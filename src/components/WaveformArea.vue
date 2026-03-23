@@ -121,14 +121,12 @@ watch(
   { deep: true }
 )
 
-// Also watch peakCaches via a trigger
-let peakCacheVersion = ref(0)
-const origSetPeakCache = useEditorState().setPeakCache
-useEditorState().setPeakCache = (id, cache) => {
-  origSetPeakCache(id, cache)
-  peakCacheVersion.value++
-}
-watch(peakCacheVersion, () => draw())
+// Also watch peakCaches directly so waveform updates when peaks are computed
+watch(
+  () => peakCaches,
+  () => draw(),
+  { deep: true }
+)
 
 onMounted(() => {
   draw()
