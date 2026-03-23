@@ -133,6 +133,26 @@ export function deleteRegion(segments, start, end) {
 }
 
 /**
+ * Extract segments within a region [start, end) for clipboard use.
+ * Returns a new array of cloned segments with outputStart recalculated
+ * from zero so they can be re-inserted at any position via insertSegments.
+ */
+export function extractRegion(segments, start, end) {
+  if (start >= end) return []
+
+  let result = splitSegmentsAtTime(segments, start)
+  result = splitSegmentsAtTime(result, end)
+
+  // Keep only segments fully within [start, end)
+  result = result.filter(seg => {
+    const segEnd = seg.outputStart + getSegmentDuration(seg)
+    return seg.outputStart >= start && segEnd <= end
+  })
+
+  return recalcOutputStarts(result)
+}
+
+/**
  * Trim to selection — keep only audio within [start, end).
  */
 export function trimToSelection(segments, start, end) {

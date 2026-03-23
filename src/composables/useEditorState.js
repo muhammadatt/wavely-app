@@ -5,6 +5,7 @@ import {
   recalcOutputStarts,
   getTimelineDuration,
   deleteRegion,
+  extractRegion,
   trimToSelection,
   trimBefore,
   trimAfter,
@@ -215,10 +216,7 @@ export function useEditorState() {
     if (!state.selection) return
     pushUndo()
     const { start, end } = state.selection
-    // Save selection segments to clipboard
-    const result = [...state.segments]
-    // We need the segments within the selection range for clipboard
-    // For simplicity, just delete and we'll handle clipboard later
+    state.clipboard = extractRegion(state.segments, start, end)
     state.segments = deleteRegion(state.segments, start, end)
     state.selection = null
   }
