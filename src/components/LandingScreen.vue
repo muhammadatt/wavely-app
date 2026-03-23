@@ -37,18 +37,32 @@ async function handleFile(file) {
   }
 
   isLoading.value = true
-  try {
-    const ctx = getAudioContext()
-    const audioBuffer = await decodeAudioFile(file, ctx)
-    const bufferId = loadFile(file.name, audioBuffer)
 
-    // Compute peak cache in background
-    const baseSamplesPerPx = 256
-    const cache = await computePeakCache(audioBuffer, baseSamplesPerPx)
-    setPeakCache(bufferId, cache)
-  } catch (err) {
-    console.error('Failed to load audio file:', err)
-    showToast('Failed to load audio file')
+  let audioBuffer
+  let bufferId
+
+  try {
+    // Decode and load the audio file (critical path)
+    try {
+      const ctx = getAudioContext()
+      audioBuffer = await decodeAudioFile(file, ctx)
+      bufferId = loadFile(file.name, audioBuffer)
+    } catch (err) {
+      console.error('Failed to load audio file:', err)
+      showToast('Failed to load audio file')
+      return
+    }
+
+    // Compute peak cache in background (non-fatal if it fails)
+    try {
+      const baseSamplesPerPx = 256
+      const cache = await computePeakCache(audioBuffer, baseSamplesPerPx)
+      setPeakCache(bufferId, cache)
+    } catch (err) {
+      console.warn('Failed to compute peak cache:', err)
+      showToast('Loaded file but failed to generate waveform overview')
+    }
+  } finally {
     isLoading.value = false
   }
 }
