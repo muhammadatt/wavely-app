@@ -50,17 +50,23 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
     const cacheStart = Math.floor(sampleStart / cacheSPP)
     const cacheEnd = Math.ceil(sampleEnd / cacheSPP)
 
-    let min = 0
-    let max = 0
+    let min = Number.POSITIVE_INFINITY
+    let max = Number.NEGATIVE_INFINITY
+    let hasData = false
     for (let ci = cacheStart; ci < cacheEnd && ci * 2 + 1 < cache.peaks.length; ci++) {
       if (ci < 0) continue
       const cMin = cache.peaks[ci * 2]
       const cMax = cache.peaks[ci * 2 + 1]
       if (cMin < min) min = cMin
       if (cMax > max) max = cMax
+      hasData = true
     }
 
-    result.push({ min, max })
+    if (!hasData) {
+      result.push({ min: 0, max: 0 })
+    } else {
+      result.push({ min, max })
+    }
   }
 
   return result
