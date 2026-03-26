@@ -4,7 +4,7 @@ import { renderWaveform } from '../audio/renderer.js'
 import { useEditorState } from '../composables/useEditorState.js'
 import { getTimelineDuration } from '../audio/operations.js'
 
-const { state, peakCaches, setSelection, setPlayhead, totalDuration } = useEditorState()
+const { state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration } = useEditorState()
 
 const canvas = ref(null)
 const container = ref(null)
@@ -13,9 +13,15 @@ const pixelsPerSecond = ref(100)
 const isSelecting = ref(false)
 const selectionAnchor = ref(0)
 
-// Min/max zoom levels
-const MIN_PPS = 10
+// Max zoom level
 const MAX_PPS = 2000
+
+// Dynamic minimum PPS: zoom out no further than the full waveform fitting the canvas
+function getMinPps() {
+  const dur = totalDuration.value
+  if (!dur || !container.value) return 10
+  return Math.max(1, container.value.clientWidth / dur)
+}
 
 function draw() {
   if (!canvas.value || !state.currentFile) return
@@ -77,24 +83,28 @@ function handleMouseUp() {
 }
 
 function handleWheel(e) {
-  if (e.ctrlKey || e.metaKey) {
-    // Zoom
-    e.preventDefault()
+  e.preventDefault()
+
+  if (e.deltaX !== 0 && !e.shiftKey) {
+    // Horizontal trackpad scroll → pan
+    scrollLeft.value = Math.max(0, scrollLeft.value + e.deltaX / pixelsPerSecond.value)
+    draw()
+  } else if (e.shiftKey && e.deltaY !== 0) {
+    // Shift + vertical scroll → pan
+    scrollLeft.value = Math.max(0, scrollLeft.value + e.deltaY / pixelsPerSecond.value)
+    draw()
+  } else if (e.deltaY !== 0) {
+    // Vertical scroll (plain or Ctrl/Meta) → zoom, anchored at mouse position
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
     const rect = canvas.value.getBoundingClientRect()
     const mouseX = e.clientX - rect.left
     const timeAtMouse = pxToTime(mouseX)
 
-    pixelsPerSecond.value = Math.max(MIN_PPS, Math.min(MAX_PPS, pixelsPerSecond.value * zoomFactor))
+    const minPps = getMinPps()
+    pixelsPerSecond.value = Math.max(minPps, Math.min(MAX_PPS, pixelsPerSecond.value * zoomFactor))
 
-    // Keep the time under the mouse stable
-    scrollLeft.value = timeAtMouse - mouseX / pixelsPerSecond.value
-    scrollLeft.value = Math.max(0, scrollLeft.value)
-    draw()
-  } else {
-    // Scroll
-    const scrollAmount = e.deltaX !== 0 ? e.deltaX : e.deltaY
-    scrollLeft.value = Math.max(0, scrollLeft.value + scrollAmount / pixelsPerSecond.value)
+    // Keep the time under the mouse cursor stable
+    scrollLeft.value = Math.max(0, timeAtMouse - mouseX / pixelsPerSecond.value)
     draw()
   }
 }
@@ -105,12 +115,12 @@ function handleZoomIn() {
 }
 
 function handleZoomOut() {
-  pixelsPerSecond.value = Math.max(MIN_PPS, pixelsPerSecond.value / 1.3)
+  pixelsPerSecond.value = Math.max(getMinPps(), pixelsPerSecond.value / 1.3)
   draw()
 }
 
 function handleZoomSet(e) {
-  pixelsPerSecond.value = Math.max(MIN_PPS, Math.min(MAX_PPS, e.detail.pixelsPerSecond))
+  pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, e.detail.pixelsPerSecond))
   draw()
 }
 
@@ -121,12 +131,8 @@ watch(
   { deep: true }
 )
 
-// Also watch peakCaches directly so waveform updates when peaks are computed
-watch(
-  () => peakCaches,
-  () => draw(),
-  { deep: true }
-)
+// Watch peakCacheVersion so waveform redraws when a new peak cache is stored
+watch(peakCacheVersion, () => draw())
 
 onMounted(() => {
   draw()

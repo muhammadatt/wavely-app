@@ -49,6 +49,8 @@ const bufferPool = new Map()
 
 // Peak caches — Map<string, { samplesPerPx, peaks }>
 const peakCaches = new Map()
+// Incremented every time a new peak cache entry is stored so watchers can react
+const peakCacheVersion = ref(0)
 
 // Undo/Redo stacks — plain arrays; reactive counters drive canUndo/canRedo
 const undoStack = []
@@ -120,6 +122,7 @@ export function useEditorState() {
   // Peak cache management
   function setPeakCache(bufferId, cache) {
     peakCaches.set(bufferId, cache)
+    peakCacheVersion.value++
   }
 
   function getPeakCache(bufferId) {
@@ -264,6 +267,12 @@ export function useEditorState() {
     state.selection = null
   }
 
+  function selectAll() {
+    const dur = getTimelineDuration(state.segments)
+    if (dur <= 0) return
+    state.selection = { start: 0, end: dur }
+  }
+
   // Playhead
   function setPlayhead(time) {
     state.playhead = Math.max(0, Math.min(time, getTimelineDuration(state.segments)))
@@ -350,7 +359,11 @@ export function useEditorState() {
     // Selection / Playhead
     setSelection,
     clearSelection,
+    selectAll,
     setPlayhead,
+
+    // Peak cache version (reactive trigger for watchers)
+    peakCacheVersion,
 
     // Tool
     setActiveTool,
