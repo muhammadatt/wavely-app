@@ -44,7 +44,7 @@ function apply() {
           <button
             v-for="ft in fadeTypes"
             :key="ft.id"
-            class="flex-1 flex flex-col items-center gap-[5px] py-2.5 px-1 rounded-[var(--radius-md)] border-2 text-[10px] font-bold cursor-pointer transition-all hover:scale-[1.04]"
+            class="flex-1 flex flex-col items-center gap-[5px] py-2.5 px-1 rounded-[var(--radius-md)] border-2 text-[10px] font-bold cursor-pointer transition-all"
             :class="fadeType === ft.id ? 'border-accent bg-accent-lt text-accent' : 'border-border bg-bg text-ink-mid hover:border-purple hover:text-ink'"
             @click="fadeType = ft.id"
           >
@@ -63,7 +63,7 @@ function apply() {
           <button
             v-for="ct in curveTypes"
             :key="ct.id"
-            class="flex-1 flex flex-col items-center gap-[5px] py-2.5 px-1 rounded-[var(--radius-md)] border-2 text-[10px] font-bold cursor-pointer transition-all hover:scale-[1.04]"
+            class="flex-1 flex flex-col items-center gap-[5px] py-2.5 px-1 rounded-[var(--radius-md)] border-2 text-[10px] font-bold cursor-pointer transition-all"
             :class="curveType === ct.id ? 'border-accent bg-accent-lt text-accent' : 'border-border bg-bg text-ink-mid hover:border-purple hover:text-ink'"
             @click="curveType = ct.id"
           >

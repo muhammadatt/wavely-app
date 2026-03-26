@@ -48,7 +48,10 @@ function handleExport() {
     <!-- Actions -->
     <div class="flex items-center gap-1.5">
       <button
-        class="inline-flex items-center gap-1.5 bg-transparent text-ink-mid font-heading text-[13px] font-bold px-[13px] py-[7px] rounded-full border-2 border-transparent cursor-pointer transition-all hover:bg-bg hover:border-border hover:text-ink disabled:opacity-35 disabled:cursor-default disabled:pointer-events-none"
+        class="inline-flex items-center gap-1.5 font-heading text-[13px] font-bold px-[13px] py-[7px] rounded-full border-2 cursor-pointer transition-colors disabled:opacity-30 disabled:cursor-default disabled:pointer-events-none"
+        :class="canUndo
+          ? 'bg-transparent text-ink-mid border-transparent hover:bg-bg hover:border-border hover:text-ink'
+          : 'bg-transparent text-ink-lt border-transparent'"
         :disabled="!canUndo"
         @click="undo"
         title="Undo (Ctrl+Z)"
@@ -57,7 +60,10 @@ function handleExport() {
         Undo
       </button>
       <button
-        class="inline-flex items-center gap-1.5 bg-transparent text-ink-mid font-heading text-[13px] font-bold px-[13px] py-[7px] rounded-full border-2 border-transparent cursor-pointer transition-all hover:bg-bg hover:border-border hover:text-ink disabled:opacity-35 disabled:cursor-default disabled:pointer-events-none"
+        class="inline-flex items-center gap-1.5 font-heading text-[13px] font-bold px-[13px] py-[7px] rounded-full border-2 cursor-pointer transition-colors disabled:opacity-30 disabled:cursor-default disabled:pointer-events-none"
+        :class="canRedo
+          ? 'bg-transparent text-ink-mid border-transparent hover:bg-bg hover:border-border hover:text-ink'
+          : 'bg-transparent text-ink-lt border-transparent'"
         :disabled="!canRedo"
         @click="redo"
         title="Redo (Ctrl+Shift+Z)"

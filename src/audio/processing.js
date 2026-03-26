@@ -89,6 +89,48 @@ export function normalizeRegion(segments, start, end, targetPeakDb, audioContext
 }
 
 /**
+ * Adjust the volume of a region by a dB amount.
+ * Returns a Promise that resolves to the processed AudioBuffer.
+ */
+export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, sampleRate, channels) {
+  return new Promise((resolve, reject) => {
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+
+    const worker = new Worker(
+      new URL('../workers/processWorker.js', import.meta.url),
+      { type: 'module' }
+    )
+
+    worker.onmessage = (e) => {
+      if (e.data.type === 'done') {
+        const duration = end - start
+        const buffer = audioContext.createBuffer(channels, Math.ceil(duration * sampleRate), sampleRate)
+
+        for (let ch = 0; ch < channels; ch++) {
+          buffer.copyToChannel(e.data.channelData[ch], ch)
+        }
+
+        worker.terminate()
+        resolve(buffer)
+      } else if (e.data.type === 'error') {
+        worker.terminate()
+        reject(new Error(e.data.message))
+      }
+    }
+
+    worker.onerror = (err) => {
+      worker.terminate()
+      reject(err)
+    }
+
+    worker.postMessage(
+      { type: 'adjustVolume', channelData, params: { gainDb } },
+      channelData.map(c => c.buffer)
+    )
+  })
+}
+
+/**
  * Compress a region using OfflineAudioContext + DynamicsCompressorNode.
  */
 export async function compressRegion(segments, start, end, params, audioContext, sampleRate, channels) {

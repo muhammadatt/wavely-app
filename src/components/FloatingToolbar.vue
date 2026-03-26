@@ -17,7 +17,7 @@ const tools = [
     icon: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   },
   {
-    id: 'silence', label: 'Silence',
+    id: 'volume', label: 'Volume',
     icon: '<rect x="3" y="8" width="18" height="8" rx="2"/><line x1="12" y1="2" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="22"/>',
   },
 ]
@@ -39,7 +39,7 @@ function handleZoomOut() {
         v-for="tool in tools"
         :key="tool.id"
         class="h-[38px] px-3.5 flex items-center justify-center gap-1.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all relative group font-heading text-[13px] font-bold whitespace-nowrap"
-        :class="state.activeTool === tool.id ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk),var(--shadow-accent)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105'"
+        :class="state.activeTool === tool.id ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk),var(--shadow-accent)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink'"
         @click="setActiveTool(tool.id)"
         :title="tool.label"
       >
@@ -52,7 +52,7 @@ function handleZoomOut() {
       <!-- Effects button -->
       <button
         class="h-[38px] px-3.5 flex items-center justify-center gap-1.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all relative group font-heading text-[13px] font-bold whitespace-nowrap"
-        :class="state.activeTool === 'effects' ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk),var(--shadow-accent)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105'"
+        :class="state.activeTool === 'effects' ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk),var(--shadow-accent)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink'"
         @click="setActiveTool('effects')"
         title="Effects"
       >
@@ -66,7 +66,7 @@ function handleZoomOut() {
 
       <!-- Zoom buttons -->
       <button
-        class="w-[38px] h-[38px] rounded-[var(--radius-pill)] flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105 relative group"
+        class="w-[38px] h-[38px] rounded-[var(--radius-pill)] flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink relative group"
         @click="handleZoomIn"
         title="Zoom In (+)"
       >
@@ -78,7 +78,7 @@ function handleZoomOut() {
         </span>
       </button>
       <button
-        class="w-[38px] h-[38px] rounded-[var(--radius-pill)] flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105 relative group"
+        class="w-[38px] h-[38px] rounded-[var(--radius-pill)] flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink relative group"
         @click="handleZoomOut"
         title="Zoom Out (-)"
       >

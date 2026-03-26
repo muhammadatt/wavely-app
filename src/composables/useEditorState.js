@@ -50,9 +50,11 @@ const bufferPool = new Map()
 // Peak caches — Map<string, { samplesPerPx, peaks }>
 const peakCaches = new Map()
 
-// Undo/Redo stacks
+// Undo/Redo stacks — plain arrays; reactive counters drive canUndo/canRedo
 const undoStack = []
 const redoStack = []
+const undoCount = ref(0)
+const redoCount = ref(0)
 
 // AudioContext — created on first user gesture
 let audioContext = null
@@ -61,8 +63,8 @@ export function useEditorState() {
   // Computed
   const totalDuration = computed(() => getTimelineDuration(state.segments))
   const hasSelection = computed(() => state.selection !== null)
-  const canUndo = computed(() => undoStack.length > 0)
-  const canRedo = computed(() => redoStack.length > 0)
+  const canUndo = computed(() => undoCount.value > 0)
+  const canRedo = computed(() => redoCount.value > 0)
   const hasFile = computed(() => state.currentFile !== null)
 
   // AudioContext management
@@ -84,6 +86,8 @@ export function useEditorState() {
     }
     // Clear redo on new action
     redoStack.length = 0
+    undoCount.value = undoStack.length
+    redoCount.value = 0
   }
 
   function undo() {
@@ -91,6 +95,8 @@ export function useEditorState() {
     redoStack.push(cloneSegments(state.segments))
     state.segments = undoStack.pop()
     state.selection = null
+    undoCount.value = undoStack.length
+    redoCount.value = redoStack.length
   }
 
   function redo() {
@@ -98,6 +104,8 @@ export function useEditorState() {
     undoStack.push(cloneSegments(state.segments))
     state.segments = redoStack.pop()
     state.selection = null
+    undoCount.value = undoStack.length
+    redoCount.value = redoStack.length
   }
 
   // Buffer pool management
@@ -149,6 +157,8 @@ export function useEditorState() {
     // Clear undo/redo
     undoStack.length = 0
     redoStack.length = 0
+    undoCount.value = 0
+    redoCount.value = 0
 
     return bufferId
   }

@@ -29,7 +29,7 @@ function apply() {
     <!-- Panel body -->
     <div class="p-3 flex flex-col gap-2">
       <label
-        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all hover:scale-[1.02]"
+        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all"
         :class="mode === 'playhead' ? 'border-accent bg-accent-lt' : 'border-border bg-bg hover:border-purple'"
         @click="mode = 'playhead'"
       >
@@ -43,7 +43,7 @@ function apply() {
       </label>
 
       <label
-        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all hover:scale-[1.02]"
+        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all"
         :class="mode === 'selection' ? 'border-accent bg-accent-lt' : 'border-border bg-bg hover:border-purple'"
         @click="mode = 'selection'"
       >

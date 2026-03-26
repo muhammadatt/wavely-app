@@ -111,7 +111,7 @@ watch(() => state.segments, () => {
     <div class="flex items-center gap-2 flex-1 justify-center">
       <!-- Skip to start -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink hover:scale-110"
+        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink"
         @click="skipToStart"
         title="Skip to Start"
       >
@@ -120,7 +120,7 @@ watch(() => state.segments, () => {
 
       <!-- Skip back -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink hover:scale-110"
+        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink"
         @click="skipBack"
         title="Skip Back 5s"
       >
@@ -129,7 +129,7 @@ watch(() => state.segments, () => {
 
       <!-- Play/Pause -->
       <button
-        class="w-14 h-14 rounded-full flex items-center justify-center border-none cursor-pointer transition-all shadow-[0_4px_0_var(--color-accent-dk),var(--shadow-accent)] hover:scale-108 hover:shadow-[0_6px_0_var(--color-accent-dk),0_8px_24px_rgba(255,107,107,0.4)] active:scale-96 active:shadow-[0_2px_0_var(--color-accent-dk)]"
+        class="w-14 h-14 rounded-full flex items-center justify-center border-none cursor-pointer transition-all shadow-[0_4px_0_var(--color-accent-dk),var(--shadow-accent)] hover:shadow-[0_6px_0_var(--color-accent-dk),0_8px_24px_rgba(255,107,107,0.4)] active:scale-96 active:shadow-[0_2px_0_var(--color-accent-dk)]"
         :class="state.isPlaying ? 'bg-accent-dk' : 'bg-accent'"
         @click="togglePlay"
         title="Play/Pause (Space)"
@@ -142,7 +142,7 @@ watch(() => state.segments, () => {
 
       <!-- Skip forward -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink hover:scale-110"
+        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink"
         @click="skipForward"
         title="Skip Forward 5s"
       >
@@ -151,7 +151,7 @@ watch(() => state.segments, () => {
 
       <!-- Loop -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 cursor-pointer transition-all hover:scale-110"
+        class="w-10 h-10 rounded-full flex items-center justify-center border-2 cursor-pointer transition-all"
         :class="isLooping ? 'bg-accent-lt border-accent text-accent' : 'border-border bg-bg text-ink-mid hover:bg-surface hover:border-ink-mid hover:text-ink'"
         @click="toggleLoop"
         title="Loop"

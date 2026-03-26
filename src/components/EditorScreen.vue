@@ -72,8 +72,11 @@ onUnmounted(() => {
       <div class="flex flex-col flex-1 overflow-hidden">
         <FloatingToolbar />
         <TimeRuler />
-        <WaveformArea />
-        <SelectionBar />
+        <!-- Waveform + SelectionBar overlay (overlay avoids resizing the canvas) -->
+        <div class="flex-1 relative overflow-hidden min-h-[120px] flex flex-col">
+          <WaveformArea />
+          <SelectionBar class="absolute bottom-0 left-0 right-0 z-20" />
+        </div>
         <TransportBar />
       </div>
       <!-- Context Panel -->

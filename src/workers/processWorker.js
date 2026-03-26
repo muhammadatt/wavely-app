@@ -11,9 +11,30 @@ self.onmessage = function (e) {
     case 'normalize':
       normalizeAudio(channelData, params)
       break
+    case 'adjustVolume':
+      adjustVolume(channelData, params)
+      break
     default:
       self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
   }
+}
+
+function adjustVolume(channelData, params) {
+  const { gainDb } = params
+  const gain = Math.pow(10, gainDb / 20) // dB to linear
+
+  const result = channelData.map(channel => {
+    const output = new Float32Array(channel.length)
+    for (let i = 0; i < channel.length; i++) {
+      output[i] = Math.max(-1, Math.min(1, channel[i] * gain))
+    }
+    return output
+  })
+
+  self.postMessage(
+    { type: 'done', channelData: result },
+    result.map(c => c.buffer)
+  )
 }
 
 function normalizeAudio(channelData, params) {

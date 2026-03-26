@@ -42,7 +42,7 @@ const options = [
       <label
         v-for="opt in options"
         :key="opt.id"
-        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all hover:scale-[1.02]"
+        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all"
         :class="mode === opt.id ? 'border-accent bg-accent-lt' : 'border-border bg-bg hover:border-purple'"
         @click="mode = opt.id"
       >

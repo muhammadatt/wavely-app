@@ -34,21 +34,21 @@ function handleCopy() {
 
     <div class="flex items-center gap-[5px] ml-auto">
       <button
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22] hover:scale-104"
+        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
         @click="handleCopy"
       >
         <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
         Copy
       </button>
       <button
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22] hover:scale-104"
+        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
         @click="performSilence"
       >
         <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>
         Silence
       </button>
       <button
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-accent/30 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-[rgba(255,107,107,0.45)] hover:scale-104"
+        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-accent/30 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-[rgba(255,107,107,0.45)]"
         @click="performDelete"
       >
         <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
