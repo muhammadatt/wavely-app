@@ -122,18 +122,14 @@ async function applyCompression() {
           </div>
 
           <button
-            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)]"
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+            :disabled="!hasSelection"
             @click="applyNormalize(true)"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-            Apply to Selection
+            Apply Normalize
           </button>
-          <button
-            class="w-full flex items-center justify-center gap-1.5 bg-bg text-ink-mid font-heading text-[13px] font-bold py-2.5 rounded-[var(--radius-pill)] border-2 border-border cursor-pointer transition-all hover:border-ink-mid hover:text-ink hover:-translate-y-[1px]"
-            @click="applyNormalize(false)"
-          >
-            Apply to Full Track
-          </button>
+
         </div>
       </div>
 
@@ -175,10 +171,6 @@ async function applyCompression() {
             </div>
             <input type="range" min="1" max="20" v-model.number="compRatio"
                    class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-          </div>
-
-          <div v-if="!hasSelection" class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed">
-            Make a selection on the waveform first
           </div>
 
           <button
@@ -231,16 +223,17 @@ async function applyCompression() {
                    class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
           </div>
           <button
-            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)]"
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+            :disabled="!hasSelection"
             @click="showToast('Noise reduction requires RNNoise WASM — coming soon')"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-            Apply to Selection
+            Apply Noise Reduction
           </button>
         </div>
       </div>
 
-      <!-- Trim Silence -->
+      <!-- Remove Silence -->
       <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
            :class="{ 'border-accent': openSection === 'trim-silence' }">
         <button
@@ -252,7 +245,7 @@ async function applyCompression() {
             <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'trim-silence' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
           </div>
           <div class="flex-1">
-            <div class="font-heading text-[13px] font-extrabold text-ink">Trim Silence</div>
+            <div class="font-heading text-[13px] font-extrabold text-ink">Remove Silence</div>
             <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Remove quiet sections</div>
           </div>
           <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
@@ -279,14 +272,21 @@ async function applyCompression() {
                    class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
           </div>
           <button
-            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)]"
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+            :disabled="!hasSelection"
             @click="showToast('Trim silence coming soon')"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-            Apply
+            Remove Silence
           </button>
         </div>
       </div>
+
+      <div class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed transition-opacity duration-700"
+           :class="hasSelection ? 'opacity-0' : 'opacity-100'">
+        Make a selection on the waveform to apply effects
+      </div>
+
     </div>
   </div>
 </template>

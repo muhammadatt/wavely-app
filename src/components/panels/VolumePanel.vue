@@ -96,10 +96,7 @@ async function applyVolume() {
         </div>
       </div>
 
-      <!-- No-selection warning -->
-      <div v-if="!hasSelection" class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed">
-        Make a selection on the waveform first
-      </div>
+
 
       <!-- Apply button -->
       <button
@@ -110,6 +107,12 @@ async function applyVolume() {
         <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         Apply Volume Change
       </button>
+
+      <!-- No-selection warning -->
+      <div class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed transition-opacity duration-700"
+           :class="hasSelection ? 'opacity-0' : 'opacity-100'">
+        Make a selection on the waveform to apply
+      </div>
     </div>
   </div>
 </template>
