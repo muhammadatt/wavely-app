@@ -133,12 +133,12 @@ async function handleFile(file) {
 
           <template v-else>
             <div class="font-heading text-[22px] font-extrabold text-ink mb-1.5">Drop your audio file here</div>
-            <div class="text-sm text-ink-mid font-semibold mb-6">or click to browse</div>
+            <div class="text-sm text-ink-mid font-semibold mb-6">or click to browse your files</div>
 
             <button class="inline-flex items-center gap-2 bg-accent text-white font-heading text-[15px] font-extrabold px-7 py-3 rounded-full border-none cursor-pointer transition-all shadow-[0_4px_0_var(--color-accent-dk),0_4px_16px_rgba(255,107,107,0.35)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--color-accent-dk),0_8px_20px_rgba(255,107,107,0.4)] active:translate-y-0.5 active:shadow-[0_2px_0_var(--color-accent-dk)]"
                     @click.stop="$refs.fileInput.click()">
               <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 stroke-white fill-none stroke-2"><path d="M9 19V6l12-3v13M9 19c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm12 0c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2z"/></svg>
-              Choose File
+              Choose audio file
             </button>
 
             <div class="mt-4.5 text-xs text-ink-lt font-bold">

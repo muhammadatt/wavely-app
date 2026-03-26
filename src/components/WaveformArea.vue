@@ -147,13 +147,15 @@ onUnmounted(() => {
 <template>
   <div
     ref="container"
-    class="flex-1 bg-surface relative overflow-hidden cursor-crosshair min-h-[120px]"
+    class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
   >
-    <canvas
-      ref="canvas"
-      class="w-full h-full"
-      @mousedown="handleMouseDown"
-      @wheel="handleWheel"
-    ></canvas>
+    <div class="absolute inset-0 flex items-center p-6">
+      <canvas
+        ref="canvas"
+        class="w-full h-full"
+        @mousedown="handleMouseDown"
+        @wheel="handleWheel"
+      ></canvas>
+    </div>
   </div>
 </template>

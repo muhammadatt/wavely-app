@@ -14,6 +14,12 @@ const targetPeak = ref(-1)
 // Compression params
 const compThreshold = ref(-24)
 const compRatio = ref(12)
+// Noise Reduction params
+const noiseStrength = ref(50)
+const noiseSensitivity = ref(60)
+// Trim Silence params
+const silenceThreshold = ref(-40)
+const silenceMinLength = ref(5)
 
 const openSection = ref('normalize')
 
@@ -77,129 +83,208 @@ async function applyCompression() {
 </script>
 
 <template>
-  <div class="p-5">
-    <div class="mb-5">
-      <div class="font-heading text-base font-extrabold text-ink">Effects</div>
-      <div class="text-xs text-ink-mid font-semibold mt-1">Apply to selection or full track</div>
+  <div>
+    <div class="px-4 pt-[18px] pb-[14px] border-b-2 border-border">
+      <div class="font-heading text-[17px] font-black text-ink mb-[3px]">Effects</div>
+      <div class="text-[11px] text-ink-lt font-bold">Apply to selection or full track</div>
     </div>
 
-    <!-- Normalize -->
-    <div class="border-2 border-border rounded-[var(--radius-sm)] mb-2 overflow-hidden">
-      <button
-        class="w-full flex items-center gap-3 p-3 bg-transparent border-none cursor-pointer text-left"
-        @click="toggleSection('normalize')"
-      >
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-             :class="openSection === 'normalize' ? 'bg-mint-lt' : 'bg-bg'">
-          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-mint" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        </div>
-        <div class="flex-1">
-          <div class="text-[13px] font-bold text-ink">Normalize</div>
-          <div class="text-[10px] text-ink-mid">Balance volume levels</div>
-        </div>
-        <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform" stroke-width="2"
-             :class="{ 'rotate-180': openSection === 'normalize' }">
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
-      </button>
-
-      <div v-if="openSection === 'normalize'" class="px-3 pb-3">
-        <div class="flex justify-between items-center mb-2">
-          <span class="text-[11px] font-bold text-ink-mid">Target peak</span>
-          <span class="text-[11px] font-bold text-ink">{{ targetPeak }} dBFS</span>
-        </div>
-        <input type="range" min="-12" max="0" v-model.number="targetPeak"
-               class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-
+    <div class="p-3 flex flex-col gap-1.5">
+      <!-- Normalize -->
+      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
+           :class="{ 'border-accent': openSection === 'normalize' }">
         <button
-          class="mt-3 w-full flex items-center justify-center gap-2 bg-mint text-white font-heading text-[12px] font-extrabold py-2 rounded-lg border-none cursor-pointer transition-all shadow-[0_2px_0_#2aaa8f] hover:-translate-y-0.5 active:translate-y-0.5"
-          @click="applyNormalize(true)"
+          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
+          @click="toggleSection('normalize')"
         >
-          <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          Apply to Selection
+          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
+               :class="openSection === 'normalize' ? 'bg-accent-lt' : 'bg-bg'">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'normalize' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="flex-1">
+            <div class="font-heading text-[13px] font-extrabold text-ink">Normalize</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Balance volume levels</div>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
+               :class="{ 'rotate-180': openSection === 'normalize' }">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
         </button>
-        <button
-          class="mt-1.5 w-full flex items-center justify-center gap-2 bg-bg text-ink font-heading text-[12px] font-bold py-2 rounded-lg border-none cursor-pointer transition-all hover:bg-border"
-          @click="applyNormalize(false)"
-        >
-          Apply to Full Track
-        </button>
+
+        <div v-if="openSection === 'normalize'" class="px-[13px] pb-[13px] flex flex-col gap-2.5">
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Target peak</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ targetPeak }} dBFS</span>
+            </div>
+            <input type="range" min="-12" max="0" v-model.number="targetPeak"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+
+          <button
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)]"
+            @click="applyNormalize(true)"
+          >
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Apply to Selection
+          </button>
+          <button
+            class="w-full flex items-center justify-center gap-1.5 bg-bg text-ink-mid font-heading text-[13px] font-bold py-2.5 rounded-[var(--radius-pill)] border-2 border-border cursor-pointer transition-all hover:border-ink-mid hover:text-ink hover:-translate-y-[1px]"
+            @click="applyNormalize(false)"
+          >
+            Apply to Full Track
+          </button>
+        </div>
       </div>
-    </div>
 
-    <!-- Compression -->
-    <div class="border-2 border-border rounded-[var(--radius-sm)] mb-2 overflow-hidden">
-      <button
-        class="w-full flex items-center gap-3 p-3 bg-transparent border-none cursor-pointer text-left"
-        @click="toggleSection('compression')"
-      >
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-             :class="openSection === 'compression' ? 'bg-purple-lt' : 'bg-bg'">
-          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-purple" stroke-width="2"><path d="M4 14h4v7H4zM10 10h4v11h-4zM16 3h4v18h-4z"/></svg>
-        </div>
-        <div class="flex-1">
-          <div class="text-[13px] font-bold text-ink">Compression</div>
-          <div class="text-[10px] text-ink-mid">Reduce dynamic range</div>
-        </div>
-        <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform" stroke-width="2"
-             :class="{ 'rotate-180': openSection === 'compression' }">
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
-      </button>
-
-      <div v-if="openSection === 'compression'" class="px-3 pb-3">
-        <div class="flex justify-between items-center mb-2">
-          <span class="text-[11px] font-bold text-ink-mid">Threshold</span>
-          <span class="text-[11px] font-bold text-ink">{{ compThreshold }} dB</span>
-        </div>
-        <input type="range" min="-60" max="0" v-model.number="compThreshold"
-               class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent mb-3" />
-
-        <div class="flex justify-between items-center mb-2">
-          <span class="text-[11px] font-bold text-ink-mid">Ratio</span>
-          <span class="text-[11px] font-bold text-ink">{{ compRatio }}:1</span>
-        </div>
-        <input type="range" min="1" max="20" v-model.number="compRatio"
-               class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-
-        <div v-if="!hasSelection" class="mt-3 text-xs text-yellow font-bold bg-yellow-lt rounded-lg px-3 py-2">
-          ⚠ Make a selection on the waveform first
-        </div>
-
+      <!-- Compression -->
+      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
+           :class="{ 'border-accent': openSection === 'compression' }">
         <button
-          class="mt-3 w-full flex items-center justify-center gap-2 bg-mint text-white font-heading text-[12px] font-extrabold py-2 rounded-lg border-none cursor-pointer transition-all shadow-[0_2px_0_#2aaa8f] hover:-translate-y-0.5 active:translate-y-0.5 disabled:opacity-40 disabled:cursor-default disabled:translate-y-0"
-          :disabled="!hasSelection"
-          @click="applyCompression"
+          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
+          @click="toggleSection('compression')"
         >
-          <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          Apply Compression
+          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
+               :class="openSection === 'compression' ? 'bg-accent-lt' : 'bg-bg'">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'compression' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><path d="M4 14h4v7H4zM10 10h4v11h-4zM16 3h4v18h-4z"/></svg>
+          </div>
+          <div class="flex-1">
+            <div class="font-heading text-[13px] font-extrabold text-ink">Compression</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Reduce dynamic range</div>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
+               :class="{ 'rotate-180': openSection === 'compression' }">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
         </button>
+
+        <div v-if="openSection === 'compression'" class="px-[13px] pb-[13px] flex flex-col gap-2.5">
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Threshold</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ compThreshold }} dB</span>
+            </div>
+            <input type="range" min="-60" max="0" v-model.number="compThreshold"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Ratio</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ compRatio }}:1</span>
+            </div>
+            <input type="range" min="1" max="20" v-model.number="compRatio"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+
+          <div v-if="!hasSelection" class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed">
+            Make a selection on the waveform first
+          </div>
+
+          <button
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+            :disabled="!hasSelection"
+            @click="applyCompression"
+          >
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Apply Compression
+          </button>
+        </div>
       </div>
-    </div>
 
-    <!-- Noise Reduction (stub) -->
-    <div class="border-2 border-border rounded-[var(--radius-sm)] mb-2 overflow-hidden">
-      <button
-        class="w-full flex items-center gap-3 p-3 bg-transparent border-none cursor-pointer text-left"
-        @click="toggleSection('noise')"
-      >
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-             :class="openSection === 'noise' ? 'bg-yellow-lt' : 'bg-bg'">
-          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-yellow" stroke-width="2"><path d="M18.36 5.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-        </div>
-        <div class="flex-1">
-          <div class="text-[13px] font-bold text-ink">Noise Reduction</div>
-          <div class="text-[10px] text-ink-mid">Remove background noise</div>
-        </div>
-        <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform" stroke-width="2"
-             :class="{ 'rotate-180': openSection === 'noise' }">
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
-      </button>
+      <!-- Noise Reduction -->
+      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
+           :class="{ 'border-accent': openSection === 'noise' }">
+        <button
+          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
+          @click="toggleSection('noise')"
+        >
+          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
+               :class="openSection === 'noise' ? 'bg-accent-lt' : 'bg-bg'">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'noise' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><path d="M12 2a3 3 0 013 3v7a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 23h8"/></svg>
+          </div>
+          <div class="flex-1">
+            <div class="font-heading text-[13px] font-extrabold text-ink">Noise Reduction</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Remove background noise</div>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
+               :class="{ 'rotate-180': openSection === 'noise' }">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
 
-      <div v-if="openSection === 'noise'" class="px-3 pb-3">
-        <div class="bg-yellow-lt rounded-lg px-3 py-2 text-xs text-yellow font-bold">
-          Coming soon — requires RNNoise WASM integration
+        <div v-if="openSection === 'noise'" class="px-[13px] pb-[13px] flex flex-col gap-2.5">
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Strength</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ noiseStrength < 34 ? 'Low' : noiseStrength < 67 ? 'Medium' : 'High' }}</span>
+            </div>
+            <input type="range" min="0" max="100" v-model.number="noiseStrength"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Sensitivity</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ noiseSensitivity }}%</span>
+            </div>
+            <input type="range" min="0" max="100" v-model.number="noiseSensitivity"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <button
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)]"
+            @click="showToast('Noise reduction requires RNNoise WASM — coming soon')"
+          >
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Apply to Selection
+          </button>
+        </div>
+      </div>
+
+      <!-- Trim Silence -->
+      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
+           :class="{ 'border-accent': openSection === 'trim-silence' }">
+        <button
+          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
+          @click="toggleSection('trim-silence')"
+        >
+          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
+               :class="openSection === 'trim-silence' ? 'bg-accent-lt' : 'bg-bg'">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'trim-silence' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+          </div>
+          <div class="flex-1">
+            <div class="font-heading text-[13px] font-extrabold text-ink">Trim Silence</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Remove quiet sections</div>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
+               :class="{ 'rotate-180': openSection === 'trim-silence' }">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+
+        <div v-if="openSection === 'trim-silence'" class="px-[13px] pb-[13px] flex flex-col gap-2.5">
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Silence threshold</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ silenceThreshold }} dB</span>
+            </div>
+            <input type="range" min="-60" max="-10" v-model.number="silenceThreshold"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Min silence length</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ (silenceMinLength / 10).toFixed(1) }} s</span>
+            </div>
+            <input type="range" min="1" max="30" v-model.number="silenceMinLength"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <button
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)]"
+            @click="showToast('Trim silence coming soon')"
+          >
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Apply
+          </button>
         </div>
       </div>
     </div>

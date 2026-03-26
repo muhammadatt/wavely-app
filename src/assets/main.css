@@ -26,12 +26,12 @@
   --radius-lg: 24px;
   --radius-xl: 32px;
   --radius-pill: 999px;
-}
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+  --shadow-sm: 0 2px 8px rgba(45,42,62,0.08);
+  --shadow-md: 0 4px 20px rgba(45,42,62,0.10);
+  --shadow-lg: 0 8px 32px rgba(45,42,62,0.12);
+  --shadow-accent: 0 4px 16px rgba(255,107,107,0.35);
+  --shadow-mint: 0 4px 16px rgba(62,207,178,0.35);
 }
 
 body {

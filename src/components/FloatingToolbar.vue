@@ -32,46 +32,41 @@ function handleZoomOut() {
 </script>
 
 <template>
-  <div class="flex items-center justify-center py-2 px-4 shrink-0">
-    <div class="inline-flex items-center gap-1 bg-surface rounded-[var(--radius-md)] px-3 py-2 shadow-[var(--shadow-md)]">
+  <div class="h-[66px] flex items-center justify-center shrink-0">
+    <div class="inline-flex items-center gap-[3px] bg-surface border-2 border-border rounded-[var(--radius-pill)] px-[5px] py-[5px] shadow-[0_6px_24px_rgba(45,42,62,0.12),0_2px_0_var(--color-border)]">
       <!-- Tool buttons -->
       <button
         v-for="tool in tools"
         :key="tool.id"
-        class="w-10 h-10 rounded-xl flex items-center justify-center border-none cursor-pointer transition-all relative group"
-        :class="state.activeTool === tool.id ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink'"
+        class="h-[38px] px-3.5 flex items-center justify-center gap-1.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all relative group font-heading text-[13px] font-bold whitespace-nowrap"
+        :class="state.activeTool === tool.id ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk),var(--shadow-accent)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105'"
         @click="setActiveTool(tool.id)"
         :title="tool.label"
       >
-        <svg viewBox="0 0 24 24" class="w-[18px] h-[18px] fill-none stroke-current" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="tool.icon"></svg>
-        <!-- Tooltip -->
-        <span class="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-ink text-white text-[10px] font-bold px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-          {{ tool.label }}
-        </span>
+        <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="tool.icon"></svg>
+        {{ tool.label }}
       </button>
 
-      <div class="w-px h-6 bg-border mx-1"></div>
+      <div class="w-[2px] h-5 bg-border mx-[2px] rounded-sm"></div>
 
       <!-- Effects button -->
       <button
-        class="w-10 h-10 rounded-xl flex items-center justify-center border-none cursor-pointer transition-all relative group"
-        :class="state.activeTool === 'effects' ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink'"
+        class="h-[38px] px-3.5 flex items-center justify-center gap-1.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all relative group font-heading text-[13px] font-bold whitespace-nowrap"
+        :class="state.activeTool === 'effects' ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk),var(--shadow-accent)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105'"
         @click="setActiveTool('effects')"
         title="Effects"
       >
-        <svg viewBox="0 0 24 24" class="w-[18px] h-[18px] fill-none stroke-current" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14M15.54 8.46a5 5 0 010 7.07M8.46 8.46a5 5 0 000 7.07"/>
         </svg>
-        <span class="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-ink text-white text-[10px] font-bold px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-          Effects
-        </span>
+        Effects
       </button>
 
-      <div class="w-px h-6 bg-border mx-1"></div>
+      <div class="w-[2px] h-5 bg-border mx-[2px] rounded-sm"></div>
 
       <!-- Zoom buttons -->
       <button
-        class="w-10 h-10 rounded-xl flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink relative group"
+        class="w-[38px] h-[38px] rounded-[var(--radius-pill)] flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105 relative group"
         @click="handleZoomIn"
         title="Zoom In (+)"
       >
@@ -83,7 +78,7 @@ function handleZoomOut() {
         </span>
       </button>
       <button
-        class="w-10 h-10 rounded-xl flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink relative group"
+        class="w-[38px] h-[38px] rounded-[var(--radius-pill)] flex items-center justify-center border-none cursor-pointer transition-all bg-transparent text-ink-mid hover:bg-bg hover:text-ink hover:scale-105 relative group"
         @click="handleZoomOut"
         title="Zoom Out (-)"
       >

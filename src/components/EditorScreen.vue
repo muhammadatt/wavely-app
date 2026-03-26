@@ -77,7 +77,21 @@ onUnmounted(() => {
         <TransportBar />
       </div>
       <!-- Context Panel -->
-      <ContextPanel v-if="state.contextPanelOpen" />
+      <Transition name="ctx-panel">
+        <ContextPanel v-if="state.contextPanelOpen" />
+      </Transition>
     </div>
   </div>
 </template>
+
+<style scoped>
+.ctx-panel-enter-active,
+.ctx-panel-leave-active {
+  transition: transform 0.25s ease, opacity 0.2s ease;
+}
+.ctx-panel-enter-from,
+.ctx-panel-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+</style>
