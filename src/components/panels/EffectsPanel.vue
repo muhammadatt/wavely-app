@@ -17,7 +17,7 @@ const compRatio = ref(12)
 // Noise Reduction params
 const noiseStrength = ref(50)
 const noiseSensitivity = ref(60)
-// Trim Silence params
+// Remove Silence params
 const silenceThreshold = ref(-40)
 const silenceMinLength = ref(5)
 
@@ -274,7 +274,7 @@ async function applyCompression() {
           <button
             class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
             :disabled="!hasSelection"
-            @click="showToast('Trim silence coming soon')"
+            @click="showToast('Remove silence coming soon')"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             Remove Silence

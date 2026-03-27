@@ -10,7 +10,8 @@ import TransportBar from './TransportBar.vue'
 import ContextPanel from './ContextPanel.vue'
 
 const {
-  state, performDelete, undo, redo, canUndo, canRedo, hasSelection,
+  state, performDelete, performCut, performCopy, performPaste,
+  undo, redo, canUndo, canRedo, hasSelection, hasClipboard,
 } = useEditorState()
 
 function handleKeydown(e) {
@@ -34,6 +35,24 @@ function handleKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
     e.preventDefault()
     if (canRedo.value) redo()
+  }
+
+  // Ctrl+X — cut selection
+  if ((e.ctrlKey || e.metaKey) && e.key === 'x' && !e.target.closest('input, textarea')) {
+    e.preventDefault()
+    if (hasSelection.value) performCut()
+  }
+
+  // Ctrl+C — copy selection
+  if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.target.closest('input, textarea')) {
+    e.preventDefault()
+    if (hasSelection.value) performCopy()
+  }
+
+  // Ctrl+V — paste at playhead
+  if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.target.closest('input, textarea')) {
+    e.preventDefault()
+    if (hasClipboard.value) performPaste(state.playhead)
   }
 
   // Delete / Backspace — delete selection

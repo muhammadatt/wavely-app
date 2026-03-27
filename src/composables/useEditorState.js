@@ -10,6 +10,7 @@ import {
   trimAfter,
   silenceRegion,
   splitAtPlayhead,
+  splitSegmentsAtTime,
   insertSegments,
   replaceRegionWithBuffer,
 } from '../audio/operations.js'
@@ -65,6 +66,7 @@ export function useEditorState() {
   // Computed
   const totalDuration = computed(() => getTimelineDuration(state.segments))
   const hasSelection = computed(() => state.selection !== null)
+  const hasClipboard = computed(() => state.clipboard !== null && state.clipboard.length > 0)
   const canUndo = computed(() => undoCount.value > 0)
   const canRedo = computed(() => redoCount.value > 0)
   const hasFile = computed(() => state.currentFile !== null)
@@ -228,12 +230,30 @@ export function useEditorState() {
     if (!state.selection) return
     pushUndo()
     const { start, end } = state.selection
-    // Save selection segments to clipboard
-    const result = [...state.segments]
-    // We need the segments within the selection range for clipboard
-    // For simplicity, just delete and we'll handle clipboard later
+    // Split at both boundaries to isolate selection segments
+    let split = splitSegmentsAtTime(state.segments, start)
+    split = splitSegmentsAtTime(split, end)
+    // Save inner segments to clipboard (cloned, outputStart relative to selection start)
+    const inner = split.filter(seg => {
+      const segEnd = seg.outputStart + (seg.sourceBuffer === null ? seg.duration : seg.sourceEnd - seg.sourceStart)
+      return seg.outputStart >= start && segEnd <= end
+    })
+    state.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
+    // Delete the region from timeline
     state.segments = deleteRegion(state.segments, start, end)
     state.selection = null
+  }
+
+  function performCopy() {
+    if (!state.selection) return
+    const { start, end } = state.selection
+    let split = splitSegmentsAtTime(state.segments, start)
+    split = splitSegmentsAtTime(split, end)
+    const inner = split.filter(seg => {
+      const segEnd = seg.outputStart + (seg.sourceBuffer === null ? seg.duration : seg.sourceEnd - seg.sourceStart)
+      return seg.outputStart >= start && segEnd <= end
+    })
+    state.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
   }
 
   function performPaste(position) {
@@ -324,6 +344,7 @@ export function useEditorState() {
     // Computed
     totalDuration,
     hasSelection,
+    hasClipboard,
     canUndo,
     canRedo,
     hasFile,
@@ -353,6 +374,7 @@ export function useEditorState() {
     performSplit,
     performSplitAtSelectionEdges,
     performCut,
+    performCopy,
     performPaste,
     replaceRegion,
 

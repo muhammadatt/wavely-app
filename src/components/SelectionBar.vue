@@ -4,9 +4,11 @@ import { useEditorState } from "../composables/useEditorState.js"
 const {
   state,
   hasSelection,
-  hasFile,
-  performDelete,
+  hasClipboard,
   performSilence,
+  performCut,
+  performCopy,
+  performPaste,
   selectAll,
   showToast,
 } = useEditorState()
@@ -18,7 +20,18 @@ function formatTime(seconds) {
 }
 
 function handleCopy() {
+  performCopy()
   showToast("Copied to clipboard")
+}
+
+function handleCut() {
+  performCut()
+  showToast("Cut to clipboard")
+}
+
+function handlePaste() {
+  performPaste(state.playhead)
+  showToast("Pasted at playhead")
 }
 </script>
 
@@ -81,6 +94,19 @@ function handleCopy() {
         Copy
       </button>
       <button
+        v-if="hasClipboard"
+        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
+        @click="handlePaste">
+        <svg
+          viewBox="0 0 24 24"
+          class="w-3 h-3 fill-none stroke-current"
+          stroke-width="2.5">
+          <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        </svg>
+        Paste
+      </button>
+      <button
         class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
         @click="performSilence">
         <svg
@@ -95,15 +121,16 @@ function handleCopy() {
       </button>
       <button
         class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-accent/30 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-[rgba(255,107,107,0.45)]"
-        @click="performDelete">
+        @click="handleCut">
         <svg
           viewBox="0 0 24 24"
           class="w-3 h-3 fill-none stroke-current"
           stroke-width="2.5">
-          <polyline points="3 6 5 6 21 6" />
-          <path d="M19 6l-1 14H6L5 6" />
-          <path d="M10 11v6M14 11v6" />
-          <path d="M9 6V4h6v2" />
+          <circle cx="6" cy="6" r="3" />
+          <circle cx="6" cy="18" r="3" />
+          <line x1="20" y1="4" x2="8.12" y2="15.88" />
+          <line x1="14.47" y1="14.48" x2="20" y2="20" />
+          <line x1="8.12" y1="8.12" x2="12" y2="12" />
         </svg>
         Cut
       </button>

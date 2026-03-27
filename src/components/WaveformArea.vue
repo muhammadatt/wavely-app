@@ -2,29 +2,94 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { renderWaveform } from '../audio/renderer.js'
 import { useEditorState } from '../composables/useEditorState.js'
-import { getTimelineDuration } from '../audio/operations.js'
 
 const { state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration } = useEditorState()
 
 const canvas = ref(null)
 const container = ref(null)
+const scrollbarTrack = ref(null)
 const scrollLeft = ref(0)
 const pixelsPerSecond = ref(100)
 const isSelecting = ref(false)
 const selectionAnchor = ref(0)
+const containerWidth = ref(0)
 
 // Max zoom level
 const MAX_PPS = 2000
 
-// Dynamic minimum PPS: zoom out no further than the full waveform fitting the canvas
+// Dynamic minimum PPS: zoom out no further than the full waveform fitting the canvas.
+// Use containerWidth (which tracks canvas.clientWidth) so this matches the renderer exactly.
 function getMinPps() {
   const dur = totalDuration.value
-  if (!dur || !container.value) return 10
-  return Math.max(1, container.value.clientWidth / dur)
+  if (!dur || containerWidth.value === 0) return 10
+  return Math.max(1, containerWidth.value / dur)
+}
+
+function updateContainerWidth() {
+  // Use canvas.clientWidth — this is the exact width the renderer draws into,
+  // which is smaller than container.clientWidth by the inner div's padding (p-6 = 24px each side).
+  if (canvas.value && canvas.value.clientWidth > 0) {
+    containerWidth.value = canvas.value.clientWidth
+  } else if (container.value) {
+    containerWidth.value = container.value.clientWidth - 48
+  }
+}
+
+// Scrollbar computed values
+const totalContentWidth = computed(() => totalDuration.value * pixelsPerSecond.value)
+const isScrollable = computed(() =>
+  containerWidth.value > 0 && totalContentWidth.value > containerWidth.value
+)
+const thumbWidthPct = computed(() => {
+  if (!isScrollable.value || containerWidth.value === 0) return 100
+  return Math.max(5, (containerWidth.value / totalContentWidth.value) * 100)
+})
+const maxScrollLeft = computed(() =>
+  Math.max(0, totalDuration.value - containerWidth.value / pixelsPerSecond.value)
+)
+const thumbLeftPct = computed(() => {
+  if (maxScrollLeft.value <= 0) return 0
+  return (scrollLeft.value / maxScrollLeft.value) * (100 - thumbWidthPct.value)
+})
+
+// Scrollbar drag state
+let sbDragging = false
+let sbDragStartX = 0
+let sbDragStartScroll = 0
+
+function handleScrollbarMouseDown(e) {
+  if (e.button !== 0) return
+  sbDragging = true
+  sbDragStartX = e.clientX
+  sbDragStartScroll = scrollLeft.value
+  window.addEventListener('mousemove', handleScrollbarMouseMove)
+  window.addEventListener('mouseup', handleScrollbarMouseUp)
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function handleScrollbarMouseMove(e) {
+  if (!sbDragging || !scrollbarTrack.value) return
+  const dx = e.clientX - sbDragStartX
+  const trackWidth = scrollbarTrack.value.clientWidth
+  const thumbMovable = trackWidth * (1 - thumbWidthPct.value / 100)
+  if (thumbMovable <= 0) return
+  const delta = (dx / thumbMovable) * maxScrollLeft.value
+  scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, sbDragStartScroll + delta))
+  draw()
+}
+
+function handleScrollbarMouseUp() {
+  sbDragging = false
+  window.removeEventListener('mousemove', handleScrollbarMouseMove)
+  window.removeEventListener('mouseup', handleScrollbarMouseUp)
 }
 
 function draw() {
   if (!canvas.value || !state.currentFile) return
+
+  // Keep containerWidth in sync with the actual canvas size before any scroll/zoom calculation
+  updateContainerWidth()
 
   renderWaveform(canvas.value, {
     segments: state.segments,
@@ -134,16 +199,22 @@ watch(
 // Watch peakCacheVersion so waveform redraws when a new peak cache is stored
 watch(peakCacheVersion, () => draw())
 
-onMounted(() => {
+function handleResize() {
+  updateContainerWidth()
   draw()
-  window.addEventListener('resize', draw)
+}
+
+onMounted(() => {
+  updateContainerWidth()
+  draw()
+  window.addEventListener('resize', handleResize)
   window.addEventListener('wavely:zoom-in', handleZoomIn)
   window.addEventListener('wavely:zoom-out', handleZoomOut)
   window.addEventListener('wavely:zoom-set', handleZoomSet)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', draw)
+  window.removeEventListener('resize', handleResize)
   window.removeEventListener('wavely:zoom-in', handleZoomIn)
   window.removeEventListener('wavely:zoom-out', handleZoomOut)
   window.removeEventListener('wavely:zoom-set', handleZoomSet)
@@ -155,13 +226,26 @@ onUnmounted(() => {
     ref="container"
     class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
   >
-    <div class="absolute inset-0 flex items-center p-6">
+    <div class="absolute inset-0 flex items-center p-6" :class="isScrollable ? 'pb-5' : 'pb-6'">
       <canvas
         ref="canvas"
         class="w-full h-full"
         @mousedown="handleMouseDown"
         @wheel="handleWheel"
       ></canvas>
+    </div>
+
+    <!-- Scrollbar — only shown when zoomed in past fit-to-width -->
+    <div
+      v-if="isScrollable"
+      ref="scrollbarTrack"
+      class="absolute bottom-2 left-6 right-6 h-1.5 rounded-full bg-ink/10"
+    >
+      <div
+        class="absolute top-0 h-full rounded-full bg-ink-mid/40 hover:bg-ink-mid/65 transition-colors cursor-grab"
+        :style="{ left: thumbLeftPct + '%', width: thumbWidthPct + '%' }"
+        @mousedown="handleScrollbarMouseDown"
+      ></div>
     </div>
   </div>
 </template>
