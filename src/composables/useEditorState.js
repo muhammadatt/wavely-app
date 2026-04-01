@@ -14,6 +14,7 @@ import {
   insertSegments,
   replaceRegionWithBuffer,
 } from '../audio/operations.js'
+import { getDefaultCompliance, isComplianceLocked } from '../audio/presets.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -36,7 +37,10 @@ const state = reactive({
   currentFile: null, // { name, duration, sampleRate, channels }
 
   // UI state
-  activeTool: null, // 'split' | 'trim' | 'fade' | 'silence' | 'effects' | null
+  activeTool: null, // 'split' | 'trim' | 'fade' | 'silence' | 'effects' | 'presets' | null
+  selectedPreset: 'general_clean',
+  selectedCompliance: 'standard',
+  processingReport: null,
   isProcessing: false,
   processingMessage: '',
   processingProgress: 0,
@@ -158,6 +162,9 @@ export function useEditorState() {
     }
     state.activeTool = null
     state.contextPanelOpen = false
+    state.selectedPreset = 'general_clean'
+    state.selectedCompliance = 'standard'
+    state.processingReport = null
 
     // Clear undo/redo
     undoStack.length = 0
@@ -326,6 +333,22 @@ export function useEditorState() {
     state.processingProgress = 0
   }
 
+  // Preset / Compliance
+  function setPreset(presetId) {
+    state.selectedPreset = presetId
+    state.selectedCompliance = getDefaultCompliance(presetId)
+    state.processingReport = null
+  }
+
+  function setCompliance(complianceId) {
+    if (isComplianceLocked(state.selectedPreset)) return
+    state.selectedCompliance = complianceId
+  }
+
+  function setProcessingReport(report) {
+    state.processingReport = report
+  }
+
   // Toast
   let toastId = 0
   function showToast(message, duration = 3000) {
@@ -394,6 +417,11 @@ export function useEditorState() {
     startProcessing,
     updateProcessingProgress,
     endProcessing,
+
+    // Preset / Compliance
+    setPreset,
+    setCompliance,
+    setProcessingReport,
 
     // Toast
     showToast,
