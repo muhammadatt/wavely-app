@@ -64,10 +64,10 @@ function channelLabel(preset) {
           <div class="flex-1 min-w-0">
             <div class="font-heading text-[13px] font-extrabold text-ink">{{ preset.displayName }}</div>
             <div class="text-[11px] text-ink-lt font-semibold mt-[1px] truncate">{{ preset.description }}</div>
+            <span class="inline-block text-[10px] font-bold text-ink-mid bg-bg rounded-[var(--radius-pill)] px-2 py-0.5 mt-1.5">
+              {{ preset.audience }}
+            </span>
           </div>
-          <span class="text-[10px] font-bold text-ink-mid bg-bg rounded-[var(--radius-pill)] px-2 py-0.5 shrink-0 whitespace-nowrap">
-            {{ preset.audience }}
-          </span>
         </button>
       </div>
 
