@@ -62,6 +62,19 @@ function handleZoomOut() {
         Effects
       </button>
 
+      <!-- Presets button -->
+      <button
+        class="h-[38px] px-3.5 flex items-center justify-center gap-1.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all relative group font-heading text-[13px] font-bold whitespace-nowrap"
+        :class="state.activeTool === 'presets' ? 'bg-accent text-white shadow-[0_3px_0_var(--color-accent-dk),var(--shadow-accent)]' : 'bg-transparent text-ink-mid hover:bg-bg hover:text-ink'"
+        @click="setActiveTool('presets')"
+        title="Presets"
+      >
+        <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>
+        </svg>
+        Presets
+      </button>
+
       <div class="w-[2px] h-5 bg-border mx-[2px] rounded-sm"></div>
 
       <!-- Zoom buttons -->
