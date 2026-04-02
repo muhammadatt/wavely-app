@@ -5,9 +5,29 @@ import {
   PRESETS, COMPLIANCE_TARGETS,
   getPresetList, getComplianceList, isComplianceLocked, formatLoudness,
 } from '../../audio/presets.js'
+import { processAudioOnServer } from '../../api/processing.js'
+import { computePeakCache } from '../../audio/processing.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
 
-const { state, setPreset, setCompliance, showToast } = useEditorState()
+const {
+  state, setPreset, setCompliance, setProcessingReport, showToast,
+  getAudioContext, replaceRegion, setPeakCache, totalDuration,
+  startProcessing, updateProcessingProgress, updateProcessingStage, endProcessing,
+} = useEditorState()
+
+// Friendly stage sequence shown while the server processes the audio.
+// Each entry has a message (cute/friendly), progress (0-1), and delay in ms.
+const PROCESSING_STAGES = [
+  { message: 'Getting to know your audio…',       progress: 0.06, delay: 0     },
+  { message: 'Clearing out the low rumbles…',      progress: 0.15, delay: 1200  },
+  { message: 'Chasing away background gremlins…',  progress: 0.30, delay: 3000  },
+  { message: 'Giving your tone a little glow-up…', progress: 0.48, delay: 6500  },
+  { message: 'Smoothing out the bumpy bits…',       progress: 0.62, delay: 10000 },
+  { message: 'Finding your perfect volume…',        progress: 0.75, delay: 13500 },
+  { message: 'Catching any sneaky loud peaks…',     progress: 0.85, delay: 17000 },
+  { message: 'Running the final report card…',      progress: 0.93, delay: 20500 },
+  { message: 'Almost there — hang tight!',          progress: 0.97, delay: 24000 },
+]
 
 const presetList = getPresetList()
 const complianceList = getComplianceList()
@@ -34,6 +54,60 @@ function compressionLabel(preset) {
 function channelLabel(preset) {
   if (!preset) return ''
   return preset.channelOutput === 'mono' ? 'Mono' : 'Preserve original'
+}
+
+async function handleProcess() {
+  if (!state.currentFile || state.isProcessing) return
+
+  startProcessing('Making your audio shine ✨')
+
+  // Fire the first stage immediately (synchronously) so it's visible right away
+  updateProcessingStage(PROCESSING_STAGES[0].message)
+  updateProcessingProgress(PROCESSING_STAGES[0].progress)
+
+  // Queue the remaining stages
+  const stageTimers = PROCESSING_STAGES.slice(1).map(({ message, progress, delay }) =>
+    setTimeout(() => {
+      updateProcessingStage(message)
+      updateProcessingProgress(progress)
+    }, delay)
+  )
+
+  try {
+    const { report, audioBlob, peaks } = await processAudioOnServer({
+      segments: state.segments,
+      sampleRate: state.currentFile.sampleRate,
+      channels: state.currentFile.channels,
+      fileName: state.currentFile.name,
+      presetId: state.selectedPreset,
+      complianceId: state.selectedCompliance,
+    })
+
+    // Decode the processed audio blob into an AudioBuffer
+    const ctx = getAudioContext()
+    const arrayBuffer = await audioBlob.arrayBuffer()
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+
+    // Replace the entire timeline with the processed audio
+    const dur = totalDuration.value
+    const bufferId = replaceRegion(0, dur, audioBuffer)
+
+    // Compute peak cache for the new buffer
+    const cache = await computePeakCache(audioBuffer, 256)
+    setPeakCache(bufferId, cache)
+
+    // Set the processing report
+    setProcessingReport(report)
+
+    const passLabel = report.compliance_results.overall_pass ? 'PASS' : 'FAIL'
+    showToast(`Processing complete — compliance: ${passLabel}`)
+  } catch (err) {
+    console.error('Server processing failed:', err)
+    showToast(err.message || 'Processing failed')
+  } finally {
+    stageTimers.forEach(clearTimeout)
+    endProcessing()
+  }
 }
 </script>
 
@@ -131,11 +205,11 @@ function channelLabel(preset) {
         </div>
       </div>
 
-      <!-- Process button (disabled placeholder) -->
+      <!-- Process button -->
       <button
         class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
-        disabled
-        title="Server processing not yet available"
+        :disabled="state.isProcessing || !state.currentFile"
+        @click="handleProcess"
       >
         <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/></svg>
         Process Audio
