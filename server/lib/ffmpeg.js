@@ -245,6 +245,39 @@ export async function encodeOutput(inputPath, outputPath, { format, bitrate, cha
 }
 
 /**
+ * Stage 3: Apply parametric EQ via FFmpeg `equalizer` filter.
+ *
+ * Accepts an array of FFmpeg filter strings computed by enhancementEQ.js,
+ * e.g. [ 'equalizer=f=285:t=q:w=2.5:g=-3.0', 'equalizer=f=4000:t=q:w=1.5:g=2.5' ]
+ * Chains them in one FFmpeg pass to minimize generation loss.
+ *
+ * @param {string}   inputPath
+ * @param {string}   outputPath
+ * @param {string[]} eqFilters  - FFmpeg filter strings from analyzeSpectrum()
+ */
+export async function applyParametricEQ(inputPath, outputPath, eqFilters) {
+  if (!eqFilters || eqFilters.length === 0) {
+    // No EQ to apply — copy through
+    await run(
+      ffmpeg(inputPath)
+        .audioCodec('pcm_f32le')
+        .format('wav')
+        .output(outputPath)
+    )
+    return outputPath
+  }
+
+  await run(
+    ffmpeg(inputPath)
+      .audioFilters(eqFilters)
+      .audioCodec('pcm_f32le')
+      .format('wav')
+      .output(outputPath)
+  )
+  return outputPath
+}
+
+/**
  * Probe a file for audio metadata.
  */
 export function probeFile(filePath) {
