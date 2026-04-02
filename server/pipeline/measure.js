@@ -88,9 +88,25 @@ async function measureVolume(filePath) {
 async function measureLoudness(filePath) {
   const { channels, sampleRate } = await readWavAllChannels(filePath)
 
+  if (!channels || channels.length === 0) {
+    throw new Error('measureLoudness expected a WAV file with at least one audio channel, but none were found')
+  }
+  if (channels.length > 2) {
+    throw new Error(
+      `measureLoudness currently supports only mono or stereo WAV files (got ${channels.length} channels)`
+    )
+  }
+
+  // Guard against OOM for very long files (2 hours at 44.1 kHz ≈ 317M samples)
+  const maxSamplesPerChannel = 2 * 60 * 60 * 44100
+  if (channels[0].length > maxSamplesPerChannel) {
+    const durationMin = Math.round(channels[0].length / sampleRate / 60)
+    throw new Error(`File too long for in-memory LUFS measurement (${durationMin} min, max 120 min)`)
+  }
+
   let integratedLoudness, truePeak
 
-  if (channels.length >= 2) {
+  if (channels.length === 2) {
     integratedLoudness = ebur128_integrated_stereo(sampleRate, channels[0], channels[1])
     truePeak           = ebur128_true_peak_stereo(sampleRate, channels[0], channels[1])
   } else {

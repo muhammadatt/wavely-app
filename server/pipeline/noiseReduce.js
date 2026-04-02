@@ -103,14 +103,21 @@ function runDeepFilter(inputPath, outputPath, attenLimDb) {
     const proc = spawn(PYTHON, args, { stdio: ['ignore', 'pipe', 'pipe'] })
 
     let stderr = ''
-    proc.stderr.on('data', chunk => { stderr += chunk.toString() })
+    proc.stderr.on('data', chunk => {
+      stderr += chunk.toString()
+      if (stderr.length > 4000) stderr = stderr.slice(-4000)
+    })
 
-    proc.on('close', code => {
-      if (code === 0) {
+    proc.on('close', (code, signal) => {
+      if (code === 0 && signal === null) {
         resolve()
       } else {
+        const reasonParts = []
+        if (code !== null) reasonParts.push(`code ${code}`)
+        if (signal !== null) reasonParts.push(`signal ${signal}`)
+        const reason = reasonParts.length ? reasonParts.join(', ') : 'unknown reason'
         reject(new Error(
-          `DeepFilter exited with code ${code}.\n` + stderr.slice(-2000)
+          `DeepFilter exited with ${reason}.\n` + stderr.slice(-2000)
         ))
       }
     })
