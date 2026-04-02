@@ -24,7 +24,8 @@
 import { Router } from 'express'
 import multer from 'multer'
 import path from 'path'
-import { readFile, unlink } from 'fs/promises'
+import { createReadStream } from 'fs'
+import { stat, unlink } from 'fs/promises'
 import { processAudio } from '../pipeline/index.js'
 import { PRESETS, COMPLIANCE_TARGETS } from '../presets.js'
 
@@ -81,7 +82,6 @@ router.post('/process', upload.single('file'), async (req, res) => {
     // --- Build multipart response ---
     const boundary = '----WavelyProcessingBoundary'
     const jsonPayload = JSON.stringify({ report, peaks })
-    const audioBuffer = await readFile(outputPath)
 
     res.setHeader('Content-Type', `multipart/mixed; boundary=${boundary}`)
 
@@ -102,8 +102,14 @@ router.post('/process', upload.single('file'), async (req, res) => {
       res.write(part)
     }
 
-    // Write audio binary
-    res.write(audioBuffer)
+    // Stream audio binary instead of loading entire file into memory
+    await new Promise((resolve, reject) => {
+      const audioStream = createReadStream(outputPath)
+      audioStream.on('error', reject)
+      audioStream.on('end', resolve)
+      audioStream.pipe(res, { end: false })
+    })
+
     res.write(`\r\n--${boundary}--\r\n`)
     res.end()
 

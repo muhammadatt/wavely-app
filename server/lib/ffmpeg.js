@@ -1,17 +1,14 @@
 /**
  * FFmpeg helper utilities.
  *
- * Wraps fluent-ffmpeg in promise-based helpers for the processing pipeline.
+ * Promise-based helpers for the processing pipeline using direct CLI invocation.
  * All intermediate files use 32-bit float PCM WAV at 44.1 kHz internally.
  */
 
-import ffmpeg from 'fluent-ffmpeg'
-import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
+import { runFfmpeg, ffprobe as runFfprobe } from './exec-ffmpeg.js'
 import { randomUUID } from 'crypto'
 import { unlink } from 'fs/promises'
 import path from 'path'
-
-ffmpeg.setFfmpegPath(ffmpegInstaller.path)
 
 const TEMP_DIR = path.resolve(import.meta.dirname, '..', 'uploads')
 const INTERNAL_SAMPLE_RATE = 44100
@@ -35,28 +32,16 @@ export async function removeTmp(filePath) {
 }
 
 /**
- * Run an ffmpeg command, returning a promise.
- */
-function run(command) {
-  return new Promise((resolve, reject) => {
-    command
-      .on('end', resolve)
-      .on('error', reject)
-      .run()
-  })
-}
-
-/**
  * Stage 0: Decode any supported input to 32-bit float PCM WAV at 44.1 kHz.
  */
 export async function decodeToFloat32(inputPath, outputPath) {
-  await run(
-    ffmpeg(inputPath)
-      .audioFrequency(INTERNAL_SAMPLE_RATE)
-      .audioCodec('pcm_f32le')
-      .format('wav')
-      .output(outputPath)
-  )
+  await runFfmpeg([
+    '-i', inputPath,
+    '-ar', String(INTERNAL_SAMPLE_RATE),
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
   return outputPath
 }
 
@@ -64,13 +49,13 @@ export async function decodeToFloat32(inputPath, outputPath) {
  * Stage 0b: Convert stereo to mono via mid-channel mixdown.
  */
 export async function mixdownToMono(inputPath, outputPath) {
-  await run(
-    ffmpeg(inputPath)
-      .audioChannels(1)
-      .audioCodec('pcm_f32le')
-      .format('wav')
-      .output(outputPath)
-  )
+  await runFfmpeg([
+    '-i', inputPath,
+    '-ac', '1',
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
   return outputPath
 }
 
@@ -89,13 +74,13 @@ export async function applyHighPass(inputPath, outputPath, { notch60Hz = false }
     filters.push('equalizer=f=60:t=q:w=10:g=-20')
   }
 
-  await run(
-    ffmpeg(inputPath)
-      .audioFilters(filters)
-      .audioCodec('pcm_f32le')
-      .format('wav')
-      .output(outputPath)
-  )
+  await runFfmpeg([
+    '-i', inputPath,
+    '-af', filters.join(','),
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
   return outputPath
 }
 
@@ -116,49 +101,38 @@ export async function applyLoudnormLUFS(inputPath, outputPath, { targetLUFS, pea
   const stats = await measureLoudnorm(inputPath)
 
   // Pass 2: apply
-  await run(
-    ffmpeg(inputPath)
-      .audioFilters([
-        `loudnorm=I=${targetLUFS}:TP=${peakCeiling}:LRA=11` +
-        `:measured_I=${stats.input_i}` +
-        `:measured_LRA=${stats.input_lra}` +
-        `:measured_TP=${stats.input_tp}` +
-        `:measured_thresh=${stats.input_thresh}` +
-        `:offset=${stats.target_offset}` +
-        `:linear=true:print_format=summary`
-      ])
-      .audioFrequency(INTERNAL_SAMPLE_RATE)
-      .audioCodec('pcm_f32le')
-      .format('wav')
-      .output(outputPath)
-  )
+  await runFfmpeg([
+    '-i', inputPath,
+    '-af',
+    `loudnorm=I=${targetLUFS}:TP=${peakCeiling}:LRA=11` +
+    `:measured_I=${stats.input_i}` +
+    `:measured_LRA=${stats.input_lra}` +
+    `:measured_TP=${stats.input_tp}` +
+    `:measured_thresh=${stats.input_thresh}` +
+    `:offset=${stats.target_offset}` +
+    `:linear=true:print_format=summary`,
+    '-ar', String(INTERNAL_SAMPLE_RATE),
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
   return outputPath
 }
 
 /**
  * Measure loudnorm stats (pass 1).
  */
-function measureLoudnorm(inputPath) {
-  return new Promise((resolve, reject) => {
-    let stderr = ''
-    ffmpeg(inputPath)
-      .audioFilters('loudnorm=I=-16:TP=-1:LRA=11:print_format=json')
-      .format('null')
-      .output('-')
-      .on('error', reject)
-      .on('stderr', (line) => { stderr += line + '\n' })
-      .on('end', () => {
-        try {
-          // Extract JSON block from stderr
-          const jsonMatch = stderr.match(/\{[\s\S]*?\}/)
-          if (!jsonMatch) throw new Error('Could not parse loudnorm stats')
-          resolve(JSON.parse(jsonMatch[0]))
-        } catch (err) {
-          reject(err)
-        }
-      })
-      .run()
-  })
+async function measureLoudnorm(inputPath) {
+  const { stderr } = await runFfmpeg([
+    '-i', inputPath,
+    '-af', 'loudnorm=I=-16:TP=-1:LRA=11:print_format=json',
+    '-f', 'null',
+    '-',
+  ])
+
+  const jsonMatch = stderr.match(/\{[\s\S]*?\}/)
+  if (!jsonMatch) throw new Error('Could not parse loudnorm stats')
+  return JSON.parse(jsonMatch[0])
 }
 
 /**
@@ -168,22 +142,22 @@ function measureLoudnorm(inputPath) {
 export async function applyLinearGain(inputPath, outputPath, gainDb) {
   if (Math.abs(gainDb) < 0.01) {
     // No meaningful gain to apply — just copy
-    await run(
-      ffmpeg(inputPath)
-        .audioCodec('pcm_f32le')
-        .format('wav')
-        .output(outputPath)
-    )
+    await runFfmpeg([
+      '-i', inputPath,
+      '-acodec', 'pcm_f32le',
+      '-f', 'wav',
+      outputPath,
+    ])
     return outputPath
   }
 
-  await run(
-    ffmpeg(inputPath)
-      .audioFilters(`volume=${gainDb}dB`)
-      .audioCodec('pcm_f32le')
-      .format('wav')
-      .output(outputPath)
-  )
+  await runFfmpeg([
+    '-i', inputPath,
+    '-af', `volume=${gainDb}dB`,
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
   return outputPath
 }
 
@@ -196,22 +170,21 @@ export async function applyTruePeakLimiter(inputPath, outputPath, { peakCeiling 
 
   // Apply loudnorm targeting the measured integrated loudness (preserve level)
   // but enforce the peak ceiling
-  await run(
-    ffmpeg(inputPath)
-      .audioFilters([
-        `loudnorm=I=${stats.input_i}:TP=${peakCeiling}:LRA=11` +
-        `:measured_I=${stats.input_i}` +
-        `:measured_LRA=${stats.input_lra}` +
-        `:measured_TP=${stats.input_tp}` +
-        `:measured_thresh=${stats.input_thresh}` +
-        `:offset=0` +
-        `:linear=true:print_format=summary`
-      ])
-      .audioFrequency(INTERNAL_SAMPLE_RATE)
-      .audioCodec('pcm_f32le')
-      .format('wav')
-      .output(outputPath)
-  )
+  await runFfmpeg([
+    '-i', inputPath,
+    '-af',
+    `loudnorm=I=${stats.input_i}:TP=${peakCeiling}:LRA=11` +
+    `:measured_I=${stats.input_i}` +
+    `:measured_LRA=${stats.input_lra}` +
+    `:measured_TP=${stats.input_tp}` +
+    `:measured_thresh=${stats.input_thresh}` +
+    `:offset=0` +
+    `:linear=true:print_format=summary`,
+    '-ar', String(INTERNAL_SAMPLE_RATE),
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
   return outputPath
 }
 
@@ -219,28 +192,30 @@ export async function applyTruePeakLimiter(inputPath, outputPath, { peakCeiling 
  * Encode output to delivery format.
  */
 export async function encodeOutput(inputPath, outputPath, { format, bitrate, channels }) {
-  const cmd = ffmpeg(inputPath)
+  const args = ['-i', inputPath]
 
   if (channels) {
-    cmd.audioChannels(channels)
+    args.push('-ac', String(channels))
   }
 
   if (format === 'mp3') {
-    cmd
-      .audioCodec('libmp3lame')
-      .audioBitrate(bitrate || '128k')
-      .outputOptions('-abr', '0')  // strict CBR
-      .format('mp3')
+    args.push(
+      '-acodec', 'libmp3lame',
+      '-b:a', bitrate || '128k',
+      '-abr', '0',  // strict CBR
+      '-f', 'mp3',
+    )
   } else {
     // WAV 16-bit PCM
-    cmd
-      .audioCodec('pcm_s16le')
-      .audioFrequency(INTERNAL_SAMPLE_RATE)
-      .format('wav')
+    args.push(
+      '-acodec', 'pcm_s16le',
+      '-ar', String(INTERNAL_SAMPLE_RATE),
+      '-f', 'wav',
+    )
   }
 
-  cmd.output(outputPath)
-  await run(cmd)
+  args.push(outputPath)
+  await runFfmpeg(args)
   return outputPath
 }
 
@@ -258,22 +233,22 @@ export async function encodeOutput(inputPath, outputPath, { format, bitrate, cha
 export async function applyParametricEQ(inputPath, outputPath, eqFilters) {
   if (!eqFilters || eqFilters.length === 0) {
     // No EQ to apply — copy through
-    await run(
-      ffmpeg(inputPath)
-        .audioCodec('pcm_f32le')
-        .format('wav')
-        .output(outputPath)
-    )
+    await runFfmpeg([
+      '-i', inputPath,
+      '-acodec', 'pcm_f32le',
+      '-f', 'wav',
+      outputPath,
+    ])
     return outputPath
   }
 
-  await run(
-    ffmpeg(inputPath)
-      .audioFilters(eqFilters)
-      .audioCodec('pcm_f32le')
-      .format('wav')
-      .output(outputPath)
-  )
+  await runFfmpeg([
+    '-i', inputPath,
+    '-af', eqFilters.join(','),
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
   return outputPath
 }
 
@@ -281,10 +256,5 @@ export async function applyParametricEQ(inputPath, outputPath, eqFilters) {
  * Probe a file for audio metadata.
  */
 export function probeFile(filePath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) return reject(err)
-      resolve(metadata)
-    })
-  })
+  return runFfprobe(filePath)
 }

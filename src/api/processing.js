@@ -56,9 +56,9 @@ async function renderTimelineToWavBlob(segments, sampleRate, channels) {
 
   const channelData = await renderRegionToBuffer(segments, 0, duration, sampleRate, channels)
 
-  // Encode as WAV
+  // Encode as 32-bit float WAV to preserve full precision for server processing
   const numSamples = channelData[0].length
-  const bytesPerSample = 2 // 16-bit
+  const bytesPerSample = 4 // 32-bit float
   const dataSize = numSamples * channels * bytesPerSample
   const buffer = new ArrayBuffer(44 + dataSize)
   const view = new DataView(buffer)
@@ -71,7 +71,7 @@ async function renderTimelineToWavBlob(segments, sampleRate, channels) {
   // fmt chunk
   writeString(view, 12, 'fmt ')
   view.setUint32(16, 16, true)         // chunk size
-  view.setUint16(20, 1, true)          // PCM format
+  view.setUint16(20, 3, true)          // IEEE float format
   view.setUint16(22, channels, true)
   view.setUint32(24, sampleRate, true)
   view.setUint32(28, sampleRate * channels * bytesPerSample, true)
@@ -82,13 +82,12 @@ async function renderTimelineToWavBlob(segments, sampleRate, channels) {
   writeString(view, 36, 'data')
   view.setUint32(40, dataSize, true)
 
-  // Interleave and write samples
+  // Interleave and write 32-bit float samples
   let offset = 44
   for (let i = 0; i < numSamples; i++) {
     for (let ch = 0; ch < channels; ch++) {
-      const sample = Math.max(-1, Math.min(1, channelData[ch][i]))
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true)
-      offset += 2
+      view.setFloat32(offset, channelData[ch][i], true)
+      offset += 4
     }
   }
 
