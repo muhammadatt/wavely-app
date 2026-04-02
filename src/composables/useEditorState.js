@@ -43,6 +43,7 @@ const state = reactive({
   processingReport: null,
   isProcessing: false,
   processingMessage: '',
+  processingStage: '',
   processingProgress: 0,
   contextPanelOpen: false,
   toasts: [],
@@ -327,9 +328,14 @@ export function useEditorState() {
     state.processingProgress = progress
   }
 
+  function updateProcessingStage(stage) {
+    state.processingStage = stage
+  }
+
   function endProcessing() {
     state.isProcessing = false
     state.processingMessage = ''
+    state.processingStage = ''
     state.processingProgress = 0
   }
 
@@ -416,6 +422,7 @@ export function useEditorState() {
     // Processing
     startProcessing,
     updateProcessingProgress,
+    updateProcessingStage,
     endProcessing,
 
     // Preset / Compliance

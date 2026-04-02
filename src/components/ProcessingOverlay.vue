@@ -11,15 +11,18 @@ const { state } = useEditorState()
       <div class="w-[52px] h-[52px] mx-auto mb-5 border-4 border-border border-t-accent border-r-yellow rounded-full" style="animation: spin 0.7s linear infinite;"></div>
 
       <div class="font-heading text-xl font-black text-ink mb-1.5">{{ state.processingMessage }}</div>
-      <div class="text-[13px] text-ink-lt font-bold mb-[22px]">This may take a moment</div>
+      <div class="text-[13px] text-ink-lt font-bold mb-[22px] min-h-[18px] transition-all duration-300"
+           :key="state.processingStage"
+           style="animation: fadeStage 0.35s ease both;">
+        {{ state.processingStage || 'This may take a moment' }}
+      </div>
 
       <!-- Progress bar (gradient like mockup) -->
       <div class="w-full h-2.5 bg-bg rounded-md overflow-hidden border-2 border-border">
         <div
           class="h-full rounded transition-all duration-400"
           style="background: linear-gradient(90deg, var(--color-accent), var(--color-yellow));"
-          :style="{ width: state.processingProgress > 0 ? `${state.processingProgress * 100}%` : '60%' }"
-          :class="{ 'animate-pulse': state.processingProgress === 0 }"
+          :style="{ width: `${state.processingProgress * 100}%` }"
         ></div>
       </div>
     </div>

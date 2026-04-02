@@ -12,8 +12,22 @@ import ProcessingReportPanel from './ProcessingReportPanel.vue'
 const {
   state, setPreset, setCompliance, setProcessingReport, showToast,
   getAudioContext, replaceRegion, setPeakCache, totalDuration,
-  startProcessing, endProcessing,
+  startProcessing, updateProcessingProgress, updateProcessingStage, endProcessing,
 } = useEditorState()
+
+// Friendly stage sequence shown while the server processes the audio.
+// Each entry has a message (cute/friendly), progress (0-1), and delay in ms.
+const PROCESSING_STAGES = [
+  { message: 'Getting to know your audio…',       progress: 0.06, delay: 0     },
+  { message: 'Clearing out the low rumbles…',      progress: 0.15, delay: 1200  },
+  { message: 'Chasing away background gremlins…',  progress: 0.30, delay: 3000  },
+  { message: 'Giving your tone a little glow-up…', progress: 0.48, delay: 6500  },
+  { message: 'Smoothing out the bumpy bits…',       progress: 0.62, delay: 10000 },
+  { message: 'Finding your perfect volume…',        progress: 0.75, delay: 13500 },
+  { message: 'Catching any sneaky loud peaks…',     progress: 0.85, delay: 17000 },
+  { message: 'Running the final report card…',      progress: 0.93, delay: 20500 },
+  { message: 'Almost there — hang tight!',          progress: 0.97, delay: 24000 },
+]
 
 const presetList = getPresetList()
 const complianceList = getComplianceList()
@@ -45,7 +59,20 @@ function channelLabel(preset) {
 async function handleProcess() {
   if (!state.currentFile || state.isProcessing) return
 
-  startProcessing('Processing audio...')
+  startProcessing('Making your audio shine ✨')
+
+  // Fire the first stage immediately (synchronously) so it's visible right away
+  updateProcessingStage(PROCESSING_STAGES[0].message)
+  updateProcessingProgress(PROCESSING_STAGES[0].progress)
+
+  // Queue the remaining stages
+  const stageTimers = PROCESSING_STAGES.slice(1).map(({ message, progress, delay }) =>
+    setTimeout(() => {
+      updateProcessingStage(message)
+      updateProcessingProgress(progress)
+    }, delay)
+  )
+
   try {
     const { report, audioBlob, peaks } = await processAudioOnServer({
       segments: state.segments,
@@ -78,6 +105,7 @@ async function handleProcess() {
     console.error('Server processing failed:', err)
     showToast(err.message || 'Processing failed')
   } finally {
+    stageTimers.forEach(clearTimeout)
     endProcessing()
   }
 }
