@@ -11,14 +11,15 @@
  *   3. If head < 0.5 s → prepend room tone to reach 0.75 s
  *   4. If tail < 1.0 s → append room tone to reach 2.0 s
  *
- * Implementation: write the room tone clip as a temp WAV, then use FFmpeg
- * concat filter to join pad + audio + pad.
+ * Implementation: read 32-bit float samples, measure head/tail near-silence,
+ * extract a room tone chunk from the quietest segment, then synthesize a new
+ * padded 32-bit float WAV in JS (via writePaddedWav / float32ToWav) without
+ * using temp files or FFmpeg concat filters.
  *
  * Reference: processing spec v3, "Room Tone Padding" section.
  */
 
 import { writeFile } from 'fs/promises'
-import { tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { readWavSamples } from './wavReader.js'
 
 const HEAD_TARGET_S   = 0.75   // target head room tone (s)
@@ -47,8 +48,17 @@ export async function applyRoomTonePadding(inputPath, outputPath, silenceAnalysi
   const headDuration = measureEdgeSilence(samples, frameSamples, sampleRate, nearSilenceThresholdDb, 'head')
   const tailDuration = measureEdgeSilence(samples, frameSamples, sampleRate, nearSilenceThresholdDb, 'tail')
 
-  const headNeeded = Math.max(0, HEAD_TARGET_S - headDuration)
-  const tailNeeded = Math.max(0, TAIL_TARGET_S - tailDuration)
+  // Only pad if the existing duration is below the trigger threshold.
+  // If the file already has ≥ 0.5 s head or ≥ 1.0 s tail room tone, leave it alone.
+  let headNeeded = 0
+  if (headDuration < HEAD_THRESHOLD_S) {
+    headNeeded = Math.max(0, HEAD_TARGET_S - headDuration)
+  }
+
+  let tailNeeded = 0
+  if (tailDuration < TAIL_THRESHOLD_S) {
+    tailNeeded = Math.max(0, TAIL_TARGET_S - tailDuration)
+  }
 
   if (headNeeded < 0.01 && tailNeeded < 0.01) {
     // Already has enough room tone — just copy

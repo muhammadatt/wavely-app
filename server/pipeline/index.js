@@ -144,14 +144,17 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     // --- Stage 4a: Compression (Sprint 3) ---
 
     // --- Stage 5: Loudness normalization ---
-    // Sprint 2: Use voiced-frame RMS for ACX path (silence excluded per spec §5b)
+    // Sprint 2: Use voiced-frame RMS for ACX path (silence excluded per spec §5b).
+    // Recompute silence analysis on the post-EQ, post-room-tone signal so that
+    // frame offsets and energy levels reflect the actual signal being normalized.
     const normPath = tmp('.wav')
 
     if (compliance.measurementMethod === 'RMS') {
       // ACX path: voiced-frame RMS normalization
-      const targetRms    = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2 // -20.5 → ~-20 dBFS
-      const voicedRms    = await measureVoicedRms(currentPath, silenceAnalysis)
-      const gainDb       = targetRms - voicedRms
+      const targetRms              = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2 // -20.5 → ~-20 dBFS
+      const prNormSilenceAnalysis  = await analyzeAudioFrames(currentPath)
+      const voicedRms              = await measureVoicedRms(currentPath, prNormSilenceAnalysis)
+      const gainDb                 = targetRms - voicedRms
 
       if (gainDb > 18) {
         // Edge case warning: recording level very low (spec §5c)
@@ -183,11 +186,14 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     const complianceResults = checkCompliance(afterMeasurements, complianceId)
 
     // --- Stage 7b: Quality risk assessment (Sprint 2) ---
+    // Rerun silence analysis on the fully processed (limited) signal so that
+    // frame offsets align correctly — room tone padding shifts all offsets.
+    const postProcessSilenceAnalysis = await analyzeAudioFrames(currentPath)
     const riskResult = await assessRisks(
       currentPath,
       presetId,
-      silenceAnalysis,
-      silenceAnalysis.voicedRmsDbfs
+      postProcessSilenceAnalysis,
+      postProcessSilenceAnalysis.voicedRmsDbfs
     )
 
     // --- Encode output ---

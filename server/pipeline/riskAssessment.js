@@ -4,7 +4,7 @@
  * Analyzes the processed audio for quality risk factors:
  *
  *  For all presets:
- *    - Overprocessing detection (crest factor, spectral flatness change)
+ *    - Overprocessing detection (crest factor)
  *
  *  For ACX Audiobook only:
  *    - Loud breath detection (short high-energy events in silence regions)
@@ -164,7 +164,11 @@ function detectBreaths(samples, frameSamples, silenceAnalysis, voicedRmsDbfs) {
  * that survived the high-pass filter.
  */
 function detectPlosives(samples, frameSamples) {
-  // We analyze in 20 ms frames, computing low-band energy
+  // We analyze in 20 ms frames, computing low-band energy.
+  // FFT_SIZE (4096) is larger than a 20 ms frame (~882 samples at 44.1 kHz),
+  // so use a smaller FFT that fits within the frame.
+  const FFT_SIZE_PLOSIVE = 512  // 512 < 882, so this fits within a 20 ms frame
+
   const numFrames = Math.floor(samples.length / frameSamples)
   if (numFrames < 10) return false
 
@@ -174,18 +178,18 @@ function detectPlosives(samples, frameSamples) {
     const start = f * frameSamples
     const end   = Math.min(start + frameSamples, samples.length)
 
-    if (end - start < FFT_SIZE) {
+    if (end - start < FFT_SIZE_PLOSIVE) {
       loEnergyPerFrame[f] = 0
       continue
     }
 
     // Use Meyda to get power spectrum for this frame
-    const frame = samples.slice(start, start + FFT_SIZE)
+    const frame = samples.slice(start, start + FFT_SIZE_PLOSIVE)
     const ps    = Meyda.extract('powerSpectrum', frame)
     if (!ps) { loEnergyPerFrame[f] = 0; continue }
 
     // Sum energy in plosive band (50–150 Hz)
-    const binHz = SAMPLE_RATE / FFT_SIZE
+    const binHz = SAMPLE_RATE / FFT_SIZE_PLOSIVE
     const loIdx = Math.floor(PLOSIVE_FREQ_LO / binHz)
     const hiIdx = Math.ceil(PLOSIVE_FREQ_HI / binHz)
     let sum = 0

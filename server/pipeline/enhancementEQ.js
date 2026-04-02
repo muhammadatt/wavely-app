@@ -130,7 +130,7 @@ export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseF
   // Measure average energy (in dB) in each diagnostic band
   const measured = measureBandEnergies(avgPowerSpectrum, SAMPLE_RATE, FFT_SIZE)
 
-  // Compute spectral mean (average across all diagnostic bands, in linear)
+  // Compute spectral mean (average across all diagnostic bands, in dB)
   const specMeanDb = Object.values(measured).reduce((s, v) => s + v, 0) / Object.keys(measured).length
 
   // Convert to deviation from spectral mean (so we compare shape, not absolute level)
