@@ -5,12 +5,16 @@
  * Uses FFmpeg filters for measurement since node-ebur128 requires
  * native compilation. This approach works with any system that has FFmpeg.
  *
+ * Sprint 2: Added measureVoicedRms() for silence-excluding RMS measurement
+ * used in Stage 5 ACX normalization (spec §5b).
+ *
  * Future: replace with libebur128 bindings for better precision.
  */
 
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
 import { COMPLIANCE_TARGETS } from '../presets.js'
+import { readWavSamples } from './wavReader.js'
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path)
 
@@ -146,4 +150,63 @@ export function checkCompliance(measurements, complianceId) {
 
 function round2(n) {
   return n !== null && n !== undefined ? Math.round(n * 100) / 100 : null
+}
+
+/**
+ * Measure RMS of voiced frames only, excluding silence.
+ *
+ * Implements spec §5b silence exclusion:
+ *   silence_threshold = noise_floor + 6 dB
+ *
+ * Used for ACX RMS-based normalization so silence frames don't pull
+ * the measured level below the true voiced speech level.
+ *
+ * @param {string} wavPath
+ * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @returns {number} Voiced RMS in dBFS
+ */
+export async function measureVoicedRms(wavPath, silenceAnalysis) {
+  // If we have silence analysis, use the pre-computed voiced RMS
+  if (silenceAnalysis && silenceAnalysis.voicedRmsDbfs !== undefined) {
+    return silenceAnalysis.voicedRmsDbfs
+  }
+
+  // Fallback: compute from scratch without silence analysis
+  const { samples, sampleRate } = await readWavSamples(wavPath)
+  const frameSamples = Math.round(0.1 * sampleRate)  // 100 ms frames
+  const numFrames    = Math.floor(samples.length / frameSamples)
+
+  if (numFrames === 0) return -60
+
+  // Bootstrap noise floor from lowest 20 frames
+  const frameRms = new Float64Array(numFrames)
+  for (let f = 0; f < numFrames; f++) {
+    const s = f * frameSamples
+    let sq  = 0
+    for (let i = s; i < s + frameSamples; i++) sq += samples[i] * samples[i]
+    frameRms[f] = Math.sqrt(sq / frameSamples)
+  }
+
+  const sorted = Float64Array.from(frameRms).sort()
+  let noiseRms = 0
+  const n = Math.min(20, sorted.length)
+  for (let i = 0; i < n; i++) noiseRms += sorted[i]
+  noiseRms /= n
+
+  const noiseFloorDb  = noiseRms > 0 ? 20 * Math.log10(noiseRms) : -120
+  const thresholdDb   = noiseFloorDb + 6
+
+  let voicedSumSq = 0
+  let count       = 0
+  for (let f = 0; f < numFrames; f++) {
+    const db = frameRms[f] > 0 ? 20 * Math.log10(frameRms[f]) : -120
+    if (db >= thresholdDb) {
+      voicedSumSq += frameRms[f] * frameRms[f]
+      count++
+    }
+  }
+
+  if (count === 0) return round2(noiseFloorDb)
+  const rms = Math.sqrt(voicedSumSq / count)
+  return round2(rms > 0 ? 20 * Math.log10(rms) : -120)
 }
