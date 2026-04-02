@@ -11,12 +11,9 @@
  * Future: replace with libebur128 bindings for better precision.
  */
 
-import ffmpeg from 'fluent-ffmpeg'
-import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
+import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { COMPLIANCE_TARGETS } from '../presets.js'
 import { readWavSamples } from './wavReader.js'
-
-ffmpeg.setFfmpegPath(ffmpegInstaller.path)
 
 /**
  * Measure audio properties of a WAV file.
@@ -39,76 +36,65 @@ export async function measureAudio(filePath) {
 /**
  * Use FFmpeg's volumedetect filter for RMS and peak measurements.
  */
-function measureVolume(filePath) {
-  return new Promise((resolve, reject) => {
-    let stderr = ''
-    ffmpeg(filePath)
-      .audioFilters('volumedetect')
-      .format('null')
-      .output('-')
-      .on('stderr', (line) => { stderr += line + '\n' })
-      .on('error', reject)
-      .on('end', () => {
-        const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/)
-        const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/)
+async function measureVolume(filePath) {
+  const { stderr } = await runFfmpeg([
+    '-i', filePath,
+    '-af', 'volumedetect',
+    '-f', 'null',
+    '-',
+  ])
 
-        const meanVolume = meanMatch ? parseFloat(meanMatch[1]) : null
-        const maxVolume = maxMatch ? parseFloat(maxMatch[1]) : null
+  const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/)
+  const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/)
 
-        // Estimate noise floor from the histogram data if available,
-        // otherwise use a rough estimate (mean - 20 dB as placeholder).
-        // True noise floor measurement requires silence frame analysis.
-        const histMatches = [...stderr.matchAll(/histogram_(\d+)db:\s*(\d+)/g)]
-        let noiseFloor = meanVolume ? meanVolume - 20 : -60
+  const meanVolume = meanMatch ? parseFloat(meanMatch[1]) : null
+  const maxVolume = maxMatch ? parseFloat(maxMatch[1]) : null
 
-        if (histMatches.length > 0) {
-          // The deepest non-zero histogram bucket approximates the noise floor
-          const deepest = histMatches.reduce((min, m) =>
-            parseInt(m[1]) > parseInt(min[1]) ? m : min
-          )
-          noiseFloor = -parseInt(deepest[1])
-        }
+  // Estimate noise floor from the histogram data if available,
+  // otherwise use a rough estimate (mean - 20 dB as placeholder).
+  // True noise floor measurement requires silence frame analysis.
+  const histMatches = [...stderr.matchAll(/histogram_(\d+)db:\s*(\d+)/g)]
+  let noiseFloor = meanVolume ? meanVolume - 20 : -60
 
-        resolve({
-          meanVolume: round2(meanVolume),
-          maxVolume: round2(maxVolume),
-          noiseFloor: round2(noiseFloor),
-        })
-      })
-      .run()
-  })
+  if (histMatches.length > 0) {
+    // Filter to buckets with non-zero counts, then pick the deepest
+    const nonZero = histMatches.filter(m => parseInt(m[2]) > 0)
+    if (nonZero.length > 0) {
+      const deepest = nonZero.reduce((min, m) =>
+        parseInt(m[1]) > parseInt(min[1]) ? m : min
+      )
+      noiseFloor = -parseInt(deepest[1])
+    }
+  }
+
+  return {
+    meanVolume: round2(meanVolume),
+    maxVolume: round2(maxVolume),
+    noiseFloor: round2(noiseFloor),
+  }
 }
 
 /**
  * Use FFmpeg's loudnorm filter (pass 1) for LUFS and true peak.
  */
-function measureLoudness(filePath) {
-  return new Promise((resolve, reject) => {
-    let stderr = ''
-    ffmpeg(filePath)
-      .audioFilters('loudnorm=I=-16:TP=-1:LRA=11:print_format=json')
-      .format('null')
-      .output('-')
-      .on('stderr', (line) => { stderr += line + '\n' })
-      .on('error', reject)
-      .on('end', () => {
-        try {
-          const jsonMatch = stderr.match(/\{[\s\S]*?\}/)
-          if (!jsonMatch) throw new Error('Could not parse loudnorm output')
-          const data = JSON.parse(jsonMatch[0])
+async function measureLoudness(filePath) {
+  const { stderr } = await runFfmpeg([
+    '-i', filePath,
+    '-af', 'loudnorm=I=-16:TP=-1:LRA=11:print_format=json',
+    '-f', 'null',
+    '-',
+  ])
 
-          resolve({
-            integratedLoudness: parseFloat(data.input_i),
-            truePeak: parseFloat(data.input_tp),
-            lra: parseFloat(data.input_lra),
-            threshold: parseFloat(data.input_thresh),
-          })
-        } catch (err) {
-          reject(err)
-        }
-      })
-      .run()
-  })
+  const jsonMatch = stderr.match(/\{[\s\S]*?\}/)
+  if (!jsonMatch) throw new Error('Could not parse loudnorm output')
+  const data = JSON.parse(jsonMatch[0])
+
+  return {
+    integratedLoudness: parseFloat(data.input_i),
+    truePeak: parseFloat(data.input_tp),
+    lra: parseFloat(data.input_lra),
+    threshold: parseFloat(data.input_thresh),
+  }
 }
 
 /**
