@@ -80,6 +80,12 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     const inputSampleRate = audioStream?.sample_rate ? parseInt(audioStream.sample_rate) : null
     const inputChannels   = audioStream?.channels || 1
 
+    if (inputChannels > 2) {
+      throw new Error(
+        `Unsupported channel count: ${inputChannels}. Only mono and stereo files are supported.`
+      )
+    }
+
     // --- Stage 0: Decode to 32-bit float PCM 44.1 kHz ---
     const decodedPath = tmp('.wav')
     await decodeToFloat32(inputPath, decodedPath)
@@ -114,9 +120,9 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     await applyHighPass(currentPath, hpfPath, { notch60Hz })
     currentPath = hpfPath
 
-    // --- Stage 2: Noise reduction (STUB — Sprint 1 placeholder) ---
+    // --- Stage 2: Noise reduction ---
     const nrPath    = tmp('.wav')
-    const nrCeiling = preset.noiseReductionCeiling <= 8 ? 3 : 4
+    const nrCeiling = ceilingTierFromMaxDb(preset.noiseReductionCeiling)
     const nrResult  = await applyNoiseReduction(currentPath, nrPath, {
       ceilingTier:      nrCeiling,
       noiseFloorDbfs:   beforeMeasurements.noiseFloorDbfs,
@@ -291,6 +297,22 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     await Promise.all(tmpFiles.map(removeTmp))
     throw err
   }
+}
+
+// ── Noise reduction tier mapping ──────────────────────────────────────────────
+
+/**
+ * Map a preset's noiseReductionCeiling (max dB) to the highest NR tier
+ * whose attenuation limit stays within that ceiling.
+ *
+ * Tier → atten_lim_db: 1→3, 2→6, 3→9, 4→12, 5→uncapped
+ */
+function ceilingTierFromMaxDb(maxDb) {
+  if (maxDb <= 3)  return 1
+  if (maxDb <= 6)  return 2
+  if (maxDb <= 9)  return 3
+  if (maxDb <= 12) return 4
+  return 5
 }
 
 // ── Report builder ────────────────────────────────────────────────────────────

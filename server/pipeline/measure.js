@@ -2,18 +2,25 @@
  * Stage 7 — Audio measurement and compliance checking.
  *
  * Measures RMS, true peak, noise floor, and LUFS of a WAV file.
- * Uses FFmpeg filters for measurement since node-ebur128 requires
- * native compilation. This approach works with any system that has FFmpeg.
+ *
+ * LUFS (integrated loudness) and true peak are measured via the ebur128-wasm
+ * WASM binding (libebur128), which is more precise than the FFmpeg loudnorm
+ * filter proxy used previously. RMS and noise floor still use FFmpeg
+ * volumedetect since libebur128 does not expose RMS.
  *
  * Sprint 2: Added measureVoicedRms() for silence-excluding RMS measurement
  * used in Stage 5 ACX normalization (spec §5b).
- *
- * Future: replace with libebur128 bindings for better precision.
  */
 
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { COMPLIANCE_TARGETS } from '../presets.js'
-import { readWavSamples } from './wavReader.js'
+import { readWavSamples, readWavAllChannels } from './wavReader.js'
+import {
+  ebur128_integrated_mono,
+  ebur128_integrated_stereo,
+  ebur128_true_peak_mono,
+  ebur128_true_peak_stereo,
+} from 'ebur128-wasm/ebur128_wasm.js'
 
 /**
  * Measure audio properties of a WAV file.
@@ -75,25 +82,41 @@ async function measureVolume(filePath) {
 }
 
 /**
- * Use FFmpeg's loudnorm filter (pass 1) for LUFS and true peak.
+ * Measure integrated LUFS and true peak via libebur128 (WASM binding).
+ * Handles both mono and stereo files.
  */
 async function measureLoudness(filePath) {
-  const { stderr } = await runFfmpeg([
-    '-i', filePath,
-    '-af', 'loudnorm=I=-16:TP=-1:LRA=11:print_format=json',
-    '-f', 'null',
-    '-',
-  ])
+  const { channels, sampleRate } = await readWavAllChannels(filePath)
 
-  const jsonMatch = stderr.match(/\{[\s\S]*?\}/)
-  if (!jsonMatch) throw new Error('Could not parse loudnorm output')
-  const data = JSON.parse(jsonMatch[0])
+  if (!channels || channels.length === 0) {
+    throw new Error('measureLoudness expected a WAV file with at least one audio channel, but none were found')
+  }
+  if (channels.length > 2) {
+    throw new Error(
+      `measureLoudness currently supports only mono or stereo WAV files (got ${channels.length} channels)`
+    )
+  }
+
+  // Guard against OOM for very long files (2 hours at 44.1 kHz ≈ 317M samples)
+  const maxSamplesPerChannel = 2 * 60 * 60 * 44100
+  if (channels[0].length > maxSamplesPerChannel) {
+    const durationMin = Math.round(channels[0].length / sampleRate / 60)
+    throw new Error(`File too long for in-memory LUFS measurement (${durationMin} min, max 120 min)`)
+  }
+
+  let integratedLoudness, truePeak
+
+  if (channels.length === 2) {
+    integratedLoudness = ebur128_integrated_stereo(sampleRate, channels[0], channels[1])
+    truePeak           = ebur128_true_peak_stereo(sampleRate, channels[0], channels[1])
+  } else {
+    integratedLoudness = ebur128_integrated_mono(sampleRate, channels[0])
+    truePeak = ebur128_true_peak_mono(sampleRate, channels[0])
+  }
 
   return {
-    integratedLoudness: parseFloat(data.input_i),
-    truePeak: parseFloat(data.input_tp),
-    lra: parseFloat(data.input_lra),
-    threshold: parseFloat(data.input_thresh),
+    integratedLoudness: round2(integratedLoudness),
+    truePeak:           round2(truePeak),
   }
 }
 
