@@ -240,8 +240,6 @@ function classifyVoice(f0) {
  */
 function analyzeSibilance(samples, silenceAnalysis, sibilantBand, sampleRate) {
   const frameSize = FFT_SIZE
-  const hop = FRAME_HOP
-  const numFrames = Math.floor((samples.length - frameSize) / hop)
 
   const sibilantEnergies = []
   const fricativeEvents = []
@@ -251,13 +249,12 @@ function analyzeSibilance(samples, silenceAnalysis, sibilantBand, sampleRate) {
   const sibilantBinHi = Math.ceil(sibilantBand[1] / binFreqRes)
   const lowBinHi = Math.ceil(1000 / binFreqRes)
 
-  for (let f = 0; f < numFrames; f++) {
-    const start = f * hop
+  // Iterate voiced frames from silenceAnalysis (consistent with enhancementEQ)
+  for (const frameInfo of silenceAnalysis.frames) {
+    if (frameInfo.isSilence) continue
+    const start = frameInfo.offsetSamples
+    if (start + frameSize > samples.length) continue
     const frame = samples.slice(start, start + frameSize)
-
-    // Skip silence frames
-    const frameRms = rms(frame)
-    if (frameRms < 1e-6) continue
 
     // Use Meyda for spectral analysis
     const features = Meyda.extract(
@@ -410,10 +407,12 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
 }
 
 /**
- * Apply a sibilant gain curve to a channel.
+ * Apply a sibilant-derived gain curve to a channel.
  *
- * For each sample: output = (input - bandpass) + bandpass * gain
- * This reduces only the sibilant band component, leaving lows untouched.
+ * Applies broadband time-varying attenuation: output[i] = input[i] * gainCurve[i].
+ * Gain reductions are small (≤ max preset reduction, typically 5–8 dB) and brief
+ * (only during detected sibilant events), so broadband attenuation is acceptable
+ * and avoids phase artifacts from per-channel band-splitting.
  */
 function applyGainCurve(samples, { gainCurve }) {
   const n = samples.length
@@ -468,14 +467,12 @@ function applyBiquad(coeffs, x, state) {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function collectVoicedFrames(samples, silenceAnalysis) {
-  const sampleRate = SAMPLE_RATE
-  const frameDuration = 0.1  // 100 ms, matching silence analysis
-  const frameSamples = Math.floor(frameDuration * sampleRate)
   const frames = []
 
   for (const frameInfo of silenceAnalysis.frames) {
     if (frameInfo.isSilence) continue
     const start = frameInfo.offsetSamples
+    const frameSamples = frameInfo.lengthSamples
     const end = Math.min(start + frameSamples, samples.length)
     if (end - start < frameSamples * 0.5) continue
     frames.push(samples.slice(start, end))

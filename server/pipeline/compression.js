@@ -106,9 +106,6 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
  * Uses the same voiced-frame set as the normalization stage.
  */
 function measureCrestFactor(samples, silenceAnalysis) {
-  const frameDurationS = 0.1
-  const frameSamples = Math.floor(frameDurationS * SAMPLE_RATE)
-
   let sumSq = 0
   let count = 0
   let peak = 0
@@ -116,7 +113,7 @@ function measureCrestFactor(samples, silenceAnalysis) {
   for (const frame of silenceAnalysis.frames) {
     if (frame.isSilence) continue
     const start = frame.offsetSamples
-    const end = Math.min(start + frameSamples, samples.length)
+    const end = Math.min(start + frame.lengthSamples, samples.length)
     for (let i = start; i < end; i++) {
       const abs = Math.abs(samples[i])
       sumSq += samples[i] * samples[i]

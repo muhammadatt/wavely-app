@@ -15,6 +15,7 @@ import { writeFile } from 'fs/promises'
  * @returns {Buffer}
  */
 export function channelsToWavBuffer(channels, sampleRate) {
+  if (!channels.length) throw new Error('channelsToWavBuffer: channels array is empty')
   const numChannels   = channels.length
   const numSamples    = channels[0].length
   const bitsPerSample = 32
@@ -40,7 +41,7 @@ export function channelsToWavBuffer(channels, sampleRate) {
   buf.write('data', off); off += 4
   buf.writeUInt32LE(dataSize, off); off += 4
 
-  const view = new DataView(buf.buffer)
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
   for (let i = 0; i < numSamples; i++) {
     for (let ch = 0; ch < numChannels; ch++) {
       view.setFloat32(off + (i * numChannels + ch) * 4, channels[ch][i], true)
