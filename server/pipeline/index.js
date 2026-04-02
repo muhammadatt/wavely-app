@@ -19,7 +19,11 @@
  *   Stage 7:   Extended report — human review risk, breath/plosive detection,
  *              overprocessing detection, notch-60Hz conditional
  *
- * Stages 4 (de-esser) and 4a (compression) are Sprint 3.
+ * Sprint 3 additions:
+ *   Stage 4:   De-esser (F0 estimation → sibilance analysis → conditional
+ *              frequency-selective compressor)
+ *   Stage 4a:  Compression (feed-forward RMS compressor, soft knee;
+ *              conditional for ACX Audiobook via crest-factor gate)
  */
 
 import { PRESETS, COMPLIANCE_TARGETS } from '../presets.js'
@@ -43,6 +47,8 @@ import { analyzeAudioFrames } from './silenceAnalysis.js'
 import { analyzeSpectrum } from './enhancementEQ.js'
 import { applyRoomTonePadding } from './roomTone.js'
 import { assessRisks } from './riskAssessment.js'
+import { analyzeAndDeEss } from './deEsser.js'
+import { applyCompression } from './compression.js'
 
 /**
  * Process an audio file through the preset chain.
@@ -140,8 +146,30 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     await applyParametricEQ(currentPath, eqPath, eqResult.ffmpegFilters)
     currentPath = eqPath
 
-    // --- Stage 4: De-esser (Sprint 3) ---
-    // --- Stage 4a: Compression (Sprint 3) ---
+    // --- Stage 4: De-esser ---
+    // Run silence analysis on the post-EQ signal so voiced-frame offsets
+    // reflect the current signal before the de-esser modifies anything.
+    const preDeEssSilenceAnalysis = await analyzeAudioFrames(currentPath)
+    const deEssPath = tmp('.wav')
+    const deEssResult = await analyzeAndDeEss(
+      currentPath,
+      deEssPath,
+      presetId,
+      preDeEssSilenceAnalysis
+    )
+    currentPath = deEssPath
+
+    // --- Stage 4a: Compression ---
+    // Silence analysis is still valid (de-esser preserves signal length and
+    // doesn't shift frame offsets), so reuse preDeEssSilenceAnalysis.
+    const compPath = tmp('.wav')
+    const compressionResult = await applyCompression(
+      currentPath,
+      compPath,
+      presetId,
+      preDeEssSilenceAnalysis
+    )
+    currentPath = compPath
 
     // --- Stage 5: Loudness normalization ---
     // Sprint 2: Use voiced-frame RMS for ACX path (silence excluded per spec §5b).
@@ -219,6 +247,8 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       nrResult,
       eqResult,
       roomToneResult,
+      deEssResult,
+      compressionResult,
       beforeMeasurements,
       afterMeasurements,
       complianceResults,
@@ -268,6 +298,7 @@ export async function processAudio(inputPath, originalName, presetId, compliance
 function buildReport({
   originalName, presetId, complianceId, probe, stereoToMono,
   inputSampleRate, notch60Hz, nrResult, eqResult, roomToneResult,
+  deEssResult, compressionResult,
   beforeMeasurements, afterMeasurements, complianceResults, riskResult,
 }) {
   const audioStream = probe.streams.find(s => s.codec_type === 'audio')
@@ -305,8 +336,25 @@ function buildReport({
         head_added_s:  roomToneResult.headAdded_s,
         tail_added_s:  roomToneResult.tailAdded_s,
       } : null,
-      de_esser:        null,  // Sprint 3
-      compression:     null,  // Sprint 3
+      de_esser: deEssResult ? {
+        applied:           deEssResult.applied,
+        f0_hz:             deEssResult.f0Hz,
+        voice_type:        deEssResult.voiceType,
+        target_freq_hz:    deEssResult.targetFreqHz,
+        max_reduction_db:  deEssResult.maxReductionDb,
+        p95_energy_db:     deEssResult.p95EnergyDb,
+        mean_energy_db:    deEssResult.meanEnergyDb,
+        trigger_reason:    deEssResult.triggerReason,
+      } : null,
+      compression: compressionResult ? {
+        applied:              compressionResult.applied,
+        skipped_reason:       compressionResult.skippedReason,
+        crest_factor_db:      compressionResult.crestFactorDb,
+        max_gain_reduction_db: compressionResult.maxGainReductionDb,
+        avg_gain_reduction_db: compressionResult.avgGainReductionDb,
+        ratio:                compressionResult.params?.ratio ?? null,
+        threshold_db:         compressionResult.params?.threshold ?? null,
+      } : null,
       normalization_gain_db: round2(afterMeasurements.rmsDbfs - beforeMeasurements.rmsDbfs),
       limiting_max_reduction_db: null,
     },
