@@ -82,3 +82,73 @@ export async function readWavSamples(wavPath) {
 
   return { samples, sampleRate, numChannels, numSamples }
 }
+
+/**
+ * Read a WAV file and return all channels as separate Float32Arrays.
+ *
+ * @param {string} wavPath
+ * @returns {{ channels: Float32Array[], sampleRate: number, numChannels: number, numSamples: number }}
+ */
+export async function readWavAllChannels(wavPath) {
+  const buffer = await readFile(wavPath)
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+
+  let offset = 12
+  let sampleRate = 44100
+  let numChannels = 1
+  let bitsPerSample = 32
+  let audioFormat = 3
+  let dataOffset = 0
+  let dataSize = 0
+
+  while (offset < buffer.length - 8) {
+    const chunkId = String.fromCharCode(
+      buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3]
+    )
+    const chunkSize = view.getUint32(offset + 4, true)
+
+    if (chunkId === 'fmt ') {
+      audioFormat   = view.getUint16(offset + 8, true)
+      numChannels   = view.getUint16(offset + 10, true)
+      sampleRate    = view.getUint32(offset + 12, true)
+      bitsPerSample = view.getUint16(offset + 22, true)
+    }
+
+    if (chunkId === 'data') {
+      dataOffset = offset + 8
+      dataSize   = chunkSize
+      break
+    }
+
+    offset += 8 + chunkSize
+    if (chunkSize % 2 !== 0) offset++
+  }
+
+  if (dataOffset === 0) throw new Error('wavReader: no data chunk found')
+
+  const bytesPerSample = bitsPerSample / 8
+  const numSamples = Math.floor(dataSize / (bytesPerSample * numChannels))
+
+  const channels = Array.from({ length: numChannels }, () => new Float32Array(numSamples))
+
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const bytePos = dataOffset + (i * numChannels + ch) * bytesPerSample
+      let sample = 0
+      if (bitsPerSample === 32 && audioFormat === 3) {
+        sample = view.getFloat32(bytePos, true)
+      } else if (bitsPerSample === 16) {
+        sample = view.getInt16(bytePos, true) / 32768
+      } else if (bitsPerSample === 24) {
+        const lo = buffer[bytePos]
+        const mi = buffer[bytePos + 1]
+        const hi = buffer[bytePos + 2]
+        const raw = (hi << 16) | (mi << 8) | lo
+        sample = (raw > 0x7FFFFF ? raw - 0x1000000 : raw) / 0x800000
+      }
+      channels[ch][i] = sample
+    }
+  }
+
+  return { channels, sampleRate, numChannels, numSamples }
+}
