@@ -2,15 +2,15 @@
 import { computed } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  PRESETS, COMPLIANCE_TARGETS,
-  getPresetList, getComplianceList, isComplianceLocked, formatLoudness,
+  PRESETS, OUTPUT_PROFILES,
+  getPresetList, getOutputProfileList, isOutputProfileLocked, formatLoudness,
 } from '../../audio/presets.js'
 import { processAudioOnServer } from '../../api/processing.js'
 import { computePeakCache } from '../../audio/processing.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
 
 const {
-  state, setPreset, setCompliance, setProcessingReport, showToast,
+  state, setPreset, setOutputProfile, setProcessingReport, showToast,
   getAudioContext, replaceRegion, setPeakCache, totalDuration,
   startProcessing, updateProcessingProgress, updateProcessingStage, endProcessing,
 } = useEditorState()
@@ -30,12 +30,17 @@ const PROCESSING_STAGES = [
 ]
 
 const presetList = getPresetList()
-const complianceList = getComplianceList()
+const outputProfileList = getOutputProfileList()
 
 const currentPreset = computed(() => PRESETS[state.selectedPreset])
-const complianceLocked = computed(() => isComplianceLocked(state.selectedPreset))
+const outputProfileLocked = computed(() => isOutputProfileLocked(state.selectedPreset))
 const isOverridden = computed(() =>
-  state.selectedCompliance !== currentPreset.value?.defaultCompliance
+  state.selectedOutputProfile !== currentPreset.value?.defaultOutputProfile
+)
+
+// Warning for noise_eraser + acx combination
+const showNoiseEraserAcxWarning = computed(() =>
+  state.selectedPreset === 'noise_eraser' && state.selectedOutputProfile === 'acx'
 )
 
 const presetIcons = {
@@ -43,10 +48,12 @@ const presetIcons = {
   podcast_ready: '<path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
   voice_ready: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/><path d="M15.54 8.46a5 5 0 010 7.07"/>',
   general_clean: '<path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>',
+  noise_eraser: '<path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/><path d="M19 2l-7 7M5 22l7-7" stroke-width="2.5"/>',
 }
 
 function compressionLabel(preset) {
   if (!preset) return ''
+  if (preset.compression.mode === 'none') return 'None'
   const { mode, ratio } = preset.compression
   return `${ratio}:1 ${mode === 'conditional' ? '(conditional)' : '(always-on)'}`
 }
@@ -59,7 +66,13 @@ function channelLabel(preset) {
 async function handleProcess() {
   if (!state.currentFile || state.isProcessing) return
 
-  startProcessing('Making your audio shine ✨')
+  // Noise Eraser pipeline is not yet implemented
+  if (state.selectedPreset === 'noise_eraser') {
+    showToast('Noise Eraser is coming soon!')
+    return
+  }
+
+  startProcessing('Making your audio shine')
 
   // Fire the first stage immediately (synchronously) so it's visible right away
   updateProcessingStage(PROCESSING_STAGES[0].message)
@@ -80,7 +93,7 @@ async function handleProcess() {
       channels: state.currentFile.channels,
       fileName: state.currentFile.name,
       presetId: state.selectedPreset,
-      complianceId: state.selectedCompliance,
+      outputProfileId: state.selectedOutputProfile,
     })
 
     // Decode the processed audio blob into an AudioBuffer
@@ -99,8 +112,12 @@ async function handleProcess() {
     // Set the processing report
     setProcessingReport(report)
 
-    const passLabel = report.compliance_results.overall_pass ? 'PASS' : 'FAIL'
-    showToast(`Processing complete — compliance: ${passLabel}`)
+    if (report.acx_certification) {
+      const label = report.acx_certification.certificate === 'pass' ? 'PASS' : 'FAIL'
+      showToast(`Processing complete — ACX certification: ${label}`)
+    } else {
+      showToast('Processing complete')
+    }
   } catch (err) {
     console.error('Server processing failed:', err)
     showToast(err.message || 'Processing failed')
@@ -145,33 +162,37 @@ async function handleProcess() {
         </button>
       </div>
 
-      <!-- Compliance target selector -->
+      <!-- Output profile selector -->
       <div>
-        <div class="text-[11px] font-bold text-ink-mid mb-2">Compliance Target</div>
+        <div class="text-[11px] font-bold text-ink-mid mb-2">Output Profile</div>
         <div class="flex gap-1.5 relative"
-             :class="{ 'opacity-45 pointer-events-none': complianceLocked }">
+             :class="{ 'opacity-45 pointer-events-none': outputProfileLocked }">
           <button
-            v-for="ct in complianceList"
-            :key="ct.id"
+            v-for="op in outputProfileList"
+            :key="op.id"
             class="flex-1 text-center text-[11px] font-bold py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
-            :class="state.selectedCompliance === ct.id
+            :class="state.selectedOutputProfile === op.id
               ? 'border-accent bg-accent-lt text-accent'
               : 'border-border bg-surface text-ink-mid hover:border-ink-lt'"
-            @click="setCompliance(ct.id)"
+            @click="setOutputProfile(op.id)"
           >
-            {{ ct.displayName }}
+            {{ op.displayName }}
           </button>
         </div>
         <!-- Locked indicator -->
-        <div v-if="complianceLocked" class="flex items-center gap-1 mt-1.5 text-[10px] text-ink-lt font-bold">
+        <div v-if="outputProfileLocked" class="flex items-center gap-1 mt-1.5 text-[10px] text-ink-lt font-bold">
           <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
           </svg>
-          Locked to {{ COMPLIANCE_TARGETS[currentPreset?.defaultCompliance]?.displayName }}
+          Locked to {{ OUTPUT_PROFILES[currentPreset?.defaultOutputProfile]?.displayName }}
         </div>
         <!-- Override note -->
-        <div v-if="!complianceLocked && isOverridden" class="mt-1.5 text-[10px] text-yellow font-bold leading-snug">
-          Override: using {{ COMPLIANCE_TARGETS[state.selectedCompliance]?.displayName }} compliance with {{ currentPreset?.displayName }} preset
+        <div v-if="!outputProfileLocked && isOverridden" class="mt-1.5 text-[10px] text-yellow font-bold leading-snug">
+          Override: using {{ OUTPUT_PROFILES[state.selectedOutputProfile]?.displayName }} profile with {{ currentPreset?.displayName }} preset
+        </div>
+        <!-- Noise Eraser + ACX warning -->
+        <div v-if="showNoiseEraserAcxWarning" class="mt-1.5 text-[10px] text-accent font-bold leading-snug">
+          ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.
         </div>
       </div>
 

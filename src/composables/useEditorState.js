@@ -14,7 +14,7 @@ import {
   insertSegments,
   replaceRegionWithBuffer,
 } from '../audio/operations.js'
-import { getDefaultCompliance, isComplianceLocked } from '../audio/presets.js'
+import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -39,7 +39,7 @@ const state = reactive({
   // UI state
   activeTool: null, // 'split' | 'trim' | 'fade' | 'silence' | 'effects' | 'presets' | null
   selectedPreset: 'general_clean',
-  selectedCompliance: 'standard',
+  selectedOutputProfile: 'podcast',
   processingReport: null,
   isProcessing: false,
   processingMessage: '',
@@ -164,7 +164,7 @@ export function useEditorState() {
     state.activeTool = null
     state.contextPanelOpen = false
     state.selectedPreset = 'general_clean'
-    state.selectedCompliance = 'standard'
+    state.selectedOutputProfile = 'podcast'
     state.processingReport = null
 
     // Clear undo/redo
@@ -339,16 +339,16 @@ export function useEditorState() {
     state.processingProgress = 0
   }
 
-  // Preset / Compliance
+  // Preset / Output Profile
   function setPreset(presetId) {
     state.selectedPreset = presetId
-    state.selectedCompliance = getDefaultCompliance(presetId)
+    state.selectedOutputProfile = getDefaultOutputProfile(presetId)
     state.processingReport = null
   }
 
-  function setCompliance(complianceId) {
-    if (isComplianceLocked(state.selectedPreset)) return
-    state.selectedCompliance = complianceId
+  function setOutputProfile(outputProfileId) {
+    if (isOutputProfileLocked(state.selectedPreset)) return
+    state.selectedOutputProfile = outputProfileId
   }
 
   function setProcessingReport(report) {
@@ -425,9 +425,9 @@ export function useEditorState() {
     updateProcessingStage,
     endProcessing,
 
-    // Preset / Compliance
+    // Preset / Output Profile
     setPreset,
-    setCompliance,
+    setOutputProfile,
     setProcessingReport,
 
     // Toast

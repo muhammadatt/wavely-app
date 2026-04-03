@@ -1,17 +1,29 @@
 /**
- * Stage 7 — Quality risk assessment.
+ * Stage 7 — Quality advisory flag generation.
  *
- * Analyzes the processed audio for quality risk factors:
+ * Compliance model v2: replaces the aggregate human_review_risk (Low/Medium/High)
+ * with individual quality advisory flags. Each flag has an id, severity
+ * (info or review), and a user-facing message.
  *
- *  For all presets:
- *    - Overprocessing detection (crest factor)
+ * Flags generated:
+ *   All presets/profiles:
+ *     - overprocessing (spectral flatness decrease)
+ *     - over_compression (crest factor < 8 dB)
  *
- *  For ACX Audiobook only:
- *    - Loud breath detection (short high-energy events in silence regions)
- *    - Plosive detection (sharp low-frequency transients that survived HPF)
- *    - Human review risk level (Low / Medium / High)
+ *   ACX Audiobook preset only:
+ *     - loud_breaths (high-energy events in silence regions)
+ *     - plosives (sharp low-frequency transients)
  *
- * Reference: processing spec v3, Stage 7b.
+ *   ACX output profile only:
+ *     - noise_floor_marginal (-60 to -62 dBFS)
+ *
+ *   Noise Eraser preset:
+ *     - separation_used (always flagged)
+ *
+ *   Pipeline context:
+ *     - high_nr_tier (Tier 4 noise reduction applied)
+ *
+ * Reference: docs/instant_polish_compliance_model_v2.md
  */
 
 import { readWavSamples } from './wavReader.js'
@@ -28,70 +40,107 @@ const BREATH_MARGIN_DB = 12
 const PLOSIVE_FREQ_LO  = 50
 const PLOSIVE_FREQ_HI  = 150
 const PLOSIVE_SPIKE_DB = 10
-const PLOSIVE_MAX_S    = 0.02   // 20 ms
 
 // Overprocessing: crest factor < 8 dB → over-compressed
 const CREST_FACTOR_THRESHOLD_DB = 8
 
 /**
- * Assess quality risks on the processed audio.
- *
- * @param {string} processedPath  - Processed WAV (post-chain)
- * @param {string} presetId
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
- *   - From the pre-normalization analysis (identifies silence regions)
- * @param {number} voicedRmsDbfs  - Average voiced RMS (for breath comparison)
- * @returns {RiskResult}
- *
- * @typedef {Object} RiskResult
- * @property {{ level: 'low'|'medium'|'high', flags: string[] } | null} humanReviewRisk
- *   - ACX Audiobook only; null for other presets
- * @property {OverprocessingResult} overprocessing
- * @property {string[]} warnings  - Human-readable warning messages
+ * @typedef {Object} QualityAdvisoryFlag
+ * @property {string} id
+ * @property {'info'|'review'} severity
+ * @property {string} message
  */
-export async function assessRisks(processedPath, presetId, silenceAnalysis, voicedRmsDbfs) {
+
+/**
+ * @typedef {Object} QualityAdvisory
+ * @property {QualityAdvisoryFlag[]} flags
+ * @property {boolean} review_recommended
+ */
+
+/**
+ * Generate quality advisory flags for the processed audio.
+ *
+ * @param {string} processedPath - Processed WAV (post-chain)
+ * @param {string} presetId
+ * @param {string} outputProfileId
+ * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {number} voicedRmsDbfs - Average voiced RMS (for breath comparison)
+ * @param {object} pipelineContext - { nrTier: number|null, noiseFloorDbfs: number|null }
+ * @returns {QualityAdvisory}
+ */
+export async function generateQualityAdvisory(
+  processedPath, presetId, outputProfileId, silenceAnalysis, voicedRmsDbfs, pipelineContext = {}
+) {
   const { samples } = await readWavSamples(processedPath)
   const frameSamples = Math.round(FRAME_S * SAMPLE_RATE)
 
-  const warnings = []
+  /** @type {QualityAdvisoryFlag[]} */
+  const flags = []
 
   // --- Overprocessing detection (all presets) ---
   const overprocessing = detectOverprocessing(samples, frameSamples)
   if (overprocessing.overCompressed) {
-    warnings.push('Output may be over-compressed — crest factor below 8 dB.')
+    flags.push({
+      id: 'over_compression',
+      severity: 'review',
+      message: 'Output may sound over-compressed. The narration may lack natural dynamic range.',
+    })
   }
 
-  // --- ACX-specific checks ---
-  let humanReviewRisk = null
-
+  // --- ACX Audiobook-specific flags ---
   if (presetId === 'acx_audiobook') {
-    const flags = []
-
     // Breath detection
-    const breathDetected = detectBreaths(samples, frameSamples, silenceAnalysis, voicedRmsDbfs)
-    if (breathDetected) {
-      flags.push('Loud breath sounds detected. These require manual editing before ACX submission.')
-      warnings.push('Loud breath sounds detected. Review and edit before submitting to ACX.')
+    if (detectBreaths(samples, frameSamples, silenceAnalysis, voicedRmsDbfs)) {
+      flags.push({
+        id: 'loud_breaths',
+        severity: 'review',
+        message: 'Loud breath sounds detected. ACX reviewers sometimes flag these. Listen and decide.',
+      })
     }
 
     // Plosive detection
-    const plosiveDetected = detectPlosives(samples, frameSamples)
-    if (plosiveDetected) {
-      flags.push('Possible unedited plosives detected.')
-      warnings.push('Possible unedited plosives detected. Review low-frequency transients.')
+    if (detectPlosives(samples, frameSamples)) {
+      flags.push({
+        id: 'plosives',
+        severity: 'review',
+        message: 'Possible plosive sounds detected. These may require manual editing.',
+      })
     }
-
-    // Overprocessing flag for ACX
-    if (overprocessing.overCompressed) {
-      flags.push('Output may be over-compressed — ACX human reviewers may flag this.')
-    }
-
-    // Aggregate into human review risk level
-    const level = computeRiskLevel(flags)
-    humanReviewRisk = { level, flags }
   }
 
-  return { humanReviewRisk, overprocessing, warnings }
+  // --- Noise floor marginal (ACX output profile only) ---
+  if (outputProfileId === 'acx' && pipelineContext.noiseFloorDbfs != null) {
+    const nf = pipelineContext.noiseFloorDbfs
+    if (nf <= -60 && nf > -62) {
+      flags.push({
+        id: 'noise_floor_marginal',
+        severity: 'info',
+        message: 'Noise floor is within spec but close to the limit. Re-recording in a quieter environment would add headroom.',
+      })
+    }
+  }
+
+  // --- High NR tier (all presets) ---
+  if (pipelineContext.nrTier != null && pipelineContext.nrTier >= 4) {
+    flags.push({
+      id: 'high_nr_tier',
+      severity: 'info',
+      message: 'Heavy noise reduction was applied. Some processing character may be audible on close listening.',
+    })
+  }
+
+  // --- Separation used (Noise Eraser only) ---
+  if (presetId === 'noise_eraser') {
+    flags.push({
+      id: 'separation_used',
+      severity: 'review',
+      message: 'Voice separation was used. The output may have a processed quality. Review carefully before submitting to ACX.',
+    })
+  }
+
+  const review_recommended = flags.some(f => f.severity === 'review')
+
+  return { flags, review_recommended }
 }
 
 // ── Overprocessing detection ──────────────────────────────────────────────────
@@ -215,14 +264,6 @@ function detectPlosives(samples, frameSamples) {
 
   // Flag if more than 2 plosive candidates detected (could be false positive from one)
   return spikeCount > 2
-}
-
-// ── Risk level aggregation ────────────────────────────────────────────────────
-
-function computeRiskLevel(flags) {
-  if (flags.length === 0) return 'low'
-  if (flags.length === 1) return 'medium'
-  return 'high'
 }
 
 function round2(n) {

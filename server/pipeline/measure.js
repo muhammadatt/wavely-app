@@ -1,5 +1,5 @@
 /**
- * Stage 7 — Audio measurement and compliance checking.
+ * Stage 7 — Audio measurement and ACX certification.
  *
  * Measures RMS, true peak, noise floor, and LUFS of a WAV file.
  *
@@ -10,10 +10,14 @@
  *
  * Sprint 2: Added measureVoicedRms() for silence-excluding RMS measurement
  * used in Stage 5 ACX normalization (spec §5b).
+ *
+ * Compliance model v2: checkCompliance() replaced by checkAcxCertification()
+ * which only runs for acx output profile and checks 6 points (RMS, true peak,
+ * noise floor, sample rate, bit depth, channel format).
  */
 
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
-import { COMPLIANCE_TARGETS } from '../presets.js'
+import { OUTPUT_PROFILES } from '../presets.js'
 import { readWavSamples, readWavAllChannels } from './wavReader.js'
 import {
   ebur128_integrated_mono,
@@ -121,40 +125,66 @@ async function measureLoudness(filePath) {
 }
 
 /**
- * Check compliance of measurements against a compliance target.
+ * ACX Technical Certification — 6-point deterministic check.
+ *
+ * Only runs when output_profile = acx. Returns a structured certificate
+ * with per-check pass/fail and measured values.
+ *
+ * @param {object} measurements - { rmsDbfs, truePeakDbfs, noiseFloorDbfs, lufsIntegrated }
+ * @param {object} fileMetadata - { sampleRate: number, bitDepth: string, channels: number }
+ * @returns {{ certificate: 'pass'|'fail', checks: object }}
  */
-export function checkCompliance(measurements, complianceId) {
-  const target = COMPLIANCE_TARGETS[complianceId]
-  if (!target) throw new Error(`Unknown compliance target: ${complianceId}`)
+export function checkAcxCertification(measurements, fileMetadata) {
+  const target = OUTPUT_PROFILES.acx
 
-  const results = {
-    target: complianceId,
-    loudness_pass: false,
-    true_peak_pass: false,
-    noise_floor_pass: true, // default true if not enforced
-    overall_pass: false,
+  const rmsPass = measurements.rmsDbfs >= target.loudnessRange[0] &&
+                  measurements.rmsDbfs <= target.loudnessRange[1]
+  const truePeakPass = measurements.truePeakDbfs <= target.truePeakCeiling
+  const noiseFloorPass = measurements.noiseFloorDbfs <= target.noiseFloorCeiling
+  const sampleRatePass = fileMetadata.sampleRate === 44100
+  const bitDepthPass = fileMetadata.bitDepth === '16-bit PCM' ||
+                       fileMetadata.bitDepth === '192 kbps CBR'
+  const channelPass = fileMetadata.channels === 1
+
+  const allPass = rmsPass && truePeakPass && noiseFloorPass &&
+                  sampleRatePass && bitDepthPass && channelPass
+
+  return {
+    certificate: allPass ? 'pass' : 'fail',
+    checks: {
+      rms: {
+        value_dbfs: measurements.rmsDbfs,
+        min: target.loudnessRange[0],
+        max: target.loudnessRange[1],
+        pass: rmsPass,
+      },
+      true_peak: {
+        value_dbfs: measurements.truePeakDbfs,
+        ceiling: target.truePeakCeiling,
+        pass: truePeakPass,
+      },
+      noise_floor: {
+        value_dbfs: measurements.noiseFloorDbfs,
+        ceiling: target.noiseFloorCeiling,
+        pass: noiseFloorPass,
+      },
+      sample_rate: {
+        value_hz: fileMetadata.sampleRate,
+        required: 44100,
+        pass: sampleRatePass,
+      },
+      bit_depth: {
+        value: fileMetadata.bitDepth,
+        required: '16-bit PCM',
+        pass: bitDepthPass,
+      },
+      channel: {
+        value: fileMetadata.channels === 1 ? 'mono' : 'stereo',
+        required: 'mono',
+        pass: channelPass,
+      },
+    },
   }
-
-  // Loudness check
-  if (target.measurementMethod === 'RMS') {
-    const rms = measurements.rmsDbfs
-    results.loudness_pass = rms >= target.loudnessRange[0] && rms <= target.loudnessRange[1]
-  } else {
-    const lufs = measurements.lufsIntegrated
-    results.loudness_pass = lufs >= target.loudnessRange[0] && lufs <= target.loudnessRange[1]
-  }
-
-  // True peak check
-  results.true_peak_pass = measurements.truePeakDbfs <= target.truePeakCeiling
-
-  // Noise floor check (only enforced for ACX)
-  if (target.noiseFloorCeiling !== null) {
-    results.noise_floor_pass = measurements.noiseFloorDbfs <= target.noiseFloorCeiling
-  }
-
-  results.overall_pass = results.loudness_pass && results.true_peak_pass && results.noise_floor_pass
-
-  return results
 }
 
 function round2(n) {

@@ -16,7 +16,7 @@
  *   Stage 3:   Enhancement EQ (Meyda.js spectral analysis → FFmpeg parametric EQ)
  *   Stage 5:   RMS normalization now uses voiced-frame RMS (silence excluded)
  *   Room tone: ACX-only head/tail padding using actual room tone
- *   Stage 7:   Extended report — human review risk, breath/plosive detection,
+ *   Stage 7:   Extended report — quality advisory flags, breath/plosive detection,
  *              overprocessing detection, notch-60Hz conditional
  *
  * Sprint 3 additions:
@@ -24,9 +24,15 @@
  *              frequency-selective compressor)
  *   Stage 4a:  Compression (feed-forward RMS compressor, soft knee;
  *              conditional for ACX Audiobook via crest-factor gate)
+ *
+ * Compliance model v2:
+ *   - "compliance target" renamed to "output profile"
+ *   - ACX certification (6-point) only runs for acx output profile
+ *   - Quality advisory flags replace aggregate human_review_risk
+ *   - Report JSON restructured per compliance model v2 spec
  */
 
-import { PRESETS, COMPLIANCE_TARGETS } from '../presets.js'
+import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import {
   tempPath,
   removeTmp,
@@ -42,29 +48,29 @@ import {
 } from '../lib/ffmpeg.js'
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { applyNoiseReduction } from './noiseReduce.js'
-import { measureAudio, measureVoicedRms, checkCompliance } from './measure.js'
+import { measureAudio, measureVoicedRms, checkAcxCertification } from './measure.js'
 import { extractPeaks } from './peaks.js'
 import { analyzeAudioFrames } from './silenceAnalysis.js'
 import { analyzeSpectrum } from './enhancementEQ.js'
 import { applyRoomTonePadding } from './roomTone.js'
-import { assessRisks } from './riskAssessment.js'
+import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 
 /**
  * Process an audio file through the preset chain.
  *
- * @param {string} inputPath     - Path to the uploaded audio file
- * @param {string} originalName  - Original filename
- * @param {string} presetId      - Preset ID (e.g. 'acx_audiobook')
- * @param {string} complianceId  - Compliance target ID (e.g. 'acx')
+ * @param {string} inputPath       - Path to the uploaded audio file
+ * @param {string} originalName    - Original filename
+ * @param {string} presetId        - Preset ID (e.g. 'acx_audiobook')
+ * @param {string} outputProfileId - Output profile ID (e.g. 'acx')
  * @returns {{ outputPath: string, report: object, peaks: object[] }}
  */
-export async function processAudio(inputPath, originalName, presetId, complianceId) {
+export async function processAudio(inputPath, originalName, presetId, outputProfileId) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
-  const compliance = COMPLIANCE_TARGETS[complianceId]
-  if (!compliance) throw new Error(`Unknown compliance target: ${complianceId}`)
+  const outputProfile = OUTPUT_PROFILES[outputProfileId]
+  if (!outputProfile) throw new Error(`Unknown output profile: ${outputProfileId}`)
 
   // Track temp files for cleanup
   const tmpFiles = []
@@ -80,6 +86,9 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     const audioStream = probe.streams.find(s => s.codec_type === 'audio')
     const inputSampleRate = audioStream?.sample_rate ? parseInt(audioStream.sample_rate) : null
     const inputChannels   = audioStream?.channels || 1
+    const inputBitDepth   = audioStream?.bits_per_sample
+      ? `${audioStream.bits_per_sample}-bit PCM`
+      : (audioStream?.codec_name || 'unknown')
 
     if (inputChannels > 2) {
       throw new Error(
@@ -102,15 +111,13 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       stereoToMono = true
     }
 
+    // Determine output channel count for metadata
+    const outputChannelCount = preset.channelOutput === 'mono' ? 1 : inputChannels
+
     // --- Stage 2a: Silence analysis (Sprint 2) ---
-    // Must run before Stage 1 HPF so that the 60 Hz notch detection can use
-    // the raw noise floor, and before Stage 2 so room tone source is identified
-    // from pre-NR signal. We re-run after HPF for EQ and room tone (see below).
     const preHpfSilenceAnalysis = await analyzeAudioFrames(currentPath)
     const { noiseFloorDbfs: rawNoiseFloor } = preHpfSilenceAnalysis
 
-    // Detect 60 Hz hum: if tonal energy at 50/60 Hz is > 6 dB above noise floor
-    // (simplified heuristic: noise floor above -55 dBFS often indicates hum)
     const notch60Hz = await detect60HzHum(currentPath, rawNoiseFloor)
 
     // --- Measure "before" values ---
@@ -137,7 +144,6 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     })
 
     // --- Stage 2a (post-NR): Re-analyze silence on HPF+NR output ---
-    // This is the definitive silence analysis used for room tone and EQ
     const silenceAnalysis = await analyzeAudioFrames(currentPath)
     logSilence('post-NR', silenceAnalysis)
 
@@ -165,8 +171,6 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     })
 
     // --- Stage 4: De-esser ---
-    // Run silence analysis on the post-EQ signal so voiced-frame offsets
-    // reflect the current signal before the de-esser modifies anything.
     const preDeEssSilenceAnalysis = await analyzeAudioFrames(currentPath)
     const deEssPath = tmp('.wav')
     const deEssResult = await analyzeAndDeEss(
@@ -184,8 +188,6 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     })
 
     // --- Stage 4a: Compression ---
-    // Silence analysis is still valid (de-esser preserves signal length and
-    // doesn't shift frame offsets), so reuse preDeEssSilenceAnalysis.
     const compPath = tmp('.wav')
     const compressionResult = await applyCompression(
       currentPath,
@@ -202,21 +204,17 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     })
 
     // --- Stage 5: Loudness normalization ---
-    // Sprint 2: Use voiced-frame RMS for ACX path (silence excluded per spec §5b).
-    // Recompute silence analysis on the post-EQ, post-room-tone signal so that
-    // frame offsets and energy levels reflect the actual signal being normalized.
     const normPath = tmp('.wav')
 
     let normExtras = {}
-    if (compliance.measurementMethod === 'RMS') {
+    if (outputProfile.measurementMethod === 'RMS') {
       // ACX path: voiced-frame RMS normalization
-      const targetRms              = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2 // -20.5 → ~-20 dBFS
+      const targetRms              = (outputProfile.loudnessRange[0] + outputProfile.loudnessRange[1]) / 2
       const prNormSilenceAnalysis  = await analyzeAudioFrames(currentPath)
       const voicedRms              = await measureVoicedRms(currentPath, prNormSilenceAnalysis)
       const gainDb                 = targetRms - voicedRms
 
       if (gainDb > 18) {
-        // Edge case warning: recording level very low (spec §5c)
         console.warn(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
       }
 
@@ -228,16 +226,16 @@ export async function processAudio(inputPath, originalName, presetId, compliance
         gainApplied: `${round2(gainDb)}dB`,
       }
     } else {
-      // LUFS path: standard/broadcast via loudnorm two-pass
-      const targetLufs = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2
+      // LUFS path: podcast/broadcast via loudnorm two-pass
+      const targetLufs = (outputProfile.loudnessRange[0] + outputProfile.loudnessRange[1]) / 2
       await applyLoudnormLUFS(currentPath, normPath, {
         targetLUFS:  targetLufs,
-        peakCeiling: compliance.truePeakCeiling,
+        peakCeiling: outputProfile.truePeakCeiling,
       })
       normExtras = {
         method:  'LUFS',
         target:  `${targetLufs}LUFS`,
-        tp:      `${compliance.truePeakCeiling}dBTP`,
+        tp:      `${outputProfile.truePeakCeiling}dBTP`,
       }
     }
     currentPath = normPath
@@ -246,26 +244,37 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     // --- Stage 6: True peak limiting ---
     const limitedPath = tmp('.wav')
     await applyTruePeakLimiter(currentPath, limitedPath, {
-      peakCeiling: compliance.truePeakCeiling,
+      peakCeiling: outputProfile.truePeakCeiling,
     })
     currentPath = limitedPath
-    await logLevel('after limiting', currentPath, { tp: `${compliance.truePeakCeiling}dBTP` })
+    await logLevel('after limiting', currentPath, { tp: `${outputProfile.truePeakCeiling}dBTP` })
 
     // --- Measure "after" values ---
     const afterMeasurements = await measureAudio(currentPath)
 
-    // --- Stage 7: Compliance check ---
-    const complianceResults = checkCompliance(afterMeasurements, complianceId)
+    // --- Stage 7: ACX certification (only for acx output profile) ---
+    let acxCertification = undefined
+    if (outputProfileId === 'acx') {
+      const fileMetadata = {
+        sampleRate: 44100, // We always decode to 44.1 kHz
+        bitDepth: '16-bit PCM', // Output is always 16-bit PCM WAV
+        channels: outputChannelCount,
+      }
+      acxCertification = checkAcxCertification(afterMeasurements, fileMetadata)
+    }
 
-    // --- Stage 7b: Quality risk assessment (Sprint 2) ---
-    // Rerun silence analysis on the fully processed (limited) signal so that
-    // frame offsets align correctly — room tone padding shifts all offsets.
+    // --- Stage 7b: Quality advisory flags ---
     const postProcessSilenceAnalysis = await analyzeAudioFrames(currentPath)
-    const riskResult = await assessRisks(
+    const qualityAdvisory = await generateQualityAdvisory(
       currentPath,
       presetId,
+      outputProfileId,
       postProcessSilenceAnalysis,
-      postProcessSilenceAnalysis.voicedRmsDbfs
+      postProcessSilenceAnalysis.voicedRmsDbfs,
+      {
+        nrTier: nrResult.tier,
+        noiseFloorDbfs: afterMeasurements.noiseFloorDbfs,
+      }
     )
 
     // --- Encode output ---
@@ -283,7 +292,7 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     const report = buildReport({
       originalName,
       presetId,
-      complianceId,
+      outputProfileId,
       probe,
       stereoToMono,
       inputSampleRate,
@@ -295,35 +304,34 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       compressionResult,
       beforeMeasurements,
       afterMeasurements,
-      complianceResults,
-      riskResult,
+      acxCertification,
+      qualityAdvisory,
     })
 
     // --- Append warnings ---
     if (!nrResult.applied) {
       report.warnings.push('Noise reduction not available — noise floor unchanged')
     }
-    if (complianceResults.overall_pass === false) {
-      if (!complianceResults.loudness_pass) {
-        const metric = compliance.measurementMethod === 'RMS'
-          ? `${afterMeasurements.rmsDbfs} dBFS RMS`
-          : `${afterMeasurements.lufsIntegrated} LUFS`
+    if (acxCertification && acxCertification.certificate === 'fail') {
+      const checks = acxCertification.checks
+      if (!checks.rms.pass) {
         report.warnings.push(
-          `Loudness ${metric} outside target range ` +
-          `[${compliance.loudnessRange[0]}, ${compliance.loudnessRange[1]}]`
+          `RMS ${checks.rms.value_dbfs} dBFS outside target range ` +
+          `[${checks.rms.min}, ${checks.rms.max}]`
         )
       }
-      if (!complianceResults.noise_floor_pass) {
+      if (!checks.noise_floor.pass) {
         report.warnings.push(
-          `Noise floor ${afterMeasurements.noiseFloorDbfs} dBFS exceeds ` +
-          `ceiling of ${compliance.noiseFloorCeiling} dBFS`
+          `Noise floor ${checks.noise_floor.value_dbfs} dBFS exceeds ` +
+          `ceiling of ${checks.noise_floor.ceiling} dBFS`
         )
       }
-    }
-
-    // Merge risk assessment warnings into report
-    for (const w of riskResult.warnings) {
-      if (!report.warnings.includes(w)) report.warnings.push(w)
+      if (!checks.true_peak.pass) {
+        report.warnings.push(
+          `True peak ${checks.true_peak.value_dbfs} dBFS exceeds ` +
+          `ceiling of ${checks.true_peak.ceiling} dBFS`
+        )
+      }
     }
 
     // Clean up all temp files except the output
@@ -339,13 +347,8 @@ export async function processAudio(inputPath, originalName, presetId, compliance
 
 // ── Noise reduction tier mapping ──────────────────────────────────────────────
 
-/**
- * Map a preset's noiseReductionCeiling (max dB) to the highest NR tier
- * whose attenuation limit stays within that ceiling.
- *
- * Tier → atten_lim_db: 1→3, 2→6, 3→9, 4→12, 5→uncapped
- */
 function ceilingTierFromMaxDb(maxDb) {
+  if (maxDb == null) return 0
   if (maxDb <= 3)  return 1
   if (maxDb <= 6)  return 2
   if (maxDb <= 9)  return 3
@@ -356,10 +359,10 @@ function ceilingTierFromMaxDb(maxDb) {
 // ── Report builder ────────────────────────────────────────────────────────────
 
 function buildReport({
-  originalName, presetId, complianceId, probe, stereoToMono,
+  originalName, presetId, outputProfileId, probe, stereoToMono,
   inputSampleRate, notch60Hz, nrResult, eqResult, roomToneResult,
   deEssResult, compressionResult,
-  beforeMeasurements, afterMeasurements, complianceResults, riskResult,
+  beforeMeasurements, afterMeasurements, acxCertification, qualityAdvisory,
 }) {
   const audioStream = probe.streams.find(s => s.codec_type === 'audio')
   const duration    = parseFloat(probe.format?.duration || audioStream?.duration || 0)
@@ -374,10 +377,10 @@ function buildReport({
     air_boost:      bandReport(eqResult.bands.air_boost),
   } : null
 
-  return {
+  const report = {
     file:             originalName,
     preset:           presetId,
-    compliance:       complianceId,
+    output_profile:   outputProfileId,
     duration_seconds: Math.round(duration),
     processing_applied: {
       stereo_to_mono:    stereoToMono,
@@ -418,23 +421,30 @@ function buildReport({
       normalization_gain_db: round2(afterMeasurements.rmsDbfs - beforeMeasurements.rmsDbfs),
       limiting_max_reduction_db: null,
     },
-    before: {
-      rms_dbfs:        beforeMeasurements.rmsDbfs,
-      true_peak_dbfs:  beforeMeasurements.truePeakDbfs,
-      noise_floor_dbfs: beforeMeasurements.noiseFloorDbfs,
-      lufs_integrated: beforeMeasurements.lufsIntegrated,
+    measurements: {
+      before: {
+        rms_dbfs:        beforeMeasurements.rmsDbfs,
+        lufs_integrated: beforeMeasurements.lufsIntegrated,
+        true_peak_dbfs:  beforeMeasurements.truePeakDbfs,
+        noise_floor_dbfs: beforeMeasurements.noiseFloorDbfs,
+      },
+      after: {
+        rms_dbfs:        afterMeasurements.rmsDbfs,
+        lufs_integrated: afterMeasurements.lufsIntegrated,
+        true_peak_dbfs:  afterMeasurements.truePeakDbfs,
+        noise_floor_dbfs: afterMeasurements.noiseFloorDbfs,
+      },
     },
-    after: {
-      rms_dbfs:        afterMeasurements.rmsDbfs,
-      true_peak_dbfs:  afterMeasurements.truePeakDbfs,
-      noise_floor_dbfs: afterMeasurements.noiseFloorDbfs,
-      lufs_integrated: afterMeasurements.lufsIntegrated,
-    },
-    compliance_results:   complianceResults,
-    human_review_risk:    riskResult.humanReviewRisk,
-    overprocessing:       riskResult.overprocessing,
-    warnings:             [],
+    quality_advisory: qualityAdvisory,
+    warnings:         [],
   }
+
+  // acx_certification is absent (not null) when output_profile is not acx
+  if (acxCertification !== undefined) {
+    report.acx_certification = acxCertification
+  }
+
+  return report
 }
 
 function bandReport(band) {
@@ -444,17 +454,7 @@ function bandReport(band) {
 
 // ── 60 Hz hum detection ───────────────────────────────────────────────────────
 
-/**
- * Simplified heuristic: check if noise floor is elevated enough to suggest hum.
- * A proper implementation would do spectral analysis on silence frames.
- * We use the raw noise floor as a proxy — if > -55 dBFS, there's likely a
- * noise source present and the 60 Hz notch is worth applying.
- *
- * Sprint 2 note: Full spectral tonal detection (per spec §1 supplementary)
- * is deferred to when silence-frame spectral analysis is added.
- */
 async function detect60HzHum(wavPath, rawNoiseFloor) {
-  // If noise floor is above -55 dBFS, apply the 60 Hz notch conservatively
   return rawNoiseFloor > -55
 }
 
@@ -464,14 +464,6 @@ function round2(n) {
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
 
-/**
- * Log peak and mean level of an audio file, plus any stage-specific extras.
- * Runs FFmpeg volumedetect on the file — one line of output per stage.
- *
- * @param {string} label    - Stage name shown in the log line
- * @param {string} filePath - Path to the WAV file to measure
- * @param {object} [extras] - Additional key=value pairs appended to the line
- */
 async function logLevel(label, filePath, extras = {}) {
   try {
     const { stderr } = await runFfmpeg([
@@ -486,13 +478,6 @@ async function logLevel(label, filePath, extras = {}) {
   }
 }
 
-/**
- * Log key metrics from a silence analysis result — no FFmpeg call needed.
- * Shows noise floor, silence threshold, voiced-frame RMS, and frame counts.
- *
- * @param {string} label - Stage name shown in the log line
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} sa
- */
 function logSilence(label, sa) {
   const voiced = sa.frames.filter(f => !f.isSilence).length
   const total  = sa.frames.length
@@ -503,5 +488,3 @@ function logSilence(label, sa) {
     `voiced=${voiced}/${total} frames`
   )
 }
-
-

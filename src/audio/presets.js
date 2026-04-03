@@ -1,12 +1,12 @@
 /**
- * Audio Effect Presets and Compliance Targets
+ * Audio Effect Presets and Output Profiles
  *
  * Pure data definitions for the Instant Polish processing chain.
  * No side effects, no Vue dependency.
  */
 
 /**
- * @typedef {Object} ComplianceTarget
+ * @typedef {Object} OutputProfile
  * @property {string} id
  * @property {string} displayName
  * @property {[number, number]} loudnessRange - [min, max] in dBFS (RMS) or LUFS
@@ -15,19 +15,19 @@
  * @property {'RMS'|'LUFS'} measurementMethod
  */
 
-/** @type {Record<string, ComplianceTarget>} */
-export const COMPLIANCE_TARGETS = {
+/** @type {Record<string, OutputProfile>} */
+export const OUTPUT_PROFILES = {
   acx: {
     id: 'acx',
-    displayName: 'ACX Standard',
+    displayName: 'ACX Audiobook',
     loudnessRange: [-23, -18],
     truePeakCeiling: -3,
     noiseFloorCeiling: -60,
     measurementMethod: 'RMS',
   },
-  standard: {
-    id: 'standard',
-    displayName: 'Standard',
+  podcast: {
+    id: 'podcast',
+    displayName: 'Podcast / Streaming',
     loudnessRange: [-18, -14],
     truePeakCeiling: -1,
     noiseFloorCeiling: null,
@@ -43,6 +43,12 @@ export const COMPLIANCE_TARGETS = {
   },
 }
 
+// Backward compatibility: accept 'standard' as alias for 'podcast'
+export function resolveOutputProfileId(id) {
+  if (id === 'standard') return 'podcast'
+  return id
+}
+
 /**
  * @typedef {Object} Preset
  * @property {string} id
@@ -54,12 +60,12 @@ export const COMPLIANCE_TARGETS = {
  * @property {number} truePeakCeiling
  * @property {number} noiseFloorTarget
  * @property {number} noiseReductionCeiling - max dB reduction
- * @property {{ mode: 'conditional'|'always', ratio: number, threshold: number, attack: number, release: number }} compression
+ * @property {{ mode: 'conditional'|'always'|'none', ratio: number, threshold: number, attack: number, release: number }} compression
  * @property {string} eqProfile
  * @property {{ sensitivity: string, trigger: number, maxReduction: number }} deEsser
  * @property {'mono'|'preserve'} channelOutput
- * @property {string} defaultCompliance
- * @property {boolean} lockedCompliance
+ * @property {string} defaultOutputProfile
+ * @property {boolean} lockedOutputProfile
  */
 
 /** @type {Record<string, Preset>} */
@@ -88,8 +94,8 @@ export const PRESETS = {
       maxReduction: 6,
     },
     channelOutput: 'mono',
-    defaultCompliance: 'acx',
-    lockedCompliance: true,
+    defaultOutputProfile: 'acx',
+    lockedOutputProfile: true,
   },
 
   podcast_ready: {
@@ -116,8 +122,8 @@ export const PRESETS = {
       maxReduction: 6,
     },
     channelOutput: 'preserve',
-    defaultCompliance: 'standard',
-    lockedCompliance: false,
+    defaultOutputProfile: 'podcast',
+    lockedOutputProfile: false,
   },
 
   voice_ready: {
@@ -144,8 +150,8 @@ export const PRESETS = {
       maxReduction: 5,
     },
     channelOutput: 'mono',
-    defaultCompliance: 'acx',
-    lockedCompliance: false,
+    defaultOutputProfile: 'acx',
+    lockedOutputProfile: false,
   },
 
   general_clean: {
@@ -172,38 +178,65 @@ export const PRESETS = {
       maxReduction: 8,
     },
     channelOutput: 'preserve',
-    defaultCompliance: 'standard',
-    lockedCompliance: false,
+    defaultOutputProfile: 'podcast',
+    lockedOutputProfile: false,
+  },
+
+  noise_eraser: {
+    id: 'noise_eraser',
+    displayName: 'Noise Eraser',
+    description: 'Voice extraction for severely noisy recordings',
+    audience: 'Noisy recordings',
+    character: 'Aggressive separation, dry booth quality',
+    targetLoudness: { value: -16, unit: 'LUFS' },
+    truePeakCeiling: -1,
+    noiseFloorTarget: null,
+    noiseReductionCeiling: null, // Uses separation, not NR tiers
+    compression: {
+      mode: 'none',
+      ratio: 1,
+      threshold: 0,
+      attack: 0,
+      release: 0,
+    },
+    eqProfile: 'separation_recovery',
+    deEsser: {
+      sensitivity: 'none',
+      trigger: 0,
+      maxReduction: 0,
+    },
+    channelOutput: 'mono',
+    defaultOutputProfile: 'podcast',
+    lockedOutputProfile: false,
   },
 }
 
 /**
  * Expected shape of the processing report returned by the server.
  * @typedef {Object} ProcessingReport
- * @property {{ rms: number, peak: number, noiseFloor: number, lufs: number|null }} before
- * @property {{ rms: number, peak: number, noiseFloor: number, lufs: number|null }} after
- * @property {{ target: string, passed: boolean, failures: string[] }} compliance
- * @property {string[]} chain - Human-readable processing steps applied
+ * @property {{ rms_dbfs: number, lufs_integrated: number|null, true_peak_dbfs: number, noise_floor_dbfs: number }} measurements.before
+ * @property {{ rms_dbfs: number, lufs_integrated: number|null, true_peak_dbfs: number, noise_floor_dbfs: number }} measurements.after
+ * @property {{ certificate: 'pass'|'fail', checks: object }|undefined} acx_certification - Present only when output_profile = acx
+ * @property {{ flags: Array<{ id: string, severity: 'info'|'review', message: string }>, review_recommended: boolean }} quality_advisory
  * @property {string[]} warnings
- * @property {'low'|'medium'|'high'|null} humanReviewRisk - ACX only
  */
 
 // --- Helpers ---
 
-export function getDefaultCompliance(presetId) {
-  return PRESETS[presetId]?.defaultCompliance ?? 'standard'
+export function getDefaultOutputProfile(presetId) {
+  return PRESETS[presetId]?.defaultOutputProfile ?? 'podcast'
 }
 
-export function isComplianceLocked(presetId) {
-  return PRESETS[presetId]?.lockedCompliance === true
+export function isOutputProfileLocked(presetId) {
+  return PRESETS[presetId]?.lockedOutputProfile === true
 }
 
 export function getPresetList() {
   return Object.values(PRESETS)
 }
 
-export function getComplianceList() {
-  return Object.values(COMPLIANCE_TARGETS)
+export function getOutputProfileList() {
+  return Object.values(OUTPUT_PROFILES)
 }
 
 export function formatLoudness(preset) {
