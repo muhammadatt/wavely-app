@@ -87,13 +87,13 @@ The appropriate user-facing controls for spot NR have not been finalized. Candid
 {
   "file": "<uploaded audio>",
   "preset": "acx_audiobook",
-  "compliance": "acx"
+  "output_profile": "acx"
 }
 ```
 
 **Server response (preset chain):**
 - Processed audio blob (WAV or MP3 per tier/preset)
-- Processing report JSON (measurements, applied processing, compliance results)
+- Processing report JSON (measurements, ACX certification if applicable, quality advisory flags)
 - Waveform peak data JSON (~1000 points for canvas rendering)
 
 The audio the user hears in-browser after mastering is **identical** to the download. There is no separate preview quality.
@@ -106,11 +106,11 @@ Key data structures: `Segment`, `SilenceSegment`, `Timeline` (ordered segment ar
 
 ---
 
-## Preset + Compliance Architecture
+## Preset + Output Profile Architecture
 
-These are **independent** selections. A preset governs the character of processing (Stages 1–6). A compliance target governs output measurement gates (Stage 7) and sets the normalization target.
+These are **independent** selections. A preset governs the character of processing (Stages 1–4a). An output profile governs the loudness target, peak ceiling, and measurement method (Stages 5–6), and determines whether ACX certification runs (Stage 7).
 
-### Presets (four at launch)
+### Presets (five at launch)
 
 | Preset ID | Display Name | Audience | Channel Output |
 |---|---|---|---|
@@ -118,33 +118,39 @@ These are **independent** selections. A preset governs the character of processi
 | `podcast_ready` | Podcast Ready | Podcast hosts | Preserve original |
 | `voice_ready` | Voice Ready | Voice actors | Mono |
 | `general_clean` | General Clean | Everyone else (default) | Preserve original |
+| `noise_eraser` | Noise Eraser | Severely noisy recordings where standard processing has failed | Mono (default) |
 
 **Default preset:** `general_clean` — or `acx_audiobook` if the user has previously selected it.
 
-### Compliance Targets (three)
+### Output Profiles (three)
 
-| Compliance ID | RMS / Loudness Target | True Peak | Noise Floor |
-|---|---|---|---|
-| `acx` | -23 to -18 dBFS RMS | -3 dBFS | -60 dBFS (enforced) |
-| `standard` | -18 to -14 LUFS | -1 dBFS | Not enforced |
-| `broadcast` | -24 to -22 LUFS | -1 dBFS | Not enforced |
+Output profiles are loudness targets, not compliance standards. They govern what the processing chain tries to achieve — they do not imply certification.
+
+| Profile ID | Display Name | Normalization Target | Peak Ceiling | Measurement |
+|---|---|---|---|---|
+| `acx` | ACX Audiobook | -20 dBFS RMS | -3 dBFS | Unweighted RMS, voiced frames only |
+| `podcast` | Podcast / Streaming | -16 LUFS integrated | -1 dBFS | K-weighted LUFS (EBU R128) |
+| `broadcast` | Broadcast | -23 LUFS integrated | -1 dBFS | K-weighted LUFS (EBU R128) |
 
 ### Default Pairings
 
-| Preset | Default Compliance |
+| Preset | Default Output Profile |
 |---|---|
 | `acx_audiobook` | `acx` |
-| `podcast_ready` | `standard` |
+| `podcast_ready` | `podcast` |
 | `voice_ready` | `acx` |
-| `general_clean` | `standard` |
+| `general_clean` | `podcast` |
+| `noise_eraser` | `podcast` |
 
-**When compliance overrides preset:** compliance target wins on normalization target. Example: `podcast_ready` + `acx` compliance → file processed with podcast character at ACX loudness levels.
+**When output profile overrides preset:** the output profile wins on normalization target and peak ceiling. Example: `podcast_ready` + `acx` output profile → file processed with podcast character at ACX loudness levels.
 
-**UI rule:** For `acx_audiobook`, hide/lock the compliance selector to `acx`. There is no meaningful reason to process an audiobook without ACX compliance, and surfacing the choice adds confusion.
+**UI rule:** For `acx_audiobook`, hide/lock the output profile selector to `acx`. There is no meaningful reason to process an audiobook without targeting ACX levels, and surfacing the choice adds confusion.
+
+**UI rule:** For `noise_eraser` with `acx` output profile, surface a warning: "ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass."
 
 ---
 
-## Processing Chain (All Presets)
+## Processing Chain (Standard Presets)
 
 ```
 Stage 1:  High-Pass Filter (80 Hz Butterworth, 4th order; + conditional 60 Hz notch)
@@ -152,29 +158,59 @@ Stage 2:  Adaptive Noise Reduction (DeepFilterNet3)
 Stage 3:  Enhancement EQ (Meyda.js spectral analysis → FFmpeg parametric EQ)
 Stage 4:  De-esser (conditional — only if P95 sibilant energy exceeds threshold)
 Stage 4a: Compression (conditional for ACX; always-on for other presets)
-Stage 5:  Loudness Normalization (libebur128 + FFmpeg loudnorm)
-Stage 6:  True Peak Limiting (FFmpeg loudnorm two-pass, 192 kHz upsample)
+Stage 5:  Loudness Normalization (libebur128 + FFmpeg loudnorm) ← output profile governs target
+Stage 6:  True Peak Limiting (FFmpeg loudnorm two-pass, 192 kHz upsample) ← output profile governs ceiling
 Stage 7:  Measurement + Processing Report
 ```
 
 **Order is critical.** Operations out of sequence produce non-compliant output. Never reorder stages.
 
+## Processing Chain (Noise Eraser Preset)
+
+Noise Eraser is a **parallel path** — it does not use Stages 1–4a. It replaces them with a source separation pipeline, then rejoins at Stage 5.
+
+```
+Pre-processing (same as standard)
+Stage NE-1: RNNoise pre-pass (unconditional)
+Stage NE-2: Tonal noise pre-treatment (conditional notch filtering)
+Stage NE-3: Demucs htdemucs_ft source separation (vocals stem only)
+Stage NE-4: Post-separation validation and artifact assessment
+Stage NE-5: Residual DF3 cleanup (conditional — only if noise floor > -55 dBFS)
+Stage NE-6: AudioSR bandwidth extension
+Stage NE-7: Post-separation enhancement EQ (separation-specific reference profile)
+Stage 5:    Loudness Normalization (standard)
+Stage 6:    True Peak Limiting (standard)
+Stage 7:    Measurement + Processing Report (with separation pipeline additions)
+```
+
+**No compression or de-esser in the Noise Eraser path.** Separation output already has a compressed character; stacking compression risks over-processing. De-esser calibration is not validated for separated audio.
+
+See `docs/instant_polish_processing_spec_noise_eraser.md` for full stage-by-stage specification.
+
 ### Key Stage Notes
 
-**Stage 2 — Noise Reduction:**
-- DeepFilterNet3 (neural network). Python `deepfilternet` 
+**Stage 2 — Noise Reduction (standard presets only):**
+- DeepFilterNet3 (neural network). Python `deepfilternet` / `libdf`.
 - Adaptive tiers 1–5 based on measured noise floor. `acx_audiobook` and `voice_ready` cap at Tier 4 (12 dB max). `podcast_ready` caps at Tier 3.
 - **Never force a pass.** If noise floor can't reach -60 dBFS without artifact risk, report failure. Do not over-process.
 - Conservative defaults for ACX — overprocessing artifacts cause human review rejection.
+- Noise floor enforcement only applies when `output_profile = acx`. For other profiles, reduction is applied for quality only.
 
 **Stage 5 — Normalization:**
-- ACX compliance → unweighted RMS measurement (ACX measures RMS, not LUFS).
-- Standard/broadcast compliance → K-weighted integrated LUFS (EBU R128).
+- `acx` output profile → unweighted RMS measurement (ACX measures RMS, not LUFS).
+- `podcast` / `broadcast` output profiles → K-weighted integrated LUFS (EBU R128).
 - Exclude silence frames from RMS measurement using dynamic threshold: `noise_floor + 6 dB`.
+- For Noise Eraser: use post-NE-5 noise floor for silence exclusion threshold, not the original pre-processing noise floor.
 
-**Stage 7 — Report:**
-- Returns compliance pass/fail per measurement, human review risk level (ACX only: Low/Medium/High), overprocessing detection flags, and processing applied summary.
-- For non-ACX compliance targets, omit noise floor row from UI display — no pass/fail threshold = confusing number.
+**Stage 7 — Report (two independent systems):**
+
+*System 1 — ACX Technical Certification:* Runs only when `output_profile = acx`. Six-point deterministic pass/fail: RMS, true peak, noise floor, sample rate, bit depth, channel format. Issues a binary certificate. The `acx_certification` key is **absent** (not null) from the JSON when `output_profile` is not `acx`.
+
+*System 2 — Quality Advisory Flags:* Runs for all presets and all output profiles. Probabilistic observations the user should review before submitting. Flags have severity `info` or `review`. No aggregate risk score. Each flag includes a "Mark as reviewed" checkbox in the UI.
+
+These two systems are independent. A file can be ACX certified and still have advisory flags. Advisory flags are never gates — the user can download at any point.
+
+See `docs/instant_polish_compliance_model_v2.md` for full flag definitions, JSON structure, and UI model.
 
 ### Preset Character Distinctions (do not converge)
 
@@ -182,6 +218,19 @@ Stage 7:  Measurement + Processing Report
 - **Podcast Ready:** Punchy, intimate, compressed. Always-on 3:1 compression. More aggressive EQ mud cut. LUFS target (not RMS). Stereo preserved for dual-host.
 - **Voice Ready:** Broadcast-neutral. Always-on 2.5:1 compression. Versatile — sits under music beds. Mono output.
 - **General Clean:** Pragmatic. More aggressive noise reduction acceptable (Tier 4, relaxed artifact warnings). 3:1 compression always-on.
+- **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Output may have a "dry booth" quality. Not recommended for ACX submission without careful review.
+
+---
+
+## ACX Certification and Quality Advisory — Key Rules
+
+**ACX certification is the only formal certification standard.** Podcast and broadcast loudness targets are norms, not standards. Streaming platforms normalize on playback — there is no external body to certify against. Do not present pass/fail framing for `podcast` or `broadcast` output profiles.
+
+**The tool certifies technical compliance. It does not certify ACX acceptance.** ACX also applies a human quality review. The quality advisory flag system addresses this separately.
+
+**Advisory flags are not failures.** A technically certified file with advisory flags is valid and submittable. Flags inform the user's review decision — they do not gate the download or export.
+
+Full specification: `docs/instant_polish_compliance_model_v2.md`.
 
 ---
 
@@ -191,8 +240,8 @@ These apply only to the `acx_audiobook` preset:
 
 - **Room tone padding:** Auto-detect and pad head (0.75 s) and tail (2 s) using actual room tone from the file's quietest silence segment. Not digital silence.
 - **Batch processing (Creator tier gate):** Multi-phase — batch analysis → per-file processing → cross-chapter consistency pass. Consistency pass aligns RMS (< 1 dB deviation from batch median) and spectral centroid (< 15% deviation) across chapters. This is the **primary value prop for narrators**. A complete audiobook processed as a cohesive unit.
-- **ACX compliance report:** Per-file RMS, true peak, noise floor vs. ACX targets + human review risk level.
-- **Plosive and breath detection:** Flags for manual editing before ACX submission.
+- **ACX compliance report:** Per-file six-point technical certification + quality advisory flags.
+- **Plosive and breath detection:** Surfaces as quality advisory flags for manual review before ACX submission.
 
 **The cross-chapter consistency problem is the highest-value unsolved pain in ACX narration.** Single-file tools don't address it. Instant Polish batch mode does.
 
@@ -231,6 +280,7 @@ Narrators primarily upload WAV (16-bit, 44.1 kHz, mono). MP3 input supported for
 | Podcast Ready | MP3 128 kbps | MP3 320 kbps CBR | WAV 16-bit 44.1 kHz |
 | Voice Ready | MP3 128 kbps | WAV only (clients expect WAV) | WAV 16-bit 44.1 kHz mono |
 | General Clean | MP3 128 kbps | MP3 256 kbps CBR | WAV 16-bit 44.1 kHz |
+| Noise Eraser | MP3 128 kbps | MP3 256 kbps CBR | WAV 16-bit 44.1 kHz mono |
 
 ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 
@@ -244,6 +294,9 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 |---|---|
 | Decode / encode / resample | FFmpeg |
 | Noise reduction (preset chain + spot NR) | DeepFilterNet3 (`deepfilternet` / `libdf`) |
+| Pre-separation noise reduction (Noise Eraser) | RNNoise (`pyrnnoise`) |
+| Source separation (Noise Eraser) | Demucs `htdemucs_ft` (`demucs` Python package) |
+| Bandwidth extension (Noise Eraser) | AudioSR (`audiosr` Python package) |
 | Spectral analysis | Meyda.js |
 | Enhancement EQ | FFmpeg `equalizer` filter (parametric biquad IIR) |
 | Compression (preset chain) | Custom DSP |
@@ -269,12 +322,15 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 
 ## Processing Sprint Sequence
 
-1. **Sprint 1** — Core pipeline (ACX Audiobook): FFmpeg decode + HPF + mono → DeepFilterNet3 → normalization + limiting → libebur128 → ACX compliance report → WAV/MP3 output
-2. **Sprint 2** — Enhancement quality (ACX): Meyda.js EQ → silence exclusion → room tone padding → extended report (human review risk, breath/plosive detection)
+1. **Sprint 1** — Core pipeline (ACX Audiobook): FFmpeg decode + HPF + mono → DeepFilterNet3 → normalization + limiting → libebur128 → ACX certification → WAV/MP3 output
+2. **Sprint 2** — Enhancement quality (ACX): Meyda.js EQ → silence exclusion → room tone padding → quality advisory flags (overprocessing, breath, plosive detection)
 3. **Sprint 3** — De-esser + compression (ACX): F0 estimation → sibilance analysis → conditional de-esser → conditional compression
-4. **Sprint 4** — Preset architecture: separate preset/compliance configs → Podcast Ready, Voice Ready, General Clean → LUFS normalization path → UI compliance selector
+4. **Sprint 4** — Preset and output profile architecture: separate preset/output profile configs → Podcast Ready, Voice Ready, General Clean → LUFS normalization path → output profile selector in UI → output measurements reporting for non-ACX profiles
 5. **Sprint 5** — Batch processing (ACX): batch analysis → per-file processing → consistency pass → batch report
 6. **Sprint 6** — Commercial library evaluation: Krisp vs. DeepFilterNet3
+7. **Sprint NE-1** — Noise Eraser core path: RNNoise pre-pass → Demucs separation → residual DF3 cleanup → Stage 5–7 → validate on high-noise test corpus
+8. **Sprint NE-2** — Noise Eraser full pipeline: tonal pre-treatment → sibilance/breath assessment → AudioSR bandwidth extension → post-separation EQ → separation quality rating in report
+9. **Sprint NE-3** — Noise Eraser benchmarking: test corpus across noise floor severity levels → calibrate NE-4 thresholds → validate AudioSR guidance scale → Demucs vs. Spleeter comparison
 
 ---
 
@@ -292,7 +348,7 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 
 ## SEO Priority
 
-**Highest-priority SEO asset:** Free Audio Loudness Checker tool page (upload → report: RMS, peak, noise floor, ACX/podcast pass/fail). Drives qualified traffic, earns organic links, funnels directly into the core product.
+**Highest-priority SEO asset:** Free Audio Loudness Checker tool page (upload → report: RMS, peak, noise floor, ACX pass/fail). Drives qualified traffic, earns organic links, funnels directly into the core product.
 
 **Tier 1 keywords (immediate fix intent):** "remove background noise from audio online," "normalize audio online free," "clean up audio online."
 
@@ -314,10 +370,12 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 
 ## Critical Implementation Rules
 
-- **Never force a pass.** If a file cannot meet compliance targets without artifacts that would fail ACX human review, report the failure. Do not over-process.
+- **Never force a pass.** If a file cannot meet output profile targets without artifacts that would fail ACX human review, report the failure. Do not over-process.
 - **Transparency first.** Same voice, cleaner and at the right level. Never a different voice.
 - **Preset character, not preset uniformity.** ACX files should sound like ACX. Podcast files should sound like podcasts. Do not converge.
-- **ACX human review is the real target**, not just the automated measurements. Three measurements passing is necessary but not sufficient.
+- **ACX human review is the real target**, not just the automated measurements. Six technical checks passing is necessary but not sufficient.
+- **`acx_certification` is absent, not null,** in the JSON when `output_profile` is not `acx`. Do not include the key with a null value.
+- **Advisory flags are never gates.** Users can download at any point regardless of flag state.
 - **`outputStart` recalculation:** After any delete/trim/paste, recalculate from scratch for every segment. Do not attempt partial updates.
 - **AudioContext on user gesture.** Never on page load.
 - **Float32Array throughout.** Web Audio API uses [-1.0, 1.0] range.
@@ -327,6 +385,12 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 
 ## Companion Documents
 
-- `instant_polish_processing_spec_v3.md` — Full processing chain technical specification (authoritative source for all processing parameters)
+| Document | Purpose |
+|---|---|
+| `docs/instant_polish_processing_spec_v3.md` | Full processing chain technical specification. Authoritative source for all processing parameters, stage definitions, preset profiles, and output profile behavior. |
+| `docs/instant_polish_compliance_model_v2.md` | ACX certification system, quality advisory flag definitions, report JSON structure, and UI model. Authoritative source for all compliance and reporting behavior. |
+| `docs/instant_polish_processing_spec_noise_eraser.md` | Noise Eraser preset specification. Parallel processing path (NE-1 through NE-7). Read alongside v3 spec, not as a standalone. |
+| `docs/acx_production_workflow.md` | ACX narrator workflow reference. Context for why features exist and where Instant Polish fits in the production chain. |
+| `docs/instant_polish_gtm.md` | Go-to-market strategy. Positioning, pricing, launch plan, SEO content map. |
 
-When in doubt about processing parameters, EQ values, noise reduction tiers, or compliance targets: **the processing spec v3 is authoritative.**
+**When in doubt about processing parameters, EQ values, noise reduction tiers, or output profile behavior: the processing spec v3 is authoritative. When in doubt about compliance reporting or advisory flags: the compliance model v2 is authoritative.**

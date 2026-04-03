@@ -2,3 +2,16 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# Local environment overrides — never committed
+server/.env
+
+# Platform-specific binaries (downloaded locally, never committed)
+server/bin/
+
+# Scratch test audio files — never committed
+*.wav
+*.mp3
+*.flac
+*.aiff
+*.m4a
