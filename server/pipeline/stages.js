@@ -8,8 +8,8 @@
  * Stage signature: async (ctx) => void
  *
  * ctx shape — see createContext() in index.js:
- *   ctx.inputPath, ctx.originalName, ctx.presetId, ctx.complianceId
- *   ctx.preset, ctx.compliance
+ *   ctx.inputPath, ctx.originalName, ctx.presetId, ctx.outputProfileId
+ *   ctx.preset, ctx.outputProfile
  *   ctx.tmp(ext)        — allocates a temp file path and registers it for cleanup
  *   ctx.tmpFiles        — array of all allocated temp paths
  *   ctx.currentPath     — path to the audio file being processed (updated by stages)
@@ -268,9 +268,12 @@ export async function measureAfter(ctx) {
 
 export async function acxCertification(ctx) {
   if (ctx.outputProfileId !== 'acx') return
+  // sampleRate and bitDepth reflect the final encoded output format for ACX,
+  // not the intermediate 32-bit float WAV the pipeline uses during processing.
+  // The encode stage always produces 16-bit PCM WAV at 44.1 kHz for ACX output.
   const fileMetadata = {
-    sampleRate: 44100,           // always — pipeline decodes to 44.1 kHz
-    bitDepth:   '16-bit PCM',    // always — certification runs on intermediate WAV
+    sampleRate: 44100,
+    bitDepth:   '16-bit PCM',
     channels:   ctx.preset.channelOutput === 'mono' ? 1 : (ctx.inputChannels ?? 1),
   }
   ctx.results.acxCertification = checkAcxCertification(ctx.results.afterMeasurements, fileMetadata)

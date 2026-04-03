@@ -10,15 +10,6 @@
  * Stage results accumulate in ctx.results. buildReport() reads only what is
  * present, so stages that are absent from a pipeline produce no orphaned keys
  * in the report JSON.
- * Dispatches to the pipeline declared for the incoming presetId (see
- * pipelines.js) and runs each stage function in order against a shared
- * pipeline context (see createContext). Adding a new preset or changing its
- * stage sequence requires no changes here — only in pipelines.js and
- * stages.js.
- *
- * Stage results accumulate in ctx.results. buildReport() reads only what is
- * present, so stages that are absent from a pipeline produce no orphaned keys
- * in the report JSON.
  */
 
 import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
@@ -60,7 +51,6 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
     return { outputPath: ctx.currentPath, report, peaks: ctx.peaks }
   } catch (err) {
     await Promise.all(ctx.tmpFiles.map(removeTmp))
-    await Promise.all(ctx.tmpFiles.map(removeTmp))
     throw err
   }
 }
@@ -98,15 +88,28 @@ function createContext({ inputPath, originalName, presetId, outputProfileId, pre
     results: {},
   }
 }
+
 // ── Report builder ────────────────────────────────────────────────────────────
 
 /**
  * Build the response report from accumulated ctx.results.
  * Only renders keys for stages that actually ran — absent stages produce no
  * orphaned null keys in the JSON.
+ *
+ * measureBefore and measureAfter are required by every pipeline. If either is
+ * missing the pipeline is misconfigured and we throw a clear error rather than
+ * silently producing a broken report.
  */
 function buildReport(ctx) {
   const { probe, presetId, outputProfileId, originalName, results } = ctx
+
+  if (!results.beforeMeasurements) {
+    throw new Error('[pipeline] buildReport: measureBefore stage did not run — ctx.results.beforeMeasurements is missing')
+  }
+  if (!results.afterMeasurements) {
+    throw new Error('[pipeline] buildReport: measureAfter stage did not run — ctx.results.afterMeasurements is missing')
+  }
+
   const audioStream = probe.streams.find(s => s.codec_type === 'audio')
   const duration    = parseFloat(probe.format?.duration || audioStream?.duration || 0)
 
@@ -124,20 +127,10 @@ function buildReport(ctx) {
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
       ...(results.compression    && { compression:        formatCompressionResult(results.compression) }),
-      normalization_gain_db:     round2(
-        results.afterMeasurements.rmsDbfs - results.beforeMeasurements.rmsDbfs
-      ),
-      stereo_to_mono:  results.stereoToMono ?? false,
-      resampled_from:  ctx.inputSampleRate !== 44100 ? ctx.inputSampleRate : null,
-      hpf_60hz_notch:  results.notch60Hz   ?? false,
-      ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
-      ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
-      ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
-      ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
-      ...(results.compression    && { compression:        formatCompressionResult(results.compression) }),
-      normalization_gain_db:     round2(
-        results.afterMeasurements.rmsDbfs - results.beforeMeasurements.rmsDbfs
-      ),
+      normalization_gain_db:
+        results.afterMeasurements?.rmsDbfs == null || results.beforeMeasurements?.rmsDbfs == null
+          ? null
+          : round2(results.afterMeasurements.rmsDbfs - results.beforeMeasurements.rmsDbfs),
       limiting_max_reduction_db: null,
     },
     before:           formatMeasurements(results.beforeMeasurements),
@@ -241,6 +234,12 @@ function buildWarnings(ctx) {
       warnings.push(
         `Noise floor ${results.afterMeasurements.noiseFloorDbfs} dBFS exceeds ` +
         `ceiling of ${outputProfile.noiseFloorCeiling} dBFS`
+      )
+    }
+    if (!checks.true_peak?.pass) {
+      warnings.push(
+        `True peak ${results.afterMeasurements.truePeakDbfs} dBFS exceeds ` +
+        `ceiling of ${outputProfile.truePeakCeiling} dBFS`
       )
     }
   }
