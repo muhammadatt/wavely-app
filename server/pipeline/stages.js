@@ -33,12 +33,12 @@ import {
 } from '../lib/ffmpeg.js'
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { applyNoiseReduction } from './noiseReduce.js'
-import { measureAudio, measureVoicedRms, checkCompliance } from './measure.js'
+import { measureAudio, measureVoicedRms, checkAcxCertification } from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
 import { analyzeAudioFrames } from './silenceAnalysis.js'
 import { analyzeSpectrum } from './enhancementEQ.js'
 import { applyRoomTonePadding } from './roomTone.js'
-import { assessRisks } from './riskAssessment.js'
+import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 
@@ -207,12 +207,12 @@ export async function compress(ctx) {
 // ── Stage: Normalize ──────────────────────────────────────────────────────────
 
 export async function normalize(ctx) {
-  const { compliance } = ctx
-  const normPath       = ctx.tmp('.wav')
-  let normExtras       = {}
+  const { outputProfile } = ctx
+  const normPath          = ctx.tmp('.wav')
+  let normExtras          = {}
 
-  if (compliance.measurementMethod === 'RMS') {
-    const targetRms             = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2
+  if (outputProfile.measurementMethod === 'RMS') {
+    const targetRms             = (outputProfile.loudnessRange[0] + outputProfile.loudnessRange[1]) / 2
     const prNormSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
     const voicedRms             = await measureVoicedRms(ctx.currentPath, prNormSilenceAnalysis)
     const gainDb                = targetRms - voicedRms
@@ -229,15 +229,15 @@ export async function normalize(ctx) {
       gainApplied: `${round2(gainDb)}dB`,
     }
   } else {
-    const targetLufs = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2
+    const targetLufs = (outputProfile.loudnessRange[0] + outputProfile.loudnessRange[1]) / 2
     await applyLoudnormLUFS(ctx.currentPath, normPath, {
       targetLUFS:  targetLufs,
-      peakCeiling: compliance.truePeakCeiling,
+      peakCeiling: outputProfile.truePeakCeiling,
     })
     normExtras = {
       method: 'LUFS',
       target: `${targetLufs}LUFS`,
-      tp:     `${compliance.truePeakCeiling}dBTP`,
+      tp:     `${outputProfile.truePeakCeiling}dBTP`,
     }
   }
 
@@ -250,10 +250,10 @@ export async function normalize(ctx) {
 export async function truePeakLimit(ctx) {
   const limitedPath = ctx.tmp('.wav')
   await applyTruePeakLimiter(ctx.currentPath, limitedPath, {
-    peakCeiling: ctx.compliance.truePeakCeiling,
+    peakCeiling: ctx.outputProfile.truePeakCeiling,
   })
   ctx.currentPath = limitedPath
-  await logLevel('after limiting', ctx.currentPath, { tp: `${ctx.compliance.truePeakCeiling}dBTP` })
+  await logLevel('after limiting', ctx.currentPath, { tp: `${ctx.outputProfile.truePeakCeiling}dBTP` })
 }
 
 // ── Stage: Measure after ──────────────────────────────────────────────────────
@@ -262,21 +262,35 @@ export async function measureAfter(ctx) {
   ctx.results.afterMeasurements = await measureAudio(ctx.currentPath)
 }
 
-// ── Stage: Compliance check ───────────────────────────────────────────────────
+// ── Stage: ACX Certification ──────────────────────────────────────────────────
+// Only runs for acx output profile. For other profiles the key is absent from
+// the report (not null) — per compliance model v2 spec.
 
-export async function complianceCheck(ctx) {
-  ctx.results.complianceResults = checkCompliance(ctx.results.afterMeasurements, ctx.complianceId)
+export async function acxCertification(ctx) {
+  if (ctx.outputProfileId !== 'acx') return
+  const fileMetadata = {
+    sampleRate: 44100,           // always — pipeline decodes to 44.1 kHz
+    bitDepth:   '16-bit PCM',    // always — certification runs on intermediate WAV
+    channels:   ctx.preset.channelOutput === 'mono' ? 1 : (ctx.inputChannels ?? 1),
+  }
+  ctx.results.acxCertification = checkAcxCertification(ctx.results.afterMeasurements, fileMetadata)
 }
 
-// ── Stage: Risk assessment ────────────────────────────────────────────────────
+// ── Stage: Quality advisory ───────────────────────────────────────────────────
 
-export async function riskAssess(ctx) {
+export async function qualityAdvisory(ctx) {
   const postProcessSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
-  ctx.results.riskResult = await assessRisks(
+  const pipelineContext = {
+    nrTier:         ctx.results.noiseReduction?.tier    ?? null,
+    noiseFloorDbfs: ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
+  }
+  ctx.results.qualityAdvisory = await generateQualityAdvisory(
     ctx.currentPath,
     ctx.presetId,
+    ctx.outputProfileId,
     postProcessSilenceAnalysis,
     postProcessSilenceAnalysis.voicedRmsDbfs,
+    pipelineContext,
   )
 }
 

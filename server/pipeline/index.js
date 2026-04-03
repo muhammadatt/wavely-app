@@ -12,7 +12,7 @@
  * in the report JSON.
  */
 
-import { PRESETS, COMPLIANCE_TARGETS } from '../presets.js'
+import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { PIPELINES } from './pipelines.js'
 
@@ -24,20 +24,20 @@ import { PIPELINES } from './pipelines.js'
  * @param {string} inputPath     - Path to the uploaded audio file
  * @param {string} originalName  - Original filename
  * @param {string} presetId      - Preset ID (e.g. 'acx_audiobook')
- * @param {string} complianceId  - Compliance target ID (e.g. 'acx')
+ * @param {string} outputProfileId - Output profile ID (e.g. 'acx')
  * @returns {{ outputPath: string, report: object, peaks: object[] }}
  */
-export async function processAudio(inputPath, originalName, presetId, complianceId) {
+export async function processAudio(inputPath, originalName, presetId, outputProfileId) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
-  const compliance = COMPLIANCE_TARGETS[complianceId]
-  if (!compliance) throw new Error(`Unknown compliance target: ${complianceId}`)
+  const outputProfile = OUTPUT_PROFILES[outputProfileId]
+  if (!outputProfile) throw new Error(`Unknown output profile: ${outputProfileId}`)
 
   const pipeline = PIPELINES[presetId]
   if (!pipeline) throw new Error(`No pipeline defined for preset: ${presetId}`)
 
-  const ctx = createContext({ inputPath, originalName, presetId, complianceId, preset, compliance })
+  const ctx = createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile })
 
   try {
     for (const stage of pipeline) {
@@ -57,16 +57,16 @@ export async function processAudio(inputPath, originalName, presetId, compliance
 
 // ── Context ───────────────────────────────────────────────────────────────────
 
-function createContext({ inputPath, originalName, presetId, complianceId, preset, compliance }) {
+function createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile }) {
   const tmpFiles = []
   return {
     // Static — set at creation, never changed by stages
     inputPath,
     originalName,
     presetId,
-    complianceId,
+    outputProfileId,
     preset,
-    compliance,
+    outputProfile,
     // Allocates a temp path and registers it for cleanup
     tmp(ext) {
       const p = tempPath(ext)
@@ -96,14 +96,14 @@ function createContext({ inputPath, originalName, presetId, complianceId, preset
  * orphaned null keys in the JSON.
  */
 function buildReport(ctx) {
-  const { probe, presetId, complianceId, originalName, results } = ctx
+  const { probe, presetId, outputProfileId, originalName, results } = ctx
   const audioStream = probe.streams.find(s => s.codec_type === 'audio')
   const duration    = parseFloat(probe.format?.duration || audioStream?.duration || 0)
 
   return {
     file:             originalName,
     preset:           presetId,
-    compliance:       complianceId,
+    output_profile:   outputProfileId,
     duration_seconds: Math.round(duration),
     processing_applied: {
       stereo_to_mono:  results.stereoToMono ?? false,
@@ -119,12 +119,12 @@ function buildReport(ctx) {
       ),
       limiting_max_reduction_db: null,
     },
-    before:             formatMeasurements(results.beforeMeasurements),
-    after:              formatMeasurements(results.afterMeasurements),
-    compliance_results: results.complianceResults,
-    human_review_risk:  results.riskResult?.humanReviewRisk ?? null,
-    overprocessing:     results.riskResult?.overprocessing   ?? null,
-    warnings:           buildWarnings(ctx),
+    before:           formatMeasurements(results.beforeMeasurements),
+    after:            formatMeasurements(results.afterMeasurements),
+    // acx_certification is absent (not null) when output_profile !== 'acx'
+    ...(results.acxCertification && { acx_certification: results.acxCertification }),
+    quality_advisory: results.qualityAdvisory ?? null,
+    warnings:         buildWarnings(ctx),
   }
 }
 
@@ -200,33 +200,28 @@ function bandReport(band) {
 // ── Warnings ──────────────────────────────────────────────────────────────────
 
 function buildWarnings(ctx) {
-  const { results, compliance } = ctx
+  const { results, outputProfile } = ctx
   const warnings = []
 
   if (results.noiseReduction && !results.noiseReduction.applied) {
     warnings.push('Noise reduction not available — noise floor unchanged')
   }
 
-  if (results.complianceResults?.overall_pass === false) {
-    if (!results.complianceResults.loudness_pass) {
-      const metric = compliance.measurementMethod === 'RMS'
-        ? `${results.afterMeasurements.rmsDbfs} dBFS RMS`
-        : `${results.afterMeasurements.lufsIntegrated} LUFS`
+  // ACX certification failures surface as warnings
+  if (results.acxCertification?.certificate === 'fail') {
+    const checks = results.acxCertification.checks
+    if (!checks.rms?.pass) {
       warnings.push(
-        `Loudness ${metric} outside target range ` +
-        `[${compliance.loudnessRange[0]}, ${compliance.loudnessRange[1]}]`
+        `Loudness ${results.afterMeasurements.rmsDbfs} dBFS RMS outside target range ` +
+        `[${outputProfile.loudnessRange[0]}, ${outputProfile.loudnessRange[1]}]`
       )
     }
-    if (!results.complianceResults.noise_floor_pass) {
+    if (!checks.noise_floor?.pass) {
       warnings.push(
         `Noise floor ${results.afterMeasurements.noiseFloorDbfs} dBFS exceeds ` +
-        `ceiling of ${compliance.noiseFloorCeiling} dBFS`
+        `ceiling of ${outputProfile.noiseFloorCeiling} dBFS`
       )
     }
-  }
-
-  for (const w of results.riskResult?.warnings ?? []) {
-    if (!warnings.includes(w)) warnings.push(w)
   }
 
   return warnings
