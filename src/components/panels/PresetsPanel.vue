@@ -38,6 +38,10 @@ const isOverridden = computed(() =>
   state.selectedOutputProfile !== currentPreset.value?.defaultOutputProfile
 )
 
+// Presets that are defined but not yet implemented server-side
+const COMING_SOON_PRESETS = new Set(['noise_eraser'])
+const isSelectedPresetComingSoon = computed(() => COMING_SOON_PRESETS.has(state.selectedPreset))
+
 // Warning for noise_eraser + acx combination
 const showNoiseEraserAcxWarning = computed(() =>
   state.selectedPreset === 'noise_eraser' && state.selectedOutputProfile === 'acx'
@@ -65,12 +69,6 @@ function channelLabel(preset) {
 
 async function handleProcess() {
   if (!state.currentFile || state.isProcessing) return
-
-  // Noise Eraser pipeline is not yet implemented
-  if (state.selectedPreset === 'noise_eraser') {
-    showToast('Noise Eraser is coming soon!')
-    return
-  }
 
   startProcessing('Making your audio shine')
 
@@ -153,7 +151,13 @@ async function handleProcess() {
                  v-html="presetIcons[preset.id]"></svg>
           </div>
           <div class="flex-1 min-w-0">
-            <div class="font-heading text-[13px] font-extrabold text-ink">{{ preset.displayName }}</div>
+            <div class="flex items-center gap-1.5">
+              <div class="font-heading text-[13px] font-extrabold text-ink">{{ preset.displayName }}</div>
+              <span v-if="COMING_SOON_PRESETS.has(preset.id)"
+                    class="inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-[var(--radius-pill)] bg-ink-lt text-white leading-none">
+                Coming soon
+              </span>
+            </div>
             <div class="text-[11px] text-ink-lt font-semibold mt-[1px] truncate">{{ preset.description }}</div>
             <span class="inline-block text-[10px] font-bold text-ink-mid bg-bg rounded-[var(--radius-pill)] px-2 py-0.5 mt-1.5">
               {{ preset.audience }}
@@ -229,7 +233,7 @@ async function handleProcess() {
       <!-- Process button -->
       <button
         class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
-        :disabled="state.isProcessing || !state.currentFile"
+        :disabled="state.isProcessing || !state.currentFile || isSelectedPresetComingSoon"
         @click="handleProcess"
       >
         <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/></svg>

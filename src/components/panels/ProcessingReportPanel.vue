@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive } from 'vue'
-import { OUTPUT_PROFILES } from '../../audio/presets.js'
+import { OUTPUT_PROFILES, resolveOutputProfileId } from '../../audio/presets.js'
 
 const props = defineProps({
   report: { type: Object, required: true },
@@ -31,7 +31,15 @@ const after = computed(() => {
   }
 })
 
-const outputProfileId = computed(() => props.report.output_profile || props.report.compliance)
+const outputProfileId = computed(() => {
+  // v2 report shape: output_profile is a plain string ID
+  if (props.report.output_profile) return resolveOutputProfileId(props.report.output_profile)
+  // legacy: compliance was sometimes a plain string ID
+  if (typeof props.report.compliance === 'string') return resolveOutputProfileId(props.report.compliance)
+  // legacy: compliance was an object with a target field
+  const target = props.report.compliance_results?.target ?? props.report.compliance?.target ?? null
+  return target ? resolveOutputProfileId(target) : null
+})
 const outputProfile = computed(() => OUTPUT_PROFILES[outputProfileId.value])
 const isAcx = computed(() => outputProfileId.value === 'acx')
 

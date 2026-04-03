@@ -7,8 +7,7 @@
  *
  * Flags generated:
  *   All presets/profiles:
- *     - overprocessing (spectral flatness decrease)
- *     - over_compression (crest factor < 8 dB)
+ *     - over_compression (crest factor < 8 dB — audio sounds over-compressed)
  *
  *   ACX Audiobook preset only:
  *     - loud_breaths (high-energy events in silence regions)

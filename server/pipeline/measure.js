@@ -142,8 +142,11 @@ export function checkAcxCertification(measurements, fileMetadata) {
   const truePeakPass = measurements.truePeakDbfs <= target.truePeakCeiling
   const noiseFloorPass = measurements.noiseFloorDbfs <= target.noiseFloorCeiling
   const sampleRatePass = fileMetadata.sampleRate === 44100
-  const bitDepthPass = fileMetadata.bitDepth === '16-bit PCM' ||
-                       fileMetadata.bitDepth === '192 kbps CBR'
+  // Only WAV (16-bit PCM) output is supported for ACX certification today.
+  // MP3 192 kbps CBR is also ACX-valid, but that path is not yet wired up:
+  // certification runs on the intermediate WAV before tier-based encoding.
+  // When tier-based encoding is added, revisit and probe the actual output file.
+  const bitDepthPass = fileMetadata.bitDepth === '16-bit PCM'
   const channelPass = fileMetadata.channels === 1
 
   const allPass = rmsPass && truePeakPass && noiseFloorPass &&
