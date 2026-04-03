@@ -1,5 +1,5 @@
 /**
- * Server-side preset and compliance configuration.
+ * Server-side preset and output profile configuration.
  *
  * Re-exports from the shared client definitions (src/audio/presets.js).
  * If ES module import from src/ causes issues in the future,
@@ -8,7 +8,8 @@
 
 export {
   PRESETS,
-  COMPLIANCE_TARGETS,
-  getDefaultCompliance,
-  isComplianceLocked,
+  OUTPUT_PROFILES,
+  resolveOutputProfileId,
+  getDefaultOutputProfile,
+  isOutputProfileLocked,
 } from '../src/audio/presets.js'

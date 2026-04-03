@@ -53,6 +53,20 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
   const { mode, ratio, threshold, attack, release } = preset.compression
+
+  // --- mode: 'none' — preset explicitly disables compression (e.g. Noise Eraser) ---
+  if (mode === 'none') {
+    await copyThrough(inputPath, outputPath)
+    return {
+      applied: false,
+      skippedReason: 'Compression disabled for this preset',
+      crestFactorDb: null,
+      maxGainReductionDb: null,
+      avgGainReductionDb: null,
+      params: { threshold, ratio, attack, release },
+    }
+  }
+
   const { channels, sampleRate } = await readWavAllChannels(inputPath)
 
   // Use channel 0 for crest factor analysis

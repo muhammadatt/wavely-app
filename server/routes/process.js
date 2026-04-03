@@ -4,21 +4,11 @@
  * Accepts a multipart upload with:
  *   - file: audio file (WAV, MP3, FLAC, etc.)
  *   - preset: preset ID string
- *   - compliance: compliance target ID string
+ *   - output_profile: output profile ID string (also accepts legacy 'compliance' field)
  *
  * Returns a multipart/mixed response:
  *   Part 1: application/json — { report, peaks }
  *   Part 2: audio/wav — processed audio blob
- *
- * Architecture note: This uses a single-response multipart approach for
- * minimal round-trips. A future improvement could use a two-step approach
- * (return JSON metadata first, then audio via a separate download URL)
- * which would enable:
- *   - Progress tracking for large files via SSE/WebSocket
- *   - Displaying the report before the full audio download completes
- *   - Resumable downloads for unreliable connections
- *   - Better caching of processed results
- * This is worth revisiting when batch processing is added in Sprint 5.
  */
 
 import { Router } from 'express'
@@ -27,7 +17,7 @@ import path from 'path'
 import { createReadStream } from 'fs'
 import { stat, unlink } from 'fs/promises'
 import { processAudio } from '../pipeline/index.js'
-import { PRESETS, COMPLIANCE_TARGETS } from '../presets.js'
+import { PRESETS, OUTPUT_PROFILES, resolveOutputProfileId } from '../presets.js'
 
 const router = Router()
 
@@ -49,13 +39,15 @@ router.post('/process', upload.single('file'), async (req, res) => {
     }
 
     const preset = req.body.preset
-    const compliance = req.body.compliance
+    // Accept both 'output_profile' and legacy 'compliance' field
+    const rawProfile = req.body.output_profile || req.body.compliance
+    const outputProfile = resolveOutputProfileId(rawProfile)
 
     if (!preset || !PRESETS[preset]) {
       return res.status(400).json({ error: `Invalid preset: ${preset}` })
     }
-    if (!compliance || !COMPLIANCE_TARGETS[compliance]) {
-      return res.status(400).json({ error: `Invalid compliance target: ${compliance}` })
+    if (!outputProfile || !OUTPUT_PROFILES[outputProfile]) {
+      return res.status(400).json({ error: `Invalid output profile: ${rawProfile}` })
     }
 
     const ext = path.extname(req.file.originalname).toLowerCase()
@@ -66,18 +58,21 @@ router.post('/process', upload.single('file'), async (req, res) => {
     }
 
     // --- Process ---
-    console.log(`Processing: ${req.file.originalname} | preset=${preset} compliance=${compliance}`)
+    console.log(`Processing: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}`)
     const startTime = Date.now()
 
     const { outputPath, report, peaks } = await processAudio(
       uploadedPath,
       req.file.originalname,
       preset,
-      compliance,
+      outputProfile,
     )
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.log(`Processed in ${elapsed}s: ${req.file.originalname} | pass=${report.compliance_results.overall_pass}`)
+    const certStatus = report.acx_certification
+      ? `acx=${report.acx_certification.certificate}`
+      : 'no-cert'
+    console.log(`Processed in ${elapsed}s: ${req.file.originalname} | ${certStatus}`)
 
     // --- Build multipart response ---
     const boundary = '----WavelyProcessingBoundary'

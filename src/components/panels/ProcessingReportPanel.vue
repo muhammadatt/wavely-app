@@ -1,46 +1,90 @@
 <script setup>
-import { computed } from 'vue'
-import { COMPLIANCE_TARGETS } from '../../audio/presets.js'
+import { computed, reactive } from 'vue'
+import { OUTPUT_PROFILES, resolveOutputProfileId } from '../../audio/presets.js'
 
 const props = defineProps({
   report: { type: Object, required: true },
 })
 
-// Support both old field names (rms, peak) and server field names (rms_dbfs, true_peak_dbfs)
+// --- Section 1: Output Measurements ---
+
 const before = computed(() => {
-  const b = props.report.before
-  if (!b) return null
+  // Support both v2 nested measurements and legacy flat structure
+  const m = props.report.measurements?.before || props.report.before
+  if (!m) return null
   return {
-    rms: b.rms ?? b.rms_dbfs ?? null,
-    peak: b.peak ?? b.true_peak_dbfs ?? null,
-    noiseFloor: b.noiseFloor ?? b.noise_floor_dbfs ?? null,
+    rms: m.rms_dbfs ?? m.rms ?? null,
+    lufs: m.lufs_integrated ?? null,
+    peak: m.true_peak_dbfs ?? m.peak ?? null,
+    noiseFloor: m.noise_floor_dbfs ?? m.noiseFloor ?? null,
   }
 })
 
 const after = computed(() => {
-  const a = props.report.after
-  if (!a) return null
+  const m = props.report.measurements?.after || props.report.after
+  if (!m) return null
   return {
-    rms: a.rms ?? a.rms_dbfs ?? null,
-    peak: a.peak ?? a.true_peak_dbfs ?? null,
-    noiseFloor: a.noiseFloor ?? a.noise_floor_dbfs ?? null,
+    rms: m.rms_dbfs ?? m.rms ?? null,
+    lufs: m.lufs_integrated ?? null,
+    peak: m.true_peak_dbfs ?? m.peak ?? null,
+    noiseFloor: m.noise_floor_dbfs ?? m.noiseFloor ?? null,
   }
 })
 
-// Support both compliance shapes
-const complianceResult = computed(() => {
-  const c = props.report.compliance || props.report.compliance_results
-  if (!c) return null
-  return {
-    target: c.target,
-    passed: c.passed ?? c.overall_pass ?? false,
-  }
+const outputProfileId = computed(() => {
+  // v2 report shape: output_profile is a plain string ID
+  if (props.report.output_profile) return resolveOutputProfileId(props.report.output_profile)
+  // legacy: compliance was sometimes a plain string ID
+  if (typeof props.report.compliance === 'string') return resolveOutputProfileId(props.report.compliance)
+  // legacy: compliance was an object with a target field
+  const target = props.report.compliance_results?.target ?? props.report.compliance?.target ?? null
+  return target ? resolveOutputProfileId(target) : null
 })
+const outputProfile = computed(() => OUTPUT_PROFILES[outputProfileId.value])
+const isAcx = computed(() => outputProfileId.value === 'acx')
 
-const compliance = computed(() => COMPLIANCE_TARGETS[complianceResult.value?.target])
-const showNoiseFloor = computed(() => compliance.value?.noiseFloorCeiling !== null)
+// --- Section 2: ACX Certification ---
 
-// Build human-readable processing chain from processing_applied
+const acxCert = computed(() => props.report.acx_certification || null)
+
+const certCheckOrder = ['rms', 'true_peak', 'noise_floor', 'sample_rate', 'bit_depth', 'channel']
+const certCheckLabels = {
+  rms: 'RMS (average loudness)',
+  true_peak: 'True Peak',
+  noise_floor: 'Noise Floor',
+  sample_rate: 'Sample Rate',
+  bit_depth: 'Bit Depth',
+  channel: 'Channel Format',
+}
+
+function formatCheckValue(checkId, check) {
+  if (!check) return '--'
+  switch (checkId) {
+    case 'rms': return `${check.value_dbfs} dBFS (target: ${check.min} to ${check.max})`
+    case 'true_peak': return `${check.value_dbfs} dBFS (target: <= ${check.ceiling})`
+    case 'noise_floor': return `${check.value_dbfs} dBFS (target: <= ${check.ceiling})`
+    case 'sample_rate': return `${check.value_hz} Hz`
+    case 'bit_depth': return check.value
+    case 'channel': return check.value
+    default: return '--'
+  }
+}
+
+// --- Section 3: Quality Advisory ---
+
+const advisory = computed(() => props.report.quality_advisory || null)
+const advisoryFlags = computed(() => advisory.value?.flags || [])
+const hasAdvisoryFlags = computed(() => advisoryFlags.value.length > 0)
+
+// Track which flags the user has marked as reviewed (local UI state only)
+const reviewedFlags = reactive({})
+
+function toggleReviewed(flagId) {
+  reviewedFlags[flagId] = !reviewedFlags[flagId]
+}
+
+// --- Processing chain (kept from v1) ---
+
 const processingChain = computed(() => {
   const chain = props.report.chain
   if (chain?.length) return chain
@@ -66,97 +110,127 @@ const processingChain = computed(() => {
   steps.push('True peak limiting')
   return steps
 })
-
-const humanReviewRisk = computed(() =>
-  props.report.humanReviewRisk ?? props.report.human_review_risk?.level ?? null
-)
-
-const riskColors = {
-  low: 'bg-mint-lt text-mint',
-  medium: 'bg-yellow-lt text-yellow',
-  high: 'bg-accent-lt text-accent',
-}
-
-function loudnessPass(value) {
-  if (!compliance.value) return true
-  const [min, max] = compliance.value.loudnessRange
-  return value >= min && value <= max
-}
-
-function peakPass(value) {
-  if (!compliance.value) return true
-  return value <= compliance.value.truePeakCeiling
-}
-
-function noisePass(value) {
-  if (!compliance.value || compliance.value.noiseFloorCeiling === null) return true
-  return value <= compliance.value.noiseFloorCeiling
-}
 </script>
 
 <template>
   <div class="flex flex-col gap-3">
-    <!-- Before / After -->
-    <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider mb-0.5">Measurements</div>
-    <div class="grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-1.5 text-[11px]">
-      <div class="font-bold text-ink-mid"></div>
-      <div class="font-bold text-ink-mid text-center">Before</div>
-      <div class="font-bold text-ink-mid text-center">After</div>
 
-      <!-- Loudness -->
-      <div class="font-bold text-ink-mid">
-        {{ compliance?.measurementMethod === 'LUFS' ? 'LUFS' : 'RMS' }}
-      </div>
-      <div class="text-ink-lt tabular-nums text-center">
-        {{ before?.rms != null ? `${before.rms.toFixed(1)} dB` : '--' }}
-      </div>
-      <div class="text-center flex items-center justify-center gap-1">
-        <span class="tabular-nums">{{ after?.rms != null ? `${after.rms.toFixed(1)} dB` : '--' }}</span>
-        <span v-if="after?.rms != null"
-              class="inline-block px-1.5 py-0.5 rounded-[var(--radius-pill)] text-[9px] font-extrabold"
-              :class="loudnessPass(after.rms) ? 'bg-mint-lt text-mint' : 'bg-accent-lt text-accent'">
-          {{ loudnessPass(after.rms) ? 'PASS' : 'FAIL' }}
-        </span>
-      </div>
+    <!-- ===== Section 1: Output Measurements (always shown) ===== -->
+    <div>
+      <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider mb-1.5">Output Measurements</div>
+      <div class="grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-1.5 text-[11px]">
+        <div class="font-bold text-ink-mid"></div>
+        <div class="font-bold text-ink-mid text-center">Before</div>
+        <div class="font-bold text-ink-mid text-center">After</div>
 
-      <!-- True Peak -->
-      <div class="font-bold text-ink-mid">True Peak</div>
-      <div class="text-ink-lt tabular-nums text-center">
-        {{ before?.peak != null ? `${before.peak.toFixed(1)} dBFS` : '--' }}
-      </div>
-      <div class="text-center flex items-center justify-center gap-1">
-        <span class="tabular-nums">{{ after?.peak != null ? `${after.peak.toFixed(1)} dBFS` : '--' }}</span>
-        <span v-if="after?.peak != null"
-              class="inline-block px-1.5 py-0.5 rounded-[var(--radius-pill)] text-[9px] font-extrabold"
-              :class="peakPass(after.peak) ? 'bg-mint-lt text-mint' : 'bg-accent-lt text-accent'">
-          {{ peakPass(after.peak) ? 'PASS' : 'FAIL' }}
-        </span>
-      </div>
+        <!-- RMS -->
+        <div class="font-bold text-ink-mid">RMS</div>
+        <div class="text-ink-lt tabular-nums text-center">
+          {{ before?.rms != null ? `${before.rms.toFixed(1)} dBFS` : '--' }}
+        </div>
+        <div class="text-ink-lt tabular-nums text-center">
+          {{ after?.rms != null ? `${after.rms.toFixed(1)} dBFS` : '--' }}
+        </div>
 
-      <!-- Noise Floor (ACX only) -->
-      <template v-if="showNoiseFloor">
+        <!-- LUFS -->
+        <div class="font-bold text-ink-mid">LUFS</div>
+        <div class="text-ink-lt tabular-nums text-center">
+          {{ before?.lufs != null ? `${before.lufs.toFixed(1)} LUFS` : '--' }}
+        </div>
+        <div class="text-ink-lt tabular-nums text-center">
+          {{ after?.lufs != null ? `${after.lufs.toFixed(1)} LUFS` : '--' }}
+        </div>
+
+        <!-- True Peak -->
+        <div class="font-bold text-ink-mid">True Peak</div>
+        <div class="text-ink-lt tabular-nums text-center">
+          {{ before?.peak != null ? `${before.peak.toFixed(1)} dBFS` : '--' }}
+        </div>
+        <div class="text-ink-lt tabular-nums text-center">
+          {{ after?.peak != null ? `${after.peak.toFixed(1)} dBFS` : '--' }}
+        </div>
+
+        <!-- Noise Floor -->
         <div class="font-bold text-ink-mid">Noise Floor</div>
         <div class="text-ink-lt tabular-nums text-center">
           {{ before?.noiseFloor != null ? `${before.noiseFloor.toFixed(1)} dBFS` : '--' }}
         </div>
-        <div class="text-center flex items-center justify-center gap-1">
-          <span class="tabular-nums">{{ after?.noiseFloor != null ? `${after.noiseFloor.toFixed(1)} dBFS` : '--' }}</span>
-          <span v-if="after?.noiseFloor != null"
-                class="inline-block px-1.5 py-0.5 rounded-[var(--radius-pill)] text-[9px] font-extrabold"
-                :class="noisePass(after.noiseFloor) ? 'bg-mint-lt text-mint' : 'bg-accent-lt text-accent'">
-            {{ noisePass(after.noiseFloor) ? 'PASS' : 'FAIL' }}
-          </span>
+        <div class="text-ink-lt tabular-nums text-center">
+          {{ after?.noiseFloor != null ? `${after.noiseFloor.toFixed(1)} dBFS` : '--' }}
         </div>
-      </template>
+      </div>
     </div>
 
-    <!-- Overall compliance -->
-    <div v-if="complianceResult" class="flex items-center gap-2">
-      <span class="text-[11px] font-bold text-ink-mid">Compliance:</span>
-      <span class="inline-block px-2 py-0.5 rounded-[var(--radius-pill)] text-[10px] font-extrabold"
-            :class="complianceResult.passed ? 'bg-mint-lt text-mint' : 'bg-accent-lt text-accent'">
-        {{ complianceResult.passed ? 'PASSED' : 'FAILED' }}
-      </span>
+    <!-- ===== Section 2: ACX Technical Certification (acx output profile only) ===== -->
+    <div v-if="acxCert">
+      <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider mb-1.5">ACX Technical Certification</div>
+
+      <!-- Overall certificate badge -->
+      <div class="flex items-center gap-2 mb-2">
+        <span class="inline-block px-2.5 py-1 rounded-[var(--radius-pill)] text-[11px] font-extrabold"
+              :class="acxCert.certificate === 'pass'
+                ? 'bg-mint-lt text-mint'
+                : 'bg-accent-lt text-accent'">
+          {{ acxCert.certificate === 'pass' ? 'PASS' : 'FAIL' }}
+        </span>
+      </div>
+
+      <!-- Per-check results -->
+      <div class="flex flex-col gap-1 text-[11px]">
+        <div v-for="checkId in certCheckOrder" :key="checkId"
+             class="flex items-start gap-1.5">
+          <span class="shrink-0 mt-[1px] font-bold"
+                :class="acxCert.checks[checkId]?.pass ? 'text-mint' : 'text-accent'">
+            {{ acxCert.checks[checkId]?.pass ? '\u2713' : '\u2717' }}
+          </span>
+          <span class="font-bold text-ink-mid w-[120px] shrink-0">{{ certCheckLabels[checkId] }}</span>
+          <span class="text-ink-lt tabular-nums">{{ formatCheckValue(checkId, acxCert.checks[checkId]) }}</span>
+        </div>
+      </div>
+
+      <!-- Export certificate stub -->
+      <button v-if="acxCert.certificate === 'pass'"
+              class="mt-2 text-[10px] font-bold text-accent hover:underline cursor-pointer bg-transparent border-none p-0"
+              @click="">
+        Export Certificate
+      </button>
+    </div>
+
+    <!-- ===== Section 3: Before You Submit (advisory flags) ===== -->
+    <div>
+      <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider mb-1.5">
+        {{ hasAdvisoryFlags ? 'Before you submit \u2014 things to listen for' : 'Quality Check' }}
+      </div>
+
+      <div v-if="hasAdvisoryFlags" class="flex flex-col gap-2">
+        <div v-for="flag in advisoryFlags" :key="flag.id"
+             class="flex items-start gap-2 rounded-[var(--radius-md)] px-3 py-2"
+             :class="flag.severity === 'review' ? 'bg-yellow-lt' : 'bg-bg'">
+          <!-- Checkbox: Mark as reviewed -->
+          <label class="flex items-start gap-2 cursor-pointer flex-1 min-w-0">
+            <input type="checkbox"
+                   :checked="reviewedFlags[flag.id]"
+                   @change="toggleReviewed(flag.id)"
+                   class="mt-0.5 shrink-0 accent-accent" />
+            <div>
+              <div class="text-[11px] font-bold leading-snug"
+                   :class="flag.severity === 'review' ? 'text-ink' : 'text-ink-mid'">
+                {{ flag.message }}
+              </div>
+              <span class="inline-block text-[9px] font-extrabold uppercase mt-0.5 px-1.5 py-0.5 rounded-[var(--radius-pill)]"
+                    :class="flag.severity === 'review'
+                      ? 'bg-yellow text-white'
+                      : 'bg-ink-lt text-white'">
+                {{ flag.severity }}
+              </span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div v-else class="text-[11px] text-ink-lt font-semibold">
+        No quality concerns detected.
+      </div>
     </div>
 
     <!-- Processing chain -->
@@ -174,15 +248,6 @@ function noisePass(value) {
         <span class="shrink-0 mt-[1px]">&#9888;</span>
         <span>{{ warning }}</span>
       </div>
-    </div>
-
-    <!-- Human review risk (ACX only) -->
-    <div v-if="humanReviewRisk" class="flex items-center gap-2">
-      <span class="text-[11px] font-bold text-ink-mid">Human Review Risk:</span>
-      <span class="inline-block px-2 py-0.5 rounded-[var(--radius-pill)] text-[10px] font-extrabold capitalize"
-            :class="riskColors[humanReviewRisk] || 'bg-bg text-ink-mid'">
-        {{ humanReviewRisk }}
-      </span>
     </div>
   </div>
 </template>
