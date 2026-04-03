@@ -191,7 +191,7 @@ const processingChain = computed(() => {
       <!-- Export certificate stub -->
       <button v-if="acxCert.certificate === 'pass'"
               class="mt-2 text-[10px] font-bold text-accent hover:underline cursor-pointer bg-transparent border-none p-0"
-              @click="/* TODO: certificate export */">
+              @click="">
         Export Certificate
       </button>
     </div>
