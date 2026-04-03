@@ -44,6 +44,15 @@ export async function readWavSamples(wavPath) {
       numChannels  = view.getUint16(offset + 10, true)
       sampleRate   = view.getUint32(offset + 12, true)
       bitsPerSample = view.getUint16(offset + 22, true)
+      // WAVE_FORMAT_EXTENSIBLE (0xFFFE): actual format is in SubFormat GUID
+      // WAVEFORMATEXTENSIBLE layout (relative to fmt chunk data start at offset+8):
+      //   +0  wFormatTag (2)  +2  nChannels (2)  +4  nSamplesPerSec (4)
+      //   +8  nAvgBytesPerSec (4)  +12 nBlockAlign (2)  +14 wBitsPerSample (2)
+      //   +16 cbSize (2)  +18 wValidBitsPerSample (2)  +20 dwChannelMask (4)
+      //   +24 SubFormat GUID (16 bytes; first 2 bytes = actual format code)
+      if (audioFormat === 0xFFFE && chunkSize >= 40) {
+        audioFormat = view.getUint16(offset + 32, true) // offset+8+24
+      }
     }
 
     if (chunkId === 'data') {
@@ -112,6 +121,11 @@ export async function readWavAllChannels(wavPath) {
       numChannels   = view.getUint16(offset + 10, true)
       sampleRate    = view.getUint32(offset + 12, true)
       bitsPerSample = view.getUint16(offset + 22, true)
+      // WAVE_FORMAT_EXTENSIBLE (0xFFFE): actual format is in SubFormat GUID
+      // SubFormat starts at fmt-data-offset + 24 → absolute: offset + 32
+      if (audioFormat === 0xFFFE && chunkSize >= 40) {
+        audioFormat = view.getUint16(offset + 32, true)
+      }
     }
 
     if (chunkId === 'data') {

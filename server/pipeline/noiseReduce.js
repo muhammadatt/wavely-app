@@ -20,8 +20,17 @@
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import fs from 'fs'
 import { decodeToFloat32, tempPath, removeTmp } from '../lib/ffmpeg.js'
 
+// --- DeepFilter invocation strategy ---
+// DEEPFILTER_BINARY (env): path to a pre-built deep-filter CLI binary.
+//   Used on platforms where the Python deepfilternet package can't be
+//   compiled (e.g. Windows ARM64 without MSVC Build Tools).
+//   On Linux servers, leave unset — the Python script path is used instead.
+// DEEPFILTER_PYTHON (env): Python executable that has deepfilternet installed.
+//   Defaults to 'python3'. Set to a venv python path if needed.
+const DEEPFILTER_BINARY = process.env.DEEPFILTER_BINARY ?? null
 const PYTHON = process.env.DEEPFILTER_PYTHON ?? 'python3'
 const SCRIPT  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'deepfilter_enhance.py')
 
@@ -86,21 +95,66 @@ function selectTier(noiseFloorDbfs) {
 }
 
 /**
- * Invoke the Python deepfilter_enhance.py subprocess.
+ * Invoke DeepFilter via whichever strategy is configured:
+ *   - DEEPFILTER_BINARY set → CLI binary  (dev override, e.g. Windows ARM64)
+ *   - otherwise            → Python script (production default, Linux server)
  *
- * @param {string}      inputPath  - WAV at any sample rate (torchaudio resamples)
+ * @param {string}      inputPath  - WAV at any sample rate
  * @param {string}      outputPath - 32-bit float WAV at 48 kHz
- * @param {number|null} attenLimDb - Max attenuation; null = no limit
+ * @param {number|null} attenLimDb - Max attenuation in dB; null = no limit (Tier 5)
  */
 function runDeepFilter(inputPath, outputPath, attenLimDb) {
+  if (DEEPFILTER_BINARY) {
+    return runDeepFilterCli(inputPath, outputPath, attenLimDb)
+  }
+  return runDeepFilterPython(inputPath, outputPath, attenLimDb)
+}
+
+/**
+ * CLI binary strategy.
+ * The binary writes <basename> into --output-dir; we point it at a dedicated
+ * temp directory and rename the result to the desired outputPath.
+ */
+async function runDeepFilterCli(inputPath, outputPath, attenLimDb) {
+  const tmpDir = tempPath('')   // unique path — reuse tempPath for uniqueness
+  fs.mkdirSync(tmpDir, { recursive: true })
+
+  try {
+    // CLI attenuation: null (Tier 5 = no limit) → 100 dB (CLI's "full reduction")
+    const attenArg = attenLimDb !== null ? String(attenLimDb) : '100'
+
+    await spawnProcess(
+      DEEPFILTER_BINARY,
+      ['-a', attenArg, '-o', tmpDir, inputPath],
+      'DeepFilter CLI',
+    )
+
+    // Binary writes <inputBasename> into tmpDir
+    const outFile = path.join(tmpDir, path.basename(inputPath))
+    fs.renameSync(outFile, outputPath)
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Python script strategy (production default).
+ * Calls deepfilter_enhance.py which uses the deepfilternet Python package.
+ */
+function runDeepFilterPython(inputPath, outputPath, attenLimDb) {
+  const args = [SCRIPT, '--input', inputPath, '--output', outputPath]
+  if (attenLimDb !== null) {
+    args.push('--atten-lim-db', String(attenLimDb))
+  }
+  return spawnProcess(PYTHON, args, 'DeepFilter Python')
+}
+
+/**
+ * Shared subprocess helper.
+ */
+function spawnProcess(executable, args, label) {
   return new Promise((resolve, reject) => {
-    const args = [SCRIPT, '--input', inputPath, '--output', outputPath]
-
-    if (attenLimDb !== null) {
-      args.push('--atten-lim-db', String(attenLimDb))
-    }
-
-    const proc = spawn(PYTHON, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] })
 
     let stderr = ''
     proc.stderr.on('data', chunk => {
@@ -117,13 +171,13 @@ function runDeepFilter(inputPath, outputPath, attenLimDb) {
         if (signal !== null) reasonParts.push(`signal ${signal}`)
         const reason = reasonParts.length ? reasonParts.join(', ') : 'unknown reason'
         reject(new Error(
-          `DeepFilter exited with ${reason}.\n` + stderr.slice(-2000)
+          `${label} exited with ${reason}.\n` + stderr.slice(-2000)
         ))
       }
     })
 
     proc.on('error', err => {
-      reject(new Error(`Failed to spawn DeepFilter: ${err.message}`))
+      reject(new Error(`Failed to spawn ${label}: ${err.message}`))
     })
   })
 }

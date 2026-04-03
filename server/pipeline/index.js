@@ -40,6 +40,7 @@ import {
   encodeOutput,
   probeFile,
 } from '../lib/ffmpeg.js'
+import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { applyNoiseReduction } from './noiseReduce.js'
 import { measureAudio, measureVoicedRms, checkCompliance } from './measure.js'
 import { extractPeaks } from './peaks.js'
@@ -119,6 +120,7 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     const hpfPath = tmp('.wav')
     await applyHighPass(currentPath, hpfPath, { notch60Hz })
     currentPath = hpfPath
+    await logLevel('after HPF', currentPath, { notch60Hz })
 
     // --- Stage 2: Noise reduction ---
     const nrPath    = tmp('.wav')
@@ -128,10 +130,16 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       noiseFloorDbfs:   beforeMeasurements.noiseFloorDbfs,
     })
     currentPath = nrPath
+    await logLevel('after NR', currentPath, {
+      tier:         nrResult.tier,
+      attenLim:     nrResult.atten_lim_db !== null ? `${nrResult.atten_lim_db}dB` : 'none',
+      preNoiseFloor: `${nrResult.pre_noise_floor_dbfs}dBFS`,
+    })
 
     // --- Stage 2a (post-NR): Re-analyze silence on HPF+NR output ---
     // This is the definitive silence analysis used for room tone and EQ
     const silenceAnalysis = await analyzeAudioFrames(currentPath)
+    logSilence('post-NR', silenceAnalysis)
 
     // --- Room tone padding (ACX Audiobook only) ---
     let roomToneResult = { applied: false, headAdded_s: 0, tailAdded_s: 0 }
@@ -151,6 +159,10 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     const eqPath = tmp('.wav')
     await applyParametricEQ(currentPath, eqPath, eqResult.ffmpegFilters)
     currentPath = eqPath
+    await logLevel('after EQ', currentPath, {
+      applied: eqResult.applied,
+      filters: eqResult.ffmpegFilters.length,
+    })
 
     // --- Stage 4: De-esser ---
     // Run silence analysis on the post-EQ signal so voiced-frame offsets
@@ -164,6 +176,12 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       preDeEssSilenceAnalysis
     )
     currentPath = deEssPath
+    await logLevel('after de-esser', currentPath, {
+      applied:    deEssResult.applied,
+      voiceType:  deEssResult.voiceType  ?? 'n/a',
+      f0:         deEssResult.f0Hz       !== null ? `${deEssResult.f0Hz}Hz`          : 'n/a',
+      maxRed:     deEssResult.maxReductionDb !== null ? `${deEssResult.maxReductionDb}dB` : 'n/a',
+    })
 
     // --- Stage 4a: Compression ---
     // Silence analysis is still valid (de-esser preserves signal length and
@@ -176,6 +194,12 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       preDeEssSilenceAnalysis
     )
     currentPath = compPath
+    await logLevel('after compression', currentPath, {
+      applied: compressionResult.applied,
+      crest:   compressionResult.crestFactorDb    !== null ? `${compressionResult.crestFactorDb}dB`    : 'n/a',
+      maxRed:  compressionResult.maxGainReductionDb !== null ? `${compressionResult.maxGainReductionDb}dB` : 'n/a',
+      avgRed:  compressionResult.avgGainReductionDb !== null ? `${compressionResult.avgGainReductionDb}dB` : 'n/a',
+    })
 
     // --- Stage 5: Loudness normalization ---
     // Sprint 2: Use voiced-frame RMS for ACX path (silence excluded per spec §5b).
@@ -183,6 +207,7 @@ export async function processAudio(inputPath, originalName, presetId, compliance
     // frame offsets and energy levels reflect the actual signal being normalized.
     const normPath = tmp('.wav')
 
+    let normExtras = {}
     if (compliance.measurementMethod === 'RMS') {
       // ACX path: voiced-frame RMS normalization
       const targetRms              = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2 // -20.5 → ~-20 dBFS
@@ -196,6 +221,12 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       }
 
       await applyLinearGain(currentPath, normPath, gainDb)
+      normExtras = {
+        method:    'RMS',
+        target:    `${targetRms}dBFS`,
+        voicedRms: `${round2(voicedRms)}dBFS`,
+        gainApplied: `${round2(gainDb)}dB`,
+      }
     } else {
       // LUFS path: standard/broadcast via loudnorm two-pass
       const targetLufs = (compliance.loudnessRange[0] + compliance.loudnessRange[1]) / 2
@@ -203,8 +234,14 @@ export async function processAudio(inputPath, originalName, presetId, compliance
         targetLUFS:  targetLufs,
         peakCeiling: compliance.truePeakCeiling,
       })
+      normExtras = {
+        method:  'LUFS',
+        target:  `${targetLufs}LUFS`,
+        tp:      `${compliance.truePeakCeiling}dBTP`,
+      }
     }
     currentPath = normPath
+    await logLevel('after normalization', currentPath, normExtras)
 
     // --- Stage 6: True peak limiting ---
     const limitedPath = tmp('.wav')
@@ -212,6 +249,7 @@ export async function processAudio(inputPath, originalName, presetId, compliance
       peakCeiling: compliance.truePeakCeiling,
     })
     currentPath = limitedPath
+    await logLevel('after limiting', currentPath, { tp: `${compliance.truePeakCeiling}dBTP` })
 
     // --- Measure "after" values ---
     const afterMeasurements = await measureAudio(currentPath)
@@ -423,3 +461,47 @@ async function detect60HzHum(wavPath, rawNoiseFloor) {
 function round2(n) {
   return n !== null && n !== undefined ? Math.round(n * 100) / 100 : null
 }
+
+// ── Diagnostics ───────────────────────────────────────────────────────────────
+
+/**
+ * Log peak and mean level of an audio file, plus any stage-specific extras.
+ * Runs FFmpeg volumedetect on the file — one line of output per stage.
+ *
+ * @param {string} label    - Stage name shown in the log line
+ * @param {string} filePath - Path to the WAV file to measure
+ * @param {object} [extras] - Additional key=value pairs appended to the line
+ */
+async function logLevel(label, filePath, extras = {}) {
+  try {
+    const { stderr } = await runFfmpeg([
+      '-i', filePath, '-af', 'volumedetect', '-f', 'null', '-',
+    ])
+    const peak = stderr.match(/max_volume:\s*([-\d.inf]+)\s*dB/)?.[1]  ?? '?'
+    const mean = stderr.match(/mean_volume:\s*([-\d.inf]+)\s*dB/)?.[1] ?? '?'
+    const extStr = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join('  ')
+    console.log(`[level] ${label}: peak=${peak}dBFS  mean=${mean}dBFS${extStr ? '  ' + extStr : ''}`)
+  } catch (e) {
+    console.log(`[level] ${label}: measurement failed — ${e.message}`)
+  }
+}
+
+/**
+ * Log key metrics from a silence analysis result — no FFmpeg call needed.
+ * Shows noise floor, silence threshold, voiced-frame RMS, and frame counts.
+ *
+ * @param {string} label - Stage name shown in the log line
+ * @param {import('./silenceAnalysis.js').SilenceAnalysis} sa
+ */
+function logSilence(label, sa) {
+  const voiced = sa.frames.filter(f => !f.isSilence).length
+  const total  = sa.frames.length
+  console.log(
+    `[silence] ${label}: noiseFloor=${sa.noiseFloorDbfs}dBFS  ` +
+    `threshold=${sa.silenceThresholdDbfs}dBFS  ` +
+    `voicedRms=${sa.voicedRmsDbfs}dBFS  ` +
+    `voiced=${voiced}/${total} frames`
+  )
+}
+
+

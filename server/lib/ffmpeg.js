@@ -121,6 +121,11 @@ export async function applyLoudnormLUFS(inputPath, outputPath, { targetLUFS, pea
 
 /**
  * Measure loudnorm stats (pass 1).
+ *
+ * Throws a descriptive error if the file is effectively silent — FFmpeg
+ * returns "-inf"/"+inf" for integrated loudness and true peak on silent audio,
+ * which are out of range for the pass-2 filter parameters and would cause a
+ * cryptic "Value -inf out of range" failure.
  */
 async function measureLoudnorm(inputPath) {
   const { stderr } = await runFfmpeg([
@@ -132,7 +137,26 @@ async function measureLoudnorm(inputPath) {
 
   const jsonMatch = stderr.match(/\{[\s\S]*?\}/)
   if (!jsonMatch) throw new Error('Could not parse loudnorm stats')
-  return JSON.parse(jsonMatch[0])
+  const stats = JSON.parse(jsonMatch[0])
+
+  // Detect silent/near-silent files: FFmpeg reports "-inf" for integrated
+  // loudness and true peak when there is no measurable audio content.
+  if (!isFiniteLoudnormValue(stats.input_i) || !isFiniteLoudnormValue(stats.input_tp)) {
+    throw new Error(
+      'Audio level is too low to measure — the file appears to be silent or ' +
+      'contains only sub-threshold noise. Check your recording level and try again.'
+    )
+  }
+
+  return stats
+}
+
+/**
+ * Return true if a loudnorm JSON value is a finite number string.
+ * FFmpeg emits "-inf", "+inf", or "inf" for silent/clipped signals.
+ */
+function isFiniteLoudnormValue(v) {
+  return v !== undefined && isFinite(Number(v))
 }
 
 /**
