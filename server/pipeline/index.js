@@ -10,6 +10,15 @@
  * Stage results accumulate in ctx.results. buildReport() reads only what is
  * present, so stages that are absent from a pipeline produce no orphaned keys
  * in the report JSON.
+ * Dispatches to the pipeline declared for the incoming presetId (see
+ * pipelines.js) and runs each stage function in order against a shared
+ * pipeline context (see createContext). Adding a new preset or changing its
+ * stage sequence requires no changes here — only in pipelines.js and
+ * stages.js.
+ *
+ * Stage results accumulate in ctx.results. buildReport() reads only what is
+ * present, so stages that are absent from a pipeline produce no orphaned keys
+ * in the report JSON.
  */
 
 import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
@@ -50,6 +59,7 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
 
     return { outputPath: ctx.currentPath, report, peaks: ctx.peaks }
   } catch (err) {
+    await Promise.all(ctx.tmpFiles.map(removeTmp))
     await Promise.all(ctx.tmpFiles.map(removeTmp))
     throw err
   }
@@ -106,6 +116,17 @@ function buildReport(ctx) {
     output_profile:   outputProfileId,
     duration_seconds: Math.round(duration),
     processing_applied: {
+      stereo_to_mono:  results.stereoToMono ?? false,
+      resampled_from:  ctx.inputSampleRate !== 44100 ? ctx.inputSampleRate : null,
+      hpf_60hz_notch:  results.notch60Hz   ?? false,
+      ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
+      ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
+      ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
+      ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
+      ...(results.compression    && { compression:        formatCompressionResult(results.compression) }),
+      normalization_gain_db:     round2(
+        results.afterMeasurements.rmsDbfs - results.beforeMeasurements.rmsDbfs
+      ),
       stereo_to_mono:  results.stereoToMono ?? false,
       resampled_from:  ctx.inputSampleRate !== 44100 ? ctx.inputSampleRate : null,
       hpf_60hz_notch:  results.notch60Hz   ?? false,
