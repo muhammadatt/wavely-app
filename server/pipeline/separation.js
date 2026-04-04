@@ -1,0 +1,104 @@
+/**
+ * Separation helpers — Node.js spawners for NE Python scripts.
+ *
+ * Each function spawns the corresponding Python script as a child process and
+ * resolves when the script exits with code 0. Failures throw with stderr
+ * included in the message for debuggability.
+ *
+ * Python executable and device are configurable via environment variables:
+ *   SEPARATION_PYTHON  — Python executable (default: python3)
+ *   SEPARATION_DEVICE  — Compute device passed to scripts (default: auto)
+ */
+
+import { spawn } from 'child_process'
+import { fileURLToPath } from 'url'
+import path from 'path'
+
+const PYTHON = process.env.SEPARATION_PYTHON ?? 'python3'
+const DEVICE = process.env.SEPARATION_DEVICE ?? 'auto'
+
+const SCRIPTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
+const RNNOISE_SCRIPT  = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
+const SEPARATE_SCRIPT = path.join(SCRIPTS_DIR, 'separate_vocals.py')
+const AUDIOSR_SCRIPT  = path.join(SCRIPTS_DIR, 'audiosr_extend.py')
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Stage NE-1: RNNoise pre-separation pass.
+ * Reduces stationary broadband noise before handing off to the separator.
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
+ */
+export function runRnnoise(inputPath, outputPath) {
+  return spawnPython(
+    RNNOISE_SCRIPT,
+    ['--input', inputPath, '--output', outputPath],
+    'RNNoise',
+  )
+}
+
+/**
+ * Stage NE-3: Vocal source separation.
+ *
+ * @param {string} inputPath   - 32-bit float WAV at 44.1 kHz (mono or stereo)
+ * @param {string} outputPath  - 32-bit float WAV at 44.1 kHz (vocals stem only)
+ * @param {'demucs'|'convtasnet'} model - Separation backend
+ */
+export function runSeparation(inputPath, outputPath, model = 'demucs') {
+  return spawnPython(
+    SEPARATE_SCRIPT,
+    ['--input', inputPath, '--output', outputPath, '--model', model, '--device', DEVICE],
+    `Separation (${model})`,
+  )
+}
+
+/**
+ * Stage NE-6: AudioSR bandwidth extension.
+ *
+ * @param {string} inputPath     - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath    - 32-bit float WAV at 44.1 kHz
+ * @param {number} guidanceScale - Diffusion guidance scale (default: 3.5)
+ */
+export function runAudioSR(inputPath, outputPath, guidanceScale = 3.5) {
+  return spawnPython(
+    AUDIOSR_SCRIPT,
+    ['--input', inputPath, '--output', outputPath,
+     '--guidance-scale', String(guidanceScale), '--device', DEVICE],
+    'AudioSR',
+  )
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+function spawnPython(script, args, label) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON, [script, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+
+    let stdout = ''
+    let stderr = ''
+    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
+    proc.stderr.on('data', chunk => {
+      stderr += chunk.toString()
+      if (stderr.length > 8000) stderr = stderr.slice(-8000)
+    })
+
+    proc.on('close', (code, signal) => {
+      if (stdout.trim()) console.log(`[${label}] ${stdout.trim()}`)
+      if (code === 0 && signal === null) {
+        resolve()
+      } else {
+        const reasonParts = []
+        if (code !== null) reasonParts.push(`code ${code}`)
+        if (signal !== null) reasonParts.push(`signal ${signal}`)
+        const reason = reasonParts.length ? reasonParts.join(', ') : 'unknown reason'
+        reject(new Error(`${label} exited with ${reason}.\n${stderr.slice(-3000)}`))
+      }
+    })
+
+    proc.on('error', err => {
+      reject(new Error(`Failed to spawn ${label}: ${err.message}`))
+    })
+  })
+}

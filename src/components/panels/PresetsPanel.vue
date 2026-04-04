@@ -1,9 +1,10 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   PRESETS, OUTPUT_PROFILES,
   getPresetList, getOutputProfileList, isOutputProfileLocked, formatLoudness,
+  getDefaultOutputProfile,
 } from '../../audio/presets.js'
 import { processAudioOnServer } from '../../api/processing.js'
 import { computePeakCache } from '../../audio/processing.js'
@@ -29,6 +30,23 @@ const PROCESSING_STAGES = [
   { message: 'Almost there — hang tight!',          progress: 0.97, delay: 24000 },
 ]
 
+// Noise Eraser uses a different progress sequence — separation takes much longer
+// than the standard chain. Granular stage labels help users understand the wait.
+const NE_PROCESSING_STAGES = [
+  { message: 'Measuring your audio…',                   progress: 0.04, delay: 0      },
+  { message: 'RNNoise pre-pass — quieting the room…',   progress: 0.10, delay: 1500   },
+  { message: 'Removing tonal hum and interference…',    progress: 0.16, delay: 4000   },
+  { message: 'Extracting your voice (this takes a while)…', progress: 0.25, delay: 7000  },
+  { message: 'AI separation in progress…',              progress: 0.45, delay: 20000  },
+  { message: 'Still separating — almost through…',      progress: 0.60, delay: 50000  },
+  { message: 'Checking separation quality…',            progress: 0.68, delay: 90000  },
+  { message: 'Cleaning up any residual noise…',         progress: 0.74, delay: 100000 },
+  { message: 'Restoring high frequencies…',             progress: 0.82, delay: 115000 },
+  { message: 'Tuning the final tone…',                  progress: 0.88, delay: 130000 },
+  { message: 'Matching your target loudness…',          progress: 0.93, delay: 145000 },
+  { message: 'Almost there — running final checks…',    progress: 0.97, delay: 155000 },
+]
+
 const presetList = getPresetList()
 const outputProfileList = getOutputProfileList()
 
@@ -38,9 +56,18 @@ const isOverridden = computed(() =>
   state.selectedOutputProfile !== currentPreset.value?.defaultOutputProfile
 )
 
-// Presets that are defined but not yet implemented server-side
-const COMING_SOON_PRESETS = new Set(['noise_eraser'])
+// No presets are currently in "coming soon" state — noise_eraser is now live
+const COMING_SOON_PRESETS = new Set()
 const isSelectedPresetComingSoon = computed(() => COMING_SOON_PRESETS.has(state.selectedPreset))
+
+// Noise Eraser separation model toggle
+const isNoiseEraser = computed(() => state.selectedPreset === 'noise_eraser')
+const separationModel = ref(PRESETS.noise_eraser?.separationModel ?? 'demucs')
+function setSeparationModel(model) {
+  separationModel.value = model
+  // Keep the preset config in sync so processAudioOnServer picks it up via request body
+  if (PRESETS.noise_eraser) PRESETS.noise_eraser.separationModel = model
+}
 
 // Warning for noise_eraser + acx combination
 const showNoiseEraserAcxWarning = computed(() =>
@@ -70,14 +97,18 @@ function channelLabel(preset) {
 async function handleProcess() {
   if (!state.currentFile || state.isProcessing) return
 
-  startProcessing('Making your audio shine')
+  const isNE    = state.selectedPreset === 'noise_eraser'
+  const stages  = isNE ? NE_PROCESSING_STAGES : PROCESSING_STAGES
+  const heading = isNE ? 'Separating your voice…' : 'Making your audio shine'
+
+  startProcessing(heading)
 
   // Fire the first stage immediately (synchronously) so it's visible right away
-  updateProcessingStage(PROCESSING_STAGES[0].message)
-  updateProcessingProgress(PROCESSING_STAGES[0].progress)
+  updateProcessingStage(stages[0].message)
+  updateProcessingProgress(stages[0].progress)
 
   // Queue the remaining stages
-  const stageTimers = PROCESSING_STAGES.slice(1).map(({ message, progress, delay }) =>
+  const stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
     setTimeout(() => {
       updateProcessingStage(message)
       updateProcessingProgress(progress)
@@ -92,6 +123,7 @@ async function handleProcess() {
       fileName: state.currentFile.name,
       presetId: state.selectedPreset,
       outputProfileId: state.selectedOutputProfile,
+      separationModel: state.selectedPreset === 'noise_eraser' ? separationModel.value : undefined,
     })
 
     // Decode the processed audio blob into an AudioBuffer
@@ -197,6 +229,29 @@ async function handleProcess() {
         <!-- Noise Eraser + ACX warning -->
         <div v-if="showNoiseEraserAcxWarning" class="mt-1.5 text-[10px] text-accent font-bold leading-snug">
           ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.
+        </div>
+      </div>
+
+      <!-- Noise Eraser: separation model toggle -->
+      <div v-if="isNoiseEraser" class="bg-bg rounded-[var(--radius-md)] p-3 flex flex-col gap-2">
+        <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider">Separation Model</div>
+        <div class="flex gap-1.5">
+          <button
+            v-for="m in [{ id: 'demucs', label: 'Quality', sub: 'Best results, slower' }, { id: 'convtasnet', label: 'Fast', sub: 'Good results, quicker' }]"
+            :key="m.id"
+            class="flex-1 text-left px-2.5 py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
+            :class="separationModel === m.id
+              ? 'border-accent bg-accent-lt'
+              : 'border-border bg-surface hover:border-ink-lt'"
+            @click="setSeparationModel(m.id)"
+          >
+            <div class="text-[12px] font-extrabold" :class="separationModel === m.id ? 'text-accent' : 'text-ink'">{{ m.label }}</div>
+            <div class="text-[10px] font-semibold mt-0.5" :class="separationModel === m.id ? 'text-accent' : 'text-ink-lt'">{{ m.sub }}</div>
+          </button>
+        </div>
+        <div class="text-[10px] text-ink-lt font-semibold leading-snug">
+          <span v-if="separationModel === 'demucs'">Demucs htdemucs_ft — ~2–10 min per file. Handles severe outdoor noise and non-stationary backgrounds.</span>
+          <span v-else>ConvTasNet WHAM! — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
         </div>
       </div>
 

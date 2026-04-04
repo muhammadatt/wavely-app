@@ -208,6 +208,10 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
+    // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
+    // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
+    // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
+    separationModel: 'demucs',
   },
 }
 

@@ -21,15 +21,18 @@ import { PIPELINES } from './pipelines.js'
 /**
  * Process an audio file through the preset chain.
  *
- * @param {string} inputPath     - Path to the uploaded audio file
- * @param {string} originalName  - Original filename
- * @param {string} presetId      - Preset ID (e.g. 'acx_audiobook')
+ * @param {string} inputPath       - Path to the uploaded audio file
+ * @param {string} originalName    - Original filename
+ * @param {string} presetId        - Preset ID (e.g. 'acx_audiobook')
  * @param {string} outputProfileId - Output profile ID (e.g. 'acx')
+ * @param {object} [presetOverrides] - Per-request preset field overrides (e.g. { separationModel: 'convtasnet' })
  * @returns {{ outputPath: string, report: object, peaks: object[] }}
  */
-export async function processAudio(inputPath, originalName, presetId, outputProfileId) {
-  const preset = PRESETS[presetId]
-  if (!preset) throw new Error(`Unknown preset: ${presetId}`)
+export async function processAudio(inputPath, originalName, presetId, outputProfileId, presetOverrides = {}) {
+  const basePreset = PRESETS[presetId]
+  if (!basePreset) throw new Error(`Unknown preset: ${presetId}`)
+  // Shallow-merge overrides so the shared PRESETS object is never mutated
+  const preset = Object.keys(presetOverrides).length ? { ...basePreset, ...presetOverrides } : basePreset
 
   const outputProfile = OUTPUT_PROFILES[outputProfileId]
   if (!outputProfile) throw new Error(`Unknown output profile: ${outputProfileId}`)
@@ -124,6 +127,7 @@ function buildReport(ctx) {
       hpf_60hz_notch:  results.notch60Hz   ?? false,
       ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
       ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
+      ...(results.separationEQ   && { separation_eq:     formatEqResult(results.separationEQ) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
       ...(results.compression    && { compression:        formatCompressionResult(results.compression) }),
@@ -137,6 +141,11 @@ function buildReport(ctx) {
     after:            formatMeasurements(results.afterMeasurements),
     // acx_certification is absent (not null) when output_profile !== 'acx'
     ...(results.acxCertification && { acx_certification: results.acxCertification }),
+    // separation_pipeline is absent (not null) for all presets except noise_eraser
+    ...(results.separationPipeline && {
+      separation_pipeline: formatSeparationPipelineResult(results.separationPipeline),
+    }),
+    // separationEQ appears in processing_applied for noise_eraser (replaces enhancementEQ)
     quality_advisory: results.qualityAdvisory ?? null,
     warnings:         buildWarnings(ctx),
   }
@@ -209,6 +218,49 @@ function formatCompressionResult(r) {
 function bandReport(band) {
   if (!band?.applied) return { applied: false }
   return { applied: true, freq_hz: band.freq_hz, gain_db: band.gain_db }
+}
+
+function formatSeparationPipelineResult(sp) {
+  if (!sp) return null
+  return {
+    rnnoise_pre_pass: sp.rnnoisePrePass
+      ? {
+          applied:                 sp.rnnoisePrePass.applied,
+          pre_noise_floor_dbfs:    sp.rnnoisePrePass.pre_noise_floor_dbfs,
+          post_noise_floor_dbfs:   sp.rnnoisePrePass.post_noise_floor_dbfs,
+        }
+      : undefined,
+    tonal_pretreatment: sp.tonalPretreatment
+      ? {
+          applied: sp.tonalPretreatment.applied,
+          notches: sp.tonalPretreatment.notches ?? [],
+        }
+      : undefined,
+    separation: sp.separation
+      ? {
+          model:                            sp.separation.model,
+          post_separation_noise_floor_dbfs: sp.separation.post_separation_noise_floor_dbfs ?? null,
+          sibilance_ratio:                  sp.separation.sibilance_ratio ?? null,
+          breath_ratio:                     sp.separation.breath_ratio ?? null,
+          artifact_flags:                   sp.separation.artifact_flags ?? [],
+        }
+      : undefined,
+    residual_cleanup: sp.residualCleanup
+      ? {
+          applied:                       sp.residualCleanup.applied,
+          tier:                          sp.residualCleanup.tier ?? null,
+          post_cleanup_noise_floor_dbfs: sp.residualCleanup.post_cleanup_noise_floor_dbfs ?? null,
+        }
+      : undefined,
+    bandwidth_extension: sp.bandwidthExtension
+      ? {
+          applied:              sp.bandwidthExtension.applied,
+          model:                sp.bandwidthExtension.model ?? null,
+          hf_energy_delta_db:   sp.bandwidthExtension.hf_energy_delta_db ?? null,
+        }
+      : undefined,
+    separation_quality: sp.separation_quality ?? null,
+  }
 }
 
 // ── Warnings ──────────────────────────────────────────────────────────────────

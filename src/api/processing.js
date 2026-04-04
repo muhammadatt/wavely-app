@@ -3,7 +3,13 @@
  *
  * Handles communication with the Wavely processing server,
  * including multipart response parsing.
+ *
+ * API base URL:
+ *   Dev:        empty — Vite proxy forwards /api to localhost:3001
+ *   Production: set VITE_API_BASE_URL=https://your-vps-domain.com in Vercel
  */
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 import { renderRegionToBuffer } from '../audio/processing.js'
 
@@ -20,7 +26,7 @@ import { renderRegionToBuffer } from '../audio/processing.js'
  * @returns {{ report: object, audioBlob: Blob, peaks: object[] }}
  */
 export async function processAudioOnServer({
-  segments, sampleRate, channels, fileName, presetId, outputProfileId,
+  segments, sampleRate, channels, fileName, presetId, outputProfileId, separationModel,
 }) {
   // Render the full timeline to a WAV blob for upload
   const wavBlob = await renderTimelineToWavBlob(segments, sampleRate, channels)
@@ -30,9 +36,10 @@ export async function processAudioOnServer({
   formData.append('file', wavBlob, fileName || 'audio.wav')
   formData.append('preset', presetId)
   formData.append('output_profile', outputProfileId)
+  if (separationModel) formData.append('separation_model', separationModel)
 
   // Send to server
-  const response = await fetch('/api/process', {
+  const response = await fetch(`${API_BASE}/api/process`, {
     method: 'POST',
     body: formData,
   })

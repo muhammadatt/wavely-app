@@ -23,7 +23,8 @@ import { readWavSamples } from './wavReader.js'
 
 const FFT_SIZE      = 4096
 const SAMPLE_RATE   = 44100
-const MAX_GAIN_DB   = 5    // spec: ±5 dB maximum per band
+const MAX_GAIN_DB   = 5    // spec: ±5 dB maximum per band (standard presets)
+const NE_MAX_GAIN_DB = 4   // spec: ±4 dB for NE-7 (separated audio more sensitive)
 const HOP_SIZE      = FFT_SIZE  // non-overlapping frames for batch analysis
 
 // ── EQ Reference Profiles ────────────────────────────────────────────────────
@@ -61,6 +62,21 @@ const EQ_REFERENCES = {
     presence: +3,    // 2–5 kHz:    clear presence
     air:       0,    // 6–12 kHz:   neutral
   },
+
+  // Noise Eraser post-separation EQ reference (NE-7).
+  // Separated audio is typically:
+  //   - Thin in the 200–400 Hz body range (Demucs attenuates lower-mids with noise)
+  //   - Reduced in 100–200 Hz warmth range
+  //   - Potentially harsh in 3–6 kHz if bandwidth extension over-synthesised
+  //   - Variable in the air band depending on BWE contribution
+  // Max gain constraint: ±4 dB (tighter than standard ±5 dB — NE-7 spec).
+  noise_eraser: {
+    warmth:   -3,    // 100–250 Hz: expect below reference (body stripped with noise)
+    mud:      -2,    // 200–400 Hz: slightly suppressed reference — boost if deficient
+    clarity:  -2,    // 400–700 Hz: neutral-slightly suppressed
+    presence: +2,    // 2–5 kHz:    moderate — may be boosted by BWE
+    air:      +1,    // 6–12 kHz:   slight uplift reference — cut if BWE over-synthesised
+  },
 }
 
 // ── Trigger thresholds (dB deviation from reference to apply EQ) ──────────────
@@ -71,6 +87,8 @@ const TRIGGERS = {
   podcast_ready: { mud: 2, presence: 2, warmth: 3, air: 3, clarity: 2 },
   voice_ready:   { mud: 3, presence: 2, warmth: 4, air: 4, clarity: 2 },
   general_clean: { mud: 3, presence: 2, warmth: 3, air: 4, clarity: 2 },
+  // NE-7: tighter triggers — separated audio is more sensitive to overcorrection
+  noise_eraser:  { mud: 4, presence: 3, warmth: 3, air: 4, clarity: 3 },
 }
 
 // ── EQ center frequencies ────────────────────────────────────────────────────
@@ -114,6 +132,7 @@ const BANDS = {
 export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseFloorDbfs) {
   const ref     = EQ_REFERENCES[presetId] ?? EQ_REFERENCES.general_clean
   const trigger = TRIGGERS[presetId]      ?? TRIGGERS.general_clean
+  const maxGain = presetId === 'noise_eraser' ? NE_MAX_GAIN_DB : MAX_GAIN_DB
 
   const { samples } = await readWavSamples(wavPath)
 
@@ -155,7 +174,7 @@ export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseF
     delta: delta.mud,
     trigger: trigger.mud,
     direction: 'cut',     // positive delta → cut
-    maxGain: MAX_GAIN_DB,
+    maxGain,
     center: EQ_CENTERS.mud,
     gainScale: 0.8,       // don't cut the full delta, be conservative
   })
@@ -167,7 +186,7 @@ export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseF
     delta: delta.clarity,
     trigger: trigger.clarity,
     direction: 'cut',
-    maxGain: 2,           // spec: -1 to -2 dB clarity cut
+    maxGain: Math.min(2, maxGain),  // spec: -1 to -2 dB clarity cut
     center: EQ_CENTERS.clarity,
     gainScale: 0.5,
   })
@@ -179,14 +198,15 @@ export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseF
     delta: delta.presence,
     trigger: trigger.presence,
     direction: 'boost',   // negative delta → boost
-    maxGain: MAX_GAIN_DB,
+    maxGain,
     center: EQ_CENTERS.presence,
     gainScale: 0.7,
   })
   if (bandResults.presence_boost.applied) filters.push(bandResults.presence_boost.filter)
 
   // --- Warmth boost (ACX: only if mud cut NOT applied, per spec) ---
-  const warmthCutApplicable = presetId === 'podcast_ready'  // podcast: warmth cut
+  // noise_eraser: warmth boost always eligible (body is typically thin post-separation)
+  const warmthCutApplicable   = presetId === 'podcast_ready'
   const warmthBoostApplicable = presetId !== 'podcast_ready' && !bandResults.mud_cut.applied
   bandResults.warmth_boost = { applied: false }
 
@@ -197,15 +217,20 @@ export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseF
     if (bandResults.warmth_boost.applied) filters.push(bandResults.warmth_boost.filter)
   } else if (warmthBoostApplicable && delta.warmth < -trigger.warmth) {
     // Warmth boost (only if no mud cut applied)
-    const gainDb = Math.min(Math.abs(delta.warmth) * 0.5, 2)
+    const gainDb = Math.min(Math.abs(delta.warmth) * 0.5, Math.min(maxGain, 3))
     bandResults.warmth_boost = buildBoost('warmth_boost', gainDb, EQ_CENTERS.warmth)
     if (bandResults.warmth_boost.applied) filters.push(bandResults.warmth_boost.filter)
   }
 
-  // --- Air boost ---
+  // --- Air: boost if deficient, cut if BWE over-synthesised (NE-7 bidirectional) ---
   if (delta.air < -trigger.air) {
     const gainDb = Math.min(Math.abs(delta.air) * 0.4, presetId === 'podcast_ready' ? 2 : 1.5)
     bandResults.air_boost = buildBoost('air_boost', gainDb, EQ_CENTERS.air)
+    if (bandResults.air_boost.applied) filters.push(bandResults.air_boost.filter)
+  } else if (presetId === 'noise_eraser' && delta.air > trigger.air) {
+    // NE-7: cut air if BWE has over-synthesised HF content
+    const gainDb = Math.min(delta.air * 0.5, maxGain)
+    bandResults.air_boost = buildCut('air_cut', gainDb, EQ_CENTERS.air)
     if (bandResults.air_boost.applied) filters.push(bandResults.air_boost.filter)
   } else {
     bandResults.air_boost = { applied: false }
