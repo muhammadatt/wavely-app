@@ -58,7 +58,17 @@ router.post('/process', upload.single('file'), async (req, res) => {
     }
 
     // --- Process ---
-    console.log(`Processing: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}`)
+    // Allow per-request preset overrides (e.g. separationModel for noise_eraser)
+    const presetOverrides = {}
+    if (req.body.separation_model && preset === 'noise_eraser') {
+      const allowedModels = ['demucs', 'convtasnet']
+      if (!allowedModels.includes(req.body.separation_model)) {
+        return res.status(400).json({ error: `Invalid separation_model: ${req.body.separation_model}` })
+      }
+      presetOverrides.separationModel = req.body.separation_model
+    }
+
+    console.log(`Processing: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}${presetOverrides.separationModel ? ` model=${presetOverrides.separationModel}` : ''}`)
     const startTime = Date.now()
 
     const { outputPath, report, peaks } = await processAudio(
@@ -66,6 +76,7 @@ router.post('/process', upload.single('file'), async (req, res) => {
       req.file.originalname,
       preset,
       outputProfile,
+      presetOverrides,
     )
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)

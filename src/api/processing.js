@@ -20,7 +20,7 @@ import { renderRegionToBuffer } from '../audio/processing.js'
  * @returns {{ report: object, audioBlob: Blob, peaks: object[] }}
  */
 export async function processAudioOnServer({
-  segments, sampleRate, channels, fileName, presetId, outputProfileId,
+  segments, sampleRate, channels, fileName, presetId, outputProfileId, separationModel,
 }) {
   // Render the full timeline to a WAV blob for upload
   const wavBlob = await renderTimelineToWavBlob(segments, sampleRate, channels)
@@ -30,6 +30,7 @@ export async function processAudioOnServer({
   formData.append('file', wavBlob, fileName || 'audio.wav')
   formData.append('preset', presetId)
   formData.append('output_profile', outputProfileId)
+  if (separationModel) formData.append('separation_model', separationModel)
 
   // Send to server
   const response = await fetch('/api/process', {

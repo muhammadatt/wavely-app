@@ -65,7 +65,34 @@ export const PIPELINES = {
   voice_ready:   STANDARD_PIPELINE,
   general_clean: STANDARD_PIPELINE,
 
-  // noise_eraser: defined in Sprint NE-1. The preset exists in presets.js
-  // and the UI shows it as "Coming soon". Pipeline will be added here once
-  // the NE stage functions (rnnoisePrePass, separateVocals, etc.) are built.
+  // Noise Eraser: parallel separation path replacing Stages 1–4a.
+  // Rejoins the standard chain at normalize (Stage 5) through extractPeaks.
+  //
+  // Key differences from STANDARD_PIPELINE:
+  //   - monoMixdown is omitted — separateVocals handles channel conversion
+  //     AFTER separation to preserve separation quality on stereo inputs.
+  //   - hpf / noiseReduce / enhancementEQ / deEss / compress are all replaced
+  //     by the NE-1 through NE-7 separation stages.
+  //   - silenceAnalysisRaw is kept: provides rawNoiseFloor for NE-2 tonal
+  //     analysis (hum detection) and NE-4 validation logging.
+  noise_eraser: [
+    stages.decode,
+    // No monoMixdown here — see separateVocals
+    stages.measureBefore,
+    stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
+    stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
+    stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
+    stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
+    stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
+    stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
+    stages.bandwidthExtension,      // NE-6: AudioSR HF restoration (conditional)
+    stages.separationEQ,            // NE-7: Post-separation enhancement EQ
+    stages.normalize,               // Stage 5: Loudness normalization
+    stages.truePeakLimit,           // Stage 6: True peak limiting
+    stages.measureAfter,
+    stages.acxCertification,        // Only emits when output_profile === 'acx'
+    stages.qualityAdvisory,
+    stages.encode,
+    stages.extractPeaks,
+  ],
 }

@@ -41,6 +41,8 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
+import { runRnnoise, runSeparation, runAudioSR } from './separation.js'
+import { validateSeparation } from './separationValidation.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -313,6 +315,211 @@ export async function encode(ctx) {
 
 export async function extractPeaks(ctx) {
   ctx.peaks = await extractPeaksFromFile(ctx.currentPath)
+}
+
+// ── NE Stage: RNNoise pre-separation pass (NE-1) ──────────────────────────────
+// Reduces stationary broadband noise before handing off to Demucs/ConvTasNet.
+// Applied unconditionally to all noise_eraser files.
+
+export async function rnnoisePrePass(ctx) {
+  const preNoiseFloor = ctx.results.rawNoiseFloor ?? ctx.results.beforeMeasurements?.noiseFloorDbfs
+  const outPath = ctx.tmp('.wav')
+  await runRnnoise(ctx.currentPath, outPath)
+  ctx.currentPath = outPath
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+  ctx.results.separationPipeline.rnnoisePrePass = {
+    applied:                true,
+    pre_noise_floor_dbfs:   round2(preNoiseFloor ?? null),
+    post_noise_floor_dbfs:  null,  // measured in NE-4 validation
+  }
+  await logLevel('after NE-1 RNNoise', ctx.currentPath, {})
+}
+
+// ── NE Stage: Tonal noise pre-treatment (NE-2, conditional) ──────────────────
+// Removes strong tonal components (hum, fan resonances) before separation.
+// Demucs handles broadband noise well but is weaker on strong tonal noise.
+
+export async function tonalPretreatment(ctx) {
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+  const rawNoiseFloor = ctx.results.rawNoiseFloor
+
+  // Detect 60 Hz and 120 Hz hum from the pre-processing noise floor.
+  // Full spectral tonal scan (Sprint NE-2) uses the silenceRaw power spectrum.
+  // Current implementation applies hum notches when noise floor is elevated.
+  const apply60Hz  = rawNoiseFloor !== null && rawNoiseFloor > -45
+  const apply120Hz = apply60Hz
+  const notches    = []
+
+  if (apply60Hz || apply120Hz) {
+    const outPath = ctx.tmp('.wav')
+    // Build notch chain: Q=12, -24 dB at each tonal frequency
+    const filters = []
+    if (apply60Hz)  { filters.push('equalizer=f=60:t=q:w=12:g=-24');  notches.push({ freq_hz: 60,  gain_db: -24 }) }
+    if (apply120Hz) { filters.push('equalizer=f=120:t=q:w=12:g=-24'); notches.push({ freq_hz: 120, gain_db: -24 }) }
+    await applyParametricEQ(ctx.currentPath, outPath, filters)
+    ctx.currentPath = outPath
+    console.log(`[NE-2] Tonal pre-treatment applied: ${notches.map(n => `${n.freq_hz}Hz`).join(', ')}`)
+  } else {
+    console.log('[NE-2] No tonal components detected — NE-2 skipped')
+  }
+
+  ctx.results.separationPipeline.tonalPretreatment = {
+    applied: notches.length > 0,
+    notches,
+  }
+}
+
+// ── NE Stage: Vocal source separation (NE-3) ─────────────────────────────────
+// Extracts the voice signal, discarding all non-voice content.
+// Uses Demucs htdemucs_ft (default) or ConvTasNet (fast mode).
+// Mono mixdown happens AFTER separation to preserve separation quality.
+
+export async function separateVocals(ctx) {
+  // Save the pre-separation path for NE-4 validation comparison
+  ctx.nePreSeparationPath = ctx.currentPath
+
+  const model    = ctx.preset.separationModel ?? 'demucs'
+  const outPath  = ctx.tmp('.wav')
+
+  console.log(`[NE-3] Starting vocal separation with ${model} — this may take several minutes`)
+  await runSeparation(ctx.currentPath, outPath, model)
+  ctx.currentPath = outPath
+
+  // After separation: apply mono mixdown if preset requires it.
+  // Demucs outputs stereo from stereo input; ConvTasNet outputs mono.
+  // Converting to mono after separation preserves more separation quality
+  // than pre-converting to mono before separation.
+  if (ctx.preset.channelOutput === 'mono' && ctx.inputChannels > 1 && model === 'demucs') {
+    const monoPath = ctx.tmp('.wav')
+    await mixdownToMono(ctx.currentPath, monoPath)
+    ctx.currentPath = monoPath
+    ctx.results.stereoToMono = true
+  } else {
+    ctx.results.stereoToMono = ctx.results.stereoToMono ?? false
+  }
+
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+  ctx.results.separationPipeline.separation = {
+    model,
+    applied: true,
+  }
+  await logLevel('after NE-3 separation', ctx.currentPath, { model })
+}
+
+// ── NE Stage: Post-separation validation (NE-4) ───────────────────────────────
+// Spectral flatness artifact detection, sibilance ratio, breath ratio, quality rating.
+
+export async function separationValidation(ctx) {
+  const assessment = await validateSeparation(ctx.nePreSeparationPath, ctx.currentPath)
+
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+  ctx.results.separationPipeline.validation = assessment
+
+  // Update rnnoisePrePass post noise floor from NE-4 measurement
+  if (ctx.results.separationPipeline.rnnoisePrePass) {
+    ctx.results.separationPipeline.rnnoisePrePass.post_noise_floor_dbfs =
+      assessment.postSeparationNoiseFloorDbfs
+  }
+  ctx.results.separationPipeline.separation.post_separation_noise_floor_dbfs =
+    assessment.postSeparationNoiseFloorDbfs
+  ctx.results.separationPipeline.separation.sibilance_ratio  = assessment.sibilanceRatio
+  ctx.results.separationPipeline.separation.breath_ratio     = assessment.breathRatio
+  ctx.results.separationPipeline.separation.artifact_flags   = assessment.artifactFlags
+  ctx.results.separationPipeline.separation_quality          = assessment.separationQuality
+
+  // Store postSeparationSilenceAnalysis for normalize stage (silence exclusion threshold)
+  ctx.results.postSeparationSilenceAnalysis = assessment.postSeparationSilenceAnalysis
+
+  assessment.artifactFlags.forEach(flag => console.warn(`[NE-4] ${flag}`))
+  console.log(
+    `[NE-4] Separation quality: ${assessment.separationQuality} | ` +
+    `noise floor: ${assessment.postSeparationNoiseFloorDbfs}dBFS | ` +
+    `sibilance: ${assessment.sibilanceRatio} | breath: ${assessment.breathRatio}`
+  )
+}
+
+// ── NE Stage: Residual cleanup (NE-5, conditional) ───────────────────────────
+// Light DF3 pass to mop up separation bleed. Skipped if noise floor < -55 dBFS.
+
+export async function residualCleanup(ctx) {
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+  const noiseFloor = ctx.results.separationPipeline.validation?.postSeparationNoiseFloorDbfs
+
+  if (noiseFloor === null || noiseFloor === undefined || noiseFloor <= -55) {
+    ctx.results.separationPipeline.residualCleanup = { applied: false, skippedReason: 'Noise floor already below -55 dBFS' }
+    console.log(`[NE-5] Residual cleanup skipped — noise floor ${noiseFloor}dBFS ≤ -55 dBFS`)
+    return
+  }
+
+  // Tier 2 ceiling: 6 dB max attenuation (light cleanup pass)
+  const nrPath = ctx.tmp('.wav')
+  const { applyNoiseReduction: applyNR } = await import('./noiseReduce.js')
+  const nrResult = await applyNR(ctx.currentPath, nrPath, {
+    ceilingTier:    2,
+    noiseFloorDbfs: noiseFloor,
+  })
+  ctx.currentPath = nrPath
+  ctx.results.separationPipeline.residualCleanup = {
+    applied:                     true,
+    tier:                        2,
+    pre_noise_floor_dbfs:        round2(noiseFloor),
+    post_cleanup_noise_floor_dbfs: null,  // measured in Stage 7
+  }
+  await logLevel('after NE-5 residual cleanup', ctx.currentPath, { tier: nrResult.tier })
+}
+
+// ── NE Stage: Bandwidth extension (NE-6, conditional) ────────────────────────
+// Restores HF voice content attenuated during source separation.
+// Skipped if sibilance ratio ≥ 0.8 AND post-separation noise floor < -55 dBFS.
+
+export async function bandwidthExtension(ctx) {
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+  const validation   = ctx.results.separationPipeline.validation
+  const sibilance    = validation?.sibilanceRatio ?? 0
+  const noiseFloor   = validation?.postSeparationNoiseFloorDbfs ?? 0
+
+  const skip = sibilance >= 0.8 && noiseFloor <= -55
+  if (skip) {
+    ctx.results.separationPipeline.bandwidthExtension = {
+      applied: false, skippedReason: 'Sibilance well-preserved and noise floor clean — BWE not needed',
+    }
+    console.log('[NE-6] Bandwidth extension skipped — sibilance preserved, noise floor clean')
+    return
+  }
+
+  const bwePath = ctx.tmp('.wav')
+  await runAudioSR(ctx.currentPath, bwePath, 3.5)
+  ctx.currentPath = bwePath
+  ctx.results.separationPipeline.bandwidthExtension = {
+    applied:            true,
+    model:              'AudioSR',
+    hf_energy_delta_db: null,  // measured in Stage 7 report
+  }
+  await logLevel('after NE-6 bandwidth extension', ctx.currentPath, {})
+}
+
+// ── NE Stage: Post-separation enhancement EQ (NE-7) ──────────────────────────
+// Corrects tonal imbalances from separation + BWE using a separation-specific
+// reference profile. Max gain ±4 dB (tighter than standard ±5 dB).
+
+export async function separationEQ(ctx) {
+  // Use the post-separation silence analysis from NE-4 as the silence context.
+  // This ensures voiced frame detection reflects the separated signal character,
+  // not the pre-processing signal (which may have had a very different noise floor).
+  const silenceAnalysis = ctx.results.postSeparationSilenceAnalysis
+    ?? ctx.results.separationPipeline?.validation?.postSeparationSilenceAnalysis
+
+  const noiseFloor = ctx.results.separationPipeline?.validation?.postSeparationNoiseFloorDbfs ?? -60
+
+  const eqResult = await analyzeSpectrum(ctx.currentPath, 'noise_eraser', silenceAnalysis, noiseFloor)
+  const eqPath   = ctx.tmp('.wav')
+  await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
+  ctx.currentPath      = eqPath
+  ctx.results.separationEQ = eqResult
+  await logLevel('after NE-7 separation EQ', ctx.currentPath, {
+    applied: eqResult.applied,
+    filters: eqResult.ffmpegFilters.length,
+  })
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
