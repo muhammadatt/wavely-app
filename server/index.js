@@ -11,6 +11,12 @@ const PORT = process.env.PORT || 3001
 // X-Forwarded-For. Without this, rate-limit returns 428 on all requests.
 app.set('trust proxy', 1)
 
+// Debug: log the resolved client IP on every request (remove after confirmed working)
+app.use((req, _res, next) => {
+  console.log(`[ip] ${req.method} ${req.path} — ip=${req.ip} xff=${req.headers['x-forwarded-for']}`)
+  next()
+})
+
 // CORS: restrict to known origins in production
 // CORS_ORIGINS       — comma-separated exact origin matches
 // CORS_ORIGIN_PATTERNS — comma-separated regex patterns (for Vercel preview URLs)
