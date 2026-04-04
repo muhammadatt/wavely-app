@@ -3,6 +3,9 @@ dist
 .DS_Store
 *.local
 
+# Python virtual environment
+server/.venv
+
 # Local environment overrides — never committed
 server/.env
 
