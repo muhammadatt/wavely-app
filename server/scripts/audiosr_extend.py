@@ -51,7 +51,13 @@ def main():
 
     import torch
     import torchaudio
-    import audiosr
+    try:
+        import audiosr
+    except ImportError:
+        print('AudioSR is not installed in this environment — NE-6 skipped.', flush=True)
+        import shutil
+        shutil.copy(args.input, args.output)
+        return
 
     device = resolve_device(args.device)
 
