@@ -6,19 +6,29 @@ import { processRoute } from './routes/process.js'
 const app = express()
 const PORT = process.env.PORT || 3001
 
+// Trust the first proxy hop (Apache reverse proxy on the same machine).
+// Required for express-rate-limit to correctly identify client IPs via
+// X-Forwarded-For. Without this, rate-limit returns 428 on all requests.
+app.set('trust proxy', 1)
+
 // CORS: restrict to known origins in production
+// CORS_ORIGINS       — comma-separated exact origin matches
+// CORS_ORIGIN_PATTERNS — comma-separated regex patterns (for Vercel preview URLs)
 const allowedOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',')
+  ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
   : ['http://localhost:5173', 'http://localhost:4173']
+
+const allowedPatterns = process.env.CORS_ORIGIN_PATTERNS
+  ? process.env.CORS_ORIGIN_PATTERNS.split(',').map(p => new RegExp(p.trim()))
+  : []
 
 app.use(cors({
   origin(origin, callback) {
     // Allow requests with no origin (server-to-server, curl, etc.) in dev
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true)
-    } else {
-      callback(new Error('Not allowed by CORS'))
-    }
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.includes(origin)) return callback(null, true)
+    if (allowedPatterns.some(pattern => pattern.test(origin))) return callback(null, true)
+    callback(new Error('Not allowed by CORS'))
   },
 }))
 
