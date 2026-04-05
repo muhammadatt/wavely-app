@@ -51,8 +51,8 @@ def main():
         denoised_channels = []
         for ch in range(waveform.shape[0]):
             channel_np = waveform[ch].numpy()
-            rnn = RNNoise()
-            cleaned = rnn.process_wav(channel_np, sample_rate=RNNOISE_SR)
+            rnn = RNNoise(sample_rate=RNNOISE_SR)
+            cleaned = rnn.process_wav(channel_np)
             denoised_channels.append(torch.from_numpy(cleaned))
         waveform = torch.stack(denoised_channels, dim=0)
     except ImportError:
