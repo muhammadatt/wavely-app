@@ -50,14 +50,23 @@ def separate_demucs(waveform, sr, device):
     Returns: torch.Tensor (channels, samples) at PIPELINE_SR.
     """
     import torch
-    from demucs.api import Separator
+    from demucs.pretrained import get_model
+    from demucs.apply import apply_model
 
-    separator = Separator('htdemucs_ft', device=device, segment=7.8, overlap=0.25, shifts=1)
-    # Demucs expects (batch, channels, samples); add batch dim
-    audio = waveform.unsqueeze(0)
-    origin, separated = separator.separate_tensor(audio, sr=sr)
-    # separated: dict of {stem_name: (batch, channels, samples)}
-    vocals = separated['vocals'].squeeze(0)  # → (channels, samples)
+    model = get_model('htdemucs_ft')
+    model.to(device)
+    model.eval()
+
+    # apply_model expects (channels, samples), returns (sources, channels, samples)
+    with torch.no_grad():
+        sources = apply_model(
+            model, waveform.to(device),
+            shifts=1, overlap=0.25, device=device, segment=7.8,
+        )
+
+    # Extract vocals stem by index
+    vocals_idx = model.sources.index('vocals')
+    vocals = sources[vocals_idx].cpu()  # (channels, samples)
     return vocals
 
 

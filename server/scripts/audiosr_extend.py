@@ -62,7 +62,6 @@ def main():
     device = resolve_device(args.device)
 
     # AudioSR expects a file path and returns a super-resolved waveform.
-    # It handles internal resampling to its operating SR and back.
     sr_model = audiosr.build_model(model_name='basic', device=device)
 
     waveform = audiosr.super_resolution(
@@ -71,20 +70,23 @@ def main():
         guidance_scale=args.guidance_scale,
         ddim_steps=50,
         latent_t_per_second=12.8,
-    )  # returns np.ndarray or torch.Tensor, shape (1, channels, samples)
+    )  # returns np.ndarray or torch.Tensor, shape varies
 
-    # Normalise output shape to (channels, samples)
-    if hasattr(waveform, 'numpy'):
-        waveform = waveform.squeeze(0)          # torch: (channels, samples)
-    else:
-        import numpy as np
-        waveform = torch.from_numpy(np.squeeze(waveform, axis=0))
+    # Normalise to torch.Tensor with shape (channels, samples)
+    import numpy as np
+    if isinstance(waveform, np.ndarray):
+        waveform = torch.from_numpy(waveform)
+    # Squeeze batch dims: (1, 1, samples) → (1, samples) or (1, ch, samples) → (ch, samples)
+    while waveform.dim() > 2:
+        waveform = waveform.squeeze(0)
+    if waveform.dim() == 1:
+        waveform = waveform.unsqueeze(0)  # (samples,) → (1, samples)
 
-    # AudioSR output SR may differ — resample to pipeline format if needed
-    audiosr_output_sr = sr_model.config.get('sample_rate', PIPELINE_SR)
-    if audiosr_output_sr != PIPELINE_SR:
+    # AudioSR 'basic' model outputs at 48 kHz
+    AUDIOSR_OUTPUT_SR = 48000
+    if AUDIOSR_OUTPUT_SR != PIPELINE_SR:
         import torchaudio.transforms as T
-        resampler = T.Resample(orig_freq=audiosr_output_sr, new_freq=PIPELINE_SR)
+        resampler = T.Resample(orig_freq=AUDIOSR_OUTPUT_SR, new_freq=PIPELINE_SR)
         waveform  = resampler(waveform)
 
     torchaudio.save(

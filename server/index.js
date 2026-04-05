@@ -11,11 +11,7 @@ const PORT = process.env.PORT || 3001
 // X-Forwarded-For. Without this, rate-limit returns 428 on all requests.
 app.set('trust proxy', 1)
 
-// Debug: log the resolved client IP on every request (remove after confirmed working)
-app.use((req, _res, next) => {
-  console.log(`[ip] ${req.method} ${req.path} — ip=${req.ip} xff=${req.headers['x-forwarded-for']}`)
-  next()
-})
+
 
 // CORS: restrict to known origins in production
 // CORS_ORIGINS       — comma-separated exact origin matches
@@ -34,7 +30,6 @@ app.use(cors({
     if (!origin) return callback(null, true)
     if (allowedOrigins.includes(origin)) return callback(null, true)
     if (allowedPatterns.some(pattern => pattern.test(origin))) return callback(null, true)
-    console.log(`[cors] rejected origin="${origin}" allowed=${JSON.stringify(allowedOrigins)} patterns=${JSON.stringify(allowedPatterns.map(p => p.source))}`)
     callback(new Error('Not allowed by CORS'))
   },
 }))

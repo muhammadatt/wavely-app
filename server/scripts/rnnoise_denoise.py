@@ -45,21 +45,32 @@ def main():
         resampler_up = T.Resample(orig_freq=sr, new_freq=RNNOISE_SR)
         waveform = resampler_up(waveform)
 
-    # Apply RNNoise channel-by-channel (operates on mono chunks)
+    # Apply RNNoise channel-by-channel.
+    # pyrnnoise.denoise_wav(in_path, out_path) operates on file paths, so each
+    # channel is written to a temp WAV, processed, and read back.
     try:
         from pyrnnoise import RNNoise
+        import tempfile
+        import os
+
         denoised_channels = []
         for ch in range(waveform.shape[0]):
-            channel_np = waveform[ch].numpy()
-            rnn = RNNoise(sample_rate=RNNOISE_SR)
-            cleaned = rnn.denoise_wav(channel_np)
-            denoised_channels.append(torch.from_numpy(cleaned))
+            channel_data = waveform[ch].unsqueeze(0)  # (1, samples)
+            tmp_in  = tempfile.mktemp(suffix='_rnn_in.wav')
+            tmp_out = tempfile.mktemp(suffix='_rnn_out.wav')
+            try:
+                torchaudio.save(tmp_in, channel_data, RNNOISE_SR)
+                rnn = RNNoise(sample_rate=RNNOISE_SR)
+                rnn.denoise_wav(tmp_in, tmp_out)
+                cleaned, _ = torchaudio.load(tmp_out)
+                denoised_channels.append(cleaned.squeeze(0))
+            finally:
+                for f in (tmp_in, tmp_out):
+                    if os.path.exists(f):
+                        os.remove(f)
         waveform = torch.stack(denoised_channels, dim=0)
     except ImportError:
         # Fallback: if pyrnnoise unavailable, pass through with a warning.
-        # This allows the pipeline to run in dev environments without pyrnnoise
-        # installed, at the cost of skipping NE-1. The separation stage (NE-3)
-        # can still produce usable output without the pre-pass.
         import sys
         print('[rnnoise] WARNING: pyrnnoise not installed — NE-1 pre-pass skipped, '
               'passing audio through unchanged.', file=sys.stderr)
