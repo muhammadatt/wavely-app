@@ -52,7 +52,7 @@ def main():
         for ch in range(waveform.shape[0]):
             channel_np = waveform[ch].numpy()
             rnn = RNNoise(sample_rate=RNNOISE_SR)
-            cleaned = rnn.process_wav(channel_np)
+            cleaned = rnn.denoise_wav(channel_np)
             denoised_channels.append(torch.from_numpy(cleaned))
         waveform = torch.stack(denoised_channels, dim=0)
     except ImportError:
