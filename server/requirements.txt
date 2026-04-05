@@ -4,16 +4,16 @@
 # Follow the order below to avoid resolver conflicts.
 #
 # GPU (CUDA 12.1):
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch==2.0.2+cu121 torchaudio==2.0.2+cu121 --index-url https://download.pytorch.org/whl/cu121
 #   pip install -r server/requirements.txt
 #
 # CPU-only:
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+#   pip install torch==2.0.2+cpu torchaudio==2.0.2+cpu --index-url https://download.pytorch.org/whl/cpu
 #   pip install -r server/requirements.txt
 #
-# torch and torchaudio are intentionally omitted here — they must be installed
-# first with the correct index URL for your compute environment (GPU vs CPU).
-# See above.
+# torch 2.0.2 / torchaudio 2.0.2 are pinned because deepfilternet 0.5.6 imports
+# torchaudio.backend.common.AudioMetaData which was removed in torchaudio 2.1.
+# Do not upgrade torchaudio beyond 2.0.x until deepfilternet drops this dependency.
 
 # ── Standard pipeline ─────────────────────────────────────────────────────────
 

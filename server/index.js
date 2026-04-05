@@ -34,6 +34,7 @@ app.use(cors({
     if (!origin) return callback(null, true)
     if (allowedOrigins.includes(origin)) return callback(null, true)
     if (allowedPatterns.some(pattern => pattern.test(origin))) return callback(null, true)
+    console.log(`[cors] rejected origin="${origin}" allowed=${JSON.stringify(allowedOrigins)} patterns=${JSON.stringify(allowedPatterns.map(p => p.source))}`)
     callback(new Error('Not allowed by CORS'))
   },
 }))
@@ -47,6 +48,10 @@ const processLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many processing requests, please try again later' },
+  // Fall back to socket IP if X-Forwarded-For is absent — prevents 428 when
+  // the proxy doesn't forward the header.
+  keyGenerator: (req) => req.ip ?? req.socket.remoteAddress ?? 'unknown',
+  validate: { xForwardedForHeader: false },
 })
 app.use('/api/process', processLimiter)
 
