@@ -12,12 +12,24 @@ Run after installing or upgrading deepfilternet:
 import pathlib
 import sys
 
-try:
-    import df  # noqa: F401 — just check it's importable
-    df_path = pathlib.Path(df.__file__).parent
-except ImportError:
+import subprocess
+result = subprocess.run(
+    [sys.executable, "-m", "pip", "show", "deepfilternet"],
+    capture_output=True, text=True
+)
+if result.returncode != 0:
     print("ERROR: deepfilternet is not installed in this Python environment.")
     sys.exit(1)
+
+location = next(
+    (line.split(": ", 1)[1].strip() for line in result.stdout.splitlines() if line.startswith("Location:")),
+    None
+)
+if not location:
+    print("ERROR: Could not determine deepfilternet install location.")
+    sys.exit(1)
+
+df_path = pathlib.Path(location) / "df"
 
 io_path = df_path / "io.py"
 content = io_path.read_text()
