@@ -33,7 +33,6 @@ def main():
     parser.add_argument('--output', required=True, help='Output WAV (32-bit float, 44.1 kHz)')
     args = parser.parse_args()
 
-    import torch
     import torchaudio
     import torchaudio.transforms as T
 
@@ -45,30 +44,40 @@ def main():
         resampler_up = T.Resample(orig_freq=sr, new_freq=RNNOISE_SR)
         waveform = resampler_up(waveform)
 
-    # Apply RNNoise channel-by-channel.
-    # pyrnnoise.denoise_wav(in_path, out_path) operates on file paths, so each
-    # channel is written to a temp WAV, processed, and read back.
+    # Apply RNNoise to the full file.
+    # pyrnnoise.denoise_wav(in_path, out_path) operates on WAV file paths.
+    # Write a 16-bit PCM WAV at 48 kHz (RNNoise's expected input format),
+    # denoise, then read back and resample to pipeline format.
     try:
         from pyrnnoise import RNNoise
         import tempfile
         import os
 
-        denoised_channels = []
-        for ch in range(waveform.shape[0]):
-            channel_data = waveform[ch].unsqueeze(0)  # (1, samples)
-            tmp_in  = tempfile.mktemp(suffix='_rnn_in.wav')
-            tmp_out = tempfile.mktemp(suffix='_rnn_out.wav')
-            try:
-                torchaudio.save(tmp_in, channel_data, RNNOISE_SR)
-                rnn = RNNoise(sample_rate=RNNOISE_SR)
-                rnn.denoise_wav(tmp_in, tmp_out)
-                cleaned, _ = torchaudio.load(tmp_out)
-                denoised_channels.append(cleaned.squeeze(0))
-            finally:
-                for f in (tmp_in, tmp_out):
-                    if os.path.exists(f):
-                        os.remove(f)
-        waveform = torch.stack(denoised_channels, dim=0)
+        # Mix to mono if stereo (RNNoise is mono-only)
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+
+        # Write 16-bit PCM WAV at 48 kHz for RNNoise
+        fd_in, tmp_in   = tempfile.mkstemp(suffix='_rnn_in.wav')
+        fd_out, tmp_out = tempfile.mkstemp(suffix='_rnn_out.wav')
+        os.close(fd_in)
+        os.close(fd_out)
+
+        try:
+            torchaudio.save(tmp_in, waveform, RNNOISE_SR,
+                            bits_per_sample=16, encoding='PCM_S')
+            rnn = RNNoise(sample_rate=RNNOISE_SR)
+            rnn.denoise_wav(tmp_in, tmp_out)
+
+            if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 44:
+                waveform, _ = torchaudio.load(tmp_out)
+            else:
+                print('[rnnoise] WARNING: denoise_wav produced no output — '
+                      'passing through unchanged.', flush=True)
+        finally:
+            for f in (tmp_in, tmp_out):
+                if os.path.exists(f):
+                    os.remove(f)
     except ImportError:
         # Fallback: if pyrnnoise unavailable, pass through with a warning.
         import sys

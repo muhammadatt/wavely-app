@@ -43,9 +43,8 @@ const processLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many processing requests, please try again later' },
-  // Fall back to socket IP if X-Forwarded-For is absent — prevents 428 when
-  // the proxy doesn't forward the header.
-  keyGenerator: (req) => req.ip ?? req.socket.remoteAddress ?? 'unknown',
+  // Suppress X-Forwarded-For validation — Apache proxy handles IP forwarding
+  // and trust proxy is already set above.
   validate: { xForwardedForHeader: false },
 })
 app.use('/api/process', processLimiter)
