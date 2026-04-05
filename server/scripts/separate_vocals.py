@@ -57,16 +57,16 @@ def separate_demucs(waveform, sr, device):
     model.to(device)
     model.eval()
 
-    # apply_model expects (channels, samples), returns (sources, channels, samples)
+    # apply_model expects (batch, channels, samples), returns (batch, sources, channels, samples)
     with torch.no_grad():
         sources = apply_model(
-            model, waveform.to(device),
+            model, waveform.unsqueeze(0).to(device),
             shifts=1, overlap=0.25, device=device, segment=7.8,
         )
 
-    # Extract vocals stem by index
+    # Extract vocals stem by index — squeeze batch dim
     vocals_idx = model.sources.index('vocals')
-    vocals = sources[vocals_idx].cpu()  # (channels, samples)
+    vocals = sources[0, vocals_idx].cpu()  # (channels, samples)
     return vocals
 
 
