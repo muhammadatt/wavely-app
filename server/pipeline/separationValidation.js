@@ -55,10 +55,13 @@ export async function validateSeparation(preSeparationPath, postSeparationPath) 
   // Voice presence check — abort if separation produced silence
   const postVoicedCount = postSA.frames.filter(f => !f.isSilence).length
   if (postVoicedCount === 0) {
-    throw new Error(
+    const err = new Error(
       'Voice could not be isolated from this recording. ' +
-      'The signal-to-noise ratio may be too low for separation.'
+      'The signal-to-noise ratio may be too low for separation. ' +
+      'Try using the Demucs model for better results on heavily noisy recordings.'
     )
+    err.statusCode = 422
+    throw err
   }
 
   const [preSamples, postSamples] = await Promise.all([

@@ -122,8 +122,9 @@ router.post('/process', upload.single('file'), async (req, res) => {
     // Clean up processed output
     await unlink(outputPath).catch(() => {})
   } catch (err) {
+    const status = err.statusCode || 500
     console.error('Processing error:', err)
-    res.status(500).json({ error: 'Processing failed', message: err.message })
+    res.status(status).json({ error: err.message })
   } finally {
     // Clean up uploaded file
     if (uploadedPath) {

@@ -57,6 +57,11 @@ def separate_demucs(waveform, sr, device):
     model.to(device)
     model.eval()
 
+    # htdemucs_ft expects stereo input — duplicate mono to stereo if needed
+    was_mono = waveform.shape[0] == 1
+    if was_mono:
+        waveform = waveform.repeat(2, 1)  # (1, samples) → (2, samples)
+
     # apply_model expects (batch, channels, samples), returns (batch, sources, channels, samples)
     with torch.no_grad():
         sources = apply_model(
@@ -67,6 +72,11 @@ def separate_demucs(waveform, sr, device):
     # Extract vocals stem by index — squeeze batch dim
     vocals_idx = model.sources.index('vocals')
     vocals = sources[0, vocals_idx].cpu()  # (channels, samples)
+
+    # If input was mono, collapse stereo output back to mono
+    if was_mono:
+        vocals = vocals.mean(dim=0, keepdim=True)  # (2, samples) → (1, samples)
+
     return vocals
 
 
