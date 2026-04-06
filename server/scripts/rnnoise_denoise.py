@@ -67,7 +67,9 @@ def main():
             torchaudio.save(tmp_in, waveform, RNNOISE_SR,
                             bits_per_sample=16, encoding='PCM_S')
             rnn = RNNoise(sample_rate=RNNOISE_SR)
-            rnn.denoise_wav(tmp_in, tmp_out)
+            # denoise_wav is a generator — must be fully consumed to produce output
+            for _ in rnn.denoise_wav(tmp_in, tmp_out):
+                pass
 
             if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 44:
                 waveform, _ = torchaudio.load(tmp_out)
