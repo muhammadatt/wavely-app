@@ -42,3 +42,12 @@ asteroid>=0.7.0
 #   import audiosr; audiosr.build_model(model_name='basic')
 # Install last — pins a newer version of transformers than asteroid.
 audiosr>=0.0.2
+
+# ── VAD (Silero) ───────────────────────────────────────────────────────────────
+
+# silero_vad.py (silence/voiced frame classification using Silero VAD v5)
+# Uses torch.hub.load() — model weights (~10 MB) downloaded on first run to:
+#   ~/.cache/torch/hub/snakers4_silero-vad_master/
+# No torchaudio version constraint; compatible with torch==2.0.0.
+# Install after audiosr to avoid transformers version conflicts.
+silero-vad>=5.1
