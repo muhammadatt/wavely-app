@@ -488,14 +488,24 @@ export async function bandwidthExtension(ctx) {
   }
 
   const bwePath = ctx.tmp('.wav')
-  await runAudioSR(ctx.currentPath, bwePath, 3.5)
-  ctx.currentPath = bwePath
-  ctx.results.separationPipeline.bandwidthExtension = {
-    applied:            true,
-    model:              'AudioSR',
-    hf_energy_delta_db: null,  // measured in Stage 7 report
+  try {
+    await runAudioSR(ctx.currentPath, bwePath, 3.5)
+    ctx.currentPath = bwePath
+    ctx.results.separationPipeline.bandwidthExtension = {
+      applied:            true,
+      model:              'AudioSR',
+      hf_energy_delta_db: null,
+    }
+    await logLevel('after NE-6 bandwidth extension', ctx.currentPath, {})
+  } catch (err) {
+    // AudioSR requires ~4 GB RAM — skip gracefully on low-memory servers
+    // rather than failing the entire pipeline.
+    console.warn(`[NE-6] AudioSR skipped — ${err.message.split('\n')[0]}`)
+    ctx.results.separationPipeline.bandwidthExtension = {
+      applied: false,
+      skippedReason: 'AudioSR unavailable or out of memory — bandwidth extension skipped',
+    }
   }
-  await logLevel('after NE-6 bandwidth extension', ctx.currentPath, {})
 }
 
 // ── NE Stage: Post-separation enhancement EQ (NE-7) ──────────────────────────
