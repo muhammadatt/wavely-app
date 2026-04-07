@@ -207,6 +207,94 @@ export const PRESETS = {
     // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
     separationModel: 'demucs',
   },
+
+  // ── Resemble Enhance ────────────────────────────────────────────────────────
+  // Single-model alternative to the full Noise Eraser separation chain.
+  // Uses Resemble AI's open-source UNet denoiser + CFM-based diffusion enhancer
+  // (MIT license). Two modes:
+  //   'denoise' — denoiser only. Conservative, voice-transparent, deterministic.
+  //               Good substitute for DF3 on extreme noise. Recommended for ACX work.
+  //   'enhance' — denoise + diffusion enhancer. Adds bandwidth extension and
+  //               perceptual improvement in a single pass (replaces NR + AudioSR).
+  //               Non-deterministic. Voice timbre may shift at low lambd values.
+  //
+  // Key enhance-mode parameters:
+  //   resembleNfe    — CFM function evaluations (higher = better quality, slower; default 64)
+  //   resembleSolver — ODE solver: 'euler' | 'midpoint' | 'rk4' (default 'midpoint')
+  //   resembleLambd  — blend: 0.0=enhance-heavy → 1.0=denoise-heavy (default 0.1)
+  //   resembleTau    — CFM conditioning noise level; lower = more faithful to input (default 0.5)
+  resemble_enhance: {
+    id: 'resemble_enhance',
+    displayName: 'Resemble Enhance',
+    description: 'Neural denoising and voice enhancement with Resemble AI diffusion model',
+    audience: 'Noisy recordings needing quality restoration',
+    character: 'Clean, enhanced, bandwidth-extended',
+    targetLoudness: { value: -16, unit: 'LUFS' },
+    truePeakCeiling: -1,
+    noiseFloorTarget: null,
+    compression: {
+      mode: 'none',
+      ratio: 1,
+      threshold: 0,
+      attack: 0,
+      release: 0,
+    },
+    eqProfile: 'general',
+    deEsser: {
+      sensitivity: 'none',
+      trigger: 0,
+      maxReduction: 0,
+    },
+    channelOutput: 'mono',
+    defaultOutputProfile: 'podcast',
+    lockedOutputProfile: false,
+    // 'denoise' = UNet denoiser only (safe for ACX, deterministic).
+    // 'enhance' = denoise + CFM diffusion enhancer (adds BWE, may alter timbre).
+    resembleMode:   'enhance',
+    resembleNfe:    64,
+    resembleSolver: 'midpoint',
+    resembleLambd:  0.1,
+    resembleTau:    0.5,
+  },
+
+  // ── VoiceFixer ──────────────────────────────────────────────────────────────
+  // Vocoder-based speech restoration (MIT license). Handles noise, reverberation,
+  // low resolution (2kHz–44.1kHz), and clipping in a single model pass.
+  // The output is vocoder-resynthesized — effective for severe degradation,
+  // especially reverberant or clipped recordings. Voice character may differ
+  // from input (this is not a transparent NR tool).
+  //
+  // voiceFixerMode:
+  //   0 — Original model. Recommended for most recordings.
+  //   1 — Adds preprocessing to remove HF clipping artefacts first.
+  //   2 — Train mode. May help on extremely degraded speech; non-deterministic.
+  voicefixer: {
+    id: 'voicefixer',
+    displayName: 'VoiceFixer',
+    description: 'Vocoder-based speech restoration for reverberant or clipped audio',
+    audience: 'Reverberant, clipped, or severely degraded recordings',
+    character: 'Restored, vocoder-resynthesized voice',
+    targetLoudness: { value: -16, unit: 'LUFS' },
+    truePeakCeiling: -1,
+    noiseFloorTarget: null,
+    compression: {
+      mode: 'none',
+      ratio: 1,
+      threshold: 0,
+      attack: 0,
+      release: 0,
+    },
+    eqProfile: 'general',
+    deEsser: {
+      sensitivity: 'none',
+      trigger: 0,
+      maxReduction: 0,
+    },
+    channelOutput: 'mono',
+    defaultOutputProfile: 'podcast',
+    lockedOutputProfile: false,
+    voiceFixerMode: 0,
+  },
 }
 
 /**

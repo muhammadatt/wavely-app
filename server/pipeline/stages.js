@@ -41,7 +41,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runAudioSR } from './separation.js'
+import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
@@ -526,6 +526,74 @@ export async function separationEQ(ctx) {
     applied: eqResult.applied,
     filters: eqResult.ffmpegFilters.length,
   })
+}
+
+// ── RE Stage: Resemble Enhance denoising/enhancement (RE-1) ──────────────────
+// Single-stage replacement for the NE-1 through NE-7 block.
+// Denoise mode: UNet denoiser only — conservative, voice-transparent.
+// Enhance mode: Denoise + CFM diffusion enhancer — adds bandwidth extension
+//               and perceptual improvement (analogous to NR + AudioSR in one pass).
+// Mono mixdown happens AFTER processing to preserve model quality on stereo inputs.
+
+export async function resembleEnhance(ctx) {
+  const mode   = ctx.preset.resembleMode   ?? 'enhance'
+  const params = {
+    nfe:    ctx.preset.resembleNfe    ?? 64,
+    solver: ctx.preset.resembleSolver ?? 'midpoint',
+    lambd:  ctx.preset.resembleLambd  ?? 0.1,
+    tau:    ctx.preset.resembleTau    ?? 0.5,
+  }
+
+  const outPath = ctx.tmp('.wav')
+  console.log(`[RE-1] Starting Resemble Enhance (${mode}) — this may take several minutes`)
+  await runResembleEnhance(ctx.currentPath, outPath, mode, params)
+  ctx.currentPath = outPath
+
+  // resemble-enhance processes mono internally; apply mixdown if preset requires it.
+  if (ctx.preset.channelOutput === 'mono' && ctx.inputChannels > 1) {
+    const monoPath = ctx.tmp('.wav')
+    await mixdownToMono(ctx.currentPath, monoPath)
+    ctx.currentPath = monoPath
+    ctx.results.stereoToMono = true
+  } else {
+    ctx.results.stereoToMono = false
+  }
+
+  ctx.results.enhancementPipeline = {
+    model:  'ResembleEnhance',
+    mode,
+    ...(mode === 'enhance' && {
+      nfe:    params.nfe,
+      solver: params.solver,
+      lambd:  params.lambd,
+      tau:    params.tau,
+    }),
+  }
+  await logLevel(`after RE-1 Resemble Enhance (${mode})`, ctx.currentPath, { mode })
+}
+
+// ── VF Stage: VoiceFixer speech restoration (VF-1) ───────────────────────────
+// Single-stage replacement for the NE-1 through NE-7 block.
+// Handles noise, reverb, low resolution, and clipping in one model pass.
+// Output is vocoder-resynthesized — effective for severe degradation but
+// voice character may differ from input (not a transparent NR tool).
+
+export async function voiceFixerRestore(ctx) {
+  const mode    = ctx.preset.voiceFixerMode ?? 0
+  const outPath = ctx.tmp('.wav')
+
+  console.log(`[VF-1] Starting VoiceFixer mode ${mode} — this may take several minutes`)
+  await runVoiceFixer(ctx.currentPath, outPath, mode)
+  ctx.currentPath = outPath
+
+  // VoiceFixer outputs mono regardless of input channel count.
+  ctx.results.stereoToMono = ctx.inputChannels > 1
+
+  ctx.results.enhancementPipeline = {
+    model: 'VoiceFixer',
+    mode,
+  }
+  await logLevel(`after VF-1 VoiceFixer (mode ${mode})`, ctx.currentPath, { mode })
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

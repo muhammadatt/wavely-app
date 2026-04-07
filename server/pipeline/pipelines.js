@@ -4,9 +4,7 @@
  * incoming presetId, so adding a new preset or varying its stage sequence
  * requires no changes to the orchestrator.
  *
- * Stages are imported from stages.js. New stages for Noise Eraser (NE-1
- * through NE-7) will be added to stages.js and declared below when Sprint
- * NE-1 is implemented.
+ * Stages are imported from stages.js.
  */
 
 import * as stages from './stages.js'
@@ -91,6 +89,40 @@ export const PIPELINES = {
     stages.truePeakLimit,           // Stage 6: True peak limiting
     stages.measureAfter,
     stages.acxCertification,        // Only emits when output_profile === 'acx'
+    stages.qualityAdvisory,
+    stages.encode,
+    stages.extractPeaks,
+  ],
+
+  // Resemble Enhance: single-model alternative to the Noise Eraser separation chain.
+  // Replaces NE-1 through NE-7 with one Resemble Enhance pass (denoise or full enhance).
+  // No monoMixdown here — resembleEnhance handles channel conversion after processing.
+  resemble_enhance: [
+    stages.decode,
+    stages.measureBefore,
+    stages.silenceAnalysisRaw,
+    stages.resembleEnhance,         // RE-1: Resemble Enhance denoise or full enhance
+    stages.normalize,
+    stages.truePeakLimit,
+    stages.measureAfter,
+    stages.acxCertification,
+    stages.qualityAdvisory,
+    stages.encode,
+    stages.extractPeaks,
+  ],
+
+  // VoiceFixer: vocoder-based speech restoration for reverberant/clipped recordings.
+  // Replaces NE-1 through NE-7 with a single VoiceFixer restoration pass.
+  // VoiceFixer outputs mono — no explicit mixdown stage needed.
+  voicefixer: [
+    stages.decode,
+    stages.measureBefore,
+    stages.silenceAnalysisRaw,
+    stages.voiceFixerRestore,       // VF-1: VoiceFixer speech restoration
+    stages.normalize,
+    stages.truePeakLimit,
+    stages.measureAfter,
+    stages.acxCertification,
     stages.qualityAdvisory,
     stages.encode,
     stages.extractPeaks,

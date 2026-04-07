@@ -58,8 +58,10 @@ router.post('/process', upload.single('file'), async (req, res) => {
     }
 
     // --- Process ---
-    // Allow per-request preset overrides (e.g. separationModel for noise_eraser)
+    // Allow per-request preset overrides
     const presetOverrides = {}
+
+    // noise_eraser: separation backend override
     if (req.body.separation_model && preset === 'noise_eraser') {
       const allowedModels = ['demucs', 'convtasnet']
       if (!allowedModels.includes(req.body.separation_model)) {
@@ -68,7 +70,31 @@ router.post('/process', upload.single('file'), async (req, res) => {
       presetOverrides.separationModel = req.body.separation_model
     }
 
-    console.log(`Processing: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}${presetOverrides.separationModel ? ` model=${presetOverrides.separationModel}` : ''}`)
+    // resemble_enhance: mode override (denoise | enhance)
+    if (req.body.resemble_mode && preset === 'resemble_enhance') {
+      const allowedModes = ['denoise', 'enhance']
+      if (!allowedModes.includes(req.body.resemble_mode)) {
+        return res.status(400).json({ error: `Invalid resemble_mode: ${req.body.resemble_mode}` })
+      }
+      presetOverrides.resembleMode = req.body.resemble_mode
+    }
+
+    // voicefixer: mode override (0 | 1 | 2)
+    if (req.body.voicefixer_mode != null && preset === 'voicefixer') {
+      const mode = parseInt(req.body.voicefixer_mode, 10)
+      if (![0, 1, 2].includes(mode)) {
+        return res.status(400).json({ error: `Invalid voicefixer_mode: ${req.body.voicefixer_mode}` })
+      }
+      presetOverrides.voiceFixerMode = mode
+    }
+
+    const overrideSummary = [
+      presetOverrides.separationModel && `model=${presetOverrides.separationModel}`,
+      presetOverrides.resembleMode    && `resemble_mode=${presetOverrides.resembleMode}`,
+      presetOverrides.voiceFixerMode  != null && `voicefixer_mode=${presetOverrides.voiceFixerMode}`,
+    ].filter(Boolean).join(' ')
+
+    console.log(`Processing: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}${overrideSummary ? ` ${overrideSummary}` : ''}`)
     const startTime = Date.now()
 
     const { outputPath, report, peaks } = await processAudio(

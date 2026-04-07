@@ -18,9 +18,11 @@ const PYTHON = process.env.SEPARATION_PYTHON ?? 'python3'
 const DEVICE = process.env.SEPARATION_DEVICE ?? 'auto'
 
 const SCRIPTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
-const RNNOISE_SCRIPT  = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
-const SEPARATE_SCRIPT = path.join(SCRIPTS_DIR, 'separate_vocals.py')
-const AUDIOSR_SCRIPT  = path.join(SCRIPTS_DIR, 'audiosr_extend.py')
+const RNNOISE_SCRIPT   = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
+const SEPARATE_SCRIPT  = path.join(SCRIPTS_DIR, 'separate_vocals.py')
+const AUDIOSR_SCRIPT   = path.join(SCRIPTS_DIR, 'audiosr_extend.py')
+const RESEMBLE_SCRIPT  = path.join(SCRIPTS_DIR, 'resemble_enhance.py')
+const VOICEFIXER_SCRIPT = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -67,6 +69,49 @@ export function runAudioSR(inputPath, outputPath, guidanceScale = 3.5) {
     ['--input', inputPath, '--output', outputPath,
      '--guidance-scale', String(guidanceScale), '--device', DEVICE],
     'AudioSR',
+  )
+}
+
+/**
+ * Resemble Enhance denoising/enhancement.
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
+ * @param {'denoise'|'enhance'} mode - Operation mode (default: 'enhance')
+ * @param {object} [params]
+ * @param {number} [params.nfe=64]           - CFM function evaluations (enhance only)
+ * @param {string} [params.solver='midpoint'] - ODE solver: euler|midpoint|rk4 (enhance only)
+ * @param {number} [params.lambd=0.1]        - Blend: 0.0=enhance-heavy, 1.0=denoise-heavy (enhance only)
+ * @param {number} [params.tau=0.5]          - CFM conditioning noise level (enhance only)
+ */
+export function runResembleEnhance(inputPath, outputPath, mode = 'enhance', params = {}) {
+  const args = [
+    '--input',  inputPath,
+    '--output', outputPath,
+    '--mode',   mode,
+    '--device', DEVICE,
+  ]
+  if (mode === 'enhance') {
+    if (params.nfe    != null) args.push('--nfe',    String(params.nfe))
+    if (params.solver != null) args.push('--solver', params.solver)
+    if (params.lambd  != null) args.push('--lambd',  String(params.lambd))
+    if (params.tau    != null) args.push('--tau',    String(params.tau))
+  }
+  return spawnPython(RESEMBLE_SCRIPT, args, `Resemble Enhance (${mode})`)
+}
+
+/**
+ * VoiceFixer speech restoration.
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
+ * @param {0|1|2}  mode       - VoiceFixer mode: 0=original, 1=preprocessing, 2=train (default: 0)
+ */
+export function runVoiceFixer(inputPath, outputPath, mode = 0) {
+  return spawnPython(
+    VOICEFIXER_SCRIPT,
+    ['--input', inputPath, '--output', outputPath, '--mode', String(mode), '--device', DEVICE],
+    `VoiceFixer (mode ${mode})`,
   )
 }
 

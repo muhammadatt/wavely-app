@@ -33,6 +33,7 @@ const PROCESSING_STAGES = [
 // Noise Eraser uses a different progress sequence — separation takes much longer
 // than the standard chain. Granular stage labels help users understand the wait.
 const NE_PROCESSING_STAGES = [
+
   { message: 'Measuring your audio…',                   progress: 0.04, delay: 0      },
   { message: 'RNNoise pre-pass — quieting the room…',   progress: 0.10, delay: 1500   },
   { message: 'Removing tonal hum and interference…',    progress: 0.16, delay: 4000   },
@@ -57,6 +58,28 @@ const isOverridden = computed(() =>
 )
 
 // No presets are currently in "coming soon" state — noise_eraser is now live
+// Resemble Enhance uses denoise + optional CFM diffusion — comparable wait to NE.
+const RE_PROCESSING_STAGES = [
+  { message: 'Measuring your audio…',                    progress: 0.05, delay: 0      },
+  { message: 'Loading Resemble Enhance model…',          progress: 0.15, delay: 2000   },
+  { message: 'Running neural denoising…',                progress: 0.35, delay: 8000   },
+  { message: 'Diffusion enhancement in progress…',       progress: 0.55, delay: 25000  },
+  { message: 'Almost done — finalising enhancement…',    progress: 0.75, delay: 55000  },
+  { message: 'Normalising and limiting…',                progress: 0.88, delay: 80000  },
+  { message: 'Wrapping up…',                             progress: 0.95, delay: 90000  },
+]
+
+// VoiceFixer runs a single vocoder restoration pass — similar wait to NE.
+const VF_PROCESSING_STAGES = [
+  { message: 'Measuring your audio…',                    progress: 0.05, delay: 0      },
+  { message: 'Loading VoiceFixer model…',                progress: 0.15, delay: 2000   },
+  { message: 'Restoring speech — this may take a while…', progress: 0.30, delay: 6000  },
+  { message: 'Vocoder restoration in progress…',         progress: 0.55, delay: 20000  },
+  { message: 'Still working — nearly done…',             progress: 0.70, delay: 50000  },
+  { message: 'Normalising and limiting…',                progress: 0.88, delay: 80000  },
+  { message: 'Wrapping up…',                             progress: 0.95, delay: 90000  },
+]
+
 const COMING_SOON_PRESETS = new Set()
 const isSelectedPresetComingSoon = computed(() => COMING_SOON_PRESETS.has(state.selectedPreset))
 
@@ -69,9 +92,29 @@ function setSeparationModel(model) {
   if (PRESETS.noise_eraser) PRESETS.noise_eraser.separationModel = model
 }
 
-// Warning for noise_eraser + acx combination
+// Resemble Enhance mode toggle
+const isResembleEnhance = computed(() => state.selectedPreset === 'resemble_enhance')
+const resembleMode = ref(PRESETS.resemble_enhance?.resembleMode ?? 'enhance')
+function setResembleMode(mode) {
+  resembleMode.value = mode
+  if (PRESETS.resemble_enhance) PRESETS.resemble_enhance.resembleMode = mode
+}
+
+// VoiceFixer mode toggle
+const isVoiceFixer = computed(() => state.selectedPreset === 'voicefixer')
+const voiceFixerMode = ref(PRESETS.voicefixer?.voiceFixerMode ?? 0)
+function setVoiceFixerMode(mode) {
+  voiceFixerMode.value = mode
+  if (PRESETS.voicefixer) PRESETS.voicefixer.voiceFixerMode = mode
+}
+
+// Warnings
 const showNoiseEraserAcxWarning = computed(() =>
   state.selectedPreset === 'noise_eraser' && state.selectedOutputProfile === 'acx'
+)
+const showResembleEnhanceAcxWarning = computed(() =>
+  state.selectedPreset === 'resemble_enhance' && state.selectedOutputProfile === 'acx'
+    && resembleMode.value === 'enhance'
 )
 
 const presetIcons = {
@@ -79,7 +122,9 @@ const presetIcons = {
   podcast_ready: '<path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
   voice_ready: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/><path d="M15.54 8.46a5 5 0 010 7.07"/>',
   general_clean: '<path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>',
-  noise_eraser: '<path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/><path d="M19 2l-7 7M5 22l7-7" stroke-width="2.5"/>',
+  noise_eraser:     '<path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/><path d="M19 2l-7 7M5 22l7-7" stroke-width="2.5"/>',
+  resemble_enhance: '<circle cx="12" cy="12" r="10"/><path d="M8 12s1.5-4 4-4 4 4 4 4"/><path d="M8 12s1.5 4 4 4 4-4 4-4"/>',
+  voicefixer:       '<path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><polyline points="17 11 17 13 7 13 7 11"/><line x1="12" y1="19" x2="12" y2="23"/><path d="M5 19c1.5-2 3.5-3 7-3s5.5 1 7 3"/>',
 }
 
 function compressionLabel(preset) {
@@ -97,9 +142,21 @@ function channelLabel(preset) {
 async function handleProcess() {
   if (!state.currentFile || state.isProcessing) return
 
-  const isNE    = state.selectedPreset === 'noise_eraser'
-  const stages  = isNE ? NE_PROCESSING_STAGES : PROCESSING_STAGES
-  const heading = isNE ? 'Separating your voice…' : 'Making your audio shine'
+  const preset = state.selectedPreset
+  let stages, heading
+  if (preset === 'noise_eraser') {
+    stages  = NE_PROCESSING_STAGES
+    heading = 'Separating your voice…'
+  } else if (preset === 'resemble_enhance') {
+    stages  = RE_PROCESSING_STAGES
+    heading = resembleMode.value === 'enhance' ? 'Enhancing your voice…' : 'Denoising your audio…'
+  } else if (preset === 'voicefixer') {
+    stages  = VF_PROCESSING_STAGES
+    heading = 'Restoring your voice…'
+  } else {
+    stages  = PROCESSING_STAGES
+    heading = 'Making your audio shine'
+  }
 
   startProcessing(heading)
 
@@ -123,7 +180,9 @@ async function handleProcess() {
       fileName: state.currentFile.name,
       presetId: state.selectedPreset,
       outputProfileId: state.selectedOutputProfile,
-      separationModel: state.selectedPreset === 'noise_eraser' ? separationModel.value : undefined,
+      separationModel: preset === 'noise_eraser' ? separationModel.value : undefined,
+      resembleMode:    preset === 'resemble_enhance' ? resembleMode.value : undefined,
+      voiceFixerMode:  preset === 'voicefixer' ? voiceFixerMode.value : undefined,
     })
 
     // Decode the processed audio blob into an AudioBuffer
@@ -238,6 +297,68 @@ async function handleProcess() {
         <!-- Noise Eraser + ACX warning -->
         <div v-if="showNoiseEraserAcxWarning" class="mt-1.5 text-[10px] text-accent font-bold leading-snug">
           ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.
+        </div>
+      </div>
+
+      <!-- Resemble Enhance: ACX warning (enhance mode + acx profile) -->
+      <div
+        v-if="showResembleEnhanceAcxWarning"
+        class="text-[11px] font-semibold text-amber-600 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 rounded-[var(--radius-md)] px-3 py-2 leading-snug"
+      >
+        ACX compliance not recommended for Resemble Enhance (enhance mode). Diffusion-based voice modification may cause ACX human review rejection even if measurements pass. Switch to <strong>Denoise</strong> mode for ACX work.
+      </div>
+
+      <!-- Resemble Enhance: mode toggle -->
+      <div v-if="isResembleEnhance" class="bg-bg rounded-[var(--radius-md)] p-3 flex flex-col gap-2">
+        <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider">Enhancement Mode</div>
+        <div class="flex gap-1.5">
+          <button
+            v-for="m in [
+              { id: 'enhance', label: 'Enhance', sub: 'Denoise + BWE, best quality' },
+              { id: 'denoise', label: 'Denoise', sub: 'Safer for ACX, deterministic' },
+            ]"
+            :key="m.id"
+            class="flex-1 text-left px-2.5 py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
+            :class="resembleMode === m.id
+              ? 'border-accent bg-accent-lt'
+              : 'border-border bg-surface hover:border-ink-lt'"
+            @click="setResembleMode(m.id)"
+          >
+            <div class="text-[12px] font-extrabold" :class="resembleMode === m.id ? 'text-accent' : 'text-ink'">{{ m.label }}</div>
+            <div class="text-[10px] font-semibold mt-0.5" :class="resembleMode === m.id ? 'text-accent' : 'text-ink-lt'">{{ m.sub }}</div>
+          </button>
+        </div>
+        <div class="text-[10px] text-ink-lt font-semibold leading-snug">
+          <span v-if="resembleMode === 'enhance'">Full pipeline: UNet denoiser → CFM diffusion enhancer + bandwidth extension. Best quality, ~2–8 min per file. Non-deterministic.</span>
+          <span v-else>Denoiser only: UNet denoiser, no diffusion step. Voice-transparent, deterministic. ~30 sec – 2 min per file.</span>
+        </div>
+      </div>
+
+      <!-- VoiceFixer: mode toggle -->
+      <div v-if="isVoiceFixer" class="bg-bg rounded-[var(--radius-md)] p-3 flex flex-col gap-2">
+        <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider">Restoration Mode</div>
+        <div class="flex gap-1.5">
+          <button
+            v-for="m in [
+              { id: 0, label: 'Standard', sub: 'Best for most recordings' },
+              { id: 1, label: 'Preprocess', sub: 'Removes HF artefacts first' },
+              { id: 2, label: 'Deep', sub: 'Extreme degradation' },
+            ]"
+            :key="m.id"
+            class="flex-1 text-left px-2.5 py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
+            :class="voiceFixerMode === m.id
+              ? 'border-accent bg-accent-lt'
+              : 'border-border bg-surface hover:border-ink-lt'"
+            @click="setVoiceFixerMode(m.id)"
+          >
+            <div class="text-[12px] font-extrabold" :class="voiceFixerMode === m.id ? 'text-accent' : 'text-ink'">{{ m.label }}</div>
+            <div class="text-[10px] font-semibold mt-0.5" :class="voiceFixerMode === m.id ? 'text-accent' : 'text-ink-lt'">{{ m.sub }}</div>
+          </button>
+        </div>
+        <div class="text-[10px] text-ink-lt font-semibold leading-snug">
+          <span v-if="voiceFixerMode === 0">Mode 0 — Original model. Recommended for noisy, reverberant, or clipped recordings.</span>
+          <span v-else-if="voiceFixerMode === 1">Mode 1 — Adds a preprocessing pass to remove high-frequency clipping artefacts before restoration.</span>
+          <span v-else>Mode 2 — Train mode. May help on severely degraded speech; results are non-deterministic.</span>
         </div>
       </div>
 

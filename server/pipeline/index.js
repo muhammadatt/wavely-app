@@ -145,6 +145,10 @@ function buildReport(ctx) {
     ...(results.separationPipeline && {
       separation_pipeline: formatSeparationPipelineResult(results.separationPipeline),
     }),
+    // enhancement_pipeline is absent (not null) for all presets except resemble_enhance and voicefixer
+    ...(results.enhancementPipeline && {
+      enhancement_pipeline: formatEnhancementPipelineResult(results.enhancementPipeline),
+    }),
     // separationEQ appears in processing_applied for noise_eraser (replaces enhancementEQ)
     quality_advisory: results.qualityAdvisory ?? null,
     warnings:         buildWarnings(ctx),
@@ -260,6 +264,18 @@ function formatSeparationPipelineResult(sp) {
         }
       : undefined,
     separation_quality: sp.separation_quality ?? null,
+  }
+}
+
+function formatEnhancementPipelineResult(ep) {
+  if (!ep) return null
+  return {
+    model: ep.model,
+    mode:  ep.mode,
+    ...(ep.nfe    != null && { nfe:    ep.nfe }),
+    ...(ep.solver != null && { solver: ep.solver }),
+    ...(ep.lambd  != null && { lambd:  ep.lambd }),
+    ...(ep.tau    != null && { tau:    ep.tau }),
   }
 }
 
