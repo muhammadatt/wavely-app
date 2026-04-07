@@ -106,18 +106,15 @@ export async function hpf(ctx) {
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
 
 export async function noiseReduce(ctx) {
-  const nrPath    = ctx.tmp('.wav')
-  const nrCeiling = ceilingTierFromMaxDb(ctx.preset.noiseReductionCeiling)
-  const nrResult  = await applyNoiseReduction(ctx.currentPath, nrPath, {
-    ceilingTier:    nrCeiling,
-    noiseFloorDbfs: ctx.results.beforeMeasurements.noiseFloorDbfs,
-  })
-  ctx.currentPath          = nrPath
+  const nrPath   = ctx.tmp('.wav')
+  // Run DF3 uncapped — the model adapts per time-frequency bin and will not
+  // aggressively attenuate speech. atten_lim_db is omitted (null = no ceiling).
+  const nrResult = await applyNoiseReduction(ctx.currentPath, nrPath)
+  nrResult.pre_noise_floor_dbfs = ctx.results.rawNoiseFloor
+  ctx.currentPath            = nrPath
   ctx.results.noiseReduction = nrResult
   await logLevel('after NR', ctx.currentPath, {
-    tier:          nrResult.tier,
-    attenLim:      nrResult.atten_lim_db !== null ? `${nrResult.atten_lim_db}dB` : 'none',
-    preNoiseFloor: `${nrResult.pre_noise_floor_dbfs}dBFS`,
+    preNoiseFloor: `${ctx.results.rawNoiseFloor}dBFS`,
   })
 }
 
@@ -286,8 +283,8 @@ export async function acxCertification(ctx) {
 export async function qualityAdvisory(ctx) {
   const postProcessSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
   const pipelineContext = {
-    nrTier:         ctx.results.noiseReduction?.tier    ?? null,
-    noiseFloorDbfs: ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
+    preNrNoiseFloor: ctx.results.rawNoiseFloor ?? null,
+    noiseFloorDbfs:  ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
   }
   ctx.results.qualityAdvisory = await generateQualityAdvisory(
     ctx.currentPath,
@@ -451,13 +448,12 @@ export async function residualCleanup(ctx) {
     return
   }
 
-  // Tier 2 ceiling: 6 dB max attenuation (light cleanup pass)
+  // 6 dB ceiling: intentionally conservative post-separation cleanup pass.
+  // Separation output already has a compressed character; uncapped DF3 risks
+  // over-processing the separated voice stem.
   const nrPath = ctx.tmp('.wav')
   const { applyNoiseReduction: applyNR } = await import('./noiseReduce.js')
-  const nrResult = await applyNR(ctx.currentPath, nrPath, {
-    ceilingTier:    2,
-    noiseFloorDbfs: noiseFloor,
-  })
+  const nrResult = await applyNR(ctx.currentPath, nrPath, { attenLimDb: 6 })
   ctx.currentPath = nrPath
   ctx.results.separationPipeline.residualCleanup = {
     applied:                     true,
@@ -543,18 +539,6 @@ export async function separationEQ(ctx) {
  */
 function detect60HzHum(rawNoiseFloor) {
   return rawNoiseFloor > -55
-}
-
-/**
- * Map a preset's noiseReductionCeiling (max dB) to a DeepFilterNet3 tier.
- * Tier → atten_lim_db: 1→3, 2→6, 3→9, 4→12, 5→uncapped
- */
-function ceilingTierFromMaxDb(maxDb) {
-  if (maxDb <= 3)  return 1
-  if (maxDb <= 6)  return 2
-  if (maxDb <= 9)  return 3
-  if (maxDb <= 12) return 4
-  return 5
 }
 
 async function logLevel(label, filePath, extras = {}) {

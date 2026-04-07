@@ -20,7 +20,7 @@
  *     - separation_used (always flagged)
  *
  *   Pipeline context:
- *     - high_nr_tier (Tier 4 noise reduction applied)
+ *     - high_nr_applied (pre-NR noise floor > -55 dBFS — heavy processing was needed)
  *
  * Reference: docs/instant_polish_compliance_model_v2.md
  */
@@ -64,7 +64,7 @@ const CREST_FACTOR_THRESHOLD_DB = 8
  * @param {string} outputProfileId
  * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
  * @param {number} voicedRmsDbfs - Average voiced RMS (for breath comparison)
- * @param {object} pipelineContext - { nrTier: number|null, noiseFloorDbfs: number|null }
+ * @param {object} pipelineContext - { preNrNoiseFloor: number|null, noiseFloorDbfs: number|null }
  * @returns {QualityAdvisory}
  */
 export async function generateQualityAdvisory(
@@ -119,10 +119,12 @@ export async function generateQualityAdvisory(
     }
   }
 
-  // --- High NR tier (all presets) ---
-  if (pipelineContext.nrTier != null && pipelineContext.nrTier >= 4) {
+  // --- Heavy NR applied (all presets) ---
+  // Threshold: pre-NR noise floor > -55 dBFS indicates a significantly noisy
+  // recording where DF3 had substantial work to do.
+  if (pipelineContext.preNrNoiseFloor != null && pipelineContext.preNrNoiseFloor > -55) {
     flags.push({
-      id: 'high_nr_tier',
+      id: 'high_nr_applied',
       severity: 'info',
       message: 'Heavy noise reduction was applied. Some processing character may be audible on close listening.',
     })

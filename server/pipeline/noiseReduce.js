@@ -1,16 +1,12 @@
 /**
  * Stage 2 — Noise Reduction via DeepFilterNet3.
  *
- * Selects an adaptive tier (1–5) based on the measured noise floor, capped
- * by the preset ceiling tier. Each tier maps to a maximum attenuation limit
- * passed to DeepFilterNet3 via atten_lim_db.
- *
- * Tier → atten_lim_db mapping:
- *   Tier 1 →  3 dB  (very clean:  gentle polish only)
- *   Tier 2 →  6 dB  (clean:       light reduction)
- *   Tier 3 →  9 dB  (moderate:    standard reduction)
- *   Tier 4 → 12 dB  (elevated:    aggressive reduction — ACX/voice_ready max)
- *   Tier 5 →  null  (very noisy:  uncapped — general_clean only)
+ * Runs DeepFilterNet3 uncapped by default (atten_lim_db=null). DF3 is an
+ * adaptive neural model that classifies speech vs. noise per time-frequency
+ * bin — it will not aggressively attenuate speech even without an external
+ * ceiling. Passing atten_lim_db limits the maximum attenuation applied to any
+ * bin; use this only when intentional conservative processing is required
+ * (e.g. the NE-5 residual cleanup pass after source separation).
  *
  * DeepFilterNet3 operates at 48 kHz internally. The Python script handles the
  * 44.1 kHz → 48 kHz resample on input; decodeToFloat32 resamples the 48 kHz
@@ -35,32 +31,15 @@ const PYTHON = process.env.DEEPFILTER_PYTHON ?? 'python3'
 const SCRIPT  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'deepfilter_enhance.py')
 
 /**
- * Noise floor thresholds (dBFS) used to select the adaptive NR tier.
- * Checked in order — first threshold the noise floor falls at or below wins.
- */
-const TIER_THRESHOLDS = [
-  { tier: 1, maxNoiseFloor: -70 },   // ≤ -70 dBFS: very clean, minimal NR
-  { tier: 2, maxNoiseFloor: -65 },   // ≤ -65 dBFS: clean, light NR
-  { tier: 3, maxNoiseFloor: -60 },   // ≤ -60 dBFS: near ACX limit, standard NR
-  { tier: 4, maxNoiseFloor: -55 },   // ≤ -55 dBFS: elevated noise, aggressive NR
-  { tier: 5, maxNoiseFloor: Infinity }, // > -55 dBFS: very noisy, uncapped
-]
-
-/** Maximum attenuation in dB per tier. null = no limit (Tier 5). */
-const TIER_ATTENUATION = { 1: 3, 2: 6, 3: 9, 4: 12, 5: null }
-
-/**
- * @param {string} inputPath      - Path to input WAV (32-bit float, 44.1 kHz)
- * @param {string} outputPath     - Path to write output WAV (32-bit float, 44.1 kHz)
- * @param {object} options
- * @param {number} options.ceilingTier      - Max NR tier allowed by preset (3 or 4)
- * @param {number} options.noiseFloorDbfs   - Measured pre-HPF noise floor in dBFS
+ * @param {string} inputPath  - Path to input WAV (32-bit float, 44.1 kHz)
+ * @param {string} outputPath - Path to write output WAV (32-bit float, 44.1 kHz)
+ * @param {object} [options]
+ * @param {number|null} [options.attenLimDb=null] - Maximum attenuation passed to
+ *   DeepFilterNet3 via atten_lim_db. null = uncapped (default). Only set this
+ *   when intentionally conservative processing is needed (e.g. NE-5 residual cleanup).
  * @returns {Promise<object>} Processing metadata for the pipeline report
  */
-export async function applyNoiseReduction(inputPath, outputPath, { ceilingTier, noiseFloorDbfs }) {
-  const adaptiveTier = selectTier(noiseFloorDbfs)
-  const selectedTier = Math.min(adaptiveTier, ceilingTier)
-  const attenLimDb   = TIER_ATTENUATION[selectedTier]
+export async function applyNoiseReduction(inputPath, outputPath, { attenLimDb = null } = {}) {
 
   // DeepFilterNet3 outputs 48 kHz — hold in a temp file before resampling
   const nr48kPath = tempPath('.wav')
@@ -76,22 +55,10 @@ export async function applyNoiseReduction(inputPath, outputPath, { ceilingTier, 
 
   return {
     applied:               true,
-    tier:                  selectedTier,
     model:                 'DeepFilterNet3',
     atten_lim_db:          attenLimDb,
-    pre_noise_floor_dbfs:  noiseFloorDbfs,
     post_noise_floor_dbfs: null, // remeasured after full chain in Stage 7
   }
-}
-
-/**
- * Select the adaptive NR tier based on the measured noise floor.
- */
-function selectTier(noiseFloorDbfs) {
-  for (const { tier, maxNoiseFloor } of TIER_THRESHOLDS) {
-    if (noiseFloorDbfs <= maxNoiseFloor) return tier
-  }
-  return 5
 }
 
 /**
@@ -101,7 +68,7 @@ function selectTier(noiseFloorDbfs) {
  *
  * @param {string}      inputPath  - WAV at any sample rate
  * @param {string}      outputPath - 32-bit float WAV at 48 kHz
- * @param {number|null} attenLimDb - Max attenuation in dB; null = no limit (Tier 5)
+ * @param {number|null} attenLimDb - Max attenuation in dB; null = no limit
  */
 function runDeepFilter(inputPath, outputPath, attenLimDb) {
   if (DEEPFILTER_BINARY) {
@@ -120,7 +87,7 @@ async function runDeepFilterCli(inputPath, outputPath, attenLimDb) {
   fs.mkdirSync(tmpDir, { recursive: true })
 
   try {
-    // CLI attenuation: null (Tier 5 = no limit) → 100 dB (CLI's "full reduction")
+    // CLI attenuation: null (uncapped) → 100 dB (CLI's "full reduction")
     const attenArg = attenLimDb !== null ? String(attenLimDb) : '100'
 
     await spawnProcess(

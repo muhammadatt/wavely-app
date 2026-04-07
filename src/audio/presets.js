@@ -59,7 +59,6 @@ export function resolveOutputProfileId(id) {
  * @property {{ value: number, unit: string }} targetLoudness
  * @property {number} truePeakCeiling
  * @property {number} noiseFloorTarget
- * @property {number} noiseReductionCeiling - max dB reduction
  * @property {{ mode: 'conditional'|'always'|'none', ratio: number, threshold: number, attack: number, release: number }} compression
  * @property {string} eqProfile
  * @property {{ sensitivity: string, trigger: number, maxReduction: number }} deEsser
@@ -79,7 +78,6 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: 'dBFS RMS' },
     truePeakCeiling: -3,
     noiseFloorTarget: -60,
-    noiseReductionCeiling: 12,
     compression: {
       mode: 'conditional',
       ratio: 2,
@@ -107,7 +105,6 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    noiseReductionCeiling: 8,
     compression: {
       mode: 'always',
       ratio: 3,
@@ -135,7 +132,6 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: 'dBFS RMS' },
     truePeakCeiling: -3,
     noiseFloorTarget: null,
-    noiseReductionCeiling: 8,
     compression: {
       mode: 'always',
       ratio: 2.5,
@@ -163,7 +159,6 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    noiseReductionCeiling: 12,
     compression: {
       mode: 'always',
       ratio: 3,
@@ -191,7 +186,6 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    noiseReductionCeiling: null, // Uses separation, not NR tiers
     compression: {
       mode: 'none',
       ratio: 1,

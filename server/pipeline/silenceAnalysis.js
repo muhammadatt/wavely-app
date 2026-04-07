@@ -37,7 +37,12 @@ const FRAME_DURATION_S = 0.1   // 100 ms frames — must match FRAME_DURATION_S 
 const BOOTSTRAP_FRAMES = 20    // use this many lowest-energy frames to bootstrap noise floor
 
 const VAD_BACKEND   = process.env.VAD_BACKEND   ?? 'silero'
-const SILERO_PYTHON = process.env.SILERO_PYTHON ?? 'python3'
+// Fall back through the other pipeline Python env vars so all scripts share
+// the same interpreter without requiring a separate SILERO_PYTHON entry.
+const SILERO_PYTHON = process.env.SILERO_PYTHON
+                   ?? process.env.DEEPFILTER_PYTHON
+                   ?? process.env.SEPARATION_PYTHON
+                   ?? 'python3'
 const SILERO_SCRIPT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', 'scripts', 'silero_vad.py'
@@ -68,7 +73,16 @@ const SILERO_SCRIPT = path.join(
  */
 export async function analyzeAudioFrames(wavPath) {
   if (VAD_BACKEND === 'silero') {
-    return analyzeAudioFramesSilero(wavPath)
+    try {
+      return await analyzeAudioFramesSilero(wavPath)
+    } catch (err) {
+      console.warn(
+        `[silence] Silero VAD failed — falling back to energy backend. ` +
+        `Set VAD_BACKEND=energy to suppress this warning.\n` +
+        `Reason: ${err.message}`
+      )
+      return analyzeAudioFramesEnergy(wavPath)
+    }
   }
   return analyzeAudioFramesEnergy(wavPath)
 }
