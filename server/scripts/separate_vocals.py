@@ -86,6 +86,14 @@ def separate_convtasnet(waveform, device):
     Operates at 8 kHz internally; resamples input/output automatically.
     waveform: torch.Tensor shape (channels, samples) at PIPELINE_SR.
     Returns: torch.Tensor (1, samples) at PIPELINE_SR (mono output).
+
+    Output scaling note: ConvTasNet is trained with SI-SNR loss (scale-invariant),
+    so its output amplitude is arbitrary relative to the input — it can be orders of
+    magnitude louder or quieter. Without rescaling, the speech stem routinely arrives
+    at near 0 dBFS peak even when the input was -25 dBFS, causing heavy clipping and
+    distortion in every subsequent stage. We measure input RMS before separation and
+    rescale the output stem to match, which preserves the noise-reduction effect while
+    restoring a sane loudness level.
     """
     import torch
     import torchaudio.transforms as T
@@ -101,6 +109,10 @@ def separate_convtasnet(waveform, device):
     # Mix to mono for processing
     mono = waveform.mean(dim=0, keepdim=True)   # (1, samples)
 
+    # Capture input RMS at pipeline SR before resampling — used to rescale output.
+    # clamp prevents divide-by-zero on silence-only files.
+    input_rms = mono.pow(2).mean().sqrt().clamp(min=1e-8)
+
     # Resample to model SR
     resamp_down = T.Resample(orig_freq=PIPELINE_SR, new_freq=CONVTASNET_SR)
     mono_8k = resamp_down(mono)
@@ -112,7 +124,14 @@ def separate_convtasnet(waveform, device):
 
     # Resample back to pipeline SR
     resamp_up = T.Resample(orig_freq=CONVTASNET_SR, new_freq=PIPELINE_SR)
-    return resamp_up(speech)
+    speech_44k = resamp_up(speech)
+
+    # Rescale to match input RMS. ConvTasNet's SI-SNR training means its output
+    # gain is unconstrained — this step is mandatory, not optional.
+    output_rms = speech_44k.pow(2).mean().sqrt().clamp(min=1e-8)
+    speech_44k = speech_44k * (input_rms / output_rms)
+
+    return speech_44k
 
 
 def main():
