@@ -43,6 +43,22 @@ asteroid>=0.7.0
 # Install last — pins a newer version of transformers than asteroid.
 audiosr>=0.0.2
 
+# ── Resemble Enhance pipeline ─────────────────────────────────────────────────
+
+# resemble_enhance.py (RE-1 — denoise-only or denoise + CFM diffusion enhancement)
+# Model weights (~200 MB) downloaded on first run to:
+#   ~/.cache/huggingface/hub/models--resemble-ai--resemble-enhance/
+# ⚠ Requires torch >= 2.0. The pinned torch==2.0.0 above is compatible.
+resemble-enhance>=0.0.1
+
+# ── VoiceFixer pipeline ────────────────────────────────────────────────────────
+
+# voicefixer_enhance.py (VF-1 — vocoder-based speech restoration)
+# Model weights (~200 MB) downloaded on first run to:
+#   ~/.cache/voicefixer/
+# ⚠ Requires torch >= 1.9. Compatible with pinned torch==2.0.0.
+voicefixer>=0.1.0
+
 # ── VAD (Silero) ───────────────────────────────────────────────────────────────
 
 # silero_vad.py (silence/voiced frame classification using Silero VAD v5)
