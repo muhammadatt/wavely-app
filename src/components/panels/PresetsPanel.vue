@@ -135,6 +135,15 @@ async function handleProcess() {
     const dur = totalDuration.value
     const bufferId = replaceRegion(0, dur, audioBuffer)
 
+    // Sync file metadata to reflect the processed audio properties.
+    // Server-side presets can change channel count (e.g. Noise Eraser → mono)
+    // and sample rate. Without this, export/render loops use the stale original
+    // channel count and crash with IndexSizeError when calling getChannelData(1)
+    // on a mono AudioBuffer.
+    state.currentFile.channels = audioBuffer.numberOfChannels
+    state.currentFile.sampleRate = audioBuffer.sampleRate
+    state.currentFile.duration = audioBuffer.duration
+
     // Compute peak cache for the new buffer
     const cache = await computePeakCache(audioBuffer, 256)
     setPeakCache(bufferId, cache)
