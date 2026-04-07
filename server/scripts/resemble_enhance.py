@@ -74,11 +74,9 @@ def main():
 
     try:
         from resemble_enhance.enhancer.inference import denoise, enhance
-    except ImportError:
-        print('resemble-enhance is not installed — copying input unchanged.', flush=True)
-        import shutil
-        shutil.copy(args.input, args.output)
-        return
+    except ImportError as e:
+        print(f'ERROR: resemble-enhance import failed: {e}', flush=True)
+        raise
 
     device = resolve_device(args.device)
 
