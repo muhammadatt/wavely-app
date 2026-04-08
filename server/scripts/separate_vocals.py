@@ -104,7 +104,15 @@ def separate_convtasnet(waveform, device):
     # WHAM! speech+noise model: source 0 = speech, source 1 = noise
     CONVTASNET_SR = 16000
     #MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
-    MODEL_ID = DPTNet.from_pretrained('mpariente/DPTNet_WHAMR_enhsingle_16k')
+
+    # DPTNet with WHAMR (reverb-aware) 
+    #MODEL_ID = 'cankeles/DPTNet_WHAMR_enhsingle_16k'
+
+    # ConvTasNet fine-tuned on audiobook + reverb 
+    MODEL_ID = 'cankeles/ConvTasNet_WHAMR_enhsingle_16k'
+
+    #WHAM and WHAMR are built on WSJ0, which is a non-commercial dataset. 
+    #This means both cankeles models are likely non-commercial use only. 
 
     model = ConvTasNet.from_pretrained(MODEL_ID).to(device)
     model.eval()
