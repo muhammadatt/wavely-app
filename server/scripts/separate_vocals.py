@@ -99,9 +99,10 @@ def separate_convtasnet(waveform, device):
     import torchaudio.transforms as T
     from asteroid.models import ConvTasNet
 
-    CONVTASNET_SR = 8000
+
     # WHAM! speech+noise model: source 0 = speech, source 1 = noise
-    MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_8k'
+    CONVTASNET_SR = 16000
+    MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
 
     model = ConvTasNet.from_pretrained(MODEL_ID).to(device)
     model.eval()
