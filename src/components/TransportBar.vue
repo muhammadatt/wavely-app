@@ -9,7 +9,7 @@ const {
 } = useEditorState()
 
 const isLooping = ref(false)
-const zoomLevel = ref(50) // 0-100 range for slider
+const zoomLevel = ref(0) // 0-100 range for slider; 0 = minimum zoom (fit to width)
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60)
@@ -86,12 +86,23 @@ function handleZoomSlider() {
   window.dispatchEvent(new CustomEvent('wavely:zoom-set', { detail: { pixelsPerSecond: pps } }))
 }
 
+function handleViewUpdate(e) {
+  // Keep slider in sync when zoom changes via scroll wheel, keyboard, or buttons
+  const { pixelsPerSecond } = e.detail
+  const minPPS = 10
+  const maxPPS = 2000
+  const t = Math.log(pixelsPerSecond / minPPS) / Math.log(maxPPS / minPPS)
+  zoomLevel.value = Math.max(0, Math.min(100, t * 100))
+}
+
 onMounted(() => {
   window.addEventListener('wavely:toggle-play', handleTogglePlay)
+  window.addEventListener('wavely:view-update', handleViewUpdate)
 })
 
 onUnmounted(() => {
   window.removeEventListener('wavely:toggle-play', handleTogglePlay)
+  window.removeEventListener('wavely:view-update', handleViewUpdate)
 })
 
 // Stop playback when segments change (edit happened during playback)
