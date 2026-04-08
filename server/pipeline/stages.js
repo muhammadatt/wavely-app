@@ -41,7 +41,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer, runHarmonicExciter } from './separation.js'
+import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer, runHarmonicExciter, runClearerVoice } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
@@ -609,6 +609,34 @@ export async function voiceFixerRestore(ctx) {
     mode,
   }
   await logLevel(`after VF-1 VoiceFixer (mode ${mode})`, ctx.currentPath, { mode })
+}
+
+// ── CE Stage: ClearerVoice speech enhancement (CE-3) ─────────────────────────
+// Single-model replacement for Demucs/ConvTasNet vocal separation (NE-3).
+// ClearerVoice SE models operate on mono audio; stereo inputs are mixed to mono
+// inside the Python script, so no explicit monoMixdown stage is needed before
+// or after this stage.
+
+export async function clearerVoiceEnhance(ctx) {
+  // Save the pre-enhancement path for NE-4 validation comparison.
+  ctx.nePreSeparationPath = ctx.currentPath
+
+  const model   = ctx.preset.clearervoiceModel ?? 'mossformer2_48k'
+  const outPath = ctx.tmp('.wav')
+
+  console.log(`[CE-3] Starting ClearerVoice enhancement (${model}) — this may take several minutes`)
+  await runClearerVoice(ctx.currentPath, outPath, model)
+  ctx.currentPath = outPath
+
+  // ClearerVoice outputs mono regardless of input channel count.
+  ctx.results.stereoToMono = ctx.inputChannels > 1
+
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+  ctx.results.separationPipeline.separation = {
+    model:   `clearervoice_${model}`,
+    applied: true,
+  }
+  await logLevel('after CE-3 ClearerVoice', ctx.currentPath, { model })
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

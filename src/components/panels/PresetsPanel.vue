@@ -48,6 +48,23 @@ const NE_PROCESSING_STAGES = [
   { message: 'Almost there — running final checks…',    progress: 0.97, delay: 155000 },
 ]
 
+// ClearerVoice Eraser is faster than Demucs-based Noise Eraser (~1–3 min CPU
+// vs ~5–10 min). Progress sequence reflects shorter expected wait.
+const CV_PROCESSING_STAGES = [
+  { message: 'Measuring your audio…',                        progress: 0.04, delay: 0      },
+  { message: 'RNNoise pre-pass — quieting the room…',        progress: 0.10, delay: 1500   },
+  { message: 'Removing tonal hum and interference…',         progress: 0.16, delay: 4000   },
+  { message: 'ClearerVoice enhancing your voice…',           progress: 0.28, delay: 7000   },
+  { message: 'AI enhancement in progress…',                  progress: 0.50, delay: 25000  },
+  { message: 'Still enhancing — almost through…',            progress: 0.64, delay: 55000  },
+  { message: 'Checking enhancement quality…',                progress: 0.72, delay: 75000  },
+  { message: 'Cleaning up any residual noise…',              progress: 0.78, delay: 85000  },
+  { message: 'Restoring high frequencies…',                  progress: 0.85, delay: 95000  },
+  { message: 'Tuning the final tone…',                       progress: 0.91, delay: 105000 },
+  { message: 'Matching your target loudness…',               progress: 0.95, delay: 115000 },
+  { message: 'Almost there — running final checks…',         progress: 0.97, delay: 125000 },
+]
+
 const presetList = getPresetList()
 const outputProfileList = getOutputProfileList()
 
@@ -69,9 +86,20 @@ function setSeparationModel(model) {
   if (PRESETS.noise_eraser) PRESETS.noise_eraser.separationModel = model
 }
 
+// ClearerVoice Eraser model toggle
+const isClearerVoiceEraser = computed(() => state.selectedPreset === 'clearervoice_eraser')
+const clearervoiceModel = ref(PRESETS.clearervoice_eraser?.clearervoiceModel ?? 'mossformer2_48k')
+function setClearervoiceModel(model) {
+  clearervoiceModel.value = model
+  if (PRESETS.clearervoice_eraser) PRESETS.clearervoice_eraser.clearervoiceModel = model
+}
+
 // Warnings
 const showNoiseEraserAcxWarning = computed(() =>
   state.selectedPreset === 'noise_eraser' && state.selectedOutputProfile === 'acx'
+)
+const showClearerVoiceAcxWarning = computed(() =>
+  state.selectedPreset === 'clearervoice_eraser' && state.selectedOutputProfile === 'acx'
 )
 
 const presetIcons = {
@@ -80,6 +108,7 @@ const presetIcons = {
   voice_ready: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/><path d="M15.54 8.46a5 5 0 010 7.07"/>',
   general_clean: '<path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>',
   noise_eraser: '<path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/><path d="M19 2l-7 7M5 22l7-7" stroke-width="2.5"/>',
+  clearervoice_eraser: '<circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>',
 }
 
 function compressionLabel(preset) {
@@ -102,6 +131,9 @@ async function handleProcess() {
   if (preset === 'noise_eraser') {
     stages  = NE_PROCESSING_STAGES
     heading = 'Separating your voice…'
+  } else if (preset === 'clearervoice_eraser') {
+    stages  = CV_PROCESSING_STAGES
+    heading = 'ClearerVoice enhancing…'
   } else {
     stages  = PROCESSING_STAGES
     heading = 'Making your audio shine'
@@ -129,7 +161,8 @@ async function handleProcess() {
       fileName: state.currentFile.name,
       presetId: state.selectedPreset,
       outputProfileId: state.selectedOutputProfile,
-      separationModel: preset === 'noise_eraser' ? separationModel.value : undefined,
+      separationModel:    preset === 'noise_eraser'        ? separationModel.value    : undefined,
+      clearervoiceModel:  preset === 'clearervoice_eraser' ? clearervoiceModel.value   : undefined,
     })
 
     // Decode the processed audio blob into an AudioBuffer
@@ -244,6 +277,33 @@ async function handleProcess() {
         <!-- Noise Eraser + ACX warning -->
         <div v-if="showNoiseEraserAcxWarning" class="mt-1.5 text-[10px] text-accent font-bold leading-snug">
           ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.
+        </div>
+        <!-- ClearerVoice Eraser + ACX warning -->
+        <div v-if="showClearerVoiceAcxWarning" class="mt-1.5 text-[10px] text-accent font-bold leading-snug">
+          ACX compliance is not recommended for ClearerVoice Eraser output. Enhancement artifacts may cause ACX human review rejection even if measurements pass.
+        </div>
+      </div>
+
+      <!-- ClearerVoice Eraser: enhancement model toggle -->
+      <div v-if="isClearerVoiceEraser" class="bg-bg rounded-[var(--radius-md)] p-3 flex flex-col gap-2">
+        <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider">Enhancement Model</div>
+        <div class="flex gap-1.5">
+          <button
+            v-for="m in [{ id: 'mossformer2_48k', label: 'Quality', sub: 'Full-band 48 kHz, slower' }, { id: 'frcrn_16k', label: 'Fast', sub: '16 kHz, quicker' }]"
+            :key="m.id"
+            class="flex-1 text-left px-2.5 py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
+            :class="clearervoiceModel === m.id
+              ? 'border-accent bg-accent-lt'
+              : 'border-border bg-surface hover:border-ink-lt'"
+            @click="setClearervoiceModel(m.id)"
+          >
+            <div class="text-[12px] font-extrabold" :class="clearervoiceModel === m.id ? 'text-accent' : 'text-ink'">{{ m.label }}</div>
+            <div class="text-[10px] font-semibold mt-0.5" :class="clearervoiceModel === m.id ? 'text-accent' : 'text-ink-lt'">{{ m.sub }}</div>
+          </button>
+        </div>
+        <div class="text-[10px] text-ink-lt font-semibold leading-snug">
+          <span v-if="clearervoiceModel === 'mossformer2_48k'">MossFormer2_SE_48K — ~1–5 min per file. Handles broadband, tonal, and non-stationary noise.</span>
+          <span v-else>FRCRN_SE_16K — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
         </div>
       </div>
 
