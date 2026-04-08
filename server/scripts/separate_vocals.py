@@ -109,7 +109,7 @@ def separate_convtasnet(waveform, device):
     #MODEL_ID = 'cankeles/DPTNet_WHAMR_enhsingle_16k'
 
     # ConvTasNet fine-tuned on audiobook + reverb 
-    #MODEL_ID = 'cankeles/ConvTasNet_WHAMR_enhsingle_16k'
+    MODEL_ID = 'cankeles/ConvTasNet_WHAMR_enhsingle_16k'
 
     #WHAM and WHAMR are built on WSJ0, which is a non-commercial dataset. 
     #This means both cankeles models are likely non-commercial use only. 
