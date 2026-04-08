@@ -59,6 +59,12 @@ resemble-enhance>=0.0.1
 # ⚠ Requires torch >= 1.9. Compatible with pinned torch==2.0.0.
 voicefixer>=0.1.0
 
+# ── ClearVoice pipeline ────────────────────────────────────────────────────────
+
+# clearervoice_enhance.py (speech enhancement/separation via ClearerVoice-Studio)
+# Pretrained model weights downloaded on first run from HuggingFace/ModelScope.
+clearvoice>=0.0.1
+
 # ── VAD (Silero) ───────────────────────────────────────────────────────────────
 
 # silero_vad.py (silence/voiced frame classification using Silero VAD v5)
