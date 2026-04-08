@@ -41,7 +41,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer } from './separation.js'
+import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer, runHarmonicExciter } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
@@ -201,6 +201,20 @@ export async function compress(ctx) {
     maxRed:  compressionResult.maxGainReductionDb !== null ? `${compressionResult.maxGainReductionDb}dB` : 'n/a',
     avgRed:  compressionResult.avgGainReductionDb !== null ? `${compressionResult.avgGainReductionDb}dB` : 'n/a',
   })
+}
+
+// ── Stage: Harmonic exciter ───────────────────────────────────────────────────
+// Adds subtle harmonic content in the presence/air region (above 3 kHz).
+// Runs after compression so the compressor's gain riding doesn't undo the
+// harmonic blend, and before normalization so the output level pass absorbs
+// any residual energy change.
+
+export async function harmonicExciter(ctx) {
+  const outPath = ctx.tmp('.wav')
+  await runHarmonicExciter(ctx.currentPath, outPath)
+  ctx.currentPath = outPath
+  ctx.results.harmonicExciter = { applied: true }
+  await logLevel('after harmonic exciter', ctx.currentPath, {})
 }
 
 // ── Stage: Normalize ──────────────────────────────────────────────────────────

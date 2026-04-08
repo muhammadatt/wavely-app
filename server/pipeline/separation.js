@@ -18,11 +18,12 @@ const PYTHON = process.env.SEPARATION_PYTHON ?? 'python3'
 const DEVICE = process.env.SEPARATION_DEVICE ?? 'auto'
 
 const SCRIPTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
-const RNNOISE_SCRIPT   = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
-const SEPARATE_SCRIPT  = path.join(SCRIPTS_DIR, 'separate_vocals.py')
-const AUDIOSR_SCRIPT   = path.join(SCRIPTS_DIR, 'audiosr_extend.py')
-const RESEMBLE_SCRIPT  = path.join(SCRIPTS_DIR, 'run_resemble_enhance.py')
-const VOICEFIXER_SCRIPT = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
+const RNNOISE_SCRIPT          = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
+const SEPARATE_SCRIPT         = path.join(SCRIPTS_DIR, 'separate_vocals.py')
+const AUDIOSR_SCRIPT          = path.join(SCRIPTS_DIR, 'audiosr_extend.py')
+const RESEMBLE_SCRIPT         = path.join(SCRIPTS_DIR, 'run_resemble_enhance.py')
+const VOICEFIXER_SCRIPT       = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
+const HARMONIC_EXCITER_SCRIPT = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -115,6 +116,26 @@ export function runVoiceFixer(inputPath, outputPath, mode = 0) {
     ['--input', inputPath, '--output', outputPath, '--mode', String(mode), '--device', DEVICE],
     `VoiceFixer (mode ${mode})`,
   )
+}
+
+/**
+ * Harmonic exciter — adds subtle harmonic content in the presence/air region.
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
+ * @param {object} [params]
+ * @param {number} [params.hpFreq=3000]            - High-pass cutoff Hz; only freqs above this are excited
+ * @param {number} [params.blend=0.06]             - Mix level of excited signal (0.06 = 6%)
+ * @param {number} [params.drive=1.8]              - Nonlinear saturation drive amount
+ * @param {number} [params.evenHarmonicWeight=0.4] - Even-harmonic blend (0=odd only, 1=even only)
+ */
+export function runHarmonicExciter(inputPath, outputPath, params = {}) {
+  const args = ['--input', inputPath, '--output', outputPath]
+  if (params.hpFreq             != null) args.push('--hp-freq',              String(params.hpFreq))
+  if (params.blend              != null) args.push('--blend',                String(params.blend))
+  if (params.drive              != null) args.push('--drive',                String(params.drive))
+  if (params.evenHarmonicWeight != null) args.push('--even-harmonic-weight', String(params.evenHarmonicWeight))
+  return spawnPython(HARMONIC_EXCITER_SCRIPT, args, 'HarmonicExciter')
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
