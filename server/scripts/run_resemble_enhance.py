@@ -19,17 +19,21 @@ Two operation modes:
     Use lambd closer to 0.0 to reduce enhancement aggressiveness.
 
 Key parameters (enhance mode only):
-  --nfe     Number of CFM function evaluations (default: 64; higher = better, slower)
-  --solver  ODE solver: euler, midpoint, rk4 (default: midpoint)
-  --lambd   Blend between enhancement (0.0) and denoising (1.0) character (default: 0.1)
-  --tau     CFM conditioning noise level — lower = more faithful to input (default: 0.5)
+  --nfe           Number of CFM function evaluations (default: 64; higher = better, slower)
+  --solver        ODE solver: euler, midpoint, rk4 (default: midpoint)
+  --lambd         Blend between enhancement (0.0) and denoising (1.0) character (default: 0.1)
+  --tau           CFM conditioning noise level — lower = more faithful to input (default: 0.5)
+  --chunk-seconds Audio chunk size passed to the inference loop (default: 10 on CPU, 30 on CUDA).
+                  Peak RAM scales roughly linearly with chunk size. Reduce if OOM on CPU.
+                  10 s ≈ 670 MB peak, 5 s ≈ 335 MB peak on CPU.
 
 Usage:
-  python3 resemble_enhance.py --input <path> --output <path>
-                              [--mode denoise|enhance]
-                              [--nfe 64] [--solver midpoint]
-                              [--lambd 0.1] [--tau 0.5]
-                              [--device auto|cpu|cuda]
+  python3 run_resemble_enhance.py --input <path> --output <path>
+                                  [--mode denoise|enhance]
+                                  [--nfe 64] [--solver midpoint]
+                                  [--lambd 0.1] [--tau 0.5]
+                                  [--chunk-seconds 10]
+                                  [--device auto|cpu|cuda]
 
 Input/output: 32-bit float PCM WAV at 44.1 kHz (pipeline internal format).
 """
@@ -66,15 +70,26 @@ def main():
                         help='CFM conditioning noise level — enhance mode only (default: 0.5)')
     parser.add_argument('--device', default='auto',
                         help='Compute device: auto, cpu, or cuda (default: auto)')
+    parser.add_argument('--chunk-seconds', type=float, default=None,
+                        help='Chunk size for inference loop in seconds. '
+                             'Defaults to 10 on CPU, 30 on CUDA. Reduce if OOM.')
     args = parser.parse_args()
 
     import torch
     import torchaudio
     import torchaudio.transforms as T
 
-    from resemble_enhance.enhancer.inference import denoise, enhance
+    # Use the lower-level API so we can pass chunk_seconds.
+    # The enhance() / denoise() convenience wrappers hard-code chunk_seconds=30,
+    # which requires ~2 GB RAM per chunk on CPU — too large for most VPS setups.
+    from resemble_enhance.enhancer.inference import load_enhancer
+    from resemble_enhance.inference import inference as re_inference
 
     device = resolve_device(args.device)
+
+    # Device-aware default: 10 s on CPU (~670 MB peak), 30 s on CUDA.
+    chunk_seconds = args.chunk_seconds if args.chunk_seconds is not None \
+        else (30.0 if device == 'cuda' else 10.0)
 
     waveform, sr = torchaudio.load(args.input)  # (channels, samples)
 
@@ -90,15 +105,26 @@ def main():
         waveform = T.Resample(orig_freq=sr, new_freq=PIPELINE_SR)(waveform)
         sr = PIPELINE_SR
 
+    print(f'Resemble Enhance ({args.mode}) | device={device} chunk={chunk_seconds}s', flush=True)
+
+    enhancer = load_enhancer(None, device)
+
     if args.mode == 'denoise':
-        out_wav, out_sr = denoise(waveform, sr, device)
+        out_wav, out_sr = re_inference(
+            model=enhancer.denoiser,
+            dwav=waveform,
+            sr=sr,
+            device=device,
+            chunk_seconds=chunk_seconds,
+        )
     else:
-        out_wav, out_sr = enhance(
-            waveform, sr, device,
-            nfe=args.nfe,
-            solver=args.solver,
-            lambd=args.lambd,
-            tau=args.tau,
+        enhancer.configurate_(nfe=args.nfe, solver=args.solver, lambd=args.lambd, tau=args.tau)
+        out_wav, out_sr = re_inference(
+            model=enhancer,
+            dwav=waveform,
+            sr=sr,
+            device=device,
+            chunk_seconds=chunk_seconds,
         )
 
     # Resample output if model returns a different rate (resemble-enhance is 44.1 kHz native)

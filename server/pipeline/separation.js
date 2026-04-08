@@ -83,6 +83,7 @@ export function runAudioSR(inputPath, outputPath, guidanceScale = 3.5) {
  * @param {string} [params.solver='midpoint'] - ODE solver: euler|midpoint|rk4 (enhance only)
  * @param {number} [params.lambd=0.1]        - Blend: 0.0=enhance-heavy, 1.0=denoise-heavy (enhance only)
  * @param {number} [params.tau=0.5]          - CFM conditioning noise level (enhance only)
+ * @param {number} [params.chunkSeconds]     - Inference chunk size in seconds (default: 10 CPU / 30 CUDA)
  */
 export function runResembleEnhance(inputPath, outputPath, mode = 'enhance', params = {}) {
   const args = [
@@ -91,6 +92,7 @@ export function runResembleEnhance(inputPath, outputPath, mode = 'enhance', para
     '--mode',   mode,
     '--device', DEVICE,
   ]
+  if (params.chunkSeconds != null) args.push('--chunk-seconds', String(params.chunkSeconds))
   if (mode === 'enhance') {
     if (params.nfe    != null) args.push('--nfe',    String(params.nfe))
     if (params.solver != null) args.push('--solver', params.solver)

@@ -538,10 +538,11 @@ export async function separationEQ(ctx) {
 export async function resembleEnhance(ctx) {
   const mode   = ctx.preset.resembleMode   ?? 'enhance'
   const params = {
-    nfe:    ctx.preset.resembleNfe    ?? 64,
-    solver: ctx.preset.resembleSolver ?? 'midpoint',
-    lambd:  ctx.preset.resembleLambd  ?? 0.1,
-    tau:    ctx.preset.resembleTau    ?? 0.5,
+    nfe:          ctx.preset.resembleNfe          ?? 64,
+    solver:       ctx.preset.resembleSolver       ?? 'midpoint',
+    lambd:        ctx.preset.resembleLambd        ?? 0.1,
+    tau:          ctx.preset.resembleTau          ?? 0.5,
+    chunkSeconds: ctx.preset.resembleChunkSeconds ?? null,  // null → script picks device-aware default
   }
 
   const outPath = ctx.tmp('.wav')

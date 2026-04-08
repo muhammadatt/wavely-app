@@ -250,11 +250,15 @@ export const PRESETS = {
     lockedOutputProfile: false,
     // 'denoise' = UNet denoiser only (safe for ACX, deterministic).
     // 'enhance' = denoise + CFM diffusion enhancer (adds BWE, may alter timbre).
-    resembleMode:   'enhance',
-    resembleNfe:    64,
-    resembleSolver: 'midpoint',
-    resembleLambd:  0.1,
-    resembleTau:    0.5,
+    resembleMode:         'enhance',
+    resembleNfe:          64,
+    resembleSolver:       'midpoint',
+    resembleLambd:        0.1,
+    resembleTau:          0.5,
+    // Chunk size for the inference loop. Peak RAM scales roughly linearly.
+    // null = script picks device-aware default (10 s CPU / 30 s CUDA).
+    // Set explicitly to 5 if still OOM on a RAM-constrained VPS.
+    resembleChunkSeconds: null,
   },
 
   // ── VoiceFixer ──────────────────────────────────────────────────────────────
