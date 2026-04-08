@@ -24,6 +24,7 @@ const STANDARD_PIPELINE = [
   stages.silenceAnalysisPreDeEss,
   stages.deEss,
   stages.compress,
+  stages.harmonicExciter,
   stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
@@ -50,6 +51,7 @@ export const PIPELINES = {
     stages.silenceAnalysisPreDeEss,
     stages.deEss,
     stages.compress,
+    stages.harmonicExciter,
     stages.normalize,
     stages.truePeakLimit,
     stages.measureAfter,
@@ -85,6 +87,7 @@ export const PIPELINES = {
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AudioSR HF restoration (conditional)
     stages.separationEQ,            // NE-7: Post-separation enhancement EQ
+    stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
     stages.truePeakLimit,           // Stage 6: True peak limiting
     stages.measureAfter,
