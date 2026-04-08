@@ -72,11 +72,7 @@ def main():
     import torchaudio
     import torchaudio.transforms as T
 
-    try:
-        from resemble_enhance.enhancer.inference import denoise, enhance
-    except ImportError as e:
-        print(f'ERROR: resemble-enhance import failed: {e}', flush=True)
-        raise
+    from resemble_enhance.enhancer.inference import denoise, enhance
 
     device = resolve_device(args.device)
 

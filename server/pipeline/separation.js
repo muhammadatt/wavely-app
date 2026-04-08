@@ -21,7 +21,7 @@ const SCRIPTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
 const RNNOISE_SCRIPT   = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
 const SEPARATE_SCRIPT  = path.join(SCRIPTS_DIR, 'separate_vocals.py')
 const AUDIOSR_SCRIPT   = path.join(SCRIPTS_DIR, 'audiosr_extend.py')
-const RESEMBLE_SCRIPT  = path.join(SCRIPTS_DIR, 'resemble_enhance.py')
+const RESEMBLE_SCRIPT  = path.join(SCRIPTS_DIR, 'run_resemble_enhance.py')
 const VOICEFIXER_SCRIPT = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
