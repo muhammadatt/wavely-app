@@ -226,7 +226,7 @@ onUnmounted(() => {
     ref="container"
     class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
   >
-    <div class="absolute inset-0 flex items-center p-6" :class="isScrollable ? 'pb-5' : 'pb-6'">
+    <div class="absolute inset-0 flex items-center" :class="isScrollable ? 'pb-5' : 'pb-6'">
       <canvas
         ref="canvas"
         class="w-full h-full"
