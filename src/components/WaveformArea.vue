@@ -41,8 +41,8 @@ const isScrollable = computed(() =>
   containerWidth.value > 0 && totalContentWidth.value > containerWidth.value
 )
 const thumbWidthPct = computed(() => {
-  if (!isScrollable.value || containerWidth.value === 0) return 100
-  return Math.max(5, (containerWidth.value / totalContentWidth.value) * 100)
+  if (!totalContentWidth.value || containerWidth.value === 0) return 100
+  return Math.min(100, Math.max(5, (containerWidth.value / totalContentWidth.value) * 100))
 })
 const maxScrollLeft = computed(() =>
   Math.max(0, totalDuration.value - containerWidth.value / pixelsPerSecond.value)
@@ -58,7 +58,7 @@ let sbDragStartX = 0
 let sbDragStartScroll = 0
 
 function handleScrollbarMouseDown(e) {
-  if (e.button !== 0) return
+  if (e.button !== 0 || !isScrollable.value) return
   sbDragging = true
   sbDragStartX = e.clientX
   sbDragStartScroll = scrollLeft.value
@@ -117,7 +117,7 @@ function pxToTime(px) {
 }
 
 function handleMouseDown(e) {
-  if (e.button !== 0) return
+  if (e.button !== 0 || sbDragging) return
   const rect = canvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
   const time = pxToTime(x)
@@ -226,7 +226,7 @@ onUnmounted(() => {
     ref="container"
     class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
   >
-    <div class="absolute inset-0 flex items-center" :class="isScrollable ? 'pb-5' : 'pb-6'">
+    <div class="absolute inset-0 flex items-center pb-2">
       <canvas
         ref="canvas"
         class="w-full h-full"
@@ -235,14 +235,14 @@ onUnmounted(() => {
       ></canvas>
     </div>
 
-    <!-- Scrollbar — only shown when zoomed in past fit-to-width -->
+    <!-- Scrollbar — always visible; full-width thumb when not zoomed in -->
     <div
-      v-if="isScrollable"
       ref="scrollbarTrack"
-      class="absolute bottom-2 left-6 right-6 h-1.5 rounded-full bg-ink/10"
+      class="absolute bottom-0 left-0 right-0 h-2 bg-ink/10"
     >
       <div
-        class="absolute top-0 h-full rounded-full bg-ink-mid/40 hover:bg-ink-mid/65 transition-colors cursor-grab"
+        class="absolute top-0 h-full rounded-full bg-ink-mid/40 transition-colors"
+        :class="isScrollable ? 'hover:bg-ink-mid/65 cursor-grab' : ''"
         :style="{ left: thumbLeftPct + '%', width: thumbWidthPct + '%' }"
         @mousedown="handleScrollbarMouseDown"
       ></div>
