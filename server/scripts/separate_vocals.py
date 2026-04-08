@@ -103,10 +103,10 @@ def separate_convtasnet(waveform, device):
 
     # WHAM! speech+noise model: source 0 = speech, source 1 = noise
     CONVTASNET_SR = 16000
-    #MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
+    MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
 
     # DPTNet with WHAMR (reverb-aware) 
-    MODEL_ID = 'cankeles/DPTNet_WHAMR_enhsingle_16k'
+    #MODEL_ID = 'cankeles/DPTNet_WHAMR_enhsingle_16k'
 
     # ConvTasNet fine-tuned on audiobook + reverb 
     #MODEL_ID = 'cankeles/ConvTasNet_WHAMR_enhsingle_16k'
