@@ -208,6 +208,38 @@ export const PRESETS = {
     separationModel: 'demucs',
   },
 
+  clearervoice_eraser: {
+    id: 'clearervoice_eraser',
+    displayName: 'ClearerVoice Eraser',
+    description: 'Neural speech enhancement using ClearerVoice-Studio',
+    audience: 'Noisy recordings',
+    character: 'AI-enhanced, clean speech, dry quality',
+    targetLoudness: { value: -16, unit: 'LUFS' },
+    truePeakCeiling: -1,
+    noiseFloorTarget: null,
+    compression: {
+      mode: 'none',
+      ratio: 1,
+      threshold: 0,
+      attack: 0,
+      release: 0,
+    },
+    eqProfile: 'separation_recovery',
+    deEsser: {
+      sensitivity: 'none',
+      trigger: 0,
+      maxReduction: 0,
+    },
+    channelOutput: 'mono',
+    defaultOutputProfile: 'podcast',
+    lockedOutputProfile: false,
+    // ClearerVoice enhancement model:
+    //   'mossformer2_48k' — MossFormer2_SE_48K (default, best quality, 48 kHz full-band)
+    //   'frcrn_16k'       — FRCRN_SE_16K (faster, good quality, 16 kHz)
+    // Both models are downloaded from HuggingFace on first use.
+    clearervoiceModel: 'mossformer2_48k',
+  },
+
 }
 
 /**

@@ -24,6 +24,7 @@ const AUDIOSR_SCRIPT          = path.join(SCRIPTS_DIR, 'audiosr_extend.py')
 const RESEMBLE_SCRIPT         = path.join(SCRIPTS_DIR, 'run_resemble_enhance.py')
 const VOICEFIXER_SCRIPT       = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
 const HARMONIC_EXCITER_SCRIPT = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
+const CLEARERVOICE_SCRIPT     = path.join(SCRIPTS_DIR, 'clearervoice_enhance.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -115,6 +116,23 @@ export function runVoiceFixer(inputPath, outputPath, mode = 0) {
     VOICEFIXER_SCRIPT,
     ['--input', inputPath, '--output', outputPath, '--mode', String(mode), '--device', DEVICE],
     `VoiceFixer (mode ${mode})`,
+  )
+}
+
+/**
+ * Stage CE-3: ClearerVoice speech enhancement.
+ * Replaces Demucs/ConvTasNet vocal separation in the ClearerVoice Eraser pipeline.
+ * Models operate on mono audio internally — stereo inputs are mixed to mono in the script.
+ *
+ * @param {string} inputPath   - 32-bit float WAV at 44.1 kHz (mono or stereo)
+ * @param {string} outputPath  - 32-bit float WAV at 44.1 kHz (mono)
+ * @param {'mossformer2_48k'|'frcrn_16k'} model - ClearerVoice model
+ */
+export function runClearerVoice(inputPath, outputPath, model = 'mossformer2_48k') {
+  return spawnPython(
+    CLEARERVOICE_SCRIPT,
+    ['--input', inputPath, '--output', outputPath, '--model', model, '--device', DEVICE],
+    `ClearerVoice (${model})`,
   )
 }
 

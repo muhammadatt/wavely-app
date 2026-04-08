@@ -70,6 +70,15 @@ router.post('/process', upload.single('file'), async (req, res) => {
       presetOverrides.separationModel = req.body.separation_model
     }
 
+    // clearervoice_eraser: model override
+    if (req.body.clearervoice_model && preset === 'clearervoice_eraser') {
+      const allowedModels = ['mossformer2_48k', 'frcrn_16k']
+      if (!allowedModels.includes(req.body.clearervoice_model)) {
+        return res.status(400).json({ error: `Invalid clearervoice_model: ${req.body.clearervoice_model}` })
+      }
+      presetOverrides.clearervoiceModel = req.body.clearervoice_model
+    }
+
     // resemble_enhance: mode override (denoise | enhance)
     if (req.body.resemble_mode && preset === 'resemble_enhance') {
       const allowedModes = ['denoise', 'enhance']
@@ -89,9 +98,10 @@ router.post('/process', upload.single('file'), async (req, res) => {
     }
 
     const overrideSummary = [
-      presetOverrides.separationModel && `model=${presetOverrides.separationModel}`,
-      presetOverrides.resembleMode    && `resemble_mode=${presetOverrides.resembleMode}`,
-      presetOverrides.voiceFixerMode  != null && `voicefixer_mode=${presetOverrides.voiceFixerMode}`,
+      presetOverrides.separationModel   && `model=${presetOverrides.separationModel}`,
+      presetOverrides.clearervoiceModel && `clearervoice_model=${presetOverrides.clearervoiceModel}`,
+      presetOverrides.resembleMode      && `resemble_mode=${presetOverrides.resembleMode}`,
+      presetOverrides.voiceFixerMode    != null && `voicefixer_mode=${presetOverrides.voiceFixerMode}`,
     ].filter(Boolean).join(' ')
 
     console.log(`Processing: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}${overrideSummary ? ` ${overrideSummary}` : ''}`)

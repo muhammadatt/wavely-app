@@ -97,6 +97,36 @@ export const PIPELINES = {
     stages.extractPeaks,
   ],
 
+  // ClearerVoice Eraser: mirrors the Noise Eraser pipeline with ClearerVoice SE
+  // (MossFormer2_SE_48K or FRCRN_SE_16K) in place of Demucs/ConvTasNet (NE-3).
+  //
+  // Key differences from noise_eraser:
+  //   - clearerVoiceEnhance replaces separateVocals — ClearerVoice SE models
+  //     process mono audio internally, so no post-stage mixdown is needed.
+  //   - All other stages (NE-1/2/4–7, normalization, encode) are identical to
+  //     noise_eraser and share the same context keys.
+  clearervoice_eraser: [
+    stages.decode,
+    // No monoMixdown here — clearerVoiceEnhance mixes to mono inside the Python script
+    stages.measureBefore,
+    stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
+    stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
+    stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
+    stages.clearerVoiceEnhance,     // CE-3: ClearerVoice SE replaces Demucs/ConvTasNet
+    stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
+    stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
+    stages.bandwidthExtension,      // NE-6: AudioSR HF restoration (conditional)
+    stages.separationEQ,            // NE-7: Post-separation enhancement EQ
+    stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
+    stages.normalize,               // Stage 5: Loudness normalization
+    stages.truePeakLimit,           // Stage 6: True peak limiting
+    stages.measureAfter,
+    stages.acxCertification,        // Only emits when output_profile === 'acx'
+    stages.qualityAdvisory,
+    stages.encode,
+    stages.extractPeaks,
+  ],
+
   // Resemble Enhance: single-model alternative to the Noise Eraser separation chain.
   // Replaces NE-1 through NE-7 with one Resemble Enhance pass (denoise or full enhance).
   // No monoMixdown here — resembleEnhance handles channel conversion after processing.
