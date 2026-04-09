@@ -199,6 +199,9 @@ watch(
 // Watch peakCacheVersion so waveform redraws when a new peak cache is stored
 watch(peakCacheVersion, () => draw())
 
+// Watch scrollLeft so canvas always redraws when scroll position changes
+watch(scrollLeft, () => draw())
+
 function handleResize() {
   updateContainerWidth()
   draw()
@@ -226,7 +229,7 @@ onUnmounted(() => {
     ref="container"
     class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
   >
-    <div class="absolute inset-0 flex items-center pb-2">
+    <div class="absolute top-0 left-0 right-0 bottom-2">
       <canvas
         ref="canvas"
         class="w-full h-full"
