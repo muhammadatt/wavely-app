@@ -73,7 +73,8 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
 }
 
 /**
- * Main render function.
+ * Main render function — draws waveform peaks only.
+ * Selection and playhead are handled separately by renderOverlay().
  *
  * @param {HTMLCanvasElement} canvas
  * @param {Object} options
@@ -82,8 +83,6 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
  * @param {number} options.sampleRate
  * @param {number} options.scrollLeft - horizontal scroll in seconds
  * @param {number} options.pixelsPerSecond - zoom level
- * @param {Object|null} options.selection - { start, end } in seconds
- * @param {number} options.playhead - playhead position in seconds
  * @param {number} options.totalDuration
  */
 export function renderWaveform(canvas, options) {
@@ -93,8 +92,6 @@ export function renderWaveform(canvas, options) {
     sampleRate,
     scrollLeft = 0,
     pixelsPerSecond = 100,
-    selection = null,
-    playhead = 0,
     totalDuration = 0,
   } = options
 
@@ -175,6 +172,38 @@ export function renderWaveform(canvas, options) {
     ctx.fill()
   }
 
+}
+
+/**
+ * Overlay render function — draws selection highlight and playhead only.
+ * Call this independently to update transient state without re-rendering peaks.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {Object} options
+ * @param {number} options.scrollLeft - horizontal scroll in seconds
+ * @param {number} options.pixelsPerSecond - zoom level
+ * @param {Object|null} options.selection - { start, end } in seconds
+ * @param {number} options.playhead - playhead position in seconds
+ */
+export function renderOverlay(canvas, options) {
+  const {
+    scrollLeft = 0,
+    pixelsPerSecond = 100,
+    selection = null,
+    playhead = 0,
+  } = options
+
+  const dpr = window.devicePixelRatio || 1
+  const logicalWidth = canvas.clientWidth
+  const logicalHeight = canvas.clientHeight
+
+  canvas.width = logicalWidth * dpr
+  canvas.height = logicalHeight * dpr
+
+  const ctx = canvas.getContext('2d')
+  ctx.scale(dpr, dpr)
+  ctx.clearRect(0, 0, logicalWidth, logicalHeight)
+
   // Draw selection overlay
   if (selection) {
     const selStartPx = (selection.start - scrollLeft) * pixelsPerSecond
@@ -182,11 +211,9 @@ export function renderWaveform(canvas, options) {
     const selWidth = selEndPx - selStartPx
 
     if (selEndPx > 0 && selStartPx < logicalWidth) {
-      // Fill
       ctx.fillStyle = SELECTION_COLOR
       ctx.fillRect(selStartPx, 0, selWidth, logicalHeight)
 
-      // Dashed borders
       ctx.strokeStyle = SELECTION_BORDER_COLOR
       ctx.lineWidth = 1.5
       ctx.setLineDash([4, 3])

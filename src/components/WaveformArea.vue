@@ -1,11 +1,12 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
-import { renderWaveform } from '../audio/renderer.js'
+import { renderWaveform, renderOverlay } from '../audio/renderer.js'
 import { useEditorState } from '../composables/useEditorState.js'
 
 const { state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration } = useEditorState()
 
 const canvas = ref(null)
+const overlayCanvas = ref(null)
 const container = ref(null)
 const scrollbarTrack = ref(null)
 const scrollLeft = ref(0)
@@ -76,7 +77,7 @@ function handleScrollbarMouseMove(e) {
   if (thumbMovable <= 0) return
   const delta = (dx / thumbMovable) * maxScrollLeft.value
   scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, sbDragStartScroll + delta))
-  draw()
+  drawAll()
 }
 
 function handleScrollbarMouseUp() {
@@ -85,7 +86,7 @@ function handleScrollbarMouseUp() {
   window.removeEventListener('mouseup', handleScrollbarMouseUp)
 }
 
-function draw() {
+function drawMain() {
   if (!canvas.value || !state.currentFile) return
 
   // Keep containerWidth in sync with the actual canvas size before any scroll/zoom calculation
@@ -97,8 +98,6 @@ function draw() {
     sampleRate: state.currentFile.sampleRate,
     scrollLeft: scrollLeft.value,
     pixelsPerSecond: pixelsPerSecond.value,
-    selection: state.selection,
-    playhead: state.playhead,
     totalDuration: totalDuration.value,
   })
 
@@ -109,6 +108,21 @@ function draw() {
       pixelsPerSecond: pixelsPerSecond.value,
     },
   }))
+}
+
+function drawOverlay() {
+  if (!overlayCanvas.value || !state.currentFile) return
+  renderOverlay(overlayCanvas.value, {
+    scrollLeft: scrollLeft.value,
+    pixelsPerSecond: pixelsPerSecond.value,
+    selection: state.selection,
+    playhead: state.playhead,
+  })
+}
+
+function drawAll() {
+  drawMain()
+  drawOverlay()
 }
 
 // Convert pixel X to timeline seconds
@@ -138,7 +152,7 @@ function handleMouseMove(e) {
   const time = Math.max(0, Math.min(pxToTime(x), totalDuration.value))
 
   setSelection(selectionAnchor.value, time)
-  draw()
+  drawOverlay() // Peaks unchanged during selection drag — overlay only
 }
 
 function handleMouseUp() {
@@ -153,11 +167,11 @@ function handleWheel(e) {
   if (e.deltaX !== 0 && !e.shiftKey) {
     // Horizontal trackpad scroll → pan
     scrollLeft.value = Math.max(0, scrollLeft.value + e.deltaX / pixelsPerSecond.value)
-    draw()
+    drawAll()
   } else if (e.shiftKey && e.deltaY !== 0) {
     // Shift + vertical scroll → pan
     scrollLeft.value = Math.max(0, scrollLeft.value + e.deltaY / pixelsPerSecond.value)
-    draw()
+    drawAll()
   } else if (e.deltaY !== 0) {
     // Vertical scroll (plain or Ctrl/Meta) → zoom, anchored at mouse position
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
@@ -170,46 +184,51 @@ function handleWheel(e) {
 
     // Keep the time under the mouse cursor stable
     scrollLeft.value = Math.max(0, timeAtMouse - mouseX / pixelsPerSecond.value)
-    draw()
+    drawAll()
   }
 }
 
 function handleZoomIn() {
   pixelsPerSecond.value = Math.min(MAX_PPS, pixelsPerSecond.value * 1.3)
-  draw()
+  drawAll()
 }
 
 function handleZoomOut() {
   pixelsPerSecond.value = Math.max(getMinPps(), pixelsPerSecond.value / 1.3)
-  draw()
+  drawAll()
 }
 
 function handleZoomSet(e) {
   pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, e.detail.pixelsPerSecond))
-  draw()
+  drawAll()
 }
 
-// Watch for state changes that require redraw
+// Waveform content changed → redraw everything
 watch(
-  () => [state.segments, state.selection, state.playhead, state.currentFile],
-  () => draw(),
+  () => [state.segments, state.currentFile],
+  () => drawAll(),
   { deep: true }
 )
 
-// Watch peakCacheVersion so waveform redraws when a new peak cache is stored
-watch(peakCacheVersion, () => draw())
+// Selection or playhead changed externally (e.g. toolbar operations, click-to-seek)
+// → overlay only; peaks are unchanged
+watch(() => state.selection, () => drawOverlay(), { deep: true })
+watch(() => state.playhead, () => drawOverlay())
 
-// Watch scrollLeft so canvas always redraws when scroll position changes
-watch(scrollLeft, () => draw())
+// Peak cache updated → redraw main canvas only (overlay positions are unchanged)
+watch(peakCacheVersion, () => drawMain())
+
+// scrollLeft is always changed by an event handler that already calls drawAll(),
+// so no separate watch is needed here.
 
 function handleResize() {
   updateContainerWidth()
-  draw()
+  drawAll()
 }
 
 onMounted(() => {
   updateContainerWidth()
-  draw()
+  drawAll()
   window.addEventListener('resize', handleResize)
   window.addEventListener('wavely:zoom-in', handleZoomIn)
   window.addEventListener('wavely:zoom-out', handleZoomOut)
@@ -230,11 +249,19 @@ onUnmounted(() => {
     class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
   >
     <div class="absolute top-0 left-0 right-0 bottom-2">
+      <!-- Both canvases are absolute inset-0 so they occupy the same compositing
+           layer space. Main canvas draws waveform peaks; overlay canvas draws
+           selection highlight + playhead. pointer-events-none lets mouse events
+           fall through to the main canvas. -->
       <canvas
         ref="canvas"
-        class="w-full h-full"
+        class="absolute inset-0 w-full h-full"
         @mousedown="handleMouseDown"
         @wheel="handleWheel"
+      ></canvas>
+      <canvas
+        ref="overlayCanvas"
+        class="absolute inset-0 w-full h-full pointer-events-none"
       ></canvas>
     </div>
 
