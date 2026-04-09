@@ -312,7 +312,7 @@ async function handleProcess() {
         <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider">Separation Model</div>
         <div class="flex gap-1.5">
           <button
-            v-for="m in [{ id: 'demucs', label: 'Quality', sub: 'Best results, slower' }, { id: 'convtasnet', label: 'Fast', sub: 'Good results, quicker' }]"
+            v-for="m in [{ id: 'demucs', label: 'Quality', sub: 'Best results, slower' }, { id: 'convtasnet', label: 'Fast', sub: 'Good results, quicker' }, { id: 'dtln', label: 'Lightweight', sub: 'Stationary noise, CPU-only' }]"
             :key="m.id"
             class="flex-1 text-left px-2.5 py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
             :class="separationModel === m.id
@@ -326,7 +326,8 @@ async function handleProcess() {
         </div>
         <div class="text-[10px] text-ink-lt font-semibold leading-snug">
           <span v-if="separationModel === 'demucs'">Demucs htdemucs_ft — ~2–10 min per file. Handles severe outdoor noise and non-stationary backgrounds.</span>
-          <span v-else>ConvTasNet WHAM! — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
+          <span v-else-if="separationModel === 'convtasnet'">ConvTasNet WHAM! — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
+          <span v-else>DTLN — ~5–30 sec per file. Lightweight noise suppression for stationary room/office noise. CPU-only, no GPU required.</span>
         </div>
       </div>
 

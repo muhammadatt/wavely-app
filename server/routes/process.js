@@ -63,7 +63,7 @@ router.post('/process', upload.single('file'), async (req, res) => {
 
     // noise_eraser: separation backend override
     if (req.body.separation_model && preset === 'noise_eraser') {
-      const allowedModels = ['demucs', 'convtasnet']
+      const allowedModels = ['demucs', 'convtasnet', 'dtln']
       if (!allowedModels.includes(req.body.separation_model)) {
         return res.status(400).json({ error: `Invalid separation_model: ${req.body.separation_model}` })
       }
