@@ -41,9 +41,12 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
   const sourceStartSample = Math.floor(segment.sourceStart * sampleRate)
 
   for (let px = startPx; px < endPx; px++) {
-    const pxOffsetInSegment = px - startPx
-    const sampleStart = sourceStartSample + Math.floor(pxOffsetInSegment * samplesPerPx)
-    const sampleEnd = sourceStartSample + Math.floor((pxOffsetInSegment + 1) * samplesPerPx)
+    // px is the pixel offset within the segment — use it directly to map to
+    // the correct source samples.  The old code subtracted startPx, which
+    // always reset to 0 and caused the waveform to render from the segment
+    // start regardless of scroll position.
+    const sampleStart = sourceStartSample + Math.floor(px * samplesPerPx)
+    const sampleEnd = sourceStartSample + Math.floor((px + 1) * samplesPerPx)
 
     // Map to peak cache indices
     const cacheSPP = cache.samplesPerPx
