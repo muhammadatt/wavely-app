@@ -166,11 +166,11 @@ function handleWheel(e) {
 
   if (e.deltaX !== 0 && !e.shiftKey) {
     // Horizontal trackpad scroll → pan
-    scrollLeft.value = Math.max(0, scrollLeft.value + e.deltaX / pixelsPerSecond.value)
+    scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, scrollLeft.value + e.deltaX / pixelsPerSecond.value))
     drawAll()
   } else if (e.shiftKey && e.deltaY !== 0) {
     // Shift + vertical scroll → pan
-    scrollLeft.value = Math.max(0, scrollLeft.value + e.deltaY / pixelsPerSecond.value)
+    scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, scrollLeft.value + e.deltaY / pixelsPerSecond.value))
     drawAll()
   } else if (e.deltaY !== 0) {
     // Vertical scroll (plain or Ctrl/Meta) → zoom, anchored at mouse position
@@ -183,23 +183,30 @@ function handleWheel(e) {
     pixelsPerSecond.value = Math.max(minPps, Math.min(MAX_PPS, pixelsPerSecond.value * zoomFactor))
 
     // Keep the time under the mouse cursor stable
-    scrollLeft.value = Math.max(0, timeAtMouse - mouseX / pixelsPerSecond.value)
+    scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, timeAtMouse - mouseX / pixelsPerSecond.value))
     drawAll()
   }
 }
 
+function clampScroll() {
+  scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, scrollLeft.value))
+}
+
 function handleZoomIn() {
   pixelsPerSecond.value = Math.min(MAX_PPS, pixelsPerSecond.value * 1.3)
+  clampScroll()
   drawAll()
 }
 
 function handleZoomOut() {
   pixelsPerSecond.value = Math.max(getMinPps(), pixelsPerSecond.value / 1.3)
+  clampScroll()
   drawAll()
 }
 
 function handleZoomSet(e) {
   pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, e.detail.pixelsPerSecond))
+  clampScroll()
   drawAll()
 }
 
