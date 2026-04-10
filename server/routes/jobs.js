@@ -45,9 +45,10 @@ router.get('/jobs/:jobId', (req, res) => {
 // ── GET /api/jobs/:jobId/download ─────────────────────────────────────────────
 // Stream the processed audio file to the client.
 //
-// The file is deleted from disk after successful transfer. Re-downloading
-// within the job TTL window is supported (file exists until TTL cleanup).
-// After the file is deleted, subsequent download requests will 410.
+// The file is deleted from disk after the first successful transfer to free
+// disk space. This route therefore supports a single successful download per
+// completed job. The job record may remain available until TTL expiry so
+// status polls can continue to return 'done'.
 
 router.get('/jobs/:jobId/download', async (req, res) => {
   const job = getJob(req.params.jobId)
