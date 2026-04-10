@@ -103,7 +103,8 @@ def separate_convtasnet(waveform, device):
 
     # WHAM! speech+noise model: source 0 = speech, source 1 = noise
     CONVTASNET_SR = 16000
-    MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
+    #MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
+    MODEL_ID = 'JorisCos/ConvTasNet_Libri1Mix_enhsingle_16k'
 
     model = ConvTasNet.from_pretrained(MODEL_ID).to(device)
     model.eval()
