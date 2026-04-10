@@ -63,8 +63,9 @@ export function isLoggingEnabled() {
  */
 export async function createLogger(preset, outputProfile, originalName, inputPath) {
   if (!LOG_ENABLED) return null
-  const runId = randomUUID()
-  const logger = new PipelineLogger(runId, preset, outputProfile, originalName)
+  const runId  = randomUUID()
+  const runSlug = makeRunSlug(preset, runId)
+  const logger = new PipelineLogger(runId, runSlug, preset, outputProfile, originalName)
   await logger.init(inputPath)
   return logger
 }
@@ -72,10 +73,11 @@ export async function createLogger(preset, outputProfile, originalName, inputPat
 // ── PipelineLogger ─────────────────────────────────────────────────────────────
 
 class PipelineLogger {
-  constructor(runId, preset, outputProfile, originalName) {
+  constructor(runId, runSlug, preset, outputProfile, originalName) {
     this.runId        = runId
-    this.runDir       = path.join(LOG_DIR, runId)
-    this.logPath      = path.join(this.runDir, `${runId}.log`)
+    this.runSlug      = runSlug
+    this.runDir       = path.join(LOG_DIR, runSlug)
+    this.logPath      = path.join(this.runDir, `${runSlug}.log`)
     this.stepIndex    = 0
     this.startTime    = Date.now()
     this.preset       = preset
@@ -117,7 +119,7 @@ class PipelineLogger {
 
       await writeFile(this.logPath, header, 'utf8')
       this._ready = true
-      console.log(`[pipeline-log] Run ${this.runId} — logging to ${this.runDir}`)
+      console.log(`[pipeline-log] ${this.runSlug} (${this.runId}) — logging to ${this.runDir}`)
     } catch (err) {
       // A logger init failure must never crash the pipeline.
       console.warn(`[pipeline-log] Logger init failed — logging disabled for this run: ${err.message}`)
@@ -209,7 +211,7 @@ class PipelineLogger {
       ].join('\n')
       await appendFile(this.logPath, footer, 'utf8')
       console.log(
-        `[pipeline-log] Run ${this.runId} complete — ` +
+        `[pipeline-log] ${this.runSlug} complete — ` +
         `${this.stepIndex} steps in ${elapsed}s`
       )
     } catch (err) {
@@ -223,4 +225,40 @@ class PipelineLogger {
 /** Format a numeric measurement value for display, handling null gracefully. */
 function fmt(value) {
   return value != null ? value : '?'
+}
+
+/**
+ * Build a human-readable run slug for the log folder and log file name.
+ *
+ * Format: `{PresetName}[-{hint}]-{shortId}`
+ *   - PresetName  — preset.displayName with spaces removed
+ *                   ("Noise Eraser" → "NoiseEraser")
+ *   - hint        — quality/speed label derived from preset-specific options:
+ *                     separationModel:   'demucs'        → 'Quality'
+ *                                        'convtasnet'    → 'Fast'
+ *                     clearervoiceModel: 'mossformer2_48k' → 'Quality'
+ *                                        'frcrn_16k'     → 'Fast'
+ *                   Omitted for presets that have no quality/speed toggle.
+ *   - shortId     — first 6 hex characters of the full UUID (without dashes)
+ *
+ * Examples:
+ *   NoiseEraser - Fast-a87ead     (noise_eraser + convtasnet)
+ *   NoiseEraser - Quality-3fc102  (noise_eraser + demucs)
+ *   ACXAudiobook-d4e591           (acx_audiobook, no toggle)
+ *
+ * @param {object} preset - Resolved preset config (post-overrides)
+ * @param {string} runId  - Full UUID from randomUUID()
+ * @returns {string}
+ */
+function makeRunSlug(preset, runId) {
+  const name    = (preset.displayName ?? preset.id).replace(/\s+/g, '')
+  const shortId = runId.replace(/-/g, '').slice(0, 6)
+
+  let hint = ''
+  if      (preset.separationModel   === 'convtasnet')      hint = 'Fast'
+  else if (preset.separationModel   === 'demucs')          hint = 'Quality'
+  else if (preset.clearervoiceModel === 'frcrn_16k')       hint = 'Fast'
+  else if (preset.clearervoiceModel === 'mossformer2_48k') hint = 'Quality'
+
+  return hint ? `${name} - ${hint}-${shortId}` : `${name}-${shortId}`
 }

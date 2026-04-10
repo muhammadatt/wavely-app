@@ -106,6 +106,7 @@ def separate_convtasnet(waveform, device):
     #MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
     MODEL_ID = 'JorisCos/ConvTasNet_Libri1Mix_enhsingle_16k'
 
+    print(f'[convtasnet] Model: {MODEL_ID}  device={device}', flush=True)
     model = ConvTasNet.from_pretrained(MODEL_ID).to(device)
     model.eval()
 
