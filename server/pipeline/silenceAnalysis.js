@@ -188,7 +188,6 @@ async function analyzeAudioFramesSilero(wavPath) {
 
 /**
  * Spawn the Silero VAD Python script.
- * Follows the spawnProcess pattern from noiseReduce.js.
  */
 function spawnSilero(inputPath, outputJsonPath) {
   return new Promise((resolve, reject) => {
@@ -198,13 +197,19 @@ function spawnSilero(inputPath, outputJsonPath) {
       '--output', outputJsonPath,
     ], { stdio: ['ignore', 'pipe', 'pipe'] })
 
+    let stdout = ''
     let stderr = ''
+    // Drain stdout to prevent pipe buffer deadlock — Silero VAD emits model
+    // loading output that can fill the 64 KB OS pipe buffer and block the
+    // child process indefinitely if the parent never reads it.
+    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
     proc.stderr.on('data', chunk => {
       stderr += chunk.toString()
       if (stderr.length > 4000) stderr = stderr.slice(-4000)
     })
 
     proc.on('close', (code, signal) => {
+      if (stdout.trim()) console.log(`[Silero VAD] ${stdout.trim()}`)
       if (code === 0 && signal === null) {
         resolve()
       } else {

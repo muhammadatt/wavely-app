@@ -123,13 +123,19 @@ function spawnProcess(executable, args, label) {
   return new Promise((resolve, reject) => {
     const proc = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] })
 
+    let stdout = ''
     let stderr = ''
+    // Drain stdout to prevent pipe buffer deadlock — DeepFilterNet3 emits
+    // progress output that can fill the 64 KB OS pipe buffer and block the
+    // child process indefinitely if the parent never reads it.
+    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
     proc.stderr.on('data', chunk => {
       stderr += chunk.toString()
       if (stderr.length > 4000) stderr = stderr.slice(-4000)
     })
 
     proc.on('close', (code, signal) => {
+      if (stdout.trim()) console.log(`[${label}] ${stdout.trim()}`)
       if (code === 0 && signal === null) {
         resolve()
       } else {
