@@ -158,20 +158,56 @@ export function runHarmonicExciter(inputPath, outputPath, params = {}) {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
+// Timeout for long-running diffusion models (AudioSR, Resemble Enhance).
+// AudioSR runs 50 DDIM steps on CPU which can take 30–60+ minutes.
+// Override via AUDIOSR_TIMEOUT_MS env var (default: 20 minutes).
+const AUDIOSR_TIMEOUT_MS = parseInt(process.env.AUDIOSR_TIMEOUT_MS ?? '', 10) || 20 * 60 * 1000
+
+// Labels whose processes use diffusion inference and need a longer timeout.
+const LONG_RUNNING_LABELS = new Set(['AudioSR', 'Resemble Enhance (enhance)', 'Resemble Enhance (denoise)'])
+
 function spawnPython(script, args, label) {
   return new Promise((resolve, reject) => {
     const proc = spawn(PYTHON, [script, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
 
-    let stdout = ''
     let stderr = ''
-    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
-    proc.stderr.on('data', chunk => {
-      stderr += chunk.toString()
-      if (stderr.length > 8000) stderr = stderr.slice(-8000)
+    let timeoutHandle = null
+
+    // Stream stdout line-by-line in real time so progress is visible.
+    proc.stdout.on('data', chunk => {
+      const lines = chunk.toString().split('\n')
+      for (const line of lines) {
+        if (line.trim()) console.log(`[${label}] ${line}`)
+      }
     })
 
+    // Stream stderr in real time — tqdm progress bars from AudioSR/Demucs
+    // go to stderr; without real-time draining the pipe fills and blocks the
+    // child process, and the pipeline appears hung with no feedback.
+    proc.stderr.on('data', chunk => {
+      const text = chunk.toString()
+      stderr += text
+      if (stderr.length > 8000) stderr = stderr.slice(-8000)
+      // Print non-empty lines so progress is visible server-side.
+      for (const line of text.split('\n')) {
+        if (line.trim()) console.log(`[${label}] ${line}`)
+      }
+    })
+
+    // Set a timeout for diffusion-based models that can silently run very long.
+    if (LONG_RUNNING_LABELS.has(label)) {
+      timeoutHandle = setTimeout(() => {
+        proc.kill('SIGTERM')
+        reject(new Error(
+          `${label} timed out after ${AUDIOSR_TIMEOUT_MS / 1000}s. ` +
+          'Increase AUDIOSR_TIMEOUT_MS or check that the model downloaded correctly. ' +
+          `Last stderr:\n${stderr.slice(-1000)}`
+        ))
+      }, AUDIOSR_TIMEOUT_MS)
+    }
+
     proc.on('close', (code, signal) => {
-      if (stdout.trim()) console.log(`[${label}] ${stdout.trim()}`)
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       if (code === 0 && signal === null) {
         resolve()
       } else {
@@ -184,6 +220,7 @@ function spawnPython(script, args, label) {
     })
 
     proc.on('error', err => {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       reject(new Error(`Failed to spawn ${label}: ${err.message}`))
     })
   })

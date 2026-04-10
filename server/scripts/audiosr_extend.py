@@ -60,9 +60,12 @@ def main():
         return
 
     device = resolve_device(args.device)
+    print(f'[audiosr] Loading model on device={device} (may download ~1.5 GB on first run)', flush=True)
 
     # AudioSR expects a file path and returns a super-resolved waveform.
     sr_model = audiosr.build_model(model_name='basic', device=device)
+    print('[audiosr] Model loaded — starting super-resolution inference '
+          f'(ddim_steps=50, guidance_scale={args.guidance_scale})', flush=True)
 
     waveform = audiosr.super_resolution(
         sr_model,
@@ -71,6 +74,7 @@ def main():
         ddim_steps=50,
         latent_t_per_second=12.8,
     )  # returns np.ndarray or torch.Tensor, shape varies
+    print('[audiosr] Inference complete — writing output', flush=True)
 
     # Normalise to torch.Tensor with shape (channels, samples)
     import numpy as np

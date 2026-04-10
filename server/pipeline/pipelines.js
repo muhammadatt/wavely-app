@@ -85,7 +85,7 @@ export const PIPELINES = {
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
-    stages.bandwidthExtension,      // NE-6: AudioSR HF restoration (conditional)
+    //stages.bandwidthExtension,      // NE-6: AudioSR HF restoration (conditional)
     stages.separationEQ,            // NE-7: Post-separation enhancement EQ
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
@@ -115,7 +115,6 @@ export const PIPELINES = {
     stages.clearerVoiceEnhance,     // CE-3: ClearerVoice SE replaces Demucs/ConvTasNet
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
-    stages.bandwidthExtension,      // NE-6: AudioSR HF restoration (conditional)
     stages.separationEQ,            // NE-7: Post-separation enhancement EQ
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
