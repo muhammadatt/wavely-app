@@ -15,6 +15,7 @@
 import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { PIPELINES } from './pipelines.js'
+import { createLogger } from './logger.js'
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -40,16 +41,40 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
   const pipeline = PIPELINES[presetId]
   if (!pipeline) throw new Error(`No pipeline defined for preset: ${presetId}`)
 
-  const ctx = createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile })
+  const ctx    = createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile })
+  const logger = await createLogger(preset, outputProfile, originalName, inputPath)
 
   try {
     for (const stage of pipeline) {
+      const prevPath        = ctx.currentPath
+      const resultKeysBefore = new Set(Object.keys(ctx.results))
+      const stageStart      = Date.now()
+
       await stage(ctx)
+
+      const stageDuration = Date.now() - stageStart
+      const audioChanged  = ctx.currentPath !== prevPath
+
+      if (logger) {
+        // Collect only the ctx.results keys that this stage added.
+        const newKeys     = Object.keys(ctx.results).filter(k => !resultKeysBefore.has(k))
+        const stageResults = {}
+        for (const key of newKeys) stageResults[key] = ctx.results[key]
+
+        await logger.logStep(
+          stage.name,
+          audioChanged ? ctx.currentPath : null,
+          stageResults,
+          stageDuration,
+        )
+      }
     }
 
     const report   = buildReport(ctx)
     const toClean  = ctx.tmpFiles.filter(f => f !== ctx.currentPath)
     await Promise.all(toClean.map(removeTmp))
+
+    if (logger) await logger.finalize(report)
 
     return { outputPath: ctx.currentPath, report, peaks: ctx.peaks }
   } catch (err) {
