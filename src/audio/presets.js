@@ -9,7 +9,8 @@
  * @typedef {Object} OutputProfile
  * @property {string} id
  * @property {string} displayName
- * @property {[number, number]} loudnessRange - [min, max] in dBFS (RMS) or LUFS
+ * @property {[number, number]} loudnessRange - [min, max] in dBFS (RMS) or LUFS — defines the acceptable compliance window
+ * @property {number} normalizationTarget - the specific dBFS RMS or LUFS value to target during normalization (may differ from loudnessRange midpoint)
  * @property {number} truePeakCeiling - dBFS
  * @property {number|null} noiseFloorCeiling - dBFS, null if not enforced
  * @property {'RMS'|'LUFS'} measurementMethod
@@ -21,6 +22,7 @@ export const OUTPUT_PROFILES = {
     id: 'acx',
     displayName: 'ACX Audiobook',
     loudnessRange: [-23, -18],
+    normalizationTarget: -20,   // dBFS RMS — ACX spec target, not the range midpoint (-20.5)
     truePeakCeiling: -3,
     noiseFloorCeiling: -60,
     measurementMethod: 'RMS',
@@ -29,6 +31,7 @@ export const OUTPUT_PROFILES = {
     id: 'podcast',
     displayName: 'Podcast / Streaming',
     loudnessRange: [-18, -14],
+    normalizationTarget: -16,   // LUFS integrated — midpoint of loudnessRange
     truePeakCeiling: -1,
     noiseFloorCeiling: null,
     measurementMethod: 'LUFS',
@@ -37,6 +40,7 @@ export const OUTPUT_PROFILES = {
     id: 'broadcast',
     displayName: 'Broadcast',
     loudnessRange: [-24, -22],
+    normalizationTarget: -23,   // LUFS integrated — midpoint of loudnessRange
     truePeakCeiling: -1,
     noiseFloorCeiling: null,
     measurementMethod: 'LUFS',

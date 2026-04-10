@@ -225,7 +225,10 @@ export async function normalize(ctx) {
   let normExtras          = {}
 
   if (outputProfile.measurementMethod === 'RMS') {
-    const targetRms             = (outputProfile.loudnessRange[0] + outputProfile.loudnessRange[1]) / 2
+    // Use the explicit normalizationTarget from the output profile.
+    // Do NOT use the loudnessRange midpoint — for ACX the midpoint is -20.5 dBFS
+    // but the spec target is -20 dBFS RMS.
+    const targetRms             = outputProfile.normalizationTarget
     const prNormSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
     const voicedRms             = await measureVoicedRms(ctx.currentPath, prNormSilenceAnalysis)
     const gainDb                = targetRms - voicedRms
@@ -242,7 +245,7 @@ export async function normalize(ctx) {
       gainApplied: `${round2(gainDb)}dB`,
     }
   } else {
-    const targetLufs = (outputProfile.loudnessRange[0] + outputProfile.loudnessRange[1]) / 2
+    const targetLufs = outputProfile.normalizationTarget
     await applyLoudnormLUFS(ctx.currentPath, normPath, {
       targetLUFS:  targetLufs,
       peakCeiling: outputProfile.truePeakCeiling,
