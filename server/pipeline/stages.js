@@ -89,7 +89,7 @@ export async function silenceAnalysisRaw(ctx) {
   const sa = await analyzeAudioFrames(ctx.currentPath)
   ctx.results.silenceRaw     = sa
   ctx.results.rawNoiseFloor  = sa.noiseFloorDbfs
-  logSilence('pre-HPF', sa)
+  logSilence(ctx, 'pre-HPF', sa)
 }
 
 // ── Stage: High-pass filter ───────────────────────────────────────────────────
@@ -100,7 +100,7 @@ export async function hpf(ctx) {
   await applyHighPass(ctx.currentPath, hpfPath, { notch60Hz })
   ctx.currentPath     = hpfPath
   ctx.results.notch60Hz = notch60Hz
-  await logLevel('after HPF', ctx.currentPath, { notch60Hz })
+  await logLevel(ctx, 'after HPF', ctx.currentPath, { notch60Hz })
 }
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ export async function noiseReduce(ctx) {
   nrResult.pre_noise_floor_dbfs = ctx.results.rawNoiseFloor
   ctx.currentPath            = nrPath
   ctx.results.noiseReduction = nrResult
-  await logLevel('after NR', ctx.currentPath, {
+  await logLevel(ctx, 'after NR', ctx.currentPath, {
     preNoiseFloor: `${ctx.results.rawNoiseFloor}dBFS`,
   })
 }
@@ -124,7 +124,7 @@ export async function noiseReduce(ctx) {
 export async function silenceAnalysisPostNr(ctx) {
   const sa = await analyzeAudioFrames(ctx.currentPath)
   ctx.results.silencePostNr = sa
-  logSilence('post-NR', sa)
+  logSilence(ctx, 'post-NR', sa)
 }
 
 // ── Stage: Room tone padding (ACX Audiobook only) ─────────────────────────────
@@ -149,7 +149,7 @@ export async function enhancementEQ(ctx) {
   await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
   ctx.currentPath       = eqPath
   ctx.results.enhancementEQ = eqResult
-  await logLevel('after EQ', ctx.currentPath, {
+  await logLevel(ctx, 'after EQ', ctx.currentPath, {
     applied: eqResult.applied,
     filters: eqResult.ffmpegFilters.length,
   })
@@ -175,7 +175,7 @@ export async function deEss(ctx) {
   )
   ctx.currentPath   = deEssPath
   ctx.results.deEss = deEssResult
-  await logLevel('after de-esser', ctx.currentPath, {
+  await logLevel(ctx, 'after de-esser', ctx.currentPath, {
     applied:   deEssResult.applied,
     voiceType: deEssResult.voiceType        ?? 'n/a',
     f0:        deEssResult.f0Hz        !== null ? `${deEssResult.f0Hz}Hz`           : 'n/a',
@@ -195,7 +195,7 @@ export async function compress(ctx) {
   )
   ctx.currentPath        = compPath
   ctx.results.compression = compressionResult
-  await logLevel('after compression', ctx.currentPath, {
+  await logLevel(ctx, 'after compression', ctx.currentPath, {
     applied: compressionResult.applied,
     crest:   compressionResult.crestFactorDb      !== null ? `${compressionResult.crestFactorDb}dB`      : 'n/a',
     maxRed:  compressionResult.maxGainReductionDb !== null ? `${compressionResult.maxGainReductionDb}dB` : 'n/a',
@@ -214,7 +214,7 @@ export async function harmonicExciter(ctx) {
   await runHarmonicExciter(ctx.currentPath, outPath)
   ctx.currentPath = outPath
   ctx.results.harmonicExciter = { applied: true }
-  await logLevel('after harmonic exciter', ctx.currentPath, {})
+  await logLevel(ctx, 'after harmonic exciter', ctx.currentPath, {})
 }
 
 // ── Stage: Normalize ──────────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ export async function normalize(ctx) {
     const gainDb                = targetRms - voicedRms
 
     if (gainDb > 18) {
-      console.warn(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
+      ctx.log(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
     }
 
     await applyLinearGain(ctx.currentPath, normPath, gainDb)
@@ -255,7 +255,7 @@ export async function normalize(ctx) {
   }
 
   ctx.currentPath = normPath
-  await logLevel('after normalization', ctx.currentPath, normExtras)
+  await logLevel(ctx, 'after normalization', ctx.currentPath, normExtras)
 }
 
 // ── Stage: True peak limiter ──────────────────────────────────────────────────
@@ -266,7 +266,7 @@ export async function truePeakLimit(ctx) {
     peakCeiling: ctx.outputProfile.truePeakCeiling,
   })
   ctx.currentPath = limitedPath
-  await logLevel('after limiting', ctx.currentPath, { tp: `${ctx.outputProfile.truePeakCeiling}dBTP` })
+  await logLevel(ctx, 'after limiting', ctx.currentPath, { tp: `${ctx.outputProfile.truePeakCeiling}dBTP` })
 }
 
 // ── Stage: Measure after ──────────────────────────────────────────────────────
@@ -343,7 +343,7 @@ export async function rnnoisePrePass(ctx) {
     pre_noise_floor_dbfs:   round2(preNoiseFloor ?? null),
     post_noise_floor_dbfs:  null,  // measured in NE-4 validation
   }
-  await logLevel('after NE-1 RNNoise', ctx.currentPath, {})
+  await logLevel(ctx, 'after NE-1 RNNoise', ctx.currentPath, {})
 }
 
 // ── NE Stage: Tonal noise pre-treatment (NE-2, conditional) ──────────────────
@@ -369,9 +369,9 @@ export async function tonalPretreatment(ctx) {
     if (apply120Hz) { filters.push('equalizer=f=120:t=q:w=12:g=-24'); notches.push({ freq_hz: 120, gain_db: -24 }) }
     await applyParametricEQ(ctx.currentPath, outPath, filters)
     ctx.currentPath = outPath
-    console.log(`[NE-2] Tonal pre-treatment applied: ${notches.map(n => `${n.freq_hz}Hz`).join(', ')}`)
+    ctx.log(`[NE-2] Tonal pre-treatment applied: ${notches.map(n => `${n.freq_hz}Hz`).join(', ')}`)
   } else {
-    console.log('[NE-2] No tonal components detected — NE-2 skipped')
+    ctx.log('[NE-2] No tonal components detected — NE-2 skipped')
   }
 
   ctx.results.separationPipeline.tonalPretreatment = {
@@ -392,7 +392,7 @@ export async function separateVocals(ctx) {
   const model    = ctx.preset.separationModel ?? 'demucs'
   const outPath  = ctx.tmp('.wav')
 
-  console.log(`[NE-3] Starting vocal separation with ${model} — this may take several minutes`)
+  ctx.log(`[NE-3] Starting vocal separation with ${model} — this may take several minutes`)
   await runSeparation(ctx.currentPath, outPath, model)
   ctx.currentPath = outPath
 
@@ -414,7 +414,7 @@ export async function separateVocals(ctx) {
     model,
     applied: true,
   }
-  await logLevel('after NE-3 separation', ctx.currentPath, { model })
+  await logLevel(ctx, 'after NE-3 separation', ctx.currentPath, { model })
 }
 
 // ── NE Stage: Post-separation validation (NE-4) ───────────────────────────────
@@ -441,8 +441,8 @@ export async function separationValidation(ctx) {
   // Store postSeparationSilenceAnalysis for normalize stage (silence exclusion threshold)
   ctx.results.postSeparationSilenceAnalysis = assessment.postSeparationSilenceAnalysis
 
-  assessment.artifactFlags.forEach(flag => console.warn(`[NE-4] ${flag}`))
-  console.log(
+  assessment.artifactFlags.forEach(flag => ctx.log(`[NE-4] ${flag}`))
+  ctx.log(
     `[NE-4] Separation quality: ${assessment.separationQuality} | ` +
     `noise floor: ${assessment.postSeparationNoiseFloorDbfs}dBFS | ` +
     `sibilance: ${assessment.sibilanceRatio} | breath: ${assessment.breathRatio}`
@@ -458,7 +458,7 @@ export async function residualCleanup(ctx) {
 
   if (noiseFloor === null || noiseFloor === undefined || noiseFloor <= -55) {
     ctx.results.separationPipeline.residualCleanup = { applied: false, skippedReason: 'Noise floor already below -55 dBFS' }
-    console.log(`[NE-5] Residual cleanup skipped — noise floor ${noiseFloor}dBFS ≤ -55 dBFS`)
+    ctx.log(`[NE-5] Residual cleanup skipped — noise floor ${noiseFloor}dBFS ≤ -55 dBFS`)
     return
   }
 
@@ -475,7 +475,7 @@ export async function residualCleanup(ctx) {
     pre_noise_floor_dbfs:        round2(noiseFloor),
     post_cleanup_noise_floor_dbfs: null,  // measured in Stage 7
   }
-  await logLevel('after NE-5 residual cleanup', ctx.currentPath, { tier: nrResult.tier })
+  await logLevel(ctx, 'after NE-5 residual cleanup', ctx.currentPath, { tier: nrResult.tier })
 }
 
 // ── NE Stage: Bandwidth extension (NE-6, conditional) ────────────────────────
@@ -493,7 +493,7 @@ export async function bandwidthExtension(ctx) {
     ctx.results.separationPipeline.bandwidthExtension = {
       applied: false, skippedReason: 'Sibilance well-preserved and noise floor clean — BWE not needed',
     }
-    console.log('[NE-6] Bandwidth extension skipped — sibilance preserved, noise floor clean')
+    ctx.log('[NE-6] Bandwidth extension skipped — sibilance preserved, noise floor clean')
     return
   }
 
@@ -506,11 +506,11 @@ export async function bandwidthExtension(ctx) {
       model:              'AudioSR',
       hf_energy_delta_db: null,
     }
-    await logLevel('after NE-6 bandwidth extension', ctx.currentPath, {})
+    await logLevel(ctx, 'after NE-6 bandwidth extension', ctx.currentPath, {})
   } catch (err) {
     // AudioSR requires ~4 GB RAM — skip gracefully on low-memory servers
     // rather than failing the entire pipeline.
-    console.warn(`[NE-6] AudioSR skipped — ${err.message.split('\n')[0]}`)
+    ctx.log(`[NE-6] AudioSR skipped — ${err.message.split('\n')[0]}`)
     ctx.results.separationPipeline.bandwidthExtension = {
       applied: false,
       skippedReason: 'AudioSR unavailable or out of memory — bandwidth extension skipped',
@@ -536,7 +536,7 @@ export async function separationEQ(ctx) {
   await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
   ctx.currentPath      = eqPath
   ctx.results.separationEQ = eqResult
-  await logLevel('after NE-7 separation EQ', ctx.currentPath, {
+  await logLevel(ctx, 'after NE-7 separation EQ', ctx.currentPath, {
     applied: eqResult.applied,
     filters: eqResult.ffmpegFilters.length,
   })
@@ -560,7 +560,7 @@ export async function resembleEnhance(ctx) {
   }
 
   const outPath = ctx.tmp('.wav')
-  console.log(`[RE-1] Starting Resemble Enhance (${mode}) — this may take several minutes`)
+  ctx.log(`[RE-1] Starting Resemble Enhance (${mode}) — this may take several minutes`)
   await runResembleEnhance(ctx.currentPath, outPath, mode, params)
   ctx.currentPath = outPath
 
@@ -584,7 +584,7 @@ export async function resembleEnhance(ctx) {
       tau:    params.tau,
     }),
   }
-  await logLevel(`after RE-1 Resemble Enhance (${mode})`, ctx.currentPath, { mode })
+  await logLevel(ctx, `after RE-1 Resemble Enhance (${mode})`, ctx.currentPath, { mode })
 }
 
 // ── VF Stage: VoiceFixer speech restoration (VF-1) ───────────────────────────
@@ -597,7 +597,7 @@ export async function voiceFixerRestore(ctx) {
   const mode    = ctx.preset.voiceFixerMode ?? 0
   const outPath = ctx.tmp('.wav')
 
-  console.log(`[VF-1] Starting VoiceFixer mode ${mode} — this may take several minutes`)
+  ctx.log(`[VF-1] Starting VoiceFixer mode ${mode} — this may take several minutes`)
   await runVoiceFixer(ctx.currentPath, outPath, mode)
   ctx.currentPath = outPath
 
@@ -608,7 +608,7 @@ export async function voiceFixerRestore(ctx) {
     model: 'VoiceFixer',
     mode,
   }
-  await logLevel(`after VF-1 VoiceFixer (mode ${mode})`, ctx.currentPath, { mode })
+  await logLevel(ctx, `after VF-1 VoiceFixer (mode ${mode})`, ctx.currentPath, { mode })
 }
 
 // ── CE Stage: ClearerVoice speech enhancement (CE-3) ─────────────────────────
@@ -624,7 +624,7 @@ export async function clearerVoiceEnhance(ctx) {
   const model   = ctx.preset.clearervoiceModel ?? 'mossformer2_48k'
   const outPath = ctx.tmp('.wav')
 
-  console.log(`[CE-3] Starting ClearerVoice enhancement (${model}) — this may take several minutes`)
+  ctx.log(`[CE-3] Starting ClearerVoice enhancement (${model}) — this may take several minutes`)
   await runClearerVoice(ctx.currentPath, outPath, model)
   ctx.currentPath = outPath
 
@@ -636,7 +636,7 @@ export async function clearerVoiceEnhance(ctx) {
     model:   `clearervoice_${model}`,
     applied: true,
   }
-  await logLevel('after CE-3 ClearerVoice', ctx.currentPath, { model })
+  await logLevel(ctx, 'after CE-3 ClearerVoice', ctx.currentPath, { model })
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -652,7 +652,7 @@ function detect60HzHum(rawNoiseFloor) {
   return rawNoiseFloor > -55
 }
 
-async function logLevel(label, filePath, extras = {}) {
+async function logLevel(ctx, label, filePath, extras = {}) {
   try {
     const { stderr } = await runFfmpeg([
       '-i', filePath, '-af', 'volumedetect', '-f', 'null', '-',
@@ -660,16 +660,16 @@ async function logLevel(label, filePath, extras = {}) {
     const peak   = stderr.match(/max_volume:\s*([-\d.inf]+)\s*dB/)?.[1]  ?? '?'
     const mean   = stderr.match(/mean_volume:\s*([-\d.inf]+)\s*dB/)?.[1] ?? '?'
     const extStr = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join('  ')
-    console.log(`[level] ${label}: peak=${peak}dBFS  mean=${mean}dBFS${extStr ? '  ' + extStr : ''}`)
+    ctx.log(`[level] ${label}: peak=${peak}dBFS  mean=${mean}dBFS${extStr ? '  ' + extStr : ''}`)
   } catch (e) {
-    console.log(`[level] ${label}: measurement failed — ${e.message}`)
+    ctx.log(`[level] ${label}: measurement failed — ${e.message}`)
   }
 }
 
-function logSilence(label, sa) {
+function logSilence(ctx, label, sa) {
   const voiced = sa.frames.filter(f => !f.isSilence).length
   const total  = sa.frames.length
-  console.log(
+  ctx.log(
     `[silence] ${label}: noiseFloor=${sa.noiseFloorDbfs}dBFS  ` +
     `threshold=${sa.silenceThresholdDbfs}dBFS  ` +
     `voicedRms=${sa.voicedRmsDbfs}dBFS  ` +

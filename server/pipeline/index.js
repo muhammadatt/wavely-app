@@ -12,9 +12,40 @@
  * in the report JSON.
  */
 
+import fs from 'fs'
+import path from 'path'
 import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { PIPELINES } from './pipelines.js'
+
+// ── Pipeline logging ───────────────────────────────────────────────────────────
+// Set PIPELINE_LOG_DIR in .env to enable per-job log files.
+// Each job writes to: {LOG_DIR}/{ISO-timestamp}_{preset}_{filename}.log
+// Leave unset to disable file logging (console output is always active).
+
+const LOG_DIR = process.env.PIPELINE_LOG_DIR ?? null
+
+function createLogStream(originalName, presetId, outputProfileId) {
+  if (!LOG_DIR) return null
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true })
+    const safe    = originalName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60)
+    const ts      = new Date().toISOString().replace(/[:.]/g, '-')
+    const logPath = path.join(LOG_DIR, `${ts}_${presetId}_${safe}.log`)
+    const stream  = fs.createWriteStream(logPath, { flags: 'w' })
+    stream.write(
+      `=== Wavely Pipeline Log ===\n` +
+      `File: ${originalName}\n` +
+      `Preset: ${presetId}  Output profile: ${outputProfileId}\n` +
+      `Started: ${new Date().toISOString()}\n` +
+      `${'─'.repeat(40)}\n`
+    )
+    return stream
+  } catch (e) {
+    console.warn(`[pipeline] Could not open log file: ${e.message}`)
+    return null
+  }
+}
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -51,17 +82,26 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
     const toClean  = ctx.tmpFiles.filter(f => f !== ctx.currentPath)
     await Promise.all(toClean.map(removeTmp))
 
+    ctx.log(`${'─'.repeat(40)}\nDone.`)
     return { outputPath: ctx.currentPath, report, peaks: ctx.peaks }
   } catch (err) {
+    ctx.log(`[pipeline] ERROR: ${err.message}`)
     await Promise.all(ctx.tmpFiles.map(removeTmp))
     throw err
+  } finally {
+    ctx.logStream?.end()
   }
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
 
 function createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile }) {
-  const tmpFiles = []
+  const tmpFiles  = []
+  const logStream = createLogStream(originalName, presetId, outputProfileId)
+  function log(msg) {
+    console.log(msg)
+    logStream?.write(msg + '\n')
+  }
   return {
     // Static — set at creation, never changed by stages
     inputPath,
@@ -77,6 +117,10 @@ function createContext({ inputPath, originalName, presetId, outputProfileId, pre
       return p
     },
     tmpFiles,
+    // Per-job logger — writes to console and (if PIPELINE_LOG_DIR is set) a log file.
+    // Use ctx.log() in all stage functions instead of console.log/console.warn.
+    log,
+    logStream,
     // Set by the decode stage
     probe:           null,
     inputSampleRate: null,
