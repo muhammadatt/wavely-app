@@ -66,7 +66,7 @@ router.get('/jobs/:jobId/download', async (req, res) => {
   }
 
   if (!job.outputPath) {
-    return res.status(500).json({ error: 'Output path missing from completed job' })
+    return res.status(410).json({ error: 'Processed file no longer available — please reprocess' })
   }
 
   res.setHeader('Content-Type', 'audio/wav')
@@ -90,7 +90,7 @@ router.get('/jobs/:jobId/download', async (req, res) => {
     else res.destroy()
   })
 
-  stream.on('end', () => {
+  res.on('finish', () => {
     // Delete file after first successful download to free disk space.
     // The job record remains in the store until TTL expiry so status
     // polls continue to return 'done' correctly.

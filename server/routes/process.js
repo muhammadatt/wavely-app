@@ -117,7 +117,8 @@ router.post('/process', upload.single('file'), async (req, res) => {
 
     // --- Background pipeline ---
     const startTime = Date.now()
-    processAudio(uploadedPath, req.file.originalname, preset, outputProfile, presetOverrides)
+    Promise.resolve()
+      .then(() => processAudio(uploadedPath, req.file.originalname, preset, outputProfile, presetOverrides))
       .then(({ outputPath, report, peaks }) => {
         completeJob(jobId, { report, peaks, outputPath })
         const elapsed    = ((Date.now() - startTime) / 1000).toFixed(1)

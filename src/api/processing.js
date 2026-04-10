@@ -62,7 +62,10 @@ export async function processAudioOnServer({
     await sleep(POLL_INTERVAL_MS)
 
     const pollRes = await fetch(`${API_BASE}/api/jobs/${jobId}`)
-    if (!pollRes.ok) throw new Error(`Status check failed: ${pollRes.status}`)
+    if (!pollRes.ok) {
+      const body = await pollRes.json().catch(() => ({}))
+      throw new Error(body.error || `Status check failed: ${pollRes.status}`)
+    }
 
     job = await pollRes.json()
 
@@ -77,7 +80,10 @@ export async function processAudioOnServer({
 
   // ── 4. Download audio ──────────────────────────────────────────────────────
   const dlRes = await fetch(`${API_BASE}/api/jobs/${jobId}/download`)
-  if (!dlRes.ok) throw new Error(`Audio download failed: ${dlRes.status}`)
+  if (!dlRes.ok) {
+    const body = await dlRes.json().catch(() => ({}))
+    throw new Error(body.error || `Audio download failed: ${dlRes.status}`)
+  }
   const audioBlob = await dlRes.blob()
 
   return { report: job.report, peaks: job.peaks, audioBlob }
