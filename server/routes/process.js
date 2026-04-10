@@ -1,23 +1,23 @@
 /**
- * POST /api/process — Audio processing endpoint.
+ * POST /api/process — Submit an audio processing job.
  *
  * Accepts a multipart upload with:
  *   - file: audio file (WAV, MP3, FLAC, etc.)
  *   - preset: preset ID string
  *   - output_profile: output profile ID string (also accepts legacy 'compliance' field)
  *
- * Returns a multipart/mixed response:
- *   Part 1: application/json — { report, peaks }
- *   Part 2: audio/wav — processed audio blob
+ * Returns 202 { jobId } immediately. The pipeline runs in the background.
+ * Poll GET /api/jobs/:jobId for status, then GET /api/jobs/:jobId/download
+ * to retrieve the processed audio once status === 'done'.
  */
 
 import { Router } from 'express'
 import multer from 'multer'
 import path from 'path'
-import { createReadStream } from 'fs'
-import { stat, unlink } from 'fs/promises'
+import { unlink } from 'fs/promises'
 import { processAudio } from '../pipeline/index.js'
 import { PRESETS, OUTPUT_PROFILES, resolveOutputProfileId } from '../presets.js'
+import { createJob, completeJob, failJob } from '../lib/jobStore.js'
 
 const router = Router()
 
@@ -32,6 +32,8 @@ const SUPPORTED_EXTENSIONS = new Set([
 
 router.post('/process', upload.single('file'), async (req, res) => {
   const uploadedPath = req.file?.path
+  let jobAccepted = false
+
   try {
     // --- Validate inputs ---
     if (!req.file) {
@@ -57,8 +59,7 @@ router.post('/process', upload.single('file'), async (req, res) => {
       })
     }
 
-    // --- Process ---
-    // Allow per-request preset overrides
+    // --- Per-request preset overrides ---
     const presetOverrides = {}
 
     // noise_eraser: separation backend override
@@ -104,66 +105,45 @@ router.post('/process', upload.single('file'), async (req, res) => {
       presetOverrides.voiceFixerMode    != null && `voicefixer_mode=${presetOverrides.voiceFixerMode}`,
     ].filter(Boolean).join(' ')
 
-    console.log(`Processing: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}${overrideSummary ? ` ${overrideSummary}` : ''}`)
+    // --- Accept job, return immediately ---
+    // The pipeline runs in the background. Cloudflare's 100 s proxy timeout
+    // only applies to the initial upload request, which now completes well
+    // within a few seconds. The client polls /api/jobs/:jobId for progress.
+    const jobId = createJob()
+    jobAccepted = true
+
+    console.log(`Job ${jobId} accepted: ${req.file.originalname} | preset=${preset} output_profile=${outputProfile}${overrideSummary ? ` ${overrideSummary}` : ''}`)
+    res.status(202).json({ jobId })
+
+    // --- Background pipeline ---
     const startTime = Date.now()
+    processAudio(uploadedPath, req.file.originalname, preset, outputProfile, presetOverrides)
+      .then(({ outputPath, report, peaks }) => {
+        completeJob(jobId, { report, peaks, outputPath })
+        const elapsed    = ((Date.now() - startTime) / 1000).toFixed(1)
+        const certStatus = report.acx_certification
+          ? `acx=${report.acx_certification.certificate}`
+          : 'no-cert'
+        console.log(`Job ${jobId} done in ${elapsed}s: ${req.file.originalname} | ${certStatus}`)
+      })
+      .catch(err => {
+        failJob(jobId, err.message)
+        console.error(`Job ${jobId} failed:`, err)
+      })
+      .finally(() => {
+        // Uploaded file is no longer needed once the pipeline finishes
+        unlink(uploadedPath).catch(() => {})
+      })
 
-    const { outputPath, report, peaks } = await processAudio(
-      uploadedPath,
-      req.file.originalname,
-      preset,
-      outputProfile,
-      presetOverrides,
-    )
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-    const certStatus = report.acx_certification
-      ? `acx=${report.acx_certification.certificate}`
-      : 'no-cert'
-    console.log(`Processed in ${elapsed}s: ${req.file.originalname} | ${certStatus}`)
-
-    // --- Build multipart response ---
-    const boundary = '----WavelyProcessingBoundary'
-    const jsonPayload = JSON.stringify({ report, peaks })
-
-    res.setHeader('Content-Type', `multipart/mixed; boundary=${boundary}`)
-
-    const parts = [
-      `--${boundary}\r\n`,
-      `Content-Type: application/json\r\n`,
-      `Content-Disposition: form-data; name="metadata"\r\n`,
-      `\r\n`,
-      jsonPayload,
-      `\r\n--${boundary}\r\n`,
-      `Content-Type: audio/wav\r\n`,
-      `Content-Disposition: form-data; name="audio"; filename="processed.wav"\r\n`,
-      `\r\n`,
-    ]
-
-    // Write text parts
-    for (const part of parts) {
-      res.write(part)
-    }
-
-    // Stream audio binary instead of loading entire file into memory
-    await new Promise((resolve, reject) => {
-      const audioStream = createReadStream(outputPath)
-      audioStream.on('error', reject)
-      audioStream.on('end', resolve)
-      audioStream.pipe(res, { end: false })
-    })
-
-    res.write(`\r\n--${boundary}--\r\n`)
-    res.end()
-
-    // Clean up processed output
-    await unlink(outputPath).catch(() => {})
   } catch (err) {
-    const status = err.statusCode || 500
-    console.error('Processing error:', err)
-    res.status(status).json({ error: err.message })
+    // Validation error — pipeline was never started
+    if (!res.headersSent) {
+      res.status(err.statusCode || 400).json({ error: err.message })
+    }
   } finally {
-    // Clean up uploaded file
-    if (uploadedPath) {
+    // Only clean up the upload immediately on validation failure.
+    // If the job was accepted, the background task's .finally() handles it.
+    if (!jobAccepted && uploadedPath) {
       await unlink(uploadedPath).catch(() => {})
     }
   }

@@ -1,60 +1,90 @@
 /**
  * API client for server-side audio processing.
  *
- * Handles communication with the Wavely processing server,
- * including multipart response parsing.
+ * Uses an async job pattern to avoid proxy timeouts (Cloudflare 524):
+ *   1. POST /api/process        → 202 { jobId }  (returns in <5 s)
+ *   2. GET  /api/jobs/:jobId    → poll until status === 'done' or 'error'
+ *   3. GET  /api/jobs/:jobId/download → stream processed audio blob
  *
  * API base URL:
  *   Dev:        empty — Vite proxy forwards /api to localhost:3001
- *   Production: set VITE_API_BASE_URL=https://your-vps-domain.com in Vercel
+ *   Production: set VITE_API_BASE_URL=https://your-vps-domain.com
  */
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 import { renderRegionToBuffer } from '../audio/processing.js'
 
+const POLL_INTERVAL_MS = 3000       // 3 s between status checks
+const MAX_POLL_ATTEMPTS = 400       // 400 × 3 s = 20 min max wait
+
 /**
  * Send audio to the server for preset processing.
  *
- * @param {object} options
- * @param {Array} options.segments - Timeline segments to process
- * @param {number} options.sampleRate - Sample rate
- * @param {number} options.channels - Number of channels
- * @param {string} options.fileName - Original file name
- * @param {string} options.presetId - Preset ID
- * @param {string} options.outputProfileId - Output profile ID
- * @returns {{ report: object, audioBlob: Blob, peaks: object[] }}
+ * @param {object}   options
+ * @param {Array}    options.segments        - Timeline segments to process
+ * @param {number}   options.sampleRate      - Sample rate
+ * @param {number}   options.channels        - Number of channels
+ * @param {string}   options.fileName        - Original file name
+ * @param {string}   options.presetId        - Preset ID
+ * @param {string}   options.outputProfileId - Output profile ID
+ * @param {Function} [options.onProgress]    - Called with progress string on each poll
+ * @returns {Promise<{ report: object, audioBlob: Blob, peaks: object[] }>}
  */
 export async function processAudioOnServer({
   segments, sampleRate, channels, fileName, presetId, outputProfileId,
   separationModel, resembleMode, voiceFixerMode, clearervoiceModel,
+  onProgress,
 }) {
-  // Render the full timeline to a WAV blob for upload
+  // ── 1. Render timeline to WAV blob ─────────────────────────────────────────
   const wavBlob = await renderTimelineToWavBlob(segments, sampleRate, channels)
 
-  // Build form data
+  // ── 2. Submit job ──────────────────────────────────────────────────────────
   const formData = new FormData()
   formData.append('file', wavBlob, fileName || 'audio.wav')
   formData.append('preset', presetId)
   formData.append('output_profile', outputProfileId)
-  if (separationModel)    formData.append('separation_model',  separationModel)
-  if (resembleMode)       formData.append('resemble_mode',      resembleMode)
-  if (voiceFixerMode != null) formData.append('voicefixer_mode', String(voiceFixerMode))
-  if (clearervoiceModel)  formData.append('clearervoice_model', clearervoiceModel)
+  if (separationModel)        formData.append('separation_model',  separationModel)
+  if (resembleMode)           formData.append('resemble_mode',      resembleMode)
+  if (voiceFixerMode != null) formData.append('voicefixer_mode',    String(voiceFixerMode))
+  if (clearervoiceModel)      formData.append('clearervoice_model', clearervoiceModel)
 
-  // Send to server
-  const response = await fetch(`${API_BASE}/api/process`, {
-    method: 'POST',
-    body: formData,
-  })
+  const submitRes = await fetch(`${API_BASE}/api/process`, { method: 'POST', body: formData })
+  if (!submitRes.ok) {
+    const body = await submitRes.json().catch(() => ({ error: 'Unknown error' }))
+    throw new Error(body.error || `Submit failed: ${submitRes.status}`)
+  }
+  const { jobId } = await submitRes.json()
 
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({ error: 'Unknown error' }))
-    throw new Error(errorBody.error || `Server error: ${response.status}`)
+  // ── 3. Poll for completion ─────────────────────────────────────────────────
+  let job = null
+  for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+    await sleep(POLL_INTERVAL_MS)
+
+    const pollRes = await fetch(`${API_BASE}/api/jobs/${jobId}`)
+    if (!pollRes.ok) throw new Error(`Status check failed: ${pollRes.status}`)
+
+    job = await pollRes.json()
+
+    if (job.status === 'done')  break
+    if (job.status === 'error') throw new Error(job.error || 'Processing failed on server')
+    if (onProgress && job.progress) onProgress(job.progress)
   }
 
-  // Parse multipart response
-  return parseMultipartResponse(response)
+  if (!job || job.status !== 'done') {
+    throw new Error('Processing timed out — please try again with a shorter file')
+  }
+
+  // ── 4. Download audio ──────────────────────────────────────────────────────
+  const dlRes = await fetch(`${API_BASE}/api/jobs/${jobId}/download`)
+  if (!dlRes.ok) throw new Error(`Audio download failed: ${dlRes.status}`)
+  const audioBlob = await dlRes.blob()
+
+  return { report: job.report, peaks: job.peaks, audioBlob }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 /**
