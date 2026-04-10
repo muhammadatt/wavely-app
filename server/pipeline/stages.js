@@ -488,7 +488,8 @@ export async function bandwidthExtension(ctx) {
   const sibilance    = validation?.sibilanceRatio ?? 0
   const noiseFloor   = validation?.postSeparationNoiseFloorDbfs ?? 0
 
-  const skip = sibilance >= 0.8 && noiseFloor <= -55
+  //const skip = sibilance >= 0.8 && noiseFloor <= -55
+  const skip = false
   if (skip) {
     ctx.results.separationPipeline.bandwidthExtension = {
       applied: false, skippedReason: 'Sibilance well-preserved and noise floor clean — BWE not needed',
