@@ -41,7 +41,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer, runHarmonicExciter, runClearerVoice } from './separation.js'
+import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
@@ -125,6 +125,26 @@ export async function silenceAnalysisPostNr(ctx) {
   const sa = await analyzeAudioFrames(ctx.currentPath)
   ctx.results.silencePostNr = sa
   logSilence(ctx, 'post-NR', sa)
+}
+
+// ── Stage: Dereverberation ────────────────────────────────────────────────────
+// Runs after noise reduction (on the cleanest possible signal) and before EQ
+// so tonal shaping operates on the de-reverberated output.
+// Skipped entirely when preset.dereverb is absent or preset.dereverb.enabled is false.
+
+export async function dereverb(ctx) {
+  const config = ctx.preset.dereverb
+  if (!config?.enabled) return
+
+  const strength     = config.strength     ?? 'medium'
+  const preserveEarly = config.preserve_early ?? false
+
+  const outPath = ctx.tmp('.wav')
+  ctx.log(`[dereverb] Starting dereverberation (strength=${strength} preserve_early=${preserveEarly})`)
+  await runDereverb(ctx.currentPath, outPath, strength, preserveEarly)
+  ctx.currentPath       = outPath
+  ctx.results.dereverb  = { applied: true, strength, preserve_early: preserveEarly }
+  await logLevel(ctx, 'after dereverb', ctx.currentPath, { strength })
 }
 
 // ── Stage: Room tone padding (ACX Audiobook only) ─────────────────────────────

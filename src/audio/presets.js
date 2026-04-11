@@ -98,6 +98,11 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'acx',
     lockedOutputProfile: true,
+    dereverb: {
+      enabled: true,
+      strength: 'medium',
+      preserve_early: false,
+    },
   },
 
   podcast_ready: {
@@ -125,6 +130,11 @@ export const PRESETS = {
     channelOutput: 'preserve',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
+    dereverb: {
+      enabled: false,
+      strength: 'light',
+      preserve_early: true,
+    },
   },
 
   voice_ready: {
@@ -152,6 +162,14 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'acx',
     lockedOutputProfile: false,
+    // VACE-WPE (heavy) auto-selects GPU when CUDA is available; falls back to
+    // CPU. Set to 'medium' here to use NARA-WPE on CPU-only servers — override
+    // at deploy time via presetOverrides if GPU is confirmed available.
+    dereverb: {
+      enabled: true,
+      strength: 'heavy',
+      preserve_early: false,
+    },
   },
 
   general_clean: {
