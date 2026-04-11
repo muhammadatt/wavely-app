@@ -65,7 +65,7 @@ def main():
     if sr != WPE_SR:
         resampler_down = T.Resample(orig_freq=sr, new_freq=WPE_SR)
         import torch
-        audio_16k = resampler_down(torch.tensor(audio_mono).unsqueeze(0))[0].numpy()
+        audio_16k = resampler_down(torch.tensor(audio_mono, dtype=torch.float32).unsqueeze(0))[0].numpy()
     else:
         audio_16k = audio_mono
 
@@ -87,7 +87,7 @@ def main():
     if sr != WPE_SR:
         import torch
         resampler_up = T.Resample(orig_freq=WPE_SR, new_freq=sr)
-        result = resampler_up(torch.tensor(result_16k).unsqueeze(0))[0].numpy()
+        result = resampler_up(torch.tensor(result_16k, dtype=torch.float32).unsqueeze(0))[0].numpy()
     else:
         result = result_16k
 
