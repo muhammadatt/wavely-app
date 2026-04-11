@@ -525,29 +525,6 @@ export async function separationEQ(ctx) {
   })
 }
 
-// ── VF Stage: VoiceFixer speech restoration (VF-1) ───────────────────────────
-// Single-stage replacement for the NE-1 through NE-7 block.
-// Handles noise, reverb, low resolution, and clipping in one model pass.
-// Output is vocoder-resynthesized — effective for severe degradation but
-// voice character may differ from input (not a transparent NR tool).
-
-export async function voiceFixerRestore(ctx) {
-  const mode    = ctx.preset.voiceFixerMode ?? 0
-  const outPath = ctx.tmp('.wav')
-
-  ctx.log(`[VF-1] Starting VoiceFixer mode ${mode} — this may take several minutes`)
-  await runVoiceFixer(ctx.currentPath, outPath, mode)
-  ctx.currentPath = outPath
-
-  // VoiceFixer outputs mono regardless of input channel count.
-  ctx.results.stereoToMono = ctx.inputChannels > 1
-
-  ctx.results.enhancementPipeline = {
-    model: 'VoiceFixer',
-    mode,
-  }
-  await logLevel(ctx, `after VF-1 VoiceFixer (mode ${mode})`, ctx.currentPath, { mode })
-}
 
 // ── CE Stage: ClearerVoice speech enhancement (CE-3) ─────────────────────────
 // Single-model replacement for Demucs/ConvTasNet vocal separation (NE-3).

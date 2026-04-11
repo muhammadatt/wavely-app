@@ -197,6 +197,11 @@ export const PRESETS = {
     channelOutput: 'preserve',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
+    dereverb: {
+      enabled: true,
+      strength: 'medium',
+      preserve_early: false,
+    },
   },
 
   noise_eraser: {
@@ -228,6 +233,11 @@ export const PRESETS = {
     // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
     // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
     separationModel: 'demucs',
+    dereverb: {
+      enabled: true,
+      strength: 'medium',
+      preserve_early: false,
+    },
   },
 
   clearervoice_eraser: {
