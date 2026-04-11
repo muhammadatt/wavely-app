@@ -6,13 +6,12 @@
 #   CPU-only:
 #     pip install -r server/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 #
-# torch and torchaudio are pinned to 2.0.0 because deepfilternet 0.5.6 uses
-# torchaudio.backend.common.AudioMetaData and torchaudio.info(), both removed
-# in torchaudio 2.1. Do not upgrade until deepfilternet releases a compatible version.
-
 # ── PyTorch (pinned for deepfilternet compatibility) ─────────────────────────
-torch==2.0.0
-torchaudio==2.0.0
+# deepfilternet 0.5.6 uses torchaudio.backend.common.AudioMetaData and
+# torchaudio.info(), both removed in torchaudio 2.1. Pin must stay below 2.1.
+# clearvoice requires torchaudio>=2.0.2, so 2.0.1/2.0.2 is the minimum valid pair.
+torch==2.0.1
+torchaudio==2.0.2
 
 # ── Standard pipeline ─────────────────────────────────────────────────────────
 
