@@ -65,6 +65,22 @@ voicefixer>=0.1.0
 # Pretrained model weights downloaded on first run from HuggingFace/ModelScope.
 clearvoice>=0.0.1
 
+# ── Dereverberation stage ─────────────────────────────────────────────────────
+
+# dereverb.py (Stage 2a — NARA-WPE light/medium paths)
+# nara_wpe: NumPy/SciPy WPE implementation, CPU-only, no ML model.
+# librosa:  resampling (orig_sr→16k→orig_sr) and fix_length length correction.
+# soundfile: WAV I/O (imported transitively; pinned for librosa compatibility).
+nara-wpe>=0.0.11
+librosa>=0.10
+soundfile>=0.12
+
+# VACE-WPE (heavy path) uses vendor/vace_wpe — clone separately:
+#   git clone https://github.com/dreadbird06/vace_wpe vendor/vace_wpe
+# Requires torch>=2.0 (already pinned above) and the checkpoint at
+#   vendor/vace_wpe/models/bldnn_4M62.pt (or set VACE_WPE_CHECKPOINT env var).
+# No pip package — imported directly from vendor/ via sys.path insertion.
+
 # ── VAD (Silero) ───────────────────────────────────────────────────────────────
 
 # silero_vad.py (silence/voiced frame classification using Silero VAD v5)

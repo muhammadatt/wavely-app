@@ -154,6 +154,7 @@ function buildReport(ctx) {
       resampled_from:  ctx.inputSampleRate !== 44100 ? ctx.inputSampleRate : null,
       hpf_60hz_notch:  results.notch60Hz   ?? false,
       ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
+      ...(results.dereverb       && { dereverberation:   formatDereverbResult(results.dereverb) }),
       ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
       ...(results.separationEQ   && { separation_eq:     formatEqResult(results.separationEQ) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
@@ -201,6 +202,15 @@ function formatNrResult(r) {
     model:                 r.model,
     pre_noise_floor_dbfs:  r.pre_noise_floor_dbfs,
     post_noise_floor_dbfs: r.post_noise_floor_dbfs,
+  }
+}
+
+function formatDereverbResult(r) {
+  if (!r?.applied) return null
+  return {
+    applied:        r.applied,
+    strength:       r.strength,
+    preserve_early: r.preserve_early,
   }
 }
 

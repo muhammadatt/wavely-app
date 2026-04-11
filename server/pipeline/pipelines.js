@@ -11,7 +11,9 @@ import * as stages from './stages.js'
 
 // Shared by podcast_ready, voice_ready, and general_clean.
 // Differences between these presets (mono vs stereo, EQ profile, compression
-// mode, NR ceiling) are all expressed through preset config — not pipeline shape.
+// mode, NR ceiling, dereverb enabled/disabled) are all expressed through preset
+// config — not pipeline shape. The dereverb stage is a no-op when
+// preset.dereverb is absent or preset.dereverb.enabled is false.
 const STANDARD_PIPELINE = [
   stages.decode,
   stages.monoMixdown,
@@ -20,6 +22,7 @@ const STANDARD_PIPELINE = [
   stages.hpf,
   stages.noiseReduce,
   stages.silenceAnalysisPostNr,
+  stages.dereverb,              // no-op when preset.dereverb.enabled is false
   stages.enhancementEQ,
   stages.silenceAnalysisPreDeEss,
   stages.deEss,
@@ -46,6 +49,7 @@ export const PIPELINES = {
     stages.hpf,
     stages.noiseReduce,
     stages.silenceAnalysisPostNr,
+    stages.dereverb,                // runs before room tone padding so padded room tone matches dereverberated signal
     stages.roomTonePad,             // ACX-only
     stages.enhancementEQ,
     stages.silenceAnalysisPreDeEss,

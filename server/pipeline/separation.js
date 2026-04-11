@@ -25,6 +25,7 @@ const RESEMBLE_SCRIPT         = path.join(SCRIPTS_DIR, 'run_resemble_enhance.py'
 const VOICEFIXER_SCRIPT       = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
 const HARMONIC_EXCITER_SCRIPT = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
 const CLEARERVOICE_SCRIPT     = path.join(SCRIPTS_DIR, 'clearervoice_enhance.py')
+const DEREVERB_SCRIPT         = path.join(SCRIPTS_DIR, 'dereverb.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,24 @@ export function runHarmonicExciter(inputPath, outputPath, params = {}) {
   if (params.drive              != null) args.push('--drive',                String(params.drive))
   if (params.evenHarmonicWeight != null) args.push('--even-harmonic-weight', String(params.evenHarmonicWeight))
   return spawnPython(HARMONIC_EXCITER_SCRIPT, args, 'HarmonicExciter')
+}
+
+/**
+ * Dereverberation — removes room reflections from voice audio using WPE.
+ *
+ * @param {string} inputPath     - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath    - 32-bit float WAV at 44.1 kHz (mono)
+ * @param {'light'|'medium'|'heavy'} strength - Algorithm tier
+ * @param {boolean} preserveEarly - If true, bump WPE delay +2 to protect early reflections
+ */
+export function runDereverb(inputPath, outputPath, strength = 'medium', preserveEarly = false) {
+  const args = [
+    '--input',    inputPath,
+    '--output',   outputPath,
+    '--strength', strength,
+  ]
+  if (preserveEarly) args.push('--preserve-early')
+  return spawnPython(DEREVERB_SCRIPT, args, `Dereverb (${strength})`)
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
