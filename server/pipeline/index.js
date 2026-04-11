@@ -174,7 +174,7 @@ function buildReport(ctx) {
     ...(results.separationPipeline && {
       separation_pipeline: formatSeparationPipelineResult(results.separationPipeline),
     }),
-    // enhancement_pipeline is absent (not null) for all presets except resemble_enhance and voicefixer
+    // enhancement_pipeline is absent (not null) for all presets except voicefixer
     ...(results.enhancementPipeline && {
       enhancement_pipeline: formatEnhancementPipelineResult(results.enhancementPipeline),
     }),
@@ -292,13 +292,6 @@ function formatSeparationPipelineResult(sp) {
           applied:                       sp.residualCleanup.applied,
           tier:                          sp.residualCleanup.tier ?? null,
           post_cleanup_noise_floor_dbfs: sp.residualCleanup.post_cleanup_noise_floor_dbfs ?? null,
-        }
-      : undefined,
-    bandwidth_extension: sp.bandwidthExtension
-      ? {
-          applied:              sp.bandwidthExtension.applied,
-          model:                sp.bandwidthExtension.model ?? null,
-          hf_energy_delta_db:   sp.bandwidthExtension.hf_energy_delta_db ?? null,
         }
       : undefined,
     separation_quality: sp.separation_quality ?? null,

@@ -41,7 +41,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runAudioSR, runResembleEnhance, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb } from './separation.js'
+import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
@@ -501,47 +501,6 @@ export async function residualCleanup(ctx) {
   await logLevel(ctx, 'after NE-5 residual cleanup', ctx.currentPath, { tier: nrResult.tier })
 }
 
-// ── NE Stage: Bandwidth extension (NE-6, conditional) ────────────────────────
-// Restores HF voice content attenuated during source separation.
-// Skipped if sibilance ratio ≥ 0.8 AND post-separation noise floor < -55 dBFS.
-
-export async function bandwidthExtension(ctx) {
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-  const validation   = ctx.results.separationPipeline.validation
-  const sibilance    = validation?.sibilanceRatio ?? 0
-  const noiseFloor   = validation?.postSeparationNoiseFloorDbfs ?? 0
-
-  //const skip = sibilance >= 0.8 && noiseFloor <= -55
-  const skip = false
-  if (skip) {
-    ctx.results.separationPipeline.bandwidthExtension = {
-      applied: false, skippedReason: 'Sibilance well-preserved and noise floor clean — BWE not needed',
-    }
-    ctx.log('[NE-6] Bandwidth extension skipped — sibilance preserved, noise floor clean')
-    return
-  }
-
-  const bwePath = ctx.tmp('.wav')
-  try {
-    await runAudioSR(ctx.currentPath, bwePath, 3.5)
-    ctx.currentPath = bwePath
-    ctx.results.separationPipeline.bandwidthExtension = {
-      applied:            true,
-      model:              'AudioSR',
-      hf_energy_delta_db: null,
-    }
-    await logLevel(ctx, 'after NE-6 bandwidth extension', ctx.currentPath, {})
-  } catch (err) {
-    // AudioSR requires ~4 GB RAM — skip gracefully on low-memory servers
-    // rather than failing the entire pipeline.
-    ctx.log(`[NE-6] AudioSR skipped — ${err.message.split('\n')[0]}`)
-    ctx.results.separationPipeline.bandwidthExtension = {
-      applied: false,
-      skippedReason: 'AudioSR unavailable or out of memory — bandwidth extension skipped',
-    }
-  }
-}
-
 // ── NE Stage: Post-separation enhancement EQ (NE-7) ──────────────────────────
 // Corrects tonal imbalances from separation + BWE using a separation-specific
 // reference profile. Max gain ±4 dB (tighter than standard ±5 dB).
@@ -564,51 +523,6 @@ export async function separationEQ(ctx) {
     applied: eqResult.applied,
     filters: eqResult.ffmpegFilters.length,
   })
-}
-
-// ── RE Stage: Resemble Enhance denoising/enhancement (RE-1) ──────────────────
-// Single-stage replacement for the NE-1 through NE-7 block.
-// Denoise mode: UNet denoiser only — conservative, voice-transparent.
-// Enhance mode: Denoise + CFM diffusion enhancer — adds bandwidth extension
-//               and perceptual improvement (analogous to NR + AudioSR in one pass).
-// Mono mixdown happens AFTER processing to preserve model quality on stereo inputs.
-
-export async function resembleEnhance(ctx) {
-  const mode   = ctx.preset.resembleMode   ?? 'enhance'
-  const params = {
-    nfe:          ctx.preset.resembleNfe          ?? 64,
-    solver:       ctx.preset.resembleSolver       ?? 'midpoint',
-    lambd:        ctx.preset.resembleLambd        ?? 0.1,
-    tau:          ctx.preset.resembleTau          ?? 0.5,
-    chunkSeconds: ctx.preset.resembleChunkSeconds ?? null,  // null → script picks device-aware default
-  }
-
-  const outPath = ctx.tmp('.wav')
-  ctx.log(`[RE-1] Starting Resemble Enhance (${mode}) — this may take several minutes`)
-  await runResembleEnhance(ctx.currentPath, outPath, mode, params)
-  ctx.currentPath = outPath
-
-  // resemble-enhance processes mono internally; apply mixdown if preset requires it.
-  if (ctx.preset.channelOutput === 'mono' && ctx.inputChannels > 1) {
-    const monoPath = ctx.tmp('.wav')
-    await mixdownToMono(ctx.currentPath, monoPath)
-    ctx.currentPath = monoPath
-    ctx.results.stereoToMono = true
-  } else {
-    ctx.results.stereoToMono = false
-  }
-
-  ctx.results.enhancementPipeline = {
-    model:  'ResembleEnhance',
-    mode,
-    ...(mode === 'enhance' && {
-      nfe:    params.nfe,
-      solver: params.solver,
-      lambd:  params.lambd,
-      tau:    params.tau,
-    }),
-  }
-  await logLevel(ctx, `after RE-1 Resemble Enhance (${mode})`, ctx.currentPath, { mode })
 }
 
 // ── VF Stage: VoiceFixer speech restoration (VF-1) ───────────────────────────

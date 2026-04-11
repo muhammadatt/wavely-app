@@ -89,7 +89,6 @@ export const PIPELINES = {
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
-    //stages.bandwidthExtension,      // NE-6: AudioSR HF restoration (conditional)
     stages.separationEQ,            // NE-7: Post-separation enhancement EQ
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
@@ -125,23 +124,6 @@ export const PIPELINES = {
     stages.truePeakLimit,           // Stage 6: True peak limiting
     stages.measureAfter,
     stages.acxCertification,        // Only emits when output_profile === 'acx'
-    stages.qualityAdvisory,
-    stages.encode,
-    stages.extractPeaks,
-  ],
-
-  // Resemble Enhance: single-model alternative to the Noise Eraser separation chain.
-  // Replaces NE-1 through NE-7 with one Resemble Enhance pass (denoise or full enhance).
-  // No monoMixdown here — resembleEnhance handles channel conversion after processing.
-  resemble_enhance: [
-    stages.decode,
-    stages.measureBefore,
-    stages.silenceAnalysisRaw,
-    stages.resembleEnhance,         // RE-1: Resemble Enhance denoise or full enhance
-    stages.normalize,
-    stages.truePeakLimit,
-    stages.measureAfter,
-    stages.acxCertification,
     stages.qualityAdvisory,
     stages.encode,
     stages.extractPeaks,

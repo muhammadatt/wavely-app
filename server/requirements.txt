@@ -36,21 +36,6 @@ demucs>=4.0.0
 # Install after demucs to avoid torch version conflicts.
 asteroid>=0.7.0
 
-# audiosr_extend.py (NE-6 bandwidth extension)
-# Diffusion model weights (~1.5 GB) downloaded on first run.
-# In production, pre-download at server startup:
-#   import audiosr; audiosr.build_model(model_name='basic')
-# Install last — pins a newer version of transformers than asteroid.
-audiosr>=0.0.2
-
-# ── Resemble Enhance pipeline ─────────────────────────────────────────────────
-
-# resemble_enhance.py (RE-1 — denoise-only or denoise + CFM diffusion enhancement)
-# Model weights (~200 MB) downloaded on first run to:
-#   ~/.cache/huggingface/hub/models--resemble-ai--resemble-enhance/
-# ⚠ Requires torch >= 2.0. The pinned torch==2.0.0 above is compatible.
-resemble-enhance>=0.0.1
-
 # ── VoiceFixer pipeline ────────────────────────────────────────────────────────
 
 # voicefixer_enhance.py (VF-1 — vocoder-based speech restoration)
@@ -87,5 +72,4 @@ soundfile>=0.12
 # Uses torch.hub.load() — model weights (~10 MB) downloaded on first run to:
 #   ~/.cache/torch/hub/snakers4_silero-vad_master/
 # No torchaudio version constraint; compatible with torch==2.0.0.
-# Install after audiosr to avoid transformers version conflicts.
 silero-vad>=5.1
