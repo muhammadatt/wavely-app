@@ -82,6 +82,31 @@ export async function measureBefore(ctx) {
   ctx.results.beforeMeasurements = await measureAudio(ctx.currentPath)
 }
 
+// ── Stage: Peak normalize (pre-processing) ───────────────────────────────────
+// Brings the true peak to -1 dBFS before any processing begins.
+// Ensures a consistent working level for NR, EQ, and compression regardless
+// of how quiet or loud the original recording is.
+// Runs after measureBefore so the report captures the original input level.
+
+export async function peakNormalize(ctx) {
+  const TARGET_PEAK_DBFS = -1.0
+  const m      = await measureAudio(ctx.currentPath)
+  const peak   = m.truePeakDbfs
+  const gainDb = TARGET_PEAK_DBFS - peak
+
+  if (Math.abs(gainDb) < 0.1) {
+    ctx.log(`[peak-norm] Peak already at ${peak.toFixed(1)} dBFS — skipped`)
+    ctx.results.peakNormalize = { applied: false, inputPeakDbfs: peak }
+    return
+  }
+
+  const outPath = ctx.tmp('.wav')
+  await applyLinearGain(ctx.currentPath, outPath, gainDb)
+  ctx.currentPath = outPath
+  ctx.results.peakNormalize = { applied: true, inputPeakDbfs: peak, gainDb }
+  ctx.log(`[peak-norm] ${peak.toFixed(1)} dBFS → ${TARGET_PEAK_DBFS} dBFS (${gainDb > 0 ? '+' : ''}${gainDb.toFixed(1)} dB)`)
+}
+
 // ── Stage: Silence analysis (pre-HPF) ────────────────────────────────────────
 // Provides the raw noise floor for 60 Hz hum detection.
 

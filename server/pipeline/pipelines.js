@@ -18,6 +18,7 @@ const STANDARD_PIPELINE = [
   stages.decode,
   stages.monoMixdown,
   stages.measureBefore,
+  stages.peakNormalize,
   stages.silenceAnalysisRaw,
   stages.hpf,
   stages.noiseReduce,
@@ -45,6 +46,7 @@ export const PIPELINES = {
     stages.decode,
     stages.monoMixdown,
     stages.measureBefore,
+    stages.peakNormalize,
     stages.silenceAnalysisRaw,
     stages.hpf,
     stages.noiseReduce,
@@ -82,8 +84,8 @@ export const PIPELINES = {
   noise_eraser: [
     stages.decode,
     // No monoMixdown here — see separateVocals
-    stages.normalize,   
     stages.measureBefore,
+    stages.peakNormalize,
     stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
     stages.hpf,
     stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
@@ -119,6 +121,7 @@ export const PIPELINES = {
     stages.decode,
     // No monoMixdown here — clearerVoiceEnhance mixes to mono inside the Python script
     stages.measureBefore,
+    stages.peakNormalize,
     stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
     stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
