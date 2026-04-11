@@ -82,15 +82,21 @@ export const PIPELINES = {
   noise_eraser: [
     stages.decode,
     // No monoMixdown here — see separateVocals
+    stages.normalize,   
     stages.measureBefore,
     stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
+    stages.hpf,
     stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
-    stages.dereverb,   
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
-    stages.separationEQ,            // NE-7: Post-separation enhancement EQ
+    stages.dereverb,   
+    //stages.separationEQ,            // NE-7: Post-separation enhancement EQ
+    stages.enhancementEQ,
+    stages.silenceAnalysisPreDeEss,
+    stages.deEss,
+    stages.compress,
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
     stages.truePeakLimit,           // Stage 6: True peak limiting
@@ -119,7 +125,8 @@ export const PIPELINES = {
     stages.clearerVoiceEnhance,     // CE-3: ClearerVoice SE replaces Demucs/ConvTasNet
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
-    stages.separationEQ,            // NE-7: Post-separation enhancement EQ
+    //stages.separationEQ,            // NE-7: Post-separation enhancement EQ
+    stages.enhancementEQ,
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
     stages.truePeakLimit,           // Stage 6: True peak limiting

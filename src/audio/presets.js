@@ -214,11 +214,17 @@ export const PRESETS = {
     truePeakCeiling: -1,
     noiseFloorTarget: null,
     compression: {
-      mode: 'none',
-      ratio: 1,
-      threshold: 0,
-      attack: 0,
-      release: 0,
+      mode: 'conditional',
+      ratio: 2,
+      threshold: -24,
+      attack: 10,
+      release: 100,
+    },
+    eqProfile: 'general',
+    deEsser: {
+      sensitivity: 'high',
+      trigger: 6,
+      maxReduction: 8,
     },
     eqProfile: 'separation_recovery',
     deEsser: {
