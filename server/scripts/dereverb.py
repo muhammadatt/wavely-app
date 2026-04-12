@@ -38,6 +38,17 @@ WPE_PARAMS = {
     'medium': {'taps': 10, 'delay': 3, 'iterations': 5},
 }
 
+# ── VACE-WPE (heavy path) constants ──────────────────────────────────────────
+# STFT options must match the training config from vace_wpe/run.py.
+# The model was trained on 16 kHz audio; dereverb.py downsamples to WPE_SR
+# before invoking VACE-WPE, so these parameters are correct.
+VACE_WPE_STFT_OPTS = dict(
+    n_fft=1024, hop_length=256, win_length=1024,
+    win_type='hanning', symmetric=True,
+)
+VACE_WPE_TAPS  = 30  # single-channel NeuralWPE taps (from run.py: taps1=30)
+VACE_WPE_DELAY = 3   # WPE delay frames (from run.py)
+
 
 def main():
     parser = argparse.ArgumentParser(description='Apply WPE dereverberation')
@@ -144,7 +155,8 @@ def _run_vace_wpe(audio: 'np.ndarray') -> 'np.ndarray':
     import os
     import torch
 
-    # Ensure vendor/vace_wpe is importable
+    # Ensure vendor/vace_wpe is importable (adds repo root so both
+    # `bldnn_4M62` and `torch_custom.*` are resolvable as top-level modules)
     vendor_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         '..', '..', 'vendor', 'vace_wpe',
@@ -154,12 +166,11 @@ def _run_vace_wpe(audio: 'np.ndarray') -> 'np.ndarray':
         sys.path.insert(0, vendor_path)
 
     try:
-        from torch_custom.neural_wpe import NeuralWPE
-        from torch_custom.torch_utils import load_checkpoint, to_arr
+        from torch_custom.torch_utils import to_arr
     except ImportError as e:
         print(
             f'[dereverb] VACE-WPE import failed ({e}). '
-            'Ensure vendor/vace_wpe is cloned and PYTHONPATH is set. '
+            'Ensure vendor/vace_wpe is cloned (git clone https://github.com/dreadbird06/vace_wpe vendor/vace_wpe). '
             'Falling back to NARA-WPE medium.',
             file=sys.stderr,
         )
@@ -168,11 +179,12 @@ def _run_vace_wpe(audio: 'np.ndarray') -> 'np.ndarray':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model  = _get_vace_model(device)
 
-    waveform = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).to(device)
+    # NeuralWPE.forward() expects (batch, channels, samples)
+    waveform = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
     with torch.no_grad():
-        result = model(waveform)
+        result = model(waveform, delay=VACE_WPE_DELAY, taps=VACE_WPE_TAPS)  # (1, 1, T)
 
-    out = to_arr(result.squeeze(0))
+    out = to_arr(result.squeeze())  # → 1-D numpy array
     print(f'[dereverb] VACE-WPE heavy: device={device}', flush=True)
     return out
 
@@ -183,12 +195,20 @@ _vace_model_cache = None
 
 
 def _get_vace_model(device):
-    """Load VACE-WPE model once and cache for the process lifetime."""
+    """Load VACE-WPE model once and cache for the process lifetime.
+
+    The vendor/vace_wpe repo stores checkpoints in dated subdirectories as
+    extension-less files named `ckpt-ep60`, e.g.:
+        vendor/vace_wpe/models/20210129-140530/ckpt-ep60
+    Override the default path with the VACE_WPE_CHECKPOINT environment variable.
+    """
     global _vace_model_cache
     if _vace_model_cache is not None:
         return _vace_model_cache
 
     import os
+    # bldnn_4M62 and torch_custom are top-level modules in vendor/vace_wpe
+    from bldnn_4M62 import LstmDnnNet as LPSEstimator
     from torch_custom.neural_wpe import NeuralWPE
     from torch_custom.torch_utils import load_checkpoint
 
@@ -196,15 +216,26 @@ def _get_vace_model(device):
         'VACE_WPE_CHECKPOINT',
         os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
-            '..', '..', 'vendor', 'vace_wpe', 'models', 'bldnn_4M62.pt',
+            '..', '..', 'vendor', 'vace_wpe',
+            'models', '20210129-140530', 'ckpt-ep60',
         ),
     )
     checkpoint_path = os.path.normpath(checkpoint_path)
 
-    # NeuralWPE init args are confirmed against vendor/vace_wpe/torch_custom/neural_wpe.py.
-    # Update here if the repo's constructor signature differs from defaults.
-    model = NeuralWPE()
-    load_checkpoint(model, checkpoint_path, device=device)
+    # LPSEstimator (LPSNet) provides the neural PSD estimator used by NeuralWPE.
+    # STFT opts and scope must match the training configuration in vace_wpe/run.py.
+    fft_bins = VACE_WPE_STFT_OPTS['n_fft'] // 2 + 1
+    lpsnet = LPSEstimator(
+        input_dim=fft_bins,
+        stft_opts=VACE_WPE_STFT_OPTS,
+        input_norm='globalmvn',
+        scope='ldnn_lpseir_ns',
+    )
+
+    model = NeuralWPE(stft_opts=VACE_WPE_STFT_OPTS, lpsnet=lpsnet)
+    # load_checkpoint signature: (model, optimizer=None, checkpoint=..., strict=True)
+    # Returns (model, learning_rate, iteration) — we only need the model.
+    model, *_ = load_checkpoint(model, checkpoint=checkpoint_path)
     model.eval().to(device)
 
     _vace_model_cache = model
