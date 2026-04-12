@@ -113,6 +113,11 @@ function createContext({ inputPath, originalName, presetId, outputProfileId, pre
     currentPath: inputPath,
     // Set by the extractPeaks stage
     peaks: null,
+    // Per-stage silenceAnalysis caches — stored here (not on ctx.results) so
+    // that per-frame data never appears in PIPELINE_LOG output.
+    silencePostNr:                null,  // set by silenceAnalysisPostNr
+    silencePreDeEss:              null,  // set by silenceAnalysisPreDeEss
+    postSeparationSilenceAnalysis: null, // set by separationValidation (NE-4)
     // Accumulates per-stage results — keyed by stage name.
     // buildReport() reads only the keys that are present, so stages absent
     // from a pipeline produce no orphaned keys in the report JSON.
