@@ -160,16 +160,24 @@ If no voiced frames are detected in the post-separation output (separation has p
 
 **Purpose:** Restore high-frequency voice content attenuated during source separation. Demucs, like all separation models, tends to suppress high-frequency content in noisy conditions because broadband noise and voice air/presence occupy the same spectral region. The output voice can sound dull or "close" compared to the original.
 
-**Implementation:** AudioSR (audio super-resolution). Python `audiosr` package, server-side.
+**Implementation:** AP-BWE (Amplitude-Phase Bandwidth Extension). Python script `server/scripts/ap_bwe_extend.py`, using the `APNet_BWE_Model` from the cloned repo at `vendor/ap_bwe`. Server-side.
+
+**Model configuration:** `8kto48k` — assumes maximally degraded narrowband input (8 kHz) and restores full wideband output (48 kHz). This is the most conservative input assumption and is appropriate for separation output where HF content may be severely attenuated. The 48 kHz output is resampled back to the pipeline's 44.1 kHz format by the Node.js stage via `decodeToFloat32`.
+
+**Setup:**
+- Clone repo: `git clone https://github.com/yxlu-0102/AP-BWE vendor/ap_bwe`
+- Download 8kto48k checkpoint from Google Drive (see `server/requirements.txt`)
+- Set `AP_BWE_CHECKPOINT` env var to the `.pt` file path
+- `config.json` must be colocated with the checkpoint
 
 **Parameters:**
 - Input: post-NE-5 output (or post-NE-3 if NE-5 was skipped)
-- Target bandwidth: 44.1 kHz (restore full audible bandwidth)
-- Guidance scale: 3.5 (default; higher values introduce more synthesis, lower values are more conservative — 3.5 is the recommended balance for speech)
+- Narrowband input rate: 8 kHz (model downsamples internally)
+- Output rate: 48 kHz (resampled to 44.1 kHz by caller)
 
-**Scope of application:** Apply to the full file. AudioSR is not computationally trivial; however, the files where Noise Eraser is appropriate are typically shorter (field recordings, interviews, rescued takes) rather than full audiobook chapters.
+**Availability:** Stage NE-6 is also present in the standard preset pipelines (acx_audiobook, podcast_ready, voice_ready, general_clean), gated by `preset.bwe.enabled`. It is `false` by default for standard presets — enable via preset config to recover HF content attenuated by DeepFilterNet3 at aggressive tiers.
 
-**Skip condition:** If the sibilance assessment in NE-4 showed no significant sibilance loss (ratio ≥ 0.8), and post-separation noise floor is already below -55 dBFS, bandwidth extension may be skipped to reduce processing time. Log decision.
+**Skip condition:** If the sibilance assessment in NE-4 showed no significant sibilance loss (ratio ≥ 0.8), and post-separation noise floor is already below -55 dBFS, bandwidth extension is skipped to reduce processing time. Log decision. For standard presets (no NE-4 data), the skip condition does not apply — the stage runs whenever `preset.bwe.enabled` is true.
 
 **Logging:** Record spectral energy in the 8–16 kHz band before and after NE-6. A meaningful increase (> 3 dB) confirms the stage contributed to the output.
 

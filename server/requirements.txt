@@ -65,6 +65,18 @@ soundfile>=0.12
 #   vendor/vace_wpe/models/bldnn_4M62.pt (or set VACE_WPE_CHECKPOINT env var).
 # No pip package — imported directly from vendor/ via sys.path insertion.
 
+# ── Bandwidth Extension (AP-BWE) ──────────────────────────────────────────────
+
+# ap_bwe_extend.py (NE-6 — AP-BWE amplitude-phase bandwidth extension)
+# AP-BWE is not pip-installable — clone the repo separately:
+#   git clone https://github.com/yxlu-0102/AP-BWE vendor/ap_bwe
+# Download the 8kto48k checkpoint from Google Drive:
+#   https://drive.google.com/drive/folders/1IIYTf2zbJWzelu4IftKD6ooHloJ8mnZF
+# Place config.json and the .pt file in the same directory, then set:
+#   AP_BWE_CHECKPOINT=<path to .pt file>
+#   AP_BWE_REPO=vendor/ap_bwe  (or omit to use the default)
+einops>=0.8.0
+
 # ── VAD (Silero) ───────────────────────────────────────────────────────────────
 
 # silero_vad.py (silence/voiced frame classification using Silero VAD v5)

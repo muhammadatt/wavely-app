@@ -41,7 +41,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb } from './separation.js'
+import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb, runApBwe } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 
@@ -580,6 +580,54 @@ export async function residualCleanup(ctx) {
     post_cleanup_noise_floor_dbfs: null,  // measured in Stage 7
   }
   await logLevel(ctx, 'after NE-5 residual cleanup', ctx.currentPath, { tier: nrResult.tier })
+}
+
+// ── NE Stage: Bandwidth extension (NE-6, conditional) ────────────────────────
+// Restores high-frequency voice content attenuated during source separation.
+// Separation models tend to suppress presence/air/sibilance because broadband
+// noise and voice HF content share spectral space; the output voice can sound
+// dull without this stage.
+//
+// Also available for standard presets (off by default) to recover any HF
+// attenuated by DeepFilterNet3 at aggressive tiers.
+//
+// Primary gate: ctx.preset.bwe.enabled must be true.
+// Secondary skip (NE context only): if NE-4 shows sibilance ratio ≥ 0.8 AND
+// post-separation noise floor ≤ -55 dBFS, HF content is already intact — skip
+// to save processing time.
+
+export async function bandwidthExtension(ctx) {
+  if (!ctx.preset.bwe?.enabled) {
+    ctx.log('[NE-6] Bandwidth extension skipped — not enabled for this preset')
+    return
+  }
+
+  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+
+  // NE-specific skip: skip only when BOTH conditions are met (voice HF is
+  // already intact AND the noise floor is already clean).
+  const sibilanceRatio = ctx.results.separationPipeline.separation?.sibilance_ratio
+  const noiseFloor     = ctx.results.separationPipeline.validation?.postSeparationNoiseFloorDbfs
+  const neSibOk  = sibilanceRatio != null && sibilanceRatio >= 0.8
+  const neNsOk   = noiseFloor    != null && noiseFloor    <= -55
+  if (neSibOk && neNsOk) {
+    ctx.results.separationPipeline.bandwidthExtension = {
+      applied:       false,
+      skippedReason: `Sibilance ratio ${sibilanceRatio} ≥ 0.8 and noise floor ${noiseFloor} dBFS ≤ -55 dBFS`,
+    }
+    ctx.log(`[NE-6] Bandwidth extension skipped — sibilance ${sibilanceRatio}, noise floor ${noiseFloor} dBFS`)
+    return
+  }
+
+  // AP-BWE outputs 48 kHz — decodeToFloat32 resamples to 32-bit float 44.1 kHz
+  const bwe48kPath = ctx.tmp('.wav')
+  const bwe44kPath = ctx.tmp('.wav')
+  await runApBwe(ctx.currentPath, bwe48kPath)
+  await decodeToFloat32(bwe48kPath, bwe44kPath)
+  ctx.currentPath = bwe44kPath
+
+  ctx.results.separationPipeline.bandwidthExtension = { applied: true }
+  await logLevel(ctx, 'after NE-6 bandwidth extension', ctx.currentPath, {})
 }
 
 // ── NE Stage: Post-separation enhancement EQ (NE-7) ──────────────────────────
