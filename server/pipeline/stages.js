@@ -43,6 +43,7 @@ import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
+import { applyAutoLeveler } from './autoLeveler.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -239,6 +240,41 @@ export async function deEss(ctx) {
   })
 }
 
+// ── Stage: Auto Leveler (Stage 4b) ────────────────────────────────────────────
+// VAD-gated gain riding. Corrects slow within-file level drift before
+// compression sees the signal so the compressor processes a consistently-leveled
+// input. Only activated when the standard deviation of per-segment RMS across
+// VAD speech windows exceeds 3 dB.
+//
+// Noise Eraser and ClearerVoice Eraser presets are excluded — separation output
+// already has a compressed, consistent character. The leveler skips silently
+// for those presets (no audio data changed, no result key written).
+
+export async function autoLevel(ctx) {
+  const levelerPath = ctx.tmp('.wav')
+  const result = await applyAutoLeveler(
+    ctx.currentPath,
+    levelerPath,
+    ctx.presetId,
+    ctx.results.silencePreDeEss,
+  )
+  ctx.currentPath      = levelerPath
+  ctx.results.autoLeveler = result
+
+  if (result.applied) {
+    ctx.log(
+      `[auto-leveler] Applied — pre σ=${result.pre_leveling_rms_std_db}dB ` +
+      `post σ=${result.post_leveling_rms_std_db}dB ` +
+      `target=${result.median_target_rms_dbfs}dBFS ` +
+      `gain=[${result.min_gain_applied_db}, ${result.max_gain_applied_db}]dB ` +
+      `capped=${result.gain_capped_segments} ` +
+      `nf_risk=${result.noise_floor_risk}`
+    )
+  } else {
+    ctx.log(`[auto-leveler] Skipped — ${result.reason}${result.pre_leveling_rms_std_db != null ? ` (σ=${result.pre_leveling_rms_std_db}dB)` : ''}`)
+  }
+}
+
 // ── Stage: Compression ────────────────────────────────────────────────────────
 
 export async function compress(ctx) {
@@ -373,6 +409,7 @@ export async function qualityAdvisory(ctx) {
   const pipelineContext = {
     preNrNoiseFloor: ctx.results.rawNoiseFloor ?? null,
     noiseFloorDbfs:  ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
+    autoLeveler:     ctx.results.autoLeveler ?? null,
   }
   ctx.results.qualityAdvisory = await generateQualityAdvisory(
     ctx.currentPath,

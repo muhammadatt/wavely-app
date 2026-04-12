@@ -103,6 +103,10 @@ export const PRESETS = {
       strength: 'medium',
       preserve_early: false,
     },
+    autoLeveler: {
+      maxGainDb:     4.0,
+      maxRateDbPerS: 1.0,
+    },
   },
 
   podcast_ready: {
@@ -134,6 +138,10 @@ export const PRESETS = {
       enabled: false,
       strength: 'light',
       preserve_early: true,
+    },
+    autoLeveler: {
+      maxGainDb:     8.0,
+      maxRateDbPerS: 1.5,
     },
   },
 
@@ -170,6 +178,10 @@ export const PRESETS = {
       strength: 'heavy',
       preserve_early: false,
     },
+    autoLeveler: {
+      maxGainDb:     4.0,
+      maxRateDbPerS: 1.0,
+    },
   },
 
   general_clean: {
@@ -201,6 +213,10 @@ export const PRESETS = {
       enabled: true,
       strength: 'medium',
       preserve_early: false,
+    },
+    autoLeveler: {
+      maxGainDb:     6.0,
+      maxRateDbPerS: 1.5,
     },
   },
 
