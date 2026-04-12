@@ -1,12 +1,22 @@
 /**
  * Stage 7 — Audio measurement and ACX certification.
  *
- * Measures RMS, true peak, noise floor, and LUFS of a WAV file.
+ * Measures RMS, true peak, and LUFS of a WAV file.
  *
  * LUFS (integrated loudness) and true peak are measured via the ebur128-wasm
  * WASM binding (libebur128), which is more precise than the FFmpeg loudnorm
- * filter proxy used previously. RMS and noise floor still use FFmpeg
- * volumedetect since libebur128 does not expose RMS.
+ * filter proxy used previously. RMS uses FFmpeg volumedetect since libebur128
+ * does not expose RMS.
+ *
+ * Noise floor is NOT measured here. It comes from the frame-based silence
+ * analysis (silenceAnalysis.js) and is merged into the measurements object by
+ * the measureBefore / measureAfter stages. Previous revisions of this file
+ * computed noise floor from FFmpeg volumedetect's histogram by picking the
+ * deepest non-zero bucket, but that reports the level of the single quietest
+ * sample (dominated by zero-crossings) rather than the actual steady-state
+ * silence floor, so it was effectively always below the ACX ceiling and the
+ * noise-floor check passed regardless of the real recording. The silence
+ * analysis bootstrap is the authoritative source.
  *
  * Sprint 2: Added measureVoicedRms() for silence-excluding RMS measurement
  * used in Stage 5 ACX normalization (spec §5b).
@@ -28,7 +38,11 @@ import {
 
 /**
  * Measure audio properties of a WAV file.
- * Returns { rmsDbfs, truePeakDbfs, noiseFloorDbfs, lufsIntegrated }.
+ * Returns { rmsDbfs, truePeakDbfs, lufsIntegrated }.
+ *
+ * Note: noiseFloorDbfs is intentionally not included. Callers that need a
+ * noise floor should merge one in from silenceAnalysis (see measureBefore /
+ * measureAfter stages). See file header for rationale.
  */
 export async function measureAudio(filePath) {
   const [volumeStats, loudnormStats] = await Promise.all([
@@ -37,15 +51,15 @@ export async function measureAudio(filePath) {
   ])
 
   return {
-    rmsDbfs: volumeStats.meanVolume,
-    truePeakDbfs: loudnormStats.truePeak,
-    noiseFloorDbfs: volumeStats.noiseFloor,
+    rmsDbfs:        volumeStats.meanVolume,
+    truePeakDbfs:   loudnormStats.truePeak,
     lufsIntegrated: loudnormStats.integratedLoudness,
   }
 }
 
 /**
- * Use FFmpeg's volumedetect filter for RMS and peak measurements.
+ * Use FFmpeg's volumedetect filter for mean/max volume. Noise floor is
+ * deliberately not derived from the histogram — see file header.
  */
 async function measureVolume(filePath) {
   const { stderr } = await runFfmpeg([
@@ -56,32 +70,14 @@ async function measureVolume(filePath) {
   ])
 
   const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/)
-  const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/)
+  const maxMatch  = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/)
 
   const meanVolume = meanMatch ? parseFloat(meanMatch[1]) : null
-  const maxVolume = maxMatch ? parseFloat(maxMatch[1]) : null
-
-  // Estimate noise floor from the histogram data if available,
-  // otherwise use a rough estimate (mean - 20 dB as placeholder).
-  // True noise floor measurement requires silence frame analysis.
-  const histMatches = [...stderr.matchAll(/histogram_(\d+)db:\s*(\d+)/g)]
-  let noiseFloor = meanVolume ? meanVolume - 20 : -60
-
-  if (histMatches.length > 0) {
-    // Filter to buckets with non-zero counts, then pick the deepest
-    const nonZero = histMatches.filter(m => parseInt(m[2]) > 0)
-    if (nonZero.length > 0) {
-      const deepest = nonZero.reduce((min, m) =>
-        parseInt(m[1]) > parseInt(min[1]) ? m : min
-      )
-      noiseFloor = -parseInt(deepest[1])
-    }
-  }
+  const maxVolume  = maxMatch  ? parseFloat(maxMatch[1])  : null
 
   return {
     meanVolume: round2(meanVolume),
-    maxVolume: round2(maxVolume),
-    noiseFloor: round2(noiseFloor),
+    maxVolume:  round2(maxVolume),
   }
 }
 
@@ -131,6 +127,8 @@ async function measureLoudness(filePath) {
  * with per-check pass/fail and measured values.
  *
  * @param {object} measurements - { rmsDbfs, truePeakDbfs, noiseFloorDbfs, lufsIntegrated }
+ *   noiseFloorDbfs must be merged in by the caller from silence analysis —
+ *   measureAudio() does not populate it (see file header).
  * @param {object} fileMetadata - { sampleRate: number, bitDepth: string, channels: number }
  * @returns {{ certificate: 'pass'|'fail', checks: object }}
  */
@@ -220,7 +218,9 @@ export async function measureVoicedRms(wavPath, silenceAnalysis) {
 
   if (numFrames === 0) return -60
 
-  // Bootstrap noise floor from lowest 20 frames
+  // Bootstrap noise floor from lowest 20 frames, combined in the power
+  // domain so the result is the RMS of the combined quietest frames rather
+  // than the mean of per-frame RMS values. Matches silenceAnalysis.js.
   const frameRms = new Float64Array(numFrames)
   for (let f = 0; f < numFrames; f++) {
     const s = f * frameSamples
@@ -230,10 +230,10 @@ export async function measureVoicedRms(wavPath, silenceAnalysis) {
   }
 
   const sorted = Float64Array.from(frameRms).sort()
-  let noiseRms = 0
   const n = Math.min(20, sorted.length)
-  for (let i = 0; i < n; i++) noiseRms += sorted[i]
-  noiseRms /= n
+  let noiseSumSq = 0
+  for (let i = 0; i < n; i++) noiseSumSq += sorted[i] * sorted[i]
+  const noiseRms = n > 0 ? Math.sqrt(noiseSumSq / n) : 0
 
   const noiseFloorDb  = noiseRms > 0 ? 20 * Math.log10(noiseRms) : -120
   const thresholdDb   = noiseFloorDb + 6

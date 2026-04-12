@@ -190,7 +190,10 @@ function formatMeasurements(m) {
   return {
     rms_dbfs:         m.rmsDbfs,
     true_peak_dbfs:   m.truePeakDbfs,
-    noise_floor_dbfs: m.noiseFloorDbfs,
+    // noiseFloorDbfs is merged into beforeMeasurements / afterMeasurements
+    // by the measureBefore / measureAfter stages from silenceAnalysis. If a
+    // future pipeline forgets to populate it the report emits null.
+    noise_floor_dbfs: m.noiseFloorDbfs ?? null,
     lufs_integrated:  m.lufsIntegrated,
   }
 }
