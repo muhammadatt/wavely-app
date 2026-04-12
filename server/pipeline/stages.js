@@ -85,10 +85,8 @@ export async function monoMixdown(ctx) {
 // single extra analyzeAudioFrames pass per job.
 
 export async function measureBefore(ctx) {
-  const [audio, silenceAnalysis] = await Promise.all([
-    measureAudio(ctx.currentPath),
-    analyzeAudioFrames(ctx.currentPath),
-  ])
+  const audio = await measureAudio(ctx.currentPath)
+  const silenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
   ctx.results.beforeMeasurements = {
     ...audio,
     noiseFloorDbfs: silenceAnalysis.noiseFloorDbfs,
