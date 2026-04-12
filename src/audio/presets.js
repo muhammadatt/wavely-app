@@ -215,7 +215,7 @@ export const PRESETS = {
     lockedOutputProfile: false,
     dereverb: {
       enabled: true,
-      strength: 'medium',
+      strength: 'heavy',
       preserve_early: false,
     },
     autoLeveler: {
@@ -261,7 +261,7 @@ export const PRESETS = {
     separationModel: 'demucs',
     dereverb: {
       enabled: true,
-      strength: 'medium',
+      strength: 'heavy',
       preserve_early: false,
     },
     autoLeveler: {
