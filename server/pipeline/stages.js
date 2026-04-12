@@ -126,7 +126,6 @@ export async function silenceAnalysisRaw(ctx) {
   const sa = await analyzeAudioFrames(ctx.currentPath)
   ctx.results.silenceRaw     = sa
   ctx.results.rawNoiseFloor  = sa.noiseFloorDbfs
-  logSilence(ctx, 'pre-HPF', sa)
 }
 
 // ── Stage: High-pass filter ───────────────────────────────────────────────────
@@ -156,12 +155,14 @@ export async function noiseReduce(ctx) {
 }
 
 // ── Stage: Silence analysis (post-NR) ────────────────────────────────────────
-// Definitive silence analysis used by room tone padding and enhancement EQ.
+// Re-derives energy metrics (noise floor, per-frame RMS, voiced RMS) from the
+// NR-processed audio. Preserves isSilence labels from silenceRaw — Silero VAD
+// classification is stable across pipeline stages since speech content doesn't
+// move, only levels change.
 
 export async function silenceAnalysisPostNr(ctx) {
-  const sa = await analyzeAudioFrames(ctx.currentPath)
+  const sa = await remeasureAudioFrames(ctx.currentPath, ctx.results.silenceRaw)
   ctx.results.silencePostNr = sa
-  logSilence(ctx, 'post-NR', sa)
 }
 
 // ── Stage: Dereverberation ────────────────────────────────────────────────────
@@ -212,14 +213,6 @@ export async function enhancementEQ(ctx) {
   })
 }
 
-// ── Stage: Silence analysis (pre de-esser) ────────────────────────────────────
-// Must run after EQ so frame offsets and levels reflect the current signal.
-// Reused by both the de-esser and compression stages.
-
-export async function silenceAnalysisPreDeEss(ctx) {
-  ctx.results.silencePreDeEss = await analyzeAudioFrames(ctx.currentPath)
-}
-
 // ── Stage: De-esser ───────────────────────────────────────────────────────────
 
 export async function deEss(ctx) {
@@ -228,7 +221,7 @@ export async function deEss(ctx) {
     ctx.currentPath,
     deEssPath,
     ctx.presetId,
-    ctx.results.silencePreDeEss,
+    ctx.results.silencePostNr,
   )
   ctx.currentPath   = deEssPath
   ctx.results.deEss = deEssResult
@@ -256,7 +249,7 @@ export async function autoLevel(ctx) {
     ctx.currentPath,
     levelerPath,
     ctx.presetId,
-    ctx.results.silencePreDeEss,
+    ctx.results.silencePostNr,
   )
   ctx.currentPath      = levelerPath
   ctx.results.autoLeveler = result
@@ -283,7 +276,7 @@ export async function compress(ctx) {
     ctx.currentPath,
     compPath,
     ctx.presetId,
-    ctx.results.silencePreDeEss,
+    ctx.results.silencePostNr,
   )
   ctx.currentPath        = compPath
   ctx.results.compression = compressionResult
@@ -667,17 +660,6 @@ async function logLevel(ctx, label, filePath, extras = {}) {
   } catch (e) {
     ctx.log(`[level] ${label}: measurement failed — ${e.message}`)
   }
-}
-
-function logSilence(ctx, label, sa) {
-  const voiced = sa.frames.filter(f => !f.isSilence).length
-  const total  = sa.frames.length
-  ctx.log(
-    `[silence] ${label}: noiseFloor=${sa.noiseFloorDbfs}dBFS  ` +
-    `threshold=${sa.silenceThresholdDbfs}dBFS  ` +
-    `voicedRms=${sa.voicedRmsDbfs}dBFS  ` +
-    `voiced=${voiced}/${total} frames`
-  )
 }
 
 function round2(n) {

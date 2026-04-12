@@ -21,9 +21,16 @@
  *   - 'energy': Pure JS energy-threshold classifier (noise_floor + 6 dB).
  *     No subprocess. Use as fallback or for A/B comparison.
  *
- * Performance note (Silero backend): ~50–100x real-time on CPU. The pipeline
- * calls analyzeAudioFrames 3–4 times per job, adding ~30–50 s total latency
- * on CPU. Set SILERO_DEVICE=cuda to reduce this significantly.
+ * Performance note (Silero backend): ~50–100x real-time on CPU. Silero runs
+ * only once per job (at silenceAnalysisRaw). Subsequent pipeline stages call
+ * remeasureAudioFrames instead, which re-derives energy metrics from the current
+ * audio while preserving the Silero isSilence labels — saving 2–3 Silero spawns
+ * per job. Set SILERO_DEVICE=cuda to reduce the single-pass latency further.
+ *
+ * Logging: silence analysis results are captured in ctx.results (silenceRaw,
+ * silencePostNr) and written to the pipeline file log (PIPELINE_LOG=true).
+ * No console output is emitted — subprocess stdout is intentionally suppressed
+ * to keep the stage-by-stage console log readable.
  */
 
 import { spawn }          from 'child_process'
@@ -133,7 +140,6 @@ async function analyzeAudioFramesSilero(wavPath) {
     await spawnSilero(wavPath, jsonPath)
     const raw = JSON.parse(await readFile(jsonPath, 'utf8'))
     sileroFrames = raw.frames
-    console.log(`[silence] silero: ${sileroFrames.length} frames classified by VAD model`)
   } finally {
     await rm(jsonPath, { force: true })
   }
@@ -204,7 +210,6 @@ function spawnSilero(inputPath, outputJsonPath) {
     })
 
     proc.on('close', (code, signal) => {
-      if (stdout.trim()) console.log(`[Silero VAD] ${stdout.trim()}`)
       if (code === 0 && signal === null) {
         resolve()
       } else {
@@ -278,6 +283,85 @@ async function analyzeAudioFramesEnergy(wavPath) {
     : noiseFloorDbfs
 
   // Find quietest contiguous silence segment (≥ 5 frames = 0.5 s)
+  const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms, frameLengthSamples)
+
+  return {
+    noiseFloorDbfs:       round2(noiseFloorDbfs),
+    silenceThresholdDbfs: round2(silenceThreshold),
+    frames,
+    voicedRmsDbfs:        round2(voicedRmsDbfs),
+    averageVoicedRmsDbfs: round2(voicedRmsDbfs),
+    quietestSilenceSegment,
+  }
+}
+
+/**
+ * Re-derive energy metrics from a new audio file while preserving the isSilence
+ * labels from a prior SilenceAnalysis. Avoids re-running the Silero subprocess.
+ *
+ * Use this for all pipeline stages after silenceAnalysisRaw. The VAD frame
+ * labels are stable throughout the pipeline — speech content does not move
+ * between HPF, NR, and EQ. Energy levels do change, so noiseFloorDbfs,
+ * rmsDbfs, voicedRmsDbfs, and quietestSilenceSegment are all re-derived from
+ * the current audio.
+ *
+ * @param {string} wavPath             - Path to 32-bit float WAV (current stage output)
+ * @param {SilenceAnalysis} reference  - Analysis from a prior stage (provides isSilence labels)
+ * @returns {Promise<SilenceAnalysis>}
+ */
+export async function remeasureAudioFrames(wavPath, reference) {
+  const { samples, sampleRate } = await readWavSamples(wavPath)
+
+  const frameLengthSamples = Math.round(FRAME_DURATION_S * sampleRate)
+  const numFrames = Math.floor(samples.length / frameLengthSamples)
+
+  if (numFrames === 0) return emptyResult()
+
+  // Re-compute per-frame RMS from the current (processed) audio
+  const frameRms = new Float64Array(numFrames)
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * frameLengthSamples
+    let sumSq = 0
+    for (let i = start; i < start + frameLengthSamples; i++) sumSq += samples[i] * samples[i]
+    frameRms[f] = Math.sqrt(sumSq / frameLengthSamples)
+  }
+
+  const noiseRmsLinear   = bootstrapNoiseRms(frameRms)
+  const noiseFloorDbfs   = rmsToDbfs(noiseRmsLinear)
+  const silenceThreshold = noiseFloorDbfs + 6
+
+  const frames = []
+  let voicedSumSq = 0
+  let voicedFrameCount = 0
+
+  for (let f = 0; f < numFrames; f++) {
+    const rmsDbfs = rmsToDbfs(frameRms[f])
+    // Preserve the Silero isSilence label from the reference analysis.
+    // Fall back to the energy threshold for any frame index beyond the
+    // reference length (should not occur — stage operations don't change
+    // sample count, so numFrames is always stable across the pipeline).
+    const isSilence = f < reference.frames.length
+      ? reference.frames[f].isSilence
+      : (rmsDbfs < silenceThreshold)
+
+    frames.push({
+      index:         f,
+      offsetSamples: f * frameLengthSamples,
+      lengthSamples: frameLengthSamples,
+      rmsDbfs:       round2(rmsDbfs),
+      isSilence,
+    })
+
+    if (!isSilence) {
+      voicedSumSq += frameRms[f] * frameRms[f]
+      voicedFrameCount++
+    }
+  }
+
+  const voicedRmsDbfs = voicedFrameCount > 0
+    ? rmsToDbfs(Math.sqrt(voicedSumSq / voicedFrameCount))
+    : noiseFloorDbfs
+
   const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms, frameLengthSamples)
 
   return {

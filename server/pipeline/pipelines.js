@@ -26,7 +26,6 @@ const STANDARD_PIPELINE = [
   stages.silenceAnalysisPostNr,
   stages.dereverb,              // no-op when preset.dereverb.enabled is false
   stages.enhancementEQ,
-  stages.silenceAnalysisPreDeEss,
   stages.deEss,
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.compress,
@@ -56,7 +55,6 @@ export const PIPELINES = {
     stages.dereverb,                // runs before room tone padding so padded room tone matches dereverberated signal
     stages.roomTonePad,             // ACX-only
     stages.enhancementEQ,
-    stages.silenceAnalysisPreDeEss,
     stages.deEss,
     stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.compress,
@@ -100,9 +98,8 @@ export const PIPELINES = {
     stages.silenceAnalysisPostNr,    // Required by enhancementEQ (populates ctx.results.silencePostNr)
     //stages.separationEQ,
     stages.enhancementEQ,
-    stages.silenceAnalysisPreDeEss,
     stages.deEss,
-    stages.autoLevel,             // Stage 4b — no-op for noise_eraser (preset not in LEVELER_CONFIG)
+    stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.compress,
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
