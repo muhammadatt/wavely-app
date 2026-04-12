@@ -159,6 +159,7 @@ function buildReport(ctx) {
       ...(results.separationEQ   && { separation_eq:     formatEqResult(results.separationEQ) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
+      ...(results.autoLeveler    && { auto_leveler:       formatAutoLevelerResult(results.autoLeveler) }),
       ...(results.compression    && { compression:        formatCompressionResult(results.compression) }),
       normalization_gain_db:
         results.afterMeasurements?.rmsDbfs == null || results.beforeMeasurements?.rmsDbfs == null
@@ -244,6 +245,28 @@ function formatDeEssResult(r) {
     p95_energy_db:    r.p95EnergyDb,
     mean_energy_db:   r.meanEnergyDb,
     trigger_reason:   r.triggerReason,
+  }
+}
+
+function formatAutoLevelerResult(r) {
+  if (!r) return null
+  if (!r.applied) {
+    return {
+      applied: false,
+      reason: r.reason ?? null,
+      ...(r.pre_leveling_rms_std_db != null && { pre_leveling_rms_std_db: r.pre_leveling_rms_std_db }),
+    }
+  }
+  return {
+    applied:                    true,
+    activation_reason:          r.activation_reason,
+    pre_leveling_rms_std_db:    r.pre_leveling_rms_std_db,
+    post_leveling_rms_std_db:   r.post_leveling_rms_std_db,
+    median_target_rms_dbfs:     r.median_target_rms_dbfs,
+    max_gain_applied_db:        r.max_gain_applied_db,
+    min_gain_applied_db:        r.min_gain_applied_db,
+    segments_analyzed:          r.segments_analyzed,
+    gain_capped_segments:       r.gain_capped_segments,
   }
 }
 

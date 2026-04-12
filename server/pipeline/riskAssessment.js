@@ -22,7 +22,12 @@
  *   Pipeline context:
  *     - high_nr_applied (pre-NR noise floor > -55 dBFS — heavy processing was needed)
  *
- * Reference: docs/instant_polish_compliance_model_v2.md
+ *   Auto Leveler (when applied):
+ *     - leveler_gain_capped (any window hit the preset's max gain cap)
+ *     - leveler_noise_floor_risk (post-application noise floor exceeded -58 dBFS)
+ *
+ * Reference: docs/instant_polish_compliance_model_v2.md,
+ *            Auto Leveler Stage Specification (April 2026 addendum)
  */
 
 import { readWavSamples } from './wavReader.js'
@@ -137,6 +142,27 @@ export async function generateQualityAdvisory(
       severity: 'review',
       message: 'Voice separation was used. The output may have a processed quality. Review carefully before submitting to ACX.',
     })
+  }
+
+  // --- Auto Leveler advisory flags ---
+  // These are only generated when the leveler actually ran (applied: true).
+  const levelerResult = pipelineContext.autoLeveler
+  if (levelerResult?.applied) {
+    if (levelerResult.gain_capped) {
+      flags.push({
+        id: 'leveler_gain_capped',
+        severity: 'info',
+        message: 'Some sections had large level differences that could not be fully corrected. Manual gain adjustment may help these sections.',
+      })
+    }
+
+    if (levelerResult.noise_floor_risk) {
+      flags.push({
+        id: 'leveler_noise_floor_risk',
+        severity: 'review',
+        message: 'Auto leveling may have affected the noise floor in quiet sections. Verify the noise floor before export.',
+      })
+    }
   }
 
   const review_recommended = flags.some(f => f.severity === 'review')

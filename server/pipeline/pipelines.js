@@ -14,6 +14,7 @@ import * as stages from './stages.js'
 // mode, NR ceiling, dereverb enabled/disabled) are all expressed through preset
 // config — not pipeline shape. The dereverb stage is a no-op when
 // preset.dereverb is absent or preset.dereverb.enabled is false.
+// autoLevel is a no-op when within-file drift is within the 3 dB threshold.
 const STANDARD_PIPELINE = [
   stages.decode,
   stages.monoMixdown,
@@ -27,6 +28,7 @@ const STANDARD_PIPELINE = [
   stages.enhancementEQ,
   stages.silenceAnalysisPreDeEss,
   stages.deEss,
+  stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.compress,
   stages.harmonicExciter,
   stages.normalize,
@@ -56,6 +58,7 @@ export const PIPELINES = {
     stages.enhancementEQ,
     stages.silenceAnalysisPreDeEss,
     stages.deEss,
+    stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.compress,
     stages.harmonicExciter,
     stages.normalize,
@@ -99,6 +102,7 @@ export const PIPELINES = {
     stages.enhancementEQ,
     stages.silenceAnalysisPreDeEss,
     stages.deEss,
+    stages.autoLevel,             // Stage 4b — no-op for noise_eraser (preset not in LEVELER_CONFIG)
     stages.compress,
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
@@ -131,6 +135,7 @@ export const PIPELINES = {
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     //stages.separationEQ,            // NE-7: Post-separation enhancement EQ
     stages.enhancementEQ,
+    stages.autoLevel,             // Stage 4b — no-op for clearervoice_eraser (preset not in LEVELER_CONFIG)
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
     stages.truePeakLimit,           // Stage 6: True peak limiting
