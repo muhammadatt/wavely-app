@@ -94,7 +94,7 @@ export const PIPELINES = {
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.dereverb,
-    stages.silenceAnalysisPostNr,    // Required by enhancementEQ (populates ctx.results.silencePostNr)
+    stages.silenceAnalysisPostNr,    // Required by enhancementEQ (populates ctx.silencePostNr)
     //stages.separationEQ,
     stages.enhancementEQ,
     stages.silenceAnalysisPreDeEss,

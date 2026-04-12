@@ -112,7 +112,6 @@ export async function peakNormalize(ctx) {
 
 export async function silenceAnalysisRaw(ctx) {
   const sa = await analyzeAudioFrames(ctx.currentPath)
-  ctx.results.silenceRaw     = sa
   ctx.results.rawNoiseFloor  = sa.noiseFloorDbfs
   logSilence(ctx, 'pre-HPF', sa)
 }
@@ -148,7 +147,7 @@ export async function noiseReduce(ctx) {
 
 export async function silenceAnalysisPostNr(ctx) {
   const sa = await analyzeAudioFrames(ctx.currentPath)
-  ctx.results.silencePostNr = sa
+  ctx.silencePostNr = sa
   logSilence(ctx, 'post-NR', sa)
 }
 
@@ -176,7 +175,7 @@ export async function dereverb(ctx) {
 
 export async function roomTonePad(ctx) {
   const paddedPath = ctx.tmp('.wav')
-  const result     = await applyRoomTonePadding(ctx.currentPath, paddedPath, ctx.results.silencePostNr)
+  const result     = await applyRoomTonePadding(ctx.currentPath, paddedPath, ctx.silencePostNr)
   ctx.currentPath        = paddedPath
   ctx.results.roomTonePad = result
 }
@@ -187,8 +186,8 @@ export async function enhancementEQ(ctx) {
   const eqResult = await analyzeSpectrum(
     ctx.currentPath,
     ctx.presetId,
-    ctx.results.silencePostNr,
-    ctx.results.silencePostNr.noiseFloorDbfs,
+    ctx.silencePostNr,
+    ctx.silencePostNr.noiseFloorDbfs,
   )
   const eqPath = ctx.tmp('.wav')
   await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
@@ -205,7 +204,7 @@ export async function enhancementEQ(ctx) {
 // Reused by both the de-esser and compression stages.
 
 export async function silenceAnalysisPreDeEss(ctx) {
-  ctx.results.silencePreDeEss = await analyzeAudioFrames(ctx.currentPath)
+  ctx.silencePreDeEss = await analyzeAudioFrames(ctx.currentPath)
 }
 
 // ── Stage: De-esser ───────────────────────────────────────────────────────────
@@ -216,7 +215,7 @@ export async function deEss(ctx) {
     ctx.currentPath,
     deEssPath,
     ctx.presetId,
-    ctx.results.silencePreDeEss,
+    ctx.silencePreDeEss,
   )
   ctx.currentPath   = deEssPath
   ctx.results.deEss = deEssResult
@@ -236,7 +235,7 @@ export async function compress(ctx) {
     ctx.currentPath,
     compPath,
     ctx.presetId,
-    ctx.results.silencePreDeEss,
+    ctx.silencePreDeEss,
   )
   ctx.currentPath        = compPath
   ctx.results.compression = compressionResult
@@ -472,7 +471,12 @@ export async function separationValidation(ctx) {
   const assessment = await validateSeparation(ctx.nePreSeparationPath, ctx.currentPath)
 
   ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-  ctx.results.separationPipeline.validation = assessment
+
+  // Cache the full silenceAnalysis on ctx (not ctx.results) to avoid bloating
+  // PIPELINE_LOG with per-frame data. Only scalar summaries are stored in results.
+  ctx.postSeparationSilenceAnalysis = assessment.postSeparationSilenceAnalysis
+  const { postSeparationSilenceAnalysis: _sa, ...validationSummary } = assessment
+  ctx.results.separationPipeline.validation = validationSummary
 
   // Update rnnoisePrePass post noise floor from NE-4 measurement
   if (ctx.results.separationPipeline.rnnoisePrePass) {
@@ -486,9 +490,8 @@ export async function separationValidation(ctx) {
   ctx.results.separationPipeline.separation.artifact_flags   = assessment.artifactFlags
   ctx.results.separationPipeline.separation_quality          = assessment.separationQuality
 
-  // Store postSeparationSilenceAnalysis for normalize stage (silence exclusion threshold)
-  ctx.results.postSeparationSilenceAnalysis = assessment.postSeparationSilenceAnalysis
-
+  // postSeparationSilenceAnalysis is cached on ctx (see above) — not ctx.results —
+  // to avoid per-frame data appearing in PIPELINE_LOG.
   assessment.artifactFlags.forEach(flag => ctx.log(`[NE-4] ${flag}`))
   ctx.log(
     `[NE-4] Separation quality: ${assessment.separationQuality} | ` +
@@ -534,8 +537,7 @@ export async function separationEQ(ctx) {
   // Use the post-separation silence analysis from NE-4 as the silence context.
   // This ensures voiced frame detection reflects the separated signal character,
   // not the pre-processing signal (which may have had a very different noise floor).
-  const silenceAnalysis = ctx.results.postSeparationSilenceAnalysis
-    ?? ctx.results.separationPipeline?.validation?.postSeparationSilenceAnalysis
+  const silenceAnalysis = ctx.postSeparationSilenceAnalysis
 
   const noiseFloor = ctx.results.separationPipeline?.validation?.postSeparationNoiseFloorDbfs ?? -60
 
