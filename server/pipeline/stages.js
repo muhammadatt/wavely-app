@@ -339,10 +339,8 @@ export async function truePeakLimit(ctx) {
 // qualityAdvisory to reuse — avoids a second analyzeAudioFrames pass.
 
 export async function measureAfter(ctx) {
-  const [audio, silenceAnalysis] = await Promise.all([
-    measureAudio(ctx.currentPath),
-    analyzeAudioFrames(ctx.currentPath),
-  ])
+  const audio = await measureAudio(ctx.currentPath)
+  const silenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
   ctx.results.afterMeasurements = {
     ...audio,
     noiseFloorDbfs: silenceAnalysis.noiseFloorDbfs,
