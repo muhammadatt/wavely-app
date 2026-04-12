@@ -62,13 +62,17 @@ export function resolveOutputProfileId(id) {
  * @property {string} character
  * @property {{ value: number, unit: string }} targetLoudness
  * @property {number} truePeakCeiling
- * @property {number} noiseFloorTarget
+ * @property {number|null} noiseFloorTarget
  * @property {{ mode: 'conditional'|'always'|'none', ratio: number, threshold: number, attack: number, release: number }} compression
  * @property {string} eqProfile
- * @property {{ sensitivity: string, trigger: number, maxReduction: number }} deEsser
+ * @property {{ sensitivity: 'standard'|'high'|'none', trigger: number, maxReduction: number }} deEsser
  * @property {'mono'|'preserve'} channelOutput
  * @property {string} defaultOutputProfile
  * @property {boolean} lockedOutputProfile
+ * @property {{ enabled: boolean, strength: 'light'|'medium'|'heavy', preserve_early: boolean }} dereverb
+ * @property {{ maxGainDb: number, maxRateDbPerS: number }} autoLeveler
+ * @property {'demucs'|'convtasnet'} [separationModel]   - Noise Eraser only
+ * @property {'mossformer2_48k'|'frcrn_16k'} [clearervoiceModel]   - ClearerVoice Eraser only
  */
 
 /** @type {Record<string, Preset>} */
@@ -260,6 +264,10 @@ export const PRESETS = {
       strength: 'medium',
       preserve_early: false,
     },
+    autoLeveler: {
+      maxGainDb:     8.0,
+      maxRateDbPerS: 1.5,
+    },
   },
 
   clearervoice_eraser: {
@@ -292,6 +300,10 @@ export const PRESETS = {
     //   'frcrn_16k'       — FRCRN_SE_16K (faster, good quality, 16 kHz)
     // Both models are downloaded from HuggingFace on first use.
     clearervoiceModel: 'mossformer2_48k',
+    autoLeveler: {
+      maxGainDb:     8.0,
+      maxRateDbPerS: 1.5,
+    },
   },
 
 }

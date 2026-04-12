@@ -18,6 +18,7 @@
 
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels }   from './wavWriter.js'
+import { PRESETS }            from '../presets.js'
 
 const SAMPLE_RATE           = 44100
 const FRAME_DURATION_S      = 0.1    // 100 ms — must match silenceAnalysis frame size
@@ -31,14 +32,6 @@ const NOISE_FLOOR_CHECK_DBFS = -58   // post-application safety check
 const FADE_IN_SAMPLES  = Math.round(0.030 * SAMPLE_RATE)  // 30 ms speech onset
 const FADE_OUT_SAMPLES = Math.round(0.020 * SAMPLE_RATE)  // 20 ms speech offset
 const GAUSSIAN_SIGMA_FRAMES = 15     // 1.5 s at 100 ms/frame resolution
-
-// Per-preset parameters (spec table §Parameter Table by Preset)
-const LEVELER_CONFIG = {
-  acx_audiobook: { maxGainDb: 4.0, maxRateDbPerS: 1.0 },
-  podcast_ready:  { maxGainDb: 8.0, maxRateDbPerS: 1.5 },
-  voice_ready:    { maxGainDb: 4.0, maxRateDbPerS: 1.0 },
-  general_clean:  { maxGainDb: 6.0, maxRateDbPerS: 1.5 },
-}
 
 // ── Main API ──────────────────────────────────────────────────────────────────
 
@@ -67,10 +60,8 @@ const LEVELER_CONFIG = {
  * @property {boolean} [leveling_effective]       - true if post σ ≤ 2.5 dB
  */
 export async function applyAutoLeveler(inputPath, outputPath, presetId, silenceAnalysis) {
-  const config = LEVELER_CONFIG[presetId]
+  const config = PRESETS[presetId]?.autoLeveler
 
-  // Presets without an Auto Leveler config (noise_eraser, clearervoice_eraser)
-  // are not leveled — spec: "skip Auto Leveler for noise_eraser preset"
   if (!config) {
     await copyThrough(inputPath, outputPath)
     return { applied: false, reason: 'preset_not_applicable' }
