@@ -148,12 +148,13 @@ class PipelineLogger {
         // Full audio measurement at this checkpoint.
         // measureAudio runs FFmpeg volumedetect + libebur128 LUFS/true-peak in
         // parallel, adding ~0.2–0.5 s per step — acceptable for a debug tool.
+        // Noise floor is no longer measured here; it lives on the silence
+        // analysis and is only captured at measureBefore / measureAfter.
         try {
           const m = await measureAudio(audioPath)
           lines.push(
             `   Audio:  RMS=${fmt(m.rmsDbfs)} dBFS  ` +
             `TruePeak=${fmt(m.truePeakDbfs)} dBTP  ` +
-            `NoiseFloor=${fmt(m.noiseFloorDbfs)} dBFS  ` +
             `LUFS=${fmt(m.lufsIntegrated)}`
           )
         } catch (e) {

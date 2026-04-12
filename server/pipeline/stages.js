@@ -77,9 +77,22 @@ export async function monoMixdown(ctx) {
 }
 
 // ── Stage: Measure before ─────────────────────────────────────────────────────
+//
+// Runs before peakNormalize and silenceAnalysisRaw, so there is no pre-existing
+// silence analysis to borrow a noise floor from. We run one inline — it's the
+// same work silenceAnalysisRaw would do later, but on the pre-peak-normalize
+// audio, which is what beforeMeasurements is meant to capture. The cost is a
+// single extra analyzeAudioFrames pass per job.
 
 export async function measureBefore(ctx) {
-  ctx.results.beforeMeasurements = await measureAudio(ctx.currentPath)
+  const [audio, silenceAnalysis] = await Promise.all([
+    measureAudio(ctx.currentPath),
+    analyzeAudioFrames(ctx.currentPath),
+  ])
+  ctx.results.beforeMeasurements = {
+    ...audio,
+    noiseFloorDbfs: silenceAnalysis.noiseFloorDbfs,
+  }
 }
 
 // ── Stage: Peak normalize (pre-processing) ───────────────────────────────────
@@ -318,9 +331,23 @@ export async function truePeakLimit(ctx) {
 }
 
 // ── Stage: Measure after ──────────────────────────────────────────────────────
+//
+// Populates afterMeasurements including the noise floor from a fresh silence
+// analysis on the fully processed audio. The ACX noise-floor check runs off
+// this value, so it must reflect the actual silence floor (frame-based) and
+// not a histogram-derived proxy. The silence analysis is stashed on ctx for
+// qualityAdvisory to reuse — avoids a second analyzeAudioFrames pass.
 
 export async function measureAfter(ctx) {
-  ctx.results.afterMeasurements = await measureAudio(ctx.currentPath)
+  const [audio, silenceAnalysis] = await Promise.all([
+    measureAudio(ctx.currentPath),
+    analyzeAudioFrames(ctx.currentPath),
+  ])
+  ctx.results.afterMeasurements = {
+    ...audio,
+    noiseFloorDbfs: silenceAnalysis.noiseFloorDbfs,
+  }
+  ctx.results.afterSilenceAnalysis = silenceAnalysis
 }
 
 // ── Stage: ACX Certification ──────────────────────────────────────────────────
@@ -343,7 +370,10 @@ export async function acxCertification(ctx) {
 // ── Stage: Quality advisory ───────────────────────────────────────────────────
 
 export async function qualityAdvisory(ctx) {
-  const postProcessSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
+  // Reuse the silence analysis produced by measureAfter when available —
+  // it was computed on the same audio and is otherwise identical work.
+  const postProcessSilenceAnalysis =
+    ctx.results.afterSilenceAnalysis ?? await analyzeAudioFrames(ctx.currentPath)
   const pipelineContext = {
     preNrNoiseFloor: ctx.results.rawNoiseFloor ?? null,
     noiseFloorDbfs:  ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,

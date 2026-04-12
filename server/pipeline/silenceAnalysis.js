@@ -122,12 +122,7 @@ async function analyzeAudioFramesSilero(wavPath) {
     frameRms[f] = Math.sqrt(sumSq / frameLengthSamples)
   }
 
-  const sorted = Float64Array.from(frameRms).sort()
-  let noiseRmsLinear = 0
-  const n = Math.min(BOOTSTRAP_FRAMES, sorted.length)
-  for (let i = 0; i < n; i++) noiseRmsLinear += sorted[i]
-  noiseRmsLinear /= n
-
+  const noiseRmsLinear   = bootstrapNoiseRms(frameRms)
   const noiseFloorDbfs   = rmsToDbfs(noiseRmsLinear)
   const silenceThreshold = noiseFloorDbfs + 6
 
@@ -250,13 +245,8 @@ async function analyzeAudioFramesEnergy(wavPath) {
     frameRms[f] = Math.sqrt(sumSq / frameLengthSamples)
   }
 
-  // Bootstrap noise floor: average the BOOTSTRAP_FRAMES lowest-energy frames
-  const sorted = Float64Array.from(frameRms).sort()
-  let noiseRmsLinear = 0
-  const n = Math.min(BOOTSTRAP_FRAMES, sorted.length)
-  for (let i = 0; i < n; i++) noiseRmsLinear += sorted[i]
-  noiseRmsLinear /= n
-
+  // Bootstrap noise floor: RMS over the BOOTSTRAP_FRAMES lowest-energy frames
+  const noiseRmsLinear    = bootstrapNoiseRms(frameRms)
   const noiseFloorDbfs    = rmsToDbfs(noiseRmsLinear)
   const silenceThreshold  = noiseFloorDbfs + 6 // dynamic threshold per spec
 
@@ -345,6 +335,29 @@ function findQuietestSilenceSegment(frames, frameRms, frameLengthSamples) {
 function rmsToDbfs(rms) {
   if (rms <= 0) return -120
   return 20 * Math.log10(rms)
+}
+
+/**
+ * Bootstrap a noise-floor estimate from per-frame linear RMS values.
+ *
+ * Selects the BOOTSTRAP_FRAMES lowest-energy frames and combines them in the
+ * power domain (not linear-RMS average), so the result is mathematically the
+ * RMS of the combined quietest frames — consistent with how voicedRmsDbfs is
+ * computed elsewhere in this module and with how noise floor is compared
+ * against the ACX noiseFloorCeiling downstream.
+ *
+ * A plain mean of linear RMS values underestimates the true RMS whenever the
+ * chosen frames have non-uniform energy, which biases the silenceThreshold
+ * (= noise_floor + 6) low and can cause voiced-frame misclassification in the
+ * energy-fallback branch.
+ */
+function bootstrapNoiseRms(frameRms) {
+  if (frameRms.length === 0) return 0
+  const sorted = Float64Array.from(frameRms).sort()
+  const n = Math.min(BOOTSTRAP_FRAMES, sorted.length)
+  let sumSq = 0
+  for (let i = 0; i < n; i++) sumSq += sorted[i] * sorted[i]
+  return Math.sqrt(sumSq / n)
 }
 
 function round2(n) {
