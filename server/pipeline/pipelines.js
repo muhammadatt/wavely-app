@@ -30,6 +30,8 @@ const STANDARD_PIPELINE = [
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.compress,
   stages.harmonicExciter,
+  stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
+  stages.normalize,
   //stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
@@ -59,6 +61,7 @@ export const PIPELINES = {
     stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.compress,
     stages.harmonicExciter,
+    stages.bandwidthExtension,        // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
     stages.normalize,
     stages.truePeakLimit,
     stages.measureAfter,
@@ -94,6 +97,7 @@ export const PIPELINES = {
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
+    stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
     stages.dereverb,
     stages.silenceAnalysisPostNr,    // Required by enhancementEQ (populates ctx.results.silencePostNr)
     //stages.separationEQ,
@@ -130,6 +134,7 @@ export const PIPELINES = {
     stages.clearerVoiceEnhance,     // CE-3: ClearerVoice SE replaces Demucs/ConvTasNet
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
+    stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
     //stages.separationEQ,            // NE-7: Post-separation enhancement EQ
     stages.enhancementEQ,
     stages.autoLevel,             // Stage 4b — no-op for clearervoice_eraser (preset not in LEVELER_CONFIG)

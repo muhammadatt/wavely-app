@@ -84,6 +84,7 @@ export function resolveOutputProfileId(id) {
  * @property {{ maxGainDb: number, maxRateDbPerS: number }} autoLeveler
  * @property {'demucs'|'convtasnet'} [separationModel]   - Noise Eraser only
  * @property {'mossformer2_48k'|'frcrn_16k'} [clearervoiceModel]   - ClearerVoice Eraser only
+ * @property {{ enabled: boolean }} bwe - Bandwidth extension (AP-BWE); enabled for NE presets, disabled for standard presets
  */
 
 /** @type {Record<string, Preset>} */
@@ -126,6 +127,7 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
+    bwe: { enabled: false },
   },
 
   podcast_ready: {
@@ -166,6 +168,7 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
+    bwe: { enabled: false },
   },
 
   voice_ready: {
@@ -209,6 +212,7 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
+    bwe: { enabled: false },
   },
 
   general_clean: {
@@ -249,6 +253,7 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
+    bwe: { enabled: false },
   },
 
   noise_eraser: {
@@ -296,6 +301,7 @@ export const PRESETS = {
       maxGainDb:     6.0,
       maxRateDbPerS: 1.5,
     },
+    bwe: { enabled: true },
   },
 
   clearervoice_eraser: {
@@ -332,6 +338,7 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
+    bwe: { enabled: true },
   },
 
 }

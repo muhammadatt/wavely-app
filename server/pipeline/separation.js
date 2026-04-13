@@ -24,6 +24,7 @@ const VOICEFIXER_SCRIPT       = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
 const HARMONIC_EXCITER_SCRIPT = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
 const CLEARERVOICE_SCRIPT     = path.join(SCRIPTS_DIR, 'clearervoice_enhance.py')
 const DEREVERB_SCRIPT         = path.join(SCRIPTS_DIR, 'dereverb.py')
+const AP_BWE_SCRIPT           = path.join(SCRIPTS_DIR, 'ap_bwe_extend.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,27 @@ export function runDereverb(inputPath, outputPath, strength = 'medium', preserve
   ]
   if (preserveEarly) args.push('--preserve-early')
   return spawnPython(DEREVERB_SCRIPT, args, `Dereverb (${strength})`)
+}
+
+/**
+ * Stage NE-6: AP-BWE bandwidth extension.
+ * Restores high-frequency content attenuated during source separation.
+ * Outputs 32-bit float WAV at 48 kHz; the caller resamples to 44.1 kHz via
+ * decodeToFloat32.
+ *
+ * Requires:
+ *   AP_BWE_REPO        - path to cloned AP-BWE repo (default: vendor/ap_bwe)
+ *   AP_BWE_CHECKPOINT  - path to the .pt checkpoint file (required)
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 48 kHz
+ */
+export function runApBwe(inputPath, outputPath) {
+  return spawnPython(
+    AP_BWE_SCRIPT,
+    ['--input', inputPath, '--output', outputPath, '--device', DEVICE],
+    'AP-BWE',
+  )
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
