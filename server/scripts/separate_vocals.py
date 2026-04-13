@@ -96,14 +96,13 @@ def separate_convtasnet(waveform, device):
     restoring a sane loudness level.
     """
     import torch
-    import torchaudio.transforms as T
+    import numpy as np
+    from math import gcd
+    from scipy.signal import resample_poly
     from asteroid.models import ConvTasNet
-    from asteroid.models import DPTNet
-
 
     # WHAM! speech+noise model: source 0 = speech, source 1 = noise
     CONVTASNET_SR = 16000
-    #MODEL_ID = 'JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k'
     MODEL_ID = 'JorisCos/ConvTasNet_Libri1Mix_enhsingle_16k'
 
     print(f'[convtasnet] Model: {MODEL_ID}  device={device}', flush=True)
@@ -114,24 +113,24 @@ def separate_convtasnet(waveform, device):
     mono = waveform.mean(dim=0, keepdim=True)   # (1, samples)
 
     # Capture input RMS at pipeline SR before resampling — used to rescale output.
-    # clamp prevents divide-by-zero on silence-only files.
     input_rms = mono.pow(2).mean().sqrt().clamp(min=1e-8)
 
-    # Resample to model SR
-    resamp_down = T.Resample(orig_freq=PIPELINE_SR, new_freq=CONVTASNET_SR)
-    mono_8k = resamp_down(mono)
+    # Resample to model SR using scipy polyphase (no torchaudio needed)
+    def _resample(t, orig_sr, target_sr):
+        g = gcd(target_sr, orig_sr)
+        arr = resample_poly(t.squeeze(0).numpy(), target_sr // g, orig_sr // g)
+        return torch.from_numpy(arr.astype(np.float32)).unsqueeze(0)
+
+    mono_16k = _resample(mono, PIPELINE_SR, CONVTASNET_SR)
 
     with torch.no_grad():
-        # (1, samples) → model expects (batch, samples)
-        est_sources = model(mono_8k.to(device))   # (1, n_src, samples)
-        speech = est_sources[0, 0:1, :].cpu()     # take speech source
+        est_sources = model(mono_16k.to(device))   # (1, n_src, samples)
+        speech = est_sources[0, 0:1, :].cpu()      # take speech source
 
     # Resample back to pipeline SR
-    resamp_up = T.Resample(orig_freq=CONVTASNET_SR, new_freq=PIPELINE_SR)
-    speech_44k = resamp_up(speech)
+    speech_44k = _resample(speech, CONVTASNET_SR, PIPELINE_SR)
 
-    # Rescale to match input RMS. ConvTasNet's SI-SNR training means its output
-    # gain is unconstrained — this step is mandatory, not optional.
+    # Rescale to match input RMS — ConvTasNet SI-SNR output gain is unconstrained.
     output_rms = speech_44k.pow(2).mean().sqrt().clamp(min=1e-8)
     speech_44k = speech_44k * (input_rms / output_rms)
 
@@ -150,23 +149,31 @@ def main():
     args = parser.parse_args()
 
     import torch
-    import torchaudio
+    import numpy as np
+    from scipy.io import wavfile
 
     device = resolve_device(args.device)
-    waveform, sr = torchaudio.load(args.input)  # (channels, samples)
+
+    # Load — scipy returns (samples,) mono or (samples, channels) stereo
+    sr, audio_np = wavfile.read(args.input)
+    audio_np = audio_np.astype(np.float32)
+    if audio_np.ndim == 1:
+        waveform = torch.from_numpy(audio_np).unsqueeze(0)   # (1, samples)
+    else:
+        waveform = torch.from_numpy(audio_np.T)              # (channels, samples)
 
     if args.model == 'demucs':
         vocals = separate_demucs(waveform, sr, device)
     else:
         vocals = separate_convtasnet(waveform, device)
 
-    torchaudio.save(
-        args.output,
-        vocals,
-        PIPELINE_SR,
-        bits_per_sample=32,
-        encoding='PCM_F',
-    )
+    # Save — convert (channels, samples) tensor back to numpy for wavfile
+    result_np = vocals.numpy()
+    if result_np.shape[0] == 1:
+        result_np = result_np[0]   # mono: (samples,)
+    else:
+        result_np = result_np.T    # stereo: (samples, channels)
+    wavfile.write(args.output, PIPELINE_SR, result_np.astype(np.float32))
 
 
 if __name__ == '__main__':

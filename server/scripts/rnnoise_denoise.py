@@ -33,16 +33,33 @@ def main():
     parser.add_argument('--output', required=True, help='Output WAV (32-bit float, 44.1 kHz)')
     args = parser.parse_args()
 
-    import torchaudio
-    import torchaudio.transforms as T
+    import numpy as np
+    from math import gcd
+    from scipy.io import wavfile
+    from scipy.signal import resample_poly
+
+    def _resample(audio, orig_sr, target_sr):
+        """Polyphase resample a (channels, samples) float32 array."""
+        if orig_sr == target_sr:
+            return audio
+        g = gcd(target_sr, orig_sr)
+        up, down = target_sr // g, orig_sr // g
+        return np.stack([
+            resample_poly(ch, up, down).astype(np.float32)
+            for ch in audio
+        ])
 
     # Load input — pipeline format is 32-bit float 44.1 kHz
-    waveform, sr = torchaudio.load(args.input)   # shape: (channels, samples)
+    # wavfile returns (samples,) mono or (samples, channels) stereo
+    sr, audio_np = wavfile.read(args.input)
+    audio_np = audio_np.astype(np.float32)
+    if audio_np.ndim == 1:
+        waveform = audio_np[np.newaxis, :]   # (1, samples)
+    else:
+        waveform = audio_np.T                # (channels, samples)
 
     # Resample to 48 kHz for RNNoise
-    if sr != RNNOISE_SR:
-        resampler_up = T.Resample(orig_freq=sr, new_freq=RNNOISE_SR)
-        waveform = resampler_up(waveform)
+    waveform = _resample(waveform, sr, RNNOISE_SR)
 
     # Apply RNNoise to the full file.
     # pyrnnoise.denoise_wav(in_path, out_path) operates on WAV file paths.
@@ -55,24 +72,25 @@ def main():
 
         # Mix to mono if stereo (RNNoise is mono-only)
         if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
+            waveform = waveform.mean(axis=0, keepdims=True)
 
-        # Write 16-bit PCM WAV at 48 kHz for RNNoise
+        # Write 16-bit PCM WAV at 48 kHz for RNNoise (clamp to prevent overflow)
         fd_in, tmp_in   = tempfile.mkstemp(suffix='_rnn_in.wav')
         fd_out, tmp_out = tempfile.mkstemp(suffix='_rnn_out.wav')
         os.close(fd_in)
         os.close(fd_out)
 
         try:
-            torchaudio.save(tmp_in, waveform, RNNOISE_SR,
-                            bits_per_sample=16, encoding='PCM_S')
+            pcm16 = np.clip(waveform[0] * 32767, -32768, 32767).astype(np.int16)
+            wavfile.write(tmp_in, RNNOISE_SR, pcm16)
             rnn = RNNoise(sample_rate=RNNOISE_SR)
             # denoise_wav is a generator — must be fully consumed to produce output
             for _ in rnn.denoise_wav(tmp_in, tmp_out):
                 pass
 
             if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 44:
-                waveform, _ = torchaudio.load(tmp_out)
+                _, rnn_out = wavfile.read(tmp_out)
+                waveform = rnn_out.astype(np.float32)[np.newaxis, :] / 32767.0
             else:
                 print('[rnnoise] WARNING: denoise_wav produced no output — '
                       'passing through unchanged.', flush=True)
@@ -87,18 +105,10 @@ def main():
               'passing audio through unchanged.', file=sys.stderr)
 
     # Resample back to 44.1 kHz (pipeline internal format)
-    if waveform.shape[-1] > 0:
-        resampler_down = T.Resample(orig_freq=RNNOISE_SR, new_freq=PIPELINE_SR)
-        waveform = resampler_down(waveform)
+    waveform = _resample(waveform, RNNOISE_SR, PIPELINE_SR)
 
-    # Write 32-bit float WAV at 44.1 kHz
-    torchaudio.save(
-        args.output,
-        waveform,
-        PIPELINE_SR,
-        bits_per_sample=32,
-        encoding='PCM_F',
-    )
+    # Write 32-bit float WAV at 44.1 kHz, mono
+    wavfile.write(args.output, PIPELINE_SR, waveform[0].astype(np.float32))
 
 
 if __name__ == '__main__':

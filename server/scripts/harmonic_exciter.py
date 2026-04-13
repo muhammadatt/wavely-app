@@ -10,7 +10,7 @@ import sys
 
 import numpy as np
 import scipy.signal
-import soundfile as sf
+from scipy.io import wavfile
 
 
 def harmonic_exciter(audio, sr=44100,
@@ -83,7 +83,8 @@ def main():
                         help='Even-harmonic blend (0=odd only, 1=even only; default: 0.4)')
     args = parser.parse_args()
 
-    audio, sr = sf.read(args.input, dtype='float32')
+    sr, audio = wavfile.read(args.input)
+    audio = audio.astype(np.float32)
 
     # Handle multichannel: process each channel independently
     if audio.ndim == 1:
@@ -99,7 +100,7 @@ def main():
         ]
         processed = np.stack(channels, axis=1)
 
-    sf.write(args.output, processed, sr, subtype='FLOAT')
+    wavfile.write(args.output, sr, processed.astype(np.float32))
     print(
         f'Harmonic exciter applied: '
         f'hp_freq={args.hp_freq}Hz  blend={args.blend}  '

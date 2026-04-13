@@ -85,83 +85,13 @@ export async function applyHighPass(inputPath, outputPath, { notch60Hz = false }
 }
 
 /**
- * Stage 5+6: Two-pass loudnorm — normalization + true peak limiting.
- *
- * Pass 1: Measure loudness statistics.
- * Pass 2: Apply normalization with peak ceiling.
- *
- * For ACX (RMS-based), we use a linear gain approach instead of loudnorm
- * since loudnorm operates on LUFS. The RMS path is handled separately
- * in the pipeline orchestrator.
- *
- * This function handles the LUFS path (standard/broadcast compliance).
- */
-export async function applyLoudnormLUFS(inputPath, outputPath, { targetLUFS, peakCeiling }) {
-  // Pass 1: measure
-  const stats = await measureLoudnorm(inputPath)
-
-  // Pass 2: apply
-  await runFfmpeg([
-    '-i', inputPath,
-    '-af',
-    `loudnorm=I=${targetLUFS}:TP=${peakCeiling}:LRA=11` +
-    `:measured_I=${stats.input_i}` +
-    `:measured_LRA=${stats.input_lra}` +
-    `:measured_TP=${stats.input_tp}` +
-    `:measured_thresh=${stats.input_thresh}` +
-    `:offset=${stats.target_offset}` +
-    `:linear=true:print_format=summary`,
-    '-ar', String(INTERNAL_SAMPLE_RATE),
-    '-acodec', 'pcm_f32le',
-    '-f', 'wav',
-    outputPath,
-  ])
-  return outputPath
-}
-
-/**
- * Measure loudnorm stats (pass 1).
- *
- * Throws a descriptive error if the file is effectively silent — FFmpeg
- * returns "-inf"/"+inf" for integrated loudness and true peak on silent audio,
- * which are out of range for the pass-2 filter parameters and would cause a
- * cryptic "Value -inf out of range" failure.
- */
-async function measureLoudnorm(inputPath) {
-  const { stderr } = await runFfmpeg([
-    '-i', inputPath,
-    '-af', 'loudnorm=I=-16:TP=-1:LRA=11:print_format=json',
-    '-f', 'null',
-    '-',
-  ])
-
-  const jsonMatch = stderr.match(/\{[\s\S]*?\}/)
-  if (!jsonMatch) throw new Error('Could not parse loudnorm stats')
-  const stats = JSON.parse(jsonMatch[0])
-
-  // Detect silent/near-silent files: FFmpeg reports "-inf" for integrated
-  // loudness and true peak when there is no measurable audio content.
-  if (!isFiniteLoudnormValue(stats.input_i) || !isFiniteLoudnormValue(stats.input_tp)) {
-    throw new Error(
-      'Audio level is too low to measure — the file appears to be silent or ' +
-      'contains only sub-threshold noise. Check your recording level and try again.'
-    )
-  }
-
-  return stats
-}
-
-/**
- * Return true if a loudnorm JSON value is a finite number string.
- * FFmpeg emits "-inf", "+inf", or "inf" for silent/clipped signals.
- */
-function isFiniteLoudnormValue(v) {
-  return v !== undefined && isFinite(Number(v))
-}
-
-/**
  * Apply a linear gain (in dB) to the audio.
- * Used for RMS-based normalization (ACX compliance).
+ *
+ * Stage 5 normalization applies this after measuring the voiced loudness
+ * (RMS for ACX, integrated LUFS for podcast/broadcast). The preceding
+ * pipeline keeps intermediate buffers in 32-bit float PCM, so this filter
+ * will not clip even at large positive gains — the downstream true-peak
+ * limiter enforces the peak ceiling.
  */
 export async function applyLinearGain(inputPath, outputPath, gainDb) {
   if (Math.abs(gainDb) < 0.01) {
@@ -186,24 +116,30 @@ export async function applyLinearGain(inputPath, outputPath, gainDb) {
 }
 
 /**
- * Stage 6: True peak limiter via loudnorm with tight ceiling.
- * Applied after normalization to catch any inter-sample peaks.
+ * Stage 6: True peak limiter.
+ *
+ * Applied after Stage 5 normalization to enforce the output profile's true
+ * peak ceiling. Uses FFmpeg `alimiter` (lookahead peak limiter) wrapped in a
+ * 192 kHz upsample / internal-rate downsample pair so inter-sample peaks
+ * (ITU-R BS.1770 true peak) are caught rather than just sample peaks.
+ *
+ * Historically this ran a two-pass `loudnorm` invocation, which was both
+ * heavyweight and shared a pass-1 measurement helper with the LUFS
+ * normalization path. The LUFS normalization path has been replaced by a
+ * silence-excluded WASM measurement + linear gain, so the shared helper is
+ * no longer needed and the simpler `alimiter`-based implementation is used.
  */
 export async function applyTruePeakLimiter(inputPath, outputPath, { peakCeiling }) {
-  const stats = await measureLoudnorm(inputPath)
+  // alimiter's `limit` parameter is linear amplitude in [0, 1]. Convert from
+  // dBFS (dBTP after upsampling): 10^(dB/20).
+  const limit = Math.pow(10, peakCeiling / 20)
 
-  // Apply loudnorm targeting the measured integrated loudness (preserve level)
-  // but enforce the peak ceiling
   await runFfmpeg([
     '-i', inputPath,
     '-af',
-    `loudnorm=I=${stats.input_i}:TP=${peakCeiling}:LRA=11` +
-    `:measured_I=${stats.input_i}` +
-    `:measured_LRA=${stats.input_lra}` +
-    `:measured_TP=${stats.input_tp}` +
-    `:measured_thresh=${stats.input_thresh}` +
-    `:offset=0` +
-    `:linear=true:print_format=summary`,
+    `aresample=192000,` +
+    `alimiter=limit=${limit}:level=disabled:asc=1,` +
+    `aresample=${INTERNAL_SAMPLE_RATE}`,
     '-ar', String(INTERNAL_SAMPLE_RATE),
     '-acodec', 'pcm_f32le',
     '-f', 'wav',

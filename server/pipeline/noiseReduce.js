@@ -40,6 +40,8 @@ const SCRIPT  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 's
  * @returns {Promise<object>} Processing metadata for the pipeline report
  */
 export async function applyNoiseReduction(inputPath, outputPath, { attenLimDb = null } = {}) {
+  const strategy = DEEPFILTER_BINARY ? `CLI binary (${DEEPFILTER_BINARY})` : `Python (${PYTHON})`
+  console.log(`[DeepFilter] Starting: model=DeepFilterNet3 strategy=${strategy} atten_lim_db=${attenLimDb ?? 'uncapped'}`)
 
   // DeepFilterNet3 outputs 48 kHz — hold in a temp file before resampling
   const nr48kPath = tempPath('.wav')
@@ -53,6 +55,7 @@ export async function applyNoiseReduction(inputPath, outputPath, { attenLimDb = 
     await removeTmp(nr48kPath)
   }
 
+  console.log(`[DeepFilter] Done`)
   return {
     applied:               true,
     model:                 'DeepFilterNet3',
@@ -136,6 +139,8 @@ function spawnProcess(executable, args, label) {
 
     proc.on('close', (code, signal) => {
       if (stdout.trim()) console.log(`[${label}] ${stdout.trim()}`)
+      // CLI binary (deep-filter.exe) writes progress to stderr; log it on success too.
+      if (stderr.trim() && code === 0) console.log(`[${label}] ${stderr.trim()}`)
       if (code === 0 && signal === null) {
         resolve()
       } else {

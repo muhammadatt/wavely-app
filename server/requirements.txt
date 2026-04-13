@@ -61,9 +61,11 @@ soundfile>=0.12
 
 # VACE-WPE (heavy path) uses vendor/vace_wpe — clone separately:
 #   git clone https://github.com/dreadbird06/vace_wpe vendor/vace_wpe
-# Requires torch>=2.0 (already pinned above) and the checkpoint at
-#   vendor/vace_wpe/models/bldnn_4M62.pt (or set VACE_WPE_CHECKPOINT env var).
-# No pip package — imported directly from vendor/ via sys.path insertion.
+# Requires torch>=2.0 (already pinned above).
+# Checkpoint default path (no pip package, no .pt extension — it is named ckpt-ep60):
+#   vendor/vace_wpe/models/20210129-140530/ckpt-ep60
+# Override with VACE_WPE_CHECKPOINT env var if using a different checkpoint.
+# No pip package — bldnn_4M62 and torch_custom.* imported via sys.path insertion.
 
 # ── Bandwidth Extension (AP-BWE) ──────────────────────────────────────────────
 

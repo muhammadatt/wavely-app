@@ -29,6 +29,12 @@ import { PRESETS } from '../presets.js'
 const SAMPLE_RATE = 44100
 const KNEE_WIDTH_DB = 4  // spec: soft knee 4 dB for all presets
 
+// --- Adaptive threshold (Stage 4a addendum) ---
+const ADAPTIVE_WINDOW_SAMPLES = 1024      // ~23 ms @ 44.1 kHz (spec)
+const ADAPTIVE_HOP_SAMPLES    = 512       // 50% overlap (spec)
+const ADAPTIVE_MIN_WINDOWS    = 50        // below this, fall back to static
+const ADAPTIVE_NOISE_MARGIN_DB = 6        // drop windows within noiseFloor + 6 dB
+
 // ── Main API ────────────────────────────────────────────────────────────────
 
 /**
@@ -47,14 +53,24 @@ const KNEE_WIDTH_DB = 4  // spec: soft knee 4 dB for all presets
  * @property {number|null} maxGainReductionDb   - Peak gain reduction during processing
  * @property {number|null} avgGainReductionDb   - Average gain reduction applied
  * @property {{ threshold: number, ratio: number, attack: number, release: number }} params
+ * @property {'adaptive_p85'|'static'|'static_fallback'|null} [thresholdMethod]
+ *     How the threshold used for compression was derived.
+ * @property {string|null} [fallbackReason]     - If static_fallback, why
+ * @property {number|null} [p85Dbfs]            - Adaptive: P85 of voiced-window RMS
+ * @property {number|null} [p99Dbfs]            - Adaptive: P99 of voiced-window RMS
+ * @property {number|null} [expectedGrDb]       - Adaptive: P99 - P85
+ * @property {[number, number]|null} [targetGrWindow]
+ * @property {boolean} [thresholdClamped]       - Adaptive: whether the derived value hit the clamp range
+ * @property {number|null} [thresholdPreClampDbfs]
  */
 export async function applyCompression(inputPath, outputPath, presetId, silenceAnalysis) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
-  const { mode, ratio, threshold, attack, release } = preset.compression
+  const presetComp = preset.compression
+  const { mode, ratio, threshold: staticThreshold, attack, release } = presetComp
 
-  // --- mode: 'none' — preset explicitly disables compression (e.g. Noise Eraser) ---
+  // --- mode: 'none' — preset explicitly disables compression (e.g. ClearerVoice) ---
   if (mode === 'none') {
     await copyThrough(inputPath, outputPath)
     return {
@@ -63,7 +79,7 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
       crestFactorDb: null,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
-      params: { threshold, ratio, attack, release },
+      params: { threshold: staticThreshold, ratio, attack, release },
     }
   }
 
@@ -84,14 +100,28 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
         crestFactorDb: round2(crestFactorDb),
         maxGainReductionDb: null,
         avgGainReductionDb: null,
-        params: { threshold, ratio, attack, release },
+        params: { threshold: staticThreshold, ratio, attack, release },
       }
     }
   }
 
+  // --- Derive threshold (adaptive per spec addendum, or static) ---
+  const adaptive = presetComp.thresholdMethod === 'adaptive'
+    ? deriveAdaptiveThreshold(analysisSamples, silenceAnalysis, presetComp)
+    : {
+        thresholdDb:           staticThreshold,
+        method:                'static',
+        fallbackReason:        null,
+        p85Dbfs:               null,
+        p99Dbfs:               null,
+        expectedGrDb:          null,
+        thresholdClamped:      false,
+        thresholdPreClampDbfs: null,
+      }
+
   // --- Build gain curve from channel 0, apply to all channels ---
   const compParams = {
-    thresholdDb: threshold,
+    thresholdDb: adaptive.thresholdDb,
     ratio,
     attackMs: attack,
     releaseMs: release,
@@ -109,7 +139,15 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
     crestFactorDb: crestFactorDb !== null ? round2(crestFactorDb) : null,
     maxGainReductionDb: round2(gainCurve.maxGainReductionDb),
     avgGainReductionDb: round2(gainCurve.avgGainReductionDb),
-    params: { threshold, ratio, attack, release },
+    params: { threshold: round2(adaptive.thresholdDb), ratio, attack, release },
+    thresholdMethod:       adaptive.method,
+    fallbackReason:        adaptive.fallbackReason,
+    p85Dbfs:               adaptive.p85Dbfs !== null ? round2(adaptive.p85Dbfs) : null,
+    p99Dbfs:               adaptive.p99Dbfs !== null ? round2(adaptive.p99Dbfs) : null,
+    expectedGrDb:          adaptive.expectedGrDb !== null ? round2(adaptive.expectedGrDb) : null,
+    targetGrWindow:        presetComp.targetGrWindow ?? null,
+    thresholdClamped:      adaptive.thresholdClamped,
+    thresholdPreClampDbfs: adaptive.thresholdPreClampDbfs !== null ? round2(adaptive.thresholdPreClampDbfs) : null,
   }
 }
 
@@ -143,6 +181,127 @@ function measureCrestFactor(samples, silenceAnalysis) {
   const rmsDb  = voicedRms > 0 ? 20 * Math.log10(voicedRms) : -120
 
   return peakDb - rmsDb
+}
+
+// ── Adaptive Threshold (Stage 4a addendum) ──────────────────────────────────
+
+/**
+ * Derive an adaptive compression threshold from the voiced-frame RMS
+ * distribution.
+ *
+ * Algorithm (see `docs/instant_polish_adaptive_compression_threshold.md`):
+ *   1. Slide 1024-sample / hop-512 windows across voiced frames only; compute
+ *      per-window RMS in dBFS.
+ *   2. Drop windows within `noiseFloor + 6 dB` (noise-contaminated breath tails).
+ *   3. If surviving windows < 50, fall back to the preset's static threshold.
+ *   4. Compute P85 (start) and P99 (peak proxy) of the distribution.
+ *   5. Nudge threshold by half the gap between expected GR (P99 - P85) and the
+ *      preset's target GR window.
+ *   6. Clamp to preset [thresholdMin, thresholdMax].
+ *
+ * @param {Float32Array} samples
+ * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('../../src/audio/presets.js').CompressionConfig} presetComp
+ * @returns {{
+ *   thresholdDb: number,
+ *   method: 'adaptive_p85'|'static_fallback',
+ *   fallbackReason: string|null,
+ *   p85Dbfs: number|null,
+ *   p99Dbfs: number|null,
+ *   expectedGrDb: number|null,
+ *   thresholdClamped: boolean,
+ *   thresholdPreClampDbfs: number|null,
+ * }}
+ */
+function deriveAdaptiveThreshold(samples, silenceAnalysis, presetComp) {
+  const staticFallback = (reason) => ({
+    thresholdDb:           presetComp.threshold,
+    method:                'static_fallback',
+    fallbackReason:        reason,
+    p85Dbfs:               null,
+    p99Dbfs:               null,
+    expectedGrDb:          null,
+    thresholdClamped:      false,
+    thresholdPreClampDbfs: null,
+  })
+
+  const noiseCeiling = silenceAnalysis.noiseFloorDbfs + ADAPTIVE_NOISE_MARGIN_DB
+  const voicedRms = collectVoicedWindowRmsDbfs(samples, silenceAnalysis, noiseCeiling)
+
+  if (voicedRms.length < ADAPTIVE_MIN_WINDOWS) {
+    console.log('[compression] adaptive_threshold: insufficient voiced content — using static fallback')
+    return staticFallback('insufficient_voiced_content')
+  }
+
+  const sorted = voicedRms.sort((a, b) => a - b)
+  const p85 = computePercentile(sorted, 85)
+  const p99 = computePercentile(sorted, 99)
+  const expectedGr = p99 - p85
+
+  const [targetMin, targetMax] = presetComp.targetGrWindow
+  let threshold
+  if (expectedGr < targetMin) {
+    // Compressor barely engaging — lower threshold
+    threshold = p85 - (targetMin - expectedGr) / 2
+  } else if (expectedGr > targetMax) {
+    // Compressor too aggressive — raise threshold
+    threshold = p85 + (expectedGr - targetMax) / 2
+  } else {
+    threshold = p85
+  }
+
+  const preClamp = threshold
+  const clamped = Math.min(
+    Math.max(threshold, presetComp.thresholdMin),
+    presetComp.thresholdMax,
+  )
+  const thresholdClamped = clamped !== preClamp
+
+  return {
+    thresholdDb:           clamped,
+    method:                'adaptive_p85',
+    fallbackReason:        null,
+    p85Dbfs:               p85,
+    p99Dbfs:               p99,
+    expectedGrDb:          expectedGr,
+    thresholdClamped,
+    thresholdPreClampDbfs: thresholdClamped ? preClamp : null,
+  }
+}
+
+/**
+ * Collect RMS (dBFS) for every 1024-sample window fully contained within a
+ * voiced frame, dropping windows at/below the noise-contamination ceiling.
+ */
+function collectVoicedWindowRmsDbfs(samples, silenceAnalysis, noiseCeilingDbfs) {
+  const out = []
+  for (const frame of silenceAnalysis.frames) {
+    if (frame.isSilence) continue
+    const frameEnd = Math.min(frame.offsetSamples + frame.lengthSamples, samples.length)
+    for (let start = frame.offsetSamples; start + ADAPTIVE_WINDOW_SAMPLES <= frameEnd; start += ADAPTIVE_HOP_SAMPLES) {
+      let sumSq = 0
+      const end = start + ADAPTIVE_WINDOW_SAMPLES
+      for (let i = start; i < end; i++) sumSq += samples[i] * samples[i]
+      const rms = Math.sqrt(sumSq / ADAPTIVE_WINDOW_SAMPLES)
+      if (rms <= 0) continue
+      const rmsDbfs = 20 * Math.log10(rms)
+      if (rmsDbfs < noiseCeilingDbfs) continue
+      out.push(rmsDbfs)
+    }
+  }
+  return out
+}
+
+/**
+ * Percentile via the "ceil index" convention from the spec:
+ *   idx = ceil(p/100 * N) - 1, clamped to [0, N-1]
+ * `sorted` MUST already be sorted ascending.
+ */
+function computePercentile(sorted, percentile) {
+  const n = sorted.length
+  if (n === 0) return 0
+  const idx = Math.max(0, Math.min(n - 1, Math.ceil((percentile / 100) * n) - 1))
+  return sorted[idx]
 }
 
 // ── Compressor DSP ──────────────────────────────────────────────────────────

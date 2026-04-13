@@ -25,7 +25,6 @@ import {
   mixdownToMono,
   applyHighPass,
   applyLinearGain,
-  applyLoudnormLUFS,
   applyTruePeakLimiter,
   applyParametricEQ,
   encodeOutput,
@@ -33,7 +32,7 @@ import {
 } from '../lib/ffmpeg.js'
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { applyNoiseReduction } from './noiseReduce.js'
-import { measureAudio, measureVoicedRms, checkAcxCertification } from './measure.js'
+import { measureAudio, measureVoicedRms, measureVoicedLufs, checkAcxCertification } from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
 import { analyzeAudioFrames, remeasureAudioFrames } from './silenceAnalysis.js'
 import { analyzeSpectrum } from './enhancementEQ.js'
@@ -309,14 +308,24 @@ export async function normalize(ctx) {
   const normPath          = ctx.tmp('.wav')
   let normExtras          = {}
 
+  // Both RMS and LUFS paths share the same three-step architecture:
+  //   1. Fresh silence analysis on the current (post-compression, post-exciter)
+  //      audio so the voiced/silence classification matches the signal we're
+  //      about to measure.
+  //   2. Silence-excluded loudness measurement (spec §5b: noise_floor + 6 dB).
+  //   3. Linear gain = target - measured, applied via FFmpeg `volume`.
+  //
+  // True peak ceiling is enforced by the subsequent truePeakLimit stage — do
+  // not apply it here.
+  const prNormSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
+
   if (outputProfile.measurementMethod === 'RMS') {
     // Use the explicit normalizationTarget from the output profile.
     // Do NOT use the loudnessRange midpoint — for ACX the midpoint is -20.5 dBFS
     // but the spec target is -20 dBFS RMS.
-    const targetRms             = outputProfile.normalizationTarget
-    const prNormSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
-    const voicedRms             = await measureVoicedRms(ctx.currentPath, prNormSilenceAnalysis)
-    const gainDb                = targetRms - voicedRms
+    const targetRms = outputProfile.normalizationTarget
+    const voicedRms = await measureVoicedRms(ctx.currentPath, prNormSilenceAnalysis)
+    const gainDb    = targetRms - voicedRms
 
     if (gainDb > 18) {
       ctx.log(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
@@ -331,14 +340,19 @@ export async function normalize(ctx) {
     }
   } else {
     const targetLufs = outputProfile.normalizationTarget
-    await applyLoudnormLUFS(ctx.currentPath, normPath, {
-      targetLUFS:  targetLufs,
-      peakCeiling: outputProfile.truePeakCeiling,
-    })
+    const voicedLufs = await measureVoicedLufs(ctx.currentPath, prNormSilenceAnalysis)
+    const gainDb     = targetLufs - voicedLufs
+
+    if (gainDb > 18) {
+      ctx.log(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
+    }
+
+    await applyLinearGain(ctx.currentPath, normPath, gainDb)
     normExtras = {
-      method: 'LUFS',
-      target: `${targetLufs}LUFS`,
-      tp:     `${outputProfile.truePeakCeiling}dBTP`,
+      method:      'LUFS',
+      target:      `${targetLufs}LUFS`,
+      voicedLufs:  `${round2(voicedLufs)}LUFS`,
+      gainApplied: `${round2(gainDb)}dB`,
     }
   }
 
