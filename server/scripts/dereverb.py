@@ -150,6 +150,33 @@ def _run_nara_wpe(audio: 'np.ndarray', strength: str, preserve_early: bool) -> '
     return result
 
 
+def _patch_stft_helper():
+    """Monkey-patch StftHelper.stft for PyTorch >= 1.8 compatibility.
+
+    The vendored stft_helper.py calls torch.stft() without return_complex,
+    which PyTorch >= 1.8 requires to be passed explicitly. The rest of vace_wpe
+    expects the old real-valued (batch, bins, frames, 2) layout, so we pass
+    return_complex=False. This patches the class in-place once per process.
+    """
+    import torch
+    from torch_custom.stft_helper import StftHelper
+
+    if getattr(StftHelper, '_patched_return_complex', False):
+        return  # already applied
+
+    def _stft_compat(self, signal, time_axis=-1, return_complex=False, center=True):
+        return torch.stft(
+            signal,
+            n_fft=self.nfft, hop_length=self.winSht, win_length=self.winLen,
+            window=self.analy_window.to(signal.device), center=center,
+            pad_mode='constant', normalized=False, onesided=True,
+            return_complex=return_complex,
+        )
+
+    StftHelper.stft = _stft_compat
+    StftHelper._patched_return_complex = True
+
+
 def _run_vace_wpe(audio: 'np.ndarray') -> 'np.ndarray':
     """Apply VACE-WPE (4M-param BLSTM + WPE) dereverberation."""
     import os
@@ -175,6 +202,8 @@ def _run_vace_wpe(audio: 'np.ndarray') -> 'np.ndarray':
             file=sys.stderr,
         )
         return _run_nara_wpe(audio, 'medium', False)
+
+    _patch_stft_helper()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model  = _get_vace_model(device)
