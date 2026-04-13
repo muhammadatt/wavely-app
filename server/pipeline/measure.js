@@ -252,3 +252,83 @@ export async function measureVoicedRms(wavPath, silenceAnalysis) {
   const rms = Math.sqrt(voicedSumSq / count)
   return round2(rms > 0 ? 20 * Math.log10(rms) : -120)
 }
+
+/**
+ * Measure integrated LUFS of voiced frames only, excluding silence.
+ *
+ * Implements spec §5b silence exclusion for LUFS-based output profiles
+ * (podcast, broadcast). Concatenates only the voiced-frame samples (where
+ * silenceAnalysis.frames[f].isSilence === false) and feeds them to libebur128
+ * for integrated LUFS measurement.
+ *
+ * Why this exists: FFmpeg's `loudnorm` relies on EBU R128's built-in gating
+ * (-70 LUFS absolute + -10 LU relative), which does not track a file-specific
+ * noise floor. On recordings with elevated room tone, the relative gate fails
+ * to exclude the silence, dragging the measured integrated loudness below the
+ * true voiced level and inflating applied gain — resulting in output that is
+ * louder than the configured target. Gating by `noise_floor + 6 dB` (via the
+ * silence analysis produced by Silero VAD v5) is the spec-aligned fix.
+ *
+ * @param {string} wavPath
+ * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @returns {Promise<number>} Voiced integrated LUFS
+ */
+export async function measureVoicedLufs(wavPath, silenceAnalysis) {
+  if (!silenceAnalysis || !Array.isArray(silenceAnalysis.frames)) {
+    throw new Error('measureVoicedLufs requires a silenceAnalysis with frames[]')
+  }
+
+  const voicedFrames = silenceAnalysis.frames.filter(f => !f.isSilence)
+  if (voicedFrames.length === 0) {
+    throw new Error(
+      'Audio level is too low to measure — no voiced frames detected. ' +
+      'The file appears to be silent or contains only sub-threshold noise. ' +
+      'Check your recording level and try again.'
+    )
+  }
+
+  const { channels, sampleRate, numChannels } = await readWavAllChannels(wavPath)
+
+  if (numChannels === 0) {
+    throw new Error('measureVoicedLufs expected a WAV file with at least one audio channel')
+  }
+  if (numChannels > 2) {
+    throw new Error(
+      `measureVoicedLufs currently supports only mono or stereo WAV files (got ${numChannels} channels)`
+    )
+  }
+
+  // Concatenate voiced-frame samples per channel. ebur128's 400 ms sliding
+  // window will see minor discontinuities at frame boundaries, but because
+  // speech is coherent across 100 ms boundaries and the relative gate filters
+  // transient power drops, the measurement remains well-behaved.
+  const totalSamples = voicedFrames.reduce((n, f) => n + f.lengthSamples, 0)
+  const voicedChannels = Array.from({ length: numChannels }, () => new Float32Array(totalSamples))
+
+  let write = 0
+  for (const frame of voicedFrames) {
+    const { offsetSamples, lengthSamples } = frame
+    for (let ch = 0; ch < numChannels; ch++) {
+      const src = channels[ch]
+      const end = Math.min(offsetSamples + lengthSamples, src.length)
+      const len = end - offsetSamples
+      if (len > 0) {
+        voicedChannels[ch].set(src.subarray(offsetSamples, end), write)
+      }
+    }
+    write += lengthSamples
+  }
+
+  const integrated = numChannels === 2
+    ? ebur128_integrated_stereo(sampleRate, voicedChannels[0], voicedChannels[1])
+    : ebur128_integrated_mono(sampleRate, voicedChannels[0])
+
+  if (!Number.isFinite(integrated)) {
+    throw new Error(
+      'Audio level is too low to measure — integrated loudness is non-finite ' +
+      'after voiced-frame extraction. Check your recording level and try again.'
+    )
+  }
+
+  return round2(integrated)
+}
