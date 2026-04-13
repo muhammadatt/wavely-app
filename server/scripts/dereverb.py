@@ -235,7 +235,11 @@ def _get_vace_model(device):
     model = NeuralWPE(stft_opts=VACE_WPE_STFT_OPTS, lpsnet=lpsnet)
     # load_checkpoint signature: (model, optimizer=None, checkpoint=..., strict=True)
     # Returns (model, learning_rate, iteration) — we only need the model.
-    model, *_ = load_checkpoint(model, checkpoint=checkpoint_path)
+    # strict=False: the checkpoint is a full VACE-WPE save that also contains
+    # vacenet.* and melfeatext.* weights — NeuralWPE only needs the lpsnet.*
+    # subset, so we let load_state_dict silently skip the unexpected keys.
+    # This matches how run.py loads NeuralWPE from these same checkpoints.
+    model, *_ = load_checkpoint(model, checkpoint=checkpoint_path, strict=False)
     model.eval().to(device)
 
     _vace_model_cache = model
