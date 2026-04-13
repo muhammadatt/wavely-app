@@ -151,12 +151,17 @@ def _run_nara_wpe(audio: 'np.ndarray', strength: str, preserve_early: bool) -> '
 
 
 def _patch_stft_helper():
-    """Monkey-patch StftHelper.stft for PyTorch >= 1.8 compatibility.
+    """Monkey-patch StftHelper.stft/istft for PyTorch >= 1.8/2.0 compatibility.
 
-    The vendored stft_helper.py calls torch.stft() without return_complex,
-    which PyTorch >= 1.8 requires to be passed explicitly. The rest of vace_wpe
-    expects the old real-valued (batch, bins, frames, 2) layout, so we pass
-    return_complex=False. This patches the class in-place once per process.
+    stft: torch.stft() requires return_complex to be passed explicitly since
+          PyTorch 1.8. The vendored code has it commented out. We pass False so
+          the rest of vace_wpe continues to see real-valued (..., 2) tensors.
+
+    istft: torch.istft() requires a complex-valued input since PyTorch 2.0, but
+           vace_wpe's WPE computation produces real (..., F, T, 2) tensors. We
+           convert via torch.view_as_complex before calling torch.istft.
+
+    Both patches are applied once per process and are no-ops on re-entry.
     """
     import torch
     from torch_custom.stft_helper import StftHelper
@@ -173,7 +178,19 @@ def _patch_stft_helper():
             return_complex=return_complex,
         )
 
+    def _istft_compat(self, coefs, length=None, time_axis=-2):
+        # PyTorch 2.0 requires complex input. vace_wpe passes real (..., F, T, 2).
+        if not coefs.is_complex():
+            coefs = torch.view_as_complex(coefs.contiguous())
+        return torch.istft(
+            coefs,
+            n_fft=self.nfft, hop_length=self.winSht, win_length=self.winLen,
+            window=self.analy_window.to(coefs.device), center=True,
+            normalized=False, onesided=True, length=length,
+        )
+
     StftHelper.stft = _stft_compat
+    StftHelper.istft = _istft_compat
     StftHelper._patched_return_complex = True
 
 
