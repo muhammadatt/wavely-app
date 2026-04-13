@@ -63,7 +63,18 @@ export function resolveOutputProfileId(id) {
  * @property {{ value: number, unit: string }} targetLoudness
  * @property {number} truePeakCeiling
  * @property {number|null} noiseFloorTarget
- * @property {{ mode: 'conditional'|'always'|'none', ratio: number, threshold: number, attack: number, release: number }} compression
+ * @property {CompressionConfig} compression
+ *
+ * @typedef {Object} CompressionConfig
+ * @property {'conditional'|'always'|'none'} mode
+ * @property {number} ratio
+ * @property {number} threshold                    - Static fallback threshold in dBFS (used when thresholdMethod is 'static' or when adaptive derivation falls back)
+ * @property {number} attack                        - Attack time in ms
+ * @property {number} release                       - Release time in ms
+ * @property {'adaptive'|'static'} [thresholdMethod]  - Threshold derivation strategy. Omitted/static = use static threshold; 'adaptive' = P85-based adaptive algorithm (Stage 4a addendum)
+ * @property {[number, number]} [targetGrWindow]     - [minDb, maxDb] expected gain reduction window for adaptive threshold
+ * @property {number} [thresholdMin]                 - Adaptive sanity clamp floor (dBFS)
+ * @property {number} [thresholdMax]                 - Adaptive sanity clamp ceiling (dBFS)
  * @property {string} eqProfile
  * @property {{ sensitivity: 'standard'|'high'|'none', trigger: number, maxReduction: number }} deEsser
  * @property {'mono'|'preserve'} channelOutput
@@ -89,7 +100,11 @@ export const PRESETS = {
     compression: {
       mode: 'conditional',
       ratio: 2,
-      threshold: -24,
+      threshold: -24,               // static fallback
+      thresholdMethod: 'adaptive',
+      targetGrWindow: [2, 4],
+      thresholdMin: -36,
+      thresholdMax: -12,
       attack: 10,
       release: 100,
     },
@@ -125,7 +140,11 @@ export const PRESETS = {
     compression: {
       mode: 'always',
       ratio: 3,
-      threshold: -20,
+      threshold: -20,               // static fallback
+      thresholdMethod: 'adaptive',
+      targetGrWindow: [4, 7],
+      thresholdMin: -36,
+      thresholdMax: -10,
       attack: 5,
       release: 80,
     },
@@ -161,7 +180,11 @@ export const PRESETS = {
     compression: {
       mode: 'always',
       ratio: 2.5,
-      threshold: -22,
+      threshold: -22,               // static fallback
+      thresholdMethod: 'adaptive',
+      targetGrWindow: [3, 5],
+      thresholdMin: -36,
+      thresholdMax: -12,
       attack: 8,
       release: 90,
     },
@@ -200,7 +223,11 @@ export const PRESETS = {
     compression: {
       mode: 'always',
       ratio: 3,
-      threshold: -20,
+      threshold: -20,               // static fallback
+      thresholdMethod: 'adaptive',
+      targetGrWindow: [4, 8],
+      thresholdMin: -40,
+      thresholdMax: -10,
       attack: 8,
       release: 80,
     },
@@ -237,6 +264,7 @@ export const PRESETS = {
       mode: 'conditional',
       ratio: 2,
       threshold: -24,
+      thresholdMethod: 'static',    // Noise Eraser: adaptive algorithm excluded (spec)
       attack: 10,
       release: 100,
     },
