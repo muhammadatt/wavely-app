@@ -166,9 +166,9 @@ If no voiced frames are detected in the post-separation output (separation has p
 
 **Setup:**
 - Clone repo: `git clone https://github.com/yxlu-0102/AP-BWE vendor/ap_bwe`
-- Download 8kto48k checkpoint from Google Drive (see `server/requirements.txt`)
-- Set `AP_BWE_CHECKPOINT` env var to the `.pt` file path
-- `config.json` must be colocated with the checkpoint
+- Download the `g_8kto48K` checkpoint from Google Drive (see `server/requirements.txt`). Note: AP-BWE checkpoint files have no file extension — `g_8kto48K` is the full filename.
+- Set `AP_BWE_CHECKPOINT` env var to the path of `g_8kto48K`
+- `config.json` must be in the same directory as the checkpoint
 
 **Parameters:**
 - Input: post-NE-5 output (or post-NE-3 if NE-5 was skipped)

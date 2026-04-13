@@ -9,7 +9,9 @@ Environment variables:
   AP_BWE_REPO        Path to cloned AP-BWE repository.
                      Defaults to vendor/ap_bwe relative to the repo root
                      (two levels up from this script's directory).
-  AP_BWE_CHECKPOINT  Path to the AP-BWE .pt checkpoint file (required).
+  AP_BWE_CHECKPOINT  Path to the AP-BWE checkpoint file (required).
+                     The checkpoint is named without an extension (e.g.
+                     "g_8kto48K") — this is normal for GAN-based models.
                      The config.json must be in the same directory as the
                      checkpoint.
 
@@ -63,8 +65,9 @@ def main():
     if not checkpoint_path:
         print(
             'AP_BWE_CHECKPOINT environment variable is not set.\n'
-            'Set it to the path of the AP-BWE .pt checkpoint file, e.g.:\n'
-            '  export AP_BWE_CHECKPOINT=vendor/ap_bwe/checkpoints/g_8kto48k',
+            'Set it to the path of the AP-BWE checkpoint file, e.g.:\n'
+            '  export AP_BWE_CHECKPOINT=vendor/ap_bwe/checkpoints/g_8kto48K\n'
+            'Note: AP-BWE checkpoints have no file extension (e.g. "g_8kto48K").',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -73,9 +76,10 @@ def main():
     if not os.path.isfile(checkpoint_path):
         print(
             f'AP-BWE checkpoint not found: {checkpoint_path}\n'
-            'Download the 8kto48k checkpoint from:\n'
+            'Download the 8kto48K checkpoint (file named "g_8kto48K") from:\n'
             '  https://drive.google.com/drive/folders/1IIYTf2zbJWzelu4IftKD6ooHloJ8mnZF\n'
-            'Place it at the path set in AP_BWE_CHECKPOINT.',
+            'Place it alongside config.json in the same directory, then set:\n'
+            '  AP_BWE_CHECKPOINT=<path to g_8kto48K>',
             file=sys.stderr,
         )
         sys.exit(1)

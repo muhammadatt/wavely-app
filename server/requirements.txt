@@ -72,10 +72,12 @@ soundfile>=0.12
 # ap_bwe_extend.py (NE-6 — AP-BWE amplitude-phase bandwidth extension)
 # AP-BWE is not pip-installable — clone the repo separately:
 #   git clone https://github.com/yxlu-0102/AP-BWE vendor/ap_bwe
-# Download the 8kto48k checkpoint from Google Drive:
+# Download the 8kto48K checkpoint from Google Drive:
 #   https://drive.google.com/drive/folders/1IIYTf2zbJWzelu4IftKD6ooHloJ8mnZF
-# Place config.json and the .pt file in the same directory, then set:
-#   AP_BWE_CHECKPOINT=<path to .pt file>
+# The checkpoint is named without an extension (e.g. "g_8kto48K") — this is
+# normal for GAN-based models; torch.load() handles it fine. Place g_8kto48K
+# and its config.json in the same directory, then set:
+#   AP_BWE_CHECKPOINT=<path to g_8kto48K>
 #   AP_BWE_REPO=vendor/ap_bwe  (or omit to use the default)
 einops>=0.8.0
 
