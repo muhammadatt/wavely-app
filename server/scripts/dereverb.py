@@ -240,7 +240,10 @@ def _get_vace_model(device):
     # subset, so we let load_state_dict silently skip the unexpected keys.
     # This matches how run.py loads NeuralWPE from these same checkpoints.
     model, *_ = load_checkpoint(model, checkpoint=checkpoint_path, strict=False)
-    model.eval().to(device)
+    # NeuralWPE.eval() overrides nn.Module.eval() without returning self,
+    # so chaining .eval().to(device) would crash. Call separately.
+    model.eval()
+    model.to(device)
 
     _vace_model_cache = model
     return _vace_model_cache
