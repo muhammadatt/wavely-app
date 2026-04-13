@@ -22,15 +22,15 @@ const STANDARD_PIPELINE = [
   stages.peakNormalize,
   stages.silenceAnalysisRaw,
   stages.hpf,
+  stages.dereverb,              
   stages.noiseReduce,
   stages.silenceAnalysisPostNr,
-  stages.dereverb,              // no-op when preset.dereverb.enabled is false
   stages.enhancementEQ,
   stages.deEss,
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.compress,
   stages.harmonicExciter,
-  stages.normalize,
+  //stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
   stages.acxCertification,
@@ -50,9 +50,9 @@ export const PIPELINES = {
     stages.peakNormalize,
     stages.silenceAnalysisRaw,
     stages.hpf,
+    stages.dereverb, 
     stages.noiseReduce,
     stages.silenceAnalysisPostNr,
-    stages.dereverb,                // runs before room tone padding so padded room tone matches dereverberated signal
     stages.roomTonePad,             // ACX-only
     stages.enhancementEQ,
     stages.deEss,

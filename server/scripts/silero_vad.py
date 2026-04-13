@@ -88,6 +88,16 @@ def main():
         )
     except Exception:
         import os as _os
+        import importlib as _il
+
+        # torch.hub.load may have partially registered 'silero_vad' in sys.modules
+        # before raising. Clear those entries so the fallback import below hits the
+        # installed package rather than the poisoned hub module.
+        for _key in [k for k in sys.modules if 'silero_vad' in k]:
+            del sys.modules[_key]
+
+        # Remove this script's directory from sys.path so `import silero_vad`
+        # resolves to the installed package, not this file (silero_vad.py).
         _script_dir = _os.path.dirname(_os.path.abspath(__file__))
         _saved_path = sys.path[:]
         sys.path = [
@@ -97,9 +107,17 @@ def main():
         try:
             from silero_vad import load_silero_vad
             model = load_silero_vad()
-        except Exception as exc:
-            print(f'[silero_vad] Failed to load Silero VAD model: {exc}', file=sys.stderr)
-            sys.exit(1)
+        except Exception:
+            # Last resort: load the JIT model directly from the package's bundled
+            # data file — no hub, no torchaudio, no package __init__ side-effects.
+            try:
+                _spec = _il.util.find_spec('silero_vad')
+                _pkg_dir = _os.path.dirname(_spec.origin)
+                _jit_path = _os.path.join(_pkg_dir, 'data', 'silero_vad.jit')
+                model = torch.jit.load(_jit_path, map_location=device)
+            except Exception as exc:
+                print(f'[silero_vad] Failed to load Silero VAD model: {exc}', file=sys.stderr)
+                sys.exit(1)
         finally:
             sys.path = _saved_path
 

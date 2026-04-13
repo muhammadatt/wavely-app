@@ -31,15 +31,19 @@ def main():
     # Load model — weights cached at ~/.cache/DeepFilterNet/DeepFilterNet3
     model, df_state, _ = init_df()
     model_sr = df_state.sr()  # 48000
+    print(f'[deepfilter] model=DeepFilterNet3 sr={model_sr} atten_lim_db={args.atten_lim_db}', flush=True)
 
     # Load input and resample to 48 kHz for the model
     audio, _ = load_audio(args.input, sr=model_sr)
+    duration_s = audio.shape[-1] / model_sr
+    print(f'[deepfilter] input duration={duration_s:.2f}s', flush=True)
 
     # Apply DeepFilterNet3; atten_lim_db=None means no attenuation limit (Tier 5)
     enhanced = enhance(model, df_state, audio, atten_lim_db=args.atten_lim_db)
 
     # Write 32-bit float WAV at 48 kHz — caller resamples to 44.1 kHz
     save_audio(args.output, enhanced, sr=model_sr, dtype=torch.float32)
+    print(f'[deepfilter] done', flush=True)
 
 
 if __name__ == '__main__':
