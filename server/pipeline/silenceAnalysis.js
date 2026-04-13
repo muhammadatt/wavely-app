@@ -81,16 +81,21 @@ const SILERO_SCRIPT = path.join(
 export async function analyzeAudioFrames(wavPath) {
   if (VAD_BACKEND === 'silero') {
     try {
-      return await analyzeAudioFramesSilero(wavPath)
+      const result = await analyzeAudioFramesSilero(wavPath)
+      console.log(`[silence] VAD backend: silero (${result.frames.length} frames)`)
+      return result
     } catch (err) {
       console.warn(
         `[silence] Silero VAD failed — falling back to energy backend. ` +
         `Set VAD_BACKEND=energy to suppress this warning.\n` +
         `Reason: ${err.message}`
       )
-      return analyzeAudioFramesEnergy(wavPath)
+      const result = await analyzeAudioFramesEnergy(wavPath)
+      console.log(`[silence] VAD backend: energy (fallback)`)
+      return result
     }
   }
+  console.log(`[silence] VAD backend: energy (VAD_BACKEND=${VAD_BACKEND})`)
   return analyzeAudioFramesEnergy(wavPath)
 }
 
