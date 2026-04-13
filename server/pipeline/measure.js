@@ -257,17 +257,29 @@ export async function measureVoicedRms(wavPath, silenceAnalysis) {
  * Measure integrated LUFS of voiced frames only, excluding silence.
  *
  * Implements spec §5b silence exclusion for LUFS-based output profiles
- * (podcast, broadcast). Concatenates only the voiced-frame samples (where
- * silenceAnalysis.frames[f].isSilence === false) and feeds them to libebur128
- * for integrated LUFS measurement.
+ * (podcast, broadcast). Zeroes out silence-frame samples in the per-channel
+ * PCM buffer and feeds the result to libebur128 — the zeros are absolute-
+ * gated (< -70 LUFS) by R128 so they do not contribute to the integrated
+ * measurement, giving a silence-excluded result without allocating a second
+ * channel buffer.
  *
- * Why this exists: FFmpeg's `loudnorm` relies on EBU R128's built-in gating
- * (-70 LUFS absolute + -10 LU relative), which does not track a file-specific
- * noise floor. On recordings with elevated room tone, the relative gate fails
- * to exclude the silence, dragging the measured integrated loudness below the
- * true voiced level and inflating applied gain — resulting in output that is
- * louder than the configured target. Gating by `noise_floor + 6 dB` (via the
- * silence analysis produced by Silero VAD v5) is the spec-aligned fix.
+ * Why this exists: FFmpeg's `loudnorm` relies only on EBU R128's built-in
+ * gating (-70 LUFS absolute + -10 LU relative), which does not track a
+ * file-specific noise floor. On recordings with elevated room tone, the
+ * relative gate fails to exclude the silence, dragging the measured
+ * integrated loudness below the true voiced level and inflating applied
+ * gain — resulting in output that is louder than the configured target.
+ * Excluding frames flagged silent by the pipeline's silence analysis is
+ * the spec-aligned fix.
+ *
+ * Voicing source: the `isSilence` labels come from whichever backend
+ * `analyzeAudioFrames` used. With `VAD_BACKEND=silero` (default) they are
+ * Silero VAD v5 neural predictions, with an energy fallback of
+ * `noise_floor + 6 dB` for any frame the Silero output does not cover.
+ * With `VAD_BACKEND=energy` the labels come entirely from the
+ * `noise_floor + 6 dB` threshold. Either way, using `frame.isSilence`
+ * keeps this measurement consistent with `measureVoicedRms` and the rest
+ * of the pipeline.
  *
  * @param {string} wavPath
  * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
@@ -278,8 +290,11 @@ export async function measureVoicedLufs(wavPath, silenceAnalysis) {
     throw new Error('measureVoicedLufs requires a silenceAnalysis with frames[]')
   }
 
-  const voicedFrames = silenceAnalysis.frames.filter(f => !f.isSilence)
-  if (voicedFrames.length === 0) {
+  const { frames } = silenceAnalysis
+  let voicedFrameCount = 0
+  for (const f of frames) if (!f.isSilence) voicedFrameCount++
+
+  if (voicedFrameCount === 0) {
     throw new Error(
       'Audio level is too low to measure — no voiced frames detected. ' +
       'The file appears to be silent or contains only sub-threshold noise. ' +
@@ -287,7 +302,7 @@ export async function measureVoicedLufs(wavPath, silenceAnalysis) {
     )
   }
 
-  const { channels, sampleRate, numChannels } = await readWavAllChannels(wavPath)
+  const { channels, sampleRate, numChannels, numSamples } = await readWavAllChannels(wavPath)
 
   if (numChannels === 0) {
     throw new Error('measureVoicedLufs expected a WAV file with at least one audio channel')
@@ -298,30 +313,33 @@ export async function measureVoicedLufs(wavPath, silenceAnalysis) {
     )
   }
 
-  // Concatenate voiced-frame samples per channel. ebur128's 400 ms sliding
-  // window will see minor discontinuities at frame boundaries, but because
-  // speech is coherent across 100 ms boundaries and the relative gate filters
-  // transient power drops, the measurement remains well-behaved.
-  const totalSamples = voicedFrames.reduce((n, f) => n + f.lengthSamples, 0)
-  const voicedChannels = Array.from({ length: numChannels }, () => new Float32Array(totalSamples))
+  // OOM guard — matches measureLoudness (2 hours at 44.1 kHz ≈ 317M samples).
+  const maxSamplesPerChannel = 2 * 60 * 60 * 44100
+  if (numSamples > maxSamplesPerChannel) {
+    const durationMin = Math.round(numSamples / sampleRate / 60)
+    throw new Error(
+      `File too long for in-memory voiced-LUFS measurement (${durationMin} min, max 120 min)`
+    )
+  }
 
-  let write = 0
-  for (const frame of voicedFrames) {
+  // Mute silent frames in place. `channels[]` was freshly allocated by
+  // readWavAllChannels, so mutating it is safe. Zeros fall below R128's
+  // -70 LUFS absolute gate and are therefore excluded from the integrated
+  // measurement. Zeroing also avoids the boundary discontinuities that a
+  // naive voiced-frame concatenation would introduce.
+  for (const frame of frames) {
+    if (!frame.isSilence) continue
     const { offsetSamples, lengthSamples } = frame
     for (let ch = 0; ch < numChannels; ch++) {
-      const src = channels[ch]
-      const end = Math.min(offsetSamples + lengthSamples, src.length)
-      const len = end - offsetSamples
-      if (len > 0) {
-        voicedChannels[ch].set(src.subarray(offsetSamples, end), write)
-      }
+      const arr = channels[ch]
+      const end = Math.min(offsetSamples + lengthSamples, arr.length)
+      arr.fill(0, offsetSamples, end)
     }
-    write += lengthSamples
   }
 
   const integrated = numChannels === 2
-    ? ebur128_integrated_stereo(sampleRate, voicedChannels[0], voicedChannels[1])
-    : ebur128_integrated_mono(sampleRate, voicedChannels[0])
+    ? ebur128_integrated_stereo(sampleRate, channels[0], channels[1])
+    : ebur128_integrated_mono(sampleRate, channels[0])
 
   if (!Number.isFinite(integrated)) {
     throw new Error(
