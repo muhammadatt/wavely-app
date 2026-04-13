@@ -272,15 +272,33 @@ function formatAutoLevelerResult(r) {
 
 function formatCompressionResult(r) {
   if (!r) return null
-  return {
+  const base = {
     applied:               r.applied,
     skipped_reason:        r.skippedReason,
     crest_factor_db:       r.crestFactorDb,
     max_gain_reduction_db: r.maxGainReductionDb,
     avg_gain_reduction_db: r.avgGainReductionDb,
     ratio:                 r.params?.ratio     ?? null,
-    threshold_db:          r.params?.threshold ?? null,
+    threshold_dbfs:        r.params?.threshold ?? null,
+    attack_ms:             r.params?.attack    ?? null,
+    release_ms:            r.params?.release   ?? null,
   }
+  if (r.applied) {
+    base.threshold_method  = r.thresholdMethod ?? null
+    base.threshold_clamped = r.thresholdClamped ?? false
+    if (r.thresholdMethod === 'adaptive_p85') {
+      base.p85_dbfs         = r.p85Dbfs
+      base.p99_dbfs         = r.p99Dbfs
+      base.expected_gr_db   = r.expectedGrDb
+      base.target_gr_window = r.targetGrWindow
+      if (r.thresholdClamped) {
+        base.threshold_pre_clamp_dbfs = r.thresholdPreClampDbfs
+      }
+    } else if (r.thresholdMethod === 'static_fallback') {
+      base.fallback_reason = r.fallbackReason
+    }
+  }
+  return base
 }
 
 function bandReport(band) {
