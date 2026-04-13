@@ -59,27 +59,40 @@ def main():
     args = parser.parse_args()
 
     import numpy as np
-    import torchaudio
-    import torchaudio.transforms as T
+    from scipy.io import wavfile
+    from scipy.signal import resample_poly
+    from math import gcd
 
-    # Load — pipeline format is 32-bit float 44.1 kHz, shape (channels, samples)
-    waveform, sr = torchaudio.load(args.input)
-    n_channels   = waveform.shape[0]
+    def _fix_length(arr, size):
+        """Truncate or zero-pad 1-D array to exactly `size` samples."""
+        if len(arr) > size:
+            return arr[:size]
+        if len(arr) < size:
+            return np.pad(arr, (0, size - len(arr)))
+        return arr
+
+    def _resample(arr, orig_sr, target_sr):
+        if orig_sr == target_sr:
+            return arr
+        g = gcd(target_sr, orig_sr)
+        return resample_poly(arr, target_sr // g, orig_sr // g).astype(np.float32)
+
+    # Load — pipeline format is 32-bit float 44.1 kHz
+    # scipy.io.wavfile: mono → (samples,), stereo → (samples, channels)
+    sr, audio_np = wavfile.read(args.input)
+    audio_np = audio_np.astype(np.float32)
+    if audio_np.ndim == 1:
+        audio_np = audio_np[np.newaxis, :]  # → (1, samples)
+    else:
+        audio_np = audio_np.T  # → (channels, samples)
+    n_channels = audio_np.shape[0]
 
     # Mix to mono for WPE (single-channel voice processing)
-    if n_channels > 1:
-        audio_mono = waveform.mean(dim=0).numpy()
-    else:
-        audio_mono = waveform[0].numpy()
+    audio_mono = audio_np.mean(axis=0) if n_channels > 1 else audio_np[0]
+    original_pipeline_len = audio_mono.shape[0]
 
     # Resample to 16 kHz (WPE parameter defaults tuned for speech at 16k)
-    if sr != WPE_SR:
-        resampler_down = T.Resample(orig_freq=sr, new_freq=WPE_SR)
-        import torch
-        audio_16k = resampler_down(torch.tensor(audio_mono, dtype=torch.float32).unsqueeze(0))[0].numpy()
-    else:
-        audio_16k = audio_mono
-
+    audio_16k = _resample(audio_mono, sr, WPE_SR)
     original_len = len(audio_16k)
 
     if args.strength in ('light', 'medium'):
@@ -91,31 +104,16 @@ def main():
         sys.exit(1)
 
     # Restore original length (STFT causes minor length drift)
-    import librosa
-    result_16k = librosa.util.fix_length(result_16k, size=original_len)
+    result_16k = _fix_length(result_16k, original_len)
 
     # Resample back to pipeline SR
-    if sr != WPE_SR:
-        import torch
-        resampler_up = T.Resample(orig_freq=WPE_SR, new_freq=sr)
-        result = resampler_up(torch.tensor(result_16k, dtype=torch.float32).unsqueeze(0))[0].numpy()
-    else:
-        result = result_16k
+    result = _resample(result_16k, WPE_SR, sr)
 
     # Restore original sample count at pipeline SR
-    original_pipeline_len = waveform.shape[1]
-    result = librosa.util.fix_length(result, size=original_pipeline_len)
+    result = _fix_length(result, original_pipeline_len)
 
     # Write 32-bit float WAV at pipeline SR, mono
-    import torch
-    out_waveform = torch.tensor(result, dtype=torch.float32).unsqueeze(0)
-    torchaudio.save(
-        args.output,
-        out_waveform,
-        sr,
-        bits_per_sample=32,
-        encoding='PCM_F',
-    )
+    wavfile.write(args.output, sr, result.astype(np.float32))
     print(f'[dereverb] Done: strength={args.strength} preserve_early={args.preserve_early}', flush=True)
 
 
@@ -220,15 +218,28 @@ def _run_vace_wpe(audio: 'np.ndarray') -> 'np.ndarray':
         )
         return _run_nara_wpe(audio, 'medium', False)
 
-    _patch_stft_helper()
+    try:
+        _patch_stft_helper()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model  = _get_vace_model(device)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model  = _get_vace_model(device)
 
-    # NeuralWPE.forward() expects (batch, channels, samples)
-    waveform = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
-    with torch.no_grad():
-        result = model(waveform, delay=VACE_WPE_DELAY, taps=VACE_WPE_TAPS)  # (1, 1, T)
+        # NeuralWPE.forward() expects (batch, channels, samples)
+        waveform = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
+        with torch.no_grad():
+            result = model(waveform, delay=VACE_WPE_DELAY, taps=VACE_WPE_TAPS)  # (1, 1, T)
+    except Exception as e:
+        # Catch any failure during VACE-WPE setup or inference:
+        #   - ModuleNotFoundError  (missing vace_wpe dependency, e.g. matplotlib)
+        #   - RuntimeError         (stft/istft complex-tensor mismatch on newer PyTorch)
+        #   - Any other load/init failure
+        # Fall back to NARA-WPE medium rather than crashing the job.
+        print(
+            f'[dereverb] VACE-WPE failed ({type(e).__name__}: {e}). '
+            'Falling back to NARA-WPE medium.',
+            file=sys.stderr,
+        )
+        return _run_nara_wpe(audio, 'medium', False)
 
     out = to_arr(result.squeeze())  # → 1-D numpy array
     print(f'[dereverb] VACE-WPE heavy: device={device}', flush=True)

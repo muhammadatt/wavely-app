@@ -59,20 +59,19 @@ def main():
     args = parser.parse_args()
 
     import torch
-    import torchaudio
-    import torchaudio.transforms as T
+    import numpy as np
+    from scipy.io import wavfile
+    from scipy.signal import resample_poly
+    from math import gcd
 
     device = resolve_device(args.device)
 
-    # Load Silero VAD model from torch hub.
-    # Weights (~10 MB) are cached at: ~/.cache/torch/hub/snakers4_silero-vad_master/
+    # Load Silero VAD model via the silero-vad package (avoids torch.hub.load,
+    # which internally imports torchaudio — unavailable on Windows ARM64).
+    # Weights (~10 MB) are cached inside the package on first import.
     try:
-        model, _ = torch.hub.load(
-            repo_or_dir='snakers4/silero-vad',
-            model='silero_vad',
-            force_reload=False,
-            onnx=False,   # PyTorch model — consistent with torch==2.0.0 in requirements
-        )
+        from silero_vad import load_silero_vad
+        model = load_silero_vad()
         model = model.to(device)
         model.eval()
     except Exception as exc:
@@ -80,18 +79,26 @@ def main():
         sys.exit(1)
 
     # Load input audio — pipeline format is 32-bit float 44.1 kHz
-    waveform, sr = torchaudio.load(args.input)   # shape: (channels, samples)
+    # Uses scipy.io.wavfile (no soundfile/torchaudio needed — both lack ARM64 builds).
+    sr, audio_np = wavfile.read(args.input)  # mono: (samples,)  stereo: (samples, channels)
+    audio_np = audio_np.astype(np.float32)
+    if audio_np.ndim == 1:
+        audio_np = audio_np[np.newaxis, :]  # → (1, samples)
+    else:
+        audio_np = audio_np.T  # → (channels, samples)
 
     # Mix to mono (Silero is mono-only)
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)   # (1, samples)
+    if audio_np.shape[0] > 1:
+        audio_np = audio_np.mean(axis=0)  # (samples,)
+    else:
+        audio_np = audio_np[0]
 
-    # Resample from 44.1 kHz to 16 kHz
+    # Resample from 44.1 kHz to 16 kHz using polyphase (scipy, no torchaudio needed)
     if sr != SILERO_SR:
-        resampler = T.Resample(orig_freq=sr, new_freq=SILERO_SR)
-        waveform = resampler(waveform)
+        g = gcd(SILERO_SR, sr)
+        audio_np = resample_poly(audio_np, SILERO_SR // g, sr // g).astype(np.float32)
 
-    audio_16k = waveform[0]   # 1D tensor of float32 samples at 16 kHz
+    audio_16k = torch.from_numpy(audio_np)   # 1D tensor of float32 samples at 16 kHz
 
     # Frame alignment:
     #   100 ms * 16000 Hz = 1600 samples per pipeline frame (exact integer)
