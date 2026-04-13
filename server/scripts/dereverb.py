@@ -242,7 +242,16 @@ def _run_vace_wpe(audio: 'np.ndarray') -> 'np.ndarray':
         return _run_nara_wpe(audio, 'medium', False)
 
     out = to_arr(result.squeeze())  # → 1-D numpy array
-    print(f'[dereverb] VACE-WPE heavy: device={device}', flush=True)
+    # Quick sanity check: log RMS change to confirm the signal was modified
+    import numpy as np
+    rms_in  = float(np.sqrt(np.mean(audio**2)))
+    rms_out = float(np.sqrt(np.mean(out**2)))
+    rms_delta = 20 * np.log10(max(rms_out, 1e-9) / max(rms_in, 1e-9))
+    print(
+        f'[dereverb] VACE-WPE heavy: device={device} '
+        f'rms_delta={rms_delta:+.2f} dB',
+        flush=True,
+    )
     return out
 
 

@@ -219,7 +219,7 @@ export const PRESETS = {
       preserve_early: false,
     },
     autoLeveler: {
-      maxGainDb:     6.0,
+      maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
   },
@@ -265,7 +265,7 @@ export const PRESETS = {
       preserve_early: false,
     },
     autoLeveler: {
-      maxGainDb:     8.0,
+      maxGainDb:     6.0,
       maxRateDbPerS: 1.5,
     },
   },

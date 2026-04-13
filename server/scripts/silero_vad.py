@@ -66,12 +66,44 @@ def main():
 
     device = resolve_device(args.device)
 
-    # Load Silero VAD model via the silero-vad package (avoids torch.hub.load,
-    # which internally imports torchaudio — unavailable on Windows ARM64).
-    # Weights (~10 MB) are cached inside the package on first import.
+    # Load Silero VAD model.
+    #
+    # Strategy 1 — torch.hub.load (preferred on Linux/VPS where torchaudio is
+    #   available). Weights (~10 MB) cached at:
+    #   ~/.cache/torch/hub/snakers4_silero-vad_master/
+    #
+    # Strategy 2 — silero-vad package API (fallback for environments without
+    #   torchaudio, e.g. Windows ARM64). The package is named `silero_vad`,
+    #   which collides with this script's filename. Python inserts the script's
+    #   own directory at sys.path[0] when spawned, so a plain
+    #   `from silero_vad import ...` would find THIS FILE instead of the
+    #   installed package. We remove the script directory from sys.path for the
+    #   duration of the import to force resolution to the installed package.
     try:
-        from silero_vad import load_silero_vad
-        model = load_silero_vad()
+        model, _ = torch.hub.load(
+            repo_or_dir='snakers4/silero-vad',
+            model='silero_vad',
+            force_reload=False,
+            onnx=False,
+        )
+    except Exception:
+        import os as _os
+        _script_dir = _os.path.dirname(_os.path.abspath(__file__))
+        _saved_path = sys.path[:]
+        sys.path = [
+            p for p in sys.path
+            if _os.path.normcase(_os.path.abspath(p)) != _os.path.normcase(_script_dir)
+        ]
+        try:
+            from silero_vad import load_silero_vad
+            model = load_silero_vad()
+        except Exception as exc:
+            print(f'[silero_vad] Failed to load Silero VAD model: {exc}', file=sys.stderr)
+            sys.exit(1)
+        finally:
+            sys.path = _saved_path
+
+    try:
         model = model.to(device)
         model.eval()
     except Exception as exc:
