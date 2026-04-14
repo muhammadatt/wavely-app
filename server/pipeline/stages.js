@@ -620,18 +620,19 @@ export async function bandwidthExtension(ctx) {
 
   // NE-specific skip: skip only when BOTH conditions are met (voice HF is
   // already intact AND the noise floor is already clean).
-  const sibilanceRatio = ctx.results.separationPipeline.separation?.sibilance_ratio
-  const noiseFloor     = ctx.results.separationPipeline.validation?.postSeparationNoiseFloorDbfs
-  const neSibOk  = sibilanceRatio != null && sibilanceRatio >= 0.8
-  const neNsOk   = noiseFloor    != null && noiseFloor    <= -55
-  if (neSibOk && neNsOk) {
-    ctx.results.separationPipeline.bandwidthExtension = {
-      applied:       false,
-      skippedReason: `Sibilance ratio ${sibilanceRatio} ≥ 0.8 and noise floor ${noiseFloor} dBFS ≤ -55 dBFS`,
-    }
-    ctx.log(`[NE-6] Bandwidth extension skipped — sibilance ${sibilanceRatio}, noise floor ${noiseFloor} dBFS`)
-    return
-  }
+  // Temporarily disabled — BWE runs unconditionally for all presets.
+  // const sibilanceRatio = ctx.results.separationPipeline.separation?.sibilance_ratio
+  // const noiseFloor     = ctx.results.separationPipeline.validation?.postSeparationNoiseFloorDbfs
+  // const neSibOk  = sibilanceRatio != null && sibilanceRatio >= 0.8
+  // const neNsOk   = noiseFloor    != null && noiseFloor    <= -55
+  // if (neSibOk && neNsOk) {
+  //   ctx.results.separationPipeline.bandwidthExtension = {
+  //     applied:       false,
+  //     skippedReason: `Sibilance ratio ${sibilanceRatio} ≥ 0.8 and noise floor ${noiseFloor} dBFS ≤ -55 dBFS`,
+  //   }
+  //   ctx.log(`[NE-6] Bandwidth extension skipped — sibilance ${sibilanceRatio}, noise floor ${noiseFloor} dBFS`)
+  //   return
+  // }
 
   // AP-BWE outputs 48 kHz — decodeToFloat32 resamples to 32-bit float 44.1 kHz
   const bwe48kPath = ctx.tmp('.wav')
