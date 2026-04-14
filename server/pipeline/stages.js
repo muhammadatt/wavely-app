@@ -43,6 +43,7 @@ import { applyCompression } from './compression.js'
 import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb, runApBwe } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
+import { applyParallelCompression } from './parallelCompression.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -284,6 +285,34 @@ export async function compress(ctx) {
     crest:   compressionResult.crestFactorDb      !== null ? `${compressionResult.crestFactorDb}dB`      : 'n/a',
     maxRed:  compressionResult.maxGainReductionDb !== null ? `${compressionResult.maxGainReductionDb}dB` : 'n/a',
     avgRed:  compressionResult.avgGainReductionDb !== null ? `${compressionResult.avgGainReductionDb}dB` : 'n/a',
+  })
+}
+
+// ── Stage: Parallel Compression (Stage 4a-PC / NE-PC) ────────────────────────
+// Splits the signal into a dry passthrough and a heavily-compressed wet branch,
+// then mixes them at the preset-specific wet/dry ratio. The wet branch also
+// receives a parallel de-esser and a VAD gate (to prevent lifting noise floor
+// content during silence).
+//
+// Runs AFTER Stage 4a (serial compression) so both compression stages shape the
+// signal before the Auto Leveler sees it — per spec: "The Auto Leveler should
+// operate on the signal after parallel compression has set the density character."
+
+export async function parallelCompress(ctx) {
+  const pcPath = ctx.tmp('.wav')
+  const result = await applyParallelCompression(
+    ctx.currentPath,
+    pcPath,
+    ctx.presetId,
+    ctx.results.silencePostNr,
+    ctx.results.deEss ?? null,
+  )
+  ctx.currentPath = pcPath
+  ctx.results.parallelCompression = result
+  await logLevel(ctx, 'after parallel compression', ctx.currentPath, {
+    applied: result.applied,
+    wet:     result.applied ? `${Math.round(result.wetMixEffective * 100)}%` : 'n/a',
+    guard:   result.applied ? result.crestFactorGuardActivated               : 'n/a',
   })
 }
 

@@ -15,6 +15,11 @@ import * as stages from './stages.js'
 // config — not pipeline shape. The dereverb stage is a no-op when
 // preset.dereverb is absent or preset.dereverb.enabled is false.
 // autoLevel is a no-op when within-file drift is within the 3 dB threshold.
+//
+// Stage order (4a → 4a-PC → 4b): compress runs before parallelCompress, which
+// runs before autoLevel. The Auto Leveler must see the signal after both
+// compression stages have set its density character — running it earlier would
+// mean leveling a signal whose character is about to change.
 const STANDARD_PIPELINE = [
   stages.decode,
   stages.monoMixdown,
@@ -22,13 +27,14 @@ const STANDARD_PIPELINE = [
   stages.peakNormalize,
   stages.silenceAnalysisRaw,
   stages.hpf,
-  stages.dereverb,              
+  stages.dereverb,
   stages.noiseReduce,
   stages.silenceAnalysisPostNr,
   stages.enhancementEQ,
   stages.deEss,
+  stages.compress,              // Stage 4a — serial compression
+  stages.parallelCompress,      // Stage 4a-PC — parallel compression (NEW)
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-  stages.compress,
   stages.harmonicExciter,
   stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
   stages.normalize,
@@ -52,14 +58,15 @@ export const PIPELINES = {
     stages.peakNormalize,
     stages.silenceAnalysisRaw,
     stages.hpf,
-    stages.dereverb, 
+    stages.dereverb,
     stages.noiseReduce,
     stages.silenceAnalysisPostNr,
     stages.roomTonePad,             // ACX-only
     stages.enhancementEQ,
     stages.deEss,
+    stages.compress,              // Stage 4a — serial compression
+    stages.parallelCompress,      // Stage 4a-PC — parallel compression (NEW)
     stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    stages.compress,
     stages.harmonicExciter,
     stages.bandwidthExtension,        // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
     stages.normalize,
@@ -103,8 +110,9 @@ export const PIPELINES = {
     //stages.separationEQ,
     stages.enhancementEQ,
     stages.deEss,
+    stages.compress,              // Stage 4a — serial compression
+    stages.parallelCompress,      // Stage NE-PC — parallel compression (NEW)
     stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    stages.compress,
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
     stages.truePeakLimit,           // Stage 6: True peak limiting

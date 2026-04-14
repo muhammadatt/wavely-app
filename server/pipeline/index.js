@@ -159,8 +159,9 @@ function buildReport(ctx) {
       ...(results.separationEQ   && { separation_eq:     formatEqResult(results.separationEQ) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
-      ...(results.autoLeveler    && { auto_leveler:       formatAutoLevelerResult(results.autoLeveler) }),
-      ...(results.compression    && { compression:        formatCompressionResult(results.compression) }),
+      ...(results.autoLeveler         && { auto_leveler:         formatAutoLevelerResult(results.autoLeveler) }),
+      ...(results.compression         && { compression:           formatCompressionResult(results.compression) }),
+      ...(results.parallelCompression && { parallel_compression:  formatParallelCompressionResult(results.parallelCompression) }),
       normalization_gain_db:
         results.afterMeasurements?.rmsDbfs == null || results.beforeMeasurements?.rmsDbfs == null
           ? null
@@ -299,6 +300,34 @@ function formatCompressionResult(r) {
     }
   }
   return base
+}
+
+function formatParallelCompressionResult(r) {
+  if (!r || !r.applied) {
+    return {
+      applied: false,
+      reason:  r?.reason ?? null,
+    }
+  }
+  return {
+    applied:                          true,
+    threshold_dbfs:                   r.thresholdDbfs,
+    voiced_rms_dbfs:                  r.voicedRmsDbfs,
+    ratio:                            r.ratio,
+    attack_ms:                        r.attackMs,
+    release_ms:                       r.releaseMs,
+    makeup_gain_db:                   r.makeupGainDb,
+    wet_mix_target:                   r.wetMixTarget,
+    wet_mix_effective:                r.wetMixEffective,
+    crest_factor_guard_activated:     r.crestFactorGuardActivated,
+    pre_pc_crest_factor_db:           r.prePcCrestFactorDb,
+    parallel_desser_applied:          r.parallelDesserApplied,
+    parallel_desser_type:             r.parallelDesserType,
+    parallel_desser_center_freq_hz:   r.parallelDesserCenterFreqHz,
+    parallel_desser_max_reduction_db: r.parallelDesserMaxReductionDb,
+    vad_gate_applied:                 r.vadGateApplied,
+    vad_gate_fade_ms:                 r.vadGateFadeMs,
+  }
 }
 
 function bandReport(band) {
