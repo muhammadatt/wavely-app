@@ -127,7 +127,7 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
-    bwe: { enabled: false },
+    bwe: { enabled: true },
   },
 
   podcast_ready: {
@@ -168,7 +168,7 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
-    bwe: { enabled: false },
+    bwe: { enabled: true },
   },
 
   voice_ready: {
@@ -212,7 +212,7 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
-    bwe: { enabled: false },
+    bwe: { enabled: true },
   },
 
   general_clean: {
@@ -253,7 +253,7 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
-    bwe: { enabled: false },
+    bwe: { enabled: true },
   },
 
   noise_eraser: {
