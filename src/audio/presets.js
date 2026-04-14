@@ -54,6 +54,17 @@ export function resolveOutputProfileId(id) {
 }
 
 /**
+ * @typedef {Object} ParallelCompressionConfig
+ * @property {number} ratio                        - Wet branch compressor ratio (e.g. 8 for 8:1)
+ * @property {number} attackMs                     - Attack time in ms
+ * @property {number} releaseMs                    - Release time in ms
+ * @property {number} makeupGainDb                 - Makeup gain applied to wet branch (dB)
+ * @property {number} wetMix                       - Target wet mix fraction (0.0–1.0)
+ * @property {number|null} wetMixCeiling           - Hard ceiling on wet mix after guard (null = no ceiling)
+ * @property {number} vadFadeMs                    - VAD gate fade duration (ms) for open and close transitions
+ * @property {number} crestGuardThresholdDb        - Crest factor below which wet mix is scaled down
+ * @property {number} parallelDesserMaxReductionDb - Max gain reduction of parallel de-esser on wet branch (dB)
+ *
  * @typedef {Object} Preset
  * @property {string} id
  * @property {string} displayName
@@ -64,6 +75,7 @@ export function resolveOutputProfileId(id) {
  * @property {number} truePeakCeiling
  * @property {number|null} noiseFloorTarget
  * @property {CompressionConfig} compression
+ * @property {ParallelCompressionConfig} parallelCompression
  *
  * @typedef {Object} CompressionConfig
  * @property {'conditional'|'always'|'none'} mode
@@ -127,6 +139,17 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
+    parallelCompression: {
+      ratio:                       8,
+      attackMs:                    0.75,   // midpoint of 0.5–1 ms spec range
+      releaseMs:                   175,
+      makeupGainDb:                7,
+      wetMix:                      0.15,   // 15% default; spec ceiling 20%
+      wetMixCeiling:               0.20,   // hard ceiling for ACX per spec
+      vadFadeMs:                   5,
+      crestGuardThresholdDb:       12,
+      parallelDesserMaxReductionDb: 10,
+    },
     bwe: { enabled: true },
   },
 
@@ -167,6 +190,17 @@ export const PRESETS = {
     autoLeveler: {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
+    },
+    parallelCompression: {
+      ratio:                       10,
+      attackMs:                    0.40,   // midpoint of 0.3–0.5 ms spec range
+      releaseMs:                   120,
+      makeupGainDb:                9,
+      wetMix:                      0.30,   // midpoint of 25–35%
+      wetMixCeiling:               null,
+      vadFadeMs:                   10,
+      crestGuardThresholdDb:       12,
+      parallelDesserMaxReductionDb: 10,
     },
     bwe: { enabled: true },
   },
@@ -212,6 +246,17 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
+    parallelCompression: {
+      ratio:                       8,
+      attackMs:                    0.50,
+      releaseMs:                   150,
+      makeupGainDb:                7,
+      wetMix:                      0.225,  // midpoint of 20–25%
+      wetMixCeiling:               null,
+      vadFadeMs:                   5,
+      crestGuardThresholdDb:       12,
+      parallelDesserMaxReductionDb: 10,
+    },
     bwe: { enabled: true },
   },
 
@@ -252,6 +297,17 @@ export const PRESETS = {
     autoLeveler: {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
+    },
+    parallelCompression: {
+      ratio:                       10,
+      attackMs:                    0.30,
+      releaseMs:                   120,
+      makeupGainDb:                10,
+      wetMix:                      0.35,   // midpoint of 30–40%
+      wetMixCeiling:               null,
+      vadFadeMs:                   8,
+      crestGuardThresholdDb:       9,      // relaxed per spec
+      parallelDesserMaxReductionDb: 12,
     },
     bwe: { enabled: true },
   },
@@ -300,6 +356,17 @@ export const PRESETS = {
     autoLeveler: {
       maxGainDb:     6.0,
       maxRateDbPerS: 1.5,
+    },
+    parallelCompression: {
+      ratio:                       8,
+      attackMs:                    1.0,
+      releaseMs:                   225,    // longer release for smoothed separation transients
+      makeupGainDb:                7,
+      wetMix:                      0.225,  // midpoint of 20–25%
+      wetMixCeiling:               null,
+      vadFadeMs:                   5,
+      crestGuardThresholdDb:       12,
+      parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
     },
     bwe: { enabled: true },
   },
