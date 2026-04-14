@@ -28,18 +28,17 @@ const STANDARD_PIPELINE = [
   stages.silenceAnalysisRaw,
   stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,
-  stages.dereverb,
+  //stages.dereverb,
   stages.noiseReduce,
   stages.silenceAnalysisPostNr,
+  stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
   stages.enhancementEQ,
   stages.deEss,
   stages.compress,              // Stage 4a — serial compression
   stages.parallelCompress,      // Stage 4a-PC — parallel compression (NEW)
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-  stages.harmonicExciter,
-  stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
+  //stages.harmonicExciter,
   stages.normalize,
-  //stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
   stages.acxCertification,
@@ -60,17 +59,18 @@ export const PIPELINES = {
     stages.silenceAnalysisRaw,
     stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
-    stages.dereverb,
+    //stages.dereverb,
     stages.noiseReduce,
-    stages.silenceAnalysisPostNr,
+    stages.bandwidthExtension,        // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
     stages.roomTonePad,             // ACX-only
+    stages.silenceAnalysisPostNr,
     stages.enhancementEQ,
     stages.deEss,
     stages.compress,              // Stage 4a — serial compression
     stages.parallelCompress,      // Stage 4a-PC — parallel compression (NEW)
     stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    stages.harmonicExciter,
-    stages.bandwidthExtension,        // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
+    //stages.harmonicExciter,
+
     stages.normalize,
     stages.truePeakLimit,
     stages.measureAfter,
@@ -108,7 +108,7 @@ export const PIPELINES = {
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
-    stages.dereverb,
+    //stages.dereverb,
     stages.silenceAnalysisPostNr,    // Required by enhancementEQ (populates ctx.results.silencePostNr)
     //stages.separationEQ,
     stages.enhancementEQ,
@@ -116,7 +116,7 @@ export const PIPELINES = {
     stages.compress,              // Stage 4a — serial compression
     stages.parallelCompress,      // Stage NE-PC — parallel compression (NEW)
     stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
+    //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
     stages.truePeakLimit,           // Stage 6: True peak limiting
     stages.measureAfter,
