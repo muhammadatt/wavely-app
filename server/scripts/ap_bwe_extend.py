@@ -5,7 +5,7 @@ AP-BWE bandwidth extension script for Instant Polish pipeline (Stage NE-6).
 Usage:
   python3 ap_bwe_extend.py --input <path> --output <path> [--device <auto|cuda|cpu>]
 
-Environment variables:
+Environment variables (set in server/.env):
   AP_BWE_REPO        Path to cloned AP-BWE repository.
                      Defaults to vendor/ap_bwe relative to the repo root
                      (two levels up from this script's directory).

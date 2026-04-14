@@ -76,7 +76,7 @@ soundfile>=0.12
 #   https://drive.google.com/drive/folders/1IIYTf2zbJWzelu4IftKD6ooHloJ8mnZF
 # The checkpoint is named without an extension (e.g. "g_8kto48K") — this is
 # normal for GAN-based models; torch.load() handles it fine. Place g_8kto48K
-# and its config.json in the same directory, then set:
+# and its config.json in the same directory, then add to server/.env:
 #   AP_BWE_CHECKPOINT=<path to g_8kto48K>
 #   AP_BWE_REPO=vendor/ap_bwe  (or omit to use the default)
 einops>=0.8.0
