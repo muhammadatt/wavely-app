@@ -26,6 +26,7 @@ const STANDARD_PIPELINE = [
   stages.measureBefore,
   stages.peakNormalize,
   stages.silenceAnalysisRaw,
+  stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,
   stages.dereverb,
   stages.noiseReduce,
@@ -57,6 +58,7 @@ export const PIPELINES = {
     stages.measureBefore,
     stages.peakNormalize,
     stages.silenceAnalysisRaw,
+    stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
     stages.dereverb,
     stages.noiseReduce,
@@ -98,6 +100,7 @@ export const PIPELINES = {
     stages.measureBefore,
     stages.peakNormalize,
     stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
+    stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
     stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
@@ -137,6 +140,7 @@ export const PIPELINES = {
     stages.measureBefore,
     stages.peakNormalize,
     stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
+    stages.humDetect,               // Pre-separation: spectral hum detection + conditional notch EQ
     stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
     stages.clearerVoiceEnhance,     // CE-3: ClearerVoice SE replaces Demucs/ConvTasNet

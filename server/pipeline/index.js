@@ -153,6 +153,7 @@ function buildReport(ctx) {
       stereo_to_mono:  results.stereoToMono ?? false,
       resampled_from:  ctx.inputSampleRate !== 44100 ? ctx.inputSampleRate : null,
       hpf_60hz_notch:  results.notch60Hz   ?? false,
+      ...(results.humEQ && { hum_eq: formatHumEqResult(results.humEQ) }),
       ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
       ...(results.dereverb       && { dereverberation:   formatDereverbResult(results.dereverb) }),
       ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
@@ -197,6 +198,23 @@ function formatMeasurements(m) {
     // future pipeline forgets to populate it the report emits null.
     noise_floor_dbfs: m.noiseFloorDbfs ?? null,
     lufs_integrated:  m.lufsIntegrated,
+  }
+}
+
+function formatHumEqResult(r) {
+  if (!r) return null
+  return {
+    triggered:         r.triggered,
+    flagged_harmonics: r.flaggedHarmonics,
+    notches_applied:   r.notchesApplied,
+    detection_detail:  r.detectionDetail.map(d => ({
+      frequency_hz: d.frequency,
+      peak_db:      d.peakDb,
+      floor_db:     d.floorDb,
+      delta_db:     d.deltaDb,
+      flagged:      d.flagged,
+    })),
+    ...(r.triggered && { ffmpeg_filter: r.ffmpegFilter }),
   }
 }
 
