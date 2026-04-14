@@ -127,11 +127,23 @@ def main():
     if audio.shape[0] > 1:
         audio = audio.mean(dim=0, keepdim=True)
 
-    # Resample to narrowband input rate expected by the model
+    # Resample to narrowband input rate, then back up to the wideband output rate.
+    # This mirrors the training dataset pipeline (dataset.py lines 74-75): the model
+    # was trained on narrowband audio that has been downsampled to lr_sampling_rate
+    # and then upsampled back to hr_sampling_rate before the STFT.  The STFT/iSTFT
+    # parameters (n_fft, hop_size, win_size) are calibrated for hr_sampling_rate, so
+    # feeding audio at lr_sampling_rate directly causes the iSTFT output to have
+    # lr/hr (e.g. 8k/48k = 1/6) of the expected number of samples, which is then
+    # saved with the hr_sampling_rate WAV header — producing audio that plays back
+    # at hr/lr (6×) the correct speed.
     if sr != h.lr_sampling_rate:
         audio_lr = F.resample(audio, sr, h.lr_sampling_rate)
     else:
         audio_lr = audio
+
+    # Upsample band-limited signal to the wideband rate so the STFT frame count
+    # matches what the model was trained on.
+    audio_lr = F.resample(audio_lr, h.lr_sampling_rate, h.hr_sampling_rate)
 
     audio_lr = audio_lr.to(device)
 
