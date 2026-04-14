@@ -44,6 +44,7 @@ import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runCleare
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
+import { analyzeHum } from './humEQ.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -128,13 +129,64 @@ export async function silenceAnalysisRaw(ctx) {
   ctx.results.rawNoiseFloor  = sa.noiseFloorDbfs
 }
 
+// ── Stage: Hum detection and conditional EQ ───────────────────────────────────
+//
+// Runs before HPF (Stage 1) so the 80 Hz Butterworth filter only does its
+// intended job (rumble removal) rather than fighting hum harmonics at 120 Hz+.
+// The HPF provides approximately −10.8 dB at 60 Hz but only −0.2 dB at 120 Hz
+// and essentially 0 dB at 180 Hz+, so hum removal must precede it.
+//
+// When triggered, the stage allocates a temp file and applies narrow notch
+// filters (Q=30, −18 dB) at each flagged harmonic. When not triggered the
+// current path is left unchanged (no temp file is created).
+
+export async function humDetect(ctx) {
+  const detection = await analyzeHum(ctx.currentPath)
+
+  if (!detection.triggered) {
+    ctx.results.humEQ = {
+      triggered:        false,
+      flaggedHarmonics: [],
+      notchesApplied:   [],
+      detectionDetail:  detection.detectionDetail,
+      ffmpegFilter:     null,
+    }
+    ctx.log('[hum-detect] No hum detected — passing through unmodified')
+    return
+  }
+
+  // Apply the pre-computed notch filter string
+  const outPath = ctx.tmp('.wav')
+  await runFfmpeg([
+    '-i', ctx.currentPath,
+    '-af', detection.ffmpegFilter,
+    '-map_metadata', '0',
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outPath,
+  ])
+
+  ctx.currentPath = outPath
+  ctx.results.humEQ = {
+    triggered:        true,
+    flaggedHarmonics: detection.flaggedHarmonics,
+    notchesApplied:   detection.flaggedHarmonics,
+    detectionDetail:  detection.detectionDetail,
+    ffmpegFilter:     detection.ffmpegFilter,
+  }
+  ctx.log(`[hum-detect] Notches applied at ${detection.flaggedHarmonics.join(', ')} Hz`)
+}
+
 // ── Stage: High-pass filter ───────────────────────────────────────────────────
 
 export async function hpf(ctx) {
-  const notch60Hz = detect60HzHum(ctx.results.rawNoiseFloor)
-  const hpfPath   = ctx.tmp('.wav')
+  // If humDetect already applied a 60 Hz spectral notch (Q=30, −18 dB), skip
+  // the coarser heuristic notch in the HPF to avoid double-notching at 60 Hz.
+  const humHandled60Hz = ctx.results.humEQ?.notchesApplied?.includes(60) === true
+  const notch60Hz      = !humHandled60Hz && detect60HzHum(ctx.results.rawNoiseFloor)
+  const hpfPath        = ctx.tmp('.wav')
   await applyHighPass(ctx.currentPath, hpfPath, { notch60Hz })
-  ctx.currentPath     = hpfPath
+  ctx.currentPath       = hpfPath
   ctx.results.notch60Hz = notch60Hz
   await logLevel(ctx, 'after HPF', ctx.currentPath, { notch60Hz })
 }
@@ -499,6 +551,17 @@ export async function rnnoisePrePass(ctx) {
 
 export async function tonalPretreatment(ctx) {
   ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
+
+  // humDetect (the pre-HPF spectral analysis stage) supersedes tonal pre-treatment
+  // when it has already applied notch filters. Skip NE-2 to avoid double-notching
+  // at 60 Hz / 120 Hz. humDetect's narrower Q=30 notch is more precise than the
+  // Q=12 notches applied here.
+  if (ctx.results.humEQ?.triggered === true) {
+    ctx.log('[NE-2] Hum already handled by humDetect — tonal pre-treatment skipped')
+    ctx.results.separationPipeline.tonalPretreatment = { applied: false, notches: [] }
+    return
+  }
+
   const rawNoiseFloor = ctx.results.rawNoiseFloor
 
   // Detect 60 Hz and 120 Hz hum from the pre-processing noise floor.
