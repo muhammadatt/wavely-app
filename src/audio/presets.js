@@ -339,11 +339,6 @@ export const PRESETS = {
       maxReduction: 8,
     },
     eqProfile: 'separation_recovery',
-    deEsser: {
-      sensitivity: 'none',
-      trigger: 0,
-      maxReduction: 0,
-    },
     channelOutput: 'mono',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
