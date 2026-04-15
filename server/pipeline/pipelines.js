@@ -103,7 +103,8 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
-    stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
+    //stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
+    stages.noiseReduce,
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
