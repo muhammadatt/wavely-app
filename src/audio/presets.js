@@ -325,7 +325,7 @@ export const PRESETS = {
       mode: 'conditional',
       ratio: 2,
       threshold: -24,
-      thresholdMethod: 'static',    // Noise Eraser: adaptive algorithm excluded (spec)
+      thresholdMethod: 'adaptive', //'static',    
       attack: 10,
       release: 100,
     },
