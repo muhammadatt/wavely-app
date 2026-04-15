@@ -50,8 +50,8 @@ const PARALLEL_DESSER_THRESHOLD_OFFSET_DB = 2
  * @param {string} inputPath
  * @param {string} outputPath  - 32-bit float WAV output
  * @param {string} presetId
- * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
- *   From ctx.results.framesPostNr. Provides voicedRmsDbfs, frames.
+ * @param {import('./stages.js').AudioMetrics} frameAnalysis
+ *   From ctx.results.metrics. Provides voicedRmsDbfs, frames.
  * @param {import('./deEsser.js').DeEssResult|null} deEssResult
  *   From ctx.results.deEss. Used to reuse Stage 4 sibilant center freq.
  *   Pass null when unavailable — falls back to fixed-band de-esser.
