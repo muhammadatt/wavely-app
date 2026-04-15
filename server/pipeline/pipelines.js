@@ -106,13 +106,14 @@ export const PIPELINES = {
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
+    stages.deEss,
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
+    stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     //stages.dereverb,
     stages.silenceAnalysisPostNr,    // Required by enhancementEQ (populates ctx.results.silencePostNr)
     //stages.separationEQ,
     stages.enhancementEQ,
-    stages.deEss,
     stages.compress,              // Stage 4a — serial compression
     stages.parallelCompress,      // Stage NE-PC — parallel compression (NEW)
     stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
