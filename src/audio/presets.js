@@ -96,7 +96,7 @@ export function resolveOutputProfileId(id) {
  * @property {{ maxGainDb: number, maxRateDbPerS: number }} autoLeveler
  * @property {'demucs'|'convtasnet'} [separationModel]   - Noise Eraser only
  * @property {'mossformer2_48k'|'frcrn_16k'} [clearervoiceModel]   - ClearerVoice Eraser only
- * @property {{ enabled: boolean }} bwe - Bandwidth extension (AP-BWE); enabled for NE presets, disabled for standard presets
+ * @property {{ enabled: boolean, postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bwe - Bandwidth extension (AP-BWE); enabled for NE presets, disabled for standard presets. postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
  */
 
 /** @type {Record<string, Preset>} */
@@ -150,7 +150,7 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
     },
-    bwe: { enabled: true },
+    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
   podcast_ready: {
@@ -202,7 +202,7 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
     },
-    bwe: { enabled: true },
+    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
   voice_ready: {
@@ -257,7 +257,7 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
     },
-    bwe: { enabled: true },
+    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
   general_clean: {
@@ -309,7 +309,7 @@ export const PRESETS = {
       crestGuardThresholdDb:       9,      // relaxed per spec
       parallelDesserMaxReductionDb: 12,
     },
-    bwe: { enabled: true },
+    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
   noise_eraser: {
@@ -368,7 +368,7 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
     },
-    bwe: { enabled: true },
+    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
   },
 
   clearervoice_eraser: {
@@ -405,7 +405,7 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
-    bwe: { enabled: true },
+    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
   },
 
 }

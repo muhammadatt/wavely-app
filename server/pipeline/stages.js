@@ -733,7 +733,28 @@ export async function bandwidthExtension(ctx) {
   await decodeToFloat32(bwe48kPath, bwe44kPath)
   ctx.currentPath = bwe44kPath
 
-  ctx.results.separationPipeline.bandwidthExtension = { applied: true }
+  // Post-BWE sibilance EQ: narrow bell cut to tame HF harshness introduced by BWE.
+  // AP-BWE synthesises broadband HF content that can skew sibilant; applying a cut
+  // here — before enhancement EQ and the de-esser — corrects this at the source.
+  // Parameters (freq, q, gainDb) are configurable per preset via bwe.postEq.
+  const postEq = ctx.preset.bwe.postEq
+  if (postEq?.enabled) {
+    const freq   = postEq.freq   ?? 9000
+    const q      = postEq.q      ?? 2
+    const gainDb = postEq.gainDb
+    const filter = `equalizer=f=${freq}:t=q:w=${q}:g=${gainDb}`
+    const eqPath = ctx.tmp('.wav')
+    await applyParametricEQ(ctx.currentPath, eqPath, [filter])
+    ctx.currentPath = eqPath
+    ctx.log(`[NE-6] Post-BWE EQ: ${filter}`)
+  }
+
+  ctx.results.separationPipeline.bandwidthExtension = {
+    applied: true,
+    ...(postEq?.enabled && {
+      postEq: { applied: true, freq: postEq.freq ?? 9000, q: postEq.q ?? 2, gainDb: postEq.gainDb },
+    }),
+  }
   await logLevel(ctx, 'after NE-6 bandwidth extension', ctx.currentPath, {})
 }
 
