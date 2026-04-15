@@ -30,8 +30,8 @@
  * audio while preserving the Silero isSilence labels. Set SILERO_DEVICE=cuda to
  * reduce the single-pass latency further.
  *
- * Logging: frame analysis results are captured in ctx.results (framesRaw,
- * framesPostNr) and written to the pipeline file log (PIPELINE_LOG=true).
+ * Logging: frame analysis results are merged into ctx.results.metrics and
+ * written to the pipeline file log (PIPELINE_LOG=true).
  * No console output is emitted — subprocess stdout is intentionally suppressed
  * to keep the stage-by-stage console log readable.
  */
