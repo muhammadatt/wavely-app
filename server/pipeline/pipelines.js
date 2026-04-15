@@ -92,9 +92,9 @@ export const PIPELINES = {
   //     AFTER separation to preserve separation quality on stereo inputs.
   //   - hpf / noiseReduce / enhancementEQ / deEss / compress are all replaced
   //     by the NE-1 through NE-7 separation stages.
-  //   - analyzeFramesRaw is kept: provides rawNoiseFloor for NE-2 tonal
-  //     analysis (hum detection) and NE-4 validation logging, and back-fills
-  //     beforeMeasurements.noiseFloorDbfs (the single analyzeFrames pass).
+  //   - analyzeFramesRaw is kept: populates ctx.results.metrics with the
+  //     initial noise floor needed by NE-2 tonal analysis and NE-4 validation,
+  //     and back-fills beforeMeasurements.noiseFloorDbfs.
   noise_eraser: [
     stages.decode,
     // No monoMixdown here — see separateVocals
@@ -113,7 +113,7 @@ export const PIPELINES = {
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     //stages.dereverb,
-    stages.remeasureFramesPostNr,    // Required by enhancementEQ (populates ctx.results.framesPostNr)
+    stages.remeasureFramesPostNr,    // Updates ctx.results.metrics with post-BWE energy values for enhancementEQ
     //stages.separationEQ,
     stages.enhancementEQ,
     stages.compress,              // Stage 4a — serial compression
