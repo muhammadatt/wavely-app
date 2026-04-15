@@ -109,10 +109,10 @@ export const PIPELINES = {
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.remeasureFramesPostNr,
-    stages.deEss,
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
+    stages.deEss,
     //stages.dereverb,
     stages.remeasureFramesPostNr,    // Updates ctx.results.metrics with post-BWE energy values for enhancementEQ
     //stages.separationEQ,
