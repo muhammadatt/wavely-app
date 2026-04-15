@@ -10,7 +10,7 @@
  *   4. Breath detection ratio     — short low-energy voiced-adjacent events
  *   5. Voice presence check       — aborts if no voiced frames detected
  *
- * Returns a SeparationAssessment object written to ctx.results.separationPipeline.
+ * Returns a SeparationAssessment object written to ctx.results.separationValidation.
  */
 
 import Meyda from 'meyda'

@@ -173,9 +173,9 @@ function buildReport(ctx) {
     after:            formatMeasurements(results.afterMeasurements),
     // acx_certification is absent (not null) when output_profile !== 'acx'
     ...(results.acxCertification && { acx_certification: results.acxCertification }),
-    // separation_pipeline is absent (not null) for all presets except noise_eraser
-    ...(results.separationPipeline && {
-      separation_pipeline: formatSeparationPipelineResult(results.separationPipeline),
+    // separation_pipeline is absent (not null) when no separation stage ran
+    ...(results.separation && {
+      separation_pipeline: buildSeparationPipelineReport(results),
     }),
     // enhancement_pipeline is absent (not null) for all presets except voicefixer
     ...(results.enhancementPipeline && {
@@ -353,39 +353,46 @@ function bandReport(band) {
   return { applied: true, freq_hz: band.freq_hz, gain_db: band.gain_db }
 }
 
-function formatSeparationPipelineResult(sp) {
-  if (!sp) return null
+/**
+ * Assembles the separation_pipeline report from individual top-level result keys.
+ * Each NE processing stage writes its own key (rnnoisePrePass, tonalPretreatment,
+ * separation, separationValidation, residualCleanup, bandwidthExtension).
+ * This function merges them into the report shape without coupling the stages
+ * to each other or to the report structure.
+ */
+function buildSeparationPipelineReport(results) {
+  const sv = results.separationValidation
   return {
-    rnnoise_pre_pass: sp.rnnoisePrePass
+    rnnoise_pre_pass: results.rnnoisePrePass
       ? {
-          applied:                 sp.rnnoisePrePass.applied,
-          pre_noise_floor_dbfs:    sp.rnnoisePrePass.pre_noise_floor_dbfs,
-          post_noise_floor_dbfs:   sp.rnnoisePrePass.post_noise_floor_dbfs,
+          applied:               results.rnnoisePrePass.applied,
+          pre_noise_floor_dbfs:  results.rnnoisePrePass.pre_noise_floor_dbfs,
+          post_noise_floor_dbfs: sv?.postSeparationNoiseFloorDbfs ?? null,
         }
       : undefined,
-    tonal_pretreatment: sp.tonalPretreatment
+    tonal_pretreatment: results.tonalPretreatment
       ? {
-          applied: sp.tonalPretreatment.applied,
-          notches: sp.tonalPretreatment.notches ?? [],
+          applied: results.tonalPretreatment.applied,
+          notches: results.tonalPretreatment.notches ?? [],
         }
       : undefined,
-    separation: sp.separation
+    separation: results.separation
       ? {
-          model:                            sp.separation.model,
-          post_separation_noise_floor_dbfs: sp.separation.post_separation_noise_floor_dbfs ?? null,
-          sibilance_ratio:                  sp.separation.sibilance_ratio ?? null,
-          breath_ratio:                     sp.separation.breath_ratio ?? null,
-          artifact_flags:                   sp.separation.artifact_flags ?? [],
+          model:                            results.separation.model,
+          post_separation_noise_floor_dbfs: sv?.postSeparationNoiseFloorDbfs ?? null,
+          sibilance_ratio:                  sv?.sibilanceRatio ?? null,
+          breath_ratio:                     sv?.breathRatio ?? null,
+          artifact_flags:                   sv?.artifactFlags ?? [],
         }
       : undefined,
-    residual_cleanup: sp.residualCleanup
+    residual_cleanup: results.residualCleanup
       ? {
-          applied:                       sp.residualCleanup.applied,
-          tier:                          sp.residualCleanup.tier ?? null,
-          post_cleanup_noise_floor_dbfs: sp.residualCleanup.post_cleanup_noise_floor_dbfs ?? null,
+          applied:                       results.residualCleanup.applied,
+          tier:                          results.residualCleanup.tier ?? null,
+          post_cleanup_noise_floor_dbfs: results.residualCleanup.post_cleanup_noise_floor_dbfs ?? null,
         }
       : undefined,
-    separation_quality: sp.separation_quality ?? null,
+    separation_quality: sv?.separationQuality ?? null,
   }
 }
 

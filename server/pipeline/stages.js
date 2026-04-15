@@ -544,11 +544,9 @@ export async function rnnoisePrePass(ctx) {
   const outPath = ctx.tmp('.wav')
   await runRnnoise(ctx.currentPath, outPath)
   ctx.currentPath = outPath
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-  ctx.results.separationPipeline.rnnoisePrePass = {
+  ctx.results.rnnoisePrePass = {
     applied:                true,
     pre_noise_floor_dbfs:   round2(preNoiseFloor ?? null),
-    post_noise_floor_dbfs:  null,  // measured in NE-4 validation
   }
   await logLevel(ctx, 'after NE-1 RNNoise', ctx.currentPath, {})
 }
@@ -558,15 +556,13 @@ export async function rnnoisePrePass(ctx) {
 // Demucs handles broadband noise well but is weaker on strong tonal noise.
 
 export async function tonalPretreatment(ctx) {
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-
   // humDetect (the pre-HPF spectral analysis stage) supersedes tonal pre-treatment
   // when it has already applied notch filters. Skip NE-2 to avoid double-notching
   // at 60 Hz / 120 Hz. humDetect's narrower Q=30 notch is more precise than the
   // Q=12 notches applied here.
   if (ctx.results.humEQ?.triggered === true) {
     ctx.log('[NE-2] Hum already handled by humDetect — tonal pre-treatment skipped')
-    ctx.results.separationPipeline.tonalPretreatment = { applied: false, notches: [] }
+    ctx.results.tonalPretreatment = { applied: false, notches: [] }
     return
   }
 
@@ -592,7 +588,7 @@ export async function tonalPretreatment(ctx) {
     ctx.log('[NE-2] No tonal components detected — NE-2 skipped')
   }
 
-  ctx.results.separationPipeline.tonalPretreatment = {
+  ctx.results.tonalPretreatment = {
     applied: notches.length > 0,
     notches,
   }
@@ -627,11 +623,7 @@ export async function separateVocals(ctx) {
     ctx.results.stereoToMono = ctx.results.stereoToMono ?? false
   }
 
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-  ctx.results.separationPipeline.separation = {
-    model,
-    applied: true,
-  }
+  ctx.results.separation = { model, applied: true }
   await logLevel(ctx, 'after NE-3 separation', ctx.currentPath, { model })
 }
 
@@ -641,22 +633,9 @@ export async function separateVocals(ctx) {
 export async function separationValidation(ctx) {
   const assessment = await validateSeparation(ctx.nePreSeparationPath, ctx.currentPath)
 
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-  ctx.results.separationPipeline.validation = assessment
+  ctx.results.separationValidation = assessment
 
-  // Update rnnoisePrePass post noise floor from NE-4 measurement
-  if (ctx.results.separationPipeline.rnnoisePrePass) {
-    ctx.results.separationPipeline.rnnoisePrePass.post_noise_floor_dbfs =
-      assessment.postSeparationNoiseFloorDbfs
-  }
-  ctx.results.separationPipeline.separation.post_separation_noise_floor_dbfs =
-    assessment.postSeparationNoiseFloorDbfs
-  ctx.results.separationPipeline.separation.sibilance_ratio  = assessment.sibilanceRatio
-  ctx.results.separationPipeline.separation.breath_ratio     = assessment.breathRatio
-  ctx.results.separationPipeline.separation.artifact_flags   = assessment.artifactFlags
-  ctx.results.separationPipeline.separation_quality          = assessment.separationQuality
-
-  // Store postSeparationFrameAnalysis for normalize stage (silence exclusion threshold)
+  // Store postSeparationFrameAnalysis for downstream stages (silence exclusion threshold)
   ctx.results.postSeparationFrameAnalysis = assessment.postSeparationFrameAnalysis
 
   assessment.artifactFlags.forEach(flag => ctx.log(`[NE-4] ${flag}`))
@@ -671,11 +650,10 @@ export async function separationValidation(ctx) {
 // Light DF3 pass to mop up separation bleed. Skipped if noise floor < -55 dBFS.
 
 export async function residualCleanup(ctx) {
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-  const noiseFloor = ctx.results.separationPipeline.validation?.postSeparationNoiseFloorDbfs
+  const noiseFloor = ctx.results.separationValidation?.postSeparationNoiseFloorDbfs
 
   if (noiseFloor === null || noiseFloor === undefined || noiseFloor <= -55) {
-    ctx.results.separationPipeline.residualCleanup = { applied: false, skippedReason: 'Noise floor already below -55 dBFS' }
+    ctx.results.residualCleanup = { applied: false, skippedReason: 'Noise floor already below -55 dBFS' }
     ctx.log(`[NE-5] Residual cleanup skipped — noise floor ${noiseFloor}dBFS ≤ -55 dBFS`)
     return
   }
@@ -687,7 +665,7 @@ export async function residualCleanup(ctx) {
   const { applyNoiseReduction: applyNR } = await import('./noiseReduce.js')
   const nrResult = await applyNR(ctx.currentPath, nrPath, { attenLimDb: 6 })
   ctx.currentPath = nrPath
-  ctx.results.separationPipeline.residualCleanup = {
+  ctx.results.residualCleanup = {
     applied:                     true,
     tier:                        2,
     pre_noise_floor_dbfs:        round2(noiseFloor),
@@ -716,17 +694,15 @@ export async function bandwidthExtension(ctx) {
     return
   }
 
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-
   // NE-specific skip: skip only when BOTH conditions are met (voice HF is
   // already intact AND the noise floor is already clean).
   // Temporarily disabled — BWE runs unconditionally for all presets.
-  // const sibilanceRatio = ctx.results.separationPipeline.separation?.sibilance_ratio
-  // const noiseFloor     = ctx.results.separationPipeline.validation?.postSeparationNoiseFloorDbfs
+  // const sibilanceRatio = ctx.results.separationValidation?.sibilanceRatio
+  // const noiseFloor     = ctx.results.separationValidation?.postSeparationNoiseFloorDbfs
   // const neSibOk  = sibilanceRatio != null && sibilanceRatio >= 0.8
   // const neNsOk   = noiseFloor    != null && noiseFloor    <= -55
   // if (neSibOk && neNsOk) {
-  //   ctx.results.separationPipeline.bandwidthExtension = {
+  //   ctx.results.bandwidthExtension = {
   //     applied:       false,
   //     skippedReason: `Sibilance ratio ${sibilanceRatio} ≥ 0.8 and noise floor ${noiseFloor} dBFS ≤ -55 dBFS`,
   //   }
@@ -757,7 +733,7 @@ export async function bandwidthExtension(ctx) {
     ctx.log(`[NE-6] Post-BWE EQ: ${filter}`)
   }
 
-  ctx.results.separationPipeline.bandwidthExtension = {
+  ctx.results.bandwidthExtension = {
     applied: true,
     ...(postEq?.enabled && {
       postEq: { applied: true, freq: postEq.freq ?? 9000, q: postEq.q ?? 2, gainDb: postEq.gainDb },
@@ -775,9 +751,9 @@ export async function separationEQ(ctx) {
   // This ensures voiced frame detection reflects the separated signal character,
   // not the pre-processing signal (which may have had a very different noise floor).
   const frameAnalysis = ctx.results.postSeparationFrameAnalysis
-    ?? ctx.results.separationPipeline?.validation?.postSeparationFrameAnalysis
+    ?? ctx.results.separationValidation?.postSeparationFrameAnalysis
 
-  const noiseFloor = ctx.results.separationPipeline?.validation?.postSeparationNoiseFloorDbfs ?? -60
+  const noiseFloor = ctx.results.separationValidation?.postSeparationNoiseFloorDbfs ?? -60
 
   const eqResult = await analyzeSpectrum(ctx.currentPath, 'noise_eraser', frameAnalysis, noiseFloor)
   const eqPath   = ctx.tmp('.wav')
@@ -811,8 +787,7 @@ export async function clearerVoiceEnhance(ctx) {
   // ClearerVoice outputs mono regardless of input channel count.
   ctx.results.stereoToMono = ctx.inputChannels > 1
 
-  ctx.results.separationPipeline = ctx.results.separationPipeline ?? {}
-  ctx.results.separationPipeline.separation = {
+  ctx.results.separation = {
     model:   `clearervoice_${model}`,
     applied: true,
   }
