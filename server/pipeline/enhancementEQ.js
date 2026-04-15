@@ -119,7 +119,7 @@ const BANDS = {
  *
  * @param {string} wavPath
  * @param {string} presetId
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @param {number} noiseFloorDbfs  - For Stage 3c ACX noise floor constraint check
  * @returns {EQResult}
  *
@@ -129,7 +129,7 @@ const BANDS = {
  * @property {string}   profile        - Preset profile name used
  * @property {boolean}  applied        - True if any EQ was applied
  */
-export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseFloorDbfs) {
+export async function analyzeSpectrum(wavPath, presetId, frameAnalysis, noiseFloorDbfs) {
   const ref     = EQ_REFERENCES[presetId] ?? EQ_REFERENCES.general_clean
   const trigger = TRIGGERS[presetId]      ?? TRIGGERS.general_clean
   const maxGain = presetId === 'noise_eraser' ? NE_MAX_GAIN_DB : MAX_GAIN_DB
@@ -137,7 +137,7 @@ export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseF
   const { samples } = await readWavSamples(wavPath)
 
   // Collect voiced frames for analysis
-  const voicedFrameBuffers = collectVoicedFrames(samples, silenceAnalysis, FFT_SIZE)
+  const voicedFrameBuffers = collectVoicedFrames(samples, frameAnalysis, FFT_SIZE)
 
   if (voicedFrameBuffers.length === 0) {
     return noEQResult(presetId)
@@ -261,8 +261,8 @@ export async function analyzeSpectrum(wavPath, presetId, silenceAnalysis, noiseF
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function collectVoicedFrames(samples, silenceAnalysis, fftSize) {
-  if (!silenceAnalysis || !silenceAnalysis.frames || silenceAnalysis.frames.length === 0) {
+function collectVoicedFrames(samples, frameAnalysis, fftSize) {
+  if (!frameAnalysis || !frameAnalysis.frames || frameAnalysis.frames.length === 0) {
     // Fallback: use all samples in chunks
     const chunks = []
     for (let i = 0; i + fftSize <= samples.length; i += fftSize) {
@@ -271,7 +271,7 @@ function collectVoicedFrames(samples, silenceAnalysis, fftSize) {
     return chunks.slice(0, 200)  // cap at 200 frames ~20s of analysis
   }
 
-  const voiced = silenceAnalysis.frames.filter(f => !f.isSilence)
+  const voiced = frameAnalysis.frames.filter(f => !f.isSilence)
   const buffers = []
 
   for (const frame of voiced) {

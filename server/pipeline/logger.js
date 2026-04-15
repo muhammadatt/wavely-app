@@ -15,7 +15,7 @@
  *                                 and stage result data
  *                               • final processing report JSON
  *
- * Stages that do not produce a new audio file (measureBefore, silenceAnalysis,
+ * Stages that do not produce a new audio file (measureBefore, analyzeFramesRaw,
  * acxCertification, etc.) are still logged with their timing and any new
  * ctx.results keys they added.
  *

@@ -50,7 +50,7 @@ const SIBILANT_BANDS = {
  * @param {string} inputPath   - 32-bit float WAV
  * @param {string} outputPath  - Output WAV path
  * @param {string} presetId
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {DeEsserResult}
  *
  * @typedef {Object} DeEsserResult
@@ -63,18 +63,18 @@ const SIBILANT_BANDS = {
  * @property {number|null} meanEnergyDb    - Mean sibilant energy (relative)
  * @property {string|null} triggerReason   - Why de-esser was/wasn't triggered
  */
-export async function analyzeAndDeEss(inputPath, outputPath, presetId, silenceAnalysis) {
+export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnalysis) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
   const deEsserConfig = preset.deEsser
   const { channels, sampleRate, numChannels } = await readWavAllChannels(inputPath)
 
-  // Use channel 0 for analysis (same as silenceAnalysis and EQ)
+  // Use channel 0 for analysis (same as frameAnalysis and EQ)
   const samples = channels[0]
 
   // --- Step 1: Estimate F0 from voiced frames ---
-  const voicedFrames = collectVoicedFrames(samples, silenceAnalysis)
+  const voicedFrames = collectVoicedFrames(samples, frameAnalysis)
   if (voicedFrames.length < 5) {
     await copyThrough(inputPath, outputPath)
     return noResult('Insufficient voiced frames for analysis')
@@ -85,7 +85,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, silenceAn
   const sibilantBand = SIBILANT_BANDS[voiceType]
 
   // --- Step 2: Identify fricative events and measure sibilant energy ---
-  const sibilanceMetrics = analyzeSibilance(samples, silenceAnalysis, sibilantBand, sampleRate)
+  const sibilanceMetrics = analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate)
 
   if (sibilanceMetrics.fricativeCount < 3) {
     await copyThrough(inputPath, outputPath)
@@ -238,7 +238,7 @@ function classifyVoice(f0) {
  * Analyze sibilant energy across all frames. Identifies fricative events
  * and computes the P95 energy and target frequency.
  */
-function analyzeSibilance(samples, silenceAnalysis, sibilantBand, sampleRate) {
+function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
   const frameSize = FFT_SIZE
 
   const sibilantEnergies = []
@@ -249,8 +249,8 @@ function analyzeSibilance(samples, silenceAnalysis, sibilantBand, sampleRate) {
   const sibilantBinHi = Math.ceil(sibilantBand[1] / binFreqRes)
   const lowBinHi = Math.ceil(1000 / binFreqRes)
 
-  // Iterate voiced frames from silenceAnalysis (consistent with enhancementEQ)
-  for (const frameInfo of silenceAnalysis.frames) {
+  // Iterate voiced frames from frameAnalysis (consistent with enhancementEQ)
+  for (const frameInfo of frameAnalysis.frames) {
     if (frameInfo.isSilence) continue
     const start = frameInfo.offsetSamples
     if (start + frameSize > samples.length) continue
@@ -466,10 +466,10 @@ function applyBiquad(coeffs, x, state) {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function collectVoicedFrames(samples, silenceAnalysis) {
+function collectVoicedFrames(samples, frameAnalysis) {
   const frames = []
 
-  for (const frameInfo of silenceAnalysis.frames) {
+  for (const frameInfo of frameAnalysis.frames) {
     if (frameInfo.isSilence) continue
     const start = frameInfo.offsetSamples
     const frameSamples = frameInfo.lengthSamples

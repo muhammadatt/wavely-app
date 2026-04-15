@@ -21,14 +21,17 @@
  *   - 'energy': Pure JS energy-threshold classifier (noise_floor + 6 dB).
  *     No subprocess. Use as fallback or for A/B comparison.
  *
- * Performance note (Silero backend): ~50–100x real-time on CPU. Silero runs
- * only once per job (at silenceAnalysisRaw). Subsequent pipeline stages call
- * remeasureAudioFrames instead, which re-derives energy metrics from the current
- * audio while preserving the Silero isSilence labels — saving 2–3 Silero spawns
- * per job. Set SILERO_DEVICE=cuda to reduce the single-pass latency further.
+ * Performance note (Silero backend): ~50–100x real-time on CPU. analyzeFrames
+ * (and therefore the Silero subprocess) runs exactly once per job, in the
+ * analyzeFramesRaw stage. measureBefore no longer calls analyzeFrames —
+ * analyzeFramesRaw back-fills beforeMeasurements.noiseFloorDbfs after correcting
+ * for the peakNormalize gain. All subsequent pipeline stages call
+ * remeasureFrames instead, which re-derives energy metrics from the current
+ * audio while preserving the Silero isSilence labels. Set SILERO_DEVICE=cuda to
+ * reduce the single-pass latency further.
  *
- * Logging: silence analysis results are captured in ctx.results (silenceRaw,
- * silencePostNr) and written to the pipeline file log (PIPELINE_LOG=true).
+ * Logging: frame analysis results are captured in ctx.results (framesRaw,
+ * framesPostNr) and written to the pipeline file log (PIPELINE_LOG=true).
  * No console output is emitted — subprocess stdout is intentionally suppressed
  * to keep the stage-by-stage console log readable.
  */
@@ -56,13 +59,13 @@ const SILERO_SCRIPT = path.join(
 )
 
 /**
- * Analyze audio frames and return silence/voiced classification.
+ * Analyze audio frames: classify voiced/silence, measure noise floor and loudness.
  * Dispatches to the Silero or energy backend based on VAD_BACKEND.
  *
  * @param {string} wavPath - Path to 32-bit float WAV (internal format)
- * @returns {SilenceAnalysis}
+ * @returns {FrameAnalysis}
  *
- * @typedef {Object} SilenceAnalysis
+ * @typedef {Object} FrameAnalysis
  * @property {number} noiseFloorDbfs            - Estimated noise floor (dB)
  * @property {number} silenceThresholdDbfs      - noise_floor + 6 dB
  * @property {FrameInfo[]} frames               - Per-frame data
@@ -78,7 +81,7 @@ const SILERO_SCRIPT = path.join(
  * @property {number} rmsDbfs           - Frame RMS in dBFS
  * @property {boolean} isSilence        - True if below silence threshold
  */
-export async function analyzeAudioFrames(wavPath) {
+export async function analyzeFrames(wavPath) {
   if (VAD_BACKEND === 'silero') {
     try {
       const result = await analyzeAudioFramesSilero(wavPath)
@@ -302,19 +305,19 @@ async function analyzeAudioFramesEnergy(wavPath) {
 
 /**
  * Re-derive energy metrics from a new audio file while preserving the isSilence
- * labels from a prior SilenceAnalysis. Avoids re-running the Silero subprocess.
+ * labels from a prior FrameAnalysis. Avoids re-running the Silero subprocess.
  *
- * Use this for all pipeline stages after silenceAnalysisRaw. The VAD frame
+ * Use this for all pipeline stages after analyzeFramesRaw. The VAD frame
  * labels are stable throughout the pipeline — speech content does not move
  * between HPF, NR, and EQ. Energy levels do change, so noiseFloorDbfs,
  * rmsDbfs, voicedRmsDbfs, and quietestSilenceSegment are all re-derived from
  * the current audio.
  *
- * @param {string} wavPath             - Path to 32-bit float WAV (current stage output)
- * @param {SilenceAnalysis} reference  - Analysis from a prior stage (provides isSilence labels)
- * @returns {Promise<SilenceAnalysis>}
+ * @param {string} wavPath           - Path to 32-bit float WAV (current stage output)
+ * @param {FrameAnalysis} reference  - Analysis from a prior stage (provides isSilence labels)
+ * @returns {Promise<FrameAnalysis>}
  */
-export async function remeasureAudioFrames(wavPath, reference) {
+export async function remeasureFrames(wavPath, reference) {
   const { samples, sampleRate } = await readWavSamples(wavPath)
 
   const frameLengthSamples = Math.round(FRAME_DURATION_S * sampleRate)

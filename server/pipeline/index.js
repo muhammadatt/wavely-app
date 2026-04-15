@@ -194,7 +194,7 @@ function formatMeasurements(m) {
     rms_dbfs:         m.rmsDbfs,
     true_peak_dbfs:   m.truePeakDbfs,
     // noiseFloorDbfs is merged into beforeMeasurements / afterMeasurements
-    // by the measureBefore / measureAfter stages from silenceAnalysis. If a
+    // by the measureBefore / measureAfter stages from frameAnalysis. If a
     // future pipeline forgets to populate it the report emits null.
     noise_floor_dbfs: m.noiseFloorDbfs ?? null,
     lufs_integrated:  m.lufsIntegrated,

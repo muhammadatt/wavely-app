@@ -25,12 +25,12 @@ const STANDARD_PIPELINE = [
   stages.monoMixdown,
   stages.measureBefore,
   stages.peakNormalize,
-  stages.silenceAnalysisRaw,
+  stages.analyzeFramesRaw,
   stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,
   //stages.dereverb,
   stages.noiseReduce,
-  stages.silenceAnalysisPostNr,
+  stages.remeasureFramesPostNr,
   stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
   stages.enhancementEQ,
   stages.deEss,
@@ -56,14 +56,14 @@ export const PIPELINES = {
     stages.monoMixdown,
     stages.measureBefore,
     stages.peakNormalize,
-    stages.silenceAnalysisRaw,
+    stages.analyzeFramesRaw,
     stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
     //stages.dereverb,
     stages.noiseReduce,
     stages.bandwidthExtension,        // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
     stages.roomTonePad,             // ACX-only
-    stages.silenceAnalysisPostNr,
+    stages.remeasureFramesPostNr,
     stages.enhancementEQ,
     stages.deEss,
     stages.compress,              // Stage 4a — serial compression
@@ -92,27 +92,28 @@ export const PIPELINES = {
   //     AFTER separation to preserve separation quality on stereo inputs.
   //   - hpf / noiseReduce / enhancementEQ / deEss / compress are all replaced
   //     by the NE-1 through NE-7 separation stages.
-  //   - silenceAnalysisRaw is kept: provides rawNoiseFloor for NE-2 tonal
-  //     analysis (hum detection) and NE-4 validation logging.
+  //   - analyzeFramesRaw is kept: provides rawNoiseFloor for NE-2 tonal
+  //     analysis (hum detection) and NE-4 validation logging, and back-fills
+  //     beforeMeasurements.noiseFloorDbfs (the single analyzeFrames pass).
   noise_eraser: [
     stages.decode,
     // No monoMixdown here — see separateVocals
     stages.measureBefore,
     stages.peakNormalize,
-    stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
+    stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
     stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
-    stages.silenceAnalysisPostNr,
+    stages.remeasureFramesPostNr,
     stages.deEss,
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     //stages.dereverb,
-    stages.silenceAnalysisPostNr,    // Required by enhancementEQ (populates ctx.results.silencePostNr)
+    stages.remeasureFramesPostNr,    // Required by enhancementEQ (populates ctx.results.framesPostNr)
     //stages.separationEQ,
     stages.enhancementEQ,
     stages.compress,              // Stage 4a — serial compression
@@ -141,7 +142,7 @@ export const PIPELINES = {
     // No monoMixdown here — clearerVoiceEnhance mixes to mono inside the Python script
     stages.measureBefore,
     stages.peakNormalize,
-    stages.silenceAnalysisRaw,      // Pre-processing noise floor for NE-2/NE-4
+    stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-separation: spectral hum detection + conditional notch EQ
     stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)

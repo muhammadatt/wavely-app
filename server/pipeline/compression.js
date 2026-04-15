@@ -43,7 +43,7 @@ const ADAPTIVE_NOISE_MARGIN_DB = 6        // drop windows within noiseFloor + 6 
  * @param {string} inputPath   - 32-bit float WAV
  * @param {string} outputPath  - Output WAV path
  * @param {string} presetId
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {CompressionResult}
  *
  * @typedef {Object} CompressionResult
@@ -63,7 +63,7 @@ const ADAPTIVE_NOISE_MARGIN_DB = 6        // drop windows within noiseFloor + 6 
  * @property {boolean} [thresholdClamped]       - Adaptive: whether the derived value hit the clamp range
  * @property {number|null} [thresholdPreClampDbfs]
  */
-export async function applyCompression(inputPath, outputPath, presetId, silenceAnalysis) {
+export async function applyCompression(inputPath, outputPath, presetId, frameAnalysis) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
@@ -91,7 +91,7 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
   // --- ACX conditional: measure crest factor ---
   let crestFactorDb = null
   if (mode === 'conditional') {
-    crestFactorDb = measureCrestFactor(analysisSamples, silenceAnalysis)
+    crestFactorDb = measureCrestFactor(analysisSamples, frameAnalysis)
     if (crestFactorDb <= 20) {
       await copyThrough(inputPath, outputPath)
       return {
@@ -107,7 +107,7 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
 
   // --- Derive threshold (adaptive per spec addendum, or static) ---
   const adaptive = presetComp.thresholdMethod === 'adaptive'
-    ? deriveAdaptiveThreshold(analysisSamples, silenceAnalysis, presetComp)
+    ? deriveAdaptiveThreshold(analysisSamples, frameAnalysis, presetComp)
     : {
         thresholdDb:           staticThreshold,
         method:                'static',
@@ -157,12 +157,12 @@ export async function applyCompression(inputPath, outputPath, presetId, silenceA
  * Compute crest factor on voiced frames: peak_dBFS - voiced_RMS_dBFS.
  * Uses the same voiced-frame set as the normalization stage.
  */
-function measureCrestFactor(samples, silenceAnalysis) {
+function measureCrestFactor(samples, frameAnalysis) {
   let sumSq = 0
   let count = 0
   let peak = 0
 
-  for (const frame of silenceAnalysis.frames) {
+  for (const frame of frameAnalysis.frames) {
     if (frame.isSilence) continue
     const start = frame.offsetSamples
     const end = Math.min(start + frame.lengthSamples, samples.length)
@@ -200,7 +200,7 @@ function measureCrestFactor(samples, silenceAnalysis) {
  *   6. Clamp to preset [thresholdMin, thresholdMax].
  *
  * @param {Float32Array} samples
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @param {import('../../src/audio/presets.js').CompressionConfig} presetComp
  * @returns {{
  *   thresholdDb: number,
@@ -213,7 +213,7 @@ function measureCrestFactor(samples, silenceAnalysis) {
  *   thresholdPreClampDbfs: number|null,
  * }}
  */
-function deriveAdaptiveThreshold(samples, silenceAnalysis, presetComp) {
+function deriveAdaptiveThreshold(samples, frameAnalysis, presetComp) {
   const staticFallback = (reason) => ({
     thresholdDb:           presetComp.threshold,
     method:                'static_fallback',
@@ -225,8 +225,8 @@ function deriveAdaptiveThreshold(samples, silenceAnalysis, presetComp) {
     thresholdPreClampDbfs: null,
   })
 
-  const noiseCeiling = silenceAnalysis.noiseFloorDbfs + ADAPTIVE_NOISE_MARGIN_DB
-  const voicedRms = collectVoicedWindowRmsDbfs(samples, silenceAnalysis, noiseCeiling)
+  const noiseCeiling = frameAnalysis.noiseFloorDbfs + ADAPTIVE_NOISE_MARGIN_DB
+  const voicedRms = collectVoicedWindowRmsDbfs(samples, frameAnalysis, noiseCeiling)
 
   if (voicedRms.length < ADAPTIVE_MIN_WINDOWS) {
     console.log('[compression] adaptive_threshold: insufficient voiced content — using static fallback')
@@ -273,9 +273,9 @@ function deriveAdaptiveThreshold(samples, silenceAnalysis, presetComp) {
  * Collect RMS (dBFS) for every 1024-sample window fully contained within a
  * voiced frame, dropping windows at/below the noise-contamination ceiling.
  */
-function collectVoicedWindowRmsDbfs(samples, silenceAnalysis, noiseCeilingDbfs) {
+function collectVoicedWindowRmsDbfs(samples, frameAnalysis, noiseCeilingDbfs) {
   const out = []
-  for (const frame of silenceAnalysis.frames) {
+  for (const frame of frameAnalysis.frames) {
     if (frame.isSilence) continue
     const frameEnd = Math.min(frame.offsetSamples + frame.lengthSamples, samples.length)
     for (let start = frame.offsetSamples; start + ADAPTIVE_WINDOW_SAMPLES <= frameEnd; start += ADAPTIVE_HOP_SAMPLES) {

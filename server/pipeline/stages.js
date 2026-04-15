@@ -34,7 +34,7 @@ import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { applyNoiseReduction } from './noiseReduce.js'
 import { measureAudio, measureVoicedRms, measureVoicedLufs, checkAcxCertification } from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
-import { analyzeAudioFrames, remeasureAudioFrames } from './silenceAnalysis.js'
+import { analyzeFrames, remeasureFrames } from './frameAnalysis.js'
 import { analyzeSpectrum } from './enhancementEQ.js'
 import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
@@ -80,18 +80,17 @@ export async function monoMixdown(ctx) {
 
 // ── Stage: Measure before ─────────────────────────────────────────────────────
 //
-// Runs before peakNormalize and silenceAnalysisRaw, so there is no pre-existing
-// silence analysis to borrow a noise floor from. We run one inline — it's the
-// same work silenceAnalysisRaw would do later, but on the pre-peak-normalize
-// audio, which is what beforeMeasurements is meant to capture. The cost is a
-// single extra analyzeAudioFrames pass per job.
+// Runs before peakNormalize. Only measureAudio runs here to capture the
+// original input level (rms, truePeak, lufs). noiseFloorDbfs is populated
+// later by analyzeFramesRaw, which corrects for the peakNormalize gain before
+// back-filling it — eliminating the redundant analyzeFrames pass that
+// used to run here.
 
 export async function measureBefore(ctx) {
   const audio = await measureAudio(ctx.currentPath)
-  const silenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
   ctx.results.beforeMeasurements = {
     ...audio,
-    noiseFloorDbfs: silenceAnalysis.noiseFloorDbfs,
+    noiseFloorDbfs: null,  // populated by analyzeFramesRaw
   }
 }
 
@@ -120,13 +119,22 @@ export async function peakNormalize(ctx) {
   ctx.log(`[peak-norm] ${peak.toFixed(1)} dBFS → ${TARGET_PEAK_DBFS} dBFS (${gainDb > 0 ? '+' : ''}${gainDb.toFixed(1)} dB)`)
 }
 
-// ── Stage: Silence analysis (pre-HPF) ────────────────────────────────────────
-// Provides the raw noise floor for 60 Hz hum detection.
+// ── Stage: Frame analysis (pre-HPF) ──────────────────────────────────────────
+// Classifies voiced/silence frames, measures noise floor and loudness metrics.
+// Also back-fills beforeMeasurements.noiseFloorDbfs: analyzeFramesRaw runs on
+// post-peakNormalize audio, so the peakNorm gain is subtracted to recover the
+// original pre-processing noise floor. Linear gain shifts the noise floor by
+// the same amount as voiced frames, so subtraction is exact.
 
-export async function silenceAnalysisRaw(ctx) {
-  const sa = await analyzeAudioFrames(ctx.currentPath)
-  ctx.results.silenceRaw     = sa
-  ctx.results.rawNoiseFloor  = sa.noiseFloorDbfs
+export async function analyzeFramesRaw(ctx) {
+  const fa = await analyzeFrames(ctx.currentPath)
+  ctx.results.framesRaw     = fa
+  ctx.results.rawNoiseFloor = fa.noiseFloorDbfs
+
+  if (ctx.results.beforeMeasurements) {
+    const gainDb = ctx.results.peakNormalize?.gainDb ?? 0
+    ctx.results.beforeMeasurements.noiseFloorDbfs = round2(fa.noiseFloorDbfs - gainDb)
+  }
 }
 
 // ── Stage: Hum detection and conditional EQ ───────────────────────────────────
@@ -206,15 +214,15 @@ export async function noiseReduce(ctx) {
   })
 }
 
-// ── Stage: Silence analysis (post-NR) ────────────────────────────────────────
+// ── Stage: Re-measure frames (post-NR) ───────────────────────────────────────
 // Re-derives energy metrics (noise floor, per-frame RMS, voiced RMS) from the
-// NR-processed audio. Preserves isSilence labels from silenceRaw — Silero VAD
+// NR-processed audio. Preserves isSilence labels from framesRaw — Silero VAD
 // classification is stable across pipeline stages since speech content doesn't
 // move, only levels change.
 
-export async function silenceAnalysisPostNr(ctx) {
-  const sa = await remeasureAudioFrames(ctx.currentPath, ctx.results.silenceRaw)
-  ctx.results.silencePostNr = sa
+export async function remeasureFramesPostNr(ctx) {
+  const fa = await remeasureFrames(ctx.currentPath, ctx.results.framesRaw)
+  ctx.results.framesPostNr = fa
 }
 
 // ── Stage: Dereverberation ────────────────────────────────────────────────────
@@ -241,7 +249,7 @@ export async function dereverb(ctx) {
 
 export async function roomTonePad(ctx) {
   const paddedPath = ctx.tmp('.wav')
-  const result     = await applyRoomTonePadding(ctx.currentPath, paddedPath, ctx.results.silencePostNr)
+  const result     = await applyRoomTonePadding(ctx.currentPath, paddedPath, ctx.results.framesPostNr)
   ctx.currentPath        = paddedPath
   ctx.results.roomTonePad = result
 }
@@ -252,8 +260,8 @@ export async function enhancementEQ(ctx) {
   const eqResult = await analyzeSpectrum(
     ctx.currentPath,
     ctx.presetId,
-    ctx.results.silencePostNr,
-    ctx.results.silencePostNr.noiseFloorDbfs,
+    ctx.results.framesPostNr,
+    ctx.results.framesPostNr.noiseFloorDbfs,
   )
   const eqPath = ctx.tmp('.wav')
   await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
@@ -273,7 +281,7 @@ export async function deEss(ctx) {
     ctx.currentPath,
     deEssPath,
     ctx.presetId,
-    ctx.results.silencePostNr,
+    ctx.results.framesPostNr,
   )
   ctx.currentPath   = deEssPath
   ctx.results.deEss = deEssResult
@@ -301,7 +309,7 @@ export async function autoLevel(ctx) {
     ctx.currentPath,
     levelerPath,
     ctx.presetId,
-    ctx.results.silencePostNr,
+    ctx.results.framesPostNr,
   )
   ctx.currentPath      = levelerPath
   ctx.results.autoLeveler = result
@@ -328,7 +336,7 @@ export async function compress(ctx) {
     ctx.currentPath,
     compPath,
     ctx.presetId,
-    ctx.results.silencePostNr,
+    ctx.results.framesPostNr,
   )
   ctx.currentPath        = compPath
   ctx.results.compression = compressionResult
@@ -356,7 +364,7 @@ export async function parallelCompress(ctx) {
     ctx.currentPath,
     pcPath,
     ctx.presetId,
-    ctx.results.silencePostNr,
+    ctx.results.framesPostNr,
     ctx.results.deEss ?? null,
   )
   ctx.currentPath = pcPath
@@ -398,14 +406,14 @@ export async function normalize(ctx) {
   //
   // True peak ceiling is enforced by the subsequent truePeakLimit stage — do
   // not apply it here.
-  const prNormSilenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
+  const prNormFrameAnalysis = await analyzeFrames(ctx.currentPath)
 
   if (outputProfile.measurementMethod === 'RMS') {
     // Use the explicit normalizationTarget from the output profile.
     // Do NOT use the loudnessRange midpoint — for ACX the midpoint is -20.5 dBFS
     // but the spec target is -20 dBFS RMS.
     const targetRms = outputProfile.normalizationTarget
-    const voicedRms = await measureVoicedRms(ctx.currentPath, prNormSilenceAnalysis)
+    const voicedRms = await measureVoicedRms(ctx.currentPath, prNormFrameAnalysis)
     const gainDb    = targetRms - voicedRms
 
     if (gainDb > 18) {
@@ -421,7 +429,7 @@ export async function normalize(ctx) {
     }
   } else {
     const targetLufs = outputProfile.normalizationTarget
-    const voicedLufs = await measureVoicedLufs(ctx.currentPath, prNormSilenceAnalysis)
+    const voicedLufs = await measureVoicedLufs(ctx.currentPath, prNormFrameAnalysis)
     const gainDb     = targetLufs - voicedLufs
 
     if (gainDb > 18) {
@@ -458,16 +466,16 @@ export async function truePeakLimit(ctx) {
 // analysis on the fully processed audio. The ACX noise-floor check runs off
 // this value, so it must reflect the actual silence floor (frame-based) and
 // not a histogram-derived proxy. The silence analysis is stashed on ctx for
-// qualityAdvisory to reuse — avoids a second analyzeAudioFrames pass.
+// qualityAdvisory to reuse — avoids a second analyzeFrames pass.
 
 export async function measureAfter(ctx) {
   const audio = await measureAudio(ctx.currentPath)
-  const silenceAnalysis = await analyzeAudioFrames(ctx.currentPath)
+  const fa    = await analyzeFrames(ctx.currentPath)
   ctx.results.afterMeasurements = {
     ...audio,
-    noiseFloorDbfs: silenceAnalysis.noiseFloorDbfs,
+    noiseFloorDbfs: fa.noiseFloorDbfs,
   }
-  ctx.results.afterSilenceAnalysis = silenceAnalysis
+  ctx.results.afterFrameAnalysis = fa
 }
 
 // ── Stage: ACX Certification ──────────────────────────────────────────────────
@@ -492,8 +500,8 @@ export async function acxCertification(ctx) {
 export async function qualityAdvisory(ctx) {
   // Reuse the silence analysis produced by measureAfter when available —
   // it was computed on the same audio and is otherwise identical work.
-  const postProcessSilenceAnalysis =
-    ctx.results.afterSilenceAnalysis ?? await analyzeAudioFrames(ctx.currentPath)
+  const afterFrameAnalysis =
+    ctx.results.afterFrameAnalysis ?? await analyzeFrames(ctx.currentPath)
   const pipelineContext = {
     preNrNoiseFloor: ctx.results.rawNoiseFloor ?? null,
     noiseFloorDbfs:  ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
@@ -503,8 +511,8 @@ export async function qualityAdvisory(ctx) {
     ctx.currentPath,
     ctx.presetId,
     ctx.outputProfileId,
-    postProcessSilenceAnalysis,
-    postProcessSilenceAnalysis.voicedRmsDbfs,
+    afterFrameAnalysis,
+    afterFrameAnalysis.voicedRmsDbfs,
     pipelineContext,
   )
 }
@@ -532,7 +540,7 @@ export async function extractPeaks(ctx) {
 // Applied unconditionally to all noise_eraser files.
 
 export async function rnnoisePrePass(ctx) {
-  const preNoiseFloor = ctx.results.rawNoiseFloor ?? ctx.results.beforeMeasurements?.noiseFloorDbfs
+  const preNoiseFloor = ctx.results.rawNoiseFloor
   const outPath = ctx.tmp('.wav')
   await runRnnoise(ctx.currentPath, outPath)
   ctx.currentPath = outPath
@@ -565,7 +573,7 @@ export async function tonalPretreatment(ctx) {
   const rawNoiseFloor = ctx.results.rawNoiseFloor
 
   // Detect 60 Hz and 120 Hz hum from the pre-processing noise floor.
-  // Full spectral tonal scan (Sprint NE-2) uses the silenceRaw power spectrum.
+  // Full spectral tonal scan (Sprint NE-2) uses the framesRaw power spectrum.
   // Current implementation applies hum notches when noise floor is elevated.
   const apply60Hz  = rawNoiseFloor !== null && rawNoiseFloor > -45
   const apply120Hz = apply60Hz
@@ -648,8 +656,8 @@ export async function separationValidation(ctx) {
   ctx.results.separationPipeline.separation.artifact_flags   = assessment.artifactFlags
   ctx.results.separationPipeline.separation_quality          = assessment.separationQuality
 
-  // Store postSeparationSilenceAnalysis for normalize stage (silence exclusion threshold)
-  ctx.results.postSeparationSilenceAnalysis = assessment.postSeparationSilenceAnalysis
+  // Store postSeparationFrameAnalysis for normalize stage (silence exclusion threshold)
+  ctx.results.postSeparationFrameAnalysis = assessment.postSeparationFrameAnalysis
 
   assessment.artifactFlags.forEach(flag => ctx.log(`[NE-4] ${flag}`))
   ctx.log(
@@ -766,12 +774,12 @@ export async function separationEQ(ctx) {
   // Use the post-separation silence analysis from NE-4 as the silence context.
   // This ensures voiced frame detection reflects the separated signal character,
   // not the pre-processing signal (which may have had a very different noise floor).
-  const silenceAnalysis = ctx.results.postSeparationSilenceAnalysis
-    ?? ctx.results.separationPipeline?.validation?.postSeparationSilenceAnalysis
+  const frameAnalysis = ctx.results.postSeparationFrameAnalysis
+    ?? ctx.results.separationPipeline?.validation?.postSeparationFrameAnalysis
 
   const noiseFloor = ctx.results.separationPipeline?.validation?.postSeparationNoiseFloorDbfs ?? -60
 
-  const eqResult = await analyzeSpectrum(ctx.currentPath, 'noise_eraser', silenceAnalysis, noiseFloor)
+  const eqResult = await analyzeSpectrum(ctx.currentPath, 'noise_eraser', frameAnalysis, noiseFloor)
   const eqPath   = ctx.tmp('.wav')
   await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
   ctx.currentPath      = eqPath

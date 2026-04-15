@@ -41,7 +41,7 @@ const GAUSSIAN_SIGMA_FRAMES = 15     // 1.5 s at 100 ms/frame resolution
  * @param {string} inputPath    - 32-bit float WAV (internal format)
  * @param {string} outputPath   - Output WAV path
  * @param {string} presetId
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {AutoLevelerResult}
  *
  * @typedef {Object} AutoLevelerResult
@@ -59,7 +59,7 @@ const GAUSSIAN_SIGMA_FRAMES = 15     // 1.5 s at 100 ms/frame resolution
  * @property {boolean} [noise_floor_risk]         - true if noise floor check exceeded
  * @property {boolean} [leveling_effective]       - true if post σ ≤ 2.5 dB
  */
-export async function applyAutoLeveler(inputPath, outputPath, presetId, silenceAnalysis) {
+export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAnalysis) {
   const config = PRESETS[presetId]?.autoLeveler
 
   if (!config) {
@@ -72,7 +72,7 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, silenceA
 
   // ── Step 1: Build speech analysis windows ─────────────────────────────────
 
-  const speechFrames = buildSpeechFrameList(silenceAnalysis)
+  const speechFrames = buildSpeechFrameList(frameAnalysis)
 
   if (speechFrames.length < ANALYSIS_WINDOW_FRAMES) {
     await copyThrough(inputPath, outputPath)
@@ -120,7 +120,7 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, silenceA
   const spline   = computeNaturalCubicSpline(splineXs, splineYs)
 
   const numFrames = Math.ceil(analysisSamples.length / FRAME_SAMPLES)
-  const frameGains = buildFrameGains(spline, silenceAnalysis, numFrames)
+  const frameGains = buildFrameGains(spline, frameAnalysis, numFrames)
 
   // Enforce rate-of-change constraint; smooth if violated
   const maxRateDbPerFrame = maxRateDbPerS * FRAME_DURATION_S
@@ -130,7 +130,7 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, silenceA
 
   const n = analysisSamples.length
   const { gainCurve, noiseFloorRisk } = buildSampleGainCurve(
-    frameGains, silenceAnalysis, n, sampleRate,
+    frameGains, frameAnalysis, n, sampleRate,
   )
 
   const processedChannels = channels.map(ch => applyGainCurve(ch, gainCurve))
@@ -171,8 +171,8 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, silenceA
  * Extract the ordered list of speech (voiced) frames from silenceAnalysis,
  * discarding contiguous segments shorter than MIN_SEGMENT_FRAMES.
  *
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} sa
- * @returns {import('./silenceAnalysis.js').FrameInfo[]}
+ * @param {import('./frameAnalysis.js').FrameAnalysis} sa
+ * @returns {import('./frameAnalysis.js').FrameInfo[]}
  */
 function buildSpeechFrameList(sa) {
   if (!sa || sa.frames.length === 0) return []
@@ -201,7 +201,7 @@ function buildSpeechFrameList(sa) {
  * Each window covers ANALYSIS_WINDOW_FRAMES voiced frames.
  * Returns per-window RMS (dBFS) and center sample position.
  *
- * @param {import('./silenceAnalysis.js').FrameInfo[]} speechFrames
+ * @param {import('./frameAnalysis.js').FrameInfo[]} speechFrames
  * @param {Float32Array} samples - Channel 0 audio samples
  * @returns {{ rmsDb: number, centerSample: number }[]}
  */
@@ -264,7 +264,7 @@ function computeWindowCenter(frames) {
  * and holding the last speech value for silence frames.
  *
  * @param {{ xs: number[], ys: number[], M: number[] }} spline
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} sa
+ * @param {import('./frameAnalysis.js').FrameAnalysis} sa
  * @param {number} numFrames
  * @returns {Float32Array}  - gain in dB per frame
  */
@@ -359,7 +359,7 @@ function applyGaussianSmoothing(arr, sigma) {
  * Also performs the post-application noise floor check.
  *
  * @param {Float32Array} frameGains  - dB per frame
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} sa
+ * @param {import('./frameAnalysis.js').FrameAnalysis} sa
  * @param {number} n                 - total sample count
  * @param {number} sampleRate
  * @returns {{ gainCurve: Float32Array, noiseFloorRisk: boolean }}

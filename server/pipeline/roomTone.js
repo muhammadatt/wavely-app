@@ -33,12 +33,12 @@ const PAD_SOURCE_S     = 0.5   // room tone sample duration to extract
  *
  * @param {string} inputPath  - 32-bit float WAV (internal format)
  * @param {string} outputPath - Output path (same format)
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {{ applied: boolean, headAdded_s: number, tailAdded_s: number }}
  */
-export async function applyRoomTonePadding(inputPath, outputPath, silenceAnalysis) {
+export async function applyRoomTonePadding(inputPath, outputPath, frameAnalysis) {
   const { samples, sampleRate } = await readWavSamples(inputPath)
-  const { noiseFloorDbfs, quietestSilenceSegment } = silenceAnalysis
+  const { noiseFloorDbfs, quietestSilenceSegment } = frameAnalysis
 
   // Threshold for "near-silence" in the head/tail detection (noise_floor + 3 dB)
   const nearSilenceThresholdDb = noiseFloorDbfs + 3

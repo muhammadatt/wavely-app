@@ -67,13 +67,13 @@ const CREST_FACTOR_THRESHOLD_DB = 8
  * @param {string} processedPath - Processed WAV (post-chain)
  * @param {string} presetId
  * @param {string} outputProfileId
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @param {number} voicedRmsDbfs - Average voiced RMS (for breath comparison)
  * @param {object} pipelineContext - { preNrNoiseFloor: number|null, noiseFloorDbfs: number|null }
  * @returns {QualityAdvisory}
  */
 export async function generateQualityAdvisory(
-  processedPath, presetId, outputProfileId, silenceAnalysis, voicedRmsDbfs, pipelineContext = {}
+  processedPath, presetId, outputProfileId, frameAnalysis, voicedRmsDbfs, pipelineContext = {}
 ) {
   const { samples } = await readWavSamples(processedPath)
   const frameSamples = Math.round(FRAME_S * SAMPLE_RATE)
@@ -94,7 +94,7 @@ export async function generateQualityAdvisory(
   // --- ACX Audiobook-specific flags ---
   if (presetId === 'acx_audiobook') {
     // Breath detection
-    if (detectBreaths(samples, frameSamples, silenceAnalysis, voicedRmsDbfs)) {
+    if (detectBreaths(samples, frameSamples, frameAnalysis, voicedRmsDbfs)) {
       flags.push({
         id: 'loud_breaths',
         severity: 'review',
@@ -201,10 +201,10 @@ function detectOverprocessing(samples, frameSamples) {
  * Detect short high-energy events within silence regions.
  * Returns true if average breath energy is within BREATH_MARGIN_DB of voiced speech.
  */
-function detectBreaths(samples, frameSamples, silenceAnalysis, voicedRmsDbfs) {
-  if (!silenceAnalysis || silenceAnalysis.frames.length === 0) return false
+function detectBreaths(samples, frameSamples, frameAnalysis, voicedRmsDbfs) {
+  if (!frameAnalysis || frameAnalysis.frames.length === 0) return false
 
-  const silenceFrames = silenceAnalysis.frames.filter(f => f.isSilence)
+  const silenceFrames = frameAnalysis.frames.filter(f => f.isSilence)
   if (silenceFrames.length === 0) return false
 
   // Collect RMS values of silence frames

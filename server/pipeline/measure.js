@@ -9,7 +9,7 @@
  * does not expose RMS.
  *
  * Noise floor is NOT measured here. It comes from the frame-based silence
- * analysis (silenceAnalysis.js) and is merged into the measurements object by
+ * analysis (frameAnalysis.js) and is merged into the measurements object by
  * the measureBefore / measureAfter stages. Previous revisions of this file
  * computed noise floor from FFmpeg volumedetect's histogram by picking the
  * deepest non-zero bucket, but that reports the level of the single quietest
@@ -41,7 +41,7 @@ import {
  * Returns { rmsDbfs, truePeakDbfs, lufsIntegrated }.
  *
  * Note: noiseFloorDbfs is intentionally not included. Callers that need a
- * noise floor should merge one in from silenceAnalysis (see measureBefore /
+ * noise floor should merge one in from frameAnalysis (see measureBefore /
  * measureAfter stages). See file header for rationale.
  */
 export async function measureAudio(filePath) {
@@ -202,13 +202,13 @@ function round2(n) {
  * the measured level below the true voiced speech level.
  *
  * @param {string} wavPath
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {number} Voiced RMS in dBFS
  */
-export async function measureVoicedRms(wavPath, silenceAnalysis) {
-  // If we have silence analysis, use the pre-computed voiced RMS
-  if (silenceAnalysis && silenceAnalysis.voicedRmsDbfs !== undefined) {
-    return silenceAnalysis.voicedRmsDbfs
+export async function measureVoicedRms(wavPath, frameAnalysis) {
+  // If we have a frame analysis, use the pre-computed voiced RMS
+  if (frameAnalysis && frameAnalysis.voicedRmsDbfs !== undefined) {
+    return frameAnalysis.voicedRmsDbfs
   }
 
   // Fallback: compute from scratch without silence analysis
@@ -220,7 +220,7 @@ export async function measureVoicedRms(wavPath, silenceAnalysis) {
 
   // Bootstrap noise floor from lowest 20 frames, combined in the power
   // domain so the result is the RMS of the combined quietest frames rather
-  // than the mean of per-frame RMS values. Matches silenceAnalysis.js.
+  // than the mean of per-frame RMS values. Matches frameAnalysis.js.
   const frameRms = new Float64Array(numFrames)
   for (let f = 0; f < numFrames; f++) {
     const s = f * frameSamples
@@ -282,15 +282,15 @@ export async function measureVoicedRms(wavPath, silenceAnalysis) {
  * of the pipeline.
  *
  * @param {string} wavPath
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {Promise<number>} Voiced integrated LUFS
  */
-export async function measureVoicedLufs(wavPath, silenceAnalysis) {
-  if (!silenceAnalysis || !Array.isArray(silenceAnalysis.frames)) {
-    throw new Error('measureVoicedLufs requires a silenceAnalysis with frames[]')
+export async function measureVoicedLufs(wavPath, frameAnalysis) {
+  if (!frameAnalysis || !Array.isArray(frameAnalysis.frames)) {
+    throw new Error('measureVoicedLufs requires a frameAnalysis with frames[]')
   }
 
-  const { frames } = silenceAnalysis
+  const { frames } = frameAnalysis
   let voicedFrameCount = 0
   for (const f of frames) if (!f.isSilence) voicedFrameCount++
 

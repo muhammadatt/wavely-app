@@ -15,7 +15,7 @@
 
 import Meyda from 'meyda'
 import { readWavSamples } from './wavReader.js'
-import { analyzeAudioFrames } from './silenceAnalysis.js'
+import { analyzeFrames } from './frameAnalysis.js'
 
 const FFT_SIZE   = 4096
 const SR         = 44100
@@ -33,7 +33,7 @@ const RESIDUAL_CLEANUP_THRESHOLD_DB = -55
 /**
  * @typedef {Object} SeparationAssessment
  * @property {number}   postSeparationNoiseFloorDbfs
- * @property {object}   postSeparationSilenceAnalysis
+ * @property {object}   postSeparationFrameAnalysis
  * @property {string[]} artifactFlags
  * @property {number}   sibilanceRatio
  * @property {number}   breathRatio
@@ -48,8 +48,8 @@ const RESIDUAL_CLEANUP_THRESHOLD_DB = -55
  */
 export async function validateSeparation(preSeparationPath, postSeparationPath) {
   const [preSA, postSA]   = await Promise.all([
-    analyzeAudioFrames(preSeparationPath),
-    analyzeAudioFrames(postSeparationPath),
+    analyzeFrames(preSeparationPath),
+    analyzeFrames(postSeparationPath),
   ])
 
   // Voice presence check — abort if separation produced silence
@@ -108,8 +108,8 @@ export async function validateSeparation(preSeparationPath, postSeparationPath) 
   const needsResidualCleanup = postSA.noiseFloorDbfs > RESIDUAL_CLEANUP_THRESHOLD_DB
 
   return {
-    postSeparationNoiseFloorDbfs:  round2(postSA.noiseFloorDbfs),
-    postSeparationSilenceAnalysis: postSA,
+    postSeparationNoiseFloorDbfs: round2(postSA.noiseFloorDbfs),
+    postSeparationFrameAnalysis:  postSA,
     artifactFlags,
     sibilanceRatio,
     breathRatio,
@@ -120,8 +120,8 @@ export async function validateSeparation(preSeparationPath, postSeparationPath) 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function measureVoicedSpectralFlatness(samples, silenceAnalysis, freqLo, freqHi) {
-  const voiced = collectVoicedFrames(samples, silenceAnalysis)
+function measureVoicedSpectralFlatness(samples, frameAnalysis, freqLo, freqHi) {
+  const voiced = collectVoicedFrames(samples, frameAnalysis)
   if (voiced.length === 0) return 0
 
   const loIdx = Math.floor(freqLo / BIN_HZ)
@@ -139,8 +139,8 @@ function measureVoicedSpectralFlatness(samples, silenceAnalysis, freqLo, freqHi)
   return count > 0 ? sum / count : 0
 }
 
-function measureVoicedBandEnergyDb(samples, silenceAnalysis, freqLo, freqHi) {
-  const voiced = collectVoicedFrames(samples, silenceAnalysis)
+function measureVoicedBandEnergyDb(samples, frameAnalysis, freqLo, freqHi) {
+  const voiced = collectVoicedFrames(samples, frameAnalysis)
   if (voiced.length === 0) return -80
 
   const loIdx = Math.floor(freqLo / BIN_HZ)
@@ -167,10 +167,10 @@ function spectralFlatness(powerSlice) {
   return arith > 0 ? geo / arith : 0
 }
 
-function collectVoicedFrames(samples, silenceAnalysis) {
-  if (!silenceAnalysis?.frames?.length) return []
+function collectVoicedFrames(samples, frameAnalysis) {
+  if (!frameAnalysis?.frames?.length) return []
   const frames = []
-  for (const frame of silenceAnalysis.frames) {
+  for (const frame of frameAnalysis.frames) {
     if (frame.isSilence) continue
     if (frame.offsetSamples + FFT_SIZE > samples.length) break
     frames.push(samples.slice(frame.offsetSamples, frame.offsetSamples + FFT_SIZE))
@@ -184,9 +184,9 @@ function collectVoicedFrames(samples, silenceAnalysis) {
  * to a voiced frame. Breaths are typically 50–200 ms (2–8 frames at 25ms/frame)
  * and 8–15 dB below adjacent voiced RMS.
  */
-function countBreathEvents(silenceAnalysis) {
-  const frames = silenceAnalysis?.frames ?? []
-  const threshold = silenceAnalysis?.silenceThresholdDbfs ?? -60
+function countBreathEvents(frameAnalysis) {
+  const frames = frameAnalysis?.frames ?? []
+  const threshold = frameAnalysis?.silenceThresholdDbfs ?? -60
   let count = 0
 
   for (let i = 1; i < frames.length - 1; i++) {

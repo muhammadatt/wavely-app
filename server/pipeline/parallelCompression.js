@@ -50,8 +50,8 @@ const PARALLEL_DESSER_THRESHOLD_OFFSET_DB = 2
  * @param {string} inputPath
  * @param {string} outputPath  - 32-bit float WAV output
  * @param {string} presetId
- * @param {import('./silenceAnalysis.js').SilenceAnalysis} silenceAnalysis
- *   From ctx.results.silencePostNr. Provides voicedRmsDbfs, frames.
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
+ *   From ctx.results.framesPostNr. Provides voicedRmsDbfs, frames.
  * @param {import('./deEsser.js').DeEssResult|null} deEssResult
  *   From ctx.results.deEss. Used to reuse Stage 4 sibilant center freq.
  *   Pass null when unavailable — falls back to fixed-band de-esser.
@@ -77,7 +77,7 @@ const PARALLEL_DESSER_THRESHOLD_OFFSET_DB = 2
  * @property {boolean} vadGateApplied
  * @property {number|null} vadGateFadeMs
  */
-export async function applyParallelCompression(inputPath, outputPath, presetId, silenceAnalysis, deEssResult) {
+export async function applyParallelCompression(inputPath, outputPath, presetId, frameAnalysis, deEssResult) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`[parallelCompression] Unknown preset: ${presetId}`)
 
@@ -92,11 +92,11 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
   const numSamples = analysisCh.length
 
   // ── 1. Adaptive threshold ────────────────────────────────────────────────
-  const voicedRms    = silenceAnalysis.voicedRmsDbfs ?? silenceAnalysis.averageVoicedRmsDbfs ?? -24
+  const voicedRms    = frameAnalysis.voicedRmsDbfs ?? frameAnalysis.averageVoicedRmsDbfs ?? -24
   const threshold    = Math.max(voicedRms - PARALLEL_THRESHOLD_OFFSET_DB, PARALLEL_THRESHOLD_FLOOR_DB)
 
   // ── 2. Pre-PC crest factor ───────────────────────────────────────────────
-  const prePcCrestFactor = measureCrestFactor(analysisCh, silenceAnalysis)
+  const prePcCrestFactor = measureCrestFactor(analysisCh, frameAnalysis)
 
   // ── 3. Crest factor guard ────────────────────────────────────────────────
   const guardThresh = config.crestGuardThresholdDb
@@ -122,7 +122,7 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
     deEssResult,
     analysisCh,
     sampleRate,
-    silenceAnalysis,
+    frameAnalysis,
     config.parallelDesserMaxReductionDb,
   )
 
@@ -136,7 +136,7 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
   })
 
   // ── 6. Build VAD gate curve ──────────────────────────────────────────────
-  const vadGateCurve = buildVadGateCurve(numSamples, silenceAnalysis, config.vadFadeMs, sampleRate)
+  const vadGateCurve = buildVadGateCurve(numSamples, frameAnalysis, config.vadFadeMs, sampleRate)
 
   // ── 7. Build parallel de-esser gain curve (wet branch only) ─────────────
   const { desserCurve, actualMaxReductionDb } = buildParallelDesserCurve(
@@ -201,7 +201,7 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
  * Adaptive: reuse Stage 4 sibilant center freq and meanEnergyDb from deEssResult.
  * Fixed-band: measure sibilant energy in 6–9 kHz band on the current signal.
  */
-function resolveParallelDesserConfig(presetId, deEssResult, samples, sampleRate, silenceAnalysis, maxReductionDb) {
+function resolveParallelDesserConfig(presetId, deEssResult, samples, sampleRate, frameAnalysis, maxReductionDb) {
   // noise_eraser always uses fixed-band (spec: post-separation altered profile)
   // Standard presets use adaptive when Stage 4 identified a center freq.
   const useAdaptive = (
@@ -221,7 +221,7 @@ function resolveParallelDesserConfig(presetId, deEssResult, samples, sampleRate,
 
   // Fixed-band fallback: measure mean energy in the fixed sibilant band from
   // the current signal to derive a context-appropriate threshold.
-  const fixedBandEnergy = measureBandEnergy(samples, sampleRate, FIXED_BAND_LOW_HZ, FIXED_BAND_HIGH_HZ, silenceAnalysis)
+  const fixedBandEnergy = measureBandEnergy(samples, sampleRate, FIXED_BAND_LOW_HZ, FIXED_BAND_HIGH_HZ, frameAnalysis)
   const centerFreq = (FIXED_BAND_LOW_HZ + FIXED_BAND_HIGH_HZ) / 2
 
   return {
@@ -237,12 +237,12 @@ function resolveParallelDesserConfig(presetId, deEssResult, samples, sampleRate,
  * Voiced-frame crest factor: peak_dBFS − voiced_RMS_dBFS.
  * Same algorithm as compression.js (inlined — not exported from that module).
  */
-function measureCrestFactor(samples, silenceAnalysis) {
+function measureCrestFactor(samples, frameAnalysis) {
   let sumSq = 0
   let count = 0
   let peak  = 0
 
-  for (const frame of silenceAnalysis.frames) {
+  for (const frame of frameAnalysis.frames) {
     if (frame.isSilence) continue
     const start = frame.offsetSamples
     const end   = Math.min(start + frame.lengthSamples, samples.length)
@@ -320,12 +320,12 @@ function computeGainReduction(levelDb, thresholdDb, ratio, kneeDb) {
  * Gate is 1.0 during voiced frames and 0.0 during silence. Transitions use
  * a linear fade over fadeSamples to prevent audible pumping.
  */
-function buildVadGateCurve(numSamples, silenceAnalysis, vadFadeMs, sampleRate) {
+function buildVadGateCurve(numSamples, frameAnalysis, vadFadeMs, sampleRate) {
   const curve       = new Float32Array(numSamples)
   const fadeSamples = Math.max(1, Math.round(sampleRate * vadFadeMs / 1000))
 
   // First pass: hard gate from frame classifications
-  for (const frame of silenceAnalysis.frames) {
+  for (const frame of frameAnalysis.frames) {
     const start = frame.offsetSamples
     const end   = Math.min(start + frame.lengthSamples, numSamples)
     const value = frame.isSilence ? 0.0 : 1.0
@@ -486,13 +486,13 @@ function applyBiquad(samples, b0, b1, b2, a1, a2) {
  * Measure mean band energy (dB) in a frequency range over voiced frames.
  * Used to set the fixed-band de-esser threshold.
  */
-function measureBandEnergy(samples, sampleRate, lowHz, highHz, silenceAnalysis) {
+function measureBandEnergy(samples, sampleRate, lowHz, highHz, frameAnalysis) {
   const bandSig  = applyBandpass(samples, sampleRate, lowHz, highHz)
 
   let sumSq = 0
   let count = 0
 
-  for (const frame of silenceAnalysis.frames) {
+  for (const frame of frameAnalysis.frames) {
     if (frame.isSilence) continue
     const start = frame.offsetSamples
     const end   = Math.min(start + frame.lengthSamples, bandSig.length)
