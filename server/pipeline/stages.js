@@ -559,10 +559,11 @@ export async function acxCertification(ctx) {
 // ── Stage: Quality advisory ───────────────────────────────────────────────────
 
 export async function qualityAdvisory(ctx) {
-  // ctx.results.metrics was updated by measureAfter with the final frame analysis.
-  // Fallback to a fresh analyzeFrames only if measureAfter didn't run (shouldn't
-  // happen in any current pipeline, but keeps the stage self-contained).
-  const frameAnalysis = (ctx.results.metrics?.frames != null)
+  // Reuse cached frame analysis only when the post-processing measurement stage
+  // ran and produced the final measurements for the current output. Otherwise,
+  // analyze the current file directly to avoid reusing stale pre-final frames.
+  const hasFinalMeasurements = ctx.results.afterMeasurements != null
+  const frameAnalysis = (hasFinalMeasurements && ctx.results.metrics?.frames != null)
     ? ctx.results.metrics
     : await analyzeFrames(ctx.currentPath)
   const pipelineContext = {
