@@ -516,8 +516,8 @@ export async function truePeakLimit(ctx) {
 // Populates afterMeasurements including the noise floor from a fresh silence
 // analysis on the fully processed audio. The ACX noise-floor check runs off
 // this value, so it must reflect the actual silence floor (frame-based) and
-// not a histogram-derived proxy. The silence analysis is stashed on ctx for
-// qualityAdvisory to reuse — avoids a second analyzeFrames pass.
+// not a histogram-derived proxy. The final frame analysis is merged into the
+// canonical ctx.results.metrics object for downstream reuse (qualityAdvisory).
 
 export async function measureAfter(ctx) {
   const audio = await measureAudio(ctx.currentPath)
@@ -632,9 +632,8 @@ export async function tonalPretreatment(ctx) {
 
   const rawNoiseFloor = ctx.results.metrics.noiseFloorDbfs
 
-  // Detect 60 Hz and 120 Hz hum from the pre-processing noise floor.
-  // Full spectral tonal scan (Sprint NE-2) uses the metrics power spectrum.
-  // Current implementation applies hum notches when noise floor is elevated.
+  // Detect 60 Hz and 120 Hz hum from the pre-processing noise-floor heuristic.
+  // Current implementation applies these hum notches only when noise floor is elevated.
   const apply60Hz  = rawNoiseFloor !== null && rawNoiseFloor > -45
   const apply120Hz = apply60Hz
   const notches    = []
