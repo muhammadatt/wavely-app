@@ -106,6 +106,7 @@ export const PIPELINES = {
     stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
+    stages.silenceAnalysisPostNr,
     stages.deEss,
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
