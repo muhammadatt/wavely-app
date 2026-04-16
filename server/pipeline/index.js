@@ -162,6 +162,7 @@ function buildReport(ctx) {
       ...(results.autoLeveler         && { auto_leveler:         formatAutoLevelerResult(results.autoLeveler) }),
       ...(results.compression         && { compression:           formatCompressionResult(results.compression) }),
       ...(results.parallelCompression && { parallel_compression:  formatParallelCompressionResult(results.parallelCompression) }),
+      ...(results.vocalExpander       && { vocal_expander:        formatVocalExpanderResult(results.vocalExpander) }),
       normalization_gain_db:
         results.afterMeasurements?.rmsDbfs == null || results.beforeMeasurements?.rmsDbfs == null
           ? null
@@ -344,6 +345,38 @@ function formatParallelCompressionResult(r) {
     parallel_desser_max_reduction_db: r.parallelDesserMaxReductionDb,
     vad_gate_applied:                 r.vadGateApplied,
     vad_gate_fade_ms:                 r.vadGateFadeMs,
+  }
+}
+
+function formatVocalExpanderResult(r) {
+  if (!r) return null
+  if (!r.applied) {
+    return {
+      applied:        false,
+      skipped_reason: r.reason ?? null,
+    }
+  }
+  return {
+    applied:        true,
+    skipped_reason: null,
+    calibration: {
+      silence_p90_pre_compression_dbfs:  r.silenceP90PreDb,
+      silence_p90_post_compression_dbfs: r.silenceP90PostDb,
+      threshold_dbfs:                    r.thresholdDb,
+      headroom_offset_db:                r.headroomOffsetDb,
+    },
+    parameters: {
+      ratio:              r.ratio,
+      high_freq_depth:    r.highFreqDepth,
+      release_ms:         r.releaseMs,
+      max_attenuation_db: r.maxAttenuationDb,
+    },
+    result: {
+      avg_attenuation_silence_db: r.avgAttenuationSilenceDb,
+      max_attenuation_db:         r.maxAttenuationAppliedDb,
+      pct_frames_expanded:        r.pctFramesExpanded,
+      over_expansion_flag:        r.overExpansionFlag,
+    },
   }
 }
 

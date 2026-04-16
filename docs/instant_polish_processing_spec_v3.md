@@ -451,6 +451,96 @@ F0 estimation → sibilant band identification → fricative event detection →
 
 ---
 
+### Stage 4a-E — Frequency-Selective Vocal Expander
+
+**Purpose:** Dynamically attenuate residual low-level noise (room tone, HVAC, mic handling, floor rumble) that compression elevates in the silence gaps between words. Runs after Stage 4a-PC (parallel compression) and before Stage 4b (Auto Leveler). Not a gate and not a replacement for Stage 2 noise reduction — a soft-ratio, band-weighted expander calibrated from the file's measured silence-energy distribution.
+
+**Applied:** All three pipelines (`STANDARD_PIPELINE`, `noise_eraser`, `clearervoice_eraser`), enabled by default. Skipped when the post-compression silence P90 RMS is already below -72 dBFS.
+
+**Architecture (two-path):**
+
+- **Detection path:** 80–800 Hz bandpass (HP80 + LP800 biquad cascade, Q=0.707) → 10 ms frame RMS → soft-ratio gain reduction with 10 ms lookahead, 10 ms attack, 20 ms hold, preset-specific release.
+- **Attenuation path:** Static 800 Hz low-pass splits the input signal into low-band and high-band. Below 800 Hz receives full gain reduction; above 800 Hz receives softened gain reduction scaled by `highFreqDepth`. The softening preserves consonant clarity.
+
+**Threshold calibration (per-file):**
+
+1. Snapshot `silenceP90PreDb` = P90 of silence-frame RMS from the post-NR metrics (pre-compression).
+2. Re-measure silence-frame RMS on the compressed signal → `silenceP90PostDb`.
+3. `thresholdDb = max(silenceP90PostDb + headroomOffsetDb, -70)`.
+
+**Gain-reduction curve:**
+
+For each 10 ms detection frame with RMS `rmsDb`:
+
+```
+if rmsDb >= thresholdDb:
+    targetGrDb = 0
+else:
+    targetGrDb = -min((thresholdDb - rmsDb) × (1 - 1/ratio), maxAttenuationDb)
+```
+
+Smoothed per-sample with exponential attack/release. The lookahead buffer lets gain begin releasing before voiced energy arrives.
+
+**Band-weighted attenuation:**
+
+```
+gainLowLin  = 10^(grDb / 20)                         // full-depth in detection band
+gainHighLin = 10^(grDb × highFreqDepth / 20)         // softened above 800 Hz
+y[i] = low[i] × gainLowLin[i] + (x[i] - low[i]) × gainHighLin[i]
+```
+
+This is equivalent to the spec form `softened_ratio = 1 + (ratio - 1) × high_freq_depth`; the gain-dB-scaling form above is numerically identical and computationally simpler.
+
+**Parameters by preset:**
+
+| Parameter | ACX Audiobook | Podcast Ready | Voice Ready | General Clean | Noise Eraser | ClearerVoice Eraser |
+|---|---|---|---|---|---|---|
+| Enabled | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Ratio | 1.5:1 | 2.0:1 | 1.5:1 | 2.0:1 | 2.0:1 | 2.0:1 |
+| Headroom offset | +4 dB | +6 dB | +4 dB | +6 dB | +6 dB | +6 dB |
+| High-freq depth | 0.25 | 0.5 | 0.25 | 0.5 | 0.5 | 0.5 |
+| Release | 200 ms | 150 ms | 200 ms | 150 ms | 150 ms | 150 ms |
+| Attack | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms |
+| Hold | 20 ms | 20 ms | 20 ms | 20 ms | 20 ms | 20 ms |
+| Lookahead | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms |
+| Max attenuation | 12 dB | 18 dB | 12 dB | 18 dB | 18 dB | 18 dB |
+| Detection band | 80–800 Hz | 80–800 Hz | 80–800 Hz | 80–800 Hz | 80–800 Hz | 80–800 Hz |
+
+**Implementation note:** The spec originally suggested FFmpeg `volume` + `equalizer` filters, but time-varying per-sample gain with lookahead/hold/release cannot be expressed in FFmpeg filter graphs. Implementation uses the custom-JS DSP pattern already established by `compression.js`, `autoLeveler.js`, and `parallelCompression.js` — read WAV via `readWavAllChannels()`, build sample-level gain curve, write WAV via `writeWavChannels()`.
+
+**Report output shape (Stage 7):**
+
+```json
+"vocal_expander": {
+  "applied": true,
+  "skipped_reason": null,
+  "calibration": {
+    "silence_p90_pre_compression_dbfs":  -58.2,
+    "silence_p90_post_compression_dbfs": -51.0,
+    "threshold_dbfs":                    -45.0,
+    "headroom_offset_db":                6
+  },
+  "parameters": {
+    "ratio":              2.0,
+    "high_freq_depth":    0.5,
+    "release_ms":         150,
+    "max_attenuation_db": 18
+  },
+  "result": {
+    "avg_attenuation_silence_db": -8.3,
+    "max_attenuation_db":         -14.1,
+    "pct_frames_expanded":        22.4,
+    "over_expansion_flag":        false
+  }
+}
+```
+
+When skipped: `{ "applied": false, "skipped_reason": "silence_floor_already_below_-72_dbfs" }` or similar reason string.
+
+**Advisory flag:** Emits `over_expansion` (severity `review`) when `pct_frames_expanded > 35` OR any VAD-voiced frame received more than 3 dB of attenuation.
+
+---
+
 ### Stage 5 — Loudness Normalization
 
 **Purpose:** Bring average loudness to the target level.

@@ -44,6 +44,7 @@ import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runCleare
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
+import { applyVocalExpander } from './vocalExpander.js'
 import { analyzeHum } from './humEQ.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
@@ -428,6 +429,41 @@ export async function parallelCompress(ctx) {
   })
 }
 
+// ── Stage: Vocal Expander (Stage 4a-E) ────────────────────────────────────────
+// Frequency-selective dynamic attenuator targeting residual silence-floor
+// noise left elevated by the serial + parallel compressors. Not a gate: uses
+// a soft ratio (1.5–2.0:1) calibrated from the file's measured silence P90
+// energy plus a headroom offset. Detection path is an 80–800 Hz bandpass;
+// attenuation is applied full-depth below 800 Hz and softened (scaled by
+// `highFreqDepth`) above 800 Hz to preserve consonant clarity.
+//
+// Runs after Stage 4a-PC and before Stage 4b so the Auto Leveler sees the
+// cleaner silence floor that the expander produces.
+
+export async function vocalExpander(ctx) {
+  const outPath = ctx.tmp('.wav')
+  const result  = await applyVocalExpander(
+    ctx.currentPath,
+    outPath,
+    ctx.presetId,
+    ctx.results.metrics,
+  )
+  if (result.applied) ctx.currentPath = outPath
+  ctx.results.vocalExpander = result
+
+  if (result.applied) {
+    ctx.log(
+      `[vocal-expander] Applied — silenceP90 pre=${result.silenceP90PreDb}dB ` +
+      `post=${result.silenceP90PostDb}dB threshold=${result.thresholdDb}dB ` +
+      `ratio=${result.ratio}:1 avgAtten=${result.avgAttenuationSilenceDb}dB ` +
+      `maxAtten=${result.maxAttenuationAppliedDb}dB ` +
+      `expanded=${result.pctFramesExpanded}%`
+    )
+  } else {
+    ctx.log(`[vocal-expander] Skipped — ${result.reason}`)
+  }
+}
+
 // ── Stage: Harmonic exciter ───────────────────────────────────────────────────
 // Adds subtle harmonic content in the presence/air region (above 3 kHz).
 // Runs after compression so the compressor's gain riding doesn't undo the
@@ -571,6 +607,7 @@ export async function qualityAdvisory(ctx) {
     preNrNoiseFloor: ctx.results.beforeMeasurements?.noiseFloorDbfs ?? null,
     noiseFloorDbfs:  ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
     autoLeveler:     ctx.results.autoLeveler ?? null,
+    vocalExpander:   ctx.results.vocalExpander ?? null,
   }
   ctx.results.qualityAdvisory = await generateQualityAdvisory(
     ctx.currentPath,

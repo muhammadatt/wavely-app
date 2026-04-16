@@ -103,6 +103,7 @@ Quality advisory flags run for all presets and all output profiles. The specific
 | `noise_floor_marginal` | Noise floor -60 to -62 dBFS (passes certification but close to limit) | Info | "Noise floor is within spec but close to the limit. Re-recording in a quieter environment would add headroom." |
 | `high_nr_tier` | Noise reduction Tier 4 was applied | Info | "Heavy noise reduction was applied. Some processing character may be audible on close listening." |
 | `separation_used` | `noise_eraser` preset was used | Review | "Voice separation was used. The output may have a processed quality. Review carefully before submitting to ACX." |
+| `over_expansion` | `pct_frames_expanded` > 35% OR any VAD-voiced frame received > 3 dB attenuation from the Stage 4a-E vocal expander | Review | "The expander may have affected quiet speech. Listen for unnatural silences between words or clipped consonants." |
 | `chapter_outlier` | Batch mode: this file deviates > 2 dB from batch median after consistency pass | Review | "This chapter sounds noticeably different from the rest of the batch. Review for consistency." |
 
 **`loud_breaths` and `plosives`** apply when `preset = acx_audiobook` only. These are specifically ACX human review concerns and are not meaningful outside that context.
@@ -110,6 +111,8 @@ Quality advisory flags run for all presets and all output profiles. The specific
 **`noise_floor_marginal`** applies when `output_profile = acx` only — the marginal threshold is defined relative to ACX's -60 dBFS requirement.
 
 **`separation_used`** applies when `preset = noise_eraser` regardless of output profile.
+
+**`over_expansion`** applies only when the Stage 4a-E vocal expander actually ran (`vocal_expander.applied = true`).
 
 All other flags apply to all presets and output profiles.
 

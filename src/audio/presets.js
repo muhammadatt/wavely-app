@@ -150,6 +150,22 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
     },
+    // Stage 4a-E: Vocal Expander — frequency-selective silence-floor attenuation.
+    // Conservative settings for audiobook narration: tighter headroom (+4 dB)
+    // keeps the threshold close to actual silence energy, and a small
+    // highFreqDepth (0.25) preserves breath/fricative transparency above 800 Hz.
+    vocalExpander: {
+      enabled:          true,
+      ratio:            1.5,
+      highFreqDepth:    0.25,
+      headroomOffsetDb: 4,
+      releaseMs:        200,
+      attackMs:         10,
+      holdMs:           20,
+      lookaheadMs:      10,
+      maxAttenuationDb: 12,
+      detectionBand:    { lowHz: 80, highHz: 800 },
+    },
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
@@ -201,6 +217,21 @@ export const PRESETS = {
       vadFadeMs:                   10,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
+    },
+    // Stage 4a-E: Vocal Expander. Assertive settings for processed podcast
+    // character: 2.0:1 ratio with wider +6 dB headroom is acceptable because
+    // listeners expect a tighter, more processed sound.
+    vocalExpander: {
+      enabled:          true,
+      ratio:            2.0,
+      highFreqDepth:    0.5,
+      headroomOffsetDb: 6,
+      releaseMs:        150,
+      attackMs:         10,
+      holdMs:           20,
+      lookaheadMs:      10,
+      maxAttenuationDb: 18,
+      detectionBand:    { lowHz: 80, highHz: 800 },
     },
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
@@ -257,6 +288,22 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
     },
+    // Stage 4a-E: Vocal Expander. Conservative settings matching ACX: voice-over
+    // work often sits under music beds, so pumping and gating artifacts are
+    // audible — the slower 200 ms release and low highFreqDepth keep the stage
+    // transparent.
+    vocalExpander: {
+      enabled:          true,
+      ratio:            1.5,
+      highFreqDepth:    0.25,
+      headroomOffsetDb: 4,
+      releaseMs:        200,
+      attackMs:         10,
+      holdMs:           20,
+      lookaheadMs:      10,
+      maxAttenuationDb: 12,
+      detectionBand:    { lowHz: 80, highHz: 800 },
+    },
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
@@ -308,6 +355,20 @@ export const PRESETS = {
       vadFadeMs:                   8,
       crestGuardThresholdDb:       9,      // relaxed per spec
       parallelDesserMaxReductionDb: 12,
+    },
+    // Stage 4a-E: Vocal Expander. Pragmatic assertive settings — this preset
+    // accepts more aggressive processing in exchange for a cleaner silence floor.
+    vocalExpander: {
+      enabled:          true,
+      ratio:            2.0,
+      highFreqDepth:    0.5,
+      headroomOffsetDb: 6,
+      releaseMs:        150,
+      attackMs:         10,
+      holdMs:           20,
+      lookaheadMs:      10,
+      maxAttenuationDb: 18,
+      detectionBand:    { lowHz: 80, highHz: 800 },
     },
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
@@ -365,6 +426,21 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
     },
+    // Stage 4a-E: Vocal Expander. Separation output already has a dry-booth
+    // quality; the expander's silence P90 calibration works correctly regardless
+    // of what produced the residual, so assertive settings are used here.
+    vocalExpander: {
+      enabled:          true,
+      ratio:            2.0,
+      highFreqDepth:    0.5,
+      headroomOffsetDb: 6,
+      releaseMs:        150,
+      attackMs:         10,
+      holdMs:           20,
+      lookaheadMs:      10,
+      maxAttenuationDb: 18,
+      detectionBand:    { lowHz: 80, highHz: 800 },
+    },
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
   },
 
@@ -401,6 +477,21 @@ export const PRESETS = {
     autoLeveler: {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
+    },
+    // Stage 4a-E: Vocal Expander. ClearerVoice output is already enhanced; the
+    // expander calibrates from the measured silence floor regardless of how the
+    // signal was produced, so the general-clean assertive defaults apply.
+    vocalExpander: {
+      enabled:          true,
+      ratio:            2.0,
+      highFreqDepth:    0.5,
+      headroomOffsetDb: 6,
+      releaseMs:        150,
+      attackMs:         10,
+      holdMs:           20,
+      lookaheadMs:      10,
+      maxAttenuationDb: 18,
+      detectionBand:    { lowHz: 80, highHz: 800 },
     },
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
   },
