@@ -393,6 +393,17 @@ export const PRESETS = {
       attack: 8,
       release: 100,
     },
+    parallelCompression: {
+      ratio:                       8,
+      attackMs:                    1.0,
+      releaseMs:                   225,    // longer release for smoothed separation transients
+      makeupGainDb:                7,
+      wetMix:                      0.30,  // midpoint of 20–25%
+      wetMixCeiling:               null,
+      vadFadeMs:                   5,
+      crestGuardThresholdDb:       12,
+      parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
+    },
     eqProfile: 'podcast',
     deEsser: {
       sensitivity: 'high',
@@ -414,17 +425,6 @@ export const PRESETS = {
     autoLeveler: {
       maxGainDb:     6.0,
       maxRateDbPerS: 1.5,
-    },
-    parallelCompression: {
-      ratio:                       8,
-      attackMs:                    1.0,
-      releaseMs:                   225,    // longer release for smoothed separation transients
-      makeupGainDb:                7,
-      wetMix:                      0.30,  // midpoint of 20–25%
-      wetMixCeiling:               null,
-      vadFadeMs:                   5,
-      crestGuardThresholdDb:       12,
-      parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
     },
     // Stage 4a-E: Vocal Expander Assertive settings are used here.
     vocalExpander: {
@@ -452,11 +452,26 @@ export const PRESETS = {
     truePeakCeiling: -1,
     noiseFloorTarget: null,
     compression: {
-      mode: 'none',
-      ratio: 1,
-      threshold: 0,
-      attack: 0,
-      release: 0,
+      mode: 'conditional',
+      ratio: 2,
+      threshold: -24,              
+      thresholdMethod: 'adaptive',
+      targetGrWindow: [4, 8],
+      thresholdMin: -40,
+      thresholdMax: -10,
+      attack: 8,
+      release: 100,
+    },
+    parallelCompression: {
+      ratio:                       8,
+      attackMs:                    1.0,
+      releaseMs:                   225,    // longer release for smoothed separation transients
+      makeupGainDb:                7,
+      wetMix:                      0.30,  // midpoint of 20–25%
+      wetMixCeiling:               null,
+      vadFadeMs:                   5,
+      crestGuardThresholdDb:       12,
+      parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
     },
     eqProfile: 'podcast',
     deEsser: {
