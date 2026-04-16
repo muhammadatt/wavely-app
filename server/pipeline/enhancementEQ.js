@@ -20,13 +20,13 @@
  * which halves HF boosts when the measured noise floor is close to -60 dBFS.
  */
 
-import Meyda from 'meyda'
-import { readWavSamples } from './wavReader.js'
+import Meyda from "meyda"
+import { readWavSamples } from "./wavReader.js"
 
-const FFT_SIZE    = 4096
+const FFT_SIZE = 4096
 const SAMPLE_RATE = 44100
-const MAX_GAIN_DB = 5   // spec: ±5 dB maximum per band
-const HOP_SIZE    = FFT_SIZE  // non-overlapping frames for batch analysis
+const MAX_GAIN_DB = 5 // spec: ±5 dB maximum per band
+const HOP_SIZE = FFT_SIZE // non-overlapping frames for batch analysis
 
 // ── EQ Reference Profiles ────────────────────────────────────────────────────
 // Each entry is the expected normalized energy (in dB relative to spectral
@@ -34,57 +34,57 @@ const HOP_SIZE    = FFT_SIZE  // non-overlapping frames for batch analysis
 // Values are relative to spectral mean across all six diagnostic bands.
 const EQ_REFERENCES = {
   audiobook: {
-    warmth:    -1,   // natural, slight cut OK
-    mud:       -3,   // slightly suppressed
-    clarity:   -2,   // slightly suppressed
-    upper_mid:  0,   // articulation untouched
-    presence:  +3,   // forward-leaning
-    air:        0,   // neutral
+    warmth: -1, // natural, slight cut OK
+    mud: -3, // slightly suppressed
+    clarity: -2, // slightly suppressed
+    upper_mid: 0, // articulation untouched
+    presence: +3, // forward-leaning
+    air: 0, // neutral
   },
   podcast: {
-    warmth:    -2,   // thinner for phone speakers
-    mud:       -5,   // assertive mud cut
-    clarity:   -3,   // clarity cut for earbuds
-    upper_mid: -1,   // shave 1 kHz to reduce honk on small speakers
-    presence:  +4,   // punchy presence
-    air:       +1,   // slight air lift
+    warmth: +12.0, // 100–250 Hz
+    mud: +11.5, // 200–400 Hz
+    clarity: +8.0, // 400–700 Hz
+    upper_mid: -2.0, // 700 Hz–2 kHz  ← new
+    presence: -9.0, // 2–5 kHz
+    air: -21.0, // 6–12 kHz
   },
   music: {
-    warmth:     0,   // neutral
-    mud:       -1,   // light mud control only
-    clarity:    0,   // neutral
-    upper_mid:  0,   // neutral
-    presence:   0,   // neutral — voice shaping disabled
-    air:       +1,   // small sparkle
+    warmth: 0, // neutral
+    mud: -1, // light mud control only
+    clarity: 0, // neutral
+    upper_mid: 0, // neutral
+    presence: 0, // neutral — voice shaping disabled
+    air: +1, // small sparkle
   },
   general: {
-    warmth:     0,   // neutral
-    mud:       -3,   // moderate mud cut
-    clarity:   -2,   // moderate clarity cut
-    upper_mid:  0,   // neutral
-    presence:  +3,   // clear presence
-    air:        0,   // neutral
+    warmth: 0, // neutral
+    mud: -3, // moderate mud cut
+    clarity: -2, // moderate clarity cut
+    upper_mid: 0, // neutral
+    presence: +3, // clear presence
+    air: 0, // neutral
   },
 }
 
 // ── EQ center frequencies / Q factors ────────────────────────────────────────
 const EQ_CENTERS = {
-  warmth:    { freq: 180,   q: 1.5 },
-  mud:       { freq: 285,   q: 2.5 },
-  clarity:   { freq: 520,   q: 2.0 },
-  upper_mid: { freq: 1200,  q: 1.0 },
-  presence:  { freq: 4000,  q: 1.5 },
-  air:       { freq: 10000, q: 0.7, shelf: true },
+  warmth: { freq: 180, q: 1.5 },
+  mud: { freq: 285, q: 2.5 },
+  clarity: { freq: 520, q: 2.0 },
+  upper_mid: { freq: 1200, q: 1.0 },
+  presence: { freq: 4000, q: 1.5 },
+  air: { freq: 10000, q: 0.7, shelf: true },
 }
 
 // ── Diagnostic band frequency limits ─────────────────────────────────────────
 const BANDS = {
-  warmth:    [100,  250],
-  mud:       [200,  400],
-  clarity:   [400,  700],
-  upper_mid: [700,  2000],
-  presence:  [2000, 5000],
-  air:       [6000, 12000],
+  warmth: [100, 250],
+  mud: [200, 400],
+  clarity: [400, 700],
+  upper_mid: [700, 2000],
+  presence: [2000, 5000],
+  air: [6000, 12000],
 }
 
 // ── Per-band treatment config (uniform across all profiles) ──────────────────
@@ -92,16 +92,16 @@ const BANDS = {
 // reference, never snapped to it. maxGainDb reflects each band's perceptual
 // sensitivity.
 const BAND_CONFIG = {
-  warmth:    { gainScale: 0.5, maxGainDb: 3 },
-  mud:       { gainScale: 0.8, maxGainDb: MAX_GAIN_DB },
-  clarity:   { gainScale: 0.5, maxGainDb: 2 },
+  warmth: { gainScale: 0.5, maxGainDb: 3 },
+  mud: { gainScale: 0.8, maxGainDb: MAX_GAIN_DB },
+  clarity: { gainScale: 0.5, maxGainDb: 2 },
   upper_mid: { gainScale: 0.5, maxGainDb: 3 },
-  presence:  { gainScale: 0.7, maxGainDb: MAX_GAIN_DB },
-  air:       { gainScale: 0.4, maxGainDb: 2 },
+  presence: { gainScale: 0.7, maxGainDb: MAX_GAIN_DB },
+  air: { gainScale: 0.4, maxGainDb: 2 },
 }
 
 // Band order matters for filter chaining: low → high.
-const BAND_ORDER = ['warmth', 'mud', 'clarity', 'upper_mid', 'presence', 'air']
+const BAND_ORDER = ["warmth", "mud", "clarity", "upper_mid", "presence", "air"]
 
 // ── Main API ─────────────────────────────────────────────────────────────────
 
@@ -122,15 +122,25 @@ const BAND_ORDER = ['warmth', 'mud', 'clarity', 'upper_mid', 'presence', 'air']
  * @property {string}   profile        - eqProfile name used
  * @property {boolean}  applied        - True if any EQ was applied
  */
-export async function analyzeSpectrum(wavPath, eqProfile, frameAnalysis, noiseFloorDbfs, opts = {}) {
-  const profile = EQ_REFERENCES[eqProfile] ? eqProfile : 'general'
-  const ref     = EQ_REFERENCES[profile]
+export async function analyzeSpectrum(
+  wavPath,
+  eqProfile,
+  frameAnalysis,
+  noiseFloorDbfs,
+  opts = {},
+) {
+  const profile = EQ_REFERENCES[eqProfile] ? eqProfile : "general"
+  const ref = EQ_REFERENCES[profile]
   const presetId = opts.presetId
 
   const { samples } = await readWavSamples(wavPath)
 
   // Collect voiced frames for analysis
-  const voicedFrameBuffers = collectVoicedFrames(samples, frameAnalysis, FFT_SIZE)
+  const voicedFrameBuffers = collectVoicedFrames(
+    samples,
+    frameAnalysis,
+    FFT_SIZE,
+  )
 
   if (voicedFrameBuffers.length === 0) {
     return noEQResult(profile)
@@ -143,7 +153,9 @@ export async function analyzeSpectrum(wavPath, eqProfile, frameAnalysis, noiseFl
   const measured = measureBandEnergies(avgPowerSpectrum, SAMPLE_RATE, FFT_SIZE)
 
   // Compute spectral mean (average across all diagnostic bands, in dB)
-  const specMeanDb = Object.values(measured).reduce((s, v) => s + v, 0) / Object.keys(measured).length
+  const specMeanDb =
+    Object.values(measured).reduce((s, v) => s + v, 0) /
+    Object.keys(measured).length
 
   // Convert to deviation from spectral mean (compare shape, not absolute level)
   const deviation = {}
@@ -154,7 +166,7 @@ export async function analyzeSpectrum(wavPath, eqProfile, frameAnalysis, noiseFl
   // How far each band deviates from its reference target
   const delta = {}
   for (const band of Object.keys(ref)) {
-    delta[band] = deviation[band] - ref[band]  // positive = band is elevated vs ref
+    delta[band] = deviation[band] - ref[band] // positive = band is elevated vs ref
   }
 
   // Build EQ decisions per band — fully bi-directional, uniform across profiles
@@ -163,9 +175,9 @@ export async function analyzeSpectrum(wavPath, eqProfile, frameAnalysis, noiseFl
 
   for (const band of BAND_ORDER) {
     const result = decideBand({
-      name:      band,
-      delta:     delta[band],
-      center:    EQ_CENTERS[band],
+      name: band,
+      delta: delta[band],
+      center: EQ_CENTERS[band],
       gainScale: BAND_CONFIG[band].gainScale,
       maxGainDb: BAND_CONFIG[band].maxGainDb,
     })
@@ -177,31 +189,53 @@ export async function analyzeSpectrum(wavPath, eqProfile, frameAnalysis, noiseFl
   // If HF boosts are applied and the noise floor is close to -60 dBFS,
   // halve their gain to avoid pushing hiss above the ACX threshold.
   // Scoped to acx_audiobook only — voice_ready and others are unaffected.
-  if (presetId === 'acx_audiobook' && noiseFloorDbfs > -66) {
+  if (presetId === "acx_audiobook" && noiseFloorDbfs > -66) {
     for (let i = 0; i < filters.length; i++) {
       const f = filters[i]
-      if (f.includes('f=10000') || f.includes('f=4000')) {
+      if (f.includes("f=10000") || f.includes("f=4000")) {
         // Halve the gain (works for both equalizer=...:g=X and treble=g=X:...)
-        filters[i] = f.replace(/g=(-?)([\d.]+)/, (_, sign, g) =>
-          `g=${sign}${round2(parseFloat(g) / 2)}`)
+        filters[i] = f.replace(
+          /g=(-?)([\d.]+)/,
+          (_, sign, g) => `g=${sign}${round2(parseFloat(g) / 2)}`,
+        )
       }
     }
     // Sync the halved gain into the band results for the report.
-    for (const band of ['presence', 'air']) {
+    for (const band of ["presence", "air"]) {
       const br = bandResults[band]
       if (br.applied) {
         br.gain_db = round2(br.gain_db / 2)
-        br.filter  = br.filter.replace(/g=(-?)([\d.]+)/, (_, sign, g) =>
-          `g=${sign}${round2(parseFloat(g) / 2)}`)
+        br.filter = br.filter.replace(
+          /g=(-?)([\d.]+)/,
+          (_, sign, g) => `g=${sign}${round2(parseFloat(g) / 2)}`,
+        )
       }
     }
   }
 
   const applied = filters.length > 0
 
+  // ── Per-band gain summary ──────────────────────────────────────────────────
+  // Flat map used for both the [eq] console line and the Meta block in the
+  // pipeline log file (appears under ctx.results.enhancementEQ.gainSummary).
+  const gainSummary = {}
+  for (const band of BAND_ORDER) {
+    gainSummary[band] = bandResults[band].gain_db
+  }
+
+  const gainStr = BAND_ORDER.map((b) => {
+    const g = bandResults[b].gain_db
+    const sign = g > 0 ? "+" : ""
+    return `${b}=${sign}${g}dB`
+  }).join("  ")
+  console.log(
+    `[eq] ${profile} profile — ${filters.length} band(s) applied — ${gainStr}`,
+  )
+
   return {
     ffmpegFilters: filters,
     bands: bandResults,
+    gainSummary,
     profile,
     applied,
   }
@@ -210,33 +244,39 @@ export async function analyzeSpectrum(wavPath, eqProfile, frameAnalysis, noiseFl
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function collectVoicedFrames(samples, frameAnalysis, fftSize) {
-  if (!frameAnalysis || !frameAnalysis.frames || frameAnalysis.frames.length === 0) {
+  if (
+    !frameAnalysis ||
+    !frameAnalysis.frames ||
+    frameAnalysis.frames.length === 0
+  ) {
     // Fallback: use all samples in chunks
     const chunks = []
     for (let i = 0; i + fftSize <= samples.length; i += fftSize) {
       chunks.push(samples.slice(i, i + fftSize))
     }
-    return chunks.slice(0, 200)  // cap at 200 frames ~20s of analysis
+    return chunks.slice(0, 200) // cap at 200 frames ~20s of analysis
   }
 
-  const voiced = frameAnalysis.frames.filter(f => !f.isSilence)
+  const voiced = frameAnalysis.frames.filter((f) => !f.isSilence)
   const buffers = []
 
   for (const frame of voiced) {
     if (frame.offsetSamples + fftSize > samples.length) break
-    buffers.push(samples.slice(frame.offsetSamples, frame.offsetSamples + fftSize))
-    if (buffers.length >= 200) break  // cap at 200 frames
+    buffers.push(
+      samples.slice(frame.offsetSamples, frame.offsetSamples + fftSize),
+    )
+    if (buffers.length >= 200) break // cap at 200 frames
   }
 
   return buffers
 }
 
 function averagePowerSpectrum(frames) {
-  const size = FFT_SIZE / 2  // Meyda powerSpectrum returns bufferSize/2 bins
+  const size = FFT_SIZE / 2 // Meyda powerSpectrum returns bufferSize/2 bins
   const sum = new Float64Array(size)
 
   for (const frame of frames) {
-    const ps = Meyda.extract('powerSpectrum', frame)
+    const ps = Meyda.extract("powerSpectrum", frame)
     if (!ps) continue
     for (let i = 0; i < size && i < ps.length; i++) {
       sum[i] += ps[i]
@@ -283,7 +323,7 @@ function decideBand({ name, delta, center, gainScale, maxGainDb }) {
   gainDb = Math.min(gainDb, maxGainDb)
   gainDb = round2(gainDb)
 
-  if (gainDb < 0.5) return unapplied(center)  // below perception threshold
+  if (gainDb < 0.5) return unapplied(center) // below perception threshold
 
   return delta > 0
     ? buildCut(name, gainDb, center)
@@ -310,12 +350,16 @@ function buildBoost(name, gainDb, center) {
 
 function noEQResult(profile) {
   const bands = {}
+  const gainSummary = {}
   for (const band of BAND_ORDER) {
     bands[band] = unapplied(EQ_CENTERS[band])
+    gainSummary[band] = 0
   }
+  console.log(`[eq] ${profile} profile — 0 band(s) applied — no voiced frames`)
   return {
     ffmpegFilters: [],
     bands,
+    gainSummary,
     profile,
     applied: false,
   }
