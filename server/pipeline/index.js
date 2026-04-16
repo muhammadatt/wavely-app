@@ -157,7 +157,6 @@ function buildReport(ctx) {
       ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
       ...(results.dereverb       && { dereverberation:   formatDereverbResult(results.dereverb) }),
       ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
-      ...(results.separationEQ   && { separation_eq:     formatEqResult(results.separationEQ) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
       ...(results.autoLeveler         && { auto_leveler:         formatAutoLevelerResult(results.autoLeveler) }),
@@ -181,7 +180,6 @@ function buildReport(ctx) {
     ...(results.enhancementPipeline && {
       enhancement_pipeline: formatEnhancementPipelineResult(results.enhancementPipeline),
     }),
-    // separationEQ appears in processing_applied for noise_eraser (replaces enhancementEQ)
     quality_advisory: results.qualityAdvisory ?? null,
     warnings:         buildWarnings(ctx),
   }
@@ -240,12 +238,13 @@ function formatDereverbResult(r) {
 function formatEqResult(r) {
   if (!r?.applied) return null
   return {
-    profile:        r.profile,
-    mud_cut:        bandReport(r.bands.mud_cut),
-    warmth_boost:   bandReport(r.bands.warmth_boost),
-    clarity_cut:    bandReport(r.bands.clarity_cut),
-    presence_boost: bandReport(r.bands.presence_boost),
-    air_boost:      bandReport(r.bands.air_boost),
+    profile:   r.profile,
+    warmth:    bandReport(r.bands.warmth),
+    mud:       bandReport(r.bands.mud),
+    clarity:   bandReport(r.bands.clarity),
+    upper_mid: bandReport(r.bands.upper_mid),
+    presence:  bandReport(r.bands.presence),
+    air:       bandReport(r.bands.air),
   }
 }
 

@@ -310,9 +310,10 @@ export async function roomTonePad(ctx) {
 export async function enhancementEQ(ctx) {
   const eqResult = await analyzeSpectrum(
     ctx.currentPath,
-    ctx.presetId,
+    ctx.preset?.eqProfile ?? 'general',
     ctx.results.metrics,
     ctx.results.metrics.noiseFloorDbfs,
+    { presetId: ctx.presetId },
   )
   const eqPath = ctx.tmp('.wav')
   await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
@@ -700,7 +701,7 @@ export async function separationValidation(ctx) {
   ctx.results.separationValidation = assessment
 
   // Merge the post-separation frame analysis into the canonical metrics object
-  // so downstream processing stages (residualCleanup, separationEQ) always
+  // so downstream processing stages (residualCleanup, enhancementEQ) always
   // read from ctx.results.metrics rather than from assessment directly.
   if (assessment.postSeparationFrameAnalysis) {
     Object.assign(ctx.results.metrics, assessment.postSeparationFrameAnalysis)
@@ -809,28 +810,6 @@ export async function bandwidthExtension(ctx) {
   }
   await logLevel(ctx, 'after NE-6 bandwidth extension', ctx.currentPath, {})
 }
-
-// ── NE Stage: Post-separation enhancement EQ (NE-7) ──────────────────────────
-// Corrects tonal imbalances from separation + BWE using a separation-specific
-// reference profile. Max gain ±4 dB (tighter than standard ±5 dB).
-
-export async function separationEQ(ctx) {
-  // Use the canonical metrics object, which was updated by separationValidation
-  // with the post-separation frame analysis. This ensures voiced frame detection
-  // reflects the separated signal character, not the pre-processing signal.
-  const eqResult = await analyzeSpectrum(
-    ctx.currentPath, 'noise_eraser', ctx.results.metrics, ctx.results.metrics.noiseFloorDbfs ?? -60
-  )
-  const eqPath   = ctx.tmp('.wav')
-  await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
-  ctx.currentPath      = eqPath
-  ctx.results.separationEQ = eqResult
-  await logLevel(ctx, 'after NE-7 separation EQ', ctx.currentPath, {
-    applied: eqResult.applied,
-    filters: eqResult.ffmpegFilters.length,
-  })
-}
-
 
 // ── CE Stage: ClearerVoice speech enhancement (CE-3) ─────────────────────────
 // Single-model replacement for Demucs/ConvTasNet vocal separation (NE-3).

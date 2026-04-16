@@ -90,8 +90,9 @@ export const PIPELINES = {
   // Key differences from STANDARD_PIPELINE:
   //   - monoMixdown is omitted — separateVocals handles channel conversion
   //     AFTER separation to preserve separation quality on stereo inputs.
-  //   - hpf / noiseReduce / enhancementEQ / deEss / compress are all replaced
-  //     by the NE-1 through NE-7 separation stages.
+  //   - hpf / noiseReduce / deEss / compress are augmented by the NE-1 through
+  //     NE-6 separation stages; enhancementEQ is retained and serves as NE-7
+  //     (post-separation tonal correction) via the preset's eqProfile.
   //   - analyzeFramesRaw is kept: populates ctx.results.metrics with the
   //     initial noise floor needed by NE-2 tonal analysis and NE-4 validation,
   //     and back-fills beforeMeasurements.noiseFloorDbfs.
@@ -115,7 +116,6 @@ export const PIPELINES = {
     stages.deEss,
     //stages.dereverb,
     stages.remeasureFramesPostNr,    // Updates ctx.results.metrics with post-BWE energy values for enhancementEQ
-    //stages.separationEQ,
     stages.enhancementEQ,
     stages.compress,              // Stage 4a — serial compression
     stages.parallelCompress,      // Stage NE-PC — parallel compression (NEW)
@@ -151,8 +151,7 @@ export const PIPELINES = {
     stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
-    //stages.separationEQ,            // NE-7: Post-separation enhancement EQ
-    stages.enhancementEQ,
+    stages.enhancementEQ,           // NE-7: Post-separation enhancement EQ (unified stage)
     stages.autoLevel,             // Stage 4b — no-op for clearervoice_eraser (preset not in LEVELER_CONFIG)
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization
