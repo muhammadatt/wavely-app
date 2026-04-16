@@ -30,14 +30,15 @@ const STANDARD_PIPELINE = [
   stages.hpf,
   //stages.dereverb,
   stages.noiseReduce,
-  stages.remeasureFramesPostNr,
   stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
-  stages.enhancementEQ,
   stages.deEss,
+  stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   stages.compress,              // Stage 4a — serial compression
   stages.parallelCompress,      // Stage 4a-PC — parallel compression (NEW)
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
+  stages.enhancementEQ,
   //stages.harmonicExciter,
+  //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
@@ -51,51 +52,18 @@ export const PIPELINES = {
   // ACX Audiobook: identical to STANDARD_PIPELINE plus roomTonePad after
   // post-NR silence analysis. Room tone padding must run on the HPF+NR signal
   // (not raw) so the sampled room tone matches the processed audio character.
-  acx_audiobook: [
-    stages.decode,
-    stages.monoMixdown,
-    stages.measureBefore,
-    stages.peakNormalize,
-    stages.analyzeFramesRaw,
-    stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
-    stages.hpf,
-    //stages.dereverb,
-    stages.noiseReduce,
-    stages.bandwidthExtension,        // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
-    stages.roomTonePad,             // ACX-only
-    stages.remeasureFramesPostNr,
-    stages.enhancementEQ,
-    stages.deEss,
-    stages.compress,              // Stage 4a — serial compression
-    stages.parallelCompress,      // Stage 4a-PC — parallel compression (NEW)
-    stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    //stages.harmonicExciter,
 
-    stages.normalize,
-    stages.truePeakLimit,
-    stages.measureAfter,
-    stages.acxCertification,
-    stages.qualityAdvisory,
-    stages.encode,
-    stages.extractPeaks,
-  ],
-
+  acx_audiobook: STANDARD_PIPELINE,
   podcast_ready: STANDARD_PIPELINE,
   voice_ready:   STANDARD_PIPELINE,
   general_clean: STANDARD_PIPELINE,
 
-  // Noise Eraser: parallel separation path replacing Stages 1–4a.
-  // Rejoins the standard chain at normalize (Stage 5) through extractPeaks.
+  // Noise Eraser: Adds a voice separation stage for additional denoise benefits.
   //
   // Key differences from STANDARD_PIPELINE:
   //   - monoMixdown is omitted — separateVocals handles channel conversion
   //     AFTER separation to preserve separation quality on stereo inputs.
-  //   - hpf / noiseReduce / deEss / compress are augmented by the NE-1 through
-  //     NE-6 separation stages; enhancementEQ is retained and serves as NE-7
-  //     (post-separation tonal correction) via the preset's eqProfile.
-  //   - analyzeFramesRaw is kept: populates ctx.results.metrics with the
-  //     initial noise floor needed by NE-2 tonal analysis and NE-4 validation,
-  //     and back-fills beforeMeasurements.noiseFloorDbfs.
+
   noise_eraser: [
     stages.decode,
     // No monoMixdown here — see separateVocals
@@ -104,27 +72,25 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
-    //stages.rnnoisePrePass,          // NE-1: RNNoise stationary noise reduction
+    //stages.rnnoisePrePass,         // RNNoise stationary noise reduction
     stages.noiseReduce,
-    stages.tonalPretreatment,       // NE-2: Hum/tonal notch filtering (conditional)
-    stages.separateVocals,          // NE-3: Demucs or ConvTasNet vocal extraction
-    stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
-    stages.remeasureFramesPostNr,
-    stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
-    stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
-    stages.separationValidation,    // NE-4: Artifact/sibilance/breath assessment
+    stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
+    stages.separateVocals,          // Demucs or ConvTasNet vocal extraction
+    stages.separationValidation,    // Artifact/sibilance/breath assessment
+    stages.residualCleanup,         // DF3 Tier 2 residual cleanup (conditional)
+    stages.bandwidthExtension,      // AP-BWE HF restoration (conditional)
     stages.deEss,
     //stages.dereverb,
-    stages.remeasureFramesPostNr,    // Updates ctx.results.metrics with post-BWE energy values for enhancementEQ
-    stages.enhancementEQ,
-    stages.compress,              // Stage 4a — serial compression
-    stages.parallelCompress,      // Stage NE-PC — parallel compression (NEW)
-    stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
+    stages.remeasureFramesPostNr,    // Recalculate noise floor and update ctx.results.metrics before compression
+    stages.compress,                 // standard serial compression
+    stages.parallelCompress,         // parallel compression 
+    stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
+    stages.enhancementEQ,           
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
-    stages.normalize,               // Stage 5: Loudness normalization
-    stages.truePeakLimit,           // Stage 6: True peak limiting
+    stages.normalize,                // Loudness normalization
+    stages.truePeakLimit,            // True peak limiting
     stages.measureAfter,
-    stages.acxCertification,        // Only emits when output_profile === 'acx'
+    stages.acxCertification,         // Only emits when output_profile === 'acx'
     stages.qualityAdvisory,
     stages.encode,
     stages.extractPeaks,
