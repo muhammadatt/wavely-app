@@ -34,12 +34,12 @@ const HOP_SIZE = FFT_SIZE // non-overlapping frames for batch analysis
 // Values are relative to spectral mean across all six diagnostic bands.
 const EQ_REFERENCES = {
   audiobook: {
-    warmth: -1, // natural, slight cut OK
-    mud: -3, // slightly suppressed
-    clarity: -2, // slightly suppressed
-    upper_mid: 0, // articulation untouched
-    presence: +3, // forward-leaning
-    air: 0, // neutral
+    warmth: +12.0, // 100–250 Hz
+    mud: +11.5, // 200–400 Hz
+    clarity: +8.0, // 400–700 Hz
+    upper_mid: -2.0, // 700 Hz–2 kHz 
+    presence: -9.0, // 2–5 kHz
+    air: -21.0, // 6–12 kHz
   },
   podcast: {
     warmth: +12.0, // 100–250 Hz
@@ -50,20 +50,20 @@ const EQ_REFERENCES = {
     air: -21.0, // 6–12 kHz
   },
   music: {
-    warmth: 0, // neutral
-    mud: -1, // light mud control only
-    clarity: 0, // neutral
-    upper_mid: 0, // neutral
-    presence: 0, // neutral — voice shaping disabled
-    air: +1, // small sparkle
+    warmth: +12.0, // 100–250 Hz
+    mud: +11.5, // 200–400 Hz
+    clarity: +8.0, // 400–700 Hz
+    upper_mid: -2.0, // 700 Hz–2 kHz  ← new
+    presence: -9.0, // 2–5 kHz
+    air: -21.0, // 6–12 kHz
   },
   general: {
-    warmth: 0, // neutral
-    mud: -3, // moderate mud cut
-    clarity: -2, // moderate clarity cut
-    upper_mid: 0, // neutral
-    presence: +3, // clear presence
-    air: 0, // neutral
+    warmth: +12.0, // 100–250 Hz
+    mud: +11.5, // 200–400 Hz
+    clarity: +8.0, // 400–700 Hz
+    upper_mid: -2.0, // 700 Hz–2 kHz  ← new
+    presence: -9.0, // 2–5 kHz
+    air: -21.0, // 6–12 kHz
   },
 }
 
