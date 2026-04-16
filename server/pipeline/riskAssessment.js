@@ -165,6 +165,23 @@ export async function generateQualityAdvisory(
     }
   }
 
+  // --- Vocal Expander advisory flags ---
+  // Emit `over_expansion` when the expander attenuated more of the file than
+  // expected (>35% of frames) or when any VAD-voiced frame received more than
+  // 3 dB of attenuation (i.e. the expander reached into quiet speech).
+  const expanderResult = pipelineContext.vocalExpander
+  if (expanderResult?.applied) {
+    const anyVoicedFrameOverExpanded = (expanderResult.maxVoicedFrameAttenuationDb ?? 0) > 3
+    const tooManyFramesExpanded      = (expanderResult.pctFramesExpanded ?? 0)        > 35
+    if (anyVoicedFrameOverExpanded || tooManyFramesExpanded) {
+      flags.push({
+        id: 'over_expansion',
+        severity: 'review',
+        message: 'The expander may have affected quiet speech. Listen for unnatural silences between words or clipped consonants.',
+      })
+    }
+  }
+
   const review_recommended = flags.some(f => f.severity === 'review')
 
   return { flags, review_recommended }

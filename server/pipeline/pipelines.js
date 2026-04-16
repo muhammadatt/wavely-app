@@ -34,7 +34,8 @@ const STANDARD_PIPELINE = [
   stages.deEss,
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   stages.compress,              // Stage 4a — serial compression
-  stages.parallelCompress,      // Stage 4a-PC — parallel compression (NEW)
+  stages.parallelCompress,      // Stage 4a-PC — parallel compression
+  stages.vocalExpander,         // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.enhancementEQ,
   //stages.harmonicExciter,
@@ -83,7 +84,8 @@ export const PIPELINES = {
     //stages.dereverb,
     stages.remeasureFramesPostNr,    // Recalculate noise floor and update ctx.results.metrics before compression
     stages.compress,                 // standard serial compression
-    stages.parallelCompress,         // parallel compression 
+    stages.parallelCompress,         // parallel compression
+    stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.enhancementEQ,           
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
@@ -118,6 +120,7 @@ export const PIPELINES = {
     stages.residualCleanup,         // NE-5: DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (conditional)
     stages.enhancementEQ,           // NE-7: Post-separation enhancement EQ (unified stage)
+    stages.vocalExpander,           // Stage 4a-E — frequency-selective expander (no compression upstream; measures current signal)
     stages.autoLevel,             // Stage 4b — no-op for clearervoice_eraser (preset not in LEVELER_CONFIG)
     stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.normalize,               // Stage 5: Loudness normalization

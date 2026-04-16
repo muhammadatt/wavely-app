@@ -177,9 +177,11 @@ Stage 2b: Dereverberation (NARA-WPE, conditional — light/medium/heavy paths)
 Stage 2c: Room tone padding (ACX only — auto-detect quietest silence segment, pad head 0.75 s + tail 2 s)
 Stage 3:  Enhancement EQ (Meyda.js spectral analysis → FFmpeg parametric EQ)
 Stage 4:  De-esser (conditional — only if P95 sibilant energy exceeds threshold)
-Stage 4a: Compression (conditional for ACX; always-on for other presets)
-Stage 4b: Auto Leveler (VAD-gated gain riding, conditional — normalizes level variance across voiced segments)
-Stage 4c: Harmonic Exciter (conditional brightness boost)
+Stage 4a:    Compression (conditional for ACX; always-on for other presets)
+Stage 4a-PC: Parallel Compression (wet/dry blend with parallel de-esser + VAD gate)
+Stage 4a-E:  Vocal Expander (frequency-selective dynamic attenuation of silence-floor residual)
+Stage 4b:    Auto Leveler (VAD-gated gain riding, conditional — normalizes level variance across voiced segments)
+Stage 4d:    Harmonic Exciter (conditional brightness boost)
 Stage 5:  Loudness Normalization (libebur128-wasm + FFmpeg loudnorm) ← output profile governs target
 Stage 6:  True Peak Limiting (FFmpeg loudnorm two-pass, 192 kHz upsample) ← output profile governs ceiling
 Stage 7:  Measurement + Processing Report (ACX certification + quality advisory flags)
@@ -236,6 +238,14 @@ See `docs/instant_polish_processing_spec_noise_eraser.md` for full stage-by-stag
 - Conservative defaults for ACX — overprocessing artifacts cause human review rejection.
 - Noise floor enforcement only applies when `output_profile = acx`. For other profiles, reduction is applied for quality only.
 
+**Stage 4a-E — Vocal Expander (frequency-selective silence-floor attenuator):**
+- Runs after Stage 4a-PC and before Stage 4b. Not a gate and not a replacement for Stage 2 NR.
+- Threshold is calibrated from the file's measured silence P90 energy (re-measured on the post-compression signal) plus a preset headroom offset; clamped to -70 dBFS.
+- Two-path architecture: detection is 80–800 Hz bandpass → 10 ms frame RMS → soft-ratio gain reduction with 10 ms lookahead, 10 ms attack, 20 ms hold, 150–200 ms release. Attenuation is applied full-depth below 800 Hz and softened above 800 Hz via `highFreqDepth` to preserve consonant clarity.
+- **Skipped** when silence P90 on the post-compression signal is already below -72 dBFS.
+- Present in all three pipelines (`STANDARD_PIPELINE`, `noise_eraser`, `clearervoice_eraser`). On ClearerVoice the calibration still works correctly — it measures the current signal regardless of what produced it.
+- Emits a `vocal_expander` object in `processing_applied` and can raise an `over_expansion` advisory flag when it reaches into quiet speech.
+
 **Stage 4b — Auto Leveler (VAD-gated gain riding):**
 - Added in PR #26 as the most recent pipeline addition.
 - Uses Silero VAD v5 to classify voiced vs. silence frames, then applies gain riding only to voiced segments.
@@ -261,11 +271,11 @@ See `docs/instant_polish_compliance_model_v2.md` for full flag definitions, JSON
 
 ### Preset Character Distinctions (do not converge)
 
-- **ACX Audiobook:** Transparent, natural. Minimal compression (conditional only, crest factor > 20 dB). Conservative noise reduction. Preserve dynamic breath of narration. ACX human reviewers expect an unprocessed character.
-- **Podcast Ready:** Punchy, intimate, compressed. Always-on 3:1 compression. More aggressive EQ mud cut. LUFS target (not RMS). Stereo preserved for dual-host.
-- **Voice Ready:** Broadcast-neutral. Always-on 2.5:1 compression. Versatile — sits under music beds. Mono output.
-- **General Clean:** Pragmatic. More aggressive noise reduction acceptable (Tier 4, relaxed artifact warnings). 3:1 compression always-on.
-- **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Output may have a "dry booth" quality. Not recommended for ACX submission without careful review.
+- **ACX Audiobook:** Transparent, natural. Minimal compression (conditional only, crest factor > 20 dB). Conservative noise reduction. Preserve dynamic breath of narration. ACX human reviewers expect an unprocessed character. Vocal Expander conservative (1.5:1, +4 dB headroom, 0.25 high-freq depth, 12 dB max).
+- **Podcast Ready:** Punchy, intimate, compressed. Always-on 3:1 compression. More aggressive EQ mud cut. LUFS target (not RMS). Stereo preserved for dual-host. Vocal Expander assertive (2.0:1, +6 dB headroom, 0.5 high-freq depth, 18 dB max).
+- **Voice Ready:** Broadcast-neutral. Always-on 2.5:1 compression. Versatile — sits under music beds. Mono output. Vocal Expander conservative (1.5:1, +4 dB headroom, 0.25 high-freq depth, 12 dB max).
+- **General Clean:** Pragmatic. More aggressive noise reduction acceptable (Tier 4, relaxed artifact warnings). 3:1 compression always-on. Vocal Expander assertive (2.0:1, +6 dB headroom, 0.5 high-freq depth, 18 dB max).
+- **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Output may have a "dry booth" quality. Not recommended for ACX submission without careful review. Vocal Expander assertive (2.0:1) runs after parallel compression for additional silence-floor polish.
 
 ---
 

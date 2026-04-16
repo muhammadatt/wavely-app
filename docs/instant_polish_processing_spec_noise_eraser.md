@@ -50,6 +50,11 @@ Input
   ├── Stage NE-6:  Bandwidth extension (AudioSR)
   ├── Stage NE-7:  Post-separation enhancement EQ
   │
+  ├── Stage 4a:    Serial compression (standard DSP)
+  ├── Stage 4a-PC: Parallel compression (wet/dry blend)
+  ├── Stage 4a-E:  Vocal Expander (frequency-selective silence-floor attenuator)
+  ├── Stage 4b:    Auto Leveler (VAD-gated gain riding, conditional)
+  │
   ├── Stage 5:     Loudness Normalization (v3, standard path)
   ├── Stage 6:     True Peak Limiting (v3, standard path)
   └── Stage 7:     Measurement + Processing Report (v3, with NE additions)
@@ -60,9 +65,8 @@ Input
 - Stage 2 (Adaptive Noise Reduction / DF3) — replaced by NE-1 through NE-5
 - Stage 3 (Enhancement EQ) — replaced by NE-7 (post-separation EQ, different reference profile)
 - Stage 4 (De-esser) — not applied; separation-induced sibilance changes are addressed in NE-7
-- Stage 4a (Compression) — not applied at this stage; see note below
 
-**Note on compression:** Compression is intentionally omitted from the Noise Eraser path. Source separation output often has an already-compressed character due to the separation model's internal dynamics handling. Applying additional compression before normalization risks over-processing. If the output crest factor after normalization is below 8 dB, log a warning in the report. Future versions may add a post-normalization light compression pass if real-world output warrants it.
+**Note on compression:** The Noise Eraser path now includes Stage 4a / 4a-PC compression (aligned with the standard chain) followed by Stage 4a-E (vocal expander) and Stage 4b (auto leveler). The expander is calibrated from the measured silence P90 on the *current* signal regardless of what produced it, so the absence of upstream compression (for `clearervoice_eraser`) does not break calibration. Output crest factor is still logged; if below 8 dB after normalization, a warning appears in the report.
 
 ---
 
