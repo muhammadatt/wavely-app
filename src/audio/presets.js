@@ -112,7 +112,7 @@ export const PRESETS = {
     noiseFloorTarget: -60,
     compression: {
       mode: 'conditional',
-      ratio: 2,
+      ratio: 3,
       threshold: -24,               // static fallback
       thresholdMethod: 'adaptive',
       targetGrWindow: [2, 4],
@@ -144,8 +144,8 @@ export const PRESETS = {
       attackMs:                    0.75,   // midpoint of 0.5–1 ms spec range
       releaseMs:                   175,
       makeupGainDb:                7,
-      wetMix:                      0.15,   // 15% default; spec ceiling 20%
-      wetMixCeiling:               0.20,   // hard ceiling for ACX per spec
+      wetMix:                      0.25,   // 15% default; spec ceiling 20%
+      wetMixCeiling:               0.30,   // hard ceiling for ACX per spec
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
@@ -180,7 +180,7 @@ export const PRESETS = {
     noiseFloorTarget: null,
     compression: {
       mode: 'always',
-      ratio: 3,
+      ratio: 4,
       threshold: -20,               // static fallback
       thresholdMethod: 'adaptive',
       targetGrWindow: [4, 7],
@@ -212,7 +212,7 @@ export const PRESETS = {
       attackMs:                    0.40,   // midpoint of 0.3–0.5 ms spec range
       releaseMs:                   120,
       makeupGainDb:                9,
-      wetMix:                      0.30,   // midpoint of 25–35%
+      wetMix:                      0.40,   // midpoint of 25–35%
       wetMixCeiling:               null,
       vadFadeMs:                   10,
       crestGuardThresholdDb:       12,
@@ -420,15 +420,13 @@ export const PRESETS = {
       attackMs:                    1.0,
       releaseMs:                   225,    // longer release for smoothed separation transients
       makeupGainDb:                7,
-      wetMix:                      0.225,  // midpoint of 20–25%
+      wetMix:                      0.30,  // midpoint of 20–25%
       wetMixCeiling:               null,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
     },
-    // Stage 4a-E: Vocal Expander. Separation output already has a dry-booth
-    // quality; the expander's silence P90 calibration works correctly regardless
-    // of what produced the residual, so assertive settings are used here.
+    // Stage 4a-E: Vocal Expander Assertive settings are used here.
     vocalExpander: {
       enabled:          true,
       ratio:            2.0,
