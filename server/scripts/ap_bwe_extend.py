@@ -107,6 +107,10 @@ def main():
 
     print(f'AP-BWE using device: {device}')
 
+    num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
+    torch.set_num_threads(num_threads)
+    print(f'AP-BWE using {num_threads} CPU threads')
+
     # ── Load config and model ─────────────────────────────────────────────────
     with open(config_path) as f:
         h = AttrDict(json.load(f))

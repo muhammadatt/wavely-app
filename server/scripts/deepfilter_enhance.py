@@ -10,6 +10,7 @@ reduction, then writes the result as 32-bit float PCM WAV at 48 kHz.
 The caller (noiseReduce.js) resamples back to 44.1 kHz via FFmpeg.
 """
 import argparse
+import os
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -27,6 +28,9 @@ def main():
 
     import torch
     from df.enhance import enhance, init_df, load_audio, save_audio
+
+    num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
+    torch.set_num_threads(num_threads)
 
     # Load model — weights cached at ~/.cache/DeepFilterNet/DeepFilterNet3
     model, df_state, _ = init_df()

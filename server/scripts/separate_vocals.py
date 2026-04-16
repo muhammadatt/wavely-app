@@ -29,6 +29,7 @@ Output: 32-bit float PCM WAV at 44.1 kHz, mono or stereo per input channels.
         Channel output is controlled by the caller (stages.separateVocals).
 """
 import argparse
+import os
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -153,6 +154,8 @@ def main():
     from scipy.io import wavfile
 
     device = resolve_device(args.device)
+    num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
+    torch.set_num_threads(num_threads)
 
     # Load — scipy returns (samples,) mono or (samples, channels) stereo
     sr, audio_np = wavfile.read(args.input)

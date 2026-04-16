@@ -15,6 +15,7 @@
 
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
+import os from 'os'
 import path from 'path'
 import fs from 'fs'
 import { decodeToFloat32, tempPath, removeTmp } from '../lib/ffmpeg.js'
@@ -28,6 +29,7 @@ import { decodeToFloat32, tempPath, removeTmp } from '../lib/ffmpeg.js'
 //   Defaults to 'python3'. Set to a venv python path if needed.
 const DEEPFILTER_BINARY = process.env.DEEPFILTER_BINARY ?? null
 const PYTHON = process.env.DEEPFILTER_PYTHON ?? 'python3'
+const NUM_THREADS = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 const SCRIPT  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'deepfilter_enhance.py')
 
 /**
@@ -124,7 +126,10 @@ function runDeepFilterPython(inputPath, outputPath, attenLimDb) {
  */
 function spawnProcess(executable, args, label) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn(executable, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS },
+    })
 
     let stdout = ''
     let stderr = ''
