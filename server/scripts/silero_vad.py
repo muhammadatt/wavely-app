@@ -29,6 +29,7 @@ latency on CPU. Set SILERO_DEVICE=cuda to reduce this significantly.
 import argparse
 import json
 import math
+import os
 import sys
 import warnings
 
@@ -65,6 +66,9 @@ def main():
     from math import gcd
 
     device = resolve_device(args.device)
+
+    num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
+    torch.set_num_threads(num_threads)
 
     # Load Silero VAD model.
     #
