@@ -121,7 +121,7 @@ export const PRESETS = {
       attack: 10,
       release: 100,
     },
-    eqProfile: 'acx_narration',
+    eqProfile: 'audiobook',
     deEsser: {
       sensitivity: 'standard',
       trigger: 8,
@@ -225,7 +225,7 @@ export const PRESETS = {
       attack: 8,
       release: 90,
     },
-    eqProfile: 'voice_over',
+    eqProfile: 'general',
     deEsser: {
       sensitivity: 'standard',
       trigger: 8,
@@ -332,13 +332,12 @@ export const PRESETS = {
       attack: 8,
       release: 100,
     },
-    eqProfile: 'general',
+    eqProfile: 'podcast',
     deEsser: {
       sensitivity: 'high',
       trigger: 6,
       maxReduction: 8,
     },
-    eqProfile: 'separation_recovery',
     channelOutput: 'mono',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
@@ -385,7 +384,7 @@ export const PRESETS = {
       attack: 0,
       release: 0,
     },
-    eqProfile: 'separation_recovery',
+    eqProfile: 'podcast',
     deEsser: {
       sensitivity: 'none',
       trigger: 0,
