@@ -360,8 +360,8 @@ function formatVocalExpanderResult(r) {
     applied:        true,
     skipped_reason: null,
     calibration: {
-      silence_p90_pre_compression_dbfs:  r.silenceP90PreDb,
-      silence_p90_post_compression_dbfs: r.silenceP90PostDb,
+      noiseFloor_db: r.noiseFloorDb,
+      voiced_db: r.fullVoicedP50Db,
       threshold_dbfs:                    r.thresholdDb,
       headroom_offset_db:                r.headroomOffsetDb,
     },

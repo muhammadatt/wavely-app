@@ -453,8 +453,7 @@ export async function vocalExpander(ctx) {
 
   if (result.applied) {
     ctx.log(
-      `[vocal-expander] Applied — silenceP90 pre=${result.silenceP90PreDb}dB ` +
-      `post=${result.silenceP90PostDb}dB threshold=${result.thresholdDb}dB ` +
+      `[vocal-expander] Applied — threshold=${result.thresholdDb}dB ` +
       `ratio=${result.ratio}:1 avgAtten=${result.avgAttenuationSilenceDb}dB ` +
       `maxAtten=${result.maxAttenuationAppliedDb}dB ` +
       `expanded=${result.pctFramesExpanded}%`
