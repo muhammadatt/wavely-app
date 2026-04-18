@@ -66,60 +66,82 @@ def main():
 
     device = resolve_device(args.device)
 
-    # Load Silero VAD model.
+    # Load Silero VAD model — three strategies, tried in order.
     #
-    # Strategy 1 — torch.hub.load (preferred on Linux/VPS where torchaudio is
-    #   available). Weights (~10 MB) cached at:
-    #   ~/.cache/torch/hub/snakers4_silero-vad_master/
+    # Strategy 1 — JIT load from the silero-vad package's bundled data file.
+    #   Preferred on all platforms. Requires only `torch` (no torchaudio, no
+    #   network access, no GitHub). The silero_vad package must be installed
+    #   but its __init__ is NOT imported, so the torchaudio import inside the
+    #   package is never reached. Use importlib.util.find_spec to locate the
+    #   package directory without executing its code.
     #
-    # Strategy 2 — silero-vad package API (fallback for environments without
-    #   torchaudio, e.g. Windows ARM64). The package is named `silero_vad`,
-    #   which collides with this script's filename. Python inserts the script's
-    #   own directory at sys.path[0] when spawned, so a plain
+    # Strategy 2 — silero-vad package API (load_silero_vad).
+    #   Works on platforms with torchaudio installed. The package is named
+    #   `silero_vad`, which collides with this script's filename. Python inserts
+    #   the script's own directory at sys.path[0] when spawned, so a plain
     #   `from silero_vad import ...` would find THIS FILE instead of the
     #   installed package. We remove the script directory from sys.path for the
     #   duration of the import to force resolution to the installed package.
+    #
+    # Strategy 3 — torch.hub.load (last resort for envs without the package).
+    #   Weights (~10 MB) cached at ~/.cache/torch/hub/snakers4_silero-vad_master/
+    #   WARNING: torch.hub.load makes a GitHub network request to check for repo
+    #   updates even with force_reload=False. This can hang in environments
+    #   without outbound internet access. Strategies 1 and 2 are preferred.
+    import os as _os
+    import importlib as _il
+
+    model = None
+
+    # Both Strategy 1 and Strategy 2 need the script's own directory removed
+    # from sys.path so that `silero_vad` resolves to the installed package,
+    # not this file (silero_vad.py). We do the removal once up front.
+    _script_dir = _os.path.dirname(_os.path.abspath(__file__))
+    _saved_path = sys.path[:]
+    sys.path = [
+        p for p in sys.path
+        if _os.path.normcase(_os.path.abspath(p)) != _os.path.normcase(_script_dir)
+    ]
+
+    # ── Strategy 1: JIT load from package's bundled data file ──────────────
+    # find_spec locates the installed silero_vad package directory without
+    # executing its __init__.py, so the torchaudio import is never reached.
     try:
-        model, _ = torch.hub.load(
-            repo_or_dir='snakers4/silero-vad',
-            model='silero_vad',
-            force_reload=False,
-            onnx=False,
-        )
+        _spec = _il.util.find_spec('silero_vad')
+        if _spec is not None:
+            _pkg_dir = _os.path.dirname(_spec.origin)
+            _jit_path = _os.path.join(_pkg_dir, 'data', 'silero_vad.jit')
+            if _os.path.isfile(_jit_path):
+                model = torch.jit.load(_jit_path, map_location=device)
     except Exception:
-        import os as _os
-        import importlib as _il
+        model = None
 
-        # torch.hub.load may have partially registered 'silero_vad' in sys.modules
-        # before raising. Clear those entries so the fallback import below hits the
-        # installed package rather than the poisoned hub module.
-        for _key in [k for k in sys.modules if 'silero_vad' in k]:
-            del sys.modules[_key]
-
-        # Remove this script's directory from sys.path so `import silero_vad`
-        # resolves to the installed package, not this file (silero_vad.py).
-        _script_dir = _os.path.dirname(_os.path.abspath(__file__))
-        _saved_path = sys.path[:]
-        sys.path = [
-            p for p in sys.path
-            if _os.path.normcase(_os.path.abspath(p)) != _os.path.normcase(_script_dir)
-        ]
+    # ── Strategy 2: silero-vad package API ─────────────────────────────────
+    if model is None:
         try:
             from silero_vad import load_silero_vad
             model = load_silero_vad()
         except Exception:
-            # Last resort: load the JIT model directly from the package's bundled
-            # data file — no hub, no torchaudio, no package __init__ side-effects.
-            try:
-                _spec = _il.util.find_spec('silero_vad')
-                _pkg_dir = _os.path.dirname(_spec.origin)
-                _jit_path = _os.path.join(_pkg_dir, 'data', 'silero_vad.jit')
-                model = torch.jit.load(_jit_path, map_location=device)
-            except Exception as exc:
-                print(f'[silero_vad] Failed to load Silero VAD model: {exc}', file=sys.stderr)
-                sys.exit(1)
+            pass
         finally:
-            sys.path = _saved_path
+            # Clear any partial silero_vad entries poisoned by a failed import.
+            for _key in [k for k in sys.modules if 'silero_vad' in k]:
+                del sys.modules[_key]
+
+    sys.path = _saved_path  # restore regardless of which strategy succeeded
+
+    # ── Strategy 3: torch.hub.load ──────────────────────────────────────────
+    if model is None:
+        try:
+            model, _ = torch.hub.load(
+                repo_or_dir='snakers4/silero-vad',
+                model='silero_vad',
+                force_reload=False,
+                onnx=False,
+            )
+        except Exception as exc:
+            print(f'[silero_vad] Failed to load Silero VAD model: {exc}', file=sys.stderr)
+            sys.exit(1)
 
     try:
         model = model.to(device)

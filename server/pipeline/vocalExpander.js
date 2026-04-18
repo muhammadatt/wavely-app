@@ -31,7 +31,7 @@
 
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels }   from './wavWriter.js'
-import { remeasureFrames }    from './frameAnalysis.js'
+
 import { PRESETS }            from '../presets.js'
 
 const SAMPLE_RATE      = 44100
@@ -41,7 +41,7 @@ const ANALYSIS_FRAME_S = 0.1                                    // 100 ms — ma
 const DET_FRAMES_PER_ANALYSIS_FRAME = Math.round(ANALYSIS_FRAME_S / DET_FRAME_S) // 10
 
 const SKIP_THRESHOLD_DBFS = -72   // skip stage entirely when silence floor is this clean
-const THRESHOLD_FLOOR_DBFS = -70  // clamp below this — expander wouldn't contribute
+//const THRESHOLD_FLOOR_DBFS = -70  // clamp below this — expander wouldn't contribute
 const ATTENUATION_DETECT_DB = 0.1 // minimum attenuation to count a frame as "expanded"
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -61,7 +61,10 @@ const ATTENUATION_DETECT_DB = 0.1 // minimum attenuation to count a frame as "ex
  * @property {boolean} applied
  * @property {string|null} reason
  * @property {number|null} silenceP90PreDb
- * @property {number|null} silenceP90PostDb
+ * @property {number|null} noiseFloorDb
+ * @property {number|null} fullVoicedP50Db
+ * @property {number|null} thresholdFromNoiseFloor
+ * @property {number|null} thresholdFromVoiced
  * @property {number|null} thresholdDb
  * @property {number|null} headroomOffsetDb
  * @property {number|null} ratio
@@ -91,35 +94,7 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
 
   const silenceP90PreDb = computeSilenceP90Db(frameAnalysis)
 
-  // ── Step 2: post-compression re-measurement ───────────────────────────────
-  // remeasureFrames recomputes per-frame RMS on the current (post-compression)
-  // signal while preserving the Silero VAD isSilence labels. This is the
-  // authoritative silence-energy distribution the expander calibrates against.
-
-  const postCompFrames = await remeasureFrames(inputPath, frameAnalysis)
-  const silenceP90PostDb = computeSilenceP90Db(postCompFrames)
-
-  // ── Step 3: skip condition ────────────────────────────────────────────────
-
-  if (silenceP90PostDb == null) {
-    await copyThrough(inputPath, outputPath)
-    return { ...skipResult('no_silence_frames', config), silenceP90PreDb }
-  }
-
-  if (silenceP90PostDb < SKIP_THRESHOLD_DBFS) {
-    await copyThrough(inputPath, outputPath)
-    return {
-      ...skipResult('silence_floor_already_below_-72_dbfs', config),
-      silenceP90PreDb,
-      silenceP90PostDb: round2(silenceP90PostDb),
-    }
-  }
-
-  // ── Step 4: threshold calibration ─────────────────────────────────────────
-
-  const thresholdDb = Math.max(silenceP90PostDb + config.headroomOffsetDb, THRESHOLD_FLOOR_DBFS)
-
-  // ── Step 5: read audio ────────────────────────────────────────────────────
+  // ── Step 2: read audio ────────────────────────────────────────────────────
 
   const { channels, sampleRate } = await readWavAllChannels(inputPath)
   if (sampleRate !== SAMPLE_RATE) {
@@ -133,12 +108,12 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
 
   const n = channels[0].length
 
-  // ── Step 6: detection path (80–800 Hz bandpass on channel 0) ──────────────
+  // ── Step 3: detection path (80–800 Hz bandpass) + 10 ms frame RMS ─────────
+  // Moved before threshold calibration so that calibration operates in the
+  // same domain (detection band) as the threshold comparison in Step 7.
 
   const detection = applyHighpass(channels[0], sampleRate, config.detectionBand.lowHz)
   applyLowpassInPlace(detection, sampleRate, config.detectionBand.highHz)
-
-  // ── Step 7: 10 ms detection-frame RMS ─────────────────────────────────────
 
   const numDetFrames = Math.floor(n / DET_FRAME_SAMPLES)
   const detRmsDb = new Float64Array(numDetFrames)
@@ -150,7 +125,67 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
     detRmsDb[f] = rms > 0 ? 20 * Math.log10(rms) : -120
   }
 
-  // ── Step 8: per-frame target gain reduction (dB, ≤ 0) ─────────────────────
+  // ── Step 4: calibration from measured noise floor ──────────────────────────
+  // Use the actual noise floor measurement from frameAnalysis, not Silero's
+  // silence labels. Silero's "silence" includes breaths (-20 to -30 dB) which
+  // are not noise floor — they're non-speech sounds that should NOT be
+  // attenuated. The bootstrapped noiseFloorDbfs represents the true quiet
+  // floor (typically -50 to -60 dB) that we want to target.
+  //
+  // For the voiced anchor, compute P50 of voiced frames to establish a ceiling
+  // that protects speech from over-expansion.
+
+  const noiseFloorDb = frameAnalysis.noiseFloorDbfs
+
+  const fullVoicedDb = []
+  for (const frame of frameAnalysis.frames) {
+    if (!frame.isSilence) {
+      fullVoicedDb.push(frame.rmsDbfs)
+    }
+  }
+  const fullVoicedP50Db = computePercentile(fullVoicedDb, 0.5)
+
+  // ── Step 5: skip condition ────────────────────────────────────────────────
+
+  if (noiseFloorDb == null) {
+    await copyThrough(inputPath, outputPath)
+    return { ...skipResult('no_noise_floor_measurement', config), silenceP90PreDb }
+  }
+
+  if (noiseFloorDb < SKIP_THRESHOLD_DBFS) {
+    await copyThrough(inputPath, outputPath)
+    return {
+      ...skipResult('noise_floor_already_below_-72_dbfs', config),
+      silenceP90PreDb,
+      noiseFloorDb: round2(noiseFloorDb),
+    }
+  }
+
+  // ── Step 6: threshold calibration ─────────────────────────────────────────
+  // Two anchors:
+  //   thresholdFromNoiseFloor: headroomOffsetDb above the measured noise floor
+  //     — ensures actual noise (not breaths) triggers expansion.
+  //   thresholdFromVoiced: headroomOffsetDb below full-band voiced P50
+  //     — ensures most voiced frames do not trigger expansion.
+  //
+  // We use the bootstrapped noiseFloorDbfs (quietest frames) rather than
+  // Silero's silence P90, because Silero labels breaths as "silence" even
+  // though they're at -20 to -30 dB. Breaths should NOT be attenuated.
+  //
+  // Math.min picks the stricter (lower) anchor; the Math.max floor at
+  // noiseFloorDb prevents the voiced guard from dragging the threshold
+  // below the noise floor.
+
+  const thresholdFromNoiseFloor = noiseFloorDb + config.headroomOffsetDb
+  const thresholdFromVoiced     = fullVoicedP50Db != null
+    ? fullVoicedP50Db - config.headroomOffsetDb
+    : thresholdFromNoiseFloor
+  const thresholdDb = Math.max(
+    Math.min(thresholdFromNoiseFloor, thresholdFromVoiced),
+    noiseFloorDb,
+  )
+
+  // ── Step 7: per-frame target gain reduction (dB, ≤ 0) ─────────────────────
 
   const targetGrDb = new Float64Array(numDetFrames)
   for (let f = 0; f < numDetFrames; f++) {
@@ -159,12 +194,12 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
       targetGrDb[f] = 0
     } else {
       const below = thresholdDb - rmsDb
-      const rawGrDb = below * (1 - 1 / config.ratio) // positive reduction amount
-      targetGrDb[f] = -Math.min(rawGrDb, config.maxAttenuationDb) // negative (attenuation)
+      const rawGrDb = below * (1 - 1 / config.ratio)
+      targetGrDb[f] = -Math.min(rawGrDb, config.maxAttenuationDb)
     }
   }
 
-  // ── Step 9: envelope smoothing (lookahead + attack + hold + release) ──────
+  // ── Step 8: envelope smoothing (lookahead + attack + hold + release) ──────
 
   const smoothedGrDb = applyEnvelope(targetGrDb, {
     attackFrames:    Math.max(1, Math.round(config.attackMs    / (DET_FRAME_S * 1000))),
@@ -192,8 +227,6 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
   let maxAttenDb = 0
   let maxVoicedAttenDb = 0
   let expandedFrameCount = 0
-
-  const lowChannelForStats = null // channel 0 stats used; we could use any
 
   for (let ch = 0; ch < channels.length; ch++) {
     const x = channels[ch]
@@ -224,7 +257,7 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
     if (attenDb > maxAttenDb) maxAttenDb = attenDb
 
     const analysisIdx = Math.floor(f / DET_FRAMES_PER_ANALYSIS_FRAME)
-    const analysisFrame = postCompFrames.frames[analysisIdx]
+    const analysisFrame = frameAnalysis.frames[analysisIdx]
     if (!analysisFrame) continue
 
     if (analysisFrame.isSilence) {
@@ -251,7 +284,10 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
     applied:                     true,
     reason:                      null,
     silenceP90PreDb:             silenceP90PreDb != null ? round2(silenceP90PreDb) : null,
-    silenceP90PostDb:            round2(silenceP90PostDb),
+    noiseFloorDb:                round2(noiseFloorDb),
+    fullVoicedP50Db:             fullVoicedP50Db != null ? round2(fullVoicedP50Db) : null,
+    thresholdFromNoiseFloor:     round2(thresholdFromNoiseFloor),
+    thresholdFromVoiced:         fullVoicedP50Db != null ? round2(thresholdFromVoiced) : null,
     thresholdDb:                 round2(thresholdDb),
     headroomOffsetDb:            config.headroomOffsetDb,
     ratio:                       config.ratio,
@@ -284,6 +320,24 @@ function computeSilenceP90Db(fa) {
   silenceDb.sort((a, b) => a - b)
   const idx = Math.max(0, Math.min(silenceDb.length - 1, Math.ceil(0.9 * silenceDb.length) - 1))
   return silenceDb[idx]
+}
+
+// ── Percentile helper ───────────────────────────────────────────────────────
+
+/**
+ * Compute an arbitrary percentile from a numeric array.
+ * Uses the "ceil index" convention, matching compression.js.
+ * The array is sorted ascending in-place.
+ *
+ * @param {number[]} arr - Values (mutated by sort)
+ * @param {number}   p   - Percentile in [0, 1] (e.g. 0.9 for P90, 0.1 for P10)
+ * @returns {number|null}
+ */
+function computePercentile(arr, p) {
+  if (arr.length === 0) return null
+  arr.sort((a, b) => a - b)
+  const idx = Math.max(0, Math.min(arr.length - 1, Math.ceil(p * arr.length) - 1))
+  return arr[idx]
 }
 
 // ── Envelope smoothing ──────────────────────────────────────────────────────
