@@ -291,33 +291,26 @@ function formatAutoLevelerResult(r) {
 
 function formatCompressionResult(r) {
   if (!r) return null
-  const base = {
-    applied:               r.applied,
-    skipped_reason:        r.skippedReason,
-    crest_factor_db:       r.crestFactorDb,
-    max_gain_reduction_db: r.maxGainReductionDb,
-    avg_gain_reduction_db: r.avgGainReductionDb,
-    ratio:                 r.params?.ratio     ?? null,
-    threshold_dbfs:        r.params?.threshold ?? null,
-    attack_ms:             r.params?.attack    ?? null,
-    release_ms:            r.params?.release   ?? null,
-  }
-  if (r.applied) {
-    base.threshold_method  = r.thresholdMethod ?? null
-    base.threshold_clamped = r.thresholdClamped ?? false
-    if (r.thresholdMethod === 'adaptive_p85') {
-      base.p85_dbfs         = r.p85Dbfs
-      base.p99_dbfs         = r.p99Dbfs
-      base.expected_gr_db   = r.expectedGrDb
-      base.target_gr_window = r.targetGrWindow
-      if (r.thresholdClamped) {
-        base.threshold_pre_clamp_dbfs = r.thresholdPreClampDbfs
-      }
-    } else if (r.thresholdMethod === 'static_fallback') {
-      base.fallback_reason = r.fallbackReason
+  if (!r.applied) {
+    return {
+      applied:                 false,
+      input_crest_factor_db:   r.inputCrestFactorDb   ?? null,
+      target_crest_factor_db:  r.targetCrestFactorDb  ?? null,
+      skip_reason:             r.skipReason            ?? null,
     }
   }
-  return base
+  return {
+    applied:                   true,
+    input_crest_factor_db:     r.inputCrestFactorDb,
+    target_crest_factor_db:    r.targetCrestFactorDb,
+    threshold_percentile:      r.thresholdPercentile,
+    threshold_dbfs:            r.thresholdDbfs,
+    derived_ratio:             r.derivedRatio,
+    derived_gain_reduction_db: r.derivedGainReductionDb,
+    ratio_clamped:             r.ratioClamped ?? false,
+    max_gain_reduction_db:     r.maxGainReductionDb,
+    avg_gain_reduction_db:     r.avgGainReductionDb,
+  }
 }
 
 function formatParallelCompressionResult(r) {
@@ -448,6 +441,11 @@ function buildWarnings(ctx) {
 
   if (results.noiseReduction && !results.noiseReduction.applied) {
     warnings.push('Noise reduction not available — noise floor unchanged')
+  }
+
+  if (results.compression?.applied && results.compression.ratioClamped &&
+      results.compression.derivedRatio >= 6.0) {
+    warnings.push('Heavy compression was applied. Input dynamics were significantly outside target range.')
   }
 
   // ACX certification failures surface as warnings
