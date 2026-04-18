@@ -12,10 +12,12 @@
 
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
+import os from 'os'
 import path from 'path'
 
 const PYTHON = process.env.SEPARATION_PYTHON ?? 'python3'
 const DEVICE = process.env.SEPARATION_DEVICE ?? 'auto'
+const NUM_THREADS = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 
 const SCRIPTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
 const RNNOISE_SCRIPT          = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
@@ -153,7 +155,10 @@ export function runApBwe(inputPath, outputPath) {
 
 function spawnPython(script, args, label) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(PYTHON, [script, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn(PYTHON, [script, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS },
+    })
 
     let stderr = ''
 

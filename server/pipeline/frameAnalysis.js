@@ -39,6 +39,7 @@
 import { spawn }          from 'child_process'
 import { readFile, rm }   from 'fs/promises'
 import { fileURLToPath }  from 'url'
+import os                 from 'os'
 import path               from 'path'
 
 import { readWavSamples } from './wavReader.js'
@@ -46,6 +47,7 @@ import { readWavSamples } from './wavReader.js'
 const FRAME_DURATION_S = 0.1   // 100 ms frames — must match FRAME_DURATION_S in silero_vad.py
 const BOOTSTRAP_FRAMES = 20    // use this many lowest-energy frames to bootstrap noise floor
 
+const NUM_THREADS   = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 const VAD_BACKEND   = process.env.VAD_BACKEND   ?? 'silero'
 // Fall back through the other pipeline Python env vars so all scripts share
 // the same interpreter without requiring a separate SILERO_PYTHON entry.
@@ -204,7 +206,10 @@ function spawnSilero(inputPath, outputJsonPath) {
       SILERO_SCRIPT,
       '--input',  inputPath,
       '--output', outputJsonPath,
-    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS },
+    })
 
     let stdout = ''
     let stderr = ''
