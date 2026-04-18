@@ -87,6 +87,24 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
   const { peakDbfs, inputCrestFactorDb, frameRmsValues } =
     measureVoicedCrestFactor(analysisSamples, frameAnalysis)
 
+  if (inputCrestFactorDb === null || peakDbfs === null) {
+    console.log('[compression] Compression skipped — no voiced frames available for crest-factor measurement.')
+    await copyThrough(inputPath, outputPath)
+    return {
+      applied: false,
+      inputCrestFactorDb: null,
+      targetCrestFactorDb,
+      skipReason: 'No voiced frames / insufficient voiced content',
+      thresholdPercentile: null,
+      thresholdDbfs: null,
+      derivedRatio: null,
+      derivedGainReductionDb: null,
+      ratioClamped: false,
+      maxGainReductionDb: null,
+      avgGainReductionDb: null,
+    }
+  }
+
   // Step 2: Skip if already within target (including 0.5 dB margin)
   if (inputCrestFactorDb <= targetCrestFactorDb + SKIP_MARGIN_DB) {
     console.log(
@@ -180,7 +198,7 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
  *
  * @param {Float32Array} samples
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
- * @returns {{ peakDbfs: number, voicedRmsDbfs: number, inputCrestFactorDb: number, frameRmsValues: number[] }}
+ * @returns {{ peakDbfs: number|null, voicedRmsDbfs: number|null, inputCrestFactorDb: number|null, frameRmsValues: number[] }}
  */
 function measureVoicedCrestFactor(samples, frameAnalysis) {
   let sumSq = 0
@@ -213,7 +231,7 @@ function measureVoicedCrestFactor(samples, frameAnalysis) {
   }
 
   if (count === 0 || peak === 0) {
-    return { peakDbfs: -120, voicedRmsDbfs: -120, inputCrestFactorDb: 0, frameRmsValues: [] }
+    return { peakDbfs: null, voicedRmsDbfs: null, inputCrestFactorDb: null, frameRmsValues: [] }
   }
 
   const voicedRms     = Math.sqrt(sumSq / count)
