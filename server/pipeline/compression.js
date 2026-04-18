@@ -149,7 +149,9 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
     makeupGainDb: 0,
   }
   const gainCurve        = buildCompressionGainCurve(analysisSamples, sampleRate, compParams)
-  const processedChannels = channels.map(ch => applyCompressionGainCurve(ch, gainCurve.curve, 0))
+  const processedChannels = channels.map(ch =>
+    applyCompressionGainCurve(ch, gainCurve.curve, compParams.makeupGainDb)
+  )
 
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
