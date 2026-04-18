@@ -394,10 +394,12 @@ export async function compress(ctx) {
   ctx.currentPath        = compPath
   ctx.results.compression = compressionResult
   await logLevel(ctx, 'after compression', ctx.currentPath, {
-    applied: compressionResult.applied,
-    crest:   compressionResult.crestFactorDb      !== null ? `${compressionResult.crestFactorDb}dB`      : 'n/a',
-    maxRed:  compressionResult.maxGainReductionDb !== null ? `${compressionResult.maxGainReductionDb}dB` : 'n/a',
-    avgRed:  compressionResult.avgGainReductionDb !== null ? `${compressionResult.avgGainReductionDb}dB` : 'n/a',
+    applied:    compressionResult.applied,
+    crest_in:   compressionResult.inputCrestFactorDb  !== null ? `${compressionResult.inputCrestFactorDb}dB`  : 'n/a',
+    crest_tgt:  compressionResult.targetCrestFactorDb !== null ? `${compressionResult.targetCrestFactorDb}dB` : 'n/a',
+    ratio:      compressionResult.derivedRatio        !== null ? `${compressionResult.derivedRatio}:1`        : 'n/a',
+    threshold:  compressionResult.thresholdDbfs       !== null ? `${compressionResult.thresholdDbfs}dBFS`    : 'n/a',
+    maxRed:     compressionResult.maxGainReductionDb  !== null ? `${compressionResult.maxGainReductionDb}dB`  : 'n/a',
   })
 }
 

@@ -78,15 +78,11 @@ export function resolveOutputProfileId(id) {
  * @property {ParallelCompressionConfig} parallelCompression
  *
  * @typedef {Object} CompressionConfig
- * @property {'conditional'|'always'|'none'} mode
- * @property {number} ratio
- * @property {number} threshold                    - Static fallback threshold in dBFS (used when thresholdMethod is 'static' or when adaptive derivation falls back)
- * @property {number} attack                        - Attack time in ms
- * @property {number} release                       - Release time in ms
- * @property {'adaptive'|'static'} [thresholdMethod]  - Threshold derivation strategy. Omitted/static = use static threshold; 'adaptive' = P85-based adaptive algorithm (Stage 4a addendum)
- * @property {[number, number]} [targetGrWindow]     - [minDb, maxDb] expected gain reduction window for adaptive threshold
- * @property {number} [thresholdMin]                 - Adaptive sanity clamp floor (dBFS)
- * @property {number} [thresholdMax]                 - Adaptive sanity clamp ceiling (dBFS)
+ * @property {'conditional'|'none'} mode
+ * @property {number} targetCrestFactorDb  - Target crest factor for output voiced speech (dB). Compression is skipped if input crest factor is already within this value.
+ * @property {number} thresholdPercentile  - Percentile of voiced-frame RMS distribution used to anchor the threshold (e.g. 0.75 = 75th percentile).
+ * @property {number} attack               - Attack time in ms
+ * @property {number} release              - Release time in ms
  * @property {string} eqProfile
  * @property {{ sensitivity: 'standard'|'high'|'none', trigger: number, maxReduction: number }} deEsser
  * @property {'mono'|'preserve'} channelOutput
@@ -112,12 +108,8 @@ export const PRESETS = {
     noiseFloorTarget: -60,
     compression: {
       mode: 'conditional',
-      ratio: 3,
-      threshold: -24,               // static fallback
-      thresholdMethod: 'adaptive',
-      targetGrWindow: [2, 4],
-      thresholdMin: -36,
-      thresholdMax: -12,
+      targetCrestFactorDb: 14,
+      thresholdPercentile: 0.75,
       attack: 10,
       release: 100,
     },
@@ -179,13 +171,9 @@ export const PRESETS = {
     truePeakCeiling: -1,
     noiseFloorTarget: null,
     compression: {
-      mode: 'always',
-      ratio: 4,
-      threshold: -20,               // static fallback
-      thresholdMethod: 'adaptive',
-      targetGrWindow: [4, 7],
-      thresholdMin: -36,
-      thresholdMax: -10,
+      mode: 'conditional',
+      targetCrestFactorDb: 10,
+      thresholdPercentile: 0.75,
       attack: 5,
       release: 80,
     },
@@ -246,13 +234,9 @@ export const PRESETS = {
     truePeakCeiling: -3,
     noiseFloorTarget: null,
     compression: {
-      mode: 'always',
-      ratio: 2.5,
-      threshold: -22,               // static fallback
-      thresholdMethod: 'adaptive',
-      targetGrWindow: [3, 5],
-      thresholdMin: -36,
-      thresholdMax: -12,
+      mode: 'conditional',
+      targetCrestFactorDb: 12,
+      thresholdPercentile: 0.75,
       attack: 8,
       release: 90,
     },
@@ -317,13 +301,9 @@ export const PRESETS = {
     truePeakCeiling: -1,
     noiseFloorTarget: null,
     compression: {
-      mode: 'always',
-      ratio: 3,
-      threshold: -20,               // static fallback
-      thresholdMethod: 'adaptive',
-      targetGrWindow: [4, 8],
-      thresholdMin: -40,
-      thresholdMax: -10,
+      mode: 'conditional',
+      targetCrestFactorDb: 10,
+      thresholdPercentile: 0.70,
       attack: 8,
       release: 80,
     },
@@ -384,12 +364,8 @@ export const PRESETS = {
     noiseFloorTarget: null,
     compression: {
       mode: 'conditional',
-      ratio: 2,
-      threshold: -24,              
-      thresholdMethod: 'adaptive',
-      targetGrWindow: [4, 8],
-      thresholdMin: -40,
-      thresholdMax: -10,
+      targetCrestFactorDb: 10,
+      thresholdPercentile: 0.75,
       attack: 8,
       release: 100,
     },
@@ -453,12 +429,8 @@ export const PRESETS = {
     noiseFloorTarget: null,
     compression: {
       mode: 'conditional',
-      ratio: 2,
-      threshold: -24,              
-      thresholdMethod: 'adaptive',
-      targetGrWindow: [4, 8],
-      thresholdMin: -40,
-      thresholdMax: -10,
+      targetCrestFactorDb: 10,
+      thresholdPercentile: 0.75,
       attack: 8,
       release: 100,
     },

@@ -1,39 +1,36 @@
 /**
- * Stage 4a — Dynamic Range Compression.
+ * Stage 4a — Adaptive Crest Factor Compression.
  *
- * Feed-forward RMS compressor with soft knee, per-preset parameters.
+ * Input-adaptive model: measures the crest factor of voiced speech frames,
+ * compares it to the preset's target, and derives the minimum ratio needed
+ * to bridge the gap. Compression is skipped if the input is already within
+ * the target crest factor.
  *
- * Reference: processing spec v3, Stage 4a.
+ * Reference: Adaptive Compression Specification (April 2026 addendum),
+ *            processing spec v3, Stage 4a.
  *
- * Behavior by preset:
- *   ACX Audiobook  — Conditional: only when crest factor > 20 dB
- *   Podcast Ready  — Always applied
- *   Voice Ready    — Always applied
- *   General Clean  — Always applied
+ * Algorithm:
+ *   1. Measure input crest factor on voiced frames (peak - voiced RMS, in dB).
+ *   2. Skip if input crest factor <= target + 0.5 dB margin.
+ *   3. Derive threshold from the preset-specified percentile of the
+ *      voiced-frame RMS distribution.
+ *   4. Derive ratio: peak_above_threshold / (peak_above_threshold - required_reduction)
+ *   5. Clamp ratio to [1.2, 6.0]. Log warning if ceiling hit.
+ *   6. Apply feed-forward RMS compressor with soft knee.
  *
- * Architecture:
- *   - Level detection: RMS with attack/release smoothing (feed-forward)
- *   - Gain computer: soft-knee compressor, knee width = 4 dB (spec §4a)
- *   - Makeup gain: 0 dB — Stage 5 normalization handles level
- *   - Lookahead: none (true real-time model for correctness)
- *
- * Crest factor measurement (ACX conditional):
- *   crest_factor = peak_dBFS - voiced_RMS_dBFS
- *   If crest_factor <= 20 dB, skip compression for ACX Audiobook.
+ * Fixed parameters (per spec): attack, release, knee width, makeup gain = 0 dB.
  */
 
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels } from './wavWriter.js'
 import { PRESETS } from '../presets.js'
 
-const SAMPLE_RATE = 44100
-const KNEE_WIDTH_DB = 4  // spec: soft knee 4 dB for all presets
-
-// --- Adaptive threshold (Stage 4a addendum) ---
-const ADAPTIVE_WINDOW_SAMPLES = 1024      // ~23 ms @ 44.1 kHz (spec)
-const ADAPTIVE_HOP_SAMPLES    = 512       // 50% overlap (spec)
-const ADAPTIVE_MIN_WINDOWS    = 50        // below this, fall back to static
-const ADAPTIVE_NOISE_MARGIN_DB = 6        // drop windows within noiseFloor + 6 dB
+const KNEE_WIDTH_DB           = 4      // soft knee width, all presets
+const RATIO_MIN               = 1.2    // below this is a no-op
+const RATIO_MAX               = 6.0    // above this: apply ceiling, log warning
+const SKIP_MARGIN_DB          = 0.5    // skip if within this margin of target
+const FALLBACK_THRESHOLD_DBFS = -22    // used when < MIN_VOICED_FRAMES available
+const MIN_VOICED_FRAMES       = 50     // minimum frames for stable percentile estimate
 
 // ── Main API ────────────────────────────────────────────────────────────────
 
@@ -48,260 +45,210 @@ const ADAPTIVE_NOISE_MARGIN_DB = 6        // drop windows within noiseFloor + 6 
  *
  * @typedef {Object} CompressionResult
  * @property {boolean} applied
- * @property {string|null} skippedReason        - Why compression was skipped
- * @property {number|null} crestFactorDb        - Measured crest factor (ACX path)
- * @property {number|null} maxGainReductionDb   - Peak gain reduction during processing
- * @property {number|null} avgGainReductionDb   - Average gain reduction applied
- * @property {{ threshold: number, ratio: number, attack: number, release: number }} params
- * @property {'adaptive_p85'|'static'|'static_fallback'|null} [thresholdMethod]
- *     How the threshold used for compression was derived.
- * @property {string|null} [fallbackReason]     - If static_fallback, why
- * @property {number|null} [p85Dbfs]            - Adaptive: P85 of voiced-window RMS
- * @property {number|null} [p99Dbfs]            - Adaptive: P99 of voiced-window RMS
- * @property {number|null} [expectedGrDb]       - Adaptive: P99 - P85
- * @property {[number, number]|null} [targetGrWindow]
- * @property {boolean} [thresholdClamped]       - Adaptive: whether the derived value hit the clamp range
- * @property {number|null} [thresholdPreClampDbfs]
+ * @property {number|null} inputCrestFactorDb    - Measured input crest factor (voiced frames)
+ * @property {number|null} targetCrestFactorDb   - Preset target crest factor
+ * @property {string|null} skipReason            - Set when applied is false
+ * @property {number|null} thresholdPercentile   - Percentile used for threshold (when applied)
+ * @property {number|null} thresholdDbfs         - Derived threshold in dBFS (when applied)
+ * @property {number|null} derivedRatio          - Derived compression ratio (when applied)
+ * @property {number|null} derivedGainReductionDb - Expected gain reduction at the peak (when applied)
+ * @property {boolean} ratioClamped              - Whether derived ratio was clamped to [1.2, 6.0]
+ * @property {number|null} maxGainReductionDb    - Peak gain reduction during processing
+ * @property {number|null} avgGainReductionDb    - Average gain reduction applied
  */
 export async function applyCompression(inputPath, outputPath, presetId, frameAnalysis) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
   const presetComp = preset.compression
-  const { mode, ratio, threshold: staticThreshold, attack, release } = presetComp
+  const { mode, targetCrestFactorDb, thresholdPercentile, attack, release } = presetComp
 
-  // --- mode: 'none' — preset explicitly disables compression (e.g. ClearerVoice) ---
   if (mode === 'none') {
     await copyThrough(inputPath, outputPath)
     return {
       applied: false,
-      skippedReason: 'Compression disabled for this preset',
-      crestFactorDb: null,
+      inputCrestFactorDb: null,
+      targetCrestFactorDb: null,
+      skipReason: 'Compression disabled for this preset',
+      thresholdPercentile: null,
+      thresholdDbfs: null,
+      derivedRatio: null,
+      derivedGainReductionDb: null,
+      ratioClamped: false,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
-      params: { threshold: staticThreshold, ratio, attack, release },
     }
   }
 
   const { channels, sampleRate } = await readWavAllChannels(inputPath)
-
-  // Use channel 0 for crest factor analysis
   const analysisSamples = channels[0]
 
-  // --- ACX conditional: measure crest factor ---
-  let crestFactorDb = null
-  if (mode === 'conditional') {
-    crestFactorDb = measureCrestFactor(analysisSamples, frameAnalysis)
-    if (crestFactorDb <= 20) {
-      await copyThrough(inputPath, outputPath)
-      return {
-        applied: false,
-        skippedReason: `Crest factor ${round2(crestFactorDb)} dB <= 20 dB threshold`,
-        crestFactorDb: round2(crestFactorDb),
-        maxGainReductionDb: null,
-        avgGainReductionDb: null,
-        params: { threshold: staticThreshold, ratio, attack, release },
-      }
+  // Step 1: Measure input crest factor on voiced frames
+  const { peakDbfs, inputCrestFactorDb, frameRmsValues } =
+    measureVoicedCrestFactor(analysisSamples, frameAnalysis)
+
+  // Step 2: Skip if already within target (including 0.5 dB margin)
+  if (inputCrestFactorDb <= targetCrestFactorDb + SKIP_MARGIN_DB) {
+    console.log(
+      `[compression] Compression skipped — input crest factor ${round2(inputCrestFactorDb)} dB` +
+      ` already within target ${targetCrestFactorDb} dB.`
+    )
+    await copyThrough(inputPath, outputPath)
+    return {
+      applied: false,
+      inputCrestFactorDb: round2(inputCrestFactorDb),
+      targetCrestFactorDb,
+      skipReason: 'Input crest factor within target',
+      thresholdPercentile: null,
+      thresholdDbfs: null,
+      derivedRatio: null,
+      derivedGainReductionDb: null,
+      ratioClamped: false,
+      maxGainReductionDb: null,
+      avgGainReductionDb: null,
     }
   }
 
-  // --- Derive threshold (adaptive per spec addendum, or static) ---
-  const adaptive = presetComp.thresholdMethod === 'adaptive'
-    ? deriveAdaptiveThreshold(analysisSamples, frameAnalysis, presetComp)
-    : {
-        thresholdDb:           staticThreshold,
-        method:                'static',
-        fallbackReason:        null,
-        p85Dbfs:               null,
-        p99Dbfs:               null,
-        expectedGrDb:          null,
-        thresholdClamped:      false,
-        thresholdPreClampDbfs: null,
-      }
+  // Step 3: Derive threshold from voiced-frame RMS percentile
+  const { thresholdDbfs } = deriveThreshold(frameRmsValues, thresholdPercentile)
 
-  // --- Build gain curve from channel 0, apply to all channels ---
+  // Step 4: Derive ratio
+  const requiredReductionDb = inputCrestFactorDb - targetCrestFactorDb
+  const peakAboveThreshold  = peakDbfs - thresholdDbfs
+
+  let derivedRatio
+  let ratioClamped = false
+
+  if (peakAboveThreshold <= 0 || peakAboveThreshold - requiredReductionDb <= 0) {
+    // Degenerate: peak at or below threshold, or reduction needed exceeds headroom
+    derivedRatio = RATIO_MAX
+    ratioClamped = true
+    console.warn('[compression] Degenerate ratio derivation — clamping to 6:1')
+  } else {
+    derivedRatio = peakAboveThreshold / (peakAboveThreshold - requiredReductionDb)
+    if (derivedRatio < RATIO_MIN) {
+      derivedRatio = RATIO_MIN
+      ratioClamped = true
+    } else if (derivedRatio > RATIO_MAX) {
+      derivedRatio = RATIO_MAX
+      ratioClamped = true
+      console.warn(
+        `[compression] Heavy compression needed — derived ratio exceeded 6:1 ceiling. ` +
+        `Input crest factor: ${round2(inputCrestFactorDb)} dB, target: ${targetCrestFactorDb} dB.`
+      )
+    }
+  }
+
+  // Step 5: Build gain curve from channel 0, apply to all channels
   const compParams = {
-    thresholdDb: adaptive.thresholdDb,
-    ratio,
-    attackMs: attack,
-    releaseMs: release,
-    kneeDb: KNEE_WIDTH_DB,
+    thresholdDb:  thresholdDbfs,
+    ratio:        derivedRatio,
+    attackMs:     attack,
+    releaseMs:    release,
+    kneeDb:       KNEE_WIDTH_DB,
     makeupGainDb: 0,
   }
-  const gainCurve = buildCompressionGainCurve(analysisSamples, sampleRate, compParams)
-  const processedChannels = channels.map(ch => applyCompressionGainCurve(ch, gainCurve.curve, compParams.makeupGainDb))
+  const gainCurve        = buildCompressionGainCurve(analysisSamples, sampleRate, compParams)
+  const processedChannels = channels.map(ch => applyCompressionGainCurve(ch, gainCurve.curve, 0))
 
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
   return {
     applied: true,
-    skippedReason: null,
-    crestFactorDb: crestFactorDb !== null ? round2(crestFactorDb) : null,
-    maxGainReductionDb: round2(gainCurve.maxGainReductionDb),
-    avgGainReductionDb: round2(gainCurve.avgGainReductionDb),
-    params: { threshold: round2(adaptive.thresholdDb), ratio, attack, release },
-    thresholdMethod:       adaptive.method,
-    fallbackReason:        adaptive.fallbackReason,
-    p85Dbfs:               adaptive.p85Dbfs !== null ? round2(adaptive.p85Dbfs) : null,
-    p99Dbfs:               adaptive.p99Dbfs !== null ? round2(adaptive.p99Dbfs) : null,
-    expectedGrDb:          adaptive.expectedGrDb !== null ? round2(adaptive.expectedGrDb) : null,
-    targetGrWindow:        presetComp.targetGrWindow ?? null,
-    thresholdClamped:      adaptive.thresholdClamped,
-    thresholdPreClampDbfs: adaptive.thresholdPreClampDbfs !== null ? round2(adaptive.thresholdPreClampDbfs) : null,
+    inputCrestFactorDb:     round2(inputCrestFactorDb),
+    targetCrestFactorDb,
+    skipReason: null,
+    thresholdPercentile,
+    thresholdDbfs:          round2(thresholdDbfs),
+    derivedRatio:           round2(derivedRatio),
+    derivedGainReductionDb: round2(requiredReductionDb),
+    ratioClamped,
+    maxGainReductionDb:     round2(gainCurve.maxGainReductionDb),
+    avgGainReductionDb:     round2(gainCurve.avgGainReductionDb),
   }
 }
 
 // ── Crest Factor Measurement ────────────────────────────────────────────────
 
 /**
- * Compute crest factor on voiced frames: peak_dBFS - voiced_RMS_dBFS.
- * Uses the same voiced-frame set as the normalization stage.
+ * Measure crest factor on voiced frames only.
+ *
+ * Returns peak dBFS, overall voiced RMS dBFS, crest factor (peak - RMS), and
+ * an array of per-frame RMS values in dBFS for threshold percentile derivation.
+ *
+ * @param {Float32Array} samples
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
+ * @returns {{ peakDbfs: number, voicedRmsDbfs: number, inputCrestFactorDb: number, frameRmsValues: number[] }}
  */
-function measureCrestFactor(samples, frameAnalysis) {
+function measureVoicedCrestFactor(samples, frameAnalysis) {
   let sumSq = 0
   let count = 0
-  let peak = 0
+  let peak  = 0
+  const frameRmsValues = []
 
   for (const frame of frameAnalysis.frames) {
     if (frame.isSilence) continue
     const start = frame.offsetSamples
-    const end = Math.min(start + frame.lengthSamples, samples.length)
+    const end   = Math.min(start + frame.lengthSamples, samples.length)
+    if (end <= start) continue
+
+    let frameSumSq = 0
+    let frameCount = 0
     for (let i = start; i < end; i++) {
       const abs = Math.abs(samples[i])
-      sumSq += samples[i] * samples[i]
+      const sq  = samples[i] * samples[i]
+      sumSq     += sq
+      frameSumSq += sq
       if (abs > peak) peak = abs
       count++
+      frameCount++
+    }
+    if (frameCount > 0) {
+      const frameRms   = Math.sqrt(frameSumSq / frameCount)
+      const frameRmsDb = frameRms > 0 ? 20 * Math.log10(frameRms) : -120
+      frameRmsValues.push(frameRmsDb)
     }
   }
 
-  if (count === 0 || peak === 0) return 0
-
-  const voicedRms = Math.sqrt(sumSq / count)
-  const peakDb = 20 * Math.log10(peak)
-  const rmsDb  = voicedRms > 0 ? 20 * Math.log10(voicedRms) : -120
-
-  return peakDb - rmsDb
-}
-
-// ── Adaptive Threshold (Stage 4a addendum) ──────────────────────────────────
-
-/**
- * Derive an adaptive compression threshold from the voiced-frame RMS
- * distribution.
- *
- * Algorithm (see `docs/instant_polish_adaptive_compression_threshold.md`):
- *   1. Slide 1024-sample / hop-512 windows across voiced frames only; compute
- *      per-window RMS in dBFS.
- *   2. Drop windows within `noiseFloor + 6 dB` (noise-contaminated breath tails).
- *   3. If surviving windows < 50, fall back to the preset's static threshold.
- *   4. Compute P85 (start) and P99 (peak proxy) of the distribution.
- *   5. Nudge threshold by half the gap between expected GR (P99 - P85) and the
- *      preset's target GR window.
- *   6. Clamp to preset [thresholdMin, thresholdMax].
- *
- * @param {Float32Array} samples
- * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
- * @param {import('../../src/audio/presets.js').CompressionConfig} presetComp
- * @returns {{
- *   thresholdDb: number,
- *   method: 'adaptive_p85'|'static_fallback',
- *   fallbackReason: string|null,
- *   p85Dbfs: number|null,
- *   p99Dbfs: number|null,
- *   expectedGrDb: number|null,
- *   thresholdClamped: boolean,
- *   thresholdPreClampDbfs: number|null,
- * }}
- */
-function deriveAdaptiveThreshold(samples, frameAnalysis, presetComp) {
-  const staticFallback = (reason) => ({
-    thresholdDb:           presetComp.threshold,
-    method:                'static_fallback',
-    fallbackReason:        reason,
-    p85Dbfs:               null,
-    p99Dbfs:               null,
-    expectedGrDb:          null,
-    thresholdClamped:      false,
-    thresholdPreClampDbfs: null,
-  })
-
-  const noiseCeiling = frameAnalysis.noiseFloorDbfs + ADAPTIVE_NOISE_MARGIN_DB
-  const voicedRms = collectVoicedWindowRmsDbfs(samples, frameAnalysis, noiseCeiling)
-
-  if (voicedRms.length < ADAPTIVE_MIN_WINDOWS) {
-    console.log('[compression] adaptive_threshold: insufficient voiced content — using static fallback')
-    return staticFallback('insufficient_voiced_content')
+  if (count === 0 || peak === 0) {
+    return { peakDbfs: -120, voicedRmsDbfs: -120, inputCrestFactorDb: 0, frameRmsValues: [] }
   }
 
-  const sorted = voicedRms.sort((a, b) => a - b)
-  const p85 = computePercentile(sorted, 85)
-  const p99 = computePercentile(sorted, 99)
-  const expectedGr = p99 - p85
-
-  const [targetMin, targetMax] = presetComp.targetGrWindow
-  let threshold
-  if (expectedGr < targetMin) {
-    // Compressor barely engaging — lower threshold
-    threshold = p85 - (targetMin - expectedGr) / 2
-  } else if (expectedGr > targetMax) {
-    // Compressor too aggressive — raise threshold
-    threshold = p85 + (expectedGr - targetMax) / 2
-  } else {
-    threshold = p85
-  }
-
-  const preClamp = threshold
-  const clamped = Math.min(
-    Math.max(threshold, presetComp.thresholdMin),
-    presetComp.thresholdMax,
-  )
-  const thresholdClamped = clamped !== preClamp
+  const voicedRms     = Math.sqrt(sumSq / count)
+  const peakDbfs      = 20 * Math.log10(peak)
+  const voicedRmsDbfs = voicedRms > 0 ? 20 * Math.log10(voicedRms) : -120
 
   return {
-    thresholdDb:           clamped,
-    method:                'adaptive_p85',
-    fallbackReason:        null,
-    p85Dbfs:               p85,
-    p99Dbfs:               p99,
-    expectedGrDb:          expectedGr,
-    thresholdClamped,
-    thresholdPreClampDbfs: thresholdClamped ? preClamp : null,
+    peakDbfs,
+    voicedRmsDbfs,
+    inputCrestFactorDb: peakDbfs - voicedRmsDbfs,
+    frameRmsValues,
   }
 }
 
-/**
- * Collect RMS (dBFS) for every 1024-sample window fully contained within a
- * voiced frame, dropping windows at/below the noise-contamination ceiling.
- */
-function collectVoicedWindowRmsDbfs(samples, frameAnalysis, noiseCeilingDbfs) {
-  const out = []
-  for (const frame of frameAnalysis.frames) {
-    if (frame.isSilence) continue
-    const frameEnd = Math.min(frame.offsetSamples + frame.lengthSamples, samples.length)
-    for (let start = frame.offsetSamples; start + ADAPTIVE_WINDOW_SAMPLES <= frameEnd; start += ADAPTIVE_HOP_SAMPLES) {
-      let sumSq = 0
-      const end = start + ADAPTIVE_WINDOW_SAMPLES
-      for (let i = start; i < end; i++) sumSq += samples[i] * samples[i]
-      const rms = Math.sqrt(sumSq / ADAPTIVE_WINDOW_SAMPLES)
-      if (rms <= 0) continue
-      const rmsDbfs = 20 * Math.log10(rms)
-      if (rmsDbfs < noiseCeilingDbfs) continue
-      out.push(rmsDbfs)
-    }
-  }
-  return out
-}
+// ── Threshold Derivation ────────────────────────────────────────────────────
 
 /**
- * Percentile via the "ceil index" convention from the spec:
- *   idx = ceil(p/100 * N) - 1, clamped to [0, N-1]
- * `sorted` MUST already be sorted ascending.
+ * Derive compression threshold from the percentile of voiced-frame RMS values.
+ *
+ * Falls back to a fixed threshold when fewer than MIN_VOICED_FRAMES are available.
+ *
+ * @param {number[]} frameRmsValues - Per-frame RMS in dBFS for all voiced frames
+ * @param {number} percentile       - Fractional (0.0–1.0); e.g. 0.75 = 75th percentile
+ * @returns {{ thresholdDbfs: number, usedFallback: boolean }}
  */
-function computePercentile(sorted, percentile) {
-  const n = sorted.length
-  if (n === 0) return 0
-  const idx = Math.max(0, Math.min(n - 1, Math.ceil((percentile / 100) * n) - 1))
-  return sorted[idx]
+function deriveThreshold(frameRmsValues, percentile) {
+  if (frameRmsValues.length < MIN_VOICED_FRAMES) {
+    console.log(
+      `[compression] Fewer than ${MIN_VOICED_FRAMES} voiced frames — ` +
+      `falling back to fixed threshold ${FALLBACK_THRESHOLD_DBFS} dBFS`
+    )
+    return { thresholdDbfs: FALLBACK_THRESHOLD_DBFS, usedFallback: true }
+  }
+
+  const sorted = [...frameRmsValues].sort((a, b) => a - b)
+  const idx    = Math.max(0, Math.min(sorted.length - 1, Math.ceil(percentile * sorted.length) - 1))
+  return { thresholdDbfs: sorted[idx], usedFallback: false }
 }
 
 // ── Compressor DSP ──────────────────────────────────────────────────────────
@@ -309,11 +256,8 @@ function computePercentile(sorted, percentile) {
 /**
  * Build a per-sample gain reduction curve (feed-forward, RMS detection).
  *
- * Level detection: power-domain envelope follower with attack/release
- * time constants. Gain computer applies soft-knee compression.
- *
- * Returns the gain curve and statistics. Apply to all channels via
- * applyCompressionGainCurve().
+ * Level detection: power-domain envelope follower with attack/release time
+ * constants. Gain computer applies soft-knee compression.
  *
  * @returns {{ curve: Float32Array, maxGainReductionDb: number, avgGainReductionDb: number }}
  */
@@ -324,12 +268,11 @@ function buildCompressionGainCurve(samples, sampleRate, params) {
   const attackCoeff  = Math.exp(-1 / (sampleRate * attackMs / 1000))
   const releaseCoeff = Math.exp(-1 / (sampleRate * releaseMs / 1000))
 
-  // curve[i] = gain reduction in dB (positive = attenuation)
   const curve = new Float32Array(n)
-  let powerEnv = 0
+  let powerEnv         = 0
   let maxGainReductionDb = 0
   let totalGainReductionDb = 0
-  let activeFrames = 0
+  let activeFrames     = 0
 
   for (let i = 0; i < n; i++) {
     const xPow = samples[i] * samples[i]
@@ -340,7 +283,7 @@ function buildCompressionGainCurve(samples, sampleRate, params) {
       powerEnv = releaseCoeff * powerEnv + (1 - releaseCoeff) * xPow
     }
 
-    const levelDb = powerEnv > 1e-14 ? 10 * Math.log10(powerEnv) : -120
+    const levelDb        = powerEnv > 1e-14 ? 10 * Math.log10(powerEnv) : -120
     const gainReductionDb = computeGainReduction(levelDb, thresholdDb, ratio, kneeDb)
 
     curve[i] = gainReductionDb
@@ -356,10 +299,10 @@ function buildCompressionGainCurve(samples, sampleRate, params) {
 }
 
 /**
- * Apply a compression gain curve to a channel.
+ * Apply a compression gain curve to a single channel.
  */
 function applyCompressionGainCurve(samples, curve, makeupGainDb) {
-  const n = samples.length
+  const n      = samples.length
   const output = new Float32Array(n)
   for (let i = 0; i < n; i++) {
     const gainLin = Math.pow(10, (-curve[i] + makeupGainDb) / 20)
@@ -371,7 +314,7 @@ function applyCompressionGainCurve(samples, curve, makeupGainDb) {
 /**
  * Soft-knee gain computer.
  *
- * Returns gain reduction in dB (positive = reduction).
+ * Returns gain reduction in dB (positive = attenuation).
  *
  * @param {number} levelDb     - Input level in dBFS
  * @param {number} thresholdDb - Compression threshold in dBFS
@@ -380,19 +323,16 @@ function applyCompressionGainCurve(samples, curve, makeupGainDb) {
  */
 function computeGainReduction(levelDb, thresholdDb, ratio, kneeDb) {
   const halfKnee = kneeDb / 2
-  const x = levelDb - thresholdDb  // distance above threshold
+  const x = levelDb - thresholdDb
 
   if (x < -halfKnee) {
-    // Below knee: no compression
     return 0
   } else if (x <= halfKnee) {
-    // In the knee: quadratic interpolation
-    // Formula: gain_reduction = (1 - 1/ratio) * (x + halfKnee)^2 / (2 * kneeDb)
+    // Quadratic interpolation through knee
     const t = x + halfKnee
     return (1 - 1 / ratio) * (t * t) / (2 * kneeDb)
   } else {
-    // Above knee: full compression
-    // gain_reduction = (1 - 1/ratio) * (x - halfKnee) + knee_corner_reduction
+    // Full compression above knee
     const cornerReduction = (1 - 1 / ratio) * (kneeDb / 2)
     return cornerReduction + (1 - 1 / ratio) * (x - halfKnee)
   }
@@ -408,4 +348,3 @@ async function copyThrough(inputPath, outputPath) {
   const { readFile, writeFile } = await import('fs/promises')
   await writeFile(outputPath, await readFile(inputPath))
 }
-

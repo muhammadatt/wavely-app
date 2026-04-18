@@ -83,6 +83,10 @@ function toggleReviewed(flagId) {
   reviewedFlags[flagId] = !reviewedFlags[flagId]
 }
 
+// --- Compression detail ---
+
+const compressionDetail = computed(() => props.report.processing_applied?.compression ?? null)
+
 // --- Processing chain (kept from v1) ---
 
 const processingChain = computed(() => {
@@ -196,7 +200,23 @@ const processingChain = computed(() => {
       </button>
     </div>
 
-    <!-- ===== Section 3: Before You Submit (advisory flags) ===== -->
+    <!-- ===== Section 3: Compression Detail ===== -->
+    <div v-if="compressionDetail">
+      <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider mb-1.5">Compression</div>
+      <div v-if="compressionDetail.applied" class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[11px]">
+        <div class="font-bold text-ink-mid">Threshold</div>
+        <div class="text-ink-lt tabular-nums text-right">{{ compressionDetail.threshold_dbfs != null ? `${compressionDetail.threshold_dbfs} dBFS` : '--' }}</div>
+        <div class="font-bold text-ink-mid">Derived ratio</div>
+        <div class="text-ink-lt tabular-nums text-right">{{ compressionDetail.derived_ratio != null ? `${compressionDetail.derived_ratio}:1` : '--' }}</div>
+        <div class="font-bold text-ink-mid">Gain reduction</div>
+        <div class="text-ink-lt tabular-nums text-right">{{ compressionDetail.derived_gain_reduction_db != null ? `${compressionDetail.derived_gain_reduction_db} dB` : '--' }}</div>
+      </div>
+      <div v-else class="text-[11px] text-ink-lt font-semibold">
+        Compression not needed — dynamics already within target.
+      </div>
+    </div>
+
+    <!-- ===== Section 5: Before You Submit (advisory flags) ===== -->
     <div>
       <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider mb-1.5">
         {{ hasAdvisoryFlags ? 'Before you submit \u2014 things to listen for' : 'Quality Check' }}
