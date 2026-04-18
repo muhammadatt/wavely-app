@@ -212,7 +212,7 @@ const processingChain = computed(() => {
         <div class="text-ink-lt tabular-nums text-right">{{ compressionDetail.derived_gain_reduction_db != null ? `${compressionDetail.derived_gain_reduction_db} dB` : '--' }}</div>
       </div>
       <div v-else class="text-[11px] text-ink-lt font-semibold">
-        Compression not needed — dynamics already within target.
+        {{ compressionDetail.skip_reason || 'Compression not needed — dynamics already within target.' }}
       </div>
     </div>
 
