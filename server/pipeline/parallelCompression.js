@@ -65,7 +65,11 @@ const PARALLEL_DESSER_THRESHOLD_OFFSET_DB = 2
  * @property {number|null} ratio
  * @property {number|null} attackMs
  * @property {number|null} releaseMs
+ * @property {number|'auto'|null} makeupGain
  * @property {number|null} makeupGainDb
+ * @property {number|null} autoMakeupGainDb
+ * @property {number|null} avgGainReductionDb
+ * @property {number|null} maxGainReductionDb
  * @property {number|null} wetMixTarget
  * @property {number|null} wetMixEffective
  * @property {boolean} crestFactorGuardActivated
@@ -111,11 +115,6 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
     effectiveWetMix = config.wetMix
   }
 
-  // Hard ceiling (ACX only — wetMixCeiling is non-null only for acx_audiobook)
-  if (config.wetMixCeiling !== null) {
-    effectiveWetMix = Math.min(effectiveWetMix, config.wetMixCeiling)
-  }
-
   // ── 4. Parallel de-esser config ──────────────────────────────────────────
   const { desserType, desserCenterFreqHz, desserThresholdDb } = resolveParallelDesserConfig(
     presetId,
@@ -127,13 +126,20 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
   )
 
   // ── 5. Build wet compressor gain curve (from channel 0) ──────────────────
-  const compCurve = buildCompressorGainCurve(analysisCh, sampleRate, {
+  const compResult = buildCompressorGainCurve(analysisCh, sampleRate, {
     thresholdDb: threshold,
     ratio:       config.ratio,
     attackMs:    config.attackMs,
     releaseMs:   config.releaseMs,
     kneeDb:      KNEE_WIDTH_DB,
   })
+  const compCurve = compResult.curve
+
+  // ── 5a. Calculate makeup gain ─────────────────────────────────────────────
+  // Handle makeup gain: can be a number (fixed dB) or 'auto' (average gain reduction)
+  const isAutoMakeup = config.makeupGain === 'auto'
+  const autoMakeupGainDb = compResult.avgGainReductionDb
+  const finalMakeupGainDb = isAutoMakeup ? autoMakeupGainDb : config.makeupGain
 
   // ── 6. Build VAD gate curve ──────────────────────────────────────────────
   const vadGateCurve = buildVadGateCurve(numSamples, frameAnalysis, config.vadFadeMs, sampleRate)
@@ -148,7 +154,7 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
     config.parallelDesserMaxReductionDb,
   )
 
-  const makeupLinear = Math.pow(10, config.makeupGainDb / 20)
+  const makeupLinear = Math.pow(10, finalMakeupGainDb / 20)
   const dryWeight    = 1 - effectiveWetMix
   const wetWeight    = effectiveWetMix
 
@@ -162,6 +168,7 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
       const compGainLin = Math.pow(10, -compCurve[i] / 20)
       const desserGainLin = Math.pow(10, -desserCurve[i] / 20)
       const wet = dry * compGainLin * makeupLinear * desserGainLin * vadGateCurve[i]
+      //const wet = dry * compGainLin * makeupLinear * desserGainLin 
 
       out[i] = dry * dryWeight + wet * wetWeight
     }
@@ -178,7 +185,11 @@ export async function applyParallelCompression(inputPath, outputPath, presetId, 
     ratio:                       config.ratio,
     attackMs:                    config.attackMs,
     releaseMs:                   config.releaseMs,
-    makeupGainDb:                config.makeupGainDb,
+    makeupGain:                  config.makeupGain,
+    makeupGainDb:                round2(finalMakeupGainDb),
+    autoMakeupGainDb:            isAutoMakeup ? round2(autoMakeupGainDb) : null,
+    avgGainReductionDb:          round2(compResult.avgGainReductionDb),
+    maxGainReductionDb:          round2(compResult.maxGainReductionDb),
     wetMixTarget:                config.wetMix,
     wetMixEffective:             round2(effectiveWetMix),
     crestFactorGuardActivated:   guardActivated,
@@ -270,7 +281,7 @@ function measureCrestFactor(samples, frameAnalysis) {
  * Same algorithm as Stage 4a (compression.js), parameterised for high-ratio
  * parallel compression. Gain curve is derived from channel 0; applied to all.
  *
- * @returns {Float32Array} gainReductionDb[i] — positive = attenuation
+ * @returns {{ curve: Float32Array, avgGainReductionDb: number, maxGainReductionDb: number }}
  */
 function buildCompressorGainCurve(samples, sampleRate, params) {
   const { thresholdDb, ratio, attackMs, releaseMs, kneeDb } = params
@@ -280,6 +291,9 @@ function buildCompressorGainCurve(samples, sampleRate, params) {
 
   const curve = new Float32Array(n)
   let powerEnv = 0
+  let maxGainReductionDb = 0
+  let totalGainReductionDb = 0
+  let activeFrames = 0
 
   for (let i = 0; i < n; i++) {
     const xPow = samples[i] * samples[i]
@@ -288,10 +302,21 @@ function buildCompressorGainCurve(samples, sampleRate, params) {
       : releaseCoeff * powerEnv + (1 - releaseCoeff) * xPow
 
     const levelDb = powerEnv > 1e-14 ? 10 * Math.log10(powerEnv) : -120
-    curve[i] = computeGainReduction(levelDb, thresholdDb, ratio, kneeDb)
+    const gainReductionDb = computeGainReduction(levelDb, thresholdDb, ratio, kneeDb)
+
+    curve[i] = gainReductionDb
+
+    // Track statistics for auto makeup gain
+    if (gainReductionDb > 0) {
+      if (gainReductionDb > maxGainReductionDb) maxGainReductionDb = gainReductionDb
+      totalGainReductionDb += gainReductionDb
+      activeFrames++
+    }
   }
 
-  return curve
+  const avgGainReductionDb = activeFrames > 0 ? totalGainReductionDb / activeFrames : 0
+
+  return { curve, avgGainReductionDb, maxGainReductionDb }
 }
 
 /**
@@ -523,7 +548,11 @@ function notApplied(reason) {
     ratio:                       null,
     attackMs:                    null,
     releaseMs:                   null,
+    makeupGain:                  null,
     makeupGainDb:                null,
+    autoMakeupGainDb:            null,
+    avgGainReductionDb:          null,
+    maxGainReductionDb:          null,
     wetMixTarget:                null,
     wetMixEffective:             null,
     crestFactorGuardActivated:   false,

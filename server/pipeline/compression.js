@@ -14,11 +14,12 @@
  *   2. Skip if input crest factor <= target + 0.5 dB margin.
  *   3. Derive threshold from the preset-specified percentile of the
  *      voiced-frame RMS distribution.
- *   4. Derive ratio: peak_above_threshold / (peak_above_threshold - required_reduction)
- *   5. Clamp ratio to [1.2, 6.0]. Log warning if ceiling hit.
+ *   4. Adjust threshold if above peak level (for quiet files).
+ *   5. Calculate ratio using simple formula: amplitude / (amplitude - required_reduction)
  *   6. Apply feed-forward RMS compressor with soft knee.
  *
  * Fixed parameters (per spec): attack, release, knee width, makeup gain = 0 dB.
+ * Ratio clamping has been removed in favor of simple calculation.
  */
 
 import { readWavAllChannels } from './wavReader.js'
@@ -26,8 +27,6 @@ import { writeWavChannels } from './wavWriter.js'
 import { PRESETS } from '../presets.js'
 
 const KNEE_WIDTH_DB           = 4      // soft knee width, all presets
-const RATIO_MIN               = 1.2    // below this is a no-op
-const RATIO_MAX               = 6.0    // above this: apply ceiling, log warning
 const SKIP_MARGIN_DB          = 0.5    // skip if within this margin of target
 const FALLBACK_THRESHOLD_DBFS = -22    // used when < MIN_VOICED_FRAMES available
 const MIN_VOICED_FRAMES       = 50     // minimum frames for stable percentile estimate
@@ -52,9 +51,9 @@ const MIN_VOICED_FRAMES       = 50     // minimum frames for stable percentile e
  * @property {number|null} thresholdDbfs         - Derived threshold in dBFS (when applied)
  * @property {number|null} derivedRatio          - Derived compression ratio (when applied)
  * @property {number|null} derivedGainReductionDb - Expected gain reduction at the peak (when applied)
- * @property {boolean} ratioClamped              - Whether derived ratio was clamped to [1.2, 6.0]
  * @property {number|null} maxGainReductionDb    - Peak gain reduction during processing
  * @property {number|null} avgGainReductionDb    - Average gain reduction applied
+ * @property {number|null} finalCrestFactorDb    - Achieved crest factor after compression (when applied)
  */
 export async function applyCompression(inputPath, outputPath, presetId, frameAnalysis) {
   const preset = PRESETS[presetId]
@@ -74,9 +73,9 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
       thresholdDbfs: null,
       derivedRatio: null,
       derivedGainReductionDb: null,
-      ratioClamped: false,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
+      finalCrestFactorDb: null,
     }
   }
 
@@ -99,9 +98,9 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
       thresholdDbfs: null,
       derivedRatio: null,
       derivedGainReductionDb: null,
-      ratioClamped: false,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
+      finalCrestFactorDb: null,
     }
   }
 
@@ -121,45 +120,36 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
       thresholdDbfs: null,
       derivedRatio: null,
       derivedGainReductionDb: null,
-      ratioClamped: false,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
+      finalCrestFactorDb: round2(inputCrestFactorDb), // Final = input when compression skipped
     }
   }
 
   // Step 3: Derive threshold from voiced-frame RMS percentile
   const { thresholdDbfs } = deriveThreshold(frameRmsValues, thresholdPercentile)
 
-  // Step 4: Derive ratio
+  // Step 4: Adjust threshold if needed and derive ratio using simple calculation
   const requiredReductionDb = inputCrestFactorDb - targetCrestFactorDb
-  const peakAboveThreshold  = peakDbfs - thresholdDbfs
 
-  let derivedRatio
-  let ratioClamped = false
+  const thresholdAdjustment = adjustCompressionThreshold(
+    analysisSamples,
+    frameAnalysis,
+    thresholdDbfs,
+    requiredReductionDb
+  )
 
-  if (peakAboveThreshold <= 0 || peakAboveThreshold - requiredReductionDb <= 0) {
-    // Degenerate: peak at or below threshold, or reduction needed exceeds headroom
-    derivedRatio = RATIO_MAX
-    ratioClamped = true
-    console.warn('[compression] Degenerate ratio derivation — clamping to 6:1')
-  } else {
-    derivedRatio = peakAboveThreshold / (peakAboveThreshold - requiredReductionDb)
-    if (derivedRatio < RATIO_MIN) {
-      derivedRatio = RATIO_MIN
-      ratioClamped = true
-    } else if (derivedRatio > RATIO_MAX) {
-      derivedRatio = RATIO_MAX
-      ratioClamped = true
-      console.warn(
-        `[compression] Heavy compression needed — derived ratio exceeded 6:1 ceiling. ` +
-        `Input crest factor: ${round2(inputCrestFactorDb)} dB, target: ${targetCrestFactorDb} dB.`
-      )
-    }
-  }
+  // MT - Replace Ratio Calculation with Simple Calc
+  const reductionNeeded = inputCrestFactorDb - targetCrestFactorDb
+  const finalThresholdDbfs = thresholdAdjustment.adjustedThreshold || thresholdDbfs
+  const amplitude = peakDbfs - finalThresholdDbfs
+  const newAmp = amplitude - reductionNeeded
+  const derivedRatio = amplitude / newAmp
+
 
   // Step 5: Build gain curve from channel 0, apply to all channels
   const compParams = {
-    thresholdDb:  thresholdDbfs,
+    thresholdDb:  finalThresholdDbfs,
     ratio:        derivedRatio,
     attackMs:     attack,
     releaseMs:    release,
@@ -173,18 +163,21 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
 
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
+  // Step 6: Measure final crest factor on the compressed audio
+  const finalCrestFactorDb = measureFinalCrestFactor(processedChannels[0], frameAnalysis)
+
   return {
     applied: true,
     inputCrestFactorDb:     round2(inputCrestFactorDb),
     targetCrestFactorDb,
     skipReason: null,
     thresholdPercentile,
-    thresholdDbfs:          round2(thresholdDbfs),
+    thresholdDbfs:          round2(finalThresholdDbfs),
     derivedRatio:           round2(derivedRatio),
     derivedGainReductionDb: round2(requiredReductionDb),
-    ratioClamped,
     maxGainReductionDb:     round2(gainCurve.maxGainReductionDb),
     avgGainReductionDb:     round2(gainCurve.avgGainReductionDb),
+    finalCrestFactorDb:     round2(finalCrestFactorDb),
   }
 }
 
@@ -238,12 +231,87 @@ function measureVoicedCrestFactor(samples, frameAnalysis) {
   const peakDbfs      = 20 * Math.log10(peak)
   const voicedRmsDbfs = voicedRms > 0 ? 20 * Math.log10(voicedRms) : -120
 
+
+
   return {
     peakDbfs,
     voicedRmsDbfs,
     inputCrestFactorDb: peakDbfs - voicedRmsDbfs,
     frameRmsValues,
   }
+}
+
+/**
+ * Measure final crest factor on the compressed audio using the same voiced frames
+ * that were used for the input measurement.
+ *
+ * @param {Float32Array} compressedSamples - Compressed audio samples
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis - Frame analysis from input
+ * @returns {number|null} Final crest factor in dB, or null if no voiced frames
+ */
+function measureFinalCrestFactor(compressedSamples, frameAnalysis) {
+  let sumSq = 0
+  let count = 0
+  let peak  = 0
+
+  for (const frame of frameAnalysis.frames) {
+    if (frame.isSilence) continue
+    const start = frame.offsetSamples
+    const end   = Math.min(start + frame.lengthSamples, compressedSamples.length)
+    if (end <= start) continue
+
+    for (let i = start; i < end; i++) {
+      const abs = Math.abs(compressedSamples[i])
+      const sq  = compressedSamples[i] * compressedSamples[i]
+      sumSq     += sq
+      if (abs > peak) peak = abs
+      count++
+    }
+  }
+
+  if (count === 0 || peak === 0) {
+    return null
+  }
+
+  const voicedRms     = Math.sqrt(sumSq / count)
+  const peakDbfs      = 20 * Math.log10(peak)
+  const voicedRmsDbfs = voicedRms > 0 ? 20 * Math.log10(voicedRms) : -120
+
+
+
+  return peakDbfs - voicedRmsDbfs
+}
+
+// ── Threshold Adjustment for Compression ────────────────────────────────────
+
+/**
+ * Adjust compression threshold when needed.
+ *
+ * Handles threshold adjustment when the original threshold is above the peak level,
+ * which is common with quiet files.
+ *
+ * @param {Float32Array} samples - Input audio samples
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis - Frame analysis
+ * @param {number} thresholdDbfs - Compression threshold in dBFS
+ * @param {number} requiredReductionDb - Required crest factor reduction in dB
+ * @returns {{adjustedThreshold?: number}}
+ */
+function adjustCompressionThreshold(samples, frameAnalysis, thresholdDbfs, requiredReductionDb) {
+  const peakDbfs = measureVoicedCrestFactor(samples, frameAnalysis).peakDbfs
+  let adjustedThreshold = thresholdDbfs
+
+  // If threshold is above peak (common with quiet files), adjust it based on required reduction
+  if (thresholdDbfs >= peakDbfs) {
+    // Calculate threshold to provide enough headroom for the required reduction
+    // We want: (peak - threshold) * (1 - 1/ratio) >= requiredReduction
+    // For max ratio (6:1): (peak - threshold) * (5/6) >= requiredReduction
+    // Therefore: threshold <= peak - (requiredReduction * 6/5)
+    const minHeadroom = requiredReductionDb * 1.5 // Add 50% margin for effectiveness
+    adjustedThreshold = Math.min(thresholdDbfs, peakDbfs - minHeadroom)
+    console.log(`[compression] Adjusted threshold from ${thresholdDbfs.toFixed(1)} to ${adjustedThreshold.toFixed(1)} dBFS (peak: ${peakDbfs.toFixed(1)} dBFS, required: ${requiredReductionDb.toFixed(1)} dB)`)
+  }
+
+  return { adjustedThreshold: adjustedThreshold !== thresholdDbfs ? adjustedThreshold : undefined }
 }
 
 // ── Threshold Derivation ────────────────────────────────────────────────────

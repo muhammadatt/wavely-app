@@ -40,7 +40,7 @@ const DET_FRAME_SAMPLES = Math.round(DET_FRAME_S * SAMPLE_RATE) // 441
 const ANALYSIS_FRAME_S = 0.1                                    // 100 ms — matches frameAnalysis.js
 const DET_FRAMES_PER_ANALYSIS_FRAME = Math.round(ANALYSIS_FRAME_S / DET_FRAME_S) // 10
 
-const SKIP_THRESHOLD_DBFS = -72   // skip stage entirely when silence floor is this clean
+const SKIP_THRESHOLD_DBFS = -140   // skip stage entirely when silence floor is this clean
 //const THRESHOLD_FLOOR_DBFS = -70  // clamp below this — expander wouldn't contribute
 const ATTENUATION_DETECT_DB = 1 // minimum attenuation to count a frame as "expanded"
 
@@ -61,7 +61,7 @@ const ATTENUATION_DETECT_DB = 1 // minimum attenuation to count a frame as "expa
  * @property {boolean} applied
  * @property {string|null} reason
  * @property {number|null} noiseFloorDb
- * @property {number|null} fullVoicedP50Db
+ * @property {number|null} voicedDb
  * @property {number|null} thresholdFromNoiseFloor
  * @property {number|null} thresholdFromVoiced
  * @property {number|null} thresholdDb
@@ -126,7 +126,7 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
   // CRITICAL FIX: Domain Mismatch Resolution
   //
   // Previous Issue: The threshold was calibrated from full-band measurements
-  // (frameAnalysis.noiseFloorDbfs, fullVoicedP50Db) but applied to band-limited
+  // (frameAnalysis.noiseFloorDbfs, voicedDb) but applied to band-limited
   // detection energy (80-800 Hz). This created a fundamental domain mismatch:
   //   - Full-band noise floor: ~-60 dBFS
   //   - 80-800 Hz noise floor: ~-75 dBFS (6-20 dB lower)
@@ -172,10 +172,10 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
     ? detectionBandNoiseFloorSamples[Math.floor(detectionBandNoiseFloorSamples.length * 0.1)]
     : frameAnalysis.noiseFloorDbfs - 12  // Fallback: estimate 12dB offset from full-band
 
-  // Calculate detection-band voiced P50
+  // Calculate detection-band voiced P10 (quietest 10th percentile)
   detectionBandVoicedSamples.sort((a, b) => a - b)
-  const fullVoicedP50Db = detectionBandVoicedSamples.length > 0
-    ? detectionBandVoicedSamples[Math.floor(detectionBandVoicedSamples.length * 0.5)]
+  const voicedDb = detectionBandVoicedSamples.length > 0
+    ? detectionBandVoicedSamples[Math.floor(detectionBandVoicedSamples.length * 0.3)]
     : null
 
 
@@ -212,8 +212,8 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
   // below the detection-band noise floor.
 
   const thresholdFromNoiseFloor = detectionBandNoiseFloorDb + config.headroomOffsetDb
-  const thresholdFromVoiced     = fullVoicedP50Db != null
-    ? fullVoicedP50Db - config.headroomOffsetDb
+  const thresholdFromVoiced     = voicedDb != null
+    ? voicedDb - config.headroomOffsetDb
     : thresholdFromNoiseFloor
   const holdDb = Math.max(
     Math.min(thresholdFromNoiseFloor, thresholdFromVoiced),
@@ -320,9 +320,9 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
     applied:                     true,
     reason:                      null,
     noiseFloorDb:                round2(detectionBandNoiseFloorDb), // Detection-band measurement
-    fullVoicedP50Db:             fullVoicedP50Db != null ? round2(fullVoicedP50Db) : null, // Detection-band measurement
+    voicedDb:             voicedDb != null ? round2(voicedDb) : null, // Detection-band measurement
     thresholdFromNoiseFloor:     round2(thresholdFromNoiseFloor),
-    thresholdFromVoiced:         fullVoicedP50Db != null ? round2(thresholdFromVoiced) : null,
+    thresholdFromVoiced:         voicedDb != null ? round2(thresholdFromVoiced) : null,
     thresholdDb:                 round2(thresholdDb),
     headroomOffsetDb:            config.headroomOffsetDb,
     ratio:                       config.ratio,

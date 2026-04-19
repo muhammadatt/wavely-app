@@ -397,6 +397,7 @@ export async function compress(ctx) {
     applied:    compressionResult.applied,
     crest_in:   compressionResult.inputCrestFactorDb  !== null ? `${compressionResult.inputCrestFactorDb}dB`  : 'n/a',
     crest_tgt:  compressionResult.targetCrestFactorDb !== null ? `${compressionResult.targetCrestFactorDb}dB` : 'n/a',
+    crest_final: compressionResult.finalCrestFactorDb !== null ? `${compressionResult.finalCrestFactorDb}dB` : 'n/a',
     ratio:      compressionResult.derivedRatio        !== null ? `${compressionResult.derivedRatio}:1`        : 'n/a',
     threshold:  compressionResult.thresholdDbfs       !== null ? `${compressionResult.thresholdDbfs}dBFS`    : 'n/a',
     maxRed:     compressionResult.maxGainReductionDb  !== null ? `${compressionResult.maxGainReductionDb}dB`  : 'n/a',

@@ -307,7 +307,6 @@ function formatCompressionResult(r) {
     threshold_dbfs:            r.thresholdDbfs,
     derived_ratio:             r.derivedRatio,
     derived_gain_reduction_db: r.derivedGainReductionDb,
-    ratio_clamped:             r.ratioClamped ?? false,
     max_gain_reduction_db:     r.maxGainReductionDb,
     avg_gain_reduction_db:     r.avgGainReductionDb,
   }
@@ -443,7 +442,7 @@ function buildWarnings(ctx) {
     warnings.push('Noise reduction not available — noise floor unchanged')
   }
 
-  if (results.compression?.applied && results.compression.ratioClamped &&
+  if (results.compression?.applied &&
       results.compression.derivedRatio >= 6.0) {
     warnings.push('Heavy compression was applied. Input dynamics were significantly outside target range.')
   }

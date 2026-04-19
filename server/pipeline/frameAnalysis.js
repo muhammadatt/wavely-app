@@ -44,7 +44,7 @@ import path               from 'path'
 
 import { readWavSamples } from './wavReader.js'
 
-const FRAME_DURATION_S = 0.1   // 100 ms frames — must match FRAME_DURATION_S in silero_vad.py
+const FRAME_DURATION_S = 0.025   // 100 ms frames — must match FRAME_DURATION_S in silero_vad.py
 const BOOTSTRAP_FRAMES = 20    // use this many lowest-energy frames to bootstrap noise floor
 
 const NUM_THREADS   = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
