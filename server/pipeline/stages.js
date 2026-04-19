@@ -40,7 +40,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb, runApBwe } from './separation.js'
+import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runVocalSaturation, runClearerVoice, runDereverb, runApBwe } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -477,6 +477,22 @@ export async function harmonicExciter(ctx) {
   ctx.currentPath = outPath
   ctx.results.harmonicExciter = { applied: true }
   await logLevel(ctx, 'after harmonic exciter', ctx.currentPath, {})
+}
+
+// ── Stage: Vocal saturation ───────────────────────────────────────────────────
+// Parallel tanh saturation mixed with the dry signal at wet_dry ratio.
+// Runs after all compression/leveling and before normalization so the
+// loudness pass absorbs any residual energy shift from the blend.
+
+export async function vocalSaturation(ctx) {
+  const outPath = ctx.tmp('.wav')
+  const sat     = ctx.preset.saturation ?? {}
+  const drive   = sat.drive  ?? 2.0
+  const wetDry  = sat.wetDry ?? 0.3
+  await runVocalSaturation(ctx.currentPath, outPath, { drive, wetDry })
+  ctx.currentPath = outPath
+  ctx.results.vocalSaturation = { applied: true, drive, wetDry }
+  await logLevel(ctx, 'after vocal saturation', ctx.currentPath, {})
 }
 
 // ── Stage: Normalize ──────────────────────────────────────────────────────────

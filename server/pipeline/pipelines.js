@@ -40,6 +40,7 @@ const STANDARD_PIPELINE = [
   stages.enhancementEQ,
   //stages.harmonicExciter,
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
+  stages.vocalSaturation,
   stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
@@ -87,8 +88,9 @@ export const PIPELINES = {
     stages.parallelCompress,         // parallel compression
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    stages.enhancementEQ,           
+    stages.enhancementEQ,
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
+    stages.vocalSaturation,
     stages.normalize,                // Loudness normalization
     stages.truePeakLimit,            // True peak limiting
     stages.measureAfter,
@@ -128,8 +130,9 @@ export const PIPELINES = {
     stages.parallelCompress,         // parallel compression
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    stages.enhancementEQ,           
+    stages.enhancementEQ,
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
+    stages.vocalSaturation,
     stages.normalize,                // Loudness normalization
     stages.truePeakLimit,            // True peak limiting
     stages.measureAfter,

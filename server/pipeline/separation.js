@@ -23,8 +23,9 @@ const SCRIPTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
 const RNNOISE_SCRIPT          = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
 const SEPARATE_SCRIPT         = path.join(SCRIPTS_DIR, 'separate_vocals.py')
 const VOICEFIXER_SCRIPT       = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
-const HARMONIC_EXCITER_SCRIPT = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
-const CLEARERVOICE_SCRIPT     = path.join(SCRIPTS_DIR, 'clearervoice_enhance.py')
+const HARMONIC_EXCITER_SCRIPT  = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
+const VOCAL_SATURATION_SCRIPT  = path.join(SCRIPTS_DIR, 'vocal_saturation.py')
+const CLEARERVOICE_SCRIPT      = path.join(SCRIPTS_DIR, 'clearervoice_enhance.py')
 const DEREVERB_SCRIPT         = path.join(SCRIPTS_DIR, 'dereverb.py')
 const AP_BWE_SCRIPT           = path.join(SCRIPTS_DIR, 'ap_bwe_extend.py')
 
@@ -110,6 +111,22 @@ export function runHarmonicExciter(inputPath, outputPath, params = {}) {
   if (params.drive              != null) args.push('--drive',                String(params.drive))
   if (params.evenHarmonicWeight != null) args.push('--even-harmonic-weight', String(params.evenHarmonicWeight))
   return spawnPython(HARMONIC_EXCITER_SCRIPT, args, 'HarmonicExciter')
+}
+
+/**
+ * Vocal Saturation — parallel tanh soft-saturation mixed with the dry signal.
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
+ * @param {object} [params]
+ * @param {number} [params.drive=2.0]   - tanh saturation factor
+ * @param {number} [params.wetDry=0.3]  - mix ratio (0=dry, 1=wet)
+ */
+export function runVocalSaturation(inputPath, outputPath, params = {}) {
+  const args = ['--input', inputPath, '--output', outputPath]
+  if (params.drive  != null) args.push('--drive',   String(params.drive))
+  if (params.wetDry != null) args.push('--wet-dry', String(params.wetDry))
+  return spawnPython(VOCAL_SATURATION_SCRIPT, args, 'VocalSaturation')
 }
 
 /**
