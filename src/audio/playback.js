@@ -17,8 +17,9 @@ let animationFrameId = null
  * @param {AudioContext} audioContext
  * @param {Function} onTimeUpdate - Called each frame with current time
  * @param {Function} onEnd - Called when playback reaches end
+ * @param {number|null} [endTime=null] - Position in seconds to stop at; null = play to end
  */
-export function startPlayback(segments, startTime, audioContext, onTimeUpdate, onEnd) {
+export function startPlayback(segments, startTime, audioContext, onTimeUpdate, onEnd, endTime = null) {
   stopPlayback()
 
   const now = audioContext.currentTime
@@ -35,8 +36,9 @@ export function startPlayback(segments, startTime, audioContext, onTimeUpdate, o
     const dur = getSegmentDuration(seg)
     const segEnd = seg.outputStart + dur
 
-    // Skip segments entirely before the start
+    // Skip segments entirely before the start or at/beyond endTime
     if (segEnd <= startTime) continue
+    if (endTime !== null && seg.outputStart >= endTime) continue
 
     if (seg.sourceBuffer === null) {
       // Silence segment — don't schedule any node
@@ -58,16 +60,24 @@ export function startPlayback(segments, startTime, audioContext, onTimeUpdate, o
       playLen = dur - skipAmount
     }
 
+    // Clamp playLen so this node doesn't play past endTime
+    if (endTime !== null) {
+      const segEffectiveStart = Math.max(seg.outputStart, startTime)
+      playLen = Math.min(segEnd, endTime) - segEffectiveStart
+    }
+
     node.start(scheduleAt, offset, playLen)
     activeNodes.push(node)
   }
+
+  const playEnd = endTime !== null ? endTime : totalDuration
 
   // Animation loop for playhead updates
   function tick() {
     const currentTime = playbackOffset + (audioContext.currentTime - playbackStartTime)
 
-    if (currentTime >= totalDuration) {
-      onTimeUpdate(totalDuration)
+    if (currentTime >= playEnd) {
+      onTimeUpdate(playEnd)
       stopPlayback()
       if (onEnd) onEnd()
       return

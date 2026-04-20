@@ -104,6 +104,7 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: 'dBFS RMS' },
     truePeakCeiling: -3,
     noiseFloorTarget: -60,
+    noiseModel: 'df3',
     eqProfile: 'audiobook',
     deEsser: {
       sensitivity: 'standard',
@@ -178,6 +179,7 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
+    noiseModel: 'df3',
     compression: [{
       targetCrestFactorDb: 12,
       thresholdPercentile: 0.85,
@@ -244,6 +246,7 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: 'dBFS RMS' },
     truePeakCeiling: -3,
     noiseFloorTarget: null,
+    noiseModel: 'df3',
     compression: {
       mode: 'conditional',
       targetCrestFactorDb: 12,
@@ -310,6 +313,7 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
+    noiseModel: 'df3',
     compression: {
       mode: 'conditional',
       targetCrestFactorDb: 10,
@@ -401,6 +405,7 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
+    noiseModel: 'df3',
     // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
     // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
     // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
@@ -465,6 +470,7 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
+    noiseModel: 'df3',
     // ClearerVoice enhancement model:
     //   'mossformer2_48k' — MossFormer2_SE_48K (default, best quality, 48 kHz full-band)
     //   'frcrn_16k'       — FRCRN_SE_16K (faster, good quality, 16 kHz)

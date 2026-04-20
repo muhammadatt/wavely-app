@@ -254,15 +254,40 @@ export async function hpf(ctx) {
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
 
 export async function noiseReduce(ctx) {
-  const nrPath   = ctx.tmp('.wav')
-  // Run DF3 uncapped — the model adapts per time-frequency bin and will not
-  // aggressively attenuate speech. atten_lim_db is omitted (null = no ceiling).
-  const nrResult = await applyNoiseReduction(ctx.currentPath, nrPath)
-  nrResult.pre_noise_floor_dbfs = ctx.results.metrics.noiseFloorDbfs
-  ctx.currentPath            = nrPath
-  ctx.results.noiseReduction = nrResult
-  await logLevel(ctx, 'after NR', ctx.currentPath, {
-    preNoiseFloor: `${ctx.results.metrics.noiseFloorDbfs}dBFS`,
+  const model         = ctx.preset.noiseModel ?? 'df3'
+  const outPath       = ctx.tmp('.wav')
+  const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
+
+  if (model === 'rnnoise') {
+    await runRnnoise(ctx.currentPath, outPath)
+    ctx.currentPath = outPath
+    ctx.results.noiseReduction = {
+      applied: true,
+      model: 'RNNoise',
+      atten_lim_db: null,
+      pre_noise_floor_dbfs: preNoiseFloor,
+      post_noise_floor_dbfs: null,
+    }
+  } else if (model === 'dtln') {
+    await runDtln(ctx.currentPath, outPath)
+    ctx.currentPath = outPath
+    ctx.results.noiseReduction = {
+      applied: true,
+      model: 'DTLN',
+      atten_lim_db: null,
+      pre_noise_floor_dbfs: preNoiseFloor,
+      post_noise_floor_dbfs: null,
+    }
+  } else {
+    // df3 (default) — uncapped; the model adapts per time-frequency bin
+    const nrResult = await applyNoiseReduction(ctx.currentPath, outPath)
+    nrResult.pre_noise_floor_dbfs = preNoiseFloor
+    ctx.currentPath = outPath
+    ctx.results.noiseReduction = nrResult
+  }
+
+  await logLevel(ctx, `after NR (${model})`, ctx.currentPath, {
+    preNoiseFloor: `${preNoiseFloor}dBFS`,
   })
 }
 
@@ -638,38 +663,6 @@ export async function encode(ctx) {
 
 export async function extractPeaks(ctx) {
   ctx.peaks = await extractPeaksFromFile(ctx.currentPath)
-}
-
-// ── NE Stage: RNNoise pre-separation pass (NE-1) ──────────────────────────────
-// Reduces stationary broadband noise before handing off to Demucs/ConvTasNet.
-// Applied unconditionally to all noise_eraser files.
-
-export async function rnnoisePrePass(ctx) {
-  const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
-  const outPath = ctx.tmp('.wav')
-  await runRnnoise(ctx.currentPath, outPath)
-  ctx.currentPath = outPath
-  ctx.results.rnnoisePrePass = {
-    applied:                true,
-    pre_noise_floor_dbfs:   round2(preNoiseFloor ?? null),
-  }
-  await logLevel(ctx, 'after NE-1 RNNoise', ctx.currentPath, {})
-}
-
-// ── NE Stage: DTLN noise reduction (optional pre-separation pass) ─────────────
-// Lightweight LSTM-based denoiser; falls between RNNoise and DF3 in quality.
-// Operates at 16 kHz internally; stereo inputs are mixed to mono in the script.
-
-export async function dtlnDenoise(ctx) {
-  const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
-  const outPath = ctx.tmp('.wav')
-  await runDtln(ctx.currentPath, outPath)
-  ctx.currentPath = outPath
-  ctx.results.dtlnDenoise = {
-    applied:              true,
-    pre_noise_floor_dbfs: round2(preNoiseFloor ?? null),
-  }
-  await logLevel(ctx, 'after DTLN denoise', ctx.currentPath, {})
 }
 
 // ── NE Stage: Tonal noise pre-treatment (NE-2, conditional) ──────────────────

@@ -8,18 +8,22 @@ const { loadFile, getAudioContext, setPeakCache, showToast } = useEditorState()
 
 const isDragOver = ref(false)
 const isLoading = ref(false)
+const dragCounter = ref(0)
 
-function onDragOver(e) {
+function onPageDragEnter(e) {
   e.preventDefault()
+  dragCounter.value++
   isDragOver.value = true
 }
 
-function onDragLeave() {
-  isDragOver.value = false
+function onPageDragLeave() {
+  dragCounter.value--
+  if (dragCounter.value === 0) isDragOver.value = false
 }
 
-function onDrop(e) {
+function onPageDrop(e) {
   e.preventDefault()
+  dragCounter.value = 0
   isDragOver.value = false
   const file = e.dataTransfer.files[0]
   if (file) handleFile(file)
@@ -70,7 +74,12 @@ async function handleFile(file) {
 
 <template>
   <div class="flex flex-col items-center justify-center min-h-screen px-6 py-10 relative overflow-hidden"
-       style="background: linear-gradient(145deg, #EEF6FF 0%, #F5F0FF 50%, #FFF5F5 100%);">
+       style="background: linear-gradient(145deg, #EEF6FF 0%, #F5F0FF 50%, #FFF5F5 100%);"
+       @dragenter="onPageDragEnter"
+       @dragover.prevent
+       @dragleave="onPageDragLeave"
+       @drop="onPageDrop"
+  >
     <!-- Decorative blobs -->
     <div class="absolute -top-[150px] -right-[100px] w-[500px] h-[500px] rounded-full pointer-events-none"
          style="background: radial-gradient(circle, rgba(255,209,102,0.3) 0%, transparent 65%);"></div>
@@ -105,9 +114,6 @@ async function handleFile(file) {
       <div
         class="border-3 border-dashed rounded-[var(--radius-xl)] p-[52px_40px] cursor-pointer transition-all bg-surface shadow-[0_4px_20px_rgba(45,42,62,0.10)] relative overflow-hidden group"
         :class="{ 'border-mint !shadow-[0_12px_32px_rgba(62,207,178,0.2)] -translate-y-[3px]': isDragOver, 'border-border hover:border-mint hover:-translate-y-[3px] hover:shadow-[0_12px_32px_rgba(62,207,178,0.2)]': !isDragOver }"
-        @dragover="onDragOver"
-        @dragleave="onDragLeave"
-        @drop="onDrop"
         @click="$refs.fileInput.click()"
       >
         <!-- Hover gradient overlay -->
