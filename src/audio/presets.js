@@ -58,9 +58,8 @@ export function resolveOutputProfileId(id) {
  * @property {number} ratio                        - Wet branch compressor ratio (e.g. 8 for 8:1)
  * @property {number} attackMs                     - Attack time in ms
  * @property {number} releaseMs                    - Release time in ms
- * @property {number} makeupGainDb                 - Makeup gain applied to wet branch (dB)
+ * @property {number|'auto'} makeupGain            - Makeup gain: number for fixed dB, 'auto' for automatic matching
  * @property {number} wetMix                       - Target wet mix fraction (0.0–1.0)
- * @property {number|null} wetMixCeiling           - Hard ceiling on wet mix after guard (null = no ceiling)
  * @property {number} vadFadeMs                    - VAD gate fade duration (ms) for open and close transitions
  * @property {number} crestGuardThresholdDb        - Crest factor below which wet mix is scaled down
  * @property {number} parallelDesserMaxReductionDb - Max gain reduction of parallel de-esser on wet branch (dB)
@@ -74,11 +73,10 @@ export function resolveOutputProfileId(id) {
  * @property {{ value: number, unit: string }} targetLoudness
  * @property {number} truePeakCeiling
  * @property {number|null} noiseFloorTarget
- * @property {CompressionConfig} compression
+ * @property {CompressionConfig|CompressionConfig[]} compression
  * @property {ParallelCompressionConfig} parallelCompression
  *
  * @typedef {Object} CompressionConfig
- * @property {'conditional'|'none'} mode
  * @property {number} targetCrestFactorDb  - Target crest factor for output voiced speech (dB). Compression is skipped if input crest factor is already within this value.
  * @property {number} thresholdPercentile  - Percentile of voiced-frame RMS distribution used to anchor the threshold (e.g. 0.75 = 75th percentile).
  * @property {number} attack               - Attack time in ms
@@ -106,13 +104,7 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: 'dBFS RMS' },
     truePeakCeiling: -3,
     noiseFloorTarget: -60,
-    compression: {
-      mode: 'conditional',
-      targetCrestFactorDb: 14,
-      thresholdPercentile: 0.75,
-      attack: 10,
-      release: 100,
-    },
+    noiseModel: 'df3',
     eqProfile: 'audiobook',
     deEsser: {
       sensitivity: 'standard',
@@ -131,31 +123,48 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
+    compression: [{
+      targetCrestFactorDb: 14,
+      thresholdPercentile: 0.90,
+      attack: 0.1,
+      release: 30,
+    }, 
+    {
+      targetCrestFactorDb: 10,
+      thresholdPercentile: 0.85,
+      attack: 5,
+      release: 60,
+    },
+    {
+      targetCrestFactorDb: 6,
+      thresholdPercentile: 0.75,
+      attack: 10,
+      release: 100,
+    }],
     parallelCompression: {
-      ratio:                       8,
-      attackMs:                    0.75,   // midpoint of 0.5–1 ms spec range
-      releaseMs:                   175,
-      makeupGainDb:                7,
-      wetMix:                      0.25,   // 15% default; spec ceiling 20%
-      wetMixCeiling:               0.30,   // hard ceiling for ACX per spec
+      ratio:                       10,
+      attackMs:                    0.1,   
+      releaseMs:                   50,
+      makeupGain:                  'auto', // automatically match average gain reduction
+      wetMix:                      0.3,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
-      parallelDesserMaxReductionDb: 10,
+      parallelDesserMaxReductionDb: 6,
     },
     // Stage 4a-E: Vocal Expander — frequency-selective silence-floor attenuation.
-    // Conservative settings for audiobook narration: tighter headroom (+4 dB)
-    // keeps the threshold close to actual silence energy, and a small
-    // highFreqDepth (0.25) preserves breath/fricative transparency above 800 Hz.
+    // headroomOffsetDb - defines how close to speech threshold; 
+    // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band -- 
+    // e.g. (0.25) preserves breath/fricative transparency above 800 Hz.
     vocalExpander: {
       enabled:          true,
-      ratio:            3.5,
+      ratio:            2.5,
       highFreqDepth:    1.0,
-      headroomOffsetDb: 3.5,
-      releaseMs:        280,
-      attackMs:         10,
-      holdMs:           40,
-      lookaheadMs:      10,
-      maxAttenuationDb: 100,
+      headroomOffsetDb: 6,
+      releaseMs:        50,
+      attackMs:         2,
+      holdMs:           5,
+      lookaheadMs:      20,
+      maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
@@ -170,13 +179,18 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    compression: {
-      mode: 'conditional',
+    noiseModel: 'df3',
+    compression: [{
+      targetCrestFactorDb: 12,
+      thresholdPercentile: 0.85,
+      attack: 1,
+      release: 50,
+    }, {
       targetCrestFactorDb: 10,
       thresholdPercentile: 0.75,
       attack: 5,
       release: 80,
-    },
+    }],
     eqProfile: 'podcast',
     deEsser: {
       sensitivity: 'high',
@@ -199,9 +213,8 @@ export const PRESETS = {
       ratio:                       10,
       attackMs:                    0.40,   // midpoint of 0.3–0.5 ms spec range
       releaseMs:                   120,
-      makeupGainDb:                9,
+      makeupGain:                  'auto', // automatically match average gain reduction
       wetMix:                      0.40,   // midpoint of 25–35%
-      wetMixCeiling:               null,
       vadFadeMs:                   10,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
@@ -233,6 +246,7 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: 'dBFS RMS' },
     truePeakCeiling: -3,
     noiseFloorTarget: null,
+    noiseModel: 'df3',
     compression: {
       mode: 'conditional',
       targetCrestFactorDb: 12,
@@ -265,9 +279,8 @@ export const PRESETS = {
       ratio:                       8,
       attackMs:                    0.50,
       releaseMs:                   150,
-      makeupGainDb:                7,
+      makeupGain:                  'auto', // automatically match average gain reduction
       wetMix:                      0.225,  // midpoint of 20–25%
-      wetMixCeiling:               null,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 10,
@@ -300,6 +313,7 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
+    noiseModel: 'df3',
     compression: {
       mode: 'conditional',
       targetCrestFactorDb: 10,
@@ -329,9 +343,8 @@ export const PRESETS = {
       ratio:                       10,
       attackMs:                    0.30,
       releaseMs:                   120,
-      makeupGainDb:                10,
+      makeupGain:                  'auto', // automatically match average gain reduction
       wetMix:                      0.35,   // midpoint of 30–40%
-      wetMixCeiling:               null,
       vadFadeMs:                   8,
       crestGuardThresholdDb:       9,      // relaxed per spec
       parallelDesserMaxReductionDb: 12,
@@ -362,25 +375,28 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    compression: {
-      mode: 'conditional',
+    compression: [{
+      targetCrestFactorDb: 14,
+      thresholdPercentile: 0.90,
+      attack: 0.1,
+      release: 20,
+    }, {
       targetCrestFactorDb: 10,
       thresholdPercentile: 0.75,
-      attack: 8,
+      attack: 10,
       release: 100,
-    },
+    }],
     parallelCompression: {
-      ratio:                       8,
-      attackMs:                    1.0,
-      releaseMs:                   225,    // longer release for smoothed separation transients
-      makeupGainDb:                7,
-      wetMix:                      0.30,  // midpoint of 20–25%
-      wetMixCeiling:               null,
+      ratio:                       10,
+      attackMs:                    0.1,   
+      releaseMs:                   50,
+      makeupGain:                  'auto', // automatically match average gain reduction
+      wetMix:                      0.3,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
-      parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
+      parallelDesserMaxReductionDb: 6,
     },
-    eqProfile: 'podcast',
+    eqProfile: 'audiobook',
     deEsser: {
       sensitivity: 'high',
       trigger: 6,
@@ -389,6 +405,7 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
+    noiseModel: 'df3',
     // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
     // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
     // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
@@ -405,17 +422,17 @@ export const PRESETS = {
     // Stage 4a-E: Vocal Expander Assertive settings are used here.
     vocalExpander: {
       enabled:          true,
-      ratio:            2.0,
-      highFreqDepth:    0.5,
-      headroomOffsetDb: 6,
-      releaseMs:        150,
-      attackMs:         10,
-      holdMs:           20,
+      ratio:            2.5,
+      highFreqDepth:    1,
+      headroomOffsetDb: 3,
+      releaseMs:        20,
+      attackMs:         1,
+      holdMs:           5,
       lookaheadMs:      10,
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
+    bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
   },
 
   clearervoice_eraser: {
@@ -438,9 +455,8 @@ export const PRESETS = {
       ratio:                       8,
       attackMs:                    1.0,
       releaseMs:                   225,    // longer release for smoothed separation transients
-      makeupGainDb:                7,
-      wetMix:                      0.30,  // midpoint of 20–25%
-      wetMixCeiling:               null,
+      makeupGain:                  'auto', // automatically match average gain reduction
+      wetMix:                      0.30,   // midpoint of 20–25%
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
@@ -454,6 +470,7 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'podcast',
     lockedOutputProfile: false,
+    noiseModel: 'df3',
     // ClearerVoice enhancement model:
     //   'mossformer2_48k' — MossFormer2_SE_48K (default, best quality, 48 kHz full-band)
     //   'frcrn_16k'       — FRCRN_SE_16K (faster, good quality, 16 kHz)

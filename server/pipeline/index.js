@@ -297,19 +297,46 @@ function formatCompressionResult(r) {
       input_crest_factor_db:   r.inputCrestFactorDb   ?? null,
       target_crest_factor_db:  r.targetCrestFactorDb  ?? null,
       skip_reason:             r.skipReason            ?? null,
+      passes:                  r.passes ? r.passes.map(formatCompressionPass) : null,
     }
   }
+
   return {
     applied:                   true,
     input_crest_factor_db:     r.inputCrestFactorDb,
     target_crest_factor_db:    r.targetCrestFactorDb,
+    final_crest_factor_db:     r.finalCrestFactorDb,
     threshold_percentile:      r.thresholdPercentile,
     threshold_dbfs:            r.thresholdDbfs,
     derived_ratio:             r.derivedRatio,
     derived_gain_reduction_db: r.derivedGainReductionDb,
-    ratio_clamped:             r.ratioClamped ?? false,
     max_gain_reduction_db:     r.maxGainReductionDb,
     avg_gain_reduction_db:     r.avgGainReductionDb,
+    passes:                    r.passes ? r.passes.map(formatCompressionPass) : null,
+  }
+}
+
+function formatCompressionPass(passData) {
+  const { passNumber, config, result } = passData
+  return {
+    pass_number: passNumber,
+    config: {
+      target_crest_factor_db: config.targetCrestFactorDb,
+      threshold_percentile: config.thresholdPercentile,
+      attack: config.attack,
+      release: config.release,
+    },
+    result: {
+      applied: result.applied,
+      input_crest_factor_db: result.inputCrestFactorDb,
+      final_crest_factor_db: result.finalCrestFactorDb,
+      skip_reason: result.skipReason,
+      threshold_dbfs: result.thresholdDbfs,
+      derived_ratio: result.derivedRatio,
+      derived_gain_reduction_db: result.derivedGainReductionDb,
+      max_gain_reduction_db: result.maxGainReductionDb,
+      avg_gain_reduction_db: result.avgGainReductionDb,
+    }
   }
 }
 
@@ -443,7 +470,7 @@ function buildWarnings(ctx) {
     warnings.push('Noise reduction not available — noise floor unchanged')
   }
 
-  if (results.compression?.applied && results.compression.ratioClamped &&
+  if (results.compression?.applied &&
       results.compression.derivedRatio >= 6.0) {
     warnings.push('Heavy compression was applied. Input dynamics were significantly outside target range.')
   }

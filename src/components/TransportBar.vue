@@ -30,7 +30,14 @@ function play() {
   const ctx = getAudioContext()
   state.isPlaying = true
 
-  const startFrom = state.playhead >= totalDuration.value ? 0 : state.playhead
+  let startFrom, endAt
+  if (state.selection) {
+    startFrom = state.selection.start
+    endAt = state.selection.end
+  } else {
+    startFrom = state.playhead >= totalDuration.value ? 0 : state.playhead
+    endAt = null
+  }
 
   startPlayback(
     state.segments,
@@ -42,10 +49,11 @@ function play() {
     () => {
       state.isPlaying = false
       if (isLooping.value) {
-        state.playhead = 0
+        state.playhead = endAt ? startFrom : 0
         play()
       }
-    }
+    },
+    endAt,
   )
 }
 

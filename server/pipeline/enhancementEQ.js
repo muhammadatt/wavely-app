@@ -34,7 +34,7 @@ const HOP_SIZE = FFT_SIZE // non-overlapping frames for batch analysis
 // Values are relative to spectral mean across all six diagnostic bands.
 const EQ_REFERENCES = {
   audiobook: {
-    warmth: +12.0, // 100–250 Hz
+    warmth: +15.0, // 100–250 Hz
     mud: +11.5, // 200–400 Hz
     clarity: +8.0, // 400–700 Hz
     upper_mid: -2.0, // 700 Hz–2 kHz 

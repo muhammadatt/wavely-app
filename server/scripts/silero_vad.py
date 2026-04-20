@@ -37,7 +37,7 @@ warnings.filterwarnings('ignore')
 
 PIPELINE_SR          = 44100
 SILERO_SR            = 16000
-FRAME_DURATION_S     = 0.100   # Must match FRAME_DURATION_S in silenceAnalysis.js
+FRAME_DURATION_S     = 0.025   # Must match FRAME_DURATION_S in frameAnalysis.js
 SILERO_CHUNK_SAMPLES = 512     # Silero v5 supported chunk size at 16 kHz
 DEFAULT_THRESHOLD    = 0.5
 

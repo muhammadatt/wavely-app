@@ -30,15 +30,16 @@ const STANDARD_PIPELINE = [
   stages.hpf,
   //stages.dereverb,
   stages.noiseReduce,
-  stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
-  stages.deEss,
+  //stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
+  //stages.deEss,
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
+  //stages.vocalExpander,   
   stages.compress,              // Stage 4a — serial compression
   stages.parallelCompress,      // Stage 4a-PC — parallel compression
   stages.vocalExpander,         // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.enhancementEQ,
-  //stages.harmonicExciter,
+  stages.harmonicExciter,
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.vocalSaturation,
   stages.normalize,
@@ -74,7 +75,6 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
-    //stages.rnnoisePrePass,         // RNNoise stationary noise reduction
     stages.noiseReduce,
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // Demucs or ConvTasNet vocal extraction
@@ -116,7 +116,6 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
-    //stages.rnnoisePrePass,         // RNNoise stationary noise reduction
     stages.noiseReduce,
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.clearerVoiceEnhance,     // Clearer Voice
