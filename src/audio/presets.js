@@ -126,9 +126,16 @@ export const PRESETS = {
       targetCrestFactorDb: 14,
       thresholdPercentile: 0.90,
       attack: 0.1,
-      release: 20,
-    }, {
+      release: 30,
+    }, 
+    {
       targetCrestFactorDb: 10,
+      thresholdPercentile: 0.85,
+      attack: 5,
+      release: 60,
+    },
+    {
+      targetCrestFactorDb: 6,
       thresholdPercentile: 0.75,
       attack: 10,
       release: 100,

@@ -87,7 +87,23 @@ def main():
     dtln_repo       = resolve_repo_path()
     checkpoint_path = os.environ.get('DTLN_CHECKPOINT')
     if not checkpoint_path:
-        checkpoint_path = os.path.join(dtln_repo, 'DTLN_norm_500h.pth')
+        # Try multiple possible model files in order of preference
+        possible_models = [
+            'DTLN_norm_500h.pth',      # Original expected model
+            'pretrained/model.pth',     # Available model in repo
+            'model.pth'                 # Fallback
+        ]
+        checkpoint_path = None
+        for model_name in possible_models:
+            candidate = os.path.join(dtln_repo, model_name)
+            if os.path.isfile(candidate):
+                checkpoint_path = candidate
+                break
+
+        if not checkpoint_path:
+            # Default to the first option for error reporting
+            checkpoint_path = os.path.join(dtln_repo, possible_models[0])
+
     checkpoint_path = os.path.abspath(checkpoint_path)
 
     repo_missing       = not os.path.isdir(dtln_repo)
