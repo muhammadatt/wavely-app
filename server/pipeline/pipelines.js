@@ -30,7 +30,6 @@ const STANDARD_PIPELINE = [
   stages.hpf,
   //stages.dereverb,
   stages.noiseReduce,
-  //stages.dtlnDenoise,             // DTLN lightweight LSTM NR (alternative to DF3 above; mono output)
   //stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
   //stages.deEss,
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
@@ -75,8 +74,6 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
-    //stages.rnnoisePrePass,         // RNNoise stationary noise reduction
-    //stages.dtlnDenoise,            // DTLN lightweight LSTM NR (alternative pre-pass)
     stages.noiseReduce,
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // Demucs or ConvTasNet vocal extraction
@@ -117,8 +114,6 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
-    //stages.rnnoisePrePass,         // RNNoise stationary noise reduction
-    //stages.dtlnDenoise,            // DTLN lightweight LSTM NR (alternative pre-pass)
     stages.noiseReduce,
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.clearerVoiceEnhance,     // Clearer Voice
