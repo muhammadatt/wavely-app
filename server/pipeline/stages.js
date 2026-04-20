@@ -395,6 +395,7 @@ export async function compress(ctx) {
   ctx.results.compression = compressionResult
   await logLevel(ctx, 'after compression', ctx.currentPath, {
     applied:    compressionResult.applied,
+    passes:     compressionResult.passes ? compressionResult.passes.length : (compressionResult.applied ? 1 : 0),
     crest_in:   compressionResult.inputCrestFactorDb  !== null ? `${compressionResult.inputCrestFactorDb}dB`  : 'n/a',
     crest_tgt:  compressionResult.targetCrestFactorDb !== null ? `${compressionResult.targetCrestFactorDb}dB` : 'n/a',
     crest_final: compressionResult.finalCrestFactorDb !== null ? `${compressionResult.finalCrestFactorDb}dB` : 'n/a',

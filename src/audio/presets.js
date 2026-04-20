@@ -73,11 +73,10 @@ export function resolveOutputProfileId(id) {
  * @property {{ value: number, unit: string }} targetLoudness
  * @property {number} truePeakCeiling
  * @property {number|null} noiseFloorTarget
- * @property {CompressionConfig} compression
+ * @property {CompressionConfig|CompressionConfig[]} compression
  * @property {ParallelCompressionConfig} parallelCompression
  *
  * @typedef {Object} CompressionConfig
- * @property {'conditional'|'none'} mode
  * @property {number} targetCrestFactorDb  - Target crest factor for output voiced speech (dB). Compression is skipped if input crest factor is already within this value.
  * @property {number} thresholdPercentile  - Percentile of voiced-frame RMS distribution used to anchor the threshold (e.g. 0.75 = 75th percentile).
  * @property {number} attack               - Attack time in ms
@@ -123,19 +122,23 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
-    compression: {
-      mode: 'conditional',
-      targetCrestFactorDb: 10,
-      thresholdPercentile: 0.95,
+    compression: [{
+      targetCrestFactorDb: 14,
+      thresholdPercentile: 0.90,
       attack: 0.1,
       release: 20,
-    },
+    }, {
+      targetCrestFactorDb: 10,
+      thresholdPercentile: 0.75,
+      attack: 10,
+      release: 100,
+    }],
     parallelCompression: {
       ratio:                       10,
       attackMs:                    0.1,   
       releaseMs:                   50,
       makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.5,
+      wetMix:                      0.3,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 6,
@@ -168,13 +171,17 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    compression: {
-      mode: 'conditional',
+    compression: [{
+      targetCrestFactorDb: 12,
+      thresholdPercentile: 0.85,
+      attack: 1,
+      release: 50,
+    }, {
       targetCrestFactorDb: 10,
       thresholdPercentile: 0.75,
       attack: 5,
       release: 80,
-    },
+    }],
     eqProfile: 'podcast',
     deEsser: {
       sensitivity: 'high',
@@ -357,24 +364,28 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    compression: {
-      mode: 'conditional',
+    compression: [{
+      targetCrestFactorDb: 14,
+      thresholdPercentile: 0.90,
+      attack: 0.1,
+      release: 20,
+    }, {
       targetCrestFactorDb: 10,
       thresholdPercentile: 0.75,
-      attack: 8,
+      attack: 10,
       release: 100,
-    },
+    }],
     parallelCompression: {
-      ratio:                       8,
-      attackMs:                    1.0,
-      releaseMs:                   225,    // longer release for smoothed separation transients
+      ratio:                       10,
+      attackMs:                    0.1,   
+      releaseMs:                   50,
       makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.30,   // midpoint of 20–25%
+      wetMix:                      0.3,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
-      parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
+      parallelDesserMaxReductionDb: 6,
     },
-    eqProfile: 'podcast',
+    eqProfile: 'audiobook',
     deEsser: {
       sensitivity: 'high',
       trigger: 6,
@@ -399,17 +410,17 @@ export const PRESETS = {
     // Stage 4a-E: Vocal Expander Assertive settings are used here.
     vocalExpander: {
       enabled:          true,
-      ratio:            2.0,
-      highFreqDepth:    0.5,
-      headroomOffsetDb: 6,
-      releaseMs:        150,
-      attackMs:         10,
-      holdMs:           20,
+      ratio:            2.5,
+      highFreqDepth:    1,
+      headroomOffsetDb: 3,
+      releaseMs:        20,
+      attackMs:         1,
+      holdMs:           5,
       lookaheadMs:      10,
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
+    bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
   },
 
   clearervoice_eraser: {

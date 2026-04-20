@@ -35,11 +35,11 @@ const STANDARD_PIPELINE = [
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   //stages.vocalExpander,   
   stages.compress,              // Stage 4a — serial compression
-  //stages.parallelCompress,      // Stage 4a-PC — parallel compression
+  stages.parallelCompress,      // Stage 4a-PC — parallel compression
   stages.vocalExpander,         // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-  //stages.enhancementEQ,
-  //stages.harmonicExciter,
+  stages.enhancementEQ,
+  stages.harmonicExciter,
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,

@@ -54,21 +54,21 @@ const MIN_VOICED_FRAMES       = 50     // minimum frames for stable percentile e
  * @property {number|null} maxGainReductionDb    - Peak gain reduction during processing
  * @property {number|null} avgGainReductionDb    - Average gain reduction applied
  * @property {number|null} finalCrestFactorDb    - Achieved crest factor after compression (when applied)
+ * @property {Array|null} passes                 - Array of individual compression pass results for serial compression
  */
 export async function applyCompression(inputPath, outputPath, presetId, frameAnalysis) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
-  const presetComp = preset.compression
-  const { mode, targetCrestFactorDb, thresholdPercentile, attack, release } = presetComp
+  const presetComp = preset?.compression
 
-  if (mode === 'none') {
+  if (!presetComp) {
     await copyThrough(inputPath, outputPath)
     return {
       applied: false,
       inputCrestFactorDb: null,
       targetCrestFactorDb: null,
-      skipReason: 'Compression disabled for this preset',
+      skipReason: 'Compression not enabled for this preset',
       thresholdPercentile: null,
       thresholdDbfs: null,
       derivedRatio: null,
@@ -76,8 +76,143 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
       maxGainReductionDb: null,
       avgGainReductionDb: null,
       finalCrestFactorDb: null,
+      passes: null,
     }
   }
+
+  // Handle both single compression config and array of compression configs
+  const compressionConfigs = Array.isArray(presetComp) ? presetComp : [presetComp]
+
+  // Return early if no compression configs
+  if (compressionConfigs.length === 0) {
+    await copyThrough(inputPath, outputPath)
+    return {
+      applied: false,
+      inputCrestFactorDb: null,
+      targetCrestFactorDb: null,
+      skipReason: 'No compression configurations provided',
+      thresholdPercentile: null,
+      thresholdDbfs: null,
+      derivedRatio: null,
+      derivedGainReductionDb: null,
+      maxGainReductionDb: null,
+      avgGainReductionDb: null,
+      finalCrestFactorDb: null,
+      passes: null,
+    }
+  }
+
+  // Apply serial compression passes
+  return await applySerialCompression(inputPath, outputPath, compressionConfigs, frameAnalysis)
+}
+
+/**
+ * Apply multiple compression passes in series.
+ *
+ * @param {string} inputPath
+ * @param {string} outputPath
+ * @param {Object[]} compressionConfigs - Array of compression configurations
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
+ * @returns {Promise<Object>} Aggregated compression result with data from all passes
+ */
+async function applySerialCompression(inputPath, outputPath, compressionConfigs, frameAnalysis) {
+  const fs = await import('fs/promises')
+
+  let currentInputPath = inputPath
+  let tempPaths = []
+  const passes = []
+  let overallInputCrestFactorDb = null
+  let overallFinalCrestFactorDb = null
+
+  try {
+    for (let i = 0; i < compressionConfigs.length; i++) {
+      const config = compressionConfigs[i]
+      const isLastPass = i === compressionConfigs.length - 1
+
+      // For the last pass, write to the final output path
+      // For intermediate passes, create temporary files
+      let currentOutputPath
+      if (isLastPass) {
+        currentOutputPath = outputPath
+      } else {
+        currentOutputPath = outputPath.replace(/\.wav$/, `_temp_pass_${i + 1}.wav`)
+        tempPaths.push(currentOutputPath)
+      }
+
+      console.log(`[compression] Starting compression pass ${i + 1}/${compressionConfigs.length}`)
+
+      // Apply single compression pass
+      const passResult = await applySingleCompressionPass(
+        currentInputPath,
+        currentOutputPath,
+        config,
+        frameAnalysis
+      )
+
+      // Store the initial input crest factor from the first pass
+      if (i === 0) {
+        overallInputCrestFactorDb = passResult.inputCrestFactorDb
+      }
+
+      // Store the final crest factor from the last pass
+      if (isLastPass || passResult.finalCrestFactorDb !== null) {
+        overallFinalCrestFactorDb = passResult.finalCrestFactorDb
+      }
+
+      passes.push({
+        passNumber: i + 1,
+        config: config,
+        result: passResult
+      })
+
+      // Update input path for next pass (unless this is the last pass)
+      if (!isLastPass) {
+        currentInputPath = currentOutputPath
+      }
+
+      // If compression was skipped, break early and copy through remaining passes
+      if (!passResult.applied) {
+        console.log(`[compression] Pass ${i + 1} skipped, ending compression chain early`)
+        if (!isLastPass) {
+          await copyThrough(currentInputPath, outputPath)
+        }
+        break
+      }
+    }
+
+    return {
+      applied: passes.some(p => p.result.applied),
+      inputCrestFactorDb: overallInputCrestFactorDb,
+      finalCrestFactorDb: overallFinalCrestFactorDb,
+      passes: passes,
+      // Legacy fields for backward compatibility (aggregate from all passes)
+      targetCrestFactorDb: passes.length > 0 ? passes[passes.length - 1].result.targetCrestFactorDb : null,
+      thresholdPercentile: passes.length > 0 ? passes[passes.length - 1].result.thresholdPercentile : null,
+      thresholdDbfs: passes.length > 0 ? passes[passes.length - 1].result.thresholdDbfs : null,
+      derivedRatio: passes.length > 0 ? passes[passes.length - 1].result.derivedRatio : null,
+      derivedGainReductionDb: passes.length > 0 ? passes[passes.length - 1].result.derivedGainReductionDb : null,
+      maxGainReductionDb: passes.reduce((max, p) => Math.max(max, p.result.maxGainReductionDb || 0), 0),
+      avgGainReductionDb: passes.length > 0 ? passes.reduce((sum, p) => sum + (p.result.avgGainReductionDb || 0), 0) / passes.filter(p => p.result.applied).length : null,
+    }
+
+  } finally {
+    // Clean up temporary files
+    for (const tempPath of tempPaths) {
+      try {
+        await fs.unlink(tempPath)
+      } catch (err) {
+        console.warn(`[compression] Failed to clean up temp file ${tempPath}:`, err)
+      }
+    }
+  }
+}
+
+/**
+ * Apply a single compression pass. This is the original compression logic
+ * extracted from applyCompression.
+ */
+async function applySingleCompressionPass(inputPath, outputPath, config, frameAnalysis) {
+  const { targetCrestFactorDb, thresholdPercentile, attack, release } = config
 
   const { channels, sampleRate } = await readWavAllChannels(inputPath)
   const analysisSamples = channels[0]
