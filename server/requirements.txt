@@ -79,6 +79,17 @@ soundfile>=0.12
 #   AP_BWE_REPO=vendor/ap_bwe  (or omit to use the default)
 einops>=0.8.0
 
+# ── DTLN noise reduction ──────────────────────────────────────────────────────
+
+# dtln_denoise.py (optional lightweight LSTM NR stage)
+# Not pip-installable — clone the repo separately:
+#   git clone https://github.com/lhwcv/DTLN_pytorch vendor/dtln_pytorch
+# The pretrained model DTLN_norm_500h.pth is included in the repo at:
+#   vendor/dtln_pytorch/DTLN_norm_500h.pth
+# Override paths with DTLN_CHECKPOINT and DTLN_REPO env vars if needed.
+# No new pip packages — torch is already pinned; scipy is a librosa transitive dep.
+# DTLN_model is imported via sys.path insertion (same pattern as VACE-WPE).
+
 # ── VAD (Silero) ───────────────────────────────────────────────────────────────
 
 # silero_vad.py (silence/voiced frame classification using Silero VAD v5)
