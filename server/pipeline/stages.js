@@ -40,7 +40,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb, runApBwe } from './separation.js'
+import { runRnnoise, runDtln, runSeparation, runVoiceFixer, runHarmonicExciter, runClearerVoice, runDereverb, runApBwe } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -654,6 +654,22 @@ export async function rnnoisePrePass(ctx) {
     pre_noise_floor_dbfs:   round2(preNoiseFloor ?? null),
   }
   await logLevel(ctx, 'after NE-1 RNNoise', ctx.currentPath, {})
+}
+
+// ── NE Stage: DTLN noise reduction (optional pre-separation pass) ─────────────
+// Lightweight LSTM-based denoiser; falls between RNNoise and DF3 in quality.
+// Operates at 16 kHz internally; stereo inputs are mixed to mono in the script.
+
+export async function dtlnDenoise(ctx) {
+  const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
+  const outPath = ctx.tmp('.wav')
+  await runDtln(ctx.currentPath, outPath)
+  ctx.currentPath = outPath
+  ctx.results.dtlnDenoise = {
+    applied:              true,
+    pre_noise_floor_dbfs: round2(preNoiseFloor ?? null),
+  }
+  await logLevel(ctx, 'after DTLN denoise', ctx.currentPath, {})
 }
 
 // ── NE Stage: Tonal noise pre-treatment (NE-2, conditional) ──────────────────

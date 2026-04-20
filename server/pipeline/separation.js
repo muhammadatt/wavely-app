@@ -21,6 +21,7 @@ const NUM_THREADS = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 
 const SCRIPTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
 const RNNOISE_SCRIPT          = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
+const DTLN_SCRIPT             = path.join(SCRIPTS_DIR, 'dtln_denoise.py')
 const SEPARATE_SCRIPT         = path.join(SCRIPTS_DIR, 'separate_vocals.py')
 const VOICEFIXER_SCRIPT       = path.join(SCRIPTS_DIR, 'voicefixer_enhance.py')
 const HARMONIC_EXCITER_SCRIPT = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
@@ -42,6 +43,25 @@ export function runRnnoise(inputPath, outputPath) {
     RNNOISE_SCRIPT,
     ['--input', inputPath, '--output', outputPath],
     'RNNoise',
+  )
+}
+
+/**
+ * DTLN noise reduction — lightweight LSTM-based denoiser, 16 kHz internal rate.
+ * Mono-only: stereo inputs are mixed to mono inside the script.
+ *
+ * Env:
+ *   DTLN_REPO        — path to cloned DTLN_pytorch repo (default: vendor/dtln_pytorch)
+ *   DTLN_CHECKPOINT  — path to .pth weights (default: <DTLN_REPO>/DTLN_norm_500h.pth)
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz (mono)
+ */
+export function runDtln(inputPath, outputPath) {
+  return spawnPython(
+    DTLN_SCRIPT,
+    ['--input', inputPath, '--output', outputPath],
+    'DTLN',
   )
 }
 
