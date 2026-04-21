@@ -123,30 +123,31 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
+    saturation: {
+      drive: 5,
+      wetDry: 0.20
+    },
     compression: [{
-      targetCrestFactorDb: 14,
-      thresholdPercentile: 0.90,
+      targetCrestFactorDb: 12,
       attack: 0.1,
       release: 30,
     }, 
     {
       targetCrestFactorDb: 10,
-      thresholdPercentile: 0.85,
-      attack: 5,
-      release: 60,
+      attack: 1,
+      release: 50,
     },
     {
-      targetCrestFactorDb: 6,
-      thresholdPercentile: 0.75,
-      attack: 10,
-      release: 100,
+      targetCrestFactorDb: 8,
+      attack: 1,
+      release: 50,
     }],
     parallelCompression: {
       ratio:                       10,
       attackMs:                    0.1,   
       releaseMs:                   50,
       makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.3,
+      wetMix:                      0.40,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 6,
@@ -167,7 +168,7 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
   podcast_ready: {
@@ -375,27 +376,6 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: 'LUFS' },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    compression: [{
-      targetCrestFactorDb: 14,
-      thresholdPercentile: 0.90,
-      attack: 0.1,
-      release: 20,
-    }, {
-      targetCrestFactorDb: 10,
-      thresholdPercentile: 0.75,
-      attack: 10,
-      release: 100,
-    }],
-    parallelCompression: {
-      ratio:                       10,
-      attackMs:                    0.1,   
-      releaseMs:                   50,
-      makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.3,
-      vadFadeMs:                   5,
-      crestGuardThresholdDb:       12,
-      parallelDesserMaxReductionDb: 6,
-    },
     eqProfile: 'audiobook',
     deEsser: {
       sensitivity: 'high',
@@ -416,23 +396,58 @@ export const PRESETS = {
       preserve_early: false,
     },
     autoLeveler: {
-      maxGainDb:     6.0,
-      maxRateDbPerS: 1.5,
+      maxGainDb:     4.0,
+      maxRateDbPerS: 1.0,
     },
-    // Stage 4a-E: Vocal Expander Assertive settings are used here.
+    saturation: {
+      drive: 5,
+      wetDry: 0.20
+    },
+    compression: [{
+      targetCrestFactorDb: 10,
+      thresholdPercentile: 0.95,
+      attack: 0.1,
+      release: 30,
+    }, 
+    {
+      targetCrestFactorDb: 9,
+      thresholdPercentile: 0.85,
+      attack: 15,
+      release: 100,
+    },
+    {
+      targetCrestFactorDb: 8,
+      thresholdPercentile: 0.75,
+      attack: 50,
+      release: 300,
+    }],
+    parallelCompression: {
+      ratio:                       25,
+      attackMs:                    0.1,   
+      releaseMs:                   50,
+      makeupGain:                  'auto', // automatically match average gain reduction
+      wetMix:                      0.40,
+      vadFadeMs:                   5,
+      crestGuardThresholdDb:       12,
+      parallelDesserMaxReductionDb: 6,
+    },
+    // Stage 4a-E: Vocal Expander — frequency-selective silence-floor attenuation.
+    // headroomOffsetDb - defines how close to speech threshold; 
+    // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band -- 
+    // e.g. (0.25) preserves breath/fricative transparency above 800 Hz.
     vocalExpander: {
       enabled:          true,
       ratio:            2.5,
-      highFreqDepth:    1,
-      headroomOffsetDb: 3,
-      releaseMs:        20,
-      attackMs:         1,
+      highFreqDepth:    1.0,
+      headroomOffsetDb: 6,
+      releaseMs:        50,
+      attackMs:         2,
       holdMs:           5,
-      lookaheadMs:      10,
-      maxAttenuationDb: 18,
+      lookaheadMs:      20,
+      maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
+    bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
   clearervoice_eraser: {

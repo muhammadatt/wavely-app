@@ -30,18 +30,18 @@ const STANDARD_PIPELINE = [
   stages.hpf,
   //stages.dereverb,
   stages.noiseReduce,
-  //stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
+  stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
   //stages.deEss,
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
-  //stages.vocalExpander,   
+  stages.vocalExpander,   
+  stages.vocalSaturation,
   stages.compress,              // Stage 4a — serial compression
-  stages.parallelCompress,      // Stage 4a-PC — parallel compression
+  //stages.parallelCompress,      // Stage 4a-PC — parallel compression
   stages.vocalExpander,         // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
   stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.enhancementEQ,
   stages.harmonicExciter,
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
-  stages.vocalSaturation,
   stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
@@ -79,18 +79,21 @@ export const PIPELINES = {
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // Artifact/sibilance/breath assessment
-    stages.residualCleanup,         // DF3 Tier 2 residual cleanup (conditional)
+    //stages.residualCleanup,         // DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // AP-BWE HF restoration (conditional)
-    stages.deEss,
+    //stages.deEss,
     //stages.dereverb,
     stages.remeasureFramesPostNr,    // Recalculate noise floor and update ctx.results.metrics before compression
+    stages.vocalExpander,   
+    stages.vocalSaturation,
     stages.compress,                 // standard serial compression
-    stages.parallelCompress,         // parallel compression
+    //stages.parallelCompress,         // parallel compression
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.enhancementEQ,
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
-    stages.vocalSaturation,
+
+    //Finalize
     stages.normalize,                // Loudness normalization
     stages.truePeakLimit,            // True peak limiting
     stages.measureAfter,
