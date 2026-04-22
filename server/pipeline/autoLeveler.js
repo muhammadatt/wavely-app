@@ -26,11 +26,10 @@ const FRAME_SAMPLES         = Math.round(FRAME_DURATION_S * SAMPLE_RATE)  // 441
 
 const ANALYSIS_WINDOW_FRAMES = 30    // 30 × 100 ms = 3 seconds of speech content
 const MIN_SEGMENT_FRAMES     = 5     // 5 × 100 ms = 500 ms — discard shorter segments
-const DRIFT_THRESHOLD_DB     = 3.0   // σ > 3 dB triggers leveler
+const DRIFT_THRESHOLD_DB     = 0.1   // σ > 3 dB triggers leveler
 const NOISE_FLOOR_CHECK_DBFS = -58   // post-application safety check
 
 const FADE_IN_SAMPLES  = Math.round(0.030 * SAMPLE_RATE)  // 30 ms speech onset
-const FADE_OUT_SAMPLES = Math.round(0.020 * SAMPLE_RATE)  // 20 ms speech offset
 const GAUSSIAN_SIGMA_FRAMES = 15     // 1.5 s at 100 ms/frame resolution
 
 // ── Main API ──────────────────────────────────────────────────────────────────
@@ -130,7 +129,7 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
 
   const n = analysisSamples.length
   const { gainCurve, noiseFloorRisk } = buildSampleGainCurve(
-    frameGains, frameAnalysis, n, sampleRate,
+    frameGains, frameAnalysis, n,
   )
 
   const processedChannels = channels.map(ch => applyGainCurve(ch, gainCurve))
@@ -143,8 +142,13 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
   const postRmsDb   = postWindows.map(w => w.rmsDb)
   const postStdDb   = postRmsDb.length >= 2 ? computeStdDev(postRmsDb) : null
 
-  const maxGainApplied = Math.max(...gainCurve.map(g => g))
-  const minGainApplied = Math.min(...gainCurve.map(g => g))
+  let maxGainApplied = -Infinity;
+  let minGainApplied = Infinity;
+  for (let i = 0; i < gainCurve.length; i++) {
+    const g = gainCurve[i];
+    if (g > maxGainApplied) maxGainApplied = g;
+    if (g < minGainApplied) minGainApplied = g;
+  }
   // gainCurve stores linear multipliers; convert back for reporting
   const maxGainDb_applied = maxGainApplied > 0 ? round2(20 * Math.log10(maxGainApplied)) : 0
   const minGainDb_applied = minGainApplied > 0 ? round2(20 * Math.log10(minGainApplied)) : 0
@@ -361,10 +365,9 @@ function applyGaussianSmoothing(arr, sigma) {
  * @param {Float32Array} frameGains  - dB per frame
  * @param {import('./frameAnalysis.js').FrameAnalysis} sa
  * @param {number} n                 - total sample count
- * @param {number} sampleRate
  * @returns {{ gainCurve: Float32Array, noiseFloorRisk: boolean }}
  */
-function buildSampleGainCurve(frameGains, sa, n, sampleRate) {
+function buildSampleGainCurve(frameGains, sa, n) {
   // Build a per-sample gain (linear, not dB) using the frame-level dB gains
   // with linear sub-frame interpolation and VAD-gated hold behavior.
   const gainCurve = new Float32Array(n)
@@ -384,44 +387,36 @@ function buildSampleGainCurve(frameGains, sa, n, sampleRate) {
   const numFrames = frameGains.length
 
   // Identify speech segment boundaries for fade logic
-  // speechSegments[f] = { isStart: bool, isEnd: bool }
   const isStart = new Uint8Array(numFrames)
-  const isEnd   = new Uint8Array(numFrames)
   for (let f = 0; f < numFrames; f++) {
     if (isSpeech(f)) {
       if (f === 0 || !isSpeech(f - 1)) isStart[f] = 1
-      if (f === numFrames - 1 || !isSpeech(f + 1)) isEnd[f] = 1
     }
-  }
-
-  // Track what gain was being applied when a speech segment ended
-  // (needed for the fade-out reference before entering silence)
-  const segmentEndGainDb = new Float32Array(numFrames)
-  for (let f = numFrames - 1; f >= 0; f--) {
-    if (isEnd[f]) segmentEndGainDb[f] = frameGains[f]
   }
 
   // Walk through all samples and assign gains
-  // We track: for each fade zone, what the held gain (before speech) was
-  const heldGainAtSegmentStart = new Float32Array(numFrames)
-  {
-    let lastSilenceGainDb = 0.0
-    for (let f = 0; f < numFrames; f++) {
-      if (!isSpeech(f)) {
-        lastSilenceGainDb = frameGains[f]  // held gain during silence
-      } else if (isStart[f]) {
-        heldGainAtSegmentStart[f] = lastSilenceGainDb
-      }
-    }
-  }
-
   for (let i = 0; i < n; i++) {
     const frameIdx = Math.floor(i / FRAME_SAMPLES)
     const cFrameIdx = Math.min(frameIdx, numFrames - 1)
 
     if (!isSpeech(cFrameIdx)) {
-      // Silence: hold at frameGains value (which is the held dB from last speech)
-      gainCurve[i] = dbToLinear(frameGains[cFrameIdx])
+      // Silence: hold at frameGains value
+      let finalGainDb = frameGains[cFrameIdx]
+
+      // Pre-fade (lookahead) into the next speech segment
+      // Ramps up to the target gain during the last 30ms of silence
+      const nextFrameIdx = cFrameIdx + 1
+      if (nextFrameIdx < numFrames && isStart[nextFrameIdx]) {
+        const segStartSample = nextFrameIdx * FRAME_SAMPLES
+        const preFadePos = segStartSample - i
+        if (preFadePos <= FADE_IN_SAMPLES) {
+          const alpha = 1 - (preFadePos / FADE_IN_SAMPLES)
+          const targetGainDb = frameGains[nextFrameIdx]
+          finalGainDb = finalGainDb + alpha * (targetGainDb - finalGainDb)
+        }
+      }
+
+      gainCurve[i] = dbToLinear(finalGainDb)
       continue
     }
 
@@ -431,33 +426,7 @@ function buildSampleGainCurve(frameGains, sa, n, sampleRate) {
     const t     = posInFrame / FRAME_SAMPLES
     const gainDb = (1 - t) * frameGains[cFrameIdx] + t * frameGains[nextFrameIdx]
 
-    let finalGainDb = gainDb
-
-    // Apply fade-in at speech segment start (silence→speech)
-    if (isStart[cFrameIdx]) {
-      const segStartSample = cFrameIdx * FRAME_SAMPLES
-      const fadePos = i - segStartSample
-      if (fadePos < FADE_IN_SAMPLES) {
-        const alpha = fadePos / FADE_IN_SAMPLES
-        const heldDb = heldGainAtSegmentStart[cFrameIdx]
-        finalGainDb = heldDb + alpha * (gainDb - heldDb)
-      }
-    }
-
-    // Apply fade-out at speech segment end (speech→silence)
-    if (isEnd[cFrameIdx]) {
-      const segEndSample = (cFrameIdx + 1) * FRAME_SAMPLES - 1
-      const fadePos = segEndSample - i
-      if (fadePos < FADE_OUT_SAMPLES) {
-        const alpha = fadePos / FADE_OUT_SAMPLES
-        const endGainDb = segmentEndGainDb[cFrameIdx]
-        // Fade toward the held gain (which equals endGainDb — no step)
-        // This is primarily a safety net; with correct hold behavior this is a no-op
-        finalGainDb = endGainDb + (1 - alpha) * (gainDb - endGainDb)
-      }
-    }
-
-    gainCurve[i] = dbToLinear(finalGainDb)
+    gainCurve[i] = dbToLinear(gainDb)
   }
 
   // Post-application noise floor check
@@ -472,7 +441,7 @@ function buildSampleGainCurve(frameGains, sa, n, sampleRate) {
       let sumSq = 0
       for (let i = start; i < end; i++) {
         const processedSample = i < n
-          ? sampleFromGainCurve(i, gainCurve, n)
+          ? sampleFromGainCurve(i, gainCurve)
           : 0
         sumSq += processedSample * processedSample
       }
@@ -494,7 +463,7 @@ function buildSampleGainCurve(frameGains, sa, n, sampleRate) {
 // frames' held gain (which should be ~0 dB, meaning noise floor doesn't change).
 // This is the safety-net check — it will catch the edge case where VAD gating
 // failed and gain is non-unity during silence.
-function sampleFromGainCurve(i, gainCurve, n) {
+function sampleFromGainCurve(i, gainCurve) {
   // gainCurve[i] is the linear gain multiplier at position i.
   // For the check we need gainCurve[i] > 1 to indicate amplification of silence.
   // We return the gain itself as a proxy — if gain >> 1 at a silence frame, risk is true.
