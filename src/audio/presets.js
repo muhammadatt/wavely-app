@@ -127,21 +127,38 @@ export const PRESETS = {
       drive: 5,
       wetDry: 0.20
     },
-    compression: [{
+    compression: [
+
+      // Pass 1: Transient Catcher (Peak Control)
+      // Hits only the loudest errant peaks (plosives, exclamations) very quickly
+      {
+        targetCrestFactorDb: 15,
+        maxRatio: 4,
+        threshold: 'auto',
+        follow: false,
+        attack: 0.1,  // Extremely fast to catch peaks
+        release: 40,  // Fast release to get out of the way quickly
+      },
+      //Tonal Pass for character
+      {
       targetCrestFactorDb: 12,
-      attack: 0.1,
-      release: 30,
-    }, 
-    {
-      targetCrestFactorDb: 10,
-      attack: 1,
-      release: 50,
+      maxRatio: 4,
+      threshold: 'auto',
+      follow: false,
+      attack: 10,
+      release: 80,
     },
-    {
-      targetCrestFactorDb: 8,
-      attack: 1,
-      release: 50,
-    }],
+      // Pass 2: Gentle Leveler (Body Control)
+      // Smooths out the overall performance, bringing up presence without pumping
+      {
+        targetCrestFactorDb: 12,
+        maxRatio: 2.5, // Gentle ratio for transparency
+        threshold: 'auto',
+        follow: false,
+        attack: 15,    // Slow enough to let crisp consonants through (presence)
+        release: 120,  // Slow release for smooth, unnoticeable recovery
+      }
+    ],
     parallelCompression: {
       ratio:                       10,
       attackMs:                    0.1,   
@@ -181,17 +198,26 @@ export const PRESETS = {
     truePeakCeiling: -1,
     noiseFloorTarget: null,
     noiseModel: 'df3',
-    compression: [{
-      targetCrestFactorDb: 12,
-      thresholdPercentile: 0.85,
-      attack: 1,
-      release: 50,
-    }, {
-      targetCrestFactorDb: 10,
-      thresholdPercentile: 0.75,
-      attack: 5,
-      release: 80,
-    }],
+    compression: [
+      // Pass 1: Transient Catcher (Peak Control)
+      {
+        targetCrestFactorDb: 14,
+        maxRatio: 5,
+        threshold: 'auto',
+        follow: false,
+        attack: 0.1,
+        release: 40,
+      },
+      // Pass 2: Aggressive Leveler (The "Radio" Sound)
+      {
+        targetCrestFactorDb: 10,
+        maxRatio: 4,
+        threshold: 'auto',
+        follow: false,
+        attack: 5,     // Faster than ACX to thicken the voice, but still lets some punch through
+        release: 80,   // Faster release for a denser, higher-energy consistent sound
+      }
+    ],
     eqProfile: 'podcast',
     deEsser: {
       sensitivity: 'high',

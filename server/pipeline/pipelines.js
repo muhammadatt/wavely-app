@@ -26,7 +26,7 @@ const STANDARD_PIPELINE = [
   stages.measureBefore,
   stages.peakNormalize,
   stages.analyzeFramesRaw,
-  stages.humDetect,              // Pre-HPF: spectral hum detection + conditional notch EQ
+  stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,
   //stages.dereverb,
   stages.noiseReduce,
@@ -35,13 +35,13 @@ const STANDARD_PIPELINE = [
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   stages.vocalExpander,   
   stages.vocalSaturation,
-  stages.compress,              // Stage 4a — serial compression
+  stages.compress,                // Stage 4a — serial compression
   //stages.parallelCompress,      // Stage 4a-PC — parallel compression
-  stages.vocalExpander,         // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
-  stages.autoLevel,             // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
+  stages.vocalExpander,           // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
+  stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.enhancementEQ,
   stages.harmonicExciter,
-  //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
+  //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
@@ -79,7 +79,7 @@ export const PIPELINES = {
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // Demucs or ConvTasNet vocal extraction
     stages.separationValidation,    // Artifact/sibilance/breath assessment
-    //stages.residualCleanup,         // DF3 Tier 2 residual cleanup (conditional)
+    //stages.residualCleanup,       // DF3 Tier 2 residual cleanup (conditional)
     stages.bandwidthExtension,      // AP-BWE HF restoration (conditional)
     //stages.deEss,
     //stages.dereverb,

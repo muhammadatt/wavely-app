@@ -58,7 +58,7 @@ const MIN_VOICED_FRAMES       = 50     // minimum frames for stable percentile e
  * @property {number|null} outputPeakDbfs        - Output peak level in dBFS
  * @property {number|null} outputVoicedRmsDbfs   - Output voiced RMS level in dBFS
  * @property {number|null} samplesExceedingThreshold - Number of samples exceeding compression threshold (when applied)
- * @property {number|null} thresholdExceedancePercentage - Percentage of samples exceeding threshold (when applied)
+ * @property {number|null} percentAboveThreshold - Percentage of samples exceeding threshold (when applied)
  * @property {number|null} pOutDbfs              - Target output peak level (pOut) in dBFS (when applied)
  * @property {Array|null} passes                 - Array of individual compression pass results for serial compression
  */
@@ -74,19 +74,18 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
       applied: false,
       inputCrestFactorDb: null,
       targetCrestFactorDb: null,
+      finalCrestFactorDb: null,
       skipReason: 'Compression not enabled for this preset',
       thresholdDbfs: null,
       derivedRatio: null,
       derivedGainReductionDb: null,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
-      finalCrestFactorDb: null,
       inputPeakDbfs: null,
       inputVoicedRmsDbfs: null,
       outputPeakDbfs: null,
       outputVoicedRmsDbfs: null,
-      samplesExceedingThreshold: null,
-      thresholdExceedancePercentage: null,
+      percentAboveThreshold: null,
       pOutDbfs: null,
       passes: null,
     }
@@ -114,7 +113,7 @@ export async function applyCompression(inputPath, outputPath, presetId, frameAna
       outputPeakDbfs: null,
       outputVoicedRmsDbfs: null,
       samplesExceedingThreshold: null,
-      thresholdExceedancePercentage: null,
+      percentAboveThreshold: null,
       pOutDbfs: null,
       passes: null,
     }
@@ -141,6 +140,7 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
   const passes = []
   let overallInputCrestFactorDb = null
   let overallFinalCrestFactorDb = null
+  let originalVoicedRmsDbfs = null
 
   try {
     for (let i = 0; i < compressionConfigs.length; i++) {
@@ -164,12 +164,14 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
         currentInputPath,
         currentOutputPath,
         config,
-        frameAnalysis
+        frameAnalysis,
+        originalVoicedRmsDbfs
       )
 
       // Store the initial input crest factor from the first pass
       if (i === 0) {
         overallInputCrestFactorDb = passResult.inputCrestFactorDb
+        originalVoicedRmsDbfs = passResult.inputVoicedRmsDbfs
       }
 
       // Store the final crest factor from the last pass
@@ -201,10 +203,13 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
     return {
       applied: passes.some(p => p.result.applied),
       inputCrestFactorDb: overallInputCrestFactorDb,
+      targetCrestFactorDb: passes.length > 0 ? passes[passes.length - 1].result.targetCrestFactorDb : null,
       finalCrestFactorDb: overallFinalCrestFactorDb,
       passes: passes,
       // Legacy fields for backward compatibility (aggregate from all passes)
-      targetCrestFactorDb: passes.length > 0 ? passes[passes.length - 1].result.targetCrestFactorDb : null,
+
+      // pOut from the last applied pass
+      pOutDbfs: passes.length > 0 ? passes[passes.length - 1].result.pOutDbfs : null,
       thresholdDbfs: passes.length > 0 ? passes[passes.length - 1].result.thresholdDbfs : null,
       derivedRatio: passes.length > 0 ? passes[passes.length - 1].result.derivedRatio : null,
       derivedGainReductionDb: passes.length > 0 ? passes[passes.length - 1].result.derivedGainReductionDb : null,
@@ -212,14 +217,11 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
       avgGainReductionDb: passes.length > 0 ? passes.reduce((sum, p) => sum + (p.result.avgGainReductionDb || 0), 0) / passes.filter(p => p.result.applied).length : null,
       // Peak and RMS metrics: input from first pass, output from last applied pass
       inputPeakDbfs: passes.length > 0 ? passes[0].result.inputPeakDbfs : null,
-      inputVoicedRmsDbfs: passes.length > 0 ? passes[0].result.inputVoicedRmsDbfs : null,
       outputPeakDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputPeakDbfs : null,
+      inputVoicedRmsDbfs: passes.length > 0 ? passes[0].result.inputVoicedRmsDbfs : null,
       outputVoicedRmsDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputVoicedRmsDbfs : null,
       // Threshold exceedance metrics: sum across all applied passes
-      samplesExceedingThreshold: passes.reduce((sum, p) => sum + (p.result.samplesExceedingThreshold || 0), 0),
-      thresholdExceedancePercentage: passes.length > 0 ? passes[passes.length - 1].result.thresholdExceedancePercentage : null,
-      // pOut from the last applied pass
-      pOutDbfs: passes.length > 0 ? passes[passes.length - 1].result.pOutDbfs : null,
+      percentAboveTheshold: passes.length > 0 ? passes[passes.length - 1].result.percentAboveThreshold : null,
     }
 
   } finally {
@@ -238,8 +240,8 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
  * Apply a single compression pass. This is the original compression logic
  * extracted from applyCompression.
  */
-async function applySingleCompressionPass(inputPath, outputPath, config, frameAnalysis) {
-  const { targetCrestFactorDb, attack, release } = config
+async function applySingleCompressionPass(inputPath, outputPath, config, frameAnalysis, originalVoicedRmsDbfs = null) {
+  const { targetCrestFactorDb, attack, release, threshold = "auto", follow = true, maxRatio = 5 } = config
 
   const { channels, sampleRate } = await readWavAllChannels(inputPath)
   const analysisSamples = channels[0]
@@ -258,19 +260,19 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
       applied: false,
       inputCrestFactorDb: null,
       targetCrestFactorDb,
+      finalCrestFactorDb: null,
       skipReason: 'No voiced frames / insufficient voiced content',
       thresholdDbfs: null,
       derivedRatio: null,
       derivedGainReductionDb: null,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
-      finalCrestFactorDb: null,
       inputPeakDbfs: null,
       inputVoicedRmsDbfs: null,
       outputPeakDbfs: null,
       outputVoicedRmsDbfs: null,
       samplesExceedingThreshold: null,
-      thresholdExceedancePercentage: null,
+      percentAboveThreshold: null,
       pOutDbfs: null,
     }
   }
@@ -286,19 +288,18 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
       applied: false,
       inputCrestFactorDb: round2(inputCrestFactorDb),
       targetCrestFactorDb,
+      finalCrestFactorDb: round2(inputCrestFactorDb), // Final = input when compression skipped
       skipReason: 'Input crest factor within target',
       thresholdDbfs: null,
       derivedRatio: null,
       derivedGainReductionDb: null,
       maxGainReductionDb: null,
       avgGainReductionDb: null,
-      finalCrestFactorDb: round2(inputCrestFactorDb), // Final = input when compression skipped
       inputPeakDbfs: round2(peakDbfs),
       inputVoicedRmsDbfs: round2(voicedRmsDbfs),
       outputPeakDbfs: round2(peakDbfs), // Same as input when compression skipped
       outputVoicedRmsDbfs: round2(voicedRmsDbfs), // Same as input when compression skipped
-      samplesExceedingThreshold: null,
-      thresholdExceedancePercentage: null,
+      percentAboveThreshold: null,
       pOutDbfs: null,
     }
   }
@@ -306,29 +307,49 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
   // Step 3: Set threshold based on distance of peak from targeted peak
   //const thresholdDbfs = peakDbfs - targetCrestFactorDb
 
-  // Step 3: Set threshold based on targeted distance above RMS
-  const thresholdDbfs = voicedRmsDbfs + targetCrestFactorDb
+  // Step 3: Set threshold based on preset configuration
+  let thresholdDbfs;
+  let referenceRmsForThreshold = voicedRmsDbfs;
 
-  // Debug: Log threshold derivation (verify using current pass measurements)
-  console.log(`[compression] Threshold derivation - Using peak ${peakDbfs?.toFixed(2)} dBFS from current pass, target crest ${targetCrestFactorDb} dB = threshold ${thresholdDbfs?.toFixed(2)} dBFS`)
+  if (typeof threshold === 'number') {
+    thresholdDbfs = threshold;
+    console.log(`[compression] Threshold derivation - Using fixed threshold: ${thresholdDbfs.toFixed(2)} dBFS`);
+  } else if (threshold === 'auto') {
+    if (follow === false && originalVoicedRmsDbfs !== null) {
+      referenceRmsForThreshold = originalVoicedRmsDbfs;
+      thresholdDbfs = referenceRmsForThreshold + targetCrestFactorDb;
+      console.log(`[compression] Threshold derivation - Using original RMS ${referenceRmsForThreshold.toFixed(2)} dBFS (follow: false), target crest ${targetCrestFactorDb} dB = threshold ${thresholdDbfs.toFixed(2)} dBFS`);
+    } else {
+      referenceRmsForThreshold = voicedRmsDbfs;
+      thresholdDbfs = referenceRmsForThreshold + targetCrestFactorDb;
+      console.log(`[compression] Threshold derivation - Using current RMS ${referenceRmsForThreshold.toFixed(2)} dBFS (follow: true), target crest ${targetCrestFactorDb} dB = threshold ${thresholdDbfs.toFixed(2)} dBFS`);
+    }
+  } else {
+    // Fallback
+    thresholdDbfs = voicedRmsDbfs + targetCrestFactorDb;
+    console.log(`[compression] Threshold derivation - Using fallback current RMS ${voicedRmsDbfs.toFixed(2)} dBFS, target crest ${targetCrestFactorDb} dB = threshold ${thresholdDbfs.toFixed(2)} dBFS`);
+  }
 
   // Step 4: Adjust threshold if needed and derive ratio using simple calculation
   const requiredReductionDb = inputCrestFactorDb - targetCrestFactorDb
 
-  const thresholdAdjustment = adjustCompressionThreshold(
-    analysisSamples,
-    frameAnalysis,
-    thresholdDbfs,
-    requiredReductionDb
-  )
-
-  const finalThresholdDbfs = thresholdAdjustment.adjustedThreshold || thresholdDbfs
+  let finalThresholdDbfs = thresholdDbfs
+  if (threshold === 'auto') {
+    const thresholdAdjustment = adjustCompressionThreshold(
+      analysisSamples,
+      frameAnalysis,
+      thresholdDbfs,
+      requiredReductionDb,
+      maxRatio
+    )
+    finalThresholdDbfs = thresholdAdjustment.adjustedThreshold || thresholdDbfs
+  }
 
   // MT - Replace Ratio Calculation with Simple Calc
   const pIn = peakDbfs
   const pOut = pIn - requiredReductionDb
-  const ratio = (pIn - finalThresholdDbfs)  / Math.max(pOut - finalThresholdDbfs, 0)
-  const derivedRatio = Math.min(ratio, 5)
+  const calculatedRatio = (pIn - finalThresholdDbfs) / Math.max(pOut - finalThresholdDbfs, 0.001) // Prevent division by zero
+  const derivedRatio = Math.min(calculatedRatio, maxRatio)
 
   // Debug: Log ratio calculation details (verify using current pass peak)
   console.log(`[compression] Ratio calculation - pIn: ${pIn?.toFixed(2)}, pOut: ${pOut?.toFixed(2)}, finalThreshold: ${finalThresholdDbfs?.toFixed(2)}, derivedRatio: ${derivedRatio?.toFixed(2)}`)
@@ -351,8 +372,26 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
     applyCompressionGainCurve(ch, gainCurve.curve, compParams.makeupGainDb)
   )
 
+  // Apply makeup gain to bring output RMS back to input RMS
+  const { voicedRmsDbfs: tempOutputVoicedRmsDbfs } = measureVoicedCrestFactor(processedChannels[0], frameAnalysis)
+
+  let appliedMakeupGainDb = 0
+  if (tempOutputVoicedRmsDbfs !== null && tempOutputVoicedRmsDbfs !== -120 && voicedRmsDbfs !== null) {
+    appliedMakeupGainDb = voicedRmsDbfs - tempOutputVoicedRmsDbfs
+    if (Math.abs(appliedMakeupGainDb) > 0.01) {
+      console.log(`[compression] Applying makeup gain: ${appliedMakeupGainDb.toFixed(2)} dB (Input RMS: ${voicedRmsDbfs.toFixed(2)}, Pre-makeup Output RMS: ${tempOutputVoicedRmsDbfs.toFixed(2)})`)
+      const gainLin = Math.pow(10, appliedMakeupGainDb / 20)
+      for (let c = 0; c < processedChannels.length; c++) {
+        const ch = processedChannels[c]
+        for (let i = 0; i < ch.length; i++) {
+          ch[i] *= gainLin
+        }
+      }
+    }
+  }
+
   // Debug: Log threshold exceedance statistics and pOut
-  console.log(`[compression] Pass summary - Threshold: ${finalThresholdDbfs.toFixed(2)} dBFS, pOut: ${pOut.toFixed(2)} dBFS, Samples exceeding threshold: ${gainCurve.samplesExceedingThreshold}, Percentage: ${gainCurve.thresholdExceedancePercentage.toFixed(2)}%`)
+  console.log(`[compression] Pass summary - Threshold: ${finalThresholdDbfs.toFixed(2)} dBFS, pOut: ${pOut.toFixed(2)} dBFS, Samples exceeding threshold: ${gainCurve.samplesExceedingThreshold}, Percentage: ${gainCurve.percentAboveThreshold.toFixed(2)}%`)
 
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
@@ -363,22 +402,22 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
 
   return {
     applied: true,
+    skipReason: null,
     inputCrestFactorDb:     round2(inputCrestFactorDb),
     targetCrestFactorDb,
-    skipReason: null,
+    finalCrestFactorDb:     round2(finalCrestFactorDb),
     thresholdDbfs:          round2(finalThresholdDbfs),
     derivedRatio:           round2(derivedRatio),
     derivedGainReductionDb: round2(requiredReductionDb),
     maxGainReductionDb:     round2(gainCurve.maxGainReductionDb),
     avgGainReductionDb:     round2(gainCurve.avgGainReductionDb),
-    finalCrestFactorDb:     round2(finalCrestFactorDb),
+    makeupGainDb:           round2(appliedMakeupGainDb),
     inputPeakDbfs:          round2(peakDbfs),
-    inputVoicedRmsDbfs:     round2(voicedRmsDbfs),
+    targetPeakOut:          round2(pOut),
     outputPeakDbfs:         round2(outputPeakDbfs),
+    inputVoicedRmsDbfs:     round2(voicedRmsDbfs),
     outputVoicedRmsDbfs:    round2(outputVoicedRmsDbfs),
-    samplesExceedingThreshold: gainCurve.samplesExceedingThreshold,
-    thresholdExceedancePercentage: round2(gainCurve.thresholdExceedancePercentage),
-    pOutDbfs:               round2(pOut),
+    percentAboveThreshold: round2(gainCurve.percentAboveThreshold),
   }
 }
 
@@ -495,21 +534,21 @@ function measureFinalCrestFactor(compressedSamples, frameAnalysis) {
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis - Frame analysis
  * @param {number} thresholdDbfs - Compression threshold in dBFS
  * @param {number} requiredReductionDb - Required crest factor reduction in dB
+ * @param {number} maxRatio - Maximum allowed compression ratio
  * @returns {{adjustedThreshold?: number}}
  */
-function adjustCompressionThreshold(samples, frameAnalysis, thresholdDbfs, requiredReductionDb) {
+function adjustCompressionThreshold(samples, frameAnalysis, thresholdDbfs, requiredReductionDb, maxRatio = 5) {
   const peakDbfs = measureVoicedCrestFactor(samples, frameAnalysis).peakDbfs
   let adjustedThreshold = thresholdDbfs
 
-  // If threshold is above peak (common with quiet files), adjust it based on required reduction
-  if (thresholdDbfs >= peakDbfs) {
-    // Calculate threshold to provide enough headroom for the required reduction
-    // We want: (peak - threshold) * (1 - 1/ratio) >= requiredReduction
-    // For max ratio (6:1): (peak - threshold) * (5/6) >= requiredReduction
-    // Therefore: threshold <= peak - (requiredReduction * 6/5)
-    const minHeadroom = requiredReductionDb * 1.5 // Add 50% margin for effectiveness
+  // Ensure threshold provides enough headroom for the required reduction
+  // We want: (peak - threshold) * (1 - 1/ratio) >= requiredReduction
+  // Therefore: threshold <= peak - (requiredReduction / (1 - 1/maxRatio))
+  const headroomFactor = 1 / (1 - 1/maxRatio)
+  const minHeadroom = requiredReductionDb * headroomFactor
+  if (thresholdDbfs > peakDbfs - minHeadroom) {
     adjustedThreshold = Math.min(thresholdDbfs, peakDbfs - minHeadroom)
-    console.log(`[compression] Adjusted threshold from ${thresholdDbfs.toFixed(1)} to ${adjustedThreshold.toFixed(1)} dBFS (peak: ${peakDbfs.toFixed(1)} dBFS, required: ${requiredReductionDb.toFixed(1)} dB)`)
+    console.log(`[compression] Adjusted threshold from ${thresholdDbfs.toFixed(1)} to ${adjustedThreshold.toFixed(1)} dBFS (peak: ${peakDbfs.toFixed(1)} dBFS, required: ${requiredReductionDb.toFixed(1)} dB, maxRatio: ${maxRatio}:1)`)
   }
 
   return { adjustedThreshold: adjustedThreshold !== thresholdDbfs ? adjustedThreshold : undefined }
@@ -523,7 +562,7 @@ function adjustCompressionThreshold(samples, frameAnalysis, thresholdDbfs, requi
  * Level detection: power-domain envelope follower with attack/release time
  * constants. Gain computer applies soft-knee compression.
  *
- * @returns {{ curve: Float32Array, maxGainReductionDb: number, avgGainReductionDb: number, samplesExceedingThreshold: number, thresholdExceedancePercentage: number }}
+ * @returns {{ curve: Float32Array, maxGainReductionDb: number, avgGainReductionDb: number, samplesExceedingThreshold: number, percentAboveThreshold: number }}
  */
 function buildCompressionGainCurve(samples, sampleRate, params) {
   const { thresholdDb, ratio, attackMs, releaseMs, kneeDb } = params
@@ -565,8 +604,8 @@ function buildCompressionGainCurve(samples, sampleRate, params) {
   }
 
   const avgGainReductionDb = activeFrames > 0 ? totalGainReductionDb / activeFrames : 0
-  const thresholdExceedancePercentage = n > 0 ? (samplesExceedingThreshold / n) * 100 : 0
-  return { curve, maxGainReductionDb, avgGainReductionDb, samplesExceedingThreshold, thresholdExceedancePercentage }
+  const percentAboveThreshold = n > 0 ? (samplesExceedingThreshold / n) * 100 : 0
+  return { curve, maxGainReductionDb, avgGainReductionDb, samplesExceedingThreshold, percentAboveThreshold }
 }
 
 /**
