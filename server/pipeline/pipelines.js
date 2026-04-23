@@ -34,10 +34,10 @@ const STANDARD_PIPELINE = [
   //stages.deEss,
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   stages.vocalExpander,   
-  stages.vocalSaturation,
   stages.compress,                // Stage 4a — serial compression
   //stages.parallelCompress,      // Stage 4a-PC — parallel compression
   stages.vocalExpander,           // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
+  stages.vocalSaturation,
   stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.enhancementEQ,
   stages.harmonicExciter,

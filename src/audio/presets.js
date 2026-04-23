@@ -125,8 +125,8 @@ export const PRESETS = {
     },
     saturation: {
       drive: 5,
-      wetDry: 0.20,
-      bias: 0.05,
+      wetDry: 0.40,
+      bias: 0.1,
       fc: 5000,
     },
     compression: [
