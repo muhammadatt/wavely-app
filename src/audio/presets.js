@@ -125,7 +125,9 @@ export const PRESETS = {
     },
     saturation: {
       drive: 5,
-      wetDry: 0.20
+      wetDry: 0.20,
+      bias: 0.05,
+      fc: 5000,
     },
     compression: [
 
@@ -236,6 +238,12 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
+    saturation: {
+      drive: 2.0,
+      wetDry: 0.3,
+      bias: 0.10,
+      fc: 3000,
+    },
     parallelCompression: {
       ratio:                       10,
       attackMs:                    0.40,   // midpoint of 0.3–0.5 ms spec range
@@ -302,6 +310,12 @@ export const PRESETS = {
       maxGainDb:     4.0,
       maxRateDbPerS: 1.0,
     },
+    saturation: {
+      drive: 2.0,
+      wetDry: 0.3,
+      bias: 0.08,
+      fc: 4000,
+    },
     parallelCompression: {
       ratio:                       8,
       attackMs:                    0.50,
@@ -366,6 +380,12 @@ export const PRESETS = {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
     },
+    saturation: {
+      drive: 2.0,
+      wetDry: 0.3,
+      bias: 0.10,
+      fc: 3000,
+    },
     parallelCompression: {
       ratio:                       10,
       attackMs:                    0.30,
@@ -427,7 +447,9 @@ export const PRESETS = {
     },
     saturation: {
       drive: 5,
-      wetDry: 0.20
+      wetDry: 0.20,
+      bias: 0.10,
+      fc: 3000,
     },
     compression: [{
       targetCrestFactorDb: 10,
@@ -520,6 +542,12 @@ export const PRESETS = {
     autoLeveler: {
       maxGainDb:     8.0,
       maxRateDbPerS: 1.5,
+    },
+    saturation: {
+      drive: 2.0,
+      wetDry: 0.3,
+      bias: 0.08,
+      fc: 3500,
     },
     // Stage 4a-E: Vocal Expander. ClearerVoice output is already enhanced; the
     // expander calibrates from the measured silence floor regardless of how the
