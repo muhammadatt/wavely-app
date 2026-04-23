@@ -134,18 +134,22 @@ export function runHarmonicExciter(inputPath, outputPath, params = {}) {
 }
 
 /**
- * Vocal Saturation — parallel tanh soft-saturation mixed with the dry signal.
+ * Vocal Saturation — parallel tube-style saturation mixed with the dry signal.
  *
  * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
  * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
  * @param {object} [params]
- * @param {number} [params.drive=2.0]   - tanh saturation factor
+ * @param {number} [params.drive=2.0]   - base saturation drive factor
  * @param {number} [params.wetDry=0.3]  - mix ratio (0=dry, 1=wet)
+ * @param {number} [params.bias=0.1]    - asymmetric bias for tube character
+ * @param {number} [params.fc=3000]     - crossover Hz; above this, drive is 1.5x
  */
 export function runVocalSaturation(inputPath, outputPath, params = {}) {
   const args = ['--input', inputPath, '--output', outputPath]
   if (params.drive  != null) args.push('--drive',   String(params.drive))
   if (params.wetDry != null) args.push('--wet-dry', String(params.wetDry))
+  if (params.bias   != null) args.push('--bias',    String(params.bias))
+  if (params.fc     != null) args.push('--fc',      String(params.fc))
   return spawnPython(VOCAL_SATURATION_SCRIPT, args, 'VocalSaturation')
 }
 

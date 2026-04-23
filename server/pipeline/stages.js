@@ -513,12 +513,14 @@ export async function harmonicExciter(ctx) {
 
 export async function vocalSaturation(ctx) {
   const outPath = ctx.tmp('.wav')
-  const sat     = ctx.preset.saturation ?? {}
-  const drive   = sat.drive  ?? 2.0
-  const wetDry  = sat.wetDry ?? 0.3
-  await runVocalSaturation(ctx.currentPath, outPath, { drive, wetDry })
+  const sat    = ctx.preset.saturation ?? {}
+  const drive  = sat.drive  ?? 2.0
+  const wetDry = sat.wetDry ?? 0.3
+  const bias   = sat.bias   ?? 0.1
+  const fc     = sat.fc     ?? 3000
+  await runVocalSaturation(ctx.currentPath, outPath, { drive, wetDry, bias, fc })
   ctx.currentPath = outPath
-  ctx.results.vocalSaturation = { applied: true, drive, wetDry }
+  ctx.results.vocalSaturation = { applied: true, drive, wetDry, bias, fc }
   await logLevel(ctx, 'after vocal saturation', ctx.currentPath, {})
 }
 
