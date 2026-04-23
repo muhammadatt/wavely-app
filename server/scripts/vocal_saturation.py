@@ -21,6 +21,11 @@ def tube_saturate(x, drive=1.0, bias=0.1):
     return y
 
 
+def make_lp_filter(fc, sr):
+    sos = butter(4, fc / (sr / 2.0), btype='low', output='sos')
+    return sos
+
+
 def make_hp_filter(fc, sr):
     sos = butter(4, fc / (sr / 2.0), btype='high', output='sos')
     return sos
@@ -33,18 +38,23 @@ def vocal_saturation(audio, drive=2.0, wet_dry=0.3, bias=0.1, fc=3000, sr=44100)
     drive:   base saturation factor
     wet_dry: mix ratio (0.0 = fully dry, 1.0 = fully wet)
     bias:    asymmetric operating point shift (tube character)
-    fc:      crossover frequency — high band receives 1.5x drive
+    fc:      high crossover frequency — mid band (800 to fc) receives 1.5x drive
     sr:      sample rate of the input signal
     """
-    # Complementary band split: low + high = audio exactly
+    # Complementary 3-band split: low + mid + high = audio exactly
+    sos_lp = make_lp_filter(800, sr)
     sos_hp = make_hp_filter(fc, sr)
-    high = sosfilt(sos_hp, audio)
-    low = audio - high
 
-    # High band gets 1.5x drive for frequency-dependent saturation character
+    low = sosfilt(sos_lp, audio)
+    high = sosfilt(sos_hp, audio)
+    mid = audio - low - high
+
+    # Mid band gets 1.5x drive for frequency-dependent saturation character
     low_sat  = tube_saturate(low,  drive,       bias)
-    high_sat = tube_saturate(high, drive * 1.5, bias)
-    wet = low_sat + high_sat
+    mid_sat  = tube_saturate(mid,  drive * 1.5, bias)
+    high_sat = tube_saturate(high, drive,       bias)
+
+    wet = low_sat + mid_sat + high_sat
 
     # RMS-match wet to dry so the blend is level-neutral at any mix ratio.
     # tube_saturate compresses energy — without matching, high wet_dry sounds
@@ -73,7 +83,7 @@ def main():
     parser.add_argument('--bias',    type=float, default=0.1,
                         help='Asymmetric bias for tube character (default: 0.1)')
     parser.add_argument('--fc',      type=float, default=3000,
-                        help='Crossover frequency in Hz — above this, drive is 1.5x (default: 3000)')
+                        help='High crossover frequency in Hz — mid band (800 to fc) gets 1.5x drive (default: 3000)')
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)

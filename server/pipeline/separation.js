@@ -142,7 +142,7 @@ export function runHarmonicExciter(inputPath, outputPath, params = {}) {
  * @param {number} [params.drive=2.0]   - base saturation drive factor
  * @param {number} [params.wetDry=0.3]  - mix ratio (0=dry, 1=wet)
  * @param {number} [params.bias=0.1]    - asymmetric bias for tube character
- * @param {number} [params.fc=3000]     - crossover Hz; above this, drive is 1.5x
+ * @param {number} [params.fc=3000]     - high crossover Hz; mid band (800 to fc) drive is 1.5x
  */
 export function runVocalSaturation(inputPath, outputPath, params = {}) {
   const args = ['--input', inputPath, '--output', outputPath]
