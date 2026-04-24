@@ -150,6 +150,7 @@ export function runVocalSaturation(inputPath, outputPath, params = {}) {
   if (params.wetDry != null) args.push('--wet-dry', String(params.wetDry))
   if (params.bias   != null) args.push('--bias',    String(params.bias))
   if (params.fc     != null) args.push('--fc',      String(params.fc))
+  if (params.f0     != null) args.push('--f0',      String(params.f0))
   return spawnPython(VOCAL_SATURATION_SCRIPT, args, 'VocalSaturation')
 }
 
