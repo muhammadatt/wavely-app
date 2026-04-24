@@ -41,6 +41,16 @@ def main():
     import torch
     import torchaudio.functional as F
 
+    # Monkey-patch torch.autocast to avoid CPU float16 error in LavaSR
+    # LavaBWE sets dtype=torch.float16 even on CPU with autocast=False, which crashes.
+    _orig_autocast = torch.autocast
+    class PatchedAutocast(_orig_autocast):
+        def __init__(self, device_type, dtype=None, enabled=True, **kwargs):
+            if device_type == 'cpu' and dtype == torch.float16:
+                dtype = torch.bfloat16
+            super().__init__(device_type, dtype=dtype, enabled=enabled, **kwargs)
+    torch.autocast = PatchedAutocast
+
     # ── Device selection ──────────────────────────────────────────────────────
     if args.device == 'auto':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
