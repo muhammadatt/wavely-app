@@ -29,6 +29,7 @@ const VOCAL_SATURATION_SCRIPT  = path.join(SCRIPTS_DIR, 'vocal_saturation.py')
 const CLEARERVOICE_SCRIPT      = path.join(SCRIPTS_DIR, 'clearervoice_enhance.py')
 const DEREVERB_SCRIPT         = path.join(SCRIPTS_DIR, 'dereverb.py')
 const AP_BWE_SCRIPT           = path.join(SCRIPTS_DIR, 'ap_bwe_extend.py')
+const LAVASR_SCRIPT           = path.join(SCRIPTS_DIR, 'lavasr_extend.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -192,6 +193,25 @@ export function runApBwe(inputPath, outputPath) {
     ['--input', inputPath, '--output', outputPath, '--device', DEVICE],
     'AP-BWE',
     { AP_BWE_CHECKPOINT: process.env.AP_BWE_CHECKPOINT, AP_BWE_REPO: process.env.AP_BWE_REPO }
+  )
+}
+
+/**
+ * Stage NE-6 (LavaSR path): Lightweight Vocos-based bandwidth extension.
+ * Outputs 48 kHz WAV; caller resamples back to 44.1 kHz via decodeToFloat32.
+ *
+ * Requires:
+ *   LAVASR_MODEL_PATH  - HuggingFace Hub ID or local path (default: YatharthS/LavaSR)
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 48 kHz
+ */
+export function runLavaSR(inputPath, outputPath) {
+  return spawnPython(
+    LAVASR_SCRIPT,
+    ['--input', inputPath, '--output', outputPath, '--device', DEVICE],
+    'LavaSR',
+    { LAVASR_MODEL_PATH: process.env.LAVASR_MODEL_PATH }
   )
 }
 

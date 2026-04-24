@@ -40,7 +40,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runDtln, runSeparation, runVoiceFixer, runHarmonicExciter, runVocalSaturation, runClearerVoice, runDereverb, runApBwe } from './separation.js'
+import { runRnnoise, runDtln, runSeparation, runVoiceFixer, runHarmonicExciter, runVocalSaturation, runClearerVoice, runDereverb, runApBwe, runLavaSR } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -848,16 +848,24 @@ export async function bandwidthExtension(ctx) {
   //   return
   // }
 
-  // AP-BWE outputs 48 kHz — decodeToFloat32 resamples to 32-bit float 44.1 kHz
+  const bweModel = ctx.preset.bweModel ?? 'ap_bwe'
+
+  // Both AP-BWE and LavaSR output 48 kHz — decodeToFloat32 resamples to 32-bit float 44.1 kHz
   const bwe48kPath = ctx.tmp('.wav')
   const bwe44kPath = ctx.tmp('.wav')
-  await runApBwe(ctx.currentPath, bwe48kPath)
+
+  if (bweModel === 'lavasr') {
+    await runLavaSR(ctx.currentPath, bwe48kPath)
+  } else {
+    await runApBwe(ctx.currentPath, bwe48kPath)
+  }
+
   await decodeToFloat32(bwe48kPath, bwe44kPath)
   ctx.currentPath = bwe44kPath
 
   // Post-BWE sibilance EQ: narrow bell cut to tame HF harshness introduced by BWE.
-  // AP-BWE synthesises broadband HF content that can skew sibilant; applying a cut
-  // here — before enhancement EQ and the de-esser — corrects this at the source.
+  // Both models synthesise broadband HF content that can skew sibilant; applying a
+  // cut here — before enhancement EQ and the de-esser — corrects this at the source.
   // Parameters (freq, q, gainDb) are configurable per preset via bwe.postEq.
   const postEq = ctx.preset.bwe.postEq
   if (postEq?.enabled) {
@@ -873,11 +881,12 @@ export async function bandwidthExtension(ctx) {
 
   ctx.results.bandwidthExtension = {
     applied: true,
+    model: bweModel === 'lavasr' ? 'LavaSR' : 'AP-BWE',
     ...(postEq?.enabled && {
       postEq: { applied: true, freq: postEq.freq ?? 9000, q: postEq.q ?? 2, gainDb: postEq.gainDb },
     }),
   }
-  await logLevel(ctx, 'after NE-6 bandwidth extension', ctx.currentPath, {})
+  await logLevel(ctx, `after NE-6 bandwidth extension (${bweModel})`, ctx.currentPath, {})
 }
 
 // ── CE Stage: ClearerVoice speech enhancement (CE-3) ─────────────────────────
