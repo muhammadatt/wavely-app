@@ -187,6 +187,7 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
@@ -269,6 +270,7 @@ export const PRESETS = {
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
@@ -342,6 +344,7 @@ export const PRESETS = {
       maxAttenuationDb: 12,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
@@ -410,6 +413,7 @@ export const PRESETS = {
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
@@ -495,6 +499,7 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    bweModel: 'ap_bwe',
     bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
@@ -564,6 +569,7 @@ export const PRESETS = {
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
   },
 
