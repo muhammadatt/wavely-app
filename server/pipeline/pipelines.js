@@ -42,6 +42,7 @@ const STANDARD_PIPELINE = [
   stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   //stages.harmonicExciter,
   stages.enhancementEQ,
+  stages.airBoost,               // Stage 3b — Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,
@@ -92,6 +93,7 @@ export const PIPELINES = {
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.enhancementEQ,
+    stages.airBoost,               // Stage 3b — no-op for noise_eraser (air_boost_db = 0)
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
 
     //Finalize
@@ -134,6 +136,7 @@ export const PIPELINES = {
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.enhancementEQ,
+    stages.airBoost,               // Stage 3b — no-op for clearervoice_eraser (air_boost_db = 0)
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.vocalSaturation,
     stages.normalize,                // Loudness normalization

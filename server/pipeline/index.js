@@ -157,6 +157,7 @@ function buildReport(ctx) {
       ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
       ...(results.dereverb       && { dereverberation:   formatDereverbResult(results.dereverb) }),
       ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
+      ...(results.airBoost       && { air_boost:          formatAirBoostResult(results.airBoost) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
       ...(results.autoLeveler         && { auto_leveler:         formatAutoLevelerResult(results.autoLeveler) }),
@@ -246,6 +247,24 @@ function formatEqResult(r) {
     upper_mid: bandReport(r.bands.upper_mid),
     presence:  bandReport(r.bands.presence),
     air:       bandReport(r.bands.air),
+  }
+}
+
+function formatAirBoostResult(r) {
+  if (!r.applied) {
+    return {
+      applied:           false,
+      requested_gain_db: r.requested_gain_db,
+      skip_reason:       r.skip_reason,
+    }
+  }
+  return {
+    applied:           true,
+    requested_gain_db: r.requested_gain_db,
+    applied_gain_db:   r.applied_gain_db,
+    acx_constrained:   r.acx_constrained ?? false,
+    model:             r.model,
+    shelves:           r.shelves,
   }
 }
 

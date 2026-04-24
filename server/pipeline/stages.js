@@ -46,6 +46,7 @@ import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { analyzeHum } from './humEQ.js'
+import { applyAirBoost } from './airBoost.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -348,6 +349,31 @@ export async function enhancementEQ(ctx) {
   await logLevel(ctx, 'after EQ', ctx.currentPath, {
     applied: eqResult.applied,
     filters: eqResult.ffmpegFilters.length,
+  })
+}
+
+// ── Stage: Air Boost (Stage 3b) ───────────────────────────────────────────────
+// Wide high-frequency shelf lift modeled on the Maag EQ4 Air Band (10 kHz
+// corner). Skips silently when preset.airBoost.gainDb is 0 or negative.
+// For ACX output profiles, a noise floor pre/post check constrains the applied
+// gain to preserve the -60 dBFS ACX ceiling.
+
+export async function airBoost(ctx) {
+  const gainDb       = ctx.preset?.airBoost?.gainDb ?? 0
+  const airBoostPath = ctx.tmp('.wav')
+  const result       = await applyAirBoost(
+    ctx.currentPath,
+    airBoostPath,
+    gainDb,
+    ctx.outputProfileId,
+    ctx.results.metrics,
+  )
+  if (result.applied) ctx.currentPath = airBoostPath
+  ctx.results.airBoost = result
+  await logLevel(ctx, 'after air boost', ctx.currentPath, {
+    applied: result.applied,
+    gainDb:  result.applied_gain_db ?? 'skipped',
+    ...(result.skip_reason && { reason: result.skip_reason }),
   })
 }
 
