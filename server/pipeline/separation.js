@@ -63,6 +63,7 @@ export function runDtln(inputPath, outputPath) {
     DTLN_SCRIPT,
     ['--input', inputPath, '--output', outputPath],
     'DTLN',
+    { DTLN_REPO: process.env.DTLN_REPO, DTLN_CHECKPOINT: process.env.DTLN_CHECKPOINT }
   )
 }
 
@@ -190,16 +191,17 @@ export function runApBwe(inputPath, outputPath) {
     AP_BWE_SCRIPT,
     ['--input', inputPath, '--output', outputPath, '--device', DEVICE],
     'AP-BWE',
+    { AP_BWE_CHECKPOINT: process.env.AP_BWE_CHECKPOINT, AP_BWE_REPO: process.env.AP_BWE_REPO }
   )
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-function spawnPython(script, args, label) {
+function spawnPython(script, args, label, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(PYTHON, [script, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS },
+      env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS, ...extraEnv },
     })
 
     let stderr = ''

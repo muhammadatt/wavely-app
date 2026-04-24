@@ -121,7 +121,7 @@ def main():
     model.eval()
 
     print(
-        f'AP-BWE model loaded: {h.lr_sampling_rate} Hz → {h.hr_sampling_rate} Hz'
+        f'AP-BWE model loaded: {h.lr_sampling_rate} Hz -> {h.hr_sampling_rate} Hz'
     )
 
     # ── Load and prepare input audio ──────────────────────────────────────────
@@ -167,7 +167,7 @@ def main():
         bits_per_sample=32,
     )
 
-    print(f'AP-BWE complete: {args.input} → {args.output} ({h.hr_sampling_rate} Hz)')
+    print(f'AP-BWE complete: {args.input} -> {args.output} ({h.hr_sampling_rate} Hz)')
 
 
 if __name__ == '__main__':
