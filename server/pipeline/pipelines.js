@@ -40,8 +40,8 @@ const STANDARD_PIPELINE = [
   stages.vocalSaturation,
   //stages.deEss,
   stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
+  //stages.harmonicExciter,
   stages.enhancementEQ,
-  stages.harmonicExciter,
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,
