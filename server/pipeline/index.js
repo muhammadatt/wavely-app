@@ -47,7 +47,7 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
   try {
     for (const stage of pipeline) {
       const prevPath        = ctx.currentPath
-      const resultKeysBefore = new Set(Object.keys(ctx.results))
+      const resultsBefore   = { ...ctx.results }
       const stageStart      = Date.now()
 
       await stage(ctx)
@@ -56,10 +56,10 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
       const audioChanged  = ctx.currentPath !== prevPath
 
       if (logger) {
-        // Collect only the ctx.results keys that this stage added.
-        const newKeys     = Object.keys(ctx.results).filter(k => !resultKeysBefore.has(k))
+        // Collect the ctx.results keys that this stage added or updated.
+        const changedKeys = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
         const stageResults = {}
-        for (const key of newKeys) stageResults[key] = ctx.results[key]
+        for (const key of changedKeys) stageResults[key] = ctx.results[key]
 
         await logger.logStep(
           stage.name,

@@ -25,9 +25,7 @@ import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels } from './wavWriter.js'
 import { PRESETS } from '../presets.js'
 
-const SAMPLE_RATE  = 44100
 const FFT_SIZE     = 4096
-const FRAME_HOP    = 2048  // 50% overlap for better temporal resolution
 
 // F0 ranges for voice classification
 const F0_MALE_MIN   = 85
@@ -68,7 +66,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
   const deEsserConfig = preset.deEsser
-  const { channels, sampleRate, numChannels } = await readWavAllChannels(inputPath)
+  const { channels, sampleRate } = await readWavAllChannels(inputPath)
 
   // Use channel 0 for analysis (same as frameAnalysis and EQ)
   const samples = channels[0]
@@ -247,26 +245,28 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
   const binFreqRes = sampleRate / frameSize
   const sibilantBinLo = Math.floor(sibilantBand[0] / binFreqRes)
   const sibilantBinHi = Math.ceil(sibilantBand[1] / binFreqRes)
-  const lowBinHi = Math.ceil(1000 / binFreqRes)
 
-  // Iterate voiced frames from frameAnalysis (consistent with enhancementEQ)
+  // Mid-band reference (1–3 kHz) is more stable than sub-1kHz,
+  // less affected by low-frequency room noise or breath
+  const midBinLo = Math.ceil(1000 / binFreqRes)
+  const midBinHi = Math.ceil(3000 / binFreqRes)
+
   for (const frameInfo of frameAnalysis.frames) {
     if (frameInfo.isSilence) continue
     const start = frameInfo.offsetSamples
     if (start + frameSize > samples.length) continue
     const frame = samples.slice(start, start + frameSize)
 
-    // Use Meyda for spectral analysis
-    const features = Meyda.extract(
-      ['powerSpectrum', 'spectralFlatness'],
-      frame,
-      { sampleRate, bufferSize: frameSize }
-    )
+    Meyda.bufferSize = frameSize
+    const features = Meyda.extract(['powerSpectrum'], frame, {
+      sampleRate,
+      bufferSize: frameSize,
+    })
     if (!features || !features.powerSpectrum) continue
 
     const ps = features.powerSpectrum
 
-    // Measure energy in the sibilant band
+    // Sibilant band energy
     let sibilantEnergy = 0
     let sibilantBinCount = 0
     for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
@@ -279,20 +279,37 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
 
     sibilantEnergies.push(sibilantDb)
 
-    // Measure energy below 1 kHz
-    let lowEnergy = 0
-    let lowBinCount = 0
-    for (let b = 1; b < lowBinHi && b < ps.length; b++) {
-      lowEnergy += ps[b]
-      lowBinCount++
+    // Mid-band reference energy (1–3 kHz)
+    let midEnergy = 0
+    let midBinCount = 0
+    for (let b = midBinLo; b <= midBinHi && b < ps.length; b++) {
+      midEnergy += ps[b]
+      midBinCount++
     }
-    const avgLowEnergy = lowBinCount > 0 ? lowEnergy / lowBinCount : 0
-    const lowDb = avgLowEnergy > 0 ? 10 * Math.log10(avgLowEnergy) : -120
+    const avgMidEnergy = midBinCount > 0 ? midEnergy / midBinCount : 0
+    const midDb = avgMidEnergy > 0 ? 10 * Math.log10(avgMidEnergy) : -120
 
-    // Fricative event: high sibilant energy relative to low-frequency content
-    // and high spectral flatness in the sibilant band (noise-like)
-    if (sibilantDb - lowDb > 3 && features.spectralFlatness > 0.3) {
-      // Find the spectral centroid within the sibilant band for this event
+    // Within-band spectral flatness (geometric mean / arithmetic mean)
+    // This measures noise-likeness specifically in the sibilant region,
+    // not dragged down by low-frequency harmonic content
+    let logSum = 0
+    let linSum = 0
+    let validBins = 0
+    for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
+      if (ps[b] > 0) {
+        logSum += Math.log(ps[b])
+        linSum += ps[b]
+        validBins++
+      }
+    }
+    const bandFlatness = validBins > 0 && linSum > 0
+      ? Math.exp(logSum / validBins) / (linSum / validBins)
+      : 0
+
+    // Looser dB margin (8dB vs 3dB) + within-band flatness gate
+    // bandFlatness > 0.1 is intentionally low — sibilants aren't pure
+    // white noise but they are noticeably flatter than voiced harmonics
+    if (sibilantDb - midDb > 8 && bandFlatness > 0.1) {
       let weightedSum = 0
       let totalWeight = 0
       for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
@@ -300,12 +317,11 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
         weightedSum += freq * ps[b]
         totalWeight += ps[b]
       }
-      const centroid = totalWeight > 0 ? weightedSum / totalWeight : (sibilantBand[0] + sibilantBand[1]) / 2
+      const centroid = totalWeight > 0
+        ? weightedSum / totalWeight
+        : (sibilantBand[0] + sibilantBand[1]) / 2
 
-      fricativeEvents.push({
-        energy: sibilantDb,
-        centroid,
-      })
+      fricativeEvents.push({ energy: sibilantDb, centroid })
     }
   }
 
@@ -313,13 +329,11 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
     return { p95EnergyDb: -120, meanEnergyDb: -120, targetFreqHz: null, fricativeCount: 0 }
   }
 
-  // Compute mean and P95 of sibilant energy
   const meanEnergy = sibilantEnergies.reduce((s, v) => s + v, 0) / sibilantEnergies.length
   const sorted = [...sibilantEnergies].sort((a, b) => a - b)
   const p95Index = Math.floor(sorted.length * 0.95)
   const p95Energy = sorted[Math.min(p95Index, sorted.length - 1)]
 
-  // Target frequency: spectral centroid of the top 5% fricative events
   let targetFreq = (sibilantBand[0] + sibilantBand[1]) / 2
   if (fricativeEvents.length > 0) {
     fricativeEvents.sort((a, b) => b.energy - a.energy)
@@ -481,11 +495,6 @@ function collectVoicedFrames(samples, frameAnalysis) {
   return frames
 }
 
-function rms(arr) {
-  let sum = 0
-  for (let i = 0; i < arr.length; i++) sum += arr[i] * arr[i]
-  return Math.sqrt(sum / arr.length)
-}
 
 function round2(n) {
   return n !== null && n !== undefined ? Math.round(n * 100) / 100 : null

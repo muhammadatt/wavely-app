@@ -107,7 +107,7 @@ export const PRESETS = {
     noiseModel: 'df3',
     eqProfile: 'audiobook',
     deEsser: {
-      sensitivity: 'standard',
+      sensitivity: 'high',
       trigger: 8,
       maxReduction: 6,
     },
@@ -124,10 +124,10 @@ export const PRESETS = {
       maxRateDbPerS: 1.0,
     },
     saturation: {
-      drive: 5,
-      wetDry: 0.40,
-      bias: 0.1,
-      fc: 5000,
+      drive: 1.8,
+      wetDry: 0.25,
+      bias: 0.08,
+      f0: 109.4,
     },
     compression: [
 
@@ -181,9 +181,9 @@ export const PRESETS = {
       highFreqDepth:    1.0,
       headroomOffsetDb: 6,
       releaseMs:        50,
-      attackMs:         2,
+      attackMs:         10,
       holdMs:           5,
-      lookaheadMs:      20,
+      lookaheadMs:      50,
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
@@ -240,7 +240,7 @@ export const PRESETS = {
     },
     saturation: {
       drive: 2.0,
-      wetDry: 0.3,
+      wetDry: 0.30,
       bias: 0.10,
       fc: 3000,
     },

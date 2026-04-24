@@ -277,6 +277,7 @@ function detectPlosives(samples, frameSamples) {
     }
 
     // Use Meyda to get power spectrum for this frame
+    Meyda.bufferSize = FFT_SIZE_PLOSIVE
     const frame = samples.slice(start, start + FFT_SIZE_PLOSIVE)
     const ps    = Meyda.extract('powerSpectrum', frame)
     if (!ps) { loEnergyPerFrame[f] = 0; continue }

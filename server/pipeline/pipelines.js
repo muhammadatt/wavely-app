@@ -33,11 +33,12 @@ const STANDARD_PIPELINE = [
   stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
   //stages.deEss,
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
-  stages.vocalExpander,   
+  //stages.vocalExpander,         // CAUTION: Expander before compressor removes noise, but softens start of words
   stages.compress,                // Stage 4a — serial compression
   //stages.parallelCompress,      // Stage 4a-PC — parallel compression
   stages.vocalExpander,           // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
   stages.vocalSaturation,
+  //stages.deEss,
   stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.enhancementEQ,
   stages.harmonicExciter,

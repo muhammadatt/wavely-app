@@ -33,15 +33,7 @@ demucs>=4.0.0
 # separate_vocals.py (NE-3 — ConvTasNet backend, fast alternative)
 # WHAM! checkpoint (~20 MB) downloaded from HuggingFace on first run.
 # Install after demucs to avoid torch version conflicts.
-asteroid>=0.7.0
-
-# ── VoiceFixer pipeline ────────────────────────────────────────────────────────
-
-# voicefixer_enhance.py (VF-1 — vocoder-based speech restoration)
-# Model weights (~200 MB) downloaded on first run to:
-#   ~/.cache/voicefixer/
-# ⚠ Requires torch >= 1.9. Compatible with pinned torch==2.0.0.
-voicefixer>=0.1.0
+# asteroid>=0.7.0
 
 # ── ClearVoice pipeline ────────────────────────────────────────────────────────
 

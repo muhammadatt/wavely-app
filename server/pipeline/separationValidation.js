@@ -129,6 +129,7 @@ function measureVoicedSpectralFlatness(samples, frameAnalysis, freqLo, freqHi) {
 
   let sum = 0
   let count = 0
+  Meyda.bufferSize = FFT_SIZE
   for (const frame of voiced) {
     const ps = Meyda.extract('powerSpectrum', frame)
     if (!ps) continue
@@ -148,6 +149,7 @@ function measureVoicedBandEnergyDb(samples, frameAnalysis, freqLo, freqHi) {
 
   let totalEnergy = 0
   let count = 0
+  Meyda.bufferSize = FFT_SIZE
   for (const frame of voiced) {
     const ps = Meyda.extract('powerSpectrum', frame)
     if (!ps) continue

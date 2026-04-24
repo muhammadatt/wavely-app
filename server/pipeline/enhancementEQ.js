@@ -26,7 +26,6 @@ import { readWavSamples } from "./wavReader.js"
 const FFT_SIZE = 4096
 const SAMPLE_RATE = 44100
 const MAX_GAIN_DB = 5 // spec: ±5 dB maximum per band
-const HOP_SIZE = FFT_SIZE // non-overlapping frames for batch analysis
 
 // ── EQ Reference Profiles ────────────────────────────────────────────────────
 // Each entry is the expected normalized energy (in dB relative to spectral
@@ -34,8 +33,8 @@ const HOP_SIZE = FFT_SIZE // non-overlapping frames for batch analysis
 // Values are relative to spectral mean across all six diagnostic bands.
 const EQ_REFERENCES = {
   audiobook: {
-    warmth: +13.0, // 100–250 Hz
-    mud: +11.5, // 200–400 Hz
+    warmth: +16.0, // 100–250 Hz
+    mud: +14.5, // 200–400 Hz
     clarity: +8.0, // 400–700 Hz
     upper_mid: -2.0, // 700 Hz–2 kHz 
     presence: -7.0, // 2–5 kHz
@@ -65,15 +64,23 @@ const EQ_REFERENCES = {
     presence: -9.0, // 2–5 kHz
     air: -21.0, // 6–12 kHz
   },
+  flat: {
+    warmth: +0, // 100–250 Hz
+    mud: +0, // 200–400 Hz
+    clarity: +0, // 400–700 Hz
+    upper_mid: +0, // 700 Hz–2 kHz  ← new
+    presence: +0, // 2–5 kHz
+    air: +0, // 6–12 kHz
+  },
 }
 
 // ── EQ center frequencies / Q factors ────────────────────────────────────────
 const EQ_CENTERS = {
   warmth: { freq: 180, q: 1.5 },
   mud: { freq: 285, q: 2.5 },
-  clarity: { freq: 520, q: 2.0 },
+  clarity: { freq: 550, q: 2.0 },
   upper_mid: { freq: 1200, q: 1.0 },
-  presence: { freq: 4000, q: 1.5 },
+  presence: { freq: 3500, q: 1.5 },
   air: { freq: 10000, q: 0.7, shelf: true },
 }
 
@@ -192,7 +199,7 @@ export async function analyzeSpectrum(
   if (presetId === "acx_audiobook" && noiseFloorDbfs > -66) {
     for (let i = 0; i < filters.length; i++) {
       const f = filters[i]
-      if (f.includes("f=10000") || f.includes("f=4000")) {
+      if (f.includes("f=10000") || f.includes("f=3500")) {
         // Halve the gain (works for both equalizer=...:g=X and treble=g=X:...)
         filters[i] = f.replace(
           /g=(-?)([\d.]+)/,
@@ -275,6 +282,9 @@ function averagePowerSpectrum(frames) {
   const size = FFT_SIZE / 2 // Meyda powerSpectrum returns bufferSize/2 bins
   const sum = new Float64Array(size)
 
+  // Configure Meyda globally for this synchronous extraction pass
+  Meyda.bufferSize = FFT_SIZE
+
   for (const frame of frames) {
     const ps = Meyda.extract("powerSpectrum", frame)
     if (!ps) continue
@@ -334,14 +344,14 @@ function unapplied(center) {
   return { applied: false, freq_hz: center.freq, gain_db: 0 }
 }
 
-function buildCut(name, gainDb, center) {
+function buildCut(_name, gainDb, center) {
   const filter = center.shelf
     ? `treble=g=-${gainDb}:f=${center.freq}`
     : `equalizer=f=${center.freq}:t=q:w=${center.q}:g=-${gainDb}`
   return { applied: true, freq_hz: center.freq, gain_db: -gainDb, filter }
 }
 
-function buildBoost(name, gainDb, center) {
+function buildBoost(_name, gainDb, center) {
   const filter = center.shelf
     ? `treble=g=${gainDb}:f=${center.freq}`
     : `equalizer=f=${center.freq}:t=q:w=${center.q}:g=${gainDb}`
