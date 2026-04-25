@@ -98,26 +98,72 @@ def main():
         audio_t = F.resample(audio_t, sr, 16000)
 
     # ── Run LavaSR inference ──────────────────────────────────────────────────
-    # denoise=False by default: noise reduction runs upstream in stage 2 (DF3).
-    # Setting batch=True handles long files safely by processing in 1.28 s chunks.
+    # Setting cutoff for FastLRMerge (Nyquist of 16kHz input is 8000Hz)
+    cutoff = args.cutoff if args.cutoff is not None else 8000
+    from LavaSR.enhancer.linkwitz_merge import FastLRMerge
+    model.bwe_model.lr_refiner = FastLRMerge(device=device, cutoff=cutoff, transition_bins=1024)
+
     kwargs = dict(
         enhance=True,
         denoise=args.denoise,
-        batch=True,
+        batch=False,
     )
-    if args.cutoff is not None:
-        # load_audio exposes cutoff; here we reach into the model to set it.
-        # FastLRMerge (the Linkwitz-Riley refiner) uses this cutoff frequency.
-        kwargs['cutoff'] = args.cutoff
 
-    print(f'LavaSR running inference (denoise={args.denoise}, cutoff={args.cutoff})')
+    print(f'LavaSR running inference (denoise={args.denoise}, cutoff={cutoff})')
+
+    # We process in 10-second chunks with 0.5s overlap to avoid boundary clicks
+    # and keep memory usage bounded.
+    chunk_sec = 10.0
+    overlap_sec = 0.5
+    chunk_samples = int(chunk_sec * 16000)
+    overlap_samples = int(overlap_sec * 16000)
+    stride_samples = chunk_samples - overlap_samples
+
+    total_samples = audio_t.shape[-1]
+    out_total_samples = total_samples * 3
+    output_audio = torch.zeros((1, out_total_samples), dtype=torch.float32, device='cpu')
+
+    out_overlap_samples = overlap_samples * 3
+    fade_in = torch.linspace(0, 1, out_overlap_samples, device='cpu')
+    fade_out = torch.linspace(1, 0, out_overlap_samples, device='cpu')
+
     with torch.no_grad():
-        output_t = model.enhance(audio_t, **kwargs)
+        start = 0
+        while start < total_samples:
+            end = min(total_samples, start + chunk_samples)
+            chunk = audio_t[:, start:end]
 
-    # Output is a tensor at 48 kHz; shape may be [1, samples] or [samples].
-    output_t = output_t.cpu()
-    if output_t.dim() == 1:
-        output_t = output_t.unsqueeze(0)
+            # LavaSR needs at least 1 second to not crash some internal convolutions
+            pad_len = 0
+            if chunk.shape[-1] < 16000:
+                pad_len = 16000 - chunk.shape[-1]
+                chunk = torch.nn.functional.pad(chunk, (0, pad_len))
+
+            out_chunk = model.enhance(chunk, **kwargs).cpu()
+            if out_chunk.dim() == 1:
+                out_chunk = out_chunk.unsqueeze(0)
+
+            if pad_len > 0:
+                out_chunk = out_chunk[:, :-(pad_len * 3)]
+
+            out_start = start * 3
+            out_end = out_start + out_chunk.shape[-1]
+
+            # Construct flat-top window
+            win = torch.ones(out_chunk.shape[-1], device='cpu')
+            if start > 0 and win.shape[0] > out_overlap_samples:
+                win[:out_overlap_samples] = fade_in
+            if end < total_samples and win.shape[0] > out_overlap_samples:
+                win[-out_overlap_samples:] = fade_out
+
+            output_audio[:, out_start:out_end] += out_chunk * win.unsqueeze(0)
+
+            if end == total_samples:
+                break
+
+            start += stride_samples
+
+    output_t = output_audio
 
     # ── Save wideband output at 48 kHz ────────────────────────────────────────
     # The Node.js stage (decodeToFloat32) resamples back to 44.1 kHz.
