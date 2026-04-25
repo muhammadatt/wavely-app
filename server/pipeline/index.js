@@ -422,7 +422,7 @@ function formatVocalExpanderResult(r) {
 
 function formatResonanceSuppressorResult(r) {
   if (!r) return null
-  if (r.skipped || r.applied === false) return { applied: false }
+  if (r.applied === false) return { applied: false }
   return {
     applied:           true,
     max_reduction_db:  r.max_reduction_db  ?? null,

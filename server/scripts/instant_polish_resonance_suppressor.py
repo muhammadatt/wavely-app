@@ -5,7 +5,7 @@ Stage 3b — Dynamic Resonance Suppressor
 Soothe2-inspired spectral spike detection and dynamic attenuation.
 Operates on 32-bit float PCM at 44.1 kHz (Instant Polish internal format).
 
-Dependencies: numpy, scipy, soundfile (for standalone testing)
+Dependencies: numpy, scipy
 All processing is frame-based via STFT/ISTFT with overlap-add reconstruction.
 """
 
@@ -215,20 +215,32 @@ class ResonanceSuppressor:
         reduction_db = np.clip(raw_reduction, 0.0, max_reduction)
         return reduction_db
 
-    def process(self, audio: np.ndarray) -> dict:
+    def process(self, audio: np.ndarray, voiced_frame_indices=None) -> dict:
         """
         Apply dynamic resonance suppression to a mono audio array.
 
+        Processes one STFT frame at a time (streaming) to keep memory proportional
+        to the audio length plus one FFT window — not to n_frames × n_bins. This
+        avoids multi-GB intermediate matrix allocations for long files.
+
+        VAD gating is applied at the STFT frame level: frames whose index is not in
+        voiced_frame_indices receive target_gr=0, letting the attack/release IIR
+        decay smoothed_gr naturally. This prevents hard per-sample splicing, which
+        causes discontinuities at overlap-add boundaries.
+
         Args:
             audio: 1D float32 numpy array at self.sr sample rate.
+            voiced_frame_indices: set of int STFT frame indices where voice is
+                present. Frames outside this set are gated (target_gr=0).
+                None means all frames are processed (no VAD gating).
 
         Returns:
             dict with keys:
-              'audio'           : processed audio (float32 ndarray, same length as input)
-              'max_reduction_db': peak reduction applied at any single bin/frame
-              'mean_reduction_db': mean reduction across all active bins and frames
-              'spike_frames'    : number of frames where any reduction was applied
-              'artifact_risk'   : bool — True if mean_reduction_db > 3 dB (advisory flag trigger)
+              'audio'            : processed audio (float32 ndarray, same length as input)
+              'max_reduction_db' : peak gain reduction at any bin across all frames (dB)
+              'mean_reduction_db': mean reduction over bins with > 0.01 dB reduction
+              'spike_frames'     : frames where any bin exceeded 0.01 dB reduction
+              'artifact_risk'    : True when mean_reduction_db > 3 dB
         """
         if audio.ndim != 1:
             raise ValueError("ResonanceSuppressor expects mono input (1D array).")
@@ -236,20 +248,15 @@ class ResonanceSuppressor:
         n_fft = self.n_fft
         hop = self.hop_length
         window = get_window("hann", n_fft, fftbins=True)
+        window_squared = window ** 2
 
-        # --- STFT ---
-        # Pad signal so all samples are covered
         pad = n_fft // 2
         audio_padded = np.pad(audio, pad, mode="reflect")
+        n_padded = len(audio_padded)
 
-        frames = []
-        pos = 0
-        while pos + n_fft <= len(audio_padded):
-            frame = audio_padded[pos : pos + n_fft] * window
-            frames.append(frame)
-            pos += hop
+        n_frames = max(0, (n_padded - n_fft) // hop + 1)
 
-        if not frames:
+        if n_frames == 0:
             logger.warning("ResonanceSuppressor: audio too short, returning unmodified.")
             return {
                 "audio": audio,
@@ -259,77 +266,76 @@ class ResonanceSuppressor:
                 "artifact_risk": False,
             }
 
-        # FFT of all frames → complex spectra
-        spectra = np.array([np.fft.rfft(f) for f in frames])  # shape: (n_frames, n_bins)
-        magnitudes = np.abs(spectra)                           # linear magnitude
-        phases = np.angle(spectra)                              # phase (preserved throughout)
+        # Output buffers scale with audio length, not n_frames × n_bins
+        output_buffer      = np.zeros(n_padded, dtype=np.float64)
+        window_accumulator = np.zeros(n_padded, dtype=np.float64)
 
-        # Convert to dB (small epsilon to avoid log(0))
-        eps = 1e-10
-        magnitudes_db = 20.0 * np.log10(magnitudes + eps)
-
-        # --- Per-frame resonance detection and gain reduction ---
-        n_frames = len(frames)
-        gain_reduction_db = np.zeros_like(magnitudes_db)  # shape: (n_frames, n_bins)
-
-        # Smoothed gain reduction state for attack/release (per bin)
+        # Per-bin attack/release state (the only O(n_bins) persistent allocation)
         smoothed_gr = np.zeros(self.n_bins)
 
+        # Telemetry accumulators
+        max_reduction       = 0.0
+        sum_reduction       = 0.0
+        n_active_bins_total = 0
+        spike_frames        = 0
+        active_threshold    = 0.01  # dB — consistent floor for mean and spike counting
+
+        eps = 1e-10
+
         for i in range(n_frames):
-            mag_db_frame = magnitudes_db[i]
-            smoothed_env = self._compute_smoothed_envelope(mag_db_frame)
-            target_gr = self._compute_gain_reduction(mag_db_frame, smoothed_env)
-
-            # Attack/release time smoothing (per-bin IIR)
-            # When target_gr > smoothed_gr → attack (gain reducing faster)
-            # When target_gr < smoothed_gr → release (gain recovering)
-            increasing = target_gr >= smoothed_gr
-            coeff = np.where(increasing, self.attack_coeff, self.release_coeff)
-            smoothed_gr = coeff * smoothed_gr + (1.0 - coeff) * target_gr
-            gain_reduction_db[i] = smoothed_gr.copy()
-
-        # --- Apply gain reduction to linear magnitudes ---
-        gain_linear = 10.0 ** (-gain_reduction_db / 20.0)
-        modified_magnitudes = magnitudes * gain_linear
-
-        # --- Reconstruct complex spectra (original phase, modified magnitude) ---
-        modified_spectra = modified_magnitudes * np.exp(1j * phases)
-
-        # --- ISTFT with overlap-add reconstruction ---
-        output_length = len(audio_padded)
-        output_buffer = np.zeros(output_length, dtype=np.float64)
-        window_accumulator = np.zeros(output_length, dtype=np.float64)
-
-        window_squared = window ** 2  # for normalization in OLA
-
-        for i, spectrum in enumerate(modified_spectra):
-            time_frame = np.fft.irfft(spectrum, n=n_fft) * window
             start = i * hop
-            end = start + n_fft
-            if end > output_length:
-                trim = output_length - start
-                output_buffer[start:output_length] += time_frame[:trim]
-                window_accumulator[start:output_length] += window_squared[:trim]
-            else:
-                output_buffer[start:end] += time_frame
-                window_accumulator[start:end] += window_squared
+            end   = start + n_fft
 
-        # Normalize by window accumulator to correct OLA gain
+            # --- FFT ---
+            frame       = audio_padded[start:end] * window
+            spectrum    = np.fft.rfft(frame)
+            magnitude   = np.abs(spectrum)
+            phase       = np.angle(spectrum)
+            magnitude_db = 20.0 * np.log10(magnitude + eps)
+
+            # --- Resonance detection ---
+            smoothed_env = self._compute_smoothed_envelope(magnitude_db)
+            target_gr    = self._compute_gain_reduction(magnitude_db, smoothed_env)
+
+            # VAD gating at STFT-frame level: silence frames receive no gain
+            # reduction target. The IIR below decays smoothed_gr toward 0,
+            # providing smooth gain recovery without hard per-sample splicing.
+            if voiced_frame_indices is not None and i not in voiced_frame_indices:
+                target_gr = np.zeros(self.n_bins)
+
+            # --- Attack/release IIR ---
+            increasing  = target_gr >= smoothed_gr
+            coeff       = np.where(increasing, self.attack_coeff, self.release_coeff)
+            smoothed_gr = coeff * smoothed_gr + (1.0 - coeff) * target_gr
+
+            # --- Per-frame telemetry ---
+            frame_max = float(np.max(smoothed_gr))
+            if frame_max > max_reduction:
+                max_reduction = frame_max
+            active_mask = smoothed_gr > active_threshold
+            if active_mask.any():
+                sum_reduction       += float(np.sum(smoothed_gr[active_mask]))
+                n_active_bins_total += int(active_mask.sum())
+                spike_frames        += 1
+
+            # --- Apply gain reduction and ISTFT ---
+            gain_linear      = 10.0 ** (-smoothed_gr / 20.0)
+            modified_spectrum = magnitude * gain_linear * np.exp(1j * phase)
+            time_frame        = np.fft.irfft(modified_spectrum, n=n_fft) * window
+
+            frame_end = min(end, n_padded)
+            trim      = frame_end - start
+            output_buffer[start:frame_end]      += time_frame[:trim]
+            window_accumulator[start:frame_end] += window_squared[:trim]
+
+        # OLA normalization
         safe_acc = np.where(window_accumulator > 1e-8, window_accumulator, 1.0)
         output_buffer /= safe_acc
 
-        # Remove padding and cast back to float32
         output_audio = output_buffer[pad : pad + len(audio)].astype(np.float32)
 
-        # --- Telemetry for processing report ---
-        max_reduction = float(np.max(gain_reduction_db))
-        mean_reduction = float(np.mean(gain_reduction_db[gain_reduction_db > 0.01]))
-        if np.isnan(mean_reduction):
-            mean_reduction = 0.0
-        spike_frames = int(np.sum(np.any(gain_reduction_db > 0.5, axis=1)))
-
-        # Artifact risk: if mean reduction is high, flag for advisory system
-        artifact_risk = mean_reduction > 3.0
+        mean_reduction = (sum_reduction / n_active_bins_total) if n_active_bins_total > 0 else 0.0
+        artifact_risk  = mean_reduction > 3.0
 
         logger.info(
             f"ResonanceSuppressor: max_reduction={max_reduction:.2f} dB | "
@@ -382,18 +388,25 @@ def apply_resonance_suppression(
 
     suppressor = ResonanceSuppressor(sample_rate=sample_rate, preset=preset)
 
+    voiced_frame_indices = None
     if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
-        # Process only voiced segments; splice results back in
-        # Simple approach: process full audio, then blend with original on silence frames
-        result = suppressor.process(audio)
-        processed = result["audio"]
-        # On silence frames (not voiced), restore original
-        silence_mask = ~vad_voiced_mask
-        processed[silence_mask] = audio[silence_mask]
-        result["audio"] = processed
-    else:
-        result = suppressor.process(audio)
+        # Convert per-sample VAD mask to a set of STFT frame indices.
+        # Frame i is "voiced" when any sample in its analysis window overlaps
+        # with voiced audio. Gating at the STFT frame level (not per-sample)
+        # avoids discontinuities at voiced/silence boundaries — the attack/release
+        # IIR in process() decays gain reduction smoothly toward zero on silence
+        # frames instead of hard-splicing original samples post-OLA.
+        pad           = suppressor.n_fft // 2
+        n_padded      = len(audio) + 2 * pad
+        n_stft_frames = max(0, (n_padded - suppressor.n_fft) // suppressor.hop_length + 1)
+        voiced_frame_indices = set()
+        for fi in range(n_stft_frames):
+            orig_start = max(0, fi * suppressor.hop_length - pad)
+            orig_end   = min(len(audio), fi * suppressor.hop_length - pad + suppressor.n_fft)
+            if orig_start < orig_end and vad_voiced_mask[orig_start:orig_end].any():
+                voiced_frame_indices.add(fi)
 
+    result = suppressor.process(audio, voiced_frame_indices=voiced_frame_indices)
     result["skipped"] = False
     return result
 

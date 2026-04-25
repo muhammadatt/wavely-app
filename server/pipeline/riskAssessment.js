@@ -183,8 +183,9 @@ export async function generateQualityAdvisory(
   }
 
   // --- Resonance Suppressor advisory flag ---
-  // Emitted when the suppressor ran (not skipped) and artifact_risk is true,
-  // indicating mean reduction depth exceeded 3 dB across active frames.
+  // Emitted when the suppressor ran and artifact_risk is true.
+  // artifact_risk is set when mean gain reduction across bins with > 0.01 dB
+  // reduction exceeds 3 dB, indicating the file had sustained resonant spikes.
   const rsResult = pipelineContext.resonanceSuppressor
   if (rsResult && rsResult.applied && rsResult.artifact_risk) {
     flags.push({

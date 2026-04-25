@@ -363,10 +363,10 @@ export async function resonanceSuppressor(ctx) {
   const outPath = ctx.tmp('.wav')
   const frames  = ctx.results.metrics?.frames ?? null
   const result  = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames)
-  if (!result.skipped) ctx.currentPath = outPath
+  if (result.applied) ctx.currentPath = outPath
   ctx.results.resonanceSuppressor = result
   await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
-    skipped:       result.skipped,
+    skipped:       result.applied === false,
     max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
     artifact_risk: result.artifact_risk ?? false,
   })
