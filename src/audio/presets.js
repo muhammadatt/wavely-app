@@ -109,7 +109,7 @@ export const PRESETS = {
     deEsser: {
       sensitivity: 'high',
       trigger: 8,
-      maxReduction: 6,
+      maxReduction: 20,
     },
     channelOutput: 'mono',
     defaultOutputProfile: 'acx',
@@ -187,6 +187,7 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    airBoost: { gainDb: 6 },
     bweModel: 'lavasr',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
@@ -301,12 +302,9 @@ export const PRESETS = {
     channelOutput: 'mono',
     defaultOutputProfile: 'acx',
     lockedOutputProfile: false,
-    // VACE-WPE (heavy) auto-selects GPU when CUDA is available; falls back to
-    // CPU. Set to 'medium' here to use NARA-WPE on CPU-only servers — override
-    // at deploy time via presetOverrides if GPU is confirmed available.
     dereverb: {
       enabled: true,
-      strength: 'heavy',
+      strength: 'heavy', // VACE-WPE (heavy) //Set to 'medium' here to use NARA-WPE
       preserve_early: false,
     },
     autoLeveler: {
@@ -415,7 +413,7 @@ export const PRESETS = {
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    airBoost: { gainDb: 2.0 },
+    airBoost: { gainDb: 16 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
@@ -458,24 +456,38 @@ export const PRESETS = {
       bias: 0.10,
       fc: 3000,
     },
-    compression: [{
-      targetCrestFactorDb: 10,
-      thresholdPercentile: 0.95,
-      attack: 0.1,
-      release: 30,
-    }, 
-    {
-      targetCrestFactorDb: 9,
-      thresholdPercentile: 0.85,
-      attack: 15,
-      release: 100,
+    compression: [
+
+      // Pass 1: Transient Catcher (Peak Control)
+      // Hits only the loudest errant peaks (plosives, exclamations) very quickly
+      {
+        targetCrestFactorDb: 15,
+        maxRatio: 4,
+        threshold: 'auto',
+        follow: false,
+        attack: 0.1,  // Extremely fast to catch peaks
+        release: 40,  // Fast release to get out of the way quickly
+      },
+      //Tonal Pass for character
+      {
+      targetCrestFactorDb: 12,
+      maxRatio: 4,
+      threshold: 'auto',
+      follow: false,
+      attack: 10,
+      release: 80,
     },
-    {
-      targetCrestFactorDb: 8,
-      thresholdPercentile: 0.75,
-      attack: 50,
-      release: 300,
-    }],
+      // Pass 2: Gentle Leveler (Body Control)
+      // Smooths out the overall performance, bringing up presence without pumping
+      {
+        targetCrestFactorDb: 12,
+        maxRatio: 2.5, // Gentle ratio for transparency
+        threshold: 'auto',
+        follow: false,
+        attack: 15,    // Slow enough to let crisp consonants through (presence)
+        release: 120,  // Slow release for smooth, unnoticeable recovery
+      }
+    ],
     parallelCompression: {
       ratio:                       25,
       attackMs:                    0.1,   

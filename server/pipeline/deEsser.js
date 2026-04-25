@@ -130,7 +130,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     targetFreq,
     bandwidth: sibilantBand[1] - sibilantBand[0],
     maxReductionDb: maxReduction,
-    thresholdDb: sibilanceMetrics.meanEnergyDb + thresholdOffset,
+    thresholdOffsetDb: thresholdOffset,
     attackMs: 1.5,
     releaseMs: 50,
   }
@@ -366,7 +366,7 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
     targetFreq,
     bandwidth,
     maxReductionDb,
-    thresholdDb,
+    thresholdOffsetDb,
     attackMs,
     releaseMs,
   } = params
@@ -386,10 +386,18 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
     bpState = res.state
   }
 
+  // Derive threshold from the bandpass-filtered signal's RMS so it's on the
+  // same amplitude scale as the envelope follower below. Meyda powerSpectrum
+  // values are unnormalized squared FFT magnitudes and cannot be used directly
+  // as an amplitude reference.
+  let sumSq = 0
+  for (let i = 0; i < n; i++) sumSq += sibilant[i] * sibilant[i]
+  const rmsLin = Math.sqrt(sumSq / n) || 1e-10
+  const thresholdLin = rmsLin * Math.pow(10, thresholdOffsetDb / 20)
+
   // Envelope follower on sibilant, gain computation
   const attackCoeff  = Math.exp(-1 / (sampleRate * attackMs / 1000))
   const releaseCoeff = Math.exp(-1 / (sampleRate * releaseMs / 1000))
-  const thresholdLin   = Math.pow(10, thresholdDb / 20)
   const maxReductionLin = Math.pow(10, -maxReductionDb / 20)
 
   // gainCurve[i] is the broadband gain multiplier at sample i:

@@ -140,8 +140,8 @@ def vocal_saturation(
 
     # --- Per-band saturation ------------------------------------------------
     low_sat  = tube_saturate(low,  drive * 5, bias)
-    mid_sat  = tube_saturate(mid,  drive * 1.0, bias)
-    high_sat = tube_saturate(high, drive * 0.7, bias)
+    mid_sat  = tube_saturate(mid,  drive * 0.1, bias)
+    high_sat = tube_saturate(high, drive * 0.1, bias)
 
     wet = low_sat + mid_sat + high_sat
 

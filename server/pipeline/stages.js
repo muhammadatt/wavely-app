@@ -738,8 +738,8 @@ export async function tonalPretreatment(ctx) {
     const outPath = ctx.tmp('.wav')
     // Build notch chain: Q=12, -24 dB at each tonal frequency
     const filters = []
-    if (apply60Hz)  { filters.push('equalizer=f=60:t=q:w=12:g=-24');  notches.push({ freq_hz: 60,  gain_db: -24 }) }
-    if (apply120Hz) { filters.push('equalizer=f=120:t=q:w=12:g=-24'); notches.push({ freq_hz: 120, gain_db: -24 }) }
+    if (apply60Hz)  { filters.push('equalizer=f=60:width_type=q:w=12:g=-24');  notches.push({ freq_hz: 60,  gain_db: -24 }) }
+    if (apply120Hz) { filters.push('equalizer=f=120:width_type=q:w=12:g=-24'); notches.push({ freq_hz: 120, gain_db: -24 }) }
     await applyParametricEQ(ctx.currentPath, outPath, filters)
     ctx.currentPath = outPath
     ctx.log(`[NE-2] Tonal pre-treatment applied: ${notches.map(n => `${n.freq_hz}Hz`).join(', ')}`)
@@ -898,7 +898,7 @@ export async function bandwidthExtension(ctx) {
     const freq   = postEq.freq   ?? 9000
     const q      = postEq.q      ?? 2
     const gainDb = postEq.gainDb
-    const filter = `equalizer=f=${freq}:t=q:w=${q}:g=${gainDb}`
+    const filter = `equalizer=f=${freq}:width_type=q:w=${q}:g=${gainDb}`
     const eqPath = ctx.tmp('.wav')
     await applyParametricEQ(ctx.currentPath, eqPath, [filter])
     ctx.currentPath = eqPath

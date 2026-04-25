@@ -27,11 +27,10 @@ const STANDARD_PIPELINE = [
   stages.peakNormalize,
   stages.analyzeFramesRaw,
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
-  stages.hpf,
+  stages.hpf,                     // 80hz hi pass filter
   //stages.dereverb,
-  stages.noiseReduce,
-  stages.bandwidthExtension,      // NE-6: AP-BWE HF restoration (enabled per preset.bwe; no-op when disabled)
-  //stages.deEss,
+  stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
+  stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   //stages.vocalExpander,         // CAUTION: Expander before compressor removes noise, but softens start of words
   stages.compress,                // Stage 4a — serial compression
@@ -41,8 +40,9 @@ const STANDARD_PIPELINE = [
   //stages.deEss,
   stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   //stages.harmonicExciter,
-  stages.enhancementEQ,
   stages.airBoost,               // Stage 3b — Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
+  stages.deEss,
+  stages.enhancementEQ,
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,
