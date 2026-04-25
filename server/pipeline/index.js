@@ -163,7 +163,8 @@ function buildReport(ctx) {
       ...(results.autoLeveler         && { auto_leveler:         formatAutoLevelerResult(results.autoLeveler) }),
       ...(results.compression         && { compression:           formatCompressionResult(results.compression) }),
       ...(results.parallelCompression && { parallel_compression:  formatParallelCompressionResult(results.parallelCompression) }),
-      ...(results.vocalExpander       && { vocal_expander:        formatVocalExpanderResult(results.vocalExpander) }),
+      ...(results.vocalExpander         && { vocal_expander:          formatVocalExpanderResult(results.vocalExpander) }),
+      ...(results.resonanceSuppressor   && { resonance_suppressor:    formatResonanceSuppressorResult(results.resonanceSuppressor) }),
       normalization_gain_db:
         results.afterMeasurements?.rmsDbfs == null || results.beforeMeasurements?.rmsDbfs == null
           ? null
@@ -416,6 +417,18 @@ function formatVocalExpanderResult(r) {
       pct_frames_expanded:        r.pctFramesExpanded,
       over_expansion_flag:        r.overExpansionFlag,
     },
+  }
+}
+
+function formatResonanceSuppressorResult(r) {
+  if (!r) return null
+  if (r.skipped || r.applied === false) return { applied: false }
+  return {
+    applied:           true,
+    max_reduction_db:  r.max_reduction_db  ?? null,
+    mean_reduction_db: r.mean_reduction_db ?? null,
+    spike_frames:      r.spike_frames      ?? null,
+    artifact_risk:     r.artifact_risk     ?? false,
   }
 }
 
