@@ -187,8 +187,7 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    airBoost: { gainDb: 1.5 },
-    bweModel: 'ap_bwe',
+    bweModel: 'lavasr',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
   },
 
