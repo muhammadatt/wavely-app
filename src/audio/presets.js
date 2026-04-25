@@ -107,9 +107,9 @@ export const PRESETS = {
     noiseModel: 'df3',
     eqProfile: 'audiobook',
     deEsser: {
-      sensitivity: 'high',
-      trigger: 8,
-      maxReduction: 20,
+      sensitivity: 'medium',
+      trigger: 1,
+      maxReduction: 10,
     },
     channelOutput: 'mono',
     defaultOutputProfile: 'acx',
@@ -125,7 +125,7 @@ export const PRESETS = {
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.25,
+      wetDry: 0.1,
       bias: 0.08,
       f0: 109.4,
     },
@@ -188,8 +188,8 @@ export const PRESETS = {
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
     airBoost: { gainDb: 6 },
-    bweModel: 'lavasr',
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    bweModel: 'ap_bwe',
+    bwe: { enabled: true, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
   },
 
   podcast_ready: {

@@ -60,6 +60,7 @@ const SIBILANT_BANDS = {
  * @property {number|null} p95EnergyDb     - P95 sibilant energy (relative)
  * @property {number|null} meanEnergyDb    - Mean sibilant energy (relative)
  * @property {string|null} triggerReason   - Why de-esser was/wasn't triggered
+ * @property {Array<{startSec:number, endSec:number, durationMs:number, avgReductionDb:number}>} treatedEvents
  */
 export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnalysis) {
   const preset = PRESETS[presetId]
@@ -96,6 +97,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
       p95EnergyDb: sibilanceMetrics.p95EnergyDb,
       meanEnergyDb: sibilanceMetrics.meanEnergyDb,
       triggerReason: 'Too few fricative events detected',
+      treatedEvents: [],
     }
   }
 
@@ -114,6 +116,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
       p95EnergyDb: sibilanceMetrics.p95EnergyDb,
       meanEnergyDb: sibilanceMetrics.meanEnergyDb,
       triggerReason: `P95-mean delta ${round2(delta)} dB <= trigger ${triggerThreshold} dB`,
+      treatedEvents: [],
     }
   }
 
@@ -132,14 +135,14 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     maxReductionDb: maxReduction,
     thresholdOffsetDb: thresholdOffset,
     attackMs: 1.5,
-    releaseMs: 50,
+    releaseMs: 10,
   }
 
   // Build gain curve from channel 0 analysis
-  const gainCurve = buildDeEsserGainCurve(channels[0], sampleRate, deEsserParams)
+  const { gainCurve, maxGainReductionDb, treatedEvents } = buildDeEsserGainCurve(channels[0], sampleRate, deEsserParams)
 
   // Apply gain curve to all channels
-  const processedChannels = channels.map(ch => applyGainCurve(ch, gainCurve))
+  const processedChannels = channels.map(ch => applyGainCurve(ch, { gainCurve }))
 
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
@@ -148,10 +151,11 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     f0Hz: f0,
     voiceType,
     targetFreqHz: targetFreq,
-    maxReductionDb: round2(gainCurve.maxGainReductionDb),
+    maxReductionDb: round2(maxGainReductionDb),
     p95EnergyDb: sibilanceMetrics.p95EnergyDb,
     meanEnergyDb: sibilanceMetrics.meanEnergyDb,
     triggerReason: `P95-mean delta ${round2(delta)} dB > trigger ${triggerThreshold} dB`,
+    treatedEvents,
   }
 }
 
@@ -359,7 +363,7 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
  *
  * The gain array is then applied to all channels via applyGainCurve().
  *
- * @returns {{ gainCurve: Float32Array, maxGainReductionDb: number }}
+ * @returns {{ gainCurve: Float32Array, maxGainReductionDb: number, treatedEvents: Array }}
  */
 function buildDeEsserGainCurve(samples, sampleRate, params) {
   const {
@@ -406,6 +410,11 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
   let envelope = 0
   let maxGainReductionDb = 0
 
+  const treatedEvents = []
+  let eventStart = -1
+  let eventAccumDb = 0
+  let eventSampleCount = 0
+
   for (let i = 0; i < n; i++) {
     const absSibilant = Math.abs(sibilant[i])
     if (absSibilant > envelope) {
@@ -415,17 +424,44 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
     }
 
     let gain = 1.0
+    let reductionDb = 0
     if (envelope > thresholdLin && thresholdLin > 0) {
       const overDb = 20 * Math.log10(envelope / thresholdLin)
-      const reductionDb = Math.min(overDb * 0.7, maxReductionDb)
+      reductionDb = Math.min(overDb * 0.7, maxReductionDb)
       gain = Math.max(Math.pow(10, -reductionDb / 20), maxReductionLin)
       if (reductionDb > maxGainReductionDb) maxGainReductionDb = reductionDb
     }
 
     gainCurve[i] = gain
+
+    if (reductionDb > 0) {
+      if (eventStart === -1) eventStart = i
+      eventAccumDb += reductionDb
+      eventSampleCount++
+    } else if (eventStart !== -1) {
+      treatedEvents.push({
+        startSec: round2(eventStart / sampleRate),
+        endSec: round2(i / sampleRate),
+        durationMs: Math.round((i - eventStart) / sampleRate * 1000),
+        avgReductionDb: round2(eventAccumDb / eventSampleCount),
+      })
+      eventStart = -1
+      eventAccumDb = 0
+      eventSampleCount = 0
+    }
   }
 
-  return { gainCurve, maxGainReductionDb }
+  // Close any event still open at end of file
+  if (eventStart !== -1) {
+    treatedEvents.push({
+      startSec: round2(eventStart / sampleRate),
+      endSec: round2(n / sampleRate),
+      durationMs: Math.round((n - eventStart) / sampleRate * 1000),
+      avgReductionDb: round2(eventAccumDb / eventSampleCount),
+    })
+  }
+
+  return { gainCurve, maxGainReductionDb, treatedEvents }
 }
 
 /**
@@ -523,6 +559,7 @@ function noResult(reason) {
     p95EnergyDb: null,
     meanEnergyDb: null,
     triggerReason: reason,
+    treatedEvents: [],
   }
 }
 
