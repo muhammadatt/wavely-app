@@ -31,10 +31,12 @@ const SCRIPT = path.join(
  * @param {string}      presetId    e.g. 'acx_audiobook'
  * @param {object[]|null} frames    ctx.results.metrics.frames — written to a temp
  *   JSON file for VAD gating. Pass null to suppress VAD gating (full-file mode).
+ * @param {number|null} f0          Estimated fundamental frequency for harmonic cross-referencing
  * @returns {Promise<object>}  Result dict from resonance_suppressor_report_entry()
  */
-export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames) {
-  console.log(`[ResonanceSuppressor] Starting: preset=${presetId}`)
+export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames, f0 = null) {
+  console.log(`[ResonanceSuppressor] Starting: preset=${presetId} | input=${inputPath}`)
+  const startTime = Date.now()
 
   const args = [
     SCRIPT,
@@ -43,22 +45,29 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
     '--preset', presetId,
   ]
 
+  if (f0 != null) {
+    args.push('--f0', String(f0))
+  }
+
   let vadMaskPath = null
   if (frames && frames.length > 0) {
     vadMaskPath = tempPath('.json')
     await writeFile(vadMaskPath, JSON.stringify(frames))
     args.push('--vad-mask-json', vadMaskPath)
+    console.log(`[ResonanceSuppressor] Using VAD mask with ${frames.length} frames`)
   }
 
   let result
   try {
+    console.log(`[ResonanceSuppressor] Running Python script...`)
     result = await runScript(args)
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
   }
 
+  const durationMs = Date.now() - startTime
   console.log(
-    `[ResonanceSuppressor] Done: skipped=${result.applied === false} ` +
+    `[ResonanceSuppressor] Done in ${durationMs}ms: skipped=${result.applied === false} ` +
     `max_reduction=${result.max_reduction_db ?? 'n/a'}dB ` +
     `artifact_risk=${result.artifact_risk ?? false}`,
   )
@@ -79,11 +88,17 @@ function runScript(args) {
 
     let stdout = ''
     let stderr = ''
+    let stdoutBuffer = ''
 
     proc.stdout.on('data', chunk => {
       const text = chunk.toString()
       stdout += text
-      for (const line of text.split('\n')) {
+      stdoutBuffer += text
+      const lines = stdoutBuffer.split('\n')
+      // The last element is either empty string (if text ended with \n) or incomplete line
+      stdoutBuffer = lines.pop()
+
+      for (const line of lines) {
         if (line.trim() && !line.startsWith('JSON_RESULT:')) {
           console.log(`[ResonanceSuppressor] ${line}`)
         }
@@ -96,6 +111,11 @@ function runScript(args) {
     })
 
     proc.on('close', (code, signal) => {
+      // Flush any remaining stdout buffer
+      if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
+        console.log(`[ResonanceSuppressor] ${stdoutBuffer.trim()}`)
+      }
+
       if (stderr.trim() && code === 0) console.log(`[ResonanceSuppressor] ${stderr.trim()}`)
       if (code === 0 && signal === null) {
         const jsonLine = stdout.split('\n').find(l => l.startsWith('JSON_RESULT:'))

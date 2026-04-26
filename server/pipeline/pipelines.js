@@ -36,14 +36,13 @@ const STANDARD_PIPELINE = [
   stages.compress,                // Stage 4a — serial compression
   //stages.parallelCompress,      // Stage 4a-PC — parallel compression
   stages.vocalExpander,           // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
-  stages.vocalSaturation,
-  //stages.deEss,
+  //stages.vocalSaturation,
   stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   //stages.harmonicExciter,
   stages.airBoost,               // Stage 3b — Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
+  stages.resonanceSuppressor,   // Dynamic resonance suppressor — voiced frames only; excluded from NE/CE pipelines
   stages.deEss,
   stages.enhancementEQ,
-  stages.resonanceSuppressor,   // Dynamic resonance suppressor — voiced frames only; excluded from NE/CE pipelines
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,

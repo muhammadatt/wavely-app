@@ -109,7 +109,7 @@ export const PRESETS = {
     deEsser: {
       sensitivity: 'medium',
       trigger: 1,
-      maxReduction: 10,
+      maxReduction: 6,
     },
     channelOutput: 'mono',
     defaultOutputProfile: 'acx',
@@ -135,12 +135,13 @@ export const PRESETS = {
       // Hits only the loudest errant peaks (plosives, exclamations) very quickly
       {
         targetCrestFactorDb: 15,
-        maxRatio: 4,
+        maxRatio: 6,
         threshold: 'auto',
         follow: false,
         attack: 0.1,  // Extremely fast to catch peaks
-        release: 40,  // Fast release to get out of the way quickly
+        release: 30,  // Fast release to get out of the way quickly
       },
+      /*
       //Tonal Pass for character
       {
       targetCrestFactorDb: 12,
@@ -149,17 +150,19 @@ export const PRESETS = {
       follow: false,
       attack: 10,
       release: 80,
-    },
+      },*/
       // Pass 2: Gentle Leveler (Body Control)
       // Smooths out the overall performance, bringing up presence without pumping
+      /*
       {
-        targetCrestFactorDb: 12,
-        maxRatio: 2.5, // Gentle ratio for transparency
+        targetCrestFactorDb: 15,
+        maxRatio: 3, // Gentle ratio for transparency
         threshold: 'auto',
         follow: false,
         attack: 15,    // Slow enough to let crisp consonants through (presence)
         release: 120,  // Slow release for smooth, unnoticeable recovery
       }
+      */
     ],
     parallelCompression: {
       ratio:                       10,
@@ -187,8 +190,8 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    airBoost: { gainDb: 6 },
-    bweModel: 'ap_bwe',
+    airBoost: { gainDb: 0 },
+    bweModel: 'lavasr',
     bwe: { enabled: true, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
   },
 

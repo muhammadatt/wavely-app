@@ -134,7 +134,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     bandwidth: sibilantBand[1] - sibilantBand[0],
     maxReductionDb: maxReduction,
     thresholdOffsetDb: thresholdOffset,
-    attackMs: 1.5,
+    attackMs: 0.1,
     releaseMs: 10,
   }
 
