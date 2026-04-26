@@ -47,6 +47,7 @@ import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { analyzeHum } from './humEQ.js'
 import { applyAirBoost } from './airBoost.js'
+import { applyResonanceSuppression } from './resonanceSuppressor.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -349,6 +350,25 @@ export async function enhancementEQ(ctx) {
   await logLevel(ctx, 'after EQ', ctx.currentPath, {
     applied: eqResult.applied,
     filters: eqResult.ffmpegFilters.length,
+  })
+}
+
+// ── Stage: Resonance Suppressor ───────────────────────────────────────────────
+// Soothe2-inspired dynamic spectral resonance suppressor. Runs after
+// enhancementEQ (static tonal corrections already applied) and before normalize.
+// Only included in STANDARD_PIPELINE — excluded from noise_eraser and
+// clearervoice_eraser by pipeline omission.
+
+export async function resonanceSuppressor(ctx) {
+  const outPath = ctx.tmp('.wav')
+  const frames  = ctx.results.metrics?.frames ?? null
+  const result  = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames)
+  if (result.applied) ctx.currentPath = outPath
+  ctx.results.resonanceSuppressor = result
+  await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
+    skipped:       result.applied === false,
+    max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
+    artifact_risk: result.artifact_risk ?? false,
   })
 }
 
@@ -678,10 +698,11 @@ export async function qualityAdvisory(ctx) {
     ? ctx.results.metrics
     : await analyzeFrames(ctx.currentPath)
   const pipelineContext = {
-    preNrNoiseFloor: ctx.results.beforeMeasurements?.noiseFloorDbfs ?? null,
-    noiseFloorDbfs:  ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
-    autoLeveler:     ctx.results.autoLeveler ?? null,
-    vocalExpander:   ctx.results.vocalExpander ?? null,
+    preNrNoiseFloor:     ctx.results.beforeMeasurements?.noiseFloorDbfs ?? null,
+    noiseFloorDbfs:      ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null,
+    autoLeveler:         ctx.results.autoLeveler ?? null,
+    vocalExpander:       ctx.results.vocalExpander ?? null,
+    resonanceSuppressor: ctx.results.resonanceSuppressor ?? null,
   }
   ctx.results.qualityAdvisory = await generateQualityAdvisory(
     ctx.currentPath,

@@ -69,7 +69,7 @@ const CREST_FACTOR_THRESHOLD_DB = 8
  * @param {string} outputProfileId
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @param {number} voicedRmsDbfs - Average voiced RMS (for breath comparison)
- * @param {object} pipelineContext - { preNrNoiseFloor: number|null, noiseFloorDbfs: number|null }
+ * @param {object} pipelineContext - { preNrNoiseFloor: number|null, noiseFloorDbfs: number|null, resonanceSuppressor: object|null }
  * @returns {QualityAdvisory}
  */
 export async function generateQualityAdvisory(
@@ -180,6 +180,19 @@ export async function generateQualityAdvisory(
         message: 'The expander may have affected quiet speech. Listen for unnatural silences between words or clipped consonants.',
       })
     }
+  }
+
+  // --- Resonance Suppressor advisory flag ---
+  // Emitted when the suppressor ran and artifact_risk is true.
+  // artifact_risk is set when mean gain reduction across bins with > 0.01 dB
+  // reduction exceeds 3 dB, indicating the file had sustained resonant spikes.
+  const rsResult = pipelineContext.resonanceSuppressor
+  if (rsResult && rsResult.applied && rsResult.artifact_risk) {
+    flags.push({
+      id:       'resonance_suppressor_high_reduction',
+      severity: 'info',
+      message:  'The resonance suppressor applied heavy reduction in some frequency bands. Listen for spectral smearing or unnatural tonal balance.',
+    })
   }
 
   const review_recommended = flags.some(f => f.severity === 'review')
