@@ -30,6 +30,7 @@ const CLEARERVOICE_SCRIPT      = path.join(SCRIPTS_DIR, 'clearervoice_enhance.py
 const DEREVERB_SCRIPT         = path.join(SCRIPTS_DIR, 'dereverb.py')
 const AP_BWE_SCRIPT           = path.join(SCRIPTS_DIR, 'ap_bwe_extend.py')
 const LAVASR_SCRIPT           = path.join(SCRIPTS_DIR, 'lavasr_extend.py')
+const CLICK_REMOVER_SCRIPT    = path.join(SCRIPTS_DIR, 'click_remover.py')
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -215,7 +216,80 @@ export function runLavaSR(inputPath, outputPath) {
   )
 }
 
+/**
+ * Click remover — Hampel-filter detection on HPF residual + Burg AR interpolation.
+ * Runs between Pre-4 (frame analysis) and Stage 1 (HPF) in the standard chain.
+ * Captures and returns the JSON processing report printed to stdout.
+ *
+ * @param {string} inputPath       - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath      - 32-bit float WAV at 44.1 kHz
+ * @param {object} [params]
+ * @param {number} [params.thresholdSigma=3.5]  - Hampel detection sensitivity (lower = more aggressive)
+ * @param {number} [params.maxClickMs=15]        - Max click duration to repair (ms); longer clicks are skipped
+ * @returns {Promise<object>} Parsed JSON report from the script
+ */
+export function runClickRemover(inputPath, outputPath, params = {}) {
+  const args = [inputPath, outputPath]
+  if (params.thresholdSigma != null) args.push('--threshold',    String(params.thresholdSigma))
+  if (params.maxClickMs     != null) args.push('--max-click-ms', String(params.maxClickMs))
+  return spawnPythonCapture(CLICK_REMOVER_SCRIPT, args, 'ClickRemover')
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Like spawnPython but collects stdout and returns it as parsed JSON.
+ * Stderr is still streamed to console in real time.
+ */
+function spawnPythonCapture(script, args, label, extraEnv = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON, [script, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS, ...extraEnv },
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
+
+    proc.stderr.on('data', chunk => {
+      const text = chunk.toString()
+      stderr += text
+      if (stderr.length > 8000) stderr = stderr.slice(-8000)
+      for (const line of text.split('\n')) {
+        if (line.trim()) console.log(`[${label}] ${line}`)
+      }
+    })
+
+    proc.on('close', (code, signal) => {
+      if (code === 0 && signal === null) {
+        try {
+          resolve(JSON.parse(stdout))
+        } catch (err) {
+          const stdoutSnippet = stdout.trim().slice(-3000)
+          const stderrSnippet = stderr.trim().slice(-3000)
+          const details = [
+            `${label} produced invalid JSON on stdout: ${err.message}`,
+            `stdout (tail):\n${stdoutSnippet || '(empty)'}`,
+          ]
+          if (stderrSnippet) details.push(`stderr (tail):\n${stderrSnippet}`)
+          reject(new Error(details.join('\n')))
+        }
+      } else {
+        const reasonParts = []
+        if (code !== null) reasonParts.push(`code ${code}`)
+        if (signal !== null) reasonParts.push(`signal ${signal}`)
+        const reason = reasonParts.length ? reasonParts.join(', ') : 'unknown reason'
+        reject(new Error(`${label} exited with ${reason}.\n${stderr.slice(-3000)}`))
+      }
+    })
+
+    proc.on('error', err => {
+      reject(new Error(`Failed to spawn ${label}: ${err.message}`))
+    })
+  })
+}
 
 function spawnPython(script, args, label, extraEnv = {}) {
   return new Promise((resolve, reject) => {
