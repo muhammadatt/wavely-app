@@ -26,6 +26,7 @@ const STANDARD_PIPELINE = [
   stages.measureBefore,
   stages.peakNormalize,
   stages.analyzeFramesRaw,
+  stages.clickRemove,              // Pre-HPF: Hampel + Burg AR click/lip-smack repair
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
   //stages.dereverb,

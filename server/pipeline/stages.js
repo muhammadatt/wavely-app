@@ -40,7 +40,7 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runDtln, runSeparation, runVoiceFixer, runHarmonicExciter, runVocalSaturation, runClearerVoice, runDereverb, runApBwe, runLavaSR } from './separation.js'
+import { runRnnoise, runDtln, runSeparation, runVoiceFixer, runHarmonicExciter, runVocalSaturation, runClearerVoice, runDereverb, runApBwe, runLavaSR, runClickRemover } from './separation.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -189,6 +189,45 @@ export async function analyzeFramesRaw(ctx) {
   const originalNoiseFloor = round2(fa.noiseFloorDbfs - gainDb)
   ctx.results.metrics.noiseFloorDbfs = fa.noiseFloorDbfs
   ctx.results.beforeMeasurements.noiseFloorDbfs = originalNoiseFloor
+}
+
+// ── Stage: Click remover (Pre-HPF) ────────────────────────────────────────────
+// Runs after frame analysis (Pre-4) and before Stage 1 (HPF). Detects and
+// repairs transient clicks and mouth sounds using Hampel filter on the HPF
+// residual + Burg AR interpolation. Parameters are per-preset: threshold_sigma
+// controls detection aggressiveness (lower = more clicks caught), max_click_ms
+// caps the repair window (AR interpolation is unreliable above ~15 ms).
+
+export async function clickRemove(ctx) {
+  const config = ctx.preset.clickRemover
+  if (!config) {
+    ctx.log('[click-remover] No clickRemover config on preset — skipped')
+    ctx.results.clickRemover = { applied: false, reason: 'not configured' }
+    return
+  }
+
+  const outPath = ctx.tmp('.wav')
+  const report  = await runClickRemover(ctx.currentPath, outPath, {
+    thresholdSigma: config.thresholdSigma,
+    maxClickMs:     config.maxClickMs,
+  })
+
+  ctx.currentPath = outPath
+  ctx.results.clickRemover = {
+    applied:               true,
+    clicks_detected:       report.clicks_detected       ?? null,
+    clicks_repaired:       report.clicks_repaired       ?? null,
+    clicks_skipped:        report.clicks_skipped        ?? null,
+    total_clicks_repaired: report.total_clicks_repaired ?? null,
+    channels:              report.channels              ?? null,
+    parameters:            report.channels?.[0]?.channel_0?.parameters ?? null,
+  }
+  ctx.log(
+    `[click-remover] Detected=${report.clicks_detected ?? '?'} ` +
+    `repaired=${report.total_clicks_repaired ?? '?'} ` +
+    `skipped=${report.clicks_skipped ?? '?'} ` +
+    `(threshold=${config.thresholdSigma}σ max=${config.maxClickMs}ms)`
+  )
 }
 
 // ── Stage: Hum detection and conditional EQ ───────────────────────────────────

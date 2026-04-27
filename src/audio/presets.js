@@ -193,6 +193,8 @@ export const PRESETS = {
     airBoost: { gainDb: 0 },
     bweModel: 'lavasr',
     bwe: { enabled: true, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
+    // Slightly more aggressive — mouth clicks are a human review concern for ACX
+    clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
   },
 
   podcast_ready: {
@@ -277,6 +279,7 @@ export const PRESETS = {
     airBoost: { gainDb: 2.5 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    clickRemover: { thresholdSigma: 3.5, maxClickMs: 15 },
   },
 
   voice_ready: {
@@ -349,6 +352,8 @@ export const PRESETS = {
     airBoost: { gainDb: 2.0 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    // Same rationale as ACX — voice actors also benefit from clean transients
+    clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
   },
 
   general_clean: {
@@ -419,6 +424,8 @@ export const PRESETS = {
     airBoost: { gainDb: 16 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    // Conservative — unknown source material
+    clickRemover: { thresholdSigma: 3.5, maxClickMs: 10 },
   },
 
   noise_eraser: {
