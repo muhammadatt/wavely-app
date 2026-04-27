@@ -29,7 +29,7 @@ import json
 import sys
 import numpy as np
 import soundfile as sf
-from scipy.ndimage import median_filter
+from scipy.ndimage import median_filter, uniform_filter1d
 from scipy.signal import butter, sosfilt
 
 
@@ -151,7 +151,7 @@ def build_hpf(sample_rate, cutoff_hz=800, order=4):
     return butter(order, cutoff_hz / (sample_rate / 2), btype='high', output='sos')
 
 
-def hampel_detect(signal, window_samples, threshold_sigma):
+def hampel_detect(signal, window_samples, threshold_sigma, sample_rate):
     """
     Hampel outlier filter on a 1-D signal.
     Returns a boolean mask — True where the sample is a statistical outlier.
@@ -175,7 +175,17 @@ def hampel_detect(signal, window_samples, threshold_sigma):
     min_mad    = max(1e-4, global_mad * 0.5)
 
     mad_scaled = np.maximum(mad_scaled, min_mad)
-    return (abs_dev > threshold_sigma * mad_scaled)
+    hampel_mask = (abs_dev > threshold_sigma * mad_scaled)
+
+    # RMS ratio check to prevent false positives on continuous high-frequency
+    # energy like periodic glottal pulses (vocal fry) or harsh sibilants.
+    # True clicks are sharp transients that stand out >5x against the local RMS.
+    rms_window_samp = int(sample_rate * 5.0 / 1000)  # 5ms
+    local_mean_sq = uniform_filter1d(sig64**2, size=rms_window_samp, mode='reflect')
+    local_rms = np.sqrt(np.maximum(local_mean_sq, 1e-12))
+    rms_mask = (abs_dev > 5.0 * local_rms)
+
+    return hampel_mask & rms_mask
 
 
 def merge_click_regions(mask, min_gap_samples):
@@ -263,7 +273,7 @@ def remove_clicks(
     hpf_signal = sosfilt(hpf_sos, sig)
 
     # Detect on HPF residual
-    mask    = hampel_detect(hpf_signal, window_samp, threshold_sigma)
+    mask    = hampel_detect(hpf_signal, window_samp, threshold_sigma, sample_rate)
     regions = merge_click_regions(mask, min_gap_samples=3)
 
     repaired_count  = 0
