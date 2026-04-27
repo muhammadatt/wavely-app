@@ -42,7 +42,7 @@ const STANDARD_PIPELINE = [
   stages.vocalExpander,           // frequency-selective expander (silence-floor residual attenuator)
   stages.vocalSaturation,
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
-  stages.resonanceSuppressor,   // Dynamic resonance suppressor — voiced frames only
+  stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
   stages.deEss,                   // De-Ess again after airBoost
   stages.enhancementEQ,
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length

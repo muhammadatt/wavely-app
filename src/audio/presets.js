@@ -107,7 +107,7 @@ export const PRESETS = {
     noiseModel: 'df3',
     eqProfile: 'audiobook',
     airBoost: { gainDb: 8 },
-    bweModel: 'lavasr',
+    bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
     deEsser: {
       sensitivity: 'medium',
