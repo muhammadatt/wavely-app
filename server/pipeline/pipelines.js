@@ -26,7 +26,7 @@ const STANDARD_PIPELINE = [
   stages.measureBefore,
   stages.peakNormalize,
   stages.analyzeFramesRaw,
-  stages.clickRemove,              // Pre-HPF: Hampel + Burg AR click/lip-smack repair
+  stages.clickRemove,             // Pre-HPF: Hampel + Burg AR click/lip-smack repair
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
   //stages.dereverb,
@@ -40,8 +40,8 @@ const STANDARD_PIPELINE = [
   //stages.vocalSaturation,
   stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   //stages.harmonicExciter,
-  stages.airBoost,               // Stage 3b — Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
-  stages.resonanceSuppressor,   // Dynamic resonance suppressor — voiced frames only; excluded from NE/CE pipelines
+  stages.airBoost,                // Stage 3b — Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
+  stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
   stages.deEss,
   stages.enhancementEQ,
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length

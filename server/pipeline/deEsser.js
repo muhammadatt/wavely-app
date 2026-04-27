@@ -383,11 +383,9 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
 
   // Extract sibilant component via bandpass
   const sibilant = new Float32Array(n)
-  let bpState = { x1: 0, x2: 0, y1: 0, y2: 0 }
+  const bpState = { x1: 0, x2: 0, y1: 0, y2: 0 }
   for (let i = 0; i < n; i++) {
-    const res = applyBiquad(bp, samples[i], bpState)
-    sibilant[i] = res.y
-    bpState = res.state
+    sibilant[i] = applyBiquad(bp, samples[i], bpState)
   }
 
   // Derive threshold from the bandpass-filtered signal's RMS so it's on the
@@ -400,6 +398,7 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
   const thresholdLin = rmsLin * Math.pow(10, thresholdOffsetDb / 20)
 
   // Envelope follower on sibilant, gain computation
+  const envCoeff = Math.exp(-1 / (sampleRate * 2.0 / 1000)) // 2ms lowpass on power
   const attackCoeff  = Math.exp(-1 / (sampleRate * attackMs / 1000))
   const releaseCoeff = Math.exp(-1 / (sampleRate * releaseMs / 1000))
   const maxReductionLin = Math.pow(10, -maxReductionDb / 20)
@@ -407,6 +406,7 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
   // gainCurve[i] is the broadband gain multiplier at sample i:
   //   1.0 = no reduction, maxReductionLin = full reduction
   const gainCurve = new Float32Array(n).fill(1.0)
+  let powerEnv = 0
   let envelope = 0
   let maxGainReductionDb = 0
 
@@ -416,11 +416,14 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
   let eventSampleCount = 0
 
   for (let i = 0; i < n; i++) {
-    const absSibilant = Math.abs(sibilant[i])
-    if (absSibilant > envelope) {
-      envelope = attackCoeff * envelope + (1 - attackCoeff) * absSibilant
+    const s = sibilant[i]
+    powerEnv = envCoeff * powerEnv + (1 - envCoeff) * (s * s)
+    const rmsSibilant = Math.sqrt(powerEnv)
+
+    if (rmsSibilant > envelope) {
+      envelope = attackCoeff * envelope + (1 - attackCoeff) * rmsSibilant
     } else {
-      envelope = releaseCoeff * envelope + (1 - releaseCoeff) * absSibilant
+      envelope = releaseCoeff * envelope + (1 - releaseCoeff) * rmsSibilant
     }
 
     let gain = 1.0
@@ -516,10 +519,12 @@ function applyBiquad(coeffs, x, state) {
   const y = coeffs.b0 * x + coeffs.b1 * state.x1 + coeffs.b2 * state.x2
            - coeffs.a1 * state.y1 - coeffs.a2 * state.y2
 
-  return {
-    y,
-    state: { x1: x, x2: state.x1, y1: y, y2: state.y1 },
-  }
+  state.x2 = state.x1
+  state.x1 = x
+  state.y2 = state.y1
+  state.y1 = y
+
+  return y
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

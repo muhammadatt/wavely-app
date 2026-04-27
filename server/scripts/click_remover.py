@@ -59,14 +59,18 @@ def burg_ar_coeffs(x, order):
         if den < 1e-12:
             break
         km = num / den
+
         a_new      = a.copy()
         a_new[m]   = km
         if m > 0:
             a_new[:m] = a[:m] + km * a[m - 1 :: -1]
         a = a_new
-        ef_new        = ef[m + 1:] + km * eb[m : n - 1]
-        eb[m : n - 1] = eb[m : n - 1] + km * ef[m + 1:]
-        ef[m + 1:]    = ef_new
+
+        ef_new = ef[m + 1:] + km * eb[m : n - 1]
+        eb_new = eb[m : n - 1] + km * ef[m + 1:]
+
+        ef[m + 1:] = ef_new
+        eb[m + 1:] = eb_new
 
     return a
 
@@ -90,6 +94,10 @@ def ar_interpolate(signal, click_start, click_end, context_samples, ar_order):
     left_order  = min(ar_order, len(left_ctx) - 1) if len(left_ctx) > 1 else 0
     right_order = min(ar_order, len(right_ctx) - 1) if len(right_ctx) > 1 else 0
 
+    # Safety clipping to prevent runaway predictions
+    max_val = max(np.max(np.abs(left_ctx)) if len(left_ctx) > 0 else 0,
+                  np.max(np.abs(right_ctx)) if len(right_ctx) > 0 else 0) * 1.5
+
     fwd = None
     bwd = None
 
@@ -100,6 +108,7 @@ def ar_interpolate(signal, click_start, click_end, context_samples, ar_order):
         buf   = left_ctx[-left_order:].tolist()
         for i in range(click_len):
             pred   = -np.dot(a_fwd, buf[-left_order:][::-1])
+            pred   = np.clip(pred, -max_val, max_val)
             fwd[i] = pred
             buf.append(pred)
 
@@ -110,6 +119,7 @@ def ar_interpolate(signal, click_start, click_end, context_samples, ar_order):
         buf   = right_ctx[:right_order][::-1].tolist()
         for i in range(click_len):
             pred                    = -np.dot(a_bwd, buf[-right_order:][::-1])
+            pred                    = np.clip(pred, -max_val, max_val)
             bwd[click_len - 1 - i]  = pred
             buf.append(pred)
 
@@ -238,7 +248,7 @@ def remove_clicks(
     window_samp      = max(3, int(sample_rate * window_ms / 1000) | 1)  # force odd
 
     if ar_order is None:
-        ar_order = max(4, context_samp // 2)
+        ar_order = min(32, max(4, context_samp // 2))
 
     # Build HPF residual for detection
     hpf_sos    = build_hpf(sample_rate, cutoff_hz=hpf_cutoff_hz)
