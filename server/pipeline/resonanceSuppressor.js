@@ -1,7 +1,7 @@
 /**
  * Stage 3b — Dynamic Resonance Suppressor.
  *
- * Runs instant_polish_resonance_suppressor.py as a Python subprocess.
+ * Runs resonance_suppressor.py as a Python subprocess.
  * Applies STFT-based spectral spike detection and dynamic gain reduction
  * to voiced frames only (VAD mask), leaving silence frames unmodified.
  *
@@ -22,7 +22,7 @@ const PYTHON = process.env.RESONANCE_PYTHON
 const NUM_THREADS = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 const SCRIPT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  '..', 'scripts', 'instant_polish_resonance_suppressor.py',
+  '..', 'scripts', 'resonance_suppressor.py',
 )
 
 /**
