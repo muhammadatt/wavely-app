@@ -167,7 +167,15 @@ def hampel_detect(signal, window_samples, threshold_sigma):
     med        = median_filter(sig64, size=window_samples, mode='reflect')
     abs_dev    = np.abs(sig64 - med)
     mad_scaled = 1.4826 * median_filter(abs_dev, size=window_samples, mode='reflect')
-    return (mad_scaled > 0) & (abs_dev > threshold_sigma * mad_scaled)
+
+    # Establish an absolute minimum noise floor using the global MAD
+    # This prevents the detector from triggering wildly on tiny background
+    # hiss or digital dither when the local signal amplitude drops to near-zero.
+    global_mad = 1.4826 * np.median(np.abs(sig64 - np.median(sig64)))
+    min_mad    = max(1e-4, global_mad * 0.5)
+
+    mad_scaled = np.maximum(mad_scaled, min_mad)
+    return (abs_dev > threshold_sigma * mad_scaled)
 
 
 def merge_click_regions(mask, min_gap_samples):
