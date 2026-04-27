@@ -215,13 +215,17 @@ export async function clickRemove(ctx) {
   ctx.currentPath = outPath
   ctx.results.clickRemover = {
     applied:               true,
-    clicks_detected:       report.clicks_detected ?? report.total_clicks_repaired ?? null,
+    clicks_detected:       report.clicks_detected       ?? null,
+    clicks_repaired:       report.clicks_repaired       ?? null,
+    clicks_skipped:        report.clicks_skipped        ?? null,
     total_clicks_repaired: report.total_clicks_repaired ?? null,
-    channels:              report.channels ?? null,
+    channels:              report.channels              ?? null,
     parameters:            report.channels?.[0]?.channel_0?.parameters ?? null,
   }
   ctx.log(
-    `[click-remover] Repaired ${report.total_clicks_repaired ?? '?'} click(s) ` +
+    `[click-remover] Detected=${report.clicks_detected ?? '?'} ` +
+    `repaired=${report.total_clicks_repaired ?? '?'} ` +
+    `skipped=${report.clicks_skipped ?? '?'} ` +
     `(threshold=${config.thresholdSigma}σ max=${config.maxClickMs}ms)`
   )
 }

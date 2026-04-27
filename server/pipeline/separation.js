@@ -266,8 +266,15 @@ function spawnPythonCapture(script, args, label, extraEnv = {}) {
       if (code === 0 && signal === null) {
         try {
           resolve(JSON.parse(stdout))
-        } catch {
-          resolve({ raw: stdout.trim() })
+        } catch (err) {
+          const stdoutSnippet = stdout.trim().slice(-3000)
+          const stderrSnippet = stderr.trim().slice(-3000)
+          const details = [
+            `${label} produced invalid JSON on stdout: ${err.message}`,
+            `stdout (tail):\n${stdoutSnippet || '(empty)'}`,
+          ]
+          if (stderrSnippet) details.push(`stderr (tail):\n${stderrSnippet}`)
+          reject(new Error(details.join('\n')))
         }
       } else {
         const reasonParts = []

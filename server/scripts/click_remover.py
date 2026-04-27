@@ -29,6 +29,7 @@ import json
 import sys
 import numpy as np
 import soundfile as sf
+from scipy.ndimage import median_filter
 from scipy.signal import butter, sosfilt
 
 
@@ -83,32 +84,47 @@ def ar_interpolate(signal, click_start, click_end, context_samples, ar_order):
     left_ctx  = signal[max(0, click_start - context_samples) : click_start].copy()
     right_ctx = signal[click_end : min(n, click_end + context_samples)].copy()
 
+    # Clamp AR order to whatever context is actually available on each side.
+    # Zero-filling when context is too short can introduce audible dropouts;
+    # reducing the order trades model accuracy for avoiding silence artifacts.
+    left_order  = min(ar_order, len(left_ctx) - 1) if len(left_ctx) > 1 else 0
+    right_order = min(ar_order, len(right_ctx) - 1) if len(right_ctx) > 1 else 0
+
+    fwd = None
+    bwd = None
+
     # Forward prediction from left context
-    if len(left_ctx) >= ar_order + 1:
-        a_fwd = burg_ar_coeffs(left_ctx, ar_order)
+    if left_order >= 1:
+        a_fwd = burg_ar_coeffs(left_ctx, left_order)
         fwd   = np.zeros(click_len, dtype=np.float64)
-        buf   = left_ctx[-ar_order:].tolist()
+        buf   = left_ctx[-left_order:].tolist()
         for i in range(click_len):
-            pred   = -np.dot(a_fwd, buf[-ar_order:][::-1])
+            pred   = -np.dot(a_fwd, buf[-left_order:][::-1])
             fwd[i] = pred
             buf.append(pred)
-    else:
-        fwd = np.zeros(click_len, dtype=np.float64)
 
     # Backward prediction from right context (reverse signal)
-    if len(right_ctx) >= ar_order + 1:
-        a_bwd = burg_ar_coeffs(right_ctx[::-1], ar_order)
+    if right_order >= 1:
+        a_bwd = burg_ar_coeffs(right_ctx[::-1], right_order)
         bwd   = np.zeros(click_len, dtype=np.float64)
-        buf   = right_ctx[:ar_order][::-1].tolist()
+        buf   = right_ctx[:right_order][::-1].tolist()
         for i in range(click_len):
-            pred                    = -np.dot(a_bwd, buf[-ar_order:][::-1])
+            pred                    = -np.dot(a_bwd, buf[-right_order:][::-1])
             bwd[click_len - 1 - i]  = pred
             buf.append(pred)
-    else:
-        bwd = np.zeros(click_len, dtype=np.float64)
+
+    # If neither side produced a usable prediction, leave the region untouched.
+    if fwd is None and bwd is None:
+        return signal
+    if fwd is None:
+        signal[click_start:click_end] = bwd
+        return signal
+    if bwd is None:
+        signal[click_start:click_end] = fwd
+        return signal
 
     # Linear crossfade: weight shifts from forward to backward across the region
-    blend           = np.linspace(1.0, 0.0, click_len) if click_len > 1 else np.array([0.5])
+    blend = np.linspace(1.0, 0.0, click_len) if click_len > 1 else np.array([0.5])
     signal[click_start:click_end] = blend * fwd + (1.0 - blend) * bwd
     return signal
 
@@ -133,20 +149,15 @@ def hampel_detect(signal, window_samples, threshold_sigma):
     Running this on an HPF-filtered version of the original signal means
     the MAD is computed over a residual where voice energy is suppressed
     and transient onsets are preserved.
+
+    Vectorized via scipy.ndimage.median_filter: O(N log W) rather than the
+    O(N * W) Python loop, which is prohibitively slow for long-form audio.
     """
-    n      = len(signal)
-    mask   = np.zeros(n, dtype=bool)
-    half   = window_samples // 2
-    padded = np.pad(signal, half, mode='reflect')
-
-    for i in range(n):
-        window     = padded[i : i + window_samples]
-        med        = np.median(window)
-        mad_scaled = 1.4826 * np.median(np.abs(window - med))
-        if mad_scaled > 0 and abs(signal[i] - med) > threshold_sigma * mad_scaled:
-            mask[i] = True
-
-    return mask
+    sig64      = signal.astype(np.float64)
+    med        = median_filter(sig64, size=window_samples, mode='reflect')
+    abs_dev    = np.abs(sig64 - med)
+    mad_scaled = 1.4826 * median_filter(abs_dev, size=window_samples, mode='reflect')
+    return (mad_scaled > 0) & (abs_dev > threshold_sigma * mad_scaled)
 
 
 def merge_click_regions(mask, min_gap_samples):
@@ -296,18 +307,24 @@ def process_file(input_path, output_path, **kwargs):
     """
     audio, sr = sf.read(input_path, dtype='float32', always_2d=True)
 
-    channels_out     = []
-    combined_report  = {"sample_rate": sr, "channels": []}
+    channels_out    = []
+    combined_report = {
+        "sample_rate":    sr,
+        "channels":       [],
+        "clicks_detected": 0,
+        "clicks_repaired": 0,
+        "clicks_skipped":  0,
+    }
 
     for ch in range(audio.shape[1]):
         repaired_ch, ch_report = remove_clicks(audio[:, ch], sr, **kwargs)
         channels_out.append(repaired_ch)
         combined_report["channels"].append({f"channel_{ch}": ch_report})
+        combined_report["clicks_detected"] += ch_report.get("clicks_detected", 0)
+        combined_report["clicks_repaired"] += ch_report.get("clicks_repaired", 0)
+        combined_report["clicks_skipped"]  += ch_report.get("clicks_skipped",  0)
 
-    combined_report["total_clicks_repaired"] = sum(
-        ch[f"channel_{i}"]["clicks_repaired"]
-        for i, ch in enumerate(combined_report["channels"])
-    )
+    combined_report["total_clicks_repaired"] = combined_report["clicks_repaired"]
 
     sf.write(output_path, np.stack(channels_out, axis=1), sr, subtype='FLOAT')
     return combined_report
