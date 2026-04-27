@@ -33,17 +33,17 @@ const STANDARD_PIPELINE = [
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
+  stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   //stages.vocalExpander,         // CAUTION: Expander before compressor removes noise, but softens start of words
-  stages.compress,                // Stage 4a — serial compression
-  stages.noiseReduce,  
-  //stages.parallelCompress,      // Stage 4a-PC — parallel compression
-  stages.vocalExpander,           // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
-  //stages.vocalSaturation,
-  stages.autoLevel,               // Stage 4b — VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-  //stages.harmonicExciter,
-  stages.airBoost,                // Stage 3b — Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
-  stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
+  stages.compress,                // Serial compression
   stages.deEss,
+  stages.noiseReduce,  
+  //stages.parallelCompress,      // parallel compression
+  stages.vocalExpander,           // frequency-selective expander (silence-floor residual attenuator)
+  stages.vocalSaturation,
+  stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
+  stages.resonanceSuppressor,   // Dynamic resonance suppressor — voiced frames only
+  stages.deEss,                   // De-Ess again after airBoost
   stages.enhancementEQ,
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
