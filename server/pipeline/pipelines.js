@@ -35,6 +35,7 @@ const STANDARD_PIPELINE = [
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   //stages.vocalExpander,         // CAUTION: Expander before compressor removes noise, but softens start of words
   stages.compress,                // Stage 4a — serial compression
+  stages.noiseReduce,  
   //stages.parallelCompress,      // Stage 4a-PC — parallel compression
   stages.vocalExpander,           // Stage 4a-E — frequency-selective expander (silence-floor residual attenuator)
   //stages.vocalSaturation,

@@ -134,8 +134,8 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     bandwidth: sibilantBand[1] - sibilantBand[0],
     maxReductionDb: maxReduction,
     thresholdOffsetDb: thresholdOffset,
-    attackMs: 0.1,
-    releaseMs: 10,
+    attackMs: 2,
+    releaseMs: 50,
   }
 
   // Build gain curve from channel 0 analysis

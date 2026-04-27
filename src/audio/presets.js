@@ -125,7 +125,7 @@ export const PRESETS = {
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.1,
+      wetDry: 0,
       bias: 0.08,
       f0: 109.4,
     },
@@ -190,9 +190,9 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
-    airBoost: { gainDb: 0 },
+    airBoost: { gainDb: 5 },
     bweModel: 'lavasr',
-    bwe: { enabled: true, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
+    bwe: { enabled: false, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
     // Slightly more aggressive — mouth clicks are a human review concern for ACX
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
   },
