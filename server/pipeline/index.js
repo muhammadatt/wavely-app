@@ -179,7 +179,7 @@ function buildReport(ctx) {
     ...(results.separation && {
       separation_pipeline: buildSeparationPipelineReport(results),
     }),
-    // enhancement_pipeline is absent (not null) for all presets except voicefixer
+    // enhancement_pipeline is absent (not null) when no enhancement_pipeline stage ran
     ...(results.enhancementPipeline && {
       enhancement_pipeline: formatEnhancementPipelineResult(results.enhancementPipeline),
     }),

@@ -30,7 +30,11 @@ import { decodeToFloat32, tempPath, removeTmp } from '../lib/ffmpeg.js'
 const DEEPFILTER_BINARY = process.env.DEEPFILTER_BINARY ?? null
 const PYTHON = process.env.DEEPFILTER_PYTHON ?? 'python3'
 const NUM_THREADS = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
-const SCRIPT  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'deepfilter_enhance.py')
+
+const SCRIPTS_DIR      = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
+const SCRIPT           = path.join(SCRIPTS_DIR, 'deepfilter_enhance.py')
+const RNNOISE_SCRIPT   = path.join(SCRIPTS_DIR, 'rnnoise_denoise.py')
+const DTLN_SCRIPT      = path.join(SCRIPTS_DIR, 'dtln_denoise.py')
 
 /**
  * @param {string} inputPath  - Path to input WAV (32-bit float, 44.1 kHz)
@@ -120,6 +124,37 @@ function runDeepFilterPython(inputPath, outputPath, attenLimDb) {
   }
   return spawnProcess(PYTHON, args, 'DeepFilter Python')
 }
+
+// ── Noise reduction alternatives ──────────────────────────────────────────────
+
+/**
+ * Stage NE-1: RNNoise pre-separation pass.
+ * Lightweight LSTM-based denoiser; reduces stationary broadband noise before
+ * handing off to the separator.
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
+ */
+export function runRnnoise(inputPath, outputPath) {
+  return spawnProcess(PYTHON, [RNNOISE_SCRIPT, '--input', inputPath, '--output', outputPath], 'RNNoise')
+}
+
+/**
+ * DTLN noise reduction — lightweight LSTM-based denoiser, 16 kHz internal rate.
+ * Mono-only: stereo inputs are mixed to mono inside the script.
+ *
+ * Env:
+ *   DTLN_REPO        — path to cloned DTLN_pytorch repo (default: vendor/dtln_pytorch)
+ *   DTLN_CHECKPOINT  — path to .pth weights (default: <DTLN_REPO>/DTLN_norm_500h.pth)
+ *
+ * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath - 32-bit float WAV at 44.1 kHz (mono)
+ */
+export function runDtln(inputPath, outputPath) {
+  return spawnProcess(PYTHON, [DTLN_SCRIPT, '--input', inputPath, '--output', outputPath], 'DTLN')
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
 
 /**
  * Shared subprocess helper.
