@@ -23,20 +23,28 @@ logger = logging.getLogger(__name__)
 
 PRESET_DEFAULTS = {
     "acx_audiobook": {
-        "depth": 0.5,          # Global reduction scale (0.0–1.0).
-        "sharpness": 0.4,      # Smoothing window relative width (0.0–1.0). 0.0 = ultra-broad, targets sibilance.
-        "selectivity": 4.0,    # Spike threshold in dB above smoothed floor. Lower = more sensitive.
-        "attack_ms": 15.0,     # Gain reduction onset speed.
-        "release_ms": 50.0,    # Gain reduction recovery speed.
-        "max_reduction_db": 12.0,  # Hard ceiling on any single notch. Conservative for ACX.
-        "freq_floor_hz": 800.0,    # Don't process below this (Avoid cutting lower vocal harmonics).
-        "freq_ceil_hz": 16000.0,  # Don't process above this.
-        "mode": "soft",           # "soft" = gradual knee; "hard" = more aggressive curve.
+        "depth": 0.5,               # Global reduction scale (0.0–1.0).
+        "sharpness": 0.0,           # Controls depth/narrowness of attenuation curve post-detection.
+                                    # 0.0 = wide gentle cuts (good for broad energy build-ups).
+                                    # 1.0 = deep narrow notches (good for sharp resonances).
+        "selectivity": 1.5,         # Within-frame spike threshold in dB above smoothed floor.
+        "sibilant_selectivity": 6.0,# Long-term reference threshold for sibilant detection.
+                                    # Calibrated against 17_airBoost.wav: min voiced-sibilant
+                                    # contrast is +11.6 dB; 6.0 dB gives clean separation from
+                                    # voiced frame-to-frame noise (~2–3 dB EMA std) while
+                                    # catching every sibilant event with >5 dB margin.
+        "attack_ms": 15.0,          # Gain reduction onset speed.
+        "release_ms": 50.0,         # Gain reduction recovery speed.
+        "max_reduction_db": 12.0,   # Hard ceiling on reduction at any bin.
+        "freq_floor_hz": 800.0,     # Don't process below this.
+        "freq_ceil_hz": 16000.0,    # Don't process above this.
+        "mode": "soft",             # "soft" = gradual knee; "hard" = linear above threshold.
     },
     "podcast_ready": {
         "depth": 0.85,
         "sharpness": 0.0,
         "selectivity": 1.5,
+        "sibilant_selectivity": 5.0,
         "attack_ms": 8.0,
         "release_ms": 60.0,
         "max_reduction_db": 9.0,
@@ -48,6 +56,7 @@ PRESET_DEFAULTS = {
         "depth": 0.75,
         "sharpness": 0.1,
         "selectivity": 2.0,
+        "sibilant_selectivity": 5.5,
         "attack_ms": 12.0,
         "release_ms": 70.0,
         "max_reduction_db": 7.0,
@@ -59,6 +68,7 @@ PRESET_DEFAULTS = {
         "depth": 0.9,
         "sharpness": 0.0,
         "selectivity": 1.0,
+        "sibilant_selectivity": 4.0,
         "attack_ms": 8.0,
         "release_ms": 50.0,
         "max_reduction_db": 12.0,
@@ -67,6 +77,33 @@ PRESET_DEFAULTS = {
         "mode": "soft",
     },
 }
+
+# Frequency above which the long-term sibilant reference is active.
+# Below this, the within-frame passes are sufficient for resonant spike
+# detection and the long-term reference would risk false positives on
+# voiced harmonics that vary frame-to-frame.
+
+# MT - Was set at 2500.0 to keep PATH2 exclusively it to the sibilant range (above 2500hz)
+# and avoid touching potentially desirable resonances in the body of the lower voice harmonics
+# But in testing it doesnt seem to hurt at 80, and may even help clear up some cloudy room resonances below 350hz 
+
+SIBILANT_BAND_FLOOR_HZ = 80 
+
+# Minimum voiced frames before the long-term reference is used for detection.
+# At hop=512, sr=44100 (11.6 ms/frame), 25 frames ≈ 290 ms of voiced speech —
+# enough for the EMA to converge away from its initialization value.
+SIBILANT_WARMUP_FRAMES = 25
+
+# EMA time constant for the long-term voiced reference (ms).
+# 300 ms gives a reference that tracks slow room/voice changes across a session
+# while remaining stable enough to distinguish transient sibilant events.
+LONG_TERM_REF_TIME_CONSTANT_MS = 300.0
+
+# If PATH 2 detects a sibilant event this strongly (dB), skip updating the
+# long-term reference for this frame. Prevents sibilant energy from pulling
+# the reference upward and masking future detections. The gate fires after
+# warmup only — during warmup all voiced frames contribute to the reference.
+SIBILANT_UPDATE_GATE_DB = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -77,14 +114,30 @@ class ResonanceSuppressor:
     """
     Dynamic resonance suppressor using STFT-based spectral spike detection.
 
-    For each frame:
-      1. Compute magnitude spectrum via STFT.
-      2. Compute a spectrally-smoothed version of the magnitude (the "expected" envelope).
-      3. Find bins where actual magnitude exceeds smoothed by more than `selectivity` dB.
-      4. Compute per-bin gain reduction proportional to spike depth * `depth` scale.
-      5. Smooth gain reduction in time (attack/release envelope).
-      6. Apply reduction to complex STFT bins (magnitude only; phase preserved).
-      7. Reconstruct via ISTFT with overlap-add.
+    Two parallel detection paths whose gain reductions are combined via
+    element-wise maximum before the shared attack/release smoothing stage:
+
+    PATH 1 — Within-frame (narrow resonant spikes, full spectrum):
+      Computes a mel-scaled smoothed reference from the current frame's own
+      spectrum and flags bins that exceed it by more than `selectivity` dB.
+      Effective for narrow resonant peaks (room modes, mic resonances) where
+      context bins on either side are not elevated. Cannot detect broad
+      sibilant plateaus because the smoothed reference follows the plateau.
+
+    PATH 2 — Long-term reference (broad sibilant elevations, 2500 Hz+):
+      Maintains a per-bin exponential moving average of voiced-frame power
+      spectra (time constant ~300 ms). Flags bins in the sibilant band that
+      exceed this long-term reference by more than `sibilant_selectivity` dB.
+      Effective for broad sibilant events because the long-term voiced
+      reference sits 11–20+ dB below the sibilant plateau; the within-frame
+      reference cannot see this contrast.
+
+    Calibration source: 17_airBoost.wav analysis —
+      - 321 voiced frames, 52 sibilant frames identified
+      - Mean sibilant contrast vs. long-term voiced reference: +20.2 dB (3–10 kHz)
+      - Minimum sibilant contrast: +11.6 dB
+      - `sibilant_selectivity` = 6.0 dB chosen to clear voiced frame-to-frame
+        EMA noise (~2–3 dB) with >5 dB margin below the minimum contrast
     """
 
     def __init__(
@@ -101,44 +154,93 @@ class ResonanceSuppressor:
         self.hop_length = hop_length
         self.f0 = f0
 
-        # Load preset defaults, then apply any overrides
         params = PRESET_DEFAULTS.get(preset, PRESET_DEFAULTS["acx_audiobook"]).copy()
         params.update(override_params)
         self.params = params
 
-        # Frequency bin mask — only process bins within [freq_floor, freq_ceil]
-        freqs = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
-        self.active_bins = (freqs >= params["freq_floor_hz"]) & (freqs <= params["freq_ceil_hz"])
-        self.n_bins = len(freqs)
+        # FFT bin frequencies — stored as instance attribute for reuse
+        self.freqs = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
+        self.n_bins = len(self.freqs)
 
-        # Smoothing window width in bins (derived from sharpness)
-        # sharpness=0.0 → very wide context window (catches only very broad peaks)
-        # sharpness=1.0 → very narrow context window (catches tight resonant spikes)
-        # Soothe behavior: higher sharpness → narrower smoothing → sharper notches
-        # For broad sibilance detection, max_window must be very large (>3000 Hz)
-        min_window = 5    # bins — minimum meaningful context
-        max_window = 300  # bins — very broad spectral context (~6.4 kHz)
-        sharpness = params["sharpness"]
-
-        # Exponential scaling so high sharpness remains narrow, while low sharpness
-        # opens up extremely broadly (needed for sibilance/de-essing).
-        self.smooth_window_bins = max(
-            min_window,
-            int(max_window * ((1.0 - sharpness) ** 2)),
+        # Active bin mask — processing range defined by preset
+        self.active_bins = (
+            (self.freqs >= params["freq_floor_hz"]) &
+            (self.freqs <= params["freq_ceil_hz"])
         )
 
-        # Attack/release time constants as frame-domain coefficients
-        # Convert ms → per-frame coefficient using hop_length/sample_rate as frame period
+        # Sibilant band mask — long-term reference path only fires here.
+        # Intersected with active_bins so it respects the preset's freq range.
+        self.sibilant_band_mask = self.active_bins & (self.freqs >= SIBILANT_BAND_FLOOR_HZ)
+
+        # ------------------------------------------------------------------
+        # PATH 1 — Within-frame mel-domain smoothing setup
+        # ------------------------------------------------------------------
+        mel_of_freq = lambda f: 2595.0 * np.log10(1.0 + np.asarray(f, dtype=float) / 700.0)
+
+        self.mel_freqs = mel_of_freq(np.maximum(self.freqs, 1.0))
+        mel_min = float(self.mel_freqs[1])
+        mel_max = float(self.mel_freqs[-1])
+        self.mel_grid = np.linspace(mel_min, mel_max, self.n_bins)
+
+        # Mel-domain window: fixed at a moderate context width, independent of
+        # sharpness (sharpness now controls attenuation shape, not detection width)
+        mel_bin_width = (mel_max - mel_min) / self.n_bins
+        self.mel_window_bins = max(3, int(120.0 / mel_bin_width))  # ~120 mel units
+
+        # Wide linear window for sibilant-band within-frame smoothing.
+        # Kept as a fallback within PATH 1; primary sibilant detection is PATH 2.
+        self.sibilant_window_bins = 200  # ~4.3 kHz at n_fft=2048, sr=44100
+
+        # Blend weight: 0.0 below 4 kHz (pure mel), 1.0 above 6 kHz (pure wide linear)
+        self.sibilant_blend = np.clip(
+            (self.freqs - 4000.0) / (6000.0 - 4000.0),
+            0.0, 1.0,
+        )
+
+        # ------------------------------------------------------------------
+        # PATH 2 — Long-term reference state
+        # ------------------------------------------------------------------
         frame_period_ms = (hop_length / sample_rate) * 1000.0
-        self.attack_coeff = self._time_to_coeff(params["attack_ms"], frame_period_ms)
+        self.long_term_alpha = self._time_to_coeff(
+            LONG_TERM_REF_TIME_CONSTANT_MS, frame_period_ms
+        )
+        self.long_term_power = None   # per-bin power EMA; None until first voiced frame
+        self.long_term_frame_count = 0  # voiced frames seen so far
+
+        # ------------------------------------------------------------------
+        # Sharpness — controls attenuation curve shape, not detection
+        # 0.0 = wide gentle cuts (broad energy build-ups)
+        # 1.0 = deep narrow notches (precise resonances)
+        # Implemented as Gaussian spreading of the gain reduction array:
+        # high sharpness = narrow kernel, low sharpness = wide kernel
+        # ------------------------------------------------------------------
+        sharpness = params["sharpness"]
+        # Kernel half-width in bins: 0 bins at sharpness=1.0, 30 bins at sharpness=0.0
+        spread_bins = int(30 * (1.0 - sharpness))
+        if spread_bins >= 2:
+            sigma = spread_bins / 3.0
+            half = spread_bins
+            x = np.arange(-half, half + 1, dtype=float)
+            self.spread_kernel = np.exp(-0.5 * (x / sigma) ** 2)
+            self.spread_kernel /= self.spread_kernel.sum()
+        else:
+            self.spread_kernel = None  # no spreading at max sharpness
+
+        # Attack/release time constants
+        self.attack_coeff  = self._time_to_coeff(params["attack_ms"],  frame_period_ms)
         self.release_coeff = self._time_to_coeff(params["release_ms"], frame_period_ms)
 
         logger.info(
             f"ResonanceSuppressor init | preset={preset} | "
             f"n_fft={n_fft} | hop={hop_length} | "
-            f"smooth_window={self.smooth_window_bins} bins | "
+            f"mel_window={self.mel_window_bins} bins | "
+            f"sibilant_window={self.sibilant_window_bins} bins | "
+            f"long_term_alpha={self.long_term_alpha:.4f} "
+            f"(tc={LONG_TERM_REF_TIME_CONSTANT_MS:.0f}ms) | "
             f"selectivity={params['selectivity']} dB | "
-            f"depth={params['depth']} | max_cut={params['max_reduction_db']} dB"
+            f"sibilant_selectivity={params['sibilant_selectivity']} dB | "
+            f"depth={params['depth']} | max_cut={params['max_reduction_db']} dB | "
+            f"sharpness={sharpness} | spread_kernel={'yes' if self.spread_kernel is not None else 'none'}"
         )
 
     @staticmethod
@@ -150,72 +252,60 @@ class ResonanceSuppressor:
 
     def _compute_smoothed_envelope(self, magnitude_db: np.ndarray) -> np.ndarray:
         """
-        Compute the spectrally-smoothed reference envelope for one frame.
-        Uses a uniform moving average across frequency bins.
-        The smoothed envelope represents the 'expected' spectral shape
-        without sharp resonant peaks.
+        Compute the within-frame two-pass smoothed reference envelope (PATH 1).
 
-        Args:
-            magnitude_db: 1D array of magnitude in dB for all freq bins, shape (n_bins,)
+        Pass 1: mel-domain smoothing — perceptually consistent context width.
+        Pass 2: wide linear smoothing — partial fallback for sibilant band.
+        Blend:  frequency-dependent interpolation between the two.
 
-        Returns:
-            smoothed: 1D array of smoothed magnitude in dB, shape (n_bins,)
+        All averaging in power domain to prevent harmonic-valley bias.
         """
-        # Convert dB to linear power domain before averaging.
-        # Averaging directly in the log (dB) domain causes deep valleys between voice
-        # harmonics to disproportionately pull down the smoothed envelope. This results
-        # in natural voice harmonics registering as massive spikes (e.g. 30dB+), which
-        # causes the algorithm to aggressively attenuate them, reducing overall volume
-        # and creating comb-filtering artifacts.
         power = 10.0 ** (magnitude_db / 10.0)
 
-        # uniform_filter1d applies a causal average across the frequency axis.
-        # mode='reflect' handles edges cleanly without zero-padding artifacts.
-        smoothed_power = uniform_filter1d(
-            power,
-            size=self.smooth_window_bins,
-            mode="reflect",
-        )
+        # Pass 1: mel-domain
+        mel_power    = np.interp(self.mel_grid,  self.mel_freqs, power)
+        mel_smoothed = uniform_filter1d(mel_power, size=self.mel_window_bins, mode="reflect")
+        pass1_power  = np.interp(self.mel_freqs, self.mel_grid,  mel_smoothed)
 
-        # Convert back to dB domain
-        return 10.0 * np.log10(smoothed_power + 1e-10)
+        # Pass 2: wide linear
+        pass2_power = uniform_filter1d(power, size=self.sibilant_window_bins, mode="reflect")
+
+        # Blend
+        blended_power = (1.0 - self.sibilant_blend) * pass1_power + self.sibilant_blend * pass2_power
+
+        return 10.0 * np.log10(blended_power + 1e-10)
 
     def _compute_gain_reduction(
         self,
         magnitude_db: np.ndarray,
         smoothed_db: np.ndarray,
+        selectivity_db: float,
+        band_mask: np.ndarray,
     ) -> np.ndarray:
         """
-        Compute per-bin gain reduction in dB for one frame.
-
-        Bins where actual > smoothed + selectivity_threshold are identified as spikes.
-        Reduction = (spike_amount - threshold) * depth_scale, clipped to max_reduction.
+        Compute per-bin gain reduction for one detection path.
 
         Args:
-            magnitude_db: actual magnitude (dB), shape (n_bins,)
-            smoothed_db:  smoothed envelope (dB), shape (n_bins,)
+            magnitude_db:   actual frame magnitude in dB, shape (n_bins,)
+            smoothed_db:    reference envelope in dB, shape (n_bins,)
+            selectivity_db: threshold above reference before reduction fires
+            band_mask:      boolean mask limiting which bins are processed
 
         Returns:
             reduction_db: gain reduction to apply (positive = cut), shape (n_bins,)
         """
         p = self.params
-        selectivity_db = p["selectivity"]
-        depth = p["depth"]
+        depth         = p["depth"]
         max_reduction = p["max_reduction_db"]
-        mode = p["mode"]
+        mode          = p["mode"]
 
-        spike_db = magnitude_db - smoothed_db  # positive where peaks stick out
-
-        # Only process active frequency range
-        spike_db_masked = np.where(self.active_bins, spike_db, 0.0)
-
-        # Amount above the selectivity threshold
+        spike_db        = magnitude_db - smoothed_db
+        spike_db_masked = np.where(band_mask, spike_db, 0.0)
         above_threshold = np.maximum(0.0, spike_db_masked - selectivity_db)
 
         if mode == "soft":
-            # Soft knee: smooth onset using a quadratic curve below 2x threshold
             knee_width = selectivity_db * 0.5
-            in_knee = above_threshold < knee_width
+            in_knee    = above_threshold < knee_width
             soft_curve = np.where(
                 in_knee,
                 above_threshold ** 2 / (2.0 * max(knee_width, 1e-6)),
@@ -223,81 +313,79 @@ class ResonanceSuppressor:
             )
             raw_reduction = soft_curve * depth
         else:
-            # Hard mode: linear reduction above threshold
             raw_reduction = above_threshold * depth
 
-        # Clip to hard ceiling
         reduction_db = np.clip(raw_reduction, 0.0, max_reduction)
+
+        # Sharpness spreading: convolve reduction with kernel to widen or
+        # narrow the attenuation around detected peaks.
+        # Low sharpness → wide kernel → gentle broad cuts.
+        # High sharpness → no spreading → tight notches at detected bins.
+        if self.spread_kernel is not None and reduction_db.any():
+            reduction_db = np.convolve(reduction_db, self.spread_kernel, mode="same")
+            reduction_db = np.clip(reduction_db, 0.0, max_reduction)
+
         return reduction_db
 
     def process(self, audio: np.ndarray, voiced_frame_indices=None) -> dict:
         """
         Apply dynamic resonance suppression to a mono audio array.
 
-        Processes one STFT frame at a time (streaming) to keep memory proportional
-        to the audio length plus one FFT window — not to n_frames × n_bins. This
-        avoids multi-GB intermediate matrix allocations for long files.
+        Each STFT frame:
+          1. PATH 1: within-frame smoothed envelope → gain reduction (full spectrum)
+          2. PATH 2: long-term voiced reference → gain reduction (2500 Hz+, after warmup)
+          3. target_gr = element-wise maximum of PATH 1 and PATH 2
+          4. Attack/release IIR smoothing of target_gr
+          5. Apply gain reduction to STFT bins; ISTFT + overlap-add
 
-        VAD gating is applied at the STFT frame level: frames whose index is not in
-        voiced_frame_indices receive target_gr=0, letting the attack/release IIR
-        decay smoothed_gr naturally. This prevents hard per-sample splicing, which
-        causes discontinuities at overlap-add boundaries.
+        Long-term reference update:
+          On each voiced frame, update per-bin power EMA with alpha derived from
+          the 300 ms time constant. Only used for detection after SIBILANT_WARMUP_FRAMES
+          voiced frames to avoid acting on an under-converged reference.
 
         Args:
             audio: 1D float32 numpy array at self.sr sample rate.
-            voiced_frame_indices: set of int STFT frame indices where voice is
-                present. Frames outside this set are gated (target_gr=0).
-                None means all frames are processed (no VAD gating).
+            voiced_frame_indices: set of int STFT frame indices where voice is present.
+                Frames outside this set receive target_gr=0 (VAD gating).
+                None means all frames are processed.
 
         Returns:
-            dict with keys:
-              'audio'            : processed audio (float32 ndarray, same length as input)
-              'max_reduction_db' : peak gain reduction at any bin across all frames (dB)
-              'mean_reduction_db': mean reduction over bins with > 0.01 dB reduction
-              'spike_frames'     : frames where any bin exceeded 0.01 dB reduction
-              'artifact_risk'    : True when mean_reduction_db > 3 dB
+            dict: audio, max_reduction_db, mean_reduction_db, spike_frames,
+                  artifact_risk, band_summary
         """
         if audio.ndim != 1:
             raise ValueError("ResonanceSuppressor expects mono input (1D array).")
 
         n_fft = self.n_fft
-        hop = self.hop_length
-        window = get_window("hann", n_fft, fftbins=True)
+        hop   = self.hop_length
+        window         = get_window("hann", n_fft, fftbins=True)
         window_squared = window ** 2
 
-        pad = n_fft // 2
+        pad          = n_fft // 2
         audio_padded = np.pad(audio, pad, mode="reflect")
-        n_padded = len(audio_padded)
-
-        n_frames = max(0, (n_padded - n_fft) // hop + 1)
+        n_padded     = len(audio_padded)
+        n_frames     = max(0, (n_padded - n_fft) // hop + 1)
 
         if n_frames == 0:
             logger.warning("ResonanceSuppressor: audio too short, returning unmodified.")
             return {
-                "audio": audio,
-                "max_reduction_db": 0.0,
-                "mean_reduction_db": 0.0,
-                "spike_frames": 0,
-                "artifact_risk": False,
+                "audio": audio, "max_reduction_db": 0.0, "mean_reduction_db": 0.0,
+                "spike_frames": 0, "artifact_risk": False,
             }
 
-        # Output buffers scale with audio length, not n_frames × n_bins
         output_buffer      = np.zeros(n_padded, dtype=np.float64)
         window_accumulator = np.zeros(n_padded, dtype=np.float64)
+        smoothed_gr        = np.zeros(self.n_bins)
 
-        # Per-bin attack/release state (the only O(n_bins) persistent allocation)
-        smoothed_gr = np.zeros(self.n_bins)
-
-        # Telemetry accumulators
         max_reduction       = 0.0
         sum_reduction       = 0.0
         n_active_bins_total = 0
         spike_frames        = 0
-        active_threshold    = 0.01  # dB — consistent floor for mean and spike counting
+        active_threshold    = 0.01
 
-        bin_sum_reduction   = np.zeros(self.n_bins)
-        bin_max_reduction   = np.zeros(self.n_bins)
-        voiced_frame_count  = 0
+        bin_sum_reduction  = np.zeros(self.n_bins)
+        bin_max_reduction  = np.zeros(self.n_bins)
+        voiced_frame_count = 0
 
         eps = 1e-10
 
@@ -306,23 +394,69 @@ class ResonanceSuppressor:
             end   = start + n_fft
 
             # --- FFT ---
-            frame       = audio_padded[start:end] * window
-            spectrum    = np.fft.rfft(frame)
-            magnitude   = np.abs(spectrum)
-            phase       = np.angle(spectrum)
+            frame        = audio_padded[start:end] * window
+            spectrum     = np.fft.rfft(frame)
+            magnitude    = np.abs(spectrum)
+            phase        = np.angle(spectrum)
             magnitude_db = 20.0 * np.log10(magnitude + eps)
+            frame_power  = magnitude ** 2
 
-            # --- Resonance detection ---
+            is_voiced = (voiced_frame_indices is None) or (i in voiced_frame_indices)
+
+            # ----------------------------------------------------------
+            # PATH 1: within-frame detection
+            # ----------------------------------------------------------
             smoothed_env = self._compute_smoothed_envelope(magnitude_db)
-            target_gr    = self._compute_gain_reduction(magnitude_db, smoothed_env)
+            gr_within    = self._compute_gain_reduction(
+                magnitude_db, smoothed_env,
+                self.params["selectivity"],
+                self.active_bins,
+            )
 
-            # VAD gating at STFT-frame level: silence frames receive no gain
-            # reduction target. The IIR below decays smoothed_gr toward 0,
-            # providing smooth gain recovery without hard per-sample splicing.
-            is_voiced = True
-            if voiced_frame_indices is not None and i not in voiced_frame_indices:
+            # ----------------------------------------------------------
+            # PATH 2: long-term sibilant reference detection
+            #
+            # Detection runs BEFORE the reference update so the current
+            # frame's reduction signal can gate the EMA update. Sibilant
+            # frames that fire PATH 2 are excluded from the reference —
+            # allowing them in would pull the reference upward and mask
+            # subsequent detections.
+            # ----------------------------------------------------------
+            gr_sibilant = np.zeros(self.n_bins)
+
+            if (self.long_term_power is not None and
+                    self.long_term_frame_count >= SIBILANT_WARMUP_FRAMES):
+                long_term_db = 10.0 * np.log10(self.long_term_power + eps)
+                gr_sibilant  = self._compute_gain_reduction(
+                    magnitude_db, long_term_db,
+                    self.params["sibilant_selectivity"],
+                    self.sibilant_band_mask,
+                )
+
+            # Update reference EMA: voiced frames only, and only when PATH 2
+            # has not detected a sibilant event this frame (after warmup).
+            is_sibilant_frame = (
+                self.long_term_frame_count >= SIBILANT_WARMUP_FRAMES and
+                np.max(gr_sibilant) > SIBILANT_UPDATE_GATE_DB
+            )
+            if is_voiced and not is_sibilant_frame:
+                if self.long_term_power is None:
+                    self.long_term_power = frame_power.copy()
+                else:
+                    self.long_term_power = (
+                        self.long_term_alpha       * self.long_term_power +
+                        (1.0 - self.long_term_alpha) * frame_power
+                    )
+                self.long_term_frame_count += 1
+
+            # ----------------------------------------------------------
+            # Combine: take the larger reduction from either path
+            # ----------------------------------------------------------
+            target_gr = np.maximum(gr_within, gr_sibilant)
+
+            # VAD gating: silence frames get zero target, IIR decays naturally
+            if not is_voiced:
                 target_gr = np.zeros(self.n_bins)
-                is_voiced = False
 
             # --- Attack/release IIR ---
             increasing  = target_gr >= smoothed_gr
@@ -331,15 +465,17 @@ class ResonanceSuppressor:
 
             if i % 100 == 0:
                 logger.info(
-                    f"Frame {i:04d} | voiced={is_voiced} | max_mag={np.max(magnitude_db):.1f}dB | "
-                    f"max_target_gr={np.max(target_gr):.1f}dB | max_smoothed_gr={np.max(smoothed_gr):.1f}dB | "
-                    f"bins_active={(smoothed_gr > 0.1).sum()}"
+                    f"Frame {i:04d} | voiced={is_voiced} | "
+                    f"lt_frames={self.long_term_frame_count} | "
+                    f"max_within={np.max(gr_within):.1f}dB | "
+                    f"max_sibilant={np.max(gr_sibilant):.1f}dB | "
+                    f"max_smoothed_gr={np.max(smoothed_gr):.1f}dB"
                 )
 
-            # --- Per-frame telemetry ---
+            # --- Telemetry ---
             if is_voiced:
                 bin_sum_reduction += smoothed_gr
-                bin_max_reduction = np.maximum(bin_max_reduction, smoothed_gr)
+                bin_max_reduction  = np.maximum(bin_max_reduction, smoothed_gr)
                 voiced_frame_count += 1
 
             frame_max = float(np.max(smoothed_gr))
@@ -352,7 +488,7 @@ class ResonanceSuppressor:
                 spike_frames        += 1
 
             # --- Apply gain reduction and ISTFT ---
-            gain_linear      = 10.0 ** (-smoothed_gr / 20.0)
+            gain_linear       = 10.0 ** (-smoothed_gr / 20.0)
             modified_spectrum = magnitude * gain_linear * np.exp(1j * phase)
             time_frame        = np.fft.irfft(modified_spectrum, n=n_fft) * window
 
@@ -362,10 +498,9 @@ class ResonanceSuppressor:
             window_accumulator[start:frame_end] += window_squared[:trim]
 
         # OLA normalization
-        safe_acc = np.where(window_accumulator > 1e-8, window_accumulator, 1.0)
+        safe_acc      = np.where(window_accumulator > 1e-8, window_accumulator, 1.0)
         output_buffer /= safe_acc
-
-        output_audio = output_buffer[pad : pad + len(audio)].astype(np.float32)
+        output_audio   = output_buffer[pad : pad + len(audio)].astype(np.float32)
 
         mean_reduction = (sum_reduction / n_active_bins_total) if n_active_bins_total > 0 else 0.0
         artifact_risk  = mean_reduction > 3.0
@@ -374,54 +509,55 @@ class ResonanceSuppressor:
         band_summary = []
         if voiced_frame_count > 0:
             bin_mean_reduction = bin_sum_reduction / voiced_frame_count
-            BAND_CENTERS = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000]
-            freqs = np.fft.rfftfreq(n_fft, d=1.0 / self.sr)
-
+            BAND_CENTERS = [
+                20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400,
+                500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000,
+                6300, 8000, 10000, 12500, 16000, 20000,
+            ]
             for center in BAND_CENTERS:
-                low = center / (2.0 ** (1.0/6.0))
-                high = center * (2.0 ** (1.0/6.0))
-                mask = (freqs >= low) & (freqs < high)
+                low  = center / (2.0 ** (1.0 / 6.0))
+                high = center * (2.0 ** (1.0 / 6.0))
+                mask = (self.freqs >= low) & (self.freqs < high)
                 if not mask.any():
                     continue
-
-                # Report both mean and max gain reduction achieved anywhere in this band
                 mean_red = float(np.mean(bin_mean_reduction[mask]))
-                max_red = float(np.max(bin_max_reduction[mask]))
-
-                if max_red > 0.05:  # skip bands with virtually zero reduction
-                    band_info = {"center": center, "mean_reduction_db": round(mean_red, 2), "peak_reduction_db": round(max_red, 2)}
-
+                max_red  = float(np.max(bin_max_reduction[mask]))
+                if max_red > 0.05:
+                    band_info = {
+                        "center": center,
+                        "mean_reduction_db": round(mean_red, 2),
+                        "peak_reduction_db": round(max_red, 2),
+                    }
                     if self.f0 and self.f0 > 0:
-                        band_freqs = freqs[mask]
-                        band_reds = bin_max_reduction[mask]
-                        peak_freq = band_freqs[np.argmax(band_reds)]
-
+                        band_freqs = self.freqs[mask]
+                        band_reds  = bin_max_reduction[mask]
+                        peak_freq  = band_freqs[np.argmax(band_reds)]
                         h = int(round(peak_freq / self.f0))
-                        # Limit to the first 20 harmonics to avoid dense high-frequency
-                        # false positives matching against sibilance noise
                         if 0 < h <= 20 and abs(peak_freq - h * self.f0) / (h * self.f0) <= 0.03:
-                            band_info["harmonic"] = f"H{h}={int(round(self.f0))} Hz"
+                            band_info["harmonic"]    = f"H{h}={int(round(self.f0))} Hz"
                             band_info["is_harmonic"] = True
                         else:
                             band_info["is_harmonic"] = False
-
                     band_summary.append(band_info)
 
             if band_summary:
                 logger.info("Band gain reduction summary (1/3-octave, voiced frames only):")
                 for b in band_summary:
-                    c = b["center"]
+                    c      = b["center"]
                     mean_r = b["mean_reduction_db"]
                     peak_r = b["peak_reduction_db"]
-                    bars = "#" * min(20, int(round(peak_r / 0.5)))
-                    harm_str = f"  [!] harmonic ({b['harmonic']})" if b.get("is_harmonic") else ""
-                    logger.info(f"{c:4.0f} Hz: Mean {-mean_r:5.2f} dB | Peak {-peak_r:5.2f} dB  {bars}{harm_str}")
+                    bars   = "#" * min(20, int(round(peak_r / 0.5)))
+                    harm   = f"  [!] harmonic ({b['harmonic']})" if b.get("is_harmonic") else ""
+                    logger.info(
+                        f"{c:6.0f} Hz: Mean {-mean_r:5.2f} dB | Peak {-peak_r:5.2f} dB  {bars}{harm}"
+                    )
 
         logger.info(
             f"ResonanceSuppressor: max_reduction={max_reduction:.2f} dB | "
             f"mean_reduction={mean_reduction:.2f} dB | "
             f"spike_frames={spike_frames}/{n_frames} | "
-            f"artifact_risk={artifact_risk}"
+            f"artifact_risk={artifact_risk} | "
+            f"lt_voiced_frames={self.long_term_frame_count}"
         )
 
         return {
@@ -448,36 +584,29 @@ def apply_resonance_suppression(
     """
     Pipeline integration entry point for Stage 3b.
 
-    If a VAD voiced_mask is provided (same shape as audio, boolean), processing
-    is applied only to voiced frames. Silence frames pass through unmodified.
-    This prevents the suppressor from processing noise-floor-only segments,
-    which would introduce artifacts.
-
     Args:
         audio:           Mono float32 audio at sample_rate.
         sample_rate:     Sample rate (should be 44100 in the Instant Polish pipeline).
         preset:          One of: acx_audiobook, podcast_ready, voice_ready, general_clean.
-        vad_voiced_mask: Optional boolean array, True where voice is present.
+        vad_voiced_mask: Optional boolean array (same length as audio), True = voiced.
+        f0:              Fundamental frequency of the voice (Hz), for harmonic annotation.
 
     Returns:
-        dict: same structure as ResonanceSuppressor.process(), plus 'skipped' bool.
+        dict: audio, max_reduction_db, mean_reduction_db, spike_frames,
+              artifact_risk, band_summary, skipped
     """
-    # Skip for noise_eraser — caller should enforce this, but guard here too
     if preset == "noise_eraser":
         logger.info("ResonanceSuppressor: skipping for noise_eraser preset.")
-        return {"audio": audio, "skipped": True, "max_reduction_db": 0.0,
-                "mean_reduction_db": 0.0, "spike_frames": 0, "artifact_risk": False, "band_summary": []}
+        return {
+            "audio": audio, "skipped": True, "max_reduction_db": 0.0,
+            "mean_reduction_db": 0.0, "spike_frames": 0,
+            "artifact_risk": False, "band_summary": [],
+        }
 
     suppressor = ResonanceSuppressor(sample_rate=sample_rate, preset=preset, f0=f0)
 
     voiced_frame_indices = None
     if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
-        # Convert per-sample VAD mask to a set of STFT frame indices.
-        # Frame i is "voiced" when any sample in its analysis window overlaps
-        # with voiced audio. Gating at the STFT frame level (not per-sample)
-        # avoids discontinuities at voiced/silence boundaries — the attack/release
-        # IIR in process() decays gain reduction smoothly toward zero on silence
-        # frames instead of hard-splicing original samples post-OLA.
         pad           = suppressor.n_fft // 2
         n_padded      = len(audio) + 2 * pad
         n_stft_frames = max(0, (n_padded - suppressor.n_fft) // suppressor.hop_length + 1)
@@ -488,7 +617,7 @@ def apply_resonance_suppression(
             if orig_start < orig_end and vad_voiced_mask[orig_start:orig_end].any():
                 voiced_frame_indices.add(fi)
 
-    result = suppressor.process(audio, voiced_frame_indices=voiced_frame_indices)
+    result            = suppressor.process(audio, voiced_frame_indices=voiced_frame_indices)
     result["skipped"] = False
     return result
 
@@ -507,14 +636,13 @@ def resonance_suppressor_report_entry(result: dict) -> dict:
     """
     if result.get("skipped"):
         return {"applied": False}
-
     return {
         "applied": True,
-        "max_reduction_db": round(result["max_reduction_db"], 1),
+        "max_reduction_db":  round(result["max_reduction_db"],  1),
         "mean_reduction_db": round(result["mean_reduction_db"], 1),
-        "spike_frames": result["spike_frames"],
-        "artifact_risk": result["artifact_risk"],
-        "band_summary": result.get("band_summary", []),
+        "spike_frames":      result["spike_frames"],
+        "artifact_risk":     result["artifact_risk"],
+        "band_summary":      result.get("band_summary", []),
     }
 
 
@@ -543,7 +671,7 @@ if __name__ == '__main__':
                         help='Path to JSON file with VAD frame metadata '
                              '(array of {isSilence, offsetSamples, lengthSamples, rmsDbfs})')
     parser.add_argument('--f0', type=float, default=None,
-                        help='Fundamental frequency of the voice (for harmonic false-positive detection)')
+                        help='Fundamental frequency of the voice (Hz), for harmonic annotation')
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
