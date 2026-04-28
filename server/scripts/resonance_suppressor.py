@@ -25,14 +25,11 @@ PRESET_DEFAULTS = {
     "acx_audiobook": {
         "depth": 0.5,               # Global reduction scale (0.0–1.0).
         "sharpness": 0.0,           # Controls depth/narrowness of attenuation curve post-detection.
-                                    # 0.0 = wide gentle cuts (good for broad energy build-ups).
+                                    # 0.0 = wide gentle cuts (good for broad energy build-ups like sibilance).
                                     # 1.0 = deep narrow notches (good for sharp resonances).
-        "selectivity": 1.5,         # Within-frame spike threshold in dB above smoothed floor.
-        "sibilant_selectivity": 6.0,# Long-term reference threshold for sibilant detection.
-                                    # Calibrated against 17_airBoost.wav: min voiced-sibilant
-                                    # contrast is +11.6 dB; 6.0 dB gives clean separation from
-                                    # voiced frame-to-frame noise (~2–3 dB EMA std) while
-                                    # catching every sibilant event with >5 dB margin.
+        "selectivity": 1.5,         # Spike threshold for per-bin peak detection in dB above smoothed floor.
+        "sibilant_selectivity": 6.0,# Spike threshold for time-based detection -- 6dB gives clean separation 
+                                    # from frame-to-frame noise (~2–3 dB EMA std) 
         "attack_ms": 15.0,          # Gain reduction onset speed.
         "release_ms": 50.0,         # Gain reduction recovery speed.
         "max_reduction_db": 12.0,   # Hard ceiling on reduction at any bin.
@@ -124,9 +121,9 @@ class ResonanceSuppressor:
       context bins on either side are not elevated. Cannot detect broad
       sibilant plateaus because the smoothed reference follows the plateau.
 
-    PATH 2 — Long-term reference (broad sibilant elevations, 2500 Hz+):
+    PATH 2 — Long-term reference (e.g. broad sibilant elevations):
       Maintains a per-bin exponential moving average of voiced-frame power
-      spectra (time constant ~300 ms). Flags bins in the sibilant band that
+      spectra (time constant ~300 ms). Flags bins in the sibilant band (above SIBILANT_BAND_FLOOR_HZ) that
       exceed this long-term reference by more than `sibilant_selectivity` dB.
       Effective for broad sibilant events because the long-term voiced
       reference sits 11–20+ dB below the sibilant plateau; the within-frame
