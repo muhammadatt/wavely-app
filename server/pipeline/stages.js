@@ -31,7 +31,7 @@ import {
   probeFile,
 } from '../lib/ffmpeg.js'
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
-import { applyNoiseReduction } from './noiseReduce.js'
+import { applyNoiseReduction, runRnnoise, runDtln } from './noiseReduce.js'
 import { measureAudio, measureVoicedRms, measureVoicedLufs, checkAcxCertification } from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
 import { analyzeFrames, remeasureFrames } from './frameAnalysis.js'
@@ -40,14 +40,14 @@ import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
-import { runRnnoise, runDtln, runSeparation, runVoiceFixer, runHarmonicExciter, runVocalSaturation, runClearerVoice, runDereverb, runApBwe, runLavaSR, runClickRemover } from './separation.js'
+import { runSeparation, runClearerVoice } from './separation.js'
+import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { analyzeHum } from './humEQ.js'
 import { applyAirBoost } from './airBoost.js'
-import { applyResonanceSuppression } from './resonanceSuppressor.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
