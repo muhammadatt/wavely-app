@@ -108,7 +108,7 @@ export const PRESETS = {
     eqProfile: 'audiobook',
     airBoost: { gainDb: 8 },
     bweModel: 'ap_bwe',
-    bwe: { enabled: true, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
+    bwe: { enabled: false, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
     deEsser: {
       sensitivity: 'medium',
       trigger: 1,
@@ -128,7 +128,7 @@ export const PRESETS = {
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.1,
+      wetDry: 0.2,
       bias: 0.08,
       f0: 109.4,
     },

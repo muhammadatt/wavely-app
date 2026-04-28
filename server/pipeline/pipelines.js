@@ -36,7 +36,7 @@ const STANDARD_PIPELINE = [
   stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   //stages.vocalExpander,         // CAUTION: Expander before compressor removes noise, but softens start of words
   stages.compress,                // Serial compression
-  stages.deEss,
+  //stages.deEss,
   stages.noiseReduce,  
   //stages.parallelCompress,      // parallel compression
   stages.vocalExpander,           // frequency-selective expander (silence-floor residual attenuator)
