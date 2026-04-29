@@ -107,6 +107,15 @@ def main():
     # Resample back to 44.1 kHz (pipeline internal format)
     waveform = _resample(waveform, RNNOISE_SR, PIPELINE_SR)
 
+    # Compensate for RNNoise inherent 20ms algorithmic delay
+    # 20ms at 44.1kHz is 882 samples
+    delay_samples = int(0.020 * PIPELINE_SR)
+    if waveform.shape[1] > delay_samples:
+        waveform = np.concatenate([
+            waveform[:, delay_samples:],
+            np.zeros((waveform.shape[0], delay_samples), dtype=waveform.dtype)
+        ], axis=1)
+
     # Write 32-bit float WAV at 44.1 kHz, mono
     wavfile.write(args.output, PIPELINE_SR, waveform[0].astype(np.float32))
 

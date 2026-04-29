@@ -42,8 +42,19 @@ def main():
     duration_s = audio.shape[-1] / model_sr
     print(f'[deepfilter] input duration={duration_s:.2f}s', flush=True)
 
+    # Pad the beginning of the audio with 1 frame (10ms) of silence.
+    # DeepFilterNet's STFT overlap-add causes a fade-in on the first frame,
+    # which makes the audio appear to shift forward by a few milliseconds.
+    # Pre-padding ensures the actual audio starts in a fully reconstructed window.
+    hop_size = df_state.hop_size()
+    import torch.nn.functional as F
+    audio_padded = F.pad(audio, (hop_size, 0))
+
     # Apply DeepFilterNet3; atten_lim_db=None means no attenuation limit (Tier 5)
-    enhanced = enhance(model, df_state, audio, atten_lim_db=args.atten_lim_db)
+    enhanced = enhance(model, df_state, audio_padded, atten_lim_db=args.atten_lim_db)
+
+    # Strip the pre-padding from the output
+    enhanced = enhanced[..., hop_size:]
 
     # Write 32-bit float WAV at 48 kHz — caller resamples to 44.1 kHz
     save_audio(args.output, enhanced, sr=model_sr, dtype=torch.float32)
