@@ -27,18 +27,15 @@ import { PRESETS } from '../presets.js'
 
 const FFT_SIZE     = 4096
 
-// F0 ranges for voice classification
-const F0_MALE_MIN   = 85
-const F0_MALE_MAX   = 180
-const F0_FEMALE_MIN = 165
-const F0_FEMALE_MAX = 255
-
-// Sibilant band lookup by voice type (spec §4a)
-const SIBILANT_BANDS = {
-  male:      [4000, 7000],
-  female:    [6000, 9000],
-  uncertain: [5000, 8000],
-}
+// Expanded F0 ranges for more granular voice classification
+const VOCAL_ARCHETYPES = [
+  { id: 'deep_male', min: 60, max: 110, band: [3500, 6500] },
+  { id: 'mid_male', min: 110, max: 160, band: [4500, 7500] },
+  { id: 'high_male_low_female', min: 160, max: 210, band: [5500, 8500] },
+  { id: 'mid_female', min: 210, max: 260, band: [6500, 9500] },
+  { id: 'high_female_child', min: 260, max: 350, band: [7500, 10500] },
+  { id: 'uncertain', min: 0, max: 0, band: [5000, 8000] }
+]
 
 // ── Main API ────────────────────────────────────────────────────────────────
 
@@ -80,11 +77,11 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
   }
 
   const f0 = estimateF0(voicedFrames, sampleRate)
-  const voiceType = classifyVoice(f0)
-  const sibilantBand = SIBILANT_BANDS[voiceType]
+  const voiceType = classifyVoiceExpanded(f0)
+  const globalSibilantBand = getSibilantBandExpanded(voiceType)
 
   // --- Step 2: Identify fricative events and measure sibilant energy ---
-  const sibilanceMetrics = analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate)
+  const sibilanceMetrics = analyzeSibilance(samples, frameAnalysis, sampleRate)
 
   if (sibilanceMetrics.fricativeCount < 3) {
     await copyThrough(inputPath, outputPath)
@@ -130,8 +127,9 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
 
   // Process each channel using the gain curve derived from channel 0
   const deEsserParams = {
+    targetFreqCurve: sibilanceMetrics.targetFreqCurve,
     targetFreq,
-    bandwidth: sibilantBand[1] - sibilantBand[0],
+    bandwidth: globalSibilantBand[1] - globalSibilantBand[0],
     maxReductionDb: maxReduction,
     thresholdOffsetDb: thresholdOffset,
     attackMs: 2,
@@ -222,115 +220,159 @@ function autocorrelationF0(frame, sampleRate) {
 }
 
 /**
- * Classify voice type based on estimated F0.
+ * Classify voice type based on estimated F0 into expanded archetypes.
  */
-function classifyVoice(f0) {
+function classifyVoiceExpanded(f0) {
   if (f0 === null) return 'uncertain'
-  if (f0 >= F0_MALE_MIN && f0 <= F0_MALE_MAX) return 'male'
-  if (f0 >= F0_FEMALE_MIN && f0 <= F0_FEMALE_MAX) return 'female'
-  // Overlap region or out of range
-  if (f0 < F0_FEMALE_MIN) return 'male'
-  if (f0 > F0_FEMALE_MAX) return 'female'
-  return 'uncertain'
+  for (const arch of VOCAL_ARCHETYPES) {
+    if (arch.id !== 'uncertain' && f0 >= arch.min && f0 <= arch.max) {
+      return arch.id;
+    }
+  }
+  // Fallbacks if out of bounds
+  if (f0 < 60) return 'deep_male';
+  if (f0 > 350) return 'high_female_child';
+  return 'uncertain';
+}
+
+function getSibilantBandExpanded(voiceType) {
+  const arch = VOCAL_ARCHETYPES.find(a => a.id === voiceType);
+  return arch ? arch.band : VOCAL_ARCHETYPES.find(a => a.id === 'uncertain').band;
 }
 
 // ── Sibilance Analysis ──────────────────────────────────────────────────────
 
 /**
  * Analyze sibilant energy across all frames. Identifies fricative events
- * and computes the P95 energy and target frequency.
+ * and computes the P95 energy and target frequency curve dynamically.
  */
-function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
+function analyzeSibilance(samples, frameAnalysis, sampleRate) {
   const frameSize = FFT_SIZE
 
   const sibilantEnergies = []
   const fricativeEvents = []
 
-  const binFreqRes = sampleRate / frameSize
-  const sibilantBinLo = Math.floor(sibilantBand[0] / binFreqRes)
-  const sibilantBinHi = Math.ceil(sibilantBand[1] / binFreqRes)
+  const targetFreqCurve = new Float32Array(samples.length)
 
-  // Mid-band reference (1–3 kHz) is more stable than sub-1kHz,
-  // less affected by low-frequency room noise or breath
+  const binFreqRes = sampleRate / frameSize
   const midBinLo = Math.ceil(1000 / binFreqRes)
   const midBinHi = Math.ceil(3000 / binFreqRes)
 
+  let recentF0s = []
+  let currentSibilantBand = VOCAL_ARCHETYPES.find(a => a.id === 'uncertain').band;
+
   for (const frameInfo of frameAnalysis.frames) {
-    if (frameInfo.isSilence) continue
     const start = frameInfo.offsetSamples
-    if (start + frameSize > samples.length) continue
+    const end = Math.min(start + frameInfo.lengthSamples, samples.length)
+
+    if (frameInfo.isSilence || start + frameSize > samples.length) {
+      const defaultFreq = (currentSibilantBand[0] + currentSibilantBand[1]) / 2;
+      for (let i = start; i < end; i++) targetFreqCurve[i] = defaultFreq;
+      continue;
+    }
+
     const frame = samples.slice(start, start + frameSize)
+
+    // Dynamic F0 estimation (every 3rd voiced frame to save CPU)
+    if (sibilantEnergies.length % 3 === 0) {
+      const f0 = autocorrelationF0(frame, sampleRate);
+      if (f0 !== null) {
+        recentF0s.push(f0);
+        if (recentF0s.length > 10) recentF0s.shift(); // ~1 sec rolling window
+      }
+    }
+
+    if (recentF0s.length > 0) {
+      const sorted = [...recentF0s].sort((a, b) => a - b);
+      const medianF0 = sorted[Math.floor(sorted.length / 2)];
+      const voiceType = classifyVoiceExpanded(medianF0);
+      currentSibilantBand = getSibilantBandExpanded(voiceType);
+    }
+
+    const sibilantBinLo = Math.floor(currentSibilantBand[0] / binFreqRes)
+    const sibilantBinHi = Math.ceil(currentSibilantBand[1] / binFreqRes)
 
     Meyda.bufferSize = frameSize
     const features = Meyda.extract(['powerSpectrum'], frame, {
       sampleRate,
       bufferSize: frameSize,
     })
-    if (!features || !features.powerSpectrum) continue
 
-    const ps = features.powerSpectrum
+    let frameTargetFreq = (currentSibilantBand[0] + currentSibilantBand[1]) / 2;
 
-    // Sibilant band energy
-    let sibilantEnergy = 0
-    let sibilantBinCount = 0
-    for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
-      sibilantEnergy += ps[b]
-      sibilantBinCount++
-    }
-    if (sibilantBinCount === 0) continue
-    const avgSibilantEnergy = sibilantEnergy / sibilantBinCount
-    const sibilantDb = avgSibilantEnergy > 0 ? 10 * Math.log10(avgSibilantEnergy) : -120
-
-    sibilantEnergies.push(sibilantDb)
-
-    // Mid-band reference energy (1–3 kHz)
-    let midEnergy = 0
-    let midBinCount = 0
-    for (let b = midBinLo; b <= midBinHi && b < ps.length; b++) {
-      midEnergy += ps[b]
-      midBinCount++
-    }
-    const avgMidEnergy = midBinCount > 0 ? midEnergy / midBinCount : 0
-    const midDb = avgMidEnergy > 0 ? 10 * Math.log10(avgMidEnergy) : -120
-
-    // Within-band spectral flatness (geometric mean / arithmetic mean)
-    // This measures noise-likeness specifically in the sibilant region,
-    // not dragged down by low-frequency harmonic content
-    let logSum = 0
-    let linSum = 0
-    let validBins = 0
-    for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
-      if (ps[b] > 0) {
-        logSum += Math.log(ps[b])
-        linSum += ps[b]
-        validBins++
-      }
-    }
-    const bandFlatness = validBins > 0 && linSum > 0
-      ? Math.exp(logSum / validBins) / (linSum / validBins)
-      : 0
-
-    // Looser dB margin (8dB vs 3dB) + within-band flatness gate
-    // bandFlatness > 0.1 is intentionally low — sibilants aren't pure
-    // white noise but they are noticeably flatter than voiced harmonics
-    if (sibilantDb - midDb > 8 && bandFlatness > 0.1) {
-      let weightedSum = 0
-      let totalWeight = 0
+    if (features && features.powerSpectrum) {
+      const ps = features.powerSpectrum
+      // Sibilant band energy
+      let sibilantEnergy = 0
+      let sibilantBinCount = 0
       for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
-        const freq = b * binFreqRes
-        weightedSum += freq * ps[b]
-        totalWeight += ps[b]
+        sibilantEnergy += ps[b]
+        sibilantBinCount++
       }
-      const centroid = totalWeight > 0
-        ? weightedSum / totalWeight
-        : (sibilantBand[0] + sibilantBand[1]) / 2
+      const avgSibilantEnergy = sibilantBinCount > 0 ? sibilantEnergy / sibilantBinCount : 0
+      const sibilantDb = avgSibilantEnergy > 0 ? 10 * Math.log10(avgSibilantEnergy) : -120
 
-      fricativeEvents.push({ energy: sibilantDb, centroid })
+      sibilantEnergies.push(sibilantDb)
+
+      // Mid-band reference energy
+      let midEnergy = 0
+      let midBinCount = 0
+      for (let b = midBinLo; b <= midBinHi && b < ps.length; b++) {
+        midEnergy += ps[b]
+        midBinCount++
+      }
+      const avgMidEnergy = midBinCount > 0 ? midEnergy / midBinCount : 0
+      const midDb = avgMidEnergy > 0 ? 10 * Math.log10(avgMidEnergy) : -120
+
+      // Within-band spectral flatness
+      let logSum = 0
+      let linSum = 0
+      let validBins = 0
+      for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
+        if (ps[b] > 0) {
+          logSum += Math.log(ps[b])
+          linSum += ps[b]
+          validBins++
+        }
+      }
+      const bandFlatness = validBins > 0 && linSum > 0
+        ? Math.exp(logSum / validBins) / (linSum / validBins)
+        : 0
+
+      if (sibilantDb - midDb > 8 && bandFlatness > 0.1) {
+        let weightedSum = 0
+        let totalWeight = 0
+        for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
+          const freq = b * binFreqRes
+          weightedSum += freq * ps[b]
+          totalWeight += ps[b]
+        }
+        const centroid = totalWeight > 0
+          ? weightedSum / totalWeight
+          : (currentSibilantBand[0] + currentSibilantBand[1]) / 2
+
+        frameTargetFreq = centroid;
+        fricativeEvents.push({ energy: sibilantDb, centroid })
+      }
     }
+
+    for (let i = start; i < end; i++) targetFreqCurve[i] = frameTargetFreq;
+  }
+
+  // Handle remaining samples (if any)
+  const lastFrame = frameAnalysis.frames[frameAnalysis.frames.length - 1];
+  if (lastFrame) {
+    const end = Math.min(lastFrame.offsetSamples + lastFrame.lengthSamples, samples.length);
+    const finalFreq = targetFreqCurve[Math.max(0, end - 1)] || 6500;
+    for (let i = end; i < samples.length; i++) targetFreqCurve[i] = finalFreq;
+  } else {
+    // If no frames at all, just fill with default
+    const finalFreq = 6500;
+    for (let i = 0; i < samples.length; i++) targetFreqCurve[i] = finalFreq;
   }
 
   if (sibilantEnergies.length === 0) {
-    return { p95EnergyDb: -120, meanEnergyDb: -120, targetFreqHz: null, fricativeCount: 0 }
+    return { p95EnergyDb: -120, meanEnergyDb: -120, targetFreqHz: null, fricativeCount: 0, targetFreqCurve }
   }
 
   const meanEnergy = sibilantEnergies.reduce((s, v) => s + v, 0) / sibilantEnergies.length
@@ -338,10 +380,10 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
   const p95Index = Math.floor(sorted.length * 0.95)
   const p95Energy = sorted[Math.min(p95Index, sorted.length - 1)]
 
-  let targetFreq = (sibilantBand[0] + sibilantBand[1]) / 2
+  let targetFreq = 6500
   if (fricativeEvents.length > 0) {
-    fricativeEvents.sort((a, b) => b.energy - a.energy)
-    const top5pct = fricativeEvents.slice(0, Math.max(1, Math.ceil(fricativeEvents.length * 0.05)))
+    const feSorted = [...fricativeEvents].sort((a, b) => b.energy - a.energy)
+    const top5pct = feSorted.slice(0, Math.max(1, Math.ceil(feSorted.length * 0.05)))
     targetFreq = top5pct.reduce((s, e) => s + e.centroid, 0) / top5pct.length
   }
 
@@ -350,6 +392,7 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
     meanEnergyDb: round2(meanEnergy),
     targetFreqHz: Math.round(targetFreq),
     fricativeCount: fricativeEvents.length,
+    targetFreqCurve
   }
 }
 
@@ -357,16 +400,14 @@ function analyzeSibilance(samples, frameAnalysis, sibilantBand, sampleRate) {
 
 /**
  * Build a per-sample sibilant gain reduction curve from a mono analysis channel.
- *
- * Signal flow:
- *   input → [bandpass (sibilant band)] → envelope → gain computation → gain[]
- *
- * The gain array is then applied to all channels via applyGainCurve().
+ * Uses an optimized Semi-Dynamic Biquad that quantizes filter updates to >100Hz
+ * shifts and crossfades to prevent discontinuity clicks.
  *
  * @returns {{ gainCurve: Float32Array, maxGainReductionDb: number, treatedEvents: Array }}
  */
 function buildDeEsserGainCurve(samples, sampleRate, params) {
   const {
+    targetFreqCurve,
     targetFreq,
     bandwidth,
     maxReductionDb,
@@ -377,15 +418,49 @@ function buildDeEsserGainCurve(samples, sampleRate, params) {
 
   const n = samples.length
 
-  // Design a 2nd-order bandpass filter centered on targetFreq
-  const Q = targetFreq / Math.max(bandwidth, 100)
-  const bp = designBandpass(targetFreq, Math.max(Q, 0.5), sampleRate)
-
-  // Extract sibilant component via bandpass
+  // Extract sibilant component via dynamic biquad bandpass
   const sibilant = new Float32Array(n)
-  const bpState = { x1: 0, x2: 0, y1: 0, y2: 0 }
+
+  let currentTargetFreq = targetFreqCurve ? targetFreqCurve[0] : targetFreq;
+  let Q = currentTargetFreq / Math.max(bandwidth, 100);
+  let bp = designBandpass(currentTargetFreq, Math.max(Q, 0.5), sampleRate);
+  let bpState = { x1: 0, x2: 0, y1: 0, y2: 0 };
+
+  let isCrossfading = false;
+  let crossfadeTimer = 0;
+  const CROSSFADE_SAMPLES = Math.floor(sampleRate * 0.005); // 5ms crossfade
+  let nextBp = null;
+  let nextBpState = null;
+
   for (let i = 0; i < n; i++) {
-    sibilant[i] = applyBiquad(bp, samples[i], bpState)
+    const desiredFreq = targetFreqCurve ? targetFreqCurve[i] : targetFreq;
+
+    // Recalculate filter only if target shifts by > 100 Hz
+    if (!isCrossfading && Math.abs(desiredFreq - currentTargetFreq) > 100) {
+      currentTargetFreq = desiredFreq;
+      Q = currentTargetFreq / Math.max(bandwidth, 100);
+      nextBp = designBandpass(currentTargetFreq, Math.max(Q, 0.5), sampleRate);
+      nextBpState = { x1: 0, x2: 0, y1: 0, y2: 0 };
+      isCrossfading = true;
+      crossfadeTimer = 0;
+    }
+
+    if (isCrossfading) {
+      const s1 = applyBiquad(bp, samples[i], bpState);
+      const s2 = applyBiquad(nextBp, samples[i], nextBpState);
+
+      const fadeRatio = crossfadeTimer / CROSSFADE_SAMPLES;
+      sibilant[i] = s1 * (1 - fadeRatio) + s2 * fadeRatio;
+
+      crossfadeTimer++;
+      if (crossfadeTimer >= CROSSFADE_SAMPLES) {
+        isCrossfading = false;
+        bp = nextBp;
+        bpState = nextBpState;
+      }
+    } else {
+      sibilant[i] = applyBiquad(bp, samples[i], bpState);
+    }
   }
 
   // Derive threshold from the bandpass-filtered signal's RMS so it's on the
