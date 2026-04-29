@@ -32,16 +32,38 @@ export async function removeTmp(filePath) {
 }
 
 /**
- * Stage 0: Decode any supported input to 32-bit float PCM WAV at 44.1 kHz.
+ * Pad the beginning of an audio file with silence.
  */
-export async function decodeToFloat32(inputPath, outputPath) {
+export async function padStart(inputPath, outputPath, padMs) {
+  // Use apad for silence at the end, but for start we need to delay the audio.
+  // adelay delays all channels.
   await runFfmpeg([
+    '-y',
     '-i', inputPath,
-    '-ar', String(INTERNAL_SAMPLE_RATE),
+    '-af', `adelay=${padMs}|${padMs}`,
     '-acodec', 'pcm_f32le',
+    '-ar', String(INTERNAL_SAMPLE_RATE),
     '-f', 'wav',
     outputPath,
   ])
+  return outputPath
+}
+
+/**
+ * Stage 0: Decode any supported input to 32-bit float PCM WAV at 44.1 kHz.
+ */
+export async function decodeToFloat32(inputPath, outputPath, { trimStartMs = 0 } = {}) {
+  const args = ['-y', '-i', inputPath]
+  if (trimStartMs > 0) {
+    args.push('-af', `atrim=start=${trimStartMs / 1000}`)
+  }
+  args.push(
+    '-ar', String(INTERNAL_SAMPLE_RATE),
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath
+  )
+  await runFfmpeg(args)
   return outputPath
 }
 
