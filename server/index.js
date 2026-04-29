@@ -19,7 +19,7 @@ app.set('trust proxy', 1)
 // CORS_ORIGIN_PATTERNS — comma-separated regex patterns (for Vercel preview URLs)
 const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:5173', 'http://localhost:4173']
+  : ['http://localhost:5173', 'http://localhost:5174']
 
 const allowedPatterns = process.env.CORS_ORIGIN_PATTERNS
   ? process.env.CORS_ORIGIN_PATTERNS.split(',').map(p => new RegExp(p.trim()))
@@ -27,10 +27,17 @@ const allowedPatterns = process.env.CORS_ORIGIN_PATTERNS
 
 app.use(cors({
   origin(origin, callback) {
-    // Allow requests with no origin (server-to-server, curl, etc.) in dev
-    if (!origin) return callback(null, true)
+    // Allow requests with no origin (server-to-server, curl, etc.) or "null" origin (file://) in dev
+    if (!origin || origin === 'null') return callback(null, true)
     if (allowedOrigins.includes(origin)) return callback(null, true)
     if (allowedPatterns.some(pattern => pattern.test(origin))) return callback(null, true)
+
+    // Allow local development and testing domains, including LAN IPs
+    if (/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin) || origin.endsWith('.test')) {
+      return callback(null, true)
+    }
+
+    console.error(`CORS rejected origin: ${origin}`)
     callback(new Error('Not allowed by CORS'))
   },
 }))

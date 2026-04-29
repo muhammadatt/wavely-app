@@ -23,19 +23,19 @@ logger = logging.getLogger(__name__)
 
 PRESET_DEFAULTS = {
     "acx_audiobook": {
-        "depth": 0.5,               # Global reduction scale (0.0–1.0).
-        "sharpness": 0.0,           # Controls depth/narrowness of attenuation curve post-detection.
-                                    # 0.0 = wide gentle cuts (good for broad energy build-ups like sibilance).
-                                    # 1.0 = deep narrow notches (good for sharp resonances).
-        "selectivity": 1.5,         # Spike threshold for per-bin peak detection in dB above smoothed floor.
-        "sibilant_selectivity": 6.0,# Spike threshold for time-based detection -- 6dB gives clean separation 
-                                    # from frame-to-frame noise (~2–3 dB EMA std) 
-        "attack_ms": 15.0,          # Gain reduction onset speed.
-        "release_ms": 50.0,         # Gain reduction recovery speed.
-        "max_reduction_db": 12.0,   # Hard ceiling on reduction at any bin.
-        "freq_floor_hz": 800.0,     # Don't process below this.
-        "freq_ceil_hz": 16000.0,    # Don't process above this.
-        "mode": "soft",             # "soft" = gradual knee; "hard" = linear above threshold.
+        "depth": 0.5,                   # Global reduction scale (0.0–1.0).
+        "sharpness": 0.0,               # Controls depth/narrowness of attenuation curve post-detection.
+                                        # 0.0 = wide gentle cuts (good for broad energy build-ups like sibilance).
+                                        # 1.0 = deep narrow notches (good for sharp resonances).
+        "selectivity": 1.5,             # Spike threshold for per-bin peak detection in dB above smoothed floor.
+        "sibilant_selectivity": 8.0,    # Spike threshold for time-based detection -- 8dB mean significant delta
+                                        # from frame-to-frame noise (~2–3 dB EMA std) 
+        "attack_ms": 15.0,              # Gain reduction onset speed.
+        "release_ms": 50.0,             # Gain reduction recovery speed.
+        "max_reduction_db": 12.0,       # Hard ceiling on reduction at any bin.
+        "freq_floor_hz": 800.0,         # Don't process below this.
+        "freq_ceil_hz": 16000.0,        # Don't process above this.
+        "mode": "soft",                 # "soft" = gradual knee; "hard" = linear above threshold.
     },
     "podcast_ready": {
         "depth": 0.85,
@@ -82,9 +82,8 @@ PRESET_DEFAULTS = {
 
 # MT - Was set at 2500.0 to keep PATH2 exclusively it to the sibilant range (above 2500hz)
 # and avoid touching potentially desirable resonances in the body of the lower voice harmonics
-# But in testing it doesnt seem to hurt at 80, and may even help clear up some cloudy room resonances below 350hz 
 
-SIBILANT_BAND_FLOOR_HZ = 80 
+SIBILANT_BAND_FLOOR_HZ = 2500 
 
 # Minimum voiced frames before the long-term reference is used for detection.
 # At hop=512, sr=44100 (11.6 ms/frame), 25 frames ≈ 290 ms of voiced speech —
