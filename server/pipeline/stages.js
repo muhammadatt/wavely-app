@@ -493,11 +493,13 @@ export async function airBoost(ctx) {
 
 export async function deEss(ctx) {
   const deEssPath   = ctx.tmp('.wav')
+  const eventsPath  = ctx._sibilanceEvents?.path ?? null
   const deEssResult = await analyzeAndDeEss(
     ctx.currentPath,
     deEssPath,
     ctx.presetId,
     ctx.results.metrics,
+    eventsPath,
   )
   ctx.currentPath   = deEssPath
   ctx.results.deEss = deEssResult

@@ -1,645 +1,233 @@
 /**
  * Stage 4 — De-esser (Conditional).
  *
- * Reduces harsh sibilant energy using Meyda.js spectral analysis to
- * drive a frequency-selective compressor implemented in custom DSP.
+ * Reduces harsh sibilant energy using a true split-band (HPF + complementary
+ * subtraction) architecture so only the high band is attenuated during
+ * sibilant events. The legacy JS broadband-attenuation path is replaced by
+ * a Python subprocess that uses scipy for vectorised STFT, biquad design,
+ * and IIR filtering.
  *
  * Reference: processing spec v3, Stage 4.
  *
- * Algorithm:
- *   1. Estimate F0 from voiced frames (autocorrelation) to determine
- *      the initial sibilant band (male vs. female voice)
- *   2. Identify fricative events (high spectral flatness in sibilant band,
- *      low energy below 1 kHz)
- *   3. Compute P95 sibilant energy — this is the de-esser target frequency
- *   4. Evaluate trigger condition (preset sensitivity)
- *   5. If triggered, apply frequency-selective compression to the sibilant band
- *
- * DSP approach: biquad bandpass isolates the sibilant band for envelope
- * detection; gain reduction is applied only to the sibilant band and summed
- * back with the untouched low-frequency content.
+ * Algorithm (in de_esser.py):
+ *   1. F0 per frame — reused from the cached sibilance event map when the
+ *      upstream sibilance suppressor stage has produced one; otherwise
+ *      estimated internally on voiced frames.
+ *   2. Fricative event detection from the per-frame F0 trajectory and the
+ *      voice-type-derived sibilant band.
+ *   3. Trigger condition (preset sensitivity) on the P95 - mean delta.
+ *   4. Dynamic detection bandpass tracks the per-frame target frequency
+ *      and feeds an envelope follower / gain-curve generator.
+ *   5. Split-band processing: HPF the input at a static crossover (derived
+ *      from voice type, clamped to [3500, 5000] Hz), apply the gain curve
+ *      to the high band only, and sum with the untouched low band.
  */
 
-import Meyda from 'meyda'
-import { readWavAllChannels } from './wavReader.js'
-import { writeWavChannels } from './wavWriter.js'
-import { PRESETS } from '../presets.js'
+import { spawn }                  from 'child_process'
+import { fileURLToPath }          from 'url'
+import { readFile, writeFile, rm } from 'fs/promises'
+import os                         from 'os'
+import path                       from 'path'
+import { tempPath }               from '../lib/ffmpeg.js'
+import { PYTHON as SHARED_PYTHON } from './spawnPython.js'
+import { PRESETS }                from '../presets.js'
 
-const FFT_SIZE     = 4096
+const DE_ESSER_PYTHON = process.env.DE_ESSER_PYTHON ?? SHARED_PYTHON
+const NUM_THREADS     = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 
-// Expanded F0 ranges for more granular voice classification
-const VOCAL_ARCHETYPES = [
-  { id: 'deep_male', min: 60, max: 110, band: [3500, 6500] },
-  { id: 'mid_male', min: 110, max: 160, band: [4500, 7500] },
-  { id: 'high_male_low_female', min: 160, max: 210, band: [5500, 8500] },
-  { id: 'mid_female', min: 210, max: 260, band: [6500, 9500] },
-  { id: 'high_female_child', min: 260, max: 350, band: [7500, 10500] },
-  { id: 'uncertain', min: 0, max: 0, band: [5000, 8000] }
-]
+const SCRIPTS_DIR    = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
+const DE_ESSER_SCRIPT = path.join(SCRIPTS_DIR, 'de_esser.py')
 
 // ── Main API ────────────────────────────────────────────────────────────────
 
 /**
  * Analyze sibilance and conditionally apply de-essing.
  *
- * @param {string} inputPath   - 32-bit float WAV
- * @param {string} outputPath  - Output WAV path
+ * Thin wrapper around server/scripts/de_esser.py. The Python side handles
+ * detection, gain-curve generation, and split-band processing; this function
+ * marshals preset config and the cached sibilance event map (when present),
+ * spawns the script, and returns the parsed result.
+ *
+ * @param {string} inputPath        - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath       - Output WAV path
  * @param {string} presetId
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
+ * @param {string|null} eventsJsonPath - On-disk path to a precomputed
+ *   sibilance event map (from analyzeSibilanceEvents / sibilance_suppressor's
+ *   --emit-events). When provided, de_esser.py reuses f0.perFrame and
+ *   f0.median from the map instead of running its own F0 estimator.
  * @returns {DeEsserResult}
  *
  * @typedef {Object} DeEsserResult
  * @property {boolean} applied
- * @property {number|null} f0Hz            - Estimated fundamental frequency
- * @property {string|null} voiceType       - 'male', 'female', or 'uncertain'
- * @property {number|null} targetFreqHz    - De-esser center frequency
+ * @property {number|null} f0Hz            - Median F0 across the file
+ * @property {string|null} voiceType       - Vocal archetype id
+ * @property {number|null} targetFreqHz    - De-esser detection target frequency
  * @property {number|null} maxReductionDb  - Maximum gain reduction applied
  * @property {number|null} p95EnergyDb     - P95 sibilant energy (relative)
  * @property {number|null} meanEnergyDb    - Mean sibilant energy (relative)
- * @property {string|null} triggerReason   - Why de-esser was/wasn't triggered
+ * @property {string|null} triggerReason
+ * @property {number} [crossoverHz]        - Static split-band crossover used
  * @property {Array<{startSec:number, endSec:number, durationMs:number, avgReductionDb:number}>} treatedEvents
  */
-export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnalysis) {
+export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnalysis, eventsJsonPath = null) {
   const preset = PRESETS[presetId]
   if (!preset) throw new Error(`Unknown preset: ${presetId}`)
 
   const deEsserConfig = preset.deEsser
-  const { channels, sampleRate } = await readWavAllChannels(inputPath)
 
-  // Use channel 0 for analysis (same as frameAnalysis and EQ)
-  const samples = channels[0]
-
-  // --- Step 1: Estimate F0 from voiced frames ---
-  const voicedFrames = collectVoicedFrames(samples, frameAnalysis)
-  if (voicedFrames.length < 5) {
+  // Skip the spawn entirely when the preset disables the de-esser. Mirrors
+  // the legacy JS path's noResult shape and avoids touching the WAV.
+  if (!deEsserConfig
+      || deEsserConfig.sensitivity === 'none'
+      || !(deEsserConfig.maxReduction > 0)) {
     await copyThrough(inputPath, outputPath)
-    return noResult('Insufficient voiced frames for analysis')
+    return noResult("Sensitivity 'none' or maxReduction <= 0")
   }
 
-  const f0 = estimateF0(voicedFrames, sampleRate)
-  const voiceType = classifyVoiceExpanded(f0)
-  const globalSibilantBand = getSibilantBandExpanded(voiceType)
+  const crossoverHz = deEsserConfig.crossoverHz ?? 4000
 
-  // --- Step 2: Identify fricative events and measure sibilant energy ---
-  const sibilanceMetrics = analyzeSibilance(samples, frameAnalysis, sampleRate)
+  console.log(
+    `[DeEsser] Starting: preset=${presetId} ` +
+    `trigger=${deEsserConfig.trigger}dB ` +
+    `maxReduction=${deEsserConfig.maxReduction}dB ` +
+    `crossover=${crossoverHz}Hz ` +
+    `sensitivity=${deEsserConfig.sensitivity} | input=${inputPath}`,
+  )
+  const startTime = Date.now()
 
-  if (sibilanceMetrics.fricativeCount < 3) {
-    await copyThrough(inputPath, outputPath)
-    return {
-      applied: false,
-      f0Hz: f0,
-      voiceType,
-      targetFreqHz: null,
-      maxReductionDb: null,
-      p95EnergyDb: sibilanceMetrics.p95EnergyDb,
-      meanEnergyDb: sibilanceMetrics.meanEnergyDb,
-      triggerReason: 'Too few fricative events detected',
-      treatedEvents: [],
-    }
+  const args = [
+    DE_ESSER_SCRIPT,
+    '--input',         inputPath,
+    '--output',        outputPath,
+    '--preset',        presetId,
+    '--trigger',       String(deEsserConfig.trigger),
+    '--max-reduction', String(deEsserConfig.maxReduction),
+    '--sensitivity',   deEsserConfig.sensitivity,
+    '--crossover-hz',  String(crossoverHz),
+  ]
+
+  let vadMaskPath = null
+  if (frameAnalysis?.frames?.length) {
+    vadMaskPath = tempPath('.json')
+    await writeFile(vadMaskPath, JSON.stringify(frameAnalysis.frames))
+    args.push('--vad-mask-json', vadMaskPath)
   }
 
-  // --- Step 3: Evaluate trigger condition ---
-  const triggerThreshold = deEsserConfig.trigger  // dB above mean
-  const delta = sibilanceMetrics.p95EnergyDb - sibilanceMetrics.meanEnergyDb
-
-  if (delta <= triggerThreshold) {
-    await copyThrough(inputPath, outputPath)
-    return {
-      applied: false,
-      f0Hz: f0,
-      voiceType,
-      targetFreqHz: sibilanceMetrics.targetFreqHz,
-      maxReductionDb: null,
-      p95EnergyDb: sibilanceMetrics.p95EnergyDb,
-      meanEnergyDb: sibilanceMetrics.meanEnergyDb,
-      triggerReason: `P95-mean delta ${round2(delta)} dB <= trigger ${triggerThreshold} dB`,
-      treatedEvents: [],
-    }
+  if (eventsJsonPath) {
+    args.push('--events-json', eventsJsonPath)
+    console.log(`[DeEsser] Reusing sibilance event map: ${eventsJsonPath}`)
   }
 
-  // --- Step 4: Apply frequency-selective compression ---
-  const targetFreq = sibilanceMetrics.targetFreqHz
-  const maxReduction = deEsserConfig.maxReduction
-
-  // De-esser threshold: mean sibilant energy + offset (spec §4b)
-  // For standard sensitivity: mean + 4 dB, for high sensitivity: mean + 3 dB
-  const thresholdOffset = deEsserConfig.sensitivity === 'high' ? 3 : 4
-
-  // Process each channel using the gain curve derived from channel 0
-  const deEsserParams = {
-    targetFreqCurve: sibilanceMetrics.targetFreqCurve,
-    targetFreq,
-    bandwidth: globalSibilantBand[1] - globalSibilantBand[0],
-    maxReductionDb: maxReduction,
-    thresholdOffsetDb: thresholdOffset,
-    attackMs: 2,
-    releaseMs: 50,
+  let result
+  try {
+    result = await runDeEsserScript(args)
+  } finally {
+    if (vadMaskPath) await rm(vadMaskPath, { force: true })
   }
 
-  // Build gain curve from channel 0 analysis
-  const { gainCurve, maxGainReductionDb, treatedEvents } = buildDeEsserGainCurve(channels[0], sampleRate, deEsserParams)
+  const durationMs = Date.now() - startTime
+  console.log(
+    `[DeEsser] Done in ${durationMs}ms: applied=${result.applied} ` +
+    `voice=${result.voiceType ?? 'n/a'} ` +
+    `f0=${result.f0Hz ?? 'n/a'}Hz ` +
+    `maxRed=${result.maxReductionDb ?? 'n/a'}dB ` +
+    `crossover=${result.crossoverHz ?? 'n/a'}Hz ` +
+    `events=${result.treatedEvents?.length ?? 0}`,
+  )
 
-  // Apply gain curve to all channels
-  const processedChannels = channels.map(ch => applyGainCurve(ch, { gainCurve }))
-
-  await writeWavChannels(processedChannels, sampleRate, outputPath)
-
-  return {
-    applied: true,
-    f0Hz: f0,
-    voiceType,
-    targetFreqHz: targetFreq,
-    maxReductionDb: round2(maxGainReductionDb),
-    p95EnergyDb: sibilanceMetrics.p95EnergyDb,
-    meanEnergyDb: sibilanceMetrics.meanEnergyDb,
-    triggerReason: `P95-mean delta ${round2(delta)} dB > trigger ${triggerThreshold} dB`,
-    treatedEvents,
-  }
+  return result
 }
 
-// ── F0 Estimation ───────────────────────────────────────────────────────────
+// ── Python subprocess helpers ───────────────────────────────────────────────
 
 /**
- * Estimate fundamental frequency via autocorrelation on voiced frames.
- * Returns median F0 across analyzed frames.
+ * Spawn de_esser.py and parse its JSON_RESULT: stdout line. Mirrors the
+ * runResonanceScript / runSibilanceScript pattern in enhancement.js — the
+ * Python script streams progress lines on stdout and emits a single
+ * JSON_RESULT: line at the end with the result payload.
  */
-function estimateF0(voicedFrames, sampleRate) {
-  const f0Estimates = []
-
-  // Analyze a subset of voiced frames (every 4th for speed)
-  const step = Math.max(1, Math.floor(voicedFrames.length / 30))
-  for (let i = 0; i < voicedFrames.length; i += step) {
-    const frame = voicedFrames[i]
-    const f0 = autocorrelationF0(frame, sampleRate)
-    if (f0 !== null) f0Estimates.push(f0)
-  }
-
-  if (f0Estimates.length === 0) return null
-
-  // Return median
-  f0Estimates.sort((a, b) => a - b)
-  return f0Estimates[Math.floor(f0Estimates.length / 2)]
-}
-
-/**
- * Autocorrelation-based F0 detection for a single frame.
- * Searches for the first significant peak in the autocorrelation function
- * within the expected F0 range (60–300 Hz).
- */
-function autocorrelationF0(frame, sampleRate) {
-  const n = frame.length
-  const minLag = Math.floor(sampleRate / 300)  // 300 Hz upper limit
-  const maxLag = Math.floor(sampleRate / 60)   // 60 Hz lower limit
-
-  // Compute autocorrelation for the lag range
-  let maxCorr = 0
-  let bestLag = 0
-
-  // Normalize by the zero-lag autocorrelation
-  let zeroLagCorr = 0
-  for (let i = 0; i < n; i++) zeroLagCorr += frame[i] * frame[i]
-  if (zeroLagCorr < 1e-10) return null
-
-  for (let lag = minLag; lag <= maxLag && lag < n; lag++) {
-    let corr = 0
-    for (let i = 0; i < n - lag; i++) {
-      corr += frame[i] * frame[i + lag]
-    }
-    corr /= zeroLagCorr
-
-    if (corr > maxCorr) {
-      maxCorr = corr
-      bestLag = lag
-    }
-  }
-
-  // Require a minimum correlation strength to accept the F0
-  if (maxCorr < 0.3 || bestLag === 0) return null
-
-  return sampleRate / bestLag
-}
-
-/**
- * Classify voice type based on estimated F0 into expanded archetypes.
- */
-function classifyVoiceExpanded(f0) {
-  if (f0 === null) return 'uncertain'
-  for (const arch of VOCAL_ARCHETYPES) {
-    if (arch.id !== 'uncertain' && f0 >= arch.min && f0 <= arch.max) {
-      return arch.id;
-    }
-  }
-  // Fallbacks if out of bounds
-  if (f0 < 60) return 'deep_male';
-  if (f0 > 350) return 'high_female_child';
-  return 'uncertain';
-}
-
-function getSibilantBandExpanded(voiceType) {
-  const arch = VOCAL_ARCHETYPES.find(a => a.id === voiceType);
-  return arch ? arch.band : VOCAL_ARCHETYPES.find(a => a.id === 'uncertain').band;
-}
-
-// ── Sibilance Analysis ──────────────────────────────────────────────────────
-
-/**
- * Analyze sibilant energy across all frames. Identifies fricative events
- * and computes the P95 energy and target frequency curve dynamically.
- */
-function analyzeSibilance(samples, frameAnalysis, sampleRate) {
-  const frameSize = FFT_SIZE
-
-  const sibilantEnergies = []
-  const fricativeEvents = []
-
-  const targetFreqCurve = new Float32Array(samples.length)
-
-  const binFreqRes = sampleRate / frameSize
-  const midBinLo = Math.ceil(1000 / binFreqRes)
-  const midBinHi = Math.ceil(3000 / binFreqRes)
-
-  let recentF0s = []
-  let currentSibilantBand = VOCAL_ARCHETYPES.find(a => a.id === 'uncertain').band;
-
-  for (const frameInfo of frameAnalysis.frames) {
-    const start = frameInfo.offsetSamples
-    const end = Math.min(start + frameInfo.lengthSamples, samples.length)
-
-    if (frameInfo.isSilence || start + frameSize > samples.length) {
-      const defaultFreq = (currentSibilantBand[0] + currentSibilantBand[1]) / 2;
-      for (let i = start; i < end; i++) targetFreqCurve[i] = defaultFreq;
-      continue;
-    }
-
-    const frame = samples.slice(start, start + frameSize)
-
-    // Dynamic F0 estimation (every 3rd voiced frame to save CPU)
-    if (sibilantEnergies.length % 3 === 0) {
-      const f0 = autocorrelationF0(frame, sampleRate);
-      if (f0 !== null) {
-        recentF0s.push(f0);
-        if (recentF0s.length > 10) recentF0s.shift(); // ~1 sec rolling window
-      }
-    }
-
-    if (recentF0s.length > 0) {
-      const sorted = [...recentF0s].sort((a, b) => a - b);
-      const medianF0 = sorted[Math.floor(sorted.length / 2)];
-      const voiceType = classifyVoiceExpanded(medianF0);
-      currentSibilantBand = getSibilantBandExpanded(voiceType);
-    }
-
-    const sibilantBinLo = Math.floor(currentSibilantBand[0] / binFreqRes)
-    const sibilantBinHi = Math.ceil(currentSibilantBand[1] / binFreqRes)
-
-    Meyda.bufferSize = frameSize
-    const features = Meyda.extract(['powerSpectrum'], frame, {
-      sampleRate,
-      bufferSize: frameSize,
+function runDeEsserScript(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(DE_ESSER_PYTHON, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        OMP_NUM_THREADS:   NUM_THREADS,
+        MKL_NUM_THREADS:   NUM_THREADS,
+        TORCH_NUM_THREADS: NUM_THREADS,
+      },
     })
 
-    let frameTargetFreq = (currentSibilantBand[0] + currentSibilantBand[1]) / 2;
+    let stdout = ''
+    let stderr = ''
+    let stdoutBuffer = ''
 
-    if (features && features.powerSpectrum) {
-      const ps = features.powerSpectrum
-      // Sibilant band energy
-      let sibilantEnergy = 0
-      let sibilantBinCount = 0
-      for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
-        sibilantEnergy += ps[b]
-        sibilantBinCount++
-      }
-      const avgSibilantEnergy = sibilantBinCount > 0 ? sibilantEnergy / sibilantBinCount : 0
-      const sibilantDb = avgSibilantEnergy > 0 ? 10 * Math.log10(avgSibilantEnergy) : -120
-
-      sibilantEnergies.push(sibilantDb)
-
-      // Mid-band reference energy
-      let midEnergy = 0
-      let midBinCount = 0
-      for (let b = midBinLo; b <= midBinHi && b < ps.length; b++) {
-        midEnergy += ps[b]
-        midBinCount++
-      }
-      const avgMidEnergy = midBinCount > 0 ? midEnergy / midBinCount : 0
-      const midDb = avgMidEnergy > 0 ? 10 * Math.log10(avgMidEnergy) : -120
-
-      // Within-band spectral flatness
-      let logSum = 0
-      let linSum = 0
-      let validBins = 0
-      for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
-        if (ps[b] > 0) {
-          logSum += Math.log(ps[b])
-          linSum += ps[b]
-          validBins++
+    proc.stdout.on('data', chunk => {
+      const text = chunk.toString()
+      stdout += text
+      stdoutBuffer += text
+      const lines = stdoutBuffer.split('\n')
+      stdoutBuffer = lines.pop()
+      for (const line of lines) {
+        if (line.trim() && !line.startsWith('JSON_RESULT:')) {
+          console.log(`[DeEsser] ${line}`)
         }
       }
-      const bandFlatness = validBins > 0 && linSum > 0
-        ? Math.exp(logSum / validBins) / (linSum / validBins)
-        : 0
-
-      if (sibilantDb - midDb > 8 && bandFlatness > 0.1) {
-        let weightedSum = 0
-        let totalWeight = 0
-        for (let b = sibilantBinLo; b <= sibilantBinHi && b < ps.length; b++) {
-          const freq = b * binFreqRes
-          weightedSum += freq * ps[b]
-          totalWeight += ps[b]
-        }
-        const centroid = totalWeight > 0
-          ? weightedSum / totalWeight
-          : (currentSibilantBand[0] + currentSibilantBand[1]) / 2
-
-        frameTargetFreq = centroid;
-        fricativeEvents.push({ energy: sibilantDb, centroid })
-      }
-    }
-
-    for (let i = start; i < end; i++) targetFreqCurve[i] = frameTargetFreq;
-  }
-
-  // Handle remaining samples (if any)
-  const lastFrame = frameAnalysis.frames[frameAnalysis.frames.length - 1];
-  if (lastFrame) {
-    const end = Math.min(lastFrame.offsetSamples + lastFrame.lengthSamples, samples.length);
-    const finalFreq = targetFreqCurve[Math.max(0, end - 1)] || 6500;
-    for (let i = end; i < samples.length; i++) targetFreqCurve[i] = finalFreq;
-  } else {
-    // If no frames at all, just fill with default
-    const finalFreq = 6500;
-    for (let i = 0; i < samples.length; i++) targetFreqCurve[i] = finalFreq;
-  }
-
-  if (sibilantEnergies.length === 0) {
-    return { p95EnergyDb: -120, meanEnergyDb: -120, targetFreqHz: null, fricativeCount: 0, targetFreqCurve }
-  }
-
-  const meanEnergy = sibilantEnergies.reduce((s, v) => s + v, 0) / sibilantEnergies.length
-  const sorted = [...sibilantEnergies].sort((a, b) => a - b)
-  const p95Index = Math.floor(sorted.length * 0.95)
-  const p95Energy = sorted[Math.min(p95Index, sorted.length - 1)]
-
-  let targetFreq = 6500
-  if (fricativeEvents.length > 0) {
-    const feSorted = [...fricativeEvents].sort((a, b) => b.energy - a.energy)
-    const top5pct = feSorted.slice(0, Math.max(1, Math.ceil(feSorted.length * 0.05)))
-    targetFreq = top5pct.reduce((s, e) => s + e.centroid, 0) / top5pct.length
-  }
-
-  return {
-    p95EnergyDb: round2(p95Energy),
-    meanEnergyDb: round2(meanEnergy),
-    targetFreqHz: Math.round(targetFreq),
-    fricativeCount: fricativeEvents.length,
-    targetFreqCurve
-  }
-}
-
-// ── De-esser DSP ────────────────────────────────────────────────────────────
-
-/**
- * Build a per-sample sibilant gain reduction curve from a mono analysis channel.
- * Uses an optimized Semi-Dynamic Biquad that quantizes filter updates to >100Hz
- * shifts and crossfades to prevent discontinuity clicks.
- *
- * @returns {{ gainCurve: Float32Array, maxGainReductionDb: number, treatedEvents: Array }}
- */
-function buildDeEsserGainCurve(samples, sampleRate, params) {
-  const {
-    targetFreqCurve,
-    targetFreq,
-    bandwidth,
-    maxReductionDb,
-    thresholdOffsetDb,
-    attackMs,
-    releaseMs,
-  } = params
-
-  const n = samples.length
-
-  // Extract sibilant component via dynamic biquad bandpass
-  const sibilant = new Float32Array(n)
-
-  let currentTargetFreq = targetFreqCurve ? targetFreqCurve[0] : targetFreq;
-  let Q = currentTargetFreq / Math.max(bandwidth, 100);
-  let bp = designBandpass(currentTargetFreq, Math.max(Q, 0.5), sampleRate);
-  let bpState = { x1: 0, x2: 0, y1: 0, y2: 0 };
-
-  let isCrossfading = false;
-  let crossfadeTimer = 0;
-  const CROSSFADE_SAMPLES = Math.floor(sampleRate * 0.005); // 5ms crossfade
-  let nextBp = null;
-  let nextBpState = null;
-
-  for (let i = 0; i < n; i++) {
-    const desiredFreq = targetFreqCurve ? targetFreqCurve[i] : targetFreq;
-
-    // Recalculate filter only if target shifts by > 100 Hz
-    if (!isCrossfading && Math.abs(desiredFreq - currentTargetFreq) > 100) {
-      currentTargetFreq = desiredFreq;
-      Q = currentTargetFreq / Math.max(bandwidth, 100);
-      nextBp = designBandpass(currentTargetFreq, Math.max(Q, 0.5), sampleRate);
-      nextBpState = { x1: 0, x2: 0, y1: 0, y2: 0 };
-      isCrossfading = true;
-      crossfadeTimer = 0;
-    }
-
-    if (isCrossfading) {
-      const s1 = applyBiquad(bp, samples[i], bpState);
-      const s2 = applyBiquad(nextBp, samples[i], nextBpState);
-
-      const fadeRatio = crossfadeTimer / CROSSFADE_SAMPLES;
-      sibilant[i] = s1 * (1 - fadeRatio) + s2 * fadeRatio;
-
-      crossfadeTimer++;
-      if (crossfadeTimer >= CROSSFADE_SAMPLES) {
-        isCrossfading = false;
-        bp = nextBp;
-        bpState = nextBpState;
-      }
-    } else {
-      sibilant[i] = applyBiquad(bp, samples[i], bpState);
-    }
-  }
-
-  // Derive threshold from the bandpass-filtered signal's RMS so it's on the
-  // same amplitude scale as the envelope follower below. Meyda powerSpectrum
-  // values are unnormalized squared FFT magnitudes and cannot be used directly
-  // as an amplitude reference.
-  let sumSq = 0
-  for (let i = 0; i < n; i++) sumSq += sibilant[i] * sibilant[i]
-  const rmsLin = Math.sqrt(sumSq / n) || 1e-10
-  const thresholdLin = rmsLin * Math.pow(10, thresholdOffsetDb / 20)
-
-  // Envelope follower on sibilant, gain computation
-  const envCoeff = Math.exp(-1 / (sampleRate * 2.0 / 1000)) // 2ms lowpass on power
-  const attackCoeff  = Math.exp(-1 / (sampleRate * attackMs / 1000))
-  const releaseCoeff = Math.exp(-1 / (sampleRate * releaseMs / 1000))
-  const maxReductionLin = Math.pow(10, -maxReductionDb / 20)
-
-  // gainCurve[i] is the broadband gain multiplier at sample i:
-  //   1.0 = no reduction, maxReductionLin = full reduction
-  const gainCurve = new Float32Array(n).fill(1.0)
-  let powerEnv = 0
-  let envelope = 0
-  let maxGainReductionDb = 0
-
-  const treatedEvents = []
-  let eventStart = -1
-  let eventAccumDb = 0
-  let eventSampleCount = 0
-
-  for (let i = 0; i < n; i++) {
-    const s = sibilant[i]
-    powerEnv = envCoeff * powerEnv + (1 - envCoeff) * (s * s)
-    const rmsSibilant = Math.sqrt(powerEnv)
-
-    if (rmsSibilant > envelope) {
-      envelope = attackCoeff * envelope + (1 - attackCoeff) * rmsSibilant
-    } else {
-      envelope = releaseCoeff * envelope + (1 - releaseCoeff) * rmsSibilant
-    }
-
-    let gain = 1.0
-    let reductionDb = 0
-    if (envelope > thresholdLin && thresholdLin > 0) {
-      const overDb = 20 * Math.log10(envelope / thresholdLin)
-      reductionDb = Math.min(overDb * 0.7, maxReductionDb)
-      gain = Math.max(Math.pow(10, -reductionDb / 20), maxReductionLin)
-      if (reductionDb > maxGainReductionDb) maxGainReductionDb = reductionDb
-    }
-
-    gainCurve[i] = gain
-
-    if (reductionDb > 0) {
-      if (eventStart === -1) eventStart = i
-      eventAccumDb += reductionDb
-      eventSampleCount++
-    } else if (eventStart !== -1) {
-      treatedEvents.push({
-        startSec: round2(eventStart / sampleRate),
-        endSec: round2(i / sampleRate),
-        durationMs: Math.round((i - eventStart) / sampleRate * 1000),
-        avgReductionDb: round2(eventAccumDb / eventSampleCount),
-      })
-      eventStart = -1
-      eventAccumDb = 0
-      eventSampleCount = 0
-    }
-  }
-
-  // Close any event still open at end of file
-  if (eventStart !== -1) {
-    treatedEvents.push({
-      startSec: round2(eventStart / sampleRate),
-      endSec: round2(n / sampleRate),
-      durationMs: Math.round((n - eventStart) / sampleRate * 1000),
-      avgReductionDb: round2(eventAccumDb / eventSampleCount),
     })
-  }
 
-  return { gainCurve, maxGainReductionDb, treatedEvents }
-}
+    proc.stderr.on('data', chunk => {
+      stderr += chunk.toString()
+      if (stderr.length > 4000) stderr = stderr.slice(-4000)
+    })
 
-/**
- * Apply a sibilant-derived gain curve to a channel.
- *
- * Applies broadband time-varying attenuation: output[i] = input[i] * gainCurve[i].
- * Gain reductions are small (≤ max preset reduction, typically 5–8 dB) and brief
- * (only during detected sibilant events), so broadband attenuation is acceptable
- * and avoids phase artifacts from per-channel band-splitting.
- */
-function applyGainCurve(samples, { gainCurve }) {
-  const n = samples.length
-  const output = new Float32Array(n)
-  for (let i = 0; i < n; i++) {
-    // Simple broadband gain (sibilant de-essing via wideband attenuation
-    // is acceptable when gain reduction is < 6 dB and brief in duration)
-    output[i] = samples[i] * gainCurve[i]
-  }
-  return output
-}
+    proc.on('close', (code, signal) => {
+      if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
+        console.log(`[DeEsser] ${stdoutBuffer.trim()}`)
+      }
+      if (stderr.trim() && code === 0) console.log(`[DeEsser] ${stderr.trim()}`)
 
-// ── Biquad Filter ───────────────────────────────────────────────────────────
+      if (code === 0 && signal === null) {
+        const jsonLine = stdout.split('\n').find(l => l.startsWith('JSON_RESULT:'))
+        if (!jsonLine) {
+          reject(new Error('DeEsser: script exited 0 but emitted no JSON_RESULT line'))
+          return
+        }
+        try {
+          resolve(JSON.parse(jsonLine.slice('JSON_RESULT:'.length)))
+        } catch (err) {
+          reject(new Error(`DeEsser: failed to parse JSON_RESULT line: ${err.message}`))
+        }
+      } else {
+        const parts = []
+        if (code   !== null) parts.push(`code ${code}`)
+        if (signal !== null) parts.push(`signal ${signal}`)
+        reject(new Error(`DeEsser exited with ${parts.join(', ')}.\n${stderr.slice(-2000)}`))
+      }
+    })
 
-/**
- * Design a 2nd-order bandpass filter (constant skirt gain, peak at center).
- * Returns coefficients { b0, b1, b2, a1, a2 } (a0 normalized to 1).
- */
-function designBandpass(freq, Q, sampleRate) {
-  const w0 = 2 * Math.PI * freq / sampleRate
-  const alpha = Math.sin(w0) / (2 * Q)
-
-  const b0 = alpha
-  const b1 = 0
-  const b2 = -alpha
-  const a0 = 1 + alpha
-  const a1 = -2 * Math.cos(w0)
-  const a2 = 1 - alpha
-
-  return {
-    b0: b0 / a0,
-    b1: b1 / a0,
-    b2: b2 / a0,
-    a1: a1 / a0,
-    a2: a2 / a0,
-  }
-}
-
-/**
- * Apply a biquad filter to a single sample.
- */
-function applyBiquad(coeffs, x, state) {
-  const y = coeffs.b0 * x + coeffs.b1 * state.x1 + coeffs.b2 * state.x2
-           - coeffs.a1 * state.y1 - coeffs.a2 * state.y2
-
-  state.x2 = state.x1
-  state.x1 = x
-  state.y2 = state.y1
-  state.y1 = y
-
-  return y
+    proc.on('error', err => {
+      reject(new Error(`Failed to spawn DeEsser: ${err.message}`))
+    })
+  })
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function collectVoicedFrames(samples, frameAnalysis) {
-  const frames = []
-
-  for (const frameInfo of frameAnalysis.frames) {
-    if (frameInfo.isSilence) continue
-    const start = frameInfo.offsetSamples
-    const frameSamples = frameInfo.lengthSamples
-    const end = Math.min(start + frameSamples, samples.length)
-    if (end - start < frameSamples * 0.5) continue
-    frames.push(samples.slice(start, end))
-  }
-
-  return frames
-}
-
-
-function round2(n) {
-  return n !== null && n !== undefined ? Math.round(n * 100) / 100 : null
-}
-
 async function copyThrough(inputPath, outputPath) {
-  const { readFile, writeFile } = await import('fs/promises')
   await writeFile(outputPath, await readFile(inputPath))
 }
 
 function noResult(reason) {
   return {
-    applied: false,
-    f0Hz: null,
-    voiceType: null,
-    targetFreqHz: null,
+    applied:        false,
+    f0Hz:           null,
+    voiceType:      null,
+    targetFreqHz:   null,
     maxReductionDb: null,
-    p95EnergyDb: null,
-    meanEnergyDb: null,
-    triggerReason: reason,
-    treatedEvents: [],
+    p95EnergyDb:    null,
+    meanEnergyDb:   null,
+    triggerReason:  reason,
+    treatedEvents:  [],
   }
 }
-
