@@ -19,6 +19,7 @@ import os                from 'os'
 import path              from 'path'
 import { tempPath }      from '../lib/ffmpeg.js'
 import { spawnPython, spawnPythonCapture, DEVICE, PYTHON as SHARED_PYTHON } from './spawnPython.js'
+import { PRESETS }       from '../presets.js'
 
 // Resonance suppressor allows its own Python override before falling back to
 // the shared SEPARATION_PYTHON, matching the original RESONANCE_PYTHON cascade.
@@ -207,6 +208,22 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
 // ── Sibilance Suppressor ──────────────────────────────────────────────────────
 
 /**
+ * Write the preset's sparse `sibilanceSuppressor` overrides to a temp JSON
+ * file for the Python --params-json arg. Returns the file path, or null when
+ * the preset has no overrides (in which case the script uses DEFAULT_PARAMS).
+ *
+ * Exported because analyzeSibilanceEvents() reuses the same plumbing — both
+ * sides must see identical params for the cached event map to stay valid.
+ */
+export async function writeSibilanceParamsFile(presetId) {
+  const overrides = PRESETS[presetId]?.sibilanceSuppressor
+  if (!overrides || Object.keys(overrides).length === 0) return null
+  const paramsPath = tempPath('.json')
+  await writeFile(paramsPath, JSON.stringify(overrides))
+  return paramsPath
+}
+
+/**
  * Stage 4 — Sibilance Suppressor.
  * F0-derived sibilant event detection with EMA-based spectral gain reduction.
  * Operates on voiced frames only (VAD mask).
@@ -235,8 +252,12 @@ export async function applySibilanceSuppression(inputPath, outputPath, presetId,
     SIBILANCE_SCRIPT,
     '--input',  inputPath,
     '--output', outputPath,
-    '--preset', presetId,
   ]
+
+  // Sparse per-preset overrides from src/audio/presets.js. Anything not
+  // present in this block inherits from DEFAULT_PARAMS in the Python script.
+  const paramsPath = await writeSibilanceParamsFile(presetId)
+  if (paramsPath) args.push('--params-json', paramsPath)
 
   if (f0 != null) args.push('--f0', String(f0))
 
@@ -260,6 +281,7 @@ export async function applySibilanceSuppression(inputPath, outputPath, presetId,
     result = await runSibilanceScript(args)
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
+    if (paramsPath)  await rm(paramsPath,  { force: true })
   }
 
   const durationMs = Date.now() - startTime

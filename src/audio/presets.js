@@ -106,7 +106,7 @@ export const PRESETS = {
     noiseFloorTarget: -60,
     noiseModel: 'df3',
     eqProfile: 'audiobook',
-    airBoost: { gainDb: 8 },
+    airBoost: { gainDb: 5 },
     bweModel: 'ap_bwe',
     bwe: { enabled: false, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
     deEsser: {
@@ -196,6 +196,15 @@ export const PRESETS = {
     },
     // Slightly more aggressive — mouth clicks are a human review concern for ACX
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
+    // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
+    // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
+    // Conservative ACX tuning: lower depth and
+    // ceiling, slower release to preserve narration intelligibility.
+    sibilanceSuppressor: {
+      depth: 0.6,
+      release_ms:           80.0,
+      max_reduction_db:     8.0,
+    },
   },
 
   podcast_ready: {
@@ -282,6 +291,13 @@ export const PRESETS = {
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
     clickRemover: { thresholdSigma: 3.5, maxClickMs: 15 },
+    // Stage 4 — Sibilance Suppressor. Slightly deeper reduction with a faster
+    // attack matches the punchier, more processed podcast character; everything
+    // else inherits from DEFAULT_PARAMS.
+    sibilanceSuppressor: {
+      depth:     0.7,
+      attack_ms: 4.0,
+    },
   },
 
   voice_ready: {
@@ -357,6 +373,18 @@ export const PRESETS = {
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
     // Same rationale as ACX — voice actors also benefit from clean transients
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
+    // Stage 4 — Sibilance Suppressor. Broadcast-neutral tuning sits between
+    // ACX and podcast: stricter detection than the defaults, lower ceiling
+    // than ACX since voice-over often sits under music beds where deep cuts
+    // become audible.
+    sibilanceSuppressor: {
+      p95_trigger_db:       8.0,
+      p95_threshold_db:     4.0,
+      broadband_trigger_db: 11.0,
+      selectivity:          5.5,
+      release_ms:           70.0,
+      max_reduction_db:     8.0,
+    },
   },
 
   general_clean: {
@@ -430,6 +458,19 @@ export const PRESETS = {
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
     // Conservative — unknown source material
     clickRemover: { thresholdSigma: 3.5, maxClickMs: 10 },
+    // Stage 4 — Sibilance Suppressor. Pragmatic assertive: lower broadband
+    // trigger and selectivity catch more events, deeper reduction with a
+    // narrower spreading kernel (sharpness 0.2) for surgical cuts on unknown
+    // source material.
+    sibilanceSuppressor: {
+      broadband_trigger_db: 9.0,
+      depth:                0.8,
+      selectivity:          4.0,
+      attack_ms:            4.0,
+      release_ms:           50.0,
+      max_reduction_db:     12.0,
+      sharpness:            0.2,
+    },
   },
 
   noise_eraser: {

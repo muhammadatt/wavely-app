@@ -40,10 +40,10 @@ from scipy.io import wavfile
 from scipy.signal import get_window
 
 from sibilance_suppressor import (
-    PRESET_DEFAULTS,
     SibilanceDetector,
     build_events_map,
     estimate_f0,
+    resolve_params,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 def analyze_sibilance_events(
     audio: np.ndarray,
     sample_rate: int,
-    preset: str = "acx_audiobook",
+    params: dict = None,
     vad_voiced_mask: np.ndarray = None,
     f0: float = None,
     n_fft: int = 2048,
@@ -64,9 +64,10 @@ def analyze_sibilance_events(
     Args:
         audio:           Mono float32 audio at sample_rate.
         sample_rate:     Sample rate in Hz (44100 in the IP pipeline).
-        preset:          Preset id. Falls back to acx_audiobook for unknown
-                         presets (including noise_eraser, which uses the
-                         analyzer's detection thresholds for cache parity).
+        params:          Sparse override dict overlaid on DEFAULT_PARAMS. Pass
+                         None or {} to use defaults unmodified. Must match the
+                         params used by the downstream suppressor for cache
+                         parity.
         vad_voiced_mask: Optional boolean array (same length as audio).
                          Frames with any voiced sample are classified voiced.
         f0:              Optional seed F0; estimated from audio if omitted.
@@ -79,8 +80,9 @@ def analyze_sibilance_events(
     if audio.ndim != 1:
         raise ValueError("analyze_sibilance_events expects mono input (1D array).")
 
-    params   = PRESET_DEFAULTS.get(preset, PRESET_DEFAULTS["acx_audiobook"]).copy()
-    detector = SibilanceDetector(sample_rate, n_fft, hop_length, params, f0=f0)
+    detector = SibilanceDetector(
+        sample_rate, n_fft, hop_length, resolve_params(params), f0=f0,
+    )
 
     if detector.f0 is None:
         detector.seed_f0(estimate_f0(audio, sample_rate))
@@ -145,13 +147,22 @@ if __name__ == "__main__":
     parser.add_argument("--input",         required=True)
     parser.add_argument("--output",        required=True,
                         help="Output JSON path for the event map.")
-    parser.add_argument("--preset",        default="acx_audiobook")
+    parser.add_argument("--params-json",   default=None,
+                        help="Sparse parameter overrides (JSON). Must match "
+                             "the params passed to the downstream suppressor "
+                             "for cache parity. Sourced from the preset's "
+                             "sibilanceSuppressor block in src/audio/presets.js.")
     parser.add_argument("--vad-mask-json", default=None)
     parser.add_argument("--f0",            type=float, default=None)
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
     audio     = audio.astype(np.float32)
+
+    params = None
+    if args.params_json:
+        with open(args.params_json) as fh:
+            params = json.load(fh)
 
     vad_voiced_mask = None
     if args.vad_mask_json:
@@ -164,7 +175,7 @@ if __name__ == "__main__":
                 e = s + frame["lengthSamples"]
                 vad_voiced_mask[s:min(e, len(audio))] = True
 
-    events = analyze_sibilance_events(audio, sr, args.preset, vad_voiced_mask, args.f0)
+    events = analyze_sibilance_events(audio, sr, params, vad_voiced_mask, args.f0)
 
     with open(args.output, "w") as fh:
         json.dump(events, fh)

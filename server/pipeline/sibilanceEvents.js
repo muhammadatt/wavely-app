@@ -20,6 +20,7 @@ import { readFile, writeFile, rm } from 'fs/promises'
 import os                from 'os'
 import path              from 'path'
 import { PYTHON as SHARED_PYTHON } from './spawnPython.js'
+import { writeSibilanceParamsFile } from './enhancement.js'
 
 const RESONANCE_PYTHON = process.env.RESONANCE_PYTHON ?? SHARED_PYTHON
 const NUM_THREADS      = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
@@ -52,8 +53,13 @@ export async function analyzeSibilanceEvents(ctx) {
     ANALYZER_SCRIPT,
     '--input',  ctx.currentPath,
     '--output', eventsPath,
-    '--preset', ctx.presetId,
   ]
+
+  // Must match the params the suppressor will see, otherwise the cached
+  // sibilantFrameIndices won't align with the suppressor's reduction step.
+  const paramsPath = await writeSibilanceParamsFile(ctx.presetId)
+  if (paramsPath) args.push('--params-json', paramsPath)
+
   if (f0 != null) args.push('--f0', String(f0))
 
   let vadMaskPath = null
@@ -70,6 +76,7 @@ export async function analyzeSibilanceEvents(ctx) {
     await runAnalyzerScript(args)
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
+    if (paramsPath)  await rm(paramsPath,  { force: true })
   }
 
   const events = JSON.parse(await readFile(eventsPath, 'utf8'))

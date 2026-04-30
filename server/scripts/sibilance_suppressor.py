@@ -124,93 +124,46 @@ F0_MASK_RESHIFT_THRESHOLD_HZ      = 20.0
 
 
 # ---------------------------------------------------------------------------
-# Preset parameters
+# Default parameters
 # ---------------------------------------------------------------------------
+# Single source of truth for every tunable. Per-preset overrides live in
+# src/audio/presets.js as sparse `sibilanceSuppressor` blocks and are passed
+# in via --params-json. Anything not specified there inherits from this dict.
 
-PRESET_DEFAULTS = {
-    "acx_audiobook": {
-        # --- Detection (de-esser logic) ---
-        # F0-derived sibilant band: F0*8 to min(F0*32, 12000 Hz)
-        # P95 trigger: sibilant event fires when P95 energy in sibilant band
-        # exceeds mean sibilant-band energy by this margin.
-        "p95_trigger_db": 8.0,      # ACX: conservative -- preserve intelligibility.
-        "p95_threshold_db": 4.0,    # Gain reduction threshold above mean energy.
-        "min_flatness": 0.1,        # Wiener entropy gate on Condition 1 (P95 spike).
-                                    # Sibilant band must be at least this flat
-                                    # (geometric/arithmetic mean ratio) to count
-                                    # as a fricative. Rejects tonal false
-                                    # positives (vowel harmonics, formant peaks).
-                                    # Higher = stricter (fewer false positives,
-                                    # potentially more false negatives).
-        "broadband_trigger_db": 12.0, # Condition 2 threshold: mean sibilant band energy
-                                    # above long-term reference mean. Higher than
-                                    # selectivity because mean-band comparison compresses
-                                    # contrast vs per-bin comparison. Calibrated to
-                                    # 17_airBoost.wav: mean contrast +20 dB, min +11.6 dB;
-                                    # 12 dB clears voiced EMA noise with >5 dB margin.
+DEFAULT_PARAMS = {
+    # --- Detection (de-esser logic) ---
+    # F0-derived sibilant band: F0*8 (or 3 kHz, whichever is greater) to 12 kHz.
+    # Condition 1 (P95 spike): sibilant event fires when P95 energy in the
+    # sibilant band exceeds the band mean by p95_trigger_db AND in-band
+    # spectral flatness >= min_flatness.
+    # Condition 2 (broadband elevation): mean sibilant band energy exceeds
+    # the long-term EMA reference mean by broadband_trigger_db.
+    "p95_trigger_db":        6.0,
+    "p95_threshold_db":      3.0,
+    "min_flatness":          0.1,    # Wiener entropy gate. Higher = stricter.
+    "broadband_trigger_db":  10.0,
 
-        # --- Reduction (EMA reference) ---
-        "depth": 0.5,               # Global reduction scale (0.0-1.0).
-        "selectivity": 6.0,         # Per-bin dB above long-term reference before reduction fires.
-                                    # Calibrated: min sibilant contrast +11.6 dB, voiced
-                                    # EMA noise ~2-3 dB -> 6.0 dB gives >5 dB margin.
-        "attack_ms": 5.0,           # Fast onset -- sibilants are transient.
-        "release_ms": 80.0,         # Slower release -- avoids post-sibilant bleed.
-        "max_reduction_db": 10.0,   # Hard ceiling per bin. Conservative for ACX.
-        "ema_time_constant_ms": 300.0, # Long-term reference time constant.
-        "warmup_frames": 25,        # Voiced frames before reduction activates.
-                                    # ~290 ms at hop=512, sr=44100.
+    # --- Reduction (EMA reference) ---
+    "depth":                 0.7,    # Global reduction scale (0.0-1.0).
+    "selectivity":           5.0,    # Per-bin dB threshold above long-term reference 
+    "attack_ms":             5.0,    # Fast onset -- sibilants are transient.
+    "release_ms":            60.0,   # Slower release -- avoids post-sibilant bleed.
+    "max_reduction_db":      9.0,    # Hard ceiling per bin.
+    "ema_time_constant_ms":  300.0,  # Long-term reference time constant.
+    "warmup_frames":         25,     # Voiced frames before reduction activates (~290 ms at hop=512, sr=44100).
 
-        # --- Sharpness (attenuation curve shape) ---
-        "sharpness": 0.3,           # 0.0 = wide gentle cuts, 1.0 = narrow deep notches.
-        "mode": "soft",
-    },
-    "podcast_ready": {
-        "p95_trigger_db": 6.0,
-        "p95_threshold_db": 3.0,
-        "min_flatness": 0.1,
-        "broadband_trigger_db": 10.0,
-        "depth": 0.7,
-        "selectivity": 5.0,
-        "attack_ms": 4.0,
-        "release_ms": 60.0,
-        "max_reduction_db": 9.0,
-        "ema_time_constant_ms": 300.0,
-        "warmup_frames": 25,
-        "sharpness": 0.3,
-        "mode": "soft",
-    },
-    "voice_ready": {
-        "p95_trigger_db": 8.0,
-        "p95_threshold_db": 4.0,
-        "min_flatness": 0.1,
-        "broadband_trigger_db": 11.0,
-        "depth": 0.6,
-        "selectivity": 5.5,
-        "attack_ms": 5.0,
-        "release_ms": 70.0,
-        "max_reduction_db": 8.0,
-        "ema_time_constant_ms": 300.0,
-        "warmup_frames": 25,
-        "sharpness": 0.3,
-        "mode": "soft",
-    },
-    "general_clean": {
-        "p95_trigger_db": 6.0,
-        "p95_threshold_db": 3.0,
-        "min_flatness": 0.1,
-        "broadband_trigger_db": 9.0,
-        "depth": 0.8,
-        "selectivity": 4.0,
-        "attack_ms": 4.0,
-        "release_ms": 50.0,
-        "max_reduction_db": 12.0,
-        "ema_time_constant_ms": 300.0,
-        "warmup_frames": 25,
-        "sharpness": 0.2,
-        "mode": "soft",
-    },
+    # --- Sharpness (attenuation curve shape) ---
+    "sharpness":             0.3,    # 0.0 = wide gentle cuts, 1.0 = narrow deep notches.
+    "mode":                  "soft", # "soft" = gradual knee; "hard" = linear above threshold.
 }
+
+
+def resolve_params(overrides: dict = None) -> dict:
+    """Merge sparse overrides over DEFAULT_PARAMS. None or empty -> defaults."""
+    params = DEFAULT_PARAMS.copy()
+    if overrides:
+        params.update(overrides)
+    return params
 
 
 # ---------------------------------------------------------------------------
@@ -624,17 +577,15 @@ class SibilanceSuppressor:
         sample_rate: int = 44100,
         n_fft: int = 2048,
         hop_length: int = 512,
-        preset: str = "acx_audiobook",
+        params: dict = None,
         f0: float = None,
-        **override_params,
     ):
         self.sr         = sample_rate
         self.n_fft      = n_fft
         self.hop_length = hop_length
 
-        params = PRESET_DEFAULTS.get(preset, PRESET_DEFAULTS["acx_audiobook"]).copy()
-        params.update(override_params)
-        self.params = params
+        self.params = resolve_params(params)
+        params = self.params
 
         self.freqs  = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
         self.n_bins = len(self.freqs)
@@ -1026,7 +977,7 @@ class SibilanceSuppressor:
 def apply_sibilance_suppression(
     audio: np.ndarray,
     sample_rate: int,
-    preset: str,
+    params: dict = None,
     vad_voiced_mask: np.ndarray = None,
     f0: float = None,
     events_map: dict = None,
@@ -1040,7 +991,8 @@ def apply_sibilance_suppression(
     Args:
         audio:           Mono float32 audio at sample_rate.
         sample_rate:     Sample rate (44100 in the Instant Polish pipeline).
-        preset:          acx_audiobook | podcast_ready | voice_ready | general_clean
+        params:          Sparse override dict overlaid on DEFAULT_PARAMS. Pass
+                         None or {} to use defaults unmodified.
         vad_voiced_mask: Optional boolean array (same length as audio), True = voiced.
         f0:              Fundamental frequency in Hz. Estimated if not provided.
         events_map:      Precomputed sibilance event map from
@@ -1055,18 +1007,8 @@ def apply_sibilance_suppression(
               sibilant_frames_processed, artifact_risk, band_summary, f0,
               sibilant_band_hz, skipped
     """
-    if preset == "noise_eraser":
-        logger.info("SibilanceSuppressor: skipping for noise_eraser preset.")
-        return {
-            "audio": audio, "skipped": True, "max_reduction_db": 0.0,
-            "mean_reduction_db": 0.0, "sibilant_frames_detected": 0,
-            "sibilant_frames_processed": 0, "artifact_risk": False,
-            "band_summary": [], "f0": f0, "sibilant_band_hz": None,
-            "events_map": None,
-        }
-
     suppressor = SibilanceSuppressor(
-        sample_rate=sample_rate, preset=preset, f0=f0
+        sample_rate=sample_rate, params=params, f0=f0
     )
 
     if events_map is not None:
@@ -1137,7 +1079,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stage 4 -- Sibilance Suppressor")
     parser.add_argument("--input",         required=True)
     parser.add_argument("--output",        required=True)
-    parser.add_argument("--preset",        default="acx_audiobook")
+    parser.add_argument("--params-json",   default=None,
+                        help="Sparse parameter overrides (JSON). Keys missing "
+                             "from the file inherit from DEFAULT_PARAMS. "
+                             "Sourced from the preset's sibilanceSuppressor "
+                             "block in src/audio/presets.js.")
     parser.add_argument("--vad-mask-json", default=None)
     parser.add_argument("--f0",            type=float, default=None)
     parser.add_argument("--events-json",   default=None,
@@ -1156,6 +1102,11 @@ if __name__ == "__main__":
     sr, audio = wavfile.read(args.input)
     audio = audio.astype(np.float32)
 
+    params = None
+    if args.params_json:
+        with open(args.params_json) as fh:
+            params = json.load(fh)
+
     vad_voiced_mask = None
     if args.vad_mask_json:
         with open(args.vad_mask_json) as fh:
@@ -1173,7 +1124,7 @@ if __name__ == "__main__":
             events_map = json.load(fh)
 
     result = apply_sibilance_suppression(
-        audio, sr, args.preset, vad_voiced_mask, args.f0, events_map=events_map
+        audio, sr, params, vad_voiced_mask, args.f0, events_map=events_map
     )
     wavfile.write(args.output, sr, result["audio"])
 

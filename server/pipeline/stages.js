@@ -449,8 +449,8 @@ export async function sibilanceSuppressor(ctx) {
       await readFile(emitPath)
       ctx._sibilanceEvents = { path: emitPath }
     } catch (err) {
-      // Suppressor may have skipped (noise_eraser, n_frames=0) and emitted
-      // nothing -- leave the cache empty so analyzeSibilanceEvents() can
+      // Suppressor may have emitted nothing (e.g. n_frames=0 on very short
+      // clips) -- leave the cache empty so analyzeSibilanceEvents() can
       // still run on demand.
       ctx.log(`[SibilanceSuppressor] No event map emitted: ${err.message}`)
     }
