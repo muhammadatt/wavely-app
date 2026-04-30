@@ -442,10 +442,12 @@ export async function sibilanceSuppressor(ctx) {
 
   // Populate the shared cache from the side-emitted map so subsequent
   // consumers (airBoost, etc.) can hit it without a second STFT pass.
+  // Cache only the emitted file path here; parsing the event payload can be
+  // deferred to consumers that actually need the map contents.
   if (emitPath && !ctx._sibilanceEvents) {
     try {
-      const events = JSON.parse(await readFile(emitPath, 'utf8'))
-      ctx._sibilanceEvents = { events, path: emitPath }
+      await readFile(emitPath)
+      ctx._sibilanceEvents = { path: emitPath }
     } catch (err) {
       // Suppressor may have skipped (noise_eraser, n_frames=0) and emitted
       // nothing -- leave the cache empty so analyzeSibilanceEvents() can
