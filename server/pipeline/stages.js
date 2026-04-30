@@ -41,7 +41,7 @@ import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
-import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression } from './enhancement.js'
+import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -411,6 +411,23 @@ export async function resonanceSuppressor(ctx) {
     artifact_risk: result.artifact_risk ?? false,
   })
 }
+
+// ── Stage: Sibilance Suppressor ───────────────────────────────────────────────
+
+export async function sibilanceSuppressor(ctx) {
+  const outPath = ctx.tmp('.wav')
+  const frames  = ctx.results.metrics?.frames ?? null
+  const f0 = ctx.results.deEss?.f0Hz ?? null
+  const result  = await applySibilanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0)
+  if (result.applied) ctx.currentPath = outPath
+  ctx.results.sibilanceSuppressor = result
+  await logLevel(ctx, 'after sibilance suppressor', ctx.currentPath, {
+    skipped:       result.applied === false,
+    max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
+    artifact_risk: result.artifact_risk ?? false,
+  })
+}
+
 
 // ── Stage: Air Boost (Stage 3b) ───────────────────────────────────────────────
 // Wide high-frequency shelf lift modeled on the Maag EQ4 Air Band (10 kHz
