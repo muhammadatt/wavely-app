@@ -505,7 +505,6 @@ export async function deEss(ctx) {
   ctx.results.deEss = deEssResult
   await logLevel(ctx, 'after de-esser', ctx.currentPath, {
     applied:   deEssResult.applied,
-    voiceType: deEssResult.voiceType        ?? 'n/a',
     f0:        deEssResult.f0Hz        !== null ? `${deEssResult.f0Hz}Hz`           : 'n/a',
     maxRed:    deEssResult.maxReductionDb !== null ? `${deEssResult.maxReductionDb}dB` : 'n/a',
   })

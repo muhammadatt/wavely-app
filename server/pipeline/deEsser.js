@@ -13,14 +13,15 @@
  *   1. F0 per frame — reused from the cached sibilance event map when the
  *      upstream sibilance suppressor stage has produced one; otherwise
  *      estimated internally on voiced frames.
- *   2. Fricative event detection from the per-frame F0 trajectory and the
- *      voice-type-derived sibilant band.
+ *   2. Fricative event detection from the per-frame F0 trajectory and a
+ *      continuous F0 -> sibilant band mapping (~3 kHz wide window whose
+ *      lower edge tracks linearly with F0).
  *   3. Trigger condition (preset sensitivity) on the P95 - mean delta.
  *   4. Dynamic detection bandpass tracks the per-frame target frequency
  *      and feeds an envelope follower / gain-curve generator.
- *   5. Split-band processing: HPF the input at a static crossover (derived
- *      from voice type, clamped to [3500, 5000] Hz), apply the gain curve
- *      to the high band only, and sum with the untouched low band.
+ *   5. Split-band processing: HPF the input at a static crossover (preset
+ *      `crossoverHz`, default 4000 Hz), apply the gain curve to the high
+ *      band only, and sum with the untouched low band.
  */
 
 import { spawn }                  from 'child_process'
@@ -61,7 +62,6 @@ const DE_ESSER_SCRIPT = path.join(SCRIPTS_DIR, 'de_esser.py')
  * @typedef {Object} DeEsserResult
  * @property {boolean} applied
  * @property {number|null} f0Hz            - Median F0 across the file
- * @property {string|null} voiceType       - Vocal archetype id
  * @property {number|null} targetFreqHz    - De-esser detection target frequency
  * @property {number|null} maxReductionDb  - Maximum gain reduction applied
  * @property {number|null} p95EnergyDb     - P95 sibilant energy (relative)
@@ -129,7 +129,6 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
   const durationMs = Date.now() - startTime
   console.log(
     `[DeEsser] Done in ${durationMs}ms: applied=${result.applied} ` +
-    `voice=${result.voiceType ?? 'n/a'} ` +
     `f0=${result.f0Hz ?? 'n/a'}Hz ` +
     `maxRed=${result.maxReductionDb ?? 'n/a'}dB ` +
     `crossover=${result.crossoverHz ?? 'n/a'}Hz ` +
@@ -222,7 +221,6 @@ function noResult(reason) {
   return {
     applied:        false,
     f0Hz:           null,
-    voiceType:      null,
     targetFreqHz:   null,
     maxReductionDb: null,
     p95EnergyDb:    null,

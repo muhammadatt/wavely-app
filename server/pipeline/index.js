@@ -278,7 +278,6 @@ function formatDeEssResult(r) {
   return {
     applied:          r.applied,
     f0_hz:            r.f0Hz,
-    voice_type:       r.voiceType,
     target_freq_hz:   r.targetFreqHz,
     max_reduction_db: r.maxReductionDb,
     p95_energy_db:    r.p95EnergyDb,

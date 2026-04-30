@@ -30,7 +30,7 @@ F0 source priority:
   1. f0.perFrame from --events-json (canonical sibilance event map written by
      sibilance_suppressor.py / analyze_sibilance_events.py). Free reuse, and
      keeps the deEss + sibilanceSuppressor stages locked to the same F0
-     trajectory so they classify voice identically.
+     trajectory so they map to the same sibilant band per frame.
   2. --f0 scalar (file-level median) -- expanded to a constant per-frame array.
   3. Internal estimation (FFT-based autocorrelation per frame) when neither
      of the above is present.
@@ -57,36 +57,31 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Vocal archetypes (mirrors VOCAL_ARCHETYPES in deEsser.js)
+# Sibilant band as a continuous function of F0
 # ---------------------------------------------------------------------------
+#
+# The de-esser's job, distinct from the upstream broadband sibilance
+# suppressor, is to catch the *peaked, voice-specific* portion of fricative
+# energy. Empirically this sits in a ~3 kHz-wide window whose lower edge
+# tracks linearly with F0 (low ~= 3500 + (F0 - 60) * 20 Hz). Earlier revisions
+# bucketed F0 into five discrete archetypes; this produced 1 kHz center jumps
+# at bucket boundaries when F0 estimates jittered. The continuous form gives
+# identical band edges at the prior bucket centers (60/110/160/210/260/310 Hz)
+# and smooth interpolation between them.
 
-VOCAL_ARCHETYPES = [
-    {"id": "deep_male",            "min":  60, "max": 110, "band": (3500,  6500)},
-    {"id": "mid_male",             "min": 110, "max": 160, "band": (4500,  7500)},
-    {"id": "high_male_low_female", "min": 160, "max": 210, "band": (5500,  8500)},
-    {"id": "mid_female",           "min": 210, "max": 260, "band": (6500,  9500)},
-    {"id": "high_female_child",    "min": 260, "max": 350, "band": (7500, 10500)},
-    {"id": "uncertain",            "min":   0, "max":   0, "band": (5000,  8000)},
-]
-UNCERTAIN_BAND = next(a["band"] for a in VOCAL_ARCHETYPES if a["id"] == "uncertain")
-
-
-def classify_voice(f0: Optional[float]) -> str:
-    if f0 is None:
-        return "uncertain"
-    for arch in VOCAL_ARCHETYPES:
-        if arch["id"] != "uncertain" and arch["min"] <= f0 <= arch["max"]:
-            return arch["id"]
-    if f0 < 60:
-        return "deep_male"
-    if f0 > 350:
-        return "high_female_child"
-    return "uncertain"
+UNCERTAIN_BAND = (5000.0, 8000.0)
+SIBILANT_BAND_WIDTH_HZ = 3000.0
+SIBILANT_LOW_MIN_HZ    = 3500.0
+SIBILANT_LOW_MAX_HZ    = 7500.0
 
 
-def sibilant_band_for(voice_type: str):
-    arch = next((a for a in VOCAL_ARCHETYPES if a["id"] == voice_type), None)
-    return arch["band"] if arch else UNCERTAIN_BAND
+def sibilant_band_for_f0(f0: Optional[float]) -> tuple:
+    if f0 is None or not np.isfinite(f0):
+        return UNCERTAIN_BAND
+    low  = SIBILANT_LOW_MIN_HZ + (float(f0) - 60.0) * 20.0
+    low  = max(SIBILANT_LOW_MIN_HZ, min(low, SIBILANT_LOW_MAX_HZ))
+    high = low + SIBILANT_BAND_WIDTH_HZ
+    return (low, high)
 
 
 # ---------------------------------------------------------------------------
@@ -262,10 +257,7 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
 
     for k in range(n_frames):
         f0_k = f0_smooth[k]
-        if np.isnan(f0_k):
-            band = UNCERTAIN_BAND
-        else:
-            band = sibilant_band_for(classify_voice(float(f0_k)))
+        band = sibilant_band_for_f0(None if np.isnan(f0_k) else float(f0_k))
         global_lo = min(global_lo, band[0])
         global_hi = max(global_hi, band[1])
 
@@ -542,8 +534,6 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
                 f0_median = fill
         f0_per_frame = arr
 
-    voice_type = classify_voice(f0_median)
-
     # Voiced-frame count gate (matches JS "Insufficient voiced frames")
     voiced_frames = int((~np.isnan(f0_per_frame)).sum()) if f0_per_frame.size else 0
     if voiced_frames < 5:
@@ -551,7 +541,6 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
             "audio":          channels,
             "applied":        False,
             "f0Hz":           f0_median,
-            "voiceType":      voice_type,
             "targetFreqHz":   None,
             "maxReductionDb": None,
             "p95EnergyDb":    None,
@@ -568,7 +557,6 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
             "audio":          channels,
             "applied":        False,
             "f0Hz":           f0_median,
-            "voiceType":      voice_type,
             "targetFreqHz":   None,
             "maxReductionDb": None,
             "p95EnergyDb":    metrics["p95_db"],
@@ -583,7 +571,6 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
             "audio":          channels,
             "applied":        False,
             "f0Hz":           f0_median,
-            "voiceType":      voice_type,
             "targetFreqHz":   metrics["target_freq_hz"],
             "maxReductionDb": None,
             "p95EnergyDb":    metrics["p95_db"],
@@ -626,7 +613,6 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
         "audio":          out_channels,
         "applied":        True,
         "f0Hz":           f0_median,
-        "voiceType":      voice_type,
         "targetFreqHz":   metrics["target_freq_hz"],
         "maxReductionDb": round(max_red_observed, 2),
         "p95EnergyDb":    metrics["p95_db"],
@@ -686,8 +672,8 @@ def main():
                         help="'high' uses a tighter threshold offset (3 dB above mean RMS); "
                              "all others use 4 dB. 'none' should not invoke this script.")
     parser.add_argument("--f0",             type=float, default=None,
-                        help="File-level median F0 (Hz). Used for voice-type "
-                             "classification when --events-json is absent.")
+                        help="File-level median F0 (Hz). Used as the per-frame "
+                             "F0 fallback when --events-json is absent.")
     parser.add_argument("--events-json",    default=None,
                         help="Sibilance event map JSON (canonical shape, see "
                              "sibilance_suppressor.build_events_map). When "
@@ -710,7 +696,7 @@ def main():
         sr, channels = _read_wav_float32(args.input)
         _write_wav_float32(args.output, sr, channels)
         result = {
-            "applied": False, "f0Hz": None, "voiceType": None,
+            "applied": False, "f0Hz": None,
             "targetFreqHz": None, "maxReductionDb": None,
             "p95EnergyDb": None, "meanEnergyDb": None,
             "triggerReason": "Sensitivity 'none' or maxReduction <= 0",
