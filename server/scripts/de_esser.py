@@ -125,23 +125,30 @@ def _f0_per_frame_internal(samples: np.ndarray, sample_rate: int,
     """
     Per-STFT-frame F0 estimation. Returns array of length n_frames with NaN
     for frames classified as silence or where autocorrelation rejected.
+
+    Uses center-padded framing (librosa center=True convention) so frame k
+    is centered on original-audio sample k*hop -- matches sibilance_suppressor.
     """
-    n_frames = 1 + max(0, (len(samples) - n_fft) // hop)
+    pad           = n_fft // 2
+    samples_padded = np.pad(samples, pad, mode="reflect")
+    n              = len(samples)
+    n_frames       = 1 + max(0, (len(samples_padded) - n_fft) // hop)
     f0 = np.full(n_frames, np.nan, dtype=np.float64)
     for k in range(n_frames):
         start = k * hop
         end   = start + n_fft
-        if end > len(samples):
+        if end > len(samples_padded):
             break
         if voiced_mask_per_sample is not None:
-            mid = (start + end) // 2
-            if 0 <= mid < len(voiced_mask_per_sample) and not voiced_mask_per_sample[mid]:
+            # Frame center in original-audio coordinates.
+            mid = k * hop
+            if 0 <= mid < n and not voiced_mask_per_sample[mid]:
                 continue
         # Subsample F0 estimation: every 3rd frame, forward-fill (matches the
         # JS rolling-F0 cadence and keeps cost bounded on long files).
         if k % 3 != 0:
             continue
-        est = _autocorr_f0(samples[start:end], sample_rate)
+        est = _autocorr_f0(samples_padded[start:end], sample_rate)
         if est is not None:
             f0[k] = est
     # Forward-fill NaN gaps so every frame has a value (median fallback for
@@ -201,7 +208,9 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
           - global_band        (lo, hi) tuple -- min/max sibilant band edges seen
     """
     n = len(samples)
-    n_frames = 1 + max(0, (n - n_fft) // hop)
+    pad            = n_fft // 2
+    samples_padded = np.pad(samples, pad, mode="reflect")
+    n_frames       = 1 + max(0, (len(samples_padded) - n_fft) // hop)
     if n_frames <= 0:
         return {
             "frame_target_freq": np.array([], dtype=np.float64),
@@ -213,10 +222,13 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
             "global_band":       UNCERTAIN_BAND,
         }
 
-    # Stack frames and compute one batched STFT (vectorised power spectrum)
+    # Stack frames and compute one batched STFT (vectorised power spectrum).
+    # Center-padded framing matches sibilance_suppressor: frame k is centered
+    # on original-audio sample k*hop, so f0_per_frame[k] from the upstream
+    # events map indexes the same audio window with no offset.
     idx0   = np.arange(n_fft)[None, :]
     starts = (np.arange(n_frames) * hop)[:, None]
-    frames = samples[starts + idx0].astype(np.float64)
+    frames = samples_padded[starts + idx0].astype(np.float64)
     window = np.hanning(n_fft)
     spec   = np.fft.rfft(frames * window, axis=1)
     power  = (spec.real ** 2 + spec.imag ** 2)
@@ -225,21 +237,17 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
     mid_lo   = int(np.ceil(1000.0 / bin_freq))
     mid_hi   = int(np.ceil(3000.0 / bin_freq))
 
-    # Align caller-supplied f0 array length to the local frame grid.
-    # sibilance_suppressor pads by n_fft/2 before STFT, so its frame count
-    # exceeds ours by ~n_fft/hop frames. We trim the leading pad-frames to
-    # align temporal correspondence; if the array is shorter, pad with the
-    # median so downstream indexing is safe.
+    # Defensive resize: with the centered convention plus the events-json
+    # geometry check (nFft/hopLength) at CLI level, lengths should match by
+    # construction. Resize only as a safety net for version drift.
     if len(f0_per_frame) != n_frames:
         f0_aligned = np.full(n_frames, np.nan, dtype=np.float64)
-        if len(f0_per_frame) > n_frames:
-            offset = (len(f0_per_frame) - n_frames) // 2
-            f0_aligned[:] = f0_per_frame[offset:offset + n_frames]
-        else:
-            f0_aligned[:len(f0_per_frame)] = f0_per_frame
+        common = min(len(f0_per_frame), n_frames)
+        f0_aligned[:common] = f0_per_frame[:common]
+        if len(f0_per_frame) < n_frames:
             valid = f0_per_frame[~np.isnan(f0_per_frame)]
             if valid.size:
-                f0_aligned[len(f0_per_frame):] = float(np.median(valid))
+                f0_aligned[common:] = float(np.median(valid))
         f0_per_frame = f0_aligned
 
     # Smooth F0 with a rolling median to suppress single-frame estimator noise
