@@ -41,6 +41,7 @@ import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
+import { readFile } from 'fs/promises'
 import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
@@ -418,9 +419,43 @@ export async function sibilanceSuppressor(ctx) {
   const outPath = ctx.tmp('.wav')
   const frames  = ctx.results.metrics?.frames ?? null
   const f0 = ctx.results.deEss?.f0Hz ?? null
-  const result  = await applySibilanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0)
+
+  // Two paths:
+  //   - Cache hit  (an upstream stage already populated ctx._sibilanceEvents):
+  //     pass --events-json to skip internal detection.
+  //   - Cache miss (this stage is the first to need the map):
+  //     run internal detection but pass --emit-events so the suppressor's
+  //     own STFT pass produces the canonical map for downstream consumers
+  //     -- no separate analyzer pass needed.
+  let eventsPath, emitPath
+  if (ctx._sibilanceEvents) {
+    eventsPath = ctx._sibilanceEvents.path
+  } else {
+    emitPath = ctx.tmp('.json')
+  }
+
+  const result = await applySibilanceSuppression(
+    ctx.currentPath, outPath, ctx.presetId, frames, f0, eventsPath, emitPath,
+  )
   if (result.applied) ctx.currentPath = outPath
   ctx.results.sibilanceSuppressor = result
+
+  // Populate the shared cache from the side-emitted map so subsequent
+  // consumers (airBoost, etc.) can hit it without a second STFT pass.
+  // Cache only the emitted file path here; parsing the event payload can be
+  // deferred to consumers that actually need the map contents.
+  if (emitPath && !ctx._sibilanceEvents) {
+    try {
+      await readFile(emitPath)
+      ctx._sibilanceEvents = { path: emitPath }
+    } catch (err) {
+      // Suppressor may have skipped (noise_eraser, n_frames=0) and emitted
+      // nothing -- leave the cache empty so analyzeSibilanceEvents() can
+      // still run on demand.
+      ctx.log(`[SibilanceSuppressor] No event map emitted: ${err.message}`)
+    }
+  }
+
   await logLevel(ctx, 'after sibilance suppressor', ctx.currentPath, {
     skipped:       result.applied === false,
     max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',

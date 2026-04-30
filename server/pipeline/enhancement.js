@@ -211,16 +211,23 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
  * F0-derived sibilant event detection with EMA-based spectral gain reduction.
  * Operates on voiced frames only (VAD mask).
  *
- * @param {string}        inputPath   32-bit float WAV at 44.1 kHz
- * @param {string}        outputPath  Pre-allocated output path (ctx.tmp('.wav'))
- * @param {string}        presetId    e.g. 'acx_audiobook'
- * @param {object[]|null} frames      ctx.results.metrics.frames — written to a temp
+ * @param {string}        inputPath       32-bit float WAV at 44.1 kHz
+ * @param {string}        outputPath      Pre-allocated output path (ctx.tmp('.wav'))
+ * @param {string}        presetId        e.g. 'acx_audiobook'
+ * @param {object[]|null} frames          ctx.results.metrics.frames — written to a temp
  *   JSON file for VAD gating. Pass null to suppress VAD gating (full-file mode).
- * @param {number|null}   f0          Estimated fundamental frequency; script estimates
+ * @param {number|null}   f0              Estimated fundamental frequency; script estimates
  *   from audio if null.
+ * @param {string|null}   eventsJsonPath  On-disk path to a precomputed event map
+ *   (from analyzeSibilanceEvents). When provided, the script bypasses internal
+ *   detection and consumes sibilantFrameIndices + f0.perFrame from the map.
+ * @param {string|null}   emitEventsPath  When internal detection runs, also write
+ *   the canonical event map to this path so the JS pipeline can cache it for
+ *   downstream consumers without paying for a separate analyzer pass.
+ *   Ignored when eventsJsonPath is set (consumer mode produces no new map).
  * @returns {Promise<object>}  Result dict from sibilance_suppressor_report_entry()
  */
-export async function applySibilanceSuppression(inputPath, outputPath, presetId, frames, f0 = null) {
+export async function applySibilanceSuppression(inputPath, outputPath, presetId, frames, f0 = null, eventsJsonPath = null, emitEventsPath = null) {
   console.log(`[SibilanceSuppressor] Starting: preset=${presetId} | input=${inputPath}`)
   const startTime = Date.now()
 
@@ -239,6 +246,13 @@ export async function applySibilanceSuppression(inputPath, outputPath, presetId,
     await writeFile(vadMaskPath, JSON.stringify(frames))
     args.push('--vad-mask-json', vadMaskPath)
     console.log(`[SibilanceSuppressor] Using VAD mask with ${frames.length} frames`)
+  }
+
+  if (eventsJsonPath) {
+    args.push('--events-json', eventsJsonPath)
+    console.log(`[SibilanceSuppressor] Using precomputed event map: ${eventsJsonPath}`)
+  } else if (emitEventsPath) {
+    args.push('--emit-events', emitEventsPath)
   }
 
   let result

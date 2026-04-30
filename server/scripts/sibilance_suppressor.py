@@ -32,9 +32,95 @@ Dependencies: numpy, scipy
 import numpy as np
 from scipy.signal import get_window
 from scipy.ndimage import uniform_filter1d
+from collections import deque
+
+
+def build_events_map(
+    sibilant_indices: list,
+    f0_per_frame:     list,
+    f0_median:        float,
+    n_frames:         int,
+    sample_rate:      int,
+    n_fft:            int,
+    hop_length:       int,
+) -> dict:
+    """
+    Build the canonical sibilance event-map JSON payload.
+
+    Shared by analyze_sibilance_events.py (detection-only pass) and the
+    suppressor's --emit-events side output, so both producers emit byte-
+    for-byte identical structures.
+
+    Args:
+        sibilant_indices: ascending list of STFT frame indices flagged sibilant.
+        f0_per_frame:     per-frame F0 (Hz) used to derive the active sibilant
+                          band -- piecewise-constant in the rolling-F0 model.
+                          Length must equal n_frames.
+        f0_median:        rolling-window median F0 (Hz) for the whole pass.
+        n_frames:         total STFT frame count for the audio.
+        sample_rate:      sample rate (Hz).
+        n_fft:             STFT size.
+        hop_length:        STFT hop.
+
+    Returns:
+        dict matching the shape consumed by `--events-json` and the
+        airBoost sibilant-aware mask.
+    """
+    events = []
+    if sibilant_indices:
+        run_start = sibilant_indices[0]
+        prev      = sibilant_indices[0]
+        for fi in sibilant_indices[1:]:
+            if fi == prev + 1:
+                prev = fi
+                continue
+            events.append((run_start, prev))
+            run_start = fi
+            prev      = fi
+        events.append((run_start, prev))
+
+    frame_period_sec = hop_length / sample_rate
+    event_objs = [
+        {
+            "startFrame": int(s),
+            "endFrame":   int(e),
+            "startSec":   round(s * frame_period_sec, 4),
+            "endSec":     round((e + 1) * frame_period_sec, 4),
+            "durationMs": round((e + 1 - s) * frame_period_sec * 1000.0, 1),
+        }
+        for s, e in events
+    ]
+
+    return {
+        "sampleRate":           sample_rate,
+        "nFft":                 n_fft,
+        "hopLength":            hop_length,
+        "frameCount":           int(n_frames),
+        "f0": {
+            "median":   round(f0_median, 1) if f0_median is not None else None,
+            "perFrame": [round(v, 1) if v is not None else None for v in f0_per_frame],
+        },
+        "sibilantFrameIndices": [int(i) for i in sibilant_indices],
+        "events":               event_objs,
+    }
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Rolling F0 estimation parameters
+# ---------------------------------------------------------------------------
+# Re-estimate F0 every Nth voiced STFT frame, maintain a rolling window of the
+# most recent estimates, and only recompute the sibilant band mask when the
+# median shifts beyond a threshold. Calibrated for hop=512, sr=44100
+# (~86 STFT frames/sec): every 8th voiced frame -> ~10 estimates/sec; window of
+# 10 entries -> ~1 sec history; 20 Hz threshold avoids mask churn from estimator
+# noise while still tracking real speaker changes.
+
+F0_ESTIMATE_EVERY_N_VOICED_FRAMES = 8
+F0_ROLLING_WINDOW_SIZE            = 10
+F0_MASK_RESHIFT_THRESHOLD_HZ      = 20.0
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +135,13 @@ PRESET_DEFAULTS = {
         # exceeds mean sibilant-band energy by this margin.
         "p95_trigger_db": 8.0,      # ACX: conservative -- preserve intelligibility.
         "p95_threshold_db": 4.0,    # Gain reduction threshold above mean energy.
+        "min_flatness": 0.1,        # Wiener entropy gate on Condition 1 (P95 spike).
+                                    # Sibilant band must be at least this flat
+                                    # (geometric/arithmetic mean ratio) to count
+                                    # as a fricative. Rejects tonal false
+                                    # positives (vowel harmonics, formant peaks).
+                                    # Higher = stricter (fewer false positives,
+                                    # potentially more false negatives).
         "broadband_trigger_db": 12.0, # Condition 2 threshold: mean sibilant band energy
                                     # above long-term reference mean. Higher than
                                     # selectivity because mean-band comparison compresses
@@ -75,6 +168,7 @@ PRESET_DEFAULTS = {
     "podcast_ready": {
         "p95_trigger_db": 6.0,
         "p95_threshold_db": 3.0,
+        "min_flatness": 0.1,
         "broadband_trigger_db": 10.0,
         "depth": 0.7,
         "selectivity": 5.0,
@@ -89,6 +183,7 @@ PRESET_DEFAULTS = {
     "voice_ready": {
         "p95_trigger_db": 8.0,
         "p95_threshold_db": 4.0,
+        "min_flatness": 0.1,
         "broadband_trigger_db": 11.0,
         "depth": 0.6,
         "selectivity": 5.5,
@@ -103,6 +198,7 @@ PRESET_DEFAULTS = {
     "general_clean": {
         "p95_trigger_db": 6.0,
         "p95_threshold_db": 3.0,
+        "min_flatness": 0.1,
         "broadband_trigger_db": 9.0,
         "depth": 0.8,
         "selectivity": 4.0,
@@ -177,6 +273,51 @@ def estimate_f0(audio: np.ndarray, sample_rate: int) -> float:
     return f0
 
 
+def _autocorrelate_f0_frame(
+    frame: np.ndarray,
+    sample_rate: int,
+    f0_min_hz: float = 70.0,
+    f0_max_hz: float = 400.0,
+    min_corr_ratio: float = 0.1,
+) -> float:
+    """
+    Single-frame autocorrelation F0 estimate.
+
+    Reuses the same FFT-based autocorrelation math as estimate_f0() but
+    operates on a pre-extracted time-domain frame. Returns None when the
+    autocorrelation peak fails the correlation strength gate. Caller is
+    responsible for restricting input to voiced frames (no internal RMS gate).
+
+    Args:
+        frame:          1D float array — time-domain audio (unwindowed preferred).
+        sample_rate:    Sample rate in Hz.
+        f0_min_hz:      Lower F0 search bound.
+        f0_max_hz:      Upper F0 search bound.
+        min_corr_ratio: Required peak correlation as fraction of zero-lag value.
+
+    Returns:
+        F0 in Hz, or None on failure.
+    """
+    n = len(frame)
+    if n < 64:
+        return None
+
+    f     = frame.astype(np.float64) - frame.mean()
+    n_fft = 2 * n
+    corr  = np.fft.irfft(np.abs(np.fft.rfft(f, n=n_fft)) ** 2)
+    corr  = corr[:n]
+
+    lag_min = int(sample_rate / f0_max_hz)
+    lag_max = int(sample_rate / f0_min_hz)
+    if lag_max >= len(corr) or lag_min >= lag_max:
+        return None
+
+    peak_lag = lag_min + int(np.argmax(corr[lag_min:lag_max]))
+    if corr[peak_lag] > min_corr_ratio * corr[0] and peak_lag > 0:
+        return float(sample_rate / peak_lag)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Sibilant band identification
 # ---------------------------------------------------------------------------
@@ -206,6 +347,256 @@ def get_sibilant_band(f0: float, sample_rate: int) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# Detection
+# ---------------------------------------------------------------------------
+
+class SibilanceDetector:
+    """
+    Per-frame sibilance detector.
+
+    Encapsulates the detection-only half of the suppressor pipeline so it can
+    be reused by other stages (e.g. a sibilant-aware airBoost) and by the
+    standalone analyzer that produces a cached event map.
+
+    Responsibilities:
+      - Rolling per-frame F0 estimation (autocorrelation on time-domain
+        frames, median over a windowed buffer, mask rebuild only when the
+        median shifts beyond F0_MASK_RESHIFT_THRESHOLD_HZ).
+      - Sibilant frequency band derivation (via get_sibilant_band).
+      - Per-frame detection: P95 spike inside the band gated on spectral
+        flatness (Condition 1) + broadband elevation above the long-term
+        EMA reference (Condition 2).
+      - EMA reference update on voiced, non-sibilant frames only.
+
+    State surfaced to consumers (read-only by convention):
+      sibilant_mask        -- current frequency-bin mask (n_bins boolean).
+      sibilant_low/high    -- band edges in Hz.
+      long_term_power      -- per-bin EMA reference (None until first voiced
+                              non-sibilant frame).
+      voiced_frame_count   -- voiced non-sibilant frames contributing to EMA.
+      f0                   -- F0 from which the current band was derived.
+      f0_rolling           -- deque of recent per-frame F0 estimates.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int,
+        n_fft: int,
+        hop_length: int,
+        params: dict,
+        f0: float = None,
+    ):
+        self.sr         = sample_rate
+        self.n_fft      = n_fft
+        self.hop_length = hop_length
+        self.params     = params
+
+        self.freqs  = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
+        self.n_bins = len(self.freqs)
+
+        # --- F0 / band state ---
+        self.f0            = f0
+        self.sibilant_low  = None
+        self.sibilant_high = None
+        self.sibilant_mask = None
+
+        self.f0_rolling           = deque(maxlen=F0_ROLLING_WINDOW_SIZE)
+        self._voiced_since_last_f0 = 0
+        self._current_band_f0     = None
+
+        if f0 is not None:
+            self._set_sibilant_band(f0)
+            self._current_band_f0 = f0
+            self.f0_rolling.append(f0)
+
+        # --- EMA state ---
+        frame_period_ms      = (hop_length / sample_rate) * 1000.0
+        self.ema_alpha       = self._time_to_coeff(
+            params["ema_time_constant_ms"], frame_period_ms
+        )
+        self.long_term_power   = None
+        self.voiced_frame_count = 0
+
+    @staticmethod
+    def _time_to_coeff(time_ms: float, frame_period_ms: float) -> float:
+        if time_ms <= 0 or frame_period_ms <= 0:
+            return 1.0
+        return np.exp(-frame_period_ms / time_ms)
+
+    def seed_f0(self, f0: float) -> None:
+        """Set the initial F0/band before processing begins."""
+        self._set_sibilant_band(f0)
+        self._current_band_f0 = f0
+        self.f0_rolling.append(f0)
+
+    def _set_sibilant_band(self, f0: float) -> None:
+        self.f0            = f0
+        low, high          = get_sibilant_band(f0, self.sr)
+        self.sibilant_low  = low
+        self.sibilant_high = high
+        self.sibilant_mask = (self.freqs >= low) & (self.freqs <= high)
+        logger.info(
+            f"SibilanceDetector: F0={f0:.1f} Hz -> "
+            f"sibilant band {low:.0f}-{high:.0f} Hz "
+            f"({self.sibilant_mask.sum()} bins)"
+        )
+
+    def update_rolling_f0(self, frame_raw: np.ndarray, is_voiced: bool) -> None:
+        """Re-estimate F0 every Nth voiced frame; rebuild mask on shift."""
+        if not is_voiced:
+            return
+        self._voiced_since_last_f0 += 1
+        if self._voiced_since_last_f0 < F0_ESTIMATE_EVERY_N_VOICED_FRAMES:
+            return
+        self._voiced_since_last_f0 = 0
+        f0_frame = _autocorrelate_f0_frame(frame_raw, self.sr)
+        if f0_frame is None:
+            return
+        self.f0_rolling.append(f0_frame)
+        if len(self.f0_rolling) >= 3:
+            median_f0 = float(np.median(self.f0_rolling))
+            if (self._current_band_f0 is None or
+                    abs(median_f0 - self._current_band_f0)
+                    > F0_MASK_RESHIFT_THRESHOLD_HZ):
+                self._set_sibilant_band(median_f0)
+                self._current_band_f0 = median_f0
+
+    def detect(self, magnitude: np.ndarray) -> bool:
+        """
+        Detect whether a frame contains a sibilant event.
+
+        Two independent conditions — either triggers detection:
+
+        Condition 1 — P95 local spike (de-esser logic from processing spec):
+          Fires when P95 energy in the sibilant band exceeds the band mean
+          by p95_trigger_db AND the in-band spectral flatness (Wiener entropy)
+          exceeds min_flatness. The flatness gate rejects tonal false
+          positives (vowel harmonics, formant peaks) that produce a P95 spike
+          without the broadband turbulent character of an actual fricative.
+          Works without a long-term reference so it fires from frame zero.
+
+        Condition 2 — Broad elevation above long-term reference:
+          Fires when the mean sibilant band energy exceeds the long-term
+          reference mean sibilant band energy by selectivity_db. Catches
+          broad sibilant plateaus (flat energy across the whole band) that
+          Condition 1 misses because P95 ~ mean within a flat plateau.
+          Only active after EMA warmup. No flatness gate — the long-term
+          reference already differentiates sibilants from voiced energy by
+          historical context.
+        """
+        if self.sibilant_mask is None or not self.sibilant_mask.any():
+            return False
+
+        sib_energy  = magnitude[self.sibilant_mask] ** 2
+        mean_energy = np.mean(sib_energy)
+        p95_energy  = np.percentile(sib_energy, 95)
+
+        mean_db = 10.0 * np.log10(mean_energy + 1e-10)
+        p95_db  = 10.0 * np.log10(p95_energy  + 1e-10)
+
+        if (p95_db - mean_db) > self.params["p95_trigger_db"]:
+            valid = sib_energy > 0
+            if valid.any():
+                geo_mean = np.exp(np.mean(np.log(sib_energy[valid])))
+                arith    = np.mean(sib_energy[valid])
+                flatness = geo_mean / arith if arith > 0 else 0.0
+            else:
+                flatness = 0.0
+            if flatness >= self.params["min_flatness"]:
+                return True
+
+        if (self.long_term_power is not None and
+                self.voiced_frame_count >= self.params["warmup_frames"]):
+            ref_mean_db = 10.0 * np.log10(
+                np.mean(self.long_term_power[self.sibilant_mask]) + 1e-10
+            )
+            if (mean_db - ref_mean_db) > self.params["broadband_trigger_db"]:
+                return True
+
+        return False
+
+    def update_ema(
+        self,
+        frame_power: np.ndarray,
+        is_voiced:   bool,
+        is_sibilant: bool,
+    ) -> None:
+        """Update the long-term reference on voiced, non-sibilant frames."""
+        if not (is_voiced and not is_sibilant):
+            return
+        if self.long_term_power is None:
+            self.long_term_power = frame_power.copy()
+        else:
+            self.long_term_power = (
+                self.ema_alpha         * self.long_term_power +
+                (1.0 - self.ema_alpha) * frame_power
+            )
+        self.voiced_frame_count += 1
+
+    def process_frame(
+        self,
+        frame_raw: np.ndarray,
+        magnitude: np.ndarray,
+        is_voiced: bool,
+    ) -> bool:
+        """
+        Full per-frame pipeline: rolling F0 update -> detection -> EMA update.
+
+        Args:
+            frame_raw: Time-domain frame (unwindowed) for autocorrelation.
+            magnitude: Linear magnitude spectrum, shape (n_bins,).
+            is_voiced: Whether VAD classifies this frame as voiced.
+
+        Returns:
+            True if the frame is sibilant.
+        """
+        self.update_rolling_f0(frame_raw, is_voiced)
+        is_sibilant = self.detect(magnitude) if is_voiced else False
+        frame_power = magnitude ** 2
+        self.update_ema(frame_power, is_voiced, is_sibilant)
+        return is_sibilant
+
+    def apply_event(
+        self,
+        magnitude:       np.ndarray,
+        is_voiced:       bool,
+        is_sibilant_pre: bool,
+        f0_pre:          float,
+    ) -> bool:
+        """
+        Per-frame update from a precomputed event map (no internal detection).
+
+        Used when the analyzer has already run a detection pass and stored
+        the result on the pipeline context. Skips rolling F0 estimation and
+        the dual-condition detection, but still:
+          - rebuilds the sibilant band mask when the precomputed F0 changes
+            (so the suppressor's reduction step targets the correct band),
+          - updates the long-term EMA reference on voiced non-sibilant frames
+            (so the reference is in sync with what the suppressor sees).
+
+        Args:
+            magnitude:       Linear magnitude spectrum, shape (n_bins,).
+            is_voiced:       Whether VAD classifies this frame as voiced.
+            is_sibilant_pre: Precomputed sibilant flag from the event map.
+            f0_pre:          Precomputed F0 for this frame from the event map.
+
+        Returns:
+            Effective is_sibilant (precomputed flag, gated on is_voiced).
+        """
+        if f0_pre is not None and (
+            self._current_band_f0 is None
+            or abs(f0_pre - self._current_band_f0) > 1e-3
+        ):
+            self._set_sibilant_band(f0_pre)
+            self._current_band_f0 = f0_pre
+
+        is_sibilant = bool(is_sibilant_pre) and is_voiced
+        frame_power = magnitude ** 2
+        self.update_ema(frame_power, is_voiced, is_sibilant)
+        return is_sibilant
+
+
+# ---------------------------------------------------------------------------
 # Core algorithm
 # ---------------------------------------------------------------------------
 
@@ -214,14 +605,18 @@ class SibilanceSuppressor:
     Sibilance suppressor combining F0-derived detection with EMA gain reduction.
 
     Per-frame processing:
-      1. Detection: measure P95 energy in sibilant band vs. mean energy.
+      1. Rolling F0: re-estimate F0 every Nth voiced frame via autocorrelation.
+         Maintain a rolling median over the recent estimates and rebuild the
+         sibilant band mask only when the median shifts beyond a threshold.
+         Tracks speaker/pitch changes within a file without per-frame churn.
+      2. Detection: measure P95 energy in sibilant band vs. mean energy.
          Fire sibilant flag when P95 > mean + p95_trigger_db.
-      2. EMA update: on non-sibilant voiced frames, update per-bin long-term
+      3. EMA update: on non-sibilant voiced frames, update per-bin long-term
          power reference. Detection drives the gate directly.
-      3. Reduction: on sibilant frames (after warmup), compute per-bin gain
+      4. Reduction: on sibilant frames (after warmup), compute per-bin gain
          reduction where frame spectrum exceeds long-term reference by
          more than `selectivity` dB.
-      4. Apply: attack/release IIR smoothing -> STFT gain application -> ISTFT.
+      5. Apply: attack/release IIR smoothing -> STFT gain application -> ISTFT.
     """
 
     def __init__(
@@ -244,22 +639,16 @@ class SibilanceSuppressor:
         self.freqs  = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
         self.n_bins = len(self.freqs)
 
-        # F0 is set later if not provided at init (estimated from audio in process())
-        self.f0             = f0
-        self.sibilant_low   = None
-        self.sibilant_high  = None
-        self.sibilant_mask  = None
-
-        if f0 is not None:
-            self._set_sibilant_band(f0)
-
-        # --- EMA state ---
-        frame_period_ms       = (hop_length / sample_rate) * 1000.0
-        self.ema_alpha        = self._time_to_coeff(
-            params["ema_time_constant_ms"], frame_period_ms
+        # F0 / mask / EMA state lives in the detector. The suppressor reads
+        # it via property accessors (sibilant_mask, long_term_power, etc.)
+        # so the rest of process() stays compact.
+        self.detector = SibilanceDetector(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            params=params,
+            f0=f0,
         )
-        self.long_term_power  = None
-        self.voiced_frame_count = 0
 
         # --- Sharpness spreading kernel ---
         sharpness   = params["sharpness"]
@@ -274,76 +663,30 @@ class SibilanceSuppressor:
             self.spread_kernel = None
 
         # --- Attack/release ---
+        frame_period_ms    = (hop_length / sample_rate) * 1000.0
         self.attack_coeff  = self._time_to_coeff(params["attack_ms"],  frame_period_ms)
         self.release_coeff = self._time_to_coeff(params["release_ms"], frame_period_ms)
 
-    def _set_sibilant_band(self, f0: float) -> None:
-        """Compute sibilant band mask from F0."""
-        self.f0            = f0
-        low, high          = get_sibilant_band(f0, self.sr)
-        self.sibilant_low  = low
-        self.sibilant_high = high
-        self.sibilant_mask = (self.freqs >= low) & (self.freqs <= high)
-        logger.info(
-            f"SibilanceSuppressor: F0={f0:.1f} Hz -> "
-            f"sibilant band {low:.0f}-{high:.0f} Hz "
-            f"({self.sibilant_mask.sum()} bins)"
-        )
+    # --- Read-only views into detector state, kept for backwards compatibility
+    # with existing telemetry / report code that reads these directly. ---
+    @property
+    def f0(self):                 return self.detector.f0
+    @property
+    def sibilant_low(self):       return self.detector.sibilant_low
+    @property
+    def sibilant_high(self):      return self.detector.sibilant_high
+    @property
+    def sibilant_mask(self):      return self.detector.sibilant_mask
+    @property
+    def long_term_power(self):    return self.detector.long_term_power
+    @property
+    def voiced_frame_count(self): return self.detector.voiced_frame_count
 
     @staticmethod
     def _time_to_coeff(time_ms: float, frame_period_ms: float) -> float:
         if time_ms <= 0 or frame_period_ms <= 0:
             return 1.0
         return np.exp(-frame_period_ms / time_ms)
-
-    def _detect_sibilant(self, magnitude: np.ndarray) -> bool:
-        """
-        Detect whether a frame contains a sibilant event.
-
-        Two independent conditions — either triggers detection:
-
-        Condition 1 — P95 local spike (de-esser logic from processing spec):
-          Fires when P95 energy in the sibilant band exceeds the band mean
-          by p95_trigger_db. Catches narrow sibilant spikes. Works without
-          a long-term reference so it fires from frame zero.
-
-        Condition 2 — Broad elevation above long-term reference:
-          Fires when the mean sibilant band energy exceeds the long-term
-          reference mean sibilant band energy by selectivity_db. Catches
-          broad sibilant plateaus (flat energy across the whole band) that
-          Condition 1 misses because P95 ~ mean within a flat plateau.
-          Only active after EMA warmup.
-
-        Args:
-            magnitude: linear magnitude spectrum, shape (n_bins,)
-
-        Returns:
-            True if sibilant event detected by either condition.
-        """
-        if self.sibilant_mask is None or not self.sibilant_mask.any():
-            return False
-
-        sib_energy  = magnitude[self.sibilant_mask] ** 2
-        mean_energy = np.mean(sib_energy)
-        p95_energy  = np.percentile(sib_energy, 95)
-
-        mean_db = 10.0 * np.log10(mean_energy + 1e-10)
-        p95_db  = 10.0 * np.log10(p95_energy  + 1e-10)
-
-        # Condition 1: local spike within sibilant band
-        if (p95_db - mean_db) > self.params["p95_trigger_db"]:
-            return True
-
-        # Condition 2: broad elevation above long-term reference
-        if (self.long_term_power is not None and
-                self.voiced_frame_count >= self.params["warmup_frames"]):
-            ref_mean_db = 10.0 * np.log10(
-                np.mean(self.long_term_power[self.sibilant_mask]) + 1e-10
-            )
-            if (mean_db - ref_mean_db) > self.params["broadband_trigger_db"]:
-                return True
-
-        return False
 
     def _compute_gain_reduction(
         self,
@@ -392,31 +735,66 @@ class SibilanceSuppressor:
 
         return reduction_db
 
-    def process(self, audio: np.ndarray, voiced_frame_indices=None) -> dict:
+    def process(
+        self,
+        audio: np.ndarray,
+        voiced_frame_indices=None,
+        events_map: dict = None,
+    ) -> dict:
         """
         Apply sibilance suppression to a mono audio array.
 
-        If F0 was not provided at init, estimates it from the audio before
-        processing. Estimation adds negligible time relative to the main loop.
+        If F0 was not provided at init, estimates a seed F0 from the audio
+        before processing. The seed sets the initial sibilant band and primes
+        the rolling F0 buffer. Inside the main loop, F0 is re-estimated every
+        Nth voiced frame and the band mask is rebuilt when the rolling median
+        shifts beyond F0_MASK_RESHIFT_THRESHOLD_HZ.
 
         Args:
             audio: 1D float32 array at self.sr.
             voiced_frame_indices: set of STFT frame indices where voice is present.
                 Silence frames receive target_gr=0; IIR decays smoothly.
                 None = process all frames.
+            events_map: Precomputed event map from analyze_sibilance_events.
+                When provided, internal detection (rolling F0 + dual-condition
+                detect()) is bypassed and the suppressor consumes
+                `sibilantFrameIndices` and `f0.perFrame` directly. The
+                long-term EMA reference is still tracked from this run's
+                spectra so the reduction step has an in-sync reference.
 
         Returns:
             dict: audio, max_reduction_db, mean_reduction_db, sibilant_frames_detected,
                   sibilant_frames_processed, artifact_risk, band_summary, f0,
-                  sibilant_band_hz
+                  sibilant_band_hz. The reported `f0` is the median of the
+                  rolling per-frame estimates collected during processing.
         """
         if audio.ndim != 1:
             raise ValueError("SibilanceSuppressor expects mono input (1D array).")
 
-        # Estimate F0 if not already set
-        if self.f0 is None:
-            f0 = estimate_f0(audio, self.sr)
-            self._set_sibilant_band(f0)
+        # Unpack the precomputed event map (if any). When present we skip
+        # internal detection and seed the band from the map's first F0
+        # (or the median) so the initial frames have a workable mask.
+        precomputed_sibilant = None
+        precomputed_f0       = None
+        if events_map is not None:
+            precomputed_sibilant = set(events_map.get("sibilantFrameIndices", []))
+            precomputed_f0       = events_map.get("f0", {}).get("perFrame", []) or []
+
+        # Estimate F0 if not already set. With an event map we prefer its
+        # median F0 (or first per-frame value) over a fresh estimate so the
+        # detector's reported F0 matches the analyzer's.
+        if self.detector.f0 is None:
+            seed = None
+            if events_map is not None:
+                seed = events_map.get("f0", {}).get("median")
+                if seed is None:
+                    for v in precomputed_f0:
+                        if v is not None:
+                            seed = v
+                            break
+            if seed is None:
+                seed = estimate_f0(audio, self.sr)
+            self.detector.seed_f0(seed)
 
         if self.sibilant_mask is None:
             logger.error("SibilanceSuppressor: sibilant band not set, returning unmodified.")
@@ -441,6 +819,7 @@ class SibilanceSuppressor:
                 "artifact_risk": False, "band_summary": [],
                 "f0": self.f0,
                 "sibilant_band_hz": (self.sibilant_low, self.sibilant_high),
+                "events_map": None,
             }
 
         output_buffer      = np.zeros(n_padded, dtype=np.float64)
@@ -459,34 +838,48 @@ class SibilanceSuppressor:
         voiced_frame_count = 0
         eps                = 1e-10
 
+        # Per-frame detection trace -- only collected when running internal
+        # detection so the result can carry an events_map payload for the
+        # JS side to cache (sidesteps the analyzer's separate STFT pass).
+        emit_sibilant_indices = [] if events_map is None else None
+        emit_f0_per_frame     = [] if events_map is None else None
+
         for i in range(n_frames):
             start = i * hop
             end   = start + n_fft
 
-            frame        = audio_padded[start:end] * window
+            frame_raw    = audio_padded[start:end]
+            frame        = frame_raw * window
             spectrum     = np.fft.rfft(frame)
             magnitude    = np.abs(spectrum)
             phase        = np.angle(spectrum)
             magnitude_db = 20.0 * np.log10(magnitude + eps)
-            frame_power  = magnitude ** 2
 
             is_voiced   = (voiced_frame_indices is None) or (i in voiced_frame_indices)
-            is_sibilant = self._detect_sibilant(magnitude) if is_voiced else False
+
+            # Rolling F0, dual-condition detection, and EMA update are all
+            # delegated to the detector. The detector exposes the resulting
+            # sibilant_mask / long_term_power / voiced_frame_count for the
+            # gain-reduction step that follows.
+            #
+            # When an event map is provided, detection is bypassed: the
+            # detector consumes the precomputed sibilant flag and F0 for
+            # this frame and only updates band mask + EMA reference.
+            if events_map is None:
+                is_sibilant = self.detector.process_frame(frame_raw, magnitude, is_voiced)
+                emit_f0_per_frame.append(self.detector.f0)
+                if is_sibilant:
+                    emit_sibilant_indices.append(i)
+            else:
+                f0_pre = precomputed_f0[i] if i < len(precomputed_f0) else None
+                is_sibilant = self.detector.apply_event(
+                    magnitude, is_voiced,
+                    is_sibilant_pre=(i in precomputed_sibilant),
+                    f0_pre=f0_pre,
+                )
 
             if is_sibilant:
                 sibilant_frames_detected += 1
-
-            # Update EMA on voiced, non-sibilant frames only.
-            # Detection drives the gate -- no secondary classifier needed.
-            if is_voiced and not is_sibilant:
-                if self.long_term_power is None:
-                    self.long_term_power = frame_power.copy()
-                else:
-                    self.long_term_power = (
-                        self.ema_alpha         * self.long_term_power +
-                        (1.0 - self.ema_alpha) * frame_power
-                    )
-                self.voiced_frame_count += 1
 
             # --- Gain reduction ---
             target_gr = np.zeros(self.n_bins)
@@ -577,8 +970,18 @@ class SibilanceSuppressor:
                         f"peak {-b['peak_reduction_db']:5.2f} dB  {bars}"
                     )
 
+        # Reported F0 is the median of all rolling estimates collected during
+        # processing — more representative than the last-applied band's F0 on
+        # files where the speaker (or pitch) varies. Falls back to self.f0
+        # when no rolling estimates were collected (very short or all-silence
+        # audio).
+        rolling = self.detector.f0_rolling
+        f0_reported = (float(np.median(rolling))
+                       if len(rolling) > 0 else self.f0)
+
         logger.info(
-            f"SibilanceSuppressor: f0={self.f0:.1f} Hz | "
+            f"SibilanceSuppressor: f0={f0_reported:.1f} Hz "
+            f"(rolling n={len(rolling)}) | "
             f"band={self.sibilant_low:.0f}-{self.sibilant_high:.0f} Hz | "
             f"detected={sibilant_frames_detected} | "
             f"processed={sibilant_frames_processed} | "
@@ -586,6 +989,21 @@ class SibilanceSuppressor:
             f"max={max_reduction:.2f} dB | mean={mean_reduction:.2f} dB | "
             f"artifact_risk={artifact_risk}"
         )
+
+        # When detection ran internally, build the canonical event-map
+        # payload so the JS wrapper can persist it for downstream consumers
+        # (airBoost, etc.) and avoid a second STFT pass via the analyzer.
+        emitted_events_map = None
+        if emit_sibilant_indices is not None:
+            emitted_events_map = build_events_map(
+                sibilant_indices = emit_sibilant_indices,
+                f0_per_frame     = emit_f0_per_frame,
+                f0_median        = f0_reported,
+                n_frames         = n_frames,
+                sample_rate      = self.sr,
+                n_fft            = self.n_fft,
+                hop_length       = self.hop_length,
+            )
 
         return {
             "audio":                    output_audio,
@@ -595,8 +1013,9 @@ class SibilanceSuppressor:
             "sibilant_frames_processed": sibilant_frames_processed,
             "artifact_risk":            artifact_risk,
             "band_summary":             band_summary,
-            "f0":                       self.f0,
+            "f0":                       f0_reported,
             "sibilant_band_hz":         (self.sibilant_low, self.sibilant_high),
+            "events_map":               emitted_events_map,
         }
 
 
@@ -610,6 +1029,7 @@ def apply_sibilance_suppression(
     preset: str,
     vad_voiced_mask: np.ndarray = None,
     f0: float = None,
+    events_map: dict = None,
 ) -> dict:
     """
     Stage 4 pipeline entry point.
@@ -623,6 +1043,12 @@ def apply_sibilance_suppression(
         preset:          acx_audiobook | podcast_ready | voice_ready | general_clean
         vad_voiced_mask: Optional boolean array (same length as audio), True = voiced.
         f0:              Fundamental frequency in Hz. Estimated if not provided.
+        events_map:      Precomputed sibilance event map from
+                         analyze_sibilance_events. When provided the
+                         suppressor bypasses its internal detection and
+                         drives the gate from `sibilantFrameIndices` /
+                         `f0.perFrame`. STFT geometry (nFft, hopLength,
+                         sampleRate) must match this run.
 
     Returns:
         dict: audio, max_reduction_db, mean_reduction_db, sibilant_frames_detected,
@@ -636,11 +1062,28 @@ def apply_sibilance_suppression(
             "mean_reduction_db": 0.0, "sibilant_frames_detected": 0,
             "sibilant_frames_processed": 0, "artifact_risk": False,
             "band_summary": [], "f0": f0, "sibilant_band_hz": None,
+            "events_map": None,
         }
 
     suppressor = SibilanceSuppressor(
         sample_rate=sample_rate, preset=preset, f0=f0
     )
+
+    if events_map is not None:
+        # Sanity check STFT geometry: a mismatched event map would silently
+        # misalign sibilant indices. Fall back to internal detection.
+        em_sr   = events_map.get("sampleRate")
+        em_nfft = events_map.get("nFft")
+        em_hop  = events_map.get("hopLength")
+        if (em_sr  != sample_rate
+                or em_nfft != suppressor.n_fft
+                or em_hop  != suppressor.hop_length):
+            logger.warning(
+                "SibilanceSuppressor: events_map geometry mismatch "
+                f"(sr={em_sr} nfft={em_nfft} hop={em_hop}); "
+                "discarding map and running internal detection."
+            )
+            events_map = None
 
     voiced_frame_indices = None
     if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
@@ -654,7 +1097,11 @@ def apply_sibilance_suppression(
             if orig_start < orig_end and vad_voiced_mask[orig_start:orig_end].any():
                 voiced_frame_indices.add(fi)
 
-    result            = suppressor.process(audio, voiced_frame_indices=voiced_frame_indices)
+    result = suppressor.process(
+        audio,
+        voiced_frame_indices=voiced_frame_indices,
+        events_map=events_map,
+    )
     result["skipped"] = False
     return result
 
@@ -693,6 +1140,17 @@ if __name__ == "__main__":
     parser.add_argument("--preset",        default="acx_audiobook")
     parser.add_argument("--vad-mask-json", default=None)
     parser.add_argument("--f0",            type=float, default=None)
+    parser.add_argument("--events-json",   default=None,
+                        help="Precomputed sibilance event map (JSON) from "
+                             "analyze_sibilance_events. Skips internal "
+                             "detection and consumes sibilantFrameIndices "
+                             "and f0.perFrame from the map.")
+    parser.add_argument("--emit-events",   default=None,
+                        help="When running internal detection, also write the "
+                             "canonical event map JSON to this path. Lets the "
+                             "JS pipeline cache the map on ctx without paying "
+                             "for a separate analyzer STFT pass. No-op when "
+                             "--events-json is also set (consumer mode).")
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
@@ -709,6 +1167,20 @@ if __name__ == "__main__":
                 e = s + frame["lengthSamples"]
                 vad_voiced_mask[s:min(e, len(audio))] = True
 
-    result = apply_sibilance_suppression(audio, sr, args.preset, vad_voiced_mask, args.f0)
+    events_map = None
+    if args.events_json:
+        with open(args.events_json) as fh:
+            events_map = json.load(fh)
+
+    result = apply_sibilance_suppression(
+        audio, sr, args.preset, vad_voiced_mask, args.f0, events_map=events_map
+    )
     wavfile.write(args.output, sr, result["audio"])
+
+    # Side-emit the event map only when internal detection ran (consumer
+    # mode produces no new map -- the input already had one).
+    if args.emit_events and result.get("events_map") is not None:
+        with open(args.emit_events, "w") as fh:
+            json.dump(result["events_map"], fh)
+
     print("JSON_RESULT:" + json.dumps(sibilance_suppressor_report_entry(result)), flush=True)
