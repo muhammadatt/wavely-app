@@ -198,7 +198,8 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
 
   const durationMs = Date.now() - startTime
   console.log(
-    `[ResonanceSuppressor] Done in ${durationMs}ms: skipped=${result.applied === false} ` +
+    `[ResonanceSuppressor] Done in ${durationMs}ms (process=${result.process_seconds ?? 'n/a'}s): ` +
+    `skipped=${result.applied === false} ` +
     `max_reduction=${result.max_reduction_db ?? 'n/a'}dB ` +
     `artifact_risk=${result.artifact_risk ?? false}`,
   )
@@ -286,7 +287,8 @@ export async function applySibilanceSuppression(inputPath, outputPath, presetId,
 
   const durationMs = Date.now() - startTime
   console.log(
-    `[SibilanceSuppressor] Done in ${durationMs}ms: skipped=${result.applied === false} ` +
+    `[SibilanceSuppressor] Done in ${durationMs}ms (process=${result.process_seconds ?? 'n/a'}s): ` +
+    `skipped=${result.applied === false} ` +
     `detected=${result.sibilant_frames_detected ?? 'n/a'} ` +
     `max_reduction=${result.max_reduction_db ?? 'n/a'}dB ` +
     `artifact_risk=${result.artifact_risk ?? false}`,

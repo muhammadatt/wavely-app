@@ -302,13 +302,8 @@ export async function hpf(ctx) {
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
 
-// When noiseReduce runs a second time in a pipeline (e.g. STANDARD_PIPELINE
-// applies it once before compression and once after), the second pass is
-// frequently a near no-op because the first pass has already pushed the
-// noise floor well below the output-profile target. Skipping it when the
-// cached floor is already deep saves a full DF3 invocation (~70s on a
-// 12-min file) without compromising compliance — the threshold leaves a
-// 15 dB margin above the ACX -60 dBFS ceiling.
+// Skip the second noise reduction pass if the the noise floor is already 
+// below -75 db -- a 15 dB margin beyond the ACX -60 dBFS ceiling.
 const NR_SECOND_PASS_SKIP_THRESHOLD_DBFS =
   parseFloat(process.env.NR_SECOND_PASS_SKIP_THRESHOLD_DBFS ?? '-75')
 
@@ -451,6 +446,7 @@ export async function resonanceSuppressor(ctx) {
     skipped:       result.applied === false,
     max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
     artifact_risk: result.artifact_risk ?? false,
+    process_s:     result.process_seconds ?? 'n/a',
   })
 }
 
@@ -501,6 +497,7 @@ export async function sibilanceSuppressor(ctx) {
     skipped:       result.applied === false,
     max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
     artifact_risk: result.artifact_risk ?? false,
+    process_s:     result.process_seconds ?? 'n/a',
   })
 }
 

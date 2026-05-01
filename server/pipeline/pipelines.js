@@ -44,7 +44,7 @@ const STANDARD_PIPELINE = [
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
   stages.sibilanceSuppressor,
-  stages.deEss,                   // De-Ess again after airBoost
+  //stages.deEss,                   // De-Ess again after airBoost
   stages.enhancementEQ,
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,

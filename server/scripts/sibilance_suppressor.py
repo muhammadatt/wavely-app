@@ -29,6 +29,8 @@ Calibration source: 17_airBoost.wav
 Dependencies: numpy, scipy
 """
 
+import time
+
 import numpy as np
 from scipy.signal import get_window
 from scipy.ndimage import uniform_filter1d
@@ -618,6 +620,10 @@ class SibilanceSuppressor:
         self.attack_coeff  = self._time_to_coeff(params["attack_ms"],  frame_period_ms)
         self.release_coeff = self._time_to_coeff(params["release_ms"], frame_period_ms)
 
+        # --- Cached overlap-add window (computed once per instance) ---
+        self._window         = get_window("hann", n_fft, fftbins=True).astype(np.float32)
+        self._window_squared = (self._window.astype(np.float64) ** 2)
+
     # --- Read-only views into detector state, kept for backwards compatibility
     # with existing telemetry / report code that reads these directly. ---
     @property
@@ -753,8 +759,8 @@ class SibilanceSuppressor:
 
         n_fft          = self.n_fft
         hop            = self.hop_length
-        window         = get_window("hann", n_fft, fftbins=True)
-        window_squared = window ** 2
+        window         = self._window
+        window_squared = self._window_squared
         warmup         = self.params["warmup_frames"]
 
         pad          = n_fft // 2
@@ -795,18 +801,26 @@ class SibilanceSuppressor:
         emit_sibilant_indices = [] if events_map is None else None
         emit_f0_per_frame     = [] if events_map is None else None
 
+        # Precompute boolean voiced mask once -- avoids per-frame set lookup.
+        if voiced_frame_indices is None:
+            voiced_mask = np.ones(n_frames, dtype=bool)
+        else:
+            voiced_mask = np.zeros(n_frames, dtype=bool)
+            for fi in voiced_frame_indices:
+                if 0 <= fi < n_frames:
+                    voiced_mask[fi] = True
+
         for i in range(n_frames):
             start = i * hop
             end   = start + n_fft
 
             frame_raw    = audio_padded[start:end]
             frame        = frame_raw * window
-            spectrum     = np.fft.rfft(frame)
+            spectrum     = np.fft.rfft(frame).astype(np.complex64, copy=False)
             magnitude    = np.abs(spectrum)
-            phase        = np.angle(spectrum)
             magnitude_db = 20.0 * np.log10(magnitude + eps)
 
-            is_voiced   = (voiced_frame_indices is None) or (i in voiced_frame_indices)
+            is_voiced   = bool(voiced_mask[i])
 
             # Rolling F0, dual-condition detection, and EMA update are all
             # delegated to the detector. The detector exposes the resulting
@@ -873,8 +887,8 @@ class SibilanceSuppressor:
                 n_active_bins_total += int(active_mask.sum())
 
             # --- Apply and ISTFT ---
-            gain_linear       = 10.0 ** (-smoothed_gr / 20.0)
-            modified_spectrum = magnitude * gain_linear * np.exp(1j * phase)
+            gain_linear       = (10.0 ** (-smoothed_gr / 20.0)).astype(np.float32, copy=False)
+            modified_spectrum = spectrum * gain_linear
             time_frame        = np.fft.irfft(modified_spectrum, n=n_fft) * window
 
             frame_end = min(end, n_padded)
@@ -1007,6 +1021,8 @@ def apply_sibilance_suppression(
               sibilant_frames_processed, artifact_risk, band_summary, f0,
               sibilant_band_hz, skipped
     """
+    t0 = time.perf_counter()
+
     suppressor = SibilanceSuppressor(
         sample_rate=sample_rate, params=params, f0=f0
     )
@@ -1044,14 +1060,15 @@ def apply_sibilance_suppression(
         voiced_frame_indices=voiced_frame_indices,
         events_map=events_map,
     )
-    result["skipped"] = False
+    result["skipped"]         = False
+    result["process_seconds"] = time.perf_counter() - t0
     return result
 
 
 def sibilance_suppressor_report_entry(result: dict) -> dict:
     """Format result for the Stage 7 processing report JSON."""
     if result.get("skipped"):
-        return {"applied": False}
+        return {"applied": False, "process_seconds": round(result.get("process_seconds", 0.0), 3)}
     low, high = result.get("sibilant_band_hz") or (None, None)
     return {
         "applied":                   True,
@@ -1064,6 +1081,7 @@ def sibilance_suppressor_report_entry(result: dict) -> dict:
         "mean_reduction_db":         round(result["mean_reduction_db"], 1),
         "artifact_risk":             result["artifact_risk"],
         "band_summary":              result.get("band_summary", []),
+        "process_seconds":           round(result.get("process_seconds", 0.0), 3),
     }
 
 
