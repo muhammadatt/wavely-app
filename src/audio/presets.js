@@ -124,7 +124,7 @@ export const PRESETS = {
       preserve_early: false,
     },
     autoLeveler: {
-      maxGainDb:     4.0,
+      maxGainDb:     8.0,
       maxRateDbPerS: 1.0,
     },
     saturation: {

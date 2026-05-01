@@ -40,7 +40,7 @@ const STANDARD_PIPELINE = [
   stages.noiseReduce,  
   //stages.parallelCompress,      // parallel compression
   stages.vocalExpander,           // frequency-selective expander (silence-floor residual attenuator)
-  stages.vocalSaturation,
+  //stages.vocalSaturation,
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
   stages.sibilanceSuppressor,
