@@ -477,8 +477,10 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
 
       1. Detection power -> 2 ms RMS smoothing via scipy.signal.lfilter
          (vectorised one-pole IIR).
-      2. Attack/release envelope follower -- tight Python loop on Python
-         floats (about 25x faster than indexing numpy scalars per iteration).
+      2. Attack/release envelope follower -- sequential loop executed by
+         the Numba-compiled _envelope_follower_jit; cache=True stores the
+         compiled artifact in __pycache__ so later subprocesses can skip
+         recompilation after the first run.
       3. Threshold compare, soft-knee gain curve, treated-event extraction --
          all vectorised numpy ops on the resulting envelope array.
     """
