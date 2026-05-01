@@ -129,12 +129,23 @@ async function renderTimelineToWavBlob(segments, sampleRate, channels) {
   writeString(view, 36, 'data')
   view.setUint32(40, dataSize, true)
 
-  // Interleave and write 32-bit float samples
-  let offset = 44
-  for (let i = 0; i < numSamples; i++) {
-    for (let ch = 0; ch < channels; ch++) {
-      view.setFloat32(offset, channelData[ch][i], true)
-      offset += 4
+  // Write audio samples directly through a Float32Array view onto the same
+  // underlying ArrayBuffer.  Float32Array typed-array operations (set /
+  // subarray) use native memory-copy speed and are orders of magnitude faster
+  // than calling DataView.setFloat32() once per sample — for a 12-minute mono
+  // file that difference is roughly 32 million JS function calls vs. a single
+  // memcpy.  All modern CPUs are little-endian, matching WAV's byte order.
+  const audioView = new Float32Array(buffer, 44)
+  if (channels === 1) {
+    // Mono: a single bulk copy — effectively memcpy.
+    audioView.set(channelData[0])
+  } else {
+    // Stereo: interleave L/R.  Still a loop, but typed-array indexing is
+    // far faster than repeated DataView calls.
+    for (let i = 0; i < numSamples; i++) {
+      for (let ch = 0; ch < channels; ch++) {
+        audioView[i * channels + ch] = channelData[ch][i]
+      }
     }
   }
 

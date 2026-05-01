@@ -33,12 +33,19 @@ export function renderRegionToBuffer(segments, start, end, sampleRate, channels)
 
     for (let ch = 0; ch < channels; ch++) {
       const srcData = seg.sourceBuffer.getChannelData(ch)
-      for (let i = 0; i < copySamples; i++) {
-        const si = sourceSampleStart + i
-        const di = destSampleStart + i
-        if (si < srcData.length && di < durationSamples) {
-          channelData[ch][di] = srcData[si]
-        }
+      // Clamp to actual buffer bounds, then bulk-copy via TypedArray.set().
+      // This is orders of magnitude faster than a per-sample loop with
+      // per-iteration bounds checks (effectively a memcpy vs. 32M JS calls).
+      const actualSamples = Math.min(
+        copySamples,
+        srcData.length - sourceSampleStart,
+        durationSamples - destSampleStart,
+      )
+      if (actualSamples > 0) {
+        channelData[ch].set(
+          srcData.subarray(sourceSampleStart, sourceSampleStart + actualSamples),
+          destSampleStart,
+        )
       }
     }
   }
