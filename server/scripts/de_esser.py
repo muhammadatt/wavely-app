@@ -50,6 +50,7 @@ import sys
 from typing import Optional
 
 import numpy as np
+from numba import njit
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.io import wavfile
 from scipy.signal import iirfilter, lfilter, sosfilt
@@ -437,6 +438,32 @@ def build_detection_signal(samples: np.ndarray, sample_rate: int,
     return out
 
 
+@njit(cache=True)
+def _envelope_follower_jit(rms_arr, attack_coeff, release_coeff):
+    """
+    Attack/release envelope follower compiled to native code via Numba.
+
+    The conditional coefficient choice (attack when rising, release when
+    falling) makes this a non-linear recurrence that can't be expressed as a
+    linear IIR filter -- the loop is intrinsically sequential. @njit gives
+    C-speed iteration; cache=True writes the compiled artifact to __pycache__
+    so de_esser.py subprocesses skip recompilation after the first run.
+    """
+    n = len(rms_arr)
+    out = np.empty(n, np.float64)
+    one_minus_a = 1.0 - attack_coeff
+    one_minus_r = 1.0 - release_coeff
+    env = 0.0
+    for i in range(n):
+        r = rms_arr[i]
+        if r > env:
+            env = attack_coeff * env + one_minus_a * r
+        else:
+            env = release_coeff * env + one_minus_r * r
+        out[i] = env
+    return out
+
+
 def build_gain_curve(detection: np.ndarray, sample_rate: int,
                      threshold_offset_db: float, max_reduction_db: float,
                      attack_ms: float, release_ms: float):
@@ -477,25 +504,8 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
                         detection.astype(np.float64) ** 2)
     rms_arr   = np.sqrt(np.maximum(power_env, 0.0))
 
-    # Step 2: attack/release envelope follower. The conditional coefficient
-    # makes this a non-linear recurrence -- not expressible as lfilter. The
-    # loop body is bare-minimum (compare + 2 muls + 1 add) and runs on Python
-    # floats from .tolist() to avoid numpy scalar dispatch overhead.
-    rms_list = rms_arr.tolist()
-    env_out  = [0.0] * n
-    env      = 0.0
-    a_attack  = attack_coeff
-    a_release = release_coeff
-    one_minus_a = 1.0 - attack_coeff
-    one_minus_r = 1.0 - release_coeff
-    for i in range(n):
-        r = rms_list[i]
-        if r > env:
-            env = a_attack * env + one_minus_a * r
-        else:
-            env = a_release * env + one_minus_r * r
-        env_out[i] = env
-    envelope_arr = np.asarray(env_out, dtype=np.float64)
+    # Step 2: attack/release envelope follower -- JIT-compiled (see above).
+    envelope_arr = _envelope_follower_jit(rms_arr, attack_coeff, release_coeff)
 
     # Step 3: vectorised soft-knee gain reduction.
     if threshold_lin > 0.0:
