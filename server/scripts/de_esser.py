@@ -236,8 +236,11 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
     starts = (np.arange(n_frames) * hop)[:, None]
     frames = samples_padded[starts + idx0].astype(np.float64)
     window = np.hanning(n_fft)
-    spec   = np.fft.rfft(frames * window, axis=1)
+    frames *= window             # in-place windowing avoids a (n_frames, n_fft) temporary
+    spec   = np.fft.rfft(frames, axis=1)
+    del frames                   # release (n_frames, n_fft) float64 -- no longer needed
     power  = (spec.real ** 2 + spec.imag ** 2)
+    del spec                     # release complex (n_frames, n_bins) -- no longer needed
 
     bin_freq = sample_rate / n_fft
     n_bins   = power.shape[1]
@@ -275,14 +278,19 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
     band_ok    = sib_hi >= sib_lo
     band_count = np.maximum(sib_hi - sib_lo + 1, 1).astype(np.float64)
 
-    # Cumsum-based variable-width band aggregates: with `cum[k, j] = sum
-    # power[k, :j]`, the inclusive sum from `lo` to `hi` is `cum[hi+1] - cum[lo]`.
-    # One numpy pass replaces the per-frame loop's millions of small calls.
-    frame_idx = np.arange(n_frames)
-    cum       = np.empty((n_frames, n_bins + 1), dtype=np.float64)
-    cum[:, 0] = 0.0
-    np.cumsum(power, axis=1, out=cum[:, 1:])
-    band_sum = cum[frame_idx, sib_hi + 1] - cum[frame_idx, sib_lo]
+    # Cumsum-based variable-width band aggregates. A single prefix-sum buffer
+    # is allocated once and reused for all three passes (sibilant power,
+    # log-power for flatness, weighted power for centroid). The log and
+    # weighted passes additionally restrict to the small subset of frames that
+    # need them, so their slices of prefix_buf are far smaller in practice:
+    #   - presibilant candidates (flatness pass): typically 5-15% of frames
+    #   - fricative frames       (centroid pass):  typically 2-8% of frames
+    # Peak memory drops from 3 × (n_frames, n_bins+1) to 1 × that shape.
+    frame_idx  = np.arange(n_frames)
+    prefix_buf = np.empty((n_frames, n_bins + 1), dtype=np.float64)
+    prefix_buf[:, 0] = 0.0
+    np.cumsum(power, axis=1, out=prefix_buf[:, 1:])
+    band_sum = prefix_buf[frame_idx, sib_hi + 1] - prefix_buf[frame_idx, sib_lo]
     avg_sib  = band_sum / band_count
     sibilant_db = np.where(band_ok & (avg_sib > 0),
                            10.0 * np.log10(np.maximum(avg_sib, 1e-30)),
@@ -297,35 +305,57 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
     else:
         mid_db = np.full(n_frames, -120.0, dtype=np.float64)
 
-    # Within-band spectral flatness (geometric/arithmetic mean ratio). A small
-    # epsilon under the log replaces the original "skip zero bins" mask: power
-    # spectra with exact zeros are vanishingly rare, and the bias from clamped
-    # zeros is well below the flatness > 0.1 fricative gate.
-    log_power     = np.log(np.maximum(power, 1e-30))
-    log_cum       = np.empty_like(cum)
-    log_cum[:, 0] = 0.0
-    np.cumsum(log_power, axis=1, out=log_cum[:, 1:])
-    log_sum  = log_cum[frame_idx, sib_hi + 1] - log_cum[frame_idx, sib_lo]
-    geo      = np.exp(log_sum / band_count)
-    flatness = np.where(band_ok & (avg_sib > 0), geo / np.maximum(avg_sib, 1e-30), 0.0)
+    # Flatness (geometric/arithmetic mean ratio) is only needed for frames
+    # that pass the sibilant-vs-mid 8 dB gate (presib_mask). These are the
+    # only candidates that can become fricatives, so we compute log_power only
+    # for that subset and reuse the head rows of prefix_buf for the cumsum.
+    presib_mask = (sibilant_db - mid_db > 8.0) & band_ok
+    flatness    = np.zeros(n_frames, dtype=np.float64)
+    if presib_mask.any():
+        cand_idx       = np.where(presib_mask)[0]
+        n_cand         = cand_idx.size
+        log_power_cand = np.log(np.maximum(power[cand_idx], 1e-30))
+        prefix_buf[:n_cand, 0] = 0.0
+        np.cumsum(log_power_cand, axis=1, out=prefix_buf[:n_cand, 1:])
+        del log_power_cand
+        cand_arange = np.arange(n_cand)
+        log_sum = (prefix_buf[cand_arange, sib_hi[cand_idx] + 1]
+                   - prefix_buf[cand_arange, sib_lo[cand_idx]])
+        geo = np.exp(log_sum / band_count[cand_idx])
+        flatness[cand_idx] = np.where(
+            avg_sib[cand_idx] > 0, geo / np.maximum(avg_sib[cand_idx], 1e-30), 0.0
+        )
 
     # Fricative gate: sibilant >> mid AND band broad/flat. Same thresholds as JS.
-    fricative_mask = (sibilant_db - mid_db > 8.0) & (flatness > 0.1) & band_ok
+    fricative_mask = presib_mask & (flatness > 0.1)
 
-    # Per-frame centroid (only meaningful for fricative frames; default to band
-    # center for non-fricative frames so target_freq stays smooth).
-    bins_arr   = np.arange(n_bins, dtype=np.float64) * bin_freq
-    w_cum       = np.empty_like(cum)
-    w_cum[:, 0] = 0.0
-    np.cumsum(power * bins_arr[None, :], axis=1, out=w_cum[:, 1:])
-    w_sum      = w_cum[frame_idx, sib_hi + 1] - w_cum[frame_idx, sib_lo]
+    # Centroid is only needed for fricative frames; target_freq defaults to
+    # band_center for all others. Reuse prefix_buf for the weighted cumsum on
+    # the fricative-row subset. power[fric_idx] fancy-indexing always returns a
+    # copy, so the in-place *= weighting below doesn't mutate power.
+    bins_arr    = np.arange(n_bins, dtype=np.float64) * bin_freq
     band_center = (band_lo + band_hi) / 2.0
-    centroid    = np.where(band_sum > 0,
-                           w_sum / np.maximum(band_sum, 1e-30),
-                           band_center)
+    target_freq = band_center.copy()
+    if fricative_mask.any():
+        fric_idx   = np.where(fricative_mask)[0]
+        n_fric     = fric_idx.size
+        power_fric = power[fric_idx]          # copy via fancy indexing
+        power_fric *= bins_arr[None, :]       # in-place frequency-weighting
+        prefix_buf[:n_fric, 0] = 0.0
+        np.cumsum(power_fric, axis=1, out=prefix_buf[:n_fric, 1:])
+        del power_fric
+        fric_arange = np.arange(n_fric)
+        w_sum = (prefix_buf[fric_arange, sib_hi[fric_idx] + 1]
+                 - prefix_buf[fric_arange, sib_lo[fric_idx]])
+        target_freq[fric_idx] = np.where(
+            band_sum[fric_idx] > 0,
+            w_sum / np.maximum(band_sum[fric_idx], 1e-30),
+            band_center[fric_idx],
+        )
 
-    target_freq         = np.where(fricative_mask, centroid, band_center)
-    fricative_centroids = centroid[fricative_mask]
+    del prefix_buf  # release before returning
+
+    fricative_centroids = target_freq[fricative_mask]
     fricative_energies  = sibilant_db[fricative_mask]
 
     # Aggregate stats
