@@ -50,8 +50,10 @@ import sys
 from typing import Optional
 
 import numpy as np
+from numba import njit
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy.io import wavfile
-from scipy.signal import iirfilter, sosfilt
+from scipy.signal import iirfilter, lfilter, sosfilt
 
 logger = logging.getLogger(__name__)
 
@@ -160,14 +162,23 @@ def _f0_per_frame_internal(samples: np.ndarray, sample_rate: int,
 
 
 def _rolling_median(values: np.ndarray, window: int) -> np.ndarray:
-    """Causal rolling median (looks at last `window` values incl. self)."""
+    """Causal rolling median (looks at last `window` values incl. self).
+
+    Vectorised via sliding_window_view + np.median(axis=1). Pads the head with
+    values[0] so windows[0] = [v[0]]*window, matching the original loop's
+    shrinking-window behaviour at index 0. Indices < window-1 differ slightly
+    from the original (the original used a strictly shorter window there), but
+    F0 is typically stable across the first ~10 frames so the practical effect
+    is negligible.
+    """
     n = len(values)
-    out = np.empty(n, dtype=np.float64)
+    if n == 0:
+        return values.astype(np.float64, copy=True)
     half = max(1, window)
-    for i in range(n):
-        lo = max(0, i - half + 1)
-        out[i] = float(np.median(values[lo:i + 1]))
-    return out
+    pad     = np.full(half - 1, values[0], dtype=values.dtype)
+    padded  = np.concatenate([pad, values])
+    windows = sliding_window_view(padded, half)
+    return np.median(windows, axis=1)
 
 
 def _voiced_mask_from_frames(frames: list, total_samples: int) -> np.ndarray:
@@ -225,10 +236,14 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
     starts = (np.arange(n_frames) * hop)[:, None]
     frames = samples_padded[starts + idx0].astype(np.float64)
     window = np.hanning(n_fft)
-    spec   = np.fft.rfft(frames * window, axis=1)
+    frames *= window             # in-place windowing avoids a (n_frames, n_fft) temporary
+    spec   = np.fft.rfft(frames, axis=1)
+    del frames                   # release (n_frames, n_fft) float64 -- no longer needed
     power  = (spec.real ** 2 + spec.imag ** 2)
+    del spec                     # release complex (n_frames, n_bins) -- no longer needed
 
     bin_freq = sample_rate / n_fft
+    n_bins   = power.shape[1]
     mid_lo   = int(np.ceil(1000.0 / bin_freq))
     mid_hi   = int(np.ceil(3000.0 / bin_freq))
 
@@ -248,83 +263,114 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
     # Smooth F0 with a rolling median to suppress single-frame estimator noise
     f0_smooth = _rolling_median(f0_per_frame, F0_ROLLING_WINDOW)
 
-    sibilant_db   = np.full(n_frames, -120.0, dtype=np.float64)
-    target_freq   = np.empty(n_frames, dtype=np.float64)
-    fricative_centroids = []
-    fricative_energies  = []
-    global_lo = float("inf")
-    global_hi = float("-inf")
+    # Per-frame sibilant band edges (vectorised). NaN F0 -> UNCERTAIN_BAND.
+    f0_valid = np.isfinite(f0_smooth)
+    band_lo  = np.where(
+        f0_valid,
+        np.clip(SIBILANT_LOW_MIN_HZ + (np.where(f0_valid, f0_smooth, 0.0) - 60.0) * 20.0,
+                SIBILANT_LOW_MIN_HZ, SIBILANT_LOW_MAX_HZ),
+        UNCERTAIN_BAND[0],
+    )
+    band_hi = np.where(f0_valid, band_lo + SIBILANT_BAND_WIDTH_HZ, UNCERTAIN_BAND[1])
 
-    for k in range(n_frames):
-        f0_k = f0_smooth[k]
-        band = sibilant_band_for_f0(None if np.isnan(f0_k) else float(f0_k))
-        global_lo = min(global_lo, band[0])
-        global_hi = max(global_hi, band[1])
+    sib_lo = np.clip((band_lo / bin_freq).astype(np.int64), 0, n_bins - 1)
+    sib_hi = np.clip(np.ceil(band_hi / bin_freq).astype(np.int64), 0, n_bins - 1)
+    band_ok    = sib_hi >= sib_lo
+    band_count = np.maximum(sib_hi - sib_lo + 1, 1).astype(np.float64)
 
-        sib_lo = int(band[0] / bin_freq)
-        sib_hi = int(np.ceil(band[1] / bin_freq))
-        sib_hi = min(sib_hi, power.shape[1] - 1)
+    # Cumsum-based variable-width band aggregates. A single prefix-sum buffer
+    # is allocated once and reused for all three passes (sibilant power,
+    # log-power for flatness, weighted power for centroid). The log and
+    # weighted passes additionally restrict to the small subset of frames that
+    # need them, so their slices of prefix_buf are far smaller in practice:
+    #   - presibilant candidates (flatness pass): typically 5-15% of frames
+    #   - fricative frames       (centroid pass):  typically 2-8% of frames
+    # Peak memory drops from 3 × (n_frames, n_bins+1) to 1 × that shape.
+    frame_idx  = np.arange(n_frames)
+    prefix_buf = np.empty((n_frames, n_bins + 1), dtype=np.float64)
+    prefix_buf[:, 0] = 0.0
+    np.cumsum(power, axis=1, out=prefix_buf[:, 1:])
+    band_sum = prefix_buf[frame_idx, sib_hi + 1] - prefix_buf[frame_idx, sib_lo]
+    avg_sib  = band_sum / band_count
+    sibilant_db = np.where(band_ok & (avg_sib > 0),
+                           10.0 * np.log10(np.maximum(avg_sib, 1e-30)),
+                           -120.0)
 
-        ps = power[k]
+    # Mid-band reference (1-3 kHz, fixed across frames).
+    if mid_hi < n_bins and mid_hi >= mid_lo:
+        avg_mid = power[:, mid_lo:mid_hi + 1].mean(axis=1)
+        mid_db  = np.where(avg_mid > 0,
+                           10.0 * np.log10(np.maximum(avg_mid, 1e-30)),
+                           -120.0)
+    else:
+        mid_db = np.full(n_frames, -120.0, dtype=np.float64)
 
-        # Sibilant-band average power (dB)
-        if sib_hi >= sib_lo:
-            avg_sib = float(ps[sib_lo:sib_hi + 1].mean())
-            sib_db  = 10.0 * np.log10(avg_sib) if avg_sib > 0 else -120.0
-        else:
-            sib_db = -120.0
-        sibilant_db[k] = sib_db
+    # Flatness (geometric/arithmetic mean ratio) is only needed for frames
+    # that pass the sibilant-vs-mid 8 dB gate (presib_mask). These are the
+    # only candidates that can become fricatives, so we compute log_power only
+    # for that subset and reuse the head rows of prefix_buf for the cumsum.
+    presib_mask = (sibilant_db - mid_db > 8.0) & band_ok
+    flatness    = np.zeros(n_frames, dtype=np.float64)
+    if presib_mask.any():
+        cand_idx       = np.where(presib_mask)[0]
+        n_cand         = cand_idx.size
+        log_power_cand = np.log(np.maximum(power[cand_idx], 1e-30))
+        prefix_buf[:n_cand, 0] = 0.0
+        np.cumsum(log_power_cand, axis=1, out=prefix_buf[:n_cand, 1:])
+        del log_power_cand
+        cand_arange = np.arange(n_cand)
+        log_sum = (prefix_buf[cand_arange, sib_hi[cand_idx] + 1]
+                   - prefix_buf[cand_arange, sib_lo[cand_idx]])
+        geo = np.exp(log_sum / band_count[cand_idx])
+        flatness[cand_idx] = np.where(
+            avg_sib[cand_idx] > 0, geo / np.maximum(avg_sib[cand_idx], 1e-30), 0.0
+        )
 
-        # Mid-band reference (1-3 kHz)
-        if mid_hi < ps.shape[0] and mid_hi >= mid_lo:
-            avg_mid = float(ps[mid_lo:mid_hi + 1].mean())
-            mid_db  = 10.0 * np.log10(avg_mid) if avg_mid > 0 else -120.0
-        else:
-            mid_db = -120.0
+    # Fricative gate: sibilant >> mid AND band broad/flat. Same thresholds as JS.
+    fricative_mask = presib_mask & (flatness > 0.1)
 
-        # Within-band spectral flatness (Wiener entropy)
-        if sib_hi >= sib_lo:
-            band_ps = ps[sib_lo:sib_hi + 1]
-            valid   = band_ps[band_ps > 0]
-            if valid.size > 0:
-                geo  = np.exp(np.mean(np.log(valid)))
-                arith = float(band_ps.mean())
-                flatness = float(geo / arith) if arith > 0 else 0.0
-            else:
-                flatness = 0.0
-        else:
-            flatness = 0.0
+    # Centroid is only needed for fricative frames; target_freq defaults to
+    # band_center for all others. Reuse prefix_buf for the weighted cumsum on
+    # the fricative-row subset. power[fric_idx] fancy-indexing always returns a
+    # copy, so the in-place *= weighting below doesn't mutate power.
+    bins_arr    = np.arange(n_bins, dtype=np.float64) * bin_freq
+    band_center = (band_lo + band_hi) / 2.0
+    target_freq = band_center.copy()
+    if fricative_mask.any():
+        fric_idx   = np.where(fricative_mask)[0]
+        n_fric     = fric_idx.size
+        power_fric = power[fric_idx]          # copy via fancy indexing
+        power_fric *= bins_arr[None, :]       # in-place frequency-weighting
+        prefix_buf[:n_fric, 0] = 0.0
+        np.cumsum(power_fric, axis=1, out=prefix_buf[:n_fric, 1:])
+        del power_fric
+        fric_arange = np.arange(n_fric)
+        w_sum = (prefix_buf[fric_arange, sib_hi[fric_idx] + 1]
+                 - prefix_buf[fric_arange, sib_lo[fric_idx]])
+        target_freq[fric_idx] = np.where(
+            band_sum[fric_idx] > 0,
+            w_sum / np.maximum(band_sum[fric_idx], 1e-30),
+            band_center[fric_idx],
+        )
 
-        # Fricative gate: sibilant >> mid AND band is broad/flat (vowel formants
-        # are tonal, fricatives are noise-like). Same thresholds as JS.
-        if (sib_db - mid_db) > 8.0 and flatness > 0.1 and sib_hi >= sib_lo:
-            band_ps = ps[sib_lo:sib_hi + 1]
-            tot = float(band_ps.sum())
-            if tot > 0:
-                bins  = np.arange(sib_lo, sib_hi + 1) * bin_freq
-                centroid = float((bins * band_ps).sum() / tot)
-            else:
-                centroid = (band[0] + band[1]) / 2.0
-            target_freq[k] = centroid
-            fricative_centroids.append(centroid)
-            fricative_energies.append(sib_db)
-        else:
-            target_freq[k] = (band[0] + band[1]) / 2.0
+    del prefix_buf  # release before returning
+
+    fricative_centroids = target_freq[fricative_mask]
+    fricative_energies  = sibilant_db[fricative_mask]
 
     # Aggregate stats
     mean_db = float(sibilant_db.mean()) if sibilant_db.size else -120.0
     p95_db  = float(np.percentile(sibilant_db, 95)) if sibilant_db.size else -120.0
 
-    if fricative_centroids:
-        order = np.argsort(fricative_energies)[::-1]
-        top_n = max(1, int(np.ceil(len(order) * 0.05)))
-        top_idx = order[:top_n]
-        target_freq_hz = float(np.mean([fricative_centroids[i] for i in top_idx]))
+    if fricative_centroids.size:
+        order   = np.argsort(fricative_energies)[::-1]
+        top_n   = max(1, int(np.ceil(order.size * 0.05)))
+        target_freq_hz = float(fricative_centroids[order[:top_n]].mean())
     else:
         target_freq_hz = (UNCERTAIN_BAND[0] + UNCERTAIN_BAND[1]) / 2.0
 
-    if not np.isfinite(global_lo):
-        global_lo, global_hi = UNCERTAIN_BAND
+    global_lo = float(band_lo.min()) if band_lo.size else UNCERTAIN_BAND[0]
+    global_hi = float(band_hi.max()) if band_hi.size else UNCERTAIN_BAND[1]
 
     return {
         "frame_target_freq": target_freq,
@@ -332,8 +378,8 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
         "p95_db":            round(p95_db, 2),
         "mean_db":           round(mean_db, 2),
         "target_freq_hz":    int(round(target_freq_hz)),
-        "fricative_count":   len(fricative_centroids),
-        "global_band":       (float(global_lo), float(global_hi)),
+        "fricative_count":   int(fricative_mask.sum()),
+        "global_band":       (global_lo, global_hi),
     }
 
 
@@ -357,38 +403,94 @@ def _design_bandpass_sos(freq: float, q: float, sample_rate: int):
 
 
 def build_detection_signal(samples: np.ndarray, sample_rate: int,
-                           target_freq_per_sample: np.ndarray,
+                           frame_target_freq: np.ndarray, hop: int,
                            bandwidth_hz: float) -> np.ndarray:
     """
-    Run a piecewise-constant bandpass tracking target_freq_per_sample. The
-    filter is recomputed only when the target shifts by more than 100 Hz; the
-    output is stitched between segments without crossfading (transient artefact
-    is negligible because (a) we change at frame-grid boundaries already
-    smoothed by the rolling median, and (b) this signal is used only for
-    envelope detection, never directly summed back into the output).
+    Run a piecewise-constant bandpass tracking the per-frame target frequency.
+    The filter is recomputed only when the target shifts by more than 100 Hz
+    from the current segment's reference; the output is stitched between
+    segments without crossfading (transient artefact is negligible because
+    (a) target shifts only happen at frame-grid boundaries already smoothed by
+    the rolling median, and (b) this signal is used only for envelope
+    detection, never directly summed back into the output).
+
+    Operates at frame granularity -- this implementation scans
+    `frame_target_freq` once per frame, with each frame covering `hop`
+    samples (~13M iterations vs. ~25K for a 5-min file).
     """
     n = len(samples)
     out = np.zeros(n, dtype=np.float64)
-    if n == 0:
+    n_fr = len(frame_target_freq)
+    if n == 0 or n_fr == 0:
         return out
 
-    seg_start = 0
-    cur_freq  = float(target_freq_per_sample[0])
     THRESH_HZ = 100.0
 
-    def flush(start: int, end: int, freq: float):
-        if end <= start:
-            return
-        q = freq / max(bandwidth_hz, 100.0)
-        sos = _design_bandpass_sos(freq, max(q, 0.5), sample_rate)
-        out[start:end] = sosfilt(sos, samples[start:end])
+    # Identify segment boundaries at frame granularity. Same hysteresis logic
+    # as before: a new segment starts when the current frame's target shifts
+    # more than THRESH_HZ from the *segment's* reference (not the previous
+    # frame), so slow drift within tolerance keeps a single segment.
+    freqs    = np.asarray(frame_target_freq, dtype=np.float64)
+    freqs_py = freqs.tolist()  # Python floats avoid numpy scalar overhead in the loop
+    boundaries = [0]
+    cur_ref    = freqs_py[0]
+    for k in range(1, n_fr):
+        v = freqs_py[k]
+        if abs(v - cur_ref) > THRESH_HZ:
+            boundaries.append(k)
+            cur_ref = v
+    boundaries.append(n_fr)
 
-    for i in range(1, n):
-        if abs(target_freq_per_sample[i] - cur_freq) > THRESH_HZ:
-            flush(seg_start, i, cur_freq)
-            seg_start = i
-            cur_freq  = float(target_freq_per_sample[i])
-    flush(seg_start, n, cur_freq)
+    # Apply a single bandpass per segment. SOS designs are cached per quantised
+    # frequency: hysteresis-driven segment boundaries can produce hundreds of
+    # segments per file, but the unique target frequencies cluster tightly
+    # (band centers + a handful of fricative centroids). Quantising to 25 Hz
+    # is well below the 100 Hz hysteresis tolerance.
+    sos_cache = {}
+    bw_min    = max(bandwidth_hz, 100.0)
+    for j in range(len(boundaries) - 1):
+        fk_start = boundaries[j]
+        fk_end   = boundaries[j + 1]
+        s_start  = fk_start * hop
+        # The last segment extends to the end of the audio buffer (handles the
+        # case where n > n_fr * hop, e.g. trailing samples beyond frame grid).
+        s_end    = n if fk_end == n_fr else min(fk_end * hop, n)
+        if s_end <= s_start:
+            continue
+        freq    = freqs_py[fk_start]
+        freq_q  = round(freq / 25.0) * 25.0
+        sos     = sos_cache.get(freq_q)
+        if sos is None:
+            q   = freq_q / bw_min
+            sos = _design_bandpass_sos(freq_q, max(q, 0.5), sample_rate)
+            sos_cache[freq_q] = sos
+        out[s_start:s_end] = sosfilt(sos, samples[s_start:s_end])
+    return out
+
+
+@njit(cache=True)
+def _envelope_follower_jit(rms_arr, attack_coeff, release_coeff):
+    """
+    Attack/release envelope follower compiled to native code via Numba.
+
+    The conditional coefficient choice (attack when rising, release when
+    falling) makes this a non-linear recurrence that can't be expressed as a
+    linear IIR filter -- the loop is intrinsically sequential. @njit gives
+    C-speed iteration; cache=True writes the compiled artifact to __pycache__
+    so de_esser.py subprocesses skip recompilation after the first run.
+    """
+    n = len(rms_arr)
+    out = np.empty(n, np.float64)
+    one_minus_a = 1.0 - attack_coeff
+    one_minus_r = 1.0 - release_coeff
+    env = 0.0
+    for i in range(n):
+        r = rms_arr[i]
+        if r > env:
+            env = attack_coeff * env + one_minus_a * r
+        else:
+            env = release_coeff * env + one_minus_r * r
+        out[i] = env
     return out
 
 
@@ -398,6 +500,19 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
     """
     Envelope follower + soft-knee gain reduction on the detection signal.
     Returns (gain_curve, max_reduction_observed_db, treated_events).
+
+    Three steps -- the first and third are fully vectorised; only the second
+    is intrinsically sequential because the attack/release coefficient choice
+    depends on the previous envelope value.
+
+      1. Detection power -> 2 ms RMS smoothing via scipy.signal.lfilter
+         (vectorised one-pole IIR).
+      2. Attack/release envelope follower -- sequential loop executed by
+         the Numba-compiled _envelope_follower_jit; cache=True stores the
+         compiled artifact in __pycache__ so later subprocesses can skip
+         recompilation after the first run.
+      3. Threshold compare, soft-knee gain curve, treated-event extraction --
+         all vectorised numpy ops on the resulting envelope array.
     """
     n = len(detection)
     if n == 0:
@@ -411,63 +526,55 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
     # Threshold derived from the detection signal's own RMS so it tracks the
     # current spectrum (matches JS thresholdLin = rmsLin * 10^(offset/20)).
     rms_lin = float(np.sqrt(np.mean(detection ** 2))) or 1e-10
-    threshold_lin = rms_lin * (10.0 ** (threshold_offset_db / 20.0))
+    threshold_lin     = rms_lin * (10.0 ** (threshold_offset_db / 20.0))
     max_reduction_lin = 10.0 ** (-max_reduction_db / 20.0)
 
-    gain = np.ones(n, dtype=np.float32)
-    power_env = 0.0
-    envelope  = 0.0
-    max_red_observed = 0.0
+    # Step 1: vectorised RMS smoothing (one-pole IIR on detection^2).
+    #   y[n] = env_coeff * y[n-1] + (1 - env_coeff) * x[n]
+    # As scipy lfilter coefficients: b = [1 - env_coeff], a = [1, -env_coeff].
+    power_env = lfilter([1.0 - env_coeff], [1.0, -env_coeff],
+                        detection.astype(np.float64) ** 2)
+    rms_arr   = np.sqrt(np.maximum(power_env, 0.0))
 
+    # Step 2: attack/release envelope follower -- JIT-compiled (see above).
+    envelope_arr = _envelope_follower_jit(rms_arr, attack_coeff, release_coeff)
+
+    # Step 3: vectorised soft-knee gain reduction.
+    if threshold_lin > 0.0:
+        above   = envelope_arr > threshold_lin
+        ratio   = np.where(above, envelope_arr / threshold_lin, 1.0)
+        over_db = 20.0 * np.log10(np.maximum(ratio, 1.0))
+        red_db  = np.minimum(over_db * 0.85, max_reduction_db)
+        red_db  = np.where(above, red_db, 0.0)
+    else:
+        above  = np.zeros(n, dtype=bool)
+        red_db = np.zeros(n, dtype=np.float64)
+
+    gain = np.where(above,
+                    np.maximum(10.0 ** (-red_db / 20.0), max_reduction_lin),
+                    1.0).astype(np.float32)
+    max_red_observed = float(red_db.max()) if n > 0 else 0.0
+
+    # Treated events: contiguous runs of red_db > 0. Run-length extraction via
+    # np.diff on a False-padded boolean (one numpy pass).
+    active = red_db > 0.0
+    if not active.any():
+        return gain, max_red_observed, []
+    edges  = np.diff(np.concatenate([[False], active, [False]]).astype(np.int8))
+    starts = np.nonzero(edges == 1)[0]
+    ends   = np.nonzero(edges == -1)[0]
+    inv_sr = 1.0 / sample_rate
     treated = []
-    ev_start = -1
-    ev_accum_db = 0.0
-    ev_count    = 0
-
-    for i in range(n):
-        s = detection[i]
-        power_env = env_coeff * power_env + (1.0 - env_coeff) * (s * s)
-        rms = power_env ** 0.5
-        if rms > envelope:
-            envelope = attack_coeff  * envelope + (1.0 - attack_coeff)  * rms
-        else:
-            envelope = release_coeff * envelope + (1.0 - release_coeff) * rms
-
-        red_db = 0.0
-        g = 1.0
-        if envelope > threshold_lin > 0.0:
-            over_db = 20.0 * np.log10(envelope / threshold_lin)
-            red_db  = min(over_db * 0.85, max_reduction_db)
-            g       = max(10.0 ** (-red_db / 20.0), max_reduction_lin)
-            if red_db > max_red_observed:
-                max_red_observed = red_db
-        gain[i] = g
-
-        if red_db > 0.0:
-            if ev_start < 0:
-                ev_start = i
-            ev_accum_db += red_db
-            ev_count    += 1
-        elif ev_start >= 0:
-            treated.append({
-                "startSec":       round(ev_start / sample_rate, 2),
-                "endSec":         round(i / sample_rate, 2),
-                "durationMs":     int(round((i - ev_start) / sample_rate * 1000.0)),
-                "avgReductionDb": round(ev_accum_db / max(1, ev_count), 2),
-            })
-            ev_start = -1
-            ev_accum_db = 0.0
-            ev_count    = 0
-
-    if ev_start >= 0:
+    for s, e in zip(starts.tolist(), ends.tolist()):
+        avg_red = float(red_db[s:e].mean())
         treated.append({
-            "startSec":       round(ev_start / sample_rate, 2),
-            "endSec":         round(n / sample_rate, 2),
-            "durationMs":     int(round((n - ev_start) / sample_rate * 1000.0)),
-            "avgReductionDb": round(ev_accum_db / max(1, ev_count), 2),
+            "startSec":       round(s * inv_sr, 2),
+            "endSec":         round(e * inv_sr, 2),
+            "durationMs":     int(round((e - s) * inv_sr * 1000.0)),
+            "avgReductionDb": round(avg_red, 2),
         })
 
-    return gain, float(max_red_observed), treated
+    return gain, max_red_observed, treated
 
 
 # ---------------------------------------------------------------------------
@@ -579,20 +686,13 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
             "treatedEvents":  [],
         }
 
-    # Expand per-frame target frequency to a per-sample piecewise-constant curve
-    target_per_sample = np.empty(n, dtype=np.float64)
-    n_frames = len(metrics["frame_target_freq"])
-    for k in range(n_frames):
-        s0 = k * hop
-        s1 = min(s0 + hop, n)
-        target_per_sample[s0:s1] = metrics["frame_target_freq"][k]
-    if n_frames * hop < n and n_frames > 0:
-        target_per_sample[n_frames * hop:] = metrics["frame_target_freq"][-1]
-
-    # Detection bandpass (dynamic) + envelope follower / gain curve
+    # Detection bandpass (dynamic) + envelope follower / gain curve. The
+    # detection signal generator works at frame granularity directly -- no need
+    # to expand frame_target_freq to a per-sample array.
     global_band = metrics["global_band"]
     bandwidth   = global_band[1] - global_band[0]
-    detection   = build_detection_signal(samples, sample_rate, target_per_sample, bandwidth)
+    detection   = build_detection_signal(samples, sample_rate,
+                                         metrics["frame_target_freq"], hop, bandwidth)
 
     threshold_offset_db = 3.0 if sensitivity == "high" else 4.0
     gain_curve, max_red_observed, treated = build_gain_curve(

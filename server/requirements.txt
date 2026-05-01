@@ -13,6 +13,12 @@
 torch==2.0.1
 torchaudio==2.0.2
 
+# ── JIT compilation ───────────────────────────────────────────────────────────
+
+# de_esser.py — envelope follower loop (@njit); cache=True writes to __pycache__
+# so de_esser.py subprocesses skip recompilation after the first run.
+numba>=0.59.0
+
 # ── Standard pipeline ─────────────────────────────────────────────────────────
 
 # deepfilter_enhance.py (Stage 2 noise reduction + NE-5 residual cleanup)
