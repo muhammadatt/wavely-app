@@ -6,6 +6,10 @@ dist
 # Python virtual environment
 server/.venv
 
+# Python bytecode caches
+__pycache__/
+*.pyc
+
 # Local environment overrides — never committed
 server/.env
 
