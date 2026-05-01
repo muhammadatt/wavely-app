@@ -68,6 +68,24 @@ app.use('/api', processRoute)
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Wavely server listening on port ${PORT}`)
 })
+
+// ── Proxy-safe timeout configuration ─────────────────────────────────────────
+//
+// Apache (and nginx) reuse keep-alive connections to the upstream.  Node.js's
+// default keepAliveTimeout is only 5 s, which is shorter than most proxy
+// keepalive windows.  If Apache sends the next request on a connection that
+// Node.js has already decided to close, Apache reads a connection reset and
+// returns 502 Bad Gateway.  This is especially likely with large file uploads
+// because the upload takes long enough for the race to be hit reliably.
+//
+// Rule: keepAliveTimeout must be > proxy keepalive timeout (Apache default: 5 s,
+//       but commonly 60–75 s in production configs).  headersTimeout must be
+//       > keepAliveTimeout so the two timers don't fire in the wrong order.
+//
+// These values are intentionally generous — they only govern idle time between
+// requests on a persistent connection, not the duration of an active upload.
+server.keepAliveTimeout = 75_000  // 75 s — safely above typical proxy keepalive
+server.headersTimeout   = 80_000  // must be strictly greater than keepAliveTimeout
