@@ -32,9 +32,24 @@ Dependencies: numpy, scipy
 import time
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import get_window
-from scipy.ndimage import uniform_filter1d
+from scipy.ndimage import uniform_filter1d, convolve1d
 from collections import deque
+
+# Reuse the JIT-compiled IIR + OLA kernels defined in resonance_suppressor.
+# Identical signatures, identical numerics; avoids duplicating ~30 lines and a
+# second numba cache entry. Falls back transparently when numba is unavailable.
+try:
+    from resonance_suppressor import (
+        _iir_attack_release,
+        _overlap_add,
+        _NUMBA_AVAILABLE,
+    )
+except ImportError:
+    _NUMBA_AVAILABLE     = False
+    _iir_attack_release  = None
+    _overlap_add         = None
 
 
 def build_events_map(
@@ -645,23 +660,15 @@ class SibilanceSuppressor:
             return 1.0
         return np.exp(-frame_period_ms / time_ms)
 
-    def _compute_gain_reduction(
+    def _compute_target_no_spread(
         self,
         magnitude_db:  np.ndarray,
         reference_db:  np.ndarray,
     ) -> np.ndarray:
         """
-        Compute per-bin gain reduction against the long-term reference.
-
-        Only fires within the sibilant band. Uses the same soft-knee
-        depth/selectivity pattern as the resonance suppressor for consistency.
-
-        Args:
-            magnitude_db: current frame magnitude in dB, shape (n_bins,)
-            reference_db: long-term EMA reference in dB,   shape (n_bins,)
-
-        Returns:
-            reduction_db: gain reduction to apply (positive = cut), shape (n_bins,)
+        Compute the per-bin target reduction (depth + selectivity + soft knee
+        + clip) without applying the bin-axis spread kernel. The chunked path
+        applies the spread once per chunk via convolve1d for efficiency.
         """
         p             = self.params
         selectivity   = p["selectivity"]
@@ -684,11 +691,23 @@ class SibilanceSuppressor:
         else:
             raw_reduction = above_threshold * depth
 
-        reduction_db = np.clip(raw_reduction, 0.0, max_reduction)
+        return np.clip(raw_reduction, 0.0, max_reduction)
+
+    def _compute_gain_reduction(
+        self,
+        magnitude_db:  np.ndarray,
+        reference_db:  np.ndarray,
+    ) -> np.ndarray:
+        """
+        Per-frame gain reduction against the long-term reference, including
+        the bin-axis spread kernel. Retained for backwards compatibility and
+        for callers that need the full reduction in one shot.
+        """
+        reduction_db = self._compute_target_no_spread(magnitude_db, reference_db)
 
         if self.spread_kernel is not None and reduction_db.any():
             reduction_db = np.convolve(reduction_db, self.spread_kernel, mode="same")
-            reduction_db = np.clip(reduction_db, 0.0, max_reduction)
+            reduction_db = np.clip(reduction_db, 0.0, self.params["max_reduction_db"])
 
         return reduction_db
 
@@ -779,9 +798,12 @@ class SibilanceSuppressor:
                 "events_map": None,
             }
 
+        # Float32 audio keeps the spectral arrays float32 throughout.
+        if audio_padded.dtype != np.float32:
+            audio_padded = audio_padded.astype(np.float32, copy=False)
+
         output_buffer      = np.zeros(n_padded, dtype=np.float64)
         window_accumulator = np.zeros(n_padded, dtype=np.float64)
-        smoothed_gr        = np.zeros(self.n_bins)
 
         max_reduction              = 0.0
         sum_reduction              = 0.0
@@ -790,10 +812,11 @@ class SibilanceSuppressor:
         sibilant_frames_processed  = 0
         active_threshold           = 0.01
 
-        bin_sum_reduction  = np.zeros(self.n_bins)
-        bin_max_reduction  = np.zeros(self.n_bins)
+        bin_sum_reduction  = np.zeros(self.n_bins, dtype=np.float64)
+        bin_max_reduction  = np.zeros(self.n_bins, dtype=np.float64)
         voiced_frame_count = 0
         eps                = 1e-10
+        max_reduction_db   = float(self.params["max_reduction_db"])
 
         # Per-frame detection trace -- only collected when running internal
         # detection so the result can carry an events_map payload for the
@@ -810,91 +833,151 @@ class SibilanceSuppressor:
                 if 0 <= fi < n_frames:
                     voiced_mask[fi] = True
 
-        for i in range(n_frames):
-            start = i * hop
-            end   = start + n_fft
+        # IIR state carried across chunks so attack/release behaviour matches
+        # the per-frame implementation. Float32 to match the JIT kernel.
+        prev_smoothed_gr  = np.zeros(self.n_bins, dtype=np.float32)
+        attack_coeff_f32  = np.float32(self.attack_coeff)
+        release_coeff_f32 = np.float32(self.release_coeff)
 
-            frame_raw    = audio_padded[start:end]
-            frame        = frame_raw * window
-            spectrum     = np.fft.rfft(frame).astype(np.complex64, copy=False)
-            magnitude    = np.abs(spectrum)
+        # 2048 frames ~= 24 s at 44.1 kHz / hop=512. Bounds per-chunk peak
+        # memory for long files while keeping FFT batches large enough to
+        # amortise allocation overhead.
+        CHUNK_FRAMES = 2048
+
+        for chunk_start in range(0, n_frames, CHUNK_FRAMES):
+            chunk_end   = min(chunk_start + CHUNK_FRAMES, n_frames)
+            chunk_n     = chunk_end - chunk_start
+            audio_start = chunk_start * hop
+            audio_stop  = (chunk_end - 1) * hop + n_fft
+
+            # Batched framing via stride trick -- (chunk_n, n_fft) view, no copy.
+            chunk_audio = audio_padded[audio_start:audio_stop]
+            frame_view  = sliding_window_view(chunk_audio, n_fft)[::hop][:chunk_n]
+            frames      = frame_view * window  # (chunk_n, n_fft) float32
+
+            # Batched STFT.
+            spectra      = np.fft.rfft(frames, axis=1).astype(np.complex64, copy=False)
+            magnitude    = np.abs(spectra)
             magnitude_db = 20.0 * np.log10(magnitude + eps)
 
-            is_voiced   = bool(voiced_mask[i])
+            target_gr_chunk = np.zeros((chunk_n, self.n_bins), dtype=np.float32)
 
-            # Rolling F0, dual-condition detection, and EMA update are all
-            # delegated to the detector. The detector exposes the resulting
-            # sibilant_mask / long_term_power / voiced_frame_count for the
-            # gain-reduction step that follows.
-            #
-            # When an event map is provided, detection is bypassed: the
-            # detector consumes the precomputed sibilant flag and F0 for
-            # this frame and only updates band mask + EMA reference.
-            if events_map is None:
-                is_sibilant = self.detector.process_frame(frame_raw, magnitude, is_voiced)
-                emit_f0_per_frame.append(self.detector.f0)
+            # Per-frame detection + target collection. Detection is genuinely
+            # causal (rolling F0, EMA reference) so this loop must remain
+            # serial; everything around it (FFT/IFFT/IIR/OLA) is batched.
+            for j in range(chunk_n):
+                gi          = chunk_start + j
+                frame_raw_j = frame_view[j]
+                mag_j       = magnitude[j]
+                mdb_j       = magnitude_db[j]
+                is_voiced   = bool(voiced_mask[gi])
+
+                if events_map is None:
+                    is_sibilant = self.detector.process_frame(frame_raw_j, mag_j, is_voiced)
+                    emit_f0_per_frame.append(self.detector.f0)
+                    if is_sibilant:
+                        emit_sibilant_indices.append(gi)
+                else:
+                    f0_pre = precomputed_f0[gi] if gi < len(precomputed_f0) else None
+                    is_sibilant = self.detector.apply_event(
+                        mag_j, is_voiced,
+                        is_sibilant_pre=(gi in precomputed_sibilant),
+                        f0_pre=f0_pre,
+                    )
+
                 if is_sibilant:
-                    emit_sibilant_indices.append(i)
+                    sibilant_frames_detected += 1
+
+                if (is_sibilant and
+                        self.long_term_power is not None and
+                        self.voiced_frame_count >= warmup):
+                    reference_db = 10.0 * np.log10(self.long_term_power + eps)
+                    target_gr_chunk[j] = self._compute_target_no_spread(
+                        mdb_j, reference_db,
+                    )
+                    sibilant_frames_processed += 1
+                # is_sibilant is False on non-voiced frames (gated inside the
+                # detector) so target_gr_chunk[j] stays zero -- no explicit
+                # voiced gate needed here.
+
+            # Bin-axis spread kernel applied once per chunk along the bin
+            # axis. Equivalent to convolving each frame independently.
+            if self.spread_kernel is not None:
+                target_gr_chunk = convolve1d(
+                    target_gr_chunk, self.spread_kernel,
+                    axis=1, mode="constant", cval=0.0,
+                ).astype(np.float32, copy=False)
+                np.clip(target_gr_chunk, 0.0, max_reduction_db, out=target_gr_chunk)
+
+            # Attack/release IIR -- state-dependent coefficient, JITed via
+            # numba (shared kernel from resonance_suppressor) when available.
+            if _NUMBA_AVAILABLE:
+                smoothed_gr_matrix, prev_smoothed_gr = _iir_attack_release(
+                    target_gr_chunk, prev_smoothed_gr,
+                    attack_coeff_f32, release_coeff_f32,
+                )
             else:
-                f0_pre = precomputed_f0[i] if i < len(precomputed_f0) else None
-                is_sibilant = self.detector.apply_event(
-                    magnitude, is_voiced,
-                    is_sibilant_pre=(i in precomputed_sibilant),
-                    f0_pre=f0_pre,
+                smoothed_gr_matrix = np.empty_like(target_gr_chunk)
+                prev = prev_smoothed_gr
+                for j in range(chunk_n):
+                    tgt   = target_gr_chunk[j]
+                    coeff = np.where(tgt >= prev, attack_coeff_f32, release_coeff_f32)
+                    prev  = (coeff * prev + (np.float32(1.0) - coeff) * tgt).astype(np.float32)
+                    smoothed_gr_matrix[j] = prev
+                prev_smoothed_gr = prev
+
+            # Apply gain to spectra and inverse-FFT in one batch.
+            gain_linear      = np.power(10.0, -smoothed_gr_matrix / 20.0, dtype=np.float32)
+            modified_spectra = spectra * gain_linear
+            time_frames      = np.fft.irfft(modified_spectra, n=n_fft, axis=1).astype(
+                np.float64, copy=False,
+            )
+            time_frames *= window  # broadcast
+
+            # Overlap-add accumulation -- JITed when numba is available.
+            if _NUMBA_AVAILABLE:
+                _overlap_add(
+                    time_frames, window_squared, output_buffer,
+                    window_accumulator, chunk_start, hop, n_padded,
                 )
+            else:
+                for j in range(chunk_n):
+                    s    = (chunk_start + j) * hop
+                    e    = min(s + n_fft, n_padded)
+                    trim = e - s
+                    output_buffer[s:e]      += time_frames[j, :trim]
+                    window_accumulator[s:e] += window_squared[:trim]
 
-            if is_sibilant:
-                sibilant_frames_detected += 1
+            # Telemetry accumulation (batched over the chunk).
+            chunk_max = float(smoothed_gr_matrix.max()) if smoothed_gr_matrix.size else 0.0
+            if chunk_max > max_reduction:
+                max_reduction = chunk_max
+            chunk_active = smoothed_gr_matrix > active_threshold
+            n_active = int(chunk_active.sum())
+            if n_active > 0:
+                sum_reduction       += float(smoothed_gr_matrix[chunk_active].sum())
+                n_active_bins_total += n_active
 
-            # --- Gain reduction ---
-            target_gr = np.zeros(self.n_bins)
+            chunk_voiced = voiced_mask[chunk_start:chunk_end]
+            if chunk_voiced.any():
+                voiced_smoothed = smoothed_gr_matrix[chunk_voiced]
+                bin_sum_reduction += voiced_smoothed.sum(axis=0, dtype=np.float64)
+                bin_max_reduction  = np.maximum(
+                    bin_max_reduction, voiced_smoothed.max(axis=0),
+                )
+                voiced_frame_count += int(chunk_voiced.sum())
 
-            if (is_sibilant and
-                    self.long_term_power is not None and
-                    self.voiced_frame_count >= warmup):
-                reference_db = 10.0 * np.log10(self.long_term_power + eps)
-                target_gr    = self._compute_gain_reduction(magnitude_db, reference_db)
-                sibilant_frames_processed += 1
-
-            if not is_voiced:
-                target_gr = np.zeros(self.n_bins)
-
-            # --- Attack/release IIR ---
-            increasing  = target_gr >= smoothed_gr
-            coeff       = np.where(increasing, self.attack_coeff, self.release_coeff)
-            smoothed_gr = coeff * smoothed_gr + (1.0 - coeff) * target_gr
-
-            if i % 100 == 0:
+            # Periodic frame log preserved at the same 100-frame cadence as
+            # the per-frame implementation. Reads from the chunk matrices so
+            # the cost is negligible (one indexed max per logged frame).
+            log_first = chunk_start + ((100 - chunk_start % 100) % 100)
+            for gi in range(log_first, chunk_end, 100):
+                j = gi - chunk_start
                 logger.info(
-                    f"Frame {i:04d} | voiced={is_voiced} | sibilant={is_sibilant} | "
-                    f"lt_frames={self.voiced_frame_count} | "
-                    f"max_target={np.max(target_gr):.1f} dB | "
-                    f"max_smoothed={np.max(smoothed_gr):.1f} dB"
+                    f"Frame {gi:04d} | "
+                    f"max_target={float(target_gr_chunk[j].max()):.1f} dB | "
+                    f"max_smoothed={float(smoothed_gr_matrix[j].max()):.1f} dB"
                 )
-
-            # --- Telemetry ---
-            if is_voiced:
-                bin_sum_reduction += smoothed_gr
-                bin_max_reduction  = np.maximum(bin_max_reduction, smoothed_gr)
-                voiced_frame_count += 1
-
-            frame_max = float(np.max(smoothed_gr))
-            if frame_max > max_reduction:
-                max_reduction = frame_max
-            active_mask = smoothed_gr > active_threshold
-            if active_mask.any():
-                sum_reduction       += float(np.sum(smoothed_gr[active_mask]))
-                n_active_bins_total += int(active_mask.sum())
-
-            # --- Apply and ISTFT ---
-            gain_linear       = (10.0 ** (-smoothed_gr / 20.0)).astype(np.float32, copy=False)
-            modified_spectrum = spectrum * gain_linear
-            time_frame        = np.fft.irfft(modified_spectrum, n=n_fft) * window
-
-            frame_end = min(end, n_padded)
-            trim      = frame_end - start
-            output_buffer[start:frame_end]      += time_frame[:trim]
-            window_accumulator[start:frame_end] += window_squared[:trim]
 
         safe_acc      = np.where(window_accumulator > 1e-8, window_accumulator, 1.0)
         output_buffer /= safe_acc
