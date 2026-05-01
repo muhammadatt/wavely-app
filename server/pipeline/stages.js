@@ -151,11 +151,18 @@ export async function measureBefore(ctx) {
 // Ensures a consistent working level for NR, EQ, and compression regardless
 // of how quiet or loud the original recording is.
 // Runs after measureBefore so the report captures the original input level.
+//
+// Reuses the truePeak measured by measureBefore when available — the audio
+// between measureBefore and this stage is unchanged (monoMixdown, when it
+// runs, precedes measureBefore), so a second measurement pass would produce
+// the same value at the cost of another full-file FFmpeg+libebur128 read.
 
 export async function peakNormalize(ctx) {
   const TARGET_PEAK_DBFS = -1.0
-  const m      = await measureAudio(ctx.currentPath)
-  const peak   = m.truePeakDbfs
+  const cachedPeak = ctx.results.metrics?.truePeakDbfs
+  const peak = cachedPeak != null
+    ? cachedPeak
+    : (await measureAudio(ctx.currentPath)).truePeakDbfs
   const gainDb = TARGET_PEAK_DBFS - peak
 
   if (Math.abs(gainDb) < 0.1) {
@@ -295,10 +302,44 @@ export async function hpf(ctx) {
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
 
+// When noiseReduce runs a second time in a pipeline (e.g. STANDARD_PIPELINE
+// applies it once before compression and once after), the second pass is
+// frequently a near no-op because the first pass has already pushed the
+// noise floor well below the output-profile target. Skipping it when the
+// cached floor is already deep saves a full DF3 invocation (~70s on a
+// 12-min file) without compromising compliance — the threshold leaves a
+// 15 dB margin above the ACX -60 dBFS ceiling.
+const NR_SECOND_PASS_SKIP_THRESHOLD_DBFS =
+  parseFloat(process.env.NR_SECOND_PASS_SKIP_THRESHOLD_DBFS ?? '-75')
+
 export async function noiseReduce(ctx) {
   const model         = ctx.preset.noiseModel ?? 'df3'
   const outPath       = ctx.tmp('.wav')
   const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
+
+  // Second-pass skip: if a prior noiseReduce already populated the result and
+  // the cached floor is already below the skip threshold, leave the audio
+  // untouched and annotate the existing result. The cached floor reflects the
+  // post-first-pass / pre-compression state (set by remeasureFramesPostNr);
+  // compression amplifies but does not introduce broadband noise, so a deep
+  // cached floor is a reliable signal that a second NR pass is unnecessary.
+  if (
+    ctx.results.noiseReduction
+    && preNoiseFloor !== null
+    && preNoiseFloor < NR_SECOND_PASS_SKIP_THRESHOLD_DBFS
+  ) {
+    ctx.results.noiseReduction = {
+      ...ctx.results.noiseReduction,
+      secondPassSkipped:       true,
+      secondPassSkipReason:    `noise floor ${preNoiseFloor} dBFS < threshold ${NR_SECOND_PASS_SKIP_THRESHOLD_DBFS} dBFS`,
+      secondPassFloorDbfs:     preNoiseFloor,
+    }
+    ctx.log(
+      `[NR] Second pass skipped — noise floor ${preNoiseFloor} dBFS already below ` +
+      `${NR_SECOND_PASS_SKIP_THRESHOLD_DBFS} dBFS threshold`
+    )
+    return
+  }
 
   if (model === 'rnnoise') {
     await runRnnoise(ctx.currentPath, outPath)
@@ -737,15 +778,29 @@ export async function truePeakLimit(ctx) {
 
 // ── Stage: Measure after ──────────────────────────────────────────────────────
 //
-// Populates afterMeasurements including the noise floor from a fresh silence
-// analysis on the fully processed audio. The ACX noise-floor check runs off
-// this value, so it must reflect the actual silence floor (frame-based) and
-// not a histogram-derived proxy. The final frame analysis is merged into the
-// canonical ctx.results.metrics object for downstream reuse (qualityAdvisory).
+// Populates afterMeasurements including the noise floor from a frame-based
+// silence analysis on the fully processed audio. The ACX noise-floor check
+// runs off this value, so it must reflect the actual silence floor (frame-
+// based) and not a histogram-derived proxy. The final frame analysis is
+// merged into the canonical ctx.results.metrics object for downstream reuse
+// (qualityAdvisory).
+//
+// Energy metrics (noiseFloorDbfs, voicedRmsDbfs, etc.) are re-derived from
+// the current audio via remeasureFrames(), which preserves the Silero VAD
+// isSilence labels established by analyzeFramesRaw. The pipeline does not
+// change sample count between analyzeFramesRaw and measureAfter, so the
+// labels are stable and a fresh Silero subprocess is unnecessary. Falls back
+// to analyzeFrames() if no reference labels were ever produced.
 
 export async function measureAfter(ctx) {
-  const audio = await measureAudio(ctx.currentPath)
-  const fa    = await analyzeFrames(ctx.currentPath)
+  const reference = ctx.results.metrics
+  const hasReference = reference && Array.isArray(reference.frames) && reference.frames.length > 0
+  const [audio, fa] = await Promise.all([
+    measureAudio(ctx.currentPath),
+    hasReference
+      ? remeasureFrames(ctx.currentPath, reference)
+      : analyzeFrames(ctx.currentPath),
+  ])
 
   // Update canonical metrics with the final post-processing values.
   Object.assign(ctx.results.metrics, fa, {
