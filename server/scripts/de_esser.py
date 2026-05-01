@@ -384,9 +384,9 @@ def build_detection_signal(samples: np.ndarray, sample_rate: int,
     the rolling median, and (b) this signal is used only for envelope
     detection, never directly summed back into the output).
 
-    Operates at frame granularity -- the original implementation scanned every
-    sample even though target_freq_per_sample was piecewise-constant in chunks
-    of `hop` samples (~13M iterations vs. ~25K for a 5-min file).
+    Operates at frame granularity -- this implementation scans
+    `frame_target_freq` once per frame, with each frame covering `hop`
+    samples (~13M iterations vs. ~25K for a 5-min file).
     """
     n = len(samples)
     out = np.zeros(n, dtype=np.float64)
