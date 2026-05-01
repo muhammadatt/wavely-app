@@ -89,3 +89,11 @@ einops>=0.8.0
 #   ~/.cache/torch/hub/snakers4_silero-vad_master/
 # No torchaudio version constraint; compatible with torch==2.0.0.
 silero-vad>=5.1
+
+# ── JIT acceleration ──────────────────────────────────────────────────────────
+
+# resonance_suppressor.py / sibilance_suppressor.py inner loops.
+# Used for the attack/release IIR and overlap-add accumulation that resist
+# numpy vectorisation (state-dependent recursion, overlapping writes).
+# Compiled artefacts cached under server/scripts/__pycache__ via @njit(cache=True).
+numba>=0.59

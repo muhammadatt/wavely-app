@@ -28,6 +28,57 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# JIT-compiled inner loops
+# ---------------------------------------------------------------------------
+# The attack/release IIR is genuinely serial (next state depends on previous
+# state via a data-dependent coefficient) and the overlap-add accumulation
+# has overlapping writes -- neither vectorises in numpy. Both are JITed via
+# numba so the per-frame Python overhead disappears. Compiled artefacts are
+# cached under server/scripts/__pycache__ so the ~3 s first-run compile is
+# paid once per environment and reused across server restarts.
+try:
+    from numba import njit
+
+    @njit(cache=True, fastmath=True)
+    def _iir_attack_release(target_gr, prev_init, attack_coeff, release_coeff):
+        """Per-bin attack/release IIR over a (n_frames, n_bins) chunk."""
+        n_frames, n_bins = target_gr.shape
+        out  = np.empty_like(target_gr)
+        prev = prev_init.copy()
+        for j in range(n_frames):
+            for b in range(n_bins):
+                t = target_gr[j, b]
+                c = attack_coeff if t >= prev[b] else release_coeff
+                prev[b] = c * prev[b] + (np.float32(1.0) - c) * t
+                out[j, b] = prev[b]
+        return out, prev
+
+    @njit(cache=True, fastmath=True)
+    def _overlap_add(time_frames, window_squared, output_buffer,
+                     window_accumulator, frame_offset, hop, n_padded):
+        """Accumulate windowed time-domain frames into the OLA buffers."""
+        n_frames, n_fft = time_frames.shape
+        for j in range(n_frames):
+            s = (frame_offset + j) * hop
+            e = s + n_fft
+            if e > n_padded:
+                e = n_padded
+            trim = e - s
+            for k in range(trim):
+                output_buffer[s + k]      += time_frames[j, k]
+                window_accumulator[s + k] += window_squared[k]
+
+    _NUMBA_AVAILABLE = True
+except ImportError:
+    _NUMBA_AVAILABLE = False
+    _iir_attack_release = None
+    _overlap_add        = None
+    logger.warning(
+        "ResonanceSuppressor: numba not available, falling back to numpy loops."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Preset-calibrated default parameters
 # ---------------------------------------------------------------------------
 
@@ -389,17 +440,22 @@ class ResonanceSuppressor:
             if not chunk_voiced.all():
                 target_gr[~chunk_voiced, :] = 0.0
 
-            # Attack/release IIR -- vectorised across bins, serial across
-            # frames. The per-frame body is two numpy ops over n_bins; the
-            # Python overhead at chunk_n=2048 is negligible.
-            smoothed_gr_matrix = np.empty_like(target_gr)
-            prev = prev_smoothed_gr
-            for j in range(chunk_n):
-                tgt   = target_gr[j]
-                coeff = np.where(tgt >= prev, attack_coeff, release_coeff)
-                prev  = coeff * prev + (np.float32(1.0) - coeff) * tgt
-                smoothed_gr_matrix[j] = prev
-            prev_smoothed_gr = prev
+            # Attack/release IIR -- state-dependent coefficient prevents
+            # numpy vectorisation across frames. JITed via numba when
+            # available, with a numpy fallback that loops in Python.
+            if _NUMBA_AVAILABLE:
+                smoothed_gr_matrix, prev_smoothed_gr = _iir_attack_release(
+                    target_gr, prev_smoothed_gr, attack_coeff, release_coeff,
+                )
+            else:
+                smoothed_gr_matrix = np.empty_like(target_gr)
+                prev = prev_smoothed_gr
+                for j in range(chunk_n):
+                    tgt   = target_gr[j]
+                    coeff = np.where(tgt >= prev, attack_coeff, release_coeff)
+                    prev  = coeff * prev + (np.float32(1.0) - coeff) * tgt
+                    smoothed_gr_matrix[j] = prev
+                prev_smoothed_gr = prev
 
             # Apply gain to spectra and inverse-FFT in one batch.
             gain_linear      = np.power(10.0, -smoothed_gr_matrix / 20.0, dtype=np.float32)
@@ -409,14 +465,20 @@ class ResonanceSuppressor:
             )
             time_frames *= window  # broadcast
 
-            # Overlap-add into the global buffer. The accumulation loop is
-            # the only remaining per-frame loop and is just two slice-adds.
-            for j in range(chunk_n):
-                s   = (chunk_start + j) * hop
-                e   = min(s + n_fft, n_padded)
-                trim = e - s
-                output_buffer[s:e]      += time_frames[j, :trim]
-                window_accumulator[s:e] += window_squared[:trim]
+            # Overlap-add into the global buffer. JITed when numba is
+            # available so the per-frame Python overhead disappears.
+            if _NUMBA_AVAILABLE:
+                _overlap_add(
+                    time_frames, window_squared, output_buffer,
+                    window_accumulator, chunk_start, hop, n_padded,
+                )
+            else:
+                for j in range(chunk_n):
+                    s    = (chunk_start + j) * hop
+                    e    = min(s + n_fft, n_padded)
+                    trim = e - s
+                    output_buffer[s:e]      += time_frames[j, :trim]
+                    window_accumulator[s:e] += window_squared[:trim]
 
             # Telemetry accumulation.
             chunk_max = float(smoothed_gr_matrix.max()) if smoothed_gr_matrix.size else 0.0
