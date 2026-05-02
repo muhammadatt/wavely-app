@@ -302,10 +302,19 @@ export async function hpf(ctx) {
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
 
-// Skip the second noise reduction pass if the the noise floor is already 
+// Skip the second noise reduction pass if the the noise floor is already
 // below -75 db -- a 15 dB margin beyond the ACX -60 dBFS ceiling.
 const NR_SECOND_PASS_SKIP_THRESHOLD_DBFS =
   parseFloat(process.env.NR_SECOND_PASS_SKIP_THRESHOLD_DBFS ?? '-85')
+
+// Maximum makeup gain applied after NR to compensate for speech-level drop
+// caused by spectral masking. Capped to prevent over-amplification on
+// pathological files where DF3 legitimately removes a large portion of energy.
+const NR_MAX_MAKEUP_GAIN_DB = 6
+
+// Minimum voiced-RMS drop (in dB) before makeup gain kicks in. Below this
+// the drop is within measurement noise and not worth compensating.
+const NR_MAKEUP_THRESHOLD_DB = 0.3
 
 export async function noiseReduce(ctx) {
   const model         = ctx.preset.noiseModel ?? 'df3'
@@ -313,11 +322,8 @@ export async function noiseReduce(ctx) {
   const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
 
   // Second-pass skip: if a prior noiseReduce already populated the result and
-  // the cached floor is already below the skip threshold, leave the audio
-  // untouched and annotate the existing result. The cached floor reflects the
-  // post-first-pass / pre-compression state (set by remeasureFramesPostNr);
-  // compression amplifies but does not introduce broadband noise, so a deep
-  // cached floor is a reliable signal that a second NR pass is unnecessary.
+  // the noise floor (refreshed by remeasureFramesPostNr before this stage) is
+  // already below the skip threshold, leave the audio untouched.
   if (
     ctx.results.noiseReduction
     && preNoiseFloor !== null
@@ -335,6 +341,13 @@ export async function noiseReduce(ctx) {
     )
     return
   }
+
+  // ── Measure voiced RMS before NR for makeup gain calculation ────────────
+  // Uses the existing Silero VAD isSilence labels so only speech frames
+  // contribute. This isolates the speech-level delta from the (desired)
+  // noise-floor reduction.
+  const preFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
+  const preVoicedRms = preFa.voicedRmsDbfs
 
   if (model === 'rnnoise') {
     await runRnnoise(ctx.currentPath, outPath)
@@ -362,6 +375,39 @@ export async function noiseReduce(ctx) {
     nrResult.pre_noise_floor_dbfs = preNoiseFloor
     ctx.currentPath = outPath
     ctx.results.noiseReduction = nrResult
+  }
+
+  // ── Makeup gain: restore voiced level lost to spectral masking ──────────
+  // NR models attenuate noise bins via spectral masking, but some speech
+  // energy is collaterally reduced — especially on a second pass where
+  // compression has raised the noise floor, causing the model to mask more
+  // aggressively. Measure the voiced-RMS delta and apply linear makeup gain
+  // so downstream stages (compression, expander) see the expected level.
+  if (preVoicedRms !== null && preVoicedRms !== undefined) {
+    const postFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
+    const postVoicedRms = postFa.voicedRmsDbfs
+
+    if (postVoicedRms !== null && postVoicedRms !== undefined) {
+      const rawDelta = preVoicedRms - postVoicedRms
+      const makeupDb = Math.min(rawDelta, NR_MAX_MAKEUP_GAIN_DB)
+
+      if (makeupDb > NR_MAKEUP_THRESHOLD_DB) {
+        const gainedPath = ctx.tmp('.wav')
+        await applyLinearGain(ctx.currentPath, gainedPath, makeupDb)
+        ctx.currentPath = gainedPath
+        ctx.results.noiseReduction.makeupGainDb = round2(makeupDb)
+        ctx.log(
+          `[NR] Makeup gain: +${makeupDb.toFixed(2)} dB ` +
+          `(voiced RMS ${preVoicedRms} → ${postVoicedRms} dBFS)`
+        )
+      } else {
+        ctx.results.noiseReduction.makeupGainDb = 0
+        ctx.log(
+          `[NR] No makeup gain needed — voiced RMS delta ${rawDelta.toFixed(2)} dB ` +
+          `≤ ${NR_MAKEUP_THRESHOLD_DB} dB threshold`
+        )
+      }
+    }
   }
 
   await logLevel(ctx, `after NR (${model})`, ctx.currentPath, {

@@ -30,12 +30,13 @@ const STANDARD_PIPELINE = [
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
-  //stages.dereverb,
+  stages.dereverb,
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
-  //stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
+  stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   //stages.vocalExpander,         // CAUTION: Expander before compressor removes noise, but softens start of words
   stages.compress,                // Serial compression
+  stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
   stages.noiseReduce,             // Conditional secondary NR pass
   stages.parallelCompress,        // Parallel compression
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)

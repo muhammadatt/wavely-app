@@ -172,7 +172,7 @@ export const PRESETS = {
       attackMs:                    15,   
       releaseMs:                   150,
       makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.30,
+      wetMix:                      0.15,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 15,
