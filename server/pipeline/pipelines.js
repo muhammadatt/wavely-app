@@ -31,6 +31,7 @@ const STANDARD_PIPELINE = [
   stages.hpf,                     // 80hz hi pass filter
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
   stages.dereverb,
+  stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
   stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
@@ -38,7 +39,6 @@ const STANDARD_PIPELINE = [
   stages.compress,                // Serial compression
   stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
   stages.noiseReduce,             // Conditional secondary NR pass
-  stages.breathReduce,            // Breath event detection and gain reduction
   stages.parallelCompress,        // Parallel compression
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
   stages.vocalSaturation,

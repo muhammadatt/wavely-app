@@ -53,7 +53,7 @@ DEFAULT_PARAMS = {
     # Detection thresholds
     "rms_min_db":       -48.0,  # Below = silence (not a breath)
     "rms_max_db":       -24.0,  # Above = voiced speech (not a breath)
-    "flatness_min":       0.20, # Spectral flatness minimum (Wiener entropy)
+    "flatness_min":       0.05, # Spectral flatness minimum (Wiener entropy)
     "zcr_min":            0.08, # ZCR minimum (breaths have fast sign changes)
 
     # Event filtering
