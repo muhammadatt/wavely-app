@@ -193,6 +193,9 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    // Conservative: enough to clean audible breaths that flag ACX human review,
+    // but not so deep that the narrator's breathing presence disappears entirely.
+    breathReducer: { max_reduction_db: 12 },
     // Slightly more aggressive — mouth clicks are a human review concern for ACX
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
@@ -289,6 +292,9 @@ export const PRESETS = {
     airBoost: { gainDb: 2.5 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    // Light reduction — podcast listeners expect some breath presence; going
+    // deeper makes the performance feel over-edited.
+    breathReducer: { max_reduction_db: 6 },
     clickRemover: { thresholdSigma: 3.5, maxClickMs: 15 },
     // Stage 4 — Sibilance Suppressor. Slightly deeper reduction with a faster
     // attack matches the punchier, more processed podcast character; everything
@@ -370,6 +376,9 @@ export const PRESETS = {
     airBoost: { gainDb: 2.0 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    // Moderate — voice-over often sits under music beds where breaths are
+    // audible; deeper reduction than podcast, lighter than ACX.
+    breathReducer: { max_reduction_db: 10 },
     // Same rationale as ACX — voice actors also benefit from clean transients
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
     // Stage 4 — Sibilance Suppressor. Broadcast-neutral tuning sits between
@@ -455,6 +464,8 @@ export const PRESETS = {
     airBoost: { gainDb: 16 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    // Aggressive — unknown source material; cleaner is generally better here.
+    breathReducer: { max_reduction_db: 15 },
     // Conservative — unknown source material
     clickRemover: { thresholdSigma: 3.5, maxClickMs: 10 },
     // Stage 4 — Sibilance Suppressor. Pragmatic assertive: lower broadband

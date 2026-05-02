@@ -42,7 +42,7 @@ import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
 import { readFile } from 'fs/promises'
-import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression } from './enhancement.js'
+import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression, applyBreathReduction } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -545,6 +545,33 @@ export async function sibilanceSuppressor(ctx) {
     artifact_risk: result.artifact_risk ?? false,
     process_s:     result.process_seconds ?? 'n/a',
   })
+}
+
+
+// ── Stage: Breath Reducer (Stage 4c) ──────────────────────────────────────────
+// Detects breath events in unvoiced regions (moderate RMS, high ZCR, high
+// spectral flatness) and applies a smooth wideband gain reduction envelope.
+// Runs after secondary NR so the signal is as clean as possible for detection;
+// runs before parallelCompress so the parallel compressor does not pump on
+// breath transients. Skips silently when preset.breathReducer is absent.
+
+export async function breathReduce(ctx) {
+  const config = ctx.preset?.breathReducer
+  if (!config) {
+    ctx.results.breathReducer = { applied: false, reason: 'not configured' }
+    return
+  }
+
+  const outPath = ctx.tmp('.wav')
+  const frames  = ctx.results.metrics?.frames ?? null
+  const result  = await applyBreathReduction(ctx.currentPath, outPath, ctx.presetId, frames)
+  if (result.applied) ctx.currentPath = outPath
+  ctx.results.breathReducer = result
+  ctx.log(
+    result.applied
+      ? `[BreathReducer] ${result.breath_events} event(s) reduced by up to ${result.max_reduction_db}dB`
+      : '[BreathReducer] no breath events detected — skipped'
+  )
 }
 
 

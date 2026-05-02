@@ -38,6 +38,7 @@ const STANDARD_PIPELINE = [
   stages.compress,                // Serial compression
   stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
   stages.noiseReduce,             // Conditional secondary NR pass
+  stages.breathReduce,            // Breath event detection and gain reduction
   stages.parallelCompress,        // Parallel compression
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
   stages.vocalSaturation,

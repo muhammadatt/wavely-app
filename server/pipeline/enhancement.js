@@ -35,6 +35,7 @@ const LAVASR_SCRIPT           = path.join(SCRIPTS_DIR, 'lavasr_extend.py')
 const CLICK_REMOVER_SCRIPT    = path.join(SCRIPTS_DIR, 'click_remover.py')
 const RESONANCE_SCRIPT        = path.join(SCRIPTS_DIR, 'resonance_suppressor.py')
 const SIBILANCE_SCRIPT        = path.join(SCRIPTS_DIR, 'sibilance_suppressor.py')
+const BREATH_REDUCER_SCRIPT   = path.join(SCRIPTS_DIR, 'breath_reducer.py')
 
 // ── Enhancement stages ────────────────────────────────────────────────────────
 
@@ -393,4 +394,45 @@ function runSibilanceScript(args) {
       reject(new Error(`Failed to spawn SibilanceSuppressor: ${err.message}`))
     })
   })
+}
+
+// ── Breath Reducer ────────────────────────────────────────────────────────────
+
+/**
+ * Stage 4c — Breath Reducer.
+ *
+ * Detects breath events (moderate RMS, high ZCR, high spectral flatness) in
+ * unvoiced regions and applies a smooth wideband gain reduction envelope.
+ *
+ * @param {string}        inputPath   32-bit float WAV at 44.1 kHz
+ * @param {string}        outputPath  Pre-allocated output path (ctx.tmp('.wav'))
+ * @param {string}        presetId    e.g. 'acx_audiobook'
+ * @param {object[]|null} frames      ctx.results.metrics.frames — VAD frame list
+ *   for voiced-region exclusion. Pass null for full-file detection.
+ * @returns {Promise<object>}  { applied, breath_events, max_reduction_db, process_seconds }
+ */
+export async function applyBreathReduction(inputPath, outputPath, presetId, frames) {
+  const args = ['--input', inputPath, '--output', outputPath]
+
+  const overrides = PRESETS[presetId]?.breathReducer
+  let paramsPath = null
+  if (overrides && Object.keys(overrides).length > 0) {
+    paramsPath = tempPath('.json')
+    await writeFile(paramsPath, JSON.stringify(overrides))
+    args.push('--params-json', paramsPath)
+  }
+
+  let vadMaskPath = null
+  if (frames && frames.length > 0) {
+    vadMaskPath = tempPath('.json')
+    await writeFile(vadMaskPath, JSON.stringify(frames))
+    args.push('--vad-mask-json', vadMaskPath)
+  }
+
+  try {
+    return await spawnPythonCapture(BREATH_REDUCER_SCRIPT, args, 'BreathReducer')
+  } finally {
+    if (paramsPath)  await rm(paramsPath,  { force: true })
+    if (vadMaskPath) await rm(vadMaskPath, { force: true })
+  }
 }
