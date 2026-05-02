@@ -305,7 +305,7 @@ export async function hpf(ctx) {
 // Skip the second noise reduction pass if the the noise floor is already 
 // below -75 db -- a 15 dB margin beyond the ACX -60 dBFS ceiling.
 const NR_SECOND_PASS_SKIP_THRESHOLD_DBFS =
-  parseFloat(process.env.NR_SECOND_PASS_SKIP_THRESHOLD_DBFS ?? '-75')
+  parseFloat(process.env.NR_SECOND_PASS_SKIP_THRESHOLD_DBFS ?? '-85')
 
 export async function noiseReduce(ctx) {
   const model         = ctx.preset.noiseModel ?? 'df3'

@@ -312,20 +312,7 @@ function runResonanceScript(args) {
 
     let stdout = ''
     let stderr = ''
-    let stdoutBuffer = ''
-
-    proc.stdout.on('data', chunk => {
-      const text = chunk.toString()
-      stdout += text
-      stdoutBuffer += text
-      const lines = stdoutBuffer.split('\n')
-      stdoutBuffer = lines.pop()
-      for (const line of lines) {
-        if (line.trim() && !line.startsWith('JSON_RESULT:')) {
-          console.log(`[ResonanceSuppressor] ${line}`)
-        }
-      }
-    })
+    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
 
     proc.stderr.on('data', chunk => {
       stderr += chunk.toString()
@@ -333,10 +320,6 @@ function runResonanceScript(args) {
     })
 
     proc.on('close', (code, signal) => {
-      if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
-        console.log(`[ResonanceSuppressor] ${stdoutBuffer.trim()}`)
-      }
-      if (stderr.trim() && code === 0) console.log(`[ResonanceSuppressor] ${stderr.trim()}`)
 
       if (code === 0 && signal === null) {
         const jsonLine = stdout.split('\n').find(l => l.startsWith('JSON_RESULT:'))
@@ -377,20 +360,8 @@ function runSibilanceScript(args) {
 
     let stdout = ''
     let stderr = ''
-    let stdoutBuffer = ''
 
-    proc.stdout.on('data', chunk => {
-      const text = chunk.toString()
-      stdout += text
-      stdoutBuffer += text
-      const lines = stdoutBuffer.split('\n')
-      stdoutBuffer = lines.pop()
-      for (const line of lines) {
-        if (line.trim() && !line.startsWith('JSON_RESULT:')) {
-          console.log(`[SibilanceSuppressor] ${line}`)
-        }
-      }
-    })
+    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
 
     proc.stderr.on('data', chunk => {
       stderr += chunk.toString()
@@ -398,10 +369,6 @@ function runSibilanceScript(args) {
     })
 
     proc.on('close', (code, signal) => {
-      if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
-        console.log(`[SibilanceSuppressor] ${stdoutBuffer.trim()}`)
-      }
-      if (stderr.trim() && code === 0) console.log(`[SibilanceSuppressor] ${stderr.trim()}`)
 
       if (code === 0 && signal === null) {
         const jsonLine = stdout.split('\n').find(l => l.startsWith('JSON_RESULT:'))

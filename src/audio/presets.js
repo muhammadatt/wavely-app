@@ -121,17 +121,16 @@ export const PRESETS = {
     dereverb: {
       enabled: true,
       strength: 'medium',
-      preserve_early: false,
+      preserve_early: true,
     },
     autoLeveler: {
-      maxGainDb:     8.0,
-      maxRateDbPerS: 1.0,
+      maxGainDb:     10.0,
+      maxRateDbPerS: 2.0,
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.2,
-      bias: 0.08,
-      f0: 109.4,
+      wetDry: 0.05,
+      bias: 0.08
     },
     compression: [
 
@@ -157,7 +156,7 @@ export const PRESETS = {
       },*/
       // Pass 2: Gentle Leveler (Body Control)
       // Smooths out the overall performance, bringing up presence without pumping
-      /*
+      
       {
         targetCrestFactorDb: 15,
         maxRatio: 3, // Gentle ratio for transparency
@@ -166,17 +165,17 @@ export const PRESETS = {
         attack: 15,    // Slow enough to let crisp consonants through (presence)
         release: 120,  // Slow release for smooth, unnoticeable recovery
       }
-      */
+      
     ],
     parallelCompression: {
-      ratio:                       10,
-      attackMs:                    0.1,   
-      releaseMs:                   50,
+      ratio:                       20,
+      attackMs:                    15,   
+      releaseMs:                   150,
       makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.40,
+      wetMix:                      0.30,
       vadFadeMs:                   5,
       crestGuardThresholdDb:       12,
-      parallelDesserMaxReductionDb: 6,
+      parallelDesserMaxReductionDb: 15,
     },
     // Stage 4a-E: Vocal Expander — frequency-selective silence-floor attenuation.
     // headroomOffsetDb - defines how close to speech threshold; 
