@@ -193,6 +193,17 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    // VAD Gate — conservative for ACX. Shallower floor preserves audible room
+    // tone (ACX human reviewers prefer natural silence); generous hold prevents
+    // chopping the long decay of narrated word endings.
+    vadGate: {
+      enabled:     false,
+      lookaheadMs: 30,
+      holdMs:      120,
+      attackMs:    10,
+      releaseMs:   80,
+      floorDb:     -50,
+    },
     // Conservative: enough to clean audible breaths that flag ACX human review,
     // but not so deep that the narrator's breathing presence disappears entirely.
     breathReducer: { max_reduction_db: 12 },
@@ -289,6 +300,17 @@ export const PRESETS = {
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    // VAD Gate — assertive for podcast. Deeper floor matches the tighter,
+    // more processed character; faster release keeps the gate from feeling
+    // sluggish on rapid-fire dialogue.
+    vadGate: {
+      enabled:     false,
+      lookaheadMs: 20,
+      holdMs:      80,
+      attackMs:    8,
+      releaseMs:   40,
+      floorDb:     -60,
+    },
     airBoost: { gainDb: 2.5 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
@@ -372,6 +394,17 @@ export const PRESETS = {
       lookaheadMs:      10,
       maxAttenuationDb: 12,
       detectionBand:    { lowHz: 80, highHz: 800 },
+    },
+    // VAD Gate — broadcast-neutral. Shallower floor than podcast since
+    // voice-over often sits under music; a hard cut would be audible against
+    // the bed.
+    vadGate: {
+      enabled:     false,
+      lookaheadMs: 25,
+      holdMs:      100,
+      attackMs:    10,
+      releaseMs:   60,
+      floorDb:     -55,
     },
     airBoost: { gainDb: 2.0 },
     bweModel: 'ap_bwe',
@@ -460,6 +493,16 @@ export const PRESETS = {
       lookaheadMs:      10,
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
+    },
+    // VAD Gate — assertive for general_clean. Unknown source material; a
+    // cleaner silence floor is generally preferable.
+    vadGate: {
+      enabled:     false,
+      lookaheadMs: 20,
+      holdMs:      80,
+      attackMs:    8,
+      releaseMs:   40,
+      floorDb:     -60,
     },
     airBoost: { gainDb: 16 },
     bweModel: 'ap_bwe',
@@ -580,6 +623,17 @@ export const PRESETS = {
       maxAttenuationDb: 40,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
+    // VAD Gate — assertive for noise_eraser. Source separation already produces
+    // a "dry booth" silence character; a hard gate completes the removal of
+    // residual bleed between words.
+    vadGate: {
+      enabled:     false,
+      lookaheadMs: 20,
+      holdMs:      80,
+      attackMs:    5,
+      releaseMs:   30,
+      floorDb:     -70,
+    },
     airBoost: { gainDb: 0 },
     bweModel: 'ap_bwe',
     bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
@@ -651,6 +705,16 @@ export const PRESETS = {
       lookaheadMs:      10,
       maxAttenuationDb: 18,
       detectionBand:    { lowHz: 80, highHz: 800 },
+    },
+    // VAD Gate — assertive for clearervoice_eraser. ClearerVoice output already
+    // has a dry, processed character; deeper floor reinforces it.
+    vadGate: {
+      enabled:     false,
+      lookaheadMs: 20,
+      holdMs:      80,
+      attackMs:    5,
+      releaseMs:   30,
+      floorDb:     -70,
     },
     airBoost: { gainDb: 0 },
     bweModel: 'ap_bwe',
