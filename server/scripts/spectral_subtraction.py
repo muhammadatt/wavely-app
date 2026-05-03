@@ -10,11 +10,11 @@ Algorithm: MMSE decision-directed Wiener gain + optional transient shaper,
 computed in a single STFT pass. Musical noise prevention via:
   1. Decision-directed SNR estimation (alpha_dd) — temporally coherent gains
   2. Spectral floor (beta) — no bin ever reaches zero gain
-  3. 3-bin frequency-axis median filter — kills isolated spectral spikes
+  3. 5-bin frequency-axis median filter — kills isolated spectral spikes
 
 Usage:
   python3 spectral_subtraction.py --input <path> --output <path>
-    [--alpha-dd 0.98] [--beta 0.05] [--strength 1.0]
+    [--alpha-dd 0.98] [--beta 0.15] [--strength 1.0]
     [--transient-shaper] [--transient-max-reduction-db 6.0]
 
 Input/output: 32-bit float PCM WAV at 44.1 kHz (pipeline internal format).
@@ -29,19 +29,30 @@ import numpy as np
 
 # STFT parameters — 2048-point FFT at 44.1 kHz gives ~46 ms resolution,
 # adequate for voiced speech without over-smoothing transients.
-N_FFT      = 2048
-HOP_LENGTH = 512
+N_FFT       = 2048
+HOP_LENGTH  = 512
 PIPELINE_SR = 44100
 
 # Noise estimator time constants (as recursive-average alpha).
 # Speech frames: very slow adaptation so voiced energy is not mistaken for noise.
-# Silence frames: faster adaptation to track room condition changes between phrases.
+# Silence frames: slower than naive spectral subtraction to reduce bleed from
+# transitional voiced frames that the VAD misses at phrase onsets/offsets.
 ALPHA_NOISE_SPEECH  = np.float32(0.99)
-ALPHA_NOISE_SILENCE = np.float32(0.85)
+ALPHA_NOISE_SILENCE = np.float32(0.92)
 
-# Energy-based VAD threshold: mean a posteriori SNR (gamma_mean) above this
-# value classifies the frame as speech. 1.5 ≈ +1.8 dB above noise.
-VAD_SNR_THRESHOLD = np.float32(1.5)
+# Speech-band VAD: limit gamma averaging to the voiced-speech frequency range
+# (80–3400 Hz). High-frequency bins are noise-dominated even during speech and
+# drag the full-spectrum mean below the threshold, causing voiced frames to be
+# misclassified as silence → noise estimator absorbs voiced energy → gain
+# collapse in those bins → musical noise / watery artifacts.
+_FREQ_RES    = PIPELINE_SR / N_FFT                          # Hz per bin ≈ 21.5 Hz
+VAD_LOW_BIN  = max(1, round(80   / _FREQ_RES))              # ≈ bin 3  (~86 Hz)
+VAD_HIGH_BIN = min(round(3400 / _FREQ_RES), N_FFT // 2)    # ≈ bin 158 (~3400 Hz)
+
+# VAD threshold: mean a posteriori SNR (gamma) over speech bins must exceed this
+# to classify the frame as voiced. Raised from 1.5 to 3.0 to give more headroom
+# against quiet voiced frames being misclassified as silence.
+VAD_SNR_THRESHOLD = np.float32(3.0)
 
 # ── Numba JIT (optional) ─────────────────────────────────────────────────────
 # The MMSE frame loop is sequential (each frame depends on the previous noise
@@ -60,13 +71,18 @@ if _HAS_NUMBA:
 
     @njit(cache=True)
     def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta,
-                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold):
+                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold,
+                   vad_low_bin, vad_high_bin):
         """
         MMSE decision-directed Wiener gain — Numba JIT implementation.
 
         Decision-directed estimator (Ephraim & Malah 1984):
           xi[t] = alpha_dd * |G[t-1]·Y[t-1]|² / λ[t]  +  (1−alpha_dd) * max(γ[t]−1, 0)
           G[t]  = xi[t] / (xi[t] + 1)   ← Wiener gain, floored at beta
+
+        VAD is computed over [vad_low_bin, vad_high_bin) only — the voiced-speech
+        frequency range — so high-frequency noise bins don't drag the mean below
+        the threshold and cause voiced frames to be misclassified as silence.
 
         mag   : (n_frames, n_bins) float32 — STFT magnitude
         returns gains (n_frames, n_bins) float32 in [beta, 1.0]
@@ -82,6 +98,7 @@ if _HAS_NUMBA:
         _eps  = np.float32(1e-10)
         _one  = np.float32(1.0)
         _zero = np.float32(0.0)
+        _vad_count = np.float32(vad_high_bin - vad_low_bin)
 
         noise_est  = mag[0].copy()
         prev_clean = mag[0].copy()
@@ -92,7 +109,7 @@ if _HAS_NUMBA:
             gamma_sum = _zero
 
             for b in range(n_bins):
-                lam   = noise_est[b] * noise_est[b] + _eps
+                lam     = noise_est[b] * noise_est[b] + _eps
                 gamma_b = mag_t[b] * mag_t[b] / lam
 
                 xi_dd = prev_clean[b] * prev_clean[b] / lam
@@ -104,12 +121,15 @@ if _HAS_NUMBA:
                 if g < _b:
                     g = _b
 
-                gains[t, b]    = g
-                prev_clean[b]  = g * mag_t[b]
-                gamma_sum     += gamma_b
+                gains[t, b]   = g
+                prev_clean[b] = g * mag_t[b]
 
-            # Energy-based VAD: mean a posteriori SNR
-            is_speech = (gamma_sum / np.float32(n_bins)) > _vth
+                # Accumulate gamma only over the speech-frequency range for VAD
+                if vad_low_bin <= b < vad_high_bin:
+                    gamma_sum += gamma_b
+
+            # Speech/silence decision from speech-band mean gamma
+            is_speech = (gamma_sum / _vad_count) > _vth
 
             if is_speech:
                 for b in range(n_bins):
@@ -122,7 +142,8 @@ if _HAS_NUMBA:
 
 else:
     def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta,
-                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold):
+                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold,
+                   vad_low_bin, vad_high_bin):
         """
         MMSE decision-directed Wiener gain — vectorised NumPy fallback.
         Same algorithm as the Numba version; slower due to the Python for loop,
@@ -146,13 +167,13 @@ else:
             gamma = (mag_t * mag_t) / lam
 
             xi    = _ad * (prev_clean * prev_clean / lam) + _mad * np.maximum(gamma - 1.0, 0.0)
-            g     = xi / (xi + 1.0)
-            g     = np.maximum(g, _b)
+            g     = np.maximum(xi / (xi + 1.0), _b)
 
             gains[t]   = g
             prev_clean = g * mag_t
 
-            if float(gamma.mean()) > float(vad_snr_threshold):
+            # VAD over speech-frequency bins only
+            if float(gamma[vad_low_bin:vad_high_bin].mean()) > float(vad_snr_threshold):
                 noise_est = _aSp * noise_est + _mSp * mag_t
             else:
                 noise_est = _aSi * noise_est + _mSi * mag_t
@@ -170,8 +191,8 @@ def main():
                         help='Output WAV (32-bit float, 44.1 kHz)')
     parser.add_argument('--alpha-dd',                   type=float, default=0.98,
                         help='Decision-directed smoothing factor (default 0.98)')
-    parser.add_argument('--beta',                       type=float, default=0.05,
-                        help='Spectral floor / minimum Wiener gain (default 0.05)')
+    parser.add_argument('--beta',                       type=float, default=0.15,
+                        help='Spectral floor / minimum Wiener gain (default 0.15)')
     parser.add_argument('--strength',                   type=float, default=1.0,
                         help='Suppression strength 0–1 (default 1.0; 0 = bypass)')
     parser.add_argument('--transient-shaper',           action='store_true',
@@ -233,11 +254,13 @@ def _process_channel(audio, args, sr):
         ALPHA_NOISE_SPEECH,
         ALPHA_NOISE_SILENCE,
         VAD_SNR_THRESHOLD,
+        VAD_LOW_BIN,
+        VAD_HIGH_BIN,
     )  # (n_frames, n_bins)
 
-    # 3-bin frequency-axis median filter: kills isolated spectral spikes that
-    # survive the decision-directed estimator. Size (1,3) = 1 frame × 3 bins.
-    gains = _median_filter_3bin(gains)
+    # 5-bin frequency-axis median filter: kills isolated spectral spikes that
+    # survive the decision-directed estimator. Size (1,5) = 1 frame × 5 bins.
+    gains = _median_filter_5bin(gains)
 
     # Blend MMSE gain with identity (passthrough) based on strength.
     # strength=0 → no processing; strength=1 → full MMSE suppression.
@@ -283,15 +306,17 @@ def _process_channel(audio, args, sr):
 
 # ── DSP helpers ───────────────────────────────────────────────────────────────
 
-def _median_filter_3bin(gains):
-    """3-bin frequency-axis median filter over the gains array.
+def _median_filter_5bin(gains):
+    """5-bin frequency-axis median filter over the gains array.
 
-    Replaces each bin's gain with the median of itself and its two neighbours.
-    Applied on the frequency axis only (size=(1,3)) so temporal coherence
-    established by the decision-directed estimator is preserved.
+    Replaces each bin's gain with the median of itself and its four neighbours.
+    Applied on the frequency axis only (size=(1,5)) so temporal coherence
+    established by the decision-directed estimator is preserved. The wider
+    kernel provides stronger suppression of isolated spectral spikes that
+    cause musical noise / watery artifacts.
     """
     from scipy.ndimage import median_filter
-    return median_filter(gains, size=(1, 3), mode='reflect').astype(np.float32)
+    return median_filter(gains, size=(1, 5), mode='reflect').astype(np.float32)
 
 
 def _compute_transient_gains(mag_T, sr, hop_length, max_reduction_db):

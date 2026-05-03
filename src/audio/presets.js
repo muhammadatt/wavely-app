@@ -214,7 +214,7 @@ export const PRESETS = {
     spectralSubtraction: {
       enabled:              true,
       alphaDd:              0.98,
-      beta:                 0.05,
+      beta:                 0.15,
       strength:             0.7,
       transientShaper:      false,
     },
@@ -333,7 +333,7 @@ export const PRESETS = {
     spectralSubtraction: {
       enabled:                 true,
       alphaDd:                 0.98,
-      beta:                    0.05,
+      beta:                    0.15,
       strength:                1.0,
       transientShaper:         true,
       transientMaxReductionDb: 6,
@@ -440,7 +440,7 @@ export const PRESETS = {
     spectralSubtraction: {
       enabled:              true,
       alphaDd:              0.98,
-      beta:                 0.05,
+      beta:                 0.15,
       strength:             0.8,
       transientShaper:      false,
     },
@@ -547,7 +547,7 @@ export const PRESETS = {
     spectralSubtraction: {
       enabled:                 true,
       alphaDd:                 0.98,
-      beta:                    0.05,
+      beta:                    0.15,
       strength:                1.0,
       transientShaper:         true,
       transientMaxReductionDb: 6,
@@ -684,7 +684,7 @@ export const PRESETS = {
     spectralSubtraction: {
       enabled:                 true,
       alphaDd:                 0.98,
-      beta:                    0.05,
+      beta:                    0.15,
       strength:                0.8,
       transientShaper:         true,
       transientMaxReductionDb: 6,
@@ -777,7 +777,7 @@ export const PRESETS = {
     spectralSubtraction: {
       enabled:                 true,
       alphaDd:                 0.98,
-      beta:                    0.05,
+      beta:                    0.15,
       strength:                0.8,
       transientShaper:         true,
       transientMaxReductionDb: 6,
