@@ -42,7 +42,7 @@ import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
 import { readFile } from 'fs/promises'
-import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression, applyBreathReduction, runSpectralSubtraction } from './enhancement.js'
+import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -843,6 +843,33 @@ export async function vocalSaturation(ctx) {
   ctx.currentPath = outPath
   ctx.results.vocalSaturation = { applied: true, drive, wetDry, bias, fc, f0 }
   await logLevel(ctx, 'after vocal saturation', ctx.currentPath, {})
+}
+
+// ── Stage: Room Presence (Stage 4c) ──────────────────────────────────────────
+// Convolution reverb with a synthetic IR. Placed after all corrective and
+// tonal processing so the reverb tail doesn't amplify residual noise, and
+// before loudness normalization so the tail doesn't trigger unexpected limiting.
+//
+// Skipped (no audio change) when preset.roomPresence.enabled is false.
+
+export async function roomPresence(ctx) {
+  const cfg = ctx.preset?.roomPresence ?? {}
+  if (cfg.enabled === false) {
+    ctx.results.roomPresence = { applied: false, reason: 'disabled by preset' }
+    ctx.log('[room-presence] disabled — skipped')
+    return
+  }
+
+  const wet        = cfg.wet        ?? 0.08
+  const rt60Ms     = cfg.rt60Ms     ?? 80
+  const preDelayMs = cfg.preDelayMs ?? 1.5
+  const diffusion  = cfg.diffusion  ?? 0.7
+
+  const outPath = ctx.tmp('.wav')
+  await runRoomPresence(ctx.currentPath, outPath, { wet, rt60Ms, preDelayMs, diffusion })
+  ctx.currentPath       = outPath
+  ctx.results.roomPresence = { applied: true, wet, rt60Ms, preDelayMs, diffusion }
+  ctx.log(`[room-presence] applied wet=${wet} rt60=${rt60Ms}ms pre_delay=${preDelayMs}ms diffusion=${diffusion}`)
 }
 
 // ── Stage: Normalize ──────────────────────────────────────────────────────────

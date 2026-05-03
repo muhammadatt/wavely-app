@@ -49,6 +49,7 @@ const STANDARD_PIPELINE = [
   stages.deEss,                   // De-Ess again after airBoost
   stages.enhancementEQ,
   //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
+  stages.roomPresence,           // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
   stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,
@@ -104,6 +105,7 @@ export const PIPELINES = {
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
 
     //Finalize
+    stages.roomPresence,             // Synthetic-IR convolution reverb; disabled in noise_eraser preset config
     stages.normalize,                // Loudness normalization
     stages.truePeakLimit,            // True peak limiting
     stages.measureAfter,
@@ -148,6 +150,7 @@ export const PIPELINES = {
     stages.airBoost,               // Stage 3b — no-op for clearervoice_eraser (air_boost_db = 0)
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.vocalSaturation,
+    stages.roomPresence,             // Synthetic-IR convolution reverb; disabled in clearervoice_eraser preset config
     stages.normalize,                // Loudness normalization
     stages.truePeakLimit,            // True peak limiting
     stages.measureAfter,
