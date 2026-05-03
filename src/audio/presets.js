@@ -177,40 +177,37 @@ export const PRESETS = {
       crestGuardThresholdDb:       12,
       parallelDesserMaxReductionDb: 15,
     },
-    // Stage 4a-E: Vocal Expander — frequency-selective silence-floor attenuation.
+    // Expander — reduce the level of the noise floor
     // headroomOffsetDb - defines how close to speech threshold; 
     // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band -- 
     // e.g. (0.25) preserves breath/fricative transparency above 800 Hz.
     vocalExpander: {
-      enabled:          true,
+      enabled:          false,
       ratio:            2.5,
-      highFreqDepth:    1.0,
+      highFreqDepth:    0.25,
       headroomOffsetDb: 6,
-      releaseMs:        50,
-      attackMs:         10,
+      releaseMs:        150,
+      attackMs:         50,
       holdMs:           5,
-      lookaheadMs:      50,
-      maxAttenuationDb: 40,
+      lookaheadMs:      250,
+      maxAttenuationDb: 24,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
     // VAD Gate — conservative for ACX. Shallower floor preserves audible room
-    // tone (ACX human reviewers prefer natural silence); generous hold prevents
-    // chopping the long decay of narrated word endings.
+    // tone; generous hold prevents chopping the long decay of narrated word endings.
     vadGate: {
-      enabled:     false,
-      lookaheadMs: 30,
-      holdMs:      120,
-      attackMs:    10,
-      releaseMs:   80,
-      floorDb:     -50,
+      enabled:     true,
+      lookaheadMs: 60, //Higher = fewer clipped onsets, more latency
+      holdMs:      200, //Higher = fewer clipped endings, less breath reduction
+      attackMs:    5, //Slower attack softens plosive transients
+      releaseMs:   80, //Slower release = more natural fade-out
+      floorDb:     -110, //-∞ = fully silent gaps (unnatural), -40 = subtle presence
     },
     // Conservative: enough to clean audible breaths that flag ACX human review,
     // but not so deep that the narrator's breathing presence disappears entirely.
     breathReducer: { max_reduction_db: 12 },
     // Slightly more aggressive — mouth clicks are a human review concern for ACX
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
-    // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
-    // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
     // Conservative ACX tuning: lower depth and
     // ceiling, slower release to preserve narration intelligibility.
     sibilanceSuppressor: {
