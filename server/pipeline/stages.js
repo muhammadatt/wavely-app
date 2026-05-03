@@ -42,7 +42,7 @@ import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
 import { readFile } from 'fs/promises'
-import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression, applyBreathReduction } from './enhancement.js'
+import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression, applyBreathReduction, runSpectralSubtraction } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -299,6 +299,38 @@ export async function hpf(ctx) {
   ctx.currentPath       = hpfPath
   ctx.results.notch60Hz = notch60Hz
   await logLevel(ctx, 'after HPF', ctx.currentPath, { notch60Hz })
+}
+
+// ── Stage: Spectral Subtraction Pre-Pass ─────────────────────────────────────
+// MMSE decision-directed Wiener gain + optional transient shaper. Runs after
+// HPF and before the main ML noise reduction (DF3, RNNoise, DTLN) to reduce
+// diffuse noise and reverb energy, lowering the problem complexity the ML
+// model receives. Skipped when preset.spectralSubtraction is absent or
+// preset.spectralSubtraction.enabled is false.
+
+export async function spectralSubtraction(ctx) {
+  const config = ctx.preset.spectralSubtraction
+  if (!config?.enabled) return
+
+  const params = {
+    alphaDd:              config.alphaDd              ?? 0.98,
+    beta:                 config.beta                 ?? 0.05,
+    strength:             config.strength             ?? 1.0,
+    transientShaper:      config.transientShaper      ?? false,
+    transientMaxReductionDb: config.transientMaxReductionDb ?? 6.0,
+  }
+
+  const outPath = ctx.tmp('.wav')
+  ctx.log(
+    `[spectral-sub] Starting: alpha_dd=${params.alphaDd} beta=${params.beta} ` +
+    `strength=${params.strength} transient_shaper=${params.transientShaper}`
+  )
+  await runSpectralSubtraction(ctx.currentPath, outPath, params)
+  ctx.currentPath = outPath
+  ctx.results.spectralSubtraction = { applied: true, ...params }
+  await logLevel(ctx, 'after spectral subtraction', ctx.currentPath, {
+    strength: params.strength,
+  })
 }
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────

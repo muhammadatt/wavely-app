@@ -29,6 +29,7 @@ const STANDARD_PIPELINE = [
   stages.clickRemove,             // Pre-HPF: Hampel + Burg AR click/lip-smack repair
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
+  stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
   stages.dereverb,
   stages.breathReduce,            // Breath event detection and gain reduction
@@ -82,6 +83,7 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
+    stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
     stages.noiseReduce,
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.separateVocals,          // Demucs or ConvTasNet vocal extraction
@@ -128,6 +130,7 @@ export const PIPELINES = {
     stages.analyzeFramesRaw,        // Pre-processing noise floor for NE-2/NE-4
     stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
     stages.hpf,
+    stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
     stages.noiseReduce,
     stages.tonalPretreatment,       // Hum/tonal notch filtering (conditional)
     stages.clearerVoiceEnhance,     // Clearer Voice
