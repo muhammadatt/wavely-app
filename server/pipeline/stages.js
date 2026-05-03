@@ -763,7 +763,7 @@ export async function vadGate(ctx) {
   }
 
   const outPath = ctx.tmp('.wav')
-  const result  = await applyVadGate(ctx.currentPath, outPath, ctx.presetId, ctx.results.metrics)
+  const result  = await applyVadGate(ctx.currentPath, outPath, config, ctx.results.metrics)
   if (result.applied) ctx.currentPath = outPath
   ctx.results.vadGate = result
 

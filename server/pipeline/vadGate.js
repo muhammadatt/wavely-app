@@ -34,7 +34,6 @@
 
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels }   from './wavWriter.js'
-import { PRESETS }            from '../presets.js'
 
 // Default parameters; each preset's vadGate config can override any subset.
 const DEFAULTS = {
@@ -50,7 +49,10 @@ const DEFAULTS = {
  *
  * @param {string} inputPath
  * @param {string} outputPath
- * @param {string} presetId
+ * @param {Object|null|undefined} config - The vadGate config to use, taken from
+ *   the merged ctx.preset (NOT looked up from the global PRESETS table) so any
+ *   per-request override flows through. When falsy or `enabled !== true` the
+ *   stage copies the input through and returns `applied: false`.
  * @param {import('./stages.js').AudioMetrics} frameAnalysis
  * @returns {Promise<VadGateResult>}
  *
@@ -67,8 +69,7 @@ const DEFAULTS = {
  * @property {number} [openSegments]
  * @property {number} [pctSamplesAtFloor]   - % of samples at or near the floor
  */
-export async function applyVadGate(inputPath, outputPath, presetId, frameAnalysis) {
-  const config = PRESETS[presetId]?.vadGate
+export async function applyVadGate(inputPath, outputPath, config, frameAnalysis) {
   if (!config?.enabled) {
     await copyThrough(inputPath, outputPath)
     return { applied: false, reason: 'preset_not_configured' }
@@ -107,6 +108,17 @@ export async function applyVadGate(inputPath, outputPath, presetId, frameAnalysi
   // offsetSamples directly so we tolerate any irregularities. Each segment is
   // [openStart, closeEnd] after applying lookahead (-) and hold (+). Segments
   // that overlap after expansion are merged on the fly.
+  //
+  // Trailing partial frame: frameAnalysis emits floor(samples / frameLength)
+  // frames, so the last (samples % frameLength) samples are not classified.
+  // When the final classified frame is voiced we extend its sample-range end
+  // to numSamples so the partial-tail inherits the voiced state — otherwise
+  // those samples fall outside every segment and the IIR ramps them down to
+  // the floor, shaving final consonants from outros that end mid-frame.
+
+  const lastFrame      = frames[frames.length - 1]
+  const lastFrameEnd   = lastFrame.offsetSamples + lastFrame.lengthSamples
+  const trailingVoiced = !lastFrame.isSilence && numSamples > lastFrameEnd
 
   const segments = []  // packed pairs: [s0, e0, s1, e1, ...]
   let curStart = -1
@@ -115,11 +127,13 @@ export async function applyVadGate(inputPath, outputPath, presetId, frameAnalysi
   for (const frame of frames) {
     if (frame.isSilence) continue
     const fStart = frame.offsetSamples
-    const fEnd   = frame.offsetSamples + frame.lengthSamples
+    const fEnd   = (frame === lastFrame && trailingVoiced)
+      ? numSamples
+      : frame.offsetSamples + frame.lengthSamples
 
     // Coalesce consecutive voiced frames into a single segment before applying
     // expansion offsets so that hold/lookahead are not applied within a span.
-    if (curEnd === fStart) {
+    if (curEnd === frame.offsetSamples) {
       curEnd = fEnd
     } else {
       if (curStart >= 0) pushExpanded(segments, curStart, curEnd, lookaheadSamples, holdSamples, numSamples)
