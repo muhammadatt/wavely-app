@@ -47,6 +47,7 @@ import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
+import { applyVadGate }       from './vadGate.js'
 import { analyzeHum } from './humEQ.js'
 import { applyAirBoost } from './airBoost.js'
 
@@ -739,6 +740,42 @@ export async function vocalExpander(ctx) {
     )
   } else {
     ctx.log(`[vocal-expander] Skipped — ${result.reason}`)
+  }
+}
+
+// ── Stage: VAD Gate ───────────────────────────────────────────────────────────
+// Smoothly attenuates non-voiced frames using Silero VAD labels. Converts the
+// binary VAD mask into a per-sample gain envelope shaped by lookahead (catches
+// word onsets that begin mid-frame), hold (catches word tails that decay past
+// the voiced label), and asymmetric attack/release smoothing (prevents clicks
+// at transitions). Floors at preset.vadGate.floorDb so silence retains a
+// faint room tone rather than collapsing to digital silence.
+//
+// Skips silently when preset.vadGate is absent or vadGate.enabled is false.
+// Runs after vocalExpander (the soft silence-floor attenuator) and before
+// normalize so the final loudness pass sees the gated silence floor.
+
+export async function vadGate(ctx) {
+  const config = ctx.preset?.vadGate
+  if (!config?.enabled) {
+    ctx.results.vadGate = { applied: false, reason: 'preset_not_configured' }
+    return
+  }
+
+  const outPath = ctx.tmp('.wav')
+  const result  = await applyVadGate(ctx.currentPath, outPath, ctx.presetId, ctx.results.metrics)
+  if (result.applied) ctx.currentPath = outPath
+  ctx.results.vadGate = result
+
+  if (result.applied) {
+    ctx.log(
+      `[vad-gate] Applied — segments=${result.openSegments} ` +
+      `floor=${result.floorDb}dB lookahead=${result.lookaheadMs}ms ` +
+      `hold=${result.holdMs}ms attack=${result.attackMs}ms release=${result.releaseMs}ms ` +
+      `atFloor=${result.pctSamplesAtFloor}%`
+    )
+  } else {
+    ctx.log(`[vad-gate] Skipped — ${result.reason}`)
   }
 }
 

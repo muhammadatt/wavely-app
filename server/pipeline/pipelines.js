@@ -41,6 +41,7 @@ const STANDARD_PIPELINE = [
   stages.noiseReduce,             // Conditional secondary NR pass
   stages.parallelCompress,        // Parallel compression
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
+  stages.vadGate,                 // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
   stages.vocalSaturation,
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
@@ -95,6 +96,7 @@ export const PIPELINES = {
     stages.compress,                 // standard serial compression
     //stages.parallelCompress,         // parallel compression
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
+    stages.vadGate,                  // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.enhancementEQ,
     stages.airBoost,               // Stage 3b — no-op for noise_eraser (air_boost_db = 0)
@@ -138,6 +140,7 @@ export const PIPELINES = {
     stages.compress,                 // standard serial compression
     stages.parallelCompress,         // parallel compression
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
+    stages.vadGate,                  // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.enhancementEQ,
     stages.airBoost,               // Stage 3b — no-op for clearervoice_eraser (air_boost_db = 0)
