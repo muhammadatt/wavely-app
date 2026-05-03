@@ -314,7 +314,7 @@ export async function spectralSubtraction(ctx) {
 
   const params = {
     alphaDd:              config.alphaDd              ?? 0.98,
-    beta:                 config.beta                 ?? 0.05,
+    beta:                 config.beta                 ?? 0.15,
     strength:             config.strength             ?? 1.0,
     transientShaper:      config.transientShaper      ?? false,
     transientMaxReductionDb: config.transientMaxReductionDb ?? 6.0,

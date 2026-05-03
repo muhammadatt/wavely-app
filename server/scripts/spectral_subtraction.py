@@ -10,11 +10,12 @@ Algorithm: MMSE decision-directed Wiener gain + optional transient shaper,
 computed in a single STFT pass. Musical noise prevention via:
   1. Decision-directed SNR estimation (alpha_dd) — temporally coherent gains
   2. Spectral floor (beta) — no bin ever reaches zero gain
-  3. 3-bin frequency-axis median filter — kills isolated spectral spikes
+  3. 5-bin frequency-axis median filter — kills isolated spectral spikes
+  4. Temporal IIR gain smoothing — prevents frame-to-frame modulation artifacts
 
 Usage:
   python3 spectral_subtraction.py --input <path> --output <path>
-    [--alpha-dd 0.98] [--beta 0.05] [--strength 1.0]
+    [--alpha-dd 0.98] [--beta 0.15] [--strength 1.0]
     [--transient-shaper] [--transient-max-reduction-db 6.0]
 
 Input/output: 32-bit float PCM WAV at 44.1 kHz (pipeline internal format).
@@ -35,13 +36,32 @@ PIPELINE_SR = 44100
 
 # Noise estimator time constants (as recursive-average alpha).
 # Speech frames: very slow adaptation so voiced energy is not mistaken for noise.
-# Silence frames: faster adaptation to track room condition changes between phrases.
+# Silence frames: moderate adaptation to track room condition changes between
+# phrases without absorbing transitional voiced frames into the noise estimate.
 ALPHA_NOISE_SPEECH  = np.float32(0.99)
-ALPHA_NOISE_SILENCE = np.float32(0.85)
+ALPHA_NOISE_SILENCE = np.float32(0.92)
 
 # Energy-based VAD threshold: mean a posteriori SNR (gamma_mean) above this
-# value classifies the frame as speech. 1.5 ≈ +1.8 dB above noise.
-VAD_SNR_THRESHOLD = np.float32(1.5)
+# value classifies the frame as speech.  3.0 ≈ +4.8 dB above noise —
+# conservative enough to avoid misclassifying quiet voiced frames as silence,
+# which would bleed speech energy into the noise estimator.
+VAD_SNR_THRESHOLD = np.float32(3.0)
+
+# VAD frequency range: only bins in 80–3400 Hz contribute to the speech/silence
+# decision.  HF bins (>3.4 kHz) are noise-dominated even during voiced speech
+# and drag the average gamma down, causing speech frames to be misclassified as
+# silence.  Bin indices are inclusive.
+_BIN_HZ       = PIPELINE_SR / N_FFT            # ~21.5 Hz per bin
+VAD_BIN_LO    = max(1, int(np.ceil(80.0 / _BIN_HZ)))    # bin for 80 Hz
+VAD_BIN_HI    = min(N_FFT // 2, int(np.floor(3400.0 / _BIN_HZ)))  # bin for 3400 Hz
+
+# Speech-protective gain floor.  During VAD-classified speech frames, gains are
+# clamped to this floor.  1.0 = complete passthrough during speech — no
+# modification at all.  Speech perceptually masks noise, so in-speech reduction
+# is unnecessary; DF3 downstream handles it with a model that can actually
+# distinguish speech from noise within the same time-frequency bin.  This stage
+# focuses exclusively on cleaning the silence/pause regions.
+BETA_SPEECH = np.float32(1.0)
 
 # ── Numba JIT (optional) ─────────────────────────────────────────────────────
 # The MMSE frame loop is sequential (each frame depends on the previous noise
@@ -59,8 +79,9 @@ if _HAS_NUMBA:
     from numba import njit
 
     @njit(cache=True)
-    def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta,
-                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold):
+    def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta, beta_speech,
+                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold,
+                   vad_bin_lo, vad_bin_hi):
         """
         MMSE decision-directed Wiener gain — Numba JIT implementation.
 
@@ -68,12 +89,20 @@ if _HAS_NUMBA:
           xi[t] = alpha_dd * |G[t-1]·Y[t-1]|² / λ[t]  +  (1−alpha_dd) * max(γ[t]−1, 0)
           G[t]  = xi[t] / (xi[t] + 1)   ← Wiener gain, floored at beta
 
+        Two gain floors:
+          - beta        : minimum gain during silence (full suppression)
+          - beta_speech : minimum gain during speech  (speech-protective)
+
+        VAD decision uses only bins in [vad_bin_lo, vad_bin_hi] (80–3400 Hz)
+        to avoid HF noise dragging the average gamma below the speech threshold.
+
         mag   : (n_frames, n_bins) float32 — STFT magnitude
         returns gains (n_frames, n_bins) float32 in [beta, 1.0]
         """
         _ad   = np.float32(alpha_dd)
         _mad  = np.float32(1.0 - alpha_dd)
         _b    = np.float32(beta)
+        _bSp  = np.float32(beta_speech)
         _aSp  = np.float32(alpha_noise_speech)
         _aSi  = np.float32(alpha_noise_silence)
         _mSp  = np.float32(1.0 - alpha_noise_speech)
@@ -86,6 +115,9 @@ if _HAS_NUMBA:
         noise_est  = mag[0].copy()
         prev_clean = mag[0].copy()
         gains      = np.empty((n_frames, n_bins), dtype=np.float32)
+
+        # Number of bins used for VAD (precompute outside the frame loop)
+        _vad_count = np.float32(vad_bin_hi - vad_bin_lo + 1)
 
         for t in range(n_frames):
             mag_t     = mag[t]
@@ -106,13 +138,19 @@ if _HAS_NUMBA:
 
                 gains[t, b]    = g
                 prev_clean[b]  = g * mag_t[b]
-                gamma_sum     += gamma_b
 
-            # Energy-based VAD: mean a posteriori SNR
-            is_speech = (gamma_sum / np.float32(n_bins)) > _vth
+                # Accumulate gamma only for speech-frequency bins
+                if vad_bin_lo <= b <= vad_bin_hi:
+                    gamma_sum += gamma_b
+
+            # Energy-based VAD: mean a posteriori SNR over speech bins only
+            is_speech = (gamma_sum / _vad_count) > _vth
 
             if is_speech:
+                # Speech frame: clamp gains to the higher speech floor
                 for b in range(n_bins):
+                    if gains[t, b] < _bSp:
+                        gains[t, b] = _bSp
                     noise_est[b] = _aSp * noise_est[b] + _mSp * mag_t[b]
             else:
                 for b in range(n_bins):
@@ -121,8 +159,9 @@ if _HAS_NUMBA:
         return gains
 
 else:
-    def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta,
-                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold):
+    def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta, beta_speech,
+                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold,
+                   vad_bin_lo, vad_bin_hi):
         """
         MMSE decision-directed Wiener gain — vectorised NumPy fallback.
         Same algorithm as the Numba version; slower due to the Python for loop,
@@ -131,6 +170,7 @@ else:
         _ad  = np.float32(alpha_dd)
         _mad = np.float32(1.0 - alpha_dd)
         _b   = np.float32(beta)
+        _bSp = np.float32(beta_speech)
         _aSp = np.float32(alpha_noise_speech)
         _aSi = np.float32(alpha_noise_silence)
         _mSp = np.float32(1.0 - alpha_noise_speech)
@@ -152,7 +192,11 @@ else:
             gains[t]   = g
             prev_clean = g * mag_t
 
-            if float(gamma.mean()) > float(vad_snr_threshold):
+            # VAD: average gamma over speech-frequency bins only (80–3400 Hz)
+            gamma_speech = float(gamma[vad_bin_lo:vad_bin_hi + 1].mean())
+            if gamma_speech > float(vad_snr_threshold):
+                # Speech frame: clamp gains to the higher speech floor
+                gains[t] = np.maximum(gains[t], _bSp)
                 noise_est = _aSp * noise_est + _mSp * mag_t
             else:
                 noise_est = _aSi * noise_est + _mSi * mag_t
@@ -170,8 +214,8 @@ def main():
                         help='Output WAV (32-bit float, 44.1 kHz)')
     parser.add_argument('--alpha-dd',                   type=float, default=0.98,
                         help='Decision-directed smoothing factor (default 0.98)')
-    parser.add_argument('--beta',                       type=float, default=0.05,
-                        help='Spectral floor / minimum Wiener gain (default 0.05)')
+    parser.add_argument('--beta',                       type=float, default=0.15,
+                        help='Spectral floor / minimum Wiener gain (default 0.15)')
     parser.add_argument('--strength',                   type=float, default=1.0,
                         help='Suppression strength 0–1 (default 1.0; 0 = bypass)')
     parser.add_argument('--transient-shaper',           action='store_true',
@@ -209,14 +253,22 @@ def _process_channel(audio, args, sr):
     """Full MMSE + optional transient shaper pass on a single audio channel."""
     from scipy.signal import stft, istft
 
+    # Guard: audio shorter than one FFT window cannot be meaningfully processed.
+    # Return it unchanged rather than crashing in scipy.signal.stft.
+    if len(audio) < N_FFT:
+        print(f'[spectral-sub] WARNING: audio too short ({len(audio)} samples < '
+              f'N_FFT={N_FFT}), returning unchanged', flush=True)
+        return audio
+
     n_overlap = N_FFT - HOP_LENGTH
 
-    # Forward STFT — boundary='reflect' avoids edge discontinuities; padded=True
-    # ensures the full signal is covered even when len(audio) % HOP_LENGTH != 0.
+    # Forward STFT — boundary='even' (symmetric reflection) avoids edge
+    # discontinuities; padded=True ensures the full signal is covered even
+    # when len(audio) % HOP_LENGTH != 0.
     _, _, Zxx = stft(
         audio, fs=sr, window='hann',
         nperseg=N_FFT, noverlap=n_overlap,
-        boundary='reflect', padded=True,
+        boundary='even', padded=True,
     )
     # Zxx: (n_bins, n_frames) complex64
     mag   = np.abs(Zxx).astype(np.float32)    # (n_bins, n_frames) — used for MMSE gain computation
@@ -230,14 +282,25 @@ def _process_channel(audio, args, sr):
         mag_T, n_frames, n_bins,
         np.float32(args.alpha_dd),
         np.float32(args.beta),
+        BETA_SPEECH,
         ALPHA_NOISE_SPEECH,
         ALPHA_NOISE_SILENCE,
         VAD_SNR_THRESHOLD,
+        VAD_BIN_LO,
+        VAD_BIN_HI,
     )  # (n_frames, n_bins)
 
-    # 3-bin frequency-axis median filter: kills isolated spectral spikes that
-    # survive the decision-directed estimator. Size (1,3) = 1 frame × 3 bins.
-    gains = _median_filter_3bin(gains)
+    # 5-bin frequency-axis median filter: kills isolated spectral spikes that
+    # survive the decision-directed estimator. Size (1,5) = 1 frame × 5 bins.
+    gains = _median_filter_freq(gains)
+
+    # Temporal gain smoothing: first-order IIR lowpass across frames.
+    # Prevents rapid per-bin gain fluctuations that cause the characteristic
+    # "watery" / "underwater" spectral subtraction artifact.  At ~86 fps
+    # (44.1 kHz / 512 hop), alpha=0.85 gives a ~7-frame time constant (~80 ms)
+    # — fast enough to track genuine speech/silence transitions, slow enough
+    # to eliminate audible amplitude modulation.
+    gains = _smooth_gains_temporal(gains, alpha=np.float32(0.85))
 
     # Blend MMSE gain with identity (passthrough) based on strength.
     # strength=0 → no processing; strength=1 → full MMSE suppression.
@@ -283,15 +346,39 @@ def _process_channel(audio, args, sr):
 
 # ── DSP helpers ───────────────────────────────────────────────────────────────
 
-def _median_filter_3bin(gains):
-    """3-bin frequency-axis median filter over the gains array.
+def _median_filter_freq(gains):
+    """5-bin frequency-axis median filter over the gains array.
 
-    Replaces each bin's gain with the median of itself and its two neighbours.
-    Applied on the frequency axis only (size=(1,3)) so temporal coherence
-    established by the decision-directed estimator is preserved.
+    Replaces each bin's gain with the median of itself and its four neighbours.
+    Applied on the frequency axis only (size=(1,5)) so temporal coherence
+    established by the decision-directed estimator is preserved.  5 bins
+    provides stronger musical noise suppression than 3 bins without noticeably
+    smearing spectral detail at the 2048-point FFT resolution (~21 Hz/bin).
     """
     from scipy.ndimage import median_filter
-    return median_filter(gains, size=(1, 3), mode='reflect').astype(np.float32)
+    return median_filter(gains, size=(1, 5), mode='reflect').astype(np.float32)
+
+
+def _smooth_gains_temporal(gains, alpha=np.float32(0.85)):
+    """First-order IIR lowpass across frames (temporal axis).
+
+    g_smooth[t] = alpha * g_smooth[t-1] + (1 - alpha) * g[t]
+
+    This prevents rapid frame-to-frame gain changes in individual frequency
+    bins — the primary cause of "watery" / "underwater" spectral subtraction
+    artifacts.  The smoothing applies only along the time axis; frequency
+    resolution is preserved.
+
+    gains : (n_frames, n_bins) float32
+    alpha : smoothing coefficient in (0, 1).  Higher = smoother / slower.
+    returns smoothed gains (n_frames, n_bins) float32
+    """
+    smoothed = np.empty_like(gains)
+    smoothed[0] = gains[0]
+    one_minus_alpha = np.float32(1.0) - alpha
+    for t in range(1, gains.shape[0]):
+        smoothed[t] = alpha * smoothed[t - 1] + one_minus_alpha * gains[t]
+    return smoothed
 
 
 def _compute_transient_gains(mag_T, sr, hop_length, max_reduction_db):
