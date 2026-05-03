@@ -219,8 +219,7 @@ def _process_channel(audio, args, sr):
         boundary='reflect', padded=True,
     )
     # Zxx: (n_bins, n_frames) complex64
-    mag   = np.abs(Zxx).astype(np.float32)    # (n_bins, n_frames)
-    phase = np.angle(Zxx).astype(np.float32)  # (n_bins, n_frames)
+    mag   = np.abs(Zxx).astype(np.float32)    # (n_bins, n_frames) — used for MMSE gain computation
 
     # Transpose to (n_frames, n_bins) for the sequential frame loop
     mag_T = np.ascontiguousarray(mag.T)
@@ -255,18 +254,31 @@ def _process_channel(audio, args, sr):
         gains *= t_gain[:, np.newaxis]   # broadcast to (n_frames, n_bins)
 
     # ── Reconstruct via ISTFT ─────────────────────────────────────────────────
-    # Apply combined gain to the magnitude; retain original phase.
+    # Apply the real-valued gain directly to the complex STFT rather than
+    # reconstructing via mag*exp(1j*phase). This avoids a redundant angle/exp
+    # round-trip and eliminates numerical edge cases around near-zero magnitudes
+    # where phase is poorly defined.
     gains_T = np.ascontiguousarray(gains.T)    # (n_bins, n_frames)
-    Zxx_out = gains_T * mag * np.exp(1j * phase.astype(np.complex64))
+    Zxx_out = gains_T * Zxx                    # real × complex → complex (broadcast)
 
     _, out = istft(
         Zxx_out, fs=sr, window='hann',
         nperseg=N_FFT, noverlap=n_overlap,
         boundary=True,
     )
-    # Trim to original length (STFT padding may extend the output slightly)
-    out = out[:len(audio)].astype(np.float32)
-    return out
+    # Fix output length to exactly match input. scipy.signal.istft may return
+    # slightly more or slightly fewer samples than len(audio) depending on
+    # boundary padding and hop alignment. Both cases must be handled: truncation
+    # is not enough — if the output is shorter, downstream frame/VAD label
+    # alignment breaks because the pipeline assumes sample count is stable after
+    # analyzeFramesRaw.
+    n_in  = len(audio)
+    n_out = len(out)
+    if n_out < n_in:
+        out = np.pad(out, (0, n_in - n_out))
+    elif n_out > n_in:
+        out = out[:n_in]
+    return out.astype(np.float32)
 
 
 # ── DSP helpers ───────────────────────────────────────────────────────────────
