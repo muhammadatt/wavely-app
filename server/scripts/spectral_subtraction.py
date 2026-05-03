@@ -57,11 +57,8 @@ VAD_BIN_HI    = min(N_FFT // 2, int(np.floor(3400.0 / _BIN_HZ)))  # bin for 3400
 
 # Speech-protective gain floor.  During VAD-classified speech frames, gains are
 # clamped to this floor.  1.0 = complete passthrough during speech — no
-# modification at all.  Speech perceptually masks noise, so in-speech reduction
-# is unnecessary; DF3 downstream handles it with a model that can actually
-# distinguish speech from noise within the same time-frequency bin.  This stage
-# focuses exclusively on cleaning the silence/pause regions.
-BETA_SPEECH = np.float32(1.0)
+# modification at all.  0.5 = less spectral reduction applied to voiced frames
+BETA_SPEECH = np.float32(0.5)
 
 # ── Numba JIT (optional) ─────────────────────────────────────────────────────
 # The MMSE frame loop is sequential (each frame depends on the previous noise

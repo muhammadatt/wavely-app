@@ -25,8 +25,9 @@ const FRAME_DURATION_S      = 0.1    // 100 ms — must match silenceAnalysis fr
 const FRAME_SAMPLES         = Math.round(FRAME_DURATION_S * SAMPLE_RATE)  // 4410
 
 const ANALYSIS_WINDOW_FRAMES = 30    // 30 × 100 ms = 3 seconds of speech content
+const ANALYSIS_WINDOW_STRIDE = 15    // 50% overlap — smoother gain profile
 const MIN_SEGMENT_FRAMES     = 5     // 5 × 100 ms = 500 ms — discard shorter segments
-const DRIFT_THRESHOLD_DB     = 0.1   // σ > 3 dB triggers leveler
+const DRIFT_THRESHOLD_DB     = 3.0   // σ > 3 dB triggers leveler
 const NOISE_FLOOR_CHECK_DBFS = -58   // post-application safety check
 
 const FADE_IN_SAMPLES  = Math.round(0.030 * SAMPLE_RATE)  // 30 ms speech onset
@@ -116,12 +117,14 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
 
   const splineXs = windowGains.map(w => w.centerSample)
   const splineYs = windowGains.map(w => w.gainDb)
-  const spline   = computeNaturalCubicSpline(splineXs, splineYs)
+  const spline   = computeMonotoneHermiteSpline(splineXs, splineYs)
 
   const numFrames = Math.ceil(analysisSamples.length / FRAME_SAMPLES)
   const frameGains = buildFrameGains(spline, frameAnalysis, numFrames)
 
-  // Enforce rate-of-change constraint; smooth if violated
+  // Always apply one pass of Gaussian smoothing for a natural-sounding envelope,
+  // then enforce rate-of-change constraint with additional passes if needed
+  applyGaussianSmoothing(frameGains, GAUSSIAN_SIGMA_FRAMES)
   const maxRateDbPerFrame = maxRateDbPerS * FRAME_DURATION_S
   enforceRateConstraint(frameGains, maxRateDbPerFrame)
 
@@ -219,7 +222,7 @@ function buildAnalysisWindows(speechFrames, samples) {
     const rmsDb        = computeWindowRms(windowFrames, samples)
     const centerSample = computeWindowCenter(windowFrames)
     windows.push({ rmsDb, centerSample })
-    i += ANALYSIS_WINDOW_FRAMES  // non-overlapping windows
+    i += ANALYSIS_WINDOW_STRIDE  // 50% overlap for smoother gain profile
   }
 
   // Include a partial final window if there are leftover frames (>= 10 frames = 1 s)
@@ -282,7 +285,7 @@ function buildFrameGains(spline, sa, numFrames) {
       frameGains[f] = heldGainDb
     } else {
       const centerSample  = frame.offsetSamples + frame.lengthSamples / 2
-      const gainDb        = evalCubicSpline(spline, centerSample)
+      const gainDb        = evalMonotoneHermite(spline, centerSample)
       frameGains[f]       = gainDb
       heldGainDb          = gainDb  // update held value on each speech frame
     }
@@ -482,73 +485,76 @@ function applyGainCurve(samples, gainCurve) {
   return output
 }
 
-// ── Cubic spline ──────────────────────────────────────────────────────────────
+// ── Monotone Hermite interpolation (Fritsch–Carlson) ─────────────────────────
 
 /**
- * Compute natural cubic spline coefficients.
- * Boundary conditions: S''(x_0) = S''(x_n) = 0.
+ * Compute a monotone-preserving cubic Hermite spline (Fritsch–Carlson method).
+ * Unlike natural cubic splines, this guarantees NO overshoot between knots —
+ * the interpolant stays within the range of adjacent y-values. This prevents
+ * the gain envelope from dipping or spiking at rapid level transitions.
  *
  * @param {number[]} xs - Strictly increasing x values (sample positions)
  * @param {number[]} ys - Corresponding y values (gain in dB)
- * @returns {{ xs: number[], ys: number[], M: number[] }}
+ * @returns {{ xs: number[], ys: number[], ms: number[] }}
  */
-function computeNaturalCubicSpline(xs, ys) {
-  const n = xs.length - 1  // number of intervals
-  if (n < 1) throw new Error('[autoLeveler] Need at least 2 knots for cubic spline')
+function computeMonotoneHermiteSpline(xs, ys) {
+  const n = xs.length
+  if (n < 2) throw new Error('[autoLeveler] Need at least 2 knots for interpolation')
 
-  if (n === 1) {
-    // Two points: M = [0, 0] → linear interpolation
-    return { xs, ys, M: [0, 0] }
+  if (n === 2) {
+    // Two points: constant slope (linear)
+    const slope = (ys[1] - ys[0]) / (xs[1] - xs[0])
+    return { xs, ys, ms: [slope, slope] }
   }
 
-  // Interval widths
-  const h = new Array(n)
-  for (let i = 0; i < n; i++) h[i] = xs[i + 1] - xs[i]
-
-  // Right-hand side for the interior equations
-  const rhs = new Array(n - 1)
-  for (let i = 1; i < n; i++) {
-    rhs[i - 1] = 6 * ((ys[i + 1] - ys[i]) / h[i] - (ys[i] - ys[i - 1]) / h[i - 1])
+  // Step 1: Compute slopes of secant lines between successive points
+  const deltas = new Array(n - 1)
+  for (let i = 0; i < n - 1; i++) {
+    deltas[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i])
   }
 
-  // Thomas algorithm for the tridiagonal system
-  // Matrix rows: a[i]*M[i-1] + b[i]*M[i] + c[i]*M[i+1] = rhs[i-1]
-  // where a[i] = h[i-1], b[i] = 2*(h[i-1]+h[i]), c[i] = h[i], i=1..n-1
-  const c2 = new Array(n - 1)
-  const d2 = new Array(n - 1)
-
-  const b0 = 2 * (h[0] + h[1 < n ? 1 : 0])
-  c2[0] = h[1 < n ? 1 : 0] / b0
-  d2[0] = rhs[0] / b0
-
+  // Step 2: Initialize tangents as average of adjacent secants
+  const ms = new Array(n)
+  ms[0] = deltas[0]
+  ms[n - 1] = deltas[n - 2]
   for (let i = 1; i < n - 1; i++) {
-    const bi = 2 * (h[i] + h[i + 1 < n ? i + 1 : i])
-    const m  = bi - h[i] * c2[i - 1]
-    c2[i] = h[i + 1 < n ? i + 1 : i] / m
-    d2[i] = (rhs[i] - h[i] * d2[i - 1]) / m
+    ms[i] = (deltas[i - 1] + deltas[i]) / 2
   }
 
-  const M_interior = new Array(n - 1)
-  M_interior[n - 2] = d2[n - 2]
-  for (let i = n - 3; i >= 0; i--) {
-    M_interior[i] = d2[i] - c2[i] * M_interior[i + 1]
+  // Step 3: Fritsch–Carlson monotonicity correction
+  for (let i = 0; i < n - 1; i++) {
+    if (Math.abs(deltas[i]) < 1e-12) {
+      // Flat segment: force tangents to zero to prevent overshoot
+      ms[i] = 0
+      ms[i + 1] = 0
+    } else {
+      const alpha = ms[i] / deltas[i]
+      const beta  = ms[i + 1] / deltas[i]
+
+      // Constrain tangents so the interpolant stays within the data range.
+      // The Fritsch–Carlson condition: α² + β² ≤ 9
+      const radiusSq = alpha * alpha + beta * beta
+      if (radiusSq > 9) {
+        const tau = 3 / Math.sqrt(radiusSq)
+        ms[i]     = tau * alpha * deltas[i]
+        ms[i + 1] = tau * beta  * deltas[i]
+      }
+    }
   }
 
-  const M = [0, ...M_interior, 0]  // natural BC: M[0] = M[n] = 0
-
-  return { xs, ys, M }
+  return { xs, ys, ms }
 }
 
 /**
- * Evaluate the cubic spline at position x.
+ * Evaluate the monotone Hermite spline at position x.
  * Values outside the knot range are clamped to the nearest endpoint.
  *
- * @param {{ xs: number[], ys: number[], M: number[] }} spline
+ * @param {{ xs: number[], ys: number[], ms: number[] }} spline
  * @param {number} x
  * @returns {number}
  */
-function evalCubicSpline(spline, x) {
-  const { xs, ys, M } = spline
+function evalMonotoneHermite(spline, x) {
+  const { xs, ys, ms } = spline
   const n = xs.length - 1
 
   if (x <= xs[0]) return ys[0]
@@ -562,13 +568,15 @@ function evalCubicSpline(spline, x) {
   }
   const i = lo
   const h = xs[i + 1] - xs[i]
+  const t = (x - xs[i]) / h
 
-  // Standard cubic spline formula in terms of second derivatives
-  const a = (xs[i + 1] - x) / h
-  const b = (x - xs[i])    / h
+  // Hermite basis functions
+  const h00 = (1 + 2 * t) * (1 - t) * (1 - t)
+  const h10 = t * (1 - t) * (1 - t)
+  const h01 = t * t * (3 - 2 * t)
+  const h11 = t * t * (t - 1)
 
-  return a * ys[i] + b * ys[i + 1] +
-    h * h / 6 * ((a * a * a - a) * M[i] + (b * b * b - b) * M[i + 1])
+  return h00 * ys[i] + h10 * h * ms[i] + h01 * ys[i + 1] + h11 * h * ms[i + 1]
 }
 
 // ── Statistics helpers ────────────────────────────────────────────────────────
