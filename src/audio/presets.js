@@ -208,6 +208,18 @@ export const PRESETS = {
     breathReducer: { max_reduction_db: 12 },
     // Slightly more aggressive — mouth clicks are a human review concern for ACX
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
+    // MMSE spectral subtraction pre-pass (before DF3). Conservative settings for
+    // ACX: lower strength preserves the natural vocal character ACX human reviewers
+    // expect; transient shaper disabled to avoid any risk of gating room tone.
+    spectralSubtraction: {
+      enabled:              true,
+      alphaDd:              0.98,
+      beta:                 0.05,
+      strength:             0.7,
+      transientShaper:      false,
+    },
+    // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
+    // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
     // Conservative ACX tuning: lower depth and
     // ceiling, slower release to preserve narration intelligibility.
     sibilanceSuppressor: {
@@ -315,6 +327,17 @@ export const PRESETS = {
     // deeper makes the performance feel over-edited.
     breathReducer: { max_reduction_db: 6 },
     clickRemover: { thresholdSigma: 3.5, maxClickMs: 15 },
+    // MMSE spectral subtraction pre-pass (before DF3). Full strength with transient
+    // shaper enabled — podcast listeners expect a processed, tight sound and benefit
+    // from inter-phrase reverb tail suppression.
+    spectralSubtraction: {
+      enabled:                 true,
+      alphaDd:                 0.98,
+      beta:                    0.05,
+      strength:                1.0,
+      transientShaper:         true,
+      transientMaxReductionDb: 6,
+    },
     // Stage 4 — Sibilance Suppressor. Slightly deeper reduction with a faster
     // attack matches the punchier, more processed podcast character; everything
     // else inherits from DEFAULT_PARAMS.
@@ -411,6 +434,16 @@ export const PRESETS = {
     breathReducer: { max_reduction_db: 10 },
     // Same rationale as ACX — voice actors also benefit from clean transients
     clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 },
+    // MMSE spectral subtraction pre-pass (before DF3). Moderate strength; transient
+    // shaper disabled because voice-over often sits under music beds where any gating
+    // artifact becomes audible against the bed.
+    spectralSubtraction: {
+      enabled:              true,
+      alphaDd:              0.98,
+      beta:                 0.05,
+      strength:             0.8,
+      transientShaper:      false,
+    },
     // Stage 4 — Sibilance Suppressor. Broadcast-neutral tuning sits between
     // ACX and podcast: stricter detection than the defaults, lower ceiling
     // than ACX since voice-over often sits under music beds where deep cuts
@@ -508,6 +541,17 @@ export const PRESETS = {
     breathReducer: { max_reduction_db: 15 },
     // Conservative — unknown source material
     clickRemover: { thresholdSigma: 3.5, maxClickMs: 10 },
+    // MMSE spectral subtraction pre-pass (before DF3). Full strength with transient
+    // shaper enabled — unknown source material benefits from maximum diffuse noise and
+    // reverb tail reduction before DF3.
+    spectralSubtraction: {
+      enabled:                 true,
+      alphaDd:                 0.98,
+      beta:                    0.05,
+      strength:                1.0,
+      transientShaper:         true,
+      transientMaxReductionDb: 6,
+    },
     // Stage 4 — Sibilance Suppressor. Pragmatic assertive: lower broadband
     // trigger and selectivity catch more events, deeper reduction with a
     // narrower spreading kernel (sharpness 0.2) for surgical cuts on unknown
@@ -634,6 +678,17 @@ export const PRESETS = {
     airBoost: { gainDb: 0 },
     bweModel: 'ap_bwe',
     bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    // MMSE spectral subtraction pre-pass (before RNNoise NE-1). Moderate strength
+    // so residual room noise is reduced before RNNoise's stationary NR pass and
+    // Demucs separation. Transient shaper enabled to suppress reverb tails.
+    spectralSubtraction: {
+      enabled:                 true,
+      alphaDd:                 0.98,
+      beta:                    0.05,
+      strength:                0.8,
+      transientShaper:         true,
+      transientMaxReductionDb: 6,
+    },
   },
 
   clearervoice_eraser: {
@@ -716,6 +771,17 @@ export const PRESETS = {
     airBoost: { gainDb: 0 },
     bweModel: 'ap_bwe',
     bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
+    // MMSE spectral subtraction pre-pass (before RNNoise NE-1). Moderate strength
+    // reduces residual room noise before ClearerVoice SE processes the signal.
+    // Transient shaper enabled to suppress inter-phrase reverb tails.
+    spectralSubtraction: {
+      enabled:                 true,
+      alphaDd:                 0.98,
+      beta:                    0.05,
+      strength:                0.8,
+      transientShaper:         true,
+      transientMaxReductionDb: 6,
+    },
   },
 
 }

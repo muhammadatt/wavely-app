@@ -26,16 +26,17 @@ import { PRESETS }       from '../presets.js'
 const RESONANCE_PYTHON = process.env.RESONANCE_PYTHON ?? SHARED_PYTHON
 const NUM_THREADS      = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 
-const SCRIPTS_DIR             = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
-const HARMONIC_EXCITER_SCRIPT = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
-const VOCAL_SATURATION_SCRIPT = path.join(SCRIPTS_DIR, 'vocal_saturation.py')
-const DEREVERB_SCRIPT         = path.join(SCRIPTS_DIR, 'dereverb.py')
-const AP_BWE_SCRIPT           = path.join(SCRIPTS_DIR, 'ap_bwe_extend.py')
-const LAVASR_SCRIPT           = path.join(SCRIPTS_DIR, 'lavasr_extend.py')
-const CLICK_REMOVER_SCRIPT    = path.join(SCRIPTS_DIR, 'click_remover.py')
-const RESONANCE_SCRIPT        = path.join(SCRIPTS_DIR, 'resonance_suppressor.py')
-const SIBILANCE_SCRIPT        = path.join(SCRIPTS_DIR, 'sibilance_suppressor.py')
-const BREATH_REDUCER_SCRIPT   = path.join(SCRIPTS_DIR, 'breath_reducer.py')
+const SCRIPTS_DIR                  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
+const HARMONIC_EXCITER_SCRIPT      = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
+const VOCAL_SATURATION_SCRIPT      = path.join(SCRIPTS_DIR, 'vocal_saturation.py')
+const DEREVERB_SCRIPT              = path.join(SCRIPTS_DIR, 'dereverb.py')
+const AP_BWE_SCRIPT                = path.join(SCRIPTS_DIR, 'ap_bwe_extend.py')
+const LAVASR_SCRIPT                = path.join(SCRIPTS_DIR, 'lavasr_extend.py')
+const CLICK_REMOVER_SCRIPT         = path.join(SCRIPTS_DIR, 'click_remover.py')
+const RESONANCE_SCRIPT             = path.join(SCRIPTS_DIR, 'resonance_suppressor.py')
+const SIBILANCE_SCRIPT             = path.join(SCRIPTS_DIR, 'sibilance_suppressor.py')
+const BREATH_REDUCER_SCRIPT        = path.join(SCRIPTS_DIR, 'breath_reducer.py')
+const SPECTRAL_SUBTRACTION_SCRIPT  = path.join(SCRIPTS_DIR, 'spectral_subtraction.py')
 
 // ── Enhancement stages ────────────────────────────────────────────────────────
 
@@ -92,6 +93,33 @@ export function runDereverb(inputPath, outputPath, strength = 'medium', preserve
   const args = ['--input', inputPath, '--output', outputPath, '--strength', strength]
   if (preserveEarly) args.push('--preserve-early')
   return spawnPython(DEREVERB_SCRIPT, args, `Dereverb (${strength})`)
+}
+
+/**
+ * DSP pre-pass: MMSE decision-directed spectral subtraction + optional transient shaper.
+ *
+ * Runs before the main ML noise reduction (DF3, RNNoise, DTLN) to reduce diffuse
+ * noise and reverb energy, lowering the complexity of the signal the ML model
+ * receives. Musical noise is prevented by the decision-directed SNR estimator,
+ * spectral floor, and 3-bin median filter mop-up.
+ *
+ * @param {string} inputPath     - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath    - 32-bit float WAV at 44.1 kHz
+ * @param {object} [params]
+ * @param {number} [params.alphaDd=0.98]              - Decision-directed smoothing (0–1; higher = more temporal smoothing)
+ * @param {number} [params.beta=0.05]                 - Spectral floor / minimum Wiener gain (0–1)
+ * @param {number} [params.strength=1.0]              - Suppression strength (0 = bypass, 1 = full)
+ * @param {boolean} [params.transientShaper=false]    - Enable transient shaper for reverb tail suppression
+ * @param {number} [params.transientMaxReductionDb=6] - Transient shaper max gain reduction in dB
+ */
+export function runSpectralSubtraction(inputPath, outputPath, params = {}) {
+  const args = ['--input', inputPath, '--output', outputPath]
+  if (params.alphaDd              != null) args.push('--alpha-dd',                   String(params.alphaDd))
+  if (params.beta                 != null) args.push('--beta',                        String(params.beta))
+  if (params.strength             != null) args.push('--strength',                    String(params.strength))
+  if (params.transientShaper)              args.push('--transient-shaper')
+  if (params.transientMaxReductionDb != null) args.push('--transient-max-reduction-db', String(params.transientMaxReductionDb))
+  return spawnPython(SPECTRAL_SUBTRACTION_SCRIPT, args, 'SpectralSubtraction')
 }
 
 /**
