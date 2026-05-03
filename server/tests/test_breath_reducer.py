@@ -242,13 +242,16 @@ class TestGroupEvents:
         # 15 frames ≈ 174 ms — within [60 ms, 550 ms]
         params = self._params()
         hop = params["hop_length"]
+        pad_frames = int(params.get("pad_ms", 0) * SR / 1000.0 / hop)
         mask = np.zeros(100, dtype=bool)
         mask[10:25] = True
         events = group_events(mask, hop, SR, params)
         assert len(events) == 1
         start_s, end_s = events[0]
-        assert start_s == 10 * hop
-        assert end_s == 25 * hop
+        # Core detection spans frames 10–25; padding extends both sides (in frames)
+        # No voiced_mask → padding extends the full pad_frames amount
+        assert start_s == max(0, 10 - pad_frames) * hop
+        assert end_s == min(100, 25 + pad_frames) * hop
 
     def test_two_valid_events_both_returned(self):
         params = self._params()
@@ -293,7 +296,7 @@ class TestApplyGainEnvelope:
         hold_e = end - fade_samples
         np.testing.assert_allclose(
             result[hold_s:hold_e], target, rtol=1e-4,
-            err_msg="Hold region should be exactly at target gain"
+            err_msg="Hold region should be at uniform target gain"
         )
 
     def test_signal_before_event_is_unchanged(self):

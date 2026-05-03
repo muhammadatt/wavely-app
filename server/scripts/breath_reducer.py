@@ -1,4 +1,7 @@
 """
+MT -- NOT CURRENTLY USEABLE. THE BREATH DETECTIION WORKS BUT TEH 
+GAIN REDUCTION EITHER LEADS TO ARTIFACTS OR CUTS OFF THE START OF CERTAIN WORDS 
+
 breath_reducer.py
 Stage 4c -- Breath Reducer
 
@@ -52,13 +55,20 @@ DEFAULT_PARAMS = {
 
     # Detection thresholds
     "rms_min_db":       -48.0,  # Below = silence (not a breath)
-    "rms_max_db":       -24.0,  # Above = voiced speech (not a breath)
-    "flatness_min":       0.05, # Spectral flatness minimum (Wiener entropy)
-    "zcr_min":            0.08, # ZCR minimum (breaths have fast sign changes)
+    "rms_max_db":       -20.0,  # Above = voiced speech (not a breath)
+    "flatness_min":     0.0000000001, # Spectral flatness minimum (Wiener entropy)
+                                # Post-NR audio has very low flatness — breaths
+                                # lose their noise-like character after DF3.
+    "zcr_min":            0.04, # ZCR minimum (breaths have fast sign changes)
 
     # Event filtering
     "min_breath_ms":     60.0,  # Shorter events are clicks / transients
     "max_breath_ms":    550.0,  # Longer events are likely room noise sections
+
+    # Padding added to each side of a detected event so the gain envelope
+    # covers the breath's natural onset and release — not just the loud core
+    # that passed the detection thresholds.
+    "pad_ms":            80.0,
 
     # Fade ramps at event boundaries to prevent clicks
     "fade_ms":           15.0,
@@ -144,29 +154,73 @@ def detect_breath_frames(rms, zcr, flatness, params, voiced_mask=None):
 # Event grouping
 # ---------------------------------------------------------------------------
 
-def group_events(breath_mask, hop_length, sr, params):
+def group_events(breath_mask, hop_length, sr, params, voiced_mask=None):
     """
     Merge contiguous True frames into (start_sample, end_sample) pairs.
     Events shorter than min_breath_ms or longer than max_breath_ms are dropped.
+
+    After duration filtering, each event is padded outward by pad_ms on
+    both sides so the gain envelope covers the breath's natural onset and
+    release — not just the loud core that passed detection thresholds.
+    Padding is clamped at voiced-frame boundaries (via voiced_mask) so it
+    never bleeds into word onsets.  Overlapping padded events are merged.
     """
     if not breath_mask.any():
         return []
 
+    n_frames   = len(breath_mask)
     min_frames = max(1, int(params["min_breath_ms"] * sr / 1000.0 / hop_length))
     max_frames = int(params["max_breath_ms"] * sr / 1000.0 / hop_length)
 
     # Vectorised run-length encoding
-    padded = np.concatenate([[False], breath_mask, [False]])
-    diff   = np.diff(padded.view(np.int8))
+    padded_mask = np.concatenate([[False], breath_mask, [False]])
+    diff   = np.diff(padded_mask.view(np.int8))
     starts = np.where(diff ==  1)[0]
     ends   = np.where(diff == -1)[0]
 
-    events = []
+    # Duration filter (in frames)
+    raw_events_frames = []
     for s, e in zip(starts, ends):
         dur = e - s
         if min_frames <= dur <= max_frames:
-            events.append((int(s) * hop_length, int(e) * hop_length))
-    return events
+            raw_events_frames.append((int(s), int(e)))
+
+    if not raw_events_frames:
+        return []
+
+    # Pad each event outward (in frames), clamped at voiced boundaries
+    pad_frames = int(params.get("pad_ms", 0) * sr / 1000.0 / hop_length)
+    padded_events = []
+    for s, e in raw_events_frames:
+        pad_s = s
+        pad_e = e
+        if pad_frames > 0:
+            # Extend start backward, stop at first voiced frame
+            for f in range(s - 1, max(s - pad_frames - 1, -1), -1):
+                if f < 0:
+                    pad_s = 0
+                    break
+                if voiced_mask is not None and voiced_mask[f]:
+                    break
+                pad_s = f
+            # Extend end forward, stop at first voiced frame
+            for f in range(e, min(e + pad_frames, n_frames)):
+                if voiced_mask is not None and voiced_mask[f]:
+                    break
+                pad_e = f + 1
+        padded_events.append((pad_s * hop_length, pad_e * hop_length))
+
+    # Merge overlapping / adjacent events (padding may cause overlaps)
+    padded_events.sort()
+    merged = [padded_events[0]]
+    for s, e in padded_events[1:]:
+        prev_s, prev_e = merged[-1]
+        if s <= prev_e:
+            merged[-1] = (prev_s, max(prev_e, e))
+        else:
+            merged.append((s, e))
+
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +231,10 @@ def apply_gain_envelope(audio, events, max_reduction_db, fade_samples):
     """
     Build a sample-domain gain envelope and multiply the audio by it.
 
-    Per event:
-      [start, start+fade)     — linear fade from 1.0 → target_gain
-      [start+fade, end-fade)  — hold at target_gain
-      [end-fade, end)         — linear fade from target_gain → 1.0
+    Applies a uniform gain reduction across each event so the breath
+    keeps its natural amplitude shape — it just sounds quieter overall.
+    Short half-cosine ramps at the edges prevent clicks without creating
+    a perceptible volume dip in the middle.
 
     np.minimum ensures the deepest reduction wins when events are adjacent.
     """
@@ -195,28 +249,29 @@ def apply_gain_envelope(audio, events, max_reduction_db, fade_samples):
             continue
 
         half_event = (end_s - start_s) // 2
-        fade_in_n  = min(fade_samples, half_event)
-        fade_out_n = min(fade_samples, half_event)
+        fade_n     = min(fade_samples, half_event)
 
-        # Fade in
-        fi_end = start_s + fade_in_n
-        if fade_in_n > 0:
-            ramp = np.linspace(1.0, target_gain, fade_in_n, dtype=np.float32)
+        # Fade in — half-cosine from 1.0 → target_gain
+        fi_end = start_s + fade_n
+        if fade_n > 0:
+            # cos(0)=1 → cos(π/2)=0, mapped to 1.0 → target_gain
+            t    = np.linspace(0.0, np.pi / 2.0, fade_n, dtype=np.float32)
+            ramp = target_gain + np.cos(t) * (1.0 - target_gain)
             gain[start_s:fi_end] = np.minimum(gain[start_s:fi_end], ramp)
 
-        # Hold
+        # Hold — uniform target_gain
         hold_start = fi_end
-        hold_end   = end_s - fade_out_n
+        hold_end   = end_s - fade_n
         if hold_start < hold_end:
             gain[hold_start:hold_end] = np.minimum(
                 gain[hold_start:hold_end], target_gain,
             )
 
-        # Fade out
-        fo_start = hold_end
-        if fade_out_n > 0:
-            ramp = np.linspace(target_gain, 1.0, fade_out_n, dtype=np.float32)
-            gain[fo_start:end_s] = np.minimum(gain[fo_start:end_s], ramp)
+        # Fade out — half-cosine from target_gain → 1.0
+        if fade_n > 0:
+            t    = np.linspace(np.pi / 2.0, 0.0, fade_n, dtype=np.float32)
+            ramp = target_gain + np.cos(t) * (1.0 - target_gain)
+            gain[hold_end:end_s] = np.minimum(gain[hold_end:end_s], ramp)
 
     return (audio * gain).astype(np.float32)
 
@@ -271,7 +326,7 @@ def apply_breath_reduction(audio, sr, params=None, vad_frames=None):
         f"rms/zcr/flatness thresholds"
     )
 
-    events = group_events(breath_mask, hop, sr, params)
+    events = group_events(breath_mask, hop, sr, params, voiced_mask)
     logger.info(f"Events after duration filter: {len(events)}")
 
     if not events:
