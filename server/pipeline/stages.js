@@ -41,7 +41,7 @@ import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
@@ -320,12 +320,25 @@ export async function spectralSubtraction(ctx) {
     transientMaxReductionDb: config.transientMaxReductionDb ?? 6.0,
   }
 
+  // Pass Silero VAD frame labels computed by analyzeFramesRaw (which always
+  // runs before this stage) to the Python script.  The script maps each STFT
+  // frame to the corresponding 100 ms pipeline frame and uses the Silero
+  // isSilence label instead of its own energy-based VAD, giving a far more
+  // accurate voiced/silence classification with zero re-processing cost.
+  let vadLabelsPath = null
+  const frames = ctx.results.metrics?.frames
+  if (frames?.length > 0) {
+    vadLabelsPath = ctx.tmp('.json')
+    await writeFile(vadLabelsPath, JSON.stringify(frames.map(f => f.isSilence)))
+  }
+
   const outPath = ctx.tmp('.wav')
   ctx.log(
     `[spectral-sub] Starting: alpha_dd=${params.alphaDd} beta=${params.beta} ` +
-    `strength=${params.strength} transient_shaper=${params.transientShaper}`
+    `strength=${params.strength} transient_shaper=${params.transientShaper} ` +
+    `vad=${vadLabelsPath ? 'silero' : 'internal'}`
   )
-  await runSpectralSubtraction(ctx.currentPath, outPath, params)
+  await runSpectralSubtraction(ctx.currentPath, outPath, params, vadLabelsPath)
   ctx.currentPath = outPath
   ctx.results.spectralSubtraction = { applied: true, ...params }
   await logLevel(ctx, 'after spectral subtraction', ctx.currentPath, {

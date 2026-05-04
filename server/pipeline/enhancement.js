@@ -113,13 +113,14 @@ export function runDereverb(inputPath, outputPath, strength = 'medium', preserve
  * @param {boolean} [params.transientShaper=false]    - Enable transient shaper for reverb tail suppression
  * @param {number} [params.transientMaxReductionDb=6] - Transient shaper max gain reduction in dB
  */
-export function runSpectralSubtraction(inputPath, outputPath, params = {}) {
+export function runSpectralSubtraction(inputPath, outputPath, params = {}, vadLabelsPath = null) {
   const args = ['--input', inputPath, '--output', outputPath]
   if (params.alphaDd              != null) args.push('--alpha-dd',                   String(params.alphaDd))
   if (params.beta                 != null) args.push('--beta',                        String(params.beta))
   if (params.strength             != null) args.push('--strength',                    String(params.strength))
   if (params.transientShaper)              args.push('--transient-shaper')
   if (params.transientMaxReductionDb != null) args.push('--transient-max-reduction-db', String(params.transientMaxReductionDb))
+  if (vadLabelsPath               != null) args.push('--vad-labels',                 vadLabelsPath)
   return spawnPython(SPECTRAL_SUBTRACTION_SCRIPT, args, 'SpectralSubtraction')
 }
 

@@ -121,7 +121,7 @@ export const PRESETS = {
     dereverb: {
       enabled: true,
       strength: 'medium',
-      preserve_early: true,
+      preserve_early: false,
     },
     autoLeveler: {
       total_max_up_db:         5.0,
@@ -240,9 +240,10 @@ export const PRESETS = {
       release_ms:           80.0,
       max_reduction_db:     8.0,
     },
-    // Stage 4c — Room Presence. Conservative for ACX: very low wet mix and
+    // Conservative for ACX: very low wet mix and
     // short RT60 add just enough placement without risking ACX human review
     // rejection for audible reverb.
+    /*
     roomPresence: {
       enabled:     true,
       wet:         0.05,
@@ -250,6 +251,14 @@ export const PRESETS = {
       preDelayMs:  1.0,
       diffusion:   0.6,
     },
+    */
+    roomPresence: {
+  enabled:     true,
+  wet:         0.05,   // 0.12 - reverb tail sits ~17dB below direct
+  rt60Ms:      130,    // presence without going washy; echoes after 200 - 250ms
+  preDelayMs:  1.0,    // tight onset
+  diffusion:   0.4,    // brighter tail preserves air
+},
   },
 
   podcast_ready: {
@@ -776,8 +785,6 @@ export const PRESETS = {
       transientShaper:         true,
       transientMaxReductionDb: 6,
     },
-    // Stage 4c — Room Presence disabled: Noise Eraser deliberately produces a
-    // "dry booth" quality. Adding room presence would contradict the preset goal.
     roomPresence: { enabled: false },
   },
 

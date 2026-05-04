@@ -35,21 +35,23 @@ const STANDARD_PIPELINE = [
   //stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
-  stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.compress,                // Serial compression
+  //stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
   stages.noiseReduce,             // Conditional secondary NR pass
   stages.parallelCompress,        // Parallel compression
   stages.vadGate,                 // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
+  stages.vadGate,
+  stages.vadGate,
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
   //stages.vocalSaturation,
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
-  stages.sibilanceSuppressor,
-  stages.deEss,                   // De-Ess again after airBoost
+  stages.sibilanceSuppressor,     // Sibilance targeted resonance suppressor
+  stages.deEss,                   // Split band De-Esser  
   stages.enhancementEQ,
-  //stages.roomTonePad,           // TO DO: Make configurable option; For ACX-only preset only; Changes file length
-  stages.roomPresence,           // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
+  stages.roomPresence,            // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
+  //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
   stages.truePeakLimit,
   stages.measureAfter,

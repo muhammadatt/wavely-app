@@ -28,8 +28,8 @@ const VAD_MIN_VOICED_MS   = 200
 const VAD_MIN_UNVOICED_MS = 300
 
 // Skip condition thresholds
-const MIN_FILE_DURATION_S   = 20
-const MIN_VOICED_DURATION_S = 15
+const MIN_FILE_DURATION_S   = 10
+const MIN_VOICED_DURATION_S = 5
 const LEVELED_STD_THRESHOLD = 1.5   // dB — both std_st and std_mt below this → skip
 
 // ─── K-weighting filter (EBU R128 / ITU-R BS.1770-4) ─────────────────────────

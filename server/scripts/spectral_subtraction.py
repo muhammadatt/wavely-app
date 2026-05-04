@@ -17,6 +17,7 @@ Usage:
   python3 spectral_subtraction.py --input <path> --output <path>
     [--alpha-dd 0.98] [--beta 0.15] [--strength 1.0]
     [--transient-shaper] [--transient-max-reduction-db 6.0]
+    [--vad-labels <path-to-isSilence.json>]
 
 Input/output: 32-bit float PCM WAV at 44.1 kHz (pipeline internal format).
 """
@@ -41,24 +42,26 @@ PIPELINE_SR = 44100
 ALPHA_NOISE_SPEECH  = np.float32(0.99)
 ALPHA_NOISE_SILENCE = np.float32(0.92)
 
-# Energy-based VAD threshold: mean a posteriori SNR (gamma_mean) above this
-# value classifies the frame as speech.  3.0 ≈ +4.8 dB above noise —
-# conservative enough to avoid misclassifying quiet voiced frames as silence,
-# which would bleed speech energy into the noise estimator.
-VAD_SNR_THRESHOLD = np.float32(3.0)
+# Speech-protective gain floor: voiced frames are full passthrough (1.0).
+# Spectral subtraction cannot separate speech from noise within the same
+# time-frequency bin — any gain < 1.0 on a voiced frame attenuates speech.
+# DF3 downstream handles in-speech NR with a model that can actually do that.
+BETA_SPEECH = np.float32(1.0)
 
-# VAD frequency range: only bins in 80–3400 Hz contribute to the speech/silence
-# decision.  HF bins (>3.4 kHz) are noise-dominated even during voiced speech
-# and drag the average gamma down, causing speech frames to be misclassified as
-# silence.  Bin indices are inclusive.
-_BIN_HZ       = PIPELINE_SR / N_FFT            # ~21.5 Hz per bin
-VAD_BIN_LO    = max(1, int(np.ceil(80.0 / _BIN_HZ)))    # bin for 80 Hz
-VAD_BIN_HI    = min(N_FFT // 2, int(np.floor(3400.0 / _BIN_HZ)))  # bin for 3400 Hz
-
-# Speech-protective gain floor.  During VAD-classified speech frames, gains are
-# clamped to this floor.  1.0 = complete passthrough during speech — no
-# modification at all.  0.5 = less spectral reduction applied to voiced frames
-BETA_SPEECH = np.float32(0.5)
+# Voiced-mask expansion applied after loading Silero labels.
+# Silero labels are at 25 ms resolution (~2 STFT frames each at 86 fps).
+# At a voiced/silence boundary the label can be up to one 25 ms frame late.
+#
+# PRE_ROLL extends the voiced region backward from each voiced onset — covers
+# the worst-case 25 ms label latency at the start of a phrase.
+# POST_ROLL extends it forward from each voiced offset — covers consonant tails
+# and short within-phrase dips.
+#
+# At 44100 Hz / 512 hop ≈ 86 fps:
+#   PRE_ROLL  = 3 frames ≈ 35 ms  (covers one full 25 ms Silero frame boundary)
+#   POST_ROLL = 3 frames ≈ 35 ms
+VAD_STFT_PRE_ROLL  = 3
+VAD_STFT_POST_ROLL = 3
 
 # ── Numba JIT (optional) ─────────────────────────────────────────────────────
 # The MMSE frame loop is sequential (each frame depends on the previous noise
@@ -77,8 +80,7 @@ if _HAS_NUMBA:
 
     @njit(cache=True)
     def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta, beta_speech,
-                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold,
-                   vad_bin_lo, vad_bin_hi):
+                   alpha_noise_speech, alpha_noise_silence, voiced_mask):
         """
         MMSE decision-directed Wiener gain — Numba JIT implementation.
 
@@ -86,14 +88,16 @@ if _HAS_NUMBA:
           xi[t] = alpha_dd * |G[t-1]·Y[t-1]|² / λ[t]  +  (1−alpha_dd) * max(γ[t]−1, 0)
           G[t]  = xi[t] / (xi[t] + 1)   ← Wiener gain, floored at beta
 
-        Two gain floors:
-          - beta        : minimum gain during silence (full suppression)
-          - beta_speech : minimum gain during speech  (speech-protective)
+        Two gain floors per frame type:
+          - beta        : silence frames — full noise suppression
+          - beta_speech : speech frames — passthrough (1.0); DF3 handles in-speech NR
 
-        VAD decision uses only bins in [vad_bin_lo, vad_bin_hi] (80–3400 Hz)
-        to avoid HF noise dragging the average gamma below the speech threshold.
+        voiced_mask[t] is a precomputed bool: True = voiced, False = silence.
+        This is derived from Silero VAD labels when available, or from the
+        energy-based fallback (_compute_voiced_mask_energy).
 
-        mag   : (n_frames, n_bins) float32 — STFT magnitude
+        mag          : (n_frames, n_bins) float32 — STFT magnitude
+        voiced_mask  : (n_frames,) bool
         returns gains (n_frames, n_bins) float32 in [beta, 1.0]
         """
         _ad   = np.float32(alpha_dd)
@@ -104,7 +108,6 @@ if _HAS_NUMBA:
         _aSi  = np.float32(alpha_noise_silence)
         _mSp  = np.float32(1.0 - alpha_noise_speech)
         _mSi  = np.float32(1.0 - alpha_noise_silence)
-        _vth  = np.float32(vad_snr_threshold)
         _eps  = np.float32(1e-10)
         _one  = np.float32(1.0)
         _zero = np.float32(0.0)
@@ -113,15 +116,13 @@ if _HAS_NUMBA:
         prev_clean = mag[0].copy()
         gains      = np.empty((n_frames, n_bins), dtype=np.float32)
 
-        # Number of bins used for VAD (precompute outside the frame loop)
-        _vad_count = np.float32(vad_bin_hi - vad_bin_lo + 1)
-
         for t in range(n_frames):
             mag_t     = mag[t]
-            gamma_sum = _zero
+            in_speech = voiced_mask[t]
+            floor     = _bSp if in_speech else _b
 
             for b in range(n_bins):
-                lam   = noise_est[b] * noise_est[b] + _eps
+                lam     = noise_est[b] * noise_est[b] + _eps
                 gamma_b = mag_t[b] * mag_t[b] / lam
 
                 xi_dd = prev_clean[b] * prev_clean[b] / lam
@@ -130,24 +131,18 @@ if _HAS_NUMBA:
                 xi    = _ad * xi_dd + _mad * xi_sp
 
                 g = xi / (xi + _one)
-                if g < _b:
-                    g = _b
+                if g < floor:
+                    g = floor
 
-                gains[t, b]    = g
-                prev_clean[b]  = g * mag_t[b]
+                gains[t, b]   = g
+                # prev_clean tracks actual output so the decision-directed
+                # estimator's prior is consistent with the gain we applied.
+                prev_clean[b] = g * mag_t[b]
 
-                # Accumulate gamma only for speech-frequency bins
-                if vad_bin_lo <= b <= vad_bin_hi:
-                    gamma_sum += gamma_b
-
-            # Energy-based VAD: mean a posteriori SNR over speech bins only
-            is_speech = (gamma_sum / _vad_count) > _vth
-
-            if is_speech:
-                # Speech frame: clamp gains to the higher speech floor
+            # Noise estimator: slow adaptation during speech to prevent voiced
+            # energy bleeding into the noise estimate.
+            if in_speech:
                 for b in range(n_bins):
-                    if gains[t, b] < _bSp:
-                        gains[t, b] = _bSp
                     noise_est[b] = _aSp * noise_est[b] + _mSp * mag_t[b]
             else:
                 for b in range(n_bins):
@@ -157,12 +152,13 @@ if _HAS_NUMBA:
 
 else:
     def _mmse_loop(mag, n_frames, n_bins, alpha_dd, beta, beta_speech,
-                   alpha_noise_speech, alpha_noise_silence, vad_snr_threshold,
-                   vad_bin_lo, vad_bin_hi):
+                   alpha_noise_speech, alpha_noise_silence, voiced_mask):
         """
         MMSE decision-directed Wiener gain — vectorised NumPy fallback.
         Same algorithm as the Numba version; slower due to the Python for loop,
         but each iteration is fully vectorised over the frequency bins.
+
+        voiced_mask : (n_frames,) bool — precomputed speech/silence labels.
         """
         _ad  = np.float32(alpha_dd)
         _mad = np.float32(1.0 - alpha_dd)
@@ -178,22 +174,18 @@ else:
         gains      = np.empty((n_frames, n_bins), dtype=np.float32)
 
         for t in range(n_frames):
-            mag_t = mag[t]
-            lam   = noise_est * noise_est + np.float32(1e-10)
-            gamma = (mag_t * mag_t) / lam
+            mag_t     = mag[t]
+            in_speech = bool(voiced_mask[t])
 
-            xi    = _ad * (prev_clean * prev_clean / lam) + _mad * np.maximum(gamma - 1.0, 0.0)
-            g     = xi / (xi + 1.0)
-            g     = np.maximum(g, _b)
+            lam = noise_est * noise_est + np.float32(1e-10)
+            xi  = _ad * (prev_clean * prev_clean / lam) + _mad * np.maximum(
+                    (mag_t * mag_t) / lam - 1.0, 0.0)
+            g   = np.maximum(xi / (xi + 1.0), _bSp if in_speech else _b)
 
             gains[t]   = g
-            prev_clean = g * mag_t
+            prev_clean = g * mag_t   # track actual output for next frame's DD prior
 
-            # VAD: average gamma over speech-frequency bins only (80–3400 Hz)
-            gamma_speech = float(gamma[vad_bin_lo:vad_bin_hi + 1].mean())
-            if gamma_speech > float(vad_snr_threshold):
-                # Speech frame: clamp gains to the higher speech floor
-                gains[t] = np.maximum(gains[t], _bSp)
+            if in_speech:
                 noise_est = _aSp * noise_est + _mSp * mag_t
             else:
                 noise_est = _aSi * noise_est + _mSi * mag_t
@@ -219,20 +211,34 @@ def main():
                         help='Enable transient shaper for inter-phrase reverb tail suppression')
     parser.add_argument('--transient-max-reduction-db', type=float, default=6.0,
                         help='Transient shaper maximum gain reduction in dB (default 6.0)')
+    parser.add_argument('--vad-labels',                  default=None,
+                        help='Path to JSON file with Silero isSilence labels (one bool per '
+                             '100 ms pipeline frame). When provided, replaces the internal '
+                             'energy-based VAD with the high-quality Silero classifications '
+                             'already computed by the pipeline.')
     args = parser.parse_args()
 
+    import json
     from scipy.io import wavfile
+
+    # Load external Silero VAD labels if provided
+    vad_labels = None
+    if args.vad_labels:
+        with open(args.vad_labels, 'r') as f:
+            vad_labels = json.load(f)   # list[bool] — True = silence
+        print(f'[spectral-sub] Loaded {len(vad_labels)} Silero VAD frames from '
+              f'{args.vad_labels}', flush=True)
 
     sr, audio_np = wavfile.read(args.input)
     audio_np = audio_np.astype(np.float32)
 
     if audio_np.ndim == 1:
-        out = _process_channel(audio_np, args, sr)
+        out = _process_channel(audio_np, args, sr, vad_labels)
         wavfile.write(args.output, sr, out.astype(np.float32))
     else:
         # Stereo: process each channel independently to preserve spatial information
-        ch0 = _process_channel(audio_np[:, 0], args, sr)
-        ch1 = _process_channel(audio_np[:, 1], args, sr)
+        ch0 = _process_channel(audio_np[:, 0], args, sr, vad_labels)
+        ch1 = _process_channel(audio_np[:, 1], args, sr, vad_labels)
         wavfile.write(args.output, sr,
                       np.stack([ch0, ch1], axis=1).astype(np.float32))
 
@@ -246,8 +252,12 @@ def main():
 
 # ── Per-channel processing ────────────────────────────────────────────────────
 
-def _process_channel(audio, args, sr):
-    """Full MMSE + optional transient shaper pass on a single audio channel."""
+def _process_channel(audio, args, sr, vad_labels=None):
+    """Full MMSE + optional transient shaper pass on a single audio channel.
+
+    vad_labels : list of bool (isSilence) from the pipeline's Silero VAD pass,
+                 or None to fall back to the internal energy-based VAD.
+    """
     from scipy.signal import stft, istft
 
     # Guard: audio shorter than one FFT window cannot be meaningfully processed.
@@ -274,6 +284,19 @@ def _process_channel(audio, args, sr):
     mag_T = np.ascontiguousarray(mag.T)
     n_frames, n_bins = mag_T.shape
 
+    # ── Build voiced mask ────────────────────────────────────────────────────
+    # Silero VAD labels are required.  Without them the stage cannot distinguish
+    # speech from silence and must pass through unchanged to avoid attenuation.
+    if vad_labels is None:
+        print('[spectral-sub] WARNING: no VAD labels supplied — bypassing (no-op)', flush=True)
+        return audio
+
+    voiced_mask = _load_vad_labels(vad_labels, n_frames, HOP_LENGTH, sr)
+    voiced_mask = _expand_voiced_mask(voiced_mask, VAD_STFT_PRE_ROLL, VAD_STFT_POST_ROLL)
+    n_voiced = int(voiced_mask.sum())
+    print(f'[spectral-sub] VAD: {len(vad_labels)} Silero frames -> {n_frames} STFT frames '
+          f'({n_voiced} voiced, {n_frames - n_voiced} silence)', flush=True)
+
     # ── MMSE Wiener gains ─────────────────────────────────────────────────────
     gains = _mmse_loop(
         mag_T, n_frames, n_bins,
@@ -282,9 +305,7 @@ def _process_channel(audio, args, sr):
         BETA_SPEECH,
         ALPHA_NOISE_SPEECH,
         ALPHA_NOISE_SILENCE,
-        VAD_SNR_THRESHOLD,
-        VAD_BIN_LO,
-        VAD_BIN_HI,
+        voiced_mask,
     )  # (n_frames, n_bins)
 
     # 5-bin frequency-axis median filter: kills isolated spectral spikes that
@@ -298,6 +319,14 @@ def _process_channel(audio, args, sr):
     # — fast enough to track genuine speech/silence transitions, slow enough
     # to eliminate audible amplitude modulation.
     gains = _smooth_gains_temporal(gains, alpha=np.float32(0.85))
+
+    # Restore voiced frames to exact passthrough after the temporal smoother.
+    # The IIR carries low silence-mode gains (beta ≈ 0.15) forward into the
+    # onset of every voiced passage — causing 6-8 dB attenuation for the first
+    # ~200 ms of speech after each pause.  Voiced frames must always be 1.0
+    # regardless of the smoother state; the smoother is only needed to suppress
+    # musical noise within silence regions.
+    gains[voiced_mask] = np.float32(1.0)
 
     # Blend MMSE gain with identity (passthrough) based on strength.
     # strength=0 → no processing; strength=1 → full MMSE suppression.
@@ -342,6 +371,68 @@ def _process_channel(audio, args, sr):
 
 
 # ── DSP helpers ───────────────────────────────────────────────────────────────
+
+def _load_vad_labels(is_silence_list, n_stft_frames, hop_length, sr,
+                     pipeline_frame_sec=0.025):
+    """Map pipeline Silero VAD labels (25 ms frames) to STFT frame resolution.
+
+    is_silence_list : list[bool] — True = silence, one entry per pipeline frame
+    n_stft_frames   : number of STFT frames to produce
+    hop_length      : STFT hop in samples
+    sr              : sample rate
+    pipeline_frame_sec : duration of each pipeline frame in seconds.
+                         Must match FRAME_DURATION_S in frameAnalysis.js (0.025 s = 25 ms).
+
+    Returns voiced_mask : np.ndarray[bool] of shape (n_stft_frames,)
+    """
+    stft_frame_sec  = hop_length / sr            # ~11.6 ms per STFT frame
+    n_pipeline      = len(is_silence_list)
+    voiced_mask     = np.empty(n_stft_frames, dtype=bool)
+
+    for t in range(n_stft_frames):
+        t_sec        = t * stft_frame_sec
+        pipeline_idx = min(int(t_sec / pipeline_frame_sec), n_pipeline - 1)
+        # isSilence=True → not voiced; isSilence=False → voiced
+        voiced_mask[t] = not is_silence_list[pipeline_idx]
+
+    return voiced_mask
+
+
+def _expand_voiced_mask(voiced_mask, pre_roll, post_roll):
+    """Expand voiced regions to compensate for Silero label resolution (100 ms).
+
+    Silero labels switch state at 100 ms frame boundaries.  At a silence->voiced
+    transition the label can be up to one full Silero frame (~8-9 STFT frames)
+    late, causing the onset of a phrase to receive silence-mode suppression.
+
+    pre_roll  : STFT frames to mark as voiced *before* each voiced onset.
+    post_roll : STFT frames to mark as voiced *after* each voiced offset.
+
+    Both passes reference the original mask so expansions don't chain.
+    """
+    n        = len(voiced_mask)
+    expanded = voiced_mask.copy()
+
+    # Post-roll: hold voiced state for post_roll frames after each voiced->silence edge
+    countdown = 0
+    for t in range(n):
+        if voiced_mask[t]:
+            countdown = post_roll
+        elif countdown > 0:
+            expanded[t] = True
+            countdown  -= 1
+
+    # Pre-roll: mark pre_roll frames before each silence->voiced edge as voiced
+    countdown = 0
+    for t in range(n - 1, -1, -1):
+        if voiced_mask[t]:
+            countdown = pre_roll
+        elif countdown > 0:
+            expanded[t] = True
+            countdown  -= 1
+
+    return expanded
+
 
 def _median_filter_freq(gains):
     """5-bin frequency-axis median filter over the gains array.
