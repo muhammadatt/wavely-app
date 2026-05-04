@@ -672,20 +672,19 @@ export async function autoLevel(ctx) {
     ctx.presetId,
     ctx.results.metrics,
   )
-  ctx.currentPath      = levelerPath
+  ctx.currentPath         = levelerPath
   ctx.results.autoLeveler = result
 
   if (result.applied) {
+    const m = result.measurements
     ctx.log(
-      `[auto-leveler] Applied — pre σ=${result.pre_leveling_rms_std_db}dB ` +
-      `post σ=${result.post_leveling_rms_std_db}dB ` +
-      `target=${result.median_target_rms_dbfs}dBFS ` +
-      `gain=[${result.min_gain_applied_db}, ${result.max_gain_applied_db}]dB ` +
-      `capped=${result.gain_capped_segments} ` +
-      `nf_risk=${result.noise_floor_risk}`
+      `[auto-leveler] Applied — in σ(st)=${m.input_loudness_st_std_db}dB ` +
+      `out σ(st)=${m.output_loudness_st_std_db}dB ` +
+      `G_total=[${m.total_max_gain_down_db}, ${m.total_max_gain_up_db}]dB ` +
+      `nf_cap=${m.noise_floor_cap_active}`
     )
   } else {
-    ctx.log(`[auto-leveler] Skipped — ${result.reason}${result.pre_leveling_rms_std_db != null ? ` (σ=${result.pre_leveling_rms_std_db}dB)` : ''}`)
+    ctx.log(`[auto-leveler] Skipped — ${result.skipped_reason}`)
   }
 }
 
