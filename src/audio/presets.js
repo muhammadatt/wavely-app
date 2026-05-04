@@ -240,6 +240,16 @@ export const PRESETS = {
       release_ms:           80.0,
       max_reduction_db:     8.0,
     },
+    // Stage 4c — Room Presence. Conservative for ACX: very low wet mix and
+    // short RT60 add just enough placement without risking ACX human review
+    // rejection for audible reverb.
+    roomPresence: {
+      enabled:     true,
+      wet:         0.05,
+      rt60Ms:      60,
+      preDelayMs:  1.0,
+      diffusion:   0.6,
+    },
   },
 
   podcast_ready: {
@@ -371,6 +381,15 @@ export const PRESETS = {
       depth:     0.7,
       attack_ms: 4.0,
     },
+    // Stage 4c — Room Presence. Default settings for podcast: standard wet mix
+    // and RT60 give an intimate small-room quality that suits conversational audio.
+    roomPresence: {
+      enabled:     true,
+      wet:         0.08,
+      rt60Ms:      80,
+      preDelayMs:  1.5,
+      diffusion:   0.7,
+    },
   },
 
   voice_ready: {
@@ -495,6 +514,16 @@ export const PRESETS = {
       release_ms:           70.0,
       max_reduction_db:     8.0,
     },
+    // Stage 4c — Room Presence. Slightly tighter than podcast defaults — voice
+    // actors need placement without obvious room character that would be
+    // audible under music beds.
+    roomPresence: {
+      enabled:     true,
+      wet:         0.06,
+      rt60Ms:      70,
+      preDelayMs:  1.5,
+      diffusion:   0.65,
+    },
   },
 
   general_clean: {
@@ -617,6 +646,15 @@ export const PRESETS = {
       max_reduction_db:     12.0,
       sharpness:            0.2,
     },
+    // Stage 4c — Room Presence. Default settings for general_clean: unknown
+    // source material benefits from standard acoustic placement.
+    roomPresence: {
+      enabled:     true,
+      wet:         0.08,
+      rt60Ms:      80,
+      preDelayMs:  1.5,
+      diffusion:   0.7,
+    },
   },
 
   noise_eraser: {
@@ -738,6 +776,9 @@ export const PRESETS = {
       transientShaper:         true,
       transientMaxReductionDb: 6,
     },
+    // Stage 4c — Room Presence disabled: Noise Eraser deliberately produces a
+    // "dry booth" quality. Adding room presence would contradict the preset goal.
+    roomPresence: { enabled: false },
   },
 
   clearervoice_eraser: {
@@ -844,6 +885,9 @@ export const PRESETS = {
       transientShaper:         true,
       transientMaxReductionDb: 6,
     },
+    // Stage 4c — Room Presence disabled: ClearerVoice Eraser produces a clean,
+    // dry enhanced signal. Adding room presence would contradict the preset goal.
+    roomPresence: { enabled: false },
   },
 
 }

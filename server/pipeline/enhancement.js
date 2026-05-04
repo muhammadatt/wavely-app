@@ -37,6 +37,7 @@ const RESONANCE_SCRIPT             = path.join(SCRIPTS_DIR, 'resonance_suppresso
 const SIBILANCE_SCRIPT             = path.join(SCRIPTS_DIR, 'sibilance_suppressor.py')
 const BREATH_REDUCER_SCRIPT        = path.join(SCRIPTS_DIR, 'breath_reducer.py')
 const SPECTRAL_SUBTRACTION_SCRIPT  = path.join(SCRIPTS_DIR, 'spectral_subtraction.py')
+const ROOM_PRESENCE_SCRIPT         = path.join(SCRIPTS_DIR, 'room_presence.py')
 
 // ── Enhancement stages ────────────────────────────────────────────────────────
 
@@ -463,4 +464,27 @@ export async function applyBreathReduction(inputPath, outputPath, presetId, fram
     if (paramsPath)  await rm(paramsPath,  { force: true })
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
   }
+}
+
+// ── Room Presence ─────────────────────────────────────────────────────────────
+
+/**
+ * Convolution reverb with a synthetic IR — adds subtle acoustic space.
+ *
+ * @param {string} inputPath   32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath  Pre-allocated output path (ctx.tmp('.wav'))
+ * @param {object} [params]
+ * @param {number} [params.wet=0.08]          Wet mix fraction (0.0–0.3)
+ * @param {number} [params.rt60Ms=80]         RT60 decay time in ms (20–200)
+ * @param {number} [params.preDelayMs=1.5]    Pre-delay in ms (0–5)
+ * @param {number} [params.diffusion=0.7]     Tail density/warmth (0.0–1.0)
+ * @returns {Promise<void>}
+ */
+export function runRoomPresence(inputPath, outputPath, params = {}) {
+  const args = ['--input', inputPath, '--output', outputPath]
+  if (params.wet        != null) args.push('--wet',          String(params.wet))
+  if (params.rt60Ms     != null) args.push('--rt60-ms',      String(params.rt60Ms))
+  if (params.preDelayMs != null) args.push('--pre-delay-ms', String(params.preDelayMs))
+  if (params.diffusion  != null) args.push('--diffusion',    String(params.diffusion))
+  return spawnPython(ROOM_PRESENCE_SCRIPT, args, 'RoomPresence')
 }
