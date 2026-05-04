@@ -265,6 +265,13 @@ function linearInterpolateToSamples(hopValues, hopSamples, totalSamples) {
       out[i] = v0 + ((i - start) / hopSamples) * (v1 - v0)
     }
   }
+  // Fill any trailing samples beyond the last full hop with the last hop value
+  // (avoids an unintended 0 dB discontinuity at the end of the file)
+  const tailStart = numHops * hopSamples
+  if (numHops > 0 && tailStart < totalSamples) {
+    const lastVal = hopValues[numHops - 1]
+    for (let i = tailStart; i < totalSamples; i++) out[i] = lastVal
+  }
   return out
 }
 
@@ -389,9 +396,10 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
   const windowTargetHops = Math.round(config.target_window_s * 1000 / HOP_MS)
   const L_target         = movingMedianVoiced(L_st, hopVoiced, windowTargetHops)
 
-  // Noise floor caps
+  // Noise floor caps — headroom is positive only when the measured noise floor is
+  // already below the target; if it is at or above the target, upward gain is 0.
   const noiseFloorDbfs   = frameAnalysis?.noiseFloorDbfs ?? -60
-  const nfHeadroom       = Math.max(0, Math.abs(noiseFloorDbfs - config.noise_floor_target_dbfs) - 3)
+  const nfHeadroom       = Math.max(0, (config.noise_floor_target_dbfs - noiseFloorDbfs) - 3)
   const maxAUpEff        = Math.min(config.loop_a.max_up_db, nfHeadroom)
   const maxBUpEff        = Math.min(config.loop_b.max_up_db, Math.max(0, nfHeadroom - maxAUpEff))
   const nfCapActive      = maxAUpEff < config.loop_a.max_up_db || maxBUpEff < config.loop_b.max_up_db
@@ -472,14 +480,14 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
     skipped_reason: null,
     preset_params: {
       total_max_up_db:          maxUp,
-      total_max_down_db:        -maxDown,
+      total_max_down_db:        maxDown,
       target_window_s:          config.target_window_s,
       noise_floor_target_dbfs:  config.noise_floor_target_dbfs,
       loop_a: {
         deadband_db:  config.loop_a.deadband_db,
         knee_db:      config.loop_a.knee_db,
         max_up_db:    config.loop_a.max_up_db,
-        max_down_db:  -config.loop_a.max_down_db,
+        max_down_db:  config.loop_a.max_down_db,
         attack_ms:    config.loop_a.attack_ms,
         release_ms:   config.loop_a.release_ms,
       },
@@ -489,7 +497,7 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
         ratio_up:         config.loop_b.ratio_up,
         ratio_down:       config.loop_b.ratio_down,
         max_up_db:        config.loop_b.max_up_db,
-        max_down_db:      -config.loop_b.max_down_db,
+        max_down_db:      config.loop_b.max_down_db,
         attack_ms:        config.loop_b.attack_ms,
         release_ms:       config.loop_b.release_ms,
       },
