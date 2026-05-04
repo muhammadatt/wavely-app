@@ -1,9 +1,10 @@
 /**
  * Auto Leveler — VAD-gated gain riding stage (Stage 4b).
  *
- * Corrects slow within-file level drift by computing a smooth gain envelope
- * anchored to the median RMS of speech segments, then applying it only during
- * VAD-detected speech frames (gain is held constant during silence).
+ * Corrects within-file level variation by measuring each speech frame's local
+ * level (via a centered ±700 ms sliding window) and applying gain to move it
+ * toward the file's median speech RMS. Gain is rate-limited for smooth
+ * transitions and held constant during silence frames.
  *
  * Only activated when within-file RMS standard deviation exceeds
  * DRIFT_THRESHOLD_DB (3 dB). For files with consistent levels the stage is a
@@ -11,9 +12,6 @@
  *
  * Chain position: immediately before the Compression stage.
  * Input: VAD mask from silenceAnalysis (silencePreDeEss in the pipeline).
- *
- * Reference: Auto Leveler Stage Specification (April 2026 addendum to
- * instant_polish_processing_spec_v3.md).
  */
 
 import { readWavAllChannels } from './wavReader.js'
@@ -24,14 +22,16 @@ const SAMPLE_RATE           = 44100
 const FRAME_DURATION_S      = 0.1    // 100 ms — must match silenceAnalysis frame size
 const FRAME_SAMPLES         = Math.round(FRAME_DURATION_S * SAMPLE_RATE)  // 4410
 
-const ANALYSIS_WINDOW_FRAMES = 30    // 30 × 100 ms = 3 seconds of speech content
-const ANALYSIS_WINDOW_STRIDE = 15    // 50% overlap — smoother gain profile
+const ANALYSIS_WINDOW_FRAMES = 15    // 15 × 100 ms = 1.5 seconds of speech content
+const ANALYSIS_WINDOW_STRIDE = 5     // ~67% overlap — dense knots for responsive tracking
 const MIN_SEGMENT_FRAMES     = 5     // 5 × 100 ms = 500 ms — discard shorter segments
 const DRIFT_THRESHOLD_DB     = 3.0   // σ > 3 dB triggers leveler
 const NOISE_FLOOR_CHECK_DBFS = -58   // post-application safety check
 
 const FADE_IN_SAMPLES  = Math.round(0.030 * SAMPLE_RATE)  // 30 ms speech onset
-const GAUSSIAN_SIGMA_FRAMES = 15     // 1.5 s at 100 ms/frame resolution
+const LOCAL_LEVEL_RADIUS     = 4     // ±4 frames (±400 ms) centered window for local level
+const LOOKAHEAD_FRAMES       = 4     // 4 × 100 ms = 400 ms forward lookahead for gain riding
+const CORRECTION_STRENGTH    = 0.60  // 60% correction toward median per frame
 
 // ── Main API ──────────────────────────────────────────────────────────────────
 
@@ -104,35 +104,28 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
 
   const medianRmsDb = computeMedian(rmsDbValues)
   const { maxGainDb, maxRateDbPerS } = config
+  const maxRateDbPerFrame = maxRateDbPerS * FRAME_DURATION_S
 
-  let gainCappedSegments = 0
-  const windowGains = windows.map(w => {
-    const raw     = medianRmsDb - w.rmsDb
-    const clamped = Math.max(-maxGainDb, Math.min(maxGainDb, raw))
-    if (Math.abs(raw) > maxGainDb) gainCappedSegments++
-    return { centerSample: w.centerSample, gainDb: clamped }
-  })
-
-  // ── Step 4: Gain envelope — cubic spline → frame level → smoothing ────────
-
-  const splineXs = windowGains.map(w => w.centerSample)
-  const splineYs = windowGains.map(w => w.gainDb)
-  const spline   = computeMonotoneHermiteSpline(splineXs, splineYs)
+  // ── Step 4: Per-frame gain envelope ────────────────────────────────────────
+  //
+  // Simple direct algorithm:
+  //   1. Measure each speech frame's RMS
+  //   2. Estimate local level via centered sliding window of speech frame RMS
+  //   3. Compute desired gain = (median − localLevel) × correctionStrength
+  //   4. Clamp to ±maxGainDb
+  //   5. Rate-limit frame-to-frame changes
+  //   6. Hold gain during silence frames
 
   const numFrames = Math.ceil(analysisSamples.length / FRAME_SAMPLES)
-  const frameGains = buildFrameGains(spline, frameAnalysis, numFrames)
-
-  // Always apply one pass of Gaussian smoothing for a natural-sounding envelope,
-  // then enforce rate-of-change constraint with additional passes if needed
-  applyGaussianSmoothing(frameGains, GAUSSIAN_SIGMA_FRAMES)
-  const maxRateDbPerFrame = maxRateDbPerS * FRAME_DURATION_S
-  enforceRateConstraint(frameGains, maxRateDbPerFrame)
+  const { frameGains, gainCappedSegments } = buildFrameGainsDirect(
+    frameAnalysis, numFrames, analysisSamples, medianRmsDb, maxGainDb, maxRateDbPerFrame,
+  )
 
   // ── Step 5: Apply gain with VAD gating ────────────────────────────────────
 
   const n = analysisSamples.length
   const { gainCurve, noiseFloorRisk } = buildSampleGainCurve(
-    frameGains, frameAnalysis, n,
+    frameGains, frameAnalysis, n, analysisSamples, maxRateDbPerFrame,
   )
 
   const processedChannels = channels.map(ch => applyGainCurve(ch, gainCurve))
@@ -267,91 +260,118 @@ function computeWindowCenter(frames) {
 // ── Frame-level gain envelope ─────────────────────────────────────────────────
 
 /**
- * Build a per-frame gain array (dB) using the cubic spline for speech frames
- * and holding the last speech value for silence frames.
+ * Build a per-frame gain array using a direct local-level algorithm.
  *
- * @param {{ xs: number[], ys: number[], M: number[] }} spline
+ * For each speech frame:
+ *   1. Measure the frame's RMS
+ *   2. Compute a local level estimate from a centered sliding window of
+ *      nearby speech frames (±LOCAL_LEVEL_RADIUS, RMS-averaged in linear domain)
+ *   3. Desired gain = (median − localLevel) × CORRECTION_STRENGTH
+ *   4. Clamp to ±maxGainDb
+ *   5. Rate-limit frame-to-frame changes to maxRateDbPerFrame
+ *   6. Hold the last speech gain during silence frames
+ *
  * @param {import('./frameAnalysis.js').FrameAnalysis} sa
- * @param {number} numFrames
- * @returns {Float32Array}  - gain in dB per frame
+ * @param {number}       numFrames
+ * @param {Float32Array} samples         - Channel 0 audio samples
+ * @param {number}       medianRmsDb     - Median target RMS (dBFS)
+ * @param {number}       maxGainDb       - Maximum gain magnitude (dB)
+ * @param {number}       maxRateDbPerFrame - Max gain change per frame (dB)
+ * @returns {{ frameGains: Float32Array, gainCappedSegments: number }}
  */
-function buildFrameGains(spline, sa, numFrames) {
-  const frameGains = new Float32Array(numFrames)
-  let heldGainDb = 0.0  // held during silence; starts at 0 dB
-
+function buildFrameGainsDirect(sa, numFrames, samples, medianRmsDb, maxGainDb, maxRateDbPerFrame) {
+  // Step A: Compute per-frame RMS (dBFS) and speech flag for all frames
+  const frameRmsDb  = new Float32Array(numFrames).fill(-120)
+  const frameSpeech = new Uint8Array(numFrames)  // 1 = speech, 0 = silence
   for (let f = 0; f < numFrames; f++) {
     const frame = sa.frames[f]
-    if (!frame || frame.isSilence) {
-      frameGains[f] = heldGainDb
-    } else {
-      const centerSample  = frame.offsetSamples + frame.lengthSamples / 2
-      const gainDb        = evalMonotoneHermite(spline, centerSample)
-      frameGains[f]       = gainDb
-      heldGainDb          = gainDb  // update held value on each speech frame
+    if (frame && !frame.isSilence) {
+      frameRmsDb[f]  = computeFrameRms(frame, samples)
+      frameSpeech[f] = 1
     }
   }
 
-  return frameGains
-}
+  // Step B: Compute desired gain for each speech frame using a centered
+  // sliding window of SPEECH FRAMES ONLY for local level estimation
+  const desiredGains = new Float32Array(numFrames).fill(NaN)
+  let gainCappedSegments = 0
 
-/**
- * Enforce the rate-of-change constraint on the frame-level gain array.
- * If any consecutive frame pair exceeds maxRateDbPerFrame, apply iterative
- * Gaussian smoothing (σ = GAUSSIAN_SIGMA_FRAMES) until satisfied.
- * Mutates the input array in place.
- *
- * @param {Float32Array} frameGains   - dB per frame (mutated)
- * @param {number}       maxRateDbPerFrame
- */
-function enforceRateConstraint(frameGains, maxRateDbPerFrame) {
-  const MAX_ITERATIONS = 10
-  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    let violated = false
-    for (let i = 1; i < frameGains.length; i++) {
-      if (Math.abs(frameGains[i] - frameGains[i - 1]) > maxRateDbPerFrame + 1e-9) {
-        violated = true
-        break
+  for (let f = 0; f < numFrames; f++) {
+    if (!frameSpeech[f]) continue
+
+    // Centered sliding window: only include speech frames in the average
+    let sumLinSq = 0, count = 0
+    for (let k = f - LOCAL_LEVEL_RADIUS; k <= f + LOCAL_LEVEL_RADIUS; k++) {
+      if (k >= 0 && k < numFrames && frameSpeech[k]) {
+        const linRms = Math.pow(10, frameRmsDb[k] / 20)
+        sumLinSq += linRms * linRms
+        count++
       }
     }
-    if (!violated) break
-    applyGaussianSmoothing(frameGains, GAUSSIAN_SIGMA_FRAMES)
+
+    if (count === 0) { desiredGains[f] = 0; continue }
+
+    const localRmsDb = 10 * Math.log10(sumLinSq / count)
+    const rawGain = (medianRmsDb - localRmsDb) * CORRECTION_STRENGTH
+    const clamped = Math.max(-maxGainDb, Math.min(maxGainDb, rawGain))
+    if (Math.abs(rawGain) > maxGainDb) gainCappedSegments++
+    desiredGains[f] = clamped
   }
+
+  // Step C: Resolve silence holds — fill silence frames with nearest speech gain
+  const targets = new Float32Array(numFrames)
+  let lastSpeech = 0
+  for (let f = 0; f < numFrames; f++) {
+    if (!Number.isNaN(desiredGains[f])) lastSpeech = desiredGains[f]
+    targets[f] = lastSpeech
+  }
+
+  // Step D: Forward pass with lookahead rate limiting
+  //
+  // At each frame the rate limiter slews toward the target LOOKAHEAD_FRAMES
+  // ahead rather than the current frame's target. This means the gain starts
+  // moving toward an upcoming level change before it arrives, so the curve is
+  // already close to correct by the time the phrase begins — no lag, no
+  // backward pass needed.
+  //
+  // A directional clamp is applied using each frame's own target as the
+  // direction signal. This guarantees the rate-limited curve can never make a
+  // bad situation worse: if the lookahead target briefly pulls the gain the
+  // wrong way during a transition, the clamp pins it at 0 dB rather than
+  // actively attenuating a quiet frame or boosting a loud one.
+
+  const frameGains = new Float32Array(numFrames)
+  let current = 0
+  for (let f = 0; f < numFrames; f++) {
+    const lookaheadIdx = Math.min(f + LOOKAHEAD_FRAMES, numFrames - 1)
+    const delta = targets[lookaheadIdx] - current
+    if (Math.abs(delta) > maxRateDbPerFrame) {
+      current += maxRateDbPerFrame * Math.sign(delta)
+    } else {
+      current = targets[lookaheadIdx]
+    }
+    // Directional clamp: floor below-median gains at 0 dB, ceiling above-median
+    // gains at 0 dB, so the leveler may fall short but never goes backwards.
+    frameGains[f] = targets[f] >= 0 ? Math.max(0, current) : Math.min(0, current)
+  }
+
+  return { frameGains, gainCappedSegments }
 }
 
 /**
- * In-place Gaussian smoothing over a Float32Array.
- * Uses a truncated kernel (radius = 3σ) with boundary reflection padding.
- *
- * @param {Float32Array} arr
- * @param {number}       sigma  - standard deviation in array elements
+ * Compute RMS in dBFS for a single frame.
  */
-function applyGaussianSmoothing(arr, sigma) {
-  const radius = Math.ceil(3 * sigma)
-  const n      = arr.length
-  const kernel = new Float32Array(2 * radius + 1)
-  let kernelSum = 0
-  for (let k = -radius; k <= radius; k++) {
-    const v = Math.exp(-(k * k) / (2 * sigma * sigma))
-    kernel[k + radius] = v
-    kernelSum += v
+function computeFrameRms(frame, samples) {
+  const start = frame.offsetSamples
+  const end   = Math.min(start + frame.lengthSamples, samples.length)
+  let sumSq = 0, count = 0
+  for (let i = start; i < end; i++) {
+    sumSq += samples[i] * samples[i]
+    count++
   }
-  for (let k = 0; k < kernel.length; k++) kernel[k] /= kernelSum
-
-  const result = new Float32Array(n)
-  for (let i = 0; i < n; i++) {
-    let sum = 0
-    for (let k = -radius; k <= radius; k++) {
-      // Reflect at boundaries
-      let idx = i + k
-      if (idx < 0) idx = -idx
-      if (idx >= n) idx = 2 * n - 2 - idx
-      if (idx < 0) idx = 0
-      if (idx >= n) idx = n - 1
-      sum += arr[idx] * kernel[k + radius]
-    }
-    result[i] = sum
-  }
-  arr.set(result)
+  if (count === 0) return -120
+  const rms = Math.sqrt(sumSq / count)
+  return rms > 0 ? 20 * Math.log10(rms) : -120
 }
 
 // ── Sample-level gain curve with VAD gating ───────────────────────────────────
@@ -365,12 +385,14 @@ function applyGaussianSmoothing(arr, sigma) {
  *
  * Also performs the post-application noise floor check.
  *
- * @param {Float32Array} frameGains  - dB per frame
+ * @param {Float32Array} frameGains     - dB per frame
  * @param {import('./frameAnalysis.js').FrameAnalysis} sa
- * @param {number} n                 - total sample count
+ * @param {number} n                    - total sample count
+ * @param {Float32Array} samples        - Original channel 0 samples (for noise floor check)
+ * @param {number}       maxRatePerFrame - Max gain change per frame (dB), for pre-fade clamping
  * @returns {{ gainCurve: Float32Array, noiseFloorRisk: boolean }}
  */
-function buildSampleGainCurve(frameGains, sa, n) {
+function buildSampleGainCurve(frameGains, sa, n, samples, maxRatePerFrame) {
   // Build a per-sample gain (linear, not dB) using the frame-level dB gains
   // with linear sub-frame interpolation and VAD-gated hold behavior.
   const gainCurve = new Float32Array(n)
@@ -407,15 +429,22 @@ function buildSampleGainCurve(frameGains, sa, n) {
       let finalGainDb = frameGains[cFrameIdx]
 
       // Pre-fade (lookahead) into the next speech segment
-      // Ramps up to the target gain during the last 30ms of silence
+      // Ramps toward the target gain during the last 30ms of silence,
+      // but clamps the target so the ramp doesn't exceed the rate limit.
       const nextFrameIdx = cFrameIdx + 1
       if (nextFrameIdx < numFrames && isStart[nextFrameIdx]) {
         const segStartSample = nextFrameIdx * FRAME_SAMPLES
         const preFadePos = segStartSample - i
         if (preFadePos <= FADE_IN_SAMPLES) {
           const alpha = 1 - (preFadePos / FADE_IN_SAMPLES)
-          const targetGainDb = frameGains[nextFrameIdx]
-          finalGainDb = finalGainDb + alpha * (targetGainDb - finalGainDb)
+          // Clamp the pre-fade target so total ramp over FADE_IN duration
+          // respects the per-frame rate limit (scaled to fade duration)
+          const fadeDurationFrames = FADE_IN_SAMPLES / FRAME_SAMPLES
+          const maxFadeDb = maxRatePerFrame * Math.max(fadeDurationFrames, 1)
+          const rawTarget = frameGains[nextFrameIdx]
+          const delta = rawTarget - finalGainDb
+          const clampedTarget = finalGainDb + Math.max(-maxFadeDb, Math.min(maxFadeDb, delta))
+          finalGainDb = finalGainDb + alpha * (clampedTarget - finalGainDb)
         }
       }
 
@@ -432,9 +461,11 @@ function buildSampleGainCurve(frameGains, sa, n) {
     gainCurve[i] = dbToLinear(gainDb)
   }
 
-  // Post-application noise floor check
+  // Post-application noise floor check: measure actual processed level in
+  // silence frames (original sample × gain curve) to detect if the leveler
+  // has amplified the noise floor above the safety threshold.
   let noiseFloorRisk = false
-  if (sa && sa.frames) {
+  if (sa && sa.frames && samples) {
     for (const frame of sa.frames) {
       if (!frame.isSilence) continue
       const start = frame.offsetSamples
@@ -443,10 +474,8 @@ function buildSampleGainCurve(frameGains, sa, n) {
 
       let sumSq = 0
       for (let i = start; i < end; i++) {
-        const processedSample = i < n
-          ? sampleFromGainCurve(i, gainCurve)
-          : 0
-        sumSq += processedSample * processedSample
+        const processed = samples[i] * gainCurve[i]
+        sumSq += processed * processed
       }
       const rms   = Math.sqrt(sumSq / (end - start))
       const rmsDb = rms > 0 ? 20 * Math.log10(rms) : -120
@@ -460,19 +489,6 @@ function buildSampleGainCurve(frameGains, sa, n) {
   return { gainCurve, noiseFloorRisk }
 }
 
-// Thin wrapper — the noise floor check needs the original-sample magnitude
-// multiplied by the gain curve to see the processed level.
-// We don't have the original samples here, so we approximate using the silence
-// frames' held gain (which should be ~0 dB, meaning noise floor doesn't change).
-// This is the safety-net check — it will catch the edge case where VAD gating
-// failed and gain is non-unity during silence.
-function sampleFromGainCurve(i, gainCurve) {
-  // gainCurve[i] is the linear gain multiplier at position i.
-  // For the check we need gainCurve[i] > 1 to indicate amplification of silence.
-  // We return the gain itself as a proxy — if gain >> 1 at a silence frame, risk is true.
-  return gainCurve[i] > 0 ? gainCurve[i] - 1 : 0  // deviation from unity
-}
-
 /**
  * Apply a per-sample linear gain curve to a channel.
  */
@@ -483,100 +499,6 @@ function applyGainCurve(samples, gainCurve) {
     output[i] = samples[i] * (i < gainCurve.length ? gainCurve[i] : 1.0)
   }
   return output
-}
-
-// ── Monotone Hermite interpolation (Fritsch–Carlson) ─────────────────────────
-
-/**
- * Compute a monotone-preserving cubic Hermite spline (Fritsch–Carlson method).
- * Unlike natural cubic splines, this guarantees NO overshoot between knots —
- * the interpolant stays within the range of adjacent y-values. This prevents
- * the gain envelope from dipping or spiking at rapid level transitions.
- *
- * @param {number[]} xs - Strictly increasing x values (sample positions)
- * @param {number[]} ys - Corresponding y values (gain in dB)
- * @returns {{ xs: number[], ys: number[], ms: number[] }}
- */
-function computeMonotoneHermiteSpline(xs, ys) {
-  const n = xs.length
-  if (n < 2) throw new Error('[autoLeveler] Need at least 2 knots for interpolation')
-
-  if (n === 2) {
-    // Two points: constant slope (linear)
-    const slope = (ys[1] - ys[0]) / (xs[1] - xs[0])
-    return { xs, ys, ms: [slope, slope] }
-  }
-
-  // Step 1: Compute slopes of secant lines between successive points
-  const deltas = new Array(n - 1)
-  for (let i = 0; i < n - 1; i++) {
-    deltas[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i])
-  }
-
-  // Step 2: Initialize tangents as average of adjacent secants
-  const ms = new Array(n)
-  ms[0] = deltas[0]
-  ms[n - 1] = deltas[n - 2]
-  for (let i = 1; i < n - 1; i++) {
-    ms[i] = (deltas[i - 1] + deltas[i]) / 2
-  }
-
-  // Step 3: Fritsch–Carlson monotonicity correction
-  for (let i = 0; i < n - 1; i++) {
-    if (Math.abs(deltas[i]) < 1e-12) {
-      // Flat segment: force tangents to zero to prevent overshoot
-      ms[i] = 0
-      ms[i + 1] = 0
-    } else {
-      const alpha = ms[i] / deltas[i]
-      const beta  = ms[i + 1] / deltas[i]
-
-      // Constrain tangents so the interpolant stays within the data range.
-      // The Fritsch–Carlson condition: α² + β² ≤ 9
-      const radiusSq = alpha * alpha + beta * beta
-      if (radiusSq > 9) {
-        const tau = 3 / Math.sqrt(radiusSq)
-        ms[i]     = tau * alpha * deltas[i]
-        ms[i + 1] = tau * beta  * deltas[i]
-      }
-    }
-  }
-
-  return { xs, ys, ms }
-}
-
-/**
- * Evaluate the monotone Hermite spline at position x.
- * Values outside the knot range are clamped to the nearest endpoint.
- *
- * @param {{ xs: number[], ys: number[], ms: number[] }} spline
- * @param {number} x
- * @returns {number}
- */
-function evalMonotoneHermite(spline, x) {
-  const { xs, ys, ms } = spline
-  const n = xs.length - 1
-
-  if (x <= xs[0]) return ys[0]
-  if (x >= xs[n]) return ys[n]
-
-  // Binary search for the containing interval
-  let lo = 0, hi = n - 1
-  while (lo < hi - 1) {
-    const mid = (lo + hi) >> 1
-    if (xs[mid] <= x) lo = mid; else hi = mid
-  }
-  const i = lo
-  const h = xs[i + 1] - xs[i]
-  const t = (x - xs[i]) / h
-
-  // Hermite basis functions
-  const h00 = (1 + 2 * t) * (1 - t) * (1 - t)
-  const h10 = t * (1 - t) * (1 - t)
-  const h01 = t * t * (3 - 2 * t)
-  const h11 = t * t * (t - 1)
-
-  return h00 * ys[i] + h10 * h * ms[i] + h01 * ys[i + 1] + h11 * h * ms[i + 1]
 }
 
 // ── Statistics helpers ────────────────────────────────────────────────────────

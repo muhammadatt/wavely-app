@@ -124,8 +124,8 @@ export const PRESETS = {
       preserve_early: true,
     },
     autoLeveler: {
-      maxGainDb:     10.0,
-      maxRateDbPerS: 2.0,
+      maxGainDb:     20.0,
+      maxRateDbPerS: 10.0,
     },
     saturation: {
       drive: 1.8,
@@ -275,8 +275,8 @@ export const PRESETS = {
       preserve_early: true,
     },
     autoLeveler: {
-      maxGainDb:     8.0,
-      maxRateDbPerS: 1.5,
+      maxGainDb:     20.0,
+      maxRateDbPerS: 10.0,
     },
     saturation: {
       drive: 2.0,
@@ -381,7 +381,7 @@ export const PRESETS = {
     },
     autoLeveler: {
       maxGainDb:     4.0,
-      maxRateDbPerS: 1.0,
+      maxRateDbPerS: 10.0,
     },
     saturation: {
       drive: 2.0,
@@ -492,7 +492,7 @@ export const PRESETS = {
     },
     autoLeveler: {
       maxGainDb:     8.0,
-      maxRateDbPerS: 1.5,
+      maxRateDbPerS: 10.0,
     },
     saturation: {
       drive: 2.0,
@@ -598,7 +598,7 @@ export const PRESETS = {
     },
     autoLeveler: {
       maxGainDb:     4.0,
-      maxRateDbPerS: 1.0,
+      maxRateDbPerS: 10.0,
     },
     saturation: {
       drive: 5,
@@ -735,7 +735,7 @@ export const PRESETS = {
     clearervoiceModel: 'mossformer2_48k',
     autoLeveler: {
       maxGainDb:     8.0,
-      maxRateDbPerS: 1.5,
+      maxRateDbPerS: 10.0,
     },
     saturation: {
       drive: 2.0,
