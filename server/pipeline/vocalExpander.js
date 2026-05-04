@@ -37,7 +37,7 @@ import { PRESETS }            from '../presets.js'
 const SAMPLE_RATE      = 44100
 const DET_FRAME_S      = 0.010                                  // 10 ms detection frames
 const DET_FRAME_SAMPLES = Math.round(DET_FRAME_S * SAMPLE_RATE) // 441
-const ANALYSIS_FRAME_S = 0.1                                    // 100 ms — matches frameAnalysis.js
+const ANALYSIS_FRAME_S = 0.1                                    // 100 ms analysis window (independent of pipeline VAD frame duration)
 const DET_FRAMES_PER_ANALYSIS_FRAME = Math.round(ANALYSIS_FRAME_S / DET_FRAME_S) // 10
 
 const SKIP_THRESHOLD_DBFS = -140   // skip stage entirely when silence floor is this clean
@@ -142,7 +142,7 @@ export async function applyVocalExpander(inputPath, outputPath, presetId, frameA
   // noise reduction effectiveness in true silence gaps.
 
   // Map frame analysis indices to detection frame indices
-  // Analysis frames are 100ms (FRAME_DURATION_S = 0.1), detection frames are 10ms
+  // Analysis frames are 100 ms (ANALYSIS_FRAME_S), detection frames are 10 ms (DET_FRAME_S)
   const analysisFrameLengthSamples = frameAnalysis.frames.length > 0 ? frameAnalysis.frames[0].lengthSamples : Math.round(0.1 * sampleRate)
   const detectionFramesPerAnalysisFrame = Math.round(analysisFrameLengthSamples / DET_FRAME_SAMPLES) // ~10 detection frames per analysis frame
 
