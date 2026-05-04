@@ -291,21 +291,15 @@ function formatAutoLevelerResult(r) {
   if (!r) return null
   if (!r.applied) {
     return {
-      applied: false,
-      reason: r.reason ?? null,
-      ...(r.pre_leveling_rms_std_db != null && { pre_leveling_rms_std_db: r.pre_leveling_rms_std_db }),
+      applied:        false,
+      skipped_reason: r.skipped_reason ?? null,
     }
   }
   return {
-    applied:                    true,
-    activation_reason:          r.activation_reason,
-    pre_leveling_rms_std_db:    r.pre_leveling_rms_std_db,
-    post_leveling_rms_std_db:   r.post_leveling_rms_std_db,
-    median_target_rms_dbfs:     r.median_target_rms_dbfs,
-    max_gain_applied_db:        r.max_gain_applied_db,
-    min_gain_applied_db:        r.min_gain_applied_db,
-    segments_analyzed:          r.segments_analyzed,
-    gain_capped_segments:       r.gain_capped_segments,
+    applied:        true,
+    skipped_reason: null,
+    preset_params:  r.preset_params,
+    measurements:   r.measurements,
   }
 }
 

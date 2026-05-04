@@ -148,19 +148,20 @@ export async function generateQualityAdvisory(
   // These are only generated when the leveler actually ran (applied: true).
   const levelerResult = pipelineContext.autoLeveler
   if (levelerResult?.applied) {
-    if (levelerResult.gain_capped) {
+    if (levelerResult.measurements?.noise_floor_cap_active) {
       flags.push({
-        id: 'leveler_gain_capped',
+        id: 'leveler_nf_capped',
         severity: 'info',
-        message: 'Some sections had large level differences that could not be fully corrected. Manual gain adjustment may help these sections.',
+        message: 'Upward gain limited to protect noise floor. Some quiet passages remain quieter than the target.',
       })
     }
 
-    if (levelerResult.noise_floor_risk) {
+    const outStd = levelerResult.measurements?.output_loudness_st_std_db
+    if (typeof outStd === 'number' && outStd < 1.0) {
       flags.push({
-        id: 'leveler_noise_floor_risk',
+        id: 'leveler_overcorrected',
         severity: 'review',
-        message: 'Auto leveling may have affected the noise floor in quiet sections. Verify the noise floor before export.',
+        message: 'Output dynamics may sound flattened. Listen carefully before submitting.',
       })
     }
   }

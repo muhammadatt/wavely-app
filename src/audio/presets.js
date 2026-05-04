@@ -87,7 +87,7 @@ export function resolveOutputProfileId(id) {
  * @property {string} defaultOutputProfile
  * @property {boolean} lockedOutputProfile
  * @property {{ enabled: boolean, strength: 'light'|'medium'|'heavy', preserve_early: boolean }} dereverb
- * @property {{ maxGainDb: number, maxRateDbPerS: number }} autoLeveler
+ * @property {{ total_max_up_db: number, total_max_down_db: number, target_window_s: number, noise_floor_target_dbfs: number, loop_a: object, loop_b: object } | null} autoLeveler
  * @property {'demucs'|'convtasnet'} [separationModel]   - Noise Eraser only
  * @property {'mossformer2_48k'|'frcrn_16k'} [clearervoiceModel]   - ClearerVoice Eraser only
  * @property {{ enabled: boolean, postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bwe - Bandwidth extension (AP-BWE); enabled for NE presets, disabled for standard presets. postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
@@ -124,8 +124,21 @@ export const PRESETS = {
       preserve_early: true,
     },
     autoLeveler: {
-      maxGainDb:     20.0,
-      maxRateDbPerS: 10.0,
+      total_max_up_db:         5.0,
+      total_max_down_db:       6.0,
+      target_window_s:         60,
+      noise_floor_target_dbfs: -60,
+      loop_a: {
+        deadband_db: 2.0, knee_db: 1.5,
+        max_up_db: 4.0, max_down_db: 5.0,
+        attack_ms: 300, release_ms: 2000,
+      },
+      loop_b: {
+        deadband_up_db: 4.0, deadband_down_db: 3.0,
+        ratio_up: 2.0, ratio_down: 2.5,
+        max_up_db: 2.5, max_down_db: 3.0,
+        attack_ms: 200, release_ms: 1000,
+      },
     },
     saturation: {
       drive: 1.8,
@@ -275,8 +288,21 @@ export const PRESETS = {
       preserve_early: true,
     },
     autoLeveler: {
-      maxGainDb:     20.0,
-      maxRateDbPerS: 10.0,
+      total_max_up_db:         6.0,
+      total_max_down_db:       8.0,
+      target_window_s:         45,
+      noise_floor_target_dbfs: -50,
+      loop_a: {
+        deadband_db: 1.5, knee_db: 1.0,
+        max_up_db: 5.0, max_down_db: 6.0,
+        attack_ms: 200, release_ms: 1200,
+      },
+      loop_b: {
+        deadband_up_db: 3.0, deadband_down_db: 2.5,
+        ratio_up: 2.5, ratio_down: 3.0,
+        max_up_db: 3.0, max_down_db: 4.0,
+        attack_ms: 150, release_ms: 800,
+      },
     },
     saturation: {
       drive: 2.0,
@@ -380,8 +406,21 @@ export const PRESETS = {
       preserve_early: false,
     },
     autoLeveler: {
-      maxGainDb:     4.0,
-      maxRateDbPerS: 10.0,
+      total_max_up_db:         5.0,
+      total_max_down_db:       6.0,
+      target_window_s:         60,
+      noise_floor_target_dbfs: -55,
+      loop_a: {
+        deadband_db: 2.0, knee_db: 1.5,
+        max_up_db: 4.0, max_down_db: 5.0,
+        attack_ms: 300, release_ms: 2000,
+      },
+      loop_b: {
+        deadband_up_db: 4.0, deadband_down_db: 3.0,
+        ratio_up: 2.0, ratio_down: 2.5,
+        max_up_db: 2.5, max_down_db: 3.0,
+        attack_ms: 200, release_ms: 1000,
+      },
     },
     saturation: {
       drive: 2.0,
@@ -491,8 +530,21 @@ export const PRESETS = {
       preserve_early: false,
     },
     autoLeveler: {
-      maxGainDb:     8.0,
-      maxRateDbPerS: 10.0,
+      total_max_up_db:         8.0,
+      total_max_down_db:       10.0,
+      target_window_s:         30,
+      noise_floor_target_dbfs: -50,
+      loop_a: {
+        deadband_db: 1.5, knee_db: 1.0,
+        max_up_db: 6.0, max_down_db: 8.0,
+        attack_ms: 200, release_ms: 1000,
+      },
+      loop_b: {
+        deadband_up_db: 3.0, deadband_down_db: 2.5,
+        ratio_up: 2.5, ratio_down: 3.0,
+        max_up_db: 3.5, max_down_db: 4.5,
+        attack_ms: 150, release_ms: 700,
+      },
     },
     saturation: {
       drive: 2.0,
@@ -596,10 +648,7 @@ export const PRESETS = {
       strength: 'heavy',
       preserve_early: false,
     },
-    autoLeveler: {
-      maxGainDb:     4.0,
-      maxRateDbPerS: 10.0,
-    },
+    autoLeveler: null,
     saturation: {
       drive: 5,
       wetDry: 0.20,
@@ -734,8 +783,21 @@ export const PRESETS = {
     // Both models are downloaded from HuggingFace on first use.
     clearervoiceModel: 'mossformer2_48k',
     autoLeveler: {
-      maxGainDb:     8.0,
-      maxRateDbPerS: 10.0,
+      total_max_up_db:         6.0,
+      total_max_down_db:       8.0,
+      target_window_s:         45,
+      noise_floor_target_dbfs: -50,
+      loop_a: {
+        deadband_db: 1.5, knee_db: 1.0,
+        max_up_db: 5.0, max_down_db: 6.0,
+        attack_ms: 200, release_ms: 1200,
+      },
+      loop_b: {
+        deadband_up_db: 3.0, deadband_down_db: 2.5,
+        ratio_up: 2.5, ratio_down: 3.0,
+        max_up_db: 3.0, max_down_db: 4.0,
+        attack_ms: 150, release_ms: 800,
+      },
     },
     saturation: {
       drive: 2.0,
