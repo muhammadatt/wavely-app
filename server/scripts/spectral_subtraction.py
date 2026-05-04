@@ -23,11 +23,19 @@ Input/output: 32-bit float PCM WAV at 44.1 kHz (pipeline internal format).
 """
 
 import argparse
+import json as _json
+import os as _os
 import sys
 import warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
+
+# Loaded from the shared config so JS and Python always use the same value.
+# To change the pipeline frame duration, edit server/config/frame_config.json.
+_config_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'config', 'frame_config.json')
+with open(_config_path) as _f:
+    PIPELINE_FRAME_S = _json.load(_f)['FRAME_DURATION_S']  # 0.025 s = 25 ms
 
 # STFT parameters — 2048-point FFT at 44.1 kHz gives ~46 ms resolution,
 # adequate for voiced speech without over-smoothing transients.
@@ -213,7 +221,7 @@ def main():
                         help='Transient shaper maximum gain reduction in dB (default 6.0)')
     parser.add_argument('--vad-labels',                  default=None,
                         help='Path to JSON file with Silero isSilence labels (one bool per '
-                             '100 ms pipeline frame). When provided, replaces the internal '
+                             '25 ms pipeline frame). When provided, replaces the internal '
                              'energy-based VAD with the high-quality Silero classifications '
                              'already computed by the pipeline.')
     args = parser.parse_args()
@@ -373,15 +381,14 @@ def _process_channel(audio, args, sr, vad_labels=None):
 # ── DSP helpers ───────────────────────────────────────────────────────────────
 
 def _load_vad_labels(is_silence_list, n_stft_frames, hop_length, sr,
-                     pipeline_frame_sec=0.025):
+                     pipeline_frame_sec=PIPELINE_FRAME_S):
     """Map pipeline Silero VAD labels (25 ms frames) to STFT frame resolution.
 
     is_silence_list : list[bool] — True = silence, one entry per pipeline frame
     n_stft_frames   : number of STFT frames to produce
     hop_length      : STFT hop in samples
     sr              : sample rate
-    pipeline_frame_sec : duration of each pipeline frame in seconds.
-                         Must match FRAME_DURATION_S in frameAnalysis.js (0.025 s = 25 ms).
+    pipeline_frame_sec : duration of each pipeline frame in seconds (from frame_config.json).
 
     Returns voiced_mask : np.ndarray[bool] of shape (n_stft_frames,)
     """
@@ -399,10 +406,10 @@ def _load_vad_labels(is_silence_list, n_stft_frames, hop_length, sr,
 
 
 def _expand_voiced_mask(voiced_mask, pre_roll, post_roll):
-    """Expand voiced regions to compensate for Silero label resolution (100 ms).
+    """Expand voiced regions to compensate for Silero label resolution (25 ms).
 
-    Silero labels switch state at 100 ms frame boundaries.  At a silence->voiced
-    transition the label can be up to one full Silero frame (~8-9 STFT frames)
+    Silero labels switch state at 25 ms frame boundaries.  At a silence->voiced
+    transition the label can be up to one full Silero frame (~2 STFT frames)
     late, causing the onset of a phrase to receive silence-mode suppression.
 
     pre_roll  : STFT frames to mark as voiced *before* each voiced onset.

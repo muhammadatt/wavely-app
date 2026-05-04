@@ -2,7 +2,7 @@
  * Frame-level silence / voiced-speech detection.
  *
  * Implements the Stage 2a analysis pass described in the processing spec:
- *   - Segment audio into 100 ms frames
+ *   - Segment audio into 25 ms frames
  *   - Classify each frame as silence or voiced
  *   - Measure per-frame RMS
  *   - Locate the quietest continuous silence segment (used for room tone)
@@ -37,6 +37,7 @@
  */
 
 import { spawn }          from 'child_process'
+import { readFileSync }   from 'fs'
 import { readFile, rm }   from 'fs/promises'
 import { fileURLToPath }  from 'url'
 import os                 from 'os'
@@ -44,7 +45,14 @@ import path               from 'path'
 
 import { readWavSamples } from './wavReader.js'
 
-const FRAME_DURATION_S = 0.025   // 100 ms frames — must match FRAME_DURATION_S in silero_vad.py
+// Loaded from the shared config so JS and Python always use the same value.
+// To change the pipeline frame duration, edit server/config/frame_config.json.
+const { FRAME_DURATION_S } = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'config', 'frame_config.json'),
+    'utf8',
+  )
+)  // 0.025 s = 25 ms — must match FRAME_DURATION_S in silero_vad.py
 const BOOTSTRAP_FRAMES = 20    // use this many lowest-energy frames to bootstrap noise floor
 
 const NUM_THREADS   = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
@@ -392,7 +400,7 @@ export async function remeasureFrames(wavPath, reference) {
  * Used for room tone extraction.
  */
 function findQuietestSilenceSegment(frames, frameRms, frameLengthSamples) {
-  const MIN_FRAMES = 5  // at least 0.5 s
+  const MIN_FRAMES = 5  // at least 125 ms (5 × 25 ms frames)
 
   let bestSegment  = null
   let bestAvgRms   = Infinity
