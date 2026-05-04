@@ -322,7 +322,7 @@ export async function spectralSubtraction(ctx) {
 
   // Pass Silero VAD frame labels computed by analyzeFramesRaw (which always
   // runs before this stage) to the Python script.  The script maps each STFT
-  // frame to the corresponding 100 ms pipeline frame and uses the Silero
+  // frame to the corresponding 25 ms pipeline frame and uses the Silero
   // isSilence label instead of its own energy-based VAD, giving a far more
   // accurate voiced/silence classification with zero re-processing cost.
   let vadLabelsPath = null
