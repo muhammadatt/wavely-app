@@ -34,7 +34,7 @@ import time
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import get_window
-from scipy.ndimage import uniform_filter1d, convolve1d
+from scipy.ndimage import uniform_filter1d
 from collections import deque
 
 # Reuse the JIT-compiled IIR + OLA kernels defined in resonance_suppressor.
@@ -160,18 +160,20 @@ DEFAULT_PARAMS = {
     "min_flatness":          0.1,    # Wiener entropy gate. Higher = stricter.
     "broadband_trigger_db":  10.0,
 
-    # --- Reduction (EMA reference) ---
-    "depth":                 0.7,    # Global reduction scale (0.0-1.0).
-    "selectivity":           5.0,    # Per-bin dB threshold above long-term reference 
+    # --- Reduction ---
+    "dead_zone_db":          1.5,    # Noise floor dead zone. Rarely needs tuning.
+                                     # Replaces: selectivity, depth, mode.
+    "smooth_bins":           3,      # Bin-axis smoothing width (uniform_filter1d).
+                                     # Replaces: sharpness / spread_kernel.
     "attack_ms":             5.0,    # Fast onset -- sibilants are transient.
     "release_ms":            60.0,   # Slower release -- avoids post-sibilant bleed.
-    "max_reduction_db":      9.0,    # Hard ceiling per bin.
+    "max_reduction_db":      18.0,   # True safety ceiling; formula self-limits to actual excess.
     "ema_time_constant_ms":  300.0,  # Long-term reference time constant.
     "warmup_frames":         25,     # Voiced frames before reduction activates (~290 ms at hop=512, sr=44100).
 
-    # --- Sharpness (attenuation curve shape) ---
-    "sharpness":             0.3,    # 0.0 = wide gentle cuts, 1.0 = narrow deep notches.
-    "mode":                  "soft", # "soft" = gradual knee; "hard" = linear above threshold.
+    # --- Per-event interpolated reference ---
+    "interp_context_frames": 6,      # Context frames each side for local reference.
+                                     # ~70 ms at hop=512, sr=44100.
 }
 
 
@@ -618,18 +620,6 @@ class SibilanceSuppressor:
             f0=f0,
         )
 
-        # --- Sharpness spreading kernel ---
-        sharpness   = params["sharpness"]
-        spread_bins = int(30 * (1.0 - sharpness))
-        if spread_bins >= 2:
-            sigma  = spread_bins / 3.0
-            half   = spread_bins
-            x      = np.arange(-half, half + 1, dtype=float)
-            kernel = np.exp(-0.5 * (x / sigma) ** 2)
-            self.spread_kernel = kernel / kernel.sum()
-        else:
-            self.spread_kernel = None
-
         # --- Attack/release ---
         frame_period_ms    = (hop_length / sample_rate) * 1000.0
         self.attack_coeff  = self._time_to_coeff(params["attack_ms"],  frame_period_ms)
@@ -666,50 +656,66 @@ class SibilanceSuppressor:
         reference_db:  np.ndarray,
     ) -> np.ndarray:
         """
-        Compute the per-bin target reduction (depth + selectivity + soft knee
-        + clip) without applying the bin-axis spread kernel. The chunked path
-        applies the spread once per chunk via convolve1d for efficiency.
+        Wiener-style direct excess match: reduce each sibilant-band bin by
+        exactly the amount it exceeds the active reference, minus a small dead
+        zone that handles noise floor variance without per-speaker tuning.
+        A uniform moving average (smooth_bins) prevents single-bin notches.
         """
-        p             = self.params
-        selectivity   = p["selectivity"]
-        depth         = p["depth"]
-        max_reduction = p["max_reduction_db"]
+        dead_zone_db  = self.params.get("dead_zone_db", 1.5)
+        max_reduction = self.params["max_reduction_db"]
 
-        spike_db        = magnitude_db - reference_db
-        spike_db_masked = np.where(self.sibilant_mask, spike_db, 0.0)
-        above_threshold = np.maximum(0.0, spike_db_masked - selectivity)
+        excess_db     = magnitude_db - reference_db
+        excess_masked = np.where(self.sibilant_mask, excess_db, 0.0)
+        excess_masked = np.maximum(0.0, excess_masked)
 
-        if p["mode"] == "soft":
-            knee_width = selectivity * 0.5
-            in_knee    = above_threshold < knee_width
-            soft_curve = np.where(
-                in_knee,
-                above_threshold ** 2 / (2.0 * max(knee_width, 1e-6)),
-                above_threshold,
+        smooth_bins = self.params.get("smooth_bins", 3)
+        if smooth_bins > 1:
+            excess_masked = uniform_filter1d(
+                excess_masked, size=smooth_bins, mode="constant", cval=0.0,
             )
-            raw_reduction = soft_curve * depth
-        else:
-            raw_reduction = above_threshold * depth
 
-        return np.clip(raw_reduction, 0.0, max_reduction)
+        reduction_db = np.maximum(0.0, excess_masked - dead_zone_db)
+        return np.clip(reduction_db, 0.0, max_reduction)
 
     def _compute_gain_reduction(
         self,
         magnitude_db:  np.ndarray,
         reference_db:  np.ndarray,
     ) -> np.ndarray:
-        """
-        Per-frame gain reduction against the long-term reference, including
-        the bin-axis spread kernel. Retained for backwards compatibility and
-        for callers that need the full reduction in one shot.
-        """
-        reduction_db = self._compute_target_no_spread(magnitude_db, reference_db)
+        """Per-frame gain reduction. Retained for backwards compatibility."""
+        return self._compute_target_no_spread(magnitude_db, reference_db)
 
-        if self.spread_kernel is not None and reduction_db.any():
-            reduction_db = np.convolve(reduction_db, self.spread_kernel, mode="same")
-            reduction_db = np.clip(reduction_db, 0.0, self.params["max_reduction_db"])
+    def _build_interpolated_reference(
+        self,
+        stft_magnitude: np.ndarray,
+        event_start:    int,
+        event_end:      int,
+        n_context:      int = 6,
+    ):
+        """
+        Build a local spectral reference from pre/post-event context frames.
 
-        return reduction_db
+        Takes the median magnitude spectrum of the N non-overlapping frames
+        immediately before and after the sibilant event, then converts to
+        power. Median (not mean) rejects sibilant bleed at event boundaries.
+
+        Returns per-bin power array (n_bins,) or None if insufficient context.
+        """
+        n_frames    = stft_magnitude.shape[0]
+        pre_start   = max(0, event_start - n_context)
+        pre_end     = event_start
+        post_start  = event_end + 1
+        post_end    = min(n_frames, event_end + 1 + n_context)
+
+        pre_frames  = stft_magnitude[pre_start:pre_end]
+        post_frames = stft_magnitude[post_start:post_end]
+        context     = np.concatenate([pre_frames, post_frames], axis=0)
+
+        if len(context) < 2:
+            return None
+
+        interp_mag = np.median(context, axis=0)
+        return interp_mag ** 2  # power, matching long_term_power units
 
     def process(
         self,
@@ -844,6 +850,42 @@ class SibilanceSuppressor:
         # amortise allocation overhead.
         CHUNK_FRAMES = 2048
 
+        # Two-pass mode (events_map path): compute full STFT magnitude upfront
+        # so each sibilant event can get a per-event interpolated reference
+        # derived from context frames on both sides of the event. This avoids
+        # EMA drift caused by consistent fricative content (/f/, /v/, /θ/).
+        # Single-pass fallback (no events_map): use EMA only.
+        #
+        # Pre-sized list indexed by frame (not a dict) — O(1) direct index
+        # in the inner loop, no per-entry Python-object overhead.
+        interp_refs_by_frame: list = []
+        if events_map is not None:
+            n_context = self.params.get("interp_context_frames", 6)
+            # Preallocate the full magnitude array and fill per chunk — avoids
+            # building a chunk list and then concatenating (which would hold
+            # both the list and the final matrix in memory simultaneously).
+            stft_magnitude = np.empty((n_frames, self.n_bins), dtype=np.float32)
+            for cs in range(0, n_frames, CHUNK_FRAMES):
+                ce      = min(cs + CHUNK_FRAMES, n_frames)
+                cn      = ce - cs
+                a_start = cs * hop
+                a_stop  = (ce - 1) * hop + n_fft
+                c_audio = audio_padded[a_start:a_stop]
+                fv      = sliding_window_view(c_audio, n_fft)[::hop][:cn]
+                stft_magnitude[cs:ce] = np.abs(np.fft.rfft(fv * window, axis=1))
+
+            interp_refs_by_frame = [None] * n_frames
+            for event in events_map.get("events", []):
+                ev_start = event["startFrame"]
+                ev_end   = event["endFrame"]
+                interp_power = self._build_interpolated_reference(
+                    stft_magnitude, ev_start, ev_end, n_context
+                )
+                if interp_power is not None:
+                    for fi in range(ev_start, min(ev_end + 1, n_frames)):
+                        interp_refs_by_frame[fi] = interp_power
+            del stft_magnitude
+
         for chunk_start in range(0, n_frames, CHUNK_FRAMES):
             chunk_end   = min(chunk_start + CHUNK_FRAMES, n_frames)
             chunk_n     = chunk_end - chunk_start
@@ -891,7 +933,16 @@ class SibilanceSuppressor:
                 if (is_sibilant and
                         self.long_term_power is not None and
                         self.voiced_frame_count >= warmup):
-                    reference_db = 10.0 * np.log10(self.long_term_power + eps)
+                    # Blend EMA with per-event interpolated reference (min = more conservative).
+                    # Two-pass mode: interp_refs_by_frame is a list of length n_frames.
+                    # Single-pass mode: interp_refs_by_frame is empty ([]), so the index
+                    # branch is never reached and we fall through to EMA only.
+                    interp_power = interp_refs_by_frame[gi] if interp_refs_by_frame else None
+                    if interp_power is not None:
+                        active_ref_power = np.minimum(self.long_term_power, interp_power)
+                    else:
+                        active_ref_power = self.long_term_power
+                    reference_db = 10.0 * np.log10(active_ref_power + eps)
                     target_gr_chunk[j] = self._compute_target_no_spread(
                         mdb_j, reference_db,
                     )
@@ -899,15 +950,6 @@ class SibilanceSuppressor:
                 # is_sibilant is False on non-voiced frames (gated inside the
                 # detector) so target_gr_chunk[j] stays zero -- no explicit
                 # voiced gate needed here.
-
-            # Bin-axis spread kernel applied once per chunk along the bin
-            # axis. Equivalent to convolving each frame independently.
-            if self.spread_kernel is not None:
-                target_gr_chunk = convolve1d(
-                    target_gr_chunk, self.spread_kernel,
-                    axis=1, mode="constant", cval=0.0,
-                ).astype(np.float32, copy=False)
-                np.clip(target_gr_chunk, 0.0, max_reduction_db, out=target_gr_chunk)
 
             # Attack/release IIR -- state-dependent coefficient, JITed via
             # numba (shared kernel from resonance_suppressor) when available.

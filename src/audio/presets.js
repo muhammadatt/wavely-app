@@ -235,13 +235,12 @@ export const PRESETS = {
     airBoost: { gainDb: 6 },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
-    // Conservative ACX tuning: lower depth and
-    // ceiling, slower release to preserve narration intelligibility.
+    // Conservative ACX tuning: higher dead zone and lower ceiling preserve
+    // narration intelligibility; slower release avoids post-sibilant artifacts.
     sibilanceSuppressor: {
-      selectivity: 25,
-      depth: 1,
+      dead_zone_db: 2.5,
       release_ms: 50.0,
-      max_reduction_db: 8.0,
+      max_reduction_db: 12.0,
     },
     // Stage 3b — Resonance Suppressor. 
     // Conservative ACX tuning: moderate depth, high selectivity, slow attack/release
@@ -403,11 +402,9 @@ export const PRESETS = {
       transientShaper: true,
       transientMaxReductionDb: 6,
     },
-    // Stage 4 — Sibilance Suppressor. Slightly deeper reduction with a faster
-    // attack matches the punchier, more processed podcast character; everything
-    // else inherits from DEFAULT_PARAMS.
+    // Stage 4 — Sibilance Suppressor. Faster attack matches the punchier,
+    // more processed podcast character; everything else inherits from DEFAULT_PARAMS.
     sibilanceSuppressor: {
-      depth: 0.7,
       attack_ms: 4.0,
     },
     // Stage 3b — Resonance Suppressor. Faster attack and lower selectivity
@@ -550,17 +547,15 @@ export const PRESETS = {
       strength: 0.8,
       transientShaper: false,
     },
-    // Stage 4 — Sibilance Suppressor. Broadcast-neutral tuning sits between
-    // ACX and podcast: stricter detection than the defaults, lower ceiling
-    // than ACX since voice-over often sits under music beds where deep cuts
-    // become audible.
+    // Stage 4 — Sibilance Suppressor. Broadcast-neutral tuning: stricter detection
+    // than the defaults and a lower ceiling since voice-over often sits under
+    // music beds where deep cuts become audible.
     sibilanceSuppressor: {
       p95_trigger_db: 8.0,
       p95_threshold_db: 4.0,
       broadband_trigger_db: 11.0,
-      selectivity: 5.5,
       release_ms: 70.0,
-      max_reduction_db: 8.0,
+      max_reduction_db: 12.0,
     },
     // Stage 3b — Resonance Suppressor. Broadcast-neutral tuning: moderate depth
     // with a lower ceiling than podcast (voice-over sits under music beds where
@@ -701,17 +696,12 @@ export const PRESETS = {
       transientMaxReductionDb: 6,
     },
     // Stage 4 — Sibilance Suppressor. Pragmatic assertive: lower broadband
-    // trigger and selectivity catch more events, deeper reduction with a
-    // narrower spreading kernel (sharpness 0.2) for surgical cuts on unknown
-    // source material.
+    // trigger catches more events on unknown source material; faster timing
+    // matches the tighter processed character.
     sibilanceSuppressor: {
       broadband_trigger_db: 9.0,
-      depth: 0.8,
-      selectivity: 4.0,
       attack_ms: 4.0,
       release_ms: 50.0,
-      max_reduction_db: 12.0,
-      sharpness: 0.2,
     },
     // Stage 3b — Resonance Suppressor. Assertive tuning for unknown source
     // material: deeper reduction, lower selectivity, wider frequency range,
