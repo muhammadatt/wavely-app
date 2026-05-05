@@ -50,11 +50,11 @@ PIPELINE_SR = 44100
 ALPHA_NOISE_SPEECH  = np.float32(0.99)
 ALPHA_NOISE_SILENCE = np.float32(0.92)
 
-# Speech-protective gain floor: voiced frames are full passthrough (1.0).
+# Speech-protective gain floor: voiced frames beta (1.0) => full passthrough .
 # Spectral subtraction cannot separate speech from noise within the same
 # time-frequency bin — any gain < 1.0 on a voiced frame attenuates speech.
 # DF3 downstream handles in-speech NR with a model that can actually do that.
-BETA_SPEECH = np.float32(1.0)
+BETA_SPEECH = np.float32(0.3)
 
 # Voiced-mask expansion applied after loading Silero labels.
 # Silero labels are at 25 ms resolution (~2 STFT frames each at 86 fps).

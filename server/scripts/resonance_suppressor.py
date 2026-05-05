@@ -9,9 +9,6 @@ Scope: narrow resonant spike detection via within-frame mel-domain spectral
 smoothing. Catches room modes, microphone resonances, and isolated harmonic
 buildups anywhere in the active frequency range.
 
-Sibilant detection and suppression is handled by a separate stage:
-  instant_polish_sibilance_suppressor.py (Stage 4)
-
 Dependencies: numpy, scipy
 All processing is frame-based via STFT/ISTFT with overlap-add reconstruction.
 """
@@ -79,59 +76,34 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Preset-calibrated default parameters
+# Default parameters
 # ---------------------------------------------------------------------------
+# Single source of truth for every tunable. Per-preset overrides live in
+# src/audio/presets.js as resonanceSuppressor blocks and are passed in via
+# --params-json. Anything not specified there inherits from this dict.
 
-PRESET_DEFAULTS = {
-    "acx_audiobook": {
-        "depth": 0.5,           # Global reduction scale (0.0-1.0).
-        "sharpness": 0.5,       # Attenuation curve shape.
-                                # 0.0 = wide gentle cuts (broad energy build-ups).
-                                # 1.0 = deep narrow notches (precise resonances).
-        "selectivity": 2.0,     # Spike threshold in dB above smoothed floor.
-                                # Higher = fewer cuts, only the most prominent spikes.
-        "attack_ms": 15.0,      # Gain reduction onset speed.
-        "release_ms": 80.0,     # Gain reduction recovery speed.
-        "max_reduction_db": 9.0,# Hard ceiling on reduction at any bin. Conservative
-                                # for ACX -- overprocessing artifacts cause rejection.
-        "freq_floor_hz": 80.0,  # Don't process below this (HPF already handles sub-vocals).
-        "freq_ceil_hz": 16000.0,# Don't process above this.
-        "mode": "soft",         # "soft" = gradual knee; "hard" = linear above threshold.
-    },
-    "podcast_ready": {
-        "depth": 0.65,
-        "sharpness": 0.5,
-        "selectivity": 1.5,
-        "attack_ms": 8.0,
-        "release_ms": 60.0,
-        "max_reduction_db": 9.0,
-        "freq_floor_hz": 80.0,
-        "freq_ceil_hz": 16000.0,
-        "mode": "soft",
-    },
-    "voice_ready": {
-        "depth": 0.55,
-        "sharpness": 0.5,
-        "selectivity": 2.0,
-        "attack_ms": 12.0,
-        "release_ms": 70.0,
-        "max_reduction_db": 7.0,
-        "freq_floor_hz": 80.0,
-        "freq_ceil_hz": 16000.0,
-        "mode": "soft",
-    },
-    "general_clean": {
-        "depth": 0.7,
-        "sharpness": 0.4,
-        "selectivity": 1.5,
-        "attack_ms": 8.0,
-        "release_ms": 50.0,
-        "max_reduction_db": 12.0,
-        "freq_floor_hz": 60.0,
-        "freq_ceil_hz": 18000.0,
-        "mode": "soft",
-    },
+DEFAULT_PARAMS = {
+    "depth": 0.5,           # Global reduction scale (0.0-1.0).
+    "sharpness": 0.5,       # Attenuation curve shape.
+                            # 0.0 = wide gentle cuts (broad energy build-ups).
+                            # 1.0 = deep narrow notches (precise resonances).
+    "selectivity": 5.0,     # Spike threshold in dB above smoothed floor.
+                            # Higher = fewer cuts, only the most prominent spikes.
+    "attack_ms": 15.0,      # Gain reduction onset speed.
+    "release_ms": 80.0,     # Gain reduction recovery speed.
+    "max_reduction_db": 9.0,# Hard ceiling on reduction at any bin.
+    "freq_floor_hz": 80.0,  # Don't process below this (HPF already handles sub-vocals).
+    "freq_ceil_hz": 16000.0,# Don't process above this.
+    "mode": "soft",         # "soft" = gradual knee; "hard" = linear above threshold.
 }
+
+
+def resolve_params(overrides: dict = None) -> dict:
+    """Merge sparse overrides over DEFAULT_PARAMS. None or empty -> defaults."""
+    params = DEFAULT_PARAMS.copy()
+    if overrides:
+        params.update(overrides)
+    return params
 
 
 # ---------------------------------------------------------------------------
@@ -179,25 +151,22 @@ class ResonanceSuppressor:
         sample_rate: int = 44100,
         n_fft: int = 2048,
         hop_length: int = 512,
-        preset: str = "acx_audiobook",
+        params: dict = None,
         f0: float = 109.4,
-        **override_params,
     ):
         self.sr         = sample_rate
         self.n_fft      = n_fft
         self.hop_length = hop_length
         self.f0         = f0
 
-        params = PRESET_DEFAULTS.get(preset, PRESET_DEFAULTS["acx_audiobook"]).copy()
-        params.update(override_params)
-        self.params = params
+        self.params = resolve_params(params)
 
         self.freqs  = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
         self.n_bins = len(self.freqs)
 
         self.active_bins = (
-            (self.freqs >= params["freq_floor_hz"]) &
-            (self.freqs <= params["freq_ceil_hz"])
+            (self.freqs >= self.params["freq_floor_hz"]) &
+            (self.freqs <= self.params["freq_ceil_hz"])
         )
 
         # --- Mel-domain smoothing setup ---
@@ -222,7 +191,7 @@ class ResonanceSuppressor:
         )
 
         # --- Sharpness: Gaussian spreading kernel ---
-        sharpness   = params["sharpness"]
+        sharpness   = self.params["sharpness"]
         spread_bins = int(30 * (1.0 - sharpness))
         if spread_bins >= 2:
             sigma  = spread_bins / 3.0
@@ -235,18 +204,18 @@ class ResonanceSuppressor:
 
         # --- Attack/release ---
         frame_period_ms    = (hop_length / sample_rate) * 1000.0
-        self.attack_coeff  = self._time_to_coeff(params["attack_ms"],  frame_period_ms)
-        self.release_coeff = self._time_to_coeff(params["release_ms"], frame_period_ms)
+        self.attack_coeff  = self._time_to_coeff(self.params["attack_ms"],  frame_period_ms)
+        self.release_coeff = self._time_to_coeff(self.params["release_ms"], frame_period_ms)
 
         # --- Cached overlap-add window (computed once per instance) ---
         self._window         = get_window("hann", n_fft, fftbins=True).astype(np.float32)
         self._window_squared = (self._window.astype(np.float64) ** 2)
 
         logger.info(
-            f"ResonanceSuppressor init | preset={preset} | n_fft={n_fft} | "
+            f"ResonanceSuppressor init | n_fft={n_fft} | "
             f"mel_window={self.mel_window_bins} bins | "
-            f"selectivity={params['selectivity']} dB | depth={params['depth']} | "
-            f"sharpness={sharpness} | max_cut={params['max_reduction_db']} dB"
+            f"selectivity={self.params['selectivity']} dB | depth={self.params['depth']} | "
+            f"sharpness={sharpness} | max_cut={self.params['max_reduction_db']} dB"
         )
 
     @staticmethod
@@ -575,23 +544,14 @@ class ResonanceSuppressor:
 def apply_resonance_suppression(
     audio: np.ndarray,
     sample_rate: int,
-    preset: str,
+    params: dict = None,
     vad_voiced_mask: np.ndarray = None,
     f0: float = None,
 ) -> dict:
     """Stage 3b pipeline entry point."""
-    if preset == "noise_eraser":
-        logger.info("ResonanceSuppressor: skipping for noise_eraser preset.")
-        return {
-            "audio": audio, "skipped": True, "max_reduction_db": 0.0,
-            "mean_reduction_db": 0.0, "spike_frames": 0,
-            "artifact_risk": False, "band_summary": [],
-            "process_seconds": 0.0,
-        }
-
     t0 = time.perf_counter()
 
-    suppressor = ResonanceSuppressor(sample_rate=sample_rate, preset=preset, f0=f0)
+    suppressor = ResonanceSuppressor(sample_rate=sample_rate, params=params, f0=f0)
 
     voiced_frame_indices = None
     if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
@@ -638,13 +598,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stage 3b -- Resonance Suppressor")
     parser.add_argument("--input",         required=True)
     parser.add_argument("--output",        required=True)
-    parser.add_argument("--preset",        default="acx_audiobook")
+    parser.add_argument("--params-json",   default=None,
+                        help="Sparse parameter overrides (JSON). Keys missing "
+                             "from the file inherit from DEFAULT_PARAMS. "
+                             "Sourced from the preset's resonanceSuppressor "
+                             "block in src/audio/presets.js.")
     parser.add_argument("--vad-mask-json", default=None)
     parser.add_argument("--f0",            type=float, default=None)
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
     audio = audio.astype(np.float32)
+
+    params = None
+    if args.params_json:
+        with open(args.params_json) as fh:
+            params = json.load(fh)
 
     vad_voiced_mask = None
     if args.vad_mask_json:
@@ -657,6 +626,6 @@ if __name__ == "__main__":
                 e = s + frame["lengthSamples"]
                 vad_voiced_mask[s:min(e, len(audio))] = True
 
-    result = apply_resonance_suppression(audio, sr, args.preset, vad_voiced_mask, args.f0)
+    result = apply_resonance_suppression(audio, sr, params, vad_voiced_mask, args.f0)
     wavfile.write(args.output, sr, result["audio"])
     print("JSON_RESULT:" + json.dumps(resonance_suppressor_report_entry(result)), flush=True)

@@ -3,7 +3,7 @@ instant_polish_sibilance_suppressor.py
 Stage 4 -- Sibilance Suppressor
 
 Combines the de-esser's F0-derived sibilant event detection with long-term
-EMA-based spectral gain reduction. Replaces the separate de-esser stage.
+EMA-based spectral gain reduction. 
 
 Architecture:
   Detection (de-esser logic):

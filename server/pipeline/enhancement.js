@@ -207,8 +207,17 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
     RESONANCE_SCRIPT,
     '--input',  inputPath,
     '--output', outputPath,
-    '--preset', presetId,
   ]
+
+  // Sparse per-preset overrides from src/audio/presets.js. Anything not
+  // present in this block inherits from DEFAULT_PARAMS in the Python script.
+  const overrides = PRESETS[presetId]?.resonanceSuppressor
+  let paramsPath = null
+  if (overrides && Object.keys(overrides).length > 0) {
+    paramsPath = tempPath('.json')
+    await writeFile(paramsPath, JSON.stringify(overrides))
+    args.push('--params-json', paramsPath)
+  }
 
   if (f0 != null) args.push('--f0', String(f0))
 
@@ -224,6 +233,7 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
   try {
     result = await runResonanceScript(args)
   } finally {
+    if (paramsPath)  await rm(paramsPath,  { force: true })
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
   }
 

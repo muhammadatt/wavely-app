@@ -496,7 +496,8 @@ def _envelope_follower_jit(rms_arr, attack_coeff, release_coeff):
 
 def build_gain_curve(detection: np.ndarray, sample_rate: int,
                      threshold_offset_db: float, max_reduction_db: float,
-                     attack_ms: float, release_ms: float):
+                     attack_ms: float, release_ms: float,
+                     slope: float = 0.85):
     """
     Envelope follower + soft-knee gain reduction on the detection signal.
     Returns (gain_curve, max_reduction_observed_db, treated_events).
@@ -544,7 +545,7 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
         above   = envelope_arr > threshold_lin
         ratio   = np.where(above, envelope_arr / threshold_lin, 1.0)
         over_db = 20.0 * np.log10(np.maximum(ratio, 1.0))
-        red_db  = np.minimum(over_db * 0.85, max_reduction_db)
+        red_db  = np.minimum(over_db * slope, max_reduction_db)
         red_db  = np.where(above, red_db, 0.0)
     else:
         above  = np.zeros(n, dtype=bool)
@@ -615,7 +616,14 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
                        f0_median: Optional[float],
                        voiced_mask: Optional[np.ndarray],
                        n_fft: int, hop: int,
-                       crossover_hz: float = 4000.0) -> dict:
+                       crossover_hz: float = 4000.0,
+                       ratio: float = 6.7) -> dict:
+    """
+    ratio controls how steeply gain reduction grows once an event exceeds the
+    threshold. Expressed as a compressor-style ratio (e.g. 4 = 4:1). Converted
+    internally to a slope via slope = 1 - 1/ratio. The default of 6.7 matches
+    the previous hardcoded slope of 0.85 (1 - 1/6.7 ≈ 0.851).
+    """
     """
     Run the full de-esser on a (n_channels, n_samples) float32 array and
     return both the processed audio and the JS-compatible result dict.
@@ -695,9 +703,10 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
                                          metrics["frame_target_freq"], hop, bandwidth)
 
     threshold_offset_db = 3.0 if sensitivity == "high" else 4.0
+    slope = 1.0 - 1.0 / max(ratio, 1.01)  # clamp ratio > 1 to keep slope in (0, 1)
     gain_curve, max_red_observed, treated = build_gain_curve(
         detection, sample_rate, threshold_offset_db, max_reduction_db,
-        attack_ms=2.0, release_ms=50.0,
+        attack_ms=2.0, release_ms=50.0, slope=slope,
     )
 
     # Split-band processing crossover: preset-defined static frequency.
@@ -788,6 +797,11 @@ def main():
                         help="Static split-band crossover frequency (Hz). "
                              "High band (above this) is attenuated by the gain "
                              "curve; low band passes through.")
+    parser.add_argument("--ratio",           type=float, default=6.7,
+                        help="Compressor-style ratio controlling how steeply gain "
+                             "reduction grows above the threshold (e.g. 4 = 4:1). "
+                             "Converted to slope via slope = 1 - 1/ratio. "
+                             "Default 6.7 preserves the previous hardcoded slope of 0.85.")
     args = parser.parse_args()
 
     if args.sensitivity == "none" or args.max_reduction <= 0:
@@ -842,6 +856,7 @@ def main():
         n_fft=DEFAULT_N_FFT,
         hop=DEFAULT_HOP,
         crossover_hz=args.crossover_hz,
+        ratio=args.ratio,
     )
 
     out_audio = result.pop("audio")

@@ -19,37 +19,37 @@
 /** @type {Record<string, OutputProfile>} */
 export const OUTPUT_PROFILES = {
   acx: {
-    id: 'acx',
-    displayName: 'ACX Audiobook',
+    id: "acx",
+    displayName: "ACX Audiobook",
     loudnessRange: [-23, -18],
-    normalizationTarget: -20,   // dBFS RMS — ACX spec target, not the range midpoint (-20.5)
+    normalizationTarget: -20, // dBFS RMS — ACX spec target, not the range midpoint (-20.5)
     truePeakCeiling: -3,
     noiseFloorCeiling: -60,
-    measurementMethod: 'RMS',
+    measurementMethod: "RMS",
   },
   podcast: {
-    id: 'podcast',
-    displayName: 'Podcast / Streaming',
+    id: "podcast",
+    displayName: "Podcast / Streaming",
     loudnessRange: [-18, -14],
-    normalizationTarget: -16,   // LUFS integrated — midpoint of loudnessRange
+    normalizationTarget: -16, // LUFS integrated — midpoint of loudnessRange
     truePeakCeiling: -1,
     noiseFloorCeiling: null,
-    measurementMethod: 'LUFS',
+    measurementMethod: "LUFS",
   },
   broadcast: {
-    id: 'broadcast',
-    displayName: 'Broadcast',
+    id: "broadcast",
+    displayName: "Broadcast",
     loudnessRange: [-24, -22],
-    normalizationTarget: -23,   // LUFS integrated — midpoint of loudnessRange
+    normalizationTarget: -23, // LUFS integrated — midpoint of loudnessRange
     truePeakCeiling: -1,
     noiseFloorCeiling: null,
-    measurementMethod: 'LUFS',
+    measurementMethod: "LUFS",
   },
 }
 
 // Backward compatibility: accept 'standard' as alias for 'podcast'
 export function resolveOutputProfileId(id) {
-  if (id === 'standard') return 'podcast'
+  if (id === "standard") return "podcast"
   return id
 }
 
@@ -82,7 +82,7 @@ export function resolveOutputProfileId(id) {
  * @property {number} attack               - Attack time in ms
  * @property {number} release              - Release time in ms
  * @property {string} eqProfile
- * @property {{ sensitivity: 'standard'|'high'|'none', trigger: number, maxReduction: number }} deEsser
+ * @property {{ sensitivity: 'standard'|'high'|'none', trigger: number, maxReduction: number, ratio: number, crossoverHz: number }} deEsser
  * @property {'mono'|'preserve'} channelOutput
  * @property {string} defaultOutputProfile
  * @property {boolean} lockedOutputProfile
@@ -96,66 +96,68 @@ export function resolveOutputProfileId(id) {
 /** @type {Record<string, Preset>} */
 export const PRESETS = {
   acx_audiobook: {
-    id: 'acx_audiobook',
-    displayName: 'ACX Audiobook',
-    description: 'Conservative, transparent processing for audiobook narration',
-    audience: 'Audiobook narrators',
-    character: 'Clean, present, natural',
-    targetLoudness: { value: -20, unit: 'dBFS RMS' },
+    id: "acx_audiobook",
+    displayName: "ACX Audiobook",
+    description: "Conservative, transparent processing for audiobook narration",
+    audience: "Audiobook narrators",
+    character: "Clean, present, natural",
+    targetLoudness: { value: -20, unit: "dBFS RMS" },
     truePeakCeiling: -3,
     noiseFloorTarget: -60,
-    noiseModel: 'df3',
-    eqProfile: 'audiobook',
-    airBoost: { gainDb: 5 },
-    bweModel: 'lavasr',
-    bwe: { enabled: true, postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 } },
-    deEsser: {
-      sensitivity: 'medium',
-      trigger: 1,
-      maxReduction: 6,
-      crossoverHz: 4000,
+    noiseModel: "df3",
+    eqProfile: "audiobook",
+    bweModel: "lavasr",
+    bwe: {
+      enabled: true,
+      postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
     },
-    channelOutput: 'mono',
-    defaultOutputProfile: 'acx',
+    channelOutput: "mono",
+    defaultOutputProfile: "acx",
     lockedOutputProfile: true,
     dereverb: {
       enabled: true,
-      strength: 'medium',
+      strength: "medium",
       preserve_early: false,
     },
     autoLeveler: {
-      total_max_up_db:         5.0,
-      total_max_down_db:       6.0,
-      target_window_s:         60,
+      total_max_up_db: 5.0,
+      total_max_down_db: 6.0,
+      target_window_s: 60,
       noise_floor_target_dbfs: -60,
       loop_a: {
-        deadband_db: 2.0, knee_db: 1.5,
-        max_up_db: 4.0, max_down_db: 5.0,
-        attack_ms: 300, release_ms: 2000,
+        deadband_db: 2.0,
+        knee_db: 1.5,
+        max_up_db: 4.0,
+        max_down_db: 5.0,
+        attack_ms: 300,
+        release_ms: 2000,
       },
       loop_b: {
-        deadband_up_db: 4.0, deadband_down_db: 3.0,
-        ratio_up: 2.0, ratio_down: 2.5,
-        max_up_db: 2.5, max_down_db: 3.0,
-        attack_ms: 200, release_ms: 1000,
+        deadband_up_db: 4.0,
+        deadband_down_db: 3.0,
+        ratio_up: 2.0,
+        ratio_down: 2.5,
+        max_up_db: 2.5,
+        max_down_db: 3.0,
+        attack_ms: 200,
+        release_ms: 1000,
       },
     },
     saturation: {
       drive: 1.8,
       wetDry: 0.05,
-      bias: 0.08
+      bias: 0.08,
     },
     compression: [
-
       // Pass 1: Transient Catcher (Peak Control)
       // Hits only the loudest errant peaks (plosives, exclamations) very quickly
       {
         targetCrestFactorDb: 15,
         maxRatio: 6,
-        threshold: 'auto',
+        threshold: "auto",
         follow: false,
-        attack: 0.1,  // Extremely fast to catch peaks
-        release: 30,  // Fast release to get out of the way quickly
+        attack: 0.1, // Extremely fast to catch peaks
+        release: 30, // Fast release to get out of the way quickly
       },
       /*
       //Tonal Pass for character
@@ -169,52 +171,51 @@ export const PRESETS = {
       },*/
       // Pass 2: Gentle Leveler (Body Control)
       // Smooths out the overall performance, bringing up presence without pumping
-      
+
       {
         targetCrestFactorDb: 15,
         maxRatio: 3, // Gentle ratio for transparency
-        threshold: 'auto',
+        threshold: "auto",
         follow: false,
-        attack: 15,    // Slow enough to let crisp consonants through (presence)
-        release: 120,  // Slow release for smooth, unnoticeable recovery
-      }
-      
+        attack: 15, // Slow enough to let crisp consonants through (presence)
+        release: 120, // Slow release for smooth, unnoticeable recovery
+      },
     ],
     parallelCompression: {
-      ratio:                       20,
-      attackMs:                    15,   
-      releaseMs:                   150,
-      makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.15,
-      vadFadeMs:                   5,
-      crestGuardThresholdDb:       12,
+      ratio: 20,
+      attackMs: 15,
+      releaseMs: 150,
+      makeupGain: "auto", // automatically match average gain reduction
+      wetMix: 0.15,
+      vadFadeMs: 5,
+      crestGuardThresholdDb: 12,
       parallelDesserMaxReductionDb: 15,
     },
     // Expander — reduce the level of the noise floor
-    // headroomOffsetDb - defines how close to speech threshold; 
-    // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band -- 
+    // headroomOffsetDb - defines how close to speech threshold;
+    // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band --
     // e.g. (0.25) preserves breath/fricative transparency above 800 Hz.
     vocalExpander: {
-      enabled:          true,
-      ratio:            2.5,
-      highFreqDepth:    0.25,
+      enabled: true,
+      ratio: 2.5,
+      highFreqDepth: 0.25,
       headroomOffsetDb: 6,
-      releaseMs:        150,
-      attackMs:         50,
-      holdMs:           5,
-      lookaheadMs:      455,
+      releaseMs: 150,
+      attackMs: 50,
+      holdMs: 5,
+      lookaheadMs: 455,
       maxAttenuationDb: 24,
-      detectionBand:    { lowHz: 80, highHz: 800 },
+      detectionBand: { lowHz: 80, highHz: 800 },
     },
     // VAD Gate — conservative for ACX. Shallower floor preserves audible room
     // tone; generous hold prevents chopping the long decay of narrated word endings.
     vadGate: {
-      enabled:     true,
+      enabled: true,
       lookaheadMs: 60, //Higher = fewer clipped onsets, more latency
-      holdMs:      200, //Higher = fewer clipped endings, less breath reduction
-      attackMs:    5, //Slower attack softens plosive transients
-      releaseMs:   80, //Slower release = more natural fade-out
-      floorDb:     -110, //-∞ = fully silent gaps (unnatural), -40 = subtle presence
+      holdMs: 200, //Higher = fewer clipped endings, less breath reduction
+      attackMs: 5, //Slower attack softens plosive transients
+      releaseMs: 80, //Slower release = more natural fade-out
+      floorDb: -110, //-∞ = fully silent gaps (unnatural), -40 = subtle presence
     },
     // Conservative: enough to clean audible breaths that flag ACX human review,
     // but not so deep that the narrator's breathing presence disappears entirely.
@@ -225,58 +226,68 @@ export const PRESETS = {
     // ACX: lower strength preserves the natural vocal character ACX human reviewers
     // expect; transient shaper disabled to avoid any risk of gating room tone.
     spectralSubtraction: {
-      enabled:              true,
-      alphaDd:              0.98,
-      beta:                 0.15,
-      strength:             0.7,
-      transientShaper:      true,
+      enabled: true,
+      alphaDd: 0.98,
+      beta: 0.15,
+      strength: 0.7,
+      transientShaper: true,
     },
+    airBoost: { gainDb: 6 },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
     // Conservative ACX tuning: lower depth and
     // ceiling, slower release to preserve narration intelligibility.
     sibilanceSuppressor: {
-      depth: 0.6,
-      release_ms:           80.0,
-      max_reduction_db:     8.0,
+      selectivity: 25,
+      depth: 1,
+      release_ms: 50.0,
+      max_reduction_db: 8.0,
     },
-    // Conservative for ACX: very low wet mix and
-    // short RT60 add just enough placement without risking ACX human review
-    // rejection for audible reverb.
-    /*
-    roomPresence: {
-      enabled:     true,
-      wet:         0.05,
-      rt60Ms:      60,
-      preDelayMs:  1.0,
-      diffusion:   0.6,
+    // Stage 3b — Resonance Suppressor. 
+    // Conservative ACX tuning: moderate depth, high selectivity, slower attack/release
+    resonanceSuppressor: {
+      depth: 0.5,
+      sharpness: 0.5,
+      selectivity: 9.0,
+      attack_ms: 15.0,
+      release_ms: 80.0,
+      max_reduction_db: 9.0,
+      freq_floor_hz: 80.0,
+      freq_ceil_hz: 16000.0,
+      mode: "soft",
     },
-    */
+    deEsser: {
+      sensitivity: "medium",
+      trigger: 1,
+      maxReduction: 6,
+      ratio: 4,
+      crossoverHz: 4000,
+    },
     roomPresence: {
-  enabled:     true,
-  wet:         0.05,   // 0.12 - reverb tail sits ~17dB below direct
-  rt60Ms:      130,    // presence without going washy; echoes after 200 - 250ms
-  preDelayMs:  20.0,   // slight punch through before reverb onset
-  diffusion:   0.4,    // brighter tail preserves air
-},
+      enabled: false,
+      wet: 0.05, // 0.12 - reverb tail sits ~17dB below direct
+      rt60Ms: 100, // presence without going washy; echoes after 200 - 250ms
+      preDelayMs: 20.0, // slight punch through before reverb onset
+      diffusion: 0.4, // brighter tail preserves air
+    },
   },
 
   podcast_ready: {
-    id: 'podcast_ready',
-    displayName: 'Podcast Ready',
-    description: 'Punchy, consistent sound for podcast distribution',
-    audience: 'Podcast hosts',
-    character: 'Punchy, intimate, consistent',
-    targetLoudness: { value: -16, unit: 'LUFS' },
+    id: "podcast_ready",
+    displayName: "Podcast Ready",
+    description: "Punchy, consistent sound for podcast distribution",
+    audience: "Podcast hosts",
+    character: "Punchy, intimate, consistent",
+    targetLoudness: { value: -16, unit: "LUFS" },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    noiseModel: 'df3',
+    noiseModel: "df3",
     compression: [
       // Pass 1: Transient Catcher (Peak Control)
       {
         targetCrestFactorDb: 14,
         maxRatio: 5,
-        threshold: 'auto',
+        threshold: "auto",
         follow: false,
         attack: 0.1,
         release: 40,
@@ -285,89 +296,100 @@ export const PRESETS = {
       {
         targetCrestFactorDb: 10,
         maxRatio: 4,
-        threshold: 'auto',
+        threshold: "auto",
         follow: false,
-        attack: 5,     // Faster than ACX to thicken the voice, but still lets some punch through
-        release: 80,   // Faster release for a denser, higher-energy consistent sound
-      }
+        attack: 5, // Faster than ACX to thicken the voice, but still lets some punch through
+        release: 80, // Faster release for a denser, higher-energy consistent sound
+      },
     ],
-    eqProfile: 'podcast',
+    eqProfile: "podcast",
     deEsser: {
-      sensitivity: 'high',
+      sensitivity: "medium",
       trigger: 6,
-      maxReduction: 6,
-      crossoverHz: 4000,
+      maxReduction: 4,
+      ratio: 6.7,
+      crossoverHz: 3000,
     },
-    channelOutput: 'preserve',
-    defaultOutputProfile: 'podcast',
+    channelOutput: "preserve",
+    defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
     dereverb: {
       enabled: false,
-      strength: 'light',
+      strength: "light",
       preserve_early: true,
     },
     autoLeveler: {
-      total_max_up_db:         6.0,
-      total_max_down_db:       8.0,
-      target_window_s:         45,
+      total_max_up_db: 6.0,
+      total_max_down_db: 8.0,
+      target_window_s: 45,
       noise_floor_target_dbfs: -50,
       loop_a: {
-        deadband_db: 1.5, knee_db: 1.0,
-        max_up_db: 5.0, max_down_db: 6.0,
-        attack_ms: 200, release_ms: 1200,
+        deadband_db: 1.5,
+        knee_db: 1.0,
+        max_up_db: 5.0,
+        max_down_db: 6.0,
+        attack_ms: 200,
+        release_ms: 1200,
       },
       loop_b: {
-        deadband_up_db: 3.0, deadband_down_db: 2.5,
-        ratio_up: 2.5, ratio_down: 3.0,
-        max_up_db: 3.0, max_down_db: 4.0,
-        attack_ms: 150, release_ms: 800,
+        deadband_up_db: 3.0,
+        deadband_down_db: 2.5,
+        ratio_up: 2.5,
+        ratio_down: 3.0,
+        max_up_db: 3.0,
+        max_down_db: 4.0,
+        attack_ms: 150,
+        release_ms: 800,
       },
     },
     saturation: {
       drive: 2.0,
-      wetDry: 0.30,
-      bias: 0.10,
+      wetDry: 0.3,
+      bias: 0.1,
       fc: 3000,
     },
     parallelCompression: {
-      ratio:                       10,
-      attackMs:                    0.40,   // midpoint of 0.3–0.5 ms spec range
-      releaseMs:                   120,
-      makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.40,   // midpoint of 25–35%
-      vadFadeMs:                   10,
-      crestGuardThresholdDb:       12,
+      ratio: 10,
+      attackMs: 0.4, // midpoint of 0.3–0.5 ms spec range
+      releaseMs: 120,
+      makeupGain: "auto", // automatically match average gain reduction
+      wetMix: 0.4, // midpoint of 25–35%
+      vadFadeMs: 10,
+      crestGuardThresholdDb: 12,
       parallelDesserMaxReductionDb: 10,
     },
     // Stage 4a-E: Vocal Expander. Assertive settings for processed podcast
     // character: 2.0:1 ratio with wider +6 dB headroom is acceptable because
     // listeners expect a tighter, more processed sound.
     vocalExpander: {
-      enabled:          true,
-      ratio:            2.0,
-      highFreqDepth:    0.5,
+      enabled: true,
+      ratio: 2.0,
+      highFreqDepth: 0.5,
       headroomOffsetDb: 6,
-      releaseMs:        150,
-      attackMs:         10,
-      holdMs:           20,
-      lookaheadMs:      10,
+      releaseMs: 150,
+      attackMs: 10,
+      holdMs: 20,
+      lookaheadMs: 10,
       maxAttenuationDb: 18,
-      detectionBand:    { lowHz: 80, highHz: 800 },
+      detectionBand: { lowHz: 80, highHz: 800 },
     },
     // VAD Gate — assertive for podcast. Deeper floor matches the tighter,
     // more processed character; faster release keeps the gate from feeling
     // sluggish on rapid-fire dialogue.
     vadGate: {
-      enabled:     false,
+      enabled: false,
       lookaheadMs: 20,
-      holdMs:      80,
-      attackMs:    8,
-      releaseMs:   40,
-      floorDb:     -60,
+      holdMs: 80,
+      attackMs: 8,
+      releaseMs: 40,
+      floorDb: -60,
     },
     airBoost: { gainDb: 2.5 },
-    bweModel: 'ap_bwe',
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    bweModel: "ap_bwe",
+    bwe: {
+      enabled: true,
+      postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 },
+    },
     // Light reduction — podcast listeners expect some breath presence; going
     // deeper makes the performance feel over-edited.
     breathReducer: { max_reduction_db: 6 },
@@ -376,78 +398,95 @@ export const PRESETS = {
     // shaper enabled — podcast listeners expect a processed, tight sound and benefit
     // from inter-phrase reverb tail suppression.
     spectralSubtraction: {
-      enabled:                 true,
-      alphaDd:                 0.98,
-      beta:                    0.15,
-      strength:                1.0,
-      transientShaper:         true,
+      enabled: true,
+      alphaDd: 0.98,
+      beta: 0.15,
+      strength: 1.0,
+      transientShaper: true,
       transientMaxReductionDb: 6,
     },
     // Stage 4 — Sibilance Suppressor. Slightly deeper reduction with a faster
     // attack matches the punchier, more processed podcast character; everything
     // else inherits from DEFAULT_PARAMS.
     sibilanceSuppressor: {
-      depth:     0.7,
+      depth: 0.7,
       attack_ms: 4.0,
+    },
+    // Stage 3b — Resonance Suppressor. Faster attack and lower selectivity
+    // match the punchier, more processed podcast character; deeper depth catches
+    // more room resonances.
+    resonanceSuppressor: {
+      depth: 0.65,
+      selectivity: 1.5,
+      attack_ms: 8.0,
+      release_ms: 60.0,
     },
     // Stage 4c — Room Presence. Default settings for podcast: standard wet mix
     // and RT60 give an intimate small-room quality that suits conversational audio.
     roomPresence: {
-      enabled:     true,
-      wet:         0.08,
-      rt60Ms:      80,
-      preDelayMs:  1.5,
-      diffusion:   0.7,
+      enabled: true,
+      wet: 0.08,
+      rt60Ms: 80,
+      preDelayMs: 1.5,
+      diffusion: 0.7,
     },
   },
 
   voice_ready: {
-    id: 'voice_ready',
-    displayName: 'Voice Ready',
-    description: 'Broadcast-quality processing for voice-over work',
-    audience: 'Voice actors',
-    character: 'Clean, broadcast-quality, neutral',
-    targetLoudness: { value: -20, unit: 'dBFS RMS' },
+    id: "voice_ready",
+    displayName: "Voice Ready",
+    description: "Broadcast-quality processing for voice-over work",
+    audience: "Voice actors",
+    character: "Clean, broadcast-quality, neutral",
+    targetLoudness: { value: -20, unit: "dBFS RMS" },
     truePeakCeiling: -3,
     noiseFloorTarget: null,
-    noiseModel: 'df3',
+    noiseModel: "df3",
     compression: {
-      mode: 'conditional',
+      mode: "conditional",
       targetCrestFactorDb: 12,
       thresholdPercentile: 0.75,
       attack: 8,
       release: 90,
     },
-    eqProfile: 'general',
+    eqProfile: "general",
     deEsser: {
-      sensitivity: 'standard',
+      sensitivity: "standard",
       trigger: 8,
       maxReduction: 5,
+      ratio: 6.7,
       crossoverHz: 4000,
     },
-    channelOutput: 'mono',
-    defaultOutputProfile: 'acx',
+    channelOutput: "mono",
+    defaultOutputProfile: "acx",
     lockedOutputProfile: false,
     dereverb: {
       enabled: true,
-      strength: 'heavy', // VACE-WPE (heavy) //Set to 'medium' here to use NARA-WPE
+      strength: "heavy", // VACE-WPE (heavy) //Set to 'medium' here to use NARA-WPE
       preserve_early: false,
     },
     autoLeveler: {
-      total_max_up_db:         5.0,
-      total_max_down_db:       6.0,
-      target_window_s:         60,
+      total_max_up_db: 5.0,
+      total_max_down_db: 6.0,
+      target_window_s: 60,
       noise_floor_target_dbfs: -55,
       loop_a: {
-        deadband_db: 2.0, knee_db: 1.5,
-        max_up_db: 4.0, max_down_db: 5.0,
-        attack_ms: 300, release_ms: 2000,
+        deadband_db: 2.0,
+        knee_db: 1.5,
+        max_up_db: 4.0,
+        max_down_db: 5.0,
+        attack_ms: 300,
+        release_ms: 2000,
       },
       loop_b: {
-        deadband_up_db: 4.0, deadband_down_db: 3.0,
-        ratio_up: 2.0, ratio_down: 2.5,
-        max_up_db: 2.5, max_down_db: 3.0,
-        attack_ms: 200, release_ms: 1000,
+        deadband_up_db: 4.0,
+        deadband_down_db: 3.0,
+        ratio_up: 2.0,
+        ratio_down: 2.5,
+        max_up_db: 2.5,
+        max_down_db: 3.0,
+        attack_ms: 200,
+        release_ms: 1000,
       },
     },
     saturation: {
@@ -457,13 +496,13 @@ export const PRESETS = {
       fc: 4000,
     },
     parallelCompression: {
-      ratio:                       8,
-      attackMs:                    0.50,
-      releaseMs:                   150,
-      makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.225,  // midpoint of 20–25%
-      vadFadeMs:                   5,
-      crestGuardThresholdDb:       12,
+      ratio: 8,
+      attackMs: 0.5,
+      releaseMs: 150,
+      makeupGain: "auto", // automatically match average gain reduction
+      wetMix: 0.225, // midpoint of 20–25%
+      vadFadeMs: 5,
+      crestGuardThresholdDb: 12,
       parallelDesserMaxReductionDb: 10,
     },
     // Stage 4a-E: Vocal Expander. Conservative settings matching ACX: voice-over
@@ -471,31 +510,34 @@ export const PRESETS = {
     // audible — the slower 200 ms release and low highFreqDepth keep the stage
     // transparent.
     vocalExpander: {
-      enabled:          true,
-      ratio:            1.5,
-      highFreqDepth:    0.25,
+      enabled: true,
+      ratio: 1.5,
+      highFreqDepth: 0.25,
       headroomOffsetDb: 4,
-      releaseMs:        200,
-      attackMs:         10,
-      holdMs:           20,
-      lookaheadMs:      10,
+      releaseMs: 200,
+      attackMs: 10,
+      holdMs: 20,
+      lookaheadMs: 10,
       maxAttenuationDb: 12,
-      detectionBand:    { lowHz: 80, highHz: 800 },
+      detectionBand: { lowHz: 80, highHz: 800 },
     },
     // VAD Gate — broadcast-neutral. Shallower floor than podcast since
     // voice-over often sits under music; a hard cut would be audible against
     // the bed.
     vadGate: {
-      enabled:     false,
+      enabled: false,
       lookaheadMs: 25,
-      holdMs:      100,
-      attackMs:    10,
-      releaseMs:   60,
-      floorDb:     -55,
+      holdMs: 100,
+      attackMs: 10,
+      releaseMs: 60,
+      floorDb: -55,
     },
     airBoost: { gainDb: 2.0 },
-    bweModel: 'ap_bwe',
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    bweModel: "ap_bwe",
+    bwe: {
+      enabled: true,
+      postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 },
+    },
     // Moderate — voice-over often sits under music beds where breaths are
     // audible; deeper reduction than podcast, lighter than ACX.
     breathReducer: { max_reduction_db: 10 },
@@ -505,128 +547,148 @@ export const PRESETS = {
     // shaper disabled because voice-over often sits under music beds where any gating
     // artifact becomes audible against the bed.
     spectralSubtraction: {
-      enabled:              true,
-      alphaDd:              0.98,
-      beta:                 0.15,
-      strength:             0.8,
-      transientShaper:      false,
+      enabled: true,
+      alphaDd: 0.98,
+      beta: 0.15,
+      strength: 0.8,
+      transientShaper: false,
     },
     // Stage 4 — Sibilance Suppressor. Broadcast-neutral tuning sits between
     // ACX and podcast: stricter detection than the defaults, lower ceiling
     // than ACX since voice-over often sits under music beds where deep cuts
     // become audible.
     sibilanceSuppressor: {
-      p95_trigger_db:       8.0,
-      p95_threshold_db:     4.0,
+      p95_trigger_db: 8.0,
+      p95_threshold_db: 4.0,
       broadband_trigger_db: 11.0,
-      selectivity:          5.5,
-      release_ms:           70.0,
-      max_reduction_db:     8.0,
+      selectivity: 5.5,
+      release_ms: 70.0,
+      max_reduction_db: 8.0,
+    },
+    // Stage 3b — Resonance Suppressor. Broadcast-neutral tuning: moderate depth
+    // with a lower ceiling than podcast (voice-over sits under music beds where
+    // deep cuts become audible) and a slower attack than podcast.
+    resonanceSuppressor: {
+      depth: 0.55,
+      attack_ms: 12.0,
+      release_ms: 70.0,
+      max_reduction_db: 7.0,
     },
     // Stage 4c — Room Presence. Slightly tighter than podcast defaults — voice
     // actors need placement without obvious room character that would be
     // audible under music beds.
     roomPresence: {
-      enabled:     true,
-      wet:         0.06,
-      rt60Ms:      70,
-      preDelayMs:  1.5,
-      diffusion:   0.65,
+      enabled: true,
+      wet: 0.06,
+      rt60Ms: 70,
+      preDelayMs: 1.5,
+      diffusion: 0.65,
     },
   },
 
   general_clean: {
-    id: 'general_clean',
-    displayName: 'General Clean',
-    description: 'Balanced cleanup for any audio recording',
-    audience: 'Everyone',
-    character: 'Pragmatic, balanced',
-    targetLoudness: { value: -16, unit: 'LUFS' },
+    id: "general_clean",
+    displayName: "General Clean",
+    description: "Balanced cleanup for any audio recording",
+    audience: "Everyone",
+    character: "Pragmatic, balanced",
+    targetLoudness: { value: -16, unit: "LUFS" },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    noiseModel: 'df3',
+    noiseModel: "df3",
     compression: {
-      mode: 'conditional',
+      mode: "conditional",
       targetCrestFactorDb: 10,
-      thresholdPercentile: 0.70,
+      thresholdPercentile: 0.7,
       attack: 8,
       release: 80,
     },
-    eqProfile: 'general',
+    eqProfile: "general",
     deEsser: {
-      sensitivity: 'high',
+      sensitivity: "high",
       trigger: 6,
       maxReduction: 8,
+      ratio: 6.7,
       crossoverHz: 4000,
     },
-    channelOutput: 'preserve',
-    defaultOutputProfile: 'podcast',
+    channelOutput: "preserve",
+    defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
     dereverb: {
       enabled: true,
-      strength: 'heavy',
+      strength: "heavy",
       preserve_early: false,
     },
     autoLeveler: {
-      total_max_up_db:         8.0,
-      total_max_down_db:       10.0,
-      target_window_s:         30,
+      total_max_up_db: 8.0,
+      total_max_down_db: 10.0,
+      target_window_s: 30,
       noise_floor_target_dbfs: -50,
       loop_a: {
-        deadband_db: 1.5, knee_db: 1.0,
-        max_up_db: 6.0, max_down_db: 8.0,
-        attack_ms: 200, release_ms: 1000,
+        deadband_db: 1.5,
+        knee_db: 1.0,
+        max_up_db: 6.0,
+        max_down_db: 8.0,
+        attack_ms: 200,
+        release_ms: 1000,
       },
       loop_b: {
-        deadband_up_db: 3.0, deadband_down_db: 2.5,
-        ratio_up: 2.5, ratio_down: 3.0,
-        max_up_db: 3.5, max_down_db: 4.5,
-        attack_ms: 150, release_ms: 700,
+        deadband_up_db: 3.0,
+        deadband_down_db: 2.5,
+        ratio_up: 2.5,
+        ratio_down: 3.0,
+        max_up_db: 3.5,
+        max_down_db: 4.5,
+        attack_ms: 150,
+        release_ms: 700,
       },
     },
     saturation: {
       drive: 2.0,
       wetDry: 0.3,
-      bias: 0.10,
+      bias: 0.1,
       fc: 3000,
     },
     parallelCompression: {
-      ratio:                       10,
-      attackMs:                    0.30,
-      releaseMs:                   120,
-      makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.35,   // midpoint of 30–40%
-      vadFadeMs:                   8,
-      crestGuardThresholdDb:       9,      // relaxed per spec
+      ratio: 10,
+      attackMs: 0.3,
+      releaseMs: 120,
+      makeupGain: "auto", // automatically match average gain reduction
+      wetMix: 0.35, // midpoint of 30–40%
+      vadFadeMs: 8,
+      crestGuardThresholdDb: 9, // relaxed per spec
       parallelDesserMaxReductionDb: 12,
     },
     // Stage 4a-E: Vocal Expander. Pragmatic assertive settings — this preset
     // accepts more aggressive processing in exchange for a cleaner silence floor.
     vocalExpander: {
-      enabled:          true,
-      ratio:            2.0,
-      highFreqDepth:    0.5,
+      enabled: true,
+      ratio: 2.0,
+      highFreqDepth: 0.5,
       headroomOffsetDb: 6,
-      releaseMs:        150,
-      attackMs:         10,
-      holdMs:           20,
-      lookaheadMs:      10,
+      releaseMs: 150,
+      attackMs: 10,
+      holdMs: 20,
+      lookaheadMs: 10,
       maxAttenuationDb: 18,
-      detectionBand:    { lowHz: 80, highHz: 800 },
+      detectionBand: { lowHz: 80, highHz: 800 },
     },
     // VAD Gate — assertive for general_clean. Unknown source material; a
     // cleaner silence floor is generally preferable.
     vadGate: {
-      enabled:     false,
+      enabled: false,
       lookaheadMs: 20,
-      holdMs:      80,
-      attackMs:    8,
-      releaseMs:   40,
-      floorDb:     -60,
+      holdMs: 80,
+      attackMs: 8,
+      releaseMs: 40,
+      floorDb: -60,
     },
     airBoost: { gainDb: 16 },
-    bweModel: 'ap_bwe',
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    bweModel: "ap_bwe",
+    bwe: {
+      enabled: true,
+      postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 },
+    },
     // Aggressive — unknown source material; cleaner is generally better here.
     breathReducer: { max_reduction_db: 15 },
     // Conservative — unknown source material
@@ -635,11 +697,11 @@ export const PRESETS = {
     // shaper enabled — unknown source material benefits from maximum diffuse noise and
     // reverb tail reduction before DF3.
     spectralSubtraction: {
-      enabled:                 true,
-      alphaDd:                 0.98,
-      beta:                    0.15,
-      strength:                1.0,
-      transientShaper:         true,
+      enabled: true,
+      alphaDd: 0.98,
+      beta: 0.15,
+      strength: 1.0,
+      transientShaper: true,
       transientMaxReductionDb: 6,
     },
     // Stage 4 — Sibilance Suppressor. Pragmatic assertive: lower broadband
@@ -648,203 +710,226 @@ export const PRESETS = {
     // source material.
     sibilanceSuppressor: {
       broadband_trigger_db: 9.0,
-      depth:                0.8,
-      selectivity:          4.0,
-      attack_ms:            4.0,
-      release_ms:           50.0,
-      max_reduction_db:     12.0,
-      sharpness:            0.2,
+      depth: 0.8,
+      selectivity: 4.0,
+      attack_ms: 4.0,
+      release_ms: 50.0,
+      max_reduction_db: 12.0,
+      sharpness: 0.2,
+    },
+    // Stage 3b — Resonance Suppressor. Assertive tuning for unknown source
+    // material: deeper reduction, lower selectivity, wider frequency range,
+    // and higher ceiling than the ACX/voice presets.
+    resonanceSuppressor: {
+      depth: 0.7,
+      sharpness: 0.4,
+      selectivity: 1.5,
+      attack_ms: 8.0,
+      release_ms: 50.0,
+      max_reduction_db: 12.0,
+      freq_floor_hz: 60.0,
+      freq_ceil_hz: 18000.0,
     },
     // Stage 4c — Room Presence. Default settings for general_clean: unknown
     // source material benefits from standard acoustic placement.
     roomPresence: {
-      enabled:     true,
-      wet:         0.08,
-      rt60Ms:      80,
-      preDelayMs:  1.5,
-      diffusion:   0.7,
+      enabled: true,
+      wet: 0.08,
+      rt60Ms: 80,
+      preDelayMs: 1.5,
+      diffusion: 0.7,
     },
   },
 
   noise_eraser: {
-    id: 'noise_eraser',
-    displayName: 'Noise Eraser',
-    description: 'Voice extraction for severely noisy recordings',
-    audience: 'Noisy recordings',
-    character: 'Aggressive separation, dry booth quality',
-    targetLoudness: { value: -16, unit: 'LUFS' },
+    id: "noise_eraser",
+    displayName: "Noise Eraser",
+    description: "Voice extraction for severely noisy recordings",
+    audience: "Noisy recordings",
+    character: "Aggressive separation, dry booth quality",
+    targetLoudness: { value: -16, unit: "LUFS" },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    eqProfile: 'audiobook',
+    eqProfile: "audiobook",
     deEsser: {
-      sensitivity: 'high',
+      sensitivity: "high",
       trigger: 6,
       maxReduction: 8,
       crossoverHz: 4000,
     },
-    channelOutput: 'mono',
-    defaultOutputProfile: 'podcast',
+    channelOutput: "mono",
+    defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
-    noiseModel: 'df3',
+    noiseModel: "df3",
     // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
     // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
     // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
-    separationModel: 'demucs',
+    separationModel: "demucs",
     dereverb: {
       enabled: true,
-      strength: 'heavy',
+      strength: "heavy",
       preserve_early: false,
     },
     autoLeveler: null,
     saturation: {
       drive: 5,
-      wetDry: 0.20,
-      bias: 0.10,
+      wetDry: 0.2,
+      bias: 0.1,
       fc: 3000,
     },
     compression: [
-
       // Pass 1: Transient Catcher (Peak Control)
       // Hits only the loudest errant peaks (plosives, exclamations) very quickly
       {
         targetCrestFactorDb: 15,
         maxRatio: 4,
-        threshold: 'auto',
+        threshold: "auto",
         follow: false,
-        attack: 0.1,  // Extremely fast to catch peaks
-        release: 40,  // Fast release to get out of the way quickly
+        attack: 0.1, // Extremely fast to catch peaks
+        release: 40, // Fast release to get out of the way quickly
       },
       //Tonal Pass for character
       {
-      targetCrestFactorDb: 12,
-      maxRatio: 4,
-      threshold: 'auto',
-      follow: false,
-      attack: 10,
-      release: 80,
-    },
+        targetCrestFactorDb: 12,
+        maxRatio: 4,
+        threshold: "auto",
+        follow: false,
+        attack: 10,
+        release: 80,
+      },
       // Pass 2: Gentle Leveler (Body Control)
       // Smooths out the overall performance, bringing up presence without pumping
       {
         targetCrestFactorDb: 12,
         maxRatio: 2.5, // Gentle ratio for transparency
-        threshold: 'auto',
+        threshold: "auto",
         follow: false,
-        attack: 15,    // Slow enough to let crisp consonants through (presence)
-        release: 120,  // Slow release for smooth, unnoticeable recovery
-      }
+        attack: 15, // Slow enough to let crisp consonants through (presence)
+        release: 120, // Slow release for smooth, unnoticeable recovery
+      },
     ],
     parallelCompression: {
-      ratio:                       25,
-      attackMs:                    0.1,   
-      releaseMs:                   50,
-      makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.40,
-      vadFadeMs:                   5,
-      crestGuardThresholdDb:       12,
+      ratio: 25,
+      attackMs: 0.1,
+      releaseMs: 50,
+      makeupGain: "auto", // automatically match average gain reduction
+      wetMix: 0.4,
+      vadFadeMs: 5,
+      crestGuardThresholdDb: 12,
       parallelDesserMaxReductionDb: 6,
     },
     // Stage 4a-E: Vocal Expander — frequency-selective silence-floor attenuation.
-    // headroomOffsetDb - defines how close to speech threshold; 
-    // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band -- 
+    // headroomOffsetDb - defines how close to speech threshold;
+    // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band --
     // e.g. (0.25) preserves breath/fricative transparency above 800 Hz.
     vocalExpander: {
-      enabled:          true,
-      ratio:            2.5,
-      highFreqDepth:    1.0,
+      enabled: true,
+      ratio: 2.5,
+      highFreqDepth: 1.0,
       headroomOffsetDb: 6,
-      releaseMs:        50,
-      attackMs:         2,
-      holdMs:           5,
-      lookaheadMs:      20,
+      releaseMs: 50,
+      attackMs: 2,
+      holdMs: 5,
+      lookaheadMs: 20,
       maxAttenuationDb: 40,
-      detectionBand:    { lowHz: 80, highHz: 800 },
+      detectionBand: { lowHz: 80, highHz: 800 },
     },
     // VAD Gate — assertive for noise_eraser. Source separation already produces
     // a "dry booth" silence character; a hard gate completes the removal of
     // residual bleed between words.
     vadGate: {
-      enabled:     false,
+      enabled: false,
       lookaheadMs: 20,
-      holdMs:      80,
-      attackMs:    5,
-      releaseMs:   30,
-      floorDb:     -70,
+      holdMs: 80,
+      attackMs: 5,
+      releaseMs: 30,
+      floorDb: -70,
     },
     airBoost: { gainDb: 0 },
-    bweModel: 'ap_bwe',
-    bwe: { enabled: false, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 } },
+    bweModel: "ap_bwe",
+    bwe: {
+      enabled: false,
+      postEq: { enabled: true, freq: 9000, q: 2, gainDb: -3 },
+    },
     // MMSE spectral subtraction pre-pass (before RNNoise NE-1). Moderate strength
     // so residual room noise is reduced before RNNoise's stationary NR pass and
     // Demucs separation. Transient shaper enabled to suppress reverb tails.
     spectralSubtraction: {
-      enabled:                 true,
-      alphaDd:                 0.98,
-      beta:                    0.15,
-      strength:                0.8,
-      transientShaper:         true,
+      enabled: true,
+      alphaDd: 0.98,
+      beta: 0.15,
+      strength: 0.8,
+      transientShaper: true,
       transientMaxReductionDb: 6,
     },
     roomPresence: { enabled: false },
   },
 
   clearervoice_eraser: {
-    id: 'clearervoice_eraser',
-    displayName: 'ClearerVoice Eraser',
-    description: 'Neural speech enhancement using ClearerVoice-Studio',
-    audience: 'Noisy recordings',
-    character: 'AI-enhanced, clean speech, dry quality',
-    targetLoudness: { value: -16, unit: 'LUFS' },
+    id: "clearervoice_eraser",
+    displayName: "ClearerVoice Eraser",
+    description: "Neural speech enhancement using ClearerVoice-Studio",
+    audience: "Noisy recordings",
+    character: "AI-enhanced, clean speech, dry quality",
+    targetLoudness: { value: -16, unit: "LUFS" },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
     compression: {
-      mode: 'conditional',
+      mode: "conditional",
       targetCrestFactorDb: 10,
       thresholdPercentile: 0.75,
       attack: 8,
       release: 100,
     },
     parallelCompression: {
-      ratio:                       8,
-      attackMs:                    1.0,
-      releaseMs:                   225,    // longer release for smoothed separation transients
-      makeupGain:                  'auto', // automatically match average gain reduction
-      wetMix:                      0.30,   // midpoint of 20–25%
-      vadFadeMs:                   5,
-      crestGuardThresholdDb:       12,
-      parallelDesserMaxReductionDb: 8,     // fixed-band only; lower ceiling per spec
+      ratio: 8,
+      attackMs: 1.0,
+      releaseMs: 225, // longer release for smoothed separation transients
+      makeupGain: "auto", // automatically match average gain reduction
+      wetMix: 0.3, // midpoint of 20–25%
+      vadFadeMs: 5,
+      crestGuardThresholdDb: 12,
+      parallelDesserMaxReductionDb: 8, // fixed-band only; lower ceiling per spec
     },
-    eqProfile: 'podcast',
+    eqProfile: "podcast",
     deEsser: {
-      sensitivity: 'none',
+      sensitivity: "none",
       trigger: 0,
       maxReduction: 0,
+      ratio: 6.7,
       crossoverHz: 4000,
     },
-    channelOutput: 'mono',
-    defaultOutputProfile: 'podcast',
+    channelOutput: "mono",
+    defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
-    noiseModel: 'df3',
+    noiseModel: "df3",
     // ClearerVoice enhancement model:
     //   'mossformer2_48k' — MossFormer2_SE_48K (default, best quality, 48 kHz full-band)
     //   'frcrn_16k'       — FRCRN_SE_16K (faster, good quality, 16 kHz)
     // Both models are downloaded from HuggingFace on first use.
-    clearervoiceModel: 'mossformer2_48k',
+    clearervoiceModel: "mossformer2_48k",
     autoLeveler: {
-      total_max_up_db:         6.0,
-      total_max_down_db:       8.0,
-      target_window_s:         45,
+      total_max_up_db: 6.0,
+      total_max_down_db: 8.0,
+      target_window_s: 45,
       noise_floor_target_dbfs: -50,
       loop_a: {
-        deadband_db: 1.5, knee_db: 1.0,
-        max_up_db: 5.0, max_down_db: 6.0,
-        attack_ms: 200, release_ms: 1200,
+        deadband_db: 1.5,
+        knee_db: 1.0,
+        max_up_db: 5.0,
+        max_down_db: 6.0,
+        attack_ms: 200,
+        release_ms: 1200,
       },
       loop_b: {
-        deadband_up_db: 3.0, deadband_down_db: 2.5,
-        ratio_up: 2.5, ratio_down: 3.0,
-        max_up_db: 3.0, max_down_db: 4.0,
-        attack_ms: 150, release_ms: 800,
+        deadband_up_db: 3.0,
+        deadband_down_db: 2.5,
+        ratio_up: 2.5,
+        ratio_down: 3.0,
+        max_up_db: 3.0,
+        max_down_db: 4.0,
+        attack_ms: 150,
+        release_ms: 800,
       },
     },
     saturation: {
@@ -857,46 +942,48 @@ export const PRESETS = {
     // expander calibrates from the measured silence floor regardless of how the
     // signal was produced, so the general-clean assertive defaults apply.
     vocalExpander: {
-      enabled:          true,
-      ratio:            2.0,
-      highFreqDepth:    0.5,
+      enabled: true,
+      ratio: 2.0,
+      highFreqDepth: 0.5,
       headroomOffsetDb: 6,
-      releaseMs:        150,
-      attackMs:         10,
-      holdMs:           20,
-      lookaheadMs:      10,
+      releaseMs: 150,
+      attackMs: 10,
+      holdMs: 20,
+      lookaheadMs: 10,
       maxAttenuationDb: 18,
-      detectionBand:    { lowHz: 80, highHz: 800 },
+      detectionBand: { lowHz: 80, highHz: 800 },
     },
     // VAD Gate — assertive for clearervoice_eraser. ClearerVoice output already
     // has a dry, processed character; deeper floor reinforces it.
     vadGate: {
-      enabled:     false,
+      enabled: false,
       lookaheadMs: 20,
-      holdMs:      80,
-      attackMs:    5,
-      releaseMs:   30,
-      floorDb:     -70,
+      holdMs: 80,
+      attackMs: 5,
+      releaseMs: 30,
+      floorDb: -70,
     },
     airBoost: { gainDb: 0 },
-    bweModel: 'ap_bwe',
-    bwe: { enabled: true, postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 } },
+    bweModel: "ap_bwe",
+    bwe: {
+      enabled: true,
+      postEq: { enabled: true, freq: 9000, q: 2, gainDb: -4 },
+    },
     // MMSE spectral subtraction pre-pass (before RNNoise NE-1). Moderate strength
     // reduces residual room noise before ClearerVoice SE processes the signal.
     // Transient shaper enabled to suppress inter-phrase reverb tails.
     spectralSubtraction: {
-      enabled:                 true,
-      alphaDd:                 0.98,
-      beta:                    0.15,
-      strength:                0.8,
-      transientShaper:         true,
+      enabled: true,
+      alphaDd: 0.98,
+      beta: 0.15,
+      strength: 0.8,
+      transientShaper: true,
       transientMaxReductionDb: 6,
     },
     // Stage 4c — Room Presence disabled: ClearerVoice Eraser produces a clean,
     // dry enhanced signal. Adding room presence would contradict the preset goal.
     roomPresence: { enabled: false },
   },
-
 }
 
 /**
@@ -912,7 +999,7 @@ export const PRESETS = {
 // --- Helpers ---
 
 export function getDefaultOutputProfile(presetId) {
-  return PRESETS[presetId]?.defaultOutputProfile ?? 'podcast'
+  return PRESETS[presetId]?.defaultOutputProfile ?? "podcast"
 }
 
 export function isOutputProfileLocked(presetId) {
@@ -928,7 +1015,7 @@ export function getOutputProfileList() {
 }
 
 export function formatLoudness(preset) {
-  if (!preset) return ''
+  if (!preset) return ""
   const { value, unit } = preset.targetLoudness
   return `${value} ${unit}`
 }

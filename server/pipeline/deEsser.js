@@ -86,11 +86,13 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
   }
 
   const crossoverHz = deEsserConfig.crossoverHz ?? 4000
+  const ratio       = deEsserConfig.ratio       ?? 6.7
 
   console.log(
     `[DeEsser] Starting: preset=${presetId} ` +
     `trigger=${deEsserConfig.trigger}dB ` +
     `maxReduction=${deEsserConfig.maxReduction}dB ` +
+    `ratio=${ratio} ` +
     `crossover=${crossoverHz}Hz ` +
     `sensitivity=${deEsserConfig.sensitivity} | input=${inputPath}`,
   )
@@ -105,6 +107,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     '--max-reduction', String(deEsserConfig.maxReduction),
     '--sensitivity',   deEsserConfig.sensitivity,
     '--crossover-hz',  String(crossoverHz),
+    '--ratio',         String(ratio),
   ]
 
   let vadMaskPath = null

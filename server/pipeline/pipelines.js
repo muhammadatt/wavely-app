@@ -29,8 +29,8 @@ const STANDARD_PIPELINE = [
   stages.clickRemove,             // Pre-HPF: Hampel + Burg AR click/lip-smack repair
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
-  stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
+  stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
   stages.dereverb,
   //stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
@@ -41,14 +41,12 @@ const STANDARD_PIPELINE = [
   stages.noiseReduce,             // Conditional secondary NR pass
   stages.parallelCompress,        // Parallel compression
   stages.vadGate,                 // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
-  stages.vadGate,
-  stages.vadGate,
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
   //stages.vocalSaturation,
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
-  stages.sibilanceSuppressor,     // Sibilance targeted resonance suppressor
   stages.deEss,                   // Split band De-Esser  
+  stages.sibilanceSuppressor,     // Sibilance targeted resonance suppressor
   stages.enhancementEQ,
   stages.roomPresence,            // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
