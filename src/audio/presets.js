@@ -195,14 +195,14 @@ export const PRESETS = {
     // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band -- 
     // e.g. (0.25) preserves breath/fricative transparency above 800 Hz.
     vocalExpander: {
-      enabled:          false,
+      enabled:          true,
       ratio:            2.5,
       highFreqDepth:    0.25,
       headroomOffsetDb: 6,
       releaseMs:        150,
       attackMs:         50,
       holdMs:           5,
-      lookaheadMs:      250,
+      lookaheadMs:      455,
       maxAttenuationDb: 24,
       detectionBand:    { lowHz: 80, highHz: 800 },
     },
@@ -229,7 +229,7 @@ export const PRESETS = {
       alphaDd:              0.98,
       beta:                 0.15,
       strength:             0.7,
-      transientShaper:      false,
+      transientShaper:      true,
     },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
@@ -256,7 +256,7 @@ export const PRESETS = {
   enabled:     true,
   wet:         0.05,   // 0.12 - reverb tail sits ~17dB below direct
   rt60Ms:      130,    // presence without going washy; echoes after 200 - 250ms
-  preDelayMs:  1.0,    // tight onset
+  preDelayMs:  20.0,   // slight punch through before reverb onset
   diffusion:   0.4,    // brighter tail preserves air
 },
   },

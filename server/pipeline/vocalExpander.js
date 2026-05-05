@@ -366,18 +366,30 @@ function applyEnvelope(targetGrDb, { attackFrames, holdFrames, releaseFrames, lo
   let lastAttenuating = false
 
   for (let f = 0; f < n; f++) {
-    const lookIdx = Math.min(f + lookaheadFrames, n - 1)
-    const target = targetGrDb[lookIdx]
+    const currentTarget = targetGrDb[f]
+    const lookIdx       = Math.min(f + lookaheadFrames, n - 1)
+    const futureTarget  = targetGrDb[lookIdx]
 
-    if (target < -1e-6) {
-      // Below threshold — attack toward target (more attenuation).
+    // Attack only when BOTH current and lookahead are below threshold.
+    // This prevents the expander from closing on voiced audio just because
+    // silence is coming in the next lookaheadMs window.
+    //
+    // Release when EITHER current or lookahead is above threshold:
+    //   - current above → signal is voiced right now, gain should be 0.
+    //   - current below, future above → onset is coming; start opening early
+    //     so gain is already at 0 dB when speech arrives (the lookahead payoff).
+    const wantAttack = currentTarget < -1e-6 && futureTarget < -1e-6
+
+    if (wantAttack) {
+      // Deeply in silence with no onset coming — close toward target.
       holdCounter = 0
       lastAttenuating = true
-      currentDb = attackCoeff * currentDb + (1 - attackCoeff) * target
+      currentDb = attackCoeff * currentDb + (1 - attackCoeff) * currentTarget
     } else {
-      // At / above threshold.
+      // At least one of {current, future} is above threshold — open.
       if (lastAttenuating) {
-        // Transition from below → above: start hold
+        // Transition: attenuating → opening. Start hold to prevent
+        // micro-pumping on brief noise spikes crossing the threshold.
         holdCounter = holdFrames
         lastAttenuating = false
       }
@@ -386,9 +398,9 @@ function applyEnvelope(targetGrDb, { attackFrames, holdFrames, releaseFrames, lo
         holdCounter--
         // hold: currentDb unchanged
       } else {
-        // release toward 0
-        currentDb = releaseCoeff * currentDb // (1 - releaseCoeff) * 0 = 0
-        if (currentDb > -1e-4) currentDb = 0 // snap to exactly zero once negligible
+        // Release toward 0.
+        currentDb = releaseCoeff * currentDb
+        if (currentDb > -1e-4) currentDb = 0
       }
     }
 
