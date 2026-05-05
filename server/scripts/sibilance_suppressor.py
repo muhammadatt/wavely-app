@@ -855,10 +855,16 @@ class SibilanceSuppressor:
         # derived from context frames on both sides of the event. This avoids
         # EMA drift caused by consistent fricative content (/f/, /v/, /θ/).
         # Single-pass fallback (no events_map): use EMA only.
-        interp_refs_by_frame: dict = {}
+        #
+        # Pre-sized list indexed by frame (not a dict) — O(1) direct index
+        # in the inner loop, no per-entry Python-object overhead.
+        interp_refs_by_frame: list = []
         if events_map is not None:
             n_context = self.params.get("interp_context_frames", 6)
-            mag_chunks = []
+            # Preallocate the full magnitude array and fill per chunk — avoids
+            # building a chunk list and then concatenating (which would hold
+            # both the list and the final matrix in memory simultaneously).
+            stft_magnitude = np.empty((n_frames, self.n_bins), dtype=np.float32)
             for cs in range(0, n_frames, CHUNK_FRAMES):
                 ce      = min(cs + CHUNK_FRAMES, n_frames)
                 cn      = ce - cs
@@ -866,12 +872,9 @@ class SibilanceSuppressor:
                 a_stop  = (ce - 1) * hop + n_fft
                 c_audio = audio_padded[a_start:a_stop]
                 fv      = sliding_window_view(c_audio, n_fft)[::hop][:cn]
-                mag_chunks.append(
-                    np.abs(np.fft.rfft(fv * window, axis=1)).astype(np.float32)
-                )
-            stft_magnitude = np.concatenate(mag_chunks, axis=0)
-            del mag_chunks
+                stft_magnitude[cs:ce] = np.abs(np.fft.rfft(fv * window, axis=1))
 
+            interp_refs_by_frame = [None] * n_frames
             for event in events_map.get("events", []):
                 ev_start = event["startFrame"]
                 ev_end   = event["endFrame"]
@@ -879,7 +882,7 @@ class SibilanceSuppressor:
                     stft_magnitude, ev_start, ev_end, n_context
                 )
                 if interp_power is not None:
-                    for fi in range(ev_start, ev_end + 1):
+                    for fi in range(ev_start, min(ev_end + 1, n_frames)):
                         interp_refs_by_frame[fi] = interp_power
             del stft_magnitude
 
@@ -931,9 +934,10 @@ class SibilanceSuppressor:
                         self.long_term_power is not None and
                         self.voiced_frame_count >= warmup):
                     # Blend EMA with per-event interpolated reference (min = more conservative).
-                    # Two-pass mode: interp_refs_by_frame is populated from the full STFT.
-                    # Single-pass mode: interp_refs_by_frame is empty; EMA only.
-                    interp_power = interp_refs_by_frame.get(gi)
+                    # Two-pass mode: interp_refs_by_frame is a list of length n_frames.
+                    # Single-pass mode: interp_refs_by_frame is empty ([]), so the index
+                    # branch is never reached and we fall through to EMA only.
+                    interp_power = interp_refs_by_frame[gi] if interp_refs_by_frame else None
                     if interp_power is not None:
                         active_ref_power = np.minimum(self.long_term_power, interp_power)
                     else:
