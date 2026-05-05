@@ -77,15 +77,6 @@ SIBILANT_LOW_MIN_HZ    = 3500.0
 SIBILANT_LOW_MAX_HZ    = 7500.0
 
 
-def sibilant_band_for_f0(f0: Optional[float]) -> tuple:
-    if f0 is None or not np.isfinite(f0):
-        return UNCERTAIN_BAND
-    low  = SIBILANT_LOW_MIN_HZ + (float(f0) - 60.0) * 20.0
-    low  = max(SIBILANT_LOW_MIN_HZ, min(low, SIBILANT_LOW_MAX_HZ))
-    high = low + SIBILANT_BAND_WIDTH_HZ
-    return (low, high)
-
-
 # ---------------------------------------------------------------------------
 # STFT and F0 conventions (aligned with sibilance_suppressor.py)
 # ---------------------------------------------------------------------------
@@ -213,7 +204,6 @@ def analyze_sibilance(samples: np.ndarray, sample_rate: int,
           - fricative_count    scalar
           - global_band        (lo, hi) tuple -- min/max sibilant band edges seen
     """
-    n = len(samples)
     pad            = n_fft // 2
     samples_padded = np.pad(samples, pad, mode="reflect")
     n_frames       = 1 + max(0, (len(samples_padded) - n_fft) // hop)
@@ -583,25 +573,34 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
 # ---------------------------------------------------------------------------
 
 def apply_split_band(channels: np.ndarray, sample_rate: int,
-                     fc_hz: float, gain_curve: np.ndarray) -> np.ndarray:
+                     fc_low_hz: float, fc_high_hz: float,
+                     gain_curve: np.ndarray) -> np.ndarray:
     """
-    Apply true split-band gain reduction to a (n_channels, n_samples) array.
+    Apply true 3-band split-band gain reduction to a (n_channels, n_samples) array.
 
-      high  = HPF(input, fc)               # Butterworth 2nd order
-      low   = input - high                 # complementary by subtraction
-      out   = low + gain_curve * high
+      high1  = HPF(input, fc_low)              # everything above fc_low
+      low    = input - high1                   # vocal body — untouched
+      air    = HPF(input, fc_high)             # air strip above fc_high — untouched
+      mid    = high1 - air                     # sibilant band [fc_low, fc_high]
+      out    = low + gain_curve * mid + air
 
-    At idle (gain_curve == 1), out == input exactly. Only the high band is
-    attenuated when the gain curve dips below 1.
+    At idle (gain_curve == 1), out == input exactly (perfect reconstruction by
+    complementary subtraction). Only the sibilant mid band is attenuated when
+    the gain curve dips below 1, leaving both the vocal body and the air strip
+    above fc_high untouched.
     """
-    sos = iirfilter(2, fc_hz, btype="highpass", ftype="butter",
-                    fs=sample_rate, output="sos")
+    sos_low  = iirfilter(2, fc_low_hz,  btype="highpass", ftype="butter",
+                         fs=sample_rate, output="sos")
+    sos_high = iirfilter(2, fc_high_hz, btype="highpass", ftype="butter",
+                         fs=sample_rate, output="sos")
     out = np.empty_like(channels, dtype=np.float32)
     for ci in range(channels.shape[0]):
-        x    = channels[ci].astype(np.float64)
-        high = sosfilt(sos, x)
-        low  = x - high
-        out[ci] = (low + gain_curve.astype(np.float64) * high).astype(np.float32)
+        x     = channels[ci].astype(np.float64)
+        high1 = sosfilt(sos_low, x)            # everything above fc_low
+        low   = x - high1                      # vocal body
+        air   = sosfilt(sos_high, x)           # air strip above fc_high
+        mid   = high1 - air                    # sibilant band
+        out[ci] = (low + gain_curve.astype(np.float64) * mid + air).astype(np.float32)
     return out
 
 
@@ -616,20 +615,17 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
                        f0_median: Optional[float],
                        voiced_mask: Optional[np.ndarray],
                        n_fft: int, hop: int,
-                       crossover_hz: float = 4000.0,
                        ratio: float = 6.7) -> dict:
     """
+    Run the full de-esser on a (n_channels, n_samples) float32 array and
+    return both the processed audio and the JS-compatible result dict.
+
     ratio controls how steeply gain reduction grows once an event exceeds the
     threshold. Expressed as a compressor-style ratio (e.g. 4 = 4:1). Converted
     internally to a slope via slope = 1 - 1/ratio. The default of 6.7 matches
     the previous hardcoded slope of 0.85 (1 - 1/6.7 ≈ 0.851).
     """
-    """
-    Run the full de-esser on a (n_channels, n_samples) float32 array and
-    return both the processed audio and the JS-compatible result dict.
-    """
     samples = channels[0]
-    n       = len(samples)
 
     # F0: prefer caller-supplied per-frame array; else estimate internally.
     if f0_per_frame is None or len(f0_per_frame) == 0:
@@ -709,26 +705,31 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
         attack_ms=2.0, release_ms=50.0, slope=slope,
     )
 
-    # Split-band processing crossover: preset-defined static frequency.
-    # Detection moves with the voice (per-frame F0); the processing crossover
-    # does not. Pinned per-file from the preset config (default 4000 Hz)
-    # rather than derived from voice type -- avoids F0-misclassification
-    # ricochets and matches industry de-esser convention.
-    fc_hz = float(crossover_hz)
+    # Split-band crossover: derived from this file's sibilant frequency
+    # distribution. The center is the median of frame_target_freq (the
+    # per-frame detection centroid), giving a file-specific band anchored to
+    # the actual voice rather than a preset constant. fc_low and fc_high are
+    # offset by half the sibilant band width from that center, clamped to
+    # keep the band within a sensible range (3 kHz floor, 12 kHz ceiling).
+    center  = float(np.median(metrics["frame_target_freq"]))
+    half    = SIBILANT_BAND_WIDTH_HZ / 2.0
+    fc_low  = max(3000.0, center - half)
+    fc_high = min(12000.0, center + half)
 
-    out_channels = apply_split_band(channels, sample_rate, fc_hz, gain_curve)
+    out_channels = apply_split_band(channels, sample_rate, fc_low, fc_high, gain_curve)
 
     return {
-        "audio":          out_channels,
-        "applied":        True,
-        "f0Hz":           f0_median,
-        "targetFreqHz":   metrics["target_freq_hz"],
-        "maxReductionDb": round(max_red_observed, 2),
-        "p95EnergyDb":    metrics["p95_db"],
-        "meanEnergyDb":   metrics["mean_db"],
-        "triggerReason":  f"P95-mean delta {round(delta, 2)} dB > trigger {trigger_db} dB",
-        "treatedEvents":  treated,
-        "crossoverHz":    int(round(fc_hz)),
+        "audio":            out_channels,
+        "applied":          True,
+        "f0Hz":             f0_median,
+        "targetFreqHz":     metrics["target_freq_hz"],
+        "maxReductionDb":   round(max_red_observed, 2),
+        "p95EnergyDb":      metrics["p95_db"],
+        "meanEnergyDb":     metrics["mean_db"],
+        "triggerReason":    f"P95-mean delta {round(delta, 2)} dB > trigger {trigger_db} dB",
+        "treatedEvents":    treated,
+        "crossoverLowHz":   int(round(fc_low)),
+        "crossoverHighHz":  int(round(fc_high)),
     }
 
 
@@ -793,10 +794,6 @@ def main():
                         help="Pipeline frame metadata for voiced/silence "
                              "classification. Used by the internal F0 estimator "
                              "fallback only.")
-    parser.add_argument("--crossover-hz",   type=float, default=4000.0,
-                        help="Static split-band crossover frequency (Hz). "
-                             "High band (above this) is attenuated by the gain "
-                             "curve; low band passes through.")
     parser.add_argument("--ratio",           type=float, default=6.7,
                         help="Compressor-style ratio controlling how steeply gain "
                              "reduction grows above the threshold (e.g. 4 = 4:1). "
@@ -855,7 +852,6 @@ def main():
         voiced_mask=voiced_mask,
         n_fft=DEFAULT_N_FFT,
         hop=DEFAULT_HOP,
-        crossover_hz=args.crossover_hz,
         ratio=args.ratio,
     )
 

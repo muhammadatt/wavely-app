@@ -19,9 +19,10 @@
  *   3. Trigger condition (preset sensitivity) on the P95 - mean delta.
  *   4. Dynamic detection bandpass tracks the per-frame target frequency
  *      and feeds an envelope follower / gain-curve generator.
- *   5. Split-band processing: HPF the input at a static crossover (preset
- *      `crossoverHz`, default 4000 Hz), apply the gain curve to the high
- *      band only, and sum with the untouched low band.
+ *   5. 3-band split-band processing: the sibilant mid band [crossoverLowHz,
+ *      crossoverHighHz] is attenuated by the gain curve; the vocal body below
+ *      and the air strip above are passed through untouched. Both crossovers
+ *      are derived from the median per-frame detection centroid for this file.
  */
 
 import { spawn }                  from 'child_process'
@@ -67,7 +68,8 @@ const DE_ESSER_SCRIPT = path.join(SCRIPTS_DIR, 'de_esser.py')
  * @property {number|null} p95EnergyDb     - P95 sibilant energy (relative)
  * @property {number|null} meanEnergyDb    - Mean sibilant energy (relative)
  * @property {string|null} triggerReason
- * @property {number} [crossoverHz]        - Static split-band crossover used
+ * @property {number} [crossoverLowHz]     - Lower edge of the attenuated sibilant band
+ * @property {number} [crossoverHighHz]    - Upper edge of the attenuated sibilant band (air preserved above)
  * @property {Array<{startSec:number, endSec:number, durationMs:number, avgReductionDb:number}>} treatedEvents
  */
 export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnalysis, eventsJsonPath = null) {
@@ -85,15 +87,13 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     return noResult("Sensitivity 'none' or maxReduction <= 0")
   }
 
-  const crossoverHz = deEsserConfig.crossoverHz ?? 4000
-  const ratio       = deEsserConfig.ratio       ?? 6.7
+  const ratio = deEsserConfig.ratio ?? 6
 
   console.log(
     `[DeEsser] Starting: preset=${presetId} ` +
     `trigger=${deEsserConfig.trigger}dB ` +
     `maxReduction=${deEsserConfig.maxReduction}dB ` +
     `ratio=${ratio} ` +
-    `crossover=${crossoverHz}Hz ` +
     `sensitivity=${deEsserConfig.sensitivity} | input=${inputPath}`,
   )
   const startTime = Date.now()
@@ -106,7 +106,6 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     '--trigger',       String(deEsserConfig.trigger),
     '--max-reduction', String(deEsserConfig.maxReduction),
     '--sensitivity',   deEsserConfig.sensitivity,
-    '--crossover-hz',  String(crossoverHz),
     '--ratio',         String(ratio),
   ]
 
@@ -134,7 +133,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnal
     `[DeEsser] Done in ${durationMs}ms: applied=${result.applied} ` +
     `f0=${result.f0Hz ?? 'n/a'}Hz ` +
     `maxRed=${result.maxReductionDb ?? 'n/a'}dB ` +
-    `crossover=${result.crossoverHz ?? 'n/a'}Hz ` +
+    `band=${result.crossoverLowHz ?? 'n/a'}-${result.crossoverHighHz ?? 'n/a'}Hz ` +
     `events=${result.treatedEvents?.length ?? 0}`,
   )
 

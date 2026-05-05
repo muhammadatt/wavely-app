@@ -33,8 +33,8 @@ const MAX_GAIN_DB = 5 // spec: ±5 dB maximum per band
 // Values are relative to spectral mean across all six diagnostic bands.
 const EQ_REFERENCES = {
   audiobook: {
-    warmth: +13.0, // 100–250 Hz
-    mud: +11.5, // 200–400 Hz
+    warmth: +15.0, // 100–250 Hz
+    mud: +12.5, // 200–400 Hz
     clarity: +8.0, // 400–700 Hz
     upper_mid: -2.0, // 700 Hz–2 kHz 
     presence: -7.0, // 2–5 kHz

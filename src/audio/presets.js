@@ -82,7 +82,7 @@ export function resolveOutputProfileId(id) {
  * @property {number} attack               - Attack time in ms
  * @property {number} release              - Release time in ms
  * @property {string} eqProfile
- * @property {{ sensitivity: 'standard'|'high'|'none', trigger: number, maxReduction: number, ratio: number, crossoverHz: number }} deEsser
+ * @property {{ sensitivity: 'standard'|'high'|'none', trigger: number, maxReduction: number, ratio: number }} deEsser
  * @property {'mono'|'preserve'} channelOutput
  * @property {string} defaultOutputProfile
  * @property {boolean} lockedOutputProfile
@@ -244,12 +244,12 @@ export const PRESETS = {
       max_reduction_db: 8.0,
     },
     // Stage 3b — Resonance Suppressor. 
-    // Conservative ACX tuning: moderate depth, high selectivity, slower attack/release
+    // Conservative ACX tuning: moderate depth, high selectivity, slow attack/release
     resonanceSuppressor: {
       depth: 0.5,
       sharpness: 0.5,
-      selectivity: 9.0,
-      attack_ms: 15.0,
+      selectivity: 10.0,
+      attack_ms: 25.0,
       release_ms: 80.0,
       max_reduction_db: 9.0,
       freq_floor_hz: 80.0,
@@ -261,7 +261,6 @@ export const PRESETS = {
       trigger: 1,
       maxReduction: 6,
       ratio: 4,
-      crossoverHz: 4000,
     },
     roomPresence: {
       enabled: false,
@@ -308,7 +307,6 @@ export const PRESETS = {
       trigger: 6,
       maxReduction: 4,
       ratio: 6.7,
-      crossoverHz: 3000,
     },
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",
@@ -455,7 +453,6 @@ export const PRESETS = {
       trigger: 8,
       maxReduction: 5,
       ratio: 6.7,
-      crossoverHz: 4000,
     },
     channelOutput: "mono",
     defaultOutputProfile: "acx",
@@ -609,7 +606,6 @@ export const PRESETS = {
       trigger: 6,
       maxReduction: 8,
       ratio: 6.7,
-      crossoverHz: 4000,
     },
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",
@@ -755,7 +751,6 @@ export const PRESETS = {
       sensitivity: "high",
       trigger: 6,
       maxReduction: 8,
-      crossoverHz: 4000,
     },
     channelOutput: "mono",
     defaultOutputProfile: "podcast",
@@ -897,7 +892,6 @@ export const PRESETS = {
       trigger: 0,
       maxReduction: 0,
       ratio: 6.7,
-      crossoverHz: 4000,
     },
     channelOutput: "mono",
     defaultOutputProfile: "podcast",
