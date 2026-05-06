@@ -211,6 +211,7 @@ export const PRESETS = {
     // tone; generous hold prevents chopping the long decay of narrated word endings.
     vadGate: {
       enabled: true,
+      energyOverrideDb: 8,
       lookaheadMs: 60, //Higher = fewer clipped onsets, more latency
       holdMs: 200, //Higher = fewer clipped endings, less breath reduction
       attackMs: 5, //Slower attack softens plosive transients
@@ -238,9 +239,9 @@ export const PRESETS = {
     // Conservative ACX tuning: higher dead zone and lower ceiling preserve
     // narration intelligibility; slower release avoids post-sibilant artifacts.
     sibilanceSuppressor: {
-      dead_zone_db: 2.5,
+      dead_zone_db: 8,
       release_ms: 50.0,
-      max_reduction_db: 12.0,
+      max_reduction_db: 6.0,
     },
     // Stage 3b — Resonance Suppressor. 
     // Conservative ACX tuning: moderate depth, high selectivity, slow attack/release

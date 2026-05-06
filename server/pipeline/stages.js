@@ -816,6 +816,8 @@ export async function vadGate(ctx) {
       `[vad-gate] Applied — segments=${result.openSegments} ` +
       `floor=${result.floorDb}dB lookahead=${result.lookaheadMs}ms ` +
       `hold=${result.holdMs}ms attack=${result.attackMs}ms release=${result.releaseMs}ms ` +
+      `energyOverridden=${result.energyOverriddenFrames} ` +
+      `gapFill=${result.minSilenceMs}ms minVoiced=${result.minVoicedMs}ms ` +
       `atFloor=${result.pctSamplesAtFloor}%`
     )
   } else {

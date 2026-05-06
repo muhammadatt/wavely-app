@@ -6,13 +6,25 @@
  * shaped by four parameters that work together to avoid the click/word-chop
  * pathology of a naive binary gate:
  *
- *   lookaheadMs — open the gate this many ms BEFORE the voiced frame starts,
- *                 catching word onsets that begin partway through a frame.
- *   holdMs      — keep the gate open this many ms AFTER the last voiced frame,
- *                 catching word tails (consonant releases, breathy decays) that
- *                 extend past the VAD's voiced classification.
- *   attackMs    — one-pole rise time when the target transitions silence→open.
- *   releaseMs   — one-pole fall time when the target transitions open→silence.
+ *   lookaheadMs      — open the gate this many ms BEFORE the voiced frame starts,
+ *                      catching word onsets that begin partway through a frame.
+ *   holdMs           — keep the gate open this many ms AFTER the last voiced frame,
+ *                      catching word tails (consonant releases, breathy decays) that
+ *                      extend past the VAD's voiced classification.
+ *   attackMs         — one-pole rise time when the target transitions silence→open.
+ *   releaseMs        — one-pole fall time when the target transitions open→silence.
+ *   energyOverrideDb — dB above the measured noise floor; silence-labeled frames
+ *                      with RMS at or above this level are treated as voiced,
+ *                      catching soft fricative onsets ("s", "f") that Silero
+ *                      mislabels. Set to null in a preset config to disable.
+ *   minSilenceMs     — post-expansion silence gaps shorter than this (ms) are
+ *                      bridged by merging the flanking segments (gap fill). This
+ *                      catches multi-frame mislabeled runs that energy override
+ *                      alone cannot recover because the onset energy is too low.
+ *   minVoicedMs      — voiced segments shorter than this (ms) are dropped after
+ *                      gap fill (removes isolated noise transients that energy
+ *                      override may have opened). Real onsets adjacent to a voiced
+ *                      body are never affected — gap fill merges them first.
  *
  * The gate never closes fully — `floorDb` sets the residual gain so silence
  * regions retain a faint room tone rather than collapsing to digital silence.
@@ -37,11 +49,14 @@ import { writeWavChannels }   from './wavWriter.js'
 
 // Default parameters; each preset's vadGate config can override any subset.
 const DEFAULTS = {
-  lookaheadMs: 20,
-  holdMs:      80,
-  attackMs:    8,
-  releaseMs:   40,
-  floorDb:     -60,
+  lookaheadMs:      20,
+  holdMs:           80,
+  attackMs:         8,
+  releaseMs:        40,
+  floorDb:          -60,
+  energyOverrideDb: 8,    // dB above noise floor; null to disable
+  minSilenceMs:     150,  // bridge post-expansion gaps shorter than this
+  minVoicedMs:      30,   // drop isolated voiced segments shorter than this
 }
 
 /**
@@ -64,10 +79,14 @@ const DEFAULTS = {
  * @property {number} [attackMs]
  * @property {number} [releaseMs]
  * @property {number} [floorDb]
+ * @property {number|null} [energyOverrideDb]       - Threshold used (dB above noise floor); null if disabled
+ * @property {number} [minSilenceMs]                - Gap fill threshold (ms)
+ * @property {number} [minVoicedMs]                 - Min segment duration before drop (ms)
  * @property {number} [voicedFrames]
  * @property {number} [silenceFrames]
+ * @property {number} [energyOverriddenFrames]      - Frames rescued from silence label by energy override
  * @property {number} [openSegments]
- * @property {number} [pctSamplesAtFloor]   - % of samples at or near the floor
+ * @property {number} [pctSamplesAtFloor]           - % of samples at or near the floor
  */
 export async function applyVadGate(inputPath, outputPath, config, frameAnalysis) {
   if (!config?.enabled) {
@@ -103,6 +122,22 @@ export async function applyVadGate(inputPath, outputPath, config, frameAnalysis)
   const floorLinear  = Math.pow(10, params.floorDb / 20)
   const span         = 1 - floorLinear
 
+  // ── Energy override ──────────────────────────────────────────────────────────
+  // Silence-labeled frames whose rmsDbfs ≥ (noiseFloor + energyOverrideDb) are
+  // treated as voiced. Catches soft fricative onsets ("s", "f") that Silero
+  // mislabels — these have energy clearly above the noise floor even when the
+  // neural model calls them silence. Disabled when energyOverrideDb is null.
+  const noiseFloorDbfs = frameAnalysis?.noiseFloorDbfs ?? -60
+  const energyOverrideThreshDb = params.energyOverrideDb != null
+    ? noiseFloorDbfs + params.energyOverrideDb
+    : Infinity
+
+  // ── Gap fill and min voiced segment parameters ───────────────────────────────
+  // minSilenceSamples: post-expansion gaps shorter than this are bridged.
+  // minVoicedSamples:  segments shorter than this are dropped (after gap fill).
+  const minSilenceSamples = Math.max(0, Math.round(params.minSilenceMs * sampleRate / 1000))
+  const minVoicedSamples  = Math.max(0, Math.round(params.minVoicedMs  * sampleRate / 1000))
+
   // ── 1. Build voiced segments at sample resolution ────────────────────────
   // Frames are emitted in index order with uniform lengthSamples, but we read
   // offsetSamples directly so we tolerate any irregularities. Each segment is
@@ -123,9 +158,12 @@ export async function applyVadGate(inputPath, outputPath, config, frameAnalysis)
   const segments = []  // packed pairs: [s0, e0, s1, e1, ...]
   let curStart = -1
   let curEnd   = -1
+  let energyOverrideCount = 0
 
   for (const frame of frames) {
-    if (frame.isSilence) continue
+    const energyOverride = frame.isSilence && frame.rmsDbfs >= energyOverrideThreshDb
+    if (frame.isSilence && !energyOverride) continue
+    if (energyOverride) energyOverrideCount++
     const fStart = frame.offsetSamples
     const fEnd   = (frame === lastFrame && trailingVoiced)
       ? numSamples
@@ -142,6 +180,15 @@ export async function applyVadGate(inputPath, outputPath, config, frameAnalysis)
     }
   }
   if (curStart >= 0) pushExpanded(segments, curStart, curEnd, lookaheadSamples, holdSamples, numSamples)
+
+  // ── 1b. Gap fill ─────────────────────────────────────────────────────────────
+  // Bridge post-expansion gaps shorter than minSilenceMs. Runs before min-voiced
+  // drop so short leading/trailing segments coalesce with their neighbour first.
+  if (minSilenceSamples > 0) mergeShortGaps(segments, minSilenceSamples)
+
+  // ── 1c. Min voiced segment drop ───────────────────────────────────────────────
+  // After gap fill, only genuinely isolated short bursts remain — drop them.
+  if (minVoicedSamples > 0) dropShortSegments(segments, minVoicedSamples)
 
   const numSegments = segments.length / 2
 
@@ -185,16 +232,20 @@ export async function applyVadGate(inputPath, outputPath, config, frameAnalysis)
   await writeWavChannels(output, sampleRate, outputPath)
 
   return {
-    applied:           true,
-    lookaheadMs:       params.lookaheadMs,
-    holdMs:            params.holdMs,
-    attackMs:          params.attackMs,
-    releaseMs:         params.releaseMs,
-    floorDb:           params.floorDb,
-    voicedFrames:      voicedCount,
-    silenceFrames:     frames.length - voicedCount,
-    openSegments:      numSegments,
-    pctSamplesAtFloor: numSamples > 0 ? round2(100 * nearFloorCount / numSamples) : 0,
+    applied:                true,
+    lookaheadMs:            params.lookaheadMs,
+    holdMs:                 params.holdMs,
+    attackMs:               params.attackMs,
+    releaseMs:              params.releaseMs,
+    floorDb:                params.floorDb,
+    energyOverrideDb:       params.energyOverrideDb ?? null,
+    minSilenceMs:           params.minSilenceMs,
+    minVoicedMs:            params.minVoicedMs,
+    voicedFrames:           voicedCount,
+    silenceFrames:          frames.length - voicedCount,
+    energyOverriddenFrames: energyOverrideCount,
+    openSegments:           numSegments,
+    pctSamplesAtFloor:      numSamples > 0 ? round2(100 * nearFloorCount / numSamples) : 0,
   }
 }
 
@@ -212,6 +263,51 @@ function pushExpanded(segments, fStart, fEnd, lookaheadSamples, holdSamples, num
     return
   }
   segments.push(s, e)
+}
+
+/**
+ * Bridge post-expansion gaps between adjacent segments that are shorter than
+ * minSilenceSamples. Runs before dropShortSegments so that short leading or
+ * trailing segments belonging to a nearby voiced body can coalesce into it
+ * before the length check fires. Operates in-place on the packed [s0,e0,...]
+ * array.
+ */
+function mergeShortGaps(segments, minSilenceSamples) {
+  if (segments.length < 4) return
+  let w = 0  // write cursor (segment index, not flat index)
+  for (let r = 1; r < segments.length / 2; r++) {
+    const prevEnd   = segments[w * 2 + 1]
+    const nextStart = segments[r * 2]
+    if (nextStart - prevEnd < minSilenceSamples) {
+      // Gap is shorter than threshold — extend the current write segment.
+      segments[w * 2 + 1] = segments[r * 2 + 1]
+    } else {
+      w++
+      segments[w * 2]     = segments[r * 2]
+      segments[w * 2 + 1] = segments[r * 2 + 1]
+    }
+  }
+  segments.length = (w + 1) * 2
+}
+
+/**
+ * Remove voiced segments shorter than minVoicedSamples. After gap fill, only
+ * genuinely isolated short segments (noise transients, click bursts) remain —
+ * real word onsets adjacent to a voiced body have already been merged into it.
+ * Operates in-place on the packed [s0,e0,...] array.
+ */
+function dropShortSegments(segments, minVoicedSamples) {
+  let w = 0
+  for (let r = 0; r < segments.length / 2; r++) {
+    const s = segments[r * 2]
+    const e = segments[r * 2 + 1]
+    if (e - s >= minVoicedSamples) {
+      segments[w * 2]     = s
+      segments[w * 2 + 1] = e
+      w++
+    }
+  }
+  segments.length = w * 2
 }
 
 async function copyThrough(inputPath, outputPath) {
