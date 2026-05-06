@@ -11,11 +11,12 @@ Architecture:
     threshold -> binary sibilant event flag. Knows precisely when a sibilant
     event starts and stops, and which frequency band to target.
 
-  Reduction (PATH 2 logic from resonance suppressor):
+  Reduction:
     Maintains a per-bin EMA of non-sibilant voiced-frame power (long-term
     reference). On sibilant frames, computes per-bin gain reduction where
-    the frame's spectrum exceeds the reference by more than `selectivity` dB.
-    Applies reduction via STFT/ISTFT with attack/release smoothing.
+    the frame's spectrum exceeds the reference by more than `dead_zone_db`
+    (a small tolerance margin that absorbs EMA variance). Applies reduction via STFT/ISTFT with attack/release
+    smoothing. IIR and overlap-add kernels are shared with resonance_suppressor.
 
   EMA gating:
     The long-term reference is updated only on frames classified as non-sibilant
@@ -161,7 +162,7 @@ DEFAULT_PARAMS = {
     "broadband_trigger_db":  10.0,
 
     # --- Reduction ---
-    "dead_zone_db":          1.5,    # Noise floor dead zone. Rarely needs tuning.
+    "dead_zone_db":          1.5,    # EMA variance tolerance margin. Rarely needs tuning.
                                      # Replaces: selectivity, depth, mode.
     "smooth_bins":           3,      # Bin-axis smoothing width (uniform_filter1d).
                                      # Replaces: sharpness / spread_kernel.
@@ -449,7 +450,7 @@ class SibilanceDetector:
 
         Condition 2 — Broad elevation above long-term reference:
           Fires when the mean sibilant band energy exceeds the long-term
-          reference mean sibilant band energy by selectivity_db. Catches
+          reference mean sibilant band energy by broadband_trigger_db. Catches
           broad sibilant plateaus (flat energy across the whole band) that
           Condition 1 misses because P95 ~ mean within a flat plateau.
           Only active after EMA warmup. No flatness gate — the long-term
@@ -586,8 +587,8 @@ class SibilanceSuppressor:
       3. EMA update: on non-sibilant voiced frames, update per-bin long-term
          power reference. Detection drives the gate directly.
       4. Reduction: on sibilant frames (after warmup), compute per-bin gain
-         reduction where frame spectrum exceeds long-term reference by
-         more than `selectivity` dB.
+         reduction where frame spectrum exceeds long-term reference by more
+         than `dead_zone_db` (EMA variance tolerance margin).
       5. Apply: attack/release IIR smoothing -> STFT gain application -> ISTFT.
     """
 
@@ -658,7 +659,7 @@ class SibilanceSuppressor:
         """
         Wiener-style direct excess match: reduce each sibilant-band bin by
         exactly the amount it exceeds the active reference, minus a small dead
-        zone that handles noise floor variance without per-speaker tuning.
+        zone that absorbs EMA reference variance without per-speaker tuning.
         A uniform moving average (smooth_bins) prevents single-bin notches.
         """
         dead_zone_db  = self.params.get("dead_zone_db", 1.5)
