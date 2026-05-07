@@ -198,7 +198,7 @@ export const PRESETS = {
     vocalExpander: {
       enabled: true,
       ratio: 2.5,
-      highFreqDepth: 0.25,
+      highFreqDepth: 1,
       headroomOffsetDb: 6,
       releaseMs: 150,
       attackMs: 50,
@@ -211,7 +211,7 @@ export const PRESETS = {
     // tone; generous hold prevents chopping the long decay of narrated word endings.
     vadGate: {
       enabled: true,
-      energyOverrideDb: 8,
+      energyOverrideDb: 12,
       lookaheadMs: 60, //Higher = fewer clipped onsets, more latency
       holdMs: 200, //Higher = fewer clipped endings, less breath reduction
       attackMs: 5, //Slower attack softens plosive transients
@@ -246,21 +246,22 @@ export const PRESETS = {
     // Stage 3b — Resonance Suppressor. 
     // Conservative ACX tuning: moderate depth, high selectivity, slow attack/release
     resonanceSuppressor: {
-      depth: 0.5,
-      sharpness: 0.5,
-      selectivity: 10.0,
+      depth: 1,
+      sharpness: 0.1,
+      selectivity: 2.0,
       attack_ms: 25.0,
       release_ms: 80.0,
       max_reduction_db: 9.0,
-      freq_floor_hz: 80.0,
-      freq_ceil_hz: 16000.0,
+      freq_floor_hz: 50.0,
+      freq_ceil_hz: 10000.0,
       mode: "soft",
     },
+    //Gentle pre-compresion settings - designed for single voice use
     deEsser: {
       sensitivity: "medium",
       trigger: 1,
-      maxReduction: 6,
-      ratio: 4,
+      maxReduction: 12,
+      ratio: 3,
     },
     roomPresence: {
       enabled: false,

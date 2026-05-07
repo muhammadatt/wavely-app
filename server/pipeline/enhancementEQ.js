@@ -37,8 +37,8 @@ const EQ_REFERENCES = {
     mud: +12.5, // 200–400 Hz
     clarity: +8.0, // 400–700 Hz
     upper_mid: -2.0, // 700 Hz–2 kHz 
-    presence: -7.0, // 2–5 kHz
-    air: -21.0, // 6–12 kHz
+    presence: -5.0, // 2–5 kHz
+    air: -19.0, // 6–12 kHz
   },
   podcast: {
     warmth: +12.0, // 100–250 Hz

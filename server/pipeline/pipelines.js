@@ -30,8 +30,8 @@ const STANDARD_PIPELINE = [
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
-  stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
-  stages.dereverb,
+  //stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
+  //stages.dereverb,
   //stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
@@ -46,8 +46,8 @@ const STANDARD_PIPELINE = [
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
   stages.deEss,                   // Split band De-Esser  
-  stages.sibilanceSuppressor,     // Sibilance targeted resonance suppressor
-  stages.enhancementEQ,
+  //stages.sibilanceSuppressor,     // Sibilance targeted resonance suppressor
+  //stages.enhancementEQ,
   stages.roomPresence,            // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,

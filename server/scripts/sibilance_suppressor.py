@@ -162,7 +162,7 @@ DEFAULT_PARAMS = {
     "broadband_trigger_db":  10.0,
 
     # --- Reduction ---
-    "dead_zone_db":          1.5,    # EMA variance tolerance margin. Rarely needs tuning.
+    "dead_zone_db":          8,    # EMA variance tolerance margin. Rarely needs tuning.
                                      # Replaces: selectivity, depth, mode.
     "smooth_bins":           3,      # Bin-axis smoothing width (uniform_filter1d).
                                      # Replaces: sharpness / spread_kernel.

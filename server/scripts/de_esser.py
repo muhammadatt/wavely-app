@@ -487,7 +487,8 @@ def _envelope_follower_jit(rms_arr, attack_coeff, release_coeff):
 def build_gain_curve(detection: np.ndarray, sample_rate: int,
                      threshold_offset_db: float, max_reduction_db: float,
                      attack_ms: float, release_ms: float,
-                     slope: float = 0.85):
+                     slope: float = 0.85,
+                     voiced_mask: Optional[np.ndarray] = None):
     """
     Envelope follower + soft-knee gain reduction on the detection signal.
     Returns (gain_curve, max_reduction_observed_db, treated_events).
@@ -504,6 +505,12 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
          recompilation after the first run.
       3. Threshold compare, soft-knee gain curve, treated-event extraction --
          all vectorised numpy ops on the resulting envelope array.
+
+    voiced_mask: per-sample bool array (same length as detection). When
+    provided the threshold reference RMS is computed over voiced samples only,
+    excluding silence frames that would otherwise dilute the mean and push the
+    threshold below the typical sibilant level. Falls back to the whole-file
+    mean when the mask is absent or selects no samples.
     """
     n = len(detection)
     if n == 0:
@@ -514,9 +521,17 @@ def build_gain_curve(detection: np.ndarray, sample_rate: int,
     attack_coeff  = float(np.exp(-1.0 / (sample_rate * attack_ms  / 1000.0)))
     release_coeff = float(np.exp(-1.0 / (sample_rate * release_ms / 1000.0)))
 
-    # Threshold derived from the detection signal's own RMS so it tracks the
-    # current spectrum (matches JS thresholdLin = rmsLin * 10^(offset/20)).
-    rms_lin = float(np.sqrt(np.mean(detection ** 2))) or 1e-10
+    # Threshold reference: RMS of voiced samples only when a mask is provided,
+    # falling back to the whole-file mean when no mask is available. Using only
+    # voiced samples removes silence-frame dilution that would otherwise pull
+    # rms_lin well below the typical sibilant level, causing the threshold to
+    # sit near the median sibilant rather than above it.
+    if voiced_mask is not None and voiced_mask.any():
+        mask = voiced_mask[:n]  # guard against off-by-one length differences
+        voiced_det = detection[mask]
+        rms_lin = (float(np.sqrt(np.mean(voiced_det ** 2))) or 1e-10) if voiced_det.size else 1e-10
+    else:
+        rms_lin = float(np.sqrt(np.mean(detection ** 2))) or 1e-10
     threshold_lin     = rms_lin * (10.0 ** (threshold_offset_db / 20.0))
     max_reduction_lin = 10.0 ** (-max_reduction_db / 20.0)
 
@@ -703,6 +718,7 @@ def analyze_and_de_ess(channels: np.ndarray, sample_rate: int,
     gain_curve, max_red_observed, treated = build_gain_curve(
         detection, sample_rate, threshold_offset_db, max_reduction_db,
         attack_ms=2.0, release_ms=50.0, slope=slope,
+        voiced_mask=voiced_mask,
     )
 
     # Split-band crossover: derived from this file's sibilant frequency
