@@ -439,7 +439,7 @@ function findLowestEnergyWindow(audioPowerSum, fromSample, toSample, windowSampl
 
 // ─── Merge adjacent clips whose gain delta exceeds threshold ──────────────────
 
-function mergeClipsForGainConflict(clips, gains, mergeMaxDeltaDb, kwPowerSum) {
+function mergeClipsForGainConflict(clips, gains, mergeMaxDeltaDb) {
   // Work on copies; iterate until stable.
   let cs = clips.map(c => ({ ...c }))
   let gs = Array.from(gains)
@@ -514,31 +514,48 @@ function buildSampleGainArray(clips, gains, crossfadePlans, totalSamples) {
 
   if (clips.length === 0) return g  // 0 dB everywhere
 
-  // Fill regions clip-by-clip; gaps inherit the previous clip's gain.
-  // Pre-roll before first clip is 0 dB; post-roll after last clip uses the
-  // last clip's gain.
+  // Pre-roll before first clip is 0 dB.
   for (let i = 0; i < clips[0].sampleStart; i++) g[i] = 0
 
+  // Voiced regions: each clip's own gain (clip's own [sampleStart, sampleEnd)).
   for (let k = 0; k < clips.length; k++) {
-    const fillVal = gains[k]
-    const fillEnd = k + 1 < clips.length ? clips[k + 1].sampleStart : totalSamples
-    for (let i = clips[k].sampleStart; i < fillEnd; i++) g[i] = fillVal
+    const v = gains[k]
+    for (let i = clips[k].sampleStart; i < clips[k].sampleEnd; i++) g[i] = v
   }
 
-  // Overlay cosine crossfades
-  for (const plan of crossfadePlans) {
-    const { startSample, endSample, fromGain, toGain } = plan
-    const len = endSample - startSample
-    if (len <= 0) continue
-    for (let i = startSample; i < endSample; i++) {
-      // Equal-power cosine crossfade in dB space (perceptually smooth for
-      // small deltas; for the merge-bounded |delta| <= merge_max_delta_db
-      // this is inaudible).
-      const t = (i - startSample) / len
-      const w = 0.5 - 0.5 * Math.cos(Math.PI * t)   // 0 at start, 1 at end
-      g[i] = fromGain * (1 - w) + toGain * w
+  // Boundaries: for each adjacent clip pair, fill the gap with a single
+  // from→to transition. Pre-crossfade samples take fromGain, crossfade samples
+  // blend, post-crossfade samples take toGain. The crossfade window may extend
+  // beyond the gap into voiced regions (voiced-adjacent boundaries or short
+  // gaps); the overlay correctly overwrites the voiced fill in that range.
+  for (let k = 0; k < clips.length - 1; k++) {
+    const plan = crossfadePlans[k]
+    const fromGain = gains[k]
+    const toGain   = gains[k + 1]
+    const gapStart = clips[k].sampleEnd
+    const gapEnd   = clips[k + 1].sampleStart
+    const xfStart  = plan.startSample
+    const xfEnd    = plan.endSample
+
+    for (let i = gapStart; i < xfStart && i < gapEnd; i++) g[i] = fromGain
+
+    const len = xfEnd - xfStart
+    if (len > 0) {
+      for (let i = xfStart; i < xfEnd; i++) {
+        const t = (i - xfStart) / len
+        const w = 0.5 - 0.5 * Math.cos(Math.PI * t)   // 0 at start, 1 at end
+        g[i] = fromGain * (1 - w) + toGain * w
+      }
     }
+
+    for (let i = Math.max(xfEnd, gapStart); i < gapEnd; i++) g[i] = toGain
   }
+
+  // Post-roll: hold the last clip's gain to the end of the file so we don't
+  // step to 0 dB after the final clip.
+  const lastEnd = clips[clips.length - 1].sampleEnd
+  const lastGain = gains[clips.length - 1]
+  for (let i = lastEnd; i < totalSamples; i++) g[i] = lastGain
 
   return g
 }
@@ -687,7 +704,7 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
   })
 
   // Merge adjacent clips with too-large gain delta (transparent fallback)
-  const merged = mergeClipsForGainConflict(clips, gains, config.merge_max_delta_db, kwPowerSum)
+  const merged = mergeClipsForGainConflict(clips, gains, config.merge_max_delta_db)
 
   // Boundary crossfade plans (placed at lowest-energy point in each gap or
   // straddling voiced-adjacent boundaries)
