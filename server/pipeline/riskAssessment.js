@@ -156,7 +156,7 @@ export async function generateQualityAdvisory(
       })
     }
 
-    const outStd = levelerResult.measurements?.output_loudness_st_std_db
+    const outStd = levelerResult.measurements?.output_clip_lufs_std_db
     if (typeof outStd === 'number' && outStd < 1.0) {
       flags.push({
         id: 'leveler_overcorrected',
