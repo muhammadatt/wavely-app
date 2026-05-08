@@ -14,12 +14,12 @@ import * as stages from './stages.js'
 // mode, NR ceiling, dereverb enabled/disabled) are all expressed through preset
 // config — not pipeline shape. The dereverb stage is a no-op when
 // preset.dereverb is absent or preset.dereverb.enabled is false.
-// autoLevel is a no-op when within-file drift is within the 3 dB threshold.
 //
-// Stage order (4a → 4a-PC → 4b): compress runs before parallelCompress, which
-// runs before autoLevel. The Auto Leveler must see the signal after both
-// compression stages have set its density character — running it earlier would
-// mean leveling a signal whose character is about to change.
+// Stage order: autoLevel runs immediately before compress. The Auto Leveler
+// is M Leveller-style clip automation — it segments voiced audio into clips
+// and applies a single flat gain offset per clip. Running it pre-compression
+// hands the compressor a level-stable input so it can act with a consistent
+// character across the file.
 const STANDARD_PIPELINE = [
   stages.decode,
   stages.monoMixdown,
@@ -34,9 +34,9 @@ const STANDARD_PIPELINE = [
   stages.dereverb,
   //stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
-  stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before compression
+  stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before autoLevel + compression
+  stages.autoLevel,               // M Leveller-style per-clip gain automation (pre-compression)
   stages.compress,                // Serial compression
-  //stages.autoLevel,               // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
   stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
   stages.noiseReduce,             // Conditional secondary NR pass
   stages.parallelCompress,        // Parallel compression
@@ -140,12 +140,12 @@ export const PIPELINES = {
     stages.bandwidthExtension,      // AP-BWE HF restoration (conditional)
     stages.deEss,
     //stages.dereverb,
-    stages.remeasureFramesPostNr,    // Recalculate noise floor and update ctx.results.metrics before compression
+    stages.remeasureFramesPostNr,    // Recalculate noise floor and update ctx.results.metrics before autoLevel + compression
+    stages.autoLevel,                // M Leveller-style per-clip gain automation (pre-compression)
     stages.compress,                 // standard serial compression
     stages.parallelCompress,         // parallel compression
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.vadGate,                  // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
-    stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
     stages.enhancementEQ,
     stages.airBoost,               // Stage 3b — no-op for clearervoice_eraser (air_boost_db = 0)
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization

@@ -453,7 +453,7 @@ F0 estimation → sibilant band identification → fricative event detection →
 
 ### Stage 4a-E — Frequency-Selective Vocal Expander
 
-**Purpose:** Dynamically attenuate residual low-level noise (room tone, HVAC, mic handling, floor rumble) that compression elevates in the silence gaps between words. Runs after Stage 4a-PC (parallel compression) and before Stage 4b (Auto Leveler). Not a gate and not a replacement for Stage 2 noise reduction — a soft-ratio, band-weighted expander calibrated from the file's measured silence-energy distribution.
+**Purpose:** Dynamically attenuate residual low-level noise (room tone, HVAC, mic handling, floor rumble) that compression elevates in the silence gaps between words. Runs after Stage 4a-PC (parallel compression). Not a gate and not a replacement for Stage 2 noise reduction — a soft-ratio, band-weighted expander calibrated from the file's measured silence-energy distribution.
 
 **Applied:** All three pipelines (`STANDARD_PIPELINE`, `noise_eraser`, `clearervoice_eraser`), enabled by default. Skipped when the post-compression silence P90 RMS is already below -72 dBFS.
 

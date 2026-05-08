@@ -668,14 +668,15 @@ export async function deEss(ctx) {
 }
 
 // ── Stage: Auto Leveler (Stage 4b) ────────────────────────────────────────────
-// VAD-gated gain riding. Corrects slow within-file level drift before
-// compression sees the signal so the compressor processes a consistently-leveled
-// input. Only activated when the standard deviation of per-segment RMS across
-// VAD speech windows exceeds 3 dB.
+// M Leveller-style clip automation. Segments voiced audio into clips (VAD
+// voiced runs plus sub-phrase splits at sustained internal level drops) and
+// applies a single flat gain offset per clip. Within each clip the dynamics
+// pass through unchanged; gain transitions happen via short cosine crossfades
+// at the lowest-energy point near each boundary. Runs pre-compression so the
+// compressor sees a level-stable input.
 //
-// Noise Eraser and ClearerVoice Eraser presets are excluded — separation output
-// already has a compressed, consistent character. The leveler skips silently
-// for those presets (no audio data changed, no result key written).
+// Noise Eraser is excluded — separation output already has a consistent
+// character. The leveler skips silently for that preset.
 
 export async function autoLevel(ctx) {
   const levelerPath = ctx.tmp('.wav')
@@ -691,9 +692,10 @@ export async function autoLevel(ctx) {
   if (result.applied) {
     const m = result.measurements
     ctx.log(
-      `[auto-leveler] Applied — in σ(st)=${m.input_loudness_st_std_db}dB ` +
-      `out σ(st)=${m.output_loudness_st_std_db}dB ` +
-      `G_total=[${m.total_max_gain_down_db}, ${m.total_max_gain_up_db}]dB ` +
+      `[auto-leveler] Applied — in σ(clip)=${m.input_clip_lufs_std_db}dB ` +
+      `out σ(clip)=${m.output_clip_lufs_std_db}dB ` +
+      `clips=${m.clip_count_after_merge} (splits=${m.subphrase_splits_count}, merges=${m.merges_count}) ` +
+      `G=[${m.gain_max_down_db}, ${m.gain_max_up_db}]dB ` +
       `nf_cap=${m.noise_floor_cap_active}`
     )
   } else {

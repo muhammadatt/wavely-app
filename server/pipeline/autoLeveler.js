@@ -1,18 +1,24 @@
 /**
- * Auto Leveler — Stage 4b, dual-loop gain riding architecture.
+ * Auto Leveler — Stage 4b, M Leveller-style clip-automation.
  *
- * Two parallel control loops share a slow loudness target derived from a
- * moving median of short-term (400 ms) K-weighted LUFS. Their gain contributions
- * sum at sample rate, then clip to a per-preset total cap.
+ * Repositioned pre-compression. The leveler segments voiced audio into clips,
+ * applies a single flat gain offset per clip, and crossfades between clips at
+ * low-energy boundaries. There is no continuous IIR smoothing of a sample-rate
+ * gain curve — gain is piecewise constant within each clip, so the dynamics
+ * inside a clip are preserved exactly.
  *
- *   Loop A (drift):   slow 1:1 correction with deadband + cubic-knee transition
- *   Loop B (perf):    asymmetric ratio compression for larger excursions
+ *   Segmentation:  VAD voiced runs, plus sub-phrase splits at sustained
+ *                  internal level drops (>= subphrase_split_drop_db for
+ *                  >= subphrase_split_min_duration_ms within a run).
+ *   Per-clip gain: shapeDrift(target - clipLufs) with deadband + cubic knee,
+ *                  capped by per-preset max_up/down and noise-floor headroom.
+ *   Boundaries:    short cosine crossfade (crossfade_ms) at the lowest-energy
+ *                  point near each boundary. Adjacent clips with too-large gain
+ *                  delta are merged into one clip with a duration-weighted
+ *                  average gain (transparent fallback).
  *
- * Both loops use one-pole IIR envelope followers and do NOT reset at unvoiced
- * boundaries — the target is held flat through silence, so the gain curve
- * continues smoothly without VAD-boundary pops.
- *
- * Chain position: immediately before the Compression stage.
+ * Chain position: immediately before the Compression stage. Hands the
+ * compressor a level-stable input so it can act with a consistent character.
  * Input: frameAnalysis from analyzeFramesRaw / remeasureFramesPostNr.
  */
 
@@ -30,7 +36,12 @@ const VAD_MIN_UNVOICED_MS = 300
 // Skip condition thresholds
 const MIN_FILE_DURATION_S   = 10
 const MIN_VOICED_DURATION_S = 5
-const LEVELED_STD_THRESHOLD = 1.5   // dB — both std_st and std_mt below this → skip
+const LEVELED_STD_THRESHOLD = 1.5   // dB — duration-weighted std of clip LUFS
+
+// Sub-phrase splitting recursion guard — never split a sub-clip shorter than
+// twice the minimum drop duration (otherwise the split point can't itself
+// satisfy the duration check).
+const MIN_SUBCLIP_HOPS_FACTOR = 2
 
 // ─── K-weighting filter (EBU R128 / ITU-R BS.1770-4) ─────────────────────────
 
@@ -177,48 +188,7 @@ function frameVoicedToHopVoiced(framedVoiced, framesPerHop, numHops) {
   return hopVoiced
 }
 
-// ─── Fill NaN (unvoiced hops) with last valid value ───────────────────────────
-
-function fillUnvoiced(curve, fallback = -23.0) {
-  const filled = new Float64Array(curve)
-  let last = fallback
-  for (let h = 0; h < filled.length; h++) {
-    if (!Number.isNaN(filled[h])) {
-      last = filled[h]
-    } else {
-      filled[h] = last
-    }
-  }
-  return filled
-}
-
-// ─── Moving median of L_st over voiced hops only ─────────────────────────────
-
-function movingMedianVoiced(L_st, hopVoiced, windowHops, minDataHops = 10) {
-  const numHops = L_st.length
-  const target  = new Float64Array(numHops)
-  let   lastTarget = NaN
-
-  for (let h = 0; h < numHops; h++) {
-    const winStart = Math.max(0, h - windowHops + 1)
-    const buf = []
-    for (let k = winStart; k <= h; k++) {
-      if (hopVoiced[k] && !Number.isNaN(L_st[k])) buf.push(L_st[k])
-    }
-    if (buf.length >= minDataHops) {
-      buf.sort((a, b) => a - b)
-      const mid = Math.floor(buf.length / 2)
-      lastTarget = buf.length % 2 === 0
-        ? (buf[mid - 1] + buf[mid]) / 2
-        : buf[mid]
-    }
-    target[h] = Number.isNaN(lastTarget) ? -23.0 : lastTarget
-  }
-
-  return target
-}
-
-// ─── Loop A: drift correction with deadband + cubic knee ──────────────────────
+// ─── Drift correction with deadband + cubic knee ──────────────────────────────
 
 function shapeDrift(delta, deadband, knee, maxUp, maxDown) {
   const abs_d  = Math.abs(delta)
@@ -238,86 +208,362 @@ function shapeDrift(delta, deadband, knee, maxUp, maxDown) {
   return g > 0 ? Math.min(g, maxUp) : Math.max(g, -maxDown)
 }
 
-// ─── Loop B: asymmetric ratio compression ─────────────────────────────────────
+// ─── Power-sum prefix array (for O(1) energy-in-range queries) ────────────────
 
-function shapeCompression(delta, deadbandUp, deadbandDown, ratioUp, ratioDown, maxUp, maxDown) {
-  if (delta > 0) {
-    if (delta < deadbandUp) return 0
-    return Math.min((delta - deadbandUp) / ratioUp, maxUp)
-  } else {
-    const abs_d = -delta
-    if (abs_d < deadbandDown) return 0
-    return Math.max(-((abs_d - deadbandDown) / ratioDown), -maxDown)
-  }
+function buildPowerSum(samples) {
+  const n = samples.length
+  const ps = new Float64Array(n + 1)
+  for (let i = 0; i < n; i++) ps[i + 1] = ps[i] + samples[i] * samples[i]
+  return ps
 }
 
-// ─── Interpolate hop-rate values to sample rate ───────────────────────────────
+function meanSquareRange(powerSum, start, end) {
+  if (end <= start) return 0
+  return (powerSum[end] - powerSum[start]) / (end - start)
+}
 
-function linearInterpolateToSamples(hopValues, hopSamples, totalSamples) {
-  const numHops = hopValues.length
-  const out     = new Float32Array(totalSamples)
-  for (let h = 0; h < numHops; h++) {
-    const start = h * hopSamples
-    const end   = Math.min(start + hopSamples, totalSamples)
-    const v0    = hopValues[h]
-    const v1    = h + 1 < numHops ? hopValues[h + 1] : hopValues[h]
-    for (let i = start; i < end; i++) {
-      out[i] = v0 + ((i - start) / hopSamples) * (v1 - v0)
+// ─── Clip detection (VAD voiced runs + sub-phrase splits) ─────────────────────
+
+/**
+ * @typedef {{ hopStart: number, hopEnd: number, sampleStart: number, sampleEnd: number }} Clip
+ */
+
+function vadRunsToClips(hopVoiced, hopSamples, totalSamples) {
+  const clips = []
+  const n = hopVoiced.length
+  let h = 0
+  while (h < n) {
+    if (hopVoiced[h] === 1) {
+      let e = h
+      while (e < n && hopVoiced[e] === 1) e++
+      clips.push({
+        hopStart:    h,
+        hopEnd:      e,
+        sampleStart: h * hopSamples,
+        sampleEnd:   Math.min(e * hopSamples, totalSamples),
+      })
+      h = e
+    } else {
+      h++
     }
   }
-  // Fill any trailing samples beyond the last full hop with the last hop value
-  // (avoids an unintended 0 dB discontinuity at the end of the file)
-  const tailStart = numHops * hopSamples
-  if (numHops > 0 && tailStart < totalSamples) {
-    const lastVal = hopValues[numHops - 1]
-    for (let i = tailStart; i < totalSamples; i++) out[i] = lastVal
-  }
-  return out
+  return clips
 }
 
-// ─── One-pole IIR envelope follower ──────────────────────────────────────────
+/**
+ * Recursive sub-phrase splitter. Splits a clip at the deepest hop within any
+ * internal drop region where L_st falls ≥ splitDropDb below the clip's median
+ * for ≥ splitMinDurationHops contiguous hops.
+ *
+ * @returns {Clip[]} one or more sub-clips (sample fields set from hop fields)
+ */
+function splitClipBySubphrase(clip, L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationHops) {
+  const { hopStart, hopEnd } = clip
+  const minSubclipHops = MIN_SUBCLIP_HOPS_FACTOR * splitMinDurationHops
 
-function envelopeFollow(target, attackMs, releaseMs, sampleRate) {
-  const alpha_a = 1.0 - Math.exp(-1.0 / (attackMs  * 0.001 * sampleRate))
-  const alpha_r = 1.0 - Math.exp(-1.0 / (releaseMs * 0.001 * sampleRate))
-  const n       = target.length
-  const out     = new Float32Array(n)
-  let   prev    = 0.0
-  for (let i = 0; i < n; i++) {
-    prev   += (target[i] > prev ? alpha_a : alpha_r) * (target[i] - prev)
-    out[i]  = prev
-  }
-  return out
-}
+  if (hopEnd - hopStart < minSubclipHops) return [clip]
 
-// ─── Statistics helpers ───────────────────────────────────────────────────────
-
-function computeStdVoiced(curve, hopVoiced) {
+  // Median of finite L_st values inside the clip
   const vals = []
-  for (let h = 0; h < curve.length; h++) {
-    if (hopVoiced[h] && !Number.isNaN(curve[h])) vals.push(curve[h])
+  for (let h = hopStart; h < hopEnd; h++) {
+    if (Number.isFinite(L_st[h])) vals.push(L_st[h])
   }
-  if (vals.length < 2) return 0
-  const mean = vals.reduce((s, v) => s + v, 0) / vals.length
-  return Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length)
-}
+  if (vals.length < 2) return [clip]
+  vals.sort((a, b) => a - b)
+  const mid = Math.floor(vals.length / 2)
+  const median = vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid]
+  const dropThreshold = median - splitDropDb
 
-// Compute 20*log10(rms(10^(G/20))) over voiced samples only
-function rmsGainOverVoiced(G_smoothed, hopVoiced, hopSamples) {
-  let sumSq = 0, count = 0
-  const numHops = hopVoiced.length
-  for (let h = 0; h < numHops; h++) {
-    if (!hopVoiced[h]) continue
-    const start = h * hopSamples
-    const end   = Math.min(start + hopSamples, G_smoothed.length)
-    for (let i = start; i < end; i++) {
-      const lin = Math.pow(10, G_smoothed[i] / 20.0)
-      sumSq += lin * lin
-      count++
+  // Find drop regions
+  let bestSplitHop = -1
+  let bestSplitVal = Infinity
+  let regionStart = -1
+  for (let h = hopStart; h <= hopEnd; h++) {
+    const below = h < hopEnd && Number.isFinite(L_st[h]) && L_st[h] < dropThreshold
+    if (below && regionStart < 0) {
+      regionStart = h
+    } else if (!below && regionStart >= 0) {
+      const regionEnd = h
+      if (regionEnd - regionStart >= splitMinDurationHops) {
+        // Find local minimum hop in [regionStart, regionEnd)
+        let localMinHop = regionStart
+        let localMinVal = L_st[regionStart]
+        for (let k = regionStart; k < regionEnd; k++) {
+          if (L_st[k] < localMinVal) {
+            localMinVal = L_st[k]
+            localMinHop = k
+          }
+        }
+        // Pick the deepest drop across all qualifying regions
+        if (localMinVal < bestSplitVal) {
+          bestSplitVal = localMinVal
+          bestSplitHop = localMinHop
+        }
+      }
+      regionStart = -1
     }
   }
-  if (count === 0) return 0
-  return 20 * Math.log10(Math.sqrt(sumSq / count))
+
+  if (bestSplitHop < 0) return [clip]
+
+  // Avoid degenerate splits (one sub-clip too short)
+  const leftLen  = bestSplitHop - hopStart
+  const rightLen = hopEnd - bestSplitHop
+  if (leftLen < splitMinDurationHops || rightLen < splitMinDurationHops) return [clip]
+
+  const left = {
+    hopStart,
+    hopEnd:      bestSplitHop,
+    sampleStart: hopStart * hopSamples,
+    sampleEnd:   Math.min(bestSplitHop * hopSamples, totalSamples),
+  }
+  const right = {
+    hopStart:    bestSplitHop,
+    hopEnd,
+    sampleStart: bestSplitHop * hopSamples,
+    sampleEnd:   Math.min(hopEnd * hopSamples, totalSamples),
+  }
+
+  return [
+    ...splitClipBySubphrase(left,  L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationHops),
+    ...splitClipBySubphrase(right, L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationHops),
+  ]
+}
+
+function detectClips({ hopVoiced, L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationMs }) {
+  const splitMinDurationHops = Math.max(1, Math.round(splitMinDurationMs / HOP_MS))
+  const baseClips = vadRunsToClips(hopVoiced, hopSamples, totalSamples)
+  const out = []
+  let totalSplits = 0
+  for (const clip of baseClips) {
+    const sub = splitClipBySubphrase(clip, L_st, hopSamples, totalSamples, splitDropDb, splitMinDurationHops)
+    totalSplits += sub.length - 1
+    out.push(...sub)
+  }
+  return { clips: out, subphraseSplits: totalSplits }
+}
+
+// ─── Per-clip K-weighted LUFS ─────────────────────────────────────────────────
+
+function computeClipLufs(kwPowerSum, clip) {
+  const meanSq = meanSquareRange(kwPowerSum, clip.sampleStart, clip.sampleEnd)
+  return meanSq > 0 ? -0.691 + 10.0 * Math.log10(meanSq) : -120.0
+}
+
+// ─── Weighted statistics ──────────────────────────────────────────────────────
+
+function weightedMedian(values, weights) {
+  const n = values.length
+  if (n === 0) return NaN
+  if (n === 1) return values[0]
+
+  const order = Array.from({ length: n }, (_, i) => i)
+  order.sort((a, b) => values[a] - values[b])
+
+  let totalW = 0
+  for (let i = 0; i < n; i++) totalW += weights[i]
+  if (totalW <= 0) return values[order[Math.floor(n / 2)]]
+
+  const half = totalW / 2
+  let cum = 0
+  for (let i = 0; i < n; i++) {
+    cum += weights[order[i]]
+    if (cum >= half) return values[order[i]]
+  }
+  return values[order[n - 1]]
+}
+
+function weightedStd(values, weights) {
+  const n = values.length
+  if (n < 2) return 0
+  let totalW = 0, mean = 0
+  for (let i = 0; i < n; i++) { totalW += weights[i]; mean += values[i] * weights[i] }
+  if (totalW <= 0) return 0
+  mean /= totalW
+  let varSum = 0
+  for (let i = 0; i < n; i++) varSum += weights[i] * (values[i] - mean) ** 2
+  return Math.sqrt(varSum / totalW)
+}
+
+// ─── Per-clip targets ─────────────────────────────────────────────────────────
+
+function computeClipTargets(clipLufs, clipDurations, sampleStarts, targetWindowS, sampleRate, mode) {
+  const n = clipLufs.length
+  const out = new Float64Array(n)
+
+  // Global fallback target (also used when running_median has insufficient data)
+  const globalTarget = weightedMedian(Array.from(clipLufs), Array.from(clipDurations))
+
+  if (mode === 'global' || n < 2) {
+    for (let k = 0; k < n; k++) out[k] = globalTarget
+    return out
+  }
+
+  const windowSamples = Math.round(targetWindowS * sampleRate)
+  const winVals = []
+  const winWts  = []
+  for (let k = 0; k < n; k++) {
+    winVals.length = 0
+    winWts.length  = 0
+    const cutoff = sampleStarts[k] - windowSamples
+    for (let j = 0; j <= k; j++) {
+      if (sampleStarts[j] >= cutoff) {
+        winVals.push(clipLufs[j])
+        winWts.push(clipDurations[j])
+      }
+    }
+    out[k] = winVals.length >= 2
+      ? weightedMedian(winVals, winWts)
+      : globalTarget
+  }
+  return out
+}
+
+// ─── Lowest-energy window search (for crossfade placement in gaps) ────────────
+
+function findLowestEnergyWindow(audioPowerSum, fromSample, toSample, windowSamples, totalSamples) {
+  const lo  = Math.max(0, fromSample)
+  const hi  = Math.min(totalSamples, toSample)
+  const win = Math.max(1, Math.min(windowSamples, hi - lo))
+  if (hi - lo <= win) return lo
+
+  const stride = Math.max(1, Math.floor(win / 4))
+  let bestStart = lo
+  let bestEnergy = Infinity
+  for (let s = lo; s + win <= hi; s += stride) {
+    const e = meanSquareRange(audioPowerSum, s, s + win)
+    if (e < bestEnergy) { bestEnergy = e; bestStart = s }
+  }
+  return bestStart
+}
+
+// ─── Merge adjacent clips whose gain delta exceeds threshold ──────────────────
+
+function mergeClipsForGainConflict(clips, gains, mergeMaxDeltaDb, kwPowerSum) {
+  // Work on copies; iterate until stable.
+  let cs = clips.map(c => ({ ...c }))
+  let gs = Array.from(gains)
+  let durs = cs.map(c => c.sampleEnd - c.sampleStart)
+  let mergesCount = 0
+
+  let changed = true
+  while (changed) {
+    changed = false
+    for (let k = 0; k < cs.length - 1; k++) {
+      if (Math.abs(gs[k + 1] - gs[k]) > mergeMaxDeltaDb) {
+        const merged = {
+          hopStart:    cs[k].hopStart,
+          hopEnd:      cs[k + 1].hopEnd,
+          sampleStart: cs[k].sampleStart,
+          sampleEnd:   cs[k + 1].sampleEnd,
+        }
+        const mDur = merged.sampleEnd - merged.sampleStart
+        // Sample-duration-weighted average gain (clamping not needed — both
+        // inputs were already within caps, average stays within them).
+        const mergedGain = (gs[k] * durs[k] + gs[k + 1] * durs[k + 1]) / (durs[k] + durs[k + 1])
+        cs.splice(k, 2, merged)
+        gs.splice(k, 2, mergedGain)
+        durs.splice(k, 2, mDur)
+        mergesCount++
+        changed = true
+        break  // restart scan
+      }
+    }
+  }
+
+  return { clips: cs, gains: gs, mergesCount }
+}
+
+// ─── Boundary crossfade plan ──────────────────────────────────────────────────
+
+/**
+ * For each pair of adjacent clips, place a cosine crossfade window:
+ *   - Gap boundary: place inside the gap, at its lowest-energy crossfade-length window.
+ *   - Voiced-adjacent boundary (no gap): straddle the boundary sample.
+ *
+ * Plan entry: { startSample, endSample, fromGain, toGain }
+ */
+function buildCrossfadePlans(clips, gains, audioPowerSum, crossfadeSamples, totalSamples) {
+  const plans = []
+  for (let k = 0; k < clips.length - 1; k++) {
+    const a = clips[k], b = clips[k + 1]
+    const gapStart = a.sampleEnd
+    const gapEnd   = b.sampleStart
+    let winStart
+    if (gapEnd > gapStart) {
+      winStart = findLowestEnergyWindow(audioPowerSum, gapStart, gapEnd, crossfadeSamples, totalSamples)
+    } else {
+      // Voiced-adjacent: straddle the boundary
+      winStart = Math.max(0, a.sampleEnd - Math.floor(crossfadeSamples / 2))
+    }
+    const winEnd = Math.min(totalSamples, winStart + crossfadeSamples)
+    plans.push({
+      startSample: winStart,
+      endSample:   winEnd,
+      fromGain:    gains[k],
+      toGain:      gains[k + 1],
+    })
+  }
+  return plans
+}
+
+// ─── Build sample-rate gain array ─────────────────────────────────────────────
+
+function buildSampleGainArray(clips, gains, crossfadePlans, totalSamples) {
+  const g = new Float32Array(totalSamples)
+
+  if (clips.length === 0) return g  // 0 dB everywhere
+
+  // Fill regions clip-by-clip; gaps inherit the previous clip's gain.
+  // Pre-roll before first clip is 0 dB; post-roll after last clip uses the
+  // last clip's gain.
+  for (let i = 0; i < clips[0].sampleStart; i++) g[i] = 0
+
+  for (let k = 0; k < clips.length; k++) {
+    const fillVal = gains[k]
+    const fillEnd = k + 1 < clips.length ? clips[k + 1].sampleStart : totalSamples
+    for (let i = clips[k].sampleStart; i < fillEnd; i++) g[i] = fillVal
+  }
+
+  // Overlay cosine crossfades
+  for (const plan of crossfadePlans) {
+    const { startSample, endSample, fromGain, toGain } = plan
+    const len = endSample - startSample
+    if (len <= 0) continue
+    for (let i = startSample; i < endSample; i++) {
+      // Equal-power cosine crossfade in dB space (perceptually smooth for
+      // small deltas; for the merge-bounded |delta| <= merge_max_delta_db
+      // this is inaudible).
+      const t = (i - startSample) / len
+      const w = 0.5 - 0.5 * Math.cos(Math.PI * t)   // 0 at start, 1 at end
+      g[i] = fromGain * (1 - w) + toGain * w
+    }
+  }
+
+  return g
+}
+
+// ─── Apply gain array to channels ─────────────────────────────────────────────
+
+function applySampleGains(channels, gainDb) {
+  const n = gainDb.length
+  return channels.map(ch => {
+    const out = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      out[i] = ch[i] * Math.pow(10, gainDb[i] / 20.0)
+    }
+    return out
+  })
+}
+
+// ─── Output measurement: per-clip LUFS std after leveling ─────────────────────
+
+function computeClipStd(clips, kwSamples) {
+  if (clips.length === 0) return 0
+  const ps = buildPowerSum(kwSamples)
+  const lufs = clips.map(c => computeClipLufs(ps, c))
+  const durs = clips.map(c => c.sampleEnd - c.sampleStart)
+  return weightedStd(lufs, durs)
 }
 
 // ─── Preset config lookup ─────────────────────────────────────────────────────
@@ -329,7 +575,7 @@ function getAutoLevelerConfig(presetId) {
 // ─── Main API ─────────────────────────────────────────────────────────────────
 
 /**
- * Apply dual-loop VAD-gated gain riding to an audio file.
+ * Apply M Leveller-style clip-automation to an audio file.
  *
  * @param {string} inputPath   - 32-bit float WAV
  * @param {string} outputPath  - Output WAV path
@@ -353,14 +599,13 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
   const audio = channels[0]
   const n     = audio.length
 
-  // Duration check
   const durationS = n / sampleRate
   if (durationS < MIN_FILE_DURATION_S) {
     await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'duration_too_short' }
   }
 
-  // 4b-1: VAD conditioning
+  // VAD conditioning + per-hop voiced mask
   const framedVoiced = applyVadHysteresis(frameAnalysis?.frames ?? [], sampleRate)
   const hopSamples   = Math.round(HOP_MS * 0.001 * sampleRate)
   const numHops      = Math.floor(n / hopSamples)
@@ -370,151 +615,141 @@ export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAna
   const framesPerHop = Math.max(1, Math.round(hopSamples / frameSamples))
   const hopVoiced    = frameVoicedToHopVoiced(framedVoiced, framesPerHop, numHops)
 
-  // Voiced duration check
   const voicedHops = hopVoiced.reduce((s, v) => s + v, 0)
   if (voicedHops * HOP_MS * 0.001 < MIN_VOICED_DURATION_S) {
     await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'insufficient_voiced_audio' }
   }
 
-  // 4b-2: K-weighted LUFS curves (voiced hops only)
-  const kwSamples = applyKWeighting(audio, sampleRate)
-  const windowSt  = Math.round(400  * 0.001 * sampleRate)
-  const windowMt  = Math.round(1500 * 0.001 * sampleRate)
-  const L_st      = computeLufsCurve(kwSamples, hopVoiced, windowSt, hopSamples)
-  const L_mt      = computeLufsCurve(kwSamples, hopVoiced, windowMt, hopSamples)
+  // K-weight once; reuse for L_st (sub-phrase splitting) and per-clip LUFS
+  const kwSamples   = applyKWeighting(audio, sampleRate)
+  const kwPowerSum  = buildPowerSum(kwSamples)
+  const audioPowerSum = buildPowerSum(audio)
 
-  // Skip check after loudness measurement
-  const stdSt = computeStdVoiced(L_st, hopVoiced)
-  const stdMt = computeStdVoiced(L_mt, hopVoiced)
-  if (stdSt < LEVELED_STD_THRESHOLD && stdMt < LEVELED_STD_THRESHOLD) {
+  const windowSt = Math.round(400 * 0.001 * sampleRate)
+  const L_st     = computeLufsCurve(kwSamples, hopVoiced, windowSt, hopSamples)
+
+  // Segmentation: VAD voiced runs + sub-phrase splits at internal drops
+  const { clips, subphraseSplits } = detectClips({
+    hopVoiced,
+    L_st,
+    hopSamples,
+    totalSamples:        n,
+    splitDropDb:         config.subphrase_split_drop_db,
+    splitMinDurationMs:  config.subphrase_split_min_duration_ms,
+  })
+
+  if (clips.length < 2) {
+    await copyThrough(inputPath, outputPath)
+    return { applied: false, skipped_reason: 'insufficient_clips' }
+  }
+
+  // Per-clip LUFS and durations
+  const clipLufs       = clips.map(c => computeClipLufs(kwPowerSum, c))
+  const clipDurations  = clips.map(c => c.sampleEnd - c.sampleStart)
+  const sampleStarts   = clips.map(c => c.sampleStart)
+
+  // Skip if file is already leveled (clip-LUFS std below threshold)
+  const inClipStd = weightedStd(clipLufs, clipDurations)
+  if (inClipStd < LEVELED_STD_THRESHOLD) {
     await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'file_already_leveled' }
   }
 
-  // 4b-3: Slow target — moving median over voiced hops
-  const windowTargetHops = Math.round(config.target_window_s * 1000 / HOP_MS)
-  const L_target         = movingMedianVoiced(L_st, hopVoiced, windowTargetHops)
+  // Noise-floor headroom cap (single-stage)
+  const noiseFloorDbfs = frameAnalysis?.noiseFloorDbfs ?? -60
+  const nfHeadroom     = Math.max(0, (config.noise_floor_target_dbfs - noiseFloorDbfs) - 3)
+  const maxUpEff       = Math.min(config.max_up_db, nfHeadroom)
+  const nfCapActive    = maxUpEff < config.max_up_db
 
-  // Noise floor caps — headroom is positive only when the measured noise floor is
-  // already below the target; if it is at or above the target, upward gain is 0.
-  const noiseFloorDbfs   = frameAnalysis?.noiseFloorDbfs ?? -60
-  const nfHeadroom       = Math.max(0, (config.noise_floor_target_dbfs - noiseFloorDbfs) - 3)
-  const maxAUpEff        = Math.min(config.loop_a.max_up_db, nfHeadroom)
-  const maxBUpEff        = Math.min(config.loop_b.max_up_db, Math.max(0, nfHeadroom - maxAUpEff))
-  const nfCapActive      = maxAUpEff < config.loop_a.max_up_db || maxBUpEff < config.loop_b.max_up_db
+  // Per-clip targets (running_median or global)
+  const targets = computeClipTargets(
+    clipLufs,
+    clipDurations,
+    sampleStarts,
+    config.target_window_s,
+    sampleRate,
+    config.target_mode,
+  )
 
-  // 4b-4a: Loop A correction shaping (drift)
-  const L_st_filled = fillUnvoiced(L_st)
-  const G_A_hops    = new Float64Array(numHops)
-  for (let h = 0; h < numHops; h++) {
-    G_A_hops[h] = shapeDrift(
-      L_target[h] - L_st_filled[h],
-      config.loop_a.deadband_db,
-      config.loop_a.knee_db,
-      maxAUpEff,
-      config.loop_a.max_down_db,
+  // Per-clip gains
+  const totalUp   = config.total_max_up_db
+  const totalDown = config.total_max_down_db
+  const gains = clipLufs.map((lufs, k) => {
+    const g = shapeDrift(
+      targets[k] - lufs,
+      config.deadband_db,
+      config.knee_db,
+      maxUpEff,
+      config.max_down_db,
     )
-  }
-
-  // 4b-4b: Loop B correction shaping (performance compression)
-  const L_mt_filled = fillUnvoiced(L_mt)
-  const G_B_hops    = new Float64Array(numHops)
-  for (let h = 0; h < numHops; h++) {
-    G_B_hops[h] = shapeCompression(
-      L_target[h] - L_mt_filled[h],
-      config.loop_b.deadband_up_db,
-      config.loop_b.deadband_down_db,
-      config.loop_b.ratio_up,
-      config.loop_b.ratio_down,
-      maxBUpEff,
-      config.loop_b.max_down_db,
-    )
-  }
-
-  // 4b-5: Interpolate to sample rate and apply envelope followers
-  const G_A_sr       = linearInterpolateToSamples(G_A_hops, hopSamples, n)
-  const G_B_sr       = linearInterpolateToSamples(G_B_hops, hopSamples, n)
-  const G_A_smoothed = envelopeFollow(G_A_sr, config.loop_a.attack_ms, config.loop_a.release_ms, sampleRate)
-  const G_B_smoothed = envelopeFollow(G_B_sr, config.loop_b.attack_ms, config.loop_b.release_ms, sampleRate)
-
-  // 4b-6: Sum, cap, apply
-  const maxUp   = config.total_max_up_db
-  const maxDown = config.total_max_down_db
-
-  const processedChannels = channels.map(ch => {
-    const out = new Float32Array(n)
-    for (let i = 0; i < n; i++) {
-      const G = Math.max(-maxDown, Math.min(maxUp, G_A_smoothed[i] + G_B_smoothed[i]))
-      out[i] = ch[i] * Math.pow(10, G / 20.0)
-    }
-    return out
+    return Math.max(-totalDown, Math.min(totalUp, g))
   })
+
+  // Merge adjacent clips with too-large gain delta (transparent fallback)
+  const merged = mergeClipsForGainConflict(clips, gains, config.merge_max_delta_db, kwPowerSum)
+
+  // Boundary crossfade plans (placed at lowest-energy point in each gap or
+  // straddling voiced-adjacent boundaries)
+  const crossfadeSamples = Math.max(1, Math.round(config.crossfade_ms * 0.001 * sampleRate))
+  const plans = buildCrossfadePlans(
+    merged.clips, merged.gains, audioPowerSum, crossfadeSamples, n,
+  )
+
+  // Render: piecewise-constant gain with cosine crossfades at boundaries
+  const gainSr = buildSampleGainArray(merged.clips, merged.gains, plans, n)
+  const processedChannels = applySampleGains(channels, gainSr)
 
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
-  // Post-processing measurements for logging
+  // Output measurements: clip-LUFS std after leveling (recompute on output)
   const kwOut    = applyKWeighting(processedChannels[0], sampleRate)
-  const L_st_out = computeLufsCurve(kwOut, hopVoiced, windowSt, hopSamples)
-  const L_mt_out = computeLufsCurve(kwOut, hopVoiced, windowMt, hopSamples)
-  const outStdSt = computeStdVoiced(L_st_out, hopVoiced)
-  const outStdMt = computeStdVoiced(L_mt_out, hopVoiced)
+  const outClipStd = computeClipStd(merged.clips, kwOut)
 
-  // Gain stats
-  let aMaxUp = -Infinity, aMaxDown = Infinity
-  let bMaxUp = -Infinity, bMaxDown = Infinity
-  let tMaxUp = -Infinity, tMaxDown = Infinity
-
-  for (let i = 0; i < n; i++) {
-    if (G_A_smoothed[i] > aMaxUp)   aMaxUp   = G_A_smoothed[i]
-    if (G_A_smoothed[i] < aMaxDown) aMaxDown = G_A_smoothed[i]
-    if (G_B_smoothed[i] > bMaxUp)   bMaxUp   = G_B_smoothed[i]
-    if (G_B_smoothed[i] < bMaxDown) bMaxDown = G_B_smoothed[i]
-    const G = Math.max(-maxDown, Math.min(maxUp, G_A_smoothed[i] + G_B_smoothed[i]))
-    if (G > tMaxUp)   tMaxUp   = G
-    if (G < tMaxDown) tMaxDown = G
+  // Gain stats over merged clips, duration-weighted
+  let maxUp = -Infinity, maxDown = Infinity
+  let powSum = 0, dSum = 0
+  for (let k = 0; k < merged.gains.length; k++) {
+    const g = merged.gains[k]
+    if (g > maxUp)   maxUp   = g
+    if (g < maxDown) maxDown = g
+    const lin = Math.pow(10, g / 20.0)
+    const d   = merged.clips[k].sampleEnd - merged.clips[k].sampleStart
+    powSum += lin * lin * d
+    dSum   += d
   }
+  const gainRmsDb = dSum > 0 ? 20 * Math.log10(Math.sqrt(powSum / dSum)) : 0
 
   return {
-    applied:       true,
+    applied:        true,
     skipped_reason: null,
     preset_params: {
-      total_max_up_db:          maxUp,
-      total_max_down_db:        maxDown,
-      target_window_s:          config.target_window_s,
-      noise_floor_target_dbfs:  config.noise_floor_target_dbfs,
-      loop_a: {
-        deadband_db:  config.loop_a.deadband_db,
-        knee_db:      config.loop_a.knee_db,
-        max_up_db:    config.loop_a.max_up_db,
-        max_down_db:  config.loop_a.max_down_db,
-        attack_ms:    config.loop_a.attack_ms,
-        release_ms:   config.loop_a.release_ms,
-      },
-      loop_b: {
-        deadband_up_db:   config.loop_b.deadband_up_db,
-        deadband_down_db: config.loop_b.deadband_down_db,
-        ratio_up:         config.loop_b.ratio_up,
-        ratio_down:       config.loop_b.ratio_down,
-        max_up_db:        config.loop_b.max_up_db,
-        max_down_db:      config.loop_b.max_down_db,
-        attack_ms:        config.loop_b.attack_ms,
-        release_ms:       config.loop_b.release_ms,
-      },
+      total_max_up_db:                   totalUp,
+      total_max_down_db:                 totalDown,
+      target_mode:                       config.target_mode,
+      target_window_s:                   config.target_window_s,
+      noise_floor_target_dbfs:           config.noise_floor_target_dbfs,
+      deadband_db:                       config.deadband_db,
+      knee_db:                           config.knee_db,
+      max_up_db:                         config.max_up_db,
+      max_down_db:                       config.max_down_db,
+      subphrase_split_drop_db:           config.subphrase_split_drop_db,
+      subphrase_split_min_duration_ms:   config.subphrase_split_min_duration_ms,
+      crossfade_ms:                      config.crossfade_ms,
+      merge_max_delta_db:                config.merge_max_delta_db,
     },
     measurements: {
-      input_loudness_st_std_db:  round2(stdSt),
-      input_loudness_mt_std_db:  round2(stdMt),
-      output_loudness_st_std_db: round2(outStdSt),
-      output_loudness_mt_std_db: round2(outStdMt),
-      loop_a_max_gain_up_db:     round2(aMaxUp   === -Infinity ? 0 : aMaxUp),
-      loop_a_max_gain_down_db:   round2(aMaxDown ===  Infinity ? 0 : aMaxDown),
-      loop_a_rms_gain_db:        round2(rmsGainOverVoiced(G_A_smoothed, hopVoiced, hopSamples)),
-      loop_b_max_gain_up_db:     round2(bMaxUp   === -Infinity ? 0 : bMaxUp),
-      loop_b_max_gain_down_db:   round2(bMaxDown ===  Infinity ? 0 : bMaxDown),
-      loop_b_rms_gain_db:        round2(rmsGainOverVoiced(G_B_smoothed, hopVoiced, hopSamples)),
-      total_max_gain_up_db:      round2(tMaxUp   === -Infinity ? 0 : tMaxUp),
-      total_max_gain_down_db:    round2(tMaxDown ===  Infinity ? 0 : tMaxDown),
+      input_clip_lufs_std_db:    round2(inClipStd),
+      output_clip_lufs_std_db:   round2(outClipStd),
+      clip_count_initial:        clips.length,
+      clip_count_after_merge:    merged.clips.length,
+      subphrase_splits_count:    subphraseSplits,
+      merges_count:              merged.mergesCount,
+      gain_max_up_db:            round2(maxUp   === -Infinity ? 0 : maxUp),
+      gain_max_down_db:          round2(maxDown ===  Infinity ? 0 : maxDown),
+      gain_rms_db:               round2(gainRmsDb),
+      total_max_gain_up_db:      round2(maxUp   === -Infinity ? 0 : maxUp),
+      total_max_gain_down_db:    round2(maxDown ===  Infinity ? 0 : maxDown),
       noise_floor_cap_active:    nfCapActive,
     },
   }
