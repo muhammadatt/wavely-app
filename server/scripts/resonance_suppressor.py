@@ -95,6 +95,18 @@ DEFAULT_PARAMS = {
     "freq_floor_hz": 80.0,  # Don't process below this (HPF already handles sub-vocals).
     "freq_ceil_hz": 16000.0,# Don't process above this.
     "mode": "soft",         # "soft" = gradual knee; "hard" = linear above threshold.
+    "preserve_harmonics": False,  # Protect harmonic overtone bins from reduction.
+    "harmonic_width_bins": 2,     # Minimum half-width of the protection zone (STFT
+                                  # bins; 1 bin ≈ 21.5 Hz at 44.1 kHz / n_fft=2048).
+                                  # Acts as a floor — higher harmonics automatically
+                                  # receive a wider zone scaled by harmonic_width_pct.
+    "harmonic_width_pct": 0.03,   # Protection half-width as a fraction of the overtone
+                                  # frequency (default 3 % matches the is_harmonic
+                                  # reporter tolerance). Whichever of harmonic_width_bins
+                                  # or harmonic_width_pct produces more bins wins.
+    "max_harmonic": 100,          # Hard cap on overtones to protect (H1 … H<n>).
+                                  # In practice freq_ceil_hz is the binding limit —
+                                  # this cap only matters for pathologically low f0.
 }
 
 
@@ -198,7 +210,7 @@ class ResonanceSuppressor:
             half   = spread_bins
             x      = np.arange(-half, half + 1, dtype=float)
             kernel = np.exp(-0.5 * (x / sigma) ** 2)
-            self.spread_kernel = kernel / kernel.sum()
+            self.spread_kernel = kernel / kernel.max()
         else:
             self.spread_kernel = None
 
@@ -206,6 +218,9 @@ class ResonanceSuppressor:
         frame_period_ms    = (hop_length / sample_rate) * 1000.0
         self.attack_coeff  = self._time_to_coeff(self.params["attack_ms"],  frame_period_ms)
         self.release_coeff = self._time_to_coeff(self.params["release_ms"], frame_period_ms)
+
+        # --- Harmonic protection mask ---
+        self._harmonic_mask = self._build_harmonic_mask()
 
         # --- Cached overlap-add window (computed once per instance) ---
         self._window         = get_window("hann", n_fft, fftbins=True).astype(np.float32)
@@ -215,7 +230,8 @@ class ResonanceSuppressor:
             f"ResonanceSuppressor init | n_fft={n_fft} | "
             f"mel_window={self.mel_window_bins} bins | "
             f"selectivity={self.params['selectivity']} dB | depth={self.params['depth']} | "
-            f"sharpness={sharpness} | max_cut={self.params['max_reduction_db']} dB"
+            f"sharpness={sharpness} | max_cut={self.params['max_reduction_db']} dB | "
+            f"preserve_harmonics={self.params['preserve_harmonics']}"
         )
 
     @staticmethod
@@ -240,6 +256,62 @@ class ResonanceSuppressor:
         frac      = np.where(denom > 0, (x - xp[idx_left]) / denom, 0.0)
         frac      = np.clip(frac, 0.0, 1.0).astype(np.float32)
         return idx_left, idx_right, frac
+
+    def _build_harmonic_mask(self) -> np.ndarray | None:
+        """
+        Return a boolean array of shape (n_bins,) where True marks bins that
+        belong to a harmonic overtone of f0 and should be protected from
+        reduction.  Returns None when preserve_harmonics is False or f0 is
+        unavailable, so the call-site can skip the mask with a simple guard.
+
+        Protection zone: per-harmonic half-width is the larger of:
+          • harmonic_width_bins  — fixed bin floor (low-frequency minimum)
+          • harmonic_width_pct   — fraction of the overtone frequency in bins
+                                   (scales with the harmonic so that the zone
+                                   stays proportionally consistent up the series)
+        Default harmonic_width_pct=0.03 matches the 3 % tolerance used by the
+        band-summary reporter, guaranteeing every bin labelled is_harmonic=True
+        is also inside the protection zone.
+        """
+        if not self.params.get("preserve_harmonics", False):
+            return None
+        if not self.f0 or self.f0 <= 0:
+            logger.warning(
+                "ResonanceSuppressor: preserve_harmonics=True but f0 is not set "
+                "— harmonic protection disabled."
+            )
+            return None
+
+        bin_width   = self.sr / self.n_fft
+        min_half    = int(self.params["harmonic_width_bins"])
+        width_pct   = float(self.params.get("harmonic_width_pct", 0.03))
+        max_h       = int(self.params["max_harmonic"])
+        freq_ceil   = float(self.params["freq_ceil_hz"])
+        mask        = np.zeros(self.n_bins, dtype=bool)
+        protected   = []
+
+        # Iterate until the harmonic exceeds freq_ceil_hz or the hard max_harmonic
+        # cap, whichever comes first.  This prevents unprotected vocal harmonics
+        # above the old fixed H20 cap from being treated as suppressible spikes.
+        for h in range(1, max_h + 1):
+            freq = h * self.f0
+            if freq > freq_ceil or freq > self.freqs[-1]:
+                break
+            center   = int(round(freq / bin_width))
+            pct_half = int(round(freq * width_pct / bin_width))
+            half     = max(min_half, pct_half)
+            lo = max(0, center - half)
+            hi = min(self.n_bins - 1, center + half)
+            mask[lo : hi + 1] = True
+            protected.append(f"H{h}={freq:.0f}Hz(±{half}bins,{lo}-{hi})")
+
+        logger.info(
+            f"ResonanceSuppressor: harmonic protection active | "
+            f"f0={self.f0:.1f} Hz | min_half={min_half} bins | "
+            f"width_pct={width_pct*100:.1f}% | "
+            f"protected overtones: {', '.join(protected)}"
+        )
+        return mask
 
     def _smoothed_envelope_matrix(self, magnitude_db: np.ndarray) -> np.ndarray:
         """
@@ -283,7 +355,7 @@ class ResonanceSuppressor:
 
         spike_db        = magnitude_db - smoothed_db
         spike_db_masked = np.where(self.active_bins, spike_db, 0.0)
-        above_threshold = np.maximum(0.0, spike_db_masked - selectivity)
+        above_threshold = np.maximum(0.0, spike_db_masked)
 
         if p["mode"] == "soft":
             knee_width = selectivity * 0.5
@@ -299,6 +371,14 @@ class ResonanceSuppressor:
 
         reduction_db = np.clip(raw_reduction, 0.0, max_reduction)
 
+        # Harmonic protection — pre-spread pass.
+        # Zero harmonic bins before the spread kernel runs so their spike
+        # energy is never convolved into neighbouring inter-harmonic bins.
+        # Without this, a large harmonic spike bleeds at Gaussian weight into
+        # the gaps on either side, defeating the protection intent.
+        if self._harmonic_mask is not None:
+            reduction_db[:, self._harmonic_mask] = 0.0
+
         # Spread kernel applied along the bin axis for every frame at once.
         # Matches np.convolve(reduction_db, kernel, mode='same') per frame.
         if self.spread_kernel is not None:
@@ -307,6 +387,18 @@ class ResonanceSuppressor:
                 axis=1, mode="constant", cval=0.0,
             )
             reduction_db = np.clip(reduction_db, 0.0, max_reduction)
+
+        # Harmonic protection — post-spread pass.
+        # Catches any residual bleed from genuine non-harmonic spikes that
+        # are adjacent to a harmonic bin and spread into it after convolution.
+        if self._harmonic_mask is not None:
+            reduction_db[:, self._harmonic_mask] = 0.0
+
+        # Frequency boundary guard — post-spread pass.
+        # Spread bleed from an active edge bin can cross freq_floor_hz /
+        # freq_ceil_hz into inactive bins. Zero those out so the boundaries
+        # are hard limits on applied reduction, not just on detection.
+        reduction_db[:, ~self.active_bins] = 0.0
 
         return reduction_db
 
@@ -480,43 +572,62 @@ class ResonanceSuppressor:
         band_summary = []
         if voiced_frame_count > 0:
             bin_mean_reduction = bin_sum_reduction / voiced_frame_count
-            BAND_CENTERS = [
-                20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400,
-                500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000,
-                6300, 8000, 10000, 12500, 16000, 20000,
-            ]
-            for center in BAND_CENTERS:
-                low  = center / (2.0 ** (1.0 / 6.0))
-                high = center * (2.0 ** (1.0 / 6.0))
-                mask = (self.freqs >= low) & (self.freqs < high)
-                if not mask.any():
-                    continue
-                mean_red = float(np.mean(bin_mean_reduction[mask]))
-                max_red  = float(np.max(bin_max_reduction[mask]))
-                if max_red > 0.05:
+
+            # Derive spike clusters directly from the per-bin data rather than
+            # checking a fixed set of 1/3-octave centers.  Active bins (those
+            # with max_reduction > threshold) are grouped into contiguous
+            # clusters; bins separated by a gap of <= GAP_BINS are merged into
+            # the same cluster so that a slight dip across a narrow resonance
+            # peak does not split it into two spurious entries.  Each cluster
+            # is reported once, centered at its peak-reduction bin.
+            ACTIVE_THRESHOLD = 0.05   # dB — below this a bin is considered silent
+            GAP_BINS         = 3      # merge clusters separated by this many bins or fewer
+
+            active_indices = np.where(bin_max_reduction > ACTIVE_THRESHOLD)[0]
+
+            if active_indices.size > 0:
+                # Build cluster list: each entry is (lo_bin, hi_bin) inclusive.
+                clusters = []
+                lo = prev = int(active_indices[0])
+                for idx in active_indices[1:]:
+                    i = int(idx)
+                    if i - prev > GAP_BINS:
+                        clusters.append((lo, prev))
+                        lo = i
+                    prev = i
+                clusters.append((lo, prev))
+
+                for lo, hi in clusters:
+                    cluster_slice   = slice(lo, hi + 1)
+                    peak_offset     = int(np.argmax(bin_max_reduction[cluster_slice]))
+                    peak_bin        = lo + peak_offset
+                    peak_freq       = float(self.freqs[peak_bin])
+                    mean_red        = float(np.mean(bin_mean_reduction[cluster_slice]))
+                    max_red         = float(bin_max_reduction[peak_bin])
+
                     band_info = {
-                        "center": center,
-                        "mean_reduction_db": round(mean_red, 2),
-                        "peak_reduction_db": round(max_red, 2),
+                        "center":             round(peak_freq, 1),
+                        "mean_reduction_db":  round(mean_red, 2),
+                        "peak_reduction_db":  round(max_red, 2),
                     }
+
                     if self.f0 and self.f0 > 0:
-                        band_freqs = self.freqs[mask]
-                        peak_freq  = band_freqs[np.argmax(bin_max_reduction[mask])]
-                        h          = int(round(peak_freq / self.f0))
-                        if 0 < h <= 20 and abs(peak_freq - h * self.f0) / (h * self.f0) <= 0.03:
+                        h = int(round(peak_freq / self.f0))
+                        if 0 < h <= self.params["max_harmonic"] and abs(peak_freq - h * self.f0) / (h * self.f0) <= 0.03:
                             band_info["harmonic"]    = f"H{h}={int(round(self.f0))} Hz"
                             band_info["is_harmonic"] = True
                         else:
                             band_info["is_harmonic"] = False
+
                     band_summary.append(band_info)
 
             if band_summary:
-                logger.info("ResonanceSuppressor band summary (1/3-oct, voiced frames):")
+                logger.info("ResonanceSuppressor spike clusters (voiced frames):")
                 for b in band_summary:
                     bars = "#" * min(20, int(round(b["peak_reduction_db"] / 0.5)))
                     harm = f"  [harmonic: {b['harmonic']}]" if b.get("is_harmonic") else ""
                     logger.info(
-                        f"  {b['center']:6.0f} Hz: "
+                        f"  {b['center']:8.1f} Hz: "
                         f"mean {-b['mean_reduction_db']:5.2f} dB | "
                         f"peak {-b['peak_reduction_db']:5.2f} dB  {bars}{harm}"
                     )
