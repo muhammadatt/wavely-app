@@ -16,15 +16,16 @@ Output: JSON file with per-frame isSilence classification.
 Frame alignment:
   - Pipeline frame duration: 25 ms → 1102 samples @ 44.1 kHz
   - Silero operates at 16 kHz → 25 ms = 400 samples
-  - Silero v5 chunk size: 512 samples
-  - Chunks per pipeline frame: ceil(400 / 512) = 1 (zero-padded to 512)
-  - Frame label: max(chunk_probs) >= threshold → voiced; else silence
-  Using max (not mean) avoids penalizing frames where speech occupies only part
-  of the window, which is common at phrase onsets and offsets.
+  - Fast path (get_speech_timestamps): processes the full audio stream in one
+    internal pass and returns speech segment timestamps, which are mapped back
+    to per-pipeline-frame isSilence labels. A frame is voiced if any returned
+    segment overlaps its sample range.
+  - Fallback (frame-by-frame loop): one model call per frame (zero-padded to
+    512 samples); frame label = max(chunk_probs) >= threshold.
 
-Performance (CPU): ~50–100x real-time. A 10-minute file takes ~6–12 seconds.
-The pipeline calls analyzeAudioFrames 3–4 times per job, adding ~30–50 s total
-latency on CPU. Set SILERO_DEVICE=cuda to reduce this significantly.
+Performance: the fast path uses get_speech_timestamps (torchaudio required)
+which avoids per-frame Python loop overhead. Falls back to the original loop
+if the import is unavailable. Set SILERO_DEVICE=cuda to reduce latency further.
 """
 import argparse
 import json
@@ -101,6 +102,7 @@ def main():
     import importlib as _il
 
     model = None
+    get_speech_timestamps = None
 
     # Both Strategy 1 and Strategy 2 need the script's own directory removed
     # from sys.path so that `silero_vad` resolves to the installed package,
@@ -128,12 +130,26 @@ def main():
     # ── Strategy 2: silero-vad package API ─────────────────────────────────
     if model is None:
         try:
-            from silero_vad import load_silero_vad
+            from silero_vad import load_silero_vad, get_speech_timestamps as _gst
             model = load_silero_vad()
+            get_speech_timestamps = _gst
         except Exception:
             pass
         finally:
             # Clear any partial silero_vad entries poisoned by a failed import.
+            for _key in [k for k in sys.modules if 'silero_vad' in k]:
+                del sys.modules[_key]
+
+    # ── get_speech_timestamps for Strategy 1 (JIT-loaded model) ────────────
+    # get_speech_timestamps works with any model object, so try importing it
+    # even when the JIT path was used and Strategy 2 was never reached.
+    if get_speech_timestamps is None:
+        try:
+            from silero_vad import get_speech_timestamps as _gst
+            get_speech_timestamps = _gst
+        except Exception:
+            pass
+        finally:
             for _key in [k for k in sys.modules if 'silero_vad' in k]:
                 del sys.modules[_key]
 
@@ -181,43 +197,88 @@ def main():
 
     audio_16k = torch.from_numpy(audio_np)   # 1D tensor of float32 samples at 16 kHz
 
-    # Frame alignment:
-    #   25 ms * 16000 Hz = 400 samples per pipeline frame
+    # Frame alignment: 25 ms * 16000 Hz = 400 samples per pipeline frame
     samples_per_frame = round(FRAME_DURATION_S * SILERO_SR)  # 400
-    n_frames = len(audio_16k) // samples_per_frame
+    n_frames          = len(audio_16k) // samples_per_frame
 
     frame_results = []
 
-    with torch.no_grad():
+    if get_speech_timestamps is not None:
+        # Fast path: get_speech_timestamps processes the full audio stream
+        # internally using the sequential GRU inference at 512-sample chunk
+        # boundaries, then returns speech segments as {start, end} sample-index
+        # pairs at 16 kHz. This avoids the per-frame Python loop overhead and
+        # the zero-padding work done in the fallback path.
+        try:
+            speech_segs = get_speech_timestamps(
+                audio_16k,
+                model,
+                sampling_rate=SILERO_SR,
+                threshold=args.threshold,
+                min_speech_duration_ms=0,
+                min_silence_duration_ms=0,
+                speech_pad_ms=0,
+                return_seconds=False,
+            )
+        except TypeError:
+            # Older silero-vad versions may not support all kwargs; retry bare.
+            speech_segs = get_speech_timestamps(
+                audio_16k, model,
+                sampling_rate=SILERO_SR,
+                threshold=args.threshold,
+            )
+
+        # Map segments to pipeline frames.
+        # Segment boundaries are at 512-sample chunk resolution; a frame is
+        # voiced if any segment overlaps its [f*400, (f+1)*400) sample range.
+        voiced_frames = set()
+        for seg in speech_segs:
+            first_frame = seg['start'] // samples_per_frame
+            last_frame  = (seg['end'] - 1) // samples_per_frame
+            for f in range(first_frame, min(last_frame + 1, n_frames)):
+                voiced_frames.add(f)
+
         for f in range(n_frames):
-            frame_start = f * samples_per_frame
-            frame_end   = frame_start + samples_per_frame
-            frame_audio = audio_16k[frame_start:frame_end]   # 400 samples
-
-            chunk_probs = []
-            for chunk_start in range(0, samples_per_frame, SILERO_CHUNK_SAMPLES):
-                chunk = frame_audio[chunk_start : chunk_start + SILERO_CHUNK_SAMPLES]
-
-                # Zero-pad last chunk if shorter than SILERO_CHUNK_SAMPLES (64 → 512)
-                if len(chunk) < SILERO_CHUNK_SAMPLES:
-                    pad = torch.zeros(SILERO_CHUNK_SAMPLES - len(chunk), dtype=chunk.dtype)
-                    chunk = torch.cat([chunk, pad])
-
-                chunk = chunk.to(device)
-                prob  = model(chunk.unsqueeze(0), SILERO_SR).item()
-                chunk_probs.append(prob)
-
-            max_prob   = max(chunk_probs)
-            is_silence = max_prob < args.threshold
-
+            voiced = f in voiced_frames
             frame_results.append({
                 'index':     f,
-                'isSilence': is_silence,
-                'maxProb':   round(max_prob, 4),
+                'isSilence': not voiced,
+                'maxProb':   1.0 if voiced else 0.0,  # approximation; not used by JS
             })
 
-    # Reset GRU state — defensive hygiene (fresh process per spawn, but good practice)
-    model.reset_states()
+        model.reset_states()
+
+    else:
+        # Fallback: original frame-by-frame inference loop.
+        with torch.no_grad():
+            for f in range(n_frames):
+                frame_start = f * samples_per_frame
+                frame_end   = frame_start + samples_per_frame
+                frame_audio = audio_16k[frame_start:frame_end]   # 400 samples
+
+                chunk_probs = []
+                for chunk_start in range(0, samples_per_frame, SILERO_CHUNK_SAMPLES):
+                    chunk = frame_audio[chunk_start : chunk_start + SILERO_CHUNK_SAMPLES]
+
+                    # Zero-pad last chunk if shorter than SILERO_CHUNK_SAMPLES
+                    if len(chunk) < SILERO_CHUNK_SAMPLES:
+                        pad = torch.zeros(SILERO_CHUNK_SAMPLES - len(chunk), dtype=chunk.dtype)
+                        chunk = torch.cat([chunk, pad])
+
+                    chunk = chunk.to(device)
+                    prob  = model(chunk.unsqueeze(0), SILERO_SR).item()
+                    chunk_probs.append(prob)
+
+                max_prob   = max(chunk_probs)
+                is_silence = max_prob < args.threshold
+
+                frame_results.append({
+                    'index':     f,
+                    'isSilence': is_silence,
+                    'maxProb':   round(max_prob, 4),
+                })
+
+        model.reset_states()
 
     with open(args.output, 'w') as fh:
         json.dump({'frames': frame_results}, fh)
