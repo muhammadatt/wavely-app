@@ -533,9 +533,9 @@ export async function resonanceSuppressor(ctx) {
   const frames  = ctx.results.metrics?.frames ?? null
 
   // Per-frame F0 contour from the centralized pitch cache. getF0Contour() runs
-  // estimate_f0_contour.py on first call and returns the cached result on all
-  // subsequent calls within the same pipeline run — zero marginal cost when the
-  // de-esser (which also consumes F0) has already triggered the computation.
+  // estimate_f0_contour.py on the first call in a pipeline run and returns the
+  // cached result on any subsequent call within that same run, including later
+  // stages such as the de-esser that also consume F0 data.
   const f0Contour = await getF0Contour(ctx)
 
   const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0Contour)
