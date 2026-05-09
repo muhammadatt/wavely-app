@@ -5,9 +5,9 @@ Stage 3b — Dynamic Resonance Suppressor
 Soothe2-inspired spectral spike detection and dynamic attenuation.
 Operates on 32-bit float PCM at 44.1 kHz (Instant Polish internal format).
 
-Scope: narrow resonant spike detection via within-frame mel-domain spectral
-smoothing. Catches room modes, microphone resonances, and isolated harmonic
-buildups anywhere in the active frequency range.
+Scope: narrow resonant spike detection via within-frame cepstral liftering.
+Catches room modes, microphone resonances, and isolated harmonic buildups
+anywhere in the active frequency range.
 
 Dependencies: numpy, scipy
 All processing is frame-based via STFT/ISTFT with overlap-add reconstruction.
@@ -18,7 +18,7 @@ import time
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import get_window
-from scipy.ndimage import uniform_filter1d, convolve1d
+from scipy.ndimage import convolve1d
 import logging
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,12 @@ DEFAULT_PARAMS = {
     "freq_floor_hz": 80.0,  # Don't process below this (HPF already handles sub-vocals).
     "freq_ceil_hz": 16000.0,# Don't process above this.
     "mode": "soft",         # "soft" = gradual knee; "hard" = linear above threshold.
-    "preserve_harmonics": False,  # Protect harmonic overtone bins from reduction.
+    "preserve_harmonics": True,   # Protect harmonic overtone bins from reduction.
+                                  # Must be True in production: cepstral liftering
+                                  # places the reference at the inter-harmonic floor,
+                                  # so vocal harmonics protrude above it and will be
+                                  # attenuated unless this mask is active.
+                                  # Set False only for testing / diagnostic runs.
     "harmonic_width_bins": 2,     # Minimum half-width of the protection zone (STFT
                                   # bins; 1 bin ≈ 21.5 Hz at 44.1 kHz / n_fft=2048).
                                   # Acts as a floor — higher harmonics automatically
@@ -138,12 +143,17 @@ class ResonanceSuppressor:
       7. Reconstruct via ISTFT with overlap-add.
 
     Detection reference:
-      Mel-domain smoothing averages power across a frequency-proportional
-      context window. At low frequencies the window is narrow in Hz, giving
-      precise spike detection among tightly-packed harmonics. At high
-      frequencies the window widens in Hz, providing appropriate context for
-      sparser spectral content. All averaging is in the power domain to prevent
-      the harmonic-valley bias that occurs when averaging in dB.
+      Cepstral liftering computes the real cepstrum of each frame's
+      log-magnitude spectrum (irfft of the one-sided log-magnitude), zeroes
+      all quefrency indices above a cutoff set just below the fundamental
+      quefrency (sr / f0), then transforms back (rfft). The pitch peak and
+      all harmonic overtones fall above the cutoff and are removed, leaving
+      only the smooth vocal-tract formant envelope. Because harmonic peaks
+      are excluded from the reference, it sits at the inter-harmonic floor
+      rather than being elevated by them -- room modes and mic resonances are
+      detectable at their true prominence regardless of proximity to vocal
+      harmonics. The lifter cutoff is f0-adaptive (40 % of sr/f0 samples),
+      floored at 20 samples to prevent degenerate behaviour on high f0 input.
 
     Sharpness:
       Controls the shape of the applied attenuation, not the detection.
@@ -164,12 +174,22 @@ class ResonanceSuppressor:
         n_fft: int = 2048,
         hop_length: int = 512,
         params: dict = None,
-        f0: float = 109.4,
+        f0: float = None,
+        f0_contour: list | None = None,
     ):
         self.sr         = sample_rate
         self.n_fft      = n_fft
         self.hop_length = hop_length
+
+        # If a per-frame contour is supplied, derive the scalar f0 from its
+        # median so the lifter cutoff is calibrated to the actual speaker pitch
+        # rather than a hardcoded default.
+        if f0_contour and not f0:
+            valid = [v for v in f0_contour if v and v > 0]
+            f0 = float(np.median(valid)) if valid else None
+
         self.f0         = f0
+        self.f0_contour = f0_contour  # per-frame list, aligned to STFT frames
 
         self.params = resolve_params(params)
 
@@ -181,26 +201,19 @@ class ResonanceSuppressor:
             (self.freqs <= self.params["freq_ceil_hz"])
         )
 
-        # --- Mel-domain smoothing setup ---
-        mel_of_freq = lambda f: 2595.0 * np.log10(1.0 + np.asarray(f, dtype=float) / 700.0)
-
-        self.mel_freqs = mel_of_freq(np.maximum(self.freqs, 1.0))
-        mel_min        = float(self.mel_freqs[1])
-        mel_max        = float(self.mel_freqs[-1])
-        self.mel_grid  = np.linspace(mel_min, mel_max, self.n_bins)
-
-        mel_bin_width        = (mel_max - mel_min) / self.n_bins
-        self.mel_window_bins = max(3, int(120.0 / mel_bin_width))
-
-        # Precompute interpolation indices/weights for the two mel-mapping
-        # passes (linear -> mel grid, mel grid -> linear). Replaces a per-frame
-        # np.interp() pair with simple gather + lerp in vectorised form.
-        self._fwd_left, self._fwd_right, self._fwd_frac = self._build_interp(
-            self.mel_freqs, self.mel_grid,
-        )
-        self._inv_left, self._inv_right, self._inv_frac = self._build_interp(
-            self.mel_grid, self.mel_freqs,
-        )
+        # --- Cepstral liftering setup ---
+        # Lifter cutoff must stay below the pitch quefrency (sr / f0 samples)
+        # so the pitch peak and all harmonic overtones are zeroed out, leaving
+        # only the smooth vocal-tract envelope. 40 % of the fundamental
+        # quefrency is a conservative margin: it retains formant detail (broad
+        # spectral features spanning hundreds of Hz) while excluding all
+        # harmonic content even for low bass voices (~80 Hz f0 -> cutoff ~220).
+        # Floor of 20 prevents degenerate behaviour on very high f0 input.
+        if f0 and f0 > 0:
+            self._lifter_cutoff = max(20, int(0.40 * sample_rate / f0))
+        else:
+            # No f0 supplied: default is safe for f0 >= ~295 Hz.
+            self._lifter_cutoff = 60
 
         # --- Sharpness: Gaussian spreading kernel ---
         sharpness   = self.params["sharpness"]
@@ -219,8 +232,17 @@ class ResonanceSuppressor:
         self.attack_coeff  = self._time_to_coeff(self.params["attack_ms"],  frame_period_ms)
         self.release_coeff = self._time_to_coeff(self.params["release_ms"], frame_period_ms)
 
-        # --- Harmonic protection mask ---
-        self._harmonic_mask = self._build_harmonic_mask()
+        # --- Harmonic protection ---
+        # _mask_cache: maps rounded f0 value → precomputed bool mask so each
+        # unique pitch level is only built once even when the contour contains
+        # hundreds of distinct values.
+        # _static_harmonic_mask: fallback when no contour is provided.
+        self._mask_cache           = {}
+        self._static_harmonic_mask = (
+            self._compute_harmonic_mask_for_f0(self.f0)
+            if self.params.get("preserve_harmonics") and self.f0
+            else None
+        )
 
         # --- Cached overlap-add window (computed once per instance) ---
         self._window         = get_window("hann", n_fft, fftbins=True).astype(np.float32)
@@ -228,10 +250,11 @@ class ResonanceSuppressor:
 
         logger.info(
             f"ResonanceSuppressor init | n_fft={n_fft} | "
-            f"mel_window={self.mel_window_bins} bins | "
+            f"lifter_cutoff={self._lifter_cutoff} samples | "
             f"selectivity={self.params['selectivity']} dB | depth={self.params['depth']} | "
             f"sharpness={sharpness} | max_cut={self.params['max_reduction_db']} dB | "
-            f"preserve_harmonics={self.params['preserve_harmonics']}"
+            f"preserve_harmonics={self.params['preserve_harmonics']} | "
+            f"f0_mode={'contour' if f0_contour else 'scalar'}"
         )
 
     @staticmethod
@@ -240,29 +263,15 @@ class ResonanceSuppressor:
             return 1.0
         return np.exp(-frame_period_ms / time_ms)
 
-    @staticmethod
-    def _build_interp(xp: np.ndarray, x: np.ndarray):
-        """
-        Precompute (left_idx, right_idx, frac) so that
-            np.interp(x, xp, fp) == fp[left_idx] * (1 - frac) + fp[right_idx] * frac
-        for any monotonically increasing xp. Out-of-range x clamps to xp's
-        endpoints (matches np.interp default).
-        """
-        n = len(xp)
-        idx_right = np.searchsorted(xp, x, side="right")
-        idx_right = np.clip(idx_right, 1, n - 1).astype(np.int64)
-        idx_left  = idx_right - 1
-        denom     = xp[idx_right] - xp[idx_left]
-        frac      = np.where(denom > 0, (x - xp[idx_left]) / denom, 0.0)
-        frac      = np.clip(frac, 0.0, 1.0).astype(np.float32)
-        return idx_left, idx_right, frac
-
-    def _build_harmonic_mask(self) -> np.ndarray | None:
+    def _compute_harmonic_mask_for_f0(self, f0_val: float) -> np.ndarray | None:
         """
         Return a boolean array of shape (n_bins,) where True marks bins that
-        belong to a harmonic overtone of f0 and should be protected from
-        reduction.  Returns None when preserve_harmonics is False or f0 is
-        unavailable, so the call-site can skip the mask with a simple guard.
+        belong to a harmonic overtone of f0_val and should be protected from
+        reduction.  Returns None when f0_val is invalid.
+
+        Results are cached in self._mask_cache keyed by f0_val rounded to the
+        nearest Hz, so each distinct pitch level across the contour is only
+        computed once.
 
         Protection zone: per-harmonic half-width is the larger of:
           • harmonic_width_bins  — fixed bin floor (low-frequency minimum)
@@ -273,28 +282,25 @@ class ResonanceSuppressor:
         band-summary reporter, guaranteeing every bin labelled is_harmonic=True
         is also inside the protection zone.
         """
-        if not self.params.get("preserve_harmonics", False):
-            return None
-        if not self.f0 or self.f0 <= 0:
-            logger.warning(
-                "ResonanceSuppressor: preserve_harmonics=True but f0 is not set "
-                "— harmonic protection disabled."
-            )
+        if not f0_val or f0_val <= 0:
             return None
 
-        bin_width   = self.sr / self.n_fft
-        min_half    = int(self.params["harmonic_width_bins"])
-        width_pct   = float(self.params.get("harmonic_width_pct", 0.03))
-        max_h       = int(self.params["max_harmonic"])
-        freq_ceil   = float(self.params["freq_ceil_hz"])
-        mask        = np.zeros(self.n_bins, dtype=bool)
-        protected   = []
+        cache_key = round(f0_val)
+        if cache_key in self._mask_cache:
+            return self._mask_cache[cache_key]
+
+        bin_width = self.sr / self.n_fft
+        min_half  = int(self.params["harmonic_width_bins"])
+        width_pct = float(self.params.get("harmonic_width_pct", 0.03))
+        max_h     = int(self.params["max_harmonic"])
+        freq_ceil = float(self.params["freq_ceil_hz"])
+        mask      = np.zeros(self.n_bins, dtype=bool)
 
         # Iterate until the harmonic exceeds freq_ceil_hz or the hard max_harmonic
         # cap, whichever comes first.  This prevents unprotected vocal harmonics
         # above the old fixed H20 cap from being treated as suppressible spikes.
         for h in range(1, max_h + 1):
-            freq = h * self.f0
+            freq = h * f0_val
             if freq > freq_ceil or freq > self.freqs[-1]:
                 break
             center   = int(round(freq / bin_width))
@@ -303,55 +309,77 @@ class ResonanceSuppressor:
             lo = max(0, center - half)
             hi = min(self.n_bins - 1, center + half)
             mask[lo : hi + 1] = True
-            protected.append(f"H{h}={freq:.0f}Hz(±{half}bins,{lo}-{hi})")
 
-        logger.info(
-            f"ResonanceSuppressor: harmonic protection active | "
-            f"f0={self.f0:.1f} Hz | min_half={min_half} bins | "
-            f"width_pct={width_pct*100:.1f}% | "
-            f"protected overtones: {', '.join(protected)}"
-        )
+        self._mask_cache[cache_key] = mask
         return mask
 
-    def _smoothed_envelope_matrix(self, magnitude_db: np.ndarray) -> np.ndarray:
+    def _cepstral_envelope_matrix(self, magnitude_db: np.ndarray) -> np.ndarray:
         """
-        Mel-domain smoothed reference envelope for a batch of frames.
+        Cepstral liftering reference envelope for a batch of frames.
 
         Args:
             magnitude_db: (n_frames, n_bins) magnitude in dB.
 
         Returns:
-            (n_frames, n_bins) smoothed reference in dB. Power-domain averaging
-            prevents harmonic-valley bias.
+            (n_frames, n_bins) smooth spectral envelope in dB, with harmonic
+            structure removed.
+
+        The real cepstrum is computed by treating each frame's one-sided
+        log-magnitude spectrum as a real one-sided spectrum and inverting it
+        (irfft). Zeroing all quefrency indices above self._lifter_cutoff
+        removes the pitch peak and all harmonic overtones — they all fall at
+        multiples of sr/f0 samples, well above the cutoff. Transforming back
+        (rfft) gives a reference that sits at the inter-harmonic floor rather
+        than being elevated by harmonic peaks, so room modes and mic resonances
+        are detectable at their true prominence regardless of their proximity
+        to vocal harmonics.
+
+        The round-trip (irfft -> zero middle -> rfft of a real-valued input)
+        is exact in theory; .real discards any floating-point residue.
         """
-        power     = np.power(10.0, magnitude_db / 10.0, dtype=np.float32)
-        # Forward map: linear-bin power -> mel-grid power via gather + lerp.
-        one_minus_fwd = (1.0 - self._fwd_frac).astype(np.float32, copy=False)
-        mel_power = (
-            power[:, self._fwd_left]  * one_minus_fwd
-            + power[:, self._fwd_right] * self._fwd_frac
-        )
-        mel_smoothed = uniform_filter1d(
-            mel_power, size=self.mel_window_bins, mode="reflect", axis=1,
-        )
-        # Reverse map: mel-grid -> linear bins.
-        one_minus_inv = (1.0 - self._inv_frac).astype(np.float32, copy=False)
-        pass1_power = (
-            mel_smoothed[:, self._inv_left]  * one_minus_inv
-            + mel_smoothed[:, self._inv_right] * self._inv_frac
-        )
-        return 10.0 * np.log10(pass1_power + 1e-10)
+        n_fft = self.n_fft
+        # Real cepstrum: treat the one-sided log-magnitude as a real one-sided
+        # spectrum and invert to a full-length cepstrum.
+        cepstrum = np.fft.irfft(magnitude_db, n=n_fft, axis=1)  # (n_frames, n_fft)
+
+        # Rectangular lifter: zero the high-quefrency middle section.
+        # Kept: indices 0..L-1 and n_fft-L+1..n_fft-1 (symmetric about zero).
+        # Zeroed: indices L..n_fft-L (pitch peak and all harmonic overtones).
+        L        = self._lifter_cutoff
+        liftered = cepstrum.copy()
+        liftered[:, L : n_fft - L + 1] = 0.0
+
+        # Back to log-magnitude domain; discard floating-point imaginary residue.
+        envelope_db = np.fft.rfft(liftered, n=n_fft, axis=1).real[:, : self.n_bins]
+        return envelope_db.astype(np.float32, copy=False)
 
     def _compute_gain_reduction_matrix(
         self,
-        magnitude_db: np.ndarray,
-        smoothed_db:  np.ndarray,
+        magnitude_db:  np.ndarray,
+        smoothed_db:   np.ndarray,
+        harmonic_mask: np.ndarray | None = None,
     ) -> np.ndarray:
-        """Batched gain-reduction. Inputs/output shape (n_frames, n_bins)."""
+        """
+        Batched gain-reduction. Inputs/output shape (n_frames, n_bins).
+
+        Args:
+            magnitude_db:  Per-frame log-magnitude spectrum (n_frames, n_bins).
+            smoothed_db:   Cepstral envelope reference (n_frames, n_bins).
+            harmonic_mask: Boolean (n_bins,) array where True = protected bin.
+                           When a per-frame F0 contour is active this is the
+                           OR-union of masks across all frames in the chunk so
+                           every harmonic position visited during the chunk
+                           window is protected. Falls back to the static scalar
+                           mask when None is passed and self._static_harmonic_mask
+                           is set.
+        """
         p             = self.params
         selectivity   = p["selectivity"]
         depth         = p["depth"]
         max_reduction = p["max_reduction_db"]
+
+        # Resolve mask: explicit chunk mask takes priority over static fallback.
+        mask = harmonic_mask if harmonic_mask is not None else self._static_harmonic_mask
 
         spike_db        = magnitude_db - smoothed_db
         spike_db_masked = np.where(self.active_bins, spike_db, 0.0)
@@ -376,8 +404,8 @@ class ResonanceSuppressor:
         # energy is never convolved into neighbouring inter-harmonic bins.
         # Without this, a large harmonic spike bleeds at Gaussian weight into
         # the gaps on either side, defeating the protection intent.
-        if self._harmonic_mask is not None:
-            reduction_db[:, self._harmonic_mask] = 0.0
+        if mask is not None:
+            reduction_db[:, mask] = 0.0
 
         # Spread kernel applied along the bin axis for every frame at once.
         # Matches np.convolve(reduction_db, kernel, mode='same') per frame.
@@ -391,8 +419,8 @@ class ResonanceSuppressor:
         # Harmonic protection — post-spread pass.
         # Catches any residual bleed from genuine non-harmonic spikes that
         # are adjacent to a harmonic bin and spread into it after convolution.
-        if self._harmonic_mask is not None:
-            reduction_db[:, self._harmonic_mask] = 0.0
+        if mask is not None:
+            reduction_db[:, mask] = 0.0
 
         # Frequency boundary guard — post-spread pass.
         # Spread bleed from an active edge bin can cross freq_floor_hz /
@@ -490,10 +518,29 @@ class ResonanceSuppressor:
             magnitude    = np.abs(spectra)                         # (chunk_n, n_bins) float32
             magnitude_db = 20.0 * np.log10(magnitude + eps)
 
-            # Reference envelope + gain reduction in matrix form.
-            smoothed_db = self._smoothed_envelope_matrix(magnitude_db)
-            target_gr   = self._compute_gain_reduction_matrix(magnitude_db, smoothed_db)
-            target_gr   = target_gr.astype(np.float32, copy=False)
+            # Reference envelope.
+            smoothed_db = self._cepstral_envelope_matrix(magnitude_db)
+
+            # Per-chunk harmonic mask — OR-union across all frames in the chunk.
+            # When a per-frame F0 contour is available the pitch may shift
+            # within the chunk window; unioning the masks from every frame
+            # ensures no harmonic position visited during the window escapes
+            # protection, regardless of where in the chunk the pitch change
+            # happens.  Falls back to the static scalar mask when no contour
+            # was provided.
+            chunk_mask = None
+            if self.f0_contour and self.params.get("preserve_harmonics"):
+                chunk_f0s = self.f0_contour[chunk_start:chunk_end]
+                chunk_mask = np.zeros(self.n_bins, dtype=bool)
+                for f0_val in chunk_f0s:
+                    m = self._compute_harmonic_mask_for_f0(f0_val)
+                    if m is not None:
+                        chunk_mask |= m
+
+            target_gr = self._compute_gain_reduction_matrix(
+                magnitude_db, smoothed_db, harmonic_mask=chunk_mask,
+            )
+            target_gr = target_gr.astype(np.float32, copy=False)
 
             # Zero out non-voiced frames so the IIR releases through silence
             # rather than holding gain reduction over it.
@@ -658,11 +705,59 @@ def apply_resonance_suppression(
     params: dict = None,
     vad_voiced_mask: np.ndarray = None,
     f0: float = None,
+    f0_contour: list | None = None,
 ) -> dict:
-    """Stage 3b pipeline entry point."""
+    """
+    Stage 3b pipeline entry point.
+
+    Args:
+        audio:           Mono float32 array at sample_rate.
+        sample_rate:     Sample rate in Hz.
+        params:          Sparse parameter overrides (see DEFAULT_PARAMS).
+        vad_voiced_mask: Per-sample bool array for silence gating.
+        f0:              Scalar median F0 (Hz). Used as lifter cutoff when
+                         contour is absent; derived from contour median
+                         automatically when only f0_contour is supplied.
+        f0_contour:      Per-STFT-frame F0 list (Hz), aligned to the same
+                         framing as process() uses. Passed from getF0Contour()
+                         in f0Analysis.js. When provided, the harmonic mask
+                         tracks pitch changes frame-by-frame rather than using
+                         a fixed scalar position.
+    """
     t0 = time.perf_counter()
 
-    suppressor = ResonanceSuppressor(sample_rate=sample_rate, params=params, f0=f0)
+    # Derive scalar f0 from contour median when only the contour is provided.
+    if f0_contour and not f0:
+        valid = [v for v in f0_contour if v and v > 0]
+        f0 = float(np.median(valid)) if valid else None
+
+    # Guard: with cepstral liftering the reference sits at the inter-harmonic
+    # floor, so vocal harmonics protrude above it and will be attenuated unless
+    # the harmonic mask is active.  If preserve_harmonics=True (the production
+    # default) and neither a contour nor a scalar f0 is available, skip the
+    # stage rather than silently damaging the voice.
+    resolved = resolve_params(params)
+    if resolved.get("preserve_harmonics") and not f0 and not f0_contour:
+        logger.warning(
+            "ResonanceSuppressor: skipping stage — preserve_harmonics=True but "
+            "neither f0 nor f0_contour is set.  Supply pitch data from "
+            "getF0Contour() in f0Analysis.js, or set preserve_harmonics=False "
+            "explicitly for diagnostic runs."
+        )
+        return {
+            "audio":             audio,
+            "max_reduction_db":  0.0,
+            "mean_reduction_db": 0.0,
+            "spike_frames":      0,
+            "artifact_risk":     False,
+            "band_summary":      [],
+            "skipped":           True,
+            "process_seconds":   time.perf_counter() - t0,
+        }
+
+    suppressor = ResonanceSuppressor(
+        sample_rate=sample_rate, params=params, f0=f0, f0_contour=f0_contour,
+    )
 
     voiced_frame_indices = None
     if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
@@ -714,8 +809,11 @@ if __name__ == "__main__":
                              "from the file inherit from DEFAULT_PARAMS. "
                              "Sourced from the preset's resonanceSuppressor "
                              "block in src/audio/presets.js.")
-    parser.add_argument("--vad-mask-json", default=None)
-    parser.add_argument("--f0",            type=float, default=None)
+    parser.add_argument("--vad-mask-json",     default=None)
+    parser.add_argument("--f0",                type=float, default=None)
+    parser.add_argument("--f0-contour-json",   default=None,
+                        help="Path to JSON produced by estimate_f0_contour.py. "
+                             "Enables per-frame harmonic mask tracking.")
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
@@ -737,6 +835,16 @@ if __name__ == "__main__":
                 e = s + frame["lengthSamples"]
                 vad_voiced_mask[s:min(e, len(audio))] = True
 
-    result = apply_resonance_suppression(audio, sr, params, vad_voiced_mask, args.f0)
+    f0_contour = None
+    if args.f0_contour_json:
+        with open(args.f0_contour_json) as fh:
+            contour_data = json.load(fh)
+        f0_contour = contour_data.get("perFrame")
+        if not args.f0 and contour_data.get("median"):
+            args.f0 = float(contour_data["median"])
+
+    result = apply_resonance_suppression(
+        audio, sr, params, vad_voiced_mask, args.f0, f0_contour,
+    )
     wavfile.write(args.output, sr, result["audio"])
     print("JSON_RESULT:" + json.dumps(resonance_suppressor_report_entry(result)), flush=True)

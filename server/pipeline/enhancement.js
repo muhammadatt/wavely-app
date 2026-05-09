@@ -196,11 +196,18 @@ export function runClickRemover(inputPath, outputPath, params = {}) {
  * @param {string}        presetId    e.g. 'acx_audiobook'
  * @param {object[]|null} frames      ctx.results.metrics.frames — written to a temp
  *   JSON file for VAD gating. Pass null to suppress VAD gating (full-file mode).
- * @param {number|null}   f0          Estimated fundamental frequency for harmonic cross-referencing
+ * @param {{ median: number, perFrame: number[], nFft: number, hopLength: number }|null} f0Contour
+ *   Per-frame F0 contour from getF0Contour() in f0Analysis.js. When provided, the
+ *   harmonic mask tracks pitch changes frame-by-frame rather than using a fixed
+ *   scalar position. Pass null to skip harmonic protection (diagnostic runs only).
  * @returns {Promise<object>}  Result dict from resonance_suppressor_report_entry()
  */
-export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames, f0 = null) {
-  console.log(`[ResonanceSuppressor] Starting: preset=${presetId} | input=${inputPath}`)
+export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames, f0Contour = null) {
+  console.log(
+    `[ResonanceSuppressor] Starting: preset=${presetId} | ` +
+    `f0=${f0Contour ? `${f0Contour.median}Hz (contour, ${f0Contour.perFrame?.length} frames)` : 'none'} | ` +
+    `input=${inputPath}`,
+  )
   const startTime = Date.now()
 
   const args = [
@@ -219,7 +226,15 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
     args.push('--params-json', paramsPath)
   }
 
-  if (f0 != null) args.push('--f0', String(f0))
+  // Write the F0 contour to a temp JSON so the Python CLI can load it as
+  // --f0-contour-json. The script also extracts the median and uses it as
+  // the lifter cutoff scalar, so no separate --f0 arg is needed.
+  let f0ContourPath = null
+  if (f0Contour?.perFrame?.length > 0) {
+    f0ContourPath = tempPath('.json')
+    await writeFile(f0ContourPath, JSON.stringify(f0Contour))
+    args.push('--f0-contour-json', f0ContourPath)
+  }
 
   let vadMaskPath = null
   if (frames && frames.length > 0) {
@@ -233,8 +248,9 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
   try {
     result = await runResonanceScript(args)
   } finally {
-    if (paramsPath)  await rm(paramsPath,  { force: true })
-    if (vadMaskPath) await rm(vadMaskPath, { force: true })
+    if (paramsPath)    await rm(paramsPath,    { force: true })
+    if (f0ContourPath) await rm(f0ContourPath, { force: true })
+    if (vadMaskPath)   await rm(vadMaskPath,   { force: true })
   }
 
   const durationMs = Date.now() - startTime

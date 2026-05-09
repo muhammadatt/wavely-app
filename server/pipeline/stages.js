@@ -50,6 +50,7 @@ import { applyVocalExpander } from './vocalExpander.js'
 import { applyVadGate }       from './vadGate.js'
 import { analyzeHum } from './humEQ.js'
 import { applyAirBoost } from './airBoost.js'
+import { getF0Contour } from './f0Analysis.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -530,12 +531,19 @@ export async function enhancementEQ(ctx) {
 export async function resonanceSuppressor(ctx) {
   const outPath = ctx.tmp('.wav')
   const frames  = ctx.results.metrics?.frames ?? null
-  const f0 = ctx.results.deEss?.f0Hz ?? 226 // Hardcoded fallback if deEss runs after this stage
-  const result  = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0)
+
+  // Per-frame F0 contour from the centralized pitch cache. getF0Contour() runs
+  // estimate_f0_contour.py on first call and returns the cached result on all
+  // subsequent calls within the same pipeline run — zero marginal cost when the
+  // de-esser (which also consumes F0) has already triggered the computation.
+  const f0Contour = await getF0Contour(ctx)
+
+  const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0Contour)
   if (result.applied) ctx.currentPath = outPath
   ctx.results.resonanceSuppressor = result
   await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
     skipped:       result.applied === false,
+    f0_median:     f0Contour?.median ?? 'n/a',
     max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
     artifact_risk: result.artifact_risk ?? false,
     process_s:     result.process_seconds ?? 'n/a',
