@@ -496,6 +496,6 @@ export function runRoomPresence(inputPath, outputPath, params = {}) {
   if (params.wet        != null) args.push('--wet',          String(params.wet))
   if (params.rt60Ms     != null) args.push('--rt60-ms',      String(params.rt60Ms))
   if (params.preDelayMs != null) args.push('--pre-delay-ms', String(params.preDelayMs))
-  if (params.diffusion  != null) args.push('--diffusion',    String(params.diffusion))
+  if (params.earlyReflections != null) args.push('--early-reflections', String(params.earlyReflections))
   return spawnPython(ROOM_PRESENCE_SCRIPT, args, 'RoomPresence')
 }

@@ -28,54 +28,69 @@ PIPELINE_SR = 44100
 _RNG_SEED   = 42
 
 
-def _generate_ir(sr, rt60_ms, pre_delay_ms, diffusion):
-    """
-    Build a synthetic exponential-decay IR.
+def generate_room_presence_ir(
+    sample_rate=44100,
+    rt60_ms=150.0,
+    pre_delay_ms=10.0,
+    early_reflection_count=2
+):
+    pre_delay_samples = int(pre_delay_ms * sample_rate / 1000)
+    tail_samples      = int(rt60_ms * 3 * sample_rate / 1000)
+    total_samples     = pre_delay_samples + tail_samples
 
-    rt60_ms:      -60 dB decay time in milliseconds
-    pre_delay_ms: silence before reverb onset (keeps the onset tight)
-    diffusion:    0.0 = bright/sparse tail, 1.0 = dark/dense tail
-                  (controls low-pass cutoff of the noise tail)
-    """
-    rng = np.random.default_rng(seed=_RNG_SEED)
+    ir = np.zeros(total_samples, dtype=np.float32)
 
-    rt60_s        = rt60_ms      / 1000.0
-    pre_delay_s   = pre_delay_ms / 1000.0
+    # NO direct impulse — wet-only IR.
+    # The dry signal is handled entirely by the mix formula.
 
-    # Tail long enough to capture full -60 dB decay
-    tail_samples      = int(sr * rt60_s * 2)
-    pre_delay_samples = int(sr * pre_delay_s)
+    early_delays_ms = [13.4, 29.7]
+    early_gains     = [0.09, 0.05]
+    for delay_ms, gain in zip(early_delays_ms[:early_reflection_count], early_gains):
+        idx = int(delay_ms * sample_rate / 1000)
+        if idx < total_samples:
+            ir[idx] += gain
 
-    # White noise tail
-    noise = rng.standard_normal(tail_samples).astype(np.float64)
+    N         = tail_samples
+    freqs_ir  = np.fft.rfftfreq(N, d=1.0 / sample_rate)
+    magnitude = np.ones(len(freqs_ir), dtype=np.float32)
+    magnitude *= np.clip(freqs_ir / 120.0, 0.0, 1.0)
+    fc        = 2800.0
+    hf_mask   = freqs_ir > fc
+    magnitude[hf_mask] *= np.exp(
+        -((freqs_ir[hf_mask] - fc) / (fc * 0.4)) ** 2
+    ).astype(np.float32)
 
-    # Low-pass to shape density/warmth: diffusion 0.0 → 8 kHz, 1.0 → 3 kHz
-    lp_cutoff = 8000.0 - diffusion * 5000.0
-    sos       = scipy.signal.butter(2, lp_cutoff / (sr / 2.0), btype='low', output='sos')
-    noise     = scipy.signal.sosfilt(sos, noise)
+    rng   = np.random.default_rng(seed=42)
+    phase = rng.uniform(-np.pi, np.pi, len(freqs_ir)).astype(np.float32)
+    tail  = np.fft.irfft(magnitude * np.exp(1j * phase), n=N).astype(np.float32)
 
-    # Exponential decay: e^(-6.9 * t / RT60) for exact -60 dB at t = RT60
-    t      = np.arange(tail_samples) / sr
-    decay  = np.exp(-6.9 * t / rt60_s)
-    noise *= decay
+    ramp_samples               = int(0.015 * sample_rate)
+    density_ramp               = np.ones(N, dtype=np.float32)
+    density_ramp[:ramp_samples] = np.linspace(0.0, 1.0, ramp_samples)
+    tail *= density_ramp
 
-    # Assemble IR: pre-delay silence + decaying tail
-    ir = np.zeros(pre_delay_samples + tail_samples, dtype=np.float32)
-    ir[pre_delay_samples:] = noise.astype(np.float32)
+    t              = np.arange(N) / sample_rate
+    rt60_s         = rt60_ms / 1000.0
+    decay_envelope = np.exp(-3.0 * np.log(10) * t / rt60_s).astype(np.float32)
+    tail          *= decay_envelope
 
-    # Normalise to unit energy so wet mix fraction is predictable
-    energy = np.sqrt(np.sum(ir ** 2)) + 1e-12
-    ir    /= energy
+    ir[pre_delay_samples:] = tail
+
+    # L2 normalize — gives the IR unit energy so wet mix is intuitive.
+    # At wet=0.08 the reverb sits ~22 dB below dry, which is the right
+    # level for a bloom effect.
+    energy = np.sqrt(np.sum(ir ** 2))
+    if energy > 0:
+        ir /= energy
 
     return ir
 
 
-def _apply_room_presence(audio, sr, wet, rt60_ms, pre_delay_ms, diffusion):
-    """Convolve audio with synthetic IR and wet/dry mix."""
-    ir         = _generate_ir(sr, rt60_ms, pre_delay_ms, diffusion)
-    # fftconvolve is O(N log N); trim output to input length
-    wet_signal = scipy.signal.fftconvolve(audio, ir)[:len(audio)]
-    output     = (1.0 - wet) * audio + wet * wet_signal.astype(np.float32)
+def _apply_room_presence(audio, sr, wet, rt60_ms, pre_delay_ms, early_reflections):
+    ir      = generate_room_presence_ir(sr, rt60_ms, pre_delay_ms, early_reflections)
+    reverb  = scipy.signal.fftconvolve(audio, ir)[:len(audio)].astype(np.float32)
+    # Dry stays at full level. wet is a reverb send — how much bloom to add.
+    output  = audio + wet * reverb
     return np.clip(output, -1.0, 1.0).astype(np.float32)
 
 
@@ -86,7 +101,7 @@ def main():
     parser.add_argument('--wet',            type=float, default=0.08,   help='Wet mix fraction 0.0–0.3 (default 0.08)')
     parser.add_argument('--rt60-ms',        type=float, default=80.0,   help='RT60 decay time in ms, 20–200 (default 80)')
     parser.add_argument('--pre-delay-ms',   type=float, default=1.5,    help='Pre-delay in ms, 0–5 (default 1.5)')
-    parser.add_argument('--diffusion',      type=float, default=0.7,    help='Tail density/warmth 0.0–1.0 (default 0.7)')
+    parser.add_argument('--early-reflections', type=int,   default=2,      help='Number of early reflections 0–2 (default 2)')
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
@@ -98,17 +113,17 @@ def main():
         sys.exit(1)
 
     # Guard parameter ranges
-    wet        = float(np.clip(args.wet,          0.0,  0.3))
-    rt60_ms    = float(np.clip(args.rt60_ms,     20.0, 200.0))
-    pre_delay  = float(np.clip(args.pre_delay_ms, 0.0,   5.0))
-    diffusion  = float(np.clip(args.diffusion,    0.0,   1.0))
+    wet               = float(np.clip(args.wet,          0.0,  0.3))
+    rt60_ms           = float(np.clip(args.rt60_ms,     20.0, 200.0))
+    pre_delay         = float(np.clip(args.pre_delay_ms, 0.0,   5.0))
+    early_reflections = int(np.clip(args.early_reflections, 0, 2))
 
     if audio.ndim == 1:
-        result = _apply_room_presence(audio, sr, wet, rt60_ms, pre_delay, diffusion)
+        result = _apply_room_presence(audio, sr, wet, rt60_ms, pre_delay, early_reflections)
     else:
         # Process each channel independently with the same IR
         channels = [
-            _apply_room_presence(audio[:, ch], sr, wet, rt60_ms, pre_delay, diffusion)
+            _apply_room_presence(audio[:, ch], sr, wet, rt60_ms, pre_delay, early_reflections)
             for ch in range(audio.shape[1])
         ]
         result = np.stack(channels, axis=1)
@@ -116,7 +131,7 @@ def main():
     wavfile.write(args.output, sr, result)
     print(
         f'[room_presence] applied wet={wet} rt60={rt60_ms}ms '
-        f'pre_delay={pre_delay}ms diffusion={diffusion}',
+        f'pre_delay={pre_delay}ms early_reflections={early_reflections}',
         file=sys.stderr,
     )
 

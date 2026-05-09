@@ -876,16 +876,16 @@ export async function roomPresence(ctx) {
     return
   }
 
-  const wet        = cfg.wet        ?? 0.08
-  const rt60Ms     = cfg.rt60Ms     ?? 80
-  const preDelayMs = cfg.preDelayMs ?? 1.5
-  const diffusion  = cfg.diffusion  ?? 0.7
+  const wet              = cfg.wet               ?? 0.08
+  const rt60Ms           = cfg.rt60Ms            ?? 80
+  const preDelayMs       = cfg.preDelayMs        ?? 1.5
+  const earlyReflections = cfg.early_reflections ?? 2
 
   const outPath = ctx.tmp('.wav')
-  await runRoomPresence(ctx.currentPath, outPath, { wet, rt60Ms, preDelayMs, diffusion })
-  ctx.currentPath       = outPath
-  ctx.results.roomPresence = { applied: true, wet, rt60Ms, preDelayMs, diffusion }
-  ctx.log(`[room-presence] applied wet=${wet} rt60=${rt60Ms}ms pre_delay=${preDelayMs}ms diffusion=${diffusion}`)
+  await runRoomPresence(ctx.currentPath, outPath, { wet, rt60Ms, preDelayMs, earlyReflections })
+  ctx.currentPath          = outPath
+  ctx.results.roomPresence = { applied: true, wet, rt60Ms, preDelayMs, earlyReflections }
+  ctx.log(`[room-presence] applied wet=${wet} rt60=${rt60Ms}ms pre_delay=${preDelayMs}ms early_reflections=${earlyReflections}`)
 }
 
 // ── Stage: Normalize ──────────────────────────────────────────────────────────

@@ -104,7 +104,7 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: "dBFS RMS" },
     truePeakCeiling: -3,
     noiseFloorTarget: -60,
-    noiseModel: "df3",
+    noiseModel: "rnnoise", //"df3", "rnnoise", "dtln"
     eqProfile: "audiobook",
     bweModel: "lavasr",
     bwe: {
@@ -136,7 +136,7 @@ export const PRESETS = {
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.05,
+      wetDry: 0.0,
       bias: 0.08,
     },
     compression: [
@@ -187,7 +187,7 @@ export const PRESETS = {
     // highFreqDepth - reduces gain reduction for noise outside the top of the frequency band --
     // e.g. (0.25) preserves breath/fricative transparency above 800 Hz.
     vocalExpander: {
-      enabled: true,
+      enabled: false,
       ratio: 2.5,
       highFreqDepth: 1,
       headroomOffsetDb: 6,
@@ -218,28 +218,28 @@ export const PRESETS = {
     // ACX: lower strength preserves the natural vocal character ACX human reviewers
     // expect; transient shaper disabled to avoid any risk of gating room tone.
     spectralSubtraction: {
-      enabled: true,
+      enabled: false,
       alphaDd: 0.98,
       beta: 0.15,
       strength: 0.7,
       transientShaper: true,
     },
-    airBoost: { gainDb: 6 },
+    airBoost: { gainDb: 8 },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
     // Conservative ACX tuning: higher dead zone and lower ceiling preserve
     // narration intelligibility; slower release avoids post-sibilant artifacts.
     sibilanceSuppressor: {
-      dead_zone_db: 8,
+      dead_zone_db: 6,
       release_ms: 50.0,
-      max_reduction_db: 6.0,
+      max_reduction_db: 12,
     },
     // Stage 3b — Resonance Suppressor. 
     // Conservative ACX tuning: moderate depth, high selectivity, slow attack/release
     resonanceSuppressor: {
-      depth: 0.5,
+      depth: 0.4,
       sharpness: 0.3,
-      selectivity: 0.1,
+      selectivity: 3,
       attack_ms: 25.0,
       release_ms: 80.0,
       max_reduction_db: 20.0,
@@ -256,11 +256,11 @@ export const PRESETS = {
       ratio: 3,
     },
     roomPresence: {
-      enabled: false,
-      wet: 0.05, // 0.12 - reverb tail sits ~17dB below direct
-      rt60Ms: 100, // presence without going washy; echoes after 200 - 250ms
-      preDelayMs: 20.0, // slight punch through before reverb onset
-      diffusion: 0.4, // brighter tail preserves air
+      enabled: true,
+      wet: 0.03, // 0.12 - reverb tail sits ~17dB below direct
+      rt60Ms: 150, // presence without going washy; echoes after 200 - 250ms
+      preDelayMs: 10.0, // slight punch through before reverb onset
+      early_reflections: 2
     },
   },
 

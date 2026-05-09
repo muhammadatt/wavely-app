@@ -355,7 +355,7 @@ class ResonanceSuppressor:
 
         spike_db        = magnitude_db - smoothed_db
         spike_db_masked = np.where(self.active_bins, spike_db, 0.0)
-        above_threshold = np.maximum(0.0, spike_db_masked)
+        above_threshold = np.maximum(0.0, spike_db_masked - selectivity)
 
         if p["mode"] == "soft":
             knee_width = selectivity * 0.5
