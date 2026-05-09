@@ -285,7 +285,7 @@ class ResonanceSuppressor:
           • harmonic_width_pct   — fraction of the overtone frequency in bins
                                    (scales with the harmonic so that the zone
                                    stays proportionally consistent up the series)
-        Default harmonic_width_pct=0.03 matches the 3 % tolerance used by the
+        Default harmonic_width_pct=0.01 matches the tolerance used by the
         band-summary reporter, guaranteeing every bin labelled is_harmonic=True
         is also inside the protection zone.
         """
@@ -298,7 +298,7 @@ class ResonanceSuppressor:
 
         bin_width = self.sr / self.n_fft
         min_half  = int(self.params["harmonic_width_bins"])
-        width_pct = float(self.params.get("harmonic_width_pct", 0.03))
+        width_pct = float(self.params.get("harmonic_width_pct", 0.01))
         max_h     = int(self.params["max_harmonic"])
         freq_ceil = float(self.params["freq_ceil_hz"])
         mask      = np.zeros(self.n_bins, dtype=bool)
@@ -372,13 +372,15 @@ class ResonanceSuppressor:
         Args:
             magnitude_db:  Per-frame log-magnitude spectrum (n_frames, n_bins).
             smoothed_db:   Cepstral envelope reference (n_frames, n_bins).
-            harmonic_mask: Boolean (n_bins,) array where True = protected bin.
-                           When a per-frame F0 contour is active this is the
-                           OR-union of masks across all frames in the chunk so
-                           every harmonic position visited during the chunk
-                           window is protected. Falls back to the static scalar
-                           mask when None is passed and self._static_harmonic_mask
-                           is set.
+            harmonic_mask: Optional boolean array where True = protected bin.
+                           Shape (n_bins,)         — static scalar-F0 path;
+                                                     broadcast to all rows.
+                           Shape (n_frames, n_bins) — per-frame contour path;
+                                                     each row protects only
+                                                     the harmonic positions at
+                                                     that frame's own pitch.
+                           When None, falls back to self._static_harmonic_mask
+                           (also None when no scalar f0 was supplied).
         """
         p             = self.params
         selectivity   = p["selectivity"]
