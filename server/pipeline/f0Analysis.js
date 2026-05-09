@@ -18,11 +18,11 @@
  *   { median: number, perFrame: number[], nFft: number, hopLength: number }
  */
 
-import { join }           from 'path'
+import { join, dirname }  from 'path'
 import { writeFile, rm }  from 'fs/promises'
 import { spawn }          from 'child_process'
 import { fileURLToPath }  from 'url'
-import { dirname }        from 'path'
+import { PYTHON }         from './spawnPython.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const F0_SCRIPT   = join(__dirname, '../scripts/estimate_f0_contour.py')
@@ -89,7 +89,7 @@ export async function getF0Contour(ctx) {
 
 function runF0Script(args) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('python', [F0_SCRIPT, ...args], {
+    const proc = spawn(PYTHON, [F0_SCRIPT, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stderr = ''

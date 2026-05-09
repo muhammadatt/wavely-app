@@ -237,16 +237,15 @@ export const PRESETS = {
     // Stage 3b — Resonance Suppressor. 
     // Conservative ACX tuning: moderate depth, high selectivity, slow attack/release
     resonanceSuppressor: {
-      depth: 0.4,
+      depth: 0.9,
       sharpness: 0.3,
-      selectivity: 3,
+      selectivity: 1,
       attack_ms: 25.0,
       release_ms: 80.0,
       max_reduction_db: 20.0,
       freq_floor_hz: 50.0,
       freq_ceil_hz: 10000.0,
       mode: "hard",
-      preserve_harmonics: true
     },
     //Gentle pre-compresion settings - designed for single voice use
     deEsser: {

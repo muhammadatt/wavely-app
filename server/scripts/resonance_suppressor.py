@@ -103,12 +103,19 @@ DEFAULT_PARAMS = {
                                   # Set False only for testing / diagnostic runs.
     "harmonic_width_bins": 2,     # Minimum half-width of the protection zone (STFT
                                   # bins; 1 bin ≈ 21.5 Hz at 44.1 kHz / n_fft=2048).
-                                  # Acts as a floor — higher harmonics automatically
-                                  # receive a wider zone scaled by harmonic_width_pct.
-    "harmonic_width_pct": 0.03,   # Protection half-width as a fraction of the overtone
-                                  # frequency (default 3 % matches the is_harmonic
-                                  # reporter tolerance). Whichever of harmonic_width_bins
-                                  # or harmonic_width_pct produces more bins wins.
+                                  # Matches the Hann window main lobe half-width —
+                                  # the physically correct floor regardless of frequency.
+                                  # Acts as the sole protection for low harmonics;
+                                  # harmonic_width_pct takes over above ~H20.
+    "harmonic_width_pct": 0.01,   # Protection half-width as a fraction of the overtone
+                                  # frequency (1 %). With a per-frame F0 contour the
+                                  # old 3 % value was compensating for pitch drift across
+                                  # frames — that is now handled by the contour itself.
+                                  # 1 % retains margin for F0 estimation quantization
+                                  # error at high harmonics (where lag rounding compounds)
+                                  # without over-protecting inter-harmonic spectrum.
+                                  # Whichever of harmonic_width_bins or harmonic_width_pct
+                                  # produces more bins wins.
     "max_harmonic": 100,          # Hard cap on overtones to protect (H1 … H<n>).
                                   # In practice freq_ceil_hz is the binding limit —
                                   # this cap only matters for pathologically low f0.
@@ -404,8 +411,16 @@ class ResonanceSuppressor:
         # energy is never convolved into neighbouring inter-harmonic bins.
         # Without this, a large harmonic spike bleeds at Gaussian weight into
         # the gaps on either side, defeating the protection intent.
+        #
+        # mask shape:
+        #   1D (n_bins,)        — static scalar-F0 path; broadcast to all rows.
+        #   2D (n_frames,n_bins)— per-frame contour path; each row protects only
+        #                         the harmonic positions at that frame's own pitch.
         if mask is not None:
-            reduction_db[:, mask] = 0.0
+            if mask.ndim == 1:
+                reduction_db[:, mask] = 0.0
+            else:
+                reduction_db[mask] = 0.0
 
         # Spread kernel applied along the bin axis for every frame at once.
         # Matches np.convolve(reduction_db, kernel, mode='same') per frame.
@@ -420,7 +435,10 @@ class ResonanceSuppressor:
         # Catches any residual bleed from genuine non-harmonic spikes that
         # are adjacent to a harmonic bin and spread into it after convolution.
         if mask is not None:
-            reduction_db[:, mask] = 0.0
+            if mask.ndim == 1:
+                reduction_db[:, mask] = 0.0
+            else:
+                reduction_db[mask] = 0.0
 
         # Frequency boundary guard — post-spread pass.
         # Spread bleed from an active edge bin can cross freq_floor_hz /
@@ -521,21 +539,24 @@ class ResonanceSuppressor:
             # Reference envelope.
             smoothed_db = self._cepstral_envelope_matrix(magnitude_db)
 
-            # Per-chunk harmonic mask — OR-union across all frames in the chunk.
-            # When a per-frame F0 contour is available the pitch may shift
-            # within the chunk window; unioning the masks from every frame
-            # ensures no harmonic position visited during the window escapes
-            # protection, regardless of where in the chunk the pitch change
-            # happens.  Falls back to the static scalar mask when no contour
-            # was provided.
+            # Per-frame harmonic mask from contour.
+            # Shape: (chunk_n, n_bins) — each row is the protection mask for
+            # that specific frame's F0 value.  A 2D mask is required here
+            # because OR-unioning into a single 1D mask across a 2048-frame
+            # chunk (~24 s) accumulates every harmonic position visited over
+            # the entire chunk window.  With natural pitch drift (e.g. 160–220 Hz)
+            # the union blankets large swaths of spectrum at each harmonic
+            # level, leaving nothing above the threshold — zero suppression.
+            # Keeping masks per-frame ensures each frame is only protected at
+            # its own pitch position, not at every pitch visited in the chunk.
             chunk_mask = None
             if self.f0_contour and self.params.get("preserve_harmonics"):
                 chunk_f0s = self.f0_contour[chunk_start:chunk_end]
-                chunk_mask = np.zeros(self.n_bins, dtype=bool)
-                for f0_val in chunk_f0s:
+                chunk_mask = np.zeros((chunk_n, self.n_bins), dtype=bool)
+                for j, f0_val in enumerate(chunk_f0s):
                     m = self._compute_harmonic_mask_for_f0(f0_val)
                     if m is not None:
-                        chunk_mask |= m
+                        chunk_mask[j] = m
 
             target_gr = self._compute_gain_reduction_matrix(
                 magnitude_db, smoothed_db, harmonic_mask=chunk_mask,
@@ -660,9 +681,18 @@ class ResonanceSuppressor:
 
                     if self.f0 and self.f0 > 0:
                         h = int(round(peak_freq / self.f0))
-                        if 0 < h <= self.params["max_harmonic"] and abs(peak_freq - h * self.f0) / (h * self.f0) <= 0.03:
-                            band_info["harmonic"]    = f"H{h}={int(round(self.f0))} Hz"
-                            band_info["is_harmonic"] = True
+                        if 0 < h <= self.params["max_harmonic"]:
+                            h_freq    = h * self.f0
+                            bin_width = self.sr / self.n_fft
+                            min_half  = int(self.params["harmonic_width_bins"])
+                            width_pct = float(self.params.get("harmonic_width_pct", 0.01))
+                            pct_half  = int(round(h_freq * width_pct / bin_width))
+                            tol_hz    = max(min_half, pct_half) * bin_width
+                            if abs(peak_freq - h_freq) <= tol_hz:
+                                band_info["harmonic"]    = f"H{h}={int(round(self.f0))} Hz"
+                                band_info["is_harmonic"] = True
+                            else:
+                                band_info["is_harmonic"] = False
                         else:
                             band_info["is_harmonic"] = False
 
