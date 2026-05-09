@@ -27,6 +27,13 @@
  *   PIPELINE_LOG=true|1          Enable pipeline logging (disabled by default)
  *   PIPELINE_LOG_DIR=<path>      Override log root directory
  *                                (default: server/pipeline-logs)
+ *   PIPELINE_LOG_SNAPSHOTS=true|1  Copy audio WAV after each stage (default: false)
+ *                                  Skipping saves ~1 GB of disk writes per run and
+ *                                  eliminates copyFile overhead between stages.
+ *   PIPELINE_LOG_MEASURE=true|1    Run FFmpeg volumedetect + WASM LUFS measurement
+ *                                  after each audio-producing stage (default: false)
+ *                                  Skipping this is the primary source of the ~100 s
+ *                                  gap between summed step times and total elapsed.
  *
  * Intended for local development and pipeline optimisation only.
  * Do NOT enable in production — audio snapshots consume significant disk space.
@@ -39,6 +46,17 @@ import { measureAudio } from './measure.js'
 
 const LOG_ENABLED =
   process.env.PIPELINE_LOG === 'true' || process.env.PIPELINE_LOG === '1'
+
+// Whether to copy the WAV produced by each stage into the log directory.
+// Off by default — 19 × 60 MB copies add ~1 GB of disk writes per run.
+const LOG_SNAPSHOTS =
+  process.env.PIPELINE_LOG_SNAPSHOTS === 'true' || process.env.PIPELINE_LOG_SNAPSHOTS === '1'
+
+// Whether to run FFmpeg volumedetect + WASM LUFS/true-peak after each stage.
+// Off by default — this is the dominant source of the gap between summed step
+// times and total elapsed (≈ 100 s on a 6-minute file with 19 audio stages).
+const LOG_MEASURE =
+  process.env.PIPELINE_LOG_MEASURE === 'true' || process.env.PIPELINE_LOG_MEASURE === '1'
 
 const LOG_DIR = process.env.PIPELINE_LOG_DIR
   ? path.resolve(process.env.PIPELINE_LOG_DIR)
@@ -119,7 +137,11 @@ class PipelineLogger {
 
       await writeFile(this.logPath, header, 'utf8')
       this._ready = true
-      console.log(`[pipeline-log] ${this.runSlug} (${this.runId}) — logging to ${this.runDir}`)
+      const opts = [
+        LOG_MEASURE   ? 'measure=on'    : 'measure=off',
+        LOG_SNAPSHOTS ? 'snapshots=on'  : 'snapshots=off',
+      ].join('  ')
+      console.log(`[pipeline-log] ${this.runSlug} (${this.runId}) — logging to ${this.runDir}  [${opts}]`)
     } catch (err) {
       // A logger init failure must never crash the pipeline.
       console.warn(`[pipeline-log] Logger init failed — logging disabled for this run: ${err.message}`)
@@ -145,30 +167,38 @@ class PipelineLogger {
       const lines       = [`── Step ${idx}: ${stageName}${durationStr}`]
 
       if (audioPath) {
-        // Full audio measurement at this checkpoint.
-        // measureAudio runs FFmpeg volumedetect + libebur128 LUFS/true-peak in
-        // parallel, adding ~0.2–0.5 s per step — acceptable for a debug tool.
-        // Noise floor is no longer measured here; it lives on the silence
-        // analysis and is only captured at measureBefore / measureAfter.
-        try {
-          const m = await measureAudio(audioPath)
-          lines.push(
-            `   Audio:  RMS=${fmt(m.rmsDbfs)} dBFS  ` +
-            `TruePeak=${fmt(m.truePeakDbfs)} dBTP  ` +
-            `LUFS=${fmt(m.lufsIntegrated)}`
-          )
-        } catch (e) {
-          lines.push(`   Audio:  measurement failed — ${e.message}`)
+        // Per-step audio measurement (FFmpeg volumedetect + WASM LUFS/true-peak).
+        // Disabled by default: each call adds ~2–5 s on a 6-minute file and
+        // accounts for most of the gap between summed step times and total elapsed.
+        // Enable with PIPELINE_LOG_MEASURE=true when you need the per-step numbers.
+        if (LOG_MEASURE) {
+          try {
+            const m = await measureAudio(audioPath)
+            lines.push(
+              `   Audio:  RMS=${fmt(m.rmsDbfs)} dBFS  ` +
+              `TruePeak=${fmt(m.truePeakDbfs)} dBTP  ` +
+              `LUFS=${fmt(m.lufsIntegrated)}`
+            )
+          } catch (e) {
+            lines.push(`   Audio:  measurement failed — ${e.message}`)
+          }
         }
 
-        // Copy the audio snapshot to the run directory.
-        try {
-          const ext      = path.extname(audioPath) || '.wav'
-          const destName = `${idx}_${stageName}${ext}`
-          await copyFile(audioPath, path.join(this.runDir, destName))
-          lines.push(`   File:   ${destName}`)
-        } catch (e) {
-          lines.push(`   File:   copy failed — ${e.message}`)
+        // WAV snapshot copy.
+        // Disabled by default: 19 × 60 MB = ~1 GB of extra disk writes per run.
+        // Enable with PIPELINE_LOG_SNAPSHOTS=true when you need the audio files.
+        if (LOG_SNAPSHOTS) {
+          try {
+            const ext      = path.extname(audioPath) || '.wav'
+            const destName = `${idx}_${stageName}${ext}`
+            await copyFile(audioPath, path.join(this.runDir, destName))
+            lines.push(`   File:   ${destName}`)
+          } catch (e) {
+            lines.push(`   File:   copy failed — ${e.message}`)
+          }
+        } else {
+          // Always record which file was produced, even without the snapshot.
+          lines.push(`   File:   ${path.basename(audioPath)}  (snapshot off — set PIPELINE_LOG_SNAPSHOTS=true to copy)`)
         }
       }
 
