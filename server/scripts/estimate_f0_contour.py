@@ -83,11 +83,32 @@ def estimate_f0_contour(
         dict with keys: median (float), perFrame (list[float]),
                         nFft (int), hopLength (int).
     """
-    pad            = n_fft // 2
-    padded         = np.pad(audio.astype(np.float32), pad, mode="reflect")
-    n_samples      = len(audio)
-    n_frames       = max(0, (len(padded) - n_fft) // hop_length + 1)
-    f0_arr         = np.full(n_frames, np.nan, dtype=np.float64)
+    pad       = n_fft // 2
+    n_samples = len(audio)
+
+    # Short-audio guard: np.pad mode='reflect' requires pad < len(audio)
+    # (strictly less than). Clips shorter than n_fft // 2 samples (~23 ms at
+    # 44.1 kHz for the default n_fft=2048) would raise a ValueError.
+    # • Empty input  → return a one-frame contour seeded by the default median
+    #   so downstream stages always receive a non-empty perFrame list.
+    # • Short input  → fall back to 'edge' padding (repeats the boundary
+    #   sample) which is valid for any non-empty array and avoids the
+    #   step-discontinuity artefact that 'constant' (zero) padding introduces.
+    if n_samples == 0:
+        logger.warning("estimate_f0_contour: empty audio — returning default contour")
+        default_f0 = 120.0
+        return {"median": default_f0, "perFrame": [default_f0], "nFft": n_fft, "hopLength": hop_length}
+
+    pad_mode = "reflect" if n_samples > pad else "edge"
+    if pad_mode == "edge":
+        logger.warning(
+            f"estimate_f0_contour: audio ({n_samples} samples) shorter than "
+            f"pad ({pad} samples) — using 'edge' padding instead of 'reflect'"
+        )
+
+    padded   = np.pad(audio.astype(np.float32), pad, mode=pad_mode)
+    n_frames = max(0, (len(padded) - n_fft) // hop_length + 1)
+    f0_arr   = np.full(n_frames, np.nan, dtype=np.float64)
 
     for k in range(n_frames):
         start = k * hop_length
@@ -96,9 +117,17 @@ def estimate_f0_contour(
             break
 
         # Skip silence frames — their slots are forward-filled below.
+        # Vote across the frame window rather than probing a single center
+        # sample; a frame that straddles a voiced/silence boundary at its
+        # center would be misclassified by a single-sample probe.
         if vad_voiced_mask is not None:
-            mid = k * hop_length          # centre in original-audio coordinates
-            if 0 <= mid < n_samples and not vad_voiced_mask[mid]:
+            # Frame center in original-audio coordinates (center padding means
+            # frame k's center aligns to k * hop_length in the source signal).
+            frame_center = k * hop_length
+            half         = n_fft // 4   # vote window: ±25 % of frame length
+            lo = max(0, frame_center - half)
+            hi = min(n_samples, frame_center + half)
+            if lo >= hi or not vad_voiced_mask[lo:hi].any():
                 continue
 
         # Subsample: estimate every 3rd frame; forward-fill the rest.
@@ -148,7 +177,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
-    audio = audio.astype(np.float32)
+    # Normalize integer PCM to [-1, 1] so autocorrelation ratios are correct
+    # for silent passages (corr[0] ≈ 0 for a silent frame; without normalization
+    # int16 silence at 0 makes the ratio check vacuously pass).
+    # float32/float64 WAV is already in [-1, 1] — np.iinfo raises for float
+    # dtypes, so check first.
+    if np.issubdtype(audio.dtype, np.integer):
+        audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
+    else:
+        audio = audio.astype(np.float32)
 
     vad_voiced_mask = None
     if args.vad_mask_json:
