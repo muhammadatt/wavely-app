@@ -258,7 +258,7 @@ export const PRESETS = {
     roomPresence: {
       enabled: true,
       wet: 0.03, // 0.12 - reverb tail sits ~17dB below direct
-      rt60Ms: 150, // presence without going washy; echoes after 200 - 250ms
+      rt60Ms: 100, // presence without going washy; echoes after 200 - 250ms
       preDelayMs: 10.0, // slight punch through before reverb onset
       early_reflections: 2
     },

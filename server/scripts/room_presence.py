@@ -53,12 +53,10 @@ def generate_room_presence_ir(
     N         = tail_samples
     freqs_ir  = np.fft.rfftfreq(N, d=1.0 / sample_rate)
     magnitude = np.ones(len(freqs_ir), dtype=np.float32)
-    magnitude *= np.clip(freqs_ir / 120.0, 0.0, 1.0)
-    fc        = 2800.0
+    magnitude *= np.clip(freqs_ir / 250.0, 0.0, 1.0)
+    fc        = 4500.0
     hf_mask   = freqs_ir > fc
-    magnitude[hf_mask] *= np.exp(
-        -((freqs_ir[hf_mask] - fc) / (fc * 0.4)) ** 2
-    ).astype(np.float32)
+    magnitude[hf_mask] *= np.exp(-((freqs_ir[hf_mask] - fc) / (fc * 0.5)) ** 2)
 
     rng   = np.random.default_rng(seed=42)
     phase = rng.uniform(-np.pi, np.pi, len(freqs_ir)).astype(np.float32)
