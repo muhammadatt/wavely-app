@@ -199,7 +199,12 @@ export function runClickRemover(inputPath, outputPath, params = {}) {
  * @param {{ median: number, perFrame: number[], nFft: number, hopLength: number }|null} f0Contour
  *   Per-frame F0 contour from getF0Contour() in f0Analysis.js. When provided, the
  *   harmonic mask tracks pitch changes frame-by-frame rather than using a fixed
- *   scalar position. Pass null to skip harmonic protection (diagnostic runs only).
+ *   scalar position. If null is passed while `preserve_harmonics` remains enabled,
+ *   resonance_suppressor.py may skip the entire stage rather than only disabling
+ *   harmonic protection. To run without pitch data, callers must also override the
+ *   suppressor params to set `preserve_harmonics=false` (e.g. via the preset params
+ *   override path). Leaving `f0Contour` null without that override is intended only
+ *   for diagnostic / bypass scenarios.
  * @returns {Promise<object>}  Result dict from resonance_suppressor_report_entry()
  */
 export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames, f0Contour = null) {
