@@ -87,8 +87,16 @@ DEFAULT_PARAMS = {
     "sharpness": 0.5,       # Attenuation curve shape.
                             # 0.0 = wide gentle cuts (broad energy build-ups).
                             # 1.0 = deep narrow notches (precise resonances).
-    "selectivity": 5.0,     # Spike threshold in dB above smoothed floor.
-                            # Higher = fewer cuts, only the most prominent spikes.
+    "selectivity": 8.0,     # Spike threshold in dB above the cepstral inter-harmonic
+                            # floor.  IMPORTANT: this reference is ~8–15 dB BELOW
+                            # the spectral peak envelope, so selectivity must be set
+                            # much higher than it would be for a mel-smoothed reference
+                            # (which sits at the peaks).  8 dB catches genuine room
+                            # modes and mic resonances (typically 8–20 dB above the
+                            # floor) while leaving the normal ±3–5 dB inter-harmonic
+                            # spectral variation untouched.  Do NOT lower below ~6 dB —
+                            # values ≤ 3 dB will trigger on voiced speech excitation
+                            # noise and produce broad, audible spectral thinning.
     "attack_ms": 15.0,      # Gain reduction onset speed.
     "release_ms": 80.0,     # Gain reduction recovery speed.
     "max_reduction_db": 9.0,# Hard ceiling on reduction at any bin.

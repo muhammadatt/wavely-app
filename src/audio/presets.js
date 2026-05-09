@@ -234,18 +234,25 @@ export const PRESETS = {
       release_ms: 50.0,
       max_reduction_db: 12,
     },
-    // Stage 3b — Resonance Suppressor. 
-    // Conservative ACX tuning: moderate depth, high selectivity, slow attack/release
+    // Stage 3b — Resonance Suppressor.
+    // Conservative ACX tuning. selectivity is calibrated for the cepstral
+    // inter-harmonic floor reference, which sits ~8–15 dB below spectral
+    // peaks — so 8 dB here is equivalent to a very tight threshold on the
+    // old mel-smoothed reference.  depth and max_reduction are conservative
+    // to preserve the natural narration character ACX human reviewers expect.
+    // freq_floor_hz aligned with the Stage 1 HPF (80 Hz) — processing below
+    // it is wasted work on the filter's roll-off region, and the 80–H1 range
+    // has no harmonic protection, so low selectivity there causes sub-vocal cuts.
     resonanceSuppressor: {
-      depth: 0.9,
-      sharpness: 0.3,
-      selectivity: 1,
+      depth: 0.5,
+      sharpness: 0.6,
+      selectivity: 8,
       attack_ms: 25.0,
-      release_ms: 80.0,
-      max_reduction_db: 20.0,
-      freq_floor_hz: 50.0,
+      release_ms: 100.0,
+      max_reduction_db: 12.0,
+      freq_floor_hz: 80.0,
       freq_ceil_hz: 10000.0,
-      mode: "hard",
+      mode: "soft",
     },
     //Gentle pre-compresion settings - designed for single voice use
     deEsser: {
@@ -391,12 +398,14 @@ export const PRESETS = {
     sibilanceSuppressor: {
       attack_ms: 4.0,
     },
-    // Stage 3b — Resonance Suppressor. Faster attack and lower selectivity
-    // match the punchier, more processed podcast character; deeper depth catches
-    // more room resonances.
+    // Stage 3b — Resonance Suppressor. Faster attack and more assertive
+    // selectivity match the punchier, more processed podcast character.
+    // selectivity: 6 dB above the cepstral inter-harmonic floor — lower than
+    // ACX (8 dB) to catch more room resonances for the processed podcast sound,
+    // but still well above the ±3–5 dB normal spectral variation threshold.
     resonanceSuppressor: {
       depth: 0.65,
-      selectivity: 1.5,
+      selectivity: 6,
       attack_ms: 8.0,
       release_ms: 60.0,
     },
@@ -670,12 +679,14 @@ export const PRESETS = {
       release_ms: 50.0,
     },
     // Stage 3b — Resonance Suppressor. Assertive tuning for unknown source
-    // material: deeper reduction, lower selectivity, wider frequency range,
-    // and higher ceiling than the ACX/voice presets.
+    // material: deeper reduction, wider frequency range, and higher ceiling
+    // than ACX/voice presets.  selectivity: 6 dB above the cepstral floor —
+    // same as podcast, more assertive than ACX, but not so low that it triggers
+    // on normal inter-harmonic spectral variation in voiced speech.
     resonanceSuppressor: {
       depth: 0.7,
       sharpness: 0.4,
-      selectivity: 1.5,
+      selectivity: 6,
       attack_ms: 8.0,
       release_ms: 50.0,
       max_reduction_db: 12.0,
