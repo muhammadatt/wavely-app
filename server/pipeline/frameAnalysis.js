@@ -163,12 +163,11 @@ async function analyzeAudioFramesSilero(wavPath) {
   }
 
   // Stage C — merge Silero labels with energy values
+
+  // Step 1: build frames with initial Silero labels
   const sileroMap = new Map(sileroFrames.map(f => [f.index, f.isSilence]))
 
   const frames = []
-  let voicedSumSq = 0
-  let voicedFrameCount = 0
-
   for (let f = 0; f < numFrames; f++) {
     const rmsDbfs = rmsToDbfs(frameRms[f])
     // Silero label takes priority; energy threshold is fallback for any
@@ -182,8 +181,36 @@ async function analyzeAudioFramesSilero(wavPath) {
       rmsDbfs:       round2(rmsDbfs),
       isSilence,
     })
+  }
 
-    if (!isSilence) {
+  // Step 2: energy-gated 1-frame boundary expansion
+  // Silero's get_speech_timestamps operates at 512-sample (32 ms) chunk
+  // boundaries at 16 kHz. Our pipeline frames are 400 samples (25 ms). When
+  // a word onset or offset falls mid-chunk, the reported segment boundary can
+  // be up to 32 ms off, causing the straddling frame to be labelled silence
+  // even though it contains real speech. Promote such frames to voiced only
+  // when their energy is above the noise floor — confirming measurable content
+  // rather than assuming speech unconditionally at every boundary.
+  // A Set snapshot of the original labels prevents cascade: expanding frame N
+  // cannot cause frame N+1 to also expand.
+  const boundaryExpansionSet = new Set()
+  for (let f = 0; f < numFrames; f++) {
+    if (!frames[f].isSilence) {
+      if (f > 0             && frames[f - 1].isSilence && frames[f - 1].rmsDbfs > noiseFloorDbfs)
+        boundaryExpansionSet.add(f - 1)
+      if (f < numFrames - 1 && frames[f + 1].isSilence && frames[f + 1].rmsDbfs > noiseFloorDbfs)
+        boundaryExpansionSet.add(f + 1)
+    }
+  }
+  for (const f of boundaryExpansionSet) {
+    frames[f].isSilence = false
+  }
+
+  // Step 3: accumulate voiced energy from expanded labels
+  let voicedSumSq = 0
+  let voicedFrameCount = 0
+  for (let f = 0; f < numFrames; f++) {
+    if (!frames[f].isSilence) {
       voicedSumSq += frameRms[f] * frameRms[f]
       voicedFrameCount++
     }
