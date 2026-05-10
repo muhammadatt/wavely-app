@@ -224,7 +224,7 @@ export const PRESETS = {
       strength: 0.7,
       transientShaper: true,
     },
-    airBoost: { gainDb: 5 },
+    airBoost: { gainDb: 6 },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
     // Conservative ACX tuning: higher dead zone and lower ceiling preserve
@@ -234,17 +234,17 @@ export const PRESETS = {
       release_ms: 120.0,
       max_reduction_db: 24,
     },
-    // Stage 3b — Resonance Suppressor.
-    // Conservative ACX tuning. selectivity is calibrated for the cepstral
-    // inter-harmonic floor reference, which sits ~8–15 dB below spectral
-    // peaks — so 8 dB here is equivalent to a very tight threshold on the
-    // old mel-smoothed reference.  depth and max_reduction are conservative
-    // to preserve the natural narration character ACX human reviewers expect.
-    // freq_floor_hz aligned with the Stage 1 HPF (80 Hz) — processing below
-    // it is wasted work on the filter's roll-off region, and the 80–H1 range
-    // has no harmonic protection, so low selectivity there causes sub-vocal cuts.
-    // Multi-pass resonance suppressor — two independent passes share one
+    // Resonance Suppressor.
+    // Selectivity is calibrated for the cepstral inter-harmonic floor reference, 
+    // which sits ~8–15 dB below spectral peaks — so 8 dB here is equivalent to a 
+    // very tight threshold on the old mel-smoothed reference. 
+
+    // Multi-pass mode -- two independent passes share one
     // STFT/ISTFT cycle; gains are combined with np.maximum before ISTFT.
+    // CAUTION: Can have unintiuitve results when using overlaping frequency 
+    // ranges -- pass2's "wide, shallow" cuts can be overriden by pass1's 
+    // "deep, narrow" cuts resulting is less overall attenuation
+
     resonanceSuppressor: [
       {
         // Pass 1 — narrow resonances (room modes, mic peaks)
@@ -267,10 +267,11 @@ export const PRESETS = {
         // plateau protrude clearly above it.  High selectivity compensates
         // for the floor sitting 15–20 dB below spectral peaks at L=3.
         sibilant_only: true,
+        combine: "add",  // stacks on top of pass 1
         depth: 0.67,
-        sharpness: 0.1,
-        selectivity: 24,
-        attack_ms: 3.0,
+        sharpness: 0.2,
+        selectivity: 10,
+        attack_ms: 5.0,
         release_ms: 120.0,
         max_reduction_db: 20.0,
         freq_floor_hz: 3000.0,

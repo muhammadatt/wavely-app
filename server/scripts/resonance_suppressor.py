@@ -161,6 +161,23 @@ DEFAULT_PARAMS = {
                                   # apply_resonance_suppression()).  If sibilant_only=True
                                   # but no indices are provided, the pass logs a warning
                                   # and processes all voiced frames as a safe fallback.
+    "combine": "max",             # How this pass's gain reduction is merged into the
+                                  # accumulated combined_gr.
+                                  # "max" (default) — np.maximum: the deeper reduction
+                                  #   at each bin wins.  Passes compete; only the most
+                                  #   aggressive value at each bin survives.  Use for
+                                  #   passes that target distinct resonances via
+                                  #   different lifter/selectivity settings, where
+                                  #   mutual exclusion per bin is the correct semantic.
+                                  # "add" — additive: this pass's reduction is summed
+                                  #   on top of whatever prior passes computed.  Use
+                                  #   when this pass is meant to complement rather than
+                                  #   compete with earlier passes — e.g. a sibilant-only
+                                  #   broad plateau reduction stacked on top of a
+                                  #   narrow-spike pass that already covers the same
+                                  #   frequency range.  Each pass's own max_reduction_db
+                                  #   still caps its individual contribution before
+                                  #   combining; the summed total is uncapped.
 }
 
 
@@ -292,6 +309,7 @@ class ResonanceSuppressor:
                 f"freq={p['freq_floor_hz']:.0f}–{p['freq_ceil_hz']:.0f} Hz | "
                 f"preserve_harmonics={p['preserve_harmonics']} | "
                 f"sibilant_only={pc['sibilant_only']} | "
+                f"combine={pc['combine']} | "
                 f"f0_mode={'contour' if f0_contour else 'scalar'}"
             )
 
@@ -360,6 +378,7 @@ class ResonanceSuppressor:
             "release_coeff":          release_coeff,
             "max_cluster_bins":       int(resolved.get("band_summary_max_cluster_bins", 46)),
             "sibilant_only":          bool(resolved.get("sibilant_only", False)),
+            "combine":                str(resolved.get("combine", "max")),
         }
 
     def _compute_harmonic_mask_for_f0(self, f0_val: float) -> np.ndarray | None:
@@ -868,8 +887,17 @@ class ResonanceSuppressor:
                         smoothed_gr_i[j] = prev
                     pass_prev_gr[i] = prev
 
-                # Take the more aggressive reduction at each bin.
-                combined_gr = np.maximum(combined_gr, smoothed_gr_i)
+                # Merge this pass's reduction into the accumulator.
+                # "max"  — winner-takes-all per bin: the deeper cut wins.
+                # "add"  — additive stacking: this pass's reduction is summed
+                #          on top of prior passes.  Each pass's own
+                #          max_reduction_db already capped its contribution
+                #          before combining; the summed total is uncapped so
+                #          complementary passes can compound correctly.
+                if pc["combine"] == "add":
+                    combined_gr = combined_gr + smoothed_gr_i
+                else:
+                    combined_gr = np.maximum(combined_gr, smoothed_gr_i)
 
                 # Per-pass voiced telemetry.
                 if chunk_voiced.any():

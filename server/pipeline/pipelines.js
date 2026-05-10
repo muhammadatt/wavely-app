@@ -44,7 +44,7 @@ const STANDARD_PIPELINE = [
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
   //stages.vocalSaturation,
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
-  stages.enhancementEQ,
+  //stages.enhancementEQ,
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — voiced frames only
   //stages.deEss,                   // Split band De-Esser  
   stages.roomPresence,            // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
