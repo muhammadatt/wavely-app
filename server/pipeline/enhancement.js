@@ -205,12 +205,20 @@ export function runClickRemover(inputPath, outputPath, params = {}) {
  *   suppressor params to set `preserve_harmonics=false` (e.g. via the preset params
  *   override path). Leaving `f0Contour` null without that override is intended only
  *   for diagnostic / bypass scenarios.
+ * @param {string|null} eventsPath
+ *   Optional path to the on-disk sibilance event map JSON produced by
+ *   analyze_sibilance_events.py (i.e. `ctx._sibilanceEvents.path`). When
+ *   supplied, passed as --events-json to the Python script so that any pass
+ *   configured with `sibilant_only: true` can gate its suppression to only
+ *   the detected sibilant frames. Ignored (and not passed to the script) when
+ *   null — passes without sibilant_only are unaffected regardless.
  * @returns {Promise<object>}  Result dict from resonance_suppressor_report_entry()
  */
-export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames, f0Contour = null) {
+export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames, f0Contour = null, eventsPath = null) {
   console.log(
     `[ResonanceSuppressor] Starting: preset=${presetId} | ` +
     `f0=${f0Contour ? `${f0Contour.median}Hz (contour, ${f0Contour.perFrame?.length} frames)` : 'none'} | ` +
+    `sibilant_events=${eventsPath ? 'yes' : 'no'} | ` +
     `input=${inputPath}`,
   )
   const startTime = Date.now()
@@ -247,6 +255,15 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
     await writeFile(vadMaskPath, JSON.stringify(frames))
     args.push('--vad-mask-json', vadMaskPath)
     console.log(`[ResonanceSuppressor] Using VAD mask with ${frames.length} frames`)
+  }
+
+  // Sibilance event map — only passed when the caller has it and the preset
+  // has at least one sibilant_only pass. The Python script ignores it for
+  // passes that do not set sibilant_only=True, so passing it unconditionally
+  // is safe but wastes a CLI arg on the common case.
+  if (eventsPath) {
+    args.push('--events-json', eventsPath)
+    console.log(`[ResonanceSuppressor] Using sibilance event map: ${eventsPath}`)
   }
 
   let result

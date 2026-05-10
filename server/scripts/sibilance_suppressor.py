@@ -675,7 +675,13 @@ class SibilanceSuppressor:
                 excess_masked, size=smooth_bins, mode="constant", cval=0.0,
             )
 
-        reduction_db = np.maximum(0.0, excess_masked - dead_zone_db)
+        # Soft-ratio compression: preserve (1/ratio) of excess above the dead zone.
+        # ratio=3 → 9 dB of excess becomes 6 dB of reduction (3 dB remains above reference).
+        # This preserves the sibilant's relative spectral shape and intelligibility.
+        ratio = 3
+        threshold_exceeded = np.maximum(0.0, excess_masked - dead_zone_db)
+        reduction_db = threshold_exceeded * (1.0 - 1.0 / ratio)
+
         return np.clip(reduction_db, 0.0, max_reduction)
 
     def _compute_gain_reduction(

@@ -230,8 +230,8 @@ export const PRESETS = {
     // Conservative ACX tuning: higher dead zone and lower ceiling preserve
     // narration intelligibility; slower release avoids post-sibilant artifacts.
     sibilanceSuppressor: {
-      dead_zone_db: 14,
-      release_ms: 50.0,
+      dead_zone_db: 18,
+      release_ms: 120.0,
       max_reduction_db: 24,
     },
     // Stage 3b — Resonance Suppressor.
@@ -266,9 +266,10 @@ export const PRESETS = {
         // wider than n_fft/(2*3) ≈ 7.3 kHz, making a 4–8 kHz sibilant
         // plateau protrude clearly above it.  High selectivity compensates
         // for the floor sitting 15–20 dB below spectral peaks at L=3.
+        sibilant_only: true,
         depth: 0.67,
         sharpness: 0.1,
-        selectivity: 20,
+        selectivity: 24,
         attack_ms: 3.0,
         release_ms: 120.0,
         max_reduction_db: 20.0,
@@ -276,6 +277,8 @@ export const PRESETS = {
         freq_ceil_hz: 12000.0,
         mode: "soft",
         lifter_cutoff_bins: 3,
+        band_summary_max_cluster_bins: 186, // ≈ 4 kHz — prevents micro-cluster
+                                            // fragmentation from wide spread kernel
       },
     ],
     //Gentle pre-compresion settings - designed for single voice use

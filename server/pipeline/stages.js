@@ -51,6 +51,7 @@ import { applyVadGate }       from './vadGate.js'
 import { analyzeHum } from './humEQ.js'
 import { applyAirBoost } from './airBoost.js'
 import { getF0Contour } from './f0Analysis.js'
+import { analyzeSibilanceEvents } from './sibilanceEvents.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -538,15 +539,31 @@ export async function resonanceSuppressor(ctx) {
   // stages such as the de-esser that also consume F0 data.
   const f0Contour = await getF0Contour(ctx)
 
-  const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0Contour)
+  // Sibilance event map — only needed when at least one resonanceSuppressor
+  // pass is configured with sibilant_only: true.  Check for this once before
+  // potentially spawning the analyzer so the common (sibilant_only=false) case
+  // pays no extra cost.  analyzeSibilanceEvents() caches on ctx._sibilanceEvents
+  // so subsequent calls (e.g. the sibilanceSuppressor stage) are free.
+  const passConfigs = ctx.preset?.resonanceSuppressor
+  const hasSibilantOnlyPass = Array.isArray(passConfigs)
+    ? passConfigs.some(p => p?.sibilant_only)
+    : passConfigs?.sibilant_only === true
+  let eventsPath = null
+  if (hasSibilantOnlyPass) {
+    const sibilanceCache = await analyzeSibilanceEvents(ctx)
+    eventsPath = sibilanceCache?.path ?? null
+  }
+
+  const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0Contour, eventsPath)
   if (result.applied) ctx.currentPath = outPath
   ctx.results.resonanceSuppressor = result
   await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
-    skipped:       result.applied === false,
-    f0_median:     f0Contour?.median ?? 'n/a',
-    max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
-    artifact_risk: result.artifact_risk ?? false,
-    process_s:     result.process_seconds ?? 'n/a',
+    skipped:        result.applied === false,
+    f0_median:      f0Contour?.median ?? 'n/a',
+    sibilant_only:  hasSibilantOnlyPass,
+    max_red:        result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
+    artifact_risk:  result.artifact_risk ?? false,
+    process_s:      result.process_seconds ?? 'n/a',
   })
 }
 

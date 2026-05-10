@@ -140,6 +140,27 @@ DEFAULT_PARAMS = {
                                   # (12–18 dB) when using low values: the floor sits
                                   # 15–25 dB below spectral peaks at L=3, so a low
                                   # selectivity threshold will trigger on everything.
+    "band_summary_max_cluster_bins": 46,
+                                  # Maximum cluster width (STFT bins) before the
+                                  # trough-split fires in the band_summary reporter.
+                                  # Default 46 ≈ 1 kHz at 44.1 kHz / n_fft=2048.
+                                  # Increase to 186 (≈4 kHz) or higher for passes
+                                  # that use a wide spread kernel (sharpness ≤ 0.2):
+                                  # a wide kernel produces smooth broad reduction where
+                                  # troughs between nearby micro-features are very
+                                  # shallow, causing the 1 kHz cap to split a plateau
+                                  # into dozens of adjacent 20 Hz micro-clusters.
+    "sibilant_only": False,       # When True, suppression for this pass is applied
+                                  # only on frames classified as sibilant by the shared
+                                  # sibilance event map (sibilantFrameIndices from
+                                  # analyze_sibilance_events.py).  Non-sibilant frames
+                                  # receive target_gr=0 so the IIR decays through them
+                                  # without disturbing voiced non-sibilant frames.
+                                  # Requires sibilant_frame_indices to be passed into
+                                  # process() (via events_map in
+                                  # apply_resonance_suppression()).  If sibilant_only=True
+                                  # but no indices are provided, the pass logs a warning
+                                  # and processes all voiced frames as a safe fallback.
 }
 
 
@@ -270,6 +291,7 @@ class ResonanceSuppressor:
                 f"sharpness={p['sharpness']} | max_cut={p['max_reduction_db']} dB | "
                 f"freq={p['freq_floor_hz']:.0f}–{p['freq_ceil_hz']:.0f} Hz | "
                 f"preserve_harmonics={p['preserve_harmonics']} | "
+                f"sibilant_only={pc['sibilant_only']} | "
                 f"f0_mode={'contour' if f0_contour else 'scalar'}"
             )
 
@@ -330,12 +352,14 @@ class ResonanceSuppressor:
         release_coeff   = np.float32(self._time_to_coeff(resolved["release_ms"], frame_period_ms))
 
         return {
-            "resolved":      resolved,
-            "lifter_cutoff": lifter_cutoff,
-            "active_bins":   active_bins,
-            "spread_kernel": spread_kernel,
-            "attack_coeff":  attack_coeff,
-            "release_coeff": release_coeff,
+            "resolved":               resolved,
+            "lifter_cutoff":          lifter_cutoff,
+            "active_bins":            active_bins,
+            "spread_kernel":          spread_kernel,
+            "attack_coeff":           attack_coeff,
+            "release_coeff":          release_coeff,
+            "max_cluster_bins":       int(resolved.get("band_summary_max_cluster_bins", 46)),
+            "sibilant_only":          bool(resolved.get("sibilant_only", False)),
         }
 
     def _compute_harmonic_mask_for_f0(self, f0_val: float) -> np.ndarray | None:
@@ -540,6 +564,7 @@ class ResonanceSuppressor:
         bin_max_reduction: np.ndarray,
         voiced_frame_count: int,
         label: str = "",
+        max_cluster_bins: int = 46,
     ) -> list:
         """
         Build the band_summary list from per-bin reduction accumulators.
@@ -547,10 +572,17 @@ class ResonanceSuppressor:
         Used for both the overall combined summary and per-pass summaries in
         multi-pass mode.  Two-pass cluster algorithm:
           Pass 1 — gap-merge: fuse bins whose gap <= GAP_BINS.
-          Pass 2 — width-cap: split clusters wider than MAX_CLUSTER_BINS at
+          Pass 2 — width-cap: split clusters wider than max_cluster_bins at
                               their local trough so broad plateaux appear as
-                              multiple ≤1 kHz entries rather than one opaque
-                              entry.
+                              multiple segments rather than one opaque entry.
+
+        Args:
+            max_cluster_bins: Maximum cluster width before the trough-split
+                              fires.  Default 46 ≈ 1 kHz at 44.1 kHz/n_fft=2048.
+                              Set larger (e.g. 186 ≈ 4 kHz) for passes that use
+                              a wide spread kernel (low sharpness) to prevent the
+                              trough-split from creating dozens of adjacent micro-
+                              clusters whose centers are only one bin apart.
         """
         band_summary = []
         if voiced_frame_count == 0:
@@ -560,7 +592,7 @@ class ResonanceSuppressor:
 
         ACTIVE_THRESHOLD = 0.05  # dB — bins below this are considered silent
         GAP_BINS         = 3     # fuse clusters separated by <= this many bins
-        MAX_CLUSTER_BINS = 46    # ≈ 1 kHz at 44.1 kHz / n_fft=2048
+        MAX_CLUSTER_BINS = max_cluster_bins
 
         active_indices = np.where(bin_max_reduction > ACTIVE_THRESHOLD)[0]
         if active_indices.size == 0:
@@ -642,7 +674,12 @@ class ResonanceSuppressor:
 
         return band_summary
 
-    def process(self, audio: np.ndarray, voiced_frame_indices=None) -> dict:
+    def process(
+        self,
+        audio: np.ndarray,
+        voiced_frame_indices=None,
+        sibilant_frame_indices=None,
+    ) -> dict:
         """
         Apply resonance suppression to a mono audio array.
 
@@ -651,6 +688,12 @@ class ResonanceSuppressor:
             voiced_frame_indices: set of STFT frame indices where voice is present.
                 Silence frames receive target_gr=0; IIR decays smoothly.
                 None = process all frames.
+            sibilant_frame_indices: set of STFT frame indices classified as
+                sibilant by the shared sibilance event map.  Used only by
+                passes whose per-pass config has sibilant_only=True; ignored
+                by all other passes.  When None and a pass has sibilant_only,
+                that pass falls back to processing all voiced frames and logs
+                a warning.
 
         Returns:
             dict: audio, max_reduction_db, mean_reduction_db, spike_frames,
@@ -701,6 +744,17 @@ class ResonanceSuppressor:
             for fi in voiced_frame_indices:
                 if 0 <= fi < n_frames:
                     voiced_mask[fi] = True
+
+        # Precompute sibilant mask once — used only by sibilant_only passes.
+        # None means "no map provided"; passes that need it will log a warning
+        # and fall back to processing all voiced frames.
+        if sibilant_frame_indices is None:
+            sibilant_mask = None
+        else:
+            sibilant_mask = np.zeros(n_frames, dtype=bool)
+            for fi in sibilant_frame_indices:
+                if 0 <= fi < n_frames:
+                    sibilant_mask[fi] = True
 
         # Per-pass IIR state — one float32 vector per pass, carried across
         # chunks so the attack/release behaviour is identical to a per-frame
@@ -778,6 +832,23 @@ class ResonanceSuppressor:
                 # Zero non-voiced frames so IIR decays through silence.
                 if not chunk_voiced.all():
                     target_gr_i[~chunk_voiced, :] = 0.0
+
+                # Sibilant gate: if this pass has sibilant_only=True, zero any
+                # frame that is not marked as sibilant so the IIR decays through
+                # non-sibilant voiced frames without applying reduction to them.
+                if pc["sibilant_only"]:
+                    if sibilant_mask is not None:
+                        chunk_sibilant = sibilant_mask[chunk_start:chunk_end]
+                        if not chunk_sibilant.all():
+                            target_gr_i[~chunk_sibilant, :] = 0.0
+                    else:
+                        logger.warning(
+                            f"ResonanceSuppressor pass {i + 1}: sibilant_only=True "
+                            "but no sibilant_frame_indices were supplied — "
+                            "processing all voiced frames as a fallback.  Pass "
+                            "--events-json from analyze_sibilance_events.py to "
+                            "enable per-sibilant gating."
+                        )
 
                 # Attack/release IIR — state-dependent coefficient prevents
                 # numpy vectorisation across frames. JITed via numba when
@@ -857,8 +928,12 @@ class ResonanceSuppressor:
         mean_reduction = (sum_reduction / n_active_bins_total) if n_active_bins_total > 0 else 0.0
         artifact_risk  = mean_reduction > 3.0
 
+        # Combined summary uses the smallest max_cluster_bins across all passes
+        # so that narrow resonances from pass 1 still get separated correctly.
+        combined_max_cluster = min(pc["max_cluster_bins"] for pc in self._pass_configs)
         band_summary = self._build_band_summary(
-            bin_sum_reduction, bin_max_reduction, voiced_frame_count, label="combined",
+            bin_sum_reduction, bin_max_reduction, voiced_frame_count,
+            label="combined", max_cluster_bins=combined_max_cluster,
         )
 
         # Per-pass detail for multi-pass reporting.
@@ -868,6 +943,7 @@ class ResonanceSuppressor:
                 p_summary = self._build_band_summary(
                     pass_bin_sum[i], pass_bin_max[i], voiced_frame_count,
                     label=f"pass {i + 1}",
+                    max_cluster_bins=pc["max_cluster_bins"],
                 )
                 passes_report.append({
                     "pass":            i + 1,
@@ -904,6 +980,7 @@ def apply_resonance_suppression(
     vad_voiced_mask: np.ndarray = None,
     f0: float = None,
     f0_contour: list | None = None,
+    events_map: dict = None,
 ) -> dict:
     """
     Stage 3b pipeline entry point.
@@ -927,6 +1004,13 @@ def apply_resonance_suppression(
                          in f0Analysis.js. When provided, the harmonic mask
                          tracks pitch changes frame-by-frame rather than using
                          a fixed scalar position.
+        events_map:      Sibilance event map dict produced by
+                         analyze_sibilance_events.py (or the cached map from
+                         sibilanceEvents.js).  When provided, the
+                         sibilantFrameIndices list is extracted and passed to
+                         process() so that any pass with sibilant_only=True
+                         can gate its suppression to only those frames.
+                         Ignored for passes that do not set sibilant_only=True.
     """
     t0 = time.perf_counter()
 
@@ -980,7 +1064,21 @@ def apply_resonance_suppression(
             if orig_start < orig_end and vad_voiced_mask[orig_start:orig_end].any():
                 voiced_frame_indices.add(fi)
 
-    result                    = suppressor.process(audio, voiced_frame_indices=voiced_frame_indices)
+    # Extract sibilant frame indices from the shared event map when provided.
+    sibilant_frame_indices = None
+    if events_map is not None:
+        raw_indices = events_map.get("sibilantFrameIndices") or []
+        sibilant_frame_indices = set(raw_indices)
+        logger.info(
+            f"ResonanceSuppressor: received events_map with "
+            f"{len(sibilant_frame_indices)} sibilant frame(s)."
+        )
+
+    result                    = suppressor.process(
+        audio,
+        voiced_frame_indices=voiced_frame_indices,
+        sibilant_frame_indices=sibilant_frame_indices,
+    )
     result["skipped"]         = False
     result["lifter_cutoff"]   = suppressor._lifter_cutoff
     result["process_seconds"] = time.perf_counter() - t0
@@ -1032,6 +1130,11 @@ if __name__ == "__main__":
     parser.add_argument("--f0-contour-json",   default=None,
                         help="Path to JSON produced by estimate_f0_contour.py. "
                              "Enables per-frame harmonic mask tracking.")
+    parser.add_argument("--events-json",        default=None,
+                        help="Path to sibilance event map JSON produced by "
+                             "analyze_sibilance_events.py (or the cached map "
+                             "from sibilanceEvents.js).  Required when any pass "
+                             "sets sibilant_only=True; ignored otherwise.")
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
@@ -1061,8 +1164,13 @@ if __name__ == "__main__":
         if not args.f0 and contour_data.get("median"):
             args.f0 = float(contour_data["median"])
 
+    events_map = None
+    if args.events_json:
+        with open(args.events_json) as fh:
+            events_map = json.load(fh)
+
     result = apply_resonance_suppression(
-        audio, sr, params, vad_voiced_mask, args.f0, f0_contour,
+        audio, sr, params, vad_voiced_mask, args.f0, f0_contour, events_map,
     )
     wavfile.write(args.output, sr, result["audio"])
     print("JSON_RESULT:" + json.dumps(resonance_suppressor_report_entry(result)), flush=True)
