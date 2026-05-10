@@ -127,6 +127,19 @@ DEFAULT_PARAMS = {
     "max_harmonic": 100,          # Hard cap on overtones to protect (H1 … H<n>).
                                   # In practice freq_ceil_hz is the binding limit —
                                   # this cap only matters for pathologically low f0.
+    "lifter_cutoff_bins": None,   # Optional hard override for the cepstral lifter
+                                  # cutoff (samples).  When None the cutoff is derived
+                                  # from f0: max(20, int(0.40 * sr / f0)).
+                                  # Set to a small value (3–5) to produce a nearly flat
+                                  # reference that exposes broad spectral elevations
+                                  # (e.g. sibilant plateaux spanning 3–6 kHz) as spikes
+                                  # above the floor.  At L=3 the floor resolves features
+                                  # wider than n_fft/(2*3) ≈ 7.3 kHz only, so anything
+                                  # narrower — including a 4–8 kHz sibilant plateau —
+                                  # protrudes above it.  Pair with higher selectivity
+                                  # (12–18 dB) when using low values: the floor sits
+                                  # 15–25 dB below spectral peaks at L=3, so a low
+                                  # selectivity threshold will trigger on everything.
 }
 
 
@@ -188,7 +201,7 @@ class ResonanceSuppressor:
         sample_rate: int = 44100,
         n_fft: int = 2048,
         hop_length: int = 512,
-        params: dict = None,
+        params: "dict | list | None" = None,
         f0: float = None,
         f0_contour: list | None = None,
     ):
@@ -206,51 +219,35 @@ class ResonanceSuppressor:
         self.f0         = f0
         self.f0_contour = f0_contour  # per-frame list, aligned to STFT frames
 
-        self.params = resolve_params(params)
-
         self.freqs  = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
         self.n_bins = len(self.freqs)
 
-        self.active_bins = (
-            (self.freqs >= self.params["freq_floor_hz"]) &
-            (self.freqs <= self.params["freq_ceil_hz"])
-        )
-
-        # --- Cepstral liftering setup ---
-        # Lifter cutoff must stay below the pitch quefrency (sr / f0 samples)
-        # so the pitch peak and all harmonic overtones are zeroed out, leaving
-        # only the smooth vocal-tract envelope. 40 % of the fundamental
-        # quefrency is a conservative margin: it retains formant detail (broad
-        # spectral features spanning hundreds of Hz) while excluding all
-        # harmonic content even for low bass voices (~80 Hz f0 -> cutoff ~220).
-        # Floor of 20 prevents degenerate behaviour on very high f0 input.
-        if f0 and f0 > 0:
-            self._lifter_cutoff = max(20, int(0.40 * sample_rate / f0))
+        # Normalise params to a list — either a single dict or an array of
+        # pass configs. Each element is resolved independently against
+        # DEFAULT_PARAMS so passes are fully independent: different
+        # lifter_cutoff, selectivity, attack/release, frequency bounds, etc.
+        if isinstance(params, list):
+            params_list = params
         else:
-            # No f0 supplied: default is safe for f0 >= ~295 Hz.
-            self._lifter_cutoff = 60
+            params_list = [params]
 
-        # --- Sharpness: Gaussian spreading kernel ---
-        sharpness   = self.params["sharpness"]
-        spread_bins = int(30 * (1.0 - sharpness))
-        if spread_bins >= 2:
-            sigma  = spread_bins / 3.0
-            half   = spread_bins
-            x      = np.arange(-half, half + 1, dtype=float)
-            kernel = np.exp(-0.5 * (x / sigma) ** 2)
-            self.spread_kernel = kernel / kernel.max()
-        else:
-            self.spread_kernel = None
+        # Build per-pass derived state (lifter_cutoff, active_bins,
+        # spread_kernel, IIR coefficients). Stored in self._pass_configs so
+        # the chunk loop can iterate over them without re-deriving each chunk.
+        self._pass_configs = [self._build_pass_config(p) for p in params_list]
 
-        # --- Attack/release ---
-        frame_period_ms    = (hop_length / sample_rate) * 1000.0
-        self.attack_coeff  = self._time_to_coeff(self.params["attack_ms"],  frame_period_ms)
-        self.release_coeff = self._time_to_coeff(self.params["release_ms"], frame_period_ms)
+        # self.params = first pass resolved params — used for harmonic mask
+        # computation, which is shared across all passes (all passes protect
+        # the same vocal harmonics at the same pitch positions).
+        self.params = self._pass_configs[0]["resolved"]
 
-        # --- Harmonic protection ---
-        # _mask_cache: maps rounded f0 value → precomputed bool mask so each
-        # unique pitch level is only built once even when the contour contains
-        # hundreds of distinct values.
+        # Backward-compat: single-pass code expects self._lifter_cutoff.
+        self._lifter_cutoff = self._pass_configs[0]["lifter_cutoff"]
+
+        # Harmonic protection cache — shared across all passes.
+        # _mask_cache: maps rounded f0 → precomputed bool mask so each unique
+        # pitch level is only built once even when the contour has hundreds of
+        # distinct values.
         # _static_harmonic_mask: fallback when no contour is provided.
         self._mask_cache           = {}
         self._static_harmonic_mask = (
@@ -259,24 +256,87 @@ class ResonanceSuppressor:
             else None
         )
 
-        # --- Cached overlap-add window (computed once per instance) ---
+        # Cached overlap-add window (computed once per instance).
         self._window         = get_window("hann", n_fft, fftbins=True).astype(np.float32)
         self._window_squared = (self._window.astype(np.float64) ** 2)
 
-        logger.info(
-            f"ResonanceSuppressor init | n_fft={n_fft} | "
-            f"lifter_cutoff={self._lifter_cutoff} samples | "
-            f"selectivity={self.params['selectivity']} dB | depth={self.params['depth']} | "
-            f"sharpness={sharpness} | max_cut={self.params['max_reduction_db']} dB | "
-            f"preserve_harmonics={self.params['preserve_harmonics']} | "
-            f"f0_mode={'contour' if f0_contour else 'scalar'}"
-        )
+        n_passes = len(self._pass_configs)
+        for i, pc in enumerate(self._pass_configs):
+            p = pc["resolved"]
+            logger.info(
+                f"ResonanceSuppressor pass {i + 1}/{n_passes} | n_fft={n_fft} | "
+                f"lifter_cutoff={pc['lifter_cutoff']} samples | "
+                f"selectivity={p['selectivity']} dB | depth={p['depth']} | "
+                f"sharpness={p['sharpness']} | max_cut={p['max_reduction_db']} dB | "
+                f"freq={p['freq_floor_hz']:.0f}–{p['freq_ceil_hz']:.0f} Hz | "
+                f"preserve_harmonics={p['preserve_harmonics']} | "
+                f"f0_mode={'contour' if f0_contour else 'scalar'}"
+            )
 
     @staticmethod
     def _time_to_coeff(time_ms: float, frame_period_ms: float) -> float:
         if time_ms <= 0 or frame_period_ms <= 0:
             return 1.0
         return np.exp(-frame_period_ms / time_ms)
+
+    def _build_pass_config(self, params_override: "dict | None") -> dict:
+        """
+        Derive and cache all per-pass state from a single params dict.
+
+        Called once per pass element in __init__; results stored in
+        self._pass_configs so the chunk loop can iterate over them without
+        recomputing derived values.
+
+        Returns a dict with keys:
+          resolved      — fully merged params dict
+          lifter_cutoff — cepstral lifter cutoff in cepstrum samples (L)
+          active_bins   — bool array (n_bins,) for active frequency range
+          spread_kernel — Gaussian convolution kernel, or None
+          attack_coeff  — float32 IIR coefficient for attack
+          release_coeff — float32 IIR coefficient for release
+        """
+        resolved = resolve_params(params_override)
+
+        # Lifter cutoff: override takes priority; otherwise derive from f0.
+        cutoff_override = resolved.get("lifter_cutoff_bins")
+        if cutoff_override is not None:
+            lifter_cutoff = max(1, int(cutoff_override))
+        elif self.f0 and self.f0 > 0:
+            lifter_cutoff = max(20, int(0.40 * self.sr / self.f0))
+        else:
+            lifter_cutoff = 60
+
+        # Active frequency bins for this pass.
+        active_bins = (
+            (self.freqs >= resolved["freq_floor_hz"]) &
+            (self.freqs <= resolved["freq_ceil_hz"])
+        )
+
+        # Gaussian spread kernel — width set by sharpness.
+        sharpness   = resolved["sharpness"]
+        spread_bins = int(30 * (1.0 - sharpness))
+        if spread_bins >= 2:
+            sigma  = spread_bins / 3.0
+            half   = spread_bins
+            x      = np.arange(-half, half + 1, dtype=float)
+            kernel = np.exp(-0.5 * (x / sigma) ** 2)
+            spread_kernel = kernel / kernel.max()
+        else:
+            spread_kernel = None
+
+        # Attack/release IIR coefficients.
+        frame_period_ms = (self.hop_length / self.sr) * 1000.0
+        attack_coeff    = np.float32(self._time_to_coeff(resolved["attack_ms"],  frame_period_ms))
+        release_coeff   = np.float32(self._time_to_coeff(resolved["release_ms"], frame_period_ms))
+
+        return {
+            "resolved":      resolved,
+            "lifter_cutoff": lifter_cutoff,
+            "active_bins":   active_bins,
+            "spread_kernel": spread_kernel,
+            "attack_coeff":  attack_coeff,
+            "release_coeff": release_coeff,
+        }
 
     def _compute_harmonic_mask_for_f0(self, f0_val: float) -> np.ndarray | None:
         """
@@ -328,12 +388,19 @@ class ResonanceSuppressor:
         self._mask_cache[cache_key] = mask
         return mask
 
-    def _cepstral_envelope_matrix(self, magnitude_db: np.ndarray) -> np.ndarray:
+    def _cepstral_envelope_matrix(
+        self,
+        magnitude_db: np.ndarray,
+        lifter_cutoff: "int | None" = None,
+    ) -> np.ndarray:
         """
         Cepstral liftering reference envelope for a batch of frames.
 
         Args:
-            magnitude_db: (n_frames, n_bins) magnitude in dB.
+            magnitude_db:  (n_frames, n_bins) magnitude in dB.
+            lifter_cutoff: Override the instance's self._lifter_cutoff.
+                           Provided by multi-pass callers so each pass uses its
+                           own L without mutating shared state.
 
         Returns:
             (n_frames, n_bins) smooth spectral envelope in dB, with harmonic
@@ -341,13 +408,13 @@ class ResonanceSuppressor:
 
         The real cepstrum is computed by treating each frame's one-sided
         log-magnitude spectrum as a real one-sided spectrum and inverting it
-        (irfft). Zeroing all quefrency indices above self._lifter_cutoff
-        removes the pitch peak and all harmonic overtones — they all fall at
-        multiples of sr/f0 samples, well above the cutoff. Transforming back
-        (rfft) gives a reference that sits at the inter-harmonic floor rather
-        than being elevated by harmonic peaks, so room modes and mic resonances
-        are detectable at their true prominence regardless of their proximity
-        to vocal harmonics.
+        (irfft). Zeroing all quefrency indices above the lifter cutoff removes
+        the pitch peak and all harmonic overtones — they all fall at multiples
+        of sr/f0 samples, well above the cutoff. Transforming back (rfft)
+        gives a reference that sits at the inter-harmonic floor rather than
+        being elevated by harmonic peaks, so room modes and mic resonances are
+        detectable at their true prominence regardless of their proximity to
+        vocal harmonics.
 
         The round-trip (irfft -> zero middle -> rfft of a real-valued input)
         is exact in theory; .real discards any floating-point residue.
@@ -360,7 +427,7 @@ class ResonanceSuppressor:
         # Rectangular lifter: zero the high-quefrency middle section.
         # Kept: indices 0..L-1 and n_fft-L+1..n_fft-1 (symmetric about zero).
         # Zeroed: indices L..n_fft-L (pitch peak and all harmonic overtones).
-        L        = self._lifter_cutoff
+        L        = lifter_cutoff if lifter_cutoff is not None else self._lifter_cutoff
         liftered = cepstrum.copy()
         liftered[:, L : n_fft - L + 1] = 0.0
 
@@ -373,6 +440,7 @@ class ResonanceSuppressor:
         magnitude_db:  np.ndarray,
         smoothed_db:   np.ndarray,
         harmonic_mask: np.ndarray | None = None,
+        pc:            "dict | None" = None,
     ) -> np.ndarray:
         """
         Batched gain-reduction. Inputs/output shape (n_frames, n_bins).
@@ -389,8 +457,16 @@ class ResonanceSuppressor:
                                                      that frame's own pitch.
                            When None, falls back to self._static_harmonic_mask
                            (also None when no scalar f0 was supplied).
+            pc:            Per-pass config dict from self._pass_configs.
+                           When supplied, uses pc["resolved"], pc["active_bins"],
+                           and pc["spread_kernel"] for this pass.  When None,
+                           falls back to the first pass config (single-pass path).
         """
-        p             = self.params
+        if pc is None:
+            pc = self._pass_configs[0]
+        p             = pc["resolved"]
+        active_bins   = pc["active_bins"]
+        spread_kernel = pc["spread_kernel"]
         selectivity   = p["selectivity"]
         depth         = p["depth"]
         max_reduction = p["max_reduction_db"]
@@ -399,7 +475,7 @@ class ResonanceSuppressor:
         mask = harmonic_mask if harmonic_mask is not None else self._static_harmonic_mask
 
         spike_db        = magnitude_db - smoothed_db
-        spike_db_masked = np.where(self.active_bins, spike_db, 0.0)
+        spike_db_masked = np.where(active_bins, spike_db, 0.0)
         above_threshold = np.maximum(0.0, spike_db_masked - selectivity)
 
         if p["mode"] == "soft":
@@ -434,9 +510,9 @@ class ResonanceSuppressor:
 
         # Spread kernel applied along the bin axis for every frame at once.
         # Matches np.convolve(reduction_db, kernel, mode='same') per frame.
-        if self.spread_kernel is not None:
+        if spread_kernel is not None:
             reduction_db = convolve1d(
-                reduction_db, self.spread_kernel,
+                reduction_db, spread_kernel,
                 axis=1, mode="constant", cval=0.0,
             )
             reduction_db = np.clip(reduction_db, 0.0, max_reduction)
@@ -454,9 +530,117 @@ class ResonanceSuppressor:
         # Spread bleed from an active edge bin can cross freq_floor_hz /
         # freq_ceil_hz into inactive bins. Zero those out so the boundaries
         # are hard limits on applied reduction, not just on detection.
-        reduction_db[:, ~self.active_bins] = 0.0
+        reduction_db[:, ~active_bins] = 0.0
 
         return reduction_db
+
+    def _build_band_summary(
+        self,
+        bin_sum_reduction: np.ndarray,
+        bin_max_reduction: np.ndarray,
+        voiced_frame_count: int,
+        label: str = "",
+    ) -> list:
+        """
+        Build the band_summary list from per-bin reduction accumulators.
+
+        Used for both the overall combined summary and per-pass summaries in
+        multi-pass mode.  Two-pass cluster algorithm:
+          Pass 1 — gap-merge: fuse bins whose gap <= GAP_BINS.
+          Pass 2 — width-cap: split clusters wider than MAX_CLUSTER_BINS at
+                              their local trough so broad plateaux appear as
+                              multiple ≤1 kHz entries rather than one opaque
+                              entry.
+        """
+        band_summary = []
+        if voiced_frame_count == 0:
+            return band_summary
+
+        bin_mean_reduction = bin_sum_reduction / voiced_frame_count
+
+        ACTIVE_THRESHOLD = 0.05  # dB — bins below this are considered silent
+        GAP_BINS         = 3     # fuse clusters separated by <= this many bins
+        MAX_CLUSTER_BINS = 46    # ≈ 1 kHz at 44.1 kHz / n_fft=2048
+
+        active_indices = np.where(bin_max_reduction > ACTIVE_THRESHOLD)[0]
+        if active_indices.size == 0:
+            return band_summary
+
+        # Pass 1: gap-merge.
+        clusters = []
+        lo = prev = int(active_indices[0])
+        for idx in active_indices[1:]:
+            i = int(idx)
+            if i - prev > GAP_BINS:
+                clusters.append((lo, prev))
+                lo = i
+            prev = i
+        clusters.append((lo, prev))
+
+        # Pass 2: width-cap — split wide clusters at their local trough.
+        capped = []
+        for lo, hi in clusters:
+            start = lo
+            while hi - start > MAX_CLUSTER_BINS:
+                window_end    = start + MAX_CLUSTER_BINS
+                trough_offset = int(
+                    np.argmin(bin_max_reduction[start : window_end + 1])
+                )
+                capped.append((start, start + trough_offset))
+                start = start + trough_offset + 1
+            if start <= hi:
+                capped.append((start, hi))
+        clusters = capped
+
+        for lo, hi in clusters:
+            cluster_slice = slice(lo, hi + 1)
+            peak_offset   = int(np.argmax(bin_max_reduction[cluster_slice]))
+            peak_bin      = lo + peak_offset
+            peak_freq     = float(self.freqs[peak_bin])
+            mean_red      = float(np.mean(bin_mean_reduction[cluster_slice]))
+            max_red       = float(bin_max_reduction[peak_bin])
+
+            band_info = {
+                "center":            round(peak_freq, 1),
+                "lo_hz":             round(float(self.freqs[lo]), 1),
+                "hi_hz":             round(float(self.freqs[hi]), 1),
+                "mean_reduction_db": round(mean_red, 2),
+                "peak_reduction_db": round(max_red, 2),
+            }
+
+            if self.f0 and self.f0 > 0:
+                h = int(round(peak_freq / self.f0))
+                if 0 < h <= self.params["max_harmonic"]:
+                    h_freq    = h * self.f0
+                    bin_width = self.sr / self.n_fft
+                    min_half  = int(self.params["harmonic_width_bins"])
+                    width_pct = float(self.params.get("harmonic_width_pct", 0.01))
+                    pct_half  = int(round(h_freq * width_pct / bin_width))
+                    tol_hz    = max(min_half, pct_half) * bin_width
+                    if abs(peak_freq - h_freq) <= tol_hz:
+                        band_info["harmonic"]    = f"H{h}={int(round(self.f0))} Hz"
+                        band_info["is_harmonic"] = True
+                    else:
+                        band_info["is_harmonic"] = False
+                else:
+                    band_info["is_harmonic"] = False
+
+            band_summary.append(band_info)
+
+        if band_summary:
+            tag = f" [{label}]" if label else ""
+            logger.info(f"ResonanceSuppressor spike clusters{tag} (voiced frames):")
+            for b in band_summary:
+                bars = "#" * min(20, int(round(b["peak_reduction_db"] / 0.5)))
+                harm = f"  [harmonic: {b['harmonic']}]" if b.get("is_harmonic") else ""
+                span = f"{b['lo_hz']:.0f}–{b['hi_hz']:.0f} Hz"
+                logger.info(
+                    f"  {b['center']:8.1f} Hz ({span}): "
+                    f"mean {-b['mean_reduction_db']:5.2f} dB | "
+                    f"peak {-b['peak_reduction_db']:5.2f} dB  {bars}{harm}"
+                )
+
+        return band_summary
 
     def process(self, audio: np.ndarray, voiced_frame_indices=None) -> dict:
         """
@@ -470,7 +654,7 @@ class ResonanceSuppressor:
 
         Returns:
             dict: audio, max_reduction_db, mean_reduction_db, spike_frames,
-                  artifact_risk, band_summary
+                  artifact_risk, band_summary, passes
         """
         if audio.ndim != 1:
             raise ValueError("ResonanceSuppressor expects mono input (1D array).")
@@ -518,11 +702,16 @@ class ResonanceSuppressor:
                 if 0 <= fi < n_frames:
                     voiced_mask[fi] = True
 
-        # IIR state (carries across chunks so the attack/release behaviour is
-        # identical to the per-frame implementation).
-        prev_smoothed_gr = np.zeros(self.n_bins, dtype=np.float32)
-        attack_coeff     = np.float32(self.attack_coeff)
-        release_coeff    = np.float32(self.release_coeff)
+        # Per-pass IIR state — one float32 vector per pass, carried across
+        # chunks so the attack/release behaviour is identical to a per-frame
+        # implementation.  Multi-pass: each pass has its own IIR state so that
+        # different attack/release settings are fully independent.
+        n_passes     = len(self._pass_configs)
+        pass_prev_gr = [np.zeros(self.n_bins, dtype=np.float32) for _ in range(n_passes)]
+
+        # Per-pass telemetry accumulators (voiced frames only).
+        pass_bin_sum = [np.zeros(self.n_bins, dtype=np.float64) for _ in range(n_passes)]
+        pass_bin_max = [np.zeros(self.n_bins, dtype=np.float64) for _ in range(n_passes)]
 
         # Chunk size keeps per-chunk peak memory bounded for long files.
         # 2048 frames ≈ 24 s at 44.1 kHz / hop=512.
@@ -541,22 +730,20 @@ class ResonanceSuppressor:
             frame_view  = sliding_window_view(chunk_audio, n_fft)[::hop][:chunk_n]
             frames      = frame_view * window  # (chunk_n, n_fft) float32
 
-            # Batched STFT.
+            # Batched STFT — computed once, shared across all passes.
             spectra      = np.fft.rfft(frames, axis=1).astype(np.complex64, copy=False)
-            magnitude    = np.abs(spectra)                         # (chunk_n, n_bins) float32
+            magnitude    = np.abs(spectra)                          # (chunk_n, n_bins)
             magnitude_db = 20.0 * np.log10(magnitude + eps)
 
-            # Reference envelope.
-            smoothed_db = self._cepstral_envelope_matrix(magnitude_db)
-
-            # Per-frame harmonic mask from contour.
+            # Per-frame harmonic mask from contour — shared across all passes
+            # (all passes protect the same vocal harmonics at the same pitch).
             # Shape: (chunk_n, n_bins) — each row is the protection mask for
-            # that specific frame's F0 value.  A 2D mask is required here
-            # because OR-unioning into a single 1D mask across a 2048-frame
-            # chunk (~24 s) accumulates every harmonic position visited over
-            # the entire chunk window.  With natural pitch drift (e.g. 160–220 Hz)
-            # the union blankets large swaths of spectrum at each harmonic
-            # level, leaving nothing above the threshold — zero suppression.
+            # that specific frame's F0 value.  A 2D mask is required because
+            # OR-unioning into a single 1D mask across a 2048-frame chunk
+            # (~24 s) accumulates every harmonic position visited over the
+            # entire window.  With natural pitch drift (e.g. 160–220 Hz) the
+            # union blankets large swaths of spectrum at each harmonic level,
+            # leaving nothing above the threshold — zero suppression.
             # Keeping masks per-frame ensures each frame is only protected at
             # its own pitch position, not at every pitch visited in the chunk.
             chunk_mask = None
@@ -568,36 +755,59 @@ class ResonanceSuppressor:
                     if m is not None:
                         chunk_mask[j] = m
 
-            target_gr = self._compute_gain_reduction_matrix(
-                magnitude_db, smoothed_db, harmonic_mask=chunk_mask,
-            )
-            target_gr = target_gr.astype(np.float32, copy=False)
-
-            # Zero out non-voiced frames so the IIR releases through silence
-            # rather than holding gain reduction over it.
             chunk_voiced = voiced_mask[chunk_start:chunk_end]
-            if not chunk_voiced.all():
-                target_gr[~chunk_voiced, :] = 0.0
 
-            # Attack/release IIR -- state-dependent coefficient prevents
-            # numpy vectorisation across frames. JITed via numba when
-            # available, with a numpy fallback that loops in Python.
-            if _NUMBA_AVAILABLE:
-                smoothed_gr_matrix, prev_smoothed_gr = _iir_attack_release(
-                    target_gr, prev_smoothed_gr, attack_coeff, release_coeff,
+            # --- Multi-pass gain reduction ---
+            # Each pass uses its own cepstral reference (lifter_cutoff),
+            # detection params (selectivity, depth, mode), spread kernel,
+            # frequency bounds, and IIR timing.  Gains are combined via
+            # np.maximum so the more aggressive reduction wins at each bin.
+            combined_gr = np.zeros((chunk_n, self.n_bins), dtype=np.float32)
+
+            for i, pc in enumerate(self._pass_configs):
+                # Cepstral envelope with this pass's lifter cutoff.
+                smoothed_db_i = self._cepstral_envelope_matrix(
+                    magnitude_db, lifter_cutoff=pc["lifter_cutoff"],
                 )
-            else:
-                smoothed_gr_matrix = np.empty_like(target_gr)
-                prev = prev_smoothed_gr
-                for j in range(chunk_n):
-                    tgt   = target_gr[j]
-                    coeff = np.where(tgt >= prev, attack_coeff, release_coeff)
-                    prev  = coeff * prev + (np.float32(1.0) - coeff) * tgt
-                    smoothed_gr_matrix[j] = prev
-                prev_smoothed_gr = prev
 
-            # Apply gain to spectra and inverse-FFT in one batch.
-            gain_linear      = np.power(10.0, -smoothed_gr_matrix / 20.0, dtype=np.float32)
+                # Gain reduction matrix for this pass.
+                target_gr_i = self._compute_gain_reduction_matrix(
+                    magnitude_db, smoothed_db_i, harmonic_mask=chunk_mask, pc=pc,
+                ).astype(np.float32, copy=False)
+
+                # Zero non-voiced frames so IIR decays through silence.
+                if not chunk_voiced.all():
+                    target_gr_i[~chunk_voiced, :] = 0.0
+
+                # Attack/release IIR — state-dependent coefficient prevents
+                # numpy vectorisation across frames. JITed via numba when
+                # available, with a numpy fallback that loops in Python.
+                if _NUMBA_AVAILABLE:
+                    smoothed_gr_i, pass_prev_gr[i] = _iir_attack_release(
+                        target_gr_i, pass_prev_gr[i],
+                        pc["attack_coeff"], pc["release_coeff"],
+                    )
+                else:
+                    smoothed_gr_i = np.empty_like(target_gr_i)
+                    prev = pass_prev_gr[i]
+                    for j in range(chunk_n):
+                        tgt   = target_gr_i[j]
+                        coeff = np.where(tgt >= prev, pc["attack_coeff"], pc["release_coeff"])
+                        prev  = coeff * prev + (np.float32(1.0) - coeff) * tgt
+                        smoothed_gr_i[j] = prev
+                    pass_prev_gr[i] = prev
+
+                # Take the more aggressive reduction at each bin.
+                combined_gr = np.maximum(combined_gr, smoothed_gr_i)
+
+                # Per-pass voiced telemetry.
+                if chunk_voiced.any():
+                    voiced_i = smoothed_gr_i[chunk_voiced]
+                    pass_bin_sum[i] += voiced_i.sum(axis=0, dtype=np.float64)
+                    pass_bin_max[i]  = np.maximum(pass_bin_max[i], voiced_i.max(axis=0))
+
+            # Apply combined gain to spectra and inverse-FFT in one batch.
+            gain_linear      = np.power(10.0, -combined_gr / 20.0, dtype=np.float32)
             modified_spectra = spectra * gain_linear
             time_frames      = np.fft.irfft(modified_spectra, n=n_fft, axis=1).astype(
                 np.float64, copy=False
@@ -619,23 +829,23 @@ class ResonanceSuppressor:
                     output_buffer[s:e]      += time_frames[j, :trim]
                     window_accumulator[s:e] += window_squared[:trim]
 
-            # Telemetry accumulation.
-            chunk_max = float(smoothed_gr_matrix.max()) if smoothed_gr_matrix.size else 0.0
+            # Overall telemetry from the combined gain reduction.
+            chunk_max = float(combined_gr.max()) if combined_gr.size else 0.0
             if chunk_max > max_reduction:
                 max_reduction = chunk_max
 
-            chunk_active = smoothed_gr_matrix > active_threshold
-            n_active = int(chunk_active.sum())
+            chunk_active = combined_gr > active_threshold
+            n_active     = int(chunk_active.sum())
             if n_active > 0:
-                sum_reduction       += float(smoothed_gr_matrix[chunk_active].sum())
+                sum_reduction       += float(combined_gr[chunk_active].sum())
                 n_active_bins_total += n_active
                 spike_frames        += int(chunk_active.any(axis=1).sum())
 
             if chunk_voiced.any():
-                voiced_smoothed = smoothed_gr_matrix[chunk_voiced]
-                bin_sum_reduction += voiced_smoothed.sum(axis=0, dtype=np.float64)
+                voiced_combined   = combined_gr[chunk_voiced]
+                bin_sum_reduction += voiced_combined.sum(axis=0, dtype=np.float64)
                 bin_max_reduction  = np.maximum(
-                    bin_max_reduction, voiced_smoothed.max(axis=0),
+                    bin_max_reduction, voiced_combined.max(axis=0),
                 )
 
         voiced_frame_count = int(voiced_mask.sum())
@@ -647,77 +857,24 @@ class ResonanceSuppressor:
         mean_reduction = (sum_reduction / n_active_bins_total) if n_active_bins_total > 0 else 0.0
         artifact_risk  = mean_reduction > 3.0
 
-        band_summary = []
-        if voiced_frame_count > 0:
-            bin_mean_reduction = bin_sum_reduction / voiced_frame_count
+        band_summary = self._build_band_summary(
+            bin_sum_reduction, bin_max_reduction, voiced_frame_count, label="combined",
+        )
 
-            # Derive spike clusters directly from the per-bin data rather than
-            # checking a fixed set of 1/3-octave centers.  Active bins (those
-            # with max_reduction > threshold) are grouped into contiguous
-            # clusters; bins separated by a gap of <= GAP_BINS are merged into
-            # the same cluster so that a slight dip across a narrow resonance
-            # peak does not split it into two spurious entries.  Each cluster
-            # is reported once, centered at its peak-reduction bin.
-            ACTIVE_THRESHOLD = 0.05   # dB — below this a bin is considered silent
-            GAP_BINS         = 3      # merge clusters separated by this many bins or fewer
-
-            active_indices = np.where(bin_max_reduction > ACTIVE_THRESHOLD)[0]
-
-            if active_indices.size > 0:
-                # Build cluster list: each entry is (lo_bin, hi_bin) inclusive.
-                clusters = []
-                lo = prev = int(active_indices[0])
-                for idx in active_indices[1:]:
-                    i = int(idx)
-                    if i - prev > GAP_BINS:
-                        clusters.append((lo, prev))
-                        lo = i
-                    prev = i
-                clusters.append((lo, prev))
-
-                for lo, hi in clusters:
-                    cluster_slice   = slice(lo, hi + 1)
-                    peak_offset     = int(np.argmax(bin_max_reduction[cluster_slice]))
-                    peak_bin        = lo + peak_offset
-                    peak_freq       = float(self.freqs[peak_bin])
-                    mean_red        = float(np.mean(bin_mean_reduction[cluster_slice]))
-                    max_red         = float(bin_max_reduction[peak_bin])
-
-                    band_info = {
-                        "center":             round(peak_freq, 1),
-                        "mean_reduction_db":  round(mean_red, 2),
-                        "peak_reduction_db":  round(max_red, 2),
-                    }
-
-                    if self.f0 and self.f0 > 0:
-                        h = int(round(peak_freq / self.f0))
-                        if 0 < h <= self.params["max_harmonic"]:
-                            h_freq    = h * self.f0
-                            bin_width = self.sr / self.n_fft
-                            min_half  = int(self.params["harmonic_width_bins"])
-                            width_pct = float(self.params.get("harmonic_width_pct", 0.01))
-                            pct_half  = int(round(h_freq * width_pct / bin_width))
-                            tol_hz    = max(min_half, pct_half) * bin_width
-                            if abs(peak_freq - h_freq) <= tol_hz:
-                                band_info["harmonic"]    = f"H{h}={int(round(self.f0))} Hz"
-                                band_info["is_harmonic"] = True
-                            else:
-                                band_info["is_harmonic"] = False
-                        else:
-                            band_info["is_harmonic"] = False
-
-                    band_summary.append(band_info)
-
-            if band_summary:
-                logger.info("ResonanceSuppressor spike clusters (voiced frames):")
-                for b in band_summary:
-                    bars = "#" * min(20, int(round(b["peak_reduction_db"] / 0.5)))
-                    harm = f"  [harmonic: {b['harmonic']}]" if b.get("is_harmonic") else ""
-                    logger.info(
-                        f"  {b['center']:8.1f} Hz: "
-                        f"mean {-b['mean_reduction_db']:5.2f} dB | "
-                        f"peak {-b['peak_reduction_db']:5.2f} dB  {bars}{harm}"
-                    )
+        # Per-pass detail for multi-pass reporting.
+        passes_report = []
+        if n_passes > 1:
+            for i, pc in enumerate(self._pass_configs):
+                p_summary = self._build_band_summary(
+                    pass_bin_sum[i], pass_bin_max[i], voiced_frame_count,
+                    label=f"pass {i + 1}",
+                )
+                passes_report.append({
+                    "pass":            i + 1,
+                    "lifter_cutoff":   pc["lifter_cutoff"],
+                    "max_reduction_db": round(float(pass_bin_max[i].max()), 2),
+                    "band_summary":    p_summary,
+                })
 
         logger.info(
             f"ResonanceSuppressor: max={max_reduction:.2f} dB | "
@@ -732,6 +889,7 @@ class ResonanceSuppressor:
             "spike_frames":      spike_frames,
             "artifact_risk":     artifact_risk,
             "band_summary":      band_summary,
+            "passes":            passes_report,
         }
 
 
@@ -742,7 +900,7 @@ class ResonanceSuppressor:
 def apply_resonance_suppression(
     audio: np.ndarray,
     sample_rate: int,
-    params: dict = None,
+    params: "dict | list | None" = None,
     vad_voiced_mask: np.ndarray = None,
     f0: float = None,
     f0_contour: list | None = None,
@@ -753,7 +911,13 @@ def apply_resonance_suppression(
     Args:
         audio:           Mono float32 array at sample_rate.
         sample_rate:     Sample rate in Hz.
-        params:          Sparse parameter overrides (see DEFAULT_PARAMS).
+        params:          Sparse parameter overrides (see DEFAULT_PARAMS), OR a
+                         list of such dicts for multi-pass processing.  Each
+                         element in the list is a complete, independent pass
+                         config; all passes share a single STFT/ISTFT cycle
+                         and their gain reductions are combined with np.maximum
+                         before the ISTFT.  Single-object presets are fully
+                         backward-compatible.
         vad_voiced_mask: Per-sample bool array for silence gating.
         f0:              Scalar median F0 (Hz). Used as lifter cutoff when
                          contour is absent; derived from contour median
@@ -776,8 +940,12 @@ def apply_resonance_suppression(
     # the harmonic mask is active.  If preserve_harmonics=True (the production
     # default) and neither a contour nor a scalar f0 is available, skip the
     # stage rather than silently damaging the voice.
-    resolved = resolve_params(params)
-    if resolved.get("preserve_harmonics") and not f0 and not f0_contour:
+    #
+    # For multi-pass: skip if ANY pass has preserve_harmonics=True and no f0
+    # data is available — erring on the side of protection.
+    params_list = params if isinstance(params, list) else [params]
+    any_preserve = any(resolve_params(p).get("preserve_harmonics", True) for p in params_list)
+    if any_preserve and not f0 and not f0_contour:
         logger.warning(
             "ResonanceSuppressor: skipping stage — preserve_harmonics=True but "
             "neither f0 nor f0_contour is set.  Supply pitch data from "
@@ -791,6 +959,7 @@ def apply_resonance_suppression(
             "spike_frames":      0,
             "artifact_risk":     False,
             "band_summary":      [],
+            "passes":            [],
             "skipped":           True,
             "process_seconds":   time.perf_counter() - t0,
         }
@@ -813,6 +982,7 @@ def apply_resonance_suppression(
 
     result                    = suppressor.process(audio, voiced_frame_indices=voiced_frame_indices)
     result["skipped"]         = False
+    result["lifter_cutoff"]   = suppressor._lifter_cutoff
     result["process_seconds"] = time.perf_counter() - t0
     return result
 
@@ -821,8 +991,9 @@ def resonance_suppressor_report_entry(result: dict) -> dict:
     """Format result for the Stage 7 processing report JSON."""
     if result.get("skipped"):
         return {"applied": False, "process_seconds": round(result.get("process_seconds", 0.0), 3)}
-    return {
+    entry = {
         "applied":           True,
+        "lifter_cutoff":     result.get("lifter_cutoff"),
         "max_reduction_db":  round(result["max_reduction_db"],  1),
         "mean_reduction_db": round(result["mean_reduction_db"], 1),
         "spike_frames":      result["spike_frames"],
@@ -830,6 +1001,10 @@ def resonance_suppressor_report_entry(result: dict) -> dict:
         "band_summary":      result.get("band_summary", []),
         "process_seconds":   round(result.get("process_seconds", 0.0), 3),
     }
+    passes = result.get("passes")
+    if passes:
+        entry["passes"] = passes
+    return entry
 
 
 # ---------------------------------------------------------------------------
@@ -845,8 +1020,11 @@ if __name__ == "__main__":
     parser.add_argument("--input",         required=True)
     parser.add_argument("--output",        required=True)
     parser.add_argument("--params-json",   default=None,
-                        help="Sparse parameter overrides (JSON). Keys missing "
-                             "from the file inherit from DEFAULT_PARAMS. "
+                        help="Sparse parameter overrides (JSON object or array). "
+                             "A single object is merged over DEFAULT_PARAMS. "
+                             "An array enables multi-pass mode: each element is "
+                             "a complete, independent pass config.  Missing keys "
+                             "in each element inherit from DEFAULT_PARAMS. "
                              "Sourced from the preset's resonanceSuppressor "
                              "block in src/audio/presets.js.")
     parser.add_argument("--vad-mask-json",     default=None)

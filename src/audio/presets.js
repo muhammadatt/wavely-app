@@ -104,7 +104,7 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: "dBFS RMS" },
     truePeakCeiling: -3,
     noiseFloorTarget: -60,
-    noiseModel: "rnnoise", //"df3", "rnnoise", "dtln"
+    noiseModel: "df3", //"df3", "rnnoise", "dtln"
     eqProfile: "audiobook",
     bweModel: "lavasr",
     bwe: {
@@ -224,13 +224,13 @@ export const PRESETS = {
       strength: 0.7,
       transientShaper: true,
     },
-    airBoost: { gainDb: 8 },
+    airBoost: { gainDb: 5 },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
     // Conservative ACX tuning: higher dead zone and lower ceiling preserve
     // narration intelligibility; slower release avoids post-sibilant artifacts.
     sibilanceSuppressor: {
-      dead_zone_db: 6,
+      dead_zone_db: 8,
       release_ms: 50.0,
       max_reduction_db: 12,
     },
@@ -243,17 +243,41 @@ export const PRESETS = {
     // freq_floor_hz aligned with the Stage 1 HPF (80 Hz) — processing below
     // it is wasted work on the filter's roll-off region, and the 80–H1 range
     // has no harmonic protection, so low selectivity there causes sub-vocal cuts.
-    resonanceSuppressor: {
-      depth: 0.5,
-      sharpness: 0.6,
-      selectivity: 8,
-      attack_ms: 25.0,
-      release_ms: 100.0,
-      max_reduction_db: 12.0,
-      freq_floor_hz: 80.0,
-      freq_ceil_hz: 10000.0,
-      mode: "soft",
-    },
+    // Multi-pass resonance suppressor — two independent passes share one
+    // STFT/ISTFT cycle; gains are combined with np.maximum before ISTFT.
+    resonanceSuppressor: [
+      {
+        // Pass 1 — narrow resonances (room modes, mic peaks)
+        // L=93 (f0-derived): reference follows formants closely so only
+        // true narrow spikes (8+ dB above inter-harmonic floor) are caught.
+        depth: 0.7,
+        sharpness: 0.6,
+        selectivity: 8,
+        attack_ms: 25.0,
+        release_ms: 100.0,
+        max_reduction_db: 12.0,
+        freq_floor_hz: 80.0,
+        freq_ceil_hz: 16000.0,
+        mode: "soft",
+      },
+      {
+        // Pass 2 — broad sibilant plateau (4–12 kHz)
+        // lifter_cutoff_bins=3: nearly-flat reference resolves only features
+        // wider than n_fft/(2*3) ≈ 7.3 kHz, making a 4–8 kHz sibilant
+        // plateau protrude clearly above it.  High selectivity compensates
+        // for the floor sitting 15–20 dB below spectral peaks at L=3.
+        depth: 0.9,
+        sharpness: 0.1,
+        selectivity: 10,
+        attack_ms: 3.0,
+        release_ms: 120.0,
+        max_reduction_db: 20.0,
+        freq_floor_hz: 3000.0,
+        freq_ceil_hz: 12000.0,
+        mode: "soft",
+        lifter_cutoff_bins: 3,
+      },
+    ],
     //Gentle pre-compresion settings - designed for single voice use
     deEsser: {
       sensitivity: "medium",
@@ -263,7 +287,7 @@ export const PRESETS = {
     },
     roomPresence: {
       enabled: true,
-      wet: 0.03, // 0.12 - reverb tail sits ~17dB below direct
+      wet: 0.0, // 0.12 - reverb tail sits ~17dB below direct
       rt60Ms: 100, // presence without going washy; echoes after 200 - 250ms
       preDelayMs: 10.0, // slight punch through before reverb onset
       early_reflections: 2
