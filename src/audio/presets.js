@@ -108,7 +108,7 @@ export const PRESETS = {
     eqProfile: "audiobook",
     bweModel: "ap-bwe", //"lavasr", "ap-bwe"
     bwe: {
-      enabled: true,
+      enabled: false,
       postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
     },
     channelOutput: "mono",
@@ -227,16 +227,7 @@ export const PRESETS = {
     // sibilantGainFloor: how much of the boost survives on sibilant frames.
     // 0.0 = no boost on sibilants; 1.0 = full boost everywhere (no masking).
     // ACX uses 0.0 — conservative; sibilant amplification risks human-review rejection.
-    airBoost: { gainDb: 12, sibilantGainFloor: 0.0 },
-    // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
-    // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
-    // Conservative ACX tuning: higher dead zone and lower ceiling preserve
-    // narration intelligibility; slower release avoids post-sibilant artifacts.
-    sibilanceSuppressor: {
-      dead_zone_db: 18,
-      release_ms: 120.0,
-      max_reduction_db: 24,
-    },
+    airBoost: { gainDb: 6, sibilantGainFloor: 0.25 },
     // Resonance Suppressor.
     // Selectivity is calibrated for the cepstral inter-harmonic floor reference, 
     // which sits ~8–15 dB below spectral peaks — so 8 dB here is equivalent to a 
@@ -273,7 +264,7 @@ export const PRESETS = {
         combine: "add",  // stacks on top of pass 1
         depth: 0.67,
         sharpness: 0.2,
-        selectivity: 10,
+        selectivity: 6,
         attack_ms: 5.0,
         release_ms: 15.0,
         max_reduction_db: 50.0,
@@ -291,6 +282,15 @@ export const PRESETS = {
       trigger: 1,
       maxReduction: 12,
       ratio: 3,
+    },
+    // Sibilance Suppressor. Sparse overrides; anything omitted
+    // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
+    // Conservative ACX tuning: higher dead zone and lower ceiling preserve
+    // narration intelligibility; slower release avoids post-sibilant artifacts.
+    sibilanceSuppressor: {
+      dead_zone_db: 18,
+      release_ms: 120.0,
+      max_reduction_db: 24,
     },
     roomPresence: {
       enabled: true,

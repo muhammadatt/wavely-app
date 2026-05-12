@@ -49,9 +49,21 @@ def _autocorr_f0(frame: np.ndarray, sample_rate: int) -> float | None:
     lag_max = int(sample_rate / F0_MIN_HZ)
     if lag_max >= len(corr) or lag_min >= lag_max:
         return None
-    peak_lag = lag_min + int(np.argmax(corr[lag_min:lag_max]))
-    if corr[peak_lag] > MIN_CORR_RATIO * corr[0] and peak_lag > 0:
-        return float(sample_rate / peak_lag)
+    i = lag_min + int(np.argmax(corr[lag_min:lag_max]))
+    if corr[i] > MIN_CORR_RATIO * corr[0] and i > 0:
+        # Parabolic interpolation: fit a parabola through the three points
+        # surrounding the integer-lag peak and solve for the continuous maximum.
+        # This removes the lag-quantisation error (up to ±0.8 Hz at f0≈188 Hz
+        # before interpolation) without introducing any new dependencies.
+        #   delta = 0.5 × (y₋₁ − y₊₁) / (y₋₁ − 2y₀ + y₊₁)
+        # Guard: skip when i is at a boundary or denominator is zero.
+        if 0 < i < len(corr) - 1:
+            y0, y1, y2 = corr[i - 1], corr[i], corr[i + 1]
+            denom = y0 - 2.0 * y1 + y2
+            if denom != 0.0:
+                delta = 0.5 * (y0 - y2) / denom
+                return float(sample_rate / (i + delta))
+        return float(sample_rate / i)
     return None
 
 

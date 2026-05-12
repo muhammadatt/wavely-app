@@ -666,22 +666,11 @@ export async function airBoost(ctx) {
   const attackMs          = airBoostConfig.sibilantAttackMs  ?? 5.0
   const releaseMs         = airBoostConfig.sibilantReleaseMs ?? 20.0
 
-  // Save the pre-boost path now — needed as --original for the blend pass and
-  // also ensures analyzeSibilanceEvents runs on the correct (pre-boost) file.
+  // Save pre-boost path — needed as --original for the blend pass regardless
+  // of when sibilance analysis runs.
   const originalPath = ctx.currentPath
-
-  // Fetch sibilant event map before applying the boost so that:
-  //   (a) detection runs on the pre-boost signal (stable timing, consistent
-  //       with what downstream stages expect)
-  //   (b) the cached map is available for free to resonanceSuppressor and
-  //       sibilanceSuppressor without a redundant STFT pass
-  let eventsPath = null
-  if (gainDb > 0 && sibilantGainFloor < 1.0) {
-    const sibilanceCache = await analyzeSibilanceEvents(ctx)
-    eventsPath = sibilanceCache?.path ?? null
-  }
-
   const airBoostPath = ctx.tmp('.wav')
+
   const result = await applyAirBoost(
     originalPath,
     airBoostPath,
@@ -691,17 +680,30 @@ export async function airBoost(ctx) {
   )
 
   if (result.applied) {
-    if (eventsPath) {
-      // Blend boosted back toward original on sibilant frames
-      const maskedPath = ctx.tmp('.wav')
-      await applyAirBoostMask(
-        originalPath, airBoostPath, eventsPath, maskedPath,
-        sibilantGainFloor, attackMs, releaseMs,
-      )
-      ctx.currentPath = maskedPath
-      result.sibilantMask = { applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs }
-    } else {
-      ctx.currentPath = airBoostPath
+    // Update currentPath to the boosted audio BEFORE calling analyzeSibilanceEvents.
+    // Detection must run on the post-boost signal so the cached event map matches
+    // the spectral state that resonanceSuppressor and sibilanceSuppressor will see.
+    // Previously, resonanceSuppressor was the first caller of analyzeSibilanceEvents
+    // and it always saw the post-boost audio — this preserves that contract while
+    // still warming up the cache here so downstream stages pay no extra cost.
+    ctx.currentPath = airBoostPath
+
+    if (sibilantGainFloor < 1.0) {
+      const sibilanceCache = await analyzeSibilanceEvents(ctx)
+      const eventsPath     = sibilanceCache?.path ?? null
+
+      if (eventsPath) {
+        // Blend boosted back toward original on sibilant frames.
+        // originalPath (pre-boost) is used as the "no boost" reference;
+        // airBoostPath (full boost) is attenuated toward it on sibilant frames.
+        const maskedPath = ctx.tmp('.wav')
+        await applyAirBoostMask(
+          originalPath, airBoostPath, eventsPath, maskedPath,
+          sibilantGainFloor, attackMs, releaseMs,
+        )
+        ctx.currentPath = maskedPath
+        result.sibilantMask = { applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs }
+      }
     }
   }
 

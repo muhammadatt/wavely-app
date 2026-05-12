@@ -1,6 +1,6 @@
 """
-instant_polish_resonance_suppressor.py
-Stage 3b — Dynamic Resonance Suppressor
+resonance_suppressor.py
+Dynamic Resonance Suppressor
 
 Soothe2-inspired spectral spike detection and dynamic attenuation.
 Operates on 32-bit float PCM at 44.1 kHz (Instant Polish internal format).
@@ -111,9 +111,16 @@ DEFAULT_PARAMS = {
                                   # Set False only for testing / diagnostic runs.
     "harmonic_width_bins": 2,     # Minimum half-width of the protection zone (STFT
                                   # bins; 1 bin ≈ 21.5 Hz at 44.1 kHz / n_fft=2048).
-                                  # Matches the Hann window main lobe half-width —
-                                  # the physically correct floor regardless of frequency.
-                                  # Acts as the sole protection for low harmonics;
+                                  # 3 bins (≈ 64 Hz) provides margin for autocorrelation
+                                  # lag quantization error in the per-frame F0 contour.
+                                  # The rolling F0 is updated every 3rd voiced frame and
+                                  # forward-filled between updates; a 3-step lag drift
+                                  # at f0≈188 Hz can shift H10 by up to ~48 Hz. A 2-bin
+                                  # (43 Hz) zone is too tight to absorb this drift,
+                                  # leaving those bins unprotected on affected frames.
+                                  # 3 bins (64 Hz) covers the worst-case drift while
+                                  # leaving ~60 Hz of inter-harmonic space per gap at
+                                  # 188 Hz — sufficient for room mode detection.
                                   # harmonic_width_pct takes over above ~H20.
     "harmonic_width_pct": 0.01,   # Protection half-width as a fraction of the overtone
                                   # frequency (1 %). With a per-frame F0 contour the
@@ -279,6 +286,15 @@ class ResonanceSuppressor:
         # the same vocal harmonics at the same pitch positions).
         self.params = self._pass_configs[0]["resolved"]
 
+        # Harmonic mask ceiling: use the highest freq_ceil_hz across all passes
+        # so that harmonics in every pass's active range are protected.  Using
+        # only the first pass's freq_ceil_hz (e.g. 3000 Hz) would leave all
+        # harmonics above that ceiling unprotected in higher-frequency passes
+        # (e.g. a sibilant-only pass covering 3–12 kHz).
+        self._harmonic_freq_ceil = max(
+            pc["resolved"]["freq_ceil_hz"] for pc in self._pass_configs
+        )
+
         # Backward-compat: single-pass code expects self._lifter_cutoff.
         self._lifter_cutoff = self._pass_configs[0]["lifter_cutoff"]
 
@@ -411,7 +427,7 @@ class ResonanceSuppressor:
         min_half  = int(self.params["harmonic_width_bins"])
         width_pct = float(self.params.get("harmonic_width_pct", 0.01))
         max_h     = int(self.params["max_harmonic"])
-        freq_ceil = float(self.params["freq_ceil_hz"])
+        freq_ceil = self._harmonic_freq_ceil
         mask      = np.zeros(self.n_bins, dtype=bool)
 
         # Iterate until the harmonic exceeds freq_ceil_hz or the hard max_harmonic

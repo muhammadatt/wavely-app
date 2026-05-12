@@ -1,19 +1,35 @@
 """
 air_boost_masked.py — Sibilant-aware air boost blend pass.
 
-Reads a boosted WAV (output of the FFmpeg Maag EQ filter chain) and the
-original pre-boost WAV, then blends them using a smooth gain envelope derived
-from the sibilance event map.  On sibilant frames the boost gain is attenuated
-to `sibilant_gain_floor` (default 0.0 = no boost at all on sibilants).  On
-non-sibilant frames the gain is 1.0 (full boost passes through).
+STFT-domain implementation — avoids the phase artefacts of time-domain blending.
 
-Envelope behaviour matches a de-esser: fast attack (boost drops quickly when
-a sibilant starts) and slower release (boost recovers after the sibilant ends).
+WHY TIME-DOMAIN BLENDING IS WRONG HERE
+---------------------------------------
+The Maag EQ chain uses IIR biquad filters (FFmpeg equalizer / highshelf).
+IIR filters introduce a frequency-varying phase shift, so the boosted audio
+is phase-shifted relative to the original.  A naive time-domain blend:
 
-IIR smoothing is computed at hop-frame rate (~86 Hz for hop_length=512 @
-44.1 kHz) and then linearly interpolated to sample rate.  This is equivalent
-in timing accuracy to a per-sample loop but avoids a 1.3 M iteration Python
-loop for a 30-second file.
+    output = original * (1-env) + boosted * env
+
+sums two signals that disagree in phase, creating comb-filtering artefacts at
+transition frequencies.  These spectral irregularities are then visible to the
+resonance suppressor, which reacts to them and produces secondary artefacts.
+
+WHY STFT-DOMAIN BLENDING IS CORRECT
+--------------------------------------
+In the complex STFT domain, S_boost[frame, bin] = S_orig[frame, bin] × H(f),
+where H(f) is the filter's complex transfer function.  The blend formula:
+
+    S_out = S_orig + (S_boost − S_orig) × env
+          = S_orig × (1 + (H − 1) × env)
+
+correctly interpolates both the magnitude and phase of the filter response.
+env=1 → full boost transfer function applied; env=0 → identity (no boost).
+No two out-of-phase signals are ever summed, so there are no comb-filter
+artefacts.
+
+The STFT parameters (N_FFT=2048, HOP_LENGTH=512) match analyze_sibilance_events.py
+so that sibilant frame indices index directly into STFT frames with no resampling.
 
 CLI:
   python air_boost_masked.py
@@ -21,9 +37,9 @@ CLI:
     --boosted             <post-boost.wav>
     --events              <sibilance_events.json>
     --output              <output.wav>
-    [--sibilant-gain-floor  0.0]   # 0.0=no boost, 1.0=full (no-op)
-    [--attack-ms            5.0]   # ms for boost to drop when sibilant starts
-    [--release-ms          20.0]   # ms for boost to recover after sibilant ends
+    [--sibilant-gain-floor  0.0]   # 0.0=no boost on sibilants, 1.0=full (no-op)
+    [--attack-ms            5.0]   # ms for boost to drop when a sibilant starts
+    [--release-ms          20.0]   # ms for boost to recover after a sibilant ends
 """
 
 import argparse
@@ -33,72 +49,89 @@ import sys
 
 import numpy as np
 from scipy.io import wavfile
+from scipy.signal import stft, istft
 
 logger = logging.getLogger(__name__)
 
+# Must match analyze_sibilance_events.py so sibilant frame indices align
+# 1-to-1 with STFT frames computed here.
+N_FFT      = 2048
+HOP_LENGTH = 512
 
-def build_gain_envelope(
+
+def build_frame_envelope(
     sibilant_frame_indices: list,
-    hop_length:             int,
-    n_samples:              int,
+    n_frames:               int,
     sibilant_gain_floor:    float,
     attack_ms:              float,
     release_ms:             float,
     sample_rate:            int,
 ) -> np.ndarray:
     """
-    Build a sample-level gain envelope from STFT sibilant frame indices.
+    Build a per-STFT-frame IIR gain envelope.
 
-    Each sibilant frame index maps to a hop_length-wide window in the audio.
-    The IIR smoothing is applied at hop rate then interpolated to sample rate.
+    1.0               = full boost (non-sibilant frame)
+    sibilant_gain_floor = attenuated boost (sibilant frame)
 
-    Returns a float32 array of length n_samples with values in
-    [sibilant_gain_floor, 1.0].
+    Attack  = how fast the gain drops when a sibilant frame starts.
+    Release = how fast the gain recovers after a sibilant frame ends.
+    Frame rate is ~86 Hz for HOP_LENGTH=512 @ 44.1 kHz — Python loop is fast.
     """
-    n_hops = max(1, (n_samples + hop_length - 1) // hop_length)
-
-    # Target per-hop: 1.0 = full boost (non-sibilant), floor = reduced (sibilant)
-    target_hops = np.ones(n_hops, dtype=np.float32)
+    target = np.ones(n_frames, dtype=np.float32)
     for fi in sibilant_frame_indices:
-        if 0 <= fi < n_hops:
-            target_hops[fi] = sibilant_gain_floor
+        if 0 <= fi < n_frames:
+            target[fi] = sibilant_gain_floor
 
-    # IIR coefficients at hop rate
-    hop_rate      = sample_rate / hop_length        # ~86.1 Hz for 512/44100
-    attack_coeff  = np.exp(-1.0 / max(1.0, attack_ms  * hop_rate / 1000.0))
-    release_coeff = np.exp(-1.0 / max(1.0, release_ms * hop_rate / 1000.0))
+    frame_rate    = sample_rate / HOP_LENGTH          # ~86.1 Hz
+    attack_coeff  = np.exp(-1.0 / max(1.0, attack_ms  * frame_rate / 1000.0))
+    release_coeff = np.exp(-1.0 / max(1.0, release_ms * frame_rate / 1000.0))
 
-    # Per-hop IIR smoothing (~86 iterations for a 1-second file)
-    envelope_hops = np.empty(n_hops, dtype=np.float32)
+    envelope = np.empty(n_frames, dtype=np.float32)
     env = 1.0
-    for i, t in enumerate(target_hops):
+    for i, t in enumerate(target):
         coeff = attack_coeff if t < env else release_coeff
         env   = coeff * env + (1.0 - coeff) * float(t)
-        envelope_hops[i] = env
-
-    # Interpolate hop-rate envelope to sample rate
-    hop_centers      = np.arange(n_hops) * hop_length + hop_length // 2
-    sample_positions = np.arange(n_samples)
-    envelope         = np.interp(sample_positions, hop_centers, envelope_hops)
-    return envelope.astype(np.float32)
+        envelope[i] = env
+    return envelope
 
 
-def blend(original: np.ndarray, boosted: np.ndarray, envelope: np.ndarray) -> np.ndarray:
+def blend_stft_channel(orig_ch, boost_ch, envelope, sample_rate):
     """
-    output = original + (boosted - original) * envelope
-           = original*(1-env) + boosted*env
-
-    Handles mono (1D) and stereo (2D, shape [samples, channels]).
+    STFT-domain blend for a single mono float32 channel.
+    Returns a float32 array of the same length as orig_ch.
     """
-    if original.ndim == 2:
-        envelope = envelope[:, np.newaxis]  # broadcast over channels
-    return (original + (boosted - original) * envelope).astype(original.dtype)
+    n_samples = len(orig_ch)
+    noverlap  = N_FFT - HOP_LENGTH
+
+    _, _, S_orig  = stft(orig_ch,  sample_rate, nperseg=N_FFT, noverlap=noverlap, boundary='zeros')
+    _, _, S_boost = stft(boost_ch, sample_rate, nperseg=N_FFT, noverlap=noverlap, boundary='zeros')
+
+    # Align envelope to the actual STFT frame count (may differ by 1–2 frames
+    # from the estimate used when building it)
+    n_frames = S_orig.shape[1]
+    env_frame = np.ones(n_frames, dtype=np.float32)
+    copy_len  = min(len(envelope), n_frames)
+    env_frame[:copy_len] = envelope[:copy_len]
+
+    # Complex STFT blend — shape (n_bins, n_frames)
+    # S_out = S_orig + (S_boost - S_orig) * env  →  no phase mismatch
+    S_out = S_orig + (S_boost - S_orig) * env_frame[np.newaxis, :]
+
+    _, out = istft(S_out, sample_rate, nperseg=N_FFT, noverlap=noverlap, boundary=True)
+
+    # Trim or pad to match original length exactly
+    if len(out) > n_samples:
+        out = out[:n_samples]
+    elif len(out) < n_samples:
+        out = np.pad(out, (0, n_samples - len(out)))
+
+    return out.astype(np.float32)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
-    parser = argparse.ArgumentParser(description="Sibilant-aware air boost blend")
+    parser = argparse.ArgumentParser(description="Sibilant-aware air boost blend (STFT)")
     parser.add_argument("--original",            required=True)
     parser.add_argument("--boosted",             required=True)
     parser.add_argument("--events",              required=True, help="Sibilance event map JSON")
@@ -119,12 +152,11 @@ if __name__ == "__main__":
     with open(args.events) as fh:
         events_map = json.load(fh)
 
-    hop_length             = events_map.get("hopLength", 512)
     sibilant_frame_indices = events_map.get("sibilantFrameIndices", [])
     n_samples              = original.shape[0]
 
     if not sibilant_frame_indices:
-        logger.info("AirBoostMask: no sibilant frames detected — writing boosted as-is")
+        logger.info("AirBoostMask: no sibilant frames — writing boosted as-is")
         wavfile.write(args.output, sr_o, boosted)
         sys.exit(0)
 
@@ -134,16 +166,27 @@ if __name__ == "__main__":
         f"attack={args.attack_ms}ms release={args.release_ms}ms"
     )
 
-    gain_envelope = build_gain_envelope(
-        sibilant_frame_indices, hop_length, n_samples,
+    # Estimate frame count for envelope pre-allocation (blend_stft_channel aligns)
+    n_frames_est = 1 + n_samples // HOP_LENGTH
+    envelope = build_frame_envelope(
+        sibilant_frame_indices, n_frames_est,
         args.sibilant_gain_floor, args.attack_ms, args.release_ms, sr_o,
     )
 
-    output = blend(original, boosted, gain_envelope)
+    mono = original.ndim == 1
+    if mono:
+        output = blend_stft_channel(original, boosted, envelope, sr_o)
+    else:
+        out_channels = [
+            blend_stft_channel(original[:, c], boosted[:, c], envelope, sr_o)
+            for c in range(original.shape[1])
+        ]
+        output = np.stack(out_channels, axis=1)
+
     wavfile.write(args.output, sr_o, output)
 
-    sib_pct = 100.0 * len(sibilant_frame_indices) * hop_length / n_samples
+    sib_pct = 100.0 * len(sibilant_frame_indices) * HOP_LENGTH / n_samples
     logger.info(
-        f"AirBoostMask: done | sibilant≈{sib_pct:.1f}% of audio | "
-        f"envelope min={gain_envelope.min():.3f} max={gain_envelope.max():.3f}"
+        f"AirBoostMask: done | sibilant≈{sib_pct:.1f}% | "
+        f"envelope min={envelope.min():.3f}"
     )

@@ -5,11 +5,12 @@
  * The result is computed once and cached on ctx._f0Contour so subsequent
  * callers pay zero marginal cost.
  *
- * Priority order:
- *   1. ctx._f0Contour          — already computed this run.
- *   2. ctx._sibilanceEvents    — sibilance analyzer ran upstream and emitted
- *                                F0 as a side effect; extract for free.
- *   3. estimate_f0_contour.py  — dedicated lightweight analysis pass.
+ * Resolution order:
+ *   1. ctx._f0Contour         — already computed this run; return immediately.
+ *   2. estimate_f0_contour.py — dedicated per-frame autocorrelation pass on
+ *                               ctx.currentPath. Always used; see note inside
+ *                               getF0Contour() for why ctx._sibilanceEvents F0
+ *                               is intentionally NOT reused here.
  *
  * Cache is stored outside ctx.results (internal pipeline plumbing, not a
  * report payload — buildReport() should never see it).
@@ -38,22 +39,15 @@ export async function getF0Contour(ctx) {
   // 1. Already computed this run.
   if (ctx._f0Contour) return ctx._f0Contour
 
-  // 2. Sibilance events already computed — extract F0 for free.
-  //    build_events_map() emits f0.{median, perFrame} alongside nFft/hopLength
-  //    at the top level of the events map.
-  const sibEvents = ctx._sibilanceEvents?.events
-  if (sibEvents?.f0?.perFrame?.length > 0 && sibEvents.f0.median != null) {
-    ctx._f0Contour = {
-      median:    sibEvents.f0.median,
-      perFrame:  sibEvents.f0.perFrame,
-      nFft:      sibEvents.nFft      ?? 2048,
-      hopLength: sibEvents.hopLength ?? 512,
-    }
-    ctx.log?.('[F0Analysis] Using F0 contour from sibilance event cache')
-    return ctx._f0Contour
-  }
+  // Note: the sibilance event map also carries a per-frame F0 field
+  // (ctx._sibilanceEvents?.events?.f0), but that is the sibilance detector's
+  // rolling-median estimate — designed for sibilance band placement (~3×F0
+  // accuracy) rather than harmonic protection (~1 bin ≈ 21.5 Hz accuracy).
+  // Reusing it here caused the resonance suppressor's harmonic mask to misfire
+  // on harmonic bins, producing visible gain reduction in the voiced harmonic
+  // region. Always run the dedicated autocorrelation estimator.
 
-  // 3. Run dedicated analysis.
+  // 2. Run dedicated analysis.
   ctx.log?.('[F0Analysis] Computing F0 contour via estimate_f0_contour.py')
   const startTime  = Date.now()
   const outputPath = ctx.tmp('.json')

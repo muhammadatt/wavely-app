@@ -232,9 +232,16 @@ def estimate_f0(audio: np.ndarray, sample_rate: int) -> float:
         if lag_max >= len(corr):
             continue
 
-        peak_lag = lag_min + np.argmax(corr[lag_min:lag_max])
-        if corr[peak_lag] > 0.1 * corr[0] and peak_lag > 0:
-            f0_estimates.append(sample_rate / peak_lag)
+        i = lag_min + int(np.argmax(corr[lag_min:lag_max]))
+        if corr[i] > 0.1 * corr[0] and i > 0:
+            # Parabolic interpolation for sub-sample lag accuracy.
+            if 0 < i < len(corr) - 1:
+                y0, y1, y2 = corr[i - 1], corr[i], corr[i + 1]
+                denom = y0 - 2.0 * y1 + y2
+                if denom != 0.0:
+                    f0_estimates.append(sample_rate / (i + 0.5 * (y0 - y2) / denom))
+                    continue
+            f0_estimates.append(sample_rate / i)
 
     if not f0_estimates:
         logger.warning(f"F0 estimation failed, using fallback {FALLBACK_F0} Hz")
@@ -285,9 +292,18 @@ def _autocorrelate_f0_frame(
     if lag_max >= len(corr) or lag_min >= lag_max:
         return None
 
-    peak_lag = lag_min + int(np.argmax(corr[lag_min:lag_max]))
-    if corr[peak_lag] > min_corr_ratio * corr[0] and peak_lag > 0:
-        return float(sample_rate / peak_lag)
+    i = lag_min + int(np.argmax(corr[lag_min:lag_max]))
+    if corr[i] > min_corr_ratio * corr[0] and i > 0:
+        # Parabolic interpolation for sub-sample lag accuracy — same method
+        # as estimate_f0_contour._autocorr_f0. Eliminates up to ±0.8 Hz of
+        # f0 quantisation error per lag step (compounds at higher harmonics).
+        if 0 < i < len(corr) - 1:
+            y0, y1, y2 = corr[i - 1], corr[i], corr[i + 1]
+            denom = y0 - 2.0 * y1 + y2
+            if denom != 0.0:
+                delta = 0.5 * (y0 - y2) / denom
+                return float(sample_rate / (i + delta))
+        return float(sample_rate / i)
     return None
 
 
