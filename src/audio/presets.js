@@ -106,7 +106,7 @@ export const PRESETS = {
     noiseFloorTarget: -60,
     noiseModel: "df3", //"df3", "rnnoise", "dtln"
     eqProfile: "audiobook",
-    bweModel: "lavasr",
+    bweModel: "ap-bwe", //"lavasr", "ap-bwe"
     bwe: {
       enabled: true,
       postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
@@ -120,15 +120,15 @@ export const PRESETS = {
       preserve_early: false,
     },
     autoLeveler: {
-      total_max_up_db: 5.0,
-      total_max_down_db: 6.0,
-      target_mode: 'running_median',
+      total_max_up_db: 10.0,
+      total_max_down_db: 10.0,
+      target_mode: 'global', // "running_median", "global"
       target_window_s: 60,
       noise_floor_target_dbfs: -60,
       deadband_db: 2.0,
       knee_db: 1.5,
-      max_up_db: 4.0,
-      max_down_db: 5.0,
+      max_up_db: 10.0,
+      max_down_db: 10.0,
       subphrase_split_drop_db: 6.0,
       subphrase_split_min_duration_ms: 500,
       crossfade_ms: 30,
@@ -224,7 +224,10 @@ export const PRESETS = {
       strength: 0.7,
       transientShaper: true,
     },
-    airBoost: { gainDb: 6 },
+    // sibilantGainFloor: how much of the boost survives on sibilant frames.
+    // 0.0 = no boost on sibilants; 1.0 = full boost everywhere (no masking).
+    // ACX uses 0.0 — conservative; sibilant amplification risks human-review rejection.
+    airBoost: { gainDb: 12, sibilantGainFloor: 0.0 },
     // Stage 4 — Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
     // Conservative ACX tuning: higher dead zone and lower ceiling preserve
@@ -272,8 +275,8 @@ export const PRESETS = {
         sharpness: 0.2,
         selectivity: 10,
         attack_ms: 5.0,
-        release_ms: 120.0,
-        max_reduction_db: 20.0,
+        release_ms: 15.0,
+        max_reduction_db: 50.0,
         freq_floor_hz: 3000.0,
         freq_ceil_hz: 12000.0,
         mode: "soft",
@@ -400,7 +403,10 @@ export const PRESETS = {
       releaseMs: 40,
       floorDb: -60,
     },
-    airBoost: { gainDb: 2.5 },
+    // Podcast: retain a small fraction of the boost on sibilant frames (0.25)
+    // so the air character isn't entirely absent on consonants — the processed,
+    // punchy podcast sound benefits from some HF presence even on sibilants.
+    airBoost: { gainDb: 2.5, sibilantGainFloor: 0.25 },
     bweModel: "ap_bwe",
     bwe: {
       enabled: true,
@@ -538,7 +544,9 @@ export const PRESETS = {
       releaseMs: 60,
       floorDb: -55,
     },
-    airBoost: { gainDb: 2.0 },
+    // Voice Ready: 0.0 — voice-over sits under music beds where sibilant
+    // amplification is audible; fully suppress the boost on sibilant frames.
+    airBoost: { gainDb: 2.0, sibilantGainFloor: 0.0 },
     bweModel: "ap_bwe",
     bwe: {
       enabled: true,
@@ -677,7 +685,9 @@ export const PRESETS = {
       releaseMs: 40,
       floorDb: -60,
     },
-    airBoost: { gainDb: 16 },
+    // General Clean: 16 dB is significant — sibilant masking is critical here.
+    // 0.0 fully suppresses the boost on sibilant frames.
+    airBoost: { gainDb: 16, sibilantGainFloor: 0.0 },
     bweModel: "ap_bwe",
     bwe: {
       enabled: true,

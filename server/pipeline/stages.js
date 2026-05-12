@@ -49,7 +49,7 @@ import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { applyVadGate }       from './vadGate.js'
 import { analyzeHum } from './humEQ.js'
-import { applyAirBoost } from './airBoost.js'
+import { applyAirBoost, applyAirBoostMask } from './airBoost.js'
 import { getF0Contour } from './f0Analysis.js'
 import { analyzeSibilanceEvents } from './sibilanceEvents.js'
 
@@ -651,23 +651,66 @@ export async function breathReduce(ctx) {
 // corner). Skips silently when preset.airBoost.gainDb is 0 or negative.
 // For ACX output profiles, a noise floor pre/post check constrains the applied
 // gain to preserve the -60 dBFS ACX ceiling.
+//
+// Sibilant masking: when preset.airBoost.sibilantGainFloor < 1.0, the
+// sibilance event map is fetched (or computed and cached) before the FFmpeg
+// pass so that downstream stages (resonanceSuppressor, sibilanceSuppressor)
+// get a free cache hit.  After the FFmpeg EQ is applied, a Python blend pass
+// attenuates the boost on sibilant frames back toward the original signal,
+// preventing the air-band lift from amplifying sibilant energy.
 
 export async function airBoost(ctx) {
-  const gainDb       = ctx.preset?.airBoost?.gainDb ?? 0
+  const airBoostConfig    = ctx.preset?.airBoost ?? {}
+  const gainDb            = airBoostConfig.gainDb            ?? 0
+  const sibilantGainFloor = airBoostConfig.sibilantGainFloor ?? 1.0  // 1.0 = no masking (legacy)
+  const attackMs          = airBoostConfig.sibilantAttackMs  ?? 5.0
+  const releaseMs         = airBoostConfig.sibilantReleaseMs ?? 20.0
+
+  // Save the pre-boost path now — needed as --original for the blend pass and
+  // also ensures analyzeSibilanceEvents runs on the correct (pre-boost) file.
+  const originalPath = ctx.currentPath
+
+  // Fetch sibilant event map before applying the boost so that:
+  //   (a) detection runs on the pre-boost signal (stable timing, consistent
+  //       with what downstream stages expect)
+  //   (b) the cached map is available for free to resonanceSuppressor and
+  //       sibilanceSuppressor without a redundant STFT pass
+  let eventsPath = null
+  if (gainDb > 0 && sibilantGainFloor < 1.0) {
+    const sibilanceCache = await analyzeSibilanceEvents(ctx)
+    eventsPath = sibilanceCache?.path ?? null
+  }
+
   const airBoostPath = ctx.tmp('.wav')
-  const result       = await applyAirBoost(
-    ctx.currentPath,
+  const result = await applyAirBoost(
+    originalPath,
     airBoostPath,
     gainDb,
     ctx.outputProfileId,
     ctx.results.metrics,
   )
-  if (result.applied) ctx.currentPath = airBoostPath
+
+  if (result.applied) {
+    if (eventsPath) {
+      // Blend boosted back toward original on sibilant frames
+      const maskedPath = ctx.tmp('.wav')
+      await applyAirBoostMask(
+        originalPath, airBoostPath, eventsPath, maskedPath,
+        sibilantGainFloor, attackMs, releaseMs,
+      )
+      ctx.currentPath = maskedPath
+      result.sibilantMask = { applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs }
+    } else {
+      ctx.currentPath = airBoostPath
+    }
+  }
+
   ctx.results.airBoost = result
   await logLevel(ctx, 'after air boost', ctx.currentPath, {
-    applied: result.applied,
-    gainDb:  result.applied_gain_db ?? 'skipped',
-    ...(result.skip_reason && { reason: result.skip_reason }),
+    applied:  result.applied,
+    gainDb:   result.applied_gain_db ?? 'skipped',
+    ...(result.skip_reason  && { reason:       result.skip_reason }),
+    ...(result.sibilantMask && { sibilantMask: `floor=${sibilantGainFloor}` }),
   })
 }
 

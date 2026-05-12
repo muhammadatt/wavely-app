@@ -30,12 +30,12 @@ const STANDARD_PIPELINE = [
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
+  stages.autoLevel,               // M Leveller-style per-clip gain automation (pre-compression)
   stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
   //stages.dereverb,
   //stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before autoLevel + compression
-  stages.autoLevel,               // M Leveller-style per-clip gain automation (pre-compression)
   stages.compress,                // Serial compression
   stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
   stages.noiseReduce,             // Conditional secondary NR pass

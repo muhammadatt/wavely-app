@@ -1,7 +1,7 @@
 /**
  * Auto Leveler — Stage 4b, M Leveller-style clip-automation.
  *
- * Repositioned pre-compression. The leveler segments voiced audio into clips,
+ * Pre-compression levleer. The leveler segments voiced audio into clips,
  * applies a single flat gain offset per clip, and crossfades between clips at
  * low-energy boundaries. There is no continuous IIR smoothing of a sample-rate
  * gain curve — gain is piecewise constant within each clip, so the dynamics

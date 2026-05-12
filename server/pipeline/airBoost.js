@@ -29,8 +29,15 @@
  * gain to keep the noise floor below the -60 dBFS ACX ceiling.
  */
 
+import { spawn }           from 'child_process'
+import { fileURLToPath }  from 'url'
+import path               from 'path'
 import { applyParametricEQ } from '../lib/ffmpeg.js'
 import { remeasureFrames }    from './frameAnalysis.js'
+import { PYTHON }         from './spawnPython.js'
+
+const SCRIPTS_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
+const MASK_SCRIPT  = path.join(SCRIPTS_DIR, 'air_boost_masked.py')
 
 const ACX_NOISE_FLOOR_CEILING = -60   // dBFS — ACX hard ceiling
 const ACX_PRE_CHECK_LIMIT     = -61   // dBFS — skip if already this close before boost
@@ -164,4 +171,81 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
     model:             'maag_eq4_approximation_v1_unverified',
     bands:             bandsReport(currentGain),
   }
+}
+
+/**
+ * Blend the boosted WAV back toward the original on sibilant frames.
+ *
+ * The FFmpeg EQ filter is time-invariant — it boosts sibilants as much as any
+ * other HF content.  This pass applies a smooth gain envelope derived from the
+ * sibilance event map so that sibilant frames receive a reduced (or no) boost,
+ * while non-sibilant frames retain the full air-boost effect.
+ *
+ * Envelope behaviour: fast attack (boost drops when sibilant starts), slower
+ * release (boost recovers after the sibilant ends) — matching de-esser timing.
+ *
+ * output = original + (boosted − original) × gain_envelope
+ *        = original × (1 − env) + boosted × env
+ *
+ * @param {string} originalPath     Pre-boost WAV (ctx.currentPath before airBoost ran)
+ * @param {string} boostedPath      Post-FFmpeg-EQ WAV (output of applyAirBoost)
+ * @param {string} eventsPath       Sibilance event map JSON (from analyzeSibilanceEvents)
+ * @param {string} outputPath       Destination WAV for the blended result
+ * @param {number} [sibilantGainFloor=0.0]  Boost fraction retained on sibilant frames
+ *                                          (0.0 = no boost, 1.0 = full boost = no-op)
+ * @param {number} [attackMs=5.0]   ms for boost to drop when a sibilant starts
+ * @param {number} [releaseMs=20.0] ms for boost to recover after a sibilant ends
+ */
+export async function applyAirBoostMask(
+  originalPath,
+  boostedPath,
+  eventsPath,
+  outputPath,
+  sibilantGainFloor = 0.0,
+  attackMs          = 5.0,
+  releaseMs         = 20.0,
+) {
+  const args = [
+    MASK_SCRIPT,
+    '--original',            originalPath,
+    '--boosted',             boostedPath,
+    '--events',              eventsPath,
+    '--output',              outputPath,
+    '--sibilant-gain-floor', String(sibilantGainFloor),
+    '--attack-ms',           String(attackMs),
+    '--release-ms',          String(releaseMs),
+  ]
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+
+    let stderr = ''
+
+    proc.stdout.on('data', chunk => {
+      for (const line of chunk.toString().split('\n')) {
+        if (line.trim()) console.log(`[AirBoostMask] ${line}`)
+      }
+    })
+
+    proc.stderr.on('data', chunk => {
+      const text = chunk.toString()
+      stderr += text
+      for (const line of text.split('\n')) {
+        if (line.trim()) console.log(`[AirBoostMask] ${line}`)
+      }
+    })
+
+    proc.on('close', (code, signal) => {
+      if (code === 0 && signal === null) {
+        resolve()
+      } else {
+        const parts = []
+        if (code   !== null) parts.push(`code ${code}`)
+        if (signal !== null) parts.push(`signal ${signal}`)
+        reject(new Error(`AirBoostMask exited with ${parts.join(', ')}.\n${stderr.slice(-2000)}`))
+      }
+    })
+
+    proc.on('error', err => reject(new Error(`Failed to spawn AirBoostMask: ${err.message}`)))
+  })
 }
