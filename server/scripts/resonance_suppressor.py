@@ -499,23 +499,34 @@ class ResonanceSuppressor:
         L = lifter_cutoff if lifter_cutoff is not None else self._lifter_cutoff
 
         if active_bins is not None:
+            envelope_db = np.zeros(magnitude_db.shape, dtype=np.float32)
             band_idx = np.flatnonzero(active_bins)
-            if band_idx.size >= 2:
-                b0 = int(band_idx[0])
-                b1 = int(band_idx[-1]) + 1
-                n_band     = b1 - b0
-                n_band_fft = 2 * (n_band - 1)
-                band_mag   = magnitude_db[:, b0:b1]
+            if band_idx.size == 0:
+                return envelope_db
 
-                cepstrum = np.fft.irfft(band_mag, n=n_band_fft, axis=1)
-                liftered = cepstrum.copy()
-                if L < n_band_fft - L + 1:
-                    liftered[:, L : n_band_fft - L + 1] = 0.0
-                band_env = np.fft.rfft(liftered, n=n_band_fft, axis=1).real[:, :n_band]
+            b0 = int(band_idx[0])
+            b1 = int(band_idx[-1]) + 1
+            n_band = b1 - b0
 
-                envelope_db = np.zeros_like(magnitude_db)
-                envelope_db[:, b0:b1] = band_env
-                return envelope_db.astype(np.float32, copy=False)
+            if n_band < 2:
+                # Single-bin band is degenerate for a cepstral round-trip;
+                # the smoothest envelope through one point is the point
+                # itself, so spike_db is zero at that bin and the pass is a
+                # no-op rather than triggering on its own magnitude.
+                envelope_db[:, b0:b1] = magnitude_db[:, b0:b1]
+                return envelope_db
+
+            n_band_fft = 2 * (n_band - 1)
+            band_mag   = magnitude_db[:, b0:b1]
+
+            cepstrum = np.fft.irfft(band_mag, n=n_band_fft, axis=1)
+            liftered = cepstrum.copy()
+            if L < n_band_fft - L + 1:
+                liftered[:, L : n_band_fft - L + 1] = 0.0
+            band_env = np.fft.rfft(liftered, n=n_band_fft, axis=1).real[:, :n_band]
+
+            envelope_db[:, b0:b1] = band_env
+            return envelope_db
 
         n_fft = self.n_fft
         # Real cepstrum: treat the one-sided log-magnitude as a real one-sided
