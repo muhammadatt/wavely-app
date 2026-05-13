@@ -396,8 +396,36 @@ def analyze_sibilance_events(
         f0=seed_f0,
     )
 
-    pad          = n_fft // 2
-    audio_padded = np.pad(audio, pad, mode="reflect")
+    pad       = n_fft // 2
+    n_samples = len(audio)
+
+    # Short-audio guard mirroring estimate_f0_contour.py. np.pad mode='reflect'
+    # requires pad < len(audio) (strictly less than), so very short or empty
+    # clips would otherwise raise a ValueError.
+    #   - Empty input: return a minimal event map with no frames so callers
+    #     get a consistent shape.
+    #   - Short input (≤ pad samples): fall back to 'edge' padding (repeats
+    #     the boundary sample), valid for any non-empty array.
+    if n_samples == 0:
+        logger.warning("analyze_sibilance_events: empty audio — returning empty event map")
+        return build_events_map(
+            sibilant_indices = [],
+            f0_per_frame     = [],
+            f0_median        = contour_median if contour_median is not None else 0.0,
+            n_frames         = 0,
+            sample_rate      = sample_rate,
+            n_fft            = n_fft,
+            hop_length       = hop_length,
+        )
+
+    pad_mode = "reflect" if n_samples > pad else "edge"
+    if pad_mode == "edge":
+        logger.warning(
+            f"analyze_sibilance_events: audio ({n_samples} samples) shorter than "
+            f"pad ({pad} samples) — using 'edge' padding instead of 'reflect'"
+        )
+
+    audio_padded = np.pad(audio, pad, mode=pad_mode)
     n_frames     = max(0, (len(audio_padded) - n_fft) // hop_length + 1)
 
     voiced_frame_indices = None

@@ -541,18 +541,35 @@ export async function resonanceSuppressor(ctx) {
 
   // Sibilance event map — only needed when at least one resonanceSuppressor
   // pass is configured with sibilant_only: true. Each sibilant_only pass
-  // owns its own detection parameters via `pass.sibilanceDetection`; we
-  // use the first such pass's params (multiple sibilant_only passes in a
-  // single resonanceSuppressor block is uncommon — see preset notes).
+  // owns its own detection parameters via `pass.sibilanceDetection`. The
+  // Python suppressor accepts a single --events-json shared across all
+  // passes, so if multiple sibilant_only passes are configured they must
+  // agree on their detection params — otherwise the later passes would be
+  // gated using a map generated for the wrong thresholds.
   const passConfigs = Array.isArray(ctx.preset?.resonanceSuppressor)
     ? ctx.preset.resonanceSuppressor
     : (ctx.preset?.resonanceSuppressor ? [ctx.preset.resonanceSuppressor] : [])
-  const sibilantPass = passConfigs.find(p => p?.sibilant_only)
+  const sibilantPasses = passConfigs.filter(p => p?.sibilant_only)
   let eventsPath = null
-  if (sibilantPass) {
+  if (sibilantPasses.length > 0) {
+    if (sibilantPasses.length > 1) {
+      const first = JSON.stringify(sibilantPasses[0].sibilanceDetection ?? null)
+      for (let i = 1; i < sibilantPasses.length; i++) {
+        const other = JSON.stringify(sibilantPasses[i].sibilanceDetection ?? null)
+        if (other !== first) {
+          throw new Error(
+            `[resonanceSuppressor] preset=${ctx.presetId}: multiple sibilant_only ` +
+            `passes have differing sibilanceDetection params (pass 0 vs pass ${i}). ` +
+            `All sibilant_only passes in a single resonanceSuppressor block must ` +
+            `share identical detection params — the Python script only accepts a ` +
+            `single --events-json, so differing params would mis-gate later passes.`,
+          )
+        }
+      }
+    }
     const sibResult = await analyzeSibilanceEvents(ctx, {
-      params:    sibilantPass.sibilanceDetection,
-      f0Contour: await getF0Contour(ctx, { useCache: true }),
+      params:    sibilantPasses[0].sibilanceDetection,
+      f0Contour,
     })
     eventsPath = sibResult?.path ?? null
   }
@@ -563,7 +580,7 @@ export async function resonanceSuppressor(ctx) {
   await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
     skipped:        result.applied === false,
     f0_median:      f0Contour?.median ?? 'n/a',
-    sibilant_only:  Boolean(sibilantPass),
+    sibilant_only:  sibilantPasses.length > 0,
     max_red:        result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
     artifact_risk:  result.artifact_risk ?? false,
     process_s:      result.process_seconds ?? 'n/a',
