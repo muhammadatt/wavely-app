@@ -230,11 +230,34 @@ export const PRESETS = {
     // sibilantGainFloor: how much of the boost survives on sibilant frames.
     // 0.0 = no boost on sibilants; 1.0 = full boost everywhere (no masking).
     // ACX uses 0.0 — conservative; sibilant amplification risks human-review rejection.
-    airBoost: { gainDb: 8, sibilantGainFloor: 0 },
+    //
+    // sibilanceDetection: sparse overrides for the airBoost stage's sibilance
+    // detector (server/scripts/sibilance_detector.py). Independent from any
+    // other stage's detection settings. ACX tuning is strict: only the
+    // harshest sibilant events should pull the boost back, since ACX human
+    // reviewers are sensitive to inconsistent HF character.
+    //   p95_trigger_db: 9.0  — P95 must exceed band mean by 9 dB (default 6).
+    //     Rejects soft /s/ sounds that sit just above threshold but are not
+    //     audibly problematic.
+    //   min_flatness: 0.2    — stricter Wiener entropy gate (default 0.1).
+    //     Genuine fricatives have flatness 0.3–0.5; 0.2 rejects tonal vowel
+    //     harmonics that bleed into the sibilant band after the 8 dB boost.
+    //   broadband_trigger_db: 13.0 — only very large EMA elevation fires
+    //     Condition 2 (default 10.0). Prevents the long-term reference from
+    //     triggering on moderate sibilant vowels post-airBoost.
+    airBoost: {
+      gainDb: 8,
+      sibilantGainFloor: 0,
+      sibilanceDetection: {
+        p95_trigger_db:      9.0,
+        min_flatness:        0.2,
+        broadband_trigger_db: 13.0,
+      },
+    },
     // Resonance Suppressor.
-    // Selectivity is calibrated for the cepstral inter-harmonic floor reference, 
-    // which sits ~8–15 dB below spectral peaks — so 8 dB here is equivalent to a 
-    // very tight threshold on the old mel-smoothed reference. 
+    // Selectivity is calibrated for the cepstral inter-harmonic floor reference,
+    // which sits ~8–15 dB below spectral peaks — so 8 dB here is equivalent to a
+    // very tight threshold on the old mel-smoothed reference.
 
     // Multi-pass mode — two fully independent serial passes.  Each pass runs
     // its own complete STFT → gain-reduction → ISTFT cycle; pass 2 receives
@@ -260,7 +283,12 @@ export const PRESETS = {
         // Pass 2 — broad sibilant plateau (4–12 kHz), gated to sibilant frames.
         // lifter_cutoff_bins=3: nearly-flat reference resolves only features
         // wider than n_fft/(2*3) ≈ 7.3 kHz, making a 4–8 kHz sibilant
-        // plateau protrude clearly above it.  
+        // plateau protrude clearly above it.
+        //
+        // sibilanceDetection: this stage's own detector params. Same strict
+        // ACX settings as airBoost — we want the same conservative behavior
+        // about classifying a frame as sibilant when deciding to apply
+        // sibilant-only resonance reduction.
         sibilant_only: true,
         preserve_harmonics: true,
         depth: 0.67,
@@ -275,6 +303,11 @@ export const PRESETS = {
         lifter_cutoff_bins: 3,
         band_summary_max_cluster_bins: 186, // reporting only ≈ 4 kHz — prevents micro-cluster
                                             // fragmentation from wide spread kernel
+        sibilanceDetection: {
+          p95_trigger_db:      9.0,
+          min_flatness:        0.2,
+          broadband_trigger_db: 13.0,
+        },
       },
     ],
     //Gentle pre-compresion settings - designed for single voice use
@@ -283,31 +316,6 @@ export const PRESETS = {
       trigger: 1,
       maxReduction: 12,
       ratio: 3,
-    },
-    // Sibilance Suppressor. Sparse overrides; anything omitted
-    // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
-    // Conservative ACX tuning: stricter detection targets only the harshest
-    // sibilant events (ACX human reviewers are sensitive to over-suppression).
-    // Detection params:
-    //   p95_trigger_db: 9.0  — P95 must exceed band mean by 9 dB (default 6).
-    //     The extra 3 dB rejects borderline fricatives and soft /s/ sounds that
-    //     sit just above the threshold but are not audibly problematic.
-    //   min_flatness: 0.2    — stricter Wiener entropy gate (default 0.1).
-    //     Genuine fricatives (/s/, /sh/) have flatness 0.3–0.5; raising to 0.2
-    //     more aggressively rejects tonal vowel harmonics that bleed into the
-    //     sibilant band after the 8 dB air boost.
-    //   broadband_trigger_db: 13.0 — only very large EMA elevation fires
-    //     Condition 2 (default 10.0). Prevents the long-term reference from
-    //     triggering on moderate sibilant vowels post-airBoost.
-    // Reduction params: higher dead zone and lower ceiling preserve narration
-    // intelligibility; slower release avoids post-sibilant artifacts.
-    sibilanceSuppressor: {
-      p95_trigger_db:      9.0,
-      min_flatness:        0.2,
-      broadband_trigger_db: 13.0,
-      dead_zone_db:        18,
-      release_ms:          120.0,
-      max_reduction_db:    24,
     },
     roomPresence: {
       enabled: true,
@@ -425,6 +433,9 @@ export const PRESETS = {
     // Podcast: retain a small fraction of the boost on sibilant frames (0.25)
     // so the air character isn't entirely absent on consonants — the processed,
     // punchy podcast sound benefits from some HF presence even on sibilants.
+    //
+    // sibilanceDetection: defaults are fine for podcast — no override needed.
+    // The punchier character tolerates more aggressive masking than ACX.
     airBoost: { gainDb: 2.5, sibilantGainFloor: 0.25 },
     bweModel: "ap_bwe",
     bwe: {
@@ -446,16 +457,13 @@ export const PRESETS = {
       transientShaper: true,
       transientMaxReductionDb: 6,
     },
-    // Stage 4 — Sibilance Suppressor. Faster attack matches the punchier,
-    // more processed podcast character; everything else inherits from DEFAULT_PARAMS.
-    sibilanceSuppressor: {
-      attack_ms: 4.0,
-    },
     // Stage 3b — Resonance Suppressor. Faster attack and more assertive
     // selectivity match the punchier, more processed podcast character.
     // selectivity: 6 dB above the cepstral inter-harmonic floor — lower than
     // ACX (8 dB) to catch more room resonances for the processed podcast sound,
     // but still well above the ±3–5 dB normal spectral variation threshold.
+    // No sibilant_only pass configured here, so no sibilanceDetection block
+    // is needed.
     resonanceSuppressor: {
       depth: 0.65,
       selectivity: 6,
@@ -567,7 +575,19 @@ export const PRESETS = {
     },
     // Voice Ready: 0.0 — voice-over sits under music beds where sibilant
     // amplification is audible; fully suppress the boost on sibilant frames.
-    airBoost: { gainDb: 2.0, sibilantGainFloor: 0.0 },
+    //
+    // sibilanceDetection: broadcast-neutral. Stricter than defaults so we
+    // only mask the boost on clearly-sibilant frames; the lower max_reduction
+    // / softer character of this preset doesn't need an aggressive sibilance
+    // catcher.
+    airBoost: {
+      gainDb: 2.0,
+      sibilantGainFloor: 0.0,
+      sibilanceDetection: {
+        p95_trigger_db:       8.0,
+        broadband_trigger_db: 11.0,
+      },
+    },
     bweModel: "ap_bwe",
     bwe: {
       enabled: true,
@@ -588,19 +608,11 @@ export const PRESETS = {
       strength: 0.8,
       transientShaper: false,
     },
-    // Stage 4 — Sibilance Suppressor. Broadcast-neutral tuning: stricter detection
-    // than the defaults and a lower ceiling since voice-over often sits under
-    // music beds where deep cuts become audible.
-    sibilanceSuppressor: {
-      p95_trigger_db: 8.0,
-      p95_threshold_db: 4.0,
-      broadband_trigger_db: 11.0,
-      release_ms: 70.0,
-      max_reduction_db: 12.0,
-    },
     // Stage 3b — Resonance Suppressor. Broadcast-neutral tuning: moderate depth
     // with a lower ceiling than podcast (voice-over sits under music beds where
     // deep cuts become audible) and a slower attack than podcast.
+    // No sibilant_only pass configured here, so no sibilanceDetection block
+    // is needed.
     resonanceSuppressor: {
       depth: 0.55,
       attack_ms: 12.0,
@@ -710,7 +722,17 @@ export const PRESETS = {
     },
     // General Clean: 16 dB is significant — sibilant masking is critical here.
     // 0.0 fully suppresses the boost on sibilant frames.
-    airBoost: { gainDb: 16, sibilantGainFloor: 0.0 },
+    //
+    // sibilanceDetection: lower broadband_trigger_db catches more events on
+    // unknown source material — the larger boost makes any missed sibilants
+    // more obviously bright.
+    airBoost: {
+      gainDb: 16,
+      sibilantGainFloor: 0.0,
+      sibilanceDetection: {
+        broadband_trigger_db: 9.0,
+      },
+    },
     bweModel: "ap_bwe",
     bwe: {
       enabled: true,
@@ -731,19 +753,13 @@ export const PRESETS = {
       transientShaper: true,
       transientMaxReductionDb: 6,
     },
-    // Stage 4 — Sibilance Suppressor. Pragmatic assertive: lower broadband
-    // trigger catches more events on unknown source material; faster timing
-    // matches the tighter processed character.
-    sibilanceSuppressor: {
-      broadband_trigger_db: 9.0,
-      attack_ms: 4.0,
-      release_ms: 50.0,
-    },
     // Stage 3b — Resonance Suppressor. Assertive tuning for unknown source
     // material: deeper reduction, wider frequency range, and higher ceiling
     // than ACX/voice presets.  selectivity: 6 dB above the cepstral floor —
     // same as podcast, more assertive than ACX, but not so low that it triggers
     // on normal inter-harmonic spectral variation in voiced speech.
+    // No sibilant_only pass configured here, so no sibilanceDetection block
+    // is needed.
     resonanceSuppressor: {
       depth: 0.7,
       sharpness: 0.4,

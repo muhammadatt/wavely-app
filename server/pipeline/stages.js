@@ -41,8 +41,8 @@ import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
-import { readFile, writeFile } from 'fs/promises'
-import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applySibilanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
+import { writeFile } from 'fs/promises'
+import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -535,27 +535,26 @@ export async function resonanceSuppressor(ctx) {
 
   // Per-frame F0 contour. getF0Contour() defaults to a fresh analysis on every
   // call so that each suppressor pass works against the actual signal at that
-  // point in the chain. The pre-pass result is stored to ctx._f0Contour so any
-  // mid-pipeline stage that opts in via { useCache: true } can reuse it without
-  // re-running the script. The post-pass always runs fresh — by that point the
-  // signal has been through compression, parallel compression, EQ, etc. and the
-  // cepstral envelope has changed enough that a stale contour produces harmonic
-  // mask misalignment (audible as F0 drift / harmonic thinning).
+  // point in the chain. The result is cached on ctx._f0Contour and reused
+  // below when analyzing sibilance events — no second autocorrelation pass.
   const f0Contour = await getF0Contour(ctx)
 
   // Sibilance event map — only needed when at least one resonanceSuppressor
-  // pass is configured with sibilant_only: true.  Check for this once before
-  // potentially spawning the analyzer so the common (sibilant_only=false) case
-  // pays no extra cost.  analyzeSibilanceEvents() caches on ctx._sibilanceEvents
-  // so subsequent calls (e.g. the sibilanceSuppressor stage) are free.
-  const passConfigs = ctx.preset?.resonanceSuppressor
-  const hasSibilantOnlyPass = Array.isArray(passConfigs)
-    ? passConfigs.some(p => p?.sibilant_only)
-    : passConfigs?.sibilant_only === true
+  // pass is configured with sibilant_only: true. Each sibilant_only pass
+  // owns its own detection parameters via `pass.sibilanceDetection`; we
+  // use the first such pass's params (multiple sibilant_only passes in a
+  // single resonanceSuppressor block is uncommon — see preset notes).
+  const passConfigs = Array.isArray(ctx.preset?.resonanceSuppressor)
+    ? ctx.preset.resonanceSuppressor
+    : (ctx.preset?.resonanceSuppressor ? [ctx.preset.resonanceSuppressor] : [])
+  const sibilantPass = passConfigs.find(p => p?.sibilant_only)
   let eventsPath = null
-  if (hasSibilantOnlyPass) {
-    const sibilanceCache = await analyzeSibilanceEvents(ctx)
-    eventsPath = sibilanceCache?.path ?? null
+  if (sibilantPass) {
+    const sibResult = await analyzeSibilanceEvents(ctx, {
+      params:    sibilantPass.sibilanceDetection,
+      f0Contour: await getF0Contour(ctx, { useCache: true }),
+    })
+    eventsPath = sibResult?.path ?? null
   }
 
   const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0Contour, eventsPath)
@@ -564,61 +563,10 @@ export async function resonanceSuppressor(ctx) {
   await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
     skipped:        result.applied === false,
     f0_median:      f0Contour?.median ?? 'n/a',
-    sibilant_only:  hasSibilantOnlyPass,
+    sibilant_only:  Boolean(sibilantPass),
     max_red:        result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
     artifact_risk:  result.artifact_risk ?? false,
     process_s:      result.process_seconds ?? 'n/a',
-  })
-}
-
-// ── Stage: Sibilance Suppressor ───────────────────────────────────────────────
-
-export async function sibilanceSuppressor(ctx) {
-  const outPath = ctx.tmp('.wav')
-  const frames  = ctx.results.metrics?.frames ?? null
-  const f0 = ctx.results.deEss?.f0Hz ?? null
-
-  // Two paths:
-  //   - Cache hit  (an upstream stage already populated ctx._sibilanceEvents):
-  //     pass --events-json to skip internal detection.
-  //   - Cache miss (this stage is the first to need the map):
-  //     run internal detection but pass --emit-events so the suppressor's
-  //     own STFT pass produces the canonical map for downstream consumers
-  //     -- no separate analyzer pass needed.
-  let eventsPath, emitPath
-  if (ctx._sibilanceEvents) {
-    eventsPath = ctx._sibilanceEvents.path
-  } else {
-    emitPath = ctx.tmp('.json')
-  }
-
-  const result = await applySibilanceSuppression(
-    ctx.currentPath, outPath, ctx.presetId, frames, f0, eventsPath, emitPath,
-  )
-  if (result.applied) ctx.currentPath = outPath
-  ctx.results.sibilanceSuppressor = result
-
-  // Populate the shared cache from the side-emitted map so subsequent
-  // consumers (airBoost, etc.) can hit it without a second STFT pass.
-  // Cache only the emitted file path here; parsing the event payload can be
-  // deferred to consumers that actually need the map contents.
-  if (emitPath && !ctx._sibilanceEvents) {
-    try {
-      await readFile(emitPath)
-      ctx._sibilanceEvents = { path: emitPath }
-    } catch (err) {
-      // Suppressor may have emitted nothing (e.g. n_frames=0 on very short
-      // clips) -- leave the cache empty so analyzeSibilanceEvents() can
-      // still run on demand.
-      ctx.log(`[SibilanceSuppressor] No event map emitted: ${err.message}`)
-    }
-  }
-
-  await logLevel(ctx, 'after sibilance suppressor', ctx.currentPath, {
-    skipped:       result.applied === false,
-    max_red:       result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
-    artifact_risk: result.artifact_risk ?? false,
-    process_s:     result.process_seconds ?? 'n/a',
   })
 }
 
@@ -656,12 +604,13 @@ export async function breathReduce(ctx) {
 // For ACX output profiles, a noise floor pre/post check constrains the applied
 // gain to preserve the -60 dBFS ACX ceiling.
 //
-// Sibilant masking: when preset.airBoost.sibilantGainFloor < 1.0, the
-// sibilance event map is fetched (or computed and cached) before the FFmpeg
-// pass so that downstream stages (resonanceSuppressor, sibilanceSuppressor)
-// get a free cache hit.  After the FFmpeg EQ is applied, a Python blend pass
-// attenuates the boost on sibilant frames back toward the original signal,
-// preventing the air-band lift from amplifying sibilant energy.
+// Sibilant masking: when preset.airBoost.sibilantGainFloor < 1.0, a sibilance
+// event map is computed against the post-boost audio (detection must see the
+// spectral state we're about to blend, not the pre-boost signal). The map's
+// detection params come from preset.airBoost.sibilanceDetection — independent
+// from any other stage's detection settings. A Python blend pass then attenuates
+// the boost on sibilant frames back toward the original signal, preventing the
+// air-band lift from amplifying sibilant energy.
 
 export async function airBoost(ctx) {
   const airBoostConfig    = ctx.preset?.airBoost ?? {}
@@ -684,22 +633,24 @@ export async function airBoost(ctx) {
   )
 
   if (result.applied) {
-    // Update currentPath to the boosted audio BEFORE calling analyzeSibilanceEvents.
-    // Detection must run on the post-boost signal so the cached event map matches
-    // the spectral state that resonanceSuppressor and sibilanceSuppressor will see.
-    // Previously, resonanceSuppressor was the first caller of analyzeSibilanceEvents
-    // and it always saw the post-boost audio — this preserves that contract while
-    // still warming up the cache here so downstream stages pay no extra cost.
+    // Detection must run on the post-boost signal — the boost reshapes the
+    // sibilant band and changes what triggers the detector. Update currentPath
+    // first so analyzeSibilanceEvents sees the boosted audio.
     ctx.currentPath = airBoostPath
 
     if (sibilantGainFloor < 1.0) {
-      const sibilanceCache = await analyzeSibilanceEvents(ctx)
-      const eventsPath     = sibilanceCache?.path ?? null
+      // Per-stage detection params — airBoost typically wants slightly looser
+      // settings than resonanceSuppressor since its purpose is to back off the
+      // boost on anything sibilant-like rather than to spot-treat isolated
+      // events.
+      const f0Contour = await getF0Contour(ctx)
+      const sibResult = await analyzeSibilanceEvents(ctx, {
+        params:    airBoostConfig.sibilanceDetection,
+        f0Contour,
+      })
+      const eventsPath = sibResult?.path ?? null
 
       if (eventsPath) {
-        // Blend boosted back toward original on sibilant frames.
-        // originalPath (pre-boost) is used as the "no boost" reference;
-        // airBoostPath (full boost) is attenuated toward it on sibilant frames.
         const maskedPath = ctx.tmp('.wav')
         await applyAirBoostMask(
           originalPath, airBoostPath, eventsPath, maskedPath,
@@ -723,14 +674,16 @@ export async function airBoost(ctx) {
 // ── Stage: De-esser ───────────────────────────────────────────────────────────
 
 export async function deEss(ctx) {
+  // The de-esser owns its own F0 estimation and sibilance analysis. It does
+  // not consume the shared sibilance event map — its detection runs on the
+  // current (post-EQ) audio and its frequency targets are derived per call.
   const deEssPath   = ctx.tmp('.wav')
-  const eventsPath  = ctx._sibilanceEvents?.path ?? null
   const deEssResult = await analyzeAndDeEss(
     ctx.currentPath,
     deEssPath,
     ctx.presetId,
     ctx.results.metrics,
-    eventsPath,
+    null,
   )
   ctx.currentPath   = deEssPath
   ctx.results.deEss = deEssResult

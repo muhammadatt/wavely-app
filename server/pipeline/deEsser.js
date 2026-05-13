@@ -55,9 +55,9 @@ const DE_ESSER_SCRIPT = path.join(SCRIPTS_DIR, 'de_esser.py')
  * @param {string} presetId
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @param {string|null} eventsJsonPath - On-disk path to a precomputed
- *   sibilance event map (from analyzeSibilanceEvents / sibilance_suppressor's
- *   --emit-events). When provided, de_esser.py reuses f0.perFrame and
- *   f0.median from the map instead of running its own F0 estimator.
+ *   sibilance event map (from analyzeSibilanceEvents). When provided,
+ *   de_esser.py reuses f0.perFrame and f0.median from the map instead of
+ *   running its own F0 estimator.
  * @returns {DeEsserResult}
  *
  * @typedef {Object} DeEsserResult
