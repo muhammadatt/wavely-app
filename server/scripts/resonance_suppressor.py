@@ -168,23 +168,6 @@ DEFAULT_PARAMS = {
                                   # apply_resonance_suppression()).  If sibilant_only=True
                                   # but no indices are provided, the pass logs a warning
                                   # and processes all voiced frames as a safe fallback.
-    "combine": "max",             # How this pass's gain reduction is merged into the
-                                  # accumulated combined_gr.
-                                  # "max" (default) — np.maximum: the deeper reduction
-                                  #   at each bin wins.  Passes compete; only the most
-                                  #   aggressive value at each bin survives.  Use for
-                                  #   passes that target distinct resonances via
-                                  #   different lifter/selectivity settings, where
-                                  #   mutual exclusion per bin is the correct semantic.
-                                  # "add" — additive: this pass's reduction is summed
-                                  #   on top of whatever prior passes computed.  Use
-                                  #   when this pass is meant to complement rather than
-                                  #   compete with earlier passes — e.g. a sibilant-only
-                                  #   broad plateau reduction stacked on top of a
-                                  #   narrow-spike pass that already covers the same
-                                  #   frequency range.  Each pass's own max_reduction_db
-                                  #   still caps its individual contribution before
-                                  #   combining; the summed total is uncapped.
 }
 
 
@@ -267,38 +250,14 @@ class ResonanceSuppressor:
         self.freqs  = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
         self.n_bins = len(self.freqs)
 
-        # Normalise params to a list — either a single dict or an array of
-        # pass configs. Each element is resolved independently against
-        # DEFAULT_PARAMS so passes are fully independent: different
-        # lifter_cutoff, selectivity, attack/release, frequency bounds, etc.
-        if isinstance(params, list):
-            params_list = params
-        else:
-            params_list = [params]
+        # Build derived processing state — lifter cutoff, active bins, spread
+        # kernel, IIR coefficients.  Stored in self._config so the chunk loop
+        # can access them without recomputing each chunk.
+        self._config            = self._build_pass_config(params)
+        self.params             = self._config["resolved"]
+        self._lifter_cutoff     = self._config["lifter_cutoff"]
 
-        # Build per-pass derived state (lifter_cutoff, active_bins,
-        # spread_kernel, IIR coefficients). Stored in self._pass_configs so
-        # the chunk loop can iterate over them without re-deriving each chunk.
-        self._pass_configs = [self._build_pass_config(p) for p in params_list]
-
-        # self.params = first pass resolved params — used for harmonic mask
-        # computation, which is shared across all passes (all passes protect
-        # the same vocal harmonics at the same pitch positions).
-        self.params = self._pass_configs[0]["resolved"]
-
-        # Harmonic mask ceiling: use the highest freq_ceil_hz across all passes
-        # so that harmonics in every pass's active range are protected.  Using
-        # only the first pass's freq_ceil_hz (e.g. 3000 Hz) would leave all
-        # harmonics above that ceiling unprotected in higher-frequency passes
-        # (e.g. a sibilant-only pass covering 3–12 kHz).
-        self._harmonic_freq_ceil = max(
-            pc["resolved"]["freq_ceil_hz"] for pc in self._pass_configs
-        )
-
-        # Backward-compat: single-pass code expects self._lifter_cutoff.
-        self._lifter_cutoff = self._pass_configs[0]["lifter_cutoff"]
-
-        # Harmonic protection cache — shared across all passes.
+        # Harmonic protection cache.
         # _mask_cache: maps rounded f0 → precomputed bool mask so each unique
         # pitch level is only built once even when the contour has hundreds of
         # distinct values.
@@ -314,20 +273,17 @@ class ResonanceSuppressor:
         self._window         = get_window("hann", n_fft, fftbins=True).astype(np.float32)
         self._window_squared = (self._window.astype(np.float64) ** 2)
 
-        n_passes = len(self._pass_configs)
-        for i, pc in enumerate(self._pass_configs):
-            p = pc["resolved"]
-            logger.info(
-                f"ResonanceSuppressor pass {i + 1}/{n_passes} | n_fft={n_fft} | "
-                f"lifter_cutoff={pc['lifter_cutoff']} samples | "
-                f"selectivity={p['selectivity']} dB | depth={p['depth']} | "
-                f"sharpness={p['sharpness']} | max_cut={p['max_reduction_db']} dB | "
-                f"freq={p['freq_floor_hz']:.0f}–{p['freq_ceil_hz']:.0f} Hz | "
-                f"preserve_harmonics={p['preserve_harmonics']} | "
-                f"sibilant_only={pc['sibilant_only']} | "
-                f"combine={pc['combine']} | "
-                f"f0_mode={'contour' if f0_contour else 'scalar'}"
-            )
+        p = self.params
+        logger.info(
+            f"ResonanceSuppressor | n_fft={n_fft} | "
+            f"lifter_cutoff={self._lifter_cutoff} samples | "
+            f"selectivity={p['selectivity']} dB | depth={p['depth']} | "
+            f"sharpness={p['sharpness']} | max_cut={p['max_reduction_db']} dB | "
+            f"freq={p['freq_floor_hz']:.0f}–{p['freq_ceil_hz']:.0f} Hz | "
+            f"preserve_harmonics={p['preserve_harmonics']} | "
+            f"sibilant_only={self._config['sibilant_only']} | "
+            f"f0_mode={'contour' if f0_contour else 'scalar'}"
+        )
 
     @staticmethod
     def _time_to_coeff(time_ms: float, frame_period_ms: float) -> float:
@@ -394,7 +350,6 @@ class ResonanceSuppressor:
             "release_coeff":          release_coeff,
             "max_cluster_bins":       int(resolved.get("band_summary_max_cluster_bins", 46)),
             "sibilant_only":          bool(resolved.get("sibilant_only", False)),
-            "combine":                str(resolved.get("combine", "max")),
         }
 
     def _compute_harmonic_mask_for_f0(self, f0_val: float) -> np.ndarray | None:
@@ -427,7 +382,7 @@ class ResonanceSuppressor:
         min_half  = int(self.params["harmonic_width_bins"])
         width_pct = float(self.params.get("harmonic_width_pct", 0.01))
         max_h     = int(self.params["max_harmonic"])
-        freq_ceil = self._harmonic_freq_ceil
+        freq_ceil = self.params["freq_ceil_hz"]
         mask      = np.zeros(self.n_bins, dtype=bool)
 
         # Iterate until the harmonic exceeds freq_ceil_hz or the hard max_harmonic
@@ -840,16 +795,9 @@ class ResonanceSuppressor:
                 if 0 <= fi < n_frames:
                     sibilant_mask[fi] = True
 
-        # Per-pass IIR state — one float32 vector per pass, carried across
-        # chunks so the attack/release behaviour is identical to a per-frame
-        # implementation.  Multi-pass: each pass has its own IIR state so that
-        # different attack/release settings are fully independent.
-        n_passes     = len(self._pass_configs)
-        pass_prev_gr = [np.zeros(self.n_bins, dtype=np.float32) for _ in range(n_passes)]
-
-        # Per-pass telemetry accumulators (voiced frames only).
-        pass_bin_sum = [np.zeros(self.n_bins, dtype=np.float64) for _ in range(n_passes)]
-        pass_bin_max = [np.zeros(self.n_bins, dtype=np.float64) for _ in range(n_passes)]
+        # IIR state — carried across chunks so attack/release behaviour is
+        # identical to a per-frame implementation.
+        prev_gr = np.zeros(self.n_bins, dtype=np.float32)
 
         # Chunk size keeps per-chunk peak memory bounded for long files.
         # 2048 frames ≈ 24 s at 44.1 kHz / hop=512.
@@ -898,82 +846,58 @@ class ResonanceSuppressor:
             # --- Multi-pass gain reduction ---
             # Each pass uses its own cepstral reference (lifter_cutoff),
             # detection params (selectivity, depth, mode), spread kernel,
-            # frequency bounds, and IIR timing.  Gains are combined via
-            # np.maximum so the more aggressive reduction wins at each bin.
-            combined_gr = np.zeros((chunk_n, self.n_bins), dtype=np.float32)
+            pc = self._config
 
-            for i, pc in enumerate(self._pass_configs):
-                # Cepstral envelope with this pass's lifter cutoff.
-                smoothed_db_i = self._cepstral_envelope_matrix(
-                    magnitude_db,
-                    lifter_cutoff=pc["lifter_cutoff"],
-                    active_bins=pc["active_bins"],
-                )
+            # Cepstral envelope.
+            smoothed_db = self._cepstral_envelope_matrix(
+                magnitude_db,
+                lifter_cutoff=pc["lifter_cutoff"],
+                active_bins=pc["active_bins"],
+            )
 
-                # Gain reduction matrix for this pass.
-                target_gr_i = self._compute_gain_reduction_matrix(
-                    magnitude_db, smoothed_db_i, harmonic_mask=chunk_mask, pc=pc,
-                ).astype(np.float32, copy=False)
+            # Gain reduction matrix.
+            target_gr = self._compute_gain_reduction_matrix(
+                magnitude_db, smoothed_db, harmonic_mask=chunk_mask, pc=pc,
+            ).astype(np.float32, copy=False)
 
-                # Zero non-voiced frames so IIR decays through silence.
-                if not chunk_voiced.all():
-                    target_gr_i[~chunk_voiced, :] = 0.0
+            # Zero non-voiced frames so IIR decays through silence.
+            if not chunk_voiced.all():
+                target_gr[~chunk_voiced, :] = 0.0
 
-                # Sibilant gate: if this pass has sibilant_only=True, zero any
-                # frame that is not marked as sibilant so the IIR decays through
-                # non-sibilant voiced frames without applying reduction to them.
-                if pc["sibilant_only"]:
-                    if sibilant_mask is not None:
-                        chunk_sibilant = sibilant_mask[chunk_start:chunk_end]
-                        if not chunk_sibilant.all():
-                            target_gr_i[~chunk_sibilant, :] = 0.0
-                    else:
-                        logger.warning(
-                            f"ResonanceSuppressor pass {i + 1}: sibilant_only=True "
-                            "but no sibilant_frame_indices were supplied — "
-                            "processing all voiced frames as a fallback.  Pass "
-                            "--events-json from analyze_sibilance_events.py to "
-                            "enable per-sibilant gating."
-                        )
-
-                # Attack/release IIR — state-dependent coefficient prevents
-                # numpy vectorisation across frames. JITed via numba when
-                # available, with a numpy fallback that loops in Python.
-                if _NUMBA_AVAILABLE:
-                    smoothed_gr_i, pass_prev_gr[i] = _iir_attack_release(
-                        target_gr_i, pass_prev_gr[i],
-                        pc["attack_coeff"], pc["release_coeff"],
+            # Sibilant gate: zero non-sibilant frames so the IIR decays
+            # through them without applying reduction to those frames.
+            if pc["sibilant_only"]:
+                if sibilant_mask is not None:
+                    chunk_sibilant = sibilant_mask[chunk_start:chunk_end]
+                    if not chunk_sibilant.all():
+                        target_gr[~chunk_sibilant, :] = 0.0
+                else:
+                    logger.warning(
+                        "ResonanceSuppressor: sibilant_only=True but no "
+                        "sibilant_frame_indices were supplied — processing all "
+                        "voiced frames as a fallback.  Pass --events-json from "
+                        "analyze_sibilance_events.py to enable per-sibilant gating."
                     )
-                else:
-                    smoothed_gr_i = np.empty_like(target_gr_i)
-                    prev = pass_prev_gr[i]
-                    for j in range(chunk_n):
-                        tgt   = target_gr_i[j]
-                        coeff = np.where(tgt >= prev, pc["attack_coeff"], pc["release_coeff"])
-                        prev  = coeff * prev + (np.float32(1.0) - coeff) * tgt
-                        smoothed_gr_i[j] = prev
-                    pass_prev_gr[i] = prev
 
-                # Merge this pass's reduction into the accumulator.
-                # "max"  — winner-takes-all per bin: the deeper cut wins.
-                # "add"  — additive stacking: this pass's reduction is summed
-                #          on top of prior passes.  Each pass's own
-                #          max_reduction_db already capped its contribution
-                #          before combining; the summed total is uncapped so
-                #          complementary passes can compound correctly.
-                if pc["combine"] == "add":
-                    combined_gr = combined_gr + smoothed_gr_i
-                else:
-                    combined_gr = np.maximum(combined_gr, smoothed_gr_i)
+            # Attack/release IIR — state-dependent coefficient prevents
+            # numpy vectorisation across frames. JITed via numba when
+            # available, with a numpy fallback that loops in Python.
+            if _NUMBA_AVAILABLE:
+                smoothed_gr, prev_gr = _iir_attack_release(
+                    target_gr, prev_gr, pc["attack_coeff"], pc["release_coeff"],
+                )
+            else:
+                smoothed_gr = np.empty_like(target_gr)
+                prev = prev_gr
+                for j in range(chunk_n):
+                    tgt   = target_gr[j]
+                    coeff = np.where(tgt >= prev, pc["attack_coeff"], pc["release_coeff"])
+                    prev  = coeff * prev + (np.float32(1.0) - coeff) * tgt
+                    smoothed_gr[j] = prev
+                prev_gr = prev
 
-                # Per-pass voiced telemetry.
-                if chunk_voiced.any():
-                    voiced_i = smoothed_gr_i[chunk_voiced]
-                    pass_bin_sum[i] += voiced_i.sum(axis=0, dtype=np.float64)
-                    pass_bin_max[i]  = np.maximum(pass_bin_max[i], voiced_i.max(axis=0))
-
-            # Apply combined gain to spectra and inverse-FFT in one batch.
-            gain_linear      = np.power(10.0, -combined_gr / 20.0, dtype=np.float32)
+            # Apply gain to spectra and inverse-FFT in one batch.
+            gain_linear      = np.power(10.0, -smoothed_gr / 20.0, dtype=np.float32)
             modified_spectra = spectra * gain_linear
             time_frames      = np.fft.irfft(modified_spectra, n=n_fft, axis=1).astype(
                 np.float64, copy=False
@@ -995,24 +919,22 @@ class ResonanceSuppressor:
                     output_buffer[s:e]      += time_frames[j, :trim]
                     window_accumulator[s:e] += window_squared[:trim]
 
-            # Overall telemetry from the combined gain reduction.
-            chunk_max = float(combined_gr.max()) if combined_gr.size else 0.0
+            # Telemetry.
+            chunk_max = float(smoothed_gr.max()) if smoothed_gr.size else 0.0
             if chunk_max > max_reduction:
                 max_reduction = chunk_max
 
-            chunk_active = combined_gr > active_threshold
+            chunk_active = smoothed_gr > active_threshold
             n_active     = int(chunk_active.sum())
             if n_active > 0:
-                sum_reduction       += float(combined_gr[chunk_active].sum())
+                sum_reduction       += float(smoothed_gr[chunk_active].sum())
                 n_active_bins_total += n_active
                 spike_frames        += int(chunk_active.any(axis=1).sum())
 
             if chunk_voiced.any():
-                voiced_combined   = combined_gr[chunk_voiced]
-                bin_sum_reduction += voiced_combined.sum(axis=0, dtype=np.float64)
-                bin_max_reduction  = np.maximum(
-                    bin_max_reduction, voiced_combined.max(axis=0),
-                )
+                voiced_gr         = smoothed_gr[chunk_voiced]
+                bin_sum_reduction += voiced_gr.sum(axis=0, dtype=np.float64)
+                bin_max_reduction  = np.maximum(bin_max_reduction, voiced_gr.max(axis=0))
 
         voiced_frame_count = int(voiced_mask.sum())
 
@@ -1023,29 +945,10 @@ class ResonanceSuppressor:
         mean_reduction = (sum_reduction / n_active_bins_total) if n_active_bins_total > 0 else 0.0
         artifact_risk  = mean_reduction > 3.0
 
-        # Combined summary uses the smallest max_cluster_bins across all passes
-        # so that narrow resonances from pass 1 still get separated correctly.
-        combined_max_cluster = min(pc["max_cluster_bins"] for pc in self._pass_configs)
         band_summary = self._build_band_summary(
             bin_sum_reduction, bin_max_reduction, voiced_frame_count,
-            label="combined", max_cluster_bins=combined_max_cluster,
+            max_cluster_bins=self._config["max_cluster_bins"],
         )
-
-        # Per-pass detail for multi-pass reporting.
-        passes_report = []
-        if n_passes > 1:
-            for i, pc in enumerate(self._pass_configs):
-                p_summary = self._build_band_summary(
-                    pass_bin_sum[i], pass_bin_max[i], voiced_frame_count,
-                    label=f"pass {i + 1}",
-                    max_cluster_bins=pc["max_cluster_bins"],
-                )
-                passes_report.append({
-                    "pass":            i + 1,
-                    "lifter_cutoff":   pc["lifter_cutoff"],
-                    "max_reduction_db": round(float(pass_bin_max[i].max()), 2),
-                    "band_summary":    p_summary,
-                })
 
         logger.info(
             f"ResonanceSuppressor: max={max_reduction:.2f} dB | "
@@ -1060,7 +963,6 @@ class ResonanceSuppressor:
             "spike_frames":      spike_frames,
             "artifact_risk":     artifact_risk,
             "band_summary":      band_summary,
-            "passes":            passes_report,
         }
 
 
@@ -1080,17 +982,28 @@ def apply_resonance_suppression(
     """
     Stage 3b pipeline entry point.
 
+    Multi-pass model: when `params` is a list, each element is executed as a
+    completely independent serial pass.  Pass N receives the output audio of
+    pass N-1 as its input and runs its own full STFT → gain-reduction → ISTFT
+    cycle with fully isolated IIR state.  There is no shared gain-reduction
+    accumulator and no cross-pass IIR bleed.  The `combine` key in each pass
+    config is ignored here; it only applies when ResonanceSuppressor is
+    instantiated directly with a list of pass configs.
+
     Args:
         audio:           Mono float32 array at sample_rate.
         sample_rate:     Sample rate in Hz.
         params:          Sparse parameter overrides (see DEFAULT_PARAMS), OR a
-                         list of such dicts for multi-pass processing.  Each
-                         element in the list is a complete, independent pass
-                         config; all passes share a single STFT/ISTFT cycle
-                         and their gain reductions are combined with np.maximum
-                         before the ISTFT.  Single-object presets are fully
+                         list of such dicts for serial multi-pass processing.
+                         Each element is a completely independent pass; passes
+                         are chained so the output of one is the input to the
+                         next.  Single-object presets are fully
                          backward-compatible.
-        vad_voiced_mask: Per-sample bool array for silence gating.
+        vad_voiced_mask: Per-sample bool array for silence gating.  Computed
+                         once from the original audio length and reused for all
+                         serial passes; valid because resonance suppression is
+                         length-preserving (ISTFT output is cropped to input
+                         length).
         f0:              Scalar median F0 (Hz). Used as lifter cutoff when
                          contour is absent; derived from contour median
                          automatically when only f0_contour is supplied.
@@ -1101,11 +1014,11 @@ def apply_resonance_suppression(
                          a fixed scalar position.
         events_map:      Sibilance event map dict produced by
                          analyze_sibilance_events.py (or the cached map from
-                         sibilanceEvents.js).  When provided, the
-                         sibilantFrameIndices list is extracted and passed to
-                         process() so that any pass with sibilant_only=True
-                         can gate its suppression to only those frames.
-                         Ignored for passes that do not set sibilant_only=True.
+                         sibilanceEvents.js).  sibilantFrameIndices is
+                         extracted once and shared across all serial passes;
+                         each pass that sets sibilant_only=True applies the
+                         gate independently on its own audio with no IIR
+                         bleed from adjacent passes.
     """
     t0 = time.perf_counter()
 
@@ -1143,41 +1056,96 @@ def apply_resonance_suppression(
             "process_seconds":   time.perf_counter() - t0,
         }
 
-    suppressor = ResonanceSuppressor(
-        sample_rate=sample_rate, params=params, f0=f0, f0_contour=f0_contour,
-    )
-
-    voiced_frame_indices = None
-    if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
-        pad           = suppressor.n_fft // 2
-        n_padded      = len(audio) + 2 * pad
-        n_stft_frames = max(0, (n_padded - suppressor.n_fft) // suppressor.hop_length + 1)
-        voiced_frame_indices = set()
-        for fi in range(n_stft_frames):
-            orig_start = max(0, fi * suppressor.hop_length - pad)
-            orig_end   = min(len(audio), fi * suppressor.hop_length - pad + suppressor.n_fft)
-            if orig_start < orig_end and vad_voiced_mask[orig_start:orig_end].any():
-                voiced_frame_indices.add(fi)
-
-    # Extract sibilant frame indices from the shared event map when provided.
+    # Extract sibilant frame indices once — shared across all serial passes.
+    # Each sibilant_only pass applies the gate independently on its own audio.
     sibilant_frame_indices = None
+    sibilant_frames_received = None  # None = no events_map; int = map was present
     if events_map is not None:
         raw_indices = events_map.get("sibilantFrameIndices") or []
         sibilant_frame_indices = set(raw_indices)
+        sibilant_frames_received = len(sibilant_frame_indices)
         logger.info(
             f"ResonanceSuppressor: received events_map with "
-            f"{len(sibilant_frame_indices)} sibilant frame(s)."
+            f"{sibilant_frames_received} sibilant frame(s)."
         )
 
-    result                    = suppressor.process(
-        audio,
-        voiced_frame_indices=voiced_frame_indices,
-        sibilant_frame_indices=sibilant_frame_indices,
-    )
-    result["skipped"]         = False
-    result["lifter_cutoff"]   = suppressor._lifter_cutoff
-    result["process_seconds"] = time.perf_counter() - t0
-    return result
+    # Compute voiced_frame_indices once from the original audio length.
+    # n_fft=2048 and hop_length=512 are the fixed ResonanceSuppressor
+    # constructor defaults; apply_resonance_suppression() does not expose them
+    # as arguments, so they are stable constants here.
+    _N_FFT      = 2048
+    _HOP_LENGTH = 512
+    voiced_frame_indices = None
+    if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
+        pad           = _N_FFT // 2
+        n_padded      = len(audio) + 2 * pad
+        n_stft_frames = max(0, (n_padded - _N_FFT) // _HOP_LENGTH + 1)
+        voiced_frame_indices = set()
+        for fi in range(n_stft_frames):
+            orig_start = max(0, fi * _HOP_LENGTH - pad)
+            orig_end   = min(len(audio), fi * _HOP_LENGTH - pad + _N_FFT)
+            if orig_start < orig_end and vad_voiced_mask[orig_start:orig_end].any():
+                voiced_frame_indices.add(fi)
+
+    # --- Serial independent passes ---
+    # Each pass is a completely isolated ResonanceSuppressor instance with its
+    # own STFT decomposition, IIR state, and gain-reduction accumulator.
+    # current_audio is threaded through so each pass operates on the output of
+    # the previous one.  There is no cross-pass GR interaction of any kind.
+    current_audio = audio
+    all_results   = []
+    for pass_params in params_list:
+        suppressor = ResonanceSuppressor(
+            sample_rate=sample_rate,
+            params=pass_params,
+            f0=f0,
+            f0_contour=f0_contour,
+        )
+        result = suppressor.process(
+            current_audio,
+            voiced_frame_indices=voiced_frame_indices,
+            sibilant_frame_indices=sibilant_frame_indices,
+        )
+        result["_lifter_cutoff"] = suppressor._lifter_cutoff
+        all_results.append(result)
+        current_audio = result["audio"]
+
+    # --- Aggregate telemetry across all serial passes ---
+    # max/mean_reduction_db: maximums across passes give a conservative upper
+    #   bound — each pass sees progressively cleaner audio so their values are
+    #   not additive.
+    # artifact_risk: OR across passes — flag if any pass triggered.
+    # spike_frames: max across passes.
+    # band_summary: from the last pass, reflecting the final state of the audio.
+    # lifter_cutoff: from the first pass for backward compatibility.
+    overall_max_db   = max(r["max_reduction_db"]  for r in all_results)
+    overall_mean_db  = max(r["mean_reduction_db"] for r in all_results)
+    overall_spike    = max(r["spike_frames"]       for r in all_results)
+    overall_artifact = any(r["artifact_risk"]      for r in all_results)
+
+    passes_report = []
+    if len(params_list) > 1:
+        for i, r in enumerate(all_results):
+            passes_report.append({
+                "pass":             i + 1,
+                "lifter_cutoff":    r["_lifter_cutoff"],
+                "max_reduction_db": round(float(r["max_reduction_db"]), 2),
+                "band_summary":     r["band_summary"],
+            })
+
+    return {
+        "audio":                    current_audio,
+        "max_reduction_db":         overall_max_db,
+        "mean_reduction_db":        overall_mean_db,
+        "spike_frames":             overall_spike,
+        "artifact_risk":            overall_artifact,
+        "band_summary":             all_results[-1]["band_summary"],
+        "passes":                   passes_report,
+        "skipped":                  False,
+        "lifter_cutoff":            all_results[0]["_lifter_cutoff"],
+        "sibilant_frames_received": sibilant_frames_received,
+        "process_seconds":          time.perf_counter() - t0,
+    }
 
 
 def resonance_suppressor_report_entry(result: dict) -> dict:
@@ -1185,14 +1153,15 @@ def resonance_suppressor_report_entry(result: dict) -> dict:
     if result.get("skipped"):
         return {"applied": False, "process_seconds": round(result.get("process_seconds", 0.0), 3)}
     entry = {
-        "applied":           True,
-        "lifter_cutoff":     result.get("lifter_cutoff"),
-        "max_reduction_db":  round(result["max_reduction_db"],  1),
-        "mean_reduction_db": round(result["mean_reduction_db"], 1),
-        "spike_frames":      result["spike_frames"],
-        "artifact_risk":     result["artifact_risk"],
-        "band_summary":      result.get("band_summary", []),
-        "process_seconds":   round(result.get("process_seconds", 0.0), 3),
+        "applied":                   True,
+        "lifter_cutoff":             result.get("lifter_cutoff"),
+        "max_reduction_db":          round(result["max_reduction_db"],  1),
+        "mean_reduction_db":         round(result["mean_reduction_db"], 1),
+        "spike_frames":              result["spike_frames"],
+        "artifact_risk":             result["artifact_risk"],
+        "sibilant_frames_received":  result.get("sibilant_frames_received"),
+        "band_summary":              result.get("band_summary", []),
+        "process_seconds":           round(result.get("process_seconds", 0.0), 3),
     }
     passes = result.get("passes")
     if passes:

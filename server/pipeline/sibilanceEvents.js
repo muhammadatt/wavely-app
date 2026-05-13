@@ -1,17 +1,31 @@
 /**
  * Sibilance event map — shared detection results for downstream stages.
  *
- * The standard sibilance suppressor and a future sibilant-aware airBoost
- * both need to know which STFT frames contain sibilant energy. Running
- * detection twice would double the STFT cost and risk inconsistency
- * (different thresholds, different rolling F0 windows). This module wraps
- * `analyze_sibilance_events.py`, caches the result on the pipeline ctx,
- * and returns the map on subsequent calls.
+ * Any pipeline stage that needs per-frame sibilance data calls
+ * analyzeSibilanceEvents(ctx). By default a fresh analysis is always run
+ * against ctx.currentPath so that the event map reflects the actual audio
+ * at the point of the call — important when multiple stages in the pipeline
+ * need sibilance data but the signal has changed significantly between them
+ * (e.g. airBoost mutates the spectrum; the resonance suppressor should see
+ * the post-mask audio, not the pre-mask boosted signal).
  *
- * The cached fields are pipeline-stable: sample-rate-tied frame indices,
- * timestamps, and per-frame F0. Frequency centroids and energy values are
- * intentionally NOT cached — those become stale after stages like NR,
- * compression, or air boost mutate the spectrum.
+ * Pass { useCache: true } to opt into returning a previously computed map
+ * without re-running the Python script. This is appropriate when a caller
+ * knows the sibilant frame timing has not changed relative to the most
+ * recent analyzeSibilanceEvents() call (e.g. stages that read the map for
+ * gating purposes but run after the audio has only been loudness-shifted).
+ *
+ * Resolution order (default — useCache: false):
+ *   1. analyze_sibilance_events.py — dedicated detection pass on
+ *                                    ctx.currentPath. Result stored to
+ *                                    ctx._sibilanceEvents.
+ *
+ * Resolution order (useCache: true):
+ *   1. ctx._sibilanceEvents — already computed; return immediately.
+ *   2. analyze_sibilance_events.py — as above when cache is empty.
+ *
+ * Cache is stored outside ctx.results (internal pipeline plumbing, not a
+ * report payload — buildReport() should never see it).
  */
 
 import { spawn }         from 'child_process'
@@ -29,21 +43,21 @@ const SCRIPTS_DIR     = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 const ANALYZER_SCRIPT = path.join(SCRIPTS_DIR, 'analyze_sibilance_events.py')
 
 /**
- * Return the sibilance event map for the current ctx audio, computing it
- * once and caching on `ctx._sibilanceEvents`. Subsequent calls return the
- * cached object without re-spawning the analyzer.
+ * Return the sibilance event map for ctx.currentPath.
  *
- * The cache is stored outside `ctx.results` because it is internal pipeline
- * plumbing, not a report payload. `buildReport()` should never see it.
- *
- * @param {object} ctx - Pipeline context (see createContext in index.js)
+ * @param {object}  ctx                  Pipeline context (see createContext in index.js)
+ * @param {object}  [options]
+ * @param {boolean} [options.useCache]   When true, return ctx._sibilanceEvents if already
+ *                                       computed rather than re-running the analysis.
+ *                                       Defaults to false — fresh analysis on every call.
  * @returns {Promise<{events: object, path: string}>}
  *   - events: parsed event map (see analyze_sibilance_events.py for shape)
  *   - path:   on-disk JSON file (registered with ctx.tmp) — pass to the
  *     suppressor via --events-json. Stable for the lifetime of ctx.
  */
-export async function analyzeSibilanceEvents(ctx) {
-  if (ctx._sibilanceEvents) return ctx._sibilanceEvents
+export async function analyzeSibilanceEvents(ctx, { useCache = false } = {}) {
+  // Return cached map only when the caller explicitly opts in.
+  if (useCache && ctx._sibilanceEvents) return ctx._sibilanceEvents
 
   const eventsPath = ctx.tmp('.json')
   const frames     = ctx.results.metrics?.frames ?? null

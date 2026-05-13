@@ -230,17 +230,16 @@ export const PRESETS = {
     // sibilantGainFloor: how much of the boost survives on sibilant frames.
     // 0.0 = no boost on sibilants; 1.0 = full boost everywhere (no masking).
     // ACX uses 0.0 — conservative; sibilant amplification risks human-review rejection.
-    airBoost: { gainDb: 8, sibilantGainFloor: 0.15 },
+    airBoost: { gainDb: 8, sibilantGainFloor: 0 },
     // Resonance Suppressor.
     // Selectivity is calibrated for the cepstral inter-harmonic floor reference, 
     // which sits ~8–15 dB below spectral peaks — so 8 dB here is equivalent to a 
     // very tight threshold on the old mel-smoothed reference. 
 
-    // Multi-pass mode -- two independent passes share one
-    // STFT/ISTFT cycle; gains are combined with np.maximum before ISTFT.
-    // CAUTION: Can have unintiuitve results when using overlaping frequency 
-    // ranges -- pass2's "wide, shallow" cuts can be overriden by pass1's 
-    // "deep, narrow" cuts resulting is less overall attenuation
+    // Multi-pass mode — two fully independent serial passes.  Each pass runs
+    // its own complete STFT → gain-reduction → ISTFT cycle; pass 2 receives
+    // the output audio of pass 1 as its input.  IIR state is isolated: there
+    // is no cross-pass bleed of any kind.
 
     resonanceSuppressor: [
       {
@@ -258,24 +257,23 @@ export const PRESETS = {
         mode: "soft",
       },
       {
-        // Pass 2 — broad sibilant plateau (4–12 kHz)
+        // Pass 2 — broad sibilant plateau (4–12 kHz), gated to sibilant frames.
         // lifter_cutoff_bins=3: nearly-flat reference resolves only features
         // wider than n_fft/(2*3) ≈ 7.3 kHz, making a 4–8 kHz sibilant
-        // plateau protrude clearly above it.  High selectivity compensates
-        // for the floor sitting 15–20 dB below spectral peaks at L=3.
+        // plateau protrude clearly above it.  
         sibilant_only: true,
-        combine: "add",  // stacks on top of pass 1
+        preserve_harmonics: true,
         depth: 0.67,
         sharpness: 0.2,
-        selectivity: 5,
+        selectivity: 1,
         attack_ms: 5.0,
-        release_ms: 15.0,
+        release_ms: 5.0,
         max_reduction_db: 50.0,
         freq_floor_hz: 3000.0,
         freq_ceil_hz: 12000.0,
         mode: "soft",
         lifter_cutoff_bins: 3,
-        band_summary_max_cluster_bins: 186, // ≈ 4 kHz — prevents micro-cluster
+        band_summary_max_cluster_bins: 186, // reporting only ≈ 4 kHz — prevents micro-cluster
                                             // fragmentation from wide spread kernel
       },
     ],
@@ -288,12 +286,28 @@ export const PRESETS = {
     },
     // Sibilance Suppressor. Sparse overrides; anything omitted
     // inherits from DEFAULT_PARAMS in server/scripts/sibilance_suppressor.py.
-    // Conservative ACX tuning: higher dead zone and lower ceiling preserve
-    // narration intelligibility; slower release avoids post-sibilant artifacts.
+    // Conservative ACX tuning: stricter detection targets only the harshest
+    // sibilant events (ACX human reviewers are sensitive to over-suppression).
+    // Detection params:
+    //   p95_trigger_db: 9.0  — P95 must exceed band mean by 9 dB (default 6).
+    //     The extra 3 dB rejects borderline fricatives and soft /s/ sounds that
+    //     sit just above the threshold but are not audibly problematic.
+    //   min_flatness: 0.2    — stricter Wiener entropy gate (default 0.1).
+    //     Genuine fricatives (/s/, /sh/) have flatness 0.3–0.5; raising to 0.2
+    //     more aggressively rejects tonal vowel harmonics that bleed into the
+    //     sibilant band after the 8 dB air boost.
+    //   broadband_trigger_db: 13.0 — only very large EMA elevation fires
+    //     Condition 2 (default 10.0). Prevents the long-term reference from
+    //     triggering on moderate sibilant vowels post-airBoost.
+    // Reduction params: higher dead zone and lower ceiling preserve narration
+    // intelligibility; slower release avoids post-sibilant artifacts.
     sibilanceSuppressor: {
-      dead_zone_db: 18,
-      release_ms: 120.0,
-      max_reduction_db: 24,
+      p95_trigger_db:      9.0,
+      min_flatness:        0.2,
+      broadband_trigger_db: 13.0,
+      dead_zone_db:        18,
+      release_ms:          120.0,
+      max_reduction_db:    24,
     },
     roomPresence: {
       enabled: true,

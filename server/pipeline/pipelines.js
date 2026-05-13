@@ -30,23 +30,24 @@ const STANDARD_PIPELINE = [
   stages.humDetect,               // Pre-HPF: spectral hum detection + conditional notch EQ
   stages.hpf,                     // 80hz hi pass filter
   stages.noiseReduce,             // Main Noise Reduction (DF3, RNNoise, DTLN)
-  stages.resonanceSuppressor,     // Dynamic resonance suppressor - pre-pass
+  //stages.resonanceSuppressor,     // Dynamic resonance suppressor - pre-pass
+  stages.remeasureFramesPostNr,
   stages.autoLevel,               // M Leveller-style per-clip gain automation (pre-compression)
   stages.spectralSubtraction,     // MMSE Wiener pre-pass + optional transient shaper (before ML NR)
   //stages.dereverb,
   //stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
+  stages.vadGate,                 // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before autoLevel + compression
   stages.compress,                // Serial compression
   stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
   stages.noiseReduce,             // Conditional secondary NR pass
   stages.parallelCompress,        // Parallel compression
-  stages.vadGate,                 // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
-  //stages.vocalSaturation,
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
-  stages.enhancementEQ,
+  //stages.vocalSaturation,
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — post-pass
+  stages.enhancementEQ,
   //stages.deEss,                   // Split band De-Esser  
   stages.roomPresence,            // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
