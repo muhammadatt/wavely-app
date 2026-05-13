@@ -136,7 +136,7 @@ export const PRESETS = {
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.0,
+      wetDry: 0.05,
       bias: 0.08,
     },
     compression: [
@@ -227,7 +227,7 @@ export const PRESETS = {
     // sibilantGainFloor: how much of the boost survives on sibilant frames.
     // 0.0 = no boost on sibilants; 1.0 = full boost everywhere (no masking).
     // ACX uses 0.0 — conservative; sibilant amplification risks human-review rejection.
-    airBoost: { gainDb: 6, sibilantGainFloor: 0.25 },
+    airBoost: { gainDb: 8, sibilantGainFloor: 0.15 },
     // Resonance Suppressor.
     // Selectivity is calibrated for the cepstral inter-harmonic floor reference, 
     // which sits ~8–15 dB below spectral peaks — so 8 dB here is equivalent to a 
@@ -251,7 +251,7 @@ export const PRESETS = {
         release_ms: 100.0,
         max_reduction_db: 12.0,
         freq_floor_hz: 80.0,
-        freq_ceil_hz: 3000.0,
+        freq_ceil_hz: 20000.0,
         mode: "soft",
       },
       {
@@ -264,7 +264,7 @@ export const PRESETS = {
         combine: "add",  // stacks on top of pass 1
         depth: 0.67,
         sharpness: 0.2,
-        selectivity: 6,
+        selectivity: 5,
         attack_ms: 5.0,
         release_ms: 15.0,
         max_reduction_db: 50.0,

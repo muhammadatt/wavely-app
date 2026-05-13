@@ -2,15 +2,27 @@
  * F0 contour analysis — shared pitch estimation for downstream stages.
  *
  * Any pipeline stage that needs per-frame F0 data calls getF0Contour(ctx).
- * The result is computed once and cached on ctx._f0Contour so subsequent
- * callers pay zero marginal cost.
+ * By default a fresh analysis is always run against ctx.currentPath so that
+ * the contour reflects the actual audio at the point of the call — important
+ * when the same stage (e.g. resonanceSuppressor) appears at multiple points
+ * in the pipeline and the signal has changed significantly between them.
  *
- * Resolution order:
- *   1. ctx._f0Contour         — already computed this run; return immediately.
- *   2. estimate_f0_contour.py — dedicated per-frame autocorrelation pass on
- *                               ctx.currentPath. Always used; see note inside
- *                               getF0Contour() for why ctx._sibilanceEvents F0
- *                               is intentionally NOT reused here.
+ * Pass { useCache: true } to opt into returning a previously computed contour
+ * without re-running the Python script.  This is appropriate for mid-pipeline
+ * stages that need pitch data but know the audio is pitch-stable relative to
+ * the most recent getF0Contour() call.
+ *
+ * Resolution order (default — useCache: false):
+ *   1. estimate_f0_contour.py — dedicated per-frame autocorrelation pass on
+ *                               ctx.currentPath. Result stored to ctx._f0Contour.
+ *
+ * Resolution order (useCache: true):
+ *   1. ctx._f0Contour         — already computed; return immediately.
+ *   2. estimate_f0_contour.py — as above when cache is empty.
+ *
+ * Note: ctx._sibilanceEvents F0 is intentionally NOT reused here — it is the
+ * sibilance detector's rolling-median estimate (~3×F0 accuracy) and caused the
+ * resonance suppressor's harmonic mask to misfire on harmonic bins.
  *
  * Cache is stored outside ctx.results (internal pipeline plumbing, not a
  * report payload — buildReport() should never see it).
@@ -29,25 +41,20 @@ const __dirname   = dirname(fileURLToPath(import.meta.url))
 const F0_SCRIPT   = join(__dirname, '../scripts/estimate_f0_contour.py')
 
 /**
- * Return the F0 contour for the current ctx audio, computing it once and
- * caching on ctx._f0Contour. Subsequent calls return the cached object.
+ * Return the F0 contour for ctx.currentPath.
  *
- * @param {object} ctx  Pipeline context (see createContext in index.js)
+ * @param {object}  ctx                  Pipeline context (see createContext in index.js)
+ * @param {object}  [options]
+ * @param {boolean} [options.useCache]   When true, return ctx._f0Contour if already
+ *                                       computed rather than re-running the analysis.
+ *                                       Defaults to false — fresh analysis on every call.
  * @returns {Promise<{ median: number, perFrame: number[], nFft: number, hopLength: number }>}
  */
-export async function getF0Contour(ctx) {
-  // 1. Already computed this run.
-  if (ctx._f0Contour) return ctx._f0Contour
+export async function getF0Contour(ctx, { useCache = false } = {}) {
+  // Return cached contour only when the caller explicitly opts in.
+  if (useCache && ctx._f0Contour) return ctx._f0Contour
 
-  // Note: the sibilance event map also carries a per-frame F0 field
-  // (ctx._sibilanceEvents?.events?.f0), but that is the sibilance detector's
-  // rolling-median estimate — designed for sibilance band placement (~3×F0
-  // accuracy) rather than harmonic protection (~1 bin ≈ 21.5 Hz accuracy).
-  // Reusing it here caused the resonance suppressor's harmonic mask to misfire
-  // on harmonic bins, producing visible gain reduction in the voiced harmonic
-  // region. Always run the dedicated autocorrelation estimator.
-
-  // 2. Run dedicated analysis.
+  // Run dedicated analysis against the current audio file.
   ctx.log?.('[F0Analysis] Computing F0 contour via estimate_f0_contour.py')
   const startTime  = Date.now()
   const outputPath = ctx.tmp('.json')

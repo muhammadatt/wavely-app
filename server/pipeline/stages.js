@@ -533,10 +533,14 @@ export async function resonanceSuppressor(ctx) {
   const outPath = ctx.tmp('.wav')
   const frames  = ctx.results.metrics?.frames ?? null
 
-  // Per-frame F0 contour from the centralized pitch cache. getF0Contour() runs
-  // estimate_f0_contour.py on the first call in a pipeline run and returns the
-  // cached result on any subsequent call within that same run, including later
-  // stages such as the de-esser that also consume F0 data.
+  // Per-frame F0 contour. getF0Contour() defaults to a fresh analysis on every
+  // call so that each suppressor pass works against the actual signal at that
+  // point in the chain. The pre-pass result is stored to ctx._f0Contour so any
+  // mid-pipeline stage that opts in via { useCache: true } can reuse it without
+  // re-running the script. The post-pass always runs fresh — by that point the
+  // signal has been through compression, parallel compression, EQ, etc. and the
+  // cepstral envelope has changed enough that a stale contour produces harmonic
+  // mask misalignment (audible as F0 drift / harmonic thinning).
   const f0Contour = await getF0Contour(ctx)
 
   // Sibilance event map — only needed when at least one resonanceSuppressor
