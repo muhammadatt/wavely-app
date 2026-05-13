@@ -921,17 +921,18 @@ export async function harmonicExciter(ctx) {
 // loudness pass absorbs any residual energy shift from the blend.
 
 export async function vocalSaturation(ctx) {
-  const outPath = ctx.tmp('.wav')
-  const sat    = ctx.preset.saturation ?? {}
-  const drive  = sat.drive  ?? 2.0
-  const wetDry = sat.wetDry ?? 0.3
-  const bias   = sat.bias   ?? 0.1
-  const fc     = sat.fc     ?? 3000
-  const f0     = sat.f0
+  const outPath      = ctx.tmp('.wav')
+  const sat          = ctx.preset.saturation ?? {}
+  const drive        = sat.drive        ?? 2.0
+  const wetDry       = sat.wetDry       ?? 0.3
+  const bias         = sat.bias         ?? 0.1
+  const lowCrossover = sat.lowCrossover ?? 500
+  const midCrossover = sat.midCrossover ?? 3500
+  const softness     = sat.softness     ?? 0.3
 
-  await runVocalSaturation(ctx.currentPath, outPath, { drive, wetDry, bias, fc, f0 })
+  await runVocalSaturation(ctx.currentPath, outPath, { drive, wetDry, bias, lowCrossover, midCrossover, softness })
   ctx.currentPath = outPath
-  ctx.results.vocalSaturation = { applied: true, drive, wetDry, bias, fc, f0 }
+  ctx.results.vocalSaturation = { applied: true, drive, wetDry, bias, lowCrossover, midCrossover, softness }
   await logLevel(ctx, 'after vocal saturation', ctx.currentPath, {})
 }
 

@@ -1,86 +1,67 @@
 #!/usr/bin/env python3
 """
 Vocal Saturation — parallel tube-style saturation mixed with the dry signal.
-Band crossovers are derived automatically from the vocal fundamental frequency (F0)
-using pyin pitch detection, so the saturation adapts to each narrator's voice.
+Band crossovers are set explicitly per preset; no pitch detection is performed.
 
 Input/output: 32-bit float WAV at any sample rate.
 """
 
 import argparse
 
-import librosa
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import butter, sosfilt
-
-
-# ---------------------------------------------------------------------------
-# F0 detection
-# ---------------------------------------------------------------------------
-
-def estimate_vocal_f0(audio: np.ndarray, sr: int, excerpt_seconds: float = 30.0) -> float:
-    """
-    Estimate the median voiced fundamental frequency of a vocal recording.
-
-    Uses pyin (probabilistic YIN) which is robust to octave errors and
-    unvoiced segments. Only the first `excerpt_seconds` of audio is analysed
-    to keep compute time acceptable on long files — a single narrator's F0
-    is stable enough that this is representative.
-
-    Returns F0 in Hz, defaulting to 150 Hz if no voiced frames are found.
-    """
-    max_samples = int(excerpt_seconds * sr)
-    excerpt = audio[:max_samples] if len(audio) > max_samples else audio
-
-    f0, voiced_flag, _ = librosa.pyin(
-        excerpt,
-        fmin=librosa.note_to_hz('C2'),   # ~65 Hz  — covers bass voices
-        fmax=librosa.note_to_hz('C6'),   # ~1047 Hz — covers soprano
-        sr=sr,
-    )
-
-    voiced_f0 = f0[voiced_flag]
-    if len(voiced_f0) == 0:
-        return 150.0  # safe fallback for silence or purely unvoiced audio
-
-    median_f0 = float(np.median(voiced_f0))
-    return median_f0
-
-
-def get_saturation_bands(f0: float) -> tuple[float, float]:
-    """
-    Derive low and mid crossover frequencies from the vocal F0.
-
-    Low crossover  ≈ 3.5× F0  — captures fundamental + 2nd & 3rd harmonics
-                                 (chest warmth / body of the voice)
-    Mid crossover  ≈ 18× F0   — top of the presence/formant region
-                                 (4th–10th harmonics, vowel character)
-
-    Both values are clamped to sensible limits so extreme F0 estimates
-    (e.g. from a noisy excerpt) can't produce degenerate filter frequencies.
-    """
-    low_crossover = np.clip(f0 * 3.5,  200.0, 900.0)
-    mid_crossover = np.clip(f0 * 18.0, 1200.0, 6000.0)
-    return float(low_crossover), float(mid_crossover)
+from scipy.signal import butter, resample_poly, sosfilt
 
 
 # ---------------------------------------------------------------------------
 # Saturation core
 # ---------------------------------------------------------------------------
 
-def tube_saturate(x: np.ndarray, drive: float = 1.0, bias: float = 0.1) -> np.ndarray:
+def tube_saturate(
+    x: np.ndarray,
+    drive: float = 1.0,
+    bias: float = 0.1,
+    softness: float = 0.3,
+) -> np.ndarray:
     """
-    Asymmetric tanh saturation.
+    Analog-warm asymmetric saturation with 2× oversampling.
 
-    The bias shifts the operating point to produce even-order harmonics
-    (tube character). The DC offset introduced by the bias is removed after
-    so the output is always DC-free.
+    Two improvements over a bare tanh make this better suited for vocals:
+
+    1. 2× oversampling — the nonlinearity runs at twice the source sample rate.
+       Intermodulation products that would alias back into the audible band are
+       attenuated by resample_poly's built-in anti-alias filter before decimation.
+       This removes the "digital edge" that naive tanh saturation has on
+       harmonically rich content like a consonant cluster or plosive.
+
+    2. Blended transfer function — pure tanh accumulates odd harmonics (3rd, 5th…)
+       that can sound brittle on voices.  Blending toward arctan (same asymptotic
+       shape, but a softer 3rd-harmonic rolloff due to the π/2 ceiling) reduces
+       that edge while the asymmetric bias continues to supply even-harmonic warmth.
+
+       softness=0.0 → pure tanh (hardest knee, strongest 3rd harmonic)
+       softness=1.0 → pure arctan (softest knee, most 2nd-harmonic character)
+       softness=0.3 → default: noticeably warmer than bare tanh, still present
     """
-    x_biased = x + bias
-    y = np.tanh(x_biased * drive)
-    y -= np.tanh(bias * drive)
-    return y
+    # Upsample 2× (built-in Kaiser anti-alias filter)
+    x_up = resample_poly(x, 2, 1)
+
+    x_biased = x_up + bias
+    pre = x_biased * drive
+
+    y_tanh = np.tanh(pre)
+    y_atan = (2.0 / np.pi) * np.arctan(pre)
+    y_up = (1.0 - softness) * y_tanh + softness * y_atan
+
+    # Remove DC offset introduced by the asymmetric bias
+    bias_ref = (1.0 - softness) * np.tanh(bias * drive) + softness * (2.0 / np.pi) * np.arctan(bias * drive)
+    y_up -= bias_ref
+
+    # Downsample 2× with built-in anti-alias filtering
+    y = resample_poly(y_up, 1, 2)
+
+    # resample_poly may produce one extra sample at the tail due to filter delay
+    return y[:len(x)]
 
 
 def make_lp_filter(fc: float, sr: int):
@@ -98,38 +79,26 @@ def vocal_saturation(
     drive: float = 2.0,
     wet_dry: float = 0.3,
     bias: float = 0.08,
-    fc: float | None = None,   # mid crossover — auto-derived from F0 if None
+    low_crossover: float = 500.0,
+    mid_crossover: float = 3500.0,
+    softness: float = 0.3,
     sr: int = 44100,
-    f0: float | None = None,   # supply a pre-computed F0 to skip detection
-    excerpt_seconds: float = 30.0,
 ) -> tuple[np.ndarray, dict]:
     """
-    Parallel tube-style saturation with F0-adaptive frequency bands.
+    Parallel tube-style saturation with preset-defined frequency bands.
 
-    Band layout (derived from F0):
-      low  band : DC  → low_crossover  (fundamental + 2nd/3rd harmonics)
+    Band layout:
+      low  band : DC  → low_crossover   (body / chest warmth)
       mid  band : low_crossover → mid_crossover  (presence / formants)
       high band : mid_crossover → Nyquist        (air / sibilance)
 
     Drive allocation:
-      low  × 3.0  — emphasises chest warmth
-      mid  × 1.0  — neutral
-      high × 0.7  — gentle rollback avoids harshness
+      low  × 5.0  — emphasises chest warmth and second-harmonic density
+      mid  × 0.1  — neutral; avoids adding grit to the vowel character
+      high × 0.1  — gentle rollback; avoids amplifying sibilance
 
-    Returns:
-      (processed_audio, info_dict)
-      info_dict contains the detected F0 and the crossover frequencies used,
-      useful for logging and for caching F0 across pipeline stages.
+    Returns (processed_audio, info_dict).
     """
-    # --- F0 detection -------------------------------------------------------
-    if f0 is None:
-        f0 = estimate_vocal_f0(audio, sr, excerpt_seconds)
-
-    low_crossover, auto_mid = get_saturation_bands(f0)
-
-    # Allow the preset fc to override the mid crossover if explicitly supplied
-    mid_crossover = fc if fc is not None else auto_mid
-
     # --- Band split ---------------------------------------------------------
     sos_lp = make_lp_filter(low_crossover, sr)
     sos_hp = make_hp_filter(mid_crossover, sr)
@@ -139,15 +108,15 @@ def vocal_saturation(
     mid  = audio - low - high   # complementary split — sums back to audio exactly
 
     # --- Per-band saturation ------------------------------------------------
-    low_sat  = tube_saturate(low,  drive * 5, bias)
-    mid_sat  = tube_saturate(mid,  drive * 0.1, bias)
-    high_sat = tube_saturate(high, drive * 0.1, bias)
+    low_sat  = tube_saturate(low,  drive * 5,   bias, softness)
+    mid_sat  = tube_saturate(mid,  drive * 0.1, bias, softness)
+    high_sat = tube_saturate(high, drive * 0.1, bias, softness)
 
     wet = low_sat + mid_sat + high_sat
 
     # --- RMS-match wet to dry -----------------------------------------------
-    # tube_saturate compresses energy; without matching, high wet_dry sounds
-    # like a gain cut rather than a tonal change.
+    # Saturation compresses energy; without matching, a high wet_dry setting
+    # sounds like a gain cut rather than a tonal change.
     dry_rms = np.sqrt(np.mean(audio ** 2)) + 1e-8
     wet_rms = np.sqrt(np.mean(wet ** 2)) + 1e-8
     wet = wet * (dry_rms / wet_rms)
@@ -159,9 +128,9 @@ def vocal_saturation(
     output = np.clip(output, -1.0, 1.0)
 
     info = {
-        'f0_hz':            round(f0, 1),
         'low_crossover_hz': round(low_crossover, 1),
         'mid_crossover_hz': round(mid_crossover, 1),
+        'softness':         round(softness, 3),
     }
     return output, info
 
@@ -172,22 +141,22 @@ def vocal_saturation(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Parallel tube-style vocal saturation with F0-adaptive band detection'
+        description='Parallel tube-style vocal saturation with preset-defined band crossovers'
     )
-    parser.add_argument('--input',   required=True, help='Input WAV path (32-bit float)')
-    parser.add_argument('--output',  required=True, help='Output WAV path (32-bit float)')
-    parser.add_argument('--drive',   type=float, default=1.8,
+    parser.add_argument('--input',          required=True,  help='Input WAV path (32-bit float)')
+    parser.add_argument('--output',         required=True,  help='Output WAV path (32-bit float)')
+    parser.add_argument('--drive',          type=float, default=1.8,
                         help='Base saturation drive factor (default: 1.8)')
-    parser.add_argument('--wet-dry', type=float, default=0.22,
+    parser.add_argument('--wet-dry',        type=float, default=0.22,
                         help='Wet/dry mix ratio: 0.0=dry, 1.0=wet (default: 0.22)')
-    parser.add_argument('--bias',    type=float, default=0.08,
-                        help='Asymmetric bias for tube character (default: 0.08)')
-    parser.add_argument('--fc',      type=float, default=None,
-                        help='Mid crossover Hz — overrides F0-derived value if set')
-    parser.add_argument('--f0',      type=float, default=None,
-                        help='Supply a known F0 in Hz to skip auto-detection')
-    parser.add_argument('--excerpt', type=float, default=30.0,
-                        help='Seconds of audio to use for F0 estimation (default: 30)')
+    parser.add_argument('--bias',           type=float, default=0.08,
+                        help='Asymmetric bias for even-harmonic warmth (default: 0.08)')
+    parser.add_argument('--low-crossover',  type=float, default=500.0,
+                        help='Low band upper boundary Hz (default: 500)')
+    parser.add_argument('--mid-crossover',  type=float, default=3500.0,
+                        help='Mid band upper boundary Hz (default: 3500)')
+    parser.add_argument('--softness',       type=float, default=0.3,
+                        help='Transfer function softness 0=tanh, 1=arctan (default: 0.3)')
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
@@ -195,12 +164,14 @@ def main():
 
     if audio.ndim == 1:
         processed, info = vocal_saturation(
-            audio, args.drive, args.wet_dry, args.bias, args.fc, sr, args.f0, args.excerpt
+            audio, args.drive, args.wet_dry, args.bias,
+            args.low_crossover, args.mid_crossover, args.softness, sr,
         )
     else:
         results = [
             vocal_saturation(
-                audio[:, ch], args.drive, args.wet_dry, args.bias, args.fc, sr, args.f0, args.excerpt
+                audio[:, ch], args.drive, args.wet_dry, args.bias,
+                args.low_crossover, args.mid_crossover, args.softness, sr,
             )
             for ch in range(audio.shape[1])
         ]
@@ -211,9 +182,9 @@ def main():
 
     print(
         f'Vocal saturation applied\n'
-        f'  detected F0      : {info["f0_hz"]} Hz\n'
         f'  low crossover    : {info["low_crossover_hz"]} Hz\n'
         f'  mid crossover    : {info["mid_crossover_hz"]} Hz\n'
+        f'  softness         : {info["softness"]}\n'
         f'  drive={args.drive}  wet_dry={args.wet_dry}  bias={args.bias}'
     )
 
