@@ -451,6 +451,7 @@ class ResonanceSuppressor:
         self,
         magnitude_db: np.ndarray,
         lifter_cutoff: "int | None" = None,
+        active_bins:  "np.ndarray | None" = None,
     ) -> np.ndarray:
         """
         Cepstral liftering reference envelope for a batch of frames.
@@ -460,6 +461,13 @@ class ResonanceSuppressor:
             lifter_cutoff: Override the instance's self._lifter_cutoff.
                            Provided by multi-pass callers so each pass uses its
                            own L without mutating shared state.
+            active_bins:   Optional boolean mask (n_bins,) selecting a
+                           contiguous frequency band. When supplied, the
+                           cepstral analysis runs on only that band so the
+                           low-quefrency coefficients describe the in-band
+                           envelope rather than the whole-spectrum mean.
+                           Out-of-band entries in the returned envelope are
+                           zero (callers mask them anyway).
 
         Returns:
             (n_frames, n_bins) smooth spectral envelope in dB, with harmonic
@@ -475,9 +483,40 @@ class ResonanceSuppressor:
         detectable at their true prominence regardless of their proximity to
         vocal harmonics.
 
+        Band-restricted mode: at small ``lifter_cutoff`` (e.g. L=3 for a
+        sibilant-only pass) the kept coefficients are dominated by c[0], the
+        per-frame mean of the input to the irfft. With a full-spectrum
+        cepstrum this is the mean across all bins, so out-of-band variation
+        (low-band silence at a voicing onset vs. low-band formant energy
+        mid-utterance) drags the reference up and down with voicing and
+        downstream spike detection becomes non-stationary across voiced-region
+        boundaries. Running the cepstrum on only the active band makes c[0]
+        the in-band mean and removes that coupling.
+
         The round-trip (irfft -> zero middle -> rfft of a real-valued input)
         is exact in theory; .real discards any floating-point residue.
         """
+        L = lifter_cutoff if lifter_cutoff is not None else self._lifter_cutoff
+
+        if active_bins is not None:
+            band_idx = np.flatnonzero(active_bins)
+            if band_idx.size >= 2:
+                b0 = int(band_idx[0])
+                b1 = int(band_idx[-1]) + 1
+                n_band     = b1 - b0
+                n_band_fft = 2 * (n_band - 1)
+                band_mag   = magnitude_db[:, b0:b1]
+
+                cepstrum = np.fft.irfft(band_mag, n=n_band_fft, axis=1)
+                liftered = cepstrum.copy()
+                if L < n_band_fft - L + 1:
+                    liftered[:, L : n_band_fft - L + 1] = 0.0
+                band_env = np.fft.rfft(liftered, n=n_band_fft, axis=1).real[:, :n_band]
+
+                envelope_db = np.zeros_like(magnitude_db)
+                envelope_db[:, b0:b1] = band_env
+                return envelope_db.astype(np.float32, copy=False)
+
         n_fft = self.n_fft
         # Real cepstrum: treat the one-sided log-magnitude as a real one-sided
         # spectrum and invert to a full-length cepstrum.
@@ -486,7 +525,6 @@ class ResonanceSuppressor:
         # Rectangular lifter: zero the high-quefrency middle section.
         # Kept: indices 0..L-1 and n_fft-L+1..n_fft-1 (symmetric about zero).
         # Zeroed: indices L..n_fft-L (pitch peak and all harmonic overtones).
-        L        = lifter_cutoff if lifter_cutoff is not None else self._lifter_cutoff
         liftered = cepstrum.copy()
         liftered[:, L : n_fft - L + 1] = 0.0
 
@@ -856,7 +894,9 @@ class ResonanceSuppressor:
             for i, pc in enumerate(self._pass_configs):
                 # Cepstral envelope with this pass's lifter cutoff.
                 smoothed_db_i = self._cepstral_envelope_matrix(
-                    magnitude_db, lifter_cutoff=pc["lifter_cutoff"],
+                    magnitude_db,
+                    lifter_cutoff=pc["lifter_cutoff"],
+                    active_bins=pc["active_bins"],
                 )
 
                 # Gain reduction matrix for this pass.
