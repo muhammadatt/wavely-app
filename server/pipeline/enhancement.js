@@ -67,18 +67,21 @@ export function runHarmonicExciter(inputPath, outputPath, params = {}) {
  * @param {string} inputPath  - 32-bit float WAV at 44.1 kHz
  * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
  * @param {object} [params]
- * @param {number} [params.drive=2.0]   - base saturation drive factor
- * @param {number} [params.wetDry=0.3]  - mix ratio (0=dry, 1=wet)
- * @param {number} [params.bias=0.1]    - asymmetric bias for tube character
- * @param {number} [params.fc=3000]     - high crossover Hz; mid band (800 to fc) drive is 1.5x
+ * @param {number} [params.drive=2.0]          - base saturation drive factor
+ * @param {number} [params.wetDry=0.3]         - mix ratio (0=dry, 1=wet)
+ * @param {number} [params.bias=0.1]           - asymmetric bias for even-harmonic warmth
+ * @param {number} [params.lowCrossover=500]   - low band upper boundary Hz
+ * @param {number} [params.midCrossover=3500]  - mid band upper boundary Hz
+ * @param {number} [params.softness=0.3]       - transfer function softness (0=tanh, 1=arctan)
  */
 export function runVocalSaturation(inputPath, outputPath, params = {}) {
   const args = ['--input', inputPath, '--output', outputPath]
-  if (params.drive  != null) args.push('--drive',   String(params.drive))
-  if (params.wetDry != null) args.push('--wet-dry', String(params.wetDry))
-  if (params.bias   != null) args.push('--bias',    String(params.bias))
-  if (params.fc     != null) args.push('--fc',      String(params.fc))
-  if (params.f0     != null) args.push('--f0',      String(params.f0))
+  if (params.drive        != null) args.push('--drive',          String(params.drive))
+  if (params.wetDry       != null) args.push('--wet-dry',        String(params.wetDry))
+  if (params.bias         != null) args.push('--bias',           String(params.bias))
+  if (params.lowCrossover != null) args.push('--low-crossover',  String(params.lowCrossover))
+  if (params.midCrossover != null) args.push('--mid-crossover',  String(params.midCrossover))
+  if (params.softness     != null) args.push('--softness',       String(params.softness))
   return spawnPython(VOCAL_SATURATION_SCRIPT, args, 'VocalSaturation')
 }
 

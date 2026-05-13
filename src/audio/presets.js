@@ -138,6 +138,9 @@ export const PRESETS = {
       drive: 1.8,
       wetDry: 0.0,
       bias: 0.08,
+      lowCrossover: 500,
+      midCrossover: 3000,
+      softness: 0.4,
     },
     compression: [
       // Pass 1: Transient Catcher (Peak Control)
@@ -365,7 +368,9 @@ export const PRESETS = {
       drive: 2.0,
       wetDry: 0.3,
       bias: 0.1,
-      fc: 3000,
+      lowCrossover: 600,
+      midCrossover: 4000,
+      softness: 0.2,
     },
     parallelCompression: {
       ratio: 10,
@@ -505,7 +510,9 @@ export const PRESETS = {
       drive: 2.0,
       wetDry: 0.3,
       bias: 0.08,
-      fc: 4000,
+      lowCrossover: 500,
+      midCrossover: 3500,
+      softness: 0.35,
     },
     parallelCompression: {
       ratio: 8,
@@ -649,7 +656,9 @@ export const PRESETS = {
       drive: 2.0,
       wetDry: 0.3,
       bias: 0.1,
-      fc: 3000,
+      lowCrossover: 550,
+      midCrossover: 3500,
+      softness: 0.25,
     },
     parallelCompression: {
       ratio: 10,
@@ -775,7 +784,9 @@ export const PRESETS = {
       drive: 5,
       wetDry: 0.2,
       bias: 0.1,
-      fc: 3000,
+      lowCrossover: 400,
+      midCrossover: 3000,
+      softness: 0.15,
     },
     compression: [
       // Pass 1: Transient Catcher (Peak Control)
@@ -926,7 +937,9 @@ export const PRESETS = {
       drive: 2.0,
       wetDry: 0.3,
       bias: 0.08,
-      fc: 3500,
+      lowCrossover: 500,
+      midCrossover: 3500,
+      softness: 0.35,
     },
     // Stage 4a-E: Vocal Expander. ClearerVoice output is already enhanced; the
     // expander calibrates from the measured silence floor regardless of how the
