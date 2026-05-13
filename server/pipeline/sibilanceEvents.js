@@ -1,81 +1,88 @@
 /**
- * Sibilance event map — shared detection results for downstream stages.
+ * Sibilance event map — detection-only Python pass for downstream stages.
  *
  * Any pipeline stage that needs per-frame sibilance data calls
- * analyzeSibilanceEvents(ctx). By default a fresh analysis is always run
- * against ctx.currentPath so that the event map reflects the actual audio
- * at the point of the call — important when multiple stages in the pipeline
- * need sibilance data but the signal has changed significantly between them
- * (e.g. airBoost mutates the spectrum; the resonance suppressor should see
- * the post-mask audio, not the pre-mask boosted signal).
+ * analyzeSibilanceEvents(ctx, { params, f0Contour }) and gets a freshly
+ * computed map back. Two design properties:
  *
- * Pass { useCache: true } to opt into returning a previously computed map
- * without re-running the Python script. This is appropriate when a caller
- * knows the sibilant frame timing has not changed relative to the most
- * recent analyzeSibilanceEvents() call (e.g. stages that read the map for
- * gating purposes but run after the audio has only been loudness-shifted).
+ *   1. Each caller supplies its own detection params (sparse overrides
+ *      over server/scripts/sibilance_detector.DEFAULT_PARAMS). airBoost
+ *      uses `preset.airBoost.sibilanceDetection`; a `sibilant_only`
+ *      resonanceSuppressor pass uses
+ *      `preset.resonanceSuppressor[i].sibilanceDetection`. There is no
+ *      shared "preset-level" sibilance config any more.
  *
- * Resolution order (default — useCache: false):
- *   1. analyze_sibilance_events.py — dedicated detection pass on
- *                                    ctx.currentPath. Result stored to
- *                                    ctx._sibilanceEvents.
+ *   2. The F0 contour comes from getF0Contour() in f0Analysis.js. The
+ *      detector consumes it directly instead of running a second
+ *      autocorrelation pass. Callers should pass the cached contour
+ *      (e.g. `await getF0Contour(ctx, { useCache: true })`) when the
+ *      audio has not changed since the last contour pass.
  *
- * Resolution order (useCache: true):
- *   1. ctx._sibilanceEvents — already computed; return immediately.
- *   2. analyze_sibilance_events.py — as above when cache is empty.
- *
- * Cache is stored outside ctx.results (internal pipeline plumbing, not a
- * report payload — buildReport() should never see it).
+ * No shared event-map cache: each caller's params may differ, so caching
+ * across stages would silently return the wrong map. If the same stage
+ * needs the result twice it should hold the return value itself.
  */
 
-import { spawn }         from 'child_process'
-import { fileURLToPath } from 'url'
+import { spawn }                  from 'child_process'
+import { fileURLToPath }          from 'url'
 import { readFile, writeFile, rm } from 'fs/promises'
-import os                from 'os'
-import path              from 'path'
+import os                         from 'os'
+import path                       from 'path'
 import { PYTHON as SHARED_PYTHON } from './spawnPython.js'
-import { writeSibilanceParamsFile } from './enhancement.js'
 
-const RESONANCE_PYTHON = process.env.RESONANCE_PYTHON ?? SHARED_PYTHON
+const SIBILANCE_PYTHON = process.env.RESONANCE_PYTHON ?? SHARED_PYTHON
 const NUM_THREADS      = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 
 const SCRIPTS_DIR     = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
 const ANALYZER_SCRIPT = path.join(SCRIPTS_DIR, 'analyze_sibilance_events.py')
 
 /**
- * Return the sibilance event map for ctx.currentPath.
+ * Run a sibilance event analysis pass against ctx.currentPath.
  *
- * @param {object}  ctx                  Pipeline context (see createContext in index.js)
+ * @param {object}  ctx                  Pipeline context (see createContext in index.js).
  * @param {object}  [options]
- * @param {boolean} [options.useCache]   When true, return ctx._sibilanceEvents if already
- *                                       computed rather than re-running the analysis.
- *                                       Defaults to false — fresh analysis on every call.
+ * @param {object}  [options.params]     Sparse override dict overlaid on
+ *                                       sibilance_detector.DEFAULT_PARAMS.
+ *                                       Caller-specific (airBoost vs.
+ *                                       resonanceSuppressor pass, etc.).
+ * @param {object}  options.f0Contour    Per-frame F0 contour from
+ *                                       getF0Contour() in f0Analysis.js.
+ *                                       Required — the detector no longer
+ *                                       runs its own pitch estimation.
  * @returns {Promise<{events: object, path: string}>}
- *   - events: parsed event map (see analyze_sibilance_events.py for shape)
- *   - path:   on-disk JSON file (registered with ctx.tmp) — pass to the
- *     suppressor via --events-json. Stable for the lifetime of ctx.
+ *   - events: parsed event map (see sibilance_detector.build_events_map)
+ *   - path:   on-disk JSON file (registered with ctx.tmp); pass to
+ *             resonance_suppressor.py via --events-json or to
+ *             air_boost_masked.py via --events. Stable for the lifetime
+ *             of ctx.
  */
-export async function analyzeSibilanceEvents(ctx, { useCache = false } = {}) {
-  // Return cached map only when the caller explicitly opts in.
-  if (useCache && ctx._sibilanceEvents) return ctx._sibilanceEvents
+export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
+  if (!f0Contour) {
+    throw new Error(
+      'analyzeSibilanceEvents requires an f0Contour. ' +
+      'Call getF0Contour(ctx) first and pass the result in.',
+    )
+  }
 
-  const eventsPath = ctx.tmp('.json')
-  const frames     = ctx.results.metrics?.frames ?? null
-  const f0         = ctx.results.deEss?.f0Hz ?? null
+  const eventsPath  = ctx.tmp('.json')
+  const contourPath = ctx.tmp('.json')
+  await writeFile(contourPath, JSON.stringify(f0Contour))
 
   const args = [
     ANALYZER_SCRIPT,
-    '--input',  ctx.currentPath,
-    '--output', eventsPath,
+    '--input',            ctx.currentPath,
+    '--output',           eventsPath,
+    '--f0-contour-json',  contourPath,
   ]
 
-  // Must match the params the suppressor will see, otherwise the cached
-  // sibilantFrameIndices won't align with the suppressor's reduction step.
-  const paramsPath = await writeSibilanceParamsFile(ctx.presetId)
-  if (paramsPath) args.push('--params-json', paramsPath)
+  let paramsPath = null
+  if (params && Object.keys(params).length > 0) {
+    paramsPath = ctx.tmp('.json')
+    await writeFile(paramsPath, JSON.stringify(params))
+    args.push('--params-json', paramsPath)
+  }
 
-  if (f0 != null) args.push('--f0', String(f0))
-
+  const frames = ctx.results.metrics?.frames ?? null
   let vadMaskPath = null
   if (frames && frames.length > 0) {
     vadMaskPath = ctx.tmp('.json')
@@ -91,10 +98,10 @@ export async function analyzeSibilanceEvents(ctx, { useCache = false } = {}) {
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
     if (paramsPath)  await rm(paramsPath,  { force: true })
+    await rm(contourPath, { force: true })
   }
 
   const events = JSON.parse(await readFile(eventsPath, 'utf8'))
-  ctx._sibilanceEvents = { events, path: eventsPath }
 
   const durationMs = Date.now() - startTime
   console.log(
@@ -103,16 +110,14 @@ export async function analyzeSibilanceEvents(ctx, { useCache = false } = {}) {
     `f0_median=${events.f0?.median ?? 'n/a'}Hz`,
   )
 
-  return ctx._sibilanceEvents
+  return { events, path: eventsPath }
 }
 
 // The analyzer uses the same JSON_RESULT: line-prefix protocol as the
 // suppressor (summary line on stdout, heavy data written to --output).
-// We don't parse the summary here — the cached file is the source of
-// truth — but we filter it from the streamed log for cleanliness.
 function runAnalyzerScript(args) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(RESONANCE_PYTHON, args, {
+    const proc = spawn(SIBILANCE_PYTHON, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,

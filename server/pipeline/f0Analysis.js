@@ -20,9 +20,9 @@
  *   1. ctx._f0Contour         — already computed; return immediately.
  *   2. estimate_f0_contour.py — as above when cache is empty.
  *
- * Note: ctx._sibilanceEvents F0 is intentionally NOT reused here — it is the
- * sibilance detector's rolling-median estimate (~3×F0 accuracy) and caused the
- * resonance suppressor's harmonic mask to misfire on harmonic bins.
+ * Note: this is the canonical F0 source for the pipeline. The sibilance
+ * detector consumes this same contour rather than running its own pitch
+ * estimation — see analyzeSibilanceEvents() in sibilanceEvents.js.
  *
  * Cache is stored outside ctx.results (internal pipeline plumbing, not a
  * report payload — buildReport() should never see it).
