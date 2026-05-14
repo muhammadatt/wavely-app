@@ -457,6 +457,11 @@ def analyze_sibilance_events(
                 seed_f0 = float(v)
                 break
 
+    # Resolve detection params up-front so they're available both to the
+    # detector below and to the empty-audio guard a few lines down.
+    resolved        = resolve_params(params)
+    min_duration_ms = float(resolved.get("min_duration_ms", 0.0) or 0.0)
+
     detector = SibilanceDetector(
         sample_rate=sample_rate,
         n_fft=n_fft,
@@ -475,8 +480,6 @@ def analyze_sibilance_events(
     #     get a consistent shape.
     #   - Short input (≤ pad samples): fall back to 'edge' padding (repeats
     #     the boundary sample), valid for any non-empty array.
-    resolved = resolve_params(params)
-    min_duration_ms = float(resolved.get("min_duration_ms", 0.0) or 0.0)
 
     if n_samples == 0:
         logger.warning("analyze_sibilance_events: empty audio — returning empty event map")

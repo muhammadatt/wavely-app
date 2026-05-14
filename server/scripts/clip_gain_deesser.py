@@ -52,15 +52,27 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _read_wav_mono_float32(path: str):
+def _read_wav_float32(path: str):
+    """
+    Returns (sr, audio_2d, was_stereo). audio_2d has shape (n_samples, n_channels);
+    mono inputs come back as (n_samples, 1) so the same code path handles both.
+    Channel preservation matters for presets whose channelOutput is 'preserve'.
+    """
     sr, audio = wavfile.read(path)
-    if audio.ndim == 2:
-        audio = audio.mean(axis=1)
     if np.issubdtype(audio.dtype, np.integer):
         audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
     else:
         audio = audio.astype(np.float32)
-    return sr, audio
+    if audio.ndim == 1:
+        return sr, audio[:, None], False
+    return sr, audio, True
+
+
+def _mono_view(audio_2d: np.ndarray) -> np.ndarray:
+    """Mono mixdown for detection / context-RMS measurement only."""
+    if audio_2d.shape[1] == 1:
+        return audio_2d[:, 0]
+    return audio_2d.mean(axis=1).astype(np.float32)
 
 
 def _build_sibilant_sample_mask(events: list, n_samples: int) -> np.ndarray:
@@ -181,12 +193,14 @@ def _render_event_envelope(
     body_start = min(n, event_start + fade_in)
     body_end   = max(body_start, event_end - fade_out + 1)
 
-    # Fade-in: unity at event_start, gain_linear at body_start
+    # Fade-in: unity at event_start, gain_linear at body_start. ramp goes
+    # 0 -> 1 across the fade window, so seg interpolates from 1.0 down to
+    # gain_linear (zero derivative at both endpoints).
     if fade_in > 0 and event_start < n:
         a = max(0, event_start)
         b = min(n, event_start + fade_in)
         if b > a:
-            ramp = _cosine_fade(b - a, rising=False)  # 1 -> 0 in normalised form
+            ramp = _cosine_fade(b - a, rising=True)
             seg  = (1.0 - ramp) * 1.0 + ramp * gain_linear
             multiplier[a:b] *= seg.astype(multiplier.dtype)
 
@@ -227,8 +241,13 @@ def main() -> int:
     parser.add_argument("--affricate-fade-out-ms", type=float, default=4.5)
     args = parser.parse_args()
 
-    sr, audio = _read_wav_mono_float32(args.input)
-    n_samples = audio.shape[0]
+    sr, audio_2d, was_stereo = _read_wav_float32(args.input)
+    n_samples = audio_2d.shape[0]
+    # Detection / context-RMS / event-peak comparison all run on a mono
+    # mixdown so a centred sibilant doesn't get measured twice. The gain
+    # envelope is later applied to every channel, preserving stereo layout
+    # for presets where channelOutput is 'preserve'.
+    audio = _mono_view(audio_2d)
 
     with open(args.events_json, "r") as fh:
         event_map = json.load(fh)
@@ -327,9 +346,11 @@ def main() -> int:
             "gainDb":       round(gain_db, 2),
         })
 
-    # Vectorised single-pass apply.
-    processed = (audio.astype(np.float32) * multiplier).astype(np.float32)
-    wavfile.write(args.output, sr, processed)
+    # Vectorised single-pass apply. Multiplier is per-sample, broadcast
+    # across channels so stereo layout is preserved.
+    processed_2d = (audio_2d.astype(np.float32) * multiplier[:, None]).astype(np.float32)
+    out = processed_2d[:, 0] if not was_stereo else processed_2d
+    wavfile.write(args.output, sr, out)
 
     summary = {
         "applied":            len(treated_events) > 0,

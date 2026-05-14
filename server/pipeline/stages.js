@@ -732,10 +732,13 @@ export async function clipGainDeEss(ctx) {
 
   const minDurationMs = config.minDurationMs ?? 25
 
-  // Detection runs on the current (post-EQ, pre-compression) signal so the
-  // event peaks reflect the audio about to receive the gain pass. F0 contour
-  // is computed fresh because earlier stages may have shifted the spectrum
-  // since the last contour call.
+  // Detection runs on the pre-compression signal — per the spec, this stage
+  // sits before the pre-compression remeasurement. Stages that further shape
+  // sibilants (airBoost, enhancementEQ) come AFTER this point in
+  // STANDARD_PIPELINE, so any HF lift they apply does not feed back into
+  // the gain calculation here; the de-essed result still passes through them
+  // downstream. F0 contour is computed fresh because earlier stages may have
+  // shifted the spectrum since the last contour call.
   const f0Contour = await getF0Contour(ctx)
 
   // Merge the preset's sibilance detection block (if any) with the
