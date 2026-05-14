@@ -64,6 +64,12 @@ if __name__ == "__main__":
         audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
     else:
         audio = audio.astype(np.float32)
+    # Detection runs on mono; fold stereo down before handing the array to
+    # analyze_sibilance_events (which rejects ndim > 1). Presets whose
+    # channelOutput is 'preserve' may legitimately still be stereo at the
+    # point a downstream stage runs the detector.
+    if audio.ndim == 2:
+        audio = audio.mean(axis=1).astype(np.float32)
 
     with open(args.f0_contour_json) as fh:
         f0_contour = json.load(fh)

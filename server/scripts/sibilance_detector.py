@@ -66,7 +66,20 @@ DEFAULT_PARAMS = {
     "broadband_trigger_db": 10.0,
     "ema_time_constant_ms": 300.0,
     "warmup_frames":        25,
+    # Minimum event duration (ms). Events shorter than this are dropped from
+    # the returned event map entirely. Default 0 preserves backward
+    # compatibility for stages that share the detector (airBoost,
+    # resonanceSuppressor). The clip-gain de-esser sets ~25 ms so it never
+    # treats brief consonant stops or click residuals as sibilants.
+    "min_duration_ms":      0.0,
 }
+
+
+# Threshold below which an event is classified as an affricate (the percussive
+# burst portion of /tʃ/, /dʒ/, etc.) rather than a steady-state fricative. Used
+# downstream by the clip-gain de-esser to pick fade-in/-out lengths so the full
+# reduction lands before the affricate's transient peak.
+AFFRICATE_PEAK_POSITION = 0.35
 
 
 def resolve_params(overrides: dict = None) -> dict:
@@ -108,12 +121,21 @@ def build_events_map(
     sample_rate:      int,
     n_fft:            int,
     hop_length:       int,
+    audio:            np.ndarray = None,
+    min_duration_ms:  float = 0.0,
 ) -> dict:
     """
     Build the canonical sibilance event-map JSON payload.
 
     Output shape matches what air_boost_masked.py and resonance_suppressor.py
-    consume (sibilantFrameIndices + f0.perFrame + STFT geometry).
+    consume (sibilantFrameIndices + f0.perFrame + STFT geometry). When `audio`
+    is provided each event is also enriched with sample-domain peak metadata
+    (startSample/endSample/peakSample/peakRelativePosition/eventPeakDb/eventType)
+    consumed by the clip-gain de-esser.
+
+    When `min_duration_ms > 0`, events shorter than that threshold are dropped
+    and the corresponding frame indices are removed from `sibilantFrameIndices`
+    so the returned map is internally consistent.
     """
     events = []
     if sibilant_indices:
@@ -129,16 +151,63 @@ def build_events_map(
         events.append((run_start, prev))
 
     frame_period_sec = hop_length / sample_rate
-    event_objs = [
-        {
+
+    n_samples = int(audio.shape[0]) if audio is not None else None
+
+    event_objs    = []
+    kept_runs     = []
+    for s, e in events:
+        duration_ms = (e + 1 - s) * frame_period_sec * 1000.0
+        if min_duration_ms > 0 and duration_ms < min_duration_ms:
+            continue
+
+        obj = {
             "startFrame": int(s),
             "endFrame":   int(e),
             "startSec":   round(s * frame_period_sec, 4),
             "endSec":     round((e + 1) * frame_period_sec, 4),
-            "durationMs": round((e + 1 - s) * frame_period_sec * 1000.0, 1),
+            "durationMs": round(duration_ms, 1),
         }
-        for s, e in events
-    ]
+
+        if audio is not None and n_samples is not None and n_samples > 0:
+            start_sample = max(0, int(s) * hop_length)
+            end_sample   = min(n_samples - 1, (int(e) + 1) * hop_length - 1)
+            if end_sample <= start_sample:
+                end_sample = min(n_samples - 1, start_sample + 1)
+
+            seg = audio[start_sample : end_sample + 1]
+            if seg.size > 0:
+                local_peak_idx = int(np.argmax(np.abs(seg)))
+                peak_sample    = start_sample + local_peak_idx
+                peak_value     = float(np.abs(seg[local_peak_idx]))
+                peak_db        = 20.0 * np.log10(peak_value + 1e-12)
+            else:
+                peak_sample = start_sample
+                peak_db     = -120.0
+
+            span = max(1, end_sample - start_sample)
+            peak_rel_pos = float(peak_sample - start_sample) / float(span)
+            event_type   = "affricate" if peak_rel_pos < AFFRICATE_PEAK_POSITION else "fricative"
+
+            obj.update({
+                "startSample":          int(start_sample),
+                "endSample":            int(end_sample),
+                "peakSample":           int(peak_sample),
+                "peakRelativePosition": round(peak_rel_pos, 4),
+                "eventPeakDb":          round(peak_db, 2),
+                "eventType":            event_type,
+            })
+
+        event_objs.append(obj)
+        kept_runs.append((s, e))
+
+    # When events were filtered out, sync sibilantFrameIndices so downstream
+    # consumers that read raw frame indices see a consistent view.
+    if min_duration_ms > 0 and len(kept_runs) != len(events):
+        kept_indices = []
+        for s, e in kept_runs:
+            kept_indices.extend(range(int(s), int(e) + 1))
+        sibilant_indices = kept_indices
 
     return {
         "sampleRate":           sample_rate,
@@ -388,11 +457,16 @@ def analyze_sibilance_events(
                 seed_f0 = float(v)
                 break
 
+    # Resolve detection params up-front so they're available both to the
+    # detector below and to the empty-audio guard a few lines down.
+    resolved        = resolve_params(params)
+    min_duration_ms = float(resolved.get("min_duration_ms", 0.0) or 0.0)
+
     detector = SibilanceDetector(
         sample_rate=sample_rate,
         n_fft=n_fft,
         hop_length=hop_length,
-        params=resolve_params(params),
+        params=resolved,
         f0=seed_f0,
     )
 
@@ -406,6 +480,7 @@ def analyze_sibilance_events(
     #     get a consistent shape.
     #   - Short input (≤ pad samples): fall back to 'edge' padding (repeats
     #     the boundary sample), valid for any non-empty array.
+
     if n_samples == 0:
         logger.warning("analyze_sibilance_events: empty audio — returning empty event map")
         return build_events_map(
@@ -416,6 +491,8 @@ def analyze_sibilance_events(
             sample_rate      = sample_rate,
             n_fft            = n_fft,
             hop_length       = hop_length,
+            audio            = audio,
+            min_duration_ms  = min_duration_ms,
         )
 
     pad_mode = "reflect" if n_samples > pad else "edge"
@@ -467,6 +544,8 @@ def analyze_sibilance_events(
         sample_rate      = sample_rate,
         n_fft            = n_fft,
         hop_length       = hop_length,
+        audio            = audio,
+        min_duration_ms  = min_duration_ms,
     )
 
     logger.info(

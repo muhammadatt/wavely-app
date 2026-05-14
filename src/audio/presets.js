@@ -302,6 +302,24 @@ export const PRESETS = {
       maxReduction: 12,
       ratio: 3,
     },
+    // Clip-gain de-esser — ACX Audiobook tuning. Transparent: low ceiling
+    // but a hard 6 dB reduction cap so even spikes never get hammered enough
+    // to call attention to the de-esser. 25 ms duration filter excludes
+    // consonant stops and click residuals.
+    clipGainDeEsser: {
+      enabled: true,
+      naturalCeilingDb: 6.5,
+      reductionRatio:   0.55,
+      maxReductionDb:   6.0,
+      minDurationMs:    25,
+      contextWindowMs:  80,
+      fades: {
+        fricativeInMs:  3.0,
+        fricativeOutMs: 4.0,
+        affricateInMs:  1.5,
+        affricateOutMs: 4.5,
+      },
+    },
     roomPresence: {
       enabled: true,
       wet: 0.10, // 0.12 - reverb tail sits ~17dB below direct
@@ -347,6 +365,24 @@ export const PRESETS = {
       trigger: 6,
       maxReduction: 4,
       ratio: 6.7,
+    },
+    // Clip-gain de-esser — Podcast Ready tuning. Higher ceiling (more
+    // permissive of bright sibilants because podcast voices sit further
+    // forward) but a slightly larger cap so loud /s/ on a peaky mic still
+    // gets pulled in.
+    clipGainDeEsser: {
+      enabled: true,
+      naturalCeilingDb: 8.0,
+      reductionRatio:   0.55,
+      maxReductionDb:   8.0,
+      minDurationMs:    25,
+      contextWindowMs:  80,
+      fades: {
+        fricativeInMs:  3.0,
+        fricativeOutMs: 4.0,
+        affricateInMs:  1.5,
+        affricateOutMs: 4.5,
+      },
     },
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",
@@ -489,6 +525,25 @@ export const PRESETS = {
       trigger: 8,
       maxReduction: 5,
       ratio: 6.7,
+    },
+    // Clip-gain de-esser — Voice Ready tuning. Broadcast-neutral character:
+    // moderate ceiling and cap, identical fade shape to ACX. Voice Ready
+    // outputs typically sit under music beds, so leaving sibilance present
+    // and natural rather than dulling it is worth a slightly higher ceiling
+    // than ACX.
+    clipGainDeEsser: {
+      enabled: true,
+      naturalCeilingDb: 7.0,
+      reductionRatio:   0.55,
+      maxReductionDb:   7.0,
+      minDurationMs:    25,
+      contextWindowMs:  80,
+      fades: {
+        fricativeInMs:  3.0,
+        fricativeOutMs: 4.0,
+        affricateInMs:  1.5,
+        affricateOutMs: 4.5,
+      },
     },
     channelOutput: "mono",
     defaultOutputProfile: "acx",
@@ -639,6 +694,23 @@ export const PRESETS = {
       trigger: 6,
       maxReduction: 8,
       ratio: 6.7,
+    },
+    // Clip-gain de-esser — General Clean tuning. Slightly more aggressive
+    // ratio (0.60) since this preset accepts heavier processing in exchange
+    // for handling unknown source material safely.
+    clipGainDeEsser: {
+      enabled: true,
+      naturalCeilingDb: 7.0,
+      reductionRatio:   0.60,
+      maxReductionDb:   8.0,
+      minDurationMs:    25,
+      contextWindowMs:  80,
+      fades: {
+        fricativeInMs:  3.0,
+        fricativeOutMs: 4.0,
+        affricateInMs:  1.5,
+        affricateOutMs: 4.5,
+      },
     },
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",

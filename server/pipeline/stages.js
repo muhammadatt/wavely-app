@@ -39,6 +39,7 @@ import { analyzeSpectrum } from './enhancementEQ.js'
 import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
+import { applyClipGainDeEsser } from './clipGainDeEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
 import { writeFile } from 'fs/promises'
@@ -708,6 +709,78 @@ export async function deEss(ctx) {
     applied:   deEssResult.applied,
     f0:        deEssResult.f0Hz        !== null ? `${deEssResult.f0Hz}Hz`           : 'n/a',
     maxRed:    deEssResult.maxReductionDb !== null ? `${deEssResult.maxReductionDb}dB` : 'n/a',
+  })
+}
+
+// ── Stage: Clip-Gain De-esser ─────────────────────────────────────────────────
+// Alternative to the compressor-based de-esser. Two passes:
+//   1. Sibilance detection with min_duration_ms set so brief consonant stops
+//      and click residuals are filtered out before any gain is calculated.
+//   2. Per-event gain reduction relative to the surrounding voiced RMS,
+//      rendered as a cosine fade envelope and applied in a single vectorised
+//      multiply.
+//
+// Skips silently when preset.clipGainDeEsser is absent or .enabled is false,
+// or when the detector returns no events that survive the duration filter.
+
+export async function clipGainDeEss(ctx) {
+  const config = ctx.preset?.clipGainDeEsser
+  if (!config || config.enabled === false) {
+    ctx.results.clipGainDeEsser = { applied: false, reason: 'preset_not_configured' }
+    return
+  }
+
+  const minDurationMs = config.minDurationMs ?? 25
+
+  // Detection runs on the pre-compression signal — per the spec, this stage
+  // sits before the pre-compression remeasurement. Stages that further shape
+  // sibilants (airBoost, enhancementEQ) come AFTER this point in
+  // STANDARD_PIPELINE, so any HF lift they apply does not feed back into
+  // the gain calculation here; the de-essed result still passes through them
+  // downstream. F0 contour is computed fresh because earlier stages may have
+  // shifted the spectrum since the last contour call.
+  const f0Contour = await getF0Contour(ctx)
+
+  // Merge the preset's sibilance detection block (if any) with the
+  // min_duration_ms override the clip-gain stage requires.
+  const detectionParams = {
+    ...(config.sibilanceDetection ?? {}),
+    min_duration_ms: minDurationMs,
+  }
+
+  const { events, path: eventsPath } = await analyzeSibilanceEvents(ctx, {
+    params:    detectionParams,
+    f0Contour,
+  })
+
+  if (!events?.events?.length) {
+    ctx.results.clipGainDeEsser = {
+      applied:    false,
+      reason:     'no_events',
+      eventCount: 0,
+    }
+    ctx.log(`[clip-gain-deess] No events ≥ ${minDurationMs}ms detected — skipped`)
+    return
+  }
+
+  const outPath = ctx.tmp('.wav')
+  const result  = await applyClipGainDeEsser(
+    ctx.currentPath,
+    outPath,
+    eventsPath,
+    config,
+    ctx.results.metrics?.frames ?? null,
+  )
+
+  if (result.applied) ctx.currentPath = outPath
+  ctx.results.clipGainDeEsser = result
+
+  await logLevel(ctx, 'after clip-gain de-esser', ctx.currentPath, {
+    applied:    result.applied,
+    treated:    `${result.treatedCount}/${result.eventCount}`,
+    skipInRng:  result.skippedInRange,
+    skipNoCtx:  result.skippedNoContext,
+    maxRed:     result.maxReductionDb != null ? `${result.maxReductionDb}dB` : 'n/a',
   })
 }
 
