@@ -37,6 +37,7 @@ const STANDARD_PIPELINE = [
   //stages.dereverb,
   //stages.breathReduce,            // Breath event detection and gain reduction
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
+  stages.vocalSaturation,
   stages.vadGate,                 // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before autoLevel + compression
   stages.compress,                // Serial compression
@@ -45,7 +46,6 @@ const STANDARD_PIPELINE = [
   stages.parallelCompress,        // Parallel compression
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
-  //stages.vocalSaturation,
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — post-pass
   stages.enhancementEQ,
   //stages.deEss,                   // Split band De-Esser  

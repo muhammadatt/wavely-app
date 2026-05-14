@@ -136,7 +136,7 @@ export const PRESETS = {
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.05,
+      wetDry: 0.5,
       bias: 0.08,
       lowCrossover: 500,
       midCrossover: 3000,
@@ -221,7 +221,7 @@ export const PRESETS = {
     // ACX: lower strength preserves the natural vocal character ACX human reviewers
     // expect; transient shaper disabled to avoid any risk of gating room tone.
     spectralSubtraction: {
-      enabled: false,
+      enabled: true,
       alphaDd: 0.98,
       beta: 0.15,
       strength: 0.7,
@@ -229,29 +229,16 @@ export const PRESETS = {
     },
     // sibilantGainFloor: how much of the boost survives on sibilant frames.
     // 0.0 = no boost on sibilants; 1.0 = full boost everywhere (no masking).
-    // ACX uses 0.0 — conservative; sibilant amplification risks human-review rejection.
     //
-    // sibilanceDetection: sparse overrides for the airBoost stage's sibilance
-    // detector (server/scripts/sibilance_detector.py). Independent from any
-    // other stage's detection settings. ACX tuning is strict: only the
-    // harshest sibilant events should pull the boost back, since ACX human
-    // reviewers are sensitive to inconsistent HF character.
-    //   p95_trigger_db: 9.0  — P95 must exceed band mean by 9 dB (default 6).
-    //     Rejects soft /s/ sounds that sit just above threshold but are not
-    //     audibly problematic.
-    //   min_flatness: 0.2    — stricter Wiener entropy gate (default 0.1).
-    //     Genuine fricatives have flatness 0.3–0.5; 0.2 rejects tonal vowel
-    //     harmonics that bleed into the sibilant band after the 8 dB boost.
-    //   broadband_trigger_db: 13.0 — only very large EMA elevation fires
-    //     Condition 2 (default 10.0). Prevents the long-term reference from
-    //     triggering on moderate sibilant vowels post-airBoost.
+    // sibilanceDetection: applies aggressive (broader) params to prevent
+    // a broad range of fricatives from being boosted 
     airBoost: {
       gainDb: 8,
       sibilantGainFloor: 0,
       sibilanceDetection: {
-        p95_trigger_db:      9.0,
-        min_flatness:        0.2,
-        broadband_trigger_db: 13.0,
+        p95_trigger_db:      6.0,
+        min_flatness:        0.1,
+        broadband_trigger_db: 10.0,
       },
     },
     // Resonance Suppressor.
@@ -285,18 +272,16 @@ export const PRESETS = {
         // wider than n_fft/(2*3) ≈ 7.3 kHz, making a 4–8 kHz sibilant
         // plateau protrude clearly above it.
         //
-        // sibilanceDetection: this stage's own detector params. Same strict
-        // ACX settings as airBoost — we want the same conservative behavior
-        // about classifying a frame as sibilant when deciding to apply
-        // sibilant-only resonance reduction.
+        // sibilanceDetection: this stage's own detector params. Uses stricter params to only
+        // suppress the harshest sibilants
         sibilant_only: true,
         preserve_harmonics: true,
         depth: 0.67,
-        sharpness: 0.2,
+        sharpness: 0.4,
         selectivity: 1,
         attack_ms: 5.0,
         release_ms: 5.0,
-        max_reduction_db: 50.0,
+        max_reduction_db: 25.0,
         freq_floor_hz: 3000.0,
         freq_ceil_hz: 12000.0,
         mode: "soft",
@@ -319,7 +304,7 @@ export const PRESETS = {
     },
     roomPresence: {
       enabled: true,
-      wet: 0.0, // 0.12 - reverb tail sits ~17dB below direct
+      wet: 0.10, // 0.12 - reverb tail sits ~17dB below direct
       rt60Ms: 100, // presence without going washy; echoes after 200 - 250ms
       preDelayMs: 10.0, // slight punch through before reverb onset
       early_reflections: 2

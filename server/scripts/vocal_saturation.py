@@ -115,14 +115,18 @@ def vocal_saturation(
     wet = low_sat + mid_sat + high_sat
 
     # --- RMS-match wet to dry -----------------------------------------------
-    # Saturation compresses energy; without matching, a high wet_dry setting
-    # sounds like a gain cut rather than a tonal change.
+    # Saturation compresses energy; scale wet to match dry RMS before blending.
     dry_rms = np.sqrt(np.mean(audio ** 2)) + 1e-8
     wet_rms = np.sqrt(np.mean(wet ** 2)) + 1e-8
     wet = wet * (dry_rms / wet_rms)
 
-    # --- Parallel blend -----------------------------------------------------
-    output = (1.0 - wet_dry) * audio + wet_dry * wet
+    # --- Gain-neutral parallel blend ----------------------------------------
+    # Dry stays at full level; wet is added additively at wet_dry gain.
+    # The mix is then RMS-matched back to the dry level so perceived loudness
+    # stays constant regardless of the wet_dry setting.
+    output = audio + wet_dry * wet
+    out_rms = np.sqrt(np.mean(output ** 2)) + 1e-8
+    output = output * (dry_rms / out_rms)
 
     # Safety clip
     output = np.clip(output, -1.0, 1.0)
