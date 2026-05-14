@@ -160,6 +160,7 @@ function buildReport(ctx) {
       ...(results.airBoost       && { air_boost:          formatAirBoostResult(results.airBoost) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
+      ...(results.clipGainDeEsser && { clip_gain_de_esser: formatClipGainDeEsserResult(results.clipGainDeEsser) }),
       ...(results.autoLeveler         && { auto_leveler:         formatAutoLevelerResult(results.autoLeveler) }),
       ...(results.compression         && { compression:           formatCompressionResult(results.compression) }),
       ...(results.parallelCompression && { parallel_compression:  formatParallelCompressionResult(results.parallelCompression) }),
@@ -284,6 +285,28 @@ function formatDeEssResult(r) {
     p95_energy_db:    r.p95EnergyDb,
     mean_energy_db:   r.meanEnergyDb,
     trigger_reason:   r.triggerReason,
+  }
+}
+
+function formatClipGainDeEsserResult(r) {
+  if (!r) return null
+  if (!r.applied) {
+    return {
+      applied:        false,
+      skipped_reason: r.reason ?? null,
+      event_count:    r.eventCount ?? 0,
+    }
+  }
+  return {
+    applied:             true,
+    event_count:         r.eventCount,
+    treated_count:       r.treatedCount,
+    skipped_in_range:    r.skippedInRange,
+    skipped_no_context:  r.skippedNoContext,
+    max_reduction_db:    r.maxReductionDb,
+    natural_ceiling_db:  r.naturalCeilingDb,
+    reduction_ratio:     r.reductionRatio,
+    max_reduction_cap_db: r.maxReductionCapDb,
   }
 }
 

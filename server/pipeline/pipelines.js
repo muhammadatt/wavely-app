@@ -39,6 +39,7 @@ const STANDARD_PIPELINE = [
   stages.bandwidthExtension,      // HF restoration/ enhacement (enabled per preset.bwe; no-op when disabled)
   stages.vocalSaturation,
   stages.vadGate,                 // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
+  stages.clipGainDeEss,           // Clip-gain de-esser — per-event sibilant attenuation via cosine envelopes
   stages.remeasureFramesPostNr,   // Recalculate noise floor and update ctx.results.metrics before autoLevel + compression
   stages.compress,                // Serial compression
   stages.remeasureFramesPostNr,   // Refresh noise floor after compression so second NR skip-check is accurate
