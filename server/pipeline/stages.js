@@ -35,7 +35,7 @@ import { applyNoiseReduction, runRnnoise, runDtln } from './noiseReduce.js'
 import { measureAudio, measureVoicedRms, measureVoicedLufs, checkAcxCertification } from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
 import { analyzeFrames, remeasureFrames } from './frameAnalysis.js'
-import { analyzeSpectrum } from './enhancementEQ.js'
+import { analyzeCorrectiveEQ, bandsToFfmpegFilters } from './correctiveEQ.js'
 import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
@@ -504,29 +504,69 @@ export async function roomTonePad(ctx) {
   ctx.results.roomTonePad = result
 }
 
-// ── Stage: Enhancement EQ ─────────────────────────────────────────────────────
+// ── Stage: Corrective EQ (Stage 3a) ───────────────────────────────────────────
+// Replaces the v3.1 Enhancement EQ. Detects localised spectral anomalies in the
+// whole-file average voiced-frame envelope and applies adaptive parametric EQ
+// with measured center frequencies, Q, and severity-proportional gains.
+// Does not run for noise_eraser — source separation alters the spectral
+// structure, so the cepstral detection thresholds are not valid on its output.
 
-export async function enhancementEQ(ctx) {
-  const eqResult = await analyzeSpectrum(
-    ctx.currentPath,
-    ctx.preset?.eqProfile ?? 'general',
-    ctx.results.metrics,
-    ctx.results.metrics.noiseFloorDbfs,
-    { presetId: ctx.presetId },
-  )
-  const eqPath = ctx.tmp('.wav')
-  await applyParametricEQ(ctx.currentPath, eqPath, eqResult.ffmpegFilters)
-  ctx.currentPath       = eqPath
-  ctx.results.enhancementEQ = eqResult
-  await logLevel(ctx, 'after EQ', ctx.currentPath, {
-    applied: eqResult.applied,
-    filters: eqResult.ffmpegFilters.length,
+export async function correctiveEQ(ctx) {
+  if (ctx.presetId === 'noise_eraser') {
+    ctx.results.correctiveEQ = {
+      applied: false,
+      skipped: true,
+      reason:  'noise_eraser preset — Stage 3a does not run on separated audio',
+    }
+    return
+  }
+
+  const result = await analyzeCorrectiveEQ(ctx)
+  let bands  = result.bands ?? []
+  let eqPath = ctx.tmp('.wav')
+  await applyParametricEQ(ctx.currentPath, eqPath, bandsToFfmpegFilters(bands))
+
+  // ACX noise floor constraint: a low-frequency boost (body_warmth) can lift
+  // the measured noise floor above the -60 dBFS ACX threshold. Re-measure and
+  // back the boost off in 1 dB steps until compliant, or drop the band.
+  const isLowFreqBoost = b => b.gain_db > 0 && b.freq_hz <= 400
+  if (ctx.outputProfileId === 'acx' && bands.some(isLowFreqBoost)) {
+    let reductionDb = 0
+    for (let iter = 0; iter < 6; iter++) {
+      const m = await remeasureFrames(eqPath, ctx.results.metrics)
+      if (m.noiseFloorDbfs <= -60) break
+      let changed = false
+      bands = bands
+        .map(b => {
+          if (!isLowFreqBoost(b)) return b
+          changed = true
+          return { ...b, gain_db: round2(Math.max(0, b.gain_db - 1)) }
+        })
+        .filter(b => Math.abs(b.gain_db) >= 0.1)
+      if (!changed) break
+      reductionDb += 1
+      ctx.log(`[correctiveEQ] ACX noise floor ${m.noiseFloorDbfs} dBFS > -60 — reduced low-frequency boost by 1 dB`)
+      eqPath = ctx.tmp('.wav')
+      await applyParametricEQ(ctx.currentPath, eqPath, bandsToFfmpegFilters(bands))
+    }
+    if (reductionDb > 0) result.acxNoiseFloorReductionDb = reductionDb
+  }
+
+  ctx.currentPath     = eqPath
+  result.bands        = bands
+  result.applied      = bands.length > 0
+  result.ffmpegFilter = bandsToFfmpegFilters(bands).join(',') || null
+  ctx.results.correctiveEQ = result
+  await logLevel(ctx, 'after corrective EQ', ctx.currentPath, {
+    voice_type: result.voice_type,
+    bands:      bands.length,
+    merged:     result.merged_bands ?? 0,
   })
 }
 
 // ── Stage: Resonance Suppressor ───────────────────────────────────────────────
 // Soothe2-inspired dynamic spectral resonance suppressor. Runs after
-// enhancementEQ (static tonal corrections already applied) and before normalize.
+// correctiveEQ (localised tonal corrections already applied) and before normalize.
 // Only included in STANDARD_PIPELINE — excluded from noise_eraser and
 // clearervoice_eraser by pipeline omission.
 
@@ -734,7 +774,7 @@ export async function clipGainDeEss(ctx) {
 
   // Detection runs on the pre-compression signal — per the spec, this stage
   // sits before the pre-compression remeasurement. Stages that further shape
-  // sibilants (airBoost, enhancementEQ) come AFTER this point in
+  // sibilants (airBoost, correctiveEQ) come AFTER this point in
   // STANDARD_PIPELINE, so any HF lift they apply does not feed back into
   // the gain calculation here; the de-essed result still passes through them
   // downstream. F0 contour is computed fresh because earlier stages may have
@@ -1265,7 +1305,7 @@ export async function separationValidation(ctx) {
   ctx.results.separationValidation = assessment
 
   // Merge the post-separation frame analysis into the canonical metrics object
-  // so downstream processing stages (residualCleanup, enhancementEQ) always
+  // so downstream processing stages (residualCleanup, correctiveEQ) always
   // read from ctx.results.metrics rather than from assessment directly.
   if (assessment.postSeparationFrameAnalysis) {
     Object.assign(ctx.results.metrics, assessment.postSeparationFrameAnalysis)

@@ -48,8 +48,8 @@ const STANDARD_PIPELINE = [
   stages.vocalExpander,           // Frequency-selective expander (silence-floor residual attenuator)
   stages.airBoost,                // Maag EQ4-style air/HF shelf lift; no-op when air_boost_db ≤ 0
   stages.resonanceSuppressor,     // Dynamic resonance suppressor — post-pass
-  stages.enhancementEQ,
-  //stages.deEss,                   // Split band De-Esser  
+  stages.correctiveEQ,            // Stage 3a — adaptive corrective EQ
+  //stages.deEss,                   // Split band De-Esser
   stages.roomPresence,            // Synthetic-IR convolution reverb; no-op when preset.roomPresence.enabled = false
   //stages.roomTonePad,             // TO DO: Make configurable option; For ACX-only preset only; Changes file length
   stages.normalize,
@@ -102,7 +102,8 @@ export const PIPELINES = {
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.vadGate,                  // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
     stages.autoLevel,                // VAD-gated gain riding; no-op when drift ≤ 3 dB σ
-    stages.enhancementEQ,
+    // Stage 3a (correctiveEQ) is omitted — source separation alters the
+    // spectral structure, so the cepstral detection thresholds are not valid.
     stages.airBoost,               // Stage 3b — no-op for noise_eraser (air_boost_db = 0)
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
 
@@ -148,7 +149,7 @@ export const PIPELINES = {
     stages.parallelCompress,         // parallel compression
     stages.vocalExpander,            // Stage 4a-E — frequency-selective expander
     stages.vadGate,                  // Smooth VAD-driven silence-floor gate (no-op when preset.vadGate.enabled is false)
-    stages.enhancementEQ,
+    stages.correctiveEQ,           // Stage 3a — adaptive corrective EQ
     stages.airBoost,               // Stage 3b — no-op for clearervoice_eraser (air_boost_db = 0)
     //stages.harmonicExciter,         // Adds presence/air harmonic content before normalization
     stages.vocalSaturation,
