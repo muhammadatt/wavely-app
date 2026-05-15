@@ -16,7 +16,7 @@ Detection scheme:
     a rolling-window median over those values and rebuilds the band mask
     when the median shifts beyond F0_MASK_RESHIFT_THRESHOLD_HZ -- avoids
     mask churn from contour jitter while tracking real pitch changes.
-  - Two-condition detect():
+  - Three-condition detect():
       * Condition 1 (P95 spike): in-band P95 energy exceeds the in-band
         mean by p95_trigger_db AND in-band spectral flatness exceeds
         min_flatness. Fires from frame zero -- no warmup needed.
@@ -24,6 +24,11 @@ Detection scheme:
         the long-term EMA reference (built on voiced non-sibilant frames)
         by broadband_trigger_db. Active only after warmup_frames voiced
         non-sibilant frames have populated the EMA.
+      * Condition 3 (per-bin contextual excess): a minimum fraction of
+        sibilant-band bins show per-bin energy excess above a short rolling
+        buffer of recent voiced non-sibilant frames (N1/N2 context window,
+        Gonzalez & Brookes 2012). Catches soft/voiced fricatives missed by
+        Conditions 1-2 and is more robust to stop bursts than the P95 gate.
 
 The module owns no F0 estimation. Callers that need an F0 contour should
 get one from estimate_f0_contour.py via getF0Contour() in f0Analysis.js.
@@ -59,19 +64,28 @@ F0_MASK_RESHIFT_THRESHOLD_HZ = 20.0
 
 DEFAULT_PARAMS = {
     # Condition 1: P95 spike + flatness gate. Fires from frame zero.
-    "p95_trigger_db":       6.0,
-    "min_flatness":         0.1,
+    "p95_trigger_db":              6.0,
+    "min_flatness":                0.1,
     # Condition 2: broadband elevation above long-term reference. Requires
     # warmup before firing so the EMA reference is stable.
-    "broadband_trigger_db": 10.0,
-    "ema_time_constant_ms": 300.0,
-    "warmup_frames":        25,
+    "broadband_trigger_db":        10.0,
+    "ema_time_constant_ms":        300.0,
+    "warmup_frames":               25,
+    # Condition 3: per-bin contextual excess (Gonzalez & Brookes 2012).
+    # Uses a short rolling buffer of recent voiced non-sibilant frames as the
+    # local noise-floor reference. Fires after the buffer is half-full.
+    "contextual_trigger_db":       8.0,   # per-bin excess (dB) to count a bin as elevated
+    "contextual_min_bin_fraction": 0.40,  # fraction of sibilant-band bins that must be elevated
     # Minimum event duration (ms). Events shorter than this are dropped from
     # the returned event map entirely. Default 0 preserves backward
     # compatibility for stages that share the detector (airBoost,
     # resonanceSuppressor). The clip-gain de-esser sets ~25 ms so it never
     # treats brief consonant stops or click residuals as sibilants.
-    "min_duration_ms":      0.0,
+    "min_duration_ms":             0.0,
+    # Gap merge (ms). Consecutive events separated by fewer frames than this
+    # threshold are joined into one event (Gonzalez & Brookes 2012 max-filter
+    # equivalent). Reduces fragmentation of long fricatives.
+    "gap_merge_ms":                30.0,
 }
 
 
@@ -123,6 +137,7 @@ def build_events_map(
     hop_length:       int,
     audio:            np.ndarray = None,
     min_duration_ms:  float = 0.0,
+    gap_merge_ms:     float = 0.0,
 ) -> dict:
     """
     Build the canonical sibilance event-map JSON payload.
@@ -151,6 +166,21 @@ def build_events_map(
         events.append((run_start, prev))
 
     frame_period_sec = hop_length / sample_rate
+
+    # --- Gap merge (Gonzalez & Brookes 2012 max-filter equivalent) ---
+    # Joins consecutive events separated by fewer than gap_merge_ms of silence
+    # into a single event. Prevents long fricatives from fragmenting into
+    # multiple short events due to 1-2 frame dips below threshold.
+    if gap_merge_ms > 0 and len(events) > 1:
+        gap_merge_frames = max(1, int((gap_merge_ms / 1000.0) / frame_period_sec))
+        merged = [events[0]]
+        for s, e in events[1:]:
+            prev_s, prev_e = merged[-1]
+            if (s - prev_e - 1) <= gap_merge_frames:
+                merged[-1] = (prev_s, e)
+            else:
+                merged.append((s, e))
+        events = merged
 
     n_samples = int(audio.shape[0]) if audio is not None else None
 
@@ -285,6 +315,12 @@ class SibilanceDetector:
         self.long_term_power    = None
         self.voiced_frame_count = 0
 
+        # N1/N2 context buffer state (Condition 3 — Gonzalez & Brookes 2012).
+        # Rolling buffer of voiced non-sibilant per-bin power spectra (~65 ms).
+        self._context_buffer_len = max(1, int(0.065 * sample_rate / hop_length))
+        self._context_buffer     = deque(maxlen=self._context_buffer_len)
+        self._context_min_fill   = max(1, self._context_buffer_len // 2)
+
     @staticmethod
     def _time_to_coeff(time_ms: float, frame_period_ms: float) -> float:
         if time_ms <= 0 or frame_period_ms <= 0:
@@ -331,7 +367,7 @@ class SibilanceDetector:
                 self._current_band_f0 = median_f0
 
     def detect(self, magnitude: np.ndarray) -> bool:
-        """Two-condition per-frame detection. See module docstring."""
+        """Three-condition per-frame detection. See module docstring."""
         if self.sibilant_mask is None or not self.sibilant_mask.any():
             return False
 
@@ -342,6 +378,7 @@ class SibilanceDetector:
         mean_db = 10.0 * np.log10(mean_energy + 1e-10)
         p95_db  = 10.0 * np.log10(p95_energy  + 1e-10)
 
+        # --- Condition 1: P95 spike + flatness gate (unchanged) ---
         if (p95_db - mean_db) > self.params["p95_trigger_db"]:
             valid = sib_energy > 0
             if valid.any():
@@ -353,6 +390,7 @@ class SibilanceDetector:
             if flatness >= self.params["min_flatness"]:
                 return True
 
+        # --- Condition 2: broadband EMA elevation (unchanged) ---
         if (self.long_term_power is not None and
                 self.voiced_frame_count >= self.params["warmup_frames"]):
             ref_mean_db = 10.0 * np.log10(
@@ -361,7 +399,46 @@ class SibilanceDetector:
             if (mean_db - ref_mean_db) > self.params["broadband_trigger_db"]:
                 return True
 
+        # --- Condition 3: per-bin contextual excess (new) ---
+        if self.detect_contextual(magnitude):
+            return True
+
         return False
+
+    def detect_contextual(self, magnitude: np.ndarray) -> bool:
+        """
+        Condition 3: per-bin contextual excess (Gonzalez & Brookes 2012).
+
+        Uses a short rolling buffer of recent voiced non-sibilant frames as
+        the local noise-floor reference (N1/N2 context window). Requires a
+        minimum fraction of sibilant-band bins to show excess above the
+        threshold. Fires only after the context buffer is at least half-full.
+        """
+        if (self.sibilant_mask is None
+                or not self.sibilant_mask.any()
+                or len(self._context_buffer) < self._context_min_fill):
+            return False
+        context_mean = np.mean(np.stack(self._context_buffer), axis=0)  # (n_bins,)
+        frame_power  = magnitude ** 2
+        sib_excess_db = (
+            10.0 * np.log10(frame_power[self.sibilant_mask]  + 1e-10)
+          - 10.0 * np.log10(context_mean[self.sibilant_mask] + 1e-10)
+        )
+        threshold        = self.params.get("contextual_trigger_db",       8.0)
+        min_bin_fraction = self.params.get("contextual_min_bin_fraction", 0.40)
+        elevated_bins = int(np.sum(sib_excess_db > threshold))
+        total_bins    = int(self.sibilant_mask.sum())
+        return (elevated_bins / total_bins) >= min_bin_fraction
+
+    def update_context_buffer(
+        self,
+        frame_power: np.ndarray,
+        is_voiced:   bool,
+        is_sibilant: bool,
+    ) -> None:
+        """Accumulate voiced non-sibilant frames into the N1/N2 context buffer."""
+        if is_voiced and not is_sibilant:
+            self._context_buffer.append(frame_power.copy())
 
     def update_ema(
         self,
@@ -369,9 +446,22 @@ class SibilanceDetector:
         is_voiced:   bool,
         is_sibilant: bool,
     ) -> None:
-        """Update the long-term reference on voiced, non-sibilant frames."""
+        """Update the long-term reference on voiced, non-sibilant frames.
+
+        Contamination guard: skip updates where the frame's in-band energy
+        deviates more than 15 dB from the current reference. Prevents
+        misclassified sibilant frames or silence frames from drifting the EMA.
+        """
         if not (is_voiced and not is_sibilant):
             return
+        if (self.long_term_power is not None
+                and self.sibilant_mask is not None
+                and self.sibilant_mask.any()):
+            cur_mean = np.mean(frame_power[self.sibilant_mask])
+            ref_mean = np.mean(self.long_term_power[self.sibilant_mask])
+            ratio_db = abs(10.0 * np.log10((cur_mean + 1e-10) / (ref_mean + 1e-10)))
+            if ratio_db > 15.0:
+                return  # skip — frame is too far from reference to be a safe update
         if self.long_term_power is None:
             self.long_term_power = frame_power.copy()
         else:
@@ -388,7 +478,8 @@ class SibilanceDetector:
         f0_for_frame: float = None,
     ) -> bool:
         """
-        Full per-frame pipeline: rolling F0 update -> detection -> EMA update.
+        Full per-frame pipeline: rolling F0 update -> detection -> EMA update
+        -> context buffer update.
 
         Returns True when the frame is classified as sibilant.
         """
@@ -396,6 +487,7 @@ class SibilanceDetector:
         is_sibilant = self.detect(magnitude) if is_voiced else False
         frame_power = magnitude ** 2
         self.update_ema(frame_power, is_voiced, is_sibilant)
+        self.update_context_buffer(frame_power, is_voiced, is_sibilant)
         return is_sibilant
 
 
@@ -461,6 +553,7 @@ def analyze_sibilance_events(
     # detector below and to the empty-audio guard a few lines down.
     resolved        = resolve_params(params)
     min_duration_ms = float(resolved.get("min_duration_ms", 0.0) or 0.0)
+    gap_merge_ms    = float(resolved.get("gap_merge_ms",    0.0) or 0.0)
 
     detector = SibilanceDetector(
         sample_rate=sample_rate,
@@ -493,6 +586,7 @@ def analyze_sibilance_events(
             hop_length       = hop_length,
             audio            = audio,
             min_duration_ms  = min_duration_ms,
+            gap_merge_ms     = gap_merge_ms,
         )
 
     pad_mode = "reflect" if n_samples > pad else "edge"
@@ -546,6 +640,7 @@ def analyze_sibilance_events(
         hop_length       = hop_length,
         audio            = audio,
         min_duration_ms  = min_duration_ms,
+        gap_merge_ms     = gap_merge_ms,
     )
 
     logger.info(
