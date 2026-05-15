@@ -321,7 +321,10 @@ class SibilanceDetector:
         self.voiced_frame_count = 0
 
         # N1/N2 context buffer state (Condition 3 — Gonzalez & Brookes 2012).
-        # Rolling buffer of voiced non-sibilant per-bin power spectra (~65 ms).
+        # Rolling buffer of recent voiced per-bin power spectra (~65 ms).
+        # All voiced frames are accepted regardless of sibilance classification
+        # so the reference tracks the live signal without circular dependency on
+        # the detection result (see update_context_buffer for rationale).
         self._context_buffer_len = max(1, int(0.065 * sample_rate / hop_length))
         self._context_buffer     = deque(maxlen=self._context_buffer_len)
         self._context_min_fill   = max(1, (self._context_buffer_len + 1) // 2)
@@ -414,10 +417,10 @@ class SibilanceDetector:
         """
         Condition 3: per-bin contextual excess (Gonzalez & Brookes 2012).
 
-        Uses a short rolling buffer of recent voiced non-sibilant frames as
-        the local noise-floor reference (N1/N2 context window). Requires a
-        minimum fraction of sibilant-band bins to show excess above the
-        threshold. Fires only after the context buffer is at least half-full.
+        Uses a short rolling buffer of recent voiced frames as the local
+        noise-floor reference (N1/N2 context window). Requires a minimum
+        fraction of sibilant-band bins to show excess above the threshold.
+        Fires only after the context buffer is at least half-full.
         """
         if (self.sibilant_mask is None
                 or not self.sibilant_mask.any()
@@ -439,25 +442,34 @@ class SibilanceDetector:
         self,
         frame_power: np.ndarray,
         is_voiced:   bool,
-        is_sibilant: bool,
     ) -> None:
-        """Accumulate voiced non-sibilant frames into the N1/N2 context buffer."""
-        if is_voiced and not is_sibilant:
+        """Accumulate voiced frames into the N1/N2 context buffer.
+
+        Sibilant frames are included. Gating updates on the detection result
+        created a circular dependency: Condition 3 firing → buffer freezes →
+        frozen reference keeps Condition 3 firing → multi-second false events.
+        Sibilants are <15% of voiced time and the 65 ms rolling window dilutes
+        any single frame, so the contamination cost is negligible.
+        """
+        if is_voiced:
             self._context_buffer.append(frame_power.copy())
 
     def update_ema(
         self,
         frame_power: np.ndarray,
         is_voiced:   bool,
-        is_sibilant: bool,
     ) -> None:
-        """Update the long-term reference on voiced, non-sibilant frames.
+        """Update the long-term EMA reference on all voiced frames.
 
-        Contamination guard: skip updates where the frame's in-band energy
-        deviates more than 15 dB from the current reference. Prevents
-        misclassified sibilant frames or silence frames from drifting the EMA.
+        Sibilant frames are included. The 15 dB contamination guard below
+        already protects against genuinely pathological frames (silence
+        misclassified as voiced, impulse noise, clipping). Gating on the
+        detection result as well created the same circular dependency as the
+        context buffer; the slow 300 ms time constant means any sibilant
+        contamination moves the reference by well under 1 dB at realistic
+        sibilant densities (~10-15% of voiced time).
         """
-        if not (is_voiced and not is_sibilant):
+        if not is_voiced:
             return
         if (self.long_term_power is not None
                 and self.sibilant_mask is not None
@@ -492,8 +504,8 @@ class SibilanceDetector:
         self.update_rolling_f0(f0_for_frame, is_voiced)
         is_sibilant = self.detect(magnitude) if is_voiced else False
         frame_power = magnitude ** 2
-        self.update_ema(frame_power, is_voiced, is_sibilant)
-        self.update_context_buffer(frame_power, is_voiced, is_sibilant)
+        self.update_ema(frame_power, is_voiced)
+        self.update_context_buffer(frame_power, is_voiced)
         return is_sibilant
 
 
