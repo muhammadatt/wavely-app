@@ -43,6 +43,11 @@ FRAME_SIZE           = 2048
 HOP_SIZE             = 512
 N_FFT                = 4096
 MIN_VOICED_FRAMES    = 50
+# Upper bound on frames fed to the cepstral mean. The averaged envelope is
+# robust at the "hundreds of frames" scale the spec assumes; beyond this we
+# stride evenly across the file rather than analysing every window, so a long
+# upload does not drive hundreds of thousands of FFTs.
+MAX_ANALYSIS_FRAMES  = 2000
 CONTEXT_OCTAVES      = 0.4
 MERGE_OCTAVES        = 0.33
 NATS_TO_DB           = 10.0 / math.log(10.0)
@@ -270,9 +275,18 @@ def merge_bands(bands):
 
 
 def _combine(b1, b2):
-    center  = math.sqrt(b1["center_hz"] * b2["center_hz"])
-    cut_lim = min(b1["cut_limit"], b2["cut_limit"])
-    boost_lim = min(b1["boost_limit"], b2["boost_limit"])
+    center = math.sqrt(b1["center_hz"] * b2["center_hz"])
+    # A region constrains only the direction it corrects — a hump region has no
+    # boost limit, a dip region no cut limit — and stores 0.0 for the other.
+    # Ignore those zeros when combining: otherwise merging a boost-only band
+    # with a cut-only band (e.g. body_warmth + mud) would clamp the net
+    # correction to zero. The all-zero direction can never be the net direction
+    # (that would require every contributor to push the opposite way), so the
+    # 0.0 fallback can never wrongly clamp a real correction.
+    cuts   = [b["cut_limit"]   for b in (b1, b2) if b["cut_limit"]   > 0]
+    boosts = [b["boost_limit"] for b in (b1, b2) if b["boost_limit"] > 0]
+    cut_lim   = min(cuts)   if cuts   else 0.0
+    boost_lim = min(boosts) if boosts else 0.0
     gain = b1["gain_db"] + b2["gain_db"]
     capped_gain = float(np.clip(gain, -cut_lim, boost_lim))
     if abs(capped_gain - gain) > 1e-6:
@@ -299,14 +313,24 @@ def _combine(b1, b2):
 # ── Frame collection ──────────────────────────────────────────────────────────
 
 def collect_voiced_frames(audio, voiced_mask):
-    """Collect FRAME_SIZE windows at HOP_SIZE whose centre sample is voiced."""
-    frames = []
+    """
+    Collect FRAME_SIZE windows at HOP_SIZE whose centre sample is voiced.
+
+    When more than MAX_ANALYSIS_FRAMES windows qualify, an evenly-spaced subset
+    is taken so the mean envelope still samples the whole file without paying
+    the FFT cost of every window on long uploads.
+    """
     half   = FRAME_SIZE // 2
-    for start in range(0, len(audio) - FRAME_SIZE + 1, HOP_SIZE):
-        center = start + half
-        if voiced_mask is None or (center < len(voiced_mask) and voiced_mask[center]):
-            frames.append(audio[start:start + FRAME_SIZE])
-    return frames
+    starts = [
+        start
+        for start in range(0, len(audio) - FRAME_SIZE + 1, HOP_SIZE)
+        if voiced_mask is None
+        or (start + half < len(voiced_mask) and voiced_mask[start + half])
+    ]
+    if len(starts) > MAX_ANALYSIS_FRAMES:
+        idx    = np.linspace(0, len(starts) - 1, MAX_ANALYSIS_FRAMES).astype(int)
+        starts = [starts[i] for i in idx]
+    return [audio[s:s + FRAME_SIZE] for s in starts]
 
 
 # ── Main analysis ─────────────────────────────────────────────────────────────

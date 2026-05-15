@@ -565,10 +565,10 @@ export async function correctiveEQ(ctx) {
 }
 
 // ── Stage: Resonance Suppressor ───────────────────────────────────────────────
-// Soothe2-inspired dynamic spectral resonance suppressor. Runs after
-// correctiveEQ (localised tonal corrections already applied) and before normalize.
-// Only included in STANDARD_PIPELINE — excluded from noise_eraser and
-// clearervoice_eraser by pipeline omission.
+// Soothe2-inspired dynamic spectral resonance suppressor. In STANDARD_PIPELINE
+// it runs immediately before correctiveEQ (and before normalize). Only included
+// in STANDARD_PIPELINE — excluded from noise_eraser and clearervoice_eraser by
+// pipeline omission.
 
 export async function resonanceSuppressor(ctx) {
   const outPath = ctx.tmp('.wav')
