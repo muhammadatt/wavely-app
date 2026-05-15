@@ -136,11 +136,11 @@ export const PRESETS = {
     },
     saturation: {
       drive: 1.8,
-      wetDry: 0.5,
+      wetDry: 0.03,
       bias: 0.08,
       lowCrossover: 500,
       midCrossover: 3000,
-      softness: 0.4,
+      softness: 0.8,
     },
     compression: [
       // Pass 1: Transient Catcher (Peak Control)
