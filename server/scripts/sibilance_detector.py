@@ -172,7 +172,7 @@ def build_events_map(
     # into a single event. Prevents long fricatives from fragmenting into
     # multiple short events due to 1-2 frame dips below threshold.
     if gap_merge_ms > 0 and len(events) > 1:
-        gap_merge_frames = max(1, int((gap_merge_ms / 1000.0) / frame_period_sec))
+        gap_merge_frames = int((gap_merge_ms / 1000.0) / frame_period_sec)
         merged = [events[0]]
         for s, e in events[1:]:
             prev_s, prev_e = merged[-1]
@@ -181,6 +181,11 @@ def build_events_map(
             else:
                 merged.append((s, e))
         events = merged
+        # Regenerate sibilant_indices from merged spans so sibilantFrameIndices
+        # stays consistent with the event list (gap frames are included).
+        sibilant_indices = []
+        for s, e in events:
+            sibilant_indices.extend(range(int(s), int(e) + 1))
 
     n_samples = int(audio.shape[0]) if audio is not None else None
 
@@ -319,7 +324,7 @@ class SibilanceDetector:
         # Rolling buffer of voiced non-sibilant per-bin power spectra (~65 ms).
         self._context_buffer_len = max(1, int(0.065 * sample_rate / hop_length))
         self._context_buffer     = deque(maxlen=self._context_buffer_len)
-        self._context_min_fill   = max(1, self._context_buffer_len // 2)
+        self._context_min_fill   = max(1, (self._context_buffer_len + 1) // 2)
 
     @staticmethod
     def _time_to_coeff(time_ms: float, frame_period_ms: float) -> float:
@@ -456,7 +461,8 @@ class SibilanceDetector:
             return
         if (self.long_term_power is not None
                 and self.sibilant_mask is not None
-                and self.sibilant_mask.any()):
+                and self.sibilant_mask.any()
+                and self.voiced_frame_count >= self.params["warmup_frames"]):
             cur_mean = np.mean(frame_power[self.sibilant_mask])
             ref_mean = np.mean(self.long_term_power[self.sibilant_mask])
             ratio_db = abs(10.0 * np.log10((cur_mean + 1e-10) / (ref_mean + 1e-10)))
