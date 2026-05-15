@@ -8,7 +8,7 @@
  *   - Locate the quietest continuous silence segment (used for room tone)
  *
  * Returns a silenceAnalysis object reused by:
- *   - enhancementEQ (voiced frames for spectral analysis)
+ *   - correctiveEQ (voiced frames for cepstral envelope analysis)
  *   - roomTone (quietest silence segment position)
  *   - measure (voiced-frame RMS for normalization)
  *   - riskAssessment (breath/plosive detection)

@@ -156,7 +156,7 @@ function buildReport(ctx) {
       ...(results.humEQ && { hum_eq: formatHumEqResult(results.humEQ) }),
       ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
       ...(results.dereverb       && { dereverberation:   formatDereverbResult(results.dereverb) }),
-      ...(results.enhancementEQ  && { enhancement_eq:    formatEqResult(results.enhancementEQ) }),
+      ...(results.correctiveEQ   && { corrective_eq:     formatCorrectiveEqResult(results.correctiveEQ) }),
       ...(results.airBoost       && { air_boost:          formatAirBoostResult(results.airBoost) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
@@ -240,16 +240,18 @@ function formatDereverbResult(r) {
   }
 }
 
-function formatEqResult(r) {
+// Stage 3a Corrective EQ — concise region-name summary. Raw dB deviations and
+// Q factors are intentionally not surfaced (meaningless without engineering
+// context, per the spec's Processing Report section).
+function formatCorrectiveEqResult(r) {
   if (!r?.applied) return null
   return {
-    profile:   r.profile,
-    warmth:    bandReport(r.bands.warmth),
-    mud:       bandReport(r.bands.mud),
-    clarity:   bandReport(r.bands.clarity),
-    upper_mid: bandReport(r.bands.upper_mid),
-    presence:  bandReport(r.bands.presence),
-    air:       bandReport(r.bands.air),
+    voice_type:  r.voice_type,
+    corrections: (r.bands ?? []).map(b => ({
+      region:    b.region,
+      freq_hz:   b.freq_hz,
+      direction: b.gain_db < 0 ? 'reduced' : 'boosted',
+    })),
   }
 }
 
@@ -474,11 +476,6 @@ function formatResonanceSuppressorResult(r) {
     spike_frames:      r.spike_frames      ?? null,
     artifact_risk:     r.artifact_risk     ?? false,
   }
-}
-
-function bandReport(band) {
-  if (!band?.applied) return { applied: false }
-  return { applied: true, freq_hz: band.freq_hz, gain_db: band.gain_db }
 }
 
 /**

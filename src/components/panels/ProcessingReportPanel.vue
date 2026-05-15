@@ -104,7 +104,9 @@ const processingChain = computed(() => {
   if (applied.noise_reduction?.applied) {
     steps.push(`Noise reduction: ${applied.noise_reduction.model} (Tier ${applied.noise_reduction.tier})`)
   }
-  if (applied.enhancement_eq) steps.push('Enhancement EQ')
+  if (applied.corrective_eq?.corrections?.length) {
+    steps.push(`Corrective EQ (${applied.corrective_eq.corrections.length} band${applied.corrective_eq.corrections.length === 1 ? '' : 's'})`)
+  }
   if (applied.de_esser?.applied) steps.push(`De-esser (${applied.de_esser.max_reduction_db} dB max)`)
   if (applied.compression?.applied) steps.push('Compression')
   if (applied.normalization_gain_db != null) {
