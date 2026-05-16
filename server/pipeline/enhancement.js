@@ -12,11 +12,11 @@
  *   LAVASR_MODEL_PATH  — HuggingFace Hub ID or local path (default: YatharthS/LavaSR)
  */
 
-import { spawn }         from 'child_process'
-import { fileURLToPath } from 'url'
-import { writeFile, rm } from 'fs/promises'
-import os                from 'os'
-import path              from 'path'
+import { spawn }               from 'child_process'
+import { fileURLToPath }       from 'url'
+import { writeFile, readFile, rm } from 'fs/promises'
+import os                     from 'os'
+import path                   from 'path'
 import { tempPath }      from '../lib/ffmpeg.js'
 import { spawnPython, spawnPythonCapture, DEVICE, PYTHON as SHARED_PYTHON } from './spawnPython.js'
 import { PRESETS }       from '../presets.js'
@@ -381,22 +381,35 @@ export async function applyBreathReduction(inputPath, outputPath, presetId, fram
 // ── Room Presence ─────────────────────────────────────────────────────────────
 
 /**
- * Convolution reverb with a synthetic IR — adds subtle acoustic space.
+ * Convolution reverb — IR-based or synthetic.
  *
  * @param {string} inputPath   32-bit float WAV at 44.1 kHz
  * @param {string} outputPath  Pre-allocated output path (ctx.tmp('.wav'))
  * @param {object} [params]
+ * @param {string} [params.irPath]            Path to .wir/.wav IR file; omit for synthetic IR
  * @param {number} [params.wet=0.08]          Wet mix fraction (0.0–0.3)
  * @param {number} [params.rt60Ms=80]         RT60 decay time in ms (20–200)
  * @param {number} [params.preDelayMs=1.5]    Pre-delay in ms (0–5)
- * @param {number} [params.diffusion=0.7]     Tail density/warmth (0.0–1.0)
+ * @param {number} [params.earlyReflections=2] Onset ramp (1=sharp, 5=gradual)
+ * @param {number} [params.diffusion=0.7]     Tail density/warmth for synthetic IR (0.0–1.0)
  * @returns {Promise<void>}
  */
-export function runRoomPresence(inputPath, outputPath, params = {}) {
-  const args = ['--input', inputPath, '--output', outputPath]
-  if (params.wet        != null) args.push('--wet',          String(params.wet))
-  if (params.rt60Ms     != null) args.push('--rt60-ms',      String(params.rt60Ms))
-  if (params.preDelayMs != null) args.push('--pre-delay-ms', String(params.preDelayMs))
+export async function runRoomPresence(inputPath, outputPath, params = {}) {
+  const resultPath = tempPath('.json')
+  const args = ['--input', inputPath, '--output', outputPath, '--result-path', resultPath]
+  if (params.irPath           != null) args.push('--ir-path',           String(params.irPath))
+  if (params.wet              != null) args.push('--wet',               String(params.wet))
+  if (params.rt60Ms           != null) args.push('--rt60-ms',           String(params.rt60Ms))
+  if (params.preDelayMs       != null) args.push('--pre-delay-ms',      String(params.preDelayMs))
   if (params.earlyReflections != null) args.push('--early-reflections', String(params.earlyReflections))
-  return spawnPython(ROOM_PRESENCE_SCRIPT, args, 'RoomPresence')
+  if (params.diffusion        != null) args.push('--diffusion',         String(params.diffusion))
+  await spawnPython(ROOM_PRESENCE_SCRIPT, args, 'RoomPresence')
+  try {
+    const json = await readFile(resultPath, 'utf8')
+    return JSON.parse(json)
+  } catch {
+    return {}
+  } finally {
+    rm(resultPath, { force: true }).catch(() => {})
+  }
 }

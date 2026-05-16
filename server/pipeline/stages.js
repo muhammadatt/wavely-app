@@ -1038,12 +1038,16 @@ export async function roomPresence(ctx) {
   const rt60Ms           = cfg.rt60Ms            ?? 80
   const preDelayMs       = cfg.preDelayMs        ?? 1.5
   const earlyReflections = cfg.early_reflections ?? 2
+  const diffusion        = cfg.diffusion         ?? 0.7
+  const irPath           = cfg.ir_path           ?? null
 
-  const outPath = ctx.tmp('.wav')
-  await runRoomPresence(ctx.currentPath, outPath, { wet, rt60Ms, preDelayMs, earlyReflections })
+  const outPath    = ctx.tmp('.wav')
+  const irResult   = await runRoomPresence(ctx.currentPath, outPath, { irPath, wet, rt60Ms, preDelayMs, earlyReflections, diffusion })
+  const irSource   = irResult.irSource ?? (irPath ? 'file' : 'synthetic')
+  const irFile     = irResult.irFile   ?? null
   ctx.currentPath          = outPath
-  ctx.results.roomPresence = { applied: true, wet, rt60Ms, preDelayMs, earlyReflections }
-  ctx.log(`[room-presence] applied wet=${wet} rt60=${rt60Ms}ms pre_delay=${preDelayMs}ms early_reflections=${earlyReflections}`)
+  ctx.results.roomPresence = { applied: true, irSource, irFile, irPath, wet, rt60Ms, preDelayMs, earlyReflections, diffusion }
+  ctx.log(`[room-presence] applied wet=${wet} rt60=${rt60Ms}ms pre_delay=${preDelayMs}ms early_reflections=${earlyReflections} diffusion=${diffusion} ir_source=${irSource}${irFile ? ` ir_file=${irFile}` : ''}`)
 }
 
 // ── Stage: Normalize ──────────────────────────────────────────────────────────

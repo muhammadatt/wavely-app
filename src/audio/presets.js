@@ -321,12 +321,15 @@ export const PRESETS = {
       },
     },
     roomPresence: {
-      enabled: false,
-      wet: 0.10, // 0.12 - reverb tail sits ~17dB below direct
-      rt60Ms: 100, // presence without going washy; echoes after 200 - 250ms
-      preDelayMs: 10.0, // slight punch through before reverb onset
-      early_reflections: 2
-    },
+      enabled: true,
+      //ir_path: "../ir/HHB1.wav",   
+      ir_path: "../ir/19_CrystalVocal.wav",  
+      wet: 0.20,                            
+      rt60Ms: 100,                          //hard trim ceiling on IR tail
+      preDelayMs: 10.0,                     //zero-pad before IR onset
+      early_reflections: 2,                 //onset ramp (1=sharp, 5=gradual)
+      normalize_ir: true,                   //normalize IR peak to 0dBFS before use
+    }
   },
 
   podcast_ready: {
