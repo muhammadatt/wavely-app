@@ -225,8 +225,15 @@ def apply_room_presence_ir(
     rms_rev = np.sqrt(np.mean(reverb ** 2)) + 1e-9
     reverb *= rms_dry / rms_rev
 
-    # Wet/dry blend
-    return (1.0 - wet) * audio + wet * reverb
+    # Constant-power (equal-power) crossfade.
+    # A linear blend — (1-wet)*dry + wet*reverb — loses loudness at mid values
+    # because dry and reverb are never fully coherent: convolution time-smears
+    # the signal, so the two arms partially cancel instead of summing to full
+    # power.  cos/sin guarantees cos²θ + sin²θ = 1 at every wet value.
+    angle   = wet * (np.pi / 2.0)
+    dry_gain = np.cos(angle)
+    wet_gain = np.sin(angle)
+    return dry_gain * audio + wet_gain * reverb
 
 
 # ---------------------------------------------------------------------------

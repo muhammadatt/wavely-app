@@ -249,11 +249,11 @@ export const PRESETS = {
         resonanceSuppressor: [
           {
             depth: 0.67,
-            sharpness: 0.6,
-            selectivity: 8,
-            attack_ms: 25.0,
-            release_ms: 100.0,
-            max_reduction_db: 12.0,
+            sharpness: 0.5,
+            selectivity: 5,
+            attack_ms: 5.0,
+            release_ms: 5.0,
+            max_reduction_db: 24.0,
             freq_floor_hz: 80.0,
             freq_ceil_hz: 20000.0,
             mode: "soft",
