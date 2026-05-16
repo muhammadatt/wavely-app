@@ -14,12 +14,22 @@
 
 import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
-import { PRESET_PIPELINES } from './presetPipelines.js'
 import * as allStages from './stages.js'
 import { createLogger } from './logger.js'
 
 // Stage name → function registry, built once at module load.
 const STAGE_REGISTRY = allStages
+
+// Config key name → stage function name, for cases where they differ.
+const STAGE_FOR_CONFIG_KEY = {
+  breathReducer:       'breathReduce',
+  clickRemover:        'clickRemove',
+  compression:         'compress',
+  parallelCompression: 'parallelCompress',
+  autoLeveler:         'autoLevel',
+  clipGainDeEsser:     'clipGainDeEss',
+  deEsser:             'deEss',
+}
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -42,26 +52,34 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
   const outputProfile = OUTPUT_PROFILES[outputProfileId]
   if (!outputProfile) throw new Error(`Unknown output profile: ${outputProfileId}`)
 
-  const pipeline = PRESET_PIPELINES[presetId]
-  if (!pipeline) throw new Error(`No pipeline defined for preset: ${presetId}`)
+  const pipeline = preset.stages
+  if (!pipeline) throw new Error(`No stages defined for preset: ${presetId}`)
 
   const ctx    = createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile })
   const logger = await createLogger(preset, outputProfile, originalName, inputPath)
 
   try {
     for (const entry of pipeline) {
-      const { stage: stageName, ...presetOverride } =
-        typeof entry === 'string' ? { stage: entry } : entry
+      let stageName, configKey, inlineConfig
+      if (typeof entry === 'string') {
+        stageName    = entry
+        configKey    = null
+        inlineConfig = null
+      } else {
+        ;[configKey] = Object.keys(entry)
+        inlineConfig  = entry[configKey]
+        stageName    = STAGE_FOR_CONFIG_KEY[configKey] ?? configKey
+      }
 
       const stageFn = STAGE_REGISTRY[stageName]
-      if (!stageFn) throw new Error(`[pipeline] Unknown stage: "${stageName}"`)
+      if (!stageFn) throw new Error(`[pipeline] Unknown stage: "${configKey ?? stageName}"`)
 
       const prevPath      = ctx.currentPath
       const resultsBefore = { ...ctx.results }
       const stageStart    = Date.now()
 
       const origPreset = ctx.preset
-      if (Object.keys(presetOverride).length) ctx.preset = { ...ctx.preset, ...presetOverride }
+      if (inlineConfig != null) ctx.preset = { ...ctx.preset, [configKey]: inlineConfig }
       await stageFn(ctx)
       ctx.preset = origPreset
 

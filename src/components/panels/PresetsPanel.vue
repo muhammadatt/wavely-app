@@ -113,9 +113,11 @@ const presetIcons = {
 
 function compressionLabel(preset) {
   if (!preset) return ''
-  if (preset.compression.mode === 'none') return 'None'
-  const { mode, ratio } = preset.compression
-  return `${ratio}:1 ${mode === 'conditional' ? '(conditional)' : '(always-on)'}`
+  const c = preset.compression
+  if (!c) return 'Conditional'
+  if (Array.isArray(c)) return `${c.length}-pass`
+  if (c.mode === 'none') return 'None'
+  return c.mode === 'conditional' ? 'Conditional' : 'Always-on'
 }
 
 function channelLabel(preset) {
