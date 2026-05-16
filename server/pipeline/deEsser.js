@@ -86,7 +86,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, preset, frameAnalys
   const ratio = deEsserConfig.ratio ?? 6
 
   console.log(
-    `[DeEsser] Starting: preset=${presetId} ` +
+    `[DeEsser] Starting: preset=${preset?.id} ` +
     `trigger=${deEsserConfig.trigger}dB ` +
     `maxReduction=${deEsserConfig.maxReduction}dB ` +
     `ratio=${ratio} ` +
@@ -98,7 +98,7 @@ export async function analyzeAndDeEss(inputPath, outputPath, preset, frameAnalys
     DE_ESSER_SCRIPT,
     '--input',         inputPath,
     '--output',        outputPath,
-    '--preset',        presetId,
+    '--preset',        preset?.id,
     '--trigger',       String(deEsserConfig.trigger),
     '--max-reduction', String(deEsserConfig.maxReduction),
     '--sensitivity',   deEsserConfig.sensitivity,

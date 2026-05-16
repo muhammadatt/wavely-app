@@ -37,7 +37,7 @@ const MIN_VOICED_FRAMES       = 50     // minimum frames for stable percentile e
  *
  * @param {string} inputPath   - 32-bit float WAV
  * @param {string} outputPath  - Output WAV path
- * @param {string} presetId
+ * @param {object} preset
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {CompressionResult}
  *

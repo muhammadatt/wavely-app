@@ -114,7 +114,7 @@ export async function applyParallelCompression(inputPath, outputPath, preset, fr
 
   // ── 4. Parallel de-esser config ──────────────────────────────────────────
   const { desserType, desserCenterFreqHz, desserThresholdDb } = resolveParallelDesserConfig(
-    presetId,
+    preset?.id,
     deEssResult,
     analysisCh,
     sampleRate,

@@ -194,7 +194,7 @@ export function runClickRemover(inputPath, outputPath, params = {}) {
  *
  * @param {string}        inputPath   32-bit float WAV at 44.1 kHz
  * @param {string}        outputPath  Pre-allocated output path (ctx.tmp('.wav'))
- * @param {string}        presetId    e.g. 'acx_audiobook'
+ * @param {object}        preset      - The preset object (ctx.preset); reads preset.resonanceSuppressor
  * @param {object[]|null} frames      ctx.results.metrics.frames — written to a temp
  *   JSON file for VAD gating. Pass null to suppress VAD gating (full-file mode).
  * @param {{ median: number, perFrame: number[], nFft: number, hopLength: number }|null} f0Contour
@@ -346,7 +346,7 @@ function runResonanceScript(args) {
  *
  * @param {string}        inputPath   32-bit float WAV at 44.1 kHz
  * @param {string}        outputPath  Pre-allocated output path (ctx.tmp('.wav'))
- * @param {string}        presetId    e.g. 'acx_audiobook'
+ * @param {object}        preset      - The preset object (ctx.preset); reads preset.breathReducer
  * @param {object[]|null} frames      ctx.results.metrics.frames — VAD frame list
  *   for voiced-region exclusion. Pass null for full-file detection.
  * @returns {Promise<object>}  { applied, breath_events, max_reduction_db, process_seconds }
