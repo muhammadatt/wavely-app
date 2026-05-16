@@ -14,8 +14,12 @@
 
 import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
-import { PIPELINES } from './pipelines.js'
+import { PRESET_PIPELINES } from './presetPipelines.js'
+import * as allStages from './stages.js'
 import { createLogger } from './logger.js'
+
+// Stage name → function registry, built once at module load.
+const STAGE_REGISTRY = allStages
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -38,31 +42,39 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
   const outputProfile = OUTPUT_PROFILES[outputProfileId]
   if (!outputProfile) throw new Error(`Unknown output profile: ${outputProfileId}`)
 
-  const pipeline = PIPELINES[presetId]
+  const pipeline = PRESET_PIPELINES[presetId]
   if (!pipeline) throw new Error(`No pipeline defined for preset: ${presetId}`)
 
   const ctx    = createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile })
   const logger = await createLogger(preset, outputProfile, originalName, inputPath)
 
   try {
-    for (const stage of pipeline) {
-      const prevPath        = ctx.currentPath
-      const resultsBefore   = { ...ctx.results }
-      const stageStart      = Date.now()
+    for (const entry of pipeline) {
+      const { stage: stageName, ...presetOverride } =
+        typeof entry === 'string' ? { stage: entry } : entry
 
-      await stage(ctx)
+      const stageFn = STAGE_REGISTRY[stageName]
+      if (!stageFn) throw new Error(`[pipeline] Unknown stage: "${stageName}"`)
+
+      const prevPath      = ctx.currentPath
+      const resultsBefore = { ...ctx.results }
+      const stageStart    = Date.now()
+
+      const origPreset = ctx.preset
+      if (Object.keys(presetOverride).length) ctx.preset = { ...ctx.preset, ...presetOverride }
+      await stageFn(ctx)
+      ctx.preset = origPreset
 
       const stageDuration = Date.now() - stageStart
       const audioChanged  = ctx.currentPath !== prevPath
 
       if (logger) {
-        // Collect the ctx.results keys that this stage added or updated.
-        const changedKeys = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
+        const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
         const stageResults = {}
         for (const key of changedKeys) stageResults[key] = ctx.results[key]
 
         await logger.logStep(
-          stage.name,
+          stageName,
           audioChanged ? ctx.currentPath : null,
           stageResults,
           stageDuration,

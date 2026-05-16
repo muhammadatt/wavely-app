@@ -19,7 +19,6 @@ import os                     from 'os'
 import path                   from 'path'
 import { tempPath }      from '../lib/ffmpeg.js'
 import { spawnPython, spawnPythonCapture, DEVICE, PYTHON as SHARED_PYTHON } from './spawnPython.js'
-import { PRESETS }       from '../presets.js'
 
 // Resonance suppressor allows its own Python override before falling back to
 // the shared SEPARATION_PYTHON, matching the original RESONANCE_PYTHON cascade.
@@ -195,7 +194,7 @@ export function runClickRemover(inputPath, outputPath, params = {}) {
  *
  * @param {string}        inputPath   32-bit float WAV at 44.1 kHz
  * @param {string}        outputPath  Pre-allocated output path (ctx.tmp('.wav'))
- * @param {string}        presetId    e.g. 'acx_audiobook'
+ * @param {object}        preset      - The preset object (ctx.preset); reads preset.resonanceSuppressor
  * @param {object[]|null} frames      ctx.results.metrics.frames — written to a temp
  *   JSON file for VAD gating. Pass null to suppress VAD gating (full-file mode).
  * @param {{ median: number, perFrame: number[], nFft: number, hopLength: number }|null} f0Contour
@@ -216,9 +215,9 @@ export function runClickRemover(inputPath, outputPath, params = {}) {
  *   null — passes without sibilant_only are unaffected regardless.
  * @returns {Promise<object>}  Result dict from resonance_suppressor_report_entry()
  */
-export async function applyResonanceSuppression(inputPath, outputPath, presetId, frames, f0Contour = null, eventsPath = null) {
+export async function applyResonanceSuppression(inputPath, outputPath, preset, frames, f0Contour = null, eventsPath = null) {
   console.log(
-    `[ResonanceSuppressor] Starting: preset=${presetId} | ` +
+    `[ResonanceSuppressor] Starting: preset=${preset?.id} | ` +
     `f0=${f0Contour ? `${f0Contour.median}Hz (contour, ${f0Contour.perFrame?.length} frames)` : 'none'} | ` +
     `sibilant_events=${eventsPath ? 'yes' : 'no'} | ` +
     `input=${inputPath}`,
@@ -233,7 +232,7 @@ export async function applyResonanceSuppression(inputPath, outputPath, presetId,
 
   // Sparse per-preset overrides from src/audio/presets.js. Anything not
   // present in this block inherits from DEFAULT_PARAMS in the Python script.
-  const overrides = PRESETS[presetId]?.resonanceSuppressor
+  const overrides = preset?.resonanceSuppressor
   let paramsPath = null
   if (overrides && Object.keys(overrides).length > 0) {
     paramsPath = tempPath('.json')
@@ -347,15 +346,15 @@ function runResonanceScript(args) {
  *
  * @param {string}        inputPath   32-bit float WAV at 44.1 kHz
  * @param {string}        outputPath  Pre-allocated output path (ctx.tmp('.wav'))
- * @param {string}        presetId    e.g. 'acx_audiobook'
+ * @param {object}        preset      - The preset object (ctx.preset); reads preset.breathReducer
  * @param {object[]|null} frames      ctx.results.metrics.frames — VAD frame list
  *   for voiced-region exclusion. Pass null for full-file detection.
  * @returns {Promise<object>}  { applied, breath_events, max_reduction_db, process_seconds }
  */
-export async function applyBreathReduction(inputPath, outputPath, presetId, frames) {
+export async function applyBreathReduction(inputPath, outputPath, preset, frames) {
   const args = ['--input', inputPath, '--output', outputPath]
 
-  const overrides = PRESETS[presetId]?.breathReducer
+  const overrides = preset?.breathReducer
   let paramsPath = null
   if (overrides && Object.keys(overrides).length > 0) {
     paramsPath = tempPath('.json')

@@ -615,7 +615,7 @@ export async function resonanceSuppressor(ctx) {
     eventsPath = sibResult?.path ?? null
   }
 
-  const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.presetId, frames, f0Contour, eventsPath)
+  const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.preset, frames, f0Contour, eventsPath)
   if (result.applied) ctx.currentPath = outPath
   ctx.results.resonanceSuppressor = result
   await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
@@ -645,7 +645,7 @@ export async function breathReduce(ctx) {
 
   const outPath = ctx.tmp('.wav')
   const frames  = ctx.results.metrics?.frames ?? null
-  const result  = await applyBreathReduction(ctx.currentPath, outPath, ctx.presetId, frames)
+  const result  = await applyBreathReduction(ctx.currentPath, outPath, ctx.preset, frames)
   if (result.applied) ctx.currentPath = outPath
   ctx.results.breathReducer = result
   ctx.log(
@@ -739,7 +739,7 @@ export async function deEss(ctx) {
   const deEssResult = await analyzeAndDeEss(
     ctx.currentPath,
     deEssPath,
-    ctx.presetId,
+    ctx.preset,
     ctx.results.metrics,
     null,
   )
@@ -840,7 +840,7 @@ export async function autoLevel(ctx) {
   const result = await applyAutoLeveler(
     ctx.currentPath,
     levelerPath,
-    ctx.presetId,
+    ctx.preset,
     ctx.results.metrics,
   )
   ctx.currentPath         = levelerPath
@@ -867,7 +867,7 @@ export async function compress(ctx) {
   const compressionResult = await applyCompression(
     ctx.currentPath,
     compPath,
-    ctx.presetId,
+    ctx.preset,
     ctx.results.metrics,
   )
   ctx.currentPath        = compPath
@@ -899,7 +899,7 @@ export async function parallelCompress(ctx) {
   const result = await applyParallelCompression(
     ctx.currentPath,
     pcPath,
-    ctx.presetId,
+    ctx.preset,
     ctx.results.metrics,
     ctx.results.deEss ?? null,
   )
@@ -928,7 +928,7 @@ export async function vocalExpander(ctx) {
   const result  = await applyVocalExpander(
     ctx.currentPath,
     outPath,
-    ctx.presetId,
+    ctx.preset,
     ctx.results.metrics,
   )
   if (result.applied) ctx.currentPath = outPath
