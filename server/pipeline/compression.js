@@ -24,7 +24,6 @@
 
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels } from './wavWriter.js'
-import { PRESETS } from '../presets.js'
 
 const KNEE_WIDTH_DB           = 4      // soft knee width, all presets
 const SKIP_MARGIN_DB          = 0.5    // skip if within this margin of target
@@ -62,10 +61,7 @@ const MIN_VOICED_FRAMES       = 50     // minimum frames for stable percentile e
  * @property {number|null} pOutDbfs              - Target output peak level (pOut) in dBFS (when applied)
  * @property {Array|null} passes                 - Array of individual compression pass results for serial compression
  */
-export async function applyCompression(inputPath, outputPath, presetId, frameAnalysis) {
-  const preset = PRESETS[presetId]
-  if (!preset) throw new Error(`Unknown preset: ${presetId}`)
-
+export async function applyCompression(inputPath, outputPath, preset, frameAnalysis) {
   const presetComp = preset?.compression
 
   if (!presetComp) {

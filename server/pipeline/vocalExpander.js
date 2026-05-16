@@ -32,7 +32,6 @@
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels }   from './wavWriter.js'
 
-import { PRESETS }            from '../presets.js'
 
 const SAMPLE_RATE      = 44100
 const DET_FRAME_S      = 0.010                                  // 10 ms detection frames
@@ -51,7 +50,7 @@ const ATTENUATION_DETECT_DB = 1 // minimum attenuation to count a frame as "expa
  *
  * @param {string} inputPath    - 32-bit float WAV (internal format)
  * @param {string} outputPath   - Output WAV path
- * @param {string} presetId
+ * @param {object} preset     - The preset object (ctx.preset); reads preset.vocalExpander
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  *   Pre-stage frame analysis (VAD labels + pre-compression silence energy).
  *   Provided via ctx.results.metrics from remeasureFramesPostNr.
@@ -76,8 +75,8 @@ const ATTENUATION_DETECT_DB = 1 // minimum attenuation to count a frame as "expa
  * @property {number|null} maxVoicedFrameAttenuationDb
  * @property {boolean} overExpansionFlag
  */
-export async function applyVocalExpander(inputPath, outputPath, presetId, frameAnalysis) {
-  const config = PRESETS[presetId]?.vocalExpander
+export async function applyVocalExpander(inputPath, outputPath, preset, frameAnalysis) {
+  const config = preset?.vocalExpander
 
   if (!config || config.enabled !== true) {
     await copyThrough(inputPath, outputPath)

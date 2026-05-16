@@ -32,7 +32,6 @@ import os                         from 'os'
 import path                       from 'path'
 import { tempPath }               from '../lib/ffmpeg.js'
 import { PYTHON as SHARED_PYTHON } from './spawnPython.js'
-import { PRESETS }                from '../presets.js'
 
 const DE_ESSER_PYTHON = process.env.DE_ESSER_PYTHON ?? SHARED_PYTHON
 const NUM_THREADS     = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
@@ -72,11 +71,8 @@ const DE_ESSER_SCRIPT = path.join(SCRIPTS_DIR, 'de_esser.py')
  * @property {number} [crossoverHighHz]    - Upper edge of the attenuated sibilant band (air preserved above)
  * @property {Array<{startSec:number, endSec:number, durationMs:number, avgReductionDb:number}>} treatedEvents
  */
-export async function analyzeAndDeEss(inputPath, outputPath, presetId, frameAnalysis, eventsJsonPath = null) {
-  const preset = PRESETS[presetId]
-  if (!preset) throw new Error(`Unknown preset: ${presetId}`)
-
-  const deEsserConfig = preset.deEsser
+export async function analyzeAndDeEss(inputPath, outputPath, preset, frameAnalysis, eventsJsonPath = null) {
+  const deEsserConfig = preset?.deEsser
 
   // Skip the spawn entirely when the preset disables the de-esser. Mirrors
   // the legacy JS path's noResult shape and avoids touching the WAV.

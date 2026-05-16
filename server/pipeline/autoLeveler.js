@@ -24,7 +24,7 @@
 
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels }   from './wavWriter.js'
-import { PRESETS }            from '../presets.js'
+
 
 const HOP_MS       = 100
 const FRAME_MS     = 25   // Silero VAD frame duration (matches frameAnalysis.js FRAME_DURATION_S * 1000)
@@ -583,12 +583,6 @@ function computeClipStd(clips, kwSamples) {
   return weightedStd(lufs, durs)
 }
 
-// ─── Preset config lookup ─────────────────────────────────────────────────────
-
-function getAutoLevelerConfig(presetId) {
-  return PRESETS[presetId]?.autoLeveler ?? null
-}
-
 // ─── Main API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -596,17 +590,12 @@ function getAutoLevelerConfig(presetId) {
  *
  * @param {string} inputPath   - 32-bit float WAV
  * @param {string} outputPath  - Output WAV path
- * @param {string} presetId
+ * @param {object} preset      - The preset object (ctx.preset); reads preset.autoLeveler
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {AutoLevelerResult}
  */
-export async function applyAutoLeveler(inputPath, outputPath, presetId, frameAnalysis) {
-  if (presetId === 'noise_eraser') {
-    await copyThrough(inputPath, outputPath)
-    return { applied: false, skipped_reason: 'preset_excluded' }
-  }
-
-  const config = getAutoLevelerConfig(presetId)
+export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnalysis) {
+  const config = preset?.autoLeveler ?? null
   if (!config) {
     await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'preset_excluded' }

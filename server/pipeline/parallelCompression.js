@@ -20,7 +20,7 @@
 
 import { readWavAllChannels } from './wavReader.js'
 import { writeWavChannels }   from './wavWriter.js'
-import { PRESETS }            from '../presets.js'
+
 
 const SAMPLE_RATE = 44100
 
@@ -81,11 +81,8 @@ const PARALLEL_DESSER_THRESHOLD_OFFSET_DB = 2
  * @property {boolean} vadGateApplied
  * @property {number|null} vadGateFadeMs
  */
-export async function applyParallelCompression(inputPath, outputPath, presetId, frameAnalysis, deEssResult) {
-  const preset = PRESETS[presetId]
-  if (!preset) throw new Error(`[parallelCompression] Unknown preset: ${presetId}`)
-
-  const config = preset.parallelCompression
+export async function applyParallelCompression(inputPath, outputPath, preset, frameAnalysis, deEssResult) {
+  const config = preset?.parallelCompression
   if (!config) {
     await copyThrough(inputPath, outputPath)
     return notApplied('preset_not_configured')
