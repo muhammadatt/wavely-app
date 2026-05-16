@@ -329,7 +329,19 @@ export const PRESETS = {
       preDelayMs: 10.0,                     //zero-pad before IR onset
       early_reflections: 2,                 //onset ramp (1=sharp, 5=gradual)
       normalize_ir: true,                   //normalize IR peak to 0dBFS before use
-    }
+    },
+    stages: [
+      'decode', 'monoMixdown', 'measureBefore', 'peakNormalize', 'analyzeFramesRaw',
+      'clickRemove', 'humDetect', 'hpf',
+      'noiseReduce', 'remeasureFramesPostNr',
+      'autoLevel', 'spectralSubtraction', 'bandwidthExtension', 'vocalSaturation',
+      'vadGate', 'clipGainDeEss',
+      'remeasureFramesPostNr', 'compress', 'remeasureFramesPostNr',
+      'noiseReduce', 'parallelCompress', 'vocalExpander',
+      'airBoost', 'resonanceSuppressor', 'correctiveEQ', 'roomPresence',
+      'normalize', 'truePeakLimit', 'measureAfter',
+      'acxCertification', 'qualityAdvisory', 'encode', 'extractPeaks',
+    ],
   },
 
   podcast_ready: {
@@ -503,6 +515,18 @@ export const PRESETS = {
       preDelayMs: 1.5,
       diffusion: 0.7,
     },
+    stages: [
+      'decode', 'monoMixdown', 'measureBefore', 'peakNormalize', 'analyzeFramesRaw',
+      'clickRemove', 'humDetect', 'hpf',
+      'noiseReduce', 'remeasureFramesPostNr',
+      'autoLevel', 'spectralSubtraction', 'bandwidthExtension', 'vocalSaturation',
+      'vadGate', 'clipGainDeEss',
+      'remeasureFramesPostNr', 'compress', 'remeasureFramesPostNr',
+      'noiseReduce', 'parallelCompress', 'vocalExpander',
+      'airBoost', 'resonanceSuppressor', 'correctiveEQ', 'roomPresence',
+      'normalize', 'truePeakLimit', 'measureAfter',
+      'acxCertification', 'qualityAdvisory', 'encode', 'extractPeaks',
+    ],
   },
 
   voice_ready: {
@@ -672,6 +696,18 @@ export const PRESETS = {
       preDelayMs: 1.5,
       diffusion: 0.65,
     },
+    stages: [
+      'decode', 'monoMixdown', 'measureBefore', 'peakNormalize', 'analyzeFramesRaw',
+      'clickRemove', 'humDetect', 'hpf',
+      'noiseReduce', 'remeasureFramesPostNr',
+      'autoLevel', 'spectralSubtraction', 'bandwidthExtension', 'vocalSaturation',
+      'vadGate', 'clipGainDeEss',
+      'remeasureFramesPostNr', 'compress', 'remeasureFramesPostNr',
+      'noiseReduce', 'parallelCompress', 'vocalExpander',
+      'airBoost', 'resonanceSuppressor', 'correctiveEQ', 'roomPresence',
+      'normalize', 'truePeakLimit', 'measureAfter',
+      'acxCertification', 'qualityAdvisory', 'encode', 'extractPeaks',
+    ],
   },
 
   general_clean: {
@@ -839,6 +875,18 @@ export const PRESETS = {
       preDelayMs: 1.5,
       diffusion: 0.7,
     },
+    stages: [
+      'decode', 'monoMixdown', 'measureBefore', 'peakNormalize', 'analyzeFramesRaw',
+      'clickRemove', 'humDetect', 'hpf',
+      'noiseReduce', 'remeasureFramesPostNr',
+      'autoLevel', 'spectralSubtraction', 'bandwidthExtension', 'vocalSaturation',
+      'vadGate', 'clipGainDeEss',
+      'remeasureFramesPostNr', 'compress', 'remeasureFramesPostNr',
+      'noiseReduce', 'parallelCompress', 'vocalExpander',
+      'airBoost', 'resonanceSuppressor', 'correctiveEQ', 'roomPresence',
+      'normalize', 'truePeakLimit', 'measureAfter',
+      'acxCertification', 'qualityAdvisory', 'encode', 'extractPeaks',
+    ],
   },
 
   noise_eraser: {
@@ -964,6 +1012,17 @@ export const PRESETS = {
       transientMaxReductionDb: 6,
     },
     roomPresence: { enabled: false },
+    stages: [
+      'decode',
+      'measureBefore', 'peakNormalize', 'analyzeFramesRaw',
+      'humDetect', 'hpf', 'spectralSubtraction', 'noiseReduce',
+      'tonalPretreatment', 'separateVocals', 'separationValidation',
+      'bandwidthExtension', 'remeasureFramesPostNr',
+      'vocalExpander', 'vocalSaturation', 'compress', 'vocalExpander',
+      'vadGate', 'autoLevel', 'airBoost',
+      'roomPresence', 'normalize', 'truePeakLimit', 'measureAfter',
+      'acxCertification', 'qualityAdvisory', 'encode', 'extractPeaks',
+    ],
   },
 
   clearervoice_eraser: {
@@ -1076,6 +1135,17 @@ export const PRESETS = {
     // Stage 4c — Room Presence disabled: ClearerVoice Eraser produces a clean,
     // dry enhanced signal. Adding room presence would contradict the preset goal.
     roomPresence: { enabled: false },
+    stages: [
+      'decode',
+      'measureBefore', 'peakNormalize', 'analyzeFramesRaw',
+      'humDetect', 'hpf', 'spectralSubtraction', 'noiseReduce',
+      'tonalPretreatment', 'clearerVoiceEnhance', 'separationValidation',
+      'residualCleanup', 'bandwidthExtension', 'deEss',
+      'remeasureFramesPostNr', 'autoLevel', 'compress', 'parallelCompress',
+      'vocalExpander', 'vadGate', 'correctiveEQ', 'airBoost', 'vocalSaturation',
+      'roomPresence', 'normalize', 'truePeakLimit', 'measureAfter',
+      'acxCertification', 'qualityAdvisory', 'encode', 'extractPeaks',
+    ],
   },
 }
 

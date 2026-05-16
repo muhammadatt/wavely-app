@@ -14,7 +14,6 @@
 
 import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
-import { PRESET_PIPELINES } from './presetPipelines.js'
 import * as allStages from './stages.js'
 import { createLogger } from './logger.js'
 
@@ -42,8 +41,8 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
   const outputProfile = OUTPUT_PROFILES[outputProfileId]
   if (!outputProfile) throw new Error(`Unknown output profile: ${outputProfileId}`)
 
-  const pipeline = PRESET_PIPELINES[presetId]
-  if (!pipeline) throw new Error(`No pipeline defined for preset: ${presetId}`)
+  const pipeline = preset.stages
+  if (!pipeline) throw new Error(`No stages defined for preset: ${presetId}`)
 
   const ctx    = createContext({ inputPath, originalName, presetId, outputProfileId, preset, outputProfile })
   const logger = await createLogger(preset, outputProfile, originalName, inputPath)
