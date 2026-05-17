@@ -115,9 +115,9 @@ export const PRESETS = {
       "measureBefore",
       "peakNormalize",
       "analyzeFramesRaw",
-      { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } },
       "humDetect",
       "hpf",
+      
       "noiseReduce",
       "remeasureFramesPostNr",
       {
@@ -236,8 +236,10 @@ export const PRESETS = {
       /*
       {
         vocalSaturation: {
-          drive: 1.8,
-          wetDry: 0.03,
+          //drive: 1.8,
+          drive: 0,
+          wetDry: 0,
+          //wetDry: 0.03,
           bias: 0.08,
           lowCrossover: 500,
           midCrossover: 3000,
@@ -245,15 +247,18 @@ export const PRESETS = {
         },
       },
       */
+      "correctiveEQ",
+      { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } },
+      /*
       {
         resonanceSuppressor: [
           {
             depth: 0.67,
             sharpness: 0.5,
-            selectivity: 5,
+            selectivity: 3,
             attack_ms: 5.0,
             release_ms: 5.0,
-            max_reduction_db: 24.0,
+            max_reduction_db: 36.0,
             freq_floor_hz: 80.0,
             freq_ceil_hz: 20000.0,
             mode: "soft",
@@ -280,13 +285,13 @@ export const PRESETS = {
           },
         ],
       },
-      "correctiveEQ",
+      */
       {
-        roomPresence: {
+      roomPresence: {
           enabled: true,
           ir_path: "../ir/MRV_VocalBoot_m-m.wav",
-          wet: 0.2,
-          rt60Ms: 100,
+          wet: 0.03,
+          rt60Ms: 250,
           preDelayMs: 10.0,
           early_reflections: 2,
           normalize_ir: true,

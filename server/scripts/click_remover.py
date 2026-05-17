@@ -152,41 +152,40 @@ def build_hpf(sample_rate, cutoff_hz=800, order=4):
 
 
 def hampel_detect(signal, window_samples, threshold_sigma, sample_rate):
-    """
-    Hampel outlier filter on a 1-D signal.
-    Returns a boolean mask — True where the sample is a statistical outlier.
-
-    Running this on an HPF-filtered version of the original signal means
-    the MAD is computed over a residual where voice energy is suppressed
-    and transient onsets are preserved.
-
-    Vectorized via scipy.ndimage.median_filter: O(N log W) rather than the
-    O(N * W) Python loop, which is prohibitively slow for long-form audio.
-    """
-    sig64      = signal.astype(np.float64)
-    med        = median_filter(sig64, size=window_samples, mode='reflect')
-    abs_dev    = np.abs(sig64 - med)
+    sig64 = signal.astype(np.float64)
+    
+    # Tighten Hampel window (0.3ms instead of 1.5ms)
+    window_samples = max(3, window_samples // 5 | 1)
+    
+    med = median_filter(sig64, size=window_samples, mode='reflect')
+    abs_dev = np.abs(sig64 - med)
     mad_scaled = 1.4826 * median_filter(abs_dev, size=window_samples, mode='reflect')
-
-    # Establish an absolute minimum noise floor using the global MAD
-    # This prevents the detector from triggering wildly on tiny background
-    # hiss or digital dither when the local signal amplitude drops to near-zero.
     global_mad = 1.4826 * np.median(np.abs(sig64 - np.median(sig64)))
-    min_mad    = max(1e-4, global_mad * 0.5)
-
+    min_mad = max(1e-4, global_mad * 0.5)
     mad_scaled = np.maximum(mad_scaled, min_mad)
     hampel_mask = (abs_dev > threshold_sigma * mad_scaled)
 
-    # RMS ratio check to prevent false positives on continuous high-frequency
-    # energy like periodic glottal pulses (vocal fry) or harsh sibilants.
-    # True clicks are sharp transients that stand out >5x against the local RMS.
-    rms_window_samp = int(sample_rate * 5.0 / 1000)  # 5ms
-    local_mean_sq = uniform_filter1d(sig64**2, size=rms_window_samp, mode='reflect')
-    local_rms = np.sqrt(np.maximum(local_mean_sq, 1e-12))
-    rms_mask = (abs_dev > 5.0 * local_rms)
+    # FIX: causal RMS — use only past samples, never contaminated by click itself
+    rms_window_samp = int(sample_rate * 20.0 / 1000)  # 20ms lookback
+    b_lp = np.ones(rms_window_samp) / rms_window_samp
+    causal_sq = np.convolve(sig64**2, b_lp, mode='full')[:len(sig64)]
+    local_rms = np.sqrt(np.maximum(causal_sq, 1e-12))
+    rms_mask = (abs_dev > 3.0 * local_rms)  # 3x instead of 5x
 
-    return hampel_mask & rms_mask
+    gate_A = hampel_mask & rms_mask  # original: both must fire
 
+    # --- NEW gate C: absolute amplitude + moderate RMS ratio ---
+    # Catches slow-onset clicks in speech where Hampel sigma is suppressed.
+    # The absolute floor (0.04) ensures we only trigger on genuinely loud
+    # transients; the 3.0x RMS ratio ensures it's anomalous vs. local baseline.
+    # False positives on consonant bursts are harmless — max_click_ms in the
+    # repair stage already rejects anything > 15ms before AR interpolation runs.
+    # Adaptive absolute floor: 15% of the signal's 99th percentile amplitude
+    signal_99p = np.percentile(np.abs(sig64), 99)
+    abs_floor = max(0.02, signal_99p * 0.15)
+    gate_C = (np.abs(sig64) > abs_floor) & (abs_dev > 3.0 * local_rms)
+
+    return gate_A | gate_C
 
 def merge_click_regions(mask, min_gap_samples):
     """
@@ -231,7 +230,7 @@ def remove_clicks(
     max_click_ms=15.0,
     context_ms=8.0,
     window_ms=1.5,
-    hpf_cutoff_hz=800,
+    hpf_cutoff_hz=2500,
     ar_order=None,
 ):
     """
