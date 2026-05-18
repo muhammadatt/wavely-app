@@ -79,8 +79,8 @@ def estimate_f0_contour(
 
     Uses center-padded framing (pad = n_fft // 2) to match the resonance
     suppressor's STFT convention so frame k here is frame k there.
-    F0 is estimated on every 3rd frame (matching the de-esser's subsampling
-    cadence) and forward-filled across skipped/unvoiced gaps.
+    F0 is estimated on every voiced frame; unvoiced gaps are forward-filled
+    from the last voiced estimate.
 
     Args:
         audio:           Mono float32 audio array.
@@ -142,11 +142,12 @@ def estimate_f0_contour(
             if lo >= hi or not vad_voiced_mask[lo:hi].any():
                 continue
 
-        # Subsample: estimate every 3rd frame; forward-fill the rest.
-        # Matches the de-esser's cadence; keeps cost O(n/3).
-        if k % 3 != 0:
-            continue
-
+        # Estimate F0 on every voiced frame. The autocorrelation is a single
+        # FFT over n_fft samples — cheap enough that per-frame estimation adds
+        # negligible cost, and it removes the forward-fill staircase a
+        # subsampled contour produces at phoneme-boundary pitch jumps (which
+        # otherwise leaves the resonance suppressor's harmonic mask stale for
+        # up to ~2 frames after the pitch moves).
         est = _autocorr_f0(padded[start:end], sample_rate)
         if est is not None:
             f0_arr[k] = est

@@ -18,7 +18,7 @@ import time
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import get_window
-from scipy.ndimage import convolve1d
+from scipy.ndimage import convolve1d, maximum_filter1d, minimum_filter1d
 import logging
 
 logger = logging.getLogger(__name__)
@@ -113,14 +113,16 @@ DEFAULT_PARAMS = {
                                   # bins; 1 bin ≈ 21.5 Hz at 44.1 kHz / n_fft=2048).
                                   # 3 bins (≈ 64 Hz) provides margin for autocorrelation
                                   # lag quantization error in the per-frame F0 contour.
-                                  # The rolling F0 is updated every 3rd voiced frame and
-                                  # forward-filled between updates; a 3-step lag drift
-                                  # at f0≈188 Hz can shift H10 by up to ~48 Hz. A 2-bin
-                                  # (43 Hz) zone is too tight to absorb this drift,
-                                  # leaving those bins unprotected on affected frames.
-                                  # 3 bins (64 Hz) covers the worst-case drift while
-                                  # leaving ~60 Hz of inter-harmonic space per gap at
-                                  # 188 Hz — sufficient for room mode detection.
+                                  # The F0 contour is now estimated per frame, so there
+                                  # is no multi-frame forward-fill lag; the residual
+                                  # error is autocorrelation lag quantization (parabolic
+                                  # interpolation leaves a small residual that compounds
+                                  # at high harmonics). A 2-bin (43 Hz) zone is too tight
+                                  # to absorb this; 3 bins (64 Hz) covers it while leaving
+                                  # ~60 Hz of inter-harmonic space per gap at 188 Hz —
+                                  # sufficient for room mode detection. Fast phoneme-
+                                  # boundary pitch jumps are handled separately by the
+                                  # transition_* parameters, not by this margin.
                                   # harmonic_width_pct takes over above ~H20.
     "harmonic_width_pct": 0.01,   # Protection half-width as a fraction of the overtone
                                   # frequency (1 %). With a per-frame F0 contour the
@@ -168,6 +170,34 @@ DEFAULT_PARAMS = {
                                   # apply_resonance_suppression()).  If sibilant_only=True
                                   # but no indices are provided, the pass logs a warning
                                   # and processes all voiced frames as a safe fallback.
+    "transition_jump_threshold": 0.12,
+                                  # Relative F0 change that marks a pitch transition.
+                                  # At a phoneme-boundary pitch jump the old and new
+                                  # harmonic series barely overlap, so a mask built from
+                                  # a single pitch leaves most of the new voice
+                                  # unprotected — the suppressor then thins the voice and
+                                  # the affected section sounds pitchy.  A 10–15 % value
+                                  # catches true phoneme-boundary jumps without triggering
+                                  # on normal expressive pitch variation.  The threshold
+                                  # applies to the F0 estimate directly (the contour is at
+                                  # F0, not at spectral bin frequencies).
+    "transition_window_frames": 5,
+                                  # Half-width (STFT frames) of both the windowed jump
+                                  # detector and the transition hold.  5 frames ≈ 58 ms at
+                                  # hop=512 / 44.1 kHz — covers the ~4-frame STFT-straddle
+                                  # blur (n_fft=2048 ≈ 46 ms window) plus the convergence
+                                  # tail.  Detection compares the F0 max/min over a ±W
+                                  # window, so a jump the contour reports as a ramp
+                                  # (no single-frame step exceeding the threshold) is
+                                  # still caught.
+    "transition_gain_scale": 0.2,
+                                  # Suppression-depth multiplier on detected transition
+                                  # frames (0.2 = 80 % less reduction).  The union
+                                  # harmonic mask does the structural voice protection;
+                                  # this backs the detector off across the blurred
+                                  # straddle frames where the harmonic structure is
+                                  # unreliable.  Set 0.0 to fully suspend suppression
+                                  # across transitions.
 }
 
 
@@ -401,6 +431,77 @@ class ResonanceSuppressor:
 
         self._mask_cache[cache_key] = mask
         return mask
+
+    def _compute_transition_state(self, n_frames: int):
+        """
+        Identify pitch-transition frames from the F0 contour.
+
+        A phoneme-boundary pitch jump moves the harmonic series so far that the
+        old and new overtones barely overlap; a harmonic mask built from a
+        single pitch then leaves most of the voice unprotected for the duration
+        of the transition, and the suppressor thins it. This method flags those
+        frames and records the stable F0 on each side of the jump so the chunk
+        loop can protect the union of both harmonic series and back off the
+        suppression depth across the transition.
+
+        Detection is windowed rather than frame-to-frame: the F0 range over a
+        ±transition_window_frames window must exceed transition_jump_threshold.
+        A windowed test is required because the STFT frame (~46 ms) is far
+        longer than the hop (~12 ms), so a pitch jump is smeared across several
+        frames in any contour derived from that framing — a strict
+        consecutive-frame difference can miss a jump reported as a ramp.
+
+        Returns:
+            transition_mask: bool (n_frames,) — True on transition frames.
+            f0_pre:          float (n_frames,) — stable F0 before the
+                             transition (0.0 on non-transition frames).
+            f0_post:         float (n_frames,) — stable F0 after the
+                             transition (0.0 on non-transition frames).
+        """
+        transition_mask = np.zeros(n_frames, dtype=bool)
+        f0_pre  = np.zeros(n_frames, dtype=np.float64)
+        f0_post = np.zeros(n_frames, dtype=np.float64)
+
+        if not self.f0_contour or n_frames == 0:
+            return transition_mask, f0_pre, f0_post
+
+        thr = float(self.params.get("transition_jump_threshold", 0.12))
+        W   = int(self.params.get("transition_window_frames", 5))
+        if thr <= 0 or W < 1:
+            return transition_mask, f0_pre, f0_post
+
+        # Align the contour to n_frames: truncate if longer, edge-pad if short.
+        c = np.asarray(self.f0_contour[:n_frames], dtype=np.float64)
+        if c.size < n_frames:
+            fill = c[-1] if c.size else float(self.f0 or 0.0)
+            c = np.concatenate([c, np.full(n_frames - c.size, fill)])
+
+        # Windowed jump detection via sliding max/min over ±W frames. The
+        # contour is forward-filled upstream, so it carries no NaNs or zeros
+        # and the relative-range ratio is well defined everywhere.
+        size     = 2 * W + 1
+        roll_max = maximum_filter1d(c, size=size, mode="nearest")
+        roll_min = minimum_filter1d(c, size=size, mode="nearest")
+        safe_min = np.where(roll_min > 1e-6, roll_min, 1e-6)
+        transition_mask = ((roll_max - roll_min) / safe_min) > thr
+
+        # For each contiguous transition block, the stable pre/post F0 are the
+        # contour values just outside the block.
+        i = 0
+        while i < n_frames:
+            if not transition_mask[i]:
+                i += 1
+                continue
+            s = i
+            while i < n_frames and transition_mask[i]:
+                i += 1
+            e = i - 1
+            pre_idx  = s - 1 if s > 0 else s
+            post_idx = e + 1 if e + 1 < n_frames else e
+            f0_pre[s : e + 1]  = c[pre_idx]
+            f0_post[s : e + 1] = c[post_idx]
+
+        return transition_mask, f0_pre, f0_post
 
     def _cepstral_envelope_matrix(
         self,
@@ -799,6 +900,13 @@ class ResonanceSuppressor:
         # identical to a per-frame implementation.
         prev_gr = np.zeros(self.n_bins, dtype=np.float32)
 
+        # Pitch-transition state — frames where F0 jumps fast enough that the
+        # old and new harmonic series barely overlap. Drives two corrections in
+        # the chunk loop: a union harmonic mask (pre + post pitch) and an
+        # attenuation of suppression depth across the transition window.
+        transition_mask, f0_pre, f0_post = self._compute_transition_state(n_frames)
+        transition_gain_scale = float(self.params.get("transition_gain_scale", 0.2))
+
         # Chunk size keeps per-chunk peak memory bounded for long files.
         # 2048 frames ≈ 24 s at 44.1 kHz / hop=512.
         CHUNK_FRAMES = 2048
@@ -841,6 +949,26 @@ class ResonanceSuppressor:
                     if m is not None:
                         chunk_mask[j] = m
 
+            # Pitch-transition harmonic protection.
+            # During a fast pitch jump the pre- and post-transition harmonic
+            # series are almost non-overlapping, so a single-pitch mask leaves
+            # most of the new voice unprotected. For transition frames, protect
+            # the union of the pre- and post-transition harmonic series. Only
+            # two pitch levels are unioned per frame (not a whole chunk), so
+            # this does not blanket the spectrum the way a chunk-wide union of
+            # drifting pitches would.
+            if chunk_mask is not None and transition_mask[chunk_start:chunk_end].any():
+                for j in np.flatnonzero(transition_mask[chunk_start:chunk_end]):
+                    gi     = chunk_start + int(j)
+                    m_pre  = self._compute_harmonic_mask_for_f0(f0_pre[gi])
+                    m_post = self._compute_harmonic_mask_for_f0(f0_post[gi])
+                    if m_pre is not None and m_post is not None:
+                        chunk_mask[j] = m_pre | m_post
+                    elif m_pre is not None:
+                        chunk_mask[j] = m_pre
+                    elif m_post is not None:
+                        chunk_mask[j] = m_post
+
             chunk_voiced = voiced_mask[chunk_start:chunk_end]
 
             # --- Multi-pass gain reduction ---
@@ -859,6 +987,16 @@ class ResonanceSuppressor:
             target_gr = self._compute_gain_reduction_matrix(
                 magnitude_db, smoothed_db, harmonic_mask=chunk_mask, pc=pc,
             ).astype(np.float32, copy=False)
+
+            # Pitch-transition suppression attenuation.
+            # Even with the union mask, STFT frames whose window straddles the
+            # phoneme boundary carry a blurred harmonic structure the spike
+            # detector can misread as resonances. Scaling the gain reduction
+            # down across the transition window is the safety net behind the
+            # dual-mask protection applied above.
+            chunk_trans = transition_mask[chunk_start:chunk_end]
+            if chunk_trans.any():
+                target_gr[chunk_trans, :] *= transition_gain_scale
 
             # Zero non-voiced frames so IIR decays through silence.
             if not chunk_voiced.all():
