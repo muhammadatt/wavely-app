@@ -111,18 +111,15 @@ DEFAULT_PARAMS = {
                                   # Set False only for testing / diagnostic runs.
     "harmonic_width_bins": 2,     # Minimum half-width of the protection zone (STFT
                                   # bins; 1 bin ≈ 21.5 Hz at 44.1 kHz / n_fft=2048).
-                                  # 3 bins (≈ 64 Hz) provides margin for autocorrelation
-                                  # lag quantization error in the per-frame F0 contour.
-                                  # The F0 contour is now estimated per frame, so there
-                                  # is no multi-frame forward-fill lag; the residual
-                                  # error is autocorrelation lag quantization (parabolic
-                                  # interpolation leaves a small residual that compounds
-                                  # at high harmonics). A 2-bin (43 Hz) zone is too tight
-                                  # to absorb this; 3 bins (64 Hz) covers it while leaving
-                                  # ~60 Hz of inter-harmonic space per gap at 188 Hz —
-                                  # sufficient for room mode detection. Fast phoneme-
-                                  # boundary pitch jumps are handled separately by the
-                                  # transition_* parameters, not by this margin.
+                                  # The default 2 bins (≈ 43 Hz) absorbs the residual
+                                  # autocorrelation lag quantization error of the
+                                  # per-frame F0 contour (parabolic interpolation leaves
+                                  # a small residual that compounds at high harmonics).
+                                  # Raising to 3 bins (≈ 64 Hz) widens the margin if high
+                                  # harmonics still read as exposed, at the cost of
+                                  # inter-harmonic space for room mode detection. Fast
+                                  # phoneme-boundary pitch jumps are handled separately by
+                                  # the transition_* parameters, not by this margin.
                                   # harmonic_width_pct takes over above ~H20.
     "harmonic_width_pct": 0.01,   # Protection half-width as a fraction of the overtone
                                   # frequency (1 %). With a per-frame F0 contour the
@@ -988,16 +985,6 @@ class ResonanceSuppressor:
                 magnitude_db, smoothed_db, harmonic_mask=chunk_mask, pc=pc,
             ).astype(np.float32, copy=False)
 
-            # Pitch-transition suppression attenuation.
-            # Even with the union mask, STFT frames whose window straddles the
-            # phoneme boundary carry a blurred harmonic structure the spike
-            # detector can misread as resonances. Scaling the gain reduction
-            # down across the transition window is the safety net behind the
-            # dual-mask protection applied above.
-            chunk_trans = transition_mask[chunk_start:chunk_end]
-            if chunk_trans.any():
-                target_gr[chunk_trans, :] *= transition_gain_scale
-
             # Zero non-voiced frames so IIR decays through silence.
             if not chunk_voiced.all():
                 target_gr[~chunk_voiced, :] = 0.0
@@ -1033,6 +1020,18 @@ class ResonanceSuppressor:
                     prev  = coeff * prev + (np.float32(1.0) - coeff) * tgt
                     smoothed_gr[j] = prev
                 prev_gr = prev
+
+            # Pitch-transition suppression attenuation.
+            # Applied to the post-IIR smoothed reduction, not the pre-IIR
+            # target: scaling target_gr alone would still let the attack/
+            # release IIR bleed earlier frames' reduction (the release tail of
+            # an already-active resonance cut) through the transition window.
+            # Scaling smoothed_gr attenuates the reduction actually applied on
+            # transition frames; the carried IIR state (prev_gr) is left
+            # untouched, so suppression returns smoothly once the window ends.
+            chunk_trans = transition_mask[chunk_start:chunk_end]
+            if chunk_trans.any():
+                smoothed_gr[chunk_trans, :] *= transition_gain_scale
 
             # Apply gain to spectra and inverse-FFT in one batch.
             gain_linear      = np.power(10.0, -smoothed_gr / 20.0, dtype=np.float32)

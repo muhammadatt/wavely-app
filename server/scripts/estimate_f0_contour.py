@@ -80,7 +80,8 @@ def estimate_f0_contour(
     Uses center-padded framing (pad = n_fft // 2) to match the resonance
     suppressor's STFT convention so frame k here is frame k there.
     F0 is estimated on every voiced frame; unvoiced gaps are forward-filled
-    from the last voiced estimate.
+    from the last voiced estimate. Leading gaps before the first voiced
+    estimate have no prior value and are seeded with the contour median.
 
     Args:
         audio:           Mono float32 audio array.
