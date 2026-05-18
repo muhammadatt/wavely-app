@@ -43,7 +43,7 @@ import { applyClipGainDeEsser } from './clipGainDeEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
 import { writeFile } from 'fs/promises'
-import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, applyResonanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
+import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, runThroatClickAttenuator, applyResonanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { applyAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
@@ -239,6 +239,88 @@ export async function clickRemove(ctx) {
     `repaired=${report.total_clicks_repaired ?? '?'} ` +
     `skipped=${report.clicks_skipped ?? '?'} ` +
     `(threshold=${config.thresholdSigma}σ max=${config.maxClickMs}ms)`
+  )
+}
+
+// ── Stage: Throat click attenuator ────────────────────────────────────────────
+// Detects and attenuates short resonant throat/palate clicks (10–25 ms,
+// 1–4 kHz) embedded in voiced speech — distinct from the transient clicks
+// click_remover handles. These become audible only after compression and
+// normalisation raise quiet detail, so this stage runs late in the chain.
+//
+// Detection uses LPC prediction error: an AR model fitted on pre-event voiced
+// context cannot predict an aperiodic click, producing a normalised error
+// spike that survives even when the click is buried in loud speech. The stage
+// is VAD-gated — only voiced spans (built from the Silero frame labels in
+// ctx.results.metrics.frames) are searched, because the LPC detector needs
+// voiced context to fit a meaningful model.
+
+export async function throatClickAttenuate(ctx) {
+  const config = ctx.preset.throatClickAttenuator
+  if (!config) {
+    ctx.log('[throat-click] No throatClickAttenuator config on preset — skipped')
+    ctx.results.throatClickAttenuator = { applied: false, reason: 'not configured' }
+    return
+  }
+
+  // Build voiced spans from contiguous non-silence Silero VAD frames.
+  const frames = ctx.results.metrics?.frames
+  if (!frames?.length) {
+    ctx.log('[throat-click] No VAD frames available — skipped')
+    ctx.results.throatClickAttenuator = { applied: false, reason: 'no vad frames' }
+    return
+  }
+
+  const spans = []
+  let runStart = null
+  let runEnd   = null
+  for (const f of frames) {
+    if (!f.isSilence) {
+      if (runStart === null) runStart = f.offsetSamples
+      runEnd = f.offsetSamples + f.lengthSamples
+    } else if (runStart !== null) {
+      spans.push([runStart, runEnd])
+      runStart = null
+    }
+  }
+  if (runStart !== null) spans.push([runStart, runEnd])
+
+  if (spans.length === 0) {
+    ctx.log('[throat-click] No voiced spans — skipped')
+    ctx.results.throatClickAttenuator = { applied: false, reason: 'no voiced spans' }
+    return
+  }
+
+  const spansPath = ctx.tmp('.json')
+  await writeFile(spansPath, JSON.stringify(spans))
+
+  const outPath = ctx.tmp('.wav')
+  const report  = await runThroatClickAttenuator(ctx.currentPath, outPath, spansPath, {
+    sensitivityDb: config.sensitivityDb,
+    minEventMs:    config.minEventMs,
+    maxEventMs:    config.maxEventMs,
+    contextMs:     config.contextMs,
+    arOrder:       config.arOrder,
+    nrmsThreshold: config.nrmsThreshold,
+    envWindowMs:   config.envWindowMs,
+    floorWindowMs: config.floorWindowMs,
+    attenuationDb: config.attenuationDb,
+    attackMs:      config.attackMs,
+    releaseMs:     config.releaseMs,
+    padMs:         config.padMs,
+  })
+
+  ctx.currentPath = outPath
+  ctx.results.throatClickAttenuator = {
+    applied:           true,
+    clicks_detected:   report.clicks_detected   ?? null,
+    clicks_attenuated: report.clicks_attenuated ?? null,
+    channels:          report.channels          ?? null,
+  }
+  ctx.log(
+    `[throat-click] detected=${report.clicks_detected ?? '?'} ` +
+    `attenuated=${report.clicks_attenuated ?? '?'} ` +
+    `(voiced spans=${spans.length})`
   )
 }
 

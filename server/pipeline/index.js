@@ -24,6 +24,7 @@ const STAGE_REGISTRY = allStages
 const STAGE_FOR_CONFIG_KEY = {
   breathReducer:       'breathReduce',
   clickRemover:        'clickRemove',
+  throatClickAttenuator: 'throatClickAttenuate',
   compression:         'compress',
   parallelCompression: 'parallelCompress',
   autoLeveler:         'autoLevel',

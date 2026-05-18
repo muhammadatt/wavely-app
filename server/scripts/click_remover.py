@@ -32,48 +32,15 @@ import soundfile as sf
 from scipy.ndimage import median_filter, uniform_filter1d
 from scipy.signal import butter, sosfilt
 
+from wavely_ar_utils import burg_ar_coeffs, ar_forward_predict
+
 
 # ---------------------------------------------------------------------------
 # Burg AR interpolation
+#
+# burg_ar_coeffs() and ar_forward_predict() live in wavely_ar_utils.py so the
+# throat click attenuator can reuse the same model fitting.
 # ---------------------------------------------------------------------------
-
-def burg_ar_coeffs(x, order):
-    """
-    Estimate AR model coefficients using the Burg method.
-    x     : 1-D float64 array of clean signal samples
-    order : AR model order
-    Returns 1-D array of AR coefficients [a1, a2, ..., a_order].
-    """
-    n = len(x)
-    if n <= order:
-        raise ValueError(f"Context length ({n}) must exceed AR order ({order})")
-
-    ef = x.copy().astype(np.float64)
-    eb = x.copy().astype(np.float64)
-    a  = np.zeros(order, dtype=np.float64)
-
-    for m in range(order):
-        num = -2.0 * np.dot(ef[m + 1:], eb[m : n - 1])
-        den = (np.dot(ef[m + 1:], ef[m + 1:])
-               + np.dot(eb[m : n - 1], eb[m : n - 1]))
-        if den < 1e-12:
-            break
-        km = num / den
-
-        a_new      = a.copy()
-        a_new[m]   = km
-        if m > 0:
-            a_new[:m] = a[:m] + km * a[m - 1 :: -1]
-        a = a_new
-
-        ef_new = ef[m + 1:] + km * eb[m : n - 1]
-        eb_new = eb[m : n - 1] + km * ef[m + 1:]
-
-        ef[m + 1:] = ef_new
-        eb[m + 1:] = eb_new
-
-    return a
-
 
 def ar_interpolate(signal, click_start, click_end, context_samples, ar_order):
     """
@@ -104,24 +71,13 @@ def ar_interpolate(signal, click_start, click_end, context_samples, ar_order):
     # Forward prediction from left context
     if left_order >= 1:
         a_fwd = burg_ar_coeffs(left_ctx, left_order)
-        fwd   = np.zeros(click_len, dtype=np.float64)
-        buf   = left_ctx[-left_order:].tolist()
-        for i in range(click_len):
-            pred   = -np.dot(a_fwd, buf[-left_order:][::-1])
-            pred   = np.clip(pred, -max_val, max_val)
-            fwd[i] = pred
-            buf.append(pred)
+        fwd   = ar_forward_predict(left_ctx, a_fwd, click_len, max_val=max_val)
 
-    # Backward prediction from right context (reverse signal)
+    # Backward prediction from right context (reverse signal, then re-reverse)
     if right_order >= 1:
         a_bwd = burg_ar_coeffs(right_ctx[::-1], right_order)
-        bwd   = np.zeros(click_len, dtype=np.float64)
-        buf   = right_ctx[:right_order][::-1].tolist()
-        for i in range(click_len):
-            pred                    = -np.dot(a_bwd, buf[-right_order:][::-1])
-            pred                    = np.clip(pred, -max_val, max_val)
-            bwd[click_len - 1 - i]  = pred
-            buf.append(pred)
+        bwd   = ar_forward_predict(right_ctx[::-1], a_bwd, click_len,
+                                   max_val=max_val)[::-1]
 
     # If neither side produced a usable prediction, leave the region untouched.
     if fwd is None and bwd is None:
