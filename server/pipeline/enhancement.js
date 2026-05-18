@@ -32,6 +32,7 @@ const DEREVERB_SCRIPT              = path.join(SCRIPTS_DIR, 'dereverb.py')
 const AP_BWE_SCRIPT                = path.join(SCRIPTS_DIR, 'ap_bwe_extend.py')
 const LAVASR_SCRIPT                = path.join(SCRIPTS_DIR, 'lavasr_extend.py')
 const CLICK_REMOVER_SCRIPT         = path.join(SCRIPTS_DIR, 'click_remover.py')
+const THROAT_CLICK_SCRIPT          = path.join(SCRIPTS_DIR, 'throat_click_attenuator.py')
 const RESONANCE_SCRIPT             = path.join(SCRIPTS_DIR, 'resonance_suppressor.py')
 const BREATH_REDUCER_SCRIPT        = path.join(SCRIPTS_DIR, 'breath_reducer.py')
 const SPECTRAL_SUBTRACTION_SCRIPT  = path.join(SCRIPTS_DIR, 'spectral_subtraction.py')
@@ -183,6 +184,47 @@ export function runClickRemover(inputPath, outputPath, params = {}) {
   if (params.thresholdSigma != null) args.push('--threshold',    String(params.thresholdSigma))
   if (params.maxClickMs     != null) args.push('--max-click-ms', String(params.maxClickMs))
   return spawnPythonCapture(CLICK_REMOVER_SCRIPT, args, 'ClickRemover')
+}
+
+/**
+ * Throat click attenuator — LPC prediction-error detection + smooth gain
+ * attenuation of short resonant throat/palate clicks inside voiced speech.
+ * Runs after click_remover, on audio that has already passed through noise
+ * reduction, EQ, and compression. Captures and returns the JSON report.
+ *
+ * @param {string} inputPath    - 32-bit float WAV at 44.1 kHz
+ * @param {string} outputPath   - 32-bit float WAV at 44.1 kHz
+ * @param {string} vadSpansPath - JSON file: array of [start_sample, end_sample] voiced spans
+ * @param {object} [params]
+ * @param {number} [params.sensitivityDb]  - dB above voiced floor to nominate a candidate
+ * @param {number} [params.minEventMs]     - Minimum candidate duration (ms)
+ * @param {number} [params.maxEventMs]     - Maximum candidate duration (ms)
+ * @param {number} [params.contextMs]      - Pre-event voiced context for AR fitting (ms)
+ * @param {number} [params.arOrder]        - AR model order (default: 2 + sr/1000)
+ * @param {number} [params.nrmsThreshold]  - Normalised prediction error to confirm detection
+ * @param {number} [params.envWindowMs]    - RMS envelope smoothing window (ms)
+ * @param {number} [params.floorWindowMs]  - Adaptive floor median window (ms)
+ * @param {number} [params.attenuationDb]  - Attenuation depth (dB)
+ * @param {number} [params.attackMs]       - Gain attack time (ms)
+ * @param {number} [params.releaseMs]      - Gain release time (ms)
+ * @param {number} [params.padMs]          - Attenuation window padding (ms)
+ * @returns {Promise<object>} Parsed JSON report from the script
+ */
+export function runThroatClickAttenuator(inputPath, outputPath, vadSpansPath, params = {}) {
+  const args = [inputPath, outputPath, '--vad-spans', vadSpansPath]
+  if (params.sensitivityDb != null) args.push('--sensitivity-db', String(params.sensitivityDb))
+  if (params.minEventMs    != null) args.push('--min-event-ms',   String(params.minEventMs))
+  if (params.maxEventMs    != null) args.push('--max-event-ms',   String(params.maxEventMs))
+  if (params.contextMs     != null) args.push('--context-ms',     String(params.contextMs))
+  if (params.arOrder       != null) args.push('--ar-order',       String(params.arOrder))
+  if (params.nrmsThreshold != null) args.push('--nrms-threshold', String(params.nrmsThreshold))
+  if (params.envWindowMs   != null) args.push('--env-window-ms',  String(params.envWindowMs))
+  if (params.floorWindowMs != null) args.push('--floor-window-ms', String(params.floorWindowMs))
+  if (params.attenuationDb != null) args.push('--attenuation-db', String(params.attenuationDb))
+  if (params.attackMs      != null) args.push('--attack-ms',      String(params.attackMs))
+  if (params.releaseMs     != null) args.push('--release-ms',     String(params.releaseMs))
+  if (params.padMs         != null) args.push('--pad-ms',         String(params.padMs))
+  return spawnPythonCapture(THROAT_CLICK_SCRIPT, args, 'ThroatClickAttenuator')
 }
 
 // ── Resonance Suppressor ──────────────────────────────────────────────────────
