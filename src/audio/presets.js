@@ -173,6 +173,20 @@ export const PRESETS = {
           },
         },
       },
+      /*
+      {
+        // Conservative — 
+        throatClickAttenuator: {
+          sensitivityDb: 10,
+          nrmsThreshold: 3.0,
+          attenuationDb: 14,
+          attackMs: 12,
+          releaseMs: 25,
+          padMs: 4,
+        },
+      },
+      */
+      "correctiveEQ",
       "remeasureFramesPostNr",
       {
         compression: [
@@ -249,18 +263,7 @@ export const PRESETS = {
       */
       "correctiveEQ",
       { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } },
-      {
-        // Conservative — ACX human reviewers expect an unprocessed character.
-        throatClickAttenuator: {
-          sensitivityDb: 10,
-          nrmsThreshold: 3.0,
-          attenuationDb: 14,
-          attackMs: 12,
-          releaseMs: 25,
-          padMs: 4,
-        },
-      },
-      /*
+      
       {
         resonanceSuppressor: [
           {
@@ -296,7 +299,7 @@ export const PRESETS = {
           },
         ],
       },
-      */
+      
       {
       roomPresence: {
           enabled: true,

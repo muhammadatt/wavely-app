@@ -337,7 +337,6 @@ def process_file(input_path, output_path, vad_spans,
             }
         })
         combined_report["clicks_detected"]   += len(detected)
-        combined_report["clicks_attenuated"] += len(detected)
 
     sf.write(output_path, np.stack(channels_out, axis=1), sr, subtype='FLOAT')
     return combined_report
