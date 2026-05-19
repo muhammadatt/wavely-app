@@ -66,9 +66,9 @@ def region_caps(freq_hz, lf_max_boost_db):
     if freq_hz < 2000:
         return (6.0, 8.0)
     if freq_hz < 6000:
-        return (7, 7)
+        return (7.0, 9.0)
     if freq_hz < 10000:
-        return (5, 8)
+        return (5.0, 8.0)
     return (4.0, 10)
 
 
