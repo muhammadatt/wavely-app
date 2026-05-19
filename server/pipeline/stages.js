@@ -449,7 +449,7 @@ const NR_MAX_MAKEUP_GAIN_DB = 6
 const NR_MAKEUP_THRESHOLD_DB = 0.3
 
 export async function noiseReduce(ctx) {
-  const model         = ctx.preset.noiseModel ?? 'df3'
+  const model         = ctx.preset.noiseReduce?.model ?? 'df3'
   const outPath       = ctx.tmp('.wav')
   const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
 
@@ -1504,13 +1504,13 @@ export async function residualCleanup(ctx) {
 // Also available for standard presets (off by default) to recover any HF
 // attenuated by DeepFilterNet3 at aggressive tiers.
 //
-// Primary gate: ctx.preset.bwe.enabled must be true.
+// Primary gate: ctx.preset.bandwidthExtension.enabled must be true.
 // Secondary skip (NE context only): if NE-4 shows sibilance ratio ≥ 0.8 AND
 // post-separation noise floor ≤ -55 dBFS, HF content is already intact — skip
 // to save processing time.
 
 export async function bandwidthExtension(ctx) {
-  if (!ctx.preset.bwe?.enabled) {
+  if (!ctx.preset.bandwidthExtension?.enabled) {
     ctx.log('[NE-6] Bandwidth extension skipped — not enabled for this preset')
     return
   }
@@ -1531,7 +1531,7 @@ export async function bandwidthExtension(ctx) {
   //   return
   // }
 
-  const bweModel = ctx.preset.bweModel ?? 'ap_bwe'
+  const bweModel = ctx.preset.bandwidthExtension?.model ?? 'ap-bwe'
 
   // Both AP-BWE and LavaSR output 48 kHz — decodeToFloat32 resamples to 32-bit float 44.1 kHz
   const bwe48kPath = ctx.tmp('.wav')
@@ -1550,7 +1550,7 @@ export async function bandwidthExtension(ctx) {
   // Both models synthesise broadband HF content that can skew sibilant; applying a
   // cut here — before enhancement EQ and the de-esser — corrects this at the source.
   // Parameters (freq, q, gainDb) are configurable per preset via bwe.postEq.
-  const postEq = ctx.preset.bwe.postEq
+  const postEq = ctx.preset.bandwidthExtension.postEq
   if (postEq?.enabled) {
     const freq   = postEq.freq   ?? 9000
     const q      = postEq.q      ?? 2

@@ -90,7 +90,8 @@ export function resolveOutputProfileId(id) {
  * @property {{ total_max_up_db: number, total_max_down_db: number, target_mode: 'running_median'|'global', target_window_s: number, noise_floor_target_dbfs: number, deadband_db: number, knee_db: number, max_up_db: number, max_down_db: number, subphrase_split_drop_db: number, subphrase_split_min_duration_ms: number, crossfade_ms: number, merge_max_delta_db: number } | null} autoLeveler
  * @property {'demucs'|'convtasnet'} [separationModel]   - Noise Eraser only
  * @property {'mossformer2_48k'|'frcrn_16k'} [clearervoiceModel]   - ClearerVoice Eraser only
- * @property {{ enabled: boolean, postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bwe - Bandwidth extension (AP-BWE); enabled for NE presets, disabled for standard presets. postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
+ * @property {{ enabled: boolean, model?: 'ap-bwe'|'ap_bwe'|'lavasr', postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bandwidthExtension - Bandwidth extension; enabled for NE presets, disabled for standard presets. model selects the backend ('ap-bwe' default, 'lavasr'). postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
+ * @property {{ model?: 'df3'|'rnnoise'|'dtln' }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). When the stage is listed more than once, each call can carry its own model.
  */
 
 /** @type {Record<string, Preset>} */
@@ -104,8 +105,6 @@ export const PRESETS = {
     targetLoudness: { value: -20, unit: "dBFS RMS" },
     truePeakCeiling: -3,
     noiseFloorTarget: -60,
-    noiseModel: "df3", //"df3", "rnnoise", "dtln"
-    bweModel: "ap-bwe", //"lavasr", "ap-bwe"
     channelOutput: "mono",
     defaultOutputProfile: "acx",
     lockedOutputProfile: true,
@@ -117,8 +116,14 @@ export const PRESETS = {
       "analyzeFramesRaw",
       "humDetect",
       "hpf",
-      
-      "noiseReduce",
+      { noiseReduce: { model: "rnnoise" } }, //"df3", "rnnoise", "dtln"
+      {
+        bandwidthExtension: {
+          enabled: true,
+          model: "ap-bwe", //"lavasr", "ap-bwe"
+          postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
+        },
+      },
       "remeasureFramesPostNr",
       {
         autoLeveler: {
@@ -149,7 +154,7 @@ export const PRESETS = {
       {
         vadGate: {
           enabled: true,
-          energyOverrideDb: 12,
+          energyOverrideDb: 24,
           lookaheadMs: 60,
           holdMs: 200,
           attackMs: 5,
@@ -160,7 +165,7 @@ export const PRESETS = {
       {
         clipGainDeEsser: {
           enabled: true,
-          naturalCeilingDb: 6.5,
+          naturalCeilingDb: 8,
           reductionRatio: 0.55,
           maxReductionDb: 6.0,
           minDurationMs: 25,
@@ -173,9 +178,8 @@ export const PRESETS = {
           },
         },
       },
-      /*
       {
-        // Conservative — 
+        // Conservative —
         throatClickAttenuator: {
           sensitivityDb: 10,
           nrmsThreshold: 3.0,
@@ -185,7 +189,7 @@ export const PRESETS = {
           padMs: 4,
         },
       },
-      */
+
       "correctiveEQ",
       "remeasureFramesPostNr",
       {
@@ -209,7 +213,7 @@ export const PRESETS = {
         ],
       },
       "remeasureFramesPostNr",
-      "noiseReduce",
+      { noiseReduce: { model: "dtln" } },
       {
         parallelCompression: {
           ratio: 20,
@@ -238,7 +242,7 @@ export const PRESETS = {
       },
       {
         airBoost: {
-          gainDb: 8,
+          gainDb: 2,
           sibilantGainFloor: 0,
           sibilanceDetection: {
             p95_trigger_db: 6.0,
@@ -264,15 +268,15 @@ export const PRESETS = {
       "correctiveEQ",
       "referenceEQ",
       { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
-      
+
       {
         resonanceSuppressor: [
           {
             depth: 0.67,
-            sharpness: 0.5,
+            sharpness: 0.8,
             selectivity: 3,
             attack_ms: 15.0,
-            release_ms: 50.0,
+            release_ms: 80.0,
             max_reduction_db: 36.0,
             freq_floor_hz: 40.0,
             freq_ceil_hz: 20000.0,
@@ -285,7 +289,7 @@ export const PRESETS = {
             sharpness: 0.4,
             selectivity: 1,
             attack_ms: 5.0,
-            release_ms: 5.0,
+            release_ms: 10.0,
             max_reduction_db: 25.0,
             freq_floor_hz: 3000.0,
             freq_ceil_hz: 10000.0,
@@ -300,12 +304,12 @@ export const PRESETS = {
           },
         ],
       },
-      
+
       {
-      roomPresence: {
+        roomPresence: {
           enabled: true,
           ir_path: "../ir/MRV_VocalBoot_m-m.wav",
-          wet: 0.03,
+          wet: 0.02,
           rt60Ms: 250,
           preDelayMs: 10.0,
           early_reflections: 2,
@@ -331,7 +335,6 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: "LUFS" },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    noiseModel: "df3",
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
@@ -344,7 +347,7 @@ export const PRESETS = {
       { clickRemover: { thresholdSigma: 3.5, maxClickMs: 15 } },
       "humDetect",
       "hpf",
-      "noiseReduce",
+      { noiseReduce: { model: "df3" } },
       "remeasureFramesPostNr",
       {
         autoLeveler: {
@@ -373,7 +376,7 @@ export const PRESETS = {
           transientMaxReductionDb: 6,
         },
       },
-      "bandwidthExtension",
+      { bandwidthExtension: { enabled: false, model: "ap-bwe" } },
       "vocalSaturation",
       {
         vadGate: {
@@ -423,7 +426,7 @@ export const PRESETS = {
         ],
       },
       "remeasureFramesPostNr",
-      "noiseReduce",
+      { noiseReduce: { model: "df3" } },
       {
         parallelCompression: {
           ratio: 10,
@@ -499,11 +502,9 @@ export const PRESETS = {
     targetLoudness: { value: -16, unit: "LUFS" },
     truePeakCeiling: -1,
     noiseFloorTarget: null,
-    noiseModel: "df3",
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
-    bweModel: "ap_bwe",
     stages: [
       "decode",
       "monoMixdown",
@@ -513,7 +514,7 @@ export const PRESETS = {
       { clickRemover: { thresholdSigma: 3.5, maxClickMs: 10 } },
       "humDetect",
       "hpf",
-      "noiseReduce",
+      { noiseReduce: { model: "df3" } },
       "remeasureFramesPostNr",
       {
         autoLeveler: {
@@ -542,7 +543,7 @@ export const PRESETS = {
           transientMaxReductionDb: 6,
         },
       },
-      "bandwidthExtension",
+      { bandwidthExtension: { enabled: false, model: "ap_bwe" } },
       "vocalSaturation",
       {
         vadGate: {
@@ -581,7 +582,7 @@ export const PRESETS = {
         },
       },
       "remeasureFramesPostNr",
-      "noiseReduce",
+      { noiseReduce: { model: "df3" } },
       {
         parallelCompression: {
           ratio: 10,
@@ -670,7 +671,6 @@ export const PRESETS = {
     channelOutput: "mono",
     defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
-    noiseModel: "df3",
     // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
     // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
     // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
@@ -692,11 +692,11 @@ export const PRESETS = {
           transientMaxReductionDb: 6,
         },
       },
-      "noiseReduce",
+      { noiseReduce: { model: "df3" } },
       "tonalPretreatment",
       "separateVocals",
       "separationValidation",
-      "bandwidthExtension",
+      { bandwidthExtension: { enabled: false, model: "ap-bwe" } },
       "remeasureFramesPostNr",
       {
         vocalExpander: {
