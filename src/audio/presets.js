@@ -262,6 +262,7 @@ export const PRESETS = {
       },
       */
       "correctiveEQ",
+      "referenceEQ",
       { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } },
       
       {
@@ -459,6 +460,7 @@ export const PRESETS = {
         },
       },
       "correctiveEQ",
+      "referenceEQ",
       {
         throatClickAttenuator: {
           sensitivityDb: 10,
@@ -626,6 +628,7 @@ export const PRESETS = {
         },
       },
       "correctiveEQ",
+      "referenceEQ",
       {
         throatClickAttenuator: {
           sensitivityDb: 10,

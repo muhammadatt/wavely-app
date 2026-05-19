@@ -188,6 +188,7 @@ function buildReport(ctx) {
       ...(results.noiseReduction && { noise_reduction:   formatNrResult(results.noiseReduction) }),
       ...(results.dereverb       && { dereverberation:   formatDereverbResult(results.dereverb) }),
       ...(results.correctiveEQ   && { corrective_eq:     formatCorrectiveEqResult(results.correctiveEQ) }),
+      ...(results.referenceEQ?.applied && { reference_eq: formatReferenceEqResult(results.referenceEQ) }),
       ...(results.airBoost       && { air_boost:          formatAirBoostResult(results.airBoost) }),
       ...(results.roomTonePad    && { room_tone_padding:  formatRoomToneResult(results.roomTonePad) }),
       ...(results.deEss          && { de_esser:           formatDeEssResult(results.deEss) }),
@@ -283,6 +284,38 @@ function formatCorrectiveEqResult(r) {
       freq_hz:   b.freq_hz,
       direction: b.gain_db < 0 ? 'reduced' : 'boosted',
     })),
+  }
+}
+
+// referenceEQ — broad tonal correction. The full correction curve is in the
+// processing log; the user-facing report shows only region-level labels for
+// adjustments that exceed ±0.5 dB. Rendered only when the stage applied.
+function formatReferenceEqResult(r) {
+  if (!r?.applied) return null
+
+  const { frequencies_hz: freqs, applied_db: applied } = r.correction_curve
+  const meanInRange = (lo, hi) => {
+    let sum = 0, n = 0
+    for (let i = 0; i < freqs.length; i++) {
+      if (freqs[i] >= lo && freqs[i] <= hi) { sum += applied[i]; n++ }
+    }
+    return n > 0 ? sum / n : 0
+  }
+
+  const adjustments = []
+  const label = (mean, boostLabel, cutLabel) => {
+    if (mean > 0.5)       adjustments.push(boostLabel)
+    else if (mean < -0.5) adjustments.push(cutLabel)
+  }
+  label(meanInRange(150, 500),    'Warmth boosted',  'Low-mid reduced')
+  label(meanInRange(1500, 5000),  'Presence lifted', 'Presence reduced')
+  label(meanInRange(6000, 16000), 'Air boosted',     'High-frequency reduced')
+
+  return {
+    applied:           true,
+    max_correction_db: r.max_correction_db,
+    acx_constrained:   r.acx_constrained ?? false,
+    adjustments,
   }
 }
 
