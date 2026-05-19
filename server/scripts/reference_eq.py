@@ -56,20 +56,20 @@ DENSE_GRID_N    = 512
 
 # Per-region (boost, cut) caps in dB — see spec §B4. The sub-500 Hz boost cap is
 # overridable so the Node side can tighten it on the ACX noise-floor retry.
-DEFAULT_LF_MAX_BOOST_DB = 2.0
+DEFAULT_LF_MAX_BOOST_DB = 4.0
 
 
 def region_caps(freq_hz, lf_max_boost_db):
     """Return (max_boost_db, max_cut_db) for a 1/3-octave centre frequency."""
     if freq_hz < 500:
-        return (lf_max_boost_db, 2.0)
+        return (lf_max_boost_db, 5.0)
     if freq_hz < 2000:
-        return (3.0, 4.0)
+        return (6.0, 8.0)
     if freq_hz < 6000:
-        return (3.5, 4.5)
+        return (7, 7)
     if freq_hz < 10000:
-        return (2.5, 4.0)
-    return (2.0, 5.0)
+        return (5, 8)
+    return (4.0, 10)
 
 
 # ── Spectrum measurement ──────────────────────────────────────────────────────
