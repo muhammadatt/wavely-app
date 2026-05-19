@@ -39,7 +39,9 @@ logger = logging.getLogger(__name__)
 
 SPEC_VERSION   = '1.0'
 MIN_CORPUS_FILES = 8           # hard floor — see spec §A1
-PRESETS        = ['acx_audiobook', 'podcast_ready', 'voice_ready', 'general_clean']
+# Non-noise_eraser presets defined in src/audio/presets.js. noise_eraser is
+# excluded — source separation invalidates corpus comparison.
+PRESETS        = ['acx_audiobook', 'podcast_ready', 'general_clean']
 
 # Repository-relative defaults. This script lives in server/scripts/.
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
@@ -47,7 +49,9 @@ _REPO_ROOT   = os.path.normpath(os.path.join(_SCRIPT_DIR, '..', '..'))
 DEFAULT_CORPUS_DIR = os.path.join(_REPO_ROOT, 'data', 'corpus')
 DEFAULT_OUTPUT_DIR = os.path.join(_REPO_ROOT, 'data', 'reference_curves')
 
-AUDIO_EXTS = ('.wav', '.flac', '.aiff', '.aif')
+# WAV only — _load_audio reads via scipy.io.wavfile, which does not decode
+# other container formats. Convert corpus audio to WAV before building.
+AUDIO_EXTS = ('.wav',)
 
 
 def build_preset_curve(preset_id, corpus_dir, output_dir):

@@ -68,13 +68,21 @@ revisited once the corpus is large enough to support stable per-type medians.
 
 ## Pipeline Placement
 
-`referenceEQ` runs immediately after `correctiveEQ` in `STANDARD_PIPELINE` (and any other
-non-`noise_eraser` pipeline). It operates on the Stage 3a-corrected signal and writes a new
-audio file into the pool, following the existing `ctx.currentPath` convention.
+`referenceEQ` runs immediately after the **final** `correctiveEQ` entry in each
+non-`noise_eraser` preset's stage sequence. It operates on the corrective-EQ'd signal and
+writes a new audio file into the pool, following the existing `ctx.currentPath` convention.
+
+In the shipped presets the EQ stages are not a single contiguous block — `airBoost` runs
+earlier in the chain than the final `correctiveEQ`. `referenceEQ` is placed directly after
+that final `correctiveEQ`, so its real position is:
 
 ```
-… → resonanceSuppressor → correctiveEQ → referenceEQ → … → airBoost → …
+… → airBoost → … → correctiveEQ → referenceEQ → … → normalize → …
 ```
+
+That `airBoost` precedes `referenceEQ` is the reason the air-region correction caps are kept
+conservative (see Architectural Boundaries).
+
 
 ---
 
@@ -127,7 +135,6 @@ data/corpus/                  (gitignored — not committed)
     narrator_02.wav
     ...
   podcast_ready/
-  voice_ready/
   general_clean/
 ```
 
@@ -189,11 +196,12 @@ If fewer than 8 valid spectra are available, the build fails for that preset.
 One JSON file per preset, stored in `data/reference_curves/` and committed to the repository.
 File naming: `{preset_id}.json`.
 
+One file per non-`noise_eraser` preset defined in `src/audio/presets.js`:
+
 ```
 data/reference_curves/
   acx_audiobook.json
   podcast_ready.json
-  voice_ready.json
   general_clean.json
 ```
 
@@ -231,9 +239,9 @@ change. Do not update curves silently.
 
 ### A6 — Corpus Build Script
 
-A standalone offline script (`scripts/build_reference_curves.py`) builds all curves from
-`data/corpus/`. Run when the corpus changes, not on each server start. It enforces the 8-file
-minimum and writes one JSON per preset to `data/reference_curves/`.
+A standalone offline script (`server/scripts/build_reference_curves.py`) builds all curves
+from `data/corpus/`. Run when the corpus changes, not on each server start. It enforces the
+8-file minimum and writes one JSON per preset to `data/reference_curves/`.
 
 ---
 
@@ -241,8 +249,12 @@ minimum and writes one JSON per preset to `data/reference_curves/`.
 
 ### B1 — Reference Curve Loading
 
-Reference curves are loaded from disk **once at server startup** and held in memory. If no
-file exists for a preset, that preset's entry is absent and `referenceEQ` skips for it.
+`referenceEQ` runs in a `reference_eq.py` subprocess, so the curve JSON is read by that
+subprocess on each invocation — the file is small (~25 floats) and the read cost is
+negligible against the FIR convolution. The Node stage module caches only the resolved curve
+*path* per preset for the process lifetime (`getReferenceCurvePath`), so the on-disk lookup
+happens at most once per preset. If no curve file exists for a preset, `referenceEQ` skips
+cleanly for it.
 
 ### B2 — Recording Spectrum Measurement
 
@@ -297,8 +309,8 @@ distortion (unlike IIR), which matters for speech intelligibility, and an FIR re
 arbitrary smooth shape without fitting error. This is a deliberate divergence from the
 FFmpeg-based EQ used by `correctiveEQ`/`airBoost`/`humEQ`: a broad smooth match-curve is the
 one EQ task where FIR is clearly the right tool. Application runs in a Python script
-(`scripts/reference_eq.py`, scipy), consistent with the existing Python-script pattern; the
-Node stage module spawns it and parses the result, mirroring `correctiveEQ.js`.
+(`server/scripts/reference_eq.py`, scipy), consistent with the existing Python-script
+pattern; the Node stage module spawns it and parses the result, mirroring `correctiveEQ.js`.
 
 **FIR construction — fixed in this revision.** `scipy.signal.firwin2` interpolates **linearly
 in linear frequency and linear gain** between the supplied points. Handing it the 25

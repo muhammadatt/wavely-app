@@ -91,17 +91,16 @@ def speech_spectrum(audio, sr, noise_floor_db=None):
         return None, 0
 
     window = np.hanning(FRAME_SIZE).astype(np.float32)
-    starts = range(0, len(audio) - FRAME_SIZE + 1, HOP_SIZE)
+    starts = list(range(0, len(audio) - FRAME_SIZE + 1, HOP_SIZE))
 
-    frames        = []
-    frame_energy  = []
-    for s in starts:
+    # First pass — per-frame energy only. Frame slices are not retained, so
+    # memory stays flat regardless of file duration.
+    frame_energy = np.empty(len(starts))
+    for i, s in enumerate(starts):
         frame = audio[s:s + FRAME_SIZE]
         rms   = float(np.sqrt(np.mean(frame.astype(np.float64) ** 2)))
-        frames.append(frame)
-        frame_energy.append(20.0 * np.log10(rms + 1e-10))
+        frame_energy[i] = 20.0 * np.log10(rms + 1e-10)
 
-    frame_energy = np.asarray(frame_energy)
     if noise_floor_db is None:
         noise_floor_db = float(np.percentile(frame_energy, 10))
 
@@ -111,13 +110,15 @@ def speech_spectrum(audio, sr, noise_floor_db=None):
     if n_speech < MIN_SPEECH_FRAMES:
         return None, n_speech
 
-    # Mean power spectrum across speech frames.
+    # Second pass — accumulate the mean power spectrum over speech frames only,
+    # re-slicing the audio (NumPy slices are views, not copies).
     freqs = np.fft.rfftfreq(FRAME_SIZE, d=1.0 / sr)
     psd   = np.zeros(len(freqs), dtype=np.float64)
-    for frame, is_speech in zip(frames, speech_mask):
+    for s, is_speech in zip(starts, speech_mask):
         if is_speech:
-            mag = np.abs(np.fft.rfft(frame.astype(np.float64) * window))
-            psd += mag ** 2
+            frame = audio[s:s + FRAME_SIZE]
+            mag   = np.abs(np.fft.rfft(frame.astype(np.float64) * window))
+            psd  += mag ** 2
     psd /= n_speech
 
     # Resample to 1/3-octave bands — average power within each band's edges in
