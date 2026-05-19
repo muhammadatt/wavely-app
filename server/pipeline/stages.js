@@ -51,6 +51,7 @@ import { applyVocalExpander } from './vocalExpander.js'
 import { applyVadGate }       from './vadGate.js'
 import { analyzeHum } from './humEQ.js'
 import { applyAirBoost, applyAirBoostMask } from './airBoost.js'
+import { getReferenceCurvePath, runReferenceEQPass } from './referenceEQ.js'
 import { getF0Contour } from './f0Analysis.js'
 import { analyzeSibilanceEvents } from './sibilanceEvents.js'
 
@@ -643,6 +644,67 @@ export async function correctiveEQ(ctx) {
     voice_type: result.voice_type,
     bands:      bands.length,
     merged:     result.merged_bands ?? 0,
+  })
+}
+
+// ── Stage: referenceEQ ────────────────────────────────────────────────────────
+// Corpus-reference broad tonal correction. Runs after the final correctiveEQ:
+// 3a fixes localised anomalies, referenceEQ fixes broad tonal imbalance via a
+// smooth linear-phase FIR matched toward a per-preset corpus curve.
+//
+// Skips for noise_eraser (source separation invalidates corpus comparison) and
+// skips cleanly when no reference curve file exists for the preset, so the
+// stage is safe to wire in before the corpus is sourced.
+//
+// ACX: a sub-500 Hz boost can lift the noise floor above the -60 dBFS ceiling.
+// The pass is re-run with a tightened sub-500 Hz boost cap until compliant,
+// mirroring correctiveEQ and airBoost.
+
+const REFERENCE_EQ_LF_CAP_START_DB = 2.0
+const REFERENCE_EQ_LF_CAP_STEP_DB  = 0.5
+
+export async function referenceEQ(ctx) {
+  if (ctx.presetId === 'noise_eraser') {
+    ctx.results.referenceEQ = {
+      applied: false,
+      skipped: true,
+      reason:  'noise_eraser preset — referenceEQ does not run on separated audio',
+    }
+    return
+  }
+
+  const curvePath = await getReferenceCurvePath(ctx.presetId)
+  if (!curvePath) {
+    ctx.log(`[referenceEQ] no reference curve for preset "${ctx.presetId}" — skipped`)
+    ctx.results.referenceEQ = {
+      applied: false,
+      skipped: true,
+      reason:  'no reference curve available for preset',
+    }
+    return
+  }
+
+  let lfMaxBoostDb = REFERENCE_EQ_LF_CAP_START_DB
+  let { result, outputPath } = await runReferenceEQPass(ctx, curvePath, lfMaxBoostDb)
+
+  if (result.applied && ctx.outputProfileId === 'acx' && result.lf_boost_applied) {
+    for (let iter = 0; iter < 5; iter++) {
+      const m = await remeasureFrames(outputPath, ctx.results.metrics)
+      if (m.noiseFloorDbfs <= -60) break
+      if (lfMaxBoostDb <= 0) break  // sub-500 Hz boost already fully capped
+      lfMaxBoostDb = Math.max(0, lfMaxBoostDb - REFERENCE_EQ_LF_CAP_STEP_DB)
+      ctx.log(`[referenceEQ] ACX noise floor ${m.noiseFloorDbfs} dBFS > -60 — tightening sub-500 Hz boost cap to ${lfMaxBoostDb} dB`)
+      ;({ result, outputPath } = await runReferenceEQPass(ctx, curvePath, lfMaxBoostDb))
+      result.acx_constrained = true
+      if (!result.applied) break
+    }
+  }
+
+  if (result.applied && outputPath) ctx.currentPath = outputPath
+  ctx.results.referenceEQ = result
+  await logLevel(ctx, 'after reference EQ', ctx.currentPath, {
+    status:         result.status,
+    max_correction: result.max_correction_db ?? 0,
   })
 }
 
