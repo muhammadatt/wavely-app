@@ -263,7 +263,7 @@ export const PRESETS = {
       */
       "correctiveEQ",
       "referenceEQ",
-      { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } },
+      { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
       
       {
         resonanceSuppressor: [
@@ -271,16 +271,16 @@ export const PRESETS = {
             depth: 0.67,
             sharpness: 0.5,
             selectivity: 3,
-            attack_ms: 5.0,
-            release_ms: 5.0,
+            attack_ms: 15.0,
+            release_ms: 50.0,
             max_reduction_db: 36.0,
-            freq_floor_hz: 80.0,
+            freq_floor_hz: 40.0,
             freq_ceil_hz: 20000.0,
             mode: "soft",
           },
           {
             sibilant_only: true,
-            preserve_harmonics: true,
+            preserve_harmonics: false,
             depth: 0.67,
             sharpness: 0.4,
             selectivity: 1,
@@ -288,7 +288,7 @@ export const PRESETS = {
             release_ms: 5.0,
             max_reduction_db: 25.0,
             freq_floor_hz: 3000.0,
-            freq_ceil_hz: 12000.0,
+            freq_ceil_hz: 10000.0,
             mode: "soft",
             lifter_cutoff_bins: 3,
             band_summary_max_cluster_bins: 186,

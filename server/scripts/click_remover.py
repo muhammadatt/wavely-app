@@ -11,10 +11,6 @@ Repair:     Autoregressive (Burg method) interpolation. Clean samples on
             both sides of each detected region are used to fit an AR model;
             the click region is replaced with a blend of forward and backward
             predictions.
-
-Pipeline position: Between Pre-4 (VAD/noise floor measurement) and Stage 1
-                   (HPF) in the Instant Polish standard chain.
-
 Usage:
     python click_remover.py input.wav output.wav [options]
     python click_remover.py input.wav output.wav --threshold 3.5 --max-click-ms 15
