@@ -266,16 +266,38 @@ canonical Pre-4 noise floor (`ctx.results.metrics.noiseFloorDbfs`) rather than a
 
 If the recording has too few speech frames to produce a spectrum, skip the stage.
 
-### B3 — Difference, Smoothing, Taper
+### B3 — Difference, Smoothing, Centering, Taper
 
 1. **Raw correction** = `reference_levels − recording_levels`. Positive = needs boost.
 2. **½-octave smoothing** in log-frequency space, applied as a proper weighted (e.g.
    Gaussian) kernel over the 1/3-octave array — *not* a plain neighbour average, which is too
    grid-dependent at this spacing. The kernel σ corresponds to ½ octave.
-3. **Low-frequency taper** to zero below 500 Hz: correction = 0 below 150 Hz, linear ramp
-   0→full from 150→500 Hz, unchanged above 500 Hz. Below 500 Hz, recording-vs-reference
+3. **Unweighted least-squares centering.** Both the recording spectrum and the reference
+   curve are normalised at 800–1200 Hz (§A3, §B2), so the raw correction carries an arbitrary
+   global dB offset. That offset does not change the correction's *relative shape* (the only
+   thing that matters — a constant offset is erased by Stage 5 loudness normalisation), so it
+   is free to choose. Subtract the **unweighted mean** of the correction over the actively
+   corrected bands; this minimises the total squared excursion, which is what determines how
+   hard the per-region caps in §B4 bite. A poorly placed offset forces one region to carry
+   its whole correction by moving every other band, pushing the far bands into their caps and
+   distorting the realised shape; centering spreads the excursion so no region is forced to
+   the cap unnecessarily. The mean is taken **only over the fully active bands** (taper
+   factor 1.0, i.e. ≥ 500 Hz) — the tapered low bands are untrusted and would bias the
+   offset. Centering is unweighted by design: every actively corrected band's shape error
+   counts equally, which is the correct objective for faithful shape reproduction. A
+   perceptually weighted offset was considered and rejected — weighting the offset toward the
+   presence region collapses it back toward a fixed single-band anchor, recreating exactly
+   the clamping concentration centering is meant to avoid.
+4. **Low-frequency taper** to zero below 500 Hz: correction = 0 below 150 Hz, linear ramp
+   0→full from 150→500 Hz, unchanged above 500 Hz. Applied *after* centering, so the centered
+   low-band values are tapered back toward zero. Below 500 Hz, recording-vs-reference
    differences reflect F0 and vocal-anatomy variation more than correctable recording
    problems, and v1 has no voice-type split to disambiguate them.
+
+> The rigorous optimum would choose the offset to directly minimise the *post-clamp* error
+> (a cheap 1-D search, since the offset is a single scalar). The unweighted mean lands within
+> a fraction of a dB of that for the small caps this stage uses, so v1 ships the mean; the
+> cap-aware search is a possible future refinement.
 
 ### B4 — Scaling and Per-Region Caps
 
@@ -347,6 +369,8 @@ load reference curve for preset       → skip if absent
 measure recording spectrum (§B2)      → skip if too few speech frames
 raw correction = reference − recording
 smooth (½-octave, log-Gaussian)       (§B3)
+center (subtract unweighted mean of   (§B3)
+        active bands ≥ 500 Hz)
 taper below 500 Hz                    (§B3)
 scale ×0.65, clamp per region         (§B4)
 if max|correction| < 0.5 dB           → skip (§B5)
@@ -386,6 +410,7 @@ processing.
   "reference_spec_version": "1.0",
   "n_corpus_files": 12,
   "max_correction_db": 3.67,
+  "centering_offset_db": 1.21,
   "fir_taps": 2049,
   "acx_constrained": false,
   "correction_curve": {
