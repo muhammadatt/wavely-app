@@ -166,7 +166,7 @@ def low_freq_taper():
 def compute_correction(reference_levels, recording_levels, lf_max_boost_db):
     """
     Build the capped, scaled, tapered correction curve (dB per 1/3-octave band).
-    Returns (raw_db, smoothed_db, applied_db).
+    Returns (raw_db, smoothed_db, applied_db, centering_offset_db).
     """
     reference_levels = np.asarray(reference_levels, dtype=float)
     recording_levels = np.asarray(recording_levels, dtype=float)
@@ -175,15 +175,30 @@ def compute_correction(reference_levels, recording_levels, lf_max_boost_db):
     raw = np.where(np.isfinite(raw), raw, 0.0)
 
     smoothed = log_gaussian_smooth(raw, SMOOTH_OCTAVES)
-    tapered  = smoothed * low_freq_taper()
-    scaled   = tapered * SCALE_FACTOR
+
+    # Unweighted least-squares centering. The correction's relative shape is
+    # independent of any global dB offset (Stage 5 loudness normalisation
+    # erases a constant offset anyway), so the offset is free to choose.
+    # Subtracting the mean of the actively corrected bands minimises the total
+    # squared excursion, which keeps bands away from the per-region caps — no
+    # single region is forced to carry the whole correction by moving every
+    # other band. The offset is measured only over the fully active bands
+    # (taper factor 1.0, i.e. >= 500 Hz); the low-frequency taper region is
+    # excluded so its untrusted, soon-to-be-zeroed values do not bias it.
+    taper            = low_freq_taper()
+    active           = taper >= 1.0
+    centering_offset = float(np.mean(smoothed[active]))
+    centered         = smoothed - centering_offset
+
+    tapered = centered * taper
+    scaled  = tapered * SCALE_FACTOR
 
     applied = np.empty_like(scaled)
     for i, fc in enumerate(THIRD_OCTAVE_CENTERS):
         max_boost, max_cut = region_caps(fc, lf_max_boost_db)
         applied[i] = float(np.clip(scaled[i], -max_cut, max_boost))
 
-    return raw, smoothed, applied
+    return raw, smoothed, applied, centering_offset
 
 
 def build_fir(applied_db, sr):
@@ -220,7 +235,7 @@ def run(audio, sr, reference_levels, noise_floor_db, lf_max_boost_db):
             'reason':  f'insufficient speech content ({n_speech} frames)',
         }, None
 
-    raw, smoothed, applied = compute_correction(
+    raw, smoothed, applied, centering_offset = compute_correction(
         reference_levels, recording_levels, lf_max_boost_db,
     )
     max_correction = float(np.max(np.abs(applied)))
@@ -248,10 +263,11 @@ def run(audio, sr, reference_levels, noise_floor_db, lf_max_boost_db):
         'status':            'applied',
         'applied':           True,
         'n_speech_frames':   n_speech,
-        'max_correction_db': round(max_correction, 3),
-        'lf_boost_applied':  lf_boost,
-        'lf_max_boost_db':   round(lf_max_boost_db, 3),
-        'fir_taps':          N_TAPS,
+        'max_correction_db':  round(max_correction, 3),
+        'centering_offset_db': round(centering_offset, 3),
+        'lf_boost_applied':   lf_boost,
+        'lf_max_boost_db':    round(lf_max_boost_db, 3),
+        'fir_taps':           N_TAPS,
         'correction_curve': {
             'frequencies_hz': THIRD_OCTAVE_CENTERS.tolist(),
             'raw_db':         [round(float(v), 3) for v in raw],
