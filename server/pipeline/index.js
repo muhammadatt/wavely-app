@@ -325,15 +325,19 @@ function formatAirBoostResult(r) {
       applied:           false,
       requested_gain_db: r.requested_gain_db,
       skip_reason:       r.skip_reason,
+      ...(r.pre_attenuation && { pre_attenuation: r.pre_attenuation }),
     }
   }
   return {
-    applied:           true,
-    requested_gain_db: r.requested_gain_db,
-    applied_gain_db:   r.applied_gain_db,
-    acx_constrained:   r.acx_constrained ?? false,
-    model:             r.model,
-    shelves:           r.shelves,
+    applied:                   true,
+    requested_gain_db:         r.requested_gain_db,
+    applied_gain_db:           r.applied_gain_db,
+    acx_constrained:           r.acx_constrained ?? false,
+    model:                     r.model,
+    shelves:                   r.shelves,
+    ...(r.gain_db_reduced_by_precut > 0
+      && { gain_db_reduced_by_precut: r.gain_db_reduced_by_precut }),
+    ...(r.pre_attenuation && { pre_attenuation: r.pre_attenuation }),
   }
 }
 

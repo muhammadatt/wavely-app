@@ -245,6 +245,9 @@ export const PRESETS = {
             min_flatness: 0.1,
             broadband_trigger_db: 10.0,
           },
+          // Predictive pre-attenuation — conservative for ACX human review.
+          // Gated on data/reference_curves/acx_audiobook.json existing.
+          precut: { enabled: true, maxCutDb: 4.0, minExcessDb: 1.5 },
         },
       },
       /*
@@ -450,7 +453,12 @@ export const PRESETS = {
           detectionBand: { lowHz: 80, highHz: 800 },
         },
       },
-      { airBoost: { gainDb: 2.5, sibilantGainFloor: 0.25 } },
+      { airBoost: {
+          gainDb: 2.5,
+          sibilantGainFloor: 0.25,
+          precut: { enabled: true, maxCutDb: 6.0, minExcessDb: 1.0 },
+        },
+      },
       {
         resonanceSuppressor: {
           depth: 0.65,
@@ -613,6 +621,7 @@ export const PRESETS = {
           gainDb: 16,
           sibilantGainFloor: 0.0,
           sibilanceDetection: { broadband_trigger_db: 9.0 },
+          precut: { enabled: true, maxCutDb: 6.0, minExcessDb: 1.0 },
         },
       },
       {
