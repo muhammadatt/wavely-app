@@ -434,11 +434,6 @@ export async function spectralSubtraction(ctx) {
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
 
-// Skip the second noise reduction pass if the the noise floor is already
-// below -75 db -- a 15 dB margin beyond the ACX -60 dBFS ceiling.
-const NR_SECOND_PASS_SKIP_THRESHOLD_DBFS =
-  parseFloat(process.env.NR_SECOND_PASS_SKIP_THRESHOLD_DBFS ?? '-85')
-
 // Maximum makeup gain applied after NR to compensate for speech-level drop
 // caused by spectral masking. Capped to prevent over-amplification on
 // pathological files where DF3 legitimately removes a large portion of energy.
@@ -450,26 +445,37 @@ const NR_MAKEUP_THRESHOLD_DB = 0.3
 
 export async function noiseReduce(ctx) {
   const model         = ctx.preset.noiseReduce?.model ?? 'df3'
+  const skipBelowDb   = ctx.preset.noiseReduce?.skipBelowDb ?? null
   const outPath       = ctx.tmp('.wav')
   const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
 
-  // Second-pass skip: if a prior noiseReduce already populated the result and
-  // the noise floor (refreshed by remeasureFramesPostNr before this stage) is
-  // already below the skip threshold, leave the audio untouched.
+  // Per-pass skip: if skipBelowDb is configured and the current noise floor
+  // (refreshed by any preceding remeasureFramesPostNr) is already below it,
+  // leave the audio untouched. Applies to whichever pass this is — first,
+  // second, third, etc. If skipBelowDb is absent, the pass always runs.
   if (
-    ctx.results.noiseReduction
+    skipBelowDb !== null
     && preNoiseFloor !== null
-    && preNoiseFloor < NR_SECOND_PASS_SKIP_THRESHOLD_DBFS
+    && preNoiseFloor < skipBelowDb
   ) {
-    ctx.results.noiseReduction = {
-      ...ctx.results.noiseReduction,
-      secondPassSkipped:       true,
-      secondPassSkipReason:    `noise floor ${preNoiseFloor} dBFS < threshold ${NR_SECOND_PASS_SKIP_THRESHOLD_DBFS} dBFS`,
-      secondPassFloorDbfs:     preNoiseFloor,
+    const skipInfo = {
+      skipped:           true,
+      skipReason:        `noise floor ${preNoiseFloor} dBFS < threshold ${skipBelowDb} dBFS`,
+      skipFloorDbfs:     preNoiseFloor,
+      skipThresholdDbfs: skipBelowDb,
     }
+    ctx.results.noiseReduction = ctx.results.noiseReduction
+      ? { ...ctx.results.noiseReduction, ...skipInfo }
+      : {
+          applied:               false,
+          model,
+          pre_noise_floor_dbfs:  preNoiseFloor,
+          post_noise_floor_dbfs: null,
+          ...skipInfo,
+        }
     ctx.log(
-      `[NR] Second pass skipped — noise floor ${preNoiseFloor} dBFS already below ` +
-      `${NR_SECOND_PASS_SKIP_THRESHOLD_DBFS} dBFS threshold`
+      `[NR] Pass skipped — noise floor ${preNoiseFloor} dBFS already below ` +
+      `${skipBelowDb} dBFS threshold`
     )
     return
   }

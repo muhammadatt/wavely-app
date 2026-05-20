@@ -91,7 +91,7 @@ export function resolveOutputProfileId(id) {
  * @property {'demucs'|'convtasnet'} [separationModel]   - Noise Eraser only
  * @property {'mossformer2_48k'|'frcrn_16k'} [clearervoiceModel]   - ClearerVoice Eraser only
  * @property {{ enabled: boolean, model?: 'ap-bwe'|'ap_bwe'|'lavasr', postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bandwidthExtension - Bandwidth extension; enabled for NE presets, disabled for standard presets. model selects the backend ('ap-bwe' default, 'lavasr'). postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
- * @property {{ model?: 'df3'|'rnnoise'|'dtln' }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). When the stage is listed more than once, each call can carry its own model.
+ * @property {{ model?: 'df3'|'rnnoise'|'dtln', skipBelowDb?: number }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). skipBelowDb skips this pass entirely if the current noise floor is already below the given dBFS (e.g. -85). When the stage is listed more than once, each call can carry its own model and skipBelowDb.
  */
 
 /** @type {Record<string, Preset>} */
@@ -116,7 +116,7 @@ export const PRESETS = {
       "analyzeFramesRaw",
       "humDetect",
       "hpf",
-      { noiseReduce: { model: "rnnoise" } }, //"df3", "rnnoise", "dtln"
+      { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
       {
         bandwidthExtension: {
           enabled: true,
@@ -213,7 +213,7 @@ export const PRESETS = {
         ],
       },
       "remeasureFramesPostNr",
-      { noiseReduce: { model: "dtln" } },
+      { noiseReduce: { model: "rrnoise", skipBelowDb: -70 } },
       {
         parallelCompression: {
           ratio: 20,
@@ -426,7 +426,7 @@ export const PRESETS = {
         ],
       },
       "remeasureFramesPostNr",
-      { noiseReduce: { model: "df3" } },
+      { noiseReduce: { model: "df3", skipBelowDb: -85 } },
       {
         parallelCompression: {
           ratio: 10,
@@ -582,7 +582,7 @@ export const PRESETS = {
         },
       },
       "remeasureFramesPostNr",
-      { noiseReduce: { model: "df3" } },
+      { noiseReduce: { model: "df3", skipBelowDb: -85 } },
       {
         parallelCompression: {
           ratio: 10,
