@@ -32,16 +32,22 @@
 import { spawn }           from 'child_process'
 import { fileURLToPath }  from 'url'
 import path               from 'path'
-import { applyParametricEQ } from '../lib/ffmpeg.js'
+import { readFile }       from 'fs/promises'
+import { applyParametricEQ, tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { remeasureFrames }    from './frameAnalysis.js'
-import { PYTHON }         from './spawnPython.js'
+import { PYTHON, spawnPython } from './spawnPython.js'
+import { getReferenceCurvePath } from './referenceEQ.js'
 
-const SCRIPTS_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
-const MASK_SCRIPT  = path.join(SCRIPTS_DIR, 'air_boost_masked.py')
+const SCRIPTS_DIR    = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
+const MASK_SCRIPT    = path.join(SCRIPTS_DIR, 'air_boost_masked.py')
+const PRECUT_SCRIPT  = path.join(SCRIPTS_DIR, 'air_boost_precut.py')
 
 const ACX_NOISE_FLOOR_CEILING = -60   // dBFS — ACX hard ceiling
 const ACX_PRE_CHECK_LIMIT     = -61   // dBFS — skip if already this close before boost
 const REDUCTION_STEP_DB       = 0.25  // dB per iteration of the ACX reduction loop
+
+const DEFAULT_PRECUT_MAX_CUT_DB    = 6.0
+const DEFAULT_PRECUT_MIN_EXCESS_DB = 1.0
 
 // ─── Filter model ────────────────────────────────────────────────────────────
 //
@@ -103,16 +109,104 @@ function bandsReport(gainDb) {
 function round4(x) { return Math.round(x * 10000) / 10000 }
 
 /**
+ * Diagnostic fragment about the precut analysis — always safe to merge, even
+ * into a skipped-stage result. Does NOT include `pre_attenuation`; that field
+ * is added separately by the success path because it represents a filter the
+ * stage actually applied to audio.
+ */
+function buildPrecutDiagnostic(precut, precutErr) {
+  if (!precut) return { precut: { ran: false, reason: 'no_preset_context' } }
+  if (precutErr) {
+    return { precut: { ran: false, reason: 'script_error', error: precutErr } }
+  }
+  if (!precut.applied) {
+    return {
+      precut: {
+        ran:             true,
+        applied:         false,
+        reason:          precut.reason,
+        n_speech_frames: precut.n_speech_frames,
+      },
+    }
+  }
+  return {
+    precut: {
+      ran:                       true,
+      applied:                   true,
+      gain_db_reduction:         precut.gain_db_reduction ?? 0,
+      peak_excess_db:            precut.peak_excess_db,
+      excess_curve_db:           precut.excess_curve_db,
+      excess_curve_freqs_hz:     precut.excess_curve_freqs_hz,
+      reference_corpus_version:  precut.reference_corpus_version,
+      reference_spec_version:    precut.reference_spec_version,
+    },
+  }
+}
+
+/**
+ * Run the predictive pre-attenuation analysis (air_boost_precut.py).
+ *
+ * Measures the current spectrum, predicts the post-airBoost magnitude in the
+ * 6-16 kHz region, and sizes a single bell cut sized to bring any predicted
+ * excess down to the preset's referenceEQ target curve. Returns a normalised
+ * object regardless of whether a cut is applied.
+ *
+ * Gated on reference-curve presence: with no curve at
+ * data/reference_curves/{presetId}.json this is a clean no-op (mirroring how
+ * referenceEQ itself behaves while the corpus is being built).
+ */
+async function runPrecutAnalysis(inputPath, gainDb, presetId, precutConfig, noiseFloorDbfs) {
+  if (precutConfig?.enabled === false) {
+    return { applied: false, reason: 'precut_disabled' }
+  }
+  const curvePath = await getReferenceCurvePath(presetId)
+  if (!curvePath) {
+    return { applied: false, reason: 'no_reference_curve' }
+  }
+
+  const maxCutDb    = precutConfig?.maxCutDb    ?? DEFAULT_PRECUT_MAX_CUT_DB
+  const minExcessDb = precutConfig?.minExcessDb ?? DEFAULT_PRECUT_MIN_EXCESS_DB
+
+  const resultPath = tempPath('.json')
+
+  const args = [
+    '--input',         inputPath,
+    '--result-json',   resultPath,
+    '--curve',         curvePath,
+    '--air-boost-db',  String(gainDb),
+    '--max-cut-db',    String(maxCutDb),
+    '--min-excess-db', String(minExcessDb),
+  ]
+  if (noiseFloorDbfs != null) args.push('--noise-floor', String(noiseFloorDbfs))
+
+  try {
+    await spawnPython(PRECUT_SCRIPT, args, 'AirBoostPrecut')
+    const text = await readFile(resultPath, 'utf8')
+    return JSON.parse(text)
+  } finally {
+    await removeTmp(resultPath)
+  }
+}
+
+/**
  * Apply the Air Boost filter chain to inputPath, writing the result to outputPath.
+ *
+ * When a reference curve exists for the preset, a predictive pre-cut is
+ * computed and prepended to the FFmpeg filter chain (no extra file hop). The
+ * pre-cut can also instruct a reduction to the airBoost gain itself when the
+ * raw predicted excess would exceed the configured clamp ceiling.
  *
  * @param {string} inputPath        Source WAV (float32, 44.1 kHz)
  * @param {string} outputPath       Destination path (pre-allocated by caller via ctx.tmp)
  * @param {number} gainDb           Requested boost from preset.airBoost.gainDb
  * @param {string} outputProfileId  'acx' | 'podcast' | 'broadcast'
  * @param {object} metrics          ctx.results.metrics — must contain frames[] for remeasure
+ * @param {object} [options]
+ * @param {string} [options.presetId]      Preset id (looked up for reference curve)
+ * @param {object} [options.precutConfig]  { enabled, maxCutDb, minExcessDb }
  * @returns {object}                Result object written to ctx.results.airBoost
  */
-export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfileId, metrics) {
+export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfileId, metrics, options = {}) {
   const requestedGainDb = gainDb
 
   if (gainDb <= 0) {
@@ -138,11 +232,43 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
     }
   }
 
+  // Predictive pre-cut. Computed once on the input; the cut filter and the
+  // gain reduction are held constant inside the ACX post-check loop below.
+  let precut    = null
+  let precutErr = null
+  if (options.presetId) {
+    try {
+      precut = await runPrecutAnalysis(
+        inputPath,
+        gainDb,
+        options.presetId,
+        options.precutConfig,
+        metrics?.noiseFloorDbfs ?? null,
+      )
+    } catch (err) {
+      precutErr = err.message
+      precut    = { applied: false, reason: 'precut_script_error' }
+    }
+  }
+  const precutAppliedFilter = precut?.applied
+    ? `equalizer=f=${precut.center_hz}:width_type=q:w=${precut.q}:g=${precut.gain_db.toFixed(5)}`
+    : null
+  const gainReductionDb = precut?.applied ? (precut.gain_db_reduction ?? 0) : 0
+
   // Apply filter chain, with an ACX noise-floor compliance loop.
-  let currentGain = gainDb
+  let currentGain = gainDb - gainReductionDb
+  if (currentGain <= 0) {
+    return {
+      applied:           false,
+      requested_gain_db: requestedGainDb,
+      skip_reason:       'precut_consumed_all_gain',
+      ...buildPrecutDiagnostic(precut, precutErr),
+    }
+  }
 
   while (true) {
     const filters = buildFilters(currentGain)
+    if (precutAppliedFilter) filters.unshift(precutAppliedFilter)
     await applyParametricEQ(inputPath, outputPath, filters)
 
     if (!isAcx) break  // non-ACX profiles skip the post-check entirely
@@ -159,17 +285,27 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
         applied:           false,
         requested_gain_db: requestedGainDb,
         skip_reason:       'noise_floor_unresolvable',
+        ...buildPrecutDiagnostic(precut, precutErr),
       }
     }
   }
 
   return {
-    applied:           true,
-    requested_gain_db: requestedGainDb,
-    applied_gain_db:   round4(currentGain),
-    acx_constrained:   isAcx && currentGain < requestedGainDb,
-    model:             'maag_eq4_approximation_v1_unverified',
-    bands:             bandsReport(currentGain),
+    applied:                   true,
+    requested_gain_db:         requestedGainDb,
+    applied_gain_db:           round4(currentGain),
+    gain_db_reduced_by_precut: round4(gainReductionDb),
+    acx_constrained:           isAcx && currentGain < (requestedGainDb - gainReductionDb),
+    model:                     'maag_eq4_approximation_v1_unverified',
+    bands:                     bandsReport(currentGain),
+    ...(precut?.applied && {
+      pre_attenuation: {
+        f_hz:    precut.center_hz,
+        q:       precut.q,
+        gain_db: precut.gain_db,
+      },
+    }),
+    ...buildPrecutDiagnostic(precut, precutErr),
   }
 }
 

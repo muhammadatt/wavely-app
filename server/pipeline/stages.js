@@ -838,6 +838,7 @@ export async function airBoost(ctx) {
     gainDb,
     ctx.outputProfileId,
     ctx.results.metrics,
+    { presetId: ctx.presetId, precutConfig: airBoostConfig.precut },
   )
 
   if (result.applied) {
@@ -876,6 +877,12 @@ export async function airBoost(ctx) {
     gainDb:   result.applied_gain_db ?? 'skipped',
     ...(result.skip_reason  && { reason:       result.skip_reason }),
     ...(result.sibilantMask && { sibilantMask: `floor=${sibilantGainFloor}` }),
+    ...(result.pre_attenuation && {
+      preCut: `${result.pre_attenuation.gain_db.toFixed(2)} dB @ ${result.pre_attenuation.f_hz} Hz Q=${result.pre_attenuation.q}`,
+    }),
+    ...(result.gain_db_reduced_by_precut > 0 && {
+      precutGainReduction: `${result.gain_db_reduced_by_precut.toFixed(2)} dB`,
+    }),
   })
 }
 
