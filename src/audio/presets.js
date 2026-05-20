@@ -242,7 +242,7 @@ export const PRESETS = {
       },
       {
         airBoost: {
-          gainDb: 2,
+          gainDb: 5,
           sibilantGainFloor: 0,
           sibilanceDetection: {
             p95_trigger_db: 6.0,
@@ -250,7 +250,6 @@ export const PRESETS = {
             broadband_trigger_db: 10.0,
           },
           // Predictive pre-attenuation — conservative for ACX human review.
-          // Gated on data/reference_curves/acx_audiobook.json existing.
           precut: { enabled: true, maxCutDb: 4.0, minExcessDb: 1.5 },
         },
       },
@@ -268,10 +267,8 @@ export const PRESETS = {
         },
       },
       */
-      "correctiveEQ",
       "referenceEQ",
       { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
-
       {
         resonanceSuppressor: [
           {

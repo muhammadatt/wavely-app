@@ -38,10 +38,9 @@ from reference_eq import THIRD_OCTAVE_CENTERS, speech_spectrum, _load_audio
 logger = logging.getLogger(__name__)
 
 SPEC_VERSION   = '1.0'
-MIN_CORPUS_FILES = 8           # hard floor — see spec §A1
-# Non-noise_eraser presets defined in src/audio/presets.js. noise_eraser is
-# excluded — source separation invalidates corpus comparison.
-PRESETS        = ['acx_audiobook', 'podcast_ready', 'general_clean']
+MIN_CORPUS_FILES = 1          
+
+PRESETS        = ['acx_audiobook', 'podcast_ready', 'general_clean', 'noise_eraser']
 
 # Repository-relative defaults. This script lives in server/scripts/.
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))

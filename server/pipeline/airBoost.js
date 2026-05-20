@@ -9,21 +9,34 @@
  * which cannot be reproduced by standard biquad shelf filters. It requires
  * overlapping wide parametric bands whose sum approximates the sigmoid shape.
  *
- * Reference plateau (REFERENCE_PLATEAU_DB): the net shelf boost measured
- * directly from the Audio Precision plot data published in Sound On Sound
- * (October 2016) — plateau mean (29k–37k Hz) minus baseline mean (20–210 Hz):
- * 16.3972 dBu − 3.8039 dBu = 12.5932 dB. This is the gain value at which
- * the band gRef parameters were fitted. All gains scale linearly from this
- * reference by the factor (air_boost_db / REFERENCE_PLATEAU_DB).
+ * Reference plateau (REFERENCE_PLATEAU_DB): plateau lift measured directly
+ * from canonical Maag EQ4 hardware data (Air Band, 10 kHz corner, knob=10):
+ * 16.460 dBu plateau (median 29k–40k Hz) − 3.910 dBu baseline (median
+ * 50–500 Hz) = 12.55 dB, rounded to 12.5932 (the value used historically;
+ * within measurement noise of the dataset). All gains scale linearly from
+ * this reference by the factor (air_boost_db / REFERENCE_PLATEAU_DB).
  *
- * Fit quality: RMS error 0.063 dB against sigmoid model (500 Hz – 25 kHz).
- * Scaling verification at 18 dB requested against Maag AP data (17 dB setting,
- * baseline-corrected, scaled to 18 dB):
- *   1870 Hz:  Maag +4.43 dB  →  model +4.33 dB  (delta −0.10 dB)
- *   5556 Hz:  Maag +12.36 dB →  model +12.22 dB (delta −0.14 dB)
- *  13610 Hz:  Maag +16.95 dB →  model +16.32 dB (delta −0.63 dB)
+ * The gRef values are fitted directly against the realised FFmpeg
+ * equalizer/highshelf biquad response — not against an analytic sigmoid —
+ * by `server/scripts/fit_airboost_bands.py` using log-frequency RMS
+ * minimisation across 100 Hz – 20 kHz. Resulting fit quality vs. the Maag
+ * hardware curve at reference plateau gain:
+ *   RMS error   : 0.12 dB
+ *   max |error| : 0.30 dB across 100 Hz – 16 kHz
+ *                 (1.15 dB at the 20 kHz edge, from shelf rise near Nyquist;
+ *                  irrelevant for speech content)
  *
- * model: maag_eq4_approximation_v1_unverified
+ * Realised response at the 18 dB setting (impulse → FFT verification):
+ *   1870 Hz:  Maag +4.27 dB  →  model +4.56 dB   (delta +0.29 dB)
+ *   5556 Hz:  Maag +12.45 dB →  model +12.05 dB  (delta −0.40 dB)
+ *  13610 Hz:  Maag +16.83 dB →  model +16.63 dB  (delta −0.21 dB)
+ *
+ * Topology note: the high shelf provides the bulk lift (+22.5 dB at
+ * reference plateau) and the 2.4 / 4.8 / 9.6 kHz bells carve it back into
+ * the Maag's slow log-frequency sigmoid shape. At a typical operating
+ * gain of 2 dB these bells are fractions of a dB each.
+ *
+ * model: maag_eq4_approximation_v2
  *
  * ACX output profile: a pre/post noise floor check constrains the applied
  * gain to keep the noise floor below the -60 dBFS ACX ceiling.
@@ -62,24 +75,26 @@ const DEFAULT_PRECUT_MIN_EXCESS_DB = 1.0
 // At runtime, each gain is scaled by (air_boost_db / REFERENCE_PLATEAU_DB).
 //
 // Measurement notes:
-//   - Low-frequency lift below 300 Hz is < 0.19 dB at reference plateau
-//     (< 0.03 dB at typical operating gains of 1.5–2.5 dB).
-//   - The -0.32 dB gRef at 1200 Hz is a small corrective cut that the
-//     optimiser uses to cancel a slight low-end excess from the 600 Hz band.
-//     At G=2.0 dB this cut is −0.05 dB — inaudible and harmless.
+//   - Low-frequency lift below 300 Hz is < 0.04 dB at reference plateau
+//     (< 0.01 dB at typical operating gains of 1.5–2.5 dB).
+//   - The 2.4 / 4.8 / 9.6 kHz bells have negative gRef values — these are
+//     corrective subtractive shaping that pulls the high shelf's broad
+//     plateau down into the Maag's slow log-frequency sigmoid. They are
+//     not a "cut" in the audible sense; the net response at every audible
+//     frequency is non-negative.
 
 const REFERENCE_PLATEAU_DB = 12.5932
 
 const BANDS = [
   // Parametric peaking bands (bells), Q = 0.5
-  { freqHz:   600, type: 'bell',  q: 0.5,   gRef:  +0.19570 },
-  { freqHz:  1200, type: 'bell',  q: 0.5,   gRef:  -0.32018 },
-  { freqHz:  2400, type: 'bell',  q: 0.5,   gRef:  +1.20294 },
-  { freqHz:  4800, type: 'bell',  q: 0.5,   gRef:  +2.05333 },
-  { freqHz:  9600, type: 'bell',  q: 0.5,   gRef:  +3.46946 },
-  // High shelf — handles the plateau without upper-frequency rolloff
+  { freqHz:   600, type: 'bell',  q: 0.5,   gRef:  -0.02733 },
+  { freqHz:  1200, type: 'bell',  q: 0.5,   gRef:  -0.30754 },
+  { freqHz:  2400, type: 'bell',  q: 0.5,   gRef:  -1.18676 },
+  { freqHz:  4800, type: 'bell',  q: 0.5,   gRef:  -0.90883 },
+  { freqHz:  9600, type: 'bell',  q: 0.5,   gRef:  +0.91883 },
+  // High shelf — provides the bulk plateau lift
   // width_type=o (octaves), w=3.023 oct corresponds to Q=0.4
-  { freqHz: 14000, type: 'shelf', wOct: 3.023, gRef: +15.08686 },
+  { freqHz: 14000, type: 'shelf', wOct: 3.023, gRef: +22.54678 },
 ]
 
 function buildFilters(gainDb) {
@@ -296,7 +311,7 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
     applied_gain_db:           round4(currentGain),
     gain_db_reduced_by_precut: round4(gainReductionDb),
     acx_constrained:           isAcx && currentGain < (requestedGainDb - gainReductionDb),
-    model:                     'maag_eq4_approximation_v1_unverified',
+    model:                     'maag_eq4_approximation_v2',
     bands:                     bandsReport(currentGain),
     ...(precut?.applied && {
       pre_attenuation: {

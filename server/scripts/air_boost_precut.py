@@ -15,8 +15,8 @@ airBoost gain so the residual excess fits inside the clamp.
 
 The BANDS table and REFERENCE_PLATEAU_DB constant are duplicated from
 server/pipeline/airBoost.js — both are version-tagged
-(maag_eq4_approximation_v1_unverified) and stable. A sanity check at module
-load asserts the analytic transfer function reproduces the verification values
+(maag_eq4_approximation_v2) and stable. A sanity check at module load
+asserts the analytic transfer function reproduces the verification values
 in the airBoost.js header.
 
 Dependencies: numpy, scipy
@@ -46,15 +46,15 @@ REFERENCE_PLATEAU_DB = 12.5932
 
 # (freqHz, type, q_or_width_oct, gRef_db)
 BANDS = [
-    (  600.0, 'bell',  0.5,    +0.19570),
-    ( 1200.0, 'bell',  0.5,    -0.32018),
-    ( 2400.0, 'bell',  0.5,    +1.20294),
-    ( 4800.0, 'bell',  0.5,    +2.05333),
-    ( 9600.0, 'bell',  0.5,    +3.46946),
-    (14000.0, 'shelf', 3.023, +15.08686),
+    (  600.0, 'bell',  0.5,    -0.02733),
+    ( 1200.0, 'bell',  0.5,    -0.30754),
+    ( 2400.0, 'bell',  0.5,    -1.18676),
+    ( 4800.0, 'bell',  0.5,    -0.90883),
+    ( 9600.0, 'bell',  0.5,    +0.91883),
+    (14000.0, 'shelf', 3.023, +22.54678),
 ]
 
-MODEL_NAME = 'maag_eq4_approximation_v1_unverified'
+MODEL_NAME = 'maag_eq4_approximation_v2'
 SR_FOR_TF  = 44100.0      # pipeline runs at 44.1 kHz throughout
 
 # Region of interest for the pre-cut: the 1/3-octave bins from 6.3 kHz upward.
@@ -146,15 +146,20 @@ def air_boost_response_db(freq_hz, air_boost_db):
 
 def _sanity_check_transfer_function():
     """
-    The airBoost.js header records the model's response at three frequencies
-    when air_boost_db=18 (extrapolated from a measured 17 dB setting):
-      1870 Hz  → +4.33 dB
-      5556 Hz  → +12.22 dB
-      13610 Hz → +16.32 dB
-    Catch silent drift between Node and Python copies of BANDS.
+    Drift detector for the JS↔Python copies of BANDS.
+
+    The expected values are the response of the current BANDS table — realised
+    through the FFmpeg-equivalent RBJ biquads in this module — at three probe
+    frequencies when air_boost_db=18:
+      1870 Hz  → +4.56 dB
+      5556 Hz  → +12.05 dB
+      13610 Hz → +16.63 dB
+    Verified empirically by running the same filter chain through FFmpeg
+    (impulse → equalizer/highshelf chain → FFT). If either copy of BANDS is
+    edited without updating the other this check will fire.
     """
     check = air_boost_response_db([1870.0, 5556.0, 13610.0], 18.0)
-    expected = np.array([4.33, 12.22, 16.32])
+    expected = np.array([4.56, 12.05, 16.63])
     err = np.abs(check - expected)
     if np.any(err > 0.15):
         raise RuntimeError(
