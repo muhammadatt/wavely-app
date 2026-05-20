@@ -32,7 +32,7 @@
 import { spawn }           from 'child_process'
 import { fileURLToPath }  from 'url'
 import path               from 'path'
-import { readFile, rm }   from 'fs/promises'
+import { readFile }       from 'fs/promises'
 import { applyParametricEQ, tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { remeasureFrames }    from './frameAnalysis.js'
 import { PYTHON, spawnPython } from './spawnPython.js'
@@ -109,11 +109,12 @@ function bandsReport(gainDb) {
 function round4(x) { return Math.round(x * 10000) / 10000 }
 
 /**
- * Shape the precut analyser's payload into the result-object fragment that
- * gets merged into ctx.results.airBoost. Always emits a `precut` key so the
- * report shows whether the analysis ran and (if not) why it was skipped.
+ * Diagnostic fragment about the precut analysis — always safe to merge, even
+ * into a skipped-stage result. Does NOT include `pre_attenuation`; that field
+ * is added separately by the success path because it represents a filter the
+ * stage actually applied to audio.
  */
-function buildPrecutReport(precut, precutErr) {
+function buildPrecutDiagnostic(precut, precutErr) {
   if (!precut) return { precut: { ran: false, reason: 'no_preset_context' } }
   if (precutErr) {
     return { precut: { ran: false, reason: 'script_error', error: precutErr } }
@@ -129,11 +130,6 @@ function buildPrecutReport(precut, precutErr) {
     }
   }
   return {
-    pre_attenuation: {
-      f_hz:    precut.center_hz,
-      q:       precut.q,
-      gain_db: precut.gain_db,
-    },
     precut: {
       ran:                       true,
       applied:                   true,
@@ -266,7 +262,7 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
       applied:           false,
       requested_gain_db: requestedGainDb,
       skip_reason:       'precut_consumed_all_gain',
-      ...buildPrecutReport(precut, precutErr),
+      ...buildPrecutDiagnostic(precut, precutErr),
     }
   }
 
@@ -289,7 +285,7 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
         applied:           false,
         requested_gain_db: requestedGainDb,
         skip_reason:       'noise_floor_unresolvable',
-        ...buildPrecutReport(precut, precutErr),
+        ...buildPrecutDiagnostic(precut, precutErr),
       }
     }
   }
@@ -302,7 +298,14 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
     acx_constrained:           isAcx && currentGain < (requestedGainDb - gainReductionDb),
     model:                     'maag_eq4_approximation_v1_unverified',
     bands:                     bandsReport(currentGain),
-    ...buildPrecutReport(precut, precutErr),
+    ...(precut?.applied && {
+      pre_attenuation: {
+        f_hz:    precut.center_hz,
+        q:       precut.q,
+        gain_db: precut.gain_db,
+      },
+    }),
+    ...buildPrecutDiagnostic(precut, precutErr),
   }
 }
 
