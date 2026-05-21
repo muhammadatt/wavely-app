@@ -117,13 +117,6 @@ export const PRESETS = {
       "humDetect",
       "hpf",
       { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
-      {
-        bandwidthExtension: {
-          enabled: true,
-          model: "ap-bwe", //"lavasr", "ap-bwe"
-          postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
-        },
-      },
       "remeasureFramesPostNr",
       {
         autoLeveler: {
@@ -189,7 +182,6 @@ export const PRESETS = {
           padMs: 4,
         },
       },
-
       "correctiveEQ",
       "remeasureFramesPostNr",
       {
@@ -242,7 +234,7 @@ export const PRESETS = {
       },
       {
         airBoost: {
-          gainDb: 5,
+          gainDb: 8,
           sibilantGainFloor: 0,
           sibilanceDetection: {
             p95_trigger_db: 6.0,
@@ -250,10 +242,19 @@ export const PRESETS = {
             broadband_trigger_db: 10.0,
           },
           // Predictive pre-attenuation — conservative for ACX human review.
-          precut: { enabled: true, maxCutDb: 4.0, minExcessDb: 1.5 },
+          precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
         },
       },
-      /*
+   
+      {
+        bandwidthExtension: {
+          enabled: true,
+          model: "lavasr", //"lavasr", "ap-bwe"
+          postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
+        },
+      },
+      
+     /*
       {
         vocalSaturation: {
           //drive: 1.8,
@@ -304,7 +305,7 @@ export const PRESETS = {
           },
         ],
       },
-
+      /*
       {
         roomPresence: {
           enabled: true,
@@ -316,6 +317,7 @@ export const PRESETS = {
           normalize_ir: true,
         },
       },
+      */
       "normalize",
       "truePeakLimit",
       "measureAfter",

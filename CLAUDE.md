@@ -188,34 +188,7 @@ Stage 7:  Measurement + Processing Report (ACX certification + quality advisory 
 Post:     Encode (WAV or MP3 per tier/preset) + extract waveform peak data (~1000 points)
 ```
 
-**Order is critical.** Operations out of sequence produce non-compliant output. Never reorder stages.
 
-## Processing Chain (Noise Eraser Preset)
-
-Noise Eraser is a **parallel path** — it does not use Stages 1–4a. It replaces them with a source separation pipeline, then rejoins at Stage 5.
-
-```
-Pre-0:      Decode (FFmpeg → 32-bit float, 44.1 kHz)
-Pre-1:      Mono mixdown
-Pre-2:      Measure before
-Pre-3:      Peak normalize (±1 dBFS)
-Pre-4:      Silence analysis — frame-based noise floor measurement (Silero VAD v5)
-Stage NE-1: RNNoise pre-pass (unconditional stationary noise reduction)
-Stage NE-2: Tonal noise pre-treatment (conditional notch filtering)
-Stage NE-3: Demucs htdemucs_ft source separation (vocals stem only); ConvTasNet (asteroid) as fallback
-Stage NE-4: Post-separation validation and artifact assessment
-Stage NE-5: Residual DF3 cleanup (conditional — only if noise floor > -55 dBFS)
-Stage NE-6: AudioSR bandwidth extension (conditional)
-Stage NE-7: Post-separation enhancement EQ (separation-specific reference profile)
-Stage 5:    Loudness Normalization (standard)
-Stage 6:    True Peak Limiting (standard)
-Stage 7:    Measurement + Processing Report (with separation pipeline additions)
-Post:       Encode + extract waveform peak data
-```
-
-**No compression or de-esser in the Noise Eraser path.** Separation output already has a compressed character; stacking compression risks over-processing. De-esser calibration is not validated for separated audio.
-
-See `docs/instant_polish_processing_spec_noise_eraser.md` for full stage-by-stage specification.
 
 ### Key Stage Notes
 
@@ -271,11 +244,11 @@ See `docs/instant_polish_compliance_model_v2.md` for full flag definitions, JSON
 
 ### Preset Character Distinctions (do not converge)
 
-- **ACX Audiobook:** Transparent, natural. Minimal compression (conditional only, crest factor > 20 dB). Conservative noise reduction. Preserve dynamic breath of narration. ACX human reviewers expect an unprocessed character. Vocal Expander conservative (1.5:1, +4 dB headroom, 0.25 high-freq depth, 12 dB max).
-- **Podcast Ready:** Punchy, intimate, compressed. Always-on 3:1 compression. More aggressive EQ mud cut. LUFS target (not RMS). Stereo preserved for dual-host. Vocal Expander assertive (2.0:1, +6 dB headroom, 0.5 high-freq depth, 18 dB max).
-- **Voice Ready:** Broadcast-neutral. Always-on 2.5:1 compression. Versatile — sits under music beds. Mono output. Vocal Expander conservative (1.5:1, +4 dB headroom, 0.25 high-freq depth, 12 dB max).
-- **General Clean:** Pragmatic. More aggressive noise reduction acceptable (Tier 4, relaxed artifact warnings). 3:1 compression always-on. Vocal Expander assertive (2.0:1, +6 dB headroom, 0.5 high-freq depth, 18 dB max).
-- **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Output may have a "dry booth" quality. Not recommended for ACX submission without careful review. Vocal Expander assertive (2.0:1) runs after parallel compression for additional silence-floor polish.
+- **ACX Audiobook:** Clean, transparent, controlled dynamics. Highest priority in term of noise reduction and artifact free output. 
+- **Podcast Ready:** Punchy, intimate, compressed.  More aggressive EQ mud cut. LUFS target (not RMS). Stereo preserved for dual-host. 
+- **Voice Ready:** Broadcast-neutral. Versatile — sits under music beds. Mono output. 
+- **General Clean:** Pragmatic. More aggressive noise reduction acceptable (Tier 4, relaxed artifact warnings).
+- **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Output may have a "dry booth" quality. 
 
 ---
 
@@ -475,12 +448,6 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 
 ## Critical Implementation Rules
 
-- **Never force a pass.** If a file cannot meet output profile targets without artifacts that would fail ACX human review, report the failure. Do not over-process.
-- **Transparency first.** Same voice, cleaner and at the right level. Never a different voice.
-- **Preset character, not preset uniformity.** ACX files should sound like ACX. Podcast files should sound like podcasts. Do not converge.
-- **ACX human review is the real target**, not just the automated measurements. Six technical checks passing is necessary but not sufficient.
-- **`acx_certification` is absent, not null,** in the JSON when `output_profile` is not `acx`. Do not include the key with a null value.
-- **Advisory flags are never gates.** Users can download at any point regardless of flag state.
 - **`outputStart` recalculation:** After any delete/trim/paste, recalculate from scratch for every segment. Do not attempt partial updates.
 - **AudioContext on user gesture.** Never on page load.
 - **Float32Array throughout.** Web Audio API uses [-1.0, 1.0] range.

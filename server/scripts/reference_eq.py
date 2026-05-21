@@ -46,8 +46,8 @@ MIN_SPEECH_FRAMES = 40
 # Correction shaping.
 SCALE_FACTOR    = 0.65         # correct 65% of the measured gap
 SMOOTH_OCTAVES  = 0.5          # log-Gaussian smoothing sigma
-TAPER_LOW_HZ    = 150          # correction is 0 below this
-TAPER_FULL_HZ   = 500          # correction reaches full strength here
+TAPER_LOW_HZ    = 100 #150          # correction is 0 below this
+TAPER_FULL_HZ   = 250 #500          # correction reaches full strength here
 SKIP_THRESHOLD_DB = 0.5        # skip the stage if max |correction| is below this
 
 # FIR.

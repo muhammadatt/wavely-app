@@ -53,7 +53,33 @@ DEFAULT_OUTPUT_DIR = os.path.join(_REPO_ROOT, 'data', 'reference_curves')
 AUDIO_EXTS = ('.wav',)
 
 
-def build_preset_curve(preset_id, corpus_dir, output_dir):
+def _log_spread_diagnostic(preset_id, names, stack, wide_idx, median, p25, p75):
+    """Per-file deviation from median at wide-spread bands. Sorted worst-first."""
+    iqr   = p75 - p25
+    lo,hi = p25 - 1.5 * iqr, p75 + 1.5 * iqr
+    band_hz = [int(THIRD_OCTAVE_CENTERS[i]) for i in wide_idx]
+
+    header  = '  '.join(f'{hz:>5d}' for hz in band_hz)
+    lines   = [
+        f'[{preset_id}] per-file deviation from median at wide bands '
+        f'(dB; * = outside Tukey fence P25-1.5*IQR..P75+1.5*IQR):',
+        f'  {"file":38s}  {header}    score',
+    ]
+    rows = []
+    for name, lev in zip(names, stack):
+        dev  = lev[wide_idx] - median[wide_idx]
+        cells = '  '.join(
+            f'{d:+5.1f}{"*" if (lev[i] < lo[i] or lev[i] > hi[i]) else " "}'
+            for d, i in zip(dev, wide_idx)
+        )
+        score = float(np.nansum(np.abs(dev)))
+        rows.append((score, f'  {name[:38]:38s}  {cells}    {score:6.1f}'))
+    rows.sort(key=lambda r: -r[0])
+    lines.extend(row for _, row in rows)
+    logger.warning('\n'.join(lines))
+
+
+def build_preset_curve(preset_id, corpus_dir, output_dir, diagnose_spread=False):
     """Build and write one preset's reference curve. Returns True on success."""
     preset_corpus = os.path.join(corpus_dir, preset_id)
     if not os.path.isdir(preset_corpus):
@@ -66,6 +92,7 @@ def build_preset_curve(preset_id, corpus_dir, output_dir):
         if f.lower().endswith(AUDIO_EXTS)
     )
 
+    names   = []
     spectra = []
     for path in files:
         try:
@@ -80,6 +107,7 @@ def build_preset_curve(preset_id, corpus_dir, output_dir):
             logger.warning('[%s] skipped %s — only %d speech frames',
                             preset_id, os.path.basename(path), n_speech)
             continue
+        names.append(os.path.basename(path))
         spectra.append(levels)
         logger.info('[%s] measured %s (%d speech frames)',
                     preset_id, os.path.basename(path), n_speech)
@@ -96,11 +124,15 @@ def build_preset_curve(preset_id, corpus_dir, output_dir):
         levels_p75       = np.nanpercentile(stack, 75, axis=0)
 
     # Spread diagnostic — a wide IQR means the median may not be representative.
-    spread = levels_p75 - levels_p25
-    wide   = [int(THIRD_OCTAVE_CENTERS[i]) for i in np.where(spread > 4.0)[0]]
-    if wide:
+    spread   = levels_p75 - levels_p25
+    wide_idx = np.where(spread > 4.0)[0]
+    if len(wide_idx):
+        wide_hz = [int(THIRD_OCTAVE_CENTERS[i]) for i in wide_idx]
         logger.warning('[%s] wide corpus spread (P75-P25 > 4 dB) at %s Hz — '
-                        'review corpus for outliers', preset_id, wide)
+                        'review corpus for outliers', preset_id, wide_hz)
+        if diagnose_spread:
+            _log_spread_diagnostic(preset_id, names, stack, wide_idx,
+                                   reference_levels, levels_p25, levels_p75)
 
     # Preserve corpus_version across rebuilds: increment the existing value.
     out_path = os.path.join(output_dir, f'{preset_id}.json')
@@ -143,9 +175,14 @@ if __name__ == '__main__':
                         help=f'Corpus root (default: {DEFAULT_CORPUS_DIR})')
     parser.add_argument('--output-dir', default=DEFAULT_OUTPUT_DIR,
                         help=f'Reference curve output directory (default: {DEFAULT_OUTPUT_DIR})')
+    parser.add_argument('--diagnose-spread', action='store_true',
+                        help='When the wide-spread warning fires, log a per-file '
+                             'deviation table (sorted worst-first) to help identify outliers')
     args = parser.parse_args()
 
     targets = [args.preset] if args.preset else PRESETS
-    built   = sum(build_preset_curve(p, args.corpus_dir, args.output_dir) for p in targets)
+    built   = sum(build_preset_curve(p, args.corpus_dir, args.output_dir,
+                                     diagnose_spread=args.diagnose_spread)
+                  for p in targets)
     logger.info('Built %d/%d reference curve(s).', built, len(targets))
     sys.exit(0 if built == len(targets) else 1)
