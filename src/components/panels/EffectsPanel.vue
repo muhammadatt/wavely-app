@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { normalizeRegion, compressRegion, computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
+import { applyVocalSaturation } from '../../api/spotEffects.js'
 
 const {
   state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
@@ -20,6 +21,16 @@ const noiseSensitivity = ref(60)
 // Remove Silence params
 const silenceThreshold = ref(-40)
 const silenceMinLength = ref(5)
+// Vocal Saturation params (defaults match server-side script defaults)
+const satDrive         = ref(2.0)
+const satWetDry        = ref(0.3)
+const satBias          = ref(0.5)
+const satLowCrossover  = ref(500)
+const satMidCrossover  = ref(3500)
+const satSoftness      = ref(0.3)
+const satLowDriveMult  = ref(5.0)
+const satMidDriveMult  = ref(0.1)
+const satHighDriveMult = ref(0.1)
 
 const openSection = ref('normalize')
 
@@ -76,6 +87,47 @@ async function applyCompression() {
   } catch (err) {
     console.error('Compression failed:', err)
     showToast('Compression failed')
+  } finally {
+    endProcessing()
+  }
+}
+
+async function applySaturation() {
+  if (!state.selection) return
+  const { start, end } = state.selection
+
+  startProcessing('Saturating...')
+  try {
+    const blob = await applyVocalSaturation({
+      segments:   state.segments,
+      start, end,
+      sampleRate: state.currentFile.sampleRate,
+      channels:   state.currentFile.channels,
+      params: {
+        drive:         satDrive.value,
+        wetDry:        satWetDry.value,
+        bias:          satBias.value,
+        lowCrossover:  satLowCrossover.value,
+        midCrossover:  satMidCrossover.value,
+        softness:      satSoftness.value,
+        lowDriveMult:  satLowDriveMult.value,
+        midDriveMult:  satMidDriveMult.value,
+        highDriveMult: satHighDriveMult.value,
+      },
+    })
+
+    const ctx = getAudioContext()
+    const arrayBuffer = await blob.arrayBuffer()
+    const buffer = await ctx.decodeAudioData(arrayBuffer)
+    const bufferId = replaceRegion(start, end, buffer)
+
+    const cache = await computePeakCache(buffer, 256)
+    setPeakCache(bufferId, cache)
+
+    showToast('Vocal saturation applied')
+  } catch (err) {
+    console.error('Vocal saturation failed:', err)
+    showToast('Vocal saturation failed')
   } finally {
     endProcessing()
   }
@@ -183,6 +235,113 @@ async function applyCompression() {
           </button>
         </div>
       </div>
+
+      <!-- Vocal Saturation -->
+      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
+           :class="{ 'border-accent': openSection === 'saturation' }">
+        <button
+          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
+          @click="toggleSection('saturation')"
+        >
+          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
+               :class="openSection === 'saturation' ? 'bg-accent-lt' : 'bg-bg'">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'saturation' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><path d="M3 12c3 0 3-6 6-6s3 12 6 12 3-6 6-6"/></svg>
+          </div>
+          <div class="flex-1">
+            <div class="font-heading text-[13px] font-extrabold text-ink">Vocal Saturation</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Parallel tube-style warmth</div>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
+               :class="{ 'rotate-180': openSection === 'saturation' }">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+
+        <div v-if="openSection === 'saturation'" class="px-[13px] pb-[13px] flex flex-col gap-2.5">
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Drive</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satDrive.toFixed(2) }}</span>
+            </div>
+            <input type="range" min="0" max="5" step="0.05" v-model.number="satDrive"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Wet / Dry</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satWetDry.toFixed(2) }}</span>
+            </div>
+            <input type="range" min="0" max="1" step="0.01" v-model.number="satWetDry"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Bias</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satBias.toFixed(2) }}</span>
+            </div>
+            <input type="range" min="0" max="1.5" step="0.01" v-model.number="satBias"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Low crossover</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satLowCrossover }} Hz</span>
+            </div>
+            <input type="range" min="100" max="2000" step="10" v-model.number="satLowCrossover"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Mid crossover</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satMidCrossover }} Hz</span>
+            </div>
+            <input type="range" min="1000" max="8000" step="50" v-model.number="satMidCrossover"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Softness</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satSoftness.toFixed(2) }}</span>
+            </div>
+            <input type="range" min="0" max="1" step="0.01" v-model.number="satSoftness"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Low drive ×</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satLowDriveMult.toFixed(2) }}</span>
+            </div>
+            <input type="range" min="0" max="10" step="0.05" v-model.number="satLowDriveMult"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Mid drive ×</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satMidDriveMult.toFixed(2) }}</span>
+            </div>
+            <input type="range" min="0" max="10" step="0.05" v-model.number="satMidDriveMult"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">High drive ×</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ satHighDriveMult.toFixed(2) }}</span>
+            </div>
+            <input type="range" min="0" max="10" step="0.05" v-model.number="satHighDriveMult"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+
+          <button
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+            :disabled="!hasSelection"
+            @click="applySaturation"
+          >
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Apply Saturation
+          </button>
+        </div>
+      </div>
+
 
       <!-- Noise Reduction -->
       <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"

@@ -46,15 +46,17 @@ def tube_saturate(
     # Upsample 2× (built-in Kaiser anti-alias filter)
     x_up = resample_poly(x, 2, 1)
 
-    x_biased = x_up + bias
-    pre = x_biased * drive
+    # Bias is added after drive so it acts as an absolute operating-point
+    # offset on the curve, independent of drive.  drive sets how hard the
+    # signal swings into the curve; bias sets where on the curve it swings.
+    pre = x_up * drive + bias
 
     y_tanh = np.tanh(pre)
     y_atan = (2.0 / np.pi) * np.arctan(pre)
     y_up = (1.0 - softness) * y_tanh + softness * y_atan
 
-    # Remove DC offset introduced by the asymmetric bias
-    bias_ref = (1.0 - softness) * np.tanh(bias * drive) + softness * (2.0 / np.pi) * np.arctan(bias * drive)
+    # Remove DC offset introduced by the asymmetric bias (curve value at x=0)
+    bias_ref = (1.0 - softness) * np.tanh(bias) + softness * (2.0 / np.pi) * np.arctan(bias)
     y_up -= bias_ref
 
     # Downsample 2× with built-in anti-alias filtering
@@ -78,24 +80,27 @@ def vocal_saturation(
     audio: np.ndarray,
     drive: float = 2.0,
     wet_dry: float = 0.3,
-    bias: float = 0.08,
+    bias: float = 0.5,
     low_crossover: float = 500.0,
     mid_crossover: float = 3500.0,
     softness: float = 0.3,
+    low_drive_mult: float = 5.0,
+    mid_drive_mult: float = 0.1,
+    high_drive_mult: float = 0.1,
     sr: int = 44100,
 ) -> tuple[np.ndarray, dict]:
     """
-    Parallel tube-style saturation with preset-defined frequency bands.
+    Parallel tube-style saturation with band-split drive shaping.
 
     Band layout:
-      low  band : DC  → low_crossover   (body / chest warmth)
+      low  band : DC  → low_crossover            (body / chest warmth)
       mid  band : low_crossover → mid_crossover  (presence / formants)
       high band : mid_crossover → Nyquist        (air / sibilance)
 
-    Drive allocation:
-      low  × 5.0  — emphasises chest warmth and second-harmonic density
-      mid  × 0.1  — neutral; avoids adding grit to the vowel character
-      high × 0.1  — gentle rollback; avoids amplifying sibilance
+    Drive allocation (per-band multipliers on the base `drive`):
+      low  × low_drive_mult   — default 5.0, emphasises chest warmth
+      mid  × mid_drive_mult   — default 0.1, neutral on vowel character
+      high × high_drive_mult  — default 0.1, avoids amplifying sibilance
 
     Returns (processed_audio, info_dict).
     """
@@ -108,9 +113,9 @@ def vocal_saturation(
     mid  = audio - low - high   # complementary split — sums back to audio exactly
 
     # --- Per-band saturation ------------------------------------------------
-    low_sat  = tube_saturate(low,  drive * 5,   bias, softness)
-    mid_sat  = tube_saturate(mid,  drive * 0.1, bias, softness)
-    high_sat = tube_saturate(high, drive * 0.1, bias, softness)
+    low_sat  = tube_saturate(low,  drive * low_drive_mult,  bias, softness)
+    mid_sat  = tube_saturate(mid,  drive * mid_drive_mult,  bias, softness)
+    high_sat = tube_saturate(high, drive * high_drive_mult, bias, softness)
 
     wet = low_sat + mid_sat + high_sat
 
@@ -132,9 +137,12 @@ def vocal_saturation(
     output = np.clip(output, -1.0, 1.0)
 
     info = {
-        'low_crossover_hz': round(low_crossover, 1),
-        'mid_crossover_hz': round(mid_crossover, 1),
-        'softness':         round(softness, 3),
+        'low_crossover_hz':  round(low_crossover, 1),
+        'mid_crossover_hz':  round(mid_crossover, 1),
+        'softness':          round(softness, 3),
+        'low_drive_mult':    round(low_drive_mult,  3),
+        'mid_drive_mult':    round(mid_drive_mult,  3),
+        'high_drive_mult':   round(high_drive_mult, 3),
     }
     return output, info
 
@@ -153,14 +161,20 @@ def main():
                         help='Base saturation drive factor (default: 1.8)')
     parser.add_argument('--wet-dry',        type=float, default=0.22,
                         help='Wet/dry mix ratio: 0.0=dry, 1.0=wet (default: 0.22)')
-    parser.add_argument('--bias',           type=float, default=0.08,
-                        help='Asymmetric bias for even-harmonic warmth (default: 0.08)')
-    parser.add_argument('--low-crossover',  type=float, default=500.0,
+    parser.add_argument('--bias',            type=float, default=0.5,
+                        help='Absolute operating-point offset on the curve (default: 0.5)')
+    parser.add_argument('--low-crossover',   type=float, default=500.0,
                         help='Low band upper boundary Hz (default: 500)')
-    parser.add_argument('--mid-crossover',  type=float, default=3500.0,
+    parser.add_argument('--mid-crossover',   type=float, default=3500.0,
                         help='Mid band upper boundary Hz (default: 3500)')
-    parser.add_argument('--softness',       type=float, default=0.3,
+    parser.add_argument('--softness',        type=float, default=0.3,
                         help='Transfer function softness 0=tanh, 1=arctan (default: 0.3)')
+    parser.add_argument('--low-drive-mult',  type=float, default=5.0,
+                        help='Low-band drive multiplier on base drive (default: 5.0)')
+    parser.add_argument('--mid-drive-mult',  type=float, default=0.1,
+                        help='Mid-band drive multiplier on base drive (default: 0.1)')
+    parser.add_argument('--high-drive-mult', type=float, default=0.1,
+                        help='High-band drive multiplier on base drive (default: 0.1)')
     args = parser.parse_args()
 
     sr, audio = wavfile.read(args.input)
@@ -169,13 +183,17 @@ def main():
     if audio.ndim == 1:
         processed, info = vocal_saturation(
             audio, args.drive, args.wet_dry, args.bias,
-            args.low_crossover, args.mid_crossover, args.softness, sr,
+            args.low_crossover, args.mid_crossover, args.softness,
+            args.low_drive_mult, args.mid_drive_mult, args.high_drive_mult,
+            sr,
         )
     else:
         results = [
             vocal_saturation(
                 audio[:, ch], args.drive, args.wet_dry, args.bias,
-                args.low_crossover, args.mid_crossover, args.softness, sr,
+                args.low_crossover, args.mid_crossover, args.softness,
+                args.low_drive_mult, args.mid_drive_mult, args.high_drive_mult,
+                sr,
             )
             for ch in range(audio.shape[1])
         ]
@@ -189,6 +207,7 @@ def main():
         f'  low crossover    : {info["low_crossover_hz"]} Hz\n'
         f'  mid crossover    : {info["mid_crossover_hz"]} Hz\n'
         f'  softness         : {info["softness"]}\n'
+        f'  band mults       : low={info["low_drive_mult"]}  mid={info["mid_drive_mult"]}  high={info["high_drive_mult"]}\n'
         f'  drive={args.drive}  wet_dry={args.wet_dry}  bias={args.bias}'
     )
 

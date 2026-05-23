@@ -145,7 +145,7 @@ export const PRESETS = {
           transientShaper: true,
         },
       },  
-      {dereverb: {enabled: true, strength: "medium", preserve_early: false}},    
+      /* {dereverb: {enabled: true, strength: "medium", preserve_early: false}}, */    
       //{ separateVocals: { model: "demucs" } },
       /*
       {
@@ -241,21 +241,6 @@ export const PRESETS = {
           detectionBand: { lowHz: 80, highHz: 800 },
         },
       },
-      */
-      {
-        airBoost: {
-          gainDb: 6,
-          sibilantGainFloor: 0,
-          sibilanceDetection: {
-            p95_trigger_db: 6.0,
-            min_flatness: 0.1,
-            broadband_trigger_db: 10.0,
-          },
-          // Predictive pre-attenuation — conservative for ACX human review.
-          precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
-        },
-      },
-      /*
       {
         bandwidthExtension: {
           enabled: true,
@@ -266,17 +251,30 @@ export const PRESETS = {
       */
       {
         vocalSaturation: {
-          //drive: 1.8,
-          drive: 0.03,
-          wetDry: 1,
-          //wetDry: 0.03,
-          bias: 0.08,
-          lowCrossover: 500,
-          midCrossover: 3000,
-          softness: 0.8,
+          drive: 2.5,
+          wetDry: 0.25,
+          bias: 0.25,
+          lowCrossover: 140,
+          midCrossover: 7550,
+          softness: 0.9,
+          lowDriveMult: 7,
+          midDriveMult: 0.25,
+          highDriveMult: 6.25,
         },
       },
-
+      {
+        airBoost: {
+          gainDb: 6,
+          sibilantGainFloor: 0,
+          sibilanceDetection: {
+            p95_trigger_db: 6.0,
+            min_flatness: 0.1,
+            broadband_trigger_db: 10.0,
+          },
+          // Predictive pre-attenuation 
+          precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
+        },
+      },
       "referenceEQ",
       { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
       {
@@ -315,17 +313,19 @@ export const PRESETS = {
           },*/
         ],
       },
+      /*
       {
         roomPresence: {
           enabled: true,
           ir_path: "../ir/CrystalVocal.wav",
-          wet: 0.15,
+          wet: 0.025,
           rt60Ms: 250,
           preDelayMs: 10.0,
           early_reflections: 2,
           normalize_ir: true,
         },
       },
+      */
 
       "normalize",
       "truePeakLimit",
@@ -387,8 +387,8 @@ export const PRESETS = {
           transientMaxReductionDb: 6,
         },
       },
-      { bandwidthExtension: { enabled: false, model: "ap-bwe" } },
-      "vocalSaturation",
+      /*{ bandwidthExtension: { enabled: false, model: "ap-bwe" } }, */
+      /*
       {
         vadGate: {
           enabled: false,
@@ -398,7 +398,7 @@ export const PRESETS = {
           releaseMs: 40,
           floorDb: -60,
         },
-      },
+      },*/
       {
         clipGainDeEsser: {
           enabled: true,
@@ -415,6 +415,7 @@ export const PRESETS = {
           },
         },
       },
+      "correctiveEQ",
       "remeasureFramesPostNr",
       {
         compression: [
@@ -450,6 +451,7 @@ export const PRESETS = {
           parallelDesserMaxReductionDb: 10,
         },
       },
+      /*
       {
         vocalExpander: {
           enabled: true,
@@ -464,8 +466,9 @@ export const PRESETS = {
           detectionBand: { lowHz: 80, highHz: 800 },
         },
       },
+      */
       { airBoost: {
-          gainDb: 2.5,
+          gainDb: 5,
           sibilantGainFloor: 0.25,
           precut: { enabled: true, maxCutDb: 6.0, minExcessDb: 1.0 },
         },
@@ -478,15 +481,29 @@ export const PRESETS = {
           release_ms: 60.0,
         },
       },
-      "correctiveEQ",
+      {
+        vocalSaturation: {
+          drive: 2.5,
+          wetDry: 1,
+          bias: 0.25,
+          lowCrossover: 140,
+          midCrossover: 7550,
+          softness: 0.7,
+          lowDriveMult: 7,
+          midDriveMult: 0.25,
+          highDriveMult: 6.25,
+        },
+      },
       "referenceEQ",
       {
         roomPresence: {
           enabled: true,
-          wet: 0.08,
-          rt60Ms: 80,
-          preDelayMs: 1.5,
-          diffusion: 0.7,
+          ir_path: "../ir/CrystalVocal.wav",
+          wet: 0.10,
+          rt60Ms: 250,
+          preDelayMs: 10.0,
+          early_reflections: 2,
+          normalize_ir: true,
         },
       },
       "normalize",

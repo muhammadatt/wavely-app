@@ -54,6 +54,59 @@ export function renderRegionToBuffer(segments, start, end, sampleRate, channels)
 }
 
 /**
+ * Encode a Float32 channel-data array as a 32-bit float WAV Blob.
+ * Used to ship raw timeline audio to the server without lossy conversion.
+ */
+export function floatChannelsToWavBlob(channelData, sampleRate, channels) {
+  const numSamples = channelData[0].length
+  const bytesPerSample = 4 // 32-bit float
+  const dataSize = numSamples * channels * bytesPerSample
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+
+  // RIFF header
+  writeString(view, 0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeString(view, 8, 'WAVE')
+
+  // fmt chunk
+  writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)         // chunk size
+  view.setUint16(20, 3, true)          // IEEE float format
+  view.setUint16(22, channels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * channels * bytesPerSample, true)
+  view.setUint16(32, channels * bytesPerSample, true)
+  view.setUint16(34, bytesPerSample * 8, true)
+
+  // data chunk
+  writeString(view, 36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  // Float32Array view onto the same ArrayBuffer — typed-array set/subarray
+  // is effectively memcpy and orders of magnitude faster than per-sample
+  // DataView.setFloat32 calls.  All modern CPUs are little-endian.
+  const audioView = new Float32Array(buffer, 44)
+  if (channels === 1) {
+    audioView.set(channelData[0])
+  } else {
+    for (let i = 0; i < numSamples; i++) {
+      for (let ch = 0; ch < channels; ch++) {
+        audioView[i * channels + ch] = channelData[ch][i]
+      }
+    }
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' })
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i))
+  }
+}
+
+/**
  * Normalize a region of the timeline.
  * Returns a Promise that resolves to the processed AudioBuffer.
  */

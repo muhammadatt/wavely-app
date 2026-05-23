@@ -13,7 +13,7 @@
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
-import { renderRegionToBuffer } from '../audio/processing.js'
+import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
 
 const POLL_INTERVAL_MS = 3000       // 3 s between status checks
 const MAX_POLL_ATTEMPTS = 400       // 400 × 3 s = 20 min max wait
@@ -102,60 +102,7 @@ async function renderTimelineToWavBlob(segments, sampleRate, channels) {
   }, 0)
 
   const channelData = await renderRegionToBuffer(segments, 0, duration, sampleRate, channels)
-
-  // Encode as 32-bit float WAV to preserve full precision for server processing
-  const numSamples = channelData[0].length
-  const bytesPerSample = 4 // 32-bit float
-  const dataSize = numSamples * channels * bytesPerSample
-  const buffer = new ArrayBuffer(44 + dataSize)
-  const view = new DataView(buffer)
-
-  // RIFF header
-  writeString(view, 0, 'RIFF')
-  view.setUint32(4, 36 + dataSize, true)
-  writeString(view, 8, 'WAVE')
-
-  // fmt chunk
-  writeString(view, 12, 'fmt ')
-  view.setUint32(16, 16, true)         // chunk size
-  view.setUint16(20, 3, true)          // IEEE float format
-  view.setUint16(22, channels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * channels * bytesPerSample, true)
-  view.setUint16(32, channels * bytesPerSample, true)
-  view.setUint16(34, bytesPerSample * 8, true)
-
-  // data chunk
-  writeString(view, 36, 'data')
-  view.setUint32(40, dataSize, true)
-
-  // Write audio samples directly through a Float32Array view onto the same
-  // underlying ArrayBuffer.  Float32Array typed-array operations (set /
-  // subarray) use native memory-copy speed and are orders of magnitude faster
-  // than calling DataView.setFloat32() once per sample — for a 12-minute mono
-  // file that difference is roughly 32 million JS function calls vs. a single
-  // memcpy.  All modern CPUs are little-endian, matching WAV's byte order.
-  const audioView = new Float32Array(buffer, 44)
-  if (channels === 1) {
-    // Mono: a single bulk copy — effectively memcpy.
-    audioView.set(channelData[0])
-  } else {
-    // Stereo: interleave L/R.  Still a loop, but typed-array indexing is
-    // far faster than repeated DataView calls.
-    for (let i = 0; i < numSamples; i++) {
-      for (let ch = 0; ch < channels; ch++) {
-        audioView[i * channels + ch] = channelData[ch][i]
-      }
-    }
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' })
-}
-
-function writeString(view, offset, string) {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i))
-  }
+  return floatChannelsToWavBlob(channelData, sampleRate, channels)
 }
 
 /**

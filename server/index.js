@@ -3,6 +3,7 @@ import cors from 'cors'
 import rateLimit from 'express-rate-limit'
 import { processRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
+import { spotRoute }   from './routes/spot.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -57,6 +58,17 @@ const processLimiter = rateLimit({
 })
 app.use('/api/process', processLimiter)
 
+// Spot effects run on short selections — more generous than the preset chain.
+const spotLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 120,                  // 120 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many spot-effect requests, please try again later' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/spot', spotLimiter)
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
@@ -67,6 +79,9 @@ app.use('/api', processRoute)
 
 // Job status + download endpoints (polled by client after submission)
 app.use('/api', jobsRoute)
+
+// Spot effect endpoint (synchronous — returns processed WAV directly)
+app.use('/api', spotRoute)
 
 const server = app.listen(PORT, () => {
   console.log(`Wavely server listening on port ${PORT}`)
