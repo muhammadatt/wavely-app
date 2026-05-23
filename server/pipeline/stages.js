@@ -1432,7 +1432,7 @@ export async function separateVocals(ctx) {
   // Save the pre-separation path for NE-4 validation comparison
   ctx.nePreSeparationPath = ctx.currentPath
 
-  const model    = ctx.preset.separationModel ?? 'demucs'
+  const model    = ctx.preset.separateVocals?.model ?? 'demucs'
   const outPath  = ctx.tmp('.wav')
 
   ctx.log(`[NE-3] Starting vocal separation with ${model} — this may take several minutes`)
@@ -1595,7 +1595,7 @@ export async function clearerVoiceEnhance(ctx) {
   // Save the pre-enhancement path for NE-4 validation comparison.
   ctx.nePreSeparationPath = ctx.currentPath
 
-  const model   = ctx.preset.clearervoiceModel ?? 'mossformer2_48k'
+  const model   = ctx.preset.clearerVoiceEnhance?.model ?? 'mossformer2_48k'
   const outPath = ctx.tmp('.wav')
 
   ctx.log(`[CE-3] Starting ClearerVoice enhancement (${model}) — this may take several minutes`)

@@ -88,8 +88,8 @@ export function resolveOutputProfileId(id) {
  * @property {boolean} lockedOutputProfile
  * @property {{ enabled: boolean, strength: 'light'|'medium'|'heavy', preserve_early: boolean }} dereverb
  * @property {{ total_max_up_db: number, total_max_down_db: number, target_mode: 'running_median'|'global', target_window_s: number, noise_floor_target_dbfs: number, deadband_db: number, knee_db: number, max_up_db: number, max_down_db: number, subphrase_split_drop_db: number, subphrase_split_min_duration_ms: number, crossfade_ms: number, merge_max_delta_db: number } | null} autoLeveler
- * @property {'demucs'|'convtasnet'} [separationModel]   - Noise Eraser only
- * @property {'mossformer2_48k'|'frcrn_16k'} [clearervoiceModel]   - ClearerVoice Eraser only
+ * @property {{ model?: 'demucs'|'convtasnet' }} [separateVocals] - Inline config for the separateVocals stage. model selects the separation backend ('demucs' default).
+ * @property {{ model?: 'mossformer2_48k'|'frcrn_16k' }} [clearerVoiceEnhance] - Inline config for the clearerVoiceEnhance stage. model selects the ClearerVoice model ('mossformer2_48k' default).
  * @property {{ enabled: boolean, model?: 'ap-bwe'|'ap_bwe'|'lavasr', postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bandwidthExtension - Bandwidth extension; enabled for NE presets, disabled for standard presets. model selects the backend ('ap-bwe' default, 'lavasr'). postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
  * @property {{ model?: 'df3'|'rnnoise'|'dtln', skipBelowDb?: number }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). skipBelowDb skips this pass entirely if the current noise floor is already below the given dBFS (e.g. -85). When the stage is listed more than once, each call can carry its own model and skipBelowDb.
  */
@@ -117,6 +117,7 @@ export const PRESETS = {
       "humDetect",
       "hpf",
       { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
+      { noiseReduce: { model: "rnnoise" } }, //"df3", "rnnoise", "dtln"
       "remeasureFramesPostNr",
       {
         autoLeveler: {
@@ -143,7 +144,10 @@ export const PRESETS = {
           strength: 0.7,
           transientShaper: true,
         },
-      },
+      },  
+      {dereverb: {enabled: true, strength: "medium", preserve_early: false}},    
+      //{ separateVocals: { model: "demucs" } },
+      /*
       {
         vadGate: {
           enabled: true,
@@ -155,6 +159,7 @@ export const PRESETS = {
           floorDb: -110,
         },
       },
+      */
       {
         clipGainDeEsser: {
           enabled: true,
@@ -171,6 +176,7 @@ export const PRESETS = {
           },
         },
       },
+      /*
       {
         // Conservative —
         throatClickAttenuator: {
@@ -182,7 +188,9 @@ export const PRESETS = {
           padMs: 4,
         },
       },
+      */
       "correctiveEQ",
+      { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } },
       "remeasureFramesPostNr",
       {
         compression: [
@@ -205,19 +213,20 @@ export const PRESETS = {
         ],
       },
       "remeasureFramesPostNr",
-      { noiseReduce: { model: "rrnoise", skipBelowDb: -70 } },
+      //{ noiseReduce: { model: "rrnoise", skipBelowDb: -90 } },
       {
         parallelCompression: {
           ratio: 20,
           attackMs: 15,
           releaseMs: 150,
           makeupGain: "auto",
-          wetMix: 0.15,
+          wetMix: 0.25,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
-          parallelDesserMaxReductionDb: 15,
+          parallelDesserMaxReductionDb: 20,
         },
       },
+      /*
       {
         vocalExpander: {
           enabled: false,
@@ -232,9 +241,10 @@ export const PRESETS = {
           detectionBand: { lowHz: 80, highHz: 800 },
         },
       },
+      */
       {
         airBoost: {
-          gainDb: 8,
+          gainDb: 6,
           sibilantGainFloor: 0,
           sibilanceDetection: {
             p95_trigger_db: 6.0,
@@ -245,7 +255,7 @@ export const PRESETS = {
           precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
         },
       },
-   
+      /*
       {
         bandwidthExtension: {
           enabled: true,
@@ -253,13 +263,12 @@ export const PRESETS = {
           postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
         },
       },
-      
-     /*
+      */
       {
         vocalSaturation: {
           //drive: 1.8,
-          drive: 0,
-          wetDry: 0,
+          drive: 0.03,
+          wetDry: 1,
           //wetDry: 0.03,
           bias: 0.08,
           lowCrossover: 500,
@@ -267,7 +276,7 @@ export const PRESETS = {
           softness: 0.8,
         },
       },
-      */
+
       "referenceEQ",
       { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
       {
@@ -275,7 +284,7 @@ export const PRESETS = {
           {
             depth: 0.67,
             sharpness: 0.8,
-            selectivity: 3,
+            selectivity: 8,
             attack_ms: 15.0,
             release_ms: 80.0,
             max_reduction_db: 36.0,
@@ -283,6 +292,7 @@ export const PRESETS = {
             freq_ceil_hz: 20000.0,
             mode: "soft",
           },
+          /*
           {
             sibilant_only: true,
             preserve_harmonics: false,
@@ -302,22 +312,21 @@ export const PRESETS = {
               min_flatness: 0.2,
               broadband_trigger_db: 13.0,
             },
-          },
+          },*/
         ],
       },
-      /*
       {
         roomPresence: {
           enabled: true,
-          ir_path: "../ir/MRV_VocalBoot_m-m.wav",
-          wet: 0.02,
+          ir_path: "../ir/CrystalVocal.wav",
+          wet: 0.15,
           rt60Ms: 250,
           preDelayMs: 10.0,
           early_reflections: 2,
           normalize_ir: true,
         },
       },
-      */
+
       "normalize",
       "truePeakLimit",
       "measureAfter",
@@ -472,16 +481,6 @@ export const PRESETS = {
       "correctiveEQ",
       "referenceEQ",
       {
-        throatClickAttenuator: {
-          sensitivityDb: 10,
-          nrmsThreshold: 2.5,
-          attenuationDb: 20,
-          attackMs: 12,
-          releaseMs: 25,
-          padMs: 4,
-        },
-      },
-      {
         roomPresence: {
           enabled: true,
           wet: 0.08,
@@ -512,6 +511,7 @@ export const PRESETS = {
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
+    clearervoiceModel: "mossformer2_48k",  // or "frcrn_16k"
     stages: [
       "decode",
       "monoMixdown",
@@ -540,28 +540,7 @@ export const PRESETS = {
           merge_max_delta_db: 6.0,
         },
       },
-      {
-        spectralSubtraction: {
-          enabled: true,
-          alphaDd: 0.98,
-          beta: 0.15,
-          strength: 1.0,
-          transientShaper: true,
-          transientMaxReductionDb: 6,
-        },
-      },
-      { bandwidthExtension: { enabled: false, model: "ap_bwe" } },
-      "vocalSaturation",
-      {
-        vadGate: {
-          enabled: false,
-          lookaheadMs: 20,
-          holdMs: 80,
-          attackMs: 8,
-          releaseMs: 40,
-          floorDb: -60,
-        },
-      },
+
       {
         clipGainDeEsser: {
           enabled: true,
@@ -578,11 +557,12 @@ export const PRESETS = {
           },
         },
       },
+      "clearerVoiceEnhance",         
       "remeasureFramesPostNr",
       {
         compression: {
           mode: "conditional",
-          targetCrestFactorDb: 10,
+          targetCrestFactorDb: 16,
           thresholdPercentile: 0.7,
           attack: 8,
           release: 80,
@@ -592,43 +572,21 @@ export const PRESETS = {
       { noiseReduce: { model: "df3", skipBelowDb: -85 } },
       {
         parallelCompression: {
-          ratio: 10,
+          ratio: 20,
           attackMs: 0.3,
-          releaseMs: 120,
+          releaseMs: 80,
           makeupGain: "auto",
-          wetMix: 0.35,
+          wetMix: 0.15,
           vadFadeMs: 8,
-          crestGuardThresholdDb: 9,
+          crestGuardThresholdDb: 10,
           parallelDesserMaxReductionDb: 12,
-        },
-      },
-      {
-        vocalExpander: {
-          enabled: true,
-          ratio: 2.0,
-          highFreqDepth: 0.5,
-          headroomOffsetDb: 6,
-          releaseMs: 150,
-          attackMs: 10,
-          holdMs: 20,
-          lookaheadMs: 10,
-          maxAttenuationDb: 18,
-          detectionBand: { lowHz: 80, highHz: 800 },
-        },
-      },
-      {
-        airBoost: {
-          gainDb: 16,
-          sibilantGainFloor: 0.0,
-          sibilanceDetection: { broadband_trigger_db: 9.0 },
-          precut: { enabled: true, maxCutDb: 6.0, minExcessDb: 1.0 },
         },
       },
       {
         resonanceSuppressor: {
           depth: 0.7,
-          sharpness: 0.4,
-          selectivity: 6,
+          sharpness: 0.6,
+          selectivity: 8,
           attack_ms: 8.0,
           release_ms: 50.0,
           max_reduction_db: 12.0,
@@ -638,25 +596,6 @@ export const PRESETS = {
       },
       "correctiveEQ",
       "referenceEQ",
-      {
-        throatClickAttenuator: {
-          sensitivityDb: 10,
-          nrmsThreshold: 2.5,
-          attenuationDb: 18,
-          attackMs: 12,
-          releaseMs: 25,
-          padMs: 4,
-        },
-      },
-      {
-        roomPresence: {
-          enabled: true,
-          wet: 0.08,
-          rt60Ms: 80,
-          preDelayMs: 1.5,
-          diffusion: 0.7,
-        },
-      },
       "normalize",
       "truePeakLimit",
       "measureAfter",
@@ -679,10 +618,6 @@ export const PRESETS = {
     channelOutput: "mono",
     defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
-    // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
-    // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
-    // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
-    separationModel: "demucs",
     stages: [
       "decode",
       "measureBefore",
@@ -702,7 +637,10 @@ export const PRESETS = {
       },
       { noiseReduce: { model: "df3" } },
       "tonalPretreatment",
-      "separateVocals",
+      // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
+      // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
+      // ConvTasNet WHAM!:   ~20–30x real-time GPU, ~5–10x real-time CPU, ~500 MB VRAM.
+      { separateVocals: { model: "demucs" } },
       "separationValidation",
       { bandwidthExtension: { enabled: false, model: "ap-bwe" } },
       "remeasureFramesPostNr",

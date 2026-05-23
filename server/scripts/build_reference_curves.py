@@ -33,7 +33,10 @@ import sys
 
 import numpy as np
 
-from reference_eq import THIRD_OCTAVE_CENTERS, speech_spectrum, _load_audio
+from reference_eq import (
+    THIRD_OCTAVE_CENTERS, TAPER_LOW_HZ, TAPER_FULL_HZ,
+    low_freq_taper, speech_spectrum, _load_audio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,26 +57,38 @@ AUDIO_EXTS = ('.wav',)
 
 
 def _log_spread_diagnostic(preset_id, names, stack, wide_idx, median, p25, p75):
-    """Per-file deviation from median at wide-spread bands. Sorted worst-first."""
-    iqr   = p75 - p25
-    lo,hi = p25 - 1.5 * iqr, p75 + 1.5 * iqr
-    band_hz = [int(THIRD_OCTAVE_CENTERS[i]) for i in wide_idx]
+    """Per-file deviation from median at wide-spread bands.
 
-    header  = '  '.join(f'{hz:>5d}' for hz in band_hz)
-    lines   = [
+    Reports both an unweighted score (sum of |dev| across wide bands) and a
+    taper-weighted score (sum of |dev| * taper_factor), where the taper factor
+    is sourced from reference_eq.low_freq_taper() so it tracks any change to
+    TAPER_LOW_HZ / TAPER_FULL_HZ. Bands the referenceEQ stage does not actually
+    correct contribute zero to the weighted score, making it the more relevant
+    curation metric. Sorted by weighted score, worst-first.
+    """
+    iqr     = p75 - p25
+    lo, hi  = p25 - 1.5 * iqr, p75 + 1.5 * iqr
+    band_hz = [int(THIRD_OCTAVE_CENTERS[i]) for i in wide_idx]
+    w_taper = low_freq_taper()[wide_idx]               # taper at wide bands only
+
+    header = '  '.join(f'{hz:>5d}' for hz in band_hz)
+    lines  = [
         f'[{preset_id}] per-file deviation from median at wide bands '
-        f'(dB; * = outside Tukey fence P25-1.5*IQR..P75+1.5*IQR):',
-        f'  {"file":38s}  {header}    score',
+        f'(dB; * = outside Tukey fence P25-1.5*IQR..P75+1.5*IQR;',
+        f'  taper: 0 below {TAPER_LOW_HZ:g} Hz, ramps to 1 by {TAPER_FULL_HZ:g} Hz; '
+        f'sorted by taper-weighted score, worst-first):',
+        f'  {"file":38s}  {header}    score   weighted',
     ]
     rows = []
     for name, lev in zip(names, stack):
-        dev  = lev[wide_idx] - median[wide_idx]
+        dev   = lev[wide_idx] - median[wide_idx]
         cells = '  '.join(
             f'{d:+5.1f}{"*" if (lev[i] < lo[i] or lev[i] > hi[i]) else " "}'
             for d, i in zip(dev, wide_idx)
         )
-        score = float(np.nansum(np.abs(dev)))
-        rows.append((score, f'  {name[:38]:38s}  {cells}    {score:6.1f}'))
+        score    = float(np.nansum(np.abs(dev)))
+        weighted = float(np.nansum(np.abs(dev) * w_taper))
+        rows.append((weighted, f'  {name[:38]:38s}  {cells}    {score:6.1f}   {weighted:6.1f}'))
     rows.sort(key=lambda r: -r[0])
     lines.extend(row for _, row in rows)
     logger.warning('\n'.join(lines))
