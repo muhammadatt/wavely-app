@@ -1,5 +1,13 @@
 # Instant Polish — Noise Eraser Preset Specification
-> Addendum to Processing Chain Technical Specification v3.1 | April 2026
+> Addendum to Processing Chain Technical Specification v3.2 | May 2026
+
+---
+
+## Architecture Note
+
+**The `noise_eraser` preset is a standard preset in the unified config-driven pipeline.** It uses the same pipeline runner and stage registry as `acx_audiobook`, `podcast_ready`, and `general_clean`. There is no separate "Noise Eraser pipeline" in the codebase. The preset declares its own `stages` array in `src/audio/presets.js`, and the orchestrator executes those stages like any other preset.
+
+The stage numbering in this document (NE-1 through NE-7) is a **documentation convention only** — it does not exist in the code. The authoritative stage sequence is the `noise_eraser` preset's `stages` array. Use this document for understanding the purpose and parameters of each separation-related stage; use `src/audio/presets.js` for the actual ordering, inline config, and currently active stages.
 
 ---
 
@@ -7,7 +15,7 @@
 
 This document specifies the `noise_eraser` preset as an addendum to the v3 processing chain specification. It follows the same preset + output profile architecture established in v3.1. Where this document is silent, v3.1 defaults apply.
 
-Noise Eraser is a **parallel processing path**, not an extension of the standard noise reduction chain. It does not use the Stage 1–6 chain defined in v3. It replaces Stages 1–4a with a source separation pipeline, then rejoins the standard chain at Stage 5 (Loudness Normalization) and Stage 6 (True Peak Limiting). Stage 7 (Measurement and Processing Report) runs as normal with noise-eraser-specific additions.
+Noise Eraser's distinguishing characteristic is its use of **source separation** (Demucs) rather than noise reduction filters as its primary voice extraction method. The pre-separation and post-separation stages are otherwise drawn from the same stage registry used by all other presets.
 
 ---
 
@@ -23,67 +31,63 @@ The tradeoff is explicit: Noise Eraser prioritizes noise removal over voice tran
 
 ## Preset Registration
 
-Add to the preset table in v3 § "Presets":
+The `noise_eraser` preset is defined in `src/audio/presets.js` alongside the other presets.
 
 | Preset ID | Display name | Primary audience |
 |---|---|---|
 | `noise_eraser` | Noise Eraser | Severely noisy recordings where standard processing has failed |
 
-**Default output profile:** `standard`
+**Default output profile:** `podcast`
 
 The output profile is user-overridable. However: noise floor enforcement (`acx`) should not be the default for this preset. Source separation does not guarantee a -60 dBFS noise floor, and presenting ACX compliance as the default target would produce misleading pass/fail results. If a user selects `acx` output profile with `noise_eraser`, surface a warning: *"ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass."*
 
 ---
 
-## Processing Chain: Noise Eraser Path
+## Processing Chain: Noise Eraser Stage Sequence
+
+The active stage sequence is defined in `src/audio/presets.js`. As of May 2026, the `noise_eraser` stages array runs approximately:
 
 ```
-Input
-  │
-  ├── Pre-processing (decode, resample, channel handling) — same as v3
-  │
-  ├── Stage NE-1:  Pre-separation RNNoise pass
-  ├── Stage NE-2:  Tonal noise pre-treatment (conditional)
-  ├── Stage NE-3:  Demucs source separation (htdemucs_ft, vocals model)
-  ├── Stage NE-4:  Post-separation validation and artifact assessment
-  ├── Stage NE-5:  Residual cleanup (conditional light DF3 pass)
-  ├── Stage NE-6:  Bandwidth extension (AudioSR)
-  ├── Stage NE-7:  Post-separation enhancement EQ
-  │
-  ├── Stage 4a:    Serial compression (standard DSP)
-  ├── Stage 4a-PC: Parallel compression (wet/dry blend)
-  ├── Stage 4a-E:  Vocal Expander (frequency-selective silence-floor attenuator)
-  ├── Stage 4b:    Auto Leveler (VAD-gated gain riding, conditional)
-  │
-  ├── Stage 5:     Loudness Normalization (v3, standard path)
-  ├── Stage 6:     True Peak Limiting (v3, standard path)
-  └── Stage 7:     Measurement + Processing Report (v3, with NE additions)
+decode → measureBefore → peakNormalize → analyzeFramesRaw
+→ humDetect → hpf
+→ spectralSubtraction → noiseReduce (df3)
+→ tonalPretreatment
+→ separateVocals (demucs)
+→ separationValidation
+→ bandwidthExtension (currently disabled — enabled: false)
+→ remeasureFramesPostNr
+→ vocalExpander (pass 1, conservative)
+→ vocalSaturation
+→ compress (3 passes)
+→ vocalExpander (pass 2, more aggressive)
+→ vadGate (currently disabled)
+→ autoLevel
+→ airBoost → roomPresence (currently disabled)
+→ normalize → truePeakLimit → measureAfter
+→ acxCertification → qualityAdvisory → encode → extractPeaks
 ```
 
-**Stages skipped vs. v3 standard chain:**
-- Stage 1 (High-Pass Filter) — subsumed by NE-2 tonal pre-treatment and Demucs separation
-- Stage 2 (Adaptive Noise Reduction / DF3) — replaced by NE-1 through NE-5
-- Stage 3 (Enhancement EQ) — replaced by NE-7 (post-separation EQ, different reference profile)
-- Stage 4 (De-esser) — not applied; separation-induced sibilance changes are addressed in NE-7
-
-**Note on compression:** The Noise Eraser path now includes Stage 4a / 4a-PC compression (aligned with the standard chain) followed by Stage 4a-E (vocal expander) and Stage 4b (auto leveler). The expander is calibrated from the measured silence P90 on the *current* signal regardless of what produced it, so the absence of upstream compression (for `clearervoice_eraser`) does not break calibration. Output crest factor is still logged; if below 8 dB after normalization, a warning appears in the report.
+**How this differs from standard presets:**
+- Uses `tonalPretreatment` → `separateVocals` → `separationValidation` as the core voice extraction path
+- No `correctiveEQ` or `referenceEQ` — post-separation tonal correction relies on `airBoost` + `vocalSaturation`
+- No `clipGainDeEss` — de-essing on separated audio can further damage already-altered sibilance
+- `vocalExpander` runs twice: once before compression (conservative) and once after (more aggressive)
+- RNNoise pre-pass described in earlier specs is replaced by spectral subtraction + DF3 before separation
+- `bandwidthExtension` is present in the stages array but currently disabled
 
 ---
 
-## Stage NE-1 — Pre-separation RNNoise Pass
+## Stage NE-1 — Pre-separation Noise Reduction
 
-**Purpose:** Reduce the stationary component of the noise floor before handing off to Demucs. Source separation models perform better when the SNR is improved going in, even modestly. RNNoise is cheap to run and provides a meaningful pre-reduction with minimal artifact risk at this stage.
+**Current implementation:** The preset runs `spectralSubtraction` followed by `noiseReduce` (DF3) before handing off to Demucs. This replaces the earlier design of a standalone RNNoise pre-pass.
 
-**Implementation:** RNNoise (Mozilla). Python `pyrnnoise` bindings or equivalent server-side wrapper.
+**Purpose:** Reduce the stationary component of the noise floor before source separation. Separation models perform better when the SNR is improved going in, even modestly.
 
-**Parameters:**
-- Apply unconditionally to all `noise_eraser` files — no tier gating
-- No attenuation ceiling — allow RNNoise to operate at its natural output level
-- Do not apply post-pass artifact check at this stage; artifact assessment runs after full separation in NE-4
+**Stage sequence in current preset:** `spectralSubtraction` (MMSE Wiener with transient shaping) → `noiseReduce { model: "df3" }` → then separation.
 
-**Expected contribution:** Approximately 5–10 dB reduction of stationary broadband noise. Non-stationary components (wind, crowd, variable ambient) will be reduced less. The goal is not to clean the file — it is to reduce the job Demucs has to do, improving separation quality on the residual.
+**Expected contribution:** Reduces stationary broadband noise before separation. Non-stationary components will be reduced less. The goal is not to fully clean the file — it is to reduce the job Demucs has to do.
 
-**Logging:** Record pre-RNNoise and post-RNNoise noise floor in processing report.
+**Logging:** Frame analysis (`analyzeFramesRaw`) before this block establishes the pre-processing noise floor.
 
 ---
 
@@ -101,7 +105,7 @@ Input
 
 ---
 
-## Stage NE-3 — Demucs Source Separation
+## Stage NE-3 — Source Separation (Demucs)
 
 **Purpose:** Extract the voice signal from the mixture, discarding all non-voice content.
 
@@ -146,21 +150,19 @@ If no voiced frames are detected in the post-separation output (separation has p
 
 ---
 
-## Stage NE-5 — Residual Cleanup (Conditional)
+## Stage NE-5 — Residual Cleanup
 
-**Purpose:** Mop up residual noise bleed that Demucs did not fully suppress. Separation is not perfect — low-level background content bleeds through, particularly in the high-frequency range.
+**Note:** A separate explicit residual cleanup stage is not currently in the `noise_eraser` stages array. The `noiseReduce` call before separation (NE-1) handles pre-separation noise reduction. Post-separation cleanup is handled by the `remeasureFramesPostNr` + `vocalExpander` combination which attenuates the remaining noise floor in silence gaps.
 
-**Trigger condition:** Post-separation noise floor (measured in NE-4) > -55 dBFS. If the noise floor is already below -55 dBFS, skip this stage.
+The design rationale below describes the intended behavior if a post-separation DF3 pass is added:
 
-**Implementation:** DeepFilterNet3, light pass. Tier 2 ceiling (8 dB max attenuation). This is a cleanup pass, not a primary reduction pass — DF3 is being asked to handle a much smaller residual problem than in the standard chain. Apply conservatively.
-
-**Artifact check:** Run post-pass spectral flatness check as in v3 Stage 2c. If artifacts are detected, reduce DF3 attenuation by 50% and re-run once. If artifacts persist, skip NE-5 and log "Residual cleanup skipped — artifact risk. Residual noise floor: [X] dBFS."
-
-**If noise floor is still above -55 dBFS after NE-5:** Do not apply further reduction. Log the measured value. Report will surface this as a warning, not a failure — the separation has already done the primary work, and the residual is likely low-amplitude non-stationary content that further processing cannot cleanly address.
+**Trigger condition:** Post-separation noise floor > -55 dBFS. Light DF3 pass (8 dB max attenuation) to mop up residual bleed. If artifacts are detected, reduce attenuation and re-run once. If the noise floor remains above -55 dBFS after cleanup, report the value as a warning — do not over-process.
 
 ---
 
 ## Stage NE-6 — Bandwidth Extension
+
+**Current status:** The `bandwidthExtension` stage is present in the `noise_eraser` stages array with `enabled: false`. It can be enabled per-request via `presetOverrides` or by updating the preset config.
 
 **Purpose:** Restore high-frequency voice content attenuated during source separation. Demucs, like all separation models, tends to suppress high-frequency content in noisy conditions because broadband noise and voice air/presence occupy the same spectral region. The output voice can sound dull or "close" compared to the original.
 
@@ -189,9 +191,11 @@ If no voiced frames are detected in the post-separation output (separation has p
 
 ## Stage NE-7 — Post-separation Enhancement EQ
 
-**Purpose:** Correct tonal imbalances introduced by the separation and bandwidth extension process. The post-separation voice has a different spectral character than a cleanly recorded voice — the EQ reference used in v3 Stage 3 is calibrated for recorded voices, not separated voices. A separation-specific reference is needed.
+**Current status:** The `noise_eraser` preset does not currently run `correctiveEQ` or `referenceEQ`. Post-separation tonal correction is handled by `airBoost` and `vocalSaturation`. A full post-separation EQ pass with a separation-specific reference profile is the intended future state.
 
-**Implementation:** FFmpeg `equalizer` filter, parametric biquad IIR. Same implementation as v3 Stage 3, different reference profile.
+**Purpose:** Correct tonal imbalances introduced by the separation and bandwidth extension process. The post-separation voice has a different spectral character than a cleanly recorded voice — a separation-specific EQ reference is needed.
+
+**Implementation:** FFmpeg `equalizer` filter, parametric biquad IIR.
 
 **Noise Eraser EQ reference profile:**
 
@@ -300,30 +304,30 @@ Aggregate the NE-4 assessments into a single separation quality indicator with t
 
 | Parameter | Value | Rationale |
 |---|---|---|
-| Processing path | Parallel (NE-1 through NE-7) | Replaces v3 Stages 1–4a |
-| Pre-separation pass | RNNoise (unconditional) | Improves Demucs input SNR |
-| Tonal pre-treatment | Notch filtering (conditional) | Removes periodic noise Demucs handles poorly |
-| Primary separation | Demucs `htdemucs_ft` | Voice extraction rather than noise reduction |
-| Residual cleanup | DF3 Tier 2 (conditional, > -55 dBFS) | Mops up separation bleed |
-| Bandwidth extension | AudioSR | Restores high-frequency content lost in separation |
-| Post-separation EQ | Separation-specific reference profile | Corrects tonal imbalances from separation process |
-| De-esser | Not applied | Separation already alters sibilance; calibration not validated |
-| Compression | Not applied | Separation output has compressed character; avoid stacking |
-| Channel output | Mono (default) | Most Noise Eraser use cases are mono deliverables |
-| Default output profile | `standard` | ACX output profile not recommended for separation output |
+| Pipeline | Unified (same runner as all presets) | `noise_eraser` is a preset, not a separate pipeline |
+| Pre-separation NR | spectralSubtraction → DF3 | Improves Demucs input SNR |
+| Tonal pre-treatment | `tonalPretreatment` (conditional notch filtering) | Removes periodic noise Demucs handles poorly |
+| Primary separation | `separateVocals` — Demucs `htdemucs_ft` (default) or ConvTasNet | Voice extraction rather than noise reduction |
+| Post-separation validation | `separationValidation` | Artifact assessment, sibilance/breath ratios |
+| Residual cleanup | Not currently an explicit stage — handled by vocalExpander | Future: conditional DF3 light pass |
+| Bandwidth extension | AP-BWE (present but disabled) | Can be enabled; restores HF lost in separation |
+| Post-separation EQ | `airBoost` + `vocalSaturation` | Full corrective/reference EQ not applied to separated audio |
+| De-esser | Not applied | Separation already alters sibilance; clip-gain de-esser would need re-calibration |
+| Compression | 3 passes (crest-factor driven) | Runs on separated signal |
+| Vocal expander | 2 passes (before and after compression) | Addresses noise floor bleed in silence gaps |
+| Channel output | Mono | Most Noise Eraser use cases are mono deliverables |
+| Default output profile | `podcast` | ACX output profile not recommended for separation output |
 | Noise floor enforcement | Not enforced by default | Separation does not guarantee -60 dBFS |
 
 ---
 
-## Library Additions
-
-Add to the Library Reference table in v3:
+## Library Reference (Noise Eraser specific)
 
 | Stage | Library / Tool | License | Cost |
 |---|---|---|---|
-| Pre-separation noise reduction | RNNoise (`pyrnnoise`) | BSD | Free |
 | Source separation | Demucs `htdemucs_ft` (`demucs` Python package) | MIT | Free |
-| Bandwidth extension | AudioSR (`audiosr` Python package) | MIT | Free |
+| Source separation (fallback) | ConvTasNet via `asteroid` | MIT | Free |
+| Bandwidth extension | AP-BWE (`ap_bwe`) / LavaSR | MIT | Free |
 
 ---
 
