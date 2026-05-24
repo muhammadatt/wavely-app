@@ -62,7 +62,27 @@ export function resolveOutputProfileId(id) {
  * @property {number} wetMix                       - Target wet mix fraction (0.0–1.0)
  * @property {number} vadFadeMs                    - VAD gate fade duration (ms) for open and close transitions
  * @property {number} crestGuardThresholdDb        - Crest factor below which wet mix is scaled down
- * @property {number} parallelDesserMaxReductionDb - Max gain reduction of parallel de-esser on wet branch (dB)
+ * @property {number} [desserGainScale]            - Single knob controlling wet-branch
+ *                                                   sibilant reduction depth. Applied as
+ *                                                   `effective = (ev.gainDb − makeupGain) × scale`
+ *                                                   to each treated event before envelope
+ *                                                   rendering. 0 = de-esser fully off, 1 =
+ *                                                   wet sibilants at dry-path parity at the
+ *                                                   output (default), >1 = more aggressive.
+ * @property {boolean} [bypassVadGate]             - Debug escape: when true, the wet branch
+ *                                                   VAD gate is skipped (gate curve forced to
+ *                                                   1.0 everywhere). Only useful for soloing
+ *                                                   the wet branch at high wetMix values —
+ *                                                   leaves the makeup-gained noise floor
+ *                                                   audible during silence in normal use.
+ *
+ * The wet branch's sibilant control reuses the clip-gain de-esser's per-event
+ * decisions (ctx.results.clipGainDeEsser.treatedEvents). The single
+ * `desserGainScale` knob composes the dry-path decision with automatic
+ * makeup-gain compensation: at scale=0 the de-esser is fully off, at scale=1
+ * the wet branch's treated sibilants sit at the same level the dry-path
+ * sibilants do at the output. Fade shapes come from the preset's
+ * `clipGainDeEsser` block.
  *
  * @typedef {Object} Preset
  * @property {string} id
@@ -190,7 +210,7 @@ export const PRESETS = {
       },
       */
       "correctiveEQ",
-      { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } },
+     /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
       "remeasureFramesPostNr",
       {
         compression: [
@@ -217,13 +237,13 @@ export const PRESETS = {
       {
         parallelCompression: {
           ratio: 20,
-          attackMs: 15,
+          attackMs: 1,
           releaseMs: 150,
           makeupGain: "auto",
-          wetMix: 0.25,
+          wetMix: 0.15,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
-          parallelDesserMaxReductionDb: 20,
+          desserGainScale: 1.5,
         },
       },
       /*
@@ -248,7 +268,6 @@ export const PRESETS = {
           postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
         },
       },
-      */
       {
         vocalSaturation: {
           drive: 2.5,
@@ -290,7 +309,6 @@ export const PRESETS = {
             freq_ceil_hz: 20000.0,
             mode: "soft",
           },
-          /*
           {
             sibilant_only: true,
             preserve_harmonics: false,
@@ -310,10 +328,9 @@ export const PRESETS = {
               min_flatness: 0.2,
               broadband_trigger_db: 13.0,
             },
-          },*/
+          },
         ],
       },
-      /*
       {
         roomPresence: {
           enabled: true,
@@ -448,7 +465,7 @@ export const PRESETS = {
           wetMix: 0.4,
           vadFadeMs: 10,
           crestGuardThresholdDb: 12,
-          parallelDesserMaxReductionDb: 10,
+          desserGainScale: 1.0,
         },
       },
       /*
@@ -596,7 +613,7 @@ export const PRESETS = {
           wetMix: 0.15,
           vadFadeMs: 8,
           crestGuardThresholdDb: 10,
-          parallelDesserMaxReductionDb: 12,
+          desserGainScale: 1.1,
         },
       },
       {

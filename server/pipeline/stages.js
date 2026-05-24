@@ -1043,9 +1043,10 @@ export async function compress(ctx) {
 
 // ── Stage: Parallel Compression (Stage 4a-PC / NE-PC) ────────────────────────
 // Splits the signal into a dry passthrough and a heavily-compressed wet branch,
-// then mixes them at the preset-specific wet/dry ratio. The wet branch also
-// receives a parallel de-esser and a VAD gate (to prevent lifting noise floor
-// content during silence).
+// then mixes them at the preset-specific wet/dry ratio. The wet branch receives
+// a VAD gate (to prevent lifting noise floor content during silence) and reuses
+// the clip-gain de-esser's per-event gain decisions as a cosine-fade envelope
+// applied to its sibilants — no separate sidechain detector.
 //
 // Runs AFTER Stage 4a (serial compression) so both compression stages shape the
 // signal before the Auto Leveler sees it — per spec: "The Auto Leveler should
@@ -1058,7 +1059,7 @@ export async function parallelCompress(ctx) {
     pcPath,
     ctx.preset,
     ctx.results.metrics,
-    ctx.results.deEss ?? null,
+    ctx.results.clipGainDeEsser ?? null,
   )
   ctx.currentPath = pcPath
   ctx.results.parallelCompression = result
@@ -1066,6 +1067,7 @@ export async function parallelCompress(ctx) {
     applied: result.applied,
     wet:     result.applied ? `${Math.round(result.wetMixEffective * 100)}%` : 'n/a',
     guard:   result.applied ? result.crestFactorGuardActivated               : 'n/a',
+    desserEvents: result.applied ? result.parallelDesserEventCount           : 'n/a',
   })
 }
 

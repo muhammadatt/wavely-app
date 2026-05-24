@@ -337,6 +337,8 @@ def main() -> int:
 
         max_reduction_db = max(max_reduction_db, abs(gain_db))
         treated_events.append({
+            "startSample":  int(s),
+            "endSample":    int(e),
             "startSec":     round(s / sr, 4),
             "endSec":       round((e + 1) / sr, 4),
             "durationMs":   round((e - s + 1) * 1000.0 / sr, 1),
