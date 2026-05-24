@@ -5,18 +5,24 @@
  * branch, then mixes them at a preset-specific wet/dry ratio.
  *
  * Wet branch processing chain:
- *   high-ratio compressor → makeup gain → clip-gain sibilant envelope → VAD gate
+ *   high-ratio compressor → makeup gain → wet-branch clip-gain envelope → VAD gate
  *
  * Key design choices:
  *   - Adaptive threshold: voiced_rms_dbfs − 12 dB (floor: −50 dBFS)
  *   - Crest factor guard: scales wet mix down when pre-PC crest factor
  *     falls below the preset guard threshold, preventing over-compression.
  *   - VAD gate: mutes wet branch during silence to avoid lifting noise floor.
- *   - Sibilant control: reuses the per-event gain decisions made by the
- *     clip-gain de-esser stage (ctx.results.clipGainDeEsser.treatedEvents)
- *     and re-renders the same cosine-fade envelope onto the wet branch.
- *     No separate sidechain detector — when the clip-gain stage didn't run
- *     or produced no events, the wet branch passes through unattenuated.
+ *   - Sibilant control: runs a second clip-gain decision pass against the
+ *     synthesized wet branch (compressed + makeup-gained) using the same
+ *     event boundaries the upstream `clipGainDeEss` stage detected on the
+ *     dry signal. The wet-branch de-esser uses its own (more aggressive)
+ *     ceiling / ratio / max-reduction settings so the compressed sibilant
+ *     in the wet path is heavily attenuated — letting the dry sibilant
+ *     character predominate after the mix. Event boundaries are reused
+ *     verbatim (no second detection pass); only peak/context measurement is
+ *     redone, against the wet signal. When the upstream stage didn't run or
+ *     produced no events, or the preset omits `wetBranchDeEsser`, the wet
+ *     branch passes through unattenuated.
  *
  * Reference: Instant Polish Parallel Compression Stage Specification, April 2026.
  */
@@ -24,6 +30,9 @@
 import { readWavAllChannels }    from './wavReader.js'
 import { writeWavChannels }      from './wavWriter.js'
 import { buildClipGainEnvelope } from './clipGainEnvelope.js'
+import { applyClipGainDeEsser }  from './clipGainDeEsser.js'
+import { tempPath }              from '../lib/ffmpeg.js'
+import { rm }                    from 'fs/promises'
 
 
 // Parallel threshold derivation (spec §Adaptive Threshold)
@@ -40,15 +49,33 @@ const KNEE_WIDTH_DB = 4
  *
  * @param {string} inputPath
  * @param {string} outputPath  - 32-bit float WAV output
- * @param {string} presetId
+ * @param {object} preset
  * @param {import('./stages.js').AudioMetrics} frameAnalysis
  *   From ctx.results.metrics. Provides voicedRmsDbfs, frames.
- * @param {object|null} clipGainResult
- *   From ctx.results.clipGainDeEsser. When present and applied, its
- *   treatedEvents (per-event {startSample, endSample, gainDb, eventType})
- *   are re-rendered as a cosine-fade gain envelope onto the wet branch.
- *   Pass null (or an unapplied result) when unavailable — the wet branch
- *   then runs without any sibilant attenuation.
+ * @param {WetBranchDeEsserCtx|null} [wetBranchDeEsserCtx]
+ *   When provided, runs a second clip-gain decision pass against the
+ *   synthesized wet branch (compressed + makeup-gained), reusing the event
+ *   boundaries from the upstream dry-path detection. The returned treated
+ *   events are rendered into a cosine-fade envelope and applied to the wet
+ *   branch only, before the dry/wet mix. Pass null to disable wet-branch
+ *   sibilant attenuation entirely.
+ *
+ * @typedef {Object} WetBranchDeEsserCtx
+ * @property {string} eventsPath        - Path to the events.json written by
+ *                                        the upstream sibilance detection
+ *                                        pass (typically the `clipGainDeEss`
+ *                                        stage). Event boundaries are reused
+ *                                        verbatim; per-event peak dBFS is
+ *                                        recomputed against the wet signal.
+ * @property {import('./clipGainDeEsser.js').ClipGainDeEsserConfig} config
+ *                                      - Wet-branch de-esser settings
+ *                                        (naturalCeilingDb, reductionRatio,
+ *                                        maxReductionDb, contextWindowMs,
+ *                                        fades). Independent from the dry-
+ *                                        path clipGainDeEss config.
+ * @property {Array}  [vadFrames]       - Frame classifications used for
+ *                                        context-RMS measurement.
+ *
  * @returns {ParallelCompressionResult}
  *
  * @typedef {Object} ParallelCompressionResult
@@ -69,15 +96,21 @@ const KNEE_WIDTH_DB = 4
  * @property {boolean} crestFactorGuardActivated
  * @property {number|null} prePcCrestFactorDb
  * @property {boolean} parallelDesserApplied
- * @property {'clip_gain_envelope_reuse'|null} parallelDesserSource
+ * @property {'wet_branch_decision'|null} parallelDesserSource
  * @property {number|null} parallelDesserEventCount
- * @property {number|null} parallelDesserGainScale
- * @property {number|null} parallelDesserMakeupCompensationDb
+ * @property {number|null} parallelDesserNaturalCeilingDb
+ * @property {number|null} parallelDesserReductionRatio
  * @property {number|null} parallelDesserMaxReductionDb
  * @property {boolean} vadGateApplied
  * @property {number|null} vadGateFadeMs
  */
-export async function applyParallelCompression(inputPath, outputPath, preset, frameAnalysis, clipGainResult) {
+export async function applyParallelCompression(
+  inputPath,
+  outputPath,
+  preset,
+  frameAnalysis,
+  wetBranchDeEsserCtx = null,
+) {
   const config = preset?.parallelCompression
   if (!config) {
     await copyThrough(inputPath, outputPath)
@@ -135,45 +168,60 @@ export async function applyParallelCompression(inputPath, outputPath, preset, fr
     ? new Float32Array(numSamples).fill(1.0)
     : buildVadGateCurve(numSamples, frameAnalysis, config.vadFadeMs, sampleRate)
 
-  // ── 6. Build wet-branch sibilant envelope (clip-gain reuse) ──────────────
-  // Static reuse: take the per-event gainDb values the clip-gain stage already
-  // computed on the dry path and re-render the same cosine-fade envelope onto
-  // the wet branch. No separate sidechain detector. When the clip-gain stage
-  // didn't apply (no preset config, no events, or disabled), the envelope is
-  // a flat 1.0 and the wet branch passes through without sibilant attenuation.
-  //
-  // Per-event gainDb is corrected before rendering:
-  //   effective = (ev.gainDb − makeupCompDb) × desserGainScale
-  //
-  // Semantics of the single knob `desserGainScale`:
-  //   0   → de-esser fully off (envelope flat at 1.0)
-  //   1   → wet branch's treated sibilants sit at dry-path parity at the output
-  //         (makeup-gain boost on sibilants is fully cancelled)
-  //   >1  → more aggressive than dry parity
-  //   <1  → gentler than dry parity (residual makeup boost remains on sibilants)
-  //
-  // The compensation scales with the knob, so scale=0 truly disables the
-  // de-esser instead of leaving a uniform makeup-shaped dip on every event.
-  const treatedEvents   = (clipGainResult?.applied && Array.isArray(clipGainResult.treatedEvents))
-    ? clipGainResult.treatedEvents
-    : []
-  const desserGainScale = config.desserGainScale ?? 1.0
-  const makeupCompDb    = finalMakeupGainDb
-  const needsCorrection = desserGainScale !== 1.0 || makeupCompDb !== 0
-  const eventsForEnvelope = !needsCorrection ? treatedEvents
-    : treatedEvents.map(ev => ({
-        ...ev,
-        gainDb: (ev.gainDb ) * desserGainScale,
-      }))
-  const desserEnvelope = buildClipGainEnvelope(
-    numSamples,
-    sampleRate,
-    eventsForEnvelope,
-    preset?.clipGainDeEsser?.fades,
-  )
-  const desserApplied = treatedEvents.length > 0
-
+  // ── 6. Wet-branch de-esser pass ──────────────────────────────────────────
+  // Synthesize the wet-branch signal (compressed + makeup-gained, no envelope
+  // and no VAD gate yet) on the analysis channel, write it to a temp WAV, and
+  // run clip_gain_deesser.py in decision-only mode against it. The script
+  // reuses the event boundaries from the upstream dry-path detection and
+  // re-measures each event's peak dBFS and surrounding context RMS on the
+  // wet signal — so events that only become problematic AFTER compression
+  // + makeup (e.g. /f/ events that the dry-path natural-ceiling rejected) are
+  // caught here. The returned treatedEvents are rendered into a cosine-fade
+  // envelope applied to the wet branch only.
   const makeupLinear = Math.pow(10, finalMakeupGainDb / 20)
+  let   wetDesserResult = null
+  let   desserEnvelope  = { multiplier: null, eventCount: 0, maxReductionDb: 0 }
+  let   desserSkipReason = null
+
+  if (wetBranchDeEsserCtx?.eventsPath && wetBranchDeEsserCtx.config) {
+    const wetAnalysisSignal = synthesizeWetAnalysisSignal(analysisCh, compCurve, makeupLinear)
+    const wetTempPath = tempPath('.wav')
+    try {
+      await writeWavChannels([wetAnalysisSignal], sampleRate, wetTempPath)
+      wetDesserResult = await applyClipGainDeEsser(
+        wetTempPath,
+        null,
+        wetBranchDeEsserCtx.eventsPath,
+        wetBranchDeEsserCtx.config,
+        wetBranchDeEsserCtx.vadFrames ?? null,
+        { recomputeEventPeaks: true, decisionOnly: true },
+      )
+      desserEnvelope = buildClipGainEnvelope(
+        numSamples,
+        sampleRate,
+        wetDesserResult?.treatedEvents ?? [],
+        wetBranchDeEsserCtx.config.fades ?? preset?.clipGainDeEsser?.fades,
+      )
+    } finally {
+      await rm(wetTempPath, { force: true }).catch(() => {})
+    }
+  } else {
+    desserSkipReason = wetBranchDeEsserCtx?.eventsPath
+      ? 'no_wet_branch_config'
+      : 'no_upstream_events'
+  }
+
+  const desserApplied = !!(wetDesserResult?.applied)
+  // Flat envelope when the wet-branch pass didn't run or treated nothing —
+  // keeps the per-sample mix loop branch-free below.
+  if (!desserEnvelope.multiplier) {
+    desserEnvelope = {
+      multiplier:     new Float32Array(numSamples).fill(1.0),
+      eventCount:     0,
+      maxReductionDb: 0,
+    }
+  }
+
   const dryWeight    = 1 - effectiveWetMix
   const wetWeight    = effectiveWetMix
 
@@ -183,7 +231,7 @@ export async function applyParallelCompression(inputPath, outputPath, preset, fr
     for (let i = 0; i < ch.length; i++) {
       const dry = ch[i]
 
-      // Wet branch: compress → makeup gain → clip-gain envelope → VAD gate
+      // Wet branch: compress → makeup gain → wet-branch envelope → VAD gate
       const compGainLin   = Math.pow(10, -compCurve[i] / 20)
       const desserGainLin = desserEnvelope.multiplier[i]
       const wet = dry * compGainLin * makeupLinear * desserGainLin * vadGateCurve[i]
@@ -195,6 +243,7 @@ export async function applyParallelCompression(inputPath, outputPath, preset, fr
 
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
+  const wetCfg = wetBranchDeEsserCtx?.config ?? null
   return {
     applied:                     true,
     reason:                      null,
@@ -212,15 +261,33 @@ export async function applyParallelCompression(inputPath, outputPath, preset, fr
     wetMixEffective:             round2(effectiveWetMix),
     crestFactorGuardActivated:   guardActivated,
     prePcCrestFactorDb:          round2(prePcCrestFactor),
-    parallelDesserApplied:              desserApplied,
-    parallelDesserSource:               desserApplied ? 'clip_gain_envelope_reuse' : null,
-    parallelDesserEventCount:           desserApplied ? desserEnvelope.eventCount : 0,
-    parallelDesserGainScale:            desserApplied ? desserGainScale : null,
-    parallelDesserMakeupCompensationDb: desserApplied ? round2(makeupCompDb) : null,
-    parallelDesserMaxReductionDb:       desserApplied ? round2(desserEnvelope.maxReductionDb) : null,
-    vadGateApplied:                     !config.bypassVadGate,
-    vadGateFadeMs:                      config.bypassVadGate ? null : config.vadFadeMs,
+    parallelDesserApplied:             desserApplied,
+    parallelDesserSource:              desserApplied ? 'wet_branch_decision' : null,
+    parallelDesserSkipReason:          desserApplied ? null : desserSkipReason,
+    parallelDesserEventCount:          desserApplied ? desserEnvelope.eventCount : 0,
+    parallelDesserNaturalCeilingDb:    wetCfg ? (wetCfg.naturalCeilingDb ?? null) : null,
+    parallelDesserReductionRatio:      wetCfg ? (wetCfg.reductionRatio   ?? null) : null,
+    parallelDesserMaxReductionDb:      desserApplied ? round2(desserEnvelope.maxReductionDb) : null,
+    vadGateApplied:                    !config.bypassVadGate,
+    vadGateFadeMs:                     config.bypassVadGate ? null : config.vadFadeMs,
   }
+}
+
+// ── Wet-Branch Synthesis ─────────────────────────────────────────────────────
+
+/**
+ * Synthesize the wet branch analysis signal (channel 0): compressed + makeup
+ * gained, no envelope, no VAD gate. This is the signal the wet-branch
+ * de-esser measures peak/context RMS against.
+ */
+function synthesizeWetAnalysisSignal(analysisCh, compCurve, makeupLinear) {
+  const n   = analysisCh.length
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const compGainLin = Math.pow(10, -compCurve[i] / 20)
+    out[i] = analysisCh[i] * compGainLin * makeupLinear
+  }
+  return out
 }
 
 // ── Crest Factor ─────────────────────────────────────────────────────────────
@@ -391,14 +458,15 @@ function notApplied(reason) {
     wetMixEffective:             null,
     crestFactorGuardActivated:   false,
     prePcCrestFactorDb:          null,
-    parallelDesserApplied:              false,
-    parallelDesserSource:               null,
-    parallelDesserEventCount:           null,
-    parallelDesserGainScale:            null,
-    parallelDesserMakeupCompensationDb: null,
-    parallelDesserMaxReductionDb:       null,
-    vadGateApplied:                     false,
-    vadGateFadeMs:                      null,
+    parallelDesserApplied:             false,
+    parallelDesserSource:              null,
+    parallelDesserSkipReason:          null,
+    parallelDesserEventCount:          null,
+    parallelDesserNaturalCeilingDb:    null,
+    parallelDesserReductionRatio:      null,
+    parallelDesserMaxReductionDb:      null,
+    vadGateApplied:                    false,
+    vadGateFadeMs:                     null,
   }
 }
 

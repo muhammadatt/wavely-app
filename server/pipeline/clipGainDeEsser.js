@@ -47,17 +47,33 @@ const SCRIPT_PATH  = path.join(SCRIPTS_DIR, 'clip_gain_deesser.py')
  * Run the clip-gain de-esser.
  *
  * @param {string} inputPath
- * @param {string} outputPath
- * @param {string} eventsJsonPath   - Path to the event map written by
- *                                    analyze_sibilance_events.py. The map's
- *                                    events must include startSample,
- *                                    endSample, peakSample, eventPeakDb,
- *                                    eventType (i.e. produced by a detector
- *                                    pass where `audio` was supplied).
+ * @param {string|null} outputPath   - Output WAV path. May be null when
+ *                                     `opts.decisionOnly` is set.
+ * @param {string} eventsJsonPath    - Path to the event map written by
+ *                                     analyze_sibilance_events.py. The map's
+ *                                     events must include startSample,
+ *                                     endSample, peakSample, eventPeakDb,
+ *                                     eventType (i.e. produced by a detector
+ *                                     pass where `audio` was supplied).
+ *                                     When `opts.recomputeEventPeaks` is set
+ *                                     only startSample/endSample/eventType
+ *                                     are required — eventPeakDb is measured
+ *                                     fresh from `inputPath`.
  * @param {ClipGainDeEsserConfig} config
- * @param {Array}  [vadFrames]      - Frame list from frameAnalysis (used as
- *                                    the voiced/silence reference for context
- *                                    RMS measurement).
+ * @param {Array}  [vadFrames]       - Frame list from frameAnalysis (used as
+ *                                     the voiced/silence reference for
+ *                                     context RMS measurement).
+ * @param {{ recomputeEventPeaks?: boolean, decisionOnly?: boolean }} [opts]
+ *   recomputeEventPeaks: re-measure each event's peak dBFS against `inputPath`
+ *     within the [startSample, endSample] window, ignoring the eventPeakDb
+ *     baked into the events JSON. Used when the events file came from a
+ *     different signal stage (e.g. dry-path detection driving a wet-branch
+ *     decision pass on the synthesized compressed signal).
+ *   decisionOnly: don't write `outputPath`. The script still computes the
+ *     per-event gain decisions and returns `treatedEvents`; the caller is
+ *     responsible for any envelope rendering. Used by the parallel-compression
+ *     wet-branch pass, which builds and applies the envelope in JS so it can
+ *     mix in-process without a second WAV round-trip.
  * @returns {Promise<object>}
  */
 export async function applyClipGainDeEsser(
@@ -66,12 +82,13 @@ export async function applyClipGainDeEsser(
   eventsJsonPath,
   config,
   vadFrames = null,
+  opts = {},
 ) {
+  const { recomputeEventPeaks = false, decisionOnly = false } = opts
   const fades = config.fades ?? {}
   const args  = [
     SCRIPT_PATH,
     '--input',                  inputPath,
-    '--output',                 outputPath,
     '--events-json',            eventsJsonPath,
     '--natural-ceiling-db',     String(config.naturalCeilingDb     ?? 7.0),
     '--reduction-ratio',        String(config.reductionRatio       ?? 0.55),
@@ -82,6 +99,10 @@ export async function applyClipGainDeEsser(
     '--affricate-fade-in-ms',   String(fades.affricateInMs         ?? 1.5),
     '--affricate-fade-out-ms',  String(fades.affricateOutMs        ?? 4.5),
   ]
+
+  if (outputPath)         args.push('--output', outputPath)
+  if (recomputeEventPeaks) args.push('--recompute-event-peaks')
+  if (decisionOnly)        args.push('--no-render')
 
   let vadMaskPath = null
   if (vadFrames && vadFrames.length > 0) {

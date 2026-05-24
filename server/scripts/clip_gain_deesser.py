@@ -13,7 +13,7 @@ sidechain -- two discrete passes:
 
 Inputs (CLI):
   --input             32-bit float mono WAV at 44.1 kHz
-  --output            Output WAV (mono float32)
+  --output            Output WAV (mono float32). Skipped when --no-render is set.
   --events-json       Event map JSON (must contain per-event peak metadata:
                       startSample/endSample/peakSample/peakRelativePosition/
                       eventPeakDb/eventType). Produced by
@@ -29,9 +29,21 @@ Inputs (CLI):
   --context-window-ms (default 80)
   --fricative-fade-in-ms / --fricative-fade-out-ms
   --affricate-fade-in-ms / --affricate-fade-out-ms
+  --recompute-event-peaks  Measure event peak dBFS from the input audio inside
+                           [startSample, endSample] instead of trusting the
+                           eventPeakDb baked into events.json. Used when the
+                           events file came from a different signal stage
+                           (e.g. dry-path detection feeding a wet-branch
+                           decision pass).
+  --no-render              Skip writing the output WAV. The script still
+                           computes per-event gain decisions and emits the
+                           JSON_RESULT line. Used by callers that only need
+                           the treatedEvents list (e.g. parallel-compression
+                           wet-branch envelope rendering done in JS).
 
-Output: rewrites the WAV with the gain envelope applied. Emits a single
-JSON_RESULT: line summarising treated event counts and max reduction.
+Output: rewrites the WAV with the gain envelope applied (unless --no-render).
+Emits a single JSON_RESULT: line summarising treated event counts and max
+reduction.
 
 Dependencies: numpy, scipy
 """
@@ -228,7 +240,8 @@ def _render_event_envelope(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Clip-gain de-esser.")
     parser.add_argument("--input",          required=True)
-    parser.add_argument("--output",         required=True)
+    parser.add_argument("--output",         default=None,
+                        help="Output WAV path. Required unless --no-render is set.")
     parser.add_argument("--events-json",    required=True)
     parser.add_argument("--vad-mask-json",  default=None)
     parser.add_argument("--natural-ceiling-db", type=float, default=7.0)
@@ -239,7 +252,15 @@ def main() -> int:
     parser.add_argument("--fricative-fade-out-ms", type=float, default=4.0)
     parser.add_argument("--affricate-fade-in-ms",  type=float, default=1.5)
     parser.add_argument("--affricate-fade-out-ms", type=float, default=4.5)
+    parser.add_argument("--recompute-event-peaks", action="store_true",
+                        help="Measure eventPeakDb from --input within event "
+                             "boundaries instead of reading it from events.json.")
+    parser.add_argument("--no-render", action="store_true",
+                        help="Skip writing --output. JSON_RESULT is still emitted.")
     args = parser.parse_args()
+
+    if not args.no_render and not args.output:
+        parser.error("--output is required unless --no-render is set")
 
     sr, audio_2d, was_stereo = _read_wav_float32(args.input)
     n_samples = audio_2d.shape[0]
@@ -270,11 +291,15 @@ def main() -> int:
     max_reduction_db  = 0.0
 
     for ev in events:
-        # Reject events without the sample-domain peak metadata. The
-        # caller (sibilance_detector.build_events_map) emits these fields
-        # only when `audio` was passed in; this script can't synthesize
-        # them itself.
-        if "startSample" not in ev or "eventPeakDb" not in ev:
+        # When recomputing peaks from the input audio we only need the sample
+        # boundaries; eventPeakDb in the JSON is ignored. Otherwise both are
+        # required (the JSON was produced against this same signal).
+        if "startSample" not in ev:
+            logger.warning(
+                "clip_gain_deesser: event missing startSample — skipping"
+            )
+            continue
+        if not args.recompute_event_peaks and "eventPeakDb" not in ev:
             logger.warning(
                 "clip_gain_deesser: event missing peak metadata — skipping"
             )
@@ -285,7 +310,11 @@ def main() -> int:
         if e <= s:
             continue
 
-        event_peak_db = float(ev["eventPeakDb"])
+        if args.recompute_event_peaks:
+            peak_lin = float(np.max(np.abs(audio[s : e + 1]))) if e + 1 > s else 0.0
+            event_peak_db = 20.0 * np.log10(peak_lin + 1e-12) if peak_lin > 0 else -120.0
+        else:
+            event_peak_db = float(ev["eventPeakDb"])
         ev_type       = ev.get("eventType", "fricative")
 
         ctx_rms_db = _context_rms_db(
@@ -350,9 +379,13 @@ def main() -> int:
 
     # Vectorised single-pass apply. Multiplier is per-sample, broadcast
     # across channels so stereo layout is preserved.
-    processed_2d = (audio_2d.astype(np.float32) * multiplier[:, None]).astype(np.float32)
-    out = processed_2d[:, 0] if not was_stereo else processed_2d
-    wavfile.write(args.output, sr, out)
+    # Decision-only callers (e.g. the parallel-compression wet-branch envelope
+    # pass, which renders the envelope itself in JS) set --no-render to skip
+    # the WAV write entirely; they only consume the JSON_RESULT line below.
+    if not args.no_render:
+        processed_2d = (audio_2d.astype(np.float32) * multiplier[:, None]).astype(np.float32)
+        out = processed_2d[:, 0] if not was_stereo else processed_2d
+        wavfile.write(args.output, sr, out)
 
     summary = {
         "applied":            len(treated_events) > 0,

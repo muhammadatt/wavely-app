@@ -62,13 +62,23 @@ export function resolveOutputProfileId(id) {
  * @property {number} wetMix                       - Target wet mix fraction (0.0–1.0)
  * @property {number} vadFadeMs                    - VAD gate fade duration (ms) for open and close transitions
  * @property {number} crestGuardThresholdDb        - Crest factor below which wet mix is scaled down
- * @property {number} [desserGainScale]            - Single knob controlling wet-branch
- *                                                   sibilant reduction depth. Applied as
- *                                                   `effective = (ev.gainDb − makeupGain) × scale`
- *                                                   to each treated event before envelope
- *                                                   rendering. 0 = de-esser fully off, 1 =
- *                                                   wet sibilants at dry-path parity at the
- *                                                   output (default), >1 = more aggressive.
+ * @property {WetBranchDeEsserConfig} [wetBranchDeEsser]
+ *                                                 - Wet-branch de-esser settings. When
+ *                                                   present (and the upstream
+ *                                                   `clipGainDeEsser` stage emitted an
+ *                                                   events.json), a second clip-gain
+ *                                                   decision pass runs against the
+ *                                                   synthesized wet branch (compressed
+ *                                                   + makeup-gained), reusing those event
+ *                                                   boundaries but re-measuring peak and
+ *                                                   context RMS on the wet signal. The
+ *                                                   resulting envelope is applied to the
+ *                                                   wet branch only — letting aggressive
+ *                                                   wet-side attenuation "hide" the
+ *                                                   compressed sibilant so the dry
+ *                                                   sibilant character predominates at
+ *                                                   the mix output. Independent from the
+ *                                                   dry-path `clipGainDeEsser` config.
  * @property {boolean} [bypassVadGate]             - Debug escape: when true, the wet branch
  *                                                   VAD gate is skipped (gate curve forced to
  *                                                   1.0 everywhere). Only useful for soloing
@@ -76,13 +86,21 @@ export function resolveOutputProfileId(id) {
  *                                                   leaves the makeup-gained noise floor
  *                                                   audible during silence in normal use.
  *
- * The wet branch's sibilant control reuses the clip-gain de-esser's per-event
- * decisions (ctx.results.clipGainDeEsser.treatedEvents). The single
- * `desserGainScale` knob composes the dry-path decision with automatic
- * makeup-gain compensation: at scale=0 the de-esser is fully off, at scale=1
- * the wet branch's treated sibilants sit at the same level the dry-path
- * sibilants do at the output. Fade shapes come from the preset's
- * `clipGainDeEsser` block.
+ * @typedef {Object} WetBranchDeEsserConfig
+ * @property {number} [naturalCeilingDb]   - dB above surrounding voiced RMS that an
+ *                                           event must clear (measured on the wet
+ *                                           signal) before any attenuation is applied.
+ *                                           Typically more aggressive (lower) than the
+ *                                           dry-path ceiling because compression +
+ *                                           makeup flattens dynamic range.
+ * @property {number} [reductionRatio]     - Fraction of "excess above ceiling" that
+ *                                           gets removed. Near 1.0 flattens excess to
+ *                                           the ceiling.
+ * @property {number} [maxReductionDb]     - Hard cap on per-event attenuation.
+ * @property {number} [contextWindowMs]    - Voiced-context window used to measure the
+ *                                           surrounding RMS for natural-ceiling
+ *                                           comparison.
+ * @property {{ fricativeInMs?: number, fricativeOutMs?: number, affricateInMs?: number, affricateOutMs?: number }} [fades] - Envelope fade timings. Falls back to the preset's `clipGainDeEsser.fades` when absent.
  *
  * @typedef {Object} Preset
  * @property {string} id
@@ -237,30 +255,38 @@ export const PRESETS = {
       {
         parallelCompression: {
           ratio: 20,
-          attackMs: 1,
+          attackMs: 0.1,
           releaseMs: 150,
           makeupGain: "auto",
           wetMix: 1,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
-          desserGainScale: 2,
+          // Wet branch is wetMix=1 with auto makeup — sibilants emerge loud
+          // after compression. Aggressive ceiling / near-flatten ratio so the
+          // compressed sibilant is heavily attenuated on the wet branch and
+          // the dry sibilant character predominates at the mix output.
+          wetBranchDeEsser: {
+            naturalCeilingDb: 3.0,
+            reductionRatio:   0.9,
+            maxReductionDb:   50.0,
+            contextWindowMs:  80,
+          },
         },
       },
       {
-        clipGainDeEsser: {
-          enabled: true,
-          naturalCeilingDb: 8,
-          reductionRatio: 0.55,
-          maxReductionDb: 6.0,
-          minDurationMs: 15,
-          contextWindowMs: 80,
-          fades: {
-            fricativeInMs: 3.0,
-            fricativeOutMs: 4.0,
-            affricateInMs: 1.5,
-            affricateOutMs: 4.5,
+        resonanceSuppressor: [
+          {
+            depth: 0.67,
+            sharpness: 0.8,
+            selectivity: 8,
+            attack_ms: 15.0,
+            release_ms: 80.0,
+            max_reduction_db: 36.0,
+            freq_floor_hz: 40.0,
+            freq_ceil_hz: 20000.0,
+            mode: "soft",
           },
-        },
+        ],
       },
       /*
       {
@@ -481,7 +507,15 @@ export const PRESETS = {
           wetMix: 0.4,
           vadFadeMs: 10,
           crestGuardThresholdDb: 12,
-          desserGainScale: 1.0,
+          // Moderate wet mix — wet sibilants are partially audible at the
+          // output. Less aggressive ceiling than ACX so the wet branch
+          // contributes more sibilant energy to the overall sound.
+          wetBranchDeEsser: {
+            naturalCeilingDb: 4.0,
+            reductionRatio:   0.8,
+            maxReductionDb:   12.0,
+            contextWindowMs:  80,
+          },
         },
       },
       /*
@@ -629,7 +663,15 @@ export const PRESETS = {
           wetMix: 0.15,
           vadFadeMs: 8,
           crestGuardThresholdDb: 10,
-          desserGainScale: 1.1,
+          // Low wet mix — wet branch is a glue layer, sibilants barely
+          // audible. Still apply wet-branch attenuation to keep the dry
+          // sibilant character dominant.
+          wetBranchDeEsser: {
+            naturalCeilingDb: 3.5,
+            reductionRatio:   0.85,
+            maxReductionDb:   12.0,
+            contextWindowMs:  80,
+          },
         },
       },
       {

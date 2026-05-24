@@ -970,7 +970,11 @@ export async function clipGainDeEss(ctx) {
   )
 
   if (result.applied) ctx.currentPath = outPath
-  ctx.results.clipGainDeEsser = result
+  // Expose eventsPath so downstream stages (e.g. parallelCompress's wet-branch
+  // de-esser pass) can reuse the same event boundaries without re-running
+  // detection. The events.json lives in the per-job temp dir alongside the
+  // other intermediate artifacts; ctx.tmp registers it for cleanup.
+  ctx.results.clipGainDeEsser = { ...result, eventsPath }
 
   await logLevel(ctx, 'after clip-gain de-esser', ctx.currentPath, {
     applied:    result.applied,
@@ -1044,22 +1048,38 @@ export async function compress(ctx) {
 // ── Stage: Parallel Compression (Stage 4a-PC / NE-PC) ────────────────────────
 // Splits the signal into a dry passthrough and a heavily-compressed wet branch,
 // then mixes them at the preset-specific wet/dry ratio. The wet branch receives
-// a VAD gate (to prevent lifting noise floor content during silence) and reuses
-// the clip-gain de-esser's per-event gain decisions as a cosine-fade envelope
-// applied to its sibilants — no separate sidechain detector.
+// a VAD gate (to prevent lifting noise floor content during silence) and, when
+// the preset defines `parallelCompression.wetBranchDeEsser`, a second clip-gain
+// decision pass runs against the synthesized wet signal. That pass reuses the
+// event boundaries the upstream `clipGainDeEss` stage detected on the dry path
+// (so it does no extra STFT/VAD work) but re-measures peak/context RMS on the
+// wet branch — letting it catch events (e.g. /f/) that only become problematic
+// after compression + makeup, and apply aggressive attenuation specifically to
+// the wet branch so the dry sibilant character predominates after the mix.
 //
 // Runs AFTER Stage 4a (serial compression) so both compression stages shape the
 // signal before the Auto Leveler sees it — per spec: "The Auto Leveler should
 // operate on the signal after parallel compression has set the density character."
 
 export async function parallelCompress(ctx) {
-  const pcPath = ctx.tmp('.wav')
+  const pcPath          = ctx.tmp('.wav')
+  const wetBranchConfig = ctx.preset?.parallelCompression?.wetBranchDeEsser
+  const upstreamEvents  = ctx.results.clipGainDeEsser?.eventsPath ?? null
+
+  const wetBranchDeEsserCtx = (wetBranchConfig && upstreamEvents)
+    ? {
+        eventsPath: upstreamEvents,
+        config:     wetBranchConfig,
+        vadFrames:  ctx.results.metrics?.frames ?? null,
+      }
+    : null
+
   const result = await applyParallelCompression(
     ctx.currentPath,
     pcPath,
     ctx.preset,
     ctx.results.metrics,
-    ctx.results.clipGainDeEsser ?? null,
+    wetBranchDeEsserCtx,
   )
   ctx.currentPath = pcPath
   ctx.results.parallelCompression = result
@@ -1067,7 +1087,10 @@ export async function parallelCompress(ctx) {
     applied: result.applied,
     wet:     result.applied ? `${Math.round(result.wetMixEffective * 100)}%` : 'n/a',
     guard:   result.applied ? result.crestFactorGuardActivated               : 'n/a',
-    desserEvents: result.applied ? result.parallelDesserEventCount           : 'n/a',
+    desserEvents:  result.applied ? result.parallelDesserEventCount        : 'n/a',
+    desserSource:  result.applied ? (result.parallelDesserSource ?? 'off') : 'n/a',
+    desserMaxRed:  result.applied && result.parallelDesserMaxReductionDb != null
+                     ? `${result.parallelDesserMaxReductionDb}dB` : 'n/a',
   })
 }
 
