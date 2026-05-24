@@ -186,7 +186,7 @@ export const PRESETS = {
           naturalCeilingDb: 8,
           reductionRatio: 0.55,
           maxReductionDb: 6.0,
-          minDurationMs: 25,
+          minDurationMs: 15,
           contextWindowMs: 80,
           fades: {
             fricativeInMs: 3.0,
@@ -240,10 +240,26 @@ export const PRESETS = {
           attackMs: 1,
           releaseMs: 150,
           makeupGain: "auto",
-          wetMix: 0.15,
+          wetMix: 1,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
-          desserGainScale: 1.5,
+          desserGainScale: 2,
+        },
+      },
+      {
+        clipGainDeEsser: {
+          enabled: true,
+          naturalCeilingDb: 8,
+          reductionRatio: 0.55,
+          maxReductionDb: 6.0,
+          minDurationMs: 15,
+          contextWindowMs: 80,
+          fades: {
+            fricativeInMs: 3.0,
+            fricativeOutMs: 4.0,
+            affricateInMs: 1.5,
+            affricateOutMs: 4.5,
+          },
         },
       },
       /*

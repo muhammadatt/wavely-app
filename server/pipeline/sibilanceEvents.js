@@ -75,10 +75,27 @@ export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
     '--f0-contour-json',  contourPath,
   ]
 
+  // Merge the upstream-measured noise floor into the detection params so
+  // the absolute-energy gate has a stable reference. analyzeFramesRaw
+  // back-fills ctx.results.metrics.noiseFloorDbfs before any stage that
+  // calls into here (airBoost, clipGainDeEsser). Clamped to [-70, -45]
+  // dBFS so a pathological measurement (e.g. an unusually clean clip
+  // that bottoms out the bootstrap estimate, or a noisy file that pulls
+  // the floor up into the voice band) can't make the gate disappear or
+  // suppress every sibilant. When the caller already provided an
+  // explicit noise_floor_dbfs it wins.
+  const mergedParams = { ...(params ?? {}) }
+  if (mergedParams.noise_floor_dbfs === undefined) {
+    const measured = ctx.results?.metrics?.noiseFloorDbfs
+    if (Number.isFinite(measured)) {
+      mergedParams.noise_floor_dbfs = Math.min(-45, Math.max(-70, measured))
+    }
+  }
+
   let paramsPath = null
-  if (params && Object.keys(params).length > 0) {
+  if (Object.keys(mergedParams).length > 0) {
     paramsPath = ctx.tmp('.json')
-    await writeFile(paramsPath, JSON.stringify(params))
+    await writeFile(paramsPath, JSON.stringify(mergedParams))
     args.push('--params-json', paramsPath)
   }
 

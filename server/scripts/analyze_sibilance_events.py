@@ -103,6 +103,32 @@ if __name__ == "__main__":
     with open(args.output, "w") as fh:
         json.dump(events, fh)
 
+    # Per-event detection diagnostics. Surfaces which detect() condition
+    # fired plus the in-band stats so misfires (false positives on /h/,
+    # vowel onsets, breath; misses on passage-start sibilants) can be
+    # audited from logs. Each line is prefixed [SibilanceAnalyzer] by the
+    # Node wrapper (sibilanceEvents.js).
+    for ev in events.get("events", []) or []:
+        det = ev.get("detection") or {}
+        if not det:
+            continue
+        fired = ",".join(
+            f"{c}({det['framesByCondition'][c]})"
+            for c in det.get("firedConditions", [])
+        ) or "none"
+        band = det.get("bandHz") or [None, None]
+        logger.info(
+            "[sib-event] t=%.3f-%.3fs f=%d-%d %.0fms type=%s cond=%s "
+            "p95=%s mean=%s lf=%s flat=%s "
+            "band=%s-%s f0=%s postSil=%s",
+            ev.get("startSec", 0.0), ev.get("endSec", 0.0),
+            ev.get("startFrame", -1), ev.get("endFrame", -1),
+            ev.get("durationMs", 0), ev.get("eventType", "?"), fired,
+            det.get("meanP95Db"), det.get("meanMeanDb"), det.get("meanLfDb"),
+            det.get("meanFlatness"),
+            band[0], band[1], det.get("f0Hz"), det.get("postSilenceOnset"),
+        )
+
     print("JSON_RESULT:" + json.dumps({
         "frameCount":         events["frameCount"],
         "sibilantFrameCount": len(events["sibilantFrameIndices"]),

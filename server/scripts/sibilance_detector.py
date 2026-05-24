@@ -3,32 +3,37 @@ sibilance_detector.py
 Self-contained sibilance event detector.
 
 Provides the SibilanceDetector class and analyze_sibilance_events() function
-used by airBoost (post-boost sibilant masking) and resonanceSuppressor
-(sibilant_only passes). Each calling stage supplies its own detection
-parameters via the standard sparse-override pattern.
+used by airBoost (post-boost sibilant masking), the clip-gain de-esser, and
+resonanceSuppressor (sibilant_only passes). Each calling stage supplies its
+own detection parameters via the standard sparse-override pattern.
+
+Scope: voiceless fricatives (/s/, /f/, /ʃ/). Voiced fricatives (/z/, /ʒ/,
+/v/) are rejected by the voicing-dominance veto by design; if a downstream
+need to capture them appears, the veto would be the place to relax.
 
 Detection scheme:
 
   - Sibilant frequency band: derived from F0 via get_sibilant_band(). Lower
-    edge is max(F0*8, 3 kHz); upper edge is fixed at 12 kHz (or Nyquist).
+    edge is max(F0*6, 2.5 kHz); upper edge is fixed at 12 kHz (or Nyquist).
   - Per-frame band update: F0 is supplied externally as a per-STFT-frame
     contour (typically from estimate_f0_contour.py). The detector maintains
     a rolling-window median over those values and rebuilds the band mask
     when the median shifts beyond F0_MASK_RESHIFT_THRESHOLD_HZ -- avoids
     mask churn from contour jitter while tracking real pitch changes.
-  - Three-condition detect():
-      * Condition 1 (P95 spike): in-band P95 energy exceeds the in-band
-        mean by p95_trigger_db AND in-band spectral flatness exceeds
-        min_flatness. Fires from frame zero -- no warmup needed.
-      * Condition 2 (broadband elevation): in-band mean energy exceeds
-        the long-term EMA reference (built on voiced non-sibilant frames)
-        by broadband_trigger_db. Active only after warmup_frames voiced
-        non-sibilant frames have populated the EMA.
-      * Condition 3 (per-bin contextual excess): a minimum fraction of
-        sibilant-band bins show per-bin energy excess above a short rolling
-        buffer of recent voiced non-sibilant frames (N1/N2 context window,
-        Gonzalez & Brookes 2012). Catches soft/voiced fricatives missed by
-        Conditions 1-2 and is more robust to stop bursts than the P95 gate.
+  - Voicing-dominance veto: frames where 80-1500 Hz energy dominates the
+    in-band mean by more than voicing_veto_db are vowels/voiced content
+    and are rejected before any other check.
+  - Absolute energy gate: in-band mean must exceed the upstream-measured
+    noise floor (noise_floor_dbfs) by min_sibilant_energy_above_noise_db.
+    When the caller does not supply a noise floor the gate is disabled
+    (standalone / audit use). The gate replaces the previous EMA and
+    rolling-context-buffer references, which self-masked inside long
+    fricatives because they were temporal references built from the very
+    signal being detected.
+  - Spectral-shape check (P95 + flatness): in-band P95 must exceed the
+    in-band mean by p95_trigger_db AND in-band spectral flatness must
+    exceed min_flatness. Distinguishes broadband fricative turbulence
+    from narrow-band content that survives the veto and gate.
 
 The module owns no F0 estimation. Callers that need an F0 contour should
 get one from estimate_f0_contour.py via getF0Contour() in f0Analysis.js.
@@ -63,19 +68,30 @@ F0_MASK_RESHIFT_THRESHOLD_HZ = 20.0
 # .sibilanceDetection); anything omitted inherits from this dict.
 
 DEFAULT_PARAMS = {
-    # Condition 1: P95 spike + flatness gate. Fires from frame zero.
+    # Spectral-shape check: P95 spike + flatness gate. Distinguishes
+    # broadband fricative turbulence from narrow-band content.
     "p95_trigger_db":              6.0,
     "min_flatness":                0.1,
-    # Condition 2: broadband elevation above long-term reference. Requires
-    # warmup before firing so the EMA reference is stable.
-    "broadband_trigger_db":        10.0,
-    "ema_time_constant_ms":        300.0,
-    "warmup_frames":               25,
-    # Condition 3: per-bin contextual excess (Gonzalez & Brookes 2012).
-    # Uses a short rolling buffer of recent voiced non-sibilant frames as the
-    # local noise-floor reference. Fires after the buffer is half-full.
-    "contextual_trigger_db":       8.0,   # per-bin excess (dB) to count a bin as elevated
-    "contextual_min_bin_fraction": 0.40,  # fraction of sibilant-band bins that must be elevated
+    # Voicing-dominance veto. Vowels and other voiced content have low-band
+    # (80-1500 Hz) energy that dominates the in-band mean by 30-50 dB;
+    # voiceless fricatives have high-band energy at or above low-band level.
+    # Suppress detection when LF-mean exceeds in-band mean by more than this
+    # threshold (dB). Runs first so vetoed frames cannot fire.
+    # TODO: when LF mean is also below an absolute floor (e.g. -50 dBFS) the
+    # voice has gone quiet and the LF/HF ratio becomes noise-dominated --
+    # deep male voices on quiet aspirated /h/+/s/ blends may need the veto
+    # bypassed in that regime. Not adding the bypass yet -- current evidence
+    # is the veto under-suppresses, not over-suppresses.
+    "voicing_veto_db":             20.0,
+    "voicing_veto_lf_low_hz":      80.0,
+    "voicing_veto_lf_high_hz":     1500.0,
+    # Absolute energy gate. In-band mean must exceed noise_floor_dbfs by
+    # at least this many dB. Replaces the previous EMA/contextual-buffer
+    # temporal references, which self-masked inside long fricatives. The
+    # noise floor is supplied per-call by the pipeline (frameAnalysis.js).
+    # When noise_floor_dbfs is None the gate is disabled (standalone use).
+    "min_sibilant_energy_above_noise_db": 20.0,
+    "noise_floor_dbfs":            None,
     # Minimum event duration (ms). Events shorter than this are dropped from
     # the returned event map entirely. Default 0 preserves backward
     # compatibility for stages that share the detector (airBoost,
@@ -83,9 +99,35 @@ DEFAULT_PARAMS = {
     # treats brief consonant stops or click residuals as sibilants.
     "min_duration_ms":             0.0,
     # Gap merge (ms). Consecutive events separated by fewer frames than this
-    # threshold are joined into one event (Gonzalez & Brookes 2012 max-filter
-    # equivalent). Reduces fragmentation of long fricatives.
-    "gap_merge_ms":                30.0,
+    # threshold are joined into one event. Reduces fragmentation of long
+    # fricatives whose P95-mean ratio briefly dips below trigger mid-burst
+    # (the loud body of a sustained /f/ or /s/ can flatten enough that the
+    # spectral-shape check drops out for a few frames between the onset
+    # and the trailing turbulence). The 80 ms window stays well inside
+    # the silence_gap_reset_ms boundary, so it cannot bridge across
+    # passage breaks.
+    "gap_merge_ms":                80.0,
+    # Silence-gap reset. When the analyzer sees this many ms of contiguous
+    # unvoiced frames it treats the next voiced frame as a passage onset:
+    # the rolling-F0 deque is cleared, and (when the caller supplies a
+    # look-ahead median) the sibilant band is reseeded from the new
+    # segment's pitch. Without this the band would stay frozen at the
+    # previous segment's F0 for the first 2-3 voiced frames of the new
+    # passage while the rolling-median buffer refills.
+    "silence_gap_reset_ms":        150.0,
+    # Voiced frames within this window after a passage onset are tagged
+    # postSilenceOnset=True in the per-event detection diagnostics so
+    # misfires concentrated at passage starts can be identified from logs.
+    "post_silence_window_ms":      150.0,
+    # Fricative tail extension (ms). Silero VAD marks the trailing
+    # turbulence-only portion of unvoiced fricatives (/f/, /s/, /sh/)
+    # as silence once the voicing dies, which truncates sibilant events
+    # mid-burst. After every voiced->silence transition this many ms of
+    # subsequent silence frames are forcibly marked voiced so the
+    # detector continues running through the fricative tail. The voicing
+    # veto and absolute energy gate still apply, so pure silence inside
+    # the extension window cannot trigger detection.
+    "fricative_tail_extension_ms": 80.0,
 }
 
 
@@ -112,13 +154,17 @@ def get_sibilant_band(f0: float, sample_rate: int) -> tuple:
     """
     Derive the sibilant band from F0.
 
-    Lower bound: max(F0*8, 3 kHz) -- fricative energy begins around the 8th
-    harmonic, never below 3 kHz (avoids voice body for high-F0 voices).
+    Lower bound: max(F0*6, 2.5 kHz) -- /sh/, /ch/, /j/ have peak energy
+    centred at 2.5-4 kHz; the previous 3 kHz floor excluded ~30% of their
+    in-band power and was the dominant cause of post-silence /sh/ misses
+    (see audit of 12_spectralSubtraction.wav, 12.25 s and 17.30 s events).
+    The F0*6 multiplier still keeps the floor safely above F1/F2 for
+    typical voices (a 400 Hz F0 -> 2.4 kHz lower bound, clamped up to 2.5).
     Upper bound: fixed at 12 kHz (or Nyquist) -- fricative turbulence is
     broadband noise whose extent depends on vocal tract acoustics, not F0.
     """
     nyquist = sample_rate / 2.0
-    low_hz  = max(f0 * 8.0, 3000.0)
+    low_hz  = max(f0 * 6.0, 2500.0)
     high_hz = min(12000.0, nyquist)
     return float(low_hz), float(high_hz)
 
@@ -126,6 +172,60 @@ def get_sibilant_band(f0: float, sample_rate: int) -> tuple:
 # ---------------------------------------------------------------------------
 # Event map serialisation
 # ---------------------------------------------------------------------------
+
+def _aggregate_event_detection(
+    per_frame_diag: dict,
+    frame_start:    int,
+    frame_end:      int,
+):
+    """
+    Reduce per-frame detection diagnostics across an event's frame range
+    into a single summary block attached to the event JSON. Captures which
+    detect() condition fired on each frame plus the in-band stats used to
+    arrive at that decision, so per-event misfires can be audited from
+    logs. Returns None when no frames in the range carry diagnostics.
+    """
+    diags = [
+        per_frame_diag[i] for i in range(frame_start, frame_end + 1)
+        if i in per_frame_diag
+    ]
+    if not diags:
+        return None
+
+    by_condition = {}
+    p95_vals, mean_vals, flat_vals = [], [], []
+    f0_vals,  lf_vals              = [], []
+    band_lo, band_hi, post_silence = None, None, False
+
+    for d in diags:
+        cond = d.get("condition")
+        if cond:
+            by_condition[cond] = by_condition.get(cond, 0) + 1
+        if d.get("p95Db")    is not None: p95_vals.append(d["p95Db"])
+        if d.get("meanDb")   is not None: mean_vals.append(d["meanDb"])
+        if d.get("flatness") is not None: flat_vals.append(d["flatness"])
+        if d.get("f0Hz")     is not None: f0_vals.append(d["f0Hz"])
+        if d.get("lfDb")     is not None: lf_vals.append(d["lfDb"])
+        if d.get("postSilence"):
+            post_silence = True
+        if band_lo is None and d.get("bandLowHz")  is not None: band_lo = d["bandLowHz"]
+        if band_hi is None and d.get("bandHighHz") is not None: band_hi = d["bandHighHz"]
+
+    def _mean(vals, ndigits=2):
+        return round(float(sum(vals) / len(vals)), ndigits) if vals else None
+
+    return {
+        "firedConditions":    sorted(by_condition.keys()),
+        "framesByCondition":  by_condition,
+        "meanP95Db":          _mean(p95_vals),
+        "meanMeanDb":         _mean(mean_vals),
+        "meanFlatness":       _mean(flat_vals, ndigits=4),
+        "meanLfDb":           _mean(lf_vals),
+        "bandHz":             [int(round(band_lo)), int(round(band_hi))] if band_lo is not None else None,
+        "f0Hz":               _mean(f0_vals, ndigits=1),
+        "postSilenceOnset":   post_silence,
+    }
+
 
 def build_events_map(
     sibilant_indices: list,
@@ -138,6 +238,7 @@ def build_events_map(
     audio:            np.ndarray = None,
     min_duration_ms:  float = 0.0,
     gap_merge_ms:     float = 0.0,
+    per_frame_diag:   dict = None,
 ) -> dict:
     """
     Build the canonical sibilance event-map JSON payload.
@@ -233,6 +334,11 @@ def build_events_map(
                 "eventType":            event_type,
             })
 
+        if per_frame_diag:
+            detection = _aggregate_event_detection(per_frame_diag, int(s), int(e))
+            if detection is not None:
+                obj["detection"] = detection
+
         event_objs.append(obj)
         kept_runs.append((s, e))
 
@@ -274,12 +380,15 @@ class SibilanceDetector:
                       current rolling-median band
 
     State surfaced to consumers (read-only):
-      sibilant_mask      - current frequency-bin mask (n_bins boolean)
-      sibilant_low/high  - band edges in Hz
-      long_term_power    - per-bin EMA reference
-      voiced_frame_count - voiced non-sibilant frames contributing to EMA
-      f0                 - F0 from which the current band was derived
-      f0_rolling         - deque of recent per-frame F0 values
+      sibilant_mask     - current frequency-bin mask (n_bins boolean)
+      sibilant_low/high - band edges in Hz
+      f0                - F0 from which the current band was derived
+      f0_rolling        - deque of recent per-frame F0 values
+
+    The detector holds no temporal reference (EMA, rolling power buffer)
+    built from the signal being detected. The absolute energy gate uses
+    the upstream-measured noise_floor_dbfs supplied via params, so a
+    sustained fricative cannot self-mask by adapting the gate up.
     """
 
     def __init__(
@@ -298,6 +407,22 @@ class SibilanceDetector:
         self.freqs  = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
         self.n_bins = len(self.freqs)
 
+        # Voicing-dominance veto mask. Fixed band (not F0-dependent) covering
+        # the vocal body. See voicing_veto_db in DEFAULT_PARAMS for rationale
+        # and the open question about a low-energy bypass.
+        lf_low  = float(params.get("voicing_veto_lf_low_hz",  80.0))
+        lf_high = float(params.get("voicing_veto_lf_high_hz", 1500.0))
+        self.lf_mask = (self.freqs >= lf_low) & (self.freqs <= lf_high)
+
+        # Absolute energy gate threshold (dBFS). Computed once from
+        # noise_floor_dbfs + min_sibilant_energy_above_noise_db; None when
+        # the caller did not supply a noise floor (gate disabled).
+        nf = params.get("noise_floor_dbfs")
+        offset = float(params.get("min_sibilant_energy_above_noise_db", 20.0))
+        self.energy_gate_dbfs = (
+            float(nf) + offset if nf is not None and np.isfinite(nf) else None
+        )
+
         # F0 / band state
         self.f0            = f0
         self.sibilant_low  = None
@@ -312,28 +437,23 @@ class SibilanceDetector:
             self._current_band_f0 = f0
             self.f0_rolling.append(f0)
 
-        # EMA state
-        frame_period_ms      = (hop_length / sample_rate) * 1000.0
-        self.ema_alpha       = self._time_to_coeff(
-            params["ema_time_constant_ms"], frame_period_ms
+        # Silence-gap reset state. analyze_sibilance_events() decides when a
+        # passage-onset reset is due (it owns the silence-run counter and
+        # the look-ahead F0 needed for reseeding) and calls
+        # mark_passage_onset() before process_frame(). The detector itself
+        # only tracks how many voiced frames remain inside the post-silence
+        # observation window so per-frame diagnostics can flag onset frames.
+        frame_period_ms = (hop_length / sample_rate) * 1000.0
+        self._post_silence_window_frames = max(
+            1, int(params.get("post_silence_window_ms", 150.0) / frame_period_ms)
         )
-        self.long_term_power    = None
-        self.voiced_frame_count = 0
+        self._post_silence_remaining = 0
 
-        # N1/N2 context buffer state (Condition 3 — Gonzalez & Brookes 2012).
-        # Rolling buffer of recent voiced per-bin power spectra (~65 ms).
-        # All voiced frames are accepted regardless of sibilance classification
-        # so the reference tracks the live signal without circular dependency on
-        # the detection result (see update_context_buffer for rationale).
-        self._context_buffer_len = max(1, int(0.065 * sample_rate / hop_length))
-        self._context_buffer     = deque(maxlen=self._context_buffer_len)
-        self._context_min_fill   = max(1, (self._context_buffer_len + 1) // 2)
-
-    @staticmethod
-    def _time_to_coeff(time_ms: float, frame_period_ms: float) -> float:
-        if time_ms <= 0 or frame_period_ms <= 0:
-            return 1.0
-        return np.exp(-frame_period_ms / time_ms)
+        # Per-frame detection diagnostics. detect() populates this on every
+        # voiced frame so analyze_sibilance_events() can collect it and
+        # aggregate per event. Reassigned (new dict) on every detect() call;
+        # consumers should not retain the reference across frames.
+        self.last_diag = None
 
     def seed_f0(self, f0: float) -> None:
         """Set the initial F0/band before processing begins."""
@@ -375,7 +495,32 @@ class SibilanceDetector:
                 self._current_band_f0 = median_f0
 
     def detect(self, magnitude: np.ndarray) -> bool:
-        """Three-condition per-frame detection. See module docstring."""
+        """Per-frame voiceless-fricative detection.
+
+        Three frame-local gates: voicing-dominance veto, absolute energy
+        above noise floor, and spectral shape (P95 spike + flatness). All
+        three must clear for a frame to be classified as sibilant. None of
+        them carry state derived from the signal being detected, so a
+        sustained fricative cannot self-mask.
+
+        Populates self.last_diag for analyze_sibilance_events() to
+        aggregate into the per-event detection summary.
+        """
+        diag = {
+            "condition":     None,
+            "p95Db":         None,
+            "meanDb":        None,
+            "flatness":      None,
+            "lfDb":          None,
+            "voicingVetoed": False,
+            "energyGated":   False,
+            "bandLowHz":     self.sibilant_low,
+            "bandHighHz":    self.sibilant_high,
+            "f0Hz":          self.f0,
+            "postSilence":   self._post_silence_remaining > 0,
+        }
+        self.last_diag = diag
+
         if self.sibilant_mask is None or not self.sibilant_mask.any():
             return False
 
@@ -386,7 +531,32 @@ class SibilanceDetector:
         mean_db = 10.0 * np.log10(mean_energy + 1e-10)
         p95_db  = 10.0 * np.log10(p95_energy  + 1e-10)
 
-        # --- Condition 1: P95 spike + flatness gate (unchanged) ---
+        diag["p95Db"]  = round(float(p95_db),  2)
+        diag["meanDb"] = round(float(mean_db), 2)
+
+        # --- Voicing-dominance veto ---
+        # Frames where low-band energy dominates the in-band mean by more
+        # than voicing_veto_db cannot be voiceless fricatives -- they are
+        # vowels or other voiced content with negligible HF content.
+        if self.lf_mask is not None and self.lf_mask.any():
+            lf_power = magnitude[self.lf_mask] ** 2
+            lf_db    = 10.0 * np.log10(float(np.mean(lf_power)) + 1e-10)
+            diag["lfDb"] = round(float(lf_db), 2)
+            if (lf_db - mean_db) > self.params.get("voicing_veto_db", 20.0):
+                diag["voicingVetoed"] = True
+                return False
+
+        # --- Absolute energy gate ---
+        # In-band mean must exceed the upstream-measured noise floor by
+        # min_sibilant_energy_above_noise_db. Because the gate is
+        # independent of the detection result it cannot self-mask the way
+        # the previous EMA / contextual-buffer references did. When no
+        # noise floor was supplied the gate is bypassed (standalone use).
+        if self.energy_gate_dbfs is not None and mean_db < self.energy_gate_dbfs:
+            diag["energyGated"] = True
+            return False
+
+        # --- Spectral-shape check: P95 spike + flatness ---
         if (p95_db - mean_db) > self.params["p95_trigger_db"]:
             valid = sib_energy > 0
             if valid.any():
@@ -395,99 +565,35 @@ class SibilanceDetector:
                 flatness = geo_mean / arith if arith > 0 else 0.0
             else:
                 flatness = 0.0
+            diag["flatness"] = round(float(flatness), 4)
             if flatness >= self.params["min_flatness"]:
+                diag["condition"] = "p95"
                 return True
-
-        # --- Condition 2: broadband EMA elevation (unchanged) ---
-        if (self.long_term_power is not None and
-                self.voiced_frame_count >= self.params["warmup_frames"]):
-            ref_mean_db = 10.0 * np.log10(
-                np.mean(self.long_term_power[self.sibilant_mask]) + 1e-10
-            )
-            if (mean_db - ref_mean_db) > self.params["broadband_trigger_db"]:
-                return True
-
-        # --- Condition 3: per-bin contextual excess (new) ---
-        if self.detect_contextual(magnitude):
-            return True
 
         return False
 
-    def detect_contextual(self, magnitude: np.ndarray) -> bool:
+    def mark_passage_onset(self, seed_f0: float = None) -> None:
         """
-        Condition 3: per-bin contextual excess (Gonzalez & Brookes 2012).
+        Reset short-term state on a silence-to-voiced transition.
 
-        Uses a short rolling buffer of recent voiced frames as the local
-        noise-floor reference (N1/N2 context window). Requires a minimum
-        fraction of sibilant-band bins to show excess above the threshold.
-        Fires only after the context buffer is at least half-full.
+        Called by analyze_sibilance_events() when it detects a contiguous
+        unvoiced run longer than `silence_gap_reset_ms` between two voiced
+        runs. Clears the rolling-F0 deque so the next voiced frame starts
+        from a fresh pitch reference instead of stale state from the
+        previous voiced segment.
+
+        When seed_f0 is supplied (look-ahead median over the next K voiced
+        frames in the contour) the sibilant band is reseeded immediately
+        so the first post-silence frame uses the right band -- otherwise
+        the band would stay frozen at the previous segment's F0 until the
+        rolling buffer refills (typically 2-3 voiced frames).
         """
-        if (self.sibilant_mask is None
-                or not self.sibilant_mask.any()
-                or len(self._context_buffer) < self._context_min_fill):
-            return False
-        context_mean = np.mean(np.stack(self._context_buffer), axis=0)  # (n_bins,)
-        frame_power  = magnitude ** 2
-        sib_excess_db = (
-            10.0 * np.log10(frame_power[self.sibilant_mask]  + 1e-10)
-          - 10.0 * np.log10(context_mean[self.sibilant_mask] + 1e-10)
-        )
-        threshold        = self.params.get("contextual_trigger_db",       8.0)
-        min_bin_fraction = self.params.get("contextual_min_bin_fraction", 0.40)
-        elevated_bins = int(np.sum(sib_excess_db > threshold))
-        total_bins    = int(self.sibilant_mask.sum())
-        return (elevated_bins / total_bins) >= min_bin_fraction
-
-    def update_context_buffer(
-        self,
-        frame_power: np.ndarray,
-        is_voiced:   bool,
-    ) -> None:
-        """Accumulate voiced frames into the N1/N2 context buffer.
-
-        Sibilant frames are included. Gating updates on the detection result
-        created a circular dependency: Condition 3 firing → buffer freezes →
-        frozen reference keeps Condition 3 firing → multi-second false events.
-        Sibilants are <15% of voiced time and the 65 ms rolling window dilutes
-        any single frame, so the contamination cost is negligible.
-        """
-        if is_voiced:
-            self._context_buffer.append(frame_power.copy())
-
-    def update_ema(
-        self,
-        frame_power: np.ndarray,
-        is_voiced:   bool,
-    ) -> None:
-        """Update the long-term EMA reference on all voiced frames.
-
-        Sibilant frames are included. The 15 dB contamination guard below
-        already protects against genuinely pathological frames (silence
-        misclassified as voiced, impulse noise, clipping). Gating on the
-        detection result as well created the same circular dependency as the
-        context buffer; the slow 300 ms time constant means any sibilant
-        contamination moves the reference by well under 1 dB at realistic
-        sibilant densities (~10-15% of voiced time).
-        """
-        if not is_voiced:
-            return
-        if (self.long_term_power is not None
-                and self.sibilant_mask is not None
-                and self.sibilant_mask.any()
-                and self.voiced_frame_count >= self.params["warmup_frames"]):
-            cur_mean = np.mean(frame_power[self.sibilant_mask])
-            ref_mean = np.mean(self.long_term_power[self.sibilant_mask])
-            ratio_db = abs(10.0 * np.log10((cur_mean + 1e-10) / (ref_mean + 1e-10)))
-            if ratio_db > 15.0:
-                return  # skip — frame is too far from reference to be a safe update
-        if self.long_term_power is None:
-            self.long_term_power = frame_power.copy()
-        else:
-            self.long_term_power = (
-                self.ema_alpha         * self.long_term_power +
-                (1.0 - self.ema_alpha) * frame_power
-            )
-        self.voiced_frame_count += 1
+        self.f0_rolling.clear()
+        if seed_f0 is not None and np.isfinite(seed_f0) and seed_f0 > 0:
+            self._set_sibilant_band(float(seed_f0))
+            self._current_band_f0 = float(seed_f0)
+            self.f0_rolling.append(float(seed_f0))
+        self._post_silence_remaining = self._post_silence_window_frames
 
     def process_frame(
         self,
@@ -496,22 +602,53 @@ class SibilanceDetector:
         f0_for_frame: float = None,
     ) -> bool:
         """
-        Full per-frame pipeline: rolling F0 update -> detection -> EMA update
-        -> context buffer update.
+        Full per-frame pipeline: rolling F0 update -> detection.
 
         Returns True when the frame is classified as sibilant.
         """
         self.update_rolling_f0(f0_for_frame, is_voiced)
         is_sibilant = self.detect(magnitude) if is_voiced else False
-        frame_power = magnitude ** 2
-        self.update_ema(frame_power, is_voiced)
-        self.update_context_buffer(frame_power, is_voiced)
+        if is_voiced and self._post_silence_remaining > 0:
+            self._post_silence_remaining -= 1
         return is_sibilant
 
 
 # ---------------------------------------------------------------------------
 # Public analysis function
 # ---------------------------------------------------------------------------
+
+def _lookahead_f0_median(
+    contour:               list,
+    voiced_frame_indices,
+    start_frame:           int,
+    n_lookahead:           int,
+) -> float:
+    """
+    Median of the next n_lookahead voiced F0 estimates from `contour`
+    starting at start_frame. Used by analyze_sibilance_events() to give
+    the detector a clean F0 seed when resetting state on a silence-to-
+    voiced transition — without it the band would stay frozen at the
+    previous segment's pitch for the first 2-3 voiced frames of the new
+    passage while the rolling-median buffer refills.
+
+    voiced_frame_indices may be a set of frame indices flagged voiced by
+    VAD, or None (no VAD — every contour entry is treated as voiced for
+    the purpose of the lookahead). Returns None when no valid F0 estimate
+    is available within the search window.
+    """
+    vals = []
+    i = start_frame
+    n = len(contour)
+    while len(vals) < n_lookahead and i < n:
+        if voiced_frame_indices is None or i in voiced_frame_indices:
+            v = contour[i]
+            if v is not None and np.isfinite(v) and v > 0:
+                vals.append(float(v))
+        i += 1
+    if not vals:
+        return None
+    return float(np.median(vals))
+
 
 def analyze_sibilance_events(
     audio: np.ndarray,
@@ -626,9 +763,50 @@ def analyze_sibilance_events(
             if o_start < o_end and vad_voiced_mask[o_start:o_end].any():
                 voiced_frame_indices.add(fi)
 
+        # Fricative tail extension. Silero classifies the trailing
+        # turbulence-only portion of unvoiced fricatives as silence the
+        # moment voicing dies, which truncates events like /f/, /s/,
+        # /sh/ ~80 ms early. Walk the voiced set in order and append
+        # tail_frames of subsequent unvoiced frames after every voiced
+        # run so detection continues through the fricative tail. The
+        # extension stops as soon as another voiced frame is reached
+        # (so we don't bridge across legitimate inter-word silences).
+        tail_ms     = float(resolved.get("fricative_tail_extension_ms", 0.0) or 0.0)
+        tail_frames = max(0, int(tail_ms / ((hop_length / sample_rate) * 1000.0)))
+        if tail_frames > 0 and voiced_frame_indices:
+            sorted_voiced = sorted(voiced_frame_indices)
+            extended      = set()
+            for vfi in sorted_voiced:
+                if (vfi + 1) in voiced_frame_indices:
+                    continue
+                # vfi is the last voiced frame in its run; extend forward
+                # until we run out of frames, hit another voiced frame,
+                # or hit the tail budget.
+                for k in range(1, tail_frames + 1):
+                    nxt = vfi + k
+                    if nxt >= n_frames or nxt in voiced_frame_indices:
+                        break
+                    extended.add(nxt)
+            voiced_frame_indices.update(extended)
+
     window           = get_window("hann", n_fft, fftbins=True)
     sibilant_indices = []
     f0_per_frame     = []
+    per_frame_diag   = {}
+
+    # Silence-gap reset bookkeeping. On any silence-to-voiced transition
+    # longer than silence_reset_frames we (a) compute a look-ahead F0 from
+    # the next few voiced frames in the contour and (b) call
+    # mark_passage_onset() so the detector clears its rolling-F0 + N1/N2
+    # context buffer and reseeds the sibilant band from the new pitch.
+    # silence_run starts at the threshold so the very first frame of the
+    # file is treated as a passage onset (file start == post-silence).
+    frame_period_ms      = (hop_length / sample_rate) * 1000.0
+    silence_reset_frames = max(
+        1, int(resolved.get("silence_gap_reset_ms", 150.0) / frame_period_ms)
+    )
+    lookahead_frames = 5
+    silence_run      = silence_reset_frames
 
     for i in range(n_frames):
         start     = i * hop_length
@@ -641,8 +819,22 @@ def analyze_sibilance_events(
         if i < len(contour_per_frame):
             f0_for_frame = contour_per_frame[i]
 
+        if is_voiced and silence_run >= silence_reset_frames:
+            seed_f0 = _lookahead_f0_median(
+                contour_per_frame, voiced_frame_indices,
+                i, lookahead_frames,
+            )
+            detector.mark_passage_onset(seed_f0)
+
+        if is_voiced:
+            silence_run = 0
+        else:
+            silence_run += 1
+
         if detector.process_frame(magnitude, is_voiced, f0_for_frame):
             sibilant_indices.append(i)
+            if detector.last_diag is not None:
+                per_frame_diag[i] = detector.last_diag
         f0_per_frame.append(detector.f0)
 
     rolling   = detector.f0_rolling
@@ -659,6 +851,7 @@ def analyze_sibilance_events(
         audio            = audio,
         min_duration_ms  = min_duration_ms,
         gap_merge_ms     = gap_merge_ms,
+        per_frame_diag   = per_frame_diag,
     )
 
     logger.info(
