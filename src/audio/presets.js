@@ -87,12 +87,32 @@ export function resolveOutputProfileId(id) {
  *                                                   audible during silence in normal use.
  *
  * @typedef {Object} WetBranchDeEsserConfig
- * @property {number} [naturalCeilingDb]   - dB above surrounding voiced RMS that an
- *                                           event must clear (measured on the wet
- *                                           signal) before any attenuation is applied.
- *                                           Typically more aggressive (lower) than the
- *                                           dry-path ceiling because compression +
- *                                           makeup flattens dynamic range.
+ * @property {boolean} [enabled]           - Explicit kill switch (default true when
+ *                                           the block is present). Set to false to
+ *                                           disable the wet-branch de-esser pass
+ *                                           without removing the block — useful for
+ *                                           A/B comparisons against the dry-only
+ *                                           sibilant path. When false the wet branch
+ *                                           passes through with no sibilant
+ *                                           attenuation; all other knobs in this
+ *                                           block are ignored.
+ * @property {number} [stridentCeilingDb]
+ *                                         - dB above surrounding voiced RMS at which an
+ *                                           event tagged sibilantClass = "strident"
+ *                                           (/s/, /ʃ/) must sit before attenuation is
+ *                                           applied. Strident events naturally project
+ *                                           above the surrounding RMS, so this stays
+ *                                           positive even on the wet branch.
+ * @property {number} [nonStridentCeilingDb]
+ *                                         - Same as stridentCeilingDb but for
+ *                                           sibilantClass = "non_strident" (/f/, /θ/).
+ *                                           Non-strident events normally sit BELOW
+ *                                           surrounding RMS; post-compression they
+ *                                           rise to vowel level. A zero or negative
+ *                                           value pushes them back below vowel level.
+ * @property {number} [naturalCeilingDb]   - Back-compat single ceiling. Used for
+ *                                           both classes when neither class-keyed
+ *                                           value is provided.
  * @property {number} [reductionRatio]     - Fraction of "excess above ceiling" that
  *                                           gets removed. Near 1.0 flattens excess to
  *                                           the ceiling.
@@ -198,10 +218,12 @@ export const PRESETS = {
         },
       },
       */
+      "correctiveEQ",
       {
         clipGainDeEsser: {
           enabled: true,
-          naturalCeilingDb: 8,
+          stridentCeilingDb:     8.0,
+          nonStridentCeilingDb: -4.0,
           reductionRatio: 0.55,
           maxReductionDb: 6.0,
           minDurationMs: 15,
@@ -227,7 +249,6 @@ export const PRESETS = {
         },
       },
       */
-      "correctiveEQ",
      /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
       "remeasureFramesPostNr",
       {
@@ -266,7 +287,9 @@ export const PRESETS = {
           // compressed sibilant is heavily attenuated on the wet branch and
           // the dry sibilant character predominates at the mix output.
           wetBranchDeEsser: {
-            naturalCeilingDb: 3.0,
+            enabled: true,
+            stridentCeilingDb:     3.0,
+            nonStridentCeilingDb: -4.0,
             reductionRatio:   0.9,
             maxReductionDb:   50.0,
             contextWindowMs:  80,
@@ -284,8 +307,29 @@ export const PRESETS = {
             max_reduction_db: 36.0,
             freq_floor_hz: 40.0,
             freq_ceil_hz: 20000.0,
-            mode: "soft",
+            mode: "soft"
           },
+          {
+            sibilant_only: true,
+            preserve_harmonics: false,
+            depth: 0.67,
+            sharpness: 0.4,
+            selectivity: 1,
+            attack_ms: 5.0,
+            release_ms: 10.0,
+            max_reduction_db: 25.0,
+            freq_floor_hz: 3000.0,
+            freq_ceil_hz: 10000.0,
+            mode: "soft",
+            lifter_cutoff_bins: 3,
+            band_summary_max_cluster_bins: 186,
+            /*
+            sibilanceDetection: {
+              p95_trigger_db: 9.0,
+              min_flatness: 0.1,
+              broadband_trigger_db: 13.0,
+            } */
+          }
         ],
       },
       /*
@@ -511,7 +555,8 @@ export const PRESETS = {
           // output. Less aggressive ceiling than ACX so the wet branch
           // contributes more sibilant energy to the overall sound.
           wetBranchDeEsser: {
-            naturalCeilingDb: 4.0,
+            stridentCeilingDb:     4.0,
+            nonStridentCeilingDb: -3.0,
             reductionRatio:   0.8,
             maxReductionDb:   12.0,
             contextWindowMs:  80,
@@ -667,7 +712,8 @@ export const PRESETS = {
           // audible. Still apply wet-branch attenuation to keep the dry
           // sibilant character dominant.
           wetBranchDeEsser: {
-            naturalCeilingDb: 3.5,
+            stridentCeilingDb:     3.5,
+            nonStridentCeilingDb: -3.5,
             reductionRatio:   0.85,
             maxReductionDb:   12.0,
             contextWindowMs:  80,

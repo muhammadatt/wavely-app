@@ -69,10 +69,10 @@ const KNEE_WIDTH_DB = 4
  *                                        recomputed against the wet signal.
  * @property {import('./clipGainDeEsser.js').ClipGainDeEsserConfig} config
  *                                      - Wet-branch de-esser settings
- *                                        (naturalCeilingDb, reductionRatio,
- *                                        maxReductionDb, contextWindowMs,
- *                                        fades). Independent from the dry-
- *                                        path clipGainDeEss config.
+ *                                        (stridentCeilingDb, nonStridentCeilingDb,
+ *                                        reductionRatio, maxReductionDb,
+ *                                        contextWindowMs, fades). Independent
+ *                                        from the dry-path clipGainDeEss config.
  * @property {Array}  [vadFrames]       - Frame classifications used for
  *                                        context-RMS measurement.
  *
@@ -97,8 +97,13 @@ const KNEE_WIDTH_DB = 4
  * @property {number|null} prePcCrestFactorDb
  * @property {boolean} parallelDesserApplied
  * @property {'wet_branch_decision'|null} parallelDesserSource
- * @property {number|null} parallelDesserEventCount
- * @property {number|null} parallelDesserNaturalCeilingDb
+ * @property {number|null} parallelDesserEventCount       - Treated event count (kept for back-compat).
+ * @property {number|null} parallelDesserTotalEventCount  - Total events the wet pass examined.
+ * @property {number|null} parallelDesserSkippedInRange   - Events whose wet peak sat below the class ceiling.
+ * @property {number|null} parallelDesserSkippedNoContext - Events with no usable voiced context window.
+ * @property {Array|null}  parallelDesserTreatedEvents    - Per-event records (same shape as dry-path treatedEvents).
+ * @property {number|null} parallelDesserStridentCeilingDb
+ * @property {number|null} parallelDesserNonStridentCeilingDb
  * @property {number|null} parallelDesserReductionRatio
  * @property {number|null} parallelDesserMaxReductionDb
  * @property {boolean} vadGateApplied
@@ -244,6 +249,12 @@ export async function applyParallelCompression(
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
   const wetCfg = wetBranchDeEsserCtx?.config ?? null
+  // Surface the class-keyed ceilings the wet-branch pass actually used,
+  // falling back to the legacy naturalCeilingDb when a preset hasn't been
+  // migrated yet (mirrors the resolution rule inside applyClipGainDeEsser).
+  const wetLegacyCeiling = wetCfg?.naturalCeilingDb     ?? null
+  const wetStridentCeil  = wetCfg?.stridentCeilingDb    ?? wetLegacyCeiling
+  const wetNonStridCeil  = wetCfg?.nonStridentCeilingDb ?? wetLegacyCeiling
   return {
     applied:                     true,
     reason:                      null,
@@ -261,15 +272,20 @@ export async function applyParallelCompression(
     wetMixEffective:             round2(effectiveWetMix),
     crestFactorGuardActivated:   guardActivated,
     prePcCrestFactorDb:          round2(prePcCrestFactor),
-    parallelDesserApplied:             desserApplied,
-    parallelDesserSource:              desserApplied ? 'wet_branch_decision' : null,
-    parallelDesserSkipReason:          desserApplied ? null : desserSkipReason,
-    parallelDesserEventCount:          desserApplied ? desserEnvelope.eventCount : 0,
-    parallelDesserNaturalCeilingDb:    wetCfg ? (wetCfg.naturalCeilingDb ?? null) : null,
-    parallelDesserReductionRatio:      wetCfg ? (wetCfg.reductionRatio   ?? null) : null,
-    parallelDesserMaxReductionDb:      desserApplied ? round2(desserEnvelope.maxReductionDb) : null,
-    vadGateApplied:                    !config.bypassVadGate,
-    vadGateFadeMs:                     config.bypassVadGate ? null : config.vadFadeMs,
+    parallelDesserApplied:               desserApplied,
+    parallelDesserSource:                desserApplied ? 'wet_branch_decision' : null,
+    parallelDesserSkipReason:            desserApplied ? null : desserSkipReason,
+    parallelDesserEventCount:            desserApplied ? desserEnvelope.eventCount : 0,
+    parallelDesserTotalEventCount:       wetDesserResult ? (wetDesserResult.eventCount       ?? null) : null,
+    parallelDesserSkippedInRange:        wetDesserResult ? (wetDesserResult.skippedInRange   ?? null) : null,
+    parallelDesserSkippedNoContext:      wetDesserResult ? (wetDesserResult.skippedNoContext ?? null) : null,
+    parallelDesserTreatedEvents:         wetDesserResult ? (wetDesserResult.treatedEvents    ?? null) : null,
+    parallelDesserStridentCeilingDb:     wetStridentCeil,
+    parallelDesserNonStridentCeilingDb:  wetNonStridCeil,
+    parallelDesserReductionRatio:        wetCfg ? (wetCfg.reductionRatio ?? null) : null,
+    parallelDesserMaxReductionDb:        desserApplied ? round2(desserEnvelope.maxReductionDb) : null,
+    vadGateApplied:                      !config.bypassVadGate,
+    vadGateFadeMs:                       config.bypassVadGate ? null : config.vadFadeMs,
   }
 }
 
@@ -458,13 +474,18 @@ function notApplied(reason) {
     wetMixEffective:             null,
     crestFactorGuardActivated:   false,
     prePcCrestFactorDb:          null,
-    parallelDesserApplied:             false,
-    parallelDesserSource:              null,
-    parallelDesserSkipReason:          null,
-    parallelDesserEventCount:          null,
-    parallelDesserNaturalCeilingDb:    null,
-    parallelDesserReductionRatio:      null,
-    parallelDesserMaxReductionDb:      null,
+    parallelDesserApplied:               false,
+    parallelDesserSource:                null,
+    parallelDesserSkipReason:            null,
+    parallelDesserEventCount:            null,
+    parallelDesserTotalEventCount:       null,
+    parallelDesserSkippedInRange:        null,
+    parallelDesserSkippedNoContext:      null,
+    parallelDesserTreatedEvents:         null,
+    parallelDesserStridentCeilingDb:     null,
+    parallelDesserNonStridentCeilingDb:  null,
+    parallelDesserReductionRatio:        null,
+    parallelDesserMaxReductionDb:        null,
     vadGateApplied:                    false,
     vadGateFadeMs:                     null,
   }

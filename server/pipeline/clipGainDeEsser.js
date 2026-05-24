@@ -31,7 +31,15 @@ const SCRIPT_PATH  = path.join(SCRIPTS_DIR, 'clip_gain_deesser.py')
 /**
  * @typedef {Object} ClipGainDeEsserConfig
  * @property {boolean} [enabled]
+ * @property {number}  [stridentCeilingDb]
+ *   Ceiling for events tagged sibilantClass = "strident" (/s/, /ʃ/).
+ * @property {number}  [nonStridentCeilingDb]
+ *   Ceiling for events tagged sibilantClass = "non_strident" (/f/, /θ/).
+ *   May be zero or negative — non-strident events sit below the surrounding
+ *   voiced RMS so a positive ceiling rarely engages them.
  * @property {number}  [naturalCeilingDb]
+ *   Back-compat single ceiling. Used for both classes when neither class-
+ *   specific value is supplied. Ignored otherwise.
  * @property {number}  [reductionRatio]
  * @property {number}  [maxReductionDb]
  * @property {number}  [contextWindowMs]
@@ -86,18 +94,25 @@ export async function applyClipGainDeEsser(
 ) {
   const { recomputeEventPeaks = false, decisionOnly = false } = opts
   const fades = config.fades ?? {}
+  // Class-keyed ceilings with legacy fallback. When a preset still ships only
+  // the single naturalCeilingDb, both classes inherit it — preserves the
+  // pre-split behaviour exactly.
+  const legacyCeiling     = config.naturalCeilingDb     ?? 7.0
+  const stridentCeiling   = config.stridentCeilingDb    ?? legacyCeiling
+  const nonStridentCeil   = config.nonStridentCeilingDb ?? legacyCeiling
   const args  = [
     SCRIPT_PATH,
-    '--input',                  inputPath,
-    '--events-json',            eventsJsonPath,
-    '--natural-ceiling-db',     String(config.naturalCeilingDb     ?? 7.0),
-    '--reduction-ratio',        String(config.reductionRatio       ?? 0.55),
-    '--max-reduction-db',       String(config.maxReductionDb       ?? 7.0),
-    '--context-window-ms',      String(config.contextWindowMs      ?? 80.0),
-    '--fricative-fade-in-ms',   String(fades.fricativeInMs         ?? 3.0),
-    '--fricative-fade-out-ms',  String(fades.fricativeOutMs        ?? 4.0),
-    '--affricate-fade-in-ms',   String(fades.affricateInMs         ?? 1.5),
-    '--affricate-fade-out-ms',  String(fades.affricateOutMs        ?? 4.5),
+    '--input',                    inputPath,
+    '--events-json',              eventsJsonPath,
+    '--strident-ceiling-db',      String(stridentCeiling),
+    '--non-strident-ceiling-db',  String(nonStridentCeil),
+    '--reduction-ratio',          String(config.reductionRatio  ?? 0.55),
+    '--max-reduction-db',         String(config.maxReductionDb  ?? 7.0),
+    '--context-window-ms',        String(config.contextWindowMs ?? 80.0),
+    '--fricative-fade-in-ms',     String(fades.fricativeInMs    ?? 3.0),
+    '--fricative-fade-out-ms',    String(fades.fricativeOutMs   ?? 4.0),
+    '--affricate-fade-in-ms',     String(fades.affricateInMs    ?? 1.5),
+    '--affricate-fade-out-ms',    String(fades.affricateOutMs   ?? 4.5),
   ]
 
   if (outputPath)         args.push('--output', outputPath)

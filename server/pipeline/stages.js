@@ -1066,7 +1066,8 @@ export async function parallelCompress(ctx) {
   const wetBranchConfig = ctx.preset?.parallelCompression?.wetBranchDeEsser
   const upstreamEvents  = ctx.results.clipGainDeEsser?.eventsPath ?? null
 
-  const wetBranchDeEsserCtx = (wetBranchConfig && upstreamEvents)
+  const wetBranchEnabled    = wetBranchConfig?.enabled !== false
+  const wetBranchDeEsserCtx = (wetBranchConfig && wetBranchEnabled && upstreamEvents)
     ? {
         eventsPath: upstreamEvents,
         config:     wetBranchConfig,
@@ -1083,12 +1084,20 @@ export async function parallelCompress(ctx) {
   )
   ctx.currentPath = pcPath
   ctx.results.parallelCompression = result
+  // Mirror the dry clipGainDeEss log format for the wet-branch pass so the
+  // two are directly comparable: treated/total, in-range skips, no-context
+  // skips, and max reduction.
+  const pdTotal     = result.parallelDesserTotalEventCount
+  const pdTreated   = result.parallelDesserEventCount
+  const desserTreat = result.applied && pdTotal != null ? `${pdTreated}/${pdTotal}` : 'n/a'
   await logLevel(ctx, 'after parallel compression', ctx.currentPath, {
     applied: result.applied,
     wet:     result.applied ? `${Math.round(result.wetMixEffective * 100)}%` : 'n/a',
     guard:   result.applied ? result.crestFactorGuardActivated               : 'n/a',
-    desserEvents:  result.applied ? result.parallelDesserEventCount        : 'n/a',
-    desserSource:  result.applied ? (result.parallelDesserSource ?? 'off') : 'n/a',
+    desserSource:  result.applied ? (result.parallelDesserSource ?? 'off')   : 'n/a',
+    desserTreated: desserTreat,
+    desserSkipInRng: result.applied ? (result.parallelDesserSkippedInRange   ?? 'n/a') : 'n/a',
+    desserSkipNoCtx: result.applied ? (result.parallelDesserSkippedNoContext ?? 'n/a') : 'n/a',
     desserMaxRed:  result.applied && result.parallelDesserMaxReductionDb != null
                      ? `${result.parallelDesserMaxReductionDb}dB` : 'n/a',
   })

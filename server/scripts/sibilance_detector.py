@@ -138,6 +138,35 @@ DEFAULT_PARAMS = {
 AFFRICATE_PEAK_POSITION = 0.35
 
 
+# ---------------------------------------------------------------------------
+# Spectral class (strident vs non-strident)
+# ---------------------------------------------------------------------------
+# Strident fricatives (/s/, /ʃ/) concentrate their turbulence energy in the
+# 4-10 kHz band and sit at or above the surrounding voiced level. Non-strident
+# fricatives (/f/, /θ/) are weak labiodental/interdental sources whose energy
+# is distributed more evenly across 1-10 kHz at a much lower absolute level --
+# they sit several dB *below* surrounding voiced speech in natural recordings.
+#
+# The single-axis "above surrounding voiced RMS" ceiling used by the clip-gain
+# de-esser is well calibrated for stridents but cannot describe the natural
+# rest position of non-stridents (which need a target *below* context, not
+# above it). To support a class-keyed ceiling downstream, each event is
+# tagged with its spectral class here at detection time.
+#
+# Classification feature: ratio of high-band RMS power (4-10 kHz) to low-mid
+# band RMS power (1-4 kHz), measured over a Hann-windowed FFT of the entire
+# event span. Empirical values from Jongman et al. 2000 and the literature:
+#   /s/  ~  +8 to +15 dB    /ʃ/ ~  +3 to  +8 dB
+#   /f/  ~  -3 to  +2 dB    /θ/ ~  -5 to   0 dB
+# A threshold at +3 dB cleanly separates the two groups. Constant exposed
+# so it can be tuned against a measured corpus.
+HF_BAND_LOW_HZ                     =  4000.0
+HF_BAND_HIGH_HZ                    = 10000.0
+LM_BAND_LOW_HZ                     =  1000.0
+LM_BAND_HIGH_HZ                    =  4000.0
+STRIDENT_CLASSIFICATION_THRESHOLD_DB = 3.0
+
+
 def resolve_params(overrides: dict = None) -> dict:
     """Merge sparse overrides over DEFAULT_PARAMS. None or empty -> defaults."""
     params = DEFAULT_PARAMS.copy()
@@ -172,6 +201,51 @@ def get_sibilant_band(f0: float, sample_rate: int) -> tuple:
 # ---------------------------------------------------------------------------
 # Event map serialisation
 # ---------------------------------------------------------------------------
+
+def _compute_event_band_ratio_db(
+    audio:        np.ndarray,
+    start_sample: int,
+    end_sample:   int,
+    sample_rate:  int,
+) -> float:
+    """
+    Ratio of HF (4-10 kHz) to LM (1-4 kHz) RMS power over the event span,
+    measured from a Hann-windowed FFT of the full event audio. Positive
+    values indicate a strident spectral profile (/s/, /ʃ/); near-zero or
+    negative values indicate a non-strident profile (/f/, /θ/).
+
+    Hann window suppresses vowel bleed at the event boundaries -- a hard
+    rectangular window can pull spectral mass downward into the LM band
+    when the event starts mid vowel->fricative transition. The whole-span
+    FFT gives better frequency resolution than the detector's per-frame
+    STFT for short events (a ~30 ms event holds barely one full STFT
+    frame at n_fft=2048).
+
+    Returns 0.0 when the event is too short for a meaningful FFT or when
+    either band contains no measurable energy (degenerate case). 0.0
+    classifies as non-strident under the default threshold (+3 dB) --
+    safer default than crashing or returning NaN.
+    """
+    seg = audio[start_sample : end_sample + 1]
+    if seg.size < 32:
+        return 0.0
+
+    n        = seg.size
+    window   = np.hanning(n).astype(np.float64)
+    spectrum = np.fft.rfft(seg.astype(np.float64) * window)
+    power    = (np.abs(spectrum) ** 2)
+    freqs    = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+
+    hf_mask = (freqs >= HF_BAND_LOW_HZ) & (freqs <= HF_BAND_HIGH_HZ)
+    lm_mask = (freqs >= LM_BAND_LOW_HZ) & (freqs <= LM_BAND_HIGH_HZ)
+
+    hf_power = float(power[hf_mask].sum())
+    lm_power = float(power[lm_mask].sum())
+
+    if hf_power <= 0.0 or lm_power <= 0.0:
+        return 0.0
+    return 10.0 * np.log10(hf_power / lm_power)
+
 
 def _aggregate_event_detection(
     per_frame_diag: dict,
@@ -325,6 +399,19 @@ def build_events_map(
             peak_rel_pos = float(peak_sample - start_sample) / float(span)
             event_type   = "affricate" if peak_rel_pos < AFFRICATE_PEAK_POSITION else "fricative"
 
+            # Spectral class (strident vs non-strident). Orthogonal to
+            # eventType -- a /tʃ/ is affricate+strident, a soft /f/ is
+            # fricative+non_strident. See module-level docstring for the
+            # band definitions and threshold rationale.
+            hf_ratio_db    = _compute_event_band_ratio_db(
+                audio, start_sample, end_sample, sample_rate,
+            )
+            sibilant_class = (
+                "strident"
+                if hf_ratio_db >= STRIDENT_CLASSIFICATION_THRESHOLD_DB
+                else "non_strident"
+            )
+
             obj.update({
                 "startSample":          int(start_sample),
                 "endSample":            int(end_sample),
@@ -332,6 +419,8 @@ def build_events_map(
                 "peakRelativePosition": round(peak_rel_pos, 4),
                 "eventPeakDb":          round(peak_db, 2),
                 "eventType":            event_type,
+                "hfRatioDb":            round(hf_ratio_db, 2),
+                "sibilantClass":        sibilant_class,
             })
 
         if per_frame_diag:

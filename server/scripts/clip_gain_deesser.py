@@ -23,7 +23,21 @@ Inputs (CLI):
                       context RMS measurement. When absent the script falls
                       back to "any frame that is not part of a sibilant event"
                       as the voiced context.
+  --strident-ceiling-db
+                      dB-above-context-RMS ceiling applied to events whose
+                      sibilantClass is "strident" (/s/, /ʃ/). These naturally
+                      sit above surrounding voiced RMS, so a positive ceiling
+                      catches only the loudest excursions.
+  --non-strident-ceiling-db
+                      Ceiling for events whose sibilantClass is "non_strident"
+                      (/f/, /θ/). These typically sit BELOW the surrounding
+                      voiced RMS, so the ceiling can be zero or negative to
+                      treat /f/ events that post-compression sit at vowel level
+                      and would be missed by a strident-style ceiling.
   --natural-ceiling-db
+                      Back-compat shim. When neither class-specific flag is
+                      set, this single value is used for both classes. Ignored
+                      otherwise.
   --reduction-ratio
   --max-reduction-db
   --context-window-ms (default 80)
@@ -244,7 +258,11 @@ def main() -> int:
                         help="Output WAV path. Required unless --no-render is set.")
     parser.add_argument("--events-json",    required=True)
     parser.add_argument("--vad-mask-json",  default=None)
-    parser.add_argument("--natural-ceiling-db", type=float, default=7.0)
+    parser.add_argument("--strident-ceiling-db",     type=float, default=None)
+    parser.add_argument("--non-strident-ceiling-db", type=float, default=None)
+    parser.add_argument("--natural-ceiling-db",      type=float, default=None,
+                        help="Back-compat: used for both classes when neither "
+                             "class-specific flag is set.")
     parser.add_argument("--reduction-ratio",    type=float, default=0.55)
     parser.add_argument("--max-reduction-db",   type=float, default=7.0)
     parser.add_argument("--context-window-ms",  type=float, default=80.0)
@@ -261,6 +279,13 @@ def main() -> int:
 
     if not args.no_render and not args.output:
         parser.error("--output is required unless --no-render is set")
+
+    # Resolve class-keyed ceilings with back-compat fallback. The legacy
+    # --natural-ceiling-db sets both classes only when neither class-specific
+    # flag is supplied; explicit class flags always win.
+    legacy_ceiling = args.natural_ceiling_db if args.natural_ceiling_db is not None else 7.0
+    strident_ceiling_db     = args.strident_ceiling_db     if args.strident_ceiling_db     is not None else legacy_ceiling
+    non_strident_ceiling_db = args.non_strident_ceiling_db if args.non_strident_ceiling_db is not None else legacy_ceiling
 
     sr, audio_2d, was_stereo = _read_wav_float32(args.input)
     n_samples = audio_2d.shape[0]
@@ -315,7 +340,9 @@ def main() -> int:
             event_peak_db = 20.0 * np.log10(peak_lin + 1e-12) if peak_lin > 0 else -120.0
         else:
             event_peak_db = float(ev["eventPeakDb"])
-        ev_type       = ev.get("eventType", "fricative")
+        ev_type        = ev.get("eventType", "fricative")
+        sibilant_class = ev.get("sibilantClass", "strident")
+        ceiling_db     = non_strident_ceiling_db if sibilant_class == "non_strident" else strident_ceiling_db
 
         ctx_rms_db = _context_rms_db(
             audio, s, e,
@@ -327,7 +354,7 @@ def main() -> int:
             skipped_no_ctx += 1
             continue
 
-        excess_db = event_peak_db - (ctx_rms_db + args.natural_ceiling_db)
+        excess_db = event_peak_db - (ctx_rms_db + ceiling_db)
         if excess_db <= 0:
             skipped_in_range += 1
             continue
@@ -366,15 +393,17 @@ def main() -> int:
 
         max_reduction_db = max(max_reduction_db, abs(gain_db))
         treated_events.append({
-            "startSample":  int(s),
-            "endSample":    int(e),
-            "startSec":     round(s / sr, 4),
-            "endSec":       round((e + 1) / sr, 4),
-            "durationMs":   round((e - s + 1) * 1000.0 / sr, 1),
-            "eventType":    ev_type,
-            "eventPeakDb":  round(event_peak_db, 2),
-            "contextRmsDb": round(ctx_rms_db, 2),
-            "gainDb":       round(gain_db, 2),
+            "startSample":    int(s),
+            "endSample":      int(e),
+            "startSec":       round(s / sr, 4),
+            "endSec":         round((e + 1) / sr, 4),
+            "durationMs":     round((e - s + 1) * 1000.0 / sr, 1),
+            "eventType":      ev_type,
+            "sibilantClass":  sibilant_class,
+            "ceilingDb":      round(ceiling_db, 2),
+            "eventPeakDb":    round(event_peak_db, 2),
+            "contextRmsDb":   round(ctx_rms_db, 2),
+            "gainDb":         round(gain_db, 2),
         })
 
     # Vectorised single-pass apply. Multiplier is per-sample, broadcast
@@ -388,16 +417,17 @@ def main() -> int:
         wavfile.write(args.output, sr, out)
 
     summary = {
-        "applied":            len(treated_events) > 0,
-        "eventCount":         len(events),
-        "treatedCount":       len(treated_events),
-        "skippedInRange":     skipped_in_range,
-        "skippedNoContext":   skipped_no_ctx,
-        "maxReductionDb":     round(max_reduction_db, 2) if treated_events else 0.0,
-        "treatedEvents":      treated_events,
-        "naturalCeilingDb":   args.natural_ceiling_db,
-        "reductionRatio":     args.reduction_ratio,
-        "maxReductionCapDb":  args.max_reduction_db,
+        "applied":                    len(treated_events) > 0,
+        "eventCount":                 len(events),
+        "treatedCount":               len(treated_events),
+        "skippedInRange":             skipped_in_range,
+        "skippedNoContext":           skipped_no_ctx,
+        "maxReductionDb":             round(max_reduction_db, 2) if treated_events else 0.0,
+        "treatedEvents":              treated_events,
+        "stridentCeilingDb":          strident_ceiling_db,
+        "nonStridentCeilingDb":       non_strident_ceiling_db,
+        "reductionRatio":             args.reduction_ratio,
+        "maxReductionCapDb":          args.max_reduction_db,
     }
     print("JSON_RESULT:" + json.dumps(summary), flush=True)
     return 0
