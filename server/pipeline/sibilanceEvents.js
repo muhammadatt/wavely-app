@@ -107,7 +107,11 @@ export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
     args.push('--vad-mask-json', vadMaskPath)
   }
 
-  console.log(`[SibilanceAnalyzer] Starting: preset=${ctx.presetId} | input=${ctx.currentPath}`)
+  console.log(
+    `[SibilanceAnalyzer] Starting: preset=${ctx.presetId} | input=${ctx.currentPath} ` +
+    `| vad_frames=${frames == null ? 'null' : frames.length} ` +
+    `vad_mask_passed=${vadMaskPath !== null}`
+  )
   const startTime = Date.now()
 
   try {

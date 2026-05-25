@@ -128,6 +128,36 @@ DEFAULT_PARAMS = {
     # veto and absolute energy gate still apply, so pure silence inside
     # the extension window cannot trigger detection.
     "fricative_tail_extension_ms": 80.0,
+    # Fricative head pre-roll (ms). Symmetric counterpart to the tail
+    # extension. Silero VAD marks the leading turbulence-only portion of
+    # unvoiced fricatives (/f/, /s/, /sh/) as silence until voicing
+    # begins, which truncates sibilant events on the head -- e.g. the
+    # /sh/ in "she" can start 50-80 ms before the vowel. Before every
+    # silence->voiced transition this many ms of preceding silence
+    # frames are forcibly marked voiced so the detector can evaluate
+    # them. Per-frame gates (P95+flatness, voicing veto, energy gate)
+    # still apply, so silence cannot trigger detection.
+    "fricative_head_extension_ms": 80.0,
+    # Boundary expansion. After the main detection loop, walk outward from
+    # each contiguous sibilant run and promote adjacent voiced frames whose
+    # per-frame stats clear the *relaxed* P95 + flatness thresholds. Captures
+    # the leading/trailing turbulence frames of fricatives whose spectral
+    # margin has been eaten by upstream EQ -- the corrective EQ runs before
+    # the de-esser, which puts boundary frames consistently 0.3-1.5 dB under
+    # the steady-state P95 trigger and 0.005-0.02 under min_flatness. Hard
+    # gates (voicing veto, absolute energy gate, pre-band check) are never
+    # relaxed; only the spectral-shape margin is.
+    #
+    # boundary_p95_relax_db    -- relax p95_trigger_db by this many dB at
+    #                              event boundaries (default 1.5 -> effective
+    #                              trigger 4.5 dB at boundaries).
+    # boundary_flatness_relax  -- relax min_flatness by this much at event
+    #                              boundaries (default 0.02 -> effective
+    #                              minimum 0.08 at boundaries).
+    # 0 on either knob disables that side of the relaxation. Setting both
+    # to 0 disables expansion entirely.
+    "boundary_p95_relax_db":       1.5,
+    "boundary_flatness_relax":     0.02,
 }
 
 
@@ -301,6 +331,175 @@ def _aggregate_event_detection(
     }
 
 
+def _summarize_boundary_frame(diag: dict) -> dict:
+    """
+    Compact single-frame view used by _build_event_boundary_diag. Captures
+    only the fields needed to identify which gate rejected the frame:
+
+      - delta = p95Db - meanDb (compared against p95_trigger_db)
+      - flat  = flatness when computed (only set when p95 passed)
+      - veto  = voicing-dominance veto fired
+      - nrg   = absolute-energy gate fired
+      - band  = pre-band-mask check failed (no sibilant band at all)
+
+    Returns None when the frame had no diag entry (e.g. unvoiced -- skipped
+    upstream).
+    """
+    if diag is None:
+        return None
+    p95 = diag.get("p95Db")
+    mn  = diag.get("meanDb")
+    delta = round(p95 - mn, 2) if (p95 is not None and mn is not None) else None
+    return {
+        "deltaDb":  delta,
+        "p95Db":    p95,
+        "meanDb":   mn,
+        "lfDb":     diag.get("lfDb"),
+        "flatness": diag.get("flatness"),
+        "p95Pass":  diag.get("p95Pass"),
+        "flatPass": diag.get("flatPass"),
+        "veto":     bool(diag.get("voicingVetoed")),
+        "nrg":      bool(diag.get("energyGated")),
+        "band":     p95 is None and mn is None,
+        "fired":    diag.get("condition") is not None,
+    }
+
+
+def _build_event_boundary_diag(
+    all_frame_diag: dict,
+    frame_start:    int,
+    frame_end:      int,
+    k:              int = 4,
+) -> dict:
+    """
+    Build the boundaryDiag block for one event. Captures per-frame stats for
+    the K frames immediately before frame_start (head side) and after
+    frame_end (tail side). Each side is ordered nearest-to-farthest from
+    the event boundary so the first entry is the frame that "almost" fired.
+    """
+    head = []
+    for offset in range(1, k + 1):
+        fi   = frame_start - offset
+        if fi < 0:
+            break
+        head.append({"frame": fi, **(_summarize_boundary_frame(all_frame_diag.get(fi)) or {"missing": True})})
+
+    tail = []
+    for offset in range(1, k + 1):
+        fi = frame_end + offset
+        tail.append({"frame": fi, **(_summarize_boundary_frame(all_frame_diag.get(fi)) or {"missing": True})})
+
+    return {"head": head, "tail": tail}
+
+
+def _expand_event_boundaries(
+    sibilant_indices:     list,
+    all_frame_diag:       dict,
+    voiced_frame_indices,
+    resolved:             dict,
+):
+    """
+    Post-loop boundary expansion.
+
+    Walks outward from each contiguous sibilant run and promotes adjacent
+    voiced frames whose per-frame stats clear the relaxed P95 + flatness
+    thresholds:
+
+      relaxed_p95  = p95_trigger_db  - boundary_p95_relax_db
+      relaxed_flat = min_flatness    - boundary_flatness_relax
+
+    Hard gates (voicing veto, absolute-energy gate, pre-band check) are
+    never relaxed -- only the spectral-shape margin is. A walk stops at
+    the first non-qualifying frame on its side, at a frame outside the
+    head/tail-extended voiced set (so legitimate silences between events
+    are preserved), or at the boundary of the next contiguous run (so
+    expansion never bridges into a different event -- gap_merge handles
+    that case downstream).
+
+    Returns (expanded_indices, added_diag) where:
+      - expanded_indices is sorted and includes every frame from the
+        original sibilant_indices plus newly promoted boundary frames;
+      - added_diag maps each newly promoted frame to its diag dict
+        (tagged with condition="boundary" so the [sib-event] aggregator
+        records that the frame was added by relaxation rather than by
+        the primary detection loop).
+    """
+    if not sibilant_indices:
+        return sibilant_indices, {}
+
+    p95_relax  = float(resolved.get("boundary_p95_relax_db",   0.0) or 0.0)
+    flat_relax = float(resolved.get("boundary_flatness_relax", 0.0) or 0.0)
+    if p95_relax <= 0.0 and flat_relax <= 0.0:
+        return sibilant_indices, {}
+
+    p95_threshold  = float(resolved.get("p95_trigger_db", 6.0)) - p95_relax
+    flat_threshold = float(resolved.get("min_flatness",   0.1)) - flat_relax
+
+    sib_set    = set(sibilant_indices)
+    sorted_idx = sorted(sib_set)
+    runs       = []
+    rs = prev = sorted_idx[0]
+    for fi in sorted_idx[1:]:
+        if fi == prev + 1:
+            prev = fi
+            continue
+        runs.append((rs, prev))
+        rs = prev = fi
+    runs.append((rs, prev))
+
+    def _qualifies(diag):
+        if diag is None:
+            return False
+        if diag.get("voicingVetoed") or diag.get("energyGated"):
+            return False
+        p95 = diag.get("p95Db")
+        mn  = diag.get("meanDb")
+        if p95 is None or mn is None:
+            return False
+        flatness = diag.get("flatness")
+        if flatness is None:
+            return False
+        return (p95 - mn) > p95_threshold and flatness >= flat_threshold
+
+    added_diag = {}
+    added      = set()
+    for ridx, (run_s, run_e) in enumerate(runs):
+        prev_end   = runs[ridx - 1][1] if ridx > 0                  else -1
+        next_start = runs[ridx + 1][0] if ridx < len(runs) - 1      else None
+
+        # Head walk.
+        fi = run_s - 1
+        while fi > prev_end and fi >= 0:
+            if voiced_frame_indices is not None and fi not in voiced_frame_indices:
+                break
+            diag = all_frame_diag.get(fi)
+            if not _qualifies(diag):
+                break
+            promoted = dict(diag)
+            promoted["condition"] = "boundary"
+            added_diag[fi] = promoted
+            added.add(fi)
+            fi -= 1
+
+        # Tail walk.
+        fi = run_e + 1
+        while next_start is None or fi < next_start:
+            if voiced_frame_indices is not None and fi not in voiced_frame_indices:
+                break
+            diag = all_frame_diag.get(fi)
+            if not _qualifies(diag):
+                break
+            promoted = dict(diag)
+            promoted["condition"] = "boundary"
+            added_diag[fi] = promoted
+            added.add(fi)
+            fi += 1
+
+    if not added:
+        return sibilant_indices, {}
+    return sorted(sib_set | added), added_diag
+
+
 def build_events_map(
     sibilant_indices: list,
     f0_per_frame:     list,
@@ -313,6 +512,7 @@ def build_events_map(
     min_duration_ms:  float = 0.0,
     gap_merge_ms:     float = 0.0,
     per_frame_diag:   dict = None,
+    all_frame_diag:   dict = None,
 ) -> dict:
     """
     Build the canonical sibilance event-map JSON payload.
@@ -427,6 +627,17 @@ def build_events_map(
             detection = _aggregate_event_detection(per_frame_diag, int(s), int(e))
             if detection is not None:
                 obj["detection"] = detection
+
+        # Boundary diag: per-frame stats for the K frames immediately before
+        # startFrame and after endFrame. Lets the operator see whether the
+        # P95 gate, voicing veto, energy gate, or pre-band check rejected
+        # the boundary frames -- so gate tuning becomes data-driven instead
+        # of guesswork. K=4 covers the typical fricative ramp-up / ramp-down
+        # range without bloating logs.
+        if all_frame_diag:
+            obj["boundaryDiag"] = _build_event_boundary_diag(
+                all_frame_diag, int(s), int(e), k=4,
+            )
 
         event_objs.append(obj)
         kept_runs.append((s, e))
@@ -603,6 +814,15 @@ class SibilanceDetector:
             "lfDb":          None,
             "voicingVetoed": False,
             "energyGated":   False,
+            # p95Pass / flatPass record whether each spectral-shape gate
+            # cleared on this frame, independently of whether the frame
+            # ultimately fired sibilant. They let boundary-expansion logic
+            # (and the wrapper's [sib-bound] formatter) distinguish a
+            # p95-margin failure from a flatness failure without round-
+            # tripping the trigger thresholds. None = not evaluated (frame
+            # rejected upstream by voicing veto, energy gate, or band).
+            "p95Pass":       None,
+            "flatPass":      None,
             "bandLowHz":     self.sibilant_low,
             "bandHighHz":    self.sibilant_high,
             "f0Hz":          self.f0,
@@ -646,18 +866,29 @@ class SibilanceDetector:
             return False
 
         # --- Spectral-shape check: P95 spike + flatness ---
-        if (p95_db - mean_db) > self.params["p95_trigger_db"]:
-            valid = sib_energy > 0
-            if valid.any():
-                geo_mean = np.exp(np.mean(np.log(sib_energy[valid])))
-                arith    = np.mean(sib_energy[valid])
-                flatness = geo_mean / arith if arith > 0 else 0.0
-            else:
-                flatness = 0.0
-            diag["flatness"] = round(float(flatness), 4)
-            if flatness >= self.params["min_flatness"]:
-                diag["condition"] = "p95"
-                return True
+        # Both gates are always evaluated once the upstream gates clear, so
+        # diag carries the full picture (p95Pass, flatPass, flatness value)
+        # for boundary-expansion candidates -- previously flatness was only
+        # computed when the P95 margin cleared, hiding flatness-failure
+        # boundary frames from the post-loop expansion pass.
+        delta_db   = p95_db - mean_db
+        p95_pass   = bool(delta_db > self.params["p95_trigger_db"])
+        diag["p95Pass"] = p95_pass
+
+        valid = sib_energy > 0
+        if valid.any():
+            geo_mean = np.exp(np.mean(np.log(sib_energy[valid])))
+            arith    = np.mean(sib_energy[valid])
+            flatness = geo_mean / arith if arith > 0 else 0.0
+        else:
+            flatness = 0.0
+        diag["flatness"] = round(float(flatness), 4)
+        flat_pass        = bool(flatness >= self.params["min_flatness"])
+        diag["flatPass"] = flat_pass
+
+        if p95_pass and flat_pass:
+            diag["condition"] = "p95"
+            return True
 
         return False
 
@@ -844,7 +1075,11 @@ def analyze_sibilance_events(
     n_frames     = max(0, (len(audio_padded) - n_fft) // hop_length + 1)
 
     voiced_frame_indices = None
-    if vad_voiced_mask is not None and len(vad_voiced_mask) == len(audio):
+    vad_mask_supplied    = vad_voiced_mask is not None
+    vad_mask_len_match   = vad_mask_supplied and len(vad_voiced_mask) == len(audio)
+    tail_added           = 0
+    head_added           = 0
+    if vad_mask_len_match:
         voiced_frame_indices = set()
         for fi in range(n_frames):
             o_start = max(0, fi * hop_length - pad)
@@ -862,6 +1097,7 @@ def analyze_sibilance_events(
         # (so we don't bridge across legitimate inter-word silences).
         tail_ms     = float(resolved.get("fricative_tail_extension_ms", 0.0) or 0.0)
         tail_frames = max(0, int(tail_ms / ((hop_length / sample_rate) * 1000.0)))
+        tail_added  = 0
         if tail_frames > 0 and voiced_frame_indices:
             sorted_voiced = sorted(voiced_frame_indices)
             extended      = set()
@@ -877,11 +1113,61 @@ def analyze_sibilance_events(
                         break
                     extended.add(nxt)
             voiced_frame_indices.update(extended)
+            tail_added = len(extended)
+
+        # Fricative head pre-roll. Symmetric to the tail extension:
+        # walk the voiced set in order and prepend head_frames of
+        # preceding unvoiced frames before every voiced-run start so
+        # the detector can evaluate fricative onsets that begin before
+        # the vowel (e.g. /sh/ in "she"). Stops as soon as another
+        # voiced frame is reached upstream so we don't bridge across
+        # legitimate inter-word silences. Frame gates still apply, so
+        # silence cannot trigger detection.
+        head_ms     = float(resolved.get("fricative_head_extension_ms", 0.0) or 0.0)
+        head_frames = max(0, int(head_ms / ((hop_length / sample_rate) * 1000.0)))
+        head_added  = 0
+        if head_frames > 0 and voiced_frame_indices:
+            sorted_voiced = sorted(voiced_frame_indices)
+            prepended     = set()
+            for vfi in sorted_voiced:
+                if (vfi - 1) in voiced_frame_indices:
+                    continue
+                # vfi is the first voiced frame in its run; extend backward
+                # until we run out of frames, hit another voiced frame,
+                # or hit the head budget.
+                for k in range(1, head_frames + 1):
+                    prv = vfi - k
+                    if prv < 0 or prv in voiced_frame_indices:
+                        break
+                    prepended.add(prv)
+            voiced_frame_indices.update(prepended)
+            head_added = len(prepended)
+
+    # Single summary line so callers can verify the VAD mask is being
+    # threaded through and see how many silence-classified frames each
+    # extension pass reclaimed for detection. Always emitted -- when no
+    # mask is supplied head/tail extension cannot run and we want that
+    # to surface in logs instead of being silently skipped.
+    logger.info(
+        "SibilanceDetector: VAD frames extended -- "
+        f"vad_mask_supplied={vad_mask_supplied} "
+        f"vad_mask_len_match={vad_mask_len_match} "
+        f"tail_added={tail_added} head_added={head_added} "
+        f"voiced_total="
+        f"{len(voiced_frame_indices) if voiced_frame_indices is not None else 'None'}"
+        f"/{n_frames}"
+    )
 
     window           = get_window("hann", n_fft, fftbins=True)
     sibilant_indices = []
     f0_per_frame     = []
     per_frame_diag   = {}
+    # Diag for every voiced frame (sibilant or not). Used by build_events_map
+    # to attach boundary stats showing why frames adjacent to each event's
+    # startFrame/endFrame failed the per-frame gates. Independent of
+    # per_frame_diag so _aggregate_event_detection() still sees only the
+    # frames that actually fired sibilant.
+    all_frame_diag   = {}
 
     # Silence-gap reset bookkeeping. On any silence-to-voiced transition
     # longer than silence_reset_frames we (a) compute a look-ahead F0 from
@@ -920,7 +1206,15 @@ def analyze_sibilance_events(
         else:
             silence_run += 1
 
-        if detector.process_frame(magnitude, is_voiced, f0_for_frame):
+        fired = detector.process_frame(magnitude, is_voiced, f0_for_frame)
+        # Capture diag for EVERY voiced frame, not just sibilant ones, so
+        # build_events_map() can emit boundary diagnostics for the N frames
+        # immediately before/after each detected event. Memory is bounded
+        # (~10 floats per frame * n_frames). Non-voiced frames are skipped --
+        # they cannot contribute to event boundaries.
+        if is_voiced and detector.last_diag is not None:
+            all_frame_diag[i] = detector.last_diag
+        if fired:
             sibilant_indices.append(i)
             if detector.last_diag is not None:
                 per_frame_diag[i] = detector.last_diag
@@ -929,8 +1223,24 @@ def analyze_sibilance_events(
     rolling   = detector.f0_rolling
     f0_median = float(np.median(rolling)) if len(rolling) > 0 else detector.f0
 
+    # Boundary expansion. Walks outward from each contiguous sibilant run
+    # and promotes adjacent voiced frames whose per-frame stats clear the
+    # relaxed P95 + flatness thresholds (see _expand_event_boundaries
+    # docstring). Runs before gap_merge so newly-adjacent runs can still
+    # be joined by build_events_map() if they fall inside gap_merge_ms.
+    expanded_indices, boundary_added = _expand_event_boundaries(
+        sibilant_indices, all_frame_diag, voiced_frame_indices, resolved,
+    )
+    if boundary_added:
+        per_frame_diag.update(boundary_added)
+        logger.info(
+            "SibilanceDetector: boundary expansion -- "
+            f"frames_promoted={len(boundary_added)} "
+            f"sibilant_total={len(expanded_indices)} (was {len(sibilant_indices)})"
+        )
+
     events_map = build_events_map(
-        sibilant_indices = sibilant_indices,
+        sibilant_indices = expanded_indices,
         f0_per_frame     = f0_per_frame,
         f0_median        = f0_median if f0_median is not None else (contour_median or 0.0),
         n_frames         = n_frames,
@@ -941,10 +1251,11 @@ def analyze_sibilance_events(
         min_duration_ms  = min_duration_ms,
         gap_merge_ms     = gap_merge_ms,
         per_frame_diag   = per_frame_diag,
+        all_frame_diag   = all_frame_diag,
     )
 
     logger.info(
-        f"SibilanceDetector: frames={n_frames} sibilant={len(sibilant_indices)} "
+        f"SibilanceDetector: frames={n_frames} sibilant={len(expanded_indices)} "
         f"events={len(events_map['events'])} "
         f"f0_median={events_map['f0']['median']} Hz"
     )

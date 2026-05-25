@@ -289,7 +289,7 @@ export const PRESETS = {
           wetBranchDeEsser: {
             enabled: true,
             stridentCeilingDb:     3.0,
-            nonStridentCeilingDb: -4.0,
+            nonStridentCeilingDb: -8.0,
             reductionRatio:   0.9,
             maxReductionDb:   50.0,
             contextWindowMs:  80,

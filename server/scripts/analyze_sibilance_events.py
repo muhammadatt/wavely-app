@@ -129,6 +129,58 @@ if __name__ == "__main__":
             band[0], band[1], det.get("f0Hz"), det.get("postSilenceOnset"),
         )
 
+        # Per-frame boundary trace. Shows, for the K frames immediately
+        # before startFrame (head) and after endFrame (tail), what the
+        # per-frame gates measured. Lets us see why the detector did NOT
+        # extend the event further -- which gate rejected each boundary
+        # frame -- so threshold tuning is data-driven.
+        bd = ev.get("boundaryDiag")
+        if bd:
+            def _fmt(side):
+                parts = []
+                for f in side:
+                    fi = f.get("frame", -1)
+                    if f.get("missing"):
+                        parts.append(f"f{fi}:--")
+                        continue
+                    # Single-gate failure label. Frames carry p95Pass/flatPass
+                    # booleans from the detector (None when the frame was
+                    # rejected upstream by voicing veto, energy gate, or band).
+                    # Order: hard gates first, then spectral-shape failures,
+                    # then a FIRED marker. p95Fail vs flatFail is now an
+                    # accurate label rather than a default fallback.
+                    flags = []
+                    if f.get("fired"):
+                        flags.append("FIRED")
+                    elif f.get("veto"):
+                        flags.append("veto")
+                    elif f.get("nrg"):
+                        flags.append("nrg")
+                    elif f.get("band"):
+                        flags.append("band")
+                    else:
+                        p95p  = f.get("p95Pass")
+                        flatp = f.get("flatPass")
+                        if p95p is False:
+                            flags.append("p95Fail")
+                        elif flatp is False:
+                            flags.append("flatFail")
+                        else:
+                            flags.append("fail")
+                    flag_s = "|".join(flags)
+                    delta  = f.get("deltaDb")
+                    flat   = f.get("flatness")
+                    parts.append(
+                        f"f{fi}:d{delta if delta is not None else '?'}"
+                        f"/flat{flat if flat is not None else '?'}/{flag_s}"
+                    )
+                return " ".join(parts)
+            logger.info(
+                "[sib-bound] startF=%d endF=%d  head: %s  tail: %s",
+                ev.get("startFrame", -1), ev.get("endFrame", -1),
+                _fmt(bd.get("head", [])), _fmt(bd.get("tail", [])),
+            )
+
     print("JSON_RESULT:" + json.dumps({
         "frameCount":         events["frameCount"],
         "sibilantFrameCount": len(events["sibilantFrameIndices"]),
