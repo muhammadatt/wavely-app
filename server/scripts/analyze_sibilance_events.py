@@ -118,12 +118,16 @@ if __name__ == "__main__":
         ) or "none"
         band = det.get("bandHz") or [None, None]
         logger.info(
-            "[sib-event] t=%.3f-%.3fs f=%d-%d %.0fms type=%s cond=%s "
+            "[sib-event] t=%.3f-%.3fs f=%d-%d %.0fms type=%s class=%s "
+            "hfRatio=%s coreP95=%s peak=%s cond=%s "
             "p95=%s mean=%s lf=%s flat=%s "
             "band=%s-%s f0=%s postSil=%s",
             ev.get("startSec", 0.0), ev.get("endSec", 0.0),
             ev.get("startFrame", -1), ev.get("endFrame", -1),
-            ev.get("durationMs", 0), ev.get("eventType", "?"), fired,
+            ev.get("durationMs", 0), ev.get("eventType", "?"),
+            ev.get("sibilantClass", "?"),
+            ev.get("hfRatioDb"), ev.get("coreMeanP95Db"),
+            ev.get("eventPeakDb"), fired,
             det.get("meanP95Db"), det.get("meanMeanDb"), det.get("meanLfDb"),
             det.get("meanFlatness"),
             band[0], band[1], det.get("f0Hz"), det.get("postSilenceOnset"),

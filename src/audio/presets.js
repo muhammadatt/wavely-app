@@ -194,6 +194,7 @@ export const PRESETS = {
           merge_max_delta_db: 6.0,
         },
       },
+      /*
       {
         spectralSubtraction: {
           enabled: true,
@@ -203,6 +204,7 @@ export const PRESETS = {
           transientShaper: true,
         },
       },  
+      */
       /* {dereverb: {enabled: true, strength: "medium", preserve_early: false}}, */    
       //{ separateVocals: { model: "demucs" } },
       /*
@@ -253,6 +255,7 @@ export const PRESETS = {
       "remeasureFramesPostNr",
       {
         compression: [
+          /*
           {
             targetCrestFactorDb: 15,
             maxRatio: 6,
@@ -269,6 +272,11 @@ export const PRESETS = {
             attack: 15,
             release: 120,
           },
+          */
+         { targetCrestFactorDb: 14, maxRatio: 4, threshold: "auto", follow: false, attack: 0.5, release: 50 },
+{ targetCrestFactorDb: 13, maxRatio: 3, threshold: "auto", follow: true,  attack: 5,   release: 100 },
+{ targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 20,  release: 200 },
+{ targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 80,  release: 400 },
         ],
       },
       "remeasureFramesPostNr",
@@ -279,7 +287,7 @@ export const PRESETS = {
           attackMs: 0.1,
           releaseMs: 150,
           makeupGain: "auto",
-          wetMix: 1,
+          wetMix: 0.1,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
           // Wet branch is wetMix=1 with auto makeup — sibilants emerge loud
@@ -295,42 +303,6 @@ export const PRESETS = {
             contextWindowMs:  80,
           },
         },
-      },
-      {
-        resonanceSuppressor: [
-          {
-            depth: 0.67,
-            sharpness: 0.8,
-            selectivity: 8,
-            attack_ms: 15.0,
-            release_ms: 80.0,
-            max_reduction_db: 36.0,
-            freq_floor_hz: 40.0,
-            freq_ceil_hz: 20000.0,
-            mode: "soft"
-          },
-          {
-            sibilant_only: true,
-            preserve_harmonics: false,
-            depth: 0.67,
-            sharpness: 0.4,
-            selectivity: 1,
-            attack_ms: 5.0,
-            release_ms: 10.0,
-            max_reduction_db: 25.0,
-            freq_floor_hz: 3000.0,
-            freq_ceil_hz: 10000.0,
-            mode: "soft",
-            lifter_cutoff_bins: 3,
-            band_summary_max_cluster_bins: 186,
-            /*
-            sibilanceDetection: {
-              p95_trigger_db: 9.0,
-              min_flatness: 0.1,
-              broadband_trigger_db: 13.0,
-            } */
-          }
-        ],
       },
       /*
       {
@@ -354,12 +326,13 @@ export const PRESETS = {
           postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
         },
       },
+      */
       {
         vocalSaturation: {
           drive: 2.5,
-          wetDry: 0.25,
+          wetDry: 0.50,
           bias: 0.25,
-          lowCrossover: 140,
+          lowCrossover: 100,
           midCrossover: 7550,
           softness: 0.9,
           lowDriveMult: 7,
@@ -417,6 +390,7 @@ export const PRESETS = {
           },
         ],
       },
+      /*
       {
         roomPresence: {
           enabled: true,
@@ -429,7 +403,6 @@ export const PRESETS = {
         },
       },
       */
-
       "normalize",
       "truePeakLimit",
       "measureAfter",
@@ -598,9 +571,9 @@ export const PRESETS = {
           drive: 2.5,
           wetDry: 1,
           bias: 0.25,
-          lowCrossover: 140,
+          lowCrossover: 100,
           midCrossover: 7550,
-          softness: 0.7,
+          softness: 0.9,
           lowDriveMult: 7,
           midDriveMult: 0.25,
           highDriveMult: 6.25,

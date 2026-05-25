@@ -188,13 +188,27 @@ AFFRICATE_PEAK_POSITION = 0.35
 # event span. Empirical values from Jongman et al. 2000 and the literature:
 #   /s/  ~  +8 to +15 dB    /ʃ/ ~  +3 to  +8 dB
 #   /f/  ~  -3 to  +2 dB    /θ/ ~  -5 to   0 dB
-# A threshold at +3 dB cleanly separates the two groups. Constant exposed
-# so it can be tuned against a measured corpus.
-HF_BAND_LOW_HZ                     =  4000.0
-HF_BAND_HIGH_HZ                    = 10000.0
-LM_BAND_LOW_HZ                     =  1000.0
-LM_BAND_HIGH_HZ                    =  4000.0
-STRIDENT_CLASSIFICATION_THRESHOLD_DB = 3.0
+# A threshold at +3 dB cleanly separates the two groups on clean fricative
+# samples. Constant exposed so it can be tuned against a measured corpus.
+#
+# Two-axis rule: /ʃ/ peak energy sits at 2.5-4 kHz -- right on the LM/HF band
+# boundary at 4 kHz -- so its ratio is intrinsically borderline and can dip
+# below the +3 dB threshold on recordings with a darker mic or mid-cut EQ.
+# Absolute in-band loudness (P95) cleanly separates /ʃ/ from /f/ in that
+# regime: /f/ is an intrinsically weak labiodental source that sits 8-15 dB
+# below /s/ and /ʃ/ in conversational speech (Jongman et al. 2000), so even
+# a loud /f/ rarely reaches the +5 dB band-P95 mark. The rescue clause says:
+# "if the core ratio is at least neutral AND the core P95 is genuinely loud
+# in the sibilant band, treat as strident even if the ratio falls below the
+# main threshold." Measured over the same P95-fired sub-span used for the
+# ratio so both axes reflect identical detector evidence.
+HF_BAND_LOW_HZ                       =  4000.0
+HF_BAND_HIGH_HZ                      = 10000.0
+LM_BAND_LOW_HZ                       =  1000.0
+LM_BAND_HIGH_HZ                      =  4000.0
+STRIDENT_CLASSIFICATION_THRESHOLD_DB =  3.0
+STRIDENT_RESCUE_RATIO_FLOOR_DB       =  0.0
+STRIDENT_RESCUE_LOUDNESS_DB          =  5.0
 
 
 def resolve_params(overrides: dict = None) -> dict:
@@ -603,12 +617,65 @@ def build_events_map(
             # eventType -- a /tʃ/ is affricate+strident, a soft /f/ is
             # fricative+non_strident. See module-level docstring for the
             # band definitions and threshold rationale.
-            hf_ratio_db    = _compute_event_band_ratio_db(
-                audio, start_sample, end_sample, sample_rate,
+            #
+            # Measurement window: prefer the sub-span covered by frames that
+            # fired the *core* P95 condition during the main detection loop,
+            # excluding any boundary-promoted frames (condition="boundary")
+            # added by the post-loop relaxation pass. Boundary frames pass
+            # only the relaxed thresholds, so they tend to sit immediately
+            # adjacent to vowel content and carry HF bleed from the vowel
+            # onset / offset transition -- in a long expanded event (e.g.
+            # 6 core + 10 boundary frames) that bleed dominates the
+            # whole-event FFT and tilts the HF/LM ratio strident even for a
+            # naturally weak /f/. Restricting the FFT window to the P95
+            # sub-span removes the contamination without changing the
+            # underlying acoustic model or the +3 dB threshold (which is
+            # still correct for clean fricative samples). Falls back to the
+            # full event span when no P95 frames are present (defensive --
+            # the event came from the main detection loop so this branch
+            # is only reached in pathological corner cases).
+            ratio_start    = start_sample
+            ratio_end      = end_sample
+            core_mean_p95  = None
+            if per_frame_diag:
+                p95_frames = [
+                    fi for fi in range(int(s), int(e) + 1)
+                    if per_frame_diag.get(fi, {}).get("condition") == "p95"
+                ]
+                if p95_frames:
+                    ratio_start = max(0, p95_frames[0] * hop_length)
+                    ratio_end   = min(
+                        n_samples - 1, (p95_frames[-1] + 1) * hop_length - 1,
+                    )
+                    if ratio_end <= ratio_start:
+                        ratio_end = min(n_samples - 1, ratio_start + 1)
+                    core_p95_vals = [
+                        per_frame_diag[fi].get("p95Db") for fi in p95_frames
+                        if per_frame_diag.get(fi, {}).get("p95Db") is not None
+                    ]
+                    if core_p95_vals:
+                        core_mean_p95 = float(np.mean(core_p95_vals))
+
+            hf_ratio_db = _compute_event_band_ratio_db(
+                audio, ratio_start, ratio_end, sample_rate,
+            )
+
+            # Two-axis rule: ratio alone is borderline for /ʃ/ on recordings
+            # whose mic/EQ profile pushes its 2.5-4 kHz peak below the +3 dB
+            # ratio threshold. Rescue via absolute in-band loudness -- /f/
+            # cannot reach the +5 dB band-P95 mark even when EQ-boosted, but
+            # /ʃ/ routinely does.
+            is_strident_by_ratio = (
+                hf_ratio_db >= STRIDENT_CLASSIFICATION_THRESHOLD_DB
+            )
+            is_strident_by_loudness = (
+                core_mean_p95 is not None
+                and hf_ratio_db >= STRIDENT_RESCUE_RATIO_FLOOR_DB
+                and core_mean_p95 >= STRIDENT_RESCUE_LOUDNESS_DB
             )
             sibilant_class = (
                 "strident"
-                if hf_ratio_db >= STRIDENT_CLASSIFICATION_THRESHOLD_DB
+                if (is_strident_by_ratio or is_strident_by_loudness)
                 else "non_strident"
             )
 
@@ -620,6 +687,9 @@ def build_events_map(
                 "eventPeakDb":          round(peak_db, 2),
                 "eventType":            event_type,
                 "hfRatioDb":            round(hf_ratio_db, 2),
+                "coreMeanP95Db":        (
+                    round(core_mean_p95, 2) if core_mean_p95 is not None else None
+                ),
                 "sibilantClass":        sibilant_class,
             })
 
