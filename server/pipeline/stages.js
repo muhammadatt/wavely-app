@@ -54,6 +54,7 @@ import { applyAirBoost, applyAirBoostMask } from './airBoost.js'
 import { getReferenceCurvePath, runReferenceEQPass } from './referenceEQ.js'
 import { getF0Contour } from './f0Analysis.js'
 import { analyzeSibilanceEvents } from './sibilanceEvents.js'
+import { applyBassEnhance } from './bassEnhance.js'
 
 // ── Stage: Decode ─────────────────────────────────────────────────────────────
 
@@ -1219,6 +1220,51 @@ export async function vocalSaturation(ctx) {
   await logLevel(ctx, 'after vocal saturation', ctx.currentPath, {})
 }
 
+// ── Stage: Bass Enhance ───────────────────────────────────────────────────────
+// Psychoacoustic bass synthesis (MaxxBass-style). Generates harmonic overtones
+// of the fundamental and blends them additively into the dry signal — the ear
+// infers the missing fundamental from its overtones, producing perceived
+// sub-bass without adding sub-bass energy that would overload the limiter.
+//
+// Consumes upstream VAD frames (ctx.results.metrics.frames) and the cached F0
+// contour (getF0Contour). With neither available the stage still runs but
+// uses a fixed fallback crossover; quality is best when both are present.
+//
+// Skipped (no audio change) when preset.bassEnhance.enabled === false.
+// Skipped at the script level when VAD coverage falls below
+// preset.bassEnhance.skipIfVoicedRatioBelow.
+
+export async function bassEnhance(ctx) {
+  const cfg = ctx.preset?.bassEnhance ?? {}
+  if (cfg.enabled === false) {
+    ctx.results.bassEnhance = { applied: false, reason: 'disabled by preset' }
+    ctx.log('[bass-enhance] disabled — skipped')
+    return
+  }
+
+  const frames     = ctx.results.metrics?.frames ?? null
+  const f0Contour  = await getF0Contour(ctx, { useCache: true })
+  const outPath    = ctx.tmp('.wav')
+
+  const info = await applyBassEnhance(ctx.currentPath, outPath, cfg, frames, f0Contour)
+
+  if (info?.applied === false) {
+    ctx.results.bassEnhance = info
+    ctx.log(`[bass-enhance] skipped — ${info.skip_reason ?? 'unknown'}`)
+    return
+  }
+
+  ctx.currentPath = outPath
+  ctx.results.bassEnhance = info
+  ctx.log(
+    `[bass-enhance] applied segments=${info.n_segments} ` +
+    `f0=${info.f0_range_hz?.join('–')}Hz ` +
+    `mix=${info.mix_effective} low_band_gain=${info.low_band_gain_db}dB ` +
+    `vad_coverage=${info.vad_coverage_pct}%`,
+  )
+  await logLevel(ctx, 'after bass enhance', ctx.currentPath, {})
+}
+
 // ── Stage: Room Presence (Stage 4c) ──────────────────────────────────────────
 // Convolution reverb with a synthetic IR. Placed after all corrective and
 // tonal processing so the reverb tail doesn't amplify residual noise, and
@@ -1395,6 +1441,7 @@ export async function qualityAdvisory(ctx) {
     autoLeveler:         ctx.results.autoLeveler ?? null,
     vocalExpander:       ctx.results.vocalExpander ?? null,
     resonanceSuppressor: ctx.results.resonanceSuppressor ?? null,
+    bassEnhance:         ctx.results.bassEnhance ?? null,
   }
   ctx.results.qualityAdvisory = await generateQualityAdvisory(
     ctx.currentPath,

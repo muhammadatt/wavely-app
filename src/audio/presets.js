@@ -327,6 +327,10 @@ export const PRESETS = {
         },
       },
       */
+      // BassEnhance off by default for audiobook narration. The preset's
+      // character is "Clean, present, natural" and ACX human review listens
+      // for unnatural tonality / over-processing; opt in per file if needed.
+      { bassEnhance: { enabled: false, drive: 2.5, softness: 0.6, bias: 0.2, mix: 0.2, crossoverFallbackHz: 280 } },
       {
         vocalSaturation: {
           drive: 2.5,
@@ -349,7 +353,7 @@ export const PRESETS = {
             min_flatness: 0.1,
             broadband_trigger_db: 10.0,
           },
-          // Predictive pre-attenuation 
+          // Predictive pre-attenuation
           precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
         },
       },
@@ -552,6 +556,11 @@ export const PRESETS = {
         },
       },
       */
+      // BassEnhance — adds perceived low-end weight via psychoacoustic
+      // harmonic synthesis. Runs after parallelCompression so the dynamics
+      // pass doesn't gate the harmonics, and before airBoost / EQ so the
+      // tonal stages shape the result.
+      { bassEnhance: { drive: 3.0, softness: 0.4, bias: 0.4, mix: 0.35, crossoverFallbackHz: 300 } },
       { airBoost: {
           gainDb: 5,
           sibilantGainFloor: 0.25,
@@ -693,6 +702,10 @@ export const PRESETS = {
           },
         },
       },
+      // BassEnhance — perceived low-end weight via psychoacoustic harmonics.
+      // Conservative mix because General Clean is the catch-all preset and
+      // we cannot assume the source has thin low end.
+      { bassEnhance: { drive: 3.0, softness: 0.5, bias: 0.3, mix: 0.3, crossoverFallbackHz: 300 } },
       {
         resonanceSuppressor: {
           depth: 0.7,

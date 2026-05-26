@@ -276,8 +276,9 @@ Dynamics: Compression (multi-pass, crest-factor driven)
           → remeasure frames → parallel compression
           → vocal expander (optional)
 
-Tonal:    Air boost → reference EQ → resonance suppressor
-          → vocal saturation → room presence (preset-dependent)
+Tonal:    Bass enhance (psychoacoustic, optional) → air boost
+          → reference EQ → resonance suppressor → vocal saturation
+          → room presence (preset-dependent)
 
 Output:   Normalize ← output profile governs target and method
           → true peak limit ← output profile governs ceiling
@@ -527,6 +528,148 @@ Note: `acx_audiobook` and `podcast_ready` currently have `vocalExpander` comment
 When skipped: `{ "applied": false, "skipped_reason": "silence_floor_already_below_-72_dbfs" }` or similar reason string.
 
 **Advisory flag:** Emits `over_expansion` (severity `review`) when `pct_frames_expanded > 35` OR any VAD-voiced frame received more than 3 dB of attenuation.
+
+---
+
+### Stage 4b — Bass Enhance (Psychoacoustic, Optional)
+
+**Purpose:** Add perceived low-end weight to thin-sounding recordings without
+adding sub-bass energy that would overload downstream limiters or disappear on
+small speakers. MaxxBass-style: synthesise harmonic overtones of the
+fundamental and blend them additively into the dry signal — the ear infers
+the missing fundamental from its overtones.
+
+**Implementation:** `server/scripts/bass_enhance.py` (Python), invoked from
+`server/pipeline/bassEnhance.js`. Reuses `tube_saturate` from
+`vocal_saturation.py` for the waveshaper (2× oversampled tanh/arctan blend
+with asymmetric bias).
+
+**Upstream inputs consumed:**
+- VAD frames from `ctx.results.metrics.frames` (Silero, 25 ms hop)
+- F0 contour from `getF0Contour(ctx, { useCache: true })` in
+  `f0Analysis.js` (autocorrelation, 512-sample hop, [70, 400] Hz range)
+
+Neither is required; without them the stage falls back to a fixed crossover
+and treats the whole file as voiced. Quality is best with both present, and
+the canonical preset wiring always provides both.
+
+**Signal flow:**
+
+1. **Per-utterance F0 segmentation.** Contiguous voiced regions separated by
+   silence gaps ≥ `f0ClusterMinGapMs` are treated as utterances. Per-utterance
+   median F0 (clamped to `[f0MinHz, f0MaxHz]`) sets the LPF crossover at
+   `1.5 × medianF0`. Utterances with fewer than 10 valid F0 frames fall back
+   to the file median F0 (clamped) rather than the global
+   `crossoverFallbackHz`. This is **not speaker segmentation** — per-utterance
+   median F0 tracks real pitch shifts between utterances without claiming
+   speaker identification that F0 clustering cannot deliver reliably.
+
+2. **Band isolation.** 4th-order Butterworth LPF, crossfaded at utterance
+   boundaries over `segmentTransitionMs` (default 75 ms) in log-Hz space.
+   Implemented as a small bank of fixed LPFs at geometric cutoffs;
+   per-sample weighted interpolation across the bank yields the time-varying
+   cutoff without coefficient redesign.
+
+3. **Waveshaping.** Bass band → `tube_saturate(drive, softness, bias)`.
+   `softness` blends tanh (odd harmonics) → arctan (even harmonics, warmer).
+   `bias` adds asymmetry for even-harmonic weight. 2× oversampling inside
+   `tube_saturate` suppresses aliasing.
+
+4. **Fundamental removal (balanced HPF).** Time-varying HPF with cutoff
+   `f0_contour × fundamentalCutRatio`, smoothed causally over
+   `fundamentalCutSmoothMs` (default 50 ms). The default
+   `fundamentalCutRatio = 1.25` is a deliberate compromise:
+
+   | Cutoff (× F0) | F0 attenuation | 2·F0 attenuation | 3·F0 attenuation |
+   |---|---|---|---|
+   | 0.9             | ~-1 dB  | ~0 dB | ~0 dB |
+   | **1.25 (default)** | **~-8 dB** | **~-1 dB** | **~0 dB** |
+   | 1.7             | ~-24 dB | ~-3 dB | ~-1 dB |
+   | 2.0             | ~-30 dB | ~-6 dB | ~-1 dB |
+
+   `1.25 × F0` preserves ~80–90% of the 2nd harmonic and almost all of h3+
+   while attenuating the fundamental by ~7–10 dB. Some residual fundamental
+   survives, producing a small genuine sub-bass lift on top of the
+   psychoacoustic effect — intentional, and documented in the script's
+   docstring so future readers do not "fix" it back to `0.9`.
+
+   Implemented as a precomputed bank of 12 fixed HPFs at geometric cutoffs
+   covering `[f0MinHz, f0MaxHz] × fundamentalCutRatio`. Per-sample weighted
+   interpolation across the bank tracks the smoothed F0 contour without
+   per-frame biquad redesign.
+
+5. **VAD gate.** Per-sample mask derived from VAD frames, smoothed by an
+   asymmetric IIR envelope (`vadAttackMs` / `vadReleaseMs`). The 25 ms VAD
+   frame quantisation is the floor on attack sharpness; sub-frame attack
+   times act as envelope shaping on the step transitions. Music beds, sound
+   effects, and silence pass through completely untouched (bit-identical to
+   dry in the silence span).
+
+6. **Stereo handling.** Stereo input is summed to mono for the harmonics
+   chain; the harmonics-only signal is then added equally to both channels.
+   Bass is center — per-channel processing would create stereo
+   de-correlation in the bass band, which is generally undesirable.
+
+7. **Additive blend.** `output = audio + mix × gated_harmonics`. Dry signal
+   passes through unchanged.
+
+8. **Output normalization (optional).** When `normalizeOutput = true`,
+   RMS-match output to dry level so perceived loudness is independent of
+   `mix`. Defaults to on.
+
+**Skip conditions:**
+- `enabled: false` in the preset block → no-op, reported as
+  `{ applied: false, skipped_reason: "disabled by preset" }`.
+- VAD coverage below `skipIfVoicedRatioBelow` (default 0.05) → no-op,
+  reported as `{ applied: false, skip_reason: "voiced_ratio_below_threshold" }`.
+  Operating the saturator on a near-silent file would manufacture artifacts.
+
+**Pipeline position:** after `parallelCompression` (so compression dynamics
+don't gate the harmonics) and before `airBoost`, `referenceEQ`, `normalize`,
+`truePeakLimit` (so the loudness pass absorbs any residual energy shift from
+the blend, and the limiter targets the final mix).
+
+**Preset defaults:**
+
+| Preset | `enabled` | `crossoverFallbackHz` | `drive` | `softness` | `bias` | `mix` |
+|---|---|---|---|---|---|---|
+| `acx_audiobook` | `false` (opt-in) | 280 | 2.5 | 0.6 | 0.2 | 0.2 |
+| `podcast_ready` | `true` | 300 | 3.0 | 0.4 | 0.4 | 0.35 |
+| `general_clean` | `true` | 300 | 3.0 | 0.5 | 0.3 | 0.3 |
+| `noise_eraser`  | not configured (separation artifacts should not be masked by synthesized bass) |
+
+ACX Audiobook is off by default because the preset's character is "clean,
+present, natural" and ACX human reviewers listen for unnatural tonality. The
+stage is wired in disabled so it can be enabled per-file without preset
+surgery.
+
+**Report payload (`bass_enhance` key):**
+```json
+{
+  "applied": true,
+  "n_segments": 4,
+  "segment_crossovers_hz": [180.0, 195.0, 187.5, 210.0],
+  "f0_range_hz": [120.0, 140.0],
+  "vad_coverage_pct": 87.5,
+  "mix_effective": 0.35,
+  "low_band_gain_db": 3.2,
+  "fundamental_cut_ratio": 1.25,
+  "drive": 3.0,
+  "softness": 0.4,
+  "bias": 0.4,
+  "channels": 1
+}
+```
+
+`low_band_gain_db` is the measured post-blend RMS in the bass band relative
+to the dry signal in the same band — drives the `excessive_bass_enhancement`
+advisory.
+
+**Advisory flag:** Emits `excessive_bass_enhancement` (severity `review`)
+when the stage applied with `mix > 0.5` AND `low_band_gain_db > 6`. Both
+conditions matter: a high mix on a source that already had healthy bass
+produces only a small `low_band_gain_db` (synthesized harmonics compete with
+existing energy), so neither alone is enough to flag.
 
 ---
 

@@ -199,6 +199,7 @@ function buildReport(ctx) {
       ...(results.vocalExpander         && { vocal_expander:          formatVocalExpanderResult(results.vocalExpander) }),
       ...(results.vadGate               && { vad_gate:                formatVadGateResult(results.vadGate) }),
       ...(results.resonanceSuppressor   && { resonance_suppressor:    formatResonanceSuppressorResult(results.resonanceSuppressor) }),
+      ...(results.bassEnhance           && { bass_enhance:             formatBassEnhanceResult(results.bassEnhance) }),
       normalization_gain_db:
         results.afterMeasurements?.rmsDbfs == null || results.beforeMeasurements?.rmsDbfs == null
           ? null
@@ -540,6 +541,31 @@ function formatVadGateResult(r) {
       open_segments:        r.openSegments,
       pct_samples_at_floor: r.pctSamplesAtFloor,
     },
+  }
+}
+
+function formatBassEnhanceResult(r) {
+  if (!r) return null
+  if (r.applied === false) {
+    return {
+      applied:        false,
+      skipped_reason: r.skip_reason ?? r.reason ?? null,
+      vad_coverage_pct: r.vad_coverage_pct ?? null,
+    }
+  }
+  return {
+    applied:                true,
+    n_segments:             r.n_segments,
+    segment_crossovers_hz:  r.segment_crossovers_hz,
+    f0_range_hz:            r.f0_range_hz,
+    vad_coverage_pct:       r.vad_coverage_pct,
+    mix_effective:          r.mix_effective,
+    low_band_gain_db:       r.low_band_gain_db,
+    fundamental_cut_ratio:  r.fundamental_cut_ratio,
+    drive:                  r.drive,
+    softness:               r.softness,
+    bias:                   r.bias,
+    channels:               r.channels,
   }
 }
 
