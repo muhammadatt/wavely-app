@@ -104,6 +104,7 @@ Quality advisory flags run for all presets and all output profiles. The specific
 | `high_nr_tier` | Noise reduction Tier 4 was applied | Info | "Heavy noise reduction was applied. Some processing character may be audible on close listening." |
 | `separation_used` | `noise_eraser` preset was used (contains `separateVocals` stage) | Review | "Voice separation was used. The output may have a processed quality. Review carefully before submitting to ACX." |
 | `over_expansion` | `pct_frames_expanded` > 35% OR any VAD-voiced frame received > 3 dB attenuation from the Stage 4a-E vocal expander | Review | "The expander may have affected quiet speech. Listen for unnatural silences between words or clipped consonants." |
+| `excessive_bass_enhancement` | BassEnhance ran with `mix > 0.5` AND post-blend low-band energy exceeds dry low-band energy by more than 6 dB | Review | "Synthesized bass may be exaggerated. Listen on small speakers — the effect can sound natural on headphones but boomy on phones and laptops." |
 | `chapter_outlier` | Batch mode: this file deviates > 2 dB from batch median after consistency pass | Review | "This chapter sounds noticeably different from the rest of the batch. Review for consistency." |
 
 **`loud_breaths` and `plosives`** apply when `preset = acx_audiobook` only. These are specifically ACX human review concerns and are not meaningful outside that context.
@@ -113,6 +114,8 @@ Quality advisory flags run for all presets and all output profiles. The specific
 **`separation_used`** applies when the `separateVocals` stage ran (i.e. `preset = noise_eraser`) regardless of output profile.
 
 **`over_expansion`** applies only when the vocal expander stage actually ran (`vocal_expander.applied = true`).
+
+**`excessive_bass_enhancement`** applies only when the BassEnhance stage actually ran (`bass_enhance.applied = true`). The low-band energy comparison is post-blend RMS in the band below `crossover_hz` vs. the same band in the dry input, captured by the stage as `low_band_gain_db`.
 
 All other flags apply to all presets and output profiles.
 

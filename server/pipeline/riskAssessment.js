@@ -183,6 +183,25 @@ export async function generateQualityAdvisory(
     }
   }
 
+  // --- BassEnhance advisory flag ---
+  // Emit `excessive_bass_enhancement` when the stage ran with mix > 0.5 and the
+  // post-blend low-band gain (low_band_gain_db) exceeds 6 dB. The combination
+  // matters: a high mix on a source that already had healthy bass produces only
+  // a small low_band_gain (the synthesized harmonics compete with existing
+  // energy), so neither condition alone is enough.
+  const beResult = pipelineContext.bassEnhance
+  if (beResult && beResult.applied) {
+    const mix     = beResult.mix_effective    ?? 0
+    const gainDb  = beResult.low_band_gain_db ?? 0
+    if (mix > 0.5 && gainDb > 6) {
+      flags.push({
+        id:       'excessive_bass_enhancement',
+        severity: 'review',
+        message:  'Synthesized bass may be exaggerated. Listen on small speakers — the effect can sound natural on headphones but boomy on phones and laptops.',
+      })
+    }
+  }
+
   // --- Resonance Suppressor advisory flag ---
   // Emitted when the suppressor ran and artifact_risk is true.
   // artifact_risk is set when mean gain reduction across bins with > 0.01 dB
