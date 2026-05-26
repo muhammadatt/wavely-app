@@ -1,6 +1,6 @@
 # Instant Polish — Audio Processing Chain: Technical Specification
-> Version 3.1 | April 2026
-> Supersedes v3.0
+> Version 3.2 | May 2026
+> Supersedes v3.1
 
 ---
 
@@ -8,7 +8,9 @@
 
 This document specifies the complete audio processing chain for Instant Polish. All processing runs server-side. The browser handles file upload, waveform visualization, playback of both the original and processed audio, and the processing report.
 
-The processing chain is designed to serve multiple use cases through a **preset + output profile** architecture. A preset defines the character of the processing — the EQ curve, compression behavior, noise reduction aggressiveness, and target loudness. An output profile defines the loudness target, peak ceiling, and measurement method the chain tries to achieve. These are independent selections.
+The processing chain is designed to serve multiple use cases through a **preset + output profile** architecture. A preset defines the character of the processing. An output profile defines the loudness target, peak ceiling, and measurement method the chain tries to achieve. These are independent selections.
+
+**Architecture note (v3.2 — config-driven pipeline):** The pipeline is fully config-driven. There is no hardcoded stage ordering. Each preset declares its own `stages` array in `src/audio/presets.js`, and the pipeline runner (`server/pipeline/index.js`) executes those stages sequentially via a stage registry in `server/pipeline/stages.js`. The stage numbering used in this document (Stage 1, Stage 2, Stage 4a, etc.) is a documentation convention only — it does not exist in the code. The actual stage sequence for any preset is authoritative in its `stages` array. Stages can appear multiple times, carry inline config overrides, and be omitted entirely for a given preset. There is no separate "Noise Eraser pipeline" — `noise_eraser` is a preset that uses the same runner and stage registry as every other preset.
 
 **Architecture note (v3.1):** Previous versions of this spec used the term "compliance target" for what is now called "output profile." The rename reflects a cleaner separation of concerns: an output profile drives processing decisions (normalization target, peak ceiling, measurement method). Compliance certification — checking the output against a formal external standard — is a separate post-processing step documented in the Compliance and Quality Review Model addendum. Output profiles and compliance certification are independent; not all output profiles have a corresponding formal certification standard.
 
@@ -63,8 +65,8 @@ Four presets ship at launch:
 |---|---|---|
 | `acx_audiobook` | ACX Audiobook | Audiobook narrators submitting to ACX/Audible |
 | `podcast_ready` | Podcast Ready | Podcast hosts and interview recordings |
-| `voice_ready` | Voice Ready | Voice actors, general voice-over |
 | `general_clean` | General Clean | Everyone else; default for unspecified use |
+| `noise_eraser` | Noise Eraser | Severely noisy recordings where standard processing has failed |
 
 Preset parameters are defined in full in the **Preset Profiles** section below.
 
@@ -88,12 +90,12 @@ Each preset has a natural default output profile, applied automatically unless o
 
 | Preset | Default output profile |
 |---|---|
-| `acx_audiobook` | `acx` |
+| `acx_audiobook` | `acx` (locked — output profile selector hidden in UI) |
 | `podcast_ready` | `podcast` |
-| `voice_ready` | `acx` |
 | `general_clean` | `podcast` |
+| `noise_eraser` | `podcast` |
 
-The user can override the output profile for any preset. The most common override: a narrator who prefers the processing character of `voice_ready` but needs their files to target ACX loudness levels.
+The user can override the output profile for any unlocked preset. Example: processing with `podcast_ready` character but targeting ACX loudness levels by selecting the `acx` output profile.
 
 ### How Preset and Output Profile Interact
 
@@ -178,42 +180,11 @@ Each preset is defined by the parameter values it passes to each processing stag
 
 ---
 
-### Preset: Voice Ready (`voice_ready`)
-
-**Use case:** Voice actors recording commercial copy, explainer videos, corporate narration, e-learning, and general voice-over work. Unlike ACX Audiobook, there is no single platform standard — the output needs to sound professional and versatile across different downstream contexts.
-
-**Character:** Clean, broadcast-quality, neutral. Sits between ACX Audiobook (very transparent, minimal processing) and Podcast Ready (punchy, compressed). Enough presence to cut through a mix but not so bright it clashes with music beds.
-
-| Parameter | Value | Rationale |
-|---|---|---|
-| Target loudness | -20 dBFS RMS | Broadcast-neutral; compatible with ACX and most video/multimedia workflows |
-| True peak ceiling | -3 dBFS | Leaves headroom for downstream mixing |
-| Noise floor target | Not enforced by default | No platform-specific noise floor requirement |
-| Noise reduction ceiling | Tier 3 (8 dB max) | |
-| Compression | Always applied | Commercial voice-over requires consistent level |
-| Compression ratio | 2.5:1 | More than ACX Audiobook, less than Podcast Ready |
-| Compression threshold | -22 dBFS | |
-| Compression attack | 8 ms | |
-| Compression release | 90 ms | |
-| EQ reference profile | Voice-over reference | Presence-forward, mild warmth cut, conservative air boost for studio character |
-| De-esser sensitivity | Standard (P95 > mean + 8 dB trigger) | |
-| De-esser max reduction | 5 dB | |
-| Channel output | Mono | Most voice-over deliverables are mono |
-| Default output profile | `acx` | ACX targets are conservative and appropriate for most voice-over deliverables |
-
-**Voice Ready notes:**
-- No room tone padding
-- No chapter batch processing
-- The -3 dBFS peak ceiling and -20 dBFS loudness target make this preset naturally ACX-certifiable when `acx` output profile is selected, without additional processing
-- ACX certification runs when output profile is `acx`
-
----
-
 ### Preset: General Clean (`general_clean`)
 
 **Use case:** Everything else — meeting recordings, lecture captures, field recordings, dictation, demo submissions, informal audio. The user has a file that sounds bad and wants it to sound better. No platform-specific requirements.
 
-**Character:** Pragmatic. More aggressive noise reduction than other presets. Balanced EQ with no strong character. Moderate compression for consistency.
+**Character:** Pragmatic. Uses ClearerVoice speech enhancement as the primary enhancement stage rather than standard EQ. Balanced, no strong tonal character. Moderate compression for consistency.
 
 | Parameter | Value | Rationale |
 |---|---|---|
@@ -286,15 +257,42 @@ These are the "before" values in the processing report.
 
 ## Processing Chain
 
+The stage sequence below reflects the general processing order shared by most presets, using documentation stage numbers for reference. The authoritative stage sequence for each preset is its `stages` array in `src/audio/presets.js` — refer there for the exact order, inline config, and any multi-pass calls.
+
+**Typical order (varies by preset):**
 ```
-Stage 1:  High-Pass Filter
-Stage 2:  Adaptive Noise Reduction
-Stage 3:  Enhancement EQ
-Stage 4:  De-esser (conditional)
-Stage 4a: Compression (conditional or always-on, per preset)
-Stage 5:  Loudness Normalization        ← output profile governs target and method
-Stage 6:  True Peak Limiting            ← output profile governs ceiling
-Stage 7:  Measurement + Processing Report
+Pre:      Decode → mono mixdown (if applicable) → measure before → peak normalize
+          → frame analysis (noise floor, VAD)
+          → hum detect → HPF → click removal
+
+NR:       Noise reduce (one or more passes, model switchable)
+          → spectral subtraction
+          → remeasure frames
+
+Voice:    Auto leveler → clip-gain de-esser → corrective EQ
+          → remeasure frames
+
+Dynamics: Compression (multi-pass, crest-factor driven)
+          → remeasure frames → parallel compression
+          → vocal expander (optional)
+
+Tonal:    Air boost → reference EQ → resonance suppressor
+          → vocal saturation → room presence (preset-dependent)
+
+Output:   Normalize ← output profile governs target and method
+          → true peak limit ← output profile governs ceiling
+          → measure after → ACX certification (if acx profile) → quality advisory
+          → encode → extract peaks
+```
+
+**Noise Eraser variant** replaces the NR block with source separation:
+```
+Pre:      ... same pre-processing ...
+          → spectral subtraction → DF3 noise reduce
+          → tonal pretreatment → separate vocals (Demucs / ConvTasNet)
+          → separation validation → bandwidth extension (optional)
+          → remeasure frames → vocal expander → ...
+          → (continues to dynamics/output as above)
 ```
 
 ---
@@ -361,7 +359,9 @@ After DF3 processing:
 
 **Purpose:** Improve tonal quality for the target use case. Runs after noise reduction, before normalization.
 
-**Implementation:** FFmpeg `equalizer` filter, parametric biquad IIR.
+**Implementation:** The current pipeline splits EQ into three separate stages in the stage registry: `correctiveEQ` (cepstral anomaly detection + adaptive parametric EQ), `referenceEQ` (corpus-reference broad tonal correction), and `airBoost` (high-frequency shelf with sibilance masking). Each is configured and ordered independently per preset. The description below reflects the combined intent.
+
+**EQ implementation:** FFmpeg `equalizer` filter, parametric biquad IIR.
 
 #### 3a — Spectral Analysis
 
@@ -407,7 +407,7 @@ No single band adjustment exceeds ±5 dB.
 
 **Purpose:** Reduce harsh sibilant energy.
 
-**Implementation:** Custom DSP — Meyda.js spectral analysis driving a frequency-selective compressor.
+**Implementation:** The current pipeline uses the `clipGainDeEss` stage (clip-gain de-esser): per-event sibilant reduction applied as a gain envelope over detected fricative and affricate events, rather than a traditional frequency-selective compressor. Parameters below reflect the general approach; see `src/audio/presets.js` for current per-preset values.
 
 **Trigger:** Standard (ACX Audiobook, Voice Ready): P95 > mean + 8 dB. Higher sensitivity (Podcast Ready, General Clean): P95 > mean + 6 dB. Skip if trigger not met.
 
@@ -431,23 +431,14 @@ F0 estimation → sibilant band identification → fricative event detection →
 
 **Purpose:** Reduce dynamic range to achieve the consistency appropriate to the target use case.
 
-| Preset | Applied | When |
+**Implementation:** The current compression model is crest-factor driven and multi-pass. Each compression call specifies a `targetCrestFactorDb` and `maxRatio`; the compressor adjusts dynamically to reach the target. Most presets run 2–3 serial compression passes with progressively lower target crest factors. Followed by `parallelCompress` (wet/dry parallel compression with VAD gate and integrated clip-gain de-esser). The fixed-ratio, fixed-threshold parameters described here are the historical specification; the authoritative current config is in `src/audio/presets.js`.
+
+| Preset | Compression passes | Notes |
 |---|---|---|
-| ACX Audiobook | Conditionally | Only when crest factor > 20 dB |
-| Podcast Ready | Always | |
-| Voice Ready | Always | |
-| General Clean | Always | |
-
-**Parameters by preset:**
-
-| Parameter | ACX Audiobook | Podcast Ready | Voice Ready | General Clean |
-|---|---|---|---|---|
-| Threshold | -24 dBFS | -20 dBFS | -22 dBFS | -20 dBFS |
-| Ratio | 2:1 | 3:1 | 2.5:1 | 3:1 |
-| Attack | 10 ms | 5 ms | 8 ms | 8 ms |
-| Release | 100 ms | 80 ms | 90 ms | 80 ms |
-| Knee | Soft, 4 dB | Soft, 4 dB | Soft, 4 dB | Soft, 4 dB |
-| Makeup gain | 0 dB | 0 dB | 0 dB | 0 dB |
+| ACX Audiobook | 2 passes | Target crest factor 15 dB each pass |
+| Podcast Ready | 2 passes | More aggressive — targets 14 dB then 10 dB |
+| General Clean | 1 pass (conditional) | ClearerVoice stage runs first |
+| Noise Eraser | 3 passes | Runs on separated signal |
 
 ---
 
@@ -455,7 +446,7 @@ F0 estimation → sibilant band identification → fricative event detection →
 
 **Purpose:** Dynamically attenuate residual low-level noise (room tone, HVAC, mic handling, floor rumble) that compression elevates in the silence gaps between words. Runs after Stage 4a-PC (parallel compression). Not a gate and not a replacement for Stage 2 noise reduction — a soft-ratio, band-weighted expander calibrated from the file's measured silence-energy distribution.
 
-**Applied:** All three pipelines (`STANDARD_PIPELINE`, `noise_eraser`, `clearervoice_eraser`), enabled by default. Skipped when the post-compression silence P90 RMS is already below -72 dBFS.
+**Applied:** Available in all presets; enabled per preset config. Skipped when the post-compression silence P90 RMS is already below -72 dBFS.
 
 **Architecture (two-path):**
 
@@ -491,20 +482,18 @@ y[i] = low[i] × gainLowLin[i] + (x[i] - low[i]) × gainHighLin[i]
 
 This is equivalent to the spec form `softened_ratio = 1 + (ratio - 1) × high_freq_depth`; the gain-dB-scaling form above is numerically identical and computationally simpler.
 
-**Parameters by preset:**
+**Parameters by preset (see `src/audio/presets.js` for authoritative values):**
 
-| Parameter | ACX Audiobook | Podcast Ready | Voice Ready | General Clean | Noise Eraser | ClearerVoice Eraser |
-|---|---|---|---|---|---|---|
-| Enabled | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Ratio | 1.5:1 | 2.0:1 | 1.5:1 | 2.0:1 | 2.0:1 | 2.0:1 |
-| Headroom offset | +4 dB | +6 dB | +4 dB | +6 dB | +6 dB | +6 dB |
-| High-freq depth | 0.25 | 0.5 | 0.25 | 0.5 | 0.5 | 0.5 |
-| Release | 200 ms | 150 ms | 200 ms | 150 ms | 150 ms | 150 ms |
-| Attack | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms |
-| Hold | 20 ms | 20 ms | 20 ms | 20 ms | 20 ms | 20 ms |
-| Lookahead | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms | 10 ms |
-| Max attenuation | 12 dB | 18 dB | 12 dB | 18 dB | 18 dB | 18 dB |
-| Detection band | 80–800 Hz | 80–800 Hz | 80–800 Hz | 80–800 Hz | 80–800 Hz | 80–800 Hz |
+| Parameter | ACX Audiobook | Podcast Ready | Noise Eraser |
+|---|---|---|---|
+| Ratio | 2.5:1 | 2.0:1 | 1.5:1 then 2.0:1 (two calls) |
+| Headroom offset | +4 dB | +6 dB | +4 dB / +6 dB |
+| High-freq depth | 1.0 | 0.5 | 0.25 / 0.5 |
+| Release | 150 ms | 120 ms | 50 ms |
+| Max attenuation | — | — | 12 dB / 18 dB |
+| Detection band | 80–800 Hz | 80–800 Hz | 80–800 Hz |
+
+Note: `acx_audiobook` and `podcast_ready` currently have `vocalExpander` commented out in their stages arrays. `noise_eraser` uses it actively with two sequential calls (before and after compression). `general_clean` does not currently use the vocal expander.
 
 **Implementation note:** The spec originally suggested FFmpeg `volume` + `equalizer` filters, but time-varying per-sample gain with lookahead/hold/release cannot be expressed in FFmpeg filter graphs. Implementation uses the custom-JS DSP pattern already established by `compression.js`, `autoLeveler.js`, and `parallelCompression.js` — read WAV via `readWavAllChannels()`, build sample-level gain curve, write WAV via `writeWavChannels()`.
 
@@ -707,12 +696,12 @@ Quality advisory flags run regardless of output profile. Full flag definitions i
 |---|---|---|
 | ACX Audiobook | MP3 192 kbps CBR | LAME via FFmpeg, `-b:a 192k -abr 0`. ACX requires strict CBR. |
 | Podcast Ready | MP3 320 kbps CBR | |
-| Voice Ready | WAV only | Voice-over deliverables are typically WAV |
 | General Clean | MP3 256 kbps CBR | |
+| Noise Eraser | MP3 256 kbps CBR | |
 
 ---
 
-## Room Tone Padding (ACX Audiobook only)
+## Room Tone Padding (ACX Audiobook)
 
 ACX requires 0.5–1 second of room tone at the head and 1–5 seconds at the tail of each file.
 
@@ -721,9 +710,11 @@ ACX requires 0.5–1 second of room tone at the head and 1–5 seconds at the ta
 **Correction:**
 - Head room tone < 0.5 s → prepend to reach 0.75 s
 - Tail room tone < 1 s → append to reach 2 s
-- Source: 500 ms sample from the lowest-energy silence segment identified in Stage 2a
+- Source: 500 ms sample from the lowest-energy silence segment in the file
 
-Room tone padding is skipped for all other presets.
+The `roomTonePad` stage is implemented in the stage registry but is not currently included in any preset's `stages` array. It is available to add to `acx_audiobook` when needed.
+
+Room tone padding is not applicable for other presets.
 
 ---
 
@@ -778,18 +769,20 @@ For `podcast` and `broadcast` output profiles, the report section is titled **"O
 |---|---|---|---|
 | Decode / encode / resample / convert | FFmpeg (system binary) | LGPL | Free |
 | High-pass filter | FFmpeg `highpass` filter | LGPL | Free |
-| 60 Hz notch filter | FFmpeg `equalizer` filter | LGPL | Free |
-| Noise reduction | DeepFilterNet3 (`deepfilternet` or `libdf`) | MIT | Free |
-| Noise reduction (future upgrade) | Krisp AI Voice SDK | Commercial | Custom |
+| Notch / parametric EQ | FFmpeg `equalizer` filter | LGPL | Free |
+| Noise reduction (DF3) | DeepFilterNet3 (`deepfilternet` or `libdf`) | MIT | Free |
+| Noise reduction (RNNoise) | RNNoise (`pyrnnoise`) | BSD | Free |
+| Source separation | Demucs `htdemucs_ft` (`demucs` Python package) | MIT | Free |
+| Bandwidth extension | AP-BWE (`ap_bwe`) / LavaSR | MIT | Free |
+| Speech enhancement | ClearerVoice (`mossformer2_48k` / `frcrn_16k`) | MIT | Free |
 | Spectral analysis (EQ + de-esser) | Meyda.js (server-side) | MIT | Free |
-| Enhancement EQ | FFmpeg `equalizer` filter | LGPL | Free |
-| De-esser | Custom DSP (Meyda.js + frequency-selective compressor) | — | Free |
-| Compression | Custom DSP | — | Free |
+| Compression / dynamics | Custom DSP (JavaScript) | — | Free |
 | RMS / LUFS measurement | libebur128 via node-ebur128 | MIT | Free |
 | True peak limiting | FFmpeg `loudnorm` (two-pass, 192 kHz upsample) | LGPL | Free |
 | Noise floor measurement | Custom energy-thresholding | — | Free |
 | Waveform data generation | Custom peak extraction | — | Free |
 | MP3 encoding | LAME via FFmpeg | LGPL + LAME | Free |
+| Noise reduction (future upgrade) | Krisp AI Voice SDK | Commercial | Custom |
 
 ---
 
@@ -815,12 +808,12 @@ Meyda.js spectral analysis → adaptive enhancement EQ → dynamic silence exclu
 F0 estimation → sibilance analysis → conditional de-esser → conditional compression → report logging
 
 **Sprint 4 — Preset and output profile architecture:**
-Separate preset config from output profile config → implement Podcast Ready, Voice Ready, General Clean presets → LUFS normalization path → output profile selector in UI → preset-specific EQ reference profiles → output profile override indicator → output measurements reporting for non-ACX profiles
+Separate preset config from output profile config → implement Podcast Ready, General Clean presets → LUFS normalization path → output profile selector in UI → preset-specific EQ reference profiles → output profile override indicator → output measurements reporting for non-ACX profiles
 
-**Sprint 5 — Batch processing (ACX Audiobook):**
+**Sprint 5 (planned) — Batch processing (ACX Audiobook):**
 Batch analysis phase → per-file processing → consistency pass → batch report
 
-**Sprint 6 — Commercial library evaluation:**
+**Sprint 6 (planned) — Commercial library evaluation:**
 Krisp SDK evaluation on real narrator recordings vs. DeepFilterNet3 → commercial licensing decision
 
 ---
@@ -837,4 +830,4 @@ Both improvements are post-launch. The heuristic system ships first.
 
 ---
 
-*This specification supersedes v3.0. Companion documents: `acx_production_workflow.md`, `instant_polish_gtm.md`, `instant_polish_compliance_model_v2.md`, `instant_polish_processing_spec_noise_eraser.md`.*
+*This specification supersedes v3.1. Companion documents: `acx_production_workflow.md`, `instant_polish_gtm.md`, `instant_polish_compliance_model_v2.md`, `instant_polish_processing_spec_noise_eraser.md`. The Noise Eraser spec documents the separation stages; the NE-X stage numbering used there is a documentation convention — in the codebase, Noise Eraser is a standard preset in the unified pipeline.*

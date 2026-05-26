@@ -102,7 +102,7 @@ Quality advisory flags run for all presets and all output profiles. The specific
 | `plosives` | Sharp low-frequency transients consistent with unedited plosives | Review | "Possible plosive sounds detected. These may require manual editing." |
 | `noise_floor_marginal` | Noise floor -60 to -62 dBFS (passes certification but close to limit) | Info | "Noise floor is within spec but close to the limit. Re-recording in a quieter environment would add headroom." |
 | `high_nr_tier` | Noise reduction Tier 4 was applied | Info | "Heavy noise reduction was applied. Some processing character may be audible on close listening." |
-| `separation_used` | `noise_eraser` preset was used | Review | "Voice separation was used. The output may have a processed quality. Review carefully before submitting to ACX." |
+| `separation_used` | `noise_eraser` preset was used (contains `separateVocals` stage) | Review | "Voice separation was used. The output may have a processed quality. Review carefully before submitting to ACX." |
 | `over_expansion` | `pct_frames_expanded` > 35% OR any VAD-voiced frame received > 3 dB attenuation from the Stage 4a-E vocal expander | Review | "The expander may have affected quiet speech. Listen for unnatural silences between words or clipped consonants." |
 | `chapter_outlier` | Batch mode: this file deviates > 2 dB from batch median after consistency pass | Review | "This chapter sounds noticeably different from the rest of the batch. Review for consistency." |
 
@@ -110,9 +110,9 @@ Quality advisory flags run for all presets and all output profiles. The specific
 
 **`noise_floor_marginal`** applies when `output_profile = acx` only — the marginal threshold is defined relative to ACX's -60 dBFS requirement.
 
-**`separation_used`** applies when `preset = noise_eraser` regardless of output profile.
+**`separation_used`** applies when the `separateVocals` stage ran (i.e. `preset = noise_eraser`) regardless of output profile.
 
-**`over_expansion`** applies only when the Stage 4a-E vocal expander actually ran (`vocal_expander.applied = true`).
+**`over_expansion`** applies only when the vocal expander stage actually ran (`vocal_expander.applied = true`).
 
 All other flags apply to all presets and output profiles.
 
@@ -273,4 +273,4 @@ When `output_profile = acx` and certification passes, surface an "Export Certifi
 
 ---
 
-*This document is a companion to `instant_polish_processing_spec_v3.md` and `instant_polish_processing_spec_noise_eraser.md`.*
+*This document is a companion to `instant_polish_processing_spec_v3.md` (v3.2) and `instant_polish_processing_spec_noise_eraser.md`.*

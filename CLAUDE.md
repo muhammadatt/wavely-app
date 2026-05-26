@@ -1,5 +1,5 @@
 # Instant Polish — CLAUDE.md
-> Project intelligence for Claude Code | Last updated: April 2026 | Codebase status: ~57 source files, ~7,973 lines
+> Project intelligence for Claude Code | Last updated: May 2026 | Codebase status: ~60 source files, ~10,000+ lines
 
 ---
 
@@ -60,27 +60,6 @@ Processing is split between client and server based on operation type. This is n
 
 **Why noise reduction must be server-side:** RNNoise (the client-side alternative) produces meaningfully worse results than DeepFilterNet3. For a product positioning on audio quality, shipping an inferior NR path for spot edits is not acceptable. The processing modal pattern normalizes the wait — every major audio tool works this way for NR.
 
-### Spot Noise Reduction — Naked DeepFilterNet3 Pass
-
-When a user applies noise reduction manually to a selection, the server receives **only that clip** and runs **only DeepFilterNet3** — no preset chain, no EQ, no limiting, no compliance processing, no room tone padding. The model is applied to the clip with user-controlled parameters and the result is returned.
-
-**Server request shape for spot NR:**
-```json
-{
-  "file": "<selection clip>",
-  "operation": "noise_reduction",
-  "context": "spot_edit",
-  "params": {
-    "strength": 0.7
-  }
-}
-```
-
-The `context: "spot_edit"` flag suppresses all preset post-processing. The server applies DeepFilterNet3 and returns the processed clip only.
-
-**⚠ Open question — DeepFilterNet3 exposed parameters:**
-The appropriate user-facing controls for spot NR have not been finalized. Candidate parameters are **strength** (aggressiveness of reduction) and **sensitivity** (how conservatively the model classifies speech vs. noise). However, it is unclear how much the `deepfilternet` / `libdf` API actually exposes — if the model has only one meaningful control (attenuation ceiling), presenting two sliders that don't do meaningfully different things would be misleading. **This requires a research spike before the spot-edit NR UI is designed.** Findings should update this document.
-
 ### Full Preset Chain — Server Request Shape
 
 ```json
@@ -120,17 +99,16 @@ Key data structures: `Segment`, `SilenceSegment`, `Timeline` (ordered segment ar
 
 ## Preset + Output Profile Architecture
 
-These are **independent** selections. A preset governs the character of processing (Stages 1–4a). An output profile governs the loudness target, peak ceiling, and measurement method (Stages 5–6), and determines whether ACX certification runs (Stage 7).
+These are **independent** selections. A preset governs the character of processing. An output profile governs the loudness target, peak ceiling, and measurement method, and determines whether ACX certification runs.
 
-### Presets (five at launch)
+### Presets (four at launch)
 
 | Preset ID | Display Name | Audience | Channel Output |
 |---|---|---|---|
 | `acx_audiobook` | ACX Audiobook | Audiobook narrators | Mono |
 | `podcast_ready` | Podcast Ready | Podcast hosts | Preserve original |
-| `voice_ready` | Voice Ready | Voice actors | Mono |
 | `general_clean` | General Clean | Everyone else (default) | Preserve original |
-| `noise_eraser` | Noise Eraser | Severely noisy recordings where standard processing has failed | Mono (default) |
+| `noise_eraser` | Noise Eraser | Severely noisy recordings where standard processing has failed | Mono |
 
 **Default preset:** `general_clean` — or `acx_audiobook` if the user has previously selected it.
 
@@ -148,9 +126,8 @@ Output profiles are loudness targets, not compliance standards. They govern what
 
 | Preset | Default Output Profile |
 |---|---|
-| `acx_audiobook` | `acx` |
+| `acx_audiobook` | `acx` (locked) |
 | `podcast_ready` | `podcast` |
-| `voice_ready` | `acx` |
 | `general_clean` | `podcast` |
 | `noise_eraser` | `podcast` |
 
@@ -162,93 +139,78 @@ Output profiles are loudness targets, not compliance standards. They govern what
 
 ---
 
-## Processing Chain (Standard Presets)
+## Processing Pipeline Architecture
 
-```
-Pre-0:    Decode (FFmpeg → 32-bit float, 44.1 kHz)
-Pre-1:    Mono mixdown (preset-dependent)
-Pre-2:    Measure before (RMS, LUFS, noise floor, peaks)
-Pre-3:    Peak normalize (±1 dBFS ceiling, linear)
-Pre-4:    Silence analysis — frame-based noise floor measurement (Silero VAD v5)
-Stage 1:  High-Pass Filter (80 Hz Butterworth, 4th order; + conditional 60 Hz notch)
-Stage 2:  Adaptive Noise Reduction (DeepFilterNet3)
-Stage 2a: Silence analysis post-NR (refine noise floor estimate)
-Stage 2b: Dereverberation (NARA-WPE, conditional — light/medium/heavy paths)
-Stage 2c: Room tone padding (ACX only — auto-detect quietest silence segment, pad head 0.75 s + tail 2 s)
-Stage 3:  Enhancement EQ (Meyda.js spectral analysis → FFmpeg parametric EQ)
-Stage 4:  De-esser (conditional — only if P95 sibilant energy exceeds threshold)
-Stage 4a:    Compression (conditional for ACX; always-on for other presets)
-Stage 4a-PC: Parallel Compression (wet/dry blend with parallel de-esser + VAD gate)
-Stage 4a-E:  Vocal Expander (frequency-selective dynamic attenuation of silence-floor residual)
-Stage 4b:    Auto Leveler (VAD-gated gain riding, conditional — normalizes level variance across voiced segments)
-Stage 4d:    Harmonic Exciter (conditional brightness boost)
-Stage 5:  Loudness Normalization (libebur128-wasm + FFmpeg loudnorm) ← output profile governs target
-Stage 6:  True Peak Limiting (FFmpeg loudnorm two-pass, 192 kHz upsample) ← output profile governs ceiling
-Stage 7:  Measurement + Processing Report (ACX certification + quality advisory flags)
-Post:     Encode (WAV or MP3 per tier/preset) + extract waveform peak data (~1000 points)
-```
+The pipeline is **fully config-driven**. There is no hardcoded stage ordering. Each preset declares its own `stages` array in `src/audio/presets.js`, and the pipeline runner in `server/pipeline/index.js` executes those stages sequentially via a stage registry. This means:
 
+- Adding or reordering stages for a preset is a data change in `presets.js` only — no changes to the runner
+- Stages can carry inline config: `{ noiseReduce: { model: "rnnoise" } }` overrides that stage's defaults for that one call
+- The same stage function can appear multiple times in a preset's chain (e.g. `noiseReduce` called twice with different models, `compression` called in multiple passes)
+- Stage results accumulate in `ctx.results`; absent stages produce no orphaned keys in the report JSON
+- There is no separate "Noise Eraser pipeline" — `noise_eraser` is a preset with its own `stages` array, executed by the same runner as every other preset
 
+**Source of truth:** `src/audio/presets.js` — all preset and output profile definitions live here. The server re-exports from `server/presets.js`.
 
-### Key Stage Notes
+### Available Stages (stage registry in `server/pipeline/stages.js`)
 
-**Pre-4 — Silence Analysis (frame-based, Silero VAD v5):**
-- Runs before Stage 1 to establish the authoritative noise floor measurement.
-- Runs again after Stage 2 (post-NR) to refine the estimate.
-- This frame-based measurement is the canonical noise floor for all downstream decisions (silence exclusion thresholds, NR tier selection, compliance checks).
-- For Noise Eraser: use the post-NE-5 noise floor, not the pre-processing measurement.
+**Pre-processing & measurement:** `decode`, `monoMixdown`, `measureBefore`, `measureAfter`, `peakNormalize`, `analyzeFramesRaw`, `remeasureFramesPostNr`
 
-**Stage 2b — Dereverberation (NARA-WPE, conditional):**
-- Python `nara-wpe` + `librosa`. Three paths: light, medium, heavy (selected based on measured reverb characteristics).
-- Applied after NR so the dereverberation model works on a cleaner signal.
-- Conditional — skipped if reverb measurement does not meet threshold.
-- Present in both standard and Noise Eraser pipelines.
+**Noise & tonal:** `humDetect`, `hpf`, `noiseReduce` (DF3 / RNNoise / DTLN switchable per call), `spectralSubtraction`, `clickRemove`, `dereverb`
 
-**Stage 2 — Noise Reduction (standard presets only):**
-- DeepFilterNet3 (neural network). Python `deepfilternet` / `libdf`.
-- Adaptive tiers 1–5 based on measured noise floor. `acx_audiobook` and `voice_ready` cap at Tier 4 (12 dB max). `podcast_ready` caps at Tier 3.
+**Voice enhancement:** `correctiveEQ`, `referenceEQ`, `airBoost`, `clipGainDeEss`, `deEss`, `resonanceSuppressor`, `breathReduce`, `vocalExpander`
+
+**Dynamics:** `compress` (multi-pass, crest-factor driven), `parallelCompress`, `autoLevel`, `vadGate`
+
+**Separation & extension (Noise Eraser):** `tonalPretreatment`, `separateVocals` (Demucs or ConvTasNet), `separationValidation`, `bandwidthExtension` (AP-BWE or LavaSR)
+
+**ClearerVoice path:** `clearerVoiceEnhance` (mossformer2_48k or frcrn_16k)
+
+**Special effects:** `harmonicExciter`, `vocalSaturation`, `roomPresence`
+
+**Output & reporting:** `normalize`, `truePeakLimit`, `acxCertification`, `qualityAdvisory`, `encode`, `extractPeaks`, `roomTonePad`
+
+### Key Processing Notes
+
+**Frame analysis (`analyzeFramesRaw` / `remeasureFramesPostNr`):**
+- Establishes the canonical noise floor measurement used by all downstream stages
+- Runs multiple times per preset to refresh metrics after heavy processing passes
+- Noise floor from this analysis drives silence exclusion thresholds, NR skip conditions, and ACX compliance checks
+
+**Noise Reduction (`noiseReduce`):**
+- Model is switchable per call: `df3` (DeepFilterNet3), `rnnoise`, or `dtln`
+- `acx_audiobook` runs DF3 then RNNoise in sequence; `noise_eraser` runs DF3 before separation
+- `skipBelowDb` option skips the call entirely if the measured noise floor is already below the given threshold
 - **Never force a pass.** If noise floor can't reach -60 dBFS without artifact risk, report failure. Do not over-process.
-- Conservative defaults for ACX — overprocessing artifacts cause human review rejection.
 - Noise floor enforcement only applies when `output_profile = acx`. For other profiles, reduction is applied for quality only.
 
-**Stage 4a-E — Vocal Expander (frequency-selective silence-floor attenuator):**
-- Runs after Stage 4a-PC and before Stage 4b. Not a gate and not a replacement for Stage 2 NR.
-- Threshold is calibrated from the file's measured silence P90 energy (re-measured on the post-compression signal) plus a preset headroom offset; clamped to -70 dBFS.
-- Two-path architecture: detection is 80–800 Hz bandpass → 10 ms frame RMS → soft-ratio gain reduction with 10 ms lookahead, 10 ms attack, 20 ms hold, 150–200 ms release. Attenuation is applied full-depth below 800 Hz and softened above 800 Hz via `highFreqDepth` to preserve consonant clarity.
-- **Skipped** when silence P90 on the post-compression signal is already below -72 dBFS.
-- Present in all three pipelines (`STANDARD_PIPELINE`, `noise_eraser`, `clearervoice_eraser`). On ClearerVoice the calibration still works correctly — it measures the current signal regardless of what produced it.
-- Emits a `vocal_expander` object in `processing_applied` and can raise an `over_expansion` advisory flag when it reaches into quiet speech.
+**Compression (`compress`):**
+- Crest-factor driven, not fixed-ratio. `targetCrestFactorDb` sets the target; the compressor adjusts ratio dynamically up to `maxRatio`.
+- Most presets run 2–3 serial compression passes with decreasing target crest factors
+- Followed by `parallelCompress` (wet/dry blend with VAD gate and integrated clip-gain de-esser)
 
-**Stage 4b — Auto Leveler (VAD-gated gain riding):**
-- Added in PR #26 as the most recent pipeline addition.
-- Uses Silero VAD v5 to classify voiced vs. silence frames, then applies gain riding only to voiced segments.
-- Reduces level variance between loud and quiet passages before the final loudness normalization.
-- Conditional per preset — present in all standard presets but with different aggressiveness settings.
-- **Do not apply after Stage 5** — gain riding post-normalization breaks compliance targets.
+**Vocal Expander (`vocalExpander`):**
+- Frequency-selective silence-floor attenuator. Not a gate — soft-ratio, band-weighted, calibrated per file.
+- Detection band: 80–800 Hz. Attenuation softened above 800 Hz via `highFreqDepth` to preserve consonants.
+- Threshold set from post-compression silence P90 + headroom offset; skipped if already below -72 dBFS.
+- Emits a `vocal_expander` key in the report; raises `over_expansion` advisory flag when it reaches into quiet speech.
 
-**Stage 5 — Normalization:**
-- `acx` output profile → unweighted RMS measurement (ACX measures RMS, not LUFS).
-- `podcast` / `broadcast` output profiles → K-weighted integrated LUFS (EBU R128).
-- Exclude silence frames from RMS measurement using dynamic threshold: `noise_floor + 6 dB`.
-- For Noise Eraser: use post-NE-5 noise floor for silence exclusion threshold, not the original pre-processing noise floor.
+**Auto Leveler (`autoLevel`):**
+- VAD-gated gain riding — reduces level variance across voiced segments before final normalization.
+- Must not run after `normalize` — gain riding post-normalization breaks compliance targets.
 
-**Stage 7 — Report (two independent systems):**
-
-*System 1 — ACX Technical Certification:* Runs only when `output_profile = acx`. Six-point deterministic pass/fail: RMS, true peak, noise floor, sample rate, bit depth, channel format. Issues a binary certificate. The `acx_certification` key is **absent** (not null) from the JSON when `output_profile` is not `acx`.
-
-*System 2 — Quality Advisory Flags:* Runs for all presets and all output profiles. Probabilistic observations the user should review before submitting. Flags have severity `info` or `review`. No aggregate risk score. Each flag includes a "Mark as reviewed" checkbox in the UI.
-
-These two systems are independent. A file can be ACX certified and still have advisory flags. Advisory flags are never gates — the user can download at any point.
+**Normalization & reporting:**
+- `normalize`: `acx` output profile → unweighted RMS; `podcast`/`broadcast` → K-weighted LUFS (EBU R128). Silence exclusion threshold: `noise_floor + 6 dB`.
+- `acxCertification`: runs for all presets when `output_profile = acx`. Six-point deterministic pass/fail. The `acx_certification` key is **absent** (not null) from the JSON for other output profiles.
+- `qualityAdvisory`: runs for all presets and output profiles. Probabilistic flags (`info` / `review`), no aggregate score, each with a "Mark as reviewed" checkbox.
 
 See `docs/instant_polish_compliance_model_v2.md` for full flag definitions, JSON structure, and UI model.
 
 ### Preset Character Distinctions (do not converge)
 
-- **ACX Audiobook:** Clean, transparent, controlled dynamics. Highest priority in term of noise reduction and artifact free output. 
-- **Podcast Ready:** Punchy, intimate, compressed.  More aggressive EQ mud cut. LUFS target (not RMS). Stereo preserved for dual-host. 
-- **Voice Ready:** Broadcast-neutral. Versatile — sits under music beds. Mono output. 
-- **General Clean:** Pragmatic. More aggressive noise reduction acceptable (Tier 4, relaxed artifact warnings).
-- **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Output may have a "dry booth" quality. 
+- **ACX Audiobook:** Clean, transparent, controlled dynamics. Highest priority on noise reduction quality and artifact-free output. Conservative compression. Dual NR pass (DF3 → RNNoise).
+- **Podcast Ready:** Punchy, intimate, compressed. More aggressive EQ. LUFS target (not RMS). Stereo preserved for dual-host. Vocal saturation + room presence added for character.
+- **General Clean:** Pragmatic. Uses ClearerVoice enhancement for broad-band cleanup. More aggressive de-esser. No strong tonal character.
+- **Noise Eraser:** Voice extraction, not noise reduction. Prioritizes noise removal over voice transparency. Uses Demucs source separation. Output may have a "dry booth" quality.
 
 ---
 
@@ -268,8 +230,8 @@ Full specification: `docs/instant_polish_compliance_model_v2.md`.
 
 These apply only to the `acx_audiobook` preset:
 
-- **Room tone padding:** ✓ Implemented — Auto-detect and pad head (0.75 s) and tail (2 s) using actual room tone from the file's quietest silence segment. Not digital silence. Runs as Stage 2c.
-- **ACX compliance report:** ✓ Implemented — Per-file six-point technical certification + quality advisory flags.
+- **Room tone padding:** Stage `roomTonePad` is implemented and available in the stage registry — auto-detect and pad head (0.75 s) and tail (2 s) using actual room tone from the file's quietest silence segment. Not digital silence. Currently not included in the `acx_audiobook` stages array.
+- **ACX compliance report:** ✓ Implemented — Per-file six-point technical certification + quality advisory flags. `acxCertification` runs for all presets when `output_profile = acx`.
 - **Plosive and breath detection:** ✓ Implemented — Surfaces as quality advisory flags for manual review before ACX submission.
 - **Batch processing (Creator tier gate):** ✗ Not yet implemented — Multi-phase: batch analysis → per-file processing → cross-chapter consistency pass. Consistency pass aligns RMS (< 1 dB deviation from batch median) and spectral centroid (< 15% deviation) across chapters. This is the **primary value prop for narrators**. Planned for Sprint 5.
 
@@ -279,7 +241,7 @@ These apply only to the `acx_audiobook` preset:
 
 ## Implementation Status
 
-### Complete (as of April 2026)
+### Complete (as of May 2026)
 
 **Frontend:**
 - Vue 3 (Composition API) production app — not a PoC
@@ -287,16 +249,16 @@ These apply only to the `acx_audiobook` preset:
 - Undo/redo stack (50-item cap)
 - Waveform visualization (Canvas 2D, peak caching, device pixel ratio support)
 - Playback with A/B before/after comparison
-- Preset panel (5 presets) + output profile panel (3 profiles) with dynamic UI rules
-- Effects panel (manual NR, compression, normalize — client-side spot operations)
+- Preset panel (4 presets) + output profile panel (3 profiles) with dynamic UI rules
 - Processing report panel (measurements, ACX certification, advisory flags)
 
 **Backend:**
-- Full 21-stage standard processing pipeline (all 4 non-NE presets)
-- Full Noise Eraser pipeline (NE-1 through NE-7 + shared Stage 5–7)
+- Config-driven pipeline architecture — all 4 presets share a single orchestrator; stage sequences declared per-preset in `src/audio/presets.js`
+- Stage registry (`server/pipeline/stages.js`): 29 stage functions including correctiveEQ, referenceEQ, airBoost, clipGainDeEss, spectralSubtraction, resonanceSuppressor, vocalSaturation, roomPresence, autoLevel, parallelCompress, vocalExpander, clickRemove, humDetect, tonalPretreatment, separateVocals, separationValidation, clearerVoiceEnhance, bandwidthExtension, vadGate
+- Noise Eraser as a preset (same runner, different stages array): spectral subtraction → DF3 → tonal pretreatment → Demucs separation → separation validation → bandwidth extension
 - Async job architecture (POST → 202 + jobId → polling → download)
 - Rate limiting, CORS, temp file cleanup, job TTL
-- All Python integrations: DeepFilterNet3, RNNoise, Demucs, ConvTasNet, NARA-WPE, Silero VAD v5, AudioSR
+- Python integrations: DeepFilterNet3, RNNoise, Demucs, ConvTasNet, AP-BWE / LavaSR, ClearerVoice
 
 ### Not Yet Implemented
 
@@ -308,10 +270,13 @@ These apply only to the `acx_audiobook` preset:
 - **Persistent job storage** — Jobs are in-memory; server restart loses them
 - **`docs/acx_production_workflow.md`** and **`docs/instant_polish_gtm.md`** — Referenced but not created
 
-### Partially Integrated (code present, not fully wired)
+### Available but Not Active in Current Presets
 
-- **VoiceFixer** — Python script present; not yet connected to a preset or UI path
-- **ClearerVoice** — Python script present; UI integration incomplete
+- **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array
+- **Dereverberation** (`dereverb`) — Stage implemented; commented out in presets
+- **VAD gate** (`vadGate`) — Stage implemented; disabled in current presets
+- **Bandwidth extension** (`bandwidthExtension`) — Stage implemented; `enabled: false` in noise_eraser preset
+- **Harmonic exciter**, **breath reducer**, **throat click attenuator** — Stages implemented; not in any active preset
 
 ---
 
@@ -346,7 +311,6 @@ Narrators primarily upload WAV (16-bit, 44.1 kHz, mono). MP3 input supported for
 |---|---|---|---|
 | ACX Audiobook | MP3 128 kbps | MP3 192 kbps CBR (LAME, strict CBR — ACX requirement) | WAV 16-bit 44.1 kHz mono |
 | Podcast Ready | MP3 128 kbps | MP3 320 kbps CBR | WAV 16-bit 44.1 kHz |
-| Voice Ready | MP3 128 kbps | WAV only (clients expect WAV) | WAV 16-bit 44.1 kHz mono |
 | General Clean | MP3 128 kbps | MP3 256 kbps CBR | WAV 16-bit 44.1 kHz |
 | Noise Eraser | MP3 128 kbps | MP3 256 kbps CBR | WAV 16-bit 44.1 kHz mono |
 
@@ -361,16 +325,14 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 | Concern | Technology |
 |---|---|
 | Decode / encode / resample | FFmpeg |
-| Noise reduction (preset chain + spot NR) | DeepFilterNet3 (`deepfilternet` / `libdf`) |
-| Pre-separation noise reduction (Noise Eraser) | RNNoise (`pyrnnoise`) |
+| Noise reduction | DeepFilterNet3 (`deepfilternet` / `libdf`), RNNoise (`pyrnnoise`), DTLN |
 | Source separation (Noise Eraser) | Demucs `htdemucs_ft` (primary); ConvTasNet via `asteroid` (fallback) |
-| Bandwidth extension (Noise Eraser) | AudioSR (`audiosr` Python package, conditional) |
-| Dereverberation | NARA-WPE (`nara-wpe` + `librosa` Python packages) |
-| Voice activity detection | Silero VAD v5 (`silero-vad`, via `torch.hub`) |
+| Bandwidth extension | AP-BWE (`ap_bwe`), LavaSR — available but currently disabled in presets |
+| Speech enhancement (General Clean) | ClearerVoice (`mossformer2_48k` or `frcrn_16k`) |
 | Spectral analysis | Meyda.js (in-process, Node.js) |
 | Enhancement EQ | FFmpeg `equalizer` filter (parametric biquad IIR) |
-| Compression (preset chain) | Custom DSP (JavaScript) |
-| RMS / LUFS measurement | libebur128-wasm (WASM bindings) |
+| Compression / dynamics | Custom DSP (JavaScript) — compression, parallel compression, vocal expander, auto leveler |
+| RMS / LUFS measurement | libebur128 (node-ebur128 bindings) |
 | True peak limiting | FFmpeg `loudnorm` (two-pass, 192 kHz upsample) |
 | MP3 encoding | LAME via FFmpeg |
 | Server framework | Express 5.1.0 (ES modules) |
@@ -383,8 +345,6 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 | Framework | Vue 3 (Composition API) |
 | Build | Vite 8.0.1 |
 | Styling | Tailwind CSS 4.2.2 |
-| Normalize (spot) | Pure JS — peak scan + linear gain multiply |
-| Compression (spot) | OfflineAudioContext + native DynamicsCompressorNode |
 | Waveform rendering | Canvas 2D API, peak data from server |
 | Playback | Web Audio API (`AudioBufferSourceNode`) |
 | Segment editing | Pure JS — no audio data touched |
@@ -401,14 +361,13 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 1. ✓ **Sprint 1** — Core pipeline (ACX Audiobook): FFmpeg decode + HPF + mono → DeepFilterNet3 → normalization + limiting → libebur128 → ACX certification → WAV/MP3 output
 2. ✓ **Sprint 2** — Enhancement quality (ACX): Meyda.js EQ → silence exclusion → room tone padding → quality advisory flags (overprocessing, breath, plosive detection)
 3. ✓ **Sprint 3** — De-esser + compression (ACX): F0 estimation → sibilance analysis → conditional de-esser → conditional compression
-4. ✓ **Sprint 4** — Preset and output profile architecture: separate preset/output profile configs → Podcast Ready, Voice Ready, General Clean → LUFS normalization path → output profile selector in UI → output measurements reporting for non-ACX profiles
-5. ✓ **Sprint Dereverb** *(post-Sprint 4, unnumbered)* — Dereverberation: NARA-WPE integration → light/medium/heavy paths → added to standard and Noise Eraser pipelines → noise floor recalculation post-dereverb
-6. ✓ **Sprint NE-1** — Noise Eraser core path: RNNoise pre-pass → Demucs separation → residual DF3 cleanup → Stage 5–7 → validate on high-noise test corpus
-7. ✓ **Sprint NE-2** — Noise Eraser full pipeline: tonal pre-treatment → sibilance/breath assessment → AudioSR bandwidth extension → post-separation EQ → separation quality rating in report; ConvTasNet (asteroid) added as separation fallback
-8. ✓ **Sprint Auto-Leveler** *(post-NE-2, PR #26)* — Auto Leveler Stage 4b: Silero VAD v5 integration → VAD-gated gain riding → applied to all standard presets → silence analysis framework unified on frame-based measurement
-9. ✗ **Sprint 5** — Batch processing (ACX): batch analysis → per-file processing → consistency pass → batch report *(Creator tier gate — primary differentiator for narrators)*
-10. ✗ **Sprint 6** — Commercial library evaluation: Krisp vs. DeepFilterNet3 on real narrator recordings
-11. ✗ **Sprint NE-3** — Noise Eraser benchmarking: test corpus across noise floor severity levels → calibrate NE-4 thresholds → validate AudioSR guidance scale → Demucs vs. ConvTasNet comparison
+4. ✓ **Sprint 4** — Preset and output profile architecture: separate preset/output profile configs → Podcast Ready, General Clean → LUFS normalization path → output profile selector in UI → output measurements reporting for non-ACX profiles
+5. ✓ **Sprint NE-1** — Noise Eraser core path: spectral subtraction → DF3 → tonal pretreatment → Demucs separation → separation validation → Stage 5–7; ConvTasNet (asteroid) added as fallback
+6. ✓ **Sprint Auto-Leveler** — Auto Leveler + pipeline refactor: VAD-gated gain riding → silence analysis framework unified on frame-based measurement → pipeline becomes fully config-driven via preset `stages` array
+7. ✓ **Sprint Pipeline Expansion** — Extended stage registry: clip-gain de-esser → corrective EQ → reference EQ → air boost → resonance suppressor → vocal saturation → room presence → spectral subtraction → click remover → hum detector → vocal expander → parallel compression → ClearerVoice integration (General Clean) → multi-pass crest-factor compression for all presets
+8. ✗ **Sprint 5** — Batch processing (ACX): batch analysis → per-file processing → consistency pass → batch report *(Creator tier gate — primary differentiator for narrators)*
+9. ✗ **Sprint 6** — Commercial library evaluation: Krisp vs. DeepFilterNet3 on real narrator recordings
+10. ✗ **Sprint NE-3** — Noise Eraser benchmarking: test corpus across noise floor severity levels → validate bandwidth extension → Demucs vs. ConvTasNet comparison
 
 ---
 
@@ -461,7 +420,7 @@ ACX MP3 must be strict CBR. Use LAME via FFmpeg with `-b:a 192k -abr 0`.
 |---|---|---|
 | `docs/instant_polish_processing_spec_v3.md` | ✓ Present | Full processing chain technical specification. Authoritative source for all processing parameters, stage definitions, preset profiles, and output profile behavior. |
 | `docs/instant_polish_compliance_model_v2.md` | ✓ Present | ACX certification system, quality advisory flag definitions, report JSON structure, and UI model. Authoritative source for all compliance and reporting behavior. |
-| `docs/instant_polish_processing_spec_noise_eraser.md` | ✓ Present | Noise Eraser preset specification. Parallel processing path (NE-1 through NE-7). Read alongside v3 spec, not as a standalone. |
+| `docs/instant_polish_processing_spec_noise_eraser.md` | ✓ Present | Noise Eraser preset specification. Documents the separation-based processing stages and their parameters. Read alongside v3 spec. Note: the NE-1 through NE-7 stage numbering used in this doc is deprecated — NE is now a standard preset in the unified pipeline. |
 | `docs/acx_production_workflow.md` | ✗ Not present | ACX narrator workflow reference. Context for why features exist and where Instant Polish fits in the production chain. |
 | `docs/instant_polish_gtm.md` | ✗ Not present | Go-to-market strategy. Positioning, pricing, launch plan, SEO content map. |
 
