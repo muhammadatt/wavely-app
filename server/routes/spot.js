@@ -34,12 +34,15 @@ const OPERATIONS = {
   vocal_saturation: {
     label: 'VocalSaturation',
     run: (inputPath, outputPath, params) => runVocalSaturation(inputPath, outputPath, {
-      drive:        params.drive,
-      wetDry:       params.wetDry,
-      bias:         params.bias,
-      lowCrossover: params.lowCrossover,
-      midCrossover: params.midCrossover,
-      softness:     params.softness,
+      drive:         params.drive,
+      wetDry:        params.wetDry,
+      bias:          params.bias,
+      lowCrossover:  params.lowCrossover,
+      midCrossover:  params.midCrossover,
+      softness:      params.softness,
+      lowDriveMult:  params.lowDriveMult,
+      midDriveMult:  params.midDriveMult,
+      highDriveMult: params.highDriveMult,
     }),
   },
 }

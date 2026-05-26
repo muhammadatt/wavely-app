@@ -273,10 +273,10 @@ export const PRESETS = {
             release: 120,
           },
           */
-         { targetCrestFactorDb: 14, maxRatio: 4, threshold: "auto", follow: false, attack: 0.5, release: 50 },
-{ targetCrestFactorDb: 13, maxRatio: 3, threshold: "auto", follow: true,  attack: 5,   release: 100 },
-{ targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 20,  release: 200 },
-{ targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 80,  release: 400 },
+         { targetCrestFactorDb: 14, maxRatio: 6, threshold: "auto", follow: false, attack: 0.5, release: 50 },
+         { targetCrestFactorDb: 13, maxRatio: 3, threshold: "auto", follow: true,  attack: 5,   release: 100 },
+         { targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 20,  release: 200 },
+         { targetCrestFactorDb: 12, maxRatio: 1.5, threshold: "auto", follow: true,  attack: 80,  release: 400 },
         ],
       },
       "remeasureFramesPostNr",
@@ -329,15 +329,15 @@ export const PRESETS = {
       */
       {
         vocalSaturation: {
-          drive: 2.5,
-          wetDry: 0.50,
-          bias: 0.25,
-          lowCrossover: 100,
-          midCrossover: 7550,
-          softness: 0.9,
-          lowDriveMult: 7,
-          midDriveMult: 0.25,
-          highDriveMult: 6.25,
+          drive: 2,
+          wetDry: 1,
+          bias: 0.5,
+          lowCrossover: 85,
+          midCrossover: 8000,
+          softness: 1,
+          lowDriveMult: 7.1,
+          midDriveMult: 0.1,
+          highDriveMult: 0.1,
         },
       },
       {
@@ -390,19 +390,19 @@ export const PRESETS = {
           },
         ],
       },
-      /*
+    
       {
         roomPresence: {
           enabled: true,
           ir_path: "../ir/CrystalVocal.wav",
-          wet: 0.025,
+          wet: 0.01,
           rt60Ms: 250,
           preDelayMs: 10.0,
           early_reflections: 2,
           normalize_ir: true,
         },
       },
-      */
+      
       "normalize",
       "truePeakLimit",
       "measureAfter",
