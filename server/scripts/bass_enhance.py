@@ -142,134 +142,8 @@ def _utterance_median_f0(
 
 
 # ---------------------------------------------------------------------------
-# Time-varying HPF — pre-computed bank with sample-level interpolation
+# VAD mask — frame-rate asymmetric IIR with vectorised upsampling
 # ---------------------------------------------------------------------------
-
-def _build_hpf_bank(
-    sr: int,
-    f0_min_hz: float,
-    f0_max_hz: float,
-    cut_ratio: float,
-    n_filters: int,
-    order: int,
-) -> tuple[np.ndarray, list[np.ndarray]]:
-    """
-    Build a bank of HPFs at semitone-spaced cutoff frequencies from
-    f0_min*cut_ratio to f0_max*cut_ratio. Returns (cutoff_array, [sos, ...]).
-
-    Per the spec the bank is precomputed once; the chunk loop selects the two
-    nearest filters per sample and interpolates their outputs.
-    """
-    fc_lo = f0_min_hz * cut_ratio
-    fc_hi = f0_max_hz * cut_ratio
-    # Geometric (semitone-ish) spacing so the perceptual resolution is
-    # constant across the bank — high cutoffs would otherwise be too sparsely
-    # covered.
-    cutoffs = np.geomspace(fc_lo, fc_hi, n_filters)
-    bank = [_butter_hp_sos(float(fc), sr, order=order) for fc in cutoffs]
-    return cutoffs, bank
-
-
-def _apply_tracking_hpf(
-    x: np.ndarray,
-    sr: int,
-    sample_cutoff_hz: np.ndarray,
-    bank_cutoffs: np.ndarray,
-    bank_sos: list[np.ndarray],
-) -> np.ndarray:
-    """
-    Apply a time-varying HPF whose cutoff follows `sample_cutoff_hz` (one
-    cutoff per sample, smooth from upstream F0 smoothing).
-
-    Implementation: run x through every filter in the bank in parallel, then
-    per-sample linear-interpolate between the two adjacent filter outputs that
-    bracket the requested cutoff. With a 12-filter bank this is 12 IIR passes
-    per call — bounded and easy to verify, no per-frame coefficient design.
-    """
-    # All bank outputs at once. State-initialised to first-sample value to
-    # suppress the IIR boot transient.
-    outputs = np.stack([_sosfilt_with_zi(sos, x) for sos in bank_sos], axis=0)
-
-    # Clamp cutoff to the bank's covered range, then locate the right bracket.
-    clamped = np.clip(sample_cutoff_hz, bank_cutoffs[0], bank_cutoffs[-1])
-    # searchsorted returns insertion index; we want the bracket [i-1, i].
-    idx_hi = np.searchsorted(bank_cutoffs, clamped, side="left")
-    idx_hi = np.clip(idx_hi, 1, len(bank_cutoffs) - 1)
-    idx_lo = idx_hi - 1
-
-    # Interpolation weight in log-cutoff space (matches the geometric bank
-    # spacing — a half-step between two bank cutoffs is one half-octave, not
-    # one half of the linear Hz gap).
-    log_lo = np.log(bank_cutoffs[idx_lo])
-    log_hi = np.log(bank_cutoffs[idx_hi])
-    log_target = np.log(clamped)
-    denom = log_hi - log_lo
-    # Where lo == hi (clamped past the bank edges) denom is 0 — pick the edge
-    # filter outright by sending weight to the bracket-low output.
-    weight = np.where(denom > 1e-12, (log_target - log_lo) / denom, 0.0)
-
-    samples = np.arange(len(x))
-    y_lo = outputs[idx_lo, samples]
-    y_hi = outputs[idx_hi, samples]
-    return (1.0 - weight) * y_lo + weight * y_hi
-
-
-# ---------------------------------------------------------------------------
-# Smoothing & per-sample maps
-# ---------------------------------------------------------------------------
-
-def _causal_smooth(x: np.ndarray, window: int) -> np.ndarray:
-    """Causal moving average; window in samples (>=1)."""
-    if window <= 1 or x.size == 0:
-        return x
-    # Use cumulative sum for an O(n) causal mean.
-    pad = np.concatenate([np.full(window - 1, x[0]), x])
-    csum = np.cumsum(pad)
-    return (csum[window - 1:] - np.concatenate([[0.0], csum[:-window]])) / window
-
-
-def _f0_contour_to_sample_cutoff(
-    f0_per_frame: list[float],
-    f0_hop: int,
-    n_samples: int,
-    sr: int,
-    cut_ratio: float,
-    smooth_ms: float,
-    fallback_hz: float,
-    f0_min_hz: float,
-    f0_max_hz: float,
-) -> np.ndarray:
-    """
-    Expand the F0 contour to a per-sample HPF cutoff signal.
-
-    Smoothing is causal so the cutoff lags the F0 contour slightly rather
-    than leading it — matters across phoneme boundaries where leading the
-    pitch can sweep the cutoff past a sustained vowel before the harmonics
-    appear in the saturator output.
-    """
-    if f0_per_frame and f0_hop > 0:
-        f0_arr = np.asarray(f0_per_frame, dtype=np.float64)
-        # Replace zero/NaN entries (gaps the upstream estimator couldn't fill)
-        # with the fallback so the cutoff curve stays continuous.
-        bad = ~np.isfinite(f0_arr) | (f0_arr <= 0)
-        if bad.any():
-            f0_arr = np.where(bad, fallback_hz / max(cut_ratio, 1e-6), f0_arr)
-        # Clamp to the estimator's operating range — anything outside is an
-        # octave error or a regression to silence.
-        f0_arr = np.clip(f0_arr, f0_min_hz, f0_max_hz)
-
-        # Upsample frame-rate values to sample-rate via nearest-neighbour;
-        # smoothing turns the staircase into a smooth ramp.
-        sample_idx = np.arange(n_samples) // f0_hop
-        sample_idx = np.clip(sample_idx, 0, f0_arr.size - 1)
-        per_sample_f0 = f0_arr[sample_idx]
-    else:
-        per_sample_f0 = np.full(n_samples, fallback_hz / max(cut_ratio, 1e-6))
-
-    cutoff = per_sample_f0 * cut_ratio
-    smooth_samples = max(1, int(smooth_ms * sr / 1000.0))
-    return _causal_smooth(cutoff, smooth_samples).astype(np.float64)
-
 
 def _build_vad_sample_mask(
     vad_frames: list,
@@ -280,116 +154,174 @@ def _build_vad_sample_mask(
 ) -> tuple[np.ndarray, float]:
     """
     Convert VAD frame labels to a per-sample float gate with asymmetric
-    attack/release envelopes. Returns (mask, voiced_coverage_fraction).
+    attack/release envelopes. Returns ``(mask, voiced_coverage_fraction)``.
 
-    With no VAD frames available the whole file is treated as voiced. The
-    25 ms VAD frame quantisation is the effective floor on attack sharpness;
-    sub-frame attack times act as envelope shaping on the step transitions.
+    Implementation runs the IIR at frame rate (~40 Hz for 25 ms VAD frames),
+    not sample rate (44.1 kHz). The frame quantisation is already the
+    effective floor on attack sharpness — sub-frame attack times act as
+    envelope shaping on the step transitions — so processing at frame rate
+    is algorithmically equivalent within the VAD's own time resolution while
+    being ~1000× cheaper than a per-sample Python loop. The frame envelope
+    is upsampled to sample rate via vectorised linear interpolation.
+
+    With no VAD frames available the whole file is treated as voiced.
     """
     if not vad_frames:
         return np.ones(n_samples, dtype=np.float32), 1.0
 
-    step = np.zeros(n_samples, dtype=np.float32)
-    voiced_samples = 0
-    for f in vad_frames:
-        s = int(f["offsetSamples"])
-        e = min(s + int(f["lengthSamples"]), n_samples)
-        if s >= n_samples:
-            break
-        if not f.get("isSilence", False):
-            step[s:e] = 1.0
-            voiced_samples += (e - s)
+    n_frames        = len(vad_frames)
+    targets         = np.empty(n_frames, dtype=np.float32)
+    centers_samples = np.empty(n_frames, dtype=np.float64)
+    voiced_samples  = 0
 
-    a_coef = np.exp(-1.0 / max(1.0, attack_ms  * sr / 1000.0))
-    r_coef = np.exp(-1.0 / max(1.0, release_ms * sr / 1000.0))
-    mask = np.empty(n_samples, dtype=np.float32)
+    for i, f in enumerate(vad_frames):
+        s = int(f["offsetSamples"])
+        ln = int(f["lengthSamples"])
+        e = min(s + ln, n_samples)
+        if s >= n_samples:
+            # Frames past the end of the audio — clamp the array and break.
+            targets         = targets[:i]
+            centers_samples = centers_samples[:i]
+            n_frames        = i
+            break
+        silent = bool(f.get("isSilence", False))
+        targets[i]         = 0.0 if silent else 1.0
+        centers_samples[i] = (s + e) / 2.0
+        if not silent:
+            voiced_samples += max(0, e - s)
+
+    if n_frames == 0:
+        return np.ones(n_samples, dtype=np.float32), 1.0
+
+    # Frame period for the IIR coefficients. Most callers pass uniform 25 ms
+    # frames so the median is a good representative; degenerate single-frame
+    # inputs fall back to the frame's own length.
+    if n_frames > 1:
+        frame_period_ms = float(np.median(np.diff(centers_samples)) * 1000.0 / sr)
+    else:
+        frame_period_ms = float(int(vad_frames[0]["lengthSamples"]) * 1000.0 / sr)
+    frame_period_ms = max(frame_period_ms, 1.0)
+
+    a_coef = np.exp(-frame_period_ms / max(1.0, attack_ms))
+    r_coef = np.exp(-frame_period_ms / max(1.0, release_ms))
+
+    # Asymmetric IIR at frame rate — ~40 iterations per second of audio.
+    env  = np.empty(n_frames, dtype=np.float32)
     prev = 0.0
-    # State-dependent coefficient — attack when rising, release when falling.
-    # Tight loop in Python is the bottleneck for very long files; acceptable
-    # for the current synchronous pipeline (10–60 s clips) but worth a numba
-    # JIT pass if BassEnhance graduates to batch mode.
-    for i in range(n_samples):
-        t = step[i]
+    for i in range(n_frames):
+        t = targets[i]
         c = a_coef if t >= prev else r_coef
         prev = c * prev + (1.0 - c) * t
-        mask[i] = prev
+        env[i] = prev
+
+    # Upsample to sample rate via vectorised linear interpolation between
+    # frame centres. Edges are held at the first/last frame value.
+    sample_indices = np.arange(n_samples, dtype=np.float64)
+    mask = np.interp(
+        sample_indices, centers_samples, env,
+        left=float(env[0]), right=float(env[-1]),
+    ).astype(np.float32)
 
     coverage = voiced_samples / float(n_samples) if n_samples > 0 else 0.0
     return mask, coverage
 
 
 # ---------------------------------------------------------------------------
-# Per-utterance LPF with boundary crossfade
+# Per-utterance fixed-cutoff filter with boundary crossfade
 # ---------------------------------------------------------------------------
 
-def _apply_utterance_lpf(
+def _apply_per_utterance_filter(
     audio: np.ndarray,
     sr: int,
     utterances: list[tuple[int, int]],
-    utterance_crossovers: list[float],
+    cutoffs: list[float],
     transition_ms: float,
+    btype: str,
+    order: int = 4,
 ) -> np.ndarray:
     """
-    Apply a per-utterance LPF whose cutoff follows the utterance median F0,
-    crossfaded at boundaries to avoid clicks on hard consonants.
+    Apply a per-utterance fixed-cutoff Butterworth filter to ``audio``.
 
-    Outside utterance spans the LPF still runs (using the nearest utterance's
-    cutoff) so the saturator sees a continuous bass band — the VAD gate later
-    zeros the harmonics-only signal in those regions anyway.
+    Within an utterance the filter is a single fixed-cutoff biquad chain. At
+    boundaries between adjacent utterances, the outgoing and incoming filter
+    outputs are linearly crossfaded over a window centred on the midpoint
+    between the two utterances.
+
+    Memory: ~4 × n_samples peak (input + one filter output + per-utterance
+    weight envelope + accumulator). The previous bank-based approach held
+    ``n_filters × n_samples`` in parallel — switching to one filter at a
+    time means peak memory is independent of utterance count.
+
+    CPU: ``n_utterances`` full-file IIR passes. For very long files with
+    many utterances this could still be a lot of work; the simpler design
+    is acceptable because per-utterance fixed cutoff is correct for a
+    psychoacoustic effect (typical within-utterance pitch variation maps
+    to bounded ~±6 dB of fundamental-attenuation swing).
+
+    ``btype`` is ``'low'`` or ``'high'``. With no utterances, falls back
+    to a single filter applied to the whole file at ``cutoffs[0]`` (or 300
+    Hz when cutoffs is empty).
     """
     n = len(audio)
+    if n == 0:
+        return audio.astype(np.float32, copy=False)
+
     if not utterances:
-        return _sosfilt_with_zi(_butter_lp_sos(300.0, sr), audio)
+        fc = cutoffs[0] if cutoffs else 300.0
+        sos = butter(order, max(fc, 20.0) / (sr / 2.0), btype=btype, output='sos')
+        return _sosfilt_with_zi(sos, audio).astype(np.float32)
 
     transition_samples = max(8, int(transition_ms * sr / 1000.0))
+    half_trans = transition_samples // 2
 
-    # Build a sample-aligned cutoff envelope: piecewise constant inside each
-    # utterance, linearly interpolated in log-Hz space across the boundary.
-    cutoff_env = np.empty(n, dtype=np.float64)
-    last_end = 0
-    last_fc = utterance_crossovers[0]
-    for (s, e), fc in zip(utterances, utterance_crossovers):
-        # Gap before this utterance — ramp from last cutoff to this one in the
-        # last `transition_samples` of the gap region.
-        if s > last_end:
-            ramp_start = max(last_end, s - transition_samples)
-            cutoff_env[last_end:ramp_start] = last_fc
-            ramp_n = s - ramp_start
-            if ramp_n > 0:
-                log_lo = np.log(last_fc)
-                log_hi = np.log(fc)
-                cutoff_env[ramp_start:s] = np.exp(
-                    np.linspace(log_lo, log_hi, ramp_n, endpoint=False)
+    out = np.zeros(n, dtype=np.float32)
+
+    for i, ((s, e), fc) in enumerate(zip(utterances, cutoffs)):
+        sos = butter(order, max(fc, 20.0) / (sr / 2.0), btype=btype, output='sos')
+        # One IIR pass over the whole file for this utterance's cutoff. The
+        # output is reused via weighted-sum below and then released to the
+        # garbage collector before the next iteration.
+        y = _sosfilt_with_zi(sos, audio).astype(np.float32, copy=False)
+
+        # Build this utterance's weight envelope: 1.0 in its active region,
+        # ramped at the midpoints between adjacent utterances.
+        weight = np.zeros(n, dtype=np.float32)
+
+        # Left edge: ramp 0 → 1 across the boundary with the previous utterance.
+        if i == 0:
+            active_start = 0
+        else:
+            prev_e  = utterances[i - 1][1]
+            mid     = (prev_e + s) // 2
+            xf_lo   = max(0, mid - half_trans)
+            xf_hi   = min(n, mid + half_trans)
+            if xf_hi > xf_lo:
+                weight[xf_lo:xf_hi] = np.linspace(
+                    0.0, 1.0, xf_hi - xf_lo, dtype=np.float32, endpoint=False,
                 )
-        cutoff_env[s:e] = fc
-        last_end = e
-        last_fc = fc
-    cutoff_env[last_end:n] = last_fc
+            active_start = xf_hi
 
-    # Reuse the tracking-HPF infrastructure for the LPF too — build an LPF
-    # bank, run audio through it, and pick the correct cutoff per sample.
-    # The bank's cutoff range covers the utterance crossovers ±20%.
-    fc_lo = max(60.0, min(utterance_crossovers) * 0.8)
-    fc_hi = max(fc_lo * 2.0, max(utterance_crossovers) * 1.2)
-    cutoffs = np.geomspace(fc_lo, fc_hi, 8)
-    bank = [_butter_lp_sos(float(fc), sr) for fc in cutoffs]
+        # Right edge: ramp 1 → 0 across the boundary with the next utterance.
+        if i == len(utterances) - 1:
+            active_end = n
+        else:
+            next_s  = utterances[i + 1][0]
+            mid     = (e + next_s) // 2
+            xf_lo   = max(0, mid - half_trans)
+            xf_hi   = min(n, mid + half_trans)
+            if xf_hi > xf_lo:
+                weight[xf_lo:xf_hi] = np.linspace(
+                    1.0, 0.0, xf_hi - xf_lo, dtype=np.float32, endpoint=False,
+                )
+            active_end = xf_lo
 
-    outputs = np.stack([_sosfilt_with_zi(sos, audio) for sos in bank], axis=0)
+        # Active region (full weight).
+        if active_end > active_start:
+            weight[active_start:active_end] = 1.0
 
-    clamped = np.clip(cutoff_env, cutoffs[0], cutoffs[-1])
-    idx_hi = np.searchsorted(cutoffs, clamped, side="left")
-    idx_hi = np.clip(idx_hi, 1, len(cutoffs) - 1)
-    idx_lo = idx_hi - 1
-    log_lo = np.log(cutoffs[idx_lo])
-    log_hi = np.log(cutoffs[idx_hi])
-    log_t  = np.log(clamped)
-    denom  = log_hi - log_lo
-    w = np.where(denom > 1e-12, (log_t - log_lo) / denom, 0.0)
+        out += weight * y
 
-    samples = np.arange(n)
-    y_lo = outputs[idx_lo, samples]
-    y_hi = outputs[idx_hi, samples]
-    return ((1.0 - w) * y_lo + w * y_hi).astype(np.float32)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -414,8 +346,6 @@ def bass_enhance(
     bias: float = 0.3,
     # Fundamental removal
     fundamental_cut_ratio: float = 1.25,
-    fundamental_cut_smooth_ms: float = 50.0,
-    fundamental_cut_n_filters: int = 12,
     # VAD gate
     vad_attack_ms: float = 5.0,
     vad_release_ms: float = 20.0,
@@ -491,8 +421,9 @@ def bass_enhance(
     f0_range_hz = (min(f0_used), max(f0_used))
 
     # --- Step 1: LPF to isolate the bass band -------------------------------
-    bass_band = _apply_utterance_lpf(
-        mono, sr, utterances, utterance_crossovers, segment_transition_ms,
+    bass_band = _apply_per_utterance_filter(
+        mono, sr, utterances, utterance_crossovers,
+        segment_transition_ms, btype='low',
     )
 
     # Track dry low-band RMS for the report (low_band_gain_db advisory).
@@ -504,21 +435,15 @@ def bass_enhance(
         drive=drive, bias=bias, softness=softness,
     ).astype(np.float32)
 
-    # --- Step 3: Time-varying HPF — strip (most of) the fundamental --------
-    sample_cutoff = _f0_contour_to_sample_cutoff(
-        f0_per_frame, f0_hop, n_samples, sr,
-        cut_ratio=fundamental_cut_ratio,
-        smooth_ms=fundamental_cut_smooth_ms,
-        fallback_hz=crossover_fallback_hz,
-        f0_min_hz=f0_min_hz,
-        f0_max_hz=f0_max_hz,
-    )
-    bank_cutoffs, bank_sos = _build_hpf_bank(
-        sr, f0_min_hz, f0_max_hz, fundamental_cut_ratio,
-        n_filters=fundamental_cut_n_filters, order=4,
-    )
-    harmonics_only = _apply_tracking_hpf(
-        saturated, sr, sample_cutoff, bank_cutoffs, bank_sos,
+    # --- Step 3: Per-utterance HPF — strip (most of) the fundamental ------
+    # Per-utterance fixed cutoff at f0_median × fundamental_cut_ratio.
+    # Within an utterance the cutoff is fixed; speech pitch varies ~±20% so
+    # the resulting fundamental attenuation swings ~±6 dB around the target,
+    # which is acceptable for a psychoacoustic effect.
+    hpf_cutoffs = [c / 1.5 * fundamental_cut_ratio for c in utterance_crossovers]
+    harmonics_only = _apply_per_utterance_filter(
+        saturated, sr, utterances, hpf_cutoffs,
+        segment_transition_ms, btype='high',
     ).astype(np.float32)
 
     # --- Step 4: VAD gate — zero harmonics during silence ------------------
@@ -601,8 +526,6 @@ def main():
     parser.add_argument("--bias",                   type=float, default=0.3)
     # Fundamental removal
     parser.add_argument("--fundamental-cut-ratio",       type=float, default=1.25)
-    parser.add_argument("--fundamental-cut-smooth-ms",   type=float, default=50.0)
-    parser.add_argument("--fundamental-cut-n-filters",   type=int,   default=12)
     # VAD gate
     parser.add_argument("--vad-attack-ms",          type=float, default=5.0)
     parser.add_argument("--vad-release-ms",         type=float, default=20.0)
@@ -643,8 +566,6 @@ def main():
         softness=args.softness,
         bias=args.bias,
         fundamental_cut_ratio=args.fundamental_cut_ratio,
-        fundamental_cut_smooth_ms=args.fundamental_cut_smooth_ms,
-        fundamental_cut_n_filters=args.fundamental_cut_n_filters,
         vad_attack_ms=args.vad_attack_ms,
         vad_release_ms=args.vad_release_ms,
         skip_if_voiced_ratio_below=args.skip_if_voiced_ratio_below,

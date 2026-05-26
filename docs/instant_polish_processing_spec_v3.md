@@ -564,21 +564,22 @@ the canonical preset wiring always provides both.
    median F0 tracks real pitch shifts between utterances without claiming
    speaker identification that F0 clustering cannot deliver reliably.
 
-2. **Band isolation.** 4th-order Butterworth LPF, crossfaded at utterance
-   boundaries over `segmentTransitionMs` (default 75 ms) in log-Hz space.
-   Implemented as a small bank of fixed LPFs at geometric cutoffs;
-   per-sample weighted interpolation across the bank yields the time-varying
-   cutoff without coefficient redesign.
+2. **Band isolation.** 4th-order Butterworth LPF at `1.5 × medianF0`, fixed
+   per utterance. At utterance boundaries the outgoing and incoming filter
+   outputs are linearly crossfaded over `segmentTransitionMs` (default
+   75 ms) centred on the midpoint between the two utterances. One filter
+   pass per utterance — no bank, no per-sample interpolation across a
+   parallel bank.
 
 3. **Waveshaping.** Bass band → `tube_saturate(drive, softness, bias)`.
    `softness` blends tanh (odd harmonics) → arctan (even harmonics, warmer).
    `bias` adds asymmetry for even-harmonic weight. 2× oversampling inside
    `tube_saturate` suppresses aliasing.
 
-4. **Fundamental removal (balanced HPF).** Time-varying HPF with cutoff
-   `f0_contour × fundamentalCutRatio`, smoothed causally over
-   `fundamentalCutSmoothMs` (default 50 ms). The default
-   `fundamentalCutRatio = 1.25` is a deliberate compromise:
+4. **Fundamental removal (balanced HPF).** Per-utterance fixed-cutoff HPF
+   at `medianF0 × fundamentalCutRatio`, with the same boundary-crossfade
+   mechanic as the LPF. The default `fundamentalCutRatio = 1.25` is a
+   deliberate compromise:
 
    | Cutoff (× F0) | F0 attenuation | 2·F0 attenuation | 3·F0 attenuation |
    |---|---|---|---|
@@ -593,17 +594,25 @@ the canonical preset wiring always provides both.
    psychoacoustic effect — intentional, and documented in the script's
    docstring so future readers do not "fix" it back to `0.9`.
 
-   Implemented as a precomputed bank of 12 fixed HPFs at geometric cutoffs
-   covering `[f0MinHz, f0MaxHz] × fundamentalCutRatio`. Per-sample weighted
-   interpolation across the bank tracks the smoothed F0 contour without
-   per-frame biquad redesign.
+   The cutoff is fixed within an utterance, not tracked per-frame. Typical
+   speech pitch varies ~±20 % within an utterance, which maps to a bounded
+   ~±6 dB swing in fundamental attenuation around the target — acceptable
+   for a psychoacoustic effect, and a major simplification over a per-frame
+   tracked filter (a single IIR pass per utterance instead of a parallel
+   filter bank).
 
-5. **VAD gate.** Per-sample mask derived from VAD frames, smoothed by an
-   asymmetric IIR envelope (`vadAttackMs` / `vadReleaseMs`). The 25 ms VAD
+5. **VAD gate.** Frame-rate asymmetric IIR (`vadAttackMs` / `vadReleaseMs`)
+   over VAD frame targets (1.0 voiced, 0.0 silent), upsampled to sample
+   rate via linear interpolation between frame centres. The 25 ms VAD
    frame quantisation is the floor on attack sharpness; sub-frame attack
-   times act as envelope shaping on the step transitions. Music beds, sound
-   effects, and silence pass through completely untouched (bit-identical to
-   dry in the silence span).
+   times act as envelope shaping on the step transitions. The
+   harmonics-only signal is multiplied by this mask, so **no synthesized
+   harmonics are added inside the silence span** — music beds, sound
+   effects, and silence pass through unchanged at the harmonics-blend step.
+   The post-blend RMS-match (`normalizeOutput`, default on) applies a
+   global gain scalar to the whole file, so the silence span is not
+   bit-identical to dry input when normalization runs. Set
+   `normalizeOutput: false` for bit-identical silence regions.
 
 6. **Stereo handling.** Stereo input is summed to mono for the harmonics
    chain; the harmonics-only signal is then added equally to both channels.

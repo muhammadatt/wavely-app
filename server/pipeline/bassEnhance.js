@@ -51,8 +51,6 @@ export async function applyBassEnhance(inputPath, outputPath, params = {}, frame
   if (params.bias                != null) args.push('--bias',                  String(params.bias))
   // Fundamental removal
   if (params.fundamentalCutRatio     != null) args.push('--fundamental-cut-ratio',     String(params.fundamentalCutRatio))
-  if (params.fundamentalCutSmoothMs  != null) args.push('--fundamental-cut-smooth-ms', String(params.fundamentalCutSmoothMs))
-  if (params.fundamentalCutNFilters  != null) args.push('--fundamental-cut-n-filters', String(params.fundamentalCutNFilters))
   // VAD gate
   if (params.vadAttackMs         != null) args.push('--vad-attack-ms',         String(params.vadAttackMs))
   if (params.vadReleaseMs        != null) args.push('--vad-release-ms',        String(params.vadReleaseMs))
