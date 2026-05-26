@@ -42,12 +42,14 @@ logger = logging.getLogger("bass_enhance")
 # Filter helpers
 # ---------------------------------------------------------------------------
 
-def _butter_lp_sos(fc: float, sr: int, order: int = 4) -> np.ndarray:
-    return butter(order, fc / (sr / 2.0), btype="low", output="sos")
-
-
-def _butter_hp_sos(fc: float, sr: int, order: int = 4) -> np.ndarray:
-    return butter(order, fc / (sr / 2.0), btype="high", output="sos")
+def _safe_cutoff(fc: float, sr: int) -> float:
+    """Clamp a cutoff frequency to the open interval (0, Nyquist). ``butter``
+    rejects normalized frequencies at or beyond 1.0, so a user-supplied
+    ``crossoverFallbackHz`` or ``fundamentalCutRatio`` that pushes a cutoff
+    to/above Nyquist would crash the stage at runtime. Clamping at 99 % of
+    Nyquist keeps the filter design valid for any input."""
+    nyquist = sr / 2.0
+    return float(np.clip(fc, 20.0, 0.99 * nyquist))
 
 
 def _sosfilt_with_zi(sos: np.ndarray, x: np.ndarray) -> np.ndarray:
@@ -268,7 +270,7 @@ def _apply_per_utterance_filter(
 
     if not utterances:
         fc = cutoffs[0] if cutoffs else 300.0
-        sos = butter(order, max(fc, 20.0) / (sr / 2.0), btype=btype, output='sos')
+        sos = butter(order, _safe_cutoff(fc, sr) / (sr / 2.0), btype=btype, output='sos')
         return _sosfilt_with_zi(sos, audio).astype(np.float32)
 
     transition_samples = max(8, int(transition_ms * sr / 1000.0))
@@ -277,7 +279,7 @@ def _apply_per_utterance_filter(
     out = np.zeros(n, dtype=np.float32)
 
     for i, ((s, e), fc) in enumerate(zip(utterances, cutoffs)):
-        sos = butter(order, max(fc, 20.0) / (sr / 2.0), btype=btype, output='sos')
+        sos = butter(order, _safe_cutoff(fc, sr) / (sr / 2.0), btype=btype, output='sos')
         # One IIR pass over the whole file for this utterance's cutoff. The
         # output is reused via weighted-sum below and then released to the
         # garbage collector before the next iteration.
@@ -449,8 +451,19 @@ def bass_enhance(
     # --- Step 4: VAD gate — zero harmonics during silence ------------------
     gated = harmonics_only * vad_mask
 
-    # Post-blend low-band energy for the advisory check.
-    post_low_rms = float(np.sqrt(np.mean((bass_band + mix * gated) ** 2)) + 1e-12)
+    # Post-blend low-band energy for the advisory check. dry_low_rms is the
+    # LPF'd bass_band RMS, so the post measurement must also be band-limited
+    # to the same crossover — the gated harmonics signal carries significant
+    # energy at 2 × F0 / 3 × F0 / … which lies above the LPF cutoff and
+    # would inflate the metric if included raw. Run the gated signal through
+    # the same per-utterance LPF to isolate its in-band contribution, then
+    # add to bass_band before taking RMS so before/after are measured in the
+    # same band.
+    gated_low = _apply_per_utterance_filter(
+        gated, sr, utterances, utterance_crossovers,
+        segment_transition_ms, btype='low',
+    )
+    post_low_rms = float(np.sqrt(np.mean((bass_band + mix * gated_low) ** 2)) + 1e-12)
     low_band_gain_db = round(20.0 * np.log10(post_low_rms / dry_low_rms), 2)
 
     # --- Step 5: Additive blend onto the dry signal -------------------------
