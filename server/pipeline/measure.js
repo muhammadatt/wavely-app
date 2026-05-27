@@ -18,8 +18,10 @@
  * noise-floor check passed regardless of the real recording. The silence
  * analysis bootstrap is the authoritative source.
  *
- * Sprint 2: Added measureVoicedRms() for silence-excluding RMS measurement
- * used in Stage 5 ACX normalization (spec §5b).
+ * Sprint 2: Added measureVoicedRms() for silence-excluded RMS measurement.
+ * No longer used by ACX normalization — ACX uses ungated full-file RMS, which
+ * is what measureAudio() returns. Retained for diagnostics and as a reference
+ * for the LUFS path, which still applies pipeline-level silence exclusion.
  *
  * Compliance model v2: checkCompliance() replaced by checkAcxCertification()
  * which only runs for acx output profile and checks 6 points (RMS, true peak,
@@ -55,6 +57,27 @@ export async function measureAudio(filePath) {
     truePeakDbfs:   loudnormStats.truePeak,
     lufsIntegrated: loudnormStats.integratedLoudness,
   }
+}
+
+/**
+ * Lightweight RMS-only measurement (FFmpeg volumedetect mean_volume).
+ * Skips the libebur128 LUFS + true-peak pass that measureAudio() runs.
+ * Used by the ACX normalize path which only needs ungated full-file RMS.
+ */
+export async function measureRmsDbfs(filePath) {
+  const { meanVolume } = await measureVolume(filePath)
+  return meanVolume
+}
+
+/**
+ * Lightweight true-peak-only measurement (libebur128).
+ * Skips the FFmpeg volumedetect pass that measureAudio() runs.
+ * Used by the truePeakLimit stage to report pre/post peak without the
+ * unneeded RMS work.
+ */
+export async function measureTruePeakDbfs(filePath) {
+  const { truePeak } = await measureLoudness(filePath)
+  return truePeak
 }
 
 /**
@@ -195,11 +218,12 @@ function round2(n) {
 /**
  * Measure RMS of voiced frames only, excluding silence.
  *
- * Implements spec §5b silence exclusion:
- *   silence_threshold = noise_floor + 6 dB
+ * Silence threshold: noise_floor + 6 dB.
  *
- * Used for ACX RMS-based normalization so silence frames don't pull
- * the measured level below the true voiced speech level.
+ * Note: ACX RMS normalization uses ungated full-file RMS via measureAudio()
+ * (volumedetect mean_volume) because ACX itself measures the full file.
+ * This function is retained for diagnostics — reporting voiced loudness
+ * alongside full-file loudness — and is not on the normalization path.
  *
  * @param {string} wavPath
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis

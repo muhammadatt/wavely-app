@@ -32,7 +32,13 @@ import {
 } from '../lib/ffmpeg.js'
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { applyNoiseReduction, runRnnoise, runDtln } from './noiseReduce.js'
-import { measureAudio, measureVoicedRms, measureVoicedLufs, checkAcxCertification } from './measure.js'
+import {
+  measureAudio,
+  measureRmsDbfs,
+  measureTruePeakDbfs,
+  measureVoicedLufs,
+  checkAcxCertification,
+} from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
 import { analyzeFrames, remeasureFrames } from './frameAnalysis.js'
 import { analyzeCorrectiveEQ, bandsToFfmpegFilters } from './correctiveEQ.js'
@@ -1306,24 +1312,33 @@ export async function normalize(ctx) {
   const normPath          = ctx.tmp('.wav')
   let normExtras          = {}
 
-  // Both RMS and LUFS paths share the same three-step architecture:
-  //   1. Fresh silence analysis on the current (post-compression, post-exciter)
-  //      audio so the voiced/silence classification matches the signal we're
-  //      about to measure.
-  //   2. Silence-excluded loudness measurement (spec §5b: noise_floor + 6 dB).
-  //   3. Linear gain = target - measured, applied via FFmpeg `volume`.
+  // RMS path (ACX): ungated full-file RMS via FFmpeg volumedetect. ACX measures
+  // every sample in the file — silences, breaths, room tone — and the target
+  // must match that measurement or normalization will systematically undershoot.
+  //
+  // LUFS path (podcast/broadcast): silence-excluded integrated loudness via
+  // libebur128, using the pipeline's frame-level silence analysis. R128's
+  // built-in gating is not file-specific enough on recordings with elevated
+  // room tone, so we exclude pipeline-flagged silence frames explicitly.
   //
   // True peak ceiling is enforced by the subsequent truePeakLimit stage — do
   // not apply it here.
-  const prNormFrameAnalysis = await analyzeFrames(ctx.currentPath)
 
   if (outputProfile.measurementMethod === 'RMS') {
     // Use the explicit normalizationTarget from the output profile.
     // Do NOT use the loudnessRange midpoint — for ACX the midpoint is -20.5 dBFS
     // but the spec target is -20 dBFS RMS.
     const targetRms = outputProfile.normalizationTarget
-    const voicedRms = await measureVoicedRms(ctx.currentPath, prNormFrameAnalysis)
-    const gainDb    = targetRms - voicedRms
+    const rmsDbfs   = await measureRmsDbfs(ctx.currentPath)
+
+    if (rmsDbfs == null || !Number.isFinite(rmsDbfs)) {
+      throw new Error(
+        `normalize: failed to measure full-file RMS for ${ctx.currentPath} ` +
+        `(volumedetect returned ${rmsDbfs}). Cannot compute normalization gain.`
+      )
+    }
+
+    const gainDb = targetRms - rmsDbfs
 
     if (gainDb > 18) {
       ctx.log(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
@@ -1331,15 +1346,16 @@ export async function normalize(ctx) {
 
     await applyLinearGain(ctx.currentPath, normPath, gainDb)
     normExtras = {
-      method:      'RMS',
-      target:      `${targetRms}dBFS`,
-      voicedRms:   `${round2(voicedRms)}dBFS`,
-      gainApplied: `${round2(gainDb)}dB`,
+      method:       'RMS',
+      target:       `${targetRms}dBFS`,
+      fullFileRms:  `${round2(rmsDbfs)}dBFS`,
+      gainApplied:  `${round2(gainDb)}dB`,
     }
   } else {
-    const targetLufs = outputProfile.normalizationTarget
-    const voicedLufs = await measureVoicedLufs(ctx.currentPath, prNormFrameAnalysis)
-    const gainDb     = targetLufs - voicedLufs
+    const prNormFrameAnalysis = await analyzeFrames(ctx.currentPath)
+    const targetLufs          = outputProfile.normalizationTarget
+    const voicedLufs          = await measureVoicedLufs(ctx.currentPath, prNormFrameAnalysis)
+    const gainDb              = targetLufs - voicedLufs
 
     if (gainDb > 18) {
       ctx.log(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
@@ -1361,12 +1377,39 @@ export async function normalize(ctx) {
 // ── Stage: True peak limiter ──────────────────────────────────────────────────
 
 export async function truePeakLimit(ctx) {
+  const ceilingDb   = ctx.outputProfile.truePeakCeiling
   const limitedPath = ctx.tmp('.wav')
+
+  // Measure true peak before limiting so we can report how much work the
+  // limiter actually did. Use the TP-only helper to skip the unused RMS pass.
+  const prePeakDbfs = await measureTruePeakDbfs(ctx.currentPath)
+
   await applyTruePeakLimiter(ctx.currentPath, limitedPath, {
-    peakCeiling: ctx.outputProfile.truePeakCeiling,
+    peakCeiling: ceilingDb,
   })
   ctx.currentPath = limitedPath
-  await logLevel(ctx, 'after limiting', ctx.currentPath, { tp: `${ctx.outputProfile.truePeakCeiling}dBTP` })
+
+  const postPeakDbfs = await measureTruePeakDbfs(ctx.currentPath)
+  const reductionDb  = prePeakDbfs != null && postPeakDbfs != null
+    ? Math.max(0, prePeakDbfs - postPeakDbfs)
+    : null
+
+  // Field names follow the codebase-wide `truePeakDbfs` convention — values
+  // are inter-sample true-peak measurements from libebur128, stored as dBFS
+  // for consistency with measureAudio() and ctx.results.metrics.
+  ctx.results.truePeakLimit = {
+    ceilingDbfs:   ceilingDb,
+    prePeakDbfs:   round2(prePeakDbfs),
+    postPeakDbfs:  round2(postPeakDbfs),
+    reductionDb:   round2(reductionDb),
+  }
+
+  await logLevel(ctx, 'after limiting', ctx.currentPath, {
+    ceiling:   `${ceilingDb}dBFS`,
+    prePeak:   prePeakDbfs  != null ? `${round2(prePeakDbfs)}dBFS`  : '?',
+    postPeak:  postPeakDbfs != null ? `${round2(postPeakDbfs)}dBFS` : '?',
+    reduction: reductionDb  != null ? `${round2(reductionDb)}dB`    : '?',
+  })
 }
 
 // ── Stage: Measure after ──────────────────────────────────────────────────────

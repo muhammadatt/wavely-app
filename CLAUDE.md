@@ -118,7 +118,7 @@ Output profiles are loudness targets, not compliance standards. They govern what
 
 | Profile ID | Display Name | Normalization Target | Peak Ceiling | Measurement |
 |---|---|---|---|---|
-| `acx` | ACX Audiobook | -20 dBFS RMS | -3 dBFS | Unweighted RMS, voiced frames only |
+| `acx` | ACX Audiobook | -20 dBFS RMS | -3 dBFS | Unweighted RMS, full-file ungated (ACX standard) |
 | `podcast` | Podcast / Streaming | -16 LUFS integrated | -1 dBFS | K-weighted LUFS (EBU R128) |
 | `broadcast` | Broadcast | -23 LUFS integrated | -1 dBFS | K-weighted LUFS (EBU R128) |
 
@@ -199,7 +199,7 @@ The pipeline is **fully config-driven**. There is no hardcoded stage ordering. E
 - Must not run after `normalize` — gain riding post-normalization breaks compliance targets.
 
 **Normalization & reporting:**
-- `normalize`: `acx` output profile → unweighted RMS; `podcast`/`broadcast` → K-weighted LUFS (EBU R128). Silence exclusion threshold: `noise_floor + 6 dB`.
+- `normalize`: `acx` output profile → ungated full-file unweighted RMS (FFmpeg `volumedetect`) — matches ACX's own measurement method. `podcast`/`broadcast` → K-weighted integrated LUFS (EBU R128) with pipeline silence exclusion (`noise_floor + 6 dB`) for elevated-room-tone recordings.
 - `acxCertification`: runs for all presets when `output_profile = acx`. Six-point deterministic pass/fail. The `acx_certification` key is **absent** (not null) from the JSON for other output profiles.
 - `qualityAdvisory`: runs for all presets and output profiles. Probabilistic flags (`info` / `review`), no aggregate score, each with a "Mark as reviewed" checkbox.
 

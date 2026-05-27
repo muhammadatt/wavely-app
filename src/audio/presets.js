@@ -253,11 +253,11 @@ export const PRESETS = {
       */
      /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
       "remeasureFramesPostNr",
-      {
+      { 
         compression: [
-          /*
+        /*  
           {
-            targetCrestFactorDb: 15,
+            targetCrestFactorDb: 14,
             maxRatio: 6,
             threshold: "auto",
             follow: false,
@@ -265,18 +265,18 @@ export const PRESETS = {
             release: 30,
           },
           {
-            targetCrestFactorDb: 15,
+            targetCrestFactorDb: 12,
             maxRatio: 3,
             threshold: "auto",
             follow: false,
             attack: 15,
             release: 120,
           },
-          */
-         { targetCrestFactorDb: 14, maxRatio: 6, threshold: "auto", follow: false, attack: 0.5, release: 50 },
-         { targetCrestFactorDb: 13, maxRatio: 3, threshold: "auto", follow: true,  attack: 5,   release: 100 },
-         { targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 20,  release: 200 },
-         { targetCrestFactorDb: 12, maxRatio: 1.5, threshold: "auto", follow: true,  attack: 80,  release: 400 },
+         */
+        
+  { targetCrestFactorDb: 14, maxRatio: 5, threshold: "auto", follow: false, attack: 0.5, release: 80 },
+  { targetCrestFactorDb: 13, maxRatio: 3, threshold: "auto", follow: true,  attack: 1.5, release: 150 },
+  { targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 3,   release: 250 }
         ],
       },
       "remeasureFramesPostNr",
@@ -287,7 +287,7 @@ export const PRESETS = {
           attackMs: 0.1,
           releaseMs: 150,
           makeupGain: "auto",
-          wetMix: 0.2,
+          wetMix: 0.4,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
           // Wet branch is wetMix=1 with auto makeup — sibilants emerge loud
@@ -326,21 +326,22 @@ export const PRESETS = {
           postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
         },
       },
-     */
       { bassEnhance: { enabled: true, drive: 3.0, softness: 0.7, bias: 0.5, mix: 0.8, fundamentalCutRatio: 0.9, crossoverFallbackHz: 200 } },
+      
       {
         vocalSaturation: {
           drive: 2,
           wetDry: 1,
           bias: 0.5,
-          lowCrossover: 85,
+          lowCrossover: 90,
           midCrossover: 8000,
-          softness: 1,
-          lowDriveMult: 5,
+          softness: 0.85,
+          lowDriveMult: 4,
           midDriveMult: 0.1,
           highDriveMult: 0.1,
         },
       },
+      */
       {
         airBoost: {
           gainDb: 6,
