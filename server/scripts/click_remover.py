@@ -313,7 +313,7 @@ def process_file(input_path, output_path, **kwargs):
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Click and lip-smack remover for speech/narration audio"
     )
@@ -333,9 +333,9 @@ if __name__ == "__main__":
         help="High-pass cutoff Hz for detection residual (default: 800).")
     parser.add_argument("--ar-order",     type=int,   default=None,
         help="AR model order (default: context_samples // 2).")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    report = process_file(
+    return process_file(
         args.input,
         args.output,
         threshold_sigma=args.threshold,
@@ -346,5 +346,19 @@ if __name__ == "__main__":
         ar_order=args.ar_order,
     )
 
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py).
+
+    Returns the report dict directly. The legacy spawnPythonCapture path
+    parses it from stdout; the worker path receives it as the response payload.
+    """
+    return main(argv)
+
+
+if __name__ == "__main__":
+    report = main()
+    # spawnPythonCapture reads JSON from stdout — preserve that contract for
+    # the legacy CLI path.
     print(json.dumps(report, indent=2))
     sys.exit(0)

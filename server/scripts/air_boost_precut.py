@@ -309,8 +309,8 @@ def size_precut(measured_db, reference_db, air_boost_db, max_cut_db, min_excess_
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def run(audio, sr, reference_levels, noise_floor_db, air_boost_db,
-        max_cut_db, min_excess_db):
+def analyze_precut(audio, sr, reference_levels, noise_floor_db, air_boost_db,
+                   max_cut_db, min_excess_db):
     measured_db, n_speech = speech_spectrum(audio, sr, noise_floor_db)
     if measured_db is None:
         return {
@@ -325,7 +325,7 @@ def run(audio, sr, reference_levels, noise_floor_db, air_boost_db,
     return out
 
 
-if __name__ == '__main__':
+def main(argv=None):
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format='%(message)s')
     parser = argparse.ArgumentParser(description='airBoost predictive pre-attenuation')
     parser.add_argument('--input',         required=True, help='Input WAV (float32, 44.1 kHz, mono)')
@@ -336,7 +336,7 @@ if __name__ == '__main__':
     parser.add_argument('--min-excess-db', type=float, default=DEFAULT_MIN_EXCESS_DB)
     parser.add_argument('--noise-floor',   type=float, default=None,
                         help='Canonical pipeline noise floor (dBFS) for the speech gate')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     with open(args.curve) as fh:
         curve = json.load(fh)
@@ -348,7 +348,7 @@ if __name__ == '__main__':
         )
 
     sr, audio = _load_audio(args.input)
-    result = run(
+    result = analyze_precut(
         audio, sr, curve_levels, args.noise_floor,
         args.air_boost_db, args.max_cut_db, args.min_excess_db,
     )
@@ -368,3 +368,17 @@ if __name__ == '__main__':
         )
     else:
         print(f"airBoostPrecut: skipped — {result.get('reason')}", flush=True)
+
+    return {
+        'applied': result.get('applied', False),
+        'gain_db': result.get('gain_db'),
+    }
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
+
+
+if __name__ == '__main__':
+    main()

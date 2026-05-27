@@ -151,7 +151,7 @@ def vocal_saturation(
 # CLI
 # ---------------------------------------------------------------------------
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description='Parallel tube-style vocal saturation with preset-defined band crossovers'
     )
@@ -175,7 +175,7 @@ def main():
                         help='Mid-band drive multiplier on base drive (default: 0.1)')
     parser.add_argument('--high-drive-mult', type=float, default=0.1,
                         help='High-band drive multiplier on base drive (default: 0.1)')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sr, audio = wavfile.read(args.input)
     audio = audio.astype(np.float32)
@@ -210,6 +210,13 @@ def main():
         f'  band mults       : low={info["low_drive_mult"]}  mid={info["mid_drive_mult"]}  high={info["high_drive_mult"]}\n'
         f'  drive={args.drive}  wet_dry={args.wet_dry}  bias={args.bias}'
     )
+
+    return info
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
 
 
 if __name__ == '__main__':
