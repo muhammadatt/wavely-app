@@ -128,8 +128,8 @@ def blend_stft_channel(orig_ch, boost_ch, envelope, sample_rate):
     return out.astype(np.float32)
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+def main(argv=None):
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(message)s")
 
     parser = argparse.ArgumentParser(description="Sibilant-aware air boost blend (STFT)")
     parser.add_argument("--original",            required=True)
@@ -139,7 +139,7 @@ if __name__ == "__main__":
     parser.add_argument("--sibilant-gain-floor", type=float, default=0.0)
     parser.add_argument("--attack-ms",           type=float, default=5.0)
     parser.add_argument("--release-ms",          type=float, default=20.0)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sr_o, original = wavfile.read(args.original)
     sr_b, boosted  = wavfile.read(args.boosted)
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     if not sibilant_frame_indices:
         logger.info("AirBoostMask: no sibilant frames — writing boosted as-is")
         wavfile.write(args.output, sr_o, boosted)
-        sys.exit(0)
+        return {'sibilant_frames': 0, 'applied': False}
 
     logger.info(
         f"AirBoostMask: {len(sibilant_frame_indices)} sibilant frames | "
@@ -190,3 +190,19 @@ if __name__ == "__main__":
         f"AirBoostMask: done | sibilant≈{sib_pct:.1f}% | "
         f"envelope min={envelope.min():.3f}"
     )
+
+    return {
+        'sibilant_frames': len(sibilant_frame_indices),
+        'sibilant_pct': sib_pct,
+        'envelope_min': float(envelope.min()),
+        'applied': True,
+    }
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
+
+
+if __name__ == "__main__":
+    main()

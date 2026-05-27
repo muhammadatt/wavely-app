@@ -1310,11 +1310,10 @@ def resonance_suppressor_report_entry(result: dict) -> dict:
 # CLI
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import argparse, json, sys
+def main(argv=None):
+    import argparse, json
     from scipy.io import wavfile
 
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
     parser = argparse.ArgumentParser(description="Stage 3b -- Resonance Suppressor")
     parser.add_argument("--input",         required=True)
     parser.add_argument("--output",        required=True)
@@ -1336,7 +1335,7 @@ if __name__ == "__main__":
                              "analyze_sibilance_events.py (or the cached map "
                              "from sibilanceEvents.js).  Required when any pass "
                              "sets sibilant_only=True; ignored otherwise.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sr, audio = wavfile.read(args.input)
     audio = audio.astype(np.float32)
@@ -1374,4 +1373,22 @@ if __name__ == "__main__":
         audio, sr, params, vad_voiced_mask, args.f0, f0_contour, events_map,
     )
     wavfile.write(args.output, sr, result["audio"])
-    print("JSON_RESULT:" + json.dumps(resonance_suppressor_report_entry(result)), flush=True)
+    return resonance_suppressor_report_entry(result)
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py).
+
+    Returns the report dict directly via the worker protocol — no
+    JSON_RESULT line is emitted in worker mode.
+    """
+    return main(argv)
+
+
+if __name__ == "__main__":
+    import json, sys
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+    # Legacy CLI / spawnPythonJsonResult contract: progress logs on stdout
+    # plus a single trailing JSON_RESULT: line that the JS side parses.
+    report = main()
+    print("JSON_RESULT:" + json.dumps(report), flush=True)

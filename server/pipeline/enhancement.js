@@ -5,25 +5,17 @@
  * Environment:
  *   SEPARATION_PYTHON  — Python executable (default: python3)
  *   SEPARATION_DEVICE  — Compute device for device-aware scripts (default: auto)
- *   RESONANCE_PYTHON   — Python override for resonance suppressor (falls back to SEPARATION_PYTHON)
  *   TORCH_NUM_THREADS  — PyTorch thread count (default: CPU count)
  *   AP_BWE_REPO        — Path to cloned AP-BWE repo (default: vendor/ap_bwe)
  *   AP_BWE_CHECKPOINT  — Path to the .pt checkpoint file (required for AP-BWE)
  *   LAVASR_MODEL_PATH  — HuggingFace Hub ID or local path (default: YatharthS/LavaSR)
  */
 
-import { spawn }               from 'child_process'
 import { fileURLToPath }       from 'url'
 import { writeFile, readFile, rm } from 'fs/promises'
-import os                     from 'os'
 import path                   from 'path'
 import { tempPath }      from '../lib/ffmpeg.js'
-import { spawnPython, spawnPythonCapture, DEVICE, PYTHON as SHARED_PYTHON } from './spawnPython.js'
-
-// Resonance suppressor allows its own Python override before falling back to
-// the shared SEPARATION_PYTHON, matching the original RESONANCE_PYTHON cascade.
-const RESONANCE_PYTHON = process.env.RESONANCE_PYTHON ?? SHARED_PYTHON
-const NUM_THREADS      = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
+import { spawnPython, spawnPythonCapture, spawnPythonJsonResult, DEVICE } from './spawnPython.js'
 
 const SCRIPTS_DIR                  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
 const HARMONIC_EXCITER_SCRIPT      = path.join(SCRIPTS_DIR, 'harmonic_exciter.py')
@@ -273,7 +265,6 @@ export async function applyResonanceSuppression(inputPath, outputPath, preset, f
   const startTime = Date.now()
 
   const args = [
-    RESONANCE_SCRIPT,
     '--input',  inputPath,
     '--output', outputPath,
   ]
@@ -317,7 +308,7 @@ export async function applyResonanceSuppression(inputPath, outputPath, preset, f
 
   let result
   try {
-    result = await runResonanceScript(args)
+    result = await spawnPythonJsonResult(RESONANCE_SCRIPT, args, 'ResonanceSuppressor')
   } finally {
     if (paramsPath)    await rm(paramsPath,    { force: true })
     if (f0ContourPath) await rm(f0ContourPath, { force: true })
@@ -334,55 +325,6 @@ export async function applyResonanceSuppression(inputPath, outputPath, preset, f
   return result
 }
 
-// The resonance suppressor script uses a JSON_RESULT: line-prefix protocol
-// rather than writing pure JSON to stdout, so it needs its own spawn helper.
-function runResonanceScript(args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(RESONANCE_PYTHON, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        OMP_NUM_THREADS:   NUM_THREADS,
-        MKL_NUM_THREADS:   NUM_THREADS,
-        TORCH_NUM_THREADS: NUM_THREADS,
-      },
-    })
-
-    let stdout = ''
-    let stderr = ''
-    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
-
-    proc.stderr.on('data', chunk => {
-      stderr += chunk.toString()
-      if (stderr.length > 4000) stderr = stderr.slice(-4000)
-    })
-
-    proc.on('close', (code, signal) => {
-
-      if (code === 0 && signal === null) {
-        const jsonLine = stdout.split('\n').find(l => l.startsWith('JSON_RESULT:'))
-        if (!jsonLine) {
-          reject(new Error('ResonanceSuppressor: script exited 0 but emitted no JSON_RESULT line'))
-          return
-        }
-        try {
-          resolve(JSON.parse(jsonLine.slice('JSON_RESULT:'.length)))
-        } catch (e) {
-          reject(new Error(`ResonanceSuppressor: failed to parse JSON result: ${e.message}`))
-        }
-      } else {
-        const parts = []
-        if (code   !== null) parts.push(`code ${code}`)
-        if (signal !== null) parts.push(`signal ${signal}`)
-        reject(new Error(`ResonanceSuppressor exited with ${parts.join(', ')}.\n${stderr.slice(-2000)}`))
-      }
-    })
-
-    proc.on('error', err => {
-      reject(new Error(`Failed to spawn ResonanceSuppressor: ${err.message}`))
-    })
-  })
-}
 
 // ── Breath Reducer ────────────────────────────────────────────────────────────
 

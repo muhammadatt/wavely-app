@@ -55,7 +55,7 @@ def resolve_device(device_arg):
     return device_arg
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description='Silero VAD frame classifier')
     parser.add_argument('--input',     required=True,  help='Input WAV (32-bit float, 44.1 kHz)')
     parser.add_argument('--output',    required=True,  help='Output JSON file path')
@@ -63,7 +63,7 @@ def main():
                         help='Speech probability threshold (default: 0.5)')
     parser.add_argument('--device',    default='auto', choices=['auto', 'cpu', 'cuda'],
                         help='Compute device (default: auto)')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     import torch
     import numpy as np
@@ -287,6 +287,11 @@ def main():
           f'({sum(1 for f in frame_results if not f["isSilence"])} voiced, '
           f'{sum(1 for f in frame_results if f["isSilence"])} silence)',
           flush=True)
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
 
 
 if __name__ == '__main__':

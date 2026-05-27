@@ -46,8 +46,14 @@ const WORKER_SCRIPTS = new Set([
   'reference_eq',
   'vocal_saturation',
   'air_boost_precut',
+  'air_boost_masked',
   'click_remover',
   'room_presence',
+  'silero_vad',
+  'estimate_f0_contour',
+  'clip_gain_deesser',
+  'analyze_sibilance_events',
+  'resonance_suppressor',
 ])
 
 function workerEnabled() {
@@ -101,6 +107,29 @@ export async function spawnPythonCapture(script, args, label, extraEnv = {}) {
     return runPython(scriptBaseName(script), args, label)
   }
   return legacySpawn(script, args, label, extraEnv, /* capture */ true)
+}
+
+/**
+ * Run a Python script that uses the `JSON_RESULT:` line-prefix protocol —
+ * progress logs go to stdout/stderr, the result is a single line beginning
+ * with `JSON_RESULT:` followed by the JSON payload. Used by stages whose
+ * scripts emit chatty progress logs but still need to return a summary
+ * dict to JS (clip_gain_deesser, analyze_sibilance_events, resonance_suppressor).
+ *
+ * Worker path: identical to spawnPythonCapture — the script's run(argv)
+ * returns the dict directly through the protocol, so the JSON_RESULT
+ * line is irrelevant and ignored. Progress prints in stdout are routed to
+ * stderr by the worker and end up in the server log.
+ *
+ * Legacy path: spawn, stream stdout to the log line-by-line, suppress
+ * lines starting with `JSON_RESULT:`, and parse the final JSON_RESULT
+ * line as the resolved value.
+ */
+export async function spawnPythonJsonResult(script, args, label, extraEnv = {}) {
+  if (shouldUseWorker(script)) {
+    return runPython(scriptBaseName(script), args, label)
+  }
+  return legacySpawnJsonResult(script, args, label, extraEnv)
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +187,80 @@ function legacySpawn(script, args, label, extraEnv, capture) {
           }
         } else {
           resolve()
+        }
+      } else {
+        const parts = []
+        if (code   !== null) parts.push(`code ${code}`)
+        if (signal !== null) parts.push(`signal ${signal}`)
+        reject(new Error(`${label} exited with ${parts.join(', ') || 'unknown reason'}.\n${stderr.slice(-3000)}`))
+      }
+    })
+
+    proc.on('error', err => {
+      reject(new Error(`Failed to spawn ${label}: ${err.message}`))
+    })
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Legacy spawn path with JSON_RESULT: prefix protocol.
+// ---------------------------------------------------------------------------
+
+function legacySpawnJsonResult(script, args, label, extraEnv) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON, [script, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        OMP_NUM_THREADS:   NUM_THREADS,
+        MKL_NUM_THREADS:   NUM_THREADS,
+        TORCH_NUM_THREADS: NUM_THREADS,
+        ...extraEnv,
+      },
+    })
+
+    let stdout       = ''
+    let stderr       = ''
+    let stdoutBuffer = ''
+
+    proc.stdout.on('data', chunk => {
+      const text = chunk.toString()
+      stdout      += text
+      stdoutBuffer += text
+      // Stream non-JSON_RESULT lines to the log as they arrive.
+      const lines  = stdoutBuffer.split('\n')
+      stdoutBuffer = lines.pop()
+      for (const line of lines) {
+        if (line.trim() && !line.startsWith('JSON_RESULT:')) {
+          console.log(`[${label}] ${line}`)
+        }
+      }
+    })
+
+    proc.stderr.on('data', chunk => {
+      const text = chunk.toString()
+      stderr += text
+      if (stderr.length > 8000) stderr = stderr.slice(-8000)
+      for (const line of text.split('\n')) {
+        if (line.trim()) console.log(`[${label}] ${line}`)
+      }
+    })
+
+    proc.on('close', (code, signal) => {
+      // Flush any partial trailing stdout line that wasn't terminated.
+      if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
+        console.log(`[${label}] ${stdoutBuffer.trim()}`)
+      }
+      if (code === 0 && signal === null) {
+        const line = stdout.split('\n').find(l => l.startsWith('JSON_RESULT:'))
+        if (!line) {
+          reject(new Error(`${label}: exited 0 but emitted no JSON_RESULT line`))
+          return
+        }
+        try {
+          resolve(JSON.parse(line.slice('JSON_RESULT:'.length)))
+        } catch (err) {
+          reject(new Error(`${label}: failed to parse JSON_RESULT: ${err.message}`))
         }
       } else {
         const parts = []
