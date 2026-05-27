@@ -1256,10 +1256,13 @@ export async function bassEnhance(ctx) {
 
   ctx.currentPath = outPath
   ctx.results.bassEnhance = info
+  const peakNote = info.scale_limited_by === 'peak' ? ' (peak-capped)' : ''
   ctx.log(
     `[bass-enhance] applied segments=${info.n_segments} ` +
     `f0=${info.f0_range_hz?.join('–')}Hz ` +
-    `mix=${info.mix_effective} low_band_gain=${info.low_band_gain_db}dB ` +
+    `mode=${info.normalize_mode} mix=${info.mix_effective} ` +
+    `scale=${info.applied_scale}${peakNote} ` +
+    `low_band_gain=${info.low_band_gain_db}dB ` +
     `vad_coverage=${info.vad_coverage_pct}%`,
   )
   await logLevel(ctx, 'after bass enhance', ctx.currentPath, {})

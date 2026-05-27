@@ -355,7 +355,8 @@ def bass_enhance(
     skip_if_voiced_ratio_below: float = 0.05,
     # Mix & output
     mix: float = 0.3,
-    normalize_output: bool = True,
+    normalize_mode: str = 'harmonics-band',
+    peak_ceiling_db: float = -1.0,
 ) -> tuple[np.ndarray, dict]:
     """
     Apply psychoacoustic bass enhancement to `audio`.
@@ -451,39 +452,126 @@ def bass_enhance(
     # --- Step 4: VAD gate — zero harmonics during silence ------------------
     gated = harmonics_only * vad_mask
 
-    # Post-blend low-band energy for the advisory check. dry_low_rms is the
-    # LPF'd bass_band RMS, so the post measurement must also be band-limited
-    # to the same crossover — the gated harmonics signal carries significant
-    # energy at 2 × F0 / 3 × F0 / … which lies above the LPF cutoff and
-    # would inflate the metric if included raw. Run the gated signal through
-    # the same per-utterance LPF to isolate its in-band contribution, then
-    # add to bass_band before taking RMS so before/after are measured in the
-    # same band.
+    # Band-limit the gated harmonics back into the LPF crossover band — used
+    # both for the low_band_gain_db advisory metric and (in 'broadband' mode)
+    # as the post-blend energy check. The gated signal itself carries energy
+    # at 2 × F0 / 3 × F0 / … above the LPF cutoff which would inflate the
+    # metric if included raw.
     gated_low = _apply_per_utterance_filter(
         gated, sr, utterances, utterance_crossovers,
         segment_transition_ms, btype='low',
     )
-    post_low_rms = float(np.sqrt(np.mean((bass_band + mix * gated_low) ** 2)) + 1e-12)
-    low_band_gain_db = round(20.0 * np.log10(post_low_rms / dry_low_rms), 2)
 
-    # --- Step 5: Additive blend onto the dry signal -------------------------
+    # --- Step 5: Determine the harmonics scale factor -----------------------
+    # Three normalisation modes select different ways of deciding how loud
+    # the added harmonics should be:
+    #
+    #   'harmonics-band' (default) — Match the harmonics' RMS in their own
+    #     band to mix × dry-band-RMS, then cap by a peak-aware bound that
+    #     keeps the blend under peak_ceiling_db. The dry voice is preserved
+    #     bit-exact; only the added harmonics are scaled.
+    #
+    #   'broadband' — Legacy behaviour. Add mix × gated to the dry signal,
+    #     then scale the whole blend back to the dry signal's broadband RMS.
+    #     Preserves total loudness but attenuates the dry voice to "pay for"
+    #     the new harmonic energy.
+    #
+    #   'off' — Pure additive: blend = audio + mix × gated. No level control
+    #     beyond the final safety clip + downstream truePeakLimit.
+    mode = (normalize_mode or 'harmonics-band').lower()
+    if mode not in ('off', 'broadband', 'harmonics-band'):
+        logger.warning(
+            "BassEnhance: unknown normalize_mode=%r — falling back to 'harmonics-band'",
+            normalize_mode,
+        )
+        mode = 'harmonics-band'
+
+    peak_ceiling    = float(10.0 ** (peak_ceiling_db / 20.0))
+    rms_scale       = float(mix)
+    peak_safe_scale = float('inf')
+    dry_band_rms    = 0.0
+    gated_band_rms  = 0.0
+
+    if mode == 'harmonics-band':
+        # Dry energy in the harmonics band — same per-utterance HPF cutoffs
+        # used to make harmonics_only. Restricted to voiced frames so silence
+        # doesn't dilute either side of the ratio.
+        dry_in_band = _apply_per_utterance_filter(
+            mono, sr, utterances, hpf_cutoffs,
+            segment_transition_ms, btype='high',
+        )
+        voiced_idx = vad_mask > 1e-6
+        if voiced_idx.any():
+            dry_band_rms   = float(np.sqrt(np.mean(dry_in_band[voiced_idx] ** 2)) + 1e-12)
+            gated_band_rms = float(np.sqrt(np.mean(gated[voiced_idx]       ** 2)) + 1e-12)
+        else:
+            dry_band_rms   = float(np.sqrt(np.mean(dry_in_band ** 2)) + 1e-12)
+            gated_band_rms = float(np.sqrt(np.mean(gated       ** 2)) + 1e-12)
+
+        rms_scale = (dry_band_rms * float(mix)) / max(gated_band_rms, 1e-12)
+
+        # Peak-aware cap: largest s such that max(|audio + s × gated|) <=
+        # peak_ceiling. Only same-sign samples constrain the bound; opposite
+        # signs partially cancel. Samples where the dry is already over the
+        # ceiling are excluded — they're downstream truePeakLimit's problem,
+        # not this stage's, and including them would force scale to zero on a
+        # single pre-existing over.
+        abs_g = np.abs(gated)
+        if audio.ndim == 2:
+            bounds = []
+            for ch in range(n_channels):
+                ach   = audio[:, ch]
+                valid = (abs_g > 1e-6) & (np.sign(ach) == np.sign(gated)) & (np.abs(ach) < peak_ceiling)
+                if valid.any():
+                    bounds.append(float(((peak_ceiling - np.abs(ach[valid])) / abs_g[valid]).min()))
+            if bounds:
+                peak_safe_scale = min(bounds)
+        else:
+            valid = (abs_g > 1e-6) & (np.sign(audio) == np.sign(gated)) & (np.abs(audio) < peak_ceiling)
+            if valid.any():
+                peak_safe_scale = float(((peak_ceiling - np.abs(audio[valid])) / abs_g[valid]).min())
+
+        scale = min(rms_scale, peak_safe_scale)
+    else:
+        # 'off' and 'broadband' both start from the literal mix multiplier.
+        scale = float(mix)
+
+    scale_limited_by = 'peak' if peak_safe_scale < rms_scale else 'rms'
+
+    # --- Step 6: Additive blend onto the dry signal -------------------------
     if audio.ndim == 2:
         # Add the same harmonics signal to every channel (bass = center).
         blend = audio.copy()
         for ch in range(n_channels):
-            blend[:, ch] = audio[:, ch] + mix * gated
+            blend[:, ch] = audio[:, ch] + scale * gated
     else:
-        blend = audio + mix * gated
+        blend = audio + scale * gated
 
-    # --- Step 6: Optional RMS-match back to dry level -----------------------
-    if normalize_output:
+    # --- Step 7: Broadband RMS-match (legacy mode only) ---------------------
+    # In 'harmonics-band' mode the scale was already chosen to match a target
+    # band RMS; rescaling the broadband output here would defeat the design.
+    # In 'off' mode the user opted out of any level matching. Only 'broadband'
+    # mode performs the legacy whole-blend RMS scaling.
+    effective_scale = scale
+    if mode == 'broadband':
         dry_rms = float(np.sqrt(np.mean(audio ** 2)) + 1e-12)
         out_rms = float(np.sqrt(np.mean(blend ** 2)) + 1e-12)
         if out_rms > 0:
-            blend = blend * (dry_rms / out_rms)
+            renorm          = dry_rms / out_rms
+            blend           = blend * renorm
+            effective_scale = scale * renorm
+
+    # Post-blend low-band energy for the advisory metric. dry_low_rms was
+    # measured on the LPF'd bass band; the post measurement uses the same
+    # band-limited gated signal multiplied by the effective coefficient that
+    # ended up on gated in the final output.
+    post_low_rms     = float(np.sqrt(np.mean((bass_band + effective_scale * gated_low) ** 2)) + 1e-12)
+    low_band_gain_db = round(20.0 * np.log10(post_low_rms / dry_low_rms), 2)
 
     # Safety clip — the saturator + blend can push transient peaks past unity
-    # on inputs that were already close to full scale.
+    # on inputs that were already close to full scale. In 'harmonics-band'
+    # mode this should be a no-op because the peak-safe scale already caps
+    # the blend at peak_ceiling; the clip remains as a last-resort defence.
     blend = np.clip(blend, -1.0, 1.0).astype(np.float32)
 
     info = {
@@ -492,7 +580,18 @@ def bass_enhance(
         "segment_crossovers_hz": [round(c, 1) for c in utterance_crossovers],
         "f0_range_hz":           [round(f0_range_hz[0], 1), round(f0_range_hz[1], 1)],
         "vad_coverage_pct":      round(voiced_ratio * 100, 2),
-        "mix_effective":         round(mix, 3),
+        "mix_effective":         round(float(mix), 3),
+        "normalize_mode":        mode,
+        "rms_scale":             round(rms_scale, 4),
+        "peak_safe_scale":       (round(peak_safe_scale, 4)
+                                  if np.isfinite(peak_safe_scale) else None),
+        "applied_scale":         round(float(effective_scale), 4),
+        "scale_limited_by":      scale_limited_by,
+        "peak_ceiling_dbfs":     round(peak_ceiling_db, 2),
+        "dry_band_rms_db":       (round(20.0 * np.log10(dry_band_rms), 2)
+                                  if dry_band_rms > 0 else None),
+        "gated_band_rms_db":     (round(20.0 * np.log10(gated_band_rms), 2)
+                                  if gated_band_rms > 0 else None),
         "low_band_gain_db":      low_band_gain_db,
         "fundamental_cut_ratio": round(fundamental_cut_ratio, 3),
         "drive":                 round(drive, 3),
@@ -545,8 +644,18 @@ def main():
     # Skip conditions & mix
     parser.add_argument("--skip-if-voiced-ratio-below", type=float, default=0.05)
     parser.add_argument("--mix",                    type=float, default=0.3)
+    parser.add_argument("--normalize-mode",         default="harmonics-band",
+                        choices=("off", "broadband", "harmonics-band"),
+                        help="How to balance added harmonics against the dry "
+                             "signal. Default 'harmonics-band' matches harmonic "
+                             "RMS to dry-band RMS with a peak-aware cap.")
+    parser.add_argument("--peak-ceiling-db",        type=float, default=-1.0,
+                        help="Target peak ceiling (dBFS) for the harmonics-band "
+                             "peak-safe scale cap. Ignored in other modes.")
+    # Deprecated alias kept so older callers that pass --no-normalize-output
+    # don't break. Equivalent to --normalize-mode off when set.
     parser.add_argument("--no-normalize-output",    action="store_true",
-                        help="Skip the post-blend RMS-match step")
+                        help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 
@@ -583,7 +692,8 @@ def main():
         vad_release_ms=args.vad_release_ms,
         skip_if_voiced_ratio_below=args.skip_if_voiced_ratio_below,
         mix=args.mix,
-        normalize_output=not args.no_normalize_output,
+        normalize_mode=('off' if args.no_normalize_output else args.normalize_mode),
+        peak_ceiling_db=args.peak_ceiling_db,
     )
 
     wavfile.write(args.output, sr, processed.astype(np.float32))

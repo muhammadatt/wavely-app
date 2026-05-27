@@ -224,10 +224,10 @@ export const PRESETS = {
       {
         clipGainDeEsser: {
           enabled: true,
-          stridentCeilingDb:     8.0,
+          stridentCeilingDb:     6.0,
           nonStridentCeilingDb: -4.0,
-          reductionRatio: 0.55,
-          maxReductionDb: 6.0,
+          reductionRatio: 0.50,
+          maxReductionDb: 8.0,
           minDurationMs: 15,
           contextWindowMs: 80,
           fades: {
@@ -287,7 +287,7 @@ export const PRESETS = {
           attackMs: 0.1,
           releaseMs: 150,
           makeupGain: "auto",
-          wetMix: 0.1,
+          wetMix: 0.2,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
           // Wet branch is wetMix=1 with auto makeup — sibilants emerge loud
@@ -326,11 +326,8 @@ export const PRESETS = {
           postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
         },
       },
-      */
-      // BassEnhance off by default for audiobook narration. The preset's
-      // character is "Clean, present, natural" and ACX human review listens
-      // for unnatural tonality / over-processing; opt in per file if needed.
-      { bassEnhance: { enabled: false, drive: 2.5, softness: 0.6, bias: 0.2, mix: 0.2, crossoverFallbackHz: 280 } },
+     */
+      { bassEnhance: { enabled: true, drive: 3.0, softness: 0.7, bias: 0.5, mix: 0.8, fundamentalCutRatio: 0.9, crossoverFallbackHz: 200 } },
       {
         vocalSaturation: {
           drive: 2,
@@ -339,7 +336,7 @@ export const PRESETS = {
           lowCrossover: 85,
           midCrossover: 8000,
           softness: 1,
-          lowDriveMult: 7.1,
+          lowDriveMult: 5,
           midDriveMult: 0.1,
           highDriveMult: 0.1,
         },
@@ -372,6 +369,7 @@ export const PRESETS = {
             freq_ceil_hz: 20000.0,
             mode: "soft",
           },
+          /*
           {
             sibilant_only: true,
             preserve_harmonics: false,
@@ -392,15 +390,16 @@ export const PRESETS = {
               broadband_trigger_db: 13.0,
             },
           },
+          */
         ],
       },
     
       {
         roomPresence: {
           enabled: true,
-          ir_path: "../ir/CrystalVocal.wav",
+          //ir_path: "../ir/19_CrystalVocal.wav",
           wet: 0.01,
-          rt60Ms: 250,
+          rt60Ms: 150,
           preDelayMs: 10.0,
           early_reflections: 2,
           normalize_ir: true,

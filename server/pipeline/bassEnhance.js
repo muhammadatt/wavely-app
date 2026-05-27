@@ -57,7 +57,14 @@ export async function applyBassEnhance(inputPath, outputPath, params = {}, frame
   // Skip & mix
   if (params.skipIfVoicedRatioBelow != null) args.push('--skip-if-voiced-ratio-below', String(params.skipIfVoicedRatioBelow))
   if (params.mix                 != null) args.push('--mix',                   String(params.mix))
-  if (params.normalizeOutput === false)   args.push('--no-normalize-output')
+  if (params.normalizeMode       != null) args.push('--normalize-mode',        String(params.normalizeMode))
+  if (params.peakCeilingDb       != null) args.push('--peak-ceiling-db',       String(params.peakCeilingDb))
+  // Backward-compat — older preset configs may still pass normalizeOutput.
+  // A literal `false` maps to the new 'off' mode unless normalizeMode is set
+  // explicitly (in which case normalizeMode wins).
+  if (params.normalizeMode == null && params.normalizeOutput === false) {
+    args.push('--normalize-mode', 'off')
+  }
 
   // VAD frames as a temp JSON — Python script handles missing file by
   // treating the whole input as voiced.
