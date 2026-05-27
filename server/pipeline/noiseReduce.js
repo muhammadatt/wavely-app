@@ -19,14 +19,19 @@ import os from 'os'
 import path from 'path'
 import fs from 'fs'
 import { decodeToFloat32, tempPath, removeTmp, padStart } from '../lib/ffmpeg.js'
+import { spawnPython } from './spawnPython.js'
 
 // --- DeepFilter invocation strategy ---
 // DEEPFILTER_BINARY (env): path to a pre-built deep-filter CLI binary.
 //   Used on platforms where the Python deepfilternet package can't be
 //   compiled (e.g. Windows ARM64 without MSVC Build Tools).
 //   On Linux servers, leave unset — the Python script path is used instead.
-// DEEPFILTER_PYTHON (env): Python executable that has deepfilternet installed.
-//   Defaults to 'python3'. Set to a venv python path if needed.
+// DEEPFILTER_PYTHON (env): Python executable for the local spawn helper.
+//   This now only affects the DTLN path and the CLI-binary error log, since
+//   DeepFilterNet3 and RNNoise are routed through spawnPython() and pick up
+//   the persistent worker (which uses SEPARATION_PYTHON). Setting
+//   DEEPFILTER_PYTHON without SEPARATION_PYTHON will not affect the DF3 or
+//   RNNoise interpreter — set SEPARATION_PYTHON to override that.
 const DEEPFILTER_BINARY = process.env.DEEPFILTER_BINARY ?? null
 const PYTHON = process.env.DEEPFILTER_PYTHON ?? 'python3'
 const NUM_THREADS = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
@@ -46,7 +51,7 @@ const DTLN_SCRIPT      = path.join(SCRIPTS_DIR, 'dtln_denoise.py')
  * @returns {Promise<object>} Processing metadata for the pipeline report
  */
 export async function applyNoiseReduction(inputPath, outputPath, { attenLimDb = null } = {}) {
-  const strategy = DEEPFILTER_BINARY ? `CLI binary (${DEEPFILTER_BINARY})` : `Python (${PYTHON})`
+  const strategy = DEEPFILTER_BINARY ? `CLI binary (${DEEPFILTER_BINARY})` : 'Python script'
   console.log(`[DeepFilter] Starting: model=DeepFilterNet3 strategy=${strategy} atten_lim_db=${attenLimDb ?? 'uncapped'}`)
 
   // DeepFilterNet3 introduces exactly 10ms of algorithmic fade-in delay (480 samples at 48kHz).
@@ -124,13 +129,15 @@ async function runDeepFilterCli(inputPath, outputPath, attenLimDb) {
 /**
  * Python script strategy (production default).
  * Calls deepfilter_enhance.py which uses the deepfilternet Python package.
+ * Routed through spawnPython so the persistent worker handles the DF3 model
+ * load once per server lifetime instead of every pipeline run.
  */
 function runDeepFilterPython(inputPath, outputPath, attenLimDb) {
-  const args = [SCRIPT, '--input', inputPath, '--output', outputPath]
+  const args = ['--input', inputPath, '--output', outputPath]
   if (attenLimDb !== null) {
     args.push('--atten-lim-db', String(attenLimDb))
   }
-  return spawnProcess(PYTHON, args, 'DeepFilter Python')
+  return spawnPython(SCRIPT, args, 'DeepFilter Python')
 }
 
 // ── Noise reduction alternatives ──────────────────────────────────────────────
@@ -151,7 +158,7 @@ export async function runRnnoise(inputPath, outputPath) {
 
   const nrPath = tempPath('.wav')
   try {
-    await spawnProcess(PYTHON, [RNNOISE_SCRIPT, '--input', paddedInput, '--output', nrPath], 'RNNoise')
+    await spawnPython(RNNOISE_SCRIPT, ['--input', paddedInput, '--output', nrPath], 'RNNoise')
     await decodeToFloat32(nrPath, outputPath, { trimStartMs: 20 })
   } finally {
     await removeTmp(paddedInput)
