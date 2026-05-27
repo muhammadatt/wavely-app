@@ -16,7 +16,9 @@
  *      voiced-frame RMS distribution.
  *   4. Adjust threshold if above peak level (for quiet files).
  *   5. Calculate ratio using simple formula: amplitude / (amplitude - required_reduction)
- *   6. Apply feed-forward RMS compressor with soft knee.
+ *   6. Apply feed-forward sample-peak compressor with soft knee and optional
+ *      forward lookahead. Attack/release smooth the gain-reduction signal, not
+ *      the level estimate, so the detector always sees the true sample peak.
  *
  * Fixed parameters (per spec): attack, release, knee width, makeup gain = 0 dB.
  * Ratio clamping has been removed in favor of simple calculation.
@@ -237,7 +239,13 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
  * extracted from applyCompression.
  */
 async function applySingleCompressionPass(inputPath, outputPath, config, frameAnalysis, originalVoicedRmsDbfs = null) {
-  const { targetCrestFactorDb, attack, release, threshold = "auto", follow = true, maxRatio = 5 } = config
+  const { targetCrestFactorDb, attack, release, threshold = "auto", follow = true, maxRatio = 5, lookahead } = config
+  // Forward lookahead window for the sample-peak detector. Defaults to the
+  // attack time (capped at 10 ms) so the gain ramp can complete before the
+  // peak arrives without over-anticipating on slow-attack passes. Setting
+  // lookahead: 0 disables anticipation and lets transients pass through the
+  // attack window — useful if the slow-attack pass is intended as a leveler.
+  const lookaheadMs = typeof lookahead === 'number' ? lookahead : Math.min(attack, 10)
 
   const { channels, sampleRate } = await readWavAllChannels(inputPath)
   const analysisSamples = channels[0]
@@ -362,6 +370,7 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
     releaseMs:    release,
     kneeDb:       KNEE_WIDTH_DB,
     makeupGainDb: 0,
+    lookaheadMs,
   }
   const gainCurve        = buildCompressionGainCurve(analysisSamples, sampleRate, compParams)
   const processedChannels = channels.map(ch =>
@@ -553,53 +562,99 @@ function adjustCompressionThreshold(samples, frameAnalysis, thresholdDbfs, requi
 // ── Compressor DSP ──────────────────────────────────────────────────────────
 
 /**
- * Build a per-sample gain reduction curve (feed-forward, RMS detection).
+ * Build a per-sample gain reduction curve (feed-forward, sample-peak detection).
  *
- * Level detection: power-domain envelope follower with attack/release time
- * constants. Gain computer applies soft-knee compression.
+ * Detector: sample-peak — max(|x|) over a forward lookahead window of
+ *           lookaheadMs. Runs in O(n) via a monotonic-deque sliding maximum.
+ * Gain computer: soft-knee compression curve (computeGainReduction).
+ * Smoothing: attack/release time constants applied to the gain-reduction
+ *            signal itself (not to the level estimate). Attack governs how
+ *            fast more reduction is applied; release governs how fast it
+ *            decays. When lookaheadMs >= attackMs the gain ramp completes
+ *            before the peak arrives — transparent peak control. With shorter
+ *            lookahead, transients partially bleed through (creative choice).
  *
+ * @param {Float32Array} samples
+ * @param {number} sampleRate
+ * @param {{ thresholdDb: number, ratio: number, attackMs: number, releaseMs: number, kneeDb: number, lookaheadMs?: number }} params
  * @returns {{ curve: Float32Array, maxGainReductionDb: number, avgGainReductionDb: number, samplesExceedingThreshold: number, percentAboveThreshold: number }}
  */
 function buildCompressionGainCurve(samples, sampleRate, params) {
-  const { thresholdDb, ratio, attackMs, releaseMs, kneeDb } = params
+  const { thresholdDb, ratio, attackMs, releaseMs, kneeDb, lookaheadMs = 0 } = params
   const n = samples.length
 
-  const attackCoeff  = Math.exp(-1 / (sampleRate * attackMs / 1000))
-  const releaseCoeff = Math.exp(-1 / (sampleRate * releaseMs / 1000))
+  const attackCoeff  = attackMs  > 0 ? Math.exp(-1 / (sampleRate * attackMs  / 1000)) : 0
+  const releaseCoeff = releaseMs > 0 ? Math.exp(-1 / (sampleRate * releaseMs / 1000)) : 0
+  const L = Math.max(0, Math.round(sampleRate * lookaheadMs / 1000))
+
+  // Monotonic deque (decreasing |x|) — circular buffer indexed by dqHead.
+  // Holds indices whose absolute sample values form the running maximum over
+  // the forward window [i, min(i + L, n - 1)]. Capacity L+2 is sufficient
+  // because the eviction rule keeps at most L+1 elements live at any time.
+  const dqCap = L + 2
+  const dq    = new Int32Array(dqCap)
+  const dqAbs = new Float32Array(dqCap)
+  let dqHead  = 0
+  let dqCount = 0
 
   const curve = new Float32Array(n)
-  let powerEnv         = 0
-  let maxGainReductionDb = 0
-  let totalGainReductionDb = 0
-  let activeFrames     = 0
+  let currentGR                 = 0
+  let maxGainReductionDb        = 0
+  let totalGainReductionDb      = 0
+  let activeFrames              = 0
   let samplesExceedingThreshold = 0
+  let fedUpTo = -1
 
   for (let i = 0; i < n; i++) {
-    const xPow = samples[i] * samples[i]
+    const feedTo = i + L < n ? i + L : n - 1
 
-    if (xPow > powerEnv) {
-      powerEnv = attackCoeff * powerEnv + (1 - attackCoeff) * xPow
+    // Push new samples into the deque, evicting from the back while the back
+    // value is <= the incoming value (preserves monotonic-decreasing order).
+    while (fedUpTo < feedTo) {
+      fedUpTo++
+      const s   = samples[fedUpTo]
+      const abs = s < 0 ? -s : s
+      while (dqCount > 0) {
+        const backPos = (dqHead + dqCount - 1) % dqCap
+        if (dqAbs[backPos] <= abs) {
+          dqCount--
+        } else break
+      }
+      const insertPos = (dqHead + dqCount) % dqCap
+      dq[insertPos]    = fedUpTo
+      dqAbs[insertPos] = abs
+      dqCount++
+    }
+
+    // Drop indices that have fallen out of the window from the front.
+    while (dqCount > 0 && dq[dqHead] < i) {
+      dqHead = (dqHead + 1) % dqCap
+      dqCount--
+    }
+
+    const peak    = dqCount > 0 ? dqAbs[dqHead] : 0
+    const levelDb = peak > 1e-7 ? 20 * Math.log10(peak) : -120
+    const desiredGR = computeGainReduction(levelDb, thresholdDb, ratio, kneeDb)
+
+    if (levelDb > thresholdDb) samplesExceedingThreshold++
+
+    // Smooth the gain-reduction signal. Attack when GR is rising (more
+    // reduction needed); release when GR is falling (less reduction needed).
+    if (desiredGR > currentGR) {
+      currentGR = attackCoeff  * currentGR + (1 - attackCoeff)  * desiredGR
     } else {
-      powerEnv = releaseCoeff * powerEnv + (1 - releaseCoeff) * xPow
+      currentGR = releaseCoeff * currentGR + (1 - releaseCoeff) * desiredGR
     }
 
-    const levelDb        = powerEnv > 1e-14 ? 10 * Math.log10(powerEnv) : -120
-    const gainReductionDb = computeGainReduction(levelDb, thresholdDb, ratio, kneeDb)
-
-    // Count samples that exceed the threshold (have gain reduction applied)
-    if (levelDb > thresholdDb) {
-      samplesExceedingThreshold++
-    }
-
-    curve[i] = gainReductionDb
-    if (gainReductionDb > 0) {
-      if (gainReductionDb > maxGainReductionDb) maxGainReductionDb = gainReductionDb
-      totalGainReductionDb += gainReductionDb
+    curve[i] = currentGR
+    if (currentGR > 0) {
+      if (currentGR > maxGainReductionDb) maxGainReductionDb = currentGR
+      totalGainReductionDb += currentGR
       activeFrames++
     }
   }
 
-  const avgGainReductionDb = activeFrames > 0 ? totalGainReductionDb / activeFrames : 0
+  const avgGainReductionDb    = activeFrames > 0 ? totalGainReductionDb / activeFrames : 0
   const percentAboveThreshold = n > 0 ? (samplesExceedingThreshold / n) * 100 : 0
   return { curve, maxGainReductionDb, avgGainReductionDb, samplesExceedingThreshold, percentAboveThreshold }
 }

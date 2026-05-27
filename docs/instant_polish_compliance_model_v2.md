@@ -37,7 +37,7 @@ ACX certification is a six-point deterministic check. All six must pass for a ce
 
 | Check | Pass threshold | Method |
 |---|---|---|
-| RMS (average loudness) | -23 to -18 dBFS | Unweighted RMS, voiced frames only, libebur128 |
+| RMS (average loudness) | -23 to -18 dBFS | Unweighted RMS, full-file ungated (ACX standard — every sample counted, including silences, breaths, room tone), FFmpeg `volumedetect` |
 | True peak | ≤ -3 dBFS | True peak at 192 kHz upsample, FFmpeg loudnorm |
 | Noise floor | ≤ -60 dBFS | Energy threshold method, lowest-energy silence frames |
 | Sample rate | 44.1 kHz | FFmpeg probe |

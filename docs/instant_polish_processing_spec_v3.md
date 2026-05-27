@@ -78,7 +78,7 @@ Three output profiles are available:
 
 | Profile ID | Display name | Normalization target | Peak ceiling | Measurement method |
 |---|---|---|---|---|
-| `acx` | ACX Audiobook | -20 dBFS RMS | -3 dBFS | Unweighted RMS, voiced frames only |
+| `acx` | ACX Audiobook | -20 dBFS RMS | -3 dBFS | Unweighted RMS, full-file ungated (ACX standard) |
 | `podcast` | Podcast / Streaming | -16 LUFS integrated | -1 dBFS | K-weighted LUFS (EBU R128) |
 | `broadcast` | Broadcast | -23 LUFS integrated | -1 dBFS | K-weighted LUFS (EBU R128) |
 
@@ -694,19 +694,19 @@ The normalization target and measurement method are set by the **output profile*
 
 | Output profile | Normalization target | Measurement method |
 |---|---|---|
-| `acx` | -20 dBFS RMS | Unweighted RMS, voiced frames only |
+| `acx` | -20 dBFS RMS | Unweighted RMS, full-file ungated (ACX standard) |
 | `podcast` | -16 LUFS integrated | K-weighted integrated loudness (EBU R128) |
 | `broadcast` | -23 LUFS integrated | K-weighted integrated loudness (EBU R128) |
 
-**Why unweighted RMS for ACX:** ACX measures unweighted RMS. Using LUFS for ACX output would create a systematic measurement mismatch with what ACX's own tools report.
+**Why unweighted RMS for ACX:** ACX measures unweighted RMS over the entire file — every sample, silences and breaths included, with no gating. Using LUFS, or applying any silence exclusion, would produce a systematic measurement mismatch with what ACX's own tools report.
 
 **Why LUFS for podcast/broadcast:** Streaming platforms normalize by LUFS. Using LUFS ensures files behave correctly in downstream platform normalization.
 
-#### 5b — Silence Exclusion
+#### 5b — Silence Handling
 
-For RMS measurement: exclude silence frames using `silence_threshold = measured_noise_floor + 6 dB`.
+For RMS measurement (ACX): **no silence exclusion.** ACX measures ungated full-file RMS — every sample contributes, including silences, breaths, and room tone. Excluding silence would target a different value than ACX's own measurement and cause systematic undershoot at the certification check.
 
-For LUFS measurement: EBU R128 gating handles silence exclusion natively.
+For LUFS measurement (podcast / broadcast): pipeline-level silence exclusion using `silence_threshold = measured_noise_floor + 6 dB`. EBU R128's built-in absolute (-70 LUFS) and relative (-10 LU) gates are not file-specific enough for recordings with elevated room tone, so pipeline-flagged silence frames are zeroed before measurement.
 
 #### 5c — Gain Calculation and Application
 
@@ -747,7 +747,7 @@ Always reported as informational values regardless of output profile:
 
 | Measurement | Method |
 |---|---|
-| RMS (unweighted) | libebur128, voiced frames only |
+| RMS (unweighted) | FFmpeg `volumedetect`, full-file ungated (ACX standard) |
 | LUFS integrated | libebur128, K-weighted |
 | True peak | FFmpeg loudnorm, 192 kHz upsample |
 | Noise floor | Energy threshold, silence frames |
