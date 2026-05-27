@@ -60,6 +60,27 @@ export async function measureAudio(filePath) {
 }
 
 /**
+ * Lightweight RMS-only measurement (FFmpeg volumedetect mean_volume).
+ * Skips the libebur128 LUFS + true-peak pass that measureAudio() runs.
+ * Used by the ACX normalize path which only needs ungated full-file RMS.
+ */
+export async function measureRmsDbfs(filePath) {
+  const { meanVolume } = await measureVolume(filePath)
+  return meanVolume
+}
+
+/**
+ * Lightweight true-peak-only measurement (libebur128).
+ * Skips the FFmpeg volumedetect pass that measureAudio() runs.
+ * Used by the truePeakLimit stage to report pre/post peak without the
+ * unneeded RMS work.
+ */
+export async function measureTruePeakDbfs(filePath) {
+  const { truePeak } = await measureLoudness(filePath)
+  return truePeak
+}
+
+/**
  * Use FFmpeg's volumedetect filter for mean/max volume. Noise floor is
  * deliberately not derived from the histogram — see file header.
  */

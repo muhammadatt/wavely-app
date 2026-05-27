@@ -32,7 +32,13 @@ import {
 } from '../lib/ffmpeg.js'
 import { runFfmpeg } from '../lib/exec-ffmpeg.js'
 import { applyNoiseReduction, runRnnoise, runDtln } from './noiseReduce.js'
-import { measureAudio, measureVoicedLufs, checkAcxCertification } from './measure.js'
+import {
+  measureAudio,
+  measureRmsDbfs,
+  measureTruePeakDbfs,
+  measureVoicedLufs,
+  checkAcxCertification,
+} from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
 import { analyzeFrames, remeasureFrames } from './frameAnalysis.js'
 import { analyzeCorrectiveEQ, bandsToFfmpegFilters } from './correctiveEQ.js'
@@ -1322,9 +1328,17 @@ export async function normalize(ctx) {
     // Use the explicit normalizationTarget from the output profile.
     // Do NOT use the loudnessRange midpoint — for ACX the midpoint is -20.5 dBFS
     // but the spec target is -20 dBFS RMS.
-    const targetRms        = outputProfile.normalizationTarget
-    const { rmsDbfs }      = await measureAudio(ctx.currentPath)
-    const gainDb           = targetRms - rmsDbfs
+    const targetRms = outputProfile.normalizationTarget
+    const rmsDbfs   = await measureRmsDbfs(ctx.currentPath)
+
+    if (rmsDbfs == null || !Number.isFinite(rmsDbfs)) {
+      throw new Error(
+        `normalize: failed to measure full-file RMS for ${ctx.currentPath} ` +
+        `(volumedetect returned ${rmsDbfs}). Cannot compute normalization gain.`
+      )
+    }
+
+    const gainDb = targetRms - rmsDbfs
 
     if (gainDb > 18) {
       ctx.log(`[pipeline] Very low recording level — gain required: ${gainDb.toFixed(1)} dB`)
@@ -1367,19 +1381,22 @@ export async function truePeakLimit(ctx) {
   const limitedPath = ctx.tmp('.wav')
 
   // Measure true peak before limiting so we can report how much work the
-  // limiter actually did. Cheap relative to the limiter pass itself.
-  const prePeakDbfs = (await measureAudio(ctx.currentPath)).truePeakDbfs
+  // limiter actually did. Use the TP-only helper to skip the unused RMS pass.
+  const prePeakDbfs = await measureTruePeakDbfs(ctx.currentPath)
 
   await applyTruePeakLimiter(ctx.currentPath, limitedPath, {
     peakCeiling: ceilingDb,
   })
   ctx.currentPath = limitedPath
 
-  const postPeakDbfs   = (await measureAudio(ctx.currentPath)).truePeakDbfs
-  const reductionDb    = prePeakDbfs != null && postPeakDbfs != null
+  const postPeakDbfs = await measureTruePeakDbfs(ctx.currentPath)
+  const reductionDb  = prePeakDbfs != null && postPeakDbfs != null
     ? Math.max(0, prePeakDbfs - postPeakDbfs)
     : null
 
+  // Field names follow the codebase-wide `truePeakDbfs` convention — values
+  // are inter-sample true-peak measurements from libebur128, stored as dBFS
+  // for consistency with measureAudio() and ctx.results.metrics.
   ctx.results.truePeakLimit = {
     ceilingDbfs:   ceilingDb,
     prePeakDbfs:   round2(prePeakDbfs),
@@ -1388,7 +1405,7 @@ export async function truePeakLimit(ctx) {
   }
 
   await logLevel(ctx, 'after limiting', ctx.currentPath, {
-    tp:        `${ceilingDb}dBTP`,
+    ceiling:   `${ceilingDb}dBFS`,
     prePeak:   prePeakDbfs  != null ? `${round2(prePeakDbfs)}dBFS`  : '?',
     postPeak:  postPeakDbfs != null ? `${round2(postPeakDbfs)}dBFS` : '?',
     reduction: reductionDb  != null ? `${round2(reductionDb)}dB`    : '?',

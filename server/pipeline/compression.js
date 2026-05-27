@@ -585,7 +585,22 @@ function buildCompressionGainCurve(samples, sampleRate, params) {
 
   const attackCoeff  = attackMs  > 0 ? Math.exp(-1 / (sampleRate * attackMs  / 1000)) : 0
   const releaseCoeff = releaseMs > 0 ? Math.exp(-1 / (sampleRate * releaseMs / 1000)) : 0
-  const L = Math.max(0, Math.round(sampleRate * lookaheadMs / 1000))
+
+  // Lookahead window length in samples, clamped to:
+  //   - a hard upper bound of 100 ms (musical lookahead beyond this is
+  //     pointless and would smear transients across phonemes);
+  //   - the available signal length (n - 1) so the deque buffer cannot
+  //     exceed the input itself on very short signals.
+  // A misconfigured preset (e.g. lookaheadMs: 5000) used to size the deque
+  // to ~220k entries at 44.1 kHz — the clamp keeps deque capacity bounded
+  // regardless of how the call site is configured.
+  const MAX_LOOKAHEAD_MS = 100
+  const requestedLook    = Math.max(0, lookaheadMs)
+  const effectiveLookMs  = Math.min(requestedLook, MAX_LOOKAHEAD_MS)
+  const L = Math.min(
+    Math.max(0, Math.round(sampleRate * effectiveLookMs / 1000)),
+    Math.max(0, n - 1)
+  )
 
   // Monotonic deque (decreasing |x|) — circular buffer indexed by dqHead.
   // Holds indices whose absolute sample values form the running maximum over
