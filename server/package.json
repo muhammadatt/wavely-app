@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node --experimental-wasm-modules --env-file=.env index.js",
-    "dev": "node --experimental-wasm-modules --watch --env-file=.env index.js"
+    "dev":   "node --experimental-wasm-modules --watch --env-file=.env index.js",
+    "test":  "node --experimental-wasm-modules --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
