@@ -327,21 +327,20 @@ export const PRESETS = {
         },
       },
       { bassEnhance: { enabled: true, drive: 3.0, softness: 0.7, bias: 0.5, mix: 0.8, fundamentalCutRatio: 0.9, crossoverFallbackHz: 200 } },
-      
+      */
       {
         vocalSaturation: {
           drive: 2,
           wetDry: 1,
           bias: 0.5,
-          lowCrossover: 90,
+          lowCrossover: 80,
           midCrossover: 8000,
           softness: 0.85,
-          lowDriveMult: 4,
+          lowDriveMult: 2.5,
           midDriveMult: 0.1,
           highDriveMult: 0.1,
         },
       },
-      */
       {
         airBoost: {
           gainDb: 6,
