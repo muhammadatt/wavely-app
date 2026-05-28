@@ -594,10 +594,22 @@ function computeClipStd(clips, kwSamples) {
  * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
  * @returns {AutoLevelerResult}
  */
-export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnalysis) {
+/**
+ * Analyze pass: read input, produce per-sample gain array (gainSr) plus
+ * everything renderAutoLeveler needs to finalize output measurements.
+ * Returns either:
+ *   { applied: false, skipped_reason }                                — no apply needed
+ *   { applied: true, channels, sampleRate, gainSr, mergedClips,
+ *     mergedGains, mergesCount, clipCountInitial, subphraseSplits,
+ *     inClipStd, nfCapActive, config }                                — feed to renderAutoLeveler
+ *
+ * The decoded channels are returned in-memory so the apply pass doesn't have
+ * to re-read the input WAV. This is the same in-memory handoff a chunked
+ * orchestrator would do per-worker.
+ */
+export async function analyzeAutoLeveler(inputPath, preset, frameAnalysis) {
   const config = preset?.autoLeveler ?? null
   if (!config) {
-    await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'preset_excluded' }
   }
 
@@ -607,7 +619,6 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
 
   const durationS = n / sampleRate
   if (durationS < MIN_FILE_DURATION_S) {
-    await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'duration_too_short' }
   }
 
@@ -623,7 +634,6 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
 
   const voicedHops = hopVoiced.reduce((s, v) => s + v, 0)
   if (voicedHops * HOP_MS * 0.001 < MIN_VOICED_DURATION_S) {
-    await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'insufficient_voiced_audio' }
   }
 
@@ -646,7 +656,6 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
   })
 
   if (clips.length < 2) {
-    await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'insufficient_clips' }
   }
 
@@ -658,7 +667,6 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
   // Skip if file is already leveled (clip-LUFS std below threshold)
   const inClipStd = weightedStd(clipLufs, clipDurations)
   if (inClipStd < LEVELED_STD_THRESHOLD) {
-    await copyThrough(inputPath, outputPath)
     return { applied: false, skipped_reason: 'file_already_leveled' }
   }
 
@@ -702,25 +710,54 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
     merged.clips, merged.gains, audioPowerSum, crossfadeSamples, n,
   )
 
-  // Render: piecewise-constant gain with cosine crossfades at boundaries
+  // Per-sample gain curve: piecewise-constant gain with cosine crossfades at
+  // boundaries. This is the parameter the apply pass consumes.
   const gainSr = buildSampleGainArray(merged.clips, merged.gains, plans, n)
-  const processedChannels = applySampleGains(channels, gainSr)
 
+  return {
+    applied:           true,
+    skipped_reason:    null,
+    channels,
+    sampleRate,
+    gainSr,
+    mergedClips:       merged.clips,
+    mergedGains:       merged.gains,
+    mergesCount:       merged.mergesCount,
+    clipCountInitial:  clips.length,
+    subphraseSplits,
+    inClipStd,
+    nfCapActive,
+    config,
+  }
+}
+
+/**
+ * Apply pass: multiply input channels by the per-sample gain array, write
+ * the output WAV, and compute output measurements (clip-LUFS std after
+ * leveling, gain stats). Returns the final report object.
+ */
+export async function renderAutoLeveler(outputPath, analyzed) {
+  const {
+    channels, sampleRate, gainSr, mergedClips, mergedGains, mergesCount,
+    clipCountInitial, subphraseSplits, inClipStd, nfCapActive, config,
+  } = analyzed
+
+  const processedChannels = applySampleGains(channels, gainSr)
   await writeWavChannels(processedChannels, sampleRate, outputPath)
 
   // Output measurements: clip-LUFS std after leveling (recompute on output)
   const kwOut    = applyKWeighting(processedChannels[0], sampleRate)
-  const outClipStd = computeClipStd(merged.clips, kwOut)
+  const outClipStd = computeClipStd(mergedClips, kwOut)
 
   // Gain stats over merged clips, duration-weighted
   let maxUp = -Infinity, maxDown = Infinity
   let powSum = 0, dSum = 0
-  for (let k = 0; k < merged.gains.length; k++) {
-    const g = merged.gains[k]
+  for (let k = 0; k < mergedGains.length; k++) {
+    const g = mergedGains[k]
     if (g > maxUp)   maxUp   = g
     if (g < maxDown) maxDown = g
     const lin = Math.pow(10, g / 20.0)
-    const d   = merged.clips[k].sampleEnd - merged.clips[k].sampleStart
+    const d   = mergedClips[k].sampleEnd - mergedClips[k].sampleStart
     powSum += lin * lin * d
     dSum   += d
   }
@@ -730,8 +767,8 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
     applied:        true,
     skipped_reason: null,
     preset_params: {
-      total_max_up_db:                   totalUp,
-      total_max_down_db:                 totalDown,
+      total_max_up_db:                   config.total_max_up_db,
+      total_max_down_db:                 config.total_max_down_db,
       target_mode:                       config.target_mode,
       target_window_s:                   config.target_window_s,
       noise_floor_target_dbfs:           config.noise_floor_target_dbfs,
@@ -747,10 +784,10 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
     measurements: {
       input_clip_lufs_std_db:    round2(inClipStd),
       output_clip_lufs_std_db:   round2(outClipStd),
-      clip_count_initial:        clips.length,
-      clip_count_after_merge:    merged.clips.length,
+      clip_count_initial:        clipCountInitial,
+      clip_count_after_merge:    mergedClips.length,
       subphrase_splits_count:    subphraseSplits,
-      merges_count:              merged.mergesCount,
+      merges_count:              mergesCount,
       gain_max_up_db:            round2(maxUp   === -Infinity ? 0 : maxUp),
       gain_max_down_db:          round2(maxDown ===  Infinity ? 0 : maxDown),
       gain_rms_db:               round2(gainRmsDb),
@@ -765,9 +802,4 @@ export async function applyAutoLeveler(inputPath, outputPath, preset, frameAnaly
 
 function round2(n) {
   return typeof n === 'number' && isFinite(n) ? Math.round(n * 100) / 100 : null
-}
-
-async function copyThrough(inputPath, outputPath) {
-  const { readFile, writeFile } = await import('fs/promises')
-  await writeFile(outputPath, await readFile(inputPath))
 }

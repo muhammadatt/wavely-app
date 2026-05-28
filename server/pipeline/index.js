@@ -27,8 +27,11 @@ const STAGE_FOR_CONFIG_KEY = {
   throatClickAttenuator: 'throatClickAttenuate',
   compression:         'compress',
   parallelCompression: 'parallelCompress',
-  autoLeveler:         'autoLevel',
-  clipGainDeEsser:     'clipGainDeEss',
+  // Split analyze/apply pairs: the config-bearing preset key routes to
+  // analyze (which owns the config); apply runs as a plain string entry
+  // immediately after and reads its inputs from ctx.globalParams.
+  autoLeveler:         'autoLevelerAnalyze',
+  clipGainDeEsser:     'clipGainDeEsserAnalyze',
   deEsser:             'deEss',
 }
 
@@ -148,6 +151,12 @@ function createContext({ inputPath, originalName, presetId, outputProfileId, pre
     // buildReport() reads only the keys that are present, so stages absent
     // from a pipeline produce no orphaned keys in the report JSON.
     results: {},
+    // Cross-stage parameter bundle, written by *Analyze stages and consumed
+    // by their *Apply pair. Distinct from ctx.results (the report output):
+    // globalParams is the input contract for apply stages, and is the same
+    // shape a future chunked orchestrator would serialize to workers.
+    // Keys mirror the stage name (e.g. globalParams.autoLeveler).
+    globalParams: {},
   }
 }
 
