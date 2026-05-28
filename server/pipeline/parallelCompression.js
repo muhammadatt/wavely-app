@@ -126,12 +126,14 @@ export async function applyParallelCompression(
   const analysisCh = channels[0]
   const numSamples = analysisCh.length
 
-  // ── 1. Adaptive threshold ────────────────────────────────────────────────
-  const voicedRms    = frameAnalysis.voicedRmsDbfs ?? frameAnalysis.averageVoicedRmsDbfs ?? -24
-  const threshold    = Math.max(voicedRms - PARALLEL_THRESHOLD_OFFSET_DB, PARALLEL_THRESHOLD_FLOOR_DB)
+  // ── 1. Voiced-frame stats (peak, RMS, crest factor) ─────────────────────
+  // Measured locally from the input channel + isSilence labels so no upstream
+  // remeasureFramesPostNr is required between compression and this stage.
+  const { crestFactorDb: prePcCrestFactor, voicedRmsDbfs: voicedRms } =
+    measureVoicedStats(analysisCh, frameAnalysis)
 
-  // ── 2. Pre-PC crest factor ───────────────────────────────────────────────
-  const prePcCrestFactor = measureCrestFactor(analysisCh, frameAnalysis)
+  // ── 2. Adaptive threshold ────────────────────────────────────────────────
+  const threshold    = Math.max(voicedRms - PARALLEL_THRESHOLD_OFFSET_DB, PARALLEL_THRESHOLD_FLOOR_DB)
 
   // ── 3. Crest factor guard ────────────────────────────────────────────────
   const guardThresh = config.crestGuardThresholdDb
@@ -309,10 +311,14 @@ function synthesizeWetAnalysisSignal(analysisCh, compCurve, makeupLinear) {
 // ── Crest Factor ─────────────────────────────────────────────────────────────
 
 /**
- * Voiced-frame crest factor: peak_dBFS − voiced_RMS_dBFS.
- * Same algorithm as compression.js (inlined — not exported from that module).
+ * Voiced-frame peak / RMS / crest factor measured from the input channel,
+ * using the upstream Silero VAD isSilence labels (which are stable across
+ * pipeline stages). Returning both values lets the caller use them for the
+ * adaptive threshold AND the crest-factor guard from one pass over the audio,
+ * without depending on a preceding remeasureFramesPostNr to refresh
+ * frameAnalysis.voicedRmsDbfs.
  */
-function measureCrestFactor(samples, frameAnalysis) {
+function measureVoicedStats(samples, frameAnalysis) {
   let sumSq = 0
   let count = 0
   let peak  = 0
@@ -329,13 +335,14 @@ function measureCrestFactor(samples, frameAnalysis) {
     }
   }
 
-  if (count === 0 || peak === 0) return 20  // safe default — guard won't activate
+  // Safe defaults — guard won't activate, threshold falls back to floor.
+  if (count === 0 || peak === 0) return { crestFactorDb: 20, voicedRmsDbfs: -24 }
 
-  const voicedRms = Math.sqrt(sumSq / count)
-  const peakDb    = 20 * Math.log10(peak)
-  const rmsDb     = voicedRms > 0 ? 20 * Math.log10(voicedRms) : -120
+  const voicedRms    = Math.sqrt(sumSq / count)
+  const peakDb       = 20 * Math.log10(peak)
+  const voicedRmsDbfs = voicedRms > 0 ? 20 * Math.log10(voicedRms) : -120
 
-  return peakDb - rmsDb
+  return { crestFactorDb: peakDb - voicedRmsDbfs, voicedRmsDbfs }
 }
 
 // ── Compressor Gain Curve ────────────────────────────────────────────────────

@@ -528,8 +528,10 @@ export async function noiseReduce(ctx) {
   // compression has raised the noise floor, causing the model to mask more
   // aggressively. Measure the voiced-RMS delta and apply linear makeup gain
   // so downstream stages (compression, expander) see the expected level.
+  let postFa = null
+  let appliedMakeupDb = 0
   if (preVoicedRms !== null && preVoicedRms !== undefined) {
-    const postFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
+    postFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
     const postVoicedRms = postFa.voicedRmsDbfs
 
     if (postVoicedRms !== null && postVoicedRms !== undefined) {
@@ -540,6 +542,7 @@ export async function noiseReduce(ctx) {
         const gainedPath = ctx.tmp('.wav')
         await applyLinearGain(ctx.currentPath, gainedPath, makeupDb)
         ctx.currentPath = gainedPath
+        appliedMakeupDb = makeupDb
         ctx.results.noiseReduction.makeupGainDb = round2(makeupDb)
         ctx.log(
           `[NR] Makeup gain: +${makeupDb.toFixed(2)} dB ` +
@@ -552,6 +555,27 @@ export async function noiseReduce(ctx) {
           `≤ ${NR_MAKEUP_THRESHOLD_DB} dB threshold`
         )
       }
+    }
+  }
+
+  // Update ctx.results.metrics with fresh post-NR (post-makeup-gain) scalars
+  // so downstream stages (autoLeveler.noiseFloorDbfs, the next noiseReduce
+  // pass's skipBelowDb check, vocalExpander.noiseFloorDbfs, etc.) see current
+  // values without a dedicated remeasureFramesPostNr stage. Makeup gain is
+  // linear so we offset postFa's dB scalars by the applied gain rather than
+  // re-reading the file. isSilence labels are Silero-derived and stable, so
+  // ctx.results.metrics.frames is left untouched.
+  if (postFa !== null) {
+    ctx.results.metrics.noiseFloorDbfs       = round2(postFa.noiseFloorDbfs       + appliedMakeupDb)
+    ctx.results.metrics.voicedRmsDbfs        = round2(postFa.voicedRmsDbfs        + appliedMakeupDb)
+    ctx.results.metrics.averageVoicedRmsDbfs = round2(postFa.averageVoicedRmsDbfs + appliedMakeupDb)
+    ctx.results.metrics.silenceThresholdDbfs = round2(postFa.silenceThresholdDbfs + appliedMakeupDb)
+
+    // rnnoise/dtln branches left post_noise_floor_dbfs null because they had
+    // no measurement source. Fill it from our authoritative post-makeup floor
+    // so qualityAdvisory / ACX cert have a value to consume for those models.
+    if (ctx.results.noiseReduction && ctx.results.noiseReduction.post_noise_floor_dbfs == null) {
+      ctx.results.noiseReduction.post_noise_floor_dbfs = ctx.results.metrics.noiseFloorDbfs
     }
   }
 
