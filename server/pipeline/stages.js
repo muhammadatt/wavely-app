@@ -216,6 +216,7 @@ export async function peakNormalizeApply(ctx) {
 export async function peakNormalize(ctx) {
   await peakNormalizeAnalyze(ctx)
   await peakNormalizeApply(ctx)
+  // params are scalar — no cleanup needed.
 }
 
 // ── Stage: Frame analysis (pre-HPF) ──────────────────────────────────────────
@@ -738,6 +739,7 @@ export async function correctiveEQApply(ctx) {
 export async function correctiveEQ(ctx) {
   await correctiveEQAnalyze(ctx)
   await correctiveEQApply(ctx)
+  // bands array is small (~handful of objects) — no cleanup needed.
 }
 
 // ── Stage: referenceEQ ────────────────────────────────────────────────────────
@@ -1099,6 +1101,11 @@ export async function clipGainDeEsserApply(ctx) {
 export async function clipGainDeEsser(ctx) {
   await clipGainDeEsserAnalyze(ctx)
   await clipGainDeEsserApply(ctx)
+  // The frames array is the heavy field here — one entry per 25 ms frame
+  // (~144k entries/hour). The eventsPath is preserved on
+  // ctx.results.clipGainDeEsser for parallelCompression's wet-branch
+  // de-esser pass; that's the only downstream consumer of de-esser state.
+  ctx.globalParams.clipGainDeEsser = null
 }
 
 // ── Stage: Auto Leveler (Stage 4b) ────────────────────────────────────────────
@@ -1157,6 +1164,14 @@ export async function autoLevelerApply(ctx) {
 export async function autoLeveler(ctx) {
   await autoLevelerAnalyze(ctx)
   await autoLevelerApply(ctx)
+  // analyze stashed the full decoded channels + per-sample gain curve on
+  // globalParams.autoLeveler so apply could consume them in-memory. For a
+  // 1-hour stereo 48 kHz file that's ~1.4 GB of float32 data. Drop the
+  // reference now that apply has written its output — the remaining
+  // pipeline (airBoost, normalize, truePeakLimit, encode, …) has no use
+  // for it, and ctx.results.autoLeveler already carries the small summary
+  // the report builder reads.
+  ctx.globalParams.autoLeveler = null
 }
 
 // ── Stage: Compression ────────────────────────────────────────────────────────
