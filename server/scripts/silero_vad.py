@@ -10,12 +10,14 @@ Usage:
   python3 silero_vad.py --input <path> --output <path.json>
                         [--threshold 0.5] [--device auto|cpu|cuda]
 
-Input:  32-bit float PCM WAV at 44.1 kHz (pipeline internal format).
+Input:  Float32 WAV. The fast path is 16 kHz mono (Node pre-resamples with
+        FFmpeg so we skip scipy resampling); 44.1 kHz inputs are still accepted
+        and resampled internally with scipy.signal.resample_poly.
 Output: JSON file with per-frame isSilence classification.
 
 Frame alignment:
-  - Pipeline frame duration: 25 ms → 1102 samples @ 44.1 kHz
-  - Silero operates at 16 kHz → 25 ms = 400 samples
+  - Pipeline frame duration: 25 ms → 400 samples @ 16 kHz
+  - Silero operates at 16 kHz with a 512-sample (32 ms) internal grain
   - Fast path (get_speech_timestamps): processes the full audio stream in one
     internal pass and returns speech segment timestamps, which are mapped back
     to per-pipeline-frame isSilence labels. A frame is voiced if any returned
@@ -23,18 +25,29 @@ Frame alignment:
   - Fallback (frame-by-frame loop): one model call per frame (zero-padded to
     512 samples); frame label = max(chunk_probs) >= threshold.
 
-Performance: the fast path uses get_speech_timestamps (torchaudio required)
-which avoids per-frame Python loop overhead. Falls back to the original loop
-if the import is unavailable. Set SILERO_DEVICE=cuda to reduce latency further.
+Backend:
+  ONNX Runtime is preferred (avoids the torch.jit cold start and runs faster
+  for single-stream CPU inference). Falls back to the silero-vad package's
+  torch JIT model, then to torch.hub if neither is available. The model and
+  get_speech_timestamps reference are cached at module level so the persistent
+  worker pays the load cost exactly once per server lifetime.
 """
 import argparse
+import importlib
+import importlib.util
 import json
-import math
 import os
 import sys
 import warnings
 
 warnings.filterwarnings('ignore')
+
+# Hot imports — kept at module level so the persistent worker's first dispatch
+# pays the cost once and every subsequent call reuses the cached modules.
+import numpy as np
+from scipy.io import wavfile
+from scipy.signal import resample_poly
+from math import gcd
 
 PIPELINE_SR          = 44100
 SILERO_SR            = 16000
@@ -47,159 +60,133 @@ _config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'c
 with open(_config_path) as _f:
     FRAME_DURATION_S = json.load(_f)['FRAME_DURATION_S']  # 0.025 s = 25 ms
 
+# Module-level model cache. Populated by _get_model() on first use; the
+# persistent worker keeps this process alive for the server's lifetime, so
+# subsequent calls reuse the loaded model and its get_speech_timestamps.
+_MODEL = None
+_GST   = None
 
-def resolve_device(device_arg):
-    if device_arg == 'auto':
-        import torch
-        return 'cuda' if torch.cuda.is_available() else 'cpu'
-    return device_arg
 
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description='Silero VAD frame classifier')
-    parser.add_argument('--input',     required=True,  help='Input WAV (32-bit float, 44.1 kHz)')
-    parser.add_argument('--output',    required=True,  help='Output JSON file path')
-    parser.add_argument('--threshold', type=float, default=DEFAULT_THRESHOLD,
-                        help='Speech probability threshold (default: 0.5)')
-    parser.add_argument('--device',    default='auto', choices=['auto', 'cpu', 'cuda'],
-                        help='Compute device (default: auto)')
-    args = parser.parse_args(argv)
-
-    import torch
-    import numpy as np
-    from scipy.io import wavfile
-    from scipy.signal import resample_poly
-    from math import gcd
-
-    device = resolve_device(args.device)
-
-    num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
-    torch.set_num_threads(num_threads)
-
-    # Load Silero VAD model.
-    #
-    # Strategy 1 — JIT load from the silero-vad package's bundled data file.
-    #   Preferred on all platforms. Requires only `torch` (no torchaudio, no
-    #   network access, no GitHub). The silero_vad package must be installed
-    #   but its __init__ is NOT imported, so the torchaudio import inside the
-    #   package is never reached. Use importlib.util.find_spec to locate the
-    #   package directory without executing its code.
-    #
-    # Strategy 2 — silero-vad package API (load_silero_vad).
-    #   Works on platforms with torchaudio installed. The package is named
-    #   `silero_vad`, which collides with this script's filename. Python inserts
-    #   the script's own directory at sys.path[0] when spawned, so a plain
-    #   `from silero_vad import ...` would find THIS FILE instead of the
-    #   installed package. We remove the script directory from sys.path for the
-    #   duration of the import to force resolution to the installed package.
-    #
-    # Strategy 3 — torch.hub.load (last resort for envs without the package).
-    #   Weights (~10 MB) cached at ~/.cache/torch/hub/snakers4_silero-vad_master/
-    #   WARNING: torch.hub.load makes a GitHub network request to check for repo
-    #   updates even with force_reload=False. This can hang in environments
-    #   without outbound internet access. Strategies 1 and 2 are preferred.
-    import os as _os
-    import importlib as _il
-
-    model = None
-    get_speech_timestamps = None
-
-    # Both Strategy 1 and Strategy 2 need the script's own directory removed
-    # from sys.path so that `silero_vad` resolves to the installed package,
-    # not this file (silero_vad.py). We do the removal once up front.
-    _script_dir = _os.path.dirname(_os.path.abspath(__file__))
-    _saved_path = sys.path[:]
+def _import_silero_pkg():
+    """
+    Import the installed silero_vad package, working around the fact that
+    this script's filename collides with the package name. Python inserts
+    the script's own directory at sys.path[0] when spawned, so a plain
+    `from silero_vad import ...` would find THIS FILE instead of the
+    installed package.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    saved_path = sys.path[:]
     sys.path = [
         p for p in sys.path
-        if _os.path.normcase(_os.path.abspath(p)) != _os.path.normcase(_script_dir)
+        if os.path.normcase(os.path.abspath(p)) != os.path.normcase(script_dir)
     ]
-
-    # ── Strategy 1: JIT load from package's bundled data file ──────────────
-    # find_spec locates the installed silero_vad package directory without
-    # executing its __init__.py, so the torchaudio import is never reached.
+    for _key in [k for k in sys.modules if 'silero_vad' in k]:
+        del sys.modules[_key]
     try:
-        _spec = _il.util.find_spec('silero_vad')
-        if _spec is not None:
-            _pkg_dir = _os.path.dirname(_spec.origin)
-            _jit_path = _os.path.join(_pkg_dir, 'data', 'silero_vad.jit')
-            if _os.path.isfile(_jit_path):
-                model = torch.jit.load(_jit_path, map_location=device)
-    except Exception:
-        model = None
+        return importlib.import_module('silero_vad')
+    finally:
+        sys.path = saved_path
 
-    # ── Strategy 2: silero-vad package API ─────────────────────────────────
-    if model is None:
+
+def _get_model():
+    """
+    Load (once) and return (model, get_speech_timestamps). Cached at module
+    level so the persistent worker pays the load cost on first dispatch only.
+
+    Strategy 1 — ONNX Runtime via silero_vad.load_silero_vad(onnx=True).
+      Preferred. Avoids the torch.jit cold start and runs faster for
+      single-stream CPU inference.
+    Strategy 2 — torch JIT via silero_vad.load_silero_vad(onnx=False).
+      Fallback when onnxruntime is unavailable.
+    Strategy 3 — torch.hub.load (last resort for envs without the package).
+      WARNING: makes a GitHub network request even with force_reload=False.
+    """
+    global _MODEL, _GST
+    if _MODEL is not None:
+        return _MODEL, _GST
+
+    pkg = None
+    if importlib.util.find_spec('onnxruntime') is not None:
         try:
-            from silero_vad import load_silero_vad, get_speech_timestamps as _gst
-            model = load_silero_vad()
-            get_speech_timestamps = _gst
-        except Exception:
-            pass
-        finally:
-            # Clear any partial silero_vad entries poisoned by a failed import.
-            for _key in [k for k in sys.modules if 'silero_vad' in k]:
-                del sys.modules[_key]
-
-    # ── get_speech_timestamps for Strategy 1 (JIT-loaded model) ────────────
-    # get_speech_timestamps works with any model object, so try importing it
-    # even when the JIT path was used and Strategy 2 was never reached.
-    if get_speech_timestamps is None:
-        try:
-            from silero_vad import get_speech_timestamps as _gst
-            get_speech_timestamps = _gst
-        except Exception:
-            pass
-        finally:
-            for _key in [k for k in sys.modules if 'silero_vad' in k]:
-                del sys.modules[_key]
-
-    sys.path = _saved_path  # restore regardless of which strategy succeeded
-
-    # ── Strategy 3: torch.hub.load ──────────────────────────────────────────
-    if model is None:
-        try:
-            model, _ = torch.hub.load(
-                repo_or_dir='snakers4/silero-vad',
-                model='silero_vad',
-                force_reload=False,
-                onnx=False,
-            )
+            pkg = _import_silero_pkg()
+            _MODEL = pkg.load_silero_vad(onnx=True)
+            _GST   = pkg.get_speech_timestamps
+            return _MODEL, _GST
         except Exception as exc:
-            print(f'[silero_vad] Failed to load Silero VAD model: {exc}', file=sys.stderr)
-            sys.exit(1)
+            print(f'[silero_vad] ONNX load failed, falling back: {exc}', file=sys.stderr)
+            _MODEL, _GST = None, None
 
     try:
-        model = model.to(device)
-        model.eval()
+        if pkg is None:
+            pkg = _import_silero_pkg()
+        _MODEL = pkg.load_silero_vad(onnx=False)
+        _GST   = pkg.get_speech_timestamps
+        return _MODEL, _GST
+    except Exception as exc:
+        print(f'[silero_vad] JIT load failed, falling back: {exc}', file=sys.stderr)
+        _MODEL, _GST = None, None
+
+    try:
+        import torch
+        model, _ = torch.hub.load(
+            repo_or_dir='snakers4/silero-vad',
+            model='silero_vad',
+            force_reload=False,
+            onnx=False,
+        )
+        _MODEL, _GST = model, None
+        return _MODEL, _GST
     except Exception as exc:
         print(f'[silero_vad] Failed to load Silero VAD model: {exc}', file=sys.stderr)
         sys.exit(1)
 
-    # Load input audio — pipeline format is 32-bit float 44.1 kHz
-    # Uses scipy.io.wavfile (no soundfile/torchaudio needed — both lack ARM64 builds).
-    sr, audio_np = wavfile.read(args.input)  # mono: (samples,)  stereo: (samples, channels)
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='Silero VAD frame classifier')
+    parser.add_argument('--input',     required=True,  help='Input WAV (32-bit float)')
+    parser.add_argument('--output',    required=True,  help='Output JSON file path')
+    parser.add_argument('--threshold', type=float, default=DEFAULT_THRESHOLD,
+                        help='Speech probability threshold (default: 0.5)')
+    parser.add_argument('--device',    default='auto', choices=['auto', 'cpu', 'cuda'],
+                        help='Compute device (default: auto). Honored only by the '
+                             'torch.hub fallback; ONNX always runs on CPU.')
+    args = parser.parse_args(argv)
+
+    model, get_speech_timestamps = _get_model()
+
+    # The torch.hub fallback returns a torch nn.Module that supports .to/.eval;
+    # the ONNX path returns a wrapper with neither. Only call these for torch
+    # models. `device` is referenced by the frame-by-frame fallback loop.
+    device = 'cpu'
+    if hasattr(model, 'to') and hasattr(model, 'eval'):
+        try:
+            import torch
+            if args.device == 'auto':
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            else:
+                device = args.device
+            num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
+            torch.set_num_threads(num_threads)
+            model = model.to(device)
+            model.eval()
+        except Exception:
+            device = 'cpu'
+
+    # Load input audio. Node-side FFmpeg pre-resamples to 16 kHz mono float32
+    # for the fast path; we still handle other rates and channel counts.
+    sr, audio_np = wavfile.read(args.input)
     audio_np = audio_np.astype(np.float32)
-    if audio_np.ndim == 1:
-        audio_np = audio_np[np.newaxis, :]  # → (1, samples)
-    else:
-        audio_np = audio_np.T  # → (channels, samples)
+    if audio_np.ndim > 1:
+        audio_np = audio_np.mean(axis=1)  # mix to mono
 
-    # Mix to mono (Silero is mono-only)
-    if audio_np.shape[0] > 1:
-        audio_np = audio_np.mean(axis=0)  # (samples,)
-    else:
-        audio_np = audio_np[0]
-
-    # Resample from 44.1 kHz to 16 kHz using polyphase (scipy, no torchaudio needed)
     if sr != SILERO_SR:
         g = gcd(SILERO_SR, sr)
         audio_np = resample_poly(audio_np, SILERO_SR // g, sr // g).astype(np.float32)
 
-    audio_16k = torch.from_numpy(audio_np)   # 1D tensor of float32 samples at 16 kHz
-
     # Frame alignment: 25 ms * 16000 Hz = 400 samples per pipeline frame
     samples_per_frame = round(FRAME_DURATION_S * SILERO_SR)  # 400
-    n_frames          = len(audio_16k) // samples_per_frame
+    n_frames          = len(audio_np) // samples_per_frame
 
     frame_results = []
 
@@ -207,11 +194,11 @@ def main(argv=None):
         # Fast path: get_speech_timestamps processes the full audio stream
         # internally using the sequential GRU inference at 512-sample chunk
         # boundaries, then returns speech segments as {start, end} sample-index
-        # pairs at 16 kHz. This avoids the per-frame Python loop overhead and
-        # the zero-padding work done in the fallback path.
+        # pairs at 16 kHz. Both the ONNX wrapper and the JIT model accept the
+        # numpy array directly.
         try:
             speech_segs = get_speech_timestamps(
-                audio_16k,
+                audio_np,
                 model,
                 sampling_rate=SILERO_SR,
                 threshold=args.threshold,
@@ -223,7 +210,7 @@ def main(argv=None):
         except TypeError:
             # Older silero-vad versions may not support all kwargs; retry bare.
             speech_segs = get_speech_timestamps(
-                audio_16k, model,
+                audio_np, model,
                 sampling_rate=SILERO_SR,
                 threshold=args.threshold,
             )
@@ -246,10 +233,13 @@ def main(argv=None):
                 'maxProb':   1.0 if voiced else 0.0,  # approximation; not used by JS
             })
 
-        model.reset_states()
+        if hasattr(model, 'reset_states'):
+            model.reset_states()
 
     else:
-        # Fallback: original frame-by-frame inference loop.
+        # Fallback: frame-by-frame inference loop (torch.hub model path only).
+        import torch
+        audio_16k = torch.from_numpy(audio_np)
         with torch.no_grad():
             for f in range(n_frames):
                 frame_start = f * samples_per_frame
@@ -278,7 +268,8 @@ def main(argv=None):
                     'maxProb':   round(max_prob, 4),
                 })
 
-        model.reset_states()
+        if hasattr(model, 'reset_states'):
+            model.reset_states()
 
     with open(args.output, 'w') as fh:
         json.dump({'frames': frame_results}, fh)

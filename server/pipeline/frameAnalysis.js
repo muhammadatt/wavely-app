@@ -43,6 +43,7 @@ import path               from 'path'
 
 import { spawnPython }    from './spawnPython.js'
 import { readWavSamples } from './wavReader.js'
+import { decodeToFloat32Mono16k, tempPath, removeTmp } from '../lib/ffmpeg.js'
 
 // Loaded from the shared config so JS and Python always use the same value.
 // To change the pipeline frame duration, edit server/config/frame_config.json.
@@ -144,14 +145,20 @@ async function analyzeAudioFramesSilero(wavPath) {
   const silenceThreshold = noiseFloorDbfs + 6
 
   // Stage B — Silero subprocess
-  const jsonPath = wavPath.replace(/\.wav$/i, '') + '_silero_vad.json'
+  // Pre-resample to 16 kHz mono float32 with FFmpeg so the Python script
+  // doesn't have to run scipy.signal.resample_poly on every call. The VAD
+  // operates at 16 kHz, so this matches the model's native rate exactly.
+  const jsonPath  = wavPath.replace(/\.wav$/i, '') + '_silero_vad.json'
+  const vadInput  = tempPath('.wav')
   let sileroFrames = []
   try {
-    await spawnSilero(wavPath, jsonPath)
+    await decodeToFloat32Mono16k(wavPath, vadInput)
+    await spawnSilero(vadInput, jsonPath)
     const raw = JSON.parse(await readFile(jsonPath, 'utf8'))
     sileroFrames = raw.frames
   } finally {
     await rm(jsonPath, { force: true })
+    await removeTmp(vadInput)
   }
 
   // Stage C — merge Silero labels with energy values

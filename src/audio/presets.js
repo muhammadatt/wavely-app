@@ -205,7 +205,7 @@ export const PRESETS = {
         },
       },  
       */
-      /* {dereverb: {enabled: true, strength: "medium", preserve_early: false}}, */    
+      /* {dereverb: {enabled: true, strength: "medium", preserve_early: false}}, */
       //{ separateVocals: { model: "demucs" } },
       /*
       {
@@ -224,9 +224,9 @@ export const PRESETS = {
       {
         clipGainDeEsser: {
           enabled: true,
-          stridentCeilingDb:     6.0,
+          stridentCeilingDb: 6.0,
           nonStridentCeilingDb: -4.0,
-          reductionRatio: 0.50,
+          reductionRatio: 0.5,
           maxReductionDb: 8.0,
           minDurationMs: 15,
           contextWindowMs: 80,
@@ -251,11 +251,11 @@ export const PRESETS = {
         },
       },
       */
-     /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
+      /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
       "remeasureFramesPostNr",
-      { 
+      {
         compression: [
-        /*  
+          /*  
           {
             targetCrestFactorDb: 14,
             maxRatio: 6,
@@ -268,15 +268,36 @@ export const PRESETS = {
             targetCrestFactorDb: 12,
             maxRatio: 3,
             threshold: "auto",
-            follow: false,
+            follow: true,
             attack: 15,
             release: 120,
           },
          */
-        
-  { targetCrestFactorDb: 14, maxRatio: 5, threshold: "auto", follow: false, attack: 0.5, release: 80 },
-  { targetCrestFactorDb: 13, maxRatio: 3, threshold: "auto", follow: true,  attack: 1.5, release: 150 },
-  { targetCrestFactorDb: 12, maxRatio: 2, threshold: "auto", follow: true,  attack: 3,   release: 250 }
+
+          {
+            targetCrestFactorDb: 14,
+            maxRatio: 5,
+            threshold: "auto",
+            follow: false,
+            attack: 0.5,
+            release: 80,
+          },
+          {
+            targetCrestFactorDb: 13,
+            maxRatio: 3,
+            threshold: "auto",
+            follow: true,
+            attack: 1.5,
+            release: 150,
+          },
+          {
+            targetCrestFactorDb: 12,
+            maxRatio: 2,
+            threshold: "auto",
+            follow: true,
+            attack: 3,
+            release: 250,
+          },
         ],
       },
       "remeasureFramesPostNr",
@@ -296,11 +317,11 @@ export const PRESETS = {
           // the dry sibilant character predominates at the mix output.
           wetBranchDeEsser: {
             enabled: true,
-            stridentCeilingDb:     3.0,
+            stridentCeilingDb: 3.0,
             nonStridentCeilingDb: -8.0,
-            reductionRatio:   0.9,
-            maxReductionDb:   50.0,
-            contextWindowMs:  80,
+            reductionRatio: 0.9,
+            maxReductionDb: 50.0,
+            contextWindowMs: 80,
           },
         },
       },
@@ -393,7 +414,7 @@ export const PRESETS = {
           */
         ],
       },
-    
+
       {
         roomPresence: {
           enabled: true,
@@ -405,7 +426,7 @@ export const PRESETS = {
           normalize_ir: true,
         },
       },
-      
+
       "normalize",
       "truePeakLimit",
       "measureAfter",
@@ -531,11 +552,11 @@ export const PRESETS = {
           // output. Less aggressive ceiling than ACX so the wet branch
           // contributes more sibilant energy to the overall sound.
           wetBranchDeEsser: {
-            stridentCeilingDb:     4.0,
+            stridentCeilingDb: 4.0,
             nonStridentCeilingDb: -3.0,
-            reductionRatio:   0.8,
-            maxReductionDb:   12.0,
-            contextWindowMs:  80,
+            reductionRatio: 0.8,
+            maxReductionDb: 12.0,
+            contextWindowMs: 80,
           },
         },
       },
@@ -559,8 +580,17 @@ export const PRESETS = {
       // harmonic synthesis. Runs after parallelCompression so the dynamics
       // pass doesn't gate the harmonics, and before airBoost / EQ so the
       // tonal stages shape the result.
-      { bassEnhance: { drive: 3.0, softness: 0.4, bias: 0.4, mix: 0.35, crossoverFallbackHz: 300 } },
-      { airBoost: {
+      {
+        bassEnhance: {
+          drive: 3.0,
+          softness: 0.4,
+          bias: 0.4,
+          mix: 0.35,
+          crossoverFallbackHz: 300,
+        },
+      },
+      {
+        airBoost: {
           gainDb: 5,
           sibilantGainFloor: 0.25,
           precut: { enabled: true, maxCutDb: 6.0, minExcessDb: 1.0 },
@@ -592,7 +622,7 @@ export const PRESETS = {
         roomPresence: {
           enabled: true,
           ir_path: "../ir/CrystalVocal.wav",
-          wet: 0.10,
+          wet: 0.1,
           rt60Ms: 250,
           preDelayMs: 10.0,
           early_reflections: 2,
@@ -621,7 +651,7 @@ export const PRESETS = {
     channelOutput: "preserve",
     defaultOutputProfile: "podcast",
     lockedOutputProfile: false,
-    clearervoiceModel: "mossformer2_48k",  // or "frcrn_16k"
+    clearervoiceModel: "mossformer2_48k", // or "frcrn_16k"
     stages: [
       "decode",
       "monoMixdown",
@@ -667,7 +697,7 @@ export const PRESETS = {
           },
         },
       },
-      "clearerVoiceEnhance",         
+      "clearerVoiceEnhance",
       "remeasureFramesPostNr",
       {
         compression: {
@@ -693,18 +723,26 @@ export const PRESETS = {
           // audible. Still apply wet-branch attenuation to keep the dry
           // sibilant character dominant.
           wetBranchDeEsser: {
-            stridentCeilingDb:     3.5,
+            stridentCeilingDb: 3.5,
             nonStridentCeilingDb: -3.5,
-            reductionRatio:   0.85,
-            maxReductionDb:   12.0,
-            contextWindowMs:  80,
+            reductionRatio: 0.85,
+            maxReductionDb: 12.0,
+            contextWindowMs: 80,
           },
         },
       },
       // BassEnhance — perceived low-end weight via psychoacoustic harmonics.
       // Conservative mix because General Clean is the catch-all preset and
       // we cannot assume the source has thin low end.
-      { bassEnhance: { drive: 3.0, softness: 0.5, bias: 0.3, mix: 0.3, crossoverFallbackHz: 300 } },
+      {
+        bassEnhance: {
+          drive: 3.0,
+          softness: 0.5,
+          bias: 0.3,
+          mix: 0.3,
+          crossoverFallbackHz: 300,
+        },
+      },
       {
         resonanceSuppressor: {
           depth: 0.7,
