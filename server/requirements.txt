@@ -91,10 +91,18 @@ einops>=0.8.0
 # ── VAD (Silero) ───────────────────────────────────────────────────────────────
 
 # silero_vad.py (silence/voiced frame classification using Silero VAD v5)
-# Uses torch.hub.load() — model weights (~10 MB) downloaded on first run to:
+# The silero-vad package ships both an ONNX model (preferred backend, used via
+# onnxruntime) and a torch JIT model. With onnxruntime present we skip the
+# torch.jit cold start entirely; the JIT model remains as a fallback.
+# Falls back to torch.hub.load if the package is unavailable — weights cached at:
 #   ~/.cache/torch/hub/snakers4_silero-vad_master/
-# No torchaudio version constraint; compatible with torch==2.0.0.
 silero-vad>=5.1
+
+# ── ONNX Runtime ──────────────────────────────────────────────────────────────
+
+# Preferred Silero VAD backend. Faster than torch.jit for single-stream CPU
+# inference and avoids the torch.jit cold start. CPU-only wheel (~13 MB).
+onnxruntime>=1.16
 
 # ── JIT acceleration ──────────────────────────────────────────────────────────
 

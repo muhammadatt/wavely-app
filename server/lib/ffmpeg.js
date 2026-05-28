@@ -68,6 +68,28 @@ export async function decodeToFloat32(inputPath, outputPath, { trimStartMs = 0 }
 }
 
 /**
+ * Decode any supported input to 32-bit float PCM WAV, mono, at 16 kHz.
+ *
+ * Used by the silence analysis stage to pre-resample the pipeline audio
+ * for Silero VAD (which operates at 16 kHz). Running the resample in a
+ * single FFmpeg pass on the JS side avoids the scipy.signal.resample_poly
+ * path on the Python side and lets the VAD script consume the audio
+ * directly without further sample-rate work.
+ */
+export async function decodeToFloat32Mono16k(inputPath, outputPath) {
+  await runFfmpeg([
+    '-y',
+    '-i', inputPath,
+    '-ac', '1',
+    '-ar', '16000',
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
+  return outputPath
+}
+
+/**
  * Stage 0b: Convert stereo to mono via mid-channel mixdown.
  */
 export async function mixdownToMono(inputPath, outputPath) {

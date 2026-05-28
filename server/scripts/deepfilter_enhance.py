@@ -9,6 +9,16 @@ Reads a WAV file, resamples to 48 kHz for DeepFilterNet3, applies noise
 reduction, then writes the result as 32-bit float PCM WAV at 48 kHz.
 The caller (noiseReduce.js) resamples back to 44.1 kHz via FFmpeg.
 
+Alignment: DeepFilterNet3 introduces ~10 ms of algorithmic fade-in delay
+(480 samples at 48 kHz). The script internally prepends `hop_size + 480`
+samples of silence — `hop_size` ensures the first STFT window is fully
+reconstructed, and the extra 480 absorbs the algorithmic delay (the same
+correction the JS wrapper used to apply via padStart before invoking this
+script). After enhancement the same number of samples is stripped from the
+front, so the output length at 48 kHz matches the input length at 48 kHz
+and the caller no longer needs a separate `trimStartMs` pass when
+resampling back to 44.1 kHz.
+
 Worker integration: when invoked through the persistent worker (_worker.py),
 the model is loaded once on the first call and cached in module state for
 every subsequent call. The standalone CLI path re-loads it each invocation,
@@ -69,18 +79,20 @@ def main(argv=None):
     duration_s = audio.shape[-1] / model_sr
     print(f'[deepfilter] input duration={duration_s:.2f}s', flush=True)
 
-    # Pad the beginning of the audio with 1 frame (10ms) of silence.
-    # DeepFilterNet's STFT overlap-add causes a fade-in on the first frame,
-    # which makes the audio appear to shift forward by a few milliseconds.
-    # Pre-padding ensures the actual audio starts in a fully reconstructed window.
+    # Pre-pad: hop_size for STFT overlap-add fade-in + 10 ms for the
+    # algorithmic delay that the JS wrapper used to compensate for via a
+    # separate padStart pass. Both portions are stripped after enhance so
+    # the output is length-equivalent to the input at 48 kHz.
     hop_size = df_state.hop_size()
-    audio_padded = F.pad(audio, (hop_size, 0))
+    delay_pad = int(0.010 * model_sr)  # 480 at 48 kHz; absorbs DF3 delay
+    total_pad = hop_size + delay_pad
+    audio_padded = F.pad(audio, (total_pad, 0))
 
     # Apply DeepFilterNet3; atten_lim_db=None means no attenuation limit (Tier 5)
     enhanced = enhance(model, df_state, audio_padded, atten_lim_db=args.atten_lim_db)
 
     # Strip the pre-padding from the output
-    enhanced = enhanced[..., hop_size:]
+    enhanced = enhanced[..., total_pad:]
 
     # Write 32-bit float WAV at 48 kHz — caller resamples to 44.1 kHz
     save_audio(args.output, enhanced, sr=model_sr, dtype=torch.float32)

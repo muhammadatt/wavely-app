@@ -9,8 +9,9 @@
  * (e.g. the NE-5 residual cleanup pass after source separation).
  *
  * DeepFilterNet3 operates at 48 kHz internally. The Python script handles the
- * 44.1 kHz → 48 kHz resample on input; decodeToFloat32 resamples the 48 kHz
- * output back to 44.1 kHz so the rest of the pipeline sees its expected format.
+ * 44.1 kHz → 48 kHz resample on input and the algorithmic-delay alignment;
+ * decodeToFloat32 resamples the 48 kHz output back to 44.1 kHz so the rest
+ * of the pipeline sees its expected format.
  */
 
 import { spawn } from 'child_process'
@@ -54,24 +55,30 @@ export async function applyNoiseReduction(inputPath, outputPath, { attenLimDb = 
   const strategy = DEEPFILTER_BINARY ? `CLI binary (${DEEPFILTER_BINARY})` : 'Python script'
   console.log(`[DeepFilter] Starting: model=DeepFilterNet3 strategy=${strategy} atten_lim_db=${attenLimDb ?? 'uncapped'}`)
 
-  // DeepFilterNet3 introduces exactly 10ms of algorithmic fade-in delay (480 samples at 48kHz).
-  // We pad 10ms of silence at the beginning, process it, and then trim 10ms from the output
-  // to ensure perfect time alignment.
-  const paddedInput = tempPath('.wav')
-  await padStart(inputPath, paddedInput, 10)
-
-  // DeepFilterNet3 outputs 48 kHz — hold in a temp file before resampling
-  const nr48kPath = tempPath('.wav')
-
-  try {
-    await runDeepFilter(paddedInput, nr48kPath, attenLimDb)
-
-    // Resample 48 kHz → 32-bit float 44.1 kHz (pipeline internal format)
-    // and trim the 10ms padding we added.
-    await decodeToFloat32(nr48kPath, outputPath, { trimStartMs: 10 })
-  } finally {
-    await removeTmp(paddedInput)
-    await removeTmp(nr48kPath)
+  if (DEEPFILTER_BINARY) {
+    // CLI binary doesn't compensate for the 10ms algorithmic fade-in delay
+    // itself, so the JS wrapper still pads + trims around it.
+    const paddedInput = tempPath('.wav')
+    await padStart(inputPath, paddedInput, 10)
+    const nr48kPath = tempPath('.wav')
+    try {
+      await runDeepFilterCli(paddedInput, nr48kPath, attenLimDb)
+      await decodeToFloat32(nr48kPath, outputPath, { trimStartMs: 10 })
+    } finally {
+      await removeTmp(paddedInput)
+      await removeTmp(nr48kPath)
+    }
+  } else {
+    // Python script absorbs the algorithmic-delay pad/strip internally so
+    // its 48 kHz output is already length-aligned with the 48 kHz input.
+    // Only the 48 kHz → 44.1 kHz resample remains for JS to handle.
+    const nr48kPath = tempPath('.wav')
+    try {
+      await runDeepFilterPython(inputPath, nr48kPath, attenLimDb)
+      await decodeToFloat32(nr48kPath, outputPath)
+    } finally {
+      await removeTmp(nr48kPath)
+    }
   }
 
   console.log(`[DeepFilter] Done`)
@@ -81,22 +88,6 @@ export async function applyNoiseReduction(inputPath, outputPath, { attenLimDb = 
     atten_lim_db:          attenLimDb,
     post_noise_floor_dbfs: null, // remeasured after full chain in Stage 7
   }
-}
-
-/**
- * Invoke DeepFilter via whichever strategy is configured:
- *   - DEEPFILTER_BINARY set → CLI binary  (dev override, e.g. Windows ARM64)
- *   - otherwise            → Python script (production default, Linux server)
- *
- * @param {string}      inputPath  - WAV at any sample rate
- * @param {string}      outputPath - 32-bit float WAV at 48 kHz
- * @param {number|null} attenLimDb - Max attenuation in dB; null = no limit
- */
-function runDeepFilter(inputPath, outputPath, attenLimDb) {
-  if (DEEPFILTER_BINARY) {
-    return runDeepFilterCli(inputPath, outputPath, attenLimDb)
-  }
-  return runDeepFilterPython(inputPath, outputPath, attenLimDb)
 }
 
 /**
@@ -151,19 +142,11 @@ function runDeepFilterPython(inputPath, outputPath, attenLimDb) {
  * @param {string} outputPath - 32-bit float WAV at 44.1 kHz
  */
 export async function runRnnoise(inputPath, outputPath) {
-  // RNNoise introduces exactly 20ms algorithmic delay due to 10ms frame size and 10ms lookahead.
-  // Pad with 20ms of silence, then trim it on the way out to perfectly align the output.
-  const paddedInput = tempPath('.wav')
-  await padStart(inputPath, paddedInput, 20)
-
-  const nrPath = tempPath('.wav')
-  try {
-    await spawnPython(RNNOISE_SCRIPT, ['--input', paddedInput, '--output', nrPath], 'RNNoise')
-    await decodeToFloat32(nrPath, outputPath, { trimStartMs: 20 })
-  } finally {
-    await removeTmp(paddedInput)
-    await removeTmp(nrPath)
-  }
+  // RNNoise has a 20ms algorithmic delay (10ms frame + 10ms lookahead). The
+  // Python script handles the 20ms pad + 40ms strip + length-match internally
+  // and writes 44.1 kHz float32 mono directly to outputPath, so the JS wrapper
+  // no longer needs separate padStart/decodeToFloat32 ffmpeg passes.
+  await spawnPython(RNNOISE_SCRIPT, ['--input', inputPath, '--output', outputPath], 'RNNoise')
 }
 
 /**
