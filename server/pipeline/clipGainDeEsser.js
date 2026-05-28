@@ -15,15 +15,10 @@
  * body, framed by half-Hann fades that prevent clicks at the boundaries.
  */
 
-import { spawn }                 from 'child_process'
 import { fileURLToPath }         from 'url'
-import { readFile, writeFile, rm } from 'fs/promises'
-import os                        from 'os'
+import { writeFile, rm }         from 'fs/promises'
 import path                      from 'path'
-import { PYTHON as SHARED_PYTHON } from './spawnPython.js'
-
-const CLIP_GAIN_PYTHON = process.env.CLIP_GAIN_DEESSER_PYTHON ?? SHARED_PYTHON
-const NUM_THREADS      = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
+import { spawnPythonJsonResult } from './spawnPython.js'
 
 const SCRIPTS_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
 const SCRIPT_PATH  = path.join(SCRIPTS_DIR, 'clip_gain_deesser.py')
@@ -101,7 +96,6 @@ export async function applyClipGainDeEsser(
   const stridentCeiling   = config.stridentCeilingDb    ?? legacyCeiling
   const nonStridentCeil   = config.nonStridentCeilingDb ?? legacyCeiling
   const args  = [
-    SCRIPT_PATH,
     '--input',                    inputPath,
     '--events-json',              eventsJsonPath,
     '--strident-ceiling-db',      String(stridentCeiling),
@@ -126,7 +120,7 @@ export async function applyClipGainDeEsser(
   }
 
   try {
-    return await runScript(args)
+    return await spawnPythonJsonResult(SCRIPT_PATH, args, 'ClipGainDeEsser')
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
   }
@@ -137,69 +131,4 @@ async function writeTempJson(payload) {
   const p = tempPath('.json')
   await writeFile(p, JSON.stringify(payload))
   return p
-}
-
-function runScript(args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(CLIP_GAIN_PYTHON, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        OMP_NUM_THREADS:   NUM_THREADS,
-        MKL_NUM_THREADS:   NUM_THREADS,
-        TORCH_NUM_THREADS: NUM_THREADS,
-      },
-    })
-
-    let stdout = ''
-    let stderr = ''
-    let stdoutBuffer = ''
-
-    proc.stdout.on('data', chunk => {
-      const text   = chunk.toString()
-      stdout      += text
-      stdoutBuffer += text
-      const lines  = stdoutBuffer.split('\n')
-      stdoutBuffer = lines.pop()
-      for (const line of lines) {
-        if (line.trim() && !line.startsWith('JSON_RESULT:')) {
-          console.log(`[ClipGainDeEsser] ${line}`)
-        }
-      }
-    })
-
-    proc.stderr.on('data', chunk => {
-      stderr += chunk.toString()
-      if (stderr.length > 4000) stderr = stderr.slice(-4000)
-    })
-
-    proc.on('close', (code, signal) => {
-      if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
-        console.log(`[ClipGainDeEsser] ${stdoutBuffer.trim()}`)
-      }
-      if (stderr.trim() && code === 0) console.log(`[ClipGainDeEsser] ${stderr.trim()}`)
-
-      if (code === 0 && signal === null) {
-        const line = stdout.split('\n').find(l => l.startsWith('JSON_RESULT:'))
-        if (!line) {
-          reject(new Error('clip_gain_deesser: exited 0 but emitted no JSON_RESULT line'))
-          return
-        }
-        try {
-          resolve(JSON.parse(line.slice('JSON_RESULT:'.length)))
-        } catch (err) {
-          reject(new Error(`clip_gain_deesser: failed to parse JSON_RESULT: ${err.message}`))
-        }
-      } else {
-        const parts = []
-        if (code   !== null) parts.push(`code ${code}`)
-        if (signal !== null) parts.push(`signal ${signal}`)
-        reject(new Error(`clip_gain_deesser exited with ${parts.join(', ')}.\n${stderr.slice(-2000)}`))
-      }
-    })
-
-    proc.on('error', err => {
-      reject(new Error(`Failed to spawn clip_gain_deesser: ${err.message}`))
-    })
-  })
 }

@@ -33,9 +33,8 @@
 
 import { join, dirname }           from 'path'
 import { writeFile, readFile, rm } from 'fs/promises'
-import { spawn }                   from 'child_process'
 import { fileURLToPath }           from 'url'
-import { PYTHON }                  from './spawnPython.js'
+import { spawnPython }             from './spawnPython.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const F0_SCRIPT   = join(__dirname, '../scripts/estimate_f0_contour.py')
@@ -70,7 +69,7 @@ export async function getF0Contour(ctx, { useCache = false } = {}) {
 
   let contour
   try {
-    await runF0Script(args)
+    await spawnPython(F0_SCRIPT, args, 'F0Contour')
     contour = JSON.parse(await readFile(outputPath, 'utf8'))
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
@@ -87,29 +86,3 @@ export async function getF0Contour(ctx, { useCache = false } = {}) {
   return ctx._f0Contour
 }
 
-// ---------------------------------------------------------------------------
-
-function runF0Script(args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(PYTHON, [F0_SCRIPT, ...args], {
-      // stdout: 'pipe' so we can drain it; stderr: 'pipe' for error capture.
-      // Both must be consumed to prevent the child process blocking on a full
-      // pipe buffer once its output exceeds the OS pipe buffer (~64 KB).
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stderr = ''
-    // Drain stdout — the script prints a one-line summary; capture it for
-    // debug visibility without blocking the process.
-    let stdout = ''
-    proc.stdout.on('data', d => { stdout += d.toString() })
-    proc.stderr.on('data', d => { stderr += d.toString() })
-    proc.on('close', code => {
-      if (stdout.trim()) process.stdout.write(`[F0Script] ${stdout.trim()}\n`)
-      if (code === 0) resolve()
-      else reject(new Error(
-        `estimate_f0_contour.py exited ${code}: ${stderr.slice(-500)}`,
-      ))
-    })
-    proc.on('error', reject)
-  })
-}

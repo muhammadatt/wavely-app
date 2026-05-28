@@ -23,15 +23,10 @@
  * needs the result twice it should hold the return value itself.
  */
 
-import { spawn }                  from 'child_process'
 import { fileURLToPath }          from 'url'
 import { readFile, writeFile, rm } from 'fs/promises'
-import os                         from 'os'
 import path                       from 'path'
-import { PYTHON as SHARED_PYTHON } from './spawnPython.js'
-
-const SIBILANCE_PYTHON = process.env.RESONANCE_PYTHON ?? SHARED_PYTHON
-const NUM_THREADS      = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
+import { spawnPythonJsonResult }  from './spawnPython.js'
 
 const SCRIPTS_DIR     = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
 const ANALYZER_SCRIPT = path.join(SCRIPTS_DIR, 'analyze_sibilance_events.py')
@@ -69,7 +64,6 @@ export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
   await writeFile(contourPath, JSON.stringify(f0Contour))
 
   const args = [
-    ANALYZER_SCRIPT,
     '--input',            ctx.currentPath,
     '--output',           eventsPath,
     '--f0-contour-json',  contourPath,
@@ -115,7 +109,12 @@ export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
   const startTime = Date.now()
 
   try {
-    await runAnalyzerScript(args)
+    // The analyzer uses the JSON_RESULT: line-prefix protocol (summary
+    // line on stdout, the heavy event map written to --output). We don't
+    // need the summary value here — it's mirrored in the event map JSON
+    // we read off disk below — but spawnPythonJsonResult is still the
+    // right shape (it'll route through the worker for migrated scripts).
+    await spawnPythonJsonResult(ANALYZER_SCRIPT, args, 'SibilanceAnalyzer')
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
     if (paramsPath)  await rm(paramsPath,  { force: true })
@@ -132,59 +131,4 @@ export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
   )
 
   return { events, path: eventsPath }
-}
-
-// The analyzer uses the same JSON_RESULT: line-prefix protocol as the
-// suppressor (summary line on stdout, heavy data written to --output).
-function runAnalyzerScript(args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(SIBILANCE_PYTHON, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        OMP_NUM_THREADS:   NUM_THREADS,
-        MKL_NUM_THREADS:   NUM_THREADS,
-        TORCH_NUM_THREADS: NUM_THREADS,
-      },
-    })
-
-    let stderr = ''
-    let stdoutBuffer = ''
-
-    proc.stdout.on('data', chunk => {
-      stdoutBuffer += chunk.toString()
-      const lines  = stdoutBuffer.split('\n')
-      stdoutBuffer = lines.pop()
-      for (const line of lines) {
-        if (line.trim() && !line.startsWith('JSON_RESULT:')) {
-          console.log(`[SibilanceAnalyzer] ${line}`)
-        }
-      }
-    })
-
-    proc.stderr.on('data', chunk => {
-      stderr += chunk.toString()
-      if (stderr.length > 4000) stderr = stderr.slice(-4000)
-    })
-
-    proc.on('close', (code, signal) => {
-      if (stdoutBuffer.trim() && !stdoutBuffer.startsWith('JSON_RESULT:')) {
-        console.log(`[SibilanceAnalyzer] ${stdoutBuffer.trim()}`)
-      }
-      if (stderr.trim() && code === 0) console.log(`[SibilanceAnalyzer] ${stderr.trim()}`)
-
-      if (code === 0 && signal === null) {
-        resolve()
-      } else {
-        const parts = []
-        if (code   !== null) parts.push(`code ${code}`)
-        if (signal !== null) parts.push(`signal ${signal}`)
-        reject(new Error(`SibilanceAnalyzer exited with ${parts.join(', ')}.\n${stderr.slice(-2000)}`))
-      }
-    })
-
-    proc.on('error', err => {
-      reject(new Error(`Failed to spawn SibilanceAnalyzer: ${err.message}`))
-    })
-  })
 }

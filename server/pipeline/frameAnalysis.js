@@ -36,13 +36,12 @@
  * to keep the stage-by-stage console log readable.
  */
 
-import { spawn }          from 'child_process'
 import { readFileSync }   from 'fs'
 import { readFile, rm }   from 'fs/promises'
 import { fileURLToPath }  from 'url'
-import os                 from 'os'
 import path               from 'path'
 
+import { spawnPython }    from './spawnPython.js'
 import { readWavSamples } from './wavReader.js'
 
 // Loaded from the shared config so JS and Python always use the same value.
@@ -55,14 +54,7 @@ const { FRAME_DURATION_S } = JSON.parse(
 )  // 0.025 s = 25 ms — must match FRAME_DURATION_S in silero_vad.py
 const BOOTSTRAP_FRAMES = 20    // use this many lowest-energy frames to bootstrap noise floor
 
-const NUM_THREADS   = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
 const VAD_BACKEND   = process.env.VAD_BACKEND   ?? 'silero'
-// Fall back through the other pipeline Python env vars so all scripts share
-// the same interpreter without requiring a separate SILERO_PYTHON entry.
-const SILERO_PYTHON = process.env.SILERO_PYTHON
-                   ?? process.env.DEEPFILTER_PYTHON
-                   ?? process.env.SEPARATION_PYTHON
-                   ?? 'python3'
 const SILERO_SCRIPT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', 'scripts', 'silero_vad.py'
@@ -237,42 +229,19 @@ async function analyzeAudioFramesSilero(wavPath) {
 
 /**
  * Spawn the Silero VAD Python script.
+ *
+ * Routed through spawnPython — in the persistent-worker path the Silero
+ * model load (a few hundred ms for the JIT artifact) happens inside the
+ * worker, but only the first time it's called per server lifetime. The
+ * legacy path spawns a fresh interpreter, matching the pre-worker
+ * behavior. Either way, stdout/stderr are drained by the shared helper.
  */
 function spawnSilero(inputPath, outputJsonPath) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(SILERO_PYTHON, [
-      SILERO_SCRIPT,
-      '--input',  inputPath,
-      '--output', outputJsonPath,
-    ], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, OMP_NUM_THREADS: NUM_THREADS, MKL_NUM_THREADS: NUM_THREADS, TORCH_NUM_THREADS: NUM_THREADS },
-    })
-
-    let stdout = ''
-    let stderr = ''
-    // Drain stdout to prevent pipe buffer deadlock — Silero VAD emits model
-    // loading output that can fill the 64 KB OS pipe buffer and block the
-    // child process indefinitely if the parent never reads it.
-    proc.stdout.on('data', chunk => { stdout += chunk.toString() })
-    proc.stderr.on('data', chunk => {
-      stderr += chunk.toString()
-      if (stderr.length > 4000) stderr = stderr.slice(-4000)
-    })
-
-    proc.on('close', (code, signal) => {
-      if (code === 0 && signal === null) {
-        resolve()
-      } else {
-        const reason = code !== null ? `code ${code}` : `signal ${signal}`
-        reject(new Error(`Silero VAD exited with ${reason}.\n${stderr.slice(-2000)}`))
-      }
-    })
-
-    proc.on('error', err => {
-      reject(new Error(`Failed to spawn Silero VAD: ${err.message}`))
-    })
-  })
+  return spawnPython(
+    SILERO_SCRIPT,
+    ['--input', inputPath, '--output', outputJsonPath],
+    'SileroVAD',
+  )
 }
 
 /**

@@ -27,11 +27,11 @@ RNNOISE_SR   = 48000   # RNNoise internal sample rate
 PIPELINE_SR  = 44100   # Pipeline internal format
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description='Apply RNNoise pre-separation pass')
     parser.add_argument('--input',  required=True, help='Input WAV (32-bit float, 44.1 kHz)')
     parser.add_argument('--output', required=True, help='Output WAV (32-bit float, 44.1 kHz)')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     import numpy as np
     from math import gcd
@@ -118,6 +118,17 @@ def main():
 
     # Write 32-bit float WAV at 44.1 kHz, mono
     wavfile.write(args.output, PIPELINE_SR, waveform[0].astype(np.float32))
+
+    return {
+        'model': 'RNNoise',
+        'input_sr': int(sr),
+        'output_sr': PIPELINE_SR,
+    }
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
 
 
 if __name__ == '__main__':

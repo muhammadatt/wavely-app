@@ -225,7 +225,7 @@ def build_fir(applied_db, sr):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def run(audio, sr, reference_levels, noise_floor_db, lf_max_boost_db):
+def apply_reference_eq(audio, sr, reference_levels, noise_floor_db, lf_max_boost_db):
     recording_levels, n_speech = speech_spectrum(audio, sr, noise_floor_db)
     if recording_levels is None:
         return {
@@ -297,7 +297,7 @@ def _load_audio(path):
     return sr, audio
 
 
-if __name__ == '__main__':
+def main(argv=None):
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format='%(message)s')
     parser = argparse.ArgumentParser(description='referenceEQ broad tonal correction')
     parser.add_argument('--input',       required=True, help='Input WAV (float32, 44.1 kHz, mono)')
@@ -308,7 +308,7 @@ if __name__ == '__main__':
                         help='Canonical pipeline noise floor (dBFS) for the speech gate')
     parser.add_argument('--lf-max-boost-db', type=float, default=DEFAULT_LF_MAX_BOOST_DB,
                         help='Sub-500 Hz boost cap (dB) — tightened on the ACX retry')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     with open(args.curve) as fh:
         curve = json.load(fh)
@@ -321,7 +321,7 @@ if __name__ == '__main__':
         )
 
     sr, audio = _load_audio(args.input)
-    result, corrected = run(
+    result, corrected = apply_reference_eq(
         audio, sr, curve_levels, args.noise_floor,
         min(args.lf_max_boost_db, DEFAULT_LF_MAX_BOOST_DB),
     )
@@ -341,3 +341,17 @@ if __name__ == '__main__':
         f"max_correction={result.get('max_correction_db', 0)} dB",
         flush=True,
     )
+
+    return {
+        'status': result['status'],
+        'max_correction_db': result.get('max_correction_db', 0),
+    }
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
+
+
+if __name__ == '__main__':
+    main()

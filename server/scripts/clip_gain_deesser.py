@@ -251,7 +251,7 @@ def _render_event_envelope(
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Clip-gain de-esser.")
     parser.add_argument("--input",          required=True)
     parser.add_argument("--output",         default=None,
@@ -275,7 +275,7 @@ def main() -> int:
                              "boundaries instead of reading it from events.json.")
     parser.add_argument("--no-render", action="store_true",
                         help="Skip writing --output. JSON_RESULT is still emitted.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not args.no_render and not args.output:
         parser.error("--output is required unless --no-render is set")
@@ -429,10 +429,22 @@ def main() -> int:
         "reductionRatio":             args.reduction_ratio,
         "maxReductionCapDb":          args.max_reduction_db,
     }
-    print("JSON_RESULT:" + json.dumps(summary), flush=True)
-    return 0
+    return summary
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py).
+
+    Returns the summary dict directly via the worker protocol — no
+    JSON_RESULT line is emitted in worker mode.
+    """
+    return main(argv)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
-    sys.exit(main())
+    # Legacy CLI / spawnPythonJsonResult contract: progress logs on stdout
+    # plus a single trailing JSON_RESULT: line that the JS side parses.
+    result = main()
+    print("JSON_RESULT:" + json.dumps(result), flush=True)
+    sys.exit(0)

@@ -180,15 +180,15 @@ def estimate_f0_contour(
 # CLI
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+def main(argv=None):
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(message)s")
     parser = argparse.ArgumentParser(description="Per-frame F0 contour estimator")
     parser.add_argument("--input",         required=True,  help="Input WAV (float32, 44.1 kHz)")
     parser.add_argument("--output",        required=True,  help="Output JSON path")
     parser.add_argument("--vad-mask-json", default=None,   help="VAD frame list JSON")
     parser.add_argument("--n-fft",         type=int, default=2048)
     parser.add_argument("--hop-length",    type=int, default=512)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sr, audio = wavfile.read(args.input)
     # Normalize integer PCM to [-1, 1] so autocorrelation ratios are correct
@@ -219,3 +219,17 @@ if __name__ == "__main__":
         f"F0Contour: median={result['median']}Hz frames={len(result['perFrame'])}",
         flush=True,
     )
+
+    return {
+        'median': result['median'],
+        'frames': len(result['perFrame']),
+    }
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
+
+
+if __name__ == "__main__":
+    main()

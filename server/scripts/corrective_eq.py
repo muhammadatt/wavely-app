@@ -461,7 +461,7 @@ def _load_voiced_mask(path, n_samples):
     return mask
 
 
-if __name__ == "__main__":
+def main(argv=None):
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(message)s")
     parser = argparse.ArgumentParser(description="Stage 3a Corrective EQ analysis")
     parser.add_argument("--input",         required=True, help="Input WAV (float32, 44.1 kHz, mono)")
@@ -469,7 +469,7 @@ if __name__ == "__main__":
     parser.add_argument("--vad-mask-json", default=None,  help="VAD frame list JSON")
     parser.add_argument("--f0-median",     type=float, required=True, help="Median F0 (Hz)")
     parser.add_argument("--f0-p5",         type=float, required=True, help="5th-percentile F0 (Hz)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sr, audio = wavfile.read(args.input)
     if np.issubdtype(audio.dtype, np.integer):
@@ -495,3 +495,19 @@ if __name__ == "__main__":
         f"bands={len(result['bands'])} merged={result['merged_bands']}",
         flush=True,
     )
+
+    return {
+        'voice_type': result['voice_type'],
+        'voiced_frames_used': result['voiced_frames_used'],
+        'bands_count': len(result['bands']),
+        'merged_bands': result['merged_bands'],
+    }
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
+
+
+if __name__ == "__main__":
+    main()

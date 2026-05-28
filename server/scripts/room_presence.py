@@ -239,7 +239,7 @@ def apply_room_presence_ir(
 # ---------------------------------------------------------------------------
 # CLI entry point — called by the Node pipeline via spawnPython
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
+def main(argv=None):
     import argparse
 
     parser = argparse.ArgumentParser(description="Room Presence (convolution reverb)")
@@ -253,7 +253,7 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion",         type=float, default=0.7,  help="Tail density for synthetic IR (0.0–1.0)")
     parser.add_argument("--normalize-ir",      action="store_true", default=True)
     parser.add_argument("--result-path",       default=None,   help="Path to write JSON result (ir_source etc.)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     input_path  = args.input
     output_path = args.output
@@ -293,3 +293,14 @@ if __name__ == "__main__":
         import json
         with open(args.result_path, "w") as _f:
             json.dump(ir_info, _f)
+
+    return ir_info
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py)."""
+    return main(argv)
+
+
+if __name__ == "__main__":
+    main()

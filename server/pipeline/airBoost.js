@@ -42,13 +42,12 @@
  * gain to keep the noise floor below the -60 dBFS ACX ceiling.
  */
 
-import { spawn }           from 'child_process'
 import { fileURLToPath }  from 'url'
 import path               from 'path'
 import { readFile }       from 'fs/promises'
 import { applyParametricEQ, tempPath, removeTmp } from '../lib/ffmpeg.js'
 import { remeasureFrames }    from './frameAnalysis.js'
-import { PYTHON, spawnPython } from './spawnPython.js'
+import { spawnPython }    from './spawnPython.js'
 import { getReferenceCurvePath } from './referenceEQ.js'
 
 const SCRIPTS_DIR    = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
@@ -356,47 +355,17 @@ export async function applyAirBoostMask(
   attackMs          = 5.0,
   releaseMs         = 20.0,
 ) {
-  const args = [
+  return spawnPython(
     MASK_SCRIPT,
-    '--original',            originalPath,
-    '--boosted',             boostedPath,
-    '--events',              eventsPath,
-    '--output',              outputPath,
-    '--sibilant-gain-floor', String(sibilantGainFloor),
-    '--attack-ms',           String(attackMs),
-    '--release-ms',          String(releaseMs),
-  ]
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn(PYTHON, args, { stdio: ['ignore', 'pipe', 'pipe'] })
-
-    let stderr = ''
-
-    proc.stdout.on('data', chunk => {
-      for (const line of chunk.toString().split('\n')) {
-        if (line.trim()) console.log(`[AirBoostMask] ${line}`)
-      }
-    })
-
-    proc.stderr.on('data', chunk => {
-      const text = chunk.toString()
-      stderr += text
-      for (const line of text.split('\n')) {
-        if (line.trim()) console.log(`[AirBoostMask] ${line}`)
-      }
-    })
-
-    proc.on('close', (code, signal) => {
-      if (code === 0 && signal === null) {
-        resolve()
-      } else {
-        const parts = []
-        if (code   !== null) parts.push(`code ${code}`)
-        if (signal !== null) parts.push(`signal ${signal}`)
-        reject(new Error(`AirBoostMask exited with ${parts.join(', ')}.\n${stderr.slice(-2000)}`))
-      }
-    })
-
-    proc.on('error', err => reject(new Error(`Failed to spawn AirBoostMask: ${err.message}`)))
-  })
+    [
+      '--original',            originalPath,
+      '--boosted',             boostedPath,
+      '--events',              eventsPath,
+      '--output',              outputPath,
+      '--sibilant-gain-floor', String(sibilantGainFloor),
+      '--attack-ms',           String(attackMs),
+      '--release-ms',          String(releaseMs),
+    ],
+    'AirBoostMask',
+  )
 }

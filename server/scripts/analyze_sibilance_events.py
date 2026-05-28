@@ -40,8 +40,7 @@ logger = logging.getLogger(__name__)
 # CLI
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Sibilance event analyzer")
     parser.add_argument("--input",            required=True)
     parser.add_argument("--output",           required=True,
@@ -57,7 +56,7 @@ if __name__ == "__main__":
                              "preset.airBoost.sibilanceDetection or "
                              "preset.resonanceSuppressor[i].sibilanceDetection).")
     parser.add_argument("--vad-mask-json",    default=None)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sr, audio = wavfile.read(args.input)
     if np.issubdtype(audio.dtype, np.integer):
@@ -185,9 +184,26 @@ if __name__ == "__main__":
                 _fmt(bd.get("head", [])), _fmt(bd.get("tail", [])),
             )
 
-    print("JSON_RESULT:" + json.dumps({
+    return {
         "frameCount":         events["frameCount"],
         "sibilantFrameCount": len(events["sibilantFrameIndices"]),
         "eventCount":         len(events["events"]),
         "f0Median":           events["f0"]["median"],
-    }), flush=True)
+    }
+
+
+def run(argv):
+    """Entry point used by the persistent worker (_worker.py).
+
+    Returns the summary dict directly via the worker protocol — no
+    JSON_RESULT line is emitted in worker mode.
+    """
+    return main(argv)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+    # Legacy CLI / spawnPythonJsonResult contract: progress logs on stdout
+    # plus a single trailing JSON_RESULT: line that the JS side parses.
+    result = main()
+    print("JSON_RESULT:" + json.dumps(result), flush=True)
