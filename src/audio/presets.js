@@ -456,7 +456,6 @@ export const PRESETS = {
       "humDetect",
       "hpf",
       { noiseReduce: { model: "df3" } },
-      "remeasureFramesPostNr",
       {
         autoLeveler: {
           total_max_up_db: 6.0,
@@ -513,7 +512,6 @@ export const PRESETS = {
         },
       },
       "correctiveEQ",
-      "remeasureFramesPostNr",
       {
         compression: [
           {
@@ -534,8 +532,6 @@ export const PRESETS = {
           },
         ],
       },
-      "remeasureFramesPostNr",
-      { noiseReduce: { model: "df3", skipBelowDb: -85 } },
       {
         parallelCompression: {
           ratio: 10,
@@ -659,7 +655,6 @@ export const PRESETS = {
       "humDetect",
       "hpf",
       { noiseReduce: { model: "df3" } },
-      "remeasureFramesPostNr",
       {
         autoLeveler: {
           total_max_up_db: 8.0,
@@ -694,8 +689,6 @@ export const PRESETS = {
           },
         },
       },
-      "clearerVoiceEnhance",
-      "remeasureFramesPostNr",
       {
         compression: {
           mode: "conditional",
@@ -705,8 +698,6 @@ export const PRESETS = {
           release: 80,
         },
       },
-      "remeasureFramesPostNr",
-      { noiseReduce: { model: "df3", skipBelowDb: -85 } },
       {
         parallelCompression: {
           ratio: 20,
@@ -801,7 +792,6 @@ export const PRESETS = {
       { separateVocals: { model: "demucs" } },
       "separationValidation",
       { bandwidthExtension: { enabled: false, model: "ap-bwe" } },
-      "remeasureFramesPostNr",
       {
         vocalExpander: {
           enabled: true,
