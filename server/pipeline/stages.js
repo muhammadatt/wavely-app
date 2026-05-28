@@ -211,6 +211,13 @@ export async function peakNormalizeApply(ctx) {
   ctx.log(`[peak-norm] ${params.inputPeakDbfs.toFixed(1)} dBFS → ${PEAK_NORMALIZE_TARGET_DBFS} dBFS (${params.gainDb > 0 ? '+' : ''}${params.gainDb.toFixed(1)} dB)`)
 }
 
+// Wrapper that pairs analyze + apply for presets. The split versions stay
+// exported so a chunked orchestrator can dispatch them independently.
+export async function peakNormalize(ctx) {
+  await peakNormalizeAnalyze(ctx)
+  await peakNormalizeApply(ctx)
+}
+
 // ── Stage: Frame analysis (pre-HPF) ──────────────────────────────────────────
 // Classifies voiced/silence frames, measures noise floor and loudness metrics.
 // Also back-fills beforeMeasurements.noiseFloorDbfs: analyzeFramesRaw runs on
@@ -728,6 +735,11 @@ export async function correctiveEQApply(ctx) {
   })
 }
 
+export async function correctiveEQ(ctx) {
+  await correctiveEQAnalyze(ctx)
+  await correctiveEQApply(ctx)
+}
+
 // ── Stage: referenceEQ ────────────────────────────────────────────────────────
 // Corpus-reference broad tonal correction. Runs after the final correctiveEQ:
 // 3a fixes localised anomalies, referenceEQ fixes broad tonal imbalance via a
@@ -1084,6 +1096,11 @@ export async function clipGainDeEsserApply(ctx) {
   })
 }
 
+export async function clipGainDeEsser(ctx) {
+  await clipGainDeEsserAnalyze(ctx)
+  await clipGainDeEsserApply(ctx)
+}
+
 // ── Stage: Auto Leveler (Stage 4b) ────────────────────────────────────────────
 // M Leveller-style clip automation. Segments voiced audio into clips (VAD
 // voiced runs plus sub-phrase splits at sustained internal level drops) and
@@ -1135,6 +1152,11 @@ export async function autoLevelerApply(ctx) {
     `G=[${m.gain_max_down_db}, ${m.gain_max_up_db}]dB ` +
     `nf_cap=${m.noise_floor_cap_active}`
   )
+}
+
+export async function autoLeveler(ctx) {
+  await autoLevelerAnalyze(ctx)
+  await autoLevelerApply(ctx)
 }
 
 // ── Stage: Compression ────────────────────────────────────────────────────────

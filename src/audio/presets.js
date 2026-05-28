@@ -170,8 +170,7 @@ export const PRESETS = {
       "decode",
       "monoMixdown",
       "measureBefore",
-      "peakNormalizeAnalyze",
-      "peakNormalizeApply",
+      "peakNormalize",
       "analyzeFramesRaw",
       "humDetect",
       "hpf",
@@ -194,7 +193,6 @@ export const PRESETS = {
           merge_max_delta_db: 6.0,
         },
       },
-      "autoLevelerApply",
       /*
       {
         spectralSubtraction: {
@@ -221,8 +219,7 @@ export const PRESETS = {
         },
       },
       */
-      "correctiveEQAnalyze",
-      "correctiveEQApply",
+      "correctiveEQ",
       {
         clipGainDeEsser: {
           enabled: true,
@@ -240,7 +237,6 @@ export const PRESETS = {
           },
         },
       },
-      "clipGainDeEsserApply",
       /*
       {
         // Conservative —
@@ -454,8 +450,7 @@ export const PRESETS = {
       "decode",
       "monoMixdown",
       "measureBefore",
-      "peakNormalizeAnalyze",
-      "peakNormalizeApply",
+      "peakNormalize",
       "analyzeFramesRaw",
       { clickRemover: { thresholdSigma: 3.5, maxClickMs: 15 } },
       "humDetect",
@@ -479,7 +474,6 @@ export const PRESETS = {
           merge_max_delta_db: 6.0,
         },
       },
-      "autoLevelerApply",
       {
         spectralSubtraction: {
           enabled: true,
@@ -518,9 +512,7 @@ export const PRESETS = {
           },
         },
       },
-      "clipGainDeEsserApply",
-      "correctiveEQAnalyze",
-      "correctiveEQApply",
+      "correctiveEQ",
       "remeasureFramesPostNr",
       {
         compression: [
@@ -661,8 +653,7 @@ export const PRESETS = {
       "decode",
       "monoMixdown",
       "measureBefore",
-      "peakNormalizeAnalyze",
-      "peakNormalizeApply",
+      "peakNormalize",
       "analyzeFramesRaw",
       { clickRemover: { thresholdSigma: 3.5, maxClickMs: 10 } },
       "humDetect",
@@ -686,7 +677,6 @@ export const PRESETS = {
           merge_max_delta_db: 6.0,
         },
       },
-      "autoLevelerApply",
 
       {
         clipGainDeEsser: {
@@ -704,7 +694,6 @@ export const PRESETS = {
           },
         },
       },
-      "clipGainDeEsserApply",
       "clearerVoiceEnhance",
       "remeasureFramesPostNr",
       {
@@ -763,8 +752,7 @@ export const PRESETS = {
           freq_ceil_hz: 18000.0,
         },
       },
-      "correctiveEQAnalyze",
-      "correctiveEQApply",
+      "correctiveEQ",
       "referenceEQ",
       "normalize",
       "truePeakLimit",
@@ -791,8 +779,7 @@ export const PRESETS = {
     stages: [
       "decode",
       "measureBefore",
-      "peakNormalizeAnalyze",
-      "peakNormalizeApply",
+      "peakNormalize",
       "analyzeFramesRaw",
       "humDetect",
       "hpf",
@@ -882,8 +869,7 @@ export const PRESETS = {
           floorDb: -70,
         },
       },
-      "autoLevelerAnalyze",
-      "autoLevelerApply",
+      "autoLeveler",
       { airBoost: { gainDb: 0 } },
       { roomPresence: { enabled: false } },
       "normalize",

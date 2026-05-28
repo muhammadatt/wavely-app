@@ -27,11 +27,6 @@ const STAGE_FOR_CONFIG_KEY = {
   throatClickAttenuator: 'throatClickAttenuate',
   compression:         'compress',
   parallelCompression: 'parallelCompress',
-  // Split analyze/apply pairs: the config-bearing preset key routes to
-  // analyze (which owns the config); apply runs as a plain string entry
-  // immediately after and reads its inputs from ctx.globalParams.
-  autoLeveler:         'autoLevelerAnalyze',
-  clipGainDeEsser:     'clipGainDeEsserAnalyze',
   deEsser:             'deEss',
 }
 
