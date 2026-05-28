@@ -91,13 +91,15 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
  * handling and registry lookup in one place.
  */
 async function runStageEntry(ctx, entry, logger) {
-  // Chunked block — dispatched separately; logged as a single "chunked" step.
+  // Chunked block — dispatched separately; logged as a single "chunked" step
+  // with the runner's per-(chunk, stage) timing breakdown attached so we can
+  // see where time goes inside the block without enabling N×M per-stage logs.
   if (typeof entry === 'object' && entry !== null && Array.isArray(entry.chunked)) {
     const prevPath      = ctx.currentPath
     const resultsBefore = { ...ctx.results }
     const stageStart    = Date.now()
 
-    await runChunkedBlock(ctx, entry.chunked, (subCtx, innerEntry) =>
+    const timings = await runChunkedBlock(ctx, entry.chunked, (subCtx, innerEntry) =>
       runStageEntry(subCtx, innerEntry, null),  // inner stages skip logger to avoid N×M log noise
     )
 
@@ -106,6 +108,7 @@ async function runStageEntry(ctx, entry, logger) {
       const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
       const stageResults = {}
       for (const key of changedKeys) stageResults[key] = ctx.results[key]
+      if (timings) stageResults._chunked = timings
       await logger.logStep(
         'chunked',
         audioChanged ? ctx.currentPath : null,

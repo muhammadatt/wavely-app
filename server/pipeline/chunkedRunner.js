@@ -42,6 +42,11 @@ const OVERLAP_MS = 100
  * invoked once per inner stage entry per chunk; it handles registry lookup,
  * inline-config patching, and (when logging is enabled) per-step logging.
  *
+ * Returns a structured timings object the orchestrator threads into the
+ * `chunked` step's log meta. The shape is stable whether the planner
+ * produced a single-chunk plan or split the file; the perChunk array has
+ * one entry per chunk and perStage rolls those up keyed by display name.
+ *
  * @param {object} ctx                  Parent pipeline context.
  * @param {Array}  innerStages          Inner stage entries (same shape as preset.stages).
  * @param {(ctx, entry) => Promise<void>} runInnerStage  Dispatch callback.
@@ -51,6 +56,25 @@ const OVERLAP_MS = 100
  *                                       callers leave this empty; tests inject smaller
  *                                       chunk sizes to force the multi-chunk path on
  *                                       reasonably-sized synthetic fixtures.
+ * @returns {Promise<ChunkedTimings>}
+ *
+ * @typedef {Object} ChunkedTimings
+ * @property {Object}        overall
+ * @property {number}        overall.plannedChunks
+ * @property {number}        overall.overlapMs
+ * @property {number}        overall.carveTotalMs       Sum of FFmpeg carve durations across chunks
+ * @property {number}        overall.stitchMs           Stitcher wall-clock (0 for single-chunk plan)
+ * @property {number}        overall.innerTotalMs       Sum of all inner stage durations across all chunks
+ * @property {string|null}   overall.planReason         Set when the plan collapsed to a single chunk
+ * @property {Array<ChunkTimings>}  perChunk
+ * @property {Object<string, { totalMs: number, avgMs: number, count: number }>} perStage
+ *
+ * @typedef {Object} ChunkTimings
+ * @property {number}   index                  1-based chunk index
+ * @property {[number,number]} sampleRange     Carved sample range [start, end)
+ * @property {number}   carveMs                FFmpeg extract duration (0 for single-chunk plan)
+ * @property {Array<{ name: string, durationMs: number }>} stages
+ * @property {number}   totalMs                Sum of stages[i].durationMs + carveMs
  */
 export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOptions = {}) {
   const sourcePath = ctx.currentPath
@@ -62,10 +86,19 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
 
   if (plan.chunks.length === 1) {
     ctx.log(`[chunked] single-chunk plan (${plan.reason}) — running inner stages whole-file`)
-    for (const entry of innerStages) {
-      await runInnerStage(ctx, entry)
+    const chunkTimings = {
+      index: 1,
+      sampleRange: [0, totalSamples],
+      carveMs: 0,
+      stages: [],
+      totalMs: 0,
     }
-    return
+    for (const entry of innerStages) {
+      const stageMs = await runTimed(() => runInnerStage(ctx, entry))
+      chunkTimings.stages.push({ name: entryDisplayName(entry), durationMs: stageMs })
+      chunkTimings.totalMs += stageMs
+    }
+    return buildTimings(plan, overlapSamples, sampleRate, 0, [chunkTimings])
   }
 
   ctx.log(
@@ -77,20 +110,33 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
   // never loaded whole. Each carved chunk file lives in ctx.tmpFiles and gets
   // cleaned up at pipeline end.
   const processedChunks = []
+  const perChunkTimings = []
   for (let i = 0; i < plan.chunks.length; i++) {
     const { startSample, endSample } = plan.chunks[i]
     const carveStart = Math.max(0, startSample - overlapSamples)
     const carveEnd   = Math.min(totalSamples, endSample + overlapSamples)
 
     const chunkInPath = ctx.tmp('.wav')
-    await extractAudioRange(sourcePath, chunkInPath, carveStart, carveEnd)
+    const carveMs = await runTimed(() => extractAudioRange(sourcePath, chunkInPath, carveStart, carveEnd))
 
     const subCtx = createSubContext(ctx, chunkInPath, frames, carveStart, carveEnd)
 
     ctx.log(`[chunked] chunk ${i + 1}/${plan.chunks.length}: samples [${carveStart}, ${carveEnd})`)
-    for (const entry of innerStages) {
-      await runInnerStage(subCtx, entry)
+    const chunkTimings = {
+      index: i + 1,
+      sampleRange: [carveStart, carveEnd],
+      carveMs,
+      stages: [],
+      totalMs: carveMs,
     }
+    for (const entry of innerStages) {
+      const stageMs = await runTimed(() => runInnerStage(subCtx, entry))
+      chunkTimings.stages.push({ name: entryDisplayName(entry), durationMs: stageMs })
+      chunkTimings.totalMs += stageMs
+    }
+    perChunkTimings.push(chunkTimings)
+
+    ctx.log(`[chunked] chunk ${i + 1}/${plan.chunks.length} done in ${(chunkTimings.totalMs / 1000).toFixed(2)}s`)
 
     processedChunks.push({
       carveStart,
@@ -104,10 +150,78 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
 
   // Stitch processed chunks → single file (streaming; at most 2 chunks resident)
   const stitchedPath = ctx.tmp('.wav')
-  await stitchChunks(processedChunks, totalSamples, sampleRate, overlapSamples, stitchedPath)
+  const stitchMs = await runTimed(() =>
+    stitchChunks(processedChunks, totalSamples, sampleRate, overlapSamples, stitchedPath),
+  )
   ctx.currentPath = stitchedPath
 
   mergeChunkResults(ctx, processedChunks)
+
+  return buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTimings)
+}
+
+// ─── Timing helpers ─────────────────────────────────────────────────────────
+
+async function runTimed(fn) {
+  const t0 = Date.now()
+  await fn()
+  return Date.now() - t0
+}
+
+/**
+ * Resolve an inner-stage entry to a human-readable label for timing reports.
+ * Bare-string entries are returned as-is. Object entries use the config key,
+ * suffixed with the model when present so dual-pass `noiseReduce` calls show
+ * up as `noiseReduce(df3)` vs `noiseReduce(rnnoise)` rather than colliding.
+ */
+function entryDisplayName(entry) {
+  if (typeof entry === 'string') return entry
+  if (!entry || typeof entry !== 'object') return String(entry)
+  const [configKey] = Object.keys(entry)
+  const inlineConfig = entry[configKey]
+  if (inlineConfig && typeof inlineConfig === 'object' && inlineConfig.model) {
+    return `${configKey}(${inlineConfig.model})`
+  }
+  return configKey
+}
+
+/**
+ * Roll per-chunk timings into the public ChunkedTimings shape, including the
+ * per-stage aggregate (total / avg / count). Stable across single-chunk and
+ * multi-chunk paths so log consumers don't need to special-case either.
+ */
+function buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTimings) {
+  const overlapMs = Math.round(overlapSamples / sampleRate * 1000)
+  let carveTotalMs = 0
+  let innerTotalMs = 0
+  const perStage = {}
+
+  for (const chunk of perChunkTimings) {
+    carveTotalMs += chunk.carveMs
+    for (const stage of chunk.stages) {
+      innerTotalMs += stage.durationMs
+      const agg = perStage[stage.name] ?? { totalMs: 0, avgMs: 0, count: 0 }
+      agg.totalMs += stage.durationMs
+      agg.count   += 1
+      perStage[stage.name] = agg
+    }
+  }
+  for (const name of Object.keys(perStage)) {
+    perStage[name].avgMs = Math.round(perStage[name].totalMs / perStage[name].count)
+  }
+
+  return {
+    overall: {
+      plannedChunks: plan.chunks.length,
+      overlapMs,
+      carveTotalMs,
+      stitchMs,
+      innerTotalMs,
+      planReason: plan.reason,
+    },
+    perChunk: perChunkTimings,
+    perStage,
+  }
 }
 
 // ─── Sub-context construction ───────────────────────────────────────────────

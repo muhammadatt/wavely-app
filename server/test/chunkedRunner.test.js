@@ -122,7 +122,7 @@ test('chunked block: hpf via chunks matches whole-file hpf within crossfade tole
   // single-chunk plan for this 2-min fixture).
   const ctx = await makeCtx(input, sampleRate)
   let innerInvocations = 0
-  await runChunkedBlock(
+  const timings = await runChunkedBlock(
     ctx,
     ['hpf'],
     async (subCtx, entry) => {
@@ -134,6 +134,32 @@ test('chunked block: hpf via chunks matches whole-file hpf within crossfade tole
   )
   assert.ok(innerInvocations >= 2,
     `expected ≥2 inner invocations (multi-chunk path), got ${innerInvocations}`)
+
+  // Timings shape — verify the public contract the orchestrator logs against
+  assert.ok(timings, 'expected runChunkedBlock to return a timings object')
+  assert.equal(timings.overall.plannedChunks, innerInvocations,
+    'plannedChunks should match the number of inner invocations for a 1-stage block')
+  assert.equal(timings.overall.overlapMs, 100)
+  assert.ok(timings.overall.stitchMs > 0,
+    `stitchMs should be >0 for multi-chunk plan, got ${timings.overall.stitchMs}`)
+  assert.equal(timings.overall.planReason, null,
+    'planReason should be null when planner returned multiple chunks')
+  assert.equal(timings.perChunk.length, innerInvocations)
+  for (let i = 0; i < timings.perChunk.length; i++) {
+    const c = timings.perChunk[i]
+    assert.equal(c.index, i + 1)
+    assert.equal(c.stages.length, 1)
+    assert.equal(c.stages[0].name, 'hpf')
+    assert.ok(c.stages[0].durationMs >= 0)
+    assert.ok(c.carveMs >= 0)
+  }
+  assert.equal(timings.perStage.hpf.count, innerInvocations)
+  assert.equal(
+    timings.perStage.hpf.totalMs,
+    timings.perChunk.reduce((s, c) => s + c.stages[0].durationMs, 0),
+    'perStage.hpf.totalMs should equal sum of per-chunk hpf durations',
+  )
+
   const chunked = (await readWavAllChannels(ctx.currentPath)).channels[0]
 
   // Lengths must match exactly — chunking must not change sample count
@@ -237,6 +263,47 @@ test('planChunkBoundaries: when every search window has silence, no chunk exceed
       `exceeds max ${maxChunkSamples}`,
     )
   }
+})
+
+test('chunked block: timings distinguish inner stages by model and aggregate per-stage', async () => {
+  // Verifies the display-name resolver and per-stage aggregation: two
+  // inner-stage entries with the same configKey but different `model`
+  // settings should appear as separate per-stage rollup keys.
+  const input = await makeChunkableWav(120)
+  const ctx   = await makeCtx(input, 44100)
+
+  // Synthetic no-op stages that mimic the dispatch contract — we only
+  // care about the runner's timing scaffolding, not the actual processing.
+  const noop = async () => {}
+  const timings = await runChunkedBlock(
+    ctx,
+    [{ noiseReduce: { model: 'df3' } }, { noiseReduce: { model: 'rnnoise' } }],
+    noop,
+    { targetChunkDurationS: 30, minChunkDurationS: 10, maxChunkDurationS: 60 },
+  )
+
+  assert.ok(timings.perStage['noiseReduce(df3)'],     'expected noiseReduce(df3) in perStage')
+  assert.ok(timings.perStage['noiseReduce(rnnoise)'], 'expected noiseReduce(rnnoise) in perStage')
+  assert.equal(timings.perStage['noiseReduce(df3)'].count, timings.overall.plannedChunks)
+  assert.equal(timings.perStage['noiseReduce(rnnoise)'].count, timings.overall.plannedChunks)
+})
+
+test('chunked block: single-chunk plan still produces a timings report', async () => {
+  const input = await makeChunkableWav(30)
+  const ctx   = await makeCtx(input, 44100)
+
+  const timings = await runChunkedBlock(ctx, ['hpf'], async (subCtx) => {
+    await hpf(subCtx)
+  })
+
+  assert.equal(timings.overall.plannedChunks, 1)
+  assert.equal(timings.overall.stitchMs, 0,
+    'single-chunk plan should report stitchMs=0 (no stitching done)')
+  assert.ok(typeof timings.overall.planReason === 'string',
+    'single-chunk plan should surface a planReason')
+  assert.equal(timings.perChunk.length, 1)
+  assert.equal(timings.perChunk[0].carveMs, 0)
+  assert.equal(timings.perStage.hpf.count, 1)
 })
 
 test('chunked block: single-chunk plan bypasses carve/stitch', async () => {
