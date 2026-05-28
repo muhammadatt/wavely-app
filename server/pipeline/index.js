@@ -16,6 +16,7 @@ import { PRESETS, OUTPUT_PROFILES } from '../presets.js'
 import { tempPath, removeTmp } from '../lib/ffmpeg.js'
 import * as allStages from './stages.js'
 import { createLogger } from './logger.js'
+import { runChunkedBlock } from './chunkedRunner.js'
 
 // Stage name → function registry, built once at module load.
 const STAGE_REGISTRY = allStages
@@ -59,44 +60,7 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
 
   try {
     for (const entry of pipeline) {
-      let stageName, configKey, inlineConfig
-      if (typeof entry === 'string') {
-        stageName    = entry
-        configKey    = null
-        inlineConfig = null
-      } else {
-        ;[configKey] = Object.keys(entry)
-        inlineConfig  = entry[configKey]
-        stageName    = STAGE_FOR_CONFIG_KEY[configKey] ?? configKey
-      }
-
-      const stageFn = STAGE_REGISTRY[stageName]
-      if (!stageFn) throw new Error(`[pipeline] Unknown stage: "${configKey ?? stageName}"`)
-
-      const prevPath      = ctx.currentPath
-      const resultsBefore = { ...ctx.results }
-      const stageStart    = Date.now()
-
-      const origPreset = ctx.preset
-      if (inlineConfig != null) ctx.preset = { ...ctx.preset, [configKey]: inlineConfig }
-      await stageFn(ctx)
-      ctx.preset = origPreset
-
-      const stageDuration = Date.now() - stageStart
-      const audioChanged  = ctx.currentPath !== prevPath
-
-      if (logger) {
-        const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
-        const stageResults = {}
-        for (const key of changedKeys) stageResults[key] = ctx.results[key]
-
-        await logger.logStep(
-          stageName,
-          audioChanged ? ctx.currentPath : null,
-          stageResults,
-          stageDuration,
-        )
-      }
+      await runStageEntry(ctx, entry, logger)
     }
 
     const report   = buildReport(ctx)
@@ -109,6 +73,85 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
   } catch (err) {
     await Promise.all(ctx.tmpFiles.map(removeTmp))
     throw err
+  }
+}
+
+// ── Stage entry dispatcher ────────────────────────────────────────────────────
+
+/**
+ * Run a single entry from a stages array. Three entry shapes are supported:
+ *
+ *   "stageName"                  — bare stage call, no inline config
+ *   { stageName: { ...config } } — stage call with inline config patch
+ *   { chunked: [...inner] }      — dispatch inner stages through the chunked
+ *                                   block runner (carve → per-chunk → stitch)
+ *
+ * Exported indirectly via runChunkedBlock so the chunked runner can recurse
+ * through the same dispatch path for its inner stages — keeps inline-config
+ * handling and registry lookup in one place.
+ */
+async function runStageEntry(ctx, entry, logger) {
+  // Chunked block — dispatched separately; logged as a single "chunked" step.
+  if (typeof entry === 'object' && entry !== null && Array.isArray(entry.chunked)) {
+    const prevPath      = ctx.currentPath
+    const resultsBefore = { ...ctx.results }
+    const stageStart    = Date.now()
+
+    await runChunkedBlock(ctx, entry.chunked, (subCtx, innerEntry) =>
+      runStageEntry(subCtx, innerEntry, null),  // inner stages skip logger to avoid N×M log noise
+    )
+
+    if (logger) {
+      const audioChanged = ctx.currentPath !== prevPath
+      const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
+      const stageResults = {}
+      for (const key of changedKeys) stageResults[key] = ctx.results[key]
+      await logger.logStep(
+        'chunked',
+        audioChanged ? ctx.currentPath : null,
+        stageResults,
+        Date.now() - stageStart,
+      )
+    }
+    return
+  }
+
+  let stageName, configKey, inlineConfig
+  if (typeof entry === 'string') {
+    stageName    = entry
+    configKey    = null
+    inlineConfig = null
+  } else {
+    ;[configKey] = Object.keys(entry)
+    inlineConfig  = entry[configKey]
+    stageName    = STAGE_FOR_CONFIG_KEY[configKey] ?? configKey
+  }
+
+  const stageFn = STAGE_REGISTRY[stageName]
+  if (!stageFn) throw new Error(`[pipeline] Unknown stage: "${configKey ?? stageName}"`)
+
+  const prevPath      = ctx.currentPath
+  const resultsBefore = { ...ctx.results }
+  const stageStart    = Date.now()
+
+  const origPreset = ctx.preset
+  if (inlineConfig != null) ctx.preset = { ...ctx.preset, [configKey]: inlineConfig }
+  await stageFn(ctx)
+  ctx.preset = origPreset
+
+  const stageDuration = Date.now() - stageStart
+  const audioChanged  = ctx.currentPath !== prevPath
+
+  if (logger) {
+    const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
+    const stageResults = {}
+    for (const key of changedKeys) stageResults[key] = ctx.results[key]
+    await logger.logStep(
+      stageName,
+      audioChanged ? ctx.currentPath : null,
+      stageResults,
+      stageDuration,
+    )
   }
 }
 
