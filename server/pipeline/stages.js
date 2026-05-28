@@ -51,7 +51,7 @@ import { runSeparation, runClearerVoice } from './separation.js'
 import { writeFile } from 'fs/promises'
 import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, runThroatClickAttenuator, applyResonanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
-import { applyAutoLeveler } from './autoLeveler.js'
+import { analyzeAutoLeveler, renderAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { applyVadGate }       from './vadGate.js'
@@ -169,25 +169,54 @@ export async function measureBefore(ctx) {
 // runs, precedes measureBefore), so a second measurement pass would produce
 // the same value at the cost of another full-file FFmpeg+libebur128 read.
 
-export async function peakNormalize(ctx) {
-  const TARGET_PEAK_DBFS = -1.0
+// Analyze pair (peakNormalizeAnalyze / peakNormalizeApply):
+//   Analyze measures the input peak and computes the gain needed to hit the
+//   target; Apply runs a single linear-gain FFmpeg call with that gain. The
+//   split lets a chunked orchestrator measure peak once on the whole file
+//   and apply the same gain in parallel across chunks.
+
+const PEAK_NORMALIZE_TARGET_DBFS = -1.0
+
+export async function peakNormalizeAnalyze(ctx) {
   const cachedPeak = ctx.results.metrics?.truePeakDbfs
   const peak = cachedPeak != null
     ? cachedPeak
     : (await measureAudio(ctx.currentPath)).truePeakDbfs
-  const gainDb = TARGET_PEAK_DBFS - peak
+  const gainDb = PEAK_NORMALIZE_TARGET_DBFS - peak
 
   if (Math.abs(gainDb) < 0.1) {
     ctx.log(`[peak-norm] Peak already at ${peak.toFixed(1)} dBFS — skipped`)
+    ctx.globalParams.peakNormalize = { applied: false, inputPeakDbfs: peak }
     ctx.results.peakNormalize = { applied: false, inputPeakDbfs: peak }
     return
   }
 
+  ctx.globalParams.peakNormalize = { applied: true, inputPeakDbfs: peak, gainDb }
+}
+
+export async function peakNormalizeApply(ctx) {
+  const params = ctx.globalParams.peakNormalize
+  if (!params || !params.applied) {
+    // analyze decided no gain change is needed — leave the report entry as-is
+    if (!ctx.results.peakNormalize) {
+      ctx.results.peakNormalize = { applied: false, inputPeakDbfs: params?.inputPeakDbfs ?? null }
+    }
+    return
+  }
+
   const outPath = ctx.tmp('.wav')
-  await applyLinearGain(ctx.currentPath, outPath, gainDb)
+  await applyLinearGain(ctx.currentPath, outPath, params.gainDb)
   ctx.currentPath = outPath
-  ctx.results.peakNormalize = { applied: true, inputPeakDbfs: peak, gainDb }
-  ctx.log(`[peak-norm] ${peak.toFixed(1)} dBFS → ${TARGET_PEAK_DBFS} dBFS (${gainDb > 0 ? '+' : ''}${gainDb.toFixed(1)} dB)`)
+  ctx.results.peakNormalize = { applied: true, inputPeakDbfs: params.inputPeakDbfs, gainDb: params.gainDb }
+  ctx.log(`[peak-norm] ${params.inputPeakDbfs.toFixed(1)} dBFS → ${PEAK_NORMALIZE_TARGET_DBFS} dBFS (${params.gainDb > 0 ? '+' : ''}${params.gainDb.toFixed(1)} dB)`)
+}
+
+// Wrapper that pairs analyze + apply for presets. The split versions stay
+// exported so a chunked orchestrator can dispatch them independently.
+export async function peakNormalize(ctx) {
+  await peakNormalizeAnalyze(ctx)
+  await peakNormalizeApply(ctx)
+  // params are scalar — no cleanup needed.
 }
 
 // ── Stage: Frame analysis (pre-HPF) ──────────────────────────────────────────
@@ -631,13 +660,26 @@ export async function roomTonePad(ctx) {
 // Does not run for noise_eraser — source separation alters the spectral
 // structure, so the cepstral detection thresholds are not valid on its output.
 
-export async function correctiveEQ(ctx) {
+// Analyze pair (correctiveEQAnalyze / correctiveEQApply):
+//   Analyze produces the final EQ band list. For acx output profile it runs
+//   the noise-floor convergence loop (apply tentative bands → remeasure floor
+//   → trim low-frequency boosts), so analyze does write intermediate temp
+//   files. Apply then runs a single parametric EQ pass with the converged
+//   bands. The redundant final apply costs one FFmpeg call (~50 ms) but
+//   keeps the contract clean: analyze=bands, apply=EQ filter.
+//
+//   For chunked processing later, the ACX convergence inside analyze would
+//   be replaced with a predictive noise-floor delta — but that's a follow-up.
+
+export async function correctiveEQAnalyze(ctx) {
   if (ctx.presetId === 'noise_eraser') {
-    ctx.results.correctiveEQ = {
+    const skip = {
       applied: false,
       skipped: true,
       reason:  'noise_eraser preset — Stage 3a does not run on separated audio',
     }
+    ctx.globalParams.correctiveEQ = skip
+    ctx.results.correctiveEQ = skip
     return
   }
 
@@ -672,16 +714,32 @@ export async function correctiveEQ(ctx) {
     if (reductionDb > 0) result.acxNoiseFloorReductionDb = reductionDb
   }
 
-  ctx.currentPath     = eqPath
   result.bands        = bands
   result.applied      = bands.length > 0
   result.ffmpegFilter = bandsToFfmpegFilters(bands).join(',') || null
+  ctx.globalParams.correctiveEQ = { bands, applied: result.applied }
   ctx.results.correctiveEQ = result
+}
+
+export async function correctiveEQApply(ctx) {
+  const params = ctx.globalParams.correctiveEQ
+  if (!params || !params.applied || !params.bands?.length) {
+    return
+  }
+  const eqPath = ctx.tmp('.wav')
+  await applyParametricEQ(ctx.currentPath, eqPath, bandsToFfmpegFilters(params.bands))
+  ctx.currentPath = eqPath
   await logLevel(ctx, 'after corrective EQ', ctx.currentPath, {
-    voice_type: result.voice_type,
-    bands:      bands.length,
-    merged:     result.merged_bands ?? 0,
+    voice_type: ctx.results.correctiveEQ?.voice_type,
+    bands:      params.bands.length,
+    merged:     ctx.results.correctiveEQ?.merged_bands ?? 0,
   })
+}
+
+export async function correctiveEQ(ctx) {
+  await correctiveEQAnalyze(ctx)
+  await correctiveEQApply(ctx)
+  // bands array is small (~handful of objects) — no cleanup needed.
 }
 
 // ── Stage: referenceEQ ────────────────────────────────────────────────────────
@@ -951,10 +1009,20 @@ export async function deEss(ctx) {
 // Skips silently when preset.clipGainDeEsser is absent or .enabled is false,
 // or when the detector returns no events that survive the duration filter.
 
-export async function clipGainDeEss(ctx) {
+// Analyze pair (clipGainDeEsserAnalyze / clipGainDeEsserApply):
+//   Analyze runs sibilance detection and writes an events.json file path
+//   plus the config + frame labels into globalParams. Apply consumes them
+//   to render the cosine-fade gain envelope. Both halves were already
+//   separable in the underlying modules — this just exposes the seam at
+//   the registry level so chunked workers can run apply per chunk while
+//   detection runs once on the whole file.
+
+export async function clipGainDeEsserAnalyze(ctx) {
   const config = ctx.preset?.clipGainDeEsser
   if (!config || config.enabled === false) {
-    ctx.results.clipGainDeEsser = { applied: false, reason: 'preset_not_configured' }
+    const skip = { applied: false, reason: 'preset_not_configured' }
+    ctx.globalParams.clipGainDeEsser = skip
+    ctx.results.clipGainDeEsser = skip
     return
   }
 
@@ -982,12 +1050,27 @@ export async function clipGainDeEss(ctx) {
   })
 
   if (!events?.events?.length) {
-    ctx.results.clipGainDeEsser = {
-      applied:    false,
-      reason:     'no_events',
-      eventCount: 0,
-    }
+    const skip = { applied: false, reason: 'no_events', eventCount: 0 }
+    ctx.globalParams.clipGainDeEsser = skip
+    ctx.results.clipGainDeEsser = skip
     ctx.log(`[clip-gain-deess] No events ≥ ${minDurationMs}ms detected — skipped`)
+    return
+  }
+
+  // Snapshot everything apply needs. The frame labels carry through here so
+  // apply doesn't have to reach into ctx.results.metrics — keeps the contract
+  // explicit and chunking-friendly.
+  ctx.globalParams.clipGainDeEsser = {
+    applied: true,
+    eventsPath,
+    config,
+    frames:  ctx.results.metrics?.frames ?? null,
+  }
+}
+
+export async function clipGainDeEsserApply(ctx) {
+  const params = ctx.globalParams.clipGainDeEsser
+  if (!params || !params.applied) {
     return
   }
 
@@ -995,17 +1078,16 @@ export async function clipGainDeEss(ctx) {
   const result  = await applyClipGainDeEsser(
     ctx.currentPath,
     outPath,
-    eventsPath,
-    config,
-    ctx.results.metrics?.frames ?? null,
+    params.eventsPath,
+    params.config,
+    params.frames,
   )
 
   if (result.applied) ctx.currentPath = outPath
-  // Expose eventsPath so downstream stages (e.g. parallelCompress's wet-branch
-  // de-esser pass) can reuse the same event boundaries without re-running
-  // detection. The events.json lives in the per-job temp dir alongside the
-  // other intermediate artifacts; ctx.tmp registers it for cleanup.
-  ctx.results.clipGainDeEsser = { ...result, eventsPath }
+  // Surface eventsPath on the report so downstream stages (parallelCompress's
+  // wet-branch de-esser pass) can reuse the same event boundaries without
+  // re-running detection.
+  ctx.results.clipGainDeEsser = { ...result, eventsPath: params.eventsPath }
 
   await logLevel(ctx, 'after clip-gain de-esser', ctx.currentPath, {
     applied:    result.applied,
@@ -1014,6 +1096,16 @@ export async function clipGainDeEss(ctx) {
     skipNoCtx:  result.skippedNoContext,
     maxRed:     result.maxReductionDb != null ? `${result.maxReductionDb}dB` : 'n/a',
   })
+}
+
+export async function clipGainDeEsser(ctx) {
+  await clipGainDeEsserAnalyze(ctx)
+  await clipGainDeEsserApply(ctx)
+  // The frames array is the heavy field here — one entry per 25 ms frame
+  // (~144k entries/hour). The eventsPath is preserved on
+  // ctx.results.clipGainDeEsser for parallelCompression's wet-branch
+  // de-esser pass; that's the only downstream consumer of de-esser state.
+  ctx.globalParams.clipGainDeEsser = null
 }
 
 // ── Stage: Auto Leveler (Stage 4b) ────────────────────────────────────────────
@@ -1027,29 +1119,59 @@ export async function clipGainDeEss(ctx) {
 // Noise Eraser is excluded — separation output already has a consistent
 // character. The leveler skips silently for that preset.
 
-export async function autoLevel(ctx) {
+// Analyze pair (autoLevelerAnalyze / autoLevelerApply):
+//   Analyze decodes the input, runs VAD conditioning, clip segmentation,
+//   per-clip LUFS / target / gain computation, and builds the per-sample
+//   gain curve. Channels + gain curve are passed in-memory through
+//   ctx.globalParams.autoLeveler so apply doesn't have to re-read the
+//   input WAV. Apply multiplies channels by the gain curve, writes the
+//   output, and computes the post-leveler measurements.
+//
+//   Skipped cases (no preset config, file too short, too few voiced
+//   clips, already-leveled) short-circuit at analyze with applied=false
+//   and an empty params bundle. Apply is then a no-op — ctx.currentPath
+//   stays at the original input, saving the gratuitous file copy that
+//   the legacy combined stage performed.
+
+export async function autoLevelerAnalyze(ctx) {
+  const analyzed = await analyzeAutoLeveler(ctx.currentPath, ctx.preset, ctx.results.metrics)
+  ctx.globalParams.autoLeveler = analyzed
+  if (!analyzed.applied) {
+    ctx.results.autoLeveler = { applied: false, skipped_reason: analyzed.skipped_reason }
+    ctx.log(`[auto-leveler] Skipped — ${analyzed.skipped_reason}`)
+  }
+}
+
+export async function autoLevelerApply(ctx) {
+  const analyzed = ctx.globalParams.autoLeveler
+  if (!analyzed || !analyzed.applied) return
+
   const levelerPath = ctx.tmp('.wav')
-  const result = await applyAutoLeveler(
-    ctx.currentPath,
-    levelerPath,
-    ctx.preset,
-    ctx.results.metrics,
-  )
+  const result = await renderAutoLeveler(levelerPath, analyzed)
   ctx.currentPath         = levelerPath
   ctx.results.autoLeveler = result
 
-  if (result.applied) {
-    const m = result.measurements
-    ctx.log(
-      `[auto-leveler] Applied — in σ(clip)=${m.input_clip_lufs_std_db}dB ` +
-      `out σ(clip)=${m.output_clip_lufs_std_db}dB ` +
-      `clips=${m.clip_count_after_merge} (splits=${m.subphrase_splits_count}, merges=${m.merges_count}) ` +
-      `G=[${m.gain_max_down_db}, ${m.gain_max_up_db}]dB ` +
-      `nf_cap=${m.noise_floor_cap_active}`
-    )
-  } else {
-    ctx.log(`[auto-leveler] Skipped — ${result.skipped_reason}`)
-  }
+  const m = result.measurements
+  ctx.log(
+    `[auto-leveler] Applied — in σ(clip)=${m.input_clip_lufs_std_db}dB ` +
+    `out σ(clip)=${m.output_clip_lufs_std_db}dB ` +
+    `clips=${m.clip_count_after_merge} (splits=${m.subphrase_splits_count}, merges=${m.merges_count}) ` +
+    `G=[${m.gain_max_down_db}, ${m.gain_max_up_db}]dB ` +
+    `nf_cap=${m.noise_floor_cap_active}`
+  )
+}
+
+export async function autoLeveler(ctx) {
+  await autoLevelerAnalyze(ctx)
+  await autoLevelerApply(ctx)
+  // analyze stashed the full decoded channels + per-sample gain curve on
+  // globalParams.autoLeveler so apply could consume them in-memory. For a
+  // 1-hour stereo 48 kHz file that's ~1.4 GB of float32 data. Drop the
+  // reference now that apply has written its output — the remaining
+  // pipeline (airBoost, normalize, truePeakLimit, encode, …) has no use
+  // for it, and ctx.results.autoLeveler already carries the small summary
+  // the report builder reads.
+  ctx.globalParams.autoLeveler = null
 }
 
 // ── Stage: Compression ────────────────────────────────────────────────────────

@@ -859,7 +859,7 @@ export const PRESETS = {
           floorDb: -70,
         },
       },
-      "autoLevel",
+      "autoLeveler",
       { airBoost: { gainDb: 0 } },
       { roomPresence: { enabled: false } },
       "normalize",
