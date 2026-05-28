@@ -176,7 +176,6 @@ export const PRESETS = {
       "hpf",
       { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
       { noiseReduce: { model: "rnnoise" } }, //"df3", "rnnoise", "dtln"
-      "remeasureFramesPostNr",
       {
         autoLeveler: {
           total_max_up_db: 10.0,
@@ -251,8 +250,7 @@ export const PRESETS = {
         },
       },
       */
-      /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
-      "remeasureFramesPostNr",
+     /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
       {
         compression: [
           /*  
@@ -300,7 +298,6 @@ export const PRESETS = {
           },
         ],
       },
-      "remeasureFramesPostNr",
       //{ noiseReduce: { model: "rrnoise", skipBelowDb: -90 } },
       {
         parallelCompression: {
