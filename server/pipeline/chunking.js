@@ -145,10 +145,16 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
     }
   }
 
-  // Greedy split placement
+  // Greedy split placement. Search is anchored to the cursor (= last emitted
+  // split, or 0 initially), and only advances when a split is actually placed.
+  // If no qualifying silence is found in [cursor + min, cursor + max] for the
+  // next chunk, we bail to a single-chunk plan rather than skipping forward —
+  // advancing without emitting a split previously broke the max-duration
+  // guarantee for the final chunk in speech-dense regions.
   const splits  = []
   let cursor    = 0
   let regionIdx = 0
+  let bailReason = null
   while (cursor + maxChunkSamples < totalSamples) {
     const idealNext = cursor + targetSamples
     const windowLo  = cursor + minChunkSamples
@@ -174,11 +180,13 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
     }
 
     if (bestIdx < 0) {
-      // No silence falls in the [min, max] window. Advance the cursor by
-      // targetSamples (or the rest of the file if that's smaller) and try
-      // again — but DON'T emit a split here, since it'd land in voiced audio.
-      cursor += targetSamples
-      continue
+      // No silence in [cursor + min, cursor + max] for the next split.
+      // Bail to a single-chunk plan: continuing without emitting a split
+      // would leave the trailing chunk anchored to the previous split and
+      // potentially span the rest of the file, violating maxChunkDurationS.
+      bailReason = 'no_silence_in_split_window'
+      splits.length = 0
+      break
     }
 
     const splitSample = silenceRegions[bestIdx].midpointSample
@@ -200,7 +208,9 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
     chunks,
     splitsAtSilenceMidpoints: splits,
     silenceRegions,
-    reason: chunks.length === 1 ? 'no_split_window_had_silence' : null,
+    reason: chunks.length === 1
+      ? (bailReason ?? 'no_split_window_had_silence')
+      : null,
   }
 }
 

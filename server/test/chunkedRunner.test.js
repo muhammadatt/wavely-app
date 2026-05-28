@@ -15,6 +15,7 @@ import { tempPath, removeTmp, applyHighPass } from '../lib/ffmpeg.js'
 import { runFfmpeg }            from '../lib/exec-ffmpeg.js'
 import { readWavAllChannels }   from '../pipeline/wavReader.js'
 import { runChunkedBlock }      from '../pipeline/chunkedRunner.js'
+import { planChunkBoundaries }  from '../pipeline/chunking.js'
 import { hpf }                  from '../pipeline/stages.js'
 
 const TEMP_FILES = []
@@ -161,6 +162,81 @@ test('chunked block: hpf via chunks matches whole-file hpf within crossfade tole
     `${mismatchedTight} samples exceed tight tolerance ${TIGHT_TOL} (max abs diff ${maxAbsDiff.toExponential(2)})`)
   assert.ok(maxAbsDiff <= LOOSE_TOL,
     `max abs diff ${maxAbsDiff} exceeds loose tolerance ${LOOSE_TOL}`)
+})
+
+test('planChunkBoundaries: bails to single-chunk plan when a search window has no silence', async () => {
+  // Construct a 30 min file with silence only in the first 10 min. The
+  // planner should place splits in the silence-rich region until its next
+  // search window (anchored to the last emitted split) falls in the silent-
+  // free tail, then bail entirely rather than emit a final chunk that spans
+  // the rest of the file and violates maxChunkDurationS.
+  const sampleRate    = 44100
+  const totalSamples  = 30 * 60 * sampleRate
+  const frameSamples  = Math.round(0.025 * sampleRate)
+  const numFrames     = Math.floor(totalSamples / frameSamples)
+  const silenceCutoff = 10 * 60 * sampleRate
+
+  const frames = []
+  for (let i = 0; i < numFrames; i++) {
+    const start = i * frameSamples
+    // Silence only in first 10 min, at minutes 3 and 6 (≥500 ms each).
+    const inSilence1 = start >= 3 * 60 * sampleRate && start < 3 * 60 * sampleRate + sampleRate
+    const inSilence2 = start >= 6 * 60 * sampleRate && start < 6 * 60 * sampleRate + sampleRate
+    const isSilence  = start < silenceCutoff && (inSilence1 || inSilence2)
+    frames.push({ offsetSamples: start, lengthSamples: frameSamples, isSilence })
+  }
+
+  const plan = planChunkBoundaries({
+    frames, sampleRate, totalSamples,
+    options: { targetChunkDurationS: 180, minChunkDurationS: 60, maxChunkDurationS: 300 },
+  })
+
+  // The bug case: previously the planner advanced its cursor past the
+  // silent-free tail without emitting splits, then emitted a final chunk
+  // anchored to the last successful split — that chunk could span the rest
+  // of the file (oversize). The fix bails to a single-chunk plan instead,
+  // letting the runner fall back to running inner stages whole-file.
+  assert.equal(plan.chunks.length, 1, `expected single-chunk bail, got ${plan.chunks.length} chunks`)
+  assert.equal(plan.reason, 'no_silence_in_split_window')
+  // Sanity: the chunk spans the whole file.
+  assert.equal(plan.chunks[0].startSample, 0)
+  assert.equal(plan.chunks[0].endSample, totalSamples)
+})
+
+test('planChunkBoundaries: when every search window has silence, no chunk exceeds max', async () => {
+  // Counterpart to the bail test: ensure the happy path still respects max
+  // when splits can be placed throughout the file. Synthesise silence every
+  // 4 min across a 30 min file; with max=300 s the planner must keep
+  // emitting splits so the worst chunk stays ≤ 5 min.
+  const sampleRate   = 44100
+  const totalSamples = 30 * 60 * sampleRate
+  const frameSamples = Math.round(0.025 * sampleRate)
+  const numFrames    = Math.floor(totalSamples / frameSamples)
+
+  const frames = []
+  for (let i = 0; i < numFrames; i++) {
+    const start = i * frameSamples
+    // 1 s silence at minutes 4, 8, 12, 16, 20, 24, 28
+    const minute   = Math.floor(start / sampleRate / 60)
+    const insideMin = (start / sampleRate) % 60
+    const isSilence = minute > 0 && minute % 4 === 0 && insideMin < 1
+    frames.push({ offsetSamples: start, lengthSamples: frameSamples, isSilence })
+  }
+
+  const plan = planChunkBoundaries({
+    frames, sampleRate, totalSamples,
+    options: { targetChunkDurationS: 240, minChunkDurationS: 60, maxChunkDurationS: 300 },
+  })
+
+  assert.ok(plan.chunks.length > 1, `expected multi-chunk plan, got ${plan.chunks.length}`)
+  const maxChunkSamples = 300 * sampleRate
+  for (const c of plan.chunks) {
+    assert.ok(
+      c.endSample - c.startSample <= maxChunkSamples,
+      `chunk [${c.startSample}, ${c.endSample}) length ${c.endSample - c.startSample} ` +
+      `exceeds max ${maxChunkSamples}`,
+    )
+  }
 })
 
 test('chunked block: single-chunk plan bypasses carve/stitch', async () => {

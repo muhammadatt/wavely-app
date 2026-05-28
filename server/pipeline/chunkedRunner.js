@@ -13,6 +13,13 @@
  * no qualifying silence), the inner stages run once against the parent ctx
  * with no carve / stitch overhead.
  *
+ * Memory model: source carve and stitch are both streaming. The source WAV
+ * is never loaded as a whole; each chunk is extracted via FFmpeg by sample
+ * range. The stitcher writes the output WAV incrementally and keeps at most
+ * two processed-chunk buffers (current + next) resident at any time. A 1-hour
+ * mono session stays under ~250 MB peak vs ~2 GB if the source, all chunks,
+ * and the output buffer were held in memory simultaneously.
+ *
  * In-scope inner stages for v1: hpf, noiseReduce. These produce stable
  * per-chunk results: HPF is stateless beyond a few hundred samples of
  * filter warm-up, and NR models (DF3 / RNNoise) operate on short internal
@@ -24,8 +31,9 @@ import {
   sliceFramesForChunk,
   equalPowerCrossfade,
 } from './chunking.js'
-import { readWavAllChannels } from './wavReader.js'
-import { writeWavChannels }   from './wavWriter.js'
+import { readWavHeader, readWavAllChannels } from './wavReader.js'
+import { openWavStreamWriter }                from './wavWriter.js'
+import { extractAudioRange }                  from '../lib/ffmpeg.js'
 
 const OVERLAP_MS = 100
 
@@ -46,8 +54,7 @@ const OVERLAP_MS = 100
  */
 export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOptions = {}) {
   const sourcePath = ctx.currentPath
-  const { channels, sampleRate } = await readWavAllChannels(sourcePath)
-  const totalSamples   = channels[0].length
+  const { sampleRate, numSamples: totalSamples } = await readWavHeader(sourcePath)
   const overlapSamples = Math.round(OVERLAP_MS / 1000 * sampleRate)
 
   const frames = ctx.results.metrics?.frames ?? []
@@ -66,16 +73,17 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
     `(overlap ${OVERLAP_MS} ms = ${overlapSamples} samples)`
   )
 
-  // Pre-carve all chunk input buffers from the loaded source channels.
+  // Carve each chunk's input from the source via FFmpeg — the source WAV is
+  // never loaded whole. Each carved chunk file lives in ctx.tmpFiles and gets
+  // cleaned up at pipeline end.
   const processedChunks = []
   for (let i = 0; i < plan.chunks.length; i++) {
     const { startSample, endSample } = plan.chunks[i]
     const carveStart = Math.max(0, startSample - overlapSamples)
     const carveEnd   = Math.min(totalSamples, endSample + overlapSamples)
 
-    const chunkChannels = channels.map(ch => ch.subarray(carveStart, carveEnd))
     const chunkInPath = ctx.tmp('.wav')
-    await writeWavChannels(chunkChannels, sampleRate, chunkInPath)
+    await extractAudioRange(sourcePath, chunkInPath, carveStart, carveEnd)
 
     const subCtx = createSubContext(ctx, chunkInPath, frames, carveStart, carveEnd)
 
@@ -94,7 +102,7 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
     })
   }
 
-  // Stitch processed chunks → single file
+  // Stitch processed chunks → single file (streaming; at most 2 chunks resident)
   const stitchedPath = ctx.tmp('.wav')
   await stitchChunks(processedChunks, totalSamples, sampleRate, overlapSamples, stitchedPath)
   ctx.currentPath = stitchedPath
@@ -133,76 +141,74 @@ function createSubContext(parent, chunkInPath, frames, carveStart, carveEnd) {
 // ─── Stitcher ────────────────────────────────────────────────────────────────
 
 /**
- * Reassemble per-chunk processed audio into a single continuous file. The
- * crossfade region at each seam is `2 * overlapSamples` wide and centred on
- * the planned split sample, so both contributing chunks supply the full
+ * Streaming reassembly of per-chunk processed audio into a single continuous
+ * WAV. The output is written incrementally via openWavStreamWriter; at most
+ * two processed-chunk buffers (current + next) are held in memory at any
+ * time, so peak memory scales with max chunk duration rather than total file
+ * duration.
+ *
+ * Crossfade region at each seam is `2 * overlapSamples` wide and centred on
+ * the planned split sample. Both contributing chunks supply the full
  * crossfade window from their own carve (no edge-of-buffer artefacts).
  *
  * Layout for chunk i (non-edge):
  *   direct copy:  [coreStart + overlap, coreEnd - overlap)
- *   xfade w/ i-1: [coreStart - overlap, coreStart + overlap)   ← written by i-1's "next" xfade
- *   xfade w/ i+1: [coreEnd   - overlap, coreEnd   + overlap)   ← written here as "next" xfade
+ *   xfade w/ i-1: [coreStart - overlap, coreStart + overlap)   ← written by i-1's seam pass
+ *   xfade w/ i+1: [coreEnd   - overlap, coreEnd   + overlap)   ← written here as seam pass
  *
  * First chunk has no leading xfade region; last chunk has no trailing one.
  */
 async function stitchChunks(chunks, totalSamples, sampleRate, overlapSamples, outPath) {
-  // All chunks have the same channel count — read first to size the output.
-  const first = await readWavAllChannels(chunks[0].processedPath)
-  const numChannels = first.channels.length
+  // Open the first chunk to size the output (channel count, sample rate).
+  let cur = await readWavAllChannels(chunks[0].processedPath)
+  const numChannels = cur.channels.length
 
-  const output = []
-  for (let c = 0; c < numChannels; c++) output.push(new Float32Array(totalSamples))
+  const writer = await openWavStreamWriter(outPath, numChannels, sampleRate, totalSamples)
 
-  // Cache processed channels per chunk to avoid re-reading during the seam pass.
-  const procs = [first.channels]
-  for (let i = 1; i < chunks.length; i++) {
-    const r = await readWavAllChannels(chunks[i].processedPath)
-    procs.push(r.channels)
-  }
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      const { carveStart, coreStart, coreEnd } = chunks[i]
+      const isFirst = i === 0
+      const isLast  = i === chunks.length - 1
 
-  for (let i = 0; i < chunks.length; i++) {
-    const { carveStart, coreStart, coreEnd } = chunks[i]
-    const procCh = procs[i]
-    const isFirst = i === 0
-    const isLast  = i === chunks.length - 1
+      // Direct-copy range covers the chunk's core minus any seam regions.
+      const directStart = isFirst ? coreStart : coreStart + overlapSamples
+      const directEnd   = isLast  ? coreEnd   : coreEnd   - overlapSamples
 
-    const directStart = isFirst ? coreStart : coreStart + overlapSamples
-    const directEnd   = isLast  ? coreEnd   : coreEnd   - overlapSamples
+      const directChannels = cur.channels.map(ch =>
+        ch.subarray(directStart - carveStart, directEnd - carveStart),
+      )
+      await writer.write(directChannels)
 
-    for (let c = 0; c < numChannels; c++) {
-      const src = procCh[c]
-      const dst = output[c]
-      for (let s = directStart; s < directEnd; s++) {
-        dst[s] = src[s - carveStart]
-      }
-    }
+      // Seam with the NEXT chunk: load next, crossfade the 2*overlap window
+      // centred on coreEnd, write, then drop the current chunk and advance.
+      if (!isLast) {
+        const next = chunks[i + 1]
+        const nextLoaded = await readWavAllChannels(next.processedPath)
 
-    // Write crossfade with the NEXT chunk (this chunk's tail meets next's head).
-    // The xfade region in absolute samples is centred on the split (= coreEnd).
-    if (!isLast) {
-      const next = chunks[i + 1]
-      const nextProc = procs[i + 1]
-      const xfStartAbs = coreEnd - overlapSamples
-      const xfLen      = 2 * overlapSamples
+        const xfStartAbs = coreEnd - overlapSamples
+        const xfLen      = 2 * overlapSamples
 
-      for (let c = 0; c < numChannels; c++) {
-        const tail = procCh[c].subarray(
-          xfStartAbs - carveStart,
-          xfStartAbs - carveStart + xfLen,
-        )
-        const head = nextProc[c].subarray(
-          xfStartAbs - next.carveStart,
-          xfStartAbs - next.carveStart + xfLen,
-        )
-        const mixed = equalPowerCrossfade(tail, head)
-        for (let s = 0; s < xfLen; s++) {
-          output[c][xfStartAbs + s] = mixed[s]
+        const mixedChannels = []
+        for (let c = 0; c < numChannels; c++) {
+          const tail = cur.channels[c].subarray(
+            xfStartAbs - carveStart,
+            xfStartAbs - carveStart + xfLen,
+          )
+          const head = nextLoaded.channels[c].subarray(
+            xfStartAbs - next.carveStart,
+            xfStartAbs - next.carveStart + xfLen,
+          )
+          mixedChannels.push(equalPowerCrossfade(tail, head))
         }
+        await writer.write(mixedChannels)
+
+        cur = nextLoaded   // chunk i becomes eligible for GC
       }
     }
+  } finally {
+    await writer.close()
   }
-
-  await writeWavChannels(output, sampleRate, outPath)
 }
 
 // ─── Per-chunk results merge ────────────────────────────────────────────────
