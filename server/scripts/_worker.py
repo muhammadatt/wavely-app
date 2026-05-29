@@ -58,34 +58,71 @@ _DEFAULT_TORCH_THREADS = None
 _LAST_THREADS_HINT     = None  # most recent `threads` field seen (or None for env-default)
 
 
-def _apply_torch_threads(threads):
+def _apply_thread_limits(threads):
     """
-    Set torch's intra-op thread count for the current request. When
-    `threads` is None we restore the worker's env-default value (captured
-    on first call) — without this, a low-thread chunked dispatch would
-    leak its setting into the next serial call.
+    Set thread caps for the current request across all relevant pools:
+    torch's intra-op pool AND the underlying OMP / MKL / OpenBLAS pools
+    that BLAS-heavy work (Conv layers in DF3, numpy matmul, etc.) actually
+    uses.
 
-    No-op when torch isn't installed (some scripts don't use it). Errors
-    are swallowed because this is a hint, not a contract — a script that
-    needs strict threading control can set its own value internally.
+    Constraining only torch.set_num_threads() leaves OMP/MKL at whatever
+    env-default the worker spawned with — so a chunked dispatch that drops
+    torch to 2 but leaves OMP at 6 still oversubscribes when multiple
+    workers run concurrently. threadpoolctl provides a uniform runtime
+    interface for all three backends and is the de-facto standard fix.
+
+    When `threads` is None we restore the worker's captured env-default
+    (the value torch reported on first call, which equals the spawn-time
+    OMP/MKL/TORCH env var). Without this restore step, a low-thread
+    chunked dispatch would leak its setting into the next serial call.
 
     Records the requested value in `_LAST_THREADS_HINT` regardless of
-    whether torch is available; __ping__ echoes this back so tests can
-    verify the threading wiring without depending on a torch install.
+    whether torch or threadpoolctl are available; __ping__ echoes this
+    back so tests can verify the threading wiring without depending on
+    either package being installed.
+
+    No-op for any backend that isn't loaded — some scripts don't use
+    torch; threadpoolctl is optional.
     """
     global _DEFAULT_TORCH_THREADS, _LAST_THREADS_HINT
     _LAST_THREADS_HINT = threads
+
+    # Capture the env-default thread count on first call so omitted-threads
+    # requests can restore to it.
+    if _DEFAULT_TORCH_THREADS is None:
+        try:
+            import torch
+            _DEFAULT_TORCH_THREADS = torch.get_num_threads()
+        except ImportError:
+            # No torch — fall back to the OMP env var that the JS-side
+            # spawned the worker with. Defaults to 1 if even that's absent.
+            _DEFAULT_TORCH_THREADS = int(os.environ.get('OMP_NUM_THREADS', '1'))
+
+    target = int(threads) if threads is not None else _DEFAULT_TORCH_THREADS
+
+    # 1) Torch intra-op pool
     try:
         import torch
-        if _DEFAULT_TORCH_THREADS is None:
-            _DEFAULT_TORCH_THREADS = torch.get_num_threads()
-        target = int(threads) if threads is not None else _DEFAULT_TORCH_THREADS
         if torch.get_num_threads() != target:
             torch.set_num_threads(target)
     except ImportError:
-        return
+        pass
     except Exception as exc:  # noqa: BLE001 — best-effort hint
-        print(f'[worker] torch.set_num_threads({threads}) failed: {exc}',
+        print(f'[worker] torch.set_num_threads({target}) failed: {exc}',
+              file=sys.stderr, flush=True)
+
+    # 2) OMP / MKL / OpenBLAS / BLIS pools — runtime limit via threadpoolctl.
+    # Without this, DF3's Conv ops still use the env-default OMP/MKL
+    # thread count regardless of what torch was told. Constructing
+    # threadpool_limits(limits=N) applies the cap immediately to every
+    # loaded backend; the cap persists until the next call replaces it.
+    try:
+        from threadpoolctl import threadpool_limits
+        threadpool_limits(limits=target)
+    except ImportError:
+        pass  # threadpoolctl not installed — torch-only is best effort
+    except Exception as exc:  # noqa: BLE001
+        print(f'[worker] threadpool_limits({target}) failed: {exc}',
               file=sys.stderr, flush=True)
 
 
@@ -145,12 +182,15 @@ def main():
             # Apply the per-call thread hint before dispatching. Each request
             # carries its own desired thread count (low for chunked-block
             # dispatches, env-default for serial). When the `threads` field is
-            # omitted, _apply_torch_threads(None) restores the worker's
+            # omitted, _apply_thread_limits(None) restores the worker's
             # captured env-default — without this restore step, a low-thread
             # chunked dispatch would leak its setting into the next serial
-            # call. The worker is single-threaded over requests, so the set →
+            # call. Constrains torch's intra-op pool AND the OMP/MKL/BLAS
+            # pools underneath; without the latter, DF3's Conv ops still
+            # use the env-default OMP threads regardless of torch's setting.
+            # The worker is single-threaded over requests, so the set →
             # dispatch → next-set sequence never races.
-            _apply_torch_threads(req.get('threads'))
+            _apply_thread_limits(req.get('threads'))
             result = _dispatch(script, argv)
             _write_response(real_stdout, {'id': req_id, 'ok': True, 'result': result})
         except SystemExit:
