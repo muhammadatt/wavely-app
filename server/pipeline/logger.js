@@ -249,6 +249,95 @@ class PipelineLogger {
       console.warn(`[pipeline-log] Failed to finalise log: ${err.message}`)
     }
   }
+
+  /**
+   * Log a stage-level failure. Increments the step counter and writes a
+   * clearly-flagged ERROR block with the error's message, stack, and any
+   * cause chain. Mirrors logStep's defensive try/catch so logger failures
+   * never propagate into the pipeline's own error path.
+   *
+   * For Python-worker errors, error.message already contains the worker's
+   * label plus its Python traceback (constructed in pythonWorker.js), so
+   * this method intentionally writes the full message — no extra parsing
+   * needed to surface the traceback.
+   *
+   * @param {string} stageName  - Stage function or label that failed.
+   * @param {Error}  err        - The thrown error.
+   * @param {number} [durationMs]  - Time spent in the stage before failure.
+   */
+  async logError(stageName, err, durationMs) {
+    if (!this._ready) return
+    try {
+      this.stepIndex++
+      const idx         = String(this.stepIndex).padStart(2, '0')
+      const durationStr = durationMs != null ? ` (failed after ${(durationMs / 1000).toFixed(2)}s)` : ''
+      const lines       = [`── ERROR @ Step ${idx}: ${stageName}${durationStr}`]
+
+      const message = err?.message ?? String(err)
+      lines.push(`   Message:`)
+      for (const ln of message.split('\n')) lines.push(`     ${ln}`)
+
+      if (err?.stack) {
+        lines.push(`   Stack:`)
+        // err.stack typically starts with the message line; trim it to avoid
+        // duplicating the message we just rendered above.
+        const stackLines = String(err.stack).split('\n')
+        const skipFirst  = stackLines[0]?.includes(message)
+        for (const ln of stackLines.slice(skipFirst ? 1 : 0)) lines.push(`     ${ln}`)
+      }
+
+      // Walk the cause chain if the underlying error wraps another. Useful
+      // when a stage rethrows a wrapped error and the root cause matters.
+      let cause = err?.cause
+      let depth = 0
+      while (cause && depth < 5) {
+        depth++
+        lines.push(`   Caused by (depth ${depth}):`)
+        for (const ln of String(cause?.message ?? cause).split('\n')) lines.push(`     ${ln}`)
+        cause = cause?.cause
+      }
+
+      lines.push('')
+      await appendFile(this.logPath, lines.join('\n') + '\n', 'utf8')
+      console.warn(`[pipeline-log] ERROR @ ${stageName}: ${message.split('\n')[0]}`)
+    } catch (logErr) {
+      console.warn(`[pipeline-log] Failed to log error for "${stageName}": ${logErr.message}`)
+    }
+  }
+
+  /**
+   * Write a "Run Failed" footer when the pipeline aborts mid-run. Counterpart
+   * to finalize() — both close the log file with a clear terminal block, so
+   * a reader can tell from the last lines whether the run succeeded, what
+   * failed, and where to look.
+   *
+   * @param {string} stageName  - The stage that failed (or '<unknown>').
+   * @param {Error}  err        - The thrown error.
+   */
+  async logFailureFooter(stageName, err) {
+    if (!this._ready) return
+    try {
+      const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(2)
+      const message = err?.message ?? String(err)
+      const footer  = [
+        '=== Run Failed ===',
+        `Total elapsed:    ${elapsed}s`,
+        `Steps logged:     ${this.stepIndex}`,
+        `Failed at stage:  ${stageName}`,
+        `Error:            ${message.split('\n')[0]}`,
+        `Run ID:           ${this.runId}`,
+        `Log dir:          ${this.runDir}`,
+        '',
+      ].join('\n')
+      await appendFile(this.logPath, footer, 'utf8')
+      console.warn(
+        `[pipeline-log] ${this.runSlug} FAILED at ${stageName} after ${elapsed}s ` +
+        `— see ${this.logPath}`
+      )
+    } catch (logErr) {
+      console.warn(`[pipeline-log] Failed to write failure footer: ${logErr.message}`)
+    }
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
