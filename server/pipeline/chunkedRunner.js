@@ -35,6 +35,8 @@ import { readWavHeader, readWavAllChannels } from './wavReader.js'
 import { openWavStreamWriter }                from './wavWriter.js'
 import { extractAudioRange }                  from '../lib/ffmpeg.js'
 import { remeasureFrames }                    from './frameAnalysis.js'
+import { withThreadLimit }                    from './threadingContext.js'
+import { getChunkedThreadLimit }              from './pythonWorker.js'
 
 const OVERLAP_MS = 100
 
@@ -122,9 +124,18 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
   }
 
   const effectiveConcurrency = Math.max(1, Math.min(concurrency, plan.chunks.length))
+  // Per-call PyTorch thread limit for inner stages. Wrapping every inner
+  // stage in withThreadLimit means concurrent workers cap their thread
+  // count to (chunkedLimit) instead of the env-default (TORCH_NUM_THREADS,
+  // tuned for serial calls). Without this, raising TORCH_NUM_THREADS to
+  // speed up serial Python stages would crush parallel chunked workloads.
+  const chunkedThreadLimit = effectiveConcurrency > 1 ? getChunkedThreadLimit() : null
   ctx.log(
     `[chunked] ${plan.chunks.length} chunks, ${innerStages.length} inner stages each ` +
-    `(overlap ${OVERLAP_MS} ms = ${overlapSamples} samples, concurrency=${effectiveConcurrency})`
+    `(overlap ${OVERLAP_MS} ms = ${overlapSamples} samples, ` +
+    `concurrency=${effectiveConcurrency}` +
+    (chunkedThreadLimit != null ? `, torchThreads=${chunkedThreadLimit}` : '') +
+    `)`
   )
 
   // Process each chunk in its own task. Inner stages within a chunk stay
@@ -154,7 +165,13 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
       totalMs: carveMs,
     }
     for (const entry of innerStages) {
-      const stageMs = await runTimed(() => runInnerStage(subCtx, entry))
+      // withThreadLimit applies only when concurrency>1; serial chunk runs
+      // (or single-chunk plans handled in the early-return branch) use the
+      // default serial thread budget.
+      const dispatch = chunkedThreadLimit != null
+        ? () => withThreadLimit(chunkedThreadLimit, () => runInnerStage(subCtx, entry))
+        : () => runInnerStage(subCtx, entry)
+      const stageMs = await runTimed(dispatch)
       chunkTimings.stages.push({ name: entryDisplayName(entry), durationMs: stageMs })
       chunkTimings.totalMs += stageMs
     }

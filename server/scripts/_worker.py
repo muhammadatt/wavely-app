@@ -10,13 +10,21 @@ pipeline run.
 
 Protocol — newline-delimited JSON on stdin (in) and stdout (out):
 
-  Request:   {"id": "<uuid>", "script": "<module_name>", "args": ["--input", "..."]}
+  Request:   {"id": "<uuid>", "script": "<module_name>", "args": ["--input", "..."],
+              "threads": 2}   # threads is optional; see below
   Success:   {"id": "<uuid>", "ok": true, "result": <jsonable>}
   Failure:   {"id": "<uuid>", "ok": false, "error": "...", "traceback": "..."}
 
   Control requests (script name starts with "__"):
-    {"script": "__ping__"}      -> {"ok": true, "result": {"pid": ...}}
+    {"script": "__ping__"}      -> {"ok": true, "result": {"pid": ..., "torch_threads": ...}}
     {"script": "__shutdown__"}  -> exits with code 0
+
+When the optional `threads` field is present, torch.set_num_threads(N) is
+called before dispatching the script. This lets the JS side use a low
+thread count for calls dispatched concurrently from a chunked block (where
+multiple workers run in parallel) and the env-default high count for serial
+calls (where only one worker is busy). The chunked runner threads this
+value through via AsyncLocalStorage in threadingContext.js.
 
 Anything written to stdout from inside a dispatched script is silently
 redirected to stderr — stdout is reserved for the protocol. Scripts that
@@ -46,10 +54,54 @@ def _load(script_name):
     return mod
 
 
+_DEFAULT_TORCH_THREADS = None
+_LAST_THREADS_HINT     = None  # most recent `threads` field seen (or None for env-default)
+
+
+def _apply_torch_threads(threads):
+    """
+    Set torch's intra-op thread count for the current request. When
+    `threads` is None we restore the worker's env-default value (captured
+    on first call) — without this, a low-thread chunked dispatch would
+    leak its setting into the next serial call.
+
+    No-op when torch isn't installed (some scripts don't use it). Errors
+    are swallowed because this is a hint, not a contract — a script that
+    needs strict threading control can set its own value internally.
+
+    Records the requested value in `_LAST_THREADS_HINT` regardless of
+    whether torch is available; __ping__ echoes this back so tests can
+    verify the threading wiring without depending on a torch install.
+    """
+    global _DEFAULT_TORCH_THREADS, _LAST_THREADS_HINT
+    _LAST_THREADS_HINT = threads
+    try:
+        import torch
+        if _DEFAULT_TORCH_THREADS is None:
+            _DEFAULT_TORCH_THREADS = torch.get_num_threads()
+        target = int(threads) if threads is not None else _DEFAULT_TORCH_THREADS
+        if torch.get_num_threads() != target:
+            torch.set_num_threads(target)
+    except ImportError:
+        return
+    except Exception as exc:  # noqa: BLE001 — best-effort hint
+        print(f'[worker] torch.set_num_threads({threads}) failed: {exc}',
+              file=sys.stderr, flush=True)
+
+
 def _dispatch(script, argv):
     """Run the named script's `run(argv)` and return its result (a dict)."""
     if script == '__ping__':
-        return {'pid': os.getpid()}
+        out = {'pid': os.getpid(), 'last_threads_hint': _LAST_THREADS_HINT}
+        # Report the current torch thread count too so tests with torch
+        # installed can verify the setting actually took effect. Tests
+        # without torch fall back to inspecting last_threads_hint.
+        try:
+            import torch
+            out['torch_threads'] = torch.get_num_threads()
+        except ImportError:
+            pass
+        return out
     if script == '__shutdown__':
         sys.exit(0)
 
@@ -90,6 +142,12 @@ def main():
             argv   = req.get('args', [])
             if not isinstance(argv, list):
                 raise TypeError(f"args must be a list of strings, got {type(argv).__name__}")
+            # Apply the per-call thread hint before dispatching. Each request
+            # carries its own desired thread count (low for chunked-block
+            # dispatches, env-default for serial); requests with no `threads`
+            # field leave the previously-set value in place — the worker is
+            # single-threaded over requests so this never races.
+            _apply_torch_threads(req.get('threads'))
             result = _dispatch(script, argv)
             _write_response(real_stdout, {'id': req_id, 'ok': True, 'result': result})
         except SystemExit:

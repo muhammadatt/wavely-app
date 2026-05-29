@@ -28,8 +28,14 @@
  * Environment:
  *   SEPARATION_PYTHON         — Python executable (default: python3)
  *   PYTHON_WORKER_POOL_SIZE   — number of worker processes (default: 1)
- *   TORCH_NUM_THREADS         — per-worker torch thread count
+ *   TORCH_NUM_THREADS         — per-worker torch thread count for serial calls
  *                                (default: floor(CPU count / pool size))
+ *   CHUNKED_TORCH_THREADS     — torch thread count for calls dispatched inside
+ *                                a chunked block. Defaults to
+ *                                min(TORCH_NUM_THREADS, floor(cpus/pool_size))
+ *                                so chunked calls stay below physical core
+ *                                count even when TORCH_NUM_THREADS is bumped
+ *                                up for serial-stage throughput.
  *   WAVELY_DISABLE_PY_WORKER  — set to '1' to force the legacy spawn path
  *                                in spawnPython.js (escape hatch)
  */
@@ -39,6 +45,8 @@ import { randomUUID } from 'crypto'
 import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
+
+import { getThreadLimit } from './threadingContext.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname  = path.dirname(__filename)
@@ -59,6 +67,24 @@ const POOL_SIZE = Math.max(1, parseInt(process.env.PYTHON_WORKER_POOL_SIZE ?? '1
 // TORCH_NUM_THREADS.
 const NUM_THREADS = process.env.TORCH_NUM_THREADS
   ?? String(Math.max(1, Math.floor(os.cpus().length / POOL_SIZE)))
+
+// Chunked-block thread cap. When the chunked runner dispatches inner stages
+// concurrently, multiple workers share the CPU at once — so each call needs
+// fewer threads than a serial call would. Defaults to
+// min(TORCH_NUM_THREADS, floor(cpus/pool_size)) so bumping TORCH_NUM_THREADS
+// for serial throughput automatically clamps chunked calls back to a safe
+// budget. Override explicitly via CHUNKED_TORCH_THREADS to tune (e.g. 2 if
+// you've observed contention even at the auto value).
+const CHUNKED_THREADS = (() => {
+  const explicit = process.env.CHUNKED_TORCH_THREADS
+  if (explicit) {
+    const n = parseInt(explicit, 10)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  const torchDefault = parseInt(NUM_THREADS, 10) || 1
+  const safeDefault  = Math.max(1, Math.floor(os.cpus().length / POOL_SIZE))
+  return Math.min(torchDefault, safeDefault)
+})()
 
 // ─── WorkerHandle ────────────────────────────────────────────────────────────
 
@@ -159,13 +185,20 @@ class WorkerHandle {
   /**
    * Send a request and resolve with the worker's response. Caller must
    * ensure `busy` is set before calling and clear it on settlement.
+   *
+   * `threads`, when set, is forwarded to the worker which calls
+   * torch.set_num_threads() before dispatching the script. The worker
+   * doesn't restore afterwards — every dispatch that omits `threads` falls
+   * back to the worker's env-default thread count by re-applying it.
    */
-  send(script, argv, label) {
+  send(script, argv, label, threads) {
     this.ensureStarted()
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, label })
-      const payload = JSON.stringify({ id, script, args: argv }) + '\n'
+      const req = { id, script, args: argv }
+      if (threads != null) req.threads = threads
+      const payload = JSON.stringify(req) + '\n'
       this.proc.stdin.write(payload, err => {
         if (err) {
           this.pending.delete(id)
@@ -211,7 +244,7 @@ function findIdleWorker() {
  */
 function dispatchOnWorker(worker, task) {
   worker.busy = true
-  worker.send(task.script, task.argv, task.label).then(
+  worker.send(task.script, task.argv, task.label, task.threads).then(
     result => {
       worker.busy = false
       task.resolve(result)
@@ -239,6 +272,10 @@ function drainQueue() {
 /**
  * Dispatch a script to an idle worker, or queue if all workers are busy.
  *
+ * The per-call PyTorch thread count is read from the AsyncLocalStorage hint
+ * set by the chunked runner; serial calls (no hint) fall back to the
+ * worker's env-default. See threadingContext.js.
+ *
  * @param {string}   script — module name (no .py), matches a file in server/scripts/
  * @param {string[]} argv   — argv-style args (e.g. ['--input', '/tmp/x.wav'])
  * @param {string}   label  — label for log messages and errors
@@ -246,7 +283,8 @@ function drainQueue() {
  */
 export function runPython(script, argv = [], label = script) {
   return new Promise((resolve, reject) => {
-    const task = { script, argv, label, resolve, reject }
+    const threads = getThreadLimit()
+    const task = { script, argv, label, threads, resolve, reject }
     const worker = findIdleWorker()
     if (worker) {
       dispatchOnWorker(worker, task)
@@ -294,4 +332,13 @@ export async function stopWorker() {
  */
 export function getPoolSize() {
   return POOL_SIZE
+}
+
+/**
+ * Resolved per-call PyTorch thread count for chunked-block dispatches.
+ * The chunked runner wraps its inner-stage calls in withThreadLimit using
+ * this value so concurrent workers stay below physical core count.
+ */
+export function getChunkedThreadLimit() {
+  return CHUNKED_THREADS
 }

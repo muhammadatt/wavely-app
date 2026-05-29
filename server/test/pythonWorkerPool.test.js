@@ -91,6 +91,40 @@ test('concurrent dispatch distributes across workers', async () => {
   }
 })
 
+test('per-call threads hint propagates through withThreadLimit to the worker', async () => {
+  const { runPython, getChunkedThreadLimit } = await loadWithPoolSize(2)
+  // Import threadingContext WITHOUT a cache-busting query string — the
+  // pythonWorker module (also without a query string for its own internal
+  // import of threadingContext) references the same AsyncLocalStorage
+  // instance. Using a query string here would create a separate module
+  // with a separate storage, and withThreadLimit values wouldn't reach
+  // getThreadLimit in pythonWorker.
+  const { withThreadLimit } = await import('../pipeline/threadingContext.js')
+
+  // Outside any withThreadLimit scope, no hint is sent — the worker's
+  // last_threads_hint should be null (env-default applies).
+  const baseline = await runPython('__ping__', [], 'ping-baseline')
+  assert.equal(baseline.last_threads_hint, null,
+    `serial call should send no threads hint; got ${baseline.last_threads_hint}`)
+
+  // Inside withThreadLimit(2), the worker should receive threads=2.
+  const inChunked = await withThreadLimit(2, () => runPython('__ping__', [], 'ping-chunked'))
+  assert.equal(inChunked.last_threads_hint, 2,
+    `chunked-scope call should send threads=2; got ${inChunked.last_threads_hint}`)
+
+  // After leaving the scope, subsequent calls should revert to no hint
+  // (and the worker's _apply_torch_threads restores the env default).
+  const afterChunked = await runPython('__ping__', [], 'ping-after')
+  assert.equal(afterChunked.last_threads_hint, null,
+    `post-scope call should send no threads hint; got ${afterChunked.last_threads_hint}`)
+
+  // Sanity: getChunkedThreadLimit returns a sensible positive integer that
+  // the chunked runner would use. With pool size 2 and the default
+  // TORCH_NUM_THREADS=floor(cpus/2), chunked = min(default, floor(cpus/2))
+  // = floor(cpus/2).
+  assert.ok(getChunkedThreadLimit() >= 1, 'chunked thread limit should be ≥1')
+})
+
 test('pool size 1 preserves single-worker behaviour', async () => {
   const { runPython, getPoolSize, pingAllWorkers } = await loadWithPoolSize(1)
   assert.equal(getPoolSize(), 1)
