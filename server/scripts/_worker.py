@@ -144,9 +144,12 @@ def main():
                 raise TypeError(f"args must be a list of strings, got {type(argv).__name__}")
             # Apply the per-call thread hint before dispatching. Each request
             # carries its own desired thread count (low for chunked-block
-            # dispatches, env-default for serial); requests with no `threads`
-            # field leave the previously-set value in place — the worker is
-            # single-threaded over requests so this never races.
+            # dispatches, env-default for serial). When the `threads` field is
+            # omitted, _apply_torch_threads(None) restores the worker's
+            # captured env-default — without this restore step, a low-thread
+            # chunked dispatch would leak its setting into the next serial
+            # call. The worker is single-threaded over requests, so the set →
+            # dispatch → next-set sequence never races.
             _apply_torch_threads(req.get('threads'))
             result = _dispatch(script, argv)
             _write_response(real_stdout, {'id': req_id, 'ok': True, 'result': result})

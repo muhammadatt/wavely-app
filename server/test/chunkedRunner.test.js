@@ -530,6 +530,67 @@ test('chunked block: clickRemover counts sum across chunks', async () => {
   assert.equal(ctx.results.clickRemover.parameters?.threshold_sigma, 2.5)
 })
 
+test('chunked block: a failing chunk stops scheduling and rethrows after settling', async () => {
+  // Regression for CoPilot review: when one chunk's inner stage throws,
+  // the runner must (a) stop scheduling subsequent chunk indices and
+  // (b) wait for already-in-flight chunks to settle before rethrowing.
+  // Without this, the outer processAudio catch can delete tmp files while
+  // other chunk loops are still writing to them.
+  const input = await makeChunkableWav(120)
+  const ctx   = await makeCtx(input, 44100)
+
+  let started      = 0
+  let settled      = 0
+  const startOrder = []
+  const settleOrder = []
+  const innerStage = async (subCtx, entry) => {
+    const i = ++started
+    startOrder.push(i)
+    // Chunk 1 fails fast. Chunks already in flight (concurrency=2 → chunk 2
+    // started just before chunk 1's throw) must finish before runChunkedBlock
+    // rethrows.
+    if (i === 1) {
+      await new Promise(r => setTimeout(r, 20))
+      throw new Error('synthetic chunk 1 failure')
+    }
+    // Other chunks take longer so they're definitely still in flight when
+    // chunk 1 throws. They must complete before the rethrow.
+    await new Promise(r => setTimeout(r, 200))
+    settleOrder.push(i)
+    settled++
+  }
+
+  let caught = null
+  try {
+    await runChunkedBlock(
+      ctx,
+      ['hpf'],
+      innerStage,
+      { targetChunkDurationS: 30, minChunkDurationS: 10, maxChunkDurationS: 60 },
+      /* concurrency */ 2,
+    )
+  } catch (err) {
+    caught = err
+  }
+
+  assert.ok(caught, 'expected runChunkedBlock to throw')
+  assert.match(caught.message, /synthetic chunk 1 failure/,
+    'rethrown error should be the original one')
+
+  // No new chunks scheduled after the first failure: the runner saw the
+  // error before launching anything past the originally-in-flight pair.
+  // With multi-chunk plans typically producing 2 chunks for a 2-min fixture,
+  // we expect at most concurrency-worth of starts (here 2).
+  assert.ok(started <= 2,
+    `expected ≤2 chunks to start after first failure, got ${started}`)
+
+  // Any chunk that did start must have settled before the throw propagated.
+  // Without the fix, settled could be < (started - 1) — the failure-fast
+  // Promise.all would return before chunk 2's setTimeout fired.
+  assert.equal(settled, started - 1,
+    `all in-flight chunks must settle before rethrow; started=${started} settled=${settled}`)
+})
+
 test('chunked block: single-chunk plan bypasses carve/stitch', async () => {
   // Short file (< 2 min) — planner returns a single chunk; runner should
   // invoke the inner stage exactly once against the parent ctx.

@@ -247,21 +247,52 @@ async function refreshPostBlockMetrics(ctx) {
  * uneven task durations don't leave idle capacity. Caller-side: tasks write
  * results into fixed-index slots so output order is independent of completion
  * order.
+ *
+ * Error policy: on the first thrown task, stop scheduling new indices but
+ * wait for all in-flight tasks to settle before rethrowing. This prevents a
+ * fail-fast Promise.all from letting the outer catch delete tmp files that
+ * other worker loops are still writing to. The first error is rethrown; any
+ * later errors from in-flight tasks are swallowed (Node would log them as
+ * unhandled rejections otherwise and the first error is the actionable one).
  */
 async function runWithConcurrency(count, limit, taskFn) {
+  let firstError = null
+  const captureError = (err) => {
+    if (firstError == null) firstError = err
+  }
+
   if (limit >= count) {
-    await Promise.all(Array.from({ length: count }, (_, i) => taskFn(i)))
+    // Use allSettled so all tasks finish before we throw — same rationale as
+    // the worker-loop branch below: don't tear down tmp state while other
+    // tasks are mid-write.
+    const results = await Promise.allSettled(
+      Array.from({ length: count }, (_, i) => Promise.resolve().then(() => taskFn(i))),
+    )
+    for (const r of results) {
+      if (r.status === 'rejected') captureError(r.reason)
+    }
+    if (firstError) throw firstError
     return
   }
+
   let next = 0
   const workers = Array.from({ length: limit }, async () => {
     while (true) {
+      // First error short-circuits new-task scheduling so we don't queue more
+      // work that would race the caller's cleanup.
+      if (firstError) return
       const i = next++
       if (i >= count) return
-      await taskFn(i)
+      try {
+        await taskFn(i)
+      } catch (err) {
+        captureError(err)
+        return
+      }
     }
   })
   await Promise.all(workers)
+  if (firstError) throw firstError
 }
 
 // ─── Timing helpers ─────────────────────────────────────────────────────────
