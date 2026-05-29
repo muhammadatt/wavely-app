@@ -393,6 +393,70 @@ test('chunked block: concurrency=1 produces serial wall-clock (baseline)', async
   )
 })
 
+test('chunked block: propagates notch60Hz from chunks and refreshes metrics post-stitch', async () => {
+  // Inner stages writing to subCtx.results should NOT be silently dropped on
+  // the way back to the parent. This was the bug: hpf sets notch60Hz, and
+  // noiseReduce refreshes whole-file metric scalars; both were lost before
+  // the merge/refresh fix.
+  const input = await makeChunkableWav(120)
+  const ctx   = await makeCtx(input, 44100)
+
+  // Seed the parent's metrics with sentinel values so we can prove the
+  // post-block refresh ran (the stitched output is real audio, so the
+  // refreshed value will be far from -77 / -33).
+  ctx.results.metrics.noiseFloorDbfs       = -77.0
+  ctx.results.metrics.voicedRmsDbfs        = -33.0
+  ctx.results.metrics.averageVoicedRmsDbfs = -33.0
+  ctx.results.metrics.silenceThresholdDbfs = -71.0
+
+  // Synthetic inner stage that mimics what real hpf + noiseReduce do:
+  // write notch60Hz, write a noiseReduction report, and update metrics on
+  // the sub-ctx. Stays as a no-op for the audio so the stitcher can still
+  // produce a valid output.
+  const innerStage = async (subCtx) => {
+    subCtx.results.notch60Hz = true
+    subCtx.results.noiseReduction = {
+      applied: true,
+      model: 'DF3-sim',
+      pre_noise_floor_dbfs:  -77.0,
+      post_noise_floor_dbfs: -88.0,
+      makeupGainDb: 1.2,
+    }
+    // Sub-ctx writes here go to the sub-ctx clone, not the parent.
+    subCtx.results.metrics.noiseFloorDbfs = -88.0
+  }
+
+  await runChunkedBlock(
+    ctx,
+    ['hpf'],   // entry name doesn't matter — innerStage above runs
+    innerStage,
+    { targetChunkDurationS: 30, minChunkDurationS: 10, maxChunkDurationS: 60 },
+  )
+
+  // notch60Hz propagated from chunk 0
+  assert.equal(ctx.results.notch60Hz, true,
+    'expected notch60Hz from chunk 0 to propagate to parent ctx.results')
+
+  // noiseReduction report present and structurally intact
+  assert.ok(ctx.results.noiseReduction, 'expected noiseReduction report on parent ctx')
+  assert.equal(ctx.results.noiseReduction.model, 'DF3-sim')
+  assert.equal(ctx.results.noiseReduction.applied, true)
+
+  // Metrics refreshed from stitched audio — sentinel values must be gone
+  assert.notEqual(ctx.results.metrics.noiseFloorDbfs, -77.0,
+    `noiseFloorDbfs (${ctx.results.metrics.noiseFloorDbfs}) is still the sentinel; ` +
+    `expected post-stitch refresh from remeasureFrames`)
+  assert.notEqual(ctx.results.metrics.voicedRmsDbfs, -33.0,
+    `voicedRmsDbfs (${ctx.results.metrics.voicedRmsDbfs}) is still the sentinel`)
+
+  // noiseReduction.post_noise_floor_dbfs synced to the refreshed metrics
+  assert.equal(
+    ctx.results.noiseReduction.post_noise_floor_dbfs,
+    ctx.results.metrics.noiseFloorDbfs,
+    'noiseReduction.post_noise_floor_dbfs should equal refreshed metrics.noiseFloorDbfs',
+  )
+})
+
 test('chunked block: single-chunk plan bypasses carve/stitch', async () => {
   // Short file (< 2 min) — planner returns a single chunk; runner should
   // invoke the inner stage exactly once against the parent ctx.

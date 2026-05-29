@@ -29,7 +29,7 @@
  *   SEPARATION_PYTHON         — Python executable (default: python3)
  *   PYTHON_WORKER_POOL_SIZE   — number of worker processes (default: 1)
  *   TORCH_NUM_THREADS         — per-worker torch thread count
- *                                (default: ceil(CPU count / pool size))
+ *                                (default: floor(CPU count / pool size))
  *   WAVELY_DISABLE_PY_WORKER  — set to '1' to force the legacy spawn path
  *                                in spawnPython.js (escape hatch)
  */
@@ -49,9 +49,14 @@ const WORKER_SCRIPT = path.join(SCRIPTS_DIR, '_worker.py')
 
 const POOL_SIZE = Math.max(1, parseInt(process.env.PYTHON_WORKER_POOL_SIZE ?? '1', 10) || 1)
 
-// Per-worker thread caps default to a fair share of physical cores so the
-// total never blows past os.cpus().length when several workers run at once.
-// Callers who know better can pin via TORCH_NUM_THREADS.
+// Per-worker thread caps default to a fair share of physical cores —
+// floor(cpus / pool size) — so the combined OMP/MKL/torch thread budget
+// across all workers stays at or below os.cpus().length. Rounding down
+// (rather than up) prevents oversubscription when CPU count isn't evenly
+// divisible: a host with 8 cores and pool size 3 gives 2 threads per
+// worker × 3 = 6 threads (2 cores headroom) instead of 3 × 3 = 9 threads
+// (1 thread oversubscribed). Callers who know their workload can pin via
+// TORCH_NUM_THREADS.
 const NUM_THREADS = process.env.TORCH_NUM_THREADS
   ?? String(Math.max(1, Math.floor(os.cpus().length / POOL_SIZE)))
 

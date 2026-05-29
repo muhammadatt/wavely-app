@@ -34,6 +34,7 @@ import {
 import { readWavHeader, readWavAllChannels } from './wavReader.js'
 import { openWavStreamWriter }                from './wavWriter.js'
 import { extractAudioRange }                  from '../lib/ffmpeg.js'
+import { remeasureFrames }                    from './frameAnalysis.js'
 
 const OVERLAP_MS = 100
 
@@ -182,8 +183,45 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
   ctx.currentPath = stitchedPath
 
   mergeChunkResults(ctx, processedChunks)
+  await refreshPostBlockMetrics(ctx)
 
   return buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTimings, effectiveConcurrency, wallClockMs)
+}
+
+/**
+ * Refresh whole-file calibration scalars on ctx.results.metrics from the
+ * stitched output so downstream stages (compress, autoLeveler, certification)
+ * read post-block values rather than the stale pre-block snapshot.
+ *
+ * Per-chunk noiseReduce passes update their own sub-ctx.results.metrics
+ * during the chunk run, but those writes don't reach the parent. Averaging
+ * across chunks would only approximate the file-level number; measuring the
+ * stitched output gives the exact post-block value at the cost of one
+ * frame-analysis pass (a few seconds even on a long file).
+ *
+ * frames is intentionally left untouched — its isSilence labels remain
+ * authoritative from the original analyzeFramesRaw call. This matches the
+ * whole-file noiseReduce stage's behaviour (see stages.js: "ctx.results.
+ * metrics.frames is left untouched").
+ *
+ * noiseReduction.post_noise_floor_dbfs is also synced to the refreshed
+ * value so the report's NR section agrees with the metrics block — without
+ * this they could disagree by the makeup-gain delta averaged across chunks.
+ */
+async function refreshPostBlockMetrics(ctx) {
+  if (!ctx.results.metrics?.frames) return
+  const postFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
+  if (postFa.noiseFloorDbfs       != null) ctx.results.metrics.noiseFloorDbfs       = round2(postFa.noiseFloorDbfs)
+  if (postFa.voicedRmsDbfs        != null) ctx.results.metrics.voicedRmsDbfs        = round2(postFa.voicedRmsDbfs)
+  if (postFa.averageVoicedRmsDbfs != null) ctx.results.metrics.averageVoicedRmsDbfs = round2(postFa.averageVoicedRmsDbfs)
+  if (postFa.silenceThresholdDbfs != null) ctx.results.metrics.silenceThresholdDbfs = round2(postFa.silenceThresholdDbfs)
+
+  // Sync the NR report's post-block noise floor to the refreshed metrics
+  // value. mergeChunkResults averages per-chunk scalars, which is fine for
+  // a representative figure but doesn't match the stitched-output truth.
+  if (ctx.results.noiseReduction && postFa.noiseFloorDbfs != null) {
+    ctx.results.noiseReduction.post_noise_floor_dbfs = ctx.results.metrics.noiseFloorDbfs
+  }
 }
 
 /**
@@ -382,18 +420,32 @@ async function stitchChunks(chunks, totalSamples, sampleRate, overlapSamples, ou
  * Fold per-chunk ctx.results entries back into the parent ctx.results so the
  * downstream report builder sees the chunked block as a single logical step.
  *
- * For v1 the only inner stages that write report keys are noiseReduce
- * variants — they overwrite `results.noiseReduction` on each pass, so each
- * sub-ctx ends up holding the report from the LAST inner noiseReduce call
- * (matching the whole-file behaviour). Numeric scalars that legitimately
- * vary per chunk (noise floor measurements, NR makeup gain) are averaged
- * across chunks to give a representative file-level figure.
+ * Each inner stage's writes go to its sub-ctx.results, not the parent —
+ * sub-ctx is constructed with a fresh results object aliasing the parent's
+ * pre-block snapshot. This function copies relevant keys back. Whole-file
+ * metric scalars (noiseFloorDbfs, voicedRmsDbfs, …) are NOT handled here;
+ * refreshPostBlockMetrics measures the stitched output instead, which is
+ * exact rather than an average across chunks.
+ *
+ * Keys merged here:
+ *   - `notch60Hz` (hpf): boolean, identical across chunks because every
+ *     sub-ctx reads the same pre-block ctx.results.metrics.noiseFloorDbfs.
+ *     Taken from chunk 0.
+ *   - `noiseReduction` (noiseReduce): structural fields (model, applied,
+ *     reason) from chunk 0; numeric scalars (makeupGainDb, pre/post noise
+ *     floor) averaged across chunks for a representative file-level figure.
+ *     post_noise_floor_dbfs is overwritten by refreshPostBlockMetrics later
+ *     so it matches the metrics block.
  *
  * Future inner stages that write their own keys can extend this switch.
  */
 function mergeChunkResults(ctx, processedChunks) {
   const first = processedChunks[0].results
   if (!first) return
+
+  if (typeof first.notch60Hz === 'boolean') {
+    ctx.results.notch60Hz = first.notch60Hz
+  }
 
   if (first.noiseReduction) {
     const merged = { ...first.noiseReduction }
