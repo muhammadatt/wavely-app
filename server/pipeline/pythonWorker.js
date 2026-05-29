@@ -1,25 +1,35 @@
 /**
- * Persistent Python worker — singleton that pipes JSON requests to a
- * long-lived Python process and resolves their JSON responses.
+ * Persistent Python worker pool — pipes JSON requests to one or more
+ * long-lived Python processes and resolves their JSON responses.
  *
- * The worker process (server/scripts/_worker.py) dispatches each request
+ * Each worker process (server/scripts/_worker.py) dispatches each request
  * to the named script's module-level `run(argv)` function. Modules are
  * lazy-imported and stay loaded for the lifetime of the worker, so torch /
  * numpy imports and (where the script caches them) ML model weights are
  * amortized across every pipeline stage.
  *
- * The singleton is lazy: the worker is spawned on the first `runPython`
- * call. Subsequent calls reuse it. If the worker dies unexpectedly all
- * in-flight requests reject; the next call respawns a fresh worker.
+ * Pool sizing: PYTHON_WORKER_POOL_SIZE (default 1). With size 1 the pool
+ * behaves exactly like the prior singleton — one process, FIFO queue. With
+ * size N the dispatcher routes each request to whichever worker is idle;
+ * tasks beyond N in-flight wait in a JS-side queue (no double-queueing on
+ * a single Python process). The pool is lazy: workers spawn on demand.
  *
- * Concurrency: requests are queued and processed in FIFO order on the
- * Python side. Single worker = serial Python work, which matches today's
- * `spawn()`-per-stage behavior (the pipeline itself is serial). Pooling
- * can be added later if intra-file chunked parallelism is introduced.
+ * Stage-level parallelism gated on this: chunked block runs `noiseReduce`
+ * (DF3 → RNNoise) per chunk; before the pool every Python call serialized
+ * through a single worker, so chunking gave no wall-clock win for the slow
+ * stages. With the pool, N chunks worth of inner Python stages run on N
+ * cores simultaneously (workers are CPU-bound — RNNoise et al. don't use
+ * GPU — so each worker pinned to its own core scales near-linearly until
+ * physical core count).
+ *
+ * If a worker dies unexpectedly, only that worker's pending requests reject;
+ * the pool respawns its slot on next dispatch. Other workers keep serving.
  *
  * Environment:
  *   SEPARATION_PYTHON         — Python executable (default: python3)
- *   TORCH_NUM_THREADS         — torch thread count (default: CPU count)
+ *   PYTHON_WORKER_POOL_SIZE   — number of worker processes (default: 1)
+ *   TORCH_NUM_THREADS         — per-worker torch thread count
+ *                                (default: ceil(CPU count / pool size))
  *   WAVELY_DISABLE_PY_WORKER  — set to '1' to force the legacy spawn path
  *                                in spawnPython.js (escape hatch)
  */
@@ -33,151 +43,250 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname  = path.dirname(__filename)
 
-export const PYTHON       = process.env.SEPARATION_PYTHON ?? 'python3'
-const SCRIPTS_DIR         = path.resolve(__dirname, '..', 'scripts')
-const WORKER_SCRIPT       = path.join(SCRIPTS_DIR, '_worker.py')
-const NUM_THREADS         = process.env.TORCH_NUM_THREADS ?? String(os.cpus().length)
+export const PYTHON = process.env.SEPARATION_PYTHON ?? 'python3'
+const SCRIPTS_DIR   = path.resolve(__dirname, '..', 'scripts')
+const WORKER_SCRIPT = path.join(SCRIPTS_DIR, '_worker.py')
 
-let workerProc    = null
-let stdoutBuffer  = ''
-const pending     = new Map()      // id -> { resolve, reject, label }
+const POOL_SIZE = Math.max(1, parseInt(process.env.PYTHON_WORKER_POOL_SIZE ?? '1', 10) || 1)
 
-function buildWorkerEnv(extraEnv = {}) {
-  return {
-    ...process.env,
-    OMP_NUM_THREADS:   NUM_THREADS,
-    MKL_NUM_THREADS:   NUM_THREADS,
-    TORCH_NUM_THREADS: NUM_THREADS,
-    // PYTHONUNBUFFERED so script print() to stderr surfaces immediately
-    // in our log stream, not after the script returns.
-    PYTHONUNBUFFERED:  '1',
-    // _worker.py imports peer scripts by name (e.g. `import deepfilter_enhance`).
-    // Prepend the scripts dir so those imports resolve regardless of cwd.
-    PYTHONPATH: SCRIPTS_DIR + path.delimiter + (process.env.PYTHONPATH ?? ''),
-    ...extraEnv,
+// Per-worker thread caps default to a fair share of physical cores so the
+// total never blows past os.cpus().length when several workers run at once.
+// Callers who know better can pin via TORCH_NUM_THREADS.
+const NUM_THREADS = process.env.TORCH_NUM_THREADS
+  ?? String(Math.max(1, Math.floor(os.cpus().length / POOL_SIZE)))
+
+// ─── WorkerHandle ────────────────────────────────────────────────────────────
+
+/**
+ * A single Python worker process. Owns its child_process handle, its own
+ * pending-request map, and a tiny stdout line buffer. The pool flips its
+ * `busy` flag while a request is in flight so dispatch never sends a second
+ * request to the same worker.
+ */
+class WorkerHandle {
+  constructor(index) {
+    this.index        = index
+    this.proc         = null
+    this.pending      = new Map()      // id -> { resolve, reject, label }
+    this.stdoutBuffer = ''
+    this.busy         = false
+  }
+
+  ensureStarted() {
+    if (this.proc) return this.proc
+
+    const proc = spawn(PYTHON, [WORKER_SCRIPT], {
+      cwd:   SCRIPTS_DIR,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        OMP_NUM_THREADS:   NUM_THREADS,
+        MKL_NUM_THREADS:   NUM_THREADS,
+        TORCH_NUM_THREADS: NUM_THREADS,
+        PYTHONUNBUFFERED:  '1',
+        PYTHONPATH: SCRIPTS_DIR + path.delimiter + (process.env.PYTHONPATH ?? ''),
+      },
+    })
+
+    proc.stdout.on('data', chunk => {
+      this.stdoutBuffer += chunk.toString()
+      let nl
+      while ((nl = this.stdoutBuffer.indexOf('\n')) >= 0) {
+        const line        = this.stdoutBuffer.slice(0, nl).trim()
+        this.stdoutBuffer = this.stdoutBuffer.slice(nl + 1)
+        if (line) this._handleResponseLine(line)
+      }
+    })
+
+    proc.stderr.on('data', chunk => {
+      const tag = POOL_SIZE > 1 ? `[python#${this.index}]` : '[python]'
+      for (const line of chunk.toString().split('\n')) {
+        if (line.trim()) console.log(`${tag} ${line}`)
+      }
+    })
+
+    proc.on('exit', (code, signal) => {
+      const err = new Error(`Python worker ${this.index} exited (code=${code}, signal=${signal})`)
+      for (const p of this.pending.values()) p.reject(err)
+      this.pending.clear()
+      this.stdoutBuffer = ''
+      this.proc         = null
+      this.busy         = false
+      // Pool will respawn this slot lazily on next dispatch.
+    })
+
+    proc.on('error', err => {
+      const wrapped = new Error(`Python worker ${this.index} spawn failed: ${err.message}`)
+      for (const p of this.pending.values()) p.reject(wrapped)
+      this.pending.clear()
+      this.proc = null
+      this.busy = false
+    })
+
+    this.proc = proc
+    return proc
+  }
+
+  _handleResponseLine(line) {
+    let res
+    try {
+      res = JSON.parse(line)
+    } catch {
+      console.warn(`[python#${this.index}] non-JSON stdout: ${line.slice(0, 500)}`)
+      return
+    }
+
+    const p = this.pending.get(res.id)
+    if (!p) {
+      console.warn(`[python#${this.index}] response with unknown id=${res.id}`)
+      return
+    }
+    this.pending.delete(res.id)
+
+    if (res.ok) {
+      p.resolve(res.result ?? {})
+    } else {
+      const details = res.traceback ? `\n${res.traceback}` : ''
+      p.reject(new Error(`${p.label} failed: ${res.error}${details}`))
+    }
+  }
+
+  /**
+   * Send a request and resolve with the worker's response. Caller must
+   * ensure `busy` is set before calling and clear it on settlement.
+   */
+  send(script, argv, label) {
+    this.ensureStarted()
+    const id = randomUUID()
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject, label })
+      const payload = JSON.stringify({ id, script, args: argv }) + '\n'
+      this.proc.stdin.write(payload, err => {
+        if (err) {
+          this.pending.delete(id)
+          reject(new Error(`${label} failed to send to worker ${this.index}: ${err.message}`))
+        }
+      })
+    })
+  }
+
+  async shutdown() {
+    if (!this.proc) return
+    return new Promise(resolve => {
+      this.proc.once('exit', () => resolve())
+      try {
+        this.proc.stdin.write(JSON.stringify({ script: '__shutdown__' }) + '\n')
+        this.proc.stdin.end()
+      } catch {
+        this.proc.kill()
+      }
+    })
   }
 }
 
-function startWorker() {
-  if (workerProc) return workerProc
+// ─── Pool ────────────────────────────────────────────────────────────────────
 
-  const proc = spawn(PYTHON, [WORKER_SCRIPT], {
-    cwd:   SCRIPTS_DIR,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env:   buildWorkerEnv(),
-  })
+const workers     = Array.from({ length: POOL_SIZE }, (_, i) => new WorkerHandle(i))
+const waitingTasks = []  // { script, argv, label, resolve, reject }
 
-  proc.stdout.on('data', chunk => {
-    stdoutBuffer += chunk.toString()
-    // The protocol is one JSON object per newline. Drain complete lines;
-    // partial trailing bytes stay in the buffer for the next chunk.
-    let nl
-    while ((nl = stdoutBuffer.indexOf('\n')) >= 0) {
-      const line   = stdoutBuffer.slice(0, nl).trim()
-      stdoutBuffer = stdoutBuffer.slice(nl + 1)
-      if (line) handleResponseLine(line)
-    }
-  })
-
-  proc.stderr.on('data', chunk => {
-    // Script-level print() and our own readiness banner come through here.
-    // We don't know which pending request emitted each line (Python is
-    // single-threaded within the worker, so it's "the currently-running one"),
-    // so we tag with a generic prefix.
-    for (const line of chunk.toString().split('\n')) {
-      if (line.trim()) console.log(`[python] ${line}`)
-    }
-  })
-
-  proc.on('exit', (code, signal) => {
-    const reason = `Python worker exited (code=${code}, signal=${signal})`
-    const err = new Error(reason)
-    for (const p of pending.values()) p.reject(err)
-    pending.clear()
-    stdoutBuffer = ''
-    workerProc   = null
-  })
-
-  proc.on('error', err => {
-    const wrapped = new Error(`Python worker spawn failed: ${err.message}`)
-    for (const p of pending.values()) p.reject(wrapped)
-    pending.clear()
-    workerProc = null
-  })
-
-  workerProc = proc
-  return proc
-}
-
-function handleResponseLine(line) {
-  let res
-  try {
-    res = JSON.parse(line)
-  } catch (err) {
-    // The worker is supposed to keep stdout protocol-clean, but if a
-    // stray write slips through we don't want to lose track of pending
-    // requests. Log and move on.
-    console.warn(`[python] non-JSON stdout: ${line.slice(0, 500)}`)
-    return
+/**
+ * Find the first idle worker, or null if all are busy.
+ */
+function findIdleWorker() {
+  for (const w of workers) {
+    if (!w.busy) return w
   }
-
-  const p = pending.get(res.id)
-  if (!p) {
-    console.warn(`[python] response with unknown id=${res.id}`)
-    return
-  }
-  pending.delete(res.id)
-
-  if (res.ok) {
-    p.resolve(res.result ?? {})
-  } else {
-    const details = res.traceback ? `\n${res.traceback}` : ''
-    p.reject(new Error(`${p.label} failed: ${res.error}${details}`))
-  }
+  return null
 }
 
 /**
- * Dispatch a script to the persistent worker.
+ * Dispatch a task to a worker, marking it busy for the duration. On
+ * settlement, free the worker and drain the next queued task (if any) into
+ * the freshly-idle slot.
+ */
+function dispatchOnWorker(worker, task) {
+  worker.busy = true
+  worker.send(task.script, task.argv, task.label).then(
+    result => {
+      worker.busy = false
+      task.resolve(result)
+      drainQueue()
+    },
+    err => {
+      worker.busy = false
+      task.reject(err)
+      drainQueue()
+    },
+  )
+}
+
+function drainQueue() {
+  while (waitingTasks.length > 0) {
+    const worker = findIdleWorker()
+    if (!worker) return
+    const task = waitingTasks.shift()
+    dispatchOnWorker(worker, task)
+  }
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * Dispatch a script to an idle worker, or queue if all workers are busy.
  *
- * @param {string} script — module name (no .py), matches a file in server/scripts/
- * @param {string[]} argv — argv-style args (e.g. ['--input', '/tmp/x.wav'])
- * @param {string} label  — label for log messages and errors
+ * @param {string}   script — module name (no .py), matches a file in server/scripts/
+ * @param {string[]} argv   — argv-style args (e.g. ['--input', '/tmp/x.wav'])
+ * @param {string}   label  — label for log messages and errors
  * @returns {Promise<object>} — the dict returned by the script's run(argv)
  */
 export function runPython(script, argv = [], label = script) {
-  const proc = startWorker()
-  const id   = randomUUID()
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, label })
-    const payload = JSON.stringify({ id, script, args: argv }) + '\n'
-    proc.stdin.write(payload, err => {
-      if (err) {
-        pending.delete(id)
-        reject(new Error(`${label} failed to send to worker: ${err.message}`))
-      }
-    })
+    const task = { script, argv, label, resolve, reject }
+    const worker = findIdleWorker()
+    if (worker) {
+      dispatchOnWorker(worker, task)
+    } else {
+      waitingTasks.push(task)
+    }
   })
 }
 
 /**
- * Health check — returns the worker's pid (spawns it if not running).
+ * Health check — returns the worker[0]'s pid (spawns it if not running).
+ * Preserves the prior singleton API; tests / health probes typically only
+ * care that *a* worker is alive.
  */
 export async function pingWorker() {
   return runPython('__ping__', [], 'worker-ping')
 }
 
 /**
- * Stop the worker if running. Intended for tests and graceful shutdown.
+ * Ping every worker in the pool (spawning any that haven't started yet).
+ * Resolves to an array of `{ index, pid }`, useful in pool tests to confirm
+ * each worker is a distinct process.
  */
-export function stopWorker() {
-  if (!workerProc) return Promise.resolve()
-  return new Promise(resolve => {
-    workerProc.once('exit', () => resolve())
-    try {
-      workerProc.stdin.write(JSON.stringify({ script: '__shutdown__' }) + '\n')
-      workerProc.stdin.end()
-    } catch {
-      workerProc.kill()
-    }
-  })
+export async function pingAllWorkers() {
+  // Issue pingS concurrently, but force each onto a distinct worker by
+  // saturating the pool first — each ping blocks its worker until the
+  // response arrives. Sequential await would round-robin onto the same idle
+  // worker every time.
+  const inflight = workers.map((_, i) => runPython('__ping__', [], `worker-ping-${i}`))
+  const results  = await Promise.all(inflight)
+  return results.map((r, i) => ({ index: i, pid: r.pid }))
+}
+
+/**
+ * Stop all workers if running. Intended for tests and graceful shutdown.
+ */
+export async function stopWorker() {
+  await Promise.all(workers.map(w => w.shutdown()))
+}
+
+/**
+ * Pool size (read-only). Useful for callers that want to size their own
+ * concurrency to match — e.g. the chunked runner's CHUNKED_CONCURRENCY cap
+ * should typically not exceed this.
+ */
+export function getPoolSize() {
+  return POOL_SIZE
 }

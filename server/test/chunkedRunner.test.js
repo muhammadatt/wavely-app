@@ -306,6 +306,93 @@ test('chunked block: single-chunk plan still produces a timings report', async (
   assert.equal(timings.perStage.hpf.count, 1)
 })
 
+test('chunked block: concurrency runs chunks in parallel and preserves order', async () => {
+  // Inner-stage callback sleeps SLEEP_MS per call. With sequential dispatch
+  // wallClockMs ≥ chunks × SLEEP_MS; with concurrency=N, wall clock should
+  // drop near (chunks/N) × SLEEP_MS. We also track in-flight count to assert
+  // the cap is actually applied.
+  const SLEEP_MS = 200
+  const input    = await makeChunkableWav(120)
+  const ctx      = await makeCtx(input, 44100)
+
+  let inFlight    = 0
+  let peakInFlight = 0
+  const completionOrder = []
+  const innerStage = async (subCtx) => {
+    inFlight++
+    if (inFlight > peakInFlight) peakInFlight = inFlight
+    await new Promise(r => setTimeout(r, SLEEP_MS))
+    inFlight--
+    // Track completion order by carved sample-range start (subCtx.currentPath
+    // is a temp file, but the chunkInPath suffix differs per chunk — easier
+    // to capture the call order via a shared counter).
+    completionOrder.push(completionOrder.length + 1)
+  }
+
+  const timings = await runChunkedBlock(
+    ctx,
+    ['hpf'],
+    innerStage,
+    { targetChunkDurationS: 30, minChunkDurationS: 10, maxChunkDurationS: 60 },
+    /* concurrency */ 3,
+  )
+
+  assert.ok(timings.overall.plannedChunks >= 2,
+    `expected ≥2 chunks for multi-chunk concurrency test, got ${timings.overall.plannedChunks}`)
+  assert.equal(timings.overall.concurrency, Math.min(3, timings.overall.plannedChunks),
+    'effective concurrency should equal min(requested, plannedChunks)')
+  assert.ok(peakInFlight >= 2,
+    `peak in-flight should be ≥2 when concurrency>1, got ${peakInFlight}`)
+  assert.ok(peakInFlight <= timings.overall.concurrency,
+    `peak in-flight ${peakInFlight} exceeded concurrency cap ${timings.overall.concurrency}`)
+
+  // wallClock should be meaningfully less than serial (innerTotalMs) at
+  // peak parallelism. Allow generous slack for setTimeout scheduling jitter
+  // and per-chunk carve overhead — the key check is "not serial".
+  const serialFloor = timings.overall.plannedChunks * SLEEP_MS
+  assert.ok(
+    timings.overall.wallClockMs < serialFloor,
+    `expected wallClockMs (${timings.overall.wallClockMs}) < serial floor (${serialFloor})`,
+  )
+
+  // perChunk[] must be in plan order regardless of completion order
+  for (let i = 0; i < timings.perChunk.length; i++) {
+    assert.equal(timings.perChunk[i].index, i + 1)
+  }
+})
+
+test('chunked block: concurrency=1 produces serial wall-clock (baseline)', async () => {
+  const SLEEP_MS = 100
+  const input    = await makeChunkableWav(120)
+  const ctx      = await makeCtx(input, 44100)
+
+  let peakInFlight = 0
+  let inFlight     = 0
+  const innerStage = async () => {
+    inFlight++
+    if (inFlight > peakInFlight) peakInFlight = inFlight
+    await new Promise(r => setTimeout(r, SLEEP_MS))
+    inFlight--
+  }
+
+  const timings = await runChunkedBlock(
+    ctx,
+    ['hpf'],
+    innerStage,
+    { targetChunkDurationS: 30, minChunkDurationS: 10, maxChunkDurationS: 60 },
+    /* concurrency */ 1,
+  )
+
+  assert.equal(timings.overall.concurrency, 1)
+  assert.equal(peakInFlight, 1, 'concurrency=1 must never run more than one chunk at a time')
+  // Serial: wallClock ≈ chunks × (SLEEP_MS + carveMs). Floor at chunks × SLEEP_MS.
+  const serialFloor = timings.overall.plannedChunks * SLEEP_MS
+  assert.ok(
+    timings.overall.wallClockMs >= serialFloor,
+    `expected wallClockMs (${timings.overall.wallClockMs}) >= serial floor (${serialFloor})`,
+  )
+})
+
 test('chunked block: single-chunk plan bypasses carve/stitch', async () => {
   // Short file (< 2 min) — planner returns a single chunk; runner should
   // invoke the inner stage exactly once against the parent ctx.

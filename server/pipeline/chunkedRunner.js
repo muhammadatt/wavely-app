@@ -37,6 +37,16 @@ import { extractAudioRange }                  from '../lib/ffmpeg.js'
 
 const OVERLAP_MS = 100
 
+// Default JS-side concurrency for per-chunk dispatch. With CHUNKED_CONCURRENCY=1
+// (the default), chunks process sequentially — identical wall-clock to the
+// pre-concurrency runner. With N>1, up to N chunks process in parallel; their
+// inner Python stages dispatch into the worker pool (PYTHON_WORKER_POOL_SIZE),
+// so end-to-end speedup is bounded by min(CHUNKED_CONCURRENCY, pool size).
+const DEFAULT_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.CHUNKED_CONCURRENCY ?? '1', 10) || 1,
+)
+
 /**
  * Run a chunked block. The orchestrator-owned `runInnerStage` callback is
  * invoked once per inner stage entry per chunk; it handles registry lookup,
@@ -56,15 +66,22 @@ const OVERLAP_MS = 100
  *                                       callers leave this empty; tests inject smaller
  *                                       chunk sizes to force the multi-chunk path on
  *                                       reasonably-sized synthetic fixtures.
+ * @param {number} [concurrency]        Max chunks to process in parallel. Defaults
+ *                                       to CHUNKED_CONCURRENCY env var (=1). Inner
+ *                                       Python stages dispatch through the worker
+ *                                       pool — concurrency above the pool size
+ *                                       saturates without further speedup.
  * @returns {Promise<ChunkedTimings>}
  *
  * @typedef {Object} ChunkedTimings
  * @property {Object}        overall
  * @property {number}        overall.plannedChunks
  * @property {number}        overall.overlapMs
+ * @property {number}        overall.concurrency        Effective concurrency used for the run
  * @property {number}        overall.carveTotalMs       Sum of FFmpeg carve durations across chunks
  * @property {number}        overall.stitchMs           Stitcher wall-clock (0 for single-chunk plan)
- * @property {number}        overall.innerTotalMs       Sum of all inner stage durations across all chunks
+ * @property {number}        overall.innerTotalMs       Sum of all inner stage durations across all chunks (CPU-time)
+ * @property {number}        overall.wallClockMs        Wall-clock time spanning the parallel chunk dispatch (<= innerTotalMs when concurrency>1)
  * @property {string|null}   overall.planReason         Set when the plan collapsed to a single chunk
  * @property {Array<ChunkTimings>}  perChunk
  * @property {Object<string, { totalMs: number, avgMs: number, count: number }>} perStage
@@ -76,7 +93,7 @@ const OVERLAP_MS = 100
  * @property {Array<{ name: string, durationMs: number }>} stages
  * @property {number}   totalMs                Sum of stages[i].durationMs + carveMs
  */
-export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOptions = {}) {
+export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOptions = {}, concurrency = DEFAULT_CONCURRENCY) {
   const sourcePath = ctx.currentPath
   const { sampleRate, numSamples: totalSamples } = await readWavHeader(sourcePath)
   const overlapSamples = Math.round(OVERLAP_MS / 1000 * sampleRate)
@@ -86,6 +103,7 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
 
   if (plan.chunks.length === 1) {
     ctx.log(`[chunked] single-chunk plan (${plan.reason}) — running inner stages whole-file`)
+    const wallClockStart = Date.now()
     const chunkTimings = {
       index: 1,
       sampleRange: [0, totalSamples],
@@ -98,20 +116,25 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
       chunkTimings.stages.push({ name: entryDisplayName(entry), durationMs: stageMs })
       chunkTimings.totalMs += stageMs
     }
-    return buildTimings(plan, overlapSamples, sampleRate, 0, [chunkTimings])
+    const wallClockMs = Date.now() - wallClockStart
+    return buildTimings(plan, overlapSamples, sampleRate, 0, [chunkTimings], 1, wallClockMs)
   }
 
+  const effectiveConcurrency = Math.max(1, Math.min(concurrency, plan.chunks.length))
   ctx.log(
     `[chunked] ${plan.chunks.length} chunks, ${innerStages.length} inner stages each ` +
-    `(overlap ${OVERLAP_MS} ms = ${overlapSamples} samples)`
+    `(overlap ${OVERLAP_MS} ms = ${overlapSamples} samples, concurrency=${effectiveConcurrency})`
   )
 
-  // Carve each chunk's input from the source via FFmpeg — the source WAV is
-  // never loaded whole. Each carved chunk file lives in ctx.tmpFiles and gets
-  // cleaned up at pipeline end.
-  const processedChunks = []
-  const perChunkTimings = []
-  for (let i = 0; i < plan.chunks.length; i++) {
+  // Process each chunk in its own task. Inner stages within a chunk stay
+  // sequential (RNNoise depends on DF3's output, etc.); independent chunks
+  // run in parallel up to the concurrency cap. Results land in fixed slots
+  // so processedChunks[] preserves order for the stitcher regardless of
+  // completion order.
+  const processedChunks = new Array(plan.chunks.length)
+  const perChunkTimings = new Array(plan.chunks.length)
+
+  const processOneChunk = async (i) => {
     const { startSample, endSample } = plan.chunks[i]
     const carveStart = Math.max(0, startSample - overlapSamples)
     const carveEnd   = Math.min(totalSamples, endSample + overlapSamples)
@@ -121,7 +144,7 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
 
     const subCtx = createSubContext(ctx, chunkInPath, frames, carveStart, carveEnd)
 
-    ctx.log(`[chunked] chunk ${i + 1}/${plan.chunks.length}: samples [${carveStart}, ${carveEnd})`)
+    ctx.log(`[chunked] chunk ${i + 1}/${plan.chunks.length} start: samples [${carveStart}, ${carveEnd})`)
     const chunkTimings = {
       index: i + 1,
       sampleRange: [carveStart, carveEnd],
@@ -134,19 +157,22 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
       chunkTimings.stages.push({ name: entryDisplayName(entry), durationMs: stageMs })
       chunkTimings.totalMs += stageMs
     }
-    perChunkTimings.push(chunkTimings)
-
     ctx.log(`[chunked] chunk ${i + 1}/${plan.chunks.length} done in ${(chunkTimings.totalMs / 1000).toFixed(2)}s`)
 
-    processedChunks.push({
+    perChunkTimings[i] = chunkTimings
+    processedChunks[i] = {
       carveStart,
       carveEnd,
       coreStart: startSample,
       coreEnd:   endSample,
       processedPath: subCtx.currentPath,
       results:       subCtx.results,
-    })
+    }
   }
+
+  const wallClockStart = Date.now()
+  await runWithConcurrency(plan.chunks.length, effectiveConcurrency, processOneChunk)
+  const wallClockMs = Date.now() - wallClockStart
 
   // Stitch processed chunks → single file (streaming; at most 2 chunks resident)
   const stitchedPath = ctx.tmp('.wav')
@@ -157,7 +183,30 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
 
   mergeChunkResults(ctx, processedChunks)
 
-  return buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTimings)
+  return buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTimings, effectiveConcurrency, wallClockMs)
+}
+
+/**
+ * Run `taskFn(i)` for i in [0, count) with at most `limit` tasks in flight.
+ * Each completion immediately frees a slot for the next pending index, so
+ * uneven task durations don't leave idle capacity. Caller-side: tasks write
+ * results into fixed-index slots so output order is independent of completion
+ * order.
+ */
+async function runWithConcurrency(count, limit, taskFn) {
+  if (limit >= count) {
+    await Promise.all(Array.from({ length: count }, (_, i) => taskFn(i)))
+    return
+  }
+  let next = 0
+  const workers = Array.from({ length: limit }, async () => {
+    while (true) {
+      const i = next++
+      if (i >= count) return
+      await taskFn(i)
+    }
+  })
+  await Promise.all(workers)
 }
 
 // ─── Timing helpers ─────────────────────────────────────────────────────────
@@ -190,7 +239,7 @@ function entryDisplayName(entry) {
  * per-stage aggregate (total / avg / count). Stable across single-chunk and
  * multi-chunk paths so log consumers don't need to special-case either.
  */
-function buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTimings) {
+function buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTimings, concurrency, wallClockMs) {
   const overlapMs = Math.round(overlapSamples / sampleRate * 1000)
   let carveTotalMs = 0
   let innerTotalMs = 0
@@ -214,9 +263,11 @@ function buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTiming
     overall: {
       plannedChunks: plan.chunks.length,
       overlapMs,
+      concurrency,
       carveTotalMs,
       stitchMs,
       innerTotalMs,
+      wallClockMs,
       planReason: plan.reason,
     },
     perChunk: perChunkTimings,
