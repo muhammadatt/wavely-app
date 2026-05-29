@@ -245,20 +245,6 @@ export const PRESETS = {
           },
         },
       },
-      /*
-      {
-        // Conservative —
-        throatClickAttenuator: {
-          sensitivityDb: 10,
-          nrmsThreshold: 3.0,
-          attenuationDb: 14,
-          attackMs: 12,
-          releaseMs: 25,
-          padMs: 4,
-        },
-      },
-      */
-     /* { clickRemover: { thresholdSigma: 3.0, maxClickMs: 15 } }, */
       {
         compression: [
           /*  
@@ -306,7 +292,6 @@ export const PRESETS = {
           },
         ],
       },
-      //{ noiseReduce: { model: "rrnoise", skipBelowDb: -90 } },
       {
         parallelCompression: {
           ratio: 20,
@@ -355,11 +340,18 @@ export const PRESETS = {
       { bassEnhance: { enabled: true, drive: 3.0, softness: 0.7, bias: 0.5, mix: 0.8, fundamentalCutRatio: 0.9, crossoverFallbackHz: 200 } },
       */
       {
+
+        chunked: [
+        // clickRemover does local AR-32 detection — each click is a few ms
+        // of context, well inside the chunk overlap. Per-chunk click counts
+        // sum cleanly in mergeChunkResults so the report still shows the
+        // file-level totals.
+          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
+
         // vocalSaturation is stateless multiband — chunk-safe with the
         // standard 100 ms overlap. Solo entry in this block because the
         // adjacent airBoost stage isn't analyze/apply split yet, so the
         // contiguous chunkable region is one stage wide.
-        chunked: [
           {
             vocalSaturation: {
               drive: 2,
@@ -389,15 +381,6 @@ export const PRESETS = {
         },
       },
       "referenceEQ",
-      {
-        // clickRemover does local AR-32 detection — each click is a few ms
-        // of context, well inside the chunk overlap. Per-chunk click counts
-        // sum cleanly in mergeChunkResults so the report still shows the
-        // file-level totals.
-        chunked: [
-          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
-        ],
-      },
       {
         resonanceSuppressor: [
           {
