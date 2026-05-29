@@ -70,7 +70,7 @@ export function sliceFramesForChunk(frames, chunkStartSample, chunkEndSample) {
 
 // ─── Chunk boundary planner ──────────────────────────────────────────────────
 
-const DEFAULT_TARGET_CHUNK_DURATION_S = 300   // 5 minutes
+const DEFAULT_TARGET_CHUNK_DURATION_S = 120   // 2 minutes
 const DEFAULT_MIN_CHUNK_DURATION_S    = 60    // never below 1 minute
 const DEFAULT_MAX_CHUNK_DURATION_S    = 600   // never above 10 minutes
 const DEFAULT_MIN_SILENCE_MS          = 500   // minimum silence to split at
