@@ -355,17 +355,25 @@ export const PRESETS = {
       { bassEnhance: { enabled: true, drive: 3.0, softness: 0.7, bias: 0.5, mix: 0.8, fundamentalCutRatio: 0.9, crossoverFallbackHz: 200 } },
       */
       {
-        vocalSaturation: {
-          drive: 2,
-          wetDry: 1,
-          bias: 0.5,
-          lowCrossover: 80,
-          midCrossover: 8000,
-          softness: 0.85,
-          lowDriveMult: 2.5,
-          midDriveMult: 0.1,
-          highDriveMult: 0.1,
-        },
+        // vocalSaturation is stateless multiband — chunk-safe with the
+        // standard 100 ms overlap. Solo entry in this block because the
+        // adjacent airBoost stage isn't analyze/apply split yet, so the
+        // contiguous chunkable region is one stage wide.
+        chunked: [
+          {
+            vocalSaturation: {
+              drive: 2,
+              wetDry: 1,
+              bias: 0.5,
+              lowCrossover: 80,
+              midCrossover: 8000,
+              softness: 0.85,
+              lowDriveMult: 2.5,
+              midDriveMult: 0.1,
+              highDriveMult: 0.1,
+            },
+          },
+        ],
       },
       {
         airBoost: {
@@ -381,7 +389,15 @@ export const PRESETS = {
         },
       },
       "referenceEQ",
-      { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
+      {
+        // clickRemover does local AR-32 detection — each click is a few ms
+        // of context, well inside the chunk overlap. Per-chunk click counts
+        // sum cleanly in mergeChunkResults so the report still shows the
+        // file-level totals.
+        chunked: [
+          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
+        ],
+      },
       {
         resonanceSuppressor: [
           {

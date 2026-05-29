@@ -431,6 +431,15 @@ async function stitchChunks(chunks, totalSamples, sampleRate, overlapSamples, ou
  *   - `notch60Hz` (hpf): boolean, identical across chunks because every
  *     sub-ctx reads the same pre-block ctx.results.metrics.noiseFloorDbfs.
  *     Taken from chunk 0.
+ *   - `vocalSaturation` (vocalSaturation): config snapshot, identical
+ *     across chunks. Taken from chunk 0.
+ *   - `clickRemover` (clickRemove): cumulative counts — clicks_detected,
+ *     clicks_repaired, clicks_skipped, total_clicks_repaired — SUMMED
+ *     across chunks. Structural fields (applied, parameters) from chunk 0.
+ *     The per-channel `channels` array is taken from chunk 0 as a
+ *     representative sample; per-channel summing would require knowing the
+ *     channel layout, and the top-level summed counts already give the
+ *     file-level totals.
  *   - `noiseReduction` (noiseReduce): structural fields (model, applied,
  *     reason) from chunk 0; numeric scalars (makeupGainDb, pre/post noise
  *     floor) averaged across chunks for a representative file-level figure.
@@ -445,6 +454,28 @@ function mergeChunkResults(ctx, processedChunks) {
 
   if (typeof first.notch60Hz === 'boolean') {
     ctx.results.notch60Hz = first.notch60Hz
+  }
+
+  if (first.vocalSaturation) {
+    ctx.results.vocalSaturation = { ...first.vocalSaturation }
+  }
+
+  if (first.clickRemover) {
+    const merged = { ...first.clickRemover }
+    const summedKeys = ['clicks_detected', 'clicks_repaired', 'clicks_skipped', 'total_clicks_repaired']
+    for (const key of summedKeys) {
+      let sum = 0
+      let count = 0
+      for (const c of processedChunks) {
+        const v = c.results.clickRemover?.[key]
+        if (typeof v === 'number' && isFinite(v)) {
+          sum += v
+          count++
+        }
+      }
+      if (count > 0) merged[key] = sum
+    }
+    ctx.results.clickRemover = merged
   }
 
   if (first.noiseReduction) {

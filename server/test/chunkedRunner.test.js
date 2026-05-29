@@ -457,6 +457,79 @@ test('chunked block: propagates notch60Hz from chunks and refreshes metrics post
   )
 })
 
+test('chunked block: vocalSaturation results take chunk 0 (config snapshot)', async () => {
+  const input = await makeChunkableWav(120)
+  const ctx   = await makeCtx(input, 44100)
+
+  // Inner stage writes a vocalSaturation report snapshot — same shape every
+  // chunk since it's preset config carried through. Mocks the real stage's
+  // write so we don't depend on Python.
+  const innerStage = async (subCtx) => {
+    subCtx.results.vocalSaturation = {
+      applied: true, drive: 2, wetDry: 1, bias: 0.5,
+      lowCrossover: 80, midCrossover: 8000, softness: 0.85,
+    }
+  }
+
+  await runChunkedBlock(
+    ctx,
+    [{ vocalSaturation: { drive: 2 } }],
+    innerStage,
+    { targetChunkDurationS: 30, minChunkDurationS: 10, maxChunkDurationS: 60 },
+  )
+
+  assert.ok(ctx.results.vocalSaturation, 'expected vocalSaturation on parent ctx')
+  assert.equal(ctx.results.vocalSaturation.applied, true)
+  assert.equal(ctx.results.vocalSaturation.drive, 2)
+  assert.equal(ctx.results.vocalSaturation.midCrossover, 8000)
+})
+
+test('chunked block: clickRemover counts sum across chunks', async () => {
+  const input = await makeChunkableWav(120)
+  const ctx   = await makeCtx(input, 44100)
+
+  // Each chunk reports a distinct set of click counts; the merge should
+  // sum the cumulative fields and keep the parameters block from chunk 0.
+  const perChunkReports = [
+    { applied: true, clicks_detected: 1000, clicks_repaired: 950, clicks_skipped: 50, total_clicks_repaired: 950, parameters: { threshold_sigma: 2.5 } },
+    { applied: true, clicks_detected: 1200, clicks_repaired: 1100, clicks_skipped: 100, total_clicks_repaired: 1100, parameters: { threshold_sigma: 2.5 } },
+    { applied: true, clicks_detected:  800, clicks_repaired:  790, clicks_skipped: 10, total_clicks_repaired:  790, parameters: { threshold_sigma: 2.5 } },
+  ]
+  let callIndex = 0
+  const innerStage = async (subCtx) => {
+    // The chunk planner may produce >3 chunks; cycle through the report set.
+    subCtx.results.clickRemover = perChunkReports[callIndex % perChunkReports.length]
+    callIndex++
+  }
+
+  await runChunkedBlock(
+    ctx,
+    [{ clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } }],
+    innerStage,
+    { targetChunkDurationS: 30, minChunkDurationS: 10, maxChunkDurationS: 60 },
+  )
+
+  assert.ok(ctx.results.clickRemover, 'expected clickRemover on parent ctx')
+  assert.equal(ctx.results.clickRemover.applied, true)
+
+  // Expected sums = sum of the first `callIndex` reports (cycling through).
+  let expectedDetected = 0, expectedRepaired = 0, expectedSkipped = 0, expectedTotalRepaired = 0
+  for (let i = 0; i < callIndex; i++) {
+    const r = perChunkReports[i % perChunkReports.length]
+    expectedDetected      += r.clicks_detected
+    expectedRepaired      += r.clicks_repaired
+    expectedSkipped       += r.clicks_skipped
+    expectedTotalRepaired += r.total_clicks_repaired
+  }
+  assert.equal(ctx.results.clickRemover.clicks_detected,       expectedDetected)
+  assert.equal(ctx.results.clickRemover.clicks_repaired,       expectedRepaired)
+  assert.equal(ctx.results.clickRemover.clicks_skipped,        expectedSkipped)
+  assert.equal(ctx.results.clickRemover.total_clicks_repaired, expectedTotalRepaired)
+
+  // parameters block survives unchanged from chunk 0
+  assert.equal(ctx.results.clickRemover.parameters?.threshold_sigma, 2.5)
+})
+
 test('chunked block: single-chunk plan bypasses carve/stitch', async () => {
   // Short file (< 2 min) — planner returns a single chunk; runner should
   // invoke the inner stage exactly once against the parent ctx.
