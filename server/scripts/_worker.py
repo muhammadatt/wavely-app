@@ -71,6 +71,26 @@ def _apply_thread_limits(threads):
     workers run concurrently. threadpoolctl provides a uniform runtime
     interface for all three backends and is the de-facto standard fix.
 
+    ⚠ KNOWN LIMITATION — DeepFilterNet3 ignores this.
+
+    The torch / MKL / OpenMP pools that DF3 uses get pinned at the
+    spawn-time env values when DF3 first runs inference (model load +
+    first forward pass). Runtime calls to torch.set_num_threads() and
+    threadpoolctl.threadpool_limits() succeed without error but don't
+    shrink the already-spawned worker threads. Verified empirically:
+    TORCH_NUM_THREADS=6 + per-call=2 still produced 6-thread DF3
+    behaviour and severe oversubscription with concurrent workers.
+
+    For DF3 specifically, the only effective control is TORCH_NUM_THREADS
+    at worker spawn (env var, applied before first inference). For other
+    stages (RNNoise, click_remover, numpy/scipy work) the runtime path
+    here is fully effective.
+
+    See pythonWorker.js header and the GitHub issue tracking a future
+    fix for this — a two-pool architecture (separate workers for chunked
+    vs serial dispatch) is the likely path forward when serial-stage
+    throughput at low env thread counts becomes a measured bottleneck.
+
     When `threads` is None we restore the worker's captured env-default
     (the value torch reported on first call, which equals the spawn-time
     OMP/MKL/TORCH env var). Without this restore step, a low-thread

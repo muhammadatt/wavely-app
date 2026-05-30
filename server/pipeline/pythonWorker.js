@@ -25,17 +25,33 @@
  * If a worker dies unexpectedly, only that worker's pending requests reject;
  * the pool respawns its slot on next dispatch. Other workers keep serving.
  *
+ * ⚠ Per-call threading is BEST-EFFORT, not guaranteed. Workers also accept a
+ * `threads` hint per request (see threadingContext.js); _worker.py applies
+ * it via torch.set_num_threads() + threadpoolctl. This works for libraries
+ * that respect runtime thread-pool changes (most NumPy/scipy work, RNNoise,
+ * click_remover, etc.) but does NOT work for DeepFilterNet3 — its torch /
+ * MKL / OpenMP thread pools are pinned at first inference using whatever
+ * env value was set at worker spawn, and subsequent runtime calls don't
+ * shrink the already-spawned worker threads. Empirical result on 8 vCPU:
+ * TORCH_NUM_THREADS=6 + per-call=2 → DF3 oversubscribes anyway (1300+ s/chunk);
+ * TORCH_NUM_THREADS=3 env-consistent → DF3 healthy (~85 s/chunk).
+ * For stages where this matters (currently only DF3), set TORCH_NUM_THREADS
+ * to the value that's safe at full chunked concurrency rather than relying
+ * on the per-call path to clamp it. See GitHub issue for revisit.
+ *
  * Environment:
  *   SEPARATION_PYTHON         — Python executable (default: python3)
  *   PYTHON_WORKER_POOL_SIZE   — number of worker processes (default: 1)
- *   TORCH_NUM_THREADS         — per-worker torch thread count for serial calls
+ *   TORCH_NUM_THREADS         — per-worker torch thread count, applied at
+ *                                worker spawn via env. ⚠ This is what DF3
+ *                                actually uses (see note above); set it
+ *                                conservatively for chunked workloads.
  *                                (default: floor(CPU count / pool size))
- *   CHUNKED_TORCH_THREADS     — torch thread count for calls dispatched inside
- *                                a chunked block. Defaults to
- *                                min(TORCH_NUM_THREADS, floor(cpus/pool_size))
- *                                so chunked calls stay below physical core
- *                                count even when TORCH_NUM_THREADS is bumped
- *                                up for serial-stage throughput.
+ *   CHUNKED_TORCH_THREADS     — per-call torch thread hint for chunked-block
+ *                                dispatches. Best-effort runtime override —
+ *                                see note above on the DF3 limitation.
+ *                                Defaults to min(TORCH_NUM_THREADS,
+ *                                floor(cpus/pool_size)).
  *   WAVELY_DISABLE_PY_WORKER  — set to '1' to force the legacy spawn path
  *                                in spawnPython.js (escape hatch)
  */
