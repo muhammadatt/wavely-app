@@ -12,11 +12,19 @@
  *      `preset.resonanceSuppressor[i].sibilanceDetection`. There is no
  *      shared "preset-level" sibilance config any more.
  *
- *   2. The F0 contour comes from getF0Contour() in f0Analysis.js. The
- *      detector consumes it directly instead of running a second
- *      autocorrelation pass. Callers should pass the cached contour
- *      (e.g. `await getF0Contour(ctx, { useCache: true })`) when the
- *      audio has not changed since the last contour pass.
+ *   2. The F0 contour is either supplied by the caller (from getF0Contour()
+ *      in f0Analysis.js — preferred when the caller needs the contour for
+ *      anything else, e.g. resonanceSuppressor's harmonic mask) OR computed
+ *      internally by analyze_sibilance_events.py on the already-loaded audio
+ *      array. The internal path saves one full WAV read + one IPC roundtrip
+ *      and is the right choice for callers whose only use of F0 is feeding
+ *      it back into sibilance detection (e.g. clipGainDeEsser).
+ *      Internal mode additionally exposes the raw per-frame contour as
+ *      `events.inputF0Contour` so the caller can seed ctx._f0Contour
+ *      without spawning estimate_f0_contour.py separately. `events.f0`
+ *      is always present but holds the detector's rolling band-median
+ *      values — those are not a per-frame contour and must not be cached
+ *      as one.
  *
  * No shared event-map cache: each caller's params may differ, so caching
  * across stages would silently return the wrong map. If the same stage
@@ -40,34 +48,47 @@ const ANALYZER_SCRIPT = path.join(SCRIPTS_DIR, 'analyze_sibilance_events.py')
  *                                       sibilance_detector.DEFAULT_PARAMS.
  *                                       Caller-specific (airBoost vs.
  *                                       resonanceSuppressor pass, etc.).
- * @param {object}  options.f0Contour    Per-frame F0 contour from
+ * @param {object}  [options.f0Contour]  Per-frame F0 contour from
  *                                       getF0Contour() in f0Analysis.js.
- *                                       Required — the detector no longer
- *                                       runs its own pitch estimation.
+ *                                       Optional — when omitted, the Python
+ *                                       analyzer computes the contour
+ *                                       internally on the already-loaded
+ *                                       audio array (saves a second WAV
+ *                                       read + IPC trip for callers whose
+ *                                       only use of F0 is sibilance
+ *                                       detection).
  * @returns {Promise<{events: object, path: string}>}
- *   - events: parsed event map (see sibilance_detector.build_events_map)
+ *   - events: parsed event map (see sibilance_detector.build_events_map).
+ *             `events.f0` ({median, perFrame}) and the STFT geometry
+ *             (`events.nFft`, `events.hopLength`) are always present, but
+ *             `events.f0.perFrame` carries the detector's rolling
+ *             band-median values — not a per-frame F0 contour.
+ *             Internal-mode runs additionally expose the raw per-frame
+ *             contour as `events.inputF0Contour`; that key is the only
+ *             one suitable for seeding ctx._f0Contour for downstream
+ *             cache hits.
  *   - path:   on-disk JSON file (registered with ctx.tmp); pass to
  *             resonance_suppressor.py via --events-json or to
  *             air_boost_masked.py via --events. Stable for the lifetime
  *             of ctx.
  */
 export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
-  if (!f0Contour) {
-    throw new Error(
-      'analyzeSibilanceEvents requires an f0Contour. ' +
-      'Call getF0Contour(ctx) first and pass the result in.',
-    )
-  }
-
   const eventsPath  = ctx.tmp('.json')
-  const contourPath = ctx.tmp('.json')
-  await writeFile(contourPath, JSON.stringify(f0Contour))
 
   const args = [
-    '--input',            ctx.currentPath,
-    '--output',           eventsPath,
-    '--f0-contour-json',  contourPath,
+    '--input',  ctx.currentPath,
+    '--output', eventsPath,
   ]
+
+  // External-contour mode: write the supplied contour to a sidecar JSON and
+  // pass it in. Internal-contour mode (no f0Contour): skip the flag, the
+  // Python side runs estimate_f0_contour on the loaded audio array.
+  let contourPath = null
+  if (f0Contour) {
+    contourPath = ctx.tmp('.json')
+    await writeFile(contourPath, JSON.stringify(f0Contour))
+    args.push('--f0-contour-json', contourPath)
+  }
 
   // Merge the upstream-measured noise floor into the detection params so
   // the absolute-energy gate has a stable reference. analyzeFramesRaw
@@ -118,7 +139,7 @@ export async function analyzeSibilanceEvents(ctx, { params, f0Contour } = {}) {
   } finally {
     if (vadMaskPath) await rm(vadMaskPath, { force: true })
     if (paramsPath)  await rm(paramsPath,  { force: true })
-    await rm(contourPath, { force: true })
+    if (contourPath) await rm(contourPath, { force: true })
   }
 
   const events = JSON.parse(await readFile(eventsPath, 'utf8'))

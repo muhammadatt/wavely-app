@@ -1093,9 +1093,16 @@ export async function clipGainDeEsserAnalyze(ctx) {
   // sibilants (airBoost, correctiveEQ) come AFTER this point in
   // STANDARD_PIPELINE, so any HF lift they apply does not feed back into
   // the gain calculation here; the de-essed result still passes through them
-  // downstream. F0 contour is computed fresh because earlier stages may have
-  // shifted the spectrum since the last contour call.
-  const f0Contour = await getF0Contour(ctx)
+  // downstream.
+  //
+  // F0 contour: we don't call getF0Contour() here. The sibilance analyzer
+  // computes F0 internally on its already-loaded audio array (one WAV read
+  // + one IPC trip saved vs. running estimate_f0_contour.py separately).
+  // The returned event map exposes that raw per-frame contour as
+  // `events.inputF0Contour`, which we stash on ctx._f0Contour below —
+  // that's the cache airBoost's `getF0Contour(ctx, { useCache: true })`
+  // hit relied on previously. (Not `events.f0` — that's the detector's
+  // rolling band-median values, see the seeding block for details.)
 
   // Merge the preset's sibilance detection block (if any) with the
   // min_duration_ms override the clip-gain stage requires.
@@ -1105,9 +1112,20 @@ export async function clipGainDeEsserAnalyze(ctx) {
   }
 
   const { events, path: eventsPath } = await analyzeSibilanceEvents(ctx, {
-    params:    detectionParams,
-    f0Contour,
+    params: detectionParams,
   })
+
+  // Seed the F0 cache from the events output so downstream stages that opt
+  // into the cache (airBoost) hit without spawning estimate_f0_contour.py.
+  // We use `events.inputF0Contour` — the raw per-frame contour the analyzer
+  // computed before passing into the detector — rather than `events.f0`,
+  // because the latter contains the detector's band-median values (rolling,
+  // slow-moving) which are a different quantity than the per-frame
+  // estimates getF0Contour() normally yields. Shape matches getF0Contour() —
+  // see f0Analysis.js docstring.
+  if (events?.inputF0Contour) {
+    ctx._f0Contour = events.inputF0Contour
+  }
 
   if (!events?.events?.length) {
     const skip = { applied: false, reason: 'no_events', eventCount: 0 }

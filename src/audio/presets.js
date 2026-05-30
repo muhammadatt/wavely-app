@@ -180,9 +180,26 @@ export const PRESETS = {
         // single-chunk plan inside the runner — no behaviour change there.
         chunked: [
           "hpf",
-          { noiseReduce: { model: "df3" } },     //"df3", "rnnoise", "dtln"
+          { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
           { noiseReduce: { model: "rnnoise" } }, //"df3", "rnnoise", "dtln"
         ],
+      },
+      {
+        clipGainDeEsser: {
+          enabled: true,
+          stridentCeilingDb: 6.0,
+          nonStridentCeilingDb: -4.0,
+          reductionRatio: 0.5,
+          maxReductionDb: 8.0,
+          minDurationMs: 15,
+          contextWindowMs: 80,
+          fades: {
+            fricativeInMs: 3.0,
+            fricativeOutMs: 4.0,
+            affricateInMs: 1.5,
+            affricateOutMs: 4.5,
+          },
+        },
       },
       {
         autoLeveler: {
@@ -201,50 +218,7 @@ export const PRESETS = {
           merge_max_delta_db: 6.0,
         },
       },
-      /*
-      {
-        spectralSubtraction: {
-          enabled: true,
-          alphaDd: 0.98,
-          beta: 0.15,
-          strength: 0.7,
-          transientShaper: true,
-        },
-      },  
-      */
-      /* {dereverb: {enabled: true, strength: "medium", preserve_early: false}}, */
-      //{ separateVocals: { model: "demucs" } },
-      /*
-      {
-        vadGate: {
-          enabled: true,
-          energyOverrideDb: 24,
-          lookaheadMs: 60,
-          holdMs: 200,
-          attackMs: 5,
-          releaseMs: 80,
-          floorDb: -110,
-        },
-      },
-      */
       "correctiveEQ",
-      {
-        clipGainDeEsser: {
-          enabled: true,
-          stridentCeilingDb: 6.0,
-          nonStridentCeilingDb: -4.0,
-          reductionRatio: 0.5,
-          maxReductionDb: 8.0,
-          minDurationMs: 15,
-          contextWindowMs: 80,
-          fades: {
-            fricativeInMs: 3.0,
-            fricativeOutMs: 4.0,
-            affricateInMs: 1.5,
-            affricateOutMs: 4.5,
-          },
-        },
-      },
       {
         compression: [
           /*  
@@ -315,43 +289,12 @@ export const PRESETS = {
           },
         },
       },
-      /*
       {
-        vocalExpander: {
-          enabled: false,
-          ratio: 2.5,
-          highFreqDepth: 1,
-          headroomOffsetDb: 6,
-          releaseMs: 150,
-          attackMs: 50,
-          holdMs: 5,
-          lookaheadMs: 455,
-          maxAttenuationDb: 24,
-          detectionBand: { lowHz: 80, highHz: 800 },
-        },
-      },
-      {
-        bandwidthExtension: {
-          enabled: true,
-          model: "lavasr", //"lavasr", "ap-bwe"
-          postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
-        },
-      },
-      { bassEnhance: { enabled: true, drive: 3.0, softness: 0.7, bias: 0.5, mix: 0.8, fundamentalCutRatio: 0.9, crossoverFallbackHz: 200 } },
-      */
-      {
-
         chunked: [
-        // clickRemover does local AR-32 detection — each click is a few ms
-        // of context, well inside the chunk overlap. Per-chunk click counts
-        // sum cleanly in mergeChunkResults so the report still shows the
-        // file-level totals.
-          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
-
-        // vocalSaturation is stateless multiband — chunk-safe with the
-        // standard 100 ms overlap. Solo entry in this block because the
-        // adjacent airBoost stage isn't analyze/apply split yet, so the
-        // contiguous chunkable region is one stage wide.
+          // vocalSaturation is stateless multiband — chunk-safe with the
+          // standard 100 ms overlap. Solo entry in this block because the
+          // adjacent airBoost stage isn't analyze/apply split yet, so the
+          // contiguous chunkable region is one stage wide.
           {
             vocalSaturation: {
               drive: 2,
@@ -365,6 +308,12 @@ export const PRESETS = {
               highDriveMult: 0.1,
             },
           },
+
+          // clickRemover does local AR-32 detection — each click is a few ms
+          // of context, well inside the chunk overlap. Per-chunk click counts
+          // sum cleanly in mergeChunkResults so the report still shows the
+          // file-level totals.
+          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
         ],
       },
       {
@@ -429,6 +378,55 @@ export const PRESETS = {
           early_reflections: 2,
           normalize_ir: true,
         },
+
+        /*
+      {
+        spectralSubtraction: {
+          enabled: true,
+          alphaDd: 0.98,
+          beta: 0.15,
+          strength: 0.7,
+          transientShaper: true,
+        },
+      },  
+      */
+        /* {dereverb: {enabled: true, strength: "medium", preserve_early: false}}, */
+        //{ separateVocals: { model: "demucs" } },
+        /*
+      {
+        vadGate: {
+          enabled: true,
+          energyOverrideDb: 24,
+          lookaheadMs: 60,
+          holdMs: 200,
+          attackMs: 5,
+          releaseMs: 80,
+          floorDb: -110,
+        },
+      },
+      {
+        vocalExpander: {
+          enabled: false,
+          ratio: 2.5,
+          highFreqDepth: 1,
+          headroomOffsetDb: 6,
+          releaseMs: 150,
+          attackMs: 50,
+          holdMs: 5,
+          lookaheadMs: 455,
+          maxAttenuationDb: 24,
+          detectionBand: { lowHz: 80, highHz: 800 },
+        },
+      },
+      {
+        bandwidthExtension: {
+          enabled: true,
+          model: "lavasr", //"lavasr", "ap-bwe"
+          postEq: { enabled: false, freq: 9000, q: 2, gainDb: -3 },
+        },
+      },
+      { bassEnhance: { enabled: true, drive: 3.0, softness: 0.7, bias: 0.5, mix: 0.8, fundamentalCutRatio: 0.9, crossoverFallbackHz: 200 } },
+      */
       },
 
       "normalize",
