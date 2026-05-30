@@ -203,12 +203,12 @@ async function runPrecutAnalysis(inputPath, gainDb, presetId, precutConfig, nois
 }
 
 /**
- * Apply the Air Boost filter chain to inputPath, writing the result to outputPath.
+ * Determine Air Boost filter parameters and write the processed output.
  *
- * When a reference curve exists for the preset, a predictive pre-cut is
- * computed and prepended to the FFmpeg filter chain (no extra file hop). The
- * pre-cut can also instruct a reduction to the airBoost gain itself when the
- * raw predicted excess would exceed the configured clamp ceiling.
+ * Runs the predictive pre-cut analysis and (for ACX) the iterative noise-floor
+ * compliance loop to find the highest gain that satisfies -60 dBFS. Writes the
+ * result to outputPath so the caller can reuse it directly in sequential mode
+ * without a second FFmpeg pass.
  *
  * @param {string} inputPath        Source WAV (float32, 44.1 kHz)
  * @param {string} outputPath       Destination path (pre-allocated by caller via ctx.tmp)
@@ -218,9 +218,9 @@ async function runPrecutAnalysis(inputPath, gainDb, presetId, precutConfig, nois
  * @param {object} [options]
  * @param {string} [options.presetId]      Preset id (looked up for reference curve)
  * @param {object} [options.precutConfig]  { enabled, maxCutDb, minExcessDb }
- * @returns {object}                Result object written to ctx.results.airBoost
+ * @returns {object}                Result object (bands, applied_gain_db, …) written to ctx.results.airBoost
  */
-export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfileId, metrics, options = {}) {
+export async function computeAirBoostParams(inputPath, outputPath, gainDb, outputProfileId, metrics, options = {}) {
   const requestedGainDb = gainDb
 
   if (gainDb <= 0) {
@@ -324,6 +324,46 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
 }
 
 /**
+ * Reconstruct FFmpeg filter strings from a computeAirBoostParams result object.
+ * Used by applyAirBoostBands so chunked workers don't re-run the compliance loop.
+ */
+function filtersFromBandsReport(bands, preAttenuation) {
+  const filters = bands.map(band => {
+    const g = band.gain_db.toFixed(5)
+    if (band.type === 'bell') {
+      return `equalizer=f=${band.f_hz}:width_type=q:w=${band.q}:g=${g}`
+    } else {
+      return `highshelf=f=${band.f_hz}:width_type=o:w=${band.width_oct}:g=${g}`
+    }
+  })
+  if (preAttenuation) {
+    filters.unshift(
+      `equalizer=f=${preAttenuation.f_hz}:width_type=q:w=${preAttenuation.q}:g=${preAttenuation.gain_db.toFixed(5)}`
+    )
+  }
+  return filters
+}
+
+/**
+ * Apply a pre-computed Air Boost filter configuration to a single chunk.
+ *
+ * Used by airBoostApply in chunked mode when airBoostAnalyze has already
+ * determined the final filter parameters on the full file. Performs one
+ * FFmpeg pass with the pre-scaled band gains — no compliance loop.
+ *
+ * @param {string} inputPath   Source WAV chunk
+ * @param {string} outputPath  Destination WAV chunk
+ * @param {object} params      Result from computeAirBoostParams (.bands, optionally .pre_attenuation)
+ */
+export async function applyAirBoostBands(inputPath, outputPath, params) {
+  if (!params.applied) {
+    return applyParametricEQ(inputPath, outputPath, [])
+  }
+  const filters = filtersFromBandsReport(params.bands, params.pre_attenuation ?? null)
+  return applyParametricEQ(inputPath, outputPath, filters)
+}
+
+/**
  * Blend the boosted WAV back toward the original on sibilant frames.
  *
  * The FFmpeg EQ filter is time-invariant — it boosts sibilants as much as any
@@ -338,7 +378,7 @@ export async function applyAirBoost(inputPath, outputPath, gainDb, outputProfile
  *        = original × (1 − env) + boosted × env
  *
  * @param {string} originalPath     Pre-boost WAV (ctx.currentPath before airBoost ran)
- * @param {string} boostedPath      Post-FFmpeg-EQ WAV (output of applyAirBoost)
+ * @param {string} boostedPath      Post-FFmpeg-EQ WAV (output of computeAirBoostParams)
  * @param {string} eventsPath       Sibilance event map JSON (from analyzeSibilanceEvents)
  * @param {string} outputPath       Destination WAV for the blended result
  * @param {number} [sibilantGainFloor=0.0]  Boost fraction retained on sibilant frames
