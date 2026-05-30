@@ -830,8 +830,12 @@ export async function resonanceSuppressor(ctx) {
     ? ctx.preset.resonanceSuppressor
     : (ctx.preset?.resonanceSuppressor ? [ctx.preset.resonanceSuppressor] : [])
   const sibilantPasses = passConfigs.filter(p => p?.sibilant_only)
-  let eventsPath = null
-  if (sibilantPasses.length > 0) {
+  let eventsPath   = null
+  let eventsSource = null
+
+  if (sibilantPasses.length === 0) {
+    ctx.log('[resonanceSuppressor] No sibilant_only passes configured — skipping sibilance detection')
+  } else {
     if (sibilantPasses.length > 1) {
       const first = JSON.stringify(sibilantPasses[0].sibilanceDetection ?? null)
       for (let i = 1; i < sibilantPasses.length; i++) {
@@ -847,11 +851,28 @@ export async function resonanceSuppressor(ctx) {
         }
       }
     }
-    const sibResult = await analyzeSibilanceEvents(ctx, {
-      params:    sibilantPasses[0].sibilanceDetection,
-      f0Contour,
-    })
-    eventsPath = sibResult?.path ?? null
+
+    // Fast mode: when no custom sibilanceDetection params are set, reuse the
+    // event windows already produced by clipGainDeEsser rather than spawning
+    // a fresh detection pass. Consistency is enforced above, so checking
+    // pass 0 is sufficient to determine whether all passes use defaults.
+    const hasCustomParams    = sibilantPasses[0].sibilanceDetection != null
+    const upstreamEventsPath = !hasCustomParams && ctx.results.clipGainDeEsser?.applied
+      ? (ctx.results.clipGainDeEsser.eventsPath ?? null)
+      : null
+
+    if (upstreamEventsPath) {
+      eventsPath   = upstreamEventsPath
+      eventsSource = 'upstream'
+      ctx.log(`[resonanceSuppressor] Fast mode: reusing clipGainDeEsser events (${upstreamEventsPath})`)
+    } else {
+      const sibResult = await analyzeSibilanceEvents(ctx, {
+        params:    sibilantPasses[0].sibilanceDetection,
+        f0Contour,
+      })
+      eventsPath   = sibResult?.path ?? null
+      eventsSource = 'denovo'
+    }
   }
 
   const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.preset, frames, f0Contour, eventsPath)
@@ -861,6 +882,7 @@ export async function resonanceSuppressor(ctx) {
     skipped:        result.applied === false,
     f0_median:      f0Contour?.median ?? 'n/a',
     sibilant_only:  sibilantPasses.length > 0,
+    events_source:  eventsSource ?? 'n/a',
     max_red:        result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
     artifact_risk:  result.artifact_risk ?? false,
     process_s:      result.process_seconds ?? 'n/a',
