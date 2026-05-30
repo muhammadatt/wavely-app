@@ -952,13 +952,19 @@ export async function airBoostAnalyze(ctx) {
       eventsPath   = upstreamEventsPath
       eventsSource = 'upstream'
     } else {
-      // Fallback: de novo detection on the post-boost signal. F0 is stable
-      // through an EQ so useCache:true avoids re-running the Python script.
+      // Fallback: de novo detection on the post-boost signal. analyzeSibilanceEvents
+      // reads ctx.currentPath, which is still the pre-boost originalPath here.
+      // Temporarily redirect it to resolvedOutputPath so detection sees the boosted
+      // audio — matching the original single-function behavior. F0 is pitch-neutral
+      // through the EQ so the cached contour is still correct.
+      const savedPath = ctx.currentPath
+      ctx.currentPath = resolvedOutputPath
       const f0Contour = await getF0Contour(ctx, { useCache: true })
       const sibResult = await analyzeSibilanceEvents(ctx, {
         params:    airBoostConfig.sibilanceDetection,
         f0Contour,
       })
+      ctx.currentPath = savedPath
       eventsPath   = sibResult?.path ?? null
       eventsSource = 'denovo'
     }
