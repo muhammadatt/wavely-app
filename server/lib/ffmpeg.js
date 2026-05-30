@@ -201,10 +201,13 @@ export async function applyTruePeakLimiter(inputPath, outputPath, { peakCeiling 
   // dBFS (dBTP after upsampling): 10^(dB/20).
   const limit = Math.pow(10, peakCeiling / 20)
 
+  // 176400 = 44100 * 4 — exact ITU-R BS.1770 4x oversampling. Integer ratio
+  // enables efficient polyphase resampling vs. the irrational 192000/44100.
   await runFfmpeg([
+    '-threads', '0',
     '-i', inputPath,
     '-af',
-    `aresample=192000,` +
+    `aresample=176400,` +
     `alimiter=limit=${limit}:level=disabled:asc=1,` +
     `aresample=${INTERNAL_SAMPLE_RATE}`,
     '-ar', String(INTERNAL_SAMPLE_RATE),
