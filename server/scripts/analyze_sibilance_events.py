@@ -15,9 +15,14 @@ Each calling stage supplies its own detection parameters via --params-json
 resonanceSuppressor, etc. can each tighten/loosen detection independently.
 
 F0 contour:
-  Required. Pass --f0-contour-json pointing at the file produced by
-  estimate_f0_contour.py. Per-frame F0 drives the detector's rolling-band
-  update so no second autocorrelation pass is needed at this stage.
+  Optional. Two modes:
+    • External: pass --f0-contour-json pointing at the file produced by
+      estimate_f0_contour.py. Per-frame F0 drives the detector's
+      rolling-band update so no autocorrelation pass is needed here.
+    • Internal: omit --f0-contour-json and the analyzer runs
+      estimate_f0_contour on the already-loaded audio array. Saves one full
+      WAV read + one IPC roundtrip when the caller (e.g. clipGainDeEsser)
+      has no other use for the contour.
 
 Output JSON shape: see sibilance_detector.build_events_map.
 """
@@ -31,6 +36,7 @@ import numpy as np
 from scipy.io import wavfile
 
 from sibilance_detector import analyze_sibilance_events
+from estimate_f0_contour import estimate_f0_contour
 
 
 logger = logging.getLogger(__name__)
@@ -45,10 +51,14 @@ def main(argv=None):
     parser.add_argument("--input",            required=True)
     parser.add_argument("--output",           required=True,
                         help="Output JSON path for the event map.")
-    parser.add_argument("--f0-contour-json",  required=True,
+    parser.add_argument("--f0-contour-json",  default=None,
                         help="F0 contour JSON from estimate_f0_contour.py. "
                              "Provides per-frame F0 + median; the detector "
-                             "uses these directly instead of re-estimating.")
+                             "uses these directly instead of re-estimating. "
+                             "Omit to have this script compute the contour "
+                             "internally on the loaded audio array (saves a "
+                             "second WAV read for callers that have no other "
+                             "use for the contour).")
     parser.add_argument("--params-json",      default=None,
                         help="Sparse detection parameter overrides (JSON). "
                              "Sourced from the calling stage's "
@@ -70,9 +80,6 @@ def main(argv=None):
     if audio.ndim == 2:
         audio = audio.mean(axis=1).astype(np.float32)
 
-    with open(args.f0_contour_json) as fh:
-        f0_contour = json.load(fh)
-
     params = None
     if args.params_json:
         with open(args.params_json) as fh:
@@ -89,15 +96,39 @@ def main(argv=None):
                 e = s + frame["lengthSamples"]
                 vad_voiced_mask[s:min(e, len(audio))] = True
 
-    # Honour the contour's STFT geometry so frame indices align with consumers.
-    n_fft      = int(f0_contour.get("nFft", 2048))
-    hop_length = int(f0_contour.get("hopLength", 512))
+    # F0 contour: external when provided, internal otherwise. Internal mode
+    # reuses the already-loaded audio + VAD mask so the contour pass is a pure
+    # numeric add-on (no second WAV read, no IPC trip). Honour the external
+    # contour's STFT geometry when present so frame indices align with whatever
+    # consumer originally produced it; default to (2048, 512) for the internal
+    # path, matching estimate_f0_contour.py's own defaults.
+    if args.f0_contour_json:
+        with open(args.f0_contour_json) as fh:
+            f0_contour = json.load(fh)
+        n_fft      = int(f0_contour.get("nFft", 2048))
+        hop_length = int(f0_contour.get("hopLength", 512))
+    else:
+        n_fft      = 2048
+        hop_length = 512
+        f0_contour = estimate_f0_contour(
+            audio, sr,
+            vad_voiced_mask=vad_voiced_mask,
+            n_fft=n_fft, hop_length=hop_length,
+        )
 
     events = analyze_sibilance_events(
         audio, sr, f0_contour,
         params=params, vad_voiced_mask=vad_voiced_mask,
         n_fft=n_fft, hop_length=hop_length,
     )
+
+    # When the contour was computed here (internal mode) the caller has no
+    # other copy of it. Expose the raw contour so the JS caller can seed its
+    # F0 cache without spawning estimate_f0_contour.py separately. In external
+    # mode the caller already holds the contour and doesn't need it back, so
+    # we omit the key to avoid bloating the events file.
+    if not args.f0_contour_json:
+        events["inputF0Contour"] = f0_contour
 
     with open(args.output, "w") as fh:
         json.dump(events, fh)
