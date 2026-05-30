@@ -35,7 +35,6 @@ import { applyNoiseReduction, runRnnoise, runDtln } from './noiseReduce.js'
 import {
   measureAudio,
   measureRmsDbfs,
-  measureTruePeakDbfs,
   measureVoicedLufs,
   checkAcxCertification,
 } from './measure.js'
@@ -1586,36 +1585,13 @@ export async function truePeakLimit(ctx) {
   const ceilingDb   = ctx.outputProfile.truePeakCeiling
   const limitedPath = ctx.tmp('.wav')
 
-  // Measure true peak before limiting so we can report how much work the
-  // limiter actually did. Use the TP-only helper to skip the unused RMS pass.
-  const prePeakDbfs = await measureTruePeakDbfs(ctx.currentPath)
-
   await applyTruePeakLimiter(ctx.currentPath, limitedPath, {
     peakCeiling: ceilingDb,
   })
   ctx.currentPath = limitedPath
 
-  const postPeakDbfs = await measureTruePeakDbfs(ctx.currentPath)
-  const reductionDb  = prePeakDbfs != null && postPeakDbfs != null
-    ? Math.max(0, prePeakDbfs - postPeakDbfs)
-    : null
-
-  // Field names follow the codebase-wide `truePeakDbfs` convention — values
-  // are inter-sample true-peak measurements from libebur128, stored as dBFS
-  // for consistency with measureAudio() and ctx.results.metrics.
-  ctx.results.truePeakLimit = {
-    ceilingDbfs:   ceilingDb,
-    prePeakDbfs:   round2(prePeakDbfs),
-    postPeakDbfs:  round2(postPeakDbfs),
-    reductionDb:   round2(reductionDb),
-  }
-
-  await logLevel(ctx, 'after limiting', ctx.currentPath, {
-    ceiling:   `${ceilingDb}dBFS`,
-    prePeak:   prePeakDbfs  != null ? `${round2(prePeakDbfs)}dBFS`  : '?',
-    postPeak:  postPeakDbfs != null ? `${round2(postPeakDbfs)}dBFS` : '?',
-    reduction: reductionDb  != null ? `${round2(reductionDb)}dB`    : '?',
-  })
+  ctx.results.truePeakLimit = { ceilingDbfs: ceilingDb }
+  ctx.log(`[level] after limiting: ceiling=${ceilingDb}dBFS`)
 }
 
 // ── Stage: Measure after ──────────────────────────────────────────────────────
