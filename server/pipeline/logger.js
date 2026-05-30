@@ -30,6 +30,13 @@
  *   PIPELINE_LOG_SNAPSHOTS=true|1  Copy audio WAV after each stage (default: false)
  *                                  Skipping saves ~1 GB of disk writes per run and
  *                                  eliminates copyFile overhead between stages.
+ *                                  When off, the final encoded output is still
+ *                                  copied as `99_output.<ext>` by finalize().
+ *   PIPELINE_LOG_CHUNK_SNAPSHOTS=true|1  Copy per-chunk per-stage WAVs from inside
+ *                                  chunked blocks (default: false). Requires
+ *                                  PIPELINE_LOG=true. Multiplies snapshot writes
+ *                                  by (chunks × inner stages) — intended for
+ *                                  debugging chunk-boundary issues only.
  *   PIPELINE_LOG_MEASURE=true|1    Run FFmpeg volumedetect + WASM LUFS measurement
  *                                  after each audio-producing stage (default: false)
  *                                  Skipping this is the primary source of the ~100 s
@@ -51,6 +58,14 @@ const LOG_ENABLED =
 // Off by default — 19 × 60 MB copies add ~1 GB of disk writes per run.
 const LOG_SNAPSHOTS =
   process.env.PIPELINE_LOG_SNAPSHOTS === 'true' || process.env.PIPELINE_LOG_SNAPSHOTS === '1'
+
+// Whether to copy per-chunk per-stage WAVs from inside chunked blocks. Off by
+// default — adds (chunks × inner stages) copies per chunked block, which on a
+// long file can easily exceed the whole-pipeline snapshot volume. Gated
+// separately from LOG_SNAPSHOTS so per-stage and per-chunk snapshotting can
+// be toggled independently when debugging chunk-boundary behaviour.
+const LOG_CHUNK_SNAPSHOTS =
+  process.env.PIPELINE_LOG_CHUNK_SNAPSHOTS === 'true' || process.env.PIPELINE_LOG_CHUNK_SNAPSHOTS === '1'
 
 // Whether to run FFmpeg volumedetect + WASM LUFS/true-peak after each stage.
 // Off by default — this is the dominant source of the gap between summed step
@@ -105,6 +120,15 @@ class PipelineLogger {
   }
 
   /**
+   * True when per-chunk per-stage snapshot copying should fire. Used by the
+   * chunked runner as a cheap-skip check before constructing snapshot names.
+   * Gated on _ready so a failed init() never produces orphan chunk files.
+   */
+  get chunkSnapshotsEnabled() {
+    return LOG_CHUNK_SNAPSHOTS && this._ready
+  }
+
+  /**
    * Create the run directory, copy the original input file, and write the
    * log header (run metadata + full preset / output-profile config JSON).
    */
@@ -138,8 +162,9 @@ class PipelineLogger {
       await writeFile(this.logPath, header, 'utf8')
       this._ready = true
       const opts = [
-        LOG_MEASURE   ? 'measure=on'    : 'measure=off',
-        LOG_SNAPSHOTS ? 'snapshots=on'  : 'snapshots=off',
+        LOG_MEASURE         ? 'measure=on'         : 'measure=off',
+        LOG_SNAPSHOTS       ? 'snapshots=on'       : 'snapshots=off',
+        LOG_CHUNK_SNAPSHOTS ? 'chunkSnapshots=on'  : 'chunkSnapshots=off',
       ].join('  ')
       console.log(`[pipeline-log] ${this.runSlug} (${this.runId}) — logging to ${this.runDir}  [${opts}]`)
     } catch (err) {
@@ -220,14 +245,57 @@ class PipelineLogger {
   }
 
   /**
+   * Copy a per-chunk per-stage WAV into the run dir from inside a chunked
+   * block. No-op unless PIPELINE_LOG_CHUNK_SNAPSHOTS is enabled.
+   *
+   * Files are named `${nextIdx}_chunked_chunk${chunkIdx}_${stageName}${ext}`
+   * where nextIdx is the step index the chunked block itself will get when
+   * logStep() runs after the block completes — chunk WAVs therefore sort
+   * directly next to their parent step (e.g. 07_chunked, 07_chunked_chunk1_*).
+   * Parens in stageName (entryDisplayName produces `noiseReduce(df3)`) are
+   * normalised to underscores so the filename stays shell-friendly.
+   *
+   * @param {number} chunkIdx   1-based chunk index
+   * @param {string} stageName  Display name ('input', 'hpf', 'noiseReduce(df3)', …)
+   * @param {string} srcPath    Source file to copy
+   */
+  async copyChunkSnapshot(chunkIdx, stageName, srcPath) {
+    if (!this.chunkSnapshotsEnabled) return
+    try {
+      const idx  = String(this.stepIndex + 1).padStart(2, '0')
+      const ext  = path.extname(srcPath) || '.wav'
+      const safe = stageName.replace(/\(/g, '_').replace(/\)/g, '')
+      const destName = `${idx}_chunked_chunk${chunkIdx}_${safe}${ext}`
+      await copyFile(srcPath, path.join(this.runDir, destName))
+    } catch (err) {
+      console.warn(`[pipeline-log] Chunk snapshot copy failed (chunk ${chunkIdx} ${stageName}): ${err.message}`)
+    }
+  }
+
+  /**
    * Append the final processing report JSON and a run-summary footer.
    * Called after the pipeline completes successfully.
    *
-   * @param {object} report - The report object returned by buildReport().
+   * When per-stage snapshots are disabled, the final pipeline output is still
+   * copied as `99_output.<ext>` so the run dir always contains a paired
+   * before/after (00_input + 99_output) regardless of snapshot mode. With
+   * snapshots on, the final stage's WAV is already present and this copy is
+   * skipped to avoid the duplicate.
+   *
+   * @param {object} report      - The report object returned by buildReport().
+   * @param {string} [finalPath] - Path to the final pipeline output (ctx.currentPath).
    */
-  async finalize(report) {
+  async finalize(report, finalPath = null) {
     if (!this._ready) return
     try {
+      if (finalPath && !LOG_SNAPSHOTS) {
+        try {
+          const ext = path.extname(finalPath) || '.wav'
+          await copyFile(finalPath, path.join(this.runDir, `99_output${ext}`))
+        } catch (e) {
+          console.warn(`[pipeline-log] Final output copy failed: ${e.message}`)
+        }
+      }
       const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(2)
       const footer  = [
         '=== Final Report ===',

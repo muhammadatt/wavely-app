@@ -67,7 +67,7 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
     const toClean  = ctx.tmpFiles.filter(f => f !== ctx.currentPath)
     await Promise.all(toClean.map(removeTmp))
 
-    if (logger) await logger.finalize(report)
+    if (logger) await logger.finalize(report, ctx.currentPath)
 
     return { outputPath: ctx.currentPath, report, peaks: ctx.peaks }
   } catch (err) {
@@ -113,8 +113,13 @@ async function runStageEntry(ctx, entry, logger) {
       const prevPath      = ctx.currentPath
       const resultsBefore = { ...ctx.results }
 
-      const timings = await runChunkedBlock(ctx, entry.chunked, (subCtx, innerEntry) =>
-        runStageEntry(subCtx, innerEntry, null),  // inner stages skip logger to avoid N×M log noise
+      const timings = await runChunkedBlock(
+        ctx,
+        entry.chunked,
+        (subCtx, innerEntry) => runStageEntry(subCtx, innerEntry, null),  // inner stages skip logger to avoid N×M log noise
+        undefined,  // plannerOptions — production defaults
+        undefined,  // concurrency — CHUNKED_CONCURRENCY env
+        logger,     // for opt-in per-chunk per-stage snapshot copies
       )
 
       if (logger) {

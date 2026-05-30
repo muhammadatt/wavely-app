@@ -74,6 +74,10 @@ const DEFAULT_CONCURRENCY = Math.max(
  *                                       Python stages dispatch through the worker
  *                                       pool — concurrency above the pool size
  *                                       saturates without further speedup.
+ * @param {object} [logger]             Optional pipeline logger. When present and
+ *                                       PIPELINE_LOG_CHUNK_SNAPSHOTS is enabled,
+ *                                       per-chunk carve inputs and per-stage
+ *                                       outputs are copied into the run dir.
  * @returns {Promise<ChunkedTimings>}
  *
  * @typedef {Object} ChunkedTimings
@@ -96,10 +100,15 @@ const DEFAULT_CONCURRENCY = Math.max(
  * @property {Array<{ name: string, durationMs: number }>} stages
  * @property {number}   totalMs                Sum of stages[i].durationMs + carveMs
  */
-export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOptions = {}, concurrency = DEFAULT_CONCURRENCY) {
+export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOptions = {}, concurrency = DEFAULT_CONCURRENCY, logger = null) {
   const sourcePath = ctx.currentPath
   const { sampleRate, numSamples: totalSamples } = await readWavHeader(sourcePath)
   const overlapSamples = Math.round(OVERLAP_MS / 1000 * sampleRate)
+
+  // Optional per-chunk per-stage snapshot copier. No-op unless the logger
+  // is present and PIPELINE_LOG_CHUNK_SNAPSHOTS is enabled.
+  const snapshot = (chunkIdx, name, srcPath) =>
+    logger?.chunkSnapshotsEnabled ? logger.copyChunkSnapshot(chunkIdx, name, srcPath) : undefined
 
   const frames = ctx.results.metrics?.frames ?? []
   const plan = planChunkBoundaries({ frames, sampleRate, totalSamples, options: plannerOptions })
@@ -114,10 +123,16 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
       stages: [],
       totalMs: 0,
     }
+    let prevPath = ctx.currentPath
+    await snapshot(1, 'input', prevPath)
     for (const entry of innerStages) {
       const stageMs = await runTimed(() => runInnerStage(ctx, entry))
       chunkTimings.stages.push({ name: entryDisplayName(entry), durationMs: stageMs })
       chunkTimings.totalMs += stageMs
+      if (ctx.currentPath !== prevPath) {
+        await snapshot(1, entryDisplayName(entry), ctx.currentPath)
+        prevPath = ctx.currentPath
+      }
     }
     const wallClockMs = Date.now() - wallClockStart
     return buildTimings(plan, overlapSamples, sampleRate, 0, [chunkTimings], 1, wallClockMs)
@@ -153,6 +168,7 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
 
     const chunkInPath = ctx.tmp('.wav')
     const carveMs = await runTimed(() => extractAudioRange(sourcePath, chunkInPath, carveStart, carveEnd))
+    await snapshot(i + 1, 'input', chunkInPath)
 
     const subCtx = createSubContext(ctx, chunkInPath, frames, carveStart, carveEnd)
 
@@ -164,6 +180,7 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
       stages: [],
       totalMs: carveMs,
     }
+    let prevPath = chunkInPath
     for (const entry of innerStages) {
       // withThreadLimit applies only when concurrency>1; serial chunk runs
       // (or single-chunk plans handled in the early-return branch) use the
@@ -174,6 +191,10 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
       const stageMs = await runTimed(dispatch)
       chunkTimings.stages.push({ name: entryDisplayName(entry), durationMs: stageMs })
       chunkTimings.totalMs += stageMs
+      if (subCtx.currentPath !== prevPath) {
+        await snapshot(i + 1, entryDisplayName(entry), subCtx.currentPath)
+        prevPath = subCtx.currentPath
+      }
     }
     ctx.log(`[chunked] chunk ${i + 1}/${plan.chunks.length} done in ${(chunkTimings.totalMs / 1000).toFixed(2)}s`)
 
