@@ -56,7 +56,7 @@ import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { applyVadGate }       from './vadGate.js'
 import { analyzeHum } from './humEQ.js'
-import { applyAirBoost, applyAirBoostMask } from './airBoost.js'
+import { computeAirBoostParams, applyAirBoostMask } from './airBoost.js'
 import { getReferenceCurvePath, runReferenceEQPass } from './referenceEQ.js'
 import { getF0Contour } from './f0Analysis.js'
 import { analyzeSibilanceEvents } from './sibilanceEvents.js'
@@ -901,78 +901,132 @@ export async function breathReduce(ctx) {
 // For ACX output profiles, a noise floor pre/post check constrains the applied
 // gain to preserve the -60 dBFS ACX ceiling.
 //
-// Sibilant masking: when preset.airBoost.sibilantGainFloor < 1.0, a sibilance
-// event map is computed against the post-boost audio (detection must see the
-// spectral state we're about to blend, not the pre-boost signal). The map's
-// detection params come from preset.airBoost.sibilanceDetection — independent
-// from any other stage's detection settings. A Python blend pass then attenuates
-// the boost on sibilant frames back toward the original signal, preventing the
-// air-band lift from amplifying sibilant energy.
+// Sibilant masking: when sibilantGainFloor < 1.0, the boost is blended back
+// toward the original signal on sibilant frames. Event boundaries are reused
+// from an upstream clipGainDeEsser result (ctx.results.clipGainDeEsser.eventsPath)
+// when available — the same pattern used by parallelCompress's wet-branch
+// de-esser. De novo detection runs only as a fallback. air_boost_masked.py reads
+// sibilantFrameIndices, which are frame-domain and stable across a pitch-neutral
+// EQ transformation.
+//
+// Analyze/Apply split: airBoostAnalyze determines filter parameters (including
+// the ACX compliance loop) and resolves sibilant events; airBoostApply applies
+// the already-written EQ output and runs the mask blend. The combined airBoost
+// wrapper handles the sequential case with no extra FFmpeg pass.
 
-export async function airBoost(ctx) {
+export async function airBoostAnalyze(ctx) {
   const airBoostConfig    = ctx.preset?.airBoost ?? {}
   const gainDb            = airBoostConfig.gainDb            ?? 0
-  const sibilantGainFloor = airBoostConfig.sibilantGainFloor ?? 1.0  // 1.0 = no masking (legacy)
+  const sibilantGainFloor = airBoostConfig.sibilantGainFloor ?? 1.0
   const attackMs          = airBoostConfig.sibilantAttackMs  ?? 5.0
   const releaseMs         = airBoostConfig.sibilantReleaseMs ?? 20.0
 
-  // Save pre-boost path — needed as --original for the blend pass regardless
-  // of when sibilance analysis runs.
-  const originalPath = ctx.currentPath
-  const airBoostPath = ctx.tmp('.wav')
+  const originalPath  = ctx.currentPath
+  const resolvedOutputPath = ctx.tmp('.wav')
 
-  const result = await applyAirBoost(
+  const params = await computeAirBoostParams(
     originalPath,
-    airBoostPath,
+    resolvedOutputPath,
     gainDb,
     ctx.outputProfileId,
     ctx.results.metrics,
     { presetId: ctx.presetId, precutConfig: airBoostConfig.precut },
   )
 
-  if (result.applied) {
-    // Detection must run on the post-boost signal — the boost reshapes the
-    // sibilant band and changes what triggers the detector. Update currentPath
-    // first so analyzeSibilanceEvents sees the boosted audio.
-    ctx.currentPath = airBoostPath
+  // Resolve sibilant event boundaries. clipGainDeEsser runs before airBoost in
+  // every active preset that enables masking, so its eventsPath is the primary
+  // source. air_boost_masked.py reads sibilantFrameIndices — frame-domain data
+  // that is stable across the pitch-neutral EQ transformation — so the
+  // pre-boost boundaries are correct. Fall back to de novo detection only when
+  // no upstream events exist (e.g. clipGainDeEsser found no events or was
+  // absent from the preset).
+  let eventsPath   = null
+  let eventsSource = null
 
-    if (sibilantGainFloor < 1.0) {
-      // Per-stage detection params — airBoost typically wants slightly looser
-      // settings than resonanceSuppressor since its purpose is to back off the
-      // boost on anything sibilant-like rather than to spot-treat isolated
-      // events.
-      const f0Contour = await getF0Contour(ctx)
+  if (params.applied && sibilantGainFloor < 1.0) {
+    const upstreamEventsPath = ctx.results.clipGainDeEsser?.applied
+      ? (ctx.results.clipGainDeEsser.eventsPath ?? null)
+      : null
+
+    if (upstreamEventsPath) {
+      eventsPath   = upstreamEventsPath
+      eventsSource = 'upstream'
+    } else {
+      // Fallback: de novo detection on the post-boost signal. F0 is stable
+      // through an EQ so useCache:true avoids re-running the Python script.
+      const f0Contour = await getF0Contour(ctx, { useCache: true })
       const sibResult = await analyzeSibilanceEvents(ctx, {
         params:    airBoostConfig.sibilanceDetection,
         f0Contour,
       })
-      const eventsPath = sibResult?.path ?? null
-
-      if (eventsPath) {
-        const maskedPath = ctx.tmp('.wav')
-        await applyAirBoostMask(
-          originalPath, airBoostPath, eventsPath, maskedPath,
-          sibilantGainFloor, attackMs, releaseMs,
-        )
-        ctx.currentPath = maskedPath
-        result.sibilantMask = { applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs }
-      }
+      eventsPath   = sibResult?.path ?? null
+      eventsSource = 'denovo'
     }
   }
 
-  ctx.results.airBoost = result
+  ctx.globalParams.airBoost = {
+    params,
+    resolvedOutputPath,
+    originalPath,
+    eventsPath,
+    eventsSource,
+    sibilantGainFloor,
+    attackMs,
+    releaseMs,
+  }
+}
+
+export async function airBoostApply(ctx) {
+  const gp = ctx.globalParams.airBoost
+  if (!gp) return
+
+  const { params, resolvedOutputPath, originalPath, eventsPath, eventsSource,
+          sibilantGainFloor, attackMs, releaseMs } = gp
+
+  if (!params.applied) {
+    ctx.results.airBoost = params
+    await logLevel(ctx, 'after air boost', ctx.currentPath, {
+      applied: false,
+      gainDb:  'skipped',
+      ...(params.skip_reason && { reason: params.skip_reason }),
+    })
+    return
+  }
+
+  // In sequential mode resolvedOutputPath already contains the EQ output
+  // written by computeAirBoostParams. In chunked mode the caller discards it
+  // and calls applyAirBoostBands per chunk instead; resolvedOutputPath is then
+  // the chunk's own output.
+  ctx.currentPath = resolvedOutputPath
+
+  if (eventsPath && sibilantGainFloor < 1.0) {
+    const maskedPath = ctx.tmp('.wav')
+    await applyAirBoostMask(
+      originalPath, resolvedOutputPath, eventsPath, maskedPath,
+      sibilantGainFloor, attackMs, releaseMs,
+    )
+    ctx.currentPath = maskedPath
+    params.sibilantMask = { applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs, eventsSource }
+  }
+
+  ctx.results.airBoost = params
   await logLevel(ctx, 'after air boost', ctx.currentPath, {
-    applied:  result.applied,
-    gainDb:   result.applied_gain_db ?? 'skipped',
-    ...(result.skip_reason  && { reason:       result.skip_reason }),
-    ...(result.sibilantMask && { sibilantMask: `floor=${sibilantGainFloor}` }),
-    ...(result.pre_attenuation && {
-      preCut: `${result.pre_attenuation.gain_db.toFixed(2)} dB @ ${result.pre_attenuation.f_hz} Hz Q=${result.pre_attenuation.q}`,
+    applied:  params.applied,
+    gainDb:   params.applied_gain_db,
+    ...(params.sibilantMask && { sibilantMask: `floor=${sibilantGainFloor} src=${eventsSource}` }),
+    ...(params.pre_attenuation && {
+      preCut: `${params.pre_attenuation.gain_db.toFixed(2)} dB @ ${params.pre_attenuation.f_hz} Hz Q=${params.pre_attenuation.q}`,
     }),
-    ...(result.gain_db_reduced_by_precut > 0 && {
-      precutGainReduction: `${result.gain_db_reduced_by_precut.toFixed(2)} dB`,
+    ...(params.gain_db_reduced_by_precut > 0 && {
+      precutGainReduction: `${params.gain_db_reduced_by_precut.toFixed(2)} dB`,
     }),
   })
+}
+
+export async function airBoost(ctx) {
+  await airBoostAnalyze(ctx)
+  await airBoostApply(ctx)
+  ctx.globalParams.airBoost = null
 }
 
 // ── Stage: De-esser ───────────────────────────────────────────────────────────
