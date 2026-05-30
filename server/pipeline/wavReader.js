@@ -12,7 +12,66 @@
  * robustness.
  */
 
-import { readFile } from 'fs/promises'
+import { readFile, open } from 'fs/promises'
+
+/**
+ * Read just the WAV header and return format + sizing metadata without
+ * touching the audio payload. Used when the caller only needs to know the
+ * sample rate, channel count, or total sample count — e.g. to plan a chunked
+ * carve against a multi-hour source without loading 600+ MB into memory.
+ *
+ * Reads at most 4 KiB from the file head, which is enough for the RIFF
+ * header plus any fmt-chunk variant (including WAVEFORMATEXTENSIBLE).
+ *
+ * @param {string} wavPath
+ * @returns {Promise<{ sampleRate: number, numChannels: number, bitsPerSample: number, numSamples: number, dataOffset: number, dataSize: number }>}
+ */
+export async function readWavHeader(wavPath) {
+  const fh = await open(wavPath, 'r')
+  try {
+    const buf = Buffer.alloc(4096)
+    const { bytesRead } = await fh.read(buf, 0, 4096, 0)
+    const view = new DataView(buf.buffer, buf.byteOffset, bytesRead)
+
+    let offset = 12
+    let sampleRate    = 44100
+    let numChannels   = 1
+    let bitsPerSample = 32
+    let dataOffset    = 0
+    let dataSize      = 0
+
+    while (offset < bytesRead - 8) {
+      const chunkId = String.fromCharCode(
+        buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]
+      )
+      const chunkSize = view.getUint32(offset + 4, true)
+
+      if (chunkId === 'fmt ') {
+        numChannels   = view.getUint16(offset + 10, true)
+        sampleRate    = view.getUint32(offset + 12, true)
+        bitsPerSample = view.getUint16(offset + 22, true)
+      }
+
+      if (chunkId === 'data') {
+        dataOffset = offset + 8
+        dataSize   = chunkSize
+        break
+      }
+
+      offset += 8 + chunkSize
+      if (chunkSize % 2 !== 0) offset++
+    }
+
+    if (dataOffset === 0) throw new Error('readWavHeader: no data chunk found')
+
+    const bytesPerSample = bitsPerSample / 8
+    const numSamples = Math.floor(dataSize / (bytesPerSample * numChannels))
+
+    return { sampleRate, numChannels, bitsPerSample, numSamples, dataOffset, dataSize }
+  } finally {
+    await fh.close()
+  }
+}
 
 /**
  * Read a WAV file and extract mono samples as Float32Array.

@@ -129,6 +129,29 @@ export async function applyHighPass(inputPath, outputPath, { notch60Hz = false }
 }
 
 /**
+ * Carve a sample-accurate range from a WAV into a new WAV without loading
+ * the full source into memory. Used by the chunked block runner to extract
+ * each chunk's input — for a multi-hour audiobook this is the difference
+ * between holding the entire decoded file resident vs streaming it through
+ * FFmpeg one chunk at a time.
+ *
+ * `atrim`'s start_sample is inclusive and end_sample is exclusive, matching
+ * the [startSample, endSample) convention used throughout the pipeline.
+ * `asetpts=PTS-STARTPTS` resets timestamps so the output WAV's data offset
+ * starts at sample 0.
+ */
+export async function extractAudioRange(inputPath, outputPath, startSample, endSample) {
+  await runFfmpeg([
+    '-i', inputPath,
+    '-af', `atrim=start_sample=${startSample}:end_sample=${endSample},asetpts=PTS-STARTPTS`,
+    '-acodec', 'pcm_f32le',
+    '-f', 'wav',
+    outputPath,
+  ])
+  return outputPath
+}
+
+/**
  * Apply a linear gain (in dB) to the audio.
  *
  * Stage 5 normalization applies this after measuring the voiced loudness
