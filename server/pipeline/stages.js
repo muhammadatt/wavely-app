@@ -1098,10 +1098,11 @@ export async function clipGainDeEsserAnalyze(ctx) {
   // F0 contour: we don't call getF0Contour() here. The sibilance analyzer
   // computes F0 internally on its already-loaded audio array (one WAV read
   // + one IPC trip saved vs. running estimate_f0_contour.py separately).
-  // The returned event map carries `events.f0` + `events.nFft` +
-  // `events.hopLength`, which we reassemble into the canonical contour shape
-  // and stash on ctx._f0Contour below — that's the cache airBoost's
-  // `getF0Contour(ctx, { useCache: true })` hit relied on previously.
+  // The returned event map exposes that raw per-frame contour as
+  // `events.inputF0Contour`, which we stash on ctx._f0Contour below —
+  // that's the cache airBoost's `getF0Contour(ctx, { useCache: true })`
+  // hit relied on previously. (Not `events.f0` — that's the detector's
+  // rolling band-median values, see the seeding block for details.)
 
   // Merge the preset's sibilance detection block (if any) with the
   // min_duration_ms override the clip-gain stage requires.
