@@ -11,40 +11,18 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import butter, sosfilt, upfirdn
+from scipy.signal import butter, firwin, resample_poly, sosfilt
 
 
 # ---------------------------------------------------------------------------
-# Half-band FIR for 2× resampling (precomputed once at import time)
+# Half-band FIR for 2× resampling (computed once at import time)
 # ---------------------------------------------------------------------------
-# 15-tap equiripple half-band filter designed for 2× up/down conversion.
-# Every other coefficient (except center) is zero by construction, so the
-# effective work is ~8 multiplies per sample — much cheaper than
-# resample_poly's general-purpose Kaiser FIR (~41 taps for ratio 2).
-_HALF_BAND_TAPS = np.array([
-    -0.01773725, 0.0, 0.04417345, 0.0, -0.09398545, 0.0,
-     0.31327629, 0.5, 0.31327629, 0.0, -0.09398545, 0.0,
-     0.04417345, 0.0, -0.01773725,
-], dtype=np.float32)
+# 15-tap Kaiser-windowed half-band filter for 2× up/down conversion.
+# Passed to resample_poly as a custom window so we get proper group-delay
+# compensation while cutting convolution work vs. the default ~41-tap filter.
+_HALFBAND_15 = firwin(15, 0.5, window=('kaiser', 5.0))
 
 _OVERSAMPLE_DRIVE_THRESHOLD = 0.5
-
-
-# ---------------------------------------------------------------------------
-# Fast 2× resampling via half-band FIR
-# ---------------------------------------------------------------------------
-
-def _upsample2(x: np.ndarray) -> np.ndarray:
-    """Zero-stuff then filter with the half-band FIR."""
-    up = np.zeros(len(x) * 2, dtype=x.dtype)
-    up[::2] = x
-    return upfirdn(_HALF_BAND_TAPS, up, up=1, down=1) * 2.0
-
-
-def _downsample2(x: np.ndarray, orig_len: int) -> np.ndarray:
-    """Anti-alias filter then decimate by 2."""
-    filtered = upfirdn(_HALF_BAND_TAPS, x, up=1, down=2)
-    return filtered[:orig_len]
 
 
 # ---------------------------------------------------------------------------
@@ -79,18 +57,18 @@ def tube_saturate(
     """
     Analog-warm asymmetric saturation with optional 2× oversampling.
 
-    Oversampling is skipped when the effective drive is below the aliasing
-    threshold (drive < 0.5), since the transfer function is near-linear and
-    intermodulation products are negligible.
-
-    Uses a precomputed 15-tap half-band FIR instead of scipy's general-purpose
-    resample_poly for ~3× faster 2× conversion.
+    When ``oversample=True`` the nonlinearity runs at 2× the source rate via
+    resample_poly with a short 15-tap half-band FIR, suppressing aliased
+    intermodulation products.  Set ``oversample=False`` to bypass resampling
+    entirely — safe when the effective drive is low enough that the transfer
+    function stays near-linear (see ``_OVERSAMPLE_DRIVE_THRESHOLD``).
     """
     if oversample:
-        x_up = _upsample2(x)
+        x_up = resample_poly(x, 2, 1, window=_HALFBAND_15)
         pre = x_up * drive + bias
         y_up = _apply_transfer(pre, softness, bias)
-        return _downsample2(y_up, len(x))
+        y = resample_poly(y_up, 1, 2, window=_HALFBAND_15)
+        return y[:len(x)]
 
     pre = x * drive + bias
     return _apply_transfer(pre, softness, bias)
