@@ -184,9 +184,12 @@ def main(argv=None):
         g = gcd(SILERO_SR, sr)
         audio_np = resample_poly(audio_np, SILERO_SR // g, sr // g).astype(np.float32)
 
-    # Frame alignment: 25 ms * 16000 Hz = 400 samples per pipeline frame
-    samples_per_frame = round(FRAME_DURATION_S * SILERO_SR)  # 400
-    n_frames          = len(audio_np) // samples_per_frame
+    # Time-based frame boundaries: frame f starts at round(f * FRAME_DURATION_S * SILERO_SR).
+    # Frame sizes alternate by ±1 sample but boundaries stay aligned in time with the JS side.
+    def frame_boundary(f):
+        return round(f * FRAME_DURATION_S * SILERO_SR)
+
+    n_frames = int(len(audio_np) // (FRAME_DURATION_S * SILERO_SR))
 
     frame_results = []
 
@@ -215,13 +218,24 @@ def main(argv=None):
                 threshold=args.threshold,
             )
 
-        # Map segments to pipeline frames.
+        # Map segments to pipeline frames using time-based boundaries.
         # Segment boundaries are at 512-sample chunk resolution; a frame is
-        # voiced if any segment overlaps its [f*400, (f+1)*400) sample range.
+        # voiced if any segment overlaps its [frame_boundary(f), frame_boundary(f+1)) range.
+        samples_per_frame_approx = FRAME_DURATION_S * SILERO_SR
+
+        def frame_at_sample(s):
+            """Return the frame index whose boundary range contains sample s."""
+            f = int(s / samples_per_frame_approx)
+            if f > 0 and frame_boundary(f) > s:
+                f -= 1
+            elif f + 1 <= n_frames and frame_boundary(f + 1) <= s:
+                f += 1
+            return min(f, n_frames - 1)
+
         voiced_frames = set()
         for seg in speech_segs:
-            first_frame = seg['start'] // samples_per_frame
-            last_frame  = (seg['end'] - 1) // samples_per_frame
+            first_frame = frame_at_sample(seg['start'])
+            last_frame  = frame_at_sample(seg['end'] - 1)
             for f in range(first_frame, min(last_frame + 1, n_frames)):
                 voiced_frames.add(f)
 
@@ -242,12 +256,13 @@ def main(argv=None):
         audio_16k = torch.from_numpy(audio_np)
         with torch.no_grad():
             for f in range(n_frames):
-                frame_start = f * samples_per_frame
-                frame_end   = frame_start + samples_per_frame
-                frame_audio = audio_16k[frame_start:frame_end]   # 400 samples
+                fb_start    = frame_boundary(f)
+                fb_end      = frame_boundary(f + 1)
+                frame_len   = fb_end - fb_start
+                frame_audio = audio_16k[fb_start:fb_end]
 
                 chunk_probs = []
-                for chunk_start in range(0, samples_per_frame, SILERO_CHUNK_SAMPLES):
+                for chunk_start in range(0, frame_len, SILERO_CHUNK_SAMPLES):
                     chunk = frame_audio[chunk_start : chunk_start + SILERO_CHUNK_SAMPLES]
 
                     # Zero-pad last chunk if shorter than SILERO_CHUNK_SAMPLES

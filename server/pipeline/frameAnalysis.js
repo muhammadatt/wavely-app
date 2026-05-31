@@ -55,6 +55,14 @@ const { FRAME_DURATION_S } = JSON.parse(
 )  // 0.025 s = 25 ms — must match FRAME_DURATION_S in silero_vad.py
 const BOOTSTRAP_FRAMES = 20    // use this many lowest-energy frames to bootstrap noise floor
 
+// Time-based frame boundary: frame f starts at sample Math.round(f * FRAME_DURATION_S * sampleRate).
+// Frame sizes alternate by ±1 sample but boundaries stay aligned in time across sample rates.
+export function frameBoundary(f, sampleRate) {
+  return Math.round(f * FRAME_DURATION_S * sampleRate)
+}
+
+export { FRAME_DURATION_S }
+
 const VAD_BACKEND   = process.env.VAD_BACKEND   ?? 'silero'
 const SILERO_SCRIPT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -123,8 +131,7 @@ export async function analyzeFrames(wavPath) {
 async function analyzeAudioFramesSilero(wavPath) {
   const { samples, sampleRate } = await readWavSamples(wavPath)
 
-  const frameLengthSamples = Math.round(FRAME_DURATION_S * sampleRate)
-  const numFrames = Math.floor(samples.length / frameLengthSamples)
+  const numFrames = Math.floor(samples.length / (FRAME_DURATION_S * sampleRate))
 
   if (numFrames === 0) {
     return emptyResult()
@@ -133,11 +140,12 @@ async function analyzeAudioFramesSilero(wavPath) {
   // Stage A — energy metrics (always run regardless of VAD backend)
   const frameRms = new Float64Array(numFrames)
   for (let f = 0; f < numFrames; f++) {
-    const start = f * frameLengthSamples
-    const end   = start + frameLengthSamples
+    const start = frameBoundary(f, sampleRate)
+    const end   = frameBoundary(f + 1, sampleRate)
+    const len   = end - start
     let sumSq = 0
     for (let i = start; i < end; i++) sumSq += samples[i] * samples[i]
-    frameRms[f] = Math.sqrt(sumSq / frameLengthSamples)
+    frameRms[f] = Math.sqrt(sumSq / len)
   }
 
   const noiseRmsLinear   = bootstrapNoiseRms(frameRms)
@@ -173,10 +181,11 @@ async function analyzeAudioFramesSilero(wavPath) {
     // frame index not present in Silero output (±1 frame edge case).
     const isSilence = sileroMap.has(f) ? sileroMap.get(f) : (rmsDbfs < silenceThreshold)
 
+    const start = frameBoundary(f, sampleRate)
     frames.push({
       index:         f,
-      offsetSamples: f * frameLengthSamples,
-      lengthSamples: frameLengthSamples,
+      offsetSamples: start,
+      lengthSamples: frameBoundary(f + 1, sampleRate) - start,
       rmsDbfs:       round2(rmsDbfs),
       isSilence,
     })
@@ -222,7 +231,7 @@ async function analyzeAudioFramesSilero(wavPath) {
     ? rmsToDbfs(Math.sqrt(voicedSumSq / voicedFrameCount))
     : noiseFloorDbfs
 
-  const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms, frameLengthSamples)
+  const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms)
 
   return {
     noiseFloorDbfs:       round2(noiseFloorDbfs),
@@ -258,8 +267,7 @@ function spawnSilero(inputPath, outputJsonPath) {
 async function analyzeAudioFramesEnergy(wavPath) {
   const { samples, sampleRate } = await readWavSamples(wavPath)
 
-  const frameLengthSamples = Math.round(FRAME_DURATION_S * sampleRate)
-  const numFrames = Math.floor(samples.length / frameLengthSamples)
+  const numFrames = Math.floor(samples.length / (FRAME_DURATION_S * sampleRate))
 
   if (numFrames === 0) {
     return emptyResult()
@@ -268,13 +276,14 @@ async function analyzeAudioFramesEnergy(wavPath) {
   // Compute RMS for every frame
   const frameRms = new Float64Array(numFrames)
   for (let f = 0; f < numFrames; f++) {
-    const start = f * frameLengthSamples
-    const end   = start + frameLengthSamples
+    const start = frameBoundary(f, sampleRate)
+    const end   = frameBoundary(f + 1, sampleRate)
+    const len   = end - start
     let sumSq = 0
     for (let i = start; i < end; i++) {
       sumSq += samples[i] * samples[i]
     }
-    frameRms[f] = Math.sqrt(sumSq / frameLengthSamples)
+    frameRms[f] = Math.sqrt(sumSq / len)
   }
 
   // Bootstrap noise floor: RMS over the BOOTSTRAP_FRAMES lowest-energy frames
@@ -291,10 +300,11 @@ async function analyzeAudioFramesEnergy(wavPath) {
     const rmsDbfs  = rmsToDbfs(frameRms[f])
     const isSilence = rmsDbfs < silenceThreshold
 
+    const start = frameBoundary(f, sampleRate)
     frames.push({
       index:         f,
-      offsetSamples: f * frameLengthSamples,
-      lengthSamples: frameLengthSamples,
+      offsetSamples: start,
+      lengthSamples: frameBoundary(f + 1, sampleRate) - start,
       rmsDbfs:       round2(rmsDbfs),
       isSilence,
     })
@@ -310,7 +320,7 @@ async function analyzeAudioFramesEnergy(wavPath) {
     : noiseFloorDbfs
 
   // Find quietest contiguous silence segment (≥ 5 frames = 0.5 s)
-  const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms, frameLengthSamples)
+  const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms)
 
   return {
     noiseFloorDbfs:       round2(noiseFloorDbfs),
@@ -339,18 +349,19 @@ async function analyzeAudioFramesEnergy(wavPath) {
 export async function remeasureFrames(wavPath, reference) {
   const { samples, sampleRate } = await readWavSamples(wavPath)
 
-  const frameLengthSamples = Math.round(FRAME_DURATION_S * sampleRate)
-  const numFrames = Math.floor(samples.length / frameLengthSamples)
+  const numFrames = Math.floor(samples.length / (FRAME_DURATION_S * sampleRate))
 
   if (numFrames === 0) return emptyResult()
 
   // Re-compute per-frame RMS from the current (processed) audio
   const frameRms = new Float64Array(numFrames)
   for (let f = 0; f < numFrames; f++) {
-    const start = f * frameLengthSamples
+    const start = frameBoundary(f, sampleRate)
+    const end   = frameBoundary(f + 1, sampleRate)
+    const len   = end - start
     let sumSq = 0
-    for (let i = start; i < start + frameLengthSamples; i++) sumSq += samples[i] * samples[i]
-    frameRms[f] = Math.sqrt(sumSq / frameLengthSamples)
+    for (let i = start; i < end; i++) sumSq += samples[i] * samples[i]
+    frameRms[f] = Math.sqrt(sumSq / len)
   }
 
   const noiseRmsLinear   = bootstrapNoiseRms(frameRms)
@@ -371,10 +382,11 @@ export async function remeasureFrames(wavPath, reference) {
       ? reference.frames[f].isSilence
       : (rmsDbfs < silenceThreshold)
 
+    const start = frameBoundary(f, sampleRate)
     frames.push({
       index:         f,
-      offsetSamples: f * frameLengthSamples,
-      lengthSamples: frameLengthSamples,
+      offsetSamples: start,
+      lengthSamples: frameBoundary(f + 1, sampleRate) - start,
       rmsDbfs:       round2(rmsDbfs),
       isSilence,
     })
@@ -389,7 +401,7 @@ export async function remeasureFrames(wavPath, reference) {
     ? rmsToDbfs(Math.sqrt(voicedSumSq / voicedFrameCount))
     : noiseFloorDbfs
 
-  const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms, frameLengthSamples)
+  const quietestSilenceSegment = findQuietestSilenceSegment(frames, frameRms)
 
   return {
     noiseFloorDbfs:       round2(noiseFloorDbfs),
@@ -405,7 +417,7 @@ export async function remeasureFrames(wavPath, reference) {
  * Find the quietest contiguous silence segment of at least MIN_SEGMENT_FRAMES.
  * Used for room tone extraction.
  */
-function findQuietestSilenceSegment(frames, frameRms, frameLengthSamples) {
+function findQuietestSilenceSegment(frames, frameRms) {
   const MIN_FRAMES = 5  // at least 125 ms (5 × 25 ms frames)
 
   let bestSegment  = null
@@ -423,9 +435,11 @@ function findQuietestSilenceSegment(frames, frameRms, frameLengthSamples) {
 
     if (avgRms < bestAvgRms) {
       bestAvgRms = avgRms
+      const startSample = frames[segStart].offsetSamples
+      const lastFrame   = frames[end - 1]
       bestSegment = {
-        offsetSamples: segStart * frameLengthSamples,
-        lengthSamples: len * frameLengthSamples,
+        offsetSamples: startSample,
+        lengthSamples: (lastFrame.offsetSamples + lastFrame.lengthSamples) - startSample,
       }
     }
     segStart = -1
