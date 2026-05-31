@@ -185,7 +185,7 @@ def main(argv=None):
         audio_np = resample_poly(audio_np, SILERO_SR // g, sr // g).astype(np.float32)
 
     # Time-based frame boundaries: frame f starts at round(f * FRAME_DURATION_S * SILERO_SR).
-    # Frame sizes alternate by ±1 sample but boundaries stay aligned in time with the JS side.
+    # With the current 25 ms/16 kHz config this remains 400 samples per frame; the formula matches the JS side.
     def frame_boundary(f):
         return round(f * FRAME_DURATION_S * SILERO_SR)
 
