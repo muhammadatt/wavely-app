@@ -35,11 +35,12 @@ import { applyNoiseReduction, runRnnoise, runDtln } from './noiseReduce.js'
 import {
   measureAudio,
   measureRmsDbfs,
+  measureRmsAndPeak,
   measureVoicedLufs,
   checkAcxCertification,
 } from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
-import { analyzeFrames, remeasureFrames } from './frameAnalysis.js'
+import { analyzeFrames, remeasureFrames, measureNoiseFloorOnly } from './frameAnalysis.js'
 import { analyzeCorrectiveEQ, bandsToFfmpegFilters } from './correctiveEQ.js'
 import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
@@ -136,11 +137,14 @@ export async function monoMixdown(ctx) {
 // report's before section and for qualityAdvisory's preNrNoiseFloor.
 
 export async function measureBefore(ctx) {
-  const audio = await measureAudio(ctx.currentPath)
+  // RMS + true peak only — integrated LUFS is not consumed by any downstream
+  // processing stage and is skipped to avoid the ebur128 integrated computation.
+  // True peak is reused by peakNormalizeAnalyze to avoid a redundant measurement.
+  const audio = await measureRmsAndPeak(ctx.currentPath)
   ctx.results.metrics = {
     rmsDbfs:               audio.rmsDbfs,
     truePeakDbfs:          audio.truePeakDbfs,
-    lufsIntegrated:        audio.lufsIntegrated,
+    lufsIntegrated:        null,
     noiseFloorDbfs:        null,
     silenceThresholdDbfs:  null,
     frames:                null,
@@ -148,11 +152,10 @@ export async function measureBefore(ctx) {
     averageVoicedRmsDbfs:  null,
     quietestSilenceSegment: null,
   }
-  // Snapshot: noiseFloorDbfs is null here; back-filled by analyzeFramesRaw.
   ctx.results.beforeMeasurements = {
     rmsDbfs:        audio.rmsDbfs,
     truePeakDbfs:   audio.truePeakDbfs,
-    lufsIntegrated: audio.lufsIntegrated,
+    lufsIntegrated: null,
     noiseFloorDbfs: null,
   }
 }
@@ -1665,43 +1668,78 @@ export async function truePeakLimit(ctx) {
 
 // ── Stage: Measure after ──────────────────────────────────────────────────────
 //
-// Populates afterMeasurements including the noise floor from a frame-based
-// silence analysis on the fully processed audio. The ACX noise-floor check
-// runs off this value, so it must reflect the actual silence floor (frame-
-// based) and not a histogram-derived proxy. The final frame analysis is
-// merged into the canonical ctx.results.metrics object for downstream reuse
-// (qualityAdvisory).
+// Measurement scope adapts to what downstream stages actually consume:
 //
-// Energy metrics (noiseFloorDbfs, voicedRmsDbfs, etc.) are re-derived from
-// the current audio via remeasureFrames(), which preserves the Silero VAD
-// isSilence labels established by analyzeFramesRaw. The pipeline does not
-// change sample count between analyzeFramesRaw and measureAfter, so the
-// labels are stable and a fresh Silero subprocess is unnecessary. Falls back
-// to analyzeFrames() if no reference labels were ever produced.
+// ACX output profile:
+//   - RMS + true peak (measureRmsAndPeak) — needed by acxCertification
+//   - Noise floor — needed by acxCertification
+//   - ACX audiobook preset: full remeasureFrames (breath/plosive detection in
+//     qualityAdvisory needs per-frame data and voicedRmsDbfs)
+//   - Other presets: measureNoiseFloorOnly (lightweight — no frame array)
+//   - Integrated LUFS: skipped (not in the ACX 6-point check)
+//
+// Non-ACX output profiles:
+//   - RMS only (measureRmsDbfs) — for normalization_gain_db in the report
+//   - True peak, integrated LUFS, noise floor, frame analysis: all skipped
+//     (ACX certification does not run; qualityAdvisory does not use frames
+//     for non-acx_audiobook presets)
 
 export async function measureAfter(ctx) {
-  const reference = ctx.results.metrics
-  const hasReference = reference && Array.isArray(reference.frames) && reference.frames.length > 0
-  const [audio, fa] = await Promise.all([
-    measureAudio(ctx.currentPath),
-    hasReference
-      ? remeasureFrames(ctx.currentPath, reference)
-      : analyzeFrames(ctx.currentPath),
-  ])
+  const isAcx          = ctx.outputProfileId === 'acx'
+  const isAcxAudiobook = ctx.presetId === 'acx_audiobook'
+  const reference      = ctx.results.metrics
+  const hasReference   = reference && Array.isArray(reference.frames) && reference.frames.length > 0
 
-  // Update canonical metrics with the final post-processing values.
-  Object.assign(ctx.results.metrics, fa, {
-    rmsDbfs:        audio.rmsDbfs,
-    truePeakDbfs:   audio.truePeakDbfs,
-    lufsIntegrated: audio.lufsIntegrated,
-  })
+  if (isAcx) {
+    // ACX certification needs rmsDbfs, truePeakDbfs, noiseFloorDbfs.
+    // Integrated LUFS is not part of the ACX 6-point check — skip it.
+    const frameTask = isAcxAudiobook
+      ? (hasReference ? remeasureFrames(ctx.currentPath, reference) : analyzeFrames(ctx.currentPath))
+      : measureNoiseFloorOnly(ctx.currentPath)
 
-  // Snapshot for ACX certification and the report's after section.
-  ctx.results.afterMeasurements = {
-    rmsDbfs:        audio.rmsDbfs,
-    truePeakDbfs:   audio.truePeakDbfs,
-    lufsIntegrated: audio.lufsIntegrated,
-    noiseFloorDbfs: fa.noiseFloorDbfs,
+    const [audio, frameResult] = await Promise.all([
+      measureRmsAndPeak(ctx.currentPath),
+      frameTask,
+    ])
+
+    // measureNoiseFloorOnly returns a bare number; remeasureFrames returns an object
+    const isFullFrameResult = typeof frameResult !== 'number'
+    const noiseFloorDbfs    = isFullFrameResult ? frameResult.noiseFloorDbfs : frameResult
+
+    if (isFullFrameResult) {
+      Object.assign(ctx.results.metrics, frameResult, {
+        rmsDbfs:        audio.rmsDbfs,
+        truePeakDbfs:   audio.truePeakDbfs,
+        lufsIntegrated: null,
+      })
+    } else {
+      ctx.results.metrics.rmsDbfs        = audio.rmsDbfs
+      ctx.results.metrics.truePeakDbfs   = audio.truePeakDbfs
+      ctx.results.metrics.noiseFloorDbfs = noiseFloorDbfs
+      ctx.results.metrics.lufsIntegrated = null
+    }
+
+    ctx.results.afterMeasurements = {
+      rmsDbfs:        audio.rmsDbfs,
+      truePeakDbfs:   audio.truePeakDbfs,
+      lufsIntegrated: null,
+      noiseFloorDbfs,
+    }
+  } else {
+    // Non-ACX profiles: ACX certification does not run. Only rmsDbfs is needed
+    // for normalization_gain_db in the report. Skip libebur128 (true peak +
+    // integrated LUFS) and frame re-analysis entirely.
+    const rmsDbfs = await measureRmsDbfs(ctx.currentPath)
+
+    ctx.results.metrics.rmsDbfs        = rmsDbfs
+    ctx.results.metrics.lufsIntegrated = null
+
+    ctx.results.afterMeasurements = {
+      rmsDbfs,
+      truePeakDbfs:   null,
+      lufsIntegrated: null,
+      noiseFloorDbfs: null,
+    }
   }
 }
 

@@ -457,6 +457,32 @@ function findQuietestSilenceSegment(frames, frameRms) {
   return bestSegment
 }
 
+/**
+ * Lightweight noise-floor-only measurement.
+ * Reads the WAV, computes per-frame RMS, and bootstraps the noise floor from
+ * the lowest BOOTSTRAP_FRAMES frames. Skips building the full frame array,
+ * voiced RMS, and quietest-silence-segment search.
+ * Used by measureAfter for non-audiobook ACX presets where only the noise
+ * floor is needed for certification (no breath/plosive detection).
+ */
+export async function measureNoiseFloorOnly(wavPath) {
+  const { samples, sampleRate } = await readWavSamples(wavPath)
+  const numFrames = Math.floor(samples.length / (FRAME_DURATION_S * sampleRate))
+  if (numFrames === 0) return -60
+
+  const frameRms = new Float64Array(numFrames)
+  for (let f = 0; f < numFrames; f++) {
+    const start = frameBoundary(f, sampleRate)
+    const end   = frameBoundary(f + 1, sampleRate)
+    const len   = end - start
+    let sumSq = 0
+    for (let i = start; i < end; i++) sumSq += samples[i] * samples[i]
+    frameRms[f] = Math.sqrt(sumSq / len)
+  }
+
+  return round2(rmsToDbfs(bootstrapNoiseRms(frameRms)))
+}
+
 function rmsToDbfs(rms) {
   if (rms <= 0) return -120
   return 20 * Math.log10(rms)
