@@ -181,35 +181,36 @@ export const PRESETS = {
         // plan inside the runner — no behaviour change there.
         chunked: [
           { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
-        ],
-      },
-      {
-        // Second NR pass: RNNoise. Its internal causal GRU VAD operates on
-        // 10 ms frames and routinely misclassifies unvoiced fricative onsets
-        // (/tʃ/, /s/, /ʃ/, /f/) as noise, suppressing 20–30 ms of audible
-        // consonant. The vadGate restores the dry input on frames where the
-        // pipeline's Silero v5 VAD (25 ms frames, ~64 ms context) disagrees
-        // with RNNoise's verdict — Silero correctly identifies those onsets
-        // as speech. A 1 ms linear crossfade at each override-region
-        // boundary keeps frame-edge transitions click-free.
-        noiseReduce: {
-          model: "rnnoise",
-          vadGate: {
-            enabled:          true,
-            rnnoiseThreshold: 0.30,
-            // 1 ms linear ramp at each override boundary — long enough to
-            // suppress clicks at the frame edge, short enough to stay
-            // transparent inside a fricative.
-            crossfadeMs:      1.0,
-            // 20 ms hangover (2 RNNoise frames). RNNoise's causal VAD
-            // takes a few frames to lock onto voicing after a
-            // fricative→vowel transition; while its speech_prob is still
-            // ramping (0.3–0.7 range) it partially attenuates the leading
-            // edge of the vowel. The hangover keeps the dry signal active
-            // through that ramp so the C→V handoff isn't a level dip.
-            hangoverFrames:   2,
+
+          {
+            // Second NR pass: RNNoise. Its internal causal GRU VAD operates on
+            // 10 ms frames and routinely misclassifies unvoiced fricative onsets
+            // (/tʃ/, /s/, /ʃ/, /f/) as noise, suppressing 20–30 ms of audible
+            // consonant. The vadGate restores the dry input on frames where the
+            // pipeline's Silero v5 VAD (25 ms frames, ~64 ms context) disagrees
+            // with RNNoise's verdict — Silero correctly identifies those onsets
+            // as speech. A 1 ms linear crossfade at each override-region
+            // boundary keeps frame-edge transitions click-free.
+            noiseReduce: {
+              model: "rnnoise",
+              vadGate: {
+                enabled: true,
+                rnnoiseThreshold: 0.3,
+                // 1 ms linear ramp at each override boundary — long enough to
+                // suppress clicks at the frame edge, short enough to stay
+                // transparent inside a fricative.
+                crossfadeMs: 1.0,
+                // 20 ms hangover (2 RNNoise frames). RNNoise's causal VAD
+                // takes a few frames to lock onto voicing after a
+                // fricative→vowel transition; while its speech_prob is still
+                // ramping (0.3–0.7 range) it partially attenuates the leading
+                // edge of the vowel. The hangover keeps the dry signal active
+                // through that ramp so the C→V handoff isn't a level dip.
+                hangoverFrames: 2,
+              },
+            },
           },
-        },
+        ],
       },
 
       {
@@ -347,20 +348,20 @@ export const PRESETS = {
       },
       */
 
-          {
-            vocalSaturation: {
-              drive: 2,
-              wetDry: 1,
-              bias: 0.5,
-              lowCrossover: 80,
-              midCrossover: 8000,
-              softness: 0.85,
-              lowDriveMult: 2.5,
-              midDriveMult: 0.1,
-              highDriveMult: 0.1,
-            },
-          },
-          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
+      {
+        vocalSaturation: {
+          drive: 2,
+          wetDry: 1,
+          bias: 0.5,
+          lowCrossover: 80,
+          midCrossover: 8000,
+          softness: 0.85,
+          lowDriveMult: 2.5,
+          midDriveMult: 0.1,
+          highDriveMult: 0.1,
+        },
+      },
+      { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
 
       {
         airBoost: {
