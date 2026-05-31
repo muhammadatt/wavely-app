@@ -149,7 +149,7 @@ export function resolveOutputProfileId(id) {
  * @property {{ model?: 'demucs'|'convtasnet' }} [separateVocals] - Inline config for the separateVocals stage. model selects the separation backend ('demucs' default).
  * @property {{ model?: 'mossformer2_48k'|'frcrn_16k' }} [clearerVoiceEnhance] - Inline config for the clearerVoiceEnhance stage. model selects the ClearerVoice model ('mossformer2_48k' default).
  * @property {{ enabled: boolean, model?: 'ap-bwe'|'ap_bwe'|'lavasr', postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bandwidthExtension - Bandwidth extension; enabled for NE presets, disabled for standard presets. model selects the backend ('ap-bwe' default, 'lavasr'). postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
- * @property {{ model?: 'df3'|'rnnoise'|'dtln', skipBelowDb?: number }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). skipBelowDb skips this pass entirely if the current noise floor is already below the given dBFS (e.g. -85). When the stage is listed more than once, each call can carry its own model and skipBelowDb.
+ * @property {{ model?: 'df3'|'rnnoise'|'dtln', skipBelowDb?: number, vadGate?: { enabled: boolean, rnnoiseThreshold?: number, crossfadeMs?: number, hangoverFrames?: number } }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). skipBelowDb skips this pass entirely if the current noise floor is already below the given dBFS (e.g. -85). vadGate (rnnoise only) restores the dry input on frames where Silero says speech but RNNoise's internal VAD reports speech_prob below rnnoiseThreshold (default 0.30); a short crossfadeMs (default 1 ms) ramp prevents clicks at region boundaries; hangoverFrames (default 2 = 20 ms) right-extends each override forward in time so RNNoise's causal VAD has time to lock onto voicing before the gate hands control back, avoiding the post-fricative vowel-onset dip. When the stage is listed more than once, each call can carry its own model, skipBelowDb, and vadGate.
  */
 
 /** @type {Record<string, Preset>} */
@@ -181,9 +181,37 @@ export const PRESETS = {
         // plan inside the runner — no behaviour change there.
         chunked: [
           { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
-          { noiseReduce: { model: "rnnoise" } }, //"df3", "rnnoise", "dtln"
         ],
       },
+      {
+        // Second NR pass: RNNoise. Its internal causal GRU VAD operates on
+        // 10 ms frames and routinely misclassifies unvoiced fricative onsets
+        // (/tʃ/, /s/, /ʃ/, /f/) as noise, suppressing 20–30 ms of audible
+        // consonant. The vadGate restores the dry input on frames where the
+        // pipeline's Silero v5 VAD (25 ms frames, ~64 ms context) disagrees
+        // with RNNoise's verdict — Silero correctly identifies those onsets
+        // as speech. A 1 ms linear crossfade at each override-region
+        // boundary keeps frame-edge transitions click-free.
+        noiseReduce: {
+          model: "rnnoise",
+          vadGate: {
+            enabled:          true,
+            rnnoiseThreshold: 0.30,
+            // 1 ms linear ramp at each override boundary — long enough to
+            // suppress clicks at the frame edge, short enough to stay
+            // transparent inside a fricative.
+            crossfadeMs:      1.0,
+            // 20 ms hangover (2 RNNoise frames). RNNoise's causal VAD
+            // takes a few frames to lock onto voicing after a
+            // fricative→vowel transition; while its speech_prob is still
+            // ramping (0.3–0.7 range) it partially attenuates the leading
+            // edge of the vowel. The hangover keeps the dry signal active
+            // through that ramp so the C→V handoff isn't a level dip.
+            hangoverFrames:   2,
+          },
+        },
+      },
+
       {
         clipGainDeEsser: {
           enabled: true,

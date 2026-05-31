@@ -552,7 +552,16 @@ export async function noiseReduce(ctx) {
   const preVoicedRms = preFa.voicedRmsDbfs
 
   if (model === 'rnnoise') {
-    await runRnnoise(ctx.currentPath, outPath)
+    // Pass the pipeline's Silero VAD labels through to the RNNoise script so
+    // its diagnostic dump can verify the 25 ms → 10 ms alignment and so the
+    // VAD-disagreement gate (opt-in via preset config) can override RNNoise's
+    // internal VAD on fricative onsets it misclassifies as noise.
+    const sileroFrames = ctx.results.metrics?.frames ?? null
+    const vadGate      = ctx.preset.noiseReduce?.vadGate ?? null
+    const rnnInfo = await runRnnoise(ctx.currentPath, outPath, {
+      sileroFrames,
+      vadGate,
+    })
     ctx.currentPath = outPath
     ctx.results.noiseReduction = {
       applied: true,
@@ -560,6 +569,12 @@ export async function noiseReduce(ctx) {
       atten_lim_db: null,
       pre_noise_floor_dbfs: preNoiseFloor,
       post_noise_floor_dbfs: null,
+    }
+    if (rnnInfo?.vadGate) {
+      ctx.results.noiseReduction.vad_gate = rnnInfo.vadGate
+    }
+    if (rnnInfo?.speechProbOut) {
+      ctx.log(`[NR] RNNoise speech_prob sidecar → ${rnnInfo.speechProbOut}`)
     }
   } else if (model === 'dtln') {
     await runDtln(ctx.currentPath, outPath)
