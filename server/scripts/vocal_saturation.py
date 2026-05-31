@@ -7,63 +7,75 @@ Input/output: 32-bit float WAV at any sample rate.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import butter, resample_poly, sosfilt
+from scipy.signal import butter, firwin, resample_poly, sosfilt
+
+
+# ---------------------------------------------------------------------------
+# Half-band FIR for 2× resampling (computed once at import time)
+# ---------------------------------------------------------------------------
+# 15-tap Kaiser-windowed half-band filter for 2× up/down conversion.
+# Passed to resample_poly as a custom window so we get proper group-delay
+# compensation while cutting convolution work vs. the default ~41-tap filter.
+_HALFBAND_15 = firwin(15, 0.5, window=('kaiser', 5.0))
+
+_OVERSAMPLE_DRIVE_THRESHOLD = 0.5
 
 
 # ---------------------------------------------------------------------------
 # Saturation core
 # ---------------------------------------------------------------------------
 
+def _apply_transfer(pre: np.ndarray, softness: float, bias: float) -> np.ndarray:
+    """Blended tanh/arctan transfer function with DC offset removal."""
+    if softness <= 0.0:
+        y = np.tanh(pre)
+        y -= np.tanh(bias)
+    elif softness >= 1.0:
+        scale = 2.0 / np.pi
+        y = scale * np.arctan(pre)
+        y -= scale * np.arctan(bias)
+    else:
+        y_tanh = np.tanh(pre)
+        y_atan = (2.0 / np.pi) * np.arctan(pre)
+        y = (1.0 - softness) * y_tanh + softness * y_atan
+        bias_ref = (1.0 - softness) * np.tanh(bias) + softness * (2.0 / np.pi) * np.arctan(bias)
+        y -= bias_ref
+    return y
+
+
 def tube_saturate(
     x: np.ndarray,
     drive: float = 1.0,
     bias: float = 0.1,
     softness: float = 0.3,
+    oversample: bool = True,
 ) -> np.ndarray:
     """
-    Analog-warm asymmetric saturation with 2× oversampling.
+    Analog-warm asymmetric saturation with optional 2× oversampling.
 
-    Two improvements over a bare tanh make this better suited for vocals:
-
-    1. 2× oversampling — the nonlinearity runs at twice the source sample rate.
-       Intermodulation products that would alias back into the audible band are
-       attenuated by resample_poly's built-in anti-alias filter before decimation.
-       This removes the "digital edge" that naive tanh saturation has on
-       harmonically rich content like a consonant cluster or plosive.
-
-    2. Blended transfer function — pure tanh accumulates odd harmonics (3rd, 5th…)
-       that can sound brittle on voices.  Blending toward arctan (same asymptotic
-       shape, but a softer 3rd-harmonic rolloff due to the π/2 ceiling) reduces
-       that edge while the asymmetric bias continues to supply even-harmonic warmth.
-
-       softness=0.0 → pure tanh (hardest knee, strongest 3rd harmonic)
-       softness=1.0 → pure arctan (softest knee, most 2nd-harmonic character)
-       softness=0.3 → default: noticeably warmer than bare tanh, still present
+    When ``oversample=True`` the nonlinearity runs at 2× the source rate via
+    resample_poly with a short 15-tap half-band FIR, suppressing aliased
+    intermodulation products.  Set ``oversample=False`` to bypass resampling
+    entirely — safe when the effective drive is low enough that the transfer
+    function stays near-linear (see ``_OVERSAMPLE_DRIVE_THRESHOLD``).
     """
-    # Upsample 2× (built-in Kaiser anti-alias filter)
-    x_up = resample_poly(x, 2, 1)
+    if oversample:
+        x_up = resample_poly(x, 2, 1, window=_HALFBAND_15)
+        pre = x_up * drive + bias
+        y_up = _apply_transfer(pre, softness, bias)
+        y = resample_poly(y_up, 1, 2, window=_HALFBAND_15)
+        return y[:len(x)]
 
-    # Bias is added after drive so it acts as an absolute operating-point
-    # offset on the curve, independent of drive.  drive sets how hard the
-    # signal swings into the curve; bias sets where on the curve it swings.
-    pre = x_up * drive + bias
+    pre = x * drive + bias
+    return _apply_transfer(pre, softness, bias)
 
-    y_tanh = np.tanh(pre)
-    y_atan = (2.0 / np.pi) * np.arctan(pre)
-    y_up = (1.0 - softness) * y_tanh + softness * y_atan
 
-    # Remove DC offset introduced by the asymmetric bias (curve value at x=0)
-    bias_ref = (1.0 - softness) * np.tanh(bias) + softness * (2.0 / np.pi) * np.arctan(bias)
-    y_up -= bias_ref
-
-    # Downsample 2× with built-in anti-alias filtering
-    y = resample_poly(y_up, 1, 2)
-
-    # resample_poly may produce one extra sample at the tail due to filter delay
-    return y[:len(x)]
+def _rms(x: np.ndarray) -> float:
+    return np.sqrt(np.dot(x, x) / len(x)) + 1e-8
 
 
 def make_lp_filter(fc: float, sr: int):
@@ -113,28 +125,28 @@ def vocal_saturation(
     mid  = audio - low - high   # complementary split — sums back to audio exactly
 
     # --- Per-band saturation ------------------------------------------------
-    low_sat  = tube_saturate(low,  drive * low_drive_mult,  bias, softness)
-    mid_sat  = tube_saturate(mid,  drive * mid_drive_mult,  bias, softness)
-    high_sat = tube_saturate(high, drive * high_drive_mult, bias, softness)
+    low_eff  = drive * low_drive_mult
+    mid_eff  = drive * mid_drive_mult
+    high_eff = drive * high_drive_mult
+
+    low_sat  = tube_saturate(low,  low_eff,  bias, softness, oversample=low_eff  >= _OVERSAMPLE_DRIVE_THRESHOLD)
+    mid_sat  = tube_saturate(mid,  mid_eff,  bias, softness, oversample=mid_eff  >= _OVERSAMPLE_DRIVE_THRESHOLD)
+    high_sat = tube_saturate(high, high_eff, bias, softness, oversample=high_eff >= _OVERSAMPLE_DRIVE_THRESHOLD)
 
     wet = low_sat + mid_sat + high_sat
 
     # --- RMS-match wet to dry -----------------------------------------------
-    # Saturation compresses energy; scale wet to match dry RMS before blending.
-    dry_rms = np.sqrt(np.mean(audio ** 2)) + 1e-8
-    wet_rms = np.sqrt(np.mean(wet ** 2)) + 1e-8
-    wet = wet * (dry_rms / wet_rms)
+    dry_rms = _rms(audio)
+    wet_rms = _rms(wet)
+    wet *= (dry_rms / wet_rms)
 
     # --- Gain-neutral parallel blend ----------------------------------------
-    # Dry stays at full level; wet is added additively at wet_dry gain.
-    # The mix is then RMS-matched back to the dry level so perceived loudness
-    # stays constant regardless of the wet_dry setting.
     output = audio + wet_dry * wet
-    out_rms = np.sqrt(np.mean(output ** 2)) + 1e-8
-    output = output * (dry_rms / out_rms)
+    out_rms = _rms(output)
+    output *= (dry_rms / out_rms)
 
     # Safety clip
-    output = np.clip(output, -1.0, 1.0)
+    np.clip(output, -1.0, 1.0, out=output)
 
     info = {
         'low_crossover_hz':  round(low_crossover, 1),
@@ -188,17 +200,20 @@ def main(argv=None):
             sr,
         )
     else:
-        results = [
-            vocal_saturation(
+        def _process_channel(ch):
+            return vocal_saturation(
                 audio[:, ch], args.drive, args.wet_dry, args.bias,
                 args.low_crossover, args.mid_crossover, args.softness,
                 args.low_drive_mult, args.mid_drive_mult, args.high_drive_mult,
                 sr,
             )
-            for ch in range(audio.shape[1])
-        ]
+
+        n_ch = audio.shape[1]
+        with ThreadPoolExecutor(max_workers=n_ch) as pool:
+            results = list(pool.map(_process_channel, range(n_ch)))
+
         processed = np.stack([r[0] for r in results], axis=1)
-        info = results[0][1]  # bands are identical across channels
+        info = results[0][1]
 
     wavfile.write(args.output, sr, processed.astype(np.float32))
 
