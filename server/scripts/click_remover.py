@@ -25,7 +25,7 @@ import json
 import sys
 import numpy as np
 import soundfile as sf
-from scipy.ndimage import median_filter, uniform_filter1d
+from scipy.ndimage import median_filter
 from scipy.signal import butter, sosfilt
 
 from wavely_ar_utils import burg_ar_coeffs, ar_forward_predict
@@ -104,11 +104,11 @@ def build_hpf(sample_rate, cutoff_hz=800, order=4):
 
 
 def hampel_detect(signal, window_samples, threshold_sigma, sample_rate):
-    sig64 = signal.astype(np.float64)
-    
+    sig64 = signal if signal.dtype == np.float64 else signal.astype(np.float64)
+
     # Tighten Hampel window (0.3ms instead of 1.5ms)
     window_samples = max(3, window_samples // 5 | 1)
-    
+
     med = median_filter(sig64, size=window_samples, mode='reflect')
     abs_dev = np.abs(sig64 - med)
     mad_scaled = 1.4826 * median_filter(abs_dev, size=window_samples, mode='reflect')
@@ -117,25 +117,30 @@ def hampel_detect(signal, window_samples, threshold_sigma, sample_rate):
     mad_scaled = np.maximum(mad_scaled, min_mad)
     hampel_mask = (abs_dev > threshold_sigma * mad_scaled)
 
-    # FIX: causal RMS — use only past samples, never contaminated by click itself
+    # Causal RMS via cumulative sum — O(n) instead of O(n*w) convolution
     rms_window_samp = int(sample_rate * 20.0 / 1000)  # 20ms lookback
-    b_lp = np.ones(rms_window_samp) / rms_window_samp
-    causal_sq = np.convolve(sig64**2, b_lp, mode='full')[:len(sig64)]
+    sq = sig64 ** 2
+    n_sq = len(sq)
+    cumsum = np.empty(n_sq + 1, dtype=np.float64)
+    cumsum[0] = 0.0
+    np.cumsum(sq, out=cumsum[1:])
+    w = rms_window_samp
+    causal_sq = np.empty(n_sq, dtype=np.float64)
+    causal_sq[:w] = cumsum[1:w + 1] / w
+    if w < n_sq:
+        causal_sq[w:] = (cumsum[w + 1:] - cumsum[1:n_sq - w + 1]) / w
     local_rms = np.sqrt(np.maximum(causal_sq, 1e-12))
-    rms_mask = (abs_dev > 3.0 * local_rms)  # 3x instead of 5x
+    rms_mask = (abs_dev > 3.0 * local_rms)
 
-    gate_A = hampel_mask & rms_mask  # original: both must fire
+    gate_A = hampel_mask & rms_mask
 
-    # --- NEW gate C: absolute amplitude + moderate RMS ratio ---
-    # Catches slow-onset clicks in speech where Hampel sigma is suppressed.
-    # The absolute floor (0.04) ensures we only trigger on genuinely loud
-    # transients; the 3.0x RMS ratio ensures it's anomalous vs. local baseline.
-    # False positives on consonant bursts are harmless — max_click_ms in the
-    # repair stage already rejects anything > 15ms before AR interpolation runs.
-    # Adaptive absolute floor: 15% of the signal's 99th percentile amplitude
-    signal_99p = np.percentile(np.abs(sig64), 99)
+    # Gate C: absolute amplitude + moderate RMS ratio for slow-onset clicks
+    abs_sig = np.abs(sig64)
+    n = len(abs_sig)
+    k = max(0, n - int(n * 0.01) - 1)
+    signal_99p = np.partition(abs_sig, k)[k]
     abs_floor = max(0.02, signal_99p * 0.15)
-    gate_C = (np.abs(sig64) > abs_floor) & (abs_dev > 3.0 * local_rms)
+    gate_C = (abs_sig > abs_floor) & (abs_dev > 3.0 * local_rms)
 
     return gate_A | gate_C
 
@@ -144,31 +149,28 @@ def merge_click_regions(mask, min_gap_samples):
     Convert a boolean sample mask to a list of (start, end) tuples.
     Regions closer than min_gap_samples are merged into one.
     """
-    regions  = []
-    in_click = False
-    start    = 0
+    padded = np.empty(len(mask) + 2, dtype=np.bool_)
+    padded[0] = False
+    padded[-1] = False
+    padded[1:-1] = mask
+    diffs = np.diff(padded.view(np.int8))
+    starts = np.where(diffs == 1)[0]
+    ends = np.where(diffs == -1)[0]
 
-    for i, flagged in enumerate(mask):
-        if flagged and not in_click:
-            start    = i
-            in_click = True
-        elif not flagged and in_click:
-            regions.append((start, i))
-            in_click = False
-    if in_click:
-        regions.append((start, len(mask)))
+    if len(starts) == 0:
+        return []
 
-    if not regions:
-        return regions
-
-    merged = [regions[0]]
-    for (s, e) in regions[1:]:
-        if s - merged[-1][1] < min_gap_samples:
-            merged[-1] = (merged[-1][0], e)
+    # Merge regions closer than min_gap_samples (loop over regions, not samples)
+    merged_s = [starts[0]]
+    merged_e = [ends[0]]
+    for i in range(1, len(starts)):
+        if starts[i] - merged_e[-1] < min_gap_samples:
+            merged_e[-1] = ends[i]
         else:
-            merged.append((s, e))
+            merged_s.append(starts[i])
+            merged_e.append(ends[i])
 
-    return merged
+    return list(zip(merged_s, merged_e))
 
 
 # ---------------------------------------------------------------------------
