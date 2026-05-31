@@ -137,14 +137,20 @@ export async function monoMixdown(ctx) {
 // report's before section and for qualityAdvisory's preNrNoiseFloor.
 
 export async function measureBefore(ctx) {
-  // RMS + true peak only — integrated LUFS is not consumed by any downstream
-  // processing stage and is skipped to avoid the ebur128 integrated computation.
-  // True peak is reused by peakNormalizeAnalyze to avoid a redundant measurement.
-  const audio = await measureRmsAndPeak(ctx.currentPath)
+  const isAcx = ctx.outputProfileId === 'acx'
+
+  // ACX: RMS + true peak only — LUFS is not part of the ACX 6-point check
+  // and no downstream processing stage reads it.
+  // Podcast/broadcast: full measureAudio — LUFS is the primary loudness
+  // metric and belongs in the report's "before" section for context.
+  const audio = isAcx
+    ? await measureRmsAndPeak(ctx.currentPath)
+    : await measureAudio(ctx.currentPath)
+
   ctx.results.metrics = {
     rmsDbfs:               audio.rmsDbfs,
     truePeakDbfs:          audio.truePeakDbfs,
-    lufsIntegrated:        null,
+    lufsIntegrated:        audio.lufsIntegrated ?? null,
     noiseFloorDbfs:        null,
     silenceThresholdDbfs:  null,
     frames:                null,
@@ -155,7 +161,7 @@ export async function measureBefore(ctx) {
   ctx.results.beforeMeasurements = {
     rmsDbfs:        audio.rmsDbfs,
     truePeakDbfs:   audio.truePeakDbfs,
-    lufsIntegrated: null,
+    lufsIntegrated: audio.lufsIntegrated ?? null,
     noiseFloorDbfs: null,
   }
 }
@@ -1727,22 +1733,26 @@ export async function measureAfter(ctx) {
       noiseFloorDbfs,
     }
   } else {
-    // Non-ACX profiles (podcast/broadcast): run full measureAudio to capture
-    // the post-limiter integrated LUFS — the primary loudness metric for these
-    // profiles. Frame re-analysis is still skipped (no compliance check needs
-    // the noise floor, and qualityAdvisory does not use frames for
-    // non-acx_audiobook presets).
-    const audio = await measureAudio(ctx.currentPath)
+    // Non-ACX profiles (podcast/broadcast): full measureAudio for the
+    // post-limiter integrated LUFS, plus lightweight noise floor so the
+    // report's after section is fully populated. Frame re-analysis is still
+    // skipped (no compliance check, and qualityAdvisory does not use frames
+    // for non-acx_audiobook presets).
+    const [audio, noiseFloorDbfs] = await Promise.all([
+      measureAudio(ctx.currentPath),
+      measureNoiseFloorOnly(ctx.currentPath),
+    ])
 
     ctx.results.metrics.rmsDbfs        = audio.rmsDbfs
     ctx.results.metrics.truePeakDbfs   = audio.truePeakDbfs
     ctx.results.metrics.lufsIntegrated = audio.lufsIntegrated
+    ctx.results.metrics.noiseFloorDbfs = noiseFloorDbfs
 
     ctx.results.afterMeasurements = {
       rmsDbfs:        audio.rmsDbfs,
       truePeakDbfs:   audio.truePeakDbfs,
       lufsIntegrated: audio.lufsIntegrated,
-      noiseFloorDbfs: null,
+      noiseFloorDbfs,
     }
   }
 }
