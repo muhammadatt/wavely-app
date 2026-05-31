@@ -239,8 +239,8 @@ export async function analyzeFramesRaw(ctx) {
   ctx.results.beforeMeasurements.noiseFloorDbfs = originalNoiseFloor
 }
 
-// ── Stage: Click remover (Pre-HPF) ────────────────────────────────────────────
-// Runs after frame analysis (Pre-4) and before Stage 1 (HPF). Detects and
+// ── Stage: Click remover  ────────────────────────────────────────────
+// Detects and
 // repairs transient clicks and mouth sounds using Hampel filter on the HPF
 // residual + Burg AR interpolation. Parameters are per-preset: threshold_sigma
 // controls detection aggressiveness (lower = more clicks caught), max_click_ms
@@ -409,6 +409,17 @@ export async function humDetect(ctx) {
 }
 
 // ── Stage: High-pass filter ───────────────────────────────────────────────────
+// The 4th-order Butterworth + optional 60 Hz notch is an IIR filter; its
+// transient response can overshoot when the input contains strong sub-80 Hz
+// energy (rumble, HVAC, DC offset, low plosives). On files arriving near full
+// scale — whether from peakNormalize or as-uploaded — the overshoot can push
+// the post-HPF peak above 0 dBFS and clip on integer encode downstream. After
+// applying the filter we read back the peak from the post-HPF level
+// measurement (which already runs for logging) and clamp back to the
+// working-level ceiling if it exceeded it. The clamp only fires on the subset
+// of files that would otherwise clip; most files pass through unchanged.
+
+const HPF_PEAK_CEILING_DBFS = -1.0
 
 export async function hpf(ctx) {
   // If humDetect already applied a 60 Hz spectral notch (Q=30, −18 dB), skip
@@ -419,7 +430,25 @@ export async function hpf(ctx) {
   await applyHighPass(ctx.currentPath, hpfPath, { notch60Hz })
   ctx.currentPath       = hpfPath
   ctx.results.notch60Hz = notch60Hz
-  await logLevel(ctx, 'after HPF', ctx.currentPath, { notch60Hz })
+  const postPeakDbfs = await logLevel(ctx, 'after HPF', ctx.currentPath, { notch60Hz })
+
+  if (postPeakDbfs != null && postPeakDbfs > HPF_PEAK_CEILING_DBFS) {
+    const gainDb      = HPF_PEAK_CEILING_DBFS - postPeakDbfs
+    const clampedPath = ctx.tmp('.wav')
+    await applyLinearGain(ctx.currentPath, clampedPath, gainDb)
+    ctx.currentPath      = clampedPath
+    ctx.results.hpfClamp = {
+      applied:      true,
+      postPeakDbfs: round2(postPeakDbfs),
+      gainDb:       round2(gainDb),
+    }
+    ctx.log(`[hpf-clamp] post-HPF peak ${postPeakDbfs.toFixed(2)} dBFS → ${HPF_PEAK_CEILING_DBFS.toFixed(1)} dBFS (${gainDb.toFixed(2)} dB)`)
+  } else {
+    ctx.results.hpfClamp = {
+      applied:      false,
+      postPeakDbfs: postPeakDbfs != null ? round2(postPeakDbfs) : null,
+    }
+  }
 }
 
 // ── Stage: Spectral Subtraction Pre-Pass ─────────────────────────────────────
@@ -1983,17 +2012,40 @@ function detect60HzHum(rawNoiseFloor) {
   return rawNoiseFloor > -55
 }
 
+// astats is used in preference to volumedetect because volumedetect only
+// accepts AV_SAMPLE_FMT_S16 input — FFmpeg auto-inserts a float→int16
+// converter that clips samples with |x| > 1.0 to int16 full-scale, so the
+// reported max_volume saturates at 0 dBFS regardless of how far the actual
+// float peak exceeded that. astats supports float and double natively and
+// reports the true sample peak, including values above 0 dBFS, which the
+// hpf clamp needs to compute the correct attenuation.
+//
+// astats is invoked without measure_perchannel / measure_overall options
+// because those were added in FFmpeg 4.2 (Aug 2019) and the bundled
+// @ffmpeg-installer build (Dec 2018) rejects them at filter-init time. The
+// default astats output emits both a per-channel section and an "Overall"
+// section; we parse the Overall section, which contains the global peak
+// (max across channels) and the energy-summed RMS — identical to the
+// per-channel values for mono input, the correct file-level summary for
+// stereo.
 async function logLevel(ctx, label, filePath, extras = {}) {
   try {
     const { stderr } = await runFfmpeg([
-      '-i', filePath, '-af', 'volumedetect', '-f', 'null', '-',
+      '-i', filePath,
+      '-af', 'astats',
+      '-f', 'null', '-',
     ])
-    const peak   = stderr.match(/max_volume:\s*([-\d.inf]+)\s*dB/)?.[1]  ?? '?'
-    const mean   = stderr.match(/mean_volume:\s*([-\d.inf]+)\s*dB/)?.[1] ?? '?'
-    const extStr = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join('  ')
-    ctx.log(`[level] ${label}: peak=${peak}dBFS  mean=${mean}dBFS${extStr ? '  ' + extStr : ''}`)
+    const overallIdx = stderr.lastIndexOf('Overall')
+    const scope      = overallIdx >= 0 ? stderr.slice(overallIdx) : stderr
+    const peakStr    = scope.match(/Peak level dB:\s*([-\d.inf]+)/)?.[1] ?? '?'
+    const rmsStr     = scope.match(/RMS level dB:\s*([-\d.inf]+)/)?.[1]  ?? '?'
+    const extStr     = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join('  ')
+    ctx.log(`[level] ${label}: peak=${peakStr}dBFS  rms=${rmsStr}dBFS${extStr ? '  ' + extStr : ''}`)
+    const peakNum = parseFloat(peakStr)
+    return Number.isFinite(peakNum) ? peakNum : null
   } catch (e) {
     ctx.log(`[level] ${label}: measurement failed — ${e.message}`)
+    return null
   }
 }
 

@@ -173,13 +173,13 @@ export const PRESETS = {
       "peakNormalize",
       "analyzeFramesRaw",
       "humDetect",
+      "hpf",
       {
-        // hpf + dual-pass noiseReduce run per silence-aligned chunk and are
-        // stitched back together with an equal-power crossfade at each seam.
-        // Short files (or files with no qualifying silence) fall through to a
-        // single-chunk plan inside the runner — no behaviour change there.
+        // Dual-pass noiseReduce runs per silence-aligned chunk and is stitched
+        // back together with an equal-power crossfade at each seam. Short files
+        // (or files with no qualifying silence) fall through to a single-chunk
+        // plan inside the runner — no behaviour change there.
         chunked: [
-          "hpf",
           { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
           { noiseReduce: { model: "rnnoise" } }, //"df3", "rnnoise", "dtln"
         ],
@@ -289,6 +289,7 @@ export const PRESETS = {
           },
         },
       },
+      /*
       {
         chunked: [
           // vocalSaturation is stateless multiband — chunk-safe with the
@@ -316,6 +317,23 @@ export const PRESETS = {
           { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
         ],
       },
+      */
+
+          {
+            vocalSaturation: {
+              drive: 2,
+              wetDry: 1,
+              bias: 0.5,
+              lowCrossover: 80,
+              midCrossover: 8000,
+              softness: 0.85,
+              lowDriveMult: 2.5,
+              midDriveMult: 0.1,
+              highDriveMult: 0.1,
+            },
+          },
+          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
+
       {
         airBoost: {
           gainDb: 6,
