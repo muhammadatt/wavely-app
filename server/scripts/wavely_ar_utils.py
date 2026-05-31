@@ -67,12 +67,17 @@ def ar_forward_predict(context, ar_coeffs, n_samples, max_val=None):
               measurement.
     """
     order = len(ar_coeffs)
-    buf = list(context[-order:])
-    out = np.zeros(n_samples, dtype=np.float64)
+    coeffs_rev = ar_coeffs[::-1].copy()
+    buf = np.empty(order + n_samples, dtype=np.float64)
+    buf[:order] = context[-order:]
+    out = np.empty(n_samples, dtype=np.float64)
     for i in range(n_samples):
-        pred = -np.dot(ar_coeffs, buf[-order:][::-1])
+        pred = -np.dot(coeffs_rev, buf[i : i + order])
         if max_val is not None:
-            pred = np.clip(pred, -max_val, max_val)
+            if pred > max_val:
+                pred = max_val
+            elif pred < -max_val:
+                pred = -max_val
+        buf[i + order] = pred
         out[i] = pred
-        buf.append(pred)
     return out
