@@ -1678,11 +1678,12 @@ export async function truePeakLimit(ctx) {
 //   - Other presets: measureNoiseFloorOnly (lightweight — no frame array)
 //   - Integrated LUFS: skipped (not in the ACX 6-point check)
 //
-// Non-ACX output profiles:
-//   - RMS only (measureRmsDbfs) — for normalization_gain_db in the report
-//   - True peak, integrated LUFS, noise floor, frame analysis: all skipped
-//     (ACX certification does not run; qualityAdvisory does not use frames
-//     for non-acx_audiobook presets)
+// Non-ACX output profiles (podcast/broadcast):
+//   - Full measureAudio (RMS + true peak + integrated LUFS) — LUFS is the
+//     primary loudness metric for these profiles and must reflect the actual
+//     post-limiter level, not a pre-limiter estimate
+//   - Noise floor + frame analysis: skipped (no compliance check, and
+//     qualityAdvisory does not use frames for non-acx_audiobook presets)
 
 export async function measureAfter(ctx) {
   const isAcx          = ctx.outputProfileId === 'acx'
@@ -1726,18 +1727,21 @@ export async function measureAfter(ctx) {
       noiseFloorDbfs,
     }
   } else {
-    // Non-ACX profiles: ACX certification does not run. Only rmsDbfs is needed
-    // for normalization_gain_db in the report. Skip libebur128 (true peak +
-    // integrated LUFS) and frame re-analysis entirely.
-    const rmsDbfs = await measureRmsDbfs(ctx.currentPath)
+    // Non-ACX profiles (podcast/broadcast): run full measureAudio to capture
+    // the post-limiter integrated LUFS — the primary loudness metric for these
+    // profiles. Frame re-analysis is still skipped (no compliance check needs
+    // the noise floor, and qualityAdvisory does not use frames for
+    // non-acx_audiobook presets).
+    const audio = await measureAudio(ctx.currentPath)
 
-    ctx.results.metrics.rmsDbfs        = rmsDbfs
-    ctx.results.metrics.lufsIntegrated = null
+    ctx.results.metrics.rmsDbfs        = audio.rmsDbfs
+    ctx.results.metrics.truePeakDbfs   = audio.truePeakDbfs
+    ctx.results.metrics.lufsIntegrated = audio.lufsIntegrated
 
     ctx.results.afterMeasurements = {
-      rmsDbfs,
-      truePeakDbfs:   null,
-      lufsIntegrated: null,
+      rmsDbfs:        audio.rmsDbfs,
+      truePeakDbfs:   audio.truePeakDbfs,
+      lufsIntegrated: audio.lufsIntegrated,
       noiseFloorDbfs: null,
     }
   }
