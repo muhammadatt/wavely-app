@@ -326,13 +326,11 @@ export const PRESETS = {
       {
         chunked: [
           // vocalSaturation is stateless multiband — chunk-safe with the
-          // standard 100 ms overlap. Solo entry in this block because the
-          // adjacent airBoost stage isn't analyze/apply split yet, so the
-          // contiguous chunkable region is one stage wide.
+          // standard 100 ms overlap.
           {
             vocalSaturation: {
               drive: 2,
-              wetDry: 1,
+              wetDry: 0.80,
               bias: 0.5,
               lowCrossover: 80,
               midCrossover: 8000,
@@ -347,7 +345,7 @@ export const PRESETS = {
           // of context, well inside the chunk overlap. Per-chunk click counts
           // sum cleanly in mergeChunkResults so the report still shows the
           // file-level totals.
-          { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } },
+          /* { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } }, */
 
           {
             airBoost: {
@@ -361,6 +359,28 @@ export const PRESETS = {
               // Predictive pre-attenuation
               precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
             },
+          },
+
+          // resonanceSuppressor IIR attack=15ms / release=80ms — well inside
+          // the 100 ms chunk overlap, so any envelope warm-up at a seam is
+          // hidden by the equal-power crossfade. Reordered to before
+          // referenceEQ so it sits inside this chunked block; referenceEQ
+          // stays whole-file because its measured spectrum is taken against
+          // a file-level reference curve.
+          {
+            resonanceSuppressor: [
+              {
+                depth: 0.67,
+                sharpness: 0.8,
+                selectivity: 8,
+                attack_ms: 15.0,
+                release_ms: 80.0,
+                max_reduction_db: 36.0,
+                freq_floor_hz: 40.0,
+                freq_ceil_hz: 20000.0,
+                mode: "soft",
+              },
+            ],
           },
         ],
       },
@@ -383,43 +403,6 @@ export const PRESETS = {
       */
 
       "referenceEQ",
-      {
-        resonanceSuppressor: [
-          {
-            depth: 0.67,
-            sharpness: 0.8,
-            selectivity: 8,
-            attack_ms: 15.0,
-            release_ms: 80.0,
-            max_reduction_db: 36.0,
-            freq_floor_hz: 40.0,
-            freq_ceil_hz: 20000.0,
-            mode: "soft",
-          },
-          /*
-          {
-            sibilant_only: true,
-            preserve_harmonics: false,
-            depth: 0.67,
-            sharpness: 0.4,
-            selectivity: 1,
-            attack_ms: 5.0,
-            release_ms: 10.0,
-            max_reduction_db: 25.0,
-            freq_floor_hz: 3000.0,
-            freq_ceil_hz: 10000.0,
-            mode: "soft",
-            lifter_cutoff_bins: 3,
-            band_summary_max_cluster_bins: 186,
-            sibilanceDetection: {
-              p95_trigger_db: 9.0,
-              min_flatness: 0.2,
-              broadband_trigger_db: 13.0,
-            },
-          },
-          */
-        ],
-      },
 
       {
         roomPresence: {

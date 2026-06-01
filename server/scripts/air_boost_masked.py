@@ -208,17 +208,22 @@ def main(argv=None):
 
     wavfile.write(args.output, sr_o, output)
 
-    # Sibilance percentage is reported against the whole-file event count so
-    # per-chunk runs surface the same coverage figure the upstream detector
-    # reports, not the in-chunk subset that survived the offset filter.
-    sib_pct = 100.0 * len(raw_sibilant_frame_indices) * HOP_LENGTH / n_samples
+    # Sibilance count / percentage are reported per-call: numerator and
+    # denominator are both scoped to the audio actually processed by this
+    # invocation. In sequential mode frame_offset is 0 and every index falls
+    # in range, so sib_in_range == len(raw_sibilant_frame_indices) and the
+    # figure equals the file-wide coverage. In chunked mode only the indices
+    # landing inside this chunk count, and the denominator is the chunk's
+    # own frame total — both bounded together, ratio ∈ [0, 100%].
+    sib_in_range = sum(1 for i in sibilant_frame_indices if 0 <= i < n_frames_est)
+    sib_pct      = 100.0 * sib_in_range / n_frames_est if n_frames_est > 0 else 0.0
     logger.info(
         f"AirBoostMask: done | sibilant≈{sib_pct:.1f}% | "
         f"envelope min={envelope.min():.3f}"
     )
 
     return {
-        'sibilant_frames': len(raw_sibilant_frame_indices),
+        'sibilant_frames': sib_in_range,
         'sibilant_pct': sib_pct,
         'envelope_min': float(envelope.min()),
         'applied': True,
