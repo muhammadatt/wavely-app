@@ -37,6 +37,7 @@ import { extractAudioRange }                  from '../lib/ffmpeg.js'
 import { remeasureFrames }                    from './frameAnalysis.js'
 import { withThreadLimit }                    from './threadingContext.js'
 import { getChunkedThreadLimit }              from './pythonWorker.js'
+import { CHUNK_MERGERS, round2 }              from './chunkMergers.js'
 
 const OVERLAP_MS = 100
 
@@ -491,77 +492,24 @@ async function stitchChunks(chunks, totalSamples, sampleRate, overlapSamples, ou
  *
  * Each inner stage's writes go to its sub-ctx.results, not the parent —
  * sub-ctx is constructed with a fresh results object aliasing the parent's
- * pre-block snapshot. This function copies relevant keys back. Whole-file
- * metric scalars (noiseFloorDbfs, voicedRmsDbfs, …) are NOT handled here;
- * refreshPostBlockMetrics measures the stitched output instead, which is
- * exact rather than an average across chunks.
+ * pre-block snapshot. This function gathers per-chunk values for each key
+ * registered in CHUNK_MERGERS and delegates the actual merge strategy
+ * (first-wins, sum, average, etc.) to the merger.
  *
- * Keys merged here:
- *   - `notch60Hz` (hpf): boolean, identical across chunks because every
- *     sub-ctx reads the same pre-block ctx.results.metrics.noiseFloorDbfs.
- *     Taken from chunk 0.
- *   - `vocalSaturation` (vocalSaturation): config snapshot, identical
- *     across chunks. Taken from chunk 0.
- *   - `clickRemover` (clickRemove): cumulative counts — clicks_detected,
- *     clicks_repaired, clicks_skipped, total_clicks_repaired — SUMMED
- *     across chunks. Structural fields (applied, parameters) from chunk 0.
- *     The per-channel `channels` array is taken from chunk 0 as a
- *     representative sample; per-channel summing would require knowing the
- *     channel layout, and the top-level summed counts already give the
- *     file-level totals.
- *   - `noiseReduction` (noiseReduce): structural fields (model, applied,
- *     reason) from chunk 0; numeric scalars (makeupGainDb, pre/post noise
- *     floor) averaged across chunks for a representative file-level figure.
- *     post_noise_floor_dbfs is overwritten by refreshPostBlockMetrics later
- *     so it matches the metrics block.
+ * To make a new stage chunk-safe, add an entry to CHUNK_MERGERS keyed by
+ * the ctx.results key the stage writes — no changes needed here.
  *
- * Future inner stages that write their own keys can extend this switch.
+ * Whole-file metric scalars (noiseFloorDbfs, voicedRmsDbfs, …) are NOT
+ * handled here; refreshPostBlockMetrics measures the stitched output
+ * instead, which is exact rather than an average across chunks.
  */
 function mergeChunkResults(ctx, processedChunks) {
-  const first = processedChunks[0].results
-  if (!first) return
+  if (!processedChunks.length) return
 
-  if (typeof first.notch60Hz === 'boolean') {
-    ctx.results.notch60Hz = first.notch60Hz
+  for (const [key, merger] of Object.entries(CHUNK_MERGERS)) {
+    const chunkValues = processedChunks.map(c => c.results?.[key])
+    if (!chunkValues.some(v => v !== undefined)) continue
+    const merged = merger(chunkValues)
+    if (merged !== undefined) ctx.results[key] = merged
   }
-
-  if (first.vocalSaturation) {
-    ctx.results.vocalSaturation = { ...first.vocalSaturation }
-  }
-
-  if (first.clickRemover) {
-    const merged = { ...first.clickRemover }
-    const summedKeys = ['clicks_detected', 'clicks_repaired', 'clicks_skipped', 'total_clicks_repaired']
-    for (const key of summedKeys) {
-      let sum = 0
-      let count = 0
-      for (const c of processedChunks) {
-        const v = c.results.clickRemover?.[key]
-        if (typeof v === 'number' && isFinite(v)) {
-          sum += v
-          count++
-        }
-      }
-      if (count > 0) merged[key] = sum
-    }
-    ctx.results.clickRemover = merged
-  }
-
-  if (first.noiseReduction) {
-    const merged = { ...first.noiseReduction }
-    const averagedKeys = ['makeupGainDb', 'post_noise_floor_dbfs', 'pre_noise_floor_dbfs']
-    for (const key of averagedKeys) {
-      const values = processedChunks
-        .map(c => c.results.noiseReduction?.[key])
-        .filter(v => typeof v === 'number' && isFinite(v))
-      if (values.length) {
-        merged[key] = round2(values.reduce((a, b) => a + b, 0) / values.length)
-      }
-    }
-    ctx.results.noiseReduction = merged
-  }
-}
-
-function round2(n) {
-  return Math.round(n * 100) / 100
 }
