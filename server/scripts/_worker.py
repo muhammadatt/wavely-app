@@ -36,9 +36,22 @@ the worker's "log channel" and the JS side streams it to the server log.
 import importlib
 import io
 import json
+import logging
 import os
 import sys
 import traceback
+
+
+# Route Python logging at INFO to stderr so dispatched scripts' logger.info()
+# calls reach the JS-side log stream. Without this the root logger keeps its
+# default WARNING level and every logger.info() emitted by a script run via
+# this worker is silently dropped -- whereas the same script invoked through
+# the legacy spawn path sees its CLI shim's `logging.basicConfig(level=INFO)`
+# under `if __name__ == "__main__"` and logs normally. Configuring once here
+# matches that behaviour for the worker path. Stderr is reserved as the
+# worker's log channel (stdout is the JSON protocol); pythonWorker.js prefixes
+# stderr lines with `[python]` before forwarding them to the server log.
+logging.basicConfig(level=logging.INFO, stream=sys.stderr, format='%(message)s')
 
 
 _LOADED_MODULES = {}

@@ -214,7 +214,10 @@ export const PRESETS = {
       },
 
       {
-        clipGainDeEsser: {
+        // Split analyze/apply form. Config lives on the analyze entry — only
+        // analyze reads the preset; apply consumes the events.json + config
+        // snapshot that analyze stashed on ctx.globalParams.clipGainDeEsser.
+        clipGainDeEsserAnalyze: {
           enabled: true,
           stridentCeilingDb: 6.0,
           nonStridentCeilingDb: -4.0,
@@ -230,6 +233,7 @@ export const PRESETS = {
           },
         },
       },
+      "clipGainDeEsserApply",
       {
         autoLeveler: {
           total_max_up_db: 10.0,

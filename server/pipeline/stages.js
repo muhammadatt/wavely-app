@@ -1152,7 +1152,14 @@ export async function deEss(ctx) {
 //   detection runs once on the whole file.
 
 export async function clipGainDeEsserAnalyze(ctx) {
-  const config = ctx.preset?.clipGainDeEsser
+  // Config may live under either key:
+  //   - `clipGainDeEsserAnalyze` when the preset uses the split analyze/apply
+  //     form (config on the analyze entry, apply as a bare string).
+  //   - `clipGainDeEsser` when the preset uses the combined stage entry, or
+  //     when invoked from the combined `clipGainDeEsser(ctx)` wrapper below.
+  // Inline-config dispatch patches ctx.preset[configKey] for the duration of
+  // the stage call, so whichever form the preset declares lands here.
+  const config = ctx.preset?.clipGainDeEsserAnalyze ?? ctx.preset?.clipGainDeEsser
   if (!config || config.enabled === false) {
     const skip = { applied: false, reason: 'preset_not_configured' }
     ctx.globalParams.clipGainDeEsser = skip
@@ -1248,16 +1255,19 @@ export async function clipGainDeEsserApply(ctx) {
     skipNoCtx:  result.skippedNoContext,
     maxRed:     result.maxReductionDb != null ? `${result.maxReductionDb}dB` : 'n/a',
   })
+
+  // Drop the analyze-stage bundle now that apply has consumed it. The frames
+  // array is the heavy field (~one entry per 25 ms frame, ~144k entries/hour);
+  // releasing it here means the split-form preset path matches the combined
+  // wrapper's lifetime guarantee without relying on the wrapper. eventsPath
+  // is already preserved on ctx.results.clipGainDeEsser for the only
+  // downstream consumer (parallelCompression's wet-branch de-esser pass).
+  ctx.globalParams.clipGainDeEsser = null
 }
 
 export async function clipGainDeEsser(ctx) {
   await clipGainDeEsserAnalyze(ctx)
   await clipGainDeEsserApply(ctx)
-  // The frames array is the heavy field here — one entry per 25 ms frame
-  // (~144k entries/hour). The eventsPath is preserved on
-  // ctx.results.clipGainDeEsser for parallelCompression's wet-branch
-  // de-esser pass; that's the only downstream consumer of de-esser state.
-  ctx.globalParams.clipGainDeEsser = null
 }
 
 // ── Stage: Auto Leveler (Stage 4b) ────────────────────────────────────────────
