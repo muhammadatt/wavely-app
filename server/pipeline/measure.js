@@ -71,13 +71,30 @@ export async function measureRmsDbfs(filePath) {
 
 /**
  * Lightweight true-peak-only measurement (libebur128).
- * Skips the FFmpeg volumedetect pass that measureAudio() runs.
+ * Skips both the FFmpeg volumedetect pass and the integrated LUFS computation.
  * Used by the truePeakLimit stage to report pre/post peak without the
- * unneeded RMS work.
+ * unneeded RMS/LUFS work.
  */
 export async function measureTruePeakDbfs(filePath) {
-  const { truePeak } = await measureLoudness(filePath)
-  return truePeak
+  return measureTruePeak(filePath)
+}
+
+/**
+ * RMS + true peak without integrated LUFS.
+ * Runs FFmpeg volumedetect and libebur128 true peak in parallel, skipping
+ * the integrated LUFS computation that measureAudio() includes.
+ * Used by measureBefore and measureAfter where LUFS is not needed for
+ * downstream processing decisions or compliance checks.
+ */
+export async function measureRmsAndPeak(filePath) {
+  const [volumeStats, truePeakDbfs] = await Promise.all([
+    measureVolume(filePath),
+    measureTruePeak(filePath),
+  ])
+  return {
+    rmsDbfs:      volumeStats.meanVolume,
+    truePeakDbfs,
+  }
 }
 
 /**
@@ -105,27 +122,36 @@ async function measureVolume(filePath) {
 }
 
 /**
+ * Read and validate WAV channels for libebur128 measurement.
+ * Shared by measureLoudness and measureTruePeak to avoid duplicating guards.
+ */
+async function readAndValidateChannels(filePath) {
+  const { channels, sampleRate } = await readWavAllChannels(filePath)
+
+  if (!channels || channels.length === 0) {
+    throw new Error('libebur128 measurement expected a WAV file with at least one audio channel, but none were found')
+  }
+  if (channels.length > 2) {
+    throw new Error(
+      `libebur128 measurement currently supports only mono or stereo WAV files (got ${channels.length} channels)`
+    )
+  }
+
+  const maxSamplesPerChannel = 2 * 60 * 60 * 44100
+  if (channels[0].length > maxSamplesPerChannel) {
+    const durationMin = Math.round(channels[0].length / sampleRate / 60)
+    throw new Error(`File too long for in-memory libebur128 measurement (${durationMin} min, max 120 min)`)
+  }
+
+  return { channels, sampleRate }
+}
+
+/**
  * Measure integrated LUFS and true peak via libebur128 (WASM binding).
  * Handles both mono and stereo files.
  */
 async function measureLoudness(filePath) {
-  const { channels, sampleRate } = await readWavAllChannels(filePath)
-
-  if (!channels || channels.length === 0) {
-    throw new Error('measureLoudness expected a WAV file with at least one audio channel, but none were found')
-  }
-  if (channels.length > 2) {
-    throw new Error(
-      `measureLoudness currently supports only mono or stereo WAV files (got ${channels.length} channels)`
-    )
-  }
-
-  // Guard against OOM for very long files (2 hours at 44.1 kHz ≈ 317M samples)
-  const maxSamplesPerChannel = 2 * 60 * 60 * 44100
-  if (channels[0].length > maxSamplesPerChannel) {
-    const durationMin = Math.round(channels[0].length / sampleRate / 60)
-    throw new Error(`File too long for in-memory LUFS measurement (${durationMin} min, max 120 min)`)
-  }
+  const { channels, sampleRate } = await readAndValidateChannels(filePath)
 
   let integratedLoudness, truePeak
 
@@ -141,6 +167,18 @@ async function measureLoudness(filePath) {
     integratedLoudness: round2(integratedLoudness),
     truePeak:           round2(truePeak),
   }
+}
+
+/**
+ * True peak only via libebur128. Skips integrated LUFS computation.
+ * Used by measureAfter and measureBefore when integrated LUFS is not needed.
+ */
+async function measureTruePeak(filePath) {
+  const { channels, sampleRate } = await readAndValidateChannels(filePath)
+  const truePeak = channels.length === 2
+    ? ebur128_true_peak_stereo(sampleRate, channels[0], channels[1])
+    : ebur128_true_peak_mono(sampleRate, channels[0])
+  return round2(truePeak)
 }
 
 /**
