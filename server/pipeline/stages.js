@@ -1152,7 +1152,14 @@ export async function deEss(ctx) {
 //   detection runs once on the whole file.
 
 export async function clipGainDeEsserAnalyze(ctx) {
-  const config = ctx.preset?.clipGainDeEsser
+  // Config may live under either key:
+  //   - `clipGainDeEsserAnalyze` when the preset uses the split analyze/apply
+  //     form (config on the analyze entry, apply as a bare string).
+  //   - `clipGainDeEsser` when the preset uses the combined stage entry, or
+  //     when invoked from the combined `clipGainDeEsser(ctx)` wrapper below.
+  // Inline-config dispatch patches ctx.preset[configKey] for the duration of
+  // the stage call, so whichever form the preset declares lands here.
+  const config = ctx.preset?.clipGainDeEsserAnalyze ?? ctx.preset?.clipGainDeEsser
   if (!config || config.enabled === false) {
     const skip = { applied: false, reason: 'preset_not_configured' }
     ctx.globalParams.clipGainDeEsser = skip

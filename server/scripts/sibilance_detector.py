@@ -1228,7 +1228,12 @@ def analyze_sibilance_events(
         f"/{n_frames}"
     )
 
-    window           = get_window("hann", n_fft, fftbins=True)
+    # Hann window cast to float32 up front. The audio buffer is float32 (the
+    # pipeline's canonical internal format) and keeping the window dtype the
+    # same lets the batched rfft below run on a single contiguous float32
+    # buffer with complex64 output, halving FFT memory and dispatch cost
+    # versus the implicit float64 promotion the un-cast Hann would trigger.
+    window           = get_window("hann", n_fft, fftbins=True).astype(np.float32)
     sibilant_indices = []
     f0_per_frame     = []
     per_frame_diag   = {}
@@ -1253,42 +1258,100 @@ def analyze_sibilance_events(
     lookahead_frames = 5
     silence_run      = silence_reset_frames
 
-    for i in range(n_frames):
-        start     = i * hop_length
-        end       = start + n_fft
-        frame_raw = audio_padded[start:end]
-        magnitude = np.abs(np.fft.rfft(frame_raw * window))
-        is_voiced = (voiced_frame_indices is None) or (i in voiced_frame_indices)
-
-        f0_for_frame = None
-        if i < len(contour_per_frame):
-            f0_for_frame = contour_per_frame[i]
-
-        if is_voiced and silence_run >= silence_reset_frames:
-            seed_f0 = _lookahead_f0_median(
-                contour_per_frame, voiced_frame_indices,
-                i, lookahead_frames,
+    # Per-frame voicing mask as a numpy bool array for O(1) batched lookup
+    # in the FFT loop below. voiced_frame_indices stays as a set/None so the
+    # downstream helpers that consume it (_lookahead_f0_median,
+    # _expand_event_boundaries) keep their existing contract.
+    if voiced_frame_indices is None:
+        voiced_arr = np.ones(n_frames, dtype=bool)
+    else:
+        voiced_arr = np.zeros(n_frames, dtype=bool)
+        if voiced_frame_indices:
+            idx_arr = np.fromiter(
+                voiced_frame_indices, dtype=np.int64, count=len(voiced_frame_indices)
             )
-            detector.mark_passage_onset(seed_f0)
+            voiced_arr[idx_arr] = True
 
-        if is_voiced:
-            silence_run = 0
+    # Batched STFT. The per-frame `np.fft.rfft(frame * window)` previously ran
+    # one FFT per iteration -- ~65k Python-level dispatch / planning round-
+    # trips for a 12-min file at 44.1 kHz / hop=512. Materialising voiced rows
+    # in bounded batches and calling rfft once per batch amortises that cost;
+    # the state-machine loop below then reads precomputed magnitudes by frame
+    # index. Magnitudes are computed for voiced rows only because
+    # `detector.process_frame` only consults `magnitude` when is_voiced -- see
+    # SibilanceDetector.process_frame above. The same `sliding_window_view +
+    # batched rfft` pattern is used by estimate_f0_contour.py; batch size is
+    # picked to match.
+    #
+    # Peak memory per batch (float32 path):
+    #   BATCH_SIZE * (n_fft * 4 + (n_fft//2 + 1) * 4) bytes
+    #   8192 * (2048*4 + 1025*4) ~= 100 MB during the rfft, ~33 MB for the
+    # magnitudes alone. Safely within the worker's budget.
+    windows_view = np.lib.stride_tricks.sliding_window_view(audio_padded, n_fft)[::hop_length]
+    BATCH_SIZE   = 8192
+
+    for batch_start in range(0, n_frames, BATCH_SIZE):
+        batch_end       = min(batch_start + BATCH_SIZE, n_frames)
+        batch_len       = batch_end - batch_start
+        batch_voiced_lo = np.flatnonzero(voiced_arr[batch_start:batch_end])
+
+        if batch_voiced_lo.size > 0:
+            # Fancy-indexing the strided view returns a fresh contiguous
+            # buffer. astype with copy=True guarantees a writable float32
+            # array regardless of the source dtype so the in-place *= and
+            # the rfft kernel can operate without further copies.
+            voiced_rows = (
+                windows_view[batch_start + batch_voiced_lo].astype(np.float32, copy=True)
+            )
+            voiced_rows *= window
+            batch_mags = np.abs(np.fft.rfft(voiced_rows, axis=1))
         else:
-            silence_run += 1
+            batch_mags = None
 
-        fired = detector.process_frame(magnitude, is_voiced, f0_for_frame)
-        # Capture diag for EVERY voiced frame, not just sibilant ones, so
-        # build_events_map() can emit boundary diagnostics for the N frames
-        # immediately before/after each detected event. Memory is bounded
-        # (~10 floats per frame * n_frames). Non-voiced frames are skipped --
-        # they cannot contribute to event boundaries.
-        if is_voiced and detector.last_diag is not None:
-            all_frame_diag[i] = detector.last_diag
-        if fired:
-            sibilant_indices.append(i)
-            if detector.last_diag is not None:
-                per_frame_diag[i] = detector.last_diag
-        f0_per_frame.append(detector.f0)
+        # Dense position map: pos_in_batch[local_i] = row index in batch_mags
+        # for voiced frames, -1 for non-voiced. A numpy lookup keeps the
+        # inner-loop magnitude access O(1) without a Python dict.
+        pos_in_batch                  = np.full(batch_len, -1, dtype=np.int64)
+        pos_in_batch[batch_voiced_lo] = np.arange(batch_voiced_lo.size)
+
+        for local_i in range(batch_len):
+            i         = batch_start + local_i
+            is_voiced = bool(voiced_arr[i])
+
+            f0_for_frame = None
+            if i < len(contour_per_frame):
+                f0_for_frame = contour_per_frame[i]
+
+            if is_voiced and silence_run >= silence_reset_frames:
+                seed_f0 = _lookahead_f0_median(
+                    contour_per_frame, voiced_frame_indices,
+                    i, lookahead_frames,
+                )
+                detector.mark_passage_onset(seed_f0)
+
+            if is_voiced:
+                silence_run = 0
+                magnitude   = batch_mags[pos_in_batch[local_i]]
+            else:
+                silence_run += 1
+                # detector.process_frame ignores magnitude when is_voiced is
+                # False (see SibilanceDetector.process_frame), so None is the
+                # canonical "unused" sentinel here.
+                magnitude   = None
+
+            fired = detector.process_frame(magnitude, is_voiced, f0_for_frame)
+            # Capture diag for EVERY voiced frame, not just sibilant ones, so
+            # build_events_map() can emit boundary diagnostics for the N frames
+            # immediately before/after each detected event. Memory is bounded
+            # (~10 floats per frame * n_frames). Non-voiced frames are skipped --
+            # they cannot contribute to event boundaries.
+            if is_voiced and detector.last_diag is not None:
+                all_frame_diag[i] = detector.last_diag
+            if fired:
+                sibilant_indices.append(i)
+                if detector.last_diag is not None:
+                    per_frame_diag[i] = detector.last_diag
+            f0_per_frame.append(detector.f0)
 
     rolling   = detector.f0_rolling
     f0_median = float(np.median(rolling)) if len(rolling) > 0 else detector.f0

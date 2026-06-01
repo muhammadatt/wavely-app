@@ -207,7 +207,9 @@ export async function applyParallelCompression(
         numSamples,
         sampleRate,
         wetDesserResult?.treatedEvents ?? [],
-        wetBranchDeEsserCtx.config.fades ?? preset?.clipGainDeEsser?.fades,
+        wetBranchDeEsserCtx.config.fades
+          ?? preset?.clipGainDeEsserAnalyze?.fades
+          ?? preset?.clipGainDeEsser?.fades,
       )
     } finally {
       await rm(wetTempPath, { force: true }).catch(() => {})
