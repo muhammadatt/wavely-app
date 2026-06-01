@@ -357,7 +357,10 @@ def main(argv=None):
                 sp_arr  = np.concatenate([sp_arr,  np.empty(8, dtype=np.float32)])
             out_buf[write_offset:write_offset + n] = f
             write_offset += n
-            sp_arr[frame_count] = speech_prob
+            # pyrnnoise yields speech_prob as a length-1 ndarray (one entry
+            # per channel; we run mono). Use .item() to extract a Python
+            # float without tripping NumPy 1.25+ scalar-conversion deprecation.
+            sp_arr[frame_count] = speech_prob.item() if hasattr(speech_prob, 'item') else speech_prob
             frame_count += 1
         speech_probs = sp_arr[:frame_count]
 
