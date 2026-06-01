@@ -86,14 +86,19 @@ const DEFAULT_MIN_SILENCE_MS          = 500   // minimum silence to split at
  *
  * Algorithm:
  *   1. Identify silence regions ≥ minSilenceMs from the VAD frame array.
- *   2. Compute the ideal chunk count from totalSamples / targetDuration.
- *   3. Greedily place N-1 split points at silence midpoints whose distance
- *      from the next ideal boundary is minimal, subject to min/max chunk
- *      duration constraints.
- *   4. If no qualifying silence falls in the [min, max] window for the
- *      next boundary, give up on that split — the resulting chunk may be
- *      longer than target but never exceeds maxChunkDurationS in the next
- *      round, since search restarts from the previous boundary.
+ *   2. Greedily place split points at silence midpoints whose distance from
+ *      `cursor + targetDuration` is minimal, subject to min/max chunk
+ *      duration constraints. Keep emitting splits while the remaining file
+ *      is large enough to form another chunk near the target size — i.e.
+ *      while `remaining > target + min`. Without this, a `max` materially
+ *      larger than `target` lets the trailing chunk balloon to max even
+ *      when more silences are available to split on.
+ *   3. The search window upper bound is capped at `totalSamples - min` so
+ *      a split never leaves a trailing chunk below the minimum.
+ *   4. If no qualifying silence falls in the search window: accept the
+ *      splits emitted so far when the trailing chunk still satisfies max,
+ *      otherwise bail to a single-chunk plan (the only way to honor the
+ *      max-duration guarantee).
  *
  * Returns a single-chunk plan when the file is shorter than 2× the minimum,
  * or when no silence region qualifies anywhere — never produces an
@@ -147,18 +152,29 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
 
   // Greedy split placement. Search is anchored to the cursor (= last emitted
   // split, or 0 initially), and only advances when a split is actually placed.
-  // If no qualifying silence is found in [cursor + min, cursor + max] for the
-  // next chunk, we bail to a single-chunk plan rather than skipping forward —
-  // advancing without emitting a split previously broke the max-duration
-  // guarantee for the final chunk in speech-dense regions.
+  //
+  // Loop predicate: keep emitting splits while the remaining file is larger
+  // than `target + min` — i.e. while there's room for another chunk near
+  // target size with a trailing chunk above min. Stopping at `remaining ≤
+  // max` (the previous behavior) left the trailing chunk free to balloon
+  // up to max, producing badly unbalanced plans whenever max ≫ target.
+  //
+  // Search window upper bound is also capped at `totalSamples - min` so a
+  // split never strands a trailing chunk below the minimum.
+  //
+  // If no qualifying silence is found in the window: stop early and keep
+  // the splits emitted so far when the trailing chunk still satisfies max,
+  // otherwise bail to a single-chunk plan (continuing without emitting a
+  // split would leave the trailing chunk anchored to the previous split
+  // and potentially violate maxChunkDurationS).
   const splits  = []
   let cursor    = 0
   let regionIdx = 0
   let bailReason = null
-  while (cursor + maxChunkSamples < totalSamples) {
+  while (totalSamples - cursor > targetSamples + minChunkSamples) {
     const idealNext = cursor + targetSamples
     const windowLo  = cursor + minChunkSamples
-    const windowHi  = cursor + maxChunkSamples
+    const windowHi  = Math.min(cursor + maxChunkSamples, totalSamples - minChunkSamples)
 
     // Advance regionIdx past any silence regions before the window
     while (regionIdx < silenceRegions.length
@@ -180,10 +196,13 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
     }
 
     if (bestIdx < 0) {
-      // No silence in [cursor + min, cursor + max] for the next split.
-      // Bail to a single-chunk plan: continuing without emitting a split
-      // would leave the trailing chunk anchored to the previous split and
-      // potentially span the rest of the file, violating maxChunkDurationS.
+      // No silence in the search window. If the trailing chunk we'd produce
+      // by stopping here still satisfies maxChunkDurationS, accept the
+      // splits already placed. Otherwise bail to a single-chunk plan.
+      if (totalSamples - cursor <= maxChunkSamples) {
+        bailReason = 'no_silence_in_split_window_stop_early'
+        break
+      }
       bailReason = 'no_silence_in_split_window'
       splits.length = 0
       break
