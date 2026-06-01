@@ -79,6 +79,78 @@ export const CHUNK_MERGERS = {
     }
     return merged
   },
+
+  /**
+   * airBoost — structural fields (requested_gain_db, bands, sibilantMask
+   * config) from the first defined chunk value. The ACX compliance loop
+   * runs per chunk against each chunk's local noise floor, so applied_gain_db
+   * may differ across chunks; report the minimum (most conservative) so the
+   * compliance summary doesn't overstate the boost actually applied at any
+   * seam. gain_db_reduced_by_precut takes the max — worst-case precut
+   * reduction across chunks.
+   */
+  airBoost(chunkValues) {
+    const first = chunkValues.find(v => v != null)
+    if (!first) return undefined
+    const merged = { ...first }
+
+    const appliedGains = chunkValues
+      .filter(v => v?.applied && typeof v.applied_gain_db === 'number')
+      .map(v => v.applied_gain_db)
+    if (appliedGains.length) {
+      merged.applied_gain_db = round2(Math.min(...appliedGains))
+    }
+
+    const precutReductions = chunkValues
+      .map(v => v?.gain_db_reduced_by_precut)
+      .filter(v => typeof v === 'number')
+    if (precutReductions.length) {
+      merged.gain_db_reduced_by_precut = round2(Math.max(...precutReductions))
+    }
+
+    return merged
+  },
+
+  /**
+   * resonanceSuppressor — structural fields (lifter_cutoff, band_summary,
+   * passes) from the first defined chunk value. Per-chunk band_summary entries
+   * are not stitched into a file-level list: bands are detected against each
+   * chunk's own spectrum so identical resonances in different chunks would
+   * appear as separate entries with slightly different centres; the first
+   * chunk's summary is a representative sample, matching the policy used for
+   * clickRemover's per-channel layout. Telemetry is aggregated:
+   *   max_reduction_db   — max across chunks (worst-case peak)
+   *   mean_reduction_db  — mean of per-chunk means (approx file-level mean)
+   *   spike_frames       — sum across chunks (frame counts are additive)
+   *   artifact_risk      — OR across chunks
+   *   sibilant_frames_received — sum across chunks
+   *   applied            — OR across chunks (file applied iff any chunk did)
+   */
+  resonanceSuppressor(chunkValues) {
+    const first = chunkValues.find(v => v != null)
+    if (!first) return undefined
+    const merged = { ...first }
+
+    merged.applied = chunkValues.some(v => v?.applied === true)
+
+    const maxReds = chunkValues
+      .map(v => v?.max_reduction_db)
+      .filter(v => typeof v === 'number' && isFinite(v))
+    if (maxReds.length) merged.max_reduction_db = round2(Math.max(...maxReds))
+
+    const meanRed = meanDefined(chunkValues.map(v => v?.mean_reduction_db))
+    if (meanRed != null) merged.mean_reduction_db = round2(meanRed)
+
+    const spikeTotal = sumDefined(chunkValues.map(v => v?.spike_frames))
+    if (spikeTotal != null) merged.spike_frames = spikeTotal
+
+    merged.artifact_risk = chunkValues.some(v => v?.artifact_risk === true)
+
+    const sibTotal = sumDefined(chunkValues.map(v => v?.sibilant_frames_received))
+    if (sibTotal != null) merged.sibilant_frames_received = sibTotal
+
+    return merged
+  },
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

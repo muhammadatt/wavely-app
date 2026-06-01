@@ -395,12 +395,19 @@ function buildTimings(plan, overlapSamples, sampleRate, stitchMs, perChunkTiming
  * same calibration in every chunk. frames is replaced with the chunk-local
  * slice so any `remeasureFrames(chunkPath, ctx.results.metrics)` call lines
  * up its frame indices against the correct isSilence labels.
+ *
+ * chunkCarveStartSamples exposes the chunk's absolute sample offset against
+ * the whole-file source so inner stages can translate whole-file frame
+ * indices (e.g. sibilance events from an upstream stage) into chunk-local
+ * coordinates. Single-chunk plans run inner stages against the parent ctx
+ * directly, where this field stays undefined and consumers treat it as 0.
  */
 function createSubContext(parent, chunkInPath, frames, carveStart, carveEnd) {
   const subFrames = sliceFramesForChunk(frames, carveStart, carveEnd)
   return {
     ...parent,
     currentPath: chunkInPath,
+    chunkCarveStartSamples: carveStart,
     results: {
       ...parent.results,
       metrics: {

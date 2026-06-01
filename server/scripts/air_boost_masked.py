@@ -40,6 +40,11 @@ CLI:
     [--sibilant-gain-floor  0.0]   # 0.0=no boost on sibilants, 1.0=full (no-op)
     [--attack-ms            5.0]   # ms for boost to drop when a sibilant starts
     [--release-ms          20.0]   # ms for boost to recover after a sibilant ends
+    [--frame-offset           0]   # STFT-frame shift applied to sibilant indices
+                                   # (chunked-mode: caller supplies the chunk's
+                                   #  carve-start expressed in STFT frames so
+                                   #  whole-file indices in the events JSON
+                                   #  resolve to chunk-local frames)
 """
 
 import argparse
@@ -139,6 +144,12 @@ def main(argv=None):
     parser.add_argument("--sibilant-gain-floor", type=float, default=0.0)
     parser.add_argument("--attack-ms",           type=float, default=5.0)
     parser.add_argument("--release-ms",          type=float, default=20.0)
+    parser.add_argument("--frame-offset",        type=int,   default=0,
+                        help="STFT-frame shift applied to sibilant indices "
+                             "from the events JSON. Used in chunked mode so "
+                             "whole-file frame indices resolve to chunk-local "
+                             "frames (frame_offset = carve_start_samples / "
+                             f"HOP_LENGTH={HOP_LENGTH}).")
     args = parser.parse_args(argv)
 
     sr_o, original = wavfile.read(args.original)
@@ -152,18 +163,30 @@ def main(argv=None):
     with open(args.events) as fh:
         events_map = json.load(fh)
 
-    sibilant_frame_indices = events_map.get("sibilantFrameIndices", [])
-    n_samples              = original.shape[0]
+    raw_sibilant_frame_indices = events_map.get("sibilantFrameIndices", [])
+    n_samples                  = original.shape[0]
 
-    if not sibilant_frame_indices:
+    if not raw_sibilant_frame_indices:
         logger.info("AirBoostMask: no sibilant frames — writing boosted as-is")
         wavfile.write(args.output, sr_o, boosted)
         return {'sibilant_frames': 0, 'applied': False}
 
+    # Apply chunk frame offset: events JSON contains whole-file indices but
+    # this invocation may be processing a carved chunk. Shift each index into
+    # the chunk-local frame coordinate system. Indices that fall before the
+    # chunk start become negative and are filtered by build_frame_envelope's
+    # 0 <= fi < n_frames gate; indices past chunk end fall above n_frames and
+    # are filtered the same way.
+    if args.frame_offset != 0:
+        sibilant_frame_indices = [fi - args.frame_offset for fi in raw_sibilant_frame_indices]
+    else:
+        sibilant_frame_indices = raw_sibilant_frame_indices
+
     logger.info(
-        f"AirBoostMask: {len(sibilant_frame_indices)} sibilant frames | "
+        f"AirBoostMask: {len(raw_sibilant_frame_indices)} sibilant frames | "
         f"floor={args.sibilant_gain_floor:.2f} "
         f"attack={args.attack_ms}ms release={args.release_ms}ms"
+        + (f" | frame_offset={args.frame_offset}" if args.frame_offset != 0 else "")
     )
 
     # Estimate frame count for envelope pre-allocation (blend_stft_channel aligns)
@@ -185,14 +208,22 @@ def main(argv=None):
 
     wavfile.write(args.output, sr_o, output)
 
-    sib_pct = 100.0 * len(sibilant_frame_indices) * HOP_LENGTH / n_samples
+    # Sibilance count / percentage are reported per-call: numerator and
+    # denominator are both scoped to the audio actually processed by this
+    # invocation. In sequential mode frame_offset is 0 and every index falls
+    # in range, so sib_in_range == len(raw_sibilant_frame_indices) and the
+    # figure equals the file-wide coverage. In chunked mode only the indices
+    # landing inside this chunk count, and the denominator is the chunk's
+    # own frame total — both bounded together, ratio ∈ [0, 100%].
+    sib_in_range = sum(1 for i in sibilant_frame_indices if 0 <= i < n_frames_est)
+    sib_pct      = 100.0 * sib_in_range / n_frames_est if n_frames_est > 0 else 0.0
     logger.info(
         f"AirBoostMask: done | sibilant≈{sib_pct:.1f}% | "
         f"envelope min={envelope.min():.3f}"
     )
 
     return {
-        'sibilant_frames': len(sibilant_frame_indices),
+        'sibilant_frames': sib_in_range,
         'sibilant_pct': sib_pct,
         'envelope_min': float(envelope.min()),
         'applied': True,

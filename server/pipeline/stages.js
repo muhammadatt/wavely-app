@@ -988,6 +988,12 @@ export async function breathReduce(ctx) {
 // the already-written EQ output and runs the mask blend. The combined airBoost
 // wrapper handles the sequential case with no extra FFmpeg pass.
 
+// STFT hop length used by air_boost_masked.py (and the upstream sibilance
+// detector that writes the events JSON consumed here). Kept in sync with
+// HOP_LENGTH in server/scripts/air_boost_masked.py — if either side changes,
+// update both.
+const AIR_BOOST_MASK_HOP = 512
+
 export async function airBoostAnalyze(ctx) {
   const airBoostConfig    = ctx.preset?.airBoost ?? {}
   const gainDb            = airBoostConfig.gainDb            ?? 0
@@ -1073,17 +1079,24 @@ export async function airBoostApply(ctx) {
     return
   }
 
-  // In sequential mode resolvedOutputPath already contains the EQ output
-  // written by computeAirBoostParams. In chunked mode the caller discards it
-  // and calls applyAirBoostBands per chunk instead; resolvedOutputPath is then
-  // the chunk's own output.
+  // resolvedOutputPath holds the EQ output: in sequential mode it was
+  // written by computeAirBoostParams against the whole file; in chunked
+  // mode it was written against the chunk's carved input. Either way the
+  // mask blend below operates against this same EQ output.
   ctx.currentPath = resolvedOutputPath
 
   if (eventsPath && sibilantGainFloor < 1.0) {
+    // Chunked mode: shift whole-file sibilance frame indices into chunk-local
+    // coordinates so the per-frame envelope built by air_boost_masked.py
+    // aligns with this chunk's STFT frames. Sequential mode leaves the
+    // sub-ctx field undefined → frameOffset = 0 → no-op shift.
+    const carveStartSamples = ctx.chunkCarveStartSamples ?? 0
+    const frameOffset       = Math.floor(carveStartSamples / AIR_BOOST_MASK_HOP)
+
     const maskedPath = ctx.tmp('.wav')
     await applyAirBoostMask(
       originalPath, resolvedOutputPath, eventsPath, maskedPath,
-      sibilantGainFloor, attackMs, releaseMs,
+      sibilantGainFloor, attackMs, releaseMs, frameOffset,
     )
     ctx.currentPath = maskedPath
     params.sibilantMask = { applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs, eventsSource }
