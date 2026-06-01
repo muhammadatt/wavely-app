@@ -62,8 +62,8 @@ export const CHUNK_MERGERS = {
   },
 
   /**
-   * noiseReduce — structural fields (model, applied, reason) from chunk 0;
-   * numeric scalars (makeupGainDb, pre/post noise floor) AVERAGED across
+   /**
+    * noiseReduce — structural fields (model, applied, reason) from the first defined chunk value;
    * chunks for a representative file-level figure.
    * post_noise_floor_dbfs is overwritten by refreshPostBlockMetrics later
    * so it agrees exactly with the metrics block.
