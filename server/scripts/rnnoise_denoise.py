@@ -159,7 +159,6 @@ def _apply_vad_gate(denoised_pcm16, dry_pcm16, speech_probs, silero_per_rnn,
         return {
             '_buffer':           denoised_pcm16,
             'overrides':         0,
-            'override_frames':   0,
             'raw_overrides':     raw_overrides,
             'total_frames':      n_frames,
             'threshold':         float(rnnoise_threshold),
@@ -215,7 +214,6 @@ def _apply_vad_gate(denoised_pcm16, dry_pcm16, speech_probs, silero_per_rnn,
     return {
         '_buffer':              out,
         'overrides':            n_overrides,
-        'override_frames':      n_overrides,
         'raw_overrides':        raw_overrides,
         'total_frames':         n_frames,
         'threshold':            float(rnnoise_threshold),
@@ -327,35 +325,63 @@ def main(argv=None):
     strip_frames      = head_pad_frames + algo_delay_frames
 
     rnn = _get_rnnoise()
-    speech_probs = []
-    silero_per_rnn = None  # list[bool], one per yielded RNNoise frame
+    speech_probs = None      # np.ndarray[float32] when populated
+    silero_per_rnn = None    # np.ndarray[bool], one entry per RNNoise frame
     vad_gate_stats = None
     if rnn is not None:
         pcm16 = np.clip(waveform[0] * 32767, -32768, 32767).astype(np.int16)
 
-        frames = []
+        # Pre-allocate the denoised output and speech_prob buffers sized to
+        # the expected frame count. pyrnnoise yields one ~480-sample frame per
+        # 10 ms of input; we add a few frames of slack to absorb any partial
+        # tail frame and a defensive `if write + n > buf.size` resize that
+        # should never fire in practice but keeps the script safe if a future
+        # pyrnnoise version yields more frames than expected. This replaces a
+        # `frames=[]; frames.append(); np.concatenate(frames)` pattern that
+        # cost both a 360 k-item Python list build and a full-buffer copy at
+        # concatenation time for hour-long files.
+        frame_samples = RNNOISE_SR // 100
+        max_frames = (pcm16.shape[0] + frame_samples - 1) // frame_samples + 4
+        out_buf = np.empty(max_frames * frame_samples, dtype=np.int16)
+        sp_arr  = np.empty(max_frames, dtype=np.float32)
+        write_offset = 0
+        frame_count  = 0
         for speech_prob, denoised_frame in rnn.denoise_chunk(pcm16, partial=True):
             # denoised_frame: (channels, samples) int16 at sample_rate (=48 kHz)
-            frames.append(denoised_frame[0] if denoised_frame.ndim == 2 else denoised_frame)
-            speech_probs.append(float(speech_prob))
+            f = denoised_frame[0] if denoised_frame.ndim == 2 else denoised_frame
+            n = f.shape[0]
+            if write_offset + n > out_buf.shape[0]:
+                # Defensive grow — unreachable with the +4 slack above unless
+                # pyrnnoise yields more frames than the input justifies.
+                out_buf = np.concatenate([out_buf, np.empty(frame_samples * 8, dtype=np.int16)])
+                sp_arr  = np.concatenate([sp_arr,  np.empty(8, dtype=np.float32)])
+            out_buf[write_offset:write_offset + n] = f
+            write_offset += n
+            sp_arr[frame_count] = speech_prob
+            frame_count += 1
+        speech_probs = sp_arr[:frame_count]
 
         # Resolve the Silero (25 ms) mask onto the RNNoise (10 ms) frame grid.
         # Output frame k aligns with original-audio time (k - strip_frames) * 10 ms;
         # the matching Silero frame is floor(t_ms / 25). Pre-roll frames (k <
         # strip_frames) have no original-audio counterpart — leave them as
         # "speech" so the gate never alters warmup output (which is stripped).
-        if silero_mask is not None and speech_probs:
-            silero_per_rnn = [True] * len(speech_probs)
-            for k in range(len(speech_probs)):
-                t_orig_ms = (k - strip_frames) * 10
-                if t_orig_ms < 0:
-                    continue
-                sf = t_orig_ms // 25
-                if 0 <= sf < len(silero_mask):
-                    silero_per_rnn[k] = not silero_mask[sf]
+        # Tail frames beyond the Silero mask's range also default to "speech";
+        # they cover the trailing input pad / model flush region.
+        if silero_mask is not None and frame_count > 0:
+            silero_full = np.asarray(silero_mask, dtype=bool)
+            k = np.arange(frame_count, dtype=np.int64)
+            t_orig_ms = (k - strip_frames) * 10
+            sf = t_orig_ms // 25
+            # Default to True (= speech); flip to ~isSilence on frames that
+            # land inside the Silero mask. Pre-roll (t<0) and post-tail
+            # (sf >= len) keep the True default.
+            silero_per_rnn = np.ones(frame_count, dtype=bool)
+            valid = (t_orig_ms >= 0) & (sf < silero_full.shape[0])
+            silero_per_rnn[valid] = ~silero_full[sf[valid]]
 
-        if frames:
-            denoised_pcm16 = np.concatenate(frames).astype(np.int16)
+        if frame_count > 0:
+            denoised_pcm16 = out_buf[:write_offset]
 
             # VAD-disagreement gate: where Silero says SPEECH but RNNoise's
             # internal VAD speech_prob < threshold, swap the denoised frame
@@ -365,7 +391,11 @@ def main(argv=None):
             # those frames as speech. A short linear crossfade at each
             # override-region boundary keeps frame-boundary discontinuities
             # below the click threshold.
-            if args.vad_gate and silero_per_rnn is not None and speech_probs:
+            # speech_probs / silero_per_rnn are ndarrays at this point — the
+            # plain truthy check used to work on lists but raises on ndarrays.
+            # frame_count > 0 already gates the outer block, so the size check
+            # is implicit.
+            if args.vad_gate and silero_per_rnn is not None:
                 # Pass the algorithmic delay so the gate can time-align the
                 # dry source against the denoised output. RNNoise emits each
                 # denoised sample algo_delay_frames * 10 ms after the input
@@ -425,8 +455,8 @@ def main(argv=None):
     # with original-audio time `(i - strip_frames) * 10` ms. The Silero mask
     # (if any) was already resolved onto the RNNoise frame grid above so the
     # gate and the dump share the same alignment.
-    if args.speech_prob_out and speech_probs:
-        arr = np.array(speech_probs, dtype=np.float64)
+    if args.speech_prob_out and speech_probs is not None and speech_probs.size > 0:
+        arr = speech_probs.astype(np.float64, copy=False)
         sidecar = {
             'frame_duration_ms':     10,
             'sample_rate':           RNNOISE_SR,
@@ -448,15 +478,15 @@ def main(argv=None):
             },
         }
         if silero_per_rnn is not None:
-            # Booleans serialise as 0/1 to keep the sidecar compact; the
-            # diagnostic reader interprets both consistently.
-            silero_arr = np.array(silero_per_rnn, dtype=bool)
-            sidecar['silero_speech_per_rnn_frame'] = [int(v) for v in silero_arr]
+            # silero_per_rnn is already a bool ndarray (vectorised resolver
+            # above). Booleans serialise as 0/1 to keep the sidecar compact;
+            # the diagnostic reader interprets both consistently.
+            sidecar['silero_speech_per_rnn_frame'] = silero_per_rnn.astype(np.int8).tolist()
             sidecar['silero_mask_frame_count'] = int(len(silero_mask) if silero_mask else 0)
             sidecar['silero_mask_frame_duration_ms'] = 25
-            disagree = (arr < 0.30) & silero_arr
-            sidecar['summary']['silero_speech_frames']     = int(silero_arr.sum())
-            sidecar['summary']['silero_silence_frames']    = int((~silero_arr).sum())
+            disagree = (arr < 0.30) & silero_per_rnn
+            sidecar['summary']['silero_speech_frames']     = int(silero_per_rnn.sum())
+            sidecar['summary']['silero_silence_frames']    = int((~silero_per_rnn).sum())
             sidecar['summary']['disagree_silero_speech_rnnoise_lt_0p30'] = int(disagree.sum())
         try:
             with open(args.speech_prob_out, 'w', encoding='utf-8') as f:
@@ -474,8 +504,6 @@ def main(argv=None):
 
     result = {
         'model': 'RNNoise',
-        'input_sr': int(sr),
-        'output_sr': PIPELINE_SR,
         'speech_prob_out': args.speech_prob_out if args.speech_prob_out else None,
     }
     if vad_gate_stats is not None:
