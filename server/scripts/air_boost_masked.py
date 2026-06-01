@@ -40,6 +40,11 @@ CLI:
     [--sibilant-gain-floor  0.0]   # 0.0=no boost on sibilants, 1.0=full (no-op)
     [--attack-ms            5.0]   # ms for boost to drop when a sibilant starts
     [--release-ms          20.0]   # ms for boost to recover after a sibilant ends
+    [--frame-offset           0]   # STFT-frame shift applied to sibilant indices
+                                   # (chunked-mode: caller supplies the chunk's
+                                   #  carve-start expressed in STFT frames so
+                                   #  whole-file indices in the events JSON
+                                   #  resolve to chunk-local frames)
 """
 
 import argparse
@@ -139,6 +144,12 @@ def main(argv=None):
     parser.add_argument("--sibilant-gain-floor", type=float, default=0.0)
     parser.add_argument("--attack-ms",           type=float, default=5.0)
     parser.add_argument("--release-ms",          type=float, default=20.0)
+    parser.add_argument("--frame-offset",        type=int,   default=0,
+                        help="STFT-frame shift applied to sibilant indices "
+                             "from the events JSON. Used in chunked mode so "
+                             "whole-file frame indices resolve to chunk-local "
+                             "frames (frame_offset = carve_start_samples / "
+                             f"HOP_LENGTH={HOP_LENGTH}).")
     args = parser.parse_args(argv)
 
     sr_o, original = wavfile.read(args.original)
@@ -152,18 +163,30 @@ def main(argv=None):
     with open(args.events) as fh:
         events_map = json.load(fh)
 
-    sibilant_frame_indices = events_map.get("sibilantFrameIndices", [])
-    n_samples              = original.shape[0]
+    raw_sibilant_frame_indices = events_map.get("sibilantFrameIndices", [])
+    n_samples                  = original.shape[0]
 
-    if not sibilant_frame_indices:
+    if not raw_sibilant_frame_indices:
         logger.info("AirBoostMask: no sibilant frames — writing boosted as-is")
         wavfile.write(args.output, sr_o, boosted)
         return {'sibilant_frames': 0, 'applied': False}
 
+    # Apply chunk frame offset: events JSON contains whole-file indices but
+    # this invocation may be processing a carved chunk. Shift each index into
+    # the chunk-local frame coordinate system. Indices that fall before the
+    # chunk start become negative and are filtered by build_frame_envelope's
+    # 0 <= fi < n_frames gate; indices past chunk end fall above n_frames and
+    # are filtered the same way.
+    if args.frame_offset != 0:
+        sibilant_frame_indices = [fi - args.frame_offset for fi in raw_sibilant_frame_indices]
+    else:
+        sibilant_frame_indices = raw_sibilant_frame_indices
+
     logger.info(
-        f"AirBoostMask: {len(sibilant_frame_indices)} sibilant frames | "
+        f"AirBoostMask: {len(raw_sibilant_frame_indices)} sibilant frames | "
         f"floor={args.sibilant_gain_floor:.2f} "
         f"attack={args.attack_ms}ms release={args.release_ms}ms"
+        + (f" | frame_offset={args.frame_offset}" if args.frame_offset != 0 else "")
     )
 
     # Estimate frame count for envelope pre-allocation (blend_stft_channel aligns)
@@ -185,14 +208,17 @@ def main(argv=None):
 
     wavfile.write(args.output, sr_o, output)
 
-    sib_pct = 100.0 * len(sibilant_frame_indices) * HOP_LENGTH / n_samples
+    # Sibilance percentage is reported against the whole-file event count so
+    # per-chunk runs surface the same coverage figure the upstream detector
+    # reports, not the in-chunk subset that survived the offset filter.
+    sib_pct = 100.0 * len(raw_sibilant_frame_indices) * HOP_LENGTH / n_samples
     logger.info(
         f"AirBoostMask: done | sibilant≈{sib_pct:.1f}% | "
         f"envelope min={envelope.min():.3f}"
     )
 
     return {
-        'sibilant_frames': len(sibilant_frame_indices),
+        'sibilant_frames': len(raw_sibilant_frame_indices),
         'sibilant_pct': sib_pct,
         'envelope_min': float(envelope.min()),
         'applied': True,

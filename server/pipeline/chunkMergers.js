@@ -79,6 +79,37 @@ export const CHUNK_MERGERS = {
     }
     return merged
   },
+
+  /**
+   * airBoost — structural fields (requested_gain_db, bands, sibilantMask
+   * config) from the first defined chunk value. The ACX compliance loop
+   * runs per chunk against each chunk's local noise floor, so applied_gain_db
+   * may differ across chunks; report the minimum (most conservative) so the
+   * compliance summary doesn't overstate the boost actually applied at any
+   * seam. gain_db_reduced_by_precut takes the max — worst-case precut
+   * reduction across chunks.
+   */
+  airBoost(chunkValues) {
+    const first = chunkValues.find(v => v != null)
+    if (!first) return undefined
+    const merged = { ...first }
+
+    const appliedGains = chunkValues
+      .filter(v => v?.applied && typeof v.applied_gain_db === 'number')
+      .map(v => v.applied_gain_db)
+    if (appliedGains.length) {
+      merged.applied_gain_db = round2(Math.min(...appliedGains))
+    }
+
+    const precutReductions = chunkValues
+      .map(v => v?.gain_db_reduced_by_precut)
+      .filter(v => typeof v === 'number')
+    if (precutReductions.length) {
+      merged.gain_db_reduced_by_precut = round2(Math.max(...precutReductions))
+    }
+
+    return merged
+  },
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

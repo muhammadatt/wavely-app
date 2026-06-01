@@ -385,6 +385,12 @@ export async function applyAirBoostBands(inputPath, outputPath, params) {
  *                                          (0.0 = no boost, 1.0 = full boost = no-op)
  * @param {number} [attackMs=5.0]   ms for boost to drop when a sibilant starts
  * @param {number} [releaseMs=20.0] ms for boost to recover after a sibilant ends
+ * @param {number} [frameOffset=0]  STFT-frame shift applied to sibilant indices
+ *                                  from the events JSON. Chunked-mode callers
+ *                                  pass the chunk's carve-start expressed in
+ *                                  STFT frames so whole-file indices resolve
+ *                                  to chunk-local frames. Sequential callers
+ *                                  leave this at 0.
  */
 export async function applyAirBoostMask(
   originalPath,
@@ -394,18 +400,19 @@ export async function applyAirBoostMask(
   sibilantGainFloor = 0.0,
   attackMs          = 5.0,
   releaseMs         = 20.0,
+  frameOffset       = 0,
 ) {
-  return spawnPython(
-    MASK_SCRIPT,
-    [
-      '--original',            originalPath,
-      '--boosted',             boostedPath,
-      '--events',              eventsPath,
-      '--output',              outputPath,
-      '--sibilant-gain-floor', String(sibilantGainFloor),
-      '--attack-ms',           String(attackMs),
-      '--release-ms',          String(releaseMs),
-    ],
-    'AirBoostMask',
-  )
+  const args = [
+    '--original',            originalPath,
+    '--boosted',             boostedPath,
+    '--events',              eventsPath,
+    '--output',              outputPath,
+    '--sibilant-gain-floor', String(sibilantGainFloor),
+    '--attack-ms',           String(attackMs),
+    '--release-ms',          String(releaseMs),
+  ]
+  if (frameOffset !== 0) {
+    args.push('--frame-offset', String(frameOffset))
+  }
+  return spawnPython(MASK_SCRIPT, args, 'AirBoostMask')
 }

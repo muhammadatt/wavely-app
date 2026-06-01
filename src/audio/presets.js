@@ -322,7 +322,7 @@ export const PRESETS = {
           },
         },
       },
-      /*
+
       {
         chunked: [
           // vocalSaturation is stateless multiband — chunk-safe with the
@@ -347,11 +347,25 @@ export const PRESETS = {
           // of context, well inside the chunk overlap. Per-chunk click counts
           // sum cleanly in mergeChunkResults so the report still shows the
           // file-level totals.
-          { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
+          { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } },
+
+          {
+            airBoost: {
+              gainDb: 6,
+              sibilantGainFloor: 0,
+              sibilanceDetection: {
+                p95_trigger_db: 6.0,
+                min_flatness: 0.1,
+                broadband_trigger_db: 10.0,
+              },
+              // Predictive pre-attenuation
+              precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
+            },
+          },
         ],
       },
-      */
 
+      /*
       {
         vocalSaturation: {
           drive: 2,
@@ -365,21 +379,9 @@ export const PRESETS = {
           highDriveMult: 0.1,
         },
       },
-      { clickRemover: { thresholdSigma: 2.5, maxClickMs: 5 } },
+      { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } },
+      */
 
-      {
-        airBoost: {
-          gainDb: 6,
-          sibilantGainFloor: 0,
-          sibilanceDetection: {
-            p95_trigger_db: 6.0,
-            min_flatness: 0.1,
-            broadband_trigger_db: 10.0,
-          },
-          // Predictive pre-attenuation
-          precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
-        },
-      },
       "referenceEQ",
       {
         resonanceSuppressor: [
