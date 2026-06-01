@@ -41,7 +41,6 @@ get one from estimate_f0_contour.py via getF0Contour() in f0Analysis.js.
 
 import logging
 import math
-import sys
 import time
 from collections import deque
 
@@ -1341,8 +1340,10 @@ def analyze_sibilance_events(
     # index. Magnitudes are computed for voiced rows only because
     # `detector.process_frame` only consults `magnitude` when is_voiced -- see
     # SibilanceDetector.process_frame above. The same `sliding_window_view +
-    # batched rfft` pattern is used by estimate_f0_contour.py; batch size is
-    # picked to match.
+    # batched rfft` pattern is used by estimate_f0_contour.py; BATCH_SIZE is
+    # sized independently for this stage against the per-batch memory budget
+    # documented immediately below (estimate_f0_contour's _AUTOCORR_BATCH_SIZE
+    # is smaller because its irfft output dominates its budget, not the input).
     #
     # Peak memory per batch during the rfft call (float32 path):
     #   input float32 rows : BATCH_SIZE * n_fft           * 4 bytes
@@ -1395,9 +1396,16 @@ def analyze_sibilance_events(
             # through to detect() via process_frame's lf_db_override kwarg.
             # Memory: (n_voiced x ~70 lf bins) float32 ~= 2 MB at BATCH_SIZE
             # 8192 -- negligible next to the rfft output.
-            lf_band     = batch_mags[:, detector.lf_mask]
-            lf_pow_mean = (lf_band * lf_band).mean(axis=1)
-            batch_lf_db = 10.0 * np.log10(lf_pow_mean + 1e-10)
+            # Mirror detect()'s `self.lf_mask is not None and self.lf_mask.any()`
+            # guard: with an empty LF veto mask there are no bins to reduce over,
+            # so leave the override unset and let the per-frame path in detect()
+            # skip the veto computation entirely.
+            if detector.lf_mask is not None and detector.lf_mask.any():
+                lf_band     = batch_mags[:, detector.lf_mask]
+                lf_pow_mean = (lf_band * lf_band).mean(axis=1)
+                batch_lf_db = 10.0 * np.log10(lf_pow_mean + 1e-10)
+            else:
+                batch_lf_db = None
         else:
             batch_mags  = None
             batch_lf_db = None
@@ -1429,7 +1437,10 @@ def analyze_sibilance_events(
                 silence_run    = 0
                 pos            = pos_in_batch[local_i]
                 magnitude      = batch_mags[pos]
-                lf_db_override = batch_lf_db[pos]
+                # batch_lf_db is None when the LF veto mask is empty (see the
+                # precompute guard above); falling back to None keeps detect()
+                # on its per-frame path for that configuration.
+                lf_db_override = batch_lf_db[pos] if batch_lf_db is not None else None
             else:
                 silence_run    += 1
                 # detector.process_frame ignores magnitude when is_voiced is
@@ -1457,24 +1468,15 @@ def analyze_sibilance_events(
         _t_loop += time.perf_counter() - _t_loop_b0
 
     _t_total = time.perf_counter() - _t_total
-    # Debug-only profile output. Printed to stderr (not logger.info) because
-    # the persistent worker (_worker.py) does not call logging.basicConfig --
-    # the root logger sits at WARNING, so logger.info() is silently dropped on
-    # the worker dispatch path. The CLI shim (analyze_sibilance_events.py)
-    # does configure logging at INFO in its __main__ block, but that path is
-    # only used by the legacy spawn fallback. Switching to a direct stderr
-    # print avoids the logging-level mismatch and keeps the profile line
-    # visible regardless of how the script is invoked. Stderr is the worker's
-    # log channel -- pythonWorker.js prefixes it with `[python]` and routes
-    # it to the pipeline log.
-    print(
-        f"[SibilanceDetector] profile -- "
-        f"fft={_t_fft:.3f}s loop={_t_loop:.3f}s "
-        f"other={(_t_total - _t_fft - _t_loop):.3f}s "
-        f"total={_t_total:.3f}s "
-        f"(batches={(n_frames + BATCH_SIZE - 1) // BATCH_SIZE} "
-        f"voiced={int(voiced_arr.sum())}/{n_frames})",
-        file=sys.stderr, flush=True,
+    # Per-pass profile line. Gated at DEBUG so normal runs stay quiet; raise
+    # the logger to DEBUG locally when validating future optimisations.
+    logger.debug(
+        "[SibilanceDetector] profile -- "
+        "fft=%.3fs loop=%.3fs other=%.3fs total=%.3fs "
+        "(batches=%d voiced=%d/%d)",
+        _t_fft, _t_loop, _t_total - _t_fft - _t_loop, _t_total,
+        (n_frames + BATCH_SIZE - 1) // BATCH_SIZE,
+        int(voiced_arr.sum()), n_frames,
     )
 
     rolling   = detector.f0_rolling

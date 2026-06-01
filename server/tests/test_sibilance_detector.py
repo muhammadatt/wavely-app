@@ -195,6 +195,72 @@ class TestVoicingVeto:
 
 
 # ===========================================================================
+# lf_db_override fast path
+# ===========================================================================
+
+class TestLfDbOverride:
+    """
+    The vectorised batch path in analyze_sibilance_events() precomputes the
+    voicing-veto's low-band dB across every voiced row and feeds it back into
+    detect() via the lf_db_override kwarg. The override branch must produce
+    the same fire/no-fire decision and the same diag.lfDb the per-frame path
+    would have computed from the magnitude — that's the equivalence
+    guarantee the batch precompute relies on.
+    """
+
+    def _detector(self, **param_overrides) -> SibilanceDetector:
+        params = resolve_params(param_overrides)
+        return SibilanceDetector(
+            sample_rate=SR, n_fft=N_FFT, hop_length=HOP_LENGTH,
+            params=params, f0=150.0,
+        )
+
+    @staticmethod
+    def _compute_lf_db(det: SibilanceDetector, magnitude: np.ndarray) -> float:
+        # Mirror analyze_sibilance_events()'s batched precompute for a single
+        # row: 10*log10(mean(mag[lf_mask]**2) + 1e-10).
+        lf_power = magnitude[det.lf_mask] ** 2
+        return 10.0 * np.log10(float(lf_power.mean()) + 1e-10)
+
+    def test_override_matches_per_frame_on_lf_dominated_frame(self):
+        magnitude = _lf_dominated_frame(SR, N_FFT)
+
+        ref = self._detector()
+        ref_fired = ref.detect(magnitude)
+        ref_diag  = dict(ref.last_diag)
+
+        ovr = self._detector()
+        lf_db = self._compute_lf_db(ovr, magnitude)
+        ovr_fired = ovr.detect(magnitude, lf_db_override=lf_db)
+
+        assert ovr_fired == ref_fired
+        assert ovr.last_diag["lfDb"] == ref_diag["lfDb"]
+        assert ovr.last_diag["voicingVetoed"] == ref_diag["voicingVetoed"]
+
+    def test_override_matches_per_frame_on_hf_dominated_frame(self):
+        # HF-dominated frame clears the veto on both paths and exercises
+        # the downstream spectral-shape gates; the override path must reach
+        # the same fire/no-fire outcome.
+        magnitude = _hf_dominated_frame(SR, N_FFT)
+
+        ref = self._detector()
+        ref_fired = ref.detect(magnitude)
+        ref_diag  = dict(ref.last_diag)
+
+        ovr = self._detector()
+        lf_db = self._compute_lf_db(ovr, magnitude)
+        ovr_fired = ovr.detect(magnitude, lf_db_override=lf_db)
+
+        assert ovr_fired == ref_fired
+        assert ovr.last_diag["lfDb"] == ref_diag["lfDb"]
+        assert ovr.last_diag["voicingVetoed"] == ref_diag["voicingVetoed"]
+        # Downstream gate diagnostics must also agree — confirms the override
+        # path didn't accidentally short-circuit later checks.
+        assert ovr.last_diag["p95Pass"]  == ref_diag["p95Pass"]
+        assert ovr.last_diag["flatPass"] == ref_diag["flatPass"]
+
+
+# ===========================================================================
 # Fricative tail extension (VAD-truncated fricatives)
 # ===========================================================================
 

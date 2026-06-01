@@ -1255,16 +1255,19 @@ export async function clipGainDeEsserApply(ctx) {
     skipNoCtx:  result.skippedNoContext,
     maxRed:     result.maxReductionDb != null ? `${result.maxReductionDb}dB` : 'n/a',
   })
+
+  // Drop the analyze-stage bundle now that apply has consumed it. The frames
+  // array is the heavy field (~one entry per 25 ms frame, ~144k entries/hour);
+  // releasing it here means the split-form preset path matches the combined
+  // wrapper's lifetime guarantee without relying on the wrapper. eventsPath
+  // is already preserved on ctx.results.clipGainDeEsser for the only
+  // downstream consumer (parallelCompression's wet-branch de-esser pass).
+  ctx.globalParams.clipGainDeEsser = null
 }
 
 export async function clipGainDeEsser(ctx) {
   await clipGainDeEsserAnalyze(ctx)
   await clipGainDeEsserApply(ctx)
-  // The frames array is the heavy field here — one entry per 25 ms frame
-  // (~144k entries/hour). The eventsPath is preserved on
-  // ctx.results.clipGainDeEsser for parallelCompression's wet-branch
-  // de-esser pass; that's the only downstream consumer of de-esser state.
-  ctx.globalParams.clipGainDeEsser = null
 }
 
 // ── Stage: Auto Leveler (Stage 4b) ────────────────────────────────────────────
