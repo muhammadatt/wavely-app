@@ -83,7 +83,7 @@ export const CHUNK_MERGERS = {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function sumDefined(values) {
+export function sumDefined(values) {
   let sum = 0
   let count = 0
   for (const v of values) {
@@ -95,7 +95,7 @@ function sumDefined(values) {
   return count > 0 ? sum : null
 }
 
-function meanDefined(values) {
+export function meanDefined(values) {
   const finite = values.filter(v => typeof v === 'number' && isFinite(v))
   if (!finite.length) return null
   return finite.reduce((a, b) => a + b, 0) / finite.length
