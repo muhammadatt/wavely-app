@@ -42,9 +42,9 @@ export const CHUNK_MERGERS = {
   },
 
   /**
-   * clickRemove — structural fields (applied, parameters, per-channel layout)
-   * from chunk 0; cumulative counts SUMMED across chunks for a file-level
-   * total. The per-channel `channels` array is taken from chunk 0 as a
+   /**
+    * clickRemove — structural fields (applied, parameters, per-channel layout)
+    * from the first defined chunk value; cumulative counts SUMMED across chunks for a file-level
    * representative sample — per-channel summing would require knowing the
    * channel layout, and the top-level summed counts already give the
    * file-level totals.
