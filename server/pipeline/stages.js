@@ -1049,9 +1049,19 @@ export async function airBoostAnalyze(ctx) {
   let eventsSource = null
 
   if (params.applied && sibilantGainFloor < 1.0) {
-    const upstreamEventsPath = ctx.results.clipGainDeEsser?.applied
-      ? (ctx.results.clipGainDeEsser.eventsPath ?? null)
-      : null
+    // Reuse clipGainDeEsser's sibilance event map whenever it DETECTED events,
+    // regardless of whether it went on to apply any gain reduction. The mask
+    // only needs to know WHERE the sibilants are; that is independent of
+    // whether the de-esser's reduction ceiling was exceeded. clipGainDeEsserApply
+    // sets ctx.results.clipGainDeEsser.eventsPath whenever detection found
+    // events, even when its own `applied` flag is false (events all sat below
+    // the reduction ceiling — common for clean narrators).
+    //
+    // Gating on `.applied` here was a bug: on a file with detectable but
+    // sub-ceiling sibilance, the de-esser reports applied=false, the upstream
+    // map was discarded, and airBoost fell through to de novo detection —
+    // exactly the fallback this block is meant to avoid (see comment above).
+    const upstreamEventsPath = ctx.results.clipGainDeEsser?.eventsPath ?? null
 
     if (upstreamEventsPath) {
       eventsPath   = upstreamEventsPath
