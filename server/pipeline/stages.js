@@ -1057,19 +1057,28 @@ export async function airBoostAnalyze(ctx) {
       eventsPath   = upstreamEventsPath
       eventsSource = 'upstream'
     } else {
-      // Fallback: de novo detection on the post-boost signal. analyzeSibilanceEvents
-      // reads ctx.currentPath, which is still the pre-boost originalPath here.
-      // Temporarily redirect it to resolvedOutputPath so detection sees the boosted
-      // audio — matching the original single-function behavior. F0 is pitch-neutral
-      // through the EQ so the cached contour is still correct.
-      const savedPath = ctx.currentPath
-      ctx.currentPath = resolvedOutputPath
+      // Fallback: de novo detection on the PRE-boost signal. ctx.currentPath is
+      // still originalPath here, which is exactly what we detect on.
+      //
+      // Detection MUST run on the pre-boost audio, not on resolvedOutputPath.
+      // The air boost adds a high-frequency shelf inside the 2.5–12 kHz band
+      // that the sibilance detector measures, so detecting on the boosted
+      // output lets the boost inflate its own detection input — borderline
+      // frames cross the p95 trigger and spawn phantom sibilant events that do
+      // not exist in the source. With sibilantGainFloor < 1.0 the mask then
+      // strips the boost off those falsely-flagged frames, so the air shelf
+      // disappears from the continuous (non-sibilant) signal path and survives
+      // only on genuinely sibilant frames. The effect scales with gainDb.
+      //
+      // Sibilant frame POSITIONS are identical pre/post boost (the EQ is
+      // time-invariant and pitch-neutral), so pre-boost detection yields the
+      // correct mask targets. This also matches the upstream clipGainDeEsser
+      // path above, whose pre-boost boundaries are documented as correct.
       const f0Contour = await getF0Contour(ctx, { useCache: true })
       const sibResult = await analyzeSibilanceEvents(ctx, {
         params:    airBoostConfig.sibilanceDetection,
         f0Contour,
       })
-      ctx.currentPath = savedPath
       eventsPath   = sibResult?.path ?? null
       eventsSource = 'denovo'
     }
