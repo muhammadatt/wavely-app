@@ -56,7 +56,7 @@ import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { applyVadGate }       from './vadGate.js'
 import { analyzeHum } from './humEQ.js'
-import { computeAirBoostParams, applyAirBoostMask } from './airBoost.js'
+import { computeAirBoostParams, applyAirBoostBands, applyAirBoostMask } from './airBoost.js'
 import { getReferenceCurvePath, runReferenceEQPass } from './referenceEQ.js'
 import { getF0Contour } from './f0Analysis.js'
 import { analyzeSibilanceEvents } from './sibilanceEvents.js'
@@ -439,7 +439,7 @@ export async function hpf(ctx) {
   await applyHighPass(ctx.currentPath, hpfPath, { notch60Hz })
   ctx.currentPath       = hpfPath
   ctx.results.notch60Hz = notch60Hz
-  const postPeakDbfs = await logLevel(ctx, 'after HPF', ctx.currentPath, { notch60Hz })
+  const postPeakDbfs = await measurePeakDbfs(ctx.currentPath)
 
   if (postPeakDbfs != null && postPeakDbfs > HPF_PEAK_CEILING_DBFS) {
     const gainDb      = HPF_PEAK_CEILING_DBFS - postPeakDbfs
@@ -500,9 +500,6 @@ export async function spectralSubtraction(ctx) {
   await runSpectralSubtraction(ctx.currentPath, outPath, params, vadLabelsPath)
   ctx.currentPath = outPath
   ctx.results.spectralSubtraction = { applied: true, ...params }
-  await logLevel(ctx, 'after spectral subtraction', ctx.currentPath, {
-    strength: params.strength,
-  })
 }
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
@@ -659,10 +656,6 @@ export async function noiseReduce(ctx) {
       ctx.results.noiseReduction.post_noise_floor_dbfs = ctx.results.metrics.noiseFloorDbfs
     }
   }
-
-  await logLevel(ctx, `after NR (${model})`, ctx.currentPath, {
-    preNoiseFloor: `${preNoiseFloor}dBFS`,
-  })
 }
 
 // ── Stage: Re-measure frames (post-NR) ───────────────────────────────────────
@@ -693,7 +686,6 @@ export async function dereverb(ctx) {
   await runDereverb(ctx.currentPath, outPath, strength, preserveEarly)
   ctx.currentPath       = outPath
   ctx.results.dereverb  = { applied: true, strength, preserve_early: preserveEarly }
-  await logLevel(ctx, 'after dereverb', ctx.currentPath, { strength })
 }
 
 // ── Stage: Room tone padding (ACX Audiobook only) ─────────────────────────────
@@ -781,11 +773,6 @@ export async function correctiveEQApply(ctx) {
   const eqPath = ctx.tmp('.wav')
   await applyParametricEQ(ctx.currentPath, eqPath, bandsToFfmpegFilters(params.bands))
   ctx.currentPath = eqPath
-  await logLevel(ctx, 'after corrective EQ', ctx.currentPath, {
-    voice_type: ctx.results.correctiveEQ?.voice_type,
-    bands:      params.bands.length,
-    merged:     ctx.results.correctiveEQ?.merged_bands ?? 0,
-  })
 }
 
 export async function correctiveEQ(ctx) {
@@ -849,10 +836,6 @@ export async function referenceEQ(ctx) {
 
   if (result.applied && outputPath) ctx.currentPath = outputPath
   ctx.results.referenceEQ = result
-  await logLevel(ctx, 'after reference EQ', ctx.currentPath, {
-    status:         result.status,
-    max_correction: result.max_correction_db ?? 0,
-  })
 }
 
 // ── Stage: Resonance Suppressor ───────────────────────────────────────────────
@@ -882,8 +865,7 @@ export async function resonanceSuppressor(ctx) {
     ? ctx.preset.resonanceSuppressor
     : (ctx.preset?.resonanceSuppressor ? [ctx.preset.resonanceSuppressor] : [])
   const sibilantPasses = passConfigs.filter(p => p?.sibilant_only)
-  let eventsPath   = null
-  let eventsSource = null
+  let eventsPath = null
 
   if (sibilantPasses.length === 0) {
     ctx.log('[resonanceSuppressor] No sibilant_only passes configured — skipping sibilance detection')
@@ -914,31 +896,20 @@ export async function resonanceSuppressor(ctx) {
       : null
 
     if (upstreamEventsPath) {
-      eventsPath   = upstreamEventsPath
-      eventsSource = 'upstream'
+      eventsPath = upstreamEventsPath
       ctx.log(`[resonanceSuppressor] Fast mode: reusing clipGainDeEsser events (${upstreamEventsPath})`)
     } else {
       const sibResult = await analyzeSibilanceEvents(ctx, {
         params:    sibilantPasses[0].sibilanceDetection,
         f0Contour,
       })
-      eventsPath   = sibResult?.path ?? null
-      eventsSource = 'denovo'
+      eventsPath = sibResult?.path ?? null
     }
   }
 
   const result = await applyResonanceSuppression(ctx.currentPath, outPath, ctx.preset, frames, f0Contour, eventsPath)
   if (result.applied) ctx.currentPath = outPath
   ctx.results.resonanceSuppressor = result
-  await logLevel(ctx, 'after resonance suppressor', ctx.currentPath, {
-    skipped:        result.applied === false,
-    f0_median:      f0Contour?.median ?? 'n/a',
-    sibilant_only:  sibilantPasses.length > 0,
-    events_source:  eventsSource ?? 'n/a',
-    max_red:        result.max_reduction_db != null ? `${result.max_reduction_db}dB` : 'n/a',
-    artifact_risk:  result.artifact_risk ?? false,
-    process_s:      result.process_seconds ?? 'n/a',
-  })
 }
 
 
@@ -995,7 +966,14 @@ export async function breathReduce(ctx) {
 const AIR_BOOST_MASK_HOP = 512
 
 export async function airBoostAnalyze(ctx) {
-  const airBoostConfig    = ctx.preset?.airBoost ?? {}
+  // Config may live under either key:
+  //   - `airBoostAnalyze` when the preset uses the split analyze/apply form
+  //     (analyze runs whole-file before a chunked block containing apply).
+  //   - `airBoost` when the preset uses the combined stage entry, or when
+  //     invoked from the combined `airBoost(ctx)` wrapper below.
+  // Inline-config dispatch patches ctx.preset[configKey] for the duration of
+  // the stage call, so whichever form the preset declares lands here.
+  const airBoostConfig    = ctx.preset?.airBoostAnalyze ?? ctx.preset?.airBoost ?? {}
   const gainDb            = airBoostConfig.gainDb            ?? 0
   const sibilantGainFloor = airBoostConfig.sibilantGainFloor ?? 1.0
   const attackMs          = airBoostConfig.sibilantAttackMs  ?? 5.0
@@ -1071,19 +1049,32 @@ export async function airBoostApply(ctx) {
 
   if (!params.applied) {
     ctx.results.airBoost = params
-    await logLevel(ctx, 'after air boost', ctx.currentPath, {
-      applied: false,
-      gainDb:  'skipped',
-      ...(params.skip_reason && { reason: params.skip_reason }),
-    })
     return
   }
 
-  // resolvedOutputPath holds the EQ output: in sequential mode it was
-  // written by computeAirBoostParams against the whole file; in chunked
-  // mode it was written against the chunk's carved input. Either way the
-  // mask blend below operates against this same EQ output.
-  ctx.currentPath = resolvedOutputPath
+  // Two dispatch modes for the EQ application:
+  //   Sequential — analyze ran whole-file and computeAirBoostParams already
+  //     wrote the boosted whole-file output to resolvedOutputPath. Reuse it.
+  //   Chunked    — analyze ran whole-file (in a separate preset entry above
+  //     the chunked block) and resolvedOutputPath is the whole-file EQ output
+  //     which doesn't match this chunk's carved input. Re-apply the analyze's
+  //     final band params to the chunk's pre-boost audio via applyAirBoostBands
+  //     so every chunk inherits the file-level compliance loop's decisions.
+  // The subContext field chunkCarveStartSamples doubles as the chunked-mode
+  // signal: createSubContext sets it on every chunked subCtx, parents leave it
+  // undefined.
+  const inChunked = ctx.chunkCarveStartSamples !== undefined
+  let chunkInputPath
+  let boostedPath
+  if (inChunked) {
+    chunkInputPath = ctx.currentPath
+    boostedPath    = ctx.tmp('.wav')
+    await applyAirBoostBands(chunkInputPath, boostedPath, params)
+  } else {
+    chunkInputPath = originalPath
+    boostedPath    = resolvedOutputPath
+  }
+  ctx.currentPath = boostedPath
 
   if (eventsPath && sibilantGainFloor < 1.0) {
     // Chunked mode: shift whole-file sibilance frame indices into chunk-local
@@ -1095,7 +1086,7 @@ export async function airBoostApply(ctx) {
 
     const maskedPath = ctx.tmp('.wav')
     await applyAirBoostMask(
-      originalPath, resolvedOutputPath, eventsPath, maskedPath,
+      chunkInputPath, boostedPath, eventsPath, maskedPath,
       sibilantGainFloor, attackMs, releaseMs, frameOffset,
     )
     ctx.currentPath = maskedPath
@@ -1103,17 +1094,6 @@ export async function airBoostApply(ctx) {
   }
 
   ctx.results.airBoost = params
-  await logLevel(ctx, 'after air boost', ctx.currentPath, {
-    applied:  params.applied,
-    gainDb:   params.applied_gain_db,
-    ...(params.sibilantMask && { sibilantMask: `floor=${sibilantGainFloor} src=${eventsSource}` }),
-    ...(params.pre_attenuation && {
-      preCut: `${params.pre_attenuation.gain_db.toFixed(2)} dB @ ${params.pre_attenuation.f_hz} Hz Q=${params.pre_attenuation.q}`,
-    }),
-    ...(params.gain_db_reduced_by_precut > 0 && {
-      precutGainReduction: `${params.gain_db_reduced_by_precut.toFixed(2)} dB`,
-    }),
-  })
 }
 
 export async function airBoost(ctx) {
@@ -1138,11 +1118,6 @@ export async function deEss(ctx) {
   )
   ctx.currentPath   = deEssPath
   ctx.results.deEss = deEssResult
-  await logLevel(ctx, 'after de-esser', ctx.currentPath, {
-    applied:   deEssResult.applied,
-    f0:        deEssResult.f0Hz        !== null ? `${deEssResult.f0Hz}Hz`           : 'n/a',
-    maxRed:    deEssResult.maxReductionDb !== null ? `${deEssResult.maxReductionDb}dB` : 'n/a',
-  })
 }
 
 // ── Stage: Clip-Gain De-esser ─────────────────────────────────────────────────
@@ -1261,14 +1236,6 @@ export async function clipGainDeEsserApply(ctx) {
   // re-running detection.
   ctx.results.clipGainDeEsser = { ...result, eventsPath: params.eventsPath }
 
-  await logLevel(ctx, 'after clip-gain de-esser', ctx.currentPath, {
-    applied:    result.applied,
-    treated:    `${result.treatedCount}/${result.eventCount}`,
-    skipInRng:  result.skippedInRange,
-    skipNoCtx:  result.skippedNoContext,
-    maxRed:     result.maxReductionDb != null ? `${result.maxReductionDb}dB` : 'n/a',
-  })
-
   // Drop the analyze-stage bundle now that apply has consumed it. The frames
   // array is the heavy field (~one entry per 25 ms frame, ~144k entries/hour);
   // releasing it here means the split-form preset path matches the combined
@@ -1361,16 +1328,6 @@ export async function compress(ctx) {
   )
   ctx.currentPath        = compPath
   ctx.results.compression = compressionResult
-  await logLevel(ctx, 'after compression', ctx.currentPath, {
-    applied:    compressionResult.applied,
-    passes:     compressionResult.passes ? compressionResult.passes.length : (compressionResult.applied ? 1 : 0),
-    crest_in:   compressionResult.inputCrestFactorDb  !== null ? `${compressionResult.inputCrestFactorDb}dB`  : 'n/a',
-    crest_tgt:  compressionResult.targetCrestFactorDb !== null ? `${compressionResult.targetCrestFactorDb}dB` : 'n/a',
-    crest_final: compressionResult.finalCrestFactorDb !== null ? `${compressionResult.finalCrestFactorDb}dB` : 'n/a',
-    ratio:      compressionResult.derivedRatio        !== null ? `${compressionResult.derivedRatio}:1`        : 'n/a',
-    threshold:  compressionResult.thresholdDbfs       !== null ? `${compressionResult.thresholdDbfs}dBFS`    : 'n/a',
-    maxRed:     compressionResult.maxGainReductionDb  !== null ? `${compressionResult.maxGainReductionDb}dB`  : 'n/a',
-  })
 }
 
 // ── Stage: Parallel Compression (Stage 4a-PC / NE-PC) ────────────────────────
@@ -1412,23 +1369,6 @@ export async function parallelCompress(ctx) {
   )
   ctx.currentPath = pcPath
   ctx.results.parallelCompression = result
-  // Mirror the dry clipGainDeEss log format for the wet-branch pass so the
-  // two are directly comparable: treated/total, in-range skips, no-context
-  // skips, and max reduction.
-  const pdTotal     = result.parallelDesserTotalEventCount
-  const pdTreated   = result.parallelDesserEventCount
-  const desserTreat = result.applied && pdTotal != null ? `${pdTreated}/${pdTotal}` : 'n/a'
-  await logLevel(ctx, 'after parallel compression', ctx.currentPath, {
-    applied: result.applied,
-    wet:     result.applied ? `${Math.round(result.wetMixEffective * 100)}%` : 'n/a',
-    guard:   result.applied ? result.crestFactorGuardActivated               : 'n/a',
-    desserSource:  result.applied ? (result.parallelDesserSource ?? 'off')   : 'n/a',
-    desserTreated: desserTreat,
-    desserSkipInRng: result.applied ? (result.parallelDesserSkippedInRange   ?? 'n/a') : 'n/a',
-    desserSkipNoCtx: result.applied ? (result.parallelDesserSkippedNoContext ?? 'n/a') : 'n/a',
-    desserMaxRed:  result.applied && result.parallelDesserMaxReductionDb != null
-                     ? `${result.parallelDesserMaxReductionDb}dB` : 'n/a',
-  })
 }
 
 // ── Stage: Vocal Expander (Stage 4a-E) ────────────────────────────────────────
@@ -1514,7 +1454,6 @@ export async function harmonicExciter(ctx) {
   await runHarmonicExciter(ctx.currentPath, outPath)
   ctx.currentPath = outPath
   ctx.results.harmonicExciter = { applied: true }
-  await logLevel(ctx, 'after harmonic exciter', ctx.currentPath, {})
 }
 
 // ── Stage: Vocal saturation ───────────────────────────────────────────────────
@@ -1544,7 +1483,6 @@ export async function vocalSaturation(ctx) {
     applied: true, drive, wetDry, bias, lowCrossover, midCrossover, softness,
     lowDriveMult, midDriveMult, highDriveMult,
   }
-  await logLevel(ctx, 'after vocal saturation', ctx.currentPath, {})
 }
 
 // ── Stage: Bass Enhance ───────────────────────────────────────────────────────
@@ -1592,7 +1530,6 @@ export async function bassEnhance(ctx) {
     `low_band_gain=${info.low_band_gain_db}dB ` +
     `vad_coverage=${info.vad_coverage_pct}%`,
   )
-  await logLevel(ctx, 'after bass enhance', ctx.currentPath, {})
 }
 
 // ── Stage: Room Presence (Stage 4c) ──────────────────────────────────────────
@@ -1631,7 +1568,6 @@ export async function roomPresence(ctx) {
 export async function normalize(ctx) {
   const { outputProfile } = ctx
   const normPath          = ctx.tmp('.wav')
-  let normExtras          = {}
 
   // RMS path (ACX): ungated full-file RMS via FFmpeg volumedetect. ACX measures
   // every sample in the file — silences, breaths, room tone — and the target
@@ -1666,12 +1602,6 @@ export async function normalize(ctx) {
     }
 
     await applyLinearGain(ctx.currentPath, normPath, gainDb)
-    normExtras = {
-      method:       'RMS',
-      target:       `${targetRms}dBFS`,
-      fullFileRms:  `${round2(rmsDbfs)}dBFS`,
-      gainApplied:  `${round2(gainDb)}dB`,
-    }
   } else {
     const prNormFrameAnalysis = await analyzeFrames(ctx.currentPath)
     const targetLufs          = outputProfile.normalizationTarget
@@ -1683,16 +1613,9 @@ export async function normalize(ctx) {
     }
 
     await applyLinearGain(ctx.currentPath, normPath, gainDb)
-    normExtras = {
-      method:      'LUFS',
-      target:      `${targetLufs}LUFS`,
-      voicedLufs:  `${round2(voicedLufs)}LUFS`,
-      gainApplied: `${round2(gainDb)}dB`,
-    }
   }
 
   ctx.currentPath = normPath
-  await logLevel(ctx, 'after normalization', ctx.currentPath, normExtras)
 }
 
 // ── Stage: True peak limiter ──────────────────────────────────────────────────
@@ -1930,7 +1853,6 @@ export async function separateVocals(ctx) {
   }
 
   ctx.results.separation = { model, applied: true }
-  await logLevel(ctx, 'after NE-3 separation', ctx.currentPath, { model })
 }
 
 // ── NE Stage: Post-separation validation (NE-4) ───────────────────────────────
@@ -1974,7 +1896,7 @@ export async function residualCleanup(ctx) {
   // over-processing the separated voice stem.
   const nrPath = ctx.tmp('.wav')
   const { applyNoiseReduction: applyNR } = await import('./noiseReduce.js')
-  const nrResult = await applyNR(ctx.currentPath, nrPath, { attenLimDb: 6 })
+  await applyNR(ctx.currentPath, nrPath, { attenLimDb: 6 })
   ctx.currentPath = nrPath
   ctx.results.residualCleanup = {
     applied:                     true,
@@ -1982,7 +1904,6 @@ export async function residualCleanup(ctx) {
     pre_noise_floor_dbfs:        round2(noiseFloor),
     post_cleanup_noise_floor_dbfs: null,  // measured in Stage 7
   }
-  await logLevel(ctx, 'after NE-5 residual cleanup', ctx.currentPath, { tier: nrResult.tier })
 }
 
 // ── NE Stage: Bandwidth extension (NE-6, conditional) ────────────────────────
@@ -2059,7 +1980,6 @@ export async function bandwidthExtension(ctx) {
       postEq: { applied: true, freq: postEq.freq ?? 9000, q: postEq.q ?? 2, gainDb: postEq.gainDb },
     }),
   }
-  await logLevel(ctx, `after NE-6 bandwidth extension (${bweModel})`, ctx.currentPath, {})
 }
 
 // ── CE Stage: ClearerVoice speech enhancement (CE-3) ─────────────────────────
@@ -2086,7 +2006,6 @@ export async function clearerVoiceEnhance(ctx) {
     model:   `clearervoice_${model}`,
     applied: true,
   }
-  await logLevel(ctx, 'after CE-3 ClearerVoice', ctx.currentPath, { model })
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -2115,10 +2034,9 @@ function detect60HzHum(rawNoiseFloor) {
 // @ffmpeg-installer build (Dec 2018) rejects them at filter-init time. The
 // default astats output emits both a per-channel section and an "Overall"
 // section; we parse the Overall section, which contains the global peak
-// (max across channels) and the energy-summed RMS — identical to the
-// per-channel values for mono input, the correct file-level summary for
-// stereo.
-async function logLevel(ctx, label, filePath, extras = {}) {
+// (max across channels) — identical to the per-channel value for mono input,
+// the correct file-level summary for stereo.
+async function measurePeakDbfs(filePath) {
   try {
     const { stderr } = await runFfmpeg([
       '-i', filePath,
@@ -2128,13 +2046,9 @@ async function logLevel(ctx, label, filePath, extras = {}) {
     const overallIdx = stderr.lastIndexOf('Overall')
     const scope      = overallIdx >= 0 ? stderr.slice(overallIdx) : stderr
     const peakStr    = scope.match(/Peak level dB:\s*([-\d.inf]+)/)?.[1] ?? '?'
-    const rmsStr     = scope.match(/RMS level dB:\s*([-\d.inf]+)/)?.[1]  ?? '?'
-    const extStr     = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join('  ')
-    ctx.log(`[level] ${label}: peak=${peakStr}dBFS  rms=${rmsStr}dBFS${extStr ? '  ' + extStr : ''}`)
-    const peakNum = parseFloat(peakStr)
+    const peakNum    = parseFloat(peakStr)
     return Number.isFinite(peakNum) ? peakNum : null
-  } catch (e) {
-    ctx.log(`[level] ${label}: measurement failed — ${e.message}`)
+  } catch {
     return null
   }
 }
