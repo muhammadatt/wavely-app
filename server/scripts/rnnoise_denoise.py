@@ -43,6 +43,7 @@ Artifact assessment is deferred to Stage NE-4 (post-separation validation).
 import argparse
 import json
 import sys
+import time
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -274,6 +275,23 @@ def main(argv=None):
                   file=sys.stderr)
             silero_mask = None
 
+    # Sub-stage timing buckets. Surfaced to JS in the result dict as
+    # `timing_ms` so the harness-vs-codec ratio is readable in a single log
+    # line. perf_counter is monotonic and high-resolution; bucket totals add
+    # up to total_ms within a few ms of `time.perf_counter()` jitter.
+    timing_ms = {
+        'load':         0.0,
+        'resample_in':  0.0,
+        'denoise':      0.0,
+        'vad_gate':     0.0,
+        'resample_out': 0.0,
+        'write':        0.0,
+        'sidecar':      0.0,
+        'total':        0.0,
+    }
+    _total_start = time.perf_counter()
+    _t = time.perf_counter()
+
     # Load input — pipeline format is 32-bit float 44.1 kHz
     # wavfile returns (samples,) mono or (samples, channels) stereo
     sr, audio_np = wavfile.read(args.input)
@@ -301,9 +319,12 @@ def main(argv=None):
         np.zeros((waveform.shape[0], pad_samples_in), dtype=waveform.dtype),
         waveform,
     ], axis=1)
+    timing_ms['load'] = (time.perf_counter() - _t) * 1000.0
+    _t = time.perf_counter()
 
     # Resample to 48 kHz for RNNoise
     waveform = _resample(waveform, sr, RNNOISE_SR)
+    timing_ms['resample_in'] = (time.perf_counter() - _t) * 1000.0
 
     # Apply RNNoise via the streaming denoise_chunk API.
     #
@@ -328,6 +349,7 @@ def main(argv=None):
     speech_probs = None      # np.ndarray[float32] when populated
     silero_per_rnn = None    # np.ndarray[bool], one entry per RNNoise frame
     vad_gate_stats = None
+    _t = time.perf_counter()
     if rnn is not None:
         pcm16 = np.clip(waveform[0] * 32767, -32768, 32767).astype(np.int16)
 
@@ -405,6 +427,9 @@ def main(argv=None):
                 # sample it cleaned, so a naïve same-index mix would splice
                 # the onset's "future" onto its denoised position — audible
                 # as a 20 ms doubled onset at every override boundary.
+                # Subtract this from the denoise bucket so the gate's cost
+                # is reported in isolation.
+                _t_gate = time.perf_counter()
                 vad_gate_stats = _apply_vad_gate(
                     denoised_pcm16,
                     pcm16,
@@ -415,6 +440,7 @@ def main(argv=None):
                     algo_delay_samples=algo_delay_frames * (RNNOISE_SR // 100),
                     hangover_frames=args.hangover_frames,
                 )
+                timing_ms['vad_gate'] = (time.perf_counter() - _t_gate) * 1000.0
                 # _apply_vad_gate returns the gated buffer under '_buffer'
                 # alongside the stats; pop it out before reporting.
                 denoised_pcm16 = vad_gate_stats.pop('_buffer')
@@ -428,8 +454,14 @@ def main(argv=None):
         print('[rnnoise] WARNING: pyrnnoise not installed — NE-1 pre-pass skipped, '
               'passing audio through unchanged.', file=sys.stderr)
 
+    # Bucket includes the silero_per_rnn resolve + denoise loop; vad_gate has
+    # already been subtracted into its own bucket above when active.
+    timing_ms['denoise'] = max(0.0, (time.perf_counter() - _t) * 1000.0 - timing_ms['vad_gate'])
+
     # Resample back to 44.1 kHz (pipeline internal format)
+    _t = time.perf_counter()
     waveform = _resample(waveform, RNNOISE_SR, PIPELINE_SR)
+    timing_ms['resample_out'] = (time.perf_counter() - _t) * 1000.0
 
     # Strip 20 ms internal pad + 20 ms RNNoise algorithmic delay = 40 ms total.
     # After the strip the leading edge is the original audio at its correct
@@ -451,13 +483,16 @@ def main(argv=None):
         ], axis=1)
 
     # Write 32-bit float WAV at 44.1 kHz, mono
+    _t = time.perf_counter()
     wavfile.write(args.output, PIPELINE_SR, waveform[0].astype(np.float32))
+    timing_ms['write'] = (time.perf_counter() - _t) * 1000.0
 
     # Diagnostic: dump per-frame VAD speech_prob curve from pyrnnoise.
     # Each yielded frame is 10 ms at 48 kHz. Output frame index `i` aligns
     # with original-audio time `(i - strip_frames) * 10` ms. The Silero mask
     # (if any) was already resolved onto the RNNoise frame grid above so the
     # gate and the dump share the same alignment.
+    _t = time.perf_counter()
     if args.speech_prob_out and speech_probs is not None and speech_probs.size > 0:
         arr = speech_probs.astype(np.float64, copy=False)
         sidecar = {
@@ -505,9 +540,13 @@ def main(argv=None):
             print(f"[rnnoise] WARNING: failed to write speech_prob sidecar "
                   f"({args.speech_prob_out}): {e}", file=sys.stderr)
 
+    timing_ms['sidecar'] = (time.perf_counter() - _t) * 1000.0
+    timing_ms['total']   = (time.perf_counter() - _total_start) * 1000.0
+
     result = {
         'model': 'RNNoise',
         'speech_prob_out': args.speech_prob_out if args.speech_prob_out else None,
+        'timing_ms': {k: round(v, 1) for k, v in timing_ms.items()},
     }
     if vad_gate_stats is not None:
         # Strip any internal-only keys before surfacing to the caller.
