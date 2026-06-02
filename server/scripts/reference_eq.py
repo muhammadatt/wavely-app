@@ -223,9 +223,62 @@ def build_fir(applied_db, sr):
     return fir
 
 
+# ── ACX analytic LF cap solver ────────────────────────────────────────────────
+# Replaces the JS-side apply-and-remeasure retry loop. The FIR's realised
+# response is the log-freq / dB interpolation of the per-1/3-octave applied
+# curve (see build_fir). Predicting lift from that interpolation against the
+# silence-frame noise PSD lets us bisect the sub-500 Hz cap analytically and
+# build the FIR exactly once.
+
+def predict_noise_floor_lift_db(applied_db, psd_freq_hz, psd_power):
+    """RMS lift in dB the applied curve would impose on a signal with this PSD."""
+    log_centers = np.log2(THIRD_OCTAVE_CENTERS)
+    log_psd_f   = np.log2(np.clip(psd_freq_hz, 1.0, None))
+    psd_db      = np.interp(log_psd_f, log_centers, applied_db)
+    gain_sq     = 10.0 ** (psd_db / 10.0)
+    power_in    = float(np.sum(psd_power))
+    if power_in <= 0:
+        return 0.0
+    return 10.0 * np.log10(float(np.sum(gain_sq * psd_power)) / power_in)
+
+
+def solve_acx_lf_cap(reference_levels, recording_levels,
+                     lf_max_boost_db_init, headroom_db,
+                     psd_freq_hz, psd_power):
+    """
+    Bisect the sub-500 Hz boost cap so predicted lift ≤ headroom_db.
+    Returns (final_cap_db, applied_db, predicted_lift_db, exhausted).
+    """
+    def lift_at(cap):
+        _, _, ap, _ = compute_correction(reference_levels, recording_levels, cap)
+        return predict_noise_floor_lift_db(ap, psd_freq_hz, psd_power), ap
+
+    base_lift, base_applied = lift_at(lf_max_boost_db_init)
+    if base_lift <= headroom_db:
+        return lf_max_boost_db_init, base_applied, base_lift, False
+
+    floor_lift, floor_applied = lift_at(0.0)
+    if floor_lift > headroom_db:
+        # Even with the LF boost fully capped at 0 dB the non-LF correction
+        # alone predicts over-headroom lift — surface this to the caller.
+        return 0.0, floor_applied, floor_lift, True
+
+    lo, hi = 0.0, lf_max_boost_db_init
+    for _ in range(14):
+        mid = (lo + hi) / 2
+        lift, _ = lift_at(mid)
+        if lift > headroom_db:
+            hi = mid
+        else:
+            lo = mid
+    final_lift, final_applied = lift_at(lo)
+    return lo, final_applied, final_lift, False
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def apply_reference_eq(audio, sr, reference_levels, noise_floor_db, lf_max_boost_db):
+def apply_reference_eq(audio, sr, reference_levels, noise_floor_db, lf_max_boost_db,
+                       acx_target_noise_floor_db=None, noise_psd=None):
     recording_levels, n_speech = speech_spectrum(audio, sr, noise_floor_db)
     if recording_levels is None:
         return {
@@ -238,6 +291,29 @@ def apply_reference_eq(audio, sr, reference_levels, noise_floor_db, lf_max_boost
     raw, smoothed, applied, centering_offset = compute_correction(
         reference_levels, recording_levels, lf_max_boost_db,
     )
+
+    # ACX analytic LF cap backoff. The JS-side ACX retry loop is replaced by a
+    # single closed-form solve here when both --acx-target-noise-floor-db and
+    # --noise-psd-json are supplied (pre-EQ noise floor comes from --noise-floor).
+    acx_backoff = None
+    if (acx_target_noise_floor_db is not None
+            and noise_floor_db is not None
+            and noise_psd is not None):
+        headroom_db = acx_target_noise_floor_db - noise_floor_db
+        final_cap, applied, predicted_lift_db, exhausted = solve_acx_lf_cap(
+            reference_levels, recording_levels, lf_max_boost_db, headroom_db,
+            noise_psd['freq_hz'], noise_psd['power'],
+        )
+        acx_backoff = {
+            'requested_lf_max_boost_db': round(float(lf_max_boost_db), 3),
+            'applied_lf_max_boost_db':   round(float(final_cap), 3),
+            'predicted_lift_db':         round(float(predicted_lift_db), 3),
+            'headroom_db':               round(float(headroom_db), 3),
+            'psd_source':                noise_psd.get('source', 'measured'),
+            'exhausted':                 bool(exhausted),
+        }
+        lf_max_boost_db = final_cap
+
     max_correction = float(np.max(np.abs(applied)))
 
     if max_correction < SKIP_THRESHOLD_DB:
@@ -283,6 +359,8 @@ def apply_reference_eq(audio, sr, reference_levels, noise_floor_db, lf_max_boost
             for v in reference_levels
         ],
     }
+    if acx_backoff is not None:
+        result['acx_backoff'] = acx_backoff
     return result, corrected.astype(np.float32)
 
 
@@ -307,7 +385,11 @@ def main(argv=None):
     parser.add_argument('--noise-floor', type=float, default=None,
                         help='Canonical pipeline noise floor (dBFS) for the speech gate')
     parser.add_argument('--lf-max-boost-db', type=float, default=DEFAULT_LF_MAX_BOOST_DB,
-                        help='Sub-500 Hz boost cap (dB) — tightened on the ACX retry')
+                        help='Sub-500 Hz boost cap (dB) — starting cap for the analytic ACX backoff')
+    parser.add_argument('--noise-psd-json', type=str, default=None,
+                        help='Path to PSD JSON ({freq_hz, power, source}) for the analytic ACX backoff')
+    parser.add_argument('--acx-target-noise-floor-db', type=float, default=None,
+                        help='ACX post-EQ noise-floor ceiling (dBFS); enables analytic LF cap solve')
     args = parser.parse_args(argv)
 
     with open(args.curve) as fh:
@@ -320,10 +402,22 @@ def main(argv=None):
             np.log2(THIRD_OCTAVE_CENTERS), np.log2(curve_freqs), curve_levels,
         )
 
+    noise_psd = None
+    if args.noise_psd_json is not None:
+        with open(args.noise_psd_json) as fh:
+            psd_raw = json.load(fh)
+        noise_psd = {
+            'freq_hz': np.asarray(psd_raw['freq_hz'], dtype=float),
+            'power':   np.asarray(psd_raw['power'],   dtype=float),
+            'source':  psd_raw.get('source', 'measured'),
+        }
+
     sr, audio = _load_audio(args.input)
     result, corrected = apply_reference_eq(
         audio, sr, curve_levels, args.noise_floor,
         min(args.lf_max_boost_db, DEFAULT_LF_MAX_BOOST_DB),
+        acx_target_noise_floor_db=args.acx_target_noise_floor_db,
+        noise_psd=noise_psd,
     )
 
     result['reference_corpus_version'] = curve.get('corpus_version')

@@ -53,11 +53,15 @@ export async function getReferenceCurvePath(presetId) {
  *
  * @param {object} ctx              Pipeline context
  * @param {string} curvePath        Reference curve JSON path
- * @param {number} lfMaxBoostDb     Sub-500 Hz boost cap (dB) — tightened on the ACX retry
+ * @param {number} lfMaxBoostDb     Sub-500 Hz boost cap (dB) — starting cap for the analytic ACX backoff
+ * @param {object} [opts]
+ * @param {string} [opts.noisePsdPath]            PSD JSON path enabling the analytic ACX LF cap solve
+ * @param {number} [opts.acxTargetNoiseFloorDb]   ACX post-EQ noise-floor ceiling (dBFS)
+ * @param {number} [opts.noiseFloorDb]            Override for --noise-floor (locally-measured floor for the ACX path); falls back to ctx.results.metrics.noiseFloorDbfs
  * @returns {Promise<{ result: object, outputPath: string|null }>}
  *          outputPath is the corrected WAV when result.applied is true, else null.
  */
-export async function runReferenceEQPass(ctx, curvePath, lfMaxBoostDb) {
+export async function runReferenceEQPass(ctx, curvePath, lfMaxBoostDb, opts = {}) {
   const outputPath = ctx.tmp('.wav')
   const resultPath = ctx.tmp('.json')
 
@@ -69,8 +73,15 @@ export async function runReferenceEQPass(ctx, curvePath, lfMaxBoostDb) {
     '--lf-max-boost-db', String(lfMaxBoostDb),
   ]
 
-  const noiseFloor = ctx.results.metrics?.noiseFloorDbfs
+  const noiseFloor = opts.noiseFloorDb ?? ctx.results.metrics?.noiseFloorDbfs
   if (noiseFloor != null) args.push('--noise-floor', String(noiseFloor))
+
+  if (opts.noisePsdPath) {
+    args.push('--noise-psd-json', opts.noisePsdPath)
+  }
+  if (opts.acxTargetNoiseFloorDb != null) {
+    args.push('--acx-target-noise-floor-db', String(opts.acxTargetNoiseFloorDb))
+  }
 
   let result
   try {

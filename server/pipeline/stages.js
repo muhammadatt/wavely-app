@@ -42,13 +42,19 @@ import {
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
 import { analyzeFrames, remeasureFrames, measureNoiseFloorOnly } from './frameAnalysis.js'
 import { analyzeCorrectiveEQ, bandsToFfmpegFilters } from './correctiveEQ.js'
+import {
+  measureNoiseFloorPsd,
+  pinkPsdFallback,
+  serializePsd,
+  solveAcxLfBoostReductionDb,
+} from './eqNoiseFloorModel.js'
 import { applyRoomTonePadding } from './roomTone.js'
 import { generateQualityAdvisory } from './riskAssessment.js'
 import { analyzeAndDeEss } from './deEsser.js'
 import { applyClipGainDeEsser } from './clipGainDeEsser.js'
 import { applyCompression } from './compression.js'
 import { runSeparation, runClearerVoice } from './separation.js'
-import { writeFile } from 'fs/promises'
+import { writeFile, rm } from 'fs/promises'
 import { runHarmonicExciter, runVocalSaturation, runDereverb, runApBwe, runLavaSR, runClickRemover, runThroatClickAttenuator, applyResonanceSuppression, applyBreathReduction, runSpectralSubtraction, runRoomPresence } from './enhancement.js'
 import { validateSeparation } from './separationValidation.js'
 import { analyzeAutoLeveler, renderAutoLeveler } from './autoLeveler.js'
@@ -706,14 +712,10 @@ export async function roomTonePad(ctx) {
 
 // Analyze pair (correctiveEQAnalyze / correctiveEQApply):
 //   Analyze produces the final EQ band list. For acx output profile it runs
-//   the noise-floor convergence loop (apply tentative bands → remeasure floor
-//   → trim low-frequency boosts), so analyze does write intermediate temp
-//   files. Apply then runs a single parametric EQ pass with the converged
-//   bands. The redundant final apply costs one FFmpeg call (~50 ms) but
-//   keeps the contract clean: analyze=bands, apply=EQ filter.
-//
-//   For chunked processing later, the ACX convergence inside analyze would
-//   be replaced with a predictive noise-floor delta — but that's a follow-up.
+//   the noise-floor backoff analytically — predicting the post-EQ lift from
+//   the band cascade response and the silence-frame noise PSD — so analyze
+//   does no audio I/O. Apply then runs a single parametric EQ pass with the
+//   converged bands. analyze=bands, apply=EQ filter.
 
 export async function correctiveEQAnalyze(ctx) {
   if (ctx.presetId === 'noise_eraser') {
@@ -728,34 +730,51 @@ export async function correctiveEQAnalyze(ctx) {
   }
 
   const result = await analyzeCorrectiveEQ(ctx)
-  let bands  = result.bands ?? []
-  let eqPath = ctx.tmp('.wav')
-  await applyParametricEQ(ctx.currentPath, eqPath, bandsToFfmpegFilters(bands))
+  let bands = result.bands ?? []
 
   // ACX noise floor constraint: a low-frequency boost (body_warmth) can lift
-  // the measured noise floor above the -60 dBFS ACX threshold. Re-measure and
-  // back the boost off in 1 dB steps until compliant, or drop the band.
+  // the measured noise floor above the -60 dBFS ACX ceiling. Predict the lift
+  // analytically from the band cascade's digital-biquad response weighted by
+  // the silence-frame noise PSD (pink-1/f fallback when too few silence frames
+  // are available), then solve once for the smallest uniform reduction across
+  // LF boost bands that keeps the predicted post-EQ floor inside the ceiling.
+  // The apply pass moves entirely to correctiveEQApply.
   const isLowFreqBoost = b => b.gain_db > 0 && b.freq_hz <= 400
   if (ctx.outputProfileId === 'acx' && bands.some(isLowFreqBoost)) {
-    let reductionDb = 0
-    for (let iter = 0; iter < 6; iter++) {
-      const m = await remeasureFrames(eqPath, ctx.results.metrics)
-      if (m.noiseFloorDbfs <= -60) break
-      let changed = false
-      bands = bands
-        .map(b => {
-          if (!isLowFreqBoost(b)) return b
-          changed = true
-          return { ...b, gain_db: round2(Math.max(0, b.gain_db - 1)) }
-        })
-        .filter(b => Math.abs(b.gain_db) >= 0.1)
-      if (!changed) break
-      reductionDb += 1
-      ctx.log(`[correctiveEQ] ACX noise floor ${m.noiseFloorDbfs} dBFS > -60 — reduced low-frequency boost by 1 dB`)
-      eqPath = ctx.tmp('.wav')
-      await applyParametricEQ(ctx.currentPath, eqPath, bandsToFfmpegFilters(bands))
+    const targetDb      = ctx.outputProfile?.noiseFloorCeiling ?? -60
+    // Measure scalar floor + PSD off the current audio in one pass so the
+    // headroom math (target - pre) and the lift prediction describe the same
+    // silence-frame population. The ctx scalar (potentially several stages
+    // stale) is only the fallback when the local measurement is unavailable.
+    const measured      = await measureNoiseFloorPsd(ctx.currentPath, ctx.results.metrics?.frames)
+    const psd           = measured ?? pinkPsdFallback()
+    const noiseFloorPre = measured?.noiseFloorDbfs ?? ctx.results.metrics?.noiseFloorDbfs
+    if (noiseFloorPre != null) {
+      const solve = solveAcxLfBoostReductionDb(
+        bands, noiseFloorPre, targetDb, psd, isLowFreqBoost,
+      )
+      bands = solve.bands.map(b => ({ ...b, gain_db: round2(b.gain_db) }))
+      result.acx_lift_predicted_db = round2(solve.predictedLiftDb)
+      result.acx_psd_source        = psd.source
+      if (solve.reductionDb > 0) {
+        result.acxNoiseFloorReductionDb = round2(solve.reductionDb)
+      }
+      if (solve.exhausted) {
+        result.acx_unresolved = true
+        ctx.log(
+          `[correctiveEQ] ACX backoff exhausted — predicted lift ` +
+          `${solve.predictedLiftDb.toFixed(2)} dB still exceeds headroom ` +
+          `(pre ${noiseFloorPre} dBFS, target ${targetDb} dBFS, psd=${psd.source})`,
+        )
+      } else if (solve.reductionDb > 0) {
+        ctx.log(
+          `[correctiveEQ] ACX backoff: LF boosts reduced by ` +
+          `${solve.reductionDb.toFixed(2)} dB ` +
+          `(predicted lift ${solve.predictedLiftDb.toFixed(2)} dB, ` +
+          `pre ${noiseFloorPre} dBFS, target ${targetDb} dBFS, psd=${psd.source})`,
+        )
+      }
     }
-    if (reductionDb > 0) result.acxNoiseFloorReductionDb = reductionDb
   }
 
   result.bands        = bands
@@ -791,11 +810,10 @@ export async function correctiveEQ(ctx) {
 // stage is safe to wire in before the corpus is sourced.
 //
 // ACX: a sub-500 Hz boost can lift the noise floor above the -60 dBFS ceiling.
-// The pass is re-run with a tightened sub-500 Hz boost cap until compliant,
-// mirroring correctiveEQ and airBoost.
+// The Python side runs an analytic LF-cap solve (bisection over the predicted
+// lift against the silence-frame noise PSD) so the FIR is built exactly once.
 
 const REFERENCE_EQ_LF_CAP_START_DB = 2.0
-const REFERENCE_EQ_LF_CAP_STEP_DB  = 0.5
 
 export async function referenceEQ(ctx) {
   if (ctx.presetId === 'noise_eraser') {
@@ -818,20 +836,49 @@ export async function referenceEQ(ctx) {
     return
   }
 
-  let lfMaxBoostDb = REFERENCE_EQ_LF_CAP_START_DB
-  let { result, outputPath } = await runReferenceEQPass(ctx, curvePath, lfMaxBoostDb)
-
-  if (result.applied && ctx.outputProfileId === 'acx' && result.lf_boost_applied) {
-    for (let iter = 0; iter < 5; iter++) {
-      const m = await remeasureFrames(outputPath, ctx.results.metrics)
-      if (m.noiseFloorDbfs <= -60) break
-      if (lfMaxBoostDb <= 0) break  // sub-500 Hz boost already fully capped
-      lfMaxBoostDb = Math.max(0, lfMaxBoostDb - REFERENCE_EQ_LF_CAP_STEP_DB)
-      ctx.log(`[referenceEQ] ACX noise floor ${m.noiseFloorDbfs} dBFS > -60 — tightening sub-500 Hz boost cap to ${lfMaxBoostDb} dB`)
-      ;({ result, outputPath } = await runReferenceEQPass(ctx, curvePath, lfMaxBoostDb))
-      result.acx_constrained = true
-      if (!result.applied) break
+  // For ACX, supply the Python solver with the current silence-frame noise PSD
+  // and the post-EQ ceiling. The script bisects the sub-500 Hz boost cap
+  // analytically — no JS-side apply+remeasure retries. The local scalar floor
+  // co-measured with the PSD is passed via --noise-floor so the script's
+  // headroom math sees the same silence population as the lift prediction;
+  // the ctx scalar is only the fallback when the local measurement is missing.
+  const passOpts = {}
+  let psdPath = null
+  if (ctx.outputProfileId === 'acx') {
+    const targetDb = ctx.outputProfile?.noiseFloorCeiling ?? -60
+    const measured = await measureNoiseFloorPsd(ctx.currentPath, ctx.results.metrics?.frames)
+    const psd      = measured ?? pinkPsdFallback()
+    psdPath = ctx.tmp('.json')
+    await writeFile(psdPath, JSON.stringify(serializePsd(psd)))
+    passOpts.noisePsdPath          = psdPath
+    passOpts.acxTargetNoiseFloorDb = targetDb
+    if (measured?.noiseFloorDbfs != null) {
+      passOpts.noiseFloorDb = measured.noiseFloorDbfs
     }
+  }
+
+  let result, outputPath
+  try {
+    ({ result, outputPath } = await runReferenceEQPass(
+      ctx, curvePath, REFERENCE_EQ_LF_CAP_START_DB, passOpts,
+    ))
+  } finally {
+    if (psdPath) await rm(psdPath, { force: true })
+  }
+
+  // Surface the analytic backoff as acxNoiseFloorReductionDb for parity with
+  // the correctiveEQ result key the UI / report consumers already read.
+  const backoff = result.acx_backoff
+  if (backoff) {
+    const reductionDb = backoff.requested_lf_max_boost_db - backoff.applied_lf_max_boost_db
+    if (reductionDb > 0) result.acxNoiseFloorReductionDb = round2(reductionDb)
+    if (backoff.exhausted) result.acx_unresolved = true
+    ctx.log(
+      `[referenceEQ] ACX backoff: LF cap ${backoff.requested_lf_max_boost_db} → ` +
+      `${backoff.applied_lf_max_boost_db} dB ` +
+      `(predicted lift ${backoff.predicted_lift_db} dB, headroom ${backoff.headroom_db} dB, ` +
+      `psd=${backoff.psd_source}${backoff.exhausted ? ', exhausted' : ''})`,
+    )
   }
 
   if (result.applied && outputPath) ctx.currentPath = outputPath
