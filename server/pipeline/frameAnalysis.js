@@ -172,12 +172,26 @@ async function analyzeAudioFramesSilero(wavPath) {
     // through to the single whole-file call below. Seams are silence-snapped
     // and warm-up-padded, so core-region labels match the whole-file run; set
     // SILERO_PARALLEL=0 to force the single call for A/B comparison.
-    const parallel = await classifySileroVadParallel(vadInput, {
-      energyFrameRms:       frameRms,
-      silenceThresholdDbfs: silenceThreshold,
-      numFrames,
-      runVad:               spawnSilero,
-    })
+    //
+    // A failure in the parallel path (FFmpeg carve / JSON parse / worker error)
+    // degrades to the single whole-file Silero call below — NOT to the energy
+    // backend. The energy fallback is reserved for Silero itself being broken;
+    // a chunking-layer hiccup should still get neural VAD, just non-parallel.
+    let parallel = null
+    try {
+      parallel = await classifySileroVadParallel(vadInput, {
+        energyFrameRms:       frameRms,
+        silenceThresholdDbfs: silenceThreshold,
+        numFrames,
+        runVad:               spawnSilero,
+      })
+    } catch (err) {
+      console.warn(
+        `[silence] parallel Silero VAD failed — falling back to the single ` +
+        `whole-file call. Reason: ${err.message}`
+      )
+      parallel = null
+    }
 
     if (parallel) {
       sileroFrames = parallel.frames

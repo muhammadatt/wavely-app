@@ -86,7 +86,20 @@ async function stubRunVad(inputPath, outputJsonPath) {
   await writeFile(outputJsonPath, JSON.stringify({ frames }))
 }
 
+// Env keys this suite mutates. Captured in before() and restored in after()
+// so leaked values can't make sibling tests order-dependent when node:test
+// shares a process.
+const MUTATED_ENV = [
+  'PYTHON_WORKER_POOL_SIZE',
+  'SILERO_PARALLEL',
+  'SILERO_PARALLEL_MIN_CHUNK_S',
+  'SILERO_PARALLEL_MAX_CHUNK_S',
+  'SILERO_PARALLEL_WARMUP_S',
+]
+const SAVED_ENV = {}
+
 before(() => {
+  for (const k of MUTATED_ENV) SAVED_ENV[k] = process.env[k]
   // Parallelism is gated on a multi-worker pool; the planner minimum is lowered
   // so the short fixture splits.
   process.env.PYTHON_WORKER_POOL_SIZE     = '4'
@@ -97,6 +110,10 @@ before(() => {
 })
 
 after(async () => {
+  for (const k of MUTATED_ENV) {
+    if (SAVED_ENV[k] === undefined) delete process.env[k]
+    else process.env[k] = SAVED_ENV[k]
+  }
   for (const f of TEMP_FILES) await removeTmp(f)
 })
 

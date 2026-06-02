@@ -64,6 +64,24 @@ const { FRAME_DURATION_S } = JSON.parse(
 const SILERO_SR = 16000  // VAD input is pre-resampled to 16 kHz mono by the caller
 
 /**
+ * Read a numeric env var, falling back to `fallback` for unset, empty,
+ * non-numeric, non-finite, or out-of-range values. Keeps a fat-fingered .env
+ * from poisoning the planner/carve math with NaN (which would otherwise throw
+ * at targetS.toFixed() or propagate into extractAudioRange sample indices).
+ *
+ * @param {string} name
+ * @param {number} fallback
+ * @param {{ min?: number, integer?: boolean }} [opts]
+ */
+function envNum(name, fallback, { min = 0, integer = false } = {}) {
+  const raw = process.env[name]
+  if (raw == null || raw === '') return fallback
+  const n = integer ? parseInt(raw, 10) : parseFloat(raw)
+  if (!Number.isFinite(n) || n < min) return fallback
+  return n
+}
+
+/**
  * Classify a 16 kHz mono VAD input in parallel. See module header.
  *
  * @param {string} vadInputPath  16 kHz mono float32 WAV (the caller's pre-resampled VAD input)
@@ -120,9 +138,11 @@ export async function classifySileroVadParallel(vadInputPath, {
   // Aim for roughly one chunk per worker; planChunkBoundaries clamps to its
   // min/max and snaps each seam to the nearest qualifying silence region.
   const totalS    = total16k / sr16
-  const minChunkS = parseFloat(process.env.SILERO_PARALLEL_MIN_CHUNK_S ?? '20')
-  const maxChunkS = parseFloat(process.env.SILERO_PARALLEL_MAX_CHUNK_S ?? '600')
-  const minSilMs  = parseInt(process.env.SILERO_PARALLEL_MIN_SILENCE_MS ?? '500', 10)
+  const minChunkS = envNum('SILERO_PARALLEL_MIN_CHUNK_S', 20, { min: 1 })
+  // Keep max ≥ min even if the operator inverts them, so the planner clamp
+  // window stays well-formed.
+  const maxChunkS = Math.max(minChunkS, envNum('SILERO_PARALLEL_MAX_CHUNK_S', 600, { min: 1 }))
+  const minSilMs  = envNum('SILERO_PARALLEL_MIN_SILENCE_MS', 500, { min: 0, integer: true })
   const targetS   = Math.min(maxChunkS, Math.max(minChunkS, totalS / poolSize))
 
   const plan = planChunkBoundaries({
@@ -152,7 +172,7 @@ export async function classifySileroVadParallel(vadInputPath, {
   cores[0].coreStartFrame              = 0
   cores[cores.length - 1].coreEndFrame = nPlan
 
-  const warmupS      = parseFloat(process.env.SILERO_PARALLEL_WARMUP_S ?? '2')
+  const warmupS      = envNum('SILERO_PARALLEL_WARMUP_S', 2, { min: 0 })
   const warmupFrames = Math.max(0, Math.round(warmupS * SILERO_SR / samplesPerFrame))
 
   const limit = Math.min(cores.length, poolSize)
