@@ -374,8 +374,14 @@ export async function applyAirBoostBands(inputPath, outputPath, params) {
  * Envelope behaviour: fast attack (boost drops when sibilant starts), slower
  * release (boost recovers after the sibilant ends) — matching de-esser timing.
  *
- * output = original + (boosted − original) × gain_envelope
- *        = original × (1 − env) + boosted × env
+ * Mask is frequency-selective: the envelope only reaches FFT bins above
+ * `maskCutoffHz` (with a `maskTransitionOct`-wide log-frequency taper). Bins
+ * below the cutoff keep the full boost on every frame, so the corrective
+ * 600/1200/2400/4800 Hz bells survive on sibilants too and only the 9.6 kHz
+ * bell + 14 kHz shelf actually get attenuated.
+ *
+ * output = original + (boosted − original) × env_2d,
+ *   env_2d = 1 − (1 − env_frame) × freq_weight
  *
  * @param {string} originalPath     Pre-boost WAV (ctx.currentPath before airBoost ran)
  * @param {string} boostedPath      Post-FFmpeg-EQ WAV (output of computeAirBoostParams)
@@ -391,6 +397,12 @@ export async function applyAirBoostBands(inputPath, outputPath, params) {
  *                                  STFT frames so whole-file indices resolve
  *                                  to chunk-local frames. Sequential callers
  *                                  leave this at 0.
+ * @param {number} [maskCutoffHz=4500]      Lower edge of the freq-selective mask.
+ *                                          Default sits at the Maag shelf's
+ *                                          -3 dB knee.
+ * @param {number} [maskTransitionOct=1.0]  Log-frequency taper width in octaves
+ *                                          across the preserved → masked
+ *                                          transition; <= 0 means hard split.
  */
 export async function applyAirBoostMask(
   originalPath,
@@ -401,6 +413,8 @@ export async function applyAirBoostMask(
   attackMs          = 5.0,
   releaseMs         = 20.0,
   frameOffset       = 0,
+  maskCutoffHz      = 4500.0,
+  maskTransitionOct = 1.0,
 ) {
   const args = [
     '--original',            originalPath,
@@ -410,6 +424,8 @@ export async function applyAirBoostMask(
     '--sibilant-gain-floor', String(sibilantGainFloor),
     '--attack-ms',           String(attackMs),
     '--release-ms',          String(releaseMs),
+    '--mask-cutoff-hz',      String(maskCutoffHz),
+    '--mask-transition-oct', String(maskTransitionOct),
   ]
   if (frameOffset !== 0) {
     args.push('--frame-offset', String(frameOffset))

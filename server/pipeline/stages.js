@@ -1025,6 +1025,15 @@ export async function airBoostAnalyze(ctx) {
   const sibilantGainFloor = airBoostConfig.sibilantGainFloor ?? 1.0
   const attackMs          = airBoostConfig.sibilantAttackMs  ?? 5.0
   const releaseMs         = airBoostConfig.sibilantReleaseMs ?? 20.0
+  // Frequency-selective mask. 4500 Hz default sits at the Maag shelf's -3 dB
+  // knee so the 600/1200/2400/4800 Hz bells stay active on sibilant frames
+  // and only the 9.6 kHz bell + 14 kHz shelf attenuate. 1.0-octave taper
+  // keeps the transition smooth on the log axis. Both are surfaced through
+  // the preset config so a preset can widen/narrow the masked band if
+  // needed; defaults are sensible enough that no current preset overrides
+  // them.
+  const maskCutoffHz      = airBoostConfig.maskCutoffHz      ?? 4500.0
+  const maskTransitionOct = airBoostConfig.maskTransitionOct ?? 1.0
 
   const originalPath  = ctx.currentPath
   const resolvedOutputPath = ctx.tmp('.wav')
@@ -1062,10 +1071,18 @@ export async function airBoostAnalyze(ctx) {
     // map was discarded, and airBoost fell through to de novo detection —
     // exactly the fallback this block is meant to avoid (see comment above).
     const upstreamEventsPath = ctx.results.clipGainDeEsser?.eventsPath ?? null
+    const upstreamEventCount = ctx.results.clipGainDeEsser?.eventCount ?? null
 
     if (upstreamEventsPath) {
       eventsPath   = upstreamEventsPath
       eventsSource = 'upstream'
+      console.log(
+        `[AirBoost] mask enabled (floor=${sibilantGainFloor.toFixed(2)} ` +
+        `attack=${attackMs}ms release=${releaseMs}ms ` +
+        `cutoff=${maskCutoffHz.toFixed(0)}Hz transition=${maskTransitionOct.toFixed(2)}oct) ` +
+        `— reusing upstream clipGainDeEsser events ` +
+        `(events=${upstreamEventCount ?? '?'}, path=${upstreamEventsPath})`
+      )
     } else {
       // Fallback: de novo detection on the PRE-boost signal. ctx.currentPath is
       // still originalPath here, which is exactly what we detect on.
@@ -1084,6 +1101,12 @@ export async function airBoostAnalyze(ctx) {
       // time-invariant and pitch-neutral), so pre-boost detection yields the
       // correct mask targets. This also matches the upstream clipGainDeEsser
       // path above, whose pre-boost boundaries are documented as correct.
+      console.log(
+        `[AirBoost] mask enabled (floor=${sibilantGainFloor.toFixed(2)} ` +
+        `attack=${attackMs}ms release=${releaseMs}ms ` +
+        `cutoff=${maskCutoffHz.toFixed(0)}Hz transition=${maskTransitionOct.toFixed(2)}oct) ` +
+        `— no upstream events available, running de novo sibilance detection`
+      )
       const f0Contour = await getF0Contour(ctx, { useCache: true })
       const sibResult = await analyzeSibilanceEvents(ctx, {
         params:    airBoostConfig.sibilanceDetection,
@@ -1092,6 +1115,12 @@ export async function airBoostAnalyze(ctx) {
       eventsPath   = sibResult?.path ?? null
       eventsSource = 'denovo'
     }
+  } else if (params.applied) {
+    console.log(
+      `[AirBoost] mask disabled (sibilantGainFloor=${sibilantGainFloor.toFixed(2)}) — ` +
+      `applying ${params.applied_gain_db ?? params.requested_gain_db ?? gainDb} dB ` +
+      `boost on the continuous signal path`
+    )
   }
 
   ctx.globalParams.airBoost = {
@@ -1103,6 +1132,8 @@ export async function airBoostAnalyze(ctx) {
     sibilantGainFloor,
     attackMs,
     releaseMs,
+    maskCutoffHz,
+    maskTransitionOct,
   }
 }
 
@@ -1111,12 +1142,33 @@ export async function airBoostApply(ctx) {
   if (!gp) return
 
   const { params, resolvedOutputPath, originalPath, eventsPath, eventsSource,
-          sibilantGainFloor, attackMs, releaseMs } = gp
+          sibilantGainFloor, attackMs, releaseMs,
+          maskCutoffHz, maskTransitionOct } = gp
 
   if (!params.applied) {
     ctx.results.airBoost = params
     return
   }
+
+  // Surface the post-compliance EQ params so logs identify the exact filter
+  // FFmpeg was instructed to apply. Lets a spectrum-curve check on
+  // boostedPath be reconciled against the requested band gains without
+  // grepping the report JSON. Compact one-liner — the bands array is small
+  // (5 bells + 1 shelf, optional precut).
+  const bandSummary = (params.bands ?? []).map(b => {
+    const w = b.type === 'bell' ? `Q=${b.q}` : `${b.width_oct}oct`
+    return `${b.f_hz}Hz/${b.type}/${w}/${b.gain_db.toFixed(2)}dB`
+  }).join(' ')
+  const precutSummary = params.pre_attenuation
+    ? ` | precut=${params.pre_attenuation.f_hz}Hz/Q=${params.pre_attenuation.q}/${params.pre_attenuation.gain_db.toFixed(2)}dB`
+    : ''
+  console.log(
+    `[AirBoost] applied_gain_db=${params.applied_gain_db} ` +
+    `requested=${params.requested_gain_db} ` +
+    `acx_constrained=${params.acx_constrained === true}` +
+    precutSummary +
+    ` | bands: ${bandSummary}`
+  )
 
   // Two dispatch modes for the EQ application:
   //   Sequential — analyze ran whole-file and computeAirBoostParams already
@@ -1154,9 +1206,24 @@ export async function airBoostApply(ctx) {
     await applyAirBoostMask(
       chunkInputPath, boostedPath, eventsPath, maskedPath,
       sibilantGainFloor, attackMs, releaseMs, frameOffset,
+      maskCutoffHz, maskTransitionOct,
     )
     ctx.currentPath = maskedPath
-    params.sibilantMask = { applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs, eventsSource }
+    params.sibilantMask = {
+      applied: true, gainFloor: sibilantGainFloor, attackMs, releaseMs,
+      maskCutoffHz, maskTransitionOct,
+      eventsSource, eventsPath, frameOffset,
+    }
+  } else {
+    // Surface the mask state even when it didn't run, so the per-stage report
+    // records WHY. `disabled` = preset has sibilantGainFloor >= 1.0 (the
+    // mask is a no-op by design). `no_events_available` = mask was requested
+    // but neither upstream nor de novo detection produced an events file
+    // (e.g. detection returned zero events). Either way the boost on the
+    // continuous signal path is unmasked, which is the same code path the
+    // disabled-mask preset runs and matches the EQ shape in the bands report.
+    const reason = sibilantGainFloor >= 1.0 ? 'disabled' : 'no_events_available'
+    params.sibilantMask = { applied: false, reason, gainFloor: sibilantGainFloor }
   }
 
   ctx.results.airBoost = params
