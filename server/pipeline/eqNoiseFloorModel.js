@@ -178,6 +178,10 @@ export async function measureNoiseFloorPsd(wavPath, frames) {
 
   Meyda.bufferSize = PSD_FFT_SIZE
   const accum = new Float64Array(PSD_FFT_SIZE / 2)
+  // Allocate the windowed-frame scratch buffer once and overwrite per frame.
+  // Meyda reads the buffer synchronously inside extract(), so reuse is safe
+  // and avoids an O(nSilenceFrames) GC churn on long files.
+  const win   = new Float32Array(PSD_FFT_SIZE)
   let nFrames  = 0
   let sumSq    = 0
   let nSamples = 0
@@ -185,7 +189,6 @@ export async function measureNoiseFloorPsd(wavPath, frames) {
   for (const f of frames) {
     if (!f.isSilence) continue
     if (f.offsetSamples + PSD_FFT_SIZE > samples.length) continue
-    const win = new Float32Array(PSD_FFT_SIZE)
     let frameSumSq = 0
     for (let i = 0; i < PSD_FFT_SIZE; i++) {
       const s = samples[f.offsetSamples + i]

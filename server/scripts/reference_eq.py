@@ -314,6 +314,15 @@ def apply_reference_eq(audio, sr, reference_levels, noise_floor_db, lf_max_boost
         }
         lf_max_boost_db = final_cap
 
+        # solve_acx_lf_cap returns the post-backoff `applied` curve but the
+        # initial compute_correction call above also produced `raw`, `smoothed`,
+        # and `centering_offset` at the pre-backoff cap. Recompute the full
+        # correction at the final cap so all four diagnostics stay consistent
+        # with the FIR that's about to be built.
+        raw, smoothed, applied, centering_offset = compute_correction(
+            reference_levels, recording_levels, lf_max_boost_db,
+        )
+
     max_correction = float(np.max(np.abs(applied)))
 
     if max_correction < SKIP_THRESHOLD_DB:
