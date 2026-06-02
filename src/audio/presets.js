@@ -346,20 +346,36 @@ export const PRESETS = {
           // sum cleanly in mergeChunkResults so the report still shows the
           // file-level totals.
           /* { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } }, */
+        ],
+      },
 
-          {
-            airBoost: {
-              gainDb: 6,
-              sibilantGainFloor: 0,
-              sibilanceDetection: {
-                p95_trigger_db: 6.0,
-                min_flatness: 0.1,
-                broadband_trigger_db: 10.0,
-              },
-              // Predictive pre-attenuation
-              precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
-            },
+      // airBoost is split: analyze runs whole-file (against the stitched
+      // post-vocalSaturation audio) so the compliance loop, precut decision,
+      // and sibilance event map are file-level. Apply then runs per-chunk
+      // in the next chunked block, re-applying the same band params to
+      // each chunk via applyAirBoostBands — every chunk inherits identical
+      // EQ across seams.
+      {
+        airBoostAnalyze: {
+          gainDb: 6,
+          sibilantGainFloor: 0,
+          sibilanceDetection: {
+            p95_trigger_db: 6.0,
+            min_flatness: 0.1,
+            broadband_trigger_db: 10.0,
           },
+          // Predictive pre-attenuation
+          precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
+        },
+      },
+
+      {
+        chunked: [
+          // airBoostApply re-applies the analyze's file-level band params to
+          // each chunk and runs the sibilance mask blend with a frame-offset
+          // computed from the chunk's carve start (whole-file event indices
+          // → chunk-local STFT frames).
+          "airBoostApply",
 
           // resonanceSuppressor IIR attack=15ms / release=80ms — well inside
           // the 100 ms chunk overlap, so any envelope warm-up at a seam is
