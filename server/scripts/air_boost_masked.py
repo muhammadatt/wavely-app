@@ -64,134 +64,6 @@ logger = logging.getLogger(__name__)
 N_FFT      = 2048
 HOP_LENGTH = 512
 
-# Probe frequencies for the diagnostic spectrum dump. Sampled to cover the
-# Maag Air Band model: low (control), midrange (where the user reports a
-# spurious +2 dB lump), and the 6–16 kHz shelf region.
-PROBE_FREQS_HZ = (200, 500, 1000, 2000, 3100, 4000, 6000, 8000, 10000, 12000, 14000)
-
-
-def _average_magnitude_db(signal, sample_rate, freqs_hz, frame_mask=None):
-    """
-    Return the time-averaged STFT magnitude in dB at each probe frequency.
-
-    Uses the same STFT geometry as the blend so the numbers are directly
-    comparable across original / boosted / output signals.
-
-    `frame_mask` (optional boolean array, one entry per STFT frame): if
-    provided, only frames where frame_mask is True contribute to the mean.
-    Used to partition the time-average into sibilant vs non-sibilant frame
-    populations. Returns NaNs at every probe frequency if the mask selects
-    zero frames so the caller can detect and skip the row cleanly.
-    """
-    noverlap = N_FFT - HOP_LENGTH
-    _, _, S  = stft(signal, sample_rate, nperseg=N_FFT, noverlap=noverlap, boundary='zeros')
-    mag_frames = np.abs(S)   # shape (n_bins, n_frames)
-    if frame_mask is not None:
-        n_frames = mag_frames.shape[1]
-        fm       = np.asarray(frame_mask, dtype=bool)
-        if fm.shape[0] != n_frames:
-            # Tolerate the ±1–2 frame drift that build_frame_envelope aligns
-            # against in blend_stft_channel; truncate the longer of the two
-            # to a common length rather than crashing on edge boundaries.
-            n = min(fm.shape[0], n_frames)
-            mag_frames = mag_frames[:, :n]
-            fm         = fm[:n]
-        if not fm.any():
-            return [float('nan')] * len(freqs_hz)
-        mag = mag_frames[:, fm].mean(axis=1)
-    else:
-        mag = mag_frames.mean(axis=1)
-    bin_hz = sample_rate / N_FFT
-    eps    = 1e-12
-    out    = []
-    for f in freqs_hz:
-        k    = int(round(f / bin_hz))
-        k    = max(0, min(k, len(mag) - 1))
-        out.append(20.0 * float(np.log10(mag[k] + eps)))
-    return out
-
-
-def _format_probe_row(label, db_values):
-    parts = " ".join(
-        " {:>5s}".format("nan") if (v != v) else f"{v:+6.2f}"   # v!=v catches NaN
-        for v in db_values
-    )
-    return f"AirBoostMask probe {label:>22s}: {parts}"
-
-
-def _diff_rows(a_db, b_db):
-    """Element-wise dB difference, propagating NaN where either side is missing."""
-    return [
-        float('nan') if (a != a or b != b) else (a - b)
-        for a, b in zip(a_db, b_db)
-    ]
-
-
-def log_spectrum_diagnostic(original, boosted, output, sample_rate, envelope=None):
-    """
-    Emit a fixed-format spectrum table for original / boosted / output.
-
-    When `envelope` is supplied (per-STFT-frame mask gain, shape (n_frames,)),
-    the diagnostic also partitions frames into sibilant (env < 0.5) and
-    non-sibilant (env >= 0.5) populations and emits per-partition curves so
-    the EQ transfer function can be inspected without sibilant-energy bias.
-
-    The four extra rows answer specific questions:
-      boost−orig (nonsib): EQ curve actually applied on frames the mask
-                           leaves alone. Should track the requested shelf
-                           to within ~0.1 dB if FFmpeg's transfer is clean.
-        out−orig (nonsib): What the masked output delivers on those same
-                           frames. Should match boost−orig (nonsib) within
-                           OLA crossfade smear.
-      boost−orig    (sib): EQ curve on sibilant frames. EQ is time-invariant
-                           so this should also match the requested shelf.
-        out−orig    (sib): Masked output on sibilant frames. With floor=0
-                           and the freq-selective mask, should be ~0 dB
-                           above the mask cutoff and ≈ boost−orig below it.
-    """
-    o_db = _average_magnitude_db(original, sample_rate, PROBE_FREQS_HZ)
-    b_db = _average_magnitude_db(boosted,  sample_rate, PROBE_FREQS_HZ)
-    y_db = _average_magnitude_db(output,   sample_rate, PROBE_FREQS_HZ)
-    header = " ".join(f"{f/1000:>6.1f}k" if f >= 1000 else f"{f:>6.0f}" for f in PROBE_FREQS_HZ)
-    logger.info(f"AirBoostMask probe          freqs (Hz)       : {header}")
-    logger.info(_format_probe_row("orig dB",  o_db))
-    logger.info(_format_probe_row("boost dB", b_db))
-    logger.info(_format_probe_row("out dB",   y_db))
-    logger.info(_format_probe_row("boost−orig (all)", _diff_rows(b_db, o_db)))
-    logger.info(_format_probe_row("out−orig (all)",   _diff_rows(y_db, o_db)))
-
-    if envelope is None:
-        return
-
-    # Frame-selective partition. 0.5 threshold splits cleanly: with floor=0
-    # the envelope sits at 0 inside sibilant events and 1 outside, and the
-    # attack/release ramps only graze 0.5 for 1–2 frames at each edge —
-    # negligible for time-averaged statistics. Each side covered separately
-    # so the per-population average is undiluted by the other.
-    env_arr      = np.asarray(envelope, dtype=np.float32)
-    nonsib_mask  = env_arr >= 0.5
-    sib_mask     = ~nonsib_mask
-    n_nonsib     = int(nonsib_mask.sum())
-    n_sib        = int(sib_mask.sum())
-    logger.info(
-        f"AirBoostMask probe partition: nonsib={n_nonsib} frames "
-        f"({100.0*n_nonsib/max(1,len(env_arr)):.1f}%) | "
-        f"sib={n_sib} frames ({100.0*n_sib/max(1,len(env_arr)):.1f}%)"
-    )
-
-    o_db_ns = _average_magnitude_db(original, sample_rate, PROBE_FREQS_HZ, nonsib_mask)
-    b_db_ns = _average_magnitude_db(boosted,  sample_rate, PROBE_FREQS_HZ, nonsib_mask)
-    y_db_ns = _average_magnitude_db(output,   sample_rate, PROBE_FREQS_HZ, nonsib_mask)
-    o_db_si = _average_magnitude_db(original, sample_rate, PROBE_FREQS_HZ, sib_mask)
-    b_db_si = _average_magnitude_db(boosted,  sample_rate, PROBE_FREQS_HZ, sib_mask)
-    y_db_si = _average_magnitude_db(output,   sample_rate, PROBE_FREQS_HZ, sib_mask)
-
-    logger.info(_format_probe_row("boost−orig (nonsib)", _diff_rows(b_db_ns, o_db_ns)))
-    logger.info(_format_probe_row("out−orig (nonsib)",   _diff_rows(y_db_ns, o_db_ns)))
-    logger.info(_format_probe_row("boost−orig (sib)",    _diff_rows(b_db_si, o_db_si)))
-    logger.info(_format_probe_row("out−orig (sib)",      _diff_rows(y_db_si, o_db_si)))
-
-
 def build_freq_weight(
     n_bins:          int,
     sample_rate:     int,
@@ -406,12 +278,6 @@ def main(argv=None):
     if not raw_sibilant_frame_indices:
         logger.info("AirBoostMask: no sibilant frames — writing boosted as-is")
         wavfile.write(args.output, sr_o, boosted)
-        # Probe boosted-vs-orig so the operator still sees what the FFmpeg EQ
-        # pass produced on a no-mask run. out==boosted in this branch, so the
-        # out−orig and boost−orig curves coincide.
-        probe_orig  = original if original.ndim == 1 else original[:, 0]
-        probe_boost = boosted  if boosted.ndim  == 1 else boosted[:, 0]
-        log_spectrum_diagnostic(probe_orig, probe_boost, probe_boost, sr_o)
         return {'sibilant_frames': 0, 'applied': False}
 
     # Apply chunk frame offset: events JSON contains whole-file indices but
@@ -460,37 +326,12 @@ def main(argv=None):
 
     wavfile.write(args.output, sr_o, output)
 
-    # Sibilance count / percentage are reported per-call: numerator and
-    # denominator are both scoped to the audio actually processed by this
-    # invocation. In sequential mode frame_offset is 0 and every index falls
-    # in range, so sib_in_range == len(raw_sibilant_frame_indices) and the
-    # figure equals the file-wide coverage. In chunked mode only the indices
-    # landing inside this chunk count, and the denominator is the chunk's
-    # own frame total — both bounded together, ratio ∈ [0, 100%].
     sib_in_range = sum(1 for i in sibilant_frame_indices if 0 <= i < n_frames_est)
     sib_pct      = 100.0 * sib_in_range / n_frames_est if n_frames_est > 0 else 0.0
     logger.info(
         f"AirBoostMask: done | sibilant≈{sib_pct:.1f}% | "
         f"envelope min={envelope.min():.3f}"
     )
-
-    # Spectrum probe — log the average magnitude (dB) of the three signals
-    # at a fixed set of frequencies plus the implied EQ curves. Lets the
-    # operator confirm whether (a) boostedPath actually carries the air
-    # shelf (boost−orig curve), and (b) what the blend did to that shape
-    # (out−orig curve). Mono only — chunked-mode runs blend per channel
-    # already; the per-call diagnostic uses channel 0 so we have a single
-    # representative row in the log without doubling the output.
-    probe_orig   = original   if mono else original[:, 0]
-    probe_boost  = boosted    if mono else boosted[:, 0]
-    probe_output = output     if mono else output[:, 0]
-    # Pass the per-frame envelope so the probe can partition frames into
-    # sibilant (env < 0.5) vs non-sibilant (env >= 0.5) and emit separate
-    # transfer-function rows for each population. Lets the operator verify
-    # directly whether the EQ shape is intact on frames the mask doesn't
-    # touch — closes out the "non-sibilant frames are short of target"
-    # question that the all-frames average can't answer.
-    log_spectrum_diagnostic(probe_orig, probe_boost, probe_output, sr_o, envelope)
 
     return {
         'sibilant_frames': sib_in_range,
