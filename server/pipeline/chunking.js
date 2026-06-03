@@ -71,7 +71,19 @@ export function sliceFramesForChunk(frames, chunkStartSample, chunkEndSample) {
 // ─── Chunk boundary planner ──────────────────────────────────────────────────
 
 const DEFAULT_TARGET_CHUNK_DURATION_S = 120   // 2 minutes
-const DEFAULT_MIN_CHUNK_DURATION_S    = 60    // never below 1 minute
+// Minimum chunk duration is an overhead-amortisation floor, not a quality
+// floor: each chunk pays ~2 s of fixed cost (two remeasureFrames passes ≈ 1 s
+// each per measured NR runs, plus FFmpeg carve + stitch crossfade + worker
+// IPC). At 30 s that's ~7 % overhead, which is the practical edge of
+// worthwhile parallelism. Going lower buys nothing — useful chunk count is
+// capped at a small multiple of CHUNKED_CONCURRENCY (more chunks ≠ more
+// parallelism, just more harness), so smaller chunks only add overhead. The
+// prior 60 s floor was set before concurrency-aware sizing existed; with
+// balancing in play it made `200 s @ c=3` and `300 s @ c=4` fail to align
+// because the implied per-chunk duration grazed the floor. If the per-chunk
+// harness shrinks (e.g. once the remeasureFrames audit lands), this can drop
+// further.
+const DEFAULT_MIN_CHUNK_DURATION_S    = 30
 const DEFAULT_MAX_CHUNK_DURATION_S    = 600   // never above 10 minutes
 const DEFAULT_MIN_SILENCE_MS          = 500   // minimum silence to split at
 
