@@ -112,7 +112,15 @@ export async function runChunkedBlock(ctx, innerStages, runInnerStage, plannerOp
     logger?.chunkSnapshotsEnabled ? logger.copyChunkSnapshot(chunkIdx, name, srcPath) : undefined
 
   const frames = ctx.results.metrics?.frames ?? []
-  const plan = planChunkBoundaries({ frames, sampleRate, totalSamples, options: plannerOptions })
+  // Pass the requested concurrency as a planner hint so the chunk count comes
+  // out as a multiple of the parallel slot count (no idle "overhang" wave).
+  // Explicit plannerOptions still win, so tests can pin the planner directly.
+  const plan = planChunkBoundaries({
+    frames,
+    sampleRate,
+    totalSamples,
+    options: { concurrencyHint: concurrency, ...plannerOptions },
+  })
 
   if (plan.chunks.length === 1) {
     ctx.log(`[chunked] single-chunk plan (${plan.reason}) — running inner stages whole-file`)

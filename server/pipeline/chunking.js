@@ -75,6 +75,68 @@ const DEFAULT_MIN_CHUNK_DURATION_S    = 60    // never below 1 minute
 const DEFAULT_MAX_CHUNK_DURATION_S    = 600   // never above 10 minutes
 const DEFAULT_MIN_SILENCE_MS          = 500   // minimum silence to split at
 
+// How far above minChunkDurationS a balanced chunk duration must sit before we
+// trust the silence-snapped greedy loop to actually realise that chunk count.
+const MIN_DURATION_MARGIN = 1.2
+
+/**
+ * Pick a chunk count that is a multiple of `concurrency` so the parallel
+ * dispatch fills every wave evenly — no "overhang" wave where some workers sit
+ * idle. (Example: 3 chunks on 2 slots runs wave 1 = chunks 1+2, then wave 2 =
+ * chunk 3 alone with the other worker idle — ~25% of capacity wasted.)
+ *
+ * Anchors on the natural count implied by `targetS`, then snaps to whichever
+ * bracketing multiple of `concurrency` yields a chunk duration closest to
+ * `targetS` while still inside [minS, maxS]. Ties break toward fewer chunks,
+ * since each extra chunk adds a fixed per-chunk harness cost (the NR stage's
+ * two remeasure passes run per chunk).
+ *
+ * Returns the chosen count, or null when no multiple of `concurrency` fits the
+ * duration rails (e.g. the file is too short to hold one full wave above the
+ * minimum) — the caller then falls back to plain target-based planning, so this
+ * never produces a plan worse than the concurrency-unaware one.
+ *
+ * @param {number} totalS      Total audio duration in seconds
+ * @param {number} targetS     Desired chunk duration (the anchor)
+ * @param {number} minS        Minimum chunk duration
+ * @param {number} maxS        Maximum chunk duration
+ * @param {number} concurrency Parallel slot count to align the chunk count to
+ * @returns {number|null}
+ */
+function balancedChunkCount(totalS, targetS, minS, maxS, concurrency) {
+  if (concurrency <= 1) return null
+
+  // Chunk-count bounds implied by the duration rails.
+  const minCount = Math.max(1, Math.ceil(totalS / maxS))   // fewest chunks within max-duration
+  const maxCount = Math.floor(totalS / minS)               // most chunks within min-duration
+  if (maxCount < concurrency) return null                  // can't even fill one full wave above min
+
+  const natural = Math.max(1, Math.round(totalS / targetS))
+  const candidates = new Set([
+    Math.floor(natural / concurrency) * concurrency,
+    Math.ceil(natural / concurrency)  * concurrency,
+  ])
+
+  let best = null
+  let bestScore = Infinity
+  for (const c of candidates) {
+    if (c < concurrency) continue              // need at least one full wave
+    if (c < minCount || c > maxCount) continue // honor the duration rails
+    const durS = totalS / c
+    // The greedy loop snaps each split to the nearest qualifying silence and
+    // excludes silences inside the first min-chunk window. A balanced duration
+    // sitting right on the floor leaves no room for that snap, so the loop
+    // overshoots and the realised count drifts off the multiple. Require a
+    // margin above min so a claimed balanced count is one the loop can hit.
+    if (durS < minS * MIN_DURATION_MARGIN) continue
+    // Closeness to the configured target, tie-broken toward fewer chunks.
+    const score = Math.abs(durS - targetS) + c * 1e-6
+    if (score < bestScore) { bestScore = score; best = c }
+  }
+  return best
+}
+
+
 /**
  * Choose split points along a file so each chunk lands at a long silence
  * region near the target duration. Returns contiguous, non-overlapping
@@ -113,22 +175,27 @@ const DEFAULT_MIN_SILENCE_MS          = 500   // minimum silence to split at
  * @param {number} [args.options.minChunkDurationS]
  * @param {number} [args.options.maxChunkDurationS]
  * @param {number} [args.options.minSilenceMs]
+ * @param {number} [args.options.concurrencyHint] Parallel slot count. When > 1,
+ *   the chunk count is nudged to a multiple of this so every parallel wave is
+ *   full (avoids the idle-worker "overhang" of e.g. 3 chunks on 2 slots).
+ *   Defaults to 1 (no adjustment).
  * @returns {{
  *   chunks: Array<{ startSample: number, endSample: number }>,
  *   splitsAtSilenceMidpoints: number[],
  *   silenceRegions: Array<{ startSample: number, endSample: number, durationMs: number }>,
  *   reason: string|null,
+ *   balancedChunkCount: number|null,
  * }}
  */
 export function planChunkBoundaries({ frames, sampleRate, totalSamples, options = {} }) {
-  const targetS   = options.targetChunkDurationS ?? DEFAULT_TARGET_CHUNK_DURATION_S
-  const minS      = options.minChunkDurationS    ?? DEFAULT_MIN_CHUNK_DURATION_S
-  const maxS      = options.maxChunkDurationS    ?? DEFAULT_MAX_CHUNK_DURATION_S
-  const minSilMs  = options.minSilenceMs         ?? DEFAULT_MIN_SILENCE_MS
+  const targetSraw      = options.targetChunkDurationS ?? DEFAULT_TARGET_CHUNK_DURATION_S
+  const minS            = options.minChunkDurationS    ?? DEFAULT_MIN_CHUNK_DURATION_S
+  const maxS            = options.maxChunkDurationS    ?? DEFAULT_MAX_CHUNK_DURATION_S
+  const minSilMs        = options.minSilenceMs         ?? DEFAULT_MIN_SILENCE_MS
+  const concurrencyHint = Math.max(1, Math.floor(options.concurrencyHint ?? 1))
 
   const minChunkSamples = Math.round(minS * sampleRate)
   const maxChunkSamples = Math.round(maxS * sampleRate)
-  const targetSamples   = Math.round(targetS * sampleRate)
 
   // File too short to chunk meaningfully
   if (totalSamples < 2 * minChunkSamples) {
@@ -137,6 +204,7 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
       splitsAtSilenceMidpoints: [],
       silenceRegions: [],
       reason: 'file_shorter_than_two_min_chunks',
+      balancedChunkCount: null,
     }
   }
 
@@ -147,8 +215,20 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
       splitsAtSilenceMidpoints: [],
       silenceRegions: [],
       reason: 'no_qualifying_silence_regions',
+      balancedChunkCount: null,
     }
   }
+
+  // Concurrency-aware target: nudge the chunk count to a multiple of the
+  // parallel slot count so every wave is full. Falls back to the raw target
+  // when no balanced count fits the duration rails. The greedy loop below is
+  // still silence-snapped, so the realised count can drift by ±1 in pathological
+  // silence layouts — the rails and single-chunk fallback keep that safe.
+  const balancedTargetCount = concurrencyHint > 1
+    ? balancedChunkCount(totalSamples / sampleRate, targetSraw, minS, maxS, concurrencyHint)
+    : null
+  const targetS       = balancedTargetCount ? (totalSamples / sampleRate) / balancedTargetCount : targetSraw
+  const targetSamples = Math.round(targetS * sampleRate)
 
   // Greedy split placement. Search is anchored to the cursor (= last emitted
   // split, or 0 initially), and only advances when a split is actually placed.
@@ -223,6 +303,18 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
   }
   chunks.push({ startSample: chunkStart, endSample: totalSamples })
 
+  // Report balancing only when the silence-snapped loop actually landed a
+  // multiple of the slot count. balancedChunkCount_ above is the *target*; the
+  // realised count can fall short when silence layout near the min-chunk floor
+  // forces an overshoot (the loop still returns a valid, rail-respecting plan).
+  // Reporting the realised-balanced count — or null when it drifted — keeps the
+  // field honest: non-null ⟹ this plan has no idle-worker overhang.
+  const balancedCount = (
+    concurrencyHint > 1 &&
+    chunks.length > 1 &&
+    chunks.length % concurrencyHint === 0
+  ) ? chunks.length : null
+
   return {
     chunks,
     splitsAtSilenceMidpoints: splits,
@@ -230,6 +322,7 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
     reason: chunks.length === 1
       ? (bailReason ?? 'no_split_window_had_silence')
       : null,
+    balancedChunkCount: balancedCount,
   }
 }
 
