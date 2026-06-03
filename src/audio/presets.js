@@ -359,7 +359,7 @@ export const PRESETS = {
                 broadband_trigger_db: 10.0,
               },
               // Predictive pre-attenuation
-              precut: { enabled: false, maxCutDb: 5.0, minExcessDb: 1.5 },
+              precut: { enabled: true, maxCutDb: 8.0, minExcessDb: 1.5 },
             },
           },
       

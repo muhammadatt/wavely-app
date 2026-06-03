@@ -58,7 +58,7 @@ const ACX_NOISE_FLOOR_CEILING = -60   // dBFS — ACX hard ceiling
 const ACX_PRE_CHECK_LIMIT     = -61   // dBFS — skip if already this close before boost
 const REDUCTION_STEP_DB       = 0.25  // dB per iteration of the ACX reduction loop
 
-const DEFAULT_PRECUT_MAX_CUT_DB    = 6.0
+const DEFAULT_PRECUT_MAX_CUT_DB    = 8.0
 const DEFAULT_PRECUT_MIN_EXCESS_DB = 1.0
 
 // ─── Filter model ────────────────────────────────────────────────────────────
@@ -147,7 +147,6 @@ function buildPrecutDiagnostic(precut, precutErr) {
     precut: {
       ran:                       true,
       applied:                   true,
-      gain_db_reduction:         precut.gain_db_reduction ?? 0,
       peak_excess_db:            precut.peak_excess_db,
       excess_curve_db:           precut.excess_curve_db,
       excess_curve_freqs_hz:     precut.excess_curve_freqs_hz,
@@ -267,18 +266,9 @@ export async function computeAirBoostParams(inputPath, outputPath, gainDb, outpu
   const precutAppliedFilter = precut?.applied
     ? `equalizer=f=${precut.center_hz}:width_type=q:w=${precut.q}:g=${precut.gain_db.toFixed(5)}`
     : null
-  const gainReductionDb = precut?.applied ? (precut.gain_db_reduction ?? 0) : 0
 
   // Apply filter chain, with an ACX noise-floor compliance loop.
-  let currentGain = gainDb - gainReductionDb
-  if (currentGain <= 0) {
-    return {
-      applied:           false,
-      requested_gain_db: requestedGainDb,
-      skip_reason:       'precut_consumed_all_gain',
-      ...buildPrecutDiagnostic(precut, precutErr),
-    }
-  }
+  let currentGain = gainDb
 
   while (true) {
     const filters = buildFilters(currentGain)
@@ -308,8 +298,7 @@ export async function computeAirBoostParams(inputPath, outputPath, gainDb, outpu
     applied:                   true,
     requested_gain_db:         requestedGainDb,
     applied_gain_db:           round4(currentGain),
-    gain_db_reduced_by_precut: round4(gainReductionDb),
-    acx_constrained:           isAcx && currentGain < (requestedGainDb - gainReductionDb),
+    acx_constrained:           isAcx && currentGain < requestedGainDb,
     model:                     'maag_eq4_approximation_v2',
     bands:                     bandsReport(currentGain),
     ...(precut?.applied && {
