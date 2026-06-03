@@ -560,8 +560,19 @@ export async function noiseReduce(ctx) {
   // Uses the existing Silero VAD isSilence labels so only speech frames
   // contribute. This isolates the speech-level delta from the (desired)
   // noise-floor reduction.
+  // Sub-stage timings collected for the diagnostic log line at the bottom of
+  // this function. Lets us see whether the codec call or the JS-side harness
+  // (the two remeasureFrames passes + optional makeupGain ffmpeg) dominates,
+  // and — for models that report it — surfaces the Python-side bucket
+  // breakdown returned in the result dict.
+  const tNr     = Date.now()
+  const tPreRem = Date.now()
   const preFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
+  const preRemeasureMs = Date.now() - tPreRem
   const preVoicedRms = preFa.voicedRmsDbfs
+
+  let runMs           = 0
+  let pythonTimingMs  = null   // {load, resample_in, denoise, vad_gate, resample_out, write, sidecar, total} when present
 
   if (model === 'rnnoise') {
     // Pass the pipeline's Silero VAD labels through to the RNNoise script so
@@ -570,10 +581,13 @@ export async function noiseReduce(ctx) {
     // internal VAD on fricative onsets it misclassifies as noise.
     const sileroFrames = ctx.results.metrics?.frames ?? null
     const vadGate      = ctx.preset.noiseReduce?.vadGate ?? null
+    const tRun = Date.now()
     const rnnInfo = await runRnnoise(ctx.currentPath, outPath, {
       sileroFrames,
       vadGate,
     })
+    runMs = Date.now() - tRun
+    pythonTimingMs = rnnInfo?.timingMs ?? null
     ctx.currentPath = outPath
     ctx.results.noiseReduction = {
       applied: true,
@@ -589,7 +603,9 @@ export async function noiseReduce(ctx) {
       ctx.log(`[NR] RNNoise speech_prob sidecar → ${rnnInfo.speechProbOut}`)
     }
   } else if (model === 'dtln') {
+    const tRun = Date.now()
     await runDtln(ctx.currentPath, outPath)
+    runMs = Date.now() - tRun
     ctx.currentPath = outPath
     ctx.results.noiseReduction = {
       applied: true,
@@ -600,7 +616,10 @@ export async function noiseReduce(ctx) {
     }
   } else {
     // df3 (default) — uncapped; the model adapts per time-frequency bin
+    const tRun = Date.now()
     const nrResult = await applyNoiseReduction(ctx.currentPath, outPath)
+    runMs = Date.now() - tRun
+    pythonTimingMs = nrResult?.timingMs ?? null
     nrResult.pre_noise_floor_dbfs = preNoiseFloor
     ctx.currentPath = outPath
     ctx.results.noiseReduction = nrResult
@@ -613,9 +632,13 @@ export async function noiseReduce(ctx) {
   // aggressively. Measure the voiced-RMS delta and apply linear makeup gain
   // so downstream stages (compression, expander) see the expected level.
   let postFa = null
-  let appliedMakeupDb = 0
+  let appliedMakeupDb   = 0
+  let postRemeasureMs   = 0
+  let makeupGainMs      = 0
   if (preVoicedRms !== null && preVoicedRms !== undefined) {
+    const tPostRem = Date.now()
     postFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
+    postRemeasureMs = Date.now() - tPostRem
     const postVoicedRms = postFa.voicedRmsDbfs
 
     if (postVoicedRms !== null && postVoicedRms !== undefined) {
@@ -624,7 +647,9 @@ export async function noiseReduce(ctx) {
 
       if (makeupDb > NR_MAKEUP_THRESHOLD_DB) {
         const gainedPath = ctx.tmp('.wav')
+        const tMakeup = Date.now()
         await applyLinearGain(ctx.currentPath, gainedPath, makeupDb)
+        makeupGainMs = Date.now() - tMakeup
         ctx.currentPath = gainedPath
         appliedMakeupDb = makeupDb
         ctx.results.noiseReduction.makeupGainDb = round2(makeupDb)
@@ -662,6 +687,31 @@ export async function noiseReduce(ctx) {
       ctx.results.noiseReduction.post_noise_floor_dbfs = ctx.results.metrics.noiseFloorDbfs
     }
   }
+
+  // Sub-stage timing breakdown. JS-side buckets tell us whether the codec
+  // call (run) or the harness (preRem + postRem + makeup) dominates; the
+  // Python-side bucket array (when present) breaks the run bucket down
+  // further into load / resample / denoise / vad_gate / resample_out / write.
+  // harnessMs is the sum of the JS-only passes around the codec call, so
+  // run / harness is the headline ratio.
+  const totalMs   = Date.now() - tNr
+  const harnessMs = preRemeasureMs + postRemeasureMs + makeupGainMs
+  let timingLine =
+    `[NR-timing] model=${model} total=${totalMs}ms ` +
+    `run=${runMs}ms harness=${harnessMs}ms ` +
+    `(preRem=${preRemeasureMs}ms postRem=${postRemeasureMs}ms makeup=${makeupGainMs}ms)`
+  if (pythonTimingMs && typeof pythonTimingMs === 'object') {
+    const py = pythonTimingMs
+    // Only surface buckets that fired; vad_gate/sidecar are conditional.
+    const parts = []
+    for (const key of ['load','resample_in','denoise','vad_gate','resample_out','write','sidecar']) {
+      const v = py[key]
+      if (typeof v === 'number' && v > 0) parts.push(`${key}=${Math.round(v)}ms`)
+    }
+    const pyTotal = typeof py.total === 'number' ? `${Math.round(py.total)}ms` : '?'
+    timingLine += `  py=${pyTotal} {${parts.join(' ')}}`
+  }
+  ctx.log(timingLine)
 }
 
 // ── Stage: Re-measure frames (post-NR) ───────────────────────────────────────

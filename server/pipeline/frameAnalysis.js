@@ -22,13 +22,15 @@
  *     No subprocess. Use as fallback or for A/B comparison.
  *
  * Performance note (Silero backend): ~50–100x real-time on CPU. analyzeFrames
- * (and therefore the Silero subprocess) runs exactly once per job, in the
- * analyzeFramesRaw stage. measureBefore no longer calls analyzeFrames —
- * analyzeFramesRaw back-fills beforeMeasurements.noiseFloorDbfs after correcting
- * for the peakNormalize gain. All subsequent pipeline stages call
- * remeasureFrames instead, which re-derives energy metrics from the current
- * audio while preserving the Silero isSilence labels. Set SILERO_DEVICE=cuda to
- * reduce the single-pass latency further.
+ * runs exactly once per job, in the analyzeFramesRaw stage; on long files the
+ * Silero subprocess underneath it is split into silence-snapped chunks run in
+ * parallel across the worker pool (see sileroParallel.js), so the wall-clock of
+ * this stage scales down with the pool size. measureBefore no longer calls
+ * analyzeFrames — analyzeFramesRaw back-fills beforeMeasurements.noiseFloorDbfs
+ * after correcting for the peakNormalize gain. All subsequent pipeline stages
+ * call remeasureFrames instead, which re-derives energy metrics from the
+ * current audio while preserving the Silero isSilence labels. Set
+ * SILERO_PARALLEL=0 to force the single whole-file call.
  *
  * Logging: frame analysis results are merged into ctx.results.metrics and
  * written to the pipeline file log (PIPELINE_LOG=true).
@@ -43,6 +45,7 @@ import path               from 'path'
 
 import { spawnPython }    from './spawnPython.js'
 import { readWavSamples } from './wavReader.js'
+import { classifySileroVadParallel } from './sileroParallel.js'
 import { decodeToFloat32Mono16k, tempPath, removeTmp } from '../lib/ffmpeg.js'
 
 // Loaded from the shared config so JS and Python always use the same value.
@@ -161,9 +164,42 @@ async function analyzeAudioFramesSilero(wavPath) {
   let sileroFrames = []
   try {
     await decodeToFloat32Mono16k(wavPath, vadInput)
-    await spawnSilero(vadInput, jsonPath)
-    const raw = JSON.parse(await readFile(jsonPath, 'utf8'))
-    sileroFrames = raw.frames
+
+    // Parallel path: split the 16 kHz VAD input at energy-silence seams and run
+    // the (unchanged) Silero subprocess on each chunk across the worker pool,
+    // reassembling global frame labels. Returns null when the file is too
+    // short / unsplittable or parallelism is disabled, in which case fall
+    // through to the single whole-file call below. Seams are silence-snapped
+    // and warm-up-padded, so core-region labels match the whole-file run; set
+    // SILERO_PARALLEL=0 to force the single call for A/B comparison.
+    //
+    // A failure in the parallel path (FFmpeg carve / JSON parse / worker error)
+    // degrades to the single whole-file Silero call below — NOT to the energy
+    // backend. The energy fallback is reserved for Silero itself being broken;
+    // a chunking-layer hiccup should still get neural VAD, just non-parallel.
+    let parallel = null
+    try {
+      parallel = await classifySileroVadParallel(vadInput, {
+        energyFrameRms:       frameRms,
+        silenceThresholdDbfs: silenceThreshold,
+        numFrames,
+        runVad:               spawnSilero,
+      })
+    } catch (err) {
+      console.warn(
+        `[silence] parallel Silero VAD failed — falling back to the single ` +
+        `whole-file call. Reason: ${err.message}`
+      )
+      parallel = null
+    }
+
+    if (parallel) {
+      sileroFrames = parallel.frames
+    } else {
+      await spawnSilero(vadInput, jsonPath)
+      const raw = JSON.parse(await readFile(jsonPath, 'utf8'))
+      sileroFrames = raw.frames
+    }
   } finally {
     await rm(jsonPath, { force: true })
     await removeTmp(vadInput)

@@ -227,6 +227,11 @@ export async function runRnnoise(
   return {
     speechProbOut: sidecarPath,
     vadGate:       result?.vad_gate ?? null,
+    // Python-side bucket timings (load / resample_in / denoise / vad_gate /
+    // resample_out / write / sidecar / total, all milliseconds). The caller's
+    // sub-stage log line surfaces these alongside the JS-side harness buckets
+    // so the codec-vs-harness ratio is readable in one line.
+    timingMs:      result?.timing_ms ?? null,
   }
 }
 
