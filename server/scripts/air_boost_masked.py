@@ -50,6 +50,7 @@ CLI:
 import argparse
 import json
 import logging
+import os
 import sys
 
 import numpy as np
@@ -62,6 +63,48 @@ logger = logging.getLogger(__name__)
 # 1-to-1 with STFT frames computed here.
 N_FFT      = 2048
 HOP_LENGTH = 512
+
+def build_freq_weight(
+    n_bins:          int,
+    sample_rate:     int,
+    cutoff_hz:       float,
+    transition_oct:  float,
+) -> np.ndarray:
+    """
+    Return a per-bin attenuation-reach weight, shape (n_bins,).
+
+    Controls how much of the sibilant frame envelope reaches each FFT bin:
+      weight = 0    -> envelope has no effect; boost preserved on every frame
+      weight = 1    -> envelope applies fully; sibilant frames revert toward
+                       the unboosted spectrum at that bin
+
+    Shape: zero below `cutoff_hz`, full above `cutoff_hz * 2^transition_oct`,
+    half-cosine taper across the transition span on the log-frequency axis.
+    A log-axis taper matches how the EQ shelf rolls in (octave-symmetric) and
+    avoids ringing from a hard bin-edge step. transition_oct <= 0 falls back
+    to a hard rectangular split at cutoff_hz.
+
+    Bin geometry follows the same STFT used by blend_stft_channel below,
+    so bin k maps to frequency k * sample_rate / N_FFT.
+    """
+    bin_hz = sample_rate / N_FFT
+    freqs  = np.arange(n_bins, dtype=np.float32) * bin_hz
+    if transition_oct <= 0.0:
+        return (freqs >= cutoff_hz).astype(np.float32)
+
+    upper = cutoff_hz * (2.0 ** transition_oct)
+    weight = np.empty(n_bins, dtype=np.float32)
+    for i, f in enumerate(freqs):
+        if f <= cutoff_hz:
+            weight[i] = 0.0
+        elif f >= upper:
+            weight[i] = 1.0
+        else:
+            # Log-frequency position [0, 1] across the transition span.
+            t = np.log2(f / cutoff_hz) / transition_oct
+            # Half-cosine ramp 0 -> 1 (smooth at both endpoints).
+            weight[i] = 0.5 - 0.5 * np.cos(np.pi * t)
+    return weight
 
 
 def build_frame_envelope(
@@ -100,10 +143,14 @@ def build_frame_envelope(
     return envelope
 
 
-def blend_stft_channel(orig_ch, boost_ch, envelope, sample_rate):
+def blend_stft_channel(orig_ch, boost_ch, envelope, sample_rate, freq_weight=None):
     """
     STFT-domain blend for a single mono float32 channel.
     Returns a float32 array of the same length as orig_ch.
+
+    `freq_weight` (shape (n_bins,), values in [0,1]) controls per-bin reach
+    of the sibilant envelope. None or all-ones reproduces the legacy uniform
+    broadcast behaviour. See build_freq_weight() for shape semantics.
     """
     n_samples = len(orig_ch)
     noverlap  = N_FFT - HOP_LENGTH
@@ -113,14 +160,32 @@ def blend_stft_channel(orig_ch, boost_ch, envelope, sample_rate):
 
     # Align envelope to the actual STFT frame count (may differ by 1–2 frames
     # from the estimate used when building it)
-    n_frames = S_orig.shape[1]
+    n_bins, n_frames = S_orig.shape
     env_frame = np.ones(n_frames, dtype=np.float32)
     copy_len  = min(len(envelope), n_frames)
     env_frame[:copy_len] = envelope[:copy_len]
 
+    # 2D bin/frame mask. env_frame controls TIME attenuation (sibilant frames
+    # pull toward env=floor); freq_weight controls FREQUENCY reach of that
+    # attenuation (only bins above the shelf-region cutoff see it). Outside
+    # those bins env_2d stays at 1.0 so the boost passes through every frame
+    # untouched. Builds:
+    #     env_2d = 1 - (1 - env_frame) * freq_weight
+    # which equals env_frame where freq_weight==1 (legacy broadband behaviour)
+    # and equals 1.0 where freq_weight==0 (boost fully preserved).
+    if freq_weight is None:
+        fw = np.ones(n_bins, dtype=np.float32)
+    else:
+        fw = np.asarray(freq_weight, dtype=np.float32)
+        if fw.shape[0] != n_bins:
+            raise ValueError(
+                f"freq_weight length {fw.shape[0]} does not match n_bins {n_bins}"
+            )
+    env_2d = 1.0 - (1.0 - env_frame[np.newaxis, :]) * fw[:, np.newaxis]
+
     # Complex STFT blend — shape (n_bins, n_frames)
-    # S_out = S_orig + (S_boost - S_orig) * env  →  no phase mismatch
-    S_out = S_orig + (S_boost - S_orig) * env_frame[np.newaxis, :]
+    # S_out = S_orig + (S_boost - S_orig) * env_2d  →  no phase mismatch
+    S_out = S_orig + (S_boost - S_orig) * env_2d
 
     _, out = istft(S_out, sample_rate, nperseg=N_FFT, noverlap=noverlap, boundary=True)
 
@@ -150,6 +215,19 @@ def main(argv=None):
                              "whole-file frame indices resolve to chunk-local "
                              "frames (frame_offset = carve_start_samples / "
                              f"HOP_LENGTH={HOP_LENGTH}).")
+    parser.add_argument("--mask-cutoff-hz",      type=float, default=4500.0,
+                        help="Lower edge of the frequency-selective mask. "
+                             "Bins below this frequency are not attenuated on "
+                             "sibilant frames; bins above the transition span "
+                             "are fully attenuated. Default 4500 sits at the "
+                             "Maag shelf's -3 dB knee, so the 600/1200/2400/"
+                             "4800 Hz bells are preserved on every frame and "
+                             "only the 9.6 kHz bell + 14 kHz shelf are masked.")
+    parser.add_argument("--mask-transition-oct", type=float, default=1.0,
+                        help="Width of the log-frequency taper between the "
+                             "preserved band and the masked band, in octaves. "
+                             "Half-cosine ramp. Set <= 0 for a hard split at "
+                             "--mask-cutoff-hz.")
     args = parser.parse_args(argv)
 
     sr_o, original = wavfile.read(args.original)
@@ -163,8 +241,39 @@ def main(argv=None):
     with open(args.events) as fh:
         events_map = json.load(fh)
 
-    raw_sibilant_frame_indices = events_map.get("sibilantFrameIndices", [])
-    n_samples                  = original.shape[0]
+    # Prefer the pre-expansion (core) frame list when the upstream producer
+    # writes it. Core frames are exactly the ones that fired the primary
+    # p95+flatness triggers — they exclude both boundary-relaxed promotions
+    # and inter-event gap-merge bridges. Boundary halos otherwise pull the
+    # time-averaged shelf in the spectrum probe down sharply because
+    # boundary-promoted frames sit at the edges of fricatives where HF
+    # energy is highest. Falls back to the expanded set on older events
+    # files (pre-coreSibilantFrameIndices producers) with a one-line note
+    # so the staleness is visible without breaking the run.
+    expanded_indices = events_map.get("sibilantFrameIndices", [])
+    core_indices     = events_map.get("coreSibilantFrameIndices")
+    if core_indices is None:
+        raw_sibilant_frame_indices = expanded_indices
+        frame_source               = "sibilantFrameIndices (expanded — coreSibilantFrameIndices missing from upstream events file)"
+    else:
+        raw_sibilant_frame_indices = core_indices
+        frame_source               = f"coreSibilantFrameIndices ({len(core_indices)} of {len(expanded_indices)} expanded retained)"
+
+    n_samples = original.shape[0]
+
+    # Prelude line — identifies the events file actually consumed, the STFT
+    # geometry, and which frame list (core vs. expanded) drove the mask.
+    # hopLength/nFft are logged because air_boost_masked's HOP_LENGTH/N_FFT
+    # must match the producer's; any mismatch here would silently misalign
+    # the envelope.
+    logger.info(
+        f"AirBoostMask: events_file={os.path.basename(args.events)} | "
+        f"frameCount={events_map.get('frameCount', '?')} | "
+        f"events={len(events_map.get('events', []) or [])} | "
+        f"frames={len(raw_sibilant_frame_indices)} [{frame_source}] | "
+        f"hopLength={events_map.get('hopLength', '?')} (expect {HOP_LENGTH}) | "
+        f"nFft={events_map.get('nFft', '?')} (expect {N_FFT})"
+    )
 
     if not raw_sibilant_frame_indices:
         logger.info("AirBoostMask: no sibilant frames — writing boosted as-is")
@@ -185,7 +294,8 @@ def main(argv=None):
     logger.info(
         f"AirBoostMask: {len(raw_sibilant_frame_indices)} sibilant frames | "
         f"floor={args.sibilant_gain_floor:.2f} "
-        f"attack={args.attack_ms}ms release={args.release_ms}ms"
+        f"attack={args.attack_ms}ms release={args.release_ms}ms | "
+        f"mask_cutoff={args.mask_cutoff_hz:.0f}Hz transition={args.mask_transition_oct:.2f}oct"
         + (f" | frame_offset={args.frame_offset}" if args.frame_offset != 0 else "")
     )
 
@@ -196,25 +306,26 @@ def main(argv=None):
         args.sibilant_gain_floor, args.attack_ms, args.release_ms, sr_o,
     )
 
+    # Per-bin frequency-selective mask weight. Confines the envelope's reach to
+    # the HF region where sibilants live; below the cutoff the boost survives
+    # on every frame, sibilant or not.
+    n_bins = N_FFT // 2 + 1
+    freq_weight = build_freq_weight(
+        n_bins, sr_o, args.mask_cutoff_hz, args.mask_transition_oct,
+    )
+
     mono = original.ndim == 1
     if mono:
-        output = blend_stft_channel(original, boosted, envelope, sr_o)
+        output = blend_stft_channel(original, boosted, envelope, sr_o, freq_weight)
     else:
         out_channels = [
-            blend_stft_channel(original[:, c], boosted[:, c], envelope, sr_o)
+            blend_stft_channel(original[:, c], boosted[:, c], envelope, sr_o, freq_weight)
             for c in range(original.shape[1])
         ]
         output = np.stack(out_channels, axis=1)
 
     wavfile.write(args.output, sr_o, output)
 
-    # Sibilance count / percentage are reported per-call: numerator and
-    # denominator are both scoped to the audio actually processed by this
-    # invocation. In sequential mode frame_offset is 0 and every index falls
-    # in range, so sib_in_range == len(raw_sibilant_frame_indices) and the
-    # figure equals the file-wide coverage. In chunked mode only the indices
-    # landing inside this chunk count, and the denominator is the chunk's
-    # own frame total — both bounded together, ratio ∈ [0, 100%].
     sib_in_range = sum(1 for i in sibilant_frame_indices if 0 <= i < n_frames_est)
     sib_pct      = 100.0 * sib_in_range / n_frames_est if n_frames_est > 0 else 0.0
     logger.info(

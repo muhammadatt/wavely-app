@@ -8,10 +8,10 @@ BANDS table that airBoost.js applies), and — when the prediction exceeds the
 preset's referenceEQ target curve in the 6-16 kHz region — sizes a single
 parametric bell cut that brings the predicted excess down to target.
 
-The cut is returned as { center_hz, q, gain_db }. When the raw excess would
-exceed the configured maxCutDb, the script additionally returns a
-gain_db_reduction value: the amount by which the Node side should reduce the
-airBoost gain so the residual excess fits inside the clamp.
+The cut is returned as { center_hz, q, gain_db }. Cut depth is sized to
+cancel the predicted overshoot at the peak bin, capped at maxCutDb. Any
+residual overshoot beyond the cap is left for referenceEQ to close at its
+scaled rate.
 
 The BANDS table and REFERENCE_PLATEAU_DB constant are duplicated from
 server/pipeline/airBoost.js — both are version-tagged
@@ -63,7 +63,7 @@ SR_FOR_TF  = 44100.0      # pipeline runs at 44.1 kHz throughout
 PRECUT_BAND_LO_HZ = 6000.0
 PRECUT_BAND_HI_HZ = 16000.0
 
-DEFAULT_MAX_CUT_DB    = 6.0
+DEFAULT_MAX_CUT_DB    = 8.0
 DEFAULT_MIN_EXCESS_DB = 1.0
 Q_CLAMP_MIN = 0.5
 Q_CLAMP_MAX = 4.0
@@ -223,7 +223,7 @@ def size_precut(measured_db, reference_db, air_boost_db, max_cut_db, min_excess_
     Decide whether a pre-cut is warranted and, if so, return its parameters.
 
     Returns one of:
-      { 'applied': True, center_hz, q, gain_db, gain_db_reduction,
+      { 'applied': True, center_hz, q, gain_db,
         excess_curve_db, excess_curve_freqs_hz, ... }
       { 'applied': False, 'reason': str, ... }
     """
@@ -269,39 +269,17 @@ def size_precut(measured_db, reference_db, air_boost_db, max_cut_db, min_excess_
             **excess_payload,
         }
 
-    # Decide whether to reduce airBoost gain so residual excess fits in the
-    # clamp. excess(f, g) = baseline(f) + g * weight(f), linear in g.
-    baseline   = region_measured - region_ref
-    weight     = boost_response / max(air_boost_db, 1e-9)   # per-dB gain weight
-    pos_weight = weight > 0
-    if peak_val > max_cut_db and np.any(pos_weight):
-        # Smallest g for which every bin's excess <= max_cut_db.
-        max_g_candidates = (max_cut_db - baseline[pos_weight]) / weight[pos_weight]
-        max_g_candidates = max_g_candidates[max_g_candidates > 0]
-        if len(max_g_candidates):
-            g_new = float(min(air_boost_db, np.min(max_g_candidates)))
-        else:
-            g_new = 0.0
-        gain_db_reduction = max(0.0, air_boost_db - g_new)
-        # Recompute excess curve at the reduced gain for downstream sizing.
-        boost_response_new = air_boost_response_db(region_freqs, g_new)
-        predicted_new      = region_measured + boost_response_new
-        excess_new         = np.maximum(predicted_new - region_ref, 0.0)
-        peak_idx           = int(np.argmax(excess_new))
-        peak_val_new       = float(excess_new[peak_idx])
-        cut_gain_db        = -min(peak_val_new, max_cut_db)
-        q                  = _fwhm_q(region_freqs, excess_new, peak_idx)
-    else:
-        gain_db_reduction = 0.0
-        cut_gain_db       = -peak_val
-        q                 = _fwhm_q(region_freqs, excess_db, peak_idx)
+    # Cut sized to cancel the overshoot at the peak bin, capped at maxCutDb.
+    # Any residual excess beyond the cap is left for referenceEQ to close at
+    # its scaled rate.
+    cut_gain_db = -min(peak_val, max_cut_db)
+    q           = _fwhm_q(region_freqs, excess_db, peak_idx)
 
     return {
         'applied':           True,
         'center_hz':         int(region_freqs[peak_idx]),
         'q':                 round(q, 3),
         'gain_db':           round(cut_gain_db, 3),
-        'gain_db_reduction': round(gain_db_reduction, 4),
         'peak_excess_db':    round(peak_val, 3),
         **excess_payload,
     }
@@ -363,7 +341,7 @@ def main(argv=None):
     if result.get('applied'):
         print(
             f"airBoostPrecut: cut={result['gain_db']:+.2f} dB @ {result['center_hz']} Hz "
-            f"Q={result['q']:.2f} reduction={result['gain_db_reduction']:.3f} dB",
+            f"Q={result['q']:.2f}",
             flush=True,
         )
     else:

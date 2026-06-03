@@ -435,8 +435,6 @@ function formatAirBoostResult(r) {
     acx_constrained:           r.acx_constrained ?? false,
     model:                     r.model,
     bands:                     r.bands,
-    ...(r.gain_db_reduced_by_precut > 0
-      && { gain_db_reduced_by_precut: r.gain_db_reduced_by_precut }),
     ...(r.pre_attenuation && { pre_attenuation: r.pre_attenuation }),
   }
 }

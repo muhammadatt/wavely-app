@@ -58,7 +58,7 @@ const ACX_NOISE_FLOOR_CEILING = -60   // dBFS — ACX hard ceiling
 const ACX_PRE_CHECK_LIMIT     = -61   // dBFS — skip if already this close before boost
 const REDUCTION_STEP_DB       = 0.25  // dB per iteration of the ACX reduction loop
 
-const DEFAULT_PRECUT_MAX_CUT_DB    = 6.0
+const DEFAULT_PRECUT_MAX_CUT_DB    = 8.0
 const DEFAULT_PRECUT_MIN_EXCESS_DB = 1.0
 
 // ─── Filter model ────────────────────────────────────────────────────────────
@@ -147,7 +147,6 @@ function buildPrecutDiagnostic(precut, precutErr) {
     precut: {
       ran:                       true,
       applied:                   true,
-      gain_db_reduction:         precut.gain_db_reduction ?? 0,
       peak_excess_db:            precut.peak_excess_db,
       excess_curve_db:           precut.excess_curve_db,
       excess_curve_freqs_hz:     precut.excess_curve_freqs_hz,
@@ -267,18 +266,9 @@ export async function computeAirBoostParams(inputPath, outputPath, gainDb, outpu
   const precutAppliedFilter = precut?.applied
     ? `equalizer=f=${precut.center_hz}:width_type=q:w=${precut.q}:g=${precut.gain_db.toFixed(5)}`
     : null
-  const gainReductionDb = precut?.applied ? (precut.gain_db_reduction ?? 0) : 0
 
   // Apply filter chain, with an ACX noise-floor compliance loop.
-  let currentGain = gainDb - gainReductionDb
-  if (currentGain <= 0) {
-    return {
-      applied:           false,
-      requested_gain_db: requestedGainDb,
-      skip_reason:       'precut_consumed_all_gain',
-      ...buildPrecutDiagnostic(precut, precutErr),
-    }
-  }
+  let currentGain = gainDb
 
   while (true) {
     const filters = buildFilters(currentGain)
@@ -308,8 +298,7 @@ export async function computeAirBoostParams(inputPath, outputPath, gainDb, outpu
     applied:                   true,
     requested_gain_db:         requestedGainDb,
     applied_gain_db:           round4(currentGain),
-    gain_db_reduced_by_precut: round4(gainReductionDb),
-    acx_constrained:           isAcx && currentGain < (requestedGainDb - gainReductionDb),
+    acx_constrained:           isAcx && currentGain < requestedGainDb,
     model:                     'maag_eq4_approximation_v2',
     bands:                     bandsReport(currentGain),
     ...(precut?.applied && {
@@ -374,8 +363,14 @@ export async function applyAirBoostBands(inputPath, outputPath, params) {
  * Envelope behaviour: fast attack (boost drops when sibilant starts), slower
  * release (boost recovers after the sibilant ends) — matching de-esser timing.
  *
- * output = original + (boosted − original) × gain_envelope
- *        = original × (1 − env) + boosted × env
+ * Mask is frequency-selective: the envelope only reaches FFT bins above
+ * `maskCutoffHz` (with a `maskTransitionOct`-wide log-frequency taper). Bins
+ * below the cutoff keep the full boost on every frame, so the corrective
+ * 600/1200/2400/4800 Hz bells survive on sibilants too and only the 9.6 kHz
+ * bell + 14 kHz shelf actually get attenuated.
+ *
+ * output = original + (boosted − original) × env_2d,
+ *   env_2d = 1 − (1 − env_frame) × freq_weight
  *
  * @param {string} originalPath     Pre-boost WAV (ctx.currentPath before airBoost ran)
  * @param {string} boostedPath      Post-FFmpeg-EQ WAV (output of computeAirBoostParams)
@@ -391,6 +386,12 @@ export async function applyAirBoostBands(inputPath, outputPath, params) {
  *                                  STFT frames so whole-file indices resolve
  *                                  to chunk-local frames. Sequential callers
  *                                  leave this at 0.
+ * @param {number} [maskCutoffHz=4500]      Lower edge of the freq-selective mask.
+ *                                          Default sits at the Maag shelf's
+ *                                          -3 dB knee.
+ * @param {number} [maskTransitionOct=1.0]  Log-frequency taper width in octaves
+ *                                          across the preserved → masked
+ *                                          transition; <= 0 means hard split.
  */
 export async function applyAirBoostMask(
   originalPath,
@@ -401,6 +402,8 @@ export async function applyAirBoostMask(
   attackMs          = 5.0,
   releaseMs         = 20.0,
   frameOffset       = 0,
+  maskCutoffHz      = 4500.0,
+  maskTransitionOct = 1.0,
 ) {
   const args = [
     '--original',            originalPath,
@@ -410,6 +413,8 @@ export async function applyAirBoostMask(
     '--sibilant-gain-floor', String(sibilantGainFloor),
     '--attack-ms',           String(attackMs),
     '--release-ms',          String(releaseMs),
+    '--mask-cutoff-hz',      String(maskCutoffHz),
+    '--mask-transition-oct', String(maskTransitionOct),
   ]
   if (frameOffset !== 0) {
     args.push('--frame-offset', String(frameOffset))

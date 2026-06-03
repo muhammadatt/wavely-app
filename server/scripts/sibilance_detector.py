@@ -517,18 +517,19 @@ def _expand_event_boundaries(
 
 
 def build_events_map(
-    sibilant_indices: list,
-    f0_per_frame:     list,
-    f0_median:        float,
-    n_frames:         int,
-    sample_rate:      int,
-    n_fft:            int,
-    hop_length:       int,
-    audio:            np.ndarray = None,
-    min_duration_ms:  float = 0.0,
-    gap_merge_ms:     float = 0.0,
-    per_frame_diag:   dict = None,
-    all_frame_diag:   dict = None,
+    sibilant_indices:       list,
+    f0_per_frame:           list,
+    f0_median:              float,
+    n_frames:               int,
+    sample_rate:            int,
+    n_fft:                  int,
+    hop_length:             int,
+    audio:                  np.ndarray = None,
+    min_duration_ms:        float = 0.0,
+    gap_merge_ms:           float = 0.0,
+    per_frame_diag:         dict = None,
+    all_frame_diag:         dict = None,
+    core_sibilant_indices:  list = None,
 ) -> dict:
     """
     Build the canonical sibilance event-map JSON payload.
@@ -542,6 +543,17 @@ def build_events_map(
     When `min_duration_ms > 0`, events shorter than that threshold are dropped
     and the corresponding frame indices are removed from `sibilantFrameIndices`
     so the returned map is internally consistent.
+
+    `core_sibilant_indices` is the pre-expansion frame list captured directly
+    from the detection loop (frames that fired the primary p95+flatness
+    triggers). When provided, the output JSON includes a parallel top-level
+    `coreSibilantFrameIndices` array containing those core frames that
+    survived gap-merge and min-duration filtering. Consumers whose envelope
+    must NOT include boundary-relaxed frames (e.g. airBoost's HF mask, where
+    boundary halos exaggerate the time-averaged shelf collapse) read this
+    field; consumers that benefit from boundary expansion's smooth ramps
+    (e.g. clipGainDeEsser's gain reduction) continue reading the unchanged
+    `sibilantFrameIndices`. Omitted from the output when None.
     """
     events = []
     if sibilant_indices:
@@ -722,7 +734,15 @@ def build_events_map(
             kept_indices.extend(range(int(s), int(e) + 1))
         sibilant_indices = kept_indices
 
-    return {
+    # Core-only frame view: intersection of the pre-expansion fire list with
+    # the final filtered sibilant set. By construction this excludes both
+    # boundary-relaxed promotions (added by _expand_event_boundaries) and
+    # inter-event gap-merge frames (added during the merge pass above), while
+    # honouring min-duration culling (because filtered events drop their
+    # indices from `sibilant_indices` first). Field omitted when the caller
+    # did not pass `core_sibilant_indices` so older consumers don't see a
+    # spurious empty list when none was intended.
+    out = {
         "sampleRate":           sample_rate,
         "nFft":                 n_fft,
         "hopLength":            hop_length,
@@ -734,6 +754,12 @@ def build_events_map(
         "sibilantFrameIndices": [int(i) for i in sibilant_indices],
         "events":               event_objs,
     }
+    if core_sibilant_indices is not None:
+        kept_set = set(int(i) for i in sibilant_indices)
+        out["coreSibilantFrameIndices"] = sorted(
+            int(i) for i in core_sibilant_indices if int(i) in kept_set
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1182,16 +1208,17 @@ def analyze_sibilance_events(
     if n_samples == 0:
         logger.warning("analyze_sibilance_events: empty audio — returning empty event map")
         return build_events_map(
-            sibilant_indices = [],
-            f0_per_frame     = [],
-            f0_median        = contour_median if contour_median is not None else 0.0,
-            n_frames         = 0,
-            sample_rate      = sample_rate,
-            n_fft            = n_fft,
-            hop_length       = hop_length,
-            audio            = audio,
-            min_duration_ms  = min_duration_ms,
-            gap_merge_ms     = gap_merge_ms,
+            sibilant_indices      = [],
+            f0_per_frame          = [],
+            f0_median             = contour_median if contour_median is not None else 0.0,
+            n_frames              = 0,
+            sample_rate           = sample_rate,
+            n_fft                 = n_fft,
+            hop_length            = hop_length,
+            audio                 = audio,
+            min_duration_ms       = min_duration_ms,
+            gap_merge_ms          = gap_merge_ms,
+            core_sibilant_indices = [],
         )
 
     pad_mode = "reflect" if n_samples > pad else "edge"
@@ -1487,6 +1514,14 @@ def analyze_sibilance_events(
     # relaxed P95 + flatness thresholds (see _expand_event_boundaries
     # docstring). Runs before gap_merge so newly-adjacent runs can still
     # be joined by build_events_map() if they fall inside gap_merge_ms.
+    #
+    # `sibilant_indices` at this point is the pre-expansion fire list (core
+    # frames only); it gets passed verbatim into build_events_map as
+    # `core_sibilant_indices` so the output JSON carries both views. After
+    # this call the local name is rebound to `expanded_indices` for the
+    # event-building path; keep `core_sibilant_indices` aliased now so it
+    # survives.
+    core_sibilant_indices = list(sibilant_indices)
     expanded_indices, boundary_added = _expand_event_boundaries(
         sibilant_indices, all_frame_diag, voiced_frame_indices, resolved,
     )
@@ -1499,18 +1534,19 @@ def analyze_sibilance_events(
         )
 
     events_map = build_events_map(
-        sibilant_indices = expanded_indices,
-        f0_per_frame     = f0_per_frame,
-        f0_median        = f0_median if f0_median is not None else (contour_median or 0.0),
-        n_frames         = n_frames,
-        sample_rate      = sample_rate,
-        n_fft            = n_fft,
-        hop_length       = hop_length,
-        audio            = audio,
-        min_duration_ms  = min_duration_ms,
-        gap_merge_ms     = gap_merge_ms,
-        per_frame_diag   = per_frame_diag,
-        all_frame_diag   = all_frame_diag,
+        sibilant_indices      = expanded_indices,
+        f0_per_frame          = f0_per_frame,
+        f0_median             = f0_median if f0_median is not None else (contour_median or 0.0),
+        n_frames              = n_frames,
+        sample_rate           = sample_rate,
+        n_fft                 = n_fft,
+        hop_length            = hop_length,
+        audio                 = audio,
+        min_duration_ms       = min_duration_ms,
+        gap_merge_ms          = gap_merge_ms,
+        per_frame_diag        = per_frame_diag,
+        all_frame_diag        = all_frame_diag,
+        core_sibilant_indices = core_sibilant_indices,
     )
 
     logger.info(

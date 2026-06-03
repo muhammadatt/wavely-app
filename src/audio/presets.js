@@ -349,12 +349,29 @@ export const PRESETS = {
         ],
       },
 
+          {
+            airBoost: {
+              gainDb: 6,
+              sibilantGainFloor: 0,
+              sibilanceDetection: {
+                p95_trigger_db: 6.0,
+                min_flatness: 0.1,
+                broadband_trigger_db: 10.0,
+              },
+              // Predictive pre-attenuation
+              precut: { enabled: true, maxCutDb: 8.0, minExcessDb: 1.5 },
+            },
+          },
+      
+
       // airBoost is split: analyze runs whole-file (against the stitched
       // post-vocalSaturation audio) so the compliance loop, precut decision,
       // and sibilance event map are file-level. Apply then runs per-chunk
       // in the next chunked block, re-applying the same band params to
       // each chunk via applyAirBoostBands — every chunk inherits identical
       // EQ across seams.
+
+      /*
       {
         airBoostAnalyze: {
           gainDb: 6,
@@ -365,7 +382,7 @@ export const PRESETS = {
             broadband_trigger_db: 10.0,
           },
           // Predictive pre-attenuation
-          precut: { enabled: true, maxCutDb: 5.0, minExcessDb: 1.5 },
+          precut: { enabled: false, maxCutDb: 5.0, minExcessDb: 1.5 },
         },
       },
 
@@ -400,6 +417,7 @@ export const PRESETS = {
           },
         ],
       },
+      */
 
       /*
       {
