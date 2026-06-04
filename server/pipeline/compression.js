@@ -191,10 +191,17 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
     }
   }
 
-  // Single write at the end. If no pass applied, this just persists the
-  // unmodified input buffer to outputPath — equivalent to the legacy
-  // copyThrough path but without a separate disk read.
-  await writeWavChannels(processedChannels, sampleRate, outputPath)
+  // Persist the final buffer. When no pass applied (e.g. first pass found
+  // input already within target), fall back to copyThrough so the output
+  // is a byte-for-byte copy of the input WAV — preserves chunk layout and
+  // any non-audio chunks. When at least one pass applied, the buffer has
+  // genuinely changed; serialise it via writeWavChannels.
+  const anyApplied = passes.some(p => p.result.applied)
+  if (anyApplied) {
+    await writeWavChannels(processedChannels, sampleRate, outputPath)
+  } else {
+    await copyThrough(inputPath, outputPath)
+  }
 
   // processedChannels references on the pass results were only needed to
   // hand the buffer to the next pass; strip them before returning so the
@@ -202,28 +209,43 @@ async function applySerialCompression(inputPath, outputPath, compressionConfigs,
   // the caller awaits this promise.
   for (const p of passes) delete p.result.processedChannels
 
+  // The aggregate "last pass" metrics describe what the chain actually did,
+  // so they pull from the last pass that APPLIED — not the last pass that
+  // ran. With break-early-on-skip, the last entry in `passes` may be the
+  // skipped pass that ended the chain, whose threshold/ratio/output fields
+  // are null. Falling back to the last applied pass keeps these fields
+  // populated whenever any compression ran.
+  const lastApplied = [...passes].reverse().find(p => p.result.applied) ?? null
+  const lastResult  = lastApplied?.result ?? null
+  const firstResult = passes[0]?.result ?? null
+  const appliedCount = passes.filter(p => p.result.applied).length
+
   return {
-    applied: passes.some(p => p.result.applied),
+    applied: anyApplied,
     inputCrestFactorDb: overallInputCrestFactorDb,
-    targetCrestFactorDb: passes.length > 0 ? passes[passes.length - 1].result.targetCrestFactorDb : null,
+    targetCrestFactorDb: lastResult?.targetCrestFactorDb ?? null,
     finalCrestFactorDb: overallFinalCrestFactorDb,
     passes: passes,
-    // Legacy fields for backward compatibility (aggregate from all passes)
-
-    // pOut from the last applied pass
-    pOutDbfs: passes.length > 0 ? passes[passes.length - 1].result.pOutDbfs : null,
-    thresholdDbfs: passes.length > 0 ? passes[passes.length - 1].result.thresholdDbfs : null,
-    derivedRatio: passes.length > 0 ? passes[passes.length - 1].result.derivedRatio : null,
-    derivedGainReductionDb: passes.length > 0 ? passes[passes.length - 1].result.derivedGainReductionDb : null,
+    // Legacy aggregate fields — derived from the last APPLIED pass so
+    // skip-early scenarios still report meaningful values.
+    pOutDbfs:               lastResult?.pOutDbfs               ?? null,
+    thresholdDbfs:          lastResult?.thresholdDbfs          ?? null,
+    derivedRatio:           lastResult?.derivedRatio           ?? null,
+    derivedGainReductionDb: lastResult?.derivedGainReductionDb ?? null,
     maxGainReductionDb: passes.reduce((max, p) => Math.max(max, p.result.maxGainReductionDb || 0), 0),
-    avgGainReductionDb: passes.length > 0 ? passes.reduce((sum, p) => sum + (p.result.avgGainReductionDb || 0), 0) / Math.max(passes.filter(p => p.result.applied).length, 1) : null,
-    // Peak and RMS metrics: input from first pass, output from last applied pass
-    inputPeakDbfs: passes.length > 0 ? passes[0].result.inputPeakDbfs : null,
-    outputPeakDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputPeakDbfs : null,
-    inputVoicedRmsDbfs: passes.length > 0 ? passes[0].result.inputVoicedRmsDbfs : null,
-    outputVoicedRmsDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputVoicedRmsDbfs : null,
-    // Threshold exceedance metrics: sum across all applied passes
-    percentAboveTheshold: passes.length > 0 ? passes[passes.length - 1].result.percentAboveThreshold : null,
+    avgGainReductionDb: appliedCount > 0
+      ? passes.reduce((sum, p) => sum + (p.result.avgGainReductionDb || 0), 0) / appliedCount
+      : null,
+    // Peak and RMS metrics: input from first pass (whether it applied or
+    // not — measurement still ran), output from last applied pass.
+    inputPeakDbfs:       firstResult?.inputPeakDbfs       ?? null,
+    outputPeakDbfs:      lastResult?.outputPeakDbfs       ?? null,
+    inputVoicedRmsDbfs:  firstResult?.inputVoicedRmsDbfs  ?? null,
+    outputVoicedRmsDbfs: lastResult?.outputVoicedRmsDbfs  ?? null,
+    // Correctly spelled key — `percentAboveTheshold` (typo) kept as an
+    // alias for any existing consumer that read the legacy name.
+    percentAboveThreshold: lastResult?.percentAboveThreshold ?? null,
+    percentAboveTheshold:  lastResult?.percentAboveThreshold ?? null,
   }
 }
 
@@ -409,6 +431,8 @@ async function applySingleCompressionPass(inputChannels, sampleRate, config, fra
     avgGainReductionDb:     round2(gainCurve.avgGainReductionDb),
     makeupGainDb:           round2(appliedMakeupGainDb),
     inputPeakDbfs:          round2(peakDbfs),
+    // pOutDbfs is the documented name; targetPeakOut kept as a legacy alias.
+    pOutDbfs:               round2(pOut),
     targetPeakOut:          round2(pOut),
     outputPeakDbfs:         round2(outputPeakDbfs),
     inputVoicedRmsDbfs:     round2(voicedRmsDbfs),
