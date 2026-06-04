@@ -510,13 +510,8 @@ export async function spectralSubtraction(ctx) {
 
 // ── Stage: Noise reduction ────────────────────────────────────────────────────
 
-// Maximum makeup gain applied after NR to compensate for speech-level drop
-// caused by spectral masking. Capped to prevent over-amplification on
-// pathological files where DF3 legitimately removes a large portion of energy.
-const NR_MAX_MAKEUP_GAIN_DB = 6
-
-// Minimum voiced-RMS drop (in dB) before makeup gain kicks in. Below this
-// the drop is within measurement noise and not worth compensating.
+// Minimum peak drop (in dB) before post-NR peak re-normalization kicks in.
+// Below this the drop is within measurement noise and not worth a gain pass.
 const NR_MAKEUP_THRESHOLD_DB = 0.3
 
 export async function noiseReduce(ctx) {
@@ -556,20 +551,7 @@ export async function noiseReduce(ctx) {
     return
   }
 
-  // ── Measure voiced RMS before NR for makeup gain calculation ────────────
-  // Uses the existing Silero VAD isSilence labels so only speech frames
-  // contribute. This isolates the speech-level delta from the (desired)
-  // noise-floor reduction.
-  // Sub-stage timings collected for the diagnostic log line at the bottom of
-  // this function. Lets us see whether the codec call or the JS-side harness
-  // (the two remeasureFrames passes + optional makeupGain ffmpeg) dominates,
-  // and — for models that report it — surfaces the Python-side bucket
-  // breakdown returned in the result dict.
-  const tNr     = Date.now()
-  const tPreRem = Date.now()
-  const preFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
-  const preRemeasureMs = Date.now() - tPreRem
-  const preVoicedRms = preFa.voicedRmsDbfs
+  const tNr = Date.now()
 
   let runMs           = 0
   let pythonTimingMs  = null   // {load, resample_in, denoise, vad_gate, resample_out, write, sidecar, total} when present
@@ -625,81 +607,70 @@ export async function noiseReduce(ctx) {
     ctx.results.noiseReduction = nrResult
   }
 
-  // ── Makeup gain: restore voiced level lost to spectral masking ──────────
-  // NR models attenuate noise bins via spectral masking, but some speech
-  // energy is collaterally reduced — especially on a second pass where
-  // compression has raised the noise floor, causing the model to mask more
-  // aggressively. Measure the voiced-RMS delta and apply linear makeup gain
-  // so downstream stages (compression, expander) see the expected level.
-  let postFa = null
-  let appliedMakeupDb   = 0
-  let postRemeasureMs   = 0
-  let makeupGainMs      = 0
-  if (preVoicedRms !== null && preVoicedRms !== undefined) {
-    const tPostRem = Date.now()
-    postFa = await remeasureFrames(ctx.currentPath, ctx.results.metrics)
-    postRemeasureMs = Date.now() - tPostRem
-    const postVoicedRms = postFa.voicedRmsDbfs
+  // ── Peak re-normalization: restore level lost to spectral masking ──────────
+  // Replaces the former voiced-RMS makeup gain (2 × remeasureFrames file reads).
+  // peakNormalize already ran before the NR block so the incoming peak is at
+  // PEAK_NORMALIZE_TARGET_DBFS; any drop after NR is collateral spectral masking
+  // attenuation. Restoring the peak is cheaper and adequate for the common case
+  // where the loudest post-NR sample is voiced speech.
+  let appliedGainDb = 0
+  let peakMeasureMs = 0
+  let gainApplyMs   = 0
 
-    if (postVoicedRms !== null && postVoicedRms !== undefined) {
-      const rawDelta = preVoicedRms - postVoicedRms
-      const makeupDb = Math.min(rawDelta, NR_MAX_MAKEUP_GAIN_DB)
+  const tPeak    = Date.now()
+  const postPeak = await measurePeakDbfs(ctx.currentPath)
+  peakMeasureMs  = Date.now() - tPeak
 
-      if (makeupDb > NR_MAKEUP_THRESHOLD_DB) {
-        const gainedPath = ctx.tmp('.wav')
-        const tMakeup = Date.now()
-        await applyLinearGain(ctx.currentPath, gainedPath, makeupDb)
-        makeupGainMs = Date.now() - tMakeup
-        ctx.currentPath = gainedPath
-        appliedMakeupDb = makeupDb
-        ctx.results.noiseReduction.makeupGainDb = round2(makeupDb)
-        ctx.log(
-          `[NR] Makeup gain: +${makeupDb.toFixed(2)} dB ` +
-          `(voiced RMS ${preVoicedRms} → ${postVoicedRms} dBFS)`
-        )
-      } else {
-        ctx.results.noiseReduction.makeupGainDb = 0
-        ctx.log(
-          `[NR] No makeup gain needed — voiced RMS delta ${rawDelta.toFixed(2)} dB ` +
-          `≤ ${NR_MAKEUP_THRESHOLD_DB} dB threshold`
-        )
-      }
+  if (postPeak !== null) {
+    const gainDb = PEAK_NORMALIZE_TARGET_DBFS - postPeak
+    if (gainDb > NR_MAKEUP_THRESHOLD_DB) {
+      const gainedPath = ctx.tmp('.wav')
+      const tGain = Date.now()
+      await applyLinearGain(ctx.currentPath, gainedPath, gainDb)
+      gainApplyMs     = Date.now() - tGain
+      ctx.currentPath = gainedPath
+      appliedGainDb   = gainDb
+      ctx.results.noiseReduction.makeupGainDb = round2(gainDb)
+      ctx.log(
+        `[NR] Peak re-norm: +${gainDb.toFixed(2)} dB ` +
+        `(post-NR peak ${postPeak.toFixed(1)} → ${PEAK_NORMALIZE_TARGET_DBFS} dBFS)`
+      )
+    } else {
+      ctx.results.noiseReduction.makeupGainDb = 0
+      ctx.log(
+        `[NR] Peak re-norm skipped — post-NR peak ${postPeak.toFixed(1)} dBFS, ` +
+        `drop ${(PEAK_NORMALIZE_TARGET_DBFS - postPeak).toFixed(2)} dB ≤ ${NR_MAKEUP_THRESHOLD_DB} dB threshold`
+      )
     }
   }
 
-  // Update ctx.results.metrics with fresh post-NR (post-makeup-gain) scalars
-  // so downstream stages (autoLeveler.noiseFloorDbfs, the next noiseReduce
-  // pass's skipBelowDb check, vocalExpander.noiseFloorDbfs, etc.) see current
-  // values without a dedicated remeasureFramesPostNr stage. Makeup gain is
-  // linear so we offset postFa's dB scalars by the applied gain rather than
-  // re-reading the file. isSilence labels are Silero-derived and stable, so
-  // ctx.results.metrics.frames is left untouched.
-  if (postFa !== null) {
-    ctx.results.metrics.noiseFloorDbfs       = round2(postFa.noiseFloorDbfs       + appliedMakeupDb)
-    ctx.results.metrics.voicedRmsDbfs        = round2(postFa.voicedRmsDbfs        + appliedMakeupDb)
-    ctx.results.metrics.averageVoicedRmsDbfs = round2(postFa.averageVoicedRmsDbfs + appliedMakeupDb)
-    ctx.results.metrics.silenceThresholdDbfs = round2(postFa.silenceThresholdDbfs + appliedMakeupDb)
-
-    // rnnoise/dtln branches left post_noise_floor_dbfs null because they had
-    // no measurement source. Fill it from our authoritative post-makeup floor
-    // so qualityAdvisory / ACX cert have a value to consume for those models.
-    if (ctx.results.noiseReduction && ctx.results.noiseReduction.post_noise_floor_dbfs == null) {
-      ctx.results.noiseReduction.post_noise_floor_dbfs = ctx.results.metrics.noiseFloorDbfs
+  // Propagate the post-NR noise floor into ctx.results.metrics so any
+  // downstream skipBelowDb check on a subsequent NR pass reads a current value.
+  // DF3 reports post_noise_floor_dbfs from the Python script; adjust it for the
+  // re-norm gain and promote it. RNNoise/DTLN don't report a floor — the metrics
+  // value stays at the pre-NR reading; remeasureFramesPostNr (placed in the
+  // preset stages array after the full NR block) will refresh all metrics from
+  // the actual audio.
+  if (model === 'df3') {
+    const reportedFloor = ctx.results.noiseReduction?.post_noise_floor_dbfs ?? null
+    if (reportedFloor !== null) {
+      const adjustedFloor = round2(reportedFloor + appliedGainDb)
+      ctx.results.metrics.noiseFloorDbfs = adjustedFloor
+      ctx.results.noiseReduction.post_noise_floor_dbfs = adjustedFloor
     }
   }
 
   // Sub-stage timing breakdown. JS-side buckets tell us whether the codec
-  // call (run) or the harness (preRem + postRem + makeup) dominates; the
-  // Python-side bucket array (when present) breaks the run bucket down
+  // call (run) or the harness (peak measure + optional gain apply) dominates;
+  // the Python-side bucket array (when present) breaks the run bucket down
   // further into load / resample / denoise / vad_gate / resample_out / write.
-  // harnessMs is the sum of the JS-only passes around the codec call, so
-  // run / harness is the headline ratio.
+  // harnessMs is the sum of the JS-only passes around the codec call.
   const totalMs   = Date.now() - tNr
-  const harnessMs = preRemeasureMs + postRemeasureMs + makeupGainMs
+  const harnessMs = peakMeasureMs + gainApplyMs
   let timingLine =
     `[NR-timing] model=${model} total=${totalMs}ms ` +
     `run=${runMs}ms harness=${harnessMs}ms ` +
-    `(preRem=${preRemeasureMs}ms postRem=${postRemeasureMs}ms makeup=${makeupGainMs}ms)`
+    `(peakMeasure=${peakMeasureMs}ms gainApply=${gainApplyMs}ms)`
   if (pythonTimingMs && typeof pythonTimingMs === 'object') {
     const py = pythonTimingMs
     // Only surface buckets that fired; vad_gate/sidecar are conditional.

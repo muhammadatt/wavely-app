@@ -212,6 +212,12 @@ export const PRESETS = {
           },
         ],
       },
+      // Refresh per-frame rmsDbfs after all NR passes complete. The internal
+      // noiseReduce update only writes scalar metrics (noiseFloorDbfs,
+      // voicedRmsDbfs, etc.) — frame-level energies stay pre-NR until here.
+      // Downstream dynamics stages (compression crest-factor, vocalExpander
+      // silence-floor P90) need post-NR frame energies to be accurate.
+      "remeasureFramesPostNr",
 
       {
         // Split analyze/apply form. Config lives on the analyze entry — only
@@ -531,6 +537,7 @@ export const PRESETS = {
       "humDetect",
       "hpf",
       { noiseReduce: { model: "df3" } },
+      "remeasureFramesPostNr",
       {
         autoLeveler: {
           total_max_up_db: 6.0,
@@ -730,6 +737,7 @@ export const PRESETS = {
       "humDetect",
       "hpf",
       { noiseReduce: { model: "df3" } },
+      "remeasureFramesPostNr",
       {
         autoLeveler: {
           total_max_up_db: 8.0,
@@ -860,6 +868,7 @@ export const PRESETS = {
         },
       },
       { noiseReduce: { model: "df3" } },
+      "remeasureFramesPostNr",
       "tonalPretreatment",
       // Separation backend: 'demucs' (default, best quality) or 'convtasnet' (faster).
       // Demucs htdemucs_ft: ~5–10x real-time GPU, ~0.5–1x real-time CPU, ~2–4 GB VRAM.
