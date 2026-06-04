@@ -149,13 +149,16 @@ test('SERIAL_TORCH_THREADS raises serial dispatches; chunked scope still wins', 
   // threadingContext is imported plainly so its AsyncLocalStorage instance is
   // shared with the worker module's internal import (so withThreadLimit reaches
   // getThreadLimit). Same reasoning as the withThreadLimit test above.
+  // Ensure we don't keep a prior cached pool alive while spinning up a second
+  // pythonWorker module instance for this env-dependent test.
+  if (loadedModule) {
+    await loadedModule.stopWorker()
+    loadedModule = null
+    loadedPoolSize = null
+  }
+
   const prevSerial = process.env.SERIAL_TORCH_THREADS
   const prevPool   = process.env.PYTHON_WORKER_POOL_SIZE
-  process.env.SERIAL_TORCH_THREADS    = '5'
-  process.env.PYTHON_WORKER_POOL_SIZE = '1'
-
-  const mod = await import(`../pipeline/pythonWorker.js?serial=${Date.now()}`)
-  const { withThreadLimit } = await import('../pipeline/threadingContext.js')
   try {
     // Serial dispatch (no chunked scope) now carries the SERIAL hint instead
     // of falling back to the worker's spawn env-default.
