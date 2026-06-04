@@ -154,6 +154,10 @@ def _denoise_direct(pcm16):
     state = _RNN_LIB.rnnoise_create(None)   # NULL model → built-in weights
     if not state:
         raise RuntimeError('rnnoise_create returned NULL — possible ABI mismatch or missing symbols')
+    # Per-frame ctypes object construction (c_void_p + cast × 2) and the
+    # ctypes dispatch overhead of process() are the remaining bottleneck on
+    # low-single-core-clock hardware (e.g. AMD EPYC VMs). Moving this loop
+    # into a thin C extension or cffi batch call would eliminate it entirely.
     try:
         for i in range(n_frames):
             off = i * stride
