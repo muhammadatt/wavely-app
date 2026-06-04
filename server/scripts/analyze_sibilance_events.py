@@ -147,21 +147,22 @@ def main(argv=None):
             for c in det.get("firedConditions", [])
         ) or "none"
         band = det.get("bandHz") or [None, None]
-        logger.info(
-            "[sib-event] t=%.3f-%.3fs f=%d-%d %.0fms type=%s class=%s "
-            "hfRatio=%s coreP95=%s peak=%s cond=%s "
-            "p95=%s mean=%s lf=%s flat=%s "
-            "band=%s-%s f0=%s postSil=%s",
-            ev.get("startSec", 0.0), ev.get("endSec", 0.0),
-            ev.get("startFrame", -1), ev.get("endFrame", -1),
-            ev.get("durationMs", 0), ev.get("eventType", "?"),
-            ev.get("sibilantClass", "?"),
-            ev.get("hfRatioDb"), ev.get("coreMeanP95Db"),
-            ev.get("eventPeakDb"), fired,
-            det.get("meanP95Db"), det.get("meanMeanDb"), det.get("meanLfDb"),
-            det.get("meanFlatness"),
-            band[0], band[1], det.get("f0Hz"), det.get("postSilenceOnset"),
-        )
+
+        #logger.info(
+        #    "[sib-event] t=%.3f-%.3fs f=%d-%d %.0fms type=%s class=%s "
+        #    "hfRatio=%s coreP95=%s peak=%s cond=%s "
+        #    "p95=%s mean=%s lf=%s flat=%s "
+        #    "band=%s-%s f0=%s postSil=%s",
+        #    ev.get("startSec", 0.0), ev.get("endSec", 0.0),
+        #    ev.get("startFrame", -1), ev.get("endFrame", -1),
+        #    ev.get("durationMs", 0), ev.get("eventType", "?"),
+        #    ev.get("sibilantClass", "?"),
+        #    ev.get("hfRatioDb"), ev.get("coreMeanP95Db"),
+        #    ev.get("eventPeakDb"), fired,
+        #    det.get("meanP95Db"), det.get("meanMeanDb"), det.get("meanLfDb"),
+        #    det.get("meanFlatness"),
+        #    band[0], band[1], det.get("f0Hz"), det.get("postSilenceOnset"),
+        #)
 
         # Per-frame boundary trace. Shows, for the K frames immediately
         # before startFrame (head) and after endFrame (tail), what the
@@ -209,11 +210,11 @@ def main(argv=None):
                         f"/flat{flat if flat is not None else '?'}/{flag_s}"
                     )
                 return " ".join(parts)
-            logger.info(
-                "[sib-bound] startF=%d endF=%d  head: %s  tail: %s",
-                ev.get("startFrame", -1), ev.get("endFrame", -1),
-                _fmt(bd.get("head", [])), _fmt(bd.get("tail", [])),
-            )
+            #logger.info(
+            #    "[sib-bound] startF=%d endF=%d  head: %s  tail: %s",
+            #    ev.get("startFrame", -1), ev.get("endFrame", -1),
+            #    _fmt(bd.get("head", [])), _fmt(bd.get("tail", [])),
+            #)
 
     return {
         "frameCount":         events["frameCount"],

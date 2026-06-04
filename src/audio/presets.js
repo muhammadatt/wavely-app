@@ -329,12 +329,12 @@ export const PRESETS = {
           // standard 100 ms overlap.
           {
             vocalSaturation: {
-              drive: 2,
+              drive: 1.8,
               wetDry: 0.80,
               bias: 0.5,
               lowCrossover: 80,
               midCrossover: 8000,
-              softness: 0.85,
+              softness: 0.95,
               lowDriveMult: 2.5,
               midDriveMult: 0.1,
               highDriveMult: 0.1,

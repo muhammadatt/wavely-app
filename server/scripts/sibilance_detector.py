@@ -865,11 +865,11 @@ class SibilanceDetector:
         self.sibilant_low  = low
         self.sibilant_high = high
         self.sibilant_mask = (self.freqs >= low) & (self.freqs <= high)
-        logger.info(
-            f"SibilanceDetector: F0={f0:.1f} Hz -> "
-            f"sibilant band {low:.0f}-{high:.0f} Hz "
-            f"({self.sibilant_mask.sum()} bins)"
-        )
+        #logger.info(
+        #    f"SibilanceDetector: F0={f0:.1f} Hz -> "
+        #    f"sibilant band {low:.0f}-{high:.0f} Hz "
+        #    f"({self.sibilant_mask.sum()} bins)"
+        #)
 
     def update_rolling_f0(self, f0_for_frame: float, is_voiced: bool) -> None:
         """
