@@ -254,34 +254,41 @@ function resolveStageName(entry) {
 // Each branch is a sequential chain of entries that share an entry-time
 // snapshot of ctx.currentPath. Branches run concurrently via Promise.all.
 //
-// Sharing model (relies on Object.create's prototype chain):
-//   • Each branch gets a forkCtx = Object.create(ctx). Top-level field writes
-//     on forkCtx (e.g. forkCtx.currentPath = newPath) land as own-properties
-//     on the fork and do not leak back to ctx — that's how we keep each
-//     branch's view of currentPath isolated.
-//   • Reads of object-typed fields (ctx.results, ctx.globalParams, ctx.tmpFiles)
-//     fall through to the parent via the prototype chain, so when a stage does
-//     ctx.results.foo = value the write lands on the shared parent — that's
-//     how branch outputs propagate back without an explicit merge step.
-//   • ctx.tmp() is a closure-captured function on the parent; calling it from
-//     a fork still pushes to the parent's tmpFiles array, so cleanup at the
-//     end of processAudio sees every temp file the forks allocated.
+// Sharing model:
+//   • Each branch gets a Proxy wrapping the parent ctx. Reads and writes pass
+//     through to the parent for every field EXCEPT `currentPath`, which is
+//     held in a fork-local slot. That keeps each branch's view of the audio
+//     path isolated (so the analyzer branch reads the entry-time WAV even
+//     while the audio chain advances) without isolating any other writes.
+//   • Scalar cache fields a stage sets on ctx — e.g. `ctx._f0Contour` from
+//     clipGainDeEsserAnalyze — therefore land on the parent and remain
+//     visible to downstream stages (airBoostAnalyze etc.) that read the
+//     cache via getF0Contour(ctx, { useCache: true }).
+//   • Object-typed fields (ctx.results, ctx.globalParams, ctx.tmpFiles) are
+//     read by reference through the proxy, so stage writes to nested keys
+//     (ctx.results.foo = …) mutate the shared parent objects directly.
+//   • ctx.tmp() is a closure-captured function on the parent; calling it
+//     from a fork still pushes to the parent's tmpFiles array, so cleanup
+//     at the end of processAudio sees every temp file the forks allocated.
 //
 // Audio mutation contract:
-//   • At most one branch may produce a new ctx.currentPath. The runner
-//     enforces this and throws if more than one branch mutated currentPath.
+//   • At most one branch may produce a new currentPath. The runner enforces
+//     this and throws if more than one branch mutated currentPath.
 //   • If a single branch mutated currentPath, its post-branch value becomes
 //     ctx.currentPath for the rest of the pipeline.
-//   • Pure analyzer branches (those that only write ctx.results / globalParams)
-//     leave forkCtx.currentPath unchanged from the entry-time value.
+//   • Pure analyzer branches (those that only write ctx.results / globalParams
+//     / scalar caches) leave their fork-local currentPath unchanged from the
+//     entry-time value.
 //
 // What branches MUST NOT do:
 //   • Two branches writing the same ctx.results key — last writer wins and
-//     interleaving is unpredictable.
+//     interleaving is unpredictable. Same for shared scalar caches like
+//     ctx._f0Contour: writes propagate to the parent, but if two branches
+//     both write it the surviving value is whichever finished last.
 //   • Mutating the frames array in ctx.results.metrics — multiple branches
 //     read it concurrently.
 //   • Reading ctx.currentPath after an await expecting the AUDIO chain's
-//     progress — each fork sees its own forkCtx.currentPath, frozen at
+//     progress — each fork sees its own fork-local currentPath, frozen at
 //     entry-time unless that same fork advanced it.
 async function runParallelBlock(ctx, branches, runEntry) {
   const entryPath = ctx.currentPath
@@ -289,8 +296,21 @@ async function runParallelBlock(ctx, branches, runEntry) {
 
   const branchPromises = branches.map(async (branch, branchIdx) => {
     const branchEntries = Array.isArray(branch) ? branch : [branch]
-    const forkCtx = Object.create(ctx)
-    forkCtx.currentPath = entryPath
+
+    // Fork-local currentPath slot. The Proxy below intercepts reads/writes
+    // of `currentPath` to this slot and forwards everything else (results,
+    // globalParams, _f0Contour, etc.) to the parent ctx.
+    const local = { currentPath: entryPath }
+    const forkCtx = new Proxy(ctx, {
+      get(target, prop, receiver) {
+        if (prop === 'currentPath') return local.currentPath
+        return Reflect.get(target, prop, receiver)
+      },
+      set(target, prop, value, receiver) {
+        if (prop === 'currentPath') { local.currentPath = value; return true }
+        return Reflect.set(target, prop, value, receiver)
+      },
+    })
 
     const branchStart = Date.now()
     const stages = []
@@ -306,7 +326,7 @@ async function runParallelBlock(ctx, branches, runEntry) {
       index:      branchIdx,
       stages,
       totalMs:    Date.now() - branchStart,
-      finalPath:  forkCtx.currentPath,
+      finalPath:  local.currentPath,
     }
   })
 
