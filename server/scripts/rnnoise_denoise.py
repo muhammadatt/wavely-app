@@ -120,7 +120,7 @@ except Exception:  # pragma: no cover - depends on installed pyrnnoise build
 
 # Direct path is on by default when the symbols are available. RNNOISE_DIRECT=0
 # forces the pyrnnoise generator path (A/B comparison / escape hatch).
-_RNNOISE_DIRECT = os.environ.get('RNNOISE_DIRECT', '1') not in ('0', 'false', 'False')
+_RNNOISE_DIRECT = os.environ.get('RNNOISE_DIRECT', '1').strip().lower() not in ('0', 'false', 'no', 'off', '')
 
 
 def _denoise_direct(pcm16):
@@ -152,6 +152,8 @@ def _denoise_direct(pcm16):
     process   = _RNN_LIB.rnnoise_process_frame  # local ref avoids per-frame attr lookup
 
     state = _RNN_LIB.rnnoise_create(None)   # NULL model → built-in weights
+    if not state:
+        raise RuntimeError('rnnoise_create returned NULL — possible ABI mismatch or missing symbols')
     try:
         for i in range(n_frames):
             off = i * stride
