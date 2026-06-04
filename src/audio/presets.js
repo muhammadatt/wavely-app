@@ -465,7 +465,7 @@ export const PRESETS = {
       },
       { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } },
       */
-
+      "clipGainDeEsserApply",
       "referenceEQ",
 
       {
