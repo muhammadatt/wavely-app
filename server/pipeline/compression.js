@@ -124,6 +124,15 @@ export async function applyCompression(inputPath, outputPath, preset, frameAnaly
 /**
  * Apply multiple compression passes in series.
  *
+ * Reads the input WAV once, runs all passes against the in-memory buffer,
+ * and writes the final result once. Each pass still re-measures the
+ * current buffer's crest factor and derives its threshold from those
+ * fresh measurements — the threshold-update semantics are unchanged from
+ * the previous file-based serial path. The only thing that moves to RAM
+ * is the inter-pass buffer (~125 MB for a 12-min mono float32 file at
+ * 44.1 kHz), eliminating two intermediate WAV writes + two reads on a
+ * 3-pass chain.
+ *
  * @param {string} inputPath
  * @param {string} outputPath
  * @param {Object[]} compressionConfigs - Array of compression configurations
@@ -131,114 +140,111 @@ export async function applyCompression(inputPath, outputPath, preset, frameAnaly
  * @returns {Promise<Object>} Aggregated compression result with data from all passes
  */
 async function applySerialCompression(inputPath, outputPath, compressionConfigs, frameAnalysis) {
-  const fs = await import('fs/promises')
+  // Read the input WAV once. Intermediate passes run against the in-memory
+  // buffer; the final processed buffer is written out at the end. Channels
+  // is an Array<Float32Array>; processedChannels is reassigned per pass to
+  // the freshly compressed channels.
+  const { channels: inputChannels, sampleRate } = await readWavAllChannels(inputPath)
+  let processedChannels = inputChannels
+  let originalVoicedRmsDbfs = null
 
-  let currentInputPath = inputPath
-  let tempPaths = []
   const passes = []
   let overallInputCrestFactorDb = null
   let overallFinalCrestFactorDb = null
-  let originalVoicedRmsDbfs = null
 
-  try {
-    for (let i = 0; i < compressionConfigs.length; i++) {
-      const config = compressionConfigs[i]
-      const isLastPass = i === compressionConfigs.length - 1
+  for (let i = 0; i < compressionConfigs.length; i++) {
+    const config = compressionConfigs[i]
 
-      // For the last pass, write to the final output path
-      // For intermediate passes, create temporary files
-      let currentOutputPath
-      if (isLastPass) {
-        currentOutputPath = outputPath
-      } else {
-        currentOutputPath = outputPath.replace(/\.wav$/, `_temp_pass_${i + 1}.wav`)
-        tempPaths.push(currentOutputPath)
-      }
+    console.log(`[compression] Starting compression pass ${i + 1}/${compressionConfigs.length} (in-memory)`)
 
-      console.log(`[compression] Starting compression pass ${i + 1}/${compressionConfigs.length} - Input: ${currentInputPath}, Output: ${currentOutputPath}`)
+    const passResult = await applySingleCompressionPass(
+      processedChannels,
+      sampleRate,
+      config,
+      frameAnalysis,
+      originalVoicedRmsDbfs,
+    )
 
-      // Apply single compression pass
-      const passResult = await applySingleCompressionPass(
-        currentInputPath,
-        currentOutputPath,
-        config,
-        frameAnalysis,
-        originalVoicedRmsDbfs
-      )
-
-      // Store the initial input crest factor from the first pass
-      if (i === 0) {
-        overallInputCrestFactorDb = passResult.inputCrestFactorDb
-        originalVoicedRmsDbfs = passResult.inputVoicedRmsDbfs
-      }
-
-      // Store the final crest factor from the last pass
-      if (isLastPass || passResult.finalCrestFactorDb !== null) {
-        overallFinalCrestFactorDb = passResult.finalCrestFactorDb
-      }
-
-      passes.push({
-        passNumber: i + 1,
-        config: config,
-        result: passResult
-      })
-
-      // Update input path for next pass (unless this is the last pass)
-      if (!isLastPass) {
-        currentInputPath = currentOutputPath
-      }
-
-      // If compression was skipped, break early and copy through remaining passes
-      if (!passResult.applied) {
-        console.log(`[compression] Pass ${i + 1} skipped, ending compression chain early`)
-        if (!isLastPass) {
-          await copyThrough(currentInputPath, outputPath)
-        }
-        break
-      }
+    if (i === 0) {
+      overallInputCrestFactorDb = passResult.inputCrestFactorDb
+      originalVoicedRmsDbfs     = passResult.inputVoicedRmsDbfs
     }
 
-    return {
-      applied: passes.some(p => p.result.applied),
-      inputCrestFactorDb: overallInputCrestFactorDb,
-      targetCrestFactorDb: passes.length > 0 ? passes[passes.length - 1].result.targetCrestFactorDb : null,
-      finalCrestFactorDb: overallFinalCrestFactorDb,
-      passes: passes,
-      // Legacy fields for backward compatibility (aggregate from all passes)
-
-      // pOut from the last applied pass
-      pOutDbfs: passes.length > 0 ? passes[passes.length - 1].result.pOutDbfs : null,
-      thresholdDbfs: passes.length > 0 ? passes[passes.length - 1].result.thresholdDbfs : null,
-      derivedRatio: passes.length > 0 ? passes[passes.length - 1].result.derivedRatio : null,
-      derivedGainReductionDb: passes.length > 0 ? passes[passes.length - 1].result.derivedGainReductionDb : null,
-      maxGainReductionDb: passes.reduce((max, p) => Math.max(max, p.result.maxGainReductionDb || 0), 0),
-      avgGainReductionDb: passes.length > 0 ? passes.reduce((sum, p) => sum + (p.result.avgGainReductionDb || 0), 0) / passes.filter(p => p.result.applied).length : null,
-      // Peak and RMS metrics: input from first pass, output from last applied pass
-      inputPeakDbfs: passes.length > 0 ? passes[0].result.inputPeakDbfs : null,
-      outputPeakDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputPeakDbfs : null,
-      inputVoicedRmsDbfs: passes.length > 0 ? passes[0].result.inputVoicedRmsDbfs : null,
-      outputVoicedRmsDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputVoicedRmsDbfs : null,
-      // Threshold exceedance metrics: sum across all applied passes
-      percentAboveTheshold: passes.length > 0 ? passes[passes.length - 1].result.percentAboveThreshold : null,
+    if (passResult.finalCrestFactorDb !== null) {
+      overallFinalCrestFactorDb = passResult.finalCrestFactorDb
     }
 
-  } finally {
-    // Clean up temporary files
-    for (const tempPath of tempPaths) {
-      try {
-        await fs.unlink(tempPath)
-      } catch (err) {
-        console.warn(`[compression] Failed to clean up temp file ${tempPath}:`, err)
-      }
+    passes.push({
+      passNumber: i + 1,
+      config,
+      result:     passResult,
+    })
+
+    // Hand off the freshly compressed buffer to the next pass, or stop the
+    // chain early if this pass skipped (no voiced frames, or already within
+    // target). On skip, processedChannels is unchanged.
+    if (passResult.applied) {
+      processedChannels = passResult.processedChannels
+    } else {
+      console.log(`[compression] Pass ${i + 1} skipped, ending compression chain early`)
+      break
     }
+  }
+
+  // Single write at the end. If no pass applied, this just persists the
+  // unmodified input buffer to outputPath — equivalent to the legacy
+  // copyThrough path but without a separate disk read.
+  await writeWavChannels(processedChannels, sampleRate, outputPath)
+
+  // processedChannels references on the pass results were only needed to
+  // hand the buffer to the next pass; strip them before returning so the
+  // result object doesn't pin ~125 MB of float32 data in memory after
+  // the caller awaits this promise.
+  for (const p of passes) delete p.result.processedChannels
+
+  return {
+    applied: passes.some(p => p.result.applied),
+    inputCrestFactorDb: overallInputCrestFactorDb,
+    targetCrestFactorDb: passes.length > 0 ? passes[passes.length - 1].result.targetCrestFactorDb : null,
+    finalCrestFactorDb: overallFinalCrestFactorDb,
+    passes: passes,
+    // Legacy fields for backward compatibility (aggregate from all passes)
+
+    // pOut from the last applied pass
+    pOutDbfs: passes.length > 0 ? passes[passes.length - 1].result.pOutDbfs : null,
+    thresholdDbfs: passes.length > 0 ? passes[passes.length - 1].result.thresholdDbfs : null,
+    derivedRatio: passes.length > 0 ? passes[passes.length - 1].result.derivedRatio : null,
+    derivedGainReductionDb: passes.length > 0 ? passes[passes.length - 1].result.derivedGainReductionDb : null,
+    maxGainReductionDb: passes.reduce((max, p) => Math.max(max, p.result.maxGainReductionDb || 0), 0),
+    avgGainReductionDb: passes.length > 0 ? passes.reduce((sum, p) => sum + (p.result.avgGainReductionDb || 0), 0) / Math.max(passes.filter(p => p.result.applied).length, 1) : null,
+    // Peak and RMS metrics: input from first pass, output from last applied pass
+    inputPeakDbfs: passes.length > 0 ? passes[0].result.inputPeakDbfs : null,
+    outputPeakDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputPeakDbfs : null,
+    inputVoicedRmsDbfs: passes.length > 0 ? passes[0].result.inputVoicedRmsDbfs : null,
+    outputVoicedRmsDbfs: passes.length > 0 ? passes[passes.length - 1].result.outputVoicedRmsDbfs : null,
+    // Threshold exceedance metrics: sum across all applied passes
+    percentAboveTheshold: passes.length > 0 ? passes[passes.length - 1].result.percentAboveThreshold : null,
   }
 }
 
 /**
- * Apply a single compression pass. This is the original compression logic
- * extracted from applyCompression.
+ * Apply a single compression pass against an in-memory channel buffer.
+ *
+ * Each pass re-measures the input crest factor on its own input — the
+ * same threshold-derivation logic that the previous file-based version
+ * used. The freshly compressed channels are returned on the result as
+ * `processedChannels`; the serial driver hands them to the next pass
+ * (or writes them to disk if this is the last applied pass). Skipped
+ * passes return `applied: false` and no processedChannels — the driver
+ * keeps the input buffer for downstream use.
+ *
+ * @param {Float32Array[]} inputChannels
+ * @param {number} sampleRate
+ * @param {Object} config
+ * @param {import('./frameAnalysis.js').FrameAnalysis} frameAnalysis
+ * @param {number|null} originalVoicedRmsDbfs - First pass's voicedRmsDbfs (for `follow: false` mode)
  */
-async function applySingleCompressionPass(inputPath, outputPath, config, frameAnalysis, originalVoicedRmsDbfs = null) {
+async function applySingleCompressionPass(inputChannels, sampleRate, config, frameAnalysis, originalVoicedRmsDbfs = null) {
   const { targetCrestFactorDb, attack, release, threshold = "auto", follow = true, maxRatio = 5, lookahead } = config
   // Forward lookahead window for the sample-peak detector. Defaults to the
   // attack time (capped at 10 ms) so the gain ramp can complete before the
@@ -247,8 +253,7 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
   // attack window — useful if the slow-attack pass is intended as a leveler.
   const lookaheadMs = typeof lookahead === 'number' ? lookahead : Math.min(attack, 10)
 
-  const { channels, sampleRate } = await readWavAllChannels(inputPath)
-  const analysisSamples = channels[0]
+  const analysisSamples = inputChannels[0]
 
   // Step 1: Measure input crest factor on voiced frames
   const { peakDbfs, voicedRmsDbfs, inputCrestFactorDb, frameRmsValues } =
@@ -259,7 +264,6 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
 
   if (inputCrestFactorDb === null || peakDbfs === null) {
     console.log('[compression] Compression skipped — no voiced frames available for crest-factor measurement.')
-    await copyThrough(inputPath, outputPath)
     return {
       applied: false,
       inputCrestFactorDb: null,
@@ -287,7 +291,6 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
       `[compression] Compression skipped — input crest factor ${round2(inputCrestFactorDb)} dB` +
       ` already within target ${targetCrestFactorDb} dB.`
     )
-    await copyThrough(inputPath, outputPath)
     return {
       applied: false,
       inputCrestFactorDb: round2(inputCrestFactorDb),
@@ -307,9 +310,6 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
       pOutDbfs: null,
     }
   }
-
-  // Step 3: Set threshold based on distance of peak from targeted peak
-  //const thresholdDbfs = peakDbfs - targetCrestFactorDb
 
   // Step 3: Set threshold based on preset configuration
   let thresholdDbfs;
@@ -349,18 +349,12 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
     finalThresholdDbfs = thresholdAdjustment.adjustedThreshold || thresholdDbfs
   }
 
-  // MT - Replace Ratio Calculation with Simple Calc
   const pIn = peakDbfs
   const pOut = pIn - requiredReductionDb
   const calculatedRatio = (pIn - finalThresholdDbfs) / Math.max(pOut - finalThresholdDbfs, 0.001) // Prevent division by zero
   const derivedRatio = Math.min(calculatedRatio, maxRatio)
 
-  // Debug: Log ratio calculation details (verify using current pass peak)
   console.log(`[compression] Ratio calculation - pIn: ${pIn?.toFixed(2)}, pOut: ${pOut?.toFixed(2)}, finalThreshold: ${finalThresholdDbfs?.toFixed(2)}, derivedRatio: ${derivedRatio?.toFixed(2)}`)
-
-  // amplitude = peakDbfs - finalThresholdDbfs
-  //const newAmp = amplitude - requiredReductionDb
-  //const ratio = amplitude / newAmp
 
   // Step 5: Build gain curve from channel 0, apply to all channels
   const compParams = {
@@ -372,8 +366,8 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
     makeupGainDb: 0,
     lookaheadMs,
   }
-  const gainCurve        = buildCompressionGainCurve(analysisSamples, sampleRate, compParams)
-  const processedChannels = channels.map(ch =>
+  const gainCurve         = buildCompressionGainCurve(analysisSamples, sampleRate, compParams)
+  const processedChannels = inputChannels.map(ch =>
     applyCompressionGainCurve(ch, gainCurve.curve, compParams.makeupGainDb)
   )
 
@@ -395,10 +389,7 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
     }
   }
 
-  // Debug: Log threshold exceedance statistics and pOut
   console.log(`[compression] Pass summary - Threshold: ${finalThresholdDbfs.toFixed(2)} dBFS, pOut: ${pOut.toFixed(2)} dBFS, Samples exceeding threshold: ${gainCurve.samplesExceedingThreshold}, Percentage: ${gainCurve.percentAboveThreshold.toFixed(2)}%`)
-
-  await writeWavChannels(processedChannels, sampleRate, outputPath)
 
   // Step 6: Measure final crest factor, peak, and RMS on the compressed audio
   const finalCrestFactorDb = measureFinalCrestFactor(processedChannels[0], frameAnalysis)
@@ -423,6 +414,11 @@ async function applySingleCompressionPass(inputPath, outputPath, config, frameAn
     inputVoicedRmsDbfs:     round2(voicedRmsDbfs),
     outputVoicedRmsDbfs:    round2(outputVoicedRmsDbfs),
     percentAboveThreshold: round2(gainCurve.percentAboveThreshold),
+    // Handed to the serial driver so the next pass works against the
+    // compressed buffer in RAM. Stripped before the driver returns to
+    // its caller so this large Float32Array array isn't pinned by the
+    // result object.
+    processedChannels,
   }
 }
 
