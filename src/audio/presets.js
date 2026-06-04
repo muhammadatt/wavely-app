@@ -181,10 +181,7 @@ export const PRESETS = {
       // to gainDb = 0 and assigns the measured value to both metrics and
       // beforeMeasurements — the same outcome the post-peakNorm subtraction
       // path produced.
-      { parallel: [
-        ["measureBefore"],
-        ["analyzeFramesRaw"],
-      ] },
+      { parallel: [["measureBefore"], ["analyzeFramesRaw"]] },
       "peakNormalize",
       "humDetect",
       "hpf",
@@ -244,47 +241,49 @@ export const PRESETS = {
       // autoLeveler (per-clip flat gain, no sample shifts) and correctiveEQ
       // (biquad EQ, also sample-aligned), so clipGainDeEsserApply can still
       // consume the analyze events against the post-EQ audio afterwards.
-      { parallel: [
-        [
-          {
-            clipGainDeEsserAnalyze: {
-              enabled: true,
-              stridentCeilingDb: 6.0,
-              nonStridentCeilingDb: -4.0,
-              reductionRatio: 0.5,
-              maxReductionDb: 8.0,
-              minDurationMs: 15,
-              contextWindowMs: 80,
-              fades: {
-                fricativeInMs: 3.0,
-                fricativeOutMs: 4.0,
-                affricateInMs: 1.5,
-                affricateOutMs: 4.5,
+      {
+        parallel: [
+          [
+            {
+              clipGainDeEsserAnalyze: {
+                enabled: true,
+                stridentCeilingDb: 6.0,
+                nonStridentCeilingDb: -4.0,
+                reductionRatio: 0.5,
+                maxReductionDb: 8.0,
+                minDurationMs: 15,
+                contextWindowMs: 80,
+                fades: {
+                  fricativeInMs: 3.0,
+                  fricativeOutMs: 4.0,
+                  affricateInMs: 1.5,
+                  affricateOutMs: 4.5,
+                },
               },
             },
-          },
-        ],
-        [
-          {
-            autoLeveler: {
-              total_max_up_db: 10.0,
-              total_max_down_db: 10.0,
-              target_mode: "global",
-              target_window_s: 60,
-              noise_floor_target_dbfs: -60,
-              deadband_db: 2.0,
-              knee_db: 1.5,
-              max_up_db: 10.0,
-              max_down_db: 10.0,
-              subphrase_split_drop_db: 6.0,
-              subphrase_split_min_duration_ms: 500,
-              crossfade_ms: 30,
-              merge_max_delta_db: 6.0,
+          ],
+          [
+            {
+              autoLeveler: {
+                total_max_up_db: 10.0,
+                total_max_down_db: 10.0,
+                target_mode: "global",
+                target_window_s: 60,
+                noise_floor_target_dbfs: -60,
+                deadband_db: 2.0,
+                knee_db: 1.5,
+                max_up_db: 10.0,
+                max_down_db: 10.0,
+                subphrase_split_drop_db: 6.0,
+                subphrase_split_min_duration_ms: 500,
+                crossfade_ms: 30,
+                merge_max_delta_db: 6.0,
+              },
             },
-          },
-          "correctiveEQ",
+            "correctiveEQ",
+          ],
         ],
-      ] },
+      },
       "clipGainDeEsserApply",
       {
         compression: [
@@ -364,7 +363,7 @@ export const PRESETS = {
           {
             vocalSaturation: {
               drive: 1.8,
-              wetDry: 0.80,
+              wetDry: 0.8,
               bias: 0.5,
               lowCrossover: 80,
               midCrossover: 8000,
@@ -383,20 +382,19 @@ export const PRESETS = {
         ],
       },
 
-          {
-            airBoost: {
-              gainDb: 6,
-              sibilantGainFloor: 0,
-              sibilanceDetection: {
-                p95_trigger_db: 6.0,
-                min_flatness: 0.1,
-                broadband_trigger_db: 10.0,
-              },
-              // Predictive pre-attenuation
-              precut: { enabled: true, maxCutDb: 8.0, minExcessDb: 1.5 },
-            },
+      /*{
+        airBoost: {
+          gainDb: 6,
+          sibilantGainFloor: 0,
+          sibilanceDetection: {
+            p95_trigger_db: 6.0,
+            min_flatness: 0.1,
+            broadband_trigger_db: 10.0,
           },
-      
+          // Predictive pre-attenuation
+          precut: { enabled: true, maxCutDb: 8.0, minExcessDb: 1.5 },
+        },
+      },*/
 
       // airBoost is split: analyze runs whole-file (against the stitched
       // post-vocalSaturation audio) so the compliance loop, precut decision,
@@ -405,7 +403,6 @@ export const PRESETS = {
       // each chunk via applyAirBoostBands — every chunk inherits identical
       // EQ across seams.
 
-      /*
       {
         airBoostAnalyze: {
           gainDb: 6,
@@ -451,7 +448,6 @@ export const PRESETS = {
           },
         ],
       },
-      */
 
       /*
       {
@@ -476,6 +472,7 @@ export const PRESETS = {
         roomPresence: {
           enabled: true,
           //ir_path: "../ir/19_CrystalVocal.wav",
+          ir_path: "../ir/MRV_VocalBoot_m-m.wav",
           wet: 0.01,
           rt60Ms: 150,
           preDelayMs: 10.0,
