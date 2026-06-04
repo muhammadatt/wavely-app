@@ -23,12 +23,18 @@ caller can use the output file directly with no further trim. This absorbs
 the historical `padStart` + `decodeToFloat32` ffmpeg passes that the JS
 wrapper used to run on either side of this script.
 
-Backend:
-  Uses pyrnnoise.RNNoise.denoise_chunk — streams frames in-memory through the
-  Mozilla RNNoise model with no disk roundtrip. The cached RNNoise instance
-  is kept at module level so the persistent worker reuses it across jobs;
-  pyrnnoise automatically resets per-channel state when partial=True is
-  passed on the final chunk, so no manual reset is required between jobs.
+Backend (two paths, same Mozilla RNNoise weights, no disk roundtrip):
+  - direct-ctypes (default): drives the librnnoise that pyrnnoise already ships,
+    one rnnoise_process_frame call per 480-sample frame into preallocated
+    buffers. Avoids pyrnnoise.denoise_chunk's per-frame numpy marshalling
+    (astype + array alloc + ctypes cast + slice ×~12k frames per 2-min chunk),
+    which — not rnnoise's compiled C — was what made RNNoise as slow as DF3.
+  - pyrnnoise-generator (fallback): pyrnnoise.RNNoise.denoise_chunk, used when
+    the direct lib symbols aren't importable or RNNOISE_DIRECT=0. The cached
+    RNNoise instance is reused across jobs; partial=True resets per-channel
+    state, so no manual reset is needed between jobs.
+  Both emit the same (denoised samples + per-frame VAD probability) the vad_gate
+  consumes. Set RNNOISE_DIRECT=0 to force the generator path for A/B comparison.
 
 Model fidelity: the model still sees int16 48 kHz data identical to the
 previous file-based denoise_wav path (RNNoise(sample_rate=48000) makes the
@@ -41,7 +47,9 @@ No attenuation ceiling — RNNoise operates at its natural output level.
 Artifact assessment is deferred to Stage NE-4 (post-separation validation).
 """
 import argparse
+import ctypes
 import json
+import os
 import sys
 import time
 import warnings
@@ -79,6 +87,84 @@ def _get_rnnoise():
     if _RNN is None:
         _RNN = _RNNoiseClass(sample_rate=RNNOISE_SR)
     return _RNN
+
+
+# Direct-ctypes fast path. pyrnnoise ships a prebuilt librnnoise and calls it
+# frame-by-frame through a Python generator (denoise_chunk), allocating/casting
+# a numpy array PER 480-sample frame (~12k frames per 2-min chunk). That
+# per-frame marshalling — not rnnoise's compiled C, which is fast — is what made
+# RNNoise as slow as DeepFilterNet3. Driving the same bundled library directly,
+# one C call per frame into preallocated buffers, removes that marshalling while
+# producing the identical (denoised samples + per-frame VAD probability) output
+# the vad_gate needs. We reuse pyrnnoise's already-loaded CDLL handle so there
+# is nothing to build — the speedup is pure-Python plumbing over the prebuilt
+# binary. Falls back to the generator path if the symbols aren't importable or
+# RNNOISE_DIRECT=0.
+try:
+    from pyrnnoise.rnnoise import lib as _RNN_LIB, FRAME_SIZE as _RNN_FRAME_SIZE
+    # Declare signatures defensively (pyrnnoise sets these, but re-asserting
+    # guards against version drift — a wrong create.restype truncates the state
+    # pointer on 64-bit and crashes).
+    _RNN_LIB.rnnoise_create.restype          = ctypes.c_void_p
+    _RNN_LIB.rnnoise_create.argtypes         = [ctypes.c_void_p]
+    _RNN_LIB.rnnoise_destroy.argtypes        = [ctypes.c_void_p]
+    _RNN_LIB.rnnoise_process_frame.restype   = ctypes.c_float
+    _RNN_LIB.rnnoise_process_frame.argtypes  = [
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_float),
+        ctypes.POINTER(ctypes.c_float),
+    ]
+except Exception:  # pragma: no cover - depends on installed pyrnnoise build
+    _RNN_LIB = None
+    _RNN_FRAME_SIZE = None
+
+# Direct path is on by default when the symbols are available. RNNOISE_DIRECT=0
+# forces the pyrnnoise generator path (A/B comparison / escape hatch).
+_RNNOISE_DIRECT = os.environ.get('RNNOISE_DIRECT', '1') not in ('0', 'false', 'False')
+
+
+def _denoise_direct(pcm16):
+    """Denoise int16 48 kHz mono samples by driving the bundled librnnoise
+    directly. One rnnoise_process_frame call per 480-sample frame into
+    preallocated float buffers — no per-frame numpy allocation.
+
+    Input is promoted from the same int16 quantisation the generator path feeds
+    the model (rnnoise operates on int16-range floats), so the two backends are
+    numerically equivalent. Returns (denoised_int16, speech_probs_float32) with
+    the same shape contract as the generator loop: one probability per frame,
+    output length == n_frames * FRAME_SIZE (trailing partial frame zero-padded;
+    the caller strips the pad downstream).
+    """
+    fs = _RNN_FRAME_SIZE
+    n  = int(pcm16.shape[0])
+    n_frames = (n + fs - 1) // fs
+    padded   = n_frames * fs
+
+    in_f = np.zeros(padded, dtype=np.float32)
+    in_f[:n] = pcm16.astype(np.float32)   # int16-quantised samples as float (model input)
+    out_f = np.empty(padded, dtype=np.float32)
+    probs = np.empty(n_frames, dtype=np.float32)
+
+    c_float_p = ctypes.POINTER(ctypes.c_float)
+    base_in   = in_f.ctypes.data
+    base_out  = out_f.ctypes.data
+    stride    = fs * in_f.itemsize         # bytes per frame
+    process   = _RNN_LIB.rnnoise_process_frame  # local ref avoids per-frame attr lookup
+
+    state = _RNN_LIB.rnnoise_create(None)   # NULL model → built-in weights
+    try:
+        for i in range(n_frames):
+            off = i * stride
+            probs[i] = process(
+                state,
+                ctypes.cast(ctypes.c_void_p(base_out + off), c_float_p),
+                ctypes.cast(ctypes.c_void_p(base_in  + off), c_float_p),
+            )
+    finally:
+        _RNN_LIB.rnnoise_destroy(state)
+
+    denoised = np.clip(out_f, -32768, 32767).astype(np.int16)
+    return denoised, probs
 
 
 def _resample(audio, orig_sr, target_sr):
@@ -345,46 +431,56 @@ def main(argv=None):
     algo_delay_frames = 2  # RNNoise's internal lookahead
     strip_frames      = head_pad_frames + algo_delay_frames
 
-    rnn = _get_rnnoise()
+    rnn = None if (_RNN_LIB is not None and _RNNOISE_DIRECT) else _get_rnnoise()
+    use_direct = _RNN_LIB is not None and _RNNOISE_DIRECT
     speech_probs = None      # np.ndarray[float32] when populated
     silero_per_rnn = None    # np.ndarray[bool], one entry per RNNoise frame
     vad_gate_stats = None
+    denoised_pcm16 = None
+    frame_count = 0
     _t = time.perf_counter()
-    if rnn is not None:
+    if use_direct or rnn is not None:
+        # int16-quantised mono frames — the model input. Both backends quantise
+        # identically here, so they are numerically equivalent.
         pcm16 = np.clip(waveform[0] * 32767, -32768, 32767).astype(np.int16)
 
-        # Pre-allocate the denoised output and speech_prob buffers sized to
-        # the expected frame count. pyrnnoise yields one ~480-sample frame per
-        # 10 ms of input; we add a few frames of slack to absorb any partial
-        # tail frame and a defensive `if write + n > buf.size` resize that
-        # should never fire in practice but keeps the script safe if a future
-        # pyrnnoise version yields more frames than expected. This replaces a
-        # `frames=[]; frames.append(); np.concatenate(frames)` pattern that
-        # cost both a 360 k-item Python list build and a full-buffer copy at
-        # concatenation time for hour-long files.
-        frame_samples = RNNOISE_SR // 100
-        max_frames = (pcm16.shape[0] + frame_samples - 1) // frame_samples + 4
-        out_buf = np.empty(max_frames * frame_samples, dtype=np.int16)
-        sp_arr  = np.empty(max_frames, dtype=np.float32)
-        write_offset = 0
-        frame_count  = 0
-        for speech_prob, denoised_frame in rnn.denoise_chunk(pcm16, partial=True):
-            # denoised_frame: (channels, samples) int16 at sample_rate (=48 kHz)
-            f = denoised_frame[0] if denoised_frame.ndim == 2 else denoised_frame
-            n = f.shape[0]
-            if write_offset + n > out_buf.shape[0]:
-                # Defensive grow — unreachable with the +4 slack above unless
-                # pyrnnoise yields more frames than the input justifies.
-                out_buf = np.concatenate([out_buf, np.empty(frame_samples * 8, dtype=np.int16)])
-                sp_arr  = np.concatenate([sp_arr,  np.empty(8, dtype=np.float32)])
-            out_buf[write_offset:write_offset + n] = f
-            write_offset += n
-            # pyrnnoise yields speech_prob as a length-1 ndarray (one entry
-            # per channel; we run mono). Use .item() to extract a Python
-            # float without tripping NumPy 1.25+ scalar-conversion deprecation.
-            sp_arr[frame_count] = speech_prob.item() if hasattr(speech_prob, 'item') else speech_prob
-            frame_count += 1
-        speech_probs = sp_arr[:frame_count]
+        if use_direct:
+            # Direct librnnoise path: one C call per frame into preallocated
+            # buffers, no per-frame numpy marshalling. See _denoise_direct.
+            print('[rnnoise] backend=direct-ctypes', flush=True)
+            denoised_pcm16, speech_probs = _denoise_direct(pcm16)
+            frame_count = int(speech_probs.shape[0])
+        else:
+            # Fallback: pyrnnoise streaming generator. Used when the direct lib
+            # symbols aren't importable or RNNOISE_DIRECT=0.
+            print('[rnnoise] backend=pyrnnoise-generator', flush=True)
+            # Pre-allocate the denoised output and speech_prob buffers sized to
+            # the expected frame count. pyrnnoise yields one ~480-sample frame
+            # per 10 ms of input; a few frames of slack absorb any partial tail
+            # frame and a defensive resize that should never fire in practice.
+            frame_samples = _RNN_FRAME_SIZE or (RNNOISE_SR // 100)
+            max_frames = (pcm16.shape[0] + frame_samples - 1) // frame_samples + 4
+            out_buf = np.empty(max_frames * frame_samples, dtype=np.int16)
+            sp_arr  = np.empty(max_frames, dtype=np.float32)
+            write_offset = 0
+            for speech_prob, denoised_frame in rnn.denoise_chunk(pcm16, partial=True):
+                # denoised_frame: (channels, samples) int16 at sample_rate (=48 kHz)
+                f = denoised_frame[0] if denoised_frame.ndim == 2 else denoised_frame
+                n = f.shape[0]
+                if write_offset + n > out_buf.shape[0]:
+                    # Defensive grow — unreachable with the +4 slack above unless
+                    # pyrnnoise yields more frames than the input justifies.
+                    out_buf = np.concatenate([out_buf, np.empty(frame_samples * 8, dtype=np.int16)])
+                    sp_arr  = np.concatenate([sp_arr,  np.empty(8, dtype=np.float32)])
+                out_buf[write_offset:write_offset + n] = f
+                write_offset += n
+                # pyrnnoise yields speech_prob as a length-1 ndarray (one entry
+                # per channel; we run mono). Use .item() to extract a Python
+                # float without tripping NumPy 1.25+ scalar-conversion deprecation.
+                sp_arr[frame_count] = speech_prob.item() if hasattr(speech_prob, 'item') else speech_prob
+                frame_count += 1
+            speech_probs   = sp_arr[:frame_count]
+            denoised_pcm16 = out_buf[:write_offset]
 
         # Resolve the Silero (25 ms) mask onto the RNNoise (10 ms) frame grid.
         # Output frame k aligns with original-audio time (k - strip_frames) * 10 ms;
@@ -406,8 +502,6 @@ def main(argv=None):
             silero_per_rnn[valid] = ~silero_full[sf[valid]]
 
         if frame_count > 0:
-            denoised_pcm16 = out_buf[:write_offset]
-
             # VAD-disagreement gate: where Silero says SPEECH but RNNoise's
             # internal VAD speech_prob < threshold, swap the denoised frame
             # back to the dry input. RNNoise misclassifies unvoiced fricative
@@ -447,7 +541,7 @@ def main(argv=None):
 
             waveform = denoised_pcm16.astype(np.float32)[np.newaxis, :] / 32767.0
         else:
-            print('[rnnoise] WARNING: denoise_chunk produced no output — '
+            print('[rnnoise] WARNING: RNNoise produced no output — '
                   'passing through unchanged.', flush=True)
     else:
         # Fallback: pyrnnoise unavailable, pass through with a warning.
