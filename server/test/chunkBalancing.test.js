@@ -104,12 +104,12 @@ test('lowered 30 s minimum lets short files balance at higher concurrencies', ()
   // overhead-amortisation floor and balancing realises the target count.
   const p200c3 = plan(200, { concurrencyHint: 3 })
   assert.equal(p200c3.balancedChunkCount, 3,
-    `200 s @ c=3: expected balanced count of 3, got ${p200c3.chunks.length}`)
+    `200 s @ c=3: expected balanced count of 3, got ${p200c3.balancedChunkCount}`)
   assert.equal(p200c3.chunks.length % 3, 0)
 
   const p300c4 = plan(300, { concurrencyHint: 4 })
   assert.equal(p300c4.balancedChunkCount, 4,
-    `300 s @ c=4: expected balanced count of 4, got ${p300c4.chunks.length}`)
+    `300 s @ c=4: expected balanced count of 4, got ${p300c4.balancedChunkCount}`)
   assert.equal(p300c4.chunks.length % 4, 0)
 })
 

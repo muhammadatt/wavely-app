@@ -204,7 +204,8 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
   const minS            = options.minChunkDurationS    ?? DEFAULT_MIN_CHUNK_DURATION_S
   const maxS            = options.maxChunkDurationS    ?? DEFAULT_MAX_CHUNK_DURATION_S
   const minSilMs        = options.minSilenceMs         ?? DEFAULT_MIN_SILENCE_MS
-  const concurrencyHint = Math.max(1, Math.floor(options.concurrencyHint ?? 1))
+  const _rawHint        = Number(options.concurrencyHint ?? 1)
+  const concurrencyHint = Number.isFinite(_rawHint) ? Math.max(1, Math.floor(_rawHint)) : 1
 
   const minChunkSamples = Math.round(minS * sampleRate)
   const maxChunkSamples = Math.round(maxS * sampleRate)
@@ -316,7 +317,7 @@ export function planChunkBoundaries({ frames, sampleRate, totalSamples, options 
   chunks.push({ startSample: chunkStart, endSample: totalSamples })
 
   // Report balancing only when the silence-snapped loop actually landed a
-  // multiple of the slot count. balancedChunkCount_ above is the *target*; the
+  // multiple of the slot count. balancedTargetCount above is the *target*; the
   // realised count can fall short when silence layout near the min-chunk floor
   // forces an overshoot (the loop still returns a valid, rail-respecting plan).
   // Reporting the realised-balanced count — or null when it drifted — keeps the
