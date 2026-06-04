@@ -169,9 +169,23 @@ export const PRESETS = {
     stages: [
       "decode",
       "monoMixdown",
-      "measureBefore",
+      // measureBefore and analyzeFramesRaw both read the original
+      // (post-mixdown, pre-peakNormalize) audio and write disjoint fields on
+      // ctx.results.metrics / ctx.results.beforeMeasurements. measureBefore is
+      // an FFmpeg subprocess (volumedetect ± libebur128) while analyzeFramesRaw
+      // is in-process JS (Meyda + Silero), so the two overlap cleanly — the
+      // FFmpeg subprocess runs on its own core while Node executes the frame
+      // analysis on the main thread. analyzeFramesRaw on pre-peakNormalize
+      // audio matches the historical behaviour exactly: peakNormalize?.gainDb
+      // is undefined at this point so the noise-floor back-fill falls through
+      // to gainDb = 0 and assigns the measured value to both metrics and
+      // beforeMeasurements — the same outcome the post-peakNorm subtraction
+      // path produced.
+      { parallel: [
+        ["measureBefore"],
+        ["analyzeFramesRaw"],
+      ] },
       "peakNormalize",
-      "analyzeFramesRaw",
       "humDetect",
       "hpf",
       {
@@ -219,45 +233,59 @@ export const PRESETS = {
       // silence-floor P90) need post-NR frame energies to be accurate.
       "remeasureFramesPostNr",
 
-      {
-        // Split analyze/apply form. Config lives on the analyze entry — only
-        // analyze reads the preset; apply consumes the events.json + config
-        // snapshot that analyze stashed on ctx.globalParams.clipGainDeEsser.
-        clipGainDeEsserAnalyze: {
-          enabled: true,
-          stridentCeilingDb: 6.0,
-          nonStridentCeilingDb: -4.0,
-          reductionRatio: 0.5,
-          maxReductionDb: 8.0,
-          minDurationMs: 15,
-          contextWindowMs: 80,
-          fades: {
-            fricativeInMs: 3.0,
-            fricativeOutMs: 4.0,
-            affricateInMs: 1.5,
-            affricateOutMs: 4.5,
+      // clipGainDeEsserAnalyze runs sibilance detection (in-process JS +
+      // Python sibilanceEvents subprocess) and writes only metadata —
+      // ctx.globalParams.clipGainDeEsser and ctx._f0Contour. It does not
+      // touch the audio buffer. autoLeveler and correctiveEQ each rewrite
+      // the audio (autoLeveler renders a new WAV; correctiveEQ applies a
+      // parametric EQ pass), so they form a single sequential audio chain
+      // in the second branch. Both chains read the same pre-leveler audio
+      // at fork entry; sibilance event sample positions are valid through
+      // autoLeveler (per-clip flat gain, no sample shifts) and correctiveEQ
+      // (biquad EQ, also sample-aligned), so clipGainDeEsserApply can still
+      // consume the analyze events against the post-EQ audio afterwards.
+      { parallel: [
+        [
+          {
+            clipGainDeEsserAnalyze: {
+              enabled: true,
+              stridentCeilingDb: 6.0,
+              nonStridentCeilingDb: -4.0,
+              reductionRatio: 0.5,
+              maxReductionDb: 8.0,
+              minDurationMs: 15,
+              contextWindowMs: 80,
+              fades: {
+                fricativeInMs: 3.0,
+                fricativeOutMs: 4.0,
+                affricateInMs: 1.5,
+                affricateOutMs: 4.5,
+              },
+            },
           },
-        },
-      },
+        ],
+        [
+          {
+            autoLeveler: {
+              total_max_up_db: 10.0,
+              total_max_down_db: 10.0,
+              target_mode: "global",
+              target_window_s: 60,
+              noise_floor_target_dbfs: -60,
+              deadband_db: 2.0,
+              knee_db: 1.5,
+              max_up_db: 10.0,
+              max_down_db: 10.0,
+              subphrase_split_drop_db: 6.0,
+              subphrase_split_min_duration_ms: 500,
+              crossfade_ms: 30,
+              merge_max_delta_db: 6.0,
+            },
+          },
+          "correctiveEQ",
+        ],
+      ] },
       "clipGainDeEsserApply",
-      {
-        autoLeveler: {
-          total_max_up_db: 10.0,
-          total_max_down_db: 10.0,
-          target_mode: "global",
-          target_window_s: 60,
-          noise_floor_target_dbfs: -60,
-          deadband_db: 2.0,
-          knee_db: 1.5,
-          max_up_db: 10.0,
-          max_down_db: 10.0,
-          subphrase_split_drop_db: 6.0,
-          subphrase_split_min_duration_ms: 500,
-          crossfade_ms: 30,
-          merge_max_delta_db: 6.0,
-        },
-      },
-      "correctiveEQ",
       {
         compression: [
           /*  

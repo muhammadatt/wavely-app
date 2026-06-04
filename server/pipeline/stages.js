@@ -153,23 +153,23 @@ export async function measureBefore(ctx) {
     ? await measureRmsAndPeak(ctx.currentPath)
     : await measureAudio(ctx.currentPath)
 
-  ctx.results.metrics = {
-    rmsDbfs:               audio.rmsDbfs,
-    truePeakDbfs:          audio.truePeakDbfs,
-    lufsIntegrated:        audio.lufsIntegrated ?? null,
-    noiseFloorDbfs:        null,
-    silenceThresholdDbfs:  null,
-    frames:                null,
-    voicedRmsDbfs:         null,
-    averageVoicedRmsDbfs:  null,
-    quietestSilenceSegment: null,
-  }
-  ctx.results.beforeMeasurements = {
+  // Merge into the shared metrics objects rather than replacing them — when
+  // measureBefore runs inside a parallel group alongside analyzeFramesRaw,
+  // either stage may land first and the other must not clobber its fields.
+  // The `??=` initialisers are atomic at the JS statement level (no await
+  // between them), so the two forks cannot both create a fresh object.
+  ctx.results.metrics ??= {}
+  Object.assign(ctx.results.metrics, {
     rmsDbfs:        audio.rmsDbfs,
     truePeakDbfs:   audio.truePeakDbfs,
     lufsIntegrated: audio.lufsIntegrated ?? null,
-    noiseFloorDbfs: null,
-  }
+  })
+  ctx.results.beforeMeasurements ??= {}
+  Object.assign(ctx.results.beforeMeasurements, {
+    rmsDbfs:        audio.rmsDbfs,
+    truePeakDbfs:   audio.truePeakDbfs,
+    lufsIntegrated: audio.lufsIntegrated ?? null,
+  })
 }
 
 // ── Stage: Peak normalize (pre-processing) ───────────────────────────────────
@@ -235,22 +235,25 @@ export async function peakNormalize(ctx) {
 
 // ── Stage: Frame analysis (pre-HPF) ──────────────────────────────────────────
 // Classifies voiced/silence frames, measures noise floor and loudness metrics.
-// Also back-fills beforeMeasurements.noiseFloorDbfs: analyzeFramesRaw runs on
-// post-peakNormalize audio, so the peakNorm gain is subtracted to recover the
-// original pre-processing noise floor. Linear gain shifts the noise floor by
-// the same amount as voiced frames, so subtraction is exact.
+// May run either before peakNormalize (e.g. as a parallel fork alongside
+// measureBefore) or after it. When peakNormalize has already run, the gain
+// it applied is subtracted from the measured noise floor to recover the
+// original pre-processing value for the beforeMeasurements snapshot. When
+// peakNormalize has not yet run, gainDb is 0 and metrics.noiseFloorDbfs and
+// beforeMeasurements.noiseFloorDbfs both receive the original measured value.
 
 export async function analyzeFramesRaw(ctx) {
   const fa = await analyzeFrames(ctx.currentPath)
+
+  // `??=` here lets analyzeFramesRaw run as a parallel fork alongside
+  // measureBefore without either stage clobbering the other's writes.
+  ctx.results.metrics ??= {}
   Object.assign(ctx.results.metrics, fa)
 
-  // Back-fill beforeMeasurements.noiseFloorDbfs: analyzeFramesRaw runs on
-  // post-peakNormalize audio, so subtract the peakNorm gain to recover the
-  // original pre-processing noise floor. Linear gain shifts the noise floor
-  // by the same amount as voiced frames, so this subtraction is exact.
   const gainDb = ctx.results.peakNormalize?.gainDb ?? 0
   const originalNoiseFloor = round2(fa.noiseFloorDbfs - gainDb)
   ctx.results.metrics.noiseFloorDbfs = fa.noiseFloorDbfs
+  ctx.results.beforeMeasurements ??= {}
   ctx.results.beforeMeasurements.noiseFloorDbfs = originalNoiseFloor
 }
 

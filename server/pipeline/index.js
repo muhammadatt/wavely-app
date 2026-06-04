@@ -88,12 +88,21 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
 // ── Stage entry dispatcher ────────────────────────────────────────────────────
 
 /**
- * Run a single entry from a stages array. Three entry shapes are supported:
+ * Run a single entry from a stages array. Four entry shapes are supported:
  *
  *   "stageName"                  — bare stage call, no inline config
  *   { stageName: { ...config } } — stage call with inline config patch
  *   { chunked: [...inner] }      — dispatch inner stages through the chunked
  *                                   block runner (carve → per-chunk → stitch)
+ *   { parallel: [branch, ...] }  — run each branch concurrently against the
+ *                                   same input audio. Each branch is itself
+ *                                   an array of entries (a sequential chain
+ *                                   that runs within one fork). At most one
+ *                                   branch may mutate ctx.currentPath — that
+ *                                   branch's output becomes the group output;
+ *                                   the others are pure analyzers writing to
+ *                                   ctx.results / ctx.globalParams. See
+ *                                   runParallelBlock for the contract details.
  *
  * Exported indirectly via runChunkedBlock so the chunked runner can recurse
  * through the same dispatch path for its inner stages — keeps inline-config
@@ -130,6 +139,36 @@ async function runStageEntry(ctx, entry, logger) {
         if (timings) stageResults._chunked = timings
         await logger.logStep(
           'chunked',
+          audioChanged ? ctx.currentPath : null,
+          stageResults,
+          Date.now() - stageStart,
+        )
+      }
+      return
+    }
+
+    // Parallel block — fork-join over independent branches sharing the same
+    // entry-time audio path. Logged as a single 'parallel' step with the
+    // per-branch / per-stage timings attached so the breakdown is visible
+    // without doubling up entries in the main step log.
+    if (typeof entry === 'object' && entry !== null && Array.isArray(entry.parallel)) {
+      const prevPath      = ctx.currentPath
+      const resultsBefore = { ...ctx.results }
+
+      const timings = await runParallelBlock(
+        ctx,
+        entry.parallel,
+        (subCtx, innerEntry) => runStageEntry(subCtx, innerEntry, null),
+      )
+
+      if (logger) {
+        const audioChanged = ctx.currentPath !== prevPath
+        const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
+        const stageResults = {}
+        for (const key of changedKeys) stageResults[key] = ctx.results[key]
+        stageResults._parallel = timings
+        await logger.logStep(
+          'parallel',
           audioChanged ? ctx.currentPath : null,
           stageResults,
           Date.now() - stageStart,
@@ -199,12 +238,120 @@ function resolveStageName(entry) {
   if (typeof entry === 'object' && entry !== null && Array.isArray(entry.chunked)) {
     return 'chunked'
   }
+  if (typeof entry === 'object' && entry !== null && Array.isArray(entry.parallel)) {
+    return 'parallel'
+  }
   if (typeof entry === 'string') return entry
   if (entry && typeof entry === 'object') {
     const [configKey] = Object.keys(entry)
     return STAGE_FOR_CONFIG_KEY[configKey] ?? configKey
   }
   return '<unknown>'
+}
+
+// ── Parallel block runner ────────────────────────────────────────────────────
+//
+// Each branch is a sequential chain of entries that share an entry-time
+// snapshot of ctx.currentPath. Branches run concurrently via Promise.all.
+//
+// Sharing model:
+//   • Each branch gets a Proxy wrapping the parent ctx. Reads and writes pass
+//     through to the parent for every field EXCEPT `currentPath`, which is
+//     held in a fork-local slot. That keeps each branch's view of the audio
+//     path isolated (so the analyzer branch reads the entry-time WAV even
+//     while the audio chain advances) without isolating any other writes.
+//   • Scalar cache fields a stage sets on ctx — e.g. `ctx._f0Contour` from
+//     clipGainDeEsserAnalyze — therefore land on the parent and remain
+//     visible to downstream stages (airBoostAnalyze etc.) that read the
+//     cache via getF0Contour(ctx, { useCache: true }).
+//   • Object-typed fields (ctx.results, ctx.globalParams, ctx.tmpFiles) are
+//     read by reference through the proxy, so stage writes to nested keys
+//     (ctx.results.foo = …) mutate the shared parent objects directly.
+//   • ctx.tmp() is a closure-captured function on the parent; calling it
+//     from a fork still pushes to the parent's tmpFiles array, so cleanup
+//     at the end of processAudio sees every temp file the forks allocated.
+//
+// Audio mutation contract:
+//   • At most one branch may produce a new currentPath. The runner enforces
+//     this and throws if more than one branch mutated currentPath.
+//   • If a single branch mutated currentPath, its post-branch value becomes
+//     ctx.currentPath for the rest of the pipeline.
+//   • Pure analyzer branches (those that only write ctx.results / globalParams
+//     / scalar caches) leave their fork-local currentPath unchanged from the
+//     entry-time value.
+//
+// What branches MUST NOT do:
+//   • Two branches writing the same ctx.results key — last writer wins and
+//     interleaving is unpredictable. Same for shared scalar caches like
+//     ctx._f0Contour: writes propagate to the parent, but if two branches
+//     both write it the surviving value is whichever finished last.
+//   • Mutating the frames array in ctx.results.metrics — multiple branches
+//     read it concurrently.
+//   • Reading ctx.currentPath after an await expecting the AUDIO chain's
+//     progress — each fork sees its own fork-local currentPath, frozen at
+//     entry-time unless that same fork advanced it.
+async function runParallelBlock(ctx, branches, runEntry) {
+  const entryPath = ctx.currentPath
+  const wallStart = Date.now()
+
+  const branchPromises = branches.map(async (branch, branchIdx) => {
+    const branchEntries = Array.isArray(branch) ? branch : [branch]
+
+    // Fork-local currentPath slot. The Proxy below intercepts reads/writes
+    // of `currentPath` to this slot and forwards everything else (results,
+    // globalParams, _f0Contour, etc.) to the parent ctx.
+    const local = { currentPath: entryPath }
+    const forkCtx = new Proxy(ctx, {
+      get(target, prop, receiver) {
+        if (prop === 'currentPath') return local.currentPath
+        return Reflect.get(target, prop, receiver)
+      },
+      set(target, prop, value, receiver) {
+        if (prop === 'currentPath') { local.currentPath = value; return true }
+        return Reflect.set(target, prop, value, receiver)
+      },
+    })
+
+    const branchStart = Date.now()
+    const stages = []
+    for (const innerEntry of branchEntries) {
+      const innerStart = Date.now()
+      await runEntry(forkCtx, innerEntry)
+      stages.push({
+        name:       resolveStageName(innerEntry),
+        durationMs: Date.now() - innerStart,
+      })
+    }
+    return {
+      index:      branchIdx,
+      stages,
+      totalMs:    Date.now() - branchStart,
+      finalPath:  local.currentPath,
+    }
+  })
+
+  const branchResults = await Promise.all(branchPromises)
+
+  const audioMutators = branchResults.filter(b => b.finalPath !== entryPath)
+  if (audioMutators.length > 1) {
+    const offenders = audioMutators.map(b => `branch ${b.index}`).join(', ')
+    throw new Error(
+      `[pipeline] parallel block: multiple branches mutated currentPath (${offenders}). ` +
+      `At most one branch in a parallel group may produce new audio.`
+    )
+  }
+  if (audioMutators.length === 1) {
+    ctx.currentPath = audioMutators[0].finalPath
+  }
+
+  return {
+    wallClockMs: Date.now() - wallStart,
+    branches:    branchResults.map(b => ({
+      index:    b.index,
+      totalMs:  b.totalMs,
+      stages:   b.stages,
+    })),
+  }
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
