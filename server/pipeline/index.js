@@ -207,6 +207,14 @@ async function runStageEntry(ctx, entry, logger) {
       const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
       const stageResults = {}
       for (const key of changedKeys) stageResults[key] = ctx.results[key]
+      // Omit per-frame silence labels from the logged metrics — the frames array
+      // contains one entry per ~100 ms of audio (thousands of entries on long files)
+      // and dominates log size and JSON-serialisation latency. Scalar fields
+      // (noiseFloorDbfs, silenceThresholdDbfs, voicedRmsDbfs, …) are preserved.
+      if (stageResults.metrics?.frames) {
+        const { frames: _frames, ...rest } = stageResults.metrics
+        stageResults.metrics = rest
+      }
       await logger.logStep(
         stageName,
         audioChanged ? ctx.currentPath : null,
