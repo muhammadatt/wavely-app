@@ -35,9 +35,15 @@
  * shrink the already-spawned worker threads. Empirical result on 8 vCPU:
  * TORCH_NUM_THREADS=6 + per-call=2 → DF3 oversubscribes anyway (1300+ s/chunk);
  * TORCH_NUM_THREADS=3 env-consistent → DF3 healthy (~85 s/chunk).
- * For stages where this matters (currently only DF3), set TORCH_NUM_THREADS
- * to the value that's safe at full chunked concurrency rather than relying
- * on the per-call path to clamp it. See GitHub issue for revisit.
+ * The fix exploits the asymmetry: non-DF3 stages can be RAISED at runtime, but
+ * DF3 cannot be LOWERED after its first inference. So spawn LOW (set
+ * TORCH_NUM_THREADS to the value safe at full chunked concurrency — this is
+ * what DF3 pins to) and RAISE serial stages via SERIAL_TORCH_THREADS, a
+ * per-call runtime hint that NumPy/scipy/torch honor. DF3 only runs inside the
+ * chunked block, so it is never raised; serial NumPy/scipy stages get more
+ * threads while DF3/chunked stay lean — no separate worker pools needed.
+ * (DF3 running *alone* still can't be raised — that single-process pin would
+ * need a second pool — but DF3 is always chunked here, so it doesn't arise.)
  *
  * Environment:
  *   SEPARATION_PYTHON         — Python executable (default: python3)
@@ -52,6 +58,16 @@
  *                                see note above on the DF3 limitation.
  *                                Defaults to min(TORCH_NUM_THREADS,
  *                                floor(cpus/pool_size)).
+ *   SERIAL_TORCH_THREADS      — per-call thread count for serial (non-chunked)
+ *                                dispatches, applied at runtime (raises NumPy/
+ *                                scipy/torch above the spawn-time DF3 budget).
+ *                                Unset → serial calls use the spawn env-default
+ *                                (prior behaviour). Typical: set TORCH_NUM_THREADS
+ *                                low for DF3/chunked and this higher for serial.
+ *   RAYON_NUM_THREADS         — libdf (DeepFilterNet Rust core) Rayon pool size,
+ *                                applied at worker spawn. Defaults to
+ *                                TORCH_NUM_THREADS. Runtime changes are ignored
+ *                                by Rayon, so it must be set via env.
  *   WAVELY_DISABLE_PY_WORKER  — set to '1' to force the legacy spawn path
  *                                in spawnPython.js (escape hatch)
  */
@@ -102,6 +118,30 @@ const CHUNKED_THREADS = (() => {
   return Math.min(torchDefault, safeDefault)
 })()
 
+// Serial-stage thread count. Serial (non-chunked) dispatches carry no
+// AsyncLocalStorage thread hint, so historically they ran at the worker's
+// spawn-time env default (NUM_THREADS). That couples them to the chunked/DF3
+// budget: raising NUM_THREADS to speed up serial NumPy/scipy stages also
+// raises the value DF3 pins to at first inference, oversubscribing the
+// chunked block.
+//
+// SERIAL_TORCH_THREADS breaks that coupling. When set, serial dispatches send
+// it as a per-call hint and _worker.py raises torch + OMP/MKL/OpenBLAS at
+// runtime (which those libraries honor) for that call. DF3 is unaffected — it
+// only runs inside the chunked block, and its threads are pinned to the spawn
+// env regardless of runtime hints. So the intended production setup is:
+//
+//   TORCH_NUM_THREADS=2     # spawn env → DF3 + chunked stages (concurrency × 2)
+//   SERIAL_TORCH_THREADS=6  # runtime raise → serial NumPy/scipy stages
+//
+// Unset → null → serial calls send no hint → identical to prior behaviour.
+const SERIAL_THREADS = (() => {
+  const explicit = process.env.SERIAL_TORCH_THREADS
+  if (!explicit) return null
+  const n = parseInt(explicit, 10)
+  return (Number.isFinite(n) && n > 0) ? n : null
+})()
+
 // ─── WorkerHandle ────────────────────────────────────────────────────────────
 
 /**
@@ -130,6 +170,15 @@ class WorkerHandle {
         OMP_NUM_THREADS:   NUM_THREADS,
         MKL_NUM_THREADS:   NUM_THREADS,
         TORCH_NUM_THREADS: NUM_THREADS,
+        // libdf (DeepFilterNet's Rust core) parallelises its DSP via Rayon,
+        // whose global pool reads RAYON_NUM_THREADS once at first use and
+        // ignores any later/runtime change — so it must be set here at spawn,
+        // not per-call. Pin it to the same DF3-safe budget as the torch pools
+        // so the chunked block doesn't oversubscribe through Rayon. Honor an
+        // explicit RAYON_NUM_THREADS from the environment if the operator set
+        // one. (A runtime RAYON_NUM_THREADS override is silently ignored by
+        // Rayon — the likely reason prior attempts had no effect.)
+        RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS ?? NUM_THREADS,
         PYTHONUNBUFFERED:  '1',
         PYTHONPATH: SCRIPTS_DIR + path.delimiter + (process.env.PYTHONPATH ?? ''),
       },
@@ -288,9 +337,13 @@ function drainQueue() {
 /**
  * Dispatch a script to an idle worker, or queue if all workers are busy.
  *
- * The per-call PyTorch thread count is read from the AsyncLocalStorage hint
- * set by the chunked runner; serial calls (no hint) fall back to the
- * worker's env-default. See threadingContext.js.
+ * Per-call thread count, in priority order:
+ *   1. the chunked runner's AsyncLocalStorage hint (set inside a chunked
+ *      block via withThreadLimit) — keeps concurrent chunks lean;
+ *   2. SERIAL_THREADS (SERIAL_TORCH_THREADS env) for serial dispatches —
+ *      raises NumPy/scipy/torch serial stages above the spawn-time DF3 budget;
+ *   3. null → no hint → the worker's spawn-time env-default.
+ * See threadingContext.js and the SERIAL_THREADS note above.
  *
  * @param {string}   script — module name (no .py), matches a file in server/scripts/
  * @param {string[]} argv   — argv-style args (e.g. ['--input', '/tmp/x.wav'])
@@ -299,7 +352,7 @@ function drainQueue() {
  */
 export function runPython(script, argv = [], label = script) {
   return new Promise((resolve, reject) => {
-    const threads = getThreadLimit()
+    const threads = getThreadLimit() ?? SERIAL_THREADS
     const task = { script, argv, label, threads, resolve, reject }
     const worker = findIdleWorker()
     if (worker) {

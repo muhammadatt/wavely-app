@@ -142,3 +142,39 @@ test('pool size 1 preserves single-worker behaviour', async () => {
       `pool size 1 should route every call to the same worker; got pid ${r.pid} vs ${lonePid}`)
   }
 })
+
+test('SERIAL_TORCH_THREADS raises serial dispatches; chunked scope still wins', async () => {
+  // SERIAL_THREADS is captured at module load, so set the env and import a
+  // fresh module instance. The cache-busting query is only on pythonWorker —
+  // threadingContext is imported plainly so its AsyncLocalStorage instance is
+  // shared with the worker module's internal import (so withThreadLimit reaches
+  // getThreadLimit). Same reasoning as the withThreadLimit test above.
+  // Ensure we don't keep a prior cached pool alive while spinning up a second
+  // pythonWorker module instance for this env-dependent test.
+  if (loadedModule) {
+    await loadedModule.stopWorker()
+    loadedModule = null
+    loadedPoolSize = null
+  }
+
+  const prevSerial = process.env.SERIAL_TORCH_THREADS
+  const prevPool   = process.env.PYTHON_WORKER_POOL_SIZE
+  try {
+    // Serial dispatch (no chunked scope) now carries the SERIAL hint instead
+    // of falling back to the worker's spawn env-default.
+    const serial = await mod.runPython('__ping__', [], 'ping-serial')
+    assert.equal(serial.last_threads_hint, 5,
+      `serial call should send SERIAL_TORCH_THREADS=5; got ${serial.last_threads_hint}`)
+
+    // A chunked scope still takes priority over the serial default.
+    const chunked = await withThreadLimit(2, () => mod.runPython('__ping__', [], 'ping-chunked'))
+    assert.equal(chunked.last_threads_hint, 2,
+      `chunked scope should override the serial default; got ${chunked.last_threads_hint}`)
+  } finally {
+    await mod.stopWorker()
+    if (prevSerial === undefined) delete process.env.SERIAL_TORCH_THREADS
+    else process.env.SERIAL_TORCH_THREADS = prevSerial
+    if (prevPool === undefined) delete process.env.PYTHON_WORKER_POOL_SIZE
+    else process.env.PYTHON_WORKER_POOL_SIZE = prevPool
+  }
+})
