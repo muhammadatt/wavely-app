@@ -45,7 +45,17 @@ def _get_model():
     import torch
     from df.enhance import init_df
 
-    num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
+    # DF3_TORCH_THREADS takes precedence over TORCH_NUM_THREADS. This lets the
+    # worker pool spawn with a higher TORCH_NUM_THREADS for other stages (RNNoise,
+    # NumPy/scipy) while keeping DF3 capped at its own safe budget. The cap must
+    # be applied here — before init_df() — because DF3 pins its torch/OMP/MKL
+    # thread pools at first inference and ignores all runtime overrides after that.
+    num_threads = int(
+        os.environ.get('DF3_TORCH_THREADS')
+        or os.environ.get('TORCH_NUM_THREADS')
+        or os.cpu_count()
+        or 4
+    )
     torch.set_num_threads(num_threads)
 
     # Weights cached at ~/.cache/DeepFilterNet/DeepFilterNet3

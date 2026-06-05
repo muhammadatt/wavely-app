@@ -100,6 +100,34 @@ const POOL_SIZE = Math.max(1, parseInt(process.env.PYTHON_WORKER_POOL_SIZE ?? '1
 const NUM_THREADS = process.env.TORCH_NUM_THREADS
   ?? String(Math.max(1, Math.floor(os.cpus().length / POOL_SIZE)))
 
+// DeepFilterNet3-specific thread cap. DF3 pins its thread pools (Torch intra-op,
+// Rayon DSP, OMP/MKL Conv) at first inference and ignores all runtime overrides —
+// so its budget must be set at worker spawn, via env vars, separately from the
+// general TORCH_NUM_THREADS that RNNoise / NumPy / scipy DO honor at runtime.
+//
+// DF3_TORCH_THREADS decouples the two budgets:
+//   TORCH_NUM_THREADS  — general pool default; can be raised freely for
+//                        chunked-RNNoise and serial NumPy/scipy throughput
+//   DF3_TORCH_THREADS  — governs ONLY DF3's spawn-time env (OMP, MKL, Rayon);
+//                        stays fixed regardless of TORCH_NUM_THREADS
+//
+// OMP_NUM_THREADS and MKL_NUM_THREADS at spawn are set to DF3_THREADS (not
+// NUM_THREADS) because DF3's Conv layers drive OMP/MKL directly, bypassing
+// torch's intra-op pool — so a spawn-time OMP mismatch oversubscribes even if
+// torch.set_num_threads() is called correctly. The serial runtime raise path
+// (SERIAL_TORCH_THREADS via threadpoolctl) still works: it raises OMP/MKL at
+// call time for non-DF3 stages regardless of their spawn default.
+//
+// Default: TORCH_NUM_THREADS (preserves prior behavior when not set).
+const DF3_THREADS = (() => {
+  const explicit = process.env.DF3_TORCH_THREADS
+  if (explicit) {
+    const n = parseInt(explicit, 10)
+    if (Number.isFinite(n) && n > 0) return String(n)
+  }
+  return NUM_THREADS
+})()
+
 // Chunked-block thread cap. When the chunked runner dispatches inner stages
 // concurrently, multiple workers share the CPU at once — so each call needs
 // fewer threads than a serial call would. Defaults to
@@ -129,9 +157,11 @@ const CHUNKED_THREADS = (() => {
 // it as a per-call hint and _worker.py raises torch + OMP/MKL/OpenBLAS at
 // runtime (which those libraries honor) for that call. DF3 is unaffected — it
 // only runs inside the chunked block, and its threads are pinned to the spawn
-// env regardless of runtime hints. So the intended production setup is:
+// env regardless of runtime hints. With DF3_TORCH_THREADS available, the full
+// intended production setup is:
 //
-//   TORCH_NUM_THREADS=2     # spawn env → DF3 + chunked stages (concurrency × 2)
+//   DF3_TORCH_THREADS=2     # spawn env → DF3-specific OMP/MKL/Rayon/torch cap
+//   TORCH_NUM_THREADS=4     # spawn env → general pool default (RNNoise, chunked)
 //   SERIAL_TORCH_THREADS=6  # runtime raise → serial NumPy/scipy stages
 //
 // Unset → null → serial calls send no hint → identical to prior behaviour.
@@ -167,18 +197,29 @@ class WorkerHandle {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        OMP_NUM_THREADS:   NUM_THREADS,
-        MKL_NUM_THREADS:   NUM_THREADS,
+        // OMP and MKL are set to DF3_THREADS, not NUM_THREADS. DF3's Conv
+        // layers call into OMP/MKL directly, bypassing torch's intra-op pool,
+        // so a spawn-time mismatch here oversubscribes even when
+        // torch.set_num_threads() is correct. The serial runtime raise path
+        // (threadpoolctl via SERIAL_TORCH_THREADS) raises these above this
+        // baseline at call time for non-DF3 stages — so the low spawn default
+        // does not cap serial NumPy/scipy throughput.
+        OMP_NUM_THREADS:   DF3_THREADS,
+        MKL_NUM_THREADS:   DF3_THREADS,
+        // General torch default for the worker. Non-DF3 stages (RNNoise,
+        // NumPy/scipy EQ, etc.) honor runtime torch.set_num_threads() calls
+        // and can operate at this higher budget during chunked and serial work.
         TORCH_NUM_THREADS: NUM_THREADS,
+        // Passed through so deepfilter_enhance.py reads it at model-init time
+        // instead of TORCH_NUM_THREADS — the moment DF3 pins its thread pools.
+        DF3_TORCH_THREADS: DF3_THREADS,
         // libdf (DeepFilterNet's Rust core) parallelises its DSP via Rayon,
         // whose global pool reads RAYON_NUM_THREADS once at first use and
         // ignores any later/runtime change — so it must be set here at spawn,
-        // not per-call. Pin it to the same DF3-safe budget as the torch pools
-        // so the chunked block doesn't oversubscribe through Rayon. Honor an
-        // explicit RAYON_NUM_THREADS from the environment if the operator set
-        // one. (A runtime RAYON_NUM_THREADS override is silently ignored by
-        // Rayon — the likely reason prior attempts had no effect.)
-        RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS ?? NUM_THREADS,
+        // not per-call. Pin it to DF3_THREADS so Rayon stays within the same
+        // budget as torch. Honor an explicit RAYON_NUM_THREADS from the
+        // environment if the operator set one.
+        RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS ?? DF3_THREADS,
         PYTHONUNBUFFERED:  '1',
         PYTHONPATH: SCRIPTS_DIR + path.delimiter + (process.env.PYTHONPATH ?? ''),
       },
