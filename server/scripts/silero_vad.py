@@ -166,8 +166,13 @@ def main(argv=None):
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
             else:
                 device = args.device
-            num_threads = int(os.environ.get('TORCH_NUM_THREADS', os.cpu_count() or 4))
-            torch.set_num_threads(num_threads)
+            # Respect the per-call thread limit that _worker.py applied before
+            # dispatching this script (torch.get_num_threads() reflects it).
+            # Do not re-read TORCH_NUM_THREADS from env — that would overwrite
+            # the sileroThreads budget set by classifySileroVadParallel's
+            # withThreadLimit context on every call after the first model load.
+            # (On the very first call the worker has already applied the limit,
+            # so torch.get_num_threads() is already correct here too.)
             model = model.to(device)
             model.eval()
         except Exception:

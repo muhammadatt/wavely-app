@@ -45,11 +45,13 @@
 import { readFile, rm }   from 'fs/promises'
 import { readFileSync }   from 'fs'
 import { fileURLToPath }  from 'url'
+import os                 from 'os'
 import path               from 'path'
 
 import { readWavHeader }                          from './wavReader.js'
 import { planChunkBoundaries }                    from './chunking.js'
 import { extractAudioRange, tempPath, removeTmp } from '../lib/ffmpeg.js'
+import { withThreadLimit }                        from './threadingContext.js'
 
 // Read the shared frame duration directly (same source silero_vad.py and
 // frameAnalysis.js use) rather than importing from frameAnalysis.js, which
@@ -176,9 +178,17 @@ export async function classifySileroVadParallel(vadInputPath, {
   const warmupFrames = Math.max(0, Math.round(warmupS * SILERO_SR / samplesPerFrame))
 
   const limit = Math.min(cores.length, poolSize)
+
+  // Per-instance thread budget. Each concurrent Silero call occupies one worker
+  // slot, so the safe per-call torch count is floor(cpus / limit) — the same
+  // budget logic the chunked NR block uses. Without this cap, each call falls
+  // back to SERIAL_TORCH_THREADS and limit×SERIAL_THREADS threads compete on
+  // the same cores (e.g. 4 × 6 = 24 on 8 cores → severe oversubscription).
+  const sileroThreads = Math.max(1, Math.floor(os.cpus().length / limit))
+
   log(
     `[silero] parallel VAD: ${cores.length} chunks across ${limit} workers ` +
-    `(target ${targetS.toFixed(0)}s, warmup ${warmupS}s)`
+    `(target ${targetS.toFixed(0)}s, warmup ${warmupS}s, threads/worker ${sileroThreads})`
   )
 
   const perChunkFrames = new Array(cores.length)
@@ -220,20 +230,29 @@ export async function classifySileroVadParallel(vadInputPath, {
   // runner's helper) to avoid an import cycle through frameAnalysis.js. First
   // rejection propagates; a thrown error lets the caller fall back to the
   // energy backend via analyzeFrames()'s existing try/catch.
+  //
+  // withThreadLimit wraps each worker coroutine so that every runPython call
+  // inside processChunk → runVad → spawnPython → runPython picks up the
+  // sileroThreads budget via AsyncLocalStorage — the same mechanism the chunked
+  // NR block uses. Without this, each call would fall back to SERIAL_TORCH_THREADS
+  // and all limit concurrent instances would share the same high serial budget,
+  // oversubscribing exactly as if CHUNKED_TORCH_THREADS were never set for NR.
   let next = 0
   let firstError = null
-  const workers = Array.from({ length: limit }, async () => {
-    while (firstError == null) {
-      const i = next++
-      if (i >= cores.length) return
-      try {
-        await processChunk(i)
-      } catch (err) {
-        if (firstError == null) firstError = err
-        return
+  const workers = Array.from({ length: limit }, () =>
+    withThreadLimit(sileroThreads, async () => {
+      while (firstError == null) {
+        const i = next++
+        if (i >= cores.length) return
+        try {
+          await processChunk(i)
+        } catch (err) {
+          if (firstError == null) firstError = err
+          return
+        }
       }
-    }
-  })
+    })
+  )
   await Promise.all(workers)
   if (firstError) throw firstError
 
