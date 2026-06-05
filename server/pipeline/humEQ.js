@@ -103,13 +103,46 @@ export async function humEQ(inputPath, outputPath, options = {}) {
 }
 
 /**
+ * Build the FFmpeg equalizer filter string for a set of notch frequencies.
+ * Exported so the pipeline stage can rebuild the filter after F0-based veto
+ * trims the candidate set returned by analyzeHum().
+ */
+export function buildHumNotchFilter(frequencies, notchQ, notchDepth) {
+  if (!frequencies?.length) return null
+  return frequencies
+    .map(f => `equalizer=f=${f}:width_type=q:width=${notchQ}:g=-${notchDepth}`)
+    .join(',')
+}
+
+/**
  * Analyze audio for hum — detection only, no file I/O side effects.
  * The returned ffmpegFilter is built when triggered so the caller can apply it
  * directly (used by the pipeline stage to avoid a second analysis pass).
  *
+ * Detection model (June 2026): instead of evaluating each harmonic in
+ * isolation, the detector anchors on the 2nd harmonic (120 Hz for 60 Hz mains,
+ * 100 Hz for 50 Hz mains). The 2nd harmonic is a more reliable anchor than the
+ * fundamental because user-applied HPFs commonly suppress 60 Hz but leave
+ * 120 Hz essentially untouched — and 120 Hz hum (transformer core, magnetic
+ * coupling) is in practice more common than pure 60 Hz hum on modern gear.
+ *
+ * Coherence rules (with anchorDelta = anchor peak − floor):
+ *   • Nothing is flagged unless anchorDelta ≥ anchorMinDeltaDb (default 6).
+ *   • For k ≥ 3 (180 Hz+): Δₖ ≤ anchorDelta + slackForK. The default slack is
+ *     3 dB; 180 Hz uses 1 dB because it's a very common male F0 and the cost of
+ *     a false positive there is high.
+ *   • For k = 1 (60 Hz fundamental): no upper bound vs. anchor — real hum's
+ *     fundamental can be louder than the 2nd harmonic, and HPFs can push it
+ *     arbitrarily low. Standard detectionThreshold and minAbsoluteLevel apply.
+ *
+ * This is the first line of defense against misclassifying vocal fundamentals
+ * (typical F0 range 80–300 Hz) as hum. The pipeline stage adds a second line
+ * by vetoing any surviving candidate that overlaps the speaker's voiced F0
+ * histogram.
+ *
  * @param {string} inputPath
  * @param {object} options
- * @returns {Promise<{ triggered, flaggedHarmonics, detectionDetail, ffmpegFilter }>}
+ * @returns {Promise<{ triggered, flaggedHarmonics, detectionDetail, ffmpegFilter, anchorFrequency, anchorDeltaDb }>}
  */
 export async function analyzeHum(inputPath, options = {}) {
   const {
@@ -121,7 +154,18 @@ export async function analyzeHum(inputPath, options = {}) {
     notchQ                 = 30,
     analysisWindow         = 50,
     minAbsoluteLevel       = -80,
+    anchorMultiplier       = 2,
+    anchorMinDeltaDb       = 6,
+    coherenceSlackDb       = 3,
+    strictSlackDb          = { 3: 1 },
   } = options
+
+  const anchorFrequency = fundamental * anchorMultiplier
+  if (!harmonics.includes(anchorMultiplier)) {
+    throw new Error(
+      `[hum-detect] anchorMultiplier (${anchorMultiplier}) must be in harmonics list`
+    )
+  }
 
   // Decode audio to raw float32 PCM samples (mono, 44.1 kHz, ≤10 s)
   const maxSamples = MAX_ANALYSIS_SECONDS * SAMPLE_RATE
@@ -130,23 +174,66 @@ export async function analyzeHum(inputPath, options = {}) {
   // Compute magnitude spectrum (dBFS) via windowed FFT
   const magnitudeDb = computeMagnitudeSpectrum(samples, FFT_SIZE, SAMPLE_RATE)
 
-  // Evaluate each harmonic
-  const detectionDetail  = []
-  const flaggedHarmonics = []
-
-  for (const multiplier of harmonics) {
+  // First pass: per-harmonic peak / floor / delta, no flagging yet.
+  const measurements = harmonics.map(multiplier => {
     const frequency = fundamental * multiplier
     const peakDb    = getPeakInBand(magnitudeDb, frequency, 2, SAMPLE_RATE, FFT_SIZE)
     const floorDb   = getMedianFloor(magnitudeDb, frequency, analysisWindow, 5, SAMPLE_RATE, FFT_SIZE)
-    const deltaDb   = peakDb - floorDb
-    const flagged   = deltaDb >= detectionThreshold && peakDb >= minAbsoluteLevel
+    return {
+      multiplier,
+      frequency,
+      peakDb,
+      floorDb,
+      deltaDb: peakDb - floorDb,
+    }
+  })
+
+  const anchor      = measurements.find(m => m.multiplier === anchorMultiplier)
+  const anchorDelta = anchor.deltaDb
+  const anchorPasses = anchorDelta >= anchorMinDeltaDb
+
+  // Second pass: apply coherence rules.
+  const detectionDetail  = []
+  const flaggedHarmonics = []
+
+  for (const m of measurements) {
+    const { multiplier, frequency, peakDb, floorDb, deltaDb } = m
+
+    let flagged          = false
+    let rejectionReason  = null
+
+    if (!anchorPasses) {
+      rejectionReason = 'anchor-failed'
+    } else if (peakDb < minAbsoluteLevel) {
+      rejectionReason = 'below-absolute-floor'
+    } else if (multiplier === anchorMultiplier) {
+      // Anchor coherence (anchorMinDeltaDb) IS the detection bar for the anchor
+      // itself — bypass detectionThreshold so that anchor deltas between
+      // anchorMinDeltaDb and detectionThreshold still count toward
+      // minHarmonicsToTrigger.
+      flagged = true
+    } else if (deltaDb < detectionThreshold) {
+      rejectionReason = 'below-threshold'
+    } else if (multiplier === 1) {
+      // Fundamental: no upper-bound coherence check (HPFs commonly suppress it
+      // far below the anchor, and an unfiltered fundamental can sit above).
+      flagged = true
+    } else {
+      const slack = strictSlackDb[multiplier] ?? coherenceSlackDb
+      if (deltaDb <= anchorDelta + slack) {
+        flagged = true
+      } else {
+        rejectionReason = 'anchor-coherence'
+      }
+    }
 
     detectionDetail.push({
       frequency,
-      peakDb:  round2(peakDb),
-      floorDb: round2(floorDb),
-      deltaDb: round2(deltaDb),
+      peakDb:           round2(peakDb),
+      floorDb:          round2(floorDb),
+      deltaDb:          round2(deltaDb),
       flagged,
+      rejectionReason,
     })
 
     if (flagged) flaggedHarmonics.push(frequency)
@@ -164,15 +251,18 @@ export async function analyzeHum(inputPath, options = {}) {
 
   const triggered = flaggedHarmonics.length >= minHarmonicsToTrigger
 
-  // Build filter string now (even if not applying) so the stage can reuse it
-  // without a second analysis pass; null when not triggered.
   const ffmpegFilter = triggered
-    ? flaggedHarmonics
-        .map(f => `equalizer=f=${f}:width_type=q:width=${notchQ}:g=-${notchDepth}`)
-        .join(',')
+    ? buildHumNotchFilter(flaggedHarmonics, notchQ, notchDepth)
     : null
 
-  return { triggered, flaggedHarmonics, detectionDetail, ffmpegFilter }
+  return {
+    triggered,
+    flaggedHarmonics,
+    detectionDetail,
+    ffmpegFilter,
+    anchorFrequency,
+    anchorDeltaDb: round2(anchorDelta),
+  }
 }
 
 // ── Audio decoding ─────────────────────────────────────────────────────────────
