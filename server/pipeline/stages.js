@@ -61,7 +61,7 @@ import { analyzeAutoLeveler, renderAutoLeveler } from './autoLeveler.js'
 import { applyParallelCompression } from './parallelCompression.js'
 import { applyVocalExpander } from './vocalExpander.js'
 import { applyVadGate }       from './vadGate.js'
-import { analyzeHum } from './humEQ.js'
+import { analyzeHum, buildHumNotchFilter } from './humEQ.js'
 import { computeAirBoostParams, applyAirBoostBands, applyAirBoostMask } from './airBoost.js'
 import { getReferenceCurvePath, runReferenceEQPass } from './referenceEQ.js'
 import { getF0Contour } from './f0Analysis.js'
@@ -389,26 +389,73 @@ export async function throatClickAttenuate(ctx) {
 // filters (Q=30, −18 dB) at each flagged harmonic. When not triggered the
 // current path is left unchanged (no temp file is created).
 
+// F0-overlap veto parameters. A surviving hum candidate is rejected if the
+// speaker's voiced F0 sits within ±F0_VETO_HALF_WIDTH_HZ of it for at least
+// F0_VETO_MIN_FRAMES voiced frames AND that fraction exceeds
+// F0_VETO_MIN_FRACTION of all voiced frames. The dual gate (absolute count +
+// fraction) guards both against spurious one-off F0 estimates and against
+// very short voiced segments dominating the histogram.
+const F0_VETO_HALF_WIDTH_HZ = 15
+const F0_VETO_MIN_FRAMES    = 10
+const F0_VETO_MIN_FRACTION  = 0.05
+const HUM_NOTCH_Q           = 30
+const HUM_NOTCH_DEPTH_DB    = 18
+
 export async function humDetect(ctx) {
-  const detection = await analyzeHum(ctx.currentPath)
+  const detection = await analyzeHum(ctx.currentPath, {
+    notchQ:     HUM_NOTCH_Q,
+    notchDepth: HUM_NOTCH_DEPTH_DB,
+  })
+
+  const baseReport = {
+    detectionDetail:  detection.detectionDetail,
+    anchorFrequency:  detection.anchorFrequency,
+    anchorDeltaDb:    detection.anchorDeltaDb,
+  }
 
   if (!detection.triggered) {
     ctx.results.humEQ = {
+      ...baseReport,
       triggered:        false,
       flaggedHarmonics: [],
       notchesApplied:   [],
-      detectionDetail:  detection.detectionDetail,
       ffmpegFilter:     null,
+      f0VetoApplied:    [],
     }
-    ctx.log('[hum-detect] No hum detected — passing through unmodified')
+    ctx.log(
+      `[hum-detect] No hum detected — anchor ${detection.anchorFrequency} Hz ` +
+      `Δ=${detection.anchorDeltaDb} dB`
+    )
     return
   }
 
-  // Apply the pre-computed notch filter string
-  const outPath = ctx.tmp('.wav')
+  // Second-line defense: veto any candidate that overlaps the speaker's voiced
+  // F0 histogram. We only fetch the F0 contour here — once analyzeHum has
+  // already proposed at least one notch — so the typical no-hum case skips
+  // this work entirely.
+  const { surviving, vetoed } = await applyF0Veto(ctx, detection.flaggedHarmonics)
+
+  if (surviving.length === 0) {
+    ctx.results.humEQ = {
+      ...baseReport,
+      triggered:        false,
+      flaggedHarmonics: detection.flaggedHarmonics,
+      notchesApplied:   [],
+      ffmpegFilter:     null,
+      f0VetoApplied:    vetoed,
+    }
+    ctx.log(
+      `[hum-detect] All candidates vetoed by F0 overlap ` +
+      `(${vetoed.map(v => `${v.frequency}Hz`).join(', ')}) — passing through unmodified`
+    )
+    return
+  }
+
+  const ffmpegFilter = buildHumNotchFilter(surviving, HUM_NOTCH_Q, HUM_NOTCH_DEPTH_DB)
+  const outPath     = ctx.tmp('.wav')
   await runFfmpeg([
     '-i', ctx.currentPath,
-    '-af', detection.ffmpegFilter,
+    '-af', ffmpegFilter,
     '-map_metadata', '0',
     '-acodec', 'pcm_f32le',
     '-f', 'wav',
@@ -417,13 +464,59 @@ export async function humDetect(ctx) {
 
   ctx.currentPath = outPath
   ctx.results.humEQ = {
+    ...baseReport,
     triggered:        true,
     flaggedHarmonics: detection.flaggedHarmonics,
-    notchesApplied:   detection.flaggedHarmonics,
-    detectionDetail:  detection.detectionDetail,
-    ffmpegFilter:     detection.ffmpegFilter,
+    notchesApplied:   surviving,
+    ffmpegFilter,
+    f0VetoApplied:    vetoed,
   }
-  ctx.log(`[hum-detect] Notches applied at ${detection.flaggedHarmonics.join(', ')} Hz`)
+  const vetoNote = vetoed.length > 0
+    ? ` (vetoed by F0: ${vetoed.map(v => `${v.frequency}Hz`).join(', ')})`
+    : ''
+  ctx.log(`[hum-detect] Notches applied at ${surviving.join(', ')} Hz${vetoNote}`)
+}
+
+async function applyF0Veto(ctx, candidates) {
+  if (!candidates?.length) return { surviving: [], vetoed: [] }
+
+  let contour
+  try {
+    contour = await getF0Contour(ctx)
+  } catch (err) {
+    ctx.log(`[hum-detect] F0 veto skipped — getF0Contour failed: ${err.message}`)
+    return { surviving: candidates.slice(), vetoed: [] }
+  }
+
+  const perFrame = contour?.perFrame ?? []
+  if (perFrame.length === 0) {
+    return { surviving: candidates.slice(), vetoed: [] }
+  }
+
+  const surviving = []
+  const vetoed    = []
+  const total     = perFrame.length
+
+  for (const freq of candidates) {
+    let overlapCount = 0
+    for (let i = 0; i < total; i++) {
+      const f0 = perFrame[i]
+      if (f0 > 0 && Math.abs(f0 - freq) <= F0_VETO_HALF_WIDTH_HZ) overlapCount++
+    }
+    const fraction = overlapCount / total
+    if (overlapCount >= F0_VETO_MIN_FRAMES && fraction >= F0_VETO_MIN_FRACTION) {
+      vetoed.push({
+        frequency:    freq,
+        overlapFrames: overlapCount,
+        totalFrames:   total,
+        fraction:      round2(fraction * 100) / 100,
+      })
+    } else {
+      surviving.push(freq)
+    }
+  }
+
+  return { surviving, vetoed }
 }
 
 // ── Stage: High-pass filter ───────────────────────────────────────────────────
