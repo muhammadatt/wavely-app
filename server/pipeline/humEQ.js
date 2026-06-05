@@ -206,10 +206,14 @@ export async function analyzeHum(inputPath, options = {}) {
       rejectionReason = 'anchor-failed'
     } else if (peakDb < minAbsoluteLevel) {
       rejectionReason = 'below-absolute-floor'
+    } else if (multiplier === anchorMultiplier) {
+      // Anchor coherence (anchorMinDeltaDb) IS the detection bar for the anchor
+      // itself — bypass detectionThreshold so that anchor deltas between
+      // anchorMinDeltaDb and detectionThreshold still count toward
+      // minHarmonicsToTrigger.
+      flagged = true
     } else if (deltaDb < detectionThreshold) {
       rejectionReason = 'below-threshold'
-    } else if (multiplier === anchorMultiplier) {
-      flagged = true
     } else if (multiplier === 1) {
       // Fundamental: no upper-bound coherence check (HPFs commonly suppress it
       // far below the anchor, and an unfiltered fundamental can sit above).

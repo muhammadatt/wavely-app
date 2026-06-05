@@ -488,27 +488,51 @@ async function applyF0Veto(ctx, candidates) {
     return { surviving: candidates.slice(), vetoed: [] }
   }
 
-  const perFrame = contour?.perFrame ?? []
-  if (perFrame.length === 0) {
+  const perFrame  = contour?.perFrame ?? []
+  const hopLength = contour?.hopLength
+  const vadFrames = ctx.results.metrics?.frames
+  if (perFrame.length === 0 || !hopLength || !vadFrames?.length) {
     return { surviving: candidates.slice(), vetoed: [] }
   }
 
+  // Build a voiced-frame mask aligned to the F0 contour. estimate_f0_contour.py
+  // forward-fills unvoiced gaps so perFrame is always > 0 — we cannot infer
+  // voiced/silence from perFrame alone. Instead, map each STFT frame's center
+  // sample to the Silero VAD frame that contains it.
+  const lastVadFrame = vadFrames[vadFrames.length - 1]
+  const vadEndSample = lastVadFrame.offsetSamples + lastVadFrame.lengthSamples
+  const vadFrameLen  = vadFrames[0].lengthSamples
+
   const surviving = []
   const vetoed    = []
-  const total     = perFrame.length
 
   for (const freq of candidates) {
     let overlapCount = 0
-    for (let i = 0; i < total; i++) {
+    let voicedTotal  = 0
+    for (let i = 0; i < perFrame.length; i++) {
+      const centerSample = i * hopLength + (hopLength >> 1)
+      if (centerSample >= vadEndSample) break
+      const vadIdx = Math.min(
+        vadFrames.length - 1,
+        Math.floor(centerSample / vadFrameLen)
+      )
+      if (vadFrames[vadIdx].isSilence) continue
+      voicedTotal++
       const f0 = perFrame[i]
       if (f0 > 0 && Math.abs(f0 - freq) <= F0_VETO_HALF_WIDTH_HZ) overlapCount++
     }
-    const fraction = overlapCount / total
+
+    if (voicedTotal === 0) {
+      surviving.push(freq)
+      continue
+    }
+
+    const fraction = overlapCount / voicedTotal
     if (overlapCount >= F0_VETO_MIN_FRAMES && fraction >= F0_VETO_MIN_FRACTION) {
       vetoed.push({
         frequency:    freq,
         overlapFrames: overlapCount,
-        totalFrames:   total,
+        voicedFrames:  voicedTotal,
         fraction:      round2(fraction * 100) / 100,
       })
     } else {
