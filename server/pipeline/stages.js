@@ -1717,7 +1717,17 @@ export async function roomPresence(ctx) {
   const irFile     = irResult.irFile   ?? null
   ctx.currentPath          = outPath
   ctx.results.roomPresence = { applied: true, irSource, irFile, irPath, wet, rt60Ms, preDelayMs, earlyReflections, diffusion }
-  ctx.log(`[room-presence] applied wet=${wet} rt60=${rt60Ms}ms pre_delay=${preDelayMs}ms early_reflections=${earlyReflections} diffusion=${diffusion} ir_source=${irSource}${irFile ? ` ir_file=${irFile}` : ''}`)
+
+  // Mirror what room_presence.py logs to stdout so the pipeline log is self-contained.
+  if (irSource === 'synthetic_fallback') {
+    ctx.log(`[room-presence] IR: file load failed — falling back to synthetic`)
+    ctx.log(`[room-presence] IR: synthetic fallback (rt60=${rt60Ms}ms, diffusion=${diffusion})`)
+  } else if (irSource === 'synthetic') {
+    ctx.log(`[room-presence] IR: synthetic (rt60=${rt60Ms}ms, diffusion=${diffusion})`)
+  } else {
+    ctx.log(`[room-presence] IR: ${irFile ?? irPath}`)
+  }
+  ctx.log(`[room-presence] applied wet=${wet} rt60=${rt60Ms}ms pre_delay=${preDelayMs}ms early_reflections=${earlyReflections} diffusion=${diffusion} ir_source=${irSource}`)
 }
 
 // ── Stage: Normalize ──────────────────────────────────────────────────────────

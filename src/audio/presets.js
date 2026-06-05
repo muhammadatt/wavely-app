@@ -472,7 +472,7 @@ export const PRESETS = {
         roomPresence: {
           enabled: true,
           //ir_path: "../ir/19_CrystalVocal.wav",
-          ir_path: "../ir/MRV_VocalBoot_m-m.wav",
+          //ir_path: "../ir/MRV_VocalBoot_m-m.wav",
           wet: 0.01,
           rt60Ms: 150,
           preDelayMs: 10.0,
