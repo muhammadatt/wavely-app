@@ -136,6 +136,10 @@ async function runStageEntry(ctx, entry, logger) {
         const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
         const stageResults = {}
         for (const key of changedKeys) stageResults[key] = ctx.results[key]
+        if (stageResults.metrics?.frames) {
+          const { frames: _frames, ...rest } = stageResults.metrics
+          stageResults.metrics = rest
+        }
         if (timings) stageResults._chunked = timings
         await logger.logStep(
           'chunked',
@@ -166,6 +170,10 @@ async function runStageEntry(ctx, entry, logger) {
         const changedKeys  = Object.keys(ctx.results).filter(k => ctx.results[k] !== resultsBefore[k])
         const stageResults = {}
         for (const key of changedKeys) stageResults[key] = ctx.results[key]
+        if (stageResults.metrics?.frames) {
+          const { frames: _frames, ...rest } = stageResults.metrics
+          stageResults.metrics = rest
+        }
         stageResults._parallel = timings
         await logger.logStep(
           'parallel',
