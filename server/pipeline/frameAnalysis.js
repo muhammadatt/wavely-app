@@ -253,6 +253,54 @@ async function analyzeAudioFramesSilero(wavPath) {
     frames[f].isSilence = false
   }
 
+  // Step 2b: multi-frame fricative onset/offset extension
+  // Phrase-initial unvoiced fricatives (/s/, /f/, /ʃ/) commonly run 60–150 ms
+  // ahead of the first voiced phoneme. Silero VAD v5 frequently misses these
+  // (its features key on voicing), so Step 2's single-frame correction can
+  // only recover the one frame immediately adjacent to the vowel onset — the
+  // leading body of the fricative stays labelled silence and is then
+  // attenuated by downstream NR. Walk outward from each Silero-voiced run
+  // boundary up to FRIC_MAX_FRAMES (150 ms) as long as the candidate frame's
+  // energy clears an adaptive gate:
+  //   gateDbfs = max(noiseFloorDbfs + FRIC_NOISE_MARGIN_DB,
+  //                  anchorRmsDbfs   - FRIC_ANCHOR_DROP_DB)
+  // The anchor-relative term limits how far the walk plausibly extends into
+  // background noise (a fricative ~30 dB below the adjacent vowel is still
+  // realistic; -40 dB and lower is almost certainly noise). The noise-floor
+  // term provides a hard lower bound when the bootstrapped noise floor is
+  // pathologically low (e.g. files with embedded digital silence pads). Snap
+  // the labels prior to mutation so the walk cannot cascade onto frames we
+  // just promoted.
+  const FRIC_MAX_FRAMES      = 6
+  const FRIC_NOISE_MARGIN_DB = -3
+  const FRIC_ANCHOR_DROP_DB  = 30
+
+  const labelsBeforeFricExt = frames.map(fr => fr.isSilence)
+  for (let f = 0; f < numFrames; f++) {
+    if (labelsBeforeFricExt[f]) continue
+    const anchorDbfs = rmsToDbfs(frameRms[f])
+    const gateDbfs   = Math.max(
+      noiseFloorDbfs + FRIC_NOISE_MARGIN_DB,
+      anchorDbfs    - FRIC_ANCHOR_DROP_DB,
+    )
+    if (f > 0 && labelsBeforeFricExt[f - 1]) {
+      for (let k = 1; k <= FRIC_MAX_FRAMES; k++) {
+        const i = f - k
+        if (i < 0 || !labelsBeforeFricExt[i])     break
+        if (rmsToDbfs(frameRms[i]) <= gateDbfs)   break
+        frames[i].isSilence = false
+      }
+    }
+    if (f < numFrames - 1 && labelsBeforeFricExt[f + 1]) {
+      for (let k = 1; k <= FRIC_MAX_FRAMES; k++) {
+        const i = f + k
+        if (i >= numFrames || !labelsBeforeFricExt[i]) break
+        if (rmsToDbfs(frameRms[i]) <= gateDbfs)        break
+        frames[i].isSilence = false
+      }
+    }
+  }
+
   // Step 3: accumulate voiced energy from expanded labels
   let voicedSumSq = 0
   let voicedFrameCount = 0

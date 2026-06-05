@@ -634,11 +634,99 @@ export async function spectralSubtraction(ctx) {
 // Below this the drop is within measurement noise and not worth a gain pass.
 const NR_MAKEUP_THRESHOLD_DB = 0.3
 
+// Tier-based DF3 attenuation ladder. Implements the spec's 5-tier model from
+// docs/instant_polish_processing_spec_v3.md §"tiered noise reduction". Each
+// entry's floorCeilingDbfs is the upper-inclusive noise-floor bound for that
+// tier; tier selection walks the table in order and stops at the first
+// matching entry. attenLimDb is the cap passed to DeepFilterNet3's enhance()
+// — lower values preserve fricative onsets (DF3 can otherwise misclassify
+// the leading edge of /s/, /f/, /ʃ/, /tʃ/ as broadband noise and attenuate
+// them 30+ dB). Tier 1 is the skip path. Tier 5 ('at_risk') reuses Tier 4's
+// cap but flags the file as noisier than the preset's safe range.
+const NR_TIERS = [
+  { tier: 1, name: 'clean',    floorCeilingDbfs: -60,       attenLimDb: null, skip: true  },
+  { tier: 2, name: 'light',    floorCeilingDbfs: -55,       attenLimDb: 6,    skip: false },
+  { tier: 3, name: 'standard', floorCeilingDbfs: -50,       attenLimDb: 12,   skip: false },
+  { tier: 4, name: 'heavy',    floorCeilingDbfs: -45,       attenLimDb: 18,   skip: false },
+  { tier: 5, name: 'at_risk',  floorCeilingDbfs: Infinity,  attenLimDb: 18,   skip: false },
+]
+
+/**
+ * Select the DF3 attenuation tier for the current noise floor, clamped by a
+ * per-preset maxTier ceiling. Returns both the applied tier (after clamping)
+ * and the natural tier (which the noise floor actually warrants) so the
+ * report can flag files that exceeded the preset's safe range without
+ * silently over-processing them.
+ */
+function selectNrTier(noiseFloorDbfs, maxTier) {
+  const natural = NR_TIERS.find(t => noiseFloorDbfs <= t.floorCeilingDbfs) ?? NR_TIERS[NR_TIERS.length - 1]
+  const cap     = maxTier != null ? Math.min(maxTier, NR_TIERS.length) : NR_TIERS.length
+  const applied = natural.tier <= cap ? natural : NR_TIERS[cap - 1]
+  return {
+    tier:        applied.tier,
+    name:        applied.name,
+    attenLimDb:  applied.attenLimDb,
+    skip:        applied.skip,
+    naturalTier: natural.tier,
+    capped:      natural.tier > cap,
+    atRisk:      natural.tier === 5,
+  }
+}
+
 export async function noiseReduce(ctx) {
-  const model         = ctx.preset.noiseReduce?.model ?? 'df3'
-  const skipBelowDb   = ctx.preset.noiseReduce?.skipBelowDb ?? null
-  const outPath       = ctx.tmp('.wav')
-  const preNoiseFloor = ctx.results.metrics.noiseFloorDbfs
+  const model              = ctx.preset.noiseReduce?.model ?? 'df3'
+  const skipBelowDb        = ctx.preset.noiseReduce?.skipBelowDb ?? null
+  const tierConfig         = ctx.preset.noiseReduce?.tier ?? null
+  const explicitAttenLimDb = ctx.preset.noiseReduce?.attenLimDb ?? null
+  const outPath            = ctx.tmp('.wav')
+  const preNoiseFloor      = ctx.results.metrics.noiseFloorDbfs
+
+  // Tier-based DF3 attenuation. Only applies when model === 'df3' (rnnoise
+  // and dtln don't expose a comparable per-bin cap). An explicit attenLimDb
+  // in the preset config wins over tier selection — last-resort override for
+  // experiments. When tier mode is on, Tier 1 (≤ -60 dBFS) skips the call
+  // entirely and supersedes the standalone skipBelowDb path below; Tiers 2-5
+  // select an atten_lim_db, with the natural tier clamped to the preset's
+  // maxTier.
+  let nrTier = null
+  let attenLimDb = explicitAttenLimDb
+  if (
+    model === 'df3'
+    && tierConfig
+    && explicitAttenLimDb === null
+    && preNoiseFloor !== null
+  ) {
+    nrTier = selectNrTier(preNoiseFloor, tierConfig.maxTier ?? null)
+    attenLimDb = nrTier.attenLimDb
+    if (nrTier.skip) {
+      const tierInfo = {
+        skipped:           true,
+        skipReason:        `Tier 1 (clean) — noise floor ${preNoiseFloor} dBFS ≤ ${NR_TIERS[0].floorCeilingDbfs} dBFS`,
+        skipFloorDbfs:     preNoiseFloor,
+        tier:              nrTier.tier,
+        tier_name:         nrTier.name,
+        tier_natural:      nrTier.naturalTier,
+        tier_capped:       nrTier.capped,
+      }
+      ctx.results.noiseReduction = ctx.results.noiseReduction
+        ? { ...ctx.results.noiseReduction, ...tierInfo }
+        : {
+            applied:               false,
+            model,
+            atten_lim_db:          null,
+            pre_noise_floor_dbfs:  preNoiseFloor,
+            post_noise_floor_dbfs: null,
+            ...tierInfo,
+          }
+      ctx.log(`[NR] Tier 1 — skip (noise floor ${preNoiseFloor} dBFS already clean)`)
+      return
+    }
+    ctx.log(
+      `[NR] Tier ${nrTier.tier} (${nrTier.name}) — noise floor ${preNoiseFloor} dBFS ` +
+      `→ atten_lim_db=${attenLimDb}` +
+      (nrTier.capped ? ` (capped from natural tier ${nrTier.naturalTier})` : '')
+    )
+  }
 
   // Per-pass skip: if skipBelowDb is configured and the current noise floor
   // (refreshed by any preceding remeasureFramesPostNr) is already below it,
@@ -683,6 +771,7 @@ export async function noiseReduce(ctx) {
     // internal VAD on fricative onsets it misclassifies as noise.
     const sileroFrames = ctx.results.metrics?.frames ?? null
     const vadGate      = ctx.preset.noiseReduce?.vadGate ?? null
+    ctx.log(`[NR] rnnoise dispatch — atten_lim_db=n/a (model does not expose per-bin cap)`)
     const tRun = Date.now()
     const rnnInfo = await runRnnoise(ctx.currentPath, outPath, {
       sileroFrames,
@@ -705,6 +794,7 @@ export async function noiseReduce(ctx) {
       ctx.log(`[NR] RNNoise speech_prob sidecar → ${rnnInfo.speechProbOut}`)
     }
   } else if (model === 'dtln') {
+    ctx.log(`[NR] dtln dispatch — atten_lim_db=n/a (model does not expose per-bin cap)`)
     const tRun = Date.now()
     await runDtln(ctx.currentPath, outPath)
     runMs = Date.now() - tRun
@@ -717,12 +807,25 @@ export async function noiseReduce(ctx) {
       post_noise_floor_dbfs: null,
     }
   } else {
-    // df3 (default) — uncapped; the model adapts per time-frequency bin
+    // df3 (default) — attenLimDb is uncapped (null) unless tier mode or an
+    // explicit override resolved it above. The model adapts per
+    // time-frequency bin within whatever cap is supplied.
+    const attenLimSource = nrTier
+      ? `tier ${nrTier.tier} ${nrTier.name}`
+      : explicitAttenLimDb !== null ? 'explicit override' : 'uncapped default'
+    ctx.log(`[NR] df3 dispatch — atten_lim_db=${attenLimDb ?? 'uncapped'} (${attenLimSource})`)
     const tRun = Date.now()
-    const nrResult = await applyNoiseReduction(ctx.currentPath, outPath)
+    const nrResult = await applyNoiseReduction(ctx.currentPath, outPath, { attenLimDb })
     runMs = Date.now() - tRun
     pythonTimingMs = nrResult?.timingMs ?? null
     nrResult.pre_noise_floor_dbfs = preNoiseFloor
+    if (nrTier) {
+      nrResult.tier         = nrTier.tier
+      nrResult.tier_name    = nrTier.name
+      nrResult.tier_natural = nrTier.naturalTier
+      nrResult.tier_capped  = nrTier.capped
+      if (nrTier.atRisk) nrResult.at_risk = true
+    }
     ctx.currentPath = outPath
     ctx.results.noiseReduction = nrResult
   }

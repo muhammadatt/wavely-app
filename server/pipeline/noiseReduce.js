@@ -1,12 +1,13 @@
 /**
  * Stage 2 — Noise Reduction via DeepFilterNet3.
  *
- * Runs DeepFilterNet3 uncapped by default (atten_lim_db=null). DF3 is an
- * adaptive neural model that classifies speech vs. noise per time-frequency
- * bin — it will not aggressively attenuate speech even without an external
- * ceiling. Passing atten_lim_db limits the maximum attenuation applied to any
- * bin; use this only when intentional conservative processing is required
- * (e.g. the NE-5 residual cleanup pass after source separation).
+ * attenLimDb caps the maximum attenuation DF3 may apply to any
+ * time-frequency bin. Defaults to null (uncapped). In production it is
+ * normally driven by the tier-based selector in stages.js → NR_TIERS, which
+ * maps the current noise floor to a tier (6 / 12 / 18 dB or uncapped) and
+ * clamps the result against the preset's maxTier. A lower cap preserves
+ * phrase-initial fricatives (/s/, /f/, /ʃ/, /tʃ/) that DF3 can otherwise
+ * misclassify as broadband noise at their leading edge.
  *
  * DeepFilterNet3 operates at 48 kHz internally. The Python script handles the
  * 44.1 kHz → 48 kHz resample on input and the algorithmic-delay alignment;
@@ -47,8 +48,8 @@ const DTLN_SCRIPT      = path.join(SCRIPTS_DIR, 'dtln_denoise.py')
  * @param {string} outputPath - Path to write output WAV (32-bit float, 44.1 kHz)
  * @param {object} [options]
  * @param {number|null} [options.attenLimDb=null] - Maximum attenuation passed to
- *   DeepFilterNet3 via atten_lim_db. null = uncapped (default). Only set this
- *   when intentionally conservative processing is needed (e.g. NE-5 residual cleanup).
+ *   DeepFilterNet3 via atten_lim_db. null = uncapped. Production callers
+ *   normally pass a tier-derived value resolved in stages.js → NR_TIERS.
  * @returns {Promise<object>} Processing metadata for the pipeline report
  */
 export async function applyNoiseReduction(inputPath, outputPath, { attenLimDb = null } = {}) {

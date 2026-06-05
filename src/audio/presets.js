@@ -191,7 +191,18 @@ export const PRESETS = {
         // (or files with no qualifying silence) fall through to a single-chunk
         // plan inside the runner — no behaviour change there.
         chunked: [
-          { noiseReduce: { model: "df3" } }, //"df3", "rnnoise", "dtln"
+          // First NR pass: DeepFilterNet3 under tier-based attenuation. The
+          // tier is selected from the current noise floor (Tier 1 ≤ -60 dBFS
+          // skips, Tier 2 -60→-55 caps at 6 dB, Tier 3 -55→-50 at 12 dB,
+          // Tier 4 -50→-45 at 18 dB). maxTier: 4 prevents pushing into the
+          // uncapped Tier 5 path even for noisier files — ACX narration
+          // never benefits from unbounded DF3 attenuation, and the cap
+          // preserves phrase-initial fricatives (/s/, /f/, /ʃ/, /tʃ/) that
+          // uncapped DF3 routinely classifies as broadband noise at their
+          // leading edge. See server/pipeline/stages.js → NR_TIERS for the
+          // table and docs/instant_polish_processing_spec_v3.md
+          // §"tiered noise reduction" for the spec.
+          { noiseReduce: { model: "df3", tier: { maxTier: 4 } } },
 
           {
             // Second NR pass: RNNoise. Its internal causal GRU VAD operates on
@@ -206,7 +217,7 @@ export const PRESETS = {
               model: "rnnoise",
               vadGate: {
                 enabled: true,
-                rnnoiseThreshold: 0.3,
+                rnnoiseThreshold: 0.7,
                 // 1 ms linear ramp at each override boundary — long enough to
                 // suppress clicks at the frame edge, short enough to stay
                 // transparent inside a fricative.
@@ -228,6 +239,26 @@ export const PRESETS = {
       // voicedRmsDbfs, etc.) — frame-level energies stay pre-NR until here.
       // Downstream dynamics stages (compression crest-factor, vocalExpander
       // silence-floor P90) need post-NR frame energies to be accurate.
+      "remeasureFramesPostNr",
+
+      {
+        autoLeveler: {
+          total_max_up_db: 10.0,
+          total_max_down_db: 10.0,
+          target_mode: "global",
+          target_window_s: 60,
+          noise_floor_target_dbfs: -60,
+          deadband_db: 2.0,
+          knee_db: 1.5,
+          max_up_db: 10.0,
+          max_down_db: 10.0,
+          subphrase_split_drop_db: 6.0,
+          subphrase_split_min_duration_ms: 500,
+          crossfade_ms: 30,
+          merge_max_delta_db: 6.0,
+        },
+      },
+
       "remeasureFramesPostNr",
 
       // clipGainDeEsserAnalyze runs sibilance detection (in-process JS +
@@ -262,26 +293,7 @@ export const PRESETS = {
               },
             },
           ],
-          [
-            {
-              autoLeveler: {
-                total_max_up_db: 10.0,
-                total_max_down_db: 10.0,
-                target_mode: "global",
-                target_window_s: 60,
-                noise_floor_target_dbfs: -60,
-                deadband_db: 2.0,
-                knee_db: 1.5,
-                max_up_db: 10.0,
-                max_down_db: 10.0,
-                subphrase_split_drop_db: 6.0,
-                subphrase_split_min_duration_ms: 500,
-                crossfade_ms: 30,
-                merge_max_delta_db: 6.0,
-              },
-            },
-            "correctiveEQ",
-          ],
+          ["correctiveEQ"],
         ],
       },
       "clipGainDeEsserApply",
@@ -465,7 +477,7 @@ export const PRESETS = {
       },
       { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } },
       */
-      //"clipGainDeEsserApply",
+      "clipGainDeEsserApply",
       "referenceEQ",
 
       {

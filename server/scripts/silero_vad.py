@@ -212,7 +212,7 @@ def main(argv=None):
                 threshold=args.threshold,
                 min_speech_duration_ms=0,
                 min_silence_duration_ms=0,
-                speech_pad_ms=0,
+                speech_pad_ms=200,
                 return_seconds=False,
             )
         except TypeError:
