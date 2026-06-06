@@ -40,7 +40,7 @@ import {
   checkAcxCertification,
 } from './measure.js'
 import { extractPeaks as extractPeaksFromFile } from './peaks.js'
-import { analyzeFrames, remeasureFrames, measureNoiseFloorOnly } from './frameAnalysis.js'
+import { analyzeFrames, remeasureFrames, measureNoiseFloorOnly, expandSpeechBoundariesForFricatives } from './frameAnalysis.js'
 import { analyzeCorrectiveEQ, bandsToFfmpegFilters } from './correctiveEQ.js'
 import {
   measureNoiseFloorPsd,
@@ -769,8 +769,30 @@ export async function noiseReduce(ctx) {
     // its diagnostic dump can verify the 25 ms → 10 ms alignment and so the
     // VAD-disagreement gate (opt-in via preset config) can override RNNoise's
     // internal VAD on fricative onsets it misclassifies as noise.
-    const sileroFrames = ctx.results.metrics?.frames ?? null
-    const vadGate      = ctx.preset.noiseReduce?.vadGate ?? null
+    const rawSileroFrames = ctx.results.metrics?.frames ?? null
+    const vadGate         = ctx.preset.noiseReduce?.vadGate ?? null
+
+    // Fricative-aware boundary expansion is applied to the sidecar mask only,
+    // never to ctx.results.metrics.frames itself. The raw Silero labels stay
+    // authoritative for every other downstream consumer (parallel compression
+    // VAD curve, silence-floor vadGate, auto-leveler, silence segment finder).
+    // The expansion uses HF-band energy (>4 kHz HPF cascade in frameAnalysis)
+    // to reject the LF-dominant mouth-noise / breath frames the previous
+    // full-band expansion was promoting.
+    const expCfg = vadGate?.boundaryExpansion ?? null
+    let sileroFrames = rawSileroFrames
+    if (expCfg?.enabled && rawSileroFrames?.length) {
+      sileroFrames = expandSpeechBoundariesForFricatives(rawSileroFrames, {
+        voicedRmsDbfs:          ctx.results.metrics?.voicedRmsDbfs ?? null,
+        maxFramesBack:          expCfg.maxFramesBack          ?? 6,
+        maxFramesForward:       expCfg.maxFramesForward       ?? 2,
+        anchorDropDb:           expCfg.anchorDropDb           ?? 20,
+        anchorMaxDbBelowVoiced: expCfg.anchorMaxDbBelowVoiced ?? 35,
+        diagnostic:             expCfg.diagnostic             ?? false,
+        log:                    ctx.log,
+      })
+    }
+
     ctx.log(`[NR] rnnoise dispatch — atten_lim_db=n/a (model does not expose per-bin cap)`)
     const tRun = Date.now()
     const rnnInfo = await runRnnoise(ctx.currentPath, outPath, {
@@ -836,34 +858,45 @@ export async function noiseReduce(ctx) {
   // PEAK_NORMALIZE_TARGET_DBFS; any drop after NR is collateral spectral masking
   // attenuation. Restoring the peak is cheaper and adequate for the common case
   // where the loudest post-NR sample is voiced speech.
+  //
+  // When this call is running inside a `chunked` block, each chunk has its own
+  // post-NR peak, so a per-chunk re-norm computes a different makeup gain for
+  // each chunk and produces audible level steps at seams. Defer the makeup to
+  // the whole-file `nrPeakRenorm` stage placed after the chunked block, which
+  // measures the stitched output once and applies a single uniform gain.
   let appliedGainDb = 0
   let peakMeasureMs = 0
   let gainApplyMs   = 0
 
-  const tPeak    = Date.now()
-  const postPeak = await measurePeakDbfs(ctx.currentPath)
-  peakMeasureMs  = Date.now() - tPeak
+  const inChunked = ctx.chunkCarveStartSamples !== undefined
+  if (inChunked) {
+    ctx.log(`[NR] Peak re-norm deferred — chunked context, handled by whole-file nrPeakRenorm stage`)
+  } else {
+    const tPeak    = Date.now()
+    const postPeak = await measurePeakDbfs(ctx.currentPath)
+    peakMeasureMs  = Date.now() - tPeak
 
-  if (postPeak !== null) {
-    const gainDb = PEAK_NORMALIZE_TARGET_DBFS - postPeak
-    if (gainDb > NR_MAKEUP_THRESHOLD_DB) {
-      const gainedPath = ctx.tmp('.wav')
-      const tGain = Date.now()
-      await applyLinearGain(ctx.currentPath, gainedPath, gainDb)
-      gainApplyMs     = Date.now() - tGain
-      ctx.currentPath = gainedPath
-      appliedGainDb   = gainDb
-      ctx.results.noiseReduction.makeupGainDb = round2(gainDb)
-      ctx.log(
-        `[NR] Peak re-norm: +${gainDb.toFixed(2)} dB ` +
-        `(post-NR peak ${postPeak.toFixed(1)} → ${PEAK_NORMALIZE_TARGET_DBFS} dBFS)`
-      )
-    } else {
-      ctx.results.noiseReduction.makeupGainDb = 0
-      ctx.log(
-        `[NR] Peak re-norm skipped — post-NR peak ${postPeak.toFixed(1)} dBFS, ` +
-        `drop ${(PEAK_NORMALIZE_TARGET_DBFS - postPeak).toFixed(2)} dB ≤ ${NR_MAKEUP_THRESHOLD_DB} dB threshold`
-      )
+    if (postPeak !== null) {
+      const gainDb = PEAK_NORMALIZE_TARGET_DBFS - postPeak
+      if (gainDb > NR_MAKEUP_THRESHOLD_DB) {
+        const gainedPath = ctx.tmp('.wav')
+        const tGain = Date.now()
+        await applyLinearGain(ctx.currentPath, gainedPath, gainDb)
+        gainApplyMs     = Date.now() - tGain
+        ctx.currentPath = gainedPath
+        appliedGainDb   = gainDb
+        ctx.results.noiseReduction.makeupGainDb = round2(gainDb)
+        ctx.log(
+          `[NR] Peak re-norm: +${gainDb.toFixed(2)} dB ` +
+          `(post-NR peak ${postPeak.toFixed(1)} → ${PEAK_NORMALIZE_TARGET_DBFS} dBFS)`
+        )
+      } else {
+        ctx.results.noiseReduction.makeupGainDb = 0
+        ctx.log(
+          `[NR] Peak re-norm skipped — post-NR peak ${postPeak.toFixed(1)} dBFS, ` +
+          `drop ${(PEAK_NORMALIZE_TARGET_DBFS - postPeak).toFixed(2)} dB ≤ ${NR_MAKEUP_THRESHOLD_DB} dB threshold`
+        )
+      }
     }
   }
 
@@ -906,6 +939,61 @@ export async function noiseReduce(ctx) {
     timingLine += `  py=${pyTotal} {${parts.join(' ')}}`
   }
   ctx.log(timingLine)
+}
+
+// ── Stage: NR peak re-normalization (whole-file) ─────────────────────────────
+// Whole-file companion to noiseReduce's deferred per-chunk re-norm. When the
+// NR passes run inside a `chunked` block, each chunk has its own post-NR peak
+// and a per-chunk makeup gain produces audible level steps at seams. This
+// stage runs once on the stitched output and applies a single uniform gain to
+// restore the peak to PEAK_NORMALIZE_TARGET_DBFS, replacing the per-chunk
+// makeup the inner noiseReduce calls would otherwise have applied.
+//
+// In a non-chunked preset noiseReduce still does its own per-pass makeup gain,
+// so this stage need not be (and should not be) added. Placement: immediately
+// after the `chunked` block containing the NR passes, before remeasureFramesPostNr.
+
+export async function nrPeakRenorm(ctx) {
+  const postPeak = await measurePeakDbfs(ctx.currentPath)
+  if (postPeak === null) {
+    return
+  }
+
+  const gainDb = PEAK_NORMALIZE_TARGET_DBFS - postPeak
+  if (gainDb > NR_MAKEUP_THRESHOLD_DB) {
+    const gainedPath = ctx.tmp('.wav')
+    await applyLinearGain(ctx.currentPath, gainedPath, gainDb)
+    ctx.currentPath = gainedPath
+    if (ctx.results.noiseReduction) {
+      ctx.results.noiseReduction.makeupGainDb = round2(gainDb)
+    }
+    // Mirror the inline noiseReduce behaviour: shift the post-NR noise floor
+    // metric by the applied gain so any consumer reading it between here and
+    // remeasureFramesPostNr sees the level that matches ctx.currentPath. The
+    // following remeasureFramesPostNr stage overwrites metrics.noiseFloorDbfs
+    // with a fresh measurement; noiseReduction.post_noise_floor_dbfs isn't
+    // touched there, so this is the only place it tracks the makeup gain.
+    if (ctx.results.metrics?.noiseFloorDbfs != null) {
+      ctx.results.metrics.noiseFloorDbfs = round2(ctx.results.metrics.noiseFloorDbfs + gainDb)
+    }
+    if (ctx.results.noiseReduction?.post_noise_floor_dbfs != null) {
+      ctx.results.noiseReduction.post_noise_floor_dbfs = round2(
+        ctx.results.noiseReduction.post_noise_floor_dbfs + gainDb
+      )
+    }
+    ctx.log(
+      `[NR] Peak re-norm: +${gainDb.toFixed(2)} dB ` +
+      `(post-NR peak ${postPeak.toFixed(1)} → ${PEAK_NORMALIZE_TARGET_DBFS} dBFS)`
+    )
+  } else {
+    if (ctx.results.noiseReduction) {
+      ctx.results.noiseReduction.makeupGainDb = 0
+    }
+    ctx.log(
+      `[NR] Peak re-norm skipped — post-NR peak ${postPeak.toFixed(1)} dBFS, ` +
+      `drop ${(PEAK_NORMALIZE_TARGET_DBFS - postPeak).toFixed(2)} dB ≤ ${NR_MAKEUP_THRESHOLD_DB} dB threshold`
+    )
+  }
 }
 
 // ── Stage: Re-measure frames (post-NR) ───────────────────────────────────────
@@ -1707,7 +1795,7 @@ export async function compress(ctx) {
   ctx.results.compression = compressionResult
 }
 
-// ── Stage: Parallel Compression (Stage 4a-PC / NE-PC) ────────────────────────
+// ── Stage: Parallel Compression  ────────────────────────
 // Splits the signal into a dry passthrough and a heavily-compressed wet branch,
 // then mixes them at the preset-specific wet/dry ratio. The wet branch receives
 // a VAD gate (to prevent lifting noise floor content during silence) and, when
@@ -1718,10 +1806,7 @@ export async function compress(ctx) {
 // wet branch — letting it catch events (e.g. /f/) that only become problematic
 // after compression + makeup, and apply aggressive attenuation specifically to
 // the wet branch so the dry sibilant character predominates after the mix.
-//
-// Runs AFTER Stage 4a (serial compression) so both compression stages shape the
-// signal before the Auto Leveler sees it — per spec: "The Auto Leveler should
-// operate on the signal after parallel compression has set the density character."
+
 
 export async function parallelCompress(ctx) {
   const pcPath          = ctx.tmp('.wav')

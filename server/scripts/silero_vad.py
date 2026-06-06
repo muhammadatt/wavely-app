@@ -12,7 +12,11 @@ Usage:
 
 Input:  Float32 WAV. The fast path is 16 kHz mono (Node pre-resamples with
         FFmpeg so we skip scipy resampling); 44.1 kHz inputs are still accepted
-        and resampled internally with scipy.signal.resample_poly.
+        and resampled internally with scipy.signal.resample_poly. The
+        in-memory waveform is peak-normalized to ~-1 dBFS before inference —
+        Silero v5 is amplitude-aware and the pipeline calls this script
+        before peakNormalize, so quiet original files would otherwise be
+        fed to the model well below its training distribution.
 Output: JSON file with per-frame isSilence classification.
 
 Frame alignment:
@@ -189,6 +193,21 @@ def main(argv=None):
         g = gcd(SILERO_SR, sr)
         audio_np = resample_poly(audio_np, SILERO_SR // g, sr // g).astype(np.float32)
 
+    # Peak-normalize the in-memory waveform to ~-1 dBFS before inference.
+    # Silero v5 is amplitude-aware — its STFT-based features scale linearly
+    # with input amplitude and its learned speech/noise thresholds are
+    # calibrated to typical recording levels (~-3 dBFS peak / -25..-15 dBFS
+    # RMS). The pipeline calls Silero in analyzeFramesRaw before the
+    # peakNormalize stage runs, so files with a low original peak (e.g.
+    # -25 dBFS) would otherwise be fed to the model at well below its
+    # training distribution and miss fricative onsets / breathy tails. The
+    # mask Silero emits is just per-frame labels, so this scaling does not
+    # propagate to anything downstream — frameRms, noise floor, and every
+    # subsequent processing stage all read the original wavPath.
+    peak = float(np.abs(audio_np).max()) if audio_np.size > 0 else 0.0
+    if peak > 0.0:
+        audio_np = audio_np * (np.float32(0.9) / np.float32(peak))
+
     # Time-based frame boundaries: frame f starts at round(f * FRAME_DURATION_S * SILERO_SR).
     # With the current 25 ms/16 kHz config this remains 400 samples per frame; the formula matches the JS side.
     def frame_boundary(f):
@@ -212,7 +231,7 @@ def main(argv=None):
                 threshold=args.threshold,
                 min_speech_duration_ms=0,
                 min_silence_duration_ms=0,
-                speech_pad_ms=200,
+                speech_pad_ms=50,
                 return_seconds=False,
             )
         except TypeError:

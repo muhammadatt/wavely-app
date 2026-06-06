@@ -81,6 +81,11 @@ const SILERO_SCRIPT = path.join(
  *
  * @typedef {Object} FrameAnalysis
  * @property {number} noiseFloorDbfs            - Estimated noise floor (dB)
+ * @property {number} [noiseFloorHfDbfs]        - HF-band (>4 kHz) noise floor
+ *   from the same bootstrap procedure as noiseFloorDbfs. Consumed by the
+ *   fricative-aware boundary expansion in the RNNoise sidecar path. Absent
+ *   on legacy paths (energy backend, remeasureFrames) that don't compute the
+ *   HF copy.
  * @property {number} silenceThresholdDbfs      - noise_floor + 6 dB
  * @property {FrameInfo[]} frames               - Per-frame data
  * @property {number} voicedRmsDbfs             - RMS of voiced frames only
@@ -92,7 +97,10 @@ const SILERO_SCRIPT = path.join(
  * @property {number} index             - Frame index
  * @property {number} offsetSamples     - Start sample
  * @property {number} lengthSamples     - Frame length in samples
- * @property {number} rmsDbfs           - Frame RMS in dBFS
+ * @property {number} rmsDbfs           - Frame RMS in dBFS (full-band)
+ * @property {number} [rmsHfDbfs]       - Frame RMS in dBFS through the 4 kHz
+ *   HPF cascade; populated by analyzeAudioFramesSilero, undefined on the
+ *   energy-backend fallback path.
  * @property {boolean} isSilence        - True if below silence threshold
  */
 export async function analyzeFrames(wavPath) {
@@ -150,6 +158,25 @@ async function analyzeAudioFramesSilero(wavPath) {
     for (let i = start; i < end; i++) sumSq += samples[i] * samples[i]
     frameRms[f] = Math.sqrt(sumSq / len)
   }
+
+  // Stage A.2 — high-frequency band per-frame RMS for fricative-aware
+  // boundary expansion. The full-band frameRms is dominated by LF
+  // mouth-noise / breath energy in regions adjacent to phrase boundaries,
+  // so it cannot distinguish a /s/ onset from a tongue click of comparable
+  // total energy. A sharp 4 kHz HPF leaves /s/, /ʃ/, /f/ intact while
+  // rejecting the sub-3-kHz body of mouth artefacts. Filter: 4th-order
+  // Butterworth (two cascaded biquads @ Q=0.707, fc=4 kHz).
+  const hpfSamples = applyHpfCascade(samples, sampleRate, 4000)
+  const frameRmsHf = new Float64Array(numFrames)
+  for (let f = 0; f < numFrames; f++) {
+    const start = frameBoundary(f, sampleRate)
+    const end   = frameBoundary(f + 1, sampleRate)
+    const len   = end - start
+    let sumSq = 0
+    for (let i = start; i < end; i++) sumSq += hpfSamples[i] * hpfSamples[i]
+    frameRmsHf[f] = Math.sqrt(sumSq / len)
+  }
+  const noiseFloorHfDbfs = rmsToDbfs(bootstrapNoiseRms(frameRmsHf))
 
   const noiseRmsLinear   = bootstrapNoiseRms(frameRms)
   const noiseFloorDbfs   = rmsToDbfs(noiseRmsLinear)
@@ -212,7 +239,8 @@ async function analyzeAudioFramesSilero(wavPath) {
 
   const frames = []
   for (let f = 0; f < numFrames; f++) {
-    const rmsDbfs = rmsToDbfs(frameRms[f])
+    const rmsDbfs   = rmsToDbfs(frameRms[f])
+    const rmsHfDbfs = rmsToDbfs(frameRmsHf[f])
     // Silero label takes priority; energy threshold is fallback for any
     // frame index not present in Silero output (±1 frame edge case).
     const isSilence = sileroMap.has(f) ? sileroMap.get(f) : (rmsDbfs < silenceThreshold)
@@ -223,6 +251,7 @@ async function analyzeAudioFramesSilero(wavPath) {
       offsetSamples: start,
       lengthSamples: frameBoundary(f + 1, sampleRate) - start,
       rmsDbfs:       round2(rmsDbfs),
+      rmsHfDbfs:     round2(rmsHfDbfs),
       isSilence,
     })
   }
@@ -253,55 +282,17 @@ async function analyzeAudioFramesSilero(wavPath) {
     frames[f].isSilence = false
   }
 
-  // Step 2b: multi-frame fricative onset/offset extension
-  // Phrase-initial unvoiced fricatives (/s/, /f/, /ʃ/) commonly run 60–150 ms
-  // ahead of the first voiced phoneme. Silero VAD v5 frequently misses these
-  // (its features key on voicing), so Step 2's single-frame correction can
-  // only recover the one frame immediately adjacent to the vowel onset — the
-  // leading body of the fricative stays labelled silence and is then
-  // attenuated by downstream NR. Walk outward from each Silero-voiced run
-  // boundary up to FRIC_MAX_FRAMES (150 ms) as long as the candidate frame's
-  // energy clears an adaptive gate:
-  //   gateDbfs = max(noiseFloorDbfs + FRIC_NOISE_MARGIN_DB,
-  //                  anchorRmsDbfs   - FRIC_ANCHOR_DROP_DB)
-  // The anchor-relative term limits how far the walk plausibly extends into
-  // background noise (a fricative ~30 dB below the adjacent vowel is still
-  // realistic; -40 dB and lower is almost certainly noise). The noise-floor
-  // term provides a hard lower bound when the bootstrapped noise floor is
-  // pathologically low (e.g. files with embedded digital silence pads). Snap
-  // the labels prior to mutation so the walk cannot cascade onto frames we
-  // just promoted.
-  const FRIC_MAX_FRAMES      = 6
-  const FRIC_NOISE_MARGIN_DB = -3
-  const FRIC_ANCHOR_DROP_DB  = 30
+  // NOTE: the multi-frame fricative-onset boundary expansion that historically
+  // ran here (Step 2b) has moved to expandSpeechBoundariesForFricatives below.
+  // It mutated the authoritative Silero labels in place, which leaked into
+  // every downstream consumer (parallel compression VAD curve, silence-floor
+  // vadGate, auto-leveler, silence-segment finder), bringing back mouth noise
+  // and breaths these stages were specifically meant to gate out. The
+  // expansion is now invoked only by the rnnoise sidecar in stages.js — the
+  // one consumer that genuinely needs more conservative speech labels to
+  // protect fricative onsets from RNNoise's internal VAD.
 
-  const labelsBeforeFricExt = frames.map(fr => fr.isSilence)
-  for (let f = 0; f < numFrames; f++) {
-    if (labelsBeforeFricExt[f]) continue
-    const anchorDbfs = rmsToDbfs(frameRms[f])
-    const gateDbfs   = Math.max(
-      noiseFloorDbfs + FRIC_NOISE_MARGIN_DB,
-      anchorDbfs    - FRIC_ANCHOR_DROP_DB,
-    )
-    if (f > 0 && labelsBeforeFricExt[f - 1]) {
-      for (let k = 1; k <= FRIC_MAX_FRAMES; k++) {
-        const i = f - k
-        if (i < 0 || !labelsBeforeFricExt[i])     break
-        if (rmsToDbfs(frameRms[i]) <= gateDbfs)   break
-        frames[i].isSilence = false
-      }
-    }
-    if (f < numFrames - 1 && labelsBeforeFricExt[f + 1]) {
-      for (let k = 1; k <= FRIC_MAX_FRAMES; k++) {
-        const i = f + k
-        if (i >= numFrames || !labelsBeforeFricExt[i]) break
-        if (rmsToDbfs(frameRms[i]) <= gateDbfs)        break
-        frames[i].isSilence = false
-      }
-    }
-  }
-
-  // Step 3: accumulate voiced energy from expanded labels
+  // Step 3: accumulate voiced energy from the Silero (+ Step 2) labels
   let voicedSumSq = 0
   let voicedFrameCount = 0
   for (let f = 0; f < numFrames; f++) {
@@ -319,6 +310,7 @@ async function analyzeAudioFramesSilero(wavPath) {
 
   return {
     noiseFloorDbfs:       round2(noiseFloorDbfs),
+    noiseFloorHfDbfs:     round2(noiseFloorHfDbfs),
     silenceThresholdDbfs: round2(silenceThreshold),
     frames,
     voicedRmsDbfs:        round2(voicedRmsDbfs),
@@ -602,10 +594,253 @@ function round2(n) {
 function emptyResult() {
   return {
     noiseFloorDbfs:       -60,
+    noiseFloorHfDbfs:     -60,
     silenceThresholdDbfs: -54,
     frames:               [],
     voicedRmsDbfs:        -20,
     averageVoicedRmsDbfs: -20,
     quietestSilenceSegment: null,
   }
+}
+
+// ── HF-band biquad cascade (4th-order Butterworth HPF) ───────────────────────
+//
+// Two RBJ-cookbook 2nd-order high-pass biquads chained for −24 dB/oct rolloff
+// (~−15 dB at 3 kHz, ~−30 dB at 2 kHz when fc=4 kHz, Q=√½). Used to isolate
+// the fricative energy band on the analysis copy of the audio; the resulting
+// per-frame HF RMS feeds the boundary-expansion gate below.
+function applyHpfCascade(samples, sampleRate, fc) {
+  const coeffs = highpassCoeffs(sampleRate, fc)
+  // Stage 1 (in a new Float64Array — sample input is Float32)
+  const stage1 = new Float64Array(samples.length)
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0
+  const { b0, b1, b2, a1, a2 } = coeffs
+  for (let i = 0; i < samples.length; i++) {
+    const x = samples[i]
+    const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+    x2 = x1; x1 = x
+    y2 = y1; y1 = y
+    stage1[i] = y
+  }
+  // Stage 2 — separate state, in-place on stage1 buffer
+  x1 = 0; x2 = 0; y1 = 0; y2 = 0
+  for (let i = 0; i < stage1.length; i++) {
+    const x = stage1[i]
+    const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+    x2 = x1; x1 = x
+    y2 = y1; y1 = y
+    stage1[i] = y
+  }
+  return stage1
+}
+
+function highpassCoeffs(fs, f0) {
+  const Q  = Math.SQRT1_2
+  const w0 = (2 * Math.PI * f0) / fs
+  const c  = Math.cos(w0)
+  const a  = Math.sin(w0) / (2 * Q)
+  const a0 = 1 + a
+  return {
+    b0: ((1 + c) / 2) / a0,
+    b1: (-(1 + c))    / a0,
+    b2: ((1 + c) / 2) / a0,
+    a1: (-2 * c)      / a0,
+    a2: (1 - a)       / a0,
+  }
+}
+
+/**
+ * Multi-frame fricative onset/offset extension for the RNNoise sidecar.
+ *
+ * Phrase-initial unvoiced fricatives (/s/, /f/, /ʃ/) commonly run 60–150 ms
+ * ahead of the first voiced phoneme. Silero VAD v5 keys on voicing and
+ * frequently labels those onset frames as silence — RNNoise's internal causal
+ * GRU VAD does the same, suppressing the audible body of the consonant.
+ *
+ * Walk outward from each voiced-run boundary up to maxFramesBack /
+ * maxFramesForward frames as long as the candidate frame's HF-band energy
+ * (`rmsHfDbfs`, derived from a 4th-order 4 kHz HPF) stays within anchorDropDb
+ * of the anchor's HF energy:
+ *   gateDbfs = anchorHfDbfs - anchorDropDb
+ *
+ * Two purely relative thresholds, no noise-floor references:
+ *   • Anchor sanity:  anchorFullDbfs ≥ voicedRmsDbfs - anchorMaxDbBelowVoiced
+ *   • Walk gate:      candidateHfDbfs > anchorHfDbfs  - anchorDropDb
+ *
+ * Both adapt to recording gain and content level without any absolute
+ * constants. The walk gate moves with the anchor: a loud anchor admits
+ * loud candidates, a quiet anchor admits quieter candidates. Candidates
+ * more than anchorDropDb below the anchor's HF are not acoustically
+ * related to it (not a fricative tail of *that* anchor's phrase).
+ *
+ * The asymmetric default (6 back / 2 forward) prioritises onset recovery
+ * (where the gain is largest) over trailing-fricative recovery (where the
+ * walk is more likely to bleed into exhales). Using HF-band energy rejects
+ * the LF-dominant mouth-noise / breath frames the previous full-band gate
+ * was promoting.
+ *
+ * Pure function: does not mutate input frames. Returns a new array of new
+ * frame objects with `isSilence` adjusted. Snapshot of the original labels
+ * is taken before any flips so the walk cannot cascade onto frames it just
+ * promoted.
+ *
+ * @param {FrameInfo[]} frames - Per-frame analysis (each must carry rmsHfDbfs and rmsDbfs)
+ * @param {object} options
+ * @param {number} options.voicedRmsDbfs      - Mean full-band RMS of Silero-voiced frames; drives the anchor sanity check
+ * @param {number} [options.maxFramesBack=6]
+ * @param {number} [options.maxFramesForward=2]
+ * @param {number} [options.anchorDropDb=20]  - Walk gate margin: candidates more than this many dB below the anchor's HF are blocked
+ * @param {number} [options.anchorMaxDbBelowVoiced=35] - Reject anchors whose
+ *   full-band RMS is more than this many dB below the file's voiced RMS mean.
+ *   Real speech spans roughly 30 dB of dynamic range (loud accented syllable
+ *   to quiet syllable tail), so anything 35+ dB below the voiced average is
+ *   almost certainly a Silero false positive in silent/edited material, not
+ *   a real anchor. Self-normalising: adapts to recording gain and content
+ *   level without any absolute reference. Tested on full-band rather than
+ *   HF because real voiced edges (low vowels, trailing voiced tails) can
+ *   have minimal HF content while still clearly being speech.
+ * @param {boolean} [options.diagnostic=false] - Emit per-walk and summary logs
+ * @param {Function|null} [options.log=null]   - Logger (e.g. ctx.log); falls back to console.log
+ * @returns {FrameInfo[]} New frames array with expanded speech labels
+ */
+export function expandSpeechBoundariesForFricatives(frames, {
+  voicedRmsDbfs,
+  maxFramesBack            = 6,
+  maxFramesForward         = 2,
+  anchorDropDb             = 20,
+  anchorMaxDbBelowVoiced   = 35,
+  diagnostic               = false,
+  log                      = null,
+} = {}) {
+  if (!Array.isArray(frames) || frames.length === 0) return frames
+  if (voicedRmsDbfs == null || !Number.isFinite(voicedRmsDbfs)) {
+    // The anchor sanity check needs a voiced RMS reference; without it the
+    // check would have no valid baseline. Skip cleanly rather than guess.
+    if (diagnostic) (log ?? console.log)(`[NR] fric-exp skipped — voicedRmsDbfs unavailable`)
+    return frames.map(fr => ({ ...fr }))
+  }
+
+  // Anchor sanity threshold: anchors below this absolute level are skipped.
+  // Derived from the file's voiced RMS mean — fully self-normalising across
+  // gain and content level. No absolute constants involved.
+  const anchorMinFullDbfs = voicedRmsDbfs - anchorMaxDbBelowVoiced
+
+  const labelsBefore = frames.map(fr => fr.isSilence)
+  const newSilence   = labelsBefore.slice()
+  const numFrames    = frames.length
+
+  let anchorsWalked        = 0
+  let anchorsSkippedQuiet  = 0
+  let promotedBack         = 0
+  let promotedFwd          = 0
+
+  for (let f = 0; f < numFrames; f++) {
+    if (labelsBefore[f]) continue
+
+    // Anchor-condition gate: only edge frames of voiced runs (those adjacent
+    // to a silence frame) are walk candidates. Interior voiced frames have
+    // nothing to walk into and shouldn't be considered "anchors" by the
+    // diagnostic either. A single-frame voiced run is both a back- and
+    // forward-anchor at the same index.
+    const isBackAnchor = f > 0              && labelsBefore[f - 1]
+    const isFwdAnchor  = f < numFrames - 1  && labelsBefore[f + 1]
+    if (!isBackAnchor && !isFwdAnchor) continue
+
+    const anchorHfDbfs   = frames[f].rmsHfDbfs ?? -120
+    const anchorFullDbfs = frames[f].rmsDbfs   ?? -120
+
+    // Whole-file time mapping: frames[f].index is the global frame index even
+    // inside a chunked sub-context (sliceFramesForChunk preserves it via the
+    // `...frame` spread). In non-chunked mode it equals the local f.
+    const globalIdx = frames[f].index ?? f
+    const tSec      = globalIdx * FRAME_DURATION_S
+
+    // Anchor sanity check: a real voiced edge has full-band RMS within
+    // roughly 30 dB of the file's voiced average (real speech spans about
+    // a 30 dB dynamic range from loud accented syllables to quiet syllable
+    // tails). An anchor more than anchorMaxDbBelowVoiced below the voiced
+    // mean is a Silero false positive in a silent/edited region — expanding
+    // from it just promotes silence. Self-normalising against voicedRmsDbfs
+    // rather than a noise floor: adapts to recording gain and content level
+    // without any absolute reference. Tested on full-band rather than HF
+    // because real voiced edges (low vowels, trailing voiced tails) can
+    // have minimal HF content while still clearly being speech.
+    if (anchorFullDbfs < anchorMinFullDbfs) {
+      anchorsSkippedQuiet++
+      if (diagnostic) {
+        (log ?? console.log)(
+          `[NR] fric-exp skip-anchor=${globalIdx} t=${tSec.toFixed(3)}s ` +
+          `full=${anchorFullDbfs.toFixed(1)} hf=${anchorHfDbfs.toFixed(1)} ` +
+          `voiced=${voicedRmsDbfs.toFixed(1)} min=${anchorMinFullDbfs.toFixed(1)} ` +
+          `(anchor >${anchorMaxDbBelowVoiced} dB below voiced mean)`
+        )
+      }
+      continue
+    }
+
+    // Walk gate: candidates within anchorDropDb of the anchor's HF energy
+    // are admitted. Purely anchor-relative — the gate moves with the anchor,
+    // no noise-floor reference. Candidates more than anchorDropDb below the
+    // anchor are not acoustically related to it (not a fricative tail of
+    // *this* anchor's phrase).
+    const gateDbfs = anchorHfDbfs - anchorDropDb
+
+    if (isBackAnchor) {
+      anchorsWalked++
+      let kBack = 0
+      let stopReason = 'max_frames'
+      for (let k = 1; k <= maxFramesBack; k++) {
+        const i = f - k
+        if (i < 0)                          { stopReason = 'file_edge';     break }
+        if (!labelsBefore[i])               { stopReason = 'already_voiced'; break }
+        if ((frames[i].rmsHfDbfs ?? -120) <= gateDbfs) { stopReason = 'gate'; break }
+        newSilence[i] = false
+        kBack++
+      }
+      promotedBack += kBack
+      if (diagnostic && kBack > 0) {
+        (log ?? console.log)(
+          `[NR] fric-exp ←anchor=${globalIdx} t=${tSec.toFixed(3)}s ` +
+          `hf=${anchorHfDbfs.toFixed(1)} full=${anchorFullDbfs.toFixed(1)} ` +
+          `gate=${gateDbfs.toFixed(1)} (anc-${anchorDropDb}) ` +
+          `promoted=${kBack} stop=${stopReason}`
+        )
+      }
+    }
+
+    if (isFwdAnchor) {
+      anchorsWalked++
+      let kFwd = 0
+      let stopReason = 'max_frames'
+      for (let k = 1; k <= maxFramesForward; k++) {
+        const i = f + k
+        if (i >= numFrames)                 { stopReason = 'file_edge';      break }
+        if (!labelsBefore[i])               { stopReason = 'already_voiced'; break }
+        if ((frames[i].rmsHfDbfs ?? -120) <= gateDbfs) { stopReason = 'gate'; break }
+        newSilence[i] = false
+        kFwd++
+      }
+      promotedFwd += kFwd
+      if (diagnostic && kFwd > 0) {
+        (log ?? console.log)(
+          `[NR] fric-exp →anchor=${globalIdx} t=${tSec.toFixed(3)}s ` +
+          `hf=${anchorHfDbfs.toFixed(1)} full=${anchorFullDbfs.toFixed(1)} ` +
+          `gate=${gateDbfs.toFixed(1)} (anc-${anchorDropDb}) ` +
+          `promoted=${kFwd} stop=${stopReason}`
+        )
+      }
+    }
+  }
+
+  if (diagnostic) {
+    (log ?? console.log)(
+      `[NR] fric-exp summary: anchors=${anchorsWalked} skipped_quiet=${anchorsSkippedQuiet} ` +
+      `back_promoted=${promotedBack} fwd_promoted=${promotedFwd} ` +
+      `voiced=${voicedRmsDbfs.toFixed(1)} anchorMin=${anchorMinFullDbfs.toFixed(1)} ` +
+      `params={back:${maxFramesBack},fwd:${maxFramesForward},` +
+      `ancDrop:${anchorDropDb},ancMaxBelowVoiced:${anchorMaxDbBelowVoiced}}`
+    )
+  }
+
+  return frames.map((fr, i) => ({ ...fr, isSilence: newSilence[i] }))
 }

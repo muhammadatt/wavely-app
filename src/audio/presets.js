@@ -149,7 +149,7 @@ export function resolveOutputProfileId(id) {
  * @property {{ model?: 'demucs'|'convtasnet' }} [separateVocals] - Inline config for the separateVocals stage. model selects the separation backend ('demucs' default).
  * @property {{ model?: 'mossformer2_48k'|'frcrn_16k' }} [clearerVoiceEnhance] - Inline config for the clearerVoiceEnhance stage. model selects the ClearerVoice model ('mossformer2_48k' default).
  * @property {{ enabled: boolean, model?: 'ap-bwe'|'ap_bwe'|'lavasr', postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bandwidthExtension - Bandwidth extension; enabled for NE presets, disabled for standard presets. model selects the backend ('ap-bwe' default, 'lavasr'). postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
- * @property {{ model?: 'df3'|'rnnoise'|'dtln', skipBelowDb?: number, vadGate?: { enabled: boolean, rnnoiseThreshold?: number, crossfadeMs?: number, hangoverFrames?: number } }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). skipBelowDb skips this pass entirely if the current noise floor is already below the given dBFS (e.g. -85). vadGate (rnnoise only) restores the dry input on frames where Silero says speech but RNNoise's internal VAD reports speech_prob below rnnoiseThreshold (default 0.30); a short crossfadeMs (default 1 ms) ramp prevents clicks at region boundaries; hangoverFrames (default 2 = 20 ms) right-extends each override forward in time so RNNoise's causal VAD has time to lock onto voicing before the gate hands control back, avoiding the post-fricative vowel-onset dip. When the stage is listed more than once, each call can carry its own model, skipBelowDb, and vadGate.
+ * @property {{ model?: 'df3'|'rnnoise'|'dtln', skipBelowDb?: number, vadGate?: { enabled: boolean, rnnoiseThreshold?: number, crossfadeMs?: number, hangoverFrames?: number, boundaryExpansion?: { enabled: boolean, maxFramesBack?: number, maxFramesForward?: number, anchorDropDb?: number, anchorMaxDbBelowVoiced?: number, diagnostic?: boolean } } }} [noiseReduce] - Noise reduction stage configuration. model selects the backend ('df3' default). skipBelowDb skips this pass entirely if the current noise floor is already below the given dBFS (e.g. -85). vadGate (rnnoise only) restores the dry input on frames where Silero says speech but RNNoise's internal VAD reports speech_prob below rnnoiseThreshold (default 0.30); a short crossfadeMs (default 1 ms) ramp prevents clicks at region boundaries; hangoverFrames (default 2 = 20 ms) right-extends each override forward in time so RNNoise's causal VAD has time to lock onto voicing before the gate hands control back, avoiding the post-fricative vowel-onset dip. vadGate.boundaryExpansion (rnnoise only) widens the sidecar's speech labels around each voiced-run boundary so RNNoise does not suppress fricative onsets Silero failed to label — applied only to the sidecar mask, never to the authoritative ctx.results.metrics.frames consumed by parallel compression / vadGate / auto-leveler. Walks maxFramesBack frames backward and maxFramesForward frames forward (asymmetric default 6/2), gated on per-frame HF-band energy (>4 kHz HPF cascade) so LF-dominant mouth noise and breaths are not promoted. The walk gate is purely anchor-relative: candidates within anchorDropDb of the anchor's HF energy are admitted. anchorMaxDbBelowVoiced (default 35) rejects anchors whose full-band RMS is more than that many dB below the file's voiced RMS mean — those are Silero false positives in silent/edited regions, not real anchors. Self-normalising against voicedRmsDbfs: adapts to gain and content level without any absolute reference. Tested on full-band rather than HF because real voiced edges (low vowels, trailing voiced tails) can have minimal HF content while still clearly being speech. diagnostic emits per-walk and summary log lines for calibration. When the stage is listed more than once, each call can carry its own model, skipBelowDb, and vadGate.
  */
 
 /** @type {Record<string, Preset>} */
@@ -198,7 +198,7 @@ export const PRESETS = {
           // uncapped Tier 5 path even for noisier files 
           // See server/pipeline/stages.js → NR_TIERS for the table
 
-          { noiseReduce: { model: "df3", tier: { maxTier: 4 } } },
+          { noiseReduce: { model: "df3" } },
 
           {
             // Second NR pass: RNNoise. Its internal causal GRU VAD operates on
@@ -225,11 +225,40 @@ export const PRESETS = {
                 // edge of the vowel. The hangover keeps the dry signal active
                 // through that ramp so the C→V handoff isn't a level dip.
                 hangoverFrames: 2,
+                // Fricative-aware boundary expansion. Widens the sidecar
+                // mask around each voiced-run boundary so RNNoise does not
+                // suppress phrase-initial /s/, /f/, /ʃ/ onsets that Silero
+                // labelled silence. Applied to the sidecar only — does not
+                // mutate ctx.results.metrics.frames
+                boundaryExpansion: {
+                  enabled:                false,
+                  maxFramesBack:          6,
+                  maxFramesForward:       2,
+                  // Walk gate margin: candidates more than anchorDropDb
+                  // below the anchor's HF energy are blocked. 
+                  anchorDropDb:           20,
+                  // Anchor sanity check: Anchors more
+                  // than 35 dB below the voiced mean are Silero false
+                  // positives in silent / edited regions — skip the
+                  // walk rather than promote silence.
+                  anchorMaxDbBelowVoiced: 35,
+                  // TEMP — calibration logging. Emits per-walk and summary
+                  // lines under `[NR] fric-exp …` so the anchor / gate /
+                  // promoted-count distribution can be read off pipeline
+                  // logs. Remove once thresholds are settled.
+                  diagnostic:             true,
+                },
               },
             },
           },
         ],
       },
+      // Whole-file peak re-normalization companion to the chunked NR passes
+      // above. Per-chunk makeup gain inside the chunked block produces audible level steps at seams. 
+      // The inner noiseReduce calls detect chunked context and skips peak
+      // re-norm; this stage runs once on the stitched output and applies a
+      // single uniform makeup gain.
+      "nrPeakRenorm",
       // Refresh per-frame rmsDbfs after all NR passes complete. The internal
       // noiseReduce update only writes scalar metrics (noiseFloorDbfs,
       // voicedRmsDbfs, etc.) — frame-level energies stay pre-NR until here.
