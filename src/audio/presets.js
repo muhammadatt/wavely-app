@@ -145,7 +145,7 @@ export function resolveOutputProfileId(id) {
  * @property {string} defaultOutputProfile
  * @property {boolean} lockedOutputProfile
  * @property {{ enabled: boolean, strength: 'light'|'medium'|'heavy', preserve_early: boolean }} dereverb
- * @property {{ total_max_up_db: number, total_max_down_db: number, target_mode: 'running_median'|'global', target_window_s: number, noise_floor_target_dbfs: number, deadband_db: number, knee_db: number, max_up_db: number, max_down_db: number, subphrase_split_drop_db: number, subphrase_split_min_duration_ms: number, crossfade_ms: number, merge_max_delta_db: number } | null} autoLeveler
+ * @property {{ target_mode: 'running_median'|'global', target_window_s: number, noise_floor_target_dbfs: number, deadband_db: number, knee_db: number, max_up_db: number, max_down_db: number } | null} autoLeveler
  * @property {{ model?: 'demucs'|'convtasnet' }} [separateVocals] - Inline config for the separateVocals stage. model selects the separation backend ('demucs' default).
  * @property {{ model?: 'mossformer2_48k'|'frcrn_16k' }} [clearerVoiceEnhance] - Inline config for the clearerVoiceEnhance stage. model selects the ClearerVoice model ('mossformer2_48k' default).
  * @property {{ enabled: boolean, model?: 'ap-bwe'|'ap_bwe'|'lavasr', postEq?: { enabled: boolean, freq?: number, q?: number, gainDb: number } }} bandwidthExtension - Bandwidth extension; enabled for NE presets, disabled for standard presets. model selects the backend ('ap-bwe' default, 'lavasr'). postEq applies a narrow bell cut after BWE to tame sibilance introduced by HF synthesis.
@@ -195,13 +195,9 @@ export const PRESETS = {
           // tier is selected from the current noise floor (Tier 1 ≤ -60 dBFS
           // skips, Tier 2 -60→-55 caps at 6 dB, Tier 3 -55→-50 at 12 dB,
           // Tier 4 -50→-45 at 18 dB). maxTier: 4 prevents pushing into the
-          // uncapped Tier 5 path even for noisier files — ACX narration
-          // never benefits from unbounded DF3 attenuation, and the cap
-          // preserves phrase-initial fricatives (/s/, /f/, /ʃ/, /tʃ/) that
-          // uncapped DF3 routinely classifies as broadband noise at their
-          // leading edge. See server/pipeline/stages.js → NR_TIERS for the
-          // table and docs/instant_polish_processing_spec_v3.md
-          // §"tiered noise reduction" for the spec.
+          // uncapped Tier 5 path even for noisier files 
+          // See server/pipeline/stages.js → NR_TIERS for the table
+
           { noiseReduce: { model: "df3", tier: { maxTier: 4 } } },
 
           {
@@ -243,19 +239,13 @@ export const PRESETS = {
 
       {
         autoLeveler: {
-          total_max_up_db: 10.0,
-          total_max_down_db: 10.0,
           target_mode: "global",
           target_window_s: 60,
           noise_floor_target_dbfs: -60,
-          deadband_db: 2.0,
-          knee_db: 1.5,
+          deadband_db: 0.75,
+          knee_db: 1,
           max_up_db: 10.0,
           max_down_db: 10.0,
-          subphrase_split_drop_db: 6.0,
-          subphrase_split_min_duration_ms: 500,
-          crossfade_ms: 30,
-          merge_max_delta_db: 6.0,
         },
       },
 
@@ -577,8 +567,6 @@ export const PRESETS = {
       "remeasureFramesPostNr",
       {
         autoLeveler: {
-          total_max_up_db: 6.0,
-          total_max_down_db: 8.0,
           target_mode: "running_median",
           target_window_s: 45,
           noise_floor_target_dbfs: -50,
@@ -586,10 +574,6 @@ export const PRESETS = {
           knee_db: 1.0,
           max_up_db: 5.0,
           max_down_db: 6.0,
-          subphrase_split_drop_db: 6.0,
-          subphrase_split_min_duration_ms: 500,
-          crossfade_ms: 30,
-          merge_max_delta_db: 6.0,
         },
       },
       {
@@ -777,8 +761,6 @@ export const PRESETS = {
       "remeasureFramesPostNr",
       {
         autoLeveler: {
-          total_max_up_db: 8.0,
-          total_max_down_db: 10.0,
           target_mode: "running_median",
           target_window_s: 30,
           noise_floor_target_dbfs: -50,
@@ -786,10 +768,6 @@ export const PRESETS = {
           knee_db: 1.0,
           max_up_db: 6.0,
           max_down_db: 8.0,
-          subphrase_split_drop_db: 6.0,
-          subphrase_split_min_duration_ms: 500,
-          crossfade_ms: 30,
-          merge_max_delta_db: 6.0,
         },
       },
 

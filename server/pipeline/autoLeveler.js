@@ -8,14 +8,14 @@
  * inside a clip are preserved exactly.
  *
  *   Segmentation:  VAD voiced runs, plus sub-phrase splits at sustained
- *                  internal level drops (>= subphrase_split_drop_db for
- *                  >= subphrase_split_min_duration_ms within a run).
+ *                  internal level drops (>= SUBPHRASE_SPLIT_DROP_DB for
+ *                  >= SUBPHRASE_SPLIT_MIN_DURATION_MS within a run).
  *   Per-clip gain: shapeDrift(target - clipLufs) with deadband + cubic knee,
  *                  capped by per-preset max_up/down and noise-floor headroom.
- *   Boundaries:    short cosine crossfade (crossfade_ms) at the lowest-energy
- *                  point near each boundary. Adjacent clips with too-large gain
- *                  delta are merged into one clip with a duration-weighted
- *                  average gain (transparent fallback).
+ *   Boundaries:    short cosine crossfade (CROSSFADE_MS) at the lowest-energy
+ *                  point near each boundary. Adjacent clips whose gain delta
+ *                  exceeds MERGE_MAX_DELTA_DB are merged into one clip with a
+ *                  duration-weighted average gain (transparent fallback).
  *
  * Chain position: immediately before the Compression stage. Hands the
  * compressor a level-stable input so it can act with a consistent character.
@@ -36,7 +36,18 @@ const VAD_MIN_UNVOICED_MS = 300
 // Skip condition thresholds
 const MIN_FILE_DURATION_S   = 10
 const MIN_VOICED_DURATION_S = 5
-const LEVELED_STD_THRESHOLD = 1.5   // dB — duration-weighted std of clip LUFS
+
+// Sub-phrase splitting: split a voiced run when an internal level drop of
+// >= SUBPHRASE_SPLIT_DROP_DB is sustained for >= SUBPHRASE_SPLIT_MIN_DURATION_MS.
+const SUBPHRASE_SPLIT_DROP_DB         = 6.0
+const SUBPHRASE_SPLIT_MIN_DURATION_MS = 500
+
+// Cosine crossfade duration at clip boundaries.
+const CROSSFADE_MS = 30
+
+// Transparent-fallback merge: adjacent clips with gain delta exceeding this
+// threshold are merged into one clip with a duration-weighted average gain.
+const MERGE_MAX_DELTA_DB = 6.0
 
 // Sub-phrase splitting recursion guard — never split a sub-clip shorter than
 // twice the minimum drop duration (otherwise the split point can't itself
@@ -651,8 +662,8 @@ export async function analyzeAutoLeveler(inputPath, preset, frameAnalysis) {
     L_st,
     hopSamples,
     totalSamples:        n,
-    splitDropDb:         config.subphrase_split_drop_db,
-    splitMinDurationMs:  config.subphrase_split_min_duration_ms,
+    splitDropDb:         SUBPHRASE_SPLIT_DROP_DB,
+    splitMinDurationMs:  SUBPHRASE_SPLIT_MIN_DURATION_MS,
   })
 
   if (clips.length < 2) {
@@ -664,9 +675,13 @@ export async function analyzeAutoLeveler(inputPath, preset, frameAnalysis) {
   const clipDurations  = clips.map(c => c.sampleEnd - c.sampleStart)
   const sampleStarts   = clips.map(c => c.sampleStart)
 
-  // Skip if file is already leveled (clip-LUFS std below threshold)
+  // Skip if file is already leveled. The threshold is the per-clip deadband:
+  // if the duration-weighted std of clip LUFS is already below the deadband,
+  // every clip would fall inside the no-op band and the stage would produce
+  // zero correction. Tying the file-level skip to the deadband keeps these
+  // two no-op conditions coherent and avoids silent-no-op runs.
   const inClipStd = weightedStd(clipLufs, clipDurations)
-  if (inClipStd < LEVELED_STD_THRESHOLD) {
+  if (inClipStd < config.deadband_db) {
     return { applied: false, skipped_reason: 'file_already_leveled' }
   }
 
@@ -686,26 +701,22 @@ export async function analyzeAutoLeveler(inputPath, preset, frameAnalysis) {
     config.target_mode,
   )
 
-  // Per-clip gains
-  const totalUp   = config.total_max_up_db
-  const totalDown = config.total_max_down_db
-  const gains = clipLufs.map((lufs, k) => {
-    const g = shapeDrift(
-      targets[k] - lufs,
-      config.deadband_db,
-      config.knee_db,
-      maxUpEff,
-      config.max_down_db,
-    )
-    return Math.max(-totalDown, Math.min(totalUp, g))
-  })
+  // Per-clip gains. shapeDrift already clamps to (maxUpEff, max_down_db);
+  // those are the sole per-direction caps.
+  const gains = clipLufs.map((lufs, k) => shapeDrift(
+    targets[k] - lufs,
+    config.deadband_db,
+    config.knee_db,
+    maxUpEff,
+    config.max_down_db,
+  ))
 
   // Merge adjacent clips with too-large gain delta (transparent fallback)
-  const merged = mergeClipsForGainConflict(clips, gains, config.merge_max_delta_db)
+  const merged = mergeClipsForGainConflict(clips, gains, MERGE_MAX_DELTA_DB)
 
   // Boundary crossfade plans (placed at lowest-energy point in each gap or
   // straddling voiced-adjacent boundaries)
-  const crossfadeSamples = Math.max(1, Math.round(config.crossfade_ms * 0.001 * sampleRate))
+  const crossfadeSamples = Math.max(1, Math.round(CROSSFADE_MS * 0.001 * sampleRate))
   const plans = buildCrossfadePlans(
     merged.clips, merged.gains, audioPowerSum, crossfadeSamples, n,
   )
@@ -767,19 +778,13 @@ export async function renderAutoLeveler(outputPath, analyzed) {
     applied:        true,
     skipped_reason: null,
     preset_params: {
-      total_max_up_db:                   config.total_max_up_db,
-      total_max_down_db:                 config.total_max_down_db,
-      target_mode:                       config.target_mode,
-      target_window_s:                   config.target_window_s,
-      noise_floor_target_dbfs:           config.noise_floor_target_dbfs,
-      deadband_db:                       config.deadband_db,
-      knee_db:                           config.knee_db,
-      max_up_db:                         config.max_up_db,
-      max_down_db:                       config.max_down_db,
-      subphrase_split_drop_db:           config.subphrase_split_drop_db,
-      subphrase_split_min_duration_ms:   config.subphrase_split_min_duration_ms,
-      crossfade_ms:                      config.crossfade_ms,
-      merge_max_delta_db:                config.merge_max_delta_db,
+      target_mode:               config.target_mode,
+      target_window_s:           config.target_window_s,
+      noise_floor_target_dbfs:   config.noise_floor_target_dbfs,
+      deadband_db:               config.deadband_db,
+      knee_db:                   config.knee_db,
+      max_up_db:                 config.max_up_db,
+      max_down_db:               config.max_down_db,
     },
     measurements: {
       input_clip_lufs_std_db:    round2(inClipStd),
