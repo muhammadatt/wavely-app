@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Free ACX Audio Compliance Checker — Instant Polish</title>
+  <meta name="description" content="Upload your audio file and get an instant ACX compliance report: RMS, true peak, noise floor, and quality metrics. Free, no account required.">
+  <meta property="og:title" content="Free ACX Audio Compliance Checker">
+  <meta property="og:description" content="Know exactly why your audio passes or fails ACX — RMS, true peak, noise floor, crest factor, hum, and sibilance. Instant, free.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="header-inner">
+    <a href="/" class="logo">
+      Instant Polish
+      <span class="logo-badge">Free Tool</span>
+    </a>
+    <a href="/" class="header-cta">Full Audio Editor →</a>
+  </div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────────────────────────── -->
+<main>
+  <div class="container">
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-label">Free · No account required</div>
+      <h1>ACX Audio Compliance Checker</h1>
+      <p>Upload your audio file and get an instant compliance report — RMS, true peak, noise floor, crest factor, hum, and sibilance. Know exactly what needs fixing before you submit.</p>
+    </section>
+
+    <!-- ── Upload zone (idle state) ──────────────────────────────────────── -->
+    <div id="upload-zone" class="card upload-zone" role="button" tabindex="0"
+         aria-label="Upload audio file for ACX compliance check">
+      <span class="upload-icon">🎙️</span>
+      <h2>Drop your audio file here</h2>
+      <p>or <button id="browse-btn" class="link-btn" type="button">click to browse</button></p>
+      <p class="hint">WAV · MP3 · FLAC · AIFF · M4A &nbsp;·&nbsp; Up to 100 MB</p>
+      <input type="file" id="file-input"
+             accept=".wav,.mp3,.flac,.aiff,.aif,.m4a,.aac" aria-hidden="true">
+    </div>
+
+    <!-- ── Processing state ──────────────────────────────────────────────── -->
+    <div id="processing-state" class="card processing-card" hidden>
+      <div class="spinner" role="status" aria-label="Analyzing audio"></div>
+      <h2 id="processing-name"></h2>
+      <p class="status-text" id="processing-stage">Analyzing your audio…</p>
+      <p class="hint">Typically 15–40 seconds depending on file size</p>
+    </div>
+
+    <!-- ── Error state ────────────────────────────────────────────────────── -->
+    <div id="error-section" class="card" hidden style="border-color:#fecaca; background:#fef2f2;">
+      <div style="display:flex; gap:12px; align-items:flex-start;">
+        <span style="font-size:1.4rem;">❌</span>
+        <div>
+          <div style="font-weight:700; margin-bottom:6px;">Analysis failed</div>
+          <div id="error-msg" style="color:var(--muted); font-size:.9rem;"></div>
+          <button onclick="resetToIdle()" class="reset-btn" style="margin-top:14px;">
+            Try another file
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Results ────────────────────────────────────────────────────────── -->
+    <div id="results" hidden>
+
+      <!-- Overall verdict -->
+      <div id="overall-badge" class="overall-badge pass">
+        <span id="badge-icon" class="badge-icon">✅</span>
+        <div id="badge-verdict" class="badge-verdict">Passes ACX Requirements</div>
+        <div id="badge-filename" class="badge-filename"></div>
+        <div id="badge-subtext" class="badge-subtext"></div>
+      </div>
+
+      <!-- ACX 6-point certification -->
+      <div class="card">
+        <div class="section-title">ACX Technical Certification</div>
+        <table class="compliance-table" aria-label="ACX compliance check results">
+          <tbody id="acx-tbody"></tbody>
+        </table>
+        <!-- File metadata strip -->
+        <div id="file-strip" class="file-strip"></div>
+      </div>
+
+      <!-- Quality metrics -->
+      <div class="card">
+        <div class="section-title">Quality Metrics</div>
+        <div id="quality-grid" class="metric-grid"></div>
+      </div>
+
+      <!-- CTA -->
+      <div class="card cta-card">
+        <h2 id="cta-heading">Ready to improve your audio?</h2>
+        <ul id="cta-points" class="cta-points"></ul>
+        <a id="cta-btn" href="/" class="cta-btn">Try Instant Polish Free →</a>
+        <p style="margin-top:14px; opacity:.65; font-size:.75rem;">
+          No account required &nbsp;·&nbsp; Processes in-browser and on our servers &nbsp;·&nbsp; Free tier available
+        </p>
+      </div>
+
+      <!-- Reset -->
+      <div class="actions-row">
+        <button id="reset-btn" class="reset-btn" type="button">
+          ← Check another file
+        </button>
+      </div>
+
+    </div>
+    <!-- /results -->
+
+  </div>
+</main>
+
+<!-- ── Footer ─────────────────────────────────────────────────────────────── -->
+<footer>
+  <p>
+    <strong>Instant Polish</strong> — Professional audio mastering for voice actors and narrators.
+    &nbsp;·&nbsp;
+    <a href="/">Open the full editor</a>
+    &nbsp;·&nbsp;
+    ACX® is a trademark of ACX/Audible. This tool is not affiliated with ACX.
+  </p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

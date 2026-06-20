@@ -1,9 +1,14 @@
 import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
-import { processRoute } from './routes/process.js'
-import { jobsRoute }   from './routes/jobs.js'
-import { spotRoute }   from './routes/spot.js'
+import { fileURLToPath } from 'url'
+import path from 'path'
+import { processRoute }   from './routes/process.js'
+import { jobsRoute }      from './routes/jobs.js'
+import { spotRoute }      from './routes/spot.js'
+import { acxCheckRoute }  from './routes/acxCheck.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -69,6 +74,20 @@ const spotLimiter = rateLimit({
 })
 app.use('/api/spot', spotLimiter)
 
+// ACX Checker: lighter rate limit than the full preset chain
+const acxCheckLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many compliance checks, please try again later' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/acx-check', acxCheckLimiter)
+
+// Serve the standalone ACX Checker frontend at /checker
+app.use('/checker', express.static(path.join(__dirname, '..', 'acx-checker')))
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
@@ -82,6 +101,9 @@ app.use('/api', jobsRoute)
 
 // Spot effect endpoint (synchronous — returns processed WAV directly)
 app.use('/api', spotRoute)
+
+// ACX Compliance Checker (analysis-only, async job pattern)
+app.use('/api', acxCheckRoute)
 
 const server = app.listen(PORT, () => {
   console.log(`Wavely server listening on port ${PORT}`)
