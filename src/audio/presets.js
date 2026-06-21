@@ -195,7 +195,7 @@ export const PRESETS = {
           // tier is selected from the current noise floor (Tier 1 ≤ -60 dBFS
           // skips, Tier 2 -60→-55 caps at 6 dB, Tier 3 -55→-50 at 12 dB,
           // Tier 4 -50→-45 at 18 dB). maxTier: 4 prevents pushing into the
-          // uncapped Tier 5 path even for noisier files 
+          // uncapped Tier 5 path even for noisier files
           // See server/pipeline/stages.js → NR_TIERS for the table
 
           { noiseReduce: { model: "df3" } },
@@ -231,12 +231,12 @@ export const PRESETS = {
                 // labelled silence. Applied to the sidecar only — does not
                 // mutate ctx.results.metrics.frames
                 boundaryExpansion: {
-                  enabled:                false,
-                  maxFramesBack:          6,
-                  maxFramesForward:       2,
+                  enabled: false,
+                  maxFramesBack: 6,
+                  maxFramesForward: 2,
                   // Walk gate margin: candidates more than anchorDropDb
-                  // below the anchor's HF energy are blocked. 
-                  anchorDropDb:           20,
+                  // below the anchor's HF energy are blocked.
+                  anchorDropDb: 20,
                   // Anchor sanity check: Anchors more
                   // than 35 dB below the voiced mean are Silero false
                   // positives in silent / edited regions — skip the
@@ -246,7 +246,7 @@ export const PRESETS = {
                   // lines under `[NR] fric-exp …` so the anchor / gate /
                   // promoted-count distribution can be read off pipeline
                   // logs. Remove once thresholds are settled.
-                  diagnostic:             true,
+                  diagnostic: true,
                 },
               },
             },
@@ -254,7 +254,7 @@ export const PRESETS = {
         ],
       },
       // Whole-file peak re-normalization companion to the chunked NR passes
-      // above. Per-chunk makeup gain inside the chunked block produces audible level steps at seams. 
+      // above. Per-chunk makeup gain inside the chunked block produces audible level steps at seams.
       // The inner noiseReduce calls detect chunked context and skips peak
       // re-norm; this stage runs once on the stitched output and applies a
       // single uniform makeup gain.
@@ -264,20 +264,6 @@ export const PRESETS = {
       // voicedRmsDbfs, etc.) — frame-level energies stay pre-NR until here.
       // Downstream dynamics stages (compression crest-factor, vocalExpander
       // silence-floor P90) need post-NR frame energies to be accurate.
-      "remeasureFramesPostNr",
-
-      {
-        autoLeveler: {
-          target_mode: "global",
-          target_window_s: 60,
-          noise_floor_target_dbfs: -60,
-          deadband_db: 0.75,
-          knee_db: 1,
-          max_up_db: 10.0,
-          max_down_db: 10.0,
-        },
-      },
-
       "remeasureFramesPostNr",
 
       // clipGainDeEsserAnalyze runs sibilance detection (in-process JS +
@@ -312,10 +298,24 @@ export const PRESETS = {
               },
             },
           ],
-          ["correctiveEQ"],
+          [
+            {
+              autoLeveler: {
+                target_mode: "global",
+                target_window_s: 60,
+                noise_floor_target_dbfs: -60,
+                deadband_db: 0.75,
+                knee_db: 1,
+                max_up_db: 10.0,
+                max_down_db: 10.0,
+              },
+            },
+            "correctiveEQ",
+          ],
         ],
       },
       "clipGainDeEsserApply",
+      "remeasureFramesPostNr",
       {
         compression: [
           /*  
@@ -372,10 +372,8 @@ export const PRESETS = {
           wetMix: 0.4,
           vadFadeMs: 5,
           crestGuardThresholdDb: 12,
-          // Wet branch is wetMix=1 with auto makeup — sibilants emerge loud
-          // after compression. Aggressive ceiling / near-flatten ratio so the
-          // compressed sibilant is heavily attenuated on the wet branch and
-          // the dry sibilant character predominates at the mix output.
+          // Aggressive deEsser settings so compressed sibilants are heavily attenuated
+          // on the wet branch and the dry-mix sibilant predominates the mix output.
           wetBranchDeEsser: {
             enabled: true,
             stridentCeilingDb: 3.0,
@@ -480,23 +478,6 @@ export const PRESETS = {
         ],
       },
 
-      /*
-      {
-        vocalSaturation: {
-          drive: 2,
-          wetDry: 1,
-          bias: 0.5,
-          lowCrossover: 80,
-          midCrossover: 8000,
-          softness: 0.85,
-          lowDriveMult: 2.5,
-          midDriveMult: 0.1,
-          highDriveMult: 0.1,
-        },
-      },
-      { clickRemover: { thresholdSigma: 3.5, maxClickMs: 5 } },
-      */
-      "clipGainDeEsserApply",
       "referenceEQ",
 
       {
