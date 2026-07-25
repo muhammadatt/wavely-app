@@ -1,9 +1,11 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { normalizeRegion, compressRegion, computePeakCache } from '../../audio/processing.js'
+import { normalizeRegion, compressRegion, applyLA2ARegion, computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
 import { applyVocalSaturation } from '../../api/spotEffects.js'
+import { getEffectChain } from '../../audio/effectChain.js'
+import { la2aEffect, LA2A_DEFAULTS } from '../../audio/effects/la2aCompressor.js'
 
 const {
   state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
@@ -31,6 +33,109 @@ const satSoftness      = ref(0.3)
 const satLowDriveMult  = ref(5.0)
 const satMidDriveMult  = ref(0.1)
 const satHighDriveMult = ref(0.1)
+
+// LA-2A params
+const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
+const la2aGain = ref(LA2A_DEFAULTS.gain)
+const la2aPreview = ref(false)
+const la2aReduction = ref(0)
+let la2aMeterId = null
+
+function initLA2AChain() {
+  const ctx = getAudioContext()
+  const chain = getEffectChain(ctx)
+  if (!chain.effects.find(e => e.id === la2aEffect.id)) {
+    chain.addEffect(la2aEffect)
+  }
+}
+
+function toggleLA2APreview() {
+  initLA2AChain()
+  const ctx = getAudioContext()
+  const chain = getEffectChain(ctx)
+  la2aPreview.value = !la2aPreview.value
+  chain.setEnabled(la2aEffect.id, la2aPreview.value)
+
+  if (la2aPreview.value) {
+    chain.updateParam(la2aEffect.id, 'peakReduction', la2aPeakReduction.value)
+    chain.updateParam(la2aEffect.id, 'gain', la2aGain.value)
+    startReductionMeter(chain)
+  } else {
+    stopReductionMeter()
+  }
+}
+
+function startReductionMeter(chain) {
+  stopReductionMeter()
+  function tick() {
+    const nodes = chain.effects.find(e => e.id === la2aEffect.id)?.nodes
+    if (nodes) {
+      la2aReduction.value = nodes.getReduction()
+    }
+    la2aMeterId = requestAnimationFrame(tick)
+  }
+  la2aMeterId = requestAnimationFrame(tick)
+}
+
+function stopReductionMeter() {
+  if (la2aMeterId !== null) {
+    cancelAnimationFrame(la2aMeterId)
+    la2aMeterId = null
+  }
+  la2aReduction.value = 0
+}
+
+watch(la2aPeakReduction, (v) => {
+  if (!la2aPreview.value) return
+  const ctx = getAudioContext()
+  const chain = getEffectChain(ctx)
+  chain.updateParam(la2aEffect.id, 'peakReduction', v)
+})
+
+watch(la2aGain, (v) => {
+  if (!la2aPreview.value) return
+  const ctx = getAudioContext()
+  const chain = getEffectChain(ctx)
+  chain.updateParam(la2aEffect.id, 'gain', v)
+})
+
+async function applyLA2A() {
+  if (!state.selection) return
+  const { start, end } = state.selection
+
+  if (la2aPreview.value) {
+    toggleLA2APreview()
+  }
+
+  startProcessing('Applying LA-2A...')
+  try {
+    const ctx = getAudioContext()
+    const buffer = await applyLA2ARegion(
+      state.segments, start, end,
+      { peakReduction: la2aPeakReduction.value, gain: la2aGain.value },
+      ctx, state.currentFile.sampleRate, state.currentFile.channels
+    )
+    const bufferId = replaceRegion(start, end, buffer)
+    const cache = await computePeakCache(buffer, 256)
+    setPeakCache(bufferId, cache)
+    showToast('LA-2A compression applied')
+  } catch (err) {
+    console.error('LA-2A failed:', err)
+    showToast('LA-2A compression failed')
+  } finally {
+    endProcessing()
+  }
+}
+
+onUnmounted(() => {
+  stopReductionMeter()
+  if (la2aPreview.value) {
+    const ctx = getAudioContext()
+    const chain = getEffectChain(ctx)
+    chain.setEnabled(la2aEffect.id, false)
+    la2aPreview.value = false
+  }
+})
 
 const openSection = ref('normalize')
 
@@ -232,6 +337,86 @@ async function applySaturation() {
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             Apply Compression
+          </button>
+        </div>
+      </div>
+
+      <!-- LA-2A Compressor -->
+      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
+           :class="{ 'border-accent': openSection === 'la2a' }">
+        <button
+          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
+          @click="toggleSection('la2a')"
+        >
+          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
+               :class="openSection === 'la2a' ? 'bg-accent-lt' : 'bg-bg'">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'la2a' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          </div>
+          <div class="flex-1">
+            <div class="font-heading text-[13px] font-extrabold text-ink">LA-2A Compressor</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Smooth optical-style leveling</div>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
+               :class="{ 'rotate-180': openSection === 'la2a' }">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+
+        <div v-if="openSection === 'la2a'" class="px-[13px] pb-[13px] flex flex-col gap-2.5">
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Peak Reduction</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ la2aPeakReduction }}%</span>
+            </div>
+            <input type="range" min="0" max="100" v-model.number="la2aPeakReduction"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">Gain</span>
+              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ la2aGain > 0 ? '+' : '' }}{{ la2aGain }} dB</span>
+            </div>
+            <input type="range" min="-12" max="24" v-model.number="la2aGain"
+                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          </div>
+
+          <!-- Gain reduction meter -->
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <span class="text-[11px] font-bold text-ink-mid">GR</span>
+              <span class="text-[11px] font-bold tabular-nums" :class="la2aReduction < -1 ? 'text-accent' : 'text-ink-lt'">{{ la2aReduction.toFixed(1) }} dB</span>
+            </div>
+            <div class="w-full h-1.5 rounded-full bg-border overflow-hidden">
+              <div class="h-full rounded-full bg-accent transition-all duration-75"
+                   :style="{ width: Math.min(100, Math.abs(la2aReduction) * 2.5) + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- Preview toggle -->
+          <button
+            class="w-full flex items-center justify-center gap-1.5 font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-2 cursor-pointer transition-all"
+            :class="la2aPreview
+              ? 'bg-accent-lt border-accent text-accent shadow-none'
+              : 'bg-transparent border-border text-ink-mid hover:border-ink-mid hover:text-ink'"
+            @click="toggleLA2APreview"
+          >
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5">
+              <polygon v-if="!la2aPreview" points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path v-if="!la2aPreview" d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/>
+              <line v-if="la2aPreview" x1="2" y1="2" x2="22" y2="22"/>
+              <polygon v-if="la2aPreview" points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            </svg>
+            {{ la2aPreview ? 'Preview On' : 'Preview' }}
+          </button>
+
+          <button
+            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+            :disabled="!hasSelection"
+            @click="applyLA2A"
+          >
+            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Apply LA-2A
           </button>
         </div>
       </div>
