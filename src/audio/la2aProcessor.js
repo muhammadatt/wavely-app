@@ -28,6 +28,8 @@
  *    - There is no threshold control on the hardware: the Peak Reduction
  *      knob is sidechain amplifier gain, driving the signal into a fixed
  *      internal threshold. Modeled the same way here.
+ *    - That threshold is anchored to nominal analog operating level
+ *      (0 VU = -18 dBFS), not to digital full scale — see NOMINAL_DBFS.
  *
  * 3. Sidechain frequency mapping + tube stage
  *    - Sidechain: one-pole 80 Hz high-pass (the cell barely responds to
@@ -66,6 +68,21 @@ const SC_HPF_HZ = 80
 const SC_SHELF_HZ = 2000
 const SC_SHELF_MAX_DB = 8
 const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies the real ballistics
+
+// Nominal operating level. The hardware's T4 threshold sits at line level
+// (0 VU = +4 dBu), so Peak Reduction is referenced to that, not to digital
+// full scale. Anchoring at 0 dBFS instead would make the cell ~18 dB deaf to
+// normal program: narration at -20 dBFS RMS would need the knob near 95 to
+// produce 3 dB of reduction. -18 dBFS is the EBU alignment.
+const NOMINAL_DBFS = -18
+
+// Peak Reduction knob → detector-sidechain drive (anchored to NOMINAL_DBFS), spanning 40 dB.
+// Effective endpoints: -2 dB at knob 0 and +38 dB at knob 100.
+// SC_TAPER < 1 models an audio-taper pot: the drive rises quickly off zero
+// and flattens toward the top, so gain reduction starts around knob 20.
+const SC_DRIVE_MIN_DB = -20
+const SC_DRIVE_SPAN_DB = 40
+const SC_TAPER = 0.7
 
 // ── Gain computer constants ─────────────────────────────────────────────────
 
@@ -141,9 +158,12 @@ export class LA2AKernel {
     this.kneeDb = this.isLimit ? LIMIT_KNEE_DB : COMPRESS_KNEE_DB
     this.halfKnee = this.kneeDb / 2
 
-    // Peak Reduction 0–100 → sidechain gain -20..+20 dB into a fixed 0 dBFS
-    // internal threshold.
-    this.scDriveDb = -20 + 0.4 * clamp(p.peakReduction, 0, 100)
+    // Peak Reduction 0–100 → sidechain gain on an audio taper, into a fixed
+    // internal threshold referenced to nominal level. Endpoints are -2 dB at
+    // knob 0 and +38 dB at knob 100.
+    const knob = clamp(p.peakReduction, 0, 100) / 100
+    this.scDriveDb =
+      SC_DRIVE_MIN_DB - NOMINAL_DBFS + SC_DRIVE_SPAN_DB * Math.pow(knob, SC_TAPER)
     this.shelfGain = Math.pow(10, (SC_SHELF_MAX_DB * clamp(p.emphasis, 0, 1)) / 20) - 1
     this.makeupLin = Math.exp(p.gainDb * LN10_OVER_20)
 
