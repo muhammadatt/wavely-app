@@ -191,40 +191,46 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
 }
 
 /**
- * Compress a region using OfflineAudioContext + DynamicsCompressorNode.
+ * Compress a region through the LA-2A emulation (src/audio/la2a.js) in the
+ * process worker. Resolves to { buffer, metering } — metering carries max/avg
+ * gain reduction in dB for user feedback.
  */
-export async function compressRegion(segments, start, end, params, audioContext, sampleRate, channels) {
-  const { threshold = -24, ratio = 12, attack = 0.003, release = 0.25 } = params
+export function la2aCompressRegion(segments, start, end, params, audioContext, sampleRate, channels) {
+  return new Promise((resolve, reject) => {
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
 
-  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
-  const duration = end - start
-  const numSamples = Math.ceil(duration * sampleRate)
+    const worker = new Worker(
+      new URL('../workers/processWorker.js', import.meta.url),
+      { type: 'module' }
+    )
 
-  // Create an OfflineAudioContext
-  const offlineCtx = new OfflineAudioContext(channels, numSamples, sampleRate)
+    worker.onmessage = (e) => {
+      if (e.data.type === 'done') {
+        const duration = end - start
+        const buffer = audioContext.createBuffer(channels, Math.ceil(duration * sampleRate), sampleRate)
 
-  // Create source buffer
-  const inputBuffer = offlineCtx.createBuffer(channels, numSamples, sampleRate)
-  for (let ch = 0; ch < channels; ch++) {
-    inputBuffer.copyToChannel(channelData[ch], ch)
-  }
+        for (let ch = 0; ch < channels; ch++) {
+          buffer.copyToChannel(e.data.channelData[ch], ch)
+        }
 
-  const source = offlineCtx.createBufferSource()
-  source.buffer = inputBuffer
+        worker.terminate()
+        resolve({ buffer, metering: e.data.metering })
+      } else if (e.data.type === 'error') {
+        worker.terminate()
+        reject(new Error(e.data.message))
+      }
+    }
 
-  // Create compressor
-  const compressor = offlineCtx.createDynamicsCompressor()
-  compressor.threshold.setValueAtTime(threshold, 0)
-  compressor.ratio.setValueAtTime(ratio, 0)
-  compressor.attack.setValueAtTime(attack, 0)
-  compressor.release.setValueAtTime(release, 0)
+    worker.onerror = (err) => {
+      worker.terminate()
+      reject(err)
+    }
 
-  source.connect(compressor)
-  compressor.connect(offlineCtx.destination)
-  source.start(0)
-
-  const renderedBuffer = await offlineCtx.startRendering()
-  return renderedBuffer
+    worker.postMessage(
+      { type: 'la2a', channelData, sampleRate, params },
+      channelData.map(c => c.buffer)
+    )
+  })
 }
 
 /**

@@ -2,10 +2,12 @@
  * Audio Processing Web Worker
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
- * Supports: normalize
+ * Supports: normalize, adjustVolume, la2a
  */
+import { processLA2A } from '../audio/la2a.js'
+
 self.onmessage = function (e) {
-  const { type, channelData, params } = e.data
+  const { type, channelData, sampleRate, params } = e.data
 
   switch (type) {
     case 'normalize':
@@ -14,8 +16,23 @@ self.onmessage = function (e) {
     case 'adjustVolume':
       adjustVolume(channelData, params)
       break
+    case 'la2a':
+      la2aCompress(channelData, sampleRate, params)
+      break
     default:
       self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
+  }
+}
+
+function la2aCompress(channelData, sampleRate, params) {
+  try {
+    const { channelData: result, metering } = processLA2A(channelData, sampleRate, params)
+    self.postMessage(
+      { type: 'done', channelData: result, metering },
+      result.map(c => c.buffer)
+    )
+  } catch (err) {
+    self.postMessage({ type: 'error', message: err.message })
   }
 }
 
