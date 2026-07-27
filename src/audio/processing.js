@@ -1,4 +1,6 @@
 import { getSegmentDuration } from './operations.js'
+import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
+import { LA2A_DEFAULTS, toKernelParams } from './effects/la2aCompressor.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -191,19 +193,18 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
 }
 
 /**
- * Compress a region using OfflineAudioContext + DynamicsCompressorNode.
+ * Apply LA-2A compression via OfflineAudioContext running the same
+ * AudioWorklet as the real-time preview (src/audio/la2aProcessor.js), so
+ * the applied result is sample-identical to what the user heard.
  */
-export async function compressRegion(segments, start, end, params, audioContext, sampleRate, channels) {
-  const { threshold = -24, ratio = 12, attack = 0.003, release = 0.25 } = params
-
+export async function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
 
-  // Create an OfflineAudioContext
   const offlineCtx = new OfflineAudioContext(channels, numSamples, sampleRate)
+  await ensureLA2AWorklet(offlineCtx)
 
-  // Create source buffer
   const inputBuffer = offlineCtx.createBuffer(channels, numSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
     inputBuffer.copyToChannel(channelData[ch], ch)
@@ -212,19 +213,18 @@ export async function compressRegion(segments, start, end, params, audioContext,
   const source = offlineCtx.createBufferSource()
   source.buffer = inputBuffer
 
-  // Create compressor
-  const compressor = offlineCtx.createDynamicsCompressor()
-  compressor.threshold.setValueAtTime(threshold, 0)
-  compressor.ratio.setValueAtTime(ratio, 0)
-  compressor.attack.setValueAtTime(attack, 0)
-  compressor.release.setValueAtTime(release, 0)
+  const la2aNode = new AudioWorkletNode(offlineCtx, 'la2a-processor', {
+    channelCount: channels,
+    channelCountMode: 'explicit',
+    outputChannelCount: [channels],
+    processorOptions: { params: toKernelParams({ ...LA2A_DEFAULTS, ...params }) },
+  })
 
-  source.connect(compressor)
-  compressor.connect(offlineCtx.destination)
+  source.connect(la2aNode)
+  la2aNode.connect(offlineCtx.destination)
   source.start(0)
 
-  const renderedBuffer = await offlineCtx.startRendering()
-  return renderedBuffer
+  return await offlineCtx.startRendering()
 }
 
 /**

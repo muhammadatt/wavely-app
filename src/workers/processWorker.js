@@ -2,7 +2,7 @@
  * Audio Processing Web Worker
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
- * Supports: normalize
+ * Supports: normalize, adjustVolume
  */
 self.onmessage = function (e) {
   const { type, channelData, params } = e.data
