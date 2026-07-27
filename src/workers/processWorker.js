@@ -2,10 +2,12 @@
  * Audio Processing Web Worker
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
- * Supports: normalize, adjustVolume
+ * Supports: normalize, adjustVolume, la2aAutoMakeup
  */
+import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
+
 self.onmessage = function (e) {
-  const { type, channelData, params } = e.data
+  const { type, channelData, sampleRate, params } = e.data
 
   switch (type) {
     case 'normalize':
@@ -14,8 +16,22 @@ self.onmessage = function (e) {
     case 'adjustVolume':
       adjustVolume(channelData, params)
       break
+    case 'la2aAutoMakeup':
+      la2aAutoMakeup(channelData, sampleRate, params)
+      break
     default:
       self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
+  }
+}
+
+// Runs the LA-2A kernel over the region purely to measure it — this is why
+// it lives in the worker rather than on the main thread, so knob drags
+// don't jank the UI while the measurement re-runs.
+function la2aAutoMakeup(channelData, sampleRate, params) {
+  try {
+    self.postMessage({ type: 'done', makeupDb: computeAutoMakeupDb(channelData, sampleRate, params) })
+  } catch (err) {
+    self.postMessage({ type: 'error', message: err.message })
   }
 }
 

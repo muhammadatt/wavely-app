@@ -193,6 +193,60 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
 }
 
 /**
+ * Measure the LA-2A auto-makeup gain (dB) for a region.
+ *
+ * Because this is a spot effect on a finite selection (not a live input),
+ * the makeup can be measured once and applied as a static offset — the
+ * real-time preview and the offline apply then use the identical constant,
+ * so they stay sample-identical and there's no estimator drift baked into
+ * the head of the region.
+ *
+ * Long regions are measured over a centered window rather than end to end:
+ * the RMS ratio is stable across a representative stretch, and this keeps
+ * the re-measure fast enough to sit behind a knob drag. The window only
+ * affects how the number is derived — preview and apply still share it.
+ */
+const AUTO_MAKEUP_MAX_ANALYSIS_S = 30
+
+export function computeLA2AAutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
+  let aStart = start
+  let aEnd = end
+  if (end - start > AUTO_MAKEUP_MAX_ANALYSIS_S) {
+    const mid = (start + end) / 2
+    aStart = mid - AUTO_MAKEUP_MAX_ANALYSIS_S / 2
+    aEnd = mid + AUTO_MAKEUP_MAX_ANALYSIS_S / 2
+  }
+
+  return new Promise((resolve, reject) => {
+    const channelData = renderRegionToBuffer(segments, aStart, aEnd, sampleRate, channels)
+
+    const worker = new Worker(
+      new URL('../workers/processWorker.js', import.meta.url),
+      { type: 'module' }
+    )
+
+    worker.onmessage = (e) => {
+      worker.terminate()
+      if (e.data.type === 'done') {
+        resolve(e.data.makeupDb)
+      } else if (e.data.type === 'error') {
+        reject(new Error(e.data.message))
+      }
+    }
+
+    worker.onerror = (err) => {
+      worker.terminate()
+      reject(err)
+    }
+
+    worker.postMessage(
+      { type: 'la2aAutoMakeup', channelData, sampleRate, params: kernelParams },
+      channelData.map(c => c.buffer)
+    )
+  })
+}
+
+/**
  * Apply LA-2A compression via OfflineAudioContext running the same
  * AudioWorklet as the real-time preview (src/audio/la2aProcessor.js), so
  * the applied result is sample-identical to what the user heard.
