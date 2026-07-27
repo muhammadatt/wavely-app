@@ -66,7 +66,11 @@ export class EffectChain {
   _rebuildChain() {
     this.inputNode.disconnect()
     for (const entry of this.effects) {
-      entry.nodes.input.disconnect()
+      // Only disconnect each effect's OUTPUT (its external hand-off to the next
+      // stage). Never call .disconnect() on an effect's `input` node here — that
+      // wipes ALL of its outgoing connections, including the effect's own
+      // permanent internal wiring (e.g. input -> compressor), leaving audio with
+      // nowhere to go the instant it becomes active.
       entry.nodes.output.disconnect()
     }
 

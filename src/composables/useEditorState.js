@@ -46,6 +46,7 @@ const state = reactive({
   processingStage: '',
   processingProgress: 0,
   contextPanelOpen: false,
+  la2aModalOpen: false,
   toasts: [],
 })
 

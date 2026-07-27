@@ -16,6 +16,40 @@ export const LA2A_DEFAULTS = {
   gain: 0,
 }
 
+function createLevelTap(audioContext, node) {
+  const analyser = audioContext.createAnalyser()
+  analyser.fftSize = 1024
+  analyser.smoothingTimeConstant = 0.6
+  node.connect(analyser)
+
+  // An AnalyserNode only gets pulled for processing if it's part of a graph
+  // that's reachable from the destination — a tap with no downstream
+  // connection can silently stop updating. Route it through a silent sink
+  // so it's always actively processed regardless of engine optimizations.
+  const silentSink = audioContext.createGain()
+  silentSink.gain.value = 0
+  analyser.connect(silentSink)
+  silentSink.connect(audioContext.destination)
+
+  const data = new Float32Array(analyser.fftSize)
+
+  return {
+    analyser,
+    getLevelDb() {
+      analyser.getFloatTimeDomainData(data)
+      let sumSquares = 0
+      for (let i = 0; i < data.length; i++) sumSquares += data[i] * data[i]
+      const rms = Math.sqrt(sumSquares / data.length)
+      if (rms <= 0) return -Infinity
+      return 20 * Math.log10(rms)
+    },
+    destroy() {
+      analyser.disconnect()
+      silentSink.disconnect()
+    },
+  }
+}
+
 export function createLA2ACompressor(audioContext) {
   const input = audioContext.createGain()
   const output = audioContext.createGain()
@@ -47,6 +81,19 @@ export function createLA2ACompressor(audioContext) {
 
   applyParams()
 
+  // Tap level meters off dedicated monitor nodes fed in parallel from the
+  // signal path, rather than off `input`/`output` directly. The chain
+  // legitimately calls `.disconnect()` on an effect's `output` node on every
+  // rebuild (to re-route it to whatever comes next), which would also wipe a
+  // tap connected straight to `output`.
+  const inputMonitor = audioContext.createGain()
+  input.connect(inputMonitor)
+  const outputMonitor = audioContext.createGain()
+  makeupGain.connect(outputMonitor)
+
+  const inputTap = createLevelTap(audioContext, inputMonitor)
+  const outputTap = createLevelTap(audioContext, outputMonitor)
+
   return {
     input,
     output,
@@ -66,11 +113,23 @@ export function createLA2ACompressor(audioContext) {
       return compressor.reduction
     },
 
+    getInputLevelDb() {
+      return inputTap.getLevelDb()
+    },
+
+    getOutputLevelDb() {
+      return outputTap.getLevelDb()
+    },
+
     destroy() {
       input.disconnect()
       compressor.disconnect()
       makeupGain.disconnect()
       output.disconnect()
+      inputMonitor.disconnect()
+      outputMonitor.disconnect()
+      inputTap.destroy()
+      outputTap.destroy()
     },
   }
 }
