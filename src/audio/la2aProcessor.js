@@ -349,6 +349,59 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
   }
 }
 
+/** RMS across every sample of every channel. */
+function rmsOfChannels(channels) {
+  let sumSq = 0
+  let count = 0
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) sumSq += ch[i] * ch[i]
+    count += ch.length
+  }
+  return count > 0 ? Math.sqrt(sumSq / count) : 0
+}
+
+/**
+ * Compute the makeup gain (dB) that restores the processed signal to the
+ * input's RMS level — i.e. what makes engaging the compressor level-neutral
+ * so bypass A/B comparisons aren't decided by loudness bias.
+ *
+ * Measured, not derived from the curve: the kernel is run over the actual
+ * audio and the output RMS compared to the input's. RMS rather than peak,
+ * because reducing peaks is the point — peak matching would over-boost.
+ *
+ * Iterated because makeup is applied *before* the tube stage (as on the
+ * hardware, where the Gain knob drives the output amplifier). Raising
+ * makeup therefore drives the tubes slightly harder, which shifts the
+ * output level a little, so each pass re-measures at the corrected
+ * operating point. The loop stops as soon as a correction lands under
+ * `toleranceDb`, which for most settings means two passes; only extreme
+ * ones (max peak reduction into max tube drive) need three or four.
+ *
+ * The caller's manual Gain trim is deliberately excluded — this returns the
+ * unity-restoring offset, and any trim is a deliberate deviation added on
+ * top of it.
+ */
+export function computeAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
+  const { maxIterations = 4, toleranceDb = 0.05 } = options
+
+  const inputRms = rmsOfChannels(channelData)
+  if (inputRms <= 0) return 0
+
+  let makeupDb = 0
+  for (let i = 0; i < maxIterations; i++) {
+    const { channelData: out } = processLA2ABuffer(channelData, sampleRate, {
+      ...params,
+      gainDb: makeupDb,
+    })
+    const outRms = rmsOfChannels(out)
+    if (outRms <= 0) break
+    const correctionDb = 20 * Math.log10(inputRms / outRms)
+    makeupDb = clamp(makeupDb + correctionDb, -24, 24)
+    if (Math.abs(correctionDb) < toleranceDb) break
+  }
+  return makeupDb
+}
+
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
 
 // `registerProcessor` and the `sampleRate` global exist only inside an

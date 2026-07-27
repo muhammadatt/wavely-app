@@ -1,18 +1,33 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useLA2A } from '../../composables/useLA2A.js'
+import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
+  la2aAutoMakeup, la2aAutoMakeupDb, la2aAutoMakeupBusy,
   la2aPreview, la2aReduction, la2aInputDb, la2aOutputDb, hasSelection,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
-  syncEmphasis, apply, teardown, closeModal,
+  syncEmphasis, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
 } = useLA2A()
+
+const { state } = useEditorState()
 
 // Default to engaged when the panel opens
 onMounted(() => {
   if (!la2aPreview.value) togglePreview()
+})
+
+// The makeup is measured from the selected region, so a new selection needs
+// a fresh measurement.
+watch(() => state.selection, () => refreshAutoMakeup(), { deep: true })
+
+const autoMakeupLabel = computed(() => {
+  if (!la2aAutoMakeup.value) return 'AUTO'
+  if (la2aAutoMakeupBusy.value) return 'AUTO ···'
+  const v = la2aAutoMakeupDb.value
+  return `AUTO ${v > 0 ? '+' : ''}${v.toFixed(1)}`
 })
 
 const ACCENT = '#f5a623'
@@ -219,14 +234,34 @@ function selectMockPreset(name) {
                 :disabled="!la2aPreview"
               />
             </div>
-            <div class="w-[130px]">
+            <div class="w-[130px] flex flex-col items-center">
               <Knob
                 :model-value="la2aGain"
                 @update:model-value="syncGain"
                 :min="-12" :max="24" :step="0.1"
-                label="Gain" :accent="ACCENT" :format-value="formatGain"
+                :label="la2aAutoMakeup ? 'Gain (trim)' : 'Gain'"
+                :accent="ACCENT" :format-value="formatGain"
                 :disabled="!la2aPreview"
               />
+              <!-- Auto makeup: measured offset that keeps engaging the
+                   compressor level-neutral, so bypass A/B isn't decided by
+                   loudness. The knob above stays live as a trim on top. -->
+              <button
+                class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
+                :style="{
+                  background: la2aAutoMakeup ? 'rgba(245,166,35,.16)' : 'rgba(255,255,255,.05)',
+                  border: `1px solid ${la2aAutoMakeup ? 'rgba(245,166,35,.42)' : 'rgba(255,255,255,.09)'}`,
+                  color: la2aAutoMakeup ? '#f7c877' : 'rgba(255,255,255,.4)',
+                  font: `700 8.5px 'JetBrains Mono',monospace`,
+                  letterSpacing: '.1em',
+                  opacity: la2aPreview ? 1 : 0.4,
+                }"
+                :disabled="!la2aPreview"
+                :title="la2aAutoMakeup
+                  ? 'Auto makeup on — output level matched to input so you hear the compression, not the loudness'
+                  : 'Auto makeup off — set makeup manually with the Gain knob'"
+                @click="toggleAutoMakeup"
+              >{{ autoMakeupLabel }}</button>
             </div>
           </div>
 
