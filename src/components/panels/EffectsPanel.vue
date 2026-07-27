@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { normalizeRegion, la2aCompressRegion, computePeakCache } from '../../audio/processing.js'
+import { normalizeRegion, computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
 import { applyVocalSaturation } from '../../api/spotEffects.js'
 import { useLA2A } from '../../composables/useLA2A.js'
@@ -13,13 +13,6 @@ const {
 
 // Normalize params
 const targetPeak = ref(-1)
-// LA-2A compressor params
-const la2aMode = ref('compress')
-const la2aPeakReduction = ref(50)
-const la2aGain = ref(0)
-const la2aTubeDrive = ref(0.3)
-const la2aEmphasis = ref(0)
-const la2aMix = ref(1)
 // Noise Reduction params
 const noiseStrength = ref(50)
 const noiseSensitivity = ref(60)
@@ -68,39 +61,6 @@ async function applyNormalize(useSelection) {
   } catch (err) {
     console.error('Normalize failed:', err)
     showToast('Normalization failed')
-  } finally {
-    endProcessing()
-  }
-}
-
-async function applyCompression() {
-  if (!state.selection) return
-  const { start, end } = state.selection
-
-  startProcessing('Compressing...')
-  try {
-    const ctx = getAudioContext()
-    const { buffer, metering } = await la2aCompressRegion(
-      state.segments, start, end,
-      {
-        mode:          la2aMode.value,
-        peakReduction: la2aPeakReduction.value,
-        gainDb:        la2aGain.value,
-        tubeDrive:     la2aTubeDrive.value,
-        emphasis:      la2aEmphasis.value,
-        mix:           la2aMix.value,
-      },
-      ctx, state.currentFile.sampleRate, state.currentFile.channels
-    )
-    const bufferId = replaceRegion(start, end, buffer)
-
-    const cache = await computePeakCache(buffer, 256)
-    setPeakCache(bufferId, cache)
-
-    showToast(`LA-2A applied (max ${metering.maxGainReductionDb.toFixed(1)} dB reduction)`)
-  } catch (err) {
-    console.error('Compression failed:', err)
-    showToast('Compression failed')
   } finally {
     endProcessing()
   }
@@ -199,101 +159,6 @@ async function applySaturation() {
         </div>
       </div>
 
-      <!-- Compression -->
-      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all"
-           :class="{ 'border-accent': openSection === 'compression' }">
-        <button
-          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
-          @click="toggleSection('compression')"
-        >
-          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
-               :class="openSection === 'compression' ? 'bg-accent-lt' : 'bg-bg'">
-            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" :class="openSection === 'compression' ? 'stroke-accent' : 'stroke-ink-mid'" stroke-width="2"><path d="M4 14h4v7H4zM10 10h4v11h-4zM16 3h4v18h-4z"/></svg>
-          </div>
-          <div class="flex-1">
-            <div class="font-heading text-[13px] font-extrabold text-ink">LA-2A Compressor</div>
-            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Opto leveling amplifier</div>
-          </div>
-          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt transition-transform shrink-0" stroke-width="2.5"
-               :class="{ 'rotate-180': openSection === 'compression' }">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-
-        <div v-if="openSection === 'compression'" class="px-[13px] pb-[13px] flex flex-col gap-2.5">
-          <!-- Compress / Limit mode switch -->
-          <div class="flex gap-1.5">
-            <button
-              class="flex-1 py-1.5 rounded-[var(--radius-sm)] border-2 font-heading text-[12px] font-extrabold cursor-pointer transition-colors"
-              :class="la2aMode === 'compress' ? 'border-accent bg-accent-lt text-accent' : 'border-border bg-transparent text-ink-mid'"
-              @click="la2aMode = 'compress'"
-            >Compress</button>
-            <button
-              class="flex-1 py-1.5 rounded-[var(--radius-sm)] border-2 font-heading text-[12px] font-extrabold cursor-pointer transition-colors"
-              :class="la2aMode === 'limit' ? 'border-accent bg-accent-lt text-accent' : 'border-border bg-transparent text-ink-mid'"
-              @click="la2aMode = 'limit'"
-            >Limit</button>
-          </div>
-          <div class="text-[10px] text-ink-lt font-semibold text-center -mt-1">
-            {{ la2aMode === 'compress' ? 'Gentle ~3:1 program-dependent leveling' : 'Hard ceiling, ~12:1 and up' }}
-          </div>
-
-          <div>
-            <div class="flex justify-between items-center mb-1.5">
-              <span class="text-[11px] font-bold text-ink-mid">Peak reduction</span>
-              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ la2aPeakReduction }}</span>
-            </div>
-            <input type="range" min="0" max="100" v-model.number="la2aPeakReduction"
-                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-          </div>
-
-          <div>
-            <div class="flex justify-between items-center mb-1.5">
-              <span class="text-[11px] font-bold text-ink-mid">Gain (makeup)</span>
-              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ la2aGain > 0 ? '+' : '' }}{{ la2aGain }} dB</span>
-            </div>
-            <input type="range" min="-12" max="24" step="0.5" v-model.number="la2aGain"
-                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-          </div>
-
-          <div>
-            <div class="flex justify-between items-center mb-1.5">
-              <span class="text-[11px] font-bold text-ink-mid">Tube drive</span>
-              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ la2aTubeDrive.toFixed(2) }}</span>
-            </div>
-            <input type="range" min="0" max="1" step="0.01" v-model.number="la2aTubeDrive"
-                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-          </div>
-
-          <div>
-            <div class="flex justify-between items-center mb-1.5">
-              <span class="text-[11px] font-bold text-ink-mid">HF emphasis (R37)</span>
-              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ la2aEmphasis === 0 ? 'Flat' : la2aEmphasis.toFixed(2) }}</span>
-            </div>
-            <input type="range" min="0" max="1" step="0.01" v-model.number="la2aEmphasis"
-                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-          </div>
-
-          <div>
-            <div class="flex justify-between items-center mb-1.5">
-              <span class="text-[11px] font-bold text-ink-mid">Mix</span>
-              <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ Math.round(la2aMix * 100) }}%</span>
-            </div>
-            <input type="range" min="0" max="1" step="0.01" v-model.number="la2aMix"
-                   class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
-          </div>
-
-          <button
-            class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
-            :disabled="!hasSelection"
-            @click="applyCompression"
-          >
-            <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-            Apply LA-2A
-          </button>
-        </div>
-      </div>
-
       <!-- LA-2A Compressor -->
       <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all">
         <button
@@ -305,7 +170,7 @@ async function applySaturation() {
           </div>
           <div class="flex-1">
             <div class="font-heading text-[13px] font-extrabold text-ink">LA-2A Compressor</div>
-            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Smooth optical-style leveling</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Opto leveling amplifier</div>
           </div>
           <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt shrink-0" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
         </button>

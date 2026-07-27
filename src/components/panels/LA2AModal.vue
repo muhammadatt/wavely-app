@@ -4,9 +4,10 @@ import { useLA2A } from '../../composables/useLA2A.js'
 import Knob from '../knobs/Knob.vue'
 
 const {
-  la2aPeakReduction, la2aGain, la2aPreview, la2aReduction,
-  la2aInputDb, la2aOutputDb, hasSelection,
-  togglePreview, syncPeakReduction, syncGain, apply, teardown, closeModal,
+  la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
+  la2aPreview, la2aReduction, la2aInputDb, la2aOutputDb, hasSelection,
+  togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
+  syncEmphasis, apply, teardown, closeModal,
 } = useLA2A()
 
 // Default to engaged when the panel opens
@@ -77,6 +78,9 @@ function formatPeakReduction(v) {
 }
 function formatGain(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
+}
+function formatPercent(v) {
+  return String(Math.round(v * 100))
 }
 
 // Preset dropdown — visual mockup only. No presets are defined for this
@@ -239,6 +243,59 @@ function selectMockPreset(name) {
               </div>
             </div>
             <span style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.45)">OUT</span>
+          </div>
+        </div>
+
+        <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 emphasis) -->
+        <div class="flex items-center justify-between mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
+          <!-- Compress / Limit — the hardware's rear-panel switch -->
+          <div class="flex flex-col gap-[7px]">
+            <div class="flex rounded-full overflow-hidden" style="border:1px solid rgba(255,255,255,.1)">
+              <button
+                class="cursor-pointer border-none px-3.5 py-[7px] transition-colors"
+                :style="{
+                  background: la2aMode === 'compress' ? 'rgba(245,166,35,.18)' : 'transparent',
+                  color: la2aMode === 'compress' ? '#f7c877' : 'rgba(255,255,255,.4)',
+                  font: `700 9px 'JetBrains Mono',monospace`, letterSpacing: '.12em',
+                }"
+                :disabled="!la2aPreview"
+                @click="syncMode('compress')"
+              >COMP</button>
+              <button
+                class="cursor-pointer border-none px-3.5 py-[7px] transition-colors"
+                :style="{
+                  background: la2aMode === 'limit' ? 'rgba(245,166,35,.18)' : 'transparent',
+                  color: la2aMode === 'limit' ? '#f7c877' : 'rgba(255,255,255,.4)',
+                  font: `700 9px 'JetBrains Mono',monospace`, letterSpacing: '.12em',
+                }"
+                :disabled="!la2aPreview"
+                @click="syncMode('limit')"
+              >LIMIT</button>
+            </div>
+            <span class="text-center" style="font:600 8.5px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+              {{ la2aMode === 'compress' ? '~3:1 leveling' : 'hard ceiling' }}
+            </span>
+          </div>
+
+          <div class="flex gap-[26px]">
+            <div class="w-[78px]">
+              <Knob
+                :model-value="la2aTubeDrive"
+                @update:model-value="syncTubeDrive"
+                :min="0" :max="1" :step="0.01" :value-font-px="13"
+                label="Tube Drive" :accent="ACCENT" :format-value="formatPercent"
+                :disabled="!la2aPreview"
+              />
+            </div>
+            <div class="w-[78px]">
+              <Knob
+                :model-value="la2aEmphasis"
+                @update:model-value="syncEmphasis"
+                :min="0" :max="1" :step="0.01" :value-font-px="13"
+                label="R37 Emphasis" :accent="ACCENT" :format-value="formatPercent"
+                :disabled="!la2aPreview"
+              />
+            </div>
           </div>
         </div>
 

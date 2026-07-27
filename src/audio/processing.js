@@ -1,4 +1,6 @@
 import { getSegmentDuration } from './operations.js'
+import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
+import { LA2A_DEFAULTS, toKernelParams } from './effects/la2aCompressor.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -191,60 +193,17 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
 }
 
 /**
- * Compress a region through the LA-2A emulation (src/audio/la2a.js) in the
- * process worker. Resolves to { buffer, metering } — metering carries max/avg
- * gain reduction in dB for user feedback.
- */
-export function la2aCompressRegion(segments, start, end, params, audioContext, sampleRate, channels) {
-  return new Promise((resolve, reject) => {
-    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
-
-    const worker = new Worker(
-      new URL('../workers/processWorker.js', import.meta.url),
-      { type: 'module' }
-    )
-
-    worker.onmessage = (e) => {
-      if (e.data.type === 'done') {
-        const duration = end - start
-        const buffer = audioContext.createBuffer(channels, Math.ceil(duration * sampleRate), sampleRate)
-
-        for (let ch = 0; ch < channels; ch++) {
-          buffer.copyToChannel(e.data.channelData[ch], ch)
-        }
-
-        worker.terminate()
-        resolve({ buffer, metering: e.data.metering })
-      } else if (e.data.type === 'error') {
-        worker.terminate()
-        reject(new Error(e.data.message))
-      }
-    }
-
-    worker.onerror = (err) => {
-      worker.terminate()
-      reject(err)
-    }
-
-    worker.postMessage(
-      { type: 'la2a', channelData, sampleRate, params },
-      channelData.map(c => c.buffer)
-    )
-  })
-}
-
-/**
- * Apply LA-2A-style compression via OfflineAudioContext.
- * Uses the same node topology as the real-time preview.
+ * Apply LA-2A compression via OfflineAudioContext running the same
+ * AudioWorklet as the real-time preview (src/audio/la2aProcessor.js), so
+ * the applied result is sample-identical to what the user heard.
  */
 export async function applyLA2ARegion(segments, start, end, params, audioContext, sampleRate, channels) {
-  const { peakReduction = 50, gain = 0 } = params
-
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
 
   const offlineCtx = new OfflineAudioContext(channels, numSamples, sampleRate)
+  await ensureLA2AWorklet(offlineCtx)
 
   const inputBuffer = offlineCtx.createBuffer(channels, numSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
@@ -254,24 +213,15 @@ export async function applyLA2ARegion(segments, start, end, params, audioContext
   const source = offlineCtx.createBufferSource()
   source.buffer = inputBuffer
 
-  const compressor = offlineCtx.createDynamicsCompressor()
-  const threshold = -10 - (peakReduction / 100) * 40
-  const ratio = 4 + (peakReduction / 100) * 8
-  const knee = 20 - (peakReduction / 100) * 10
-  const release = 0.3 + (peakReduction / 100) * 0.7
+  const la2aNode = new AudioWorkletNode(offlineCtx, 'la2a-processor', {
+    channelCount: channels,
+    channelCountMode: 'explicit',
+    outputChannelCount: [channels],
+    processorOptions: { params: toKernelParams({ ...LA2A_DEFAULTS, ...params }) },
+  })
 
-  compressor.threshold.setValueAtTime(threshold, 0)
-  compressor.ratio.setValueAtTime(ratio, 0)
-  compressor.knee.setValueAtTime(knee, 0)
-  compressor.attack.setValueAtTime(0.01, 0)
-  compressor.release.setValueAtTime(release, 0)
-
-  const makeupGain = offlineCtx.createGain()
-  makeupGain.gain.setValueAtTime(Math.pow(10, gain / 20), 0)
-
-  source.connect(compressor)
-  compressor.connect(makeupGain)
-  makeupGain.connect(offlineCtx.destination)
+  source.connect(la2aNode)
+  la2aNode.connect(offlineCtx.destination)
   source.start(0)
 
   return await offlineCtx.startRendering()

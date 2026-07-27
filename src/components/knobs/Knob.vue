@@ -10,6 +10,7 @@ const props = defineProps({
   accent: { type: String, default: '#f5a623' },
   formatValue: { type: Function, default: (v) => String(Math.round(v)) },
   disabled: { type: Boolean, default: false },
+  valueFontPx: { type: Number, default: 19 },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -118,7 +119,7 @@ function onWheel(e) {
                style="background: #000000;"></div>
         </div>
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span class="tracking-[0.01em]" style="font:500 19px/1 'Inter',system-ui" :style="{ color: valColor }">{{ formatValue(modelValue) }}</span>
+          <span class="tracking-[0.01em]" :style="{ font: `500 ${valueFontPx}px/1 'Inter',system-ui`, color: valColor }">{{ formatValue(modelValue) }}</span>
         </div>
       </div>
     </div>

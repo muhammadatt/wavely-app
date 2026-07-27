@@ -5,13 +5,26 @@ import { getEffectChain } from '../audio/effectChain.js'
 import { la2aEffect, LA2A_DEFAULTS } from '../audio/effects/la2aCompressor.js'
 
 // Singleton reactive state shared between the sidebar trigger and the LA-2A modal
+const la2aMode = ref(LA2A_DEFAULTS.mode)
 const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
+const la2aTubeDrive = ref(LA2A_DEFAULTS.tubeDrive)
+const la2aEmphasis = ref(LA2A_DEFAULTS.emphasis)
 const la2aPreview = ref(false)
 const la2aReduction = ref(0)
 const la2aInputDb = ref(-Infinity)
 const la2aOutputDb = ref(-Infinity)
 let meterId = null
+
+function currentParams() {
+  return {
+    mode: la2aMode.value,
+    peakReduction: la2aPeakReduction.value,
+    gain: la2aGain.value,
+    tubeDrive: la2aTubeDrive.value,
+    emphasis: la2aEmphasis.value,
+  }
+}
 
 export function useLA2A() {
   const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
@@ -49,35 +62,38 @@ export function useLA2A() {
     la2aOutputDb.value = -Infinity
   }
 
+  function pushAllParams(chain) {
+    for (const [name, value] of Object.entries(currentParams())) {
+      chain.updateParam(la2aEffect.id, name, value)
+    }
+  }
+
   function togglePreview() {
     const chain = initChain()
     la2aPreview.value = !la2aPreview.value
     chain.setEnabled(la2aEffect.id, la2aPreview.value)
 
     if (la2aPreview.value) {
-      chain.updateParam(la2aEffect.id, 'peakReduction', la2aPeakReduction.value)
-      chain.updateParam(la2aEffect.id, 'gain', la2aGain.value)
+      pushAllParams(chain)
       startMeters(chain)
     } else {
       stopMeters()
     }
   }
 
-  function syncPeakReduction(v) {
-    la2aPeakReduction.value = v
+  function syncParam(name, refVar, value) {
+    refVar.value = value
     if (!la2aPreview.value) return
     const ctx = getAudioContext()
     const chain = getEffectChain(ctx)
-    chain.updateParam(la2aEffect.id, 'peakReduction', v)
+    chain.updateParam(la2aEffect.id, name, value)
   }
 
-  function syncGain(v) {
-    la2aGain.value = v
-    if (!la2aPreview.value) return
-    const ctx = getAudioContext()
-    const chain = getEffectChain(ctx)
-    chain.updateParam(la2aEffect.id, 'gain', v)
-  }
+  const syncMode = (v) => syncParam('mode', la2aMode, v)
+  const syncPeakReduction = (v) => syncParam('peakReduction', la2aPeakReduction, v)
+  const syncGain = (v) => syncParam('gain', la2aGain, v)
+  const syncTubeDrive = (v) => syncParam('tubeDrive', la2aTubeDrive, v)
+  const syncEmphasis = (v) => syncParam('emphasis', la2aEmphasis, v)
 
   async function apply() {
     if (!state.selection) return
@@ -91,7 +107,7 @@ export function useLA2A() {
       const ctx = getAudioContext()
       const buffer = await applyLA2ARegion(
         state.segments, start, end,
-        { peakReduction: la2aPeakReduction.value, gain: la2aGain.value },
+        currentParams(),
         ctx, state.currentFile.sampleRate, state.currentFile.channels
       )
       const bufferId = replaceRegion(start, end, buffer)
@@ -125,16 +141,22 @@ export function useLA2A() {
   }
 
   return {
+    la2aMode,
     la2aPeakReduction,
     la2aGain,
+    la2aTubeDrive,
+    la2aEmphasis,
     la2aPreview,
     la2aReduction,
     la2aInputDb,
     la2aOutputDb,
     hasSelection,
     togglePreview,
+    syncMode,
     syncPeakReduction,
     syncGain,
+    syncTubeDrive,
+    syncEmphasis,
     apply,
     teardown,
     openModal,
