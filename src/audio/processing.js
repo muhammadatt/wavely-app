@@ -234,6 +234,50 @@ export function la2aCompressRegion(segments, start, end, params, audioContext, s
 }
 
 /**
+ * Apply LA-2A-style compression via OfflineAudioContext.
+ * Uses the same node topology as the real-time preview.
+ */
+export async function applyLA2ARegion(segments, start, end, params, audioContext, sampleRate, channels) {
+  const { peakReduction = 50, gain = 0 } = params
+
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  const duration = end - start
+  const numSamples = Math.ceil(duration * sampleRate)
+
+  const offlineCtx = new OfflineAudioContext(channels, numSamples, sampleRate)
+
+  const inputBuffer = offlineCtx.createBuffer(channels, numSamples, sampleRate)
+  for (let ch = 0; ch < channels; ch++) {
+    inputBuffer.copyToChannel(channelData[ch], ch)
+  }
+
+  const source = offlineCtx.createBufferSource()
+  source.buffer = inputBuffer
+
+  const compressor = offlineCtx.createDynamicsCompressor()
+  const threshold = -10 - (peakReduction / 100) * 40
+  const ratio = 4 + (peakReduction / 100) * 8
+  const knee = 20 - (peakReduction / 100) * 10
+  const release = 0.3 + (peakReduction / 100) * 0.7
+
+  compressor.threshold.setValueAtTime(threshold, 0)
+  compressor.ratio.setValueAtTime(ratio, 0)
+  compressor.knee.setValueAtTime(knee, 0)
+  compressor.attack.setValueAtTime(0.01, 0)
+  compressor.release.setValueAtTime(release, 0)
+
+  const makeupGain = offlineCtx.createGain()
+  makeupGain.gain.setValueAtTime(Math.pow(10, gain / 20), 0)
+
+  source.connect(compressor)
+  compressor.connect(makeupGain)
+  makeupGain.connect(offlineCtx.destination)
+  source.start(0)
+
+  return await offlineCtx.startRendering()
+}
+
+/**
  * Compute peak cache for an AudioBuffer using a Web Worker.
  */
 export function computePeakCache(audioBuffer, samplesPerPx) {

@@ -1,4 +1,5 @@
 import { getSegmentDuration } from './operations.js'
+import { getEffectChainIfExists } from './effectChain.js'
 
 /**
  * Playback engine using Web Audio API.
@@ -47,7 +48,8 @@ export function startPlayback(segments, startTime, audioContext, onTimeUpdate, o
 
     const node = audioContext.createBufferSource()
     node.buffer = seg.sourceBuffer
-    node.connect(audioContext.destination)
+    const chain = getEffectChainIfExists()
+    node.connect(chain ? chain.getInputNode() : audioContext.destination)
 
     const scheduleAt = now + Math.max(0, seg.outputStart - startTime)
     let offset = seg.sourceStart

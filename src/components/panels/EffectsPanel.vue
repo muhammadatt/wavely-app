@@ -4,6 +4,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { normalizeRegion, la2aCompressRegion, computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
 import { applyVocalSaturation } from '../../api/spotEffects.js'
+import { useLA2A } from '../../composables/useLA2A.js'
 
 const {
   state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
@@ -35,6 +36,8 @@ const satSoftness      = ref(0.3)
 const satLowDriveMult  = ref(5.0)
 const satMidDriveMult  = ref(0.1)
 const satHighDriveMult = ref(0.1)
+
+const { openModal: openLA2AModal } = useLA2A()
 
 const openSection = ref('normalize')
 
@@ -289,6 +292,23 @@ async function applySaturation() {
             Apply LA-2A
           </button>
         </div>
+      </div>
+
+      <!-- LA-2A Compressor -->
+      <div class="border-2 border-border rounded-[var(--radius-md)] overflow-hidden transition-all">
+        <button
+          class="w-full flex items-center gap-2.5 px-[13px] py-3 bg-transparent border-none cursor-pointer text-left select-none"
+          @click="openLA2AModal"
+        >
+          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 bg-bg">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-mid" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          </div>
+          <div class="flex-1">
+            <div class="font-heading text-[13px] font-extrabold text-ink">LA-2A Compressor</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Smooth optical-style leveling</div>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt shrink-0" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
       </div>
 
       <!-- Vocal Saturation -->
