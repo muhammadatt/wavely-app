@@ -76,10 +76,10 @@ const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies th
 // produce 3 dB of reduction. -18 dBFS is the EBU alignment.
 const NOMINAL_DBFS = -18
 
-// Peak Reduction knob → sidechain amplifier gain, spanning 40 dB.
+// Peak Reduction knob → detector-sidechain drive (anchored to NOMINAL_DBFS), spanning 40 dB.
+// Effective endpoints: -2 dB at knob 0 and +38 dB at knob 100.
 // SC_TAPER < 1 models an audio-taper pot: the drive rises quickly off zero
-// and flattens toward the top, so gain reduction starts around knob 20 and
-// the everyday 3-6 dB range sits mid-dial rather than in the last third.
+// and flattens toward the top, so gain reduction starts around knob 20.
 const SC_DRIVE_MIN_DB = -20
 const SC_DRIVE_SPAN_DB = 40
 const SC_TAPER = 0.7
