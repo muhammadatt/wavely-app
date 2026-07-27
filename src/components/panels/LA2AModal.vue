@@ -52,7 +52,8 @@ function onDragMove(e) {
 function onDragEnd(e) {
   if (!dragging.value) return
   dragging.value = false
-  e.currentTarget.releasePointerCapture(e.pointerId)
+  // On pointercancel the capture is already implicitly released
+  try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
 }
 
@@ -119,6 +120,7 @@ function selectMockPreset(name) {
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
+      @pointercancel="onDragEnd"
     >
       <div class="flex items-center gap-2.5">
         <div class="w-3.5 h-3.5 rounded-full" style="background:linear-gradient(135deg,#ffd88a,#f5a623);box-shadow:0 0 10px rgba(245,166,35,.65)"></div>
@@ -176,7 +178,7 @@ function selectMockPreset(name) {
         <!-- Gain reduction bar -->
         <div class="flex items-center justify-between mb-1.5">
           <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">GAIN REDUCTION</span>
-          <span style="font:700 12px 'JetBrains Mono',monospace;color:#f7c877;text-shadow:0 0 8px rgba(245,166,35,.55)">{{ la2aReduction.toFixed(1) }} dB</span>
+          <span style="font:700 12px 'JetBrains Mono',monospace;color:#f7c877;text-shadow:0 0 8px rgba(245,166,35,.55)">{{ Math.abs(la2aReduction).toFixed(1) }} dB</span>
         </div>
         <div class="relative h-[18px] rounded-[9px]" style="background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 6px rgba(0,0,0,.8)">
           <div class="absolute top-0 bottom-0 left-0 rounded-[9px] transition-all duration-75"

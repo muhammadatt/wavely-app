@@ -197,7 +197,7 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
  * AudioWorklet as the real-time preview (src/audio/la2aProcessor.js), so
  * the applied result is sample-identical to what the user heard.
  */
-export async function applyLA2ARegion(segments, start, end, params, audioContext, sampleRate, channels) {
+export async function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)

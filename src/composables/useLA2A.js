@@ -104,11 +104,10 @@ export function useLA2A() {
 
     startProcessing('Applying LA-2A...')
     try {
-      const ctx = getAudioContext()
       const buffer = await applyLA2ARegion(
         state.segments, start, end,
         currentParams(),
-        ctx, state.currentFile.sampleRate, state.currentFile.channels
+        state.currentFile.sampleRate, state.currentFile.channels
       )
       const bufferId = replaceRegion(start, end, buffer)
       const cache = await computePeakCache(buffer, 256)

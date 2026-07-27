@@ -77,7 +77,8 @@ function onPointerMove(e) {
 
 function onPointerUp(e) {
   dragging.value = false
-  e.currentTarget.releasePointerCapture(e.pointerId)
+  // On pointercancel the capture is already implicitly released
+  try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
 }
 
 function onWheel(e) {
@@ -98,6 +99,7 @@ function onWheel(e) {
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
       @wheel="onWheel"
     >
       <svg viewBox="0 0 100 100" class="absolute inset-0 w-full h-full overflow-visible">

@@ -1,5 +1,3 @@
-import { reactive, shallowRef } from 'vue'
-
 let instance = null
 
 export class EffectChain {
