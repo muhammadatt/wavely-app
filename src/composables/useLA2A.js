@@ -13,9 +13,15 @@ const la2aEmphasis = ref(LA2A_DEFAULTS.emphasis)
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
 // boundary and perturbs the levels the mastering chain later measures.
+// While on, the plugin owns the Gain knob: measurements are written into
+// la2aGain itself, so the knob always shows the gain actually in effect.
 const la2aAutoMakeup = ref(true)
-const la2aAutoMakeupDb = ref(0)
 const la2aAutoMakeupBusy = ref(false)
+
+// Gain knob travel — measured makeup is clamped to it so the knob position
+// can never disagree with the value in effect.
+const GAIN_MIN_DB = -12
+const GAIN_MAX_DB = 24
 const la2aPreview = ref(false)
 const la2aReduction = ref(0)
 const la2aInputDb = ref(-Infinity)
@@ -28,16 +34,11 @@ const AUTO_MAKEUP_DEBOUNCE_MS = 120
 let makeupTimer = null
 let makeupSeq = 0
 
-/** Total gain sent to the kernel: measured makeup plus the manual trim. */
-function effectiveGainDb() {
-  return (la2aAutoMakeup.value ? la2aAutoMakeupDb.value : 0) + la2aGain.value
-}
-
 function currentParams() {
   return {
     mode: la2aMode.value,
     peakReduction: la2aPeakReduction.value,
-    gain: effectiveGainDb(),
+    gain: la2aGain.value,
     tubeDrive: la2aTubeDrive.value,
     emphasis: la2aEmphasis.value,
   }
@@ -116,15 +117,15 @@ export function useLA2A() {
     chain.updateParam(la2aEffect.id, name, value)
   }
 
-  /** Push the combined makeup + trim to the running effect. */
   function pushGain() {
-    pushParam('gain', effectiveGainDb())
+    pushParam('gain', la2aGain.value)
   }
 
   /**
-   * Re-measure the auto-makeup for the current selection and settings.
-   * Superseded calls are discarded by sequence number so a fast knob drag
-   * can't have an older measurement land after a newer one.
+   * Re-measure the auto-makeup for the current selection and settings and
+   * drive the Gain knob to it. Superseded calls are discarded by sequence
+   * number so a fast knob drag can't have an older measurement land after
+   * a newer one.
    */
   async function refreshAutoMakeup() {
     if (!la2aAutoMakeup.value || !state.selection || !state.currentFile) return
@@ -139,7 +140,7 @@ export function useLA2A() {
         state.currentFile.sampleRate, state.currentFile.channels
       )
       if (seq !== makeupSeq) return // a newer measurement is already in flight
-      la2aAutoMakeupDb.value = makeupDb
+      la2aGain.value = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, makeupDb))
       pushGain()
     } catch (err) {
       console.error('LA-2A auto makeup measurement failed:', err)
@@ -171,6 +172,7 @@ export function useLA2A() {
   const syncEmphasis = (v) => syncCompressionParam('emphasis', la2aEmphasis, v)
 
   function syncGain(v) {
+    if (la2aAutoMakeup.value) return // the plugin owns the gain in auto mode
     la2aGain.value = v
     pushGain()
   }
@@ -180,10 +182,10 @@ export function useLA2A() {
     if (la2aAutoMakeup.value) {
       refreshAutoMakeup()
     } else {
+      // Hand the knob back where it stands, so switching to manual is a
+      // seamless takeover rather than a jump back to 0 dB.
       makeupSeq++ // discard any in-flight measurement
-      la2aAutoMakeupDb.value = 0
       la2aAutoMakeupBusy.value = false
-      pushGain()
     }
   }
 
@@ -238,7 +240,6 @@ export function useLA2A() {
     la2aTubeDrive,
     la2aEmphasis,
     la2aAutoMakeup,
-    la2aAutoMakeupDb,
     la2aAutoMakeupBusy,
     la2aPreview,
     la2aReduction,
