@@ -10,6 +10,10 @@ const props = defineProps({
   accent: { type: String, default: '#f5a623' },
   formatValue: { type: Function, default: (v) => String(Math.round(v)) },
   disabled: { type: Boolean, default: false },
+  // Driven by the plugin rather than the user (e.g. auto makeup owning the
+  // Gain knob): not draggable, but stays fully lit because the value it is
+  // showing is live and meaningful — unlike `disabled`, which dims.
+  readonly: { type: Boolean, default: false },
   valueFontPx: { type: Number, default: 19 },
 })
 
@@ -61,7 +65,7 @@ function quantize(v) {
 }
 
 function onPointerDown(e) {
-  if (props.disabled) return
+  if (props.disabled || props.readonly) return
   dragging.value = true
   dragStartY = e.clientY
   dragStartValue = props.modelValue
@@ -82,7 +86,7 @@ function onPointerUp(e) {
 }
 
 function onWheel(e) {
-  if (props.disabled) return
+  if (props.disabled || props.readonly) return
   e.preventDefault()
   const delta = e.deltaY < 0 ? props.step : -props.step
   emit('update:modelValue', quantize(props.modelValue + delta))
@@ -94,7 +98,7 @@ function onWheel(e) {
        :style="{ fontFamily: `'Inter',system-ui,sans-serif`, opacity: disabled ? 0.4 : 1 }">
     <div
       class="relative w-full touch-none"
-      :class="disabled ? 'cursor-default' : 'cursor-ns-resize'"
+      :class="disabled || readonly ? 'cursor-default' : 'cursor-ns-resize'"
       style="aspect-ratio:1"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"

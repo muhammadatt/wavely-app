@@ -6,7 +6,7 @@ import Knob from '../knobs/Knob.vue'
 
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
-  la2aAutoMakeup, la2aAutoMakeupDb, la2aAutoMakeupBusy,
+  la2aAutoMakeup, la2aAutoMakeupBusy,
   la2aPreview, la2aReduction, la2aInputDb, la2aOutputDb, hasSelection,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
   syncEmphasis, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
@@ -23,12 +23,9 @@ onMounted(() => {
 // a fresh measurement.
 watch(() => state.selection, () => refreshAutoMakeup(), { deep: true })
 
-const autoMakeupLabel = computed(() => {
-  if (!la2aAutoMakeup.value) return 'AUTO'
-  if (la2aAutoMakeupBusy.value) return 'AUTO ···'
-  const v = la2aAutoMakeupDb.value
-  return `AUTO ${v > 0 ? '+' : ''}${v.toFixed(1)}`
-})
+const autoMakeupLabel = computed(() =>
+  la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO ···' : 'AUTO'
+)
 
 const ACCENT = '#f5a623'
 const PANEL_WIDTH = 640
@@ -239,13 +236,14 @@ function selectMockPreset(name) {
                 :model-value="la2aGain"
                 @update:model-value="syncGain"
                 :min="-12" :max="24" :step="0.1"
-                :label="la2aAutoMakeup ? 'Gain (trim)' : 'Gain'"
-                :accent="ACCENT" :format-value="formatGain"
+                label="Gain" :accent="ACCENT" :format-value="formatGain"
                 :disabled="!la2aPreview"
+                :readonly="la2aAutoMakeup"
               />
-              <!-- Auto makeup: measured offset that keeps engaging the
-                   compressor level-neutral, so bypass A/B isn't decided by
-                   loudness. The knob above stays live as a trim on top. -->
+              <!-- Auto makeup drives the Gain knob above to whatever keeps
+                   the output level-matched to the input, so bypass A/B isn't
+                   decided by loudness. Switching it off leaves the knob where
+                   it stands and hands control back to the user. -->
               <button
                 class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
                 :style="{
@@ -258,8 +256,8 @@ function selectMockPreset(name) {
                 }"
                 :disabled="!la2aPreview"
                 :title="la2aAutoMakeup
-                  ? 'Auto makeup on — output level matched to input so you hear the compression, not the loudness'
-                  : 'Auto makeup off — set makeup manually with the Gain knob'"
+                  ? 'Auto makeup on — the plugin sets Gain to level-match the output, so you hear the compression rather than the loudness. Click to take manual control.'
+                  : 'Auto makeup off — Gain is yours to set. Click to let the plugin level-match it.'"
                 @click="toggleAutoMakeup"
               >{{ autoMakeupLabel }}</button>
             </div>
