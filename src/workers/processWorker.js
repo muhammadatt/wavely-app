@@ -2,9 +2,10 @@
  * Audio Processing Web Worker
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
- * Supports: normalize, adjustVolume, la2aAutoMakeup
+ * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup
  */
 import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
+import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
 
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
@@ -17,19 +18,22 @@ self.onmessage = function (e) {
       adjustVolume(channelData, params)
       break
     case 'la2aAutoMakeup':
-      la2aAutoMakeup(channelData, sampleRate, params)
+      autoMakeup(computeAutoMakeupDb, channelData, sampleRate, params)
+      break
+    case 'fet1176AutoMakeup':
+      autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
       break
     default:
       self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
   }
 }
 
-// Runs the LA-2A kernel over the region purely to measure it — this is why
+// Runs a compressor kernel over the region purely to measure it — this is why
 // it lives in the worker rather than on the main thread, so knob drags
 // don't jank the UI while the measurement re-runs.
-function la2aAutoMakeup(channelData, sampleRate, params) {
+function autoMakeup(measure, channelData, sampleRate, params) {
   try {
-    self.postMessage({ type: 'done', makeupDb: computeAutoMakeupDb(channelData, sampleRate, params) })
+    self.postMessage({ type: 'done', makeupDb: measure(channelData, sampleRate, params) })
   } catch (err) {
     self.postMessage({ type: 'error', message: err.message })
   }

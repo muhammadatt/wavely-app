@@ -52,7 +52,7 @@ Processing is split between client and server based on operation type. This is n
 |---|---|---|
 | Trim, cut, delete, silence, split | Client | Pure segment manipulation — no audio data touched |
 | Normalize | Client | Linear operation, expected to feel instant. Quality gap vs. server is acceptable for spot work |
-| Compression | Client | Interactive parameter tweaking expects immediacy. OfflineAudioContext + DynamicsCompressorNode |
+| Compression | Client | Interactive parameter tweaking expects immediacy. Two emulations — OptoSmooth (LA-2A opto) and FET Punch (1176 FET) — each a dependency-free kernel run in an AudioWorklet for preview and in an OfflineAudioContext for apply, so the two are sample-identical |
 | Noise reduction | Server (DeepFilterNet3) | Quality gap vs. RNNoise is significant and user-visible. Modal wait is normal for this operation |
 | Full preset chain | Server | Always server-side |
 

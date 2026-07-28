@@ -1,6 +1,11 @@
 import { getSegmentDuration } from './operations.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_DEFAULTS, toKernelParams } from './effects/la2aCompressor.js'
+import { ensureFET1176Worklet } from './fet1176WorkletLoader.js'
+import {
+  FET1176_DEFAULTS,
+  toKernelParams as toFET1176KernelParams,
+} from './effects/fet1176Compressor.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -208,7 +213,7 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
  */
 const AUTO_MAKEUP_MAX_ANALYSIS_S = 30
 
-export function computeLA2AAutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
+function computeAutoMakeup(workerType, segments, start, end, kernelParams, sampleRate, channels) {
   let aStart = start
   let aEnd = end
   if (end - start > AUTO_MAKEUP_MAX_ANALYSIS_S) {
@@ -240,24 +245,38 @@ export function computeLA2AAutoMakeup(segments, start, end, kernelParams, sample
     }
 
     worker.postMessage(
-      { type: 'la2aAutoMakeup', channelData, sampleRate, params: kernelParams },
+      { type: workerType, channelData, sampleRate, params: kernelParams },
       channelData.map(c => c.buffer)
     )
   })
 }
 
+export function computeLA2AAutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
+  return computeAutoMakeup('la2aAutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
+}
+
+/** Measure the FET Punch auto-makeup (Output) for a region — see above. */
+export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
+  return computeAutoMakeup('fet1176AutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
+}
+
 /**
- * Apply LA-2A compression via OfflineAudioContext running the same
- * AudioWorklet as the real-time preview (src/audio/la2aProcessor.js), so
- * the applied result is sample-identical to what the user heard.
+ * Render a region through a compressor worklet in an OfflineAudioContext.
+ *
+ * Both compressors apply this way, running the exact same worklet module as
+ * the real-time preview, so the applied result is sample-identical to what
+ * the user heard.
  */
-export async function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
+async function applyWorkletRegion(
+  segments, start, end, sampleRate, channels,
+  { ensureWorklet, processorName, kernelParams },
+) {
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
 
   const offlineCtx = new OfflineAudioContext(channels, numSamples, sampleRate)
-  await ensureLA2AWorklet(offlineCtx)
+  await ensureWorklet(offlineCtx)
 
   const inputBuffer = offlineCtx.createBuffer(channels, numSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
@@ -267,18 +286,36 @@ export async function applyLA2ARegion(segments, start, end, params, sampleRate, 
   const source = offlineCtx.createBufferSource()
   source.buffer = inputBuffer
 
-  const la2aNode = new AudioWorkletNode(offlineCtx, 'la2a-processor', {
+  const node = new AudioWorkletNode(offlineCtx, processorName, {
     channelCount: channels,
     channelCountMode: 'explicit',
     outputChannelCount: [channels],
-    processorOptions: { params: toKernelParams({ ...LA2A_DEFAULTS, ...params }) },
+    processorOptions: { params: kernelParams },
   })
 
-  source.connect(la2aNode)
-  la2aNode.connect(offlineCtx.destination)
+  source.connect(node)
+  node.connect(offlineCtx.destination)
   source.start(0)
 
   return await offlineCtx.startRendering()
+}
+
+/** Apply OptoSmooth (LA-2A) compression to a region. */
+export function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureLA2AWorklet,
+    processorName: 'la2a-processor',
+    kernelParams: toKernelParams({ ...LA2A_DEFAULTS, ...params }),
+  })
+}
+
+/** Apply FET Punch (1176) compression to a region. */
+export function applyFET1176Region(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureFET1176Worklet,
+    processorName: 'fet1176-processor',
+    kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
+  })
 }
 
 /**

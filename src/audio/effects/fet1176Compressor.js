@@ -1,40 +1,46 @@
 /**
- * LA-2A optical compressor — real-time effect chain wrapper.
+ * FET Punch (1176-style) compressor — real-time effect chain wrapper.
  *
- * The DSP itself lives in ../la2aProcessor.js (T4 optical cell with
- * dual-stage memory-dependent release, program-dependent compress/limit
- * ratios, R37 sidechain emphasis, tube saturation) and runs in an
- * AudioWorklet. The offline apply path renders through the same worklet in
- * an OfflineAudioContext, so the preview is sample-identical to what gets
- * written to the timeline.
+ * The DSP itself lives in ../fet1176Processor.js (FET gain cell with
+ * user-set microsecond attack, program-dependent release, four ratio
+ * settings plus all-buttons-in, optional sidechain high-pass, FET/class-A
+ * saturation) and runs in an AudioWorklet. The offline apply path renders
+ * through the same worklet in an OfflineAudioContext, so the preview is
+ * sample-identical to what gets written to the timeline.
  *
  * The worklet module loads asynchronously; until it's ready the effect
  * passes audio through unprocessed, then splices the worklet node in.
  */
 
-import { ensureLA2AWorklet } from '../la2aWorkletLoader.js'
+import { ensureFET1176Worklet } from '../fet1176WorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 
-export const LA2A_DEFAULTS = {
-  mode: 'compress', // 'compress' | 'limit'
-  peakReduction: 50,
-  gain: 0, // makeup gain dB
-  tubeDrive: 0.3,
-  emphasis: 0, // R37 HF sidechain emphasis, 0 = flat (stock)
+export const FET1176_DEFAULTS = {
+  inputDrive: 50, // 0-100, drives the fixed internal threshold
+  output: 0, // makeup gain dB
+  attack: 4, // dial 1-7, 7 = fastest (20 us)
+  release: 4, // dial 1-7, 7 = fastest (50 ms)
+  ratio: '4', // '4' | '8' | '12' | '20' | 'all'
+  fetDrive: 0.35, // FET / output-amp saturation
+  scHpf: 0, // sidechain high-pass corner in Hz, 0 = off (stock)
+  mix: 1, // wet/dry blend for parallel compression
 }
 
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {
   return {
-    mode: params.mode,
-    peakReduction: params.peakReduction,
-    gainDb: params.gain,
-    tubeDrive: params.tubeDrive,
-    emphasis: params.emphasis,
+    inputDrive: params.inputDrive,
+    outputGainDb: params.output,
+    attack: params.attack,
+    release: params.release,
+    ratio: params.ratio,
+    fetDrive: params.fetDrive,
+    scHpfHz: params.scHpf,
+    mix: params.mix,
   }
 }
 
-export function createLA2ACompressor(audioContext) {
+export function createFET1176Compressor(audioContext) {
   const input = audioContext.createGain()
   // preOutput is a stable internal hand-off: the chain calls .disconnect()
   // on `output` during rebuilds (wiping ALL its outgoing connections), so
@@ -43,7 +49,7 @@ export function createLA2ACompressor(audioContext) {
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...LA2A_DEFAULTS }
+  let params = { ...FET1176_DEFAULTS }
   let worklet = null
   let destroyed = false
   let grDb = 0
@@ -52,10 +58,10 @@ export function createLA2ACompressor(audioContext) {
   input.connect(preOutput)
   preOutput.connect(output)
 
-  ensureLA2AWorklet(audioContext)
+  ensureFET1176Worklet(audioContext)
     .then(() => {
       if (destroyed) return
-      worklet = new AudioWorkletNode(audioContext, 'la2a-processor', {
+      worklet = new AudioWorkletNode(audioContext, 'fet1176-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
       worklet.port.onmessage = (e) => {
@@ -66,7 +72,7 @@ export function createLA2ACompressor(audioContext) {
       worklet.connect(preOutput)
     })
     .catch((err) => {
-      console.error('LA-2A worklet failed to load, running bypassed:', err)
+      console.error('FET Punch worklet failed to load, running bypassed:', err)
     })
 
   // Level meter taps on dedicated monitor nodes fed from stable internal
@@ -121,10 +127,10 @@ export function createLA2ACompressor(audioContext) {
   }
 }
 
-export const la2aEffect = {
-  id: 'la2a-compressor',
-  name: 'LA-2A Compressor',
+export const fet1176Effect = {
+  id: 'fet1176-compressor',
+  name: 'FET Punch Compressor',
   createNodes(audioContext) {
-    return createLA2ACompressor(audioContext)
+    return createFET1176Compressor(audioContext)
   },
 }
