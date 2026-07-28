@@ -24,7 +24,7 @@ onMounted(() => {
 watch(() => state.selection, () => refreshAutoMakeup(), { deep: true })
 
 const autoMakeupLabel = computed(() =>
-  la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO ···' : 'AUTO'
+  la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO' : 'AUTO'
 )
 
 const ACCENT = '#f5a623'
@@ -136,7 +136,7 @@ function selectMockPreset(name) {
     >
       <div class="flex items-center gap-2.5">
         <div class="w-3.5 h-3.5 rounded-full" style="background:linear-gradient(135deg,#ffd88a,#f5a623);box-shadow:0 0 10px rgba(245,166,35,.65)"></div>
-        <span style="font:800 13px/1 'Inter';letter-spacing:.22em;color:#f6ecdd">AXIS&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.4)">DYN</span></span>
+        <span style="font:800 13px/1 'Inter';letter-spacing:.22em;color:#f6ecdd">OPTO&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.4)">SMOOTH</span></span>
       </div>
 
       <!-- Preset selector — visual mockup only, not yet wired to real presets -->
@@ -232,14 +232,21 @@ function selectMockPreset(name) {
               />
             </div>
             <div class="w-[130px] flex flex-col items-center">
-              <Knob
-                :model-value="la2aGain"
-                @update:model-value="syncGain"
-                :min="-12" :max="24" :step="0.1"
-                label="Gain" :accent="ACCENT" :format-value="formatGain"
-                :disabled="!la2aPreview"
-                :readonly="la2aAutoMakeup"
-              />
+              <div class="relative w-full" :style="{ opacity: la2aAutoMakeup ? 0.78 : 1 }">
+                <Knob
+                  :model-value="la2aGain"
+                  @update:model-value="syncGain"
+                  :min="-12" :max="24" :step="0.1"
+                  label="Gain" :accent="ACCENT" :format-value="formatGain"
+                  :disabled="!la2aPreview"
+                  :readonly="la2aAutoMakeup"
+                />
+                <span
+                  v-if="la2aAutoMakeup"
+                  class="absolute top-[2px] right-[4px] px-1.5 py-[2px] rounded-full pointer-events-none"
+                  style="background:rgba(245,166,35,.2);border:1px solid rgba(245,166,35,.4);font:700 7px/1 'JetBrains Mono',monospace;letter-spacing:.09em;color:#f7c877"
+                >AUTO</span>
+              </div>
               <!-- Auto makeup drives the Gain knob above to whatever keeps
                    the output level-matched to the input, so bypass A/B isn't
                    decided by loudness. Switching it off leaves the knob where
@@ -256,8 +263,8 @@ function selectMockPreset(name) {
                 }"
                 :disabled="!la2aPreview"
                 :title="la2aAutoMakeup
-                  ? 'Auto makeup on — the plugin sets Gain to level-match the output, so you hear the compression rather than the loudness. Click to take manual control.'
-                  : 'Auto makeup off — Gain is yours to set. Click to let the plugin level-match it.'"
+                  ? 'Auto makeup on. Click to take manual control.'
+                  : 'Auto makeup off. Click to let the plugin automatically set the output gain.'"
                 @click="toggleAutoMakeup"
               >{{ autoMakeupLabel }}</button>
             </div>

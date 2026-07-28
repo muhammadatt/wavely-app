@@ -30,9 +30,13 @@ let meterId = null
 
 // Debounce + supersede state for the auto-makeup measurement, shared across
 // every useLA2A() caller so knob drags coalesce into one measurement.
-const AUTO_MAKEUP_DEBOUNCE_MS = 120
+// Keep this short so the Gain knob tracks Peak Reduction closely in AUTO
+// mode, while still avoiding a worker spawn per pointer tick.
+const AUTO_MAKEUP_DEBOUNCE_MS = 45
 let makeupTimer = null
 let makeupSeq = 0
+let makeupBurstActive = false
+let makeupBurstDirty = false
 
 function currentParams() {
   return {
@@ -151,10 +155,26 @@ export function useLA2A() {
 
   function scheduleAutoMakeup() {
     if (!la2aAutoMakeup.value) return
+
+    // Leading edge: first move in a burst measures immediately so the Gain
+    // knob responds right away.
+    if (!makeupBurstActive) {
+      makeupBurstActive = true
+      makeupBurstDirty = false
+      refreshAutoMakeup()
+    } else {
+      // Additional moves during the debounce window request one trailing pass
+      // with the final knob value.
+      makeupBurstDirty = true
+    }
+
     if (makeupTimer !== null) clearTimeout(makeupTimer)
     makeupTimer = setTimeout(() => {
       makeupTimer = null
-      refreshAutoMakeup()
+      const shouldRunTrailing = makeupBurstDirty
+      makeupBurstActive = false
+      makeupBurstDirty = false
+      if (shouldRunTrailing) refreshAutoMakeup()
     }, AUTO_MAKEUP_DEBOUNCE_MS)
   }
 
@@ -184,6 +204,12 @@ export function useLA2A() {
     } else {
       // Hand the knob back where it stands, so switching to manual is a
       // seamless takeover rather than a jump back to 0 dB.
+      if (makeupTimer !== null) {
+        clearTimeout(makeupTimer)
+        makeupTimer = null
+      }
+      makeupBurstActive = false
+      makeupBurstDirty = false
       makeupSeq++ // discard any in-flight measurement
       la2aAutoMakeupBusy.value = false
     }

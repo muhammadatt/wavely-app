@@ -169,8 +169,8 @@ async function applySaturation() {
             <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-mid" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           </div>
           <div class="flex-1">
-            <div class="font-heading text-[13px] font-extrabold text-ink">LA-2A Compressor</div>
-            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Opto leveling amplifier</div>
+            <div class="font-heading text-[13px] font-extrabold text-ink">Opto Smooth</div>
+            <div class="text-[11px] text-ink-lt font-semibold mt-[1px]">Subtle, transparent leveler/compressor</div>
           </div>
           <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none stroke-ink-lt shrink-0" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
