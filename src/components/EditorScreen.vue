@@ -16,6 +16,10 @@ const {
 } = useEditorState()
 
 function handleKeydown(e) {
+  // Shift changes e.key's case ('z' → 'Z'), so match on the lowered key
+  // throughout or every Shift-modified shortcut silently never fires.
+  const key = e.key.toLowerCase()
+
   // Space — play/pause (handled in TransportBar via event bus)
   if (e.code === 'Space' && !e.target.closest('input, textarea, button')) {
     e.preventDefault()
@@ -23,35 +27,35 @@ function handleKeydown(e) {
   }
 
   // Ctrl+Z — undo
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && key === 'z') {
     e.preventDefault()
     if (canUndo.value) undo()
   }
 
   // Ctrl+Shift+Z or Ctrl+Y — redo
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'z') {
     e.preventDefault()
     if (canRedo.value) redo()
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+  if ((e.ctrlKey || e.metaKey) && key === 'y') {
     e.preventDefault()
     if (canRedo.value) redo()
   }
 
   // Ctrl+X — cut selection
-  if ((e.ctrlKey || e.metaKey) && e.key === 'x' && !e.target.closest('input, textarea')) {
+  if ((e.ctrlKey || e.metaKey) && key === 'x' && !e.target.closest('input, textarea')) {
     e.preventDefault()
     if (hasSelection.value) performCut()
   }
 
   // Ctrl+C — copy selection
-  if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.target.closest('input, textarea')) {
+  if ((e.ctrlKey || e.metaKey) && key === 'c' && !e.target.closest('input, textarea')) {
     e.preventDefault()
     if (hasSelection.value) performCopy()
   }
 
   // Ctrl+V — paste at playhead
-  if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.target.closest('input, textarea')) {
+  if ((e.ctrlKey || e.metaKey) && key === 'v' && !e.target.closest('input, textarea')) {
     e.preventDefault()
     if (hasClipboard.value) performPaste(state.playhead)
   }
@@ -91,18 +95,25 @@ onUnmounted(() => {
       <!-- Workspace -->
       <div class="flex flex-col flex-1 overflow-hidden">
         <FloatingToolbar />
-        <!-- Waveform + SelectionBar overlay (overlay avoids resizing the canvas) -->
         <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px]">
-          <WaveformOverview v-if="state.currentFile" />
-          <div class="relative flex-1 min-h-0 flex gap-2">
-            <DbfsScale />
-            <div
-              class="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-[12px]"
-              style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
-            >
+          <!-- Overview is indented by the dBFS gutter so its time axis shares an
+               x-origin with the main waveform below it. -->
+          <div class="flex shrink-0">
+            <div class="w-7 shrink-0"></div>
+            <WaveformOverview class="flex-1" />
+          </div>
+          <div
+            class="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-[12px]"
+            style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
+          >
+            <!-- The scale shares the canvas's box exactly, so its ticks land on
+                 the amplitudes they name. SelectionBar sits below in flow rather
+                 than overlaying the waveform's loudest peaks. -->
+            <div class="flex-1 min-h-0 flex">
+              <DbfsScale />
               <WaveformArea />
-              <SelectionBar class="absolute bottom-0 left-0 right-0 z-20" />
             </div>
+            <SelectionBar />
           </div>
         </div>
         <TransportBar />

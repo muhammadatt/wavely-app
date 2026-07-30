@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from "vue"
 import { useEditorState } from "../composables/useEditorState.js"
 
 const {
@@ -6,6 +7,7 @@ const {
   hasSelection,
   hasClipboard,
   performSilence,
+  performDelete,
   performCut,
   performCopy,
   performPaste,
@@ -13,26 +15,56 @@ const {
   showToast,
 } = useEditorState()
 
+// The bar is always mounted, so every readout has to survive selection === null.
+const EMPTY = "—"
+
 function formatTime(seconds) {
+  if (!Number.isFinite(seconds)) return EMPTY
   const m = Math.floor(seconds / 60)
   const s = (seconds % 60).toFixed(2)
   return `${m}:${s.padStart(5, "0")}`
 }
 
+const selectionDuration = computed(() => {
+  if (!hasSelection.value) return EMPTY
+  return `${(state.selection.end - state.selection.start).toFixed(2)}s`
+})
+
+// Every action below is a no-op without its precondition, so the toast only
+// fires once the operation has actually run.
 function handleCopy() {
+  if (!hasSelection.value) return
   performCopy()
   showToast("Copied to clipboard")
 }
 
 function handleCut() {
+  if (!hasSelection.value) return
   performCut()
   showToast("Cut to clipboard")
 }
 
 function handlePaste() {
+  if (!hasClipboard.value) return
   performPaste(state.playhead)
   showToast("Pasted at playhead")
 }
+
+function handleSilence() {
+  if (!hasSelection.value) return
+  performSilence()
+  showToast("Region silenced")
+}
+
+function handleDelete() {
+  if (!hasSelection.value) return
+  performDelete()
+  showToast("Selection deleted")
+}
+
+const ACTION_CLASS =
+  "flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold disabled:opacity-35 disabled:cursor-default"
+const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
 </script>
 
 <template>
@@ -42,11 +74,15 @@ function handlePaste() {
     <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase"
       >Selection</span
     >
-    <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[#7fe9f6] tabular-nums"
+    <span
+      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums"
+      :class="hasSelection ? 'text-[#7fe9f6]' : 'text-[rgba(255,255,255,.28)]'"
       >{{ formatTime(state.selection?.start) }}</span
     >
     <span class="text-[10.5px] text-[rgba(255,255,255,.3)] font-bold">→</span>
-    <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[#7fe9f6] tabular-nums"
+    <span
+      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums"
+      :class="hasSelection ? 'text-[#7fe9f6]' : 'text-[rgba(255,255,255,.28)]'"
       >{{ formatTime(state.selection?.end) }}</span
     >
 
@@ -55,15 +91,24 @@ function handlePaste() {
     <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase"
       >Duration</span
     >
-    <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[rgba(255,255,255,.7)] tabular-nums"
-      >{{ (state.selection?.end - state.selection?.start).toFixed(2) }}s</span
+    <span
+      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums"
+      :class="hasSelection ? 'text-[rgba(255,255,255,.7)]' : 'text-[rgba(255,255,255,.28)]'"
+      >{{ selectionDuration }}</span
+    >
+
+    <span
+      v-if="!hasSelection"
+      class="text-[10.5px] font-medium text-[rgba(255,255,255,.3)] whitespace-nowrap"
+      >Drag on the waveform to select</span
     >
 
     <div class="flex items-center gap-[6px] ml-auto">
-      <!-- Select All — always visible when a file is loaded -->
+      <!-- Select All — the only action here that needs no precondition -->
       <button
-        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
-        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
+        :class="ACTION_CLASS"
+        :style="ACTION_STYLE"
+        title="Select All (Ctrl+A)"
         @click="selectAll">
         <svg
           viewBox="0 0 24 24"
@@ -75,8 +120,10 @@ function handlePaste() {
         Select All
       </button>
       <button
-        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
-        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
+        :class="ACTION_CLASS"
+        :style="ACTION_STYLE"
+        :disabled="!hasSelection"
+        title="Copy (Ctrl+C)"
         @click="handleCopy">
         <svg
           viewBox="0 0 24 24"
@@ -88,9 +135,10 @@ function handlePaste() {
         Copy
       </button>
       <button
-        v-if="hasClipboard"
-        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
-        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
+        :class="ACTION_CLASS"
+        :style="ACTION_STYLE"
+        :disabled="!hasClipboard"
+        title="Paste at playhead (Ctrl+V)"
         @click="handlePaste">
         <svg
           viewBox="0 0 24 24"
@@ -102,9 +150,11 @@ function handlePaste() {
         Paste
       </button>
       <button
-        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
-        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
-        @click="performSilence">
+        :class="ACTION_CLASS"
+        :style="ACTION_STYLE"
+        :disabled="!hasSelection"
+        title="Replace selection with silence"
+        @click="handleSilence">
         <svg
           viewBox="0 0 24 24"
           class="w-3 h-3 fill-none stroke-current"
@@ -116,8 +166,10 @@ function handlePaste() {
         Silence
       </button>
       <button
-        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
-        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
+        :class="ACTION_CLASS"
+        :style="ACTION_STYLE"
+        :disabled="!hasSelection"
+        title="Cut (Ctrl+X)"
         @click="handleCut">
         <svg
           viewBox="0 0 24 24"
@@ -130,6 +182,22 @@ function handlePaste() {
           <line x1="8.12" y1="8.12" x2="12" y2="12" />
         </svg>
         Cut
+      </button>
+      <button
+        :class="ACTION_CLASS"
+        :style="ACTION_STYLE"
+        :disabled="!hasSelection"
+        title="Delete selection (Del)"
+        @click="handleDelete">
+        <svg
+          viewBox="0 0 24 24"
+          class="w-3 h-3 fill-none stroke-current"
+          stroke-width="2.5">
+          <path d="M3 6h18" />
+          <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+        </svg>
+        Delete
       </button>
     </div>
   </div>

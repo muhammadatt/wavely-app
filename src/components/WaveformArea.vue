@@ -8,7 +8,6 @@ const { state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDur
 const canvas = ref(null)
 const overlayCanvas = ref(null)
 const container = ref(null)
-const scrollbarTrack = ref(null)
 const scrollLeft = ref(0)
 const pixelsPerSecond = ref(100)
 const isSelecting = ref(false)
@@ -27,64 +26,18 @@ function getMinPps() {
 }
 
 function updateContainerWidth() {
-  // Use canvas.clientWidth — this is the exact width the renderer draws into,
-  // which is smaller than container.clientWidth by the inner div's padding (p-6 = 24px each side).
+  // canvas.clientWidth is the exact width the renderer draws into; the
+  // container is only a fallback for the first tick, before layout settles.
   if (canvas.value && canvas.value.clientWidth > 0) {
     containerWidth.value = canvas.value.clientWidth
   } else if (container.value) {
-    containerWidth.value = container.value.clientWidth - 48
+    containerWidth.value = container.value.clientWidth
   }
 }
 
-// Scrollbar computed values
-const totalContentWidth = computed(() => totalDuration.value * pixelsPerSecond.value)
-const isScrollable = computed(() =>
-  containerWidth.value > 0 && totalContentWidth.value > containerWidth.value
-)
-const thumbWidthPct = computed(() => {
-  if (!totalContentWidth.value || containerWidth.value === 0) return 100
-  return Math.min(100, Math.max(5, (containerWidth.value / totalContentWidth.value) * 100))
-})
 const maxScrollLeft = computed(() =>
   Math.max(0, totalDuration.value - containerWidth.value / pixelsPerSecond.value)
 )
-const thumbLeftPct = computed(() => {
-  if (maxScrollLeft.value <= 0) return 0
-  return (scrollLeft.value / maxScrollLeft.value) * (100 - thumbWidthPct.value)
-})
-
-// Scrollbar drag state
-let sbDragging = false
-let sbDragStartX = 0
-let sbDragStartScroll = 0
-
-function handleScrollbarMouseDown(e) {
-  if (e.button !== 0 || !isScrollable.value) return
-  sbDragging = true
-  sbDragStartX = e.clientX
-  sbDragStartScroll = scrollLeft.value
-  window.addEventListener('mousemove', handleScrollbarMouseMove)
-  window.addEventListener('mouseup', handleScrollbarMouseUp)
-  e.preventDefault()
-  e.stopPropagation()
-}
-
-function handleScrollbarMouseMove(e) {
-  if (!sbDragging || !scrollbarTrack.value) return
-  const dx = e.clientX - sbDragStartX
-  const trackWidth = scrollbarTrack.value.clientWidth
-  const thumbMovable = trackWidth * (1 - thumbWidthPct.value / 100)
-  if (thumbMovable <= 0) return
-  const delta = (dx / thumbMovable) * maxScrollLeft.value
-  scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, sbDragStartScroll + delta))
-  drawAll()
-}
-
-function handleScrollbarMouseUp() {
-  sbDragging = false
-  window.removeEventListener('mousemove', handleScrollbarMouseMove)
-  window.removeEventListener('mouseup', handleScrollbarMouseUp)
-}
 
 function drawMain() {
   if (!canvas.value || !state.currentFile) return
@@ -132,7 +85,7 @@ function pxToTime(px) {
 }
 
 function handleMouseDown(e) {
-  if (e.button !== 0 || sbDragging) return
+  if (e.button !== 0) return
   const rect = canvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
   const time = pxToTime(x)
@@ -268,7 +221,7 @@ onUnmounted(() => {
     ref="container"
     class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
   >
-    <div class="absolute top-0 left-0 right-0 bottom-2">
+    <div class="absolute inset-0">
       <!-- Both canvases are absolute inset-0 so they occupy the same compositing
            layer space. Main canvas draws waveform peaks; overlay canvas draws
            selection highlight + playhead. pointer-events-none lets mouse events
@@ -284,9 +237,5 @@ onUnmounted(() => {
         class="absolute inset-0 w-full h-full pointer-events-none"
       ></canvas>
     </div>
-
-    <!-- Scrollbar — always visible; full-width thumb when not zoomed in -->
-     <!-- MT -removed bottom scrollbar in favor of WaveformOverview scoll and always SelectionBar on bottom) s-->
-
   </div>
 </template>
