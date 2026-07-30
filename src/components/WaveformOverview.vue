@@ -165,28 +165,84 @@ onUnmounted(() => {
 <template>
   <div
     ref="strip"
-    class="relative h-[52px] shrink-0 rounded-[10px] overflow-hidden cursor-pointer select-none"
+    class="relative h-[52px] shrink-0 rounded-[10px] cursor-pointer select-none"
     style="background:#080a0d;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)"
     @mousedown="onStripMouseDown"
   >
-    <canvas ref="canvas" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+    <!-- The canvas carries its own radius instead of the strip clipping to it:
+         the resize handles straddle the window edge, and at either extreme of
+         the file that put half a handle outside a clipping parent. -->
+    <canvas ref="canvas" class="absolute inset-0 w-full h-full rounded-[10px] pointer-events-none"></canvas>
 
     <!-- Dimmed regions outside the visible window -->
     <div class="absolute top-0 bottom-0 left-0 pointer-events-none" style="background:rgba(5,7,9,.65)" :style="{ width: windowLeftPct + '%' }"></div>
     <div class="absolute top-0 bottom-0 right-0 pointer-events-none" style="background:rgba(5,7,9,.65)" :style="{ width: (100 - windowLeftPct - windowWidthPct) + '%' }"></div>
 
-    <!-- Draggable zoom window -->
+    <!-- Draggable zoom window. The body pans the view; the edges resize it,
+         which is the zoom. Neither is guessable from a plain translucent bar,
+         so the handles carry a grip and both halves carry a tooltip. -->
     <div
-      class="absolute top-0 bottom-0 box-border cursor-grab active:cursor-grabbing"
-      style="border:1.5px solid rgba(53,211,230,.55);background:rgba(53,211,230,.06)"
+      class="zoom-window absolute top-0 bottom-0 box-border cursor-grab active:cursor-grabbing"
       :style="{ left: windowLeftPct + '%', width: windowWidthPct + '%' }"
+      title="Drag to scroll the waveform"
       @mousedown="onWindowMouseDown"
     >
-      <div class="absolute -left-[4px] top-0 bottom-0 w-[8px] rounded-[3px] cursor-ew-resize" style="background:rgba(255,255,255,.6)" @mousedown="onLeftHandleMouseDown"></div>
-      <div class="absolute -right-[4px] top-0 bottom-0 w-[8px] rounded-[3px] cursor-ew-resize" style="background:rgba(255,255,255,.6)" @mousedown="onRightHandleMouseDown"></div>
+      <div
+        class="ov-handle absolute -left-[7px] top-0 bottom-0 w-[14px] flex items-center justify-center cursor-ew-resize"
+        title="Drag to zoom"
+        @mousedown="onLeftHandleMouseDown"
+      >
+        <span class="ov-grip"></span>
+      </div>
+      <div
+        class="ov-handle absolute -right-[7px] top-0 bottom-0 w-[14px] flex items-center justify-center cursor-ew-resize"
+        title="Drag to zoom"
+        @mousedown="onRightHandleMouseDown"
+      >
+        <span class="ov-grip"></span>
+      </div>
     </div>
 
     <!-- Playhead -->
     <div class="absolute top-0 bottom-0 w-[2px] pointer-events-none" style="background:#ff5a4d" :style="{ left: playheadPct + '%' }"></div>
   </div>
 </template>
+
+<style scoped>
+.zoom-window {
+  border: 1.5px solid rgba(126, 240, 255, 0.75);
+  background: rgba(53, 211, 230, 0.07);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.zoom-window:hover {
+  background: rgba(53, 211, 230, 0.12);
+  border-color: rgba(126, 240, 255, 0.95);
+}
+
+/* The grip is a slim pill with two ridges — small enough not to cover the
+   waveform underneath, distinct enough to read as a control rather than an
+   edge of the highlight. */
+.ov-grip {
+  width: 6px;
+  height: 26px;
+  border-radius: 3px;
+  background: #cbf5fd;
+  box-shadow:
+    0 0 0 1px rgba(8, 22, 26, 0.55),
+    0 1px 4px rgba(0, 0, 0, 0.5);
+  background-image: linear-gradient(
+    to right,
+    transparent 1.5px,
+    rgba(8, 22, 26, 0.45) 1.5px 2.5px,
+    transparent 2.5px 3.5px,
+    rgba(8, 22, 26, 0.45) 3.5px 4.5px,
+    transparent 4.5px
+  );
+  transition: height 0.15s ease, background-color 0.15s ease;
+}
+.ov-handle:hover .ov-grip,
+.ov-handle:active .ov-grip {
+  height: 36px;
+  background-color: #ffffff;
+}
+</style>

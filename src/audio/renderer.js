@@ -9,8 +9,12 @@ import { getSegmentDuration } from './operations.js'
 
 const WAVEFORM_FILL = '#5df0b0'
 const WAVEFORM_EDGE = '#5df0b0'
-const SELECTION_COLOR = 'rgba(53, 211, 230, 0.07)'
-const SELECTION_BORDER_COLOR = 'rgba(53, 211, 230, 0.55)'
+// Selection reads by dimming everything outside it rather than by tinting the
+// inside. A 7% cyan wash over a bright waveform on near-black was close to
+// invisible; veiling the unselected audio gives the contrast instead.
+const SELECTION_COLOR = 'rgba(53, 211, 230, 0.10)'
+const SELECTION_BORDER_COLOR = 'rgba(126, 240, 255, 0.9)'
+const UNSELECTED_VEIL_COLOR = 'rgba(5, 7, 9, 0.55)'
 const PLAYHEAD_COLOR = '#ff5a4d'
 const ZERO_LINE_COLOR = 'rgba(255, 255, 255, 0.07)'
 
@@ -270,12 +274,18 @@ export function renderOverlay(canvas, options) {
     const selWidth = selEndPx - selStartPx
 
     if (selEndPx > 0 && selStartPx < logicalWidth) {
+      // Veil the audio on either side, then lift the selection itself.
+      ctx.fillStyle = UNSELECTED_VEIL_COLOR
+      if (selStartPx > 0) ctx.fillRect(0, 0, Math.min(selStartPx, logicalWidth), logicalHeight)
+      if (selEndPx < logicalWidth) ctx.fillRect(selEndPx, 0, logicalWidth - selEndPx, logicalHeight)
+
       ctx.fillStyle = SELECTION_COLOR
       ctx.fillRect(selStartPx, 0, selWidth, logicalHeight)
 
+      // Solid edges, not dashed — a dashed boundary reads as provisional, and
+      // these are the handles the user is about to cut on.
       ctx.strokeStyle = SELECTION_BORDER_COLOR
       ctx.lineWidth = 1.5
-      ctx.setLineDash([4, 3])
 
       ctx.beginPath()
       ctx.moveTo(selStartPx, 0)
@@ -286,8 +296,6 @@ export function renderOverlay(canvas, options) {
       ctx.moveTo(selEndPx, 0)
       ctx.lineTo(selEndPx, logicalHeight)
       ctx.stroke()
-
-      ctx.setLineDash([])
     }
   }
 
@@ -332,7 +340,8 @@ function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSec
 
   ctx.fillStyle = 'rgba(255,255,255,.32)'
   ctx.font = "600 8.5px 'JetBrains Mono', monospace"
-  ctx.textAlign = 'center'
+
+  const EDGE_PAD = 4
 
   for (let t = startTime; t <= endTime + tickInterval; t += tickInterval) {
     const x = (t - scrollLeft) * pixelsPerSecond
@@ -346,8 +355,21 @@ function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSec
     ctx.lineTo(x, logicalHeight)
     ctx.stroke()
 
-    // Label near the top edge
-    ctx.fillText(formatRulerTime(t), x, 13)
+    // Label near the top edge. Centring every label clips the ones whose tick
+    // sits on a canvas edge — at scroll 0 the "0s" label lost its digit and
+    // showed as a bare "s" — so labels near an edge flip to hugging it.
+    const label = formatRulerTime(t)
+    const half = ctx.measureText(label).width / 2
+    if (x - half < EDGE_PAD) {
+      ctx.textAlign = 'left'
+      ctx.fillText(label, x + EDGE_PAD, 13)
+    } else if (x + half > logicalWidth - EDGE_PAD) {
+      ctx.textAlign = 'right'
+      ctx.fillText(label, x - EDGE_PAD, 13)
+    } else {
+      ctx.textAlign = 'center'
+      ctx.fillText(label, x, 13)
+    }
   }
 }
 

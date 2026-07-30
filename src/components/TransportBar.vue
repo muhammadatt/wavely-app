@@ -5,10 +5,8 @@ import { startPlayback, stopPlayback } from '../audio/playback.js'
 import BaseButton from './ui/BaseButton.vue'
 
 const {
-  state, setPlayhead, getAudioContext, totalDuration, hasSelection,
+  state, setPlayhead, getAudioContext, totalDuration, hasSelection, toggleLoop,
 } = useEditorState()
-
-const isLooping = ref(false)
 const zoomLevel = ref(0) // 0-100 range for slider; 0 = fully zoomed out (fit to width)
 
 // Zoom bounds are owned by WaveformArea — the floor is "whole file fits the
@@ -58,7 +56,7 @@ function play() {
     },
     () => {
       state.isPlaying = false
-      if (isLooping.value) {
+      if (state.isLooping) {
         state.playhead = endAt ? startFrom : 0
         play()
       }
@@ -85,10 +83,6 @@ function skipBack() {
 function skipForward() {
   if (state.isPlaying) stop()
   setPlayhead(Math.min(totalDuration.value, state.playhead + 5))
-}
-
-function toggleLoop() {
-  isLooping.value = !isLooping.value
 }
 
 function handleTogglePlay() {
@@ -191,7 +185,7 @@ watch(() => state.segments, () => {
 
       <!-- Loop -->
       <BaseButton
-        size="sm" circle toggle :active="isLooping"
+        size="sm" circle toggle :active="state.isLooping"
         color="accent" accent="rgba(53,211,230,.14)" text-color="#7fe9f6"
         @click="toggleLoop"
         title="Loop"
