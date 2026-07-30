@@ -147,6 +147,11 @@ export function renderWaveform(canvas, options) {
   const centerY = logicalHeight / 2
   const amplitude = logicalHeight / 2 - 2 // Leave 2px padding
 
+  // Time grid — drawn first so the waveform fill paints over it, matching
+  // the reference design's layering (grid behind the waveform, inside the
+  // same box, rather than a separate ruler strip above it).
+  drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSecond)
+
   // Draw zero line
   ctx.strokeStyle = ZERO_LINE_COLOR
   ctx.lineWidth = 1
@@ -308,23 +313,11 @@ export function renderOverlay(canvas, options) {
 }
 
 /**
- * Render time ruler ticks.
+ * Draw vertical time-grid lines + labels inside the waveform box, near the
+ * top edge — the reference design overlays these on the waveform itself
+ * rather than in a separate ruler strip.
  */
-export function renderTimeRuler(canvas, options) {
-  const { scrollLeft = 0, pixelsPerSecond = 100, totalDuration = 0 } = options
-
-  const dpr = window.devicePixelRatio || 1
-  const logicalWidth = canvas.clientWidth
-  const logicalHeight = canvas.clientHeight
-
-  canvas.width = logicalWidth * dpr
-  canvas.height = logicalHeight * dpr
-
-  const ctx = canvas.getContext('2d')
-  ctx.scale(dpr, dpr)
-
-  ctx.clearRect(0, 0, logicalWidth, logicalHeight)
-
+function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSecond) {
   // Determine tick interval based on zoom
   let tickInterval = 1 // seconds
   if (pixelsPerSecond < 20) tickInterval = 10
@@ -337,36 +330,24 @@ export function renderTimeRuler(canvas, options) {
   const startTime = Math.floor(scrollLeft / tickInterval) * tickInterval
   const endTime = scrollLeft + logicalWidth / pixelsPerSecond
 
-  ctx.fillStyle = 'rgba(255,255,255,.42)'
-  ctx.font = "600 9.5px 'JetBrains Mono', monospace"
+  ctx.fillStyle = 'rgba(255,255,255,.32)'
+  ctx.font = "600 8.5px 'JetBrains Mono', monospace"
   ctx.textAlign = 'center'
 
   for (let t = startTime; t <= endTime + tickInterval; t += tickInterval) {
     const x = (t - scrollLeft) * pixelsPerSecond
     if (x < -50 || x > logicalWidth + 50) continue
 
-    // Major tick
-    ctx.strokeStyle = 'rgba(255,255,255,.22)'
+    // Full-height gridline, subtle — the waveform fill paints over it
+    ctx.strokeStyle = 'rgba(255,255,255,.05)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(x, logicalHeight - 8)
+    ctx.moveTo(x, 0)
     ctx.lineTo(x, logicalHeight)
     ctx.stroke()
 
-    // Label
-    ctx.fillText(formatRulerTime(t), x, logicalHeight - 12)
-
-    // Minor ticks (quarter intervals)
-    const minorInterval = tickInterval / 4
-    for (let m = 1; m < 4; m++) {
-      const mx = ((t + m * minorInterval) - scrollLeft) * pixelsPerSecond
-      if (mx < 0 || mx > logicalWidth) continue
-      ctx.strokeStyle = 'rgba(255,255,255,.08)'
-      ctx.beginPath()
-      ctx.moveTo(mx, logicalHeight - 4)
-      ctx.lineTo(mx, logicalHeight)
-      ctx.stroke()
-    }
+    // Label near the top edge
+    ctx.fillText(formatRulerTime(t), x, 13)
   }
 }
 

@@ -3,8 +3,8 @@ import { onMounted, onUnmounted } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import TopBar from './TopBar.vue'
 import FloatingToolbar from './FloatingToolbar.vue'
-import TimeRuler from './TimeRuler.vue'
 import WaveformOverview from './WaveformOverview.vue'
+import DbfsScale from './DbfsScale.vue'
 import WaveformArea from './WaveformArea.vue'
 import SelectionBar from './SelectionBar.vue'
 import TransportBar from './TransportBar.vue'
@@ -91,16 +91,18 @@ onUnmounted(() => {
       <!-- Workspace -->
       <div class="flex flex-col flex-1 overflow-hidden">
         <FloatingToolbar />
-        <TimeRuler />
         <!-- Waveform + SelectionBar overlay (overlay avoids resizing the canvas) -->
         <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px]">
           <WaveformOverview v-if="state.currentFile" />
-          <div
-            class="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-[12px]"
-            style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
-          >
-            <WaveformArea />
-            <SelectionBar class="absolute bottom-0 left-0 right-0 z-20" />
+          <div class="relative flex-1 min-h-0 flex gap-2">
+            <DbfsScale />
+            <div
+              class="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-[12px]"
+              style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
+            >
+              <WaveformArea />
+              <SelectionBar class="absolute bottom-0 left-0 right-0 z-20" />
+            </div>
           </div>
         </div>
         <TransportBar />
