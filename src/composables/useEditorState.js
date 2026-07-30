@@ -29,6 +29,7 @@ const state = reactive({
   // Playhead
   playhead: 0,
   isPlaying: false,
+  isLooping: false,
 
   // Clipboard
   clipboard: null,
@@ -308,6 +309,10 @@ export function useEditorState() {
     state.playhead = Math.max(0, Math.min(time, getTimelineDuration(state.segments)))
   }
 
+  function toggleLoop() {
+    state.isLooping = !state.isLooping
+  }
+
   // Tool
   function setActiveTool(tool) {
     if (state.activeTool === tool) {
@@ -414,6 +419,7 @@ export function useEditorState() {
     clearSelection,
     selectAll,
     setPlayhead,
+    toggleLoop,
 
     // Peak cache version (reactive trigger for watchers)
     peakCacheVersion,
