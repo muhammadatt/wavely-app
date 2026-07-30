@@ -275,11 +275,12 @@ onUnmounted(() => {
     <!-- Scrollbar — always visible; full-width thumb when not zoomed in -->
     <div
       ref="scrollbarTrack"
-      class="absolute bottom-0 left-0 right-0 h-2 bg-ink/10"
+      class="absolute bottom-0 left-0 right-0 h-2 bg-[rgba(255,255,255,.05)]"
     >
       <div
-        class="absolute top-0 h-full rounded-full bg-ink-mid/40 transition-colors"
-        :class="isScrollable ? 'hover:bg-ink-mid/65 cursor-grab' : ''"
+        class="absolute top-0 h-full rounded-full transition-colors"
+        :class="isScrollable ? 'hover:bg-[rgba(255,255,255,.32)] cursor-grab' : ''"
+        style="background:rgba(255,255,255,.18)"
         :style="{ left: thumbLeftPct + '%', width: thumbWidthPct + '%' }"
         @mousedown="handleScrollbarMouseDown"
       ></div>

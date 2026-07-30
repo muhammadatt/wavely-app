@@ -120,17 +120,18 @@ watch(() => state.segments, () => {
 </script>
 
 <template>
-  <div class="h-[76px] bg-surface border-t-2 border-border flex items-center px-6 gap-5 shrink-0">
+  <div class="h-[76px] flex items-center px-6 gap-5 shrink-0 border-t border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0d1013)">
     <!-- Time display -->
-    <div class="font-heading text-[28px] font-black text-ink tabular-nums min-w-[110px] tracking-tight">
-      {{ formatTime(state.playhead).main }}<span class="text-ink-mid">{{ formatTime(state.playhead).seconds }}</span><span class="text-ink-lt text-lg font-bold">{{ formatTime(state.playhead).ms }}</span>
+    <div class="font-['JetBrains_Mono'] text-[26px] font-bold tabular-nums min-w-[110px] tracking-tight text-[#eaf6f8]">
+      {{ formatTime(state.playhead).main }}<span class="text-[rgba(255,255,255,.4)]">{{ formatTime(state.playhead).seconds }}</span><span class="text-[rgba(255,255,255,.3)] text-[15px] font-semibold">{{ formatTime(state.playhead).ms }}</span>
     </div>
 
     <!-- Transport controls -->
-    <div class="flex items-center gap-2 flex-1 justify-center">
+    <div class="flex items-center gap-3 flex-1 justify-center">
       <!-- Skip to start -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink"
+        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
+        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)"
         @click="skipToStart"
         title="Skip to Start"
       >
@@ -139,7 +140,8 @@ watch(() => state.segments, () => {
 
       <!-- Skip back -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink"
+        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
+        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)"
         @click="skipBack"
         title="Skip Back 5s"
       >
@@ -148,20 +150,21 @@ watch(() => state.segments, () => {
 
       <!-- Play/Pause -->
       <button
-        class="w-14 h-14 rounded-full flex items-center justify-center border-none cursor-pointer transition-all shadow-[0_4px_0_var(--color-accent-dk),var(--shadow-accent)] hover:shadow-[0_6px_0_var(--color-accent-dk),0_8px_24px_rgba(255,107,107,0.4)] active:scale-96 active:shadow-[0_2px_0_var(--color-accent-dk)]"
-        :class="state.isPlaying ? 'bg-accent-dk' : 'bg-accent'"
+        class="w-[58px] h-[58px] rounded-full flex items-center justify-center border-none cursor-pointer transition-all"
+        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.45)"
         @click="togglePlay"
         title="Play/Pause (Space)"
       >
         <!-- Play icon -->
-        <svg v-if="!state.isPlaying" viewBox="0 0 24 24" class="w-[22px] h-[22px] ml-[3px]"><polygon points="6 3 20 12 6 21 6 3" fill="white"/></svg>
+        <svg v-if="!state.isPlaying" viewBox="0 0 24 24" class="w-[24px] h-[24px] ml-[3px]"><polygon points="6 3 20 12 6 21 6 3" fill="#08161a"/></svg>
         <!-- Pause icon -->
-        <svg v-else viewBox="0 0 24 24" class="w-[22px] h-[22px]"><rect x="6" y="4" width="4" height="16" rx="1" fill="white"/><rect x="14" y="4" width="4" height="16" rx="1" fill="white"/></svg>
+        <svg v-else viewBox="0 0 24 24" class="w-[24px] h-[24px]"><rect x="6" y="4" width="4" height="16" rx="1" fill="#08161a"/><rect x="14" y="4" width="4" height="16" rx="1" fill="#08161a"/></svg>
       </button>
 
       <!-- Skip forward -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 border-border bg-bg cursor-pointer text-ink-mid transition-all hover:bg-surface hover:border-ink-mid hover:text-ink"
+        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
+        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)"
         @click="skipForward"
         title="Skip Forward 5s"
       >
@@ -170,8 +173,10 @@ watch(() => state.segments, () => {
 
       <!-- Loop -->
       <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border-2 cursor-pointer transition-all"
-        :class="isLooping ? 'bg-accent-lt border-accent text-accent' : 'border-border bg-bg text-ink-mid hover:bg-surface hover:border-ink-mid hover:text-ink'"
+        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
+        :style="isLooping
+          ? 'border-color:rgba(53,211,230,.4);background:rgba(53,211,230,.12);color:#7fe9f6'
+          : 'border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)'"
         @click="toggleLoop"
         title="Loop"
       >
@@ -180,16 +185,39 @@ watch(() => state.segments, () => {
     </div>
 
     <!-- Zoom slider -->
-    <div class="flex items-center gap-2 text-ink-lt text-xs font-bold min-w-[140px] justify-end">
-      <span class="text-[11px] text-ink-lt font-bold">Zoom</span>
+    <div class="flex items-center gap-[11px] min-w-[140px] justify-end">
+      <span class="font-['Inter'] text-[10px] font-semibold text-[rgba(255,255,255,.4)]">Zoom</span>
       <input
         type="range"
         min="0"
         max="100"
         v-model.number="zoomLevel"
         @input="handleZoomSlider"
-        class="w-20 h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-mint"
+        class="zoom-slider w-20 h-[5px] rounded-full appearance-none cursor-pointer"
+        :style="{ background: `linear-gradient(to right, #35d3e6 ${zoomLevel}%, rgba(255,255,255,.1) ${zoomLevel}%)` }"
       />
     </div>
   </div>
 </template>
+
+<style scoped>
+.zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #eaf6f8;
+  box-shadow: 0 0 8px rgba(53, 211, 230, 0.6);
+  cursor: pointer;
+}
+.zoom-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: #eaf6f8;
+  box-shadow: 0 0 8px rgba(53, 211, 230, 0.6);
+  cursor: pointer;
+}
+</style>

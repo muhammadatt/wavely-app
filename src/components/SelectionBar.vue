@@ -38,39 +38,33 @@ function handlePaste() {
 <template>
   <div
     v-if="hasSelection"
-    class="h-10 bg-ink flex items-center px-3.5 gap-2.5 text-[12px] font-bold text-white shrink-0">
-    <div class="w-px h-3.5 bg-white/15"></div>
-
-    <span class="text-[11px] text-white/45 font-bold whitespace-nowrap"
+    class="h-9 flex items-center px-[14px] gap-[10px] font-['Inter'] shrink-0 border-t border-[rgba(255,255,255,.08)]"
+    style="background:rgba(5,7,9,.85);backdrop-filter:blur(4px)">
+    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase"
       >Selection</span
     >
-    <span
-      class="text-[12px] text-white font-extrabold font-heading tabular-nums"
+    <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[#7fe9f6] tabular-nums"
       >{{ formatTime(state.selection.start) }}</span
     >
-    <div class="w-px h-3.5 bg-white/15"></div>
-    <span class="text-[11px] text-white/45 font-bold">to</span>
-    <span
-      class="text-[12px] text-white font-extrabold font-heading tabular-nums"
+    <span class="text-[10.5px] text-[rgba(255,255,255,.3)] font-bold">→</span>
+    <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[#7fe9f6] tabular-nums"
       >{{ formatTime(state.selection.end) }}</span
     >
 
-    <div class="w-px h-3.5 bg-white/15"></div>
+    <div class="w-px h-3.5 bg-[rgba(255,255,255,.1)]"></div>
 
-    <span class="text-[11px] text-white/45 font-bold whitespace-nowrap"
+    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase"
       >Duration</span
     >
-    <span
-      class="text-[12px] text-white font-extrabold font-heading tabular-nums"
+    <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[rgba(255,255,255,.7)] tabular-nums"
       >{{ (state.selection.end - state.selection.start).toFixed(2) }}s</span
     >
 
-    <div class="w-px h-3.5 bg-white/15"></div>
-
-    <div class="flex items-center gap-[5px] ml-auto">
+    <div class="flex items-center gap-[6px] ml-auto">
       <!-- Select All — always visible when a file is loaded -->
       <button
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
+        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
+        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
         @click="selectAll">
         <svg
           viewBox="0 0 24 24"
@@ -82,7 +76,8 @@ function handlePaste() {
         Select All
       </button>
       <button
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
+        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
+        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
         @click="handleCopy">
         <svg
           viewBox="0 0 24 24"
@@ -95,7 +90,8 @@ function handlePaste() {
       </button>
       <button
         v-if="hasClipboard"
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
+        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
+        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
         @click="handlePaste">
         <svg
           viewBox="0 0 24 24"
@@ -107,7 +103,8 @@ function handlePaste() {
         Paste
       </button>
       <button
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-white/10 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-white/[0.22]"
+        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
+        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
         @click="performSilence">
         <svg
           viewBox="0 0 24 24"
@@ -120,7 +117,8 @@ function handlePaste() {
         Silence
       </button>
       <button
-        class="flex items-center gap-[5px] px-3 py-[5px] rounded-[var(--radius-pill)] bg-accent/30 text-white font-heading text-[11px] font-bold border-none cursor-pointer transition-all whitespace-nowrap hover:bg-[rgba(255,107,107,0.45)]"
+        class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
+        style="background:rgba(255,90,77,.16);color:#ff8a80"
         @click="handleCut">
         <svg
           viewBox="0 0 24 24"

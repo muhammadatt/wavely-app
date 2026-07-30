@@ -23,62 +23,66 @@ function handleExport() {
 </script>
 
 <template>
-  <div class="h-[62px] bg-surface border-b-2 border-border flex items-center px-5 gap-3 shrink-0 shadow-[0_2px_12px_rgba(45,42,62,0.06)] z-10">
+  <div
+    class="h-[56px] flex items-center px-5 gap-[13px] shrink-0 z-10 border-b border-[rgba(255,255,255,.06)]"
+    style="background:linear-gradient(180deg,#1e242b,#151a20)"
+  >
     <!-- Logo -->
-    <div class="flex items-center gap-2 shrink-0">
-      <div class="w-8 h-8 bg-accent rounded-[10px] flex items-center justify-center shadow-[0_3px_0_var(--color-accent-dk)]">
-        <svg viewBox="0 0 20 20" class="w-[17px] h-[17px]"><path d="M3 10 Q5 4 7 10 Q9 16 11 10 Q13 4 15 10 Q17 16 19 10" stroke="white" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+    <div class="flex items-center gap-[13px] shrink-0">
+      <div
+        class="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center"
+        style="background:linear-gradient(135deg,#7ef0ff,#25b6d0);box-shadow:0 0 16px rgba(53,211,230,.5)"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#08161a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h3l2-6 3 13 3-16 2 9h5"/></svg>
       </div>
-      <span class="font-heading text-xl font-black text-ink">Wavely</span>
+      <span class="font-['Inter'] text-[15px] font-extrabold tracking-[0.2em] text-[#eaf6f8]">WAVELY</span>
     </div>
 
-    <div class="w-px h-[22px] bg-border"></div>
+    <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)]"></div>
 
     <!-- Filename -->
-    <div class="flex-1 flex items-center gap-2 text-ink-mid text-[13px] overflow-hidden" v-if="state.currentFile">
-      <strong class="text-ink font-bold truncate max-w-[260px]">{{ state.currentFile.name }}</strong>
-      <span class="bg-purple-lt text-purple text-[10px] font-extrabold px-2 py-[1px] rounded-[var(--radius-sm)] border-2 border-border whitespace-nowrap tracking-[0.5px] shrink-0">
-        {{ state.currentFile.name.split('.').pop().toUpperCase() }}
-      </span>
-      <span class="text-[12px] text-ink-lt font-bold whitespace-nowrap shrink-0">
+    <div class="flex-1 flex items-center gap-[10px] overflow-hidden" v-if="state.currentFile">
+      <span class="font-['Inter'] text-[12.5px] font-medium text-[rgba(255,255,255,.6)] truncate max-w-[280px]">{{ state.currentFile.name }}</span>
+      <span
+        class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px] whitespace-nowrap shrink-0"
+        style="color:#7fe9f6;background:rgba(53,211,230,.14);border:1px solid rgba(53,211,230,.3)"
+      >{{ state.currentFile.name.split('.').pop().toUpperCase() }}</span>
+      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">
         {{ formatDuration(state.currentFile.duration) }}
       </span>
     </div>
 
     <!-- Actions -->
-    <div class="flex items-center gap-1.5">
+    <div class="flex items-center gap-2">
       <button
-        class="inline-flex items-center gap-1.5 font-heading text-[13px] font-bold px-[13px] py-[7px] rounded-full border-2 cursor-pointer transition-colors disabled:opacity-30 disabled:cursor-default disabled:pointer-events-none"
-        :class="canUndo
-          ? 'bg-transparent text-ink-mid border-transparent hover:bg-bg hover:border-border hover:text-ink'
-          : 'bg-transparent text-ink-lt border-transparent'"
+        class="flex items-center gap-[7px] font-['Inter'] text-[11.5px] font-semibold px-[13px] py-[8px] rounded-[9px] border cursor-pointer transition-colors disabled:cursor-default disabled:pointer-events-none"
+        :class="canUndo ? 'text-[rgba(255,255,255,.7)] border-[rgba(255,255,255,.09)] bg-[rgba(255,255,255,.04)] hover:bg-[rgba(255,255,255,.08)]' : 'text-[rgba(255,255,255,.22)] border-[rgba(255,255,255,.05)] bg-transparent'"
         :disabled="!canUndo"
         @click="undo"
         title="Undo (Ctrl+Z)"
       >
-        <svg viewBox="0 0 24 24" class="w-[14px] h-[14px] stroke-current fill-none shrink-0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg>
         Undo
       </button>
       <button
-        class="inline-flex items-center gap-1.5 font-heading text-[13px] font-bold px-[13px] py-[7px] rounded-full border-2 cursor-pointer transition-colors disabled:opacity-30 disabled:cursor-default disabled:pointer-events-none"
-        :class="canRedo
-          ? 'bg-transparent text-ink-mid border-transparent hover:bg-bg hover:border-border hover:text-ink'
-          : 'bg-transparent text-ink-lt border-transparent'"
+        class="flex items-center gap-[7px] font-['Inter'] text-[11.5px] font-semibold px-[13px] py-[8px] rounded-[9px] border cursor-pointer transition-colors disabled:cursor-default disabled:pointer-events-none"
+        :class="canRedo ? 'text-[rgba(255,255,255,.7)] border-[rgba(255,255,255,.09)] bg-[rgba(255,255,255,.04)] hover:bg-[rgba(255,255,255,.08)]' : 'text-[rgba(255,255,255,.22)] border-[rgba(255,255,255,.05)] bg-transparent'"
         :disabled="!canRedo"
         @click="redo"
         title="Redo (Ctrl+Shift+Z)"
       >
-        <svg viewBox="0 0 24 24" class="w-[14px] h-[14px] stroke-current fill-none shrink-0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3L21 13"/></svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h4"/></svg>
         Redo
       </button>
 
-      <div class="w-px h-6 bg-border mx-1"></div>
+      <div class="w-px h-6 bg-[rgba(255,255,255,.1)] mx-1"></div>
 
       <button
-        class="inline-flex items-center gap-1.5 bg-mint text-white font-heading text-[13px] font-extrabold px-[18px] py-2 rounded-full border-none cursor-pointer transition-all shadow-[0_3px_0_#2aaa8f,var(--shadow-mint)] hover:-translate-y-px hover:shadow-[0_5px_0_#2aaa8f,0_8px_20px_rgba(62,207,178,0.35)] active:translate-y-[2px] active:shadow-[0_1px_0_#2aaa8f]"
+        class="flex items-center gap-2 border-none cursor-pointer font-['Inter'] text-[12px] font-bold tracking-[0.02em] px-[18px] py-[9px] rounded-[10px]"
+        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
         @click="handleExport"
       >
-        <svg viewBox="0 0 24 24" class="w-[14px] h-[14px] stroke-white fill-none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>
         Export
       </button>
     </div>

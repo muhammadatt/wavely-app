@@ -43,35 +43,36 @@ async function applyVolume() {
 </script>
 
 <template>
-  <div>
+  <div class="font-['Inter']">
     <!-- Header -->
-    <div class="px-4 pt-[18px] pb-[14px] border-b-2 border-border">
-      <div class="font-heading text-[17px] font-black text-ink mb-[3px]">Volume</div>
-      <div class="text-[11px] text-ink-lt font-bold">Adjust the volume of the selected region</div>
+    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
+      <div class="text-[15px] font-bold text-[#eaf6f8]">Volume</div>
+      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Adjust the volume of the selected region</div>
     </div>
 
     <!-- Body -->
     <div class="px-4 py-4 flex flex-col gap-4">
 
       <!-- dB slider -->
-      <div>
+      <div class="rounded-[12px] p-[14px]" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
         <div class="flex items-center justify-between mb-2">
-          <label class="text-[11px] text-ink-mid font-extrabold uppercase tracking-[0.6px]">Gain</label>
+          <label class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[.14em] text-[rgba(255,255,255,.4)] uppercase">Gain</label>
           <div class="flex items-center gap-1">
             <span
-              class="font-heading text-[15px] font-black tabular-nums"
-              :class="gainDb > 0 ? 'text-mint' : gainDb < 0 ? 'text-accent' : 'text-ink-mid'"
+              class="font-['JetBrains_Mono'] text-[15px] font-bold tabular-nums"
+              :style="{ color: gainDb > 0 ? '#5df0b0' : gainDb < 0 ? '#ff8a80' : 'rgba(255,255,255,.5)' }"
             >{{ gainDb >= 0 ? '+' : '' }}{{ gainDisplay }}</span>
-            <span class="text-[10px] text-ink-lt font-bold">dB</span>
+            <span class="text-[10px] font-semibold text-[rgba(255,255,255,.4)]">dB</span>
           </div>
         </div>
         <input
           type="range" min="-30" max="30" step="0.5"
           v-model.number="gainDb"
           @input="onGainInput"
-          class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-purple"
+          class="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+          style="background:rgba(255,255,255,.1);accent-color:#35d3e6"
         />
-        <div class="flex justify-between mt-1 text-[10px] text-ink-lt font-bold">
+        <div class="flex justify-between mt-1 text-[10px] font-semibold text-[rgba(255,255,255,.35)]">
           <span>-30 dB</span>
           <span>0</span>
           <span>+30 dB</span>
@@ -80,15 +81,15 @@ async function applyVolume() {
 
       <!-- Quick presets -->
       <div>
-        <div class="text-[11px] text-ink-mid font-extrabold uppercase tracking-[0.6px] mb-2">Quick presets</div>
-        <div class="flex flex-wrap gap-1.5">
+        <div class="text-[11px] font-semibold text-[rgba(255,255,255,.4)] mb-2">Quick presets</div>
+        <div class="flex flex-wrap gap-[6px]">
           <button
             v-for="preset in [-12, -6, -3, 3, 6, 12]"
             :key="preset"
-            class="px-2.5 py-1 rounded-[var(--radius-pill)] text-[11px] font-extrabold font-heading border-2 cursor-pointer transition-colors"
-            :class="gainDb === preset
-              ? 'bg-purple text-white border-purple'
-              : 'bg-bg text-ink-mid border-border hover:border-purple-lt hover:text-purple'"
+            class="px-[10px] py-1 rounded-full text-[11px] font-bold border cursor-pointer transition-colors"
+            :style="gainDb === preset
+              ? 'background:#35d3e6;color:#08161a;border-color:#35d3e6'
+              : 'background:rgba(255,255,255,.03);color:rgba(255,255,255,.5);border-color:rgba(255,255,255,.09)'"
             @click="gainDb = preset; onGainInput()"
           >
             {{ preset > 0 ? '+' : '' }}{{ preset }} dB
@@ -100,7 +101,8 @@ async function applyVolume() {
 
       <!-- Apply button -->
       <button
-        class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+        class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
+        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
         :disabled="!hasSelection || gainDb === 0"
         @click="applyVolume"
       >
@@ -109,11 +111,11 @@ async function applyVolume() {
       </button>
 
       <!-- No-selection warning -->
-      <div class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed transition-opacity duration-700"
+      <div class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed transition-opacity duration-700"
+           style="color:#e0b84a;background:rgba(224,184,74,.08);border:1px solid rgba(224,184,74,.32)"
            :class="hasSelection ? 'opacity-0' : 'opacity-100'">
         Make a selection on the waveform to apply
       </div>
     </div>
   </div>
 </template>
-

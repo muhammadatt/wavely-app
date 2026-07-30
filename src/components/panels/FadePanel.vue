@@ -30,30 +30,26 @@ function apply() {
 </script>
 
 <template>
-  <div>
-    <div class="px-4 pt-[18px] pb-[14px] border-b-2 border-border">
-      <div class="font-heading text-[17px] font-black text-ink mb-[3px]">
-        Fade
-      </div>
-      <div class="text-[11px] text-ink-lt font-bold">
+  <div class="font-['Inter']">
+    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
+      <div class="text-[15px] font-bold text-[#eaf6f8]">Fade</div>
+      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">
         Shape the volume curve at the selection edges
       </div>
     </div>
 
-    <div class="p-3 flex flex-col gap-3">
+    <div class="p-4 flex flex-col gap-[14px]">
       <!-- Fade type -->
       <div>
-        <div class="text-[11px] font-bold text-ink-mid mb-2">Type</div>
-        <div class="flex gap-1.5">
+        <div class="text-[11px] font-semibold text-[rgba(255,255,255,.4)] mb-2">Type</div>
+        <div class="flex gap-[6px]">
           <button
             v-for="ft in fadeTypes"
             :key="ft.id"
-            class="flex-1 flex flex-col items-center gap-[5px] py-2.5 px-1 rounded-[var(--radius-md)] border-2 text-[10px] font-bold cursor-pointer transition-all"
-            :class="
-              fadeType === ft.id
-                ? 'border-accent bg-accent-lt text-accent'
-                : 'border-border bg-bg text-ink-mid hover:border-purple hover:text-ink'
-            "
+            class="flex-1 flex flex-col items-center gap-[5px] py-[10px] px-1 rounded-[12px] border text-[10px] font-semibold cursor-pointer transition-all"
+            :style="fadeType === ft.id
+              ? 'border-color:rgba(53,211,230,.5);background:rgba(53,211,230,.12);color:#7fe9f6'
+              : 'border-color:rgba(255,255,255,.07);background:rgba(255,255,255,.03);color:rgba(255,255,255,.5)'"
             @click="fadeType = ft.id">
             <svg viewBox="0 0 48 24" fill="none" class="w-9 h-[18px]">
               <path
@@ -69,17 +65,15 @@ function apply() {
 
       <!-- Curve shape -->
       <div>
-        <div class="text-[11px] font-bold text-ink-mid mb-2">Curve</div>
-        <div class="flex gap-1.5">
+        <div class="text-[11px] font-semibold text-[rgba(255,255,255,.4)] mb-2">Curve</div>
+        <div class="flex gap-[6px]">
           <button
             v-for="ct in curveTypes"
             :key="ct.id"
-            class="flex-1 flex flex-col items-center gap-[5px] py-2.5 px-1 rounded-[var(--radius-md)] border-2 text-[10px] font-bold cursor-pointer transition-all"
-            :class="
-              curveType === ct.id
-                ? 'border-accent bg-accent-lt text-accent'
-                : 'border-border bg-bg text-ink-mid hover:border-purple hover:text-ink'
-            "
+            class="flex-1 flex flex-col items-center gap-[5px] py-[10px] px-1 rounded-[12px] border text-[10px] font-semibold cursor-pointer transition-all"
+            :style="curveType === ct.id
+              ? 'border-color:rgba(53,211,230,.5);background:rgba(53,211,230,.12);color:#7fe9f6'
+              : 'border-color:rgba(255,255,255,.07);background:rgba(255,255,255,.03);color:rgba(255,255,255,.5)'"
             @click="curveType = ct.id">
             <svg viewBox="0 0 48 24" fill="none" class="w-9 h-[18px]">
               <path
@@ -93,24 +87,24 @@ function apply() {
         </div>
       </div>
 
-      <!-- Duration slider -->
-      <div>
-        <div class="flex justify-between items-center mb-1.5">
-          <span class="text-[11px] font-bold text-ink-mid">Duration</span>
-          <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{
-            durationDisplay()
-          }}</span>
+      <!-- Duration -->
+      <div class="rounded-[12px] p-[14px]" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[.14em] text-[rgba(255,255,255,.4)] uppercase">Duration</span>
+          <span class="font-['JetBrains_Mono'] text-[15px] font-bold text-[#7fe9f6] tabular-nums">{{ durationDisplay() }}</span>
         </div>
         <input
           type="range"
           min="1"
           max="100"
           v-model.number="duration"
-          class="w-full h-1.5 rounded-full appearance-none bg-border cursor-pointer accent-accent" />
+          class="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+          style="background:rgba(255,255,255,.1);accent-color:#35d3e6" />
       </div>
 
       <button
-        class="mt-1 w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+        class="mt-1 w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
+        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
         :disabled="!hasSelection"
         @click="apply">
         <svg
@@ -123,7 +117,8 @@ function apply() {
       </button>
 
       <div
-        class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed transition-opacity duration-700"
+        class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed transition-opacity duration-700"
+        style="color:#e0b84a;background:rgba(224,184,74,.08);border:1px solid rgba(224,184,74,.32)"
         :class="hasSelection ? 'opacity-0' : 'opacity-100'">
         Make a selection on the waveform to apply fade
       </div>

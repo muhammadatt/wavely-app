@@ -50,48 +50,42 @@ const options = [
 </script>
 
 <template>
-  <div>
-    <div class="px-4 pt-[18px] pb-[14px] border-b-2 border-border">
-      <div class="font-heading text-[17px] font-black text-ink mb-[3px]">
-        Trim
-      </div>
-      <div class="text-[11px] text-ink-lt font-bold">
+  <div class="font-['Inter']">
+    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
+      <div class="text-[15px] font-bold text-[#eaf6f8]">Trim</div>
+      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">
         Remove audio outside or inside your selection
       </div>
     </div>
 
-    <div class="p-3 flex flex-col gap-2">
-      <label
+    <div class="p-4 flex flex-col gap-2.5">
+      <button
         v-for="opt in options"
         :key="opt.id"
-        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all"
-        :class="
-          mode === opt.id
-            ? 'border-accent bg-accent-lt'
-            : 'border-border bg-bg hover:border-purple'
-        "
+        class="text-left px-[14px] py-[13px] rounded-[12px] border cursor-pointer transition-all"
+        :style="mode === opt.id
+          ? 'background:rgba(53,211,230,.12);border-color:rgba(53,211,230,.5);box-shadow:0 0 20px rgba(53,211,230,.15)'
+          : 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.07)'"
         @click="mode = opt.id">
-        <div
-          class="w-4 h-4 rounded-full border-[2.5px] mt-[1px] shrink-0 flex items-center justify-center transition-all"
-          :class="
-            mode === opt.id
-              ? 'border-accent bg-accent shadow-[inset_0_0_0_3px_white]'
-              : 'border-ink-lt'
-          "></div>
-        <div>
-          <div
-            class="font-heading text-[12px] font-bold text-ink mb-[2px]"
-            :class="{ 'text-accent-dk': mode === opt.id }">
-            {{ opt.label }}
-          </div>
-          <div class="text-[11px] text-ink-lt font-semibold leading-snug">
-            {{ opt.desc }}
+        <div class="flex items-start gap-[11px]">
+          <span class="relative top-[1px] w-4 h-4 rounded-full border-[1.5px] shrink-0 flex items-center justify-center"
+            style="border-color:rgba(255,255,255,.25)">
+            <span v-if="mode === opt.id" class="w-2 h-2 rounded-full" style="background:#35d3e6;box-shadow:0 0 8px #35d3e6"></span>
+          </span>
+          <div>
+            <div class="text-[12.5px] font-semibold mb-[2px]" :style="{ color: mode === opt.id ? '#7fe9f6' : '#eaf6f8' }">
+              {{ opt.title ?? opt.label }}
+            </div>
+            <div class="text-[10.5px] leading-snug font-medium text-[rgba(255,255,255,.4)]">
+              {{ opt.desc }}
+            </div>
           </div>
         </div>
-      </label>
+      </button>
 
       <button
-        class="mt-1 w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+        class="mt-1 w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
+        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
         :disabled="!hasSelection"
         @click="apply">
         <svg
@@ -104,7 +98,8 @@ const options = [
       </button>
 
       <div
-        class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed transition-opacity duration-700"
+        class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed transition-opacity duration-700"
+        style="color:#e0b84a;background:rgba(224,184,74,.08);border:1px solid rgba(224,184,74,.32)"
         :class="hasSelection ? 'opacity-0' : 'opacity-100'">
         Make a selection on the waveform to trim
       </div>

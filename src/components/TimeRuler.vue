@@ -39,7 +39,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-7 shrink-0 bg-surface border-b-2 border-border">
+  <div class="h-7 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:#0e1216">
     <canvas ref="canvas" class="w-full h-full"></canvas>
   </div>
 </template>

@@ -7,12 +7,12 @@ import { getSegmentDuration } from './operations.js'
  * Handles devicePixelRatio for retina displays.
  */
 
-const WAVEFORM_COLOR = '#3ECFB2'
-const WAVEFORM_COLOR_LIGHT = 'rgba(62, 207, 178, 0.3)'
-const SELECTION_COLOR = 'rgba(155, 137, 245, 0.15)'
-const SELECTION_BORDER_COLOR = '#9B89F5'
-const PLAYHEAD_COLOR = '#FF6B6B'
-const ZERO_LINE_COLOR = 'rgba(232, 230, 245, 0.5)'
+const WAVEFORM_FILL = '#2fa377'
+const WAVEFORM_EDGE = '#5df0b0'
+const SELECTION_COLOR = 'rgba(53, 211, 230, 0.07)'
+const SELECTION_BORDER_COLOR = 'rgba(53, 211, 230, 0.55)'
+const PLAYHEAD_COLOR = '#ff5a4d'
+const ZERO_LINE_COLOR = 'rgba(255, 255, 255, 0.07)'
 
 /**
  * Compute peaks for a segment using its peak cache.
@@ -151,7 +151,7 @@ export function renderWaveform(canvas, options) {
 
     if (peaks.length === 0) continue
 
-    // Draw filled waveform
+    // Filled body — solid, opaque, mid-tone
     ctx.beginPath()
     for (let i = 0; i < peaks.length; i++) {
       const x = visibleStartPx + i
@@ -165,14 +165,31 @@ export function renderWaveform(canvas, options) {
       ctx.lineTo(x, yBottom)
     }
     ctx.closePath()
-
-    // Gradient fill
-    const grad = ctx.createLinearGradient(0, 0, 0, logicalHeight)
-    grad.addColorStop(0, WAVEFORM_COLOR)
-    grad.addColorStop(0.5, WAVEFORM_COLOR)
-    grad.addColorStop(1, WAVEFORM_COLOR_LIGHT)
-    ctx.fillStyle = grad
+    ctx.fillStyle = WAVEFORM_FILL
     ctx.fill()
+
+    // Brighter thin contour along the top and bottom edges
+    ctx.strokeStyle = WAVEFORM_EDGE
+    ctx.lineWidth = 1.3
+    ctx.lineJoin = 'round'
+
+    ctx.beginPath()
+    for (let i = 0; i < peaks.length; i++) {
+      const x = visibleStartPx + i
+      const yTop = centerY + peaks[i].max * amplitude
+      if (i === 0) ctx.moveTo(x, yTop)
+      else ctx.lineTo(x, yTop)
+    }
+    ctx.stroke()
+
+    ctx.beginPath()
+    for (let i = 0; i < peaks.length; i++) {
+      const x = visibleStartPx + i
+      const yBottom = centerY + peaks[i].min * amplitude
+      if (i === 0) ctx.moveTo(x, yBottom)
+      else ctx.lineTo(x, yBottom)
+    }
+    ctx.stroke()
   }
 
 }
@@ -286,8 +303,8 @@ export function renderTimeRuler(canvas, options) {
   const startTime = Math.floor(scrollLeft / tickInterval) * tickInterval
   const endTime = scrollLeft + logicalWidth / pixelsPerSecond
 
-  ctx.fillStyle = '#7B789A'
-  ctx.font = '10px "Nunito Sans", sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,.42)'
+  ctx.font = "600 9.5px 'JetBrains Mono', monospace"
   ctx.textAlign = 'center'
 
   for (let t = startTime; t <= endTime + tickInterval; t += tickInterval) {
@@ -295,7 +312,7 @@ export function renderTimeRuler(canvas, options) {
     if (x < -50 || x > logicalWidth + 50) continue
 
     // Major tick
-    ctx.strokeStyle = '#C4C2D4'
+    ctx.strokeStyle = 'rgba(255,255,255,.22)'
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(x, logicalHeight - 8)
@@ -310,7 +327,7 @@ export function renderTimeRuler(canvas, options) {
     for (let m = 1; m < 4; m++) {
       const mx = ((t + m * minorInterval) - scrollLeft) * pixelsPerSecond
       if (mx < 0 || mx > logicalWidth) continue
-      ctx.strokeStyle = '#E8E6F5'
+      ctx.strokeStyle = 'rgba(255,255,255,.08)'
       ctx.beginPath()
       ctx.moveTo(mx, logicalHeight - 4)
       ctx.lineTo(mx, logicalHeight)

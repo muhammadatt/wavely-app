@@ -19,49 +19,58 @@ function apply() {
 </script>
 
 <template>
-  <div>
+  <div class="font-['Inter']">
     <!-- Panel header -->
-    <div class="px-4 pt-[18px] pb-[14px] border-b-2 border-border">
-      <div class="font-heading text-[17px] font-black text-ink mb-[3px]">Split</div>
-      <div class="text-[11px] text-ink-lt font-bold">Divide the audio into two separate clips</div>
+    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
+      <div class="text-[15px] font-bold text-[#eaf6f8]">Split</div>
+      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Divide the audio into two separate clips</div>
     </div>
 
     <!-- Panel body -->
-    <div class="p-3 flex flex-col gap-2">
-      <label
-        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all"
-        :class="mode === 'playhead' ? 'border-accent bg-accent-lt' : 'border-border bg-bg hover:border-purple'"
+    <div class="p-4 flex flex-col gap-2.5">
+      <button
+        class="text-left px-[14px] py-[13px] rounded-[12px] border cursor-pointer transition-all"
+        :style="mode === 'playhead'
+          ? 'background:rgba(53,211,230,.12);border-color:rgba(53,211,230,.5);box-shadow:0 0 20px rgba(53,211,230,.15)'
+          : 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.07)'"
         @click="mode = 'playhead'"
       >
-        <div class="w-4 h-4 rounded-full border-[2.5px] mt-[1px] shrink-0 flex items-center justify-center transition-all"
-             :class="mode === 'playhead' ? 'border-accent bg-accent shadow-[inset_0_0_0_3px_white]' : 'border-ink-lt'">
+        <div class="flex items-start gap-[11px]">
+          <span class="relative top-[1px] w-4 h-4 rounded-full border-[1.5px] shrink-0 flex items-center justify-center" style="border-color:rgba(255,255,255,.25)">
+            <span v-if="mode === 'playhead'" class="w-2 h-2 rounded-full" style="background:#35d3e6;box-shadow:0 0 8px #35d3e6"></span>
+          </span>
+          <div>
+            <div class="text-[12.5px] font-semibold mb-[2px]" :style="{ color: mode === 'playhead' ? '#7fe9f6' : '#eaf6f8' }">Split at playhead</div>
+            <div class="text-[10.5px] leading-snug font-medium text-[rgba(255,255,255,.4)]">Cuts at the current playhead position</div>
+          </div>
         </div>
-        <div>
-          <div class="font-heading text-[12px] font-bold text-ink mb-[2px]" :class="{ 'text-accent-dk': mode === 'playhead' }">Split at playhead</div>
-          <div class="text-[11px] text-ink-lt font-semibold leading-snug">Cuts at the current playhead position</div>
-        </div>
-      </label>
+      </button>
 
-      <label
-        class="flex items-start gap-2.5 px-[13px] py-[11px] rounded-[var(--radius-md)] border-2 cursor-pointer transition-all"
-        :class="mode === 'selection' ? 'border-accent bg-accent-lt' : 'border-border bg-bg hover:border-purple'"
+      <button
+        class="text-left px-[14px] py-[13px] rounded-[12px] border cursor-pointer transition-all"
+        :style="mode === 'selection'
+          ? 'background:rgba(53,211,230,.12);border-color:rgba(53,211,230,.5);box-shadow:0 0 20px rgba(53,211,230,.15)'
+          : 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.07)'"
         @click="mode = 'selection'"
       >
-        <div class="w-4 h-4 rounded-full border-[2.5px] mt-[1px] shrink-0 flex items-center justify-center transition-all"
-             :class="mode === 'selection' ? 'border-accent bg-accent shadow-[inset_0_0_0_3px_white]' : 'border-ink-lt'">
+        <div class="flex items-start gap-[11px]">
+          <span class="relative top-[1px] w-4 h-4 rounded-full border-[1.5px] shrink-0 flex items-center justify-center" style="border-color:rgba(255,255,255,.25)">
+            <span v-if="mode === 'selection'" class="w-2 h-2 rounded-full" style="background:#35d3e6;box-shadow:0 0 8px #35d3e6"></span>
+          </span>
+          <div>
+            <div class="text-[12.5px] font-semibold mb-[2px]" :style="{ color: mode === 'selection' ? '#7fe9f6' : '#eaf6f8' }">Split at selection edges</div>
+            <div class="text-[10.5px] leading-snug font-medium text-[rgba(255,255,255,.4)]">Creates cuts at both ends of your selection</div>
+          </div>
         </div>
-        <div>
-          <div class="font-heading text-[12px] font-bold text-ink mb-[2px]" :class="{ 'text-accent-dk': mode === 'selection' }">Split at selection edges</div>
-          <div class="text-[11px] text-ink-lt font-semibold leading-snug">Creates cuts at both ends of your selection</div>
-        </div>
-      </label>
+      </button>
 
-      <div v-if="mode === 'selection' && !hasSelection" class="text-[11px] text-ink-mid font-bold bg-yellow-lt border-2 border-yellow rounded-[var(--radius-md)] px-3 py-2.5 text-center leading-relaxed">
+      <div v-if="mode === 'selection' && !hasSelection" class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed" style="color:#e0b84a;background:rgba(224,184,74,.08);border:1px solid rgba(224,184,74,.32)">
         Make a selection on the waveform first
       </div>
 
       <button
-        class="mt-1 w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+        class="mt-1 w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
+        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
         :disabled="mode === 'selection' && !hasSelection"
         @click="apply"
       >

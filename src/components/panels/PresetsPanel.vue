@@ -209,39 +209,42 @@ async function handleProcess() {
 </script>
 
 <template>
-  <div>
+  <div class="font-['Inter']">
     <!-- Header -->
-    <div class="px-4 pt-[18px] pb-[14px] border-b-2 border-border">
-      <div class="font-heading text-[17px] font-black text-ink mb-[3px]">Instant Polish</div>
-      <div class="text-[11px] text-ink-lt font-bold">Audio processing presets</div>
+    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
+      <div class="text-[15px] font-bold text-[#eaf6f8]">Instant Polish</div>
+      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Audio processing presets</div>
     </div>
 
-    <div class="p-3 flex flex-col gap-3">
+    <div class="p-4 flex flex-col gap-[14px]">
       <!-- Preset cards -->
-      <div class="flex flex-col gap-1.5">
+      <div class="flex flex-col gap-[6px]">
         <button
           v-for="preset in presetList"
           :key="preset.id"
-          class="w-full flex items-center gap-2.5 px-[13px] py-3 border-2 rounded-[var(--radius-md)] cursor-pointer text-left select-none transition-all bg-surface"
-          :class="state.selectedPreset === preset.id ? 'border-accent shadow-[0_0_0_1px_var(--color-accent)]' : 'border-border hover:border-ink-lt'"
+          class="w-full flex items-center gap-[10px] px-[13px] py-3 border rounded-[12px] cursor-pointer text-left select-none transition-all"
+          :style="state.selectedPreset === preset.id
+            ? 'background:rgba(53,211,230,.1);border-color:rgba(53,211,230,.5);box-shadow:0 0 20px rgba(53,211,230,.12)'
+            : 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.07)'"
           @click="setPreset(preset.id)"
         >
-          <div class="w-[34px] h-[34px] rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
-               :class="state.selectedPreset === preset.id ? 'bg-accent-lt' : 'bg-bg'">
-            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                 :class="state.selectedPreset === preset.id ? 'stroke-accent' : 'stroke-ink-mid'"
+          <div class="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center shrink-0 transition-colors"
+               :style="state.selectedPreset === preset.id ? 'background:rgba(53,211,230,.14)' : 'background:rgba(255,255,255,.04)'">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                 :style="{ color: state.selectedPreset === preset.id ? '#7fe9f6' : 'rgba(255,255,255,.5)' }"
                  v-html="presetIcons[preset.id]"></svg>
           </div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1.5">
-              <div class="font-heading text-[13px] font-extrabold text-ink">{{ preset.displayName }}</div>
+            <div class="flex items-center gap-[6px]">
+              <div class="text-[13px] font-bold text-[#eaf6f8]">{{ preset.displayName }}</div>
               <span v-if="COMING_SOON_PRESETS.has(preset.id)"
-                    class="inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-[var(--radius-pill)] bg-ink-lt text-white leading-none">
+                    class="inline-block text-[9px] font-extrabold uppercase px-[6px] py-0.5 rounded-full leading-none"
+                    style="background:rgba(255,255,255,.15);color:#eaf6f8">
                 Coming soon
               </span>
             </div>
-            <div class="text-[11px] text-ink-lt font-semibold mt-[1px] truncate">{{ preset.description }}</div>
-            <span class="inline-block text-[10px] font-bold text-ink-mid bg-bg rounded-[var(--radius-pill)] px-2 py-0.5 mt-1.5">
+            <div class="text-[11px] font-medium mt-[1px] truncate text-[rgba(255,255,255,.42)]">{{ preset.description }}</div>
+            <span class="inline-block text-[10px] font-bold rounded-full px-2 py-0.5 mt-[6px]" style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.5)">
               {{ preset.audience }}
             </span>
           </div>
@@ -250,121 +253,122 @@ async function handleProcess() {
 
       <!-- Output profile selector -->
       <div>
-        <div class="text-[11px] font-bold text-ink-mid mb-2">Output Profile</div>
-        <div class="flex gap-1.5 relative"
+        <div class="text-[11px] font-semibold text-[rgba(255,255,255,.4)] mb-2">Output Profile</div>
+        <div class="flex gap-[6px] relative"
              :class="{ 'opacity-45 pointer-events-none': outputProfileLocked }">
           <button
             v-for="op in outputProfileList"
             :key="op.id"
-            class="flex-1 text-center text-[11px] font-bold py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
-            :class="state.selectedOutputProfile === op.id
-              ? 'border-accent bg-accent-lt text-accent'
-              : 'border-border bg-surface text-ink-mid hover:border-ink-lt'"
+            class="flex-1 text-center text-[11px] font-bold py-2 rounded-[10px] border cursor-pointer transition-all"
+            :style="state.selectedOutputProfile === op.id
+              ? 'border-color:rgba(53,211,230,.5);background:rgba(53,211,230,.12);color:#7fe9f6'
+              : 'border-color:rgba(255,255,255,.07);background:rgba(255,255,255,.03);color:rgba(255,255,255,.5)'"
             @click="setOutputProfile(op.id)"
           >
             {{ op.displayName }}
           </button>
         </div>
         <!-- Locked indicator -->
-        <div v-if="outputProfileLocked" class="flex items-center gap-1 mt-1.5 text-[10px] text-ink-lt font-bold">
+        <div v-if="outputProfileLocked" class="flex items-center gap-1 mt-[6px] text-[10px] font-bold text-[rgba(255,255,255,.35)]">
           <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
           </svg>
           Locked to {{ OUTPUT_PROFILES[currentPreset?.defaultOutputProfile]?.displayName }}
         </div>
         <!-- Override note -->
-        <div v-if="!outputProfileLocked && isOverridden" class="mt-1.5 text-[10px] text-yellow font-bold leading-snug">
+        <div v-if="!outputProfileLocked && isOverridden" class="mt-[6px] text-[10px] font-bold leading-snug" style="color:#e0b84a">
           Override: using {{ OUTPUT_PROFILES[state.selectedOutputProfile]?.displayName }} profile with {{ currentPreset?.displayName }} preset
         </div>
         <!-- Noise Eraser + ACX warning -->
-        <div v-if="showNoiseEraserAcxWarning" class="mt-1.5 text-[10px] text-accent font-bold leading-snug">
+        <div v-if="showNoiseEraserAcxWarning" class="mt-[6px] text-[10px] font-bold leading-snug text-[#ff8a80]">
           ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.
         </div>
         <!-- ClearerVoice Eraser + ACX warning -->
-        <div v-if="showClearerVoiceAcxWarning" class="mt-1.5 text-[10px] text-accent font-bold leading-snug">
+        <div v-if="showClearerVoiceAcxWarning" class="mt-[6px] text-[10px] font-bold leading-snug text-[#ff8a80]">
           ACX compliance is not recommended for ClearerVoice Eraser output. Enhancement artifacts may cause ACX human review rejection even if measurements pass.
         </div>
       </div>
 
       <!-- ClearerVoice Eraser: enhancement model toggle -->
-      <div v-if="isClearerVoiceEraser" class="bg-bg rounded-[var(--radius-md)] p-3 flex flex-col gap-2">
-        <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider">Enhancement Model</div>
-        <div class="flex gap-1.5">
+      <div v-if="isClearerVoiceEraser" class="rounded-[12px] p-3 flex flex-col gap-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+        <div class="text-[11px] font-bold text-[rgba(255,255,255,.4)] uppercase tracking-wider">Enhancement Model</div>
+        <div class="flex gap-[6px]">
           <button
             v-for="m in [{ id: 'mossformer2_48k', label: 'Quality', sub: 'Full-band 48 kHz, slower' }, { id: 'frcrn_16k', label: 'Fast', sub: '16 kHz, quicker' }]"
             :key="m.id"
-            class="flex-1 text-left px-2.5 py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
-            :class="clearervoiceModel === m.id
-              ? 'border-accent bg-accent-lt'
-              : 'border-border bg-surface hover:border-ink-lt'"
+            class="flex-1 text-left px-[10px] py-2 rounded-[10px] border cursor-pointer transition-all"
+            :style="clearervoiceModel === m.id
+              ? 'border-color:rgba(53,211,230,.5);background:rgba(53,211,230,.12)'
+              : 'border-color:rgba(255,255,255,.07);background:rgba(255,255,255,.02)'"
             @click="setClearervoiceModel(m.id)"
           >
-            <div class="text-[12px] font-extrabold" :class="clearervoiceModel === m.id ? 'text-accent' : 'text-ink'">{{ m.label }}</div>
-            <div class="text-[10px] font-semibold mt-0.5" :class="clearervoiceModel === m.id ? 'text-accent' : 'text-ink-lt'">{{ m.sub }}</div>
+            <div class="text-[12px] font-extrabold" :style="{ color: clearervoiceModel === m.id ? '#7fe9f6' : '#eaf6f8' }">{{ m.label }}</div>
+            <div class="text-[10px] font-semibold mt-0.5" :style="{ color: clearervoiceModel === m.id ? '#7fe9f6' : 'rgba(255,255,255,.4)' }">{{ m.sub }}</div>
           </button>
         </div>
-        <div class="text-[10px] text-ink-lt font-semibold leading-snug">
+        <div class="text-[10px] font-medium leading-snug text-[rgba(255,255,255,.4)]">
           <span v-if="clearervoiceModel === 'mossformer2_48k'">MossFormer2_SE_48K — ~1–5 min per file. Handles broadband, tonal, and non-stationary noise.</span>
           <span v-else>FRCRN_SE_16K — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
         </div>
       </div>
 
       <!-- Noise Eraser: separation model toggle -->
-      <div v-if="isNoiseEraser" class="bg-bg rounded-[var(--radius-md)] p-3 flex flex-col gap-2">
-        <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider">Separation Model</div>
-        <div class="flex gap-1.5">
+      <div v-if="isNoiseEraser" class="rounded-[12px] p-3 flex flex-col gap-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+        <div class="text-[11px] font-bold text-[rgba(255,255,255,.4)] uppercase tracking-wider">Separation Model</div>
+        <div class="flex gap-[6px]">
           <button
             v-for="m in [{ id: 'demucs', label: 'Quality', sub: 'Best results, slower' }, { id: 'convtasnet', label: 'Fast', sub: 'Good results, quicker' }]"
             :key="m.id"
-            class="flex-1 text-left px-2.5 py-2 rounded-[var(--radius-sm)] border-2 cursor-pointer transition-all"
-            :class="separationModel === m.id
-              ? 'border-accent bg-accent-lt'
-              : 'border-border bg-surface hover:border-ink-lt'"
+            class="flex-1 text-left px-[10px] py-2 rounded-[10px] border cursor-pointer transition-all"
+            :style="separationModel === m.id
+              ? 'border-color:rgba(53,211,230,.5);background:rgba(53,211,230,.12)'
+              : 'border-color:rgba(255,255,255,.07);background:rgba(255,255,255,.02)'"
             @click="setSeparationModel(m.id)"
           >
-            <div class="text-[12px] font-extrabold" :class="separationModel === m.id ? 'text-accent' : 'text-ink'">{{ m.label }}</div>
-            <div class="text-[10px] font-semibold mt-0.5" :class="separationModel === m.id ? 'text-accent' : 'text-ink-lt'">{{ m.sub }}</div>
+            <div class="text-[12px] font-extrabold" :style="{ color: separationModel === m.id ? '#7fe9f6' : '#eaf6f8' }">{{ m.label }}</div>
+            <div class="text-[10px] font-semibold mt-0.5" :style="{ color: separationModel === m.id ? '#7fe9f6' : 'rgba(255,255,255,.4)' }">{{ m.sub }}</div>
           </button>
         </div>
-        <div class="text-[10px] text-ink-lt font-semibold leading-snug">
+        <div class="text-[10px] font-medium leading-snug text-[rgba(255,255,255,.4)]">
           <span v-if="separationModel === 'demucs'">Demucs htdemucs_ft — ~2–10 min per file. Handles severe outdoor noise and non-stationary backgrounds.</span>
           <span v-else>ConvTasNet WHAM! — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
         </div>
       </div>
 
       <!-- Preset details -->
-      <div class="bg-bg rounded-[var(--radius-md)] p-3 flex flex-col gap-1.5">
-        <div class="text-[11px] font-bold text-ink-mid uppercase tracking-wider mb-0.5">Preset Details</div>
+      <div class="rounded-[12px] p-3 flex flex-col gap-[6px]" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+        <div class="text-[11px] font-bold text-[rgba(255,255,255,.4)] uppercase tracking-wider mb-0.5">Preset Details</div>
 
         <div class="flex justify-between">
-          <span class="text-[11px] font-bold text-ink-mid">Target Loudness</span>
-          <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ formatLoudness(currentPreset) }}</span>
+          <span class="text-[11px] font-semibold text-[rgba(255,255,255,.5)]">Target Loudness</span>
+          <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.6)] tabular-nums">{{ formatLoudness(currentPreset) }}</span>
         </div>
         <div class="flex justify-between">
-          <span class="text-[11px] font-bold text-ink-mid">True Peak Ceiling</span>
-          <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ currentPreset?.truePeakCeiling }} dBFS</span>
+          <span class="text-[11px] font-semibold text-[rgba(255,255,255,.5)]">True Peak Ceiling</span>
+          <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.6)] tabular-nums">{{ currentPreset?.truePeakCeiling }} dBFS</span>
         </div>
         <div class="flex justify-between">
-          <span class="text-[11px] font-bold text-ink-mid">Compression</span>
-          <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ compressionLabel(currentPreset) }}</span>
+          <span class="text-[11px] font-semibold text-[rgba(255,255,255,.5)]">Compression</span>
+          <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.6)] tabular-nums">{{ compressionLabel(currentPreset) }}</span>
         </div>
         <div class="flex justify-between">
-          <span class="text-[11px] font-bold text-ink-mid">Channel Output</span>
-          <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ channelLabel(currentPreset) }}</span>
+          <span class="text-[11px] font-semibold text-[rgba(255,255,255,.5)]">Channel Output</span>
+          <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.6)] tabular-nums">{{ channelLabel(currentPreset) }}</span>
         </div>
         <div v-if="currentPreset?.noiseFloorTarget" class="flex justify-between">
-          <span class="text-[11px] font-bold text-ink-mid">Noise Floor Target</span>
-          <span class="text-[11px] font-bold text-ink-lt tabular-nums">{{ currentPreset.noiseFloorTarget }} dBFS</span>
+          <span class="text-[11px] font-semibold text-[rgba(255,255,255,.5)]">Noise Floor Target</span>
+          <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.6)] tabular-nums">{{ currentPreset.noiseFloorTarget }} dBFS</span>
         </div>
         <div class="flex justify-between">
-          <span class="text-[11px] font-bold text-ink-mid">Character</span>
-          <span class="text-[11px] font-bold text-ink-lt">{{ currentPreset?.character }}</span>
+          <span class="text-[11px] font-semibold text-[rgba(255,255,255,.5)]">Character</span>
+          <span class="text-[11px] font-semibold text-[rgba(255,255,255,.6)]">{{ currentPreset?.character }}</span>
         </div>
       </div>
 
       <!-- Process button -->
       <button
-        class="w-full flex items-center justify-center gap-1.5 bg-accent text-white font-heading text-[13px] font-extrabold py-2.5 rounded-[var(--radius-pill)] border-none cursor-pointer transition-all shadow-[0_3px_0_var(--color-accent-dk)] hover:-translate-y-0.5 hover:shadow-[0_5px_0_var(--color-accent-dk),var(--shadow-accent)] active:translate-y-[1px] active:shadow-[0_1px_0_var(--color-accent-dk)] disabled:opacity-45 disabled:cursor-default disabled:translate-y-0 disabled:shadow-none"
+        class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
+        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
         :disabled="state.isProcessing || !state.currentFile || isSelectedPresetComingSoon"
         @click="handleProcess"
       >
@@ -373,7 +377,7 @@ async function handleProcess() {
       </button>
 
       <!-- Processing report (shown when available) -->
-      <div v-if="state.processingReport" class="border-t-2 border-border pt-3">
+      <div v-if="state.processingReport" class="border-t border-[rgba(255,255,255,.07)] pt-3">
         <ProcessingReportPanel :report="state.processingReport" />
       </div>
     </div>

@@ -84,7 +84,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-screen bg-bg overflow-hidden">
+  <div class="flex flex-col h-screen overflow-hidden font-['Inter']" style="background:linear-gradient(160deg,#181c22,#0c0f13 62%)">
     <TopBar />
     <div class="flex flex-1 overflow-hidden">
       <!-- Workspace -->
@@ -92,9 +92,14 @@ onUnmounted(() => {
         <FloatingToolbar />
         <TimeRuler />
         <!-- Waveform + SelectionBar overlay (overlay avoids resizing the canvas) -->
-        <div class="flex-1 relative overflow-hidden min-h-[120px] flex flex-col">
-          <WaveformArea />
-          <SelectionBar class="absolute bottom-0 left-0 right-0 z-20" />
+        <div class="flex-1 min-h-0 p-[14px] pl-5">
+          <div
+            class="relative h-full flex flex-col overflow-hidden rounded-[12px]"
+            style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
+          >
+            <WaveformArea />
+            <SelectionBar class="absolute bottom-0 left-0 right-0 z-20" />
+          </div>
         </div>
         <TransportBar />
       </div>
