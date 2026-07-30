@@ -15,8 +15,17 @@ const PLAYHEAD_COLOR = '#ff5a4d'
 const ZERO_LINE_COLOR = 'rgba(255, 255, 255, 0.07)'
 
 /**
- * Compute peaks for a segment using its peak cache.
- * Returns array of { min, max } for each pixel column.
+ * Compute peaks for a segment for each pixel column.
+ *
+ * The peak cache is precomputed once at a fixed resolution (samplesPerPx)
+ * for cheap full-file/overview rendering. It's coarser than what's needed
+ * once the user zooms in past that resolution — reading it at that point
+ * just stretches the same low-res buckets across pixels, which reads as
+ * blocky rather than a true sample-accurate close-up. So: read peaks
+ * straight from the decoded AudioBuffer whenever the current zoom asks for
+ * more detail than the cache has (samplesPerPx below the cache's own), and
+ * fall back to the cache otherwise — the visible sample range at that point
+ * is small enough that scanning it directly every frame is still cheap.
  */
 function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPerPx, sampleRate) {
   if (segment.sourceBuffer === null) {
@@ -31,14 +40,37 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
 
   const bufferId = segment.sourceBufferId
   const cache = peakCaches.get(bufferId)
+  const sourceStartSample = Math.floor(segment.sourceStart * sampleRate)
 
-  if (!cache) {
-    // No cache yet, return empty
-    return []
+  const useRaw = !cache || samplesPerPx < cache.samplesPerPx
+  if (useRaw) {
+    const channelData = segment.sourceBuffer.getChannelData(0)
+    const totalSamples = channelData.length
+    const result = []
+    for (let px = startPx; px < endPx; px++) {
+      const sampleStart = sourceStartSample + Math.floor(px * samplesPerPx)
+      // Always cover at least one raw sample, even when samplesPerPx < 1
+      // (multiple pixels per sample, at the very deepest zoom).
+      const sampleEnd = Math.max(sampleStart + 1, sourceStartSample + Math.floor((px + 1) * samplesPerPx))
+
+      let min = Number.POSITIVE_INFINITY
+      let max = Number.NEGATIVE_INFINITY
+      let hasData = false
+      const s0 = Math.max(0, sampleStart)
+      const s1 = Math.min(totalSamples, sampleEnd)
+      for (let j = s0; j < s1; j++) {
+        const v = channelData[j]
+        if (v < min) min = v
+        if (v > max) max = v
+        hasData = true
+      }
+
+      result.push(hasData ? { min, max } : { min: 0, max: 0 })
+    }
+    return result
   }
 
   const result = []
-  const sourceStartSample = Math.floor(segment.sourceStart * sampleRate)
 
   for (let px = startPx; px < endPx; px++) {
     // px is the pixel offset within the segment — use it directly to map to
