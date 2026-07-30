@@ -55,30 +55,33 @@ function handleExport() {
 
     <!-- Actions -->
     <div class="flex items-center gap-2">
-      <button
-        class="flex items-center gap-[7px] font-['Inter'] text-[11.5px] font-semibold px-[13px] py-[8px] rounded-[9px] border cursor-pointer transition-colors disabled:cursor-default disabled:pointer-events-none"
-        :class="canUndo ? 'text-[rgba(255,255,255,.7)] border-[rgba(255,255,255,.09)] bg-[rgba(255,255,255,.04)] hover:bg-[rgba(255,255,255,.08)]' : 'text-[rgba(255,255,255,.22)] border-[rgba(255,255,255,.05)] bg-transparent'"
+      <BaseButton
+        size="sm" color="ghost" :pill="false"
         :disabled="!canUndo"
         @click="undo"
         title="Undo (Ctrl+Z)"
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg>
         Undo
-      </button>
-      <button
-        class="flex items-center gap-[7px] font-['Inter'] text-[11.5px] font-semibold px-[13px] py-[8px] rounded-[9px] border cursor-pointer transition-colors disabled:cursor-default disabled:pointer-events-none"
-        :class="canRedo ? 'text-[rgba(255,255,255,.7)] border-[rgba(255,255,255,.09)] bg-[rgba(255,255,255,.04)] hover:bg-[rgba(255,255,255,.08)]' : 'text-[rgba(255,255,255,.22)] border-[rgba(255,255,255,.05)] bg-transparent'"
+      </BaseButton>
+      <BaseButton
+        size="sm" color="ghost" :pill="false"
         :disabled="!canRedo"
         @click="redo"
         title="Redo (Ctrl+Shift+Z)"
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h4"/></svg>
         Redo
-      </button>
+      </BaseButton>
 
       <div class="w-px h-6 bg-[rgba(255,255,255,.1)] mx-1"></div>
 
-      <BaseButton size="md" :pill="false" @click="handleExport">
+      <BaseButton
+        size="md" :pill="false"
+        :disabled="state.isProcessing"
+        @click="handleExport"
+        title="Export as WAV"
+      >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>
         Export
       </BaseButton>

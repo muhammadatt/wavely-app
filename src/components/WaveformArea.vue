@@ -16,6 +16,11 @@ const containerWidth = ref(0)
 
 // Max zoom level
 const MAX_PPS = 2000
+// One step, shared by the zoom buttons and the keyboard shortcuts, so the three
+// zoom entry points move at a predictable rate.
+const ZOOM_STEP = 1.3
+// The wheel is continuous, so it steps finer than a discrete button press.
+const WHEEL_ZOOM_STEP = 1.1
 
 // Dynamic minimum PPS: zoom out no further than the full waveform fitting the canvas.
 // Use containerWidth (which tracks canvas.clientWidth) so this matches the renderer exactly.
@@ -54,12 +59,16 @@ function drawMain() {
     totalDuration: totalDuration.value,
   })
 
-  // Notify other components of view state
+  // Notify other components of view state. The zoom bounds travel with it so
+  // the transport's slider can map its track onto the range that actually
+  // exists for this file and viewport, rather than a hardcoded guess.
   window.dispatchEvent(new CustomEvent('wavely:view-update', {
     detail: {
       scrollLeft: scrollLeft.value,
       pixelsPerSecond: pixelsPerSecond.value,
       visibleDuration: containerWidth.value / pixelsPerSecond.value,
+      minPixelsPerSecond: getMinPps(),
+      maxPixelsPerSecond: MAX_PPS,
     },
   }))
 }
@@ -118,28 +127,28 @@ function handleMouseUp() {
 function handleWheel(e) {
   e.preventDefault()
 
-  if (e.deltaX !== 0 && !e.shiftKey) {
-    // Horizontal trackpad scroll → pan
-    scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, scrollLeft.value + e.deltaX / pixelsPerSecond.value))
-    drawAll()
-  } else if (e.shiftKey && e.deltaY !== 0) {
-    // Shift + vertical scroll → pan
-    scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, scrollLeft.value + e.deltaY / pixelsPerSecond.value))
-    drawAll()
-  } else if (e.deltaY !== 0) {
-    // Vertical scroll (plain or Ctrl/Meta) → zoom, anchored at mouse position
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
+  // Ctrl/Meta + wheel → zoom, anchored at the pointer. Plain wheel pans, which
+  // is what a two-finger trackpad scroll — the most common gesture over this
+  // surface — should do; it used to zoom instead.
+  if ((e.ctrlKey || e.metaKey) && e.deltaY !== 0) {
+    const zoomFactor = e.deltaY > 0 ? 1 / WHEEL_ZOOM_STEP : WHEEL_ZOOM_STEP
     const rect = canvas.value.getBoundingClientRect()
     const mouseX = e.clientX - rect.left
     const timeAtMouse = pxToTime(mouseX)
 
-    const minPps = getMinPps()
-    pixelsPerSecond.value = Math.max(minPps, Math.min(MAX_PPS, pixelsPerSecond.value * zoomFactor))
+    pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, pixelsPerSecond.value * zoomFactor))
 
     // Keep the time under the mouse cursor stable
     scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, timeAtMouse - mouseX / pixelsPerSecond.value))
     drawAll()
+    return
   }
+
+  // Otherwise pan, taking whichever axis the device reports.
+  const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY
+  if (delta === 0) return
+  scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, scrollLeft.value + delta / pixelsPerSecond.value))
+  drawAll()
 }
 
 function clampScroll() {
@@ -147,13 +156,13 @@ function clampScroll() {
 }
 
 function handleZoomIn() {
-  pixelsPerSecond.value = Math.min(MAX_PPS, pixelsPerSecond.value * 1.3)
+  pixelsPerSecond.value = Math.min(MAX_PPS, pixelsPerSecond.value * ZOOM_STEP)
   clampScroll()
   drawAll()
 }
 
 function handleZoomOut() {
-  pixelsPerSecond.value = Math.max(getMinPps(), pixelsPerSecond.value / 1.3)
+  pixelsPerSecond.value = Math.max(getMinPps(), pixelsPerSecond.value / ZOOM_STEP)
   clampScroll()
   drawAll()
 }
@@ -194,12 +203,23 @@ watch(peakCacheVersion, () => drawMain())
 
 function handleResize() {
   updateContainerWidth()
+  clampScroll()
   drawAll()
 }
+
+// The window is not the only thing that resizes this canvas — opening or
+// closing the context panel changes its width too, and without this the
+// bitmap kept its old width and the waveform rendered stretched, with peaks
+// no longer above the time grid they belong to.
+let resizeObserver = null
 
 onMounted(() => {
   updateContainerWidth()
   drawAll()
+  if (typeof ResizeObserver !== 'undefined' && container.value) {
+    resizeObserver = new ResizeObserver(handleResize)
+    resizeObserver.observe(container.value)
+  }
   window.addEventListener('resize', handleResize)
   window.addEventListener('wavely:zoom-in', handleZoomIn)
   window.addEventListener('wavely:zoom-out', handleZoomOut)
@@ -208,6 +228,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  resizeObserver?.disconnect()
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('wavely:zoom-in', handleZoomIn)
   window.removeEventListener('wavely:zoom-out', handleZoomOut)

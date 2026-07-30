@@ -138,14 +138,23 @@ function handleResize() {
 watch(() => [state.segments, state.currentFile], () => drawMini(), { deep: true })
 watch(peakCacheVersion, () => drawMini())
 
+// Same reason as the main waveform: the context panel changes this strip's
+// width without the window ever resizing.
+let resizeObserver = null
+
 onMounted(() => {
   updateStripWidth()
   drawMini()
+  if (typeof ResizeObserver !== 'undefined' && strip.value) {
+    resizeObserver = new ResizeObserver(handleResize)
+    resizeObserver.observe(strip.value)
+  }
   window.addEventListener('resize', handleResize)
   window.addEventListener('wavely:view-update', handleViewUpdate)
 })
 
 onUnmounted(() => {
+  resizeObserver?.disconnect()
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('wavely:view-update', handleViewUpdate)
   window.removeEventListener('mousemove', onDragMove)

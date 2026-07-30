@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue"
 import { useEditorState } from "../composables/useEditorState.js"
+import BaseButton from "./ui/BaseButton.vue"
 
 const {
   state,
@@ -61,53 +62,52 @@ function handleDelete() {
   performDelete()
   showToast("Selection deleted")
 }
-
-const ACTION_CLASS =
-  "flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold disabled:opacity-35 disabled:cursor-default"
-const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
 </script>
 
 <template>
+  <!-- Scrolls rather than clips: with the context panel open on a narrow window
+       the readouts and actions together exceed the bar, and the trailing
+       actions were being cut off with no way to reach them. -->
   <div
-    class="h-9 flex items-center px-[14px] gap-[10px] font-['Inter'] shrink-0 border-t border-[rgba(255,255,255,.08)]"
+    class="selection-bar h-9 flex items-center px-[14px] gap-[10px] font-['Inter'] shrink-0 overflow-x-auto border-t border-[rgba(255,255,255,.08)]"
     style="background:rgba(5,7,9,.85);backdrop-filter:blur(4px)">
-    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase"
+    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase shrink-0"
       >Selection</span
     >
     <span
-      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums"
+      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums shrink-0"
       :class="hasSelection ? 'text-[#7fe9f6]' : 'text-[rgba(255,255,255,.28)]'"
       >{{ formatTime(state.selection?.start) }}</span
     >
     <span class="text-[10.5px] text-[rgba(255,255,255,.3)] font-bold">→</span>
     <span
-      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums"
+      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums shrink-0"
       :class="hasSelection ? 'text-[#7fe9f6]' : 'text-[rgba(255,255,255,.28)]'"
       >{{ formatTime(state.selection?.end) }}</span
     >
 
-    <div class="w-px h-3.5 bg-[rgba(255,255,255,.1)]"></div>
+    <div class="w-px h-3.5 shrink-0 bg-[rgba(255,255,255,.1)]"></div>
 
-    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase"
+    <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase shrink-0"
       >Duration</span
     >
     <span
-      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums"
+      class="font-['JetBrains_Mono'] text-[11.5px] font-semibold tabular-nums shrink-0"
       :class="hasSelection ? 'text-[rgba(255,255,255,.7)]' : 'text-[rgba(255,255,255,.28)]'"
       >{{ selectionDuration }}</span
     >
 
     <span
       v-if="!hasSelection"
-      class="text-[10.5px] font-medium text-[rgba(255,255,255,.3)] whitespace-nowrap"
+      class="text-[10.5px] font-medium text-[rgba(255,255,255,.3)] whitespace-nowrap shrink-0"
       >Drag on the waveform to select</span
     >
 
-    <div class="flex items-center gap-[6px] ml-auto">
+    <div class="flex items-center gap-[6px] ml-auto shrink-0 pl-2">
       <!-- Select All — the only action here that needs no precondition -->
-      <button
-        :class="ACTION_CLASS"
-        :style="ACTION_STYLE"
+      <BaseButton
+        size="xs" color="ghost" :pill="false"
+        class="whitespace-nowrap font-semibold"
         title="Select All (Ctrl+A)"
         @click="selectAll">
         <svg
@@ -118,10 +118,10 @@ const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7
           <path d="M9 12l2 2 4-4" />
         </svg>
         Select All
-      </button>
-      <button
-        :class="ACTION_CLASS"
-        :style="ACTION_STYLE"
+      </BaseButton>
+      <BaseButton
+        size="xs" color="ghost" :pill="false"
+        class="whitespace-nowrap font-semibold"
         :disabled="!hasSelection"
         title="Copy (Ctrl+C)"
         @click="handleCopy">
@@ -133,10 +133,10 @@ const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7
           <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
         </svg>
         Copy
-      </button>
-      <button
-        :class="ACTION_CLASS"
-        :style="ACTION_STYLE"
+      </BaseButton>
+      <BaseButton
+        size="xs" color="ghost" :pill="false"
+        class="whitespace-nowrap font-semibold"
         :disabled="!hasClipboard"
         title="Paste at playhead (Ctrl+V)"
         @click="handlePaste">
@@ -148,10 +148,10 @@ const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7
           <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
         </svg>
         Paste
-      </button>
-      <button
-        :class="ACTION_CLASS"
-        :style="ACTION_STYLE"
+      </BaseButton>
+      <BaseButton
+        size="xs" color="ghost" :pill="false"
+        class="whitespace-nowrap font-semibold"
         :disabled="!hasSelection"
         title="Replace selection with silence"
         @click="handleSilence">
@@ -164,10 +164,10 @@ const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7
           <line x1="8" y1="18" x2="21" y2="18" />
         </svg>
         Silence
-      </button>
-      <button
-        :class="ACTION_CLASS"
-        :style="ACTION_STYLE"
+      </BaseButton>
+      <BaseButton
+        size="xs" color="ghost" :pill="false"
+        class="whitespace-nowrap font-semibold"
         :disabled="!hasSelection"
         title="Cut (Ctrl+X)"
         @click="handleCut">
@@ -182,10 +182,10 @@ const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7
           <line x1="8.12" y1="8.12" x2="12" y2="12" />
         </svg>
         Cut
-      </button>
-      <button
-        :class="ACTION_CLASS"
-        :style="ACTION_STYLE"
+      </BaseButton>
+      <BaseButton
+        size="xs" color="ghost" :pill="false"
+        class="whitespace-nowrap font-semibold"
         :disabled="!hasSelection"
         title="Delete selection (Del)"
         @click="handleDelete">
@@ -198,7 +198,16 @@ const ACTION_STYLE = "background:rgba(255,255,255,.06);color:rgba(255,255,255,.7
           <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
         </svg>
         Delete
-      </button>
+      </BaseButton>
     </div>
   </div>
 </template>
+
+<style scoped>
+.selection-bar {
+  scrollbar-width: none;
+}
+.selection-bar::-webkit-scrollbar {
+  display: none;
+}
+</style>
