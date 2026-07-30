@@ -18,6 +18,15 @@ const containerWidth = ref(0)
 // Max zoom level
 const MAX_PPS = 2000
 
+// dBFS scale ticks, top and bottom mirrored around the zero line. Position is
+// derived from linear amplitude (10^(db/20)) since peaks are drawn linearly,
+// so ticks bunch up near the center the way a real meter's dB scale does.
+const DB_LEVELS = [0, -6, -12, -18]
+const dbTicks = DB_LEVELS.map(db => {
+  const distPct = Math.pow(10, db / 20) * 50
+  return { db: String(db), pos: db === 0 ? '2px' : `calc(${(50 - distPct).toFixed(2)}%)` }
+})
+
 // Dynamic minimum PPS: zoom out no further than the full waveform fitting the canvas.
 // Use containerWidth (which tracks canvas.clientWidth) so this matches the renderer exactly.
 function getMinPps() {
@@ -106,6 +115,7 @@ function drawMain() {
     detail: {
       scrollLeft: scrollLeft.value,
       pixelsPerSecond: pixelsPerSecond.value,
+      visibleDuration: containerWidth.value / pixelsPerSecond.value,
     },
   }))
 }
@@ -210,6 +220,16 @@ function handleZoomSet(e) {
   drawAll()
 }
 
+// Sets pan + zoom together (from the overview strip's drag/resize handles) so
+// the two never briefly disagree — e.g. a stale scrollLeft clamped against
+// the old pixelsPerSecond for one frame.
+function handleViewSet(e) {
+  pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, e.detail.pixelsPerSecond))
+  const newMaxScroll = Math.max(0, totalDuration.value - containerWidth.value / pixelsPerSecond.value)
+  scrollLeft.value = Math.max(0, Math.min(newMaxScroll, e.detail.scrollLeft))
+  drawAll()
+}
+
 // Waveform content changed → redraw everything
 watch(
   () => [state.segments, state.currentFile],
@@ -240,6 +260,7 @@ onMounted(() => {
   window.addEventListener('wavely:zoom-in', handleZoomIn)
   window.addEventListener('wavely:zoom-out', handleZoomOut)
   window.addEventListener('wavely:zoom-set', handleZoomSet)
+  window.addEventListener('wavely:view-set', handleViewSet)
 })
 
 onUnmounted(() => {
@@ -247,43 +268,52 @@ onUnmounted(() => {
   window.removeEventListener('wavely:zoom-in', handleZoomIn)
   window.removeEventListener('wavely:zoom-out', handleZoomOut)
   window.removeEventListener('wavely:zoom-set', handleZoomSet)
+  window.removeEventListener('wavely:view-set', handleViewSet)
 })
 </script>
 
 <template>
-  <div
-    ref="container"
-    class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
-  >
-    <div class="absolute top-0 left-0 right-0 bottom-2">
-      <!-- Both canvases are absolute inset-0 so they occupy the same compositing
-           layer space. Main canvas draws waveform peaks; overlay canvas draws
-           selection highlight + playhead. pointer-events-none lets mouse events
-           fall through to the main canvas. -->
-      <canvas
-        ref="canvas"
-        class="absolute inset-0 w-full h-full"
-        @mousedown="handleMouseDown"
-        @wheel="handleWheel"
-      ></canvas>
-      <canvas
-        ref="overlayCanvas"
-        class="absolute inset-0 w-full h-full pointer-events-none"
-      ></canvas>
+  <div class="flex-1 flex min-h-0">
+    <!-- dBFS scale — mirrored top/bottom around the zero line -->
+    <div class="w-7 shrink-0 relative select-none font-['JetBrains_Mono'] text-[8px] font-semibold" style="color:rgba(255,255,255,.32)">
+      <span v-for="t in dbTicks" :key="'t' + t.db" class="absolute right-1 -translate-y-1/2" :style="{ top: t.pos }">{{ t.db }}</span>
+      <span v-for="t in dbTicks" :key="'b' + t.db" class="absolute right-1 translate-y-1/2" :style="{ bottom: t.pos }">{{ t.db }}</span>
     </div>
 
-    <!-- Scrollbar — always visible; full-width thumb when not zoomed in -->
     <div
-      ref="scrollbarTrack"
-      class="absolute bottom-0 left-0 right-0 h-2 bg-[rgba(255,255,255,.05)]"
+      ref="container"
+      class="flex-1 relative overflow-hidden cursor-crosshair min-h-[120px]"
     >
+      <div class="absolute top-0 left-0 right-0 bottom-2">
+        <!-- Both canvases are absolute inset-0 so they occupy the same compositing
+             layer space. Main canvas draws waveform peaks; overlay canvas draws
+             selection highlight + playhead. pointer-events-none lets mouse events
+             fall through to the main canvas. -->
+        <canvas
+          ref="canvas"
+          class="absolute inset-0 w-full h-full"
+          @mousedown="handleMouseDown"
+          @wheel="handleWheel"
+        ></canvas>
+        <canvas
+          ref="overlayCanvas"
+          class="absolute inset-0 w-full h-full pointer-events-none"
+        ></canvas>
+      </div>
+
+      <!-- Scrollbar — always visible; full-width thumb when not zoomed in -->
       <div
-        class="absolute top-0 h-full rounded-full transition-colors"
-        :class="isScrollable ? 'hover:bg-[rgba(255,255,255,.32)] cursor-grab' : ''"
-        style="background:rgba(255,255,255,.18)"
-        :style="{ left: thumbLeftPct + '%', width: thumbWidthPct + '%' }"
-        @mousedown="handleScrollbarMouseDown"
-      ></div>
+        ref="scrollbarTrack"
+        class="absolute bottom-0 left-0 right-0 h-2 bg-[rgba(255,255,255,.05)]"
+      >
+        <div
+          class="absolute top-0 h-full rounded-full transition-colors"
+          :class="isScrollable ? 'hover:bg-[rgba(255,255,255,.32)] cursor-grab' : ''"
+          style="background:rgba(255,255,255,.18)"
+          :style="{ left: thumbLeftPct + '%', width: thumbWidthPct + '%' }"
+          @mousedown="handleScrollbarMouseDown"
+        ></div>
+      </div>
     </div>
   </div>
 </template>
