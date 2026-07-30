@@ -14,6 +14,13 @@ const tools = [
     icon: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>',
   },
   {
+    // SilencePanel existed but nothing could set activeTool to 'silence', so the
+    // panel was unreachable — Silence was only available as the SelectionBar's
+    // instant-apply button, with no explanation of what it does.
+    id: 'silence', label: 'Silence',
+    icon: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>',
+  },
+  {
     id: 'fade', label: 'Fade',
     icon: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   },
@@ -41,49 +48,56 @@ function handleZoomOut() {
 </script>
 
 <template>
-  <div class="h-[60px] flex items-center px-5 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
-    <div class="flex-1"></div>
-    <div class="flex items-center gap-[4px] p-[5px] rounded-[13px]" style="background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+  <div class="h-[60px] flex items-center gap-3 px-5 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
+    <div class="flex-1 min-w-0"></div>
+    <!-- min-w-0 + scroll: the tool group gives up centring before it collides
+         with the zoom controls on a narrow window. -->
+    <div class="tool-group flex items-center gap-[4px] p-[5px] rounded-[13px] min-w-0 overflow-x-auto" style="background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
       <BaseButton
         v-for="tool in tools"
         :key="tool.id"
         size="md" :pill="false" toggle
         :active="state.activeTool === tool.id"
-        class="whitespace-nowrap"
+        class="whitespace-nowrap shrink-0"
         @click="setActiveTool(tool.id)"
-        :title="tool.label"
       >
         <svg viewBox="0 0 24 24" width="15" height="15" class="fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="tool.icon"></svg>
         {{ tool.label }}
       </BaseButton>
     </div>
+    <!-- No min-w-0 here on purpose: this side must never shrink below its own
+         content, or its basis-0 box collapses and the buttons spill leftward
+         over the tool group. -->
     <div class="flex-1 flex justify-end gap-2">
-      <button
-        class="w-[34px] h-[34px] rounded-[9px] border cursor-pointer flex items-center justify-center transition-colors relative group"
-        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.6)"
+      <BaseButton
+        size="xs" color="ghost" square
         @click="handleZoomIn"
         title="Zoom In (+)"
+        aria-label="Zoom in"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" class="fill-none stroke-current" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
         </svg>
-        <span class="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-[#1c2129] text-[#eaf6f8] text-[10px] font-bold px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-          Zoom In
-        </span>
-      </button>
-      <button
-        class="w-[34px] h-[34px] rounded-[9px] border cursor-pointer flex items-center justify-center transition-colors relative group"
-        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.6)"
+      </BaseButton>
+      <BaseButton
+        size="xs" color="ghost" square
         @click="handleZoomOut"
         title="Zoom Out (-)"
+        aria-label="Zoom out"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" class="fill-none stroke-current" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="8" y1="11" x2="14" y2="11"/>
         </svg>
-        <span class="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-[#1c2129] text-[#eaf6f8] text-[10px] font-bold px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-          Zoom Out
-        </span>
-      </button>
+      </BaseButton>
     </div>
   </div>
 </template>
+
+<style scoped>
+.tool-group {
+  scrollbar-width: none;
+}
+.tool-group::-webkit-scrollbar {
+  display: none;
+}
+</style>

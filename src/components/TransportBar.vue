@@ -1,16 +1,25 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { startPlayback, stopPlayback } from '../audio/playback.js'
-import { getTimelineDuration } from '../audio/operations.js'
 import BaseButton from './ui/BaseButton.vue'
 
 const {
-  state, setPlayhead, getAudioContext, totalDuration, showToast,
+  state, setPlayhead, getAudioContext, totalDuration, hasSelection,
 } = useEditorState()
 
 const isLooping = ref(false)
-const zoomLevel = ref(0) // 0-100 range for slider; 0 = minimum zoom (fit to width)
+const zoomLevel = ref(0) // 0-100 range for slider; 0 = fully zoomed out (fit to width)
+
+// Zoom bounds are owned by WaveformArea — the floor is "whole file fits the
+// viewport", which depends on duration and viewport width. Mirroring them here
+// keeps slider position 0 meaning the same thing the waveform means by it.
+const minPps = ref(10)
+const maxPps = ref(2000)
+
+const playTitle = computed(() =>
+  hasSelection.value ? 'Play selection (Space)' : 'Play/Pause (Space)'
+)
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60)
@@ -86,21 +95,29 @@ function handleTogglePlay() {
   togglePlay()
 }
 
+// The slider is dragged continuously while the waveform redraws and re-emits
+// its view state, so a naive sync would fight the pointer mid-gesture.
+const isDraggingZoom = ref(false)
+
 function handleZoomSlider() {
-  // Map 0-100 to pixelsPerSecond range (10-2000) using exponential scale
-  const minPPS = 10
-  const maxPPS = 2000
   const t = zoomLevel.value / 100
-  const pps = minPPS * Math.pow(maxPPS / minPPS, t)
+  const pps = minPps.value * Math.pow(maxPps.value / minPps.value, t)
   window.dispatchEvent(new CustomEvent('wavely:zoom-set', { detail: { pixelsPerSecond: pps } }))
 }
 
 function handleViewUpdate(e) {
   // Keep slider in sync when zoom changes via scroll wheel, keyboard, or buttons
-  const { pixelsPerSecond } = e.detail
-  const minPPS = 10
-  const maxPPS = 2000
-  const t = Math.log(pixelsPerSecond / minPPS) / Math.log(maxPPS / minPPS)
+  const { pixelsPerSecond, minPixelsPerSecond, maxPixelsPerSecond } = e.detail
+  if (Number.isFinite(minPixelsPerSecond)) minPps.value = minPixelsPerSecond
+  if (Number.isFinite(maxPixelsPerSecond)) maxPps.value = maxPixelsPerSecond
+  if (isDraggingZoom.value) return
+
+  const span = maxPps.value / minPps.value
+  if (!(span > 1)) {
+    zoomLevel.value = 0
+    return
+  }
+  const t = Math.log(pixelsPerSecond / minPps.value) / Math.log(span)
   zoomLevel.value = Math.max(0, Math.min(100, t * 100))
 }
 
@@ -130,30 +147,31 @@ watch(() => state.segments, () => {
     <!-- Transport controls -->
     <div class="flex items-center gap-3 flex-1 justify-center">
       <!-- Skip to start -->
-      <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
-        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)"
+      <BaseButton
+        size="sm" color="ghost" circle
         @click="skipToStart"
-        title="Skip to Start"
+        title="Skip to Start (Home)"
+        aria-label="Skip to start"
       >
         <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
-      </button>
+      </BaseButton>
 
       <!-- Skip back -->
-      <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
-        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)"
+      <BaseButton
+        size="sm" color="ghost" circle
         @click="skipBack"
         title="Skip Back 5s"
+        aria-label="Skip back 5 seconds"
       >
         <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 19 2 12 11 5 11 19"/><polygon points="22 19 13 12 22 5 22 19"/></svg>
-      </button>
+      </BaseButton>
 
-      <!-- Play/Pause -->
+      <!-- Play/Pause — plays the selection when there is one, so the label says so -->
       <BaseButton
         size="lg" circle
         @click="togglePlay"
-        title="Play/Pause (Space)"
+        :title="playTitle"
+        :aria-label="playTitle"
       >
         <!-- Play icon -->
         <svg v-if="!state.isPlaying" viewBox="0 0 24 24" class="w-[24px] h-[24px] ml-[3px]"><polygon points="6 3 20 12 6 21 6 3" fill="#08161a"/></svg>
@@ -162,26 +180,25 @@ watch(() => state.segments, () => {
       </BaseButton>
 
       <!-- Skip forward -->
-      <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
-        style="border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)"
+      <BaseButton
+        size="sm" color="ghost" circle
         @click="skipForward"
         title="Skip Forward 5s"
+        aria-label="Skip forward 5 seconds"
       >
         <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg>
-      </button>
+      </BaseButton>
 
       <!-- Loop -->
-      <button
-        class="w-10 h-10 rounded-full flex items-center justify-center border cursor-pointer transition-all"
-        :style="isLooping
-          ? 'border-color:rgba(53,211,230,.4);background:rgba(53,211,230,.12);color:#7fe9f6'
-          : 'border-color:rgba(255,255,255,.09);background:rgba(255,255,255,.04);color:rgba(255,255,255,.65)'"
+      <BaseButton
+        size="sm" circle toggle :active="isLooping"
+        color="accent" accent="rgba(53,211,230,.14)" text-color="#7fe9f6"
         @click="toggleLoop"
         title="Loop"
+        aria-label="Loop playback"
       >
         <svg viewBox="0 0 24 24" class="w-[15px] h-[15px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
-      </button>
+      </BaseButton>
     </div>
 
     <!-- Zoom slider -->
@@ -193,6 +210,11 @@ watch(() => state.segments, () => {
         max="100"
         v-model.number="zoomLevel"
         @input="handleZoomSlider"
+        @pointerdown="isDraggingZoom = true"
+        @pointerup="isDraggingZoom = false"
+        @pointercancel="isDraggingZoom = false"
+        @blur="isDraggingZoom = false"
+        aria-label="Zoom"
         class="zoom-slider w-20 h-[5px] rounded-full appearance-none cursor-pointer"
         :style="{ background: `linear-gradient(to right, #35d3e6 ${zoomLevel}%, rgba(255,255,255,.1) ${zoomLevel}%)` }"
       />
