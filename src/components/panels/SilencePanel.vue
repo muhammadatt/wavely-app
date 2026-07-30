@@ -1,5 +1,6 @@
 <script setup>
 import { useEditorState } from '../../composables/useEditorState.js'
+import BaseButton from '../ui/BaseButton.vue'
 
 const { hasSelection, performSilence, showToast } = useEditorState()
 
@@ -37,15 +38,14 @@ function apply() {
         Make a selection on the waveform first
       </div>
 
-      <button
-        class="mt-1 w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
+      <BaseButton
+        class="mt-1" size="lg" block
         :disabled="!hasSelection"
         @click="apply"
       >
         <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         Apply Silence
-      </button>
+      </BaseButton>
     </div>
   </div>
 </template>

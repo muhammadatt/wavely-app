@@ -7,6 +7,7 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingPluginPanel from './FloatingPluginPanel.vue'
+import BaseButton from '../ui/BaseButton.vue'
 
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
@@ -204,14 +205,14 @@ function selectMockPreset(name) {
         </div>
       </div>
 
-      <button
-        class="w-full flex items-center justify-center gap-1.5 mt-3 py-2.5 rounded-full border-none cursor-pointer transition-opacity disabled:opacity-60 disabled:cursor-default"
-        style="background:linear-gradient(90deg,#f5a623,#e0921a);color:#1a1310;font:800 13px 'Inter';letter-spacing:.02em"
+      <BaseButton
+        class="mt-3" size="md" block
+        color="accent" :accent="ACCENT" text-color="#1a1310"
         :disabled="!hasSelection || !la2aPreview"
         @click="applyAndClose"
       >
         {{ !la2aPreview ? 'Turn on OptoSmooth to apply' : hasSelection ? 'Apply compression' : 'Make a selection on the waveform to apply' }}
-      </button>
+      </BaseButton>
     </div>
   </FloatingPluginPanel>
 </template>

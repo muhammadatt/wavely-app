@@ -1,6 +1,7 @@
 <script setup>
 import { useEditorState } from '../composables/useEditorState.js'
 import { exportAsWav } from '../audio/export.js'
+import BaseButton from './ui/BaseButton.vue'
 
 const { state, undo, redo, canUndo, canRedo, showToast } = useEditorState()
 
@@ -77,14 +78,10 @@ function handleExport() {
 
       <div class="w-px h-6 bg-[rgba(255,255,255,.1)] mx-1"></div>
 
-      <button
-        class="flex items-center gap-2 border-none cursor-pointer font-['Inter'] text-[12px] font-bold tracking-[0.02em] px-[18px] py-[9px] rounded-[10px]"
-        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
-        @click="handleExport"
-      >
+      <BaseButton size="md" :pill="false" @click="handleExport">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>
         Export
-      </button>
+      </BaseButton>
     </div>
   </div>
 </template>

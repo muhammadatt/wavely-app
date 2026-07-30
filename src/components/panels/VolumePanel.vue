@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
+import BaseButton from '../ui/BaseButton.vue'
 import { adjustVolumeRegion, computePeakCache } from '../../audio/processing.js'
 
 const {
@@ -100,15 +101,14 @@ async function applyVolume() {
 
 
       <!-- Apply button -->
-      <button
-        class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
+      <BaseButton
+        size="lg" block
         :disabled="!hasSelection || gainDb === 0"
         @click="applyVolume"
       >
         <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         Apply Volume Change
-      </button>
+      </BaseButton>
 
       <!-- No-selection warning -->
       <div class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed transition-opacity duration-700"

@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from "vue"
 import { useEditorState } from "../../composables/useEditorState.js"
+import BaseButton from "../ui/BaseButton.vue"
 
 const {
   hasSelection,
@@ -64,13 +65,13 @@ const options = [
         :key="opt.id"
         class="text-left px-[14px] py-[13px] rounded-[12px] border cursor-pointer transition-all"
         :style="mode === opt.id
-          ? 'background:rgba(53,211,230,.12);border-color:rgba(53,211,230,.5);box-shadow:0 0 20px rgba(53,211,230,.15)'
+          ? 'background:rgba(53,211,230,.12);border-color:rgba(53,211,230,.5)'
           : 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.07)'"
         @click="mode = opt.id">
         <div class="flex items-start gap-[11px]">
           <span class="relative top-[1px] w-4 h-4 rounded-full border-[1.5px] shrink-0 flex items-center justify-center"
             style="border-color:rgba(255,255,255,.25)">
-            <span v-if="mode === opt.id" class="w-2 h-2 rounded-full" style="background:#35d3e6;box-shadow:0 0 8px #35d3e6"></span>
+            <span v-if="mode === opt.id" class="w-2 h-2 rounded-full" style="background:#35d3e6"></span>
           </span>
           <div>
             <div class="text-[12.5px] font-semibold mb-[2px]" :style="{ color: mode === opt.id ? '#7fe9f6' : '#eaf6f8' }">
@@ -83,9 +84,8 @@ const options = [
         </div>
       </button>
 
-      <button
-        class="mt-1 w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
+      <BaseButton
+        class="mt-1" size="lg" block
         :disabled="!hasSelection"
         @click="apply">
         <svg
@@ -95,7 +95,7 @@ const options = [
           <polyline points="20 6 9 17 4 12" />
         </svg>
         Apply Trim
-      </button>
+      </BaseButton>
 
       <div
         class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed transition-opacity duration-700"

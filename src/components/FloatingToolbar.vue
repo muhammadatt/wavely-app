@@ -1,5 +1,6 @@
 <script setup>
 import { useEditorState } from '../composables/useEditorState.js'
+import BaseButton from './ui/BaseButton.vue'
 
 const { state, setActiveTool } = useEditorState()
 
@@ -37,29 +38,24 @@ function handleZoomIn() {
 function handleZoomOut() {
   window.dispatchEvent(new CustomEvent('wavely:zoom-out'))
 }
-
-function toolStyle(active) {
-  return active
-    ? 'color:#08161a;background:linear-gradient(180deg,#35d3e6,#2bbdd6);box-shadow:0 0 18px rgba(53,211,230,.4),inset 0 1px 0 rgba(255,255,255,.45);'
-    : 'color:rgba(255,255,255,.6);background:transparent;'
-}
 </script>
 
 <template>
   <div class="h-[60px] flex items-center px-5 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
     <div class="flex-1"></div>
     <div class="flex items-center gap-[4px] p-[5px] rounded-[13px]" style="background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
-      <button
+      <BaseButton
         v-for="tool in tools"
         :key="tool.id"
-        class="h-[34px] px-[15px] flex items-center justify-center gap-[7px] rounded-[9px] border-none cursor-pointer transition-all font-['Inter'] text-[12.5px] font-semibold whitespace-nowrap"
-        :style="toolStyle(state.activeTool === tool.id)"
+        size="md" :pill="false" toggle
+        :active="state.activeTool === tool.id"
+        class="whitespace-nowrap"
         @click="setActiveTool(tool.id)"
         :title="tool.label"
       >
         <svg viewBox="0 0 24 24" width="15" height="15" class="fill-none stroke-current shrink-0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="tool.icon"></svg>
         {{ tool.label }}
-      </button>
+      </BaseButton>
     </div>
     <div class="flex-1 flex justify-end gap-2">
       <button

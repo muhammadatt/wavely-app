@@ -8,6 +8,7 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import VuMeter from '../meters/VuMeter.vue'
 import FloatingPluginPanel from './FloatingPluginPanel.vue'
+import BaseButton from '../ui/BaseButton.vue'
 
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
@@ -277,14 +278,14 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
         </div>
       </div>
 
-      <button
-        class="w-full flex items-center justify-center gap-1.5 mt-4 py-2.5 rounded-full border-none cursor-pointer transition-opacity disabled:opacity-60 disabled:cursor-default"
-        style="background:linear-gradient(90deg,#79b8ff,#4f8fd6);color:#0c1218;font:800 13px 'Inter';letter-spacing:.02em"
+      <BaseButton
+        class="mt-4" size="md" block
+        color="accent" :accent="ACCENT" text-color="#0c1218"
         :disabled="!hasSelection || !fetPreview"
         @click="applyAndClose"
       >
         {{ !fetPreview ? 'Turn on FET Punch to apply' : hasSelection ? 'Apply compression' : 'Make a selection on the waveform to apply' }}
-      </button>
+      </BaseButton>
     </div>
   </FloatingPluginPanel>
 </template>

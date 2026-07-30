@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from "vue"
 import { useEditorState } from "../../composables/useEditorState.js"
+import BaseButton from "../ui/BaseButton.vue"
 
 const { hasSelection, showToast } = useEditorState()
 
@@ -102,9 +103,8 @@ function apply() {
           style="background:rgba(255,255,255,.1);accent-color:#35d3e6" />
       </div>
 
-      <button
-        class="mt-1 w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
+      <BaseButton
+        class="mt-1" size="lg" block
         :disabled="!hasSelection"
         @click="apply">
         <svg
@@ -114,7 +114,7 @@ function apply() {
           <polyline points="20 6 9 17 4 12" />
         </svg>
         Apply Fade
-      </button>
+      </BaseButton>
 
       <div
         class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed transition-opacity duration-700"

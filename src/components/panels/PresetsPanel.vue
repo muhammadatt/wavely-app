@@ -9,6 +9,7 @@ import {
 import { processAudioOnServer } from '../../api/processing.js'
 import { computePeakCache } from '../../audio/processing.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
+import BaseButton from '../ui/BaseButton.vue'
 
 const {
   state, setPreset, setOutputProfile, setProcessingReport, showToast,
@@ -224,7 +225,7 @@ async function handleProcess() {
           :key="preset.id"
           class="w-full flex items-center gap-[10px] px-[13px] py-3 border rounded-[12px] cursor-pointer text-left select-none transition-all"
           :style="state.selectedPreset === preset.id
-            ? 'background:rgba(53,211,230,.1);border-color:rgba(53,211,230,.5);box-shadow:0 0 20px rgba(53,211,230,.12)'
+            ? 'background:rgba(53,211,230,.1);border-color:rgba(53,211,230,.5)'
             : 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.07)'"
           @click="setPreset(preset.id)"
         >
@@ -366,15 +367,14 @@ async function handleProcess() {
       </div>
 
       <!-- Process button -->
-      <button
-        class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[13px] text-[12.5px] font-bold tracking-[.03em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)"
+      <BaseButton
+        size="lg" block
         :disabled="state.isProcessing || !state.currentFile || isSelectedPresetComingSoon"
         @click="handleProcess"
       >
         <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/></svg>
         Process Audio
-      </button>
+      </BaseButton>
 
       <!-- Processing report (shown when available) -->
       <div v-if="state.processingReport" class="border-t border-[rgba(255,255,255,.07)] pt-3">

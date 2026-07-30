@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { startPlayback, stopPlayback } from '../audio/playback.js'
 import { getTimelineDuration } from '../audio/operations.js'
+import BaseButton from './ui/BaseButton.vue'
 
 const {
   state, setPlayhead, getAudioContext, totalDuration, showToast,
@@ -149,9 +150,8 @@ watch(() => state.segments, () => {
       </button>
 
       <!-- Play/Pause -->
-      <button
-        class="w-[58px] h-[58px] rounded-full flex items-center justify-center border-none cursor-pointer transition-all"
-        style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf);box-shadow:inset 0 1px 0 rgba(255,255,255,.45)"
+      <BaseButton
+        size="lg" circle
         @click="togglePlay"
         title="Play/Pause (Space)"
       >
@@ -159,7 +159,7 @@ watch(() => state.segments, () => {
         <svg v-if="!state.isPlaying" viewBox="0 0 24 24" class="w-[24px] h-[24px] ml-[3px]"><polygon points="6 3 20 12 6 21 6 3" fill="#08161a"/></svg>
         <!-- Pause icon -->
         <svg v-else viewBox="0 0 24 24" class="w-[24px] h-[24px]"><rect x="6" y="4" width="4" height="16" rx="1" fill="#08161a"/><rect x="14" y="4" width="4" height="16" rx="1" fill="#08161a"/></svg>
-      </button>
+      </BaseButton>
 
       <!-- Skip forward -->
       <button

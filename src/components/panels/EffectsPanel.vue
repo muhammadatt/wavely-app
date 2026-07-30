@@ -6,6 +6,7 @@ import { getTimelineDuration } from '../../audio/operations.js'
 import { applyVocalSaturation } from '../../api/spotEffects.js'
 import { useLA2A } from '../../composables/useLA2A.js'
 import { useFET1176 } from '../../composables/useFET1176.js'
+import BaseButton from '../ui/BaseButton.vue'
 
 const {
   state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
@@ -149,15 +150,14 @@ async function applySaturation() {
                    class="w-full h-1.5 rounded-full appearance-none cursor-pointer" style="background:rgba(255,255,255,.1);accent-color:#35d3e6" />
           </div>
 
-          <button
-            class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[10px] text-[12.5px] font-bold tracking-[.02em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-            style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf)"
+          <BaseButton
+            size="md" block
             :disabled="!hasSelection"
             @click="applyNormalize(true)"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             Apply Normalize
-          </button>
+          </BaseButton>
 
         </div>
       </div>
@@ -291,15 +291,14 @@ async function applySaturation() {
                    class="w-full h-1.5 rounded-full appearance-none cursor-pointer" style="background:rgba(255,255,255,.1);accent-color:#35d3e6" />
           </div>
 
-          <button
-            class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[10px] text-[12.5px] font-bold tracking-[.02em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-            style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf)"
+          <BaseButton
+            size="md" block
             :disabled="!hasSelection"
             @click="applySaturation"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             Apply Saturation
-          </button>
+          </BaseButton>
         </div>
       </div>
 
@@ -342,15 +341,14 @@ async function applySaturation() {
             <input type="range" min="0" max="100" v-model.number="noiseSensitivity"
                    class="w-full h-1.5 rounded-full appearance-none cursor-pointer" style="background:rgba(255,255,255,.1);accent-color:#35d3e6" />
           </div>
-          <button
-            class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[10px] text-[12.5px] font-bold tracking-[.02em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-            style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf)"
+          <BaseButton
+            size="md" block
             :disabled="!hasSelection"
             @click="showToast('Spot noise reduction via DeepFilterNet3 — coming in Sprint 2')"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             Apply Noise Reduction
-          </button>
+          </BaseButton>
         </div>
       </div>
 
@@ -392,15 +390,14 @@ async function applySaturation() {
             <input type="range" min="1" max="30" v-model.number="silenceMinLength"
                    class="w-full h-1.5 rounded-full appearance-none cursor-pointer" style="background:rgba(255,255,255,.1);accent-color:#35d3e6" />
           </div>
-          <button
-            class="w-full flex items-center justify-center gap-[7px] border-none rounded-full cursor-pointer py-[10px] text-[12.5px] font-bold tracking-[.02em] transition-opacity disabled:opacity-40 disabled:cursor-default"
-            style="color:#08161a;background:linear-gradient(180deg,#4fe0f0,#22b6cf)"
+          <BaseButton
+            size="md" block
             :disabled="!hasSelection"
             @click="showToast('Remove silence coming soon')"
           >
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             Remove Silence
-          </button>
+          </BaseButton>
         </div>
       </div>
 
