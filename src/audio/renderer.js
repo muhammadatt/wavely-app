@@ -7,7 +7,7 @@ import { getSegmentDuration } from './operations.js'
  * Handles devicePixelRatio for retina displays.
  */
 
-const WAVEFORM_FILL = '#2fa377'
+const WAVEFORM_FILL = '#5df0b0'
 const WAVEFORM_EDGE = '#5df0b0'
 const SELECTION_COLOR = 'rgba(53, 211, 230, 0.07)'
 const SELECTION_BORDER_COLOR = 'rgba(53, 211, 230, 0.55)'
@@ -169,6 +169,7 @@ export function renderWaveform(canvas, options) {
     ctx.fill()
 
     // Brighter thin contour along the top and bottom edges
+    /*
     ctx.strokeStyle = WAVEFORM_EDGE
     ctx.lineWidth = 1.3
     ctx.lineJoin = 'round'
@@ -190,6 +191,7 @@ export function renderWaveform(canvas, options) {
       else ctx.lineTo(x, yBottom)
     }
     ctx.stroke()
+    */
   }
 
 }
