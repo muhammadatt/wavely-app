@@ -286,17 +286,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Scrollbar — always visible; full-width thumb when not zoomed in -->
-    <div
-      ref="scrollbarTrack"
-      class="absolute bottom-0 left-0 right-0 h-2 bg-[rgba(255,255,255,.05)]"
-    >
-      <div
-        class="absolute top-0 h-full rounded-full transition-colors"
-        :class="isScrollable ? 'hover:bg-[rgba(255,255,255,.32)] cursor-grab' : ''"
-        style="background:rgba(255,255,255,.18)"
-        :style="{ left: thumbLeftPct + '%', width: thumbWidthPct + '%' }"
-        @mousedown="handleScrollbarMouseDown"
-      ></div>
-    </div>
+     <!-- MT -removed bottom scrollbar in favor of WaveformOverview scoll and always SelectionBar on bottom) s-->
+
   </div>
 </template>

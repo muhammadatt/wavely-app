@@ -37,18 +37,17 @@ function handlePaste() {
 
 <template>
   <div
-    v-if="hasSelection"
     class="h-9 flex items-center px-[14px] gap-[10px] font-['Inter'] shrink-0 border-t border-[rgba(255,255,255,.08)]"
     style="background:rgba(5,7,9,.85);backdrop-filter:blur(4px)">
     <span class="text-[10.5px] font-bold tracking-[.08em] text-[rgba(255,255,255,.4)] whitespace-nowrap uppercase"
       >Selection</span
     >
     <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[#7fe9f6] tabular-nums"
-      >{{ formatTime(state.selection.start) }}</span
+      >{{ formatTime(state.selection?.start) }}</span
     >
     <span class="text-[10.5px] text-[rgba(255,255,255,.3)] font-bold">→</span>
     <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[#7fe9f6] tabular-nums"
-      >{{ formatTime(state.selection.end) }}</span
+      >{{ formatTime(state.selection?.end) }}</span
     >
 
     <div class="w-px h-3.5 bg-[rgba(255,255,255,.1)]"></div>
@@ -57,7 +56,7 @@ function handlePaste() {
       >Duration</span
     >
     <span class="font-['JetBrains_Mono'] text-[11.5px] font-semibold text-[rgba(255,255,255,.7)] tabular-nums"
-      >{{ (state.selection.end - state.selection.start).toFixed(2) }}s</span
+      >{{ (state.selection?.end - state.selection?.start).toFixed(2) }}s</span
     >
 
     <div class="flex items-center gap-[6px] ml-auto">
@@ -118,7 +117,7 @@ function handlePaste() {
       </button>
       <button
         class="flex items-center gap-[5px] px-[11px] py-[5px] rounded-[7px] border-none cursor-pointer transition-all whitespace-nowrap font-['Inter'] text-[10.5px] font-semibold"
-        style="background:rgba(255,90,77,.16);color:#ff8a80"
+        style="background:rgba(255,255,255,.06);color:rgba(255,255,255,.7)"
         @click="handleCut">
         <svg
           viewBox="0 0 24 24"
