@@ -10,7 +10,7 @@ const props = defineProps({
   label: { type: String, default: '' },
   accent: { type: String, default: '#f5a623' },
   // Faceplate the knob is mounted on — see components/faceplate.js.
-  face: { type: String, default: 'dark' }, // 'dark' | 'light'
+  face: { type: String, default: 'dark' }, // 'dark' | 'metal'
   formatValue: { type: Function, default: (v) => String(Math.round(v)) },
   disabled: { type: Boolean, default: false },
   // Driven by the plugin rather than the user (e.g. auto makeup owning the
@@ -50,13 +50,47 @@ const ticks = computed(() => {
       y1: (50 + rr1 * Math.sin(ang)).toFixed(2),
       x2: (50 + rr2 * Math.cos(ang)).toFixed(2),
       y2: (50 + rr2 * Math.sin(ang)).toFixed(2),
-      col: on ? ink.value.accentLit : (ink.value.light ? 'rgba(16,22,29,0.24)' : 'rgba(255,255,255,0.16)'),
+      col: on ? props.accent : (ink.value.metal ? 'rgba(238,243,248,0.22)' : 'rgba(255,255,255,0.16)'),
     })
   }
   return out
 })
 
 const valColor = computed(() => `color-mix(in srgb, ${props.accent} 60%, #ffffff)`)
+
+// A knob on a milled panel is turned metal: a chrome bezel ringing a dark
+// face, the light running round it rather than sitting on top. The moulded
+// knob keeps its soft edge — the ring is what makes the metal one metal.
+const capStyle = computed(() =>
+  ink.value.metal
+    ? {
+        background: 'linear-gradient(155deg,#c6cfdb 0%,#7d8794 28%,#49525d 55%,#9aa5b2 82%,#525b66 100%)',
+        boxShadow: 'inset 0 1px 1px rgba(255,255,255,.35), 0 8px 18px rgba(0,0,0,.55)',
+      }
+    : {
+        background: 'radial-gradient(circle at 50% 38%,#2b323c 74%,#6b727c 89%,#7a818b 94%,#3a424c 100%)',
+        boxShadow: 'inset 0 1.5px 1px rgba(255,255,255,.16), inset 0 -3px 6px rgba(0,0,0,.6), 0 8px 18px rgba(0,0,0,.55)',
+      }
+)
+
+// The face the value is printed on, seated inside the bezel.
+const capFaceStyle = computed(() =>
+  ink.value.metal
+    ? {
+        background: 'radial-gradient(circle at 50% 26%,#2c343f,#1b212a 78%)',
+        boxShadow: 'inset 0 2px 4px rgba(0,0,0,.6), inset 0 0 0 1px rgba(6,10,15,.7)',
+      }
+    : {
+        background: 'linear-gradient(160deg,#1f252d,#1b212a)',
+        boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.32)',
+      }
+)
+
+const indicatorStyle = computed(() =>
+  ink.value.metal
+    ? { top: '11%', width: '4.5%', height: '17%', background: 'rgba(238,243,248,.92)', boxShadow: '0 0 3px rgba(0,0,0,.55)' }
+    : { top: '15%', width: '6%', height: '6%', background: '#000000' }
+)
 
 // Drag-to-adjust: vertical drag, 150px traverses the full range
 const DRAG_RANGE_PX = 150
@@ -112,23 +146,22 @@ function onWheel(e) {
       @wheel="onWheel"
     >
       <svg viewBox="0 0 100 100" class="absolute inset-0 w-full h-full overflow-visible">
+        <!-- Unlit travel is a groove cut into the plate, not a painted line -->
         <circle cx="50" cy="50" r="42" fill="none"
-                :stroke="ink.light ? 'rgba(16,22,29,0.16)' : 'rgba(255,255,255,0.07)'" stroke-width="2.4"
+                :stroke="ink.metal ? 'rgba(6,10,15,0.5)' : 'rgba(255,255,255,0.07)'" stroke-width="2.4"
                 stroke-linecap="round" :stroke-dasharray="trackDash" transform="rotate(135 50 50)" />
-        <circle cx="50" cy="50" r="42" fill="none" :stroke="ink.accentLit" stroke-width="2.4"
+        <circle cx="50" cy="50" r="42" fill="none" :stroke="accent" stroke-width="2.4"
                 stroke-linecap="round" :stroke-dasharray="valDash" transform="rotate(135 50 50)"
                 :style="{ filter: ink.glow }" />
         <line v-for="(t, i) in ticks" :key="i" :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2"
               :stroke="t.col" stroke-width="1.3" stroke-linecap="round" />
       </svg>
-      <div class="absolute left-[16%] top-[16%] w-[68%] h-[68%] rounded-full"
-           style="background:radial-gradient(circle at 50% 38%,#2b323c 74%,#6b727c 89%,#7a818b 94%,#3a424c 100%);box-shadow:inset 0 1.5px 1px rgba(255,255,255,.16), inset 0 -3px 6px rgba(0,0,0,.6), 0 8px 18px rgba(0,0,0,.55)">
-        <div class="absolute inset-[9%] rounded-full overflow-hidden"
-             style="background:linear-gradient(160deg,#1f252d,#1b212a);box-shadow:inset 0 0 0 1px rgba(0,0,0,.32)">
-        </div>
+      <div class="absolute left-[16%] top-[16%] w-[68%] h-[68%] rounded-full" :style="capStyle">
+        <div class="absolute inset-[9%] rounded-full overflow-hidden" :style="capFaceStyle"></div>
         <div class="absolute inset-0" :style="{ transform: `rotate(${indicatorDeg}deg)` }">
-          <div class="absolute top-[15%] left-1/2 -translate-x-1/2 w-[6%] h-[6%] rounded-full"
-               style="background: #000000;"></div>
+          <!-- A milled knob carries a scribed pointer; a moulded one takes a
+               punched dot. -->
+          <div class="absolute left-1/2 -translate-x-1/2 rounded-full" :style="indicatorStyle"></div>
         </div>
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span class="tracking-[0.01em]" :style="{ font: `500 ${valueFontPx}px/1 'Inter',system-ui`, color: valColor }">{{ formatValue(modelValue) }}</span>

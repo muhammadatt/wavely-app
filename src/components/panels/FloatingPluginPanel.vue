@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { faceInk } from '../faceplate.js'
+import { faceInk, seam } from '../faceplate.js'
 
 /**
  * Shared shell for the outboard-gear plugin panels (OptoSmooth, FET Punch).
@@ -22,21 +22,22 @@ const props = defineProps({
   // Faceplate gradients — each plugin gets its own colour.
   background: { type: String, default: 'linear-gradient(155deg,#1a1815,#100e0b 60%)' },
   headerBackground: { type: String, default: 'linear-gradient(#221f1a,#171410)' },
-  // Whether the faceplate above is dark or bright. Drives every piece of ink
-  // printed on it; pass it to the controls in the slot too.
-  face: { type: String, default: 'dark' }, // 'dark' | 'light'
+  // What the faceplate above is made of. Drives every piece of ink printed on
+  // it; pass it to the controls in the slot too.
+  face: { type: String, default: 'dark' }, // 'dark' | 'metal'
   engaged: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['toggle-engaged', 'close'])
 
 const ink = computed(() => faceInk(props.face, props.accent))
+const headerSeam = computed(() => seam(props.face, 'bottom'))
 
-// A dark unit sits in its own shadow; a brushed metal one needs a machined
-// edge — a bright top bevel over a dark rim — or it reads as a flat rectangle.
+// A black unit sits in its own shadow; a milled one needs an edge — light
+// catching the top bevel over a cut rim — or it reads as a flat rectangle.
 const frameShadow = computed(() =>
-  props.face === 'light'
-    ? '0 24px 60px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.8),inset 0 0 0 1px rgba(16,22,29,.28)'
+  props.face === 'metal'
+    ? '0 26px 64px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.16),inset 0 -1px 0 rgba(0,0,0,.5),inset 0 0 0 1px rgba(6,10,15,.55)'
     : '0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.05)'
 )
 
@@ -96,20 +97,19 @@ function onDragEnd(e) {
     <div
       class="flex items-center justify-between px-[18px] h-12 touch-none"
       :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
-      :style="{ background: headerBackground, borderBottom: `1px solid ${ink.hairline}` }"
+      :style="[{ background: headerBackground }, headerSeam]"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
       @pointercancel="onDragEnd"
     >
       <div class="flex items-center gap-2.5">
-        <!-- Power LED. On a bright faceplate the halo does nothing, so the
-             lamp gets a bezel instead. -->
+        <!-- Power LED, seated in a bezel on metal the way a panel lamp is. -->
         <div class="w-3.5 h-3.5 rounded-full"
              :style="{
-               background: `linear-gradient(135deg, color-mix(in srgb, ${ink.accentLit} 45%, #ffffff), ${ink.accentLit})`,
-               boxShadow: ink.light
-                 ? `inset 0 0 0 1px rgba(16,22,29,.35), 0 1px 2px rgba(16,22,29,.35)`
+               background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 45%, #ffffff), ${accent})`,
+               boxShadow: ink.metal
+                 ? `0 0 10px color-mix(in srgb, ${accent} 55%, transparent), inset 0 0 0 1px rgba(6,10,15,.4), 0 0 0 1px rgba(255,255,255,.08)`
                  : `0 0 10px color-mix(in srgb, ${accent} 65%, transparent)`,
              }"></div>
         <span :style="{ font: `800 13px/1 'Inter'`, letterSpacing: '.22em', color: ink.strong }">{{ brandLead }}&nbsp;<span :style="{ fontWeight: 500, color: ink.muted }">{{ brandTail }}</span></span>
@@ -122,19 +122,19 @@ function onDragEnd(e) {
         <button
           class="flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-opacity"
           :style="{
-            background: engaged || !ink.light ? ink.accentWash : ink.well,
-            borderColor: engaged || !ink.light ? ink.accentEdge : ink.line,
-            opacity: engaged ? 1 : ink.light ? 0.8 : 0.55,
+            background: engaged || !ink.metal ? ink.accentWash : ink.well,
+            borderColor: engaged || !ink.metal ? ink.accentEdge : ink.line,
+            opacity: engaged ? 1 : ink.metal ? 0.85 : 0.55,
           }"
           @pointerdown.stop
           @click="emit('toggle-engaged')"
         >
           <span class="w-[7px] h-[7px] rounded-full"
                 :style="{
-                  background: ink.accentLit,
-                  boxShadow: ink.light ? 'inset 0 0 0 1px rgba(16,22,29,.3)' : `0 0 7px ${accent}`,
+                  background: accent,
+                  boxShadow: `0 0 7px ${accent}`,
                 }"></span>
-          <span :style="{ font: `700 9px 'JetBrains Mono',monospace`, letterSpacing: '.14em', color: engaged || !ink.light ? ink.accentInk : ink.muted }">{{ engaged ? 'ON' : 'BYPASS' }}</span>
+          <span :style="{ font: `700 9px 'JetBrains Mono',monospace`, letterSpacing: '.14em', color: engaged || !ink.metal ? ink.accentInk : ink.muted }">{{ engaged ? 'ON' : 'BYPASS' }}</span>
         </button>
         <button
           class="flex items-center justify-center w-7 h-7 rounded-full border-none cursor-pointer"

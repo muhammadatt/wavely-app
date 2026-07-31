@@ -12,10 +12,10 @@ const props = defineProps({
   square: { type: Boolean, default: false },    // fixed-diameter rounded-square icon button
   toggle: { type: Boolean, default: false },    // on/off appearance driven by `active`
   active: { type: Boolean, default: true },
-  // Surface the button sits on. Dimming to 40% reads as "off" against a dark
-  // surface but washes a button out on a bright one, so a light face gets a
-  // grey chip for its disabled state instead.
-  face: { type: String, default: 'dark' },      // 'dark' | 'light'
+  // Surface the button sits on. Dropping a bright fill to 40% over gunmetal
+  // leaves a murky slab with unreadable text, so a metal face gets an unlit
+  // chip for its disabled state instead of the same fill dimmed.
+  face: { type: String, default: 'dark' },      // 'dark' | 'metal'
 })
 
 // Radius follows size rather than being chosen per call site, so a row of
@@ -79,7 +79,7 @@ const buttonStyle = computed(() => ((props.toggle && !props.active) ? OFF : onSt
     class="base-btn flex items-center justify-center cursor-pointer font-bold tracking-[.02em]"
     :aria-pressed="toggle ? String(active) : undefined"
     :class="[
-      face === 'light' ? 'base-btn--light' : '',
+      face === 'metal' ? 'base-btn--metal' : '',
       isIcon ? '' : [sizeTokens.pad, sizeTokens.text],
       sizeTokens.gap,
       block ? 'w-full' : '',
@@ -118,10 +118,11 @@ const buttonStyle = computed(() => ((props.toggle && !props.active) ? OFF : onSt
   opacity: 0.4;
   cursor: default;
 }
-.base-btn--light:disabled {
+.base-btn--metal:disabled {
   opacity: 1;
-  background: rgba(16, 22, 29, 0.1);
-  color: rgba(16, 22, 29, 0.48);
-  border: 1px solid rgba(16, 22, 29, 0.14);
+  background: rgba(6, 10, 15, 0.3);
+  color: rgba(238, 243, 248, 0.45);
+  border: 1px solid rgba(6, 10, 15, 0.55);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 </style>

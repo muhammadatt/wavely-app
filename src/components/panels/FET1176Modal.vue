@@ -9,7 +9,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import VuMeter from '../meters/VuMeter.vue'
 import FloatingPluginPanel from './FloatingPluginPanel.vue'
 import BaseButton from '../ui/BaseButton.vue'
-import { faceInk } from '../faceplate.js'
+import { faceInk, seam } from '../faceplate.js'
 
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
@@ -34,22 +34,44 @@ watch(() => state.selection, () => refreshAutoMakeup(), { deep: true })
 // which of the two is on screen.
 const ACCENT = '#79b8ff'
 
-// Brushed aluminium faceplate, the way the hardware wears it: fine vertical
-// grain over a diagonal sheen, so the sweep of highlight moves across the
-// panel rather than sitting flat. The dark unit put pale legends and controls
-// on a near-black plate, which left the buttons short of contrast; on metal
-// they get dark ink instead.
-const FACE = 'light'
+// Machined gunmetal faceplate. The near-black plate this replaces gave the
+// legends and switch banks nothing to sit against — a flat surface at the
+// bottom of the value range, where every tint reads as the same black. Metal
+// carries a gradient of its own: fine brushing under a broad diagonal sheen,
+// several stops up from black, so bevels and cut edges become visible and the
+// controls read as hardware let into a plate.
+const FACE = 'metal'
 const FACEPLATE = [
-  'repeating-linear-gradient(90deg,rgba(255,255,255,.32) 0 1px,rgba(255,255,255,0) 1px 2px,rgba(16,22,29,.03) 2px 3px)',
-  'linear-gradient(163deg,#f5f7f9 0%,#dfe4e9 17%,#c7cfd8 36%,#eef1f4 51%,#c3cbd4 67%,#dee3e9 85%,#b7c1cb 100%)',
+  'repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,rgba(0,0,0,.05) 1px 2px,rgba(255,255,255,0) 2px 3px)',
+  'linear-gradient(168deg,#39424f 0%,#2f3742 22%,#262d37 50%,#2d343f 72%,#1f2530 100%)',
 ].join(',')
 const FACEPLATE_HEADER = [
-  'repeating-linear-gradient(90deg,rgba(255,255,255,.26) 0 1px,rgba(255,255,255,0) 1px 2px,rgba(16,22,29,.04) 2px 3px)',
-  'linear-gradient(#dae0e6,#bac3cd)',
+  'repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 1px,rgba(0,0,0,.06) 1px 2px,rgba(255,255,255,0) 2px 3px)',
+  'linear-gradient(#2b323c,#1e242c)',
 ].join(',')
 
+// The control bay is a sub-panel screwed onto the faceplate: a shade lighter
+// than the plate around it, edged by its own bevel.
+const BAY = {
+  background: 'linear-gradient(180deg,#454e5c,#363e4a 55%,#313945)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.09), inset 0 0 0 1px rgba(6,10,15,.5), 0 2px 5px rgba(0,0,0,.35), 0 1px 0 rgba(255,255,255,.06)',
+}
+
+// Panel-head fasteners at the bay's corners.
+const SCREW = {
+  background: 'radial-gradient(circle at 34% 30%,#7c8695,#454e5b 62%,#2b323c)',
+  boxShadow: 'inset 0 0 0 1px rgba(6,10,15,.5), 0 1px 0 rgba(255,255,255,.09)',
+}
+
+const SCREW_CORNERS = [
+  { k: 'tl', pos: { top: '7px', left: '7px' } },
+  { k: 'tr', pos: { top: '7px', right: '7px' } },
+  { k: 'bl', pos: { bottom: '7px', left: '7px' } },
+  { k: 'br', pos: { bottom: '7px', right: '7px' } },
+]
+
 const ink = faceInk(FACE, ACCENT)
+const bayGroove = seam(FACE, 'top')
 
 const RATIO_OPTIONS = [
   { value: '4', label: '4:1', title: 'Gentle enough to leave on a whole take' },
@@ -135,7 +157,13 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
       </span>
     </template>
 
-    <div class="px-[26px] pt-[20px] pb-[26px]">
+    <div class="px-[18px] pt-[16px] pb-[18px]">
+      <!-- Control bay: the whole working surface is one sub-panel bolted to
+           the faceplate, the way a milled unit is actually built. -->
+      <div class="relative rounded-[13px] px-[22px] pt-[18px] pb-[20px]" :style="BAY">
+        <span v-for="corner in SCREW_CORNERS" :key="corner.k"
+              class="absolute w-[5px] h-[5px] rounded-full" :style="[SCREW, corner.pos]"></span>
+
       <!-- Meter bay: VU movement on the left, gain staging on the right -->
       <div class="flex items-start gap-[26px]">
         <div class="w-[248px] shrink-0 flex flex-col items-center gap-[10px]">
@@ -205,7 +233,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               <button
                 class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
                 :style="{
-                  background: fetAutoMakeup ? ink.accentWash : 'rgba(255,255,255,.5)',
+                  background: fetAutoMakeup ? ink.accentWash : ink.well,
                   border: `1px solid ${fetAutoMakeup ? ink.accentEdge : ink.line}`,
                   color: fetAutoMakeup ? ink.accentInk : ink.muted,
                   font: `700 8.5px 'JetBrains Mono',monospace`,
@@ -227,7 +255,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
 
       <!-- Ratio buttons + sidechain filter, and the ballistics -->
       <div class="flex items-start justify-between gap-[20px] mt-[18px] pt-[16px]"
-           :style="{ borderTop: `1px solid ${ink.hairline}` }">
+           :style="bayGroove">
         <div class="flex flex-col gap-[12px] pt-[6px]">
           <div class="flex items-center gap-[10px]">
             <span class="w-[46px]" :style="{ font: `700 8.5px 'JetBrains Mono',monospace`, letterSpacing: '.16em', color: ink.label }">RATIO</span>
@@ -303,10 +331,11 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
           </div>
         </div>
       </div>
+      </div>
 
       <BaseButton
-        class="mt-4" size="md" block
-        color="accent" :accent="ink.accentInk" text-color="#f6fafd" :face="FACE"
+        class="mt-[14px]" size="md" block
+        color="accent" :accent="ACCENT" text-color="#0c1218" :face="FACE"
         :disabled="!hasSelection || !fetPreview"
         @click="applyAndClose"
       >

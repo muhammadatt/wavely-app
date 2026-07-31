@@ -15,7 +15,7 @@ const props = defineProps({
   options: { type: Array, required: true },
   accent: { type: String, default: '#f5a623' },
   // Faceplate the bank is mounted on — see components/faceplate.js.
-  face: { type: String, default: 'dark' }, // 'dark' | 'light'
+  face: { type: String, default: 'dark' }, // 'dark' | 'metal'
   disabled: { type: Boolean, default: false },
   // Caption under the bank, e.g. the selected setting's plain-English effect.
   caption: { type: String, default: '' },
@@ -26,13 +26,23 @@ const emit = defineEmits(['update:modelValue'])
 
 const ink = computed(() => faceInk(props.face, props.accent))
 
-// On a bright faceplate the bank needs a body of its own — a lighter well
-// under the buttons — or the unlit positions dissolve into the metal.
+// On metal the bank is let into the plate: a dark recess with the light
+// catching its lower lip. Unlit positions read as unlit buttons rather than
+// dissolving into the faceplate.
 const bankStyle = computed(() => ({
   border: `1px solid ${ink.value.line}`,
-  background: ink.value.light ? 'rgba(255,255,255,.5)' : 'transparent',
-  boxShadow: ink.value.light ? 'inset 0 1px 2px rgba(16,22,29,.14)' : 'none',
+  background: ink.value.metal ? 'rgba(6,10,15,.3)' : 'transparent',
+  boxShadow: ink.value.metal
+    ? 'inset 0 1px 3px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.07)'
+    : 'none',
 }))
+
+// The selected position sits proud of the recess and lit from within.
+const selectedShadow = computed(() =>
+  ink.value.metal
+    ? `inset 0 1px 0 rgba(255,255,255,.14), inset 0 0 0 1px ${ink.value.accentEdge}`
+    : 'none'
+)
 </script>
 
 <template>
@@ -46,6 +56,7 @@ const bankStyle = computed(() => ({
           paddingRight: paddingX + 'px',
           background: String(modelValue) === String(opt.value) ? ink.accentWash : 'transparent',
           color: String(modelValue) === String(opt.value) ? ink.accentInk : ink.muted,
+          boxShadow: String(modelValue) === String(opt.value) ? selectedShadow : 'none',
           font: `700 9px 'JetBrains Mono',monospace`,
           letterSpacing: '.12em',
         }"
