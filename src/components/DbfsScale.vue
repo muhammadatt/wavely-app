@@ -18,7 +18,7 @@ const dbTicks = DB_LEVELS.map(db => {
 </script>
 
 <template>
-  <div class="w-7 shrink-0 relative select-none font-['JetBrains_Mono'] text-[8px] font-semibold" style="color:rgba(255,255,255,.32)">
+  <div class="w-7 shrink-0 relative select-none font-['JetBrains_Mono'] text-[8px] font-semibold" style="color:rgba(255,255,255,.32)" >
     <span
       v-for="t in dbTicks"
       :key="'t' + t.db"

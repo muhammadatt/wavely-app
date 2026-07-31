@@ -5,7 +5,7 @@ import { startPlayback, stopPlayback } from '../audio/playback.js'
 import BaseButton from './ui/BaseButton.vue'
 
 const {
-  state, setPlayhead, getAudioContext, totalDuration, hasSelection, toggleLoop,
+  state, setPlayhead, getAudioContext, totalDuration, hasSelection, toggleLoop, hasFile,
 } = useEditorState()
 const zoomLevel = ref(0) // 0-100 range for slider; 0 = fully zoomed out (fit to width)
 
@@ -143,6 +143,7 @@ watch(() => state.segments, () => {
       <!-- Skip to start -->
       <BaseButton
         size="sm" color="ghost" circle
+        :disabled="!hasFile"
         @click="skipToStart"
         title="Skip to Start (Home)"
         aria-label="Skip to start"
@@ -153,6 +154,7 @@ watch(() => state.segments, () => {
       <!-- Skip back -->
       <BaseButton
         size="sm" color="ghost" circle
+        :disabled="!hasFile"
         @click="skipBack"
         title="Skip Back 5s"
         aria-label="Skip back 5 seconds"
@@ -163,6 +165,7 @@ watch(() => state.segments, () => {
       <!-- Play/Pause — plays the selection when there is one, so the label says so -->
       <BaseButton
         size="lg" circle
+        :disabled="!hasFile"
         @click="togglePlay"
         :title="playTitle"
         :aria-label="playTitle"
@@ -176,6 +179,7 @@ watch(() => state.segments, () => {
       <!-- Skip forward -->
       <BaseButton
         size="sm" color="ghost" circle
+        :disabled="!hasFile"
         @click="skipForward"
         title="Skip Forward 5s"
         aria-label="Skip forward 5 seconds"
@@ -187,6 +191,7 @@ watch(() => state.segments, () => {
       <BaseButton
         size="sm" circle toggle :active="state.isLooping"
         color="accent" accent="rgba(53,211,230,.14)" text-color="#7fe9f6"
+        :disabled="!hasFile"
         @click="toggleLoop"
         title="Loop"
         aria-label="Loop playback"
@@ -208,6 +213,7 @@ watch(() => state.segments, () => {
         @pointerup="isDraggingZoom = false"
         @pointercancel="isDraggingZoom = false"
         @blur="isDraggingZoom = false"
+        :disabled="!hasFile"
         aria-label="Zoom"
         class="zoom-slider w-20 h-[5px] rounded-full appearance-none cursor-pointer"
         :style="{ background: `linear-gradient(to right, #35d3e6 ${zoomLevel}%, rgba(255,255,255,.1) ${zoomLevel}%)` }"

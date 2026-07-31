@@ -9,10 +9,11 @@ import WaveformArea from './WaveformArea.vue'
 import SelectionBar from './SelectionBar.vue'
 import TransportBar from './TransportBar.vue'
 import ContextPanel from './ContextPanel.vue'
+import EmptyState from './EmptyState.vue'
 
 const {
   state, performDelete, performCut, performCopy, performPaste,
-  undo, redo, canUndo, canRedo, hasSelection, hasClipboard,
+  undo, redo, canUndo, canRedo, hasSelection, hasClipboard, hasFile,
   selectAll, clearSelection, setPlayhead, totalDuration, setActiveTool,
 } = useEditorState()
 
@@ -48,9 +49,9 @@ function handleKeydown(e) {
     return
   }
 
-  // Nothing below should reach the timeline behind a modal or the processing
-  // overlay — the editor used to keep taking edits through both.
-  if (modalOpen || state.isProcessing || inText) return
+  // Nothing below should reach the timeline behind a modal, the processing
+  // overlay, or an empty editor — the editor used to keep taking edits through all three.
+  if (modalOpen || state.isProcessing || inText || !hasFile.value) return
 
   // Space — play/pause (handled in TransportBar via event bus). Focus lands on
   // whichever button was last clicked, and in an editor Space means transport,
@@ -168,25 +169,28 @@ onUnmounted(() => {
       <div class="flex flex-col flex-1 overflow-hidden">
         <FloatingToolbar />
         <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px]">
-          <!-- Overview is indented by the dBFS gutter so its time axis shares an
-               x-origin with the main waveform below it. -->
-          <div class="flex shrink-0">
-            <div class="w-7 shrink-0"></div>
-            <WaveformOverview class="flex-1" />
-          </div>
-          <div
-            class="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-[12px]"
-            style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
-          >
-            <!-- The scale shares the canvas's box exactly, so its ticks land on
-                 the amplitudes they name. SelectionBar sits below in flow rather
-                 than overlaying the waveform's loudest peaks. -->
-            <div class="flex-1 min-h-0 flex">
-              <DbfsScale />
-              <WaveformArea />
+          <template v-if="hasFile">
+            <!-- Overview is indented by the dBFS gutter so its time axis shares an
+                 x-origin with the main waveform below it. -->
+            <div class="flex shrink-0">
+              <div class="w-7 shrink-0"></div>
+              <WaveformOverview class="flex-1" />
             </div>
-            <SelectionBar />
-          </div>
+            <div
+              class="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-[12px]"
+              style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
+            >
+              <!-- The scale shares the canvas's box exactly, so its ticks land on
+                   the amplitudes they name. SelectionBar sits below in flow rather
+                   than overlaying the waveform's loudest peaks. -->
+              <div class="flex-1 min-h-0 flex">
+                <DbfsScale />
+                <WaveformArea />
+              </div>
+              <SelectionBar />
+            </div>
+          </template>
+          <EmptyState v-else />
         </div>
         <TransportBar />
       </div>

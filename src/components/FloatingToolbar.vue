@@ -2,7 +2,7 @@
 import { useEditorState } from '../composables/useEditorState.js'
 import BaseButton from './ui/BaseButton.vue'
 
-const { state, setActiveTool } = useEditorState()
+const { state, setActiveTool, hasFile } = useEditorState()
 
 const tools = [
   {
@@ -58,6 +58,7 @@ function handleZoomOut() {
         :key="tool.id"
         size="md" :pill="false" toggle
         :active="state.activeTool === tool.id"
+        :disabled="!hasFile"
         class="whitespace-nowrap shrink-0"
         @click="setActiveTool(tool.id)"
       >
@@ -71,6 +72,7 @@ function handleZoomOut() {
     <div class="flex-1 flex justify-end gap-2">
       <BaseButton
         size="xs" color="ghost" square
+        :disabled="!hasFile"
         @click="handleZoomIn"
         title="Zoom In (+)"
         aria-label="Zoom in"
@@ -81,6 +83,7 @@ function handleZoomOut() {
       </BaseButton>
       <BaseButton
         size="xs" color="ghost" square
+        :disabled="!hasFile"
         @click="handleZoomOut"
         title="Zoom Out (-)"
         aria-label="Zoom out"

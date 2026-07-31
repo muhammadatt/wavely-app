@@ -78,7 +78,7 @@ function handleExport() {
 
       <BaseButton
         size="md" :pill="false"
-        :disabled="state.isProcessing"
+        :disabled="state.isProcessing || !state.currentFile"
         @click="handleExport"
         title="Export as WAV"
       >
