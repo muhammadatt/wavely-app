@@ -9,6 +9,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import VuMeter from '../meters/VuMeter.vue'
 import FloatingPluginPanel from './FloatingPluginPanel.vue'
 import BaseButton from '../ui/BaseButton.vue'
+import { faceInk } from '../faceplate.js'
 
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
@@ -32,6 +33,23 @@ watch(() => state.selection, () => refreshAutoMakeup(), { deep: true })
 // Steel blue rather than the OptoSmooth's amber — at a glance you can tell
 // which of the two is on screen.
 const ACCENT = '#79b8ff'
+
+// Brushed aluminium faceplate, the way the hardware wears it: fine vertical
+// grain over a diagonal sheen, so the sweep of highlight moves across the
+// panel rather than sitting flat. The dark unit put pale legends and controls
+// on a near-black plate, which left the buttons short of contrast; on metal
+// they get dark ink instead.
+const FACE = 'light'
+const FACEPLATE = [
+  'repeating-linear-gradient(90deg,rgba(255,255,255,.32) 0 1px,rgba(255,255,255,0) 1px 2px,rgba(16,22,29,.03) 2px 3px)',
+  'linear-gradient(163deg,#f5f7f9 0%,#dfe4e9 17%,#c7cfd8 36%,#eef1f4 51%,#c3cbd4 67%,#dee3e9 85%,#b7c1cb 100%)',
+].join(',')
+const FACEPLATE_HEADER = [
+  'repeating-linear-gradient(90deg,rgba(255,255,255,.26) 0 1px,rgba(255,255,255,0) 1px 2px,rgba(16,22,29,.04) 2px 3px)',
+  'linear-gradient(#dae0e6,#bac3cd)',
+].join(',')
+
+const ink = faceInk(FACE, ACCENT)
 
 const RATIO_OPTIONS = [
   { value: '4', label: '4:1', title: 'Gentle enough to leave on a whole take' },
@@ -104,14 +122,15 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
     :accent="ACCENT"
     brand-lead="FET"
     brand-tail="PUNCH"
-    background="linear-gradient(155deg,#171a1f,#0b0d10 60%)"
-    header-background="linear-gradient(#1e2229,#13161a)"
+    :background="FACEPLATE"
+    :header-background="FACEPLATE_HEADER"
+    :face="FACE"
     :engaged="fetPreview"
     @toggle-engaged="togglePreview"
     @close="close"
   >
     <template #header-center>
-      <span style="font:600 9.5px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.32)">
+      <span :style="{ font: `600 9.5px 'JetBrains Mono',monospace`, letterSpacing: '.16em', color: ink.faint }">
         FET LIMITING AMPLIFIER
       </span>
     </template>
@@ -132,12 +151,13 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
             v-model="meterMode"
             :options="METER_OPTIONS"
             :accent="ACCENT"
+            :face="FACE"
             :padding-x="16"
           />
         </div>
 
         <div class="flex-1 flex items-center justify-between gap-[14px]">
-          <LevelMeter :db="fetInputDb" label="IN" :height="132" />
+          <LevelMeter :db="fetInputDb" label="IN" :height="132" :face="FACE" />
 
           <div class="flex-1 flex justify-center gap-[26px]">
             <div class="w-[118px]">
@@ -148,17 +168,20 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
                 :model-value="fetInput"
                 @update:model-value="syncInput"
                 :min="0" :max="100" :step="1"
-                label="Input" :accent="ACCENT" :format-value="formatInteger"
+                label="Input" :accent="ACCENT" :face="FACE" :format-value="formatInteger"
                 :disabled="!fetPreview"
               />
             </div>
             <div class="w-[118px] flex flex-col items-center">
-              <div class="relative w-full" :style="{ opacity: fetAutoMakeup ? 0.78 : 1 }">
+              <!-- Dimmed while auto owns the knob. A dark knob fades to fog
+                   against metal, so the light face needs a lighter touch than
+                   the 0.78 that reads as "hands off" on a dark one. -->
+              <div class="relative w-full" :style="{ opacity: fetAutoMakeup ? 0.88 : 1 }">
                 <Knob
                   :model-value="fetOutput"
                   @update:model-value="syncOutput"
                   :min="-36" :max="24" :step="0.1"
-                  label="Output" :accent="ACCENT" :format-value="formatGain"
+                  label="Output" :accent="ACCENT" :face="FACE" :format-value="formatGain"
                   :disabled="!fetPreview"
                   :readonly="fetAutoMakeup"
                 />
@@ -166,11 +189,11 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
                   v-if="fetAutoMakeup"
                   class="absolute top-[2px] right-[4px] px-1.5 py-[2px] rounded-full pointer-events-none"
                   :style="{
-                    background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
-                    border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
+                    background: ink.accentWash,
+                    border: `1px solid ${ink.accentEdge}`,
                     font: `700 7px/1 'JetBrains Mono',monospace`,
                     letterSpacing: '.09em',
-                    color: `color-mix(in srgb, ${ACCENT} 65%, #ffffff)`,
+                    color: ink.accentInk,
                   }"
                 >AUTO</span>
               </div>
@@ -182,9 +205,9 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               <button
                 class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
                 :style="{
-                  background: fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 16%, transparent)` : 'rgba(255,255,255,.05)',
-                  border: `1px solid ${fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 42%, transparent)` : 'rgba(255,255,255,.09)'}`,
-                  color: fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 65%, #ffffff)` : 'rgba(255,255,255,.4)',
+                  background: fetAutoMakeup ? ink.accentWash : 'rgba(255,255,255,.5)',
+                  border: `1px solid ${fetAutoMakeup ? ink.accentEdge : ink.line}`,
+                  color: fetAutoMakeup ? ink.accentInk : ink.muted,
                   font: `700 8.5px 'JetBrains Mono',monospace`,
                   letterSpacing: '.1em',
                   opacity: fetPreview ? 1 : 0.4,
@@ -198,27 +221,29 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
             </div>
           </div>
 
-          <LevelMeter :db="fetOutputDb" label="OUT" :height="132" />
+          <LevelMeter :db="fetOutputDb" label="OUT" :height="132" :face="FACE" />
         </div>
       </div>
 
       <!-- Ratio buttons + sidechain filter, and the ballistics -->
-      <div class="flex items-start justify-between gap-[20px] mt-[18px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
+      <div class="flex items-start justify-between gap-[20px] mt-[18px] pt-[16px]"
+           :style="{ borderTop: `1px solid ${ink.hairline}` }">
         <div class="flex flex-col gap-[12px] pt-[6px]">
           <div class="flex items-center gap-[10px]">
-            <span class="w-[46px]" style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.4)">RATIO</span>
+            <span class="w-[46px]" :style="{ font: `700 8.5px 'JetBrains Mono',monospace`, letterSpacing: '.16em', color: ink.label }">RATIO</span>
             <SegmentedSwitch
               :model-value="fetRatio"
               @update:model-value="syncRatio"
               :options="RATIO_OPTIONS"
               :accent="ACCENT"
+              :face="FACE"
               :disabled="!fetPreview"
               :padding-x="11"
               :caption="ratioCaption"
             />
           </div>
           <div class="flex items-center gap-[10px]">
-            <span class="w-[46px]" style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.4)">SC HPF</span>
+            <span class="w-[46px]" :style="{ font: `700 8.5px 'JetBrains Mono',monospace`, letterSpacing: '.16em', color: ink.label }">SC HPF</span>
             <!-- Not on the original: the 1176's detector is broadband, which
                  lets plosives duck a whole phrase. Off is the stock path. -->
             <SegmentedSwitch
@@ -226,6 +251,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               @update:model-value="syncScHpf"
               :options="SC_HPF_OPTIONS"
               :accent="ACCENT"
+              :face="FACE"
               :disabled="!fetPreview"
               :padding-x="13"
             />
@@ -240,27 +266,27 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               :model-value="fetAttack"
               @update:model-value="syncAttack"
               :min="1" :max="7" :step="1" :value-font-px="13"
-              label="Attack" :accent="ACCENT" :format-value="formatInteger"
+              label="Attack" :accent="ACCENT" :face="FACE" :format-value="formatInteger"
               :disabled="!fetPreview"
             />
-            <span class="mt-[3px]" style="font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.32)">{{ attackTime }}</span>
+            <span class="mt-[3px]" :style="{ font: `600 8px 'JetBrains Mono',monospace`, color: ink.muted }">{{ attackTime }}</span>
           </div>
           <div class="w-[72px] flex flex-col items-center">
             <Knob
               :model-value="fetRelease"
               @update:model-value="syncRelease"
               :min="1" :max="7" :step="1" :value-font-px="13"
-              label="Release" :accent="ACCENT" :format-value="formatInteger"
+              label="Release" :accent="ACCENT" :face="FACE" :format-value="formatInteger"
               :disabled="!fetPreview"
             />
-            <span class="mt-[3px]" style="font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.32)">{{ releaseTime }}</span>
+            <span class="mt-[3px]" :style="{ font: `600 8px 'JetBrains Mono',monospace`, color: ink.muted }">{{ releaseTime }}</span>
           </div>
           <div class="w-[72px]">
             <Knob
               :model-value="fetDrive"
               @update:model-value="syncDrive"
               :min="0" :max="1" :step="0.01" :value-font-px="13"
-              label="FET Drive" :accent="ACCENT" :format-value="formatPercent"
+              label="FET Drive" :accent="ACCENT" :face="FACE" :format-value="formatPercent"
               :disabled="!fetPreview"
             />
           </div>
@@ -271,7 +297,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               :model-value="fetMix"
               @update:model-value="syncMix"
               :min="0" :max="1" :step="0.01" :value-font-px="13"
-              label="Mix" :accent="ACCENT" :format-value="formatPercent"
+              label="Mix" :accent="ACCENT" :face="FACE" :format-value="formatPercent"
               :disabled="!fetPreview"
             />
           </div>
@@ -280,7 +306,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
 
       <BaseButton
         class="mt-4" size="md" block
-        color="accent" :accent="ACCENT" text-color="#0c1218"
+        color="accent" :accent="ink.accentInk" text-color="#f6fafd" :face="FACE"
         :disabled="!hasSelection || !fetPreview"
         @click="applyAndClose"
       >

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { faceInk } from '../faceplate.js'
 
 const props = defineProps({
   modelValue: { type: Number, required: true },
@@ -8,6 +9,8 @@ const props = defineProps({
   step: { type: Number, default: 1 },
   label: { type: String, default: '' },
   accent: { type: String, default: '#f5a623' },
+  // Faceplate the knob is mounted on — see components/faceplate.js.
+  face: { type: String, default: 'dark' }, // 'dark' | 'light'
   formatValue: { type: Function, default: (v) => String(Math.round(v)) },
   disabled: { type: Boolean, default: false },
   // Driven by the plugin rather than the user (e.g. auto makeup owning the
@@ -33,6 +36,8 @@ const trackDash = `${ARC.toFixed(1)} ${CIRCUMFERENCE.toFixed(1)}`
 const valDash = computed(() => `${(pct.value * ARC).toFixed(1)} ${CIRCUMFERENCE.toFixed(1)}`)
 const indicatorDeg = computed(() => (225 + pct.value * 270).toFixed(1))
 
+const ink = computed(() => faceInk(props.face, props.accent))
+
 const ticks = computed(() => {
   const out = []
   for (let i = 0; i < N_TICKS; i++) {
@@ -45,7 +50,7 @@ const ticks = computed(() => {
       y1: (50 + rr1 * Math.sin(ang)).toFixed(2),
       x2: (50 + rr2 * Math.cos(ang)).toFixed(2),
       y2: (50 + rr2 * Math.sin(ang)).toFixed(2),
-      col: on ? props.accent : 'rgba(255,255,255,0.16)',
+      col: on ? ink.value.accentLit : (ink.value.light ? 'rgba(16,22,29,0.24)' : 'rgba(255,255,255,0.16)'),
     })
   }
   return out
@@ -107,11 +112,12 @@ function onWheel(e) {
       @wheel="onWheel"
     >
       <svg viewBox="0 0 100 100" class="absolute inset-0 w-full h-full overflow-visible">
-        <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="2.4"
+        <circle cx="50" cy="50" r="42" fill="none"
+                :stroke="ink.light ? 'rgba(16,22,29,0.16)' : 'rgba(255,255,255,0.07)'" stroke-width="2.4"
                 stroke-linecap="round" :stroke-dasharray="trackDash" transform="rotate(135 50 50)" />
-        <circle cx="50" cy="50" r="42" fill="none" :stroke="accent" stroke-width="2.4"
+        <circle cx="50" cy="50" r="42" fill="none" :stroke="ink.accentLit" stroke-width="2.4"
                 stroke-linecap="round" :stroke-dasharray="valDash" transform="rotate(135 50 50)"
-                :style="{ filter: `drop-shadow(0 0 4px ${accent})` }" />
+                :style="{ filter: ink.glow }" />
         <line v-for="(t, i) in ticks" :key="i" :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2"
               :stroke="t.col" stroke-width="1.3" stroke-linecap="round" />
       </svg>
@@ -129,6 +135,7 @@ function onWheel(e) {
         </div>
       </div>
     </div>
-    <span class="uppercase" style="font:600 10px/1 'Inter',system-ui;letter-spacing:0.14em;color:rgba(255,255,255,0.55)">{{ label }}</span>
+    <span class="uppercase"
+          :style="{ font: `600 10px/1 'Inter',system-ui`, letterSpacing: '0.14em', color: ink.label }">{{ label }}</span>
   </div>
 </template>

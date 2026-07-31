@@ -12,6 +12,10 @@ const props = defineProps({
   square: { type: Boolean, default: false },    // fixed-diameter rounded-square icon button
   toggle: { type: Boolean, default: false },    // on/off appearance driven by `active`
   active: { type: Boolean, default: true },
+  // Surface the button sits on. Dimming to 40% reads as "off" against a dark
+  // surface but washes a button out on a bright one, so a light face gets a
+  // grey chip for its disabled state instead.
+  face: { type: String, default: 'dark' },      // 'dark' | 'light'
 })
 
 // Radius follows size rather than being chosen per call site, so a row of
@@ -75,6 +79,7 @@ const buttonStyle = computed(() => ((props.toggle && !props.active) ? OFF : onSt
     class="base-btn flex items-center justify-center cursor-pointer font-bold tracking-[.02em]"
     :aria-pressed="toggle ? String(active) : undefined"
     :class="[
+      face === 'light' ? 'base-btn--light' : '',
       isIcon ? '' : [sizeTokens.pad, sizeTokens.text],
       sizeTokens.gap,
       block ? 'w-full' : '',
@@ -112,5 +117,11 @@ const buttonStyle = computed(() => ((props.toggle && !props.active) ? OFF : onSt
 .base-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.base-btn--light:disabled {
+  opacity: 1;
+  background: rgba(16, 22, 29, 0.1);
+  color: rgba(16, 22, 29, 0.48);
+  border: 1px solid rgba(16, 22, 29, 0.14);
 }
 </style>
