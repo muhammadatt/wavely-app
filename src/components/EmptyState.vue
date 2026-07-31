@@ -74,11 +74,10 @@ async function handleFile(file) {
 
 <template>
   <div
-    class="relative flex-1 min-h-0 rounded-[12px] flex items-center justify-center overflow-hidden rounded-[16px] border-3 border-dashed transition-all cursor-pointer m-1"
-          :style="isDragOver
-        ? 'border-color:#35d3e6;background:rgba(53,211,230,.06)'
-        : 'border-color:rgba(255,255,255,.12)'"
-    style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
+    class="relative flex-1 min-h-0 rounded-[16px] border-3 border-dashed transition-all cursor-pointer m-1 flex items-center justify-center overflow-hidden"
+    :style="isDragOver
+      ? 'border-color:#35d3e6;background:rgba(53,211,230,.06)'
+      : 'border-color:rgba(255,255,255,.12)'"
     @dragenter="onDragEnter"
     @dragover.prevent
     @dragleave="onDragLeave"

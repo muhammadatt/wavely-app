@@ -169,28 +169,35 @@ onUnmounted(() => {
       <div class="flex flex-col flex-1 overflow-hidden">
         <FloatingToolbar />
         <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px]">
+          <!-- Overview is indented by the dBFS gutter so its time axis shares an
+               x-origin with the main waveform below it. -->
+          <div class="flex shrink-0" v-if="hasFile">
+            <div class="w-7 shrink-0"></div>
+            <WaveformOverview class="flex-1" />
+          </div>
           <template v-if="hasFile">
-            <!-- Overview is indented by the dBFS gutter so its time axis shares an
-                 x-origin with the main waveform below it. -->
-            <div class="flex shrink-0">
-              <div class="w-7 shrink-0"></div>
-              <WaveformOverview class="flex-1" />
-            </div>
-            <div
-              class="relative flex-1 min-h-0 flex flex-col overflow-hidden rounded-[12px]"
-              style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
-            >
-              <!-- The scale shares the canvas's box exactly, so its ticks land on
-                   the amplitudes they name. SelectionBar sits below in flow rather
-                   than overlaying the waveform's loudest peaks. -->
+            <!-- Waveform row + SelectionBar sit in their own gap-less column so
+                 they stay visually flush, while the scale sits directly on the
+                 outermost background rather than the canvas box — it reads as
+                 chrome, not content — but still shares the canvas's exact height
+                 so its ticks land on the amplitudes they name. -->
+            <div class="flex-1 min-h-0 flex flex-col">
               <div class="flex-1 min-h-0 flex">
                 <DbfsScale />
-                <WaveformArea />
+                <div
+                  class="relative flex-1 min-h-0 flex flex-col rounded-t-[12px] overflow-hidden"
+                  style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
+                >
+                  <WaveformArea />
+                </div>
               </div>
-              <SelectionBar />
+              <div class="flex shrink-0">
+                <div class="w-7 shrink-0"></div>
+                <SelectionBar class="flex-1 rounded-b-[12px] overflow-hidden" style="background:#080a0d" />
+              </div>
             </div>
           </template>
-          <EmptyState v-else />
+          <EmptyState v-else class="flex-1 min-h-0" />
         </div>
         <TransportBar />
       </div>

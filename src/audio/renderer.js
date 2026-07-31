@@ -339,7 +339,7 @@ function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSec
   const endTime = scrollLeft + logicalWidth / pixelsPerSecond
 
   ctx.fillStyle = 'rgba(255,255,255,.32)'
-  ctx.font = "600 8.5px 'JetBrains Mono', monospace"
+  ctx.font = "600 10px 'JetBrains Mono', monospace"
 
   const EDGE_PAD = 4
 
@@ -359,6 +359,7 @@ function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSec
     // sits on a canvas edge — at scroll 0 the "0s" label lost its digit and
     // showed as a bare "s" — so labels near an edge flip to hugging it.
     const label = formatRulerTime(t)
+    if (!label) continue
     const half = ctx.measureText(label).width / 2
     if (x - half < EDGE_PAD) {
       ctx.textAlign = 'left'
@@ -374,10 +375,15 @@ function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSec
 }
 
 function formatRulerTime(seconds) {
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  if (seconds < 60) {
-    return `${secs.toFixed(secs % 1 === 0 ? 0 : 1)}s`
-  }
-  return `${mins}:${secs.toFixed(0).padStart(2, '0')}`
+  // Hide 0:00 so the first visible label is 0:01.
+  if (seconds <= 0) return ''
+
+  // Keep ruler labels on whole-second boundaries even when the grid interval
+  // becomes sub-second at high zoom levels.
+  const rounded = Math.round(seconds)
+  if (Math.abs(seconds - rounded) > 1e-6) return ''
+
+  const mins = Math.floor(rounded / 60)
+  const secs = rounded % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }

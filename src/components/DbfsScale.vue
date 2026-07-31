@@ -2,7 +2,7 @@
 // dBFS scale ticks, top and bottom mirrored around the zero line. Position is
 // derived from linear amplitude (10^(db/20)) since peaks are drawn linearly,
 // so ticks bunch up near the center the way a real meter's dB scale does.
-const DB_LEVELS = [0, -6, -12, -18]
+const DB_LEVELS = [-1, -3, -6, -12, -18]
 
 // The renderer leaves 2px of headroom above full scale, so the 0 dB tick sits
 // 2px from the edge. Centring a label on it puts half the glyph outside the
