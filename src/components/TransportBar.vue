@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { startPlayback, stopPlayback } from '../audio/playback.js'
+import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import BaseButton from './ui/BaseButton.vue'
 
 const {
@@ -12,8 +13,10 @@ const zoomLevel = ref(0) // 0-100 range for slider; 0 = fully zoomed out (fit to
 // Zoom bounds are owned by WaveformArea — the floor is "whole file fits the
 // viewport", which depends on duration and viewport width. Mirroring them here
 // keeps slider position 0 meaning the same thing the waveform means by it.
+// Both are replaced by the first wavely:view-update; the ceiling seeds from the
+// shared constant rather than a second copy of the number.
 const minPps = ref(10)
-const maxPps = ref(2000)
+const maxPps = ref(MAX_PIXELS_PER_SECOND)
 
 const playTitle = computed(() =>
   hasSelection.value ? 'Play selection (Space)' : 'Play/Pause (Space)'

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
-import { renderWaveform, renderOverlay } from '../audio/renderer.js'
+import { renderWaveform, renderOverlay, RULER_GUTTER_HEIGHT } from '../audio/renderer.js'
+import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 
 const { state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration } = useEditorState()
@@ -13,24 +14,29 @@ const pixelsPerSecond = ref(100)
 const isSelecting = ref(false)
 const selectionAnchor = ref(0)
 const containerWidth = ref(0)
-// Whether the view is pinned to "whole file fits the viewport". Starts false to
-// preserve the existing load behaviour, which opens at the default 100 px/s
-// rather than fitted.
-const fitToWindow = ref(false)
+// Whether the view is pinned to "whole file fits the viewport". Starts true so
+// a freshly opened file shows end to end rather than the first few seconds at
+// the default 100 px/s. It stays true until the user zooms in, and because it's
+// a mode rather than a value it also survives the first-frame case where the
+// canvas hasn't been laid out yet and the fit scale can't be computed.
+const fitToWindow = ref(true)
 
-// Max zoom level
-const MAX_PPS = 2000
 // One step, shared by the zoom buttons and the keyboard shortcuts, so the three
 // zoom entry points move at a predictable rate.
 const ZOOM_STEP = 1.3
 // The wheel is continuous, so it steps finer than a discrete button press.
 const WHEEL_ZOOM_STEP = 1.1
 
-// Dynamic minimum PPS: zoom out no further than the full waveform fitting the canvas.
-// Use containerWidth (which tracks canvas.clientWidth) so this matches the renderer exactly.
+// Dynamic minimum PPS: zoom out no further than the full waveform fitting the
+// canvas. Uses containerWidth (which tracks canvas.clientWidth) so this matches
+// the renderer exactly.
+//
+// Returns null when the floor is genuinely unknowable — no file, or the canvas
+// hasn't been laid out yet. Callers must bail rather than clamp, since any
+// stand-in value here silently becomes a real zoom limit.
 function getMinPps() {
   const dur = totalDuration.value
-  if (!dur || containerWidth.value === 0) return 10
+  if (!dur || containerWidth.value === 0) return null
   return Math.max(1, containerWidth.value / dur)
 }
 
@@ -60,21 +66,26 @@ const maxScrollLeft = computed(() =>
 // survives both. The floor still applies when not fitted, for the case where
 // the viewport grows under a fixed zoom.
 function applyZoomBounds() {
-  if (!totalDuration.value || containerWidth.value === 0) return
   const minPps = getMinPps()
+  if (minPps === null) return
   if (fitToWindow.value) pixelsPerSecond.value = minPps
   else if (pixelsPerSecond.value < minPps) pixelsPerSecond.value = minPps
 }
 
 // Single entry point for every zoom change, so the fit flag can't be set in one
-// path and missed in another.
+// path and missed in another. Returns whether the zoom was applied.
 function setZoom(pps) {
   const minPps = getMinPps()
-  const clamped = Math.max(minPps, Math.min(MAX_PPS, pps))
+  // No measurable floor means no meaningful zoom — drop the request rather than
+  // clamp against a guess. applyZoomBounds re-establishes the correct scale on
+  // the next draw, once the canvas has a width.
+  if (minPps === null) return false
+  const clamped = Math.max(minPps, Math.min(MAX_PIXELS_PER_SECOND, pps))
   pixelsPerSecond.value = clamped
   // Relative epsilon: the floor is a float ratio, so zooming out to it rarely
   // lands on it exactly.
   fitToWindow.value = clamped <= minPps * 1.0001
+  return true
 }
 
 function drawMain() {
@@ -97,18 +108,24 @@ function drawMain() {
     // Capped at 2: beyond stereo the lanes get too short to read anything from,
     // and the product's inputs are mono or stereo voice recordings.
     channelCount: Math.min(state.currentFile.channels ?? 1, 2),
+    topGutter: RULER_GUTTER_HEIGHT,
   })
 
   // Notify other components of view state. The zoom bounds travel with it so
   // the transport's slider can map its track onto the range that actually
-  // exists for this file and viewport, rather than a hardcoded guess.
+  // exists for this file and viewport, rather than a hardcoded guess, and so
+  // the overview's resize handles stop at the same ceiling the viewport
+  // enforces. viewportWidthPx is sent raw: the overview used to recover it as
+  // visibleDuration * pixelsPerSecond, which is the same number by a longer
+  // route.
   window.dispatchEvent(new CustomEvent('wavely:view-update', {
     detail: {
       scrollLeft: scrollLeft.value,
       pixelsPerSecond: pixelsPerSecond.value,
       visibleDuration: containerWidth.value / pixelsPerSecond.value,
+      viewportWidthPx: containerWidth.value,
       minPixelsPerSecond: getMinPps(),
-      maxPixelsPerSecond: MAX_PPS,
+      maxPixelsPerSecond: MAX_PIXELS_PER_SECOND,
     },
   }))
 }
@@ -173,13 +190,9 @@ function handleWheel(e) {
   if ((e.ctrlKey || e.metaKey) && e.deltaY !== 0) {
     const zoomFactor = e.deltaY > 0 ? 1 / WHEEL_ZOOM_STEP : WHEEL_ZOOM_STEP
     const rect = canvas.value.getBoundingClientRect()
-    const mouseX = e.clientX - rect.left
-    const timeAtMouse = pxToTime(mouseX)
 
-    setZoom(pixelsPerSecond.value * zoomFactor)
-
-    // Keep the time under the mouse cursor stable
-    scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, timeAtMouse - mouseX / pixelsPerSecond.value))
+    // The pointer is the anchor here; every other zoom path uses the centre.
+    zoomAt(pixelsPerSecond.value * zoomFactor, e.clientX - rect.left)
     drawAll()
     return
   }
@@ -195,31 +208,66 @@ function clampScroll() {
   scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, scrollLeft.value))
 }
 
+// Zoom about a fixed point: whatever time sits under anchorPx stays under
+// anchorPx afterwards. Without this the left edge is the implicit anchor, so
+// zooming in walks the view toward the start of the file instead of magnifying
+// what the user is looking at.
+function zoomAt(pps, anchorPx) {
+  const anchorTime = pxToTime(anchorPx)
+  if (!setZoom(pps)) return
+  scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, anchorTime - anchorPx / pixelsPerSecond.value))
+}
+
+// Anchor for the zoom paths with no pointer position of their own — buttons,
+// keyboard, and the transport slider.
+//
+// The selection is the anchor, not the playhead: click-to-seek moves the
+// playhead on every click, so it tracks the last place the user clicked rather
+// than what they're working on. A selection only exists after a deliberate drag
+// (setSelection nulls itself when start === end), which makes it a real
+// statement of intent.
+//
+// Anchoring on the midpoint of the *visible* part of the selection rather than
+// its true midpoint covers the case where it runs past one or both edges: zoomed
+// inside a long selection there is no visible midpoint to speak of, and a
+// selection half off-screen would otherwise fall back to a centre that isn't
+// inside it at all.
+function zoomAnchorPx() {
+  const center = containerWidth.value / 2
+  const sel = state.selection
+  if (!sel) return center
+
+  const startPx = (sel.start - scrollLeft.value) * pixelsPerSecond.value
+  const endPx = (sel.end - scrollLeft.value) * pixelsPerSecond.value
+  if (endPx < 0 || startPx > containerWidth.value) return center
+
+  return (Math.max(0, startPx) + Math.min(containerWidth.value, endPx)) / 2
+}
+
+// None of these clamp scroll themselves: drawMain re-establishes both bounds
+// before rendering, so a clamp here would only be doing the same work twice.
 function handleZoomIn() {
-  setZoom(pixelsPerSecond.value * ZOOM_STEP)
-  clampScroll()
+  zoomAt(pixelsPerSecond.value * ZOOM_STEP, zoomAnchorPx())
   drawAll()
 }
 
 function handleZoomOut() {
-  setZoom(pixelsPerSecond.value / ZOOM_STEP)
-  clampScroll()
+  zoomAt(pixelsPerSecond.value / ZOOM_STEP, zoomAnchorPx())
   drawAll()
 }
 
 function handleZoomSet(e) {
-  setZoom(e.detail.pixelsPerSecond)
-  clampScroll()
+  zoomAt(e.detail.pixelsPerSecond, zoomAnchorPx())
   drawAll()
 }
 
 // Sets pan + zoom together (from the overview strip's drag/resize handles) so
 // the two never briefly disagree — e.g. a stale scrollLeft clamped against
-// the old pixelsPerSecond for one frame.
+// the old pixelsPerSecond for one frame. setZoom has already run, so
+// maxScrollLeft reflects the new zoom.
 function handleViewSet(e) {
   setZoom(e.detail.pixelsPerSecond)
-  const newMaxScroll = Math.max(0, totalDuration.value - containerWidth.value / pixelsPerSecond.value)
-  scrollLeft.value = Math.max(0, Math.min(newMaxScroll, e.detail.scrollLeft))
+  scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, e.detail.scrollLeft))
   drawAll()
 }
 
@@ -230,37 +278,47 @@ watch(
   { deep: true }
 )
 
+// A different file was opened → refit. Deliberately not deep: loadFile replaces
+// currentFile wholesale, while PresetsPanel mutates its channels/sampleRate in
+// place after processing, and that shouldn't throw away the user's zoom.
+watch(
+  () => state.currentFile,
+  () => {
+    fitToWindow.value = true
+    scrollLeft.value = 0
+    drawAll()
+  }
+)
+
 // Selection or playhead changed externally (e.g. toolbar operations, click-to-seek)
 // → overlay only; peaks are unchanged
 watch(() => state.selection, () => drawOverlay(), { deep: true })
 watch(() => state.playhead, () => drawOverlay())
 
-// Peak cache updated → redraw main canvas only (overlay positions are unchanged)
-watch(peakCacheVersion, () => drawMain())
+// Peak cache updated → full redraw. Not drawMain alone: it re-establishes the
+// zoom and scroll bounds, and a processed file that changed duration moves the
+// fit scale, which would leave the overlay's selection and playhead painted at
+// the previous scale.
+watch(peakCacheVersion, () => drawAll())
 
 // scrollLeft is always changed by an event handler that already calls drawAll(),
 // so no separate watch is needed here.
-
-function handleResize() {
-  updateContainerWidth()
-  clampScroll()
-  drawAll()
-}
 
 // The window is not the only thing that resizes this canvas — opening or
 // closing the context panel changes its width too, and without this the
 // bitmap kept its old width and the waveform rendered stretched, with peaks
 // no longer above the time grid they belong to.
+//
+// This also covers plain window resizes, so there is no window 'resize'
+// listener: that fired a second, identical redraw for every window resize.
 let resizeObserver = null
 
 onMounted(() => {
-  updateContainerWidth()
   drawAll()
   if (typeof ResizeObserver !== 'undefined' && container.value) {
-    resizeObserver = new ResizeObserver(handleResize)
+    resizeObserver = new ResizeObserver(() => drawAll())
     resizeObserver.observe(container.value)
   }
-  window.addEventListener('resize', handleResize)
   window.addEventListener('wavely:zoom-in', handleZoomIn)
   window.addEventListener('wavely:zoom-out', handleZoomOut)
   window.addEventListener('wavely:zoom-set', handleZoomSet)
@@ -269,7 +327,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
-  window.removeEventListener('resize', handleResize)
   window.removeEventListener('wavely:zoom-in', handleZoomIn)
   window.removeEventListener('wavely:zoom-out', handleZoomOut)
   window.removeEventListener('wavely:zoom-set', handleZoomSet)

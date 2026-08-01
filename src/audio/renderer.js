@@ -17,6 +17,10 @@ const UNSELECTED_VEIL_COLOR = 'rgba(5, 7, 9, 0.55)'
 const PLAYHEAD_COLOR = '#ff5a4d'
 const ZERO_LINE_COLOR = 'rgba(255, 255, 255, 0.07)'
 const LANE_DIVIDER_COLOR = 'rgba(255, 255, 255, 0.14)'
+// Clears the ruler labels, which sit on a 13px baseline in a 10px font. Callers
+// that want a ruler-safe waveform pass this as topGutter, so the two stay tied
+// together rather than drifting apart in separate files.
+export const RULER_GUTTER_HEIGHT = 18
 const LANE_LABEL_COLOR = 'rgba(255, 255, 255, 0.38)'
 // Stereo is the case worth labelling; anything wider falls back to numbers.
 const LANE_LABELS = ['L', 'R']
@@ -145,6 +149,15 @@ export function renderWaveform(canvas, options) {
     // Lanes to draw. Defaults to 1 so the overview strip and any other caller
     // keeps its single-lane look without opting in.
     channelCount = 1,
+    // Height reserved above the lanes for the ruler labels. The waveform is
+    // drawn after the grid, so at full scale its fill painted straight over the
+    // timestamps; the lanes now start below them instead. Defaults to 0 to
+    // leave the short overview strip at its full height.
+    topGutter = 0,
+    // The overview strip is for navigation, not measurement — the main canvas
+    // carries the ruler, and repeating it in a strip a few pixels tall reads as
+    // clutter.
+    showTimeGrid = true,
   } = options
 
   const dpr = window.devicePixelRatio || 1
@@ -164,15 +177,16 @@ export function renderWaveform(canvas, options) {
   // Each channel gets an equal horizontal band, so a stereo file reads as two
   // stacked lanes sharing one time axis.
   const lanes = Math.max(1, channelCount)
-  const laneHeight = logicalHeight / lanes
-  const laneCenterY = i => laneHeight * i + laneHeight / 2
+  const laneTop = Math.min(topGutter, logicalHeight)
+  const laneHeight = (logicalHeight - laneTop) / lanes
+  const laneCenterY = i => laneTop + laneHeight * i + laneHeight / 2
   const amplitude = laneHeight / 2 - 2 // Leave 2px padding
 
   // Time grid — drawn first so the waveform fill paints over it, matching
   // the reference design's layering (grid behind the waveform, inside the
   // same box, rather than a separate ruler strip above it). Spans the full
   // height: the time axis is shared by every lane.
-  drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSecond)
+  if (showTimeGrid) drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSecond)
 
   // Zero line per lane
   ctx.strokeStyle = ZERO_LINE_COLOR
@@ -190,8 +204,8 @@ export function renderWaveform(canvas, options) {
     ctx.strokeStyle = LANE_DIVIDER_COLOR
     for (let i = 1; i < lanes; i++) {
       ctx.beginPath()
-      ctx.moveTo(0, laneHeight * i)
-      ctx.lineTo(logicalWidth, laneHeight * i)
+      ctx.moveTo(0, laneTop + laneHeight * i)
+      ctx.lineTo(logicalWidth, laneTop + laneHeight * i)
       ctx.stroke()
     }
   }
@@ -247,7 +261,7 @@ export function renderWaveform(canvas, options) {
   }
 
   // Lane labels last, so they sit above the waveform fill rather than under it.
-  if (lanes > 1) drawLaneLabels(ctx, lanes, laneHeight)
+  if (lanes > 1) drawLaneLabels(ctx, lanes, laneTop, laneHeight)
 
 }
 
@@ -255,13 +269,13 @@ export function renderWaveform(canvas, options) {
  * Small L / R tag in the bottom-left of each lane. Bottom rather than top so it
  * never collides with the time-grid labels, which sit along the top edge.
  */
-function drawLaneLabels(ctx, lanes, laneHeight) {
+function drawLaneLabels(ctx, lanes, laneTop, laneHeight) {
   ctx.font = "700 9px 'JetBrains Mono', monospace"
   ctx.textAlign = 'left'
   ctx.fillStyle = LANE_LABEL_COLOR
   for (let i = 0; i < lanes; i++) {
     const label = lanes === 2 ? LANE_LABELS[i] : String(i + 1)
-    ctx.fillText(label, 5, laneHeight * (i + 1) - 5)
+    ctx.fillText(label, 5, laneTop + laneHeight * (i + 1) - 5)
   }
 }
 
