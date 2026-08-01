@@ -12,7 +12,7 @@ import ContextPanel from './ContextPanel.vue'
 import EmptyState from './EmptyState.vue'
 
 const {
-  state, performDelete, performCut, performCopy, performPaste,
+  state, performCut, performCopy, performPaste,
   undo, redo, canUndo, canRedo, hasSelection, hasClipboard, hasFile,
   selectAll, clearSelection, setPlayhead, totalDuration, setActiveTool,
 } = useEditorState()
@@ -112,11 +112,12 @@ function handleKeydown(e) {
 
   if (e.ctrlKey || e.metaKey) return
 
-  // Delete / Backspace — delete selection
+  // Delete / Backspace — same operation as the toolbar's Cut, so the clipboard
+  // is written here too. There is no separate non-clipboard removal.
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (!hasSelection.value) return
     e.preventDefault()
-    performDelete()
+    performCut()
     return
   }
 

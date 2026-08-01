@@ -8,7 +8,7 @@ const {
   hasSelection,
   hasClipboard,
   performSilence,
-  performDelete,
+  performTrimToSelection,
   performCut,
   performCopy,
   performPaste,
@@ -57,10 +57,12 @@ function handleSilence() {
   showToast("Region silenced")
 }
 
-function handleDelete() {
+// Mirrors the Trim panel's "Trim to selection" mode — same wording, same toast,
+// so the shortcut and the panel don't read as two different operations.
+function handleTrim() {
   if (!hasSelection.value) return
-  performDelete()
-  showToast("Selection deleted")
+  performTrimToSelection()
+  showToast("Trimmed to selection")
 }
 </script>
 
@@ -169,7 +171,7 @@ function handleDelete() {
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
         :disabled="!hasSelection"
-        title="Cut (Ctrl+X)"
+        title="Cut selection to clipboard (Ctrl+X or Del)"
         @click="handleCut">
         <svg
           viewBox="0 0 24 24"
@@ -187,17 +189,18 @@ function handleDelete() {
         size="xs" color="ghost" :pill="false"
         class="whitespace-nowrap font-semibold"
         :disabled="!hasSelection"
-        title="Delete selection (Del)"
-        @click="handleDelete">
+        title="Trim to selection — keep only what's selected"
+        @click="handleTrim">
         <svg
           viewBox="0 0 24 24"
           class="w-3 h-3 fill-none stroke-current"
           stroke-width="2.5">
-          <path d="M3 6h18" />
-          <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+          <path d="M4 7h16" />
+          <path d="M4 17h16" />
+          <path d="M8 3v18" />
+          <path d="M16 3v18" />
         </svg>
-        Delete
+        Trim
       </BaseButton>
     </div>
   </div>

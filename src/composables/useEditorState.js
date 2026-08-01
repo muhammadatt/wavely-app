@@ -180,17 +180,6 @@ export function useEditorState() {
   }
 
   // Edit operations — all push undo first
-  function performDelete() {
-    if (!state.selection) return
-    pushUndo()
-    const { start, end } = state.selection
-    state.segments = deleteRegion(state.segments, start, end)
-    state.selection = null
-    if (state.playhead > getTimelineDuration(state.segments)) {
-      state.playhead = getTimelineDuration(state.segments)
-    }
-  }
-
   function performTrimToSelection() {
     if (!state.selection) return
     pushUndo()
@@ -253,6 +242,10 @@ export function useEditorState() {
     // Delete the region from timeline
     state.segments = deleteRegion(state.segments, start, end)
     state.selection = null
+    // Cutting the tail can leave the playhead past the end of the shortened
+    // timeline — clamp it back onto the timeline.
+    const dur = getTimelineDuration(state.segments)
+    if (state.playhead > dur) state.playhead = dur
   }
 
   function performCopy() {
@@ -402,7 +395,6 @@ export function useEditorState() {
     loadFile,
 
     // Edit operations
-    performDelete,
     performTrimToSelection,
     performTrimBefore,
     performTrimAfter,
