@@ -13,6 +13,10 @@ const pixelsPerSecond = ref(100)
 const isSelecting = ref(false)
 const selectionAnchor = ref(0)
 const containerWidth = ref(0)
+// Whether the view is pinned to "whole file fits the viewport". Starts false to
+// preserve the existing load behaviour, which opens at the default 100 px/s
+// rather than fitted.
+const fitToWindow = ref(false)
 
 // Max zoom level
 const MAX_PPS = 2000
@@ -44,11 +48,44 @@ const maxScrollLeft = computed(() =>
   Math.max(0, totalDuration.value - containerWidth.value / pixelsPerSecond.value)
 )
 
+// Both inputs to getMinPps() move on their own: totalDuration changes on every
+// cut/trim/paste, and containerWidth changes when the window resizes or the
+// context panel opens. Either one moves the fit scale out from under a
+// pixelsPerSecond that was correct when it was set, and the renderer draws
+// totalDuration * pixelsPerSecond of content — too narrow for the viewport, or
+// too wide for it.
+//
+// So "fully zoomed out" is tracked as a mode rather than inferred from the
+// value. Cutting raises the fit scale and pasting lowers it; only a flag
+// survives both. The floor still applies when not fitted, for the case where
+// the viewport grows under a fixed zoom.
+function applyZoomBounds() {
+  if (!totalDuration.value || containerWidth.value === 0) return
+  const minPps = getMinPps()
+  if (fitToWindow.value) pixelsPerSecond.value = minPps
+  else if (pixelsPerSecond.value < minPps) pixelsPerSecond.value = minPps
+}
+
+// Single entry point for every zoom change, so the fit flag can't be set in one
+// path and missed in another.
+function setZoom(pps) {
+  const minPps = getMinPps()
+  const clamped = Math.max(minPps, Math.min(MAX_PPS, pps))
+  pixelsPerSecond.value = clamped
+  // Relative epsilon: the floor is a float ratio, so zooming out to it rarely
+  // lands on it exactly.
+  fitToWindow.value = clamped <= minPps * 1.0001
+}
+
 function drawMain() {
   if (!canvas.value || !state.currentFile) return
 
   // Keep containerWidth in sync with the actual canvas size before any scroll/zoom calculation
   updateContainerWidth()
+  applyZoomBounds()
+  // Same staleness on the pan axis: a shorter timeline lowers maxScrollLeft,
+  // which can leave scrollLeft parked past the end of the audio.
+  clampScroll()
 
   renderWaveform(canvas.value, {
     segments: state.segments,
@@ -136,7 +173,7 @@ function handleWheel(e) {
     const mouseX = e.clientX - rect.left
     const timeAtMouse = pxToTime(mouseX)
 
-    pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, pixelsPerSecond.value * zoomFactor))
+    setZoom(pixelsPerSecond.value * zoomFactor)
 
     // Keep the time under the mouse cursor stable
     scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, timeAtMouse - mouseX / pixelsPerSecond.value))
@@ -156,19 +193,19 @@ function clampScroll() {
 }
 
 function handleZoomIn() {
-  pixelsPerSecond.value = Math.min(MAX_PPS, pixelsPerSecond.value * ZOOM_STEP)
+  setZoom(pixelsPerSecond.value * ZOOM_STEP)
   clampScroll()
   drawAll()
 }
 
 function handleZoomOut() {
-  pixelsPerSecond.value = Math.max(getMinPps(), pixelsPerSecond.value / ZOOM_STEP)
+  setZoom(pixelsPerSecond.value / ZOOM_STEP)
   clampScroll()
   drawAll()
 }
 
 function handleZoomSet(e) {
-  pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, e.detail.pixelsPerSecond))
+  setZoom(e.detail.pixelsPerSecond)
   clampScroll()
   drawAll()
 }
@@ -177,7 +214,7 @@ function handleZoomSet(e) {
 // the two never briefly disagree — e.g. a stale scrollLeft clamped against
 // the old pixelsPerSecond for one frame.
 function handleViewSet(e) {
-  pixelsPerSecond.value = Math.max(getMinPps(), Math.min(MAX_PPS, e.detail.pixelsPerSecond))
+  setZoom(e.detail.pixelsPerSecond)
   const newMaxScroll = Math.max(0, totalDuration.value - containerWidth.value / pixelsPerSecond.value)
   scrollLeft.value = Math.max(0, Math.min(newMaxScroll, e.detail.scrollLeft))
   drawAll()
