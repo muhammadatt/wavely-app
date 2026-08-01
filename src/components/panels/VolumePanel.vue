@@ -45,12 +45,7 @@ async function applyVolume() {
 
 <template>
   <div class="font-['Inter']">
-    <!-- Header -->
-    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
-      <div class="text-[15px] font-bold text-[#eaf6f8]">Volume</div>
-      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Adjust the volume of the selected region</div>
-    </div>
-
+    <!-- Header lives in EditPanel, which owns the Trim/Silence/Fade/Volume group -->
     <!-- Body -->
     <div class="px-4 py-4 flex flex-col gap-4">
 

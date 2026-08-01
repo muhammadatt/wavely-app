@@ -10,23 +10,11 @@ const tools = [
     icon: '<line x1="12" y1="2" x2="12" y2="22"/><path d="M6 8l6-6 6 6"/><path d="M6 16l6 6 6-6"/>',
   },
   {
-    id: 'trim', label: 'Trim',
+    // Trim / Silence / Fade / Volume are sub-tools inside EditPanel rather than
+    // four toolbar entries — they all operate on the current selection and were
+    // pushing the tool group into a scroll on narrower windows.
+    id: 'edit', label: 'Edit',
     icon: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>',
-  },
-  {
-    // SilencePanel existed but nothing could set activeTool to 'silence', so the
-    // panel was unreachable — Silence was only available as the SelectionBar's
-    // instant-apply button, with no explanation of what it does.
-    id: 'silence', label: 'Silence',
-    icon: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>',
-  },
-  {
-    id: 'fade', label: 'Fade',
-    icon: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
-  },
-  {
-    id: 'volume', label: 'Volume',
-    icon: '<rect x="3" y="8" width="18" height="8" rx="2"/><line x1="12" y1="2" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="22"/>',
   },
   {
     id: 'effects', label: 'Effects',

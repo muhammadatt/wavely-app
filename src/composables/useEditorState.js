@@ -38,7 +38,9 @@ const state = reactive({
   currentFile: null, // { name, duration, sampleRate, channels }
 
   // UI state
-  activeTool: null, // 'split' | 'trim' | 'fade' | 'silence' | 'effects' | 'presets' | null
+  // 'edit' covers trim / silence / fade / volume; EditPanel owns which of those
+  // is showing.
+  activeTool: null, // 'split' | 'edit' | 'effects' | 'presets' | null
   selectedPreset: 'general_clean',
   selectedOutputProfile: 'podcast',
   processingReport: null,

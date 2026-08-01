@@ -13,11 +13,7 @@ function apply() {
 
 <template>
   <div class="font-['Inter']">
-    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
-      <div class="text-[15px] font-bold text-[#eaf6f8]">Silence</div>
-      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Replace the selected region with silence</div>
-    </div>
-
+    <!-- Header lives in EditPanel, which owns the Trim/Silence/Fade/Volume group -->
     <div class="p-4 flex flex-col gap-[10px]">
       <!-- Preview graphic -->
       <div class="rounded-[12px] p-3" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
