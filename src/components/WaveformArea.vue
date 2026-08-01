@@ -94,6 +94,9 @@ function drawMain() {
     scrollLeft: scrollLeft.value,
     pixelsPerSecond: pixelsPerSecond.value,
     totalDuration: totalDuration.value,
+    // Capped at 2: beyond stereo the lanes get too short to read anything from,
+    // and the product's inputs are mono or stereo voice recordings.
+    channelCount: Math.min(state.currentFile.channels ?? 1, 2),
   })
 
   // Notify other components of view state. The zoom bounds travel with it so

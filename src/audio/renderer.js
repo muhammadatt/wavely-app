@@ -8,7 +8,6 @@ import { getSegmentDuration } from './operations.js'
  */
 
 const WAVEFORM_FILL = '#5df0b0'
-const WAVEFORM_EDGE = '#5df0b0'
 // Selection reads by dimming everything outside it rather than by tinting the
 // inside. A 7% cyan wash over a bright waveform on near-black was close to
 // invisible; veiling the unselected audio gives the contrast instead.
@@ -17,6 +16,10 @@ const SELECTION_BORDER_COLOR = 'rgba(126, 240, 255, 0.9)'
 const UNSELECTED_VEIL_COLOR = 'rgba(5, 7, 9, 0.55)'
 const PLAYHEAD_COLOR = '#ff5a4d'
 const ZERO_LINE_COLOR = 'rgba(255, 255, 255, 0.07)'
+const LANE_DIVIDER_COLOR = 'rgba(255, 255, 255, 0.14)'
+const LANE_LABEL_COLOR = 'rgba(255, 255, 255, 0.38)'
+// Stereo is the case worth labelling; anything wider falls back to numbers.
+const LANE_LABELS = ['L', 'R']
 
 /**
  * Compute peaks for a segment for each pixel column.
@@ -31,7 +34,7 @@ const ZERO_LINE_COLOR = 'rgba(255, 255, 255, 0.07)'
  * fall back to the cache otherwise — the visible sample range at that point
  * is small enough that scanning it directly every frame is still cheap.
  */
-function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPerPx, sampleRate) {
+function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPerPx, sampleRate, channelIndex = 0) {
   if (segment.sourceBuffer === null) {
     // Silence — return flat line
     const count = endPx - startPx
@@ -46,9 +49,15 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
   const cache = peakCaches.get(bufferId)
   const sourceStartSample = Math.floor(segment.sourceStart * sampleRate)
 
+  // A buffer can hold fewer channels than the timeline has lanes — a
+  // server-processed mono result dropped into a stereo file, say. Fall back to
+  // its last channel so that segment still draws in both lanes rather than
+  // vanishing from the right one.
+  const bufferCh = Math.min(channelIndex, segment.sourceBuffer.numberOfChannels - 1)
+
   const useRaw = !cache || samplesPerPx < cache.samplesPerPx
   if (useRaw) {
-    const channelData = segment.sourceBuffer.getChannelData(0)
+    const channelData = segment.sourceBuffer.getChannelData(bufferCh)
     const totalSamples = channelData.length
     const result = []
     for (let px = startPx; px < endPx; px++) {
@@ -75,6 +84,7 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
   }
 
   const result = []
+  const cachePeaks = cache.channels[Math.min(channelIndex, cache.channels.length - 1)]
 
   for (let px = startPx; px < endPx; px++) {
     // px is the pixel offset within the segment — use it directly to map to
@@ -92,10 +102,10 @@ function getSegmentPeaksForRange(segment, peakCaches, startPx, endPx, samplesPer
     let min = Number.POSITIVE_INFINITY
     let max = Number.NEGATIVE_INFINITY
     let hasData = false
-    for (let ci = cacheStart; ci < cacheEnd && ci * 2 + 1 < cache.peaks.length; ci++) {
+    for (let ci = cacheStart; ci < cacheEnd && ci * 2 + 1 < cachePeaks.length; ci++) {
       if (ci < 0) continue
-      const cMin = cache.peaks[ci * 2]
-      const cMax = cache.peaks[ci * 2 + 1]
+      const cMin = cachePeaks[ci * 2]
+      const cMax = cachePeaks[ci * 2 + 1]
       if (cMin < min) min = cMin
       if (cMax > max) max = cMax
       hasData = true
@@ -132,6 +142,9 @@ export function renderWaveform(canvas, options) {
     scrollLeft = 0,
     pixelsPerSecond = 100,
     totalDuration = 0,
+    // Lanes to draw. Defaults to 1 so the overview strip and any other caller
+    // keeps its single-lane look without opting in.
+    channelCount = 1,
   } = options
 
   const dpr = window.devicePixelRatio || 1
@@ -148,21 +161,40 @@ export function renderWaveform(canvas, options) {
   // Clear
   ctx.clearRect(0, 0, logicalWidth, logicalHeight)
 
-  const centerY = logicalHeight / 2
-  const amplitude = logicalHeight / 2 - 2 // Leave 2px padding
+  // Each channel gets an equal horizontal band, so a stereo file reads as two
+  // stacked lanes sharing one time axis.
+  const lanes = Math.max(1, channelCount)
+  const laneHeight = logicalHeight / lanes
+  const laneCenterY = i => laneHeight * i + laneHeight / 2
+  const amplitude = laneHeight / 2 - 2 // Leave 2px padding
 
   // Time grid — drawn first so the waveform fill paints over it, matching
   // the reference design's layering (grid behind the waveform, inside the
-  // same box, rather than a separate ruler strip above it).
+  // same box, rather than a separate ruler strip above it). Spans the full
+  // height: the time axis is shared by every lane.
   drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSecond)
 
-  // Draw zero line
+  // Zero line per lane
   ctx.strokeStyle = ZERO_LINE_COLOR
   ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(0, centerY)
-  ctx.lineTo(logicalWidth, centerY)
-  ctx.stroke()
+  for (let i = 0; i < lanes; i++) {
+    ctx.beginPath()
+    ctx.moveTo(0, laneCenterY(i))
+    ctx.lineTo(logicalWidth, laneCenterY(i))
+    ctx.stroke()
+  }
+
+  // Divider between lanes, brighter than the zero lines so the split between
+  // channels doesn't read as another zero crossing.
+  if (lanes > 1) {
+    ctx.strokeStyle = LANE_DIVIDER_COLOR
+    for (let i = 1; i < lanes; i++) {
+      ctx.beginPath()
+      ctx.moveTo(0, laneHeight * i)
+      ctx.lineTo(logicalWidth, laneHeight * i)
+      ctx.stroke()
+    }
+  }
 
   if (segments.length === 0 || !sampleRate) return
 
@@ -183,58 +215,54 @@ export function renderWaveform(canvas, options) {
     const offsetInSegStartPx = visibleStartPx - segStartPx
     const offsetInSegEndPx = visibleEndPx - segStartPx
 
-    const peaks = getSegmentPeaksForRange(
-      seg, peakCacheMap,
-      Math.floor(offsetInSegStartPx),
-      Math.ceil(offsetInSegEndPx),
-      samplesPerPx, sampleRate
-    )
+    for (let lane = 0; lane < lanes; lane++) {
+      const peaks = getSegmentPeaksForRange(
+        seg, peakCacheMap,
+        Math.floor(offsetInSegStartPx),
+        Math.ceil(offsetInSegEndPx),
+        samplesPerPx, sampleRate, lane
+      )
 
-    if (peaks.length === 0) continue
+      if (peaks.length === 0) continue
 
-    // Filled body — solid, opaque, mid-tone
-    ctx.beginPath()
-    for (let i = 0; i < peaks.length; i++) {
-      const x = visibleStartPx + i
-      const yTop = centerY + peaks[i].max * amplitude
-      if (i === 0) ctx.moveTo(x, yTop)
-      else ctx.lineTo(x, yTop)
+      const centerY = laneCenterY(lane)
+
+      // Filled body — solid, opaque, mid-tone
+      ctx.beginPath()
+      for (let i = 0; i < peaks.length; i++) {
+        const x = visibleStartPx + i
+        const yTop = centerY + peaks[i].max * amplitude
+        if (i === 0) ctx.moveTo(x, yTop)
+        else ctx.lineTo(x, yTop)
+      }
+      for (let i = peaks.length - 1; i >= 0; i--) {
+        const x = visibleStartPx + i
+        const yBottom = centerY + peaks[i].min * amplitude
+        ctx.lineTo(x, yBottom)
+      }
+      ctx.closePath()
+      ctx.fillStyle = WAVEFORM_FILL
+      ctx.fill()
     }
-    for (let i = peaks.length - 1; i >= 0; i--) {
-      const x = visibleStartPx + i
-      const yBottom = centerY + peaks[i].min * amplitude
-      ctx.lineTo(x, yBottom)
-    }
-    ctx.closePath()
-    ctx.fillStyle = WAVEFORM_FILL
-    ctx.fill()
-
-    // Brighter thin contour along the top and bottom edges
-    /*
-    ctx.strokeStyle = WAVEFORM_EDGE
-    ctx.lineWidth = 1.3
-    ctx.lineJoin = 'round'
-
-    ctx.beginPath()
-    for (let i = 0; i < peaks.length; i++) {
-      const x = visibleStartPx + i
-      const yTop = centerY + peaks[i].max * amplitude
-      if (i === 0) ctx.moveTo(x, yTop)
-      else ctx.lineTo(x, yTop)
-    }
-    ctx.stroke()
-
-    ctx.beginPath()
-    for (let i = 0; i < peaks.length; i++) {
-      const x = visibleStartPx + i
-      const yBottom = centerY + peaks[i].min * amplitude
-      if (i === 0) ctx.moveTo(x, yBottom)
-      else ctx.lineTo(x, yBottom)
-    }
-    ctx.stroke()
-    */
   }
 
+  // Lane labels last, so they sit above the waveform fill rather than under it.
+  if (lanes > 1) drawLaneLabels(ctx, lanes, laneHeight)
+
+}
+
+/**
+ * Small L / R tag in the bottom-left of each lane. Bottom rather than top so it
+ * never collides with the time-grid labels, which sit along the top edge.
+ */
+function drawLaneLabels(ctx, lanes, laneHeight) {
+  ctx.font = "700 9px 'JetBrains Mono', monospace"
+  ctx.textAlign = 'left'
+  ctx.fillStyle = LANE_LABEL_COLOR
+  for (let i = 0; i < lanes; i++) {
+    const label = lanes === 2 ? LANE_LABELS[i] : String(i + 1)
+    ctx.fillText(label, 5, laneHeight * (i + 1) - 5)
+  }
 }
 
 /**

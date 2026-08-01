@@ -341,7 +341,8 @@ export function computePeakCache(audioBuffer, samplesPerPx) {
         worker.terminate()
         resolve({
           samplesPerPx,
-          peaks: e.data.peaks,
+          // One Float32Array per channel. The renderer indexes this by lane.
+          channels: e.data.peaks,
         })
       } else if (e.data.type === 'progress') {
         // Could forward progress if needed
