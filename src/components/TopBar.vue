@@ -26,7 +26,7 @@ function handleExport() {
 <template>
   <div
     class="h-[56px] flex items-center px-5 gap-[13px] shrink-0 z-10 border-b border-[rgba(255,255,255,.06)]"
-    style="background:linear-gradient(180deg,#1e242b,#151a20)"
+    style="background:linear-gradient(rgb(20, 25, 34), rgb(14, 17, 22));"
   >
     <!-- Logo -->
     <div class="flex items-center gap-[13px] shrink-0">
