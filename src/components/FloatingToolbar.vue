@@ -1,10 +1,9 @@
 <script setup>
 import { useEditorState } from '../composables/useEditorState.js'
 import { CATEGORIES } from '../ui/registry.js'
-import BaseButton from './ui/BaseButton.vue'
 import Icon from './ui/Icon.vue'
 
-const { state, setActiveTool, hasFile, undo, redo, canUndo, canRedo, openCommandPalette } = useEditorState()
+const { state, setActiveTool, hasFile, openCommandPalette } = useEditorState()
 
 // The category list lives in the registry, so the toolbar and the rail can no
 // longer disagree about which tools exist.
@@ -30,47 +29,101 @@ const tools = CATEGORIES
     </div>
     <!-- min-w-0 + scroll: the tool group gives up centring before it collides
          with the zoom controls on a narrow window. -->
-    <div class="tool-group flex items-center gap-[4px] p-[5px] rounded-[13px] min-w-0 overflow-x-auto" style="background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
-      <BaseButton
+    <div class="tool-group flex items-center gap-[4px] p-[5px] rounded-[13px] min-w-0 overflow-x-auto" style="background:linear-gradient(180deg, #1a2029, #12161d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+      <button
         v-for="tool in tools"
         :key="tool.id"
-        size="md" :pill="false" toggle
-        :active="state.activeTool === tool.id"
+        type="button"
+        class="tool-btn"
+        :class="{ 'is-active': state.activeTool === tool.id }"
         :disabled="!hasFile"
-        class="whitespace-nowrap shrink-0"
+        :aria-pressed="String(state.activeTool === tool.id)"
+        :title="tool.desc"
         @click="setActiveTool(tool.id)"
       >
-        <Icon :name="tool.icon" :size="15" />
+        <Icon :name="tool.icon" :size="15" class="tool-btn__icon" />
         {{ tool.label }}
-      </BaseButton>
+      </button>
     </div>
-    <!-- No min-w-0 here on purpose: this side must never shrink below its own
-         content, or its basis-0 box collapses and the buttons spill leftward
-         over the tool group. -->
-    <div class="flex-1 flex justify-end gap-2">
-      <BaseButton
-        size="sm" color="ghost" :pill="false"
-        :disabled="!canUndo"
-        @click="undo"
-        title="Undo (Ctrl+Z)"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg>
-        Undo
-      </BaseButton>
-      <BaseButton
-        size="sm" color="ghost" :pill="false"
-        :disabled="!canRedo"
-        @click="redo"
-        title="Redo (Ctrl+Shift+Z)"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h4"/></svg>
-        Redo
-      </BaseButton>
-    </div>
+    <!-- Undo/Redo moved to the TopBar, next to Export. This spacer stays: it
+         balances the search button on the left so the tool group sits centred
+         rather than drifting right. -->
+    <div class="flex-1"></div>
   </div>
 </template>
 
 <style scoped>
+/* Segmented control, styled here rather than through BaseButton.
+ *
+ * The toolbar is the app's primary navigation and wants a look of its own: a
+ * group of chips sharing one recessed tray, where the selected chip lifts out
+ * of it. BaseButton's toggle is built for standalone on/off controls, and its
+ * selected state is a solid cyan fill — correct for a lone button, but shouting
+ * inside a group of four.
+ *
+ * The selected treatment here matches the accent wash + accent border + bright
+ * accent text already used for selected rows in the rail and selected preset
+ * cards, so "this one is chosen" looks the same everywhere in the app.
+ */
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-soft);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease,
+              border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tool-btn__icon {
+  opacity: 0.8;
+  transition: opacity 0.15s ease;
+}
+
+.tool-btn:hover:not(:disabled):not(.is-active) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+}
+.tool-btn:hover:not(:disabled) .tool-btn__icon {
+  opacity: 1;
+}
+
+.tool-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.tool-btn.is-active {
+  background: linear-gradient(180deg, rgba(53, 211, 230, 0.2), rgba(53, 211, 230, 0.11));
+  border-color: rgba(53, 211, 230, 0.45);
+  color: var(--color-accent-bright);
+  /* Top highlight + outer glow lift the chip off the recessed tray. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08),
+              0 2px 10px rgba(53, 211, 230, 0.16);
+}
+.tool-btn.is-active .tool-btn__icon {
+  opacity: 1;
+}
+
+.tool-btn:focus-visible {
+  outline: 2px solid var(--color-accent-bright);
+  outline-offset: 2px;
+}
+
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .palette-trigger {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.07);

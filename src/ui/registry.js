@@ -47,7 +47,7 @@ export const CATEGORIES = [
   {
     id: 'edit',
     label: 'Edit',
-    icon: 'edit',
+    icon: 'copy',
     desc: 'Shape and clean up the content',
     panel: null,
   },
@@ -59,9 +59,9 @@ export const CATEGORIES = [
     panel: null,
   },
   {
-    id: 'presets',
-    label: 'Presets',
-    icon: 'presets',
+    id: 'master',
+    label: 'Master',
+    icon: 'master',
     desc: 'One-click mastering chains',
     panel: PresetsPanel,
   },
@@ -72,17 +72,85 @@ export const CATEGORIES = [
  *
  *   category  which top-level list it appears in
  *   group     section heading within that list
- *   requires  'selection' | 'file' | null — gates the row and the palette entry
+ *   requires  'selection' | 'clipboard' | 'file' | null — gates the row, the
+ *             palette entry and the context-menu item
  *   surface   'rail'      opens as a detail view inside the rail
  *             'window'    opens as a floating window
- *             'immediate' runs on click, no parameters (reserved for verbs
- *                         like Cut/Copy that the palette should fire directly)
+ *             'immediate' runs on click; no parameters, so nothing opens
+ *   action    required for 'immediate'. Receives the editor state object rather
+ *             than calling useEditorState() here — this module is imported by
+ *             the state's own consumers, and reaching back into it would make
+ *             the import order matter.
  *
  * Surface is fixed per category, not per operation: everything under Edit opens
- * in the rail, everything under Effects opens as a window. Two adjacent rows in
- * one list never behave differently — that inconsistency is what this replaces.
+ * in the rail (or runs immediately, for the parameterless verbs), everything
+ * under Effects opens as a window. Two adjacent rows in one list never behave
+ * differently — that inconsistency is what this replaces.
  */
 export const OPERATIONS = [
+
+  // ---- Edit: clipboard verbs (immediate) ----
+  // These duplicate SelectionBar's buttons on purpose. The bar is a shortcut
+  // strip; a user browsing "Edit" or searching "copy" still expects to find
+  // them, and both surfaces now read from this one definition.
+  {
+    id: 'cut',
+    label: 'Cut',
+    desc: 'Remove the selection and put it on the clipboard',
+    category: 'edit',
+    group: 'Selection',
+    icon: 'cut',
+    keywords: ['clipboard', 'remove', 'delete', 'ctrl+x'],
+    requires: 'selection',
+    surface: 'immediate',
+    action: editor => {
+      editor.performCut()
+      editor.showToast('Cut to clipboard')
+    },
+  },
+  {
+    id: 'copy',
+    label: 'Copy',
+    desc: 'Put the selection on the clipboard',
+    category: 'edit',
+    group: 'Selection',
+    icon: 'copy',
+    keywords: ['clipboard', 'duplicate', 'ctrl+c'],
+    requires: 'selection',
+    surface: 'immediate',
+    action: editor => {
+      editor.performCopy()
+      editor.showToast('Copied to clipboard')
+    },
+  },
+  {
+    id: 'paste',
+    label: 'Paste',
+    desc: 'Insert the clipboard at the playhead',
+    category: 'edit',
+    group: 'Selection',
+    icon: 'paste',
+    keywords: ['clipboard', 'insert', 'ctrl+v'],
+    requires: 'clipboard',
+    surface: 'immediate',
+    action: editor => {
+      editor.performPaste(editor.state.playhead)
+      editor.showToast('Pasted at playhead')
+    },
+  },
+  {
+    id: 'select-all',
+    label: 'Select All',
+    desc: 'Select the entire track',
+    category: 'edit',
+    group: 'Selection',
+    icon: 'selectAll',
+    keywords: ['everything', 'whole', 'ctrl+a'],
+    requires: null,
+    surface: 'immediate',
+    action: editor => editor.selectAll(),
+  },
+
   // ---- Edit (rail) ----
   {
     id: 'trim',
@@ -132,6 +200,7 @@ export const OPERATIONS = [
     surface: 'rail',
     component: VolumePanel,
   },
+
 
   // ---- Effects (windows) ----
   {
@@ -200,7 +269,7 @@ export const OPERATIONS = [
     desc: 'Remove quiet sections',
     category: 'effects',
     group: 'Clean',
-    icon: 'scissors',
+    icon: 'removeSilence',
     keywords: ['gap', 'pause', 'dead air', 'tighten', 'trim silence'],
     requires: 'selection',
     surface: 'window',

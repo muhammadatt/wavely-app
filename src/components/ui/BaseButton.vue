@@ -19,7 +19,7 @@ const props = defineProps({
 const SIZES = {
   xs: { pad: 'px-[11px] py-[5px]', text: 'text-[10.5px]', gap: 'gap-[5px]', diameter: '34px', radius: '8px' },
   sm: { pad: 'px-3 py-2', text: 'text-[11px]', gap: 'gap-[6px]', diameter: '40px', radius: '8px' },
-  md: { pad: 'px-4 py-[10px]', text: 'text-[12.5px]', gap: 'gap-[7px]', diameter: '48px', radius: '10px' },
+  md: { pad: 'px-4 py-[10px]', text: 'text-[11.5px]', gap: 'gap-[7px]', diameter: '48px', radius: '10px' },
   lg: { pad: 'px-4 py-[13px]', text: 'text-[12.5px]', gap: 'gap-[7px]', diameter: '58px', radius: '10px' },
 }
 
@@ -42,10 +42,15 @@ const GHOST = {
   '--btn-border': '1px solid rgba(255,255,255,.09)',
 }
 
+// "Off" is not "unavailable". The foreground matches the operation-row title
+// in the rail (--color-text) so an unselected tool reads as something you can
+// click; at 60% white it was dimmer than the disabled treatment below and the
+// whole toolbar looked greyed out. The selected state earns its emphasis from
+// the solid accent fill, not from everything else being faded.
 const OFF = {
   '--btn-bg': 'transparent',
-  '--btn-bg-hover': 'rgba(255,255,255,.07)',
-  '--btn-fg': 'rgba(255,255,255,.6)',
+  '--btn-bg-hover': 'rgba(255,255,255,.09)',
+  '--btn-fg': 'var(--color-text-soft)',
   '--btn-border': '1px solid transparent',
 }
 

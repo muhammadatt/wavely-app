@@ -3,11 +3,12 @@ import { computed } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
 import BaseButton from './ui/BaseButton.vue'
+import Icon from './ui/Icon.vue'
 import FileTabs from './FileTabs.vue'
 
 
 const {
-  state, appState, hasFile, documentCount,
+  state, appState, hasFile, documentCount, undo, redo, canUndo, canRedo,
 } = useEditorState()
 const { promptForFiles } = useFileImport()
 
@@ -67,6 +68,29 @@ const fileMeta = computed(() => {
 
     <!-- Actions -->
     <div class="flex items-center gap-2">
+      <!-- History. Icon-only: the arrows are unambiguous and the labels were
+           costing width this row doesn't have once the tab strip fills up. -->
+      <BaseButton
+        size="md" color="ghost" :pill="false"
+        :disabled="!canUndo"
+        @click="undo"
+        title="Undo (Ctrl+Z)"
+        aria-label="Undo"
+      >
+        <Icon name="undo" :size="15" /> Undo
+      </BaseButton>
+      <BaseButton
+        size="md" color="ghost" :pill="false"
+        :disabled="!canRedo"
+        @click="redo"
+        title="Redo (Ctrl+Shift+Z)"
+        aria-label="Redo"
+      >
+        <Icon name="redo" :size="15" /> Redo
+      </BaseButton>
+
+      <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1"></div>
+
       <BaseButton
         size="md" :pill="false"
         :disabled="!hasFile"

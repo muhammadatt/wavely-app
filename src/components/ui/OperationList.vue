@@ -13,8 +13,8 @@ import Icon from './Icon.vue'
  */
 const props = defineProps({
   categoryId: { type: String, required: true },
-  // Whether a selection currently exists, for gating rows that need one.
-  hasSelection: { type: Boolean, default: false },
+  // Predicate from useOperationDispatch — whether a row should render as dead.
+  isDisabled: { type: Function, default: () => false },
   // Show the search field. Hidden for short lists where it's just clutter.
   searchable: { type: Boolean, default: true },
 })
@@ -32,14 +32,8 @@ const groups = computed(() => {
   return hits.length ? [{ group: '', operations: hits }] : []
 })
 
-function isEnabled(op) {
-  if (op.requires === 'selection') return props.hasSelection
-  return true
-}
-
-// The row stays clickable without a selection: the parameter panel it opens
-// explains what's missing, which is more useful than a dead row.
 function select(op) {
+  if (props.isDisabled(op)) return
   emit('select', op)
 }
 </script>
@@ -72,7 +66,8 @@ function select(op) {
         v-for="op in g.operations"
         :key="op.id"
         class="op-row w-full flex items-center gap-[10px] px-[13px] py-3 rounded-[12px] border cursor-pointer text-left select-none"
-        :class="isEnabled(op) ? '' : 'op-row--unmet'"
+        :class="isDisabled(op) ? 'op-row--disabled' : ''"
+        :disabled="isDisabled(op)"
         @click="select(op)"
       >
         <div class="op-icon w-[34px] h-[34px] rounded-[10px] flex items-center justify-center shrink-0">
@@ -82,7 +77,12 @@ function select(op) {
           <div class="text-[13px] font-bold text-text truncate">{{ op.label }}</div>
           <div class="text-[11px] font-medium mt-[1px] text-text-muted truncate">{{ op.desc }}</div>
         </div>
-        <Icon name="chevronRight" :size="16" :stroke-width="2.5" class="text-text-faint" />
+        <!-- A chevron promises "this opens something", so the verbs that just
+             run don't get one. -->
+        <Icon
+          v-if="op.surface !== 'immediate'"
+          name="chevronRight" :size="16" :stroke-width="2.5" class="text-text-faint"
+        />
       </button>
     </div>
 
@@ -121,9 +121,19 @@ function select(op) {
   outline: 2px solid var(--color-accent-bright);
   outline-offset: 2px;
 }
-/* Dimmed rather than disabled — the panel it opens explains the requirement. */
-.op-row--unmet {
-  opacity: 0.55;
+/* Reserved for rows that genuinely cannot be clicked, so dimming keeps meaning
+   "unavailable" rather than "this one needs a selection". */
+.op-row--disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.op-row--disabled:hover {
+  background: transparent;
+  border-color: var(--color-border-2);
+}
+.op-row--disabled:hover .op-icon {
+  background: var(--color-surface-1);
+  color: var(--color-text-dim);
 }
 
 .op-icon {

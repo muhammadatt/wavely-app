@@ -73,6 +73,15 @@ const dragging = ref(false)
 let dragOffsetX = 0
 let dragOffsetY = 0
 
+const frameEl = ref(null)
+// Whatever had focus when this opened, so closing can hand it back.
+let previouslyFocused = null
+
+// Accessible name: the brand mark for device faces, the plain title otherwise.
+const label = computed(() =>
+  isUtility.value ? props.title : `${props.brandLead} ${props.brandTail}`.trim()
+)
+
 onMounted(() => {
   const remembered = getPosition(props.windowId)
   if (remembered) {
@@ -82,10 +91,23 @@ onMounted(() => {
     pos.value = { x: Math.max(16, window.innerWidth - width.value - 40), y: props.top }
   }
   clampToViewport()
+
+  // These windows are non-modal by design — audio keeps playing and the
+  // waveform stays usable while one is open — so there is deliberately no focus
+  // trap and no aria-modal. Trapping would break previewing an effect against a
+  // selection, which is the whole point of them. Focus still has to *land* here
+  // though, or a keyboard user has no way in.
+  previouslyFocused = document.activeElement
+  frameEl.value?.focus({ preventScroll: true })
 })
 
 onBeforeUnmount(() => {
   savePosition(props.windowId, pos.value)
+  // Return focus only if it is still inside this window; if the user has since
+  // clicked the waveform, yanking it back would be worse than leaving it.
+  if (frameEl.value?.contains(document.activeElement)) {
+    previouslyFocused?.focus?.({ preventScroll: true })
+  }
 })
 
 function clampToViewport() {
@@ -117,10 +139,19 @@ function onDragEnd(e) {
   savePosition(props.windowId, pos.value)
 }
 
-// Touching anywhere in the frame raises it. Without this, two open windows keep
-// whatever order they happened to mount in.
+// Touching or tabbing into the frame raises it. Without this, two open windows
+// keep whatever order they happened to mount in.
 function raise() {
   focusWindow(props.windowId)
+}
+
+// Escape closes the window focus is actually in, which is not necessarily the
+// topmost one. Stopping propagation keeps EditorScreen's global ladder from
+// then closing a second window behind it.
+function onEscape(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  requestClose()
 }
 
 // The manager owns the open set, so the shell can close itself; `close` is
@@ -133,7 +164,11 @@ function requestClose() {
 
 <template>
   <div
-    class="fixed rounded-2xl overflow-hidden"
+    ref="frameEl"
+    class="win-frame fixed rounded-2xl overflow-hidden"
+    role="dialog"
+    :aria-label="label"
+    tabindex="-1"
     :style="{
       left: pos.x + 'px', top: pos.y + 'px', width: width + 'px',
       zIndex: z,
@@ -144,6 +179,8 @@ function requestClose() {
       userSelect: dragging ? 'none' : 'auto',
     }"
     @pointerdown="raise"
+    @focusin="raise"
+    @keydown.escape="onEscape"
   >
     <!-- Header (drag handle) -->
     <div
@@ -215,6 +252,16 @@ function requestClose() {
 </template>
 
 <style scoped>
+/* The frame takes focus programmatically on open so keyboard users land inside
+   it. That must not paint a ring — only an actual keyboard focus should. */
+.win-frame:focus {
+  outline: none;
+}
+.win-frame:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}
+
 .win-close {
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.55);

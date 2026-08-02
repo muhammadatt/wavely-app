@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
-import { useWindows } from '../composables/useWindows.js'
+import { useOperationDispatch } from '../composables/useOperationDispatch.js'
 import { getCategory, getOperation } from '../ui/registry.js'
 import OperationList from './ui/OperationList.vue'
 import PanelHeader from './ui/PanelHeader.vue'
@@ -17,19 +17,11 @@ import Icon from './ui/Icon.vue'
  * Categories carrying a bespoke `panel` (Split, Presets) render it directly and
  * skip the list level; they aren't lists of operations.
  */
-const { state, hasSelection, closeRail, setRailOperation } = useEditorState()
-const { openWindow } = useWindows()
+const { state, closeRail, setRailOperation } = useEditorState()
+const { dispatch, isDisabled } = useOperationDispatch()
 
 const category = computed(() => getCategory(state.activeTool))
 const operation = computed(() => (state.railOperation ? getOperation(state.railOperation) : null))
-
-function handleSelect(op) {
-  // Surface is a property of the operation, but fixed per category — so every
-  // row in a given list does the same thing and nothing surprises the user.
-  if (op.surface === 'window') openWindow(op.id)
-  else if (op.surface === 'immediate') op.action?.()
-  else setRailOperation(op.id)
-}
 </script>
 
 <template>
@@ -67,8 +59,8 @@ function handleSelect(op) {
         <PanelHeader :title="category.label" :desc="category.desc" />
         <OperationList
           :category-id="category.id"
-          :has-selection="hasSelection"
-          @select="handleSelect"
+          :is-disabled="isDisabled"
+          @select="dispatch"
         />
       </template>
     </template>

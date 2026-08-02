@@ -223,7 +223,7 @@ onUnmounted(() => {
 
 <style scoped>
 .zoom-window {
-  border: 1.5px solid rgba(126, 240, 255, 0.75);
+  border: 1.5px solid rgba(126, 240, 255, 0.5);
   background: rgba(53, 211, 230, 0.07);
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }

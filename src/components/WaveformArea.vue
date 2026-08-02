@@ -4,7 +4,10 @@ import { renderWaveform, renderOverlay, RULER_GUTTER_HEIGHT } from '../audio/ren
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 
-const { state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration } = useEditorState()
+const {
+  state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration,
+  openContextMenu,
+} = useEditorState()
 
 const canvas = ref(null)
 const overlayCanvas = ref(null)
@@ -148,6 +151,14 @@ function drawAll() {
 // Convert pixel X to timeline seconds
 function pxToTime(px) {
   return scrollLeft.value + px / pixelsPerSecond.value
+}
+
+// Right-click opens the edit menu. It deliberately does not move the playhead
+// or clear the selection — the menu's items act on whatever is already
+// selected, so changing that out from under the click would be hostile.
+function handleContextMenu(e) {
+  e.preventDefault()
+  openContextMenu(e.clientX, e.clientY)
 }
 
 function handleMouseDown(e) {
@@ -349,6 +360,7 @@ onUnmounted(() => {
         class="absolute inset-0 w-full h-full"
         @mousedown="handleMouseDown"
         @wheel="handleWheel"
+        @contextmenu="handleContextMenu"
       ></canvas>
       <canvas
         ref="overlayCanvas"

@@ -74,10 +74,17 @@ const appState = reactive({
   clipboard: null,
 
   // UI chrome — persists across document switches
-  activeTool: null, // 'split' | 'edit' | 'effects' | 'presets' | null — also *is* "rail open"
+  // Category id from src/ui/registry.js, or null. Also *is* "rail is open" —
+  // there is no separate flag. Never compare against a literal here; the
+  // registry owns the set of ids.
+  activeTool: null,
   // Operation id the rail has drilled into, or null for the category list.
   railOperation: null,
   commandPaletteOpen: false,
+  // Viewport coords of an open waveform context menu, or null. Position is
+  // state rather than a component ref because the menu renders at the app root,
+  // above the rail and the floating windows.
+  contextMenu: null,
   exportDialogOpen: false,
   // Document ids the export dialog should open with pre-checked. Set when
   // export is invoked from a bulk selection; null means "just the active one".
@@ -574,6 +581,15 @@ export function useEditorState() {
     appState.commandPaletteOpen = false
   }
 
+  // ── Waveform context menu ──────────────────────────────────────────────────
+  function openContextMenu(x, y) {
+    appState.contextMenu = { x, y }
+  }
+
+  function closeContextMenu() {
+    appState.contextMenu = null
+  }
+
   // ── Processing (per document) ──────────────────────────────────────────────
   function startProcessing(message, docId = appState.activeDocumentId) {
     const doc = getDocument(docId)
@@ -708,6 +724,8 @@ export function useEditorState() {
     openRailOperation,
     openCommandPalette,
     closeCommandPalette,
+    openContextMenu,
+    closeContextMenu,
 
     // Processing
     startProcessing,

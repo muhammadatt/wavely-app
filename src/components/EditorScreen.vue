@@ -19,7 +19,7 @@ const {
   state, appState, performCut, performCopy, performPaste,
   undo, redo, canUndo, canRedo, hasSelection, hasClipboard, hasFile,
   selectAll, clearSelection, setPlayhead, totalDuration,
-  closeRail, openCommandPalette, closeCommandPalette,
+  closeRail, openCommandPalette, closeCommandPalette, closeContextMenu,
   documents, cycleDocument, setActiveDocument, closeDocument,
   documentHasUnsavedWork, activeDoc,
 } = useEditorState()
@@ -75,6 +75,7 @@ function isTextField(target) {
 // The Escape ladder, top layer first. Floating windows sit above the dialogs
 // because they're the thing the user most recently reached for.
 function closeTopModal() {
+  if (appState.contextMenu) { closeContextMenu(); return true }
   if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
   if (closeTopWindow()) return true
   if (appState.exportDialogOpen) { appState.exportDialogOpen = false; return true }
@@ -88,7 +89,7 @@ function handleKeydown(e) {
   const key = e.key.toLowerCase()
   const inText = isTextField(e.target)
   const modalOpen = anyWindowOpen.value || appState.commandPaletteOpen ||
-    appState.exportDialogOpen || appState.filesPanelOpen
+    appState.contextMenu || appState.exportDialogOpen || appState.filesPanelOpen
 
   // Escape — close the top modal, then the selection, then the rail.
   if (e.key === 'Escape') {

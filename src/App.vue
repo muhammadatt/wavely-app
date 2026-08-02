@@ -5,6 +5,7 @@ import FilesPanel from './components/FilesPanel.vue'
 import ExportDialog from './components/ExportDialog.vue'
 import ToastNotification from './components/ToastNotification.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import WaveformContextMenu from './components/WaveformContextMenu.vue'
 import WindowLayer from './components/WindowLayer.vue'
 
 // ProcessingOverlay is no longer mounted here — it now renders inside the
@@ -21,5 +22,12 @@ const { appState } = useEditorState()
   <ExportDialog v-if="appState.exportDialogOpen" />
   <WindowLayer />
   <CommandPalette v-if="appState.commandPaletteOpen" />
+  <!-- Keyed on position: right-clicking while the menu is open nulls and re-sets
+       contextMenu within one tick, so without this Vue reuses the instance and
+       the menu stays at the previous coordinates. -->
+  <WaveformContextMenu
+    v-if="appState.contextMenu"
+    :key="`${appState.contextMenu.x},${appState.contextMenu.y}`"
+  />
   <ToastNotification />
 </template>

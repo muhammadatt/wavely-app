@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
-import { useWindows } from '../composables/useWindows.js'
+import { useOperationDispatch } from '../composables/useOperationDispatch.js'
 import { searchOperations, getCategory } from '../ui/registry.js'
 import Icon from './ui/Icon.vue'
 
@@ -12,8 +12,8 @@ import Icon from './ui/Icon.vue'
  * you can reach anything without knowing whether it lives under Edit or
  * Effects, which is what makes it safe to keep adding operations.
  */
-const { hasSelection, closeCommandPalette, openRailOperation } = useEditorState()
-const { openWindow } = useWindows()
+const { closeCommandPalette } = useEditorState()
+const { dispatch, isDisabled } = useOperationDispatch()
 
 const query = ref('')
 const cursor = ref(0)
@@ -29,11 +29,6 @@ onMounted(() => {
   inputEl.value?.focus()
 })
 
-function isEnabled(op) {
-  if (op.requires === 'selection') return hasSelection.value
-  return true
-}
-
 function move(delta) {
   const n = results.value.length
   if (!n) return
@@ -47,17 +42,10 @@ async function scrollCursorIntoView() {
   listEl.value?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
 }
 
+// An unavailable verb leaves the palette open rather than closing on a no-op —
+// the user still has to do something about the missing selection.
 function run(op) {
-  if (!op) return
-  closeCommandPalette()
-
-  if (op.surface === 'window') {
-    openWindow(op.id)
-  } else if (op.surface === 'immediate') {
-    op.action?.()
-  } else {
-    openRailOperation(op.category, op.id)
-  }
+  if (dispatch(op)) closeCommandPalette()
 }
 
 function onKeydown(e) {
@@ -110,7 +98,7 @@ function categoryLabel(op) {
           :key="op.id"
           class="palette-row w-full flex items-center gap-[11px] px-3 py-[10px] rounded-[10px] border-none cursor-pointer text-left"
           :data-active="i === cursor"
-          :class="[i === cursor ? 'is-active' : '', isEnabled(op) ? '' : 'opacity-55']"
+          :class="[i === cursor ? 'is-active' : '', isDisabled(op) ? 'opacity-45' : '']"
           @click="run(op)"
           @mousemove="cursor = i"
         >
