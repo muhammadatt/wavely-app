@@ -1,8 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
-import BaseButton from '../ui/BaseButton.vue'
-import RequirementNotice from '../ui/RequirementNotice.vue'
+import ApplyAction from '../ui/ApplyAction.vue'
 import { adjustVolumeRegion, computePeakCache } from '../../audio/processing.js'
 
 const {
@@ -97,16 +96,15 @@ async function applyVolume() {
 
 
       <!-- Apply button -->
-      <BaseButton
-        size="lg" block
-        :disabled="!hasSelection || gainDb === 0"
-        @click="applyVolume"
-      >
-        <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-        Apply Volume Change
-      </BaseButton>
+      <ApplyAction
+        class="mt-1"
+        :met="hasSelection"
+        message="Make a selection to apply"
+        label="Apply Volume Change"
+        :disabled="gainDb === 0"
+        @apply="applyVolume"
+      />
 
-      <RequirementNotice :met="hasSelection" message="Make a selection on the waveform to apply" />
     </div>
   </div>
 </template>

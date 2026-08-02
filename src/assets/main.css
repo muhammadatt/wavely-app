@@ -16,7 +16,8 @@
 
   /* Text */
   --color-text: #eaf6f8;
-  --color-text-soft: rgba(255 255 255 / 0.78);
+  --color-text-soft: rgba(255 255 255 / 0.85);
+  --color-text-softer: rgba(255 255 255 / 0.65);
   --color-text-dim: rgba(255, 255, 255, 0.5);
   --color-text-muted: rgba(255, 255, 255, 0.42);
   --color-text-faint: rgba(255, 255, 255, 0.35);

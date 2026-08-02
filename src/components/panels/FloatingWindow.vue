@@ -4,46 +4,42 @@ import { useWindows } from '../../composables/useWindows.js'
 import Icon from '../ui/Icon.vue'
 
 /**
- * Shared shell for every floating window.
+ * Shared shell for every effect window — the outboard-gear faceplate.
  *
  * Owns the chrome each one needs and nothing about any one of them: the
- * draggable frame, the header, the engage/bypass pill, the close button and
- * its place in the stacking order. Contents arrive through the default slot.
+ * draggable frame, the brand header, the engage/bypass pill, the close button
+ * and its place in the stacking order. Contents arrive through the default slot.
  *
- * Two variants, because "every effect opens as a window" has to cover both the
- * outboard-gear faces and a four-slider utility without forcing knob artwork
- * onto the latter:
- *
- *   device  — faceplate gradient, letterspaced brand mark, per-plugin accent.
- *             OptoSmooth, FET Punch.
- *   utility — narrow, flat, reads like the rail. Icon + plain title, sliders
- *             and an Apply footer.
+ * There used to be a second, flat "utility" variant for the effects that only
+ * had a few sliders. Two looks for one kind of object is the inconsistency this
+ * whole restructure exists to remove, so every effect now wears the faceplate
+ * and the faceplate is derived from the plugin's own accent — a family
+ * resemblance that costs each window one colour.
  */
 const props = defineProps({
   // Registry id. Identifies this window to the manager for focus and for
   // remembering where the user last dragged it.
   windowId: { type: String, required: true },
   z: { type: Number, default: 500 },
-  variant: { type: String, default: 'device' }, // 'device' | 'utility'
 
-  width: { type: Number, default: null },
+  width: { type: Number, default: 640 },
   // Vertical offset of the initial resting place, used only the first time a
   // window opens; after that the remembered position wins.
   top: { type: Number, default: 90 },
-  accent: { type: String, default: null },
+  accent: { type: String, default: '#f5a623' },
 
-  // device: two-part brand mark, e.g. "OPTO" + "SMOOTH" — the first word solid,
-  // the second lighter.
-  brandLead: { type: String, default: '' },
+  // Two-part brand mark, e.g. "OPTO" + "SMOOTH" — the first word solid, the
+  // second lighter.
+  brandLead: { type: String, required: true },
   brandTail: { type: String, default: '' },
-  // utility: plain title + icon name.
-  title: { type: String, default: '' },
-  icon: { type: String, default: '' },
 
+  // Override the derived faceplate. Only FET Punch does — its steel-blue accent
+  // tints too cold through the generic recipe, so it keeps a hand-tuned pair.
   background: { type: String, default: null },
   headerBackground: { type: String, default: null },
 
-  // The ON/BYPASS pill only makes sense where there is something to bypass.
+  // The ON/BYPASS pill only makes sense where there is something to bypass —
+  // i.e. effects that preview in real time.
   showEngage: { type: Boolean, default: true },
   engaged: { type: Boolean, default: false },
 })
@@ -52,20 +48,18 @@ const emit = defineEmits(['toggle-engaged', 'close'])
 
 const { focusWindow, closeWindow, savePosition, getPosition } = useWindows()
 
-const isUtility = computed(() => props.variant === 'utility')
+const width = computed(() => props.width)
+const accent = computed(() => props.accent)
 
-// Per-variant defaults, so a utility window needs only a title and an icon.
-const width = computed(() => props.width ?? (isUtility.value ? 380 : 640))
-const accent = computed(() => props.accent ?? (isUtility.value ? '#35d3e6' : '#f5a623'))
+// The faceplate is a near-black tinted toward the plugin's accent. Keeping the
+// tint this weak is what lets six different hues still read as one product.
 const background = computed(() =>
-  props.background ?? (isUtility.value
-    ? 'linear-gradient(180deg,#161b24,#0e1116)'
-    : 'linear-gradient(155deg,#1a1815,#100e0b 60%)')
+  props.background ??
+  `linear-gradient(155deg, color-mix(in srgb, ${accent.value} 10%, #16191e), color-mix(in srgb, ${accent.value} 4%, #0b0d10) 60%)`
 )
 const headerBackground = computed(() =>
-  props.headerBackground ?? (isUtility.value
-    ? 'linear-gradient(#1b212b,#151a22)'
-    : 'linear-gradient(#221f1a,#171410)')
+  props.headerBackground ??
+  `linear-gradient(color-mix(in srgb, ${accent.value} 14%, #1c2026), color-mix(in srgb, ${accent.value} 7%, #121418))`
 )
 
 const pos = ref({ x: 0, y: props.top })
@@ -77,10 +71,8 @@ const frameEl = ref(null)
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
 
-// Accessible name: the brand mark for device faces, the plain title otherwise.
-const label = computed(() =>
-  isUtility.value ? props.title : `${props.brandLead} ${props.brandTail}`.trim()
-)
+// Accessible name, read off the brand mark.
+const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 
 onMounted(() => {
   const remembered = getPosition(props.windowId)
@@ -184,11 +176,8 @@ function requestClose() {
   >
     <!-- Header (drag handle) -->
     <div
-      class="flex items-center justify-between touch-none"
-      :class="[
-        dragging ? 'cursor-grabbing' : 'cursor-grab',
-        isUtility ? 'px-4 h-11' : 'px-[18px] h-12',
-      ]"
+      class="flex items-center justify-between touch-none px-[18px] h-12"
+      :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
       style="border-bottom:1px solid rgba(255,255,255,.06)"
       :style="{ background: headerBackground }"
       @pointerdown="onDragStart"
@@ -196,25 +185,20 @@ function requestClose() {
       @pointerup="onDragEnd"
       @pointercancel="onDragEnd"
     >
-      <!-- Utility: icon + plain title, matching the rail's voice -->
-      <div v-if="isUtility" class="flex items-center gap-2.5 min-w-0">
-        <div
-          class="w-[26px] h-[26px] rounded-lg flex items-center justify-center shrink-0"
-          :style="{ background: `color-mix(in srgb, ${accent} 16%, transparent)`, color: accent }"
-        >
-          <Icon v-if="icon" :name="icon" :size="14" />
-        </div>
-        <span class="text-[13px] font-bold text-text truncate">{{ title }}</span>
-      </div>
-
-      <!-- Device: brand mark -->
-      <div v-else class="flex items-center gap-2.5">
+      <!-- Brand mark -->
+      <div class="flex items-center gap-2.5">
         <div class="w-3.5 h-3.5 rounded-full"
              :style="{
                background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 45%, #ffffff), ${accent})`,
                boxShadow: `0 0 10px color-mix(in srgb, ${accent} 65%, transparent)`,
              }"></div>
-        <span style="font:800 13px/1 'Inter';letter-spacing:.22em;color:#f6ecdd">{{ brandLead }}&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.4)">{{ brandTail }}</span></span>
+        <!-- Brand text is a very light tint of the accent rather than a fixed
+             cream, which was tuned for OptoSmooth's amber and read wrong on
+             every other hue. -->
+        <span
+          style="font:800 13px/1 'Inter';letter-spacing:.22em"
+          :style="{ color: `color-mix(in srgb, ${accent} 20%, #ffffff)` }"
+        >{{ brandLead }}&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.4)">{{ brandTail }}</span></span>
       </div>
 
       <!-- Optional middle slot (preset selector and the like) -->

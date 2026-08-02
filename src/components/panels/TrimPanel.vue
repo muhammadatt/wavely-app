@@ -1,8 +1,7 @@
 <script setup>
 import { ref } from "vue"
 import { useEditorState } from "../../composables/useEditorState.js"
-import BaseButton from "../ui/BaseButton.vue"
-import RequirementNotice from '../ui/RequirementNotice.vue'
+import ApplyAction from '../ui/ApplyAction.vue'
 
 const {
   hasSelection,
@@ -79,20 +78,14 @@ const options = [
         </div>
       </button>
 
-      <BaseButton
-        class="mt-1" size="lg" block
-        :disabled="!hasSelection"
-        @click="apply">
-        <svg
-          viewBox="0 0 24 24"
-          class="w-[13px] h-[13px] fill-none stroke-current"
-          stroke-width="2.5">
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
-        Apply Trim
-      </BaseButton>
+      <ApplyAction
+        class="mt-1"
+        :met="hasSelection"
+        message="Make a selection to trim"
+        label="Apply Trim"
+        @apply="apply"
+      />
 
-      <RequirementNotice :met="hasSelection" message="Make a selection on the waveform to trim" />
     </div>
   </div>
 </template>

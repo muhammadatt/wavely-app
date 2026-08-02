@@ -1,7 +1,6 @@
 <script setup>
 import { useEditorState } from '../../composables/useEditorState.js'
-import BaseButton from '../ui/BaseButton.vue'
-import RequirementNotice from '../ui/RequirementNotice.vue'
+import ApplyAction from '../ui/ApplyAction.vue'
 
 const { hasSelection, performSilence, showToast } = useEditorState()
 
@@ -31,16 +30,14 @@ function apply() {
         </p>
       </div>
 
-      <RequirementNotice :met="hasSelection" :reserve-space="false" />
 
-      <BaseButton
-        class="mt-1" size="lg" block
-        :disabled="!hasSelection"
-        @click="apply"
-      >
-        <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-        Apply Silence
-      </BaseButton>
+      <ApplyAction
+        class="mt-1"
+        :met="hasSelection"
+        message="Make a selection to silence"
+        label="Apply Silence"
+        @apply="apply"
+      />
     </div>
   </div>
 </template>

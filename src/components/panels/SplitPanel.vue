@@ -1,12 +1,15 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
-import BaseButton from '../ui/BaseButton.vue'
-import RequirementNotice from '../ui/RequirementNotice.vue'
+import ApplyAction from '../ui/ApplyAction.vue'
 
 const { state, hasSelection, performSplit, performSplitAtSelectionEdges, showToast } = useEditorState()
 
 const mode = ref('playhead') // 'playhead' | 'selection'
+
+// Splitting at the playhead needs nothing; splitting at the selection edges
+// obviously needs a selection. The requirement follows the mode.
+const requirementMet = computed(() => mode.value !== 'selection' || hasSelection.value)
 
 function apply() {
   if (mode.value === 'playhead') {
@@ -66,20 +69,13 @@ function apply() {
         </div>
       </button>
 
-      <RequirementNotice
-        v-if="mode === 'selection'"
-        :met="hasSelection"
-        :reserve-space="false"
+      <ApplyAction
+        class="mt-1"
+        :met="requirementMet"
+        message="Make a selection to split at its edges"
+        label="Apply Split"
+        @apply="apply"
       />
-
-      <BaseButton
-        class="mt-1" size="lg" block
-        :disabled="mode === 'selection' && !hasSelection"
-        @click="apply"
-      >
-        <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-        Apply Split
-      </BaseButton>
     </div>
   </div>
 </template>

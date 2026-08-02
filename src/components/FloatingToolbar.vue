@@ -11,7 +11,7 @@ const tools = CATEGORIES
 </script>
 
 <template>
-  <div class="h-[60px] flex items-center gap-3 px-5 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
+  <div class="h-[65px] flex items-center gap-3 px-5 shrink-0 border-b border-[rgba(255,255,255,.06)]" style="background:linear-gradient(180deg,#12161b,#0e1216)">
     <!-- Search is the escape hatch from the category hierarchy: as the number
          of operations grows, this is how you reach one without knowing which
          category it lives in. -->
@@ -61,9 +61,10 @@ const tools = CATEGORIES
  * selected state is a solid cyan fill — correct for a lone button, but shouting
  * inside a group of four.
  *
- * The selected treatment here matches the accent wash + accent border + bright
- * accent text already used for selected rows in the rail and selected preset
- * cards, so "this one is chosen" looks the same everywhere in the app.
+ * The selected chip is a solid accent fill. This is deliberately louder than
+ * the accent *wash* used for selected rows in the rail and selected preset
+ * cards: those are selections within a panel you are already looking at, while
+ * this one says which panel you are in at all.
  */
 .tool-btn {
   display: flex;
@@ -71,11 +72,11 @@ const tools = CATEGORIES
   gap: 7px;
   flex-shrink: 0;
   white-space: nowrap;
-  padding: 8px 14px;
+  padding: 10px 16px;
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--color-text-soft);
+  color: var(--color-text-softer);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   font-weight: 600;
@@ -102,16 +103,29 @@ const tools = CATEGORIES
   transform: translateY(0.5px);
 }
 
+/* Solid accent fill with dark text — the selected chip reads as a physical key
+ * pressed into the tray rather than an outlined region. The gradient is the
+ * same one the logo tile uses, so the brightest thing in the toolbar and the
+ * brightest thing in the header are visibly the same colour.
+ *
+ * No border: at this contrast an accent outline around an accent fill only
+ * muddies the edge. The glow does the lifting instead.
+ */
 .tool-btn.is-active {
-  background: linear-gradient(180deg, rgba(53, 211, 230, 0.2), rgba(53, 211, 230, 0.11));
-  border-color: rgba(53, 211, 230, 0.45);
-  color: var(--color-accent-bright);
-  /* Top highlight + outer glow lift the chip off the recessed tray. */
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08),
-              0 2px 10px rgba(53, 211, 230, 0.16);
+  background: linear-gradient(180deg, #7ef0ff, #5ce3f8);
+  border-color: transparent;
+  color: #08161a;
+  /*
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4),
+              0 2px 12px rgba(53, 211, 230, 0.35);
+  */
 }
 .tool-btn.is-active .tool-btn__icon {
   opacity: 1;
+}
+/* Hover on the already-selected chip: lift, don't recolour. */
+.tool-btn.is-active:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 
 .tool-btn:focus-visible {

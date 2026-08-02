@@ -3,10 +3,8 @@ import { ref } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import { normalizeRegion, computePeakCache } from '../../../audio/processing.js'
 import FloatingWindow from '../FloatingWindow.vue'
-import ParameterSlider from '../../ui/ParameterSlider.vue'
-import RequirementNotice from '../../ui/RequirementNotice.vue'
-import BaseButton from '../../ui/BaseButton.vue'
-import Icon from '../../ui/Icon.vue'
+import Knob from '../../knobs/Knob.vue'
+import ApplyAction from '../../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -15,9 +13,15 @@ const {
   startProcessing, endProcessing, showToast, totalDuration,
 } = useEditorState()
 
+const ACCENT = '#5df0b0'
+
 const targetPeak = ref(-1)
 
-async function applyNormalize(useSelection) {
+function formatDb(v) {
+  return v.toFixed(1)
+}
+
+async function applyNormalize(useSelection = true) {
   const start = useSelection && state.selection ? state.selection.start : 0
   const end = useSelection && state.selection ? state.selection.end : totalDuration.value
 
@@ -49,33 +53,42 @@ async function applyNormalize(useSelection) {
 <template>
   <FloatingWindow
     window-id="normalize"
-    variant="utility"
     :z="z"
-    title="Normalize"
-    icon="normalize"
+    :width="360"
+    :accent="ACCENT"
+    brand-lead="PEAK"
+    brand-tail="NORM"
     :show-engage="false"
   >
-    <div class="p-4 flex flex-col gap-[14px]">
-      <p class="text-[11.5px] leading-[1.45] text-text-muted">
-        Scales the selection so its loudest peak sits at the target level.
+    <div class="px-[26px] pt-[22px] pb-[24px]">
+      <!-- One parameter, so it carries the face: a single large knob rather
+           than a lone slider adrift in the panel. -->
+      <div class="flex justify-center">
+        <div class="w-[136px]">
+          <Knob
+            v-model="targetPeak"
+            :min="-12" :max="0" :step="0.5"
+            label="Target Peak" :accent="ACCENT" :format-value="formatDb"
+          />
+        </div>
+      </div>
+
+      <p class="mt-[18px] text-center text-[10.5px] leading-[1.5] text-[rgba(255,255,255,.4)]">
+        Scales the selection so its loudest peak lands at
+        <span class="font-['JetBrains_Mono']" :style="{ color: ACCENT }">{{ formatDb(targetPeak) }} dBFS</span>.
       </p>
 
-      <ParameterSlider
-        v-model="targetPeak"
-        label="Target peak"
-        :min="-12" :max="0" :step="1"
-        unit="dBFS"
-      />
-
-      <RequirementNotice
-        :met="hasSelection"
-        message="Make a selection on the waveform to normalize"
-      />
-
-      <BaseButton size="md" block :disabled="!hasSelection" @click="applyNormalize(true)">
-        <Icon name="check" :size="13" :stroke-width="2.5" />
-        Apply Normalize
-      </BaseButton>
+      <div class="mt-[18px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
+        <ApplyAction
+          size="md"
+          :accent="ACCENT"
+          text-color="#08211a"
+          :met="hasSelection"
+          message="Make a selection to normalize"
+          label="Apply Normalize"
+          @apply="applyNormalize()"
+        />
+      </div>
     </div>
   </FloatingWindow>
 </template>

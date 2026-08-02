@@ -83,7 +83,6 @@ function selectMockPreset(name) {
 <template>
   <FloatingWindow
     window-id="opto-smooth"
-    variant="device"
     :z="z"
     :width="640"
     :accent="ACCENT"

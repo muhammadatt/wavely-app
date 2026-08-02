@@ -105,7 +105,6 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
 <template>
   <FloatingWindow
     window-id="fet-punch"
-    variant="device"
     :z="z"
     :width="700"
     :top="130"
