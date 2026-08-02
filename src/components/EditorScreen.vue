@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
+import { useWindows } from '../composables/useWindows.js'
 import TopBar from './TopBar.vue'
 import FileTabs from './FileTabs.vue'
 import FloatingToolbar from './FloatingToolbar.vue'
@@ -17,11 +18,13 @@ import ProcessingOverlay from './ProcessingOverlay.vue'
 const {
   state, appState, performCut, performCopy, performPaste,
   undo, redo, canUndo, canRedo, hasSelection, hasClipboard, hasFile,
-  selectAll, clearSelection, setPlayhead, totalDuration, setActiveTool,
+  selectAll, clearSelection, setPlayhead, totalDuration,
+  closeRail, openCommandPalette, closeCommandPalette,
   documents, cycleDocument, setActiveDocument, closeDocument,
   documentHasUnsavedWork, activeDoc,
 } = useEditorState()
 const { importFiles, promptForFiles } = useFileImport()
+const { closeTopWindow, anyWindowOpen } = useWindows()
 
 const NUDGE_SECONDS = 1
 const NUDGE_SECONDS_COARSE = 5
@@ -69,11 +72,13 @@ function isTextField(target) {
   return !!target.closest?.('input, textarea, select, [contenteditable="true"]')
 }
 
+// The Escape ladder, top layer first. Floating windows sit above the dialogs
+// because they're the thing the user most recently reached for.
 function closeTopModal() {
+  if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
+  if (closeTopWindow()) return true
   if (appState.exportDialogOpen) { appState.exportDialogOpen = false; return true }
   if (appState.filesPanelOpen) { appState.filesPanelOpen = false; return true }
-  if (state.la2aModalOpen) { state.la2aModalOpen = false; return true }
-  if (state.fet1176ModalOpen) { state.fet1176ModalOpen = false; return true }
   return false
 }
 
@@ -82,16 +87,23 @@ function handleKeydown(e) {
   // throughout or every Shift-modified shortcut silently never fires.
   const key = e.key.toLowerCase()
   const inText = isTextField(e.target)
-  const modalOpen = state.la2aModalOpen || state.fet1176ModalOpen ||
+  const modalOpen = anyWindowOpen.value || appState.commandPaletteOpen ||
     appState.exportDialogOpen || appState.filesPanelOpen
 
-  // Escape — close the top modal, then the context panel, then the selection.
+  // Escape — close the top modal, then the selection, then the rail.
   if (e.key === 'Escape') {
     if (closeTopModal()) { e.preventDefault(); return }
     if (hasSelection.value) { clearSelection(); e.preventDefault(); return }
-    // Route through setActiveTool rather than closing the panel directly, or
-    // the toolbar keeps showing the tool as active with nothing open.
-    if (state.contextPanelOpen && state.activeTool) { setActiveTool(state.activeTool); e.preventDefault() }
+    if (state.activeTool) { closeRail(); e.preventDefault() }
+    return
+  }
+
+  // Ctrl+K opens search. Deliberately above the modalOpen guard so it still
+  // works with a plugin window open — that's the point of a command palette.
+  if ((e.ctrlKey || e.metaKey) && key === 'k') {
+    if (!hasFile.value) return
+    e.preventDefault()
+    openCommandPalette()
     return
   }
 
@@ -319,7 +331,7 @@ onUnmounted(() => {
       </div>
       <!-- Context Panel -->
       <Transition name="ctx-panel">
-        <ContextPanel v-if="state.contextPanelOpen" />
+        <ContextPanel v-if="state.activeTool" />
       </Transition>
     </div>
 

@@ -1,43 +1,70 @@
 @import "tailwindcss";
 
+/* The design tokens the app actually uses.
+ *
+ * These replace an earlier light/pastel Nunito palette that no component ever
+ * referenced — the real values had been hardcoded as literals across ~30 files.
+ * New and refactored components should read from here; the untouched files
+ * still carry their literals and will be migrated opportunistically.
+ */
 @theme {
-  --color-bg: #F0F7FF;
-  --color-surface: #FFFFFF;
-  --color-accent: #FF6B6B;
-  --color-accent-lt: #FFF0F0;
-  --color-accent-dk: #E84545;
-  --color-mint: #3ECFB2;
-  --color-mint-lt: #E8FAF7;
-  --color-yellow: #FFD166;
-  --color-yellow-lt: #FFFBEE;
-  --color-purple: #9B89F5;
-  --color-purple-lt: #F3F1FF;
-  --color-ink: #2D2A3E;
-  --color-ink-mid: #7B789A;
-  --color-ink-lt: #C4C2D4;
-  --color-border: #E8E6F5;
-  --color-selection: rgba(155, 137, 245, 0.15);
+  /* Accent — the single interactive colour. `accent` fills, `accent-bright`
+     is the text/stroke tint that sits on top of a translucent accent wash. */
+  --color-accent: #35d3e6;
+  --color-accent-bright: #7fe9f6;
+  --color-accent-solid: #86e8ff;
 
-  --font-family-heading: 'Nunito', sans-serif;
-  --font-family-body: 'Nunito Sans', sans-serif;
+  /* Text */
+  --color-text: #eaf6f8;
+  --color-text-dim: rgba(255, 255, 255, 0.5);
+  --color-text-muted: rgba(255, 255, 255, 0.42);
+  --color-text-faint: rgba(255, 255, 255, 0.35);
 
-  --radius-sm: 12px;
-  --radius-md: 18px;
-  --radius-lg: 24px;
-  --radius-xl: 32px;
+  /* Status */
+  --color-warn: #e0b84a;
+  --color-danger: #ff8a80;
+
+  /* Surfaces, lightest last. surface-1 is a panel row at rest, surface-2 a
+     raised control, surface-3 a hover state. */
+  --color-surface-1: rgba(255, 255, 255, 0.03);
+  --color-surface-2: rgba(255, 255, 255, 0.06);
+  --color-surface-3: rgba(255, 255, 255, 0.1);
+
+  /* Borders. border-1 is the near-invisible structural rule between regions,
+     border-2 the visible outline of a control. */
+  --color-border-1: rgba(255, 255, 255, 0.06);
+  --color-border-2: rgba(255, 255, 255, 0.09);
+
+  /* Chrome gradients */
+  --gradient-rail: linear-gradient(180deg, #141922, #0e1116);
+  --gradient-bar: linear-gradient(180deg, #12161b, #0e1216);
+
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-pill: 999px;
+}
 
-  --shadow-sm: 0 2px 8px rgba(45,42,62,0.08);
-  --shadow-md: 0 4px 20px rgba(45,42,62,0.10);
-  --shadow-lg: 0 8px 32px rgba(45,42,62,0.12);
-  --shadow-accent: 0 4px 16px rgba(255,107,107,0.35);
-  --shadow-mint: 0 4px 16px rgba(62,207,178,0.35);
+/* Stacking order, in one place. Previously these were unscaled magic numbers
+   spread across six components, which is why two plugin windows both sat at
+   500 and the later mount won permanently. */
+:root {
+  --z-panel: 100;
+  --z-overlay: 400;
+  --z-dialog: 450;
+  --z-window: 500;   /* windows stack upward from here, one per open window */
+  --z-palette: 700;
+  --z-toast: 800;
 }
 
 body {
-  font-family: var(--font-family-body);
-  background: var(--color-bg);
-  color: var(--color-ink);
+  font-family: var(--font-ui);
+  background: #0e1116;
+  color: var(--color-text);
   min-height: 100vh;
   font-size: 14px;
 }
@@ -57,11 +84,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-ink-lt);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-ink-mid);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Animations */

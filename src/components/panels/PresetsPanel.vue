@@ -11,6 +11,7 @@ import { computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
 import BaseButton from '../ui/BaseButton.vue'
+import Icon from '../ui/Icon.vue'
 
 const {
   state, appState, setPreset, setOutputProfile, setProcessingReport, showToast,
@@ -79,39 +80,82 @@ const isOverridden = computed(() =>
 const COMING_SOON_PRESETS = new Set()
 const isSelectedPresetComingSoon = computed(() => COMING_SOON_PRESETS.has(state.selectedPreset))
 
-// Noise Eraser separation model toggle
-const isNoiseEraser = computed(() => state.selectedPreset === 'noise_eraser')
-const separationModel = ref(PRESETS.noise_eraser?.separationModel ?? 'demucs')
-function setSeparationModel(model) {
-  separationModel.value = model
-  // Keep the preset config in sync so processAudioOnServer picks it up via request body
-  if (PRESETS.noise_eraser) PRESETS.noise_eraser.separationModel = model
+/**
+ * Presets that expose a model choice.
+ *
+ * Noise Eraser and ClearerVoice Eraser previously carried two near-identical
+ * blocks of markup and two near-identical setters differing only in ids and
+ * copy. The chosen model is written back onto the preset config because that
+ * object is what processAudioOnServer serialises into the request body.
+ */
+const MODEL_CHOICES = {
+  noise_eraser: {
+    title: 'Separation Model',
+    configKey: 'separationModel',
+    fallback: 'demucs',
+    options: [
+      {
+        id: 'demucs', label: 'Quality', sub: 'Best results, slower',
+        note: 'Demucs htdemucs_ft — ~2–10 min per file. Handles severe outdoor noise and non-stationary backgrounds.',
+      },
+      {
+        id: 'convtasnet', label: 'Fast', sub: 'Good results, quicker',
+        note: 'ConvTasNet WHAM! — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.',
+      },
+    ],
+  },
+  clearervoice_eraser: {
+    title: 'Enhancement Model',
+    configKey: 'clearervoiceModel',
+    fallback: 'mossformer2_48k',
+    options: [
+      {
+        id: 'mossformer2_48k', label: 'Quality', sub: 'Full-band 48 kHz, slower',
+        note: 'MossFormer2_SE_48K — ~1–5 min per file. Handles broadband, tonal, and non-stationary noise.',
+      },
+      {
+        id: 'frcrn_16k', label: 'Fast', sub: '16 kHz, quicker',
+        note: 'FRCRN_SE_16K — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.',
+      },
+    ],
+  },
 }
 
-// ClearerVoice Eraser model toggle
-const isClearerVoiceEraser = computed(() => state.selectedPreset === 'clearervoice_eraser')
-const clearervoiceModel = ref(PRESETS.clearervoice_eraser?.clearervoiceModel ?? 'mossformer2_48k')
-function setClearervoiceModel(model) {
-  clearervoiceModel.value = model
-  if (PRESETS.clearervoice_eraser) PRESETS.clearervoice_eraser.clearervoiceModel = model
-}
-
-// Warnings
-const showNoiseEraserAcxWarning = computed(() =>
-  state.selectedPreset === 'noise_eraser' && state.selectedOutputProfile === 'acx'
+// Selected model per preset id, seeded from whatever the preset config carries.
+const selectedModels = ref(
+  Object.fromEntries(
+    Object.entries(MODEL_CHOICES).map(([presetId, choice]) =>
+      [presetId, PRESETS[presetId]?.[choice.configKey] ?? choice.fallback]
+    )
+  )
 )
-const showClearerVoiceAcxWarning = computed(() =>
-  state.selectedPreset === 'clearervoice_eraser' && state.selectedOutputProfile === 'acx'
+
+const modelChoice = computed(() => MODEL_CHOICES[state.selectedPreset] ?? null)
+const selectedModel = computed(() => selectedModels.value[state.selectedPreset] ?? null)
+const selectedModelNote = computed(() =>
+  modelChoice.value?.options.find(o => o.id === selectedModel.value)?.note ?? ''
 )
 
-const presetIcons = {
-  acx_audiobook: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',
-  podcast_ready: '<path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
-  voice_ready: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/><path d="M15.54 8.46a5 5 0 010 7.07"/>',
-  general_clean: '<path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>',
-  noise_eraser: '<path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/><path d="M19 2l-7 7M5 22l7-7" stroke-width="2.5"/>',
-  clearervoice_eraser: '<circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>',
+function setModel(modelId) {
+  const presetId = state.selectedPreset
+  const choice = MODEL_CHOICES[presetId]
+  if (!choice) return
+  selectedModels.value[presetId] = modelId
+  if (PRESETS[presetId]) PRESETS[presetId][choice.configKey] = modelId
 }
+
+// Presets whose output ACX's human reviewers are likely to reject on artifacts,
+// even when the measurements pass.
+const ACX_ARTIFACT_WARNINGS = {
+  noise_eraser: 'ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.',
+  clearervoice_eraser: 'ACX compliance is not recommended for ClearerVoice Eraser output. Enhancement artifacts may cause ACX human review rejection even if measurements pass.',
+}
+
+const acxArtifactWarning = computed(() =>
+  state.selectedOutputProfile === 'acx'
+    ? ACX_ARTIFACT_WARNINGS[state.selectedPreset] ?? ''
+    : ''
+)
 
 function compressionLabel(preset) {
   if (!preset) return ''
@@ -171,8 +215,8 @@ async function handleProcess() {
       fileName: doc.currentFile.name,
       presetId: doc.selectedPreset,
       outputProfileId: doc.selectedOutputProfile,
-      separationModel:    preset === 'noise_eraser'        ? separationModel.value    : undefined,
-      clearervoiceModel:  preset === 'clearervoice_eraser' ? clearervoiceModel.value   : undefined,
+      separationModel:    preset === 'noise_eraser'        ? selectedModels.value.noise_eraser        : undefined,
+      clearervoiceModel:  preset === 'clearervoice_eraser' ? selectedModels.value.clearervoice_eraser : undefined,
     })
 
     // The user can close a document while its job is in flight. Bail rather
@@ -228,8 +272,8 @@ async function handleProcess() {
   <div class="font-['Inter']">
     <!-- Header -->
     <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
-      <div class="text-[15px] font-bold text-[#eaf6f8]">Instant Polish</div>
-      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Audio processing presets</div>
+      <div class="text-[15px] font-bold text-[#eaf6f8]">Master</div>
+      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Preset mastering chains</div>
     </div>
 
     <div class="p-4 flex flex-col gap-[14px]">
@@ -246,9 +290,8 @@ async function handleProcess() {
         >
           <div class="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center shrink-0 transition-colors"
                :style="state.selectedPreset === preset.id ? 'background:rgba(53,211,230,.14)' : 'background:rgba(255,255,255,.04)'">
-            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                 :style="{ color: state.selectedPreset === preset.id ? '#7fe9f6' : 'rgba(255,255,255,.5)' }"
-                 v-html="presetIcons[preset.id]"></svg>
+            <Icon :name="preset.id" :size="16"
+                  :style="{ color: state.selectedPreset === preset.id ? '#7fe9f6' : 'rgba(255,255,255,.5)' }" />
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-[6px]">
@@ -295,60 +338,31 @@ async function handleProcess() {
         <div v-if="!outputProfileLocked && isOverridden" class="mt-[6px] text-[10px] font-bold leading-snug" style="color:#e0b84a">
           Override: using {{ OUTPUT_PROFILES[state.selectedOutputProfile]?.displayName }} profile with {{ currentPreset?.displayName }} preset
         </div>
-        <!-- Noise Eraser + ACX warning -->
-        <div v-if="showNoiseEraserAcxWarning" class="mt-[6px] text-[10px] font-bold leading-snug text-[#ff8a80]">
-          ACX compliance is not recommended for Noise Eraser output. Separation artifacts may cause ACX human review rejection even if measurements pass.
-        </div>
-        <!-- ClearerVoice Eraser + ACX warning -->
-        <div v-if="showClearerVoiceAcxWarning" class="mt-[6px] text-[10px] font-bold leading-snug text-[#ff8a80]">
-          ACX compliance is not recommended for ClearerVoice Eraser output. Enhancement artifacts may cause ACX human review rejection even if measurements pass.
+        <!-- Artifact warning for separation/enhancement presets targeting ACX -->
+        <div v-if="acxArtifactWarning" class="mt-[6px] text-[10px] font-bold leading-snug text-[#ff8a80]">
+          {{ acxArtifactWarning }}
         </div>
       </div>
 
-      <!-- ClearerVoice Eraser: enhancement model toggle -->
-      <div v-if="isClearerVoiceEraser" class="rounded-[12px] p-3 flex flex-col gap-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
-        <div class="text-[11px] font-bold text-[rgba(255,255,255,.4)] uppercase tracking-wider">Enhancement Model</div>
+      <!-- Model choice, for the presets that have one -->
+      <div v-if="modelChoice" class="rounded-[12px] p-3 flex flex-col gap-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
+        <div class="text-[11px] font-bold text-[rgba(255,255,255,.4)] uppercase tracking-wider">{{ modelChoice.title }}</div>
         <div class="flex gap-[6px]">
           <button
-            v-for="m in [{ id: 'mossformer2_48k', label: 'Quality', sub: 'Full-band 48 kHz, slower' }, { id: 'frcrn_16k', label: 'Fast', sub: '16 kHz, quicker' }]"
+            v-for="m in modelChoice.options"
             :key="m.id"
             class="flex-1 text-left px-[10px] py-2 rounded-[10px] border cursor-pointer transition-all"
-            :style="clearervoiceModel === m.id
+            :style="selectedModel === m.id
               ? 'border-color:rgba(53,211,230,.5);background:rgba(53,211,230,.12)'
               : 'border-color:rgba(255,255,255,.07);background:rgba(255,255,255,.02)'"
-            @click="setClearervoiceModel(m.id)"
+            :aria-pressed="selectedModel === m.id"
+            @click="setModel(m.id)"
           >
-            <div class="text-[12px] font-extrabold" :style="{ color: clearervoiceModel === m.id ? '#7fe9f6' : '#eaf6f8' }">{{ m.label }}</div>
-            <div class="text-[10px] font-semibold mt-0.5" :style="{ color: clearervoiceModel === m.id ? '#7fe9f6' : 'rgba(255,255,255,.4)' }">{{ m.sub }}</div>
+            <div class="text-[12px] font-extrabold" :style="{ color: selectedModel === m.id ? '#7fe9f6' : '#eaf6f8' }">{{ m.label }}</div>
+            <div class="text-[10px] font-semibold mt-0.5" :style="{ color: selectedModel === m.id ? '#7fe9f6' : 'rgba(255,255,255,.4)' }">{{ m.sub }}</div>
           </button>
         </div>
-        <div class="text-[10px] font-medium leading-snug text-[rgba(255,255,255,.4)]">
-          <span v-if="clearervoiceModel === 'mossformer2_48k'">MossFormer2_SE_48K — ~1–5 min per file. Handles broadband, tonal, and non-stationary noise.</span>
-          <span v-else>FRCRN_SE_16K — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
-        </div>
-      </div>
-
-      <!-- Noise Eraser: separation model toggle -->
-      <div v-if="isNoiseEraser" class="rounded-[12px] p-3 flex flex-col gap-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
-        <div class="text-[11px] font-bold text-[rgba(255,255,255,.4)] uppercase tracking-wider">Separation Model</div>
-        <div class="flex gap-[6px]">
-          <button
-            v-for="m in [{ id: 'demucs', label: 'Quality', sub: 'Best results, slower' }, { id: 'convtasnet', label: 'Fast', sub: 'Good results, quicker' }]"
-            :key="m.id"
-            class="flex-1 text-left px-[10px] py-2 rounded-[10px] border cursor-pointer transition-all"
-            :style="separationModel === m.id
-              ? 'border-color:rgba(53,211,230,.5);background:rgba(53,211,230,.12)'
-              : 'border-color:rgba(255,255,255,.07);background:rgba(255,255,255,.02)'"
-            @click="setSeparationModel(m.id)"
-          >
-            <div class="text-[12px] font-extrabold" :style="{ color: separationModel === m.id ? '#7fe9f6' : '#eaf6f8' }">{{ m.label }}</div>
-            <div class="text-[10px] font-semibold mt-0.5" :style="{ color: separationModel === m.id ? '#7fe9f6' : 'rgba(255,255,255,.4)' }">{{ m.sub }}</div>
-          </button>
-        </div>
-        <div class="text-[10px] font-medium leading-snug text-[rgba(255,255,255,.4)]">
-          <span v-if="separationModel === 'demucs'">Demucs htdemucs_ft — ~2–10 min per file. Handles severe outdoor noise and non-stationary backgrounds.</span>
-          <span v-else>ConvTasNet WHAM! — ~30 sec – 2 min per file. Good for moderate noise, low-resource environments.</span>
-        </div>
+        <div class="text-[10px] font-medium leading-snug text-[rgba(255,255,255,.4)]">{{ selectedModelNote }}</div>
       </div>
 
       <!-- Preset details -->

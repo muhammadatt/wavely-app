@@ -1,36 +1,77 @@
 <script setup>
+import { computed } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
-import SplitPanel from './panels/SplitPanel.vue'
-import EditPanel from './panels/EditPanel.vue'
-import EffectsPanel from './panels/EffectsPanel.vue'
-import PresetsPanel from './panels/PresetsPanel.vue'
+import { useWindows } from '../composables/useWindows.js'
+import { getCategory, getOperation } from '../ui/registry.js'
+import OperationList from './ui/OperationList.vue'
+import PanelHeader from './ui/PanelHeader.vue'
+import Icon from './ui/Icon.vue'
 
-const { state, setActiveTool } = useEditorState()
+/**
+ * The right-hand rail.
+ *
+ * Two levels: a category list, and the detail view for one operation. Which one
+ * shows is decided entirely by the registry — there is no per-category branch
+ * here any more, and no v-if chain to keep in sync with the toolbar.
+ *
+ * Categories carrying a bespoke `panel` (Split, Presets) render it directly and
+ * skip the list level; they aren't lists of operations.
+ */
+const { state, hasSelection, closeRail, setRailOperation } = useEditorState()
+const { openWindow } = useWindows()
 
-// Re-clicking the active tool was the only way out of here, which is not a
-// thing a panel with no visible close control tells you.
-function close() {
-  if (state.activeTool) setActiveTool(state.activeTool)
+const category = computed(() => getCategory(state.activeTool))
+const operation = computed(() => (state.railOperation ? getOperation(state.railOperation) : null))
+
+function handleSelect(op) {
+  // Surface is a property of the operation, but fixed per category — so every
+  // row in a given list does the same thing and nothing surprises the user.
+  if (op.surface === 'window') openWindow(op.id)
+  else if (op.surface === 'immediate') op.action?.()
+  else setRailOperation(op.id)
 }
 </script>
 
 <template>
-  <div class="w-[280px] shrink-0 relative border-l border-[rgba(255,255,255,.06)] overflow-y-auto" style="background:linear-gradient(180deg,#141922,#0e1116)">
+  <div
+    class="w-[280px] shrink-0 relative border-l border-border-1 overflow-y-auto"
+    style="background:linear-gradient(180deg,#141922,#0e1116)"
+  >
     <button
       class="panel-close absolute top-[14px] right-[14px] z-10 w-6 h-6 rounded-[7px] flex items-center justify-center cursor-pointer"
       title="Close panel (Esc)"
       aria-label="Close panel"
-      @click="close"
+      @click="closeRail"
     >
-      <svg viewBox="0 0 24 24" class="w-3 h-3 fill-none stroke-current" stroke-width="2.5" stroke-linecap="round">
-        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-      </svg>
+      <Icon name="close" :size="12" :stroke-width="2.5" />
     </button>
 
-    <SplitPanel v-if="state.activeTool === 'split'" />
-    <EditPanel v-if="state.activeTool === 'edit'" />
-    <EffectsPanel v-if="state.activeTool === 'effects'" />
-    <PresetsPanel v-if="state.activeTool === 'presets'" />
+    <template v-if="category">
+      <!-- Bespoke panel: owns its own header and body -->
+      <component v-if="category.panel" :is="category.panel" />
+
+      <!-- Detail level -->
+      <template v-else-if="operation">
+        <PanelHeader
+          :title="operation.label"
+          :desc="operation.desc"
+          back
+          :back-label="category.label"
+          @back="setRailOperation(null)"
+        />
+        <component :is="operation.component" />
+      </template>
+
+      <!-- List level -->
+      <template v-else>
+        <PanelHeader :title="category.label" :desc="category.desc" />
+        <OperationList
+          :category-id="category.id"
+          :has-selection="hasSelection"
+          @select="handleSelect"
+        />
+      </template>
+    </template>
   </div>
 </template>
 

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import BaseButton from '../ui/BaseButton.vue'
+import RequirementNotice from '../ui/RequirementNotice.vue'
 
 const { state, hasSelection, performSplit, performSplitAtSelectionEdges, showToast } = useEditorState()
 
@@ -65,9 +66,11 @@ function apply() {
         </div>
       </button>
 
-      <div v-if="mode === 'selection' && !hasSelection" class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed" style="color:#e0b84a;background:rgba(224,184,74,.08);border:1px solid rgba(224,184,74,.32)">
-        Make a selection on the waveform first
-      </div>
+      <RequirementNotice
+        v-if="mode === 'selection'"
+        :met="hasSelection"
+        :reserve-space="false"
+      />
 
       <BaseButton
         class="mt-1" size="lg" block

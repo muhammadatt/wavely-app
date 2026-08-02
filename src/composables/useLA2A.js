@@ -1,8 +1,12 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
+import { useWindows } from './useWindows.js'
 import { applyLA2ARegion, computeLA2AAutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { la2aEffect, LA2A_DEFAULTS } from '../audio/effects/la2aCompressor.js'
+
+// Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
+export const LA2A_WINDOW_ID = 'opto-smooth'
 
 // Singleton reactive state shared between the sidebar trigger and the LA-2A modal
 const la2aMode = ref(LA2A_DEFAULTS.mode)
@@ -61,6 +65,7 @@ function measurementParams() {
 
 export function useLA2A() {
   const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
+  const { openWindow, closeWindow } = useWindows()
 
   function initChain() {
     const ctx = getAudioContext()
@@ -251,12 +256,15 @@ export function useLA2A() {
     }
   }
 
+  // Open/close delegate to the window manager, which owns the open set and the
+  // stacking order. Kept on the composable so call sites don't need to know the
+  // registry id.
   function openModal() {
-    state.la2aModalOpen = true
+    openWindow(LA2A_WINDOW_ID)
   }
 
   function closeModal() {
-    state.la2aModalOpen = false
+    closeWindow(LA2A_WINDOW_ID)
   }
 
   return {

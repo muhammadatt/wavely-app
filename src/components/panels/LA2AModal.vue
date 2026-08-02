@@ -6,8 +6,10 @@ import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
-import FloatingPluginPanel from './FloatingPluginPanel.vue'
+import FloatingWindow from './FloatingWindow.vue'
 import BaseButton from '../ui/BaseButton.vue'
+
+defineProps({ z: { type: Number, default: 500 } })
 
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
@@ -39,13 +41,16 @@ const MODE_OPTIONS = [
   { value: 'limit', label: 'LIMIT' },
 ]
 
+// The shell removes itself from the window manager; this only has to stop the
+// preview chain and the meter loop.
 function close() {
   teardown()
-  closeModal()
 }
 
 async function applyAndClose() {
   await apply()
+  // apply() already disables the preview, but the meter loop is still running.
+  teardown()
   closeModal()
 }
 
@@ -76,7 +81,10 @@ function selectMockPreset(name) {
 </script>
 
 <template>
-  <FloatingPluginPanel
+  <FloatingWindow
+    window-id="opto-smooth"
+    variant="device"
+    :z="z"
     :width="640"
     :accent="ACCENT"
     brand-lead="OPTO"
@@ -214,5 +222,5 @@ function selectMockPreset(name) {
         {{ !la2aPreview ? 'Turn on OptoSmooth to apply' : hasSelection ? 'Apply compression' : 'Make a selection on the waveform to apply' }}
       </BaseButton>
     </div>
-  </FloatingPluginPanel>
+  </FloatingWindow>
 </template>

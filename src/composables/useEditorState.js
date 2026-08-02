@@ -74,10 +74,10 @@ const appState = reactive({
   clipboard: null,
 
   // UI chrome — persists across document switches
-  activeTool: null, // 'split' | 'edit' | 'effects' | 'presets' | null
-  contextPanelOpen: false,
-  la2aModalOpen: false,
-  fet1176ModalOpen: false,
+  activeTool: null, // 'split' | 'edit' | 'effects' | 'presets' | null — also *is* "rail open"
+  // Operation id the rail has drilled into, or null for the category list.
+  railOperation: null,
+  commandPaletteOpen: false,
   exportDialogOpen: false,
   // Document ids the export dialog should open with pre-checked. Set when
   // export is invoked from a bulk selection; null means "just the active one".
@@ -535,14 +535,43 @@ export function useEditorState() {
   }
 
   // ── Tool ───────────────────────────────────────────────────────────────────
+  // `activeTool` alone says whether the rail is open — a separate
+  // contextPanelOpen flag was a second way to express the same thing, and the
+  // two could disagree.
   function setActiveTool(tool) {
-    if (appState.activeTool === tool) {
-      appState.activeTool = null
-      appState.contextPanelOpen = false
-    } else {
-      appState.activeTool = tool
-      appState.contextPanelOpen = true
-    }
+    const next = appState.activeTool === tool ? null : tool
+    appState.activeTool = next
+    // Switching categories always lands on that category's list, never on a
+    // detail view left over from last time.
+    appState.railOperation = null
+  }
+
+  function closeRail() {
+    appState.activeTool = null
+    appState.railOperation = null
+  }
+
+  /** Drill into an operation's detail view inside the rail. */
+  function setRailOperation(operationId) {
+    appState.railOperation = operationId
+  }
+
+  /**
+   * Open the rail directly at one operation, switching category if needed.
+   * Used by the command palette, which addresses operations, not categories.
+   */
+  function openRailOperation(categoryId, operationId) {
+    appState.activeTool = categoryId
+    appState.railOperation = operationId
+  }
+
+  // ── Command palette ────────────────────────────────────────────────────────
+  function openCommandPalette() {
+    appState.commandPaletteOpen = true
+  }
+
+  function closeCommandPalette() {
+    appState.commandPaletteOpen = false
   }
 
   // ── Processing (per document) ──────────────────────────────────────────────
@@ -674,6 +703,11 @@ export function useEditorState() {
 
     // Tool
     setActiveTool,
+    closeRail,
+    setRailOperation,
+    openRailOperation,
+    openCommandPalette,
+    closeCommandPalette,
 
     // Processing
     startProcessing,

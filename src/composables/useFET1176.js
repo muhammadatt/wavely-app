@@ -1,8 +1,12 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
+import { useWindows } from './useWindows.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { fet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compressor.js'
+
+// Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
+export const FET1176_WINDOW_ID = 'fet-punch'
 
 // Singleton reactive state shared between the sidebar trigger and the modal
 const fetInput = ref(FET1176_DEFAULTS.inputDrive)
@@ -70,6 +74,7 @@ function measurementParams() {
 
 export function useFET1176() {
   const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
+  const { openWindow, closeWindow } = useWindows()
 
   function initChain() {
     const ctx = getAudioContext()
@@ -263,12 +268,15 @@ export function useFET1176() {
     }
   }
 
+  // Open/close delegate to the window manager, which owns the open set and the
+  // stacking order. Kept on the composable so call sites don't need to know the
+  // registry id.
   function openModal() {
-    state.fet1176ModalOpen = true
+    openWindow(FET1176_WINDOW_ID)
   }
 
   function closeModal() {
-    state.fet1176ModalOpen = false
+    closeWindow(FET1176_WINDOW_ID)
   }
 
   return {

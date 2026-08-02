@@ -1,6 +1,7 @@
 <script setup>
 import { useEditorState } from '../../composables/useEditorState.js'
 import BaseButton from '../ui/BaseButton.vue'
+import RequirementNotice from '../ui/RequirementNotice.vue'
 
 const { hasSelection, performSilence, showToast } = useEditorState()
 
@@ -13,7 +14,7 @@ function apply() {
 
 <template>
   <div class="font-['Inter']">
-    <!-- Header lives in EditPanel, which owns the Trim/Silence/Fade/Volume group -->
+    <!-- Header lives in ContextPanel, which renders it from the registry entry -->
     <div class="p-4 flex flex-col gap-[10px]">
       <!-- Preview graphic -->
       <div class="rounded-[12px] p-3" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)">
@@ -30,9 +31,7 @@ function apply() {
         </p>
       </div>
 
-      <div v-if="!hasSelection" class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed" style="color:#e0b84a;background:rgba(224,184,74,.08);border:1px solid rgba(224,184,74,.32)">
-        Make a selection on the waveform first
-      </div>
+      <RequirementNotice :met="hasSelection" :reserve-space="false" />
 
       <BaseButton
         class="mt-1" size="lg" block

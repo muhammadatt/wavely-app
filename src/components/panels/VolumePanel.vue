@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import BaseButton from '../ui/BaseButton.vue'
+import RequirementNotice from '../ui/RequirementNotice.vue'
 import { adjustVolumeRegion, computePeakCache } from '../../audio/processing.js'
 
 const {
@@ -45,7 +46,7 @@ async function applyVolume() {
 
 <template>
   <div class="font-['Inter']">
-    <!-- Header lives in EditPanel, which owns the Trim/Silence/Fade/Volume group -->
+    <!-- Header lives in ContextPanel, which renders it from the registry entry -->
     <!-- Body -->
     <div class="px-4 py-4 flex flex-col gap-4">
 
@@ -105,12 +106,7 @@ async function applyVolume() {
         Apply Volume Change
       </BaseButton>
 
-      <!-- No-selection warning -->
-      <div class="text-[11px] font-semibold rounded-[12px] px-3 py-[10px] text-center leading-relaxed transition-opacity duration-700"
-           style="color:#e0b84a;background:rgba(224,184,74,.08);border:1px solid rgba(224,184,74,.32)"
-           :class="hasSelection ? 'opacity-0' : 'opacity-100'">
-        Make a selection on the waveform to apply
-      </div>
+      <RequirementNotice :met="hasSelection" message="Make a selection on the waveform to apply" />
     </div>
   </div>
 </template>
