@@ -8,12 +8,13 @@ import {
 } from '../../audio/presets.js'
 import { processAudioOnServer } from '../../api/processing.js'
 import { computePeakCache } from '../../audio/processing.js'
+import { getTimelineDuration } from '../../audio/operations.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
 import BaseButton from '../ui/BaseButton.vue'
 
 const {
-  state, setPreset, setOutputProfile, setProcessingReport, showToast,
-  getAudioContext, replaceRegion, setPeakCache, totalDuration,
+  state, appState, setPreset, setOutputProfile, setProcessingReport, showToast,
+  getAudioContext, replaceRegion, setPeakCache, getDocument,
   startProcessing, updateProcessingProgress, updateProcessingStage, endProcessing,
 } = useEditorState()
 
@@ -127,9 +128,15 @@ function channelLabel(preset) {
 }
 
 async function handleProcess() {
-  if (!state.currentFile || state.isProcessing) return
+  // Bind the whole job to the document that started it. Processing no longer
+  // blocks the app, so the user can switch tabs mid-job — every write below
+  // has to land on this document, not on whichever one is active when the
+  // server finally answers.
+  const docId = appState.activeDocumentId
+  const doc = getDocument(docId)
+  if (!doc || !doc.currentFile || doc.isProcessing) return
 
-  const preset = state.selectedPreset
+  const preset = doc.selectedPreset
   let stages, heading
   if (preset === 'noise_eraser') {
     stages  = NE_PROCESSING_STAGES
@@ -142,69 +149,77 @@ async function handleProcess() {
     heading = 'Making your audio shine'
   }
 
-  startProcessing(heading)
+  startProcessing(heading, docId)
 
   // Fire the first stage immediately (synchronously) so it's visible right away
-  updateProcessingStage(stages[0].message)
-  updateProcessingProgress(stages[0].progress)
+  updateProcessingStage(stages[0].message, docId)
+  updateProcessingProgress(stages[0].progress, docId)
 
   // Queue the remaining stages
   const stageTimers = stages.slice(1).map(({ message, progress, delay }) =>
     setTimeout(() => {
-      updateProcessingStage(message)
-      updateProcessingProgress(progress)
+      updateProcessingStage(message, docId)
+      updateProcessingProgress(progress, docId)
     }, delay)
   )
 
   try {
     const { report, audioBlob, peaks } = await processAudioOnServer({
-      segments: state.segments,
-      sampleRate: state.currentFile.sampleRate,
-      channels: state.currentFile.channels,
-      fileName: state.currentFile.name,
-      presetId: state.selectedPreset,
-      outputProfileId: state.selectedOutputProfile,
+      segments: doc.segments,
+      sampleRate: doc.currentFile.sampleRate,
+      channels: doc.currentFile.channels,
+      fileName: doc.currentFile.name,
+      presetId: doc.selectedPreset,
+      outputProfileId: doc.selectedOutputProfile,
       separationModel:    preset === 'noise_eraser'        ? separationModel.value    : undefined,
       clearervoiceModel:  preset === 'clearervoice_eraser' ? clearervoiceModel.value   : undefined,
     })
+
+    // The user can close a document while its job is in flight. Bail rather
+    // than writing results into a detached object and leaking its buffers back
+    // into the pool.
+    if (!getDocument(docId)) return
 
     // Decode the processed audio blob into an AudioBuffer
     const ctx = getAudioContext()
     const arrayBuffer = await audioBlob.arrayBuffer()
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
 
-    // Replace the entire timeline with the processed audio
-    const dur = totalDuration.value
-    const bufferId = replaceRegion(0, dur, audioBuffer)
+    // Replace that document's entire timeline with the processed audio
+    const dur = getTimelineDuration(doc.segments)
+    const bufferId = replaceRegion(0, dur, audioBuffer, docId)
 
     // Sync file metadata to reflect the processed audio properties.
     // Server-side presets can change channel count (e.g. Noise Eraser → mono)
     // and sample rate. Without this, export/render loops use the stale original
     // channel count and crash with IndexSizeError when calling getChannelData(1)
     // on a mono AudioBuffer.
-    state.currentFile.channels = audioBuffer.numberOfChannels
-    state.currentFile.sampleRate = audioBuffer.sampleRate
-    state.currentFile.duration = audioBuffer.duration
+    doc.currentFile.channels = audioBuffer.numberOfChannels
+    doc.currentFile.sampleRate = audioBuffer.sampleRate
+    doc.currentFile.duration = audioBuffer.duration
 
     // Compute peak cache for the new buffer
     const cache = await computePeakCache(audioBuffer, 256)
     setPeakCache(bufferId, cache)
 
-    // Set the processing report
-    setProcessingReport(report)
+    setProcessingReport(report, docId)
 
+    // Name the file in the toast — with several documents open, "Processing
+    // complete" alone doesn't say which one finished.
+    const suffix = appState.documents.length > 1 ? ` — ${doc.name}` : ''
     if (report.acx_certification) {
       const label = report.acx_certification.certificate === 'pass' ? 'PASS' : 'FAIL'
-      showToast(`Processing complete — ACX certification: ${label}`)
+      showToast(`ACX certification: ${label}${suffix}`)
     } else {
-      showToast('Processing complete')
+      showToast(`Processing complete${suffix}`)
     }
   } catch (err) {
     console.error('Server processing failed:', err)
-    showToast(err.message || 'Processing failed')
+    const suffix = appState.documents.length > 1 ? ` — ${doc.name}` : ''
+    showToast((err.message || 'Processing failed') + suffix)
   } finally {
     stageTimers.forEach(clearTimeout)
-    endProcessing()
+    endProcessing(docId)
   }
 }
 </script>

@@ -2,26 +2,45 @@ import { renderRegionToBuffer } from './processing.js'
 import { getTimelineDuration } from './operations.js'
 
 /**
- * Render the entire timeline to a flat PCM buffer and encode as WAV.
- * Triggers a file download.
+ * Render a timeline to a WAV ArrayBuffer.
+ *
+ * Kept separate from downloading so the same render feeds a single-file
+ * download, a zip entry, or anything else that needs bytes.
+ *
+ * @returns {ArrayBuffer|null} null when the timeline is empty
  */
-export function exportAsWav(segments, sampleRate, channels, fileName) {
+export function renderTimelineToWav(segments, sampleRate, channels) {
   const totalDuration = getTimelineDuration(segments)
-  if (totalDuration === 0) return
+  if (totalDuration === 0) return null
 
   const channelData = renderRegionToBuffer(segments, 0, totalDuration, sampleRate, channels)
-  const wavBuffer = encodeWav(channelData, sampleRate, channels)
+  return encodeWav(channelData, sampleRate, channels)
+}
 
-  // Trigger download
-  const blob = new Blob([wavBuffer], { type: 'audio/wav' })
+/** Swap a filename's extension for .wav. */
+export function toWavFileName(fileName) {
+  return fileName.replace(/\.[^.]+$/, '') + '.wav'
+}
+
+/** Trigger a browser download for a Blob. */
+export function downloadBlob(blob, fileName) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = fileName.replace(/\.[^.]+$/, '') + '.wav'
+  a.download = fileName
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+/**
+ * Render the entire timeline and download it as WAV.
+ */
+export function exportAsWav(segments, sampleRate, channels, fileName) {
+  const wavBuffer = renderTimelineToWav(segments, sampleRate, channels)
+  if (!wavBuffer) return
+  downloadBlob(new Blob([wavBuffer], { type: 'audio/wav' }), toWavFileName(fileName))
 }
 
 /**

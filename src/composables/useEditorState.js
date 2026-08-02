@@ -1,8 +1,7 @@
-import { reactive, computed, shallowRef, ref, toRaw } from 'vue'
+import { reactive, computed, ref } from 'vue'
 import { v4 as uuidv4 } from 'uuid'
 import {
   cloneSegments,
-  recalcOutputStarts,
   getTimelineDuration,
   deleteRegion,
   trimToSelection,
@@ -14,33 +13,43 @@ import {
   insertSegments,
   replaceRegionWithBuffer,
 } from '../audio/operations.js'
+import { stopPlayback } from '../audio/playback.js'
 import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
 
 const UNDO_STACK_CAP = 50
 
-// Singleton state
-const state = reactive({
-  // Timeline
-  segments: [],
+/**
+ * Multi-document model.
+ *
+ * A *document* is one timeline over one or more source buffers, with its own
+ * selection, playhead, undo history, preset choice and processing job. The app
+ * holds an ordered list of documents plus one active id.
+ *
+ * `state` (exported below) is a Proxy that forwards per-document fields to the
+ * active document and everything else to `appState`. That keeps the shape every
+ * component already reads — `state.segments`, `state.currentFile`, … — working
+ * unchanged while the data underneath became per-document.
+ */
 
-  // Selection
-  selection: null, // { start, end } or null
+// Fields that live on a document rather than on the app.
+const DOC_FIELDS = new Set([
+  'segments', 'selection', 'playhead', 'isPlaying', 'isLooping',
+  'currentFile', 'selectedPreset', 'selectedOutputProfile', 'processingReport',
+  'isProcessing', 'processingMessage', 'processingStage', 'processingProgress',
+  'undoCount', 'redoCount', 'status', 'name',
+])
 
-  // Playhead
+// Returned for document fields when no document is open. The empty segments
+// array is shared and never mutated — handing out a fresh [] on every read
+// would retrigger every watcher that depends on it.
+const EMPTY_SEGMENTS = Object.freeze([])
+const DOC_FIELD_FALLBACKS = {
+  segments: EMPTY_SEGMENTS,
+  selection: null,
   playhead: 0,
   isPlaying: false,
   isLooping: false,
-
-  // Clipboard
-  clipboard: null,
-
-  // File info
-  currentFile: null, // { name, duration, sampleRate, channels }
-
-  // UI state
-  // 'edit' covers trim / silence / fade / volume; EditPanel owns which of those
-  // is showing.
-  activeTool: null, // 'split' | 'edit' | 'effects' | 'presets' | null
+  currentFile: null,
   selectedPreset: 'general_clean',
   selectedOutputProfile: 'podcast',
   processingReport: null,
@@ -48,38 +57,126 @@ const state = reactive({
   processingMessage: '',
   processingStage: '',
   processingProgress: 0,
+  undoCount: 0,
+  redoCount: 0,
+  status: 'empty',
+  name: '',
+}
+
+// App-level state — everything that is not per-document.
+const appState = reactive({
+  documents: [],
+  activeDocumentId: null,
+
+  // Clipboard is deliberately app-level: copying a region in one document and
+  // pasting it into another is a real workflow (lifting room tone between
+  // chapters), and it falls out for free by keeping this global.
+  clipboard: null,
+
+  // UI chrome — persists across document switches
+  activeTool: null, // 'split' | 'edit' | 'effects' | 'presets' | null
   contextPanelOpen: false,
   la2aModalOpen: false,
   fet1176ModalOpen: false,
+  exportDialogOpen: false,
+  // Document ids the export dialog should open with pre-checked. Set when
+  // export is invoked from a bulk selection; null means "just the active one".
+  exportPreselection: null,
+  filesPanelOpen: false,
   toasts: [],
 })
 
-// Buffer pool — Map<string, AudioBuffer>
-// Using a plain Map since AudioBuffers can't be reactive (transferable objects)
+// Buffer pool — Map<bufferId, AudioBuffer>. App-level and shared across
+// documents; ownership is tracked separately so closing a document can free
+// the buffers no other document still references.
 const bufferPool = new Map()
 
-// Peak caches — Map<string, { samplesPerPx, peaks }>
+// Peak caches — Map<bufferId, { samplesPerPx, peaks }>
 const peakCaches = new Map()
-// Incremented every time a new peak cache entry is stored so watchers can react
 const peakCacheVersion = ref(0)
 
-// Undo/Redo stacks — plain arrays; reactive counters drive canUndo/canRedo
-const undoStack = []
-const redoStack = []
-const undoCount = ref(0)
-const redoCount = ref(0)
+// Map<docId, Set<bufferId>> — which buffers each document brought into the pool.
+const docBuffers = new Map()
+
+// Map<docId, { undo: Segment[][], redo: Segment[][] }>
+// Held outside the reactive tree: these are up to 50 full segment-array clones
+// per document, and deep-reactive wrapping them is pure cost — nothing renders
+// from history directly. The reactive `undoCount`/`redoCount` on the document
+// are what drive canUndo/canRedo.
+const docHistory = new Map()
+
+// Sticky preset choice. A narrator mastering 20 chapters wants one preset
+// across all of them, so a new document inherits the last explicit choice
+// rather than resetting to the global default.
+let lastPreset = 'general_clean'
+let lastOutputProfile = 'podcast'
 
 // AudioContext — created on first user gesture
 let audioContext = null
+
+const activeDocument = computed(
+  () => appState.documents.find(d => d.id === appState.activeDocumentId) ?? null
+)
+
+// The compatibility proxy described above.
+const state = new Proxy({}, {
+  get(_target, key) {
+    if (DOC_FIELDS.has(key)) {
+      const doc = activeDocument.value
+      return doc ? doc[key] : DOC_FIELD_FALLBACKS[key]
+    }
+    return appState[key]
+  },
+  set(_target, key, value) {
+    if (DOC_FIELDS.has(key)) {
+      const doc = activeDocument.value
+      if (doc) doc[key] = value
+      return true
+    }
+    appState[key] = value
+    return true
+  },
+  has(_target, key) {
+    return DOC_FIELDS.has(key) || key in appState
+  },
+  ownKeys() {
+    return [...new Set([...Object.keys(appState), ...DOC_FIELDS])]
+  },
+  getOwnPropertyDescriptor() {
+    return { enumerable: true, configurable: true }
+  },
+})
+
+function historyFor(docId) {
+  let h = docHistory.get(docId)
+  if (!h) {
+    h = { undo: [], redo: [] }
+    docHistory.set(docId, h)
+  }
+  return h
+}
+
+function buffersFor(docId) {
+  let s = docBuffers.get(docId)
+  if (!s) {
+    s = new Set()
+    docBuffers.set(docId, s)
+  }
+  return s
+}
 
 export function useEditorState() {
   // Computed
   const totalDuration = computed(() => getTimelineDuration(state.segments))
   const hasSelection = computed(() => state.selection !== null)
-  const hasClipboard = computed(() => state.clipboard !== null && state.clipboard.length > 0)
-  const canUndo = computed(() => undoCount.value > 0)
-  const canRedo = computed(() => redoCount.value > 0)
+  const hasClipboard = computed(() => appState.clipboard !== null && appState.clipboard.length > 0)
+  const canUndo = computed(() => state.undoCount > 0)
+  const canRedo = computed(() => state.redoCount > 0)
   const hasFile = computed(() => state.currentFile !== null)
+
+  const documents = computed(() => appState.documents)
+  const documentCount = computed(() => appState.documents.length)
+  const activeDoc = activeDocument
 
   // AudioContext management
   function getAudioContext() {
@@ -92,46 +189,56 @@ export function useEditorState() {
     return audioContext
   }
 
-  // Undo support
+  // ── Undo/Redo ──────────────────────────────────────────────────────────────
   function pushUndo() {
-    undoStack.push(cloneSegments(state.segments))
-    if (undoStack.length > UNDO_STACK_CAP) {
-      undoStack.shift()
-    }
-    // Clear redo on new action
-    redoStack.length = 0
-    undoCount.value = undoStack.length
-    redoCount.value = 0
+    const doc = activeDocument.value
+    if (!doc) return
+    const h = historyFor(doc.id)
+    h.undo.push(cloneSegments(doc.segments))
+    if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
+    h.redo.length = 0
+    doc.undoCount = h.undo.length
+    doc.redoCount = 0
   }
 
   function undo() {
-    if (undoStack.length === 0) return
-    redoStack.push(cloneSegments(state.segments))
-    state.segments = undoStack.pop()
-    state.selection = null
-    undoCount.value = undoStack.length
-    redoCount.value = redoStack.length
+    const doc = activeDocument.value
+    if (!doc) return
+    const h = historyFor(doc.id)
+    if (h.undo.length === 0) return
+    h.redo.push(cloneSegments(doc.segments))
+    doc.segments = h.undo.pop()
+    doc.selection = null
+    doc.undoCount = h.undo.length
+    doc.redoCount = h.redo.length
   }
 
   function redo() {
-    if (redoStack.length === 0) return
-    undoStack.push(cloneSegments(state.segments))
-    state.segments = redoStack.pop()
-    state.selection = null
-    undoCount.value = undoStack.length
-    redoCount.value = redoStack.length
+    const doc = activeDocument.value
+    if (!doc) return
+    const h = historyFor(doc.id)
+    if (h.redo.length === 0) return
+    h.undo.push(cloneSegments(doc.segments))
+    doc.segments = h.redo.pop()
+    doc.selection = null
+    doc.undoCount = h.undo.length
+    doc.redoCount = h.redo.length
   }
 
-  // Buffer pool management
-  function addBuffer(id, buffer) {
+  // ── Buffer pool ────────────────────────────────────────────────────────────
+  /**
+   * Add a buffer to the pool, owned by `docId` (defaults to the active
+   * document). Ownership decides who can free it on close.
+   */
+  function addBuffer(id, buffer, docId = appState.activeDocumentId) {
     bufferPool.set(id, buffer)
+    if (docId) buffersFor(docId).add(id)
   }
 
   function getBuffer(id) {
     return bufferPool.get(id)
   }
 
-  // Peak cache management
   function setPeakCache(bufferId, cache) {
     peakCaches.set(bufferId, cache)
     peakCacheVersion.value++
@@ -141,10 +248,10 @@ export function useEditorState() {
     return peakCaches.get(bufferId)
   }
 
-  // File loading
-  function loadFile(name, audioBuffer) {
+  // ── Documents ──────────────────────────────────────────────────────────────
+  function makeDocument(name, audioBuffer) {
+    const docId = uuidv4()
     const bufferId = uuidv4()
-    addBuffer(bufferId, audioBuffer)
 
     const segment = {
       id: uuidv4(),
@@ -155,33 +262,136 @@ export function useEditorState() {
       outputStart: 0,
     }
 
-    state.segments = [segment]
-    state.selection = null
-    state.playhead = 0
-    state.isPlaying = false
-    state.clipboard = null
-    state.currentFile = {
+    return {
+      id: docId,
+      bufferId,
       name,
-      duration: audioBuffer.duration,
-      sampleRate: audioBuffer.sampleRate,
-      channels: audioBuffer.numberOfChannels,
+      status: 'ready', // 'ready' | 'processing' | 'error'
+      segments: [segment],
+      selection: null,
+      playhead: 0,
+      isPlaying: false,
+      isLooping: false,
+      currentFile: {
+        name,
+        duration: audioBuffer.duration,
+        sampleRate: audioBuffer.sampleRate,
+        channels: audioBuffer.numberOfChannels,
+      },
+      selectedPreset: lastPreset,
+      selectedOutputProfile: lastOutputProfile,
+      processingReport: null,
+      isProcessing: false,
+      processingMessage: '',
+      processingStage: '',
+      processingProgress: 0,
+      undoCount: 0,
+      redoCount: 0,
     }
-    state.activeTool = null
-    state.contextPanelOpen = false
-    state.selectedPreset = 'general_clean'
-    state.selectedOutputProfile = 'podcast'
-    state.processingReport = null
-
-    // Clear undo/redo
-    undoStack.length = 0
-    redoStack.length = 0
-    undoCount.value = 0
-    redoCount.value = 0
-
-    return bufferId
   }
 
-  // Edit operations — all push undo first
+  /**
+   * Create a document from a decoded buffer and make it active.
+   * @returns {{ docId: string, bufferId: string }}
+   */
+  function createDocument(name, audioBuffer, { activate = true } = {}) {
+    const doc = makeDocument(name, audioBuffer)
+    appState.documents.push(doc)
+
+    bufferPool.set(doc.bufferId, audioBuffer)
+    buffersFor(doc.id).add(doc.bufferId)
+    historyFor(doc.id)
+
+    if (activate) setActiveDocument(doc.id)
+    return { docId: doc.id, bufferId: doc.bufferId }
+  }
+
+  function getDocument(docId) {
+    return appState.documents.find(d => d.id === docId) ?? null
+  }
+
+  function setActiveDocument(docId) {
+    if (appState.activeDocumentId === docId) return
+    // Playback is a module singleton keyed to whatever segments were scheduled;
+    // leaving it running would play the old document over the new one.
+    stopPlayback()
+    const prev = activeDocument.value
+    if (prev) prev.isPlaying = false
+    appState.activeDocumentId = docId
+  }
+
+  /** True when the document has edits that closing it would discard. */
+  function documentHasUnsavedWork(docId) {
+    const h = docHistory.get(docId)
+    return !!h && h.undo.length > 0
+  }
+
+  function closeDocument(docId) {
+    const idx = appState.documents.findIndex(d => d.id === docId)
+    if (idx === -1) return
+
+    // Free buffers this document owns that no *other* document references.
+    // Checking the other documents' sets directly rather than keeping a
+    // refcount avoids a second structure that could drift out of sync, and the
+    // scan is trivial at these document counts.
+    const owned = docBuffers.get(docId)
+    if (owned) {
+      for (const bufferId of owned) {
+        let stillUsed = false
+        for (const [otherDocId, set] of docBuffers) {
+          if (otherDocId !== docId && set.has(bufferId)) { stillUsed = true; break }
+        }
+        if (!stillUsed) {
+          bufferPool.delete(bufferId)
+          peakCaches.delete(bufferId)
+        }
+      }
+    }
+    docBuffers.delete(docId)
+    docHistory.delete(docId)
+
+    const wasActive = appState.activeDocumentId === docId
+    appState.documents.splice(idx, 1)
+
+    if (wasActive) {
+      stopPlayback()
+      // Prefer the tab that slid into this slot, else the one before it.
+      const next = appState.documents[idx] ?? appState.documents[idx - 1] ?? null
+      appState.activeDocumentId = next?.id ?? null
+    }
+    peakCacheVersion.value++
+  }
+
+  function closeDocuments(docIds) {
+    for (const id of [...docIds]) closeDocument(id)
+  }
+
+  function renameDocument(docId, name) {
+    const doc = getDocument(docId)
+    if (!doc || !name.trim()) return
+    doc.name = name.trim()
+    if (doc.currentFile) doc.currentFile.name = name.trim()
+  }
+
+  function reorderDocument(fromIndex, toIndex) {
+    const docs = appState.documents
+    if (fromIndex < 0 || fromIndex >= docs.length) return
+    const clamped = Math.max(0, Math.min(toIndex, docs.length - 1))
+    const [moved] = docs.splice(fromIndex, 1)
+    docs.splice(clamped, 0, moved)
+  }
+
+  /** Step through documents by offset, wrapping at both ends. */
+  function cycleDocument(offset) {
+    const docs = appState.documents
+    if (docs.length < 2) return
+    const idx = docs.findIndex(d => d.id === appState.activeDocumentId)
+    if (idx === -1) return
+    const next = (idx + offset + docs.length) % docs.length
+    setActiveDocument(docs[next].id)
+  }
+
+  // ── Edit operations — all push undo first ──────────────────────────────────
   function performTrimToSelection() {
     if (!state.selection) return
     pushUndo()
@@ -228,20 +438,21 @@ export function useEditorState() {
     state.segments = segs
   }
 
+  function segmentsInRange(segments, start, end) {
+    let split = splitSegmentsAtTime(segments, start)
+    split = splitSegmentsAtTime(split, end)
+    return split.filter(seg => {
+      const segEnd = seg.outputStart + (seg.sourceBuffer === null ? seg.duration : seg.sourceEnd - seg.sourceStart)
+      return seg.outputStart >= start && segEnd <= end
+    })
+  }
+
   function performCut() {
     if (!state.selection) return
     pushUndo()
     const { start, end } = state.selection
-    // Split at both boundaries to isolate selection segments
-    let split = splitSegmentsAtTime(state.segments, start)
-    split = splitSegmentsAtTime(split, end)
-    // Save inner segments to clipboard (cloned, outputStart relative to selection start)
-    const inner = split.filter(seg => {
-      const segEnd = seg.outputStart + (seg.sourceBuffer === null ? seg.duration : seg.sourceEnd - seg.sourceStart)
-      return seg.outputStart >= start && segEnd <= end
-    })
-    state.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
-    // Delete the region from timeline
+    const inner = segmentsInRange(state.segments, start, end)
+    appState.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
     state.segments = deleteRegion(state.segments, start, end)
     state.selection = null
     // Cutting the tail can leave the playhead past the end of the shortened
@@ -253,32 +464,47 @@ export function useEditorState() {
   function performCopy() {
     if (!state.selection) return
     const { start, end } = state.selection
-    let split = splitSegmentsAtTime(state.segments, start)
-    split = splitSegmentsAtTime(split, end)
-    const inner = split.filter(seg => {
-      const segEnd = seg.outputStart + (seg.sourceBuffer === null ? seg.duration : seg.sourceEnd - seg.sourceStart)
-      return seg.outputStart >= start && segEnd <= end
-    })
-    state.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
+    const inner = segmentsInRange(state.segments, start, end)
+    appState.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
   }
 
   function performPaste(position) {
-    if (!state.clipboard) return
+    const doc = activeDocument.value
+    if (!appState.clipboard || !doc) return
     pushUndo()
-    state.segments = insertSegments(state.segments, position, state.clipboard)
+    // Pasting across documents brings in segments whose buffers belong to the
+    // source document. Claim shared ownership so closing that document doesn't
+    // free a buffer this one is now rendering from.
+    const owned = buffersFor(doc.id)
+    for (const seg of appState.clipboard) {
+      if (!seg.sourceBufferId) continue
+      owned.add(seg.sourceBufferId)
+      if (!bufferPool.has(seg.sourceBufferId) && seg.sourceBuffer) {
+        bufferPool.set(seg.sourceBufferId, seg.sourceBuffer)
+      }
+    }
+    state.segments = insertSegments(state.segments, position, appState.clipboard)
   }
 
-  function replaceRegion(start, end, newBuffer) {
-    pushUndo()
+  function replaceRegion(start, end, newBuffer, docId = appState.activeDocumentId) {
+    const doc = getDocument(docId)
+    if (!doc) return null
+    // Undo must land on the document being modified, which is not necessarily
+    // the active one — a preset job can finish after the user switched tabs.
+    const h = historyFor(doc.id)
+    h.undo.push(cloneSegments(doc.segments))
+    if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
+    h.redo.length = 0
+    doc.undoCount = h.undo.length
+    doc.redoCount = 0
+
     const bufferId = uuidv4()
-    addBuffer(bufferId, newBuffer)
-    state.segments = replaceRegionWithBuffer(
-      state.segments, start, end, newBuffer, bufferId
-    )
+    addBuffer(bufferId, newBuffer, doc.id)
+    doc.segments = replaceRegionWithBuffer(doc.segments, start, end, newBuffer, bufferId)
     return bufferId
   }
 
-  // Selection
+  // ── Selection ──────────────────────────────────────────────────────────────
   function setSelection(start, end) {
     if (start === end) {
       state.selection = null
@@ -299,7 +525,7 @@ export function useEditorState() {
     state.selection = { start: 0, end: dur }
   }
 
-  // Playhead
+  // ── Playhead ───────────────────────────────────────────────────────────────
   function setPlayhead(time) {
     state.playhead = Math.max(0, Math.min(time, getTimelineDuration(state.segments)))
   }
@@ -308,67 +534,84 @@ export function useEditorState() {
     state.isLooping = !state.isLooping
   }
 
-  // Tool
+  // ── Tool ───────────────────────────────────────────────────────────────────
   function setActiveTool(tool) {
-    if (state.activeTool === tool) {
-      state.activeTool = null
-      state.contextPanelOpen = false
+    if (appState.activeTool === tool) {
+      appState.activeTool = null
+      appState.contextPanelOpen = false
     } else {
-      state.activeTool = tool
-      state.contextPanelOpen = true
+      appState.activeTool = tool
+      appState.contextPanelOpen = true
     }
   }
 
-  // Processing state
-  function startProcessing(message) {
-    state.isProcessing = true
-    state.processingMessage = message
-    state.processingProgress = 0
+  // ── Processing (per document) ──────────────────────────────────────────────
+  function startProcessing(message, docId = appState.activeDocumentId) {
+    const doc = getDocument(docId)
+    if (!doc) return
+    doc.isProcessing = true
+    doc.status = 'processing'
+    doc.processingMessage = message
+    doc.processingStage = ''
+    doc.processingProgress = 0
   }
 
-  function updateProcessingProgress(progress) {
-    state.processingProgress = progress
+  function updateProcessingProgress(progress, docId = appState.activeDocumentId) {
+    const doc = getDocument(docId)
+    if (doc) doc.processingProgress = progress
   }
 
-  function updateProcessingStage(stage) {
-    state.processingStage = stage
+  function updateProcessingStage(stage, docId = appState.activeDocumentId) {
+    const doc = getDocument(docId)
+    if (doc) doc.processingStage = stage
   }
 
-  function endProcessing() {
-    state.isProcessing = false
-    state.processingMessage = ''
-    state.processingStage = ''
-    state.processingProgress = 0
+  function endProcessing(docId = appState.activeDocumentId) {
+    const doc = getDocument(docId)
+    if (!doc) return
+    doc.isProcessing = false
+    doc.status = 'ready'
+    doc.processingMessage = ''
+    doc.processingStage = ''
+    doc.processingProgress = 0
   }
 
-  // Preset / Output Profile
+  /** True while any document has a job in flight. */
+  const anyProcessing = computed(() => appState.documents.some(d => d.isProcessing))
+
+  // ── Preset / Output Profile ────────────────────────────────────────────────
   function setPreset(presetId) {
     state.selectedPreset = presetId
     state.selectedOutputProfile = getDefaultOutputProfile(presetId)
     state.processingReport = null
+    lastPreset = presetId
+    lastOutputProfile = state.selectedOutputProfile
   }
 
   function setOutputProfile(outputProfileId) {
     if (isOutputProfileLocked(state.selectedPreset)) return
     state.selectedOutputProfile = outputProfileId
+    lastOutputProfile = outputProfileId
   }
 
-  function setProcessingReport(report) {
-    state.processingReport = report
+  function setProcessingReport(report, docId = appState.activeDocumentId) {
+    const doc = getDocument(docId)
+    if (doc) doc.processingReport = report
   }
 
-  // Toast
+  // ── Toast ──────────────────────────────────────────────────────────────────
   let toastId = 0
   function showToast(message, duration = 3000) {
     const id = ++toastId
-    state.toasts.push({ id, message })
+    appState.toasts.push({ id, message })
     setTimeout(() => {
-      state.toasts = state.toasts.filter(t => t.id !== id)
+      appState.toasts = appState.toasts.filter(t => t.id !== id)
     }, duration)
   }
 
   return {
     state,
+    appState,
     bufferPool,
     peakCaches,
 
@@ -379,6 +622,10 @@ export function useEditorState() {
     canUndo,
     canRedo,
     hasFile,
+    documents,
+    documentCount,
+    activeDoc,
+    anyProcessing,
 
     // AudioContext
     getAudioContext,
@@ -386,15 +633,25 @@ export function useEditorState() {
     // Undo/Redo
     undo,
     redo,
+    pushUndo,
 
     // Buffer pool
     addBuffer,
     getBuffer,
     setPeakCache,
     getPeakCache,
+    peakCacheVersion,
 
-    // File
-    loadFile,
+    // Documents
+    createDocument,
+    getDocument,
+    setActiveDocument,
+    closeDocument,
+    closeDocuments,
+    renameDocument,
+    reorderDocument,
+    cycleDocument,
+    documentHasUnsavedWork,
 
     // Edit operations
     performTrimToSelection,
@@ -414,9 +671,6 @@ export function useEditorState() {
     selectAll,
     setPlayhead,
     toggleLoop,
-
-    // Peak cache version (reactive trigger for watchers)
-    peakCacheVersion,
 
     // Tool
     setActiveTool,

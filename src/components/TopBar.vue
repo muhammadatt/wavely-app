@@ -1,9 +1,15 @@
 <script setup>
+import { computed } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
-import { exportAsWav } from '../audio/export.js'
+import { useFileImport } from '../composables/useFileImport.js'
 import BaseButton from './ui/BaseButton.vue'
+import FileTabs from './FileTabs.vue'
 
-const { state, undo, redo, canUndo, canRedo, showToast } = useEditorState()
+
+const {
+  state, appState, undo, redo, canUndo, canRedo, hasFile, documentCount,
+} = useEditorState()
+const { promptForFiles } = useFileImport()
 
 function formatDuration(seconds) {
   const m = Math.floor(seconds / 60)
@@ -11,16 +17,18 @@ function formatDuration(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function handleExport() {
-  if (!state.currentFile) return
-  exportAsWav(
-    state.segments,
-    state.currentFile.sampleRate,
-    state.currentFile.channels,
-    state.currentFile.name
-  )
-  showToast('File exported as WAV')
-}
+// The tab strip names the active file, so this row carries the properties a
+// tab has no room for instead of repeating the filename.
+const fileMeta = computed(() => {
+  const f = state.currentFile
+  if (!f) return null
+  return {
+    format: f.name.split('.').pop().toUpperCase(),
+    duration: formatDuration(f.duration),
+    channels: f.channels === 1 ? 'Mono' : f.channels === 2 ? 'Stereo' : `${f.channels} ch`,
+    sampleRate: `${(f.sampleRate / 1000).toFixed(1)} kHz`,
+  }
+})
 </script>
 
 <template>
@@ -41,20 +49,33 @@ function handleExport() {
 
     <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)]"></div>
 
-    <!-- Filename -->
-    <div class="flex-1 flex items-center gap-[10px] overflow-hidden" v-if="state.currentFile">
-      <span class="font-['Inter'] text-[12.5px] font-medium text-[rgba(255,255,255,.6)] truncate max-w-[280px]">{{ state.currentFile.name }}</span>
+    <!-- Active file properties -->
+    <div class="flex-1 flex items-center gap-[8px] overflow-hidden" v-if="fileMeta">
       <span
         class="font-['JetBrains_Mono'] text-[8.5px] font-bold tracking-[0.1em] px-[6px] py-[3px] rounded-[5px] whitespace-nowrap shrink-0"
         style="color:#7fe9f6;background:rgba(53,211,230,.14);border:1px solid rgba(53,211,230,.3)"
-      >{{ state.currentFile.name.split('.').pop().toUpperCase() }}</span>
-      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">
-        {{ formatDuration(state.currentFile.duration) }}
-      </span>
+      >{{ fileMeta.format }}</span>
+      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">{{ fileMeta.duration }}</span>
+      <span class="text-[rgba(255,255,255,.15)] shrink-0">·</span>
+      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">{{ fileMeta.channels }}</span>
+      <span class="text-[rgba(255,255,255,.15)] shrink-0">·</span>
+      <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">{{ fileMeta.sampleRate }}</span>
     </div>
+    <div v-else class="flex-1"></div>
+
+    <FileTabs />
 
     <!-- Actions -->
     <div class="flex items-center gap-2">
+      <BaseButton
+        size="sm" color="ghost" :pill="false"
+        @click="promptForFiles()"
+        title="Open audio files (Ctrl+O)"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        Open
+      </BaseButton>
+
       <BaseButton
         size="sm" color="ghost" :pill="false"
         :disabled="!canUndo"
@@ -78,9 +99,9 @@ function handleExport() {
 
       <BaseButton
         size="md" :pill="false"
-        :disabled="state.isProcessing || !state.currentFile"
-        @click="handleExport"
-        title="Export as WAV"
+        :disabled="!hasFile"
+        @click="appState.exportDialogOpen = true"
+        :title="documentCount > 1 ? 'Export files (Ctrl+E)' : 'Export as WAV (Ctrl+E)'"
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>
         Export
