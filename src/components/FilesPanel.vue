@@ -237,7 +237,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
       <div class="flex items-center gap-2 px-3 py-[11px] border-t border-[rgba(255,255,255,.07)]">
         <BaseButton size="sm" color="ghost" :pill="false" @click="promptForFiles()">
           <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-          Add files
+          Upload
         </BaseButton>
 
         <div class="flex-1"></div>

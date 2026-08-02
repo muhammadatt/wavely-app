@@ -63,8 +63,6 @@ const fileMeta = computed(() => {
     </div>
     <div v-else class="flex-1"></div>
 
-    <FileTabs />
-
     <!-- Actions -->
     <div class="flex items-center gap-2">
       <BaseButton
