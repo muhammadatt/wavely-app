@@ -278,7 +278,7 @@ onUnmounted(() => {
     @drop="onDrop"
   >
     <TopBar />
-    <FileTabs />
+
     <div class="flex flex-1 overflow-hidden">
       <!-- Workspace -->
       <div class="flex flex-col flex-1 overflow-hidden">

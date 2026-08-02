@@ -4,6 +4,7 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { renderTimelineToWav, toWavFileName, downloadBlob } from '../audio/export.js'
 import { createZip, ZIP_SIZE_LIMIT } from '../audio/zip.js'
+import { formatDuration } from '../utils/format.js'
 import BaseButton from './ui/BaseButton.vue'
 
 /**
@@ -44,12 +45,6 @@ function toggleAll() {
 }
 
 const selectedDocs = computed(() => documents.value.filter(d => checked.value.has(d.id)))
-
-function formatDuration(seconds) {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
 
 /** 16-bit PCM: bytes = samples × channels × 2, plus a 44-byte header. */
 function estimatedBytes(doc) {

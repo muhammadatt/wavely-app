@@ -92,6 +92,14 @@ function handleTogglePlay() {
   togglePlay()
 }
 
+function handleZoomIn() {
+  window.dispatchEvent(new CustomEvent('wavely:zoom-in'))
+}
+
+function handleZoomOut() {
+  window.dispatchEvent(new CustomEvent('wavely:zoom-out'))
+}
+
 // The slider is dragged continuously while the waveform redraws and re-emits
 // its view state, so a naive sync would fight the pointer mid-gesture.
 const isDraggingZoom = ref(false)
@@ -203,7 +211,7 @@ watch(() => state.segments, () => {
       </BaseButton>
     </div>
 
-    <!-- Zoom slider -->
+    <!-- Zoom controls -->
     <div class="flex items-center gap-[11px] min-w-[140px] justify-end">
       <span class="font-['Inter'] text-[10px] font-semibold text-[rgba(255,255,255,.4)]">Zoom</span>
       <input
@@ -221,6 +229,30 @@ watch(() => state.segments, () => {
         class="zoom-slider w-20 h-[5px] rounded-full appearance-none cursor-pointer"
         :style="{ background: `linear-gradient(to right, #35d3e6 ${zoomLevel}%, rgba(255,255,255,.1) ${zoomLevel}%)` }"
       />
+      <div class="flex items-center gap-1 shrink-0">
+                <BaseButton
+          size="xs" color="ghost" square
+          :disabled="!hasFile"
+          @click="handleZoomOut"
+          title="Zoom Out (-)"
+          aria-label="Zoom out"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" class="fill-none stroke-current" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </BaseButton>
+        <BaseButton
+          size="xs" color="ghost" square
+          :disabled="!hasFile"
+          @click="handleZoomIn"
+          title="Zoom In (+)"
+          aria-label="Zoom in"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" class="fill-none stroke-current" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </BaseButton>
+      </div>
     </div>
   </div>
 </template>

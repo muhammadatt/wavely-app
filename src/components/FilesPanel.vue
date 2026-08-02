@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
 import { getTimelineDuration } from '../audio/operations.js'
+import { formatDuration } from '../utils/format.js'
+import { documentStatus } from '../utils/documentStatus.js'
 import WaveformThumbnail from './WaveformThumbnail.vue'
 import BaseButton from './ui/BaseButton.vue'
 
@@ -58,12 +60,6 @@ function close() {
   query.value = ''
 }
 
-function formatDuration(seconds) {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
 function docDuration(doc) {
   return formatDuration(getTimelineDuration(doc.segments))
 }
@@ -111,18 +107,8 @@ function focusInput(el) {
 }
 
 // ── Status ───────────────────────────────────────────────────────────────────
-function statusLabel(doc) {
-  if (doc.isProcessing) return { text: doc.processingStage || 'Processing…', color: '#7fe9f6' }
-  const cert = doc.processingReport?.acx_certification
-  if (cert) {
-    return cert.certificate === 'pass'
-      ? { text: 'ACX pass', color: '#5fd39a' }
-      : { text: 'ACX fail', color: '#ff8a80' }
-  }
-  if (doc.processingReport) return { text: 'Mastered', color: '#7fe9f6' }
-  if (doc.undoCount > 0) return { text: 'Edited', color: 'rgba(255,255,255,.45)' }
-  return null
-}
+// Same definition the tab strip renders as a dot.
+const statusLabel = documentStatus
 
 onMounted(() => nextTick(() => searchInput.value?.focus()))
 
@@ -214,7 +200,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
               <span class="font-['JetBrains_Mono'] text-[10.5px] font-semibold text-[rgba(255,255,255,.35)]">{{ docDuration(doc) }}</span>
               <template v-if="statusLabel(doc)">
                 <span class="text-[rgba(255,255,255,.15)] text-[10px]">·</span>
-                <span class="text-[10.5px] font-bold truncate" :style="{ color: statusLabel(doc).color }">{{ statusLabel(doc).text }}</span>
+                <span class="text-[10.5px] font-bold truncate" :style="{ color: statusLabel(doc).color }">{{ statusLabel(doc).label }}</span>
               </template>
             </div>
           </div>

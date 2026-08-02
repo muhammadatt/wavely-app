@@ -2,21 +2,40 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
+import { formatDuration } from '../utils/format.js'
+import { documentStatus } from '../utils/documentStatus.js'
 
 /**
- * Tab strip for open documents.
+ * Tab strip for open documents, plus the properties of whichever one is active.
  *
  * Tabs handle the "few files I'm actively holding" case. Past what fits at the
  * minimum tab width they collapse into an overflow chip that opens FilesPanel,
  * which is the navigation surface once you have ten-plus files. The strip never
  * scrolls horizontally — scrolling tab strips are miserable to use.
+ *
+ * The format/duration/channel readout lives at the right of this row rather
+ * than up in the command bar: it describes the active document, so it belongs
+ * on the same line as the tab that chose it.
  */
 
 const {
-  appState, documents, activeDoc, setActiveDocument, closeDocument,
+  state, appState, documents, activeDoc, setActiveDocument, closeDocument,
   documentHasUnsavedWork, renameDocument,
 } = useEditorState()
 const { promptForFiles } = useFileImport()
+
+// The tab names the active file, so this readout carries the properties a tab
+// has no room for instead of repeating the filename.
+const fileMeta = computed(() => {
+  const f = state.currentFile
+  if (!f) return null
+  return {
+    format: f.name.split('.').pop().toUpperCase(),
+    duration: formatDuration(f.duration),
+    channels: f.channels === 1 ? 'Mono' : f.channels === 2 ? 'Stereo' : `${f.channels} ch`,
+    sampleRate: `${(f.sampleRate / 1000).toFixed(1)} kHz`,
+  }
+})
 
 const MIN_TAB_WIDTH = 110
 const MAX_TAB_WIDTH = 190
@@ -113,22 +132,9 @@ function focusInput(el) {
 
 // ── Per-tab status ───────────────────────────────────────────────────────────
 // The dot is the whole point of a tab over a plain label: mastered/compliant
-// state is visible without opening each file.
-function statusOf(doc) {
-  if (doc.isProcessing) return { kind: 'processing' }
-  const cert = doc.processingReport?.acx_certification
-  if (cert) return { kind: cert.certificate === 'pass' ? 'pass' : 'fail' }
-  if (doc.processingReport) return { kind: 'mastered' }
-  if (doc.undoCount > 0) return { kind: 'edited' }
-  return null
-}
-
-const STATUS_STYLE = {
-  pass:      { color: '#5fd39a', title: 'Mastered — ACX certification passed' },
-  fail:      { color: '#ff8a80', title: 'Mastered — ACX certification failed' },
-  mastered:  { color: '#7fe9f6', title: 'Mastered' },
-  edited:    { color: 'rgba(255,255,255,.35)', title: 'Edited' },
-}
+// state is visible without opening each file. Definition is shared with the
+// files panel, which renders the same state as a text label.
+const statusOf = documentStatus
 </script>
 
 <template>
@@ -137,6 +143,7 @@ const STATUS_STYLE = {
     class="h-[36px] flex items-stretch shrink-0 px-2 gap-[3px] border-b border-[rgba(255,255,255,.06)]"
     style="background:linear-gradient(180deg,#12161b,#0f1318)"
   >
+
     <div ref="stripEl" class="flex-1 min-w-0 flex items-stretch gap-[3px]">
       <div
         v-for="doc in visibleDocs"
@@ -165,8 +172,8 @@ const STATUS_STYLE = {
           <div
             v-else
             class="w-[6px] h-[6px] rounded-full shrink-0"
-            :style="{ background: STATUS_STYLE[statusOf(doc).kind].color }"
-            :title="STATUS_STYLE[statusOf(doc).kind].title"
+            :style="{ background: statusOf(doc).color }"
+            :title="statusOf(doc).title"
           ></div>
         </template>
 
@@ -229,6 +236,28 @@ const STATUS_STYLE = {
       >
         <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       </button>
+    </div>
+
+        <!-- Files entry point + active file properties, packed left so the tabs
+         start immediately after them. This region sits outside the measured
+         strip, so the tab capacity maths accounts for it for free via the
+         ResizeObserver.
+
+         Search, rename, bulk close and bulk export used to be reachable only
+         via the overflow chip — which does not exist below the overflow
+         threshold — or an unadvertised Ctrl+P. -->
+    <div class="flex items-center gap-[8px] shrink-0 pr-3">
+      <button
+        class="flex items-center gap-[5px] px-[9px] py-4 h-[22px] rounded-[7px] text-[12px] font-bold transition-colors hover:bg-[rgba(255,255,255,.09)]"
+        style="color:rgba(255,255,255,.55);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)"
+        title="All files — search, rename, bulk export (Ctrl+P)"
+        @click="appState.filesPanelOpen = true"
+      >
+        <svg viewBox="0 0 24 24" class="w-[11px] h-[11px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        Files
+        <span class="font-['JetBrains_Mono'] text-[10px] font-semibold text-[rgba(255,255,255,.35)]">{{ documents.length }}</span>
+      </button>
+
     </div>
   </div>
 </template>

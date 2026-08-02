@@ -7,7 +7,7 @@ import FileTabs from './FileTabs.vue'
 
 
 const {
-  state, appState, undo, redo, canUndo, canRedo, hasFile, documentCount,
+  state, appState, hasFile, documentCount,
 } = useEditorState()
 const { promptForFiles } = useFileImport()
 
@@ -63,38 +63,10 @@ const fileMeta = computed(() => {
     </div>
     <div v-else class="flex-1"></div>
 
+        <FileTabs />
+
     <!-- Actions -->
     <div class="flex items-center gap-2">
-      <BaseButton
-        size="sm" color="ghost" :pill="false"
-        @click="promptForFiles()"
-        title="Open audio files (Ctrl+O)"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-        Open
-      </BaseButton>
-
-      <BaseButton
-        size="sm" color="ghost" :pill="false"
-        :disabled="!canUndo"
-        @click="undo"
-        title="Undo (Ctrl+Z)"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg>
-        Undo
-      </BaseButton>
-      <BaseButton
-        size="sm" color="ghost" :pill="false"
-        :disabled="!canRedo"
-        @click="redo"
-        title="Redo (Ctrl+Shift+Z)"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h4"/></svg>
-        Redo
-      </BaseButton>
-
-      <div class="w-px h-6 bg-[rgba(255,255,255,.1)] mx-1"></div>
-
       <BaseButton
         size="md" :pill="false"
         :disabled="!hasFile"
