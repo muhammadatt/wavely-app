@@ -234,6 +234,36 @@ test('cascade keeps per-channel state independent', () => {
   }
 })
 
+test('ensureChannels widens without disturbing existing channels', () => {
+  const c = lowpass(SR, 500, 0.7)
+  const wide = new BiquadCascade(1, 2)
+  wide.setSections([c])
+  const narrow = new BiquadCascade(1, 1)
+  narrow.setSections([c])
+
+  const n = 128
+  const sig = new Float64Array(n)
+  for (let i = 0; i < n; i++) sig[i] = Math.sin(i / 5)
+
+  // Run half the signal through both, then widen the narrow one mid-stream.
+  const half = n >> 1
+  const a = new Float64Array(n)
+  const b = new Float64Array(n)
+  wide.process(sig, a, half, 0)
+  narrow.process(sig, b, half, 0)
+  narrow.ensureChannels(4)
+  assert.equal(narrow.channelCount, 4)
+  wide.process(sig.subarray(half), a.subarray(half), half, 0)
+  narrow.process(sig.subarray(half), b.subarray(half), half, 0)
+
+  for (let i = 0; i < n; i++) {
+    assert.ok(Math.abs(a[i] - b[i]) < 1e-15, `state lost on widen at ${i}`)
+  }
+  // Narrowing is a no-op rather than a truncation.
+  narrow.ensureChannels(2)
+  assert.equal(narrow.channelCount, 4)
+})
+
 test('reset clears state', () => {
   const cascade = new BiquadCascade(1, 1)
   cascade.setSections([lowpass(SR, 500, 0.7)])

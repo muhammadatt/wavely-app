@@ -1,13 +1,13 @@
 /**
- * Load the FET Punch worklet module into an AudioContext or
- * OfflineAudioContext, once per context. See la2aWorkletLoader.js for why
+ * Load the Vocal Saturation worklet module into an AudioContext or
+ * OfflineAudioContext, once per context. See airBandWorkletLoader.js for why
  * these go through `?worker&url` rather than a raw asset URL.
  */
-import workletUrl from './fet1176Processor.js?worker&url'
+import workletUrl from './vocalSatProcessor.js?worker&url'
 
 const loadPromises = new WeakMap()
 
-export function ensureFET1176Worklet(context) {
+export function ensureVocalSatWorklet(context) {
   let promise = loadPromises.get(context)
   if (!promise) {
     promise = context.audioWorklet.addModule(workletUrl)

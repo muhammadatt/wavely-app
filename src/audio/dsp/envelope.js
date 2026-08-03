@@ -43,31 +43,53 @@ export function riseCoeff(tauMs, sampleRate) {
  * downstream `dryRms / wetRms` division.
  */
 export class RmsFollower {
+  /**
+   * @param {number} sampleRate
+   * @param {number} [tauMs=300]
+   * @param {number} [floorLinear=1e-6] clamp on the reported value, so the
+   *   follower is safe to divide by
+   */
   constructor(sampleRate, tauMs = 300, floorLinear = 1e-6) {
     this.coeff = riseCoeff(tauMs, sampleRate)
     this.floorLinear = floorLinear
+    // Warm up with a cumulative mean over roughly one time constant before
+    // handing over to the exponential average. Starting the IIR from zero
+    // makes the first ~tau read far too quiet, which matters wherever this
+    // stands in for a whole-file measurement: a gain derived from it would
+    // swing over the opening moments and leave an audible step at a region
+    // boundary. Seeding from a single sample is not enough either — a tone
+    // that happens to start at a zero crossing seeds zero.
+    this.warmupTarget = Math.max(1, Math.round(sampleRate * (tauMs / 1000)))
+    this.warmupCount = 0
     this.meanSq = 0
   }
 
   reset() {
     this.meanSq = 0
+    this.warmupCount = 0
+  }
+
+  /** Seed the estimate directly and skip the warmup. */
+  prime(meanSq) {
+    this.meanSq = meanSq
+    this.warmupCount = this.warmupTarget
   }
 
   /** Feed one sample; returns the current RMS estimate. */
   process(x) {
-    this.meanSq += this.coeff * (x * x - this.meanSq)
+    const sq = x * x
+    if (this.warmupCount < this.warmupTarget) {
+      this.warmupCount++
+      this.meanSq += (sq - this.meanSq) / this.warmupCount
+    } else {
+      this.meanSq += this.coeff * (sq - this.meanSq)
+    }
     return this.value
   }
 
   /** Feed a block, returning the RMS estimate after the last sample. */
   processBlock(input, n) {
-    const c = this.coeff
-    let m = this.meanSq
-    for (let i = 0; i < n; i++) {
-      const x = input[i]
-      m += c * (x * x - m)
-    }
-    this.meanSq = m
+    for (let i = 0; i < n; i++) this.process(input[i])
     return this.value
   }
 

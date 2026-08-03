@@ -80,6 +80,47 @@ test('RmsFollower reset returns it to the initial state', () => {
   for (let i = 0; i < 1000; i++) f.process(0.5)
   f.reset()
   assert.equal(f.meanSq, 0)
+  assert.equal(f.warmupCount, 0)
+})
+
+test('RmsFollower reaches a usable estimate within a few cycles', () => {
+  // Matters at region boundaries: a gain derived from a follower ramping up
+  // from zero would swing over the opening ~tau and leave an audible step.
+  // The warmup uses a cumulative mean, so accuracy arrives after roughly one
+  // cycle of the signal rather than after one time constant.
+  const f = new RmsFollower(SR, 300)
+  const amp = 0.5
+  const freq = 200
+  const expected = amp / Math.SQRT2
+  const cycleSamples = SR / freq
+
+  // After three cycles (~15 ms) the estimate should already be close, versus
+  // the 300 ms an unwarmed exponential average would need.
+  for (let i = 0; i < cycleSamples * 3; i++) {
+    f.process(amp * Math.sin((2 * Math.PI * freq * i) / SR))
+  }
+  assert.ok(
+    Math.abs(f.value - expected) < 0.05,
+    `after 3 cycles: expected ~${expected.toFixed(3)}, got ${f.value.toFixed(3)}`,
+  )
+})
+
+test('RmsFollower warmup hands over to the exponential average', () => {
+  const f = new RmsFollower(SR, 10) // short tau so warmup ends quickly
+  for (let i = 0; i < f.warmupTarget; i++) f.process(0.5)
+  assert.equal(f.warmupCount, f.warmupTarget)
+  assert.ok(Math.abs(f.value - 0.5) < 1e-9)
+
+  // Now a level change should track at the IIR rate, not the cumulative one.
+  for (let i = 0; i < SR * 0.2; i++) f.process(0.1)
+  assert.ok(Math.abs(f.value - 0.1) < 1e-3, `did not track after warmup: ${f.value}`)
+})
+
+test('explicit prime skips the warmup entirely', () => {
+  const f = new RmsFollower(SR, 300)
+  f.prime(0.25) // meanSq
+  assert.ok(Math.abs(f.value - 0.5) < 1e-12)
+  assert.equal(f.warmupCount, f.warmupTarget)
 })
 
 test('AttackReleaseFollower rises fast and falls slow', () => {

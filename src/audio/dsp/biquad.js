@@ -192,6 +192,29 @@ export class BiquadCascade {
   }
 
   /**
+   * Grow the per-channel state to hold at least `n` channels, preserving the
+   * state of channels that already exist.
+   *
+   * Worklet kernels do not learn their channel count until the first
+   * `process()` call, and it can change if the graph is rewired, so the
+   * cascade has to be able to widen in place.
+   */
+  ensureChannels(n) {
+    if (n <= this.channelCount) return
+    const z1 = new Float64Array(this.sectionCount * n)
+    const z2 = new Float64Array(this.sectionCount * n)
+    for (let s = 0; s < this.sectionCount; s++) {
+      for (let c = 0; c < this.channelCount; c++) {
+        z1[s * n + c] = this.z1[s * this.channelCount + c]
+        z2[s * n + c] = this.z2[s * this.channelCount + c]
+      }
+    }
+    this.z1 = z1
+    this.z2 = z2
+    this.channelCount = n
+  }
+
+  /**
    * Filter `n` samples of one channel in place (or into `output`).
    * @param {ArrayLike<number>} input
    * @param {{[i:number]: number}} output may alias `input`
