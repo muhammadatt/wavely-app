@@ -7,7 +7,7 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import BaseButton from '../ui/BaseButton.vue'
+import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -40,6 +40,13 @@ const MODE_OPTIONS = [
   { value: 'compress', label: 'COMP' },
   { value: 'limit', label: 'LIMIT' },
 ]
+
+// Preview is just transport playback: the worklet is already in the chain, so
+// what makes this effect "live" is that the audio is running while you turn the
+// knobs. Reuses the existing toggle-play bus rather than a second play path.
+function togglePlayback() {
+  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
+}
 
 // The shell removes itself from the window manager; this only has to stop the
 // preview chain and the meter loop.
@@ -212,14 +219,23 @@ function selectMockPreset(name) {
         </div>
       </div>
 
-      <BaseButton
-        class="mt-3" size="md" block
-        color="accent" :accent="ACCENT" text-color="#1a1310"
-        :disabled="!hasSelection || !la2aPreview"
-        @click="applyAndClose"
-      >
-        {{ !la2aPreview ? 'Turn on OptoSmooth to apply' : hasSelection ? 'Apply compression' : 'Make a selection on the waveform to apply' }}
-      </BaseButton>
+      <div class="mt-3">
+        <ApplyAction
+          size="md"
+          show-preview
+          previewable
+          :previewing="state.isPlaying"
+          :accent="ACCENT"
+          text-color="#1a1310"
+          :met="hasSelection"
+          message="Make a selection to compress"
+          label="Apply compression"
+          :disabled="!la2aPreview"
+          disabled-hint="Turn OptoSmooth on to apply it"
+          @toggle-preview="togglePlayback"
+          @apply="applyAndClose"
+        />
+      </div>
     </div>
   </FloatingWindow>
 </template>

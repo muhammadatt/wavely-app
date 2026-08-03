@@ -8,7 +8,7 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import VuMeter from '../meters/VuMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import BaseButton from '../ui/BaseButton.vue'
+import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -67,6 +67,13 @@ const meterMode = ref('gr')
 const vuReference = computed(() => (meterMode.value === 'vu8' ? -14 : -18))
 
 const ratioCaption = computed(() => RATIO_CAPTIONS[fetRatio.value] ?? '')
+
+// Preview is just transport playback: the worklet is already in the chain, so
+// what makes this effect "live" is that the audio is running while you turn the
+// knobs. Reuses the existing toggle-play bus rather than a second play path.
+function togglePlayback() {
+  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
+}
 
 // The shell removes itself from the window manager; this only has to stop the
 // preview chain and the meter loop.
@@ -285,14 +292,23 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
         </div>
       </div>
 
-      <BaseButton
-        class="mt-4" size="md" block
-        color="accent" :accent="ACCENT" text-color="#0c1218"
-        :disabled="!hasSelection || !fetPreview"
-        @click="applyAndClose"
-      >
-        {{ !fetPreview ? 'Turn on FET Punch to apply' : hasSelection ? 'Apply compression' : 'Make a selection on the waveform to apply' }}
-      </BaseButton>
+      <div class="mt-4">
+        <ApplyAction
+          size="md"
+          show-preview
+          previewable
+          :previewing="state.isPlaying"
+          :accent="ACCENT"
+          text-color="#0c1218"
+          :met="hasSelection"
+          message="Make a selection to compress"
+          label="Apply compression"
+          :disabled="!fetPreview"
+          disabled-hint="Turn FET Punch on to apply it"
+          @toggle-preview="togglePlayback"
+          @apply="applyAndClose"
+        />
+      </div>
     </div>
   </FloatingWindow>
 </template>

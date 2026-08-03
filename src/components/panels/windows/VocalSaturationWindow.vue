@@ -134,6 +134,8 @@ async function applySaturation() {
       <div class="mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <ApplyAction
           size="md"
+          show-preview
+          :previewable="false"
           :accent="ACCENT"
           text-color="#2b1006"
           :met="hasSelection"
