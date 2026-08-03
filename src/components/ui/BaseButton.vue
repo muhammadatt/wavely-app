@@ -19,7 +19,7 @@ const props = defineProps({
 const SIZES = {
   xs: { pad: 'px-[11px] py-[5px]', text: 'text-[10.5px]', gap: 'gap-[5px]', diameter: '34px', radius: '8px' },
   sm: { pad: 'px-3 py-2', text: 'text-[11px]', gap: 'gap-[6px]', diameter: '40px', radius: '8px' },
-  md: { pad: 'px-4 py-[10px]', text: 'text-[11.5px]', gap: 'gap-[7px]', diameter: '48px', radius: '10px' },
+  md: { pad: 'px-4 py-[10px]', text: 'text-[12.5px]', gap: 'gap-[7px]', diameter: '48px', radius: '10px' },
   lg: { pad: 'px-4 py-[13px]', text: 'text-[12.5px]', gap: 'gap-[7px]', diameter: '58px', radius: '10px' },
 }
 
