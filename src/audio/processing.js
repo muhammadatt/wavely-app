@@ -6,6 +6,16 @@ import {
   FET1176_DEFAULTS,
   toKernelParams as toFET1176KernelParams,
 } from './effects/fet1176Compressor.js'
+import { ensureAirBandWorklet } from './airBandWorkletLoader.js'
+import {
+  AIR_BAND_DEFAULTS,
+  toKernelParams as toAirBandKernelParams,
+} from './effects/airBand.js'
+import { ensureVocalSatWorklet } from './vocalSatWorkletLoader.js'
+import {
+  VOCAL_SAT_DEFAULTS,
+  toKernelParams as toVocalSatKernelParams,
+} from './effects/vocalSat.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -315,6 +325,24 @@ export function applyFET1176Region(segments, start, end, params, sampleRate, cha
     ensureWorklet: ensureFET1176Worklet,
     processorName: 'fet1176-processor',
     kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
+  })
+}
+
+/** Apply Air Band to a region. */
+export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureAirBandWorklet,
+    processorName: 'air-band-processor',
+    kernelParams: toAirBandKernelParams({ ...AIR_BAND_DEFAULTS, ...params }),
+  })
+}
+
+/** Apply Vocal Saturation to a region. */
+export function applyVocalSatRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureVocalSatWorklet,
+    processorName: 'vocal-sat-processor',
+    kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
   })
 }
 

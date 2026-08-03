@@ -4,6 +4,14 @@
  * Spot effects run on a short user selection, bypass the preset chain on the
  * server, and return the processed WAV directly. No job polling — the request
  * resolves with the processed audio.
+ *
+ * Currently unused by the client: vocal saturation was the only caller and now
+ * runs in an AudioWorklet (src/audio/vocalSatProcessor.js), which removed the
+ * upload round-trip. Kept because it is still the right shape for the spot
+ * operations that genuinely have to run server-side — noise reduction being
+ * the obvious one, since DeepFilterNet3 has no browser implementation here.
+ * The server's /api/spot/vocal_saturation route also remains, and the preset
+ * chain's own Python vocalSaturation stage is untouched.
  */
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
@@ -46,27 +54,3 @@ export async function runSpotEffect({
   return await res.blob()
 }
 
-/**
- * Apply Vocal Saturation to a region of the timeline.
- *
- * @param {object} options
- * @param {Array}  options.segments
- * @param {number} options.start
- * @param {number} options.end
- * @param {number} options.sampleRate
- * @param {number} options.channels
- * @param {object} options.params
- * @param {number} options.params.drive
- * @param {number} options.params.wetDry
- * @param {number} options.params.bias            - absolute operating-point offset on the curve (drive-independent)
- * @param {number} options.params.lowCrossover
- * @param {number} options.params.midCrossover
- * @param {number} options.params.softness
- * @param {number} options.params.lowDriveMult    - low-band drive multiplier (× drive)
- * @param {number} options.params.midDriveMult    - mid-band drive multiplier (× drive)
- * @param {number} options.params.highDriveMult   - high-band drive multiplier (× drive)
- * @returns {Promise<Blob>}
- */
-export function applyVocalSaturation(options) {
-  return runSpotEffect({ ...options, operation: 'vocal_saturation' })
-}

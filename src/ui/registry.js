@@ -7,6 +7,7 @@ import PresetsPanel from '../components/panels/PresetsPanel.vue'
 
 import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
+import AirBandModal from '../components/panels/AirBandModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
@@ -250,6 +251,18 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: VocalSaturationWindow,
+  },
+  {
+    id: 'air-band',
+    label: 'Air Band',
+    desc: 'High-shelf presence lift',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'air',
+    keywords: ['air', 'maag', 'shelf', 'high', 'presence', 'sheen', 'treble', 'eq'],
+    requires: 'selection',
+    surface: 'window',
+    component: AirBandModal,
   },
   {
     id: 'noise-reduction',
