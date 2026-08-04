@@ -9,6 +9,7 @@ import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
+import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
@@ -276,6 +277,16 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: ResonanceModal,
+    id: 'hum-remover',
+    label: 'Hum Remover',
+    desc: 'Notch out mains buzz',
+    category: 'effects',
+    group: 'Clean',
+    icon: 'hum',
+    keywords: ['hum', 'buzz', 'mains', 'ground loop', '50hz', '60hz', 'notch', 'electrical'],
+    requires: 'selection',
+    surface: 'window',
+    component: HumRemoverModal,
   },
   {
     id: 'noise-reduction',
@@ -284,7 +295,7 @@ export const OPERATIONS = [
     category: 'effects',
     group: 'Clean',
     icon: 'noise',
-    keywords: ['denoise', 'hiss', 'hum', 'background', 'deepfilternet', 'clean'],
+    keywords: ['denoise', 'hiss', 'background', 'deepfilternet', 'clean'],
     requires: 'selection',
     surface: 'window',
     component: NoiseReductionWindow,

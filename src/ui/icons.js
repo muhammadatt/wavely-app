@@ -48,6 +48,9 @@ export const ICONS = {
   // out of it — a narrow notch pushed down onto the spike.
   resonance: '<path d="M2 18c3 0 3.5-3 5-3s2 3 4 3"/><path d="M11 18c1-6 2-12 4-12s3 6 4 12"/><path d="M19 18c1 0 1.5-2 3-2"/><path d="M15 3v6" stroke-dasharray="2 2" opacity=".5"/>',
   noise: '<path d="M12 2a3 3 0 013 3v7a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 23h8"/>',
+  // Hum: a steady sine with a notch taken out of its middle — the mains tone
+  // and the cut being placed on it.
+  hum: '<path d="M2 12c1.5-4 3-4 4.5 0s3 4 4.5 0"/><path d="M13 12c1.5-4 3-4 4.5 0s3 4 4.5 0" opacity=".35"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
   // Waveform, flat stretch, waveform — the gap being targeted. Was a second
   // copy of the `cut` scissors, which is the clipboard verb's glyph.
   removeSilence: '<path d="M3 6v12M7 9v6"/><path d="M9.5 12h5"/><path d="M17 9v6M21 6v12"/>',
