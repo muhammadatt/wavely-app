@@ -311,6 +311,12 @@ def main(argv=None):
 
     multiplier        = np.ones(n_samples, dtype=np.float32)
     treated_events    = []
+    # Every event that got as far as a gain decision, treated or not. The
+    # realtime de-esser recomputes gain client-side from eventPeakDb and
+    # contextRmsDb, so it needs the events that this pass declined as well —
+    # lowering the ceiling in the UI has to be able to bring them back, and
+    # treated_events alone cannot express that.
+    measured_events   = []
     skipped_in_range  = 0
     skipped_no_ctx    = 0
     max_reduction_db  = 0.0
@@ -355,6 +361,19 @@ def main(argv=None):
             continue
 
         excess_db = event_peak_db - (ctx_rms_db + ceiling_db)
+
+        # Recorded before the in-range test: an event sitting under the ceiling
+        # now may sit above a lower one the user picks later, and the client can
+        # only work that out if it has the measurements.
+        measured_events.append({
+            "startSample":   int(s),
+            "endSample":     int(e),
+            "eventType":     ev_type,
+            "sibilantClass": sibilant_class,
+            "eventPeakDb":   round(event_peak_db, 2),
+            "contextRmsDb":  round(ctx_rms_db, 2),
+        })
+
         if excess_db <= 0:
             skipped_in_range += 1
             continue
@@ -424,6 +443,10 @@ def main(argv=None):
         "skippedNoContext":           skipped_no_ctx,
         "maxReductionDb":             round(max_reduction_db, 2) if treated_events else 0.0,
         "treatedEvents":              treated_events,
+        # Superset of treatedEvents: every event with a context measurement,
+        # carrying only what a client needs to redo the gain decision itself.
+        # Existing consumers read treatedEvents and are unaffected.
+        "measuredEvents":             measured_events,
         "stridentCeilingDb":          strident_ceiling_db,
         "nonStridentCeilingDb":       non_strident_ceiling_db,
         "reductionRatio":             args.reduction_ratio,

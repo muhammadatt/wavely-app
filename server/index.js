@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit'
 import { processRoute } from './routes/process.js'
 import { jobsRoute }   from './routes/jobs.js'
 import { spotRoute }   from './routes/spot.js'
+import { analyzeRoute } from './routes/analyze.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -69,6 +70,19 @@ const spotLimiter = rateLimit({
 })
 app.use('/api/spot', spotLimiter)
 
+// Analysis runs a short stage sequence and returns JSON, no audio. Cheaper
+// than a spot effect but not free — it spawns Python — so it gets the same
+// budget rather than the preset chain's.
+const analyzeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 120,                  // 120 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many analysis requests, please try again later' },
+  validate: { xForwardedForHeader: false },
+})
+app.use('/api/analyze', analyzeLimiter)
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.0.1' })
@@ -82,6 +96,9 @@ app.use('/api', jobsRoute)
 
 // Spot effect endpoint (synchronous — returns processed WAV directly)
 app.use('/api', spotRoute)
+
+// Analysis endpoints (synchronous — return measurements as JSON)
+app.use('/api', analyzeRoute)
 
 const server = app.listen(PORT, () => {
   console.log(`Wavely server listening on port ${PORT}`)

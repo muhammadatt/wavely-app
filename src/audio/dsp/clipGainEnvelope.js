@@ -35,27 +35,50 @@ const DEFAULT_FADES = {
  * @param {Partial<typeof DEFAULT_FADES>} [fades]
  *   Per-preset fade timings. Falls back to the same defaults the Python script
  *   uses when keys are absent.
- * @returns {{ multiplier: Float32Array, eventCount: number, maxReductionDb: number }}
+ * @returns {{ multiplier: Float32Array, eventCount: number, inputCount: number,
+ *            maxReductionDb: number, skipped: Array<{index:number,reason:string}> }}
+ *   eventCount is how many events were RENDERED. Compare with inputCount to
+ *   detect events that could not be placed; `skipped` says why for each.
  */
 export function buildClipGainEnvelope(numSamples, sampleRate, treatedEvents, fades = {}) {
   const multiplier = new Float32Array(numSamples)
   multiplier.fill(1.0)
 
   if (!treatedEvents || treatedEvents.length === 0) {
-    return { multiplier, eventCount: 0, maxReductionDb: 0 }
+    return {
+      multiplier, eventCount: 0, inputCount: 0, maxReductionDb: 0, skipped: [],
+    }
   }
 
   const f = { ...DEFAULT_FADES, ...(fades || {}) }
   let maxReductionDb = 0
+  let eventCount = 0
+  const skipped = []
 
-  for (const ev of treatedEvents) {
+  for (let i = 0; i < treatedEvents.length; i++) {
+    const ev = treatedEvents[i]
     const s = resolveStart(ev, sampleRate)
     const e = resolveEnd(ev, sampleRate)
-    if (s == null || e == null) continue
+
+    // Malformed: no usable bounds at all.
+    if (s == null || e == null) {
+      skipped.push({ index: i, reason: 'unresolved-bounds' })
+      continue
+    }
+    // Malformed: zero-length or inverted before any clamping.
+    if (e <= s) {
+      skipped.push({ index: i, reason: 'degenerate' })
+      continue
+    }
 
     const sClamp = Math.max(0, s)
     const eClamp = Math.min(numSamples - 1, e)
-    if (eClamp <= sClamp) continue
+    // Expected, not malformed: the envelope covers a sub-region and this event
+    // lies outside it. Recorded, but not something to warn about.
+    if (eClamp <= sClamp) {
+      skipped.push({ index: i, reason: 'outside-buffer' })
+      continue
+    }
 
     const gainLinear  = Math.pow(10, ev.gainDb / 20)
     const isAffricate = ev.eventType === 'affricate'
@@ -72,22 +95,52 @@ export function buildClipGainEnvelope(numSamples, sampleRate, treatedEvents, fad
     }
 
     renderEventEnvelope(multiplier, sClamp, eClamp, gainLinear, fadeIn, fadeOut)
+    eventCount++
     const absDb = Math.abs(ev.gainDb)
     if (absDb > maxReductionDb) maxReductionDb = absDb
   }
 
-  return { multiplier, eventCount: treatedEvents.length, maxReductionDb }
+  // Bad input should say so. Out-of-buffer events are routine when the envelope
+  // spans a sub-region; unusable bounds are a producer bug and used to vanish
+  // without a trace anywhere.
+  const malformed = skipped.filter(x => x.reason !== 'outside-buffer')
+  if (malformed.length > 0) {
+    console.warn(
+      `[clipGainEnvelope] ${malformed.length} of ${treatedEvents.length} events ` +
+      `could not be rendered: ` +
+      malformed.map(x => `#${x.index} ${x.reason}`).join(', '),
+    )
+  }
+
+  return {
+    multiplier,
+    /** Events actually rendered — NOT the number handed in. */
+    eventCount,
+    inputCount: treatedEvents.length,
+    maxReductionDb,
+    skipped,
+  }
 }
 
+/**
+ * Sample bounds from an event, in samples.
+ *
+ * Any finite number is accepted as a sample index and rounded. It used to
+ * require Number.isInteger, which meant a fractional index — trivially produced
+ * by arithmetic like `2.2 * 44100`, which is 97020.00000000001 — matched
+ * neither branch and returned null, and the event was then dropped by a bare
+ * `continue`. Nothing logged, nothing counted, the envelope just quietly had a
+ * hole in it.
+ */
 function resolveStart(ev, sampleRate) {
-  if (Number.isInteger(ev.startSample)) return ev.startSample
-  if (typeof ev.startSec === 'number')  return Math.round(ev.startSec * sampleRate)
+  if (Number.isFinite(ev.startSample)) return Math.round(ev.startSample)
+  if (Number.isFinite(ev.startSec))    return Math.round(ev.startSec * sampleRate)
   return null
 }
 
 function resolveEnd(ev, sampleRate) {
-  if (Number.isInteger(ev.endSample))  return ev.endSample
-  if (typeof ev.endSec === 'number')   return Math.round(ev.endSec * sampleRate) - 1
+  if (Number.isFinite(ev.endSample))  return Math.round(ev.endSample)
+  if (Number.isFinite(ev.endSec))     return Math.round(ev.endSec * sampleRate) - 1
   return null
 }
 

@@ -10,6 +10,7 @@ import FET1176Modal from '../components/panels/FET1176Modal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
+import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
@@ -277,6 +278,18 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: ResonanceModal,
+  },
+  {
+    id: 'clip-gain-deesser',
+    label: 'De-Esser',
+    desc: 'Tame harsh S and F sounds',
+    category: 'effects',
+    group: 'Clean',
+    icon: 'deesser',
+    keywords: ['de-ess', 'deesser', 'sibilance', 'sibilant', 'harsh', 'ess', 'fricative', 'clip gain'],
+    requires: 'selection',
+    surface: 'window',
+    component: DeEsserModal,
   },
   {
     id: 'hum-remover',
