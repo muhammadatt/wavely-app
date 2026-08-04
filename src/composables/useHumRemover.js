@@ -185,21 +185,22 @@ export function useHumRemover() {
       humAnalysis.value = result
       analyzedKey.value = selectionKey()
       // Pre-tick what the detector recommends — flagged, minus anything the
-      // pitch check identified as the speaker's own voice. Every harmonic is
-      // still listed with its measurement so the user can override either way.
+      // pitch check attributed to a sustained source in the recording. Every
+      // harmonic is still listed with its measurement so the user can override
+      // either way.
       humHarmonics.value = result.detectionDetail.map(d => ({
         ...d,
-        enabled: d.flagged && !d.matchesVoicePitch,
+        enabled: d.flagged && !d.matchesPitchedSource,
       }))
       pushFrequencies()
 
       if (result.tooShort) {
         showToast('Selection too short to detect hum reliably')
       } else if (!result.triggered) {
-        const vetoed = result.detectionDetail.filter(d => d.flagged && d.matchesVoicePitch)
+        const vetoed = result.detectionDetail.filter(d => d.flagged && d.matchesPitchedSource)
         showToast(
           vetoed.length > 0
-            ? 'No hum found — the energy there is the voice itself'
+            ? 'No hum found — that energy belongs to the recording itself'
             : 'No mains hum detected',
         )
       } else {

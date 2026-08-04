@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
+import { PITCH_RANGES } from '../../audio/effects/resonance.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
@@ -15,10 +16,10 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPreview, resReduction, resInputDb, resOutputDb, hasSelection,
+  resPitchRange, resPreview, resReduction, resInputDb, resOutputDb, hasSelection,
   togglePreview, syncDepth, syncSharpness, syncSelectivity, syncAttack,
   syncRelease, syncMaxReduction, syncFreqFloor, syncFreqCeil, syncMode,
-  togglePreserveHarmonics, apply, teardown, closeModal,
+  syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
 
 const { state } = useEditorState()
@@ -34,6 +35,14 @@ const MODE_OPTIONS = [
   { value: 'hard', label: 'HARD', title: 'Linear above the threshold' },
 ]
 
+// Which pitches harmonic protection looks for. Nothing else about the effect
+// assumes speech, and this should not either — see PITCH_RANGES.
+const PITCH_RANGE_OPTIONS = Object.entries(PITCH_RANGES).map(([value, r]) => ({
+  value,
+  label: r.label,
+  title: r.title,
+}))
+
 const percent = v => `${Math.round(v * 100)}`
 const oneDp = v => v.toFixed(1)
 const ms = v => `${Math.round(v)}`
@@ -43,6 +52,11 @@ const db = v => `${Math.round(v)}`
 const modeCaption = computed(() =>
   resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
 )
+
+const pitchRangeCaption = computed(() => {
+  const r = PITCH_RANGES[resPitchRange.value] ?? PITCH_RANGES.voice
+  return `${Math.round(r.minHz)}–${Math.round(r.maxHz)} Hz`
+})
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -167,34 +181,48 @@ async function applyAndClose() {
 
           <!-- Harmonic protection is the safety mechanism, not a flavour
                control: without it the cepstral reference sits at the
-               inter-harmonic floor and the suppressor eats vocal harmonics. -->
-          <button
-            class="shrink-0 px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
-            :style="{
-              width: '186px',
-              background: resPreserveHarmonics ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
-              border: `1px solid ${resPreserveHarmonics ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
-              opacity: resPreview ? 1 : 0.4,
-            }"
-            :disabled="!resPreview"
-            title="Protects the speaker's harmonics from being treated as resonances. Turning it off is a diagnostic aid — it will thin the voice."
-            @click="togglePreserveHarmonics"
-          >
-            <span
-              class="block"
+               inter-harmonic floor and the suppressor eats the harmonics of
+               whatever is playing. The range picker sits with it because it
+               feeds it — protection is only as good as the pitch it is handed,
+               and a source outside the range reports an octave artefact rather
+               than nothing, which puts the mask on the wrong bins. -->
+          <div class="shrink-0 flex flex-col gap-[10px]" style="width:186px">
+            <button
+              class="w-full px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
               :style="{
-                font: `700 8.5px 'JetBrains Mono',monospace`,
-                letterSpacing: '.12em',
-                color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
+                background: resPreserveHarmonics ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
+                border: `1px solid ${resPreserveHarmonics ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
+                opacity: resPreview ? 1 : 0.4,
               }"
-            >{{ resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
-            <span
-              class="block mt-[3px]"
-              style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
-            >{{ resPreserveHarmonics
-              ? 'Preserves harmonic frequencies.'
-              : 'Full supression — risks thinning harmonic frequencies.' }}</span>
-          </button>
+              :disabled="!resPreview"
+              title="Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material."
+              @click="togglePreserveHarmonics"
+            >
+              <span
+                class="block"
+                :style="{
+                  font: `700 8.5px 'JetBrains Mono',monospace`,
+                  letterSpacing: '.12em',
+                  color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
+                }"
+              >{{ resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
+              <span
+                class="block mt-[3px]"
+                style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
+              >{{ resPreserveHarmonics
+                ? 'Preserves harmonic frequencies.'
+                : 'Full suppression — risks thinning harmonic frequencies.' }}</span>
+            </button>
+
+            <SegmentedSwitch
+              :model-value="resPitchRange"
+              @update:model-value="syncPitchRange"
+              :options="PITCH_RANGE_OPTIONS"
+              :accent="ACCENT"
+              :disabled="!resPreview || !resPreserveHarmonics"
+              :caption="`Protect pitches ${pitchRangeCaption}`"
+            />
+          </div>
         </div>
       </div>
 
