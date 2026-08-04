@@ -16,6 +16,12 @@ import {
   VOCAL_SAT_DEFAULTS,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
+import { ensureResonanceWorklet } from './resonanceWorkletLoader.js'
+import {
+  RESONANCE_DEFAULTS,
+  RESONANCE_LATENCY_SAMPLES,
+  toKernelParams as toResonanceKernelParams,
+} from './effects/resonance.js'
 import { ensureHumNotchWorklet } from './humNotchWorkletLoader.js'
 import {
   HUM_NOTCH_DEFAULTS,
@@ -277,26 +283,53 @@ export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sam
 }
 
 /**
- * Render a region through a compressor worklet in an OfflineAudioContext.
+ * Render a region through an effect's worklet in an OfflineAudioContext.
  *
- * Both compressors apply this way, running the exact same worklet module as
- * the real-time preview, so the applied result is sample-identical to what
- * the user heard.
+ * Every effect applies this way, running the exact same worklet module as the
+ * real-time preview, so the applied result is sample-identical to what the
+ * user heard.
+ *
+ * LATENCY. An effect that reports `latencySamples > 0` emits output that lags
+ * its input — the resonance suppressor's STFT holds back a full fftSize before
+ * a sample is fully reconstructed. Rendering exactly `numSamples` would then
+ * write back audio shifted late by that much, with the tail cut off: silence
+ * spliced in at the head of the region and the last `latency` samples of real
+ * audio lost. So the render is extended, the region is extended to match (real
+ * audio where the timeline has it, silence past the end), and the leading
+ * `latency` samples are dropped from the result.
+ *
+ * Zero-latency effects take the original path untouched — no extra render, no
+ * copy.
  */
 async function applyWorkletRegion(
   segments, start, end, sampleRate, channels,
-  { ensureWorklet, processorName, kernelParams },
+  { ensureWorklet, processorName, kernelParams, latencySamples = 0 },
 ) {
-  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
+  const latency = Math.max(0, Math.round(latencySamples))
+  const renderSamples = numSamples + latency
 
-  const offlineCtx = new OfflineAudioContext(channels, numSamples, sampleRate)
+  // Pull `latency` extra samples of real audio from past the region where the
+  // timeline has them, so the tail is reconstructed from context rather than
+  // from silence. renderRegionToBuffer zero-fills beyond the end of the
+  // timeline, which is exactly what we want there.
+  const channelData = renderRegionToBuffer(
+    segments, start, end + latency / sampleRate, sampleRate, channels,
+  )
+
+  const offlineCtx = new OfflineAudioContext(channels, renderSamples, sampleRate)
   await ensureWorklet(offlineCtx)
 
-  const inputBuffer = offlineCtx.createBuffer(channels, numSamples, sampleRate)
+  const inputBuffer = offlineCtx.createBuffer(channels, renderSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
-    inputBuffer.copyToChannel(channelData[ch], ch)
+    // renderRegionToBuffer sizes to ceil() of the extended duration, which can
+    // differ from renderSamples by a sample; copy only what fits.
+    const src = channelData[ch]
+    inputBuffer.copyToChannel(
+      src.length > renderSamples ? src.subarray(0, renderSamples) : src,
+      ch,
+    )
   }
 
   const source = offlineCtx.createBufferSource()
@@ -313,7 +346,20 @@ async function applyWorkletRegion(
   node.connect(offlineCtx.destination)
   source.start(0)
 
-  return await offlineCtx.startRendering()
+  const rendered = await offlineCtx.startRendering()
+  if (latency === 0) return rendered
+
+  // Drop the leading `latency` samples so output sample 0 corresponds to input
+  // sample 0, and hand back a buffer of exactly the region's length — that is
+  // what replaceRegion expects to splice in.
+  const trimmed = offlineCtx.createBuffer(channels, numSamples, sampleRate)
+  for (let ch = 0; ch < channels; ch++) {
+    trimmed.copyToChannel(
+      rendered.getChannelData(ch).subarray(latency, latency + numSamples),
+      ch,
+    )
+  }
+  return trimmed
 }
 
 /** Apply OptoSmooth (LA-2A) compression to a region. */
@@ -417,6 +463,21 @@ export function analyzeHumRegion(segments, start, end, sampleRate, channels, opt
       reject(err)
     }
     worker.postMessage({ samples: mono, sampleRate, options }, [mono.buffer])
+  })
+}
+
+/**
+ * Apply Resonance Suppression to a region.
+ *
+ * The only caller so far that passes a non-zero latency — its STFT delays the
+ * output by a full frame, which applyWorkletRegion renders long and trims.
+ */
+export function applyResonanceRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureResonanceWorklet,
+    processorName: 'resonance-processor',
+    kernelParams: toResonanceKernelParams({ ...RESONANCE_DEFAULTS, ...params }),
+    latencySamples: RESONANCE_LATENCY_SAMPLES,
   })
 }
 

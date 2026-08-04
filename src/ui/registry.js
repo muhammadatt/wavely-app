@@ -8,6 +8,7 @@ import PresetsPanel from '../components/panels/PresetsPanel.vue'
 import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
+import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
@@ -266,6 +267,16 @@ export const OPERATIONS = [
     component: AirBandModal,
   },
   {
+    id: 'resonance-suppressor',
+    label: 'ResoTame',
+    desc: 'Tame harsh resonant peaks',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'resonance',
+    keywords: ['resonance', 'soothe', 'harsh', 'ring', 'room mode', 'dynamic eq', 'peak'],
+    requires: 'selection',
+    surface: 'window',
+    component: ResonanceModal,
     id: 'hum-remover',
     label: 'Hum Remover',
     desc: 'Notch out mains buzz',

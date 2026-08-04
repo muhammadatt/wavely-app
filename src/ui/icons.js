@@ -44,6 +44,9 @@ export const ICONS = {
   saturation: '<path d="M12 3a6 6 0 00-3.6 10.8c1 .8 1.6 1.8 1.8 3.2h3.6c.2-1.4.8-2.4 1.8-3.2A6 6 0 0012 3z"/><path d="M9 17h6"/><path d="M9.5 20h5"/><path d="M10 11l2 2 2-2"/>',
   // A rising shelf: flat, then a gentle knee up to a plateau — the air curve.
   air: '<path d="M2 17c5 0 8 0 11-5s5-5 9-5"/><path d="M2 21h20" opacity=".35"/>',
+  // Resonance: a spectrum with one peak protruding, and the cut being taken
+  // out of it — a narrow notch pushed down onto the spike.
+  resonance: '<path d="M2 18c3 0 3.5-3 5-3s2 3 4 3"/><path d="M11 18c1-6 2-12 4-12s3 6 4 12"/><path d="M19 18c1 0 1.5-2 3-2"/><path d="M15 3v6" stroke-dasharray="2 2" opacity=".5"/>',
   noise: '<path d="M12 2a3 3 0 013 3v7a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 23h8"/>',
   // Hum: a steady sine with a notch taken out of its middle — the mains tone
   // and the cut being placed on it.
