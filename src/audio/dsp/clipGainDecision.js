@@ -83,8 +83,8 @@ export function maxReductionOf(treatedEvents) {
  * positions, so re-selecting the analysed region exactly can land a float short
  * and would otherwise read as "moved outside".
  *
- * @param {{start:number,end:number}|null} selection
- * @param {{start:number,end:number}|null} region
+ * @param {{start:number,end:number}|null} region    the analysed span
+ * @param {{start:number,end:number}|null} selection what is selected now
  */
 export function regionCovers(region, selection) {
   if (!region) return false

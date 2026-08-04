@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -12,6 +12,13 @@ import tailwindcss from '@tailwindcss/vite'
  * flag's docstring claims.
  *
  * Keep this list in sync with the guards in src/devFlags.js.
+ *
+ * The enable check MUST read the same env Vite injects into the client. It used
+ * to read process.env directly, which only sees the OS environment — so setting
+ * VITE_DEV_PANELS=1 in .env.local (what devFlags.js tells you to do) turned the
+ * flag on in the app while this plugin still stripped the module. The async
+ * import then resolved to the stub and the panel rendered nothing at all, with
+ * no error to explain it. loadEnv reads the .env files exactly as Vite does.
  */
 const DEV_ONLY_MODULES = [/SibilanceTuningPanel\.vue$/]
 
@@ -34,22 +41,30 @@ function stripDevOnlyModules(enabled) {
   }
 }
 
-export default defineConfig(({ mode }) => ({
-  plugins: [
-    stripDevOnlyModules(mode === 'development' || process.env.VITE_DEV_PANELS === '1'),
-    vue(),
-    tailwindcss(),
-  ],
-  server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/checker': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
+export default defineConfig(({ mode }) => {
+  // Read the env exactly as Vite will, including .env files. The '' prefix
+  // loads every variable, not just VITE_-prefixed ones, so the value is seen
+  // however it was provided.
+  const env = loadEnv(mode, process.cwd(), '')
+  const devPanels = mode === 'development' || env.VITE_DEV_PANELS === '1'
+
+  return {
+    plugins: [
+      stripDevOnlyModules(devPanels),
+      vue(),
+      tailwindcss(),
+    ],
+    server: {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+        '/checker': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
       },
     },
-  },
-}))
+  }
+})

@@ -49,6 +49,13 @@ const TuningPanel = DEV_TUNING_PANELS
 /** Detection settings changed since the last Analyse. */
 const tuningDirty = ref(false)
 
+/**
+ * Tuning grid collapsed by default, and the window narrows to match. Left open
+ * it is most of the panel, and it is not what you are looking at while
+ * sweeping — the event count in the status line is.
+ */
+const tuningOpen = ref(false)
+
 function onTuningUpdate(key, value) {
   syncTuning(key, value)
   tuningDirty.value = true
@@ -117,7 +124,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="clip-gain-deesser"
     :z="z"
-    :width="DEV_TUNING_PANELS ? 760 : 620"
+    :width="TuningPanel && tuningOpen ? 760 : 620"
     :accent="ACCENT"
     brand-lead="DE"
     brand-tail="ESSER"
@@ -274,9 +281,11 @@ async function applyAndClose() {
         :tuning="tuning"
         :accent="ACCENT"
         :dirty="tuningDirty"
+        :open="tuningOpen"
         @update="onTuningUpdate"
         @reset="onTuningReset"
         @reanalyze="runAnalyze"
+        @toggle="tuningOpen = !tuningOpen"
       />
 
       <div class="mt-[16px]">

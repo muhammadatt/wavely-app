@@ -9,6 +9,10 @@
  *
  * Every control here invalidates the analysis, so nothing is pushed live —
  * changes are staged and take effect on the next Analyse.
+ *
+ * Collapsed by default. Fifteen parameters is a lot of window, and most of the
+ * time it is open you are watching the event count rather than the grid, so the
+ * header keeps the changed count and RE-ANALYSE visible either way.
  */
 import { computed } from 'vue'
 import { SIBILANCE_TUNING_GROUPS, SIBILANCE_TUNING_DEFAULTS } from '../../audio/sibilanceTuning.js'
@@ -17,8 +21,9 @@ const props = defineProps({
   tuning: { type: Object, required: true },
   accent: { type: String, default: '#7ec8ff' },
   dirty: { type: Boolean, default: false },
+  open: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update', 'reset', 'reanalyze'])
+const emit = defineEmits(['update', 'reset', 'reanalyze', 'toggle'])
 
 // `tuning` carries overrides only, so its own keys ARE the changed set.
 const changed = computed(() => new Set(Object.keys(props.tuning)))
@@ -39,8 +44,23 @@ function onInput(key, event) {
     class="mt-[16px] pt-[14px]"
     style="border-top:1px dashed rgba(126,200,255,.35)"
   >
-    <div class="flex items-center justify-between mb-[10px]">
-      <div>
+    <div class="flex items-center justify-between" :class="open ? 'mb-[10px]' : ''">
+      <button
+        class="flex items-center gap-[7px] cursor-pointer text-left"
+        :aria-expanded="open"
+        aria-controls="sibilance-tuning-body"
+        :title="open ? 'Collapse detection tuning' : 'Expand detection tuning'"
+        @click="emit('toggle')"
+      >
+        <svg
+          viewBox="0 0 24 24" class="w-[10px] h-[10px] shrink-0"
+          fill="none" :stroke="accent" stroke-width="3"
+          stroke-linecap="round" stroke-linejoin="round"
+          :style="{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }"
+          aria-hidden="true"
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
         <span
           :style="{
             font: `700 8.5px 'JetBrains Mono',monospace`,
@@ -49,16 +69,17 @@ function onInput(key, event) {
           }"
         >DETECTION TUNING · DEV</span>
         <span
-          class="ml-[8px]"
+          v-if="open"
           style="font:500 9px 'Inter';color:rgba(255,255,255,.3)"
         >re-analyse to apply · not shipped to users</span>
-      </div>
+      </button>
       <div class="flex items-center gap-[8px]">
         <span
           v-if="changed.size > 0"
           style="font:600 8.5px 'JetBrains Mono',monospace;color:#ffb27a"
         >{{ changed.size }} changed</span>
         <button
+          v-if="open"
           class="px-[10px] py-[5px] rounded cursor-pointer"
           style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.1em;
                  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
@@ -79,7 +100,7 @@ function onInput(key, event) {
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-x-[22px] gap-y-[10px]">
+    <div v-if="open" id="sibilance-tuning-body" class="grid grid-cols-2 gap-x-[22px] gap-y-[10px]">
       <div v-for="group in SIBILANCE_TUNING_GROUPS" :key="group.label">
         <div
           style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.12em;
