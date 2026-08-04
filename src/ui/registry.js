@@ -245,7 +245,7 @@ export const OPERATIONS = [
   {
     id: 'vocal-saturation',
     label: 'Tube Saturation',
-    desc: 'Warm tube-style saturation',
+    desc: 'Warm tube-like saturation',
     category: 'effects',
     group: 'Tone',
     icon: 'saturation',
@@ -256,7 +256,7 @@ export const OPERATIONS = [
   },
   {
     id: 'air-band',
-    label: 'AirBoost',
+    label: 'Air Boost',
     desc: 'Add air and sparkle',
     category: 'effects',
     group: 'Tone',
@@ -268,8 +268,8 @@ export const OPERATIONS = [
   },
   {
     id: 'resonance-suppressor',
-    label: 'ResoTame',
-    desc: 'Tame harsh resonant peaks',
+    label: 'Reso Tame',
+    desc: 'Soothe harsh resonances',
     category: 'effects',
     group: 'Tone',
     icon: 'resonance',
@@ -277,6 +277,8 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: ResonanceModal,
+  },
+  {
     id: 'hum-remover',
     label: 'Hum Remover',
     desc: 'Notch out mains buzz',

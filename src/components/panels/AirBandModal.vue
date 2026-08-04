@@ -38,7 +38,7 @@ const CURVE_FREQS = Array.from({ length: 160 }, (_, i) =>
   F_MIN * Math.pow(F_MAX / F_MIN, i / 159),
 )
 
-const GRID_FREQS = [100, 1000, 10000]
+const GRID_FREQS = [100, 1000, 10000, 20000]
 
 function xFor(freqHz) {
   return (Math.log2(freqHz / F_MIN) / Math.log2(F_MAX / F_MIN)) * CURVE_W
@@ -74,6 +74,25 @@ function formatOutput(v) {
 
 function gridLabel(f) {
   return f >= 1000 ? `${f / 1000}k` : String(f)
+}
+
+function gridLabelStyle(freqHz) {
+  if (freqHz <= F_MIN) {
+    return {
+      left: '0%',
+      transform: 'none',
+    }
+  }
+  if (freqHz >= F_MAX) {
+    return {
+      left: '100%',
+      transform: 'translateX(-100%)',
+    }
+  }
+  return {
+    left: `${(xFor(freqHz) / CURVE_W) * 100}%`,
+    transform: 'translateX(-50%)',
+  }
 }
 
 // Preview is transport playback — the worklet is already in the chain, so what
@@ -129,10 +148,18 @@ async function applyAndClose() {
             <path :d="curveFill" :fill="ACCENT" fill-opacity="0.12" />
             <path :d="curvePath" :stroke="ACCENT" stroke-width="2" fill="none" />
           </svg>
-          <div class="flex w-full justify-between mt-[4px] px-[2px]">
+          <div class="relative w-full mt-[4px] h-[10px]">
             <span
               v-for="f in GRID_FREQS" :key="f"
-              style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.28)"
+              class="absolute top-0"
+              :style="{
+                ...gridLabelStyle(f),
+                fontWeight: 600,
+                fontSize: '8px',
+                fontFamily: 'JetBrains Mono, monospace',
+                letterSpacing: '0.08em',
+                color: 'rgba(255,255,255,.28)',
+              }"
             >{{ gridLabel(f) }}</span>
           </div>
 

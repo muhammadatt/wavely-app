@@ -187,13 +187,13 @@ async function applyAndClose() {
                 letterSpacing: '.12em',
                 color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
               }"
-            >{{ resPreserveHarmonics ? 'HARMONICS PROTECTED' : 'PROTECTION OFF' }}</span>
+            >{{ resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
             <span
               class="block mt-[3px]"
               style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
             >{{ resPreserveHarmonics
-              ? 'Vocal harmonics are left alone.'
-              : 'Diagnostic only — this will thin the voice.' }}</span>
+              ? 'Preserves harmonic frequencies.'
+              : 'Full supression — risks thinning harmonic frequencies.' }}</span>
           </button>
         </div>
       </div>
