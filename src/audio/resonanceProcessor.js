@@ -215,8 +215,8 @@ export class ResonanceKernel {
       ? Math.exp(-this.frameRateMs / p.releaseMs)
       : 0
 
-    // Harmonic geometry changed, so cached masks no longer apply.
-    this.maskCache.clear()
+    // Harmonic geometry changed (band limits), so cached masks no longer apply.
+    if ('freqFloorHz' in partial || 'freqCeilHz' in partial) this.maskCache.clear()
   }
 
   reset() {
