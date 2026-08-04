@@ -16,6 +16,11 @@ import {
   VOCAL_SAT_DEFAULTS,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
+import { ensureHumNotchWorklet } from './humNotchWorkletLoader.js'
+import {
+  HUM_NOTCH_DEFAULTS,
+  toKernelParams as toHumNotchKernelParams,
+} from './effects/humNotch.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -343,6 +348,55 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     ensureWorklet: ensureVocalSatWorklet,
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
+  })
+}
+
+/** Apply Hum Remover notches to a region. */
+export function applyHumNotchRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureHumNotchWorklet,
+    processorName: 'hum-notch-processor',
+    kernelParams: toHumNotchKernelParams({ ...HUM_NOTCH_DEFAULTS, ...params }),
+  })
+}
+
+/**
+ * Analyse a region for mains hum in a Worker.
+ *
+ * Mono mixdown happens here rather than in the worker so only one channel of
+ * samples crosses the boundary, and it is transferred rather than copied.
+ *
+ * @returns {Promise<object>} the detectHum() result — see src/audio/dsp/humDetect.js
+ */
+export function analyzeHumRegion(segments, start, end, sampleRate, channels, options = {}) {
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+
+  // Mono mixdown — hum is common-mode, and the detector expects one channel.
+  const n = channelData[0].length
+  const mono = new Float32Array(n)
+  for (const ch of channelData) {
+    for (let i = 0; i < n; i++) mono[i] += ch[i]
+  }
+  if (channels > 1) {
+    const scale = 1 / channels
+    for (let i = 0; i < n; i++) mono[i] *= scale
+  }
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL('../workers/humWorker.js', import.meta.url),
+      { type: 'module' },
+    )
+    worker.onmessage = (e) => {
+      worker.terminate()
+      if (e.data.type === 'done') resolve(e.data.result)
+      else reject(new Error(e.data.message))
+    }
+    worker.onerror = (err) => {
+      worker.terminate()
+      reject(err)
+    }
+    worker.postMessage({ samples: mono, sampleRate, options }, [mono.buffer])
   })
 }
 
