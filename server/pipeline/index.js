@@ -85,6 +85,56 @@ export async function processAudio(inputPath, originalName, presetId, outputProf
   }
 }
 
+/**
+ * Run an ad-hoc stages array for analysis, outside any preset.
+ *
+ * `processAudio` is preset-driven — it resolves `preset.stages` and always
+ * builds a full report, which needs measureBefore/measureAfter. Analysis
+ * callers (the /api/analyze routes) want a handful of stages and one value out
+ * of `ctx.results`, so they need a way in that does not pretend to be a preset.
+ * Registering a synthetic preset would have worked, but PRESETS is the list the
+ * UI renders — an analysis entry does not belong in it.
+ *
+ * Takes a callback rather than returning ctx so temp-file cleanup cannot be
+ * forgotten: stages register temps on the context, and the caller usually needs
+ * to read one of them (an events JSON) before they go.
+ *
+ * @param {object} opts
+ * @param {string} opts.inputPath
+ * @param {string} [opts.originalName]
+ * @param {Array}  opts.stages       entries in the same shapes runStageEntry takes
+ * @param {object} [opts.preset]     synthetic preset — stages read their config off it
+ * @param {string} [opts.outputProfileId]
+ * @param {(ctx: object) => Promise<T>|T} fn
+ * @returns {Promise<T>}
+ * @template T
+ */
+export async function withAnalysisContext(
+  { inputPath, originalName = 'analysis', stages, preset = {}, outputProfileId = 'podcast' },
+  fn,
+) {
+  const outputProfile = OUTPUT_PROFILES[outputProfileId]
+  if (!outputProfile) throw new Error(`Unknown output profile: ${outputProfileId}`)
+
+  const ctx = createContext({
+    inputPath,
+    originalName,
+    presetId: 'analysis',
+    outputProfileId,
+    preset,
+    outputProfile,
+  })
+
+  try {
+    for (const entry of stages) {
+      await runStageEntry(ctx, entry, null)
+    }
+    return await fn(ctx)
+  } finally {
+    await Promise.all(ctx.tmpFiles.map(removeTmp))
+  }
+}
+
 // ── Stage entry dispatcher ────────────────────────────────────────────────────
 
 /**
