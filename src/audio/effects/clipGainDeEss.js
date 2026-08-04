@@ -69,18 +69,28 @@ export function toFadeParams(p) {
  * @param {number} numSamples      length of the analysed region
  * @param {number} sampleRate
  * @param {object} params
- * @returns {{ deviation: Float32Array, treatedCount: number, maxReductionDb: number }}
+ * @returns {{ deviation: Float32Array, treatedCount: number, decidedCount: number,
+ *            skipped: Array<{index:number,reason:string}>, maxReductionDb: number }}
  */
 export function renderDeEsserEnvelope(measuredEvents, numSamples, sampleRate, params) {
-  const treated = decideClipGains(measuredEvents, toDecisionParams(params))
-  const { multiplier, maxReductionDb } = buildClipGainEnvelope(
-    numSamples, sampleRate, treated, toFadeParams(params),
+  const decided = decideClipGains(measuredEvents, toDecisionParams(params))
+  const { multiplier, eventCount, maxReductionDb, skipped } = buildClipGainEnvelope(
+    numSamples, sampleRate, decided, toFadeParams(params),
   )
 
   const deviation = new Float32Array(numSamples)
   for (let i = 0; i < numSamples; i++) deviation[i] = multiplier[i] - 1
 
-  return { deviation, treatedCount: treated.length, maxReductionDb }
+  return {
+    deviation,
+    // What was actually rendered, not what the decision pass selected. Those
+    // differ whenever an event falls outside the envelope's span, and the
+    // panel must not claim to have attenuated something it did not touch.
+    treatedCount: eventCount,
+    decidedCount: decided.length,
+    skipped,
+    maxReductionDb,
+  }
 }
 
 export function createClipGainDeEsser(audioContext) {
