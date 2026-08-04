@@ -69,3 +69,26 @@ export function maxReductionOf(treatedEvents) {
   }
   return max
 }
+
+/**
+ * Do measurements taken over `region` still apply to `selection`?
+ *
+ * Analysis is expensive and its results are reusable: every event inside the
+ * analysed span was measured, so narrowing the selection to work on one phrase
+ * needs no new detection. Only leaving the span does — outside it nothing was
+ * measured, and an envelope built from what was would simply have no events
+ * there.
+ *
+ * Edges get a hair of tolerance because selection bounds come from pixel
+ * positions, so re-selecting the analysed region exactly can land a float short
+ * and would otherwise read as "moved outside".
+ *
+ * @param {{start:number,end:number}|null} selection
+ * @param {{start:number,end:number}|null} region
+ */
+export function regionCovers(region, selection) {
+  if (!region) return false
+  if (!selection) return true
+  const EPS = 1e-6
+  return selection.start >= region.start - EPS && selection.end <= region.end + EPS
+}

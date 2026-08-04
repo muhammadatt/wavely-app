@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { analyzeSibilance } from '../api/analyze.js'
@@ -9,6 +9,7 @@ import {
   DEESSER_DEFAULTS,
   renderDeEsserEnvelope,
 } from '../audio/effects/clipGainDeEss.js'
+import { regionCovers } from '../audio/dsp/clipGainDecision.js'
 
 export const DEESSER_WINDOW_ID = 'clip-gain-deesser'
 
@@ -20,7 +21,16 @@ export const DEESSER_WINDOW_ID = 'clip-gain-deesser'
 const measuredEvents = ref([])
 const analysis = ref(null)
 const analyzing = ref(false)
-const analyzedKey = ref(null)
+
+/**
+ * The region the measurements describe, and which audio it was measured from.
+ *
+ * Stored as a region rather than as an exact selection fingerprint. Narrowing
+ * the selection to work on one phrase is the normal way to use this, and every
+ * event inside the new bounds was already measured — re-running detection there
+ * would return the same numbers for the third time.
+ */
+const analyzedRegion = ref(null) // { start, end, sourceKey }
 
 /**
  * Detection parameter OVERRIDES — sparse, empty by default.
@@ -37,6 +47,7 @@ const tuning = ref({})
 
 const params = ref({ ...DEESSER_DEFAULTS })
 const preview = ref(false)
+const reductionDb = ref(0)
 const inputDb = ref(-Infinity)
 const outputDb = ref(-Infinity)
 const treatedCount = ref(0)
@@ -50,27 +61,39 @@ export function useDeEsser() {
   } = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
-  /** Identifies the exact audio a result was measured from. */
-  function selectionKey() {
-    if (!state.selection || !state.currentFile) return null
-    const { start, end } = state.selection
+  /**
+   * Identifies the audio itself — not the selection within it.
+   *
+   * Any edit mints new buffer ids, and loading another file replaces them
+   * wholesale, so this changing means the measurements describe audio that is
+   * no longer on the timeline.
+   */
+  function sourceKey() {
+    if (!state.currentFile) return null
     const ids = state.segments.map(s => s.sourceBufferId ?? 'silence').join(',')
-    return `${start.toFixed(6)}:${end.toFixed(6)}:${ids}`
+    return `${state.currentFile.name}:${ids}`
   }
 
   /**
-   * True when the analysis no longer describes the current selection.
+   * True when the analysis no longer covers what is selected.
    *
-   * Event offsets are relative to the analysed region, so an edit that shifts
-   * the timeline would place every one of them somewhere else. Nothing about
-   * the numbers themselves would look wrong, which is why this is checked
-   * rather than trusted.
+   * Two ways to go stale, and they are different failures. The audio changed —
+   * an edit, or a different file — and the offsets now point at unrelated
+   * samples. Or the selection has moved outside the analysed region, where
+   * nothing was measured. Narrowing INSIDE the region is neither: those events
+   * are already measured.
    */
-  const isStale = computed(
-    () => analysis.value !== null && analyzedKey.value !== selectionKey(),
-  )
+  const isStale = computed(() => {
+    const region = analyzedRegion.value
+    if (!region) return false
+    if (region.sourceKey !== sourceKey()) return true
+    return !regionCovers(region, state.selection)
+  })
 
   const hasAnalysis = computed(() => measuredEvents.value.length > 0)
+
+  /** Measurements exist AND still describe what is selected. */
+  const envelopeValid = computed(() => hasAnalysis.value && !isStale.value)
 
   function initChain() {
     const ctx = getAudioContext()
@@ -88,6 +111,7 @@ export function useDeEsser() {
       if (nodes) {
         inputDb.value = nodes.getInputLevelDb()
         outputDb.value = nodes.getOutputLevelDb()
+        reductionDb.value = nodes.getReduction()
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -101,6 +125,7 @@ export function useDeEsser() {
     }
     inputDb.value = -Infinity
     outputDb.value = -Infinity
+    reductionDb.value = 0
   }
 
   /**
@@ -111,21 +136,28 @@ export function useDeEsser() {
    * milliseconds, no server, no re-detection.
    */
   function rebuildEnvelope() {
-    if (!state.selection || !state.currentFile || !hasAnalysis.value) {
+    // A stale envelope must not keep playing. Event offsets are relative to the
+    // analysed region, so once the audio underneath has changed they point at
+    // unrelated samples — audible, wrong, and with nothing on screen to explain
+    // it beyond a line of text.
+    if (!state.currentFile || !envelopeValid.value) {
       treatedCount.value = 0
       maxReductionDb.value = 0
       return null
     }
-    const { start, end } = state.selection
+    const region = analyzedRegion.value
     const sampleRate = state.currentFile.sampleRate
-    const numSamples = Math.ceil((end - start) * sampleRate)
+    // Built over the ANALYSED region, positioned at its start. Event offsets are
+    // relative to that, so narrowing the selection changes nothing here — it
+    // only changes which part of it apply() writes back.
+    const numSamples = Math.ceil((region.end - region.start) * sampleRate)
 
     const rendered = renderDeEsserEnvelope(
       measuredEvents.value, numSamples, sampleRate, params.value,
     )
     treatedCount.value = rendered.treatedCount
     maxReductionDb.value = rendered.maxReductionDb
-    return { deviation: rendered.deviation, startSec: start }
+    return { deviation: rendered.deviation, startSec: region.start }
   }
 
   function pushEnvelope() {
@@ -147,6 +179,13 @@ export function useDeEsser() {
     }
   }
 
+  // Going stale has to take the envelope out of the chain, not just change the
+  // status text. Until this existed the effect kept applying measurements from
+  // a region — or a file — that was no longer under the playhead.
+  watch(isStale, (stale) => {
+    if (stale) pushEnvelope()
+  })
+
   /** Every attenuation control routes through here. */
   function syncParam(name, value) {
     params.value = { ...params.value, [name]: value }
@@ -165,7 +204,7 @@ export function useDeEsser() {
   function clearAnalysis() {
     measuredEvents.value = []
     analysis.value = null
-    analyzedKey.value = null
+    analyzedRegion.value = null
     treatedCount.value = 0
     maxReductionDb.value = 0
     pushEnvelope()
@@ -185,14 +224,16 @@ export function useDeEsser() {
         end,
         sampleRate: state.currentFile.sampleRate,
         channels: state.currentFile.channels,
-        params: pruneUndefined({
-          detection, minDurationMs, contextWindowMs, ...params.value,
-        }),
+        // Detection settings only. The ceilings, ratio, cap and fades never
+        // reach detection — measuredEvents is collected before the ceiling
+        // test — so sending them would only change a treatedCount in the
+        // response that the client recomputes anyway.
+        params: pruneUndefined({ detection, minDurationMs, contextWindowMs }),
       })
 
       analysis.value = result
       measuredEvents.value = result.measuredEvents
-      analyzedKey.value = selectionKey()
+      analyzedRegion.value = { start, end, sourceKey: sourceKey() }
       pushEnvelope()
 
       const n = result.measuredEvents.length
@@ -210,11 +251,21 @@ export function useDeEsser() {
   }
 
   async function apply() {
-    if (!state.selection || !hasAnalysis.value) return
+    if (!state.selection || !envelopeValid.value) return
     const { start, end } = state.selection
 
     const envelope = rebuildEnvelope()
     if (!envelope) return
+
+    // The envelope spans the analysed region; apply writes back only the
+    // current selection, so take the slice that lines up with it.
+    const sampleRate = state.currentFile.sampleRate
+    const offset = Math.round((start - envelope.startSec) * sampleRate)
+    const length = Math.ceil((end - start) * sampleRate)
+    const slice = envelope.deviation.subarray(
+      Math.max(0, offset),
+      Math.min(envelope.deviation.length, Math.max(0, offset) + length),
+    )
 
     const wasPreviewing = preview.value
     if (wasPreviewing) togglePreview()
@@ -222,7 +273,7 @@ export function useDeEsser() {
     startProcessing('De-essing...')
     try {
       const buffer = applyDeEsserRegion(
-        state.segments, start, end, envelope.deviation,
+        state.segments, start, end, slice,
         state.currentFile.sampleRate, state.currentFile.channels,
       )
       const bufferId = replaceRegion(start, end, buffer)
@@ -246,9 +297,9 @@ export function useDeEsser() {
 
   return {
     params, preview, analysis, analyzing, measuredEvents,
-    treatedCount, maxReductionDb, inputDb, outputDb,
+    treatedCount, maxReductionDb, reductionDb, inputDb, outputDb,
     tuning, syncTuning, resetTuning,
-    hasAnalysis, hasSelection, isStale,
+    hasAnalysis, hasSelection, isStale, envelopeValid, analyzedRegion,
     togglePreview, syncParam, analyze, apply, teardown,
     openModal: () => openWindow(DEESSER_WINDOW_ID),
     closeModal: () => closeWindow(DEESSER_WINDOW_ID),

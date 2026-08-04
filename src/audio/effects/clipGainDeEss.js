@@ -103,8 +103,17 @@ export function createClipGainDeEsser(audioContext) {
    * bounds the allocation by the selection.
    */
   let envelopeBuffer = null
+  let envelopeDeviation = null
   let regionStartSec = 0
   let modulator = null
+
+  // Transport anchor, so getReduction() can read the envelope at the position
+  // that is actually sounding. Every other effect in the chain measures its own
+  // reduction live; reporting the envelope's planned maximum instead would be a
+  // different quantity wearing the same meter.
+  let transportWhen = 0
+  let transportStartSec = 0
+  let running = false
 
   function stopTransport() {
     if (!modulator) return
@@ -115,6 +124,7 @@ export function createClipGainDeEsser(audioContext) {
       // Already stopped — starting and stopping in the same tick is normal.
     }
     modulator = null
+    running = false
   }
 
   /**
@@ -143,7 +153,12 @@ export function createClipGainDeEsser(audioContext) {
     modulator = audioContext.createBufferSource()
     modulator.buffer = envelopeBuffer
     modulator.connect(gainNode.gain)
+    modulator.onended = () => { running = false }
     modulator.start(at, offset)
+
+    transportWhen = at
+    transportStartSec = startSec < regionStartSec ? regionStartSec : startSec
+    running = true
   }
 
   const inputMonitor = audioContext.createGain()
@@ -166,6 +181,7 @@ export function createClipGainDeEsser(audioContext) {
         stopTransport()
         if (!value || !value.deviation?.length) {
           envelopeBuffer = null
+          envelopeDeviation = null
           return
         }
         const buf = audioContext.createBuffer(
@@ -173,6 +189,7 @@ export function createClipGainDeEsser(audioContext) {
         )
         buf.copyToChannel(value.deviation, 0)
         envelopeBuffer = buf
+        envelopeDeviation = value.deviation
         regionStartSec = value.startSec ?? 0
         return
       }
@@ -181,6 +198,26 @@ export function createClipGainDeEsser(audioContext) {
 
     getParam(name) {
       return params[name]
+    },
+
+    /**
+     * Reduction currently being applied, in negative dB — same convention as
+     * DynamicsCompressorNode.reduction and the other effects' meters.
+     *
+     * Read straight out of the envelope at the sounding position rather than
+     * measured from the signal: the envelope IS the gain, so this is exact and
+     * costs an array index. Zero whenever nothing is playing, which is the
+     * honest answer — no audio is being reduced.
+     */
+    getReduction() {
+      if (!running || !envelopeDeviation) return 0
+      const elapsed = audioContext.currentTime - transportWhen
+      if (elapsed < 0) return 0
+      const posSec = transportStartSec - regionStartSec + elapsed
+      const idx = Math.round(posSec * audioContext.sampleRate)
+      if (idx < 0 || idx >= envelopeDeviation.length) return 0
+      const gain = 1 + envelopeDeviation[idx]
+      return gain > 0 ? 20 * Math.log10(gain) : 0
     },
 
     getInputLevelDb() {

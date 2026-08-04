@@ -7,7 +7,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideClipGains, maxReductionOf, CLIP_GAIN_DEFAULTS } from '../../src/audio/dsp/clipGainDecision.js'
+import {
+  decideClipGains, maxReductionOf, regionCovers, CLIP_GAIN_DEFAULTS,
+} from '../../src/audio/dsp/clipGainDecision.js'
 import { buildClipGainEnvelope } from '../../src/audio/dsp/clipGainEnvelope.js'
 
 const SR = 44100
@@ -126,4 +128,32 @@ test('no events means a flat envelope, not a broken one', () => {
   const { multiplier, eventCount } = buildClipGainEnvelope(1000, SR, decideClipGains([], CLIP_GAIN_DEFAULTS))
   assert.equal(eventCount, 0)
   for (let i = 0; i < 1000; i++) assert.equal(multiplier[i], 1)
+})
+
+test('narrowing the selection inside an analysed region reuses it', () => {
+  // The reason this exists: zooming in on one phrase should not cost a second
+  // detection pass. Every event in the narrower span was already measured.
+  const region = { start: 10, end: 20 }
+  assert.equal(regionCovers(region, { start: 10, end: 20 }), true, 'the region itself')
+  assert.equal(regionCovers(region, { start: 12, end: 15 }), true, 'narrowed inside')
+  assert.equal(regionCovers(region, { start: 10, end: 11 }), true, 'flush with the start')
+  assert.equal(regionCovers(region, { start: 19, end: 20 }), true, 'flush with the end')
+})
+
+test('leaving the analysed region does not reuse it', () => {
+  const region = { start: 10, end: 20 }
+  assert.equal(regionCovers(region, { start: 9, end: 15 }), false, 'starts earlier')
+  assert.equal(regionCovers(region, { start: 15, end: 21 }), false, 'ends later')
+  assert.equal(regionCovers(region, { start: 30, end: 40 }), false, 'disjoint')
+  assert.equal(regionCovers(region, { start: 5, end: 25 }), false, 'strictly wider')
+})
+
+test('region containment tolerates float edges from pixel positions', () => {
+  const region = { start: 10, end: 20 }
+  assert.equal(regionCovers(region, { start: 10 - 1e-9, end: 20 + 1e-9 }), true)
+  assert.equal(regionCovers(region, { start: 9.99, end: 20 }), false, 'real overshoot still counts')
+})
+
+test('no analysis means nothing is covered', () => {
+  assert.equal(regionCovers(null, { start: 1, end: 2 }), false)
 })

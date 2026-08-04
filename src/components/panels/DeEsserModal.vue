@@ -22,9 +22,9 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   params, preview, analysis, analyzing, measuredEvents,
-  treatedCount, maxReductionDb, inputDb, outputDb,
+  treatedCount, maxReductionDb, reductionDb, inputDb, outputDb,
   tuning, syncTuning, resetTuning,
-  hasAnalysis, hasSelection, isStale,
+  hasAnalysis, hasSelection, isStale, envelopeValid, analyzedRegion,
   togglePreview, syncParam, analyze, apply, teardown, closeModal,
 } = useDeEsser()
 
@@ -69,13 +69,29 @@ const pct = v => `${Math.round(v * 100)}`
 const db = v => v.toFixed(1)
 const ms = v => v.toFixed(1)
 
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60)
+  const s = (sec - m * 60).toFixed(1).padStart(4, '0')
+  return `${m}:${s}`
+}
+
+/** The analysed span, so "analyse again" says which bounds were left. */
+function fmtRange(region) {
+  return `${fmtTime(region.start)}–${fmtTime(region.end)}`
+}
+
 const statusLine = computed(() => {
   if (analyzing.value) return 'Detecting sibilants…'
   if (!hasAnalysis.value) {
     if (analysis.value) return 'No sibilant events found in this selection.'
     return 'Analyse the selection to find sibilants.'
   }
-  if (isStale.value) return 'Audio changed since analysis — analyse again.'
+  if (isStale.value) {
+    const region = analyzedRegion.value
+    return region
+      ? `Selection is outside the analysed ${fmtRange(region)} — analyse again.`
+      : 'Audio changed since analysis — analyse again.'
+  }
   const total = measuredEvents.value.length
   const untreated = total - treatedCount.value
   const tail = untreated > 0 ? ` ${untreated} under the ceiling.` : ''
@@ -110,7 +126,10 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
-      <GainReductionBar :reduction-db="-maxReductionDb" :accent="ACCENT" />
+      <!-- Live reduction at the playhead, matching every other effect's meter.
+           The envelope's planned maximum is a different quantity and lives in
+           the status line, where it does not look like a meter. -->
+      <GainReductionBar :reduction-db="reductionDb" :accent="ACCENT" />
 
       <div class="flex items-start justify-between gap-[20px] mt-[20px]">
         <LevelMeter :db="inputDb" label="IN" :height="164" />
@@ -155,7 +174,7 @@ async function applyAndClose() {
                 @update:model-value="v => syncParam('stridentCeilingDb', v)"
                 :min="-12" :max="18" :step="0.5" :value-font-px="12"
                 label="/s/ Ceiling dB" :accent="ACCENT" :format-value="oneDp"
-                :disabled="!preview || !hasAnalysis"
+                :disabled="!preview || !envelopeValid"
               />
             </div>
             <div class="w-[104px]">
@@ -164,7 +183,7 @@ async function applyAndClose() {
                 @update:model-value="v => syncParam('nonStridentCeilingDb', v)"
                 :min="-18" :max="12" :step="0.5" :value-font-px="12"
                 label="/f/ Ceiling dB" :accent="ACCENT" :format-value="oneDp"
-                :disabled="!preview || !hasAnalysis"
+                :disabled="!preview || !envelopeValid"
               />
             </div>
             <div class="w-[104px]">
@@ -173,7 +192,7 @@ async function applyAndClose() {
                 @update:model-value="v => syncParam('reductionRatio', v)"
                 :min="0" :max="1" :step="0.01" :value-font-px="12"
                 label="Amount" :accent="ACCENT" :format-value="pct"
-                :disabled="!preview || !hasAnalysis"
+                :disabled="!preview || !envelopeValid"
               />
             </div>
             <div class="w-[104px]">
@@ -182,7 +201,7 @@ async function applyAndClose() {
                 @update:model-value="v => syncParam('maxReductionDb', v)"
                 :min="0" :max="24" :step="0.5" :value-font-px="12"
                 label="Max Cut dB" :accent="ACCENT" :format-value="db"
-                :disabled="!preview || !hasAnalysis"
+                :disabled="!preview || !envelopeValid"
               />
             </div>
           </div>
@@ -215,7 +234,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('fricativeInMs', v)"
               :min="0.5" :max="20" :step="0.5" :value-font-px="11"
               label="Fric In" :accent="ACCENT" :format-value="ms"
-              :disabled="!preview || !hasAnalysis"
+              :disabled="!preview || !envelopeValid"
             />
           </div>
           <div class="w-[70px]">
@@ -224,7 +243,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('fricativeOutMs', v)"
               :min="0.5" :max="20" :step="0.5" :value-font-px="11"
               label="Fric Out" :accent="ACCENT" :format-value="ms"
-              :disabled="!preview || !hasAnalysis"
+              :disabled="!preview || !envelopeValid"
             />
           </div>
           <div class="w-[70px]">
@@ -233,7 +252,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('affricateInMs', v)"
               :min="0.5" :max="20" :step="0.5" :value-font-px="11"
               label="Affr In" :accent="ACCENT" :format-value="ms"
-              :disabled="!preview || !hasAnalysis"
+              :disabled="!preview || !envelopeValid"
             />
           </div>
           <div class="w-[70px]">
@@ -242,7 +261,7 @@ async function applyAndClose() {
               @update:model-value="v => syncParam('affricateOutMs', v)"
               :min="0.5" :max="20" :step="0.5" :value-font-px="11"
               label="Affr Out" :accent="ACCENT" :format-value="ms"
-              :disabled="!preview || !hasAnalysis"
+              :disabled="!preview || !envelopeValid"
             />
           </div>
         </div>
@@ -271,12 +290,14 @@ async function applyAndClose() {
           :met="hasSelection"
           message="Make a selection to de-ess"
           label="Apply De-Essing"
-          :disabled="!preview || !hasAnalysis || treatedCount === 0"
+          :disabled="!preview || !envelopeValid || treatedCount === 0"
           :disabled-hint="!preview
             ? 'Turn the de-esser on to apply it'
             : !hasAnalysis
               ? 'Analyse the selection first'
-              : 'No events are above their ceiling — lower it to treat some'"
+              : isStale
+                ? 'Selection moved outside the analysed region — analyse again'
+                : 'No events are above their ceiling — lower it to treat some'"
           @toggle-preview="togglePlayback"
           @apply="applyAndClose"
         />
