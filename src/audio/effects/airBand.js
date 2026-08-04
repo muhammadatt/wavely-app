@@ -55,7 +55,7 @@ export function createAirBand(audioContext) {
       worklet.connect(preOutput)
     })
     .catch((err) => {
-      console.error('Air Band worklet failed to load, running bypassed:', err)
+      console.error('AirBoost worklet failed to load, running bypassed:', err)
     })
 
   // Level meter taps on dedicated monitor nodes fed from stable internal
@@ -107,7 +107,7 @@ export function createAirBand(audioContext) {
 
 export const airBandEffect = {
   id: 'air-band',
-  name: 'Air Band',
+  name: 'AirBoost',
   createNodes(audioContext) {
     return createAirBand(audioContext)
   },

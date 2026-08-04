@@ -69,7 +69,7 @@ export function createVocalSat(audioContext) {
       worklet.connect(preOutput)
     })
     .catch((err) => {
-      console.error('Vocal Saturation worklet failed to load, running bypassed:', err)
+      console.error('Tube Saturation worklet failed to load, running bypassed:', err)
     })
 
   const inputMonitor = audioContext.createGain()
@@ -119,7 +119,7 @@ export function createVocalSat(audioContext) {
 
 export const vocalSatEffect = {
   id: 'vocal-sat',
-  name: 'Vocal Saturation',
+  name: 'Tube Saturation',
   createNodes(audioContext) {
     return createVocalSat(audioContext)
   },

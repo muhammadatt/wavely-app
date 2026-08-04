@@ -103,7 +103,7 @@ export function useAirBand() {
     const wasPreviewing = airBandPreview.value
     if (wasPreviewing) togglePreview()
 
-    startProcessing('Applying Air Band...')
+    startProcessing('Applying AirBoost...')
     try {
       const buffer = await applyAirBandRegion(
         state.segments, start, end,
@@ -113,10 +113,10 @@ export function useAirBand() {
       const bufferId = replaceRegion(start, end, buffer)
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
-      showToast('Air Band applied')
+      showToast('AirBoost applied')
     } catch (err) {
-      console.error('Air Band failed:', err)
-      showToast('Air Band failed')
+      console.error('AirBoost failed:', err)
+      showToast('AirBoost failed')
     } finally {
       endProcessing()
     }

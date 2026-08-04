@@ -133,10 +133,10 @@ export function useVocalSaturation() {
       const bufferId = replaceRegion(start, end, buffer)
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
-      showToast('Vocal saturation applied')
+      showToast('Tube saturation applied')
     } catch (err) {
-      console.error('Vocal saturation failed:', err)
-      showToast('Vocal saturation failed')
+      console.error('Tube saturation failed:', err)
+      showToast('Tube saturation failed')
     } finally {
       endProcessing()
     }

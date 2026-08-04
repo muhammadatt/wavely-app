@@ -242,8 +242,8 @@ export const OPERATIONS = [
   },
   {
     id: 'vocal-saturation',
-    label: 'Vocal Saturation',
-    desc: 'Parallel tube-style warmth',
+    label: 'Tube Saturation',
+    desc: 'Warm tube-style saturation',
     category: 'effects',
     group: 'Tone',
     icon: 'saturation',
@@ -254,8 +254,8 @@ export const OPERATIONS = [
   },
   {
     id: 'air-band',
-    label: 'Air Band',
-    desc: 'High-shelf presence lift',
+    label: 'AirBoost',
+    desc: 'Add air and sparkle',
     category: 'effects',
     group: 'Tone',
     icon: 'air',
@@ -337,7 +337,7 @@ export const WINDOW_COMPONENTS = Object.fromEntries(
 /**
  * Rank operations against a query for the command palette.
  *
- * Subsequence matching rather than substring, so "vsat" finds Vocal Saturation.
+ * Subsequence matching rather than substring, so "tsat" finds Tube Saturation.
  * Scoring only has to separate an exact label hit from a keyword hit from a
  * loose fuzzy hit — the list is short enough that finer ranking is noise.
  */

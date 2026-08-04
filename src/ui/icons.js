@@ -40,7 +40,8 @@ export const ICONS = {
   normalize: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
   opto: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   fet: '<polyline points="13 2 4 14 11 14 10 22 20 10 13 10 13 2"/>',
-  saturation: '<path d="M3 12c3 0 3-6 6-6s3 12 6 12 3-6 6-6"/>',
+  // Tube saturation: light-bulb silhouette to suggest analog tube glow.
+  saturation: '<path d="M12 3a6 6 0 00-3.6 10.8c1 .8 1.6 1.8 1.8 3.2h3.6c.2-1.4.8-2.4 1.8-3.2A6 6 0 0012 3z"/><path d="M9 17h6"/><path d="M9.5 20h5"/><path d="M10 11l2 2 2-2"/>',
   // A rising shelf: flat, then a gentle knee up to a plateau — the air curve.
   air: '<path d="M2 17c5 0 8 0 11-5s5-5 9-5"/><path d="M2 21h20" opacity=".35"/>',
   noise: '<path d="M12 2a3 3 0 013 3v7a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 23h8"/>',
