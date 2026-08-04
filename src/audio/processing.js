@@ -408,6 +408,43 @@ export function applyHumNotchRegion(segments, start, end, params, sampleRate, ch
 }
 
 /**
+ * Apply the clip-gain de-esser envelope to a region.
+ *
+ * No OfflineAudioContext render here, unlike every other apply path. Preview
+ * drives a GainNode's AudioParam from the envelope buffer, and that was
+ * measured to be bit-identical to multiplying the arrays (maxErr 0), so the
+ * multiply IS the preview — routing it through a worklet would add a graph and
+ * a promise to reach the same samples.
+ *
+ * @param {Array}  segments
+ * @param {number} start           region start (seconds)
+ * @param {number} end             region end (seconds)
+ * @param {Float32Array} deviation envelope as deviation from unity, region-aligned
+ * @param {number} sampleRate
+ * @param {number} channels
+ * @returns {AudioBuffer}
+ */
+export function applyDeEsserRegion(segments, start, end, deviation, sampleRate, channels) {
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  const numSamples = channelData[0].length
+
+  const ctx = new OfflineAudioContext(channels, numSamples, sampleRate)
+  const out = ctx.createBuffer(channels, numSamples, sampleRate)
+
+  const n = Math.min(numSamples, deviation.length)
+  for (let ch = 0; ch < channels; ch++) {
+    const src = channelData[ch]
+    const dst = out.getChannelData(ch)
+    for (let i = 0; i < n; i++) dst[i] = src[i] * (1 + deviation[i])
+    // Envelope shorter than the region (or absent) leaves the tail untouched,
+    // matching what an ended modulator does during preview.
+    for (let i = n; i < numSamples; i++) dst[i] = src[i]
+  }
+
+  return out
+}
+
+/**
  * Analyse a region for mains hum in a Worker.
  *
  * Only a bounded window is rendered. detectHum examines at most

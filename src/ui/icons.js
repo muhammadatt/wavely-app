@@ -51,6 +51,9 @@ export const ICONS = {
   // Hum: a steady sine with a notch taken out of its middle — the mains tone
   // and the cut being placed on it.
   hum: '<path d="M2 12c1.5-4 3-4 4.5 0s3 4 4.5 0"/><path d="M13 12c1.5-4 3-4 4.5 0s3 4 4.5 0" opacity=".35"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
+  // De-esser: a sibilant burst with a bracket clamping its top — the ceiling
+  // being placed on the peak, which is exactly what the control does.
+  deesser: '<path d="M3 16c2 0 2.5-6 4.5-6S10 16 12 16s2.5-8 4.5-8S19 16 21 16"/><path d="M5 5h14" stroke-dasharray="3 2"/><path d="M5 4v2M19 4v2"/>',
   // Waveform, flat stretch, waveform — the gap being targeted. Was a second
   // copy of the `cut` scissors, which is the clipboard verb's glyph.
   removeSilence: '<path d="M3 6v12M7 9v6"/><path d="M9.5 12h5"/><path d="M17 9v6M21 6v12"/>',
