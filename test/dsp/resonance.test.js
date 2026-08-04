@@ -8,6 +8,7 @@ import {
   RESONANCE_KERNEL_DEFAULTS,
   processResonanceBuffer,
 } from '../../src/audio/resonanceProcessor.js'
+import { effectivePitchRange, PITCH_RANGES } from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
 
@@ -311,6 +312,26 @@ test('the pitch search range is settable and clamped to what the frame resolves'
   kernel.setParams({ pitchMinHz: 70, pitchMaxHz: 400 })
   assert.equal(kernel.pitchRange.minHz, 70)
   assert.equal(kernel.f0.lagMax, Math.floor(SR / 70))
+})
+
+test('the range the UI shows is the range the kernel uses', () => {
+  // effectivePitchRange mirrors the kernel's clamp on the main thread, because
+  // a worklet has no way to hand a value back for rendering a label. Mirrored
+  // logic drifts, so pin the two together.
+  for (const sampleRate of [44100, 48000, 96000]) {
+    const kernel = new ResonanceKernel(sampleRate)
+    for (const [key, range] of Object.entries(PITCH_RANGES)) {
+      kernel.setParams({ pitchMinHz: range.minHz, pitchMaxHz: range.maxHz })
+      const shown = effectivePitchRange(sampleRate, key)
+      assert.ok(
+        Math.abs(shown.minHz - kernel.pitchRange.minHz) < 1e-9,
+        `${key} @ ${sampleRate}: UI says ${shown.minHz}, kernel uses ${kernel.pitchRange.minHz}`,
+      )
+      assert.equal(shown.maxHz, kernel.pitchRange.maxHz)
+    }
+  }
+  // The case that motivated it: 'wide' asks for 40 Hz and does not get it.
+  assert.ok(effectivePitchRange(44100, 'wide').minHz > PITCH_RANGES.wide.minHz)
 })
 
 test('the mask cache survives a knob move that does not change its geometry', () => {

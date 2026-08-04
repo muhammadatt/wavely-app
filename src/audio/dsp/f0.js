@@ -60,7 +60,7 @@ export class F0Tracker {
    * @param {number} opts.sampleRate
    * @param {number} [opts.frameSize=2048] must match the consumer's STFT n_fft
    * @param {number} [opts.medianWindow=10]
-   * @param {number} [opts.defaultF0=null] seed used before the first voiced frame
+   * @param {number} [opts.defaultF0=null] seed used before the first pitched frame
    * @param {number} [opts.minHz=70] low end of the pitch search
    * @param {number} [opts.maxHz=400] high end of the pitch search
    */

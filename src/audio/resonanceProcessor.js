@@ -277,8 +277,10 @@ export class ResonanceKernel {
       : 0
 
     // Pitch search range. The tracker clamps to what the frame can resolve and
-    // reports back what it settled on, so the UI can show the real range rather
-    // than the requested one.
+    // returns the range it settled on; kept here so tests and any future
+    // in-worklet reporting can read it. The UI mirrors the same clamp on the
+    // main thread via effectivePitchRange() — there is no channel out of a
+    // worklet for a value that is needed to render a label.
     this.pitchRange = this.f0.setRange(
       p.pitchMinHz ?? DEFAULT_PITCH_MIN_HZ,
       p.pitchMaxHz ?? DEFAULT_PITCH_MAX_HZ,

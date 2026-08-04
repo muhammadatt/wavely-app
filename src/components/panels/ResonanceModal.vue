@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
-import { PITCH_RANGES } from '../../audio/effects/resonance.js'
+import { PITCH_RANGES, effectivePitchRange } from '../../audio/resonanceParams.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
@@ -53,8 +53,11 @@ const modeCaption = computed(() =>
   resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
 )
 
+// The kernel clamps the low end to what its analysis frame can resolve, so show
+// what it will actually search rather than what the preset asked for.
 const pitchRangeCaption = computed(() => {
-  const r = PITCH_RANGES[resPitchRange.value] ?? PITCH_RANGES.voice
+  const sr = state.currentFile?.sampleRate ?? 44100
+  const r = effectivePitchRange(sr, resPitchRange.value)
   return `${Math.round(r.minHz)}–${Math.round(r.maxHz)} Hz`
 })
 

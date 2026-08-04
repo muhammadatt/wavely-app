@@ -19,26 +19,12 @@
 
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
+import { PITCH_RANGES, RESONANCE_FRAME_SIZE } from '../resonanceParams.js'
 
-/** Matches FFT_SIZE in resonanceProcessor.js. */
-export const RESONANCE_LATENCY_SAMPLES = 2048
+export { PITCH_RANGES, RESONANCE_FRAME_SIZE, effectivePitchRange } from '../resonanceParams.js'
 
-/**
- * Pitch search ranges for harmonic protection.
- *
- * The server's stage only ever ran on speech, so its range was a constant. This
- * effect is a general tool, and an out-of-range source does not degrade
- * gracefully: the tracker returns the best lag *within* the range, which for an
- * out-of-range pitch is an octave artefact reported with full confidence, and
- * the protection mask then lands on bins that are not harmonics.
- *
- * `wide` bottoms out at 40 Hz because a 2048-sample frame cannot autocorrelate
- * reliably at longer lags; the kernel clamps to what it can actually resolve.
- */
-export const PITCH_RANGES = {
-  voice: { minHz: 70, maxHz: 400, label: 'VOICE', title: 'Speech and vocals (70–400 Hz)' },
-  wide: { minHz: 40, maxHz: 1200, label: 'WIDE', title: 'Instruments and full-range material (40–1200 Hz)' },
-}
+/** This STFT holds back exactly one frame before a sample is reconstructed. */
+export const RESONANCE_LATENCY_SAMPLES = RESONANCE_FRAME_SIZE
 
 // Defaults are the acx_audiobook preset's resonanceSuppressor block
 // (src/audio/presets.js), which is the tuning these were chosen against.

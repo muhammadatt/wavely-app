@@ -36,9 +36,10 @@
  *   - The server could assume speech. This effect is pointed at whatever the
  *     user loaded, so the check is described in terms of a *pitched source*
  *     rather than a speaker. The mechanism is identical — an F0 contour with a
- *     concentration test — but a bass guitar, a sustained synth or a hummed note
- *     trip it exactly as a voice does, and calling that "the speaker" in the UI
- *     would be wrong.
+ *     concentration test — but anything sustained and pitched inside the
+ *     tracker's range trips it exactly as a voice does: a bass or cello line in
+ *     its upper register, a held synth note, a hummed pitch. Calling that "the
+ *     speaker" in the UI would be wrong.
  */
 
 import { getFFT } from './fft.js'
@@ -77,8 +78,10 @@ export const HUM_DETECT_DEFAULTS = {
  * Frequencies where a flagged harmonic could plausibly be the fundamental of a
  * wanted pitched source rather than hum. Only used to decide whether the F0
  * check is worth running for a given harmonic; the verdict comes from the
- * measured pitch. Spans speech but is not limited to it — a bass, a cello and a
- * held synth note all live in here.
+ * measured pitch. Nothing about the band is specific to speech — a held synth
+ * note or an instrument playing in this register sits in it just as a narrator
+ * does. Note it is narrower than the tracker's own range, and excludes
+ * fundamentals below 80 Hz such as a bass guitar's bottom strings.
  */
 const PITCHED_F0_RANGE_HZ = [80, 300]
 
@@ -465,7 +468,8 @@ export function detectHum(samples, sampleRate, options = {}) {
     /**
      * Median pitch of the sustained source found in the selection, or null
      * when none was found or the contour was too scattered to trust. Usually a
-     * voice, but a bass, cello or held synth note reads the same way.
+     * voice, but any sustained pitched source inside the tracker's range
+     * reads the same way.
      */
     pitchedSourceHz: pitchTrusted ? round2(source.pitchHz) : null,
     pitchConcentration: round2(source.concentration),
