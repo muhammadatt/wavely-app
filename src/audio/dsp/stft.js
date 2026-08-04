@@ -51,6 +51,12 @@ export class StftProcessor {
 
     // Scratch, so steady-state processing allocates nothing.
     this.frame = new Float64Array(fftSize)
+    /**
+     * The same frame before the analysis window is applied. Pitch estimation
+     * wants this: estimate_f0_contour.py autocorrelates unwindowed frames, and
+     * a Hann taper would bias the autocorrelation toward shorter lags.
+     */
+    this.rawFrame = new Float64Array(fftSize)
     this.specRe = new Float64Array(this.binCount)
     this.specIm = new Float64Array(this.binCount)
 
@@ -120,13 +126,16 @@ export class StftProcessor {
   }
 
   _processFrame(frameFn) {
-    const { fftSize, hopSize, window, inRing, frame, ola, olaWin, specRe, specIm } =
-      this
+    const { fftSize, hopSize, window, inRing, frame, rawFrame, ola, olaWin,
+      specRe, specIm } = this
 
-    // Gather the ring into linear order (oldest first) and window it.
+    // Gather the ring into linear order (oldest first), keeping both the raw
+    // frame and the windowed one.
     let r = this.inWrite // oldest sample sits at the write cursor
     for (let i = 0; i < fftSize; i++) {
-      frame[i] = inRing[r] * window[i]
+      const x = inRing[r]
+      rawFrame[i] = x
+      frame[i] = x * window[i]
       r = r + 1 === fftSize ? 0 : r + 1
     }
 
