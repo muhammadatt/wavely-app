@@ -72,6 +72,19 @@ function deltaWidth(deltaDb) {
   return Math.max(0, Math.min(100, (deltaDb / DELTA_FULL_SCALE_DB) * 100))
 }
 
+/**
+ * Accessible name for a harmonic's toggle. The visible row is a bar and a
+ * number, so the label has to carry the frequency, how prominent it is, and
+ * whether the pitch check thinks it is the voice — everything a sighted user
+ * reads off the row before deciding.
+ */
+function harmonicToggleLabel(h) {
+  if (h.deltaDb === null) return `${h.frequency} Hz — not analysed`
+  const prominence = `${h.deltaDb.toFixed(1)} dB above the surrounding floor`
+  if (h.matchesVoicePitch) return `${h.frequency} Hz, ${prominence}, matches the speaker's pitch`
+  return `${h.frequency} Hz, ${prominence}`
+}
+
 /** Why a harmonic was marked as the speaker rather than hum. */
 function voiceTooltip(h) {
   const pitch = humAnalysis.value?.voicePitchHz
@@ -171,19 +184,25 @@ async function applyAndClose() {
               class="grid items-center gap-x-[10px] py-[7px]"
               style="grid-template-columns:26px 62px 1fr 58px;border-bottom:1px solid rgba(255,255,255,.04)"
             >
+              <!-- Reads as a checkbox to assistive tech: the visual tick and
+                   the accent fill are the only other cue that a row is on. -->
               <button
                 class="w-[16px] h-[16px] rounded-[4px] cursor-pointer transition-all"
                 :style="{
                   background: h.enabled ? ACCENT : 'transparent',
                   border: `1px solid ${h.enabled ? ACCENT : 'rgba(255,255,255,.22)'}`,
                 }"
+                role="checkbox"
+                :aria-checked="h.enabled"
+                :aria-label="harmonicToggleLabel(h)"
                 :title="h.enabled ? 'Notching this frequency' : 'Leave this frequency alone'"
                 :disabled="h.deltaDb === null"
                 @click="toggleHarmonic(h.frequency)"
               >
                 <svg v-if="h.enabled" viewBox="0 0 24 24" class="w-full h-full"
                      fill="none" stroke="#1a1024" stroke-width="4"
-                     stroke-linecap="round" stroke-linejoin="round">
+                     stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </button>

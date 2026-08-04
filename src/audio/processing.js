@@ -21,6 +21,7 @@ import {
   HUM_NOTCH_DEFAULTS,
   toKernelParams as toHumNotchKernelParams,
 } from './effects/humNotch.js'
+import { MAX_ANALYSIS_SECONDS as HUM_MAX_ANALYSIS_SECONDS } from './dsp/humDetect.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -363,13 +364,32 @@ export function applyHumNotchRegion(segments, start, end, params, sampleRate, ch
 /**
  * Analyse a region for mains hum in a Worker.
  *
+ * Only a bounded window is rendered. detectHum examines at most
+ * MAX_ANALYSIS_SECONDS regardless of what it is handed, so rendering the whole
+ * selection would make memory scale with selection length for no benefit —
+ * selecting a whole chapter and analysing would allocate hundreds of MB
+ * (a 60-minute mono selection is ~635 MB for the render plus as much again for
+ * the mixdown) to then throw all but ten seconds of it away.
+ *
+ * The window is centred rather than taken from the head, matching
+ * computeAutoMakeup above: hum is stationary so any representative stretch
+ * will do, and the middle of a selection is less likely to be lead-in silence.
+ *
  * Mono mixdown happens here rather than in the worker so only one channel of
  * samples crosses the boundary, and it is transferred rather than copied.
  *
  * @returns {Promise<object>} the detectHum() result — see src/audio/dsp/humDetect.js
  */
 export function analyzeHumRegion(segments, start, end, sampleRate, channels, options = {}) {
-  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  let aStart = start
+  let aEnd = end
+  if (end - start > HUM_MAX_ANALYSIS_SECONDS) {
+    const mid = (start + end) / 2
+    aStart = mid - HUM_MAX_ANALYSIS_SECONDS / 2
+    aEnd = mid + HUM_MAX_ANALYSIS_SECONDS / 2
+  }
+
+  const channelData = renderRegionToBuffer(segments, aStart, aEnd, sampleRate, channels)
 
   // Mono mixdown — hum is common-mode, and the detector expects one channel.
   const n = channelData[0].length
