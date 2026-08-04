@@ -72,6 +72,17 @@ export function startPlayback(segments, startTime, audioContext, onTimeUpdate, o
     activeNodes.push(node)
   }
 
+  // Effects carrying a pre-rendered envelope schedule it against the same
+  // clock as the segments above. They are given the timeline position rather
+  // than a sample counter, so a seek is just a different `startTime` — nothing
+  // has to track how many quanta have gone by.
+  const transportChain = getEffectChainIfExists()
+  if (transportChain) {
+    for (const entry of transportChain.effects) {
+      if (entry.enabled) entry.nodes?.startTransport?.(now, startTime)
+    }
+  }
+
   const playEnd = endTime !== null ? endTime : totalDuration
 
   // Animation loop for playhead updates
@@ -99,6 +110,14 @@ export function stopPlayback() {
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId)
     animationFrameId = null
+  }
+
+  // Envelope modulators are scheduled sources like any other, so they have to
+  // be torn down with the segments — otherwise a stopped transport keeps
+  // driving gain from a buffer that no longer lines up with anything.
+  const transportChain = getEffectChainIfExists()
+  if (transportChain) {
+    for (const entry of transportChain.effects) entry.nodes?.stopTransport?.()
   }
 
   for (const node of activeNodes) {
