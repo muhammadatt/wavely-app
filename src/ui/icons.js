@@ -45,6 +45,9 @@ export const ICONS = {
   // A rising shelf: flat, then a gentle knee up to a plateau — the air curve.
   air: '<path d="M2 17c5 0 8 0 11-5s5-5 9-5"/><path d="M2 21h20" opacity=".35"/>',
   noise: '<path d="M12 2a3 3 0 013 3v7a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 23h8"/>',
+  // Hum: a steady sine with a notch taken out of its middle — the mains tone
+  // and the cut being placed on it.
+  hum: '<path d="M2 12c1.5-4 3-4 4.5 0s3 4 4.5 0"/><path d="M13 12c1.5-4 3-4 4.5 0s3 4 4.5 0" opacity=".35"/><path d="M12 4v16" stroke-dasharray="2 2"/>',
   // Waveform, flat stretch, waveform — the gap being targeted. Was a second
   // copy of the `cut` scissors, which is the clipboard verb's glyph.
   removeSilence: '<path d="M3 6v12M7 9v6"/><path d="M9.5 12h5"/><path d="M17 9v6M21 6v12"/>',

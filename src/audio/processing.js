@@ -16,6 +16,12 @@ import {
   VOCAL_SAT_DEFAULTS,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
+import { ensureHumNotchWorklet } from './humNotchWorkletLoader.js'
+import {
+  HUM_NOTCH_DEFAULTS,
+  toKernelParams as toHumNotchKernelParams,
+} from './effects/humNotch.js'
+import { MAX_ANALYSIS_SECONDS as HUM_MAX_ANALYSIS_SECONDS } from './dsp/humDetect.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -343,6 +349,74 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     ensureWorklet: ensureVocalSatWorklet,
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
+  })
+}
+
+/** Apply Hum Remover notches to a region. */
+export function applyHumNotchRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureHumNotchWorklet,
+    processorName: 'hum-notch-processor',
+    kernelParams: toHumNotchKernelParams({ ...HUM_NOTCH_DEFAULTS, ...params }),
+  })
+}
+
+/**
+ * Analyse a region for mains hum in a Worker.
+ *
+ * Only a bounded window is rendered. detectHum examines at most
+ * MAX_ANALYSIS_SECONDS regardless of what it is handed, so rendering the whole
+ * selection would make memory scale with selection length for no benefit —
+ * selecting a whole chapter and analysing would allocate hundreds of MB
+ * (a 60-minute mono selection is ~635 MB for the render plus as much again for
+ * the mixdown) to then throw all but ten seconds of it away.
+ *
+ * The window is centred rather than taken from the head, matching
+ * computeAutoMakeup above: hum is stationary so any representative stretch
+ * will do, and the middle of a selection is less likely to be lead-in silence.
+ *
+ * Mono mixdown happens here rather than in the worker so only one channel of
+ * samples crosses the boundary, and it is transferred rather than copied.
+ *
+ * @returns {Promise<object>} the detectHum() result — see src/audio/dsp/humDetect.js
+ */
+export function analyzeHumRegion(segments, start, end, sampleRate, channels, options = {}) {
+  let aStart = start
+  let aEnd = end
+  if (end - start > HUM_MAX_ANALYSIS_SECONDS) {
+    const mid = (start + end) / 2
+    aStart = mid - HUM_MAX_ANALYSIS_SECONDS / 2
+    aEnd = mid + HUM_MAX_ANALYSIS_SECONDS / 2
+  }
+
+  const channelData = renderRegionToBuffer(segments, aStart, aEnd, sampleRate, channels)
+
+  // Mono mixdown — hum is common-mode, and the detector expects one channel.
+  const n = channelData[0].length
+  const mono = new Float32Array(n)
+  for (const ch of channelData) {
+    for (let i = 0; i < n; i++) mono[i] += ch[i]
+  }
+  if (channels > 1) {
+    const scale = 1 / channels
+    for (let i = 0; i < n; i++) mono[i] *= scale
+  }
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL('../workers/humWorker.js', import.meta.url),
+      { type: 'module' },
+    )
+    worker.onmessage = (e) => {
+      worker.terminate()
+      if (e.data.type === 'done') resolve(e.data.result)
+      else reject(new Error(e.data.message))
+    }
+    worker.onerror = (err) => {
+      worker.terminate()
+      reject(err)
+    }
+    worker.postMessage({ samples: mono, sampleRate, options }, [mono.buffer])
   })
 }
 
