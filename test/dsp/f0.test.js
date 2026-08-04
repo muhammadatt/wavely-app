@@ -25,8 +25,8 @@ function makeTracker(opts = {}) {
 test('estimates the pitch of a sawtooth across the vocal range', () => {
   for (const f of [80, 100, 120, 150, 200, 250, 300, 380]) {
     const t = makeTracker()
-    const { f0, voiced } = t.estimate(sawFrame(f))
-    assert.ok(voiced, `${f} Hz should read voiced`)
+    const { f0, pitched } = t.estimate(sawFrame(f))
+    assert.ok(pitched, `${f} Hz should read pitched`)
     const errCents = 1200 * Math.log2(f0 / f)
     assert.ok(
       Math.abs(errCents) < 25,
@@ -104,7 +104,7 @@ test('matches the reference on harmonic stacks and mixtures', () => {
   assert.ok(Math.abs(makeTracker().estimate(mix).f0 - 119.863462) < 1e-6)
 })
 
-test('white noise is not reported as voiced', () => {
+test('white noise is not reported as pitched', () => {
   const t = makeTracker()
   let s = 12345
   const frame = new Float64Array(FRAME)
@@ -112,21 +112,21 @@ test('white noise is not reported as voiced', () => {
     s = (s * 1103515245 + 12345) & 0x7fffffff
     frame[i] = s / 0x3fffffff - 1
   }
-  const { voiced } = t.estimate(frame)
-  assert.equal(voiced, false, 'noise should fail the correlation-ratio gate')
+  const { pitched } = t.estimate(frame)
+  assert.equal(pitched, false, 'noise should fail the correlation-ratio gate')
 })
 
-test('silence is not reported as voiced', () => {
+test('silence is not reported as pitched', () => {
   const t = makeTracker()
-  const { voiced, f0 } = t.estimate(new Float64Array(FRAME))
-  assert.equal(voiced, false)
+  const { pitched, f0 } = t.estimate(new Float64Array(FRAME))
+  assert.equal(pitched, false)
   assert.equal(f0, null)
 })
 
 test('the caller energy gate can veto an otherwise periodic frame', () => {
   const t = makeTracker()
-  const { voiced } = t.estimate(sawFrame(150), false)
-  assert.equal(voiced, false, 'energy gate should override the correlation gate')
+  const { pitched } = t.estimate(sawFrame(150), false)
+  assert.equal(pitched, false, 'energy gate should override the correlation gate')
 })
 
 test('is insensitive to DC offset', () => {
@@ -137,7 +137,7 @@ test('is insensitive to DC offset', () => {
   assert.ok(Math.abs(a - b) < 1e-9, `DC changed the estimate: ${a} vs ${b}`)
 })
 
-test('rolling median tracks the speaker and ignores unvoiced frames', () => {
+test('rolling median tracks the source and ignores unpitched frames', () => {
   const t = makeTracker({ medianWindow: 5, defaultF0: 60 })
   assert.equal(t.median, 60, 'seeded default before any voiced frame')
 
@@ -163,8 +163,8 @@ test('lag range brackets the configured F0 limits', () => {
   assert.equal(t.lagMin, Math.floor(SR / F0_MAX_HZ))
   assert.equal(t.lagMax, Math.floor(SR / F0_MIN_HZ))
   // A tone below F0_MIN cannot be reported inside the range.
-  const { f0, voiced } = makeTracker().estimate(sawFrame(45))
-  if (voiced) {
+  const { f0, pitched } = makeTracker().estimate(sawFrame(45))
+  if (pitched) {
     assert.ok(f0 >= F0_MIN_HZ - 5, `reported ${f0} below the search floor`)
   }
 })

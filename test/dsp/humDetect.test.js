@@ -108,18 +108,18 @@ test('a voice sitting on the mains grid is not mistaken for hum', () => {
     r.flaggedHarmonics.includes(120),
     'the spectral test is expected to flag it — that is the blind spot',
   )
-  assert.ok(r.voicePitchHz !== null, 'a speaker pitch should have been measured')
-  assert.ok(Math.abs(r.voicePitchHz - 120) < 6, `measured pitch ${r.voicePitchHz}`)
+  assert.ok(r.pitchedSourceHz !== null, 'a source pitch should have been measured')
+  assert.ok(Math.abs(r.pitchedSourceHz - 120) < 6, `measured pitch ${r.pitchedSourceHz}`)
 
   const at120 = r.detectionDetail.find(d => d.frequency === 120)
-  assert.equal(at120.matchesVoicePitch, true, 'pitch check should identify it as voice')
-  assert.equal(at120.voiceHarmonic, 1)
+  assert.equal(at120.matchesPitchedSource, true, 'pitch check should claim it')
+  assert.equal(at120.pitchHarmonic, 1)
 
   // 240 Hz is the speaker's second harmonic — real vocal energy, and notching
   // it thins the voice just as badly as notching the fundamental.
   const at240 = r.detectionDetail.find(d => d.frequency === 240)
-  assert.equal(at240.matchesVoicePitch, true, 'harmonics of the pitch count too')
-  assert.equal(at240.voiceHarmonic, 2)
+  assert.equal(at240.matchesPitchedSource, true, 'harmonics of the pitch count too')
+  assert.equal(at240.pitchHarmonic, 2)
 
   assert.equal(r.triggered, false, `false positive: ${JSON.stringify(r.recommendedHarmonics)}`)
   assert.deepEqual(r.recommendedHarmonics, [], 'nothing should be recommended')
@@ -130,20 +130,20 @@ test('a scattered pitch contour is not trusted', () => {
   // it and reports a "pitch" that is really nothing of the kind. The
   // concentration test is what stops that vetoing genuine hum harmonics.
   const r = detectHum(makeSignal({ humFundamental: 60 }), SR)
-  assert.equal(r.voicePitchHz, null, 'no speaker should be reported on pure hum')
+  assert.equal(r.pitchedSourceHz, null, 'no pitched source should be reported on pure hum')
   assert.ok(
-    r.voicePitchConcentration < 0.5,
-    `contour was unexpectedly tight: ${r.voicePitchConcentration}`,
+    r.pitchConcentration < 0.5,
+    `contour was unexpectedly tight: ${r.pitchConcentration}`,
   )
 })
 
 test('the pitch check can be turned off', () => {
   // Confirms the veto is what suppresses the previous case, not something else.
   const sig = makeSignal({ voiceF0: 120 })
-  const r = detectHum(sig, SR, { voicePitchCheck: false })
+  const r = detectHum(sig, SR, { pitchSourceCheck: false })
   assert.equal(r.triggered, true, 'without the pitch check this is a false positive')
   for (const d of r.detectionDetail) {
-    assert.equal(d.matchesVoicePitch, false)
+    assert.equal(d.matchesPitchedSource, false)
   }
 })
 
@@ -154,7 +154,7 @@ test('real hum under a voice at a different pitch still gets found', () => {
   assert.equal(r.triggered, true, 'hum should survive the pitch check')
   assert.ok(r.recommendedHarmonics.includes(120), `got ${r.recommendedHarmonics}`)
   const at120 = r.detectionDetail.find(d => d.frequency === 120)
-  assert.equal(at120.matchesVoicePitch, false, '120 Hz is not this speaker’s pitch')
+  assert.equal(at120.matchesPitchedSource, false, '120 Hz is not this source’s pitch')
 })
 
 test('a 180 Hz male fundamental alone does not trigger', () => {
@@ -168,34 +168,34 @@ test('a 180 Hz male fundamental alone does not trigger', () => {
   assert.equal(at180.flagged, false)
 })
 
-test('reports which candidates could plausibly be a voice', () => {
+test('reports which candidates could plausibly be a pitched source', () => {
   const r = detectHum(makeSignal({ humFundamental: 60 }), SR)
   const byFreq = Object.fromEntries(r.detectionDetail.map(d => [d.frequency, d]))
-  assert.equal(byFreq[60].looksLikeVoice, false, '60 Hz is below any voice F0')
-  assert.equal(byFreq[120].looksLikeVoice, true)
-  assert.equal(byFreq[180].looksLikeVoice, true)
-  assert.equal(byFreq[300].looksLikeVoice, true)
+  assert.equal(byFreq[60].inPitchRange, false, '60 Hz is below the pitched-source range')
+  assert.equal(byFreq[120].inPitchRange, true)
+  assert.equal(byFreq[180].inPitchRange, true)
+  assert.equal(byFreq[300].inPitchRange, true)
   // Pure hum with no voice present: in range, but no trusted pitch to match.
   for (const d of r.detectionDetail) {
-    assert.equal(d.matchesVoicePitch, false, `${d.frequency} Hz falsely read as voice`)
+    assert.equal(d.matchesPitchedSource, false, `${d.frequency} Hz falsely attributed to a pitched source`)
   }
 })
 
-test('a genuine hum harmonic near the speaker is not vetoed', () => {
+test('a genuine hum harmonic near the source pitch is not vetoed', () => {
   // 200 Hz speaker over 60 Hz hum. A naive per-frame overlap test reads ~14%
   // of frames within 15 Hz of 180 (the low tail of the pitch wobble) and would
   // veto a real hum harmonic. Anchoring on the median pitch instead does not.
   const sig = makeSignal({ humFundamental: 60, humDb: -40, voiceF0: 200, voiceDb: -26, voiceJitterHz: 6 })
   const r = detectHum(sig, SR)
-  assert.ok(Math.abs(r.voicePitchHz - 200) < 8, `measured pitch ${r.voicePitchHz}`)
+  assert.ok(Math.abs(r.pitchedSourceHz - 200) < 8, `measured pitch ${r.pitchedSourceHz}`)
   const at180 = r.detectionDetail.find(d => d.frequency === 180)
-  assert.equal(at180.matchesVoicePitch, false, '180 Hz is hum, not the speaker')
+  assert.equal(at180.matchesPitchedSource, false, '180 Hz is hum, not the source')
   assert.ok(r.recommendedHarmonics.includes(180), `got ${r.recommendedHarmonics}`)
 })
 
-test('recommendedHarmonics is flaggedHarmonics minus the voice matches', () => {
+test('recommendedHarmonics is flaggedHarmonics minus the pitch matches', () => {
   const r = detectHum(makeSignal({ voiceF0: 120 }), SR)
-  const vetoed = r.detectionDetail.filter(d => d.flagged && d.matchesVoicePitch)
+  const vetoed = r.detectionDetail.filter(d => d.flagged && d.matchesPitchedSource)
   assert.ok(vetoed.length > 0, 'this fixture is meant to exercise the veto')
   assert.deepEqual(
     r.recommendedHarmonics,
@@ -239,20 +239,20 @@ test('finds hum whose fundamental has been high-passed away', () => {
   assert.ok(!r.flaggedHarmonics.includes(60), '60 Hz is absent, should not flag')
 })
 
-test('the mains grid wins when the voice cannot explain every flagged harmonic', () => {
+test('the mains grid wins when the pitch cannot explain every flagged harmonic', () => {
   // High-passed hum (120/180/240) has a true period of 60 Hz, below the
   // tracker's floor, so it locks onto 120 Hz with a perfectly steady contour —
   // indistinguishable from a 120 Hz speaker by pitch alone. 180 Hz is what
   // separates them: on the mains grid, absent from a 120 Hz harmonic series.
   const r = detectHum(makeSignal({ humFundamental: 60, humHarmonics: [2, 3, 4] }), SR)
 
-  assert.ok(r.voicePitchHz !== null, 'the tracker is expected to report a pitch here')
-  assert.ok(Math.abs(r.voicePitchHz - 120) < 6, `locked onto ${r.voicePitchHz}`)
-  assert.equal(r.voicePitchConcentration, 1, 'and to be entirely confident about it')
+  assert.ok(r.pitchedSourceHz !== null, 'the tracker is expected to report a pitch here')
+  assert.ok(Math.abs(r.pitchedSourceHz - 120) < 6, `locked onto ${r.pitchedSourceHz}`)
+  assert.equal(r.pitchConcentration, 1, 'and to be entirely confident about it')
 
   // ...and yet nothing is vetoed, because 180 Hz does not fit that series.
   for (const d of r.detectionDetail) {
-    assert.equal(d.matchesVoicePitch, false, `${d.frequency} Hz should not be vetoed`)
+    assert.equal(d.matchesPitchedSource, false, `${d.frequency} Hz should not be vetoed`)
   }
   assert.equal(r.triggered, true)
   assert.deepEqual(r.recommendedHarmonics, [120, 180, 240])

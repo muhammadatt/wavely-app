@@ -40,15 +40,17 @@ const statusLine = computed(() => {
   }
   if (isStale.value) return 'Audio changed since analysis — analyse again.'
   const a = humAnalysis.value
-  const vetoed = a.detectionDetail.filter(d => d.flagged && d.matchesVoicePitch)
+  const vetoed = a.detectionDetail.filter(d => d.flagged && d.matchesPitchedSource)
   if (!a.triggered && enabledCount.value === 0) {
     if (vetoed.length > 0) {
       const list = vetoed.map(d => `${d.frequency} Hz`).join(', ')
-      return `Energy at ${list} tracks the voice (${a.voicePitchHz} Hz), not mains hum.`
+      return `Energy at ${list} follows a ${a.pitchedSourceHz} Hz source in the recording, not mains hum.`
     }
     return `No hum found. Anchor ${a.anchorFrequency} Hz was ${a.anchorDeltaDb} dB above the floor.`
   }
-  const suffix = vetoed.length > 0 ? ` ${vetoed.length} left out as voice.` : ''
+  const suffix = vetoed.length > 0
+    ? ` ${vetoed.length} left out as part of the recording.`
+    : ''
   return `${enabledCount.value} notch${enabledCount.value === 1 ? '' : 'es'} active.${suffix}`
 })
 
@@ -75,24 +77,31 @@ function deltaWidth(deltaDb) {
 /**
  * Accessible name for a harmonic's toggle. The visible row is a bar and a
  * number, so the label has to carry the frequency, how prominent it is, and
- * whether the pitch check thinks it is the voice — everything a sighted user
- * reads off the row before deciding.
+ * whether the pitch check attributed it to the recording — everything a
+ * sighted user reads off the row before deciding.
  */
 function harmonicToggleLabel(h) {
   if (h.deltaDb === null) return `${h.frequency} Hz — not analysed`
   const prominence = `${h.deltaDb.toFixed(1)} dB above the surrounding floor`
-  if (h.matchesVoicePitch) return `${h.frequency} Hz, ${prominence}, matches the speaker's pitch`
+  if (h.matchesPitchedSource) {
+    return `${h.frequency} Hz, ${prominence}, matches a pitched source in the recording`
+  }
   return `${h.frequency} Hz, ${prominence}`
 }
 
-/** Why a harmonic was marked as the speaker rather than hum. */
-function voiceTooltip(h) {
-  const pitch = humAnalysis.value?.voicePitchHz
-  if (!pitch) return 'This looks like the voice rather than hum.'
-  const which = h.voiceHarmonic === 1
-    ? `the speaker's pitch (${pitch} Hz)`
-    : `harmonic ${h.voiceHarmonic} of the speaker's pitch (${pitch} Hz)`
-  return `${h.frequency} Hz is ${which}, so this energy is probably the voice, not hum. Notching it will thin the recording. Tick it anyway if you can hear hum here.`
+/**
+ * Why a harmonic was attributed to the recording rather than to the mains.
+ *
+ * Deliberately says "source" rather than "voice": the check is an F0 contour,
+ * and a bass, a cello or a held synth note trips it exactly as a narrator does.
+ */
+function pitchedTooltip(h) {
+  const pitch = humAnalysis.value?.pitchedSourceHz
+  if (!pitch) return 'This looks like part of the recording rather than hum.'
+  const which = h.pitchHarmonic === 1
+    ? `the pitch of a sustained source in this selection (${pitch} Hz)`
+    : `harmonic ${h.pitchHarmonic} of a sustained source in this selection (${pitch} Hz)`
+  return `${h.frequency} Hz is ${which}, so this energy is probably content, not hum. Notching it will thin the recording. Tick it anyway if you can hear hum here.`
 }
 
 function rejectionLabel(h) {
@@ -224,10 +233,10 @@ async function applyAndClose() {
                   />
                 </div>
                 <span
-                  v-if="h.matchesVoicePitch"
-                  :title="voiceTooltip(h)"
+                  v-if="h.matchesPitchedSource"
+                  :title="pitchedTooltip(h)"
                   style="font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.08em;color:#ffb27a;white-space:nowrap"
-                >IS VOICE</span>
+                >IN SOURCE</span>
                 <span
                   v-else-if="rejectionLabel(h)"
                   style="font:500 8.5px 'Inter';color:rgba(255,255,255,.26);white-space:nowrap"
@@ -258,7 +267,7 @@ async function applyAndClose() {
            style="border-top:1px solid rgba(255,255,255,.06)">
         <p style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.3);max-width:320px">
           Narrow cuts at the mains frequency and its harmonics. Deeper and wider
-          removes more hum but takes more of the voice with it.
+          removes more hum but takes more of the recording with it.
         </p>
         <div class="flex gap-[26px]">
           <div class="w-[80px]">

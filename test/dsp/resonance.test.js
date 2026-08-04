@@ -8,6 +8,7 @@ import {
   RESONANCE_KERNEL_DEFAULTS,
   processResonanceBuffer,
 } from '../../src/audio/resonanceProcessor.js'
+import { effectivePitchRange, PITCH_RANGES } from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
 
@@ -15,9 +16,11 @@ const SR = 44100
 const LATENCY = 2048
 
 /**
- * Voiced signal: a harmonic stack with slow pitch wobble over a broadband
- * floor. The stack matters — non-voiced frames target zero reduction by
- * design, so the suppressor does nothing at all to pure noise.
+ * Pitched signal: a harmonic stack with slow pitch wobble over a broadband
+ * floor. Used wherever a test needs harmonics to protect. It is NOT required
+ * for the suppressor to do anything — see the unpitched test below, which is
+ * the regression guard for the gate that used to switch the effect off on
+ * anything the pitch tracker could not read.
  */
 function voice({
   seconds = 3, f0 = 150, jitterHz = 3, amp = 0.2, noiseDb = -45,
@@ -48,6 +51,19 @@ function resonate(sig, freqHz, q, gainDb) {
   cascade.setSections([peaking(SR, freqHz, q, gainDb)])
   const out = new Float32Array(sig.length)
   cascade.process(sig, out, sig.length, 0)
+  return out
+}
+
+/** Unpitched broadband signal — the tracker reads 0 of 255 frames as pitched. */
+function noise({ seconds = 3, db = -20 } = {}) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  const amp = Math.pow(10, db / 20)
+  let s = 4242
+  for (let i = 0; i < n; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff
+    out[i] = amp * (s / 0x3fffffff - 1)
+  }
   return out
 }
 
@@ -138,13 +154,21 @@ test('the delay is measurable, not merely advertised', () => {
   assert.equal(argmax(out) - argmax(sig), LATENCY)
 })
 
-test('harmonic mask matches the Python bin for bin', () => {
-  // Golden bin counts from _compute_harmonic_mask_for_f0 in
-  // resonance_suppressor.py, reproduced with its exact geometry
-  // (harmonic_width_bins 2, harmonic_width_pct 0.01, max_harmonic 100,
-  // freq_ceil 20 kHz). Verified equal as full index lists, not just counts.
+test('harmonic mask geometry is pinned', () => {
+  // These counts DIVERGE from resonance_suppressor.py, deliberately. Two
+  // changes, both forced by this being a general-purpose effect rather than a
+  // stage inside a speech chain:
+  //
+  //   - the walk ends at freqCeilHz instead of a fixed 100 harmonics, so the
+  //     protected band no longer slides with pitch (at 40 Hz the Python stops
+  //     at 4 kHz and leaves everything above exposed);
+  //   - the half-width is clamped so neighbouring masks keep a gap.
+  //
+  // The second is what makes the first safe. With the cap lifted and no clamp,
+  // coverage measured 100% for every f0 at or below 82 Hz — "protect the
+  // harmonics" collapses into "protect everything" and the effect goes inert.
   const kernel = new ResonanceKernel(SR)
-  const golden = { 100: 467, 120.5: 538, 150: 632, 154.7: 645, 220: 755, 300: 654 }
+  const golden = { 100: 600, 120.5: 495, 150: 665, 154.7: 645, 220: 694, 300: 578 }
   for (const [f0, expected] of Object.entries(golden)) {
     const mask = kernel._harmonicMask(parseFloat(f0))
     let count = 0
@@ -153,14 +177,20 @@ test('harmonic mask matches the Python bin for bin', () => {
   }
 })
 
-test('harmonic protection covers most of the spectrum, and all of it up high', () => {
-  // Surprising enough to pin. Protection half-width is
-  // max(2 bins, 1% of the harmonic frequency), so once 2% of a harmonic's
-  // frequency exceeds the pitch — above roughly 50x F0 — adjacent protection
-  // zones touch and nothing is reachable. For a 150 Hz speaker that is about
-  // 7.5 kHz. This is the server's own geometry, not a divergence, and it is
-  // why the effect works mainly on narrow resonances at low and mid
-  // frequencies.
+test('no mask at all below the resolvable harmonic spacing', () => {
+  // Under ~64.6 Hz at this bin width, consecutive harmonics land closer than
+  // three bins and no comb with gaps can be drawn. Returning null says "no
+  // protection available" rather than silently protecting the whole spectrum.
+  const kernel = new ResonanceKernel(SR)
+  assert.equal(kernel._harmonicMask(64), null)
+  assert.ok(kernel._harmonicMask(70) instanceof Uint8Array)
+})
+
+test('harmonic protection leaves gaps at every frequency', () => {
+  // The property that matters: the inter-harmonic floor stays reachable across
+  // the whole band. This previously failed above roughly 50x F0 — for a 150 Hz
+  // speaker, everything above ~7.5 kHz was fully masked and unreachable,
+  // because the 1%-of-frequency half-width outgrew the harmonic spacing.
   const kernel = new ResonanceKernel(SR)
   const binHz = SR / 2048
   const coverage = (f0, loHz, hiHz) => {
@@ -176,10 +206,15 @@ test('harmonic protection covers most of the spectrum, and all of it up high', (
     }
     return covered / total
   }
-  assert.ok(coverage(150, 500, 1500) < 0.9, 'mid band should still have gaps')
-  assert.ok(coverage(150, 8000, 12000) > 0.99, 'high band should be fully protected')
-  assert.ok(coverage(220, 500, 1500) < coverage(150, 500, 1500) + 0.01,
-    'a higher pitch leaves at least as much room')
+  for (const f0 of [100, 150, 220, 300]) {
+    for (const [lo, hi] of [[500, 1500], [8000, 12000], [16000, 20000]]) {
+      const c = coverage(f0, lo, hi)
+      assert.ok(
+        c < 0.95,
+        `f0 ${f0}, ${lo}-${hi} Hz: ${(c * 100).toFixed(1)}% masked, nothing left to work on`,
+      )
+    }
+  }
 })
 
 test('suppresses a narrow resonance', () => {
@@ -238,6 +273,79 @@ test('harmonic protection holds the suppressor off the voice', () => {
     unguarded > guarded * 3,
     `mask made little difference: ${guarded.toExponential(2)} vs ${unguarded.toExponential(2)}`,
   )
+})
+
+test('suppresses a resonance in unpitched material', () => {
+  // REGRESSION GUARD. Suppression used to be gated on the pitch tracker
+  // reporting a pitch, which conflated "is there signal here" with "did we
+  // find a periodic component". On this input the tracker reads 1 frame in 258
+  // as pitched, so the old gate zeroed the reduction on 257 of them and the
+  // effect did nothing at all. Drums, cymbals, synths, room tone and every
+  // fricative in a narration land in the same hole.
+  const sig = resonate(noise(), 3000, 40, 14)
+  const out = processResonanceBuffer([sig], SR, RESONANCE_KERNEL_DEFAULTS).channelData[0]
+
+  const change = f => bandDb(out, f, SR + LATENCY) - bandDb(sig, f, SR)
+  const onResonance = change(3000)
+  assert.ok(onResonance < -1.5, `resonant band only moved ${onResonance.toFixed(2)} dB`)
+  for (const control of [1500, 6000]) {
+    assert.ok(
+      change(control) > onResonance + 1,
+      `${control} Hz moved as much as the resonance — the cut is not selective`,
+    )
+  }
+})
+
+test('the pitch search range is settable and clamped to what the frame resolves', () => {
+  // The server hard-coded 70-400 Hz because it only ever saw speech. An
+  // out-of-range source does not fail quietly here: the peak picker returns the
+  // best lag WITHIN the range, so a 45 Hz source is reported as an octave
+  // artefact with full confidence and the mask lands on non-harmonics.
+  const kernel = new ResonanceKernel(SR)
+
+  kernel.setParams({ pitchMinHz: 40, pitchMaxHz: 1200 })
+  assert.ok(kernel.pitchRange.minHz >= 43, 'a 2048-sample frame cannot reach below ~43 Hz')
+  assert.ok(kernel.pitchRange.minHz < 45, `clamped too hard: ${kernel.pitchRange.minHz}`)
+  assert.equal(kernel.pitchRange.maxHz, 1200)
+  assert.equal(kernel.f0.lagMin, Math.floor(SR / 1200))
+
+  kernel.setParams({ pitchMinHz: 70, pitchMaxHz: 400 })
+  assert.equal(kernel.pitchRange.minHz, 70)
+  assert.equal(kernel.f0.lagMax, Math.floor(SR / 70))
+})
+
+test('the range the UI shows is the range the kernel uses', () => {
+  // effectivePitchRange mirrors the kernel's clamp on the main thread, because
+  // a worklet has no way to hand a value back for rendering a label. Mirrored
+  // logic drifts, so pin the two together.
+  for (const sampleRate of [44100, 48000, 96000]) {
+    const kernel = new ResonanceKernel(sampleRate)
+    for (const [key, range] of Object.entries(PITCH_RANGES)) {
+      kernel.setParams({ pitchMinHz: range.minHz, pitchMaxHz: range.maxHz })
+      const shown = effectivePitchRange(sampleRate, key)
+      assert.ok(
+        Math.abs(shown.minHz - kernel.pitchRange.minHz) < 1e-9,
+        `${key} @ ${sampleRate}: UI says ${shown.minHz}, kernel uses ${kernel.pitchRange.minHz}`,
+      )
+      assert.equal(shown.maxHz, kernel.pitchRange.maxHz)
+    }
+  }
+  // The case that motivated it: 'wide' asks for 40 Hz and does not get it.
+  assert.ok(effectivePitchRange(44100, 'wide').minHz > PITCH_RANGES.wide.minHz)
+})
+
+test('the mask cache survives a knob move that does not change its geometry', () => {
+  // The effect wrapper posts the whole param object on every knob move, so an
+  // `in partial` test on the key would clear the cache on every twist.
+  const kernel = new ResonanceKernel(SR)
+  kernel._harmonicMask(150)
+  assert.equal(kernel.maskCache.size, 1)
+
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, depth: 0.4 })
+  assert.equal(kernel.maskCache.size, 1, 'depth does not move a single harmonic')
+
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, freqCeilHz: 12000 })
+  assert.equal(kernel.maskCache.size, 0, 'the ceiling ends the harmonic walk')
 })
 
 test('output is independent of the block size it was fed in', () => {

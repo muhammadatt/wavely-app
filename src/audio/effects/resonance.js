@@ -19,9 +19,12 @@
 
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
+import { PITCH_RANGES, RESONANCE_FRAME_SIZE } from '../resonanceParams.js'
 
-/** Matches FFT_SIZE in resonanceProcessor.js. */
-export const RESONANCE_LATENCY_SAMPLES = 2048
+export { PITCH_RANGES, RESONANCE_FRAME_SIZE, effectivePitchRange } from '../resonanceParams.js'
+
+/** This STFT holds back exactly one frame before a sample is reconstructed. */
+export const RESONANCE_LATENCY_SAMPLES = RESONANCE_FRAME_SIZE
 
 // Defaults are the acx_audiobook preset's resonanceSuppressor block
 // (src/audio/presets.js), which is the tuning these were chosen against.
@@ -36,10 +39,12 @@ export const RESONANCE_DEFAULTS = {
   freqCeil: 20000, // Hz
   mode: 'soft', // 'soft' | 'hard'
   preserveHarmonics: true,
+  pitchRange: 'voice', // key of PITCH_RANGES
 }
 
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {
+  const range = PITCH_RANGES[params.pitchRange] ?? PITCH_RANGES.voice
   return {
     depth: params.depth,
     sharpness: params.sharpness,
@@ -51,6 +56,8 @@ export function toKernelParams(params) {
     freqCeilHz: params.freqCeil,
     mode: params.mode,
     preserveHarmonics: params.preserveHarmonics,
+    pitchMinHz: range.minHz,
+    pitchMaxHz: range.maxHz,
   }
 }
 

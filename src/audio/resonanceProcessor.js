@@ -27,20 +27,31 @@
  * transition detector (a ±5-frame lookahead that would cost another 58 ms of
  * latency and is outside the core parameter set).
  *
- * HARMONIC PROTECTION IS NOT OPTIONAL. Cepstral liftering puts the reference at
- * the inter-harmonic floor, so vocal harmonics protrude above it and read as
- * resonances. Without the mask the suppressor eats the voice — the server
- * refuses to run the stage at all when `preserve_harmonics` is on and no F0 is
- * available. Here F0Tracker supplies a per-frame pitch, which is what makes the
- * mask possible live.
+ * HARMONIC PROTECTION MATTERS WHEREVER THERE ARE HARMONICS. Cepstral liftering
+ * puts the reference at the inter-harmonic floor, so the harmonics of a pitched
+ * source protrude above it and read as resonances. Without the mask the
+ * suppressor eats them — the server refuses to run the stage at all when
+ * `preserve_harmonics` is on and no F0 is available. Here F0Tracker supplies a
+ * per-frame pitch, which is what makes the mask possible live.
+ *
+ * THIS EFFECT IS NOT VOICE-ONLY. The server stage ran inside a voice mastering
+ * chain and could assume speech; a realtime effect gets pointed at drums,
+ * synths, guitars and room tone. Two consequences run through this file:
+ *
+ *   - Suppression is gated on signal presence, never on pitch. Unpitched
+ *     material is exactly as valid an input as a narrator.
+ *   - The pitch search range is a parameter (`pitchMinHz` / `pitchMaxHz`), not
+ *     the server's hard-coded speech band. An out-of-range source does not fail
+ *     quietly — the tracker returns an octave artefact with full confidence and
+ *     the mask lands on bins that are not harmonics, which is worse than having
+ *     no mask at all.
  *
  * THREE APPROXIMATIONS vs. the server, all consequences of streaming:
  *
  *   - Lifter cutoff comes from a rolling median pitch rather than the whole
  *     file's median.
- *   - Voicing comes from the pitch tracker's correlation gate plus an absolute
- *     energy floor, in place of Silero labels. Non-voiced frames get a zero
- *     target so the IIR decays through them.
+ *   - Frame activity comes from an absolute energy floor in place of Silero
+ *     labels. Silent frames get a zero target so the IIR decays through them.
  *   - The cepstral reference is computed over the full spectrum rather than the
  *     server's band-restricted variant. Band restriction exists for passes with
  *     a very small lifter cutoff (L≈3, the sibilant-only passes), where the
@@ -61,28 +72,73 @@ const HOP_SIZE = 512
 /** Matches `eps` in resonance_suppressor.py's process(). */
 const MAG_EPS = 1e-10
 
-/** Lifter cutoff before any pitch has been measured. */
-const DEFAULT_F0_HZ = 60
+/**
+ * Cepstral lifter cutoff used when no pitch has been measured, in quefrency
+ * bins — the `else` branch of resonance_suppressor.py:346.
+ *
+ * This is a cutoff, NOT a pitch. An earlier version of this file seeded the
+ * tracker with a 60 Hz *pitch* and ran it through `0.40 * sr / f0`, which
+ * yields L = 294 rather than 60 — an envelope roughly five times finer than
+ * intended. A fine envelope traces a resonance instead of passing under it, so
+ * nothing protrudes and nothing is suppressed. On speech that only affected
+ * warmup, because a real pitch arrives within a frame or two. On unpitched
+ * material there is never a pitch, so the wrong cutoff was permanent and the
+ * effect did essentially nothing (measured: 0.3 dB removed from a 13 dB
+ * resonance in noise).
+ */
+const DEFAULT_LIFTER_CUTOFF = 60
 
 // Harmonic protection geometry — DEFAULT_PARAMS in resonance_suppressor.py.
 const HARMONIC_WIDTH_BINS = 2
 const HARMONIC_WIDTH_PCT = 0.01
-const MAX_HARMONIC = 100
+
+/**
+ * Safety bound on the harmonic walk.
+ *
+ * The server caps at a fixed 100 harmonics, which makes the protected band slide
+ * with pitch — at 40 Hz it stops at 4 kHz and leaves everything above exposed,
+ * at 220 Hz it runs past Nyquist. The walk now ends at `freqCeilHz` instead, so
+ * the protected band is the band the user asked to process. This is only a guard
+ * against a pathological pitch making the loop long.
+ */
+const MAX_HARMONIC = 4096
+
+/**
+ * Minimum open bins between neighbouring harmonic masks, and the harmonic
+ * spacing below which the comb stops being representable at all.
+ *
+ * A protection mask is only useful if the inter-harmonic floor stays exposed
+ * for the suppressor to work on. Once neighbouring masks touch, "protect the
+ * harmonics" becomes "protect everything" and the effect goes inert. At
+ * 2048/44.1 kHz the spacing limit puts the pitch floor for protection at
+ * ~64.6 Hz — which is, not coincidentally, right where the server's 70 Hz
+ * speech floor sits.
+ */
+const MIN_HARMONIC_GAP_BINS = 1
+const MIN_HARMONIC_SPACING_BINS = 3
 
 /** Bound the per-pitch mask cache so a long session cannot grow it forever. */
 const MASK_CACHE_LIMIT = 256
 
 /**
- * Absolute energy floor for the voicing decision, in dB of frame mean-square.
+ * Absolute energy floor below which a frame is treated as silence, in dB of
+ * frame mean-square.
  *
- * Voicing is decided by F0Tracker's correlation-ratio gate, which already
- * rejects noise and silence; this only stops the tracker chasing a pitch in
- * near-silence. It is deliberately absolute rather than relative to a measured
- * noise floor: a floor tracker rises toward the signal, so on continuous speech
- * with no silence in it the floor converges on the speech level and the gate
- * never opens at all.
+ * Deliberately absolute rather than relative to a measured noise floor: a floor
+ * tracker rises toward the signal, so on continuous material with no silence in
+ * it the floor converges on the signal level and the gate never opens at all.
  */
-const VOICING_FLOOR_DB = -60
+const SILENCE_FLOOR_DB = -60
+
+/**
+ * Default pitch search range for harmonic protection.
+ *
+ * The server hard-coded the speech range because the stage only ever ran inside
+ * a voice mastering chain. A realtime effect gets pointed at drums, synths and
+ * instruments, so the range is a parameter — see `pitchMinHz` / `pitchMaxHz`.
+ */
+const DEFAULT_PITCH_MIN_HZ = 70
+const DEFAULT_PITCH_MAX_HZ = 400
 
 export const RESONANCE_KERNEL_DEFAULTS = {
   depth: 0.67,
@@ -93,6 +149,8 @@ export const RESONANCE_KERNEL_DEFAULTS = {
   maxReductionDb: 36,
   freqFloorHz: 40,
   freqCeilHz: 20000,
+  pitchMinHz: DEFAULT_PITCH_MIN_HZ,
+  pitchMaxHz: DEFAULT_PITCH_MAX_HZ,
   mode: 'soft', // 'soft' | 'hard'
   preserveHarmonics: true,
 }
@@ -112,7 +170,9 @@ export class ResonanceKernel {
     this.f0 = new F0Tracker({
       sampleRate,
       frameSize: FFT_SIZE,
-      defaultF0: DEFAULT_F0_HZ,
+      defaultF0: null,
+      minHz: DEFAULT_PITCH_MIN_HZ,
+      maxHz: DEFAULT_PITCH_MAX_HZ,
     })
 
     // One STFT per channel. Detection runs on channel 0 and the resulting gain
@@ -167,6 +227,7 @@ export class ResonanceKernel {
 
   /** Merge a partial param update and recompute derived state. */
   setParams(partial) {
+    const prevCeilHz = this.freqCeilHz
     const p = { ...this.params, ...partial }
     this.params = p
 
@@ -215,8 +276,21 @@ export class ResonanceKernel {
       ? Math.exp(-this.frameRateMs / p.releaseMs)
       : 0
 
-    // Harmonic geometry changed (band limits), so cached masks no longer apply.
-    if ('freqFloorHz' in partial || 'freqCeilHz' in partial) this.maskCache.clear()
+    // Pitch search range. The tracker clamps to what the frame can resolve and
+    // returns the range it settled on; kept here so tests and any future
+    // in-worklet reporting can read it. The UI mirrors the same clamp on the
+    // main thread via effectivePitchRange() — there is no channel out of a
+    // worklet for a value that is needed to render a label.
+    this.pitchRange = this.f0.setRange(
+      p.pitchMinHz ?? DEFAULT_PITCH_MIN_HZ,
+      p.pitchMaxHz ?? DEFAULT_PITCH_MAX_HZ,
+    )
+
+    // The harmonic walk now ends at freqCeilHz, so that is the only param the
+    // cached masks depend on. Compare values rather than key presence: the
+    // effect wrapper posts the full param object on every knob move, so an
+    // `in partial` test is true on every twist and never lets the cache survive.
+    if (this.freqCeilHz !== prevCeilHz) this.maskCache.clear()
   }
 
   reset() {
@@ -230,9 +304,14 @@ export class ResonanceKernel {
   /**
    * Boolean protection mask for one pitch: bins belonging to a harmonic of f0.
    * Cached per rounded pitch, as the Python does.
+   *
+   * Returns null when the comb cannot be represented at this bin width — see
+   * MIN_HARMONIC_SPACING_BINS. A null mask means "no protection available",
+   * which the caller must not confuse with "no protection needed".
    */
   _harmonicMask(f0) {
     if (!f0 || f0 <= 0) return null
+    if (f0 / this.binWidth < MIN_HARMONIC_SPACING_BINS) return null
     const key = Math.round(f0)
     const cached = this.maskCache.get(key)
     if (cached) return cached
@@ -241,12 +320,25 @@ export class ResonanceKernel {
 
     const mask = new Uint8Array(this.binCount)
     const nyquist = this.sampleRate / 2
+
+    // Widest half-width that still leaves a gap between neighbouring harmonics.
+    // Without this the comb merges into a solid block and the suppressor has
+    // nothing left to work on — measured at 100% coverage for f0 <= 82 Hz, and
+    // above ~5 kHz even at 150 Hz, because the 1% term outgrows the spacing.
+    // The server gets away with it only because its fixed 100-harmonic cap
+    // truncates the comb before the damage is visible.
+    const spacingBins = f0 / this.binWidth
+    const maxHalf = Math.max(
+      0,
+      Math.floor((spacingBins - 1 - MIN_HARMONIC_GAP_BINS) / 2),
+    )
+
     for (let h = 1; h <= MAX_HARMONIC; h++) {
       const freq = h * f0
       if (freq > this.freqCeilHz || freq >= nyquist) break
       const center = Math.round(freq / this.binWidth)
       const pctHalf = Math.round((freq * HARMONIC_WIDTH_PCT) / this.binWidth)
-      const half = Math.max(HARMONIC_WIDTH_BINS, pctHalf)
+      const half = Math.min(Math.max(HARMONIC_WIDTH_BINS, pctHalf), maxHalf)
       const lo = Math.max(0, center - half)
       const hi = Math.min(this.binCount - 1, center + half)
       for (let k = lo; k <= hi; k++) mask[k] = 1
@@ -295,17 +387,30 @@ export class ResonanceKernel {
     for (let i = 0; i < FFT_SIZE; i++) sumSq += raw[i] * raw[i]
     const frameDb = 10 * Math.log10(sumSq / FFT_SIZE + 1e-20)
 
-    const { f0, voiced } = this.f0.estimate(raw, frameDb > VOICING_FLOOR_DB)
-    const medianF0 = this.f0.median ?? DEFAULT_F0_HZ
-
-    // lifter_cutoff = max(20, int(0.40 * sr / f0))
+    // TWO SEPARATE QUESTIONS, and conflating them is what made this effect
+    // switch itself off on anything unpitched:
+    //
+    //   active  — is there enough signal here to act on at all? Drives whether
+    //             suppression runs.
+    //   pitched — did we find a periodic component? Drives ONLY whether the
+    //             harmonic protection mask is available.
+    //
+    // A frame can be loud and unpitched — a fricative, a snare, a cymbal, a
+    // noise sweep — and those frames still need suppressing. They just have no
+    // harmonics to protect.
+    const active = frameDb > SILENCE_FLOOR_DB
+    const { f0, pitched } = this.f0.estimate(raw, active)
+    // lifter_cutoff = max(20, int(0.40 * sr / f0)), or the flat default when
+    // no pitch has been measured yet — the two branches of
+    // resonance_suppressor.py:343-346.
+    const medianF0 = this.f0.median
     const lifterCutoff = medianF0 > 0
       ? Math.max(20, Math.trunc((0.4 * this.sampleRate) / medianF0))
-      : 60
+      : DEFAULT_LIFTER_CUTOFF
 
     this._cepstralEnvelope(lifterCutoff)
 
-    const mask = this.preserveHarmonics && voiced ? this._harmonicMask(f0) : null
+    const mask = this.preserveHarmonics && pitched ? this._harmonicMask(f0) : null
 
     // Spike detection → soft knee → depth → clip.
     for (let k = 0; k < binCount; k++) {
@@ -351,9 +456,10 @@ export class ResonanceKernel {
       }
     }
 
-    // Non-voiced frames target zero, so the IIR decays through silence rather
-    // than holding a cut across it.
-    if (!voiced) reduction.fill(0)
+    // Silent frames target zero, so the IIR decays through silence rather than
+    // holding a cut across it. Note this keys off `active`, not `pitched` —
+    // an unpitched frame is still processed.
+    if (!active) reduction.fill(0)
 
     // Per-bin attack/release at the frame rate.
     const { attackCoeff, releaseCoeff } = this

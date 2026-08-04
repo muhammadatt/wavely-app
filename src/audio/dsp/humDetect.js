@@ -16,21 +16,30 @@
  * common on modern gear than pure 60 Hz.
  *
  * The anchored coherence test is only the FIRST line of defence against
- * mistaking a voice for hum, and it has a known blind spot: a speaker whose
- * fundamental is near the mains frequency or one of its harmonics puts real
- * vocal energy exactly on the grid being tested. A 120 Hz voice is
- * indistinguishable from 60 Hz hum by spectrum shape alone — its harmonics land
- * on 120, 240, 360.
+ * mistaking wanted content for hum, and it has a known blind spot: any sustained
+ * pitched source whose fundamental sits near the mains frequency or one of its
+ * harmonics puts real energy exactly on the grid being tested. A 120 Hz source
+ * is indistinguishable from 60 Hz hum by spectrum shape alone — its harmonics
+ * land on 120, 240, 360.
  *
  * The server closes that hole with an F0 veto (stages.js:481) that drops any
  * candidate overlapping the speaker's voiced pitch, using an F0 contour and
- * Silero VAD labels. The same check runs here against F0Tracker, with an
- * energy gate standing in for Silero. It differs in what it does with the
- * answer: the server discards the candidate silently, whereas this reports
- * `matchesVoicePitch` and leaves the row visible and tickable. A narrator whose
- * voice really does sit on 120 Hz can still hear the difference in preview and
- * decide — which is more informative than a silent drop, and safer than the
- * label-only warning this originally shipped with.
+ * Silero VAD labels. The same check runs here against F0Tracker, with an energy
+ * gate standing in for Silero.
+ *
+ * TWO DELIBERATE DIFFERENCES from the server:
+ *
+ *   - The server discards the candidate silently. This reports
+ *     `matchesPitchedSource` and leaves the row visible and tickable, so a
+ *     narrator who really does sit on 120 Hz can hear the difference in preview
+ *     and decide.
+ *   - The server could assume speech. This effect is pointed at whatever the
+ *     user loaded, so the check is described in terms of a *pitched source*
+ *     rather than a speaker. The mechanism is identical — an F0 contour with a
+ *     concentration test — but anything sustained and pitched inside the
+ *     tracker's range trips it exactly as a voice does: a bass or cello line in
+ *     its upper register, a held synth note, a hummed pitch. Calling that "the
+ *     speaker" in the UI would be wrong.
  */
 
 import { getFFT } from './fft.js'
@@ -62,15 +71,19 @@ export const HUM_DETECT_DEFAULTS = {
   anchorMinDeltaDb: 6,
   coherenceSlackDb: 3,
   strictSlackDb: { 3: 1 },
-  voicePitchCheck: true,
+  pitchSourceCheck: true,
 }
 
 /**
- * Frequencies where a flagged harmonic could plausibly be a voice fundamental
- * rather than hum. Only used to decide whether the F0 check is worth running
- * for a given harmonic; the verdict comes from the measured pitch.
+ * Frequencies where a flagged harmonic could plausibly be the fundamental of a
+ * wanted pitched source rather than hum. Only used to decide whether the F0
+ * check is worth running for a given harmonic; the verdict comes from the
+ * measured pitch. Nothing about the band is specific to speech — a held synth
+ * note or an instrument playing in this register sits in it just as a narrator
+ * does. Note it is narrower than the tracker's own range, and excludes
+ * fundamentals below 80 Hz such as a bass guitar's bottom strings.
  */
-const VOICE_F0_RANGE_HZ = [80, 300]
+const PITCHED_F0_RANGE_HZ = [80, 300]
 
 // F0 veto tolerance and minimum evidence, matching F0_VETO_* in
 // server/pipeline/stages.js.
@@ -78,7 +91,7 @@ const F0_VETO_HALF_WIDTH_HZ = 15
 const F0_VETO_MIN_FRAMES = 10
 
 /**
- * Fraction of voiced frames that must cluster around the median pitch before
+ * Fraction of pitched frames that must cluster around the median pitch before
  * the pitch estimate is trusted at all.
  *
  * The server tests each candidate against the raw F0 histogram, which is safe
@@ -86,21 +99,22 @@ const F0_VETO_MIN_FRAMES = 10
  * Silero the tracker also runs on hum-only frames, and hum is periodic — an
  * autocorrelation tracker happily locks onto multiples of 60 Hz. Measured on a
  * pure 60 Hz hum series it yields scattered estimates spread across 60–330 Hz
- * with a concentration around 0.07, where a real speaker sits at 1.0. Requiring
- * concentration is what separates "a voice is present" from "the tracker is
- * chasing a tone", and without it a genuine hum harmonic gets vetoed as voice.
+ * with a concentration around 0.07, where a real sustained source sits at 1.0.
+ * Requiring concentration is what separates "something pitched is present" from
+ * "the tracker is chasing the hum", and without it a genuine hum harmonic gets
+ * vetoed.
  */
-const VOICE_PITCH_CONCENTRATION_MIN = 0.5
+const PITCH_CONCENTRATION_MIN = 0.5
 
 /**
- * A candidate is also treated as voice when it lands on a harmonic of the
- * speaker's pitch — a 120 Hz speaker puts real energy on 240 Hz too, and
- * notching that thins the voice just as badly as notching the fundamental.
+ * A candidate is also treated as wanted content when it lands on a harmonic of
+ * the measured pitch — a 120 Hz source puts real energy on 240 Hz too, and
+ * notching that thins the recording just as badly as notching the fundamental.
  */
-const MAX_VOICE_HARMONIC = 3
+const MAX_TRACKED_HARMONIC = 3
 
 /** Pitch jitter multiplies up the harmonic series, so the window widens. */
-function voiceToleranceHz(harmonic) {
+function pitchToleranceHz(harmonic) {
   return Math.min(harmonic * F0_VETO_HALF_WIDTH_HZ, 40)
 }
 
@@ -108,17 +122,17 @@ function voiceToleranceHz(harmonic) {
 const F0_FRAME_SIZE = 2048
 const F0_HOP = 512
 
-/** Voiced frames must clear the noise floor by this much to count. */
-const VOICING_GATE_DB = 8
+/** Frames must clear the noise floor by this much to count. */
+const ACTIVITY_GATE_DB = 8
 
 /**
  * Per-frame F0 over the analysis window, with an energy gate standing in for
- * Silero. Returns the speaker's median pitch and how tightly the estimates
- * cluster around it — see VOICE_PITCH_CONCENTRATION_MIN for why the second
- * number matters.
+ * Silero. Returns the median pitch of whatever sustained source is present and
+ * how tightly the estimates cluster around it — see PITCH_CONCENTRATION_MIN for
+ * why the second number matters.
  */
-function measureVoicePitch(samples, sampleRate) {
-  const none = { pitchHz: null, concentration: 0, voicedFrames: 0 }
+function measurePitchedSource(samples, sampleRate) {
+  const none = { pitchHz: null, concentration: 0, pitchedFrames: 0 }
   const nFrames = Math.floor((samples.length - F0_FRAME_SIZE) / F0_HOP) + 1
   if (nFrames < 1) return none
 
@@ -139,9 +153,9 @@ function measureVoicePitch(samples, sampleRate) {
   // `p10 + 8` is the speech gate reference_eq.py uses, and it is right for
   // material with real dynamic range. It collapses on steady content, though —
   // when every frame sits at the same level the 10th percentile IS that level,
-  // so nothing clears the gate and the pitch pass sees no voiced frames at all.
+  // so nothing clears the gate and the pitch pass sees no usable frames at all.
   // Falling back to just under the loud end keeps steady material analysable.
-  const gateDb = Math.min(p10 + VOICING_GATE_DB, p95 - 3)
+  const gateDb = Math.min(p10 + ACTIVITY_GATE_DB, p95 - 3)
 
   const tracker = new F0Tracker({ sampleRate, frameSize: F0_FRAME_SIZE })
   const frame = new Float64Array(F0_FRAME_SIZE)
@@ -149,8 +163,8 @@ function measureVoicePitch(samples, sampleRate) {
   for (let f = 0; f < nFrames; f++) {
     const off = f * F0_HOP
     for (let i = 0; i < F0_FRAME_SIZE; i++) frame[i] = samples[off + i]
-    const { f0, voiced } = tracker.estimate(frame, frameDb[f] > gateDb)
-    if (voiced) pitches.push(f0)
+    const { f0, pitched } = tracker.estimate(frame, frameDb[f] > gateDb)
+    if (pitched) pitches.push(f0)
   }
   if (pitches.length < F0_VETO_MIN_FRAMES) return none
 
@@ -168,17 +182,17 @@ function measureVoicePitch(samples, sampleRate) {
   return {
     pitchHz,
     concentration: near / pitches.length,
-    voicedFrames: pitches.length,
+    pitchedFrames: pitches.length,
   }
 }
 
 /**
- * Is this frequency the speaker's pitch, or a harmonic of it?
+ * Is this frequency the measured pitch, or a harmonic of it?
  * Returns the matching harmonic number, or 0 for no match.
  */
-function voiceHarmonicOf(frequency, pitchHz) {
-  for (let h = 1; h <= MAX_VOICE_HARMONIC; h++) {
-    if (Math.abs(frequency - h * pitchHz) <= voiceToleranceHz(h)) return h
+function pitchHarmonicOf(frequency, pitchHz) {
+  for (let h = 1; h <= MAX_TRACKED_HARMONIC; h++) {
+    if (Math.abs(frequency - h * pitchHz) <= pitchToleranceHz(h)) return h
   }
   return 0
 }
@@ -280,7 +294,7 @@ function getMedianFloor(magnitudeDb, centerHz, windowHz, excludeHz, sampleRate, 
  *   detectionDetail: Array<{
  *     frequency: number, multiplier: number, peakDb: number|null,
  *     floorDb: number|null, deltaDb: number|null, flagged: boolean,
- *     rejectionReason: string|null, looksLikeVoice: boolean,
+ *     rejectionReason: string|null, inPitchRange: boolean,
  *   }>,
  * }}
  */
@@ -316,9 +330,9 @@ export function detectHum(samples, sampleRate, options = {}) {
       deltaDb: null,
       flagged: false,
       rejectionReason: 'selection-too-short',
-      looksLikeVoice: false,
-      matchesVoicePitch: false,
-      voiceOverlapFraction: 0,
+      inPitchRange: false,
+      matchesPitchedSource: false,
+      pitchOverlapFraction: 0,
     })),
   }
   if (analyzedSeconds < MIN_ANALYSIS_SECONDS) return empty
@@ -328,19 +342,19 @@ export function detectHum(samples, sampleRate, options = {}) {
   const magnitudeDb = computeMagnitudeSpectrum(view, FFT_SIZE, fft)
 
   // Second line of defence, only worth the pitch pass if some candidate could
-  // plausibly be a voice fundamental.
-  const anyInVoiceRange = harmonics.some(m => {
+  // plausibly be the fundamental of a wanted pitched source.
+  const anyInPitchRange = harmonics.some(m => {
     const f = fundamental * m
-    return f >= VOICE_F0_RANGE_HZ[0] && f <= VOICE_F0_RANGE_HZ[1]
+    return f >= PITCHED_F0_RANGE_HZ[0] && f <= PITCHED_F0_RANGE_HZ[1]
   })
-  const voice =
-    opts.voicePitchCheck && anyInVoiceRange
-      ? measureVoicePitch(view, sampleRate)
-      : { pitchHz: null, concentration: 0, voicedFrames: 0 }
+  const source =
+    opts.pitchSourceCheck && anyInPitchRange
+      ? measurePitchedSource(view, sampleRate)
+      : { pitchHz: null, concentration: 0, pitchedFrames: 0 }
   // Only trust the pitch when the estimates actually cluster; a scattered
-  // contour means the tracker was chasing a tone, not following a speaker.
-  const voicePitchTrusted =
-    voice.pitchHz !== null && voice.concentration >= VOICE_PITCH_CONCENTRATION_MIN
+  // contour means the tracker was chasing the hum, not following a real source.
+  const pitchTrusted =
+    source.pitchHz !== null && source.concentration >= PITCH_CONCENTRATION_MIN
 
   // First pass: measure every harmonic, flag nothing yet.
   const measurements = harmonics.map(multiplier => {
@@ -386,10 +400,10 @@ export function detectHum(samples, sampleRate, options = {}) {
       else rejectionReason = 'anchor-coherence'
     }
 
-    const inVoiceRange =
-      frequency >= VOICE_F0_RANGE_HZ[0] && frequency <= VOICE_F0_RANGE_HZ[1]
-    const voiceHarmonic = voicePitchTrusted
-      ? voiceHarmonicOf(frequency, voice.pitchHz)
+    const inPitchRange =
+      frequency >= PITCHED_F0_RANGE_HZ[0] && frequency <= PITCHED_F0_RANGE_HZ[1]
+    const pitchHarmonic = pitchTrusted
+      ? pitchHarmonicOf(frequency, source.pitchHz)
       : 0
 
     detectionDetail.push({
@@ -400,10 +414,10 @@ export function detectHum(samples, sampleRate, options = {}) {
       deltaDb: round2(deltaDb),
       flagged,
       rejectionReason,
-      looksLikeVoice: inVoiceRange,
-      voiceHarmonic,
+      inPitchRange,
+      pitchHarmonic,
       // Filled in below, once the whole flagged set can be weighed.
-      matchesVoicePitch: false,
+      matchesPitchedSource: false,
     })
 
     if (flagged) flaggedHarmonics.push(frequency)
@@ -414,22 +428,22 @@ export function detectHum(samples, sampleRate, options = {}) {
   // A pitch match on its own is not enough. Hum whose fundamental has been
   // high-passed away — energy at 120, 180 and 240 — has a true period of 60 Hz,
   // below the tracker's floor, so it locks onto 120 Hz with a rock-steady
-  // contour and looks exactly like a 120 Hz speaker. What separates them is
+  // contour and looks exactly like a real 120 Hz source. What separates them is
   // 180 Hz: it sits on the mains grid but is nowhere in a 120 Hz harmonic
-  // series. So the voice hypothesis only wins when it accounts for EVERY
-  // flagged harmonic; a single one off the series means the mains grid is the
-  // better explanation and nothing is vetoed.
+  // series. So the pitched-source hypothesis only wins when it accounts for
+  // EVERY flagged harmonic; a single one off the series means the mains grid is
+  // the better explanation and nothing is vetoed.
   //
-  // When both are genuinely present — a 120 Hz speaker over real 60 Hz hum —
-  // the grid wins and the shared harmonics get notched. That is the right call
-  // by default: no notch can separate hum from a voice at the same frequency,
-  // and the row stays tickable either way.
+  // When both are genuinely present — a 120 Hz voice or bass over real 60 Hz
+  // hum — the grid wins and the shared harmonics get notched. That is the right
+  // call by default: no notch can separate hum from wanted content at the same
+  // frequency, and the row stays tickable either way.
   const flaggedDetails = detectionDetail.filter(d => d.flagged)
-  const voiceExplainsAll =
-    flaggedDetails.length > 0 && flaggedDetails.every(d => d.voiceHarmonic > 0)
-  if (voiceExplainsAll) {
+  const pitchExplainsAll =
+    flaggedDetails.length > 0 && flaggedDetails.every(d => d.pitchHarmonic > 0)
+  if (pitchExplainsAll) {
     for (const d of detectionDetail) {
-      d.matchesVoicePitch = d.voiceHarmonic > 0
+      d.matchesPitchedSource = d.pitchHarmonic > 0
     }
   }
 
@@ -437,7 +451,7 @@ export function detectHum(samples, sampleRate, options = {}) {
   // single remaining harmonic is more likely musical content or a room
   // resonance than mains hum, so it does not trigger on its own.
   const recommendedHarmonics = detectionDetail
-    .filter(d => d.flagged && !d.matchesVoicePitch)
+    .filter(d => d.flagged && !d.matchesPitchedSource)
     .map(d => d.frequency)
   const triggered = recommendedHarmonics.length >= minHarmonicsToTrigger
 
@@ -449,11 +463,16 @@ export function detectHum(samples, sampleRate, options = {}) {
     anchorDeltaDb: round2(anchorDelta),
     /** Everything the spectral test flagged, before the pitch check. */
     flaggedHarmonics,
-    /** What to actually notch — flagged, minus anything that is the speaker. */
+    /** What to actually notch — flagged, minus anything the pitch check claimed. */
     recommendedHarmonics,
-    /** Measured speaker pitch, or null when none was found or trusted. */
-    voicePitchHz: voicePitchTrusted ? round2(voice.pitchHz) : null,
-    voicePitchConcentration: round2(voice.concentration),
+    /**
+     * Median pitch of the sustained source found in the selection, or null
+     * when none was found or the contour was too scattered to trust. Usually a
+     * voice, but any sustained pitched source inside the tracker's range
+     * reads the same way.
+     */
+    pitchedSourceHz: pitchTrusted ? round2(source.pitchHz) : null,
+    pitchConcentration: round2(source.concentration),
     detectionDetail,
   }
 }

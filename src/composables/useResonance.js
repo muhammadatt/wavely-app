@@ -19,6 +19,7 @@ const resFreqFloor = ref(RESONANCE_DEFAULTS.freqFloor)
 const resFreqCeil = ref(RESONANCE_DEFAULTS.freqCeil)
 const resMode = ref(RESONANCE_DEFAULTS.mode)
 const resPreserveHarmonics = ref(RESONANCE_DEFAULTS.preserveHarmonics)
+const resPitchRange = ref(RESONANCE_DEFAULTS.pitchRange)
 
 const resPreview = ref(false)
 const resReduction = ref(0)
@@ -38,6 +39,7 @@ function currentParams() {
     freqCeil: resFreqCeil.value,
     mode: resMode.value,
     preserveHarmonics: resPreserveHarmonics.value,
+    pitchRange: resPitchRange.value,
   }
 }
 
@@ -120,6 +122,7 @@ export function useResonance() {
   const syncFreqFloor = v => syncParam('freqFloor', resFreqFloor, v)
   const syncFreqCeil = v => syncParam('freqCeil', resFreqCeil, v)
   const syncMode = v => syncParam('mode', resMode, v)
+  const syncPitchRange = v => syncParam('pitchRange', resPitchRange, v)
 
   function togglePreserveHarmonics() {
     syncParam('preserveHarmonics', resPreserveHarmonics, !resPreserveHarmonics.value)
@@ -179,6 +182,7 @@ export function useResonance() {
     resFreqCeil,
     resMode,
     resPreserveHarmonics,
+    resPitchRange,
     resPreview,
     resReduction,
     resInputDb,
@@ -194,6 +198,7 @@ export function useResonance() {
     syncFreqFloor,
     syncFreqCeil,
     syncMode,
+    syncPitchRange,
     togglePreserveHarmonics,
     apply,
     teardown,
