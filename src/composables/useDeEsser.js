@@ -53,6 +53,19 @@ const outputDb = ref(-Infinity)
 const treatedCount = ref(0)
 const maxReductionDb = ref(0)
 let meterId = null
+let meterLastMs = 0
+
+/**
+ * Release time constant for the gain-reduction meter, in ms.
+ *
+ * The reduction itself is an impulse — 30–80 ms with 3 ms fades — so a meter
+ * that tracks it literally is invisible at 60 fps. Instant attack and a slow
+ * release is the standard hardware behaviour: the needle jumps and falls back.
+ */
+const GR_RELEASE_MS = 300
+
+/** Below this the bar is holding a rounding error, not a reduction. */
+const GR_FLOOR_DB = 0.05
 
 export function useDeEsser() {
   const {
@@ -106,12 +119,25 @@ export function useDeEsser() {
 
   function startMeters(chain) {
     stopMeters()
-    function tick() {
+    function tick(nowMs) {
       const nodes = chain.effects.find(e => e.id === clipGainDeEsserEffect.id)?.nodes
       if (nodes) {
         inputDb.value = nodes.getInputLevelDb()
         outputDb.value = nodes.getOutputLevelDb()
-        reductionDb.value = nodes.getReduction()
+
+        // Both values are <= 0, so "more reduction" is more negative. Attack is
+        // instantaneous — the peak the node reports for this frame is shown in
+        // full, never averaged away — and only the fall back to rest is damped.
+        const peak = nodes.getReduction()
+        const dtMs = meterLastMs ? nowMs - meterLastMs : 0
+        meterLastMs = nowMs
+        if (peak <= reductionDb.value) {
+          reductionDb.value = peak
+        } else {
+          const k = Math.exp(-dtMs / GR_RELEASE_MS)
+          const released = peak + (reductionDb.value - peak) * k
+          reductionDb.value = released > -GR_FLOOR_DB ? peak : released
+        }
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -123,6 +149,7 @@ export function useDeEsser() {
       cancelAnimationFrame(meterId)
       meterId = null
     }
+    meterLastMs = 0
     inputDb.value = -Infinity
     outputDb.value = -Infinity
     reductionDb.value = 0

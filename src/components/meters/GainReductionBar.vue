@@ -13,6 +13,10 @@ const props = defineProps({
   fullScaleDb: { type: Number, default: 40 },
   scale: { type: Array, default: () => ['0', '-3', '-6', '-12', '-24'] },
   title: { type: String, default: 'GAIN REDUCTION' },
+  // CSS smoothing on the fill. Fine for a compressor, whose reduction is already
+  // a continuous tens-of-ms envelope. Set to 0 when the caller applies its own
+  // meter ballistics, otherwise the two fight and the bar lags behind both.
+  transitionMs: { type: Number, default: 75 },
 })
 
 const amount = computed(() => Math.abs(props.reductionDb))
@@ -30,9 +34,10 @@ const fillPct = computed(() => Math.min(100, (amount.value / props.fullScaleDb) 
             }">{{ amount.toFixed(1) }} dB</span>
     </div>
     <div class="relative h-[18px] rounded-[9px]" style="background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 6px rgba(0,0,0,.8)">
-      <div class="absolute top-0 bottom-0 left-0 rounded-[9px] transition-all duration-75"
+      <div class="absolute top-0 bottom-0 left-0 rounded-[9px]"
            :style="{
              width: fillPct + '%',
+             transition: transitionMs > 0 ? `width ${transitionMs}ms linear` : 'none',
              background: `linear-gradient(90deg, color-mix(in srgb, ${accent} 35%, #ffffff), ${accent})`,
              boxShadow: `0 0 16px color-mix(in srgb, ${accent} 70%, transparent)`,
            }"></div>

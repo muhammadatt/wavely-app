@@ -136,7 +136,15 @@ async function applyAndClose() {
       <!-- Live reduction at the playhead, matching every other effect's meter.
            The envelope's planned maximum is a different quantity and lives in
            the status line, where it does not look like a meter. -->
-      <GainReductionBar :reduction-db="reductionDb" :accent="ACCENT" />
+      <!-- 12 dB full scale, not the shared 40: de-essing lives in the 3–8 dB
+           range, and on a 40 dB bar a full-strength event is a fifth of the
+           width. The composable applies the meter ballistics, so the CSS
+           smoothing is off. -->
+      <GainReductionBar
+        :reduction-db="reductionDb" :accent="ACCENT"
+        :full-scale-db="12" :scale="['0', '-3', '-6', '-9', '-12']"
+        :transition-ms="0"
+      />
 
       <div class="flex items-start justify-between gap-[20px] mt-[20px]">
         <LevelMeter :db="inputDb" label="IN" :height="164" />

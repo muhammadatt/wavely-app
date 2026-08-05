@@ -125,7 +125,15 @@ export function createClipGainDeEsser(audioContext) {
   let transportStartSec = 0
   let running = false
 
+  /**
+   * Where the last getReduction() call finished reading, so the next one can
+   * cover the gap rather than take another point sample. -1 means "no reading
+   * yet" and the next call starts a fresh span.
+   */
+  let lastReadIdx = -1
+
   function stopTransport() {
+    lastReadIdx = -1
     if (!modulator) return
     try {
       modulator.stop()
@@ -211,22 +219,51 @@ export function createClipGainDeEsser(audioContext) {
     },
 
     /**
-     * Reduction currently being applied, in negative dB — same convention as
-     * DynamicsCompressorNode.reduction and the other effects' meters.
+     * PEAK reduction over the span of audio that has sounded since the last
+     * call, in negative dB — same convention as DynamicsCompressorNode.reduction
+     * and the other effects' meters.
      *
-     * Read straight out of the envelope at the sounding position rather than
-     * measured from the signal: the envelope IS the gain, so this is exact and
-     * costs an array index. Zero whenever nothing is playing, which is the
-     * honest answer — no audio is being reduced.
+     * Read straight out of the envelope rather than measured from the signal:
+     * the envelope IS the gain, so this is exact. Zero whenever nothing is
+     * playing, which is the honest answer — no audio is being reduced.
+     *
+     * A span, not a point, because this is polled from an animation frame — one
+     * sample every ~16.7 ms — while a sibilant event is 30–80 ms with 3 ms
+     * fades. Point-sampling lands inside the dip two or three times if it is
+     * lucky and misses it outright if it is not, which is what made the meter
+     * read as intermittent and late. Scanning the whole elapsed span cannot miss
+     * an event, and costs an array walk over one frame of samples.
+     *
+     * Note this is a getter with state: each call consumes the span it reports.
+     * That is the point — it is a meter read, not a query.
      */
     getReduction() {
       if (!running || !envelopeDeviation) return 0
-      const elapsed = audioContext.currentTime - transportWhen
+
+      // currentTime is the scheduler's clock: audio scheduled for it is still in
+      // the output pipeline and has not been heard yet. Backing off by the
+      // device latency reports the envelope at the position actually sounding.
+      const latency = (audioContext.outputLatency || 0) + (audioContext.baseLatency || 0)
+      const elapsed = audioContext.currentTime - transportWhen - latency
       if (elapsed < 0) return 0
+
+      const len = envelopeDeviation.length
+      if (lastReadIdx >= len) return 0 // envelope already fully consumed
+
       const posSec = transportStartSec - regionStartSec + elapsed
       const idx = Math.round(posSec * audioContext.sampleRate)
-      if (idx < 0 || idx >= envelopeDeviation.length) return 0
-      const gain = 1 + envelopeDeviation[idx]
+      if (idx < 0) return 0
+
+      const to = Math.min(idx, len - 1)
+      const from = lastReadIdx < 0 || lastReadIdx > to ? to : lastReadIdx
+      if (to < from) return 0
+      lastReadIdx = to + 1
+
+      let minDeviation = 0
+      for (let i = from; i <= to; i++) {
+        if (envelopeDeviation[i] < minDeviation) minDeviation = envelopeDeviation[i]
+      }
+      const gain = 1 + minDeviation
       return gain > 0 ? 20 * Math.log10(gain) : 0
     },
 
