@@ -38,11 +38,10 @@ const props = defineProps({
   spectrumFn: { type: Function, default: null },
   showAnalyzer: { type: Boolean, default: false },
 
-  /**
-   * VoxDoc overlay: the measured envelope, its per-region baselines and the
-   * detection thresholds that form the tolerance ribbon.
-   */
-  deviation: { type: Object, default: null },
+  /** VoxDoc overlay: the analysis result, whose envelope and detections are drawn. */
+  analysis: { type: Object, default: null },
+  /** Region name to emphasise, driven by hovering a suggestion row. */
+  highlightRegion: { type: String, default: null },
 })
 
 const emit = defineEmits([
@@ -64,30 +63,15 @@ let ro = null
 /**
  * Gain axis auto-scales so small moves stay legible (spec §7.1).
  *
- * The deviation curve is scaled by a high percentile rather than its maximum.
- * At the top of the spectrum a dull recording has almost no energy, so the log
- * spectrum — and the cepstral envelope built from it — swings enormously over a
- * region the ear barely registers. Scaling to that would squash everything the
- * user actually needs to see into a few pixels around zero.
+ * Only the EQ curve lives on this axis. The envelope is fitted separately —
+ * its range is 60 dB and more, and letting it drive the gain scale would
+ * compress every band the user is actually adjusting into a few pixels.
  */
 const dbMax = computed(() => {
   let peak = 6
   for (const b of props.bands) {
     if (!b.enabled) continue
     peak = Math.max(peak, Math.abs(b.gainDb) + 2)
-  }
-  if (props.deviation) {
-    const mags = []
-    for (const r of props.deviation.regionResults ?? []) {
-      if (!r.scanEnv || !r.baseline) continue
-      for (let i = 0; i < r.scanEnv.length; i++) {
-        mags.push(Math.abs(r.scanEnv[i] - r.baseline[i]))
-      }
-    }
-    if (mags.length > 0) {
-      mags.sort((a, b) => a - b)
-      peak = Math.max(peak, mags[Math.floor(mags.length * 0.9)] + 2)
-    }
   }
   return Math.min(18, Math.max(6, Math.ceil(peak / 3) * 3))
 })
@@ -104,20 +88,6 @@ function yFor(db) {
   return props.height / 2 - (db / dbMax.value) * (props.height / 2)
 }
 
-/**
- * As yFor, but pinned inside the plot.
- *
- * Used for measured curves, which — unlike a filter response — are not bounded
- * by anything. A curve that leaves the box takes the reader's eye with it and
- * makes the region it belongs to unreadable; pinning it at the edge says "off
- * the scale here" while keeping the rest legible.
- */
-function yForClamped(db) {
-  const margin = 3
-  const y = yFor(db)
-  return Math.max(margin, Math.min(props.height - margin, y))
-}
-
 function dbFor(y) {
   return ((props.height / 2 - y) / (props.height / 2)) * dbMax.value
 }
@@ -132,15 +102,14 @@ function hzLabel(hz) {
 /**
  * VoxDoc labels its axis with role names, not numbers (spec §6.1).
  *
- * The user's task is "flatten the wiggle into the ribbon", and naming the
- * regions is what makes that possible without knowing any frequencies — the
- * numbers are still there on hover. Labels alternate between two rows because
- * nine of them across a log axis collide badly in one, and the regions overlap
- * at their edges by design.
+ * Naming the regions is what lets someone read the display without knowing any
+ * frequencies — the numbers are still there on hover. Labels alternate between
+ * two rows because nine of them across a log axis collide badly in one, and the
+ * regions overlap at their edges by design.
  */
 const roleAxis = computed(() => {
-  if (!props.deviation) return []
-  return (props.deviation.regionResults ?? [])
+  if (!props.analysis) return []
+  return (props.analysis.regionResults ?? [])
     .filter(r => r.roleId)
     .map((r, i) => ({
       id: r.roleId,
@@ -150,6 +119,25 @@ const roleAxis = computed(() => {
       row: i % 2,
     }))
 })
+
+/**
+ * Envelope level at an arbitrary frequency, interpolated between FFT bins.
+ *
+ * The envelope is sampled on a linear frequency grid (~10.8 Hz per bin) and
+ * drawn on a log one, so below a few hundred hertz many plot points fall inside
+ * a single bin. Taking the nearest bin drew the low end as a visible staircase —
+ * an artefact of the grid mismatch that reads as structure in the voice.
+ */
+function envelopeAt(hz) {
+  const a = props.analysis
+  const env = a?.envelopeDb
+  if (!env) return 0
+  const pos = (hz * (env.length - 1) * 2) / props.sampleRate
+  const lo = Math.max(0, Math.min(env.length - 1, Math.floor(pos)))
+  const hi = Math.min(env.length - 1, lo + 1)
+  const t = pos - lo
+  return env[lo] + (env[hi] - env[lo]) * t
+}
 
 // ── Curves ──────────────────────────────────────────────────────────────────
 
@@ -190,9 +178,12 @@ function draw() {
 
   drawGrid(ctx, w, h)
   if (props.showAnalyzer && props.spectrumFn) drawAnalyzer(ctx, w, h)
-  if (props.deviation) drawDeviation(ctx, w, h)
+  const fit = props.analysis ? drawEnvelope(ctx, w, h) : null
   drawExtremes(ctx, h)
   drawComposite(ctx, h)
+  // Markers last: they are the point of the VoxDoc display and must not be
+  // crossed out by the EQ curve.
+  if (fit) drawMarkers(ctx, h, fit.yEnv)
 }
 
 function drawGrid(ctx, w, h) {
@@ -252,50 +243,129 @@ function drawAnalyzer(ctx, w, h) {
   ctx.fill()
 }
 
-/** The VoxDoc layer: measured envelope, baseline, and the threshold ribbon. */
-function drawDeviation(ctx, w, h) {
-  const dev = props.deviation
-  for (const r of dev.regionResults ?? []) {
-    if (!r.scanFreqs || !r.baseline) continue
+/**
+ * The tonal shape of the voice: the measured spectral envelope, as one
+ * continuous curve behind everything else.
+ *
+ * WHY THE ENVELOPE AND NOT THE DEVIATION. The detector works by laying a
+ * straight baseline between anchors just outside each region and measuring the
+ * excursion from it. Plotting that excursion seemed natural — it is the
+ * quantity the thresholds apply to — but it is an internal intermediate, and
+ * drawing it produced a row of disconnected sawtooth fragments: every region
+ * starts negative and ends positive, because a straight line under a curved
+ * envelope always does that, and adjacent regions disagree by 3-6 dB at their
+ * shared edge because each uses its own anchors. It read as noise, and it was.
+ *
+ * The envelope itself is continuous, is the actual measurement, and looks like
+ * the thing every listener has already seen in a media player. The problems the
+ * detector found are marked on it directly, which is the part the user needs.
+ *
+ * Drawn on its own vertical fit rather than the dB axis: it is a shape to
+ * recognise, not a number to read, and its true range (60 dB and more) has no
+ * relationship to the ±18 dB the EQ curve lives in. Fitting it to the plot is
+ * honest as long as nothing invites the reader to measure it, so it carries no
+ * gridlines and no scale.
+ */
+function drawEnvelope(ctx, w, h) {
+  const a = props.analysis
+  const freqs = a?.freqsHz
+  const env = a?.envelopeDb
+  if (!freqs || !env) return
 
-    // Tolerance ribbon: the region's own detection threshold, drawn around the
-    // baseline. Inside it, the tool has nothing to say — so "flat inside the
-    // ribbon" and "no suggestions" are the same statement.
-    ctx.fillStyle = 'rgba(255,255,255,.045)'
+  // Fit to the band that has content. The floor is relative to the peak for the
+  // same reason the analysis skips dead regions: below it there is nothing but
+  // the log of numerical noise, and letting that set the scale would flatten
+  // the part of the curve that matters into a few pixels.
+  let peak = -Infinity
+  for (let k = 0; k < freqs.length; k++) {
+    if (freqs[k] >= 100 && freqs[k] <= 16000) peak = Math.max(peak, env[k])
+  }
+  if (!Number.isFinite(peak)) return
+  const floor = peak - 60
+  const top = h * 0.08
+  const bottom = h * 0.94
+
+  const yEnv = (db) => {
+    const t = (Math.max(db, floor) - floor) / (peak - floor)
+    return bottom - t * (bottom - top)
+  }
+
+  const points = []
+  for (let i = 0; i < CURVE_POINTS; i++) {
+    const hz = CURVE_FREQS[i]
+    if (hz < 60 || hz > 16000) continue
+    points.push([xFor(hz), yEnv(envelopeAt(hz))])
+  }
+  if (points.length < 2) return null
+
+  const trace = () => {
     ctx.beginPath()
-    for (let i = 0; i < r.scanFreqs.length; i++) {
-      const x = xFor(r.scanFreqs[i])
-      const y = yFor(r.direction === 'dip' ? -r.thresholdDb : r.thresholdDb)
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-    }
-    for (let i = r.scanFreqs.length - 1; i >= 0; i--) {
-      ctx.lineTo(xFor(r.scanFreqs[i]), yFor(0))
-    }
-    ctx.closePath()
+    ctx.moveTo(points[0][0], points[0][1])
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1])
+  }
+
+  // Filled body first, so the curve reads as a shape rather than a wire.
+  trace()
+  ctx.lineTo(points[points.length - 1][0], bottom)
+  ctx.lineTo(points[0][0], bottom)
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(255,255,255,.055)'
+  ctx.fill()
+
+  trace()
+  ctx.lineWidth = 1.25
+  ctx.strokeStyle = 'rgba(255,255,255,.3)'
+  ctx.stroke()
+
+  return { yEnv }
+}
+
+/**
+ * Where the problems are: one marker per detection, sitting on the envelope.
+ *
+ * This is what connects the words in the suggestion list to the picture. The
+ * label is the role name, not a frequency — the frequency is in the suggestion
+ * row for anyone who wants it, and a number here would be one more thing to
+ * decode.
+ */
+function drawMarkers(ctx, h, yEnv) {
+  const a = props.analysis
+  if (!a || !yEnv) return
+
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'alphabetic'
+
+  for (const r of a.regionResults ?? []) {
+    if (!r.detected || !Number.isFinite(r.centerHz)) continue
+
+    const hot = props.highlightRegion === r.name
+    const x = xFor(r.centerHz)
+    const y = yEnv(envelopeAt(r.centerHz))
+    const colour = hot ? 'rgba(255,200,140,1)' : 'rgba(255,180,120,.85)'
+
+    // A stem down to the axis, so the marker reads as "at this frequency".
+    ctx.beginPath()
+    ctx.setLineDash([2, 3])
+    ctx.moveTo(x, y)
+    ctx.lineTo(x, h)
+    ctx.lineWidth = 1
+    ctx.strokeStyle = hot ? 'rgba(255,200,140,.55)' : 'rgba(255,180,120,.25)'
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    ctx.beginPath()
+    ctx.arc(x, y, hot ? 5 : 3.5, 0, Math.PI * 2)
+    ctx.fillStyle = colour
     ctx.fill()
 
-    // Measured deviation from the baseline. This is the dry curve: it is
-    // computed pre-EQ and does not move as bands change (spec §9.1).
-    ctx.beginPath()
-    ctx.lineWidth = 1.5
-    ctx.strokeStyle = r.detected ? 'rgba(255,180,120,.85)' : 'rgba(255,255,255,.26)'
-    for (let i = 0; i < r.scanFreqs.length; i++) {
-      const x = xFor(r.scanFreqs[i])
-      const y = yForClamped(r.scanEnv[i] - r.baseline[i])
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-
-    // Mark where the detection landed, so the number in the suggestion row has
-    // a place on the picture.
-    if (r.detected && Number.isFinite(r.centerHz)) {
-      const x = xFor(r.centerHz)
-      ctx.beginPath()
-      ctx.arc(x, yForClamped(r.deviationDb), 3, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(255,180,120,.9)'
-      ctx.fill()
+    const role = getRole(r.roleId)
+    if (role) {
+      ctx.font = `700 ${hot ? 10 : 9}px Inter, sans-serif`
+      ctx.fillStyle = colour
+      ctx.fillText(role.label.toUpperCase(), x, Math.max(11, y - 9))
     }
   }
+  ctx.textAlign = 'start'
 }
 
 function drawExtremes(ctx, h) {
@@ -373,7 +443,8 @@ watch(() => props.showAnalyzer, (on) => {
 })
 
 watch(
-  [() => props.bands, () => props.deviation, () => props.selectedId, dbMax],
+  [() => props.bands, () => props.analysis, () => props.highlightRegion,
+   () => props.selectedId, dbMax],
   () => {
     if (rafId === null) draw()
   },

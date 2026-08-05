@@ -7,11 +7,16 @@ import { bandForRole } from '../../../audio/eqBands.js'
 /**
  * VoxDoc — the voice-specific corrective view.
  *
- * The user's task is "flatten the wiggle into the ribbon", which requires no
- * frequency knowledge. The plot shows deviation from each region's own
- * edge-anchored baseline, with the ribbon set by that region's detection
- * threshold — so inside the ribbon the tool has nothing to say, and "flat" and
- * "no suggestions" are the same statement.
+ * The picture is the tonal shape of the voice with the problems marked on it,
+ * and the list underneath says what each mark means in words. The two are
+ * linked by hover, so neither has to be read alone.
+ *
+ * An earlier version plotted the detector's deviation-from-baseline instead.
+ * That was the quantity the thresholds apply to, which made it feel like the
+ * right thing to show, but it is an internal intermediate: it came out as
+ * disconnected sawtooth fragments that told a reader nothing. The lesson is
+ * worth keeping — what a detector computes and what a person can read are
+ * different questions, and the display answers the second one.
  *
  * If the name promises a diagnosis, the tool has to deliver one. A mode called
  * VoxDoc that only handed over labelled sliders would be a broken promise, which
@@ -26,6 +31,14 @@ const props = defineProps({
 
 const auditioning = ref(null)
 let stopAudition = null
+
+/**
+ * Region under the pointer, so hovering a suggestion lights its marker on the
+ * plot. This is what ties the sentence to the picture — without it the two are
+ * separate claims the reader has to match up by frequency, which is exactly the
+ * work the mode exists to remove.
+ */
+const hoveredRegion = ref(null)
 
 const analysis = computed(() => (props.eq.hasAnalysis.value ? props.eq.analysis.value : null))
 
@@ -126,14 +139,42 @@ function roleBand(roleId) {
 
     <!-- ── After analysis ──────────────────────────────────────────────── -->
     <template v-else>
+      <!-- What the picture is. Without this the plot is three unlabelled
+           shapes, and a reader has no way in. -->
+      <div class="flex items-baseline justify-between mb-[6px] gap-[10px]">
+        <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.45)">
+          THE TONE OF YOUR VOICE
+        </span>
+        <span style="font:500 9px/1.3 'Inter';color:rgba(255,255,255,.3)">
+          low notes on the left, high on the right
+        </span>
+      </div>
+
       <EqPlot
         :bands="eq.bands.value"
         :sample-rate="sampleRate"
         :accent="accent"
         :handle-ids="roleHandleIds"
         :interactive="false"
-        :deviation="analysis"
+        :analysis="analysis"
+        :highlight-region="hoveredRegion"
       />
+
+      <!-- Legend. Three marks, three sentences. -->
+      <div class="flex flex-wrap items-center gap-x-[16px] gap-y-[4px] mt-[7px]">
+        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+          <svg width="16" height="8" aria-hidden="true"><path d="M0 6 Q4 1 8 4 T16 2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.5"/></svg>
+          your voice
+        </span>
+        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+          <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="rgba(255,180,120,.9)"/></svg>
+          something to fix
+        </span>
+        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+          <svg width="16" height="8" aria-hidden="true"><path d="M0 4 Q8 8 16 2" fill="none" :stroke="accent" stroke-width="2"/></svg>
+          your changes
+        </span>
+      </div>
 
       <div class="flex items-center justify-between mt-[8px] gap-[10px]">
         <p style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32)">
@@ -180,8 +221,14 @@ function roleBand(roleId) {
         <div
           v-for="s in eq.suggestions.value"
           :key="s.id"
-          class="flex items-center gap-[10px] py-[6px]"
+          class="flex items-center gap-[10px] py-[6px] rounded-[2px] transition-colors"
           style="border-top:1px solid rgba(255,255,255,.05)"
+          :style="{
+            background: hoveredRegion === s.region
+              ? 'rgba(255,180,120,.07)' : 'transparent',
+          }"
+          @pointerenter="hoveredRegion = s.region"
+          @pointerleave="hoveredRegion = null"
         >
           <p class="flex-1" style="font:500 11px/1.4 'Inter';color:rgba(255,255,255,.75)">
             {{ s.symptom }}
@@ -218,8 +265,8 @@ function roleBand(roleId) {
         class="mt-[14px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
-        Nothing stands out — this selection sits inside the tolerance band
-        everywhere. You can still shape it by hand below.
+        Nothing stands out — no part of this recording is far enough out of
+        line to be worth correcting. You can still shape it by hand below.
       </p>
 
       <!-- Role controls -->
