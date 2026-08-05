@@ -1,0 +1,364 @@
+/**
+ * Manual EQ band model and role taxonomy.
+ *
+ * Pure data and pure functions — no Web Audio, no DOM, no Vue. The kernel, the
+ * curve renderer, both UI views and the tests all read the band shape from
+ * here, so there is one definition of what a band is.
+ *
+ * THE GOVERNING RULE (manual EQ spec §2.1): constraints govern the reachable
+ * set, not the representable set. A mode restricts what the user can *do*; it
+ * never restricts what can exist and never alters existing state on entry or
+ * exit. Nothing in this module clamps, snaps or drops a band on a mode change,
+ * and there is deliberately no function here that could — modes are render-time
+ * filters over one array, so VoxDoc -> General -> VoxDoc is bit-identical by
+ * construction rather than by careful bookkeeping.
+ *
+ * EVERY BAND CARRIES EVERY FIELD, from the first commit, whoever created it.
+ * General-created bands get `role: null` and `canonicalQ: null` rather than
+ * omitting the keys. Retrofitting role metadata later would mean migrating
+ * saved chains, which is a migration worth not needing.
+ */
+
+import { REGION_ORDER, SCAN_LOW, SCAN_HIGH } from './voxdoc/regions.js'
+
+/**
+ * UI clutter limit, not a CPU one — biquads are cheap. The cascade is sized to
+ * this so slots can be filled with pass-throughs instead of reallocating.
+ */
+export const MAX_BANDS = 12
+
+/** Filter types the engine understands. VoxDoc uses only the first three. */
+export const FILTER_TYPES = [
+  'peaking', 'lowshelf', 'highshelf', 'highpass', 'lowpass', 'notch',
+]
+
+/**
+ * Parameter ranges for General mode (spec §7.4, §8.1).
+ *
+ * ±18 dB is deliberate and is NOT the pipeline's ±5 dB corrective clamp
+ * relaxed. The pipeline clamps because an automated decision ships with no
+ * human ear in the loop; here a human is auditioning continuously, which is the
+ * safeguard the pipeline lacks. The two numbers look related and are justified
+ * differently — see spec §1.1. Do not harmonise them.
+ *
+ * A general EQ that cannot pull 15 dB out of a resonant room mode is broken for
+ * its own use case, and a spare-bedroom recording is exactly that use case.
+ */
+export const PARAM_RANGES = {
+  frequencyHz: [20, 20000],
+  gainDb: [-18, 18],
+  q: {
+    peaking: [0.3, 10],
+    lowshelf: [0.3, 2],
+    highshelf: [0.3, 2],
+    highpass: [0.3, 10],
+    lowpass: [0.3, 10],
+    notch: [4, 30],
+  },
+}
+
+/**
+ * The role taxonomy — VoxDoc's control surface.
+ *
+ * Each role is a view onto one Stage 3a detection region (see voxdoc/regions.js);
+ * `region` is the join key. Frequency ranges are NOT stored here on purpose:
+ * they come from the resolved region table, which shifts with the classified
+ * voice type. A role's legal range for a female narrator is not the same as for
+ * a male one, and freezing a nominal range in this table is exactly the mistake
+ * the manual EQ spec's §5 table flags with its calibration warning.
+ *
+ * `type` is the filter shape used when a band is created for this role. At the
+ * spectrum edges that is a shelf, which diverges from Stage 3a — the server
+ * emits peaking bands throughout because it renders through FFmpeg's
+ * `equalizer`. A shelf is the musically correct shape for rumble and air, the
+ * manual tool has shelves available, and a human is listening; so the manual
+ * tool uses them and the realised curve differs slightly from the server's for
+ * those two roles.
+ *
+ * `canonicalQ` is the default for a MANUALLY added band. A suggested band
+ * carries the Q measured from the anomaly's half-power width instead, which is
+ * what makes the `qModified` marker meaningful rather than decorative.
+ */
+export const ROLES = [
+  {
+    id: 'rumble',
+    region: 'sub_bass',
+    label: 'Rumble',
+    type: 'lowshelf',
+    canonicalQ: 0.7,
+    bias: 'cut',
+    defaultVisible: true,
+    describe: () => 'less rumble',
+  },
+  {
+    id: 'body',
+    region: 'body_warmth',
+    label: 'Body',
+    type: 'peaking',
+    canonicalQ: 1.2,
+    bias: 'bidirectional',
+    defaultVisible: true,
+    describe: gainDb => (gainDb >= 0 ? 'more body' : 'less boom'),
+  },
+  {
+    id: 'mud',
+    region: 'mud',
+    label: 'Mud',
+    type: 'peaking',
+    canonicalQ: 2.0,
+    bias: 'cut',
+    defaultVisible: true,
+    describe: () => 'less mud',
+  },
+  {
+    id: 'boxiness',
+    region: 'boxy_honky',
+    label: 'Boxiness',
+    type: 'peaking',
+    canonicalQ: 2.5,
+    bias: 'cut',
+    defaultVisible: true,
+    describe: () => 'less boxy',
+  },
+  {
+    id: 'nasality',
+    region: 'nasal',
+    label: 'Nasality',
+    type: 'peaking',
+    canonicalQ: 3.0,
+    bias: 'cut',
+    defaultVisible: false,
+    describe: () => 'less nasal',
+  },
+  {
+    // No counterpart in the manual EQ spec's §5 table. Stage 3a scans
+    // lower_presence (1.2-2.5 kHz) for a dip, which is the "muffled, words are
+    // hard to pick out" complaint — common enough in narration that leaving it
+    // out would be a hole in the taxonomy. Off by default so the standing
+    // control surface stays the size the spec intended; it appears the moment a
+    // suggestion targets it.
+    id: 'clarity',
+    region: 'lower_presence',
+    label: 'Clarity',
+    type: 'peaking',
+    canonicalQ: 1.2,
+    bias: 'bidirectional',
+    defaultVisible: false,
+    describe: gainDb => (gainDb >= 0 ? 'clearer diction' : 'softer diction'),
+  },
+  {
+    // Presence and harshness are one band (spec §5.1): same region, opposite
+    // sign. Two controls would let a user boost one and cut the other over the
+    // same frequencies, which is incoherent and unreadable on the curve.
+    id: 'presence',
+    region: 'upper_presence',
+    label: 'Presence',
+    type: 'peaking',
+    canonicalQ: 1.5,
+    bias: 'bidirectional',
+    defaultVisible: true,
+    describe: gainDb => (gainDb >= 0 ? 'more presence' : 'less harsh'),
+  },
+  {
+    id: 'sibilance',
+    region: 'brilliance',
+    label: 'Sibilance',
+    type: 'peaking',
+    canonicalQ: 3.5,
+    bias: 'cut',
+    defaultVisible: false,
+    describe: () => 'less sibilant',
+  },
+  {
+    id: 'air',
+    region: 'air',
+    label: 'Air',
+    type: 'highshelf',
+    canonicalQ: 0.7,
+    bias: 'bidirectional',
+    defaultVisible: true,
+    describe: gainDb => (gainDb >= 0 ? 'more air' : 'less fizz'),
+  },
+]
+
+const ROLE_BY_ID = new Map(ROLES.map(r => [r.id, r]))
+const ROLE_BY_REGION = new Map(ROLES.map(r => [r.region, r]))
+
+export function getRole(roleId) {
+  return ROLE_BY_ID.get(roleId) ?? null
+}
+
+export function roleForRegion(regionName) {
+  return ROLE_BY_REGION.get(regionName) ?? null
+}
+
+/** Roles in display order, low frequency to high — follows the region order. */
+export const ROLES_IN_ORDER = REGION_ORDER.map(r => ROLE_BY_REGION.get(r)).filter(Boolean)
+
+/**
+ * A role's legal frequency range under a resolved region table.
+ * @returns {[number, number]|null}
+ */
+export function roleFreqRange(roleId, regions) {
+  const role = getRole(roleId)
+  if (!role || !regions) return null
+  const region = regions[role.region]
+  if (!region) return null
+  return [region[SCAN_LOW], region[SCAN_HIGH]]
+}
+
+let bandSeq = 0
+
+/** Short, collision-free within a session — these never leave the browser. */
+function nextBandId() {
+  bandSeq += 1
+  return `band_${bandSeq.toString(36)}${Math.random().toString(36).slice(2, 6)}`
+}
+
+export function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+/** Legal Q range for a filter type. */
+export function qRangeFor(type) {
+  return PARAM_RANGES.q[type] ?? PARAM_RANGES.q.peaking
+}
+
+/**
+ * Create a band. Every field is populated; role fields are null unless a role
+ * is supplied along with the resolved region table it was tagged from.
+ *
+ * @param {object} spec
+ * @param {string} [spec.type='peaking']
+ * @param {number} spec.frequencyHz
+ * @param {number} [spec.gainDb=0]
+ * @param {number} [spec.q]
+ * @param {boolean} [spec.enabled=true]
+ * @param {string|null} [spec.role=null]
+ * @param {object|null} [spec.regions=null] resolved region table, required with `role`
+ * @param {'suggestion'|'manual_voxdoc'|'manual_general'} [spec.origin='manual_general']
+ */
+export function createBand({
+  type = 'peaking',
+  frequencyHz,
+  gainDb = 0,
+  q,
+  enabled = true,
+  role = null,
+  regions = null,
+  origin = 'manual_general',
+} = {}) {
+  const roleDef = role ? getRole(role) : null
+  const resolvedType = roleDef ? roleDef.type : type
+  const canonicalQ = roleDef ? roleDef.canonicalQ : null
+  const resolvedQ = q ?? canonicalQ ?? 1.0
+  const range = roleDef ? roleFreqRange(role, regions) : null
+
+  return {
+    id: nextBandId(),
+    type: resolvedType,
+    frequencyHz: clamp(frequencyHz, ...PARAM_RANGES.frequencyHz),
+    gainDb: clamp(gainDb, ...PARAM_RANGES.gainDb),
+    q: clamp(resolvedQ, ...qRangeFor(resolvedType)),
+    enabled,
+    role: range ? role : null,
+    roleFreqRangeHz: range,
+    canonicalQ: range ? canonicalQ : null,
+    qModified: range ? Math.abs(resolvedQ - canonicalQ) > 1e-9 : false,
+    origin,
+  }
+}
+
+/**
+ * Role forfeiture (spec §5.3).
+ *
+ * Moving a role-tagged band outside its legal range drops the tag: silent,
+ * automatic, no dialog. The band's audio behaviour is unchanged — it keeps its
+ * frequency, gain, Q and type, and sounds identical. All that changes is that
+ * VoxDoc stops offering a control for it and starts counting it as a general
+ * band, which is the honest description of what it has become.
+ *
+ * Mutates and returns the band, so callers can use it inline after a drag.
+ */
+export function applyForfeiture(band) {
+  if (band.role === null || !band.roleFreqRangeHz) return band
+  const [lo, hi] = band.roleFreqRangeHz
+  if (band.frequencyHz >= lo && band.frequencyHz <= hi) return band
+
+  band.role = null
+  band.roleFreqRangeHz = null
+  band.canonicalQ = null
+  band.qModified = false
+  return band
+}
+
+/**
+ * The reverse direction: which role, if any, would accept this band's current
+ * frequency. Used to *offer* re-tagging — never to apply it. An untagged band
+ * that drifts into a role's range is not evidence the user wanted that role.
+ *
+ * @returns {string|null} role id
+ */
+export function candidateRoleFor(band, regions) {
+  if (band.role !== null || !regions) return null
+  for (const role of ROLES_IN_ORDER) {
+    const range = roleFreqRange(role.id, regions)
+    if (range && band.frequencyHz >= range[0] && band.frequencyHz <= range[1]) {
+      return role.id
+    }
+  }
+  return null
+}
+
+/** Tag an untagged band with a role, adopting the role's canonical Q and type. */
+export function tagBand(band, roleId, regions) {
+  const range = roleFreqRange(roleId, regions)
+  const roleDef = getRole(roleId)
+  if (!range || !roleDef) return band
+
+  band.role = roleId
+  band.roleFreqRangeHz = range
+  band.canonicalQ = roleDef.canonicalQ
+  band.type = roleDef.type
+  band.q = clamp(roleDef.canonicalQ, ...qRangeFor(roleDef.type))
+  band.qModified = false
+  return band
+}
+
+/** Restore a role band's canonical Q, clearing the "modified" marker. */
+export function resetBandQ(band) {
+  if (band.canonicalQ === null) return band
+  band.q = clamp(band.canonicalQ, ...qRangeFor(band.type))
+  band.qModified = false
+  return band
+}
+
+/**
+ * Set a band's Q, tracking whether it has diverged from the role canon.
+ * VoxDoc hides the Q control but preserves any value already there (spec §2.4).
+ */
+export function setBandQ(band, q) {
+  band.q = clamp(q, ...qRangeFor(band.type))
+  band.qModified = band.canonicalQ !== null && Math.abs(band.q - band.canonicalQ) > 1e-9
+  return band
+}
+
+/**
+ * Set a band's frequency, applying forfeiture if it leaves the role's range.
+ * The single entry point for frequency changes — a drag, a numeric entry and a
+ * suggestion apply must all forfeit identically.
+ */
+export function setBandFrequency(band, frequencyHz) {
+  band.frequencyHz = clamp(frequencyHz, ...PARAM_RANGES.frequencyHz)
+  return applyForfeiture(band)
+}
+
+/** Bands VoxDoc has no control for, but which are still in the audio path. */
+export function untaggedBands(bands) {
+  return bands.filter(b => b.role === null)
+}
+
+/** The band carrying a given role, or null. One band per role by construction. */
+export function bandForRole(bands, roleId) {
+  return bands.find(b => b.role === roleId) ?? null
+}

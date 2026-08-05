@@ -44,6 +44,14 @@ export const ICONS = {
   saturation: '<path d="M12 3a6 6 0 00-3.6 10.8c1 .8 1.6 1.8 1.8 3.2h3.6c.2-1.4.8-2.4 1.8-3.2A6 6 0 0012 3z"/><path d="M9 17h6"/><path d="M9.5 20h5"/><path d="M10 11l2 2 2-2"/>',
   // A rising shelf: flat, then a gentle knee up to a plateau — the air curve.
   air: '<path d="M2 17c5 0 8 0 11-5s5-5 9-5"/><path d="M2 21h20" opacity=".35"/>',
+  // EQ: an equalisation curve with its band handles on it — a dip and a lift,
+  // with the two nodes you would drag. Deliberately not faders, which is the
+  // `effects` category glyph, and not a flat spectrum, which is `resonance`.
+  eq: '<path d="M2 15c3 0 4-6 7-6s3.5 5 6.5 5S19 9 22 9"/><circle cx="9" cy="9" r="2"/><circle cx="18.5" cy="10.2" r="2"/>',
+  // VoxDoc: the EQ curve read as a diagnosis — a waveform with a stethoscope
+  // head resting on it. Says "listening to a voice", which is the promise the
+  // mode has to keep.
+  voxdoc: '<path d="M3 11c1.5 0 2-4 3.5-4S8 15 9.5 15s2-6 3.5-6"/><path d="M17 4v4a3 3 0 006 0V4" opacity=".55"/><circle cx="20" cy="15" r="3"/><path d="M20 11v1"/>',
   // Resonance: a spectrum with one peak protruding, and the cut being taken
   // out of it — a narrow notch pushed down onto the spike.
   resonance: '<path d="M2 18c3 0 3.5-3 5-3s2 3 4 3"/><path d="M11 18c1-6 2-12 4-12s3 6 4 12"/><path d="M19 18c1 0 1.5-2 3-2"/><path d="M15 3v6" stroke-dasharray="2 2" opacity=".5"/>',

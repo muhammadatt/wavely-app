@@ -53,6 +53,7 @@ Processing is split between client and server based on operation type. This is n
 | Trim, cut, delete, silence, split | Client | Pure segment manipulation — no audio data touched |
 | Normalize | Client | Linear operation, expected to feel instant. Quality gap vs. server is acceptable for spot work |
 | Compression | Client | Interactive parameter tweaking expects immediacy. Two emulations — OptoSmooth (LA-2A opto) and FET Punch (1176 FET) — each a dependency-free kernel run in an AudioWorklet for preview and in an OfflineAudioContext for apply, so the two are sample-identical |
+| Manual EQ (General + VoxDoc) | Client | A biquad cascade is cheap enough to run live, and the whole usability argument depends on hearing the change while moving the control. VoxDoc's analysis is a client port of Stage 3a — measurement-driven, so it needs no corpus, no reference curve and no preset |
 | Noise reduction | Server (DeepFilterNet3) | Quality gap vs. RNNoise is significant and user-visible. Modal wait is normal for this operation |
 | Full preset chain | Server | Always server-side |
 
@@ -251,6 +252,7 @@ These apply only to the `acx_audiobook` preset:
 - Playback with A/B before/after comparison
 - Preset panel (4 presets) + output profile panel (3 profiles) with dynamic UI rules
 - Processing report panel (measurements, ACX certification, advisory flags)
+- Manual EQ with two views onto one band pool: General (parametric, 12 bands, live analyzer) and VoxDoc (voice diagnosis — client port of Stage 3a's cepstral envelope and edge-anchored deviation detection, producing plain-language suggestions with measured centre frequency and Q)
 
 **Backend:**
 - Config-driven pipeline architecture — all 4 presets share a single orchestrator; stage sequences declared per-preset in `src/audio/presets.js`

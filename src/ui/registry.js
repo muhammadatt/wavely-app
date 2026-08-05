@@ -11,7 +11,9 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
+import EqModal from '../components/panels/EqModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
+import { openManualEqWindow } from '../composables/useManualEq.js'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
 import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
@@ -254,6 +256,34 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: VocalSaturationWindow,
+  },
+  {
+    id: 'manual-eq',
+    label: 'EQ',
+    desc: 'Shape the tone by frequency',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'eq',
+    keywords: ['equalizer', 'equaliser', 'eq', 'parametric', 'frequency', 'tone', 'bass', 'treble', 'filter'],
+    requires: 'selection',
+    surface: 'window',
+    component: EqModal,
+  },
+  {
+    // Second door into the same plugin (manual EQ spec §3, Path B). Not a
+    // second window: WINDOW_COMPONENTS is keyed by operation id, so a second
+    // 'window' entry would mint a second instance with its own band pool. This
+    // runs immediately, sets the view and raises the one window that exists.
+    id: 'voxdoc',
+    label: 'VoxDoc',
+    desc: 'Find what’s wrong with a voice recording',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'voxdoc',
+    keywords: ['voice', 'diagnose', 'analyze', 'analyse', 'muddy', 'boxy', 'harsh', 'nasal', 'eq', 'doctor', 'fix'],
+    requires: 'selection',
+    surface: 'immediate',
+    action: () => openManualEqWindow('voxdoc'),
   },
   {
     id: 'air-band',
