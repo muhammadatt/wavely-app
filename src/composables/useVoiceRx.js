@@ -282,9 +282,14 @@ export function useVoiceRx() {
    * Used for display and suggestion generation only — the EQ is still applied to
    * the user's actual selection. Reaching outside is honest as long as it is
    * labelled, and it beats refusing to analyse a phrase that happens to be short.
+   *
+   * The frame constants are sample counts, so the duration they need depends on
+   * the file's own rate — analysis runs at the file's native rate, and a server
+   * round-trip can change it. Widening against a fixed 44.1 kHz would reach too
+   * far on lower rates and too little on higher ones.
    */
-  function widenedRange(start, end, duration) {
-    const needed = ((MIN_VOICED_FRAMES * HOP_SIZE + FRAME_SIZE) / 44100) * 3
+  function widenedRange(start, end, duration, sampleRate) {
+    const needed = ((MIN_VOICED_FRAMES * HOP_SIZE + FRAME_SIZE) / sampleRate) * 3
     if (end - start >= needed) return { start, end, widened: false }
     const grow = (needed - (end - start)) / 2
     const s = Math.max(0, start - grow)
@@ -317,7 +322,9 @@ export function useVoiceRx() {
     try {
       const { sampleRate, channels } = state.currentFile
       const sel = state.selection
-      const range = widenedRange(sel.start, sel.end, getTimelineDuration(state.segments))
+      const range = widenedRange(
+        sel.start, sel.end, getTimelineDuration(state.segments), sampleRate,
+      )
 
       const rendered = renderRegionToBuffer(
         state.segments, range.start, range.end, sampleRate, channels,

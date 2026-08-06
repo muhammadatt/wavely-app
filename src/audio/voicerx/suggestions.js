@@ -2,17 +2,18 @@
  * VoiceRx suggestions — turning detections into something a non-professional can
  * act on.
  *
- * VoiceRx presents suggestions, not applied corrections: analyze -> review ->
- * apply. The apply step is not protecting against damage (the operation is
- * non-destructive, undoable and real-time) — it is protecting against surprise.
- * That is a comprehension goal, and it is why per-suggestion accept matters as
- * much as "apply all".
+ * VoiceRx corrects on arrival: analyze -> hear it fixed -> adjust. Analysis
+ * turns every suggestion into an enabled band itself (see
+ * useVoiceRx.applyAllSuggestions), so the first thing the user hears is the
+ * corrected version rather than a panel describing problems the audio still
+ * has. Review comes after, not before — each row stays switchable, which is why
+ * a suggestion remains addressable long past the moment it was applied.
  *
  * SUGGESTIONS ARE VIEW STATE, NOT BAND STATE (spec §9.2). They live outside the
  * band pool entirely, derived from the frozen analysis on every read. Nothing
  * to migrate, nothing to reconcile with role tags, no partial-application
  * states — and handing the bands off to the EQ leaves the analysis untouched,
- * so the suggestions simply come back. Only on apply does one become a band.
+ * so the suggestions simply come back, ready to be re-applied by their row.
  *
  * DETECTION ALWAYS RUNS ON THE DRY SIGNAL (spec §9.1). Once suggestions are
  * applied the composite curve flattens; detection re-run on the post-EQ signal
