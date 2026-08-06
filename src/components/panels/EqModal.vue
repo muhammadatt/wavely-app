@@ -22,6 +22,15 @@ const { state } = useEditorState()
 
 const ACCENT = '#8fd18f'
 
+/**
+ * Taller than the 200 px other faceplates use, by what removing the instruction
+ * row under the plot gave back — so the window is the height it was and the
+ * space went to the curve rather than off the bottom. Every dB of range gets
+ * ~10% more pixels for free, which matters most at the ±30 stop where the axis
+ * is thinnest. Shared with the meters either side so the three line up.
+ */
+const PLOT_HEIGHT = 221
+
 onMounted(() => {
   // Opens with a starting layout rather than a bare plot — four unity bands,
   // so this cannot change what the user hears.
@@ -62,11 +71,25 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="px-[22px] pt-[18px] pb-[22px]">
-      <div class="flex items-center justify-end mb-[14px] gap-[14px]">
+      <div class="flex items-center justify-between mb-[14px] gap-[14px]">
+                <label
+          class="flex items-center gap-[6px] cursor-pointer shrink-0"
+          style="font:600 9px/1 'Inter';letter-spacing:.06em;color:rgba(255,255,255,.4)"
+          title="Draw the live spectrum behind the curve"
+        >
+          <input
+            type="checkbox"
+            :checked="eq.showAnalyzer.value"
+            class="accent-current w-[11px] h-[11px]"
+            @change="eq.showAnalyzer.value = $event.target.checked"
+          >
+          ANALYZER
+        </label>
         <span
           v-if="activeBandCount > 0"
           style="font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
         >{{ activeBandCount }} band{{ activeBandCount === 1 ? '' : 's' }} active</span>
+
         <button
           type="button"
           class="px-[8px] py-[4px] rounded-[3px]"
@@ -77,13 +100,16 @@ async function applyAndClose() {
       </div>
 
       <div class="flex gap-[16px]">
-        <LevelMeter :db="eq.inputDb.value" label="IN" :height="200" />
+        <LevelMeter :db="eq.inputDb.value" label="IN" :height="PLOT_HEIGHT" />
 
         <div class="flex-1 min-w-0">
-          <GeneralView :eq="eq" :accent="ACCENT" :sample-rate="sampleRate" />
+          <GeneralView
+            :eq="eq" :accent="ACCENT" :sample-rate="sampleRate"
+            :plot-height="PLOT_HEIGHT"
+          />
         </div>
 
-        <LevelMeter :db="eq.outputDb.value" label="OUT" :height="200" />
+        <LevelMeter :db="eq.outputDb.value" label="OUT" :height="PLOT_HEIGHT" />
       </div>
 
       <div class="mt-[16px] pt-[14px]" style="border-top:1px solid rgba(255,255,255,.06)">

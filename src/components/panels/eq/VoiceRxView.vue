@@ -173,6 +173,7 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
         :sample-rate="sampleRate"
         :accent="accent"
         :handle-ids="roleHandleIds"
+        :solo-id="eq.soloBandId.value"
         :interactive="false"
         :analysis="analysis"
         :highlight-region="hoveredRegion"

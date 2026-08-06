@@ -40,6 +40,20 @@ const instance = createEqInstance({
 const showAnalyzer = ref(true)
 
 /**
+ * Gain axis range: 'auto', or a fixed number of dB either side.
+ *
+ * Auto, whose floor is ±12 (see AUTO_FLOOR_DB in EqPlot). Pinning it at ±12
+ * instead was tried and is worse: bands go to ±18, so any pinned range below
+ * that lets a bell run into the ceiling and flatten off, which reads as the
+ * display breaking rather than as the band reaching its limit. Auto keeps the
+ * whole curve on the plot at every gain while still starting somewhere roomy.
+ *
+ * The ±6 stop is where the tighter view went — useful for 1 dB work, just not
+ * as the thing you land on by default.
+ */
+const dbRange = ref('auto')
+
+/**
  * Take a set of bands from elsewhere and open the window on them.
  *
  * Standalone rather than a method so VoiceRx can hand over without reaching into
@@ -85,5 +99,5 @@ export function useManualEq() {
     seedGeneralBands()
   }
 
-  return { ...api, showAnalyzer, seedGeneralBands, resetBands }
+  return { ...api, showAnalyzer, dbRange, seedGeneralBands, resetBands }
 }

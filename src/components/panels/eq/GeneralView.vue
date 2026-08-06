@@ -27,9 +27,19 @@ const props = defineProps({
   eq: { type: Object, required: true },
   accent: { type: String, required: true },
   sampleRate: { type: Number, default: 44100 },
+  /** Set by the faceplate, which sizes the level meters to match. */
+  plotHeight: { type: Number, default: 200 },
 })
 
-/** Strip under the pointer — lights the matching handle on the plot. */
+/**
+ * The band under the pointer, from whichever surface the pointer is on.
+ *
+ * Set by hovering a strip and by hovering its dot on the curve, and read by
+ * both — so the highlight is symmetric and either surface teaches the other.
+ * That link is what lets the two control surfaces coexist for two audiences
+ * instead of competing: a novice living in the strips picks up what the dots
+ * are without ever being made to use them.
+ */
 const hoveredId = ref(null)
 
 // ── Strip order ───────────────────────────────────────────────────────────
@@ -153,38 +163,36 @@ function gainLabel(band) {
 
 <template>
   <div>
+    <!-- The how-to moved from a line of body copy under the plot into the
+         plot's own tooltip. It was facts a user needs once, occupying a row of a
+         window already at its height limit — and a tooltip on the thing being
+         described is where someone looks when stuck, which is the only time it
+         is wanted.
+
+         This one covers the empty canvas only. The band dots carry their own,
+         which the browser prefers over this while the pointer is on one. -->
     <EqPlot
+      title="Click anywhere on the plot to add a band · double-click any knob to type an exact value"
       :bands="eq.bands.value"
       :sample-rate="sampleRate"
       :accent="accent"
+      :height="plotHeight"
       :selected-id="hoveredId"
       :show-analyzer="eq.showAnalyzer.value"
       :spectrum-fn="eq.getSpectrum"
+      :db-range="eq.dbRange.value"
+      :solo-id="eq.soloBandId.value"
+      range-control
+      cursor-readout
+      @update:db-range="eq.dbRange.value = $event"
       @create-band="onCreate"
+      @hover-band="hoveredId = $event"
       @select-band="hoveredId = $event"
       @move-band="onMove"
       @q-band="onQ"
       @remove-band="eq.removeBand"
       @toggle-band="eq.toggleBand"
     />
-
-    <div class="flex items-center justify-between mt-[10px]">
-      <p style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.3)">
-        Click the curve to add a band · drag to move · double-click a knob to type a value
-      </p>
-      <label
-        class="flex items-center gap-[6px] cursor-pointer shrink-0"
-        style="font:600 9px/1 'Inter';letter-spacing:.06em;color:rgba(255,255,255,.4)"
-      >
-        <input
-          type="checkbox"
-          :checked="eq.showAnalyzer.value"
-          class="accent-current w-[11px] h-[11px]"
-          @change="eq.showAnalyzer.value = $event.target.checked"
-        >
-        ANALYZER
-      </label>
-    </div>
 
     <!-- ── Band strips ──────────────────────────────────────────────────── -->
     <div
