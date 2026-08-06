@@ -11,6 +11,8 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
+import EqModal from '../components/panels/EqModal.vue'
+import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
@@ -254,6 +256,33 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: VocalSaturationWindow,
+  },
+  {
+    id: 'manual-eq',
+    label: 'EQ',
+    desc: 'Parametric equalizer',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'eq',
+    keywords: ['equalizer', 'equaliser', 'eq', 'parametric', 'frequency', 'tone', 'bass', 'treble', 'filter'],
+    requires: 'selection',
+    surface: 'window',
+    component: EqModal,
+  },
+  {
+    // Its own window and its own band pool. It was once a second door into the
+    // EQ — one pool, two views — which is why the two still look related; see
+    // useEqInstance.js for why they were separated.
+    id: 'voicerx',
+    label: 'VoiceRx',
+    desc: 'Find what’s wrong with a voice recording',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'voicerx',
+    keywords: ['voice', 'diagnose', 'analyze', 'analyse', 'muddy', 'boxy', 'harsh', 'nasal', 'eq', 'doctor', 'fix'],
+    requires: 'selection',
+    surface: 'window',
+    component: VoiceRxModal,
   },
   {
     id: 'air-band',
