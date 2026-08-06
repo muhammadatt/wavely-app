@@ -1,11 +1,11 @@
 <script setup>
 import { computed, ref, onBeforeUnmount } from 'vue'
 import EqPlot from './EqPlot.vue'
-import DeviceSlider from '../../knobs/DeviceSlider.vue'
+import Knob from '../../knobs/Knob.vue'
 import { bandForRole } from '../../../audio/eqBands.js'
 
 /**
- * VoxDoc — the voice-specific corrective view.
+ * VoiceRx — the voice-specific corrective view.
  *
  * The picture is the tonal shape of the voice with the problems marked on it,
  * and the list underneath says what each mark means in words. The two are
@@ -18,9 +18,10 @@ import { bandForRole } from '../../../audio/eqBands.js'
  * worth keeping — what a detector computes and what a person can read are
  * different questions, and the display answers the second one.
  *
- * If the name promises a diagnosis, the tool has to deliver one. A mode called
- * VoxDoc that only handed over labelled sliders would be a broken promise, which
- * is why the suggestion list, not the sliders, is the top of this panel.
+ * If the name promises a diagnosis, the tool has to deliver one. A plugin
+ * called VoiceRx that only handed over labelled knobs would be a broken promise,
+ * which is why the findings list, not the knobs, is the top of this panel — and
+ * why the corrections are applied on arrival rather than offered for approval.
  */
 
 const props = defineProps({
@@ -28,9 +29,6 @@ const props = defineProps({
   accent: { type: String, required: true },
   sampleRate: { type: Number, default: 44100 },
 })
-
-const auditioning = ref(null)
-let stopAudition = null
 
 /**
  * Region under the pointer, so hovering a suggestion lights its marker on the
@@ -42,11 +40,9 @@ const hoveredRegion = ref(null)
 
 const analysis = computed(() => (props.eq.hasAnalysis.value ? props.eq.analysis.value : null))
 
-/** Handles are shown for role bands only; general bands have no VoxDoc control. */
+/** Handles are shown for role bands only; general bands have no VoiceRx control. */
 const roleHandleIds = computed(() =>
   props.eq.bands.value.filter(b => b.role !== null).map(b => b.id))
-
-const untaggedCount = computed(() => props.eq.untagged.value.length)
 
 const voiceLabel = computed(() => {
   const a = analysis.value
@@ -58,32 +54,34 @@ const voiceLabel = computed(() => {
 const errorMessage = computed(() => {
   switch (props.eq.analysisError.value) {
     case 'no_voiced_frames':
-      return 'No speech found here. VoxDoc reads voices — for other material, General mode has the full EQ.'
+      return 'No speech found here. VoiceRx reads voices — for other material, the EQ plugin has the full set of controls.'
     case 'insufficient_voiced':
-      return 'This selection is too short, or has too little speech, to analyse. Try a longer stretch, or use General mode.'
+      return 'This selection is too short, or has too little speech, to analyse. Try a longer stretch, or use the EQ plugin.'
     case 'failed':
-      return 'Analysis failed. Try again, or use General mode.'
+      return 'Analysis failed. Try again, or use the EQ plugin.'
     default:
       return null
   }
 })
 
-function startAudition(suggestion) {
-  stopAudition?.()
-  auditioning.value = suggestion.id
-  stopAudition = props.eq.auditionSuggestion(suggestion)
-}
+// Solo latches, the way the EQ's per-band S button does. It replaced a
+// press-and-hold "hear it": holding gave a cleaner A/B in principle, but it
+// could not be combined with turning a knob, and two different ways to listen
+// to one band across two plugins was one too many.
+onBeforeUnmount(() => props.eq.clearSolo())
 
-function endAudition() {
-  stopAudition?.()
-  stopAudition = null
-  auditioning.value = null
-}
-
-onBeforeUnmount(endAudition)
+const allOn = computed(() =>
+  props.eq.suggestions.value.length > 0
+  && props.eq.activeSuggestionCount.value === props.eq.suggestions.value.length)
 
 function gainFor(roleId) {
   return props.eq.roleGain(roleId)
+}
+
+/** A role whose band exists but is switched off is shown, but shown as inert. */
+function roleMuted(roleId) {
+  const band = bandForRole(props.eq.bands.value, roleId)
+  return !!band && !band.enabled
 }
 
 function fmtGain(v) {
@@ -93,6 +91,19 @@ function fmtGain(v) {
 function roleBand(roleId) {
   return bandForRole(props.eq.bands.value, roleId)
 }
+
+/**
+ * The plain-language read-out for every role that is doing something.
+ *
+ * The sliders carried one of these per control. Knobs are too narrow to sit a
+ * sentence under, and most of them say nothing at rest anyway — collected into
+ * one line, the panel says what the EQ is doing in a single sentence instead of
+ * six mostly-empty ones.
+ */
+const activeSummary = computed(() => props.eq.visibleRoles.value
+  .filter(r => gainFor(r.id) !== 0)
+  .map(r => r.describe(gainFor(r.id)))
+  .join(' · '))
 </script>
 
 <template>
@@ -113,26 +124,33 @@ function roleBand(roleId) {
         class="text-center max-w-[360px]"
         style="font:500 11px/1.6 'Inter';color:rgba(255,255,255,.4)"
       >
-        VoxDoc listens to your selection and tells you what it hears —
+        VoiceRx listens to your selection and tells you what it hears —
         what is muddy, boxy, harsh or dull, and by how much.
       </p>
 
       <button
         type="button"
-        class="px-[20px] py-[8px] rounded-[3px] transition-opacity"
+        class="flex items-center gap-[8px] px-[20px] py-[8px] rounded-[3px] transition-opacity"
         :style="{
           background: accent,
           color: '#0a1410',
           font: '700 11px/1 Inter',
           letterSpacing: '.08em',
-          opacity: eq.analyzing.value || !eq.hasSelection.value ? 0.45 : 1,
+          opacity: eq.analyzing.value || !eq.hasSelection.value ? 0.55 : 1,
         }"
         :disabled="eq.analyzing.value || !eq.hasSelection.value"
         @click="eq.analyze()"
-      >{{ eq.analyzing.value ? 'ANALYSING…' : 'ANALYZE' }}</button>
+      >
+        <span v-if="eq.analyzing.value" class="vd-spin" style="--spin-color:#0a1410" aria-hidden="true" />
+        {{ eq.analyzing.value ? 'ANALYSING…' : 'ANALYZE' }}
+      </button>
 
       <p
-        v-if="!eq.hasSelection.value"
+        v-if="eq.analyzing.value"
+        style="font:500 9px/1 'Inter';color:rgba(255,255,255,.35)"
+      >Reading the whole selection — a long one takes a few seconds.</p>
+      <p
+        v-else-if="!eq.hasSelection.value"
         style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)"
       >Make a selection first</p>
     </div>
@@ -180,16 +198,18 @@ function roleBand(roleId) {
         <p style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32)">
           {{ voiceLabel }}
           <span v-if="eq.analysisWidened.value"> · analysed from surrounding audio</span>
-          <span v-if="untaggedCount > 0">
-            · {{ untaggedCount }} general band{{ untaggedCount === 1 ? '' : 's' }} active
-          </span>
         </p>
         <button
           type="button"
-          class="shrink-0 px-[8px] py-[4px] rounded-[3px]"
+          class="shrink-0 flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px]"
           style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5)"
+          :style="{ opacity: eq.analyzing.value ? 0.55 : 1 }"
+          :disabled="eq.analyzing.value"
           @click="eq.analyze()"
-        >RE-ANALYZE</button>
+        >
+          <span v-if="eq.analyzing.value" class="vd-spin" aria-hidden="true" />
+          {{ eq.analyzing.value ? 'ANALYSING…' : 'RE-ANALYZE' }}
+        </button>
       </div>
 
       <p
@@ -206,57 +226,90 @@ function roleBand(roleId) {
           <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.4)">
             WHAT I HEAR
           </span>
-          <button
-            type="button"
-            class="px-[8px] py-[4px] rounded-[3px]"
-            :style="{
-              font: '600 9px/1 Inter', letterSpacing: '.06em',
-              border: `1px solid color-mix(in srgb, ${accent} 45%, transparent)`,
-              color: accent,
-            }"
-            @click="eq.applyAllSuggestions()"
-          >APPLY ALL</button>
+          <div class="flex items-center gap-[10px]">
+            <span style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)">
+              {{ eq.activeSuggestionCount.value }} of {{ eq.suggestions.value.length }} on
+            </span>
+            <button
+              type="button"
+              class="px-[8px] py-[4px] rounded-[3px]"
+              :style="{
+                font: '600 9px/1 Inter', letterSpacing: '.06em',
+                border: `1px solid color-mix(in srgb, ${accent} 45%, transparent)`,
+                color: accent,
+              }"
+              @click="eq.setAllSuggestions(!allOn)"
+            >{{ allOn ? 'ALL OFF' : 'ALL ON' }}</button>
+          </div>
         </div>
 
+        <!-- The corrections run in the live chain, so they are inaudible while
+             the plugin is bypassed. Saying so beats a silent panel. -->
+        <p
+          v-if="!eq.eqPreview.value"
+          class="mb-[7px]"
+          style="font:500 9px/1.4 'Inter';color:rgba(255,190,120,.7)"
+        >
+          VoiceRx is switched off — turn it on to hear these.
+        </p>
+
+        <!-- Applied on arrival, listed so they can be switched back off. The row
+             is a live control, not a proposal: the note explains what was heard,
+             the switch says whether anything is being done about it. -->
         <div
-          v-for="s in eq.suggestions.value"
-          :key="s.id"
+          v-for="row in eq.suggestionRows.value"
+          :key="row.suggestion.id"
           class="flex items-center gap-[10px] py-[6px] rounded-[2px] transition-colors"
           style="border-top:1px solid rgba(255,255,255,.05)"
           :style="{
-            background: hoveredRegion === s.region
+            background: hoveredRegion === row.suggestion.region
               ? 'rgba(255,180,120,.07)' : 'transparent',
+            opacity: row.band?.enabled ? 1 : 0.45,
           }"
-          @pointerenter="hoveredRegion = s.region"
+          @pointerenter="hoveredRegion = row.suggestion.region"
           @pointerleave="hoveredRegion = null"
         >
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="!!row.band?.enabled"
+            class="shrink-0 rounded-full transition-colors"
+            style="width:26px;height:15px;padding:2px"
+            :style="{
+              background: row.band?.enabled
+                ? accent : 'rgba(255,255,255,.14)',
+            }"
+            :title="row.band?.enabled ? 'Switch this correction off' : 'Switch this correction on'"
+            @click="eq.toggleSuggestion(row.suggestion)"
+          >
+            <span
+              class="block rounded-full transition-transform"
+              style="width:11px;height:11px;background:#0d1216"
+              :style="{ transform: row.band?.enabled ? 'translateX(11px)' : 'none' }"
+            />
+          </button>
+
           <p class="flex-1" style="font:500 11px/1.4 'Inter';color:rgba(255,255,255,.75)">
-            {{ s.symptom }}
+            {{ row.suggestion.symptom }}
           </p>
           <span
             class="shrink-0 text-right"
             style="font:600 10px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.45);min-width:96px"
-          >{{ s.roleLabel }} · {{ fmtGain(s.gainDb) }} dB</span>
+          >{{ row.suggestion.roleLabel }} · {{ fmtGain(row.band?.gainDb ?? row.suggestion.gainDb) }} dB</span>
           <button
             type="button"
             class="shrink-0 px-[8px] py-[4px] rounded-[3px]"
             style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12)"
             :style="{
-              color: auditioning === s.id ? accent : 'rgba(255,255,255,.55)',
-              background: auditioning === s.id
+              color: eq.soloBandId.value === row.band?.id ? accent : 'rgba(255,255,255,.5)',
+              background: eq.soloBandId.value === row.band?.id
                 ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'transparent',
+              opacity: row.band ? 1 : 0.35,
             }"
-            @pointerdown="startAudition(s)"
-            @pointerup="endAudition"
-            @pointerleave="endAudition"
-            @pointercancel="endAudition"
-          >HEAR IT</button>
-          <button
-            type="button"
-            class="shrink-0 px-[10px] py-[4px] rounded-[3px]"
-            :style="{ background: accent, color: '#0a1410', font: '700 9px/1 Inter', letterSpacing: '.06em' }"
-            @click="eq.applySuggestion(s)"
-          >APPLY</button>
+            :disabled="!row.band"
+            title="Hear this correction on its own"
+            @click="eq.toggleSolo(row.band)"
+          >SOLO</button>
         </div>
       </div>
 
@@ -271,32 +324,50 @@ function roleBand(roleId) {
 
       <!-- Role controls -->
       <div class="mt-[16px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <div class="grid grid-cols-2 gap-x-[20px] gap-y-[10px]">
-          <div v-for="role in eq.visibleRoles.value" :key="role.id">
-            <DeviceSlider
+        <!-- One knob per role. Six faders stacked two-up pushed the suggestion
+             list — the part of this mode that earns its name — off the bottom
+             of the window; a single row of knobs keeps it all in one view. -->
+        <div class="flex flex-wrap gap-x-[14px] gap-y-[12px]">
+          <div
+            v-for="role in eq.visibleRoles.value"
+            :key="role.id"
+            class="flex flex-col items-center w-[62px] transition-opacity"
+            :style="{ opacity: roleMuted(role.id) ? 0.4 : 1 }"
+            :title="roleMuted(role.id)
+              ? `${role.label} — switched off; move the knob to switch it back on`
+              : `${role.label} — drag to adjust, double-click to reset`"
+            @dblclick="eq.setRoleGain(role.id, 0)"
+          >
+            <Knob
               :model-value="gainFor(role.id)"
               :min="-12" :max="12" :step="0.1"
-              :label="role.label"
+              label=""
+              bipolar
               :accent="accent"
+              :value-font-px="11"
               :format-value="fmtGain"
               @update:model-value="eq.setRoleGain(role.id, $event)"
             />
-            <div class="flex items-center gap-[8px] mt-[2px] h-[11px]">
-              <span
-                v-if="gainFor(role.id) !== 0"
-                style="font:500 9px/1 'Inter';color:rgba(255,255,255,.32)"
-              >{{ role.describe(gainFor(role.id)) }}</span>
-              <button
-                v-if="roleBand(role.id)?.qModified"
-                type="button"
-                class="underline underline-offset-2"
-                style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)"
-                title="This band's width came from the measurement rather than the default"
-                @click="eq.resetQ(roleBand(role.id).id)"
-              >width: measured — reset</button>
-            </div>
+            <span
+              class="uppercase mt-[5px] text-center"
+              style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.5)"
+            >{{ role.label }}</span>
+            <button
+              v-if="roleBand(role.id)?.qModified"
+              type="button"
+              class="underline underline-offset-2 mt-[3px]"
+              style="font:500 8px/1 'Inter';color:rgba(255,255,255,.3)"
+              title="This band's width came from the measurement rather than the default — click to restore the default width"
+              @click.stop="eq.resetQ(roleBand(role.id).id)"
+            >width: measured</button>
           </div>
         </div>
+
+        <p
+          v-if="activeSummary"
+          class="mt-[10px]"
+          style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32)"
+        >{{ activeSummary }}</p>
 
         <div v-if="eq.hiddenRoles.value.length > 0" class="mt-[12px] flex flex-wrap gap-[6px]">
           <button
@@ -322,3 +393,30 @@ function roleBand(roleId) {
     </template>
   </div>
 </template>
+
+<style scoped>
+/*
+ * The analysis blocks the main thread while it runs, so the busy indicator has
+ * to be something the compositor can animate on its own. A transform keyframe
+ * qualifies; anything driven by JS or by a layout-affecting property would sit
+ * frozen for exactly the seconds it is meant to cover.
+ */
+.vd-spin {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--spin-color, rgba(255, 255, 255, 0.55)) 25%, transparent);
+  border-top-color: var(--spin-color, rgba(255, 255, 255, 0.55));
+  animation: vd-spin 0.7s linear infinite;
+  will-change: transform;
+}
+
+@keyframes vd-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vd-spin { animation-duration: 2.4s; }
+}
+</style>

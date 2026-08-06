@@ -6,15 +6,13 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 import GeneralView from './eq/GeneralView.vue'
-import VoxDocView from './eq/VoxDocView.vue'
 
 /**
- * The EQ faceplate — one plugin, two views.
+ * The EQ faceplate — a parametric equaliser, on its own.
  *
- * Both registry entries ("EQ" and "VoxDoc") open this same window; the mode is
- * a view flag on the shared composable, not a second instance. That is what
- * makes the spec's §2.1 promise structural: there is only one band pool, and
- * switching views cannot alter it because neither view writes on entry.
+ * It carried VoiceRx as a second view for a while, on the reasoning that both
+ * were doing one job to one signal. See useEqInstance.js for why that was
+ * abandoned; VoiceRx is its own window now, and can hand its corrections here.
  */
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -24,14 +22,17 @@ const { state } = useEditorState()
 
 const ACCENT = '#8fd18f'
 
-// Default to engaged when the panel opens, matching the other plugin windows.
 onMounted(() => {
+  // Opens with a starting layout rather than a bare plot — four unity bands,
+  // so this cannot change what the user hears.
+  eq.seedGeneralBands()
+  // Default to engaged when the panel opens, matching the other plugin windows.
   if (!eq.eqPreview.value) eq.togglePreview()
 })
 
 const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
 
-const activeBandCount = computed(() => eq.bands.value.filter(b => b.enabled).length)
+const activeBandCount = computed(() => eq.activeBands.value.length)
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -55,64 +56,31 @@ async function applyAndClose() {
     :width="720"
     :accent="ACCENT"
     brand-lead="EQ"
-    :brand-tail="eq.mode.value === 'voxdoc' ? 'VOXDOC' : 'GENERAL'"
+    brand-tail="PARAMETRIC"
     :engaged="eq.eqPreview.value"
     @toggle-engaged="eq.togglePreview()"
     @close="close"
   >
     <div class="px-[22px] pt-[18px] pb-[22px]">
-      <!-- Mode switch -->
-      <div class="flex items-center justify-between mb-[14px]">
-        <div
-          class="inline-flex rounded-[3px] overflow-hidden"
-          style="border:1px solid rgba(255,255,255,.1)"
-          role="tablist"
-        >
-          <button
-            v-for="m in [{ id: 'general', label: 'GENERAL' }, { id: 'voxdoc', label: 'VOXDOC' }]"
-            :key="m.id"
-            type="button"
-            role="tab"
-            :aria-selected="eq.mode.value === m.id"
-            class="px-[14px] py-[5px]"
-            :style="{
-              font: '700 9px/1 Inter',
-              letterSpacing: '.1em',
-              background: eq.mode.value === m.id
-                ? `color-mix(in srgb, ${ACCENT} 26%, transparent)` : 'transparent',
-              color: eq.mode.value === m.id ? ACCENT : 'rgba(255,255,255,.4)',
-            }"
-            @click="eq.setMode(m.id)"
-          >{{ m.label }}</button>
-        </div>
-
-        <div class="flex items-center gap-[14px]">
-          <span
-            v-if="activeBandCount > 0"
-            style="font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
-          >{{ activeBandCount }} band{{ activeBandCount === 1 ? '' : 's' }}</span>
-          <button
-            v-if="eq.bands.value.length > 0"
-            type="button"
-            class="px-[8px] py-[4px] rounded-[3px]"
-            style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
-            @click="eq.clearBands()"
-          >RESET</button>
-        </div>
+      <div class="flex items-center justify-end mb-[14px] gap-[14px]">
+        <span
+          v-if="activeBandCount > 0"
+          style="font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
+        >{{ activeBandCount }} band{{ activeBandCount === 1 ? '' : 's' }} active</span>
+        <button
+          type="button"
+          class="px-[8px] py-[4px] rounded-[3px]"
+          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
+          title="Back to the four neutral bands this opened with"
+          @click="eq.resetBands()"
+        >RESET</button>
       </div>
 
       <div class="flex gap-[16px]">
         <LevelMeter :db="eq.inputDb.value" label="IN" :height="200" />
 
         <div class="flex-1 min-w-0">
-          <GeneralView
-            v-if="eq.mode.value === 'general'"
-            :eq="eq" :accent="ACCENT" :sample-rate="sampleRate"
-          />
-          <VoxDocView
-            v-else
-            :eq="eq" :accent="ACCENT" :sample-rate="sampleRate"
-          />
+          <GeneralView :eq="eq" :accent="ACCENT" :sample-rate="sampleRate" />
         </div>
 
         <LevelMeter :db="eq.outputDb.value" label="OUT" :height="200" />
@@ -131,7 +99,7 @@ async function applyAndClose() {
           label="Apply EQ"
           :disabled="!eq.eqPreview.value || activeBandCount === 0"
           :disabled-hint="activeBandCount === 0
-            ? 'Add a band before applying'
+            ? 'Move a band before applying'
             : 'Turn the EQ on to apply it'"
           @toggle-preview="togglePlayback"
           @apply="applyAndClose"

@@ -134,10 +134,27 @@ export function createManualEq(audioContext) {
   }
 }
 
-export const manualEqEffect = {
-  id: 'manual-eq',
-  name: 'EQ',
-  createNodes(audioContext) {
-    return createManualEq(audioContext)
-  },
+/**
+ * Mint an EQ effect.
+ *
+ * A factory rather than a singleton because EQ and VoiceRx are two plugins with
+ * two band pools, and EffectChain keys entries by id — one shared literal would
+ * mean the two overwrite each other's bands on every push.
+ */
+export function createEqEffect(id, name) {
+  return {
+    id,
+    name,
+    createNodes(audioContext) {
+      return createManualEq(audioContext)
+    },
+  }
 }
+
+export const manualEqEffect = createEqEffect('manual-eq', 'EQ')
+
+/**
+ * VoiceRx's own cascade. Added to the chain ahead of the general EQ — corrective
+ * before creative, the same order the server pipeline uses.
+ */
+export const voiceRxEqEffect = createEqEffect('voicerx-eq', 'VoiceRx')

@@ -1,5 +1,5 @@
 /**
- * VoxDoc detection regions — the client half of Stage 3a's region tables.
+ * VoiceRx detection regions — the client half of Stage 3a's region tables.
  *
  * Direct port of MALE_REGIONS / FEMALE_REGIONS / classify_voice in
  * server/scripts/corrective_eq.py:64-108. Keep the numbers in sync with that
@@ -9,7 +9,7 @@
  * WHY THE RANGES MOVE. A region is a *place a problem lives*, and where that is
  * depends on the voice. Mud sits at 200-420 Hz for a male narrator and
  * 280-550 Hz for a female one, because it is a fixed interval above the
- * fundamental rather than a fixed frequency. This is the whole reason VoxDoc
+ * fundamental rather than a fixed frequency. This is the whole reason VoiceRx
  * classifies voice type: not to pick a reference curve (there is none — the
  * baseline is derived from the file itself), but to aim the scan ranges.
  *

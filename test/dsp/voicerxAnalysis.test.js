@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  analyzeVoxDoc,
+  analyzeVoiceRx,
   collectVoicedFrames,
   detectAnomaly,
   estimateBaseline,
@@ -18,11 +18,11 @@ import {
   qFromWidth,
   computeBandParams,
   MIN_VOICED_FRAMES,
-} from '../../src/audio/voxdoc/analysis.js'
+} from '../../src/audio/voicerx/analysis.js'
 import {
   classifyVoice, MALE_REGIONS, FEMALE_REGIONS, SCAN_LOW, SCAN_HIGH,
-} from '../../src/audio/voxdoc/regions.js'
-import { buildSuggestions } from '../../src/audio/voxdoc/suggestions.js'
+} from '../../src/audio/voicerx/regions.js'
+import { buildSuggestions } from '../../src/audio/voicerx/suggestions.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 
 const SR = 44100
@@ -284,7 +284,7 @@ test('the energy gate does not eat continuous speech', () => {
 test('a planted resonance is detected in the right region', () => {
   // 300 Hz sits inside the male mud region (200-420) and outside every other.
   const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
-  const result = analyzeVoxDoc(audio, SR)
+  const result = analyzeVoiceRx(audio, SR)
 
   assert.equal(result.ok, true, `analysis failed: ${result.reason}`)
   assert.equal(result.voiceType, 'male', `classified as ${result.voiceType}`)
@@ -319,7 +319,7 @@ test('gain opposes the deviation and is capped by the region limits', () => {
 
 test('a bigger resonance produces a bigger correction', () => {
   const gainFor = db => {
-    const r = analyzeVoxDoc(
+    const r = analyzeVoiceRx(
       synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: db }), SR,
     )
     return r.regionResults.find(x => x.name === 'mud').gainDb
@@ -340,7 +340,7 @@ test('a dead band is not mistaken for a deficiency', () => {
   // (9-16 kHz) has none — so the guard has to separate two regions that are
   // both far below the envelope peak.
   const audio = synthVoice({ f0: 120, seconds: 3, bandwidthHz: 9000 })
-  const result = analyzeVoxDoc(audio, SR)
+  const result = analyzeVoiceRx(audio, SR)
 
   const air = result.regionResults.find(r => r.name === 'air')
   assert.equal(air.skipReason, 'no_energy', 'dead air region was assessed anyway')
@@ -360,7 +360,7 @@ test('a dead band is not mistaken for a deficiency', () => {
 
 test('a female-pitched voice moves the scan ranges', () => {
   const audio = synthVoice({ f0: 220, seconds: 3 })
-  const result = analyzeVoxDoc(audio, SR)
+  const result = analyzeVoiceRx(audio, SR)
   assert.equal(result.ok, true)
   assert.equal(result.voiceType, 'female')
   const mud = result.regionResults.find(r => r.name === 'mud')
@@ -370,7 +370,7 @@ test('a female-pitched voice moves the scan ranges', () => {
 
 test('material too short to analyse reports failure instead of a curve', () => {
   const audio = synthVoice({ f0: 120, seconds: 0.3 })
-  const result = analyzeVoxDoc(audio, SR)
+  const result = analyzeVoiceRx(audio, SR)
   assert.equal(result.ok, false)
   assert.equal(result.reason, 'insufficient_voiced')
   assert.equal(result.requiredFrames, MIN_VOICED_FRAMES)
@@ -383,7 +383,7 @@ test('material with no pitch at all is reported distinctly', () => {
   // component in the odd noise frame by chance, and one lucky frame must not
   // turn "this is traffic rumble" into "select a longer stretch of it".
   for (const seed of [1, 2, 3, 12345, 0x9e3779b9]) {
-    const result = analyzeVoxDoc(noise(SR * 2, seed), SR)
+    const result = analyzeVoiceRx(noise(SR * 2, seed), SR)
     assert.equal(result.ok, false)
     assert.equal(result.reason, 'no_voiced_frames', `seed ${seed}`)
   }
@@ -391,7 +391,7 @@ test('material with no pitch at all is reported distinctly', () => {
 
 test('short but genuine speech is reported as short, not as non-speech', () => {
   // The other side of the same distinction.
-  const result = analyzeVoxDoc(synthVoice({ f0: 120, seconds: 0.35 }), SR)
+  const result = analyzeVoiceRx(synthVoice({ f0: 120, seconds: 0.35 }), SR)
   assert.equal(result.ok, false)
   assert.equal(result.reason, 'insufficient_voiced')
   assert.ok(result.voicedRatio > 0.1, `voiced ratio was ${result.voicedRatio}`)
@@ -399,7 +399,7 @@ test('short but genuine speech is reported as short, not as non-speech', () => {
 
 test('suggestions carry the measured centre, gain and Q', () => {
   const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
-  const result = analyzeVoxDoc(audio, SR)
+  const result = analyzeVoiceRx(audio, SR)
   const suggestions = buildSuggestions(result)
 
   assert.ok(suggestions.length > 0, 'a planted resonance produced no suggestion')

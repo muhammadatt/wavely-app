@@ -9,7 +9,7 @@ import {
   applyForfeiture, candidateRoleFor, tagBand, resetBandQ,
   setBandQ, setBandFrequency, untaggedBands, bandForRole,
 } from '../../src/audio/eqBands.js'
-import { MALE_REGIONS, REGION_ORDER, SCAN_LOW, SCAN_HIGH } from '../../src/audio/voxdoc/regions.js'
+import { MALE_REGIONS, REGION_ORDER, SCAN_LOW, SCAN_HIGH } from '../../src/audio/voicerx/regions.js'
 import { eqSections } from '../../src/audio/eqProcessor.js'
 import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 
@@ -60,10 +60,10 @@ test('every band carries the full field set, however it was created', () => {
     'role', 'roleFreqRangeHz', 'canonicalQ', 'qModified', 'origin',
   ]
   const general = createBand({ frequencyHz: 1000 })
-  const voxdoc = createBand({ role: 'mud', regions: R, frequencyHz: 300 })
+  const voicerx = createBand({ role: 'mud', regions: R, frequencyHz: 300 })
   for (const f of FIELDS) {
     assert.ok(f in general, `general band missing ${f}`)
-    assert.ok(f in voxdoc, `voxdoc band missing ${f}`)
+    assert.ok(f in voicerx, `voicerx band missing ${f}`)
   }
   // Null, not absent — that is what makes retrofitting unnecessary later.
   assert.equal(general.role, null)
@@ -182,16 +182,16 @@ test('mode switching is idempotent and audibly transparent', () => {
   const bands = [
     createBand({ role: 'mud', regions: R, frequencyHz: 287, gainDb: -3.2, q: 4.1, origin: 'suggestion' }),
     createBand({ frequencyHz: 1750, gainDb: 2.5, q: 0.9, origin: 'manual_general' }),
-    createBand({ role: 'air', regions: R, frequencyHz: 12000, gainDb: 4, origin: 'manual_voxdoc' }),
+    createBand({ role: 'air', regions: R, frequencyHz: 12000, gainDb: 4, origin: 'manual_voicerx' }),
     createBand({ type: 'notch', frequencyHz: 60, q: 20, origin: 'manual_general' }),
   ]
   const snapshot = JSON.stringify(bands)
 
-  // Whatever a view does, it reads. The VoxDoc view sees role bands; the
+  // Whatever a view does, it reads. The VoiceRx view sees role bands; the
   // General view sees all of them. Neither writes.
-  const voxdocView = bands.filter(b => b.role !== null)
+  const voicerxView = bands.filter(b => b.role !== null)
   const generalView = bands.slice()
-  assert.equal(voxdocView.length, 2)
+  assert.equal(voicerxView.length, 2)
   assert.equal(generalView.length, 4)
   assert.equal(JSON.stringify(bands), snapshot, 'a view mutated the band pool')
 
@@ -203,7 +203,7 @@ test('mode switching is idempotent and audibly transparent', () => {
 })
 
 test('untagged bands are counted, not hidden from the audio path', () => {
-  // Spec §2.4: VoxDoc exposes no control for a general band, but its
+  // Spec §2.4: VoiceRx exposes no control for a general band, but its
   // contribution IS in the composite curve. A curve that omitted it would be a
   // lie about what the user is hearing.
   const bands = [

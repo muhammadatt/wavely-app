@@ -1,5 +1,5 @@
 /**
- * VoxDoc analysis — client port of Stage 3a Corrective EQ.
+ * VoiceRx analysis — client port of Stage 3a Corrective EQ.
  *
  * Direct port of server/scripts/corrective_eq.py. Same constants, same steps,
  * same order: mean cepstral envelope over voiced frames -> per-region
@@ -528,7 +528,7 @@ export function mergeBands(input) {
 // ── Main analysis ───────────────────────────────────────────────────────────
 
 /**
- * Run the full VoxDoc analysis over a mono selection.
+ * Run the full VoiceRx analysis over a mono selection.
  *
  * Returns `{ ok: false, reason }` rather than a curve whenever the material
  * cannot support one. Never returns a partial result: a deviation curve drawn
@@ -538,7 +538,7 @@ export function mergeBands(input) {
  * @param {Float32Array} audio mono, 32-bit float
  * @param {number} sampleRate
  */
-export function analyzeVoxDoc(audio, sampleRate) {
+export function analyzeVoiceRx(audio, sampleRate) {
   const collected = collectVoicedFrames(audio, sampleRate)
   const { frames, f0Values, noiseFloorDb, totalFrames } = collected
 

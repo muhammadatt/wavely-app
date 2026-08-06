@@ -12,8 +12,8 @@ import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
+import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
-import { openManualEqWindow } from '../composables/useManualEq.js'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
 import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
@@ -260,7 +260,7 @@ export const OPERATIONS = [
   {
     id: 'manual-eq',
     label: 'EQ',
-    desc: 'Shape the tone by frequency',
+    desc: 'Parametric equalizer',
     category: 'effects',
     group: 'Tone',
     icon: 'eq',
@@ -270,20 +270,19 @@ export const OPERATIONS = [
     component: EqModal,
   },
   {
-    // Second door into the same plugin (manual EQ spec §3, Path B). Not a
-    // second window: WINDOW_COMPONENTS is keyed by operation id, so a second
-    // 'window' entry would mint a second instance with its own band pool. This
-    // runs immediately, sets the view and raises the one window that exists.
-    id: 'voxdoc',
-    label: 'VoxDoc',
+    // Its own window and its own band pool. It was once a second door into the
+    // EQ — one pool, two views — which is why the two still look related; see
+    // useEqInstance.js for why they were separated.
+    id: 'voicerx',
+    label: 'VoiceRx',
     desc: 'Find what’s wrong with a voice recording',
     category: 'effects',
     group: 'Tone',
-    icon: 'voxdoc',
+    icon: 'voicerx',
     keywords: ['voice', 'diagnose', 'analyze', 'analyse', 'muddy', 'boxy', 'harsh', 'nasal', 'eq', 'doctor', 'fix'],
     requires: 'selection',
-    surface: 'immediate',
-    action: () => openManualEqWindow('voxdoc'),
+    surface: 'window',
+    component: VoiceRxModal,
   },
   {
     id: 'air-band',

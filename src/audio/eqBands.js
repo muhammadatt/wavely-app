@@ -2,16 +2,19 @@
  * Manual EQ band model and role taxonomy.
  *
  * Pure data and pure functions — no Web Audio, no DOM, no Vue. The kernel, the
- * curve renderer, both UI views and the tests all read the band shape from
- * here, so there is one definition of what a band is.
+ * curve renderer, both plugins and the tests all read the band shape from here,
+ * so there is one definition of what a band is.
  *
  * THE GOVERNING RULE (manual EQ spec §2.1): constraints govern the reachable
- * set, not the representable set. A mode restricts what the user can *do*; it
- * never restricts what can exist and never alters existing state on entry or
- * exit. Nothing in this module clamps, snaps or drops a band on a mode change,
- * and there is deliberately no function here that could — modes are render-time
- * filters over one array, so VoxDoc -> General -> VoxDoc is bit-identical by
- * construction rather than by careful bookkeeping.
+ * set, not the representable set. A plugin restricts what the user can *do*; it
+ * never restricts what can exist. Nothing in this module clamps, snaps or drops
+ * a band to suit whoever is displaying it, and there is deliberately no
+ * function here that could — which is what lets VoiceRx hand its bands to the
+ * EQ by moving objects rather than by translating between two band formats.
+ *
+ * The rule was originally about mode switching, when EQ and VoiceRx were two
+ * views onto one pool. They are separate plugins with separate pools now (see
+ * useEqInstance.js), and the rule outlived the design that prompted it.
  *
  * EVERY BAND CARRIES EVERY FIELD, from the first commit, whoever created it.
  * General-created bands get `role: null` and `canonicalQ: null` rather than
@@ -19,7 +22,7 @@
  * saved chains, which is a migration worth not needing.
  */
 
-import { REGION_ORDER, SCAN_LOW, SCAN_HIGH } from './voxdoc/regions.js'
+import { REGION_ORDER, SCAN_LOW, SCAN_HIGH } from './voicerx/regions.js'
 
 /**
  * UI clutter limit, not a CPU one — biquads are cheap. The cascade is sized to
@@ -27,7 +30,7 @@ import { REGION_ORDER, SCAN_LOW, SCAN_HIGH } from './voxdoc/regions.js'
  */
 export const MAX_BANDS = 12
 
-/** Filter types the engine understands. VoxDoc uses only the first three. */
+/** Filter types the engine understands. VoiceRx uses only the first three. */
 export const FILTER_TYPES = [
   'peaking', 'lowshelf', 'highshelf', 'highpass', 'lowpass', 'notch',
 ]
@@ -58,9 +61,9 @@ export const PARAM_RANGES = {
 }
 
 /**
- * The role taxonomy — VoxDoc's control surface.
+ * The role taxonomy — VoiceRx's control surface.
  *
- * Each role is a view onto one Stage 3a detection region (see voxdoc/regions.js);
+ * Each role is a view onto one Stage 3a detection region (see voicerx/regions.js);
  * `region` is the join key. Frequency ranges are NOT stored here on purpose:
  * they come from the resolved region table, which shifts with the classified
  * voice type. A role's legal range for a female narrator is not the same as for
@@ -236,7 +239,7 @@ export function qRangeFor(type) {
  * @param {boolean} [spec.enabled=true]
  * @param {string|null} [spec.role=null]
  * @param {object|null} [spec.regions=null] resolved region table, required with `role`
- * @param {'suggestion'|'manual_voxdoc'|'manual_general'} [spec.origin='manual_general']
+ * @param {'suggestion'|'manual_voicerx'|'manual_general'} [spec.origin='manual_general']
  */
 export function createBand({
   type = 'peaking',
@@ -275,7 +278,7 @@ export function createBand({
  * Moving a role-tagged band outside its legal range drops the tag: silent,
  * automatic, no dialog. The band's audio behaviour is unchanged — it keeps its
  * frequency, gain, Q and type, and sounds identical. All that changes is that
- * VoxDoc stops offering a control for it and starts counting it as a general
+ * VoiceRx stops offering a control for it and starts counting it as a general
  * band, which is the honest description of what it has become.
  *
  * Mutates and returns the band, so callers can use it inline after a drag.
@@ -335,7 +338,7 @@ export function resetBandQ(band) {
 
 /**
  * Set a band's Q, tracking whether it has diverged from the role canon.
- * VoxDoc hides the Q control but preserves any value already there (spec §2.4).
+ * VoiceRx hides the Q control but preserves any value already there (spec §2.4).
  */
 export function setBandQ(band, q) {
   band.q = clamp(q, ...qRangeFor(band.type))
@@ -353,10 +356,77 @@ export function setBandFrequency(band, frequencyHz) {
   return applyForfeiture(band)
 }
 
-/** Bands VoxDoc has no control for, but which are still in the audio path. */
+/** Bands VoiceRx has no control for, but which are still in the audio path. */
 export function untaggedBands(bands) {
   return bands.filter(b => b.role === null)
 }
+
+/**
+ * Does this band change the sound at all?
+ *
+ * A bell or shelf at 0 dB is exactly unity and can be ignored; a pass filter or
+ * a notch cuts by construction and counts even at 0 dB, because gain is not
+ * what it is doing. Used for the band counts and for whether Apply has any work
+ * to do — General mode opens with a neutral starting layout on screen, and
+ * counting those four as "active" would claim an edit nobody made.
+ */
+export function isBandActive(band) {
+  if (!band.enabled) return false
+  if (band.type === 'highpass' || band.type === 'lowpass' || band.type === 'notch') return true
+  return band.gainDb !== 0
+}
+
+// ── Positional shapes ───────────────────────────────────────────────────────
+
+/**
+ * Which shapes a band may take, given where it sits among the others.
+ *
+ * Cuts and shelves act on everything past their corner, so they only mean
+ * anything at the ends of the chain — a low shelf with another band below it is
+ * lifting audio that a later filter has already dealt with. Restricting by
+ * position rather than reserving fixed slots keeps this true without inventing
+ * a special class of band: drag a bell below the high-pass and the two simply
+ * swap what they offer.
+ *
+ * A single band is at both ends at once, so it gets everything.
+ */
+const SHAPES_LOWEST = ['highpass', 'lowshelf', 'peaking', 'notch']
+const SHAPES_MIDDLE = ['peaking', 'notch']
+const SHAPES_HIGHEST = ['lowpass', 'highshelf', 'peaking', 'notch']
+
+export function shapesForBand(band, bands) {
+  if (bands.length <= 1) return [...FILTER_TYPES]
+
+  const sorted = [...bands].sort((a, b) => a.frequencyHz - b.frequencyHz)
+  const i = sorted.findIndex(b => b.id === band.id)
+
+  let allowed
+  if (i <= 0) allowed = SHAPES_LOWEST
+  else if (i === sorted.length - 1) allowed = SHAPES_HIGHEST
+  else allowed = SHAPES_MIDDLE
+
+  // The band's current shape stays on the menu even when its position no longer
+  // offers it. A shelf that has been overtaken is still the user's shelf —
+  // converting it silently would change their audio to tidy up our own rule.
+  const set = new Set([...allowed, band.type])
+  return FILTER_TYPES.filter(t => set.has(t))
+}
+
+/**
+ * The layout General mode opens with: a shelf at each end and two bells in the
+ * middle, all at 0 dB and all deletable.
+ *
+ * Every shape here is exactly unity at 0 dB, so opening the window cannot
+ * change what the user hears — a high-pass in this set would start cutting the
+ * moment the panel appeared. The point is to replace an empty plot, which too
+ * many people will not click on, with a layout that shows what the tool does.
+ */
+export const DEFAULT_GENERAL_BANDS = [
+  { type: 'lowshelf', frequencyHz: 80, q: 0.7 },
+  { type: 'peaking', frequencyHz: 300, q: 1.0 },
+  { type: 'peaking', frequencyHz: 3000, q: 1.0 },
+  { type: 'highshelf', frequencyHz: 10000, q: 0.7 },
+]
 
 /** The band carrying a given role, or null. One band per role by construction. */
 export function bandForRole(bands, roleId) {

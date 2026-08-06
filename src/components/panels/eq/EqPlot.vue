@@ -18,7 +18,7 @@ import { getRole } from '../../../audio/eqBands.js'
  * running rather than a redrawn approximation. The analyzer trace is a separate,
  * independently disableable live FFT.
  *
- * EVERY ENABLED BAND IS IN THE CURVE, including ones VoxDoc has no control for.
+ * EVERY ENABLED BAND IS IN THE CURVE, including ones VoiceRx has no control for.
  * A composite that omitted them would be a lie about what the user is hearing.
  */
 
@@ -28,7 +28,7 @@ const props = defineProps({
   accent: { type: String, default: '#8fd18f' },
   height: { type: Number, default: 200 },
 
-  /** Draggable handles and click-to-create. Off in VoxDoc, where roles drive. */
+  /** Draggable handles and click-to-create. Off in VoiceRx, where roles drive. */
   interactive: { type: Boolean, default: true },
   /** Band ids to show handles for. Null means all of them. */
   handleIds: { type: Array, default: null },
@@ -38,7 +38,7 @@ const props = defineProps({
   spectrumFn: { type: Function, default: null },
   showAnalyzer: { type: Boolean, default: false },
 
-  /** VoxDoc overlay: the analysis result, whose envelope and detections are drawn. */
+  /** VoiceRx overlay: the analysis result, whose envelope and detections are drawn. */
   analysis: { type: Object, default: null },
   /** Region name to emphasise, driven by hovering a suggestion row. */
   highlightRegion: { type: String, default: null },
@@ -71,6 +71,10 @@ const dbMax = computed(() => {
   let peak = 6
   for (const b of props.bands) {
     if (!b.enabled) continue
+    // Shapes with no gain term keep whatever gainDb they carried in from their
+    // previous type. That number is not on the curve, so it must not stretch
+    // the axis the curve is drawn against.
+    if (b.type === 'notch' || b.type === 'highpass' || b.type === 'lowpass') continue
     peak = Math.max(peak, Math.abs(b.gainDb) + 2)
   }
   return Math.min(18, Math.max(6, Math.ceil(peak / 3) * 3))
@@ -84,8 +88,25 @@ function hzFor(x) {
   return F_MIN * Math.pow(2, (x / width.value) * LOG_SPAN)
 }
 
+/**
+ * Gain to pixels, clamped to the plot.
+ *
+ * A notch is a true null and a pass filter falls away without limit, so their
+ * curves run to negative infinity and would otherwise be drawn far outside the
+ * box — over the legend, the strips and anything else below. There is no axis
+ * range that "accommodates" them, so the curve stops at the floor instead,
+ * which is what every parametric EQ does and reads correctly as off-the-scale.
+ *
+ * Auto-scaling to make room is the wrong fix: the axis would have to jump to
+ * its full range the moment a high-pass is added, squashing every bell the user
+ * is actually adjusting into a few pixels — the failure mode dbMax exists to
+ * avoid.
+ */
 function yFor(db) {
-  return props.height / 2 - (db / dbMax.value) * (props.height / 2)
+  const y = props.height / 2 - (db / dbMax.value) * (props.height / 2)
+  // Half the stroke width in from each edge, so a clamped line is not sliced
+  // lengthwise by the canvas boundary.
+  return Math.max(1, Math.min(props.height - 1, y))
 }
 
 function dbFor(y) {
@@ -100,7 +121,7 @@ function hzLabel(hz) {
 }
 
 /**
- * VoxDoc labels its axis with role names, not numbers (spec §6.1).
+ * VoiceRx labels its axis with role names, not numbers (spec §6.1).
  *
  * Naming the regions is what lets someone read the display without knowing any
  * frequencies — the numbers are still there on hover. Labels alternate between
@@ -181,7 +202,7 @@ function draw() {
   const fit = props.analysis ? drawEnvelope(ctx, w, h) : null
   drawExtremes(ctx, h)
   drawComposite(ctx, h)
-  // Markers last: they are the point of the VoxDoc display and must not be
+  // Markers last: they are the point of the VoiceRx display and must not be
   // crossed out by the EQ curve.
   if (fit) drawMarkers(ctx, h, fit.yEnv)
 }
@@ -471,9 +492,12 @@ const shownHandles = computed(() => {
 })
 
 function handleStyle(band) {
+  // Same rule as the axis: a shape with no gain term sits on the centre line,
+  // not at whatever gain it happened to carry in from its previous type.
+  const hasGain = band.type !== 'notch' && band.type !== 'highpass' && band.type !== 'lowpass'
   return {
     left: `${(xFor(band.frequencyHz) / width.value) * 100}%`,
-    top: `${yFor(band.gainDb)}px`,
+    top: `${yFor(hasGain ? band.gainDb : 0)}px`,
   }
 }
 
@@ -561,7 +585,7 @@ function onPlotDown(e) {
       @dblclick.stop="emit('remove-band', band.id)"
     />
 
-    <!-- Frequency axis: role names in VoxDoc, numbers in General -->
+    <!-- Frequency axis: role names in VoiceRx, numbers in General -->
     <div
       v-if="roleAxis.length > 0"
       class="relative w-full mt-[3px]"

@@ -1,18 +1,18 @@
 /**
- * VoxDoc suggestions — turning detections into something a non-professional can
+ * VoiceRx suggestions — turning detections into something a non-professional can
  * act on.
  *
- * VoxDoc presents suggestions, not applied corrections: analyze -> review ->
+ * VoiceRx presents suggestions, not applied corrections: analyze -> review ->
  * apply. The apply step is not protecting against damage (the operation is
  * non-destructive, undoable and real-time) — it is protecting against surprise.
  * That is a comprehension goal, and it is why per-suggestion accept matters as
  * much as "apply all".
  *
  * SUGGESTIONS ARE VIEW STATE, NOT BAND STATE (spec §9.2). They live outside the
- * band pool entirely. Switching to General discards them; they regenerate on
- * return without re-analysing, provided the selection has not changed. Nothing
+ * band pool entirely, derived from the frozen analysis on every read. Nothing
  * to migrate, nothing to reconcile with role tags, no partial-application
- * states. Only on apply does a suggestion become a band.
+ * states — and handing the bands off to the EQ leaves the analysis untouched,
+ * so the suggestions simply come back. Only on apply does one become a band.
  *
  * DETECTION ALWAYS RUNS ON THE DRY SIGNAL (spec §9.1). Once suggestions are
  * applied the composite curve flattens; detection re-run on the post-EQ signal
@@ -66,7 +66,7 @@ function formatHz(hz) {
  * and a diagnosis, and if the name promises a diagnosis the tool has to deliver
  * one.
  *
- * @param {object} analysis result of analyzeVoxDoc
+ * @param {object} analysis result of analyzeVoiceRx
  * @returns {Array<object>} suggestions, low frequency to high
  */
 export function buildSuggestions(analysis) {
@@ -94,7 +94,7 @@ export function buildSuggestions(analysis) {
  * Turn a suggestion into a band.
  *
  * The band is tagged with the suggestion's role and carries the MEASURED Q, not
- * the role's canonical one — so `qModified` comes out true and VoxDoc shows the
+ * the role's canonical one — so `qModified` comes out true and VoiceRx shows the
  * "modified" marker with its reset affordance. That is correct and intended:
  * the reset is there to get back to the canonical width if the measured one
  * turns out wrong, which is a judgement only the user's ear can make.
