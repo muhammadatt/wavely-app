@@ -71,9 +71,11 @@ async function applyAndClose() {
           type="button"
           class="flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px]"
           style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5)"
-          :style="{ opacity: vox.analyzing.value ? 0.55 : 1 }"
-          :disabled="vox.analyzing.value"
-          title="Measure the current selection again"
+          :style="{ opacity: vox.analyzing.value || !vox.hasSelection.value ? 0.55 : 1 }"
+          :disabled="vox.analyzing.value || !vox.hasSelection.value"
+          :title="vox.hasSelection.value
+            ? 'Measure the current selection again'
+            : 'Select some audio to measure'"
           @click="vox.analyze()"
         >
           <span v-if="vox.analyzing.value" class="vrx-spin" aria-hidden="true" />

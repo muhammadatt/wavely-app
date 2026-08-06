@@ -67,6 +67,33 @@ const dragging = ref(false)
 let dragOffsetX = 0
 let dragOffsetY = 0
 
+// Gap left between the bottom of a window and the bottom of the viewport, so a
+// full-height window still reads as a window rather than a panel welded to the
+// edge.
+const VIEWPORT_MARGIN = 16
+// Below this the body is not worth scrolling — a window dragged almost off the
+// bottom keeps a usable sliver and hangs over the edge instead of collapsing.
+const MIN_BODY_PX = 160
+// Header height, fixed by its own h-12 class. The body gets what is left.
+const HEADER_PX = 48
+
+const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
+
+/**
+ * How tall the scrolling body may be.
+ *
+ * Windows are sized by their contents and some of them are tall — VoiceRx runs
+ * a 200 px plot, a findings list, a knob row and an apply bar, which together
+ * outrun a laptop viewport. The frame is overflow:hidden, so before this the
+ * overflow was not merely off screen but unreachable: Apply could sit below the
+ * fold with no scrollbar anywhere and no way to drag the window high enough to
+ * reveal it.
+ */
+const bodyMaxHeight = computed(() => Math.max(
+  MIN_BODY_PX,
+  viewportH.value - pos.value.y - HEADER_PX - VIEWPORT_MARGIN,
+))
+
 const frameEl = ref(null)
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
@@ -91,9 +118,12 @@ onMounted(() => {
   // though, or a keyboard user has no way in.
   previouslyFocused = document.activeElement
   frameEl.value?.focus({ preventScroll: true })
+
+  window.addEventListener('resize', onViewportResize)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', onViewportResize)
   savePosition(props.windowId, pos.value)
   // Return focus only if it is still inside this window; if the user has since
   // clicked the waveform, yanking it back would be worse than leaving it.
@@ -101,6 +131,19 @@ onBeforeUnmount(() => {
     previouslyFocused?.focus?.({ preventScroll: true })
   }
 })
+
+/**
+ * Shrinking the viewport must not strand a window.
+ *
+ * Position was clamped once, on open, so a window opened on a tall screen and
+ * then met with a smaller one — a resized browser, a rotated tablet, devtools
+ * opening — kept a position that no longer existed. Re-clamping here also keeps
+ * the body's height honest, since it is measured from the top edge down.
+ */
+function onViewportResize() {
+  viewportH.value = window.innerHeight
+  clampToViewport()
+}
 
 function clampToViewport() {
   const maxX = window.innerWidth - 120
@@ -157,7 +200,7 @@ function requestClose() {
 <template>
   <div
     ref="frameEl"
-    class="win-frame fixed rounded-2xl overflow-hidden"
+    class="win-frame fixed rounded-2xl overflow-hidden flex flex-col"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
@@ -176,7 +219,7 @@ function requestClose() {
   >
     <!-- Header (drag handle) -->
     <div
-      class="flex items-center justify-between touch-none px-[18px] h-12"
+      class="flex items-center justify-between touch-none px-[18px] h-12 shrink-0"
       :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
       style="border-bottom:1px solid rgba(255,255,255,.06)"
       :style="{ background: headerBackground }"
@@ -231,7 +274,14 @@ function requestClose() {
       </div>
     </div>
 
-    <slot />
+    <!--
+      The body scrolls; the header does not. min-height:0 is what makes that
+      true — without it a flex child refuses to shrink below its content and the
+      max-height lands on a box that never gets to enforce it.
+    -->
+    <div class="win-body min-h-0 overflow-y-auto" :style="{ maxHeight: `${bodyMaxHeight}px` }">
+      <slot />
+    </div>
   </div>
 </template>
 
@@ -244,6 +294,29 @@ function requestClose() {
 .win-frame:focus-visible {
   outline: 2px solid #7fe9f6;
   outline-offset: 2px;
+}
+
+/* A default scrollbar on a near-black faceplate reads as a rendering fault.
+   Only paints when the body actually overflows. */
+.win-body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.win-body::-webkit-scrollbar {
+  width: 9px;
+}
+.win-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.win-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+.win-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: content-box;
 }
 
 .win-close {

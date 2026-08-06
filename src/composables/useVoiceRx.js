@@ -4,7 +4,7 @@ import { createEqInstance } from './useEqInstance.js'
 import { voiceRxEqEffect } from '../audio/effects/manualEq.js'
 import { renderRegionToBuffer } from '../audio/processing.js'
 import {
-  getRole, bandForRole, ROLES_IN_ORDER,
+  getRole, bandForRole, ROLES_IN_ORDER, isBandActive,
 } from '../audio/eqBands.js'
 import { analyzeVoiceRx, MIN_VOICED_FRAMES, HOP_SIZE, FRAME_SIZE } from '../audio/voicerx/analysis.js'
 import { buildSuggestions, suggestionToBand } from '../audio/voicerx/suggestions.js'
@@ -67,7 +67,21 @@ export function useVoiceRx() {
     () => analysis.value !== null && analyzedKey.value !== selectionKey(),
   )
 
-  const hasAnalysis = computed(() => analysis.value?.ok === true && !isStale.value)
+  /**
+   * There is a result to show. Deliberately not "and it is still fresh".
+   *
+   * Staleness used to be folded in here, and it made a nudged selection erase
+   * the diagnosis: the panel dropped back to its ANALYZE prompt while the
+   * corrections that analysis had made were still in the pool and still
+   * audible, the per-suggestion switches went with it, and the "selection
+   * changed" banner could never render because it lives inside the branch that
+   * had just unmounted. A measurement does not stop being true because the
+   * selection moved — it stops describing what is selected now, which is a
+   * caption, not a reason to throw it away. Freshness is isStale's job, shown
+   * as a banner over a result that stays put; the de-esser and hum remover
+   * report it the same way.
+   */
+  const hasAnalysis = computed(() => analysis.value?.ok === true)
 
   /**
    * The resolved region table.
@@ -107,8 +121,16 @@ export function useVoiceRx() {
     band: s.roleId ? bandForRole(bands.value, s.roleId) : null,
   })))
 
+  /**
+   * How many suggestions are actually doing something.
+   *
+   * Counted with isBandActive, the same rule the faceplate's correction count
+   * and the Apply gate use. Counting `enabled` alone let a band turned down to
+   * 0 dB by its knob read as on here and as nothing everywhere else — "3 of 4
+   * on" over a header that said 2 corrections, with Apply greyed out.
+   */
   const activeSuggestionCount = computed(
-    () => suggestionRows.value.filter(r => r.band?.enabled).length)
+    () => suggestionRows.value.filter(r => r.band && isBandActive(r.band)).length)
 
   // ── Applying ──────────────────────────────────────────────────────────────
 
@@ -142,13 +164,27 @@ export function useVoiceRx() {
   /**
    * Switch one suggestion's correction on or off.
    *
-   * Rebuilds the band if it is missing — after a Reset, or after the user sent
-   * the corrections to the EQ — so a row is never a dead switch.
+   * A row is never a dead switch, which means answering for every way a
+   * correction can be inert, not just the obvious one. A band is doing nothing
+   * if it is switched off — or if its knob has been turned to 0 dB, which the
+   * switch reads as off because that is what it sounds like. Turning such a row
+   * back on restores the measured gain; flipping `enabled` alone would leave the
+   * switch exactly where it was and look broken.
+   *
+   * Rebuilds the band outright if it is missing — after a Clear, or after the
+   * user sent the corrections to the EQ.
    */
   function toggleSuggestion(suggestion) {
     const existing = suggestion.roleId ? bandForRole(bands.value, suggestion.roleId) : null
     if (existing) {
-      api.toggleBand(existing.id)
+      if (isBandActive(existing)) {
+        api.toggleBand(existing.id)
+        return
+      }
+      api.updateBand(existing.id, (b) => {
+        b.enabled = true
+        if (b.gainDb === 0) b.gainDb = suggestion.gainDb
+      })
       return
     }
     if (api.atBandLimit.value) {

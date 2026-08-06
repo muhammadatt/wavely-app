@@ -2,7 +2,7 @@
 import { computed, ref, onBeforeUnmount } from 'vue'
 import EqPlot from './EqPlot.vue'
 import Knob from '../../knobs/Knob.vue'
-import { bandForRole } from '../../../audio/eqBands.js'
+import { bandForRole, isBandActive } from '../../../audio/eqBands.js'
 
 /**
  * VoiceRx — the voice-specific corrective view.
@@ -90,6 +90,30 @@ function fmtGain(v) {
 
 function roleBand(roleId) {
   return bandForRole(props.eq.bands.value, roleId)
+}
+
+/**
+ * Why the result on screen no longer describes what is selected.
+ *
+ * A cleared selection is stale too — selectionKey() has nothing to match — and
+ * it needs its own wording, because the fix is to select something rather than
+ * to press RE-ANALYZE at a selection that is not there.
+ */
+const staleMessage = computed(() => (props.eq.hasSelection.value
+  ? 'The selection has changed — this is the earlier measurement. The corrections '
+    + 'below are still running; RE-ANALYZE to measure what is selected now.'
+  : 'Nothing is selected — this is the earlier measurement. The corrections below '
+    + 'are still running; select some audio and RE-ANALYZE to measure it.'))
+
+/**
+ * Is this row's correction audible?
+ *
+ * The switch answers "is anything happening", not "is the enabled flag set" —
+ * a band at 0 dB is silent whatever the flag says, and showing it as on while
+ * the header counts it as off is the mismatch this replaced.
+ */
+function isOn(row) {
+  return !!row.band && isBandActive(row.band)
 }
 
 /**
@@ -184,28 +208,36 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
       </div>
       </div>
 
-      <EqPlot
-        :bands="eq.bands.value"
-        :sample-rate="sampleRate"
-        :accent="accent"
-        :handle-ids="roleHandleIds"
-        :solo-id="eq.soloBandId.value"
-        :interactive="false"
-        :analysis="analysis"
-        :highlight-region="hoveredRegion"
-      />
+      <!-- Above the picture, not below it: this is the caption that says what
+           the picture is of, and a reader who meets it afterwards has already
+           read the plot as a description of the current selection. The findings
+           stay live while stale — they describe corrections that are still in
+           the chain and still audible, so they remain switchable. -->
+      <p
+        v-if="eq.isStale.value"
+        class="mb-[6px]"
+        style="font:500 9px/1.4 'Inter';color:rgba(255,190,120,.7)"
+      >{{ staleMessage }}</p>
+
+      <div
+        class="transition-opacity"
+        :style="{ opacity: eq.isStale.value ? 0.55 : 1 }"
+      >
+        <EqPlot
+          :bands="eq.bands.value"
+          :sample-rate="sampleRate"
+          :accent="accent"
+          :handle-ids="roleHandleIds"
+          :solo-id="eq.soloBandId.value"
+          :interactive="false"
+          :analysis="analysis"
+          :highlight-region="hoveredRegion"
+        />
+      </div>
 
       <!-- RE-ANALYZE lives in the faceplate's button row, with SEND TO EQ and
            RESET — the three things you do to a whole diagnosis rather than to
            one finding. -->
-
-      <p
-        v-if="eq.isStale.value"
-        class="mt-[8px]"
-        style="font:500 9px/1.4 'Inter';color:rgba(255,190,120,.7)"
-      >
-        The selection changed since this was measured.
-      </p>
 
       <!-- Suggestions -->
       <div v-if="eq.suggestions.value.length > 0" class="mt-[14px]">
@@ -251,7 +283,7 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
           :style="{
             background: hoveredRegion === row.suggestion.region
               ? 'rgba(255,180,120,.07)' : 'transparent',
-            opacity: row.band?.enabled ? 1 : 0.45,
+            opacity: isOn(row) ? 1 : 0.45,
           }"
           @pointerenter="hoveredRegion = row.suggestion.region"
           @pointerleave="hoveredRegion = null"
@@ -259,20 +291,19 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
           <button
             type="button"
             role="switch"
-            :aria-checked="!!row.band?.enabled"
+            :aria-checked="isOn(row)"
             class="shrink-0 rounded-full transition-colors"
             style="width:26px;height:15px;padding:2px"
             :style="{
-              background: row.band?.enabled
-                ? accent : 'rgba(255,255,255,.14)',
+              background: isOn(row) ? accent : 'rgba(255,255,255,.14)',
             }"
-            :title="row.band?.enabled ? 'Switch this correction off' : 'Switch this correction on'"
+            :title="isOn(row) ? 'Switch this correction off' : 'Switch this correction on'"
             @click="eq.toggleSuggestion(row.suggestion)"
           >
             <span
               class="block rounded-full transition-transform"
               style="width:11px;height:11px;background:#0d1216"
-              :style="{ transform: row.band?.enabled ? 'translateX(11px)' : 'none' }"
+              :style="{ transform: isOn(row) ? 'translateX(11px)' : 'none' }"
             />
           </button>
 
