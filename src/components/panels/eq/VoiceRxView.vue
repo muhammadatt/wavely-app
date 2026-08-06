@@ -159,13 +159,29 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
     <template v-else>
       <!-- What the picture is. Without this the plot is three unlabelled
            shapes, and a reader has no way in. -->
-      <div class="flex items-baseline justify-between mb-[6px] gap-[10px]">
+      <div class="flex items-baseline justify-start mb-[6px] gap-[10px]">
         <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.45)">
-          THE TONE OF YOUR VOICE
+          VOICE TONE
         </span>
-        <span style="font:500 9px/1.3 'Inter';color:rgba(255,255,255,.3)">
-          low notes on the left, high on the right
+        <p style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32)">
+          {{ voiceLabel }}
+          <span v-if="eq.analysisWidened.value"> · analysed from surrounding audio</span>
+        </p>
+      <!-- Legend. Three marks, three sentences. -->
+      <div class="flex flex-wrap items-center gap-x-[16px] gap-y-[4px] mt-[7px]">
+        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+          <svg width="16" height="8" aria-hidden="true"><path d="M0 6 Q4 1 8 4 T16 2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.5"/></svg>
+          your voice
         </span>
+        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+          <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="rgba(255,180,120,.9)"/></svg>
+          area to fix
+        </span>
+        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+          <svg width="16" height="8" aria-hidden="true"><path d="M0 4 Q8 8 16 2" fill="none" :stroke="accent" stroke-width="2"/></svg>
+          your changes
+        </span>
+      </div>
       </div>
 
       <EqPlot
@@ -179,43 +195,13 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
         :highlight-region="hoveredRegion"
       />
 
-      <!-- Legend. Three marks, three sentences. -->
-      <div class="flex flex-wrap items-center gap-x-[16px] gap-y-[4px] mt-[7px]">
-        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
-          <svg width="16" height="8" aria-hidden="true"><path d="M0 6 Q4 1 8 4 T16 2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.5"/></svg>
-          your voice
-        </span>
-        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
-          <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="rgba(255,180,120,.9)"/></svg>
-          something to fix
-        </span>
-        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
-          <svg width="16" height="8" aria-hidden="true"><path d="M0 4 Q8 8 16 2" fill="none" :stroke="accent" stroke-width="2"/></svg>
-          your changes
-        </span>
-      </div>
-
-      <div class="flex items-center justify-between mt-[8px] gap-[10px]">
-        <p style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32)">
-          {{ voiceLabel }}
-          <span v-if="eq.analysisWidened.value"> · analysed from surrounding audio</span>
-        </p>
-        <button
-          type="button"
-          class="shrink-0 flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px]"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5)"
-          :style="{ opacity: eq.analyzing.value ? 0.55 : 1 }"
-          :disabled="eq.analyzing.value"
-          @click="eq.analyze()"
-        >
-          <span v-if="eq.analyzing.value" class="vd-spin" aria-hidden="true" />
-          {{ eq.analyzing.value ? 'ANALYSING…' : 'RE-ANALYZE' }}
-        </button>
-      </div>
+      <!-- RE-ANALYZE lives in the faceplate's button row, with SEND TO EQ and
+           RESET — the three things you do to a whole diagnosis rather than to
+           one finding. -->
 
       <p
         v-if="eq.isStale.value"
-        class="mt-[6px]"
+        class="mt-[8px]"
         style="font:500 9px/1.4 'Inter';color:rgba(255,190,120,.7)"
       >
         The selection changed since this was measured.
@@ -381,15 +367,6 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
           >+ {{ role.label }}</button>
         </div>
 
-        <p
-          v-if="eq.visibleRoles.value.some(r => r.id === 'sibilance')"
-          class="mt-[10px]"
-          style="font:500 9px/1.5 'Inter';color:rgba(255,255,255,.3)"
-        >
-          Sibilance here is a fixed cut across the whole selection. For harsh
-          S sounds on individual words, the De-Esser handles them one at a time —
-          the two solve different problems.
-        </p>
       </div>
     </template>
   </div>

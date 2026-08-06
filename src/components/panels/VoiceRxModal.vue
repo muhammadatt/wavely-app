@@ -63,6 +63,22 @@ async function applyAndClose() {
           v-if="activeBandCount > 0"
           style="font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
         >{{ activeBandCount }} correction{{ activeBandCount === 1 ? '' : 's' }}</span>
+        <!-- Only once there is something to re-do. Keyed on the raw analysis
+             rather than hasAnalysis, which goes false the moment the selection
+             changes — precisely when re-analyzing is the thing you want. -->
+        <button
+          v-if="vox.analysis.value?.ok"
+          type="button"
+          class="flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px]"
+          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5)"
+          :style="{ opacity: vox.analyzing.value ? 0.55 : 1 }"
+          :disabled="vox.analyzing.value"
+          title="Measure the current selection again"
+          @click="vox.analyze()"
+        >
+          <span v-if="vox.analyzing.value" class="vrx-spin" aria-hidden="true" />
+          {{ vox.analyzing.value ? 'ANALYSING…' : 'RE-ANALYZE' }}
+        </button>
         <button
           v-if="vox.canSendToEq.value"
           type="button"
@@ -81,7 +97,7 @@ async function applyAndClose() {
           class="px-[8px] py-[4px] rounded-[3px]"
           style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
           @click="vox.clearBands()"
-        >RESET</button>
+        >CLEAR</button>
       </div>
 
       <div class="flex gap-[16px]">
@@ -116,3 +132,33 @@ async function applyAndClose() {
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+/*
+ * The analysis blocks the main thread while it runs, so the busy indicator has
+ * to be something the compositor can animate on its own. A transform keyframe
+ * qualifies; anything driven by JS would sit frozen for exactly the seconds it
+ * is meant to cover.
+ *
+ * Duplicated from VoiceRxView rather than shared: scoped styles do not cross
+ * component boundaries, and a two-rule spinner is not worth a global class.
+ */
+.vrx-spin {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.6);
+  animation: vrx-spin 0.7s linear infinite;
+  will-change: transform;
+}
+
+@keyframes vrx-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vrx-spin { animation-duration: 2.4s; }
+}
+</style>
