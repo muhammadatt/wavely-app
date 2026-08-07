@@ -126,6 +126,12 @@ function roleBand(roleId) {
   return bandForRole(props.eq.bands.value, roleId)
 }
 
+/** Back to the role's canonical width, leaving its gain where it is. */
+function resetRoleWidth(roleId) {
+  const band = roleBand(roleId)
+  if (band) props.eq.resetQ(band.id)
+}
+
 /**
  * Why the result on screen no longer describes what is selected.
  *
@@ -793,7 +799,19 @@ function fmtWidth(q) {
             reports what they act on instead.
           -->
           <template v-if="focusedRoleId === role.id && !focusedIsShelf">
-            <div class="w-[40px] mt-[7px]">
+            <!-- Full column width, the same size as the gain knob above it.
+                 It is the same kind of control over the same band and there is
+                 no hierarchy between them worth expressing by shrinking one.
+
+                 Double-click resets the width alone — stopped here so it does
+                 not reach the column, where the same gesture resets the whole
+                 role. That is what the "measured / click to restore" link used
+                 to be for; the gesture says it without the chrome. -->
+            <div
+              class="w-full mt-[7px]"
+              :title="`Width — drag to narrow or widen ${role.label}, double-click for its default`"
+              @dblclick.stop="resetRoleWidth(role.id)"
+            >
               <Knob
                 :model-value="eq.roleQ(role.id)"
                 :min="qRangeFor(role.type)[0]"
@@ -801,24 +819,16 @@ function fmtWidth(q) {
                 scale="log"
                 label=""
                 :accent="accent"
-                :value-font-px="8"
+                :value-font-px="9"
                 :format-value="fmtWidth"
                 :disabled="!roleBand(role.id)"
                 @update:model-value="eq.setRoleQ(role.id, $event)"
               />
             </div>
             <span
-              class="uppercase mt-[4px]"
+              class="uppercase mt-[5px]"
               style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
             >Width</span>
-            <button
-              v-if="roleBand(role.id)?.qModified"
-              type="button"
-              class="underline underline-offset-2 mt-[3px]"
-              style="font:500 8px/1 'Inter';color:rgba(255,255,255,.3)"
-              title="This width came from the measurement rather than the default — click to restore the default"
-              @click.stop="eq.resetQ(roleBand(role.id).id)"
-            >measured</button>
           </template>
         </div>
       </div>
