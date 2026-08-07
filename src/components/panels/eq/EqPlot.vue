@@ -99,6 +99,8 @@ const emit = defineEmits([
 
 const F_MIN = 20
 const F_MAX = 20000
+
+const clampUnit = v => (v < 0 ? 0 : v > 1 ? 1 : v)
 /** Height of the region ribbon, inside the plot along its bottom edge. */
 const RIBBON_H = 7
 const LOG_SPAN = Math.log2(F_MAX / F_MIN)
@@ -529,6 +531,28 @@ function drawAnalyzer(ctx, w, h) {
  * honest as long as nothing invites the reader to measure it, so it carries no
  * gridlines and no scale.
  */
+/**
+ * The frequency span the analysis scanned, read off the resolved region table.
+ *
+ * Derived rather than written down as 60 and 16000, because the table is what
+ * decides it and the table moves with the classified voice type. Falls back to
+ * the full axis so a missing table draws one continuous curve rather than
+ * marking everything unmeasured.
+ */
+function measuredSpanHz() {
+  const table = props.analysis?.regions
+  if (!table) return [F_MIN, F_MAX]
+  let lo = Infinity
+  let hi = -Infinity
+  for (const span of Object.values(table)) {
+    lo = Math.min(lo, span[0])
+    hi = Math.max(hi, span[1])
+  }
+  return Number.isFinite(lo) && Number.isFinite(hi)
+    ? [Math.max(lo, F_MIN), Math.min(hi, F_MAX)]
+    : [F_MIN, F_MAX]
+}
+
 function drawEnvelope(ctx, w, h) {
   const a = props.analysis
   const freqs = a?.freqsHz
@@ -548,34 +572,73 @@ function drawEnvelope(ctx, w, h) {
   const top = h * 0.08
   const bottom = h * 0.94
 
+  // Clamped at BOTH ends. The low clamp was always here; the high one matters
+  // now that the trace runs the full axis, because peak and floor are fitted
+  // over 100 Hz-16 kHz and a rumble-heavy file can sit above that peak down at
+  // 30 Hz. Unclamped it computed t > 1 and drew off the top of the canvas.
   const yEnv = (db) => {
-    const t = (Math.max(db, floor) - floor) / (peak - floor)
+    const t = clampUnit((db - floor) / (peak - floor))
     return bottom - t * (bottom - top)
   }
 
-  const points = []
-  for (let i = 0; i < CURVE_POINTS; i++) {
-    const hz = CURVE_FREQS[i]
-    if (hz < 60 || hz > 16000) continue
-    points.push([xFor(hz), yEnv(envelopeAt(hz))])
+  // Points across an inclusive frequency span, with both boundaries landing
+  // exactly on it so neighbouring segments share their end points and the curve
+  // reads as continuous across the joins.
+  const segment = (loHz, hiHz) => {
+    const pts = [[xFor(loHz), yEnv(envelopeAt(loHz))]]
+    for (let i = 0; i < CURVE_POINTS; i++) {
+      const hz = CURVE_FREQS[i]
+      if (hz > loHz && hz < hiHz) pts.push([xFor(hz), yEnv(envelopeAt(hz))])
+    }
+    pts.push([xFor(hiHz), yEnv(envelopeAt(hiHz))])
+    return pts
   }
-  if (points.length < 2) return null
 
-  const trace = () => {
+  const trace = (pts) => {
     ctx.beginPath()
-    ctx.moveTo(points[0][0], points[0][1])
-    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1])
+    ctx.moveTo(pts[0][0], pts[0][1])
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
   }
 
-  // Filled body first, so the curve reads as a shape rather than a wire.
-  trace()
-  ctx.lineTo(points[points.length - 1][0], bottom)
-  ctx.lineTo(points[0][0], bottom)
+  const [measuredLo, measuredHi] = measuredSpanHz()
+  const measured = segment(measuredLo, measuredHi)
+  if (measured.length < 2) return null
+
+  // Filled body first, so the curve reads as a shape rather than a wire. Only
+  // under the measured span: the fill is what makes the curve read as "this is
+  // your voice", and claiming that over frequencies nothing was measured at
+  // would be asserting more than was found out.
+  trace(measured)
+  ctx.lineTo(measured[measured.length - 1][0], bottom)
+  ctx.lineTo(measured[0][0], bottom)
   ctx.closePath()
   ctx.fillStyle = 'rgba(255,255,255,.055)'
   ctx.fill()
 
-  trace()
+  // The unmeasured margins, dashed and dim.
+  //
+  // The curve used to stop dead at the region table's edges, which on a log
+  // axis left the left sixth of the plot empty — 20 to 60 Hz is 15.9% of the
+  // width, against 3.2% for 16 to 20 kHz — while the grid, the EQ curve and the
+  // analyzer all ran the full span. One line labelled "your voice" starting a
+  // sixth of the way in reads as a fault rather than as a boundary.
+  //
+  // Continuing it dimmed says what stopping said, without the hole: the
+  // envelope is measured everywhere the transform reaches, but only inside the
+  // scan ranges is it something the analysis will act on. Below the fundamental
+  // it is rumble and room, above the top region it is whatever survived the
+  // source's bandwidth.
+  ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(255,255,255,.13)'
+  ctx.setLineDash([3, 3])
+  for (const [lo, hi] of [[F_MIN, measuredLo], [measuredHi, F_MAX]]) {
+    if (hi - lo < 1) continue
+    trace(segment(lo, hi))
+    ctx.stroke()
+  }
+  ctx.setLineDash([])
+
+  trace(measured)
   ctx.lineWidth = 1.25
   ctx.strokeStyle = 'rgba(255,255,255,.3)'
   ctx.stroke()

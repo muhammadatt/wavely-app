@@ -354,6 +354,14 @@ function fmtWidth(q) {
             <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="rgba(255,180,120,.9)"/></svg>
             area to fix
           </span>
+          <!-- The dashed ends of the envelope. Without a word for them a reader
+               has to guess whether the dashes mean uncertainty, damage or
+               nothing, and the answer is none of those: it is simply outside
+               where VoiceRx looks. -->
+          <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.32)">
+            <svg width="16" height="8" aria-hidden="true"><path d="M0 4 H16" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="1.5" stroke-dasharray="3 3"/></svg>
+            outside the analysis
+          </span>
         </template>
         <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
           <svg width="16" height="8" aria-hidden="true"><path d="M0 4 Q8 8 16 2" fill="none" :stroke="accent" stroke-width="2"/></svg>
