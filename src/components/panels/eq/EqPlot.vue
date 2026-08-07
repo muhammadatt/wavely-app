@@ -74,6 +74,11 @@ const props = defineProps({
   /** Track the pointer and show the frequency under it. */
   cursorReadout: { type: Boolean, default: false },
 
+  /** Low end of the frequency axis. */
+  minHz: { type: Number, default: 20 },
+  /** High end of the frequency axis. */
+  maxHz: { type: Number, default: 20000 },
+
   /**
    * Resolved region table to draw as a scale ribbon along the bottom, or null.
    *
@@ -97,13 +102,23 @@ const emit = defineEmits([
   'hover-band',
 ])
 
-const F_MIN = 20
-const F_MAX = 20000
-
 const clampUnit = v => (v < 0 ? 0 : v > 1 ? 1 : v)
 /** Height of the region ribbon, inside the plot along its bottom edge. */
 const RIBBON_H = 7
-const LOG_SPAN = Math.log2(F_MAX / F_MIN)
+
+/**
+ * The frequency axis.
+ *
+ * Configurable because the two plugins work over different spans and showing
+ * the same one in both wastes the space that matters. The EQ can place a band
+ * anywhere from 20 Hz to 20 kHz and keeps the full range. VoiceRx cannot: every
+ * role range, every marker and the whole measured envelope live between 60 Hz
+ * and 16 kHz, so on a full-span axis the outer 19% of the plot is a region the
+ * plugin can never draw in, measure in or put a control in.
+ */
+const fMin = computed(() => props.minHz)
+const fMax = computed(() => props.maxHz)
+const logSpan = computed(() => Math.log2(fMax.value / fMin.value))
 
 const canvasEl = ref(null)
 const wrapEl = ref(null)
@@ -186,11 +201,11 @@ function rangeLabel(r) {
 }
 
 function xFor(hz) {
-  return (Math.log2(Math.max(hz, F_MIN) / F_MIN) / LOG_SPAN) * width.value
+  return (Math.log2(Math.max(hz, fMin.value) / fMin.value) / logSpan.value) * width.value
 }
 
 function hzFor(x) {
-  return F_MIN * Math.pow(2, (x / width.value) * LOG_SPAN)
+  return fMin.value * Math.pow(2, (x / width.value) * logSpan.value)
 }
 
 /**
@@ -218,7 +233,17 @@ function dbFor(y) {
   return ((props.height / 2 - y) / (props.height / 2)) * dbMax.value
 }
 
-const GRID_HZ = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+const GRID_DECADES = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+
+/**
+ * Grid marks inside the axis.
+ *
+ * Filtered rather than fixed: xFor clamps below the axis floor, so on a
+ * narrowed axis every mark under it would pile up on the left edge as one
+ * bright line and every mark over it would be drawn past the right edge.
+ */
+const gridHz = computed(() =>
+  GRID_DECADES.filter(hz => hz >= fMin.value && hz <= fMax.value))
 
 function hzLabel(hz) {
   if (hz >= 1000) return `${hz / 1000}k`
@@ -268,13 +293,13 @@ function envelopeAt(hz) {
 // ── Curves ──────────────────────────────────────────────────────────────────
 
 const CURVE_POINTS = 320
-const CURVE_FREQS = Array.from({ length: CURVE_POINTS }, (_, i) =>
-  F_MIN * Math.pow(F_MAX / F_MIN, i / (CURVE_POINTS - 1)))
+const curveFreqs = computed(() => Array.from({ length: CURVE_POINTS }, (_, i) =>
+  fMin.value * Math.pow(fMax.value / fMin.value, i / (CURVE_POINTS - 1))))
 
 const compositeDb = computed(() => {
   const sections = eqSections(props.sampleRate, props.bands)
   if (sections.length === 0) return new Float64Array(CURVE_POINTS)
-  return magnitudeResponseDb(sections, CURVE_FREQS, props.sampleRate)
+  return magnitudeResponseDb(sections, curveFreqs.value, props.sampleRate)
 })
 
 /**
@@ -341,8 +366,8 @@ function drawRegionRibbon(ctx, h) {
   for (const [region, span] of Object.entries(table)) {
     const [lo, hi] = span
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue
-    const x1 = xFor(Math.max(lo, F_MIN))
-    const x2 = xFor(Math.min(hi, F_MAX))
+    const x1 = xFor(Math.max(lo, fMin.value))
+    const x2 = xFor(Math.min(hi, fMax.value))
     const hot = props.highlightRegion === region
 
     ctx.fillStyle = hot
@@ -367,7 +392,7 @@ function drawGrid(ctx, w, h) {
   ctx.lineWidth = 1
 
   ctx.strokeStyle = 'rgba(255,255,255,.06)'
-  for (const hz of GRID_HZ) {
+  for (const hz of gridHz.value) {
     const x = Math.round(xFor(hz)) + 0.5
     ctx.beginPath()
     ctx.moveTo(x, 0)
@@ -414,10 +439,10 @@ function soloRangeHz(band) {
   switch (band.type) {
     case 'lowshelf':
     case 'highpass':
-      return [F_MIN, f]
+      return [fMin.value, f]
     case 'highshelf':
     case 'lowpass':
-      return [f, F_MAX]
+      return [f, fMax.value]
     default: {
       // RBJ bandwidth in octaves from Q, so the shading narrows as the band does.
       const bwOct = bandwidthOctaves(band.q)
@@ -434,8 +459,8 @@ function drawSolo(ctx, h) {
   if (!band) return
 
   const [lo, hi] = soloRangeHz(band)
-  const x1 = xFor(Math.max(lo, F_MIN))
-  const x2 = xFor(Math.min(hi, F_MAX))
+  const x1 = xFor(Math.max(lo, fMin.value))
+  const x2 = xFor(Math.min(hi, fMax.value))
 
   ctx.fillStyle = `color-mix(in srgb, ${props.accent} 12%, transparent)`
   ctx.fillRect(x1, 0, x2 - x1, h)
@@ -488,8 +513,8 @@ function drawAnalyzer(ctx, w, h) {
   let started = false
   for (let k = 1; k < spectrum.length; k++) {
     const hz = k * binWidth
-    if (hz < F_MIN) continue
-    if (hz > F_MAX) break
+    if (hz < fMin.value) continue
+    if (hz > fMax.value) break
     // The analyser reports dBFS; map the useful window onto the plot so the
     // trace sits behind the curve as a texture rather than competing with it.
     const norm = (spectrum[k] + 100) / 90
@@ -531,28 +556,6 @@ function drawAnalyzer(ctx, w, h) {
  * honest as long as nothing invites the reader to measure it, so it carries no
  * gridlines and no scale.
  */
-/**
- * The frequency span the analysis scanned, read off the resolved region table.
- *
- * Derived rather than written down as 60 and 16000, because the table is what
- * decides it and the table moves with the classified voice type. Falls back to
- * the full axis so a missing table draws one continuous curve rather than
- * marking everything unmeasured.
- */
-function measuredSpanHz() {
-  const table = props.analysis?.regions
-  if (!table) return [F_MIN, F_MAX]
-  let lo = Infinity
-  let hi = -Infinity
-  for (const span of Object.values(table)) {
-    lo = Math.min(lo, span[0])
-    hi = Math.max(hi, span[1])
-  }
-  return Number.isFinite(lo) && Number.isFinite(hi)
-    ? [Math.max(lo, F_MIN), Math.min(hi, F_MAX)]
-    : [F_MIN, F_MAX]
-}
-
 function drawEnvelope(ctx, w, h) {
   const a = props.analysis
   const freqs = a?.freqsHz
@@ -572,73 +575,38 @@ function drawEnvelope(ctx, w, h) {
   const top = h * 0.08
   const bottom = h * 0.94
 
-  // Clamped at BOTH ends. The low clamp was always here; the high one matters
-  // now that the trace runs the full axis, because peak and floor are fitted
-  // over 100 Hz-16 kHz and a rumble-heavy file can sit above that peak down at
-  // 30 Hz. Unclamped it computed t > 1 and drew off the top of the canvas.
+  // Clamped at BOTH ends. The low clamp was always here; the high one is needed
+  // because peak and floor are fitted over 100 Hz-16 kHz — deliberately, so
+  // that low-end content cannot compress the part of the curve anyone is
+  // reading — while the axis starts lower than that. On a rumble-heavy file the
+  // envelope below 100 Hz sits above the fitted peak, and unclamped it computed
+  // t > 1 and drew off the top of the canvas.
   const yEnv = (db) => {
     const t = clampUnit((db - floor) / (peak - floor))
     return bottom - t * (bottom - top)
   }
 
-  // Points across an inclusive frequency span, with both boundaries landing
-  // exactly on it so neighbouring segments share their end points and the curve
-  // reads as continuous across the joins.
-  const segment = (loHz, hiHz) => {
-    const pts = [[xFor(loHz), yEnv(envelopeAt(loHz))]]
-    for (let i = 0; i < CURVE_POINTS; i++) {
-      const hz = CURVE_FREQS[i]
-      if (hz > loHz && hz < hiHz) pts.push([xFor(hz), yEnv(envelopeAt(hz))])
-    }
-    pts.push([xFor(hiHz), yEnv(envelopeAt(hiHz))])
-    return pts
+  const points = []
+  for (let i = 0; i < CURVE_POINTS; i++) {
+    points.push([xFor(curveFreqs.value[i]), yEnv(envelopeAt(curveFreqs.value[i]))])
   }
+  if (points.length < 2) return null
 
-  const trace = (pts) => {
+  const trace = () => {
     ctx.beginPath()
-    ctx.moveTo(pts[0][0], pts[0][1])
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
+    ctx.moveTo(points[0][0], points[0][1])
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1])
   }
 
-  const [measuredLo, measuredHi] = measuredSpanHz()
-  const measured = segment(measuredLo, measuredHi)
-  if (measured.length < 2) return null
-
-  // Filled body first, so the curve reads as a shape rather than a wire. Only
-  // under the measured span: the fill is what makes the curve read as "this is
-  // your voice", and claiming that over frequencies nothing was measured at
-  // would be asserting more than was found out.
-  trace(measured)
-  ctx.lineTo(measured[measured.length - 1][0], bottom)
-  ctx.lineTo(measured[0][0], bottom)
+  // Filled body first, so the curve reads as a shape rather than a wire.
+  trace()
+  ctx.lineTo(points[points.length - 1][0], bottom)
+  ctx.lineTo(points[0][0], bottom)
   ctx.closePath()
   ctx.fillStyle = 'rgba(255,255,255,.055)'
   ctx.fill()
 
-  // The unmeasured margins, dashed and dim.
-  //
-  // The curve used to stop dead at the region table's edges, which on a log
-  // axis left the left sixth of the plot empty — 20 to 60 Hz is 15.9% of the
-  // width, against 3.2% for 16 to 20 kHz — while the grid, the EQ curve and the
-  // analyzer all ran the full span. One line labelled "your voice" starting a
-  // sixth of the way in reads as a fault rather than as a boundary.
-  //
-  // Continuing it dimmed says what stopping said, without the hole: the
-  // envelope is measured everywhere the transform reaches, but only inside the
-  // scan ranges is it something the analysis will act on. Below the fundamental
-  // it is rumble and room, above the top region it is whatever survived the
-  // source's bandwidth.
-  ctx.lineWidth = 1
-  ctx.strokeStyle = 'rgba(255,255,255,.13)'
-  ctx.setLineDash([3, 3])
-  for (const [lo, hi] of [[F_MIN, measuredLo], [measuredHi, F_MAX]]) {
-    if (hi - lo < 1) continue
-    trace(segment(lo, hi))
-    ctx.stroke()
-  }
-  ctx.setLineDash([])
-
-  trace(measured)
+  trace()
   ctx.lineWidth = 1.25
   ctx.strokeStyle = 'rgba(255,255,255,.3)'
   ctx.stroke()
@@ -702,8 +670,8 @@ function drawExtremes(ctx, h) {
     const hot = i < CURVE_POINTS && (db[i] > EXTREME_HI || db[i] < EXTREME_LO)
     if (hot && runStart === -1) runStart = i
     if (!hot && runStart !== -1) {
-      const x0 = xFor(CURVE_FREQS[runStart])
-      const x1 = xFor(CURVE_FREQS[i - 1])
+      const x0 = xFor(curveFreqs.value[runStart])
+      const x1 = xFor(curveFreqs.value[i - 1])
       ctx.fillRect(x0, 0, Math.max(2, x1 - x0), h)
       runStart = -1
     }
@@ -715,14 +683,14 @@ function drawComposite(ctx, h) {
 
   ctx.beginPath()
   for (let i = 0; i < CURVE_POINTS; i++) {
-    const x = xFor(CURVE_FREQS[i])
+    const x = xFor(curveFreqs.value[i])
     const y = yFor(db[i])
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
   }
   const stroke = ctx.strokeStyle
   ctx.save()
-  ctx.lineTo(xFor(F_MAX), yFor(0))
-  ctx.lineTo(xFor(F_MIN), yFor(0))
+  ctx.lineTo(xFor(fMax.value), yFor(0))
+  ctx.lineTo(xFor(fMin.value), yFor(0))
   ctx.closePath()
   ctx.fillStyle = `color-mix(in srgb, ${props.accent} 14%, transparent)`
   ctx.fill()
@@ -730,7 +698,7 @@ function drawComposite(ctx, h) {
 
   ctx.beginPath()
   for (let i = 0; i < CURVE_POINTS; i++) {
-    const x = xFor(CURVE_FREQS[i])
+    const x = xFor(curveFreqs.value[i])
     const y = yFor(db[i])
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
   }
@@ -771,7 +739,7 @@ watch(() => props.showAnalyzer, (on) => {
 watch(
   [() => props.bands, () => props.analysis, () => props.highlightRegion,
    () => props.selectedId, () => props.soloId, () => props.soloProbe,
-   () => props.regionRibbon, dbMax, cursorHz],
+   () => props.regionRibbon, fMin, fMax, dbMax, cursorHz],
   () => {
     if (rafId === null) draw()
   },
@@ -1011,12 +979,13 @@ function onPlotDown(e) {
     </div>
     <div v-else class="relative w-full mt-[3px] h-[11px]">
       <span
-        v-for="hz in GRID_HZ"
+        v-for="hz in gridHz"
         :key="hz"
         class="absolute top-0"
         :style="{
           left: `${(xFor(hz) / width) * 100}%`,
-          transform: hz === 20 ? 'none' : hz === 20000 ? 'translateX(-100%)' : 'translateX(-50%)',
+          transform: hz === gridHz[0] ? 'none'
+            : hz === gridHz[gridHz.length - 1] ? 'translateX(-100%)' : 'translateX(-50%)',
           fontWeight: 600,
           fontSize: '8px',
           fontFamily: 'JetBrains Mono, monospace',

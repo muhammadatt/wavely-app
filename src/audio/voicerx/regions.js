@@ -64,6 +64,26 @@ export const FEMALE_REGIONS = {
 /** Field order within a region tuple, for readable destructuring. */
 export const SCAN_LOW = 0
 export const SCAN_HIGH = 1
+
+/**
+ * The whole span the regions cover, low to high.
+ *
+ * Derived from both tables rather than written down, so it cannot fall out of
+ * step with them. It is the outer edge of everything VoiceRx measures or offers
+ * a control for, which makes it the right frequency axis for VoiceRx's display:
+ * beyond it there is nothing to draw, nothing to detect and no role to adjust.
+ *
+ * The two tables happen to agree at both ends today — sub_bass starts at 60 Hz
+ * and air ends at 16 kHz for either voice — so this is a constant in practice.
+ * Computing it keeps that a fact about the data rather than an assumption.
+ */
+export const REGION_SPAN_HZ = [MALE_REGIONS, FEMALE_REGIONS].reduce(
+  ([lo, hi], table) => Object.values(table).reduce(
+    ([a, b], region) => [Math.min(a, region[SCAN_LOW]), Math.max(b, region[SCAN_HIGH])],
+    [lo, hi],
+  ),
+  [Infinity, -Infinity],
+)
 export const DIRECTION = 2
 export const THRESHOLD_DB = 3
 export const MAX_BOOST_DB = 4
