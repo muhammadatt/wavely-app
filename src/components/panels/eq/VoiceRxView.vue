@@ -209,7 +209,14 @@ function roleTitle(role) {
 const paletteCaption = computed(() => {
   const role = previewedRole.value
   if (!role) return activeSummary.value
-  return `${role.label} — ${role.description}`
+  // The nudge toward the detail strip, and only until it has been found. The
+  // strip shipped with no way to know it was there: its opener is the role's
+  // name, which looks exactly like the plain label it replaced, so the width,
+  // solo and reset controls behind it went unseen. Cursor and hover state say
+  // "pressable"; this says what pressing gets you, and stops once something is
+  // focused because by then the answer is on screen.
+  const hint = focusedRole.value ? '' : ' · click for width, solo and reset'
+  return `${role.label} — ${role.description}${hint}`
 })
 
 /**
@@ -674,13 +681,14 @@ function fmtWidth(q) {
         <div
           v-for="role in eq.paletteRoles"
           :key="role.id"
-          class="flex flex-col items-center w-[62px] transition-opacity"
+          class="flex flex-col items-center w-[62px] cursor-pointer transition-opacity"
           :style="{ opacity: roleMuted(role.id) ? 0.4 : 1 }"
           :title="roleTitle(role)"
           @pointerenter="previewRole(role)"
           @pointerleave="previewRole(null)"
           @focusin="previewRole(role)"
           @focusout="previewRole(null)"
+          @click="focusedRoleId = role.id"
           @dblclick="eq.setRoleGain(role.id, 0)"
         >
           <div class="relative w-full">
@@ -710,8 +718,11 @@ function fmtWidth(q) {
                reachable by keyboard, since the knob above it is not. -->
           <button
             type="button"
-            class="uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
+            class="vrx-role-label uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
             :aria-pressed="focusedRoleId === role.id"
+            :title="focusedRoleId === role.id
+              ? `Hide the details for ${role.label}`
+              : `Show width, solo and reset for ${role.label}`"
             :style="{
               font: `600 8px/1 'Inter'`,
               letterSpacing: '.1em',
@@ -720,6 +731,7 @@ function fmtWidth(q) {
                 ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
             }"
             @click.stop="focusRole(role)"
+            @dblclick.stop
           >{{ role.label }}</button>
           <button
             v-if="roleBand(role.id)?.qModified"
@@ -821,6 +833,16 @@ function fmtWidth(q) {
             @click="eq.resetRole(focusedRole.id)"
           >RESET</button>
         </div>
+
+        <!-- Clicking the focused role's name closes it too, but only someone
+             who knows that would try it. -->
+        <button
+          type="button"
+          class="shrink-0 self-start rounded-[2px] px-[5px] py-[3px] transition-colors"
+          style="font:600 11px/1 'Inter';color:rgba(255,255,255,.35)"
+          :title="`Close the ${focusedRole.label} details`"
+          @click="focusedRoleId = null"
+        >&times;</button>
       </div>
     </div>
     </template>
@@ -828,6 +850,17 @@ function fmtWidth(q) {
 </template>
 
 <style scoped>
+/*
+ * The role name is the detail strip's opener, so it has to read as something
+ * that can be pressed. It is 8px of uppercase text in a row of eight others,
+ * which gives it no shape of its own to signal with — the tint on hover is the
+ * signal.
+ */
+.vrx-role-label:not([aria-pressed="true"]):hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
 /*
  * The analysis blocks the main thread while it runs, so the busy indicator has
  * to be something the compositor can animate on its own. A transform keyframe
