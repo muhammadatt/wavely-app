@@ -17,10 +17,13 @@ import {
   percentile,
   qFromWidth,
   computeBandParams,
+  scanRegions,
+  correctedEnvelope,
   MIN_VOICED_FRAMES,
+  MAX_TOTAL_CAP_FACTOR,
 } from '../../src/audio/voicerx/analysis.js'
 import {
-  classifyVoice, MALE_REGIONS, FEMALE_REGIONS, SCAN_LOW, SCAN_HIGH,
+  classifyVoice, MALE_REGIONS, FEMALE_REGIONS, SCAN_LOW, SCAN_HIGH, MAX_CUT_DB,
 } from '../../src/audio/voicerx/regions.js'
 import { buildSuggestions } from '../../src/audio/voicerx/suggestions.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
@@ -327,7 +330,56 @@ test('a bigger resonance produces a bigger correction', () => {
   const small = gainFor(12)
   const large = gainFor(30)
   assert.ok(large < small, `expected a deeper cut for a bigger resonance: ${large} vs ${small}`)
-  assert.ok(large >= -6, 'gain must never exceed the mud cut limit')
+
+  // The bound is the TOTAL cap, not the per-pass one. MAX_CUT_DB limits what a
+  // single measurement may spend; the analysis takes up to MAX_CORRECTION_PASSES
+  // of those, and MAX_TOTAL_CAP_FACTOR bounds the sum. Asserting -6 here would
+  // be asserting that iterating never happens.
+  const totalLimit = MALE_REGIONS.mud[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
+  assert.ok(large >= -totalLimit, `gain must never exceed the mud total cap: ${large}`)
+})
+
+test('one analysis settles what repeated analysis used to', () => {
+  // The symptom this exists to stop: apply the corrections, analyse the result,
+  // and be told there is still work to do. A single pass leaves 30% of every
+  // deviation standing by construction (SCALE is 0.70), so anything much over
+  // threshold reported again the moment anyone looked.
+  const r = analyzeVoiceRx(
+    synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 }), SR,
+  )
+  assert.ok(r.ok)
+  assert.ok(r.passes > 1, 'the analysis settled in one pass; nothing was iterated')
+
+  // Apply what it recommends to the envelope it measured, then measure again.
+  // This is exactly what the user was doing by hand.
+  const after = correctedEnvelope(SR, r.freqsHz, r.envelopeDb, r.bands.map(b => ({
+    region: b.region, centerHz: b.freqHz, q: b.q, gainDb: b.gainDb,
+  })))
+  let peakDb = -Infinity
+  for (let k = 0; k < r.freqsHz.length; k++) {
+    if (r.freqsHz[k] >= 100 && r.freqsHz[k] <= 16000) {
+      peakDb = Math.max(peakDb, r.envelopeDb[k])
+    }
+  }
+  const again = scanRegions(r.freqsHz, after, r.regions, peakDb)
+  const mud = again.regionResults.find(x => x.name === 'mud')
+  assert.equal(mud.detected, false,
+    `mud still reads ${mud.peakDeviationDb} dB out against a ${mud.thresholdDb} dB threshold`)
+})
+
+test('iterating never spends more than the total cap', () => {
+  // A resonance far past anything the caps can resolve must stop short and stay
+  // flagged rather than earning a surgical cut nobody measured carefully.
+  const r = analyzeVoiceRx(
+    synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 40 }), SR,
+  )
+  const totalLimit = MALE_REGIONS.mud[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
+  for (const band of r.bands) {
+    assert.ok(
+      Math.abs(band.gainDb) <= totalLimit + 0.01,
+      `${band.region} spent ${band.gainDb} dB, past the ${totalLimit} dB total cap`,
+    )
+  }
 })
 
 test('a dead band is not mistaken for a deficiency', () => {

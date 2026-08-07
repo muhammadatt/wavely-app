@@ -42,6 +42,7 @@ import {
   SCAN_LOW, SCAN_HIGH, DIRECTION, THRESHOLD_DB, MAX_BOOST_DB, MAX_CUT_DB, SCALE,
 } from './regions.js'
 import { roleForRegion } from '../eqBands.js'
+import { peaking, lowShelf, highShelf, magnitudeResponseDb } from '../dsp/biquad.js'
 
 // ── Constants, all from corrective_eq.py:41-53 ──────────────────────────────
 
@@ -58,6 +59,38 @@ export const MIN_VOICED_FRAMES = 50
 export const MAX_ANALYSIS_FRAMES = 2000
 export const CONTEXT_OCTAVES = 0.4
 export const MERGE_OCTAVES = 0.33
+
+/**
+ * How many measure-correct-measure rounds one analysis runs.
+ *
+ * Three settles everything the per-region caps allow: an uncapped region is
+ * within 0.3^2 = 9% of its deviation after two, and a capped one reaches its
+ * cap in three from any starting deviation. A fourth would only ever re-confirm
+ * a total that is already pinned.
+ */
+export const MAX_CORRECTION_PASSES = 3
+
+/**
+ * How far a region's total correction may exceed what one pass may spend.
+ *
+ * There are two caps and they answer different questions. `MAX_CUT_DB` /
+ * `MAX_BOOST_DB` bound a single decision — how much one measurement is trusted
+ * to move the file — and iterating must not turn that into three times the
+ * licence. But holding the TOTAL to the per-pass figure would make iterating
+ * pointless: a 12 dB hump in mud spends its whole 6 dB budget on pass one and
+ * still leaves 6 dB standing, so the total has to be allowed past 6 or nothing
+ * has changed.
+ *
+ * Two is not a taste call. It is where repeated manual analysis already lands:
+ * re-running the analysis on corrected audio hands each round a fresh budget,
+ * and a 12 dB hump settles at 6.0 + 4.2 = 10.2 dB over two rounds. This factor
+ * lets one analysis reach the same place the user was reaching by hand, and no
+ * further. Deviations past about 14 dB stop short of resolved and stay flagged,
+ * which is the right answer: at that size the measurement is as likely to be
+ * wrong as the voice is to be that broken, and a 15 dB surgical cut taken on
+ * trust is the worse mistake.
+ */
+export const MAX_TOTAL_CAP_FACTOR = 2
 const NATS_TO_DB = 10.0 / Math.LN10
 
 /**
@@ -525,53 +558,20 @@ export function mergeBands(input) {
   return { bands, mergeCount }
 }
 
-// ── Main analysis ───────────────────────────────────────────────────────────
+// ── Correction passes ───────────────────────────────────────────────────────
 
 /**
- * Run the full VoiceRx analysis over a mono selection.
+ * One measurement sweep over all nine regions.
  *
- * Returns `{ ok: false, reason }` rather than a curve whenever the material
- * cannot support one. Never returns a partial result: a deviation curve drawn
- * from four voiced frames is noise wearing a diagnosis's clothes, and the
- * display has no way to say so once it is on screen.
+ * Split out of analyzeVoiceRx so it can be run more than once, against
+ * successively corrected envelopes — see iterateCorrections for why once is
+ * not enough.
  *
- * @param {Float32Array} audio mono, 32-bit float
- * @param {number} sampleRate
+ * `envelopePeakDb` is a parameter rather than recomputed here on purpose: the
+ * dead-region test asks whether the SOURCE has content in a region, which is a
+ * property of the recording and must not drift as corrections are applied.
  */
-export function analyzeVoiceRx(audio, sampleRate) {
-  const collected = collectVoicedFrames(audio, sampleRate)
-  const { frames, f0Values, noiseFloorDb, totalFrames } = collected
-
-  if (frames.length < MIN_VOICED_FRAMES) {
-    const voicedRatio = totalFrames > 0 ? f0Values.length / totalFrames : 0
-    return {
-      ok: false,
-      reason: voicedRatio < MIN_VOICED_RATIO ? 'no_voiced_frames' : 'insufficient_voiced',
-      voicedFrames: frames.length,
-      voicedRatio,
-      requiredFrames: MIN_VOICED_FRAMES,
-    }
-  }
-
-  const medianF0Hz = median(f0Values)
-  const p5 = percentile(f0Values, 5)
-  const f0P5Hz = p5 > 0 ? p5 : medianF0Hz
-
-  const { voiceType, regions } = classifyVoice(medianF0Hz)
-  const { freqsHz, envelopeDb, lifterCutoff } = computeCepstralEnvelope(
-    frames, sampleRate, f0P5Hz,
-  )
-
-  // Reference level for the dead-region test. Taken over the band where speech
-  // actually lives, so a rumble-heavy file does not raise the bar for everything
-  // above it.
-  let envelopePeakDb = -Infinity
-  for (let k = 0; k < freqsHz.length; k++) {
-    if (freqsHz[k] >= 100 && freqsHz[k] <= 16000) {
-      envelopePeakDb = Math.max(envelopePeakDb, envelopeDb[k])
-    }
-  }
-
+export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb) {
   const regionResults = []
   const detected = []
 
@@ -651,6 +651,200 @@ export function analyzeVoiceRx(audio, sampleRate) {
     })
   }
 
+  return { regionResults, detected }
+}
+
+/**
+ * The filter VoiceRx will actually build for a region.
+ *
+ * Shelves at the ends, bells everywhere else — the client's own shapes, not the
+ * server's all-peaking set (see the ROLES table). Predicting the correction
+ * with the wrong shape would mispredict exactly the two regions whose reach is
+ * unbounded on one side.
+ */
+function sectionForRegion(sampleRate, region, centerHz, q, gainDb) {
+  switch (roleForRegion(region)?.type) {
+    case 'lowshelf': return lowShelf(sampleRate, centerHz, q, gainDb)
+    case 'highshelf': return highShelf(sampleRate, centerHz, q, gainDb)
+    default: return peaking(sampleRate, centerHz, q, gainDb)
+  }
+}
+
+/**
+ * The envelope as it will read once these corrections are applied.
+ *
+ * Analytic, not re-measured: the corrections are biquads whose magnitude
+ * response is known exactly, so predicting their effect is one add per bin. No
+ * audio is re-rendered and no second FFT runs, which is what makes iterating
+ * affordable at all.
+ */
+export function correctedEnvelope(sampleRate, freqsHz, envelopeDb, corrections) {
+  if (corrections.length === 0) return envelopeDb
+  const sections = corrections.map(c =>
+    sectionForRegion(sampleRate, c.region, c.centerHz, c.q, c.gainDb))
+  const responseDb = magnitudeResponseDb(sections, freqsHz, sampleRate)
+
+  const out = new Float64Array(envelopeDb.length)
+  for (let k = 0; k < out.length; k++) out[k] = envelopeDb[k] + responseDb[k]
+  return out
+}
+
+/**
+ * Measure, correct, and measure again — up to MAX_CORRECTION_PASSES.
+ *
+ * WHY ONE PASS IS NOT ENOUGH. Two things stop a single sweep from settling the
+ * file, and both are deliberate features of the detector rather than faults:
+ *
+ *  1. `SCALE` applies 0.70 of the measured deviation (0.60 for upper_presence),
+ *     so 30% is left standing by construction. Whenever the original deviation
+ *     was more than about 3.3x a region's threshold, that remainder is itself
+ *     over threshold and the region reports again the moment anyone looks.
+ *  2. Baselines are anchored in the neighbours. CONTEXT_OCTAVES is 0.4 and the
+ *     scan ranges abut, so Boxiness's lower anchor (288-380 Hz for a male
+ *     voice) lies inside Mud's scan range, and Mud's upper anchor lies inside
+ *     Boxiness's. Correcting one region moves its neighbour's reference, which
+ *     can raise a deviation that was under threshold before. The target moves;
+ *     this is not something a bigger single correction could have anticipated.
+ *
+ * On the server neither shows, because correctiveEQ runs exactly once in a
+ * preset chain and nothing ever re-measures. VoiceRx is the first place a human
+ * can analyse twice, which is how the residue became visible.
+ *
+ * WHAT BOUNDS IT. Each pass's increment is clamped to the region's per-pass cap
+ * and the running total to MAX_TOTAL_CAP_FACTOR times that, so three passes
+ * cannot spend 3x6 dB on Mud. The total cap is also what stops the neighbour
+ * coupling above from ratcheting two adjacent regions against each other, and
+ * it is why the loop is safe without a convergence proof. Where and how wide
+ * come from the pass that first detected a region; later passes only revise how
+ * much, so a correction never wanders off the anomaly it was measured from.
+ */
+export function iterateCorrections(
+  sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb,
+) {
+  const first = scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb)
+  const totals = new Map()
+  let passes = 0
+
+  for (let pass = 1; pass <= MAX_CORRECTION_PASSES; pass++) {
+    const scan = pass === 1
+      ? first
+      : scanRegions(
+        freqsHz,
+        correctedEnvelope(sampleRate, freqsHz, envelopeDb, [...totals.values()]),
+        regions,
+        envelopePeakDb,
+      )
+    if (scan.detected.length === 0) break
+
+    let moved = false
+    for (const d of scan.detected) {
+      const prev = totals.get(d.region)
+      if (!prev) {
+        // The stored limits are the TOTAL ones from here on. Each pass's own
+        // increment was already clamped to the per-pass cap inside
+        // computeBandParams; what these bound is the sum, and they are what the
+        // merge step will later clamp a combined band against.
+        totals.set(d.region, {
+          ...d,
+          cutLimit: d.cutLimit * MAX_TOTAL_CAP_FACTOR,
+          boostLimit: d.boostLimit * MAX_TOTAL_CAP_FACTOR,
+          detectedOnPass: pass,
+        })
+        moved = true
+        continue
+      }
+      const next = round(clamp(prev.gainDb + d.gainDb, -prev.cutLimit, prev.boostLimit), 2)
+      if (Math.abs(next - prev.gainDb) >= 0.01) moved = true
+      prev.gainDb = next
+    }
+    // Every region pinned at its total cap: further passes would re-measure the
+    // same envelope and add nothing.
+    if (!moved) break
+    // Counted only where a pass changed the correction, so `passes` reads as
+    // work done rather than loops entered — the round that finds nothing left
+    // is how the loop ends, not a round that did something.
+    passes = pass
+  }
+
+  // The curves on screen are drawn against the dry envelope, so the display
+  // keeps the first pass's measurement — its scanEnv, baseline and deviation
+  // are what the user's own recording reads, and a later pass's numbers would
+  // describe a curve that is not the one plotted. Only the correction itself is
+  // updated to the accumulated total, so the marker and the finding agree with
+  // what is actually being applied.
+  const regionResults = first.regionResults
+  for (const entry of regionResults) {
+    const total = totals.get(entry.name)
+    if (!total) continue
+    entry.detected = true
+    entry.centerHz = total.centerHz
+    entry.gainDb = total.gainDb
+    entry.q = total.q
+    entry.widthOctaves = round(total.widthOctaves, 2)
+    entry.detectedOnPass = total.detectedOnPass
+  }
+
+  // Low frequency first. mergeBands compares every pair so it does not need the
+  // order, but it names a merged band after its first contributor and the UI
+  // reads that name as the primary one — which only holds while the list runs
+  // upward. A region first detected on a later pass would otherwise land at the
+  // end and rename any merge it took part in.
+  const detected = [...totals.values()].sort((a, b) => a.centerHz - b.centerHz)
+
+  return { regionResults, detected, passes }
+}
+
+// ── Main analysis ───────────────────────────────────────────────────────────
+
+/**
+ * Run the full VoiceRx analysis over a mono selection.
+ *
+ * Returns `{ ok: false, reason }` rather than a curve whenever the material
+ * cannot support one. Never returns a partial result: a deviation curve drawn
+ * from four voiced frames is noise wearing a diagnosis's clothes, and the
+ * display has no way to say so once it is on screen.
+ *
+ * @param {Float32Array} audio mono, 32-bit float
+ * @param {number} sampleRate
+ */
+export function analyzeVoiceRx(audio, sampleRate) {
+  const collected = collectVoicedFrames(audio, sampleRate)
+  const { frames, f0Values, noiseFloorDb, totalFrames } = collected
+
+  if (frames.length < MIN_VOICED_FRAMES) {
+    const voicedRatio = totalFrames > 0 ? f0Values.length / totalFrames : 0
+    return {
+      ok: false,
+      reason: voicedRatio < MIN_VOICED_RATIO ? 'no_voiced_frames' : 'insufficient_voiced',
+      voicedFrames: frames.length,
+      voicedRatio,
+      requiredFrames: MIN_VOICED_FRAMES,
+    }
+  }
+
+  const medianF0Hz = median(f0Values)
+  const p5 = percentile(f0Values, 5)
+  const f0P5Hz = p5 > 0 ? p5 : medianF0Hz
+
+  const { voiceType, regions } = classifyVoice(medianF0Hz)
+  const { freqsHz, envelopeDb, lifterCutoff } = computeCepstralEnvelope(
+    frames, sampleRate, f0P5Hz,
+  )
+
+  // Reference level for the dead-region test. Taken over the band where speech
+  // actually lives, so a rumble-heavy file does not raise the bar for everything
+  // above it.
+  let envelopePeakDb = -Infinity
+  for (let k = 0; k < freqsHz.length; k++) {
+    if (freqsHz[k] >= 100 && freqsHz[k] <= 16000) {
+      envelopePeakDb = Math.max(envelopePeakDb, envelopeDb[k])
+    }
+  }
+
+  const { regionResults, detected, passes } = iterateCorrections(
+    sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb,
+  )
+
   const { bands: merged, mergeCount } = mergeBands(detected)
   const bands = merged
     .filter(b => Math.abs(b.gainDb) >= 0.1)
@@ -681,5 +875,7 @@ export function analyzeVoiceRx(audio, sampleRate) {
     regionResults,
     bands,
     mergedBands: mergeCount,
+    /** How many measure-correct rounds it took to settle. See iterateCorrections. */
+    passes,
   }
 }
