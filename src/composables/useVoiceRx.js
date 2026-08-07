@@ -33,6 +33,9 @@ const instance = createEqInstance({
   effect: voiceRxEqEffect,
   windowId: VOICERX_WINDOW_ID,
   label: 'VoiceRx',
+  // A band here is the control for a named characteristic, so its range is a
+  // wall rather than the general EQ's trapdoor — see clampBandToRole.
+  frequencyPolicy: 'clamp',
 })
 
 // Analysis is heavy and frozen; the curves inside it are typed arrays that must

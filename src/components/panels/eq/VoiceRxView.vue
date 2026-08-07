@@ -47,6 +47,15 @@ const props = defineProps({
  */
 const hoveredRegion = ref(null)
 
+/**
+ * How far a role knob travels.
+ *
+ * Narrower than the band model's ±18: these are corrections to a voice, not
+ * tone-shaping moves, and a range that reaches further than anything sensible
+ * makes every useful setting live in the middle third of the sweep.
+ */
+const GAIN_LIMIT_DB = 12
+
 const analysis = computed(() => (props.eq.hasAnalysis.value ? props.eq.analysis.value : null))
 
 /** Handles are shown for role bands only; general bands have no VoiceRx control. */
@@ -150,6 +159,19 @@ const activeSummary = computed(() => props.eq.paletteRoles
 const previewedRole = ref(null)
 
 /**
+ * Glancing at a role lights its span on the plot's ribbon.
+ *
+ * This is the half of the mapping that makes the ribbon worth drawing: the
+ * palette says what the characteristic is, the ribbon says where in the voice
+ * it lives, and pointing at either one answers for both. Nobody has to be told
+ * that Nasality means 650-1200 Hz, and nobody has to know it either.
+ */
+function previewRole(role) {
+  previewedRole.value = role
+  hoveredRegion.value = role?.region ?? null
+}
+
+/**
  * The hover tooltip: what this control does, and what state it is in.
  *
  * What the role *means* is not in here — that goes on the shared caption line,
@@ -181,6 +203,52 @@ const paletteCaption = computed(() => {
   if (!role) return activeSummary.value
   return `${role.label} — ${role.description}`
 })
+
+// ── Handles on the plot ─────────────────────────────────────────────────────
+
+/**
+ * Dragging a dot moves the correction within its role, and nowhere else.
+ *
+ * The gain half of the drag is the same edit the role knob makes; the frequency
+ * half is the one thing the palette cannot express, because a knob per role has
+ * no second axis. The band cannot leave its range — the pool is on the clamping
+ * policy — so a drag can nudge where Mud sits inside 200-420 Hz but can never
+ * turn Mud into something with no control.
+ *
+ * Gain is held to the palette's own limit rather than the band model's wider
+ * one: the two controls edit the same number, and a drag that took it past
+ * where the knob can follow would leave the knob pinned and wrong.
+ */
+function onMoveBand({ id, frequencyHz, gainDb }) {
+  props.eq.setFrequency(id, frequencyHz)
+  props.eq.setGain(id, Math.max(-GAIN_LIMIT_DB, Math.min(GAIN_LIMIT_DB, gainDb)))
+}
+
+/** Scrolling a dot narrows or widens it — the third dimension a drag cannot reach. */
+function onQBand({ id, delta }) {
+  const band = props.eq.findBand(id)
+  if (!band) return
+  // Multiplicative, so the step feels the same at Q 0.5 and Q 8.
+  props.eq.setQ(id, band.q * (delta > 0 ? 1.15 : 1 / 1.15))
+}
+
+/** Touching a dot focuses its role, so the strip follows the plot. */
+function onSelectBand(id) {
+  const band = props.eq.findBand(id)
+  if (band?.role) focusedRoleId.value = band.role
+}
+
+/**
+ * Hovering a dot lights its region on the ribbon and its row in the findings.
+ *
+ * The link ran one way — a findings row lit the plot, never the reverse — so
+ * the picture could not be used to ask what something was.
+ */
+function onHoverBand(id) {
+  const band = id ? props.eq.findBand(id) : null
+  const role = band?.role ? props.eq.paletteRoles.find(r => r.id === band.role) : null
+  hoveredRegion.value = role?.region ?? null
+}
 
 // ── The focused role ────────────────────────────────────────────────────────
 
@@ -316,9 +384,14 @@ function fmtWidth(q) {
         :handle-ids="roleHandleIds"
         :solo-id="eq.soloBandId.value"
         :solo-probe="eq.soloProbe.value"
-        :interactive="false"
+        interaction="bands"
         :analysis="analysis"
         :highlight-region="hoveredRegion"
+        :region-ribbon="eq.regions.value"
+        @move-band="onMoveBand"
+        @q-band="onQBand"
+        @select-band="onSelectBand"
+        @hover-band="onHoverBand"
       />
     </div>
 
@@ -503,16 +576,16 @@ function fmtWidth(q) {
           class="flex flex-col items-center w-[62px] transition-opacity"
           :style="{ opacity: roleMuted(role.id) ? 0.4 : 1 }"
           :title="roleTitle(role)"
-          @pointerenter="previewedRole = role"
-          @pointerleave="previewedRole = null"
-          @focusin="previewedRole = role"
-          @focusout="previewedRole = null"
+          @pointerenter="previewRole(role)"
+          @pointerleave="previewRole(null)"
+          @focusin="previewRole(role)"
+          @focusout="previewRole(null)"
           @dblclick="eq.setRoleGain(role.id, 0)"
         >
           <div class="relative w-full">
             <Knob
               :model-value="gainFor(role.id)"
-              :min="-12" :max="12" :step="0.1"
+              :min="-GAIN_LIMIT_DB" :max="GAIN_LIMIT_DB" :step="0.1"
               label=""
               bipolar
               :accent="accent"

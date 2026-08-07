@@ -8,6 +8,7 @@ import {
   createBand, getRole, roleForRegion, roleFreqRange,
   applyForfeiture, candidateRoleFor, tagBand, resetBandQ,
   setBandQ, setBandFrequency, untaggedBands, bandForRole, bandwidthOctaves,
+  clampBandToRole,
 } from '../../src/audio/eqBands.js'
 import { MALE_REGIONS, REGION_ORDER, SCAN_LOW, SCAN_HIGH } from '../../src/audio/voicerx/regions.js'
 import { eqSections } from '../../src/audio/eqProcessor.js'
@@ -179,6 +180,34 @@ test('forfeiture fires outside the edges and not on them', () => {
     setBandFrequency(b, f)
     assert.equal(b.role === 'mud', keeps, `at ${f} Hz expected keeps=${keeps}`)
   }
+})
+
+test('clamping holds a role band inside its range instead of forfeiting', () => {
+  // The opposite policy to setBandFrequency, and deliberately so: in VoiceRx
+  // the range is the control, so leaving it would strand a filter that is still
+  // being heard with no knob anywhere that admits to it.
+  const lo = R.mud[SCAN_LOW]
+  const hi = R.mud[SCAN_HIGH]
+  const b = createBand({ role: 'mud', regions: R, frequencyHz: 300, gainDb: -4 })
+
+  clampBandToRole(b, hi + 500)
+  assert.equal(b.role, 'mud', 'the tag was dropped by a clamping move')
+  assert.equal(b.frequencyHz, hi)
+
+  clampBandToRole(b, lo - 500)
+  assert.equal(b.role, 'mud')
+  assert.equal(b.frequencyHz, lo)
+
+  // Inside the range it is an ordinary move.
+  clampBandToRole(b, 310)
+  assert.equal(b.frequencyHz, 310)
+})
+
+test('clamping an untagged band falls back to the parameter range', () => {
+  const b = createBand({ frequencyHz: 1000 })
+  clampBandToRole(b, 999999)
+  assert.equal(b.frequencyHz, PARAM_RANGES.frequencyHz[1])
+  assert.equal(b.role, null)
 })
 
 test('an untagged band is never auto-tagged by drifting into range', () => {

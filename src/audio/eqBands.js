@@ -381,6 +381,31 @@ export function setBandFrequency(band, frequencyHz) {
   return applyForfeiture(band)
 }
 
+/**
+ * Move a band, keeping it inside its role. The wall, where forfeiture is the
+ * trapdoor.
+ *
+ * The two policies suit opposite pools. In the general EQ a band that leaves
+ * the mud range has stopped being Mud, and dropping the tag is the honest
+ * record of that. In VoiceRx the range *is* the control: a band that slipped
+ * out of it would keep filtering while vanishing from the only surface that
+ * offers a knob for it, so there the boundary has to stop the drag instead.
+ *
+ * An untagged band has no role to be held inside and falls through to the
+ * ordinary parameter clamp.
+ */
+export function clampBandToRole(band, frequencyHz) {
+  if (band.role === null || !band.roleFreqRangeHz) {
+    return setBandFrequency(band, frequencyHz)
+  }
+  const [lo, hi] = band.roleFreqRangeHz
+  band.frequencyHz = clamp(
+    clamp(frequencyHz, lo, hi),
+    ...PARAM_RANGES.frequencyHz,
+  )
+  return band
+}
+
 /** Bands VoiceRx has no control for, but which are still in the audio path. */
 export function untaggedBands(bands) {
   return bands.filter(b => b.role === null)

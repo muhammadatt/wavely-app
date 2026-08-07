@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { magnitudeResponseDb } from '../../../audio/dsp/biquad.js'
 import { eqSections } from '../../../audio/eqProcessor.js'
-import { getRole, bandwidthOctaves } from '../../../audio/eqBands.js'
+import { getRole, roleForRegion, bandwidthOctaves } from '../../../audio/eqBands.js'
 
 /**
  * The EQ display, shared by both modes.
@@ -28,8 +28,24 @@ const props = defineProps({
   accent: { type: String, default: '#8fd18f' },
   height: { type: Number, default: 200 },
 
-  /** Draggable handles and click-to-create. Off in VoiceRx, where roles drive. */
-  interactive: { type: Boolean, default: true },
+  /**
+   * How much of the plot can be operated.
+   *
+   * 'full'   — handles drag, and pressing empty canvas creates a band.
+   * 'bands'  — existing handles drag and scroll; the canvas creates nothing.
+   * 'none'   — a display.
+   *
+   * The middle setting is what VoiceRx needs and what one boolean could not
+   * express. Its bands are role bands: every one of them is the control for a
+   * named characteristic, so nudging where a correction sits is welcome, while
+   * a press on empty canvas minting an untagged band is not — that band would
+   * belong to no role, appear under no knob, and still be heard.
+   */
+  interaction: {
+    type: String,
+    default: 'full',
+    validator: v => ['full', 'bands', 'none'].includes(v),
+  },
   /** Band ids to show handles for. Null means all of them. */
   handleIds: { type: Array, default: null },
   selectedId: { type: String, default: null },
@@ -57,6 +73,14 @@ const props = defineProps({
   soloProbe: { type: Object, default: null },
   /** Track the pointer and show the frequency under it. */
   cursorReadout: { type: Boolean, default: false },
+
+  /**
+   * Resolved region table to draw as a scale ribbon along the bottom, or null.
+   *
+   * Takes the table rather than reading one, because the ranges move with the
+   * classified voice type and only the caller knows which one is in force.
+   */
+  regionRibbon: { type: Object, default: null },
 })
 
 const emit = defineEmits([
@@ -75,6 +99,8 @@ const emit = defineEmits([
 
 const F_MIN = 20
 const F_MAX = 20000
+/** Height of the region ribbon, inside the plot along its bottom edge. */
+const RIBBON_H = 7
 const LOG_SPAN = Math.log2(F_MAX / F_MIN)
 
 const canvasEl = ref(null)
@@ -283,9 +309,56 @@ function draw() {
   const fit = props.analysis ? drawEnvelope(ctx, w, h) : null
   drawExtremes(ctx, h)
   drawComposite(ctx, h)
+  drawRegionRibbon(ctx, h)
   // Markers last: they are the point of the VoiceRx display and must not be
   // crossed out by the EQ curve.
   if (fit) drawMarkers(ctx, h, fit.yEnv)
+}
+
+/**
+ * The nine named regions, drawn to scale along the bottom of the plot.
+ *
+ * This is what makes the palette and the picture one object. The alternative
+ * was to place the role controls themselves at their frequencies, which does
+ * not survive contact with the arithmetic: on a log axis the closest pair of
+ * centres are 46 px apart at this width and a control is 62 px wide, so they
+ * would overlap in the mids while 150 px of the low end sat empty. A ribbon
+ * carries the mapping at the axis's own scale and leaves the controls evenly
+ * spaced and legible, with hover linking the two.
+ *
+ * Spans are the scan ranges, so adjacent regions genuinely overlap — Body and
+ * Mud share 200-280 Hz for a male voice. Drawn translucent, the overlap shows
+ * as a brighter join, which is the truth: a problem sitting there belongs to
+ * both descriptions.
+ */
+function drawRegionRibbon(ctx, h) {
+  const table = props.regionRibbon
+  if (!table) return
+
+  const top = h - RIBBON_H
+  for (const [region, span] of Object.entries(table)) {
+    const [lo, hi] = span
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue
+    const x1 = xFor(Math.max(lo, F_MIN))
+    const x2 = xFor(Math.min(hi, F_MAX))
+    const hot = props.highlightRegion === region
+
+    ctx.fillStyle = hot
+      ? `color-mix(in srgb, ${props.accent} 55%, transparent)`
+      : 'rgba(255,255,255,.07)'
+    ctx.fillRect(x1 + 0.5, top, Math.max(1, x2 - x1 - 1), RIBBON_H - 2)
+
+    if (!hot) continue
+    // The label only for the region being pointed at. Nine at this scale would
+    // be unreadable, and the palette below already names all nine.
+    const role = roleForRegion(region)
+    if (!role) continue
+    ctx.fillStyle = `color-mix(in srgb, ${props.accent} 45%, #ffffff)`
+    ctx.font = "600 8px 'Inter', system-ui, sans-serif"
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText(role.label.toUpperCase(), (x1 + x2) / 2, top - 2)
+  }
 }
 
 function drawGrid(ctx, w, h) {
@@ -635,7 +708,7 @@ watch(() => props.showAnalyzer, (on) => {
 watch(
   [() => props.bands, () => props.analysis, () => props.highlightRegion,
    () => props.selectedId, () => props.soloId, () => props.soloProbe,
-   dbMax, cursorHz],
+   () => props.regionRibbon, dbMax, cursorHz],
   () => {
     if (rafId === null) draw()
   },
@@ -671,10 +744,17 @@ function handleStyle(band) {
   }
 }
 
+/** Handles respond to the pointer in both editing modes. */
+const canEditBands = computed(() => props.interaction !== 'none')
+
+const handleHint = computed(() => (canEditBands.value
+  ? 'Drag to move · scroll to widen or narrow · double-click to remove'
+  : null))
+
 let drag = null
 
 function onHandleDown(e, band) {
-  if (!props.interactive) return
+  if (!canEditBands.value) return
   e.stopPropagation()
   if (e.altKey) {
     emit('toggle-band', band.id)
@@ -712,7 +792,7 @@ function onHandleUp(e) {
 const HANDLE_HIT_PX = 32
 
 function onHandleWheel(e, band) {
-  if (!props.interactive) return
+  if (!canEditBands.value) return
   e.preventDefault()
   // Scroll over a handle adjusts Q — the third dimension a two-axis drag
   // cannot reach.
@@ -736,7 +816,7 @@ function onPlotMove(e) {
 }
 
 function onPlotDown(e) {
-  if (!props.interactive) return
+  if (props.interaction !== 'full') return
   // Clicking empty plot creates a band there. The fastest path to a band, and
   // it needs no menu.
   const rect = canvasEl.value.getBoundingClientRect()
@@ -814,16 +894,14 @@ function onPlotDown(e) {
         width: `${HANDLE_HIT_PX}px`,
         height: `${HANDLE_HIT_PX}px`,
       }"
-      :title="interactive
-        ? 'Drag to move · scroll to widen or narrow · double-click to remove'
-        : null"
+      :title="handleHint"
       @pointerenter="emit('hover-band', band.id)"
       @pointerleave="emit('hover-band', null)"
     >
       <button
         type="button"
         class="absolute inset-0 flex items-center justify-center"
-        :style="{ cursor: interactive ? 'grab' : 'default' }"
+        :style="{ cursor: canEditBands ? 'grab' : 'default' }"
         :aria-label="`Band at ${Math.round(band.frequencyHz)} hertz, ${band.gainDb.toFixed(1)} decibels`"
         @pointerdown="onHandleDown($event, band)"
         @pointermove="onHandleMove"

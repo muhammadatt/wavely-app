@@ -5,7 +5,7 @@ import { applyManualEqRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import {
   MAX_BANDS, createBand, applyForfeiture, setBandFrequency, setBandQ,
-  resetBandQ, isBandActive, PARAM_RANGES, clamp, qRangeFor,
+  resetBandQ, isBandActive, PARAM_RANGES, clamp, qRangeFor, clampBandToRole,
 } from '../audio/eqBands.js'
 
 /**
@@ -26,7 +26,9 @@ import {
  * Everything role-, analysis- and suggestion-shaped lives in useVoiceRx.js;
  * nothing here knows what a role is.
  */
-export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS }) {
+export function createEqInstance({
+  effect, windowId, label, maxBands = MAX_BANDS, frequencyPolicy = 'forfeit',
+}) {
   // Module-scope-per-instance: created once at import, shared by every caller
   // of the owning composable, exactly as the single pool used to be.
   const bands = ref([])
@@ -164,8 +166,17 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
       pushBands()
     }
 
+    /**
+     * Move a band along the axis, under the pool's own policy.
+     *
+     * 'forfeit' lets a band leave its role and drops the tag; 'clamp' holds it
+     * inside. See clampBandToRole for why the same gesture should do opposite
+     * things in the two plugins.
+     */
     function setFrequency(id, hz) {
-      updateBand(id, b => setBandFrequency(b, hz))
+      updateBand(id, b => (frequencyPolicy === 'clamp'
+        ? clampBandToRole(b, hz)
+        : setBandFrequency(b, hz)))
     }
 
     function setGain(id, db) {
