@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { magnitudeResponseDb } from '../../../audio/dsp/biquad.js'
 import { eqSections } from '../../../audio/eqProcessor.js'
-import { getRole, roleForRegion, bandwidthOctaves } from '../../../audio/eqBands.js'
+import { getRole, bandwidthOctaves } from '../../../audio/eqBands.js'
 
 /**
  * The EQ display, shared by both modes.
@@ -365,6 +365,12 @@ function draw() {
  * Mud share 200-280 Hz for a male voice. Drawn translucent, the overlap shows
  * as a brighter join, which is the truth: a problem sitting there belongs to
  * both descriptions.
+ *
+ * Unnamed. The highlighted segment used to draw its region's name above itself,
+ * which was worth it while the axis labels below alternated across two rows and
+ * the matching one could be on either. Now that they sit on one line directly
+ * under the ribbon, the name appeared twice within a few pixels of the same
+ * place. The segment lights, the label under it lights, and that is the link.
  */
 function drawRegionRibbon(ctx, h) {
   const table = props.regionRibbon
@@ -382,17 +388,6 @@ function drawRegionRibbon(ctx, h) {
       ? `color-mix(in srgb, ${props.accent} 55%, transparent)`
       : 'rgba(255,255,255,.07)'
     ctx.fillRect(x1 + 0.5, top, Math.max(1, x2 - x1 - 1), RIBBON_H - 2)
-
-    if (!hot) continue
-    // The label only for the region being pointed at. Nine at this scale would
-    // be unreadable, and the palette below already names all nine.
-    const role = roleForRegion(region)
-    if (!role) continue
-    ctx.fillStyle = `color-mix(in srgb, ${props.accent} 45%, #ffffff)`
-    ctx.font = "600 8px 'Inter', system-ui, sans-serif"
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(role.label.toUpperCase(), (x1 + x2) / 2, top - 2)
   }
 }
 
@@ -407,6 +402,11 @@ function drawGrid(ctx, w, h) {
     ctx.lineTo(x, h)
     ctx.stroke()
   }
+
+  // Half a label's height plus a hair, so a middle-baselined glyph clears the
+  // edge it is held away from.
+  const LABEL_INSET = 8
+  const bottomInset = LABEL_INSET + (props.regionRibbon ? RIBBON_H : 0)
 
   const step = dbMax.value >= 12 ? 6 : 3
   ctx.font = '9px "JetBrains Mono", monospace'
@@ -430,7 +430,15 @@ function drawGrid(ctx, w, h) {
     // The line sits at its true position, but the text is held inside the
     // canvas: the outermost lines are at y=0 and y=h, where a middle-baselined
     // label would be sliced in half by the edge.
-    if (db !== 0) ctx.fillText(`${db > 0 ? '+' : ''}${db}`, 4, Math.min(h - 6, Math.max(6, y)))
+    //
+    // The lower bound also clears the region ribbon. That bar took over the
+    // bottom of the plot after this clamp was written, so the bottom-most
+    // label — -12 at the default range — was still inside the canvas but sat
+    // on top of it, showing through a translucent bar as two overlaid things.
+    if (db !== 0) {
+      const label = `${db > 0 ? '+' : ''}${db}`
+      ctx.fillText(label, 4, Math.min(h - bottomInset, Math.max(LABEL_INSET, y)))
+    }
   }
 }
 
