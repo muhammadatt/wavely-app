@@ -45,7 +45,10 @@ const props = defineProps({
   eq: { type: Object, required: true },
   accent: { type: String, required: true },
   sampleRate: { type: Number, default: 44100 },
+  hoveredRegion: { type: String, default: null },
 })
+
+const emit = defineEmits(['update:hoveredRegion'])
 
 /**
  * Region under the pointer, so hovering a suggestion lights its marker on the
@@ -53,7 +56,14 @@ const props = defineProps({
  * separate claims the reader has to match up by frequency, which is exactly the
  * work the mode exists to remove.
  */
-const hoveredRegion = ref(null)
+const localHoveredRegion = ref(null)
+const hoveredRegion = computed({
+  get: () => props.hoveredRegion ?? localHoveredRegion.value,
+  set: (region) => {
+    localHoveredRegion.value = region
+    emit('update:hoveredRegion', region)
+  },
+})
 
 /**
  * How far a role knob travels.
@@ -444,7 +454,7 @@ function fmtWidth(q) {
     <!-- What the picture is. Without this the plot is unlabelled shapes and a
          reader has no way in. -->
     <div class="mb-[6px]">
-      <div class="flex items-baseline justify-start gap-[10px]">
+      <div class="hidden flex items-baseline justify-start gap-[10px]">
         <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.45)">
           VOICE TONE
         </span>
@@ -457,7 +467,7 @@ function fmtWidth(q) {
       <!-- Legend. Only the marks that are actually on the plot: before an
            analysis there is no envelope and there are no findings, and naming
            them would send the reader looking for something that is not there. -->
-      <div class="flex flex-wrap items-center gap-x-[16px] gap-y-[4px] mt-[7px]">
+      <div class="flex flex-wrap items-center gap-x-[16px] gap-y-[4px]">
         <template v-if="analysis">
           <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
             <svg width="16" height="8" aria-hidden="true"><path d="M0 6 Q4 1 8 4 T16 2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.5"/></svg>
@@ -509,6 +519,17 @@ function fmtWidth(q) {
         @hover-band="onHoverBand"
         @hover-region="previewRegion"
       />
+
+      <div class="flex items-baseline justify-center mb-[9px]">
+      <!-- Fixed height: this line swaps between the running summary and the
+           definition of whichever control is under the pointer, and nothing
+           below it should move as that happens. -->
+      <p
+        class="mt-[10px]"
+        style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32);min-height:13px"
+      >{{ paletteCaption }}</p>
+      </div>
+
     </div>
 
     <!-- RE-ANALYZE lives in the faceplate's button row, with SEND TO EQ and
@@ -570,117 +591,8 @@ function fmtWidth(q) {
       </button>
     </div>
 
-    <!-- Suggestions -->
-    <div v-else-if="eq.suggestions.value.length > 0" class="mt-[14px]">
-      <div class="flex items-center justify-between mb-[7px]">
-        <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.4)">
-          WHAT I HEAR
-        </span>
-        <div class="flex items-center gap-[10px]">
-          <span style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)">
-            {{ eq.activeSuggestionCount.value }} of {{ eq.suggestions.value.length }} on
-          </span>
-          <button
-            type="button"
-            class="px-[8px] py-[4px] rounded-[3px]"
-            :style="{
-              font: '600 9px/1 Inter', letterSpacing: '.06em',
-              border: `1px solid color-mix(in srgb, ${accent} 45%, transparent)`,
-              color: accent,
-            }"
-            @click="eq.setAllSuggestions(!allOn)"
-          >{{ allOn ? 'ALL OFF' : 'ALL ON' }}</button>
-        </div>
-      </div>
-
-      <!-- The corrections run in the live chain, so they are inaudible while
-           the plugin is bypassed. Saying so beats a silent panel. -->
-      <p
-        v-if="!eq.eqPreview.value"
-        class="mb-[7px]"
-        style="font:500 9px/1.4 'Inter';color:rgba(255,190,120,.7)"
-      >
-        VoiceRx is switched off — turn it on to hear these.
-      </p>
-
-      <!-- Applied on arrival, listed so they can be switched back off. The row
-           is a live control, not a proposal: the note explains what was heard,
-           the switch says whether anything is being done about it. -->
-      <div
-        v-for="row in eq.suggestionRows.value"
-        :key="row.suggestion.id"
-        class="flex items-center gap-[10px] py-[6px] rounded-[2px] transition-colors"
-        style="border-top:1px solid rgba(255,255,255,.05)"
-        :style="{
-          background: hoveredRegion === row.suggestion.region
-            ? 'rgba(255,180,120,.07)' : 'transparent',
-          opacity: isOn(row) ? 1 : 0.45,
-        }"
-        @pointerenter="hoveredRegion = row.suggestion.region"
-        @pointerleave="hoveredRegion = null"
-      >
-        <button
-          type="button"
-          role="switch"
-          :aria-checked="isOn(row)"
-          class="shrink-0 rounded-full transition-colors"
-          style="width:26px;height:15px;padding:2px"
-          :style="{
-            background: isOn(row) ? accent : 'rgba(255,255,255,.14)',
-          }"
-          :title="isOn(row) ? 'Switch this correction off' : 'Switch this correction on'"
-          @click="eq.toggleSuggestion(row.suggestion)"
-        >
-          <span
-            class="block rounded-full transition-transform"
-            style="width:11px;height:11px;background:#0d1216"
-            :style="{ transform: isOn(row) ? 'translateX(11px)' : 'none' }"
-          />
-        </button>
-
-        <p class="flex-1" style="font:500 11px/1.4 'Inter';color:rgba(255,255,255,.75)">
-          {{ row.suggestion.symptom }}
-        </p>
-        <span
-          class="shrink-0 text-right"
-          style="font:600 10px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.45);min-width:96px"
-        >{{ row.suggestion.roleLabel }} · {{ fmtGain(row.band?.gainDb ?? row.suggestion.gainDb) }} dB</span>
-        <button
-          type="button"
-          class="shrink-0 px-[8px] py-[4px] rounded-[3px]"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12)"
-          :style="{
-            color: eq.soloBandId.value === row.band?.id ? accent : 'rgba(255,255,255,.5)',
-            background: eq.soloBandId.value === row.band?.id
-              ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'transparent',
-            opacity: row.band ? 1 : 0.35,
-          }"
-          :disabled="!row.band"
-          title="Hear this correction on its own"
-          @click="eq.toggleSolo(row.band)"
-        >SOLO</button>
-      </div>
-    </div>
-
-    <p
-      v-else
-      class="mt-[14px] text-center"
-      style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
-    >
-      Nothing stands out — no part of this recording is far enough out of
-      line to be worth correcting. You can still shape it by hand below.
-    </p>
-
     <!-- Role controls -->
     <div class="mt-[16px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">
-      <div class="flex items-baseline justify-between mb-[9px]">
-        <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.4)">
-          SHAPE BY EAR
-        </span>
-        <span style="font:500 9px/1 'Inter';color:rgba(255,255,255,.28)">
-          low to high
-        </span>
-      </div>
 
       <!-- Every role, in frequency order, one row. The set is fixed: which of
            them the analysis flagged is a mark on the control, not a decision
@@ -699,52 +611,11 @@ function fmtWidth(q) {
           @click="focusedRoleId = role.id"
           @dblclick="eq.resetRole(role.id)"
         >
-          <div class="relative w-full">
-            <Knob
-              :model-value="gainFor(role.id)"
-              :min="-GAIN_LIMIT_DB" :max="GAIN_LIMIT_DB" :step="0.1"
-              label=""
-              bipolar
-              :accent="accent"
-              :value-font-px="11"
-              :format-value="fmtGain"
-              @update:model-value="eq.setRoleGain(role.id, $event)"
-            />
-            <!-- The finding mark, in the plot's amber because it means what
-                 the plot's markers mean. It sits on the knob rather than
-                 beside the label so that adding it to some controls and not
-                 others does not knock the labels out of line — the corner is
-                 clear of the knob's ring at every value. -->
-            <span
-              v-if="eq.detectedRoles.value.has(role.id)"
-              class="absolute rounded-full"
-              style="top:-1px;right:1px;width:5px;height:5px;background:rgba(255,180,120,.9)"
-              aria-hidden="true"
-            />
-          </div>
-          <!-- The label is the focus control. A real button so the strip is
-               reachable by keyboard, since the knob above it is not. -->
-          <button
-            type="button"
-            class="vrx-role-label uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
-            :aria-pressed="focusedRoleId === role.id"
-            :title="focusedRoleId === role.id
-              ? `Close ${role.label}`
-              : `Open ${role.label} to set its width`"
-            :style="{
-              font: `600 8px/1 'Inter'`,
-              letterSpacing: '.1em',
-              color: focusedRoleId === role.id ? accent : 'rgba(255,255,255,.5)',
-              background: focusedRoleId === role.id
-                ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-            }"
-            @click.stop="focusRole(role)"
-            @dblclick.stop
-          >{{ role.label }}</button>
+
           <!-- S and ON, permanent, in the general EQ's own shapes and words.
                Two plugins that both hold a pool of bands should not each invent
                their own vocabulary for switching one off and hearing it alone. -->
-          <div class="flex items-center gap-[3px] mt-[4px]">
+          <div class="flex items-center gap-[3px] mt-[4px] mb-[6px]">
             <button
               type="button"
               class="px-[4px] py-[2px] rounded-[2px] transition-colors"
@@ -783,6 +654,50 @@ function fmtWidth(q) {
               @dblclick.stop
             >{{ eq.roleOnState(role.id) === 'on' ? 'ON' : 'OFF' }}</button>
           </div>
+          <div class="relative w-full">
+            <Knob
+              :model-value="gainFor(role.id)"
+              :min="-GAIN_LIMIT_DB" :max="GAIN_LIMIT_DB" :step="0.1"
+              label=""
+              bipolar
+              :accent="accent"
+              :value-font-px="11"
+              :format-value="fmtGain"
+              @update:model-value="eq.setRoleGain(role.id, $event)"
+            />
+            <!-- The finding mark, in the plot's amber because it means what
+                 the plot's markers mean. It sits on the knob rather than
+                 beside the label so that adding it to some controls and not
+                 others does not knock the labels out of line — the corner is
+                 clear of the knob's ring at every value. -->
+            <span
+              v-if="eq.detectedRoles.value.has(role.id)"
+              class="absolute rounded-full"
+              style="top:-1px;right:1px;width:5px;height:5px;background:rgba(255,180,120,.9)"
+              aria-hidden="true"
+            />
+          </div>
+          
+          <!-- The label is the focus control. A real button so the strip is
+               reachable by keyboard, since the knob above it is not. -->
+          <button
+            type="button"
+            class="vrx-role-label uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
+            :aria-pressed="focusedRoleId === role.id"
+            :title="focusedRoleId === role.id
+              ? `Close ${role.label}`
+              : `Open ${role.label} to set its width`"
+            :style="{
+              font: `600 8px/1 'Inter'`,
+              letterSpacing: '.1em',
+              color: focusedRoleId === role.id ? accent : 'rgba(255,255,255,.5)',
+              background: focusedRoleId === role.id
+                ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+            }"
+            @click.stop="focusRole(role)"
+            @dblclick.stop
+          >{{ role.label }}</button>
+
 
           <!--
             Width, under the knob it belongs to.
@@ -834,13 +749,7 @@ function fmtWidth(q) {
         </div>
       </div>
 
-      <!-- Fixed height: this line swaps between the running summary and the
-           definition of whichever control is under the pointer, and nothing
-           below it should move as that happens. -->
-      <p
-        class="mt-[10px]"
-        style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32);min-height:13px"
-      >{{ paletteCaption }}</p>
+
 
     </div>
     </template>
