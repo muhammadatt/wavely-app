@@ -87,8 +87,12 @@ onBeforeUnmount(() => {
 
 // ── Plot interaction ──────────────────────────────────────────────────────
 
-function onCreate({ frequencyHz, gainDb }) {
-  props.eq.addBand({ frequencyHz, gainDb, q: 1, type: 'peaking', origin: 'manual_general' })
+function onCreate({ frequencyHz, gainDb, adopt }) {
+  const band = props.eq.addBand({
+    frequencyHz, gainDb, q: 1, type: 'peaking', origin: 'manual_general',
+  })
+  // Hand the id straight back so the press that made it can go on to drag it.
+  adopt?.(band?.id)
 }
 
 function onMove({ id, frequencyHz, gainDb }) {

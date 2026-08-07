@@ -293,19 +293,15 @@ function onMoveBand({ id, frequencyHz, gainDb }) {
 }
 
 /**
- * A press on empty plot puts that role there.
+ * A press on empty plot puts that role there, and goes on to drag it.
  *
- * The dead zone is the whole reason this is safe to leave on. A press maps its
- * height to a gain, so a stray one near the zero line would otherwise mint a
- * band nobody asked for at a gain nobody would notice — and the band would then
- * exist, count and need clearing. Under half a decibel it does nothing at all.
+ * Whether a band that never left the zero line survives the gesture is the
+ * plot's call, not this one's — it is the thing that knows the press turned
+ * into a drag. See CREATE_FLOOR_DB in EqPlot.
  */
-const CREATE_FLOOR_DB = 0.5
-
-function onCreateBand({ frequencyHz, gainDb }) {
+function onCreateBand({ frequencyHz, gainDb, adopt }) {
   const gain = Math.max(-GAIN_LIMIT_DB, Math.min(GAIN_LIMIT_DB, gainDb))
-  if (Math.abs(gain) < CREATE_FLOOR_DB) return
-  props.eq.setRoleAt(frequencyHz, gain)
+  adopt?.(props.eq.setRoleAt(frequencyHz, gain))
 }
 
 /** Scrolling a dot narrows or widens it — the third dimension a drag cannot reach. */
@@ -546,6 +542,7 @@ function fmtWidth(q) {
         :min-hz="REGION_SPAN_HZ[0]"
         :max-hz="REGION_SPAN_HZ[1]"
         @create-band="onCreateBand"
+        @remove-band="eq.removeBand"
         :analysis="analysis"
         :highlight-region="hoveredRegion"
         :region-ribbon="eq.regions.value"

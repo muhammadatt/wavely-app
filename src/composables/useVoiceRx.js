@@ -320,11 +320,13 @@ export function useVoiceRx() {
    * role is the invariant the whole palette rests on. The frequency is held
    * inside the role's own range, so a click near a boundary lands at the edge
    * rather than somewhere the role cannot reach.
+   *
+   * Returns the band's id so the press that placed it can carry on dragging it.
    */
   function setRoleAt(frequencyHz, gainDb) {
     const region = regionAtHz(regions.value, frequencyHz)
     const role = region ? roleForRegion(region) : null
-    if (!role) return
+    if (!role) return null
 
     const [lo, hi] = roleFreqRange(role.id, regions.value) ?? [frequencyHz, frequencyHz]
     const hz = clamp(frequencyHz, lo, hi)
@@ -334,15 +336,15 @@ export function useVoiceRx() {
       if (!existing.enabled) api.toggleBand(existing.id)
       api.setFrequency(existing.id, hz)
       api.setGain(existing.id, gainDb)
-      return
+      return existing.id
     }
-    api.addBand({
+    return api.addBand({
       role: role.id,
       regions: regions.value,
       frequencyHz: hz,
       gainDb,
       origin: 'manual_voicerx',
-    })
+    })?.id ?? null
   }
 
   /**

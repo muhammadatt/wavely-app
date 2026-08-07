@@ -796,9 +796,26 @@ function onHandleMove(e) {
   })
 }
 
+/**
+ * Gain below which a band created by a press is treated as never wanted.
+ *
+ * Applied on release, never on press. It started life on the press, blocking
+ * creation near the zero line so a stray click could not mint a band — which
+ * broke the most natural way to use the gesture, because pressing exactly on
+ * the line and dragging out to the gain you want starts at 0 dB by definition.
+ * Judging at release instead keeps the same protection with none of that cost:
+ * drag anywhere useful and the band stays, let go without having gone anywhere
+ * and it was a stray click after all.
+ */
+const CREATE_FLOOR_DB = 0.5
+
 function onHandleUp(e) {
   if (!drag) return
   e.target.releasePointerCapture?.(e.pointerId)
+  if (drag.created) {
+    const band = props.bands.find(b => b.id === drag.id)
+    if (band && Math.abs(band.gainDb) < CREATE_FLOOR_DB) emit('remove-band', band.id)
+  }
   drag = null
 }
 
@@ -842,10 +859,29 @@ function onPlotDown(e) {
   // and places that role's band. Both want the gesture, so this component only
   // reports it.
   const rect = canvasEl.value.getBoundingClientRect()
+
+  // The press carries straight into dragging the band it just made, so the
+  // whole gesture is one movement: put it here, pull it to there. The owner
+  // hands back the id synchronously — an emit's handlers run before this
+  // returns — because the band does not exist until it says so, and without
+  // knowing which one it made there is nothing to drag.
+  // Snapshotted before the emit, because the owner may hand back a band that
+  // already existed — VoiceRx moves a role's band rather than giving the role a
+  // second one. Only a band this press actually brought into being may be taken
+  // away again on release, or a press at the zero line would delete work.
+  const existing = new Set(props.bands.map(b => b.id))
+
+  let placed = null
   emit('create-band', {
     frequencyHz: hzFor(e.clientX - rect.left),
     gainDb: dbFor(e.clientY - rect.top),
+    adopt: (id) => { placed = id ?? null },
   })
+  if (placed === null) return
+
+  emit('select-band', placed)
+  drag = { id: placed, created: !existing.has(placed) }
+  canvasEl.value.setPointerCapture(e.pointerId)
 }
 </script>
 
@@ -861,6 +897,9 @@ function onPlotDown(e) {
       class="block w-full rounded-[3px]"
       :style="{ height: `${height}px`, background: 'rgba(0,0,0,.28)' }"
       @pointerdown="onPlotDown"
+      @pointermove="onHandleMove"
+      @pointerup="onHandleUp"
+      @pointercancel="onHandleUp"
     />
 
     <!-- Gain range, overlaid on the axis it governs. pointerdown is stopped
