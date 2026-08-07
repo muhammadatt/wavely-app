@@ -4,11 +4,12 @@ import { createEqInstance } from './useEqInstance.js'
 import { voiceRxEqEffect } from '../audio/effects/manualEq.js'
 import { renderRegionToBuffer } from '../audio/processing.js'
 import {
-  getRole, bandForRole, ROLES_IN_ORDER, isBandActive,
+  getRole, bandForRole, ROLES_IN_ORDER, isBandActive, roleForRegion,
+  roleFreqRange, clamp,
 } from '../audio/eqBands.js'
 import { analyzeVoiceRx, MIN_VOICED_FRAMES, HOP_SIZE, FRAME_SIZE } from '../audio/voicerx/analysis.js'
 import { buildSuggestions, suggestionToBand } from '../audio/voicerx/suggestions.js'
-import { MALE_REGIONS } from '../audio/voicerx/regions.js'
+import { MALE_REGIONS, regionAtHz } from '../audio/voicerx/regions.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { receiveBands } from './useManualEq.js'
 
@@ -305,6 +306,46 @@ export function useVoiceRx() {
   }
 
   /**
+   * Put a role at a point on the plot, creating its band if it has none.
+   *
+   * This is the gesture the general EQ has always had and VoiceRx refused,
+   * because a band created by clicking empty canvas there carries no role and
+   * would be audible with no control anywhere that admits to it. That objection
+   * was about the EQ's semantics, not the gesture: here the frequency names a
+   * role (see regionAtHz), so the click creates exactly the band the role knob
+   * would have created, at the point actually pointed at rather than at the
+   * region's centre.
+   *
+   * A role that already has a band gets it moved, not doubled — one band per
+   * role is the invariant the whole palette rests on. The frequency is held
+   * inside the role's own range, so a click near a boundary lands at the edge
+   * rather than somewhere the role cannot reach.
+   */
+  function setRoleAt(frequencyHz, gainDb) {
+    const region = regionAtHz(regions.value, frequencyHz)
+    const role = region ? roleForRegion(region) : null
+    if (!role) return
+
+    const [lo, hi] = roleFreqRange(role.id, regions.value) ?? [frequencyHz, frequencyHz]
+    const hz = clamp(frequencyHz, lo, hi)
+
+    const existing = bandForRole(bands.value, role.id)
+    if (existing) {
+      if (!existing.enabled) api.toggleBand(existing.id)
+      api.setFrequency(existing.id, hz)
+      api.setGain(existing.id, gainDb)
+      return
+    }
+    api.addBand({
+      role: role.id,
+      regions: regions.value,
+      frequencyHz: hz,
+      gainDb,
+      origin: 'manual_voicerx',
+    })
+  }
+
+  /**
    * Where a role sits: the band's frequency if it has one, the measured
    * anomaly's centre if the analysis found one there, otherwise the geometric
    * centre of the role's scan range.
@@ -541,7 +582,7 @@ export function useVoiceRx() {
     regions, paletteRoles, detectedRoles,
     analyze, applyAllSuggestions, toggleSuggestion, setAllSuggestions, toggleSolo,
     toggleRoleSolo, isRoleSoloed,
-    roleGain, setRoleGain, roleQ, setRoleQ, roleCentreHz, resetRole,
+    roleGain, setRoleGain, setRoleAt, roleQ, setRoleQ, roleCentreHz, resetRole,
     roleOnState, toggleRoleEnabled,
     canSendToEq, sendToEq,
   }

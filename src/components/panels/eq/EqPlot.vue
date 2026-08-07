@@ -28,24 +28,6 @@ const props = defineProps({
   accent: { type: String, default: '#8fd18f' },
   height: { type: Number, default: 200 },
 
-  /**
-   * How much of the plot can be operated.
-   *
-   * 'full'   — handles drag, and pressing empty canvas creates a band.
-   * 'bands'  — existing handles drag and scroll; the canvas creates nothing.
-   * 'none'   — a display.
-   *
-   * The middle setting is what VoiceRx needs and what one boolean could not
-   * express. Its bands are role bands: every one of them is the control for a
-   * named characteristic, so nudging where a correction sits is welcome, while
-   * a press on empty canvas minting an untagged band is not — that band would
-   * belong to no role, appear under no knob, and still be heard.
-   */
-  interaction: {
-    type: String,
-    default: 'full',
-    validator: v => ['full', 'bands', 'none'].includes(v),
-  },
   /** Band ids to show handles for. Null means all of them. */
   handleIds: { type: Array, default: null },
   selectedId: { type: String, default: null },
@@ -791,17 +773,9 @@ function handleStyle(band) {
   }
 }
 
-/** Handles respond to the pointer in both editing modes. */
-const canEditBands = computed(() => props.interaction !== 'none')
-
-const handleHint = computed(() => (canEditBands.value
-  ? 'Drag to move · scroll to widen or narrow · double-click to remove'
-  : null))
-
 let drag = null
 
 function onHandleDown(e, band) {
-  if (!canEditBands.value) return
   e.stopPropagation()
   if (e.altKey) {
     emit('toggle-band', band.id)
@@ -839,7 +813,6 @@ function onHandleUp(e) {
 const HANDLE_HIT_PX = 32
 
 function onHandleWheel(e, band) {
-  if (!canEditBands.value) return
   e.preventDefault()
   // Scroll over a handle adjusts Q — the third dimension a two-axis drag
   // cannot reach.
@@ -863,9 +836,11 @@ function onPlotMove(e) {
 }
 
 function onPlotDown(e) {
-  if (props.interaction !== 'full') return
-  // Clicking empty plot creates a band there. The fastest path to a band, and
-  // it needs no menu.
+  // Pressing empty plot creates a band there. The fastest path to a band, and
+  // it needs no menu. What "there" means is the owner's to decide: the EQ
+  // places a free band at the point, VoiceRx resolves the frequency to a role
+  // and places that role's band. Both want the gesture, so this component only
+  // reports it.
   const rect = canvasEl.value.getBoundingClientRect()
   emit('create-band', {
     frequencyHz: hzFor(e.clientX - rect.left),
@@ -941,14 +916,14 @@ function onPlotDown(e) {
         width: `${HANDLE_HIT_PX}px`,
         height: `${HANDLE_HIT_PX}px`,
       }"
-      :title="handleHint"
+      title="Drag to move · scroll to widen or narrow · double-click to remove"
       @pointerenter="emit('hover-band', band.id)"
       @pointerleave="emit('hover-band', null)"
     >
       <button
         type="button"
         class="absolute inset-0 flex items-center justify-center"
-        :style="{ cursor: canEditBands ? 'grab' : 'default' }"
+        style="cursor:grab"
         :aria-label="`Band at ${Math.round(band.frequencyHz)} hertz, ${band.gainDb.toFixed(1)} decibels`"
         @pointerdown="onHandleDown($event, band)"
         @pointermove="onHandleMove"

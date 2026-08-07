@@ -128,6 +128,28 @@ function roleMuted(roleId) {
   return !!band && !band.enabled
 }
 
+/**
+ * How brightly a role's knob is painted.
+ *
+ * Contrast, not availability. Nine knob bodies at equal brightness is a busy
+ * surface with no answer to "which of these is doing anything", and the
+ * temptation is to grey the idle ones out — but they are not disabled. Turning
+ * a knob that sits at zero with no band is precisely how that band comes into
+ * existence, so painting it as unavailable would deny the one gesture that
+ * works, and would put most of the vocabulary behind a state again.
+ *
+ * So idle roles are quiet and live, and a switched-off one is quieter still,
+ * because suppressing something is a stronger statement than never having
+ * touched it.
+ */
+function roleBrightness(roleId) {
+  switch (props.eq.roleOnState(roleId)) {
+    case 'on': return 1
+    case 'off': return 0.32
+    default: return 0.5
+  }
+}
+
 function fmtGain(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 }
@@ -268,6 +290,22 @@ function previewRegion(regionName) {
 function onMoveBand({ id, frequencyHz, gainDb }) {
   props.eq.setFrequency(id, frequencyHz)
   props.eq.setGain(id, Math.max(-GAIN_LIMIT_DB, Math.min(GAIN_LIMIT_DB, gainDb)))
+}
+
+/**
+ * A press on empty plot puts that role there.
+ *
+ * The dead zone is the whole reason this is safe to leave on. A press maps its
+ * height to a gain, so a stray one near the zero line would otherwise mint a
+ * band nobody asked for at a gain nobody would notice — and the band would then
+ * exist, count and need clearing. Under half a decibel it does nothing at all.
+ */
+const CREATE_FLOOR_DB = 0.5
+
+function onCreateBand({ frequencyHz, gainDb }) {
+  const gain = Math.max(-GAIN_LIMIT_DB, Math.min(GAIN_LIMIT_DB, gainDb))
+  if (Math.abs(gain) < CREATE_FLOOR_DB) return
+  props.eq.setRoleAt(frequencyHz, gain)
 }
 
 /** Scrolling a dot narrows or widens it — the third dimension a drag cannot reach. */
@@ -507,7 +545,7 @@ function fmtWidth(q) {
         :solo-probe="eq.soloProbe.value"
         :min-hz="REGION_SPAN_HZ[0]"
         :max-hz="REGION_SPAN_HZ[1]"
-        interaction="bands"
+        @create-band="onCreateBand"
         :analysis="analysis"
         :highlight-region="hoveredRegion"
         :region-ribbon="eq.regions.value"
@@ -599,8 +637,7 @@ function fmtWidth(q) {
         <div
           v-for="role in eq.paletteRoles"
           :key="role.id"
-          class="flex flex-col items-center w-[62px] cursor-pointer transition-opacity"
-          :style="{ opacity: roleMuted(role.id) ? 0.4 : 1 }"
+          class="flex flex-col items-center w-[62px] cursor-pointer"
           :title="roleTitle(role)"
           @pointerenter="previewRole(role)"
           @pointerleave="previewRole(null)"
@@ -652,7 +689,10 @@ function fmtWidth(q) {
               @dblclick.stop
             >{{ eq.roleOnState(role.id) === 'on' ? 'ON' : 'OFF' }}</button>
           </div>
-          <div class="relative w-full">
+          <div
+            class="relative w-full transition-opacity"
+            :style="{ opacity: roleBrightness(role.id) }"
+          >
             <Knob
               :model-value="gainFor(role.id)"
               :min="-GAIN_LIMIT_DB" :max="GAIN_LIMIT_DB" :step="0.1"
@@ -688,7 +728,9 @@ function fmtWidth(q) {
             :style="{
               font: `600 8px/1 'Inter'`,
               letterSpacing: '.1em',
-              color: focusedRoleId === role.id ? accent : 'rgba(255,255,255,.5)',
+              color: focusedRoleId === role.id ? accent
+                : eq.roleOnState(role.id) === 'on'
+                  ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.42)',
               background: focusedRoleId === role.id
                 ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
             }"

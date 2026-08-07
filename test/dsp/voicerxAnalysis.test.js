@@ -24,6 +24,7 @@ import {
 } from '../../src/audio/voicerx/analysis.js'
 import {
   classifyVoice, MALE_REGIONS, FEMALE_REGIONS, SCAN_LOW, SCAN_HIGH, MAX_CUT_DB,
+  REGION_ORDER, regionAtHz,
 } from '../../src/audio/voicerx/regions.js'
 import { buildSuggestions } from '../../src/audio/voicerx/suggestions.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
@@ -117,6 +118,48 @@ test('ambiguous scan ranges interpolate between the two tables', () => {
 test('an unclassifiable F0 does not throw', () => {
   assert.equal(classifyVoice(0).voiceType, 'male')
   assert.equal(classifyVoice(NaN).voiceType, 'male')
+})
+
+// ── Frequency to region ─────────────────────────────────────────────────────
+
+test('a frequency inside one region resolves to it', () => {
+  for (const table of [MALE_REGIONS, FEMALE_REGIONS]) {
+    for (const name of REGION_ORDER) {
+      // The geometric centre is unambiguously inside, whatever the neighbours do.
+      const centre = Math.sqrt(table[name][SCAN_LOW] * table[name][SCAN_HIGH])
+      assert.equal(regionAtHz(table, centre), name, `${name} at its own centre`)
+    }
+  }
+})
+
+test('a gap in the table falls to its nearer neighbour, never to nothing', () => {
+  // The female table leaves 130-180 Hz and 1400-1500 Hz uncovered. A click
+  // there has to name a role or it does nothing at all, which reads as broken.
+  for (const hz of [131, 155, 179, 1401, 1450, 1499]) {
+    const region = regionAtHz(FEMALE_REGIONS, hz)
+    assert.ok(region, `${hz} Hz resolved to nothing`)
+    assert.ok(REGION_ORDER.includes(region))
+  }
+  assert.equal(regionAtHz(FEMALE_REGIONS, 131), 'sub_bass', 'just above sub_bass')
+  assert.equal(regionAtHz(FEMALE_REGIONS, 179), 'body_warmth', 'just below body_warmth')
+})
+
+test('an overlap goes to whichever region holds the point more centrally', () => {
+  // Female upper_presence (3-6k) and brilliance (5-9k) share a whole kilohertz.
+  assert.equal(regionAtHz(FEMALE_REGIONS, 5100), 'upper_presence')
+  assert.equal(regionAtHz(FEMALE_REGIONS, 5900), 'brilliance')
+})
+
+test('the ends of the axis resolve, and nonsense does not', () => {
+  assert.equal(regionAtHz(MALE_REGIONS, 60), 'sub_bass')
+  assert.equal(regionAtHz(MALE_REGIONS, 16000), 'air')
+  // Beyond the tables it still names the nearest, so a click at the very edge
+  // of the plot is never swallowed by rounding.
+  assert.equal(regionAtHz(MALE_REGIONS, 59), 'sub_bass')
+  assert.equal(regionAtHz(MALE_REGIONS, 16001), 'air')
+  assert.equal(regionAtHz(MALE_REGIONS, 0), null)
+  assert.equal(regionAtHz(MALE_REGIONS, NaN), null)
+  assert.equal(regionAtHz(null, 300), null)
 })
 
 // ── Numeric helpers ─────────────────────────────────────────────────────────

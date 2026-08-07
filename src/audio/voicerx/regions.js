@@ -65,6 +65,49 @@ export const FEMALE_REGIONS = {
 export const SCAN_LOW = 0
 export const SCAN_HIGH = 1
 
+export const DIRECTION = 2
+export const THRESHOLD_DB = 3
+export const MAX_BOOST_DB = 4
+export const MAX_CUT_DB = 5
+export const SCALE = 6
+
+/**
+ * Which region a frequency belongs to.
+ *
+ * Needed because a click on the plot has to name a role, and the tables do not
+ * partition the spectrum cleanly enough to just test containment. Neighbours
+ * overlap by design — a male voice shares 200-280 Hz between body_warmth and
+ * mud, a female one shares a full kilohertz between upper_presence and
+ * brilliance — and the female table has two outright gaps, 130-180 Hz and
+ * 1400-1500 Hz, where a strict test would find nothing at all.
+ *
+ * So the answer is the nearest region rather than the containing one, measured
+ * in half-widths of log-frequency from each region's centre. Inside a region
+ * that distance is under 1; in an overlap the region the point sits more
+ * centrally within wins; in a gap the closer neighbour takes it instead of the
+ * click being swallowed. Normalising by half-width is what makes a narrow
+ * region and a wide one compete fairly.
+ */
+export function regionAtHz(table, hz) {
+  if (!table || !Number.isFinite(hz) || hz <= 0) return null
+  const target = Math.log2(hz)
+
+  let best = null
+  let bestDistance = Infinity
+  for (const [name, span] of Object.entries(table)) {
+    const lo = Math.log2(span[SCAN_LOW])
+    const hi = Math.log2(span[SCAN_HIGH])
+    const halfWidth = (hi - lo) / 2
+    if (!(halfWidth > 0)) continue
+    const distance = Math.abs(target - (lo + hi) / 2) / halfWidth
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = name
+    }
+  }
+  return best
+}
+
 /**
  * The whole span the regions cover, low to high.
  *
@@ -84,11 +127,6 @@ export const REGION_SPAN_HZ = [MALE_REGIONS, FEMALE_REGIONS].reduce(
   ),
   [Infinity, -Infinity],
 )
-export const DIRECTION = 2
-export const THRESHOLD_DB = 3
-export const MAX_BOOST_DB = 4
-export const MAX_CUT_DB = 5
-export const SCALE = 6
 
 const MALE_MAX_F0 = 165.0
 const FEMALE_MIN_F0 = 200.0
