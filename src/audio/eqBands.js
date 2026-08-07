@@ -247,6 +247,19 @@ export function bandwidthOctaves(q) {
   return (2 / Math.LN2) * Math.asinh(1 / (2 * Math.max(q, 0.05)))
 }
 
+/**
+ * Rounding for a Q control, shared by every knob that moves one.
+ *
+ * Two decimals is fine enough to feel continuous under the pointer and coarse
+ * enough that the number stops twitching in the last digit. It lives here
+ * rather than in a view because both plugins adjust the same parameter on the
+ * same band model, and two copies of a rounding rule is two chances to end up
+ * with knobs that behave differently on the same object.
+ */
+export function quantizeQ(q) {
+  return Math.round(q * 100) / 100
+}
+
 /** Legal Q range for a filter type. */
 export function qRangeFor(type) {
   return PARAM_RANGES.q[type] ?? PARAM_RANGES.q.peaking

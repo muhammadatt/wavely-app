@@ -3,7 +3,7 @@ import { computed, ref, onBeforeUnmount } from 'vue'
 import EqPlot from './EqPlot.vue'
 import Knob from '../../knobs/Knob.vue'
 import {
-  bandForRole, isBandActive, bandwidthOctaves, qRangeFor,
+  bandForRole, isBandActive, bandwidthOctaves, qRangeFor, quantizeQ,
 } from '../../../audio/eqBands.js'
 import { REGION_SPAN_HZ } from '../../../audio/voicerx/regions.js'
 
@@ -817,6 +817,7 @@ function fmtWidth(q) {
                 :min="qRangeFor(role.type)[0]"
                 :max="qRangeFor(role.type)[1]"
                 scale="log"
+                :quantize="quantizeQ"
                 label=""
                 :accent="accent"
                 :value-font-px="9"

@@ -3,7 +3,9 @@ import { computed, ref, onBeforeUnmount } from 'vue'
 import EqPlot from './EqPlot.vue'
 import Knob from '../../knobs/Knob.vue'
 import FilterShapePicker from './FilterShapePicker.vue'
-import { PARAM_RANGES, qRangeFor, shapesForBand } from '../../../audio/eqBands.js'
+import {
+  PARAM_RANGES, qRangeFor, shapesForBand, quantizeQ,
+} from '../../../audio/eqBands.js'
 
 /**
  * General mode — a conventional parametric EQ.
@@ -126,10 +128,6 @@ function quantizeHz(hz) {
   if (hz >= 10000) return Math.round(hz / 100) * 100
   if (hz >= 1000) return Math.round(hz / 10) * 10
   return Math.round(hz)
-}
-
-function quantizeQ(q) {
-  return Math.round(q * 100) / 100
 }
 
 function qRangeForBand(band) {
