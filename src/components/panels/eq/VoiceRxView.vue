@@ -192,7 +192,7 @@ function roleTitle(role) {
     : ''
   const how = roleMuted(role.id)
     ? 'switched off; move the knob to switch it back on'
-    : 'drag to adjust, double-click to reset'
+    : 'drag to adjust, double-click to reset it to flat and its default width'
   return `${role.label} — ${how}.${flagged}`
 }
 
@@ -207,16 +207,21 @@ function roleTitle(role) {
  * so nothing below it moves as the pointer crosses the row.
  */
 const paletteCaption = computed(() => {
-  const role = previewedRole.value
+  // Hovering wins over the open role, because the pointer is the more recent
+  // question. Nothing hovered falls back to whatever is open, so opening a role
+  // leaves its definition on screen rather than only flashing it past.
+  const role = previewedRole.value ?? focusedRole.value
   if (!role) return activeSummary.value
-  // The nudge toward the detail strip, and only until it has been found. The
-  // strip shipped with no way to know it was there: its opener is the role's
-  // name, which looks exactly like the plain label it replaced, so the width,
-  // solo and reset controls behind it went unseen. Cursor and hover state say
-  // "pressable"; this says what pressing gets you, and stops once something is
-  // focused because by then the answer is on screen.
-  const hint = focusedRole.value ? '' : ' · click for width, solo and reset'
-  return `${role.label} — ${role.description}${hint}`
+
+  // The reach came off the detail strip when the width knob moved under its own
+  // gain knob. It belongs with the definition anyway: both answer "what is this
+  // control", one in words and one in hertz.
+  const reach = role === focusedRole.value ? ` · acts on ${focusedReach.value}` : ''
+  // The nudge toward opening a role, until one has been opened. The width knob
+  // is the only thing a click reveals now, and a name that looks like a label
+  // will not advertise it.
+  const hint = focusedRole.value ? '' : ' · click for width'
+  return `${role.label} — ${role.description}${reach}${hint}`
 })
 
 /**
@@ -304,9 +309,6 @@ function focusRole(role) {
 /** A shelf reaches to the end of the spectrum; only a bell has a width. */
 const focusedIsShelf = computed(() =>
   focusedRole.value?.type === 'lowshelf' || focusedRole.value?.type === 'highshelf')
-
-const focusedBand = computed(() =>
-  (focusedRole.value ? roleBand(focusedRole.value.id) : null))
 
 function fmtHz(hz) {
   return hz >= 1000 ? `${(hz / 1000).toFixed(1)} kHz` : `${Math.round(hz)} Hz`
@@ -689,7 +691,7 @@ function fmtWidth(q) {
           @focusin="previewRole(role)"
           @focusout="previewRole(null)"
           @click="focusedRoleId = role.id"
-          @dblclick="eq.setRoleGain(role.id, 0)"
+          @dblclick="eq.resetRole(role.id)"
         >
           <div class="relative w-full">
             <Knob
@@ -721,8 +723,8 @@ function fmtWidth(q) {
             class="vrx-role-label uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
             :aria-pressed="focusedRoleId === role.id"
             :title="focusedRoleId === role.id
-              ? `Hide the details for ${role.label}`
-              : `Show width, solo and reset for ${role.label}`"
+              ? `Close ${role.label}`
+              : `Open ${role.label} to set its width`"
             :style="{
               font: `600 8px/1 'Inter'`,
               letterSpacing: '.1em',
@@ -733,14 +735,91 @@ function fmtWidth(q) {
             @click.stop="focusRole(role)"
             @dblclick.stop
           >{{ role.label }}</button>
-          <button
-            v-if="roleBand(role.id)?.qModified"
-            type="button"
-            class="underline underline-offset-2 mt-[3px]"
-            style="font:500 8px/1 'Inter';color:rgba(255,255,255,.3)"
-            title="This band's width came from the measurement rather than the default — click to restore the default width"
-            @click.stop="eq.resetQ(roleBand(role.id).id)"
-          >width: measured</button>
+          <!-- S and ON, permanent, in the general EQ's own shapes and words.
+               Two plugins that both hold a pool of bands should not each invent
+               their own vocabulary for switching one off and hearing it alone. -->
+          <div class="flex items-center gap-[3px] mt-[4px]">
+            <button
+              type="button"
+              class="px-[4px] py-[2px] rounded-[2px] transition-colors"
+              style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
+              :style="{
+                color: eq.isRoleSoloed(role.id) ? accent : 'rgba(255,255,255,.35)',
+                background: eq.isRoleSoloed(role.id)
+                  ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+              }"
+              :title="roleBand(role.id)
+                ? `Hear the ${role.label} correction alone`
+                : `Hear the part of the recording ${role.label} acts on`"
+              @click.stop="eq.toggleRoleSolo(role.id)"
+              @dblclick.stop
+            >S</button>
+            <button
+              type="button"
+              class="px-[4px] py-[2px] rounded-[2px] transition-colors"
+              style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
+              :style="{
+                color: eq.roleOnState(role.id) === 'on' ? accent : 'rgba(255,255,255,.35)',
+                background: eq.roleOnState(role.id) === 'on'
+                  ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+                opacity: eq.roleOnState(role.id) === 'on'
+                  || eq.roleOnState(role.id) === 'off' ? 1 : 0.4,
+              }"
+              :disabled="eq.roleOnState(role.id) === 'absent'
+                || eq.roleOnState(role.id) === 'flat'"
+              :title="{
+                on: `Switch the ${role.label} correction off`,
+                off: `Switch the ${role.label} correction back on`,
+                flat: `${role.label} is at zero — turn the knob to switch it on`,
+                absent: `${role.label} is doing nothing yet — turn the knob to start`,
+              }[eq.roleOnState(role.id)]"
+              @click.stop="eq.toggleRoleEnabled(role.id)"
+              @dblclick.stop
+            >{{ eq.roleOnState(role.id) === 'on' ? 'ON' : 'OFF' }}</button>
+          </div>
+
+          <!--
+            Width, under the knob it belongs to.
+
+            It was a row of its own across the panel, which put the control a
+            long way from the thing it widens and gave a single knob the visual
+            weight of a section. Here it is plainly a second dimension of the
+            control above it, and it costs the palette a little height only
+            while a role is open.
+
+            No width on a shelf: Rumble and Air reach to the end of the
+            spectrum, so their Q is knee resonance rather than reach and a knob
+            called WIDTH would not do what its label says. The caption line
+            reports what they act on instead.
+          -->
+          <template v-if="focusedRoleId === role.id && !focusedIsShelf">
+            <div class="w-[40px] mt-[7px]">
+              <Knob
+                :model-value="eq.roleQ(role.id)"
+                :min="qRangeFor(role.type)[0]"
+                :max="qRangeFor(role.type)[1]"
+                scale="log"
+                label=""
+                :accent="accent"
+                :value-font-px="8"
+                :format-value="fmtWidth"
+                :disabled="!roleBand(role.id)"
+                @update:model-value="eq.setRoleQ(role.id, $event)"
+              />
+            </div>
+            <span
+              class="uppercase mt-[4px]"
+              style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
+            >Width</span>
+            <button
+              v-if="roleBand(role.id)?.qModified"
+              type="button"
+              class="underline underline-offset-2 mt-[3px]"
+              style="font:500 8px/1 'Inter';color:rgba(255,255,255,.3)"
+              title="This width came from the measurement rather than the default — click to restore the default"
+              @click.stop="eq.resetQ(roleBand(role.id).id)"
+            >measured</button>
+          </template>
         </div>
       </div>
 
@@ -752,98 +831,6 @@ function fmtWidth(q) {
         style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32);min-height:13px"
       >{{ paletteCaption }}</p>
 
-      <!--
-        The detail strip: one role at a time, reused.
-
-        Everything here would need nine copies to live in the palette itself,
-        and nine of anything alongside nine gain knobs is a console. Reused for
-        whichever role is focused, it costs one row and can afford to spell
-        things out — what the characteristic is, where it sits, how far it
-        reaches, and a way to hear it alone.
-      -->
-      <div
-        v-if="focusedRole"
-        class="mt-[12px] flex items-center gap-[16px] rounded-[3px] px-[13px] py-[11px]"
-        :style="{
-          background: 'rgba(0,0,0,.28)',
-          boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accent} 18%, transparent)`,
-        }"
-      >
-        <div class="flex-1 min-w-0">
-          <div class="flex items-baseline gap-[8px]">
-            <span
-              class="uppercase"
-              :style="{ font: `700 9px/1 'Inter'`, letterSpacing: '.12em', color: accent }"
-            >{{ focusedRole.label }}</span>
-            <span style="font:500 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.4)">
-              {{ focusedReach }}
-            </span>
-          </div>
-          <p class="mt-[5px]" style="font:500 10px/1.45 'Inter';color:rgba(255,255,255,.6)">
-            {{ focusedRole.description }}
-          </p>
-        </div>
-
-        <!-- Width only where width means something. On a shelf, Q is knee
-             resonance, not reach — a knob labelled WIDTH there would be
-             describing a parameter the user cannot hear doing what the label
-             says. The corner frequency is the shelf's real second dimension,
-             and it is not adjustable from here yet. -->
-        <div v-if="!focusedIsShelf" class="shrink-0 flex flex-col items-center w-[58px]">
-          <Knob
-            :model-value="eq.roleQ(focusedRole.id)"
-            :min="qRangeFor(focusedRole.type)[0]"
-            :max="qRangeFor(focusedRole.type)[1]"
-            scale="log"
-            label=""
-            :accent="accent"
-            :value-font-px="9"
-            :format-value="fmtWidth"
-            :disabled="!focusedBand"
-            @update:model-value="eq.setRoleQ(focusedRole.id, $event)"
-          />
-          <span
-            class="uppercase mt-[5px]"
-            style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
-          >Width</span>
-        </div>
-
-        <div class="shrink-0 flex flex-col gap-[6px]">
-          <button
-            type="button"
-            class="px-[10px] py-[5px] rounded-[3px] transition-colors"
-            style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12)"
-            :style="{
-              color: eq.isRoleSoloed(focusedRole.id) ? accent : 'rgba(255,255,255,.5)',
-              background: eq.isRoleSoloed(focusedRole.id)
-                ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'transparent',
-            }"
-            :title="focusedBand
-              ? 'Hear this correction on its own'
-              : 'Hear the part of the recording this control acts on'"
-            @click="eq.toggleRoleSolo(focusedRole.id)"
-          >SOLO</button>
-          <button
-            type="button"
-            class="px-[10px] py-[5px] rounded-[3px] transition-opacity"
-            style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
-            :style="{ opacity: focusedBand ? 1 : 0.35 }"
-            :disabled="!focusedBand"
-            title="Back to flat, at the default width"
-            @click="eq.resetRole(focusedRole.id)"
-          >RESET</button>
-        </div>
-
-        <!-- Clicking the focused role's name closes it too, but only someone
-             who knows that would try it. -->
-        <button
-          type="button"
-          class="shrink-0 self-start rounded-[2px] px-[5px] py-[3px] transition-colors"
-          style="font:600 11px/1 'Inter';color:rgba(255,255,255,.35)"
-          :title="`Close the ${focusedRole.label} details`"
-          @click="focusedRoleId = null"
-        >&times;</button>
-      </div>
     </div>
     </template>
   </div>

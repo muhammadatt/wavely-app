@@ -344,6 +344,33 @@ export function useVoiceRx() {
     if (band) api.setQ(band.id, q)
   }
 
+  /**
+   * What a role's ON button should show, and whether it can be pressed.
+   *
+   * The general EQ's equivalent reads `band.enabled` and nothing else, because
+   * there every strip has a band behind it. Here a role can have no band — the
+   * resting state, since an inert band would hold a pool slot for nothing — and
+   * a band can be switched on while its knob sits at 0 dB, which is on and
+   * silent. Both are off as far as the ear is concerned, and both are states
+   * this button cannot do anything about: there is no gain to restore, because
+   * nothing measured one. So they read OFF and do not take a press, with the
+   * knob directly above saying why.
+   *
+   * 'on' is exactly isBandActive, which keeps this button and the findings
+   * list's switch describing the same band the same way.
+   */
+  function roleOnState(roleId) {
+    const band = bandForRole(bands.value, roleId)
+    if (!band) return 'absent'
+    if (band.gainDb === 0) return 'flat'
+    return band.enabled ? 'on' : 'off'
+  }
+
+  function toggleRoleEnabled(roleId) {
+    const band = bandForRole(bands.value, roleId)
+    if (band && band.gainDb !== 0) api.toggleBand(band.id)
+  }
+
   /** Put a role back to untouched: flat, and at its canonical width. */
   function resetRole(roleId) {
     const band = bandForRole(bands.value, roleId)
@@ -515,6 +542,7 @@ export function useVoiceRx() {
     analyze, applyAllSuggestions, toggleSuggestion, setAllSuggestions, toggleSolo,
     toggleRoleSolo, isRoleSoloed,
     roleGain, setRoleGain, roleQ, setRoleQ, roleCentreHz, resetRole,
+    roleOnState, toggleRoleEnabled,
     canSendToEq, sendToEq,
   }
 }
