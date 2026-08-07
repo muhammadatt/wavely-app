@@ -100,6 +100,14 @@ const emit = defineEmits([
    * without being told, that the dot and the strip are the same band.
    */
   'hover-band',
+  /**
+   * Pointer entered or left a role name on the axis; null on leave.
+   *
+   * Carries the region rather than the role because that is what the ribbon and
+   * the markers are keyed on, and the axis label's whole job is to point at
+   * them.
+   */
+  'hover-region',
 ])
 
 const clampUnit = v => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -262,12 +270,12 @@ const roleAxis = computed(() => {
   if (!props.analysis) return []
   return (props.analysis.regionResults ?? [])
     .filter(r => r.roleId)
-    .map((r, i) => ({
+    .map(r => ({
       id: r.roleId,
+      region: r.name,
       label: getRole(r.roleId)?.label ?? r.roleId,
       centerHz: Math.sqrt(r.scanLowHz * r.scanHighHz),
       detected: r.detected,
-      row: i % 2,
     }))
 })
 
@@ -956,25 +964,38 @@ function onPlotDown(e) {
     </div>
 
     <!-- Frequency axis: role names in VoiceRx, numbers in General -->
+    <!--
+      One line, not two.
+
+      These used to alternate between two rows to keep long neighbours apart,
+      which was necessary while the axis ran 20 Hz-20 kHz and squeezed all nine
+      into its middle two thirds. On the region-span axis they spread out: the
+      closest pair, Boxiness and Nasality, sit 68px apart and need 50, and every
+      other pair has more room. Two rows now costs a line of height and reads as
+      though the labels were in some kind of order they are not.
+    -->
     <div
       v-if="roleAxis.length > 0"
       class="relative w-full mt-[3px]"
-      style="height:22px"
+      style="height:11px"
     >
       <span
         v-for="r in roleAxis"
         :key="r.id"
-        class="absolute whitespace-nowrap"
-        :title="`${Math.round(r.centerHz)} Hz`"
+        class="absolute top-0 whitespace-nowrap cursor-default"
+        :title="`${r.label} — around ${Math.round(r.centerHz)} Hz`"
         :style="{
           left: `${(xFor(r.centerHz) / width) * 100}%`,
-          top: `${r.row * 11}px`,
           transform: 'translateX(-50%)',
           fontWeight: 700,
           fontSize: '8px',
           letterSpacing: '.07em',
-          color: r.detected ? 'rgba(255,180,120,.8)' : 'rgba(255,255,255,.28)',
+          color: highlightRegion === r.region
+            ? `color-mix(in srgb, ${accent} 45%, #ffffff)`
+            : r.detected ? 'rgba(255,180,120,.8)' : 'rgba(255,255,255,.28)',
         }"
+        @pointerenter="emit('hover-region', r.region)"
+        @pointerleave="emit('hover-region', null)"
       >{{ r.label.toUpperCase() }}</span>
     </div>
     <div v-else class="relative w-full mt-[3px] h-[11px]">

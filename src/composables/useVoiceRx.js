@@ -46,6 +46,25 @@ const analyzing = ref(false)
 const analysisError = ref(null)
 const analysisWidened = ref(false)
 
+/**
+ * Whether the panel has moved past its opening offer to analyse.
+ *
+ * The plugin opens on the diagnosis and nothing else, because that is the thing
+ * a first-time user can act on without knowing any of the vocabulary: press one
+ * button, hear the voice fixed, then read what was wrong. Nine knobs and a plot
+ * arriving at the same moment is a lot to meet before any of it means anything.
+ *
+ * Anyone who already knows the tool can step past it, and a completed analysis
+ * steps past it too — once the controls have been seen there is no teaching
+ * left to do and returning to the offer would read as the panel forgetting.
+ *
+ * Module-level, so it holds for the session and not merely while the window is
+ * open. It resets on reload, which errs toward the new user; nothing else in
+ * this app persists a preference across loads and one flag is not the place to
+ * start.
+ */
+const introDismissed = ref(false)
+
 export function openVoiceRxWindow() {
   useWindows().openWindow(VOICERX_WINDOW_ID)
 }
@@ -462,6 +481,7 @@ export function useVoiceRx() {
 
       analysis.value = result
       analyzedKey.value = selectionKey()
+      introDismissed.value = true
       analysisWidened.value = range.widened
 
       // A fresh diagnosis replaces the old one outright. Keeping bands from a
@@ -489,6 +509,7 @@ export function useVoiceRx() {
   return {
     ...api,
     analysis, analyzing, analysisError, analysisWidened, isStale, hasAnalysis,
+    introDismissed, dismissIntro: () => { introDismissed.value = true },
     suggestions, suggestionRows, activeSuggestionCount,
     regions, paletteRoles, detectedRoles,
     analyze, applyAllSuggestions, toggleSuggestion, setAllSuggestions, toggleSolo,

@@ -26,12 +26,19 @@ import { REGION_SPAN_HZ } from '../../../audio/voicerx/regions.js'
  * which is why the findings list, not the knobs, is the top of this panel — and
  * why the corrections are applied on arrival rather than offered for approval.
  *
- * But the diagnosis is not the toll gate. There are two capabilities here: being
- * told what is wrong, and being able to reach for a characteristic — nasal,
- * boxy, muddy — without knowing what frequency it lives at. The second used to
- * be reachable only through the first, because the plot and the palette were
- * inside the branch that rendered after analysing. They render always now. The
- * findings add to the panel when there are findings.
+ * There are two capabilities here: being told what is wrong, and being able to
+ * reach for a characteristic — nasal, boxy, muddy — without knowing what
+ * frequency it lives at. The panel opens on the first, alone, because it is the
+ * one a newcomer can act on with none of the vocabulary, and because meeting
+ * nine knobs and a plot at the same moment asks them to understand the panel
+ * before any of it means anything.
+ *
+ * That opening is a door and not a toll gate, which is the whole distinction.
+ * It can be skipped in one click; the compact ANALYZE strip is waiting on the
+ * other side; and once past it — by skipping or by analysing — it never
+ * returns. Nothing about the second capability depends on having used the
+ * first, which is the property an earlier version lost by putting the plot and
+ * the palette inside the branch that only rendered after a diagnosis.
  */
 
 const props = defineProps({
@@ -205,6 +212,22 @@ const paletteCaption = computed(() => {
   return `${role.label} — ${role.description}`
 })
 
+/**
+ * The opening offer to analyse, shown alone.
+ *
+ * Gone once there is a result or the user has stepped past it. The panel behind
+ * it is unchanged — the compact ANALYZE strip is still there, so skipping is
+ * skipping the introduction rather than giving up the diagnosis.
+ */
+const showIntro = computed(() => !analysis.value && !props.eq.introDismissed.value)
+
+/** Hovering an axis label reads exactly as hovering that role's knob. */
+function previewRegion(regionName) {
+  previewRole(regionName
+    ? props.eq.paletteRoles.find(r => r.region === regionName) ?? null
+    : null)
+}
+
 // ── Handles on the plot ─────────────────────────────────────────────────────
 
 /**
@@ -318,6 +341,80 @@ function fmtWidth(q) {
 <template>
   <div>
     <!--
+      The introduction: one thing to read and one thing to press.
+
+      VoiceRx opens on the diagnosis alone because that is what a first-time
+      user can act on with none of the vocabulary — press once, hear the voice
+      fixed, then read what was wrong in the findings. Meeting nine knobs, a
+      plot and a findings list at the same moment asks them to understand the
+      panel before anything in it means anything.
+
+      It is a door, not a toll gate. Skipping goes straight to the controls and
+      the compact ANALYZE strip is waiting there, so nothing is behind it that
+      cannot be reached without it, and once past it the panel never comes back
+      to it. That is the difference between this and what it replaced, which
+      made the diagnosis the only route in.
+    -->
+    <div
+      v-if="showIntro"
+      class="rounded-[3px] flex flex-col items-center justify-center gap-[12px] px-[24px] py-[22px]"
+      style="min-height:200px;background:rgba(0,0,0,.28)"
+    >
+      <p
+        v-if="errorMessage"
+        class="text-center max-w-[420px]"
+        style="font:500 11px/1.6 'Inter';color:rgba(255,190,120,.75)"
+      >{{ errorMessage }}</p>
+      <p
+        v-else
+        class="text-center max-w-[420px]"
+        style="font:500 11px/1.6 'Inter';color:rgba(255,255,255,.45)"
+      >
+        VoiceRx listens to your selection and corrects what it finds — what is
+        muddy, boxy, harsh or dull, and by how much. You will hear the result
+        before you have to decide anything about it.
+      </p>
+
+      <button
+        type="button"
+        class="flex items-center gap-[8px] px-[22px] py-[9px] rounded-[3px] transition-opacity"
+        :style="{
+          background: accent,
+          color: '#0a1410',
+          font: '700 11px/1 Inter',
+          letterSpacing: '.08em',
+          opacity: eq.analyzing.value || !eq.hasSelection.value ? 0.55 : 1,
+        }"
+        :disabled="eq.analyzing.value || !eq.hasSelection.value"
+        @click="eq.analyze()"
+      >
+        <span v-if="eq.analyzing.value" class="vd-spin" style="--spin-color:#0a1410" aria-hidden="true" />
+        {{ eq.analyzing.value ? 'ANALYSING…' : 'ANALYZE' }}
+      </button>
+
+      <p
+        v-if="eq.analyzing.value"
+        style="font:500 9px/1 'Inter';color:rgba(255,255,255,.35)"
+      >Reading the whole selection — a long one takes a few seconds.</p>
+      <p
+        v-else-if="!eq.hasSelection.value"
+        style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)"
+      >Make a selection first</p>
+
+      <!-- Quiet on purpose. It is the right door for anyone who already knows
+           the tool and the wrong one for anyone who does not, so it should be
+           findable without competing with the thing worth pressing first. -->
+      <button
+        v-if="!eq.analyzing.value"
+        type="button"
+        class="underline underline-offset-2 transition-colors"
+        style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)"
+        @click="eq.dismissIntro()"
+      >Skip — go straight to the controls</button>
+    </div>
+
+    <template v-else>
+    <!--
       Nothing here is gated on having analysed.
 
       The plot and the palette used to live behind the ANALYZE prompt, which
@@ -395,6 +492,7 @@ function fmtWidth(q) {
         @q-band="onQBand"
         @select-band="onSelectBand"
         @hover-band="onHoverBand"
+        @hover-region="previewRegion"
       />
     </div>
 
@@ -725,6 +823,7 @@ function fmtWidth(q) {
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
