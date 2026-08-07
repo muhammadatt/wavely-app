@@ -121,7 +121,7 @@ async function applyAndClose() {
           :accent="ACCENT"
           text-color="#0a1410"
           :met="vox.hasSelection.value"
-          message="Make a selection to diagnose"
+          message="Make a selection to apply these to"
           label="Apply corrections"
           :disabled="!vox.eqPreview.value || activeBandCount === 0"
           :disabled-hint="activeBandCount === 0
