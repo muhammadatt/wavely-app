@@ -229,15 +229,9 @@ const paletteCaption = computed(() => {
   const role = previewedRole.value ?? focusedRole.value
   if (!role) return activeSummary.value
 
-  // The reach came off the detail strip when the width knob moved under its own
-  // gain knob. It belongs with the definition anyway: both answer "what is this
-  // control", one in words and one in hertz.
-  const reach = role === focusedRole.value ? ` · acts on ${focusedReach.value}` : ''
-  // The nudge toward opening a role, until one has been opened. The width knob
-  // is the only thing a click reveals now, and a name that looks like a label
-  // will not advertise it.
-  const hint = focusedRole.value ? '' : ' · click for width'
-  return `${role.label} — ${role.description}${reach}${hint}`
+  // Centre and reach both answer "what is this control" in audible terms.
+  const centreHz = Math.round(props.eq.roleCentreHz(role.id))
+  return `${role.label} — ${role.description} ~ ${roleReach(role)}`
 })
 
 /**
@@ -340,12 +334,16 @@ function fmtHz(hz) {
 const focusedReach = computed(() => {
   const role = focusedRole.value
   if (!role) return ''
+  return roleReach(role)
+})
+
+function roleReach(role) {
   const centre = props.eq.roleCentreHz(role.id)
   if (role.type === 'lowshelf') return `everything below ${fmtHz(centre)}`
   if (role.type === 'highshelf') return `everything above ${fmtHz(centre)}`
   const bw = bandwidthOctaves(props.eq.roleQ(role.id))
   return `${fmtHz(centre * 2 ** (-bw / 2))} to ${fmtHz(centre * 2 ** (bw / 2))}`
-})
+}
 
 /**
  * Width as a word.

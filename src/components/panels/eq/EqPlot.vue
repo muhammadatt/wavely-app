@@ -991,7 +991,6 @@ function onPlotDown(e) {
         v-for="r in roleAxis"
         :key="r.id"
         class="absolute top-0 whitespace-nowrap cursor-default"
-        :title="`${r.label} — around ${Math.round(r.centerHz)} Hz`"
         :style="{
           left: `${(xFor(r.centerHz) / width) * 100}%`,
           transform: 'translateX(-50%)',
