@@ -37,6 +37,8 @@ export const MANUAL_EQ_KERNEL_DEFAULTS = {
   outputGainDb: 0,
   /** Index into `bands` to monitor in isolation, or null. */
   soloIndex: null,
+  /** A `{ type, frequencyHz, q }` region to monitor that has no band. */
+  soloProbe: null,
 }
 
 const LN10_OVER_20 = Math.LN10 / 20
@@ -99,11 +101,21 @@ function soloSectionFor(sampleRate, band) {
  * Returns only the active sections. Feed the result to `magnitudeResponseDb`
  * for the composite response.
  *
+ * Solo takes either form. `soloIndex` points into the band list and is what the
+ * general EQ uses, where everything audible is a band. `soloProbe` carries the
+ * shape directly — `{ type, frequencyHz, q }` — for auditioning a region that
+ * has no band behind it yet: VoiceRx offers "hear what this control grabs"
+ * before you have turned it up, and turning it up is exactly what creates the
+ * band. The probe wins if both are given.
+ *
  * @param {number} sampleRate
  * @param {Array<object>} bands
- * @param {{ soloIndex?: number|null }} [options]
+ * @param {{ soloIndex?: number|null, soloProbe?: object|null }} [options]
  */
-export function eqSections(sampleRate, bands, { soloIndex = null } = {}) {
+export function eqSections(sampleRate, bands, { soloIndex = null, soloProbe = null } = {}) {
+  if (soloProbe && Number.isFinite(soloProbe.frequencyHz)) {
+    return [soloSectionFor(sampleRate, soloProbe)]
+  }
   if (soloIndex !== null && bands[soloIndex]) {
     return [soloSectionFor(sampleRate, bands[soloIndex])]
   }
@@ -133,6 +145,7 @@ export class ManualEqKernel {
 
     const sections = eqSections(this.sampleRate, p.bands ?? [], {
       soloIndex: p.soloIndex ?? null,
+      soloProbe: p.soloProbe ?? null,
     })
     this.activeCount = sections.length
 

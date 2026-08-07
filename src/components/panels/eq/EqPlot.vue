@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { magnitudeResponseDb } from '../../../audio/dsp/biquad.js'
 import { eqSections } from '../../../audio/eqProcessor.js'
-import { getRole } from '../../../audio/eqBands.js'
+import { getRole, bandwidthOctaves } from '../../../audio/eqBands.js'
 
 /**
  * The EQ display, shared by both modes.
@@ -50,6 +50,11 @@ const props = defineProps({
 
   /** Band being monitored alone; its span is shaded so you can see where you are listening. */
   soloId: { type: String, default: null },
+  /**
+   * A region being monitored that has no band — `{ type, frequencyHz, q }`.
+   * Shades the same way; takes precedence over soloId, as it does in the kernel.
+   */
+  soloProbe: { type: Object, default: null },
   /** Track the pointer and show the frequency under it. */
   cursorReadout: { type: Boolean, default: false },
 })
@@ -340,14 +345,17 @@ function soloRangeHz(band) {
       return [f, F_MAX]
     default: {
       // RBJ bandwidth in octaves from Q, so the shading narrows as the band does.
-      const bwOct = (2 / Math.LN2) * Math.asinh(1 / (2 * Math.max(band.q, 0.05)))
+      const bwOct = bandwidthOctaves(band.q)
       return [f * 2 ** (-bwOct / 2), f * 2 ** (bwOct / 2)]
     }
   }
 }
 
 function drawSolo(ctx, h) {
-  const band = props.bands.find(b => b.id === props.soloId)
+  // A probe is a region being auditioned with no band behind it, so it is not
+  // in the list to be found — but it shades identically, because to the ear it
+  // is the same thing being listened to.
+  const band = props.soloProbe ?? props.bands.find(b => b.id === props.soloId)
   if (!band) return
 
   const [lo, hi] = soloRangeHz(band)
@@ -626,7 +634,8 @@ watch(() => props.showAnalyzer, (on) => {
 
 watch(
   [() => props.bands, () => props.analysis, () => props.highlightRegion,
-   () => props.selectedId, () => props.soloId, dbMax, cursorHz],
+   () => props.selectedId, () => props.soloId, () => props.soloProbe,
+   dbMax, cursorHz],
   () => {
     if (rafId === null) draw()
   },

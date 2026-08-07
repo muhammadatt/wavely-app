@@ -235,6 +235,18 @@ export function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
 
+/**
+ * RBJ bandwidth in octaves for a Q — how wide a peaking band actually reaches.
+ *
+ * The number a user can act on is the span in hertz this implies, not Q itself:
+ * "reaches 240 to 420 Hz" is a fact about their recording, where "Q 2.4" is a
+ * fact about a filter. Shared by the plot's solo shading and VoiceRx's width
+ * read-out so the two cannot drift.
+ */
+export function bandwidthOctaves(q) {
+  return (2 / Math.LN2) * Math.asinh(1 / (2 * Math.max(q, 0.05)))
+}
+
 /** Legal Q range for a filter type. */
 export function qRangeFor(type) {
   return PARAM_RANGES.q[type] ?? PARAM_RANGES.q.peaking

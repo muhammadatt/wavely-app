@@ -33,6 +33,16 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
   const eqPreview = ref(false)
   const outputTrim = ref(0)
   const soloBandId = ref(null)
+  /**
+   * A region being auditioned that has no band — `{ type, frequencyHz, q }`.
+   *
+   * Solo is a monitoring state, not an edit, so wanting to hear a region should
+   * not have to mint a band to hang the monitor filter on. An inert 0 dB band
+   * left behind by an audition would occupy a pool slot, show up in the band
+   * count and need cleaning up on exit; a probe is discarded by clearing it.
+   * Mutually exclusive with soloBandId — setting either clears the other.
+   */
+  const soloProbe = ref(null)
   const inputDb = ref(-Infinity)
   const outputDb = ref(-Infinity)
 
@@ -71,6 +81,7 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
       const chain = getEffectChain(getAudioContext())
       chain.updateParam(effect.id, 'bands', bands.value)
       chain.updateParam(effect.id, 'soloIndex', soloIndex())
+      chain.updateParam(effect.id, 'soloProbe', soloProbe.value)
       chain.updateParam(effect.id, 'output', outputTrim.value)
     }
 
@@ -190,6 +201,7 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
     function clearBands() {
       bands.value = []
       soloBandId.value = null
+      soloProbe.value = null
       pushBands()
     }
 
@@ -206,11 +218,20 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
 
     function setSolo(id) {
       soloBandId.value = id
+      soloProbe.value = null
+      pushBands()
+    }
+
+    /** Audition a region with no band behind it. `{ type, frequencyHz, q }`. */
+    function setSoloProbe(probe) {
+      soloProbe.value = probe
+      soloBandId.value = null
       pushBands()
     }
 
     function clearSolo() {
       soloBandId.value = null
+      soloProbe.value = null
       pushBands()
     }
 
@@ -251,11 +272,12 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
         eqPreview.value = false
       }
       soloBandId.value = null
+      soloProbe.value = null
     }
 
     return {
       // state
-      bands, eqPreview, outputTrim, soloBandId, inputDb, outputDb,
+      bands, eqPreview, outputTrim, soloBandId, soloProbe, inputDb, outputDb,
       hasSelection, atBandLimit, maxBands,
       activeBands: computed(() => bands.value.filter(isBandActive)),
 
@@ -266,7 +288,7 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
       // bands
       addBand, removeBand, findBand, updateBand, setFrequency, setGain, setQ,
       setType, toggleBand, resetQ, clearBands, adoptBands,
-      setSolo, clearSolo,
+      setSolo, setSoloProbe, clearSolo,
 
       // lifecycle
       apply, teardown,
@@ -278,5 +300,5 @@ export function createEqInstance({ effect, windowId, label, maxBands = MAX_BANDS
     }
   }
 
-  return { use, bands, eqPreview, soloBandId }
+  return { use, bands, eqPreview, soloBandId, soloProbe }
 }

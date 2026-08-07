@@ -17,6 +17,7 @@ export const MANUAL_EQ_DEFAULTS = {
   bands: [],
   output: 0, // output trim dB, for level-matched A/B
   soloIndex: null,
+  soloProbe: null,
 }
 
 /**
@@ -38,6 +39,15 @@ export function toKernelParams(params) {
     })),
     outputGainDb: params.output ?? 0,
     soloIndex: params.soloIndex ?? null,
+    // Copied field by field for the same reason the bands are: it arrives as a
+    // reactive proxy and postMessage throws DataCloneError on one.
+    soloProbe: params.soloProbe
+      ? {
+        type: params.soloProbe.type,
+        frequencyHz: params.soloProbe.frequencyHz,
+        q: params.soloProbe.q,
+      }
+      : null,
   }
 }
 

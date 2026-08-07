@@ -212,6 +212,41 @@ export function useVoiceRx() {
     else api.setSolo(band.id)
   }
 
+  /**
+   * Audition a role, band or no band.
+   *
+   * "What does this word even sound like" is the question the palette exists to
+   * answer, and it is asked before anything has been turned up, not after — so
+   * solo cannot require a band to hang a monitor filter on. With no band it
+   * sends a probe at the role's own centre and canonical width, which is the
+   * region the control would act on if it were turned up.
+   */
+  function toggleRoleSolo(roleId) {
+    const band = bandForRole(bands.value, roleId)
+    if (band) {
+      toggleSolo(band)
+      return
+    }
+    if (api.soloProbe.value?.roleId === roleId) {
+      api.clearSolo()
+      return
+    }
+    const role = getRole(roleId)
+    api.setSoloProbe({
+      roleId,
+      type: role.type,
+      frequencyHz: roleCentreHz(roleId),
+      q: role.canonicalQ,
+    })
+  }
+
+  function isRoleSoloed(roleId) {
+    const band = bandForRole(bands.value, roleId)
+    return band
+      ? api.soloBandId.value === band.id
+      : api.soloProbe.value?.roleId === roleId
+  }
+
   // ── The palette ───────────────────────────────────────────────────────────
 
   /**
@@ -248,6 +283,54 @@ export function useVoiceRx() {
   }
 
   /**
+   * Where a role sits: the band's frequency if it has one, the measured
+   * anomaly's centre if the analysis found one there, otherwise the geometric
+   * centre of the role's scan range.
+   *
+   * Answers the question for a role with no band too, which is what lets the
+   * detail strip and the solo probe describe a control before it has been
+   * touched.
+   */
+  function roleCentreHz(roleId) {
+    const band = bandForRole(bands.value, roleId)
+    if (band) return band.frequencyHz
+
+    const role = getRole(roleId)
+    const measured = analysis.value?.regionResults?.find(r => r.roleId === roleId)
+    if (measured && Number.isFinite(measured.centerHz)) return measured.centerHz
+
+    const [lo, hi] = measured
+      ? [measured.scanLowHz, measured.scanHighHz]
+      : (regions.value[role.region] ?? [200, 400])
+    return Math.sqrt(lo * hi)
+  }
+
+  /** The width in use: the band's Q, or the role's canon where there is none. */
+  function roleQ(roleId) {
+    return bandForRole(bands.value, roleId)?.q ?? getRole(roleId).canonicalQ
+  }
+
+  /**
+   * Narrow or widen a role.
+   *
+   * Only meaningful once the role has a band — width is a property of a
+   * correction, and there is nothing to be wide. The strip disables the control
+   * rather than minting an inert band to hold a number nobody is hearing.
+   */
+  function setRoleQ(roleId, q) {
+    const band = bandForRole(bands.value, roleId)
+    if (band) api.setQ(band.id, q)
+  }
+
+  /** Put a role back to untouched: flat, and at its canonical width. */
+  function resetRole(roleId) {
+    const band = bandForRole(bands.value, roleId)
+    if (!band) return
+    api.resetQ(band.id)
+    api.setGain(band.id, 0)
+  }
+
+  /**
    * Move a role's gain, creating the band on first touch.
    *
    * A role knob at 0 dB with no band behind it is the correct resting state: an
@@ -263,17 +346,10 @@ export function useVoiceRx() {
       return
     }
     if (db === 0) return
-    const role = getRole(roleId)
-    const range = analysis.value?.regionResults?.find(r => r.roleId === roleId)
-    // Centre a fresh role band where the anomaly was measured if there is one,
-    // otherwise at the geometric centre of the role's range.
-    const [lo, hi] = range
-      ? [range.scanLowHz, range.scanHighHz]
-      : (regions.value[role.region] ?? [200, 400])
     api.addBand({
       role: roleId,
       regions: regions.value,
-      frequencyHz: range?.centerHz ?? Math.sqrt(lo * hi),
+      frequencyHz: roleCentreHz(roleId),
       gainDb: db,
       origin: 'manual_voicerx',
     })
@@ -413,7 +489,8 @@ export function useVoiceRx() {
     suggestions, suggestionRows, activeSuggestionCount,
     regions, paletteRoles, detectedRoles,
     analyze, applyAllSuggestions, toggleSuggestion, setAllSuggestions, toggleSolo,
-    roleGain, setRoleGain,
+    toggleRoleSolo, isRoleSoloed,
+    roleGain, setRoleGain, roleQ, setRoleQ, roleCentreHz, resetRole,
     canSendToEq, sendToEq,
   }
 }

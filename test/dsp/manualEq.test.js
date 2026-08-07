@@ -160,6 +160,35 @@ test('solo replaces the chain with a monitor filter', () => {
   assert.ok(soloed[1] > soloed[2] + 20, 'solo did not attenuate above the band')
 })
 
+test('a solo probe monitors a region with no band behind it', () => {
+  // VoiceRx auditions a role before anything has been turned up, so the monitor
+  // filter cannot depend on a band existing to hang it on.
+  const probed = measuredResponseDb(
+    { bands: [], soloProbe: { type: 'peaking', frequencyHz: 3000, q: 4 } },
+    [200, 3000, 15000],
+  )
+  assert.ok(probed[1] > probed[0] + 20, 'probe did not attenuate below the region')
+  assert.ok(probed[1] > probed[2] + 20, 'probe did not attenuate above the region')
+})
+
+test('a solo probe wins over a solo index', () => {
+  const bands = [band({ frequencyHz: 200, gainDb: -6, q: 2 })]
+  const sections = eqSections(SR, bands, {
+    soloIndex: 0,
+    soloProbe: { type: 'peaking', frequencyHz: 6000, q: 3 },
+  })
+  const db = magnitudeResponseDb(sections, [200, 6000], SR)
+  assert.ok(db[1] > db[0] + 20, 'the index was monitored instead of the probe')
+})
+
+test('an incomplete solo probe is ignored rather than silencing the chain', () => {
+  const bands = [band({ frequencyHz: 1000, gainDb: 6, q: 1 })]
+  const sections = eqSections(SR, bands, { soloProbe: { type: 'peaking', q: 2 } })
+  assert.equal(sections.length, 1)
+  const db = magnitudeResponseDb(sections, [1000], SR)
+  assert.ok(db[0] > 5, 'the band was not left running')
+})
+
 test('output trim is a clean gain', () => {
   const bands = [band({ frequencyHz: 1000, gainDb: 4, q: 1 })]
   const n = 2048

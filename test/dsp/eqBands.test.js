@@ -7,7 +7,7 @@ import {
   ROLES, ROLES_IN_ORDER, MAX_BANDS, PARAM_RANGES,
   createBand, getRole, roleForRegion, roleFreqRange,
   applyForfeiture, candidateRoleFor, tagBand, resetBandQ,
-  setBandQ, setBandFrequency, untaggedBands, bandForRole,
+  setBandQ, setBandFrequency, untaggedBands, bandForRole, bandwidthOctaves,
 } from '../../src/audio/eqBands.js'
 import { MALE_REGIONS, REGION_ORDER, SCAN_LOW, SCAN_HIGH } from '../../src/audio/voicerx/regions.js'
 import { eqSections } from '../../src/audio/eqProcessor.js'
@@ -62,6 +62,18 @@ test('every role label reads both ways, not just the bidirectional ones', () => 
       `${role.id} describes a boost and a cut identically`,
     )
   }
+})
+
+test('bandwidth in octaves falls as Q rises', () => {
+  // The width read-out is derived from this, so the direction matters: a higher
+  // Q must read as narrower, never the reverse.
+  const wide = bandwidthOctaves(0.7)
+  const narrow = bandwidthOctaves(3.5)
+  assert.ok(wide > narrow, 'a low Q did not come out wider')
+  // Q 1.41 is the textbook one-octave case.
+  assert.ok(Math.abs(bandwidthOctaves(1.4142) - 1) < 0.01)
+  // Never returns nonsense for a degenerate Q, which would corrupt the span.
+  assert.ok(Number.isFinite(bandwidthOctaves(0)))
 })
 
 test('every role defines its own characteristic without naming itself', () => {
