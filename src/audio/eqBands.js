@@ -81,6 +81,21 @@ export const PARAM_RANGES = {
  * `canonicalQ` is the default for a MANUALLY added band. A suggested band
  * carries the Q measured from the anomaly's half-power width instead, which is
  * what makes the `qModified` marker meaningful rather than decorative.
+ *
+ * `description` defines the word. The whole promise of this control surface is
+ * that you can reach for a characteristic without knowing what frequency it
+ * lives at, which only works if the characteristic names something you can
+ * hear — so every role says what its region sounds like, in terms that do not
+ * lean on the role's own name to explain it. These are deliberately NOT the
+ * symptom sentences from voicerx/suggestions.js: those assert a fault that was
+ * measured ("this reads muddy"), and a control sitting at rest has measured
+ * nothing.
+ *
+ * `describe` is the running commentary — what turning this role has done, in
+ * words, and it must answer for both directions. Roles whose region is only
+ * ever *scanned* one way are still draggable both ways (regions.js is explicit
+ * that scan direction is not slider bias), so a role that ignored the sign
+ * would claim "less mud" over a boost.
  */
 export const ROLES = [
   {
@@ -90,8 +105,8 @@ export const ROLES = [
     type: 'lowshelf',
     canonicalQ: 0.7,
     bias: 'cut',
-    defaultVisible: true,
-    describe: () => 'less rumble',
+    description: 'Weight underneath the voice — traffic, air conditioning, knocks on the desk.',
+    describe: gainDb => (gainDb >= 0 ? 'more rumble' : 'less rumble'),
   },
   {
     id: 'body',
@@ -100,7 +115,7 @@ export const ROLES = [
     type: 'peaking',
     canonicalQ: 1.2,
     bias: 'bidirectional',
-    defaultVisible: true,
+    description: 'The chest behind the voice. Too little and it reads thin; too much and it booms.',
     describe: gainDb => (gainDb >= 0 ? 'more body' : 'less boom'),
   },
   {
@@ -110,8 +125,8 @@ export const ROLES = [
     type: 'peaking',
     canonicalQ: 2.0,
     bias: 'cut',
-    defaultVisible: true,
-    describe: () => 'less mud',
+    description: 'Crowding just above the fundamental. Speech thickens and stops sounding open.',
+    describe: gainDb => (gainDb >= 0 ? 'more mud' : 'less mud'),
   },
   {
     id: 'boxiness',
@@ -120,8 +135,8 @@ export const ROLES = [
     type: 'peaking',
     canonicalQ: 2.5,
     bias: 'cut',
-    defaultVisible: true,
-    describe: () => 'less boxy',
+    description: 'A hollow ring, as though the voice were recorded inside a carton.',
+    describe: gainDb => (gainDb >= 0 ? 'boxier' : 'less boxy'),
   },
   {
     id: 'nasality',
@@ -130,23 +145,21 @@ export const ROLES = [
     type: 'peaking',
     canonicalQ: 3.0,
     bias: 'cut',
-    defaultVisible: false,
-    describe: () => 'less nasal',
+    description: 'A pinched quality, the sound of speaking with a blocked nose.',
+    describe: gainDb => (gainDb >= 0 ? 'more nasal' : 'less nasal'),
   },
   {
     // No counterpart in the manual EQ spec's §5 table. Stage 3a scans
     // lower_presence (1.2-2.5 kHz) for a dip, which is the "muffled, words are
     // hard to pick out" complaint — common enough in narration that leaving it
-    // out would be a hole in the taxonomy. Off by default so the standing
-    // control surface stays the size the spec intended; it appears the moment a
-    // suggestion targets it.
+    // out would be a hole in the taxonomy.
     id: 'clarity',
     region: 'lower_presence',
     label: 'Clarity',
     type: 'peaking',
     canonicalQ: 1.2,
     bias: 'bidirectional',
-    defaultVisible: false,
+    description: 'How cleanly one word separates from the next.',
     describe: gainDb => (gainDb >= 0 ? 'clearer diction' : 'softer diction'),
   },
   {
@@ -159,7 +172,7 @@ export const ROLES = [
     type: 'peaking',
     canonicalQ: 1.5,
     bias: 'bidirectional',
-    defaultVisible: true,
+    description: 'How far forward the voice sits in the ear. Pushed too far it turns harsh.',
     describe: gainDb => (gainDb >= 0 ? 'more presence' : 'less harsh'),
   },
   {
@@ -169,8 +182,8 @@ export const ROLES = [
     type: 'peaking',
     canonicalQ: 3.5,
     bias: 'cut',
-    defaultVisible: false,
-    describe: () => 'less sibilant',
+    description: 'The edge on S and T sounds, the part that whistles or spits.',
+    describe: gainDb => (gainDb >= 0 ? 'more sibilant' : 'less sibilant'),
   },
   {
     id: 'air',
@@ -179,7 +192,7 @@ export const ROLES = [
     type: 'highshelf',
     canonicalQ: 0.7,
     bias: 'bidirectional',
-    defaultVisible: true,
+    description: 'Openness at the very top — the sense of space around the voice.',
     describe: gainDb => (gainDb >= 0 ? 'more air' : 'less fizz'),
   },
 ]

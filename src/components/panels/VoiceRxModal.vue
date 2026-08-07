@@ -49,7 +49,7 @@ async function applyAndClose() {
   <FloatingWindow
     window-id="voicerx"
     :z="z"
-    :width="720"
+    :width="820"
     :accent="ACCENT"
     brand-lead="VOICE"
     brand-tail="RX"

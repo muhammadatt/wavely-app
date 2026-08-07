@@ -122,12 +122,48 @@ function isOn(row) {
  * The sliders carried one of these per control. Knobs are too narrow to sit a
  * sentence under, and most of them say nothing at rest anyway — collected into
  * one line, the panel says what the EQ is doing in a single sentence instead of
- * six mostly-empty ones.
+ * nine mostly-empty ones.
  */
-const activeSummary = computed(() => props.eq.visibleRoles.value
+const activeSummary = computed(() => props.eq.paletteRoles
   .filter(r => gainFor(r.id) !== 0)
   .map(r => r.describe(gainFor(r.id)))
   .join(' · '))
+
+/** The role under the pointer or holding focus, if any. */
+const previewedRole = ref(null)
+
+/**
+ * The hover tooltip: what this control does, and what state it is in.
+ *
+ * What the role *means* is not in here — that goes on the shared caption line,
+ * where it is readable without hovering and cannot be missed by anyone who
+ * never discovers that these have tooltips.
+ */
+function roleTitle(role) {
+  const flagged = props.eq.detectedRoles.value.has(role.id)
+    ? ' The analysis flagged this one.'
+    : ''
+  const how = roleMuted(role.id)
+    ? 'switched off; move the knob to switch it back on'
+    : 'drag to adjust, double-click to reset'
+  return `${role.label} — ${how}.${flagged}`
+}
+
+/**
+ * One line, two jobs.
+ *
+ * At rest it reports what the corrections are doing; while a control is under
+ * the pointer it defines that control instead. A palette whose whole promise is
+ * that you can reach for a characteristic without knowing its frequency has to
+ * say what the characteristic *is*, and nine sentences printed at once is not a
+ * palette, it is a glossary. Sharing the line keeps the height fixed either way,
+ * so nothing below it moves as the pointer crosses the row.
+ */
+const paletteCaption = computed(() => {
+  const role = previewedRole.value
+  if (!role) return activeSummary.value
+  return `${role.label} — ${role.description}`
+})
 </script>
 
 <template>
@@ -342,30 +378,54 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
 
       <!-- Role controls -->
       <div class="mt-[16px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <!-- One knob per role. Six faders stacked two-up pushed the suggestion
-             list — the part of this mode that earns its name — off the bottom
-             of the window; a single row of knobs keeps it all in one view. -->
+        <div class="flex items-baseline justify-between mb-[9px]">
+          <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.4)">
+            SHAPE BY EAR
+          </span>
+          <span style="font:500 9px/1 'Inter';color:rgba(255,255,255,.28)">
+            low to high
+          </span>
+        </div>
+
+        <!-- Every role, in frequency order, one row. The set is fixed: which of
+             them the analysis flagged is a mark on the control, not a decision
+             about whether the control exists. See useVoiceRx.paletteRoles. -->
         <div class="flex flex-wrap gap-x-[14px] gap-y-[12px]">
           <div
-            v-for="role in eq.visibleRoles.value"
+            v-for="role in eq.paletteRoles"
             :key="role.id"
             class="flex flex-col items-center w-[62px] transition-opacity"
             :style="{ opacity: roleMuted(role.id) ? 0.4 : 1 }"
-            :title="roleMuted(role.id)
-              ? `${role.label} — switched off; move the knob to switch it back on`
-              : `${role.label} — drag to adjust, double-click to reset`"
+            :title="roleTitle(role)"
+            @pointerenter="previewedRole = role"
+            @pointerleave="previewedRole = null"
+            @focusin="previewedRole = role"
+            @focusout="previewedRole = null"
             @dblclick="eq.setRoleGain(role.id, 0)"
           >
-            <Knob
-              :model-value="gainFor(role.id)"
-              :min="-12" :max="12" :step="0.1"
-              label=""
-              bipolar
-              :accent="accent"
-              :value-font-px="11"
-              :format-value="fmtGain"
-              @update:model-value="eq.setRoleGain(role.id, $event)"
-            />
+            <div class="relative w-full">
+              <Knob
+                :model-value="gainFor(role.id)"
+                :min="-12" :max="12" :step="0.1"
+                label=""
+                bipolar
+                :accent="accent"
+                :value-font-px="11"
+                :format-value="fmtGain"
+                @update:model-value="eq.setRoleGain(role.id, $event)"
+              />
+              <!-- The finding mark, in the plot's amber because it means what
+                   the plot's markers mean. It sits on the knob rather than
+                   beside the label so that adding it to some controls and not
+                   others does not knock the labels out of line — the corner is
+                   clear of the knob's ring at every value. -->
+              <span
+                v-if="eq.detectedRoles.value.has(role.id)"
+                class="absolute rounded-full"
+                style="top:-1px;right:1px;width:5px;height:5px;background:rgba(255,180,120,.9)"
+                aria-hidden="true"
+              />
+            </div>
             <span
               class="uppercase mt-[5px] text-center"
               style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.5)"
@@ -381,22 +441,13 @@ const activeSummary = computed(() => props.eq.visibleRoles.value
           </div>
         </div>
 
+        <!-- Fixed height: this line swaps between the running summary and the
+             definition of whichever control is under the pointer, and nothing
+             below it should move as that happens. -->
         <p
-          v-if="activeSummary"
           class="mt-[10px]"
-          style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32)"
-        >{{ activeSummary }}</p>
-
-        <div v-if="eq.hiddenRoles.value.length > 0" class="mt-[12px] flex flex-wrap gap-[6px]">
-          <button
-            v-for="role in eq.hiddenRoles.value"
-            :key="role.id"
-            type="button"
-            class="px-[8px] py-[4px] rounded-[3px]"
-            style="font:600 9px/1 'Inter';letter-spacing:.05em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
-            @click="eq.revealRole(role.id)"
-          >+ {{ role.label }}</button>
-        </div>
+          style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32);min-height:13px"
+        >{{ paletteCaption }}</p>
 
       </div>
     </template>

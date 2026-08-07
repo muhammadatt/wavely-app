@@ -52,6 +52,35 @@ test('the sign-dependent presence label reads both ways', () => {
   assert.equal(presence.describe(-3), 'less harsh')
 })
 
+test('every role label reads both ways, not just the bidirectional ones', () => {
+  // Scan direction is not slider bias (regions.js): a region scanned only for
+  // humps is still draggable upward, so a describe() that ignored its argument
+  // would report "less mud" over a boost.
+  for (const role of ROLES) {
+    assert.notEqual(
+      role.describe(4), role.describe(-4),
+      `${role.id} describes a boost and a cut identically`,
+    )
+  }
+})
+
+test('every role defines its own characteristic without naming itself', () => {
+  // The palette's promise is that you can reach for a characteristic without
+  // knowing its frequency, which holds only while the word is defined in terms
+  // of something audible — and a definition that leans on the label defines
+  // nothing.
+  for (const role of ROLES) {
+    assert.ok(
+      role.description && role.description.length > 20,
+      `${role.id} has no usable description`,
+    )
+    assert.ok(
+      !role.description.toLowerCase().includes(role.label.toLowerCase()),
+      `${role.id} describes itself with its own name`,
+    )
+  }
+})
+
 // ── Band creation ───────────────────────────────────────────────────────────
 
 test('every band carries the full field set, however it was created', () => {

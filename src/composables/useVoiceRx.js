@@ -42,8 +42,6 @@ const analyzedKey = ref(null)
 const analyzing = ref(false)
 const analysisError = ref(null)
 const analysisWidened = ref(false)
-/** Roles surfaced beyond the default-visible set, by user action or detection. */
-const revealedRoles = ref([])
 
 export function openVoiceRxWindow() {
   useWindows().openWindow(VOICERX_WINDOW_ID)
@@ -156,7 +154,6 @@ export function useVoiceRx() {
       bands.value = existing
         ? bands.value.map(b => (b.id === existing.id ? band : b))
         : [...bands.value, band]
-      revealRole(s.roleId)
     }
     api.pushBands()
   }
@@ -192,7 +189,6 @@ export function useVoiceRx() {
       return
     }
     bands.value = [...bands.value, suggestionToBand(suggestion, regions.value)]
-    revealRole(suggestion.roleId)
     api.pushBands()
   }
 
@@ -216,28 +212,35 @@ export function useVoiceRx() {
     else api.setSolo(band.id)
   }
 
-  // ── Role visibility ───────────────────────────────────────────────────────
-
-  function revealRole(roleId) {
-    if (roleId && !revealedRoles.value.includes(roleId)) {
-      revealedRoles.value = [...revealedRoles.value, roleId]
-    }
-  }
+  // ── The palette ───────────────────────────────────────────────────────────
 
   /**
-   * Roles with a control on screen: the default-visible set, plus any role a
-   * suggestion targets, plus any the user added by hand. Eight knobs at once
-   * undercuts the sparseness that justifies this plugin, so the rest stay
-   * behind an explicit add.
+   * Every role, always, in frequency order.
+   *
+   * This used to be a subset: six roles by default, the rest appearing when a
+   * suggestion targeted one or the user added it from a chip. That was the
+   * right instinct for a findings panel and the wrong one for a palette. The
+   * nine regions tile the voice contiguously from 60 Hz to 16 kHz (see
+   * voicerx/regions.js) — together they are a complete map, and showing two
+   * thirds of a map leaves the user to conclude the missing part is not
+   * covered rather than that it is one click away.
+   *
+   * The deciding argument is constancy. The visible set was a function of what
+   * the last analysis happened to find, so the control surface was arranged
+   * differently on every file. A vocabulary you are meant to learn — reach for
+   * "nasal" without knowing it lives at 650-1200 Hz — cannot be one that moves
+   * between sessions.
+   *
+   * What is lost is the signal that appearing carried for free: which roles the
+   * analysis actually flagged. That is now marked on the controls themselves
+   * (detectedRoles), because it is information about this file, and only the
+   * layout should be constant.
    */
-  const visibleRoles = computed(() => ROLES_IN_ORDER.filter(r =>
-    r.defaultVisible
-    || revealedRoles.value.includes(r.id)
-    || bands.value.some(b => b.role === r.id)
-    || suggestions.value.some(s => s.roleId === r.id)))
+  const paletteRoles = ROLES_IN_ORDER
 
-  const hiddenRoles = computed(() =>
-    ROLES_IN_ORDER.filter(r => !visibleRoles.value.includes(r)))
+  /** Roles the current analysis raised a finding for. */
+  const detectedRoles = computed(
+    () => new Set(suggestions.value.map(s => s.roleId).filter(Boolean)))
 
   /** The gain of a role's band, or 0 where the role has no band yet. */
   function roleGain(roleId) {
@@ -381,7 +384,6 @@ export function useVoiceRx() {
       analysis.value = result
       analyzedKey.value = selectionKey()
       analysisWidened.value = range.widened
-      for (const b of result.bands) revealRole(b.roleId)
 
       // A fresh diagnosis replaces the old one outright. Keeping bands from a
       // previous measurement would leave corrections on screen that the
@@ -409,9 +411,9 @@ export function useVoiceRx() {
     ...api,
     analysis, analyzing, analysisError, analysisWidened, isStale, hasAnalysis,
     suggestions, suggestionRows, activeSuggestionCount,
-    regions, visibleRoles, hiddenRoles,
+    regions, paletteRoles, detectedRoles,
     analyze, applyAllSuggestions, toggleSuggestion, setAllSuggestions, toggleSolo,
-    roleGain, setRoleGain, revealRole,
+    roleGain, setRoleGain,
     canSendToEq, sendToEq,
   }
 }
