@@ -304,7 +304,7 @@ function onCreateBand({ frequencyHz, gainDb, adopt }) {
   adopt?.(props.eq.setRoleAt(frequencyHz, gain))
 }
 
-/** Scrolling a dot narrows or widens it — the third dimension a drag cannot reach. */
+/** Scrolling the mouse wheel over a dot narrows or widens it — the third dimension a drag cannot reach. */
 function onQBand({ id, delta }) {
   const band = props.eq.findBand(id)
   if (!band) return
@@ -644,6 +644,32 @@ function fmtWidth(q) {
           @dblclick="eq.resetRole(role.id)"
         >
 
+
+          
+          <!-- The label is the focus control. A real button so the strip is
+               reachable by keyboard, since the knob above it is not. -->
+          <button
+            type="button"
+            class="vrx-role-label uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
+            :aria-pressed="focusedRoleId === role.id"
+            :title="focusedRoleId === role.id
+              ? `Close ${role.label}`
+              : `Open ${role.label} to set its width`"
+            :style="{
+              font: `600 8px/1 'Inter'`,
+              letterSpacing: '.1em',
+              color: focusedRoleId === role.id ? accent
+                : eq.roleOnState(role.id) === 'on'
+                  ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.42)',
+              background: focusedRoleId === role.id
+                ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+            }"
+            @click.stop="focusRole(role)"
+            @dblclick.stop
+          >{{ role.label }}</button>
+
+          <template v-if="focusedRoleId === role.id && !focusedIsShelf || gainFor(role.id) !== 0">
+
           <!-- S and ON, permanent, in the general EQ's own shapes and words.
                Two plugins that both hold a pool of bands should not each invent
                their own vocabulary for switching one off and hearing it alone. -->
@@ -686,11 +712,13 @@ function fmtWidth(q) {
               @dblclick.stop
             >{{ eq.roleOnState(role.id) === 'on' ? 'ON' : 'OFF' }}</button>
           </div>
+
           <div
-            class="relative w-full transition-opacity"
+            class="relative w-full transition-opacity mt-2"
             :style="{ opacity: roleBrightness(role.id) }"
           >
             <Knob
+              v-if="focusedRoleId === role.id || gainFor(role.id) !== 0"
               :model-value="gainFor(role.id)"
               :min="-GAIN_LIMIT_DB" :max="GAIN_LIMIT_DB" :step="0.1"
               label=""
@@ -712,49 +740,22 @@ function fmtWidth(q) {
               aria-hidden="true"
             />
           </div>
-          
-          <!-- The label is the focus control. A real button so the strip is
-               reachable by keyboard, since the knob above it is not. -->
-          <button
-            type="button"
-            class="vrx-role-label uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
-            :aria-pressed="focusedRoleId === role.id"
-            :title="focusedRoleId === role.id
-              ? `Close ${role.label}`
-              : `Open ${role.label} to set its width`"
-            :style="{
-              font: `600 8px/1 'Inter'`,
-              letterSpacing: '.1em',
-              color: focusedRoleId === role.id ? accent
-                : eq.roleOnState(role.id) === 'on'
-                  ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.42)',
-              background: focusedRoleId === role.id
-                ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-            }"
-            @click.stop="focusRole(role)"
-            @dblclick.stop
-          >{{ role.label }}</button>
+          <span
+              class="uppercase mb-[5px]"
+              style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
+            >Gain</span>
 
 
-          <!--
+
+
+                      <!--
             Width, under the knob it belongs to.
-
-            It was a row of its own across the panel, which put the control a
-            long way from the thing it widens and gave a single knob the visual
-            weight of a section. Here it is plainly a second dimension of the
-            control above it, and it costs the palette a little height only
-            while a role is open.
 
             No width on a shelf: Rumble and Air reach to the end of the
             spectrum, so their Q is knee resonance rather than reach and a knob
             called WIDTH would not do what its label says. The caption line
             reports what they act on instead.
-          -->
-          <template v-if="focusedRoleId === role.id && !focusedIsShelf">
-            <!-- Full column width, the same size as the gain knob above it.
-                 It is the same kind of control over the same band and there is
-                 no hierarchy between them worth expressing by shrinking one.
-
+         
                  Double-click resets the width alone — stopped here so it does
                  not reach the column, where the same gesture resets the whole
                  role. That is what the "measured / click to restore" link used

@@ -796,26 +796,9 @@ function onHandleMove(e) {
   })
 }
 
-/**
- * Gain below which a band created by a press is treated as never wanted.
- *
- * Applied on release, never on press. It started life on the press, blocking
- * creation near the zero line so a stray click could not mint a band — which
- * broke the most natural way to use the gesture, because pressing exactly on
- * the line and dragging out to the gain you want starts at 0 dB by definition.
- * Judging at release instead keeps the same protection with none of that cost:
- * drag anywhere useful and the band stays, let go without having gone anywhere
- * and it was a stray click after all.
- */
-const CREATE_FLOOR_DB = 0.5
-
 function onHandleUp(e) {
   if (!drag) return
   e.target.releasePointerCapture?.(e.pointerId)
-  if (drag.created) {
-    const band = props.bands.find(b => b.id === drag.id)
-    if (band && Math.abs(band.gainDb) < CREATE_FLOOR_DB) emit('remove-band', band.id)
-  }
   drag = null
 }
 
