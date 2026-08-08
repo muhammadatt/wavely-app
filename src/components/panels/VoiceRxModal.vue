@@ -22,7 +22,18 @@ const vox = useVoiceRx()
 const { state } = useEditorState()
 
 const ACCENT = '#7fb8e8'
-const hoveredSuggestionRegion = ref(null)
+/**
+ * Which findings row the pointer is on. Lights that region's marker on the plot.
+ *
+ * Separate from hoveredPlotRegion below, and it has to be: this one is echoed
+ * down into VoiceRxView as `markedRegion`, so folding the view's own hover into
+ * it would send every knob hover back as "a row is being pointed at" and light
+ * the marker after all. One ref per direction is what keeps them apart.
+ */
+const hoveredRowRegion = ref(null)
+
+/** Which region the view is adjusting, so the matching row can light with it. */
+const hoveredPlotRegion = ref(null)
 
 onMounted(() => {
   if (!vox.eqPreview.value) vox.togglePreview()
@@ -173,17 +184,22 @@ async function applyAndClose() {
           VoiceRx is switched off — turn it on to hear these.
         </p>
 
+        <!-- Lit from either direction: the pointer on this row, or the pointer on
+             that region's controls down in the plot. Both mean "this row is the
+             one in question", so both look the same here. What differs is what
+             each lights on the plot — see markedRegion in VoiceRxView. -->
         <div
           v-for="row in vox.suggestionRows.value"
           :key="row.suggestion.id"
           class="flex items-center gap-[10px] py-[6px] rounded-[2px] transition-colors"
           style="border-top:1px solid rgba(255,255,255,.05)"
           :style="{
-            background: hoveredSuggestionRegion === row.suggestion.region
+            background: hoveredRowRegion === row.suggestion.region
+              || hoveredPlotRegion === row.suggestion.region
               ? 'rgba(255,180,120,.07)' : 'transparent',
           }"
-          @pointerenter="hoveredSuggestionRegion = row.suggestion.region"
-          @pointerleave="hoveredSuggestionRegion = null"
+          @pointerenter="hoveredRowRegion = row.suggestion.region"
+          @pointerleave="hoveredRowRegion = null"
         >
           <p
             class="flex-1 transition-opacity"
@@ -227,7 +243,7 @@ async function applyAndClose() {
             :disabled="row.atRecommended"
             :title="applyTitle(row)"
             @click="vox.applySuggestion(row.suggestion)"
-          >{{ row.atRecommended ? 'APPLIED' : 'APPLY' }}</button>
+          >{{ row.atRecommended ? 'APPLIED' : 'RESTORE' }}</button>
         </div>
       </div>
 
@@ -261,8 +277,8 @@ async function applyAndClose() {
             :eq="vox"
             :accent="ACCENT"
             :sample-rate="sampleRate"
-            :hovered-region="hoveredSuggestionRegion"
-            @update:hovered-region="hoveredSuggestionRegion = $event"
+            :marked-region="hoveredRowRegion"
+            @update:hovered-region="hoveredPlotRegion = $event"
           />
         </div>
 

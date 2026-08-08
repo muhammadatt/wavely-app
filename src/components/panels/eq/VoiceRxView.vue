@@ -45,25 +45,43 @@ const props = defineProps({
   eq: { type: Object, required: true },
   accent: { type: String, required: true },
   sampleRate: { type: Number, default: 44100 },
-  hoveredRegion: { type: String, default: null },
+  /**
+   * Region of the findings row under the pointer, if any.
+   *
+   * Comes in only to light that region's detection marker — the drawing of the
+   * measurement the row's sentence is about. It is not merged with this
+   * component's own hover, and that separation is the point: see hoveredRegion.
+   */
+  markedRegion: { type: String, default: null },
 })
 
 const emit = defineEmits(['update:hoveredRegion'])
 
 /**
- * Region under the pointer, so hovering a suggestion lights its marker on the
- * plot. This is what ties the sentence to the picture — without it the two are
- * separate claims the reader has to match up by frequency, which is exactly the
- * work the mode exists to remove.
+ * Region under the pointer *in here* — a role's controls, its axis label, or its
+ * dot on the plot.
+ *
+ * TWO CHANNELS, NOT ONE. This used to merge with the incoming findings-row
+ * region and drive everything from the result, so any hover anywhere lit the
+ * ribbon, the label, the dot and the marker together. Worse, the faceplate
+ * echoes this component's emit straight back in as a prop, so once merged there
+ * was no way left to tell where a hover had come from.
+ *
+ * Split, each gesture answers with the object it is actually about. Pointing at
+ * a control lights live state — the dot it moves, its ribbon span, its name.
+ * Pointing at a findings row lights the measurement — its marker, via
+ * markedRegion. Nothing lights both, so neither can be mistaken for the other.
+ *
+ * Still emitted, because the faceplate dims the findings row for whichever
+ * region is being adjusted; that is a different question from which row is being
+ * pointed at, and the faceplate now keeps the two apart as well.
  */
-const localHoveredRegion = ref(null)
-const hoveredRegion = computed({
-  get: () => props.hoveredRegion ?? localHoveredRegion.value,
-  set: (region) => {
-    localHoveredRegion.value = region
-    emit('update:hoveredRegion', region)
-  },
-})
+const hoveredRegion = ref(null)
+
+function setHoveredRegion(region) {
+  hoveredRegion.value = region
+  emit('update:hoveredRegion', region)
+}
 
 /**
  * How far a role knob travels.
@@ -220,8 +238,33 @@ const previewedRole = ref(null)
  */
 function previewRole(role) {
   previewedRole.value = role
-  hoveredRegion.value = role?.region ?? null
+  setHoveredRegion(role?.region ?? null)
 }
+
+/**
+ * The dot to emphasise on the plot, from whichever role is under the pointer.
+ *
+ * This is the general EQ's own gesture, which VoiceRx did not have: over there a
+ * band's strip and its dot are the same object seen twice, and pointing at
+ * either one enlarges the dot (see hoveredId in GeneralView). It is the cheapest
+ * available lesson in what the dots are, and it was missing here precisely where
+ * the connection is least obvious — the column is under an axis label, not
+ * beside the curve.
+ *
+ * Keyed on the hovered region rather than on previewedRole, because the region
+ * is the channel every source already writes to: a column, an axis label, a dot
+ * on the plot, and a findings row in the faceplate — which arrives as a prop and
+ * never touches previewedRole at all. One derivation off the shared signal means
+ * all four light the same dot without four call sites agreeing to.
+ *
+ * Null for a role with no band, which is honest — there is no dot to point at.
+ */
+const hoveredBandId = computed(() => {
+  const region = hoveredRegion.value
+  if (!region) return null
+  const role = props.eq.paletteRoles.find(r => r.region === region)
+  return role ? roleBand(role.id)?.id ?? null : null
+})
 
 /**
  * The hover tooltip: what this control does, and what state it is in.
@@ -338,7 +381,10 @@ function onSelectBand(id) {
 function onHoverBand(id) {
   const band = id ? props.eq.findBand(id) : null
   const role = band?.role ? props.eq.paletteRoles.find(r => r.id === band.role) : null
-  hoveredRegion.value = role?.region ?? null
+  // Through previewRole rather than straight to hoveredRegion, so a dot under
+  // the pointer answers with everything a column does: the ribbon segment, the
+  // axis label, the caption line's definition, and the dot's own emphasis.
+  previewRole(role)
 }
 
 // ── The focused role ────────────────────────────────────────────────────────
@@ -579,6 +625,7 @@ function fmtWidth(q) {
         :sample-rate="sampleRate"
         :accent="accent"
         :handle-ids="roleHandleIds"
+        :selected-id="hoveredBandId"
         :solo-id="eq.soloBandId.value"
         :solo-probe="eq.soloProbe.value"
         :min-hz="REGION_SPAN_HZ[0]"
@@ -587,6 +634,7 @@ function fmtWidth(q) {
         @remove-band="eq.removeBand"
         :analysis="analysis"
         :highlight-region="hoveredRegion"
+        :mark-region="markedRegion"
         :region-ribbon="eq.regions.value"
         @move-band="onMoveBand"
         @q-band="onQBand"

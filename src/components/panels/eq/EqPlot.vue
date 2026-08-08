@@ -38,8 +38,26 @@ const props = defineProps({
 
   /** VoiceRx overlay: the analysis result, whose envelope and detections are drawn. */
   analysis: { type: Object, default: null },
-  /** Region name to emphasise, driven by hovering a suggestion row. */
+  /**
+   * Region whose ribbon segment and axis label light up. The live-state channel.
+   *
+   * Set by pointing at a role's controls, its axis label, or its dot — the three
+   * things that adjust a correction. Deliberately does not touch the detection
+   * markers; see markRegion.
+   */
   highlightRegion: { type: String, default: null },
+
+  /**
+   * Region whose detection marker lights up. The measurement channel.
+   *
+   * Separate from highlightRegion because the two are pointed at by different
+   * things and should answer with different things. A findings row is a sentence
+   * about what the analysis measured, so it lights the marker — the drawing of
+   * that measurement. A knob is a live control, so it lights the dot and the
+   * ribbon. Sharing one channel meant every hover lit everything, and the marker
+   * appeared to be live state that moved when you touched a knob.
+   */
+  markRegion: { type: String, default: null },
 
   /** Gain axis: 'auto' to scale to the bands, or a number of dB either side. */
   dbRange: { type: [String, Number], default: 'auto' },
@@ -715,6 +733,18 @@ function drawEnvelope(ctx, w, h) {
  * label is the role name, not a frequency — the frequency is in the suggestion
  * row for anyone who wants it, and a number here would be one more thing to
  * decode.
+ *
+ * ONE THING LIGHTS THESE, AND IT IS NOT THE KNOBS. They used to follow
+ * highlightRegion, so pointing at a role's controls moved the marker for that
+ * region — the wrong object to answer with, because a marker records what was
+ * measured before anything was corrected and does not change when a knob moves.
+ * Reacting to that pointer made it read as live state. Pointing at a control now
+ * lights the band's dot, which *is* live state (see hoveredBandId in
+ * VoiceRxView).
+ *
+ * What does light a marker is markRegion: a findings row in the faceplate, whose
+ * sentence is about this measurement and nothing else. Same gesture, opposite
+ * direction — the words point at the drawing of the thing they describe.
  */
 function drawMarkers(ctx, h, yEnv) {
   const a = props.analysis
@@ -726,7 +756,7 @@ function drawMarkers(ctx, h, yEnv) {
   for (const r of a.regionResults ?? []) {
     if (!r.detected || !Number.isFinite(r.centerHz)) continue
 
-    const hot = props.highlightRegion === r.name
+    const hot = props.markRegion === r.name
     const x = xFor(r.centerHz)
     const y = yEnv(envelopeAt(r.centerHz))
     const colour = hot ? 'rgba(255,200,140,1)' : 'rgba(255,180,120,.85)'
@@ -832,6 +862,7 @@ watch(() => props.showAnalyzer, (on) => {
 
 watch(
   [() => props.bands, () => props.analysis, () => props.highlightRegion,
+   () => props.markRegion,
    () => props.selectedId, () => props.soloId, () => props.soloProbe,
    () => props.regionRibbon, fMin, fMax, dbMax, cursorHz],
   () => {
