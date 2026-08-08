@@ -1053,11 +1053,16 @@ function onPlotDown(e) {
         which starts 4px into the row below.
 
         It was a plain span, and the role's own controls carried a second copy
-        of the same word above them to open them with. Two labels for one thing,
-        in two places, one of which had no position on the frequency axis — so
-        the reader had to match name to name to find out where in the voice a
-        knob was acting. Pressing the name on the axis is the whole gesture now,
-        and the controls open directly beneath it.
+        of the same word above them to press. Two labels for one thing, in two
+        places, one of which had no position on the frequency axis — so the
+        reader had to match name to name to find out where in the voice a knob
+        was acting. There is one name now, at the frequency it belongs to, with
+        that role's controls directly beneath it.
+
+        Pressing it focuses the role; it does not reveal anything, because every
+        column is on screen already (see COLUMN_H in VoiceRxView). Colour says
+        which roles are doing audible work, hover says which one the pointer is
+        asking about, and aria-pressed says which one is focused.
       -->
       <button
         v-for="r in roleAxis"
@@ -1072,9 +1077,9 @@ function onPlotDown(e) {
           fontSize: '8px',
           letterSpacing: '.07em',
           color: highlightRegion === r.region
-            ? `rgba(255,180,120,.8)`
-            : (activeRoleIds.has(r.id))
-              ? 'color-mix(in srgb, ${accent} 45%, #ffffff)'
+            ? 'rgba(255,180,120,.8)'
+            : activeRoleIds.has(r.id)
+              ? `color-mix(in srgb, ${accent} 45%, #ffffff)`
               : 'rgba(255,255,255,.28)',
           background: 'transparent',
         }"

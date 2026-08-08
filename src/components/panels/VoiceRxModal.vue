@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, withDirectives } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useVoiceRx } from '../../composables/useVoiceRx.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { isBandActive } from '../../audio/eqBands.js'
@@ -110,8 +110,10 @@ async function applyAndClose() {
            aligned with the IN/OUT bars regardless of list length. -->
       <div v-if="vox.suggestions.value.length > 0" class="mb-[14px]">
         <div class="flex items-center justify-between mb-[7px]">
-          <span style="font:700 9px/1 'Inter';letter-spacing:.12em;" :style="`color-mix(in srgb, ${accent} 45%, #ffffff)`">
-            {{ vox.suggestions.value.length }} ISSUES IDENTIFIED:
+          <span
+            style="font:700 9px/1 'Inter';letter-spacing:.12em;color: rgba(255,255,255,.5)"
+          >
+            ISSUES IDENTIFIED:
           </span>
           <div class="flex items-center gap-[10px]">
             <!-- Only once there is something to re-do. Keyed on the raw analysis
@@ -229,8 +231,21 @@ async function applyAndClose() {
         </div>
       </div>
 
+      <!--
+        A clean bill of health, which only a completed analysis can give.
+
+        This was a plain v-else on the findings list, so it also covered the
+        state before anything had been measured — the panel opened by asserting
+        that nothing in the recording was worth correcting, having not listened
+        to it. An empty findings list means two entirely different things
+        depending on whether a diagnosis has run, and only one of them is news.
+
+        Keyed on hasAnalysis rather than on freshness on purpose: a measurement
+        that found nothing does not stop having found nothing because the
+        selection moved. VoiceRxView's own banner reports the staleness.
+      -->
       <p
-        v-else
+        v-else-if="vox.hasAnalysis.value"
         class="mb-[14px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >

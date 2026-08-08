@@ -344,17 +344,16 @@ function onHoverBand(id) {
 // ── The focused role ────────────────────────────────────────────────────────
 
 /**
- * The role whose controls are open.
+ * The role the panel is currently talking about.
  *
  * Two levels, not two competing ideas of "current": hovering an axis label
- * glances at a role and updates the caption line; pressing it commits, and its
- * column of controls opens underneath. Nine columns of gain, width, solo and on
- * standing open at once would be a mixing console, which is the thing this
- * plugin exists not to be — so the resting state is the plot and nine names,
- * and the controls arrive one press at a time.
+ * glances at a role and updates the caption line for as long as the pointer is
+ * there; pressing it commits, so the definition stays on screen and the label
+ * and its ribbon segment hold the accent while the knobs are being turned.
  *
- * A role doing something audible is open regardless (see isRoleOpen), because
- * the knob is where you read how much.
+ * It does not gate anything. Every column is on screen at all times (see
+ * COLUMN_H) — this only says which one is being attended to, which is why
+ * nothing breaks when it is null.
  */
 const focusedRoleId = ref(null)
 
@@ -381,13 +380,23 @@ function toggleRoleById(roleId) {
 const COLUMN_W = 48
 
 /**
- * Height reserved for the row of columns, once anything is open.
+ * Height of the row of columns. Fixed, and always occupied.
  *
- * Fixed, and tall enough for the tallest column — S/ON, gain, its label, width,
- * its label, and the knob's own drop shadow under that — so that opening a
- * second role, or closing one, never moves the panel underneath. It grows once,
- * when the first column opens, which is feedback rather than a jump; what it
- * must not do is resize every time the open set changes.
+ * EVERY COLUMN IS ALWAYS SHOWN. They were revealed a role at a time by pressing
+ * its axis label, which read as tidy and played as a dead end: the panel a user
+ * arrives at by pressing "skip — go straight to the controls" had nine names on
+ * an axis and nothing underneath them, so the link's promise was answered with
+ * an empty surface and a gesture nobody had been told about. The palette is not
+ * a disclosure — it is the half of this plugin that works without a diagnosis,
+ * and hiding it behind a click it does not advertise is the same mistake as
+ * putting it behind ANALYZE, one step further in.
+ *
+ * So the axis label is not a reveal. It focuses a role, which tints the label,
+ * lights its ribbon segment and holds its definition on the caption line.
+ *
+ * Tall enough for the tallest column — S/ON, gain, its label, width, its label,
+ * and the knob's own drop shadow under that — so a role gaining or losing its
+ * width knob never moves the panel underneath.
  *
  * THE COLUMN'S VERTICAL RHYTHM. Two gaps only, and the small one has to be
  * clearly smaller or the labels stop belonging to anything:
@@ -400,21 +409,6 @@ const COLUMN_W = 48
  * caption for the wrong one. The ratio matters more than either number.
  */
 const COLUMN_H = 156
-
-/**
- * Is this role's column showing?
- *
- * Two ways in, because there are two reasons a role's controls should be on
- * screen: the user asked for them by pressing the label, or the role is doing
- * something audible and its knob is where you read how much. The second is what
- * puts several columns up at once the moment an analysis lands.
- */
-function isRoleOpen(roleId) {
-  return focusedRoleId.value === roleId || gainFor(roleId) !== 0
-}
-
-const anyRoleOpen = computed(() =>
-  props.eq.paletteRoles.some(r => isRoleOpen(r.id)))
 
 /**
  * Which of the two names this role's Q knob goes under.
@@ -487,9 +481,7 @@ function fmtWidth(q) {
         class="text-center max-w-[420px]"
         style="font:500 11px/1.6 'Inter';color:rgba(255,255,255,.45)"
       >
-        VoiceRx listens to your selection and corrects what it finds — what is
-        muddy, boxy, harsh or dull, and by how much. You will hear the result
-        before you have to decide anything about it.
+        VoiceRx analyzes your voice and recommends subtle EQ adjustments to fix trouble spots.
       </p>
 
       <button
@@ -614,12 +606,9 @@ function fmtWidth(q) {
           what is under it.
         -->
         <template #role-controls="{ roles }">
-          <!-- overflow-hidden so that the first column to open is revealed by
-               the row growing rather than appearing full-height over whatever
-               is below it for the length of the transition. -->
           <div
-            class="relative w-full overflow-hidden transition-[height] duration-150"
-            :style="{ height: anyRoleOpen ? `${COLUMN_H}px` : '0px' }"
+            class="relative w-full"
+            :style="{ height: `${COLUMN_H}px` }"
           >
             <div
               v-for="r in roles"
