@@ -11,17 +11,17 @@ import {
 /**
  * One EQ: a band pool, a live biquad cascade, and an apply.
  *
- * EQ and VoiceRx were built as two views onto a single pool, on the reasoning
- * that a user shaping tone in one place and correcting problems in the other is
- * really doing one job to one signal. In use it did not hold up: role bands and
- * hand-placed bands sat in the same list looking alike and behaving
- * differently, and switching views left you looking at a control surface that
- * described only some of what you were hearing. They are two plugins now, each
- * calling this factory, each owning its own pool and its own node in the chain.
+ * EQ and VoiceRx are two plugins, each calling this factory, each owning its
+ * own pool and its own node in the chain. They were built as two views onto a
+ * single pool, on the reasoning that a user shaping tone in one place and
+ * correcting problems in the other is really doing one job to one signal. In
+ * use it did not hold up: role bands and hand-placed bands sat in the same list
+ * looking alike and behaving differently, and switching views left you looking
+ * at a control surface that described only some of what you were hearing.
  *
- * What is left of the old design is the one-way hand-off — VoiceRx can pass its
- * corrections to the EQ. Only that direction, and only as a move, so a given
- * correction exists in exactly one pool and can never be applied twice.
+ * The one link left is the one-way hand-off — VoiceRx can pass its corrections
+ * to the EQ. Only that direction, and only as a move, so a given correction
+ * exists in exactly one pool and can never be applied twice.
  *
  * Everything role-, analysis- and suggestion-shaped lives in useVoiceRx.js;
  * nothing here knows what a role is.
@@ -29,8 +29,9 @@ import {
 export function createEqInstance({
   effect, windowId, label, maxBands = MAX_BANDS, frequencyPolicy = 'forfeit',
 }) {
-  // Module-scope-per-instance: created once at import, shared by every caller
-  // of the owning composable, exactly as the single pool used to be.
+  // Module-scope-per-instance: created once at import and shared by every
+  // caller of the owning composable, so a plugin's state survives its window
+  // being closed and reopened.
   const bands = ref([])
   const eqPreview = ref(false)
   const outputTrim = ref(0)
@@ -120,10 +121,6 @@ export function createEqInstance({
       } else {
         stopMeters()
       }
-    }
-
-    function setPreview(on) {
-      if (eqPreview.value !== on) togglePreview()
     }
 
     // ── Band editing ────────────────────────────────────────────────────────
@@ -293,11 +290,11 @@ export function createEqInstance({
       activeBands: computed(() => bands.value.filter(isBandActive)),
 
       // chain
-      togglePreview, setPreview, pushBands, nodes,
+      togglePreview, pushBands,
       getSpectrum: () => nodes()?.getSpectrumDb() ?? null,
 
       // bands
-      addBand, removeBand, findBand, updateBand, setFrequency, setGain, setQ,
+      addBand, removeBand, findBand, setFrequency, setGain, setQ,
       setType, toggleBand, resetQ, clearBands, adoptBands,
       setSolo, setSoloProbe, clearSolo,
 

@@ -33,7 +33,7 @@ import { createBand, getRole } from '../eqBands.js'
  * is the gain number next to it, and the decision is theirs.
  *
  * Deliberately avoids the vocabulary the control itself uses. A suggestion that
- * says "there is too much mud" next to a slider labelled Mud has told the user
+ * says "there is too much mud" next to a knob labelled Mud has told the user
  * nothing they could not already see.
  */
 const SYMPTOMS = {
@@ -63,8 +63,8 @@ function formatHz(hz) {
  *
  * One suggestion per merged band. Each carries the measured centre frequency,
  * the measured Q and the computed gain — all three from the detection, none of
- * them from a role default. That is the difference between a labelled slider
- * and a diagnosis, and if the name promises a diagnosis the tool has to deliver
+ * them from a role default. That is the difference between a labelled knob and
+ * a diagnosis, and if the name promises a diagnosis the tool has to deliver
  * one.
  *
  * @param {object} analysis result of analyzeVoiceRx
@@ -84,9 +84,6 @@ export function buildSuggestions(analysis) {
       gainDb: band.gainDb,
       q: band.q,
       symptom: `${symptomFor(band.region)}, around ${formatHz(band.freqHz)}`,
-      // "less harsh" vs "more presence" — the sign-dependent label from §5.1,
-      // resolved here so the row and the slider always agree on the wording.
-      effect: role ? role.describe(band.gainDb) : 'correction',
     }
   })
 }
@@ -95,10 +92,10 @@ export function buildSuggestions(analysis) {
  * Turn a suggestion into a band.
  *
  * The band is tagged with the suggestion's role and carries the MEASURED Q, not
- * the role's canonical one — so `qModified` comes out true and VoiceRx shows the
- * "modified" marker with its reset affordance. That is correct and intended:
- * the reset is there to get back to the canonical width if the measured one
- * turns out wrong, which is a judgement only the user's ear can make.
+ * the role's canonical one — so `qModified` comes out true. That is correct and
+ * intended: double-clicking the role's width knob resets to the canonical width
+ * if the measured one turns out wrong, which is a judgement only the user's ear
+ * can make.
  *
  * @param {object} suggestion
  * @param {object} regions resolved region table from the same analysis
