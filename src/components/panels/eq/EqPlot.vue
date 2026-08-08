@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { magnitudeResponseDb } from '../../../audio/dsp/biquad.js'
 import { eqSections } from '../../../audio/eqProcessor.js'
-import { getRole, bandwidthOctaves } from '../../../audio/eqBands.js'
+import { getRole, bandwidthOctaves, ROLES_IN_ORDER } from '../../../audio/eqBands.js'
 
 /**
  * The EQ display, shared by both modes.
@@ -68,6 +68,15 @@ const props = defineProps({
    * classified voice type and only the caller knows which one is in force.
    */
   regionRibbon: { type: Object, default: null },
+
+  /**
+   * Role whose controls are open under the axis, so its label reads as pressed.
+   *
+   * Separate from `highlightRegion`: that one is hover, which is a glance and
+   * can be any region including ones with no role. This is the committed
+   * selection, and the axis label is the control that toggles it.
+   */
+  openRole: { type: String, default: null },
 })
 
 const emit = defineEmits([
@@ -90,6 +99,14 @@ const emit = defineEmits([
    * them.
    */
   'hover-region',
+  /**
+   * A role name on the axis was clicked. Carries the role id.
+   *
+   * The role rather than the region, because what this opens is a set of
+   * controls and controls belong to roles. Hover is the region's business —
+   * it lights the ribbon segment and the markers, which are keyed that way.
+   */
+  'select-role',
 ])
 
 const clampUnit = v => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -244,21 +261,51 @@ function hzLabel(hz) {
  * VoiceRx labels its axis with role names, not numbers (spec §6.1).
  *
  * Naming the regions is what lets someone read the display without knowing any
- * frequencies — the numbers are still there on hover. Labels alternate between
- * two rows because nine of them across a log axis collide badly in one, and the
- * regions overlap at their edges by design.
+ * frequencies — the numbers are still there on hover.
+ *
+ * DRIVEN BY THE REGION TABLE, NOT BY THE ANALYSIS. It used to read
+ * analysis.regionResults, which meant the axis fell back to hertz until
+ * something had been measured. That was harmless while these were captions;
+ * it is not harmless now that the role controls hang off them, because it
+ * would put the whole palette behind a diagnosis — the one thing this panel is
+ * built not to do. The table is always resolved (useVoiceRx.regions falls back
+ * to the male ranges), so the names are always available and the analysis only
+ * adds the detected marks.
+ *
+ * Each entry carries the role definition whole, so a caller placing controls
+ * under these labels needs no second lookup to find out what the role is.
  */
 const roleAxis = computed(() => {
-  if (!props.analysis) return []
-  return (props.analysis.regionResults ?? [])
-    .filter(r => r.roleId)
-    .map(r => ({
-      id: r.roleId,
-      region: r.name,
-      label: getRole(r.roleId)?.label ?? r.roleId,
-      centerHz: Math.sqrt(r.scanLowHz * r.scanHighHz),
-      detected: r.detected,
-    }))
+  const table = props.regionRibbon
+  if (!table) return []
+
+  const detected = new Set((props.analysis?.regionResults ?? [])
+    .filter(r => r.detected)
+    .map(r => r.name))
+
+  return ROLES_IN_ORDER.flatMap((role) => {
+    const span = table[role.region]
+    if (!span) return []
+    const centerHz = Math.sqrt(span[0] * span[1])
+    return [{
+      id: role.id,
+      region: role.region,
+      label: role.label,
+      role,
+      centerHz,
+      detected: detected.has(role.region),
+      /**
+       * Position as a percentage of the plot's width.
+       *
+       * A percentage rather than the pixel xFor returns, because anything
+       * hung off this list is positioned inside the same full-width box and a
+       * percentage tracks a resize on its own. It is also the one number a
+       * caller cannot compute without reproducing the axis mapping, which is
+       * the whole reason the geometry is published from here.
+       */
+      leftPct: (xFor(centerHz) / width.value) * 100,
+    }]
+  })
 })
 
 /**
@@ -335,13 +382,16 @@ function draw() {
 /**
  * The nine named regions, drawn to scale along the bottom of the plot.
  *
- * This is what makes the palette and the picture one object. The alternative
- * was to place the role controls themselves at their frequencies, which does
- * not survive contact with the arithmetic: on a log axis the closest pair of
- * centres are 46 px apart at this width and a control is 62 px wide, so they
- * would overlap in the mids while 150 px of the low end sat empty. A ribbon
- * carries the mapping at the axis's own scale and leaves the controls evenly
- * spaced and legible, with hover linking the two.
+ * This is what makes the palette and the picture one object. It was once the
+ * only thing doing that job, because placing the role controls themselves at
+ * their frequencies did not survive the arithmetic: on the old 20 Hz-20 kHz
+ * axis the closest pair of region centres were 46 px apart and a control was
+ * 62 px wide, so they overlapped in the mids while 150 px of the low end sat
+ * empty. Narrowing the axis to the region span (see fMin) changed that number —
+ * the tightest pair, Body and Mud, are now 58 px apart at this width — and the
+ * controls did move onto the axis, at 48 px each. The ribbon stays because it
+ * is the only thing that can show a *span*: a control sits at one point, and
+ * the regions are ranges that overlap.
  *
  * Spans are the scan ranges, so adjacent regions genuinely overlap — Body and
  * Mud share 200-280 Hz for a male voice. Drawn translucent, the overlap shows
@@ -982,25 +1032,45 @@ function onPlotDown(e) {
     <div
       v-if="roleAxis.length > 0"
       class="relative w-full mt-[3px]"
-      style="height:11px"
+      style="height:12px"
     >
-      <span
+      <!--
+        The label is the role's control, not a caption.
+
+        It was a plain span, and the role's own controls carried a second copy
+        of the same word above them to open them with. Two labels for one thing,
+        in two places, one of which had no position on the frequency axis — so
+        the reader had to match name to name to find out where in the voice a
+        knob was acting. Pressing the name on the axis is the whole gesture now,
+        and the controls open directly beneath it.
+      -->
+      <button
         v-for="r in roleAxis"
         :key="r.id"
-        class="absolute top-0 whitespace-nowrap cursor-default"
+        type="button"
+        class="eqp-role-label absolute top-0 whitespace-nowrap rounded-[2px] px-[3px] transition-colors"
+        :aria-pressed="openRole === r.id"
+        :title="openRole === r.id
+          ? `Close ${r.label}`
+          : `Open the ${r.label} controls, below this label`"
         :style="{
-          left: `${(xFor(r.centerHz) / width) * 100}%`,
+          left: `${r.leftPct}%`,
           transform: 'translateX(-50%)',
           fontWeight: 700,
           fontSize: '8px',
           letterSpacing: '.07em',
-          color: highlightRegion === r.region
-            ? `color-mix(in srgb, ${accent} 45%, #ffffff)`
-            : r.detected ? 'rgba(255,180,120,.8)' : 'rgba(255,255,255,.28)',
+          color: openRole === r.id
+            ? accent
+            : highlightRegion === r.region
+              ? `color-mix(in srgb, ${accent} 45%, #ffffff)`
+              : r.detected ? 'rgba(255,180,120,.8)' : 'rgba(255,255,255,.28)',
+          background: openRole === r.id
+            ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
         }"
         @pointerenter="emit('hover-region', r.region)"
         @pointerleave="emit('hover-region', null)"
-      >{{ r.label.toUpperCase() }}</span>
+        @click="emit('select-role', r.id)"
+      >{{ r.label.toUpperCase() }}</button>
     </div>
     <div v-else class="relative w-full mt-[3px] h-[11px]">
       <span
@@ -1019,5 +1089,34 @@ function onPlotDown(e) {
         }"
       >{{ hzLabel(hz) }}</span>
     </div>
+
+    <!--
+      Controls belonging to the axis labels, for a caller to hang at the
+      frequencies this component has just placed those labels at.
+
+      A slot rather than a `roleControls` prop of positions, because the
+      geometry and the controls have different owners: only the plot knows the
+      axis mapping, and only the plugin knows what a role's controls are. Each
+      entry carries `leftPct`, which is all a caller needs to line a column up
+      with its label — and it is the one number a caller could not work out
+      without reproducing that mapping and inviting the two to drift apart.
+    -->
+    <slot name="role-controls" :roles="roleAxis" />
   </div>
 </template>
+
+<style scoped>
+/*
+ * The axis label is what opens a role's controls, so it has to read as
+ * pressable. It is 8 px of uppercase text among eight others and has no shape
+ * of its own to signal with, so the tint on hover is the signal — the same one
+ * the role labels used before they moved onto the axis.
+ *
+ * Not applied while pressed: that state already carries the accent, and the
+ * hover tint would wash it out into something dimmer than the resting colour.
+ */
+.eqp-role-label:not([aria-pressed="true"]):hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+</style>

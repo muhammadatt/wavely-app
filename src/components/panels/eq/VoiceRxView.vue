@@ -333,26 +333,72 @@ function onHoverBand(id) {
 // ── The focused role ────────────────────────────────────────────────────────
 
 /**
- * The role the detail strip is about.
+ * The role whose controls are open.
  *
- * Two levels, not two competing ideas of "current": hovering glances at a
- * control and updates the caption line; clicking commits to one and opens the
- * strip, which is where the controls that do not earn a permanent place in a
- * nine-wide row live. Nine width knobs and nine solo buttons would be a mixing
- * console, which is the thing this plugin exists not to be.
+ * Two levels, not two competing ideas of "current": hovering an axis label
+ * glances at a role and updates the caption line; pressing it commits, and its
+ * column of controls opens underneath. Nine columns of gain, width, solo and on
+ * standing open at once would be a mixing console, which is the thing this
+ * plugin exists not to be — so the resting state is the plot and nine names,
+ * and the controls arrive one press at a time.
+ *
+ * A role doing something audible is open regardless (see isRoleOpen), because
+ * the knob is where you read how much.
  */
 const focusedRoleId = ref(null)
 
 const focusedRole = computed(() =>
   props.eq.paletteRoles.find(r => r.id === focusedRoleId.value) ?? null)
 
-function focusRole(role) {
-  focusedRoleId.value = focusedRoleId.value === role.id ? null : role.id
+/** Pressing the open role's own axis label closes it again. */
+function toggleRoleById(roleId) {
+  focusedRoleId.value = focusedRoleId.value === roleId ? null : roleId
 }
 
+// ── The role columns, hung under their axis labels ───────────────────────────
+
+/**
+ * How wide a role's column of controls is.
+ *
+ * Set by the axis, not by taste. The region centres are 58 px apart at their
+ * tightest — Body at 142 px and Mud at 200 px on the 708 px plot — so a column
+ * centred on each label has 58 px to live in before its neighbour is touched,
+ * and the pair is a common one to have open at once (a dip and a hump, adjacent,
+ * both routinely flagged). 48 leaves a 10 px gutter there, and clears both ends:
+ * Rumble sits 49 px from the left edge and Air 37 px from the right.
+ */
+const COLUMN_W = 48
+
+/**
+ * Height reserved for the row of columns, once anything is open.
+ *
+ * Fixed, and tall enough for the tallest column — S/ON, gain, its label, width,
+ * its label, and the knob's own drop shadow under that — so that opening a
+ * second role, or closing one, never moves the panel underneath. It grows once,
+ * when the first column opens, which is feedback rather than a jump; what it
+ * must not do is resize every time the open set changes.
+ */
+const COLUMN_H = 152
+
+/**
+ * Is this role's column showing?
+ *
+ * Two ways in, because there are two reasons a role's controls should be on
+ * screen: the user asked for them by pressing the label, or the role is doing
+ * something audible and its knob is where you read how much. The second is what
+ * puts several columns up at once the moment an analysis lands.
+ */
+function isRoleOpen(roleId) {
+  return focusedRoleId.value === roleId || gainFor(roleId) !== 0
+}
+
+const anyRoleOpen = computed(() =>
+  props.eq.paletteRoles.some(r => isRoleOpen(r.id)))
+
 /** A shelf reaches to the end of the spectrum; only a bell has a width. */
-const focusedIsShelf = computed(() =>
-  focusedRole.value?.type === 'lowshelf' || focusedRole.value?.type === 'highshelf')
+function isShelfRole(role) {
+  return role.type === 'lowshelf' || role.type === 'highshelf'
+}
 
 function fmtHz(hz) {
   return hz >= 1000 ? `${(hz / 1000).toFixed(1)} kHz` : `${Math.round(hz)} Hz`
@@ -379,19 +425,9 @@ function roleReach(role) {
   return `${fmtHz(centre * 2 ** (-bw / 2))} to ${fmtHz(centre * 2 ** (bw / 2))}`
 }
 
-/**
- * Width as a word.
- *
- * The knob moves Q, but Q is not what anyone is thinking about — they are
- * thinking "does this grab a sliver or a swathe". The precise answer is next to
- * it in hertz, which is more use than either number.
- */
+/** Display width as the underlying Q value. */
 function fmtWidth(q) {
-  const oct = bandwidthOctaves(q)
-  if (oct >= 2) return 'Wide'
-  if (oct >= 1) return 'Medium'
-  if (oct >= 0.5) return 'Narrow'
-  return 'Tight'
+  return q.toFixed(2).replace(/\.?0+$/, '')
 }
 </script>
 
@@ -551,7 +587,168 @@ function fmtWidth(q) {
         @select-band="onSelectBand"
         @hover-band="onHoverBand"
         @hover-region="previewRegion"
-      />
+        :open-role="focusedRoleId"
+        @select-role="toggleRoleById"
+      >
+        <!--
+          Every role's controls, directly under the name on the axis that
+          opens them.
+
+          They used to be a wrapping row of nine fixed columns below the plot,
+          each with the role's name repeated above it. That is one label too
+          many for one thing: the copy on the axis had a frequency and the copy
+          over the knob did not, so the only way to find out where in the voice
+          a knob was acting was to match the two words. Hanging the column off
+          the label collapses them into one control — and the ribbon segment,
+          the label and the knobs now light and sit at the same place.
+
+          Position comes from the plot, which owns the axis mapping (see the
+          role-controls slot in EqPlot). The row keeps a fixed height while
+          anything is open so that opening or closing one column does not shift
+          what is under it.
+        -->
+        <template #role-controls="{ roles }">
+          <!-- overflow-hidden so that the first column to open is revealed by
+               the row growing rather than appearing full-height over whatever
+               is below it for the length of the transition. -->
+          <div
+            class="relative w-full overflow-hidden transition-[height] duration-150"
+            :style="{ height: anyRoleOpen ? `${COLUMN_H}px` : '0px' }"
+          >
+            <div
+              v-for="r in roles"
+              :key="r.id"
+              v-show="isRoleOpen(r.id)"
+              class="absolute top-[6px] flex flex-col items-center cursor-pointer"
+              :style="{
+                left: `${r.leftPct}%`,
+                width: `${COLUMN_W}px`,
+                transform: 'translateX(-50%)',
+              }"
+              :title="roleTitle(r.role)"
+              @pointerenter="previewRole(r.role)"
+              @pointerleave="previewRole(null)"
+              @focusin="previewRole(r.role)"
+              @focusout="previewRole(null)"
+              @click="focusedRoleId = r.id"
+              @dblclick="eq.resetRole(r.id)"
+            >
+              <!-- S and ON, in the general EQ's own shapes and words. Two
+                   plugins that both hold a pool of bands should not each invent
+                   their own vocabulary for switching one off and hearing it
+                   alone. -->
+              <div class="flex items-center gap-[3px] mb-[6px]">
+                <button
+                  type="button"
+                  class="px-[4px] py-[2px] rounded-[2px] transition-colors"
+                  style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
+                  :style="{
+                    color: eq.isRoleSoloed(r.id) ? accent : 'rgba(255,255,255,.35)',
+                    background: eq.isRoleSoloed(r.id)
+                      ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+                  }"
+                  :title="roleBand(r.id)
+                    ? `Hear the ${r.label} correction alone`
+                    : `Hear the part of the recording ${r.label} acts on`"
+                  @click.stop="eq.toggleRoleSolo(r.id)"
+                  @dblclick.stop
+                >S</button>
+                <button
+                  type="button"
+                  class="px-[4px] py-[2px] rounded-[2px] transition-colors"
+                  style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
+                  :style="{
+                    color: eq.roleOnState(r.id) === 'on' ? accent : 'rgba(255,255,255,.35)',
+                    background: eq.roleOnState(r.id) === 'on'
+                      ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+                    opacity: eq.roleOnState(r.id) === 'on'
+                      || eq.roleOnState(r.id) === 'off' ? 1 : 0.4,
+                  }"
+                  :disabled="eq.roleOnState(r.id) === 'absent'
+                    || eq.roleOnState(r.id) === 'flat'"
+                  :title="{
+                    on: `Switch the ${r.label} correction off`,
+                    off: `Switch the ${r.label} correction back on`,
+                    flat: `${r.label} is at zero — turn the knob to switch it on`,
+                    absent: `${r.label} is doing nothing yet — turn the knob to start`,
+                  }[eq.roleOnState(r.id)]"
+                  @click.stop="eq.toggleRoleEnabled(r.id)"
+                  @dblclick.stop
+                >{{ eq.roleOnState(r.id) === 'on' ? 'ON' : 'OFF' }}</button>
+              </div>
+
+              <div
+                class="relative w-[50px] transition-opacity"
+                :style="{ opacity: roleBrightness(r.id) }"
+              >
+                <Knob
+                  :model-value="gainFor(r.id)"
+                  :min="-GAIN_LIMIT_DB" :max="GAIN_LIMIT_DB" :step="0.1"
+                  label=""
+                  bipolar
+                  :accent="accent"
+                  :value-font-px="11"
+                  :format-value="fmtGain"
+                  @update:model-value="eq.setRoleGain(r.id, $event)"
+                />
+                <!-- The finding mark, in the plot's amber because it means what
+                     the plot's markers mean. It sits on the knob rather than
+                     beside the label so that adding it to some controls and not
+                     others does not knock anything out of line — the corner is
+                     clear of the knob's ring at every value. -->
+                <span
+                  v-if="eq.detectedRoles.value.has(r.id)"
+                  class="absolute rounded-full"
+                  style="top:-1px;right:1px;width:5px;height:5px;background:rgba(255,180,120,.9)"
+                  aria-hidden="true"
+                />
+              </div>
+              <span
+                class="uppercase mt-[5px]"
+                style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
+              >Gain</span>
+
+              <!--
+                Width, under the knob it belongs to.
+
+                No width on a shelf: Rumble and Air reach to the end of the
+                spectrum, so their Q is knee resonance rather than reach and a
+                knob called WIDTH would not do what its label says. The caption
+                line reports what they act on instead.
+
+                Double-click resets the width alone — stopped here so it does
+                not reach the column, where the same gesture resets the whole
+                role.
+              -->
+              <template v-if="!isShelfRole(r.role)">
+                <div
+                  class="w-[40px] mt-[7px]"
+                  :title="`Width — drag to narrow or widen ${r.label}, double-click for its default`"
+                  @dblclick.stop="resetRoleWidth(r.id)"
+                >
+                  <Knob
+                    :model-value="eq.roleQ(r.id)"
+                    :min="qRangeFor(r.role.type)[0]"
+                    :max="qRangeFor(r.role.type)[1]"
+                    scale="log"
+                    :quantize="quantizeQ"
+                    label=""
+                    :accent="accent"
+                    :value-font-px="9"
+                    :format-value="fmtWidth"
+                    :disabled="!roleBand(r.id)"
+                    @update:model-value="eq.setRoleQ(r.id, $event)"
+                  />
+                </div>
+                <span
+                  class="uppercase mt-[5px]"
+                  style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
+                >Width</span>
+              </template>
+            </div>
+          </div>
+        </template>
+      </EqPlot>
 
       <div class="flex items-baseline justify-center mb-[9px]">
       <!-- Fixed height: this line swaps between the running summary and the
@@ -624,188 +821,11 @@ function fmtWidth(q) {
       </button>
     </div>
 
-    <!-- Role controls -->
-    <div class="mt-[16px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">
-
-      <!-- Every role, in frequency order, one row. The set is fixed: which of
-           them the analysis flagged is a mark on the control, not a decision
-           about whether the control exists. See useVoiceRx.paletteRoles. -->
-      <div class="flex flex-wrap gap-x-[14px] gap-y-[12px]">
-        <div
-          v-for="role in eq.paletteRoles"
-          :key="role.id"
-          class="flex flex-col items-center w-[62px] cursor-pointer"
-          :title="roleTitle(role)"
-          @pointerenter="previewRole(role)"
-          @pointerleave="previewRole(null)"
-          @focusin="previewRole(role)"
-          @focusout="previewRole(null)"
-          @click="focusedRoleId = role.id"
-          @dblclick="eq.resetRole(role.id)"
-        >
-
-
-          
-          <!-- The label is the focus control. A real button so the strip is
-               reachable by keyboard, since the knob above it is not. -->
-          <button
-            type="button"
-            class="vrx-role-label uppercase mt-[5px] text-center rounded-[2px] px-[3px] py-[2px] transition-colors"
-            :aria-pressed="focusedRoleId === role.id"
-            :title="focusedRoleId === role.id
-              ? `Close ${role.label}`
-              : `Open ${role.label} to set its width`"
-            :style="{
-              font: `600 8px/1 'Inter'`,
-              letterSpacing: '.1em',
-              color: focusedRoleId === role.id ? accent
-                : eq.roleOnState(role.id) === 'on'
-                  ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.42)',
-              background: focusedRoleId === role.id
-                ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-            }"
-            @click.stop="focusRole(role)"
-            @dblclick.stop
-          >{{ role.label }}</button>
-
-          <template v-if="focusedRoleId === role.id && !focusedIsShelf || gainFor(role.id) !== 0">
-
-          <!-- S and ON, permanent, in the general EQ's own shapes and words.
-               Two plugins that both hold a pool of bands should not each invent
-               their own vocabulary for switching one off and hearing it alone. -->
-          <div class="flex items-center gap-[3px] mt-[4px] mb-[6px]">
-            <button
-              type="button"
-              class="px-[4px] py-[2px] rounded-[2px] transition-colors"
-              style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
-              :style="{
-                color: eq.isRoleSoloed(role.id) ? accent : 'rgba(255,255,255,.35)',
-                background: eq.isRoleSoloed(role.id)
-                  ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-              }"
-              :title="roleBand(role.id)
-                ? `Hear the ${role.label} correction alone`
-                : `Hear the part of the recording ${role.label} acts on`"
-              @click.stop="eq.toggleRoleSolo(role.id)"
-              @dblclick.stop
-            >S</button>
-            <button
-              type="button"
-              class="px-[4px] py-[2px] rounded-[2px] transition-colors"
-              style="font:600 8px/1 'Inter';border:1px solid rgba(255,255,255,.12)"
-              :style="{
-                color: eq.roleOnState(role.id) === 'on' ? accent : 'rgba(255,255,255,.35)',
-                background: eq.roleOnState(role.id) === 'on'
-                  ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-                opacity: eq.roleOnState(role.id) === 'on'
-                  || eq.roleOnState(role.id) === 'off' ? 1 : 0.4,
-              }"
-              :disabled="eq.roleOnState(role.id) === 'absent'
-                || eq.roleOnState(role.id) === 'flat'"
-              :title="{
-                on: `Switch the ${role.label} correction off`,
-                off: `Switch the ${role.label} correction back on`,
-                flat: `${role.label} is at zero — turn the knob to switch it on`,
-                absent: `${role.label} is doing nothing yet — turn the knob to start`,
-              }[eq.roleOnState(role.id)]"
-              @click.stop="eq.toggleRoleEnabled(role.id)"
-              @dblclick.stop
-            >{{ eq.roleOnState(role.id) === 'on' ? 'ON' : 'OFF' }}</button>
-          </div>
-
-          <div
-            class="relative w-full transition-opacity mt-2"
-            :style="{ opacity: roleBrightness(role.id) }"
-          >
-            <Knob
-              v-if="focusedRoleId === role.id || gainFor(role.id) !== 0"
-              :model-value="gainFor(role.id)"
-              :min="-GAIN_LIMIT_DB" :max="GAIN_LIMIT_DB" :step="0.1"
-              label=""
-              bipolar
-              :accent="accent"
-              :value-font-px="11"
-              :format-value="fmtGain"
-              @update:model-value="eq.setRoleGain(role.id, $event)"
-            />
-            <!-- The finding mark, in the plot's amber because it means what
-                 the plot's markers mean. It sits on the knob rather than
-                 beside the label so that adding it to some controls and not
-                 others does not knock the labels out of line — the corner is
-                 clear of the knob's ring at every value. -->
-            <span
-              v-if="eq.detectedRoles.value.has(role.id)"
-              class="absolute rounded-full"
-              style="top:-1px;right:1px;width:5px;height:5px;background:rgba(255,180,120,.9)"
-              aria-hidden="true"
-            />
-          </div>
-          <span
-              class="uppercase mb-[5px]"
-              style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
-            >Gain</span>
-
-
-
-
-                      <!--
-            Width, under the knob it belongs to.
-
-            No width on a shelf: Rumble and Air reach to the end of the
-            spectrum, so their Q is knee resonance rather than reach and a knob
-            called WIDTH would not do what its label says. The caption line
-            reports what they act on instead.
-         
-                 Double-click resets the width alone — stopped here so it does
-                 not reach the column, where the same gesture resets the whole
-                 role. That is what the "measured / click to restore" link used
-                 to be for; the gesture says it without the chrome. -->
-            <div
-              class="w-full mt-[7px]"
-              :title="`Width — drag to narrow or widen ${role.label}, double-click for its default`"
-              @dblclick.stop="resetRoleWidth(role.id)"
-            >
-              <Knob
-                :model-value="eq.roleQ(role.id)"
-                :min="qRangeFor(role.type)[0]"
-                :max="qRangeFor(role.type)[1]"
-                scale="log"
-                :quantize="quantizeQ"
-                label=""
-                :accent="accent"
-                :value-font-px="9"
-                :format-value="fmtWidth"
-                :disabled="!roleBand(role.id)"
-                @update:model-value="eq.setRoleQ(role.id, $event)"
-              />
-            </div>
-            <span
-              class="uppercase mt-[5px]"
-              style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
-            >Width</span>
-          </template>
-        </div>
-      </div>
-
-
-
-    </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-/*
- * The role name is the detail strip's opener, so it has to read as something
- * that can be pressed. It is 8px of uppercase text in a row of eight others,
- * which gives it no shape of its own to signal with — the tint on hover is the
- * signal.
- */
-.vrx-role-label:not([aria-pressed="true"]):hover {
-  background: rgba(255, 255, 255, 0.09);
-  color: rgba(255, 255, 255, 0.85) !important;
-}
-
 /*
  * The analysis blocks the main thread while it runs, so the busy indicator has
  * to be something the compositor can animate on its own. A transform keyframe
