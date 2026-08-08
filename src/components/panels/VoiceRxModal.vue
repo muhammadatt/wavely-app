@@ -110,7 +110,7 @@ async function applyAndClose() {
            aligned with the IN/OUT bars regardless of list length. -->
       <div v-if="vox.suggestions.value.length > 0" class="mb-[14px]">
         <div class="flex items-center justify-between mb-[7px]">
-          <span style="font:700 9px/1 'Inter';letter-spacing:.12em;" :style="{color: white, opacity: 0.55}">
+          <span style="font:700 9px/1 'Inter';letter-spacing:.12em;" :style="`color-mix(in srgb, ${accent} 45%, #ffffff)`">
             {{ vox.suggestions.value.length }} ISSUES IDENTIFIED:
           </span>
           <div class="flex items-center gap-[10px]">
@@ -120,8 +120,8 @@ async function applyAndClose() {
         <button
           v-if="vox.analysis.value?.ok"
           type="button"
-          class="flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px]"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5)"
+          class="flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px] cursor-pointer"
+          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.5)"
           :style="{ opacity: vox.analyzing.value || !vox.hasSelection.value ? 0.55 : 1 }"
           :disabled="vox.analyzing.value || !vox.hasSelection.value"
           :title="vox.hasSelection.value
@@ -135,8 +135,8 @@ async function applyAndClose() {
           <button
           v-if="vox.bands.value.length > 0"
           type="button"
-          class="px-[8px] py-[4px] rounded-[3px]"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
+          class="px-[8px] py-[4px] rounded-[3px] cursor-pointer"
+          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.5)"
           @click="vox.clearBands()"
         >CLEAR</button>
             <!-- The same one-way write as a row's APPLY, over every row.
@@ -185,7 +185,7 @@ async function applyAndClose() {
         >
           <p
             class="flex-1 transition-opacity"
-            style="font:500 11px/1.4 'Inter';color:rgba(255,255,255,.75)"
+            style="font:500 11px/1.4 'Inter';color:rgba(255,255,255,.8)"
           >
             {{ row.suggestion.symptom }}
           </p>

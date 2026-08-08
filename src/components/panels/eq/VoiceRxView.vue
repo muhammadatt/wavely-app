@@ -631,7 +631,6 @@ function fmtWidth(q) {
                 width: `${COLUMN_W}px`,
                 transform: 'translateX(-50%)',
               }"
-              :title="roleTitle(r.role)"
               @pointerenter="previewRole(r.role)"
               @pointerleave="previewRole(null)"
               @focusin="previewRole(r.role)"
@@ -740,8 +739,8 @@ function fmtWidth(q) {
                   class="w-[40px] mt-[13px]"
                   :title="isShelfRole(r.role)
                     ? `Slope — drag to steepen or soften the ${r.label} knee, `
-                      + `double-click for its default. Past about 1.4 it resonates at the corner.`
-                    : `Width — drag to narrow or widen ${r.label}, double-click for its default`"
+                      + `Past 1.4 may add resonance.`
+                    : `Width — drag to narrow or widen`"
                   @dblclick.stop="resetRoleQ(r.id)"
                 >
                   <Knob

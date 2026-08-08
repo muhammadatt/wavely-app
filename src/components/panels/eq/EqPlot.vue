@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { magnitudeResponseDb } from '../../../audio/dsp/biquad.js'
 import { eqSections } from '../../../audio/eqProcessor.js'
-import { getRole, bandwidthOctaves, ROLES_IN_ORDER } from '../../../audio/eqBands.js'
+import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive } from '../../../audio/eqBands.js'
 
 /**
  * The EQ display, shared by both modes.
@@ -111,7 +111,7 @@ const emit = defineEmits([
 
 const clampUnit = v => (v < 0 ? 0 : v > 1 ? 1 : v)
 /** Height of the region ribbon, inside the plot along its bottom edge. */
-const RIBBON_H = 7
+const RIBBON_H = 6
 
 /**
  * The frequency axis.
@@ -308,6 +308,13 @@ const roleAxis = computed(() => {
   })
 })
 
+/** Roles currently doing audible work, so their axis labels can read as active. */
+const activeRoleIds = computed(() => new Set(
+  props.bands
+    .filter(b => b.role !== null && isBandActive(b))
+    .map(b => b.role),
+))
+
 /**
  * Envelope level at an arbitrary frequency, interpolated between FFT bins.
  *
@@ -418,8 +425,8 @@ function drawRegionRibbon(ctx, h) {
 
     ctx.fillStyle = hot
       ? `color-mix(in srgb, ${props.accent} 55%, transparent)`
-      : 'rgba(255,255,255,.07)'
-    ctx.fillRect(x1 + 0.5, top, Math.max(1, x2 - x1 - 1), RIBBON_H - 2)
+      : 'rgba(255,255,255,0)'
+    ctx.fillRect(x1 + 0.5, top, Math.max(1, x2 - x1 - 1), RIBBON_H + 1 )
   }
 }
 
@@ -1056,24 +1063,20 @@ function onPlotDown(e) {
         v-for="r in roleAxis"
         :key="r.id"
         type="button"
-        class="eqp-role-label absolute top-0 whitespace-nowrap rounded-[2px] px-[3px] py-[2px] transition-colors"
+        class="eqp-role-label absolute top-0 whitespace-nowrap rounded-[2px] px-[3px] py-[2px] cursor-pointer transition-colors"
         :aria-pressed="openRole === r.id"
-        :title="openRole === r.id
-          ? `Close ${r.label}`
-          : `Open the ${r.label} controls, below this label`"
         :style="{
           left: `${r.leftPct}%`,
           transform: 'translateX(-50%)',
           fontWeight: 700,
           fontSize: '8px',
           letterSpacing: '.07em',
-          color: openRole === r.id
-            ? accent
-            : highlightRegion === r.region
-              ? `color-mix(in srgb, ${accent} 45%, #ffffff)`
-              : r.detected ? 'rgba(255,180,120,.8)' : 'rgba(255,255,255,.28)',
-          background: openRole === r.id
-            ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+          color: highlightRegion === r.region
+            ? `rgba(255,180,120,.8)`
+            : (activeRoleIds.has(r.id))
+              ? 'color-mix(in srgb, ${accent} 45%, #ffffff)'
+              : 'rgba(255,255,255,.28)',
+          background: 'transparent',
         }"
         @pointerenter="emit('hover-region', r.region)"
         @pointerleave="emit('hover-region', null)"
