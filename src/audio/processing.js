@@ -27,6 +27,11 @@ import {
   HUM_NOTCH_DEFAULTS,
   toKernelParams as toHumNotchKernelParams,
 } from './effects/humNotch.js'
+import { ensureManualEqWorklet } from './eqWorkletLoader.js'
+import {
+  MANUAL_EQ_DEFAULTS,
+  toKernelParams as toManualEqKernelParams,
+} from './effects/manualEq.js'
 import { MAX_ANALYSIS_SECONDS as HUM_MAX_ANALYSIS_SECONDS } from './dsp/humDetect.js'
 
 /**
@@ -395,6 +400,23 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     ensureWorklet: ensureVocalSatWorklet,
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
+  })
+}
+
+/**
+ * Apply the manual EQ to a region.
+ *
+ * `soloIndex` is deliberately not forwarded: solo is a monitoring state, and
+ * committing a bandpass-monitored selection to the timeline is never what the
+ * user meant by "Apply".
+ */
+export function applyManualEqRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureManualEqWorklet,
+    processorName: 'manual-eq-processor',
+    kernelParams: toManualEqKernelParams({
+      ...MANUAL_EQ_DEFAULTS, ...params, soloIndex: null,
+    }),
   })
 }
 

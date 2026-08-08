@@ -121,6 +121,22 @@ export function highpass(sampleRate, freqHz, q = Math.SQRT1_2) {
   return normalise(b0, -(1 + cosW0), b0, 1 + alpha, -2 * cosW0, 1 - alpha)
 }
 
+/**
+ * Constant-skirt-gain bandpass (RBJ, peak gain = Q).
+ *
+ * Only used for solo monitoring in the manual EQ, where the point is to hear
+ * one band's region in isolation rather than to filter the signal path. The
+ * constant-peak-gain variant would normalise the peak to unity and make a
+ * narrow solo far quieter than a wide one; constant skirt gain keeps the
+ * comparison between bands honest.
+ */
+export function bandpass(sampleRate, freqHz, q) {
+  const w0 = (2 * Math.PI * freqHz) / sampleRate
+  const cosW0 = Math.cos(w0)
+  const alpha = Math.sin(w0) / (2 * q)
+  return normalise(alpha, 0, -alpha, 1 + alpha, -2 * cosW0, 1 - alpha)
+}
+
 export function notch(sampleRate, freqHz, q) {
   const w0 = (2 * Math.PI * freqHz) / sampleRate
   const cosW0 = Math.cos(w0)

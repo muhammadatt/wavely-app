@@ -53,6 +53,7 @@ Processing is split between client and server based on operation type. This is n
 | Trim, cut, delete, silence, split | Client | Pure segment manipulation — no audio data touched |
 | Normalize | Client | Linear operation, expected to feel instant. Quality gap vs. server is acceptable for spot work |
 | Compression | Client | Interactive parameter tweaking expects immediacy. Two emulations — OptoSmooth (LA-2A opto) and FET Punch (1176 FET) — each a dependency-free kernel run in an AudioWorklet for preview and in an OfflineAudioContext for apply, so the two are sample-identical |
+| Manual EQ and VoiceRx | Client | Two separate plugins, each a biquad cascade cheap enough to run live — the whole usability argument depends on hearing the change while moving the control. VoiceRx's analysis is a client port of Stage 3a — measurement-driven, so it needs no corpus, no reference curve and no preset |
 | Noise reduction | Server (DeepFilterNet3) | Quality gap vs. RNNoise is significant and user-visible. Modal wait is normal for this operation |
 | Full preset chain | Server | Always server-side |
 
@@ -251,6 +252,9 @@ These apply only to the `acx_audiobook` preset:
 - Playback with A/B before/after comparison
 - Preset panel (4 presets) + output profile panel (3 profiles) with dynamic UI rules
 - Processing report panel (measurements, ACX certification, advisory flags)
+- **EQ** — parametric, 12 bands, live analyzer. One strip per band (gain knob, filter shape, frequency and width knobs) with all bands on screen at once; shape options are positional, so cuts and shelves are offered only on the lowest and highest bands. Opens on a neutral four-band starting layout.
+- **VoiceRx** — voice diagnosis (renamed from VoxDoc). Client port of Stage 3a's cepstral envelope and edge-anchored deviation detection, producing plain-language findings with measured centre frequency and Q, over a role-knob control surface. **Corrections are applied the moment analysis completes**, not offered for approval — the findings list is a set of live on/off switches with a per-row solo, so the first thing the user hears is the corrected version and switching any of it back off is one click. Nothing touches the file until Apply.
+- EQ and VoiceRx are **separate plugins with separate band pools and separate nodes in the live chain** (VoiceRx first — corrective before creative). They were built as two views onto one pool; in use, role bands and hand-placed bands sitting in one list looking alike but behaving differently was the problem, not the solution. The only link left is a one-way hand-off: VoiceRx can **move** its corrections into the EQ, where they become ordinary untagged bands. Moving rather than copying makes double-application structurally impossible. See `src/composables/useEqInstance.js`.
 
 **Backend:**
 - Config-driven pipeline architecture — all 4 presets share a single orchestrator; stage sequences declared per-preset in `src/audio/presets.js`
