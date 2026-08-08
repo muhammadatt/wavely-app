@@ -100,7 +100,7 @@ async function applyAndClose() {
       </div>
 
       <div class="flex gap-[16px]">
-        <LevelMeter :db="eq.inputDb.value" label="IN" :height="PLOT_HEIGHT" />
+        <LevelMeter :db="eq.inputDb.value" :peak-db="eq.inputPeakDb.value" label="IN" :height="PLOT_HEIGHT" />
 
         <div class="flex-1 min-w-0">
           <GeneralView
@@ -109,7 +109,7 @@ async function applyAndClose() {
           />
         </div>
 
-        <LevelMeter :db="eq.outputDb.value" label="OUT" :height="PLOT_HEIGHT" />
+        <LevelMeter :db="eq.outputDb.value" :peak-db="eq.outputPeakDb.value" label="OUT" :height="PLOT_HEIGHT" />
       </div>
 
       <div class="mt-[16px] pt-[14px]" style="border-top:1px solid rgba(255,255,255,.06)">

@@ -275,7 +275,7 @@ async function applyAndClose() {
       </p>
 
       <div class="flex gap-[16px]">
-        <LevelMeter :db="vox.inputDb.value" label="IN" :height="200" />
+        <LevelMeter :db="vox.inputDb.value" :peak-db="vox.inputPeakDb.value" label="IN" :height="200" />
 
         <div class="flex-1 min-w-0">
           <VoiceRxView
@@ -287,7 +287,7 @@ async function applyAndClose() {
           />
         </div>
 
-        <LevelMeter :db="vox.outputDb.value" label="OUT" :height="200" />
+        <LevelMeter :db="vox.outputDb.value" :peak-db="vox.outputPeakDb.value" label="OUT" :height="200" />
       </div>
 
       <div class="flex items-center justify-end mt-[14px] gap-[14px]">

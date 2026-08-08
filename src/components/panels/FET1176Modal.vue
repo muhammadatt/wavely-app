@@ -14,7 +14,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
-  fetAutoMakeup, fetPreview, fetReduction, fetInputDb, fetOutputDb, hasSelection,
+  fetAutoMakeup, fetPreview, fetReduction, fetInputDb, fetOutputDb, fetInputPeakDb, fetOutputPeakDb, hasSelection,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup,
   apply, teardown, closeModal,
@@ -151,7 +151,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
         </div>
 
         <div class="flex-1 flex items-center justify-between gap-[14px]">
-          <LevelMeter :db="fetInputDb" label="IN" :height="132" />
+          <LevelMeter :db="fetInputDb" :peak-db="fetInputPeakDb" label="IN" :height="132" />
 
           <div class="flex-1 flex justify-center gap-[26px]">
             <div class="w-[118px]">
@@ -212,7 +212,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
             </div>
           </div>
 
-          <LevelMeter :db="fetOutputDb" label="OUT" :height="132" />
+          <LevelMeter :db="fetOutputDb" :peak-db="fetOutputPeakDb" label="OUT" :height="132" />
         </div>
       </div>
 

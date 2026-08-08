@@ -12,7 +12,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   humFundamental, humQ, humDepth, humHarmonics, humAnalysis, humAnalyzing,
-  humPreview, humInputDb, humOutputDb, isStale, hasEnabledNotches, hasSelection,
+  humPreview, humInputDb, humOutputDb, humInputPeakDb, humOutputPeakDb, isStale, hasEnabledNotches, hasSelection,
   togglePreview, analyze, toggleHarmonic, setFundamental, syncQ, syncDepth,
   apply, teardown, closeModal,
 } = useHumRemover()
@@ -145,7 +145,7 @@ async function applyAndClose() {
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
       <div class="flex items-start justify-between gap-[20px]">
-        <LevelMeter :db="humInputDb" label="IN" :height="176" />
+        <LevelMeter :db="humInputDb" :peak-db="humInputPeakDb" label="IN" :height="176" />
 
         <div class="flex-1">
           <!-- Mains frequency + analyse -->
@@ -259,7 +259,7 @@ async function applyAndClose() {
           >{{ statusLine }}</p>
         </div>
 
-        <LevelMeter :db="humOutputDb" label="OUT" :height="176" />
+        <LevelMeter :db="humOutputDb" :peak-db="humOutputPeakDb" label="OUT" :height="176" />
       </div>
 
       <!-- Notch shape -->

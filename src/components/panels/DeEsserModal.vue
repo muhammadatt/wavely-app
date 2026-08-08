@@ -22,7 +22,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   params, preview, analysis, analyzing, measuredEvents,
-  treatedCount, maxReductionDb, reductionDb, inputDb, outputDb,
+  treatedCount, maxReductionDb, reductionDb, inputDb, outputDb, inputPeakDb, outputPeakDb,
   tuning, syncTuning, resetTuning,
   hasAnalysis, hasSelection, isStale, envelopeValid, analyzedRegion,
   togglePreview, syncParam, analyze, apply, teardown, closeModal,
@@ -147,7 +147,7 @@ async function applyAndClose() {
       />
 
       <div class="flex items-start justify-between gap-[20px] mt-[20px]">
-        <LevelMeter :db="inputDb" label="IN" :height="164" />
+        <LevelMeter :db="inputDb" :peak-db="inputPeakDb" label="IN" :height="164" />
 
         <div class="flex-1">
           <!-- Analyse: the frozen half -->
@@ -230,7 +230,7 @@ async function applyAndClose() {
           >{{ statusLine }}</p>
         </div>
 
-        <LevelMeter :db="outputDb" label="OUT" :height="164" />
+        <LevelMeter :db="outputDb" :peak-db="outputPeakDb" label="OUT" :height="164" />
       </div>
 
       <!-- Fade shaping -->

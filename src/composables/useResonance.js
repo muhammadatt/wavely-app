@@ -25,6 +25,8 @@ const resPreview = ref(false)
 const resReduction = ref(0)
 const resInputDb = ref(-Infinity)
 const resOutputDb = ref(-Infinity)
+const resInputPeakDb = ref(-Infinity)
+const resOutputPeakDb = ref(-Infinity)
 let meterId = null
 
 function currentParams() {
@@ -65,8 +67,12 @@ export function useResonance() {
       const nodes = chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
       if (nodes) {
         resReduction.value = nodes.getReduction()
-        resInputDb.value = nodes.getInputLevelDb()
-        resOutputDb.value = nodes.getOutputLevelDb()
+        const inLevels = nodes.getInputLevels()
+        resInputDb.value = inLevels.rmsDb
+        resInputPeakDb.value = inLevels.peakDb
+        const outLevels = nodes.getOutputLevels()
+        resOutputDb.value = outLevels.rmsDb
+        resOutputPeakDb.value = outLevels.peakDb
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -81,6 +87,8 @@ export function useResonance() {
     resReduction.value = 0
     resInputDb.value = -Infinity
     resOutputDb.value = -Infinity
+    resInputPeakDb.value = -Infinity
+    resOutputPeakDb.value = -Infinity
   }
 
   function pushAllParams(chain) {
@@ -187,6 +195,8 @@ export function useResonance() {
     resReduction,
     resInputDb,
     resOutputDb,
+    resInputPeakDb,
+    resOutputPeakDb,
     hasSelection,
     togglePreview,
     syncDepth,

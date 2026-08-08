@@ -14,6 +14,8 @@ const airBandOutput = ref(AIR_BAND_DEFAULTS.output)
 const airBandPreview = ref(false)
 const airBandInputDb = ref(-Infinity)
 const airBandOutputDb = ref(-Infinity)
+const airBandInputPeakDb = ref(-Infinity)
+const airBandOutputPeakDb = ref(-Infinity)
 let meterId = null
 
 function currentParams() {
@@ -44,8 +46,12 @@ export function useAirBand() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === airBandEffect.id)?.nodes
       if (nodes) {
-        airBandInputDb.value = nodes.getInputLevelDb()
-        airBandOutputDb.value = nodes.getOutputLevelDb()
+        const inLevels = nodes.getInputLevels()
+        airBandInputDb.value = inLevels.rmsDb
+        airBandInputPeakDb.value = inLevels.peakDb
+        const outLevels = nodes.getOutputLevels()
+        airBandOutputDb.value = outLevels.rmsDb
+        airBandOutputPeakDb.value = outLevels.peakDb
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -59,6 +65,8 @@ export function useAirBand() {
     }
     airBandInputDb.value = -Infinity
     airBandOutputDb.value = -Infinity
+    airBandInputPeakDb.value = -Infinity
+    airBandOutputPeakDb.value = -Infinity
   }
 
   function pushAllParams(chain) {
@@ -145,6 +153,8 @@ export function useAirBand() {
     airBandPreview,
     airBandInputDb,
     airBandOutputDb,
+    airBandInputPeakDb,
+    airBandOutputPeakDb,
     hasSelection,
     togglePreview,
     syncAir,

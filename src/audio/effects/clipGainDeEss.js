@@ -267,12 +267,12 @@ export function createClipGainDeEsser(audioContext) {
       return gain > 0 ? 20 * Math.log10(gain) : 0
     },
 
-    getInputLevelDb() {
-      return inputTap.getLevelDb()
+    getInputLevels() {
+      return inputTap.getLevels()
     },
 
-    getOutputLevelDb() {
-      return outputTap.getLevelDb()
+    getOutputLevels() {
+      return outputTap.getLevels()
     },
 
     destroy() {

@@ -35,6 +35,8 @@ const fetPreview = ref(false)
 const fetReduction = ref(0)
 const fetInputDb = ref(-Infinity)
 const fetOutputDb = ref(-Infinity)
+const fetInputPeakDb = ref(-Infinity)
+const fetOutputPeakDb = ref(-Infinity)
 let meterId = null
 
 // Debounce + supersede state for the auto-makeup measurement, shared across
@@ -91,8 +93,12 @@ export function useFET1176() {
       const nodes = chain.effects.find(e => e.id === fet1176Effect.id)?.nodes
       if (nodes) {
         fetReduction.value = nodes.getReduction()
-        fetInputDb.value = nodes.getInputLevelDb()
-        fetOutputDb.value = nodes.getOutputLevelDb()
+        const inLevels = nodes.getInputLevels()
+        fetInputDb.value = inLevels.rmsDb
+        fetInputPeakDb.value = inLevels.peakDb
+        const outLevels = nodes.getOutputLevels()
+        fetOutputDb.value = outLevels.rmsDb
+        fetOutputPeakDb.value = outLevels.peakDb
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -107,6 +113,8 @@ export function useFET1176() {
     fetReduction.value = 0
     fetInputDb.value = -Infinity
     fetOutputDb.value = -Infinity
+    fetInputPeakDb.value = -Infinity
+    fetOutputPeakDb.value = -Infinity
   }
 
   function pushAllParams(chain) {
@@ -294,6 +302,8 @@ export function useFET1176() {
     fetReduction,
     fetInputDb,
     fetOutputDb,
+    fetInputPeakDb,
+    fetOutputPeakDb,
     hasSelection,
     togglePreview,
     syncInput,

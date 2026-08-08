@@ -30,6 +30,8 @@ const la2aPreview = ref(false)
 const la2aReduction = ref(0)
 const la2aInputDb = ref(-Infinity)
 const la2aOutputDb = ref(-Infinity)
+const la2aInputPeakDb = ref(-Infinity)
+const la2aOutputPeakDb = ref(-Infinity)
 let meterId = null
 
 // Debounce + supersede state for the auto-makeup measurement, shared across
@@ -82,8 +84,12 @@ export function useLA2A() {
       const nodes = chain.effects.find(e => e.id === la2aEffect.id)?.nodes
       if (nodes) {
         la2aReduction.value = nodes.getReduction()
-        la2aInputDb.value = nodes.getInputLevelDb()
-        la2aOutputDb.value = nodes.getOutputLevelDb()
+        const inLevels = nodes.getInputLevels()
+        la2aInputDb.value = inLevels.rmsDb
+        la2aInputPeakDb.value = inLevels.peakDb
+        const outLevels = nodes.getOutputLevels()
+        la2aOutputDb.value = outLevels.rmsDb
+        la2aOutputPeakDb.value = outLevels.peakDb
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -98,6 +104,8 @@ export function useLA2A() {
     la2aReduction.value = 0
     la2aInputDb.value = -Infinity
     la2aOutputDb.value = -Infinity
+    la2aInputPeakDb.value = -Infinity
+    la2aOutputPeakDb.value = -Infinity
   }
 
   function pushAllParams(chain) {
@@ -279,6 +287,8 @@ export function useLA2A() {
     la2aReduction,
     la2aInputDb,
     la2aOutputDb,
+    la2aInputPeakDb,
+    la2aOutputPeakDb,
     hasSelection,
     togglePreview,
     syncMode,

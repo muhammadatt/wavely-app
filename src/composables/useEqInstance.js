@@ -48,6 +48,8 @@ export function createEqInstance({
   const soloProbe = ref(null)
   const inputDb = ref(-Infinity)
   const outputDb = ref(-Infinity)
+  const inputPeakDb = ref(-Infinity)
+  const outputPeakDb = ref(-Infinity)
 
   let meterId = null
 
@@ -93,8 +95,12 @@ export function createEqInstance({
       function tick() {
         const n = chain.effects.find(e => e.id === effect.id)?.nodes
         if (n) {
-          inputDb.value = n.getInputLevelDb()
-          outputDb.value = n.getOutputLevelDb()
+          const inLevels = n.getInputLevels()
+          inputDb.value = inLevels.rmsDb
+          inputPeakDb.value = inLevels.peakDb
+          const outLevels = n.getOutputLevels()
+          outputDb.value = outLevels.rmsDb
+          outputPeakDb.value = outLevels.peakDb
         }
         meterId = requestAnimationFrame(tick)
       }
@@ -108,6 +114,8 @@ export function createEqInstance({
       }
       inputDb.value = -Infinity
       outputDb.value = -Infinity
+      inputPeakDb.value = -Infinity
+      outputPeakDb.value = -Infinity
     }
 
     function togglePreview() {
@@ -285,7 +293,7 @@ export function createEqInstance({
 
     return {
       // state
-      bands, eqPreview, outputTrim, soloBandId, soloProbe, inputDb, outputDb,
+      bands, eqPreview, outputTrim, soloBandId, soloProbe, inputDb, outputDb, inputPeakDb, outputPeakDb,
       hasSelection, atBandLimit, maxBands,
       activeBands: computed(() => bands.value.filter(isBandActive)),
 

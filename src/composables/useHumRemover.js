@@ -37,6 +37,8 @@ const analyzedKey = ref(null)
 const humPreview = ref(false)
 const humInputDb = ref(-Infinity)
 const humOutputDb = ref(-Infinity)
+const humInputPeakDb = ref(-Infinity)
+const humOutputPeakDb = ref(-Infinity)
 let meterId = null
 
 /** Frequencies the user currently has ticked. */
@@ -88,8 +90,12 @@ export function useHumRemover() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === humNotchEffect.id)?.nodes
       if (nodes) {
-        humInputDb.value = nodes.getInputLevelDb()
-        humOutputDb.value = nodes.getOutputLevelDb()
+        const inLevels = nodes.getInputLevels()
+        humInputDb.value = inLevels.rmsDb
+        humInputPeakDb.value = inLevels.peakDb
+        const outLevels = nodes.getOutputLevels()
+        humOutputDb.value = outLevels.rmsDb
+        humOutputPeakDb.value = outLevels.peakDb
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -103,6 +109,8 @@ export function useHumRemover() {
     }
     humInputDb.value = -Infinity
     humOutputDb.value = -Infinity
+    humInputPeakDb.value = -Infinity
+    humOutputPeakDb.value = -Infinity
   }
 
   function pushAllParams(chain) {
@@ -270,6 +278,8 @@ export function useHumRemover() {
     humPreview,
     humInputDb,
     humOutputDb,
+    humInputPeakDb,
+    humOutputPeakDb,
     isStale,
     hasEnabledNotches,
     hasSelection,

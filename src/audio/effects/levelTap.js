@@ -52,10 +52,16 @@ export function createSpectrumTap(audioContext, node) {
   }
 }
 
+/**
+ * Time-domain tap, for the level meters.
+ *
+ * No `smoothingTimeConstant` here: it only applies to the FFT that backs
+ * `getFloatFrequencyData`, so on a tap that is read purely in the time domain
+ * it does nothing. Meter ballistics belong to whoever renders the reading.
+ */
 export function createLevelTap(audioContext, node) {
   const analyser = audioContext.createAnalyser()
   analyser.fftSize = 1024
-  analyser.smoothingTimeConstant = 0.6
   node.connect(analyser)
 
   const silentSink = audioContext.createGain()
@@ -64,16 +70,38 @@ export function createLevelTap(audioContext, node) {
   silentSink.connect(audioContext.destination)
 
   const data = new Float32Array(analyser.fftSize)
+  const levels = { rmsDb: -Infinity, peakDb: -Infinity }
 
   return {
     analyser,
-    getLevelDb() {
+    /**
+     * RMS and sample peak of the most recent window, both in dBFS.
+     *
+     * The window is 1024 samples and a 60 Hz caller advances 735 of them
+     * between reads, so consecutive windows overlap and no sample goes
+     * unseen. That is what makes the peak reading trustworthy enough to
+     * drive an over indicator — the guarantee does not survive rAF
+     * throttling in a backgrounded tab, where samples can pass unread.
+     *
+     * Both figures are taken from the analyser's mono downmix, so a peak on
+     * one channel of a stereo file reads lower here than it truly is.
+     *
+     * Reuses one object — read the fields, do not retain it.
+     */
+    getLevels() {
       analyser.getFloatTimeDomainData(data)
       let sumSquares = 0
-      for (let i = 0; i < data.length; i++) sumSquares += data[i] * data[i]
+      let peak = 0
+      for (let i = 0; i < data.length; i++) {
+        const sample = data[i]
+        sumSquares += sample * sample
+        const magnitude = Math.abs(sample)
+        if (magnitude > peak) peak = magnitude
+      }
       const rms = Math.sqrt(sumSquares / data.length)
-      if (rms <= 0) return -Infinity
-      return 20 * Math.log10(rms)
+      levels.rmsDb = rms > 0 ? 20 * Math.log10(rms) : -Infinity
+      levels.peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity
+      return levels
     },
     destroy() {
       analyser.disconnect()

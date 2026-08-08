@@ -22,6 +22,8 @@ const vsHighDriveMult = ref(VOCAL_SAT_DEFAULTS.highDriveMult)
 const vsPreview = ref(false)
 const vsInputDb = ref(-Infinity)
 const vsOutputDb = ref(-Infinity)
+const vsInputPeakDb = ref(-Infinity)
+const vsOutputPeakDb = ref(-Infinity)
 let meterId = null
 
 function currentParams() {
@@ -59,8 +61,12 @@ export function useVocalSaturation() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === vocalSatEffect.id)?.nodes
       if (nodes) {
-        vsInputDb.value = nodes.getInputLevelDb()
-        vsOutputDb.value = nodes.getOutputLevelDb()
+        const inLevels = nodes.getInputLevels()
+        vsInputDb.value = inLevels.rmsDb
+        vsInputPeakDb.value = inLevels.peakDb
+        const outLevels = nodes.getOutputLevels()
+        vsOutputDb.value = outLevels.rmsDb
+        vsOutputPeakDb.value = outLevels.peakDb
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -74,6 +80,8 @@ export function useVocalSaturation() {
     }
     vsInputDb.value = -Infinity
     vsOutputDb.value = -Infinity
+    vsInputPeakDb.value = -Infinity
+    vsOutputPeakDb.value = -Infinity
   }
 
   function pushAllParams(chain) {
@@ -172,6 +180,8 @@ export function useVocalSaturation() {
     vsPreview,
     vsInputDb,
     vsOutputDb,
+    vsInputPeakDb,
+    vsOutputPeakDb,
     hasSelection,
     togglePreview,
     syncDrive,

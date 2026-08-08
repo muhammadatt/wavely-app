@@ -83,12 +83,12 @@ export function createAirBand(audioContext) {
       return params[name]
     },
 
-    getInputLevelDb() {
-      return inputTap.getLevelDb()
+    getInputLevels() {
+      return inputTap.getLevels()
     },
 
-    getOutputLevelDb() {
-      return outputTap.getLevelDb()
+    getOutputLevels() {
+      return outputTap.getLevels()
     },
 
     destroy() {
