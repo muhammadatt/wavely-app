@@ -87,6 +87,12 @@ function applyTitle(row) {
     + `${fmtGain(row.band.gainDb)} dB — with the recommended ${want}`
 }
 
+function applyLabel(row) {
+  if (row.atRecommended) return 'APPLIED'
+  if (!row.band) return 'APPLY'
+  return 'RESTORE'
+}
+
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
 }
@@ -243,7 +249,7 @@ async function applyAndClose() {
             :disabled="row.atRecommended"
             :title="applyTitle(row)"
             @click="vox.applySuggestion(row.suggestion)"
-          >{{ row.atRecommended ? 'APPLIED' : 'RESTORE' }}</button>
+          >{{ applyLabel(row) }}</button>
         </div>
       </div>
 
