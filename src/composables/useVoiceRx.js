@@ -4,7 +4,7 @@ import { createEqInstance } from './useEqInstance.js'
 import { voiceRxEqEffect } from '../audio/effects/manualEq.js'
 import { renderRegionToBuffer } from '../audio/processing.js'
 import {
-  getRole, bandForRole, ROLES_IN_ORDER, isBandActive, roleForRegion,
+  getRole, bandForRole, ROLES_IN_ORDER, roleForRegion,
   roleFreqRange, clamp,
 } from '../audio/eqBands.js'
 import { analyzeVoiceRx, MIN_VOICED_FRAMES, HOP_SIZE, FRAME_SIZE } from '../audio/voicerx/analysis.js'
@@ -45,7 +45,6 @@ const analysis = shallowRef(null)
 const analyzedKey = ref(null)
 const analyzing = ref(false)
 const analysisError = ref(null)
-const analysisWidened = ref(false)
 
 /**
  * Whether the panel has moved past its opening offer to analyse.
@@ -91,16 +90,16 @@ export function useVoiceRx() {
   /**
    * There is a result to show. Deliberately not "and it is still fresh".
    *
-   * Staleness used to be folded in here, and it made a nudged selection erase
-   * the diagnosis: the panel dropped back to its ANALYZE prompt while the
-   * corrections that analysis had made were still in the pool and still
-   * audible, the per-suggestion switches went with it, and the "selection
-   * changed" banner could never render because it lives inside the branch that
-   * had just unmounted. A measurement does not stop being true because the
-   * selection moved — it stops describing what is selected now, which is a
-   * caption, not a reason to throw it away. Freshness is isStale's job, shown
-   * as a banner over a result that stays put; the de-esser and hum remover
-   * report it the same way.
+   * Folding staleness in here would make a nudged selection erase the
+   * diagnosis: the panel would drop back to its ANALYZE prompt while the
+   * corrections that analysis made were still in the pool and still audible,
+   * the per-suggestion switches would go with it, and the "selection changed"
+   * banner could never render, because it lives inside the branch that had just
+   * unmounted. A measurement does not stop being true because the selection
+   * moved — it stops describing what is selected now, which is a caption, not a
+   * reason to throw it away. Freshness is isStale's job, shown as a banner over
+   * a result that stays put; the de-esser and hum remover report it the same
+   * way.
    */
   const hasAnalysis = computed(() => analysis.value?.ok === true)
 
@@ -121,10 +120,9 @@ export function useVoiceRx() {
    * analysis it came from.
    *
    * Every suggestion the analysis produced is listed, including the ones
-   * currently switched off. They used to be filtered out once applied, which
-   * made sense while applying was a decision the user made per row; now that
-   * analysis applies them on arrival, a row disappearing on apply would take
-   * away the only control for switching it back off.
+   * currently switched off. Filtering out the applied ones would empty the list
+   * the moment a diagnosis arrives — analysis applies them all — and would take
+   * away the only control for switching one back off.
    */
   const suggestions = computed(() =>
     (hasAnalysis.value ? buildSuggestions(analysis.value) : []))
@@ -167,27 +165,15 @@ export function useVoiceRx() {
       && Math.abs(band.q - suggestion.q) < 0.01
   }
 
-  /**
-   * How many suggestions are actually doing something.
-   *
-   * Counted with isBandActive, the same rule the faceplate's correction count
-   * and the Apply gate use. Counting `enabled` alone let a band turned down to
-   * 0 dB by its knob read as on here and as nothing everywhere else — "3 of 4
-   * on" over a header that said 2 corrections, with Apply greyed out.
-   */
-  const activeSuggestionCount = computed(
-    () => suggestionRows.value.filter(r => r.band && isBandActive(r.band)).length)
-
   // ── Applying ──────────────────────────────────────────────────────────────
 
   /**
    * Put every suggestion into the pool, switched on.
    *
    * Called by analyze(), so a diagnosis arrives already corrected and the first
-   * thing the user hears is the fixed version. The previous design listed the
-   * corrections and waited to be told to apply each one, which reads as
-   * cautious and plays as broken: the panel described problems while the audio
-   * still had them, and the obvious next action was a button press away.
+   * thing the user hears is the fixed version. Listing the corrections and
+   * waiting to be told to apply each one reads as cautious and plays as broken:
+   * the panel would describe problems while the audio still had them.
    *
    * Nothing is lost by applying first — every row can be switched off, the EQ
    * as a whole can be bypassed, and nothing touches the file until Apply.
@@ -200,13 +186,11 @@ export function useVoiceRx() {
   /**
    * Write one recommendation into the pool, overwriting whatever is there.
    *
-   * ONE-WAY, AND THE ONLY DIRECTION THAT EXISTS. The row used to be a toggle:
-   * press it once to switch the correction off, again to bring it back. That
-   * made the row a control over the band, and a control has to display the
-   * thing it controls — so the row showed the band's live gain, which meant the
-   * measured recommendation was overwritten on screen the moment the user
-   * touched the knob. The diagnosis then had no representation anywhere, and
-   * "what did it actually recommend?" became unanswerable.
+   * ONE-WAY, AND THE ONLY DIRECTION THAT EXISTS. Making the row a toggle would
+   * make it a control over the band, and a control has to display the thing it
+   * controls — so the row would have to show the band's live gain, and the
+   * measured recommendation would be overwritten on screen the moment the user
+   * touched the knob. "What did it actually recommend?" would be unanswerable.
    *
    * So the row is a read-only statement of what was measured, and this is the
    * one action on it: put that back. Switching a correction off is the role
@@ -292,30 +276,20 @@ export function useVoiceRx() {
   /**
    * Every role, always, in frequency order.
    *
-   * This used to be a subset: six roles by default, the rest appearing when a
-   * suggestion targeted one or the user added it from a chip. That was the
-   * right instinct for a findings panel and the wrong one for a palette. The
-   * nine regions tile the voice contiguously from 60 Hz to 16 kHz (see
-   * voicerx/regions.js) — together they are a complete map, and showing two
-   * thirds of a map leaves the user to conclude the missing part is not
-   * covered rather than that it is one click away.
+   * Never a subset chosen by the analysis. The nine regions tile the voice
+   * contiguously from 60 Hz to 16 kHz (see voicerx/regions.js) — together they
+   * are a complete map, and showing two thirds of a map leaves the user to
+   * conclude the missing part is not covered.
    *
-   * The deciding argument is constancy. The visible set was a function of what
-   * the last analysis happened to find, so the control surface was arranged
-   * differently on every file. A vocabulary you are meant to learn — reach for
-   * "nasal" without knowing it lives at 650-1200 Hz — cannot be one that moves
-   * between sessions.
-   *
-   * What is lost is the signal that appearing carried for free: which roles the
-   * analysis actually flagged. That is now marked on the controls themselves
-   * (detectedRoles), because it is information about this file, and only the
-   * layout should be constant.
+   * The deciding argument is constancy. A visible set that followed what the
+   * last analysis happened to find would arrange the control surface
+   * differently on every file, and a vocabulary you are meant to learn — reach
+   * for "nasal" without knowing it lives at 650-1200 Hz — cannot be one that
+   * moves between sessions. What this file's analysis flagged is said by the
+   * findings list and by the plot's markers, both of which are about this
+   * recording; only the layout is constant.
    */
   const paletteRoles = ROLES_IN_ORDER
-
-  /** Roles the current analysis raised a finding for. */
-  const detectedRoles = computed(
-    () => new Set(suggestions.value.map(s => s.roleId).filter(Boolean)))
 
   /** The gain of a role's band, or 0 where the role has no band yet. */
   function roleGain(roleId) {
@@ -325,13 +299,12 @@ export function useVoiceRx() {
   /**
    * Put a role at a point on the plot, creating its band if it has none.
    *
-   * This is the gesture the general EQ has always had and VoiceRx refused,
-   * because a band created by clicking empty canvas there carries no role and
-   * would be audible with no control anywhere that admits to it. That objection
-   * was about the EQ's semantics, not the gesture: here the frequency names a
-   * role (see regionAtHz), so the click creates exactly the band the role knob
-   * would have created, at the point actually pointed at rather than at the
-   * region's centre.
+   * The general EQ's own gesture, made safe for a role-tagged pool: the
+   * frequency pressed names a role (see regionAtHz), so the click creates
+   * exactly the band that role's knob would have created, at the point actually
+   * pointed at rather than at the region's centre. A band with no role would be
+   * audible with no control anywhere that admits to it, which is why the
+   * frequency has to resolve to one before anything is placed.
    *
    * A role that already has a band gets it moved, not doubled — one band per
    * role is the invariant the whole palette rests on. The frequency is held
@@ -370,7 +343,7 @@ export function useVoiceRx() {
    * centre of the role's scan range.
    *
    * Answers the question for a role with no band too, which is what lets the
-   * detail strip and the solo probe describe a control before it has been
+   * caption line and the solo probe describe a control before it has been
    * touched.
    */
   function roleCentreHz(roleId) {
@@ -396,7 +369,7 @@ export function useVoiceRx() {
    * Narrow or widen a role.
    *
    * Only meaningful once the role has a band — width is a property of a
-   * correction, and there is nothing to be wide. The strip disables the control
+   * correction, and there is nothing to be wide. The column hides the control
    * rather than minting an inert band to hold a number nobody is hearing.
    */
   function setRoleQ(roleId, q) {
@@ -503,9 +476,10 @@ export function useVoiceRx() {
   /**
    * Widen a too-short selection symmetrically into the surrounding audio.
    *
-   * Used for display and suggestion generation only — the EQ is still applied to
-   * the user's actual selection. Reaching outside is honest as long as it is
-   * labelled, and it beats refusing to analyse a phrase that happens to be short.
+   * Used for measurement only — the EQ is still applied to the user's actual
+   * selection. Reading a little beyond the selection beats refusing to analyse
+   * a phrase that happens to be short, and the corrections it produces are
+   * still corrections to the same voice.
    *
    * The frame constants are sample counts, so the duration they need depends on
    * the file's own rate — analysis runs at the file's native rate, and a server
@@ -514,11 +488,12 @@ export function useVoiceRx() {
    */
   function widenedRange(start, end, duration, sampleRate) {
     const needed = ((MIN_VOICED_FRAMES * HOP_SIZE + FRAME_SIZE) / sampleRate) * 3
-    if (end - start >= needed) return { start, end, widened: false }
+    if (end - start >= needed) return { start, end }
     const grow = (needed - (end - start)) / 2
-    const s = Math.max(0, start - grow)
-    const e = Math.min(duration, end + grow)
-    return { start: s, end: e, widened: s !== start || e !== end }
+    return {
+      start: Math.max(0, start - grow),
+      end: Math.min(duration, end + grow),
+    }
   }
 
   /**
@@ -569,7 +544,6 @@ export function useVoiceRx() {
       analysis.value = result
       analyzedKey.value = selectionKey()
       introDismissed.value = true
-      analysisWidened.value = range.widened
 
       // A fresh diagnosis replaces the old one outright. Keeping bands from a
       // previous measurement would leave corrections on screen that the
@@ -595,11 +569,11 @@ export function useVoiceRx() {
 
   return {
     ...api,
-    analysis, analyzing, analysisError, analysisWidened, isStale, hasAnalysis,
+    analysis, analyzing, analysisError, isStale, hasAnalysis,
     introDismissed, dismissIntro: () => { introDismissed.value = true },
-    suggestions, suggestionRows, activeSuggestionCount,
-    regions, paletteRoles, detectedRoles,
-    analyze, applyAllSuggestions, applySuggestion, toggleSolo,
+    suggestions, suggestionRows,
+    regions, paletteRoles,
+    analyze, applyAllSuggestions, applySuggestion,
     toggleRoleSolo, isRoleSoloed,
     roleGain, setRoleGain, setRoleAt, roleQ, setRoleQ, roleCentreHz, resetRole,
     roleOnState, toggleRoleEnabled,

@@ -3,7 +3,7 @@ import { computed, ref, onBeforeUnmount } from 'vue'
 import EqPlot from './EqPlot.vue'
 import Knob from '../../knobs/Knob.vue'
 import {
-  bandForRole, isBandActive, bandwidthOctaves, qRangeFor, quantizeQ,
+  bandForRole, bandwidthOctaves, qRangeFor, quantizeQ,
 } from '../../../audio/eqBands.js'
 import { REGION_SPAN_HZ } from '../../../audio/voicerx/regions.js'
 
@@ -11,15 +11,8 @@ import { REGION_SPAN_HZ } from '../../../audio/voicerx/regions.js'
  * VoiceRx — the voice-specific corrective view.
  *
  * The picture is the tonal shape of the voice with the problems marked on it,
- * and the list underneath says what each mark means in words. The two are
- * linked by hover, so neither has to be read alone.
- *
- * An earlier version plotted the detector's deviation-from-baseline instead.
- * That was the quantity the thresholds apply to, which made it feel like the
- * right thing to show, but it is an internal intermediate: it came out as
- * disconnected sawtooth fragments that told a reader nothing. The lesson is
- * worth keeping — what a detector computes and what a person can read are
- * different questions, and the display answers the second one.
+ * and the findings list in the faceplate says what each mark means in words.
+ * The two are linked by hover, so neither has to be read alone.
  *
  * If the name promises a diagnosis, the tool has to deliver one. A plugin
  * called VoiceRx that only handed over labelled knobs would be a broken promise,
@@ -37,8 +30,7 @@ import { REGION_SPAN_HZ } from '../../../audio/voicerx/regions.js'
  * It can be skipped in one click; the compact ANALYZE strip is waiting on the
  * other side; and once past it — by skipping or by analysing — it never
  * returns. Nothing about the second capability depends on having used the
- * first, which is the property an earlier version lost by putting the plot and
- * the palette inside the branch that only rendered after a diagnosis.
+ * first: the plot and the palette live outside the intro branch, not inside it.
  */
 
 const props = defineProps({
@@ -61,20 +53,15 @@ const emit = defineEmits(['update:hoveredRegion'])
  * Region under the pointer *in here* — a role's controls, its axis label, or its
  * dot on the plot.
  *
- * TWO CHANNELS, NOT ONE. This used to merge with the incoming findings-row
- * region and drive everything from the result, so any hover anywhere lit the
- * ribbon, the label, the dot and the marker together. Worse, the faceplate
- * echoes this component's emit straight back in as a prop, so once merged there
- * was no way left to tell where a hover had come from.
- *
- * Split, each gesture answers with the object it is actually about. Pointing at
- * a control lights live state — the dot it moves, its ribbon span, its name.
+ * TWO CHANNELS, NOT ONE. Kept strictly apart from the incoming markedRegion:
+ * each gesture answers with the object it is actually about. Pointing at a
+ * control lights live state — the dot it moves, its ribbon span, its name.
  * Pointing at a findings row lights the measurement — its marker, via
  * markedRegion. Nothing lights both, so neither can be mistaken for the other.
  *
- * Still emitted, because the faceplate dims the findings row for whichever
- * region is being adjusted; that is a different question from which row is being
- * pointed at, and the faceplate now keeps the two apart as well.
+ * Merging them is not an option even in principle: the faceplate echoes this
+ * component's emit straight back in as markedRegion, so a merged signal would
+ * lose all record of where a hover came from.
  */
 const hoveredRegion = ref(null)
 
@@ -98,21 +85,6 @@ const analysis = computed(() => (props.eq.hasAnalysis.value ? props.eq.analysis.
 const roleHandleIds = computed(() =>
   props.eq.bands.value.filter(b => b.role !== null).map(b => b.id))
 
-/**
- * What the plot is showing, in the header.
- *
- * Says so explicitly when nothing has been measured. The panel is usable
- * unanalysed — that is the point of ungating it — but the plot is then only the
- * user's own changes, and a header that stayed silent about it would let the
- * grid read as a picture of their voice.
- */
-const toneLabel = computed(() => {
-  const a = analysis.value
-  if (!a) return 'not yet analysed — the curve below is your changes only'
-  const type = { male: 'lower-pitched', female: 'higher-pitched', ambiguous: 'mid-range' }[a.voiceType]
-  return `${type} voice · ${Math.round(a.medianF0Hz)} Hz`
-})
-
 const errorMessage = computed(() => {
   switch (props.eq.analysisError.value) {
     case 'no_voiced_frames':
@@ -132,18 +104,8 @@ const errorMessage = computed(() => {
 // to one band across two plugins was one too many.
 onBeforeUnmount(() => props.eq.clearSolo())
 
-const allOn = computed(() =>
-  props.eq.suggestions.value.length > 0
-  && props.eq.activeSuggestionCount.value === props.eq.suggestions.value.length)
-
 function gainFor(roleId) {
   return props.eq.roleGain(roleId)
-}
-
-/** A role whose band exists but is switched off is shown, but shown as inert. */
-function roleMuted(roleId) {
-  const band = bandForRole(props.eq.bands.value, roleId)
-  return !!band && !band.enabled
 }
 
 /**
@@ -177,6 +139,44 @@ function roleBand(roleId) {
 }
 
 /**
+ * Can this role be auditioned?
+ *
+ * A role with no band can: "what does this word even sound like" is asked
+ * before anything has been turned up, and useVoiceRx.toggleRoleSolo answers it
+ * with a probe at the role's own centre and width. Gating that on a band would
+ * have shut off the one case the probe exists for.
+ *
+ * A band that is switched off or sitting at 0 dB cannot, because there is
+ * nothing being done to hear alone — the ON button beside it is the way back.
+ */
+function canSolo(roleId) {
+  const state = props.eq.roleOnState(roleId)
+  return state === 'on' || state === 'absent'
+}
+
+/**
+ * The column's tooltip: how to work this control.
+ *
+ * What the role *means* is not in here — that goes on the shared caption line,
+ * where it is readable without hovering and cannot be missed by anyone who
+ * never discovers that these have tooltips. The buttons and the width knob
+ * carry their own titles, which override this one where they sit.
+ */
+function roleTitle(r) {
+  return props.eq.roleOnState(r.id) === 'off'
+    ? `${r.label} is switched off — move the knob to switch it back on.`
+    : `${r.label} — drag to adjust, double-click to reset it to flat and its `
+      + 'default width.'
+}
+
+function soloTitle(r) {
+  if (!canSolo(r.id)) return `Switch ${r.label} on to solo it`
+  return roleBand(r.id)
+    ? `Hear the ${r.label} correction alone`
+    : `Hear the part of the recording ${r.label} acts on`
+}
+
+/**
  * Back to the role's canonical Q, leaving its gain where it is.
  *
  * Named for the parameter rather than for the control, because the same reset
@@ -202,30 +202,21 @@ const staleMessage = computed(() => (props.eq.hasSelection.value
     + 'are still running; select some audio and RE-ANALYZE to measure it.'))
 
 /**
- * Is this row's correction audible?
- *
- * The switch answers "is anything happening", not "is the enabled flag set" —
- * a band at 0 dB is silent whatever the flag says, and showing it as on while
- * the header counts it as off is the mismatch this replaced.
- */
-function isOn(row) {
-  return !!row.band && isBandActive(row.band)
-}
-
-/**
  * The plain-language read-out for every role that is doing something.
  *
- * The sliders carried one of these per control. Knobs are too narrow to sit a
- * sentence under, and most of them say nothing at rest anyway — collected into
- * one line, the panel says what the EQ is doing in a single sentence instead of
- * nine mostly-empty ones.
+ * One line for the whole palette rather than one per control: a knob is too
+ * narrow to sit a sentence under, and most of them say nothing at rest anyway.
+ *
+ * Keyed on roleOnState rather than on the gain, so a correction that has been
+ * switched off drops out of the sentence. Reading "less mud" off a band nobody
+ * can hear is the same mismatch isBandActive exists to prevent elsewhere.
  */
 const activeSummary = computed(() => props.eq.paletteRoles
-  .filter(r => gainFor(r.id) !== 0)
+  .filter(r => props.eq.roleOnState(r.id) === 'on')
   .map(r => r.describe(gainFor(r.id)))
   .join(' · '))
 
-/** The role under the pointer or holding focus, if any. */
+/** The role under the pointer, if any. */
 const previewedRole = ref(null)
 
 /**
@@ -267,23 +258,6 @@ const hoveredBandId = computed(() => {
 })
 
 /**
- * The hover tooltip: what this control does, and what state it is in.
- *
- * What the role *means* is not in here — that goes on the shared caption line,
- * where it is readable without hovering and cannot be missed by anyone who
- * never discovers that these have tooltips.
- */
-function roleTitle(role) {
-  const flagged = props.eq.detectedRoles.value.has(role.id)
-    ? ' The analysis flagged this one.'
-    : ''
-  const how = roleMuted(role.id)
-    ? 'switched off; move the knob to switch it back on'
-    : 'drag to adjust, double-click to reset it to flat and its default width'
-  return `${role.label} — ${how}.${flagged}`
-}
-
-/**
  * One line, two jobs.
  *
  * At rest it reports what the corrections are doing; while a control is under
@@ -300,8 +274,8 @@ const paletteCaption = computed(() => {
   const role = previewedRole.value ?? focusedRole.value
   if (!role) return activeSummary.value
 
-  // Centre and reach both answer "what is this control" in audible terms.
-  const centreHz = Math.round(props.eq.roleCentreHz(role.id))
+  // Definition plus reach: what the characteristic is, and where in the voice
+  // this control acts, both in terms that need no frequency vocabulary.
   return `${role.label} — ${role.description} ~ ${roleReach(role)}`
 })
 
@@ -344,9 +318,9 @@ function onMoveBand({ id, frequencyHz, gainDb }) {
 /**
  * A press on empty plot puts that role there, and goes on to drag it.
  *
- * Whether a band that never left the zero line survives the gesture is the
- * plot's call, not this one's — it is the thing that knows the press turned
- * into a drag. See CREATE_FLOOR_DB in EqPlot.
+ * `adopt` hands the band's id back to the plot synchronously, so the same press
+ * carries straight into dragging what it just placed. A role that already has a
+ * band gets it moved rather than doubled — see setRoleAt.
  */
 function onCreateBand({ frequencyHz, gainDb, adopt }) {
   const gain = Math.max(-GAIN_LIMIT_DB, Math.min(GAIN_LIMIT_DB, gainDb))
@@ -472,18 +446,12 @@ function fmtHz(hz) {
 }
 
 /**
- * What the focused role reaches, in hertz.
+ * What a role reaches, in hertz.
  *
  * The honest answer to "how wide is this" — a span in the user's own recording
  * rather than a Q, which is a fact about a filter and means nothing to anyone
  * who did not come here already knowing it.
  */
-const focusedReach = computed(() => {
-  const role = focusedRole.value
-  if (!role) return ''
-  return roleReach(role)
-})
-
 function roleReach(role) {
   const centre = props.eq.roleCentreHz(role.id)
   if (role.type === 'lowshelf') return `everything below ${fmtHz(centre)}`
@@ -505,12 +473,11 @@ function fmtWidth(q) {
 
       VoiceRx opens on the diagnosis alone because that is what a first-time
       user can act on with none of the vocabulary — press once, hear the voice
-      fixed, then read what was wrong in the findings. \
-      
-      Skipping goes straight to the controls and
-      the compact ANALYZE strip is waiting there, so nothing is behind it that
-      cannot be reached without it, and once past it the panel never comes back
-      to it. 
+      fixed, then read what was wrong in the findings.
+
+      Skipping goes straight to the controls, where the compact ANALYZE strip is
+      waiting, so nothing is behind this that cannot be reached without it. Once
+      past it the panel never comes back to it.
     -->
     <div
       v-if="showIntro"
@@ -554,7 +521,7 @@ function fmtWidth(q) {
       <p
         v-else-if="!eq.hasSelection.value"
         style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)"
-      >Make a selection first</p>
+      >Make a selection first.</p>
 
       <!-- Quiet on purpose. It is the right door for anyone who already knows
            the tool and the wrong one for anyone who does not, so it should be
@@ -570,39 +537,27 @@ function fmtWidth(q) {
 
     <template v-else>
 
-
     <!-- What the picture is. Without this the plot is unlabelled shapes and a
-         reader has no way in. -->
-    <div class="mb-[6px]">
-      <div class="hidden flex items-baseline justify-start gap-[10px]">
-        <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.45)">
-          VOICE TONE
-        </span>
-        <p style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32)">
-          {{ toneLabel }}
-          <span v-if="analysis && eq.analysisWidened.value"> · analysed from surrounding audio</span>
-        </p>
-      </div>
+         reader has no way in.
 
-      <!-- Legend. Only the marks that are actually on the plot: before an
-           analysis there is no envelope and there are no findings, and naming
-           them would send the reader looking for something that is not there. -->
-      <div class="flex flex-wrap items-center gap-x-[16px] gap-y-[4px]">
-        <template v-if="analysis">
-          <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
-            <svg width="16" height="8" aria-hidden="true"><path d="M0 6 Q4 1 8 4 T16 2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.5"/></svg>
-            your voice
-          </span>
-          <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
-            <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="rgba(255,180,120,.9)"/></svg>
-            area to fix
-          </span>
-        </template>
+         Only the marks that are actually on the plot: before an analysis there
+         is no envelope and there are no findings, and naming them would send
+         the reader looking for something that is not there. -->
+    <div class="flex flex-wrap items-center gap-x-[16px] gap-y-[4px] mb-[6px]">
+      <template v-if="analysis">
         <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
-          <svg width="16" height="8" aria-hidden="true"><path d="M0 4 Q8 8 16 2" fill="none" :stroke="accent" stroke-width="2"/></svg>
-          your changes
+          <svg width="16" height="8" aria-hidden="true"><path d="M0 6 Q4 1 8 4 T16 2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.5"/></svg>
+          your voice
         </span>
-      </div>
+        <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+          <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="rgba(255,180,120,.9)"/></svg>
+          area to fix
+        </span>
+      </template>
+      <span class="flex items-center gap-[6px]" style="font:500 9px/1 'Inter';color:rgba(255,255,255,.42)">
+        <svg width="16" height="8" aria-hidden="true"><path d="M0 4 Q8 8 16 2" fill="none" :stroke="accent" stroke-width="2"/></svg>
+        your changes
+      </span>
     </div>
 
     <!-- Above the picture, not below it: this is the caption that says what
@@ -661,13 +616,13 @@ function fmtWidth(q) {
             <div
               v-for="r in roles"
               :key="r.id"
-
               class="absolute top-[4px] flex flex-col items-center cursor-pointer"
               :style="{
                 left: `${r.leftPct}%`,
                 width: `${COLUMN_W}px`,
                 transform: 'translateX(-50%)',
               }"
+              :title="roleTitle(r)"
               @pointerenter="previewRole(r.role)"
               @pointerleave="previewRole(null)"
               @focusin="previewRole(r.role)"
@@ -688,14 +643,10 @@ function fmtWidth(q) {
                     color: eq.isRoleSoloed(r.id) ? accent : 'rgba(255,255,255,.35)',
                     background: eq.isRoleSoloed(r.id)
                       ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
-                    opacity: eq.roleOnState(r.id) === 'on' ? 1 : 0.4,
+                    opacity: canSolo(r.id) ? 1 : 0.4,
                   }"
-                  :disabled="eq.roleOnState(r.id) !== 'on'"
-                  :title="eq.roleOnState(r.id) === 'on'
-                    ? (roleBand(r.id)
-                      ? `Hear the ${r.label} correction alone`
-                      : `Hear the part of the recording ${r.label} acts on`)
-                    : `Switch ${r.label} on to solo it`"
+                  :disabled="!canSolo(r.id)"
+                  :title="soloTitle(r)"
                   @click.stop="eq.toggleRoleSolo(r.id)"
                   @dblclick.stop
                 >S</button>
@@ -737,7 +688,6 @@ function fmtWidth(q) {
                   :format-value="fmtGain"
                   @update:model-value="eq.setRoleGain(r.id, $event)"
                 />
-
               </div>
               <span
                 class="uppercase mt-[3px]"
@@ -752,21 +702,20 @@ function fmtWidth(q) {
                 cannot widen anything — it sets how steeply the shelf climbs
                 through its corner frequency, and past about 1.4 it starts to
                 overshoot into an audible bump or dip at the corner rather than
-                just steepening. A knob labelled WIDTH would have moved a real
-                parameter while naming one it does not touch, which is why these
-                two carried no knob at all; the fix for a wrong label is the
-                right label, not a missing control. What a shelf acts on is
-                still the caption line's answer, since slope does not change it.
+                just steepening. What a shelf acts on is still the caption
+                line's answer, since slope does not change it.
 
-                Double-click resets it alone — stopped here so it does not reach
-                the column, where the same gesture resets the whole role.
+                Only rendered while the role is on, so the knob always has a
+                band behind it to move. Double-click resets it alone — stopped
+                here so it does not reach the column, where the same gesture
+                resets the whole role.
               -->
-              <template v-if="eq.roleOnState(r.id) == 'on'">
+              <template v-if="eq.roleOnState(r.id) === 'on'">
                 <div
                   class="w-[40px] mt-[13px]"
                   :title="isShelfRole(r.role)
-                    ? `Slope — drag to steepen or soften the ${r.label} knee, `
-                      + `Past 1.4 may add resonance.`
+                    ? `Slope — drag to steepen or soften the ${r.label} knee. `
+                      + `Past 1.4 it may add resonance at the corner.`
                     : `Width — drag to narrow or widen`"
                   @dblclick.stop="resetRoleQ(r.id)"
                 >
@@ -780,7 +729,6 @@ function fmtWidth(q) {
                     :accent="accent"
                     :value-font-px="9"
                     :format-value="fmtWidth"
-                    :disabled="!roleBand(r.id)"
                     @update:model-value="eq.setRoleQ(r.id, $event)"
                   />
                 </div>
@@ -794,16 +742,13 @@ function fmtWidth(q) {
         </template>
       </EqPlot>
 
-      <div class="flex items-baseline justify-center mb-[9px]">
       <!-- Fixed height: this line swaps between the running summary and the
            definition of whichever control is under the pointer, and nothing
            below it should move as that happens. -->
       <p
-        class="mt-[10px]"
+        class="mt-[10px] mb-[9px] text-center"
         style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.32);min-height:13px"
       >{{ paletteCaption }}</p>
-      </div>
-
     </div>
 
     <div

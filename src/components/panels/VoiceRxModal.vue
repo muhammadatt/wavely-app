@@ -121,43 +121,43 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="px-[22px] pt-[18px] pb-[22px]">
-
-
       <!-- Findings are above the meter/plot row so the plot baseline stays
            aligned with the IN/OUT bars regardless of list length. -->
       <div v-if="vox.suggestions.value.length > 0" class="mb-[14px]">
         <div class="flex items-center justify-between mb-[7px]">
           <span
-            style="font:700 9px/1 'Inter';letter-spacing:.12em;color: rgba(255,255,255,.5)"
+            style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.5)"
           >
             ISSUES IDENTIFIED:
           </span>
           <div class="flex items-center gap-[10px]">
             <!-- Only once there is something to re-do. Keyed on the raw analysis
-             rather than hasAnalysis, which goes false the moment the selection
-             changes — precisely when re-analyzing is the thing you want. -->
-        <button
-          v-if="vox.analysis.value?.ok"
-          type="button"
-          class="flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px] cursor-pointer"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.5)"
-          :style="{ opacity: vox.analyzing.value || !vox.hasSelection.value ? 0.55 : 1 }"
-          :disabled="vox.analyzing.value || !vox.hasSelection.value"
-          :title="vox.hasSelection.value
-            ? 'Measure the current selection again'
-            : 'Select some audio to measure'"
-          @click="vox.analyze()"
-        >
-          <span v-if="vox.analyzing.value" class="vrx-spin" aria-hidden="true" />
-          {{ vox.analyzing.value ? 'ANALYSING…' : 'RE-ANALYZE' }}
-        </button>  
-          <button
-          v-if="vox.bands.value.length > 0"
-          type="button"
-          class="px-[8px] py-[4px] rounded-[3px] cursor-pointer"
-          style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.5)"
-          @click="vox.clearBands()"
-        >CLEAR</button>
+                 rather than hasAnalysis, which goes false the moment the
+                 selection changes — precisely when re-analyzing is what you
+                 want. -->
+            <button
+              v-if="vox.analysis.value?.ok"
+              type="button"
+              class="flex items-center gap-[6px] px-[8px] py-[4px] rounded-[3px] cursor-pointer"
+              style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.5)"
+              :style="{ opacity: vox.analyzing.value || !vox.hasSelection.value ? 0.55 : 1 }"
+              :disabled="vox.analyzing.value || !vox.hasSelection.value"
+              :title="vox.hasSelection.value
+                ? 'Measure the current selection again'
+                : 'Select some audio to measure'"
+              @click="vox.analyze()"
+            >
+              <span v-if="vox.analyzing.value" class="vrx-spin" aria-hidden="true" />
+              {{ vox.analyzing.value ? 'ANALYSING…' : 'RE-ANALYZE' }}
+            </button>
+            <button
+              v-if="vox.bands.value.length > 0"
+              type="button"
+              class="px-[8px] py-[4px] rounded-[3px] cursor-pointer"
+              style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.5)"
+              title="Remove every correction, leaving the diagnosis in place"
+              @click="vox.clearBands()"
+            >CLEAR</button>
             <!-- The same one-way write as a row's APPLY, over every row.
                  Disabled once nothing would change, so it reports whether the
                  diagnosis is in force rather than being a button that always
@@ -213,10 +213,10 @@ async function applyAndClose() {
           >
             {{ row.suggestion.symptom }}
           </p>
-          <!-- The measured recommendation, and only that. It used to fall back
-               to the band's live gain, which meant turning the knob rewrote the
-               diagnosis on screen and left no record of what was actually
-               measured. This number never changes while the analysis stands. -->
+          <!-- The measured recommendation, and only that — never the band's
+               live gain, or turning a knob would rewrite the diagnosis on
+               screen and leave no record of what was actually measured. This
+               number does not change while the analysis stands. -->
           <span
             class="shrink-0 text-right transition-opacity"
             style="font:600 10px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.45);min-width:96px"
@@ -224,10 +224,10 @@ async function applyAndClose() {
           >{{ row.suggestion.roleLabel }} · {{ fmtGain(row.suggestion.gainDb) }} dB</span>
 
           <!-- What is actually in force, when it is not what was recommended.
-               This is the half the row could not show before, and it is what
-               makes the button's "override" legible: you can see both numbers
-               and what pressing it would do. Fixed width so the buttons stay in
-               a column whether or not a row has drifted. -->
+               This is what makes the button's "override" legible: both numbers
+               are on the row, so what pressing it would do is visible. Fixed
+               width so the buttons stay in a column whether or not a row has
+               drifted. -->
           <span
             class="shrink-0 text-right"
             style="font:600 9px/1 'JetBrains Mono',monospace;min-width:62px"
@@ -256,15 +256,14 @@ async function applyAndClose() {
       <!--
         A clean bill of health, which only a completed analysis can give.
 
-        This was a plain v-else on the findings list, so it also covered the
-        state before anything had been measured — the panel opened by asserting
-        that nothing in the recording was worth correcting, having not listened
-        to it. An empty findings list means two entirely different things
-        depending on whether a diagnosis has run, and only one of them is news.
+        Gated on hasAnalysis, not on the list simply being empty: an empty
+        findings list means two entirely different things depending on whether
+        a diagnosis has run, and a panel that opens by asserting nothing is
+        wrong has not listened to anything yet.
 
-        Keyed on hasAnalysis rather than on freshness on purpose: a measurement
-        that found nothing does not stop having found nothing because the
-        selection moved. VoiceRxView's own banner reports the staleness.
+        Freshness is deliberately not part of the test — a measurement that
+        found nothing does not stop having found nothing because the selection
+        moved. VoiceRxView's own banner reports the staleness.
       -->
       <p
         v-else-if="vox.hasAnalysis.value"
@@ -291,7 +290,7 @@ async function applyAndClose() {
         <LevelMeter :db="vox.outputDb.value" label="OUT" :height="200" />
       </div>
 
-            <div class="flex items-center justify-end mb-[14px] gap-[14px]">
+      <div class="flex items-center justify-end mt-[14px] gap-[14px]">
         <span
           v-if="activeBandCount > 0"
           style="font:600 9px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"

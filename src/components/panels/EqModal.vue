@@ -72,7 +72,7 @@ async function applyAndClose() {
   >
     <div class="px-[22px] pt-[18px] pb-[22px]">
       <div class="flex items-center justify-between mb-[14px] gap-[14px]">
-                <label
+        <label
           class="flex items-center gap-[6px] cursor-pointer shrink-0"
           style="font:600 9px/1 'Inter';letter-spacing:.06em;color:rgba(255,255,255,.4)"
           title="Draw the live spectrum behind the curve"

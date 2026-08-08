@@ -376,7 +376,8 @@ export function resetBandQ(band) {
 
 /**
  * Set a band's Q, tracking whether it has diverged from the role canon.
- * VoiceRx hides the Q control but preserves any value already there (spec §2.4).
+ * `qModified` is what resetBandQ keys off, so the canonical width is always
+ * recoverable however far a width knob has been turned.
  */
 export function setBandQ(band, q) {
   band.q = clamp(q, ...qRangeFor(band.type))

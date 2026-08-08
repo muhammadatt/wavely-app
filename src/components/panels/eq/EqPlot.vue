@@ -281,10 +281,9 @@ function hzLabel(hz) {
  * Naming the regions is what lets someone read the display without knowing any
  * frequencies — the numbers are still there on hover.
  *
- * DRIVEN BY THE REGION TABLE, NOT BY THE ANALYSIS. It used to read
- * analysis.regionResults, which meant the axis fell back to hertz until
- * something had been measured. That was harmless while these were captions;
- * it is not harmless now that the role controls hang off them, because it
+ * DRIVEN BY THE REGION TABLE, NOT BY THE ANALYSIS. Reading
+ * analysis.regionResults instead would leave the axis in hertz until something
+ * had been measured, and since the role controls hang off these labels that
  * would put the whole palette behind a diagnosis — the one thing this panel is
  * built not to do. The table is always resolved (useVoiceRx.regions falls back
  * to the male ranges), so the names are always available and the analysis only
@@ -349,19 +348,12 @@ const LABEL_HOVER_LIFT = 0.35
 /**
  * One label, two states, one hover.
  *
- * WHAT THIS REPLACED. The label had three colour paths that did not agree:
- * amber whenever its region was highlighted, an accent-white mix when the role
- * was active, and a `!important` white with a tinted background from a CSS
- * :hover rule. Which one you saw depended on how you arrived — pointing at the
- * label itself hit the CSS rule and went white, pointing at its knob missed the
- * rule and went amber, so the same question asked two ways got two answers, and
- * neither looked like the accent the ribbon segment lights underneath.
- *
- * So: colour says one thing only — is this role doing audible work — and hover
- * is a brightness lift on top of whatever that colour is. No CSS :hover, which
- * is what makes it uniform: `highlightRegion` is set by pointing at the label,
- * at the role's knobs, or at its row in the findings list, and all three now
- * look identical because all three are the same signal.
+ * Colour says one thing only — is this role doing audible work — and hover is a
+ * brightness lift on top of whatever that colour is. Deliberately no CSS
+ * :hover, which is what keeps it uniform: `highlightRegion` is set by pointing
+ * at the label, at the role's knobs, or at its dot on the curve, and all three
+ * look identical because all three are the same signal. A CSS rule would answer
+ * only the first of them, and differently.
  */
 function roleLabelStyle(r) {
   const on = activeRoleIds.value.has(r.id)
@@ -444,46 +436,35 @@ function draw() {
 }
 
 /**
- * The nine named regions, drawn to scale along the bottom of the plot.
+ * The region under the pointer, drawn to scale along the bottom of the plot.
  *
- * This is what makes the palette and the picture one object. It was once the
- * only thing doing that job, because placing the role controls themselves at
- * their frequencies did not survive the arithmetic: on the old 20 Hz-20 kHz
- * axis the closest pair of region centres were 46 px apart and a control was
- * 62 px wide, so they overlapped in the mids while 150 px of the low end sat
- * empty. Narrowing the axis to the region span (see fMin) changed that number —
- * the tightest pair, Body and Mud, are now 58 px apart at this width — and the
- * controls did move onto the axis, at 48 px each. The ribbon stays because it
- * is the only thing that can show a *span*: a control sits at one point, and
- * the regions are ranges that overlap.
+ * This is what makes the palette and the picture one object, and it is the only
+ * thing here that can show a *span*: a role's controls sit at one point on the
+ * axis, and the regions are ranges. The span drawn is the scan range, so
+ * adjacent regions genuinely overlap — Body and Mud share 200-280 Hz for a male
+ * voice — which is why a highlight can reach under its neighbour's label.
  *
- * Spans are the scan ranges, so adjacent regions genuinely overlap — Body and
- * Mud share 200-280 Hz for a male voice. Drawn translucent, the overlap shows
- * as a brighter join, which is the truth: a problem sitting there belongs to
- * both descriptions.
- *
- * Unnamed. The highlighted segment used to draw its region's name above itself,
- * which was worth it while the axis labels below alternated across two rows and
- * the matching one could be on either. Now that they sit on one line directly
- * under the ribbon, the name appeared twice within a few pixels of the same
- * place. The segment lights, the label under it lights, and that is the link.
+ * Only the highlighted region is painted, and it carries no name of its own:
+ * the axis labels sit on one line directly beneath the ribbon, so a name here
+ * would appear twice within a few pixels. The segment lights, the label under
+ * it lights, and that is the link.
  */
 function drawRegionRibbon(ctx, h) {
   const table = props.regionRibbon
   if (!table) return
 
   const top = h - RIBBON_H
+  // Only the highlighted segment is painted — the rest of the ribbon is the
+  // plot's own background, so drawing them fully transparent achieved nothing.
   for (const [region, span] of Object.entries(table)) {
+    if (props.highlightRegion !== region) continue
     const [lo, hi] = span
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue
     const x1 = xFor(Math.max(lo, fMin.value))
     const x2 = xFor(Math.min(hi, fMax.value))
-    const hot = props.highlightRegion === region
 
-    ctx.fillStyle = hot
-      ? `color-mix(in srgb, ${props.accent} 55%, transparent)`
-      : 'rgba(255,255,255,0)'
-    ctx.fillRect(x1 + 0.5, top, Math.max(1, x2 - x1 - 1), RIBBON_H + 1 )
+    ctx.fillStyle = `color-mix(in srgb, ${props.accent} 55%, transparent)`
+    ctx.fillRect(x1 + 0.5, top, Math.max(1, x2 - x1 - 1), RIBBON_H + 1)
   }
 }
 
@@ -622,7 +603,6 @@ function drawAnalyzer(ctx, w, h) {
   const binWidth = props.sampleRate / (spectrum.length * 2)
   ctx.beginPath()
   ctx.moveTo(0, h)
-  let started = false
   for (let k = 1; k < spectrum.length; k++) {
     const hz = k * binWidth
     if (hz < fMin.value) continue
@@ -630,14 +610,7 @@ function drawAnalyzer(ctx, w, h) {
     // The analyser reports dBFS; map the useful window onto the plot so the
     // trace sits behind the curve as a texture rather than competing with it.
     const norm = (spectrum[k] + 100) / 90
-    const y = h - Math.max(0, Math.min(1, norm)) * h
-    const x = xFor(hz)
-    if (!started) {
-      ctx.lineTo(x, y)
-      started = true
-    } else {
-      ctx.lineTo(x, y)
-    }
+    ctx.lineTo(xFor(hz), h - clampUnit(norm) * h)
   }
   ctx.lineTo(w, h)
   ctx.closePath()
@@ -672,7 +645,7 @@ function drawEnvelope(ctx, w, h) {
   const a = props.analysis
   const freqs = a?.freqsHz
   const env = a?.envelopeDb
-  if (!freqs || !env) return
+  if (!freqs || !env) return null
 
   // Fit to the band that has content. The floor is relative to the peak for the
   // same reason the analysis skips dead regions: below it there is nothing but
@@ -682,7 +655,7 @@ function drawEnvelope(ctx, w, h) {
   for (let k = 0; k < freqs.length; k++) {
     if (freqs[k] >= 100 && freqs[k] <= 16000) peak = Math.max(peak, env[k])
   }
-  if (!Number.isFinite(peak)) return
+  if (!Number.isFinite(peak)) return null
   const floor = peak - 60
   const top = h * 0.08
   const bottom = h * 0.94
@@ -734,13 +707,11 @@ function drawEnvelope(ctx, w, h) {
  * row for anyone who wants it, and a number here would be one more thing to
  * decode.
  *
- * ONE THING LIGHTS THESE, AND IT IS NOT THE KNOBS. They used to follow
- * highlightRegion, so pointing at a role's controls moved the marker for that
- * region — the wrong object to answer with, because a marker records what was
- * measured before anything was corrected and does not change when a knob moves.
- * Reacting to that pointer made it read as live state. Pointing at a control now
- * lights the band's dot, which *is* live state (see hoveredBandId in
- * VoiceRxView).
+ * ONE THING LIGHTS THESE, AND IT IS NOT THE KNOBS. A marker records what was
+ * measured before anything was corrected; it does not move when a knob moves,
+ * so reacting to a pointer on a control would make it read as live state.
+ * Pointing at a control lights the band's dot instead, which *is* live state
+ * (see hoveredBandId in VoiceRxView).
  *
  * What does light a marker is markRegion: a findings row in the faceplate, whose
  * sentence is about this measurement and nothing else. Same gesture, opposite
@@ -975,12 +946,10 @@ function onPlotDown(e) {
   // hands back the id synchronously — an emit's handlers run before this
   // returns — because the band does not exist until it says so, and without
   // knowing which one it made there is nothing to drag.
-  // Snapshotted before the emit, because the owner may hand back a band that
-  // already existed — VoiceRx moves a role's band rather than giving the role a
-  // second one. Only a band this press actually brought into being may be taken
-  // away again on release, or a press at the zero line would delete work.
-  const existing = new Set(props.bands.map(b => b.id))
-
+  //
+  // The id may belong to a band that already existed: VoiceRx moves a role's
+  // band rather than giving the role a second one. Either way it is the band
+  // now under the pointer, which is all the drag needs.
   let placed = null
   emit('create-band', {
     frequencyHz: hzFor(e.clientX - rect.left),
@@ -990,7 +959,7 @@ function onPlotDown(e) {
   if (placed === null) return
 
   emit('select-band', placed)
-  drag = { id: placed, created: !existing.has(placed) }
+  drag = { id: placed }
   canvasEl.value.setPointerCapture(e.pointerId)
 }
 </script>
@@ -1044,17 +1013,14 @@ function onPlotDown(e) {
       Band handles: DOM, not canvas, so pointer capture and focus are free.
 
       The grab area is HANDLE_HIT_PX square while the dot drawn inside it stays
-      11 px. They used to be the same 11 px, which made grabbing an existing
-      band a game of accuracy nobody wins: the canvas underneath turns any press
-      into a new band, so every near miss added one. The dot is a target to aim
-      at, not the size of the target.
-    -->
-    <!--
-      Its own title, which overrides the wrapper's by ordinary HTML tooltip
-      resolution. The plot as a whole explains adding a band; a band explains
-      what can be done to a band. That is cheaper than any badge and it puts the
-      answer where the question is asked — an earlier version floated a × over
-      the hovered dot, which worked and read as clutter.
+      11 px. The canvas underneath turns any press into a new band, so a grab
+      area the size of the dot would make every near miss add one. The dot is a
+      target to aim at, not the size of the target.
+
+      Each handle carries its own title, which overrides the wrapper's by
+      ordinary HTML tooltip resolution: the plot as a whole explains adding a
+      band, a band explains what can be done to a band. Cheaper than any badge,
+      and it puts the answer where the question is asked.
     -->
     <div
       v-for="band in shownHandles"
@@ -1095,16 +1061,13 @@ function onPlotDown(e) {
       </button>
     </div>
 
-    <!-- Frequency axis: role names in VoiceRx, numbers in General -->
     <!--
-      One line, not two.
+      Frequency axis: role names in VoiceRx, numbers in General.
 
-      These used to alternate between two rows to keep long neighbours apart,
-      which was necessary while the axis ran 20 Hz-20 kHz and squeezed all nine
-      into its middle two thirds. On the region-span axis they spread out: the
-      closest pair, Boxiness and Nasality, sit 68px apart and need 50, and every
-      other pair has more room. Two rows now costs a line of height and reads as
-      though the labels were in some kind of order they are not.
+      One line, not two. On the region-span axis the nine names spread out far
+      enough to sit side by side — the closest pair, Boxy and Nasal, are 68 px
+      apart and need 50 — and a second row would cost a line of height while
+      implying an ordering the labels do not have.
     -->
     <div
       v-if="roleAxis.length > 0"
@@ -1119,12 +1082,9 @@ function onPlotDown(e) {
         py-[2px] is what sets the row's 14px, whose 2px of slack underneath is
         the gap to the column below.
 
-        It was a plain span, and the role's own controls carried a second copy
-        of the same word above them to press. Two labels for one thing, in two
-        places, one of which had no position on the frequency axis — so the
-        reader had to match name to name to find out where in the voice a knob
-        was acting. There is one name now, at the frequency it belongs to, with
-        that role's controls directly beneath it.
+        One name per role, at the frequency it belongs to, with that role's
+        controls directly beneath it — so nothing has to be matched name to name
+        to find out where in the voice a knob is acting.
 
         Pressing it focuses the role; it does not reveal anything, because every
         column is on screen already (see COLUMN_H in VoiceRxView). Colour says
