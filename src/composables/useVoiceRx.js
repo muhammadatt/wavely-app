@@ -136,11 +136,36 @@ export function useVoiceRx() {
    * explanation. Neither is derivable from the other, which is why the row needs
    * both: the note says what was heard, the band says what is being done about
    * it right now.
+   *
+   * `atRecommended` answers the one question the row's button needs: would
+   * pressing it change anything? All three measured numbers are compared, not
+   * just the gain, because a dot dragged along the plot moves the frequency and
+   * a wheel over it moves the Q — both leave the correction no longer the one
+   * that was recommended, and both are things the button exists to undo.
    */
-  const suggestionRows = computed(() => suggestions.value.map(s => ({
-    suggestion: s,
-    band: s.roleId ? bandForRole(bands.value, s.roleId) : null,
-  })))
+  const suggestionRows = computed(() => suggestions.value.map((s) => {
+    const band = s.roleId ? bandForRole(bands.value, s.roleId) : null
+    return { suggestion: s, band, atRecommended: isAtRecommended(band, s) }
+  }))
+
+  /**
+   * Does this band carry exactly what was recommended for it?
+   *
+   * Tolerances rather than equality: gain arrives from a knob quantized to
+   * 0.1 dB and Q from one quantized to two decimals, so a band the user nudged
+   * and nudged back would fail an === test while sounding identical, and the
+   * button would offer to re-apply something already in force.
+   *
+   * A switched-off band is not at the recommendation whatever its numbers say.
+   * The recommendation is a correction to be heard; one that is muted is not
+   * being made, and re-applying is exactly the right offer.
+   */
+  function isAtRecommended(band, suggestion) {
+    if (!band || !band.enabled) return false
+    return Math.abs(band.gainDb - suggestion.gainDb) < 0.05
+      && Math.abs(band.frequencyHz - suggestion.frequencyHz) < 0.5
+      && Math.abs(band.q - suggestion.q) < 0.01
+  }
 
   /**
    * How many suggestions are actually doing something.
@@ -168,62 +193,54 @@ export function useVoiceRx() {
    * as a whole can be bypassed, and nothing touches the file until Apply.
    */
   function applyAllSuggestions() {
-    for (const s of suggestions.value) {
-      if (bands.value.length >= api.maxBands) break
-      const existing = s.roleId ? bandForRole(bands.value, s.roleId) : null
-      const band = suggestionToBand(s, regions.value)
-      // One band per role: a second correction over the same region stacks two
-      // filters where the analysis measured one problem.
-      bands.value = existing
-        ? bands.value.map(b => (b.id === existing.id ? band : b))
-        : [...bands.value, band]
-    }
+    for (const s of suggestions.value) writeSuggestion(s)
     api.pushBands()
   }
 
   /**
-   * Switch one suggestion's correction on or off.
+   * Write one recommendation into the pool, overwriting whatever is there.
    *
-   * A row is never a dead switch, which means answering for every way a
-   * correction can be inert, not just the obvious one. A band is doing nothing
-   * if it is switched off — or if its knob has been turned to 0 dB, which the
-   * switch reads as off because that is what it sounds like. Turning such a row
-   * back on restores the measured gain; flipping `enabled` alone would leave the
-   * switch exactly where it was and look broken.
+   * ONE-WAY, AND THE ONLY DIRECTION THAT EXISTS. The row used to be a toggle:
+   * press it once to switch the correction off, again to bring it back. That
+   * made the row a control over the band, and a control has to display the
+   * thing it controls — so the row showed the band's live gain, which meant the
+   * measured recommendation was overwritten on screen the moment the user
+   * touched the knob. The diagnosis then had no representation anywhere, and
+   * "what did it actually recommend?" became unanswerable.
    *
-   * Rebuilds the band outright if it is missing — after a Clear, or after the
-   * user sent the corrections to the EQ.
+   * So the row is a read-only statement of what was measured, and this is the
+   * one action on it: put that back. Switching a correction off is the role
+   * column's ON button, where it sits beside the knob it mutes.
+   *
+   * Keeps the existing band's id when overwriting. createBand mints a fresh one,
+   * and a new id would strand a solo or a plot selection pointing at the band
+   * this just replaced.
+   *
+   * @returns {boolean} false if the pool was full and nothing was written
    */
-  function toggleSuggestion(suggestion) {
-    const existing = suggestion.roleId ? bandForRole(bands.value, suggestion.roleId) : null
-    if (existing) {
-      if (isBandActive(existing)) {
-        api.toggleBand(existing.id)
-        return
-      }
-      api.updateBand(existing.id, (b) => {
-        b.enabled = true
-        if (b.gainDb === 0) b.gainDb = suggestion.gainDb
-      })
-      return
-    }
-    if (api.atBandLimit.value) {
-      showToast(`VoiceRx holds ${api.maxBands} bands — remove one to add another`)
-      return
-    }
-    bands.value = [...bands.value, suggestionToBand(suggestion, regions.value)]
-    api.pushBands()
+  function writeSuggestion(s) {
+    const existing = s.roleId ? bandForRole(bands.value, s.roleId) : null
+    if (!existing && bands.value.length >= api.maxBands) return false
+
+    const band = suggestionToBand(s, regions.value)
+    // One band per role: a second correction over the same region stacks two
+    // filters where the analysis measured one problem.
+    bands.value = existing
+      ? bands.value.map(b => (b.id === existing.id ? { ...band, id: existing.id } : b))
+      : [...bands.value, band]
+    return true
   }
 
-  function setAllSuggestions(on) {
-    if (on) {
-      // Re-create anything missing, then make sure the whole set is enabled.
-      applyAllSuggestions()
-      bands.value = bands.value.map(b => (b.origin === 'suggestion'
-        ? { ...b, enabled: true } : b))
-    } else {
-      bands.value = bands.value.map(b => (b.origin === 'suggestion'
-        ? { ...b, enabled: false } : b))
+  /**
+   * The row's button: override this role's current values with the measured ones.
+   *
+   * Same writer as applyAllSuggestions, so a row and the bulk action can never
+   * disagree about what "the recommendation" means.
+   */
+  function applySuggestion(suggestion) {
+    if (!writeSuggestion(suggestion)) {
+      showToast(`VoiceRx holds ${api.maxBands} bands — remove one to add another`)
+      return
     }
     api.pushBands()
   }
@@ -582,7 +599,7 @@ export function useVoiceRx() {
     introDismissed, dismissIntro: () => { introDismissed.value = true },
     suggestions, suggestionRows, activeSuggestionCount,
     regions, paletteRoles, detectedRoles,
-    analyze, applyAllSuggestions, toggleSuggestion, setAllSuggestions, toggleSolo,
+    analyze, applyAllSuggestions, applySuggestion, toggleSolo,
     toggleRoleSolo, isRoleSoloed,
     roleGain, setRoleGain, setRoleAt, roleQ, setRoleQ, roleCentreHz, resetRole,
     roleOnState, toggleRoleEnabled,

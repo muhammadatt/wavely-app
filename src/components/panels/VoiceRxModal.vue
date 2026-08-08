@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, withDirectives } from 'vue'
 import { useVoiceRx } from '../../composables/useVoiceRx.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { isBandActive } from '../../audio/eqBands.js'
@@ -32,12 +32,48 @@ const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
 
 const activeBandCount = computed(() => vox.activeBands.value.length)
 
+const atRecommendedCount = computed(() =>
+  vox.suggestionRows.value.filter(r => r.atRecommended).length)
+
+/** Nothing left for APPLY ALL to change. */
+const allAtRecommended = computed(() =>
+  vox.suggestions.value.length > 0
+  && atRecommendedCount.value === vox.suggestions.value.length)
+
 function fmtGain(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 }
 
 function isOn(row) {
   return !!row.band && isBandActive(row.band)
+}
+
+/**
+ * What is in force in this region right now, if it is not the recommendation.
+ *
+ * Empty when the row is at its recommended values — there is nothing to
+ * contrast with — and empty is rendered as transparent text rather than as no
+ * element, so the buttons stay aligned down the list.
+ *
+ * The three ways a row can have drifted get three different notes, because
+ * "off" and "−2.0 dB instead of −4.5" and "not in the pool at all" are answered
+ * by different next actions, and only the last is a case where APPLY is adding
+ * something rather than replacing it.
+ */
+function currentNote(row) {
+  if (row.atRecommended) return ''
+  if (!row.band) return 'not set'
+  if (!row.band.enabled) return 'off'
+  return `now ${fmtGain(row.band.gainDb)}`
+}
+
+/** Says what the press will do, in the two numbers it will do it to. */
+function applyTitle(row) {
+  const want = `${fmtGain(row.suggestion.gainDb)} dB`
+  if (row.atRecommended) return `${row.suggestion.roleLabel} is at the recommended ${want}`
+  if (!row.band) return `Add the recommended ${row.suggestion.roleLabel} correction, ${want}`
+  return `Override ${row.suggestion.roleLabel} — currently `
+    + `${fmtGain(row.band.gainDb)} dB — with the recommended ${want}`
 }
 
 function togglePlayback() {
@@ -74,13 +110,10 @@ async function applyAndClose() {
            aligned with the IN/OUT bars regardless of list length. -->
       <div v-if="vox.suggestions.value.length > 0" class="mb-[14px]">
         <div class="flex items-center justify-between mb-[7px]">
-          <span style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.4)">
-            ISSUES IDENTIFIED:
+          <span style="font:700 9px/1 'Inter';letter-spacing:.12em;" :style="{color: white, opacity: 0.55}">
+            {{ vox.suggestions.value.length }} ISSUES IDENTIFIED:
           </span>
           <div class="flex items-center gap-[10px]">
-            <span style="font:500 9px/1 'Inter';color:rgba(255,255,255,.3)">
-              {{ vox.activeSuggestionCount.value }} of {{ vox.suggestions.value.length }} on
-            </span>
             <!-- Only once there is something to re-do. Keyed on the raw analysis
              rather than hasAnalysis, which goes false the moment the selection
              changes — precisely when re-analyzing is the thing you want. -->
@@ -106,15 +139,26 @@ async function applyAndClose() {
           style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4)"
           @click="vox.clearBands()"
         >CLEAR</button>
+            <!-- The same one-way write as a row's APPLY, over every row.
+                 Disabled once nothing would change, so it reports whether the
+                 diagnosis is in force rather than being a button that always
+                 looks live and sometimes does nothing. -->
             <button
               type="button"
-              class="px-[8px] py-[4px] rounded-[3px]"
+              class="px-[8px] py-[4px] rounded-[3px] transition-colors"
               :style="{
                 font: '600 9px/1 Inter', letterSpacing: '.06em',
-                border: `1px solid color-mix(in srgb, ${ACCENT} 45%, transparent)`,
-                color: ACCENT,
+                border: allAtRecommended
+                  ? '1px solid rgba(255,255,255,.08)'
+                  : `1px solid color-mix(in srgb, ${ACCENT} 45%, transparent)`,
+                color: allAtRecommended ? 'rgba(255,255,255,.3)' : ACCENT,
+                cursor: allAtRecommended ? 'default' : 'pointer',
               }"
-              @click="vox.setAllSuggestions(true)"
+              :disabled="allAtRecommended"
+              :title="allAtRecommended
+                ? 'Every correction is at its recommended value'
+                : 'Override every correction with the recommended values'"
+              @click="vox.applyAllSuggestions()"
             >APPLY ALL</button>
           </div>
         </div>
@@ -135,32 +179,53 @@ async function applyAndClose() {
           :style="{
             background: hoveredSuggestionRegion === row.suggestion.region
               ? 'rgba(255,180,120,.07)' : 'transparent',
-            opacity: isOn(row) ? 1 : 0.45,
           }"
           @pointerenter="hoveredSuggestionRegion = row.suggestion.region"
           @pointerleave="hoveredSuggestionRegion = null"
         >
-          <p class="flex-1" style="font:500 11px/1.4 'Inter';color:rgba(255,255,255,.75)">
+          <p
+            class="flex-1 transition-opacity"
+            style="font:500 11px/1.4 'Inter';color:rgba(255,255,255,.75)"
+          >
             {{ row.suggestion.symptom }}
           </p>
+          <!-- The measured recommendation, and only that. It used to fall back
+               to the band's live gain, which meant turning the knob rewrote the
+               diagnosis on screen and left no record of what was actually
+               measured. This number never changes while the analysis stands. -->
+          <span
+            class="shrink-0 text-right transition-opacity"
+            style="font:600 10px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.45);min-width:96px"
+            :style="{ opacity: isOn(row) ? 1 : 0.45 }"
+          >{{ row.suggestion.roleLabel }} · {{ fmtGain(row.suggestion.gainDb) }} dB</span>
+
+          <!-- What is actually in force, when it is not what was recommended.
+               This is the half the row could not show before, and it is what
+               makes the button's "override" legible: you can see both numbers
+               and what pressing it would do. Fixed width so the buttons stay in
+               a column whether or not a row has drifted. -->
           <span
             class="shrink-0 text-right"
-            style="font:600 10px/1 'JetBrains Mono',monospace;color:rgba(255,255,255,.45);min-width:96px"
-          >{{ row.suggestion.roleLabel }} · {{ fmtGain(row.band?.gainDb ?? row.suggestion.gainDb) }} dB</span>
+            style="font:600 9px/1 'JetBrains Mono',monospace;min-width:62px"
+            :style="{ color: currentNote(row) ? 'rgba(255,190,120,.7)' : 'transparent' }"
+          >{{ currentNote(row) }}</span>
+
           <button
             type="button"
-            class="shrink-0 px-[8px] py-[4px] rounded-[3px]"
-            style="font:600 9px/1 'Inter';letter-spacing:.06em;border:1px solid rgba(255,255,255,.12)"
+            class="shrink-0 px-[8px] py-[4px] rounded-[3px] transition-colors"
+            style="font:600 9px/1 'Inter';letter-spacing:.06em"
             :style="{
-              color: vox.soloBandId.value === row.band?.id ? ACCENT : 'rgba(255,255,255,.5)',
-              background: vox.soloBandId.value === row.band?.id
-                ? `color-mix(in srgb, ${ACCENT} 22%, transparent)` : 'transparent',
-              opacity: row.band ? 1 : 0.35,
+              border: row.atRecommended
+                ? '1px solid rgba(255,255,255,.08)'
+                : `1px solid color-mix(in srgb, ${ACCENT} 45%, transparent)`,
+              color: row.atRecommended ? 'rgba(255,255,255,.3)' : ACCENT,
+              background: 'transparent',
+              cursor: row.atRecommended ? 'default' : 'pointer',
             }"
-            :disabled="!row.band"
-            title="Hear this correction on its own"
-            @click="vox.toggleSuggestion(row.suggestion)"
-          >APPLY</button>
+            :disabled="row.atRecommended"
+            :title="applyTitle(row)"
+            @click="vox.applySuggestion(row.suggestion)"
+          >{{ row.atRecommended ? 'APPLIED' : 'APPLY' }}</button>
         </div>
       </div>
 

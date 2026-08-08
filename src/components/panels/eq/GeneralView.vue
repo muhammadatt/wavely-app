@@ -305,8 +305,10 @@ function gainLabel(band) {
               color: eq.soloBandId.value === band.id ? accent : 'rgba(255,255,255,.35)',
               background: eq.soloBandId.value === band.id
                 ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+              opacity: band.enabled ? 1 : 0.4,
             }"
-            title="Hear this band alone"
+            :disabled="!band.enabled"
+            :title="band.enabled ? 'Hear this band alone' : 'Turn this band on to solo it'"
             @click="eq.soloBandId.value === band.id ? eq.clearSolo() : eq.setSolo(band.id)"
           >S</button>
           <button

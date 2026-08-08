@@ -129,9 +129,9 @@ export const ROLES = [
     describe: gainDb => (gainDb >= 0 ? 'more mud' : 'less mud'),
   },
   {
-    id: 'boxiness',
+    id: 'boxy',
     region: 'boxy_honky',
-    label: 'Boxiness',
+    label: 'Boxy',
     type: 'peaking',
     canonicalQ: 2.5,
     bias: 'cut',
@@ -139,9 +139,9 @@ export const ROLES = [
     describe: gainDb => (gainDb >= 0 ? 'boxier' : 'less boxy'),
   },
   {
-    id: 'nasality',
+    id: 'nasal',
     region: 'nasal',
-    label: 'Nasality',
+    label: 'Nasal',
     type: 'peaking',
     canonicalQ: 3.0,
     bias: 'cut',

@@ -37,15 +37,15 @@ import { createBand, getRole } from '../eqBands.js'
  * nothing they could not already see.
  */
 const SYMPTOMS = {
-  sub_bass: 'low-end rumble is sitting under the voice',
-  body_warmth: 'the voice sounds thin — it is missing weight',
-  mud: 'this reads muddy — the low mids are crowded',
-  boxy_honky: 'there is a boxy, hollow ring to this',
-  nasal: 'the voice sounds pinched, like a blocked nose',
-  lower_presence: 'speech sits back — words are harder to pick out',
-  upper_presence: 'this is harsh and forward in the ear',
-  brilliance: 'the S sounds are sharp',
-  air: 'the top end is dull — there is no air around the voice',
+  sub_bass: 'Low-end rumble is sitting under the voice',
+  body_warmth: 'The voice sounds thin — it is missing weight',
+  mud: 'Sounds muddy — the low mids are crowded',
+  boxy_honky: 'There is a boxy, hollow ring to this',
+  nasal: 'The voice sounds pinched, like a blocked nose',
+  lower_presence: 'Speech sits back — words are harder to pick out',
+  upper_presence: 'This sounds harsh and forward in the ear',
+  brilliance: 'The S sounds are sharp',
+  air: 'The top end is dull and lacking air around the voice',
 }
 
 /** Where a merged band's symptom comes from: the lower-frequency contributor. */

@@ -1032,10 +1032,18 @@ function onPlotDown(e) {
     <div
       v-if="roleAxis.length > 0"
       class="relative w-full mt-[3px]"
-      style="height:12px"
+      style="height:14px"
     >
       <!--
         The label is the role's control, not a caption.
+
+        Hence py-[2px], and hence the row being 14px rather than the 12 an 8px
+        glyph needs: the pressed tint has to be the same shape as the tint on the
+        S/ON buttons in the column below, because they are the same kind of
+        thing. Unpadded, it was a tint bar exactly as tall as its text sitting
+        above buttons half again that height, and the two read as unrelated
+        chrome. The 2px of slack under the button is the whole gap to the column,
+        which starts 4px into the row below.
 
         It was a plain span, and the role's own controls carried a second copy
         of the same word above them to open them with. Two labels for one thing,
@@ -1048,7 +1056,7 @@ function onPlotDown(e) {
         v-for="r in roleAxis"
         :key="r.id"
         type="button"
-        class="eqp-role-label absolute top-0 whitespace-nowrap rounded-[2px] px-[3px] transition-colors"
+        class="eqp-role-label absolute top-0 whitespace-nowrap rounded-[2px] px-[3px] py-[2px] transition-colors"
         :aria-pressed="openRole === r.id"
         :title="openRole === r.id
           ? `Close ${r.label}`

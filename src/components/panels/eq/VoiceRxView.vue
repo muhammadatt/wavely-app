@@ -158,8 +158,14 @@ function roleBand(roleId) {
   return bandForRole(props.eq.bands.value, roleId)
 }
 
-/** Back to the role's canonical width, leaving its gain where it is. */
-function resetRoleWidth(roleId) {
+/**
+ * Back to the role's canonical Q, leaving its gain where it is.
+ *
+ * Named for the parameter rather than for the control, because the same reset
+ * serves both names that parameter goes under — a bell's width and a shelf's
+ * slope.
+ */
+function resetRoleQ(roleId) {
   const band = roleBand(roleId)
   if (band) props.eq.resetQ(band.id)
 }
@@ -304,7 +310,12 @@ function onCreateBand({ frequencyHz, gainDb, adopt }) {
   adopt?.(props.eq.setRoleAt(frequencyHz, gain))
 }
 
-/** Scrolling the mouse wheel over a dot narrows or widens it — the third dimension a drag cannot reach. */
+/**
+ * Scrolling the mouse wheel over a dot moves its Q — the third dimension a drag
+ * cannot reach. Narrows or widens a bell; steepens or softens a shelf's knee.
+ * Either way it is a shortcut to the knob in the role's column, not a control
+ * that exists only here.
+ */
 function onQBand({ id, delta }) {
   const band = props.eq.findBand(id)
   if (!band) return
@@ -377,8 +388,18 @@ const COLUMN_W = 48
  * second role, or closing one, never moves the panel underneath. It grows once,
  * when the first column opens, which is feedback rather than a jump; what it
  * must not do is resize every time the open set changes.
+ *
+ * THE COLUMN'S VERTICAL RHYTHM. Two gaps only, and the small one has to be
+ * clearly smaller or the labels stop belonging to anything:
+ *
+ *   3 px   a label to the knob it names, directly above it
+ *   10-13  one group to the next, and the S/ON row to the knobs
+ *
+ * It used to run 5 px above each label and 7 px below it, which put GAIN almost
+ * exactly between two knobs — near enough to equidistant that it read as the
+ * caption for the wrong one. The ratio matters more than either number.
  */
-const COLUMN_H = 152
+const COLUMN_H = 156
 
 /**
  * Is this role's column showing?
@@ -395,7 +416,13 @@ function isRoleOpen(roleId) {
 const anyRoleOpen = computed(() =>
   props.eq.paletteRoles.some(r => isRoleOpen(r.id)))
 
-/** A shelf reaches to the end of the spectrum; only a bell has a width. */
+/**
+ * Which of the two names this role's Q knob goes under.
+ *
+ * A shelf reaches to the end of the spectrum, so only a bell has a width; on a
+ * shelf the same parameter is the slope of the knee. See the Q knob in the
+ * template.
+ */
 function isShelfRole(role) {
   return role.type === 'lowshelf' || role.type === 'highshelf'
 }
@@ -438,15 +465,12 @@ function fmtWidth(q) {
 
       VoiceRx opens on the diagnosis alone because that is what a first-time
       user can act on with none of the vocabulary — press once, hear the voice
-      fixed, then read what was wrong in the findings. Meeting nine knobs, a
-      plot and a findings list at the same moment asks them to understand the
-      panel before anything in it means anything.
-
-      It is a door, not a toll gate. Skipping goes straight to the controls and
+      fixed, then read what was wrong in the findings. \
+      
+      Skipping goes straight to the controls and
       the compact ANALYZE strip is waiting there, so nothing is behind it that
       cannot be reached without it, and once past it the panel never comes back
-      to it. That is the difference between this and what it replaced, which
-      made the diagnosis the only route in.
+      to it. 
     -->
     <div
       v-if="showIntro"
@@ -507,17 +531,7 @@ function fmtWidth(q) {
     </div>
 
     <template v-else>
-    <!--
-      Nothing here is gated on having analysed.
 
-      The plot and the palette used to live behind the ANALYZE prompt, which
-      made shaping by ear — reach for a characteristic, hear what it does —
-      reachable only by first running a diagnosis you may not want. They are
-      two capabilities, not one flow, and the region table falls back to the
-      male ranges until a voice type is measured (see useVoiceRx.regions), so
-      the controls have always been able to work unanalysed. The diagnosis
-      adds to this panel; it is not the door to it.
-    -->
 
     <!-- What the picture is. Without this the plot is unlabelled shapes and a
          reader has no way in. -->
@@ -594,14 +608,6 @@ function fmtWidth(q) {
           Every role's controls, directly under the name on the axis that
           opens them.
 
-          They used to be a wrapping row of nine fixed columns below the plot,
-          each with the role's name repeated above it. That is one label too
-          many for one thing: the copy on the axis had a frequency and the copy
-          over the knob did not, so the only way to find out where in the voice
-          a knob was acting was to match the two words. Hanging the column off
-          the label collapses them into one control — and the ribbon segment,
-          the label and the knobs now light and sit at the same place.
-
           Position comes from the plot, which owns the axis mapping (see the
           role-controls slot in EqPlot). The row keeps a fixed height while
           anything is open so that opening or closing one column does not shift
@@ -618,8 +624,8 @@ function fmtWidth(q) {
             <div
               v-for="r in roles"
               :key="r.id"
-              v-show="isRoleOpen(r.id)"
-              class="absolute top-[6px] flex flex-col items-center cursor-pointer"
+
+              class="absolute top-[4px] flex flex-col items-center cursor-pointer"
               :style="{
                 left: `${r.leftPct}%`,
                 width: `${COLUMN_W}px`,
@@ -637,7 +643,7 @@ function fmtWidth(q) {
                    plugins that both hold a pool of bands should not each invent
                    their own vocabulary for switching one off and hearing it
                    alone. -->
-              <div class="flex items-center gap-[3px] mb-[6px]">
+              <div class="flex items-center gap-[3px] mb-[10px]">
                 <button
                   type="button"
                   class="px-[4px] py-[2px] rounded-[2px] transition-colors"
@@ -646,10 +652,14 @@ function fmtWidth(q) {
                     color: eq.isRoleSoloed(r.id) ? accent : 'rgba(255,255,255,.35)',
                     background: eq.isRoleSoloed(r.id)
                       ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+                    opacity: eq.roleOnState(r.id) === 'on' ? 1 : 0.4,
                   }"
-                  :title="roleBand(r.id)
-                    ? `Hear the ${r.label} correction alone`
-                    : `Hear the part of the recording ${r.label} acts on`"
+                  :disabled="eq.roleOnState(r.id) !== 'on'"
+                  :title="eq.roleOnState(r.id) === 'on'
+                    ? (roleBand(r.id)
+                      ? `Hear the ${r.label} correction alone`
+                      : `Hear the part of the recording ${r.label} acts on`)
+                    : `Switch ${r.label} on to solo it`"
                   @click.stop="eq.toggleRoleSolo(r.id)"
                   @dblclick.stop
                 >S</button>
@@ -704,27 +714,35 @@ function fmtWidth(q) {
                 />
               </div>
               <span
-                class="uppercase mt-[5px]"
+                class="uppercase mt-[3px]"
                 style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
               >Gain</span>
 
               <!--
-                Width, under the knob it belongs to.
+                Width for a bell, slope for a shelf: one Q, under whichever name
+                describes what it does to that shape.
 
-                No width on a shelf: Rumble and Air reach to the end of the
-                spectrum, so their Q is knee resonance rather than reach and a
-                knob called WIDTH would not do what its label says. The caption
-                line reports what they act on instead.
+                Rumble and Air reach to the end of the spectrum, so their Q
+                cannot widen anything — it sets how steeply the shelf climbs
+                through its corner frequency, and past about 1.4 it starts to
+                overshoot into an audible bump or dip at the corner rather than
+                just steepening. A knob labelled WIDTH would have moved a real
+                parameter while naming one it does not touch, which is why these
+                two carried no knob at all; the fix for a wrong label is the
+                right label, not a missing control. What a shelf acts on is
+                still the caption line's answer, since slope does not change it.
 
-                Double-click resets the width alone — stopped here so it does
-                not reach the column, where the same gesture resets the whole
-                role.
+                Double-click resets it alone — stopped here so it does not reach
+                the column, where the same gesture resets the whole role.
               -->
-              <template v-if="!isShelfRole(r.role)">
+              <template v-if="eq.roleOnState(r.id) == 'on'">
                 <div
-                  class="w-[40px] mt-[7px]"
-                  :title="`Width — drag to narrow or widen ${r.label}, double-click for its default`"
-                  @dblclick.stop="resetRoleWidth(r.id)"
+                  class="w-[40px] mt-[13px]"
+                  :title="isShelfRole(r.role)
+                    ? `Slope — drag to steepen or soften the ${r.label} knee, `
+                      + `double-click for its default. Past about 1.4 it resonates at the corner.`
+                    : `Width — drag to narrow or widen ${r.label}, double-click for its default`"
+                  @dblclick.stop="resetRoleQ(r.id)"
                 >
                   <Knob
                     :model-value="eq.roleQ(r.id)"
@@ -741,9 +759,9 @@ function fmtWidth(q) {
                   />
                 </div>
                 <span
-                  class="uppercase mt-[5px]"
+                  class="uppercase mt-[3px]"
                   style="font:600 8px/1 'Inter';letter-spacing:.1em;color:rgba(255,255,255,.4)"
-                >Width</span>
+                >{{ isShelfRole(r.role) ? 'Slope' : 'Width' }}</span>
               </template>
             </div>
           </div>
@@ -762,18 +780,6 @@ function fmtWidth(q) {
 
     </div>
 
-    <!-- RE-ANALYZE lives in the faceplate's button row, with SEND TO EQ and
-         RESET — the three things you do to a whole diagnosis rather than to
-         one finding. -->
-
-    <!--
-      The offer to diagnose, sitting where the findings will land.
-
-      It was a 200 px empty box owning the whole panel, which made the
-      diagnosis the price of entry. As a strip it is still the first thing
-      under the plot and still the only accented button on screen, so it reads
-      as the recommended next step rather than a toll gate.
-    -->
     <div
       v-if="!analysis"
       class="mt-[14px] flex items-center gap-[16px] rounded-[3px] px-[14px] py-[12px]"
