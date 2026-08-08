@@ -316,6 +316,45 @@ const activeRoleIds = computed(() => new Set(
 ))
 
 /**
+ * How bright an axis label sits at rest, on or off.
+ *
+ * Alpha rather than two literal colours, so the hover lift below is one
+ * arithmetic step that works on either state. Writing them as colours meant
+ * brightening one of them required a different expression from brightening the
+ * other, which is how the label ended up with three unrelated treatments.
+ */
+const LABEL_REST_ALPHA = { on: 0.9, off: 0.28 }
+
+/** Added to whichever rest alpha applies, when the pointer is on this role. */
+const LABEL_HOVER_LIFT = 0.35
+
+/**
+ * One label, two states, one hover.
+ *
+ * WHAT THIS REPLACED. The label had three colour paths that did not agree:
+ * amber whenever its region was highlighted, an accent-white mix when the role
+ * was active, and a `!important` white with a tinted background from a CSS
+ * :hover rule. Which one you saw depended on how you arrived — pointing at the
+ * label itself hit the CSS rule and went white, pointing at its knob missed the
+ * rule and went amber, so the same question asked two ways got two answers, and
+ * neither looked like the accent the ribbon segment lights underneath.
+ *
+ * So: colour says one thing only — is this role doing audible work — and hover
+ * is a brightness lift on top of whatever that colour is. No CSS :hover, which
+ * is what makes it uniform: `highlightRegion` is set by pointing at the label,
+ * at the role's knobs, or at its row in the findings list, and all three now
+ * look identical because all three are the same signal.
+ */
+function roleLabelStyle(r) {
+  const on = activeRoleIds.value.has(r.id)
+  const rest = on ? LABEL_REST_ALPHA.on : LABEL_REST_ALPHA.off
+  return {
+    color: on ? 'rgba(255,180,120,.8)' : '#ffffff',
+    opacity: Math.min(1, rest + (props.highlightRegion === r.region ? LABEL_HOVER_LIFT : 0)),
+  }
+}
+
+/**
  * Envelope level at an arbitrary frequency, interpolated between FFT bins.
  *
  * The envelope is sampled on a linear frequency grid (~10.8 Hz per bin) and
@@ -1044,13 +1083,10 @@ function onPlotDown(e) {
       <!--
         The label is the role's control, not a caption.
 
-        Hence py-[2px], and hence the row being 14px rather than the 12 an 8px
-        glyph needs: the pressed tint has to be the same shape as the tint on the
-        S/ON buttons in the column below, because they are the same kind of
-        thing. Unpadded, it was a tint bar exactly as tall as its text sitting
-        above buttons half again that height, and the two read as unrelated
-        chrome. The 2px of slack under the button is the whole gap to the column,
-        which starts 4px into the row below.
+        Colour and brightness are roleLabelStyle's business — two states and one
+        hover lift, deliberately the whole vocabulary. The 8px glyph plus
+        py-[2px] is what sets the row's 14px, whose 2px of slack underneath is
+        the gap to the column below.
 
         It was a plain span, and the role's own controls carried a second copy
         of the same word above them to press. Two labels for one thing, in two
@@ -1061,14 +1097,14 @@ function onPlotDown(e) {
 
         Pressing it focuses the role; it does not reveal anything, because every
         column is on screen already (see COLUMN_H in VoiceRxView). Colour says
-        which roles are doing audible work, hover says which one the pointer is
-        asking about, and aria-pressed says which one is focused.
+        which roles are doing audible work, brightness says which one the pointer
+        is asking about, and aria-pressed says which one is focused.
       -->
       <button
         v-for="r in roleAxis"
         :key="r.id"
         type="button"
-        class="eqp-role-label absolute top-0 whitespace-nowrap rounded-[2px] px-[3px] py-[2px] cursor-pointer transition-colors"
+        class="absolute top-0 whitespace-nowrap rounded-[2px] px-[3px] py-[2px] cursor-pointer transition-[color,opacity] duration-100"
         :aria-pressed="openRole === r.id"
         :style="{
           left: `${r.leftPct}%`,
@@ -1076,12 +1112,7 @@ function onPlotDown(e) {
           fontWeight: 700,
           fontSize: '8px',
           letterSpacing: '.07em',
-          color: highlightRegion === r.region
-            ? 'rgba(255,180,120,.8)'
-            : activeRoleIds.has(r.id)
-              ? `color-mix(in srgb, ${accent} 45%, #ffffff)`
-              : 'rgba(255,255,255,.28)',
-          background: 'transparent',
+          ...roleLabelStyle(r),
         }"
         @pointerenter="emit('hover-region', r.region)"
         @pointerleave="emit('hover-region', null)"
@@ -1121,18 +1152,3 @@ function onPlotDown(e) {
   </div>
 </template>
 
-<style scoped>
-/*
- * The axis label is what opens a role's controls, so it has to read as
- * pressable. It is 8 px of uppercase text among eight others and has no shape
- * of its own to signal with, so the tint on hover is the signal — the same one
- * the role labels used before they moved onto the axis.
- *
- * Not applied while pressed: that state already carries the accent, and the
- * hover tint would wash it out into something dimmer than the resting colour.
- */
-.eqp-role-label:not([aria-pressed="true"]):hover {
-  background: rgba(255, 255, 255, 0.09);
-  color: rgba(255, 255, 255, 0.85) !important;
-}
-</style>

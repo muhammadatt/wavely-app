@@ -689,17 +689,7 @@ function fmtWidth(q) {
                   :format-value="fmtGain"
                   @update:model-value="eq.setRoleGain(r.id, $event)"
                 />
-                <!-- The finding mark, in the plot's amber because it means what
-                     the plot's markers mean. It sits on the knob rather than
-                     beside the label so that adding it to some controls and not
-                     others does not knock anything out of line — the corner is
-                     clear of the knob's ring at every value. -->
-                <span
-                  v-if="eq.detectedRoles.value.has(r.id)"
-                  class="absolute rounded-full"
-                  style="top:-1px;right:1px;width:5px;height:5px;background:rgba(255,180,120,.9)"
-                  aria-hidden="true"
-                />
+
               </div>
               <span
                 class="uppercase mt-[3px]"
