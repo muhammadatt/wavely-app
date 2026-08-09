@@ -63,34 +63,35 @@ async function applyAndClose() {
     @toggle-engaged="togglePreview"
     @close="close"
   >
-    <div class="px-[26px] pt-[22px] pb-[24px]">
-      <div class="flex items-center justify-between gap-[20px]">
+    <div class="px-[22px] pt-[22px] pb-[24px]">
+      <div class="flex items-center gap-[14px]">
         <LevelMeter :levels="vsInputLevels" label="IN" :height="132" />
 
-        <!-- The four you dial by ear get knobs. -->
-        <div class="flex-1 flex items-start justify-center gap-[30px]">
-          <div class="w-[104px]">
+        <!-- Primary voicing controls in the center strip. -->
+        <div class="flex-1 min-w-0 flex items-start justify-center gap-[18px]">
+          <div class="w-[100px]">
             <Knob :model-value="vsDrive" @update:model-value="syncDrive"
                   :min="0" :max="5" :step="0.05"
                   label="Drive" :accent="ACCENT" :format-value="twoDp"
                   :disabled="!vsPreview" />
           </div>
-          <div class="w-[104px]">
-            <Knob :model-value="vsWetDry" @update:model-value="syncWetDry"
-                  :min="0" :max="1" :step="0.01"
-                  label="Wet / Dry" :accent="ACCENT" :format-value="percent"
-                  :disabled="!vsPreview" />
-          </div>
-          <div class="w-[104px]">
+          <div class="w-[100px]">
             <Knob :model-value="vsBias" @update:model-value="syncBias"
                   :min="0" :max="1.5" :step="0.01"
                   label="Bias" :accent="ACCENT" :format-value="twoDp"
                   :disabled="!vsPreview" />
           </div>
-          <div class="w-[104px]">
+          <div class="w-[100px]">
             <Knob :model-value="vsSoftness" @update:model-value="syncSoftness"
                   :min="0" :max="1" :step="0.01"
                   label="Softness" :accent="ACCENT" :format-value="twoDp"
+                  :disabled="!vsPreview" />
+          </div>
+          <div class="w-[72px] pt-[8px]">
+            <Knob :model-value="vsWetDry" @update:model-value="syncWetDry"
+                  :min="0" :max="1" :step="0.01"
+                  :value-font-px="13"
+                  label="Wet / Dry" :accent="ACCENT" :format-value="percent"
                   :disabled="!vsPreview" />
           </div>
         </div>
@@ -118,18 +119,27 @@ async function applyAndClose() {
                         :min="1000" :max="8000" :step="50"
                         label="Mid Crossover" :accent="ACCENT" :format-value="hertz"
                         :disabled="!vsPreview" />
-          <DeviceSlider :model-value="vsLowDriveMult" @update:model-value="syncLowDriveMult"
-                        :min="0" :max="10" :step="0.05"
-                        label="Low Drive" :accent="ACCENT" :format-value="multiplier"
-                        :disabled="!vsPreview" />
-          <DeviceSlider :model-value="vsMidDriveMult" @update:model-value="syncMidDriveMult"
-                        :min="0" :max="10" :step="0.05"
-                        label="Mid Drive" :accent="ACCENT" :format-value="multiplier"
-                        :disabled="!vsPreview" />
-          <DeviceSlider :model-value="vsHighDriveMult" @update:model-value="syncHighDriveMult"
-                        :min="0" :max="10" :step="0.05"
-                        label="High Drive" :accent="ACCENT" :format-value="multiplier"
-                        :disabled="!vsPreview" />
+        </div>
+
+        <div class="mt-[16px] flex items-start justify-center gap-[20px]">
+          <div class="w-[82px]">
+            <Knob :model-value="vsLowDriveMult" @update:model-value="syncLowDriveMult"
+                  :min="0" :max="10" :step="0.05" :value-font-px="13"
+                  label="Low Drive" :accent="ACCENT" :format-value="multiplier"
+                  :disabled="!vsPreview" />
+          </div>
+          <div class="w-[82px]">
+            <Knob :model-value="vsMidDriveMult" @update:model-value="syncMidDriveMult"
+                  :min="0" :max="10" :step="0.05" :value-font-px="13"
+                  label="Mid Drive" :accent="ACCENT" :format-value="multiplier"
+                  :disabled="!vsPreview" />
+          </div>
+          <div class="w-[82px]">
+            <Knob :model-value="vsHighDriveMult" @update:model-value="syncHighDriveMult"
+                  :min="0" :max="10" :step="0.05" :value-font-px="13"
+                  label="High Drive" :accent="ACCENT" :format-value="multiplier"
+                  :disabled="!vsPreview" />
+          </div>
         </div>
       </div>
 

@@ -34,12 +34,18 @@ const props = defineProps({
 // segment count follows from the height the caller asked for rather than the
 // other way round — panels keep setting a pixel height and the ladder fills
 // as much of it as whole segments allow.
-const SEG_W = 6
 const SEG_H = 4
 const SEG_GAP = 3
 const PITCH = SEG_H + SEG_GAP
 const CH_GAP = 2
 const MIN_ROWS = 8
+
+// The ladder block is a fixed width whatever the channel count, and the
+// channels divide it between them. Sizing the segment instead and letting the
+// block follow made a mono meter half the width of a stereo one — so the same
+// panel changed shape with the file, and the housing, the lamp, the readout
+// and the caption all moved with it.
+const LADDER_W = 14
 
 const rows = computed(() =>
   Math.max(MIN_ROWS, Math.floor((props.height + SEG_GAP) / PITCH)))
@@ -246,7 +252,7 @@ const ladders = computed(() => {
 
 const channelCount = computed(() => Math.max(1, props.levels.length))
 
-// Channel identity is carried in the label rather than drawn: at 6 px a
+// Channel identity is carried in the label rather than drawn: at this width a
 // segment has no room for a caption, and a stereo pair reads as
 // left-then-right.
 function channelName(index) {
@@ -268,11 +274,16 @@ const readoutDb = computed(() => {
 const readout = computed(() =>
   readoutDb.value <= props.floorDb ? '-∞' : readoutDb.value.toFixed(1))
 
+// A mono meter gets one wide segment rather than one narrow one, so the block
+// measures the same either way. Fractional widths are fine — the browser
+// subpixel-positions them and the ladder still lands on whole pixels overall.
+const segWidth = computed(() =>
+  (LADDER_W - (channelCount.value - 1) * CH_GAP) / channelCount.value)
+
 // The lamp belongs to the ladders, not to the whole component — the scale
 // gutter and the caption are both wider, and stretching to them left it
 // floating unaligned above the thing it reports on.
-const ladderBlockWidth = computed(() =>
-  channelCount.value * SEG_W + (channelCount.value - 1) * CH_GAP)
+const ladderBlockWidth = computed(() => LADDER_W)
 
 // Outer width of the housing: the ladders, its padding, its border. The
 // readout and the caption are centred on this rather than on the component,
@@ -287,7 +298,7 @@ const visibleTicks = computed(() => TICKS.filter(t => t > props.floorDb))
 
 function segStyle(seg) {
   return {
-    width: SEG_W + 'px',
+    width: segWidth.value + 'px',
     height: SEG_H + 'px',
     borderRadius: '1px',
     background: seg.color,

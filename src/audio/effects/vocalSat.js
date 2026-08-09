@@ -20,14 +20,14 @@ import { createLevelTap } from './levelTap.js'
 // Same names and defaults the panel already used, so the UI is unchanged.
 export const VOCAL_SAT_DEFAULTS = {
   drive: 2.0,
-  wetDry: 0.3,
-  bias: 0.5,
-  softness: 0.3,
+  wetDry: 1,
+  bias: 1,
+  softness: 0.5,
   lowCrossover: 500,
   midCrossover: 3500,
-  lowDriveMult: 5.0,
-  midDriveMult: 0.1,
-  highDriveMult: 0.1,
+  lowDriveMult: 8.0,
+  midDriveMult: 8,
+  highDriveMult: 8,
 }
 
 /** Map UI param names to kernel param names — 1:1 for this effect. */
