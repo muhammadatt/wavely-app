@@ -60,8 +60,8 @@ const CYAN_DB = -36
 const AMBER_DB = -18
 const RED_DB = -6
 
-const COOL = '#3FD0DE'
-const MID = '#8FD48A'
+const COOL = '#7CE0A8' // '#3FD0DE' blue
+const MID = '#6FD6C0'// '#8FD48A' green
 const WARM = '#E8A33D'
 const HOT = '#FF5A4E'
 
