@@ -16,7 +16,7 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resPreview, resReduction, resInputDb, resOutputDb, resInputPeakDb, resOutputPeakDb, hasSelection,
+  resPitchRange, resPreview, resReduction, resInputLevels, resOutputLevels, hasSelection,
   togglePreview, syncDepth, syncSharpness, syncSelectivity, syncAttack,
   syncRelease, syncMaxReduction, syncFreqFloor, syncFreqCeil, syncMode,
   syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
@@ -92,7 +92,7 @@ async function applyAndClose() {
       <GainReductionBar :reduction-db="resReduction" :accent="ACCENT" />
 
       <div class="flex items-center justify-between gap-[22px] mt-[22px]">
-        <LevelMeter :db="resInputDb" :peak-db="resInputPeakDb" label="IN" :height="150" />
+        <LevelMeter :levels="resInputLevels" label="IN" :height="150" />
 
         <div class="flex-1 flex justify-center gap-[34px]">
           <div class="w-[124px]">
@@ -121,7 +121,7 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <LevelMeter :db="resOutputDb" :peak-db="resOutputPeakDb" label="OUT" :height="150" />
+        <LevelMeter :levels="resOutputLevels" label="OUT" :height="150" />
       </div>
 
       <!-- Timing + ceiling -->

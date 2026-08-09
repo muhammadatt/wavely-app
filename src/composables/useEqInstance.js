@@ -3,6 +3,7 @@ import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyManualEqRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 import {
   MAX_BANDS, createBand, applyForfeiture, setBandFrequency, setBandQ,
   resetBandQ, isBandActive, PARAM_RANGES, clamp, qRangeFor, clampBandToRole,
@@ -46,10 +47,8 @@ export function createEqInstance({
    * Mutually exclusive with soloBandId — setting either clears the other.
    */
   const soloProbe = ref(null)
-  const inputDb = ref(-Infinity)
-  const outputDb = ref(-Infinity)
-  const inputPeakDb = ref(-Infinity)
-  const outputPeakDb = ref(-Infinity)
+  const inputLevels = ref([])
+  const outputLevels = ref([])
 
   let meterId = null
 
@@ -95,12 +94,11 @@ export function createEqInstance({
       function tick() {
         const n = chain.effects.find(e => e.id === effect.id)?.nodes
         if (n) {
-          const inLevels = n.getInputLevels()
-          inputDb.value = inLevels.rmsDb
-          inputPeakDb.value = inLevels.peakDb
-          const outLevels = n.getOutputLevels()
-          outputDb.value = outLevels.rmsDb
-          outputPeakDb.value = outLevels.peakDb
+          // Only meter channels the source really has: the splitter is
+          // discrete, so asking for stereo on a mono file adds a dead bar.
+          const chCount = state.currentFile?.channels ?? 1
+          inputLevels.value = snapshotLevels(n.getInputLevels(chCount))
+          outputLevels.value = snapshotLevels(n.getOutputLevels(chCount))
         }
         meterId = requestAnimationFrame(tick)
       }
@@ -112,10 +110,8 @@ export function createEqInstance({
         cancelAnimationFrame(meterId)
         meterId = null
       }
-      inputDb.value = -Infinity
-      outputDb.value = -Infinity
-      inputPeakDb.value = -Infinity
-      outputPeakDb.value = -Infinity
+      inputLevels.value = []
+      outputLevels.value = []
     }
 
     function togglePreview() {
@@ -293,7 +289,7 @@ export function createEqInstance({
 
     return {
       // state
-      bands, eqPreview, outputTrim, soloBandId, soloProbe, inputDb, outputDb, inputPeakDb, outputPeakDb,
+      bands, eqPreview, outputTrim, soloBandId, soloProbe, inputLevels, outputLevels,
       hasSelection, atBandLimit, maxBands,
       activeBands: computed(() => bands.value.filter(isBandActive)),
 

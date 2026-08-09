@@ -10,6 +10,7 @@ import {
   renderDeEsserEnvelope,
 } from '../audio/effects/clipGainDeEss.js'
 import { regionCovers } from '../audio/dsp/clipGainDecision.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 export const DEESSER_WINDOW_ID = 'clip-gain-deesser'
 
@@ -48,10 +49,8 @@ const tuning = ref({})
 const params = ref({ ...DEESSER_DEFAULTS })
 const preview = ref(false)
 const reductionDb = ref(0)
-const inputDb = ref(-Infinity)
-const outputDb = ref(-Infinity)
-const inputPeakDb = ref(-Infinity)
-const outputPeakDb = ref(-Infinity)
+const inputLevels = ref([])
+const outputLevels = ref([])
 const treatedCount = ref(0)
 const maxReductionDb = ref(0)
 let meterId = null
@@ -124,12 +123,11 @@ export function useDeEsser() {
     function tick(nowMs) {
       const nodes = chain.effects.find(e => e.id === clipGainDeEsserEffect.id)?.nodes
       if (nodes) {
-        const inLevels = nodes.getInputLevels()
-        inputDb.value = inLevels.rmsDb
-        inputPeakDb.value = inLevels.peakDb
-        const outLevels = nodes.getOutputLevels()
-        outputDb.value = outLevels.rmsDb
-        outputPeakDb.value = outLevels.peakDb
+        // Only meter channels the source really has: the splitter is
+        // discrete, so asking for stereo on a mono file adds a dead bar.
+        const chCount = state.currentFile?.channels ?? 1
+        inputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+        outputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
 
         // Both values are <= 0, so "more reduction" is more negative. Attack is
         // instantaneous — the peak the node reports for this frame is shown in
@@ -156,10 +154,8 @@ export function useDeEsser() {
       meterId = null
     }
     meterLastMs = 0
-    inputDb.value = -Infinity
-    outputDb.value = -Infinity
-    inputPeakDb.value = -Infinity
-    outputPeakDb.value = -Infinity
+    inputLevels.value = []
+    outputLevels.value = []
     reductionDb.value = 0
   }
 
@@ -332,7 +328,7 @@ export function useDeEsser() {
 
   return {
     params, preview, analysis, analyzing, measuredEvents,
-    treatedCount, maxReductionDb, reductionDb, inputDb, outputDb, inputPeakDb, outputPeakDb,
+    treatedCount, maxReductionDb, reductionDb, inputLevels, outputLevels,
     tuning, syncTuning, resetTuning,
     hasAnalysis, hasSelection, isStale, envelopeValid, analyzedRegion,
     togglePreview, syncParam, analyze, apply, teardown,

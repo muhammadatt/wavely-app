@@ -4,6 +4,7 @@ import { useWindows } from './useWindows.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { vocalSatEffect, VOCAL_SAT_DEFAULTS } from '../audio/effects/vocalSat.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const VOCAL_SAT_WINDOW_ID = 'vocal-saturation'
@@ -20,10 +21,8 @@ const vsMidDriveMult = ref(VOCAL_SAT_DEFAULTS.midDriveMult)
 const vsHighDriveMult = ref(VOCAL_SAT_DEFAULTS.highDriveMult)
 
 const vsPreview = ref(false)
-const vsInputDb = ref(-Infinity)
-const vsOutputDb = ref(-Infinity)
-const vsInputPeakDb = ref(-Infinity)
-const vsOutputPeakDb = ref(-Infinity)
+const vsInputLevels = ref([])
+const vsOutputLevels = ref([])
 let meterId = null
 
 function currentParams() {
@@ -61,12 +60,11 @@ export function useVocalSaturation() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === vocalSatEffect.id)?.nodes
       if (nodes) {
-        const inLevels = nodes.getInputLevels()
-        vsInputDb.value = inLevels.rmsDb
-        vsInputPeakDb.value = inLevels.peakDb
-        const outLevels = nodes.getOutputLevels()
-        vsOutputDb.value = outLevels.rmsDb
-        vsOutputPeakDb.value = outLevels.peakDb
+        // Only meter channels the source really has: the splitter is
+        // discrete, so asking for stereo on a mono file adds a dead bar.
+        const chCount = state.currentFile?.channels ?? 1
+        vsInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+        vsOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -78,10 +76,8 @@ export function useVocalSaturation() {
       cancelAnimationFrame(meterId)
       meterId = null
     }
-    vsInputDb.value = -Infinity
-    vsOutputDb.value = -Infinity
-    vsInputPeakDb.value = -Infinity
-    vsOutputPeakDb.value = -Infinity
+    vsInputLevels.value = []
+    vsOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
@@ -178,10 +174,8 @@ export function useVocalSaturation() {
     vsMidDriveMult,
     vsHighDriveMult,
     vsPreview,
-    vsInputDb,
-    vsOutputDb,
-    vsInputPeakDb,
-    vsOutputPeakDb,
+    vsInputLevels,
+    vsOutputLevels,
     hasSelection,
     togglePreview,
     syncDrive,

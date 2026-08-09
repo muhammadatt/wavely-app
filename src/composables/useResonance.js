@@ -4,6 +4,7 @@ import { useWindows } from './useWindows.js'
 import { applyResonanceRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
@@ -23,10 +24,8 @@ const resPitchRange = ref(RESONANCE_DEFAULTS.pitchRange)
 
 const resPreview = ref(false)
 const resReduction = ref(0)
-const resInputDb = ref(-Infinity)
-const resOutputDb = ref(-Infinity)
-const resInputPeakDb = ref(-Infinity)
-const resOutputPeakDb = ref(-Infinity)
+const resInputLevels = ref([])
+const resOutputLevels = ref([])
 let meterId = null
 
 function currentParams() {
@@ -67,12 +66,11 @@ export function useResonance() {
       const nodes = chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
       if (nodes) {
         resReduction.value = nodes.getReduction()
-        const inLevels = nodes.getInputLevels()
-        resInputDb.value = inLevels.rmsDb
-        resInputPeakDb.value = inLevels.peakDb
-        const outLevels = nodes.getOutputLevels()
-        resOutputDb.value = outLevels.rmsDb
-        resOutputPeakDb.value = outLevels.peakDb
+        // Only meter channels the source really has: the splitter is
+        // discrete, so asking for stereo on a mono file adds a dead bar.
+        const chCount = state.currentFile?.channels ?? 1
+        resInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+        resOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -85,10 +83,8 @@ export function useResonance() {
       meterId = null
     }
     resReduction.value = 0
-    resInputDb.value = -Infinity
-    resOutputDb.value = -Infinity
-    resInputPeakDb.value = -Infinity
-    resOutputPeakDb.value = -Infinity
+    resInputLevels.value = []
+    resOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
@@ -193,10 +189,8 @@ export function useResonance() {
     resPitchRange,
     resPreview,
     resReduction,
-    resInputDb,
-    resOutputDb,
-    resInputPeakDb,
-    resOutputPeakDb,
+    resInputLevels,
+    resOutputLevels,
     hasSelection,
     togglePreview,
     syncDepth,

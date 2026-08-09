@@ -99,12 +99,12 @@ export function createLA2ACompressor(audioContext) {
       return -grDb
     },
 
-    getInputLevels() {
-      return inputTap.getLevels()
+    getInputLevels(channelCount) {
+      return inputTap.getLevels(channelCount)
     },
 
-    getOutputLevels() {
-      return outputTap.getLevels()
+    getOutputLevels(channelCount) {
+      return outputTap.getLevels(channelCount)
     },
 
     destroy() {

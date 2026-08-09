@@ -12,7 +12,7 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  airBandAir, airBandOutput, airBandPreview, airBandInputDb, airBandOutputDb, airBandInputPeakDb, airBandOutputPeakDb,
+  airBandAir, airBandOutput, airBandPreview, airBandInputLevels, airBandOutputLevels,
   hasSelection, togglePreview, syncAir, syncOutput, apply, teardown, closeModal,
 } = useAirBand()
 
@@ -126,7 +126,7 @@ async function applyAndClose() {
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
       <div class="flex items-center justify-between gap-[22px]">
-        <LevelMeter :db="airBandInputDb" :peak-db="airBandInputPeakDb" label="IN" :height="120" />
+        <LevelMeter :levels="airBandInputLevels" label="IN" :height="120" />
 
         <div class="flex-1 flex flex-col items-center">
           <!-- Response curve -->
@@ -185,7 +185,7 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <LevelMeter :db="airBandOutputDb" :peak-db="airBandOutputPeakDb" label="OUT" :height="120" />
+        <LevelMeter :levels="airBandOutputLevels" label="OUT" :height="120" />
       </div>
 
       <p

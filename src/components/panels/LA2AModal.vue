@@ -14,7 +14,7 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
   la2aAutoMakeup, la2aAutoMakeupBusy,
-  la2aPreview, la2aReduction, la2aInputDb, la2aOutputDb, la2aInputPeakDb, la2aOutputPeakDb, hasSelection,
+  la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels, hasSelection,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
   syncEmphasis, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
 } = useLA2A()
@@ -131,7 +131,7 @@ function selectMockPreset(name) {
 
       <!-- IN meter · knobs · OUT meter -->
       <div class="flex items-center justify-between gap-[22px] mt-[24px]">
-        <LevelMeter :db="la2aInputDb" :peak-db="la2aInputPeakDb" label="IN" />
+        <LevelMeter :levels="la2aInputLevels" label="IN" />
 
         <div class="flex-1 flex justify-center gap-[40px]">
           <div class="w-[130px]">
@@ -182,7 +182,7 @@ function selectMockPreset(name) {
           </div>
         </div>
 
-        <LevelMeter :db="la2aOutputDb" :peak-db="la2aOutputPeakDb" label="OUT" />
+        <LevelMeter :levels="la2aOutputLevels" label="OUT" />
       </div>
 
       <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 emphasis) -->

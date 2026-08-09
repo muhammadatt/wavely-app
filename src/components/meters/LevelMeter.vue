@@ -11,19 +11,14 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
  * number and the hold line show how close the transients are to the ceiling.
  */
 const props = defineProps({
-  // RMS level in dBFS, the bar reading.
-  db: { type: Number, required: true },
-  // Sample peak in dBFS. Drives the hold line, the readout and the over lamp.
-  // Callers without a peak source can omit it and get a bar-only meter.
-  peakDb: { type: Number, default: -Infinity },
-  label: { type: String, default: '' },
   /**
-   * Bars to draw. One per independent reading the caller actually has — the
-   * level tap measures the analyser's mono downmix, so one is the honest
-   * answer for every current caller. Drawing two from a single number was
-   * a stereo meter that could not show a channel imbalance if there was one.
+   * One `{ rmsDb, peakDb }` per channel, in dBFS, refreshed every frame by
+   * the caller. Length sets how many bars are drawn, so it must be the
+   * source's real channel count — see `createLevelTap`. Empty means the
+   * graph is not running.
    */
-  channels: { type: Number, default: 1 },
+  levels: { type: Array, default: () => [] },
+  label: { type: String, default: '' },
   height: { type: Number, default: 150 },
   // Bottom of the scale. The top is always 0 dBFS.
   floorDb: { type: Number, default: -60 },
@@ -81,11 +76,12 @@ function dbToPct(db) {
   return Math.max(0, Math.min(100, pct))
 }
 
-const displayDb = ref(-Infinity)
-const heldPeakDb = ref(-Infinity)
+// One entry per channel: `{ displayDb, heldPeakDb }` after ballistics.
+const bars = ref([])
 const clipped = ref(false)
-let holdUntil = 0
+let holdUntil = []
 let lastTs = 0
+let rafId = null
 
 /**
  * Ballistics run on their own frame loop rather than off a watcher.
@@ -95,44 +91,54 @@ let lastTs = 0
  * steady tone — or any signal that momentarily plateaus — freezes the bar
  * part-way down. The loop keeps falling whatever the input does.
  */
-let rafId = null
-
 function advance() {
-  const rms = props.db
-  const peak = props.peakDb
+  const src = props.levels
+  const now = performance.now()
 
-  // A non-finite reading means the graph is not running — no real recording
-  // reaches digital silence. Clear rather than decay, so a torn-down meter
-  // cannot strand a bar or a hold line at whatever it last saw.
-  if (!Number.isFinite(rms) && !Number.isFinite(peak)) {
-    displayDb.value = -Infinity
-    heldPeakDb.value = -Infinity
+  // No channels means the graph is not running. Clear rather than decay, so
+  // a torn-down meter cannot strand a bar or a hold line at its last reading.
+  if (!src || src.length === 0) {
+    if (bars.value.length) bars.value = []
     clipped.value = false
+    holdUntil = []
     lastTs = 0
     rafId = requestAnimationFrame(advance)
     return
   }
 
-  const now = performance.now()
   const elapsedS = lastTs ? (now - lastTs) / 1000 : 0
   lastTs = now
 
-  if (!Number.isFinite(displayDb.value) || rms >= displayDb.value) {
-    displayDb.value = rms
-  } else {
-    displayDb.value = Math.max(rms, displayDb.value - BAR_RELEASE_DB_PER_S * elapsedS)
-  }
+  const prev = bars.value
+  const next = new Array(src.length)
+  if (holdUntil.length !== src.length) holdUntil = new Array(src.length).fill(0)
 
-  if (Number.isFinite(peak)) {
+  for (let ch = 0; ch < src.length; ch++) {
+    const rms = src[ch].rmsDb
+    const peak = src[ch].peakDb
+    const last = prev[ch] ?? { displayDb: -Infinity, heldPeakDb: -Infinity }
+
+    const displayDb = (!Number.isFinite(last.displayDb) || rms >= last.displayDb)
+      ? rms
+      : Math.max(rms, last.displayDb - BAR_RELEASE_DB_PER_S * elapsedS)
+
+    // An over on any channel lights the one lamp.
     if (peak >= props.clipDb) clipped.value = true
-    if (!Number.isFinite(heldPeakDb.value) || peak >= heldPeakDb.value) {
-      heldPeakDb.value = peak
-      holdUntil = now + PEAK_HOLD_MS
-    } else if (now >= holdUntil) {
-      heldPeakDb.value = Math.max(peak, heldPeakDb.value - PEAK_RELEASE_DB_PER_S * elapsedS)
+
+    let heldPeakDb = last.heldPeakDb
+    if (!Number.isFinite(heldPeakDb) || peak >= heldPeakDb) {
+      heldPeakDb = peak
+      holdUntil[ch] = now + PEAK_HOLD_MS
+    } else if (now >= holdUntil[ch]) {
+      // Math.max against a -Infinity peak still decays, so a hold line over a
+      // digitally silent passage falls away instead of hanging there.
+      heldPeakDb = Math.max(peak, heldPeakDb - PEAK_RELEASE_DB_PER_S * elapsedS)
     }
+
+    next[ch] = { displayDb, heldPeakDb }
   }
 
+  bars.value = next
   rafId = requestAnimationFrame(advance)
 }
 
@@ -142,9 +148,6 @@ onUnmounted(() => {
   rafId = null
 })
 
-const fillPct = computed(() =>
-  Number.isFinite(displayDb.value) ? dbToPct(displayDb.value) : 0)
-
 /**
  * The gradient is sized to the full track and pinned to its bottom edge, so
  * the zones stay at fixed dB positions. Left to resolve against the fill —
@@ -152,8 +155,7 @@ const fillPct = computed(() =>
  * they would scale with the reading, and every level would render with a red
  * tip. Stops come from dbToPct, so the zones follow the knee automatically.
  */
-const fillStyle = computed(() => ({
-  height: fillPct.value + '%',
+const fillBackground = computed(() => ({
   backgroundImage: `linear-gradient(to top,
     #2ec96b 0 ${dbToPct(AMBER_DB)}%,
     #e9c63b ${dbToPct(AMBER_DB)}% ${dbToPct(RED_DB)}%,
@@ -163,22 +165,45 @@ const fillStyle = computed(() => ({
   backgroundRepeat: 'no-repeat',
 }))
 
-const heldPeakPct = computed(() =>
-  Number.isFinite(heldPeakDb.value) ? dbToPct(heldPeakDb.value) : 0)
+function fillStyle(bar) {
+  return {
+    height: (Number.isFinite(bar.displayDb) ? dbToPct(bar.displayDb) : 0) + '%',
+    ...fillBackground.value,
+  }
+}
+
+const channelCount = computed(() => Math.max(1, props.levels.length))
+
+// Channel identity is carried in the label rather than drawn: at 9 px a bar
+// has no room for a caption, and a stereo pair reads as left-then-right.
+function channelName(index) {
+  if (channelCount.value < 2) return ''
+  return index === 0 ? 'left' : 'right'
+}
+
+/** Loudest peak across channels — one number over a pair means the hotter. */
+const readoutDb = computed(() => {
+  let max = -Infinity
+  for (const bar of bars.value) {
+    if (bar.heldPeakDb > max) max = bar.heldPeakDb
+  }
+  return max
+})
 
 const readout = computed(() =>
-  Number.isFinite(heldPeakDb.value) ? heldPeakDb.value.toFixed(1) : '-∞')
+  Number.isFinite(readoutDb.value) ? readoutDb.value.toFixed(1) : '-∞')
 
 // The lamp belongs to the bars, not to the whole component — the scale gutter
 // and the caption are both wider, and stretching to them left it floating
 // unaligned above the thing it reports on.
 const barBlockWidth = computed(() =>
-  props.channels * BAR_WIDTH + (props.channels - 1) * BAR_GAP)
+  channelCount.value * BAR_WIDTH + (channelCount.value - 1) * BAR_GAP)
 
 const visibleTicks = computed(() => TICKS.filter(t => t > props.floorDb))
 
-const ariaText = computed(() =>
-  Number.isFinite(props.db) ? `${props.db.toFixed(1)} dBFS` : 'silent')
+function ariaText(bar) {
+  return Number.isFinite(bar.displayDb) ? `${bar.displayDb.toFixed(1)} dBFS` : 'silent'
+}
 </script>
 
 <template>
@@ -208,32 +233,35 @@ const ariaText = computed(() =>
 
     <div class="flex items-end" :style="{ gap: showScale ? '5px' : '0' }">
       <div class="flex" :style="{ gap: BAR_GAP + 'px' }">
+        <!-- Before the first frame there are no bars yet; draw the empty
+             tracks so the panel does not reflow as metering starts. -->
         <div
-          v-for="ch in channels" :key="ch"
+          v-for="(bar, ch) in (bars.length ? bars : [{ displayDb: -Infinity, heldPeakDb: -Infinity }])"
+          :key="ch"
           class="relative rounded-[3px]"
           :style="{ width: BAR_WIDTH + 'px', height: height + 'px' }"
           style="background:#07090c;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)"
           role="meter"
           :aria-valuemin="floorDb"
           :aria-valuemax="0"
-          :aria-valuenow="Number.isFinite(db) ? Number(db.toFixed(1)) : floorDb"
-          :aria-valuetext="ariaText"
-          :aria-label="label ? `${label} level` : 'Level'"
+          :aria-valuenow="Number.isFinite(bar.displayDb) ? Number(bar.displayDb.toFixed(1)) : floorDb"
+          :aria-valuetext="ariaText(bar)"
+          :aria-label="[label, channelName(ch), 'level'].filter(Boolean).join(' ')"
         >
           <!-- No CSS transition: ballistics are applied above, and a
                transition restarting every frame never reaches its target. -->
-          <div class="absolute bottom-0 left-0 right-0 rounded-[3px]" :style="fillStyle"></div>
+          <div class="absolute bottom-0 left-0 right-0 rounded-[3px]" :style="fillStyle(bar)"></div>
 
           <!-- Segment ruling, purely cosmetic — the scale is the ticks. -->
           <div class="absolute inset-0" style="background:repeating-linear-gradient(to top,#0000 0 4px,#07090c 4px 6px)"></div>
 
           <div
-            v-if="Number.isFinite(heldPeakDb)"
+            v-if="Number.isFinite(bar.heldPeakDb)"
             class="absolute left-0 right-0"
             :style="{
-              bottom: `calc(${heldPeakPct}% - 1px)`,
+              bottom: `calc(${dbToPct(bar.heldPeakDb)}% - 1px)`,
               height: '2px',
-              background: heldPeakDb >= RED_DB ? '#ff8a7a' : 'rgba(255,255,255,.85)',
+              background: bar.heldPeakDb >= RED_DB ? '#ff8a7a' : 'rgba(255,255,255,.85)',
             }"
           ></div>
         </div>

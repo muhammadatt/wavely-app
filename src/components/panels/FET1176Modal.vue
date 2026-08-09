@@ -14,13 +14,26 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
-  fetAutoMakeup, fetPreview, fetReduction, fetInputDb, fetOutputDb, fetInputPeakDb, fetOutputPeakDb, hasSelection,
+  fetAutoMakeup, fetPreview, fetReduction, fetInputLevels, fetOutputLevels, hasSelection,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup,
   apply, teardown, closeModal,
 } = useFET1176()
 
 const { state } = useEditorState()
+
+/**
+ * One needle over a stereo pair follows the louder channel, matching what the
+ * level meters' single readout reports. RMS rather than peak — the movement
+ * is a VU, and it is scaled for an averaged level.
+ */
+const fetOutputVuDb = computed(() => {
+  let loudest = -Infinity
+  for (const channel of fetOutputLevels.value) {
+    if (channel.rmsDb > loudest) loudest = channel.rmsDb
+  }
+  return loudest
+})
 
 // Default to engaged when the panel opens
 onMounted(() => {
@@ -138,7 +151,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
             class="w-full"
             :mode="meterMode === 'gr' ? 'gr' : 'vu'"
             :reduction-db="Math.abs(fetReduction)"
-            :level-db="fetOutputDb"
+            :level-db="fetOutputVuDb"
             :reference-dbfs="vuReference"
             :accent="ACCENT"
           />
@@ -151,7 +164,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
         </div>
 
         <div class="flex-1 flex items-center justify-between gap-[14px]">
-          <LevelMeter :db="fetInputDb" :peak-db="fetInputPeakDb" label="IN" :height="132" />
+          <LevelMeter :levels="fetInputLevels" label="IN" :height="132" />
 
           <div class="flex-1 flex justify-center gap-[26px]">
             <div class="w-[118px]">
@@ -212,7 +225,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
             </div>
           </div>
 
-          <LevelMeter :db="fetOutputDb" :peak-db="fetOutputPeakDb" label="OUT" :height="132" />
+          <LevelMeter :levels="fetOutputLevels" label="OUT" :height="132" />
         </div>
       </div>
 
