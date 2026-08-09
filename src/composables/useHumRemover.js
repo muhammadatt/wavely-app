@@ -8,6 +8,7 @@ import {
 } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { humNotchEffect, HUM_NOTCH_DEFAULTS } from '../audio/effects/humNotch.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const HUM_REMOVER_WINDOW_ID = 'hum-remover'
@@ -35,8 +36,8 @@ const humAnalyzing = ref(false)
 const analyzedKey = ref(null)
 
 const humPreview = ref(false)
-const humInputDb = ref(-Infinity)
-const humOutputDb = ref(-Infinity)
+const humInputLevels = ref([])
+const humOutputLevels = ref([])
 let meterId = null
 
 /** Frequencies the user currently has ticked. */
@@ -88,8 +89,11 @@ export function useHumRemover() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === humNotchEffect.id)?.nodes
       if (nodes) {
-        humInputDb.value = nodes.getInputLevelDb()
-        humOutputDb.value = nodes.getOutputLevelDb()
+        // Only meter channels the source really has: the splitter is
+        // discrete, so asking for stereo on a mono file adds a dead bar.
+        const chCount = state.currentFile?.channels ?? 1
+        humInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+        humOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -101,8 +105,8 @@ export function useHumRemover() {
       cancelAnimationFrame(meterId)
       meterId = null
     }
-    humInputDb.value = -Infinity
-    humOutputDb.value = -Infinity
+    humInputLevels.value = []
+    humOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
@@ -268,8 +272,8 @@ export function useHumRemover() {
     humAnalysis,
     humAnalyzing,
     humPreview,
-    humInputDb,
-    humOutputDb,
+    humInputLevels,
+    humOutputLevels,
     isStale,
     hasEnabledNotches,
     hasSelection,

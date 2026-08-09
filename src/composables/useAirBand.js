@@ -4,6 +4,7 @@ import { useWindows } from './useWindows.js'
 import { applyAirBandRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { airBandEffect, AIR_BAND_DEFAULTS } from '../audio/effects/airBand.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const AIR_BAND_WINDOW_ID = 'air-band'
@@ -12,8 +13,8 @@ export const AIR_BAND_WINDOW_ID = 'air-band'
 const airBandAir = ref(AIR_BAND_DEFAULTS.air)
 const airBandOutput = ref(AIR_BAND_DEFAULTS.output)
 const airBandPreview = ref(false)
-const airBandInputDb = ref(-Infinity)
-const airBandOutputDb = ref(-Infinity)
+const airBandInputLevels = ref([])
+const airBandOutputLevels = ref([])
 let meterId = null
 
 function currentParams() {
@@ -44,8 +45,11 @@ export function useAirBand() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === airBandEffect.id)?.nodes
       if (nodes) {
-        airBandInputDb.value = nodes.getInputLevelDb()
-        airBandOutputDb.value = nodes.getOutputLevelDb()
+        // Only meter channels the source really has: the splitter is
+        // discrete, so asking for stereo on a mono file adds a dead bar.
+        const chCount = state.currentFile?.channels ?? 1
+        airBandInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+        airBandOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -57,8 +61,8 @@ export function useAirBand() {
       cancelAnimationFrame(meterId)
       meterId = null
     }
-    airBandInputDb.value = -Infinity
-    airBandOutputDb.value = -Infinity
+    airBandInputLevels.value = []
+    airBandOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
@@ -143,8 +147,8 @@ export function useAirBand() {
     airBandAir,
     airBandOutput,
     airBandPreview,
-    airBandInputDb,
-    airBandOutputDb,
+    airBandInputLevels,
+    airBandOutputLevels,
     hasSelection,
     togglePreview,
     syncAir,

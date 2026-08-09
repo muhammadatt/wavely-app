@@ -4,6 +4,7 @@ import { useWindows } from './useWindows.js'
 import { applyLA2ARegion, computeLA2AAutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { la2aEffect, LA2A_DEFAULTS } from '../audio/effects/la2aCompressor.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const LA2A_WINDOW_ID = 'opto-smooth'
@@ -28,8 +29,8 @@ const GAIN_MIN_DB = -12
 const GAIN_MAX_DB = 24
 const la2aPreview = ref(false)
 const la2aReduction = ref(0)
-const la2aInputDb = ref(-Infinity)
-const la2aOutputDb = ref(-Infinity)
+const la2aInputLevels = ref([])
+const la2aOutputLevels = ref([])
 let meterId = null
 
 // Debounce + supersede state for the auto-makeup measurement, shared across
@@ -82,8 +83,11 @@ export function useLA2A() {
       const nodes = chain.effects.find(e => e.id === la2aEffect.id)?.nodes
       if (nodes) {
         la2aReduction.value = nodes.getReduction()
-        la2aInputDb.value = nodes.getInputLevelDb()
-        la2aOutputDb.value = nodes.getOutputLevelDb()
+        // Only meter channels the source really has: the splitter is
+        // discrete, so asking for stereo on a mono file adds a dead bar.
+        const chCount = state.currentFile?.channels ?? 1
+        la2aInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+        la2aOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -96,8 +100,8 @@ export function useLA2A() {
       meterId = null
     }
     la2aReduction.value = 0
-    la2aInputDb.value = -Infinity
-    la2aOutputDb.value = -Infinity
+    la2aInputLevels.value = []
+    la2aOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
@@ -277,8 +281,8 @@ export function useLA2A() {
     la2aAutoMakeupBusy,
     la2aPreview,
     la2aReduction,
-    la2aInputDb,
-    la2aOutputDb,
+    la2aInputLevels,
+    la2aOutputLevels,
     hasSelection,
     togglePreview,
     syncMode,

@@ -4,6 +4,7 @@ import { useWindows } from './useWindows.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { fet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compressor.js'
+import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const FET1176_WINDOW_ID = 'fet-punch'
@@ -33,8 +34,8 @@ const OUTPUT_MAX_DB = 24
 
 const fetPreview = ref(false)
 const fetReduction = ref(0)
-const fetInputDb = ref(-Infinity)
-const fetOutputDb = ref(-Infinity)
+const fetInputLevels = ref([])
+const fetOutputLevels = ref([])
 let meterId = null
 
 // Debounce + supersede state for the auto-makeup measurement, shared across
@@ -91,8 +92,11 @@ export function useFET1176() {
       const nodes = chain.effects.find(e => e.id === fet1176Effect.id)?.nodes
       if (nodes) {
         fetReduction.value = nodes.getReduction()
-        fetInputDb.value = nodes.getInputLevelDb()
-        fetOutputDb.value = nodes.getOutputLevelDb()
+        // Only meter channels the source really has: the splitter is
+        // discrete, so asking for stereo on a mono file adds a dead bar.
+        const chCount = state.currentFile?.channels ?? 1
+        fetInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
+        fetOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -105,8 +109,8 @@ export function useFET1176() {
       meterId = null
     }
     fetReduction.value = 0
-    fetInputDb.value = -Infinity
-    fetOutputDb.value = -Infinity
+    fetInputLevels.value = []
+    fetOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
@@ -292,8 +296,8 @@ export function useFET1176() {
     fetAutoMakeupBusy,
     fetPreview,
     fetReduction,
-    fetInputDb,
-    fetOutputDb,
+    fetInputLevels,
+    fetOutputLevels,
     hasSelection,
     togglePreview,
     syncInput,

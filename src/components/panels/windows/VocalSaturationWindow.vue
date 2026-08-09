@@ -14,7 +14,7 @@ const {
   vsDrive, vsWetDry, vsBias, vsSoftness,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult,
-  vsPreview, vsInputDb, vsOutputDb, hasSelection,
+  vsPreview, vsInputLevels, vsOutputLevels, hasSelection,
   togglePreview,
   syncDrive, syncWetDry, syncBias, syncSoftness,
   syncLowCrossover, syncMidCrossover,
@@ -65,7 +65,7 @@ async function applyAndClose() {
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
       <div class="flex items-center justify-between gap-[20px]">
-        <LevelMeter :db="vsInputDb" label="IN" :height="132" />
+        <LevelMeter :levels="vsInputLevels" label="IN" :height="132" />
 
         <!-- The four you dial by ear get knobs. -->
         <div class="flex-1 flex items-start justify-center gap-[30px]">
@@ -95,7 +95,7 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <LevelMeter :db="vsOutputDb" label="OUT" :height="132" />
+        <LevelMeter :levels="vsOutputLevels" label="OUT" :height="132" />
       </div>
 
       <!-- Band shaping: wide numeric ranges you read rather than feel, so

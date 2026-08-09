@@ -105,12 +105,12 @@ export function createFET1176Compressor(audioContext) {
       return -grDb
     },
 
-    getInputLevelDb() {
-      return inputTap.getLevelDb()
+    getInputLevels(channelCount) {
+      return inputTap.getLevels(channelCount)
     },
 
-    getOutputLevelDb() {
-      return outputTap.getLevelDb()
+    getOutputLevels(channelCount) {
+      return outputTap.getLevels(channelCount)
     },
 
     destroy() {

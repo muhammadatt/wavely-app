@@ -95,12 +95,12 @@ export function createVocalSat(audioContext) {
       return params[name]
     },
 
-    getInputLevelDb() {
-      return inputTap.getLevelDb()
+    getInputLevels(channelCount) {
+      return inputTap.getLevels(channelCount)
     },
 
-    getOutputLevelDb() {
-      return outputTap.getLevelDb()
+    getOutputLevels(channelCount) {
+      return outputTap.getLevels(channelCount)
     },
 
     destroy() {
