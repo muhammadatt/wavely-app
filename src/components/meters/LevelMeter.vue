@@ -3,13 +3,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 /**
  * Vertical level meter — a segmented LED ladder per channel, a peak-hold
- * segment, a clip lamp and a labelled scale. Shared by the plugin panels for
+ * line, a clip lamp and a labelled scale. Shared by the plugin panels for
  * their IN and OUT readouts.
  *
  * The ladder is RMS and the readout is peak, which is the split that makes a
  * meter this size useful: the ladder shows how loud the passage sits, the
- * number and the held segment show how close the transients are to the
- * ceiling.
+ * number and the hold line show how close the transients are to the ceiling.
  */
 const props = defineProps({
   /**
@@ -77,8 +76,8 @@ const KNEE_DB = -24
 const KNEE_PCT = 35
 
 // Meter ballistics. Instant attack so nothing is missed, timed release so the
-// eye can follow. The ladder falls faster than the hold segment, which is what
-// keeps the hold segment visible above it.
+// eye can follow. The ladder falls faster than the hold line, which is what
+// keeps the hold line visible above it.
 const BAR_RELEASE_DB_PER_S = 26
 const PEAK_RELEASE_DB_PER_S = 20
 const PEAK_HOLD_MS = 1200
@@ -161,7 +160,7 @@ function advance() {
       holdUntil[ch] = now + PEAK_HOLD_MS
     } else if (now >= holdUntil[ch]) {
       // Decays against the floor rather than against the peak, so a hold
-      // segment over a digitally silent passage falls away and settles
+      // line over a digitally silent passage falls away and settles
       // instead of either hanging there or running off the bottom.
       heldPeakDb = heldPeakDb - PEAK_RELEASE_DB_PER_S * elapsedS
     }
@@ -211,7 +210,6 @@ const segMeta = computed(() => {
  */
 const ladders = computed(() => {
   const meta = segMeta.value
-  const h = ladderHeight.value
   const floor = props.floorDb
   const source = bars.value.length
     ? bars.value
@@ -220,28 +218,29 @@ const ladders = computed(() => {
   return source.map((bar) => {
     const levelPct = dbToPct(bar.displayDb)
 
-    // The hold reads as one segment, so snap it to the nearest one rather
-    // than letting it fall between two and light neither. At the floor there
-    // is nothing to hold, so no segment is claimed.
-    const peakIndex = bar.heldPeakDb <= floor
-      ? -1
-      : Math.max(0, Math.min(meta.length - 1,
-        Math.round((dbToPct(bar.heldPeakDb) / 100 * h - SEG_H / 2) / PITCH)))
-
-    const segments = meta.map((seg, i) => {
+    const segments = meta.map((seg) => {
       const on = seg.centerPct <= levelPct
-      const held = i === peakIndex
       return {
         color: seg.color,
-        // Lit runs at full; a hold sitting above the run is dimmed so the two
-        // stay tellable apart, and everything else is the dark faceplate.
-        opacity: on ? 1 : held ? 0.85 : 0.1,
-        glow: on || held,
+        opacity: on ? 1 : 0.1,
+        glow: on,
       }
     })
     // Drawn top-down.
     segments.reverse()
-    return { bar, segments }
+
+    // The hold is a hairline riding over the ladder, not a lit segment. Drawn
+    // in the ladder's own vocabulary it reads as "the level is briefly up
+    // there too", which is the opposite of what it means — it is a mark left
+    // behind. A rule in a foreign colour, sitting in the gaps between
+    // segments, says "high-water" without any explanation. It also carries
+    // the true position rather than the nearest segment's, so the number
+    // beneath it and the mark agree.
+    const peak = bar.heldPeakDb <= floor
+      ? null
+      : { pct: dbToPct(bar.heldPeakDb), hot: bar.heldPeakDb >= RED_DB }
+
+    return { bar, segments, peak }
   })
 })
 
@@ -339,7 +338,7 @@ function ariaText(bar) {
           <div
             v-for="(ladder, ch) in ladders"
             :key="ch"
-            class="flex flex-col"
+            class="relative flex flex-col"
             :style="{ gap: SEG_GAP + 'px', height: ladderHeight + 'px' }"
             role="meter"
             :aria-valuemin="floorDb"
@@ -352,6 +351,17 @@ function ariaText(bar) {
                  above, and a transition restarting every frame never reaches
                  its target. -->
             <div v-for="(seg, i) in ladder.segments" :key="i" :style="segStyle(seg)"></div>
+
+            <!-- Peak hold. Last child so it paints over the ladder. -->
+            <div
+              v-if="ladder.peak"
+              class="absolute left-0 right-0 pointer-events-none"
+              :style="{
+                bottom: `calc(${ladder.peak.pct}% - 1px)`,
+                height: '2px',
+                background: ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)',
+              }"
+            ></div>
           </div>
         </div>
       </div>
