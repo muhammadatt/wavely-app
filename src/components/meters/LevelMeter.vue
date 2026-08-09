@@ -275,6 +275,15 @@ const readout = computed(() =>
 const ladderBlockWidth = computed(() =>
   channelCount.value * SEG_W + (channelCount.value - 1) * CH_GAP)
 
+// Outer width of the housing: the ladders, its padding, its border. The
+// readout and the caption are centred on this rather than on the component,
+// which includes the scale gutter off to one side and so would sit them
+// visibly off to that side of the thing they label.
+const HOUSING_PAD = 5
+const HOUSING_BORDER = 1
+const housingWidth = computed(() =>
+  ladderBlockWidth.value + 2 * (HOUSING_PAD + HOUSING_BORDER))
+
 const visibleTicks = computed(() => TICKS.filter(t => t > props.floorDb))
 
 function segStyle(seg) {
@@ -294,7 +303,7 @@ function ariaText(bar) {
 </script>
 
 <template>
-  <div class="flex flex-col items-center gap-[7px]">
+  <div class="flex flex-col items-start gap-[7px]">
     <div class="flex items-end" :style="{ gap: showScale ? '5px' : '0' }">
       <!-- Ladder housing. The lamp lives inside it, on the faceplate, rather
            than floating above the component. -->
@@ -363,24 +372,30 @@ function ariaText(bar) {
           <span :style="{
             width: LABELLED.has(tick) ? '4px' : '2.5px',
             height: '1px',
-            background: 'rgba(255,255,255,.18)',
+            background: 'rgba(255,255,255,.22)',
           }"></span>
           <span
             v-if="LABELLED.has(tick)"
-            style="font:500 9px 'JetBrains Mono',monospace;color:#5d6472;line-height:1"
+            style="font:600 7px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3);line-height:1"
           >{{ tick }}</span>
         </div>
       </div>
     </div>
 
-    <span
-      v-if="showReadout"
-      :style="{
-        font: `600 12px 'JetBrains Mono',monospace`,
-        color: clipped ? '#ff9d90' : '#cfd4de',
-      }"
-    >{{ readout }}</span>
+    <div
+      v-if="showReadout || label"
+      class="flex flex-col items-center gap-[7px]"
+      :style="{ width: housingWidth + 'px' }"
+    >
+      <span
+        v-if="showReadout"
+        :style="{
+          font: `700 9.5px 'JetBrains Mono',monospace`,
+          color: clipped ? '#ff9d90' : 'rgba(255,255,255,.62)',
+        }"
+      >{{ readout }}</span>
 
-    <span v-if="label" style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6f7787">{{ label }}</span>
+      <span v-if="label" style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.45)">{{ label }}</span>
+    </div>
   </div>
 </template>
