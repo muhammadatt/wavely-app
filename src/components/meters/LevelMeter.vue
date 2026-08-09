@@ -35,7 +35,7 @@ const props = defineProps({
 // other way round — panels keep setting a pixel height and the ladder fills
 // as much of it as whole segments allow.
 const SEG_W = 6
-const SEG_H = 6
+const SEG_H = 4
 const SEG_GAP = 3
 const PITCH = SEG_H + SEG_GAP
 const CH_GAP = 2
@@ -358,8 +358,13 @@ function ariaText(bar) {
               class="absolute left-0 right-0 pointer-events-none"
               :style="{
                 bottom: `calc(${ladder.peak.pct}% - 1px)`,
-                height: '2px',
                 background: ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)',
+                width: SEG_W + 'px',
+                height: '3px',
+                borderRadius: '1px',
+                opacity: 1,
+                boxShadow: `0 0 6px ` + ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)',
+
               }"
             ></div>
           </div>
