@@ -1,12 +1,12 @@
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useFET1176 } from '../../composables/useFET1176.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { attackSecondsForDial, releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import VuMeter from '../meters/VuMeter.vue'
+import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
@@ -21,19 +21,6 @@ const {
 } = useFET1176()
 
 const { state } = useEditorState()
-
-/**
- * One needle over a stereo pair follows the louder channel, matching what the
- * level meters' single readout reports. RMS rather than peak — the movement
- * is a VU, and it is scaled for an averaged level.
- */
-const fetOutputVuDb = computed(() => {
-  let loudest = -Infinity
-  for (const channel of fetOutputLevels.value) {
-    if (channel.rmsDb > loudest) loudest = channel.rmsDb
-  }
-  return loudest
-})
 
 // Default to engaged when the panel opens
 onMounted(() => {
@@ -69,15 +56,6 @@ const SC_HPF_OPTIONS = [
   { value: 90, label: '90', title: 'Stops plosives and rumble from ducking the take' },
   { value: 150, label: '150', title: 'Keeps chest weight out of the detector entirely' },
 ]
-
-const METER_OPTIONS = [
-  { value: 'gr', label: 'GR', title: 'Gain reduction' },
-  { value: 'vu4', label: '+4', title: 'Output level, 0 VU = -18 dBFS' },
-  { value: 'vu8', label: '+8', title: 'Output level, 0 VU = -14 dBFS' },
-]
-
-const meterMode = ref('gr')
-const vuReference = computed(() => (meterMode.value === 'vu8' ? -14 : -18))
 
 const ratioCaption = computed(() => RATIO_CAPTIONS[fetRatio.value] ?? '')
 
@@ -144,89 +122,75 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
     </template>
 
     <div class="px-[26px] pt-[20px] pb-[26px]">
-      <!-- Meter bay: VU movement on the left, gain staging on the right -->
-      <div class="flex items-start gap-[26px]">
-        <div class="w-[248px] shrink-0 flex flex-col items-center gap-[10px]">
-          <VuMeter
-            class="w-full"
-            :mode="meterMode === 'gr' ? 'gr' : 'vu'"
-            :reduction-db="Math.abs(fetReduction)"
-            :level-db="fetOutputVuDb"
-            :reference-dbfs="vuReference"
-            :accent="ACCENT"
-          />
-          <SegmentedSwitch
-            v-model="meterMode"
-            :options="METER_OPTIONS"
-            :accent="ACCENT"
-            :padding-x="16"
-          />
-        </div>
+      <!-- Gain reduction across the full width, then the gain staging under it.
+           Same meter and same layout as the OptoSmooth panel: the two
+           compressors are meant to be compared, and they cannot be compared
+           through two different instruments. -->
+      <GainReductionBar :reduction-db="fetReduction" :accent="ACCENT" />
 
-        <div class="flex-1 flex items-center justify-between gap-[14px]">
-          <LevelMeter :levels="fetInputLevels" label="IN" :height="132" />
+      <div class="flex items-center justify-between gap-[14px] mt-[24px]">
+        <LevelMeter :levels="fetInputLevels" label="IN" :height="132" />
 
-          <div class="flex-1 flex justify-center gap-[26px]">
-            <div class="w-[118px]">
-              <!-- Input is the only threshold control there is: it drives the
-                   audio path and the detector together, exactly as the
-                   hardware attenuator does. -->
-              <Knob
-                :model-value="fetInput"
-                @update:model-value="syncInput"
-                :min="0" :max="100" :step="1"
-                label="Input" :accent="ACCENT" :format-value="formatInteger"
-                :disabled="!fetPreview"
-              />
-            </div>
-            <div class="w-[118px] flex flex-col items-center">
-              <div class="relative w-full" :style="{ opacity: fetAutoMakeup ? 0.78 : 1 }">
-                <Knob
-                  :model-value="fetOutput"
-                  @update:model-value="syncOutput"
-                  :min="-36" :max="24" :step="0.1"
-                  label="Output" :accent="ACCENT" :format-value="formatGain"
-                  :disabled="!fetPreview"
-                  :readonly="fetAutoMakeup"
-                />
-                <span
-                  v-if="fetAutoMakeup"
-                  class="absolute top-[2px] right-[4px] px-1.5 py-[2px] rounded-full pointer-events-none"
-                  :style="{
-                    background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
-                    border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
-                    font: `700 7px/1 'JetBrains Mono',monospace`,
-                    letterSpacing: '.09em',
-                    color: `color-mix(in srgb, ${ACCENT} 65%, #ffffff)`,
-                  }"
-                >AUTO</span>
-              </div>
-              <!-- Auto makeup matters more here than on the OptoSmooth:
-                   Input feeds the audio path too, so driving the unit harder
-                   swings the output level by tens of dB. With AUTO on, the
-                   plugin keeps Output level-matched to the input so pushing
-                   Input is a change of character, not of loudness. -->
-              <button
-                class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
-                :style="{
-                  background: fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 16%, transparent)` : 'rgba(255,255,255,.05)',
-                  border: `1px solid ${fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 42%, transparent)` : 'rgba(255,255,255,.09)'}`,
-                  color: fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 65%, #ffffff)` : 'rgba(255,255,255,.4)',
-                  font: `700 8.5px 'JetBrains Mono',monospace`,
-                  letterSpacing: '.1em',
-                  opacity: fetPreview ? 1 : 0.4,
-                }"
-                :disabled="!fetPreview"
-                :title="fetAutoMakeup
-                  ? 'Auto makeup on. Click to take manual control of Output.'
-                  : 'Auto makeup off. Click to let the plugin match Output to the input level.'"
-              @click="toggleAutoMakeup"
-              >AUTO</button>
-            </div>
+        <div class="flex-1 flex justify-center gap-[40px]">
+          <div class="w-[118px]">
+            <!-- Input is the only threshold control there is: it drives the
+                 audio path and the detector together, exactly as the
+                 hardware attenuator does. -->
+            <Knob
+              :model-value="fetInput"
+              @update:model-value="syncInput"
+              :min="0" :max="100" :step="1"
+              label="Input" :accent="ACCENT" :format-value="formatInteger"
+              :disabled="!fetPreview"
+            />
           </div>
-
-          <LevelMeter :levels="fetOutputLevels" label="OUT" :height="132" />
+          <div class="w-[118px] flex flex-col items-center">
+            <div class="relative w-full" :style="{ opacity: fetAutoMakeup ? 0.78 : 1 }">
+              <Knob
+                :model-value="fetOutput"
+                @update:model-value="syncOutput"
+                :min="-36" :max="24" :step="0.1"
+                label="Output" :accent="ACCENT" :format-value="formatGain"
+                :disabled="!fetPreview"
+                :readonly="fetAutoMakeup"
+              />
+              <span
+                v-if="fetAutoMakeup"
+                class="absolute top-[2px] right-[4px] px-1.5 py-[2px] rounded-full pointer-events-none"
+                :style="{
+                  background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
+                  font: `700 7px/1 'JetBrains Mono',monospace`,
+                  letterSpacing: '.09em',
+                  color: `color-mix(in srgb, ${ACCENT} 65%, #ffffff)`,
+                }"
+              >AUTO</span>
+            </div>
+            <!-- Auto makeup matters more here than on the OptoSmooth:
+                 Input feeds the audio path too, so driving the unit harder
+                 swings the output level by tens of dB. With AUTO on, the
+                 plugin keeps Output level-matched to the input so pushing
+                 Input is a change of character, not of loudness. -->
+            <button
+              class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
+              :style="{
+                background: fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 16%, transparent)` : 'rgba(255,255,255,.05)',
+                border: `1px solid ${fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 42%, transparent)` : 'rgba(255,255,255,.09)'}`,
+                color: fetAutoMakeup ? `color-mix(in srgb, ${ACCENT} 65%, #ffffff)` : 'rgba(255,255,255,.4)',
+                font: `700 8.5px 'JetBrains Mono',monospace`,
+                letterSpacing: '.1em',
+                opacity: fetPreview ? 1 : 0.4,
+              }"
+              :disabled="!fetPreview"
+              :title="fetAutoMakeup
+                ? 'Auto makeup on. Click to take manual control of Output.'
+                : 'Auto makeup off. Click to let the plugin match Output to the input level.'"
+            @click="toggleAutoMakeup"
+            >AUTO</button>
+          </div>
         </div>
+
+        <LevelMeter :levels="fetOutputLevels" label="OUT" :height="132" />
       </div>
 
       <!-- Ratio buttons + sidechain filter, and the ballistics -->

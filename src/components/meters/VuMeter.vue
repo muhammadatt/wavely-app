@@ -1,5 +1,6 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { createPeakHold, createVuBallistics, grFraction, useMeterFrame } from './ballistics.js'
 
 /**
  * Backlit analog VU meter with a swinging needle.
@@ -32,18 +33,22 @@ const SWEEP = 52
 // Deflection is linear in voltage, so the dB markings bunch up on their own
 // at the crowded end of the travel. Only the numerals that stay legible get
 // printed; the rest are drawn as bare ticks, the way a real face is engraved.
-const GR_MARKS = [0, 1, 2, 3, 4, 5, 7, 10, 20]
+const GR_MARKS = [0, 1, 2, 3, 4, 5, 7, 10, 15, 20]
 const GR_LABELLED = new Set([0, 1, 3, 5, 10, 20])
-const GR_MIN_FRACTION = 0.1 // voltage fraction at the 20 dB end of the scale
+const GR_FULL_SCALE_DB = 20 // reduction at the left-hand end of the scale
 
 const VU_MARKS = [-20, -10, -7, -5, -3, -1, 0, 1, 2, 3]
 const VU_LABELLED = new Set([-20, -10, -5, -3, 0, 3])
 const VU_TOP_DB = 3 // right-hand end of the scale
 
-/** Voltage fraction (0-1 across the face) for a gain-reduction reading. */
-function grFraction(db) {
-  const v = Math.pow(10, -Math.max(0, db) / 20)
-  return (v - GR_MIN_FRACTION) / (1 - GR_MIN_FRACTION)
+/**
+ * Voltage fraction (0-1 across the face) for a gain-reduction reading.
+ *
+ * Rest is hard right, so this is the complement of the shared scale law the
+ * horizontal bar draws with — same curve, mirrored.
+ */
+function grDeflection(db) {
+  return 1 - grFraction(db, GR_FULL_SCALE_DB)
 }
 
 /** Voltage fraction (0-1 across the face) for a VU reading. */
@@ -65,7 +70,7 @@ const marks = computed(() =>
   isGr.value
     ? GR_MARKS.map(db => ({
         label: GR_LABELLED.has(db) ? String(db) : '',
-        angle: fractionToAngle(grFraction(db)),
+        angle: fractionToAngle(grDeflection(db)),
         major: GR_LABELLED.has(db),
       }))
     : VU_MARKS.map(db => ({
@@ -76,11 +81,50 @@ const marks = computed(() =>
       }))
 )
 
-const needleAngle = computed(() => {
-  if (isGr.value) return fractionToAngle(grFraction(props.reductionDb))
+/**
+ * Where the needle would sit with no movement mass, 0-1 across the face.
+ */
+function targetDeflection() {
+  if (isGr.value) return grDeflection(Math.max(0, props.reductionDb))
   const vu = Number.isFinite(props.levelDb) ? props.levelDb - props.referenceDbfs : -60
-  return fractionToAngle(vuFraction(vu))
+  return clamp01(vuFraction(vu))
+}
+
+/**
+ * VU damping, run explicitly rather than left to a CSS transition.
+ *
+ * A transition restarts from wherever it was every time the prop changes, so
+ * its timing depends on how often the caller pushes; the movement it models
+ * has one time constant regardless. Running it per frame also means the bar
+ * meter and this one are damped by the same code.
+ */
+const deflection = ref(0)
+// Distance travelled from rest, which is hard left on the level scale and hard
+// right on the GR scale. Holding the excursion rather than the deflection lets
+// one peak hold serve both without knowing which way the needle points.
+const peakExcursion = ref(0)
+const needle = createVuBallistics()
+// Shared hold and fall rate: the excursion is already a scale fraction, which
+// is the unit the peak hold defaults are expressed in.
+const peak = createPeakHold()
+let lastMode = props.mode
+
+useMeterFrame((dtMs) => {
+  if (props.mode !== lastMode) {
+    // A held GR peak is meaningless on the level scale, and the reverse.
+    lastMode = props.mode
+    peak.reset(0)
+  }
+  const target = targetDeflection()
+  deflection.value = needle.push(target, dtMs)
+  peakExcursion.value = peak.push(isGr.value ? 1 - target : target, dtMs)
 })
+
+const needleAngle = computed(() => fractionToAngle(deflection.value))
+const peakAngle = computed(() =>
+  fractionToAngle(isGr.value ? 1 - peakExcursion.value : peakExcursion.value)
+)
+const showPeak = computed(() => peakExcursion.value > 0.005)
 
 // The red arc: 0 VU and above on the level scale; the GR scale has none.
 const redArc = computed(() => {
@@ -147,12 +191,22 @@ const caption = computed(() => (isGr.value ? 'GAIN REDUCTION' : 'VU'))
             fill="rgba(58,50,38,.72)"
             style="font:700 7.5px 'Inter',system-ui;letter-spacing:.22em">{{ caption }}</text>
 
-      <!-- Needle -->
+      <!-- Peak hold: a fast marker riding the scale arc, so the transient
+           depth the damped needle averages away is still readable. -->
+      <g v-show="showPeak" :style="{
+           transform: `rotate(${peakAngle}deg)`,
+           transformBox: 'view-box',
+           transformOrigin: `${PIVOT_X}px ${PIVOT_Y}px`,
+         }">
+        <line :x1="PIVOT_X" :y1="PIVOT_Y - FACE_R - 1" :x2="PIVOT_X" :y2="PIVOT_Y - FACE_R + 13"
+              stroke="#8c2f22" stroke-width="2.2" stroke-linecap="round" opacity="0.85" />
+      </g>
+
+      <!-- Needle. Damped in script, not by a CSS transition. -->
       <g :style="{
            transform: `rotate(${needleAngle}deg)`,
            transformBox: 'view-box',
            transformOrigin: `${PIVOT_X}px ${PIVOT_Y}px`,
-           transition: 'transform 130ms cubic-bezier(.22,.9,.3,1.08)',
          }">
         <line :x1="PIVOT_X" :y1="PIVOT_Y + 6" :x2="PIVOT_X" :y2="PIVOT_Y - FACE_R + 4"
               stroke="#14100a" stroke-width="1.9" stroke-linecap="round" />

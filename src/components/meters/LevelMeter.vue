@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { createReadoutThrottle } from './ballistics.js'
 
 /**
  * Vertical level meter — a segmented LED ladder per channel, a peak-hold
@@ -111,6 +112,17 @@ let lastTs = 0
 let rafId = null
 
 /**
+ * Loudest held peak across channels — one number over a pair means the hotter.
+ *
+ * Refreshed on its own slower clock than the ladder. While the hold is latched
+ * the number sits still anyway, but during the release it falls at 20 dB/s,
+ * and a tenths digit stepping twice a frame is unreadable. Same throttle the
+ * gain-reduction bar's numerals use.
+ */
+const readoutThrottle = createReadoutThrottle()
+const readoutDb = ref(props.floorDb)
+
+/**
  * Ballistics run on their own frame loop rather than off a watcher.
  *
  * A release is a function of elapsed time, not of the input changing. Driven
@@ -130,11 +142,15 @@ function advance() {
     clipped.value = false
     holdUntil = []
     lastTs = 0
+    // Not throttled: a torn-down meter should read silent at once, not carry
+    // its last number for another tenth of a second.
+    readoutDb.value = props.floorDb
     rafId = requestAnimationFrame(advance)
     return
   }
 
-  const elapsedS = lastTs ? (now - lastTs) / 1000 : 0
+  const elapsedMs = lastTs ? now - lastTs : 0
+  const elapsedS = elapsedMs / 1000
   lastTs = now
 
   const prev = bars.value
@@ -176,6 +192,15 @@ function advance() {
   }
 
   bars.value = next
+
+  if (readoutThrottle.due(elapsedMs)) {
+    let loudest = floor
+    for (const bar of next) {
+      if (bar.heldPeakDb > loudest) loudest = bar.heldPeakDb
+    }
+    readoutDb.value = loudest
+  }
+
   rafId = requestAnimationFrame(advance)
 }
 
@@ -259,15 +284,6 @@ function channelName(index) {
   if (channelCount.value < 2) return ''
   return index === 0 ? 'left' : 'right'
 }
-
-/** Loudest peak across channels — one number over a pair means the hotter. */
-const readoutDb = computed(() => {
-  let max = props.floorDb
-  for (const bar of bars.value) {
-    if (bar.heldPeakDb > max) max = bar.heldPeakDb
-  }
-  return max
-})
 
 // At the floor the meter is off the bottom of its own scale, and a number
 // there would be a reading the scale cannot show.
@@ -370,12 +386,9 @@ function ariaText(bar) {
               :style="{
                 bottom: `calc(${ladder.peak.pct}% - 1px)`,
                 background: ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)',
-                width: SEG_W + 'px',
                 height: '3px',
                 borderRadius: '1px',
-                opacity: 1,
-                boxShadow: `0 0 6px ` + ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)',
-
+                boxShadow: `0 0 6px ${ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)'}`,
               }"
             ></div>
           </div>

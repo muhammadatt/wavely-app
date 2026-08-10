@@ -136,14 +136,14 @@ async function applyAndClose() {
       <!-- Live reduction at the playhead, matching every other effect's meter.
            The envelope's planned maximum is a different quantity and lives in
            the status line, where it does not look like a meter. -->
-      <!-- 12 dB full scale, not the shared 40: de-essing lives in the 3–8 dB
-           range, and on a 40 dB bar a full-strength event is a fifth of the
-           width. The composable applies the meter ballistics, so the CSS
-           smoothing is off. -->
+      <!-- 12 dB full scale, not the shared 24: de-essing lives in the 3–8 dB
+           range, and even on the voltage-law scale a shallower face gives
+           those few dB more of the bar. The composable already holds the peak
+           of each event and releases slowly, so the bar's own damping is off —
+           two stages of smoothing would put the reading behind the audio. -->
       <GainReductionBar
         :reduction-db="reductionDb" :accent="ACCENT"
-        :full-scale-db="12" :scale="['0', '-3', '-6', '-9', '-12']"
-        :transition-ms="0"
+        :full-scale-db="12" ballistics="none"
       />
 
       <div class="flex items-start justify-between gap-[20px] mt-[20px]">
