@@ -408,11 +408,6 @@ function ariaText(bar) {
           class="absolute left-0 flex items-center gap-[4px]"
           :style="{ bottom: `calc(${dbToPct(tick)}% - 3px)`, height: '6px' }"
         >
-          <span :style="{
-            width: LABELLED.has(tick) ? '4px' : '2.5px',
-            height: '1px',
-            background: 'rgba(255,255,255,.22)',
-          }"></span>
           <span
             v-if="LABELLED.has(tick)"
             style="font:600 7px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3);line-height:1"

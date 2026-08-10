@@ -6,6 +6,7 @@ import {
   createReadoutThrottle,
   createVuBallistics,
   grFraction,
+  grFractionToDb,
   grScaleMarks,
   useMeterFrame,
 } from './ballistics.js'
@@ -70,13 +71,6 @@ const heldAverage = createHeldAverage()
 const averageDb = ref(0)
 const hasAverage = ref(false)
 
-/** Undo the scale law, so the numeral always states what the fill shows. */
-function fractionToDb(fraction) {
-  const vMin = Math.pow(10, -props.fullScaleDb / 20)
-  const v = 1 - fraction * (1 - vMin)
-  return v > 0 ? Math.min(-20 * Math.log10(v), props.fullScaleDb) : props.fullScaleDb
-}
-
 useMeterFrame((dtMs) => {
   const target = Math.abs(props.reductionDb)
   const targetFraction = grFraction(target, props.fullScaleDb)
@@ -92,12 +86,43 @@ useMeterFrame((dtMs) => {
   averageDb.value = heldAverage.push(target, dtMs)
   hasAverage.value = heldAverage.active
 
-  if (readoutThrottle.due(dtMs)) readingDb.value = fractionToDb(fillFraction.value)
+  if (readoutThrottle.due(dtMs)) {
+    readingDb.value = grFractionToDb(fillFraction.value, props.fullScaleDb)
+  }
 })
 
 const fillPct = computed(() => Math.min(100, Math.max(0, fillFraction.value * 100)))
 const peakPct = computed(() => Math.min(100, Math.max(0, peakFraction.value * 100)))
 const showPeak = computed(() => peakFraction.value > 0.005)
+
+/**
+ * Track geometry.
+ *
+ * The lit slot and the plate around it used to be one element, so the fill ran
+ * edge to edge and there was nowhere for a margin to live. Splitting them puts
+ * the padding on the plate and leaves the lit height untouched — the plate
+ * grows outward by the gap rather than the bar shrinking inward by it.
+ *
+ * Radii are concentric: an inner corner and an outer corner separated by the
+ * padding only stay parallel if the outer radius is the inner plus the gap.
+ * Matching them instead leaves a visibly pinched crescent at each end.
+ */
+const LIT_H = 18
+const TRACK_PAD = 3
+
+const plateStyle = {
+  padding: `${TRACK_PAD}px`,
+  borderRadius: `${LIT_H / 2 + TRACK_PAD}px`,
+  background: '#0a0806',
+  boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.05)',
+}
+
+const slotStyle = {
+  height: `${LIT_H}px`,
+  borderRadius: `${LIT_H / 2}px`,
+  background: 'rgba(0,0,0,.5)',
+  boxShadow: 'inset 0 1px 4px rgba(0,0,0,.8)',
+}
 
 const marks = computed(() =>
   grScaleMarks(props.fullScaleDb).map((mark) => {
@@ -131,29 +156,20 @@ const marks = computed(() =>
       <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">{{ title }}</span>
 
     </div>
-    <div class="relative h-[18px] rounded-[9px]" style="background:#0a0806;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 6px rgba(0,0,0,.8)">
-      <div class="absolute top-0 bottom-0 left-0 rounded-[9px]"
-           :style="{
-             width: fillPct + '%',
-             background: `linear-gradient(90deg, color-mix(in srgb, ${accent} 35%, #ffffff), ${accent})`,
-             boxShadow: `0 0 16px color-mix(in srgb, ${accent} 70%, transparent)`,
-           }"></div>
-      <div class="absolute inset-0 rounded-[9px]" style="background:repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)"></div>
-      <!-- Ticks on the track itself, so the engraving is visibly tied to the
-           positions the numerals claim. Majors run the full height. -->
-      <div
-        v-for="(mark, i) in marks" :key="`t${i}`"
-        v-show="mark.pct > 0 && mark.pct < 100"
-        class="absolute"
-        :style="{
-          left: mark.pct + '%',
-          top: mark.major ? '0' : '5px',
-          bottom: mark.major ? '0' : '5px',
-          width: '1px',
-          background: mark.major ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.1)',
-        }"
-      ></div>
-      <!--
+    <!-- Plate, then the lit slot recessed into it. The gap between them is the
+         plate's padding, so the bar keeps its height. -->
+    <div :style="plateStyle">
+      <div class="relative" :style="slotStyle">
+        <div class="absolute top-0 bottom-0 left-0"
+             :style="{
+               width: fillPct + '%',
+               borderRadius: `${LIT_H / 2}px`,
+               background: `linear-gradient(90deg, color-mix(in srgb, ${accent} 35%, #ffffff), ${accent})`,
+               boxShadow: `0 0 16px color-mix(in srgb, ${accent} 70%, transparent)`,
+             }"></div>
+        <div class="absolute inset-0" :style="{ borderRadius: `${LIT_H / 2}px`, background: 'repeating-linear-gradient(90deg,#0000 0 9px,rgba(10,8,6,.85) 9px 11px)' }"></div>
+
+        <!--
         Peak hold: instant attack, so it catches the transient depth the damped
         fill never reaches. Sits above the LED mask, not behind it.
 
@@ -166,26 +182,32 @@ const marks = computed(() =>
         into it, which is the correct amount of attention for a gap that is not
         there.
       -->
-      <div
-        v-show="showPeak"
-        class="absolute pointer-events-none"
-        :style="{
-          left: `calc(${peakPct}% - 1px)`,
-          top: '1px',
-          bottom: '1px',
-          width: '2px',
-          borderRadius: '1px',
-          background: 'rgba(255,255,255,.5)',
-        }"
-      ></div>
+        <div
+          v-show="showPeak"
+          class="absolute pointer-events-none"
+          :style="{
+            left: `calc(${peakPct}% - 1px)`,
+            top: '1px',
+            bottom: '1px',
+            width: '2px',
+            borderRadius: '1px',
+            background: 'rgba(255,255,255,.5)',
+          }"
+        ></div>
+      </div>
     </div>
-    <div class="relative mt-[5px] h-[10px]" style="font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
-      <span
-        v-for="(mark, i) in marks" :key="i"
-        v-show="mark.label"
-        class="absolute top-0"
-        :style="{ left: mark.pct + '%', transform: mark.shift }"
-      >{{ mark.label }}</span>
+
+    <!-- Inset by the same padding as the slot, so a numeral still lands over
+         the position it names rather than over the plate beside it. -->
+    <div :style="{ padding: `0 ${TRACK_PAD}px` }">
+      <div class="relative mt-[5px] h-[10px]" style="font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)">
+        <span
+          v-for="(mark, i) in marks" :key="i"
+          v-show="mark.label"
+          class="absolute top-0"
+          :style="{ left: mark.pct + '%', transform: mark.shift }"
+        >{{ mark.label }}</span>
+      </div>
     </div>
   </div>
 </template>

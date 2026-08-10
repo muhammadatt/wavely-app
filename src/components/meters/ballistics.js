@@ -248,26 +248,57 @@ export function useMeterFrame(step) {
 }
 
 /**
+ * Curvature of the gain-reduction scale: how far it leans from even dB spacing
+ * toward the crowding of a moving-coil face.
+ *
+ * The scale is linear in voltage raised to this power. At 1 it is the law a
+ * real movement obeys — deflection linear in voltage — which fixes the problem
+ * a linear dB scale has (nearly all gain reduction squeezed into the first
+ * eighth of the bar) by overcorrecting: 0 to -10 dB takes 73% of a 24 dB face
+ * and everything past -10 is crushed into the last quarter. As it approaches 0
+ * the curve straightens back out to even dB spacing. Half way is the useful
+ * place to stand — on a 24 dB face:
+ *
+ *              -3 dB   -8 dB   -10 dB  -20 dB   3-8 dB band
+ *   linear       13%     33%      42%     83%     21% of bar
+ *   this (0.5)   21%     49%      58%     91%     28% of bar
+ *   voltage (1)  31%     64%      73%     96%     33% of bar
+ *
+ * It keeps most of the resolution where reduction actually lives while leaving
+ * the deep end 42% of the bar instead of 27% — enough that a limiting peak
+ * still travels visibly rather than pinning against the end.
+ */
+export const GR_CURVE = 0.5
+
+/**
  * Position of a gain-reduction reading on the scale, 0 at rest to 1 at full
  * scale.
- *
- * Deflection is linear in voltage, not in dB — the law a moving-coil meter
- * obeys because that is what the movement does, and the reason a hardware GR
- * scale gives most of its face to the first few dB. On a 24 dB scale it puts
- * 0 to -10 dB across roughly the first 70% of the travel, so the 3-8 dB range
- * that nearly all real gain reduction lives in is spread over a third of the
- * meter instead of an eighth.
  */
 export function grFraction(db, fullScaleDb) {
   const amount = Math.min(Math.abs(db), fullScaleDb)
-  const vMin = Math.pow(10, -fullScaleDb / 20)
-  return (1 - Math.pow(10, -amount / 20)) / (1 - vMin)
+  const vMin = Math.pow(10, (-GR_CURVE * fullScaleDb) / 20)
+  return (1 - Math.pow(10, (-GR_CURVE * amount) / 20)) / (1 - vMin)
+}
+
+/**
+ * The inverse, so a numeral can state what the fill shows.
+ *
+ * Lives next to grFraction deliberately: these two have to be exact opposites,
+ * and a curve change that updated only one of them would leave the number and
+ * the bar quietly disagreeing.
+ */
+export function grFractionToDb(fraction, fullScaleDb) {
+  const f = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction
+  const vMin = Math.pow(10, (-GR_CURVE * fullScaleDb) / 20)
+  const v = 1 - f * (1 - vMin)
+  if (v <= 0) return fullScaleDb
+  return Math.min((-20 * Math.log10(v)) / GR_CURVE, fullScaleDb)
 }
 
 /**
  * Engraving vocabulary. Only the round numbers get numerals; the rest are bare
- * ticks, because past 10 dB the voltage law crowds them together faster than
- * 8px type can be read. Full scale is always numbered, whatever it is.
+ * ticks, because past 10 dB the curve crowds them together faster than 8px
+ * type can be read. Full scale is always numbered, whatever it is.
  */
 const TICKS_DB = [0, 1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 40]
 const LABELLED_DB = new Set([0, 1, 3, 5, 10, 20, 40])
