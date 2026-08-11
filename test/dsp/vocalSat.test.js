@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import {
   VocalSatKernel,
   VOCAL_SAT_KERNEL_DEFAULTS,
+  VOCAL_SAT_LATENCY_SAMPLES,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -26,13 +27,19 @@ function tone(n, freqHz, amp = 0.4) {
 
 test('is transparent at zero drive and zero bias', () => {
   // transfer(0*x + 0) === 0, so wet is silent and the blend collapses to dry.
+  // "Transparent" now means the dry signal delayed by the reported latency: the
+  // saturation runs oversampled, and the dry side is held back to meet it.
+  // Nothing filters the dry path, so this is still an exact delay.
   const n = 8192
   const sig = tone(n, 220)
-  const { channelData } = processVocalSatBuffer([sig], SR, {
+  const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
     drive: 0, bias: 0, wetDry: 0.5,
   })
+  assert.equal(latencySamples, VOCAL_SAT_LATENCY_SAMPLES)
   let maxErr = 0
-  for (let i = 1000; i < n; i++) maxErr = Math.max(maxErr, Math.abs(channelData[0][i] - sig[i]))
+  for (let i = 1000; i < n; i++) {
+    maxErr = Math.max(maxErr, Math.abs(channelData[0][i] - sig[i - VOCAL_SAT_LATENCY_SAMPLES]))
+  }
   assert.ok(maxErr < 1e-5, `not transparent: max error ${maxErr}`)
 })
 
@@ -41,7 +48,9 @@ test('is transparent at zero wet/dry', () => {
   const sig = tone(n, 220)
   const { channelData } = processVocalSatBuffer([sig], SR, { wetDry: 0 })
   let maxErr = 0
-  for (let i = 1000; i < n; i++) maxErr = Math.max(maxErr, Math.abs(channelData[0][i] - sig[i]))
+  for (let i = 1000; i < n; i++) {
+    maxErr = Math.max(maxErr, Math.abs(channelData[0][i] - sig[i - VOCAL_SAT_LATENCY_SAMPLES]))
+  }
   assert.ok(maxErr < 1e-5, `not transparent: max error ${maxErr}`)
 })
 
@@ -132,8 +141,16 @@ test('bias asymmetry produces even harmonics', () => {
   )
 })
 
+/** FFT length used by the aliasing measurements. */
+const FFT_N = 32768
+
+/** The bin index whose tone completes a whole number of periods in FFT_N. */
+function cyclesFor(freqHz) {
+  return Math.round((freqHz * FFT_N) / SR)
+}
+
 /**
- * Alias-to-signal ratio in dB for a bin-centred tone.
+ * Settled spectrum of a bin-centred tone put through the effect.
  *
  * The tone must complete exactly `cycles` periods in the FFT length. That
  * gives zero spectral leakage, so every bin that is not a multiple of `cycles`
@@ -142,22 +159,26 @@ test('bias asymmetry produces even harmonics', () => {
  *
  * Analysis runs on a settled window, past the filter and follower warmup.
  */
-function aliasToSignalDb(params, cycles, amp = 0.4) {
-  const n = 32768
-  const f0 = (cycles * SR) / n
-  const total = n * 3
+function spectrumOf(params, cycles, amp = 0.4) {
+  const f0 = (cycles * SR) / FFT_N
+  const total = FFT_N * 3
   const sig = new Float32Array(total)
   for (let i = 0; i < total; i++) sig[i] = amp * Math.sin((2 * Math.PI * f0 * i) / SR)
 
   const { channelData } = processVocalSatBuffer([sig], SR, params)
-  const settled = channelData[0].subarray(total - n)
+  const settled = channelData[0].subarray(total - FFT_N)
 
-  const fft = getFFT(n)
-  const bins = rfftBinCount(n)
+  const fft = getFFT(FFT_N)
+  const bins = rfftBinCount(FFT_N)
   const re = new Float64Array(bins)
   const im = new Float64Array(bins)
   fft.rfft(settled, re, im)
+  return { re, im, bins }
+}
 
+/** Total alias energy relative to the tone and its harmonics, in dB. */
+function aliasToSignalDb(params, cycles, amp = 0.4) {
+  const { re, im, bins } = spectrumOf(params, cycles, amp)
   let harmonic = 0
   let alias = 0
   for (let k = 1; k < bins; k++) {
@@ -168,15 +189,15 @@ function aliasToSignalDb(params, cycles, amp = 0.4) {
   return 10 * Math.log10(alias / harmonic)
 }
 
-test('aliasing stays inaudible without oversampling', () => {
-  // The Python oversamples 2x whenever a band's effective drive reaches 0.5,
-  // and at default settings the low band runs at 10. This kernel does not
-  // oversample, because a streaming 2x up/down pair costs 7 samples of latency
-  // and would make this a latent effect. These numbers are what that decision
-  // actually costs — all far below anything audible.
+test('aliasing stays inaudible', () => {
+  // The three transfer curves run at 2x. These are the numbers that decision is
+  // worth — if a future change removes the oversampling, they are what fails.
   //
-  // Measured: -91.8 dB at defaults, -87.2 dB on a 122 Hz tone, -92.6 dB even
-  // at drive 5 (low band effective drive 25), -79.1 dB fully wet.
+  // NOTE ON COVERAGE: this test once stopped at 2 kHz, which is why the effect
+  // shipped without oversampling for as long as it did. The low band carries
+  // the hard drive and its harmonics have room below Nyquist, so low tones look
+  // clean whether or not anything is oversampled. High tones are where folding
+  // shows, and cymbals and air are exactly the material a music user brings.
   const D = VOCAL_SAT_KERNEL_DEFAULTS
   const cases = [
     ['defaults', D, 235, 0.4],
@@ -185,14 +206,47 @@ test('aliasing stays inaudible without oversampling', () => {
     ['drive 5', { ...D, drive: 5 }, 235, 0.4],
     ['fully wet', { ...D, wetDry: 1 }, 235, 0.4],
     ['mid-band tone', D, 1486, 0.4],
+    // High tones: a 12 kHz partial's second harmonic is above Nyquist and its
+    // third lands back at 8 kHz, in the middle of everything.
+    ['6 kHz tone', D, cyclesFor(6000), 0.4],
+    ['9 kHz tone', D, cyclesFor(9000), 0.4],
+    ['12 kHz tone', D, cyclesFor(12000), 0.4],
+    ['12 kHz, drive 5', { ...D, drive: 5 }, cyclesFor(12000), 0.4],
+    ['12 kHz, drive 5, fully wet', { ...D, drive: 5, wetDry: 1 }, cyclesFor(12000), 0.4],
   ]
   for (const [label, params, cycles, amp] of cases) {
     const db = aliasToSignalDb(params, cycles, amp)
     assert.ok(
       db < -70,
-      `${label}: alias/signal ${db.toFixed(1)} dB — oversampling may now be needed`,
+      `${label}: alias/signal ${db.toFixed(1)} dB — oversampling may have regressed`,
     )
   }
+})
+
+test('the worst folded product on a high tone stays far down', () => {
+  // aliasToSignalDb aggregates every non-harmonic bin, which mixes a large
+  // inaudible product at 20 kHz with a small audible one at 8 kHz. This pins
+  // the individual worst offender instead, and reports where it landed, so a
+  // regression says something useful rather than just going red.
+  const D = VOCAL_SAT_KERNEL_DEFAULTS
+  const cycles = cyclesFor(12000)
+  const { re, im, bins } = spectrumOf({ ...D, drive: 5, wetDry: 1 }, cycles, 0.4)
+  const power = b => re[b] * re[b] + im[b] * im[b]
+
+  let worst = 0
+  let worstBin = -1
+  for (let b = 8; b < bins; b++) {
+    if (b % cycles === 0) continue
+    if (power(b) > worst) {
+      worst = power(b)
+      worstBin = b
+    }
+  }
+  const dbc = 10 * Math.log10(worst / power(cycles))
+  assert.ok(
+    dbc < -80,
+    `worst folded product ${dbc.toFixed(1)} dBc at ${((worstBin * SR) / FFT_N).toFixed(0)} Hz`,
+  )
 })
 
 test('a near-linear band produces essentially no aliasing', () => {

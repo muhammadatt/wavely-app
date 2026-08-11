@@ -6,10 +6,11 @@ import assert from 'node:assert/strict'
 import {
   ManualEqKernel,
   eqSections,
+  eqResponseDb,
   processManualEqBuffer,
+  EQ_LATENCY_SAMPLES,
   MAX_BANDS,
 } from '../../src/audio/eqProcessor.js'
-import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
 
 const SR = 44100
@@ -56,7 +57,7 @@ function measuredResponseDb(params, freqs) {
 const PROBE = [50, 120, 300, 800, 1000, 2500, 5000, 9000, 15000]
 
 test('kernel response matches the curve the UI draws', () => {
-  // Both views render magnitudeResponseDb(eqSections(...)). If these disagree
+  // Both views render eqResponseDb(...). If these disagree
   // the display is lying about what is being applied — which in a tool whose
   // entire premise is "drag this and hear it" is the one unforgivable bug.
   const cases = [
@@ -75,7 +76,7 @@ test('kernel response matches the curve the UI draws', () => {
   ]
 
   for (const bands of cases) {
-    const analytic = magnitudeResponseDb(eqSections(SR, bands), PROBE.map(binFreq), SR)
+    const analytic = eqResponseDb(SR, bands, PROBE.map(binFreq))
     const measured = measuredResponseDb({ bands }, PROBE)
     for (let i = 0; i < PROBE.length; i++) {
       assert.ok(
@@ -86,14 +87,31 @@ test('kernel response matches the curve the UI draws', () => {
   }
 })
 
-test('an empty band pool is bit-transparent', () => {
+test('an empty band pool is transparent, delayed by exactly the reported latency', () => {
+  // This used to assert bit-transparency. The cascade now runs oversampled, and
+  // the resamplers run even with no bands — deliberately, so that latency is the
+  // same whatever the band list says. Disabling the last band would otherwise
+  // move the whole timeline under the apply path, which trims a fixed count.
+  //
+  // So the property is no longer "unchanged" but "unchanged except for a known
+  // delay", which is what the apply path compensates and what the chain can
+  // absorb. The residual is the resampling filters' own error.
   const n = 4096
   const sig = new Float32Array(n)
   for (let i = 0; i < n; i++) sig[i] = 0.4 * Math.sin(i / 6) + 0.2 * Math.sin(i / 1.7)
-  const { channelData } = processManualEqBuffer([sig], SR, { bands: [] })
-  for (let i = 0; i < n; i++) {
-    assert.equal(channelData[0][i], sig[i], `sample ${i} changed with no bands`)
+  const { channelData, latencySamples } = processManualEqBuffer([sig], SR, { bands: [] })
+
+  assert.equal(latencySamples, EQ_LATENCY_SAMPLES)
+
+  let err = 0
+  let ref = 0
+  for (let i = EQ_LATENCY_SAMPLES + 64; i < n; i++) {
+    const d = channelData[0][i] - sig[i - EQ_LATENCY_SAMPLES]
+    err += d * d
+    ref += sig[i - EQ_LATENCY_SAMPLES] ** 2
   }
+  const errDb = 10 * Math.log10(err / ref)
+  assert.ok(errDb < -80, `empty pool is not transparent: ${errDb.toFixed(1)} dB of error`)
 })
 
 test('disabled bands are inaudible but keep their slot', () => {
@@ -173,11 +191,10 @@ test('a solo probe monitors a region with no band behind it', () => {
 
 test('a solo probe wins over a solo index', () => {
   const bands = [band({ frequencyHz: 200, gainDb: -6, q: 2 })]
-  const sections = eqSections(SR, bands, {
+  const db = eqResponseDb(SR, bands, [200, 6000], {
     soloIndex: 0,
     soloProbe: { type: 'peaking', frequencyHz: 6000, q: 3 },
   })
-  const db = magnitudeResponseDb(sections, [200, 6000], SR)
   assert.ok(db[1] > db[0] + 20, 'the index was monitored instead of the probe')
 })
 
@@ -185,7 +202,7 @@ test('an incomplete solo probe is ignored rather than silencing the chain', () =
   const bands = [band({ frequencyHz: 1000, gainDb: 6, q: 1 })]
   const sections = eqSections(SR, bands, { soloProbe: { type: 'peaking', q: 2 } })
   assert.equal(sections.length, 1)
-  const db = magnitudeResponseDb(sections, [1000], SR)
+  const db = eqResponseDb(SR, bands, [1000], { soloProbe: { type: 'peaking', q: 2 } })
   assert.ok(db[0] > 5, 'the band was not left running')
 })
 
@@ -214,7 +231,12 @@ test('channels are filtered independently', () => {
   let energy = 0
   for (let i = 0; i < n; i++) energy += Math.abs(channelData[1][i])
   assert.equal(energy, 0, 'silent channel picked up the other channel’s impulse')
-  assert.ok(channelData[0][0] !== 0, 'signal channel produced nothing')
+
+  // Measured over the whole block rather than at sample 0: the oversampler is
+  // linear phase, so the impulse arrives EQ_LATENCY_SAMPLES late.
+  let signalEnergy = 0
+  for (let i = 0; i < n; i++) signalEnergy += Math.abs(channelData[0][i])
+  assert.ok(signalEnergy > 0, 'signal channel produced nothing')
 })
 
 test('block size does not change the result', () => {
@@ -257,4 +279,150 @@ test('a band at Nyquist does not vanish or blow up', () => {
   for (const v of Object.values(sections[0])) {
     assert.ok(Number.isFinite(v), `non-finite coefficient near Nyquist: ${v}`)
   }
+})
+
+// ── Cramping / response accuracy ────────────────────────────────────────────
+//
+// The reason the cascade runs oversampled at all. The bilinear transform maps
+// the analog frequency axis' infinite range onto a finite digital one, so
+// everything the analog prototype does between the design frequency and
+// infinity gets compressed into the space below Nyquist. On a 44.1 kHz file a
+// wide bell at 10 kHz came out more than 1.4 dB shy of its prototype across
+// 8-16 kHz, which on narration was invisible and on cymbals and air is not.
+//
+// These assert the accuracy that oversampling bought, so that a future change
+// to the profile — or a well-meaning "simplification" back to the base rate —
+// fails here rather than in someone's mix.
+
+/** RBJ's analog peaking prototype: H(s) = (s² + s·A/Q + 1)/(s² + s/(A·Q) + 1). */
+function analogPeakingDb(freqHz, centreHz, q, gainDb) {
+  const A = Math.pow(10, gainDb / 40)
+  const w = freqHz / centreHz
+  return 20 * Math.log10(
+    Math.hypot(1 - w * w, (w * A) / q) / Math.hypot(1 - w * w, w / (A * q)),
+  )
+}
+
+/** RBJ's analog high-shelf prototype. */
+function analogHighShelfDb(freqHz, cornerHz, q, gainDb) {
+  const A = Math.pow(10, gainDb / 40)
+  const w = freqHz / cornerHz
+  const sqrtA = Math.sqrt(A)
+  return 20 * Math.log10(
+    (A * Math.hypot(1 - A * w * w, (w * sqrtA) / q))
+    / Math.hypot(A - w * w, (w * sqrtA) / q),
+  )
+}
+
+test('high-frequency bells track their analog prototype', () => {
+  // 0.6 dB is the budget for bells a musical move would actually use — wide to
+  // moderately narrow, ordinary gains. Measured worst across these cases is
+  // 0.53 dB (the 9 kHz cut; deeper cuts have steeper skirts and so a larger
+  // error in dB), against 2.13 dB for the same band at the base rate. Every
+  // case improves by roughly 4x. The extreme corner of the control range is a
+  // separate test below, because it does not meet this bound and pretending
+  // otherwise would just be a tolerance tuned until it passed.
+  const TOLERANCE_DB = 0.6
+  const cases = [
+    { frequencyHz: 8000, q: 0.7, gainDb: 4 },
+    { frequencyHz: 10000, q: 0.7, gainDb: 4 },
+    { frequencyHz: 12000, q: 0.7, gainDb: 4 },
+    { frequencyHz: 10000, q: 2, gainDb: 4 },
+    { frequencyHz: 12000, q: 4, gainDb: -6 },
+    { frequencyHz: 9000, q: 1, gainDb: -8 },
+  ]
+  const probes = []
+  for (let f = 4000; f <= 16000; f += 500) probes.push(f)
+
+  for (const spec of cases) {
+    const bands = [band(spec)]
+    const got = eqResponseDb(SR, bands, probes)
+    for (let i = 0; i < probes.length; i++) {
+      const want = analogPeakingDb(probes[i], spec.frequencyHz, spec.q, spec.gainDb)
+      assert.ok(
+        Math.abs(got[i] - want) < TOLERANCE_DB,
+        `bell ${spec.frequencyHz} Hz Q=${spec.q}: at ${probes[i]} Hz got `
+        + `${got[i].toFixed(2)} dB, analog ${want.toFixed(2)} dB`,
+      )
+    }
+  }
+})
+
+test('high shelves track their analog prototype', () => {
+  const TOLERANCE_DB = 0.3
+  for (const spec of [
+    { type: 'highshelf', frequencyHz: 8000, q: 0.7, gainDb: 4 },
+    { type: 'highshelf', frequencyHz: 10000, q: 0.7, gainDb: 4 },
+    { type: 'highshelf', frequencyHz: 12000, q: 0.7, gainDb: -5 },
+  ]) {
+    const got = eqResponseDb(SR, [band(spec)], [4000, 8000, 12000, 16000, 20000])
+    const probes = [4000, 8000, 12000, 16000, 20000]
+    for (let i = 0; i < probes.length; i++) {
+      const want = analogHighShelfDb(probes[i], spec.frequencyHz, spec.q, spec.gainDb)
+      assert.ok(
+        Math.abs(got[i] - want) < TOLERANCE_DB,
+        `shelf ${spec.frequencyHz} Hz: at ${probes[i]} Hz got ${got[i].toFixed(2)} dB, `
+        + `analog ${want.toFixed(2)} dB`,
+      )
+    }
+  }
+})
+
+test('a bell keeps its nominal gain at its centre', () => {
+  // Cramping never moved the centre gain — that was always exact, and it has to
+  // stay exact, because it is the number printed on the control.
+  for (const frequencyHz of [100, 1000, 8000, 12000, 16000, 20000]) {
+    for (const gainDb of [-12, -6, 6, 12]) {
+      const got = eqResponseDb(SR, [band({ frequencyHz, gainDb, q: 2 })], [frequencyHz])[0]
+      assert.ok(
+        Math.abs(got - gainDb) < 0.01,
+        `${frequencyHz} Hz at ${gainDb} dB measured ${got.toFixed(3)}`,
+      )
+    }
+  }
+})
+
+test('the kernel really applies the uncramped response, not just the curve', () => {
+  // eqResponseDb is analytic. This measures the running kernel's impulse
+  // response, so a bug that uncramped the display while leaving the audio at
+  // the base rate cannot pass.
+  const spec = { frequencyHz: 10000, q: 0.7, gainDb: 4 }
+  const probes = [8000, 10000, 12000, 14000, 16000]
+  const measured = measuredResponseDb({ bands: [band(spec)] }, probes)
+  for (let i = 0; i < probes.length; i++) {
+    const want = analogPeakingDb(probes[i], spec.frequencyHz, spec.q, spec.gainDb)
+    assert.ok(
+      Math.abs(measured[i] - want) < 0.3,
+      `kernel at ${probes[i]} Hz: measured ${measured[i].toFixed(2)} dB, `
+      + `analog ${want.toFixed(2)} dB`,
+    )
+  }
+})
+
+test('the extreme corner of the control range is improved, not solved', () => {
+  // Q=10 at ±18 dB centred at 16 kHz is the worst the UI can ask for: a nearly
+  // vertical skirt right up against Nyquist, where a small warping of the
+  // frequency axis is worth a lot of dB. 2x brings it from 6.9 dB of deviation
+  // to 1.5; 4x would reach 0.35 for 70% more CPU across the whole plugin.
+  //
+  // Staying at 2x is a deliberate call, and it is defensible because the curve
+  // on screen is drawn from these same coefficients — the user sees the filter
+  // they are getting. What is left is fidelity to an analog prototype nobody is
+  // comparing against, not a control that misbehaves.
+  //
+  // This test exists to keep that honest: if the residual is ever claimed to be
+  // gone, it should have to change here.
+  const probes = []
+  for (let f = 4000; f <= 16000; f += 250) probes.push(f)
+
+  const spec = { frequencyHz: 16000, q: 10, gainDb: 18 }
+  const got = eqResponseDb(SR, [band(spec)], probes)
+  let worst = 0
+  for (let i = 0; i < probes.length; i++) {
+    const want = analogPeakingDb(probes[i], spec.frequencyHz, spec.q, spec.gainDb)
+    worst = Math.max(worst, Math.abs(got[i] - want))
+  }
+  assert.ok(worst < 2.0, `extreme bell deviates by ${worst.toFixed(2)} dB, expected < 2`)
+  assert.ok(worst > 0.5, `extreme bell deviates by only ${worst.toFixed(2)} dB — `
+    + 'better than the 2x profile can do, so this test is measuring something else now')
 })

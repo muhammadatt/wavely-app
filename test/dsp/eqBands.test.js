@@ -11,8 +11,7 @@ import {
   clampBandToRole,
 } from '../../src/audio/eqBands.js'
 import { MALE_REGIONS, REGION_ORDER, SCAN_LOW, SCAN_HIGH } from '../../src/audio/voicerx/regions.js'
-import { eqSections } from '../../src/audio/eqProcessor.js'
-import { magnitudeResponseDb } from '../../src/audio/dsp/biquad.js'
+import { eqSections, eqResponseDb } from '../../src/audio/eqProcessor.js'
 
 const R = MALE_REGIONS
 
@@ -267,8 +266,8 @@ test('mode switching is idempotent and audibly transparent', () => {
 
   // And the filter graph is bit-identical across the round trip.
   const probe = [50, 300, 1000, 3000, 12000]
-  const before = magnitudeResponseDb(eqSections(44100, bands), probe, 44100)
-  const after = magnitudeResponseDb(eqSections(44100, bands), probe, 44100)
+  const before = eqResponseDb(44100, bands, probe)
+  const after = eqResponseDb(44100, bands, probe)
   assert.deepEqual(Array.from(before), Array.from(after))
 })
 
@@ -287,7 +286,7 @@ test('untagged bands are counted, not hidden from the audio path', () => {
 
   // All three reach the filter graph.
   assert.equal(eqSections(44100, bands).length, 3)
-  const at1750 = magnitudeResponseDb(eqSections(44100, bands), [1750], 44100)[0]
+  const at1750 = eqResponseDb(44100, bands, [1750])[0]
   assert.ok(at1750 > 4, `untagged band absent from the composite: ${at1750} dB at 1750 Hz`)
 })
 

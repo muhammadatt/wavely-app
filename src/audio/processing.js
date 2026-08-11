@@ -17,6 +17,7 @@ import {
 import { ensureVocalSatWorklet } from './vocalSatWorkletLoader.js'
 import {
   VOCAL_SAT_DEFAULTS,
+  VOCAL_SAT_LATENCY_SAMPLES,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
 import { ensureResonanceWorklet } from './resonanceWorkletLoader.js'
@@ -33,6 +34,7 @@ import {
 import { ensureManualEqWorklet } from './eqWorkletLoader.js'
 import {
   MANUAL_EQ_DEFAULTS,
+  EQ_LATENCY_SAMPLES,
   toKernelParams as toManualEqKernelParams,
 } from './effects/manualEq.js'
 import { MAX_ANALYSIS_SECONDS as HUM_MAX_ANALYSIS_SECONDS } from './dsp/humDetect.js'
@@ -405,6 +407,7 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     ensureWorklet: ensureVocalSatWorklet,
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
+    latencySamples: VOCAL_SAT_LATENCY_SAMPLES,
   })
 }
 
@@ -422,6 +425,7 @@ export function applyManualEqRegion(segments, start, end, params, sampleRate, ch
     kernelParams: toManualEqKernelParams({
       ...MANUAL_EQ_DEFAULTS, ...params, soloIndex: null,
     }),
+    latencySamples: EQ_LATENCY_SAMPLES,
   })
 }
 

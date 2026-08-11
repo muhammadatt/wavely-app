@@ -43,6 +43,7 @@ import {
 } from './regions.js'
 import { roleForRegion } from '../eqBands.js'
 import { peaking, lowShelf, highShelf, magnitudeResponseDb } from '../dsp/biquad.js'
+import { eqDesignRate } from '../eqProcessor.js'
 
 // ── Constants, all from corrective_eq.py:41-53 ──────────────────────────────
 
@@ -680,9 +681,16 @@ function sectionForRegion(sampleRate, region, centerHz, q, gainDb) {
  */
 export function correctedEnvelope(sampleRate, freqsHz, envelopeDb, corrections) {
   if (corrections.length === 0) return envelopeDb
+  // Design and evaluate at the rate the EQ cascade actually runs at. These
+  // sections are a prediction of a filter the VoiceRx cascade will apply, and
+  // that cascade is oversampled — modelling it at the file's rate would predict
+  // a cramped response while an uncramped one ran. The gap is worst in `air`
+  // (9-16 kHz), which is precisely where the correction loop needs to know
+  // whether it has done enough.
+  const designRate = eqDesignRate(sampleRate)
   const sections = corrections.map(c =>
-    sectionForRegion(sampleRate, c.region, c.centerHz, c.q, c.gainDb))
-  const responseDb = magnitudeResponseDb(sections, freqsHz, sampleRate)
+    sectionForRegion(designRate, c.region, c.centerHz, c.q, c.gainDb))
+  const responseDb = magnitudeResponseDb(sections, freqsHz, designRate)
 
   const out = new Float64Array(envelopeDb.length)
   for (let k = 0; k < out.length; k++) out[k] = envelopeDb[k] + responseDb[k]

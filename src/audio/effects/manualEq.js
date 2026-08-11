@@ -11,7 +11,10 @@
  */
 
 import { ensureManualEqWorklet } from '../eqWorkletLoader.js'
+import { EQ_LATENCY_SAMPLES } from '../eqProcessor.js'
 import { createLevelTap, createSpectrumTap } from './levelTap.js'
+
+export { EQ_LATENCY_SAMPLES }
 
 export const MANUAL_EQ_DEFAULTS = {
   bands: [],
@@ -155,6 +158,10 @@ export function createEqEffect(id, name) {
   return {
     id,
     name,
+    // The cascade runs oversampled, and the halfband filters that get it there
+    // are linear phase, so the plugin delays. Constant at every setting — the
+    // resamplers run even with no bands enabled.
+    latencySamples: EQ_LATENCY_SAMPLES,
     createNodes(audioContext) {
       return createManualEq(audioContext)
     },
