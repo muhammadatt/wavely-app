@@ -13,7 +13,15 @@
  */
 
 import { ensureLA2AWorklet } from '../la2aWorkletLoader.js'
+import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+
+/**
+ * The tube stage runs oversampled, and the halfband filters that get it there
+ * are linear phase, so the plugin delays. Constant at every setting — see
+ * `latencySamples` on the kernel.
+ */
+export const LA2A_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
 
 export const LA2A_DEFAULTS = {
   mode: 'compress', // 'compress' | 'limit'
@@ -124,6 +132,7 @@ export function createLA2ACompressor(audioContext) {
 export const la2aEffect = {
   id: 'la2a-compressor',
   name: 'LA-2A Compressor',
+  latencySamples: LA2A_LATENCY_SAMPLES,
   createNodes(audioContext) {
     return createLA2ACompressor(audioContext)
   },

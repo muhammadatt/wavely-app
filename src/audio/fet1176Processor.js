@@ -5,8 +5,8 @@
  * BOTH a normal ES module (exports FET1176Kernel and processFET1176Buffer for
  * offline use and Node-based verification) AND an AudioWorklet module
  * (registers 'fet1176-processor' when loaded into an AudioWorkletGlobalScope).
- * It must stay dependency-free: the worklet loads it as a raw asset via
- * `new URL(...)`, so imports would not resolve there.
+ * Its loader goes through `?worker&url`, which bundles whatever it imports into
+ * one self-contained chunk — see fet1176WorkletLoader.js.
  *
  * The same kernel therefore runs in three places with identical results:
  * real-time preview (AudioContext), offline apply (OfflineAudioContext), and
@@ -51,7 +51,35 @@
  *      plosives and rumble don't duck a narration track.
  *    - Asymmetric tanh waveshaper standing in for the FET plus class-A output
  *      amp, followed by a DC blocker.
+ *
+ * OVERSAMPLING. The gain cell and the FET stage run at OVERSAMPLE_FACTOR times
+ * the base rate; the detector, the ballistics and the gain computer stay at the
+ * base rate, where their time constants were tuned.
+ *
+ * This unit has two things generating content above Nyquist, not one. The
+ * obvious one is the waveshaper. The other is the gain signal itself: the
+ * detector is deliberately unsmoothed and at attack dial 7 the cell tracks the
+ * waveform, so the gain sequence is a broadband nonlinear function of the input
+ * and multiplying by it folds. At 44.1 kHz that showed up as -47 dBc of folded
+ * product on a 9 kHz tone at the default fetDrive, and -80 dBc with the FET
+ * stage switched off entirely — the residue of the multiply alone.
+ *
+ * Forming the product at the oversampled rate addresses both. What it cannot
+ * recover is detail already lost in computing the gain at the base rate; taking
+ * the detector up as well would change the ballistics, which is the sound.
+ *
+ * The cost is OVERSAMPLE_LATENCY_SAMPLES of latency. Both the dry side of the
+ * wet/dry blend and the gain envelope are delay-compensated inside the kernel,
+ * so a parallel setting still lines up; the offline apply path compensates the
+ * whole-plugin delay via `latencySamples`.
  */
+
+import {
+  Oversampler, DelayLine, OVERSAMPLE_FACTOR,
+  OVERSAMPLE_LATENCY_SAMPLES, UPSAMPLE_DELAY_SAMPLES,
+} from './dsp/oversample.js'
+
+export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 
 // ── Level reference ─────────────────────────────────────────────────────────
 
@@ -166,6 +194,16 @@ export class FET1176Kernel {
     this.dcX = []
     this.dcY = []
 
+    // Per-channel oversamplers and dry-path delay lines (grown on demand).
+    this.oversamplers = []
+    this.dryLines = []
+
+    // The gain envelope is computed once per block at the base rate and shared
+    // by every channel, so it is delayed once, here, rather than per channel.
+    this.gainDelay = new DelayLine(UPSAMPLE_DELAY_SAMPLES)
+    // Last gain of the previous block, for interpolating across the block seam.
+    this.lastGain = 1
+
     // Metering
     this.grDb = 0
     this.maxGrDb = 0
@@ -173,6 +211,7 @@ export class FET1176Kernel {
     this.grActive = 0
 
     this.gainScratch = new Float32Array(128)
+    this.wetScratch = new Float64Array(128)
 
     this.params = { ...FET1176_KERNEL_DEFAULTS }
     this.setParams({})
@@ -242,6 +281,16 @@ export class FET1176Kernel {
     this.dryMix = 1 - this.wetMix
   }
 
+  /**
+   * Algorithmic latency, in samples. Reported to the offline apply path, which
+   * renders long and trims. Constant regardless of settings — the oversampled
+   * path runs even at `fetDrive: 0`, so that switching the FET stage off cannot
+   * shift the timeline underneath a running preview.
+   */
+  get latencySamples() {
+    return OVERSAMPLE_LATENCY_SAMPLES
+  }
+
   /** Static curve: overshoot in dB -> gain reduction in dB. */
   _grForOvershoot(over) {
     if (over <= -this.halfKnee) return 0
@@ -269,6 +318,7 @@ export class FET1176Kernel {
     }
 
     if (this.gainScratch.length < n) this.gainScratch = new Float32Array(n)
+    if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
     const chScale = 1 / nIn
 
@@ -318,7 +368,13 @@ export class FET1176Kernel {
       // Input attenuator and gain cell fold into one per-sample coefficient;
       // Output is applied after the saturator, where the hardware's output
       // control sits.
-      gain[i] = this.inputLin * Math.exp(-grNow * LN10_OVER_20)
+      //
+      // Held back to meet the audio where it emerges inside the oversampled
+      // section, which the upsampler has delayed by UPSAMPLE_DELAY_SAMPLES.
+      // Without this the reduction would arrive early — a look-ahead the
+      // hardware does not have, and one that would blunt the grab this unit is
+      // bought for.
+      gain[i] = this.gainDelay.push(this.inputLin * Math.exp(-grNow * LN10_OVER_20))
     }
 
     this.hpfLp1 = hpfLp1
@@ -330,30 +386,67 @@ export class FET1176Kernel {
     while (this.dcX.length < nOut) {
       this.dcX.push(0)
       this.dcY.push(0)
+      this.oversamplers.push(new Oversampler())
+      this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
     }
+
+    const L = OVERSAMPLE_FACTOR
+    const invL = 1 / L
+    // Every channel interpolates from the same block-seam value, so it is read
+    // before the loop and advanced once after it.
+    const seamGain = this.lastGain
+    const wet = this.wetScratch
 
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
+      const hi = this.oversamplers[ch].up(input, n)
+
+      // The multiply is the other half of this unit's aliasing, not just a way
+      // of applying the curve — at dial 7 the gain tracks the waveform. So the
+      // gain is interpolated up to the oversampled rate rather than held in
+      // steps, and the product is formed there.
+      let gPrev = seamGain
+      for (let i = 0; i < n; i++) {
+        const gNext = gain[i]
+        const step = (gNext - gPrev) * invL
+        for (let j = 0; j < L; j++) {
+          const k = i * L + j
+          let w = hi[k] * (gPrev + step * (j + 1))
+          if (this.applyFet) {
+            w = (Math.tanh(this.fetDriveLin * w + this.fetBias) - this.tanhBias) / this.fetNorm
+          }
+          hi[k] = w
+        }
+        gPrev = gNext
+      }
+
+      this.oversamplers[ch].down(wet, n)
+
+      // Back at the base rate: the DC blocker and the Output control are both
+      // linear and generate nothing, so they cost nothing to run down here.
       let dcX = this.dcX[ch]
       let dcY = this.dcY[ch]
+      const dryLine = this.dryLines[ch]
       for (let i = 0; i < n; i++) {
-        const dry = input[i]
-        let wet = dry * gain[i]
+        let w = wet[i]
         if (this.applyFet) {
-          const shaped = (Math.tanh(this.fetDriveLin * wet + this.fetBias) - this.tanhBias) / this.fetNorm
-          dcY = shaped - dcX + this.dcR * dcY
-          dcX = shaped
-          wet = dcY
+          dcY = w - dcX + this.dcR * dcY
+          dcX = w
+          w = dcY
         }
-        wet *= this.outputLin
-        // The dry side of the blend is the untouched input, so a parallel
-        // setting stays level-sane and bypass A/B compares like for like.
-        out[i] = dry * this.dryMix + wet * this.wetMix
+        w *= this.outputLin
+        // The dry side of the blend is the untouched input, delayed to meet the
+        // wet side, so a parallel setting stays level-sane and phase-coherent
+        // and bypass A/B compares like for like.
+        const dry = dryLine.push(input[i])
+        out[i] = dry * this.dryMix + w * this.wetMix
       }
       this.dcX[ch] = dcX
       this.dcY[ch] = dcY
     }
+
+    if (n > 0) this.lastGain = gain[n - 1]
   }
 
   getMetering() {
@@ -390,6 +483,7 @@ export function processFET1176Buffer(channelData, sampleRate, params = {}) {
   const m = kernel.getMetering()
   return {
     channelData: output,
+    latencySamples: kernel.latencySamples,
     metering: {
       maxGainReductionDb: m.maxGainReductionDb,
       avgGainReductionDb: m.avgGainReductionDb,
@@ -397,13 +491,16 @@ export function processFET1176Buffer(channelData, sampleRate, params = {}) {
   }
 }
 
-/** RMS across every sample of every channel. */
-function rmsOfChannels(channels) {
+/**
+ * RMS across every sample of every channel, optionally skipping a leading
+ * stretch — see the counterpart in la2aProcessor.js for why.
+ */
+function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
   let count = 0
   for (const ch of channels) {
-    for (let i = 0; i < ch.length; i++) sumSq += ch[i] * ch[i]
-    count += ch.length
+    for (let i = skip; i < ch.length; i++) sumSq += ch[i] * ch[i]
+    count += Math.max(0, ch.length - skip)
   }
   return count > 0 ? Math.sqrt(sumSq / count) : 0
 }
@@ -429,7 +526,9 @@ function rmsOfChannels(channels) {
 export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 3, toleranceDb = 0.05 } = options
 
-  const inputRms = rmsOfChannels(channelData)
+  // Compare like with like: the processed buffer is measured past the
+  // oversampler's ramp-up, so the reference skips the same leading stretch.
+  const inputRms = rmsOfChannels(channelData, OVERSAMPLE_LATENCY_SAMPLES)
   if (inputRms <= 0) return 0
 
   let makeupDb = 0
@@ -438,7 +537,7 @@ export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {},
       ...params,
       outputGainDb: makeupDb,
     })
-    const outRms = rmsOfChannels(out)
+    const outRms = rmsOfChannels(out, OVERSAMPLE_LATENCY_SAMPLES)
     if (outRms <= 0) break
     const correctionDb = 20 * Math.log10(inputRms / outRms)
     makeupDb = clamp(makeupDb + correctionDb, -36, 36)
