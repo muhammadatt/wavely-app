@@ -320,12 +320,25 @@ export const COMPRESSOR_OVERSAMPLE = buildProfile({
  * for twice this one's CPU and half again its latency — spent entirely above
  * the range anyone can hear.
  */
-export const EQ_OVERSAMPLE = buildProfile({
-  name: 'eq',
+const TRANSPARENT_2X = buildProfile({
+  name: 'transparent-2x',
   factor: 2,
   stage1Taps: 125,
   stage1Beta: 10.0,
 })
+
+export const EQ_OVERSAMPLE = TRANSPARENT_2X
+
+/**
+ * The vocal saturator's profile — deliberately the same object as the EQ's.
+ *
+ * It wants exactly what the EQ wants: enough headroom to keep a mild
+ * nonlinearity's products from folding, and a passband transparent enough that
+ * a bright source does not lose its top just by passing through. Sharing the
+ * profile keeps one set of filter tables and one latency figure; if the two ever
+ * need to diverge, split this into its own buildProfile call.
+ */
+export const VOCAL_SAT_OVERSAMPLE = TRANSPARENT_2X
 
 /** Back-compatible aliases for the compressor kernels, which predate profiles. */
 export const OVERSAMPLE_FACTOR = COMPRESSOR_OVERSAMPLE.factor
@@ -374,6 +387,19 @@ export class Oversampler {
       this.stage1.up(input, this.mid, n)
       this.stage2.up(this.mid, this.high, 2 * n)
     }
+    return this.high
+  }
+
+  /**
+   * The high-rate scratch buffer, sized for `n` base-rate samples.
+   *
+   * For callers that assemble a high-rate signal from somewhere other than this
+   * instance's own `up()` — the vocal saturator sums three separately
+   * upsampled bands and then needs one downsample of the total — fill this and
+   * call `down()`.
+   */
+  scratch(n) {
+    this._ensure(n)
     return this.high
   }
 

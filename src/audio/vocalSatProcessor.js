@@ -20,23 +20,58 @@
  *    constant over the file. Followers are primed from the first sample so the
  *    opening of a region is not under-normalised.
  *
- * 2. NO OVERSAMPLING. The Python runs the nonlinearity at 2x via a 15-tap
- *    Kaiser half-band whenever a band's effective drive reaches 0.5 — at
- *    default settings the low band runs at 10 — relying on resample_poly to
- *    compensate group delay internally. A streaming 2x up/down pair costs
- *    exactly 7 samples of latency at the base rate, which would make this a
- *    latent effect and force delay compensation through the offline apply path.
+ * 2. OVERSAMPLING IS UNCONDITIONAL, where the Python's is gated.
  *
- *    Measured cost of leaving it out (test/dsp/vocalSat.test.js, bin-centred
- *    tones so spectral leakage is not mistaken for aliasing): alias-to-signal
- *    is -91.8 dB at defaults, -87.2 dB on a 122 Hz tone, -92.6 dB even at
- *    drive 5, and -79.1 dB fully wet. All far below audibility, so the effect
- *    stays genuinely zero-latency at no practical cost. Revisit only if a
- *    future band runs a much harder curve.
+ *    The Python runs each band's nonlinearity at 2x whenever that band's
+ *    effective drive reaches 0.5 (`_OVERSAMPLE_DRIVE_THRESHOLD`), which at
+ *    default settings is the low band alone — mid and high sit at 0.2. This
+ *    kernel oversamples all three, always.
+ *
+ *    Not gating is what keeps latency constant. The apply path trims a fixed
+ *    number of samples, so a threshold that engaged as a knob crossed it would
+ *    move the whole region on the timeline mid-drag. The Python's gate exists
+ *    to save CPU in a batch job that has no such constraint.
+ *
+ *    Unconditional also means this side never aliases more than the server,
+ *    at any setting — which the gated version could not promise. Where the
+ *    Python skips a band, this one is slightly cleaner; where it oversamples,
+ *    the two agree.
+ *
+ *    THIS FILE PREVIOUSLY DID NOT OVERSAMPLE AT ALL, on the strength of
+ *    measurements that ran to 2 kHz and stopped. That was sound for narration,
+ *    where the hard drive is on the low band and its harmonics have room below
+ *    Nyquist. It does not hold for bright material. On a 12 kHz tone the second
+ *    harmonic folded to 20.1 kHz at -50 dBc at defaults and -36 dBc at full
+ *    drive fully wet; those are now -102 and -93.
+ *
+ *    On DENSE bright material the gain is smaller and worth stating honestly:
+ *    2 to 4 dB in the audible band, because most of the non-harmonic energy
+ *    there is real intermodulation between partials, which oversampling
+ *    neither can nor should remove. What it removes is the folded part, which
+ *    is concentrated above 16 kHz and improves by 16 to 25 dB. The audible-band
+ *    win is largest on sparse bright sources — a cymbal ringing out, a bell, a
+ *    synth tone — where there is little else to mask a folded partial.
+ *
+ *    The other half of that decision was that latency "would make this a
+ *    latent effect and force delay compensation through the offline apply
+ *    path". That machinery now exists and carries three other plugins.
+ *
+ *    Cost: about 5.9% of one core for stereo, against 2.2% before. Most of it
+ *    is the three upsamplers. If that ever needs to come down, the low and mid
+ *    bands are band-limited well below the transition and would be served by a
+ *    much shorter filter than the high band needs.
+ *
+ * The band split stays at the base rate, as it is in the Python. That is not
+ * incidental: designing the 500 Hz Butterworth at 2x instead moves its stopband
+ * by 18 dB at 16 kHz, which would be a different effect, not a cleaner one.
+ * Only the three transfer curves run high.
  */
 
 import { lowpass, highpass, butterworthQs, BiquadCascade } from './dsp/biquad.js'
+import { Oversampler, DelayLine, VOCAL_SAT_OVERSAMPLE } from './dsp/oversample.js'
 import { RmsFollower } from './dsp/envelope.js'
+
+export const VOCAL_SAT_LATENCY_SAMPLES = VOCAL_SAT_OVERSAMPLE.latencySamples
 
 export const VOCAL_SAT_KERNEL_DEFAULTS = {
   drive: 2.0,
@@ -80,7 +115,7 @@ function applyTransfer(pre, softness, bias) {
   return (1 - softness) * yTanh + softness * yAtan - biasRef
 }
 
-/** Per-channel filter and follower state. */
+/** Per-channel filter, follower, and resampler state. */
 class ChannelState {
   constructor(sampleRate) {
     const qs = butterworthQs(4)
@@ -89,6 +124,18 @@ class ChannelState {
     this.dryRms = new RmsFollower(sampleRate, RMS_TAU_MS, RMS_FLOOR)
     this.wetRms = new RmsFollower(sampleRate, RMS_TAU_MS, RMS_FLOOR)
     this.outRms = new RmsFollower(sampleRate, RMS_TAU_MS, RMS_FLOOR)
+
+    // One upsampler per band, because each band is filtered at the base rate
+    // and only then taken up. The three saturated bands are summed while still
+    // at the high rate, so a single downsampler serves all of them.
+    this.upLow = new Oversampler(VOCAL_SAT_OVERSAMPLE)
+    this.upMid = new Oversampler(VOCAL_SAT_OVERSAMPLE)
+    this.upHigh = new Oversampler(VOCAL_SAT_OVERSAMPLE)
+    this.downWet = new Oversampler(VOCAL_SAT_OVERSAMPLE)
+
+    // The blend `x + wetDry * wet` is a sample-accurate sum, so the dry side
+    // has to wait for the wet side to come back down.
+    this.dryLine = new DelayLine(VOCAL_SAT_OVERSAMPLE.latencySamples)
   }
 }
 
@@ -154,31 +201,45 @@ export class VocalSatKernel {
     this._ensureChannels(nOut)
 
     const { softness, bias, wetDry, lowDrive, midDrive, highDrive } = this
+    const L = VOCAL_SAT_OVERSAMPLE.factor
 
-    const { low: lowBuf, high: highBuf } = this._scratch(n)
+    const { low: lowBuf, high: highBuf, mid: midBuf, wet: wetBuf } = this._scratch(n)
 
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
       const st = this.channels[ch]
 
-      // Band split, as in vocal_saturation.py:
+      // Band split at the base rate, as in vocal_saturation.py:
       //   low  = sosfilt(sos_lp, audio)
       //   high = sosfilt(sos_hp, audio)
       //   mid  = audio - low - high      (complementary — sums back exactly)
       st.lp.process(input, lowBuf, n, 0)
       st.hp.process(input, highBuf, n, 0)
+      for (let i = 0; i < n; i++) midBuf[i] = input[i] - lowBuf[i] - highBuf[i]
 
+      // Up to the high rate one band at a time. Upsampling is linear, so the
+      // three still sum back to the input there — the complementary split is
+      // preserved, and each band meets its own transfer curve with room above
+      // it for the harmonics that curve creates.
+      const lowUp = st.upLow.up(lowBuf, n)
+      const midUp = st.upMid.up(midBuf, n)
+      const highUp = st.upHigh.up(highBuf, n)
+
+      const sum = st.downWet.scratch(n)
+      for (let j = 0; j < n * L; j++) {
+        sum[j] =
+          applyTransfer(lowUp[j] * lowDrive + bias, softness, bias) +
+          applyTransfer(midUp[j] * midDrive + bias, softness, bias) +
+          applyTransfer(highUp[j] * highDrive + bias, softness, bias)
+      }
+      st.downWet.down(wetBuf, n)
+
+      // Level matching and the blend stay at the base rate, where the Python
+      // does them. The dry side is delayed to meet the wet side.
       for (let i = 0; i < n; i++) {
-        const x = input[i]
-        const low = lowBuf[i]
-        const high = highBuf[i]
-        const mid = x - low - high
-
-        const wet =
-          applyTransfer(low * lowDrive + bias, softness, bias) +
-          applyTransfer(mid * midDrive + bias, softness, bias) +
-          applyTransfer(high * highDrive + bias, softness, bias)
+        const x = st.dryLine.push(input[i])
+        const wet = wetBuf[i]
 
         const dryRms = st.dryRms.process(x)
         const wetRms = st.wetRms.process(wet)
@@ -197,6 +258,15 @@ export class VocalSatKernel {
   }
 
   /**
+   * Algorithmic latency, in samples. Reported to the offline apply path, which
+   * renders long and trims. Constant at every setting — see the note at the top
+   * about why the Python's per-band gate is not reproduced here.
+   */
+  get latencySamples() {
+    return VOCAL_SAT_LATENCY_SAMPLES
+  }
+
+  /**
    * Band scratch buffers, grown on demand. Float64 so the complementary
    * subtraction `mid = x - low - high` does not lose precision before the
    * nonlinearity sees it. Channels are processed sequentially, so one pair
@@ -206,8 +276,12 @@ export class VocalSatKernel {
     if (!this._lowBuf || this._lowBuf.length < n) {
       this._lowBuf = new Float64Array(n)
       this._highBuf = new Float64Array(n)
+      this._midBuf = new Float64Array(n)
+      this._wetBuf = new Float64Array(n)
     }
-    return { low: this._lowBuf, high: this._highBuf }
+    return {
+      low: this._lowBuf, high: this._highBuf, mid: this._midBuf, wet: this._wetBuf,
+    }
   }
 }
 
@@ -231,7 +305,7 @@ export function processVocalSatBuffer(channelData, sampleRate, params = {}) {
       len,
     )
   }
-  return { channelData: output }
+  return { channelData: output, latencySamples: kernel.latencySamples }
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

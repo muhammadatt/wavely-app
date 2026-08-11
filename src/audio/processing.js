@@ -17,6 +17,7 @@ import {
 import { ensureVocalSatWorklet } from './vocalSatWorkletLoader.js'
 import {
   VOCAL_SAT_DEFAULTS,
+  VOCAL_SAT_LATENCY_SAMPLES,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
 import { ensureResonanceWorklet } from './resonanceWorkletLoader.js'
@@ -406,6 +407,7 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     ensureWorklet: ensureVocalSatWorklet,
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
+    latencySamples: VOCAL_SAT_LATENCY_SAMPLES,
   })
 }
 

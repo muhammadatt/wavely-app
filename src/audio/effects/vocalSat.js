@@ -15,7 +15,10 @@
  */
 
 import { ensureVocalSatWorklet } from '../vocalSatWorkletLoader.js'
+import { VOCAL_SAT_LATENCY_SAMPLES } from '../vocalSatProcessor.js'
 import { createLevelTap } from './levelTap.js'
+
+export { VOCAL_SAT_LATENCY_SAMPLES }
 
 // Same names and defaults the panel already used, so the UI is unchanged.
 export const VOCAL_SAT_DEFAULTS = {
@@ -120,6 +123,10 @@ export function createVocalSat(audioContext) {
 export const vocalSatEffect = {
   id: 'vocal-sat',
   name: 'Tube Saturation',
+  // The three transfer curves run oversampled, and the halfband filters that
+  // get them there are linear phase, so the plugin delays. Constant at every
+  // setting — see `latencySamples` on the kernel.
+  latencySamples: VOCAL_SAT_LATENCY_SAMPLES,
   createNodes(audioContext) {
     return createVocalSat(audioContext)
   },
