@@ -223,8 +223,8 @@ export const OPERATIONS = [
   },
   {
     id: 'opto-smooth',
-    label: 'Opto Smooth',
-    desc: 'Subtle, transparent leveler',
+    label: 'Opto Comp',
+    desc: 'Subtle, transparent compressor',
     category: 'effects',
     group: 'Dynamics',
     icon: 'opto',
@@ -236,7 +236,7 @@ export const OPERATIONS = [
   {
     id: 'fet-punch',
     label: 'FET Punch',
-    desc: 'Compressor/limiter',
+    desc: 'Peak compressor/limiter',
     category: 'effects',
     group: 'Dynamics',
     icon: 'fet',
@@ -298,7 +298,7 @@ export const OPERATIONS = [
   },
   {
     id: 'resonance-suppressor',
-    label: 'Reso Tame',
+    label: 'Reso Smooth',
     desc: 'Soothe harsh resonances',
     category: 'effects',
     group: 'Tone',
@@ -323,7 +323,7 @@ export const OPERATIONS = [
   {
     id: 'hum-remover',
     label: 'Hum Remover',
-    desc: 'Notch out mains buzz',
+    desc: 'Remove electrical hum',
     category: 'effects',
     group: 'Clean',
     icon: 'hum',
