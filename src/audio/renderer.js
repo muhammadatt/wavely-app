@@ -363,29 +363,111 @@ export function renderOverlay(canvas, options) {
 }
 
 /**
+ * Tick intervals the ruler is allowed to use, in seconds. Every step is a
+ * value a listener would actually count in — tenths, seconds, quarter minutes,
+ * minutes, then quarter hours — so a label always lands on a round time no
+ * matter how far out the file is zoomed.
+ */
+const TICK_INTERVALS = [
+  0.01, 0.02, 0.05, 0.1, 0.2, 0.5,
+  1, 2, 5, 10, 15, 30,
+  60, 120, 300, 600, 900, 1800, 3600,
+]
+
+/**
+ * Smallest interval from the ladder whose ticks are at least `minSpacingPx`
+ * apart at this zoom.
+ *
+ * The old ladder keyed off zoom alone and bottomed out at 10 s, which is a
+ * label every 5 px once a 30-minute file is fitted to the window — the labels
+ * collided into an unreadable smear. Choosing from the required spacing instead
+ * means the ruler thins itself out for as long as the file needs, and the
+ * spacing is measured from the widest label actually being drawn, so it holds
+ * as labels grow a minutes field and then an hours field.
+ *
+ * Exported for the unit tests; the renderer is the only other caller.
+ */
+export function chooseTickInterval(pixelsPerSecond, minSpacingPx) {
+  if (!(pixelsPerSecond > 0) || !(minSpacingPx > 0)) return 1
+  for (const interval of TICK_INTERVALS) {
+    if (interval * pixelsPerSecond >= minSpacingPx) return interval
+  }
+  // Past an hour per tick, keep doubling rather than let the labels collide.
+  let interval = TICK_INTERVALS[TICK_INTERVALS.length - 1]
+  while (interval * pixelsPerSecond < minSpacingPx) interval *= 2
+  return interval
+}
+
+/**
+ * Format a ruler label. `tickInterval` sets the precision: sub-second grids get
+ * decimals, and the hours field appears only once the file is long enough to
+ * need it, so short files keep the compact `m:ss` they had.
+ *
+ * Exported for the unit tests.
+ */
+export function formatRulerTime(seconds, tickInterval = 1) {
+  // Hide 0:00 so the first visible label is the first real elapsed time.
+  if (seconds <= 0) return ''
+
+  const decimals = tickInterval < 0.1 ? 2 : tickInterval < 1 ? 1 : 0
+  // Round onto the label's own precision first, so the fields below can't be
+  // derived from a value that displays as :60.
+  const scale = 10 ** decimals
+  const t = Math.round(seconds * scale) / scale
+
+  const hrs = Math.floor(t / 3600)
+  const mins = Math.floor((t - hrs * 3600) / 60)
+  const secs = t - hrs * 3600 - mins * 60
+
+  const secStr = decimals > 0
+    ? secs.toFixed(decimals).padStart(decimals + 3, '0')
+    : String(Math.floor(secs)).padStart(2, '0')
+
+  if (hrs > 0) return `${hrs}:${String(mins).padStart(2, '0')}:${secStr}`
+  return `${mins}:${secStr}`
+}
+
+/**
  * Draw vertical time-grid lines + labels inside the waveform box, near the
  * top edge — the reference design overlays these on the waveform itself
  * rather than in a separate ruler strip.
  */
 function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSecond) {
-  // Determine tick interval based on zoom
-  let tickInterval = 1 // seconds
-  if (pixelsPerSecond < 20) tickInterval = 10
-  else if (pixelsPerSecond < 50) tickInterval = 5
-  else if (pixelsPerSecond < 100) tickInterval = 2
-  else if (pixelsPerSecond < 300) tickInterval = 1
-  else if (pixelsPerSecond < 600) tickInterval = 0.5
-  else tickInterval = 0.1
-
-  const startTime = Math.floor(scrollLeft / tickInterval) * tickInterval
-  const endTime = scrollLeft + logicalWidth / pixelsPerSecond
-
   ctx.fillStyle = 'rgba(255,255,255,.32)'
   ctx.font = "600 10px 'JetBrains Mono', monospace"
 
   const EDGE_PAD = 4
+  // Gap between neighbouring labels. Small enough that the ruler stays dense on
+  // short files, large enough that two labels never touch.
+  const LABEL_GAP = 14
 
-  for (let t = startTime; t <= endTime + tickInterval; t += tickInterval) {
+  const endTime = scrollLeft + logicalWidth / pixelsPerSecond
+
+  // Measure the widest label this view will produce — the last one on screen,
+  // which carries the most fields — rather than assuming a width. Two passes:
+  // the first picks an interval from a provisional width, the second re-picks
+  // it once the label's real precision is known, since dropping to a coarser
+  // interval can also drop the decimals and narrow the label.
+  let tickInterval = 1
+  for (let pass = 0; pass < 2; pass++) {
+    const sample = formatRulerTime(Math.max(endTime, tickInterval), tickInterval) || '0:00'
+    tickInterval = chooseTickInterval(pixelsPerSecond, ctx.measureText(sample).width + LABEL_GAP)
+  }
+
+  const startTime = Math.floor(scrollLeft / tickInterval) * tickInterval
+
+  // Right edge of the last label drawn. The interval keeps ticks far enough
+  // apart for centred labels, but a label whose tick sits on a canvas edge is
+  // shifted inward by up to half its width and can still run into its
+  // neighbour, so each label is checked against what was actually drawn.
+  let lastLabelRight = -Infinity
+
+  for (let i = 0; ; i++) {
+    // Stepping by index rather than accumulating keeps sub-second intervals
+    // from drifting off their round values across a screenful of ticks.
+    const t = startTime + i * tickInterval
+    if (t > endTime + tickInterval) break
+
     const x = (t - scrollLeft) * pixelsPerSecond
     if (x < -50 || x > logicalWidth + 50) continue
 
@@ -400,32 +482,36 @@ function drawTimeGrid(ctx, logicalWidth, logicalHeight, scrollLeft, pixelsPerSec
     // Label near the top edge. Centring every label clips the ones whose tick
     // sits on a canvas edge — at scroll 0 the "0s" label lost its digit and
     // showed as a bare "s" — so labels near an edge flip to hugging it.
-    const label = formatRulerTime(t)
+    // Ticks are drawn slightly past both edges so their gridlines reach the
+    // corners, but a label belongs to a tick the user can see. Hugging the edge
+    // for a tick that is off-canvas produced a half-clipped timestamp at the
+    // left edge that read as a different, wrong time.
+    if (x < 0 || x > logicalWidth) continue
+
+    const label = formatRulerTime(t, tickInterval)
     if (!label) continue
-    const half = ctx.measureText(label).width / 2
+    const width = ctx.measureText(label).width
+    const half = width / 2
+
+    let left
+    let align
+    let drawX
     if (x - half < EDGE_PAD) {
-      ctx.textAlign = 'left'
-      ctx.fillText(label, x + EDGE_PAD, 13)
+      align = 'left'; drawX = x + EDGE_PAD; left = drawX
     } else if (x + half > logicalWidth - EDGE_PAD) {
-      ctx.textAlign = 'right'
-      ctx.fillText(label, x - EDGE_PAD, 13)
+      align = 'right'; drawX = x - EDGE_PAD; left = drawX - width
     } else {
-      ctx.textAlign = 'center'
-      ctx.fillText(label, x, 13)
+      align = 'center'; drawX = x; left = x - half
     }
+
+    // Drop the label rather than let two of them touch. Only an edge-hugged
+    // label can trip this, and dropping it costs nothing — its gridline is
+    // still there, and the tick beside it is the same round number one
+    // interval along.
+    if (left < lastLabelRight + LABEL_GAP) continue
+
+    ctx.textAlign = align
+    ctx.fillText(label, drawX, 13)
+    lastLabelRight = left + width
   }
-}
-
-function formatRulerTime(seconds) {
-  // Hide 0:00 so the first visible label is 0:01.
-  if (seconds <= 0) return ''
-
-  // Keep ruler labels on whole-second boundaries even when the grid interval
-  // becomes sub-second at high zoom levels.
-  const rounded = Math.round(seconds)
-  if (Math.abs(seconds - rounded) > 1e-6) return ''
-
-  const mins = Math.floor(rounded / 60)
-  const secs = rounded % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
 }

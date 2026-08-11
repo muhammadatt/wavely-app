@@ -5,6 +5,7 @@ import { useFileImport } from '../composables/useFileImport.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { formatDuration } from '../utils/format.js'
 import { documentStatus } from '../utils/documentStatus.js'
+import { focusRenameInput } from '../utils/renameInput.js'
 import WaveformThumbnail from './WaveformThumbnail.vue'
 import BaseButton from './ui/BaseButton.vue'
 
@@ -102,10 +103,6 @@ function commitRename() {
   renamingId.value = null
 }
 
-function focusInput(el) {
-  if (el) { el.focus(); el.select() }
-}
-
 // ── Status ───────────────────────────────────────────────────────────────────
 // Same definition the tab strip renders as a dot.
 const statusLabel = documentStatus
@@ -181,7 +178,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
           <div class="flex-1 min-w-0">
             <input
               v-if="renamingId === doc.id"
-              :ref="focusInput"
+              :ref="focusRenameInput"
               v-model="renameDraft"
               class="w-full bg-transparent outline-none text-[12.5px] font-bold text-[#eaf6f8] border-b border-[#35d3e6]"
               @click.stop

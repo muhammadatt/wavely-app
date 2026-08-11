@@ -9,6 +9,7 @@ import FloatingToolbar from './FloatingToolbar.vue'
 import WaveformOverview from './WaveformOverview.vue'
 import DbfsScale from './DbfsScale.vue'
 import WaveformArea from './WaveformArea.vue'
+import WaveformScrollbar from './WaveformScrollbar.vue'
 import SelectionBar from './SelectionBar.vue'
 import TransportBar from './TransportBar.vue'
 import ContextPanel from './ContextPanel.vue'
@@ -317,6 +318,11 @@ onUnmounted(() => {
                   style="background:linear-gradient(180deg,#0c0f13,#080a0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),inset 0 2px 16px rgba(0,0,0,.7)"
                 >
                   <WaveformArea />
+                  <!-- Inside the waveform's own box rather than the gutter-
+                       indented rows below it, so the track spans exactly the
+                       canvas it scrolls — the two have to agree pixel for
+                       pixel for the thumb to line up with what's on screen. -->
+                  <WaveformScrollbar />
                   <ProcessingOverlay v-if="state.isProcessing" />
                 </div>
               </div>
