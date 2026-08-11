@@ -106,6 +106,42 @@ export function halfbandTaps(length, beta) {
 }
 
 /**
+ * A FIR history that pushes in O(1) and still reads contiguously.
+ *
+ * The obvious implementation — shift every element up by one on each new sample
+ * — costs O(taps) per sample on top of the O(taps) convolution, which roughly
+ * doubles the work in a loop that runs at four times the sample rate on every
+ * channel. A plain circular buffer fixes the push but puts a modulo in the
+ * inner loop, which is its own tax.
+ *
+ * So the buffer is stored twice, back to back, and every sample is written to
+ * both copies. The write position walks backwards, which makes `buf[pos + j]`
+ * the sample `j` pushes ago for any j in [0, length) with no wrapping test at
+ * all: pos < length and j < length, so pos + j never leaves the doubled array.
+ * The convolution reads a straight run of memory, which is also the layout a
+ * prefetcher likes.
+ */
+class RingHistory {
+  constructor(length) {
+    this.length = length
+    this.buf = new Float64Array(2 * length)
+    this.pos = 0
+  }
+
+  reset() {
+    this.buf.fill(0)
+    this.pos = 0
+  }
+
+  push(x) {
+    const p = this.pos === 0 ? this.length - 1 : this.pos - 1
+    this.pos = p
+    this.buf[p] = x
+    this.buf[p + this.length] = x
+  }
+}
+
+/**
  * One 2x halfband stage for a single channel, holding its own filter state.
  *
  * Both directions share the odd-phase taps. Writing them out:
@@ -129,17 +165,19 @@ class HalfbandStage {
     this.p1 = new Float64Array(M)
     for (let j = 0; j < M; j++) this.p1[j] = taps[2 * j + 1]
 
-    // Histories are indexed [0] = most recent. Long enough for the deepest
-    // reach of either direction.
-    this.upHist = new Float64Array(M + this.halfM + 1)
-    this.downEvenHist = new Float64Array(this.halfM + 1)
-    this.downOddHist = new Float64Array(M + 1)
+    // Histories read [pos + k] = the sample k pushes ago. Each is sized to the
+    // deepest index its direction actually reaches: the up path wants
+    // p1[0..M-1] and the even-branch delay at halfM; the down path wants the
+    // even delay at halfM and the odd taps one step further back, at 1..M.
+    this.upHist = new RingHistory(Math.max(M, this.halfM + 1))
+    this.downEvenHist = new RingHistory(this.halfM + 1)
+    this.downOddHist = new RingHistory(M + 1)
   }
 
   reset() {
-    this.upHist.fill(0)
-    this.downEvenHist.fill(0)
-    this.downOddHist.fill(0)
+    this.upHist.reset()
+    this.downEvenHist.reset()
+    this.downOddHist.reset()
   }
 
   /**
@@ -150,17 +188,18 @@ class HalfbandStage {
    */
   up(input, output, n) {
     const { p1, M, halfM, upHist } = this
-    const histLen = upHist.length
+    const buf = upHist.buf
 
     for (let i = 0; i < n; i++) {
-      // Shift newest sample in at [0].
-      for (let k = histLen - 1; k > 0; k--) upHist[k] = upHist[k - 1]
-      upHist[0] = input[i]
+      upHist.push(input[i])
+      const base = upHist.pos
 
-      output[2 * i] = upHist[halfM]
+      // Even branch is a pure delay — the halfband's zero taps mean there is
+      // nothing to compute here.
+      output[2 * i] = buf[base + halfM]
 
       let acc = 0
-      for (let j = 0; j < M; j++) acc += p1[j] * upHist[j]
+      for (let j = 0; j < M; j++) acc += p1[j] * buf[base + j]
       output[2 * i + 1] = 2 * acc
     }
   }
@@ -173,18 +212,17 @@ class HalfbandStage {
    */
   down(input, output, n) {
     const { p1, M, halfM, downEvenHist, downOddHist } = this
-    const evenLen = downEvenHist.length
-    const oddLen = downOddHist.length
+    const evenBuf = downEvenHist.buf
+    const oddBuf = downOddHist.buf
 
     for (let i = 0; i < n; i++) {
-      for (let k = evenLen - 1; k > 0; k--) downEvenHist[k] = downEvenHist[k - 1]
-      downEvenHist[0] = input[2 * i]
-      for (let k = oddLen - 1; k > 0; k--) downOddHist[k] = downOddHist[k - 1]
-      downOddHist[0] = input[2 * i + 1]
+      downEvenHist.push(input[2 * i])
+      downOddHist.push(input[2 * i + 1])
+      const evenBase = downEvenHist.pos
+      const oddBase = downOddHist.pos + 1 // u_odd[i-1-j] is one further back
 
-      let acc = 0.5 * downEvenHist[halfM]
-      // u_odd[i - 1 - j] is one further back than u_odd[i - j].
-      for (let j = 0; j < M; j++) acc += p1[j] * downOddHist[j + 1]
+      let acc = 0.5 * evenBuf[evenBase + halfM]
+      for (let j = 0; j < M; j++) acc += p1[j] * oddBuf[oddBase + j]
       output[i] = acc
     }
   }
