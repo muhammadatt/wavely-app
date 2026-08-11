@@ -13,7 +13,15 @@
  */
 
 import { ensureFET1176Worklet } from '../fet1176WorkletLoader.js'
+import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+
+/**
+ * The gain cell and FET stage run oversampled, and the halfband filters that
+ * get them there are linear phase, so the plugin delays. Constant at every
+ * setting — see `latencySamples` on the kernel.
+ */
+export const FET1176_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
 
 export const FET1176_DEFAULTS = {
   inputDrive: 50, // 0-100, drives the fixed internal threshold
@@ -130,6 +138,7 @@ export function createFET1176Compressor(audioContext) {
 export const fet1176Effect = {
   id: 'fet1176-compressor',
   name: 'FET Punch Compressor',
+  latencySamples: FET1176_LATENCY_SAMPLES,
   createNodes(audioContext) {
     return createFET1176Compressor(audioContext)
   },

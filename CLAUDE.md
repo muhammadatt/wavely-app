@@ -52,7 +52,7 @@ Processing is split between client and server based on operation type. This is n
 |---|---|---|
 | Trim, cut, delete, silence, split | Client | Pure segment manipulation — no audio data touched |
 | Normalize | Client | Linear operation, expected to feel instant. Quality gap vs. server is acceptable for spot work |
-| Compression | Client | Interactive parameter tweaking expects immediacy. Two emulations — OptoSmooth (LA-2A opto) and FET Punch (1176 FET) — each a dependency-free kernel run in an AudioWorklet for preview and in an OfflineAudioContext for apply, so the two are sample-identical |
+| Compression | Client | Interactive parameter tweaking expects immediacy. Two emulations — OptoSmooth (LA-2A opto) and FET Punch (1176 FET) — each a kernel run in an AudioWorklet for preview and in an OfflineAudioContext for apply, so the two are sample-identical. Both run their gain cell and saturator 4x oversampled (`src/audio/dsp/oversample.js`); detector and ballistics stay at base rate. Each reports 50 samples of latency, which the apply path compensates |
 | Manual EQ and VoiceRx | Client | Two separate plugins, each a biquad cascade cheap enough to run live — the whole usability argument depends on hearing the change while moving the control. VoiceRx's analysis is a client port of Stage 3a — measurement-driven, so it needs no corpus, no reference curve and no preset |
 | Noise reduction | Server (DeepFilterNet3) | Quality gap vs. RNNoise is significant and user-visible. Modal wait is normal for this operation |
 | Full preset chain | Server | Always server-side |
@@ -270,7 +270,7 @@ These apply only to the `acx_audiobook` preset:
 - **Payment / tier enforcement** — Gate logic not present; all tiers currently serve same output
 - **Batch processing** — Sprint 5; multi-file + cross-chapter consistency pass
 - **API access** — Sprint 6 / Pro tier
-- **Test infrastructure** — No unit, integration, or E2E tests
+- **Test infrastructure** — Partial. `npm test` runs a `node:test` unit suite over the client DSP (`test/dsp/`, 213 tests). No integration or E2E tests, and no coverage of the server pipeline, Vue components or the async job flow
 - **Persistent job storage** — Jobs are in-memory; server restart loses them
 - **`docs/acx_production_workflow.md`** and **`docs/instant_polish_gtm.md`** — Referenced but not created
 

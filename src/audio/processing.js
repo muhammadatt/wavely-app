@@ -1,9 +1,12 @@
 import { getSegmentDuration } from './operations.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
-import { LA2A_DEFAULTS, toKernelParams } from './effects/la2aCompressor.js'
+import {
+  LA2A_DEFAULTS, LA2A_LATENCY_SAMPLES, toKernelParams,
+} from './effects/la2aCompressor.js'
 import { ensureFET1176Worklet } from './fet1176WorkletLoader.js'
 import {
   FET1176_DEFAULTS,
+  FET1176_LATENCY_SAMPLES,
   toKernelParams as toFET1176KernelParams,
 } from './effects/fet1176Compressor.js'
 import { ensureAirBandWorklet } from './airBandWorkletLoader.js'
@@ -373,6 +376,7 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
     ensureWorklet: ensureLA2AWorklet,
     processorName: 'la2a-processor',
     kernelParams: toKernelParams({ ...LA2A_DEFAULTS, ...params }),
+    latencySamples: LA2A_LATENCY_SAMPLES,
   })
 }
 
@@ -382,6 +386,7 @@ export function applyFET1176Region(segments, start, end, params, sampleRate, cha
     ensureWorklet: ensureFET1176Worklet,
     processorName: 'fet1176-processor',
     kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
+    latencySamples: FET1176_LATENCY_SAMPLES,
   })
 }
 
@@ -528,8 +533,8 @@ export function analyzeHumRegion(segments, start, end, sampleRate, channels, opt
 /**
  * Apply Resonance Suppression to a region.
  *
- * The only caller so far that passes a non-zero latency — its STFT delays the
- * output by a full frame, which applyWorkletRegion renders long and trims.
+ * Its STFT delays the output by a full frame, which applyWorkletRegion renders
+ * long and trims. The two compressors do the same for their oversamplers.
  */
 export function applyResonanceRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {

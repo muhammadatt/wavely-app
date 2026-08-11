@@ -4,8 +4,9 @@
  * This file is BOTH a normal ES module (exports LA2AKernel and
  * processLA2ABuffer for offline use and Node-based verification) AND an
  * AudioWorklet module (registers 'la2a-processor' when loaded into an
- * AudioWorkletGlobalScope). It must stay dependency-free: the worklet loads
- * it as a raw asset via `new URL(...)`, so imports would not resolve there.
+ * AudioWorkletGlobalScope). Its loader goes through `?worker&url`, which
+ * bundles whatever it imports into one self-contained chunk — see
+ * la2aWorkletLoader.js.
  *
  * The same kernel instance therefore runs in three places with identical
  * results: real-time preview (AudioContext), offline apply
@@ -38,7 +39,33 @@
  *    - Output path: asymmetric tanh waveshaper approximating the harmonic
  *      profile of the input/driver/output tube stages (bias term → 2nd
  *      harmonic, tanh curvature → 3rd), followed by a DC blocker.
+ *
+ * OVERSAMPLING. The gain cell and the tube stage run at OVERSAMPLE_FACTOR times
+ * the base rate; the detector, the T4 ballistics and the gain computer stay at
+ * the base rate, where their time constants were tuned. That split is
+ * deliberate: only the multiply and the waveshaper generate new frequency
+ * content, so only they need the headroom, and keeping the ballistics where
+ * they were means the unit still sounds like itself.
+ *
+ * This one benefits more than its FET counterpart, because the Gain knob sits
+ * BEFORE the tube stage (as on the hardware). With auto-makeup engaged — the
+ * app's default — a Peak Reduction of 70 hands the tubes about 14 dB more
+ * signal than the raw defaults suggest, so the stage was being driven hard
+ * exactly when nobody had asked for distortion. At 44.1 kHz that measured
+ * -40 dBc of folded product on a 9 kHz tone.
+ *
+ * The cost is OVERSAMPLE_LATENCY_SAMPLES of latency. Both the dry side of the
+ * wet/dry blend and the gain envelope are delay-compensated inside the kernel,
+ * so a parallel setting still lines up; the offline apply path compensates the
+ * whole-plugin delay via `latencySamples`.
  */
+
+import {
+  Oversampler, DelayLine, OVERSAMPLE_FACTOR,
+  OVERSAMPLE_LATENCY_SAMPLES, UPSAMPLE_DELAY_SAMPLES,
+} from './dsp/oversample.js'
+
+export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 
 // ── T4 optical cell constants ───────────────────────────────────────────────
 
@@ -137,6 +164,16 @@ export class LA2AKernel {
     this.dcX = []
     this.dcY = []
 
+    // Per-channel oversamplers and dry-path delay lines (grown on demand).
+    this.oversamplers = []
+    this.dryLines = []
+
+    // The gain envelope is computed once per block at the base rate and shared
+    // by every channel, so it is delayed once, here, rather than per channel.
+    this.gainDelay = new DelayLine(UPSAMPLE_DELAY_SAMPLES)
+    // Last gain of the previous block, for interpolating across the block seam.
+    this.lastGain = 1
+
     // Metering
     this.grDb = 0
     this.maxGrDb = 0
@@ -144,6 +181,7 @@ export class LA2AKernel {
     this.grActive = 0
 
     this.gainScratch = new Float32Array(128)
+    this.wetScratch = new Float64Array(128)
 
     this.params = { ...LA2A_KERNEL_DEFAULTS }
     this.setParams({})
@@ -183,6 +221,16 @@ export class LA2AKernel {
   }
 
   /**
+   * Algorithmic latency, in samples. Reported to the offline apply path, which
+   * renders long and trims. Constant regardless of settings — the oversampled
+   * path runs even at `tubeDrive: 0`, so that switching the tube stage off
+   * cannot shift the timeline underneath a running preview.
+   */
+  get latencySamples() {
+    return OVERSAMPLE_LATENCY_SAMPLES
+  }
+
+  /**
    * Process one block.
    *
    * @param {Float32Array[]} inputChannels  - per-channel input (any count)
@@ -204,6 +252,7 @@ export class LA2AKernel {
     this.slowRelCoef = 1 - Math.exp(-1 / (this.sampleRate * slowTau))
 
     if (this.gainScratch.length < n) this.gainScratch = new Float32Array(n)
+    if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
     const chScale = 1 / nIn
 
@@ -270,7 +319,11 @@ export class LA2AKernel {
         this.grSum += grNow
         this.grActive++
       }
-      gain[i] = Math.exp(-grNow * LN10_OVER_20) * this.makeupLin
+      // Held back to meet the audio where it emerges inside the oversampled
+      // section, which the upsampler has delayed by UPSAMPLE_DELAY_SAMPLES.
+      // Without this the reduction would arrive early — a small look-ahead the
+      // hardware does not have.
+      gain[i] = this.gainDelay.push(Math.exp(-grNow * LN10_OVER_20) * this.makeupLin)
     }
 
     this.hpfLp = hpfLp
@@ -281,31 +334,68 @@ export class LA2AKernel {
     this.memory = memory
     this.grDb = grFast + grSlow
 
-    // Apply gain curve + tube stage per channel
+    // Apply gain curve + tube stage per channel, at the oversampled rate.
     while (this.dcX.length < nOut) {
       this.dcX.push(0)
       this.dcY.push(0)
+      this.oversamplers.push(new Oversampler())
+      this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
     }
+
+    const L = OVERSAMPLE_FACTOR
+    const invL = 1 / L
+    // Every channel interpolates from the same block-seam value, so it is read
+    // before the loop and advanced once after it.
+    const seamGain = this.lastGain
+    const wet = this.wetScratch
 
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
+      const hi = this.oversamplers[ch].up(input, n)
+
+      // The multiply is itself a nonlinearity — a fast-moving gain against
+      // program material generates sum and difference content — so the gain is
+      // interpolated up to the oversampled rate rather than held in steps, and
+      // the product is formed there.
+      let gPrev = seamGain
+      for (let i = 0; i < n; i++) {
+        const gNext = gain[i]
+        const step = (gNext - gPrev) * invL
+        for (let j = 0; j < L; j++) {
+          const k = i * L + j
+          let w = hi[k] * (gPrev + step * (j + 1))
+          if (this.applyTube) {
+            w = (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
+          }
+          hi[k] = w
+        }
+        gPrev = gNext
+      }
+
+      this.oversamplers[ch].down(wet, n)
+
+      // Back at the base rate: the DC blocker is linear and generates nothing,
+      // so it costs nothing to run down here. The dry side of the blend is the
+      // untouched input, delayed to meet the wet side.
       let dcX = this.dcX[ch]
       let dcY = this.dcY[ch]
+      const dryLine = this.dryLines[ch]
       for (let i = 0; i < n; i++) {
-        const dry = input[i]
-        let wet = dry * gain[i]
+        let w = wet[i]
         if (this.applyTube) {
-          const shaped = (Math.tanh(this.tubeDriveLin * wet + this.tubeBias) - this.tanhBias) / this.tubeNorm
-          dcY = shaped - dcX + this.dcR * dcY
-          dcX = shaped
-          wet = dcY
+          dcY = w - dcX + this.dcR * dcY
+          dcX = w
+          w = dcY
         }
-        out[i] = dry * this.dryMix + wet * this.wetMix
+        const dry = dryLine.push(input[i])
+        out[i] = dry * this.dryMix + w * this.wetMix
       }
       this.dcX[ch] = dcX
       this.dcY[ch] = dcY
     }
+
+    if (n > 0) this.lastGain = gain[n - 1]
   }
 
   getMetering() {
@@ -342,6 +432,7 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
   const m = kernel.getMetering()
   return {
     channelData: output,
+    latencySamples: kernel.latencySamples,
     metering: {
       maxGainReductionDb: m.maxGainReductionDb,
       avgGainReductionDb: m.avgGainReductionDb,
@@ -349,13 +440,22 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
   }
 }
 
-/** RMS across every sample of every channel. */
-function rmsOfChannels(channels) {
+/**
+ * RMS across every sample of every channel, optionally skipping a leading
+ * stretch.
+ *
+ * The skip exists for the oversampler's latency: the first
+ * OVERSAMPLE_LATENCY_SAMPLES of a processed buffer are the filters' ramp-up,
+ * not signal, and including them would bias the measurement quietly downward.
+ * Over a region of any real length the effect is tiny, but the auto-makeup that
+ * depends on it is exactly the thing users judge bypass A/B by.
+ */
+function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
   let count = 0
   for (const ch of channels) {
-    for (let i = 0; i < ch.length; i++) sumSq += ch[i] * ch[i]
-    count += ch.length
+    for (let i = skip; i < ch.length; i++) sumSq += ch[i] * ch[i]
+    count += Math.max(0, ch.length - skip)
   }
   return count > 0 ? Math.sqrt(sumSq / count) : 0
 }
@@ -384,7 +484,9 @@ function rmsOfChannels(channels) {
 export function computeAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 4, toleranceDb = 0.05 } = options
 
-  const inputRms = rmsOfChannels(channelData)
+  // Compare like with like: the processed buffer is measured past the
+  // oversampler's ramp-up, so the reference skips the same leading stretch.
+  const inputRms = rmsOfChannels(channelData, OVERSAMPLE_LATENCY_SAMPLES)
   if (inputRms <= 0) return 0
 
   let makeupDb = 0
@@ -393,7 +495,7 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
       ...params,
       gainDb: makeupDb,
     })
-    const outRms = rmsOfChannels(out)
+    const outRms = rmsOfChannels(out, OVERSAMPLE_LATENCY_SAMPLES)
     if (outRms <= 0) break
     const correctionDb = 20 * Math.log10(inputRms / outRms)
     makeupDb = clamp(makeupDb + correctionDb, -24, 24)
