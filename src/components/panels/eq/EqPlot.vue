@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { eqSections, eqResponseDb } from '../../../audio/eqProcessor.js'
+import { eqResponseDb } from '../../../audio/eqProcessor.js'
 import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive } from '../../../audio/eqBands.js'
 
 /**
@@ -389,13 +389,16 @@ const curveFreqs = computed(() => Array.from({ length: CURVE_POINTS }, (_, i) =>
   fMin.value * Math.pow(fMax.value / fMin.value, i / (CURVE_POINTS - 1))))
 
 const compositeDb = computed(() => {
-  if (eqSections(props.sampleRate, props.bands).length === 0) {
-    return new Float64Array(CURVE_POINTS)
-  }
   // eqResponseDb, not magnitudeResponseDb: the cascade runs oversampled, so its
   // coefficients belong to a higher rate and evaluating them at the file's rate
   // would draw a cramped curve over an uncramped filter — the one thing this
   // display must never do.
+  //
+  // No empty-band early return: with nothing active the section list is empty
+  // and the running product stays at unity, so this already yields a flat 0 dB
+  // curve of the right length. Checking first would mean designing every band's
+  // coefficients twice on every recompute, which is once per frame while a band
+  // is being dragged.
   return eqResponseDb(props.sampleRate, props.bands, curveFreqs.value)
 })
 
