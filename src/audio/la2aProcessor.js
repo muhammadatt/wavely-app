@@ -395,10 +395,10 @@ export class LA2AKernel {
       // upsampler's even branch is a pure delay, so sub-sample j = 0 is the
       // original input sample, not an interpolated point — it has to receive
       // the gain computed from it, exactly. Starting the ramp a step later left
-      // that sample holding three quarters of the PREVIOUS gain, which at a
-      // 20 us attack is most of the reduction a transient was supposed to get:
-      // the first sample of every hard onset passed through nearly unattenuated
-      // and read as a click.
+      // that sample holding three quarters of the PREVIOUS gain. On very fast attacks
+      // (e.g. FET Punch dial 7 ≈ 20 µs) that was most of the reduction a transient
+      // should have received, so the first sample of a hard onset passed through nearly
+      // unattenuated and read as a click.
       let gCur = seamGain
       for (let i = 0; i < n; i++) {
         const gNext = gain[i]
