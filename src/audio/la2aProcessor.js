@@ -125,6 +125,12 @@ export const LA2A_KERNEL_DEFAULTS = {
   tubeDrive: 0.3, // 0–1 tube stage saturation amount
   emphasis: 0, // 0–1 R37 HF sidechain emphasis (0 = flat, stock)
   mix: 1, // wet/dry blend
+  /**
+   * Run the gain cell and tube stage oversampled. Always true for anything
+   * anyone listens to; see `computeAutoMakeupDb` for the one caller that turns
+   * it off and why that is sound.
+   */
+  oversample: true,
 }
 
 function clamp(v, lo, hi) {
@@ -218,16 +224,21 @@ export class LA2AKernel {
 
     this.wetMix = clamp(p.mix, 0, 1)
     this.dryMix = 1 - this.wetMix
+
+    this.oversampleOn = p.oversample !== false
   }
 
   /**
    * Algorithmic latency, in samples. Reported to the offline apply path, which
-   * renders long and trims. Constant regardless of settings — the oversampled
-   * path runs even at `tubeDrive: 0`, so that switching the tube stage off
-   * cannot shift the timeline underneath a running preview.
+   * renders long and trims.
+   *
+   * Constant across every setting a listener can reach — the oversampled path
+   * runs even at `tubeDrive: 0`, so switching the tube stage off cannot shift
+   * the timeline underneath a running preview. It is zero only in the
+   * measurement mode described on `oversample`, which nothing renders through.
    */
   get latencySamples() {
-    return OVERSAMPLE_LATENCY_SAMPLES
+    return this.oversampleOn ? OVERSAMPLE_LATENCY_SAMPLES : 0
   }
 
   /**
@@ -322,8 +333,10 @@ export class LA2AKernel {
       // Held back to meet the audio where it emerges inside the oversampled
       // section, which the upsampler has delayed by UPSAMPLE_DELAY_SAMPLES.
       // Without this the reduction would arrive early — a small look-ahead the
-      // hardware does not have.
-      gain[i] = this.gainDelay.push(Math.exp(-grNow * LN10_OVER_20) * this.makeupLin)
+      // hardware does not have. In the base-rate measurement path there is
+      // nothing to meet, so the delay would only misalign it.
+      const g = Math.exp(-grNow * LN10_OVER_20) * this.makeupLin
+      gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
     }
 
     this.hpfLp = hpfLp
@@ -338,8 +351,15 @@ export class LA2AKernel {
     while (this.dcX.length < nOut) {
       this.dcX.push(0)
       this.dcY.push(0)
-      this.oversamplers.push(new Oversampler())
-      this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
+    }
+    // Built only when they will be used. The measurement path runs the whole
+    // kernel several times over a selection and never touches them, and their
+    // filter tables are not free to allocate.
+    if (this.oversampleOn) {
+      while (this.oversamplers.length < nOut) {
+        this.oversamplers.push(new Oversampler())
+        this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
+      }
     }
 
     const L = OVERSAMPLE_FACTOR
@@ -352,6 +372,12 @@ export class LA2AKernel {
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
+
+      if (!this.oversampleOn) {
+        this._processChannelBaseRate(input, out, gain, n, ch)
+        continue
+      }
+
       const hi = this.oversamplers[ch].up(input, n)
 
       // The multiply is itself a nonlinearity — a fast-moving gain against
@@ -396,6 +422,29 @@ export class LA2AKernel {
     }
 
     if (n > 0) this.lastGain = gain[n - 1]
+  }
+
+  /**
+   * Measurement-only path: the same arithmetic at the base rate, with no
+   * resampling and therefore no latency. See the counterpart in
+   * fet1176Processor.js for why this exists and why it is sound.
+   */
+  _processChannelBaseRate(input, out, gain, n, ch) {
+    let dcX = this.dcX[ch]
+    let dcY = this.dcY[ch]
+    for (let i = 0; i < n; i++) {
+      const dry = input[i]
+      let w = dry * gain[i]
+      if (this.applyTube) {
+        const shaped = (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
+        dcY = shaped - dcX + this.dcR * dcY
+        dcX = shaped
+        w = dcY
+      }
+      out[i] = dry * this.dryMix + w * this.wetMix
+    }
+    this.dcX[ch] = dcX
+    this.dcY[ch] = dcY
   }
 
   getMetering() {
@@ -484,18 +533,23 @@ function rmsOfChannels(channels, skip = 0) {
 export function computeAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 4, toleranceDb = 0.05 } = options
 
-  // Compare like with like: the processed buffer is measured past the
-  // oversampler's ramp-up, so the reference skips the same leading stretch.
-  const inputRms = rmsOfChannels(channelData, OVERSAMPLE_LATENCY_SAMPLES)
+  // Measured through the base-rate path. The question here is only what the
+  // output's RMS is, and oversampling moves that by at most 0.02 dB across the
+  // whole control range — it removes folded harmonics, which carry almost no
+  // energy. Measuring through the oversampled path instead made this about
+  // three times slower, which the Output knob showed as lag behind a drag.
+  const measureParams = { ...params, oversample: false }
+
+  const inputRms = rmsOfChannels(channelData)
   if (inputRms <= 0) return 0
 
   let makeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
     const { channelData: out } = processLA2ABuffer(channelData, sampleRate, {
-      ...params,
+      ...measureParams,
       gainDb: makeupDb,
     })
-    const outRms = rmsOfChannels(out, OVERSAMPLE_LATENCY_SAMPLES)
+    const outRms = rmsOfChannels(out)
     if (outRms <= 0) break
     const correctionDb = 20 * Math.log10(inputRms / outRms)
     makeupDb = clamp(makeupDb + correctionDb, -24, 24)

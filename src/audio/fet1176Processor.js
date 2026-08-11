@@ -147,6 +147,12 @@ export const FET1176_KERNEL_DEFAULTS = {
   fetDrive: 0.35, // 0-1 FET / output-amp saturation amount
   scHpfHz: 0, // 0 = off (stock), or sidechain high-pass corner in Hz
   mix: 1, // wet/dry blend — parallel compression
+  /**
+   * Run the gain cell and FET stage oversampled. Always true for anything
+   * anyone listens to; see `computeFET1176AutoMakeupDb` for the one caller
+   * that turns it off and why that is sound.
+   */
+  oversample: true,
 }
 
 function clamp(v, lo, hi) {
@@ -279,16 +285,21 @@ export class FET1176Kernel {
 
     this.wetMix = clamp(p.mix, 0, 1)
     this.dryMix = 1 - this.wetMix
+
+    this.oversampleOn = p.oversample !== false
   }
 
   /**
    * Algorithmic latency, in samples. Reported to the offline apply path, which
-   * renders long and trims. Constant regardless of settings — the oversampled
-   * path runs even at `fetDrive: 0`, so that switching the FET stage off cannot
-   * shift the timeline underneath a running preview.
+   * renders long and trims.
+   *
+   * Constant across every setting a listener can reach — the oversampled path
+   * runs even at `fetDrive: 0`, so switching the FET stage off cannot shift the
+   * timeline underneath a running preview. It is zero only in the measurement
+   * mode described on `oversample`, which nothing renders through.
    */
   get latencySamples() {
-    return OVERSAMPLE_LATENCY_SAMPLES
+    return this.oversampleOn ? OVERSAMPLE_LATENCY_SAMPLES : 0
   }
 
   /** Static curve: overshoot in dB -> gain reduction in dB. */
@@ -373,8 +384,10 @@ export class FET1176Kernel {
       // section, which the upsampler has delayed by UPSAMPLE_DELAY_SAMPLES.
       // Without this the reduction would arrive early — a look-ahead the
       // hardware does not have, and one that would blunt the grab this unit is
-      // bought for.
-      gain[i] = this.gainDelay.push(this.inputLin * Math.exp(-grNow * LN10_OVER_20))
+      // bought for. In the base-rate measurement path there is nothing to meet,
+      // so the delay would only misalign it.
+      const g = this.inputLin * Math.exp(-grNow * LN10_OVER_20)
+      gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
     }
 
     this.hpfLp1 = hpfLp1
@@ -386,8 +399,15 @@ export class FET1176Kernel {
     while (this.dcX.length < nOut) {
       this.dcX.push(0)
       this.dcY.push(0)
-      this.oversamplers.push(new Oversampler())
-      this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
+    }
+    // Built only when they will be used. The measurement path runs the whole
+    // kernel several times over a selection and never touches them, and their
+    // filter tables are not free to allocate.
+    if (this.oversampleOn) {
+      while (this.oversamplers.length < nOut) {
+        this.oversamplers.push(new Oversampler())
+        this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
+      }
     }
 
     const L = OVERSAMPLE_FACTOR
@@ -400,6 +420,12 @@ export class FET1176Kernel {
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
+
+      if (!this.oversampleOn) {
+        this._processChannelBaseRate(input, out, gain, n, ch)
+        continue
+      }
+
       const hi = this.oversamplers[ch].up(input, n)
 
       // The multiply is the other half of this unit's aliasing, not just a way
@@ -447,6 +473,44 @@ export class FET1176Kernel {
     }
 
     if (n > 0) this.lastGain = gain[n - 1]
+  }
+
+  /**
+   * Measurement-only path: the same arithmetic at the base rate, with no
+   * resampling and therefore no latency.
+   *
+   * This exists because the auto-makeup measurement runs the whole kernel over
+   * the selection several times to converge, and doing that through the
+   * oversampled path made it about three times slower — slow enough that the
+   * Output knob visibly lagged a drag, and slow enough that a stale Output
+   * could be applied to a louder signal than it was measured for.
+   *
+   * It is sound because the measurement only ever asks one question: what is
+   * the output's RMS. Oversampling changes that by at most 0.02 dB across the
+   * whole control range — it removes folded harmonics, which carry almost no
+   * energy. A test pins that bound so the shortcut cannot quietly stop being
+   * true.
+   *
+   * Nothing that renders audio uses this. The worklet never sets `oversample`,
+   * and the apply path trims a fixed latency that assumes the oversampled path.
+   */
+  _processChannelBaseRate(input, out, gain, n, ch) {
+    let dcX = this.dcX[ch]
+    let dcY = this.dcY[ch]
+    for (let i = 0; i < n; i++) {
+      const dry = input[i]
+      let w = dry * gain[i]
+      if (this.applyFet) {
+        const shaped = (Math.tanh(this.fetDriveLin * w + this.fetBias) - this.tanhBias) / this.fetNorm
+        dcY = shaped - dcX + this.dcR * dcY
+        dcX = shaped
+        w = dcY
+      }
+      w *= this.outputLin
+      out[i] = dry * this.dryMix + w * this.wetMix
+    }
+    this.dcX[ch] = dcX
+    this.dcY[ch] = dcY
   }
 
   getMetering() {
@@ -526,18 +590,23 @@ function rmsOfChannels(channels, skip = 0) {
 export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 3, toleranceDb = 0.05 } = options
 
-  // Compare like with like: the processed buffer is measured past the
-  // oversampler's ramp-up, so the reference skips the same leading stretch.
-  const inputRms = rmsOfChannels(channelData, OVERSAMPLE_LATENCY_SAMPLES)
+  // Measured through the base-rate path. The question here is only what the
+  // output's RMS is, and oversampling moves that by at most 0.02 dB across the
+  // whole control range — it removes folded harmonics, which carry almost no
+  // energy. Measuring through the oversampled path instead made this about
+  // three times slower, which the Output knob showed as lag behind a drag.
+  const measureParams = { ...params, oversample: false }
+
+  const inputRms = rmsOfChannels(channelData)
   if (inputRms <= 0) return 0
 
   let makeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
     const { channelData: out } = processFET1176Buffer(channelData, sampleRate, {
-      ...params,
+      ...measureParams,
       outputGainDb: makeupDb,
     })
-    const outRms = rmsOfChannels(out, OVERSAMPLE_LATENCY_SAMPLES)
+    const outRms = rmsOfChannels(out)
     if (outRms <= 0) break
     const correctionDb = 20 * Math.log10(inputRms / outRms)
     makeupDb = clamp(makeupDb + correctionDb, -36, 36)
