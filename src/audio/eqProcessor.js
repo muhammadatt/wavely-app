@@ -24,10 +24,36 @@
 
 import {
   peaking, lowShelf, highShelf, highpass, lowpass, notch, bandpass, BiquadCascade,
+  magnitudeResponseDb,
 } from './dsp/biquad.js'
+import { Oversampler, EQ_OVERSAMPLE } from './dsp/oversample.js'
 import { MAX_BANDS } from './eqBands.js'
 
 export { MAX_BANDS }
+
+export const EQ_OVERSAMPLE_FACTOR = EQ_OVERSAMPLE.factor
+export const EQ_LATENCY_SAMPLES = EQ_OVERSAMPLE.latencySamples
+
+/**
+ * The rate the biquads are DESIGNED at, which is not the rate the file is in.
+ *
+ * The cascade runs inside the oversampled section, so its coefficients are
+ * computed for `sampleRate * factor`. That is the whole point of oversampling a
+ * linear filter: the bilinear transform squeezes everything between the design
+ * frequency and infinity into the space below Nyquist, so a bell at 10 kHz on a
+ * 44.1 kHz file comes out visibly narrower and lopsided than the analog
+ * prototype it is named after — "cramping". Moving Nyquist to 44.1 kHz moves
+ * that distortion out of the audible band.
+ *
+ * Every caller that reasons about the filter must use this rate, not the file's.
+ * In particular EqPlot draws the curve from these same sections, and drawing
+ * them at the file's rate would show a cramped curve while an uncramped one was
+ * running — the display would stop being the truth, which is the property that
+ * made cramping tolerable in the first place.
+ */
+export function eqDesignRate(sampleRate) {
+  return sampleRate * EQ_OVERSAMPLE.factor
+}
 
 /** Unity biquad, for slots with no band assigned. */
 const PASS_THROUGH = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
@@ -108,24 +134,50 @@ function soloSectionFor(sampleRate, band) {
  * before you have turned it up, and turning it up is exactly what creates the
  * band. The probe wins if both are given.
  *
- * @param {number} sampleRate
+ * TAKES the file's sample rate; DESIGNS at `eqDesignRate(sampleRate)`, because
+ * the cascade runs oversampled. Feed the result to `magnitudeResponseDb` with
+ * `eqDesignRate(sampleRate)` too — evaluating these coefficients at the file's
+ * rate describes a filter that is not the one running.
+ *
+ * @param {number} sampleRate the file's rate, not the design rate
  * @param {Array<object>} bands
  * @param {{ soloIndex?: number|null, soloProbe?: object|null }} [options]
  */
 export function eqSections(sampleRate, bands, { soloIndex = null, soloProbe = null } = {}) {
+  const designRate = eqDesignRate(sampleRate)
   if (soloProbe && Number.isFinite(soloProbe.frequencyHz)) {
-    return [soloSectionFor(sampleRate, soloProbe)]
+    return [soloSectionFor(designRate, soloProbe)]
   }
   if (soloIndex !== null && bands[soloIndex]) {
-    return [soloSectionFor(sampleRate, bands[soloIndex])]
+    return [soloSectionFor(designRate, bands[soloIndex])]
   }
   const sections = []
   for (const band of bands.slice(0, MAX_BANDS)) {
     if (!band.enabled) continue
     if (!Number.isFinite(band.frequencyHz) || band.frequencyHz <= 0) continue
-    sections.push(sectionFor(sampleRate, band))
+    sections.push(sectionFor(designRate, band))
   }
   return sections
+}
+
+/**
+ * Magnitude response of a band list, in dB, at the given frequencies.
+ *
+ * Prefer this over calling `magnitudeResponseDb(eqSections(...), ...)` by hand.
+ * The sections are designed at `eqDesignRate`, so evaluating them at the file's
+ * sample rate silently describes a different filter from the one running — a
+ * mistake that reads as perfectly ordinary code and produces a curve that is
+ * wrong by more than a dB up top. This pairs the two correctly, once.
+ *
+ * @param {number} sampleRate the file's rate, not the design rate
+ * @param {Array<object>} bands
+ * @param {ArrayLike<number>} freqsHz
+ * @param {{ soloIndex?: number|null, soloProbe?: object|null }} [options]
+ * @returns {Float64Array}
+ */
+export function eqResponseDb(sampleRate, bands, freqsHz, options = {}) {
+  const sections = eqSections(sampleRate, bands, options)
+  return magnitudeResponseDb(sections, freqsHz, eqDesignRate(sampleRate))
 }
 
 export class ManualEqKernel {
@@ -135,7 +187,24 @@ export class ManualEqKernel {
     this.params = { ...MANUAL_EQ_KERNEL_DEFAULTS }
     this.activeCount = 0
     this.outputLin = 1
+
+    // Per-channel oversamplers, grown on demand. Even a bypassed EQ runs them:
+    // latency has to stay constant whatever the band list says, or the apply
+    // path — which trims a fixed number of samples — would cut in the wrong
+    // place the moment a user disabled the last band.
+    this.oversamplers = []
+    this.wetScratch = new Float64Array(128)
+
     this.setParams({})
+  }
+
+  /**
+   * Algorithmic latency, in samples. Reported to the offline apply path, which
+   * renders long and trims. Constant at every setting — see the note in the
+   * constructor.
+   */
+  get latencySamples() {
+    return EQ_LATENCY_SAMPLES
   }
 
   /** Merge a partial param update and rebuild coefficients. */
@@ -172,23 +241,34 @@ export class ManualEqKernel {
     }
 
     this.cascade.ensureChannels(nOut)
+    while (this.oversamplers.length < nOut) {
+      this.oversamplers.push(new Oversampler(EQ_OVERSAMPLE))
+    }
+    if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
 
+    const L = EQ_OVERSAMPLE.factor
     const outputLin = this.outputLin
+    const wet = this.wetScratch
+
     for (let ch = 0; ch < nOut; ch++) {
       // Channels beyond the input count reuse the last one, matching the
       // convention in la2aProcessor.js / airBandProcessor.js.
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
+      const os = this.oversamplers[ch]
 
-      if (this.activeCount === 0) {
-        // No bands — copy rather than running twelve unity biquads.
-        for (let i = 0; i < n; i++) out[i] = input[i]
-      } else {
-        this.cascade.process(input, out, n, ch)
+      // Always resample, even with no bands: see the constructor. The filters
+      // still cost their taps, but the cascade below is skipped.
+      const hi = os.up(input, n)
+      if (this.activeCount !== 0) {
+        this.cascade.process(hi, hi, n * L, ch)
       }
+      os.down(wet, n)
 
-      if (outputLin !== 1) {
-        for (let i = 0; i < n; i++) out[i] *= outputLin
+      if (outputLin === 1) {
+        for (let i = 0; i < n; i++) out[i] = wet[i]
+      } else {
+        for (let i = 0; i < n; i++) out[i] = wet[i] * outputLin
       }
     }
   }
@@ -214,7 +294,7 @@ export function processManualEqBuffer(channelData, sampleRate, params = {}) {
       len,
     )
   }
-  return { channelData: output }
+  return { channelData: output, latencySamples: kernel.latencySamples }
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

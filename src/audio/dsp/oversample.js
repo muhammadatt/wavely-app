@@ -228,48 +228,109 @@ class HalfbandStage {
   }
 }
 
-// Stage tap counts. Both are ≡ 1 (mod 4).
-//
-// Stage 1 runs base↔2x and carries the whole burden: it has to pass 20 kHz and
-// stop the image of 20 kHz at 24.1 kHz, a 4 kHz transition at 88.2 kHz. Stage 2
-// runs 2x↔4x, where the same passband edge only has to be separated from 68.2
-// kHz, so it is short.
-//
-// STAGE2_TAPS ≡ 1 (mod 8) additionally, so that its contribution to the
-// upsample-path delay lands on a whole base-rate sample and the gain envelope
-// can be aligned exactly rather than rounded.
-const STAGE1_TAPS = 93
-const STAGE1_BETA = 9.5
-const STAGE2_TAPS = 17
-const STAGE2_BETA = 7.0
+/**
+ * Build an oversampling profile: the filters for each stage plus the delays
+ * they imply.
+ *
+ * Profiles exist because the two callers want different trade-offs from the
+ * same machinery. A compressor's waveshaper needs a lot of headroom above the
+ * band and does not care much what happens in the last kilohertz; an EQ is a
+ * transparent path that has to hand back what it was given everywhere the user
+ * can hear, so it wants a longer stage-1 filter and can settle for less
+ * headroom. Encoding that as a profile keeps one implementation and lets each
+ * caller state its own requirement.
+ *
+ * Stage 1 runs base↔2x and carries the burden: it must pass the audible band
+ * and stop that band's image, reflected around the base sample rate. Stage 2,
+ * where a profile uses one, runs 2x↔4x with a far wider relative transition and
+ * is correspondingly short.
+ *
+ * Both tap counts must be ≡ 1 (mod 4) — see `halfbandTaps`. A 4x profile
+ * additionally needs stage 2 ≡ 1 (mod 8), so its share of the upsample-path
+ * delay lands on a whole base-rate sample; the constructor rejects anything
+ * that would leave a fractional delay, since a control signal generated at the
+ * base rate could then never be aligned exactly with the audio.
+ */
+function buildProfile({ name, factor, stage1Taps, stage1Beta, stage2Taps, stage2Beta }) {
+  if (factor !== 2 && factor !== 4) {
+    throw new Error(`oversampling factor must be 2 or 4, got ${factor}`)
+  }
+  const stage1H = halfbandTaps(stage1Taps, stage1Beta)
+  const stage2H = factor === 4 ? halfbandTaps(stage2Taps, stage2Beta) : null
 
-const STAGE1_H = halfbandTaps(STAGE1_TAPS, STAGE1_BETA)
-const STAGE2_H = halfbandTaps(STAGE2_TAPS, STAGE2_BETA)
+  const m1 = (stage1Taps - 1) / 2
+  const m2 = factor === 4 ? (stage2Taps - 1) / 2 : 0
+  // Each stage delays by M samples at the rate it outputs, so the upsample path
+  // costs m1/2 + m2/4 base-rate samples and the downsample path the same again.
+  const upsampleDelaySamples = factor === 4 ? m1 / 2 + m2 / 4 : m1 / 2
+  if (!Number.isInteger(upsampleDelaySamples)) {
+    throw new Error(
+      `${name}: oversampler delays must be whole base-rate samples, got ${upsampleDelaySamples}`,
+    )
+  }
 
-/** Oversampling factor used by the compressor kernels. 2 or 4. */
-export const OVERSAMPLE_FACTOR = 4
+  return {
+    name,
+    factor,
+    stage1H,
+    stage2H,
+    upsampleDelaySamples,
+    latencySamples: 2 * upsampleDelaySamples,
+  }
+}
 
 /**
- * Round-trip latency in base-rate samples, and the delay that must be applied
- * to a control signal generated at the base rate before it is used at the
- * oversampled rate.
+ * Compressor profile: 4x, with a stage-1 filter that passes 20 kHz and stops
+ * the image of 20 kHz at 24.1 kHz.
  *
- * Derivation, with M1 = (STAGE1_TAPS-1)/2 and M2 = (STAGE2_TAPS-1)/2: each
- * stage delays by M samples at the rate it outputs, so the upsample path costs
- * M1/2 + M2/4 base-rate samples and the downsample path costs the same again.
+ * The waveshapers want the headroom of 4x more than they want the last
+ * kilohertz of passband, and their material — narration, at 44.1 kHz — has
+ * essentially nothing above 20 kHz.
  */
-const M1 = (STAGE1_TAPS - 1) / 2
-const M2 = (STAGE2_TAPS - 1) / 2
+export const COMPRESSOR_OVERSAMPLE = buildProfile({
+  name: 'compressor',
+  factor: 4,
+  stage1Taps: 93,
+  stage1Beta: 9.5,
+  stage2Taps: 17,
+  stage2Beta: 7.0,
+})
 
-export const UPSAMPLE_DELAY_SAMPLES =
-  OVERSAMPLE_FACTOR === 4 ? M1 / 2 + M2 / 4 : M1 / 2
-export const OVERSAMPLE_LATENCY_SAMPLES = 2 * UPSAMPLE_DELAY_SAMPLES
+/**
+ * EQ profile: 2x, with a much longer stage-1 filter.
+ *
+ * The two differences from the compressor profile both follow from the EQ being
+ * a linear path rather than a nonlinear one.
+ *
+ * 2x rather than 4x: there is no harmonic generation to contain. Oversampling
+ * here only pushes Nyquist away so the bilinear transform stops compressing the
+ * top of the response — "cramping". 2x brings a wide high-frequency bell to
+ * within 0.3 dB of its analog prototype across 8-16 kHz, against 1.5 dB at the
+ * base rate; 4x would reach 0.07 dB for nearly twice the cost, which is far
+ * below what anyone can hear on a filter curve.
+ *
+ * A longer stage 1: every signal through the EQ passes the resampling filters,
+ * so their passband edge becomes the plugin's. The compressor profile is 0.17 dB
+ * down at 20 kHz and 2.3 dB down at 21 kHz, which was a fair trade for narration
+ * and is not one for music with cymbals and air in it. 125 taps brings 20 kHz to
+ * 0.006 dB.
+ *
+ * 125 rather than more: the tap count buys passband edge and nothing else, and
+ * past this it is buying it above 20 kHz. 185 taps would hold 20.5 kHz flat too,
+ * for twice this one's CPU and half again its latency — spent entirely above
+ * the range anyone can hear.
+ */
+export const EQ_OVERSAMPLE = buildProfile({
+  name: 'eq',
+  factor: 2,
+  stage1Taps: 125,
+  stage1Beta: 10.0,
+})
 
-if (!Number.isInteger(UPSAMPLE_DELAY_SAMPLES)) {
-  throw new Error(
-    `oversampler delays must be whole base-rate samples, got ${UPSAMPLE_DELAY_SAMPLES}`,
-  )
-}
+/** Back-compatible aliases for the compressor kernels, which predate profiles. */
+export const OVERSAMPLE_FACTOR = COMPRESSOR_OVERSAMPLE.factor
+export const UPSAMPLE_DELAY_SAMPLES = COMPRESSOR_OVERSAMPLE.upsampleDelaySamples
+export const OVERSAMPLE_LATENCY_SAMPLES = COMPRESSOR_OVERSAMPLE.latencySamples
 
 /**
  * A per-channel oversampler: `up()` a block, do nonlinear work on it, `down()`
@@ -279,13 +340,12 @@ if (!Number.isInteger(UPSAMPLE_DELAY_SAMPLES)) {
  * no allocation once the block size settles.
  */
 export class Oversampler {
-  constructor(factor = OVERSAMPLE_FACTOR) {
-    if (factor !== 2 && factor !== 4) {
-      throw new Error(`oversampling factor must be 2 or 4, got ${factor}`)
-    }
-    this.factor = factor
-    this.stage1 = new HalfbandStage(STAGE1_H)
-    this.stage2 = factor === 4 ? new HalfbandStage(STAGE2_H) : null
+  /** @param {object} profile one of the *_OVERSAMPLE profiles above */
+  constructor(profile = COMPRESSOR_OVERSAMPLE) {
+    this.profile = profile
+    this.factor = profile.factor
+    this.stage1 = new HalfbandStage(profile.stage1H)
+    this.stage2 = profile.stage2H ? new HalfbandStage(profile.stage2H) : null
     this.mid = new Float64Array(256)
     this.high = new Float64Array(512)
   }

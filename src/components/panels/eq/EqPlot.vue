@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { magnitudeResponseDb } from '../../../audio/dsp/biquad.js'
-import { eqSections } from '../../../audio/eqProcessor.js'
+import { eqSections, eqResponseDb } from '../../../audio/eqProcessor.js'
 import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive } from '../../../audio/eqBands.js'
 
 /**
@@ -13,7 +12,7 @@ import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive } from '../../.
  * coordinates.
  *
  * THE COMPOSITE CURVE IS ANALYTIC, NOT MEASURED. It comes from
- * magnitudeResponseDb over the same sections the kernel installs, so no FFT runs
+ * eqResponseDb over the same sections the kernel installs, so no FFT runs
  * while a band is being dragged and what is on screen is the filter that is
  * running rather than a redrawn approximation. The analyzer trace is a separate,
  * independently disableable live FFT.
@@ -390,9 +389,14 @@ const curveFreqs = computed(() => Array.from({ length: CURVE_POINTS }, (_, i) =>
   fMin.value * Math.pow(fMax.value / fMin.value, i / (CURVE_POINTS - 1))))
 
 const compositeDb = computed(() => {
-  const sections = eqSections(props.sampleRate, props.bands)
-  if (sections.length === 0) return new Float64Array(CURVE_POINTS)
-  return magnitudeResponseDb(sections, curveFreqs.value, props.sampleRate)
+  if (eqSections(props.sampleRate, props.bands).length === 0) {
+    return new Float64Array(CURVE_POINTS)
+  }
+  // eqResponseDb, not magnitudeResponseDb: the cascade runs oversampled, so its
+  // coefficients belong to a higher rate and evaluating them at the file's rate
+  // would draw a cramped curve over an uncramped filter — the one thing this
+  // display must never do.
+  return eqResponseDb(props.sampleRate, props.bands, curveFreqs.value)
 })
 
 /**

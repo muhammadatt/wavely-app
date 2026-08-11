@@ -33,6 +33,7 @@ import {
 import { ensureManualEqWorklet } from './eqWorkletLoader.js'
 import {
   MANUAL_EQ_DEFAULTS,
+  EQ_LATENCY_SAMPLES,
   toKernelParams as toManualEqKernelParams,
 } from './effects/manualEq.js'
 import { MAX_ANALYSIS_SECONDS as HUM_MAX_ANALYSIS_SECONDS } from './dsp/humDetect.js'
@@ -422,6 +423,7 @@ export function applyManualEqRegion(segments, start, end, params, sampleRate, ch
     kernelParams: toManualEqKernelParams({
       ...MANUAL_EQ_DEFAULTS, ...params, soloIndex: null,
     }),
+    latencySamples: EQ_LATENCY_SAMPLES,
   })
 }
 
