@@ -176,7 +176,14 @@ export class LA2AKernel {
 
     // The gain envelope is computed once per block at the base rate and shared
     // by every channel, so it is delayed once, here, rather than per channel.
-    this.gainDelay = new DelayLine(UPSAMPLE_DELAY_SAMPLES)
+    //
+    // One sample SHORT of the upsampler's delay, deliberately. Interpolating a
+    // gain across the oversampled sub-samples needs both endpoints, and the
+    // later one has to be in hand before the earlier one is used. Holding the
+    // envelope one sample less makes `gain[i]` the newer endpoint and last
+    // block's `gain[i-1]` the older one, which is exactly the pair the ramp in
+    // `process` consumes.
+    this.gainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     // Last gain of the previous block, for interpolating across the block seam.
     this.lastGain = 1
 
@@ -384,19 +391,27 @@ export class LA2AKernel {
       // program material generates sum and difference content — so the gain is
       // interpolated up to the oversampled rate rather than held in steps, and
       // the product is formed there.
-      let gPrev = seamGain
+      // The ramp starts AT gCur rather than one step past it. The halfband
+      // upsampler's even branch is a pure delay, so sub-sample j = 0 is the
+      // original input sample, not an interpolated point — it has to receive
+      // the gain computed from it, exactly. Starting the ramp a step later left
+      // that sample holding three quarters of the PREVIOUS gain, which at a
+      // 20 us attack is most of the reduction a transient was supposed to get:
+      // the first sample of every hard onset passed through nearly unattenuated
+      // and read as a click.
+      let gCur = seamGain
       for (let i = 0; i < n; i++) {
         const gNext = gain[i]
-        const step = (gNext - gPrev) * invL
+        const step = (gNext - gCur) * invL
         for (let j = 0; j < L; j++) {
           const k = i * L + j
-          let w = hi[k] * (gPrev + step * (j + 1))
+          let w = hi[k] * (gCur + step * j)
           if (this.applyTube) {
             w = (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
           }
           hi[k] = w
         }
-        gPrev = gNext
+        gCur = gNext
       }
 
       this.oversamplers[ch].down(wet, n)

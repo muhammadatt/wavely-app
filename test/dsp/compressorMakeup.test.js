@@ -168,3 +168,89 @@ test('the measurement path does not disturb the audio path', () => {
     assert.equal(after[i], before[i], `audio path changed at sample ${i}`)
   }
 })
+
+// ── Transient timing ────────────────────────────────────────────────────────
+
+test('a hard onset is grabbed on its first sample, not one sample late', () => {
+  // The halfband upsampler's even branch is a pure delay, so sub-sample 0 of
+  // each base sample IS the original sample rather than an interpolated point.
+  // It therefore has to receive the gain computed from it, exactly. A ramp that
+  // starts one step past it leaves that sample holding most of the PREVIOUS
+  // gain, and at a 20 us attack the previous gain is most of the reduction the
+  // onset was supposed to get — the first sample of every hard onset passes
+  // through nearly unattenuated and reads as a click.
+  //
+  // Caught on a real narration recording, where it put 0.056 of overshoot on
+  // word onsets: about 10% of the file's peak, on two or three samples.
+  const n = 8192
+  const onset = Math.round(n / 2)
+  const sig = new Float32Array(n)
+  // The envelope rises over RAMP samples rather than instantaneously. A
+  // sample-to-sample jump is not a signal any sample rate can represent, and
+  // the overshoot a resampler correctly reconstructs from one would swamp what
+  // is being measured here — at RAMP = 1 both a correct and a broken kernel
+  // show large departures for that reason alone.
+  //
+  // RAMP = 4 (about 0.09 ms) is calibrated: fast enough that the gain moves
+  // substantially within a sample, slow enough to be a signal. Measured
+  // departure is 0.014 with the gain aligned and 0.146 with it a sample late,
+  // so the bound below sits an order of magnitude clear of both.
+  const RAMP = 4
+  for (let i = 0; i < n; i++) {
+    let level = 0.02
+    if (i >= onset + RAMP) level = 0.9
+    else if (i >= onset) {
+      const u = (i - onset) / RAMP
+      level = 0.02 + (0.9 - 0.02) * (0.5 - 0.5 * Math.cos(Math.PI * u))
+    }
+    sig[i] = level * Math.sin((2 * Math.PI * 220 * i) / SR)
+  }
+
+  const params = { inputDrive: 85, ratio: '20', attack: 7, release: 4, fetDrive: 0.35 }
+  const over = processFET1176Buffer([sig], SR, { ...params, oversample: true }).channelData[0]
+  const base = processFET1176Buffer([sig], SR, { ...params, oversample: false }).channelData[0]
+
+  // Compare the two paths across the onset, allowing for the oversampled path's
+  // delay. They will not match exactly — oversampling changes the saturation
+  // slightly — but neither may overshoot the other on the attack.
+  let worst = 0
+  let worstIndex = -1
+  for (let i = onset - 200; i < onset + 800; i++) {
+    const d = Math.abs(over[i + OVERSAMPLE_LATENCY_SAMPLES] - base[i])
+    if (d > worst) {
+      worst = d
+      worstIndex = i
+    }
+  }
+  assert.ok(
+    worst < 0.05,
+    `oversampled path departs from base-rate by ${worst.toFixed(4)} at sample `
+    + `${worstIndex - onset} relative to the onset — the gain envelope is not `
+    + 'landing on the sample it was computed from',
+  )
+})
+
+test('OptoSmooth tracks its base-rate path across an onset too', () => {
+  // Slow attack makes this far less sensitive, but the interpolation is shared.
+  const n = 16384
+  const onset = Math.round(n / 2)
+  const sig = new Float32Array(n)
+  const RAMP = 4
+  for (let i = 0; i < n; i++) {
+    let level = 0.02
+    if (i >= onset + RAMP) level = 0.9
+    else if (i >= onset) {
+      const u = (i - onset) / RAMP
+      level = 0.02 + (0.9 - 0.02) * (0.5 - 0.5 * Math.cos(Math.PI * u))
+    }
+    sig[i] = level * Math.sin((2 * Math.PI * 220 * i) / SR)
+  }
+  const params = { mode: 'limit', peakReduction: 90, tubeDrive: 0.3 }
+  const over = processLA2ABuffer([sig], SR, { ...params, oversample: true }).channelData[0]
+  const base = processLA2ABuffer([sig], SR, { ...params, oversample: false }).channelData[0]
+  let worst = 0
+  for (let i = onset - 200; i < onset + 2000; i++) {
+    worst = Math.max(worst, Math.abs(over[i + OVERSAMPLE_LATENCY_SAMPLES] - base[i]))
+  }
+  assert.ok(worst < 0.05, `departs from base-rate by ${worst.toFixed(4)} across the onset`)
+})
