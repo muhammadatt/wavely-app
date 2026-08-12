@@ -607,12 +607,17 @@ test('a notch does not produce phantom cuts on either side of itself', () => {
 })
 
 test('regions away from a notch are unaffected by it', () => {
+  // Plant a resonance at 700 Hz (boxy_honky) and a notch at 5 kHz.
+  // The notch suppresses upper_presence/brilliance but must not touch boxy_honky.
   const planted = synthVoice({
     f0: 120, seconds: 3, bandwidthHz: 12000, resonanceHz: 700, resonanceDb: 12,
+    notchHz: 5000, notchDb: 18,
   })
   const result = analyzeVoiceRx(planted, SR)
+  assert.equal(result.holes.length, 1, 'the notch was not detected')
   const boxy = result.regionResults.find(r => r.name === 'boxy_honky')
-  assert.equal(boxy.detected, true, 'a planted resonance far from any hole went unfound')
+  assert.equal(boxy.detected, true, 'a planted resonance far from the notch went unfound')
+  assert.notEqual(boxy.skipReason, 'spectral_hole', 'boxy_honky was incorrectly suppressed by a distant notch')
   assert.ok(boxy.gainDb < 0)
 })
 

@@ -141,7 +141,10 @@ export function buildAdvisories(analysis) {
     // someone that "upper_presence was suppressed" names a thing they have
     // never been shown.
     const suppressed = (analysis.regionResults ?? [])
-      .filter(r => r.skipReason === 'spectral_hole')
+      .filter(r =>
+        r.skipReason === 'spectral_hole' &&
+        r.scanLowHz < hole.highHz && r.scanHighHz > hole.lowHz,
+      )
       .map(r => getRole(roleForRegion(r.name)?.id)?.label)
       .filter(Boolean)
 
