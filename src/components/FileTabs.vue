@@ -4,6 +4,7 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
 import { formatDuration } from '../utils/format.js'
 import { documentStatus } from '../utils/documentStatus.js'
+import { focusRenameInput } from '../utils/renameInput.js'
 
 /**
  * Tab strip for open documents, plus the properties of whichever one is active.
@@ -126,10 +127,6 @@ function commitRename() {
   renamingId.value = null
 }
 
-function focusInput(el) {
-  if (el) { el.focus(); el.select() }
-}
-
 // ── Per-tab status ───────────────────────────────────────────────────────────
 // The dot is the whole point of a tab over a plain label: mastered/compliant
 // state is visible without opening each file. Definition is shared with the
@@ -179,7 +176,7 @@ const statusOf = documentStatus
 
         <input
           v-if="renamingId === doc.id"
-          :ref="focusInput"
+          :ref="focusRenameInput"
           v-model="renameDraft"
           class="flex-1 min-w-0 bg-transparent outline-none text-[11.5px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
           @click.stop

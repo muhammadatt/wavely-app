@@ -5,6 +5,7 @@ import { getTimelineDuration } from '../audio/operations.js'
 import { renderTimelineToWav, toWavFileName, downloadBlob } from '../audio/export.js'
 import { createZip, ZIP_SIZE_LIMIT } from '../audio/zip.js'
 import { formatDuration } from '../utils/format.js'
+import { focusRenameInput } from '../utils/renameInput.js'
 import BaseButton from './ui/BaseButton.vue'
 
 /**
@@ -17,7 +18,7 @@ import BaseButton from './ui/BaseButton.vue'
  * where it's actually being made.
  */
 
-const { appState, documents, showToast } = useEditorState()
+const { appState, documents, showToast, renameDocument } = useEditorState()
 
 // Pre-check whatever the caller asked for, else just the active document.
 const initial = appState.exportPreselection?.length
@@ -71,6 +72,27 @@ const overZipLimit = computed(() =>
 function close() {
   if (isExporting.value) return
   appState.exportDialogOpen = false
+}
+
+// ── Rename before export ─────────────────────────────────────────────────────
+// Renaming was reachable only by double-clicking a tab or a row in the files
+// panel — both of them somewhere else, and neither advertised. The moment the
+// name matters is the moment it becomes a filename on disk, which is this
+// dialog, so the same inline rename lives here too. It edits the document's
+// real name (the tab strip and files panel follow), and the exported file
+// takes it via uniqueNames() below.
+const renamingId = ref(null)
+const renameDraft = ref('')
+
+function startRename(doc) {
+  if (isExporting.value) return
+  renamingId.value = doc.id
+  renameDraft.value = doc.name
+}
+
+function commitRename() {
+  if (renamingId.value) renameDocument(renamingId.value, renameDraft.value)
+  renamingId.value = null
 }
 
 /** Disambiguate names that collide once extensions are normalised to .wav. */
@@ -168,7 +190,7 @@ function complianceOf(doc) {
       <div class="px-5 pt-[18px] pb-[14px] border-b border-[rgba(255,255,255,.07)]">
         <div class="text-[15px] font-bold text-[#eaf6f8]">Export</div>
         <div class="mt-[3px] text-[11.5px] text-[rgba(255,255,255,.42)]">
-          WAV 16-bit · choose which files to include
+          WAV 16-bit · choose which files to include · double-click a name to rename
         </div>
       </div>
 
@@ -195,7 +217,7 @@ function complianceOf(doc) {
         <div
           v-for="doc in documents"
           :key="doc.id"
-          class="flex items-center gap-[10px] px-2 py-[9px] rounded-[9px] cursor-pointer transition-colors"
+          class="group flex items-center gap-[10px] px-2 py-[9px] rounded-[9px] cursor-pointer transition-colors"
           :style="checked.has(doc.id) ? 'background:rgba(53,211,230,.07)' : ''"
           @click="toggle(doc.id)"
         >
@@ -212,7 +234,45 @@ function complianceOf(doc) {
           </button>
 
           <div class="flex-1 min-w-0">
-            <div class="text-[12.5px] font-bold truncate text-[#eaf6f8]" :title="doc.name">{{ doc.name }}</div>
+            <input
+              v-if="renamingId === doc.id"
+              :ref="focusRenameInput"
+              v-model="renameDraft"
+              class="w-full bg-transparent outline-none text-[12.5px] font-bold text-[#eaf6f8] border-b border-[#35d3e6]"
+              aria-label="File name"
+              @click.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="renamingId = null"
+              @blur="commitRename"
+            />
+            <div v-else class="flex items-center gap-[6px] min-w-0">
+              <!-- Clicks on the name are stopped, not just the double-click:
+                   a double-click delivers two click events first, and the row's
+                   handler is a toggle, so renaming from here flipped the file's
+                   include state on and back off with a visible flash. The name
+                   is the rename target rather than a second hit area for the
+                   checkbox — the meta line, the status and the rest of the row
+                   still toggle. -->
+              <span
+                class="text-[12.5px] font-bold truncate text-[#eaf6f8] cursor-text"
+                :title="`${doc.name} — double-click to rename`"
+                @click.stop
+                @dblclick.stop="startRename(doc)"
+              >{{ doc.name }}</span>
+              <!-- Double-click works on the name itself; the pencil is there so
+                   the rename is visible rather than something you have to know
+                   about. -->
+              <button
+                class="w-[18px] h-[18px] rounded-[5px] shrink-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[rgba(255,255,255,.12)]"
+                style="color:rgba(255,255,255,.6)"
+                :disabled="isExporting"
+                :aria-label="`Rename ${doc.name}`"
+                title="Rename before export"
+                @click.stop="startRename(doc)"
+              >
+                <svg viewBox="0 0 24 24" class="w-[11px] h-[11px] fill-none stroke-current" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
+              </button>
+            </div>
             <div class="flex items-center gap-[6px] mt-[2px]">
               <span class="font-['JetBrains_Mono'] text-[10.5px] font-semibold text-[rgba(255,255,255,.35)]">
                 {{ formatDuration(getTimelineDuration(doc.segments)) }}

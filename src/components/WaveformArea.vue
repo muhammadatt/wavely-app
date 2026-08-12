@@ -5,7 +5,7 @@ import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 
 const {
-  state, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration,
+  state, appState, peakCaches, peakCacheVersion, setSelection, setPlayhead, totalDuration,
   openContextMenu,
 } = useEditorState()
 
@@ -272,6 +272,13 @@ function handleZoomSet(e) {
   drawAll()
 }
 
+// Pan-only, from the scrollbar beneath the waveform. The scrollbar sends a
+// position rather than a delta, so it can't accumulate drift over a long drag.
+function handleScrollSet(e) {
+  scrollLeft.value = Math.max(0, Math.min(maxScrollLeft.value, e.detail.scrollLeft))
+  drawAll()
+}
+
 // Sets pan + zoom together (from the overview strip's drag/resize handles) so
 // the two never briefly disagree — e.g. a stale scrollLeft clamped against
 // the old pixelsPerSecond for one frame. setZoom has already run, so
@@ -289,16 +296,88 @@ watch(
   { deep: true }
 )
 
-// A different file was opened → refit. Deliberately not deep: loadFile replaces
-// currentFile wholesale, while PresetsPanel mutates its channels/sampleRate in
-// place after processing, and that shouldn't throw away the user's zoom.
+// ── Per-document view ───────────────────────────────────────────────────────
+// Zoom and pan belong to the document being looked at, not to this component.
+// Held here rather than on the document itself because they are properties of
+// *this viewport* — its width decides what the numbers mean — and nothing
+// outside the waveform reads them.
+//
+// Without this, switching tabs left the incoming document at whatever zoom the
+// outgoing one had, and the refit below then threw that away too: every tab
+// switch snapped back to the whole file, so a narrator comparing the same
+// passage across two chapters had to re-zoom on every switch.
+const viewByDoc = new Map()
+
+function saveView(docId) {
+  if (!docId) return
+  viewByDoc.set(docId, {
+    scrollLeft: scrollLeft.value,
+    pixelsPerSecond: pixelsPerSecond.value,
+    fitToWindow: fitToWindow.value,
+  })
+}
+
+function fitView() {
+  fitToWindow.value = true
+  scrollLeft.value = 0
+}
+
+function restoreView(docId) {
+  const saved = viewByDoc.get(docId)
+  // No saved view means a document opened while another was on screen — it has
+  // never been laid out here, so it starts fitted like any freshly opened file.
+  if (!saved) { fitView(); return }
+  scrollLeft.value = saved.scrollLeft
+  pixelsPerSecond.value = saved.pixelsPerSecond
+  fitToWindow.value = saved.fitToWindow
+  // Both bounds are re-established by drawMain against the current width and
+  // duration, so a view saved before a resize or an edit still lands legally.
+}
+
+// Documents that have been closed would otherwise sit here forever holding a
+// view for an id that can never come back.
+//
+// The scan is unconditional. Comparing sizes first looked like a cheap way to
+// skip it, but it only catches a net shrink: close one document and open
+// another and the count is unchanged, so the closed one's entry survived every
+// future prune. At these document counts the scan costs nothing.
+function pruneViews() {
+  const live = new Set(appState.documents.map(d => d.id))
+  for (const id of viewByDoc.keys()) if (!live.has(id)) viewByDoc.delete(id)
+}
+
+let lastDocId = appState.activeDocumentId
+let lastFile = state.currentFile
+
+// Two different events arrive on this one watcher because they need opposite
+// treatment and only their order distinguishes them: a *different document* is
+// a view switch (save one, restore the other), while a *different file object
+// on the same document* is a genuinely new recording, which refits.
+//
+// Deliberately not deep: loadFile replaces currentFile wholesale, while
+// PresetsPanel mutates its channels/sampleRate in place after processing, and
+// that shouldn't throw away the user's zoom.
 watch(
-  () => state.currentFile,
-  () => {
-    fitToWindow.value = true
-    scrollLeft.value = 0
+  () => [appState.activeDocumentId, state.currentFile],
+  ([docId, file]) => {
+    if (docId !== lastDocId) {
+      saveView(lastDocId)
+      restoreView(docId)
+      pruneViews()
+    } else if (file !== lastFile) {
+      fitView()
+    }
+    lastDocId = docId
+    lastFile = file
     drawAll()
-  }
+  },
+  // Synchronous, because saving the outgoing view has to happen at the instant
+  // the active document changes. On the default 'pre' flush this runs one
+  // microtask later, by which time the segments watcher above has already
+  // redrawn against the incoming document — and drawMain re-clamps zoom and
+  // scroll as it draws, so what got saved was the new document's view, not the
+  // one being left behind.
+  { flush: 'sync' }
 )
 
 // Selection or playhead changed externally (e.g. toolbar operations, click-to-seek)
@@ -334,6 +413,7 @@ onMounted(() => {
   window.addEventListener('wavely:zoom-out', handleZoomOut)
   window.addEventListener('wavely:zoom-set', handleZoomSet)
   window.addEventListener('wavely:view-set', handleViewSet)
+  window.addEventListener('wavely:scroll-set', handleScrollSet)
 })
 
 onUnmounted(() => {
@@ -342,6 +422,7 @@ onUnmounted(() => {
   window.removeEventListener('wavely:zoom-out', handleZoomOut)
   window.removeEventListener('wavely:zoom-set', handleZoomSet)
   window.removeEventListener('wavely:view-set', handleViewSet)
+  window.removeEventListener('wavely:scroll-set', handleScrollSet)
 })
 </script>
 
