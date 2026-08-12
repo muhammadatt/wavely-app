@@ -103,15 +103,31 @@ export function buildSuggestions(analysis) {
  * thing they could hear. Saying "there is a hole here and it is why Presence
  * and Sibilance were left alone" turns the same silence into a finding.
  *
- * WHY NO CORRECTION IS OFFERED. A hole is a deficiency, and the arithmetic for
- * filling one is trivial — but a 17 dB corrective boost is the single most
- * destructive move in this tool's vocabulary. Whatever removed those
- * frequencies removed the noise floor's contribution too; boosting the band
- * back raises hiss, room tone and codec artefacts by the full amount and
- * returns no voice, because the voice is not in there to be recovered. This is
- * the same judgement DEAD_REGION_DB already makes about brick-walled files, at
- * a different depth. Report it, name it, and let the user decide whether to go
- * back to the source.
+ * WHY NO CORRECTION IS OFFERED — AND WHAT THAT IS NOT SAYING. A hole is a
+ * deficiency and the arithmetic for filling one is trivial, so the reason to
+ * decline has to be a real one.
+ *
+ * It is NOT that the band is empty. A notch is an attenuation, not a deletion,
+ * and there is usually plenty of voice still under it: the clip this was built
+ * against measures 23 dB of speech-above-floor at the bottom of a 17.6 dB hole.
+ * That is the opposite of the brick-walled case DEAD_REGION_DB guards, where
+ * the band really is numerical noise and a boost really does return nothing but
+ * hiss. The two look alike on a plot and differ by 40 dB of SNR; do not reason
+ * from one to the other.
+ *
+ * The real reasons are these. Filling a hole this deep takes a boost larger
+ * than any correction VoiceRx will make on its own, and MAX_TOTAL_CAP_FACTOR
+ * has already settled what to do with a measurement that size — flag it, do not
+ * spend it, because past about 14 dB the measurement is as likely to be wrong
+ * as the voice is to be that broken. The band's room tone comes up with the
+ * boost, and a notched voice does not imply a notched floor to compensate: on
+ * that same clip the noise floor inside the hole is 8 dB HIGHER than an octave
+ * below it, so the lift is paid for in full. And the tool cannot know why the
+ * hole is there. Someone may have cut a resonance, a whistle or a mic artefact
+ * deliberately, and undoing that unasked restores the problem they removed.
+ *
+ * So report it, name what it cost, and leave the decision — which is about the
+ * recording's history, not about its spectrum — to the person who has it.
  *
  * @param {object} analysis result of analyzeVoiceRx
  * @returns {Array<{id:string, title:string, detail:string, lowHz:number, highHz:number}>}
@@ -130,12 +146,17 @@ export function buildAdvisories(analysis) {
       .filter(Boolean)
 
     const where = formatHz(hole.centerHz)
-    const depth = `${Math.round(hole.depthDb)} dB`
+    const depthDb = Math.round(hole.depthDb)
+    const depth = `${depthDb} dB`
+    const article = articleFor(depthDb)
 
+    // Careful with this wording. The band is quiet, not empty — there is still
+    // voice under a notch — so anything implying the frequencies are gone for
+    // good is both false and the wrong reason to leave them alone.
     let detail = `Something has already taken these frequencies out — an EQ cut, `
-      + `or the device this was recorded on. VoiceRx has not tried to put them `
-      + `back: boosting a band this empty raises the room and the hiss by the `
-      + `same ${depth} and returns no voice, because the voice is no longer in there.`
+      + `or the device this was recorded on. VoiceRx has not put them back on `
+      + `its own: that would take ${article} ${depth} boost, far bigger than any move it `
+      + `makes unasked, and the room tone in this band comes up with it.`
 
     if (suppressed.length) {
       detail += ` ${listOf(suppressed)} ${suppressed.length > 1 ? 'sit' : 'sits'} `
@@ -143,14 +164,29 @@ export function buildAdvisories(analysis) {
         + `${suppressed.length > 1 ? 'they have' : 'it has'} been left alone.`
     }
 
+    detail += ` If you know why it is there — and that it should not be — you `
+      + `can lift it by hand in the EQ.`
+
     return {
       id: `adv_hole_${i}`,
-      title: `A ${depth} notch at ${where}`,
+      title: `${article === 'an' ? 'An' : 'A'} ${depth} notch at ${where}`,
       detail,
       lowHz: hole.lowHz,
       highHz: hole.highHz,
     }
   })
+}
+
+/**
+ * "a" or "an" for a number the user will read aloud in their head.
+ *
+ * Driven by how the digits SOUND, not how they are spelled: 18 is "eighteen"
+ * and takes "an", 40 is "forty" and takes "a". Only 8, 11 and 18 fall on the
+ * vowel side within the range a hole depth can occupy, which is bounded below
+ * by MIN_DEPTH_DB and in practice never reaches three digits.
+ */
+function articleFor(n) {
+  return [8, 11, 18].includes(n) ? 'an' : 'a'
 }
 
 /** "A", "A and B", "A, B and C" — the list reads as a sentence, not as data. */
