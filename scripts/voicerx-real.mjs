@@ -69,7 +69,10 @@ function describeAdvisory(a) {
 
 function fmtBands(bands) {
   if (!bands.length) return '—'
-  return bands.map(b => `${Math.round(b.freqHz)}Hz ${b.gainDb > 0 ? '+' : ''}${b.gainDb.toFixed(1)}`).join('  ')
+  // A band on the fundamental is marked, because it is the one correction that
+  // is never right whatever else the detector got out of the file.
+  return bands.map(b => `${Math.round(b.freqHz)}Hz ${b.gainDb > 0 ? '+' : ''}${b.gainDb.toFixed(1)}`
+    + (b.nearF0 ? '[F0]' : '')).join('  ')
 }
 
 function print(r) {
@@ -95,11 +98,12 @@ function print(r) {
         console.log(`${at}  ERROR ${w.error}`)
         continue
       }
+      const gated = w.quietLevelDbfs < -80 ? ' GATED' : ''
       const voice = `${w.voiceType ?? '?'} F0 ${w.medianF0Hz ?? '?'}`
       console.log(`${at}  ${voice.padEnd(18)} mask ${w.mask
         ? `${(w.mask.liveFraction * 100).toFixed(0)}% live to ${w.mask.topLiveHz} Hz, `
           + `SNR ${w.mask.medianSpeechSnrDb ?? '?'} dB${w.mask.noiseFloorMeasured ? '' : ' (NO PAUSES — floor not measured)'}`
-        : '—'}`)
+        : '—'}, floor ${w.quietLevelDbfs} dBFS${gated}`)
       for (const [name, out] of Object.entries(w.detectors)) {
         const label = out.ok
           ? `${String(out.bands.length).padStart(2)} bands  ${fmtBands(out.bands)}`
@@ -126,12 +130,38 @@ function print(r) {
     )
   }
 
+  console.log('\nCORRECTING THE FUNDAMENTAL — never right, it is the pitch not a defect')
+  for (const [name, s] of Object.entries(r.summary)) {
+    console.log(`  ${name.padEnd(10)} ${s.bandsNearF0}/${s.totalBands} bands within 15% of measured F0`)
+  }
+
+  console.log('\nREPEATABILITY — of the first window\'s bands, how many recur in EVERY window')
+  for (const [name, s] of Object.entries(r.summary)) {
+    console.log(`  ${name.padEnd(10)} ${s.recurringFraction === null ? 'n/a'
+      : `${(s.recurringFraction * 100).toFixed(0)}%`}`)
+  }
+  console.log('  A user who analyses twice and is told different things has no reason')
+  console.log('  to believe either answer.')
+
+  console.log('\nWHERE THE INVENTED BANDS LAND (half-octave bins)')
+  for (const [name, s] of Object.entries(r.summary)) {
+    const rows = Object.entries(s.histogram)
+      .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
+      .filter(([, n]) => n > 0)
+    console.log(`  ${name}`)
+    for (const [label, n] of rows) {
+      console.log(`    ${label.padStart(8)}  ${'#'.repeat(n)} ${n}`)
+    }
+  }
+
   console.log('\nMASK HEALTH (v2 only — the measurement everything else rests on)')
   const m = r.maskSummary
   console.log(`  files where a noise floor could be measured   ${m.measured}/${m.windows}`)
   console.log(`  median live fraction of 60 Hz-16 kHz          ${(m.medianLiveFraction * 100).toFixed(0)}%`)
   console.log(`  median speech-band SNR                        ${m.medianSpeechSnrDb ?? '?'} dB`)
   console.log(`  median top live frequency                     ${m.medianTopLiveHz} Hz`)
+  console.log(`  median level of the quietest frames           ${m.medianQuietLevelDbfs} dBFS`)
+  console.log(`  windows whose pauses look gated (<-80 dBFS)   ${m.windowsWithGatedSilence}/${m.windows}`)
   console.log('\n  A live fraction far below ~90%, or an SNR in single digits, means')
   console.log('  mastering has compressed the pauses enough to blind the mask — and')
   console.log('  every v2 number on this corpus would then be describing a spectrum')

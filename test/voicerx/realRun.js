@@ -15,7 +15,23 @@
 
 import { analyzeVoiceRxV2 } from '../../src/audio/voicerx/v2/index.js'
 import { DETECTORS } from './detectors.js'
-import { listCorpus, excerpts, maskHealth, CORPUS_DIR } from './realCorpus.js'
+import { listCorpus, excerpts, maskHealth, quietLevelDbfs, CORPUS_DIR } from './realCorpus.js'
+
+/**
+ * How close a band has to sit to the measured fundamental to be flagged.
+ *
+ * A fifth of an octave, which is 15% in frequency. Wide enough to catch a band
+ * aimed at F0 by a detector whose centre estimate wanders, narrow enough that a
+ * genuine correction an octave up cannot be mistaken for one.
+ */
+const NEAR_F0_OCTAVES = 0.2
+
+/**
+ * How close two bands from different windows of the same file have to sit to
+ * count as the same finding. A third of an octave — the same critical-band
+ * spacing v2 uses to decide two corrections are acting on one colour.
+ */
+const REPEAT_OCTAVES = 0.33
 
 function median(values) {
   if (!values.length) return null
@@ -63,9 +79,18 @@ export function runDetectors({ dir = CORPUS_DIR, seconds = 45, windows = 3 } = {
         record.error = err.message
       }
 
+      // Absolute level of the quietest frames, in dBFS. The SNR mask divides
+      // the voiced spectrum by the pause spectrum, and a ratio says nothing
+      // about whether the denominator is real room tone or edited-in digital
+      // silence. A floor near -90 dBFS means the pauses were gated or replaced,
+      // the measured SNR is meaningless however large it looks, and the mask is
+      // trusting the whole spectrum because it has nothing to compare against.
+      record.quietLevelDbfs = quietLevelDbfs(w.audio)
+
       for (const [name, detector] of Object.entries(DETECTORS)) {
         try {
           const out = detector(w.audio, loaded.audio.sampleRate)
+          const f0 = record.medianF0Hz
           record.detectors[name] = out.ok
             ? {
               ok: true,
@@ -73,6 +98,10 @@ export function runDetectors({ dir = CORPUS_DIR, seconds = 45, windows = 3 } = {
                 freqHz: Math.round(b.freqHz * 10) / 10,
                 gainDb: Math.round(b.gainDb * 100) / 100,
                 q: b.q,
+                // Correcting the fundamental is never right: it is the voice's
+                // own pitch, not a defect in it, and a cut there thins the
+                // whole delivery.
+                nearF0: !!(f0 && Math.abs(Math.log2(b.freqHz / f0)) < NEAR_F0_OCTAVES),
               })),
               advisories: out.advisories ?? [],
             }
@@ -90,11 +119,47 @@ export function runDetectors({ dir = CORPUS_DIR, seconds = 45, windows = 3 } = {
 
   const allWindows = files.flatMap(f => f.windows)
 
+  // Does a detector say the same thing about two different minutes of the same
+  // finished file? A user who analyses twice and gets different answers has no
+  // reason to believe either. Only files with more than one window can say.
+  for (const f of files) {
+    if (f.windows.length < 2) continue
+    f.repeatability = {}
+    for (const name of Object.keys(DETECTORS)) {
+      const perWindow = f.windows.map(w => w.detectors[name]?.bands ?? [])
+      const first = perWindow[0]
+      let recurring = 0
+      for (const band of first) {
+        const inAll = perWindow.slice(1).every(
+          other => other.some(b => Math.abs(Math.log2(b.freqHz / band.freqHz)) < REPEAT_OCTAVES),
+        )
+        if (inAll) recurring++
+      }
+      f.repeatability[name] = {
+        bandsPerWindow: perWindow.map(b => b.length),
+        recurringInEveryWindow: recurring,
+        ofFirstWindow: first.length,
+      }
+    }
+  }
+
   const summary = {}
   for (const name of Object.keys(DETECTORS)) {
     const outs = allWindows.map(w => w.detectors[name]).filter(Boolean)
     const bandCounts = outs.map(o => o.bands.length)
     const gains = outs.flatMap(o => o.bands.map(b => Math.abs(b.gainDb)))
+    const allBands = outs.flatMap(o => o.bands)
+    // Where the invented corrections land, by octave. A detector whose mistakes
+    // are scattered has a noisy estimator; one whose mistakes pile into a
+    // couple of octaves has a specific bug with an address.
+    const histogram = {}
+    for (const b of allBands) {
+      const key = Math.round(Math.log2(b.freqHz / 62.5) * 2) / 2
+      const label = `${Math.round(62.5 * 2 ** key)}Hz`
+      histogram[label] = (histogram[label] ?? 0) + 1
+    }
+
+    const repeat = files.map(f => f.repeatability?.[name]).filter(Boolean)
     summary[name] = {
       windows: outs.length,
       windowsWithBands: outs.filter(o => o.bands.length > 0).length,
@@ -103,6 +168,12 @@ export function runDetectors({ dir = CORPUS_DIR, seconds = 45, windows = 3 } = {
       largestGainDb: gains.length ? Math.max(...gains) : 0,
       refused: outs.filter(o => !o.ok).length,
       advisories: outs.reduce((a, o) => a + (o.advisories?.length ?? 0), 0),
+      bandsNearF0: allBands.filter(b => b.nearF0).length,
+      totalBands: allBands.length,
+      histogram,
+      recurringFraction: repeat.length
+        ? repeat.reduce((a, r) => a + (r.ofFirstWindow ? r.recurringInEveryWindow / r.ofFirstWindow : 1), 0) / repeat.length
+        : null,
     }
   }
 
@@ -113,6 +184,8 @@ export function runDetectors({ dir = CORPUS_DIR, seconds = 45, windows = 3 } = {
     medianLiveFraction: median(masks.map(m => m.liveFraction)) ?? 0,
     medianTopLiveHz: Math.round(median(masks.map(m => m.topLiveHz)) ?? 0),
     medianSpeechSnrDb: median(masks.map(m => m.medianSpeechSnrDb).filter(v => v !== null)),
+    medianQuietLevelDbfs: median(allWindows.map(w => w.quietLevelDbfs).filter(v => Number.isFinite(v))),
+    windowsWithGatedSilence: allWindows.filter(w => w.quietLevelDbfs < -80).length,
   }
 
   return {

@@ -105,6 +105,33 @@ export function excerpts(file, { seconds = 45, windows = 3 } = {}) {
 }
 
 /**
+ * Level of the quietest frames, in dBFS.
+ *
+ * The mask is a RATIO — voiced spectrum over pause spectrum — and a ratio
+ * cannot tell you whether its denominator is real room tone or silence someone
+ * edited in. Those two want opposite treatment: real room tone makes the SNR
+ * measurement meaningful, while gated or replaced silence makes it enormous and
+ * meaningless, and a mask reading 100% live everywhere is then not a finding
+ * about the recording but a symptom of having nothing to compare against.
+ *
+ * ACX permits noise floors down to -60 dBFS and requires room tone rather than
+ * digital silence, so a floor far below that is evidence the pauses were
+ * processed.
+ */
+export function quietLevelDbfs(audio, frameSize = 2048, hop = 512) {
+  const energies = []
+  for (let s = 0; s + frameSize <= audio.length; s += hop) {
+    let sumSq = 0
+    for (let i = 0; i < frameSize; i++) sumSq += audio[s + i] * audio[s + i]
+    energies.push(Math.sqrt(sumSq / frameSize))
+  }
+  if (!energies.length) return NaN
+  energies.sort((a, b) => a - b)
+  const p15 = energies[Math.floor(energies.length * 0.15)]
+  return Math.round(20 * Math.log10(p15 + 1e-12) * 10) / 10
+}
+
+/**
  * How the SNR mask behaved — the thing to check before trusting any other
  * number from mastered material.
  *
