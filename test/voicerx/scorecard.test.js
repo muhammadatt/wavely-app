@@ -29,7 +29,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runScorecard } from './harness.js'
 import { SMOKE_CASES } from './cases.js'
-import { currentDetector } from './detectors.js'
+import { DETECTORS } from './detectors.js'
 
 const baseline = JSON.parse(
   readFileSync(new URL('./baseline-smoke.json', import.meta.url), 'utf8'),
@@ -70,22 +70,27 @@ function compare(actual, expected, path, failures) {
   }
 }
 
-test('the VoiceRx scorecard matches the recorded baseline', () => {
-  const card = runScorecard(currentDetector, SMOKE_CASES)
-  const failures = []
-  compare(card.overall, baseline.overall, 'overall', failures)
-  for (const [family, want] of Object.entries(baseline.families)) {
-    compare(card.families[family] ?? {}, want, family, failures)
-  }
+for (const [name, want] of Object.entries(baseline.detectors)) {
+  test(`the ${name} detector matches its recorded baseline`, () => {
+    const detector = DETECTORS[name]
+    assert.ok(detector, `baseline names a detector that no longer exists: ${name}`)
 
-  assert.equal(
-    failures.length, 0,
-    `VoiceRx behaviour changed against test/voicerx/baseline-smoke.json:\n  ${
-      failures.join('\n  ')
-    }\n\nIf this is the change you meant to make, re-record it:\n`
-    + '  node scripts/voicerx-scorecard.mjs --smoke --write-baseline\n',
-  )
-})
+    const card = runScorecard(detector, SMOKE_CASES)
+    const failures = []
+    compare(card.overall, want.overall, 'overall', failures)
+    for (const [family, w] of Object.entries(want.families)) {
+      compare(card.families[family] ?? {}, w, family, failures)
+    }
+
+    assert.equal(
+      failures.length, 0,
+      `"${name}" changed against test/voicerx/baseline-smoke.json:\n  ${
+        failures.join('\n  ')
+      }\n\nIf this is the change you meant to make, re-record it:\n`
+      + '  node scripts/voicerx-scorecard.mjs --smoke --write-baseline\n',
+    )
+  })
+}
 
 /**
  * The corpus has to be able to fail, or the scorecard measures nothing.

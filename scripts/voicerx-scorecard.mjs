@@ -48,20 +48,26 @@ if (has('--json')) {
 
 if (has('--write-baseline')) {
   const here = dirname(fileURLToPath(import.meta.url))
-  // Two baselines, because they describe two different case sets and mixing
-  // them would silently compare a six-case number against a fifty-eight-case
-  // one. The smoke file is the one the committed test reads.
+  // Two files, because they describe two different case sets and mixing them
+  // would silently compare a six-case number against a fifty-eight-case one.
+  // The smoke file is the one the committed test reads.
   const file = has('--smoke') ? 'baseline-smoke.json' : 'baseline.json'
   const path = join(here, '..', 'test', 'voicerx', file)
-  // Per-case detail is deliberately excluded. The baseline is a regression
-  // guard, and pinning every band of every case would make it fire on noise
-  // in the last decimal place of a gain rather than on a change worth reading.
-  writeFileSync(path, `${JSON.stringify({
-    detector: detectorName,
-    overall: card.overall,
-    families: card.families,
-  }, null, 2)}\n`)
-  console.log(`\nwrote test/voicerx/${file}`)
+
+  // EVERY detector, not just the one that was printed. A baseline holding only
+  // the detector you happened to run would silently drop the other one's guard
+  // the first time someone regenerated it, which is exactly when both matter.
+  const detectors = {}
+  for (const [name, fn] of Object.entries(DETECTORS)) {
+    const c = name === detectorName ? card : runScorecard(fn, cases)
+    // Per-case detail is deliberately excluded. The baseline is a regression
+    // guard, and pinning every band of every case would make it fire on noise
+    // in the last decimal place of a gain rather than on a change worth reading.
+    detectors[name] = { overall: c.overall, families: c.families }
+  }
+
+  writeFileSync(path, `${JSON.stringify({ cases: cases.length, detectors }, null, 2)}\n`)
+  console.log(`\nwrote test/voicerx/${file} (${Object.keys(detectors).join(', ')})`)
 }
 
 function pct(v) {

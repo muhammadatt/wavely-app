@@ -15,6 +15,7 @@
 
 import { analyzeVoiceRx } from '../../src/audio/voicerx/analysis.js'
 import { buildAdvisories } from '../../src/audio/voicerx/suggestions.js'
+import { analyzeVoiceRxV2 } from '../../src/audio/voicerx/v2/index.js'
 
 /**
  * The shipping detector: edge-anchored per-region scanning, three correction
@@ -32,6 +33,23 @@ export function currentDetector(audio, sampleRate) {
   }
 }
 
+/**
+ * The replacement: masked by measured SNR, referenced to a robust local trend,
+ * features found continuously, corrections scaled by confidence. Not wired into
+ * the app — see src/audio/voicerx/v2/index.js.
+ */
+export function v2Detector(audio, sampleRate) {
+  const analysis = analyzeVoiceRxV2(audio, sampleRate)
+  if (!analysis.ok) return { ok: false, reason: analysis.reason, bands: [], advisories: [] }
+
+  return {
+    ok: true,
+    bands: analysis.bands.map(b => ({ freqHz: b.freqHz, gainDb: b.gainDb, q: b.q })),
+    advisories: analysis.advisories,
+  }
+}
+
 export const DETECTORS = {
   current: currentDetector,
+  v2: v2Detector,
 }

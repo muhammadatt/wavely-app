@@ -1,0 +1,232 @@
+/**
+ * VoiceRx v2 — measure, find, believe, correct.
+ *
+ * NOT WIRED INTO THE APP. This exists to be scored against the same corpus as
+ * the shipping detector (`npm run scorecard --detector=v2`). Nothing imports it
+ * outside the harness, and it stays that way until the numbers say it should
+ * not.
+ *
+ * The pipeline, and what each stage replaces:
+ *
+ *   measure    voiced envelope, its two halves, and the noise floor
+ *              -> the halves and the floor are both new; v1 measures neither
+ *   mask       per-frequency SNR
+ *              -> replaces DEAD_REGION_DB, no_energy and flatBaseline
+ *   trend      robust local quadratic
+ *              -> replaces the two-anchor chord and its curvature blind spot
+ *   features   extrema of the residual, continuously
+ *              -> replaces nine fixed regions, mergeBands, and the directional
+ *                 blind spots that make a hump at 1.5 kHz undetectable
+ *   confidence four independent doubts, multiplied
+ *              -> replaces the caps, and the spectral-hole guard
+ *   policy     gain = -height x confidence
+ *              -> replaces per-region SCALE, MAX_CUT_DB, MAX_BOOST_DB and the
+ *                 three-pass correction loop
+ *
+ * Sixty-three hand-set constants in two region tables become six here, and none
+ * of the six is per-frequency. That is the claim this has to earn on the corpus.
+ */
+
+import { REGION_SPAN_HZ, classifyVoice, regionAtHz } from '../regions.js'
+import { roleForRegion } from '../../eqBands.js'
+import { measure } from './envelope.js'
+import { toLogGrid, buildMask, robustTrend, GRID_OCTAVES } from './trend.js'
+import { findFeatures } from './features.js'
+import { scoreConfidence } from './confidence.js'
+
+/**
+ * Largest correction the detector will make on its own, before confidence.
+ *
+ * One number rather than nine, because there is no measured reason for the
+ * ceiling to differ by frequency and v1's per-region caps are demonstrably
+ * inconsistent with each other — the corpus shows recovery swinging from 0.26
+ * to 0.74 across defects identical apart from where they sit.
+ */
+const MAX_CORRECTION_DB = 8
+
+/**
+ * The same ceiling for boosts, which is lower for the reason set out beside
+ * IMPLAUSIBLE_DEFICIENCY_DB: a boost lifts the band's noise floor with it and a
+ * cut does not, so the two are not mirror images and should not share a limit.
+ */
+const MAX_BOOST_DB = 5
+
+/**
+ * How far past the reported range the analysis grid extends, in octaves.
+ *
+ * Enough that a feature at either end of the reported range still sits inside a
+ * full-width fit window. See where it is used.
+ */
+const ANALYSIS_MARGIN_OCTAVES = 0.8
+
+/**
+ * Confidence below which a feature is reported but not corrected.
+ *
+ * The line between "here is a fix" and "here is something you should look at".
+ * A notch lands below it because its plausibility term collapses; a feature at
+ * a bandwidth edge lands below it because its conditioning does. Both become
+ * advisories through the same arithmetic rather than through two guards written
+ * years apart.
+ */
+const MIN_CORRECTION_CONFIDENCE = 0.35
+
+/** Corrections below this are inaudible and only clutter the findings list. */
+const MIN_GAIN_DB = 0.5
+
+/**
+ * How much of a feature's measured height to ask for.
+ *
+ * A resonance raises the trend it is measured against — the fit down-weights it
+ * but cannot exclude it entirely — so the residual reads lower than the defect
+ * really is and correcting the residual alone under-corrects. This compensates,
+ * and unlike v1's per-region SCALE it is one number applied everywhere, so it
+ * can be calibrated against the corpus rather than guessed per band.
+ *
+ * It is deliberately NOT paired with an iteration loop. v1 under-corrects by
+ * 30% on purpose and then runs three passes to claw it back, which is two
+ * mechanisms fighting and which turned a 3.6 dB measurement error on the
+ * reference clip into a 7.9 dB correction. One measurement, one correction.
+ */
+const RECOVERY_GAIN = 1.25
+
+/** Q from a half-height width in octaves, matching v1's formula. */
+function qFromWidth(widthOctaves) {
+  if (!(widthOctaves > 0)) return 3.0
+  const q = 1 / (2 * Math.sinh((Math.LN2 / 2) * widthOctaves))
+  return Math.min(8, Math.max(0.8, q))
+}
+
+function round(v, places) {
+  const f = 10 ** places
+  return Math.round(v * f) / f
+}
+
+/**
+ * Analyse a mono selection.
+ *
+ * @param {Float32Array} audio
+ * @param {number} sampleRate
+ */
+export function analyzeVoiceRxV2(audio, sampleRate) {
+  const m = measure(audio, sampleRate)
+  if (!m || m.ok === false) {
+    return { ok: false, reason: m?.reason ?? 'no_voiced_frames', bands: [], advisories: [] }
+  }
+
+  // The grid runs WIDER than the range features are reported in. A trend fit
+  // spanning 1.5 octaves either side needs spectrum on both sides to be a fit
+  // rather than an extrapolation, and without the margin every feature within
+  // an octave of 60 Hz or 16 kHz is measured against a one-sided window and
+  // scored down for it — which showed up as planted defects at 180 and 300 Hz
+  // going undetected purely because of where the grid happened to stop.
+  const reportLoHz = REGION_SPAN_HZ[0]
+  const reportHiHz = Math.min(REGION_SPAN_HZ[1], sampleRate / 2 - 1)
+  const loHz = reportLoHz / Math.pow(2, ANALYSIS_MARGIN_OCTAVES)
+  const hiHz = Math.min(sampleRate / 2 - 1, reportHiHz * Math.pow(2, ANALYSIS_MARGIN_OCTAVES))
+
+  const grid = toLogGrid(m.freqsHz, m.envelopeDb, loHz, hiHz)
+  const noiseGrid = m.noiseDb ? toLogGrid(m.freqsHz, m.noiseDb, loHz, hiHz) : null
+  const { mask, snrDb, measured } = buildMask(grid.db, noiseGrid?.db, grid.n)
+
+  const { trend } = robustTrend(grid.db, mask, grid.n)
+  const residual = new Float64Array(grid.n)
+  for (let i = 0; i < grid.n; i++) residual[i] = grid.db[i] - trend[i]
+
+  // The halves get their own trends so each residual is measured against its
+  // own reference — see halfAgreement.
+  const halves = [m.firstHalfDb, m.secondHalfDb].map((db) => {
+    if (!db) return null
+    const g = toLogGrid(m.freqsHz, db, loHz, hiHz)
+    const t = robustTrend(g.db, mask, g.n).trend
+    const r = new Float64Array(g.n)
+    for (let i = 0; i < g.n; i++) r[i] = g.db[i] - t[i]
+    return r
+  })
+
+  const ctx = {
+    n: grid.n,
+    mask,
+    voicedFrames: m.voicedFrames,
+    firstResidual: halves[0],
+    secondResidual: halves[1],
+  }
+
+  const { voiceType, regions } = classifyVoice(m.medianF0Hz)
+
+  const features = findFeatures(grid.hz, residual, mask, grid.n)
+    .filter(f => f.centreHz >= reportLoHz && f.centreHz <= reportHiHz)
+    .map((f) => {
+    const { confidence, terms } = scoreConfidence(f, ctx)
+    const region = regionAtHz(regions, f.centreHz)
+    return {
+      ...f,
+      confidence: round(confidence, 3),
+      terms,
+      region,
+      roleId: roleForRegion(region)?.id ?? null,
+    }
+  })
+
+  const bands = []
+  const advisories = []
+
+  for (const f of features) {
+    const sign = f.kind === 'resonance' ? -1 : 1
+    const wanted = sign * f.heightDb * RECOVERY_GAIN * f.confidence
+    const ceiling = wanted > 0 ? MAX_BOOST_DB : MAX_CORRECTION_DB
+    const gainDb = Math.sign(wanted) * Math.min(Math.abs(wanted), ceiling)
+
+    if (f.confidence < MIN_CORRECTION_CONFIDENCE || Math.abs(gainDb) < MIN_GAIN_DB) {
+      // Only worth telling the user about if it is big enough to hear. A
+      // low-confidence 2 dB wobble is not a finding, it is the reason the
+      // threshold exists.
+      if (f.heightDb >= 6) {
+        advisories.push({
+          id: `adv_${f.kind}_${Math.round(f.centreHz)}`,
+          kind: f.kind,
+          centreHz: round(f.centreHz, 1),
+          depthDb: round(f.heightDb, 2),
+          confidence: f.confidence,
+          reason: dominantDoubt(f.terms),
+          lowHz: round(f.lowHz, 1),
+          highHz: round(f.highHz, 1),
+        })
+      }
+      continue
+    }
+
+    bands.push({
+      region: f.region,
+      roleId: f.roleId,
+      freqHz: round(f.centreHz, 1),
+      gainDb: round(gainDb, 2),
+      q: round(qFromWidth(f.widthOctaves), 2),
+      widthOctaves: round(f.widthOctaves, 3),
+      confidence: f.confidence,
+    })
+  }
+
+  return {
+    ok: true,
+    voiceType,
+    regions,
+    medianF0Hz: round(m.medianF0Hz, 2),
+    voicedFrames: m.voicedFrames,
+    freqsHz: grid.hz,
+    envelopeDb: grid.db,
+    trendDb: trend,
+    residualDb: residual,
+    mask,
+    snrDb,
+    noiseFloorMeasured: measured,
+    features,
+    bands: bands.sort((a, b) => a.freqHz - b.freqHz),
+    advisories,
+    gridOctaves: GRID_OCTAVES,
+  }
+}
+
+/** Which term dragged confidence down, so the advisory can say why. */
+function dominantDoubt(terms) {
+  return Object.entries(terms).sort((a, b) => a[1] - b[1])[0][0]
+}

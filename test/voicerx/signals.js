@@ -99,15 +99,28 @@ const FORMANT_TILT_DB_PER_OCT = -4
  * phonetics lab has a 60 Hz F1; the same vowel inside running speech is wider
  * and shorter, which is what a narrator actually produces and what makes a
  * long-term average smooth.
+ *
+ * F3 IS THE SAME TRAP AS F4, ONE FORMANT DOWN. Textbook F3 values for these
+ * vowels sit between 2240 and 2600 Hz — six of seven inside a fifth of an
+ * octave — and averaged over a passage that is a persistent 3.3 dB peak at
+ * 2.42 kHz. The v1 detector never noticed, so the corpus looked clean; the v2
+ * detector found it immediately, with high confidence and near-perfect
+ * split-half stability, because it is really there. A corpus is only as clean
+ * as the most sensitive detector that has looked at it, and grading a better
+ * detector on this one would have marked it down for being right.
+ *
+ * So F3 is spread across the range male F3 actually occupies, 2200-3100 Hz, and
+ * damped a little harder. The vowels stay recognisable; the long-term average
+ * stops having a formant baked into it.
  */
 const VOWELS = [
-  { f: [730, 1090, 2440], b: [90, 110, 140] }, // "ah"
-  { f: [530, 1840, 2480], b: [90, 110, 140] }, // "eh"
-  { f: [270, 2290, 3010], b: [90, 110, 140] }, // "ee"
-  { f: [570, 840, 2410], b: [90, 110, 140] },  // "oh"
-  { f: [300, 870, 2240], b: [90, 110, 140] },  // "oo"
-  { f: [620, 1300, 2500], b: [90, 110, 140] }, // "uh" — fills the F2 gap
-  { f: [400, 1600, 2600], b: [90, 110, 140] }, // "ih" — fills the F2 gap
+  { f: [730, 1090, 2300], b: [90, 110, 170] }, // "ah"
+  { f: [530, 1840, 2750], b: [90, 110, 170] }, // "eh"
+  { f: [270, 2290, 3080], b: [90, 110, 170] }, // "ee"
+  { f: [570, 840, 2480], b: [90, 110, 170] },  // "oh"
+  { f: [300, 870, 2210], b: [90, 110, 170] },  // "oo"
+  { f: [620, 1300, 2920], b: [90, 110, 170] }, // "uh" — fills the F2 gap
+  { f: [400, 1600, 2620], b: [90, 110, 170] }, // "ih" — fills the F2 gap
 ].map((v, i) => ({
   // Deterministic per-vowel jitter, so the higher series smears in the mean
   // instead of stacking into a fixed peak.
