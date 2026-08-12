@@ -1,0 +1,508 @@
+{
+  "cases": 58,
+  "detectors": {
+    "current": {
+      "overall": {
+        "cases": 58,
+        "plantedDefects": 46,
+        "detected": 31,
+        "detectionRate": 0.674,
+        "missed": [
+          "180Hz +6dB",
+          "180Hz +12dB",
+          "1500Hz +6dB",
+          "1500Hz +12dB",
+          "2000Hz +6dB",
+          "2000Hz +12dB",
+          "11000Hz +6dB",
+          "11000Hz +12dB",
+          "200Hz -6dB",
+          "400Hz -6dB",
+          "900Hz -6dB",
+          "2500Hz -6dB",
+          "5000Hz -6dB",
+          "220Hz -7dB",
+          "8000Hz -6dB"
+        ],
+        "recovery": {
+          "median": 0.5,
+          "p10": 0.161,
+          "p90": 0.744,
+          "spread": 0.583
+        },
+        "freqErrorOctaves": {
+          "median": 0.021,
+          "max": 0.2
+        },
+        "spuriousBands": 27,
+        "spuriousGainDb": 90.08,
+        "noCorrectionExpected": 16,
+        "noCorrectionButGotBands": 5,
+        "analysisFailures": 0
+      },
+      "families": {
+        "clean": {
+          "cases": 5,
+          "plantedDefects": 0,
+          "detected": 0,
+          "detectionRate": null,
+          "missed": [],
+          "recovery": {
+            "median": null,
+            "p10": null,
+            "p90": null,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": null,
+            "max": null
+          },
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
+          "noCorrectionExpected": 5,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "resonance": {
+          "cases": 22,
+          "plantedDefects": 22,
+          "detected": 14,
+          "detectionRate": 0.636,
+          "missed": [
+            "180Hz +6dB",
+            "180Hz +12dB",
+            "1500Hz +6dB",
+            "1500Hz +12dB",
+            "2000Hz +6dB",
+            "2000Hz +12dB",
+            "11000Hz +6dB",
+            "11000Hz +12dB"
+          ],
+          "recovery": {
+            "median": 0.517,
+            "p10": 0.253,
+            "p90": 0.805,
+            "spread": 0.552
+          },
+          "freqErrorOctaves": {
+            "median": 0.024,
+            "max": 0.2
+          },
+          "spuriousBands": 5,
+          "spuriousGainDb": 16.27,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "resonance-width": {
+          "cases": 4,
+          "plantedDefects": 4,
+          "detected": 4,
+          "detectionRate": 1,
+          "missed": [],
+          "recovery": {
+            "median": 0.212,
+            "p10": 0.091,
+            "p90": 0.436,
+            "spread": 0.345
+          },
+          "freqErrorOctaves": {
+            "median": 0.033,
+            "max": 0.161
+          },
+          "spuriousBands": 3,
+          "spuriousGainDb": 9.7,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "deficiency": {
+          "cases": 7,
+          "plantedDefects": 7,
+          "detected": 2,
+          "detectionRate": 0.286,
+          "missed": [
+            "200Hz -6dB",
+            "400Hz -6dB",
+            "900Hz -6dB",
+            "2500Hz -6dB",
+            "5000Hz -6dB"
+          ],
+          "recovery": {
+            "median": 0.359,
+            "p10": 0.288,
+            "p90": 0.43,
+            "spread": 0.142
+          },
+          "freqErrorOctaves": {
+            "median": 0.013,
+            "max": 0.026
+          },
+          "spuriousBands": 2,
+          "spuriousGainDb": 4.98,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "notch": {
+          "cases": 6,
+          "plantedDefects": 0,
+          "detected": 0,
+          "detectionRate": null,
+          "missed": [],
+          "recovery": {
+            "median": null,
+            "p10": null,
+            "p90": null,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": null,
+            "max": null
+          },
+          "spuriousBands": 5,
+          "spuriousGainDb": 21.28,
+          "noCorrectionExpected": 6,
+          "noCorrectionButGotBands": 3,
+          "analysisFailures": 0
+        },
+        "bandwidth": {
+          "cases": 5,
+          "plantedDefects": 0,
+          "detected": 0,
+          "detectionRate": null,
+          "missed": [],
+          "recovery": {
+            "median": null,
+            "p10": null,
+            "p90": null,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": null,
+            "max": null
+          },
+          "spuriousBands": 3,
+          "spuriousGainDb": 10.67,
+          "noCorrectionExpected": 5,
+          "noCorrectionButGotBands": 2,
+          "analysisFailures": 0
+        },
+        "combined": {
+          "cases": 3,
+          "plantedDefects": 7,
+          "detected": 5,
+          "detectionRate": 0.714,
+          "missed": [
+            "220Hz -7dB",
+            "8000Hz -6dB"
+          ],
+          "recovery": {
+            "median": 0.541,
+            "p10": 0.263,
+            "p90": 0.665,
+            "spread": 0.402
+          },
+          "freqErrorOctaves": {
+            "median": 0.029,
+            "max": 0.106
+          },
+          "spuriousBands": 3,
+          "spuriousGainDb": 8.26,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "noise": {
+          "cases": 3,
+          "plantedDefects": 3,
+          "detected": 3,
+          "detectionRate": 1,
+          "missed": [],
+          "recovery": {
+            "median": 0.5,
+            "p10": 0.5,
+            "p90": 0.5,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": 0.007,
+            "max": 0.007
+          },
+          "spuriousBands": 3,
+          "spuriousGainDb": 9.19,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "duration": {
+          "cases": 3,
+          "plantedDefects": 3,
+          "detected": 3,
+          "detectionRate": 1,
+          "missed": [],
+          "recovery": {
+            "median": 0.5,
+            "p10": 0.5,
+            "p90": 0.5,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": 0.007,
+            "max": 0.024
+          },
+          "spuriousBands": 3,
+          "spuriousGainDb": 9.73,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        }
+      }
+    },
+    "v2": {
+      "overall": {
+        "cases": 58,
+        "plantedDefects": 46,
+        "detected": 38,
+        "detectionRate": 0.826,
+        "missed": [
+          "180Hz +6dB",
+          "180Hz +12dB",
+          "300Hz +6dB",
+          "200Hz -6dB",
+          "9000Hz -6dB",
+          "220Hz -7dB",
+          "320Hz +7dB",
+          "900Hz +10dB"
+        ],
+        "recovery": {
+          "median": 0.667,
+          "p10": 0.452,
+          "p90": 0.867,
+          "spread": 0.415
+        },
+        "freqErrorOctaves": {
+          "median": 0.015,
+          "max": 0.125
+        },
+        "spuriousBands": 4,
+        "spuriousGainDb": 7.66,
+        "noCorrectionExpected": 16,
+        "noCorrectionButGotBands": 2,
+        "analysisFailures": 0
+      },
+      "families": {
+        "clean": {
+          "cases": 5,
+          "plantedDefects": 0,
+          "detected": 0,
+          "detectionRate": null,
+          "missed": [],
+          "recovery": {
+            "median": null,
+            "p10": null,
+            "p90": null,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": null,
+            "max": null
+          },
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
+          "noCorrectionExpected": 5,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "resonance": {
+          "cases": 22,
+          "plantedDefects": 22,
+          "detected": 19,
+          "detectionRate": 0.864,
+          "missed": [
+            "180Hz +6dB",
+            "180Hz +12dB",
+            "300Hz +6dB"
+          ],
+          "recovery": {
+            "median": 0.667,
+            "p10": 0.506,
+            "p90": 0.904,
+            "spread": 0.398
+          },
+          "freqErrorOctaves": {
+            "median": 0.017,
+            "max": 0.125
+          },
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "resonance-width": {
+          "cases": 4,
+          "plantedDefects": 4,
+          "detected": 4,
+          "detectionRate": 1,
+          "missed": [],
+          "recovery": {
+            "median": 0.651,
+            "p10": 0.38,
+            "p90": 0.708,
+            "spread": 0.328
+          },
+          "freqErrorOctaves": {
+            "median": 0.008,
+            "max": 0.065
+          },
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "deficiency": {
+          "cases": 7,
+          "plantedDefects": 7,
+          "detected": 5,
+          "detectionRate": 0.714,
+          "missed": [
+            "200Hz -6dB",
+            "9000Hz -6dB"
+          ],
+          "recovery": {
+            "median": 0.673,
+            "p10": 0.48,
+            "p90": 0.77,
+            "spread": 0.29
+          },
+          "freqErrorOctaves": {
+            "median": 0.022,
+            "max": 0.04
+          },
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "notch": {
+          "cases": 6,
+          "plantedDefects": 0,
+          "detected": 0,
+          "detectionRate": null,
+          "missed": [],
+          "recovery": {
+            "median": null,
+            "p10": null,
+            "p90": null,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": null,
+            "max": null
+          },
+          "spuriousBands": 2,
+          "spuriousGainDb": 3.96,
+          "noCorrectionExpected": 6,
+          "noCorrectionButGotBands": 2,
+          "analysisFailures": 0
+        },
+        "bandwidth": {
+          "cases": 5,
+          "plantedDefects": 0,
+          "detected": 0,
+          "detectionRate": null,
+          "missed": [],
+          "recovery": {
+            "median": null,
+            "p10": null,
+            "p90": null,
+            "spread": 0
+          },
+          "freqErrorOctaves": {
+            "median": null,
+            "max": null
+          },
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
+          "noCorrectionExpected": 5,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "combined": {
+          "cases": 3,
+          "plantedDefects": 7,
+          "detected": 5,
+          "detectionRate": 0.714,
+          "missed": [
+            "220Hz -7dB",
+            "320Hz +7dB"
+          ],
+          "recovery": {
+            "median": 0.611,
+            "p10": 0.53,
+            "p90": 0.927,
+            "spread": 0.397
+          },
+          "freqErrorOctaves": {
+            "median": 0.015,
+            "max": 0.055
+          },
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "noise": {
+          "cases": 3,
+          "plantedDefects": 3,
+          "detected": 3,
+          "detectionRate": 1,
+          "missed": [],
+          "recovery": {
+            "median": 0.696,
+            "p10": 0.675,
+            "p90": 0.701,
+            "spread": 0.026
+          },
+          "freqErrorOctaves": {
+            "median": 0.013,
+            "max": 0.015
+          },
+          "spuriousBands": 1,
+          "spuriousGainDb": 1.96,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        },
+        "duration": {
+          "cases": 3,
+          "plantedDefects": 3,
+          "detected": 2,
+          "detectionRate": 0.667,
+          "missed": [
+            "900Hz +10dB"
+          ],
+          "recovery": {
+            "median": 0.572,
+            "p10": 0.419,
+            "p90": 0.724,
+            "spread": 0.305
+          },
+          "freqErrorOctaves": {
+            "median": 0.012,
+            "max": 0.016
+          },
+          "spuriousBands": 1,
+          "spuriousGainDb": 1.74,
+          "noCorrectionExpected": 0,
+          "noCorrectionButGotBands": 0,
+          "analysisFailures": 0
+        }
+      }
+    }
+  }
+}
