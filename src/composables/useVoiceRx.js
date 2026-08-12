@@ -8,7 +8,7 @@ import {
   roleFreqRange, clamp,
 } from '../audio/eqBands.js'
 import { analyzeVoiceRx, MIN_VOICED_FRAMES, HOP_SIZE, FRAME_SIZE } from '../audio/voicerx/analysis.js'
-import { buildSuggestions, suggestionToBand } from '../audio/voicerx/suggestions.js'
+import { buildSuggestions, buildAdvisories, suggestionToBand } from '../audio/voicerx/suggestions.js'
 import { MALE_REGIONS, regionAtHz } from '../audio/voicerx/regions.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { receiveBands } from './useManualEq.js'
@@ -126,6 +126,17 @@ export function useVoiceRx() {
    */
   const suggestions = computed(() =>
     (hasAnalysis.value ? buildSuggestions(analysis.value) : []))
+
+  /**
+   * What the analysis found but will not correct — see buildAdvisories.
+   *
+   * Derived from the same frozen analysis as the suggestions, and separate from
+   * them because it is not a correction: there is no band, no gain and nothing
+   * to apply, so it cannot travel through suggestionRows without becoming a row
+   * with a dead button on it.
+   */
+  const advisories = computed(() =>
+    (hasAnalysis.value ? buildAdvisories(analysis.value) : []))
 
   /**
    * Each suggestion paired with the band carrying it, if there is one.
@@ -571,7 +582,7 @@ export function useVoiceRx() {
     ...api,
     analysis, analyzing, analysisError, isStale, hasAnalysis,
     introDismissed, dismissIntro: () => { introDismissed.value = true },
-    suggestions, suggestionRows,
+    suggestions, suggestionRows, advisories,
     regions, paletteRoles,
     analyze, applyAllSuggestions, applySuggestion,
     toggleRoleSolo, isRoleSoloed,

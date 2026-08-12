@@ -23,7 +23,7 @@
  * touch. Nothing in this module reads the band pool.
  */
 
-import { createBand, getRole } from '../eqBands.js'
+import { createBand, getRole, roleForRegion } from '../eqBands.js'
 
 /**
  * Plain-language symptom per region.
@@ -86,6 +86,77 @@ export function buildSuggestions(analysis) {
       symptom: `${symptomFor(band.region)}, around ${formatHz(band.freqHz)}`,
     }
   })
+}
+
+/**
+ * Notes about the recording that are not corrections.
+ *
+ * A suggestion says "this region is wrong and here is the fix". An advisory
+ * says "this part of the recording cannot be read, and here is why nothing was
+ * offered for it" — which is a different sentence with a different ending, and
+ * the reason it needs saying at all.
+ *
+ * WHY SILENCE IS THE WRONG ANSWER. Without this, a file with a notch in it
+ * shows an emptier findings list than one without, and the emptier list reads
+ * as the better diagnosis. The user hears an obvious problem around 5 kHz,
+ * VoiceRx says nothing about it, and the tool looks like it missed the one
+ * thing they could hear. Saying "there is a hole here and it is why Presence
+ * and Sibilance were left alone" turns the same silence into a finding.
+ *
+ * WHY NO CORRECTION IS OFFERED. A hole is a deficiency, and the arithmetic for
+ * filling one is trivial — but a 17 dB corrective boost is the single most
+ * destructive move in this tool's vocabulary. Whatever removed those
+ * frequencies removed the noise floor's contribution too; boosting the band
+ * back raises hiss, room tone and codec artefacts by the full amount and
+ * returns no voice, because the voice is not in there to be recovered. This is
+ * the same judgement DEAD_REGION_DB already makes about brick-walled files, at
+ * a different depth. Report it, name it, and let the user decide whether to go
+ * back to the source.
+ *
+ * @param {object} analysis result of analyzeVoiceRx
+ * @returns {Array<{id:string, title:string, detail:string, lowHz:number, highHz:number}>}
+ */
+export function buildAdvisories(analysis) {
+  if (!analysis?.ok || !analysis.holes?.length) return []
+
+  return analysis.holes.map((hole, i) => {
+    // Which corrections this hole cost the user. Named by their role labels,
+    // because that is what the user sees on the control surface — telling
+    // someone that "upper_presence was suppressed" names a thing they have
+    // never been shown.
+    const suppressed = (analysis.regionResults ?? [])
+      .filter(r => r.skipReason === 'spectral_hole')
+      .map(r => getRole(roleForRegion(r.name)?.id)?.label)
+      .filter(Boolean)
+
+    const where = formatHz(hole.centerHz)
+    const depth = `${Math.round(hole.depthDb)} dB`
+
+    let detail = `Something has already taken these frequencies out — an EQ cut, `
+      + `or the device this was recorded on. VoiceRx has not tried to put them `
+      + `back: boosting a band this empty raises the room and the hiss by the `
+      + `same ${depth} and returns no voice, because the voice is no longer in there.`
+
+    if (suppressed.length) {
+      detail += ` ${listOf(suppressed)} ${suppressed.length > 1 ? 'sit' : 'sits'} `
+        + `across it and cannot be measured honestly while it is there, so `
+        + `${suppressed.length > 1 ? 'they have' : 'it has'} been left alone.`
+    }
+
+    return {
+      id: `adv_hole_${i}`,
+      title: `A ${depth} notch at ${where}`,
+      detail,
+      lowHz: hole.lowHz,
+      highHz: hole.highHz,
+    }
+  })
+}
+
+/** "A", "A and B", "A, B and C" — the list reads as a sentence, not as data. */
+function listOf(names) {
+  if (names.length === 1) return names[0]
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
 
 /**

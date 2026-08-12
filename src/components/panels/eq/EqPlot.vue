@@ -430,6 +430,7 @@ function draw() {
   drawGrid(ctx, w, h)
   // Behind everything: backdrops marking where you are listening and what
   // frequency the pointer is on, not marks competing with the curve.
+  drawHoles(ctx, h)
   drawSolo(ctx, h)
   drawCursorHz(ctx, w, h)
   if (props.showAnalyzer && props.spectrumFn) drawAnalyzer(ctx, w, h)
@@ -440,6 +441,60 @@ function draw() {
   // Markers last: they are the point of the VoiceRx display and must not be
   // crossed out by the EQ curve.
   if (fit) drawMarkers(ctx, h, fit.yEnv)
+}
+
+/**
+ * Where the recording has a hole in it.
+ *
+ * Drawn as a backdrop rather than as a mark, and drawn first, because it is not
+ * a finding sitting at a frequency — it is a stretch of the axis over which the
+ * envelope is not reporting the voice. Everything else on the plot is painted
+ * over it, which is the correct reading: the curve still crosses this span, it
+ * just cannot be trusted there.
+ *
+ * The advisory in the faceplate says the same thing in words. This is what
+ * those words point at, and without it "a notch at 5.1 kHz" asks the user to
+ * find a shape on the plot with no help doing it — while the shape in question
+ * is the one part of the curve that looks like a dramatic finding and is
+ * instead a hole where a finding cannot be made.
+ *
+ * Hatched, not tinted. A flat wash over a fifth of the axis reads as a
+ * highlight — as though this span were selected or being emphasised — and the
+ * plot already spends flat washes on solo and on the pointer. Diagonals read as
+ * "excluded" and cannot be mistaken for either.
+ */
+function drawHoles(ctx, h) {
+  const holes = props.analysis?.holes
+  if (!holes?.length) return
+
+  const top = 0
+  const bottom = h - RIBBON_H
+
+  for (const hole of holes) {
+    const x1 = xFor(Math.max(hole.lowHz, fMin.value))
+    const x2 = xFor(Math.min(hole.highHz, fMax.value))
+    if (!(x2 > x1)) continue
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x1, top, x2 - x1, bottom - top)
+    ctx.clip()
+
+    ctx.fillStyle = 'rgba(255,190,120,.045)'
+    ctx.fillRect(x1, top, x2 - x1, bottom - top)
+
+    ctx.strokeStyle = 'rgba(255,190,120,.11)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    // Offset by the band's own height so the diagonals meet the edges cleanly
+    // whatever the plot's aspect ratio.
+    for (let x = x1 - (bottom - top); x < x2; x += 7) {
+      ctx.moveTo(x, bottom)
+      ctx.lineTo(x + (bottom - top), top)
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
 }
 
 /**

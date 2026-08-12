@@ -26,7 +26,8 @@ import {
   classifyVoice, MALE_REGIONS, FEMALE_REGIONS, SCAN_LOW, SCAN_HIGH, MAX_CUT_DB,
   REGION_ORDER, regionAtHz,
 } from '../../src/audio/voicerx/regions.js'
-import { buildSuggestions } from '../../src/audio/voicerx/suggestions.js'
+import { buildSuggestions, buildAdvisories } from '../../src/audio/voicerx/suggestions.js'
+import { detectSpectralHoles, holeCoverage } from '../../src/audio/voicerx/holes.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 
 const SR = 44100
@@ -64,6 +65,7 @@ function noise(n, seed = 0x9e3779b9) {
  */
 function synthVoice({
   f0 = 120, seconds = 3, resonanceHz = null, resonanceDb = 12, bandwidthHz = 5000,
+  notchHz = null, notchDb = 18, notchQ = 1.0,
 } = {}) {
   const n = Math.round(SR * seconds)
   const sig = new Float32Array(n)
@@ -87,6 +89,16 @@ function synthVoice({
     const res = new BiquadCascade(1, 1)
     res.setSection(0, peaking(SR, resonanceHz, 3.0, resonanceDb, 'q'))
     res.process(sig, sig, n, 0)
+  }
+
+  // A hole: what a previously applied surgical EQ cut leaves in a file. Broad
+  // and deep rather than narrow and deep, because that is the shape that
+  // corrupts a context window — a notch narrower than the 0.4-octave window
+  // moves its median hardly at all.
+  if (notchHz) {
+    const cut = new BiquadCascade(1, 1)
+    cut.setSection(0, peaking(SR, notchHz, notchQ, -notchDb, 'q'))
+    cut.process(sig, sig, n, 0)
   }
   return sig
 }
@@ -451,6 +463,177 @@ test('a dead band is not mistaken for a deficiency', () => {
   // below the peak but has real harmonic content.
   const brilliance = result.regionResults.find(r => r.name === 'brilliance')
   assert.notEqual(brilliance.skipReason, 'no_energy', 'real content was suppressed')
+})
+
+// ── Spectral holes ──────────────────────────────────────────────────────────
+
+/** A log-spaced envelope, for the hole detector's own unit tests. */
+function envelopeFrom(fn, { bins = 2048, sr = SR } = {}) {
+  const freqs = new Float64Array(bins)
+  const env = new Float64Array(bins)
+  for (let k = 0; k < bins; k++) {
+    freqs[k] = (k * sr) / (2 * (bins - 1))
+    env[k] = fn(Math.max(freqs[k], 1))
+  }
+  return { freqs, env }
+}
+
+test('a steep slope is not a hole, at any steepness', () => {
+  // The property the whole detector rests on. A voice envelope falls tens of dB
+  // across this range, and every smoothing-based reference — running median,
+  // high percentile — is biased upward on a slope in proportion to the slope,
+  // so it reports a deficit down the entire descent. Closing is exactly zero on
+  // a monotone signal regardless of gradient.
+  for (const perOctave of [3, 12, 40]) {
+    const { freqs, env } = envelopeFrom(f => -perOctave * Math.log2(f / 100))
+    const holes = detectSpectralHoles(freqs, env, -Infinity, 60, 16000)
+    assert.deepEqual(holes, [], `a ${perOctave} dB/octave slope was read as a hole`)
+  }
+})
+
+test('a planted notch is found, with its floor and its shoulders', () => {
+  const { freqs, env } = envelopeFrom((f) => {
+    const octavesFromNotch = Math.log2(f / 5000)
+    return -20 * Math.exp(-(octavesFromNotch ** 2) / (2 * 0.25 ** 2))
+  })
+  const holes = detectSpectralHoles(freqs, env, -Infinity, 60, 16000)
+
+  assert.equal(holes.length, 1)
+  const [hole] = holes
+  assert.ok(Math.abs(hole.centerHz - 5000) < 250, `floor at ${hole.centerHz}`)
+  assert.ok(Math.abs(hole.depthDb - 20) < 1.5, `depth ${hole.depthDb}`)
+  // Shoulder to shoulder, so the span reaches out to where the envelope has
+  // recovered — not the half-depth points, which would leave the notch's own
+  // flanks inside the neighbouring regions' context windows.
+  assert.ok(hole.lowHz < 3600 && hole.highHz > 6900, `span ${hole.lowHz}-${hole.highHz}`)
+})
+
+test('a brick wall is an edge, not a hole', () => {
+  // A lowpassed file falls off a cliff and never comes back. Taking the maximum
+  // across the whole window rather than the lower of the two shoulders reads
+  // that fall as a vast deficit and plants a hole on the cutoff.
+  const { freqs, env } = envelopeFrom(f => (f < 10000 ? 0 : -80))
+  assert.deepEqual(detectSpectralHoles(freqs, env, -60, 60, 16000), [])
+})
+
+test('a shallow ripple between formants is not a hole', () => {
+  // +/-2.5 dB, so 5 dB peak to trough — under MIN_DEPTH_DB. This is the natural
+  // corrugation of a formant envelope, and reading it as a series of holes
+  // would mask out most of the spectrum on every file.
+  const { freqs, env } = envelopeFrom(f => 2.5 * Math.sin(2 * Math.PI * Math.log2(f)))
+  assert.deepEqual(detectSpectralHoles(freqs, env, -Infinity, 60, 16000), [])
+})
+
+test('coverage is measured in octaves, not hertz', () => {
+  const holes = [{ centerHz: 4500, depthDb: 18, lowHz: 4000, highHz: 5000 }]
+  // 4-5 kHz is a third of an octave inside 2.5-5 kHz, which is one octave wide.
+  assert.ok(Math.abs(holeCoverage(holes, 2500, 5000) - Math.log2(5 / 4)) < 1e-9)
+  assert.equal(holeCoverage(holes, 200, 400), 0)
+  assert.equal(holeCoverage([], 2500, 5000), 0)
+})
+
+test('an anchor inside a hole is replaced, not used', () => {
+  // Flat spectrum with a notch sitting exactly in the region's upper context
+  // window. Un-repaired, the anchor drops into the notch and the chord tips,
+  // which is the whole bug: an ordinary flat region reports a large hump.
+  const { freqs, env } = envelopeFrom(f => (f > 5000 && f < 6600 ? -48 : -30))
+  const hole = [{ centerHz: 5700, depthDb: 18, lowHz: 5000, highHz: 6600 }]
+
+  const naive = estimateBaseline(freqs, env, 2500, 5000, -Infinity, [])
+  const naiveDev = detectAnomaly(naive.scanFreqs, naive.scanEnv, naive.baseline, 2.5, 'hump')
+  assert.ok(naiveDev.detected, 'the bug is not reproduced, so the fix proves nothing')
+
+  const repaired = estimateBaseline(freqs, env, 2500, 5000, -Infinity, hole)
+  const dev = detectAnomaly(
+    repaired.scanFreqs, repaired.scanEnv, repaired.baseline, 2.5, 'hump', repaired.usable,
+  )
+  assert.equal(dev.detected, false, 'a flat region still read as a hump')
+  assert.ok(Math.abs(dev.peakDeviationDb) < 0.5)
+})
+
+test('a context window that needs no repair is not widened', () => {
+  // sub_bass's low context holds two bins at 48 kHz and 4096-point transforms.
+  // A rule that widened whenever a window held fewer than three would reach
+  // down into DC rumble on every file analysed, to fix a problem none of them
+  // have — so widening happens only once exclusions have removed something.
+  const freqs = new Float64Array(64)
+  const env = new Float64Array(64)
+  for (let k = 0; k < 64; k++) {
+    freqs[k] = k * 11.72
+    env[k] = freqs[k] < 45 ? -60 : -30
+  }
+  const base = estimateBaseline(freqs, env, 60, 130, -Infinity, [])
+  assert.ok(base, 'a two-bin context window was rejected')
+  // Anchored on the two clean bins at 46.9 and 58.6 Hz, not on the -60 dB
+  // material below 45 Hz that widening would have pulled in.
+  assert.ok(Math.abs(base.baseline[0] - -30) < 0.01, `anchored at ${base.baseline[0]}`)
+})
+
+test('a notch does not produce phantom cuts on either side of itself', () => {
+  // The failure this whole mechanism exists for. One hole between two scan
+  // regions corrupts BOTH — the region below anchors its top in the notch, the
+  // region above anchors its bottom in the same notch — so a single 18 dB dip
+  // at 5 kHz produces a matched pair of large, confident cuts in upper_presence
+  // and brilliance, neither of which needs cutting.
+  const clean = analyzeVoiceRx(synthVoice({ f0: 120, seconds: 3, bandwidthHz: 12000 }), SR)
+  const notched = analyzeVoiceRx(
+    synthVoice({ f0: 120, seconds: 3, bandwidthHz: 12000, notchHz: 5000, notchDb: 18 }), SR,
+  )
+
+  assert.equal(notched.ok, true)
+  assert.equal(notched.holes.length, 1, 'the notch was not found')
+  assert.ok(Math.abs(notched.holes[0].centerHz - 5000) < 600)
+
+  // Neither region either side of the hole may emit a correction.
+  for (const name of ['upper_presence', 'brilliance']) {
+    const region = notched.regionResults.find(r => r.name === name)
+    assert.equal(region.skipReason, 'spectral_hole', `${name} was assessed across a notch`)
+    assert.equal(region.detected, false)
+    assert.ok(
+      !notched.bands.some(b => b.region.includes(name)),
+      `${name} produced a band despite sitting across a hole`,
+    )
+  }
+
+  // And the guard is specific to the hole: the clean control is untouched by
+  // any of this, so nothing here is suppressing detections in general.
+  assert.deepEqual(clean.holes, [])
+  for (const name of ['upper_presence', 'brilliance']) {
+    assert.notEqual(
+      clean.regionResults.find(r => r.name === name).skipReason,
+      'spectral_hole',
+    )
+  }
+})
+
+test('regions away from a notch are unaffected by it', () => {
+  const planted = synthVoice({
+    f0: 120, seconds: 3, bandwidthHz: 12000, resonanceHz: 700, resonanceDb: 12,
+  })
+  const result = analyzeVoiceRx(planted, SR)
+  const boxy = result.regionResults.find(r => r.name === 'boxy_honky')
+  assert.equal(boxy.detected, true, 'a planted resonance far from any hole went unfound')
+  assert.ok(boxy.gainDb < 0)
+})
+
+test('a hole is reported to the user, and no correction is offered for it', () => {
+  const notched = analyzeVoiceRx(
+    synthVoice({ f0: 120, seconds: 3, bandwidthHz: 12000, notchHz: 5000, notchDb: 18 }), SR,
+  )
+  const advisories = buildAdvisories(notched)
+  assert.equal(advisories.length, 1)
+
+  const [adv] = advisories
+  assert.match(adv.title, /notch/i)
+  assert.match(adv.title, /5\.\d kHz/, `title did not name the frequency: ${adv.title}`)
+  // It has to name what it cost the user, in the words on the control surface.
+  assert.match(adv.detail, /Presence/)
+  assert.match(adv.detail, /Sibilance/)
+
+  // An advisory is not a suggestion: nothing in the correction list refers to
+  // it, because there is no band behind it and no button that could apply one.
+  assert.ok(!buildSuggestions(notched).some(s => /notch/i.test(s.symptom)))
+  assert.deepEqual(buildAdvisories({ ok: true, holes: [], regionResults: [] }), [])
 })
 
 test('a female-pitched voice moves the scan ranges', () => {
