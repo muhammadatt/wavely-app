@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test \"test/**/*.test.js\"",
-    "scorecard": "node scripts/voicerx-scorecard.mjs"
+    "scorecard": "node scripts/voicerx-scorecard.mjs",
+    "scorecard:real": "node scripts/voicerx-real.mjs"
   },
   "dependencies": {
     "uuid": "^13.0.0",
