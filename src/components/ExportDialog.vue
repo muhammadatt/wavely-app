@@ -246,9 +246,17 @@ function complianceOf(doc) {
               @blur="commitRename"
             />
             <div v-else class="flex items-center gap-[6px] min-w-0">
+              <!-- Clicks on the name are stopped, not just the double-click:
+                   a double-click delivers two click events first, and the row's
+                   handler is a toggle, so renaming from here flipped the file's
+                   include state on and back off with a visible flash. The name
+                   is the rename target rather than a second hit area for the
+                   checkbox — the meta line, the status and the rest of the row
+                   still toggle. -->
               <span
-                class="text-[12.5px] font-bold truncate text-[#eaf6f8]"
-                :title="doc.name"
+                class="text-[12.5px] font-bold truncate text-[#eaf6f8] cursor-text"
+                :title="`${doc.name} — double-click to rename`"
+                @click.stop
                 @dblclick.stop="startRename(doc)"
               >{{ doc.name }}</span>
               <!-- Double-click works on the name itself; the pencil is there so

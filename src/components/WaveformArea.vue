@@ -336,8 +336,12 @@ function restoreView(docId) {
 
 // Documents that have been closed would otherwise sit here forever holding a
 // view for an id that can never come back.
+//
+// The scan is unconditional. Comparing sizes first looked like a cheap way to
+// skip it, but it only catches a net shrink: close one document and open
+// another and the count is unchanged, so the closed one's entry survived every
+// future prune. At these document counts the scan costs nothing.
 function pruneViews() {
-  if (viewByDoc.size <= appState.documents.length) return
   const live = new Set(appState.documents.map(d => d.id))
   for (const id of viewByDoc.keys()) if (!live.has(id)) viewByDoc.delete(id)
 }
