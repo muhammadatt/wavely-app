@@ -55,20 +55,31 @@ const IMPLAUSIBLE_DB = 12
  * to spend should be too. v1 encodes the same asymmetry in its region tables
  * (boost caps of 3-4 dB against cut caps of 4-6) without ever saying why.
  *
- * The value is not free either — it is MAX_BOOST_DB over RECOVERY_GAIN, the
- * residual height at which the requested boost would start being clipped by the
- * ceiling anyway. Coupling them means confidence begins to decay exactly where
- * the policy has already decided not to spend more, instead of the two
- * disagreeing about where "too big" starts.
+ * THIS IS THE WEAKEST CONSTANT IN THE DESIGN and it should be read with that in
+ * mind. It has to separate a shallow dip worth filling from a deep notch that
+ * must only be reported, and the two are separated by residual height alone —
+ * badly. Measured across the corpus at the chosen trend span:
  *
- * It lands where the corpus needs it. Measured residuals: a shallow correctable
- * dip reads 3.1 dB, a -15 dB notch reads 5.8 and a -20 dB notch 8.1 — a notch
- * wide enough to matter is partly followed by the trend measuring it, so true
- * depth and residual depth are not the same number. Four sits below the notches
- * and above the dip, so the dip is filled and the notches decay into advisories
- * rather than drawing a boost into a band whose noise floor would rise with it.
+ *   -6 dB dip  @ 2500 Hz    3.29 dB residual      fill it
+ *   -6 dB dip  @  900 Hz    4.12
+ *   -6 dB dip  @ 1600 Hz    6.16
+ *   ------------------------------ the whole margin is here
+ *   -15 dB notch @ 800 Hz   7.41                  report it
+ *   -15 dB notch @ 2000 Hz  9.43
+ *   -20 dB notch @ 5000 Hz 11.46
+ *
+ * A 1.25 dB gap, and the same defect reads 3.29 or 6.16 depending only on where
+ * it sits, because how much of a feature the trend absorbs depends on the local
+ * shape of the spectrum. Two better discriminators were tried and neither
+ * worked: measuring depth against a much wider trend widens the gap only
+ * slightly, and per-frequency SNR deficit is inverted here, because an EQ cut
+ * applied to a finished file attenuates its noise floor along with the voice
+ * and leaves SNR unchanged.
+ *
+ * So this is set from the measurement rather than derived, the decay past it is
+ * steep (see below), and finding a real discriminator is open work.
  */
-const IMPLAUSIBLE_DEFICIENCY_DB = 4
+const IMPLAUSIBLE_DEFICIENCY_DB = 5.5
 
 /**
  * How closely the two halves of the selection must agree.
@@ -106,10 +117,18 @@ export function scoreConfidence(feature, ctx) {
   // Does the feature survive being measured on half the data, twice?
   const stability = halfAgreement(feature, ctx)
 
-  const limit = feature.kind === 'deficiency' ? IMPLAUSIBLE_DEFICIENCY_DB : IMPLAUSIBLE_DB
+  // Deficiencies decay over half the limit rather than the whole of it. The
+  // margin between a fillable dip and a notch is barely a dB wide, so a gentle
+  // slope would leave a -15 dB notch still looking half credible and still
+  // drawing a boost. Cuts have no such crowding above them and keep the gentler
+  // decay, which is what lets a large but genuine resonance still be corrected
+  // in part instead of falling off a cliff.
+  const isDip = feature.kind === 'deficiency'
+  const limit = isDip ? IMPLAUSIBLE_DEFICIENCY_DB : IMPLAUSIBLE_DB
+  const falloff = isDip ? limit * 0.5 : limit
   const plausibility = feature.heightDb <= limit
     ? 1
-    : Math.max(0, 1 - (feature.heightDb - limit) / limit)
+    : Math.max(0, 1 - (feature.heightDb - limit) / falloff)
 
   return {
     confidence: clamp01(evidence * conditioning * stability * plausibility),

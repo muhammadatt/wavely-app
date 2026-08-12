@@ -58,6 +58,28 @@ const MIN_PROMINENCE_DB = 1.0
 const MAX_WIDTH_OCTAVES = 2.0
 
 /**
+ * Narrowest feature that counts as a TONAL defect.
+ *
+ * VoiceRx corrects tonal balance — its controls are Mud, Boxy, Nasal, Presence,
+ * Sibilance, all broad characteristics of how a voice reads. It is not a
+ * surgical notch tool; the manual EQ is there for that. So the question a
+ * feature has to pass is not "is it real" but "is it the kind of thing this
+ * tool is for", and below roughly a critical band the answer is no however real
+ * it is. The ear integrates tonal colour over about a third of an octave at
+ * these frequencies, so a 4 dB peak an eighth of an octave wide is not heard as
+ * harshness — it is heard as nothing much, and correcting it with a Q of 8 is
+ * inaudible at best.
+ *
+ * Measured rather than assumed. On the reference clip the features that made
+ * v2's output unusable — ten bands where the shipping detector emits two —
+ * measure 0.042, 0.125 and 0.125 octaves. The planted defects the corpus wants
+ * found measure 0.25 (Q8) to 0.63 (Q1). The gap between those two groups is
+ * where this sits, and it is wide enough that the exact value inside it does
+ * not matter much.
+ */
+const MIN_WIDTH_OCTAVES = 0.22
+
+/**
  * Locate extrema of `residual` in one direction.
  *
  * @param {Float64Array} hz grid frequencies
@@ -92,7 +114,7 @@ function findExtrema(hz, residual, mask, n, sign) {
     let hi = i
     while (hi < n - 1 && mask[hi + 1] && sign * residual[hi + 1] >= v / 2) hi++
     const widthOctaves = (hi - lo) * GRID_OCTAVES
-    if (widthOctaves > MAX_WIDTH_OCTAVES) continue
+    if (widthOctaves > MAX_WIDTH_OCTAVES || widthOctaves < MIN_WIDTH_OCTAVES) continue
 
     const prominence = prominenceAt(residual, mask, n, i, sign)
     if (prominence < MIN_PROMINENCE_DB) continue

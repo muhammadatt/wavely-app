@@ -271,7 +271,7 @@
           "300Hz +6dB",
           "200Hz -6dB",
           "400Hz -6dB",
-          "1600Hz -6dB",
+          "9000Hz -6dB",
           "220Hz -7dB",
           "320Hz +7dB",
           "900Hz +10dB"
@@ -286,10 +286,10 @@
           "median": 0.015,
           "max": 0.124
         },
-        "spuriousBands": 7,
-        "spuriousGainDb": 13.61,
+        "spuriousBands": 5,
+        "spuriousGainDb": 9.57,
         "noCorrectionExpected": 16,
-        "noCorrectionButGotBands": 2,
+        "noCorrectionButGotBands": 1,
         "analysisFailures": 0
       },
       "families": {
@@ -371,16 +371,16 @@
           "missed": [
             "200Hz -6dB",
             "400Hz -6dB",
-            "1600Hz -6dB"
+            "9000Hz -6dB"
           ],
           "recovery": {
-            "median": 0.666,
-            "p10": 0.63,
-            "p90": 0.751,
-            "spread": 0.121
+            "median": 0.687,
+            "p10": 0.636,
+            "p90": 0.793,
+            "spread": 0.157
           },
           "freqErrorOctaves": {
-            "median": 0.02,
+            "median": 0.022,
             "max": 0.041
           },
           "spuriousBands": 1,
@@ -405,10 +405,10 @@
             "median": null,
             "max": null
           },
-          "spuriousBands": 3,
-          "spuriousGainDb": 5.66,
+          "spuriousBands": 1,
+          "spuriousGainDb": 1.62,
           "noCorrectionExpected": 6,
-          "noCorrectionButGotBands": 2,
+          "noCorrectionButGotBands": 1,
           "analysisFailures": 0
         },
         "bandwidth": {

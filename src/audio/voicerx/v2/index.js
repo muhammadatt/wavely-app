@@ -74,6 +74,37 @@ const MIN_CORRECTION_CONFIDENCE = 0.35
 const MIN_GAIN_DB = 0.5
 
 /**
+ * How far apart two corrections must sit, in octaves.
+ *
+ * Continuous detection finds everything, which is its point and also its
+ * problem: on real material the residual has genuine fine structure, and
+ * without this the detector emits neighbouring corrections that pull against
+ * each other. On the reference clip that produced a -2.35 dB cut at 3466 Hz
+ * next to a +1.71 dB boost at 3709 Hz — a tenth of an octave apart, opposite
+ * signs, together doing almost nothing except making the findings list
+ * unreadable. That is chasing ripple, not diagnosing.
+ *
+ * A third of an octave is roughly a critical band, so two corrections closer
+ * than this are acting inside one region the ear hears as a single colour. If
+ * both are needed, one broader filter is what was actually wanted; the stronger
+ * of the two is the better approximation to it, and the weaker is dropped
+ * rather than merged, because averaging two disagreeing measurements into a
+ * band at neither frequency is how v1's merge step produced corrections that
+ * sat on nothing.
+ */
+const MIN_SPACING_OCTAVES = 0.33
+
+/**
+ * Most corrections offered at once.
+ *
+ * A product limit, not a signal-processing one. Someone who cannot read a
+ * spectrum can act on a short list of named problems; ten rows of +/-2 dB is
+ * not a diagnosis, it is a spectrum in words. The strongest few are also the
+ * ones that carry nearly all the audible change, so the tail costs little.
+ */
+const MAX_BANDS = 6
+
+/**
  * How much of a feature's measured height to ask for.
  *
  * A resonance raises the trend it is measured against — the fit down-weights it
@@ -167,8 +198,8 @@ export function analyzeVoiceRxV2(audio, sampleRate) {
     }
   })
 
-  const bands = []
-  const advisories = []
+  const candidates = []
+  const flagged = []
 
   for (const f of features) {
     const sign = f.kind === 'resonance' ? -1 : 1
@@ -181,7 +212,7 @@ export function analyzeVoiceRxV2(audio, sampleRate) {
       // low-confidence 2 dB wobble is not a finding, it is the reason the
       // threshold exists.
       if (f.heightDb >= 6) {
-        advisories.push({
+        flagged.push({
           id: `adv_${f.kind}_${Math.round(f.centreHz)}`,
           kind: f.kind,
           centreHz: round(f.centreHz, 1),
@@ -195,7 +226,7 @@ export function analyzeVoiceRxV2(audio, sampleRate) {
       continue
     }
 
-    bands.push({
+    candidates.push({
       region: f.region,
       roleId: f.roleId,
       freqHz: round(f.centreHz, 1),
@@ -205,6 +236,32 @@ export function analyzeVoiceRxV2(audio, sampleRate) {
       confidence: f.confidence,
     })
   }
+
+  // Strongest first, then greedily keep anything far enough from what has
+  // already been kept. Greedy rather than exhaustive because the ranking is the
+  // whole point: when two corrections compete for the same critical band, the
+  // larger one is the one the listener would notice.
+  const bands = []
+  for (const c of candidates.sort((a, b) => Math.abs(b.gainDb) - Math.abs(a.gainDb))) {
+    if (bands.length >= MAX_BANDS) break
+    const crowded = bands.some(
+      b => Math.abs(Math.log2(c.freqHz / b.freqHz)) < MIN_SPACING_OCTAVES,
+    )
+    if (!crowded) bands.push(c)
+  }
+
+  // Advisories get the same treatment, and need it for the same reason. One
+  // wide notch has a floor that wanders, so the residual dips at more than one
+  // grid point inside it — on the reference clip that reported the single
+  // 5 kHz hole twice, at 5122 and 5537 Hz, which reads as two problems.
+  const advisories = []
+  for (const a of flagged.sort((x, y) => y.depthDb - x.depthDb)) {
+    const crowded = advisories.some(
+      b => Math.abs(Math.log2(a.centreHz / b.centreHz)) < MIN_SPACING_OCTAVES,
+    )
+    if (!crowded) advisories.push(a)
+  }
+  advisories.sort((a, b) => a.centreHz - b.centreHz)
 
   return {
     ok: true,

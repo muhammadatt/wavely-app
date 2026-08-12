@@ -136,8 +136,8 @@
           "median": 0.018,
           "max": 0.029
         },
-        "spuriousBands": 2,
-        "spuriousGainDb": 3.61,
+        "spuriousBands": 1,
+        "spuriousGainDb": 1.62,
         "noCorrectionExpected": 4,
         "noCorrectionButGotBands": 1,
         "analysisFailures": 0
@@ -203,8 +203,8 @@
             "median": null,
             "max": null
           },
-          "spuriousBands": 2,
-          "spuriousGainDb": 3.61,
+          "spuriousBands": 1,
+          "spuriousGainDb": 1.62,
           "noCorrectionExpected": 2,
           "noCorrectionButGotBands": 1,
           "analysisFailures": 0
