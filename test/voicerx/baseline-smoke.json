@@ -133,11 +133,11 @@
           "spread": 0
         },
         "freqErrorOctaves": {
-          "median": 0.018,
+          "median": 0.017,
           "max": 0.029
         },
         "spuriousBands": 1,
-        "spuriousGainDb": 1.62,
+        "spuriousGainDb": 2.43,
         "noCorrectionExpected": 4,
         "noCorrectionButGotBands": 1,
         "analysisFailures": 0
@@ -178,7 +178,7 @@
             "spread": 0
           },
           "freqErrorOctaves": {
-            "median": 0.018,
+            "median": 0.017,
             "max": 0.029
           },
           "spuriousBands": 0,
@@ -204,7 +204,7 @@
             "max": null
           },
           "spuriousBands": 1,
-          "spuriousGainDb": 1.62,
+          "spuriousGainDb": 2.43,
           "noCorrectionExpected": 2,
           "noCorrectionButGotBands": 1,
           "analysisFailures": 0

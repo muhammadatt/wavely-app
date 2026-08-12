@@ -42,6 +42,23 @@ export const MIN_VOICED_FRAMES = 40
 const MAX_ANALYSIS_FRAMES = 2000
 
 /**
+ * Cap on pause frames fed to the noise-floor mean.
+ *
+ * Far lower than the voiced cap, and it can be: room tone is stationary, so a
+ * few hundred frames pin its spectrum as well as ten thousand would, while the
+ * voiced envelope is averaging over constantly changing phonemes and wants
+ * every frame it can get.
+ *
+ * Capping this at all matters more than the value. The quiet set is everything
+ * at or below the 15th percentile of frame energy, so on a long recording with
+ * real pauses it can be several times the size of the CAPPED voiced set — and
+ * each frame here costs the same three transforms. Left uncapped, measuring the
+ * noise floor dominates the analysis on exactly the long files where the cap
+ * was supposed to be protecting the user.
+ */
+const MAX_NOISE_FRAMES = 400
+
+/**
  * Percentile of frame energies taken as the noise floor, and the margin above
  * it that counts as speech.
  *
@@ -155,13 +172,8 @@ export function measure(audio, sampleRate) {
     }
   }
 
-  let selected = voiced
-  if (voiced.length > MAX_ANALYSIS_FRAMES) {
-    selected = []
-    for (let k = 0; k < MAX_ANALYSIS_FRAMES; k++) {
-      selected.push(voiced[Math.round((k * (voiced.length - 1)) / (MAX_ANALYSIS_FRAMES - 1))])
-    }
-  }
+  const selected = stride(voiced, MAX_ANALYSIS_FRAMES)
+  const selectedQuiet = stride(quiet, MAX_NOISE_FRAMES)
 
   const medianF0Hz = percentile(f0Values, 50)
   const p5 = percentile(f0Values, 5)
@@ -204,7 +216,7 @@ export function measure(audio, sampleRate) {
     // whether a feature is still there later in the passage.
     ;(i < midpoint ? firstHalf : secondHalf).add(env)
   }
-  for (const start of quiet) noise.add(liftered(start))
+  for (const start of selectedQuiet) noise.add(liftered(start))
 
   const freqsHz = new Float64Array(bins)
   for (let k = 0; k < bins; k++) freqsHz[k] = (k * sampleRate) / N_FFT
@@ -222,6 +234,20 @@ export function measure(audio, sampleRate) {
     medianF0Hz,
     voicedFrames: selected.length,
     totalFrames: starts.length,
-    quietFrames: quiet.length,
+    quietFrames: selectedQuiet.length,
   }
+}
+
+/**
+ * Evenly spaced subset, or the whole thing when it already fits.
+ *
+ * Strided rather than truncated so the mean still samples the whole selection
+ * instead of only its opening — a narrator who clears their throat in the first
+ * ten seconds should not have that stand in for the entire noise floor.
+ */
+function stride(items, cap) {
+  if (items.length <= cap) return items
+  const out = []
+  for (let k = 0; k < cap; k++) out.push(items[Math.round((k * (items.length - 1)) / (cap - 1))])
+  return out
 }

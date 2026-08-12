@@ -39,13 +39,19 @@ const baseline = JSON.parse(
  * Floats get a tolerance, counts do not.
  *
  * The corpus and the analysis are both deterministic, so in principle every
- * number is exact. In practice Math.sin and Math.log2 are permitted to differ
- * in the last bits between platforms and engine versions, and a recovery
- * fraction that lands on 0.4999 rather than 0.5001 should not fail a build.
+ * number is exact. In practice Math.sin and Math.log2 may differ in their last
+ * bits between platforms and engine versions, and every scorecard float is
+ * already rounded to three decimals — so half of that last place absorbs any
+ * genuine jitter, including a value sitting on a rounding boundary.
+ *
+ * It has to be that tight. At 0.05, detection could fall from 0.80 to 0.75 —
+ * two fewer defects found out of forty-six — and still pass a test whose whole
+ * claim is that the numbers are unchanged.
+ *
  * Counts are integers derived from threshold comparisons; if one of those moves
  * the behaviour really did change and it should be looked at.
  */
-const TOLERANCE = 0.05
+const TOLERANCE = 0.005
 
 function compare(actual, expected, path, failures) {
   for (const [key, want] of Object.entries(expected)) {
@@ -55,6 +61,12 @@ function compare(actual, expected, path, failures) {
     if (want === null || typeof want === 'number') {
       if (want === null || got === null) {
         if (want !== got) failures.push(`${where}: expected ${want}, got ${got}`)
+      } else if (typeof got !== 'number' || !Number.isFinite(got)) {
+        // Without this the comparison below evaluates Math.abs(undefined - want),
+        // which is NaN, and NaN > TOLERANCE is false — so a renamed or deleted
+        // metric passed the guard silently. A missing number is the largest
+        // change a metric can undergo, not the smallest.
+        failures.push(`${where}: expected ${want}, got ${got === undefined ? 'nothing' : got}`)
       } else if (Number.isInteger(want) && Number.isInteger(got)) {
         if (want !== got) failures.push(`${where}: expected ${want}, got ${got}`)
       } else if (Math.abs(got - want) > TOLERANCE) {

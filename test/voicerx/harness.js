@@ -83,22 +83,31 @@ export function scoreCase(spec, output) {
   const defects = []
 
   for (const defect of spec.defects ?? []) {
-    const near = bands.filter(b => octavesApart(b.freqHz, defect.freqHz) <= MATCH_OCTAVES)
-    for (const b of near) claimed.add(b)
-
     const idealGainDb = -defect.gainDb
+    const near = bands.filter(b => octavesApart(b.freqHz, defect.freqHz) <= MATCH_OCTAVES)
+
+    // ONLY BANDS PUSHING THE RIGHT WAY COUNT AS ADDRESSING THE DEFECT. A boost
+    // sitting on a planted resonance is not a weak fix, it is a second defect,
+    // and claiming it here would hide it from the spurious tally — leaving a
+    // detector that makes the audio actively worse scoring identically to one
+    // that stayed silent. Both would show one miss and nothing else.
+    const helping = near.filter(b => Math.sign(b.gainDb) === Math.sign(idealGainDb))
+    for (const b of helping) claimed.add(b)
+
+    // Recovery is still the NET of everything nearby: what reaches the audio is
+    // the sum, and a correction half undone by its neighbour has half recovered.
     const appliedGainDb = near.reduce((sum, b) => sum + b.gainDb, 0)
     const rightWay = Math.sign(appliedGainDb) === Math.sign(idealGainDb)
     // Aim is judged by the band doing most of the work, not by an average that
     // a small opposite-signed neighbour could drag anywhere.
-    const dominant = near.reduce(
+    const dominant = helping.reduce(
       (best, b) => (best === null || Math.abs(b.gainDb) > Math.abs(best.gainDb) ? b : best), null,
     )
 
     defects.push({
       freqHz: defect.freqHz,
       plantedGainDb: defect.gainDb,
-      detected: near.length > 0 && rightWay,
+      detected: helping.length > 0 && rightWay,
       appliedGainDb: round(appliedGainDb, 2),
       recovery: round(appliedGainDb / idealGainDb, 3),
       freqErrorOctaves: dominant ? round(octavesApart(dominant.freqHz, defect.freqHz), 3) : null,

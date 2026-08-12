@@ -54,10 +54,28 @@ const MAX_BOOST_DB = 5
 /**
  * How far past the reported range the analysis grid extends, in octaves.
  *
- * Enough that a feature at either end of the reported range still sits inside a
- * full-width fit window. See where it is used.
+ * A FULL TWO-SIDED WINDOW AT THE BOUNDARIES IS NOT ACHIEVABLE, and an earlier
+ * version of this comment claimed otherwise. Satisfying it would need
+ * SPAN_OCTAVES of margin — 16 kHz plus 2.5 octaves is 90 kHz, against a Nyquist
+ * of 22.05 — so at the top the grid is clamped and the fits up there really are
+ * one-sided whatever this constant says. What handles that is `conditioning`,
+ * which measures how much of each fit window carried voice and scores a feature
+ * down for exactly the reason it deserves.
+ *
+ * So the margin is not derived, it is swept, and more is not better:
+ *
+ *   margin   detection   invented bands   invented gain
+ *   0.8         80%            5              9.6 dB
+ *   1.5         83%            4              7.7 dB
+ *   2.5         83%            9             22.9 dB
+ *
+ * 1.5 takes all the detection that widening buys. Going to the full span adds
+ * nothing at the top, because Nyquist has already clamped it, while at the
+ * bottom it extends the grid to 10 Hz — three octaves of spectrum a voice
+ * cannot occupy — and features near the low boundary start being found against
+ * fits made mostly of masked-out nothing.
  */
-const ANALYSIS_MARGIN_OCTAVES = 0.8
+const ANALYSIS_MARGIN_OCTAVES = 1.5
 
 /**
  * Confidence below which a feature is reported but not corrected.
@@ -145,11 +163,11 @@ export function analyzeVoiceRxV2(audio, sampleRate) {
   }
 
   // The grid runs WIDER than the range features are reported in. A trend fit
-  // spanning 1.5 octaves either side needs spectrum on both sides to be a fit
-  // rather than an extrapolation, and without the margin every feature within
-  // an octave of 60 Hz or 16 kHz is measured against a one-sided window and
-  // scored down for it — which showed up as planted defects at 180 and 300 Hz
-  // going undetected purely because of where the grid happened to stop.
+  // needs spectrum on both sides of a point to be a fit rather than an
+  // extrapolation, and without the margin every feature near 60 Hz or 16 kHz is
+  // measured against a one-sided window and scored down for it — which showed
+  // up as planted defects at 180 and 300 Hz going undetected purely because of
+  // where the grid happened to stop.
   const reportLoHz = REGION_SPAN_HZ[0]
   const reportHiHz = Math.min(REGION_SPAN_HZ[1], sampleRate / 2 - 1)
   const loHz = reportLoHz / Math.pow(2, ANALYSIS_MARGIN_OCTAVES)
