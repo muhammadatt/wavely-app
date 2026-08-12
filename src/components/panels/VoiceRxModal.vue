@@ -254,6 +254,38 @@ async function applyAndClose() {
       </div>
 
       <!--
+        What the analysis found and will not correct.
+
+        Its own block, below the corrections and above the clean bill of health,
+        because it is neither. A row in ISSUES IDENTIFIED promises a gain and a
+        button; these have no band behind them and never will, so putting one in
+        that list would mean a row whose APPLY does nothing.
+
+        It has to appear whether or not there are corrections. A notch is most
+        worth reporting precisely when it has suppressed everything around it
+        and the findings list has gone quiet — that is the case where silence
+        would read as "nothing wrong here".
+      -->
+      <div v-if="vox.advisories.value.length > 0" class="mb-[14px]">
+        <span
+          style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,190,120,.6)"
+        >
+          ALSO FOUND — NOT CORRECTED:
+        </span>
+        <div
+          v-for="adv in vox.advisories.value"
+          :key="adv.id"
+          class="mt-[7px] pt-[6px]"
+          style="border-top:1px solid rgba(255,255,255,.05)"
+        >
+          <p style="font:600 11px/1.4 'Inter';color:rgba(255,190,120,.8)">{{ adv.title }}</p>
+          <p class="mt-[3px]" style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.45)">
+            {{ adv.detail }}
+          </p>
+        </div>
+      </div>
+
+      <!--
         A clean bill of health, which only a completed analysis can give.
 
         Gated on hasAnalysis, not on the list simply being empty: an empty
@@ -264,9 +296,17 @@ async function applyAndClose() {
         Freshness is deliberately not part of the test — a measurement that
         found nothing does not stop having found nothing because the selection
         moved. VoiceRxView's own banner reports the staleness.
+
+        Advisories count against it as much as corrections do. A file whose
+        presence and sibilance went unread because a notch sits across them has
+        not been given a clean bill of health, and saying "nothing stands out"
+        under a paragraph describing an 18 dB hole would contradict the line
+        above it.
       -->
       <p
-        v-else-if="vox.hasAnalysis.value"
+        v-if="vox.hasAnalysis.value
+          && vox.suggestions.value.length === 0
+          && vox.advisories.value.length === 0"
         class="mb-[14px] text-center"
         style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
       >
