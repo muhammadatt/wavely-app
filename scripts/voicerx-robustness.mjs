@@ -119,6 +119,20 @@ const offenders = Object.entries(results).flatMap(([name, rows]) => rows
 if (offenders.length) {
   console.log('\n  NOT INVARIANT TO GAIN OR POLARITY — every one of these is a bug:')
   for (const o of offenders.slice(0, 12)) console.log(o)
+  // Name the band that moved. A percentage alone cannot be chased by anyone who
+  // does not have the file, which for a gitignored corpus is everyone else.
+  console.log('\n  WHICH BAND MOVED:')
+  for (const [name, rows] of Object.entries(results)) {
+    for (const r of rows) {
+      for (const d of r.invariance?.disagreements ?? []) {
+        console.log(`    ${name} / ${r.sample} / ${d.variant}`)
+        if (!d.ok) { console.log('      variant refused to analyse at all'); continue }
+        console.log(`      base:    ${d.base.join('  ') || '—'}`)
+        console.log(`      variant: ${d.got.join('  ') || '—'}`)
+        console.log(`      differs: ${d.only.join('  ') || '—'}`)
+      }
+    }
+  }
 }
 
 console.log('\nCONVERGENCE — apply its own corrections, ask again')

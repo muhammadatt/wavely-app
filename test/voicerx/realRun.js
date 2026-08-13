@@ -174,6 +174,20 @@ export function runDetectors({ dir = CORPUS_DIR, seconds = 45, windows = 3 } = {
       recurringFraction: repeat.length
         ? repeat.reduce((a, r) => a + (r.ofFirstWindow ? r.recurringInEveryWindow / r.ofFirstWindow : 1), 0) / repeat.length
         : null,
+      // A FRACTION PUNISHES A QUIET DETECTOR. Averaging per-file ratios, one
+      // stray band out of two scores 50% while one out of five scores 80% — so
+      // a detector that says less looks less repeatable for saying less, which
+      // is exactly the confound between v1 (2.87 bands/window, 75%) and v1trend
+      // (1.55, 56%). These two are immune to it: pooling sums before dividing,
+      // and the absolute count asks how many bands actually failed to recur
+      // rather than what share of a small number they were.
+      recurringPooled: repeat.length
+        ? repeat.reduce((a, r) => a + r.recurringInEveryWindow, 0)
+          / Math.max(1, repeat.reduce((a, r) => a + r.ofFirstWindow, 0))
+        : null,
+      nonRecurringPerFile: repeat.length
+        ? repeat.reduce((a, r) => a + (r.ofFirstWindow - r.recurringInEveryWindow), 0) / repeat.length
+        : null,
     }
   }
 

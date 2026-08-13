@@ -136,12 +136,20 @@ function print(r) {
   }
 
   console.log('\nREPEATABILITY — of the first window\'s bands, how many recur in EVERY window')
+  console.log('detector    per-file avg   pooled   bands that FAILED to recur, per file')
   for (const [name, s] of Object.entries(r.summary)) {
-    console.log(`  ${name.padEnd(10)} ${s.recurringFraction === null ? 'n/a'
-      : `${(s.recurringFraction * 100).toFixed(0)}%`}`)
+    const p = v => (v === null ? '   n/a' : `${(v * 100).toFixed(0)}%`.padStart(6))
+    console.log(
+      `  ${name.padEnd(10)}`,
+      p(s.recurringFraction).padStart(11),
+      p(s.recurringPooled),
+      (s.nonRecurringPerFile === null ? 'n/a' : s.nonRecurringPerFile.toFixed(2)).padStart(30),
+    )
   }
   console.log('  A user who analyses twice and is told different things has no reason')
-  console.log('  to believe either answer.')
+  console.log('  to believe either answer. Read the LAST column when comparing two')
+  console.log('  detectors that emit different numbers of bands — the per-file average')
+  console.log('  charges a quiet detector more for the same absolute mistake.')
 
   console.log('\nWHERE THE INVENTED BANDS LAND (half-octave bins)')
   for (const [name, s] of Object.entries(r.summary)) {

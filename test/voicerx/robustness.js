@@ -39,15 +39,34 @@ const SAME_GAIN_DB = 1.5
  */
 const RISKY_BOOST_ABOVE_HZ = 3000
 
+/** The transformations a magnitude spectrum genuinely cannot see. */
+const EXACT_CASES = ['gain +6 dB', 'gain -6 dB', 'polarity flip']
+
+function sameBand(a, b) {
+  return Math.abs(Math.log2(b.freqHz / a.freqHz)) < SAME_BAND_OCTAVES
+    && Math.abs(b.gainDb - a.gainDb) < SAME_GAIN_DB
+}
+
+/** Bands present in one list and not the other, either way round. */
+function symmetricDifference(a, b) {
+  return [
+    ...a.filter(x => !b.some(y => sameBand(x, y))).map(x => ({ ...x, side: 'base only' })),
+    ...b.filter(y => !a.some(x => sameBand(x, y))).map(y => ({ ...y, side: 'variant only' })),
+  ]
+}
+
+function fmt(b) {
+  return `${Math.round(b.freqHz)}Hz ${b.gainDb > 0 ? '+' : ''}${b.gainDb.toFixed(1)}`
+    + (b.side ? ` (${b.side})` : '')
+}
+
 function agreement(a, b) {
   if (a.length === 0 && b.length === 0) return 1
   if (a.length === 0 || b.length === 0) return 0
 
   let matched = 0
   for (const band of a) {
-    const hit = b.some(other => Math.abs(Math.log2(other.freqHz / band.freqHz)) < SAME_BAND_OCTAVES
-      && Math.abs(other.gainDb - band.gainDb) < SAME_GAIN_DB)
-    if (hit) matched++
+    if (b.some(other => sameBand(band, other))) matched++
   }
   // Symmetric: a detector that emits ten bands where the other emits one has
   // not "agreed" just because the one is among the ten.
@@ -99,16 +118,26 @@ export function invariance(detector, audio, sampleRate) {
     'shift 3 hops': shifted(audio, 1536),
   }
 
-  const out = { bands: base.bands.length, scores: {} }
+  const out = { bands: base.bands.length, scores: {}, disagreements: [] }
   for (const [name, variant] of Object.entries(cases)) {
     const got = detector(variant, sampleRate)
     out.scores[name] = got.ok ? agreement(base.bands, got.bands) : 0
+    // An exact-invariance failure is a bug by definition, so record WHICH band
+    // moved rather than only that something did. Without this the finding is
+    // "89% on one file", which cannot be chased without the file in hand.
+    if (EXACT_CASES.includes(name) && out.scores[name] < 0.999) {
+      out.disagreements.push({
+        variant: name,
+        ok: got.ok,
+        base: base.bands.map(fmt),
+        got: got.ok ? got.bands.map(fmt) : null,
+        only: got.ok ? symmetricDifference(base.bands, got.bands).map(fmt) : null,
+      })
+    }
   }
   // Gain and polarity are the ones that must be exact; the shifts are reported
   // but held to a lower standard, so they are summarised apart.
-  out.exact = Math.min(
-    out.scores['gain +6 dB'], out.scores['gain -6 dB'], out.scores['polarity flip'],
-  )
+  out.exact = Math.min(...EXACT_CASES.map(c => out.scores[c]))
   out.framing = Math.min(out.scores['shift 1/2 hop'], out.scores['shift 3 hops'])
   return out
 }
