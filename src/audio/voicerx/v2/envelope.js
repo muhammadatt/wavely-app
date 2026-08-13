@@ -28,7 +28,7 @@
 
 import { getFFT, rfftBinCount } from '../../dsp/fft.js'
 import { F0Tracker } from '../../dsp/f0.js'
-import { hannSymmetric, percentile } from '../analysis.js'
+import { hannSymmetric, percentile, logPowerSpectrum } from '../analysis.js'
 
 export const FRAME_SIZE = 2048
 export const HOP_SIZE = 512
@@ -199,7 +199,7 @@ export function measure(audio, sampleRate) {
     padded.fill(0)
     for (let i = 0; i < FRAME_SIZE; i++) padded[i] = audio[start + i] * window[i]
     fft.rfft(padded, re, im)
-    for (let k = 0; k < bins; k++) logPower[k] = Math.log(re[k] * re[k] + im[k] * im[k] + 1e-10)
+    logPowerSpectrum(re, im, logPower, bins)
     fft.irfft(logPower, null, cepstrum)
     for (let i = 0; i < N_FFT; i++) cepstrum[i] *= lifter[i]
     fft.rfft(cepstrum, envRe, envIm)

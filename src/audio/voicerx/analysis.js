@@ -286,6 +286,52 @@ function clamp(v, lo, hi) {
  * shift the envelope's smoothness, so both use the same definition the Python
  * does.
  */
+/**
+ * Floor for the log-power spectrum, as a fraction of the frame's loudest bin.
+ *
+ * This used to be an absolute `+ 1e-10`, which made the entire analysis depend
+ * on how loud the file happened to be. Bins below the constant get flattened up
+ * to it and bins above keep their value, so which side of it a bin falls on
+ * moves when you apply gain — and the same recording, 6 dB louder, produces a
+ * different envelope. The invariance check found it rather than reasoning did:
+ * v2 dropped a 12.1 kHz band on a gated file when the input was lifted 6 dB.
+ *
+ * Measured on a gated synthetic, doubling the input moved envelope bins by
+ * anywhere from 6.02 to 10.3 dB where every bin should have moved by exactly
+ * 6.02. The error peaks in a narrow band of levels — those where the quietest
+ * bins straddle the constant — which is why attenuating a case by 20, 40 and 60
+ * dB failed to reproduce it, and why it survived this long.
+ *
+ * 120 dB below the frame's own peak scales with the signal, so the pipeline
+ * becomes exactly scale-invariant, and it sits far enough down to leave any
+ * well-conditioned frame's spectrum untouched.
+ */
+const LOG_POWER_FLOOR_RATIO = 1e-12
+
+/**
+ * Log power spectrum with a relative floor. Writes `bins` values into `out`.
+ *
+ * Shared by both detectors deliberately: they had separate copies of the same
+ * absolute epsilon, and a scale-dependence bug fixed in one copy is a bug still
+ * shipping in the other.
+ */
+export function logPowerSpectrum(re, im, out, bins) {
+  let maxPower = 0
+  for (let k = 0; k < bins; k++) {
+    const p = re[k] * re[k] + im[k] * im[k]
+    out[k] = p
+    if (p > maxPower) maxPower = p
+  }
+  // Digital silence has no scale of its own, so there is no relative floor to
+  // apply. A flat spectrum is the only scale-invariant answer available.
+  if (maxPower === 0) {
+    out.fill(0, 0, bins)
+    return
+  }
+  const floor = maxPower * LOG_POWER_FLOOR_RATIO
+  for (let k = 0; k < bins; k++) out[k] = Math.log(out[k] + floor)
+}
+
 export function hannSymmetric(size) {
   const w = new Float64Array(size)
   if (size === 1) {
@@ -424,11 +470,7 @@ export function computeCepstralEnvelope(frames, sampleRate, f0P5Hz) {
     for (let i = 0; i < n; i++) padded[i] = frame[i] * window[i]
 
     fft.rfft(padded, specRe, specIm)
-    for (let k = 0; k < bins; k++) {
-      const re = specRe[k]
-      const im = specIm[k]
-      logPower[k] = Math.log(re * re + im * im + 1e-10)
-    }
+    logPowerSpectrum(specRe, specIm, logPower, bins)
 
     // Real half-spectrum -> real symmetric cepstrum. irfft's null imaginary
     // argument is exactly this case; see the note in dsp/fft.js.
