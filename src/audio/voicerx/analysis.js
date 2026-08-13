@@ -153,6 +153,71 @@ const NOISE_FLOOR_PERCENTILE = 10
 const DEAD_REGION_DB = 60
 
 /**
+ * Steepest local slope, in dB per octave, into which a correction may be made.
+ *
+ * A dip detector cannot tell "this band is deficient" from "this file's
+ * bandwidth ends here", and the second is common: any lowpass, any codec, any
+ * modest microphone. `air` is a fixed 9-16 kHz band scanned for dips with a
+ * boost cap, so on a file whose content stops at 11 kHz it finds the roll-off,
+ * calls it a deficiency, and lifts it — which is bandwidth extension performed
+ * by accident, and all it raises is hiss. On the real corpus this was six
+ * boosts of +6.0 dB at 14.8-16 kHz, every one pinned at twice its cap.
+ *
+ * The guard is a slope test because the separation is enormous. Measured on the
+ * reproduced cases:
+ *
+ *   bandwidth edge at 14 kHz, false boost     -56 dB/octave
+ *   bandwidth edge at 11 kHz, false boost     -59
+ *   bandwidth edge at  9 kHz, false boost     -62
+ *   planted -6 dB deficiency at 9 kHz, real    -6
+ *   planted -6 dB deficiency at 5 kHz, real    -5
+ *   clean voice, no defect                     -9
+ *
+ * Nothing sits between -9 and -56, so the threshold's exact value inside that
+ * gap does not matter. 25 dB/octave is chosen as comfortably beyond anything a
+ * vocal tract produces: a spectrum falling that fast over half an octave is a
+ * filter, not a voice.
+ *
+ * Tested on the MAGNITUDE of the slope, so the same rule catches the mirror
+ * case at the bottom — boosting into a high-pass roll-off, which every ACX
+ * master carries — without a second constant.
+ *
+ * CUTS ARE GUARDED TOO, which was not the first instinct. The reasoning for
+ * exempting them — attenuating something already attenuated is pointless but
+ * harmless — is wrong twice over. A cut on the shoulder of a roll-off removes
+ * the last of a file's real top end, and more fundamentally the test is about
+ * whether the DETECTION is valid: a feature sitting on a filter slope is a
+ * filter artefact whichever direction the correction would point. Measured,
+ * extending it to cuts takes the bandwidth family to zero invented bands with
+ * detection rate unchanged, so it costs nothing.
+ */
+const MAX_CORRECTION_SLOPE_DB_PER_OCT = 25
+
+/** Span over which that slope is measured, in octaves. */
+const CORRECTION_SLOPE_SPAN_OCTAVES = 0.5
+
+/**
+ * Local slope of the envelope at `hz`, in dB per octave.
+ *
+ * Measured across a span rather than between adjacent bins: a two-bin
+ * difference on a cepstrally smoothed curve is dominated by the smoothing, and
+ * what this needs to know is the gross direction of travel.
+ */
+function envelopeSlopeDbPerOctave(freqsHz, envelopeDb, hz, sampleRate) {
+  const half = Math.pow(2, CORRECTION_SLOPE_SPAN_OCTAVES / 2)
+  const lo = hz / half
+  const hi = Math.min(hz * half, sampleRate / 2 - 100)
+  if (!(hi > lo)) return 0
+
+  const step = freqsHz[1] - freqsHz[0]
+  const at = (f) => {
+    const k = Math.min(envelopeDb.length - 1, Math.max(0, Math.round(f / step)))
+    return envelopeDb[k]
+  }
+  return (at(hi) - at(lo)) / Math.log2(hi / lo)
+}
+
+/**
  * Fraction of frames that must be pitched before the material counts as speech
  * at all.
  *
@@ -762,7 +827,9 @@ export function mergeBands(input) {
  * dead-region test asks whether the SOURCE has content in a region, which is a
  * property of the recording and must not drift as corrections are applied.
  */
-export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes = [], trendAt = null) {
+export function scanRegions(
+  freqsHz, envelopeDb, regions, envelopePeakDb, holes = [], trendAt = null, sampleRate = 44100,
+) {
   const regionResults = []
   const detected = []
 
@@ -845,6 +912,19 @@ export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes 
       det.centerHz, det.deviationDb, det.widthOctaves,
       region[SCALE], region[MAX_BOOST_DB], region[MAX_CUT_DB],
     )
+
+    // A correction sitting on a filter slope is describing the filter, not the
+    // voice. See MAX_CORRECTION_SLOPE_DB_PER_OCT.
+    if (params.gainDb !== 0) {
+      const slope = envelopeSlopeDbPerOctave(freqsHz, envelopeDb, params.freqHz, sampleRate)
+      if (Math.abs(slope) > MAX_CORRECTION_SLOPE_DB_PER_OCT) {
+        entry.skipReason = 'bandwidth_edge'
+        entry.slopeDbPerOctave = round(slope, 1)
+        regionResults.push(entry)
+        continue
+      }
+    }
+
     Object.assign(entry, {
       detected: true,
       centerHz: params.freqHz,
@@ -954,7 +1034,7 @@ export function iterateCorrections(
     : null)
 
   const first = scanRegions(
-    freqsHz, envelopeDb, regions, envelopePeakDb, holes, trendFor(envelopeDb),
+    freqsHz, envelopeDb, regions, envelopePeakDb, holes, trendFor(envelopeDb), sampleRate,
   )
   const totals = new Map()
   let passes = 0
@@ -977,6 +1057,7 @@ export function iterateCorrections(
         // working on.
         holes,
         trendFor(corrected),
+        sampleRate,
       )
     }
     if (scan.detected.length === 0) break

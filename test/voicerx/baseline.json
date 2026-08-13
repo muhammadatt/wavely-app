@@ -34,10 +34,10 @@
           "median": 0.021,
           "max": 0.2
         },
-        "spuriousBands": 27,
-        "spuriousGainDb": 90.08,
+        "spuriousBands": 24,
+        "spuriousGainDb": 79.41,
         "noCorrectionExpected": 16,
-        "noCorrectionButGotBands": 5,
+        "noCorrectionButGotBands": 3,
         "analysisFailures": 0
       },
       "families": {
@@ -182,10 +182,10 @@
             "median": null,
             "max": null
           },
-          "spuriousBands": 3,
-          "spuriousGainDb": 10.67,
+          "spuriousBands": 0,
+          "spuriousGainDb": 0,
           "noCorrectionExpected": 5,
-          "noCorrectionButGotBands": 2,
+          "noCorrectionButGotBands": 0,
           "analysisFailures": 0
         },
         "combined": {
@@ -294,10 +294,10 @@
           "median": 0.011,
           "max": 0.327
         },
-        "spuriousBands": 8,
-        "spuriousGainDb": 29.83,
+        "spuriousBands": 5,
+        "spuriousGainDb": 19.83,
         "noCorrectionExpected": 16,
-        "noCorrectionButGotBands": 4,
+        "noCorrectionButGotBands": 3,
         "analysisFailures": 0
       },
       "families": {
@@ -444,10 +444,10 @@
             "median": null,
             "max": null
           },
-          "spuriousBands": 6,
-          "spuriousGainDb": 24.98,
+          "spuriousBands": 3,
+          "spuriousGainDb": 14.98,
           "noCorrectionExpected": 5,
-          "noCorrectionButGotBands": 4,
+          "noCorrectionButGotBands": 3,
           "analysisFailures": 0
         },
         "combined": {
