@@ -18,8 +18,12 @@ import { buildAdvisories } from '../../src/audio/voicerx/suggestions.js'
 import { analyzeVoiceRxV2 } from '../../src/audio/voicerx/v2/index.js'
 
 /**
- * The shipping detector: edge-anchored per-region scanning, three correction
- * passes, plus the spectral-hole guard.
+ * The shipping detector, whatever it currently is — called with no options on
+ * purpose, so this tracks the default rather than restating it.
+ *
+ * It is presently identical to `v1chord` except for the baseline: per-region
+ * scanning against a robust local trend, three correction passes, the
+ * bandwidth-edge slope guard and the spectral-hole guard.
  */
 export function currentDetector(audio, sampleRate) {
   const analysis = analyzeVoiceRx(audio, sampleRate)
@@ -50,17 +54,15 @@ export function v2Detector(audio, sampleRate) {
 }
 
 /**
- * v1's regions, directions, caps and iteration — with v2's robust local trend
- * in place of the chord baseline, and nothing else changed.
+ * The superseded chord baseline — everything else identical to `current`.
  *
- * The hypothesis this exists to test: the real corpus says the chord is v1's
- * confirmed-bad part (it reads spectral curvature as a hump) and the region
- * table's directional limits are its confirmed-GOOD part (the only thing
- * preventing v2 from cutting the fundamental and boosting into sibilance). If
- * both readings are right, this should beat both parents. One variable.
+ * Kept after the trend became the default so the corpora can still answer "what
+ * did changing the baseline actually do", which is the only question that
+ * justified the change. This was called `current` while it shipped; the
+ * detector that was called `v1trend` is now `current`.
  */
-export function v1TrendDetector(audio, sampleRate) {
-  const analysis = analyzeVoiceRx(audio, sampleRate, { baseline: 'trend' })
+export function v1ChordDetector(audio, sampleRate) {
+  const analysis = analyzeVoiceRx(audio, sampleRate, { baseline: 'chord' })
   if (!analysis.ok) return { ok: false, reason: analysis.reason, bands: [], advisories: [] }
 
   return {
@@ -73,6 +75,6 @@ export function v1TrendDetector(audio, sampleRate) {
 
 export const DETECTORS = {
   current: currentDetector,
-  v1trend: v1TrendDetector,
+  v1chord: v1ChordDetector,
   v2: v2Detector,
 }

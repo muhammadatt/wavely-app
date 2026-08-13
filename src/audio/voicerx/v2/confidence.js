@@ -22,7 +22,7 @@
  * against a half-masked window is not two-thirds believable.
  */
 
-import { GRID_OCTAVES, SPAN_OCTAVES } from './trend.js'
+import { GRID_OCTAVES, SPAN_OCTAVES } from '../trend.js'
 
 /**
  * Frames at which evidence stops being the limiting factor.

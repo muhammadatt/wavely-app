@@ -44,29 +44,45 @@ import {
 import {
   detectSpectralHoles, inAnyHole, holeCoverage, MAX_HOLE_COVERAGE,
 } from './holes.js'
-import { toLogGrid, robustTrend } from './v2/trend.js'
+import { toLogGrid, robustTrend } from './trend.js'
 import { roleForRegion } from '../eqBands.js'
 import { peaking, lowShelf, highShelf, magnitudeResponseDb } from '../dsp/biquad.js'
 import { eqDesignRate } from '../eqProcessor.js'
 
 /**
- * BASELINE STRATEGY — an experiment, defaulting to the shipping behaviour.
+ * BASELINE STRATEGY — `trend` ships; `chord` is kept for comparison only.
  *
- * `chord` is what has always run: the median of a context window either side of
- * a scan region, interpolated straight across in log-frequency. `trend` swaps
- * in the robust local quadratic from the v2 work and changes NOTHING else — the
- * region tables, directions, thresholds, caps, SCALE, iteration and merge all
- * stay exactly as they are.
+ * `chord` is what shipped originally: the median of a context window either
+ * side of a scan region, interpolated straight across in log-frequency. It has
+ * one confirmed structural fault — it reads spectral CURVATURE as a hump, so a
+ * notch or a steep roll-off anywhere near a region tips the anchors and invents
+ * a correction on the far side of it. That is the failure that started this
+ * whole investigation.
  *
- * One variable, on purpose. The real corpus says the chord is the confirmed-bad
- * part of v1 (it reads curvature as a hump) and the region table's directional
- * limits are the confirmed-GOOD part (they are the only thing preventing v2's
- * two worst errors — cutting the fundamental and boosting into sibilance). This
- * tests whether those two conclusions compose.
+ * `trend` replaces it with a robust local quadratic and changes NOTHING else:
+ * the region tables, directions, thresholds, caps, SCALE, iteration and merge
+ * are exactly as they were. One variable, which is what made the comparison
+ * readable.
  *
- * Importing the fit from v2/ is backwards and deliberate: trend.js is generic
- * DSP rather than v2 policy, and if this experiment wins it should be promoted
- * out of that directory rather than copied into this one.
+ * WHY IT WON, and on which evidence. The synthetic corpus rates it WORSE
+ * (detection 67%→63%, recovery 0.50→0.44) because v1's thresholds were
+ * calibrated against chord deviations and the trend is a tighter reference. The
+ * real corpus — 13 commercially mastered files, 31 windows, where the right
+ * answer is very nearly "no correction" — reverses that comprehensively:
+ *
+ *   invented bands        89 → 48          invented gain   289.4 → 132.0 dB
+ *   windows left alone     1 →  5 of 31    bands on F0         1 → 0
+ *   convergence residual 0.11 → 0.00       risky boosts        0 → 0
+ *
+ * It costs 0.11 bands per file in repeatability (0.78 → 0.89 that fail to
+ * recur across windows of one file), which is the one measure where the chord
+ * is ahead. Convergence is the strongest single signal: applying the trend's
+ * own corrections and re-analysing leaves it with NOTHING further to say, where
+ * the chord still wants 11% of its original gain — a detector chasing structure
+ * in its own reference never settles.
+ *
+ * Both readings rest on finished masters, so the claim is specifically "does
+ * not damage good audio". Raw narrator recordings remain unvalidated.
  */
 
 // ── Constants, all from corrective_eq.py:41-53 ──────────────────────────────
@@ -1175,9 +1191,10 @@ export function iterateCorrections(
  * @param {Float32Array} audio mono, 32-bit float
  * @param {number} sampleRate
  * @param {{baseline?: 'chord'|'trend'}} [options] see the BASELINE STRATEGY note
- *   at the top of this file. Defaults to the shipping behaviour.
+ *   at the top of this file. `trend` ships; `chord` is the superseded baseline,
+ *   retained so the scorecards can still measure what changing it did.
  */
-export function analyzeVoiceRx(audio, sampleRate, { baseline = 'chord' } = {}) {
+export function analyzeVoiceRx(audio, sampleRate, { baseline = 'trend' } = {}) {
   const collected = collectVoicedFrames(audio, sampleRate)
   const { frames, f0Values, noiseFloorDb, totalFrames } = collected
 

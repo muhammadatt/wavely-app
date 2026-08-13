@@ -339,22 +339,59 @@ test('the energy gate does not eat continuous speech', () => {
 
 // ── End to end ──────────────────────────────────────────────────────────────
 
+/**
+ * 900 Hz sits inside the male nasal region (650-1200) and outside every other,
+ * and it is clear of the synth's own -6 dB tilt at 500 Hz.
+ *
+ * These end-to-end tests used to plant at 300 Hz / mud. That stopped working
+ * when the trend became the default baseline, and the reason is a real property
+ * of the method rather than a bug: at 300 Hz on an F0 120 voice the defect sits
+ * on the spectrum's own maximum, where a smooth local reference follows it and
+ * almost nothing is left over. The 12 dB resonance that read well clear of
+ * threshold against the chord reads 1.24 dB against the trend. The blind spot
+ * is pinned explicitly below rather than hidden by moving these tests.
+ */
+const PROBE = { f0: 120, seconds: 3, resonanceHz: 900, resonanceDb: 12 }
+
 test('a planted resonance is detected in the right region', () => {
-  // 300 Hz sits inside the male mud region (200-420) and outside every other.
-  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
+  const audio = synthVoice(PROBE)
   const result = analyzeVoiceRx(audio, SR)
 
   assert.equal(result.ok, true, `analysis failed: ${result.reason}`)
   assert.equal(result.voiceType, 'male', `classified as ${result.voiceType}`)
 
-  const mud = result.regionResults.find(r => r.name === 'mud')
-  assert.equal(mud.detected, true, `mud peak deviation was ${mud.peakDeviationDb} dB`)
+  const nasal = result.regionResults.find(r => r.name === 'nasal')
+  assert.equal(nasal.detected, true, `nasal peak deviation was ${nasal.peakDeviationDb} dB`)
   assert.ok(
-    Math.abs(mud.centerHz - 300) < 60,
-    `detected at ${mud.centerHz} Hz, expected near 300`,
+    Math.abs(Math.log2(nasal.centerHz / 900)) < 0.3,
+    `detected at ${nasal.centerHz} Hz, expected near 900`,
   )
-  assert.ok(mud.gainDb < 0, 'a hump must produce a cut')
-  assert.ok(mud.gainDb >= -6, 'gain must respect the region cut limit')
+  assert.ok(nasal.gainDb < 0, 'a hump must produce a cut')
+  // The bound is the TOTAL cap. MAX_CUT_DB limits a single measurement; the
+  // analysis takes several and MAX_TOTAL_CAP_FACTOR bounds their sum.
+  const cap = MALE_REGIONS.nasal[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
+  assert.ok(nasal.gainDb >= -cap, `gain ${nasal.gainDb} past the nasal total cap ${-cap}`)
+})
+
+test('a defect on the spectral maximum is near-invisible to the trend baseline', () => {
+  // Not an aspiration — a measured limitation of the shipping detector, pinned
+  // so that a change in it is noticed. A smooth local reference cannot separate
+  // a broad hump from the peak it sits on, which is why the low-frequency
+  // detection rate is what it is. The chord caught this case and paid for it
+  // everywhere else: on 31 windows of finished masters it invents 89 bands to
+  // the trend's 48.
+  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
+
+  const trend = analyzeVoiceRx(audio, SR)
+  const chord = analyzeVoiceRx(audio, SR, { baseline: 'chord' })
+  assert.ok(trend.ok && chord.ok)
+
+  const mudOf = r => r.regionResults.find(x => x.name === 'mud')
+  assert.equal(mudOf(chord).detected, true,
+    'the chord baseline should still see this; if it does not, the probe changed')
+  assert.equal(mudOf(trend).detected, false,
+    `the trend now detects mud at ${mudOf(trend).peakDeviationDb} dB — if this is a real `
+    + 'improvement, re-record the scorecards and delete this test')
 })
 
 test('gain opposes the deviation and is capped by the region limits', () => {
@@ -377,10 +414,8 @@ test('gain opposes the deviation and is capped by the region limits', () => {
 
 test('a bigger resonance produces a bigger correction', () => {
   const gainFor = db => {
-    const r = analyzeVoiceRx(
-      synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: db }), SR,
-    )
-    return r.regionResults.find(x => x.name === 'mud').gainDb
+    const r = analyzeVoiceRx(synthVoice({ ...PROBE, resonanceDb: db }), SR)
+    return r.regionResults.find(x => x.name === 'nasal').gainDb
   }
   const small = gainFor(12)
   const large = gainFor(30)
@@ -390,8 +425,8 @@ test('a bigger resonance produces a bigger correction', () => {
   // single measurement may spend; the analysis takes up to MAX_CORRECTION_PASSES
   // of those, and MAX_TOTAL_CAP_FACTOR bounds the sum. Asserting -6 here would
   // be asserting that iterating never happens.
-  const totalLimit = MALE_REGIONS.mud[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
-  assert.ok(large >= -totalLimit, `gain must never exceed the mud total cap: ${large}`)
+  const totalLimit = MALE_REGIONS.nasal[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
+  assert.ok(large >= -totalLimit, `gain must never exceed the nasal total cap: ${large}`)
 })
 
 test('one analysis settles what repeated analysis used to', () => {
@@ -399,9 +434,7 @@ test('one analysis settles what repeated analysis used to', () => {
   // and be told there is still work to do. A single pass leaves 30% of every
   // deviation standing by construction (SCALE is 0.70), so anything much over
   // threshold reported again the moment anyone looked.
-  const r = analyzeVoiceRx(
-    synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 }), SR,
-  )
+  const r = analyzeVoiceRx(synthVoice(PROBE), SR)
   assert.ok(r.ok)
   assert.ok(r.passes > 1, 'the analysis settled in one pass; nothing was iterated')
 
@@ -417,18 +450,29 @@ test('one analysis settles what repeated analysis used to', () => {
     }
   }
   const again = scanRegions(r.freqsHz, after, r.regions, peakDb)
-  const mud = again.regionResults.find(x => x.name === 'mud')
-  assert.equal(mud.detected, false,
-    `mud still reads ${mud.peakDeviationDb} dB out against a ${mud.thresholdDb} dB threshold`)
+  const before = r.regionResults.find(x => x.name === 'nasal').peakDeviationDb
+  const nasal = again.regionResults.find(x => x.name === 'nasal')
+
+  // MOST of it must be gone, not all of it. This asserted `detected === false`
+  // while the chord shipped, planting at 300 Hz / mud where the cut limit is
+  // 6 dB. Under the trend the same 12 dB resonance is measured at 7.89 dB in a
+  // region whose limit is 5, so the TOTAL CAP binds before the deviation is
+  // removed — and refusing to spend past the cap is the deliberate behaviour
+  // asserted by the next test. Requiring it to fall under threshold here would
+  // be requiring the cap not to work.
+  assert.ok(nasal.peakDeviationDb < before * 0.5,
+    `nasal went ${before} -> ${nasal.peakDeviationDb} dB; one analysis barely moved it`)
 })
 
 test('iterating never spends more than the total cap', () => {
   // A resonance far past anything the caps can resolve must stop short and stay
   // flagged rather than earning a surgical cut nobody measured carefully.
-  const r = analyzeVoiceRx(
-    synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 40 }), SR,
-  )
+  const r = analyzeVoiceRx(synthVoice({ ...PROBE, resonanceDb: 40 }), SR)
+  // mud carries the largest cut limit of any region, so it bounds every band
+  // here whatever region they land in. Assert the loop runs at all: planting a
+  // defect the detector cannot see would make this pass vacuously.
   const totalLimit = MALE_REGIONS.mud[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
+  assert.ok(r.bands.length > 0, 'a 40 dB resonance produced no bands to cap')
   for (const band of r.bands) {
     assert.ok(
       Math.abs(band.gainDb) <= totalLimit + 0.01,
@@ -681,15 +725,14 @@ test('short but genuine speech is reported as short, not as non-speech', () => {
 })
 
 test('suggestions carry the measured centre, gain and Q', () => {
-  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
-  const result = analyzeVoiceRx(audio, SR)
+  const result = analyzeVoiceRx(synthVoice(PROBE), SR)
   const suggestions = buildSuggestions(result)
 
   assert.ok(suggestions.length > 0, 'a planted resonance produced no suggestion')
-  const s = suggestions.find(x => x.region.startsWith('mud'))
-  assert.ok(s, `no mud suggestion in ${suggestions.map(x => x.region).join(', ')}`)
-  assert.equal(s.roleId, 'mud')
-  assert.ok(s.symptom.includes('muddy'), `symptom read "${s.symptom}"`)
+  const s = suggestions.find(x => x.region.startsWith('nasal'))
+  assert.ok(s, `no nasal suggestion in ${suggestions.map(x => x.region).join(', ')}`)
+  assert.equal(s.roleId, 'nasal')
+  assert.ok(s.symptom.includes('pinched'), `symptom read "${s.symptom}"`)
   assert.ok(s.gainDb < 0)
   assert.ok(s.q >= 0.8 && s.q <= 8, `Q ${s.q} outside the clamp`)
 })
