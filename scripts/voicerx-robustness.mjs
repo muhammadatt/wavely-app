@@ -3,11 +3,14 @@
  * Three ground-truth-free checks over every detector.
  *
  *   npm run robustness                            synthetic corpus
- *   npm run robustness -- --real                  real corpus, if present
+ *   npm run robustness:real                       real corpus, if present
  *   node scripts/voicerx-robustness.mjs --real --json
  *
- * Note the bare `--` when going through npm, or the flag is eaten before it
- * reaches the script.
+ * `npm run robustness -- --real` also works on most shells, but not all of
+ * them — it silently ran the synthetic set on Windows/PowerShell, which looks
+ * exactly like a successful run and is worth nobody's afternoon. Hence the
+ * dedicated `robustness:real` script, the npm_config fallback below, and the
+ * banner naming which corpus actually ran.
  *
  * Everything here works on audio nobody has annotated, which is the point: the
  * synthetic corpus needs a planted defect and the real corpus needs a finished
@@ -22,12 +25,15 @@ import { listCorpus, excerpts, CORPUS_DIR } from '../test/voicerx/realCorpus.js'
 import { invariance, convergence, directionStats } from '../test/voicerx/robustness.js'
 
 const argv = process.argv.slice(2)
-const has = f => argv.includes(f)
+// npm turns an unforwarded `--real` into npm_config_real rather than dropping
+// it, so honour both spellings and the run mode stops depending on the shell.
+const has = f => argv.includes(f) || process.env[`npm_config_${f.replace(/^--/, '')}`] === 'true'
 const opt = (name, fallback) => {
   const hit = argv.find(a => a.startsWith(`--${name}=`))
-  return hit ? hit.slice(name.length + 3) : fallback
+  return hit ? hit.slice(name.length + 3) : (process.env[`npm_config_${name}`] || fallback)
 }
 const dir = opt('dir', CORPUS_DIR)
+const real = has('--real')
 
 /**
  * A spread of material rather than the whole corpus. Each check runs the
@@ -43,7 +49,7 @@ const SYNTHETIC_SUBSET = [
 ]
 
 function loadSamples() {
-  if (!has('--real')) {
+  if (!real) {
     return CASES.filter(c => SYNTHETIC_SUBSET.includes(c.name))
       .map(c => ({ name: c.name, audio: renderCase(c), sampleRate: SR }))
   }
@@ -87,8 +93,10 @@ if (has('--json')) {
 const pct = v => (v === null || v === undefined ? '   -' : `${(v * 100).toFixed(0).padStart(3)}%`)
 const num = (v, p = 2) => (Number.isFinite(v) ? v.toFixed(p).padStart(6) : '   inf')
 
-console.log(`\nVoiceRx robustness — ${samples.length} ${has('--real') ? 'real' : 'synthetic'} `
-  + `samples, ${elapsed}s\n`)
+console.log(`\nVoiceRx robustness — ${samples.length} ${real ? `real samples from ${dir}` : 'SYNTHETIC samples'}`
+  + `, ${elapsed}s`)
+if (!real) console.log('  (synthetic corpus — run `npm run robustness:real` for the real one)')
+console.log()
 
 console.log('INVARIANCE — the same audio, trivially transformed, must diagnose the same')
 console.log('  exact   = gain and polarity, which CANNOT legitimately change anything')

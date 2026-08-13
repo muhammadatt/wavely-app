@@ -10,7 +10,8 @@
     "test": "node --test \"test/**/*.test.js\"",
     "scorecard": "node scripts/voicerx-scorecard.mjs",
     "scorecard:real": "node scripts/voicerx-real.mjs",
-    "robustness": "node scripts/voicerx-robustness.mjs"
+    "robustness": "node scripts/voicerx-robustness.mjs",
+    "robustness:real": "node scripts/voicerx-robustness.mjs --real"
   },
   "dependencies": {
     "uuid": "^13.0.0",
