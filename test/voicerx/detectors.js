@@ -49,7 +49,30 @@ export function v2Detector(audio, sampleRate) {
   }
 }
 
+/**
+ * v1's regions, directions, caps and iteration — with v2's robust local trend
+ * in place of the chord baseline, and nothing else changed.
+ *
+ * The hypothesis this exists to test: the real corpus says the chord is v1's
+ * confirmed-bad part (it reads spectral curvature as a hump) and the region
+ * table's directional limits are its confirmed-GOOD part (the only thing
+ * preventing v2 from cutting the fundamental and boosting into sibilance). If
+ * both readings are right, this should beat both parents. One variable.
+ */
+export function v1TrendDetector(audio, sampleRate) {
+  const analysis = analyzeVoiceRx(audio, sampleRate, { baseline: 'trend' })
+  if (!analysis.ok) return { ok: false, reason: analysis.reason, bands: [], advisories: [] }
+
+  return {
+    ok: true,
+    bands: analysis.bands.map(b => ({ freqHz: b.freqHz, gainDb: b.gainDb, q: b.q })),
+    advisories: buildAdvisories(analysis),
+    holes: analysis.holes,
+  }
+}
+
 export const DETECTORS = {
   current: currentDetector,
+  v1trend: v1TrendDetector,
   v2: v2Detector,
 }

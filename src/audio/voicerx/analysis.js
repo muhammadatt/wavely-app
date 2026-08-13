@@ -44,9 +44,30 @@ import {
 import {
   detectSpectralHoles, inAnyHole, holeCoverage, MAX_HOLE_COVERAGE,
 } from './holes.js'
+import { toLogGrid, robustTrend } from './v2/trend.js'
 import { roleForRegion } from '../eqBands.js'
 import { peaking, lowShelf, highShelf, magnitudeResponseDb } from '../dsp/biquad.js'
 import { eqDesignRate } from '../eqProcessor.js'
+
+/**
+ * BASELINE STRATEGY — an experiment, defaulting to the shipping behaviour.
+ *
+ * `chord` is what has always run: the median of a context window either side of
+ * a scan region, interpolated straight across in log-frequency. `trend` swaps
+ * in the robust local quadratic from the v2 work and changes NOTHING else — the
+ * region tables, directions, thresholds, caps, SCALE, iteration and merge all
+ * stay exactly as they are.
+ *
+ * One variable, on purpose. The real corpus says the chord is the confirmed-bad
+ * part of v1 (it reads curvature as a hump) and the region table's directional
+ * limits are the confirmed-GOOD part (they are the only thing preventing v2's
+ * two worst errors — cutting the fundamental and boosting into sibilance). This
+ * tests whether those two conclusions compose.
+ *
+ * Importing the fit from v2/ is backwards and deliberate: trend.js is generic
+ * DSP rather than v2 policy, and if this experiment wins it should be promoted
+ * out of that directory rather than copied into this one.
+ */
 
 // ── Constants, all from corrective_eq.py:41-53 ──────────────────────────────
 
@@ -470,8 +491,10 @@ function anchorLevel(freqsHz, envelopeDb, edgeHz, below, floorDb, holes) {
  * @returns {{ scanFreqs, scanEnv, baseline, usable, flatBaseline }|null}
  */
 export function estimateBaseline(
-  freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb = -Infinity, holes = [],
+  freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb = -Infinity, holes = [], trendAt = null,
 ) {
+  if (trendAt) return trendBaseline(freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb, holes, trendAt)
+
   const ctxLoLow = scanLowHz / Math.pow(2, CONTEXT_OCTAVES)
   const ctxHiHigh = scanHighHz * Math.pow(2, CONTEXT_OCTAVES)
 
@@ -519,6 +542,67 @@ export function estimateBaseline(
     usable[i] = envelopeDb[k] >= floorDb && !inAnyHole(holes, freqsHz[k]) ? 1 : 0
   }
   return { scanFreqs, scanEnv, baseline, usable, flatBaseline: lowDead || highDead }
+}
+
+/**
+ * The same region measurement, referenced to a trend instead of a chord.
+ *
+ * There are no anchors here and therefore none of the anchor machinery — no
+ * context windows to be empty, no widening, no flat-baseline fallback. A local
+ * fit is defined wherever there is spectrum around the point, which is the
+ * whole reason it cannot be tipped by a notch sitting in one window.
+ *
+ * `usable` and the hole exclusion are kept identical to the chord path so the
+ * comparison isolates the baseline and nothing else.
+ */
+function trendBaseline(freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb, holes, trendAt) {
+  const scanIdx = []
+  for (let k = 0; k < freqsHz.length; k++) {
+    const f = freqsHz[k]
+    if (f >= scanLowHz && f <= scanHighHz) scanIdx.push(k)
+  }
+  if (scanIdx.length < 2) return null
+
+  const scanFreqs = new Float64Array(scanIdx.length)
+  const scanEnv = new Float64Array(scanIdx.length)
+  const baseline = new Float64Array(scanIdx.length)
+  const usable = new Uint8Array(scanIdx.length)
+  for (let i = 0; i < scanIdx.length; i++) {
+    const k = scanIdx[i]
+    scanFreqs[i] = freqsHz[k]
+    scanEnv[i] = envelopeDb[k]
+    baseline[i] = trendAt(freqsHz[k])
+    usable[i] = envelopeDb[k] >= floorDb && !inAnyHole(holes, freqsHz[k]) ? 1 : 0
+  }
+  return { scanFreqs, scanEnv, baseline, usable, flatBaseline: false }
+}
+
+/**
+ * Build a trend lookup over the whole envelope.
+ *
+ * Masked by v1's own dead-region rule rather than by v2's measured-SNR mask.
+ * The real corpus showed that mask reading 100% live on 31/31 windows — inert —
+ * so bringing it along would import a component that does nothing while
+ * pretending the experiment tested it.
+ */
+export function makeTrendLookup(freqsHz, envelopeDb, floorDb, sampleRate) {
+  const loHz = Math.max(20, freqsHz[1])
+  const hiHz = Math.min(sampleRate / 2 - 1, freqsHz[freqsHz.length - 1])
+  const grid = toLogGrid(freqsHz, envelopeDb, loHz, hiHz)
+
+  const mask = new Uint8Array(grid.n)
+  for (let i = 0; i < grid.n; i++) mask[i] = grid.db[i] >= floorDb ? 1 : 0
+
+  const { trend } = robustTrend(grid.db, mask, grid.n)
+  const logLo = Math.log2(loHz)
+  const perOctave = 1 / (Math.log2(grid.hz[1] / grid.hz[0]))
+
+  return (hz) => {
+    const x = (Math.log2(Math.max(hz, loHz)) - logLo) * perOctave
+    const i = Math.min(grid.n - 2, Math.max(0, Math.floor(x)))
+    const t = Math.min(1, Math.max(0, x - i))
+    return trend[i] * (1 - t) + trend[i + 1] * t
+  }
 }
 
 // ── Step 3 — deviation detection ────────────────────────────────────────────
@@ -678,7 +762,7 @@ export function mergeBands(input) {
  * dead-region test asks whether the SOURCE has content in a region, which is a
  * property of the recording and must not drift as corrections are applied.
  */
-export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes = []) {
+export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes = [], trendAt = null) {
   const regionResults = []
   const detected = []
 
@@ -711,7 +795,7 @@ export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes 
 
     const base = estimateBaseline(
       freqsHz, envelopeDb, region[SCAN_LOW], region[SCAN_HIGH],
-      envelopePeakDb - DEAD_REGION_DB, holes,
+      envelopePeakDb - DEAD_REGION_DB, holes, trendAt,
     )
     if (!base) {
       entry.skipReason = 'context window unavailable'
@@ -860,18 +944,30 @@ export function correctedEnvelope(sampleRate, freqsHz, envelopeDb, corrections) 
  * much, so a correction never wanders off the anomaly it was measured from.
  */
 export function iterateCorrections(
-  sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes = [],
+  sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes = [], useTrend = false,
 ) {
-  const first = scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes)
+  // The reference is rebuilt on each pass's corrected envelope, exactly as the
+  // chord's anchors are re-measured — a baseline that stayed frozen while the
+  // audio under it moved would stop describing the thing being scanned.
+  const trendFor = env => (useTrend
+    ? makeTrendLookup(freqsHz, env, envelopePeakDb - DEAD_REGION_DB, sampleRate)
+    : null)
+
+  const first = scanRegions(
+    freqsHz, envelopeDb, regions, envelopePeakDb, holes, trendFor(envelopeDb),
+  )
   const totals = new Map()
   let passes = 0
 
   for (let pass = 1; pass <= MAX_CORRECTION_PASSES; pass++) {
-    const scan = pass === 1
-      ? first
-      : scanRegions(
+    let scan = first
+    if (pass > 1) {
+      const corrected = correctedEnvelope(
+        sampleRate, freqsHz, envelopeDb, [...totals.values()],
+      )
+      scan = scanRegions(
         freqsHz,
-        correctedEnvelope(sampleRate, freqsHz, envelopeDb, [...totals.values()]),
+        corrected,
         regions,
         envelopePeakDb,
         // Holes are a property of the SOURCE, like envelopePeakDb, and are
@@ -880,7 +976,9 @@ export function iterateCorrections(
         // hole on the next pass and start masking out the very region it is
         // working on.
         holes,
+        trendFor(corrected),
       )
+    }
     if (scan.detected.length === 0) break
 
     let moved = false
@@ -953,8 +1051,10 @@ export function iterateCorrections(
  *
  * @param {Float32Array} audio mono, 32-bit float
  * @param {number} sampleRate
+ * @param {{baseline?: 'chord'|'trend'}} [options] see the BASELINE STRATEGY note
+ *   at the top of this file. Defaults to the shipping behaviour.
  */
-export function analyzeVoiceRx(audio, sampleRate) {
+export function analyzeVoiceRx(audio, sampleRate, { baseline = 'chord' } = {}) {
   const collected = collectVoicedFrames(audio, sampleRate)
   const { frames, f0Values, noiseFloorDb, totalFrames } = collected
 
@@ -999,7 +1099,7 @@ export function analyzeVoiceRx(audio, sampleRate) {
   )
 
   const { regionResults, detected, passes } = iterateCorrections(
-    sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes,
+    sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes, baseline === 'trend',
   )
 
   const { bands: merged, mergeCount } = mergeBands(detected)
@@ -1037,6 +1137,7 @@ export function analyzeVoiceRx(audio, sampleRate) {
      * `skipReason: 'spectral_hole'` went unread.
      */
     holes,
+    baseline,
     mergedBands: mergeCount,
     /** How many measure-correct rounds it took to settle. See iterateCorrections. */
     passes,
