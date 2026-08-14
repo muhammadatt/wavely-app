@@ -125,9 +125,9 @@
           "2000Hz +12dB"
         ],
         "recovery": {
-          "median": 0.833,
-          "p10": 0.833,
-          "p90": 0.833,
+          "median": 0.725,
+          "p10": 0.725,
+          "p90": 0.725,
           "spread": 0
         },
         "freqErrorOctaves": {
@@ -135,7 +135,7 @@
           "max": 0.032
         },
         "spuriousBands": 2,
-        "spuriousGainDb": 11.11,
+        "spuriousGainDb": 9.21,
         "noCorrectionExpected": 4,
         "noCorrectionButGotBands": 1,
         "analysisFailures": 0
@@ -172,9 +172,9 @@
             "2000Hz +12dB"
           ],
           "recovery": {
-            "median": 0.833,
-            "p10": 0.833,
-            "p90": 0.833,
+            "median": 0.725,
+            "p10": 0.725,
+            "p90": 0.725,
             "spread": 0
           },
           "freqErrorOctaves": {
@@ -204,7 +204,7 @@
             "max": null
           },
           "spuriousBands": 2,
-          "spuriousGainDb": 11.11,
+          "spuriousGainDb": 9.21,
           "noCorrectionExpected": 2,
           "noCorrectionButGotBands": 1,
           "analysisFailures": 0

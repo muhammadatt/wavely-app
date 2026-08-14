@@ -156,12 +156,38 @@ export const MERGE_OCTAVES = 0.33
 /**
  * How many measure-correct-measure rounds one analysis runs.
  *
- * Three settles everything the per-region caps allow: an uncapped region is
- * within 0.3^2 = 9% of its deviation after two, and a capped one reaches its
- * cap in three from any starting deviation. A fourth would only ever re-confirm
- * a total that is already pinned.
+ * WAS THREE, and three was reasoned about purely as convergence: an uncapped
+ * region is within 0.3^2 = 9% of its deviation after two passes, a capped one
+ * reaches its cap in three, so a fourth could only re-confirm a pinned total.
+ * All still true, and all beside the point — the argument assumed each pass
+ * re-measures the SAME defect more accurately. It does not. Each pass re-derives
+ * the baseline from audio the previous pass already altered, so a reference with
+ * any bias in it compounds that bias round after round.
+ *
+ * The chord has exactly such a bias, and the third pass is where it shows. On
+ * the 5 kHz-notch clip it spends -7.9 dB on a region it measured at 5.12 dB —
+ * one pass at SCALE 0.70 would spend -3.6 — and listening reported that as
+ * cutting harder than the defect warranted. Dropping to two takes it to -5.7.
+ *
+ * MEASURED, and the reason this is safe: detection is 67% at one, two and three
+ * passes. Iteration never finds a defect, it only decides how much to spend on
+ * one already found. So capping it trades nothing for a third of the overshoot:
+ *
+ *                      detection   recovery   invented gain   the clip's cut
+ *   chord, 3 passes         67%       0.50         79.4 dB          -7.9 dB
+ *   chord, 2 passes         67%       0.50         75.7 dB          -5.7 dB
+ *   chord, 1 pass           67%       0.42         70.0 dB   loses a band
+ *
+ * One pass is too few: recovery drops to 0.42, and on that clip the mud band
+ * disappears entirely — it is only measurable once the larger adjacent hump has
+ * been taken down, which is the legitimate half of what iterating is for.
+ *
+ * The shipping trend baseline is near-indifferent to this (invented gain 19.8 ->
+ * 18.7 dB, detection and recovery unchanged), which is itself the tell: a
+ * reference that is not chasing its own corrections has little left to do on a
+ * third round. Same evidence as its 0.00 convergence residual.
  */
-export const MAX_CORRECTION_PASSES = 3
+export const MAX_CORRECTION_PASSES = 2
 
 /**
  * How far a region's total correction may exceed what one pass may spend.
@@ -1126,8 +1152,8 @@ export function correctedEnvelope(sampleRate, freqsHz, envelopeDb, corrections) 
  * can analyse twice, which is how the residue became visible.
  *
  * WHAT BOUNDS IT. Each pass's increment is clamped to the region's per-pass cap
- * and the running total to MAX_TOTAL_CAP_FACTOR times that, so three passes
- * cannot spend 3x6 dB on Mud. The total cap is also what stops the neighbour
+ * and the running total to MAX_TOTAL_CAP_FACTOR times that, so the passes
+ * cannot spend N x 6 dB on Mud. The total cap is also what stops the neighbour
  * coupling above from ratcheting two adjacent regions against each other, and
  * it is why the loop is safe without a convergence proof. Where and how wide
  * come from the pass that first detected a region; later passes only revise how
