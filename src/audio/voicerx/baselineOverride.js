@@ -34,14 +34,48 @@ const KNOWN = new Set(['trend', 'chord'])
  * That is precisely the confusion this exists to prevent.
  */
 export function resolveBaseline() {
-  let requested = null
-  try {
-    requested = new URLSearchParams(window.location.search).get('voicerxBaseline')
-      ?? window.localStorage.getItem('voicerxBaseline')
-  } catch {
-    // No window under test, or a browser that throws on localStorage access
-    // in private mode. Neither is a reason to fail an analysis.
-    return DEFAULT_BASELINE
-  }
+  const requested = read('voicerxBaseline')
   return KNOWN.has(requested) ? requested : DEFAULT_BASELINE
+}
+
+/**
+ * Detection-threshold multiplier — see the THRESHOLD CALIBRATION note in
+ * analysis.js.
+ *
+ *   ?voicerxThreshold=0.8
+ *   localStorage.setItem('voicerxThreshold', '0.8')
+ *
+ * 1 is the shipping calibration. 0.8 is the value the synthetic corpus prefers
+ * and the one worth listening to; it is deliberately not the default until a
+ * real corpus has been checked, because lowering a detection threshold can only
+ * increase what the tool offers on audio that needs nothing.
+ *
+ * Clamped to [0.4, 2]. Outside that the tool either offers nothing at all or
+ * offers something on every region of every file, and in both cases the person
+ * doing the listening learns nothing about the detector.
+ */
+export const DEFAULT_THRESHOLD_SCALE = 1
+const MIN_SCALE = 0.4
+const MAX_SCALE = 2
+
+export function resolveThresholdScale() {
+  const raw = read('voicerxThreshold')
+  if (raw === null || raw === '') return DEFAULT_THRESHOLD_SCALE
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < MIN_SCALE || value > MAX_SCALE) {
+    return DEFAULT_THRESHOLD_SCALE
+  }
+  return value
+}
+
+/** Query string, then stored preference. Null when neither has an opinion. */
+function read(key) {
+  try {
+    return new URLSearchParams(window.location.search).get(key)
+      ?? window.localStorage.getItem(key)
+  } catch {
+    // No window under test, or a browser that throws on localStorage access in
+    // private mode. Neither is a reason to fail an analysis.
+    return null
+  }
 }

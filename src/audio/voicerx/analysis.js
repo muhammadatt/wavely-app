@@ -83,7 +83,59 @@ import { eqDesignRate } from '../eqProcessor.js'
  *
  * Both readings rest on finished masters, so the claim is specifically "does
  * not damage good audio". Raw narrator recordings remain unvalidated.
+ *
+ *
+ * THRESHOLD CALIBRATION — an open question, not yet a default.
+ *
+ * Every per-region detection threshold in regions.js was tuned against CHORD
+ * deviations, and the chord systematically over-reads: a convex spectrum sits
+ * above its own chord whether or not anything is wrong with it, so the number a
+ * threshold was chosen to clear was always the real defect PLUS a curvature
+ * bias. The trend removes the bias, which means the same thresholds are now too
+ * high by roughly however much bias they were absorbing.
+ *
+ * That is measurable, and it lines up with what listening reported — the chord
+ * catching real defects the trend walks past, while cutting harder than the
+ * defect warranted. On the clip that started this investigation the trend
+ * measures a genuine boxy resonance at 2.46 dB against a 2.5 dB threshold: a
+ * miss by four hundredths of a decibel, on a defect a person can hear.
+ *
+ * Scaling every threshold by 0.80 on the 58-case corpus beats BOTH shipping
+ * detectors on every axis at once:
+ *
+ *                        detection   recovery   invented bands   invented gain
+ *   chord                     67%       0.50               24         79.4 dB
+ *   trend, x1.00              63%       0.44                5         19.8 dB
+ *   trend, x0.80              70%       0.58                7         27.1 dB
+ *
+ * Convergence stays at 0 and risky boosts stay at 0. Below 0.75 it collapses
+ * (x0.60 gives 41 invented bands), so 0.80 is a knee rather than a slope.
+ *
+ * It is NOT the default, for one reason: that table is the synthetic corpus,
+ * which has now been wrong about the real-audio ranking three times. Lowering a
+ * detection threshold necessarily increases what gets offered on finished audio
+ * that needs nothing, and the size of that increase has not been measured where
+ * it matters. Run `npm run scorecard:real` against a corpus of finished masters
+ * before promoting this. Until then it is reachable, so it can be heard.
  */
+
+/**
+ * Region table with every detection threshold scaled.
+ *
+ * Copies rather than mutating: the tables in regions.js are module-level
+ * objects shared by the plot, the role clamps and both detectors, so scaling
+ * them in place would silently change what every other caller sees.
+ */
+function scaleThresholds(regions, scale) {
+  if (!(scale > 0) || scale === 1) return regions
+  const out = {}
+  for (const [name, row] of Object.entries(regions)) {
+    const copy = [...row]
+    copy[THRESHOLD_DB] = row[THRESHOLD_DB] * scale
+    out[name] = copy
+  }
+  return out
+}
 
 // ── Constants, all from corrective_eq.py:41-53 ──────────────────────────────
 
@@ -1190,11 +1242,14 @@ export function iterateCorrections(
  *
  * @param {Float32Array} audio mono, 32-bit float
  * @param {number} sampleRate
- * @param {{baseline?: 'chord'|'trend'}} [options] see the BASELINE STRATEGY note
- *   at the top of this file. `trend` ships; `chord` is the superseded baseline,
- *   retained so the scorecards can still measure what changing it did.
+ * @param {{baseline?: 'chord'|'trend', thresholdScale?: number}} [options] see
+ *   the BASELINE STRATEGY and THRESHOLD CALIBRATION notes at the top of this
+ *   file. `trend` ships; `chord` is the superseded baseline, retained so the
+ *   scorecards can still measure what changing it did.
  */
-export function analyzeVoiceRx(audio, sampleRate, { baseline = 'trend' } = {}) {
+export function analyzeVoiceRx(
+  audio, sampleRate, { baseline = 'trend', thresholdScale = 1 } = {},
+) {
   const collected = collectVoicedFrames(audio, sampleRate)
   const { frames, f0Values, noiseFloorDb, totalFrames } = collected
 
@@ -1213,7 +1268,8 @@ export function analyzeVoiceRx(audio, sampleRate, { baseline = 'trend' } = {}) {
   const p5 = percentile(f0Values, 5)
   const f0P5Hz = p5 > 0 ? p5 : medianF0Hz
 
-  const { voiceType, regions } = classifyVoice(medianF0Hz)
+  const { voiceType, regions: nominalRegions } = classifyVoice(medianF0Hz)
+  const regions = scaleThresholds(nominalRegions, thresholdScale)
   const { freqsHz, envelopeDb, lifterCutoff } = computeCepstralEnvelope(
     frames, sampleRate, f0P5Hz,
   )
@@ -1278,6 +1334,7 @@ export function analyzeVoiceRx(audio, sampleRate, { baseline = 'trend' } = {}) {
      */
     holes,
     baseline,
+    thresholdScale,
     mergedBands: mergeCount,
     /** How many measure-correct rounds it took to settle. See iterateCorrections. */
     passes,

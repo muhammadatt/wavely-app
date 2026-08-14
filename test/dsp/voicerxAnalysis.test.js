@@ -24,7 +24,7 @@ import {
 } from '../../src/audio/voicerx/analysis.js'
 import {
   classifyVoice, MALE_REGIONS, FEMALE_REGIONS, SCAN_LOW, SCAN_HIGH, MAX_CUT_DB,
-  REGION_ORDER, regionAtHz,
+  REGION_ORDER, regionAtHz, THRESHOLD_DB,
 } from '../../src/audio/voicerx/regions.js'
 import { buildSuggestions, buildAdvisories } from '../../src/audio/voicerx/suggestions.js'
 import { detectSpectralHoles, holeCoverage } from '../../src/audio/voicerx/holes.js'
@@ -739,4 +739,26 @@ test('suggestions carry the measured centre, gain and Q', () => {
 
 test('suggestions are empty when nothing is wrong', () => {
   assert.deepEqual(buildSuggestions({ ok: false, reason: 'insufficient_voiced' }), [])
+})
+
+test('thresholdScale changes what is detected without touching the shared tables', () => {
+  // A resonance planted just under the shipping threshold: invisible at 1.0,
+  // found once the threshold is scaled down. If this ever stops discriminating,
+  // the probe has drifted rather than the feature having broken.
+  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 900, resonanceDb: 5 })
+  const nasalOf = r => r.regionResults.find(x => x.name === 'nasal')
+
+  const shipping = analyzeVoiceRx(audio, SR)
+  const lowered = analyzeVoiceRx(audio, SR, { thresholdScale: 0.6 })
+  assert.equal(nasalOf(shipping).detected, false,
+    `probe is above the shipping threshold at ${nasalOf(shipping).peakDeviationDb} dB`)
+  assert.equal(nasalOf(lowered).detected, true,
+    `still missed at x0.6, ${nasalOf(lowered).peakDeviationDb} dB`)
+
+  // The region tables are module-level objects shared with the plot, the role
+  // clamps and both detectors. Scaling them in place would change every other
+  // caller's idea of a threshold, silently and for the rest of the session.
+  assert.equal(MALE_REGIONS.nasal[THRESHOLD_DB], 2.5, 'the shared table was mutated')
+  assert.equal(nasalOf(analyzeVoiceRx(audio, SR)).detected, false,
+    'a scaled analysis leaked into the next unscaled one')
 })
