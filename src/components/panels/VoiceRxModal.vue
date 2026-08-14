@@ -125,10 +125,22 @@ async function applyAndClose() {
            aligned with the IN/OUT bars regardless of list length. -->
       <div v-if="vox.suggestions.value.length > 0" class="mb-[14px]">
         <div class="flex items-center justify-between mb-[7px]">
-          <span
-            style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.5)"
-          >
-            ISSUES IDENTIFIED:
+          <span class="flex items-center gap-[8px]">
+            <span
+              style="font:700 9px/1 'Inter';letter-spacing:.12em;color:rgba(255,255,255,.5)"
+            >
+              ISSUES IDENTIFIED:
+            </span>
+            <!-- Only when the baseline override is active (see resolveBaseline
+                 in useVoiceRx.js). An A/B where you cannot see which side you
+                 are on is not a comparison; normal users never see this. -->
+            <span
+              v-if="vox.analysis.value?.ok && vox.analysis.value.baseline !== 'trend'"
+              style="font:700 9px/1 'Inter';letter-spacing:.1em;color:#f0b429"
+              title="VoiceRx baseline override is active — this is not the shipping detector."
+            >
+              BASELINE: {{ vox.analysis.value.baseline.toUpperCase() }}
+            </span>
           </span>
           <div class="flex items-center gap-[10px]">
             <!-- Only once there is something to re-do. Keyed on the raw analysis

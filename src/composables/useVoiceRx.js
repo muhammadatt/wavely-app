@@ -10,12 +10,12 @@ import {
 import { analyzeVoiceRx, MIN_VOICED_FRAMES, HOP_SIZE, FRAME_SIZE } from '../audio/voicerx/analysis.js'
 import { buildSuggestions, buildAdvisories, suggestionToBand } from '../audio/voicerx/suggestions.js'
 import { MALE_REGIONS, regionAtHz } from '../audio/voicerx/regions.js'
+import { resolveBaseline, DEFAULT_BASELINE } from '../audio/voicerx/baselineOverride.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { receiveBands } from './useManualEq.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const VOICERX_WINDOW_ID = 'voicerx'
-
 /**
  * VoiceRx — the voice diagnosis plugin.
  *
@@ -543,7 +543,11 @@ export function useVoiceRx() {
       // stereo pair would otherwise be analysed as its left channel alone.
       const mono = rendered.length === 1 ? rendered[0] : mixToMono(rendered)
 
-      const result = analyzeVoiceRx(mono, sampleRate)
+      const baseline = resolveBaseline()
+      const result = analyzeVoiceRx(mono, sampleRate, { baseline })
+      if (baseline !== DEFAULT_BASELINE) {
+        console.info(`VoiceRx: analysing with the "${baseline}" baseline (override active)`)
+      }
 
       if (!result.ok) {
         analysis.value = null
