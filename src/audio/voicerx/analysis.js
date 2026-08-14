@@ -209,7 +209,7 @@ export const MAX_CORRECTION_PASSES = 2
  * wrong as the voice is to be that broken, and a 15 dB surgical cut taken on
  * trust is the worse mistake.
  */
-export const MAX_TOTAL_CAP_FACTOR = 2
+export const MAX_TOTAL_CAP_FACTOR = 1
 const NATS_TO_DB = 10.0 / Math.LN10
 
 /**
