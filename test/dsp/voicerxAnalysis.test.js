@@ -24,7 +24,7 @@ import {
 } from '../../src/audio/voicerx/analysis.js'
 import {
   classifyVoice, MALE_REGIONS, FEMALE_REGIONS, SCAN_LOW, SCAN_HIGH, MAX_CUT_DB,
-  REGION_ORDER, regionAtHz,
+  REGION_ORDER, regionAtHz, THRESHOLD_DB,
 } from '../../src/audio/voicerx/regions.js'
 import { buildSuggestions, buildAdvisories } from '../../src/audio/voicerx/suggestions.js'
 import { detectSpectralHoles, holeCoverage } from '../../src/audio/voicerx/holes.js'
@@ -65,6 +65,9 @@ function noise(n, seed = 0x9e3779b9) {
  */
 function synthVoice({
   f0 = 120, seconds = 3, resonanceHz = null, resonanceDb = 12, bandwidthHz = 5000,
+  // A second, smaller resonance. Two humps rather than one is the only way to
+  // exercise what iterating is actually for -- see the late-detection test.
+  secondHz = null, secondDb = 8,
   notchHz = null, notchDb = 18, notchQ = 1.0,
 } = {}) {
   const n = Math.round(SR * seconds)
@@ -85,9 +88,10 @@ function synthVoice({
   tilt.setSection(0, peaking(SR, 500, 0.4, -6, 'q'))
   tilt.process(sig, sig, n, 0)
 
-  if (resonanceHz) {
+  for (const [hz, db] of [[resonanceHz, resonanceDb], [secondHz, secondDb]]) {
+    if (!hz) continue
     const res = new BiquadCascade(1, 1)
-    res.setSection(0, peaking(SR, resonanceHz, 3.0, resonanceDb, 'q'))
+    res.setSection(0, peaking(SR, hz, 3.0, db, 'q'))
     res.process(sig, sig, n, 0)
   }
 
@@ -339,22 +343,59 @@ test('the energy gate does not eat continuous speech', () => {
 
 // ── End to end ──────────────────────────────────────────────────────────────
 
+/**
+ * 900 Hz sits inside the male nasal region (650-1200) and outside every other,
+ * and it is clear of the synth's own -6 dB tilt at 500 Hz.
+ *
+ * These end-to-end tests used to plant at 300 Hz / mud. That stopped working
+ * when the trend became the default baseline, and the reason is a real property
+ * of the method rather than a bug: at 300 Hz on an F0 120 voice the defect sits
+ * on the spectrum's own maximum, where a smooth local reference follows it and
+ * almost nothing is left over. The 12 dB resonance that read well clear of
+ * threshold against the chord reads 1.24 dB against the trend. The blind spot
+ * is pinned explicitly below rather than hidden by moving these tests.
+ */
+const PROBE = { f0: 120, seconds: 3, resonanceHz: 900, resonanceDb: 12 }
+
 test('a planted resonance is detected in the right region', () => {
-  // 300 Hz sits inside the male mud region (200-420) and outside every other.
-  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
+  const audio = synthVoice(PROBE)
   const result = analyzeVoiceRx(audio, SR)
 
   assert.equal(result.ok, true, `analysis failed: ${result.reason}`)
   assert.equal(result.voiceType, 'male', `classified as ${result.voiceType}`)
 
-  const mud = result.regionResults.find(r => r.name === 'mud')
-  assert.equal(mud.detected, true, `mud peak deviation was ${mud.peakDeviationDb} dB`)
+  const nasal = result.regionResults.find(r => r.name === 'nasal')
+  assert.equal(nasal.detected, true, `nasal peak deviation was ${nasal.peakDeviationDb} dB`)
   assert.ok(
-    Math.abs(mud.centerHz - 300) < 60,
-    `detected at ${mud.centerHz} Hz, expected near 300`,
+    Math.abs(Math.log2(nasal.centerHz / 900)) < 0.3,
+    `detected at ${nasal.centerHz} Hz, expected near 900`,
   )
-  assert.ok(mud.gainDb < 0, 'a hump must produce a cut')
-  assert.ok(mud.gainDb >= -6, 'gain must respect the region cut limit')
+  assert.ok(nasal.gainDb < 0, 'a hump must produce a cut')
+  // The bound is the TOTAL cap. MAX_CUT_DB limits a single measurement; the
+  // analysis takes several and MAX_TOTAL_CAP_FACTOR bounds their sum.
+  const cap = MALE_REGIONS.nasal[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
+  assert.ok(nasal.gainDb >= -cap, `gain ${nasal.gainDb} past the nasal total cap ${-cap}`)
+})
+
+test('a defect on the spectral maximum is near-invisible to the trend baseline', () => {
+  // Not an aspiration — a measured limitation of the shipping detector, pinned
+  // so that a change in it is noticed. A smooth local reference cannot separate
+  // a broad hump from the peak it sits on, which is why the low-frequency
+  // detection rate is what it is. The chord caught this case and paid for it
+  // everywhere else: on 31 windows of finished masters it invents 89 bands to
+  // the trend's 48.
+  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
+
+  const trend = analyzeVoiceRx(audio, SR, { baseline: 'trend' })
+  const chord = analyzeVoiceRx(audio, SR)
+  assert.ok(trend.ok && chord.ok)
+
+  const mudOf = r => r.regionResults.find(x => x.name === 'mud')
+  assert.equal(mudOf(chord).detected, true,
+    'the shipping chord baseline should still see this; if not, the probe changed')
+  assert.equal(mudOf(trend).detected, false,
+    `the trend now detects mud at ${mudOf(trend).peakDeviationDb} dB — if this is a real `
+    + 'improvement, re-record the scorecards and delete this test')
 })
 
 test('gain opposes the deviation and is capped by the region limits', () => {
@@ -377,21 +418,46 @@ test('gain opposes the deviation and is capped by the region limits', () => {
 
 test('a bigger resonance produces a bigger correction', () => {
   const gainFor = db => {
-    const r = analyzeVoiceRx(
-      synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: db }), SR,
-    )
-    return r.regionResults.find(x => x.name === 'mud').gainDb
+    const r = analyzeVoiceRx(synthVoice({ ...PROBE, resonanceDb: db }), SR)
+    return r.regionResults.find(x => x.name === 'nasal').gainDb
   }
-  const small = gainFor(12)
-  const large = gainFor(30)
+  // Both must stay clear of the cap or they saturate to the same number and the
+  // comparison says nothing: at 900 Hz the nasal total cap of 5 dB is reached
+  // by about a 12 dB resonance.
+  const small = gainFor(6)
+  const large = gainFor(8)
   assert.ok(large < small, `expected a deeper cut for a bigger resonance: ${large} vs ${small}`)
 
   // The bound is the TOTAL cap, not the per-pass one. MAX_CUT_DB limits what a
   // single measurement may spend; the analysis takes up to MAX_CORRECTION_PASSES
   // of those, and MAX_TOTAL_CAP_FACTOR bounds the sum. Asserting -6 here would
   // be asserting that iterating never happens.
-  const totalLimit = MALE_REGIONS.mud[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
-  assert.ok(large >= -totalLimit, `gain must never exceed the mud total cap: ${large}`)
+  const totalLimit = MALE_REGIONS.nasal[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
+  assert.ok(large >= -totalLimit, `gain must never exceed the nasal total cap: ${large}`)
+})
+
+test('iterating surfaces a region that the first pass could not measure', () => {
+  // THIS is what iterating is for, and it is the whole reason
+  // MAX_CORRECTION_PASSES is 2 rather than 1. With MAX_TOTAL_CAP_FACTOR at 1 a
+  // region reaches its cap on the pass that finds it and can never gain more,
+  // so a later pass cannot inflate an existing correction -- it can only find
+  // something that was not measurable before.
+  //
+  // A smaller hump next to a larger one is exactly that case: the big one at
+  // 900 Hz lifts the context window boxy_honky is measured against, so 550 Hz
+  // reads as ordinary until the 900 Hz correction brings its neighbour down.
+  // The same thing happens on real audio -- on the reference clip the mud band
+  // appears only on the second pass, after the boxy hump above it is cut.
+  const r = analyzeVoiceRx(synthVoice({
+    f0: 120, seconds: 3, resonanceHz: 900, resonanceDb: 10, secondHz: 550, secondDb: 8,
+  }), SR)
+  assert.ok(r.ok)
+
+  const boxy = r.regionResults.find(x => x.name === 'boxy_honky')
+  assert.equal(boxy.detected, true, 'the smaller neighbouring hump was never found')
+  assert.ok(boxy.detectedOnPass > 1,
+    `boxy_honky was found on pass ${boxy.detectedOnPass}; the probe no longer needs iterating`)
+  assert.ok(r.passes > 1, 'the analysis settled in one pass; nothing was iterated')
 })
 
 test('one analysis settles what repeated analysis used to', () => {
@@ -399,11 +465,8 @@ test('one analysis settles what repeated analysis used to', () => {
   // and be told there is still work to do. A single pass leaves 30% of every
   // deviation standing by construction (SCALE is 0.70), so anything much over
   // threshold reported again the moment anyone looked.
-  const r = analyzeVoiceRx(
-    synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 }), SR,
-  )
+  const r = analyzeVoiceRx(synthVoice(PROBE), SR)
   assert.ok(r.ok)
-  assert.ok(r.passes > 1, 'the analysis settled in one pass; nothing was iterated')
 
   // Apply what it recommends to the envelope it measured, then measure again.
   // This is exactly what the user was doing by hand.
@@ -417,19 +480,32 @@ test('one analysis settles what repeated analysis used to', () => {
     }
   }
   const again = scanRegions(r.freqsHz, after, r.regions, peakDb)
-  const mud = again.regionResults.find(x => x.name === 'mud')
-  assert.equal(mud.detected, false,
-    `mud still reads ${mud.peakDeviationDb} dB out against a ${mud.thresholdDb} dB threshold`)
+  const before = r.regionResults.find(x => x.name === 'nasal').peakDeviationDb
+  const nasal = again.regionResults.find(x => x.name === 'nasal')
+
+  // MOST of it must be gone, not all of it. Requiring it to fall under
+  // threshold would be requiring the cap not to work: MAX_TOTAL_CAP_FACTOR is
+  // 1, so nasal will never spend more than its 5 dB however large the defect,
+  // and stopping short while staying flagged is the deliberate behaviour the
+  // next test asserts.
+  assert.ok(nasal.peakDeviationDb < before * 0.6,
+    `nasal went ${before} -> ${nasal.peakDeviationDb} dB; one analysis barely moved it`)
 })
+
 
 test('iterating never spends more than the total cap', () => {
   // A resonance far past anything the caps can resolve must stop short and stay
   // flagged rather than earning a surgical cut nobody measured carefully.
-  const r = analyzeVoiceRx(
-    synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 40 }), SR,
-  )
+  const r = analyzeVoiceRx(synthVoice({ ...PROBE, resonanceDb: 40 }), SR)
+  // mud carries the largest cut limit of any region, so it bounds every band
+  // here whatever region they land in. Assert the loop runs at all: planting a
+  // defect the detector cannot see would make this pass vacuously.
   const totalLimit = MALE_REGIONS.mud[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
-  for (const band of r.bands) {
+  // The rumble shelf has its own cap and is not produced by iterating, so the
+  // region caps do not apply to it.
+  const iterated = r.bands.filter(b => b.roleId !== 'rumble')
+  assert.ok(iterated.length > 0, 'a 40 dB resonance produced no bands to cap')
+  for (const band of iterated) {
     assert.ok(
       Math.abs(band.gainDb) <= totalLimit + 0.01,
       `${band.region} spent ${band.gainDb} dB, past the ${totalLimit} dB total cap`,
@@ -681,19 +757,40 @@ test('short but genuine speech is reported as short, not as non-speech', () => {
 })
 
 test('suggestions carry the measured centre, gain and Q', () => {
-  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 300, resonanceDb: 12 })
-  const result = analyzeVoiceRx(audio, SR)
+  const result = analyzeVoiceRx(synthVoice(PROBE), SR)
   const suggestions = buildSuggestions(result)
 
   assert.ok(suggestions.length > 0, 'a planted resonance produced no suggestion')
-  const s = suggestions.find(x => x.region.startsWith('mud'))
-  assert.ok(s, `no mud suggestion in ${suggestions.map(x => x.region).join(', ')}`)
-  assert.equal(s.roleId, 'mud')
-  assert.ok(s.symptom.includes('muddy'), `symptom read "${s.symptom}"`)
+  const s = suggestions.find(x => x.region.startsWith('nasal'))
+  assert.ok(s, `no nasal suggestion in ${suggestions.map(x => x.region).join(', ')}`)
+  assert.equal(s.roleId, 'nasal')
+  assert.ok(s.symptom.includes('pinched'), `symptom read "${s.symptom}"`)
   assert.ok(s.gainDb < 0)
   assert.ok(s.q >= 0.8 && s.q <= 8, `Q ${s.q} outside the clamp`)
 })
 
 test('suggestions are empty when nothing is wrong', () => {
   assert.deepEqual(buildSuggestions({ ok: false, reason: 'insufficient_voiced' }), [])
+})
+
+test('thresholdScale changes what is detected without touching the shared tables', () => {
+  // A resonance planted just under the shipping threshold: invisible at 1.0,
+  // found once the threshold is scaled down. If this ever stops discriminating,
+  // the probe has drifted rather than the feature having broken.
+  const audio = synthVoice({ f0: 120, seconds: 3, resonanceHz: 900, resonanceDb: 4 })
+  const nasalOf = r => r.regionResults.find(x => x.name === 'nasal')
+
+  const shipping = analyzeVoiceRx(audio, SR)
+  const lowered = analyzeVoiceRx(audio, SR, { thresholdScale: 0.6 })
+  assert.equal(nasalOf(shipping).detected, false,
+    `probe is above the shipping threshold at ${nasalOf(shipping).peakDeviationDb} dB`)
+  assert.equal(nasalOf(lowered).detected, true,
+    `still missed at x0.6, ${nasalOf(lowered).peakDeviationDb} dB`)
+
+  // The region tables are module-level objects shared with the plot, the role
+  // clamps and both detectors. Scaling them in place would change every other
+  // caller's idea of a threshold, silently and for the rest of the session.
+  assert.equal(MALE_REGIONS.nasal[THRESHOLD_DB], 2.5, 'the shared table was mutated')
+  assert.equal(nasalOf(analyzeVoiceRx(audio, SR)).detected, false,
+    'a scaled analysis leaked into the next unscaled one')
 })

@@ -30,7 +30,7 @@
 import { REGION_SPAN_HZ, classifyVoice, regionAtHz } from '../regions.js'
 import { roleForRegion } from '../../eqBands.js'
 import { measure } from './envelope.js'
-import { toLogGrid, buildMask, robustTrend, GRID_OCTAVES } from './trend.js'
+import { toLogGrid, buildMask, robustTrend, GRID_OCTAVES } from '../trend.js'
 import { findFeatures } from './features.js'
 import { scoreConfidence } from './confidence.js'
 

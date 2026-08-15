@@ -44,9 +44,110 @@ import {
 import {
   detectSpectralHoles, inAnyHole, holeCoverage, MAX_HOLE_COVERAGE,
 } from './holes.js'
+import { toLogGrid, robustTrend } from './trend.js'
+// Circular by design: rumble.js reuses this module's FFT geometry and helpers,
+// and only touches them inside function bodies, so neither module reads an
+// uninitialised binding while the other is still evaluating.
+import { analyzeRumble } from './rumble.js'
 import { roleForRegion } from '../eqBands.js'
 import { peaking, lowShelf, highShelf, magnitudeResponseDb } from '../dsp/biquad.js'
 import { eqDesignRate } from '../eqProcessor.js'
+
+/**
+ * BASELINE STRATEGY — `chord` ships; `trend` stays wired and scored.
+ *
+ * `chord` is the original: the median of a context window either side of a scan
+ * region, interpolated straight across in log-frequency. `trend` replaces it
+ * with a robust local quadratic and changes NOTHING else — same region tables,
+ * directions, thresholds, caps, SCALE, iteration and merge. One variable, which
+ * is what made the comparison readable.
+ *
+ * THE TWO OF THEM MAKE OPPOSITE ERRORS, and this is not a case where one is
+ * simply better. The chord has one confirmed structural fault: it reads
+ * spectral CURVATURE as a hump, because a convex spectrum sits above its own
+ * chord whether or not anything is wrong with it. So a notch or a steep
+ * roll-off near a region tips the anchors and invents a correction on the far
+ * side of it — the failure that started this whole investigation. Against 13
+ * commercially mastered files (31 windows), where the right answer is very
+ * nearly "no correction":
+ *
+ *   invented bands        89 → 48          invented gain   289.4 → 132.0 dB
+ *   windows left alone     1 →  5 of 31    bands on F0         1 → 0
+ *   convergence residual 0.11 → 0.00       risky boosts        0 → 0
+ *
+ * The trend is better on every one of those. It is worse at the other error.
+ * A defect centred on the spectrum's own maximum is near-invisible to a smooth
+ * local reference — a 12 dB resonance at 300 Hz on an F0 120 voice reads
+ * 1.24 dB — so it walks past low-frequency problems the chord catches, and on
+ * the reference clip it locates the boxy peak 0.45 octaves below where the
+ * chord puts it, close enough to the mud band that `mergeBands` collapses the
+ * two into one.
+ *
+ * WHY THE CHORD SHIPS. Those two error types are not equally weighted by
+ * measurement, and the corpus can only see one of them. "Did it damage audio
+ * that was already finished" is countable; "did it find the problem a person
+ * can hear" needs a person. Listening across several files preferred the
+ * chord's answers — specifically its two distinct low-mid cuts over the trend's
+ * merged single one — and the corpus evidence against the chord was collected
+ * entirely on files that needed nothing, which is not the input this tool
+ * receives. When a countable proxy and a direct observation disagree about the
+ * thing the proxy is standing in for, the observation wins.
+ *
+ * The trend's real-corpus advantage remains real and remains unaddressed. If
+ * the merge behaviour and the low-frequency blind spot are fixed, revisit this.
+ *
+ *
+ * THRESHOLD CALIBRATION — an open question, not yet a default.
+ *
+ * Every per-region detection threshold in regions.js was tuned against CHORD
+ * deviations, and the chord systematically over-reads: a convex spectrum sits
+ * above its own chord whether or not anything is wrong with it, so the number a
+ * threshold was chosen to clear was always the real defect PLUS a curvature
+ * bias. The trend removes the bias, which means the same thresholds are now too
+ * high by roughly however much bias they were absorbing.
+ *
+ * That is measurable, and it lines up with what listening reported — the chord
+ * catching real defects the trend walks past, while cutting harder than the
+ * defect warranted. On the clip that started this investigation the trend
+ * measures a genuine boxy resonance at 2.46 dB against a 2.5 dB threshold: a
+ * miss by four hundredths of a decibel, on a defect a person can hear.
+ *
+ * Scaling every threshold by 0.80 on the 58-case corpus beats BOTH shipping
+ * detectors on every axis at once:
+ *
+ *                        detection   recovery   invented bands   invented gain
+ *   chord                     67%       0.50               24         79.4 dB
+ *   trend, x1.00              63%       0.44                5         19.8 dB
+ *   trend, x0.80              70%       0.58                7         27.1 dB
+ *
+ * Convergence stays at 0 and risky boosts stay at 0. Below 0.75 it collapses
+ * (x0.60 gives 41 invented bands), so 0.80 is a knee rather than a slope.
+ *
+ * It is NOT the default, for one reason: that table is the synthetic corpus,
+ * which has now been wrong about the real-audio ranking three times. Lowering a
+ * detection threshold necessarily increases what gets offered on finished audio
+ * that needs nothing, and the size of that increase has not been measured where
+ * it matters. Run `npm run scorecard:real` against a corpus of finished masters
+ * before promoting this. Until then it is reachable, so it can be heard.
+ */
+
+/**
+ * Region table with every detection threshold scaled.
+ *
+ * Copies rather than mutating: the tables in regions.js are module-level
+ * objects shared by the plot, the role clamps and both detectors, so scaling
+ * them in place would silently change what every other caller sees.
+ */
+function scaleThresholds(regions, scale) {
+  if (!(scale > 0) || scale === 1) return regions
+  const out = {}
+  for (const [name, row] of Object.entries(regions)) {
+    const copy = [...row]
+    copy[THRESHOLD_DB] = row[THRESHOLD_DB] * scale
+    out[name] = copy
+  }
+  return out
+}
 
 // ── Constants, all from corrective_eq.py:41-53 ──────────────────────────────
 
@@ -67,34 +168,71 @@ export const MERGE_OCTAVES = 0.33
 /**
  * How many measure-correct-measure rounds one analysis runs.
  *
- * Three settles everything the per-region caps allow: an uncapped region is
- * within 0.3^2 = 9% of its deviation after two, and a capped one reaches its
- * cap in three from any starting deviation. A fourth would only ever re-confirm
- * a total that is already pinned.
+ * WAS THREE, and three was reasoned about purely as convergence: an uncapped
+ * region is within 0.3^2 = 9% of its deviation after two passes, a capped one
+ * reaches its cap in three, so a fourth could only re-confirm a pinned total.
+ * All still true, and all beside the point — the argument assumed each pass
+ * re-measures the SAME defect more accurately. It does not. Each pass re-derives
+ * the baseline from audio the previous pass already altered, so a reference with
+ * any bias in it compounds that bias round after round.
+ *
+ * The chord has exactly such a bias, and the third pass is where it shows. On
+ * the 5 kHz-notch clip it spends -7.9 dB on a region it measured at 5.12 dB —
+ * one pass at SCALE 0.70 would spend -3.6 — and listening reported that as
+ * cutting harder than the defect warranted. Dropping to two takes it to -5.7.
+ *
+ * MEASURED, and the reason this is safe: detection is 67% at one, two and three
+ * passes. Iteration never finds a defect, it only decides how much to spend on
+ * one already found. So capping it trades nothing for a third of the overshoot:
+ *
+ *                      detection   recovery   invented gain   the clip's cut
+ *   chord, 3 passes         67%       0.50         79.4 dB          -7.9 dB
+ *   chord, 2 passes         67%       0.50         75.7 dB          -5.7 dB
+ *   chord, 1 pass           67%       0.42         70.0 dB   loses a band
+ *
+ * One pass is too few: recovery drops to 0.42, and on that clip the mud band
+ * disappears entirely — it is only measurable once the larger adjacent hump has
+ * been taken down, which is the legitimate half of what iterating is for.
+ *
+ * The shipping trend baseline is near-indifferent to this (invented gain 19.8 ->
+ * 18.7 dB, detection and recovery unchanged), which is itself the tell: a
+ * reference that is not chasing its own corrections has little left to do on a
+ * third round. Same evidence as its 0.00 convergence residual.
  */
-export const MAX_CORRECTION_PASSES = 3
+export const MAX_CORRECTION_PASSES = 2
 
 /**
  * How far a region's total correction may exceed what one pass may spend.
  *
- * There are two caps and they answer different questions. `MAX_CUT_DB` /
- * `MAX_BOOST_DB` bound a single decision — how much one measurement is trusted
- * to move the file — and iterating must not turn that into three times the
- * licence. But holding the TOTAL to the per-pass figure would make iterating
- * pointless: a 12 dB hump in mud spends its whole 6 dB budget on pass one and
- * still leaves 6 dB standing, so the total has to be allowed past 6 or nothing
- * has changed.
+ * ONE: the per-region dB caps in regions.js are TOTAL caps, not per-pass
+ * allowances. `MAX_CUT_DB = 6` for mud means this tool will never cut mud by
+ * more than 6 dB, full stop — which is what the number reads as, and what
+ * anyone reading the table would assume it meant.
  *
- * Two is not a taste call. It is where repeated manual analysis already lands:
- * re-running the analysis on corrected audio hands each round a fresh budget,
- * and a 12 dB hump settles at 6.0 + 4.2 = 10.2 dB over two rounds. This factor
- * lets one analysis reach the same place the user was reaching by hand, and no
- * further. Deviations past about 14 dB stop short of resolved and stay flagged,
- * which is the right answer: at that size the measurement is as likely to be
- * wrong as the voice is to be that broken, and a 15 dB surgical cut taken on
- * trust is the worse mistake.
+ * This was 2, on the argument that holding the total to the per-pass figure
+ * "would make iterating pointless" because a 12 dB hump spends its whole budget
+ * on pass one and still leaves 6 dB standing. That argument was wrong about
+ * what iterating is FOR. Iteration does not exist to keep spending on a region
+ * already at its limit; it exists because a second feature can be unmeasurable
+ * until a larger adjacent one comes down — the mud band on the 5 kHz-notch clip
+ * appears only on pass two, after the boxy hump above it is corrected. That
+ * still works with this at 1: a region first detected on a later pass gets its
+ * own full budget. What no longer happens is one region quietly accumulating
+ * past the cap the table advertises.
+ *
+ * The old reasoning also justified itself by matching what repeated manual
+ * analysis reaches — a user re-running the tool by hand gets a fresh budget
+ * each round, landing a 12 dB hump at 6.0 + 4.2 = 10.2 dB. That is a
+ * description of what the tool used to permit, not evidence that it should:
+ * the same clip that motivated this change had the chord spending 7.9 dB on a
+ * region it measured at 5.12, and listening called that too much.
+ *
+ * A deviation past what a cap allows now stops short of resolved and stays
+ * flagged. At that size the measurement is as likely to be wrong as the voice
+ * is to be that broken, and a large surgical cut taken on trust is the worse
+ * mistake.
  */
-export const MAX_TOTAL_CAP_FACTOR = 2
+export const MAX_TOTAL_CAP_FACTOR = 1
 const NATS_TO_DB = 10.0 / Math.LN10
 
 /**
@@ -130,6 +268,71 @@ const NOISE_FLOOR_PERCENTILE = 10
  * band to always catch it.
  */
 const DEAD_REGION_DB = 60
+
+/**
+ * Steepest local slope, in dB per octave, into which a correction may be made.
+ *
+ * A dip detector cannot tell "this band is deficient" from "this file's
+ * bandwidth ends here", and the second is common: any lowpass, any codec, any
+ * modest microphone. `air` is a fixed 9-16 kHz band scanned for dips with a
+ * boost cap, so on a file whose content stops at 11 kHz it finds the roll-off,
+ * calls it a deficiency, and lifts it — which is bandwidth extension performed
+ * by accident, and all it raises is hiss. On the real corpus this was six
+ * boosts of +6.0 dB at 14.8-16 kHz, every one pinned at twice its cap.
+ *
+ * The guard is a slope test because the separation is enormous. Measured on the
+ * reproduced cases:
+ *
+ *   bandwidth edge at 14 kHz, false boost     -56 dB/octave
+ *   bandwidth edge at 11 kHz, false boost     -59
+ *   bandwidth edge at  9 kHz, false boost     -62
+ *   planted -6 dB deficiency at 9 kHz, real    -6
+ *   planted -6 dB deficiency at 5 kHz, real    -5
+ *   clean voice, no defect                     -9
+ *
+ * Nothing sits between -9 and -56, so the threshold's exact value inside that
+ * gap does not matter. 25 dB/octave is chosen as comfortably beyond anything a
+ * vocal tract produces: a spectrum falling that fast over half an octave is a
+ * filter, not a voice.
+ *
+ * Tested on the MAGNITUDE of the slope, so the same rule catches the mirror
+ * case at the bottom — boosting into a high-pass roll-off, which every ACX
+ * master carries — without a second constant.
+ *
+ * CUTS ARE GUARDED TOO, which was not the first instinct. The reasoning for
+ * exempting them — attenuating something already attenuated is pointless but
+ * harmless — is wrong twice over. A cut on the shoulder of a roll-off removes
+ * the last of a file's real top end, and more fundamentally the test is about
+ * whether the DETECTION is valid: a feature sitting on a filter slope is a
+ * filter artefact whichever direction the correction would point. Measured,
+ * extending it to cuts takes the bandwidth family to zero invented bands with
+ * detection rate unchanged, so it costs nothing.
+ */
+const MAX_CORRECTION_SLOPE_DB_PER_OCT = 25
+
+/** Span over which that slope is measured, in octaves. */
+const CORRECTION_SLOPE_SPAN_OCTAVES = 0.5
+
+/**
+ * Local slope of the envelope at `hz`, in dB per octave.
+ *
+ * Measured across a span rather than between adjacent bins: a two-bin
+ * difference on a cepstrally smoothed curve is dominated by the smoothing, and
+ * what this needs to know is the gross direction of travel.
+ */
+function envelopeSlopeDbPerOctave(freqsHz, envelopeDb, hz, sampleRate) {
+  const half = Math.pow(2, CORRECTION_SLOPE_SPAN_OCTAVES / 2)
+  const lo = hz / half
+  const hi = Math.min(hz * half, sampleRate / 2 - 100)
+  if (!(hi > lo)) return 0
+
+  const step = freqsHz[1] - freqsHz[0]
+  const at = (f) => {
+    const k = Math.min(envelopeDb.length - 1, Math.max(0, Math.round(f / step)))
+    return envelopeDb[k]
+  }
+  return (at(hi) - at(lo)) / Math.log2(hi / lo)
+}
 
 /**
  * Fraction of frames that must be pitched before the material counts as speech
@@ -200,6 +403,52 @@ function clamp(v, lo, hi) {
  * shift the envelope's smoothness, so both use the same definition the Python
  * does.
  */
+/**
+ * Floor for the log-power spectrum, as a fraction of the frame's loudest bin.
+ *
+ * This used to be an absolute `+ 1e-10`, which made the entire analysis depend
+ * on how loud the file happened to be. Bins below the constant get flattened up
+ * to it and bins above keep their value, so which side of it a bin falls on
+ * moves when you apply gain — and the same recording, 6 dB louder, produces a
+ * different envelope. The invariance check found it rather than reasoning did:
+ * v2 dropped a 12.1 kHz band on a gated file when the input was lifted 6 dB.
+ *
+ * Measured on a gated synthetic, doubling the input moved envelope bins by
+ * anywhere from 6.02 to 10.3 dB where every bin should have moved by exactly
+ * 6.02. The error peaks in a narrow band of levels — those where the quietest
+ * bins straddle the constant — which is why attenuating a case by 20, 40 and 60
+ * dB failed to reproduce it, and why it survived this long.
+ *
+ * 120 dB below the frame's own peak scales with the signal, so the pipeline
+ * becomes exactly scale-invariant, and it sits far enough down to leave any
+ * well-conditioned frame's spectrum untouched.
+ */
+const LOG_POWER_FLOOR_RATIO = 1e-12
+
+/**
+ * Log power spectrum with a relative floor. Writes `bins` values into `out`.
+ *
+ * Shared by both detectors deliberately: they had separate copies of the same
+ * absolute epsilon, and a scale-dependence bug fixed in one copy is a bug still
+ * shipping in the other.
+ */
+export function logPowerSpectrum(re, im, out, bins) {
+  let maxPower = 0
+  for (let k = 0; k < bins; k++) {
+    const p = re[k] * re[k] + im[k] * im[k]
+    out[k] = p
+    if (p > maxPower) maxPower = p
+  }
+  // Digital silence has no scale of its own, so there is no relative floor to
+  // apply. A flat spectrum is the only scale-invariant answer available.
+  if (maxPower === 0) {
+    out.fill(0, 0, bins)
+    return
+  }
+  const floor = maxPower * LOG_POWER_FLOOR_RATIO
+  for (let k = 0; k < bins; k++) out[k] = Math.log(out[k] + floor)
+}
+
 export function hannSymmetric(size) {
   const w = new Float64Array(size)
   if (size === 1) {
@@ -338,11 +587,7 @@ export function computeCepstralEnvelope(frames, sampleRate, f0P5Hz) {
     for (let i = 0; i < n; i++) padded[i] = frame[i] * window[i]
 
     fft.rfft(padded, specRe, specIm)
-    for (let k = 0; k < bins; k++) {
-      const re = specRe[k]
-      const im = specIm[k]
-      logPower[k] = Math.log(re * re + im * im + 1e-10)
-    }
+    logPowerSpectrum(specRe, specIm, logPower, bins)
 
     // Real half-spectrum -> real symmetric cepstrum. irfft's null imaginary
     // argument is exactly this case; see the note in dsp/fft.js.
@@ -470,8 +715,10 @@ function anchorLevel(freqsHz, envelopeDb, edgeHz, below, floorDb, holes) {
  * @returns {{ scanFreqs, scanEnv, baseline, usable, flatBaseline }|null}
  */
 export function estimateBaseline(
-  freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb = -Infinity, holes = [],
+  freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb = -Infinity, holes = [], trendAt = null,
 ) {
+  if (trendAt) return trendBaseline(freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb, holes, trendAt)
+
   const ctxLoLow = scanLowHz / Math.pow(2, CONTEXT_OCTAVES)
   const ctxHiHigh = scanHighHz * Math.pow(2, CONTEXT_OCTAVES)
 
@@ -519,6 +766,67 @@ export function estimateBaseline(
     usable[i] = envelopeDb[k] >= floorDb && !inAnyHole(holes, freqsHz[k]) ? 1 : 0
   }
   return { scanFreqs, scanEnv, baseline, usable, flatBaseline: lowDead || highDead }
+}
+
+/**
+ * The same region measurement, referenced to a trend instead of a chord.
+ *
+ * There are no anchors here and therefore none of the anchor machinery — no
+ * context windows to be empty, no widening, no flat-baseline fallback. A local
+ * fit is defined wherever there is spectrum around the point, which is the
+ * whole reason it cannot be tipped by a notch sitting in one window.
+ *
+ * `usable` and the hole exclusion are kept identical to the chord path so the
+ * comparison isolates the baseline and nothing else.
+ */
+function trendBaseline(freqsHz, envelopeDb, scanLowHz, scanHighHz, floorDb, holes, trendAt) {
+  const scanIdx = []
+  for (let k = 0; k < freqsHz.length; k++) {
+    const f = freqsHz[k]
+    if (f >= scanLowHz && f <= scanHighHz) scanIdx.push(k)
+  }
+  if (scanIdx.length < 2) return null
+
+  const scanFreqs = new Float64Array(scanIdx.length)
+  const scanEnv = new Float64Array(scanIdx.length)
+  const baseline = new Float64Array(scanIdx.length)
+  const usable = new Uint8Array(scanIdx.length)
+  for (let i = 0; i < scanIdx.length; i++) {
+    const k = scanIdx[i]
+    scanFreqs[i] = freqsHz[k]
+    scanEnv[i] = envelopeDb[k]
+    baseline[i] = trendAt(freqsHz[k])
+    usable[i] = envelopeDb[k] >= floorDb && !inAnyHole(holes, freqsHz[k]) ? 1 : 0
+  }
+  return { scanFreqs, scanEnv, baseline, usable, flatBaseline: false }
+}
+
+/**
+ * Build a trend lookup over the whole envelope.
+ *
+ * Masked by v1's own dead-region rule rather than by v2's measured-SNR mask.
+ * The real corpus showed that mask reading 100% live on 31/31 windows — inert —
+ * so bringing it along would import a component that does nothing while
+ * pretending the experiment tested it.
+ */
+export function makeTrendLookup(freqsHz, envelopeDb, floorDb, sampleRate) {
+  const loHz = Math.max(20, freqsHz[1])
+  const hiHz = Math.min(sampleRate / 2 - 1, freqsHz[freqsHz.length - 1])
+  const grid = toLogGrid(freqsHz, envelopeDb, loHz, hiHz)
+
+  const mask = new Uint8Array(grid.n)
+  for (let i = 0; i < grid.n; i++) mask[i] = grid.db[i] >= floorDb ? 1 : 0
+
+  const { trend } = robustTrend(grid.db, mask, grid.n)
+  const logLo = Math.log2(loHz)
+  const perOctave = 1 / (Math.log2(grid.hz[1] / grid.hz[0]))
+
+  return (hz) => {
+    const x = (Math.log2(Math.max(hz, loHz)) - logLo) * perOctave
+    const i = Math.min(grid.n - 2, Math.max(0, Math.floor(x)))
+    const t = Math.min(1, Math.max(0, x - i))
+    return trend[i] * (1 - t) + trend[i + 1] * t
+  }
 }
 
 // ── Step 3 — deviation detection ────────────────────────────────────────────
@@ -678,7 +986,9 @@ export function mergeBands(input) {
  * dead-region test asks whether the SOURCE has content in a region, which is a
  * property of the recording and must not drift as corrections are applied.
  */
-export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes = []) {
+export function scanRegions(
+  freqsHz, envelopeDb, regions, envelopePeakDb, holes = [], trendAt = null, sampleRate = 44100,
+) {
   const regionResults = []
   const detected = []
 
@@ -711,7 +1021,7 @@ export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes 
 
     const base = estimateBaseline(
       freqsHz, envelopeDb, region[SCAN_LOW], region[SCAN_HIGH],
-      envelopePeakDb - DEAD_REGION_DB, holes,
+      envelopePeakDb - DEAD_REGION_DB, holes, trendAt,
     )
     if (!base) {
       entry.skipReason = 'context window unavailable'
@@ -761,6 +1071,19 @@ export function scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes 
       det.centerHz, det.deviationDb, det.widthOctaves,
       region[SCALE], region[MAX_BOOST_DB], region[MAX_CUT_DB],
     )
+
+    // A correction sitting on a filter slope is describing the filter, not the
+    // voice. See MAX_CORRECTION_SLOPE_DB_PER_OCT.
+    if (params.gainDb !== 0) {
+      const slope = envelopeSlopeDbPerOctave(freqsHz, envelopeDb, params.freqHz, sampleRate)
+      if (Math.abs(slope) > MAX_CORRECTION_SLOPE_DB_PER_OCT) {
+        entry.skipReason = 'bandwidth_edge'
+        entry.slopeDbPerOctave = round(slope, 1)
+        regionResults.push(entry)
+        continue
+      }
+    }
+
     Object.assign(entry, {
       detected: true,
       centerHz: params.freqHz,
@@ -852,26 +1175,38 @@ export function correctedEnvelope(sampleRate, freqsHz, envelopeDb, corrections) 
  * can analyse twice, which is how the residue became visible.
  *
  * WHAT BOUNDS IT. Each pass's increment is clamped to the region's per-pass cap
- * and the running total to MAX_TOTAL_CAP_FACTOR times that, so three passes
- * cannot spend 3x6 dB on Mud. The total cap is also what stops the neighbour
+ * and the running total to MAX_TOTAL_CAP_FACTOR times that, so the passes
+ * cannot spend N x 6 dB on Mud. The total cap is also what stops the neighbour
  * coupling above from ratcheting two adjacent regions against each other, and
  * it is why the loop is safe without a convergence proof. Where and how wide
  * come from the pass that first detected a region; later passes only revise how
  * much, so a correction never wanders off the anomaly it was measured from.
  */
 export function iterateCorrections(
-  sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes = [],
+  sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes = [], useTrend = false,
 ) {
-  const first = scanRegions(freqsHz, envelopeDb, regions, envelopePeakDb, holes)
+  // The reference is rebuilt on each pass's corrected envelope, exactly as the
+  // chord's anchors are re-measured — a baseline that stayed frozen while the
+  // audio under it moved would stop describing the thing being scanned.
+  const trendFor = env => (useTrend
+    ? makeTrendLookup(freqsHz, env, envelopePeakDb - DEAD_REGION_DB, sampleRate)
+    : null)
+
+  const first = scanRegions(
+    freqsHz, envelopeDb, regions, envelopePeakDb, holes, trendFor(envelopeDb), sampleRate,
+  )
   const totals = new Map()
   let passes = 0
 
   for (let pass = 1; pass <= MAX_CORRECTION_PASSES; pass++) {
-    const scan = pass === 1
-      ? first
-      : scanRegions(
+    let scan = first
+    if (pass > 1) {
+      const corrected = correctedEnvelope(
+        sampleRate, freqsHz, envelopeDb, [...totals.values()],
+      )
+      scan = scanRegions(
         freqsHz,
-        correctedEnvelope(sampleRate, freqsHz, envelopeDb, [...totals.values()]),
+        corrected,
         regions,
         envelopePeakDb,
         // Holes are a property of the SOURCE, like envelopePeakDb, and are
@@ -880,7 +1215,10 @@ export function iterateCorrections(
         // hole on the next pass and start masking out the very region it is
         // working on.
         holes,
+        trendFor(corrected),
+        sampleRate,
       )
+    }
     if (scan.detected.length === 0) break
 
     let moved = false
@@ -953,8 +1291,13 @@ export function iterateCorrections(
  *
  * @param {Float32Array} audio mono, 32-bit float
  * @param {number} sampleRate
+ * @param {{baseline?: 'chord'|'trend', thresholdScale?: number}} [options] see
+ *   the BASELINE STRATEGY and THRESHOLD CALIBRATION notes at the top of this
+ *   file. `chord` ships; `trend` is the alternative, kept wired and scored.
  */
-export function analyzeVoiceRx(audio, sampleRate) {
+export function analyzeVoiceRx(
+  audio, sampleRate, { baseline = 'chord', thresholdScale = 1 } = {},
+) {
   const collected = collectVoicedFrames(audio, sampleRate)
   const { frames, f0Values, noiseFloorDb, totalFrames } = collected
 
@@ -973,7 +1316,8 @@ export function analyzeVoiceRx(audio, sampleRate) {
   const p5 = percentile(f0Values, 5)
   const f0P5Hz = p5 > 0 ? p5 : medianF0Hz
 
-  const { voiceType, regions } = classifyVoice(medianF0Hz)
+  const { voiceType, regions: nominalRegions } = classifyVoice(medianF0Hz)
+  const regions = scaleThresholds(nominalRegions, thresholdScale)
   const { freqsHz, envelopeDb, lifterCutoff } = computeCepstralEnvelope(
     frames, sampleRate, f0P5Hz,
   )
@@ -999,10 +1343,38 @@ export function analyzeVoiceRx(audio, sampleRate) {
   )
 
   const { regionResults, detected, passes } = iterateCorrections(
-    sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes,
+    sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes, baseline === 'trend',
   )
 
-  const { bands: merged, mergeCount } = mergeBands(detected)
+  /**
+   * Below the fundamental the deviation machinery has nothing to measure
+   * against, so `sub_bass` is dropped from the correction set and the rumble
+   * heuristic answers for that range instead. Dropping rather than merely
+   * ignoring: two mechanisms both entitled to place a shelf down there would
+   * eventually place two.
+   */
+  const rumble = analyzeRumble(audio, sampleRate, f0Values)
+  const withoutSubBass = detected.filter(d => d.region !== 'sub_bass')
+
+  // Say so in the region results too, or the panel would show a `sub_bass`
+  // finding with a gain beside it and no band anywhere carrying that gain.
+  //
+  // EVERY detection-only field goes, not just the gain. A region that was never
+  // detected carries none of these at all, so leaving one behind would make
+  // this the only entry in the array that is skipped AND still describes an
+  // anomaly — and `roleCentreHz` reads `centerHz` off whichever result matches
+  // the role, so a stale one would put the rumble knob on a frequency no longer
+  // claimed by anything.
+  const subBassResult = regionResults.find(r => r.name === 'sub_bass')
+  if (subBassResult) {
+    subBassResult.detected = false
+    subBassResult.skipReason = 'rumble_heuristic'
+    for (const field of ['gainDb', 'centerHz', 'q', 'widthOctaves', 'detectedOnPass']) {
+      delete subBassResult[field]
+    }
+  }
+
+  const { bands: merged, mergeCount } = mergeBands(withoutSubBass)
   const bands = merged
     .filter(b => Math.abs(b.gainDb) >= 0.1)
     .sort((a, b) => a.centerHz - b.centerHz)
@@ -1018,6 +1390,21 @@ export function analyzeVoiceRx(audio, sampleRate) {
       widthOctaves: b.widthOctaves,
     }))
 
+  // Appended after the merge, not before it: the rumble shelf is anchored to
+  // this speaker's fundamental rather than to a measured peak, so letting it be
+  // pulled toward a neighbouring band would move it off the only thing that
+  // justifies where it sits.
+  if (rumble?.applies) {
+    bands.unshift({
+      region: 'sub_bass',
+      roleId: roleForRegion('sub_bass')?.id ?? null,
+      freqHz: rumble.cornerHz,
+      gainDb: rumble.gainDb,
+      q: rumble.q,
+      widthOctaves: null,
+    })
+  }
+
   return {
     ok: true,
     voiceType,
@@ -1032,11 +1419,19 @@ export function analyzeVoiceRx(audio, sampleRate) {
     regionResults,
     bands,
     /**
+     * What the rumble heuristic measured, whether or not it acted. Present even
+     * when `applies` is false so the panel can say "checked, nothing there"
+     * rather than staying silent about a range it did look at.
+     */
+    rumble,
+    /**
      * Notches in the source, low to high. Usually empty; a non-empty list is a
      * finding in its own right, and the reason any region carrying
      * `skipReason: 'spectral_hole'` went unread.
      */
     holes,
+    baseline,
+    thresholdScale,
     mergedBands: mergeCount,
     /** How many measure-correct rounds it took to settle. See iterateCorrections. */
     passes,

@@ -25,7 +25,7 @@
  * a width threshold to do it.
  */
 
-import { GRID_OCTAVES } from './trend.js'
+import { GRID_OCTAVES } from '../trend.js'
 
 /**
  * Residual magnitude below which a feature is not worth naming.

@@ -18,8 +18,12 @@ import { buildAdvisories } from '../../src/audio/voicerx/suggestions.js'
 import { analyzeVoiceRxV2 } from '../../src/audio/voicerx/v2/index.js'
 
 /**
- * The shipping detector: edge-anchored per-region scanning, three correction
- * passes, plus the spectral-hole guard.
+ * The shipping detector, whatever it currently is — called with no options on
+ * purpose, so this tracks the default rather than restating it.
+ *
+ * It is presently identical to `v1trend` except for the baseline: per-region
+ * scanning against an edge-anchored chord, two correction passes, the
+ * bandwidth-edge slope guard and the spectral-hole guard.
  */
 export function currentDetector(audio, sampleRate) {
   const analysis = analyzeVoiceRx(audio, sampleRate)
@@ -27,7 +31,9 @@ export function currentDetector(audio, sampleRate) {
 
   return {
     ok: true,
-    bands: analysis.bands.map(b => ({ freqHz: b.freqHz, gainDb: b.gainDb, q: b.q })),
+    bands: analysis.bands.map(b => ({
+      freqHz: b.freqHz, gainDb: b.gainDb, q: b.q, roleId: b.roleId, region: b.region,
+    })),
     advisories: buildAdvisories(analysis),
     holes: analysis.holes,
   }
@@ -49,7 +55,31 @@ export function v2Detector(audio, sampleRate) {
   }
 }
 
+/**
+ * The robust-local-trend baseline — everything else identical to `current`.
+ *
+ * Not the shipping detector, and not a dead end either: it beats the chord on
+ * every countable measure taken against finished masters, and loses on the one
+ * measure only a person can take. Kept wired and scored so that the two open
+ * problems standing between it and shipping — the low-frequency blind spot and
+ * the band merge — can be worked on against numbers.
+ */
+export function v1TrendDetector(audio, sampleRate) {
+  const analysis = analyzeVoiceRx(audio, sampleRate, { baseline: 'trend' })
+  if (!analysis.ok) return { ok: false, reason: analysis.reason, bands: [], advisories: [] }
+
+  return {
+    ok: true,
+    bands: analysis.bands.map(b => ({
+      freqHz: b.freqHz, gainDb: b.gainDb, q: b.q, roleId: b.roleId, region: b.region,
+    })),
+    advisories: buildAdvisories(analysis),
+    holes: analysis.holes,
+  }
+}
+
 export const DETECTORS = {
   current: currentDetector,
+  v1trend: v1TrendDetector,
   v2: v2Detector,
 }

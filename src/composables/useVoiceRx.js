@@ -10,6 +10,9 @@ import {
 import { analyzeVoiceRx, MIN_VOICED_FRAMES, HOP_SIZE, FRAME_SIZE } from '../audio/voicerx/analysis.js'
 import { buildSuggestions, buildAdvisories, suggestionToBand } from '../audio/voicerx/suggestions.js'
 import { MALE_REGIONS, regionAtHz } from '../audio/voicerx/regions.js'
+import {
+  resolveBaseline, resolveThresholdScale, DEFAULT_BASELINE, DEFAULT_THRESHOLD_SCALE,
+} from '../audio/voicerx/baselineOverride.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { receiveBands } from './useManualEq.js'
 
@@ -137,6 +140,23 @@ export function useVoiceRx() {
    */
   const advisories = computed(() =>
     (hasAnalysis.value ? buildAdvisories(analysis.value) : []))
+
+  /**
+   * What the badge says when a detector override is in force, null otherwise.
+   *
+   * Read off the ANALYSIS rather than off the override itself, so it describes
+   * the result on screen and not the setting that will apply to the next run.
+   * Someone who flips the override and has not re-analysed yet is still looking
+   * at the previous detector's findings, and the badge has to agree with them.
+   */
+  const overrideLabel = computed(() => {
+    const a = analysis.value
+    if (!a?.ok) return null
+    const parts = []
+    if (a.baseline !== DEFAULT_BASELINE) parts.push(`BASELINE: ${a.baseline.toUpperCase()}`)
+    if (a.thresholdScale !== DEFAULT_THRESHOLD_SCALE) parts.push(`THRESHOLDS ×${a.thresholdScale}`)
+    return parts.length ? parts.join('  ') : null
+  })
 
   /**
    * Each suggestion paired with the band carrying it, if there is one.
@@ -362,8 +382,11 @@ export function useVoiceRx() {
     if (band) return band.frequencyHz
 
     const role = getRole(roleId)
+    // `detected` is checked, not merely `centerHz`, because a skipped region has
+    // no anomaly to point at whatever fields happen to survive on it. Without
+    // this the knob follows a measurement the analysis has already withdrawn.
     const measured = analysis.value?.regionResults?.find(r => r.roleId === roleId)
-    if (measured && Number.isFinite(measured.centerHz)) return measured.centerHz
+    if (measured?.detected && Number.isFinite(measured.centerHz)) return measured.centerHz
 
     const [lo, hi] = measured
       ? [measured.scanLowHz, measured.scanHighHz]
@@ -543,7 +566,13 @@ export function useVoiceRx() {
       // stereo pair would otherwise be analysed as its left channel alone.
       const mono = rendered.length === 1 ? rendered[0] : mixToMono(rendered)
 
-      const result = analyzeVoiceRx(mono, sampleRate)
+      const baseline = resolveBaseline()
+      const thresholdScale = resolveThresholdScale()
+      const result = analyzeVoiceRx(mono, sampleRate, { baseline, thresholdScale })
+      if (baseline !== DEFAULT_BASELINE || thresholdScale !== DEFAULT_THRESHOLD_SCALE) {
+        console.info(`VoiceRx: "${baseline}" baseline, thresholds x${thresholdScale} `
+          + '(override active — not the shipping detector)')
+      }
 
       if (!result.ok) {
         analysis.value = null
@@ -582,7 +611,7 @@ export function useVoiceRx() {
     ...api,
     analysis, analyzing, analysisError, isStale, hasAnalysis,
     introDismissed, dismissIntro: () => { introDismissed.value = true },
-    suggestions, suggestionRows, advisories,
+    suggestions, suggestionRows, advisories, overrideLabel,
     regions, paletteRoles,
     analyze, applyAllSuggestions, applySuggestion,
     toggleRoleSolo, isRoleSoloed,
