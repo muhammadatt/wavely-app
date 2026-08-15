@@ -501,8 +501,11 @@ test('iterating never spends more than the total cap', () => {
   // here whatever region they land in. Assert the loop runs at all: planting a
   // defect the detector cannot see would make this pass vacuously.
   const totalLimit = MALE_REGIONS.mud[MAX_CUT_DB] * MAX_TOTAL_CAP_FACTOR
-  assert.ok(r.bands.length > 0, 'a 40 dB resonance produced no bands to cap')
-  for (const band of r.bands) {
+  // The rumble shelf has its own cap and is not produced by iterating, so the
+  // region caps do not apply to it.
+  const iterated = r.bands.filter(b => b.roleId !== 'rumble')
+  assert.ok(iterated.length > 0, 'a 40 dB resonance produced no bands to cap')
+  for (const band of iterated) {
     assert.ok(
       Math.abs(band.gainDb) <= totalLimit + 0.01,
       `${band.region} spent ${band.gainDb} dB, past the ${totalLimit} dB total cap`,

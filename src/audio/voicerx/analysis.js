@@ -45,6 +45,10 @@ import {
   detectSpectralHoles, inAnyHole, holeCoverage, MAX_HOLE_COVERAGE,
 } from './holes.js'
 import { toLogGrid, robustTrend } from './trend.js'
+// Circular by design: rumble.js reuses this module's FFT geometry and helpers,
+// and only touches them inside function bodies, so neither module reads an
+// uninitialised binding while the other is still evaluating.
+import { analyzeRumble } from './rumble.js'
 import { roleForRegion } from '../eqBands.js'
 import { peaking, lowShelf, highShelf, magnitudeResponseDb } from '../dsp/biquad.js'
 import { eqDesignRate } from '../eqProcessor.js'
@@ -1342,7 +1346,26 @@ export function analyzeVoiceRx(
     sampleRate, freqsHz, envelopeDb, regions, envelopePeakDb, holes, baseline === 'trend',
   )
 
-  const { bands: merged, mergeCount } = mergeBands(detected)
+  /**
+   * Below the fundamental the deviation machinery has nothing to measure
+   * against, so `sub_bass` is dropped from the correction set and the rumble
+   * heuristic answers for that range instead. Dropping rather than merely
+   * ignoring: two mechanisms both entitled to place a shelf down there would
+   * eventually place two.
+   */
+  const rumble = analyzeRumble(audio, sampleRate, f0Values)
+  const withoutSubBass = detected.filter(d => d.region !== 'sub_bass')
+
+  // Say so in the region results too, or the panel would show a `sub_bass`
+  // finding with a gain beside it and no band anywhere carrying that gain.
+  const subBassResult = regionResults.find(r => r.name === 'sub_bass')
+  if (subBassResult) {
+    subBassResult.detected = false
+    subBassResult.gainDb = undefined
+    subBassResult.skipReason = 'rumble_heuristic'
+  }
+
+  const { bands: merged, mergeCount } = mergeBands(withoutSubBass)
   const bands = merged
     .filter(b => Math.abs(b.gainDb) >= 0.1)
     .sort((a, b) => a.centerHz - b.centerHz)
@@ -1358,6 +1381,21 @@ export function analyzeVoiceRx(
       widthOctaves: b.widthOctaves,
     }))
 
+  // Appended after the merge, not before it: the rumble shelf is anchored to
+  // this speaker's fundamental rather than to a measured peak, so letting it be
+  // pulled toward a neighbouring band would move it off the only thing that
+  // justifies where it sits.
+  if (rumble?.applies) {
+    bands.unshift({
+      region: 'sub_bass',
+      roleId: roleForRegion('sub_bass')?.id ?? null,
+      freqHz: rumble.cornerHz,
+      gainDb: rumble.gainDb,
+      q: rumble.q,
+      widthOctaves: null,
+    })
+  }
+
   return {
     ok: true,
     voiceType,
@@ -1371,6 +1409,12 @@ export function analyzeVoiceRx(
     envelopeDb,
     regionResults,
     bands,
+    /**
+     * What the rumble heuristic measured, whether or not it acted. Present even
+     * when `applies` is false so the panel can say "checked, nothing there"
+     * rather than staying silent about a range it did look at.
+     */
+    rumble,
     /**
      * Notches in the source, low to high. Usually empty; a non-empty list is a
      * finding in its own right, and the reason any region carrying

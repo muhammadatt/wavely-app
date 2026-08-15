@@ -78,7 +78,18 @@ function round(v, places = 3) {
  * let a detector score well by emitting bands at random.
  */
 export function scoreCase(spec, output) {
-  const bands = (output.bands ?? []).filter(b => Math.abs(b.gainDb) >= NEGLIGIBLE_GAIN_DB)
+  // The rumble shelf is excluded, and this corpus is the reason. It is not a
+  // deviation measurement -- it is placed below the fundamental on the argument
+  // that nothing there can be voice -- so no planted defect can claim it and it
+  // would score as spurious on every case. Worse, it fires spuriously HERE
+  // specifically: the synthetic voice gates its pauses with a hard on/off, and
+  // those discontinuities splatter broadband energy below F0 that a real
+  // recording does not have. Measured, the synth's sub-F0 tilt reads -1.4 dB
+  // against a real clip's -14.7. Judging the heuristic needs raw narrator
+  // recordings, not this.
+  const bands = (output.bands ?? [])
+    .filter(b => b.roleId !== 'rumble' && b.region !== 'sub_bass')
+    .filter(b => Math.abs(b.gainDb) >= NEGLIGIBLE_GAIN_DB)
   const claimed = new Set()
   const defects = []
 

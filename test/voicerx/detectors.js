@@ -31,7 +31,9 @@ export function currentDetector(audio, sampleRate) {
 
   return {
     ok: true,
-    bands: analysis.bands.map(b => ({ freqHz: b.freqHz, gainDb: b.gainDb, q: b.q })),
+    bands: analysis.bands.map(b => ({
+      freqHz: b.freqHz, gainDb: b.gainDb, q: b.q, roleId: b.roleId, region: b.region,
+    })),
     advisories: buildAdvisories(analysis),
     holes: analysis.holes,
   }
@@ -68,7 +70,9 @@ export function v1TrendDetector(audio, sampleRate) {
 
   return {
     ok: true,
-    bands: analysis.bands.map(b => ({ freqHz: b.freqHz, gainDb: b.gainDb, q: b.q })),
+    bands: analysis.bands.map(b => ({
+      freqHz: b.freqHz, gainDb: b.gainDb, q: b.q, roleId: b.roleId, region: b.region,
+    })),
     advisories: buildAdvisories(analysis),
     holes: analysis.holes,
   }
