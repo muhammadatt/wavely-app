@@ -12,7 +12,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { analyzeRumble, rumbleCornerHz, RUMBLE_Q } from '../../src/audio/voicerx/rumble.js'
-import { BiquadCascade, lowShelf, peaking } from '../../src/audio/dsp/biquad.js'
+import { BiquadCascade, lowpass, peaking } from '../../src/audio/dsp/biquad.js'
 
 const SR = 44100
 
@@ -56,18 +56,28 @@ function voice({ f0 = 120, seconds = 4 } = {}) {
   return sig
 }
 
-/** Low-frequency noise, the shape actual rumble has: energy piled at the bottom. */
-function withRumble(audio, gainDb, cornerHz = 45) {
-  const out = Float32Array.from(audio)
-  const rum = new Float32Array(out.length)
-  noiseInto(rum, 0.05, 0x1234567)
-  // Two cascaded low-passes so the added noise really is confined to the bottom.
+/**
+ * Additive low-frequency noise — the shape actual rumble has, energy piled at
+ * the bottom rather than an amplification of what was already there.
+ *
+ * An earlier version of this helper only shelved the existing signal, which is
+ * a weaker test: boosting a band that is already near-empty flattens the tilt
+ * but cannot reverse it, so it never produced the signal the heuristic is
+ * really meant to catch. HVAC and traffic ADD energy; they do not amplify the
+ * voice's own tail.
+ */
+function withRumble(audio, levelDbfs, cornerHz = 45) {
+  const rumble = new Float32Array(audio.length)
+  noiseInto(rumble, Math.pow(10, levelDbfs / 20), 0x1234567)
+  // Two cascaded low-passes, so what is added really is confined to the bottom
+  // and does not leak into the band the corner is measured against.
   const lp = new BiquadCascade(2, 1)
-  lp.setSection(0, peaking(SR, cornerHz, 0.7, 0, 'q'))
-  lp.setSection(1, peaking(SR, cornerHz, 0.7, 0, 'q'))
-  const shelf = new BiquadCascade(1, 1)
-  shelf.setSection(0, lowShelf(SR, cornerHz, 0.7, gainDb))
-  shelf.process(out, out, out.length, 0)
+  lp.setSection(0, lowpass(SR, cornerHz))
+  lp.setSection(1, lowpass(SR, cornerHz))
+  lp.process(rumble, rumble, rumble.length, 0)
+
+  const out = new Float32Array(audio.length)
+  for (let i = 0; i < audio.length; i++) out[i] = audio[i] + rumble[i]
   return out
 }
 
@@ -97,12 +107,16 @@ test('a clean recording gets a shelf of nothing', () => {
 })
 
 test('rumble is cut, and more of it is cut harder', () => {
+  // Levels in dBFS, and measured: the clean signal's tilt is -15.8 dB, -30 dBFS
+  // of rumble takes it to -12.5, and -20 dBFS to -5.1. At -10 it goes POSITIVE
+  // (+2.8) -- the spectrum genuinely rising toward DC, which is the physical
+  // signature this whole measurement is built on.
   const clean = analyzeRumble(voice(), SR, f0sFor(120))
-  const light = analyzeRumble(withRumble(voice(), 12), SR, f0sFor(120))
-  const heavy = analyzeRumble(withRumble(voice(), 24), SR, f0sFor(120))
+  const light = analyzeRumble(withRumble(voice(), -30), SR, f0sFor(120))
+  const heavy = analyzeRumble(withRumble(voice(), -20), SR, f0sFor(120))
 
-  assert.ok(light.applies, `12 dB of rumble was ignored (tilt ${light.tiltDb})`)
-  assert.ok(heavy.applies, `24 dB of rumble was ignored (tilt ${heavy.tiltDb})`)
+  assert.ok(light.applies, `-30 dBFS of rumble was ignored (tilt ${light.tiltDb})`)
+  assert.ok(heavy.applies, `-20 dBFS of rumble was ignored (tilt ${heavy.tiltDb})`)
   assert.ok(heavy.gainDb < light.gainDb,
     `more rumble did not cut harder: ${heavy.gainDb} vs ${light.gainDb}`)
   assert.ok(light.gainDb < clean.gainDb, 'rumble did not move the correction at all')
@@ -124,7 +138,7 @@ test('a resonance ABOVE the corner is not mistaken for rumble', () => {
 })
 
 test('the cut is bounded however extreme the rumble', () => {
-  const r = analyzeRumble(withRumble(voice(), 60), SR, f0sFor(120))
+  const r = analyzeRumble(withRumble(voice(), -5), SR, f0sFor(120))
   assert.ok(r.gainDb >= -12.001, `spent ${r.gainDb} dB, past the 12 dB bound`)
 })
 

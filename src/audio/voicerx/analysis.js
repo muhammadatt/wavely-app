@@ -1358,11 +1358,20 @@ export function analyzeVoiceRx(
 
   // Say so in the region results too, or the panel would show a `sub_bass`
   // finding with a gain beside it and no band anywhere carrying that gain.
+  //
+  // EVERY detection-only field goes, not just the gain. A region that was never
+  // detected carries none of these at all, so leaving one behind would make
+  // this the only entry in the array that is skipped AND still describes an
+  // anomaly — and `roleCentreHz` reads `centerHz` off whichever result matches
+  // the role, so a stale one would put the rumble knob on a frequency no longer
+  // claimed by anything.
   const subBassResult = regionResults.find(r => r.name === 'sub_bass')
   if (subBassResult) {
     subBassResult.detected = false
-    subBassResult.gainDb = undefined
     subBassResult.skipReason = 'rumble_heuristic'
+    for (const field of ['gainDb', 'centerHz', 'q', 'widthOctaves', 'detectedOnPass']) {
+      delete subBassResult[field]
+    }
   }
 
   const { bands: merged, mergeCount } = mergeBands(withoutSubBass)

@@ -382,8 +382,11 @@ export function useVoiceRx() {
     if (band) return band.frequencyHz
 
     const role = getRole(roleId)
+    // `detected` is checked, not merely `centerHz`, because a skipped region has
+    // no anomaly to point at whatever fields happen to survive on it. Without
+    // this the knob follows a measurement the analysis has already withdrawn.
     const measured = analysis.value?.regionResults?.find(r => r.roleId === roleId)
-    if (measured && Number.isFinite(measured.centerHz)) return measured.centerHz
+    if (measured?.detected && Number.isFinite(measured.centerHz)) return measured.centerHz
 
     const [lo, hi] = measured
       ? [measured.scanLowHz, measured.scanHighHz]
