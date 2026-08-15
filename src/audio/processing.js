@@ -14,6 +14,12 @@ import {
   AIR_BAND_DEFAULTS,
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
+import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
+import {
+  SCHEPS_DEFAULTS,
+  SCHEPS_LATENCY_SAMPLES,
+  toKernelParams as toSchepsKernelParams,
+} from './effects/scheps.js'
 import { ensureVocalSatWorklet } from './vocalSatWorkletLoader.js'
 import {
   VOCAL_SAT_DEFAULTS,
@@ -245,7 +251,13 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
  */
 const AUTO_MAKEUP_MAX_ANALYSIS_S = 30
 
-function computeAutoMakeup(workerType, segments, start, end, kernelParams, sampleRate, channels) {
+/**
+ * Run one measurement pass over a region in the processing worker and resolve
+ * whatever it reports. Shared by every measured-parameter path — the compressor
+ * auto-makeups and the Scheps wet trim — which differ only in the kernel they
+ * run and the numbers they hand back.
+ */
+function measureInWorker(workerType, segments, start, end, kernelParams, sampleRate, channels) {
   let aStart = start
   let aEnd = end
   if (end - start > AUTO_MAKEUP_MAX_ANALYSIS_S) {
@@ -265,7 +277,7 @@ function computeAutoMakeup(workerType, segments, start, end, kernelParams, sampl
     worker.onmessage = (e) => {
       worker.terminate()
       if (e.data.type === 'done') {
-        resolve(e.data.makeupDb)
+        resolve(e.data)
       } else if (e.data.type === 'error') {
         reject(new Error(e.data.message))
       }
@@ -284,12 +296,24 @@ function computeAutoMakeup(workerType, segments, start, end, kernelParams, sampl
 }
 
 export function computeLA2AAutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
-  return computeAutoMakeup('la2aAutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
+  return measureInWorker('la2aAutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
+    .then(d => d.makeupDb)
 }
 
 /** Measure the FET Punch auto-makeup (Output) for a region — see above. */
 export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
-  return computeAutoMakeup('fet1176AutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
+  return measureInWorker('fet1176AutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
+    .then(d => d.makeupDb)
+}
+
+/**
+ * Measure the Scheps wet-path trim and the dry/wet correlation for a region.
+ * Resolves `{ trimDb, correlation }` — see computeSchepsAutoTrim for what each
+ * is for.
+ */
+export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate, channels) {
+  return measureInWorker('schepsAutoTrim', segments, start, end, kernelParams, sampleRate, channels)
+    .then(d => ({ trimDb: d.trimDb, correlation: d.correlation }))
 }
 
 /**
@@ -398,6 +422,16 @@ export function applyAirBandRegion(segments, start, end, params, sampleRate, cha
     ensureWorklet: ensureAirBandWorklet,
     processorName: 'air-band-processor',
     kernelParams: toAirBandKernelParams({ ...AIR_BAND_DEFAULTS, ...params }),
+  })
+}
+
+/** Apply Scheps Parallel to a region. */
+export function applySchepsRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureSchepsWorklet,
+    processorName: 'scheps-processor',
+    kernelParams: toSchepsKernelParams({ ...SCHEPS_DEFAULTS, ...params }),
+    latencySamples: SCHEPS_LATENCY_SAMPLES,
   })
 }
 

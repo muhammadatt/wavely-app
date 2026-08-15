@@ -618,5 +618,16 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('la2a-processor', LA2AWorkletProcessor)
+  // Guarded, because this module reaches a worklet scope by two routes: its own
+  // loader, and as a dependency of the Scheps worklet, which composes
+  // LA2AKernel. Load both into one AudioContext and the second bundle's
+  // registration hits a name that is already taken and throws NotSupportedError
+  // — which would abort that whole module, taking the Scheps processor with it
+  // over a duplicate nobody needed. Already-registered is the desired state, so
+  // swallow exactly that and nothing else.
+  try {
+    registerProcessor('la2a-processor', LA2AWorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }

@@ -40,6 +40,10 @@ export const ICONS = {
   normalize: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
   opto: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   fet: '<polyline points="13 2 4 14 11 14 10 22 20 10 13 10 13 2"/>',
+  // Scheps Parallel: one signal splitting into two paths and summing back — the
+  // lower path carrying a compressed (flattened) copy. Says "parallel", which
+  // is the thing being offered; the Pultec stages inside it are mechanism.
+  parallel: '<path d="M2 12h3"/><path d="M5 12c2 0 2-6 4-6h9"/><path d="M5 12c2 0 2 6 4 6h9"/><path d="M18 6c2 0 2 6 4 6"/><path d="M18 18c2 0 2-6 4-6"/><circle cx="5" cy="12" r="1.2"/><circle cx="22" cy="12" r="1.2"/>',
   // Tube saturation: light-bulb silhouette to suggest analog tube glow.
   saturation: '<path d="M12 3a6 6 0 00-3.6 10.8c1 .8 1.6 1.8 1.8 3.2h3.6c.2-1.4.8-2.4 1.8-3.2A6 6 0 0012 3z"/><path d="M9 17h6"/><path d="M9.5 20h5"/><path d="M10 11l2 2 2-2"/>',
   // A rising shelf: flat, then a gentle knee up to a plateau — the air curve.
