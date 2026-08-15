@@ -1,14 +1,15 @@
 /**
  * Baseline override, for listening to the two detectors back to back.
  *
- *   ?voicerxBaseline=chord                              one page load
- *   localStorage.setItem('voicerxBaseline', 'chord')    until cleared
+ *   ?voicerxBaseline=trend                              one page load
+ *   localStorage.setItem('voicerxBaseline', 'trend')    until cleared
  *
- * The trend ships (see the BASELINE STRATEGY note in analysis.js). The chord is
- * the superseded baseline, kept reachable because the case for switching rests
- * entirely on corpus measurements — and a corpus cannot tell you what something
- * SOUNDS like. That needs a person, one file, and a way to flip between them
- * without a rebuild.
+ * The chord ships (see the BASELINE STRATEGY note in analysis.js). The trend is
+ * the alternative, and it is better than the chord on every countable measure
+ * taken against finished masters — which is exactly why this override has to
+ * exist: a corpus cannot tell you what something SOUNDS like, and the decision
+ * between these two rested on listening. That needs a person, one file, and a
+ * way to flip between them without a rebuild.
  *
  * Its own module rather than a function inside useVoiceRx.js so it can be
  * tested under node: importing the composable drags in Vite's `?worker&url`
@@ -16,7 +17,7 @@
  */
 
 /** The baseline used unless something explicitly asks for the other one. */
-export const DEFAULT_BASELINE = 'trend'
+export const DEFAULT_BASELINE = 'chord'
 
 const KNOWN = new Set(['trend', 'chord'])
 
@@ -28,10 +29,10 @@ const KNOWN = new Set(['trend', 'chord'])
  * in the console and re-analysing works without a page reload.
  *
  * An unrecognised value falls back to the default instead of passing through.
- * A typo in a query string must not silently produce a third behaviour, and
- * `analyzeVoiceRx` treats any non-'trend' string as the chord — so `chrod`
- * would quietly select the superseded detector while looking like a normal run.
- * That is precisely the confusion this exists to prevent.
+ * A typo in a query string must not silently produce a third behaviour: since
+ * `analyzeVoiceRx` treats any unrecognised string as the chord, `trned` would
+ * quietly run the shipping detector while the person at the keyboard believed
+ * they were listening to the other one. That is the confusion this prevents.
  */
 export function resolveBaseline() {
   const requested = read('voicerxBaseline')

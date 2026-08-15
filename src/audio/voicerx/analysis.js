@@ -50,39 +50,47 @@ import { peaking, lowShelf, highShelf, magnitudeResponseDb } from '../dsp/biquad
 import { eqDesignRate } from '../eqProcessor.js'
 
 /**
- * BASELINE STRATEGY — `trend` ships; `chord` is kept for comparison only.
+ * BASELINE STRATEGY — `chord` ships; `trend` stays wired and scored.
  *
- * `chord` is what shipped originally: the median of a context window either
- * side of a scan region, interpolated straight across in log-frequency. It has
- * one confirmed structural fault — it reads spectral CURVATURE as a hump, so a
- * notch or a steep roll-off anywhere near a region tips the anchors and invents
- * a correction on the far side of it. That is the failure that started this
- * whole investigation.
+ * `chord` is the original: the median of a context window either side of a scan
+ * region, interpolated straight across in log-frequency. `trend` replaces it
+ * with a robust local quadratic and changes NOTHING else — same region tables,
+ * directions, thresholds, caps, SCALE, iteration and merge. One variable, which
+ * is what made the comparison readable.
  *
- * `trend` replaces it with a robust local quadratic and changes NOTHING else:
- * the region tables, directions, thresholds, caps, SCALE, iteration and merge
- * are exactly as they were. One variable, which is what made the comparison
- * readable.
- *
- * WHY IT WON, and on which evidence. The synthetic corpus rates it WORSE
- * (detection 67%→63%, recovery 0.50→0.44) because v1's thresholds were
- * calibrated against chord deviations and the trend is a tighter reference. The
- * real corpus — 13 commercially mastered files, 31 windows, where the right
- * answer is very nearly "no correction" — reverses that comprehensively:
+ * THE TWO OF THEM MAKE OPPOSITE ERRORS, and this is not a case where one is
+ * simply better. The chord has one confirmed structural fault: it reads
+ * spectral CURVATURE as a hump, because a convex spectrum sits above its own
+ * chord whether or not anything is wrong with it. So a notch or a steep
+ * roll-off near a region tips the anchors and invents a correction on the far
+ * side of it — the failure that started this whole investigation. Against 13
+ * commercially mastered files (31 windows), where the right answer is very
+ * nearly "no correction":
  *
  *   invented bands        89 → 48          invented gain   289.4 → 132.0 dB
  *   windows left alone     1 →  5 of 31    bands on F0         1 → 0
  *   convergence residual 0.11 → 0.00       risky boosts        0 → 0
  *
- * It costs 0.11 bands per file in repeatability (0.78 → 0.89 that fail to
- * recur across windows of one file), which is the one measure where the chord
- * is ahead. Convergence is the strongest single signal: applying the trend's
- * own corrections and re-analysing leaves it with NOTHING further to say, where
- * the chord still wants 11% of its original gain — a detector chasing structure
- * in its own reference never settles.
+ * The trend is better on every one of those. It is worse at the other error.
+ * A defect centred on the spectrum's own maximum is near-invisible to a smooth
+ * local reference — a 12 dB resonance at 300 Hz on an F0 120 voice reads
+ * 1.24 dB — so it walks past low-frequency problems the chord catches, and on
+ * the reference clip it locates the boxy peak 0.45 octaves below where the
+ * chord puts it, close enough to the mud band that `mergeBands` collapses the
+ * two into one.
  *
- * Both readings rest on finished masters, so the claim is specifically "does
- * not damage good audio". Raw narrator recordings remain unvalidated.
+ * WHY THE CHORD SHIPS. Those two error types are not equally weighted by
+ * measurement, and the corpus can only see one of them. "Did it damage audio
+ * that was already finished" is countable; "did it find the problem a person
+ * can hear" needs a person. Listening across several files preferred the
+ * chord's answers — specifically its two distinct low-mid cuts over the trend's
+ * merged single one — and the corpus evidence against the chord was collected
+ * entirely on files that needed nothing, which is not the input this tool
+ * receives. When a countable proxy and a direct observation disagree about the
+ * thing the proxy is standing in for, the observation wins.
+ *
+ * The trend's real-corpus advantage remains real and remains unaddressed. If
+ * the merge behaviour and the low-frequency blind spot are fixed, revisit this.
  *
  *
  * THRESHOLD CALIBRATION — an open question, not yet a default.
@@ -192,22 +200,33 @@ export const MAX_CORRECTION_PASSES = 2
 /**
  * How far a region's total correction may exceed what one pass may spend.
  *
- * There are two caps and they answer different questions. `MAX_CUT_DB` /
- * `MAX_BOOST_DB` bound a single decision — how much one measurement is trusted
- * to move the file — and iterating must not turn that into three times the
- * licence. But holding the TOTAL to the per-pass figure would make iterating
- * pointless: a 12 dB hump in mud spends its whole 6 dB budget on pass one and
- * still leaves 6 dB standing, so the total has to be allowed past 6 or nothing
- * has changed.
+ * ONE: the per-region dB caps in regions.js are TOTAL caps, not per-pass
+ * allowances. `MAX_CUT_DB = 6` for mud means this tool will never cut mud by
+ * more than 6 dB, full stop — which is what the number reads as, and what
+ * anyone reading the table would assume it meant.
  *
- * Two is not a taste call. It is where repeated manual analysis already lands:
- * re-running the analysis on corrected audio hands each round a fresh budget,
- * and a 12 dB hump settles at 6.0 + 4.2 = 10.2 dB over two rounds. This factor
- * lets one analysis reach the same place the user was reaching by hand, and no
- * further. Deviations past about 14 dB stop short of resolved and stay flagged,
- * which is the right answer: at that size the measurement is as likely to be
- * wrong as the voice is to be that broken, and a 15 dB surgical cut taken on
- * trust is the worse mistake.
+ * This was 2, on the argument that holding the total to the per-pass figure
+ * "would make iterating pointless" because a 12 dB hump spends its whole budget
+ * on pass one and still leaves 6 dB standing. That argument was wrong about
+ * what iterating is FOR. Iteration does not exist to keep spending on a region
+ * already at its limit; it exists because a second feature can be unmeasurable
+ * until a larger adjacent one comes down — the mud band on the 5 kHz-notch clip
+ * appears only on pass two, after the boxy hump above it is corrected. That
+ * still works with this at 1: a region first detected on a later pass gets its
+ * own full budget. What no longer happens is one region quietly accumulating
+ * past the cap the table advertises.
+ *
+ * The old reasoning also justified itself by matching what repeated manual
+ * analysis reaches — a user re-running the tool by hand gets a fresh budget
+ * each round, landing a 12 dB hump at 6.0 + 4.2 = 10.2 dB. That is a
+ * description of what the tool used to permit, not evidence that it should:
+ * the same clip that motivated this change had the chord spending 7.9 dB on a
+ * region it measured at 5.12, and listening called that too much.
+ *
+ * A deviation past what a cap allows now stops short of resolved and stays
+ * flagged. At that size the measurement is as likely to be wrong as the voice
+ * is to be that broken, and a large surgical cut taken on trust is the worse
+ * mistake.
  */
 export const MAX_TOTAL_CAP_FACTOR = 1
 const NATS_TO_DB = 10.0 / Math.LN10
@@ -1270,11 +1289,10 @@ export function iterateCorrections(
  * @param {number} sampleRate
  * @param {{baseline?: 'chord'|'trend', thresholdScale?: number}} [options] see
  *   the BASELINE STRATEGY and THRESHOLD CALIBRATION notes at the top of this
- *   file. `trend` ships; `chord` is the superseded baseline, retained so the
- *   scorecards can still measure what changing it did.
+ *   file. `chord` ships; `trend` is the alternative, kept wired and scored.
  */
 export function analyzeVoiceRx(
-  audio, sampleRate, { baseline = 'trend', thresholdScale = 1 } = {},
+  audio, sampleRate, { baseline = 'chord', thresholdScale = 1 } = {},
 ) {
   const collected = collectVoicedFrames(audio, sampleRate)
   const { frames, f0Values, noiseFloorDb, totalFrames } = collected

@@ -31,7 +31,7 @@ function withEnv({ search = '', stored = null, throws = false }, fn) {
 }
 
 test('the shipping baseline is the default', () => {
-  assert.equal(withEnv({}, resolveBaseline), 'trend')
+  assert.equal(withEnv({}, resolveBaseline), 'chord')
 })
 
 test('the query string selects a baseline', () => {
@@ -50,15 +50,15 @@ test('localStorage persists a choice, and the query string outranks it', () => {
 })
 
 test('an unrecognised value falls back rather than passing through', () => {
-  for (const search of ['?voicerxBaseline=chrod', '?voicerxBaseline=', '?voicerxBaseline=v2']) {
-    assert.equal(withEnv({ search }, resolveBaseline), 'trend', search)
+  for (const search of ['?voicerxBaseline=trned', '?voicerxBaseline=', '?voicerxBaseline=v2']) {
+    assert.equal(withEnv({ search }, resolveBaseline), 'chord', search)
   }
-  assert.equal(withEnv({ stored: 'nonsense' }, resolveBaseline), 'trend')
+  assert.equal(withEnv({ stored: 'nonsense' }, resolveBaseline), 'chord')
 })
 
 test('a storage access that throws does not break analysis', () => {
   // Safari private mode throws on localStorage rather than returning null.
-  assert.equal(withEnv({ throws: true }, resolveBaseline), 'trend')
+  assert.equal(withEnv({ throws: true }, resolveBaseline), 'chord')
 })
 
 // ── Threshold scale ─────────────────────────────────────────────────────────
