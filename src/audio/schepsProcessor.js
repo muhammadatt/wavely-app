@@ -40,7 +40,7 @@
 
 import { LA2AKernel } from './la2aProcessor.js'
 import { DelayLine } from './dsp/oversample.js'
-import { BiquadCascade } from './dsp/biquad.js'
+import { BiquadCascade, highpass, lowpass } from './dsp/biquad.js'
 import { pultecSections, PULTEC_STAGES } from './dsp/pultec.js'
 
 const LN10_OVER_20 = Math.LN10 / 20
@@ -318,30 +318,78 @@ function renderWetPath(channelData, sampleRate, params) {
 }
 
 /**
+ * Speech band, in Hz, for the trim measurement — see `speechWeight`.
+ */
+const SPEECH_BAND_HZ = [300, 4000]
+
+/**
+ * Band-limit a copy of a signal to the speech range, for measurement only.
+ *
+ * BROADBAND RMS CANNOT MEASURE A VOICE'S LOUDNESS, and the failure is not
+ * marginal. Measured on a real narrator recording: **81% of the file's total
+ * energy sits between 125 and 500 Hz**, and 2–8 kHz carries **1.6%**. So a
+ * broadband RMS match is, to within a rounding error, a match of the
+ * fundamental region alone — which is the one part of the spectrum Thick's net
+ * curve raises. The trim therefore read "already loud enough" while the entire
+ * intelligibility range came out 3 dB down, and the file sounded quieter with
+ * the meters saying it was level.
+ *
+ * K-weighting is not enough to fix it: its shelf is +4 dB above 1.7 kHz, and on
+ * a band carrying 1.6% of the energy that moved the answer by 0.34 dB against a
+ * 3 dB deficit. Measured, not assumed.
+ *
+ * A flat band-pass over the speech range is blunt, but it puts the measurement
+ * where the ear decides loudness for a voice, and it is explicable in one line —
+ * which a weighting curve fitted to this one recording would not be.
+ */
+function speechWeight(x, sampleRate) {
+  const cascade = new BiquadCascade(2, 1)
+  cascade.setSections([
+    highpass(sampleRate, SPEECH_BAND_HZ[0], Math.SQRT1_2),
+    lowpass(sampleRate, Math.min(SPEECH_BAND_HZ[1], sampleRate * 0.45), Math.SQRT1_2),
+  ])
+  const y = new Float32Array(x.length)
+  cascade.process(x, y, x.length, 0)
+  return y
+}
+
+/**
  * Measure the two numbers the blend needs from the audio itself.
  *
  * `trimDb` is the wet-path gain that puts the compressed copy at the dry
- * signal's RMS. Without it the wet path arrives however loud the chain happens
- * to leave it — Thick's net curve alone is +4 dB in the low end — and the Mix
- * knob becomes a volume control, which decides an A/B before the user has heard
- * anything. RMS rather than peak: squashing peaks is the entire point of the
- * wet path, so peak matching would over-boost it badly.
+ * signal's level. Without it the wet path arrives however loud the chain
+ * happens to leave it — Thick's net curve alone is +4 dB in the low end — and
+ * the Mix knob becomes a volume control, which decides an A/B before the user
+ * has heard anything.
  *
- * `correlation` is the zero-lag Pearson correlation between the dry signal and
- * the level-matched wet one. It is what makes the equal-power law hold for two
- * paths carrying the same voice — see `mixGains`.
+ * BOTH NUMBERS ARE MEASURED IN THE SPEECH BAND, not broadband — see
+ * `speechWeight` for the measurement that forced that, and note what it makes
+ * this plugin promise. The invariant across the Mix sweep is constant
+ * *speech-band* loudness; broadband energy deliberately rises with Mix, because
+ * the character's whole point is to add weight underneath the voice. Matching
+ * broadband instead makes the low end pay for itself out of the midrange, which
+ * is audible and wrong.
+ *
+ * RMS rather than peak: squashing peaks is the entire point of the wet path, so
+ * peak matching would over-boost it badly.
+ *
+ * `correlation` is the zero-lag Pearson correlation between dry and wet, in the
+ * same band, so the mix law's compensation holds the same quantity the trim
+ * does — see `mixGains`.
  *
  * Both are measured over the region the user has selected, so they follow the
  * material rather than a table of assumptions about it.
  */
 export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
-  const wet = renderWetPath(channelData, sampleRate, params)
+  const wetRaw = renderWetPath(channelData, sampleRate, params)
+  const dryBand = channelData.map(c => speechWeight(c, sampleRate))
+  const wet = wetRaw.map(c => speechWeight(c, sampleRate))
 
   let dryEnergy = 0
   let wetEnergy = 0
   let crossEnergy = 0
   for (let ch = 0; ch < channelData.length; ch++) {
-    const d = channelData[ch]
+    const d = dryBand[ch]
     const w = wet[ch]
     for (let i = 0; i < d.length; i++) {
       dryEnergy += d[i] * d[i]

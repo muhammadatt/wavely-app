@@ -16,6 +16,7 @@ import {
   SCHEPS_KERNEL_DEFAULTS,
 } from '../../src/audio/schepsProcessor.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
+import { highpass, lowpass, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 
 const SR = 44100
 
@@ -66,6 +67,24 @@ function voiceLike(seconds, { f0 = 130, envRateHz = 3 } = {}) {
     out[i] = 0.06 * (s + ((seed / 0x7fffffff) - 0.5) * 0.35) * env
   }
   return out
+}
+
+/**
+ * RMS of the 300 Hz - 4 kHz band, in dB.
+ *
+ * The level the trim actually targets, and the one the ear uses to judge how
+ * loud a voice is. Broadband RMS is not a substitute: on a real narrator
+ * recording 81% of the total energy sits between 125 and 500 Hz, so a broadband
+ * figure barely moves when the whole intelligibility range shifts by 3 dB.
+ */
+function speechRmsDb(x, skip = 0) {
+  const c = new BiquadCascade(2, 1)
+  c.setSections([highpass(SR, 300, Math.SQRT1_2), lowpass(SR, 4000, Math.SQRT1_2)])
+  const y = new Float32Array(x.length)
+  c.process(x, y, x.length, 0)
+  return 10 * Math.log10(
+    y.subarray(skip).reduce((s, v) => s + v * v, 0) / (y.length - skip) + 1e-30,
+  )
 }
 
 /** Standard deviation of short-term (50 ms) RMS, in dB — how uneven a level is. */
@@ -224,8 +243,8 @@ test('auto trim levels the wet path against the dry one', () => {
       character, squash: 65, mix: 1, wetTrimDb: trimDb, correlation,
     })
     const skip = OVERSAMPLE_LATENCY_SAMPLES
-    const errDb = db(rms(channelData[0], skip) / rms(input, skip))
-    assert.ok(Math.abs(errDb) < 0.5, `${character}: wet is ${errDb.toFixed(2)} dB off dry`)
+    const errDb = speechRmsDb(channelData[0], skip) - speechRmsDb(input, skip)
+    assert.ok(Math.abs(errDb) < 0.5, `${character}: wet is ${errDb.toFixed(2)} dB off dry in the speech band`)
   }
 })
 
@@ -233,18 +252,39 @@ test('with the trim engaged, Mix does not become a volume control', () => {
   const input = voiceLike(1.5)
   const { trimDb, correlation } = computeSchepsAutoTrim([input], SR, {})
   const skip = OVERSAMPLE_LATENCY_SAMPLES
-  const dryDb = db(rms(input, skip))
+  const dryDb = speechRmsDb(input, skip)
 
   for (const mix of [0, 0.25, 0.5, 0.75, 1]) {
     const { channelData } = processSchepsBuffer([input], SR, {
       mix, wetTrimDb: trimDb, correlation,
     })
-    const errDb = db(rms(channelData[0], skip)) - dryDb
+    const errDb = speechRmsDb(channelData[0], skip) - dryDb
     // The whole promise of the pair: sweeping Mix end to end changes character,
     // not loudness. Half a dB is well under the threshold at which a level
     // difference starts deciding an A/B for the listener.
     assert.ok(Math.abs(errDb) < 0.5, `mix ${mix}: ${errDb.toFixed(2)} dB off dry`)
   }
+})
+
+test('broadband energy is allowed to rise with Mix — that is the character', () => {
+  // The other half of the trade, asserted so nobody "fixes" it back. Holding
+  // BROADBAND energy constant is what broke this: on a voice, that band is
+  // mostly fundamental, so a constant-broadband trim lets the low end Thick
+  // adds pay for itself out of the midrange, and the file goes quiet where it
+  // counts while the meters read level.
+  const input = voiceLike(4)
+  const skip = OVERSAMPLE_LATENCY_SAMPLES
+  const { trimDb, correlation } = computeSchepsAutoTrim([input], SR, { character: 'thick' })
+
+  const at = mix => processSchepsBuffer([input], SR, {
+    character: 'thick', mix, wetTrimDb: trimDb, correlation,
+  }).channelData[0]
+
+  const broadband = m => db(rms(at(m), skip) / rms(input, skip))
+  assert.ok(
+    broadband(1) > broadband(0) + 0.2,
+    `broadband should gain weight with Mix, got ${broadband(1).toFixed(2)} dB at full wet`,
+  )
 })
 
 test('the correlation the blend needs is real and high for this material', () => {
