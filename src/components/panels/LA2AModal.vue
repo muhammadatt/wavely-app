@@ -151,7 +151,6 @@ function selectMockPreset(name) {
                 :min="-12" :max="24" :step="0.1"
                 label="Gain" :accent="ACCENT" :format-value="formatGain"
                 :disabled="!la2aPreview"
-                :readonly="la2aAutoMakeup"
               />
               <span
                 v-if="la2aAutoMakeup"
@@ -159,10 +158,12 @@ function selectMockPreset(name) {
                 style="background:rgba(245,166,35,.2);border:1px solid rgba(245,166,35,.4);font:700 7px/1 'JetBrains Mono',monospace;letter-spacing:.09em;color:#f7c877"
               >AUTO</span>
             </div>
-            <!-- Auto makeup drives the Gain knob above to whatever keeps
-                 the output level-matched to the input, so bypass A/B isn't
-                 decided by loudness. Switching it off leaves the knob where
-                 it stands and hands control back to the user. -->
+            <!-- Auto makeup drives the Gain knob above to whatever restores
+                 the input's PEAK level — classic makeup, so the quiet parts
+                 come up while the peaks land where they started. The knob stays
+                 draggable while AUTO is lit: touching it takes over and drops
+                 AUTO, which is the only way a user can set a gain and have it
+                 stick. Discarding the drag instead reads as a broken knob. -->
             <button
               class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
               :style="{

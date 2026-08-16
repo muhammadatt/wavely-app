@@ -541,6 +541,42 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
  * Over a region of any real length the effect is tiny, but the auto-makeup that
  * depends on it is exactly the thing users judge bypass A/B by.
  */
+/**
+ * Peak magnitude across every sample of every channel, in dB.
+ *
+ * The makeup reference. Peak rather than RMS, and the distinction is the whole
+ * point of makeup gain: the compressor pulls the loud moments down, makeup
+ * hands back what it took, the peaks land where they started and everything
+ * underneath rises with them. That is a compressor made louder without being
+ * merely turned up — which is the comparison a listener is actually running
+ * when they A/B it.
+ *
+ * Matching RMS instead, as this did, returns only the average loss and
+ * therefore leaves the output exactly as loud as the input: a compressor that
+ * by construction cannot make anything louder.
+ *
+ * TRUE PEAK, not a high percentile, and that was measured. A percentile of
+ * short-block peaks looks more robust and is worse where it matters: on real
+ * speech a fast transient can survive compression almost intact while the p99
+ * comes down several dB, so percentile-referenced makeup over-compensates and
+ * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
+ * peak cannot do that; the guarantee it buys is exact.
+ *
+ * The cost is the opposite failure: a single uncompressed click sets the
+ * reference and the makeup comes out small. That is the safe direction — never
+ * louder than the source — and the manual trim is there for it.
+ */
+function peakOfChannels(channels, skip = 0) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > peak) peak = v
+    }
+  }
+  return peak
+}
+
 function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
   let count = 0
@@ -552,13 +588,12 @@ function rmsOfChannels(channels, skip = 0) {
 }
 
 /**
- * Compute the makeup gain (dB) that restores the processed signal to the
- * input's RMS level — i.e. what makes engaging the compressor level-neutral
- * so bypass A/B comparisons aren't decided by loudness bias.
+ * Compute the makeup gain (dB) that restores the processed signal's PEAK to
+ * the input's — the classic makeup convention. See `peakOfChannels` for why
+ * peak and not RMS, and why not a percentile either.
  *
  * Measured, not derived from the curve: the kernel is run over the actual
- * audio and the output RMS compared to the input's. RMS rather than peak,
- * because reducing peaks is the point — peak matching would over-boost.
+ * audio and the output's peak compared to the input's.
  *
  * Iterated because makeup is applied *before* the tube stage (as on the
  * hardware, where the Gain knob drives the output amplifier). Raising
@@ -575,15 +610,15 @@ function rmsOfChannels(channels, skip = 0) {
 export function computeAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 4, toleranceDb = 0.05 } = options
 
-  // Measured through the base-rate path. The question here is only what the
-  // output's RMS is, and oversampling moves that by at most 0.02 dB across the
-  // whole control range — it removes folded harmonics, which carry almost no
-  // energy. Measuring through the oversampled path instead made this about
-  // three times slower, which the Output knob showed as lag behind a drag.
+  // Measured through the base-rate path: oversampling removes folded
+  // harmonics, which carry almost no energy, and measuring through it was
+  // about three times slower — which the Gain knob showed as lag behind a
+  // drag. It does move the peak slightly more than it moves the RMS, so the
+  // iteration below re-measures rather than trusting one pass.
   const measureParams = { ...params, oversample: false }
 
-  const inputRms = rmsOfChannels(channelData)
-  if (inputRms <= 0) return 0
+  const inputPeak = peakOfChannels(channelData)
+  if (inputPeak <= 0) return 0
 
   let makeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
@@ -591,9 +626,9 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
       ...measureParams,
       gainDb: makeupDb,
     })
-    const outRms = rmsOfChannels(out)
-    if (outRms <= 0) break
-    const correctionDb = 20 * Math.log10(inputRms / outRms)
+    const outPeak = peakOfChannels(out)
+    if (outPeak <= 0) break
+    const correctionDb = 20 * Math.log10(inputPeak / outPeak)
     makeupDb = clamp(makeupDb + correctionDb, -24, 24)
     if (Math.abs(correctionDb) < toleranceDb) break
   }

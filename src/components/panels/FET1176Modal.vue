@@ -152,7 +152,6 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
                 :min="-36" :max="24" :step="0.1"
                 label="Output" :accent="ACCENT" :format-value="formatGain"
                 :disabled="!fetPreview"
-                :readonly="fetAutoMakeup"
               />
               <span
                 v-if="fetAutoMakeup"
@@ -169,8 +168,10 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
             <!-- Auto makeup matters more here than on the OptoSmooth:
                  Input feeds the audio path too, so driving the unit harder
                  swings the output level by tens of dB. With AUTO on, the
-                 plugin keeps Output level-matched to the input so pushing
-                 Input is a change of character, not of loudness. -->
+                 plugin restores the input's PEAK level, so pushing Input
+                 raises the quiet parts rather than the whole signal. The knob
+                 stays draggable while AUTO is lit: touching it takes over and
+                 drops AUTO, so a gain the user sets actually sticks. -->
             <button
               class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
               :style="{

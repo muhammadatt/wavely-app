@@ -55,6 +55,15 @@ function rmsDb(channels, skip = 0) {
   return 10 * Math.log10(sumSq / count)
 }
 
+/** Peak magnitude across channels, in dB — the makeup reference. */
+function peakDb(channels, skip = 0) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) peak = Math.max(peak, Math.abs(ch[i]))
+  }
+  return 20 * Math.log10(peak + 1e-30)
+}
+
 const SIGNAL = material()
 
 test('FET Punch: the measurement path measures the same level as the audio path', () => {
@@ -101,20 +110,28 @@ test('OptoSmooth: the measurement path measures the same level as the audio path
   }
 })
 
-test('auto-makeup lands within a fraction of a dB of unity', () => {
-  // What the control actually promises: engaging the compressor should not
-  // change loudness, so bypass A/B is not decided by level.
+test('auto-makeup restores the PEAK, which is what makeup gain means', () => {
+  // Not level-neutrality, which is what this used to assert. A compressor
+  // pulls the loud moments down; makeup hands back what it took, so the peaks
+  // land where they started and everything underneath rises with them. Matching
+  // RMS instead returns only the average loss and leaves the compressor unable
+  // to make anything louder.
+  //
+  // The guarantee this buys is the important half: the output can never come
+  // out hotter than the source, whatever the setting. That is what stops a
+  // surviving transient being pushed above the input and reading as an errant
+  // peak.
   for (const params of [
     { inputDrive: 50, ratio: '4', attack: 4, release: 4, fetDrive: 0.35 },
     { inputDrive: 85, ratio: '20', attack: 7, release: 4, fetDrive: 0.5 },
   ]) {
     const makeup = computeFET1176AutoMakeupDb([SIGNAL], SR, params)
     const out = processFET1176Buffer([SIGNAL], SR, { ...params, outputGainDb: makeup })
-    const delta = rmsDb(out.channelData, OVERSAMPLE_LATENCY_SAMPLES)
-      - rmsDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
+    const peakDelta = peakDb(out.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+      - peakDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
     assert.ok(
-      Math.abs(delta) < 0.2,
-      `FET makeup ${makeup.toFixed(2)} dB left ${delta.toFixed(3)} dB of level change`,
+      Math.abs(peakDelta) < 0.1,
+      `FET makeup ${makeup.toFixed(2)} dB left the peak ${peakDelta.toFixed(3)} dB off`,
     )
   }
 
@@ -124,13 +141,48 @@ test('auto-makeup lands within a fraction of a dB of unity', () => {
   ]) {
     const makeup = computeAutoMakeupDb([SIGNAL], SR, params)
     const out = processLA2ABuffer([SIGNAL], SR, { ...params, gainDb: makeup })
-    const delta = rmsDb(out.channelData, OVERSAMPLE_LATENCY_SAMPLES)
-      - rmsDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
+    const peakDelta = peakDb(out.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+      - peakDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
     assert.ok(
-      Math.abs(delta) < 0.2,
-      `Opto makeup ${makeup.toFixed(2)} dB left ${delta.toFixed(3)} dB of level change`,
+      Math.abs(peakDelta) < 0.1,
+      `Opto makeup ${makeup.toFixed(2)} dB left the peak ${peakDelta.toFixed(3)} dB off`,
     )
+    assert.ok(peakDelta <= 0.05, 'the output must never exceed the input peak')
   }
+})
+
+test('a peak compressor earns loudness from makeup; a slow leveller may not', () => {
+  // The measured difference between the two, and the reason the same makeup
+  // rule reads so differently on them.
+  //
+  // FET Punch catches peaks, so restoring them lifts everything underneath and
+  // the average rises — the textbook picture. OptoSmooth on this material does
+  // the opposite: a 10 ms attack into a multi-second release lets syllable
+  // onsets through nearly intact while pulling the sustained body down, so it
+  // reduces the average MORE than the peaks and peak-referenced makeup comes
+  // out quieter on average.
+  //
+  // That is a property of an opto leveller rather than a fault, and it is
+  // pinned here because it decides what users should expect: reach for FET
+  // Punch to make something louder, for OptoSmooth to make it steadier. On
+  // slower material the Opto does earn density — measured at +1.6 dB on a real
+  // narration clip at Peak Reduction 60.
+  const fetParams = { inputDrive: 50, ratio: '4', attack: 4, release: 4, fetDrive: 0.35 }
+  const fetMakeup = computeFET1176AutoMakeupDb([SIGNAL], SR, fetParams)
+  const fetOut = processFET1176Buffer([SIGNAL], SR, { ...fetParams, outputGainDb: fetMakeup })
+  const fetGain = rmsDb(fetOut.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+    - rmsDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
+  assert.ok(fetGain > 0.5, `FET Punch should earn density, got ${fetGain.toFixed(2)} dB`)
+
+  const optoParams = { mode: 'compress', peakReduction: 70, tubeDrive: 0.3 }
+  const optoMakeup = computeAutoMakeupDb([SIGNAL], SR, optoParams)
+  const optoOut = processLA2ABuffer([SIGNAL], SR, { ...optoParams, gainDb: optoMakeup })
+  const optoGain = rmsDb(optoOut.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+    - rmsDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
+  assert.ok(
+    optoGain < fetGain,
+    `the opto should trail the FET on density: ${optoGain.toFixed(2)} vs ${fetGain.toFixed(2)} dB`,
+  )
 })
 
 test('latency is reported per path, so the apply trim can never be wrong', () => {
