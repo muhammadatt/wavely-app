@@ -87,6 +87,24 @@ function speechRmsDb(x, skip = 0) {
   )
 }
 
+/** Speech-band level of the loud parts — p95 of 100 ms blocks. The makeup target. */
+function loudPartDb(x, skip = 0) {
+  const c = new BiquadCascade(2, 1)
+  c.setSections([highpass(SR, 300, Math.SQRT1_2), lowpass(SR, 4000, Math.SQRT1_2)])
+  const y = new Float32Array(x.length)
+  c.process(x, y, x.length, 0)
+  const W = Math.round(SR * 0.1)
+  const blocks = []
+  for (let off = skip; off + W <= y.length; off += W) {
+    let s = 0
+    for (let i = 0; i < W; i++) s += y[off + i] * y[off + i]
+    blocks.push(10 * Math.log10(s / W + 1e-30))
+  }
+  const loudest = Math.max(...blocks)
+  const voiced = blocks.filter(v => v > loudest - 40).sort((a, b) => a - b)
+  return voiced[Math.floor((voiced.length - 1) * 0.95)]
+}
+
 /** Standard deviation of short-term (50 ms) RMS, in dB — how uneven a level is. */
 function levelSpreadDb(x, skip = 0) {
   const W = Math.round(0.05 * SR)
@@ -232,38 +250,71 @@ test('stereo channels stay independent in the EQ and shared in the detector', ()
 
 // ── measured trim ───────────────────────────────────────────────────────────
 
-test('auto trim levels the wet path against the dry one', () => {
-  const input = voiceLike(1)
+test('the makeup lands the wet path’s LOUD PARTS on the dry one’s', () => {
+  // What makeup gain has always meant: give back what the compressor took off
+  // the loud moments. Matching the AVERAGE instead — which this used to do — is
+  // a compressor that by construction cannot make anything louder.
+  const input = voiceLike(4, { envRateHz: 0.5 })
+  const skip = OVERSAMPLE_LATENCY_SAMPLES
   for (const character of ['thick', 'presence']) {
-    const { trimDb, correlation } = computeSchepsAutoTrim([input], SR, { character, squash: 65 })
-
-    // Applying the measured trim to a fully-wet render should land within a
-    // fraction of a dB of the dry level.
+    const m = computeSchepsAutoTrim([input], SR, { character, squash: 65 })
     const { channelData } = processSchepsBuffer([input], SR, {
-      character, squash: 65, mix: 1, wetTrimDb: trimDb, correlation,
+      character, squash: 65, mix: 1, wetTrimDb: m.trimDb,
+      correlation: m.correlation, densityDb: m.densityDb,
     })
-    const skip = OVERSAMPLE_LATENCY_SAMPLES
-    const errDb = speechRmsDb(channelData[0], skip) - speechRmsDb(input, skip)
-    assert.ok(Math.abs(errDb) < 0.5, `${character}: wet is ${errDb.toFixed(2)} dB off dry in the speech band`)
+    const errDb = loudPartDb(channelData[0], skip) - loudPartDb(input, skip)
+    assert.ok(
+      Math.abs(errDb) < 0.7,
+      `${character}: wet loud parts are ${errDb.toFixed(2)} dB off dry`,
+    )
   }
 })
 
-test('with the trim engaged, Mix does not become a volume control', () => {
-  const input = voiceLike(1.5)
-  const { trimDb, correlation } = computeSchepsAutoTrim([input], SR, {})
+test('the compression yields real density, and it is modest on an opto cell', () => {
+  // `densityDb` is how much louder the wet copy's average is once its loud
+  // parts are level — the loudness the compressor actually earns. It must be
+  // positive, or the makeup is doing nothing. It is also small: a T4 cell with a
+  // multi-second release applies nearly constant gain reduction rather than
+  // ducking peaks selectively, so it hands back far less than a fast peak
+  // compressor would. Measured 0.6-0.8 dB on real speech.
+  const input = voiceLike(4, { envRateHz: 0.5 })
+  const { densityDb } = computeSchepsAutoTrim([input], SR, { squash: 80 })
+  assert.ok(densityDb > 0, `expected the compression to buy something, got ${densityDb.toFixed(2)} dB`)
+  assert.ok(densityDb < 4, `suspiciously large for an opto cell: ${densityDb.toFixed(2)} dB`)
+})
+
+test('Mix adds the compression’s density, monotonically, and nothing else', () => {
+  // The promise is not "Mix changes nothing" — a blended-in compressed copy
+  // SHOULD get gently louder, and refusing to let it was the bug. The promise
+  // is that the only loudness Mix adds is the density the compressor earned,
+  // rising smoothly from exactly dry at 0. What it must never do is jump around
+  // or run away, which is what an uncorrected correlated sum does.
+  const input = voiceLike(4, { envRateHz: 0.5 })
+  const m = computeSchepsAutoTrim([input], SR, {})
   const skip = OVERSAMPLE_LATENCY_SAMPLES
   const dryDb = speechRmsDb(input, skip)
 
-  for (const mix of [0, 0.25, 0.5, 0.75, 1]) {
+  const levels = [0, 0.25, 0.5, 0.75, 1].map((mix) => {
     const { channelData } = processSchepsBuffer([input], SR, {
-      mix, wetTrimDb: trimDb, correlation,
+      mix, wetTrimDb: m.trimDb, correlation: m.correlation, densityDb: m.densityDb,
     })
-    const errDb = speechRmsDb(channelData[0], skip) - dryDb
-    // The whole promise of the pair: sweeping Mix end to end changes character,
-    // not loudness. Half a dB is well under the threshold at which a level
-    // difference starts deciding an A/B for the listener.
-    assert.ok(Math.abs(errDb) < 0.5, `mix ${mix}: ${errDb.toFixed(2)} dB off dry`)
+    return speechRmsDb(channelData[0], skip) - dryDb
+  })
+
+  assert.ok(Math.abs(levels[0]) < 0.05, `mix 0 must be dry: ${levels[0].toFixed(2)} dB`)
+  for (let i = 1; i < levels.length; i++) {
+    assert.ok(
+      levels[i] > levels[i - 1] - 0.05,
+      `should not dip on the way up: ${levels.map(v => v.toFixed(2)).join(' -> ')}`,
+    )
   }
+  assert.ok(
+    Math.abs(levels[levels.length - 1] - m.densityDb) < 0.4,
+    `full wet should land on the measured density ${m.densityDb.toFixed(2)}, got ${levels[levels.length - 1].toFixed(2)}`,
+  )
+  // Bounded: an uncorrected equal-power sum of two correlated paths runs ~3 dB
+  // hot in the middle of the sweep. Nothing here may approach that.
+  assert.ok(Math.max(...levels) < 1.5, `Mix is acting as a volume control: ${levels.map(v => v.toFixed(2)).join(' -> ')}`)
 })
 
 test('broadband energy is allowed to rise with Mix — that is the character', () => {

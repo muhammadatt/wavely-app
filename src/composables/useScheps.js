@@ -29,6 +29,7 @@ const schepsAutoTrim = ref(true)
 const schepsAutoTrimBusy = ref(false)
 const schepsWetTrimDb = ref(SCHEPS_DEFAULTS.wetTrimDb)
 const schepsCorrelation = ref(SCHEPS_DEFAULTS.correlation)
+const schepsDensityDb = ref(SCHEPS_DEFAULTS.densityDb)
 
 const schepsPreview = ref(false)
 const schepsReduction = ref(0)
@@ -54,6 +55,7 @@ function currentParams() {
     output: schepsOutput.value,
     wetTrimDb: schepsWetTrimDb.value,
     correlation: schepsCorrelation.value,
+    densityDb: schepsDensityDb.value,
   }
 }
 
@@ -146,7 +148,7 @@ export function useScheps() {
     const seq = ++trimSeq
     schepsAutoTrimBusy.value = true
     try {
-      const { trimDb, correlation } = await computeSchepsTrim(
+      const { trimDb, correlation, densityDb } = await computeSchepsTrim(
         state.segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
@@ -154,8 +156,10 @@ export function useScheps() {
       if (seq !== trimSeq) return // a newer measurement is already in flight
       schepsWetTrimDb.value = trimDb
       schepsCorrelation.value = correlation
+      schepsDensityDb.value = densityDb
       pushParam('wetTrimDb', trimDb)
       pushParam('correlation', correlation)
+      pushParam('densityDb', densityDb)
     } catch (err) {
       console.error('Scheps auto trim measurement failed:', err)
     } finally {
@@ -232,8 +236,10 @@ export function useScheps() {
     schepsAutoTrimBusy.value = false
     schepsWetTrimDb.value = 0
     schepsCorrelation.value = 0
+    schepsDensityDb.value = 0
     pushParam('wetTrimDb', 0)
     pushParam('correlation', 0)
+    pushParam('densityDb', 0)
   }
 
   async function apply() {
@@ -288,6 +294,7 @@ export function useScheps() {
     schepsAutoTrimBusy,
     schepsWetTrimDb,
     schepsCorrelation,
+    schepsDensityDb,
     schepsPreview,
     schepsReduction,
     schepsInputLevels,

@@ -89,6 +89,13 @@ export const SCHEPS_KERNEL_DEFAULTS = {
    * `_updateMix`. Zero gives a textbook equal-power crossfade.
    */
   correlation: 0,
+  /**
+   * How much louder the wet copy's average is than the dry one's once its loud
+   * parts are level — the compression's yield, from computeSchepsAutoTrim. The
+   * mix law passes it through instead of flattening it, so Mix gently raises
+   * loudness. Zero means unmeasured.
+   */
+  densityDb: 0,
   outputDb: 0, // manual trim on the summed output
 }
 
@@ -116,14 +123,27 @@ function clamp(v, lo, hi) {
  *
  * Exported for the tests and the panel readout.
  */
-export function mixGains(mix, correlation = 0) {
+export function mixGains(mix, correlation = 0, densityDb = 0) {
   const theta = clamp(mix, 0, 1) * (Math.PI / 2)
   const dry = Math.cos(theta)
   const wet = Math.sin(theta)
   const rho = clamp(correlation, -0.98, 0.98)
-  // sin(2*theta) is 2*dry*wet; both are non-negative here, so the radicand
-  // cannot go below 1 - 0.98 and needs no further guarding.
-  const compensation = 1 / Math.sqrt(1 + rho * 2 * dry * wet)
+  const r = Math.exp(clamp(densityDb, -12, 12) * LN10_OVER_20)
+
+  // What the sum WOULD be if the two paths were independent. This is the target
+  // rather than unity, and the difference is the point: the wet copy is louder
+  // on average than the dry one by `densityDb`, because its loud parts were
+  // pulled down and handed back. That gain is the compression's yield and has
+  // to survive the blend — flattening it is what left the plugin unable to make
+  // anything louder.
+  const target = dry * dry + r * r * wet * wet
+  // What it actually is, with the interference term the correlation creates.
+  const actual = target + 2 * rho * r * dry * wet
+  const compensation = Math.sqrt(target / Math.max(actual, 1e-6))
+  // `r` shapes the compensation only. It is not applied as a gain: the wet path
+  // is ALREADY that much louder on average, because the trim put its loud parts
+  // level and compression raised everything underneath them. Multiplying by it
+  // here would count the same density twice.
   return { dry, wet, compensation }
 }
 
@@ -184,7 +204,9 @@ export class SchepsKernel {
   }
 
   _updateMix() {
-    const { dry, wet, compensation } = mixGains(this.params.mix, this.params.correlation)
+    const { dry, wet, compensation } = mixGains(
+      this.params.mix, this.params.correlation, this.params.densityDb,
+    )
     this.dryGain = dry * compensation
     this.wetGain = wet * compensation
   }
@@ -354,30 +376,67 @@ function speechWeight(x, sampleRate) {
 }
 
 /**
- * Measure the two numbers the blend needs from the audio itself.
+ * Level of the LOUD PARTS: the 95th percentile of 100 ms block levels, in dB.
  *
- * `trimDb` is the wet-path gain that puts the compressed copy at the dry
- * signal's level. Without it the wet path arrives however loud the chain
- * happens to leave it — Thick's net curve alone is +4 dB in the low end — and
- * the Mix knob becomes a volume control, which decides an A/B before the user
- * has heard anything.
+ * This is what makeup gain has always been referenced to, and it is not the
+ * same as the average. A compressor earns loudness by pulling the loud moments
+ * down and then handing back roughly what it took: the loud parts land back
+ * where they started, everything quieter comes up by the full makeup, and the
+ * average rises. Restoring the AVERAGE instead gives back only what was lost on
+ * average, which by construction leaves the file exactly as loud as it started
+ * — a compressor that cannot make anything louder.
  *
- * BOTH NUMBERS ARE MEASURED IN THE SPEECH BAND, not broadband — see
- * `speechWeight` for the measurement that forced that, and note what it makes
- * this plugin promise. The invariant across the Mix sweep is constant
- * *speech-band* loudness; broadband energy deliberately rises with Mix, because
- * the character's whole point is to add weight underneath the voice. Matching
- * broadband instead makes the low end pay for itself out of the midrange, which
- * is audible and wrong.
+ * Blocks more than 40 dB below the loudest are dropped, so pauses and room tone
+ * cannot drag the percentile down on a sparsely-voiced take.
+ */
+function loudPartDb(x, sampleRate) {
+  const W = Math.round(sampleRate * 0.1)
+  if (x.length < W * 4) {
+    // Too short to have a level distribution; fall back to plain RMS.
+    let s = 0
+    for (let i = 0; i < x.length; i++) s += x[i] * x[i]
+    return 10 * Math.log10(s / Math.max(1, x.length) + 1e-30)
+  }
+  const blocks = []
+  for (let off = 0; off + W <= x.length; off += W) {
+    let s = 0
+    for (let i = 0; i < W; i++) s += x[off + i] * x[off + i]
+    blocks.push(10 * Math.log10(s / W + 1e-30))
+  }
+  const loudest = Math.max(...blocks)
+  const voiced = blocks.filter(v => v > loudest - 40)
+  voiced.sort((a, b) => a - b)
+  return voiced[Math.floor((voiced.length - 1) * 0.95)]
+}
+
+/**
+ * Measure the three numbers the blend needs from the audio itself.
  *
- * RMS rather than peak: squashing peaks is the entire point of the wet path, so
- * peak matching would over-boost it badly.
+ * `trimDb` is the wet-path makeup: the gain that puts the compressed copy's
+ * LOUD PARTS back where the dry signal's are. See `loudPartDb` for why the loud
+ * parts and not the average — matching the average is what made this plugin
+ * incapable of making anything louder, which is not what a compressor is for.
+ *
+ * `densityDb` is what that buys: how much louder the wet copy's average is than
+ * the dry one's, once its loud parts are level. It is the compression's actual
+ * yield, and it is modest here — 0.6 to 0.8 dB on real speech — because an opto
+ * cell with a multi-second release applies nearly constant gain reduction
+ * rather than selectively ducking peaks. A fast peak compressor would hand back
+ * far more. The mix law passes this through rather than flattening it, so
+ * pushing Mix does gently increase loudness, which is the whole point of
+ * blending a compressed copy in.
+ *
+ * ALL THREE ARE MEASURED IN THE SPEECH BAND, not broadband — see `speechWeight`
+ * for the measurement that forced that. Broadband energy is free to rise faster
+ * than `densityDb`, because the character adds weight underneath the voice, and
+ * making that weight pay for itself out of the midrange is what went wrong
+ * before.
  *
  * `correlation` is the zero-lag Pearson correlation between dry and wet, in the
  * same band, so the mix law's compensation holds the same quantity the trim
  * does — see `mixGains`.
  *
- * Both are measured over the region the user has selected, so they follow the
+ * All are measured over the region the user has selected, so they follow the
  * material rather than a table of assumptions about it.
  */
 export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
@@ -398,15 +457,24 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
     }
   }
 
-  if (dryEnergy <= 0 || wetEnergy <= 0) return { trimDb: 0, correlation: 0 }
+  if (dryEnergy <= 0 || wetEnergy <= 0) {
+    return { trimDb: 0, correlation: 0, densityDb: 0 }
+  }
 
-  // Trim is clamped to the same travel the panel's readout shows, so the value
-  // in effect and the value displayed can never disagree.
-  const trimDb = clamp(10 * Math.log10(dryEnergy / wetEnergy), -24, 24)
+  // Makeup, referenced to the loud parts. Measured on channel 0: the level
+  // distribution is a property of the performance, and a stereo voice recording
+  // has the same one on both sides.
+  const trimDb = clamp(
+    loudPartDb(dryBand[0], sampleRate) - loudPartDb(wet[0], sampleRate), -24, 24,
+  )
+  // What that makeup yields in average level — the density the blend passes on.
+  const densityDb = clamp(
+    trimDb + 10 * Math.log10(wetEnergy / dryEnergy), -12, 12,
+  )
   // Scaling the wet path by a positive gain cannot change a normalised
   // correlation, so this is computed on the unscaled wet signal.
   const correlation = clamp(crossEnergy / Math.sqrt(dryEnergy * wetEnergy), -1, 1)
-  return { trimDb, correlation }
+  return { trimDb, correlation, densityDb }
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

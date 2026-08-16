@@ -48,8 +48,8 @@ function autoMakeup(measure, channelData, sampleRate, params) {
 // Scheps wet path (two EQ cascades and the opto compressor) over the region.
 function schepsAutoTrim(channelData, sampleRate, params) {
   try {
-    const { trimDb, correlation } = computeSchepsAutoTrim(channelData, sampleRate, params)
-    self.postMessage({ type: 'done', trimDb, correlation })
+    const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
+    self.postMessage({ type: 'done', trimDb, correlation, densityDb })
   } catch (err) {
     self.postMessage({ type: 'error', message: err.message })
   }

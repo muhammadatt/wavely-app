@@ -32,6 +32,7 @@ export const SCHEPS_DEFAULTS = {
   // so the applied render uses the same two numbers the preview was heard with.
   wetTrimDb: 0,
   correlation: 0,
+  densityDb: 0,
 }
 
 /** Map UI param names to kernel param names. */
@@ -43,6 +44,7 @@ export function toKernelParams(params) {
     outputDb: params.output,
     wetTrimDb: params.wetTrimDb,
     correlation: params.correlation,
+    densityDb: params.densityDb,
   }
 }
 

@@ -307,13 +307,13 @@ export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sam
 }
 
 /**
- * Measure the Scheps wet-path trim and the dry/wet correlation for a region.
- * Resolves `{ trimDb, correlation }` — see computeSchepsAutoTrim for what each
- * is for.
+ * Measure the Scheps wet-path makeup, the dry/wet correlation and the density
+ * the compression yields, for a region. Resolves
+ * `{ trimDb, correlation, densityDb }` — see computeSchepsAutoTrim.
  */
 export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker('schepsAutoTrim', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => ({ trimDb: d.trimDb, correlation: d.correlation }))
+    .then(d => ({ trimDb: d.trimDb, correlation: d.correlation, densityDb: d.densityDb }))
 }
 
 /**
