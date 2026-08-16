@@ -207,6 +207,12 @@ function selectMockPreset(name) {
               :disabled="!la2aPreview"
             />
           </div>
+          <!-- R37 filters the SIDE-CHAIN, not the audio. At 0 it is the
+               hardware's factory position (fully clockwise, flat); turning it
+               up attenuates the side-chain below 1 kHz by up to 10 dB, so the
+               cell stops reacting to plosives and rides the presence band
+               instead. Nothing here is audible on its own — it changes what the
+               compressor listens to. -->
           <div class="w-[78px]">
             <Knob
               :model-value="la2aEmphasis"

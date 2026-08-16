@@ -68,8 +68,14 @@ export const SCHEPS_KERNEL_DEFAULTS = {
    * Drives the LA-2A's Peak Reduction, 0–100. Parallel compression wants far
    * more of this than a series insert would — the squashed copy is a layer, not
    * the signal.
+   *
+   * Set high because the side-chain arrives twice-filtered: the pre EQ takes
+   * ~4.7 dB out of the lows and R37 wide open takes 10 dB more below 1 kHz, so
+   * the cell is looking at far less than the raw signal. On speech at nominal
+   * level this lands around 7 dB of gain reduction on the wet path; the same
+   * number on the Opto Comp panel, with a flat side-chain, would be about 13.
    */
-  squash: 65,
+  squash: 80,
   mix: 0.35, // 0–1 wet
   /**
    * Wet-path gain, applied after the post EQ and BEFORE the mix sums. Measured

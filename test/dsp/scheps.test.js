@@ -30,23 +30,40 @@ function db(x) {
 }
 
 /**
- * A stand-in for a voice: a fundamental with a few harmonics, amplitude
- * modulated so the compressor has something to move on, and with the syllable
- * envelope shaped rather than gated — a hard on/off splatters broadband energy
- * that the low shelves would then read as content.
+ * A stand-in for a voice.
+ *
+ * FORMANTS MATTER HERE, and a plain 1/h harmonic stack will not do. Both this
+ * chain's low-rejecting elements — the Pultec pre-cut and R37 wide open — take
+ * energy out of the side-chain below about a kilohertz, so a probe whose energy
+ * is almost all fundamental is the one signal that makes a working compressor
+ * look idle. Resonances near 600/1800/2800 Hz plus a little fricative noise put
+ * weight where speech actually has it, and roughly double the gain reduction at
+ * a matched level.
+ *
+ * The syllable envelope is shaped rather than gated: a hard on/off splatters
+ * broadband energy that the low shelves would then read as content.
  */
 function voiceLike(seconds, { f0 = 130, envRateHz = 3 } = {}) {
   const n = Math.round(seconds * SR)
   const out = new Float32Array(n)
+  let seed = 1
   for (let i = 0; i < n; i++) {
     const t = i / SR
     let s = 0
-    for (let h = 1; h <= 8; h++) s += Math.sin(2 * Math.PI * f0 * h * t) / h
-    // Raised-cosine syllable envelope, never fully closing. Shaped rather than
-    // gated: a hard on/off splatters broadband energy that the low shelves
-    // would then read as content.
+    for (let h = 1; h <= 40; h++) {
+      const f = f0 * h
+      if (f > SR / 2) break
+      let a = 1 / h
+      for (const F of [600, 1800, 2800]) {
+        a += 0.9 * Math.exp(-Math.pow((f - F) / 260, 2)) / Math.sqrt(h)
+      }
+      // Per-harmonic phase offset: summing them all in phase builds an
+      // impulse train with a crest factor no voice has.
+      s += a * Math.sin(2 * Math.PI * f * t + h)
+    }
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
     const env = 0.25 + 0.75 * (0.5 - 0.5 * Math.cos(2 * Math.PI * envRateHz * t))
-    out[i] = 0.25 * s * env
+    out[i] = 0.06 * (s + ((seed / 0x7fffffff) - 0.5) * 0.35) * env
   }
   return out
 }
@@ -257,7 +274,13 @@ test('the wet path really is levelled, and Squash controls how much', () => {
   // Compared against the same chain with the compressor backed off rather than
   // against the raw input: Thick's two EQ stages net +4 dB at the bottom, which
   // on a harmonic stack moves these statistics on its own.
-  const input = voiceLike(3, { envRateHz: 1 })
+  //
+  // SLOW envelope, and that is the physics rather than a threshold that needed
+  // loosening. A T4 cell is 10 ms of attack into a release measured in seconds,
+  // so it cannot follow syllables — measured across envelope rates, the same
+  // settings that flatten a 0.1 Hz swell by 1.3 dB move a 3 Hz one by 0.16.
+  // Levelling phrases while letting syllables through is what the unit is for.
+  const input = voiceLike(10, { envRateHz: 0.1 })
   const skip = OVERSAMPLE_LATENCY_SAMPLES
 
   const spreadAt = (squash) => {
@@ -280,7 +303,7 @@ test('the blend keeps the dry signal’s dynamics — that is what parallel is f
   // Series compression at this depth would flatten the performance. Blended at
   // the default Mix it must not: the summed level spread has to sit between the
   // dry signal's and the fully-wet one's.
-  const input = voiceLike(3, { envRateHz: 1 })
+  const input = voiceLike(10, { envRateHz: 0.1 }) // slow, per the note above
   const skip = OVERSAMPLE_LATENCY_SAMPLES
   const { trimDb, correlation } = computeSchepsAutoTrim([input], SR, { squash: 80 })
 

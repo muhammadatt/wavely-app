@@ -25,7 +25,7 @@ export const SCHEPS_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
 
 export const SCHEPS_DEFAULTS = {
   character: 'thick', // 'thick' | 'presence'
-  squash: 65, // LA-2A Peak Reduction on the wet path
+  squash: 80, // LA-2A Peak Reduction on the wet path — see the kernel defaults
   mix: 35, // percent wet — the panel's unit
   output: 0, // manual trim on the summed output, dB
   // Measured by the auto trim pass. Held here rather than derived at apply time

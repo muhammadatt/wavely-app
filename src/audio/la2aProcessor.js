@@ -92,8 +92,29 @@ const MEM_HALF_DB = 2.5
 // ── Sidechain constants ─────────────────────────────────────────────────────
 
 const SC_HPF_HZ = 80
-const SC_SHELF_HZ = 2000
-const SC_SHELF_MAX_DB = 8
+
+/**
+ * R37 side-chain pre-emphasis.
+ *
+ * An ATTENUATOR of lows, not a booster of highs — the distinction decides what
+ * the control can actually do. On the hardware R37 is a trimmer in a passive
+ * network, and a passive network cannot boost: "emphasis" is achieved by
+ * discarding low frequencies and letting the side-chain amplifier make the
+ * level back up. Factory position is fully clockwise, which is flat; turning it
+ * counter-clockwise progressively filters the side-chain so the cell stops
+ * responding to the low end. `emphasis` here runs 0 (flat, factory) to 1 (fully
+ * counter-clockwise), so the parameter increases in the direction the hardware
+ * knob turns for more filtering.
+ *
+ * This was modelled backwards until it was measured against a plosive: as a
+ * high SHELF BOOST from unity it left the lows at full level, so sweeping it
+ * moved the gain reduction on a 120 Hz thump by 0.06 dB — and upward, because
+ * the Peak Reduction knob drives a FIXED internal threshold, so adding
+ * side-chain gain adds compression. Attenuating instead gives the control
+ * authority over the thing it exists to reject.
+ */
+const SC_SHELF_HZ = 1000
+const SC_SHELF_MAX_DB = 10
 const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies the real ballistics
 
 // Nominal operating level. The hardware's T4 threshold sits at line level
@@ -215,7 +236,11 @@ export class LA2AKernel {
     const knob = clamp(p.peakReduction, 0, 100) / 100
     this.scDriveDb =
       SC_DRIVE_MIN_DB - NOMINAL_DBFS + SC_DRIVE_SPAN_DB * Math.pow(knob, SC_TAPER)
-    this.shelfGain = Math.pow(10, (SC_SHELF_MAX_DB * clamp(p.emphasis, 0, 1)) / 20) - 1
+    // Gain applied to the side-chain's sub-1 kHz content: 1 at emphasis 0
+    // (flat), down to -10 dB fully counter-clockwise. Above the corner the
+    // side-chain stays at unity, so this only ever removes drive — see
+    // SC_SHELF_MAX_DB.
+    this.shelfLowGain = Math.pow(10, (-SC_SHELF_MAX_DB * clamp(p.emphasis, 0, 1)) / 20)
     this.makeupLin = Math.exp(p.gainDb * LN10_OVER_20)
 
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
@@ -282,14 +307,16 @@ export class LA2AKernel {
       for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
       x *= chScale
 
-      // Sidechain frequency mapping: 80 Hz HPF, then HF emphasis shelf
+      // Sidechain frequency mapping: 80 Hz HPF, then the R37 emphasis filter.
       hpfLp += (x - hpfLp) * this.hpfLpCoef
       const hp = x - hpfLp
-      let sc = hp
-      if (this.shelfGain > 0) {
-        shelfLp += (hp - shelfLp) * this.shelfLpCoef
-        sc = hp + this.shelfGain * (hp - shelfLp)
-      }
+      // Split at the corner and attenuate only the low half. Run
+      // unconditionally rather than skipped at emphasis 0: it is algebraically
+      // the identity there (lowGain 1 sums the two halves back to hp), and
+      // skipping it would leave the one-pole holding stale state for the knob
+      // to jump off when it next moves.
+      shelfLp += (hp - shelfLp) * this.shelfLpCoef
+      const sc = (hp - shelfLp) + this.shelfLowGain * shelfLp
 
       // Rectify + light smoothing
       const rect = sc < 0 ? -sc : sc
