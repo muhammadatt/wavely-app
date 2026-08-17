@@ -3,7 +3,7 @@
  *
  * The DSP itself lives in ../la2aProcessor.js (T4 optical cell with
  * dual-stage memory-dependent release, program-dependent compress/limit
- * ratios, R37 sidechain emphasis, tube saturation) and runs in an
+ * ratios, the R37 side-chain trimmer, tube saturation) and runs in an
  * AudioWorklet. The offline apply path renders through the same worklet in
  * an OfflineAudioContext, so the preview is sample-identical to what gets
  * written to the timeline.
@@ -28,7 +28,7 @@ export const LA2A_DEFAULTS = {
   peakReduction: 50,
   gain: 0, // makeup gain dB
   tubeDrive: 0.3,
-  emphasis: 0, // R37 HF sidechain emphasis, 0 = flat (stock)
+  r37: 100, // R37 side-chain trimmer as knob rotation; 100 = flat (factory)
 }
 
 /** Map UI param names to kernel param names. */
@@ -38,7 +38,7 @@ export function toKernelParams(params) {
     peakReduction: params.peakReduction,
     gainDb: params.gain,
     tubeDrive: params.tubeDrive,
-    emphasis: params.emphasis,
+    r37: params.r37,
   }
 }
 

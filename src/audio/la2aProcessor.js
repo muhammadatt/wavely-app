@@ -34,8 +34,9 @@
  *
  * 3. Sidechain frequency mapping + tube stage
  *    - Sidechain: one-pole 80 Hz high-pass (the cell barely responds to
- *      rumble) plus an R37-style HF emphasis shelf (0 to +8 dB above 2 kHz)
- *      that makes the unit progressively de-ess as it's turned up.
+ *      rumble) plus the R37 pre-emphasis trimmer, which attenuates the
+ *      side-chain below 1 kHz by up to 10 dB and so makes the unit
+ *      progressively more sensitive to highs as it is turned down.
  *    - Output path: asymmetric tanh waveshaper approximating the harmonic
  *      profile of the input/driver/output tube stages (bias term → 2nd
  *      harmonic, tanh curvature → 3rd), followed by a DC blocker.
@@ -96,22 +97,32 @@ const SC_HPF_HZ = 80
 /**
  * R37 side-chain pre-emphasis.
  *
- * An ATTENUATOR of lows, not a booster of highs — the distinction decides what
- * the control can actually do. On the hardware R37 is a trimmer in a passive
- * network, and a passive network cannot boost: "emphasis" is achieved by
- * discarding low frequencies and letting the side-chain amplifier make the
- * level back up. Factory position is fully clockwise, which is flat; turning it
- * counter-clockwise progressively filters the side-chain so the cell stops
- * responding to the low end. `emphasis` here runs 0 (flat, factory) to 1 (fully
- * counter-clockwise), so the parameter increases in the direction the hardware
- * knob turns for more filtering.
+ * DIRECTION: THE PARAMETER RUNS THE WAY THE HARDWARE KNOB DOES. From the LA-2A
+ * manual: "This potentiometer is factory set for a 'flat' side-chain response
+ * (clockwise). Increasing the resistance of this potentiometer by turning it
+ * counter clockwise will result in compression which is increasingly more
+ * sensitive to the higher frequencies."
  *
- * This was modelled backwards until it was measured against a plosive: as a
- * high SHELF BOOST from unity it left the lows at full level, so sweeping it
+ * So `r37` is 0-100 read as knob rotation: **100 is fully clockwise, flat, the
+ * factory position and the default**; winding down toward 0 filters more low
+ * end out of the side-chain, leaving the cell increasingly sensitive to highs.
+ * It previously ran the opposite way as `emphasis`, with 0 meaning flat, which
+ * inverted both the hardware and every reference plugin — the same number meant
+ * opposite things in our panel and in anything we compared it against.
+ *
+ * MECHANISM: an ATTENUATOR of lows, not a booster of highs. On the hardware R37
+ * is a trimmer in a passive network, and a passive network cannot boost:
+ * "emphasis" is achieved by discarding low frequencies and letting the
+ * side-chain amplifier make the level back up.
+ *
+ * That was modelled backwards too, until it was measured against a plosive. As
+ * a high SHELF BOOST from unity it left the lows at full level, so sweeping it
  * moved the gain reduction on a 120 Hz thump by 0.06 dB — and upward, because
  * the Peak Reduction knob drives a FIXED internal threshold, so adding
  * side-chain gain adds compression. Attenuating instead gives the control
  * authority over the thing it exists to reject.
+ *
+ * Neither the 1 kHz corner nor the 10 dB depth is measured against hardware.
  */
 const SC_SHELF_HZ = 1000
 const SC_SHELF_MAX_DB = 10
@@ -144,7 +155,7 @@ export const LA2A_KERNEL_DEFAULTS = {
   peakReduction: 50, // 0–100, sidechain drive (hardware Peak Reduction knob)
   gainDb: 0, // makeup gain (hardware Gain knob)
   tubeDrive: 0.3, // 0–1 tube stage saturation amount
-  emphasis: 0, // 0–1 R37 HF sidechain emphasis (0 = flat, stock)
+  r37: 100, // 0–100 side-chain pre-emphasis, as knob rotation: 100 = flat (factory)
   mix: 1, // wet/dry blend
   /**
    * Run the gain cell and tube stage oversampled. Always true for anything
@@ -251,11 +262,12 @@ export class LA2AKernel {
     const knob = clamp(p.peakReduction, 0, 100) / 100
     this.scDriveDb =
       SC_DRIVE_MIN_DB - NOMINAL_DBFS + SC_DRIVE_SPAN_DB * Math.pow(knob, SC_TAPER)
-    // Gain applied to the side-chain's sub-1 kHz content: 1 at emphasis 0
-    // (flat), down to -10 dB fully counter-clockwise. Above the corner the
-    // side-chain stays at unity, so this only ever removes drive — see
-    // SC_SHELF_MAX_DB.
-    this.shelfLowGain = Math.pow(10, (-SC_SHELF_MAX_DB * clamp(p.emphasis, 0, 1)) / 20)
+    // Gain applied to the side-chain's sub-1 kHz content: 1 at r37 100 (fully
+    // clockwise, flat, factory), down to -10 dB at r37 0 (fully counter-
+    // clockwise). Above the corner the side-chain stays at unity, so this only
+    // ever removes drive — see SC_SHELF_MAX_DB.
+    const r37 = Number.isFinite(p.r37) ? clamp(p.r37, 0, 100) : LA2A_KERNEL_DEFAULTS.r37
+    this.shelfLowGain = Math.pow(10, (-SC_SHELF_MAX_DB * (1 - r37 / 100)) / 20)
     this.makeupLin = Math.exp((Number.isFinite(p.gainDb) ? p.gainDb : 0) * LN10_OVER_20)
 
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
@@ -336,7 +348,7 @@ export class LA2AKernel {
       hpfLp += (x - hpfLp) * this.hpfLpCoef
       const hp = x - hpfLp
       // Split at the corner and attenuate only the low half. Run
-      // unconditionally rather than skipped at emphasis 0: it is algebraically
+      // unconditionally rather than skipped at r37 100: it is algebraically
       // the identity there (lowGain 1 sums the two halves back to hp), and
       // skipping it would leave the one-pole holding stale state for the knob
       // to jump off when it next moves.

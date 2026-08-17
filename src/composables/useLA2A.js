@@ -14,7 +14,7 @@ const la2aMode = ref(LA2A_DEFAULTS.mode)
 const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
 const la2aTubeDrive = ref(LA2A_DEFAULTS.tubeDrive)
-const la2aEmphasis = ref(LA2A_DEFAULTS.emphasis)
+const la2aR37 = ref(LA2A_DEFAULTS.r37)
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
 // boundary and perturbs the levels the mastering chain later measures.
@@ -49,7 +49,7 @@ function currentParams() {
     peakReduction: la2aPeakReduction.value,
     gain: la2aGain.value,
     tubeDrive: la2aTubeDrive.value,
-    emphasis: la2aEmphasis.value,
+    r37: la2aR37.value,
   }
 }
 
@@ -60,7 +60,7 @@ function measurementParams() {
     peakReduction: la2aPeakReduction.value,
     gainDb: 0,
     tubeDrive: la2aTubeDrive.value,
-    emphasis: la2aEmphasis.value,
+    r37: la2aR37.value,
   }
 }
 
@@ -198,7 +198,7 @@ export function useLA2A() {
   const syncMode = (v) => syncCompressionParam('mode', la2aMode, v)
   const syncPeakReduction = (v) => syncCompressionParam('peakReduction', la2aPeakReduction, v)
   const syncTubeDrive = (v) => syncCompressionParam('tubeDrive', la2aTubeDrive, v)
-  const syncEmphasis = (v) => syncCompressionParam('emphasis', la2aEmphasis, v)
+  const syncR37 = (v) => syncCompressionParam('r37', la2aR37, v)
 
   /**
    * Touch-to-take-over: dragging the knob while AUTO is on switches AUTO off
@@ -295,7 +295,7 @@ export function useLA2A() {
     la2aPeakReduction,
     la2aGain,
     la2aTubeDrive,
-    la2aEmphasis,
+    la2aR37,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
     la2aPreview,
@@ -308,7 +308,7 @@ export function useLA2A() {
     syncPeakReduction,
     syncGain,
     syncTubeDrive,
-    syncEmphasis,
+    syncR37,
     toggleAutoMakeup,
     refreshAutoMakeup,
     apply,

@@ -13,9 +13,9 @@
  * the compressor takes the plosives and the chest thump out of the sidechain,
  * so the opto cell stops ducking the whole voice every time a "p" lands; the
  * 8 kHz lift does the same in reverse, handing the cell the presence band so it
- * rides that instead. The LA-2A's own R37 emphasis is pinned wide open here for
- * the same reason — on the hardware that is the HF knob turned all the way up,
- * and it is the single setting the trick is named for.
+ * rides that instead. The LA-2A's own R37 trimmer is pinned fully counter-
+ * clockwise here for the same reason, and it is the single setting the trick is
+ * named for.
  *
  * WHY THE POST STAGE IS NOT AN EXACT INVERSE. It is measured, not derived: the
  * curves in data/pultec_curves/ are what a passive EQP-1A actually does, and its
@@ -48,7 +48,9 @@ const LN10_OVER_20 = Math.LN10 / 20
 /**
  * LA-2A settings the trick fixes, and why none of them is on the panel.
  *
- * `emphasis: 1` is the trick. `mode: 'compress'` because this is levelling, not
+ * `r37: 0` is the trick: the trimmer wound fully counter-clockwise, which is
+ * what "turn the HF knob all the way up" means on a unit whose factory position
+ * is clockwise and flat. `mode: 'compress'` because this is levelling, not
  * limiting. `mix: 1` because the parallel blend is ours, not the compressor's.
  *
  * `gainDb` is NOT here: the wet path's makeup is handed to the compressor as
@@ -64,7 +66,7 @@ const LN10_OVER_20 = Math.LN10 / 20
  */
 const LA2A_FIXED = {
   mode: 'compress',
-  emphasis: 1,
+  r37: 0,
   tubeDrive: 0.3,
   mix: 1,
 }
@@ -77,7 +79,8 @@ export const SCHEPS_KERNEL_DEFAULTS = {
    * the signal.
    *
    * Set high because the side-chain arrives twice-filtered: the pre EQ takes
-   * ~4.7 dB out of the lows and R37 wide open takes 10 dB more below 1 kHz, so
+   * ~4.7 dB out of the lows and R37 fully counter-clockwise takes 10 dB more
+   * below 1 kHz, so
    * the cell is looking at far less than the raw signal. On speech at nominal
    * level this lands around 7 dB of gain reduction on the wet path; the same
    * number on the Opto Comp panel, with a flat side-chain, would be about 13.

@@ -12,11 +12,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
+  la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aR37,
   la2aAutoMakeup, la2aAutoMakeupBusy,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels, hasSelection,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
-  syncEmphasis, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
+  syncR37, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
 } = useLA2A()
 
 const { state } = useEditorState()
@@ -186,7 +186,7 @@ function selectMockPreset(name) {
         <LevelMeter :levels="la2aOutputLevels" label="OUT" />
       </div>
 
-      <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 emphasis) -->
+      <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 trimmer) -->
       <div class="flex items-center justify-between mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <!-- Compress / Limit — the hardware's rear-panel switch -->
         <SegmentedSwitch
@@ -208,18 +208,19 @@ function selectMockPreset(name) {
               :disabled="!la2aPreview"
             />
           </div>
-          <!-- R37 filters the SIDE-CHAIN, not the audio. At 0 it is the
-               hardware's factory position (fully clockwise, flat); turning it
-               up attenuates the side-chain below 1 kHz by up to 10 dB, so the
-               cell stops reacting to plosives and rides the presence band
-               instead. Nothing here is audible on its own — it changes what the
-               compressor listens to. -->
+          <!-- R37 filters the SIDE-CHAIN, not the audio, and it reads as knob
+               rotation like the hardware trimmer: 100 is fully clockwise and
+               flat, which is the factory position and where it sits by default.
+               Winding it DOWN attenuates the side-chain below 1 kHz by up to
+               10 dB, so the cell stops reacting to plosives and rides the
+               presence band instead. Nothing here is audible on its own — it
+               changes what the compressor listens to. -->
           <div class="w-[78px]">
             <Knob
-              :model-value="la2aEmphasis"
-              @update:model-value="syncEmphasis"
-              :min="0" :max="1" :step="0.01" :value-font-px="13"
-              label="R37 Emphasis" :accent="ACCENT" :format-value="formatPercent"
+              :model-value="la2aR37"
+              @update:model-value="syncR37"
+              :min="0" :max="100" :step="1" :value-font-px="13"
+              label="R37" :accent="ACCENT"
               :disabled="!la2aPreview"
             />
           </div>
