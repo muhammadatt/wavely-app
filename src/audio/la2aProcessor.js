@@ -221,6 +221,21 @@ export class LA2AKernel {
     this.setParams({})
   }
 
+  /** Clear every feedback path in the cell and the tube stage. */
+  resetState() {
+    this.hpfLp = 0
+    this.shelfLp = 0
+    this.env = 0
+    this.grFast = 0
+    this.grSlow = 0
+    this.memory = 0
+    this.lastGain = 1
+    this.dcX = this.dcX.map(() => 0)
+    this.dcY = this.dcY.map(() => 0)
+    this.gainDelay.reset()
+    for (const line of this.dryLines) line?.reset()
+  }
+
   /** Merge a partial param update and recompute derived coefficients. */
   setParams(partial) {
     const p = { ...this.params, ...partial }
@@ -241,7 +256,7 @@ export class LA2AKernel {
     // side-chain stays at unity, so this only ever removes drive — see
     // SC_SHELF_MAX_DB.
     this.shelfLowGain = Math.pow(10, (-SC_SHELF_MAX_DB * clamp(p.emphasis, 0, 1)) / 20)
-    this.makeupLin = Math.exp(p.gainDb * LN10_OVER_20)
+    this.makeupLin = Math.exp((Number.isFinite(p.gainDb) ? p.gainDb : 0) * LN10_OVER_20)
 
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
@@ -281,6 +296,16 @@ export class LA2AKernel {
    * @param {number} n                      - samples in this block
    */
   process(inputChannels, outputChannels, n) {
+    // A non-finite value anywhere in the cell's state is unrecoverable on its
+    // own: env, grFast, grSlow and memory all feed back into themselves, so one
+    // NaN makes every future block NaN and the effect goes silent for good.
+    // Params are validated at the boundary, but this kernel is embedded by
+    // other plugins and reached from a message port, so it also heals itself.
+    // One comparison per block.
+    if (!Number.isFinite(this.env + this.grFast + this.grSlow + this.memory)) {
+      this.resetState()
+    }
+
     const nIn = inputChannels.length
     const nOut = outputChannels.length
     if (nIn === 0 || n === 0) {

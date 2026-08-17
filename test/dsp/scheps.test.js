@@ -438,3 +438,42 @@ test('defaults are the ones the panel and the apply path share', () => {
   assert.equal(SCHEPS_KERNEL_DEFAULTS.character, 'thick')
   assert.ok(SCHEPS_KERNEL_DEFAULTS.mix > 0 && SCHEPS_KERNEL_DEFAULTS.mix < 1)
 })
+
+test('a bad param cannot poison the kernel — it used to, permanently', () => {
+  // Since the makeup became the compressor's own Gain, a non-finite param no
+  // longer stays local: it reaches the T4 cell's envelope and memory, which
+  // feed back into themselves, and every later block comes out NaN. Measured
+  // before the guard: one bad push, then twenty blocks of good params, still
+  // 128/128 non-finite samples. In the app that is an effect that goes silent
+  // and stays silent until the page is reloaded.
+  //
+  // `clamp` alone does not catch it — `undefined < lo` and `undefined > hi` are
+  // both false, so it hands the undefined straight through.
+  const SR_ = SR
+  const block = new Float32Array(128)
+  for (let i = 0; i < 128; i++) block[i] = 0.3 * Math.sin((2 * Math.PI * 200 * i) / SR_)
+
+  const kernel = new SchepsKernel(SR_)
+  const out = new Float32Array(128)
+  const nonFinite = a => a.reduce((n, v) => n + (Number.isFinite(v) ? 0 : 1), 0)
+
+  kernel.setParams({ mix: 0.35, wetTrimDb: 3 })
+  kernel.process([block], [out], 128)
+  assert.equal(nonFinite(out), 0)
+
+  for (const bad of [
+    { wetTrimDb: undefined }, { wetTrimDb: NaN }, { outputDb: NaN },
+    { mix: undefined }, { squash: NaN }, { correlation: undefined },
+    { densityDb: NaN }, { squash: Infinity },
+  ]) {
+    kernel.setParams(bad)
+    kernel.process([block], [out], 128)
+    assert.equal(nonFinite(out), 0, `${JSON.stringify(bad)} produced non-finite output`)
+  }
+
+  // And it still works afterwards, rather than having been quietly bricked.
+  kernel.setParams({ mix: 0.35, wetTrimDb: 3, squash: 80, correlation: 0.9, densityDb: 0.6 })
+  kernel.process([block], [out], 128)
+  assert.equal(nonFinite(out), 0)
+  assert.ok(out.some(v => v !== 0), 'the kernel went silent instead of recovering')
+})

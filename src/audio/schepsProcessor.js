@@ -112,6 +112,24 @@ function clamp(v, lo, hi) {
 }
 
 /**
+ * Clamp, but reject anything that is not a finite number.
+ *
+ * Params reach this kernel over a message port from UI state, so one undefined
+ * or NaN is always one bug away — and since the makeup is now the compressor's
+ * own Gain, a NaN no longer stays local. It enters the T4 cell's envelope and
+ * memory, which are persistent, and the kernel then outputs NaN forever: the
+ * effect goes silent and stays silent until the page is reloaded. Measured
+ * exactly that way — one bad push, then twenty blocks of good params, still all
+ * non-finite.
+ *
+ * `clamp` alone cannot catch it: `undefined < lo` and `undefined > hi` are both
+ * false, so it returns undefined unchanged.
+ */
+function finite(v, fallback, lo, hi) {
+  return Number.isFinite(v) ? clamp(v, lo, hi) : fallback
+}
+
+/**
  * Dry and wet gains for a mix position, plus the compensation that keeps the
  * sum's level constant across the whole sweep.
  *
@@ -132,11 +150,11 @@ function clamp(v, lo, hi) {
  * Exported for the tests and the panel readout.
  */
 export function mixGains(mix, correlation = 0, densityDb = 0) {
-  const theta = clamp(mix, 0, 1) * (Math.PI / 2)
+  const theta = finite(mix, 0, 0, 1) * (Math.PI / 2)
   const dry = Math.cos(theta)
   const wet = Math.sin(theta)
-  const rho = clamp(correlation, -0.98, 0.98)
-  const r = Math.exp(clamp(densityDb, -12, 12) * LN10_OVER_20)
+  const rho = finite(correlation, 0, -0.98, 0.98)
+  const r = Math.exp(finite(densityDb, 0, -12, 12) * LN10_OVER_20)
 
   // What the sum WOULD be if the two paths were independent. This is the target
   // rather than unity, and the difference is the point: the wet copy is louder
@@ -191,16 +209,16 @@ export class SchepsKernel {
 
     this.la2a.setParams({
       ...LA2A_FIXED,
-      peakReduction: clamp(p.squash, 0, 100),
+      peakReduction: finite(p.squash, SCHEPS_KERNEL_DEFAULTS.squash, 0, 100),
       // The wet path's makeup, at the stage the hardware puts it — before the
       // tube, after the cell, and therefore before the post EQ.
-      gainDb: clamp(p.wetTrimDb, -36, 36),
+      gainDb: finite(p.wetTrimDb, 0, -36, 36),
       // Measurement mode propagates through: with oversampling off the whole
       // wet path is latency-free, and the dry delay below follows it to zero.
       oversample: p.oversample !== false,
     })
 
-    this.outputLin = Math.exp(clamp(p.outputDb, -24, 24) * LN10_OVER_20)
+    this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)
     this._updateMix()
 
     // The dry delay has to match the wet path's latency exactly; rebuild it if
