@@ -8,7 +8,11 @@ import {
   RESONANCE_KERNEL_DEFAULTS,
   processResonanceBuffer,
 } from '../../src/audio/resonanceProcessor.js'
-import { effectivePitchRange, PITCH_RANGES } from '../../src/audio/resonanceParams.js'
+import {
+  effectivePitchRange,
+  PITCH_RANGES,
+  resonanceDisplayRange,
+} from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
 
@@ -413,4 +417,190 @@ test('reset returns the kernel to its initial behaviour', () => {
   let maxErr = 0
   for (let i = 0; i < sig.length; i++) maxErr = Math.max(maxErr, Math.abs(a[i] - b[i]))
   assert.ok(maxErr < 1e-9, `reset did not restore state: ${maxErr}`)
+})
+
+// ── Display grid ────────────────────────────────────────────────────────────
+//
+// The panel draws these numbers directly, so they are the display's only
+// contract. What matters is that a frequency on the plot is the frequency in
+// the audio, that the level axis means dBFS, and that a peak between two reads
+// is not lost — a display that misses transient reductions would be worse than
+// the bar it replaces, which never missed one.
+
+/** Run a signal through a kernel and return it, ready to be read. */
+function runKernel(sig, params = {}) {
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams(params)
+  const out = new Float32Array(sig.length)
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  return kernel
+}
+
+/** Split a display read into its three curves plus the grid's frequencies. */
+function readDisplay(kernel) {
+  const d = kernel.displayBins
+  const buf = new Float32Array(3 * d)
+  const ok = kernel.readDisplay(buf)
+  const octaves = Math.log2(kernel.displayMaxHz / kernel.displayMinHz)
+  return {
+    ok,
+    bins: d,
+    mag: buf.subarray(0, d),
+    reference: buf.subarray(d, 2 * d),
+    reduction: buf.subarray(2 * d, 3 * d),
+    hz: i => kernel.displayMinHz * Math.pow(2, (i / (d - 1)) * octaves),
+  }
+}
+
+/**
+ * Mean reduction per display bin over a whole run, read the way the worklet
+ * reads it — every 1024 samples.
+ *
+ * Reading once at the end instead would report the maximum over every frame in
+ * the file, and on noise that saturates: somewhere in three seconds nearly
+ * every bin momentarily pokes over the threshold, so the peak of a
+ * read-once trace is wherever the noise happened to be loudest. Averaging the
+ * reads is both what the display shows over time and the only way to ask where
+ * the effect is *consistently* working.
+ */
+function meanReduction(sig, params) {
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams(params)
+  const out = new Float32Array(sig.length)
+  const d = kernel.displayBins
+  const buf = new Float32Array(3 * d)
+  const sum = new Float64Array(d)
+  let reads = 0
+  let since = 0
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    since += len
+    if (since < 1024) continue
+    since = 0
+    if (!kernel.readDisplay(buf)) continue
+    for (let i = 0; i < d; i++) sum[i] += buf[2 * d + i]
+    reads++
+  }
+  const octaves = Math.log2(kernel.displayMaxHz / kernel.displayMinHz)
+  return {
+    mean: Array.from(sum, v => v / reads),
+    hz: i => kernel.displayMinHz * Math.pow(2, (i / (d - 1)) * octaves),
+  }
+}
+
+function argmax(arr) {
+  let best = -Infinity
+  let at = 0
+  for (let i = 0; i < arr.length; i++) if (arr[i] > best) { best = arr[i]; at = i }
+  return at
+}
+
+test('nothing to display until a frame has been analysed', () => {
+  const kernel = new ResonanceKernel(SR)
+  assert.equal(kernel.readDisplay(new Float32Array(3 * kernel.displayBins)), false)
+})
+
+test('the display puts the reduction at the frequency it was taken from', () => {
+  // Unpitched carrier on purpose. On the harmonic stack the deepest cut with
+  // protection off lands on the fundamental, which is correct behaviour and
+  // useless as a position test — it would pass for a display that reported
+  // every cut at 150 Hz.
+  const d = meanReduction(resonate(noise(), 3000, 40, 14), UNPROTECTED)
+  const at = d.hz(argmax(d.mean))
+  assert.ok(
+    Math.abs(Math.log2(at / 3000)) < 0.12,
+    `deepest cut reported at ${at.toFixed(0)} Hz, resonance was at 3000 Hz`,
+  )
+})
+
+test('the displayed spectrum is calibrated in dBFS', () => {
+  // A full-scale sine reads 0 dBFS. Without this the level axis is an
+  // arbitrary offset and the numerals beside it are decoration.
+  //
+  // On a bin centre, because scalloping is not calibration error: a Hann
+  // window loses up to 1.4 dB on a tone that falls between two bins, and that
+  // is a property of every FFT analyser ever built rather than something this
+  // display could correct. Testing off-centre would only pin the loss.
+  const hz = (46 * SR) / 2048
+  const n = SR
+  const sig = new Float32Array(n)
+  for (let i = 0; i < n; i++) sig[i] = Math.sin((2 * Math.PI * hz * i) / SR)
+
+  const d = readDisplay(runKernel(sig, { ...UNPROTECTED, depth: 0 }))
+  const peak = argmax(d.mag)
+  assert.ok(
+    Math.abs(Math.log2(d.hz(peak) / hz)) < 0.05,
+    `peak at ${d.hz(peak).toFixed(0)} Hz, expected ${hz.toFixed(0)}`,
+  )
+  assert.ok(
+    Math.abs(d.mag[peak]) < 0.3,
+    `full scale should read 0 dBFS, read ${d.mag[peak].toFixed(2)}`,
+  )
+})
+
+test('the reference sits below a resonance by more than the selectivity', () => {
+  // What the panel draws as the threshold is reference + selectivity, and the
+  // whole explanation it offers is "this peak is over that line". If the
+  // reference tracked the peak instead there would be nothing to see.
+  const kernel = runKernel(resonate(noise(), 3000, 40, 18), UNPROTECTED)
+  const d = readDisplay(kernel)
+  const at = argmax(d.reduction)
+  assert.ok(
+    d.mag[at] - d.reference[at] > RESONANCE_KERNEL_DEFAULTS.selectivity,
+    `peak stood only ${(d.mag[at] - d.reference[at]).toFixed(1)} dB over the reference`,
+  )
+})
+
+test('reduction between two reads is held, not lost', () => {
+  // The worklet reads at half the frame rate, so a peak landing on an unread
+  // frame has to survive to the next read — that peak is the transient ring
+  // the user is looking for.
+  const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
+  const first = readDisplay(kernel)
+  const held = Math.max(...first.reduction)
+  assert.ok(held > 3, `expected a real cut to report, got ${held.toFixed(1)} dB`)
+
+  // A second read with no further audio reports nothing: the accumulator was
+  // cleared, so a stale peak cannot be shown twice.
+  const second = readDisplay(kernel)
+  assert.equal(Math.max(...second.reduction), 0)
+})
+
+test('the display grid covers the documented span at every sample rate', () => {
+  for (const sr of [44100, 48000, 22050]) {
+    const kernel = new ResonanceKernel(sr)
+    const expected = resonanceDisplayRange(sr)
+    assert.equal(kernel.displayMinHz, expected.minHz)
+    assert.equal(kernel.displayMaxHz, expected.maxHz)
+    // Every point resolves to a real bin — including the low end, where the
+    // grid is finer than the FFT and the kernel interpolates instead.
+    for (let i = 0; i < kernel.displayBins; i++) {
+      const lo = kernel.dLo[i]
+      const hi = kernel.dHi[i]
+      if (hi >= lo) {
+        assert.ok(hi < kernel.binCount, `bin span past the spectrum at ${i}`)
+      } else {
+        assert.ok(kernel.dPos[i] >= 0 && kernel.dPos[i] <= kernel.binCount - 1)
+      }
+    }
+  }
+})
+
+test('every displayed value is finite, silence included', () => {
+  const d = readDisplay(runKernel(new Float32Array(SR)))
+  for (let i = 0; i < d.bins; i++) {
+    assert.ok(Number.isFinite(d.mag[i]), `magnitude ${i} was not finite`)
+    assert.ok(Number.isFinite(d.reference[i]), `reference ${i} was not finite`)
+    assert.ok(Number.isFinite(d.reduction[i]), `reduction ${i} was not finite`)
+  }
+})
+
+test('reset clears the display as well as the audio state', () => {
+  const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
+  kernel.reset()
+  assert.equal(kernel.readDisplay(new Float32Array(3 * kernel.displayBins)), false)
 })

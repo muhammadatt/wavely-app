@@ -65,6 +65,7 @@
 import { StftProcessor } from './dsp/stft.js'
 import { F0Tracker } from './dsp/f0.js'
 import { getFFT } from './dsp/fft.js'
+import { RESONANCE_DISPLAY_BINS, resonanceDisplayRange } from './resonanceParams.js'
 
 const FFT_SIZE = 2048
 const HOP_SIZE = 512
@@ -140,6 +141,19 @@ const SILENCE_FLOOR_DB = -60
 const DEFAULT_PITCH_MIN_HZ = 70
 const DEFAULT_PITCH_MAX_HZ = 400
 
+/**
+ * Level that reads as 0 on the displayed spectrum, in dB of raw bin magnitude.
+ *
+ * The FFT is unnormalised and the analysis window is a periodic Hann, so a
+ * full-scale sine sitting on a bin centre produces |X| = A·N/4 — the N/2 of an
+ * unnormalised transform times the window's 0.5 coherent gain. Subtracting that
+ * puts the display in dBFS, which is the only scale a number on a spectrum plot
+ * can be read against. It is a display convention only: nothing in the
+ * suppression path sees it, because every decision the kernel makes is a
+ * difference between two magnitudes and a constant cancels out of all of them.
+ */
+const SPECTRUM_REF_DB = 20 * Math.log10(FFT_SIZE / 4)
+
 export const RESONANCE_KERNEL_DEFAULTS = {
   depth: 0.67,
   sharpness: 0.8,
@@ -201,6 +215,17 @@ export class ResonanceKernel {
 
     // Metering — peak reduction seen since the last read.
     this.maxReductionSeen = 0
+
+    // Per-frequency display. The panel draws what the kernel measured rather
+    // than running its own analyser over the output: a second FFT would show
+    // the result of the cut but not the reference it was decided against, and
+    // the threshold line is the one curve that explains what Selectivity does.
+    this.displayBins = RESONANCE_DISPLAY_BINS
+    this.displayMag = new Float32Array(this.displayBins)
+    this.displayEnv = new Float32Array(this.displayBins)
+    this.displayGr = new Float32Array(this.displayBins)
+    this.hasDisplayFrame = false
+    this._buildDisplayGrid()
 
     // Bound once so the hot path passes a stable reference rather than
     // allocating a closure per block.
@@ -299,6 +324,114 @@ export class ResonanceKernel {
     this.prevGr.fill(0)
     this.frameIndex = 0
     this.maskCache.clear()
+    this.displayGr.fill(0)
+    this.hasDisplayFrame = false
+  }
+
+  /**
+   * Map the FFT bins onto the log-frequency display grid, once.
+   *
+   * Each display point owns a span of the axis, and which case it falls into
+   * depends on where it sits: above ~400 Hz its span covers several FFT bins
+   * and it takes the strongest of them, below that the span is narrower than a
+   * bin and it interpolates between the two either side. Taking the maximum
+   * rather than the mean is the important half — a resonance is a narrow peak,
+   * and averaging it against the bins beside it is exactly the operation that
+   * would hide the thing this display exists to show.
+   */
+  _buildDisplayGrid() {
+    const D = this.displayBins
+    const { minHz, maxHz } = resonanceDisplayRange(this.sampleRate)
+    this.displayMinHz = minHz
+    this.displayMaxHz = maxHz
+
+    // Inclusive FFT bin span per display point; hi < lo means "interpolate at
+    // dPos instead", which is the only signal the hot loop needs.
+    this.dLo = new Int32Array(D)
+    this.dHi = new Int32Array(D)
+    this.dPos = new Float32Array(D)
+
+    const octaves = Math.log2(maxHz / minHz)
+    const halfStep = octaves / (D - 1) / 2
+    const last = this.binCount - 1
+
+    for (let d = 0; d < D; d++) {
+      const fc = minHz * Math.pow(2, (d / (D - 1)) * octaves)
+      this.dPos[d] = clamp(fc / this.binWidth, 0, last)
+
+      const rawLo = Math.ceil((fc * Math.pow(2, -halfStep)) / this.binWidth)
+      const rawHi = Math.floor((fc * Math.pow(2, halfStep)) / this.binWidth)
+      if (rawHi >= rawLo && rawHi >= 0 && rawLo <= last) {
+        this.dLo[d] = Math.max(rawLo, 0)
+        this.dHi[d] = Math.min(rawHi, last)
+      } else {
+        this.dLo[d] = 1
+        this.dHi[d] = 0
+      }
+    }
+  }
+
+  /**
+   * Resample this frame's measurements onto the display grid.
+   *
+   * Magnitude and the reference are this frame's; reduction is the maximum
+   * since the last read, because the display is read at half the frame rate and
+   * a peak that lands on the unread frame is exactly the transient the user is
+   * trying to see. The reference goes out without `selectivity` added — the
+   * panel adds it when drawing, so turning the knob moves the threshold line
+   * immediately rather than on the next frame from the worklet.
+   */
+  _snapshotDisplay() {
+    const { magDb, envDb, prevGr, displayMag, displayEnv, displayGr } = this
+    const last = this.binCount - 1
+
+    for (let d = 0; d < this.displayBins; d++) {
+      const lo = this.dLo[d]
+      const hi = this.dHi[d]
+      let mag
+      let env
+      let gr
+      if (hi >= lo) {
+        mag = -Infinity
+        env = 0
+        gr = 0
+        for (let k = lo; k <= hi; k++) {
+          if (magDb[k] > mag) mag = magDb[k]
+          env += envDb[k]
+          if (prevGr[k] > gr) gr = prevGr[k]
+        }
+        env /= hi - lo + 1
+      } else {
+        const pos = this.dPos[d]
+        const k0 = Math.min(Math.floor(pos), last)
+        const k1 = Math.min(k0 + 1, last)
+        const t = pos - k0
+        mag = magDb[k0] + (magDb[k1] - magDb[k0]) * t
+        env = envDb[k0] + (envDb[k1] - envDb[k0]) * t
+        gr = prevGr[k0] > prevGr[k1] ? prevGr[k0] : prevGr[k1]
+      }
+      displayMag[d] = mag - SPECTRUM_REF_DB
+      displayEnv[d] = env - SPECTRUM_REF_DB
+      if (gr > displayGr[d]) displayGr[d] = gr
+    }
+    this.hasDisplayFrame = true
+  }
+
+  /**
+   * Copy the display grid into `out` as [magnitude, reference, reduction] and
+   * clear the reduction accumulator. Returns false before the first frame.
+   *
+   * One flat array of three sections rather than three arrays, because this
+   * crosses a postMessage boundary every 23 ms and one buffer clones once.
+   */
+  readDisplay(out) {
+    if (!this.hasDisplayFrame) return false
+    const D = this.displayBins
+    out.set(this.displayMag, 0)
+    out.set(this.displayEnv, D)
+    out.set(this.displayGr, 2 * D)
+    this.displayGr.fill(0)
+    return true
   }
 
   /**
@@ -474,6 +607,11 @@ export class ResonanceKernel {
     }
     if (frameMax > this.maxReductionSeen) this.maxReductionSeen = frameMax
 
+    // Unconditional: at ~2000 operations per frame this costs less than one of
+    // the three transforms above, and a display that only fills once someone is
+    // watching has to define what "watching" means across a port boundary.
+    this._snapshotDisplay()
+
     this.frameIndex++
   }
 
@@ -571,6 +709,7 @@ if (typeof registerProcessor === 'function') {
         this.kernel.setParams(options.processorOptions.params)
       }
       this.sinceMeter = 0
+      this.display = new Float32Array(3 * this.kernel.displayBins)
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
         else if (e.data?.type === 'reset') this.kernel.reset()
@@ -593,7 +732,15 @@ if (typeof registerProcessor === 'function') {
       this.sinceMeter += n
       if (this.sinceMeter >= METER_INTERVAL_SAMPLES) {
         this.sinceMeter = 0
-        this.port.postMessage({ type: 'gr', grDb: this.kernel.readMetering() })
+        // One scratch buffer, reused: postMessage clones synchronously, so the
+        // main thread gets its own copy and the worklet allocates nothing on
+        // the audio thread.
+        const hasDisplay = this.kernel.readDisplay(this.display)
+        this.port.postMessage({
+          type: 'gr',
+          grDb: this.kernel.readMetering(),
+          display: hasDisplay ? this.display : null,
+        })
       }
       return true
     }

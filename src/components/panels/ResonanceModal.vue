@@ -7,7 +7,7 @@ import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import DeviceSlider from '../knobs/DeviceSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import GainReductionBar from '../meters/GainReductionBar.vue'
+import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
@@ -16,7 +16,8 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resPreview, resReduction, resInputLevels, resOutputLevels, hasSelection,
+  resPitchRange, resPreview, resReduction, resInputLevels, resOutputLevels,
+  resDisplayFn, hasSelection,
   togglePreview, syncDepth, syncSharpness, syncSelectivity, syncAttack,
   syncRelease, syncMaxReduction, syncFreqFloor, syncFreqCeil, syncMode,
   syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
@@ -89,7 +90,17 @@ async function applyAndClose() {
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
-      <GainReductionBar :reduction-db="resReduction" :accent="ACCENT" />
+      <!-- The display, not a meter. This effect cuts a few narrow bands and
+           leaves the rest alone, so "how much" without "where" describes almost
+           nothing about it — see the note in ResonanceSpectrum. -->
+      <ResonanceSpectrum
+        :data-fn="resDisplayFn"
+        :reduction-db="resReduction"
+        :accent="ACCENT"
+        :selectivity-db="resSelectivity"
+        :freq-floor-hz="resFreqFloor"
+        :freq-ceil-hz="resFreqCeil"
+      />
 
       <div class="flex items-center justify-between gap-[22px] mt-[22px]">
         <LevelMeter :levels="resInputLevels" label="IN" :height="150" />

@@ -28,6 +28,22 @@ const resInputLevels = ref([])
 const resOutputLevels = ref([])
 let meterId = null
 
+/**
+ * The live effect's nodes while the preview is running, or null.
+ *
+ * Held outside the reactive state on purpose. The spectrum display reads a
+ * 576-float frame every animation frame; putting that through a ref would make
+ * Vue diff a typed array 60 times a second to redraw a canvas that does not
+ * care about reactivity. The meter loop owns this handle's lifetime, so the
+ * display goes dark the moment the preview stops.
+ */
+let resNodes = null
+
+/** Latest per-frequency frame, for a display that draws it directly. */
+function resDisplayFn() {
+  return resNodes?.getDisplay() ?? null
+}
+
 function currentParams() {
   return {
     depth: resDepth.value,
@@ -62,8 +78,9 @@ export function useResonance() {
 
   function startMeters(chain) {
     stopMeters()
+    resNodes = chain.effects.find(e => e.id === resonanceEffect.id)?.nodes ?? null
     function tick() {
-      const nodes = chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
+      const nodes = resNodes
       if (nodes) {
         resReduction.value = nodes.getReduction()
         // Only meter channels the source really has: the splitter is
@@ -82,6 +99,7 @@ export function useResonance() {
       cancelAnimationFrame(meterId)
       meterId = null
     }
+    resNodes = null
     resReduction.value = 0
     resInputLevels.value = []
     resOutputLevels.value = []
@@ -191,6 +209,7 @@ export function useResonance() {
     resReduction,
     resInputLevels,
     resOutputLevels,
+    resDisplayFn,
     hasSelection,
     togglePreview,
     syncDepth,

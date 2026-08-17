@@ -19,9 +19,19 @@
 
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
-import { PITCH_RANGES, RESONANCE_FRAME_SIZE } from '../resonanceParams.js'
+import {
+  PITCH_RANGES,
+  RESONANCE_FRAME_SIZE,
+  resonanceDisplayRange,
+} from '../resonanceParams.js'
 
-export { PITCH_RANGES, RESONANCE_FRAME_SIZE, effectivePitchRange } from '../resonanceParams.js'
+export {
+  PITCH_RANGES,
+  RESONANCE_FRAME_SIZE,
+  RESONANCE_DISPLAY_BINS,
+  effectivePitchRange,
+  resonanceDisplayRange,
+} from '../resonanceParams.js'
 
 /** This STFT holds back exactly one frame before a sample is reconstructed. */
 export const RESONANCE_LATENCY_SAMPLES = RESONANCE_FRAME_SIZE
@@ -72,6 +82,12 @@ export function createResonance(audioContext) {
   let destroyed = false
   let grDb = 0
 
+  // Latest per-frequency frame from the kernel, and a view onto it. The view is
+  // rebuilt only when a new frame lands, so a display reading it every animation
+  // frame — faster than the ~46 Hz the worklet posts at — allocates nothing.
+  let displayFrame = null
+  let displayView = null
+
   input.connect(preOutput)
   preOutput.connect(output)
 
@@ -82,7 +98,12 @@ export function createResonance(audioContext) {
         processorOptions: { params: toKernelParams(params) },
       })
       worklet.port.onmessage = (e) => {
-        if (e.data?.type === 'gr') grDb = e.data.grDb
+        if (e.data?.type !== 'gr') return
+        grDb = e.data.grDb
+        if (e.data.display) {
+          displayFrame = e.data.display
+          displayView = null
+        }
       }
       input.disconnect(preOutput)
       input.connect(worklet)
@@ -118,6 +139,36 @@ export function createResonance(audioContext) {
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.
     getReduction() {
       return -grDb
+    },
+
+    /**
+     * The kernel's own view of the last frame, on a log-frequency grid, or null
+     * before the worklet has produced one.
+     *
+     * `mag` and `reference` are dBFS; `reduction` is positive dB of cut, held at
+     * the maximum seen since the previous frame was read. `reference` does NOT
+     * include `selectivity` — the caller adds it, so the threshold line tracks
+     * the knob without waiting for the audio thread.
+     *
+     * Returns a live view onto the latest frame rather than a copy. It is valid
+     * until the next message arrives, which is what a per-frame drawing loop
+     * wants; anything holding it longer must copy.
+     */
+    getDisplay() {
+      if (!displayFrame) return null
+      if (!displayView) {
+        const bins = displayFrame.length / 3
+        const range = resonanceDisplayRange(audioContext.sampleRate)
+        displayView = {
+          bins,
+          minHz: range.minHz,
+          maxHz: range.maxHz,
+          mag: displayFrame.subarray(0, bins),
+          reference: displayFrame.subarray(bins, 2 * bins),
+          reduction: displayFrame.subarray(2 * bins, 3 * bins),
+        }
+      }
+      return displayView
     },
 
     getInputLevels(channelCount) {
