@@ -7,7 +7,7 @@
  *
  *   dry ─────────────────────── delay ────────────────┐
  *                                                     ├─ equal-power mix ─ out
- *   wet ─ Pultec(pre) ─ OptoSmooth ─ Pultec(post) ─ trim ┘
+ *   wet ─ Pultec(pre) ─ OptoSmooth(+makeup) ─ Pultec(post) ─┘
  *
  * WHAT THE PRE STAGE IS FOR. It is not a tone control. Cutting the lows before
  * the compressor takes the plosives and the chest thump out of the sidechain,
@@ -49,15 +49,22 @@ const LN10_OVER_20 = Math.LN10 / 20
  * LA-2A settings the trick fixes, and why none of them is on the panel.
  *
  * `emphasis: 1` is the trick. `mode: 'compress'` because this is levelling, not
- * limiting. `gainDb: 0` because makeup here would drive the tube stage — the
- * Gain knob sits before it on the hardware — and the wet path already has a
- * measured trim after the post EQ, which is the right place for it. `mix: 1`
- * because the parallel blend is ours, not the compressor's.
+ * limiting. `mix: 1` because the parallel blend is ours, not the compressor's.
+ *
+ * `gainDb` is NOT here: the wet path's makeup is handed to the compressor as
+ * its own Gain, in `setParams` below. It used to be pinned to zero with the
+ * makeup applied after the post EQ instead, which was the wrong stage. On the
+ * hardware the Gain knob feeds the output amplifier and the second Pultec sits
+ * after it, so makeup drives the tube rather than bypassing it — measured at
+ * about 1 dB more harmonic content, which is small because our post EQ is a
+ * linear biquad cascade with no gain stage of its own to be driven. The reason
+ * to get it right anyway is structural: the makeup now flows through the
+ * compressor's own machinery, so every change to how OptoSmooth computes makeup
+ * reaches this plugin instead of having to be mirrored into it.
  */
 const LA2A_FIXED = {
   mode: 'compress',
   emphasis: 1,
-  gainDb: 0,
   tubeDrive: 0.3,
   mix: 1,
 }
@@ -78,9 +85,10 @@ export const SCHEPS_KERNEL_DEFAULTS = {
   squash: 80,
   mix: 0.35, // 0–1 wet
   /**
-   * Wet-path gain, applied after the post EQ and BEFORE the mix sums. Measured
-   * by computeSchepsAutoTrim so that pushing Mix changes character rather than
-   * loudness. Zero means unmeasured, not "no trim needed".
+   * The wet path's makeup, handed to the compressor as its own Gain — so it
+   * sits before the tube stage and before the post EQ, where the hardware puts
+   * it. Measured by computeSchepsAutoTrim. Zero means unmeasured, not "no
+   * makeup needed".
    */
   wetTrimDb: 0,
   /**
@@ -184,12 +192,14 @@ export class SchepsKernel {
     this.la2a.setParams({
       ...LA2A_FIXED,
       peakReduction: clamp(p.squash, 0, 100),
+      // The wet path's makeup, at the stage the hardware puts it — before the
+      // tube, after the cell, and therefore before the post EQ.
+      gainDb: clamp(p.wetTrimDb, -36, 36),
       // Measurement mode propagates through: with oversampling off the whole
       // wet path is latency-free, and the dry delay below follows it to zero.
       oversample: p.oversample !== false,
     })
 
-    this.wetTrimLin = Math.exp(clamp(p.wetTrimDb, -36, 36) * LN10_OVER_20)
     this.outputLin = Math.exp(clamp(p.outputDb, -24, 24) * LN10_OVER_20)
     this._updateMix()
 
@@ -262,7 +272,7 @@ export class SchepsKernel {
     // channels by design, so a stereo file's two sides move together.
     this.la2a.process(wet, wet, n)
 
-    const { dryGain, wetGain, wetTrimLin, outputLin } = this
+    const { dryGain, wetGain, outputLin } = this
     for (let ch = 0; ch < nOut; ch++) {
       const src = inputChannels[ch < nIn ? ch : nIn - 1]
       const w = wet[ch]
@@ -270,12 +280,11 @@ export class SchepsKernel {
       this.postEq.process(w, w, n, ch)
 
       const line = this.dryLines[ch]
-      const wetScale = wetGain * wetTrimLin
       for (let i = 0; i < n; i++) {
         // Read the dry sample before writing the output, so an in-place caller
         // (input and output the same array) still works.
         const dry = line.push(src[i])
-        out[i] = (dry * dryGain + w[i] * wetScale) * outputLin
+        out[i] = (dry * dryGain + w[i] * wetGain) * outputLin
       }
     }
   }
@@ -306,17 +315,17 @@ export function processSchepsBuffer(channelData, sampleRate, params = {}) {
 }
 
 /**
- * Render the wet path alone — pre EQ, compressor, post EQ, no blend and no
- * trim. Separate from `process` because the measurement needs the wet signal
- * before it is mixed with anything.
+ * Render the wet path alone — pre EQ, compressor at the given makeup, post EQ,
+ * no blend. Separate from `process` because the measurement needs the wet
+ * signal before it is mixed with anything.
  */
-function renderWetPath(channelData, sampleRate, params) {
+function renderWetPath(channelData, sampleRate, params, wetTrimDb = 0) {
   const kernel = new SchepsKernel(sampleRate)
   kernel.setParams({
     ...params,
     mix: 1,
     correlation: 0,
-    wetTrimDb: 0,
+    wetTrimDb,
     outputDb: 0,
     // Base rate: the question is what the wet path's level and shape are, and
     // oversampling moves neither by anything measurable. It also makes the wet
@@ -440,39 +449,47 @@ function loudPartDb(x, sampleRate) {
  * material rather than a table of assumptions about it.
  */
 export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
-  const wetRaw = renderWetPath(channelData, sampleRate, params)
   const dryBand = channelData.map(c => speechWeight(c, sampleRate))
-  const wet = wetRaw.map(c => speechWeight(c, sampleRate))
+  const dryLoudDb = loudPartDb(dryBand[0], sampleRate)
 
   let dryEnergy = 0
+  for (const d of dryBand) for (let i = 0; i < d.length; i++) dryEnergy += d[i] * d[i]
+  if (dryEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0 }
+
+  // ITERATED, because the makeup is now the compressor's own Gain and that sits
+  // BEFORE the tube stage, as on the hardware. Raising it drives the tube a
+  // little harder, which moves the output level, so each pass re-measures at
+  // the corrected operating point. Same reason and the same shape as
+  // computeAutoMakeupDb; two passes is normally enough.
+  let trimDb = 0
+  let wet = null
+  for (let pass = 0; pass < 4; pass++) {
+    const rendered = renderWetPath(channelData, sampleRate, params, trimDb)
+    wet = rendered.map(c => speechWeight(c, sampleRate))
+    const wetLoudDb = loudPartDb(wet[0], sampleRate)
+    if (!Number.isFinite(wetLoudDb)) break
+    const correctionDb = dryLoudDb - wetLoudDb
+    trimDb = clamp(trimDb + correctionDb, -24, 24)
+    if (Math.abs(correctionDb) < 0.05) break
+  }
+
   let wetEnergy = 0
   let crossEnergy = 0
-  for (let ch = 0; ch < channelData.length; ch++) {
+  for (let ch = 0; ch < dryBand.length; ch++) {
     const d = dryBand[ch]
     const w = wet[ch]
     for (let i = 0; i < d.length; i++) {
-      dryEnergy += d[i] * d[i]
       wetEnergy += w[i] * w[i]
       crossEnergy += d[i] * w[i]
     }
   }
+  if (wetEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0 }
 
-  if (dryEnergy <= 0 || wetEnergy <= 0) {
-    return { trimDb: 0, correlation: 0, densityDb: 0 }
-  }
-
-  // Makeup, referenced to the loud parts. Measured on channel 0: the level
-  // distribution is a property of the performance, and a stereo voice recording
-  // has the same one on both sides.
-  const trimDb = clamp(
-    loudPartDb(dryBand[0], sampleRate) - loudPartDb(wet[0], sampleRate), -24, 24,
-  )
-  // What that makeup yields in average level — the density the blend passes on.
-  const densityDb = clamp(
-    trimDb + 10 * Math.log10(wetEnergy / dryEnergy), -12, 12,
-  )
-  // Scaling the wet path by a positive gain cannot change a normalised
-  // correlation, so this is computed on the unscaled wet signal.
+  // The rendered wet path ALREADY carries the makeup, so the density is the
+  // straight energy ratio — no trim term to add back, unlike when the makeup
+  // was a separate multiply after the post EQ.
+  const densityDb = clamp(10 * Math.log10(wetEnergy / dryEnergy), -12, 12)
+  // Scaling by a positive gain cannot change a normalised correlation.
   const correlation = clamp(crossEnergy / Math.sqrt(dryEnergy * wetEnergy), -1, 1)
   return { trimDb, correlation, densityDb }
 }
