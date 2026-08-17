@@ -96,7 +96,6 @@ test('OptoSmooth: the measurement path measures the same level as the audio path
     { mode: 'compress', peakReduction: 50, tubeDrive: 0.3 },
     { mode: 'compress', peakReduction: 90, tubeDrive: 1 },
     { mode: 'limit', peakReduction: 70, tubeDrive: 0.3 },
-    { mode: 'limit', peakReduction: 95, tubeDrive: 1 },
   ]) {
     const over = processLA2ABuffer([SIGNAL], SR, { ...params, oversample: true })
     const base = processLA2ABuffer([SIGNAL], SR, { ...params, oversample: false })
@@ -104,6 +103,37 @@ test('OptoSmooth: the measurement path measures the same level as the audio path
       - rmsDb(base.channelData, OVERSAMPLE_LATENCY_SAMPLES)
     assert.ok(
       Math.abs(delta) < 0.05,
+      `${params.mode} PR ${params.peakReduction}: `
+      + `oversampled RMS differs from base-rate by ${delta.toFixed(4)} dB`,
+    )
+  }
+})
+
+test('the measurement shortcut degrades at the top of LIMIT, and by how much', () => {
+  // Split out of the test above, which used to cover limit PR 95 at the same
+  // 0.05 dB bar and stopped clearing it when the Peak Reduction taper was fitted
+  // to a real LA-2A. That is not the shortcut going wrong — it is the knob
+  // finally reaching the depth the hardware has. The old taper topped out at
+  // 13 dB of gain reduction, so the saturator was never driven hard enough for
+  // folded harmonics to carry measurable energy; it now reaches 27 dB, and at
+  // the very top of LIMIT they do.
+  //
+  // Pinned at measured values rather than folded into a looser blanket
+  // tolerance, so this still fails on drift. The error is worth accepting
+  // because it is bounded and small next to the ~24 dB of makeup being set from
+  // it, and because measuring through the oversampled path is three times
+  // slower — enough that the Gain knob visibly lagged a drag.
+  for (const [params, bound] of [
+    [{ mode: 'compress', peakReduction: 100, tubeDrive: 1 }, 0.1],
+    [{ mode: 'limit', peakReduction: 95, tubeDrive: 1 }, 0.25],
+    [{ mode: 'limit', peakReduction: 100, tubeDrive: 1 }, 0.35],
+  ]) {
+    const over = processLA2ABuffer([SIGNAL], SR, { ...params, oversample: true })
+    const base = processLA2ABuffer([SIGNAL], SR, { ...params, oversample: false })
+    const delta = rmsDb(over.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+      - rmsDb(base.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+    assert.ok(
+      Math.abs(delta) < bound,
       `${params.mode} PR ${params.peakReduction}: `
       + `oversampled RMS differs from base-rate by ${delta.toFixed(4)} dB`,
     )
@@ -135,9 +165,11 @@ test('auto-makeup restores the PEAK, which is what makeup gain means', () => {
     )
   }
 
+  // Settings the +24 dB Gain knob can actually restore. `limit` PR 90 used to be
+  // one of them and no longer is — see the clamp test below.
   for (const params of [
     { mode: 'compress', peakReduction: 70, tubeDrive: 0.3 },
-    { mode: 'limit', peakReduction: 90, tubeDrive: 0.3 },
+    { mode: 'compress', peakReduction: 85, tubeDrive: 0.3 },
   ]) {
     const makeup = computeAutoMakeupDb([SIGNAL], SR, params)
     const out = processLA2ABuffer([SIGNAL], SR, { ...params, gainDb: makeup })
@@ -148,6 +180,36 @@ test('auto-makeup restores the PEAK, which is what makeup gain means', () => {
       `Opto makeup ${makeup.toFixed(2)} dB left the peak ${peakDelta.toFixed(3)} dB off`,
     )
     assert.ok(peakDelta <= 0.05, 'the output must never exceed the input peak')
+  }
+})
+
+test('auto-makeup that cannot fit in the Gain knob clamps short, never over', () => {
+  // A regime that did not exist before the Peak Reduction taper was fitted to a
+  // real LA-2A. The old law reached 13 dB of gain reduction across its entire
+  // travel, so +24 dB of Gain could always hand it back; the taper now reaches
+  // 27 dB, and deep LIMIT settings ask for more makeup than the knob has.
+  //
+  // The knob's range is the hardware's and is not the thing to widen. What has
+  // to hold is the direction of the shortfall: an unreachable makeup must leave
+  // the output QUIETER than the source, because the guarantee this whole
+  // mechanism buys is that the output never comes out hotter than what went in.
+  // Clamping in the other direction would put peaks above the input at exactly
+  // the settings most likely to produce them.
+  for (const params of [
+    { mode: 'limit', peakReduction: 90, tubeDrive: 0.3 },
+    { mode: 'limit', peakReduction: 100, tubeDrive: 0.3 },
+  ]) {
+    const makeup = computeAutoMakeupDb([SIGNAL], SR, params)
+    assert.ok(makeup <= 24 + 1e-9, `makeup ${makeup.toFixed(2)} dB exceeds the Gain knob`)
+    assert.ok(makeup > 23.9, `expected the clamp to be reached, got ${makeup.toFixed(2)} dB`)
+    const out = processLA2ABuffer([SIGNAL], SR, { ...params, gainDb: makeup })
+    const peakDelta = peakDb(out.channelData, OVERSAMPLE_LATENCY_SAMPLES)
+      - peakDb([SIGNAL], OVERSAMPLE_LATENCY_SAMPLES)
+    assert.ok(
+      peakDelta < 0,
+      `a clamped makeup must undershoot; PR ${params.peakReduction} left the peak `
+      + `${peakDelta.toFixed(3)} dB off`,
+    )
   }
 })
 

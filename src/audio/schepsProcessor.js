@@ -80,12 +80,19 @@ export const SCHEPS_KERNEL_DEFAULTS = {
    *
    * Set high because the side-chain arrives twice-filtered: the pre EQ takes
    * ~4.7 dB out of the lows and R37 fully counter-clockwise takes 10 dB more
-   * below 1 kHz, so
-   * the cell is looking at far less than the raw signal. On speech at nominal
-   * level this lands around 7 dB of gain reduction on the wet path; the same
-   * number on the Opto Comp panel, with a flat side-chain, would be about 13.
+   * below 1 kHz, so the cell is looking at far less than the raw signal. On
+   * speech at nominal level this lands around 7 dB of gain reduction on the wet
+   * path; the same number on the Opto Comp panel, with a flat side-chain, gives
+   * 11.6.
+   *
+   * WAS 80, AND THE OPERATING POINT IS WHAT IS PRESERVED HERE, NOT THE NUMBER.
+   * 80 delivered that ~7 dB under the old Peak Reduction taper, which topped out
+   * at 13 dB of reduction across its whole travel; the taper is now fitted to a
+   * reference LA-2A and reaches 27, so 80 on the same clip became 14.2 dB —
+   * double the compression on the default patch, silently. 62 restores 7.25 dB.
+   * Every Squash figure recorded before the taper fit refers to the old law.
    */
-  squash: 80,
+  squash: 62,
   mix: 0.35, // 0–1 wet
   /**
    * The wet path's makeup, handed to the compressor as its own Gain — so it

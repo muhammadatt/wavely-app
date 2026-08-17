@@ -28,7 +28,8 @@
  *    - Limit mode: narrower knee, ratio climbing from ~12:1 toward ~20:1.
  *    - There is no threshold control on the hardware: the Peak Reduction
  *      knob is sidechain amplifier gain, driving the signal into a fixed
- *      internal threshold. Modeled the same way here.
+ *      internal threshold. Modeled the same way here, with the knob-to-drive
+ *      law fitted to a reference emulation — see SC_DRIVE_MAX_DB.
  *    - That threshold is anchored to nominal analog operating level
  *      (0 VU = -18 dBFS), not to digital full scale — see NOMINAL_DBFS.
  *
@@ -135,13 +136,51 @@ const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies th
 // produce 3 dB of reduction. -18 dBFS is the EBU alignment.
 const NOMINAL_DBFS = -18
 
-// Peak Reduction knob → detector-sidechain drive (anchored to NOMINAL_DBFS), spanning 40 dB.
-// Effective endpoints: -2 dB at knob 0 and +38 dB at knob 100.
-// SC_TAPER < 1 models an audio-taper pot: the drive rises quickly off zero
-// and flattens toward the top, so gain reduction starts around knob 20.
-const SC_DRIVE_MIN_DB = -20
-const SC_DRIVE_SPAN_DB = 40
-const SC_TAPER = 0.7
+/**
+ * Peak Reduction knob → side-chain drive, in dB above NOMINAL_DBFS.
+ *
+ * FITTED TO A REFERENCE EMULATION, not chosen. Eight captures of one narration
+ * clip through Analog Obsession's LAEA at knobs 20/30/40/56/70/80/90/100, with
+ * its own +1.34 dB insertion gain removed. The three constants below reproduce
+ * the reference's average gain reduction at all eight positions with an **rms
+ * residual of 0.17 dB across 0–27 dB of reduction** — 0.04/0.26/2.47/9.40/
+ * 14.93/18.98/22.92/26.88 dB measured, 0.00/0.36/2.61/9.05/15.05/19.15/23.03/
+ * 26.70 reproduced.
+ *
+ * FITTED IN GAIN REDUCTION, NOT IN DRIVE, and that is not a presentational
+ * difference. The first attempt fitted the knob→drive law against drive values
+ * recovered by interpolating a coarse drive→GR table, and landed constants whose
+ * end-to-end error was **0.68 dB with a systematic +1 dB bias above knob 70** —
+ * every position in the upper half compressing harder than the reference. The
+ * residual was small in the fitted quantity and wrong in the audible one. The
+ * drive axis is now walked exactly instead of interpolated: drive and level add
+ * in dB inside the gain computer (`over = levelDb + scDriveDb`), so scaling the
+ * input at a fixed knob moves the operating point through the real kernel with
+ * no probe hook and no interpolation.
+ *
+ * WHAT WAS WRONG BEFORE. The old law was `-2 + 40*(knob/100)^0.7`, giving 11 dB
+ * of drive at knob 20 and 38 dB at knob 100. Two independent errors: it started
+ * compressing far too early (the reference does nothing until about knob 25),
+ * and it could not reach the top at all — the reference delivers 55 dB at knob
+ * 100 against our 38, so our whole travel topped out at 13.3 dB of gain
+ * reduction where it reaches 26.9 dB on the same clip.
+ *
+ * Anchored at the TOP rather than the bottom, because that is the end whose
+ * value means something: SC_DRIVE_MAX_DB is the drive at knob 100 relative to
+ * nominal line level. The span is how far the curve reaches below it, and at
+ * this taper most of that span is spent below the threshold where nothing
+ * happens — which is exactly the "nothing until 25, then it arrives quickly"
+ * behaviour the reference has.
+ *
+ * CAVEAT: inverting through our own gain computer means these constants absorb
+ * any difference between its knee and ratio and the reference's. They are a
+ * behavioural match on average gain reduction, not a claim about the
+ * reference's literal side-chain gain. Fitted on ONE clip; a second source
+ * would be worth checking before treating the shape as settled.
+ */
+const SC_DRIVE_MAX_DB = 36.24
+const SC_DRIVE_SPAN_DB = 105.9
+const SC_TAPER = 0.4247
 
 // ── Gain computer constants ─────────────────────────────────────────────────
 
@@ -261,7 +300,7 @@ export class LA2AKernel {
     // knob 0 and +38 dB at knob 100.
     const knob = clamp(p.peakReduction, 0, 100) / 100
     this.scDriveDb =
-      SC_DRIVE_MIN_DB - NOMINAL_DBFS + SC_DRIVE_SPAN_DB * Math.pow(knob, SC_TAPER)
+      SC_DRIVE_MAX_DB - NOMINAL_DBFS - SC_DRIVE_SPAN_DB * (1 - Math.pow(knob, SC_TAPER))
     // Gain applied to the side-chain's sub-1 kHz content: 1 at r37 100 (fully
     // clockwise, flat, factory), down to -10 dB at r37 0 (fully counter-
     // clockwise). Above the corner the side-chain stays at unity, so this only
