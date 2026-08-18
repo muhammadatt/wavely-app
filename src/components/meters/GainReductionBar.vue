@@ -40,6 +40,13 @@ const props = defineProps({
    * both smooths twice and the bar lags behind the audio.
    */
   ballistics: { type: String, default: 'vu' }, // 'vu' | 'none'
+  /**
+   * Optional target-range shading, e.g. the soft clipper's "3-6 dB is usable,
+   * past that it reads as grit" range (spec §7.1-7.2). Undefined on either
+   * bound skips the shading entirely — every other caller is unaffected.
+   */
+  zoneMinDb: { type: Number, default: null },
+  zoneMaxDb: { type: Number, default: null },
 })
 
 const averaged = createVuBallistics()
@@ -124,6 +131,10 @@ const slotStyle = {
   boxShadow: 'inset 0 1px 4px rgba(0,0,0,.8)',
 }
 
+const hasZone = computed(() => props.zoneMinDb != null && props.zoneMaxDb != null)
+const zoneStartPct = computed(() => hasZone.value ? grFraction(props.zoneMinDb, props.fullScaleDb) * 100 : 0)
+const zoneEndPct = computed(() => hasZone.value ? grFraction(props.zoneMaxDb, props.fullScaleDb) * 100 : 0)
+
 const marks = computed(() =>
   grScaleMarks(props.fullScaleDb).map((mark) => {
     const pct = mark.fraction * 100
@@ -160,6 +171,19 @@ const marks = computed(() =>
          plate's padding, so the bar keeps its height. -->
     <div :style="plateStyle">
       <div class="relative" :style="slotStyle">
+        <!-- Target-range shading, drawn first so the fill and peak marker sit
+             on top of it. A quiet band, not a second meter: it answers "where
+             should I be aiming" without competing with "where am I". -->
+        <div
+          v-if="hasZone"
+          class="absolute top-0 bottom-0 pointer-events-none"
+          :style="{
+            left: zoneStartPct + '%',
+            width: (zoneEndPct - zoneStartPct) + '%',
+            background: `color-mix(in srgb, ${accent} 14%, transparent)`,
+            boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accent} 22%, transparent)`,
+          }"
+        ></div>
         <div class="absolute top-0 bottom-0 left-0"
              :style="{
                width: fillPct + '%',
