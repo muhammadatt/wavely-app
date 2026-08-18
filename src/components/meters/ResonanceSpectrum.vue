@@ -174,20 +174,29 @@ const cursorX = ref(null)
 const cursorText = ref('')
 
 /**
- * Per-display-bin peak hold.
+ * Per-display-bin peak hold, and how long each bin has gone without a rise.
  *
  * Held in scale fractions rather than dB for the reason PEAK_FALL_PER_SEC
  * documents: on a voltage-law scale a fixed dB/s marker crawls at the deep end
  * and flicks at the shallow one. Sized on the first frame, because the bin
  * count is the kernel's to choose.
  *
- * One fall timer for the whole trace rather than one per bin. Per-bin timers
- * would be strictly more faithful and would also make the hold a comb of
- * hundreds of independently-aged spikes; a single age keeps it legible as a
- * curve, which is the only thing it is for.
+ * ONE AGE PER BIN. This started as a single timer for the whole trace, on the
+ * argument that per-bin ages would turn the hold into a comb of independently
+ * aged spikes while one age keeps it legible as a curve. Measured, that is
+ * simply wrong, and in the worst way: a shared timer resets whenever ANY of 192
+ * bins rises, and on real material something always is, so the trace never
+ * reached its decay phase at all. An intermittent 3 kHz ring left a mark still
+ * sitting at full height three seconds after it stopped — the exact opposite of
+ * what a peak hold is for. With per-bin ages the same mark reads 0.49, 0.37,
+ * 0.16 over that interval.
+ *
+ * (A continuous decay with no plateau was measured too: it falls to zero
+ * between events, which makes it a slow copy of the live trace rather than a
+ * record of where the effect has been working.)
  */
 let peakBins = null
-let peakHeldMs = 0
+let peakAges = null
 
 /** Last frame identity, so a stopped transport reads as stale rather than live. */
 let lastFrame = null
@@ -354,7 +363,7 @@ function drawReduction(ctx, w, frame, alpha) {
  * everything over it is what the top lane is taking out.
  */
 function drawSpectrum(ctx, w, frame, alpha) {
-  const { mag, reference, reduction, bins } = frame
+  const { mag, reference, output, bins } = frame
   const top = specTop.value
   const height = specH.value
   const bottom = top + height
@@ -391,7 +400,7 @@ function drawSpectrum(ctx, w, frame, alpha) {
     d === 0 ? ctx.moveTo(x, yFor(mag[d])) : ctx.lineTo(x, yFor(mag[d]))
   }
   for (let d = bins - 1; d >= 0; d--) {
-    ctx.lineTo(d * xStep, yFor(mag[d] - reduction[d]))
+    ctx.lineTo(d * xStep, yFor(output[d]))
   }
   ctx.closePath()
   ctx.fillStyle = tint(props.accent, props.delta ? 0.5 : 0.24)
@@ -409,11 +418,15 @@ function drawSpectrum(ctx, w, frame, alpha) {
   ctx.stroke()
   ctx.setLineDash([])
 
-  // Output: the one bright curve. Coincides with the input outline wherever
-  // nothing is being done, so any gap between them is the effect working.
+  // Output: the one bright curve, and the kernel's own summary of it rather
+  // than this frame's magnitude minus this frame's reduction. Those are drawn
+  // from different FFT bins inside a display cell — see RESONANCE_DISPLAY_CURVES
+  // — so subtracting them here would carve a notch nothing in the audio has.
+  // Coincides with the input outline wherever nothing is being done, so any gap
+  // between the two is the effect working.
   ctx.beginPath()
   for (let d = 0; d < bins; d++) {
-    const y = yFor(mag[d] - reduction[d])
+    const y = yFor(output[d])
     d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
   }
   ctx.lineWidth = 1.6
@@ -522,11 +535,12 @@ function drawCursor(ctx, w) {
 function updatePeaks(frame, dtMs) {
   const step = Math.min(dtMs, 100)
 
+  const fall = (PEAK_FALL_PER_SEC * step) / 1000
+
   if (!frame) {
     // Nothing playing: let the hold run down rather than freezing a shape that
     // no longer describes anything, and drop the hotspot line.
     if (peakBins) {
-      const fall = (PEAK_FALL_PER_SEC * step) / 1000
       for (let d = 0; d < peakBins.length; d++) {
         peakBins[d] = Math.max(0, peakBins[d] - fall)
       }
@@ -536,31 +550,36 @@ function updatePeaks(frame, dtMs) {
     return
   }
 
-  const { reduction, bins, minHz, maxHz } = frame
-  if (!peakBins || peakBins.length !== bins) peakBins = new Float32Array(bins)
+  const { reduction, reductionHeld, bins, minHz, maxHz } = frame
+  if (!peakBins || peakBins.length !== bins) {
+    peakBins = new Float32Array(bins)
+    peakAges = new Float32Array(bins)
+  }
 
   let hotFraction = 0
   let hotIndex = 0
-  let rose = false
   for (let d = 0; d < bins; d++) {
-    const f = grFraction(reduction[d], props.fullScaleDb)
-    if (f >= peakBins[d]) {
-      peakBins[d] = f
-      rose = true
+    // The hold is fed by the held curve, which is the only thing that value is
+    // for: it catches a peak landing on a frame the reader never saw.
+    const held = grFraction(reductionHeld[d], props.fullScaleDb)
+    if (held > peakBins[d]) {
+      // Strictly greater. Equal is not a rise — a bin sitting at zero against a
+      // held zero would otherwise restart its plateau on every frame forever.
+      peakBins[d] = held
+      peakAges[d] = 0
+    } else {
+      peakAges[d] += step
+      // Flat for the plateau every other peak marker in the app holds for, then
+      // down at the rate they all fall at, never below the live reading.
+      if (peakAges[d] >= PEAK_HOLD_MS) {
+        peakBins[d] = Math.max(held, peakBins[d] - fall)
+      }
     }
+
+    const f = grFraction(reduction[d], props.fullScaleDb)
     if (f > hotFraction) {
       hotFraction = f
       hotIndex = d
-    }
-  }
-
-  // Hold flat while anything is still pushing the trace up, then let the whole
-  // shape fall at the rate every other peak marker in the app falls at.
-  peakHeldMs = rose ? 0 : peakHeldMs + step
-  if (peakHeldMs >= PEAK_HOLD_MS) {
-    const fall = (PEAK_FALL_PER_SEC * step) / 1000
-    for (let d = 0; d < bins; d++) {
-      peakBins[d] = Math.max(grFraction(reduction[d], props.fullScaleDb), peakBins[d] - fall)
     }
   }
 
@@ -607,6 +626,28 @@ function formatHz(hz) {
 const hotspotText = computed(() =>
   hotDb.value > 0.3 ? `PEAK ${formatHz(hotHz.value)} · -${hotDb.value.toFixed(1)} dB` : '',
 )
+
+/**
+ * What the plot says, in a sentence, for anyone who cannot see it.
+ *
+ * A canvas is opaque to a screen reader, so replacing the gain-reduction bar
+ * with this display took away a number that used to be plain text and gave
+ * nothing back. The three facts that carried are where the deepest cut is, how
+ * deep, and which band is being processed at all.
+ *
+ * Not a live region, and rounded to whole decibels: it is a description of the
+ * element, read when someone reaches it, and it must not turn into a meter that
+ * interrupts every tenth of a second. Whole dB also means the string stops
+ * changing while the reading is merely wobbling.
+ */
+const plotSummary = computed(() => {
+  const cut = hotDb.value > 0.3
+    ? `Deepest cut ${Math.round(hotDb.value)} dB at ${formatHz(hotHz.value)}.`
+    : 'No reduction.'
+  const band = `Processing ${formatHz(props.freqFloorHz)} to ${formatHz(props.freqCeilHz)}.`
+  const mode = props.delta ? ' Monitoring the removed signal only.' : ''
+  return `${props.title}. ${cut} ${band}${mode}`
+})
 
 </script>
 
@@ -683,7 +724,7 @@ const hotspotText = computed(() =>
         ref="canvasEl"
         class="block w-full"
         role="img"
-        :aria-label="title"
+        :aria-label="plotSummary"
         :style="{ height: `${height}px`, borderRadius: '6px' }"
         @pointermove="onMove"
         @pointerleave="onLeave"

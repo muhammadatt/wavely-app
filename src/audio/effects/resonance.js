@@ -21,6 +21,7 @@ import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 import {
   PITCH_RANGES,
+  RESONANCE_DISPLAY_CURVES,
   RESONANCE_FRAME_SIZE,
   resonanceDisplayRange,
 } from '../resonanceParams.js'
@@ -29,6 +30,7 @@ export {
   PITCH_RANGES,
   RESONANCE_FRAME_SIZE,
   RESONANCE_DISPLAY_BINS,
+  RESONANCE_DISPLAY_CURVES,
   effectivePitchRange,
   resonanceDisplayRange,
 } from '../resonanceParams.js'
@@ -153,10 +155,13 @@ export function createResonance(audioContext) {
      * The kernel's own view of the last frame, on a log-frequency grid, or null
      * before the worklet has produced one.
      *
-     * `mag` and `reference` are dBFS; `reduction` is positive dB of cut, held at
-     * the maximum seen since the previous frame was read. `reference` does NOT
-     * include `selectivity` — the caller adds it, so the threshold line tracks
-     * the knob without waiting for the audio thread.
+     * `mag`, `reference` and `output` are dBFS; the two reduction curves are
+     * positive dB of cut. All but `reductionHeld` describe the same single
+     * frame, so anything drawn from them agrees about one instant;
+     * `reductionHeld` is the maximum since the previous read and exists for the
+     * peak-hold trace alone. `reference` does NOT include `selectivity` — the
+     * caller adds it, so the threshold line tracks the knob without waiting for
+     * the audio thread.
      *
      * Returns a live view onto the latest frame rather than a copy. It is valid
      * until the next message arrives, which is what a per-frame drawing loop
@@ -165,15 +170,18 @@ export function createResonance(audioContext) {
     getDisplay() {
       if (!displayFrame) return null
       if (!displayView) {
-        const bins = displayFrame.length / 3
+        const bins = displayFrame.length / RESONANCE_DISPLAY_CURVES
         const range = resonanceDisplayRange(audioContext.sampleRate)
+        const curve = i => displayFrame.subarray(i * bins, (i + 1) * bins)
         displayView = {
           bins,
           minHz: range.minHz,
           maxHz: range.maxHz,
-          mag: displayFrame.subarray(0, bins),
-          reference: displayFrame.subarray(bins, 2 * bins),
-          reduction: displayFrame.subarray(2 * bins, 3 * bins),
+          mag: curve(0),
+          reference: curve(1),
+          output: curve(2),
+          reduction: curve(3),
+          reductionHeld: curve(4),
         }
       }
       return displayView

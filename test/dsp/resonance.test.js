@@ -439,18 +439,21 @@ function runKernel(sig, params = {}) {
   return kernel
 }
 
-/** Split a display read into its three curves plus the grid's frequencies. */
+/** Split a display read into its curves plus the grid's frequencies. */
 function readDisplay(kernel) {
   const d = kernel.displayBins
-  const buf = new Float32Array(3 * d)
+  const buf = new Float32Array(kernel.displayLength)
   const ok = kernel.readDisplay(buf)
   const octaves = Math.log2(kernel.displayMaxHz / kernel.displayMinHz)
+  const curve = i => buf.subarray(i * d, (i + 1) * d)
   return {
     ok,
     bins: d,
-    mag: buf.subarray(0, d),
-    reference: buf.subarray(d, 2 * d),
-    reduction: buf.subarray(2 * d, 3 * d),
+    mag: curve(0),
+    reference: curve(1),
+    output: curve(2),
+    reduction: curve(3),
+    reductionHeld: curve(4),
     hz: i => kernel.displayMinHz * Math.pow(2, (i / (d - 1)) * octaves),
   }
 }
@@ -471,7 +474,7 @@ function meanReduction(sig, params) {
   kernel.setParams(params)
   const out = new Float32Array(sig.length)
   const d = kernel.displayBins
-  const buf = new Float32Array(3 * d)
+  const buf = new Float32Array(kernel.displayLength)
   const sum = new Float64Array(d)
   let reads = 0
   let since = 0
@@ -482,7 +485,7 @@ function meanReduction(sig, params) {
     if (since < 1024) continue
     since = 0
     if (!kernel.readDisplay(buf)) continue
-    for (let i = 0; i < d; i++) sum[i] += buf[2 * d + i]
+    for (let i = 0; i < d; i++) sum[i] += buf[4 * d + i]
     reads++
   }
   const octaves = Math.log2(kernel.displayMaxHz / kernel.displayMinHz)
@@ -501,7 +504,7 @@ function argmax(arr) {
 
 test('nothing to display until a frame has been analysed', () => {
   const kernel = new ResonanceKernel(SR)
-  assert.equal(kernel.readDisplay(new Float32Array(3 * kernel.displayBins)), false)
+  assert.equal(kernel.readDisplay(new Float32Array(kernel.displayLength)), false)
 })
 
 test('the display puts the reduction at the frequency it was taken from', () => {
@@ -558,16 +561,60 @@ test('the reference sits below a resonance by more than the selectivity', () => 
 test('reduction between two reads is held, not lost', () => {
   // The worklet reads at half the frame rate, so a peak landing on an unread
   // frame has to survive to the next read — that peak is the transient ring
-  // the user is looking for.
+  // the user is looking for. Only the held curve carries it.
   const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
   const first = readDisplay(kernel)
-  const held = Math.max(...first.reduction)
+  const held = Math.max(...first.reductionHeld)
   assert.ok(held > 3, `expected a real cut to report, got ${held.toFixed(1)} dB`)
 
-  // A second read with no further audio reports nothing: the accumulator was
-  // cleared, so a stale peak cannot be shown twice.
+  // A second read with no further audio holds nothing: the accumulator was
+  // cleared, so a stale peak cannot be shown twice. The live curve is a
+  // snapshot rather than an accumulator, so it still reports the last frame.
   const second = readDisplay(kernel)
-  assert.equal(Math.max(...second.reduction), 0)
+  assert.equal(Math.max(...second.reductionHeld), 0)
+  assert.deepEqual(
+    Array.from(second.reduction),
+    Array.from(first.reduction),
+    'the live curve should be the last frame, unchanged by being read',
+  )
+})
+
+test('the held reduction never reads below the live one', () => {
+  // The held curve is a maximum taken over the frames the live curve is the
+  // last of, so it can only ever be the larger of the two. If that inverts,
+  // the peak-hold outline would sit under the fill it is meant to cap.
+  const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
+  const d = readDisplay(kernel)
+  for (let i = 0; i < d.bins; i++) {
+    assert.ok(
+      d.reductionHeld[i] >= d.reduction[i] - 1e-6,
+      `held ${d.reductionHeld[i].toFixed(2)} below live ${d.reduction[i].toFixed(2)} at bin ${i}`,
+    )
+  }
+})
+
+test('the output curve is the kernel\'s, not magnitude minus reduction', () => {
+  // Both summarise a display cell, but from different FFT bins — magnitude
+  // takes the loudest bin, reduction the most suppressed one, and on speech
+  // those differ in most cells that carry any cut. Subtracting one from the
+  // other draws a deeper notch than the audio has, which is why the output is
+  // measured per bin in the kernel and sent.
+  const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
+  const d = readDisplay(kernel)
+
+  let worst = 0
+  for (let i = 0; i < d.bins; i++) {
+    // It is an output level, so it can never exceed the input at the same place
+    // nor fall below what subtracting the cell's own peak cut would give.
+    assert.ok(d.output[i] <= d.mag[i] + 1e-4, `output above input at bin ${i}`)
+    assert.ok(
+      d.output[i] >= d.mag[i] - d.reduction[i] - 1e-4,
+      `output below the deepest possible cut at bin ${i}`,
+    )
+    worst = Math.max(worst, d.output[i] - (d.mag[i] - d.reduction[i]))
+  }
+  // And it is not merely the subtraction under another name.
+  assert.ok(worst > 0.2, `output never differed from mag - reduction (${worst.toFixed(3)} dB)`)
 })
 
 test('the display grid covers the documented span at every sample rate', () => {
@@ -595,14 +642,16 @@ test('every displayed value is finite, silence included', () => {
   for (let i = 0; i < d.bins; i++) {
     assert.ok(Number.isFinite(d.mag[i]), `magnitude ${i} was not finite`)
     assert.ok(Number.isFinite(d.reference[i]), `reference ${i} was not finite`)
+    assert.ok(Number.isFinite(d.output[i]), `output ${i} was not finite`)
     assert.ok(Number.isFinite(d.reduction[i]), `reduction ${i} was not finite`)
+    assert.ok(Number.isFinite(d.reductionHeld[i]), `held reduction ${i} was not finite`)
   }
 })
 
 test('reset clears the display as well as the audio state', () => {
   const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
   kernel.reset()
-  assert.equal(kernel.readDisplay(new Float32Array(3 * kernel.displayBins)), false)
+  assert.equal(kernel.readDisplay(new Float32Array(kernel.displayLength)), false)
 })
 
 // ── Delta monitoring ────────────────────────────────────────────────────────

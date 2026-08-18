@@ -65,6 +65,23 @@ export function effectivePitchRange(sampleRate, rangeKey) {
  * than 21.5 Hz.
  */
 export const RESONANCE_DISPLAY_BINS = 192
+/**
+ * Curves the kernel posts per frame, in order: magnitude, reference, output,
+ * reduction, held reduction.
+ *
+ * The output curve is sent rather than derived on the far side as
+ * `magnitude - reduction`. Those two are summarised from different FFT bins —
+ * magnitude takes the loudest bin in a display cell, reduction the most
+ * suppressed one, and on real speech they are different bins in 65% of the
+ * cells that carry any cut. Subtracting one from the other draws a notch up to
+ * 2 dB deeper than the one that happened.
+ *
+ * Reduction is sent twice for a related reason. The live curve is this frame's,
+ * so it agrees with the spectrum beside it; the held curve is the maximum since
+ * the last read, which is what the peak-hold outline needs and what nothing
+ * else should be drawn from.
+ */
+export const RESONANCE_DISPLAY_CURVES = 5
 export const RESONANCE_DISPLAY_MIN_HZ = 20
 export const RESONANCE_DISPLAY_MAX_HZ = 20000
 

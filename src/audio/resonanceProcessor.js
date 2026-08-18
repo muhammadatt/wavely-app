@@ -65,7 +65,11 @@
 import { StftProcessor } from './dsp/stft.js'
 import { F0Tracker } from './dsp/f0.js'
 import { getFFT } from './dsp/fft.js'
-import { RESONANCE_DISPLAY_BINS, resonanceDisplayRange } from './resonanceParams.js'
+import {
+  RESONANCE_DISPLAY_BINS,
+  RESONANCE_DISPLAY_CURVES,
+  resonanceDisplayRange,
+} from './resonanceParams.js'
 
 const FFT_SIZE = 2048
 const HOP_SIZE = 512
@@ -227,7 +231,9 @@ export class ResonanceKernel {
     this.displayBins = RESONANCE_DISPLAY_BINS
     this.displayMag = new Float32Array(this.displayBins)
     this.displayEnv = new Float32Array(this.displayBins)
-    this.displayGr = new Float32Array(this.displayBins)
+    this.displayOut = new Float32Array(this.displayBins)
+    this.displayGrNow = new Float32Array(this.displayBins)
+    this.displayGrHeld = new Float32Array(this.displayBins)
     this.hasDisplayFrame = false
     this._buildDisplayGrid()
 
@@ -356,7 +362,7 @@ export class ResonanceKernel {
     this.prevGr.fill(0)
     this.frameIndex = 0
     this.maskCache.clear()
-    this.displayGr.fill(0)
+    this.displayGrHeld.fill(0)
     this.hasDisplayFrame = false
   }
 
@@ -406,15 +412,21 @@ export class ResonanceKernel {
   /**
    * Resample this frame's measurements onto the display grid.
    *
-   * Magnitude and the reference are this frame's; reduction is the maximum
-   * since the last read, because the display is read at half the frame rate and
-   * a peak that lands on the unread frame is exactly the transient the user is
-   * trying to see. The reference goes out without `selectivity` added — the
-   * panel adds it when drawing, so turning the knob moves the threshold line
-   * immediately rather than on the next frame from the worklet.
+   * Everything here is this frame's except the held reduction, which is the
+   * maximum since the last read. The display is read at half the frame rate, so
+   * a peak landing on the unread frame would otherwise be lost — but only the
+   * peak-hold outline wants that value. Anything drawn against the spectrum
+   * uses the live curve, so the two agree about the same instant.
+   *
+   * The reference goes out without `selectivity` added — the panel adds it when
+   * drawing, so turning the knob moves the threshold line immediately rather
+   * than on the next frame out of the worklet.
    */
   _snapshotDisplay() {
-    const { magDb, envDb, prevGr, displayMag, displayEnv, displayGr } = this
+    const {
+      magDb, envDb, prevGr,
+      displayMag, displayEnv, displayOut, displayGrNow, displayGrHeld,
+    } = this
     const last = this.binCount - 1
 
     for (let d = 0; d < this.displayBins; d++) {
@@ -422,14 +434,22 @@ export class ResonanceKernel {
       const hi = this.dHi[d]
       let mag
       let env
+      let out
       let gr
       if (hi >= lo) {
         mag = -Infinity
         env = 0
+        out = -Infinity
         gr = 0
         for (let k = lo; k <= hi; k++) {
           if (magDb[k] > mag) mag = magDb[k]
           env += envDb[k]
+          // The output is summarised from the same bin as its own magnitude,
+          // not assembled afterwards from the loudest bin and the most
+          // suppressed one — those are different bins most of the time, and
+          // the difference between them is a notch that never happened.
+          const o = magDb[k] - prevGr[k]
+          if (o > out) out = o
           if (prevGr[k] > gr) gr = prevGr[k]
         }
         env /= hi - lo + 1
@@ -440,29 +460,41 @@ export class ResonanceKernel {
         const t = pos - k0
         mag = magDb[k0] + (magDb[k1] - magDb[k0]) * t
         env = envDb[k0] + (envDb[k1] - envDb[k0]) * t
+        const o0 = magDb[k0] - prevGr[k0]
+        out = o0 + (magDb[k1] - prevGr[k1] - o0) * t
         gr = prevGr[k0] > prevGr[k1] ? prevGr[k0] : prevGr[k1]
       }
       displayMag[d] = mag - SPECTRUM_REF_DB
       displayEnv[d] = env - SPECTRUM_REF_DB
-      if (gr > displayGr[d]) displayGr[d] = gr
+      displayOut[d] = out - SPECTRUM_REF_DB
+      displayGrNow[d] = gr
+      if (gr > displayGrHeld[d]) displayGrHeld[d] = gr
     }
     this.hasDisplayFrame = true
   }
 
+  /** Floats one display read needs. */
+  get displayLength() {
+    return RESONANCE_DISPLAY_CURVES * this.displayBins
+  }
+
   /**
-   * Copy the display grid into `out` as [magnitude, reference, reduction] and
-   * clear the reduction accumulator. Returns false before the first frame.
+   * Copy the display grid into `out` as
+   * [magnitude, reference, output, reduction, held reduction] and clear the
+   * held accumulator. Returns false before the first frame.
    *
-   * One flat array of three sections rather than three arrays, because this
-   * crosses a postMessage boundary every 23 ms and one buffer clones once.
+   * One flat array of sections rather than an array each, because this crosses
+   * a postMessage boundary every 23 ms and one buffer clones once.
    */
   readDisplay(out) {
     if (!this.hasDisplayFrame) return false
     const D = this.displayBins
     out.set(this.displayMag, 0)
     out.set(this.displayEnv, D)
-    out.set(this.displayGr, 2 * D)
-    this.displayGr.fill(0)
+    out.set(this.displayOut, 2 * D)
+    out.set(this.displayGrNow, 3 * D)
+    out.set(this.displayGrHeld, 4 * D)
+    this.displayGrHeld.fill(0)
     return true
   }
 
@@ -741,7 +773,7 @@ if (typeof registerProcessor === 'function') {
         this.kernel.setParams(options.processorOptions.params)
       }
       this.sinceMeter = 0
-      this.display = new Float32Array(3 * this.kernel.displayBins)
+      this.display = new Float32Array(this.kernel.displayLength)
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
         else if (e.data?.type === 'monitor') this.kernel.setMonitor(e.data.delta)
