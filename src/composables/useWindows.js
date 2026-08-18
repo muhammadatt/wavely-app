@@ -20,6 +20,12 @@ const openIds = reactive([])
 // user dragged it, not fling it to the default corner again.
 const positions = new Map()
 
+// Last known size per window id, for the subset of windows that opt into
+// resizing (see FloatingWindow's `resizable` prop). Same lifetime rule as
+// positions: outside the reactive list, never cleared, so a resized window
+// reopens at the size it was left rather than back at its default.
+const sizes = new Map()
+
 export function useWindows() {
   function isOpen(id) {
     return openIds.includes(id)
@@ -70,6 +76,14 @@ export function useWindows() {
     return positions.get(id) ?? null
   }
 
+  function saveSize(id, size) {
+    sizes.set(id, { ...size })
+  }
+
+  function getSize(id) {
+    return sizes.get(id) ?? null
+  }
+
   return {
     windows: openIds,
     anyWindowOpen: computed(() => openIds.length > 0),
@@ -81,5 +95,7 @@ export function useWindows() {
     closeAllWindows,
     savePosition,
     getPosition,
+    saveSize,
+    getSize,
   }
 }
