@@ -5,9 +5,9 @@ import { PITCH_RANGES, effectivePitchRange } from '../../audio/resonanceParams.j
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
-import DeviceSlider from '../knobs/DeviceSlider.vue'
+import DeviceRangeSlider from '../knobs/DeviceRangeSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import GainReductionBar from '../meters/GainReductionBar.vue'
+import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
@@ -16,8 +16,9 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resPreview, resReduction, resInputLevels, resOutputLevels, hasSelection,
-  togglePreview, syncDepth, syncSharpness, syncSelectivity, syncAttack,
+  resPitchRange, resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
+  resDisplayFn, hasSelection,
+  togglePreview, toggleDelta, syncDepth, syncSharpness, syncSelectivity, syncAttack,
   syncRelease, syncMaxReduction, syncFreqFloor, syncFreqCeil, syncMode,
   syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
@@ -46,8 +47,34 @@ const PITCH_RANGE_OPTIONS = Object.entries(PITCH_RANGES).map(([value, r]) => ({
 const percent = v => `${Math.round(v * 100)}`
 const oneDp = v => v.toFixed(1)
 const ms = v => `${Math.round(v)}`
-const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`)
 const db = v => `${Math.round(v)}`
+
+/**
+ * Frequency for the range readout. Carries its unit, because the two ends of
+ * the band now share one readout and "40 – 20k" reads as a pair of unrelated
+ * numbers where "40 Hz – 20 kHz" reads as a span.
+ */
+const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v)} Hz`)
+
+/**
+ * Round a frequency off the range track to something printable.
+ *
+ * The track steps in constant octaves, so its raw values are things like
+ * 8347.2 Hz. Snapping by decade keeps the readout to three figures at every
+ * point on the scale, and keeps a handle nudged with the arrow keys landing on
+ * round numbers rather than drifting through the decimals.
+ *
+ * Every step here is finer than one step of the track, which is ~1.4% of the
+ * frequency wherever you are on it. A coarser snap would quantise the drag
+ * itself — the thumb would sit still through several steps and then jump —
+ * because the accepted value is written back to the element on every event.
+ */
+function snapHz(v) {
+  if (v < 100) return Math.round(v)
+  if (v < 1000) return Math.round(v / 5) * 5
+  if (v < 10000) return Math.round(v / 25) * 25
+  return Math.round(v / 100) * 100
+}
 
 const modeCaption = computed(() =>
   resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
@@ -88,14 +115,56 @@ async function applyAndClose() {
     @toggle-engaged="togglePreview"
     @close="close"
   >
-    <div class="px-[26px] pt-[22px] pb-[24px]">
-      <GainReductionBar :reduction-db="resReduction" :accent="ACCENT" />
+    <!-- Delta sits beside ON/BYPASS because it is the same kind of control:
+         both change what reaches the speakers and neither changes the file.
+         Putting it down among the parameters would have implied it was one. -->
+    <template #header-center>
+      <button
+        class="flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-opacity disabled:cursor-default"
+        :style="{
+          background: resDelta ? `color-mix(in srgb, ${ACCENT} 26%, transparent)` : 'transparent',
+          borderColor: resDelta
+            ? `color-mix(in srgb, ${ACCENT} 55%, transparent)`
+            : 'rgba(255,255,255,.14)',
+          opacity: resPreview ? 1 : 0.4,
+        }"
+        :disabled="!resPreview"
+        :aria-pressed="String(resDelta)"
+        title="Hear only what is being removed. Monitoring only — Apply always renders the processed audio."
+        @pointerdown.stop
+        @click="toggleDelta"
+      >
+        <span
+          :style="{
+            font: `700 9px 'JetBrains Mono',monospace`,
+            letterSpacing: '.14em',
+            color: resDelta
+              ? `color-mix(in srgb, ${ACCENT} 55%, #ffffff)`
+              : 'rgba(255,255,255,.45)',
+          }"
+        >DELTA</span>
+      </button>
+    </template>
+    <div class="px-[26px] pt-[18px] pb-[18px]">
+      <!-- The display, not a meter. This effect cuts a few narrow bands and
+           leaves the rest alone, so "how much" without "where" describes almost
+           nothing about it — see the note in ResonanceSpectrum. -->
+      <ResonanceSpectrum
+        :data-fn="resDisplayFn"
+        :reduction-db="resReduction"
+        :accent="ACCENT"
+        :selectivity-db="resSelectivity"
+        :freq-floor-hz="resFreqFloor"
+        :freq-ceil-hz="resFreqCeil"
+        :height="140"
+        :delta="resDelta"
+      />
 
-      <div class="flex items-center justify-between gap-[22px] mt-[22px]">
-        <LevelMeter :levels="resInputLevels" label="IN" :height="150" />
+      <div class="flex items-center justify-between gap-[18px] mt-[16px]">
+        <LevelMeter :levels="resInputLevels" label="IN" :height="104" />
 
-        <div class="flex-1 flex justify-center gap-[34px]">
-          <div class="w-[124px]">
+        <div class="flex-1 flex justify-center gap-[28px]">
+          <div class="w-[104px]">
             <Knob
               :model-value="resDepth" @update:model-value="syncDepth"
               :min="0" :max="1" :step="0.01"
@@ -103,7 +172,7 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[124px]">
+          <div class="w-[104px]">
             <Knob
               :model-value="resSelectivity" @update:model-value="syncSelectivity"
               :min="3" :max="24" :step="0.5"
@@ -111,7 +180,7 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[124px]">
+          <div class="w-[104px]">
             <Knob
               :model-value="resSharpness" @update:model-value="syncSharpness"
               :min="0" :max="1" :step="0.01"
@@ -121,11 +190,11 @@ async function applyAndClose() {
           </div>
         </div>
 
-        <LevelMeter :levels="resOutputLevels" label="OUT" :height="150" />
+        <LevelMeter :levels="resOutputLevels" label="OUT" :height="104" />
       </div>
 
       <!-- Timing + ceiling -->
-      <div class="flex items-center justify-between mt-[18px] pt-[16px]"
+      <div class="flex items-center justify-between mt-[14px] pt-[13px]"
            style="border-top:1px solid rgba(255,255,255,.06)">
         <SegmentedSwitch
           :model-value="resMode"
@@ -136,8 +205,8 @@ async function applyAndClose() {
           :caption="modeCaption"
         />
 
-        <div class="flex gap-[24px]">
-          <div class="w-[74px]">
+        <div class="flex gap-[20px]">
+          <div class="w-[66px]">
             <Knob
               :model-value="resAttack" @update:model-value="syncAttack"
               :min="1" :max="100" :step="1" :value-font-px="13"
@@ -145,7 +214,7 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[74px]">
+          <div class="w-[66px]">
             <Knob
               :model-value="resRelease" @update:model-value="syncRelease"
               :min="10" :max="500" :step="5" :value-font-px="13"
@@ -153,7 +222,7 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[74px]">
+          <div class="w-[66px]">
             <Knob
               :model-value="resMaxReduction" @update:model-value="syncMaxReduction"
               :min="3" :max="48" :step="1" :value-font-px="13"
@@ -164,72 +233,81 @@ async function applyAndClose() {
         </div>
       </div>
 
-      <!-- Range + harmonic protection -->
-      <div class="mt-[18px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <div class="flex items-start gap-[30px]">
-          <div class="flex-1 grid grid-cols-2 gap-x-[26px] gap-y-[12px]">
-            <DeviceSlider
-              :model-value="resFreqFloor" @update:model-value="syncFreqFloor"
-              :min="20" :max="1000" :step="10"
-              label="Low Limit" :accent="ACCENT" :format-value="hz"
-              :disabled="!resPreview"
-            />
-            <DeviceSlider
-              :model-value="resFreqCeil" @update:model-value="syncFreqCeil"
-              :min="2000" :max="20000" :step="100"
-              label="High Limit" :accent="ACCENT" :format-value="hz"
-              :disabled="!resPreview"
-            />
-          </div>
-
-          <!-- Harmonic protection is the safety mechanism, not a flavour
-               control: without it the cepstral reference sits at the
-               inter-harmonic floor and the suppressor eats the harmonics of
-               whatever is playing. The range picker sits with it because it
-               feeds it — protection is only as good as the pitch it is handed,
-               and a source outside the range reports an octave artefact rather
-               than nothing, which puts the mask on the wrong bins. -->
-          <div class="shrink-0 flex flex-col gap-[10px]" style="width:186px">
-            <button
-              class="w-full px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
-              :style="{
-                background: resPreserveHarmonics ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
-                border: `1px solid ${resPreserveHarmonics ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
-                opacity: resPreview ? 1 : 0.4,
-              }"
-              :disabled="!resPreview"
-              title="Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material."
-              @click="togglePreserveHarmonics"
-            >
-              <span
-                class="block"
-                :style="{
-                  font: `700 8.5px 'JetBrains Mono',monospace`,
-                  letterSpacing: '.12em',
-                  color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
-                }"
-              >{{ resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
-              <span
-                class="block mt-[3px]"
-                style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
-              >{{ resPreserveHarmonics
-                ? 'Preserves harmonic frequencies.'
-                : 'Full suppression — risks thinning harmonic frequencies.' }}</span>
-            </button>
-
-            <SegmentedSwitch
-              :model-value="resPitchRange"
-              @update:model-value="syncPitchRange"
-              :options="PITCH_RANGE_OPTIONS"
-              :accent="ACCENT"
-              :disabled="!resPreview || !resPreserveHarmonics"
-              :caption="`Protect pitches ${pitchRangeCaption}`"
-            />
-          </div>
+      <!-- Range + harmonic protection.
+           One line, and it has to be: this panel outgrew the viewport when the
+           spectrum display went in, and a section that stacked a two-line
+           button over a switch over a caption was the tallest thing here that
+           was not a control. Everything in it is now on the baseline the range
+           fader sets. -->
+      <div class="flex items-end gap-[20px] mt-[14px] pt-[13px]"
+           style="border-top:1px solid rgba(255,255,255,.06)">
+        <div class="flex-1">
+          <DeviceRangeSlider
+            :low="resFreqFloor" :high="resFreqCeil"
+            @update:low="syncFreqFloor" @update:high="syncFreqCeil"
+            :min="20" :max="20000"
+            :snap="snapHz"
+            label="Range" :accent="ACCENT" :format-value="hz"
+            :disabled="!resPreview"
+          />
         </div>
+
+        <!-- Harmonic protection is the safety mechanism, not a flavour
+             control: without it the cepstral reference sits at the
+             inter-harmonic floor and the suppressor eats the harmonics of
+             whatever is playing. The range picker sits with it because it
+             feeds it — protection is only as good as the pitch it is handed,
+             and a source outside the range reports an octave artefact rather
+             than nothing, which puts the mask on the wrong bins.
+
+             The state sentence under the label is not decoration and does not
+             belong in a tooltip. This is the one control here that can quietly
+             wreck the material, its two states are not opposites of one name,
+             and a tooltip is invisible to anyone who has not already decided
+             the control is worth hovering — which is exactly the person about
+             to turn protection off without knowing what it protects. It was
+             moved to the title attribute to buy 30 px and has been put back;
+             the height came out of the plot instead. -->
+        <button
+          class="shrink-0 px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
+          style="width:186px"
+          :style="{
+            background: resPreserveHarmonics ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
+            border: `1px solid ${resPreserveHarmonics ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
+            opacity: resPreview ? 1 : 0.4,
+          }"
+          :disabled="!resPreview"
+          title="Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material."
+          @click="togglePreserveHarmonics"
+        >
+          <span
+            class="block"
+            :style="{
+              font: `700 8.5px 'JetBrains Mono',monospace`,
+              letterSpacing: '.12em',
+              color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
+            }"
+          >{{ resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
+          <span
+            class="block mt-[3px]"
+            style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
+          >{{ resPreserveHarmonics
+            ? 'Preserves harmonic frequencies.'
+            : 'Full suppression — risks thinning harmonic frequencies.' }}</span>
+        </button>
+
+        <SegmentedSwitch
+          class="shrink-0"
+          :model-value="resPitchRange"
+          @update:model-value="syncPitchRange"
+          :options="PITCH_RANGE_OPTIONS"
+          :accent="ACCENT"
+          :disabled="!resPreview || !resPreserveHarmonics"
+          :caption="`Protect ${pitchRangeCaption}`"
+        />
       </div>
 
-      <div class="mt-[16px]">
+      <div class="mt-[14px]">
         <ApplyAction
           size="md"
           show-preview

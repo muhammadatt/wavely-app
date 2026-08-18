@@ -19,9 +19,21 @@
 
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
-import { PITCH_RANGES, RESONANCE_FRAME_SIZE } from '../resonanceParams.js'
+import {
+  PITCH_RANGES,
+  RESONANCE_DISPLAY_CURVES,
+  RESONANCE_FRAME_SIZE,
+  resonanceDisplayRange,
+} from '../resonanceParams.js'
 
-export { PITCH_RANGES, RESONANCE_FRAME_SIZE, effectivePitchRange } from '../resonanceParams.js'
+export {
+  PITCH_RANGES,
+  RESONANCE_FRAME_SIZE,
+  RESONANCE_DISPLAY_BINS,
+  RESONANCE_DISPLAY_CURVES,
+  effectivePitchRange,
+  resonanceDisplayRange,
+} from '../resonanceParams.js'
 
 /** This STFT holds back exactly one frame before a sample is reconstructed. */
 export const RESONANCE_LATENCY_SAMPLES = RESONANCE_FRAME_SIZE
@@ -72,6 +84,17 @@ export function createResonance(audioContext) {
   let destroyed = false
   let grDb = 0
 
+  // Latest per-frequency frame from the kernel, and a view onto it. The view is
+  // rebuilt only when a new frame lands, so a display reading it every animation
+  // frame — faster than the ~46 Hz the worklet posts at — allocates nothing.
+  let displayFrame = null
+  let displayView = null
+
+  // Monitoring mode, kept out of `params` on purpose — see ResonanceKernel's
+  // setMonitor. It rides its own port message, so the offline render cannot
+  // pick it up from a param spread.
+  let monitorDelta = false
+
   input.connect(preOutput)
   preOutput.connect(output)
 
@@ -82,8 +105,16 @@ export function createResonance(audioContext) {
         processorOptions: { params: toKernelParams(params) },
       })
       worklet.port.onmessage = (e) => {
-        if (e.data?.type === 'gr') grDb = e.data.grDb
+        if (e.data?.type !== 'gr') return
+        grDb = e.data.grDb
+        if (e.data.display) {
+          displayFrame = e.data.display
+          displayView = null
+        }
       }
+      // The worklet loads asynchronously, so it can miss a toggle made while
+      // the effect was still passing through.
+      worklet.port.postMessage({ type: 'monitor', delta: monitorDelta })
       input.disconnect(preOutput)
       input.connect(worklet)
       worklet.connect(preOutput)
@@ -118,6 +149,57 @@ export function createResonance(audioContext) {
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.
     getReduction() {
       return -grDb
+    },
+
+    /**
+     * The kernel's own view of the last frame, on a log-frequency grid, or null
+     * before the worklet has produced one.
+     *
+     * `mag`, `reference` and `output` are dBFS; the two reduction curves are
+     * positive dB of cut. All but `reductionHeld` describe the same single
+     * frame, so anything drawn from them agrees about one instant;
+     * `reductionHeld` is the maximum since the previous read and exists for the
+     * peak-hold trace alone. `reference` does NOT include `selectivity` — the
+     * caller adds it, so the threshold line tracks the knob without waiting for
+     * the audio thread.
+     *
+     * Returns a live view onto the latest frame rather than a copy. It is valid
+     * until the next message arrives, which is what a per-frame drawing loop
+     * wants; anything holding it longer must copy.
+     */
+    getDisplay() {
+      if (!displayFrame) return null
+      if (!displayView) {
+        const bins = displayFrame.length / RESONANCE_DISPLAY_CURVES
+        const range = resonanceDisplayRange(audioContext.sampleRate)
+        const curve = i => displayFrame.subarray(i * bins, (i + 1) * bins)
+        displayView = {
+          bins,
+          minHz: range.minHz,
+          maxHz: range.maxHz,
+          mag: curve(0),
+          reference: curve(1),
+          output: curve(2),
+          reduction: curve(3),
+          reductionHeld: curve(4),
+        }
+      }
+      return displayView
+    },
+
+    /**
+     * Audition the difference — only what the suppressor is removing.
+     *
+     * A separate call rather than a parameter: parameters are what the apply
+     * path renders with, and this must never be one of them.
+     */
+    setMonitorDelta(on) {
+      monitorDelta = !!on
+      worklet?.port.postMessage({ type: 'monitor', delta: monitorDelta })
+    },
+
+    isMonitoringDelta() {
+      return monitorDelta
     },
 
     getInputLevels(channelCount) {
