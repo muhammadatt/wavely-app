@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyResonanceRegion, computePeakCache } from '../audio/processing.js'
-import { getEffectChain } from '../audio/effectChain.js'
+import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -23,6 +23,14 @@ const resPreserveHarmonics = ref(RESONANCE_DEFAULTS.preserveHarmonics)
 const resPitchRange = ref(RESONANCE_DEFAULTS.pitchRange)
 
 const resPreview = ref(false)
+/**
+ * Auditioning the difference rather than the result.
+ *
+ * Deliberately not a member of currentParams(): that object is what apply()
+ * hands the offline renderer, and a monitoring mode in there would be one
+ * spread away from writing a difference signal into the timeline.
+ */
+const resDelta = ref(false)
 const resReduction = ref(0)
 const resInputLevels = ref([])
 const resOutputLevels = ref([])
@@ -109,6 +117,24 @@ export function useResonance() {
     for (const [name, value] of Object.entries(currentParams())) {
       chain.updateParam(resonanceEffect.id, name, value)
     }
+    // Not in currentParams, so it needs restoring by hand when the preview is
+    // switched back on.
+    chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
+      ?.setMonitorDelta(resDelta.value)
+  }
+
+  /**
+   * Hear only what is being removed.
+   *
+   * The most direct answer to "is it taking out the ring or the voice", and the
+   * one question the display cannot settle on its own — a plot can show a
+   * narrow cut landing on a peak and still not tell you that the peak was a
+   * consonant. Nothing about the file changes: this is a monitoring mode, and
+   * Apply renders the processed output whatever it is set to.
+   */
+  function toggleDelta() {
+    resDelta.value = !resDelta.value
+    resNodes?.setMonitorDelta(resDelta.value)
   }
 
   function togglePreview() {
@@ -183,6 +209,16 @@ export function useResonance() {
       chain.setEnabled(resonanceEffect.id, false)
       resPreview.value = false
     }
+    // Cleared on the node too, not just in the ref. The effect entry outlives
+    // this panel, so a mode left set on it would come back the next time the
+    // preview was switched on — under a header that no longer said so. Read off
+    // the chain rather than the meter loop's handle, which apply() has already
+    // dropped by the time it gets here.
+    if (resDelta.value) {
+      resDelta.value = false
+      getEffectChainIfExists()?.effects
+        .find(e => e.id === resonanceEffect.id)?.nodes?.setMonitorDelta(false)
+    }
   }
 
   function openModal() {
@@ -206,12 +242,14 @@ export function useResonance() {
     resPreserveHarmonics,
     resPitchRange,
     resPreview,
+    resDelta,
     resReduction,
     resInputLevels,
     resOutputLevels,
     resDisplayFn,
     hasSelection,
     togglePreview,
+    toggleDelta,
     syncDepth,
     syncSharpness,
     syncSelectivity,

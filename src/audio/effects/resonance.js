@@ -88,6 +88,11 @@ export function createResonance(audioContext) {
   let displayFrame = null
   let displayView = null
 
+  // Monitoring mode, kept out of `params` on purpose — see ResonanceKernel's
+  // setMonitor. It rides its own port message, so the offline render cannot
+  // pick it up from a param spread.
+  let monitorDelta = false
+
   input.connect(preOutput)
   preOutput.connect(output)
 
@@ -105,6 +110,9 @@ export function createResonance(audioContext) {
           displayView = null
         }
       }
+      // The worklet loads asynchronously, so it can miss a toggle made while
+      // the effect was still passing through.
+      worklet.port.postMessage({ type: 'monitor', delta: monitorDelta })
       input.disconnect(preOutput)
       input.connect(worklet)
       worklet.connect(preOutput)
@@ -169,6 +177,21 @@ export function createResonance(audioContext) {
         }
       }
       return displayView
+    },
+
+    /**
+     * Audition the difference — only what the suppressor is removing.
+     *
+     * A separate call rather than a parameter: parameters are what the apply
+     * path renders with, and this must never be one of them.
+     */
+    setMonitorDelta(on) {
+      monitorDelta = !!on
+      worklet?.port.postMessage({ type: 'monitor', delta: monitorDelta })
+    },
+
+    isMonitoringDelta() {
+      return monitorDelta
     },
 
     getInputLevels(channelCount) {

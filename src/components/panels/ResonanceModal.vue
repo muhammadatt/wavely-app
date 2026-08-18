@@ -16,9 +16,9 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resPreview, resReduction, resInputLevels, resOutputLevels,
+  resPitchRange, resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
   resDisplayFn, hasSelection,
-  togglePreview, syncDepth, syncSharpness, syncSelectivity, syncAttack,
+  togglePreview, toggleDelta, syncDepth, syncSharpness, syncSelectivity, syncAttack,
   syncRelease, syncMaxReduction, syncFreqFloor, syncFreqCeil, syncMode,
   syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
@@ -110,6 +110,36 @@ async function applyAndClose() {
     @toggle-engaged="togglePreview"
     @close="close"
   >
+    <!-- Delta sits beside ON/BYPASS because it is the same kind of control:
+         both change what reaches the speakers and neither changes the file.
+         Putting it down among the parameters would have implied it was one. -->
+    <template #header-center>
+      <button
+        class="flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-opacity disabled:cursor-default"
+        :style="{
+          background: resDelta ? `color-mix(in srgb, ${ACCENT} 26%, transparent)` : 'transparent',
+          borderColor: resDelta
+            ? `color-mix(in srgb, ${ACCENT} 55%, transparent)`
+            : 'rgba(255,255,255,.14)',
+          opacity: resPreview ? 1 : 0.4,
+        }"
+        :disabled="!resPreview"
+        :aria-pressed="String(resDelta)"
+        title="Hear only what is being removed. Monitoring only — Apply always renders the processed audio."
+        @pointerdown.stop
+        @click="toggleDelta"
+      >
+        <span
+          :style="{
+            font: `700 9px 'JetBrains Mono',monospace`,
+            letterSpacing: '.14em',
+            color: resDelta
+              ? `color-mix(in srgb, ${ACCENT} 55%, #ffffff)`
+              : 'rgba(255,255,255,.45)',
+          }"
+        >DELTA</span>
+      </button>
+    </template>
     <div class="px-[26px] pt-[18px] pb-[18px]">
       <!-- The display, not a meter. This effect cuts a few narrow bands and
            leaves the rest alone, so "how much" without "where" describes almost
@@ -122,6 +152,7 @@ async function applyAndClose() {
         :freq-floor-hz="resFreqFloor"
         :freq-ceil-hz="resFreqCeil"
         :height="140"
+        :delta="resDelta"
       />
 
       <div class="flex items-center justify-between gap-[18px] mt-[16px]">

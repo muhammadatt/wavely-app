@@ -216,6 +216,10 @@ export class ResonanceKernel {
     // Metering — peak reduction seen since the last read.
     this.maxReductionSeen = 0
 
+    // Monitoring mode. Never a member of `params`, and deliberately so — see
+    // setMonitor.
+    this.monitorDelta = false
+
     // Per-frequency display. The panel draws what the kernel measured rather
     // than running its own analyser over the output: a second FFT would show
     // the result of the cut but not the reference it was decided against, and
@@ -235,6 +239,19 @@ export class ResonanceKernel {
     }
     this._applyGain = (re, im, bins) => {
       const g = this.gain
+      if (this.monitorDelta) {
+        // The complement of the gain is exactly the part being removed. The
+        // STFT and its overlap-add are linear and reconstruct exactly, so
+        // ISTFT(X·(1−G)) is ISTFT(X) − ISTFT(X·G) sample for sample — the
+        // difference between the input and the output, with no delay to line
+        // up and no second signal path to drift.
+        for (let k = 0; k < bins; k++) {
+          const d = 1 - g[k]
+          re[k] *= d
+          im[k] *= d
+        }
+        return
+      }
       for (let k = 0; k < bins; k++) {
         re[k] *= g[k]
         im[k] *= g[k]
@@ -316,6 +333,21 @@ export class ResonanceKernel {
     // effect wrapper posts the full param object on every knob move, so an
     // `in partial` test is true on every twist and never lets the cache survive.
     if (this.freqCeilHz !== prevCeilHz) this.maskCache.clear()
+  }
+
+  /**
+   * Monitor the difference instead of the result: what the suppressor is
+   * taking out, alone.
+   *
+   * NOT A PARAMETER, and the separation is structural rather than tidiness.
+   * `params` is what the offline apply path hands the kernel to render into
+   * the timeline (applyResonanceRegion spreads it into toKernelParams), so a
+   * monitoring mode living in there is one careless spread away from writing a
+   * difference signal into someone's file. It travels on its own port message,
+   * which the offline path never sends and processResonanceBuffer never calls.
+   */
+  setMonitor(delta) {
+    this.monitorDelta = !!delta
   }
 
   reset() {
@@ -712,6 +744,7 @@ if (typeof registerProcessor === 'function') {
       this.display = new Float32Array(3 * this.kernel.displayBins)
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
+        else if (e.data?.type === 'monitor') this.kernel.setMonitor(e.data.delta)
         else if (e.data?.type === 'reset') this.kernel.reset()
       }
     }

@@ -604,3 +604,105 @@ test('reset clears the display as well as the audio state', () => {
   kernel.reset()
   assert.equal(kernel.readDisplay(new Float32Array(3 * kernel.displayBins)), false)
 })
+
+// ── Delta monitoring ────────────────────────────────────────────────────────
+//
+// Auditioning the difference is only useful if it IS the difference. The
+// implementation applies the complement of the gain inside the same STFT rather
+// than subtracting two signals downstream, so the claim to check is the
+// identity that licenses it: output + delta must reconstruct the input, sample
+// for sample, with nothing left over at the edges where the overlap-add
+// normalisation does its work.
+
+/** Render a signal through a kernel and return the output. */
+function renderKernel(sig, params = {}, { monitorDelta = false } = {}) {
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams(params)
+  if (monitorDelta) kernel.setMonitor(true)
+  const out = new Float32Array(sig.length)
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  return out
+}
+
+/**
+ * Peak level past the latency, which is where every other measurement in this
+ * file starts too.
+ *
+ * The kernel's first frames carry a startup transient: a spectral gain applied
+ * while the analysis ring is still filling smears energy into a region the
+ * overlap-add has barely any accumulated window for, and the normalisation
+ * there magnifies it. It sits inside the latency the apply path trims, and it
+ * cancels exactly between the output and the delta — the reconstruction test
+ * above covers the whole signal and sees 7e-9 — but it is 30x either signal's
+ * working level, so a peak measured from sample 0 measures only it.
+ */
+function maxAbs(a, from = LATENCY) {
+  let m = 0
+  for (let i = from; i < a.length; i++) m = Math.max(m, Math.abs(a[i]))
+  return m
+}
+
+test('output plus delta reconstructs the input', () => {
+  const sig = resonate(voice(), 3000, 40, 14)
+  const wet = renderKernel(sig, UNPROTECTED)
+  const delta = renderKernel(sig, UNPROTECTED, { monitorDelta: true })
+  // At zero depth the gain is 1 everywhere, so this is the input as the STFT
+  // reconstructs it — the only fair reference, since it carries the same
+  // latency and the same overlap-add normalisation as the other two.
+  const dry = renderKernel(sig, { ...UNPROTECTED, depth: 0 })
+
+  let worst = 0
+  for (let i = 0; i < sig.length; i++) {
+    worst = Math.max(worst, Math.abs(wet[i] + delta[i] - dry[i]))
+  }
+  assert.ok(worst < 1e-6, `output + delta missed the input by ${worst}`)
+})
+
+test('delta carries what was removed, and only that', () => {
+  // Unpitched carrier, so the resonance is the only structure in the signal.
+  // On the harmonic stack with protection off the suppressor legitimately eats
+  // harmonics all over the spectrum — that is what PROTECTION OFF does — and a
+  // delta measured there says more about the mask than about this feature.
+  const sig = resonate(noise(), 3000, 40, 18)
+  const delta = renderKernel(sig, UNPROTECTED, { monitorDelta: true })
+  const dry = renderKernel(sig, { ...UNPROTECTED, depth: 0 })
+
+  // Something is there: a silent delta would satisfy the reconstruction test
+  // above whenever the suppressor happened to be doing nothing.
+  assert.ok(maxAbs(delta) > 1e-3, `delta was silent (${maxAbs(delta)})`)
+  // You cannot remove more than there was.
+  assert.ok(
+    maxAbs(delta) <= maxAbs(dry) * 1.01,
+    `delta (${maxAbs(delta).toFixed(3)}) exceeded the input (${maxAbs(dry).toFixed(3)})`,
+  )
+
+  const atResonance = bandDb(delta, 3000, SR + LATENCY)
+  const away = bandDb(delta, 700, SR + LATENCY)
+  assert.ok(
+    atResonance > away + 15,
+    `delta is not concentrated at the resonance: ${atResonance.toFixed(1)} dB at 3 kHz vs ${away.toFixed(1)} dB at 700 Hz`,
+  )
+})
+
+test('monitoring is off by default and unreachable through the parameters', () => {
+  // The structural guarantee behind setMonitor: applyResonanceRegion spreads a
+  // param object straight into the kernel, so a monitoring mode that could be
+  // set from `params` would be one careless key away from rendering a
+  // difference signal into the timeline.
+  const kernel = new ResonanceKernel(SR)
+  assert.equal(kernel.monitorDelta, false)
+  kernel.setParams({ monitorDelta: true, delta: true, monitor: 'delta' })
+  assert.equal(kernel.monitorDelta, false)
+
+  const sig = resonate(voice({ seconds: 1 }), 3000, 40, 14)
+  const rendered = processResonanceBuffer([sig], SR, UNPROTECTED).channelData[0]
+  const expected = renderKernel(sig, UNPROTECTED)
+  let worst = 0
+  for (let i = 0; i < sig.length; i++) {
+    worst = Math.max(worst, Math.abs(rendered[i] - expected[i]))
+  }
+  assert.ok(worst < 1e-9, `the render path did not produce the processed output (${worst})`)
+})

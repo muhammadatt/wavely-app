@@ -60,6 +60,15 @@ const props = defineProps({
   freqCeilHz: { type: Number, default: 20000 },
   /** Reduction that fills the top lane. Matches GainReductionBar's default. */
   fullScaleDb: { type: Number, default: 24 },
+  /**
+   * The panel is auditioning the difference rather than the result.
+   *
+   * Changes nothing about what is measured — the kernel reports the same
+   * numbers either way — only which part of the picture is the thing being
+   * heard. That part is the sliver between input and output, so it stops being
+   * an annotation and becomes the subject.
+   */
+  delta: { type: Boolean, default: false },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -385,7 +394,7 @@ function drawSpectrum(ctx, w, frame, alpha) {
     ctx.lineTo(d * xStep, yFor(mag[d] - reduction[d]))
   }
   ctx.closePath()
-  ctx.fillStyle = tint(props.accent, 0.24)
+  ctx.fillStyle = tint(props.accent, props.delta ? 0.5 : 0.24)
   ctx.fill()
 
   // Threshold: dashed, because it is a decision boundary rather than a signal.
@@ -620,6 +629,20 @@ const hotspotText = computed(() =>
         <span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">
           AVG {{ hasAverage ? averageDb.toFixed(1) : '—' }}
         </span>
+        <!-- Second statement of a mode the header pill already shows, and
+             worth the duplication: someone reading the plot to decide whether
+             a cut is landing where they want has their eyes here, not on the
+             title bar, and the sliver being loud is otherwise unexplained. -->
+        <span
+          v-show="delta"
+          class="px-[5px] py-[1px] rounded"
+          :style="{
+            font: `700 8px 'JetBrains Mono',monospace`,
+            letterSpacing: '.12em',
+            color: `color-mix(in srgb, ${accent} 55%, #ffffff)`,
+            background: `color-mix(in srgb, ${accent} 22%, transparent)`,
+          }"
+        >DELTA</span>
       </span>
 
       <span class="flex items-center gap-[11px] shrink-0"
