@@ -61,24 +61,39 @@ const props = defineProps({
   /** Reduction that fills the top lane. Matches GainReductionBar's default. */
   fullScaleDb: { type: Number, default: 24 },
   height: { type: Number, default: 188 },
-  title: { type: String, default: 'SPECTRAL REDUCTION' },
+  /**
+   * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
+   * reader, and this is the only thing that tells one what the element is.
+   */
+  title: { type: String, default: 'Spectral reduction' },
 })
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
-/** Reduction lane. Deep enough for the scale's numerals to have somewhere to sit. */
-const GR_H = 56
 /** Gap between the lanes, carrying the divider rule. */
 const LANE_GAP = 7
 /** Strip along the bottom for the frequency numerals. */
 const AXIS_H = 13
+/**
+ * Share of the plot given to the reduction lane.
+ *
+ * A fraction rather than a fixed depth, because the panel sizes this display to
+ * whatever height it can spare and a fixed lane takes the whole cut out of the
+ * spectrum: at 188 px the split was 56/112, and the same 56 at 140 px would
+ * leave the spectrum 64 px to draw a harmonic comb, a reference and an output
+ * curve in. Reduction needs less room than the spectrum — it is one curve
+ * against a scale, not three against each other.
+ */
+const GR_SHARE = 0.36
 /** Vertical clearance between two numerals on the reduction scale. */
 const MIN_SCALE_GAP_PX = 11
 /** Below this fraction of the scale the peak hold has nothing to say. */
 const PEAK_VISIBLE = 0.025
 
-const specTop = GR_H + LANE_GAP
-const specH = computed(() => Math.max(40, props.height - specTop - AXIS_H))
+const grH = computed(() =>
+  Math.round(Math.max(34, (props.height - LANE_GAP - AXIS_H) * GR_SHARE)))
+const specTop = computed(() => grH.value + LANE_GAP)
+const specH = computed(() => Math.max(40, props.height - specTop.value - AXIS_H))
 
 /**
  * Spectrum window, dBFS.
@@ -238,11 +253,11 @@ function draw(dtMs) {
 /** The two recessed lanes and the rule between them. */
 function drawPlates(ctx, w) {
   ctx.fillStyle = 'rgba(0,0,0,.42)'
-  ctx.fillRect(0, 0, w, GR_H)
-  ctx.fillRect(0, specTop, w, specH.value)
+  ctx.fillRect(0, 0, w, grH.value)
+  ctx.fillRect(0, specTop.value, w, specH.value)
 
   ctx.fillStyle = 'rgba(255,255,255,.07)'
-  ctx.fillRect(0, GR_H + (LANE_GAP - 1) / 2, w, 1)
+  ctx.fillRect(0, grH.value + (LANE_GAP - 1) / 2, w, 1)
 }
 
 function drawGrid(ctx, w, xFor, minHz, maxHz) {
@@ -251,8 +266,8 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
     if (hz < minHz || hz > maxHz) continue
     const x = Math.round(xFor(hz)) + 0.5
     if (x >= w) continue
-    ctx.fillRect(x, 0, 1, GR_H)
-    ctx.fillRect(x, specTop, 1, specH.value)
+    ctx.fillRect(x, 0, 1, grH.value)
+    ctx.fillRect(x, specTop.value, 1, specH.value)
   }
 }
 
@@ -268,12 +283,12 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
 function drawReduction(ctx, w, frame, alpha) {
   const { reduction, bins } = frame
   const xStep = w / (bins - 1)
-  const yFor = db => grFraction(db, props.fullScaleDb) * GR_H
+  const yFor = db => grFraction(db, props.fullScaleDb) * grH.value
 
   ctx.globalAlpha = alpha
   ctx.save()
   ctx.beginPath()
-  ctx.rect(0, 0, w, GR_H)
+  ctx.rect(0, 0, w, grH.value)
   ctx.clip()
 
   ctx.beginPath()
@@ -281,7 +296,7 @@ function drawReduction(ctx, w, frame, alpha) {
   for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(reduction[d]))
   ctx.lineTo(w, 0)
   ctx.closePath()
-  const grad = ctx.createLinearGradient(0, 0, 0, GR_H)
+  const grad = ctx.createLinearGradient(0, 0, 0, grH.value)
   grad.addColorStop(0, tint(props.accent, 0.62))
   grad.addColorStop(1, tint(props.accent, 0.18))
   ctx.fillStyle = grad
@@ -307,7 +322,7 @@ function drawReduction(ctx, w, frame, alpha) {
         open = false
         continue
       }
-      const y = peakBins[d] * GR_H
+      const y = peakBins[d] * grH.value
       const x = d * xStep
       open ? ctx.lineTo(x, y) : ctx.moveTo(x, y)
       open = true
@@ -331,7 +346,7 @@ function drawReduction(ctx, w, frame, alpha) {
  */
 function drawSpectrum(ctx, w, frame, alpha) {
   const { mag, reference, reduction, bins } = frame
-  const top = specTop
+  const top = specTop.value
   const height = specH.value
   const bottom = top + height
   const xStep = w / (bins - 1)
@@ -404,18 +419,18 @@ function drawSpectrum(ctx, w, frame, alpha) {
 function drawOutOfBand(ctx, w, xFor, minHz, maxHz) {
   const wash = 'rgba(6,8,7,.72)'
   const edge = 'rgba(255,255,255,.14)'
-  const bottom = specTop + specH.value
+  const bottom = specTop.value + specH.value
 
   const paint = (x0, x1) => {
     if (x1 <= x0) return
     ctx.fillStyle = wash
-    ctx.fillRect(x0, 0, x1 - x0, GR_H)
-    ctx.fillRect(x0, specTop, x1 - x0, bottom - specTop)
+    ctx.fillRect(x0, 0, x1 - x0, grH.value)
+    ctx.fillRect(x0, specTop.value, x1 - x0, bottom - specTop.value)
   }
   const rule = (x) => {
     ctx.fillStyle = edge
-    ctx.fillRect(Math.round(x) + 0.5, 0, 1, GR_H)
-    ctx.fillRect(Math.round(x) + 0.5, specTop, 1, bottom - specTop)
+    ctx.fillRect(Math.round(x) + 0.5, 0, 1, grH.value)
+    ctx.fillRect(Math.round(x) + 0.5, specTop.value, 1, bottom - specTop.value)
   }
 
   if (props.freqFloorHz > minHz) {
@@ -445,8 +460,8 @@ function drawGrScale(ctx, w) {
   let lastY = -Infinity
   for (const mark of grScaleMarks(props.fullScaleDb)) {
     if (!mark.label || mark.db === 0) continue
-    const y = mark.fraction * GR_H
-    if (y < MIN_SCALE_GAP_PX / 2 || y > GR_H - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
+    const y = mark.fraction * grH.value
+    if (y < MIN_SCALE_GAP_PX / 2 || y > grH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
     lastY = y
     ctx.fillStyle = 'rgba(255,255,255,.06)'
     ctx.fillRect(0, Math.round(y) + 0.5, w - 20, 1)
@@ -484,8 +499,8 @@ function drawCursor(ctx, w) {
   const x = Math.round(cursorX.value) + 0.5
   if (x < 0 || x > w) return
   ctx.fillStyle = 'rgba(255,255,255,.22)'
-  ctx.fillRect(x, 0, 1, GR_H)
-  ctx.fillRect(x, specTop, 1, specH.value)
+  ctx.fillRect(x, 0, 1, grH.value)
+  ctx.fillRect(x, specTop.value, 1, specH.value)
 }
 
 /**
@@ -588,9 +603,15 @@ const hotspotText = computed(() =>
 
 <template>
   <div>
-    <!-- Header: the two numbers the bar carried, unchanged. -->
-    <div class="flex items-center justify-between mb-1.5">
-      <span class="flex items-baseline gap-[9px]">
+    <!-- One line above the plot, carrying everything that is not the plot.
+         It was two — readouts over the plot, legend and readout under it — and
+         the panel could not afford both once the display went in. What went
+         was the "SPECTRAL REDUCTION" title: the legend names all three curves,
+         the scale down the right of the top lane names what it measures, and a
+         title naming the panel a second time was the only line here that told
+         you nothing you could not read off the plot. -->
+    <div class="flex items-baseline gap-[14px] mb-1.5">
+      <span class="flex items-baseline gap-[9px] shrink-0">
         <span :style="{
                 font: `700 12px 'JetBrains Mono',monospace`,
                 color: `color-mix(in srgb, ${accent} 65%, #ffffff)`,
@@ -600,33 +621,9 @@ const hotspotText = computed(() =>
           AVG {{ hasAverage ? averageDb.toFixed(1) : '—' }}
         </span>
       </span>
-      <span style="font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.18em;color:rgba(255,255,255,.5)">{{ title }}</span>
-    </div>
 
-    <div
-      :style="{
-        padding: '3px',
-        borderRadius: '9px',
-        background: '#0a0806',
-        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.05)',
-      }"
-    >
-      <canvas
-        ref="canvasEl"
-        class="block w-full"
-        :style="{ height: `${height}px`, borderRadius: '6px' }"
-        @pointermove="onMove"
-        @pointerleave="onLeave"
-      ></canvas>
-    </div>
-
-    <!-- Legend, and the readout that answers whatever the pointer is over.
-         Both live under the plot rather than in it: text drawn into the canvas
-         either sits over a curve or reserves a strip of plot that is blank
-         whenever there is nothing to say. -->
-    <div class="flex items-center justify-between mt-[6px]"
-         style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(255,255,255,.32)">
-      <span class="flex items-center gap-[11px]">
+      <span class="flex items-center gap-[11px] shrink-0"
+            style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(255,255,255,.32)">
         <span class="flex items-center gap-[4px]">
           <span :style="{ width: '10px', height: '2px', background: 'rgba(255,255,255,.3)' }"></span>INPUT
         </span>
@@ -640,9 +637,34 @@ const hotspotText = computed(() =>
           <span :style="{ width: '10px', height: '2px', background: accent }"></span>OUTPUT
         </span>
       </span>
-      <span :style="{ color: cursorText ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)' }">
-        {{ cursorText || hotspotText }}
-      </span>
+
+      <!-- Whatever the pointer is over, or where the deepest cut is when it is
+           over nothing. Right-aligned into the space left over, so the text
+           changing length moves nothing else on the line. -->
+      <span
+        class="flex-1 text-right truncate"
+        style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em"
+        :style="{ color: cursorText ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)' }"
+      >{{ cursorText || hotspotText }}</span>
+    </div>
+
+    <div
+      :style="{
+        padding: '3px',
+        borderRadius: '9px',
+        background: '#0a0806',
+        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.05)',
+      }"
+    >
+      <canvas
+        ref="canvasEl"
+        class="block w-full"
+        role="img"
+        :aria-label="title"
+        :style="{ height: `${height}px`, borderRadius: '6px' }"
+        @pointermove="onMove"
+        @pointerleave="onLeave"
+      ></canvas>
     </div>
   </div>
 </template>
