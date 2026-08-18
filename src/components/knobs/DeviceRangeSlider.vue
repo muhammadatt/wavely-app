@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 /**
  * Two-handle range fader — DeviceSlider's sibling, for a pair of values that
@@ -84,14 +84,41 @@ const highFrac = computed(() => String(fracOf(props.high)))
 
 const valColor = computed(() => `color-mix(in srgb, ${props.accent} 60%, #ffffff)`)
 
+const lowEl = ref(null)
+const highEl = ref(null)
+
+/**
+ * Put both thumbs where the values say they are.
+ *
+ * A range input is not a controlled component: the browser moves its thumb with
+ * the pointer and only *then* fires input, and Vue's `:value` binding patches
+ * the element only when the bound value changes. So the moment a handle reaches
+ * the other one and the clamp starts returning the same frequency, Vue has
+ * nothing to patch and the element keeps whatever the pointer dragged it to —
+ * the thumb sails past the other handle and stays there after release, while
+ * the model and the lit band correctly say it stopped.
+ *
+ * Writing the accepted position back is what makes the stop real. Called after
+ * every input event, and again whenever the values change from outside, so the
+ * thumbs cannot drift from the numbers under any route.
+ */
+function syncThumbs() {
+  if (lowEl.value) lowEl.value.value = String(posOf(props.low))
+  if (highEl.value) highEl.value.value = String(posOf(props.high))
+}
+
+watch([() => props.low, () => props.high], syncThumbs)
+
 function onLow(e) {
   const hz = props.snap(hzOf(Number(e.target.value)))
   emit('update:low', Math.max(props.min, Math.min(props.high, hz)))
+  syncThumbs()
 }
 
 function onHigh(e) {
   const hz = props.snap(hzOf(Number(e.target.value)))
   emit('update:high', Math.min(props.max, Math.max(props.low, hz)))
+  syncThumbs()
 }
 
 /**
@@ -136,6 +163,7 @@ const lowOnTop = computed(() => props.high >= props.max)
       <div class="dev-range__band"></div>
 
       <input
+        ref="lowEl"
         type="range" class="dev-range__input"
         :min="0" :max="steps" :step="1"
         :value="posOf(low)"
@@ -146,6 +174,7 @@ const lowOnTop = computed(() => props.high >= props.max)
         @input="onLow"
       />
       <input
+        ref="highEl"
         type="range" class="dev-range__input"
         :min="0" :max="steps" :step="1"
         :value="posOf(high)"

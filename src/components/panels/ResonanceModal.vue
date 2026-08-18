@@ -54,7 +54,7 @@ const db = v => `${Math.round(v)}`
  * the band now share one readout and "40 – 20k" reads as a pair of unrelated
  * numbers where "40 Hz – 20 kHz" reads as a span.
  */
-const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)} kHz` : `${Math.round(v)} Hz`)
+const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v)} Hz`)
 
 /**
  * Round a frequency off the range track to something printable.
@@ -63,12 +63,17 @@ const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)} kHz` : `
  * 8347.2 Hz. Snapping by decade keeps the readout to three figures at every
  * point on the scale, and keeps a handle nudged with the arrow keys landing on
  * round numbers rather than drifting through the decimals.
+ *
+ * Every step here is finer than one step of the track, which is ~1.4% of the
+ * frequency wherever you are on it. A coarser snap would quantise the drag
+ * itself — the thumb would sit still through several steps and then jump —
+ * because the accepted value is written back to the element on every event.
  */
 function snapHz(v) {
   if (v < 100) return Math.round(v)
   if (v < 1000) return Math.round(v / 5) * 5
-  if (v < 10000) return Math.round(v / 50) * 50
-  return Math.round(v / 250) * 250
+  if (v < 10000) return Math.round(v / 25) * 25
+  return Math.round(v / 100) * 100
 }
 
 const modeCaption = computed(() =>
@@ -255,32 +260,40 @@ async function applyAndClose() {
              and a source outside the range reports an octave artefact rather
              than nothing, which puts the mask on the wrong bins.
 
-             The sentence that used to sit under the label is now only in the
-             tooltip. It explained the state well and cost 30 px of a panel
-             that had none to spare, and the label already says which state it
-             is in — the amber, which is what actually carries the warning,
-             is unchanged. -->
+             The state sentence under the label is not decoration and does not
+             belong in a tooltip. This is the one control here that can quietly
+             wreck the material, its two states are not opposites of one name,
+             and a tooltip is invisible to anyone who has not already decided
+             the control is worth hovering — which is exactly the person about
+             to turn protection off without knowing what it protects. It was
+             moved to the title attribute to buy 30 px and has been put back;
+             the height came out of the plot instead. -->
         <button
           class="shrink-0 px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
+          style="width:186px"
           :style="{
             background: resPreserveHarmonics ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
             border: `1px solid ${resPreserveHarmonics ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
             opacity: resPreview ? 1 : 0.4,
           }"
           :disabled="!resPreview"
-          :title="resPreserveHarmonics
-            ? 'Preserves the harmonics of the pitched source in the recording, so they are not treated as resonances. Turning it off is a diagnostic aid — it will thin the material.'
-            : 'Full suppression. The harmonics of the pitched source are treated as resonances like anything else, which will thin the material. A diagnostic aid — turn it back on for normal use.'"
+          title="Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material."
           @click="togglePreserveHarmonics"
         >
           <span
-            class="block whitespace-nowrap"
+            class="block"
             :style="{
               font: `700 8.5px 'JetBrains Mono',monospace`,
               letterSpacing: '.12em',
               color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
             }"
           >{{ resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
+          <span
+            class="block mt-[3px]"
+            style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
+          >{{ resPreserveHarmonics
+            ? 'Preserves harmonic frequencies.'
+            : 'Full suppression — risks thinning harmonic frequencies.' }}</span>
         </button>
 
         <SegmentedSwitch
