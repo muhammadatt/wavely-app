@@ -16,13 +16,20 @@ import { computed } from 'vue'
  * track the audible bottom four octaves would share the first 5% of the width
  * and be unadjustable; here an octave is an octave anywhere along it.
  *
- * EACH HANDLE KEEPS ITS OWN LIMITS. `lowMax` and `highMin` are where each
- * handle stops, and they are deliberately not "wherever the other handle is":
- * the two parameters had their own ranges before this control merged them, and
- * a shared track is a presentational change that should not quietly widen what
- * the effect can be set to. The dead span between the two stops cannot be
- * reached by either handle, which is the same thing the two separate faders
- * said — just visibly.
+ * EACH HANDLE STOPS AT THE OTHER ONE, and at nothing else. The two parameters
+ * had their own sub-ranges as separate faders (low ≤ 1 kHz, high ≥ 2 kHz) and
+ * this control kept them at first, on the argument that merging two faders is
+ * presentational and should not widen what the effect can be set to. That was
+ * wrong about how the merged control reads: on two separate faders a limit is
+ * just where that fader ends, but on one shared track a handle stopping dead in
+ * open space with more track visibly in front of it reads as a jam, not as a
+ * limit. Nothing about the kernel wanted those stops — it clamps the ceiling to
+ * the floor and processes whatever band it is given — so what is left is the
+ * only bound the parameters actually have on each other.
+ *
+ * A closed band is therefore reachable, and it means the effect processes
+ * nothing. That is legible rather than silent: the display washes out every
+ * frequency outside the band, so closing it greys the whole plot.
  *
  * Two overlaid range inputs rather than a hand-rolled div, for the reason
  * DeviceSlider gives: keyboard control and screen-reader semantics come for
@@ -35,10 +42,6 @@ const props = defineProps({
   high: { type: Number, required: true },
   min: { type: Number, default: 20 },
   max: { type: Number, default: 20000 },
-  /** Furthest right the low handle may travel. */
-  lowMax: { type: Number, default: 1000 },
-  /** Furthest left the high handle may travel. */
-  highMin: { type: Number, default: 2000 },
   label: { type: String, default: '' },
   accent: { type: String, default: '#f5a623' },
   formatValue: { type: Function, default: v => String(Math.round(v)) },
@@ -83,13 +86,27 @@ const valColor = computed(() => `color-mix(in srgb, ${props.accent} 60%, #ffffff
 
 function onLow(e) {
   const hz = props.snap(hzOf(Number(e.target.value)))
-  emit('update:low', Math.max(props.min, Math.min(props.lowMax, hz)))
+  emit('update:low', Math.max(props.min, Math.min(props.high, hz)))
 }
 
 function onHigh(e) {
   const hz = props.snap(hzOf(Number(e.target.value)))
-  emit('update:high', Math.min(props.max, Math.max(props.highMin, hz)))
+  emit('update:high', Math.min(props.max, Math.max(props.low, hz)))
 }
+
+/**
+ * Which thumb takes a press where the two are on top of one another.
+ *
+ * Handles that can meet can also hide each other, and the one underneath is
+ * then unreachable — a real trap, because the way out of a closed band is to
+ * grab one of the two handles sitting in the same place. Whichever one still
+ * has somewhere to go wins: with the band closed at the top of the range only
+ * the low handle can move, and closed anywhere else the high handle can always
+ * open it to the right. So the answer is just "is the high handle pinned at the
+ * end", and it is checked whether or not they actually coincide — where they do
+ * not, z-order decides nothing.
+ */
+const lowOnTop = computed(() => props.high >= props.max)
 </script>
 
 <template>
@@ -123,6 +140,7 @@ function onHigh(e) {
         :min="0" :max="steps" :step="1"
         :value="posOf(low)"
         :disabled="disabled"
+        :style="{ zIndex: lowOnTop ? 2 : 1 }"
         :aria-label="`${label} low limit`"
         :aria-valuetext="formatValue(low)"
         @input="onLow"
@@ -132,6 +150,7 @@ function onHigh(e) {
         :min="0" :max="steps" :step="1"
         :value="posOf(high)"
         :disabled="disabled"
+        :style="{ zIndex: lowOnTop ? 1 : 2 }"
         :aria-label="`${label} high limit`"
         :aria-valuetext="formatValue(high)"
         @input="onHigh"

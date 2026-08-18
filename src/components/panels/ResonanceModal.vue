@@ -209,7 +209,7 @@ async function applyAndClose() {
           <DeviceRangeSlider
             :low="resFreqFloor" :high="resFreqCeil"
             @update:low="syncFreqFloor" @update:high="syncFreqCeil"
-            :min="20" :max="20000" :low-max="1000" :high-min="2000"
+            :min="20" :max="20000"
             :snap="snapHz"
             label="Range" :accent="ACCENT" :format-value="hz"
             :disabled="!resPreview"

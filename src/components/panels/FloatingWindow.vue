@@ -95,6 +95,24 @@ const bodyMaxHeight = computed(() => Math.max(
 ))
 
 const frameEl = ref(null)
+const bodyEl = ref(null)
+
+/**
+ * Whether the body has content below its visible edge.
+ *
+ * Measured rather than derived from bodyMaxHeight, because only the DOM knows
+ * how tall the slotted panel actually is — and it changes as a panel opens a
+ * section, runs an analysis, or grows a findings list.
+ */
+const canScrollDown = ref(false)
+let bodyRo = null
+
+function updateOverflow() {
+  const el = bodyEl.value
+  // A pixel of slack: fractional layout heights leave sub-pixel remainders that
+  // would otherwise light the hint on a panel that fits exactly.
+  canScrollDown.value = !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 1
+}
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
 
@@ -120,10 +138,19 @@ onMounted(() => {
   frameEl.value?.focus({ preventScroll: true })
 
   window.addEventListener('resize', onViewportResize)
+
+  // Watches the scroller and its content: the first catches the max-height
+  // moving with the viewport, the second catches the panel itself changing
+  // size, which is the case a scroll listener alone never sees.
+  bodyRo = new ResizeObserver(updateOverflow)
+  bodyRo.observe(bodyEl.value)
+  if (bodyEl.value.firstElementChild) bodyRo.observe(bodyEl.value.firstElementChild)
+  updateOverflow()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onViewportResize)
+  bodyRo?.disconnect()
   savePosition(props.windowId, pos.value)
   // Return focus only if it is still inside this window; if the user has since
   // clicked the waveform, yanking it back would be worse than leaving it.
@@ -278,14 +305,61 @@ function requestClose() {
       The body scrolls; the header does not. min-height:0 is what makes that
       true — without it a flex child refuses to shrink below its content and the
       max-height lands on a box that never gets to enforce it.
+
+      The wrapper exists only to hang the overflow hint off, which has to be
+      positioned against the viewport onto the content rather than against the
+      content itself — inside the scroller it would sit at the bottom of the
+      scrolled content, which is the one place it is not needed.
     -->
-    <div class="win-body min-h-0 overflow-y-auto" :style="{ maxHeight: `${bodyMaxHeight}px` }">
-      <slot />
+    <div class="relative min-h-0 flex flex-col">
+      <div
+        ref="bodyEl"
+        class="win-body min-h-0 overflow-y-auto"
+        :style="{ maxHeight: `${bodyMaxHeight}px` }"
+        @scroll="updateOverflow"
+      >
+        <slot />
+      </div>
+
+      <!--
+        There is more panel below this edge.
+
+        A window taller than the viewport has always scrolled, but its scrollbar
+        is a hairline tuned not to look like a rendering fault on a near-black
+        faceplate, and on a faceplate the eye reads the bottom edge as the end of
+        the instrument. So a panel with controls below the fold looked like a
+        panel with no such controls — reported twice as a control that had
+        "disappeared". Shortening the panel fixes one viewport; saying so fixes
+        every viewport.
+      -->
+      <div
+        v-show="canScrollDown"
+        class="win-more absolute left-0 right-0 bottom-0 flex items-end justify-center pointer-events-none"
+        aria-hidden="true"
+      >
+        <span
+          class="mb-[3px] px-2 py-[2px] rounded-full"
+          :style="{
+            font: `700 8px 'JetBrains Mono',monospace`,
+            letterSpacing: '.14em',
+            color: `color-mix(in srgb, ${accent} 55%, #ffffff)`,
+            background: 'rgba(0,0,0,.55)',
+          }"
+        >MORE ↓</span>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* The hint's own height is the fade: tall enough that the gradient reads as
+   depth rather than as a border, short enough not to dim a control that is
+   fully visible. */
+.win-more {
+  height: 34px;
+  background: linear-gradient(rgba(10, 12, 14, 0), rgba(10, 12, 14, 0.92));
+}
+
 /* The frame takes focus programmatically on open so keyboard users land inside
    it. That must not paint a ring — only an actual keyboard focus should. */
 .win-frame:focus {
@@ -300,7 +374,7 @@ function requestClose() {
    Only paints when the body actually overflows. */
 .win-body {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
 }
 .win-body::-webkit-scrollbar {
   width: 9px;
@@ -309,7 +383,7 @@ function requestClose() {
   background: transparent;
 }
 .win-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.26);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
