@@ -270,6 +270,21 @@ test('the makeup lands the wet path’s LOUD PARTS on the dry one’s', () => {
   }
 })
 
+test('stereo trim level-matches the louder channel, not channel 0', () => {
+  const loud = voiceLike(4, { envRateHz: 0.5 })
+  const quiet = loud.map(v => v * 0.35)
+  const measured = computeSchepsAutoTrim([quiet, loud], SR, { squash: 65 })
+  const { channelData } = processSchepsBuffer([quiet, loud], SR, {
+    mix: 1, squash: 65, wetTrimDb: measured.trimDb,
+  })
+  const skip = OVERSAMPLE_LATENCY_SAMPLES
+  const errDb = loudPartDb(channelData[1], skip) - loudPartDb(loud, skip)
+  assert.ok(
+    Math.abs(errDb) < 0.7,
+    `louder stereo channel is ${errDb.toFixed(2)} dB off after trim`,
+  )
+})
+
 test('the compression yields real density, and it is modest on an opto cell', () => {
   // `densityDb` is how much louder the wet copy's average is once its loud
   // parts are level — the loudness the compressor actually earns. It must be

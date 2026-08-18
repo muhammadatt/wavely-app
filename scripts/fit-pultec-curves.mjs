@@ -96,7 +96,9 @@ function seedFor(types, stage) {
 
 function readCurves(character) {
   const path = join(ROOT, 'data/pultec_curves', `scheps_${character}_curve_data.csv`)
-  const lines = readFileSync(path, 'utf8').trim().split('\n')
+  // The fitter reads the same checked-in CSVs as the tests; accept CRLF so a
+  // Windows checkout parses identically instead of turning trailing '\r' into NaNs.
+  const lines = readFileSync(path, 'utf8').trim().split(/\r?\n/)
   const freqs = []
   const pre = []
   const post = []

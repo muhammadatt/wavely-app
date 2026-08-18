@@ -32,7 +32,9 @@ const TOLERANCE_DB = 0.7
 
 function readCurves(character) {
   const path = join(ROOT, 'data/pultec_curves', `scheps_${character}_curve_data.csv`)
-  const rows = readFileSync(path, 'utf8').trim().split('\n').slice(1)
+  // The measured CSVs travel across platforms; tolerate CRLF so a Windows
+  // checkout does not leak '\r' into the numeric fields and manufacture NaNs.
+  const rows = readFileSync(path, 'utf8').trim().split(/\r?\n/).slice(1)
   const freqs = []
   const pre = []
   const post = []

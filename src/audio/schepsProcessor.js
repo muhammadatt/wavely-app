@@ -478,7 +478,15 @@ function loudPartDb(x, sampleRate) {
  */
 export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
   const dryBand = channelData.map(c => speechWeight(c, sampleRate))
-  const dryLoudDb = loudPartDb(dryBand[0], sampleRate)
+  // Trim must follow the same stereo picture the energy and correlation do: if
+  // one side of a stereo pair is hotter, match the loudest channel rather than
+  // silently measuring channel 0 alone.
+  const loudestBandDb = (bands) => {
+    let best = -Infinity
+    for (const band of bands) best = Math.max(best, loudPartDb(band, sampleRate))
+    return best
+  }
+  const dryLoudDb = loudestBandDb(dryBand)
 
   let dryEnergy = 0
   for (const d of dryBand) for (let i = 0; i < d.length; i++) dryEnergy += d[i] * d[i]
@@ -494,7 +502,7 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
   for (let pass = 0; pass < 4; pass++) {
     const rendered = renderWetPath(channelData, sampleRate, params, trimDb)
     wet = rendered.map(c => speechWeight(c, sampleRate))
-    const wetLoudDb = loudPartDb(wet[0], sampleRate)
+    const wetLoudDb = loudestBandDb(wet)
     if (!Number.isFinite(wetLoudDb)) break
     const correctionDb = dryLoudDb - wetLoudDb
     trimDb = clamp(trimDb + correctionDb, -24, 24)
