@@ -2,10 +2,12 @@
  * Audio Processing Web Worker
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
- * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup
+ * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
+ * schepsAutoTrim
  */
 import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
+import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
 
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
@@ -23,6 +25,9 @@ self.onmessage = function (e) {
     case 'fet1176AutoMakeup':
       autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
       break
+    case 'schepsAutoTrim':
+      schepsAutoTrim(channelData, sampleRate, params)
+      break
     default:
       self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
   }
@@ -34,6 +39,17 @@ self.onmessage = function (e) {
 function autoMakeup(measure, channelData, sampleRate, params) {
   try {
     self.postMessage({ type: 'done', makeupDb: measure(channelData, sampleRate, params) })
+  } catch (err) {
+    self.postMessage({ type: 'error', message: err.message })
+  }
+}
+
+// Same reasoning as autoMakeup, and the same cost: this one runs the whole
+// Scheps wet path (two EQ cascades and the opto compressor) over the region.
+function schepsAutoTrim(channelData, sampleRate, params) {
+  try {
+    const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
+    self.postMessage({ type: 'done', trimDb, correlation, densityDb })
   } catch (err) {
     self.postMessage({ type: 'error', message: err.message })
   }

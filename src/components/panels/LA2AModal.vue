@@ -12,11 +12,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aEmphasis,
+  la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aR37,
   la2aAutoMakeup, la2aAutoMakeupBusy,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels, hasSelection,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
-  syncEmphasis, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
+  syncR37, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
 } = useLA2A()
 
 const { state } = useEditorState()
@@ -151,7 +151,6 @@ function selectMockPreset(name) {
                 :min="-12" :max="24" :step="0.1"
                 label="Gain" :accent="ACCENT" :format-value="formatGain"
                 :disabled="!la2aPreview"
-                :readonly="la2aAutoMakeup"
               />
               <span
                 v-if="la2aAutoMakeup"
@@ -159,10 +158,12 @@ function selectMockPreset(name) {
                 style="background:rgba(245,166,35,.2);border:1px solid rgba(245,166,35,.4);font:700 7px/1 'JetBrains Mono',monospace;letter-spacing:.09em;color:#f7c877"
               >AUTO</span>
             </div>
-            <!-- Auto makeup drives the Gain knob above to whatever keeps
-                 the output level-matched to the input, so bypass A/B isn't
-                 decided by loudness. Switching it off leaves the knob where
-                 it stands and hands control back to the user. -->
+            <!-- Auto makeup drives the Gain knob above to whatever restores
+                 the input's PEAK level — classic makeup, so the quiet parts
+                 come up while the peaks land where they started. The knob stays
+                 draggable while AUTO is lit: touching it takes over and drops
+                 AUTO, which is the only way a user can set a gain and have it
+                 stick. Discarding the drag instead reads as a broken knob. -->
             <button
               class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
               :style="{
@@ -185,7 +186,7 @@ function selectMockPreset(name) {
         <LevelMeter :levels="la2aOutputLevels" label="OUT" />
       </div>
 
-      <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 emphasis) -->
+      <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 trimmer) -->
       <div class="flex items-center justify-between mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <!-- Compress / Limit — the hardware's rear-panel switch -->
         <SegmentedSwitch
@@ -207,12 +208,19 @@ function selectMockPreset(name) {
               :disabled="!la2aPreview"
             />
           </div>
+          <!-- R37 filters the SIDE-CHAIN, not the audio, and it reads as knob
+               rotation like the hardware trimmer: 100 is fully clockwise and
+               flat, which is the factory position and where it sits by default.
+               Winding it DOWN attenuates the side-chain below 1 kHz by up to
+               10 dB, so the cell stops reacting to plosives and rides the
+               presence band instead. Nothing here is audible on its own — it
+               changes what the compressor listens to. -->
           <div class="w-[78px]">
             <Knob
-              :model-value="la2aEmphasis"
-              @update:model-value="syncEmphasis"
-              :min="0" :max="1" :step="0.01" :value-font-px="13"
-              label="R37 Emphasis" :accent="ACCENT" :format-value="formatPercent"
+              :model-value="la2aR37"
+              @update:model-value="syncR37"
+              :min="0" :max="100" :step="1" :value-font-px="13"
+              label="R37" :accent="ACCENT"
               :disabled="!la2aPreview"
             />
           </div>

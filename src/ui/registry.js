@@ -7,6 +7,7 @@ import PresetsPanel from '../components/panels/PresetsPanel.vue'
 
 import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
+import SchepsModal from '../components/panels/SchepsModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
@@ -244,6 +245,24 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: FET1176Modal,
+  },
+  {
+    // Filed under Dynamics rather than Tone: the two Pultec stages are there to
+    // steer the compressor's sidechain, and what the user is reaching for is a
+    // parallel compression sound. The EQ is the mechanism, not the offer.
+    id: 'scheps-parallel',
+    label: 'Scheps Parallel',
+    desc: 'Blend in a squashed, EQ-steered copy',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'parallel',
+    keywords: [
+      'scheps', 'parallel', 'pultec', 'eqp-1a', 'la-2a', 'trick', 'blend',
+      'mix', 'thick', 'presence', 'vocal', 'compressor', 'new york',
+    ],
+    requires: 'selection',
+    surface: 'window',
+    component: SchepsModal,
   },
   {
     id: 'vocal-saturation',

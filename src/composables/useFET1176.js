@@ -212,27 +212,46 @@ export function useFET1176() {
   const syncScHpf = (v) => syncCompressionParam('scHpf', fetScHpf, v)
   const syncMix = (v) => syncCompressionParam('mix', fetMix, v)
 
+  /**
+   * Touch-to-take-over: dragging the knob while AUTO is on switches AUTO off
+   * and accepts the value, rather than silently discarding it.
+   *
+   * Discarding it is what shipped, and it reads as the knob being broken. It
+   * cost a real comparison: an "OptoSmooth at 75 with no makeup gain" export
+   * turned out to carry 9.45 dB, because setting the knob to 0 never took and
+   * nothing said so. AUTO still owns the value until the moment the user
+   * disagrees with it, which is the point at which they have earned it.
+   */
   function syncOutput(v) {
-    if (fetAutoMakeup.value) return // the plugin owns the output in auto mode
+    if (fetAutoMakeup.value) disableAutoMakeup()
     fetOutput.value = v
     pushOutput()
   }
 
+  /**
+   * Leave AUTO, keeping the knob exactly where it stands, so going manual is a
+   * seamless takeover rather than a jump back to 0 dB. Any in-flight
+   * measurement is discarded by sequence number so it cannot land afterwards
+   * and move a knob the user now owns.
+   */
+  function disableAutoMakeup() {
+    fetAutoMakeup.value = false
+    if (makeupTimer !== null) {
+      clearTimeout(makeupTimer)
+      makeupTimer = null
+    }
+    makeupBurstActive = false
+    makeupBurstDirty = false
+    makeupSeq++
+    fetAutoMakeupBusy.value = false
+  }
+
   function toggleAutoMakeup() {
-    fetAutoMakeup.value = !fetAutoMakeup.value
     if (fetAutoMakeup.value) {
-      refreshAutoMakeup()
+      disableAutoMakeup()
     } else {
-      // Hand the knob back where it stands, so switching to manual is a
-      // seamless takeover rather than a jump back to 0 dB.
-      if (makeupTimer !== null) {
-        clearTimeout(makeupTimer)
-        makeupTimer = null
-      }
-      makeupBurstActive = false
-      makeupBurstDirty = false
-      makeupSeq++ // discard any in-flight measurement
-      fetAutoMakeupBusy.value = false
+      fetAutoMakeup.value = true
+      refreshAutoMakeup()
     }
   }
 

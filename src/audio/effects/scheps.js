@@ -1,48 +1,54 @@
 /**
- * LA-2A optical compressor — real-time effect chain wrapper.
+ * Scheps Parallel — real-time effect chain wrapper.
  *
- * The DSP itself lives in ../la2aProcessor.js (T4 optical cell with
- * dual-stage memory-dependent release, program-dependent compress/limit
- * ratios, the R37 side-chain trimmer, tube saturation) and runs in an
- * AudioWorklet. The offline apply path renders through the same worklet in
- * an OfflineAudioContext, so the preview is sample-identical to what gets
- * written to the timeline.
+ * The DSP lives in ../schepsProcessor.js (two fitted Pultec stages around the
+ * existing OptoSmooth kernel, blended against a delay-compensated dry path) and
+ * runs in an AudioWorklet. The offline apply path renders through the same
+ * worklet in an OfflineAudioContext, so the preview is sample-identical to what
+ * gets written to the timeline.
  *
- * The worklet module loads asynchronously; until it's ready the effect
- * passes audio through unprocessed, then splices the worklet node in.
+ * The worklet module loads asynchronously; until it's ready the effect passes
+ * audio through unprocessed, then splices the worklet node in.
  */
 
-import { ensureLA2AWorklet } from '../la2aWorkletLoader.js'
+import { ensureSchepsWorklet } from '../schepsWorkletLoader.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
 
 /**
- * The tube stage runs oversampled, and the halfband filters that get it there
- * are linear phase, so the plugin delays. Constant at every setting — see
- * `latencySamples` on the kernel.
+ * The wet path runs through OptoSmooth's oversampled gain cell, whose halfband
+ * filters are linear phase and therefore delay. The dry side of the blend is
+ * delayed to match inside the kernel; this is the whole plugin's delay, which
+ * the offline apply path compensates.
  */
-export const LA2A_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
+export const SCHEPS_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
 
-export const LA2A_DEFAULTS = {
-  mode: 'compress', // 'compress' | 'limit'
-  peakReduction: 50,
-  gain: 0, // makeup gain dB
-  tubeDrive: 0.3,
-  r37: 100, // R37 side-chain trimmer as knob rotation; 100 = flat (factory)
+export const SCHEPS_DEFAULTS = {
+  character: 'thick', // 'thick' | 'presence'
+  squash: 62, // LA-2A Peak Reduction on the wet path — see the kernel defaults
+  mix: 35, // percent wet — the panel's unit
+  output: 0, // manual trim on the summed output, dB
+  // Measured by the auto trim pass. Held here rather than derived at apply time
+  // so the applied render uses the same two numbers the preview was heard with.
+  wetTrimDb: 0,
+  correlation: 0,
+  densityDb: 0,
 }
 
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {
   return {
-    mode: params.mode,
-    peakReduction: params.peakReduction,
-    gainDb: params.gain,
-    tubeDrive: params.tubeDrive,
-    r37: params.r37,
+    character: params.character,
+    squash: params.squash,
+    mix: params.mix / 100,
+    outputDb: params.output,
+    wetTrimDb: params.wetTrimDb,
+    correlation: params.correlation,
+    densityDb: params.densityDb,
   }
 }
 
-export function createLA2ACompressor(audioContext) {
+export function createScheps(audioContext) {
   const input = audioContext.createGain()
   // preOutput is a stable internal hand-off: the chain calls .disconnect()
   // on `output` during rebuilds (wiping ALL its outgoing connections), so
@@ -51,7 +57,7 @@ export function createLA2ACompressor(audioContext) {
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...LA2A_DEFAULTS }
+  let params = { ...SCHEPS_DEFAULTS }
   let worklet = null
   let destroyed = false
   let grDb = 0
@@ -60,10 +66,10 @@ export function createLA2ACompressor(audioContext) {
   input.connect(preOutput)
   preOutput.connect(output)
 
-  ensureLA2AWorklet(audioContext)
+  ensureSchepsWorklet(audioContext)
     .then(() => {
       if (destroyed) return
-      worklet = new AudioWorkletNode(audioContext, 'la2a-processor', {
+      worklet = new AudioWorkletNode(audioContext, 'scheps-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
       worklet.port.onmessage = (e) => {
@@ -74,7 +80,7 @@ export function createLA2ACompressor(audioContext) {
       worklet.connect(preOutput)
     })
     .catch((err) => {
-      console.error('LA-2A worklet failed to load, running bypassed:', err)
+      console.error('Scheps Parallel worklet failed to load, running bypassed:', err)
     })
 
   // Level meter taps on dedicated monitor nodes fed from stable internal
@@ -102,7 +108,9 @@ export function createLA2ACompressor(audioContext) {
       return params[name]
     },
 
-    // Negative dB, matching DynamicsCompressorNode.reduction conventions.
+    // Negative dB, matching DynamicsCompressorNode.reduction conventions. This
+    // is the wet path's gain reduction, which is what the trick is doing — the
+    // summed output is reduced by rather less, in proportion to Mix.
     getReduction() {
       return -grDb
     },
@@ -129,11 +137,11 @@ export function createLA2ACompressor(audioContext) {
   }
 }
 
-export const la2aEffect = {
-  id: 'la2a-compressor',
-  name: 'LA-2A Compressor',
-  latencySamples: LA2A_LATENCY_SAMPLES,
+export const schepsEffect = {
+  id: 'scheps-parallel',
+  name: 'Scheps Parallel',
+  latencySamples: SCHEPS_LATENCY_SAMPLES,
   createNodes(audioContext) {
-    return createLA2ACompressor(audioContext)
+    return createScheps(audioContext)
   },
 }

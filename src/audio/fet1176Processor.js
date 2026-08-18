@@ -574,6 +574,42 @@ export function processFET1176Buffer(channelData, sampleRate, params = {}) {
  * RMS across every sample of every channel, optionally skipping a leading
  * stretch — see the counterpart in la2aProcessor.js for why.
  */
+/**
+ * Peak magnitude across every sample of every channel, in dB.
+ *
+ * The makeup reference. Peak rather than RMS, and the distinction is the whole
+ * point of makeup gain: the compressor pulls the loud moments down, makeup
+ * hands back what it took, the peaks land where they started and everything
+ * underneath rises with them. That is a compressor made louder without being
+ * merely turned up — which is the comparison a listener is actually running
+ * when they A/B it.
+ *
+ * Matching RMS instead, as this did, returns only the average loss and
+ * therefore leaves the output exactly as loud as the input: a compressor that
+ * by construction cannot make anything louder.
+ *
+ * TRUE PEAK, not a high percentile, and that was measured. A percentile of
+ * short-block peaks looks more robust and is worse where it matters: on real
+ * speech a fast transient can survive compression almost intact while the p99
+ * comes down several dB, so percentile-referenced makeup over-compensates and
+ * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
+ * peak cannot do that; the guarantee it buys is exact.
+ *
+ * The cost is the opposite failure: a single uncompressed click sets the
+ * reference and the makeup comes out small. That is the safe direction — never
+ * louder than the source — and the manual trim is there for it.
+ */
+function peakOfChannels(channels, skip = 0) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > peak) peak = v
+    }
+  }
+  return peak
+}
+
 function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
   let count = 0
@@ -585,17 +621,17 @@ function rmsOfChannels(channels, skip = 0) {
 }
 
 /**
- * Compute the Output setting (dB) that restores the processed signal to the
- * input's RMS level — i.e. what makes engaging the compressor level-neutral
- * so bypass A/B comparisons aren't decided by loudness bias.
+ * Compute the Output setting (dB) that restores the processed signal's PEAK to
+ * the input's — the classic makeup convention; see `peakOfChannels`. Formerly
+ * matched RMS, which returns only the average loss and so left the compressor
+ * unable to make anything louder.
  *
  * This matters more here than on the OptoSmooth: Input drives the audio path
  * as well as the detector, so moving it swings the output level by tens of dB
  * and the user would otherwise be re-trimming Output after every touch.
  *
  * Measured, not derived from the curve: the kernel is run over the actual
- * audio and the output RMS compared to the input's. RMS rather than peak,
- * because reducing peaks is the point — peak matching would over-boost.
+ * audio and the output's peak compared to the input's.
  *
  * Output is applied after the saturator (as on the hardware), so unlike the
  * LA-2A's makeup it does not change the operating point of the nonlinearity
@@ -612,8 +648,8 @@ export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {},
   // three times slower, which the Output knob showed as lag behind a drag.
   const measureParams = { ...params, oversample: false }
 
-  const inputRms = rmsOfChannels(channelData)
-  if (inputRms <= 0) return 0
+  const inputPeak = peakOfChannels(channelData)
+  if (inputPeak <= 0) return 0
 
   let makeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
@@ -621,9 +657,9 @@ export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {},
       ...measureParams,
       outputGainDb: makeupDb,
     })
-    const outRms = rmsOfChannels(out)
-    if (outRms <= 0) break
-    const correctionDb = 20 * Math.log10(inputRms / outRms)
+    const outPeak = peakOfChannels(out)
+    if (outPeak <= 0) break
+    const correctionDb = 20 * Math.log10(inputPeak / outPeak)
     makeupDb = clamp(makeupDb + correctionDb, -36, 36)
     if (Math.abs(correctionDb) < toleranceDb) break
   }

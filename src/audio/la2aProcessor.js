@@ -28,14 +28,16 @@
  *    - Limit mode: narrower knee, ratio climbing from ~12:1 toward ~20:1.
  *    - There is no threshold control on the hardware: the Peak Reduction
  *      knob is sidechain amplifier gain, driving the signal into a fixed
- *      internal threshold. Modeled the same way here.
+ *      internal threshold. Modeled the same way here, with the knob-to-drive
+ *      law fitted to a reference emulation — see SC_DRIVE_MAX_DB.
  *    - That threshold is anchored to nominal analog operating level
  *      (0 VU = -18 dBFS), not to digital full scale — see NOMINAL_DBFS.
  *
  * 3. Sidechain frequency mapping + tube stage
  *    - Sidechain: one-pole 80 Hz high-pass (the cell barely responds to
- *      rumble) plus an R37-style HF emphasis shelf (0 to +8 dB above 2 kHz)
- *      that makes the unit progressively de-ess as it's turned up.
+ *      rumble) plus the R37 pre-emphasis trimmer, which attenuates the
+ *      side-chain below 1 kHz by up to 10 dB and so makes the unit
+ *      progressively more sensitive to highs as it is turned down.
  *    - Output path: asymmetric tanh waveshaper approximating the harmonic
  *      profile of the input/driver/output tube stages (bias term → 2nd
  *      harmonic, tanh curvature → 3rd), followed by a DC blocker.
@@ -92,8 +94,39 @@ const MEM_HALF_DB = 2.5
 // ── Sidechain constants ─────────────────────────────────────────────────────
 
 const SC_HPF_HZ = 80
-const SC_SHELF_HZ = 2000
-const SC_SHELF_MAX_DB = 8
+
+/**
+ * R37 side-chain pre-emphasis.
+ *
+ * DIRECTION: THE PARAMETER RUNS THE WAY THE HARDWARE KNOB DOES. From the LA-2A
+ * manual: "This potentiometer is factory set for a 'flat' side-chain response
+ * (clockwise). Increasing the resistance of this potentiometer by turning it
+ * counter clockwise will result in compression which is increasingly more
+ * sensitive to the higher frequencies."
+ *
+ * So `r37` is 0-100 read as knob rotation: **100 is fully clockwise, flat, the
+ * factory position and the default**; winding down toward 0 filters more low
+ * end out of the side-chain, leaving the cell increasingly sensitive to highs.
+ * It previously ran the opposite way as `emphasis`, with 0 meaning flat, which
+ * inverted both the hardware and every reference plugin — the same number meant
+ * opposite things in our panel and in anything we compared it against.
+ *
+ * MECHANISM: an ATTENUATOR of lows, not a booster of highs. On the hardware R37
+ * is a trimmer in a passive network, and a passive network cannot boost:
+ * "emphasis" is achieved by discarding low frequencies and letting the
+ * side-chain amplifier make the level back up.
+ *
+ * That was modelled backwards too, until it was measured against a plosive. As
+ * a high SHELF BOOST from unity it left the lows at full level, so sweeping it
+ * moved the gain reduction on a 120 Hz thump by 0.06 dB — and upward, because
+ * the Peak Reduction knob drives a FIXED internal threshold, so adding
+ * side-chain gain adds compression. Attenuating instead gives the control
+ * authority over the thing it exists to reject.
+ *
+ * Neither the 1 kHz corner nor the 10 dB depth is measured against hardware.
+ */
+const SC_SHELF_HZ = 1000
+const SC_SHELF_MAX_DB = 10
 const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies the real ballistics
 
 // Nominal operating level. The hardware's T4 threshold sits at line level
@@ -103,13 +136,51 @@ const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies th
 // produce 3 dB of reduction. -18 dBFS is the EBU alignment.
 const NOMINAL_DBFS = -18
 
-// Peak Reduction knob → detector-sidechain drive (anchored to NOMINAL_DBFS), spanning 40 dB.
-// Effective endpoints: -2 dB at knob 0 and +38 dB at knob 100.
-// SC_TAPER < 1 models an audio-taper pot: the drive rises quickly off zero
-// and flattens toward the top, so gain reduction starts around knob 20.
-const SC_DRIVE_MIN_DB = -20
-const SC_DRIVE_SPAN_DB = 40
-const SC_TAPER = 0.7
+/**
+ * Peak Reduction knob → side-chain drive, in dB above NOMINAL_DBFS.
+ *
+ * FITTED TO A REFERENCE EMULATION, not chosen. Eight captures of one narration
+ * clip through Analog Obsession's LAEA at knobs 20/30/40/56/70/80/90/100, with
+ * its own +1.34 dB insertion gain removed. The three constants below reproduce
+ * the reference's average gain reduction at all eight positions with an **rms
+ * residual of 0.17 dB across 0–27 dB of reduction** — 0.04/0.26/2.47/9.40/
+ * 14.93/18.98/22.92/26.88 dB measured, 0.00/0.36/2.61/9.05/15.05/19.15/23.03/
+ * 26.70 reproduced.
+ *
+ * FITTED IN GAIN REDUCTION, NOT IN DRIVE, and that is not a presentational
+ * difference. The first attempt fitted the knob→drive law against drive values
+ * recovered by interpolating a coarse drive→GR table, and landed constants whose
+ * end-to-end error was **0.68 dB with a systematic +1 dB bias above knob 70** —
+ * every position in the upper half compressing harder than the reference. The
+ * residual was small in the fitted quantity and wrong in the audible one. The
+ * drive axis is now walked exactly instead of interpolated: drive and level add
+ * in dB inside the gain computer (`over = levelDb + scDriveDb`), so scaling the
+ * input at a fixed knob moves the operating point through the real kernel with
+ * no probe hook and no interpolation.
+ *
+ * WHAT WAS WRONG BEFORE. The old law was `-2 + 40*(knob/100)^0.7`, giving 11 dB
+ * of drive at knob 20 and 38 dB at knob 100. Two independent errors: it started
+ * compressing far too early (the reference does nothing until about knob 25),
+ * and it could not reach the top at all — the reference delivers 55 dB at knob
+ * 100 against our 38, so our whole travel topped out at 13.3 dB of gain
+ * reduction where it reaches 26.9 dB on the same clip.
+ *
+ * Anchored at the TOP rather than the bottom, because that is the end whose
+ * value means something: SC_DRIVE_MAX_DB is the drive at knob 100 relative to
+ * nominal line level. The span is how far the curve reaches below it, and at
+ * this taper most of that span is spent below the threshold where nothing
+ * happens — which is exactly the "nothing until 25, then it arrives quickly"
+ * behaviour the reference has.
+ *
+ * CAVEAT: inverting through our own gain computer means these constants absorb
+ * any difference between its knee and ratio and the reference's. They are a
+ * behavioural match on average gain reduction, not a claim about the
+ * reference's literal side-chain gain. Fitted on ONE clip; a second source
+ * would be worth checking before treating the shape as settled.
+ */
+const SC_DRIVE_MAX_DB = 36.24
+const SC_DRIVE_SPAN_DB = 105.9
+const SC_TAPER = 0.4247
 
 // ── Gain computer constants ─────────────────────────────────────────────────
 
@@ -123,7 +194,7 @@ export const LA2A_KERNEL_DEFAULTS = {
   peakReduction: 50, // 0–100, sidechain drive (hardware Peak Reduction knob)
   gainDb: 0, // makeup gain (hardware Gain knob)
   tubeDrive: 0.3, // 0–1 tube stage saturation amount
-  emphasis: 0, // 0–1 R37 HF sidechain emphasis (0 = flat, stock)
+  r37: 100, // 0–100 side-chain pre-emphasis, as knob rotation: 100 = flat (factory)
   mix: 1, // wet/dry blend
   /**
    * Run the gain cell and tube stage oversampled. Always true for anything
@@ -200,6 +271,21 @@ export class LA2AKernel {
     this.setParams({})
   }
 
+  /** Clear every feedback path in the cell and the tube stage. */
+  resetState() {
+    this.hpfLp = 0
+    this.shelfLp = 0
+    this.env = 0
+    this.grFast = 0
+    this.grSlow = 0
+    this.memory = 0
+    this.lastGain = 1
+    this.dcX = this.dcX.map(() => 0)
+    this.dcY = this.dcY.map(() => 0)
+    this.gainDelay.reset()
+    for (const line of this.dryLines) line?.reset()
+  }
+
   /** Merge a partial param update and recompute derived coefficients. */
   setParams(partial) {
     const p = { ...this.params, ...partial }
@@ -214,9 +300,14 @@ export class LA2AKernel {
     // knob 0 and +38 dB at knob 100.
     const knob = clamp(p.peakReduction, 0, 100) / 100
     this.scDriveDb =
-      SC_DRIVE_MIN_DB - NOMINAL_DBFS + SC_DRIVE_SPAN_DB * Math.pow(knob, SC_TAPER)
-    this.shelfGain = Math.pow(10, (SC_SHELF_MAX_DB * clamp(p.emphasis, 0, 1)) / 20) - 1
-    this.makeupLin = Math.exp(p.gainDb * LN10_OVER_20)
+      SC_DRIVE_MAX_DB - NOMINAL_DBFS - SC_DRIVE_SPAN_DB * (1 - Math.pow(knob, SC_TAPER))
+    // Gain applied to the side-chain's sub-1 kHz content: 1 at r37 100 (fully
+    // clockwise, flat, factory), down to -10 dB at r37 0 (fully counter-
+    // clockwise). Above the corner the side-chain stays at unity, so this only
+    // ever removes drive — see SC_SHELF_MAX_DB.
+    const r37 = Number.isFinite(p.r37) ? clamp(p.r37, 0, 100) : LA2A_KERNEL_DEFAULTS.r37
+    this.shelfLowGain = Math.pow(10, (-SC_SHELF_MAX_DB * (1 - r37 / 100)) / 20)
+    this.makeupLin = Math.exp((Number.isFinite(p.gainDb) ? p.gainDb : 0) * LN10_OVER_20)
 
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
@@ -256,6 +347,16 @@ export class LA2AKernel {
    * @param {number} n                      - samples in this block
    */
   process(inputChannels, outputChannels, n) {
+    // A non-finite value anywhere in the cell's state is unrecoverable on its
+    // own: env, grFast, grSlow and memory all feed back into themselves, so one
+    // NaN makes every future block NaN and the effect goes silent for good.
+    // Params are validated at the boundary, but this kernel is embedded by
+    // other plugins and reached from a message port, so it also heals itself.
+    // One comparison per block.
+    if (!Number.isFinite(this.env + this.grFast + this.grSlow + this.memory)) {
+      this.resetState()
+    }
+
     const nIn = inputChannels.length
     const nOut = outputChannels.length
     if (nIn === 0 || n === 0) {
@@ -282,14 +383,16 @@ export class LA2AKernel {
       for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
       x *= chScale
 
-      // Sidechain frequency mapping: 80 Hz HPF, then HF emphasis shelf
+      // Sidechain frequency mapping: 80 Hz HPF, then the R37 emphasis filter.
       hpfLp += (x - hpfLp) * this.hpfLpCoef
       const hp = x - hpfLp
-      let sc = hp
-      if (this.shelfGain > 0) {
-        shelfLp += (hp - shelfLp) * this.shelfLpCoef
-        sc = hp + this.shelfGain * (hp - shelfLp)
-      }
+      // Split at the corner and attenuate only the low half. Run
+      // unconditionally rather than skipped at r37 100: it is algebraically
+      // the identity there (lowGain 1 sums the two halves back to hp), and
+      // skipping it would leave the one-pole holding stale state for the knob
+      // to jump off when it next moves.
+      shelfLp += (hp - shelfLp) * this.shelfLpCoef
+      const sc = (hp - shelfLp) + this.shelfLowGain * shelfLp
 
       // Rectify + light smoothing
       const rect = sc < 0 ? -sc : sc
@@ -514,6 +617,42 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
  * Over a region of any real length the effect is tiny, but the auto-makeup that
  * depends on it is exactly the thing users judge bypass A/B by.
  */
+/**
+ * Peak magnitude across every sample of every channel, in dB.
+ *
+ * The makeup reference. Peak rather than RMS, and the distinction is the whole
+ * point of makeup gain: the compressor pulls the loud moments down, makeup
+ * hands back what it took, the peaks land where they started and everything
+ * underneath rises with them. That is a compressor made louder without being
+ * merely turned up — which is the comparison a listener is actually running
+ * when they A/B it.
+ *
+ * Matching RMS instead, as this did, returns only the average loss and
+ * therefore leaves the output exactly as loud as the input: a compressor that
+ * by construction cannot make anything louder.
+ *
+ * TRUE PEAK, not a high percentile, and that was measured. A percentile of
+ * short-block peaks looks more robust and is worse where it matters: on real
+ * speech a fast transient can survive compression almost intact while the p99
+ * comes down several dB, so percentile-referenced makeup over-compensates and
+ * pushes that survivor ABOVE the source — up to 5.5 dB above, measured. True
+ * peak cannot do that; the guarantee it buys is exact.
+ *
+ * The cost is the opposite failure: a single uncompressed click sets the
+ * reference and the makeup comes out small. That is the safe direction — never
+ * louder than the source — and the manual trim is there for it.
+ */
+function peakOfChannels(channels, skip = 0) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > peak) peak = v
+    }
+  }
+  return peak
+}
+
 function rmsOfChannels(channels, skip = 0) {
   let sumSq = 0
   let count = 0
@@ -525,13 +664,12 @@ function rmsOfChannels(channels, skip = 0) {
 }
 
 /**
- * Compute the makeup gain (dB) that restores the processed signal to the
- * input's RMS level — i.e. what makes engaging the compressor level-neutral
- * so bypass A/B comparisons aren't decided by loudness bias.
+ * Compute the makeup gain (dB) that restores the processed signal's PEAK to
+ * the input's — the classic makeup convention. See `peakOfChannels` for why
+ * peak and not RMS, and why not a percentile either.
  *
  * Measured, not derived from the curve: the kernel is run over the actual
- * audio and the output RMS compared to the input's. RMS rather than peak,
- * because reducing peaks is the point — peak matching would over-boost.
+ * audio and the output's peak compared to the input's.
  *
  * Iterated because makeup is applied *before* the tube stage (as on the
  * hardware, where the Gain knob drives the output amplifier). Raising
@@ -548,15 +686,15 @@ function rmsOfChannels(channels, skip = 0) {
 export function computeAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
   const { maxIterations = 4, toleranceDb = 0.05 } = options
 
-  // Measured through the base-rate path. The question here is only what the
-  // output's RMS is, and oversampling moves that by at most 0.02 dB across the
-  // whole control range — it removes folded harmonics, which carry almost no
-  // energy. Measuring through the oversampled path instead made this about
-  // three times slower, which the Output knob showed as lag behind a drag.
+  // Measured through the base-rate path: oversampling removes folded
+  // harmonics, which carry almost no energy, and measuring through it was
+  // about three times slower — which the Gain knob showed as lag behind a
+  // drag. It does move the peak slightly more than it moves the RMS, so the
+  // iteration below re-measures rather than trusting one pass.
   const measureParams = { ...params, oversample: false }
 
-  const inputRms = rmsOfChannels(channelData)
-  if (inputRms <= 0) return 0
+  const inputPeak = peakOfChannels(channelData)
+  if (inputPeak <= 0) return 0
 
   let makeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
@@ -564,9 +702,9 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
       ...measureParams,
       gainDb: makeupDb,
     })
-    const outRms = rmsOfChannels(out)
-    if (outRms <= 0) break
-    const correctionDb = 20 * Math.log10(inputRms / outRms)
+    const outPeak = peakOfChannels(out)
+    if (outPeak <= 0) break
+    const correctionDb = 20 * Math.log10(inputPeak / outPeak)
     makeupDb = clamp(makeupDb + correctionDb, -24, 24)
     if (Math.abs(correctionDb) < toleranceDb) break
   }
@@ -618,5 +756,16 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('la2a-processor', LA2AWorkletProcessor)
+  // Guarded, because this module reaches a worklet scope by two routes: its own
+  // loader, and as a dependency of the Scheps worklet, which composes
+  // LA2AKernel. Load both into one AudioContext and the second bundle's
+  // registration hits a name that is already taken and throws NotSupportedError
+  // — which would abort that whole module, taking the Scheps processor with it
+  // over a duplicate nobody needed. Already-registered is the desired state, so
+  // swallow exactly that and nothing else.
+  try {
+    registerProcessor('la2a-processor', LA2AWorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }
