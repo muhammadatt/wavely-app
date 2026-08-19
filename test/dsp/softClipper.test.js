@@ -131,14 +131,20 @@ test('pre/de-emphasis cascade nulls to near float precision', () => {
   assert.ok(nullDb < -100, `emphasis pair null: ${nullDb.toFixed(1)} dB, expected < -100 dB`)
 })
 
-test('a wide/extreme shelf can be flagged unstable by the zero check', () => {
-  // Sanity check on the guard itself: a shelf pushed to an extreme slope near
-  // Nyquist should read as ill-conditioned rather than silently accepted.
-  // (Not a claim that THIS exact configuration is unstable — only that the
-  // check responds to conditioning, which is what spec §4.2's implementation
-  // note asks for.)
-  const wellConditioned = highShelf(SR, 3500, 0.7, 6, 'slope')
-  assert.ok(biquadZerosInsideUnitCircle(wellConditioned))
+test('the emphasis shelf at its actual operating point reads as minimum-phase', () => {
+  const shelf = highShelf(SR, 3500, 0.7, 6, 'slope')
+  assert.ok(biquadZerosInsideUnitCircle(shelf))
+})
+
+test('the zero check actually rejects a non-minimum-phase numerator', () => {
+  // The positive check above only proves the guard doesn't false-positive on
+  // the one shelf this kernel actually runs — it says nothing about whether
+  // the guard can catch a bad one. This constructs a numerator by hand with a
+  // known zero outside the unit circle: b0*z^2 + b1*z + b2 = (z-2)(z-0.5) =
+  // z^2 - 2.5z + 1, i.e. a root at z=2. invertBiquad of this would produce an
+  // unstable filter, and the check must say so.
+  const nonMinimumPhase = { b0: 1, b1: -2.5, b2: 1, a1: 0, a2: 0 }
+  assert.equal(biquadZerosInsideUnitCircle(nonMinimumPhase), false)
 })
 
 // ── Kernel: idle transparency (spec §8.2) ───────────────────────────────────

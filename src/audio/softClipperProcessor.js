@@ -239,7 +239,7 @@ export class SoftClipperKernel {
     this.gateOpen = false
     this.speechLevelDb = SPEECH_INIT_DEFAULT_DB
     this.speechWarmupCount = 0
-    this.speechWarmupSum = 0 // accumulated linear meanSq during warmup
+    this.speechWarmupSum = 0 // cumulative mean of fastRmsLin (linear RMS amplitude) during warmup
     this.speechWarmupTarget = Math.max(1, Math.round(sampleRate * (SPEECH_INIT_WINDOW_MS / 1000)))
 
     this.fastRmsCoef = riseCoeff(FAST_RMS_TAU_MS, sampleRate)
