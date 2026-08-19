@@ -483,6 +483,40 @@ export const KNEE_DB = 7
 // ⚠ Spec flags the corner as "consider fixing in v1" (Open Question #1) —
 // fixed here, which also means the pre/de-emphasis pair only ever needs one
 // coefficient set per sample rate rather than one per (corner, gain) pair.
+/**
+ * WHAT THE EMPHASIS PAIR ACTUALLY COLOURS, measured after a user reported that
+ * the stage's (pleasant) character is stronger on louder passages and stronger
+ * at higher HF Emphasis settings. Both are real; the mechanism is not the
+ * obvious one and is worth recording.
+ *
+ * The detector reads the UNFILTERED input, so T does not move when Emphasis
+ * does — but the clipper sees the PRE-EMPHASISED signal. So raising Emphasis
+ * lowers the effective threshold for HF-rich moments without moving it for
+ * anything else. Measured on the reference clip at the default Headroom, the
+ * fraction of voiced samples crossing the threshold goes 0.16% (emphasis 0) to
+ * 0.26% (emphasis 12), and the share of blocks doing anything at all goes
+ * 1% -> 2% -> 3% across 0 / 6 / 12.
+ *
+ * THE COLOURING IS BROADBAND, NOT HF-ONLY, which is the counter-intuitive part.
+ * A crossing triggered by sibilance still applies a WIDEBAND gain reduction to
+ * that instant, so the added modulation lands wherever the signal's energy is.
+ * Residual against input, emphasis 0 -> 12 on loud frames: 100-300 Hz rises
+ * 5.7 dB, 300-800 Hz 6.1 dB, 800 Hz-2 kHz 5.8 dB, but 3.5-6 kHz only 2.2 dB and
+ * 6-16 kHz 2.0-2.5 dB. The high end rises LEAST precisely because de-emphasis
+ * is pulling those harmonics back down — the pair is doing its §4.1 job; the
+ * low-mid movement is the side effect §4.1 does not mention.
+ *
+ * NOTHING BELOW THE THRESHOLD IS TOUCHED, and that was checked separately
+ * because the report described it as affecting material under the clip point:
+ * frames whose peak sits below T measure -76 to -90 dBc of residual and are
+ * bit-identical across emphasis 0, 6 and 12. Only frames that actually cross
+ * carry the character (-40 / -37 / -31 dBc at emphasis 0 / 6 / 12).
+ *
+ * The reason it can read as "below the threshold" is the METER, not the audio:
+ * of the blocks that do clip, the median reduction is 0.3-0.4 dB, which on a
+ * 12 dB scale under VU ballistics is visually nothing. A passage can generate
+ * audible harmonic character while the needle looks idle.
+ */
 const EMPHASIS_CORNER_HZ = 3500
 const EMPHASIS_SLOPE_S = 0.7 // gentle shelf slope, avoids resonant overshoot at the corner
 const EMPHASIS_EPSILON_DB = 0.001 // below this, treat as "0 dB" and skip the filters entirely
