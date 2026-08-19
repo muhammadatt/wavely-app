@@ -57,6 +57,12 @@ export function createSoftClipper(audioContext) {
   let worklet = null
   let destroyed = false
   let reductionDb = 0
+  let engagedFraction = 0
+
+  // Monitoring mode, kept out of `params` on purpose — see the kernel's
+  // setMonitor. It rides its own port message, so the offline render cannot
+  // pick it up from a param spread.
+  let monitorDelta = false
 
   // Scope ring. Points arrive batched (see the kernel's SCOPE_BATCH) and are
   // APPENDED rather than replacing a latest-frame, because this display is a
@@ -89,9 +95,14 @@ export function createSoftClipper(audioContext) {
       worklet = new AudioWorkletNode(audioContext, 'soft-clipper-processor', {
         processorOptions: { params: toKernelParams(params) },
       })
+      // A monitoring mode set before the module finished loading would
+      // otherwise be silently dropped — the node it was meant for did not
+      // exist yet.
+      if (monitorDelta) worklet.port.postMessage({ type: 'monitor', delta: true })
       worklet.port.onmessage = (e) => {
         if (e.data?.type !== 'gr') return
         reductionDb = e.data.reductionDb
+        engagedFraction = e.data.engagedFraction ?? 0
         const batch = e.data.scope
         if (!batch) return
         for (let i = 0; i + 1 < batch.length; i += 2) {
@@ -136,6 +147,32 @@ export function createSoftClipper(audioContext) {
     // which takes the magnitude either way.
     getReduction() {
       return reductionDb
+    },
+
+    /**
+     * Share of voiced blocks the curve engaged on, 0-1.
+     *
+     * The companion to getReduction, and the one that answers "is this doing
+     * anything at all" — of the blocks that clip, the median reduction is
+     * 0.3-0.4 dB, which reads as an idle needle on a dB meter.
+     */
+    getEngagedFraction() {
+      return engagedFraction
+    },
+
+    /**
+     * Audition the residual — only what the stage is removing.
+     *
+     * A separate call rather than a parameter: parameters are what the apply
+     * path renders with, and this must never be one of them.
+     */
+    setMonitorDelta(on) {
+      monitorDelta = !!on
+      worklet?.port.postMessage({ type: 'monitor', delta: monitorDelta })
+    },
+
+    isMonitoringDelta() {
+      return monitorDelta
     },
 
     /**

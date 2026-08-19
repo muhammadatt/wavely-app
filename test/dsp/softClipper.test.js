@@ -809,3 +809,179 @@ test('the scope threshold starts above full scale, so warm-up draws no crossings
     )
   }
 })
+
+// ── DELTA monitoring and the ENGAGED readout ────────────────────────────────
+//
+// Both are new instrumentation rather than new processing, and both are the
+// kind of thing that ships broken unnoticed: a monitor is only correct if the
+// residual it plays is genuinely the difference, and a coverage figure is only
+// useful if it moves with the control it sits beside.
+
+/** Render a signal through a kernel, optionally monitoring the residual. */
+function renderKernel(signal, params = {}, { monitorDelta = false } = {}) {
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams(params)
+  if (monitorDelta) kernel.setMonitor(true)
+  const out = new Float32Array(signal.length)
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  return { out, kernel }
+}
+
+test('DELTA plus the processed output reconstructs the input exactly', () => {
+  // The guarantee that makes the monitor trustworthy: what you hear on DELTA
+  // is precisely what the stage removed, with nothing else in it. The dry copy
+  // is delayed by the oversampler's own group delay, so the sum lands on the
+  // input shifted by that much rather than on the input itself — comparing
+  // against the un-delayed original would fail for a reason that has nothing
+  // to do with the residual.
+  const signal = speechLike(3, 0.6, 23)
+  const params = { headroomDb: 6, emphasisDb: 6 }
+  const wet = renderKernel(signal, params).out
+  const delta = renderKernel(signal, params, { monitorDelta: true }).out
+
+  const D = SOFT_CLIPPER_LATENCY_SAMPLES
+  let worst = 0
+  for (let i = D; i < signal.length; i++) {
+    const err = Math.abs(wet[i] + delta[i] - signal[i - D])
+    if (err > worst) worst = err
+  }
+  assert.ok(worst < 1e-6, `delta + output did not reconstruct the input: worst error ${worst}`)
+})
+
+test("DELTA's floor is the oversampler, and clipping stands far above it", () => {
+  // What the monitor plays when the stage does nothing is NOT digital silence,
+  // and it is worth knowing why: the clip curve is bit-transparent below the
+  // threshold, but the signal still makes a round trip through the 4x halfband
+  // pair, whose reconstruction is not exact. Measured on this probe, with zero
+  // blocks clipping, the residual sits at -79.9 dBFS peak / -97.0 rms. That is
+  // the monitor's noise floor, it is inaudible, and it comes from the
+  // oversampler rather than from anything the user set.
+  //
+  // Both ends are asserted on purpose. A monitor that simply output silence
+  // would pass the quiet half on its own, which is exactly the bug this is
+  // meant to catch.
+  const signal = speechLike(8, 0.5, 11)
+  const peakDb = (params) => {
+    const delta = renderKernel(signal, params, { monitorDelta: true }).out
+    let peak = 0
+    for (let i = SOFT_CLIPPER_LATENCY_SAMPLES; i < delta.length; i++) {
+      const a = Math.abs(delta[i])
+      if (a > peak) peak = a
+    }
+    return 20 * Math.log10(peak)
+  }
+
+  // Headroom at the top of its range is effectively off — nothing crosses.
+  const idle = peakDb({ headroomDb: 16, emphasisDb: 6 })
+  // Headroom at the bottom is the aggressive end.
+  const working = peakDb({ headroomDb: 4, emphasisDb: 6 })
+
+  assert.ok(idle < -60, `residual on an untouched signal peaked at ${idle.toFixed(1)} dBFS`)
+  assert.ok(working > -35, `residual on heavily clipped material only reached ${working.toFixed(1)} dBFS`)
+  assert.ok(
+    working - idle > 30,
+    `residual barely moved between idle and working: ${idle.toFixed(1)} -> ${working.toFixed(1)} dBFS`,
+  )
+})
+
+test('Output Trim scales the residual rather than leaking dry signal into it', () => {
+  // The residual is taken before the trim and trimmed with everything else. If
+  // it were taken after, a trim of -6 dB would add 6 dB of broadband DRY
+  // signal to the difference and the monitor would stop being a monitor.
+  const signal = speechLike(3, 0.6, 31)
+  const base = renderKernel(signal, { headroomDb: 6, emphasisDb: 6, outputTrimDb: 0 }, { monitorDelta: true }).out
+  const trimmed = renderKernel(signal, { headroomDb: 6, emphasisDb: 6, outputTrimDb: -6 }, { monitorDelta: true }).out
+
+  let sumBase = 0, sumTrim = 0
+  for (let i = SR; i < signal.length; i++) { sumBase += base[i] * base[i]; sumTrim += trimmed[i] * trimmed[i] }
+  const ratioDb = 10 * Math.log10(sumTrim / sumBase)
+  assert.ok(
+    Math.abs(ratioDb + 6) < 0.2,
+    `-6 dB of trim moved the residual by ${ratioDb.toFixed(2)} dB; a post-trim difference would read far higher`,
+  )
+})
+
+test('monitoring is off by default and unreachable through the parameters', () => {
+  // The structural guarantee behind setMonitor: applySoftClipperRegion spreads
+  // a param object straight into the kernel, so a monitoring mode that could be
+  // set from `params` would be one careless key away from rendering a
+  // difference signal into someone's timeline.
+  const kernel = new SoftClipperKernel(SR)
+  assert.equal(kernel.monitorDelta, false)
+  kernel.setParams({ monitorDelta: true, delta: true, monitor: 'delta' })
+  assert.equal(kernel.monitorDelta, false, 'a monitoring mode was reachable through setParams')
+})
+
+test('the offline buffer path never monitors', () => {
+  // processSoftClipperBuffer is what verification scripts render through, and
+  // the app's apply path is its worklet equivalent. Neither may ever emit a
+  // residual, whatever it is handed.
+  const signal = speechLike(2, 0.6, 37)
+  const viaBuffer = processSoftClipperBuffer([signal], SR, { headroomDb: 6, emphasisDb: 6, monitorDelta: true })
+  const expected = renderKernel(signal, { headroomDb: 6, emphasisDb: 6 }).out
+  let worst = 0
+  for (let i = 0; i < signal.length; i++) {
+    const err = Math.abs(viaBuffer.channelData[0][i] - expected[i])
+    if (err > worst) worst = err
+  }
+  assert.equal(worst, 0, 'the offline path diverged from an unmonitored render')
+})
+
+/**
+ * Highest ENGAGED reading over a render, past the detector's settling.
+ *
+ * The kernel's own field is a 2 s exponential average — correct for a live
+ * readout, and a poor thing to assert on at the end of a file, where it
+ * reports only the last couple of seconds and swings with whatever the passage
+ * happened to be doing there. The peak over the render is the same quantity
+ * measured stably.
+ */
+function peakEngaged(signal, params) {
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ emphasisDb: 6, ...params })
+  const out = new Float32Array(signal.length)
+  let peak = 0
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    if (off >= 2 * SR && kernel.engagedFraction > peak) peak = kernel.engagedFraction
+  }
+  return peak
+}
+
+test('ENGAGED rises as Headroom falls, and reads zero when the stage is off', () => {
+  // The readout exists because peak reduction cannot distinguish "idle" from
+  // "working quietly" — the blocks that clip take a median of 0.3-0.4 dB. So
+  // the property that matters is that this number MOVES with the control the
+  // dB meter barely responds to. Measured on this probe: 0% / 0.6% / 2.6% /
+  // 4.7% across Headroom 16 / 8 / 6 / 4.
+  const signal = speechLike(8, 0.5, 11)
+
+  const off = peakEngaged(signal, { headroomDb: 16 })
+  const gentle = peakEngaged(signal, { headroomDb: 8 })
+  const hard = peakEngaged(signal, { headroomDb: 4 })
+
+  assert.equal(off, 0, `Headroom 16 should be effectively off; engaged read ${(100 * off).toFixed(2)}%`)
+  assert.ok(gentle > 0, `engaged stayed at zero at Headroom 8, where the curve does engage`)
+  assert.ok(
+    hard > gentle,
+    `engaged did not rise from Headroom 8 (${(100 * gentle).toFixed(2)}%) to 4 (${(100 * hard).toFixed(2)}%)`,
+  )
+  assert.ok(hard <= 1, `engaged is a fraction and read ${hard}`)
+})
+
+test('ENGAGED ignores silence, so it measures the setting and not the pauses', () => {
+  // Averaged over voiced blocks only. Padding a passage with silence must not
+  // change the reading — otherwise the number tracks how slowly someone reads.
+  const voiced = speechLike(6, 0.5, 47)
+  const padded = concat(noise(3, dbToLin(-70), SR, 5), voiced, noise(3, dbToLin(-70), SR, 6))
+  const a = renderKernel(voiced, { headroomDb: 6, emphasisDb: 6 }).kernel.engagedFraction
+  const b = renderKernel(padded, { headroomDb: 6, emphasisDb: 6 }).kernel.engagedFraction
+  assert.ok(
+    Math.abs(a - b) < 0.15,
+    `silence padding moved engaged from ${(100 * a).toFixed(1)}% to ${(100 * b).toFixed(1)}%`,
+  )
+})

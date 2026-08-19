@@ -48,10 +48,17 @@ const props = defineProps({
   title: { type: String, default: 'Clipper scope' },
 })
 
-const emit = defineEmits(['update:fixedThresholdDb'])
+const emit = defineEmits(['update:fixedThresholdDb', 'requestPlay'])
 
 const canvasEl = ref(null)
 const isFixed = computed(() => props.mode === 'fixed')
+
+/**
+ * True while the scope has nothing to draw — the transport is stopped and no
+ * audio has ever reached the effect. Mirrored into a ref so the cursor can
+ * say the idle label is clickable, which is the whole point of it being one.
+ */
+const isIdle = ref(true)
 
 /**
  * Vertical scale: amplitude^0.45, not linear.
@@ -69,6 +76,20 @@ const unitToAmp = (u) => Math.pow(Math.min(1, Math.max(0, u)), 1 / SCALE_EXP)
 
 const dbToLin = (db) => Math.pow(10, db / 20)
 const linToDb = (a) => (a > 1e-6 ? 20 * Math.log10(a) : -120)
+
+/**
+ * dBFS gridlines.
+ *
+ * Without these the vertical axis is unreadable: it is amplitude^0.45, so it
+ * is neither linear nor logarithmic and nothing on screen says where -6 is.
+ * That matters twice over in fixed mode, where the drag has no other ruler —
+ * the whole -24…-1 dBFS travel of the control is this axis.
+ *
+ * Spaced to cover the fixed range's ends and the middle where thresholds
+ * actually land, rather than at even dB intervals, which the power law would
+ * bunch against the top.
+ */
+const GRID_DB = [-1, -3, -6, -12, -24]
 
 // Staleness: a stopped transport leaves the last picture up but dimmed, rather
 // than blanking — the frozen scroll is still the truth about the moment it
@@ -109,19 +130,15 @@ function draw(dtMs) {
   const mid = h / 2
   const half = mid - 2
 
-  // Centre line
-  ctx.strokeStyle = 'rgba(255,255,255,.08)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(0, mid + 0.5)
-  ctx.lineTo(w, mid + 0.5)
-  ctx.stroke()
+  drawGrid(ctx, w, mid, half)
 
   if (!scope || scope.filled === 0) {
     ctx.globalAlpha = 1
+    isIdle.value = true
     drawIdleLabel(ctx, w, mid)
     return
   }
+  isIdle.value = false
 
   // Oldest sample sits at x=0 and the newest at x=w, so the picture scrolls
   // leftward the way every scope does. When the ring is not yet full the
@@ -191,31 +208,151 @@ function draw(dtMs) {
   }
   ctx.globalAlpha = 1
 
-  drawLabel(ctx, w, h, mid, half, scope, start, n)
+  drawLegend(ctx, w, h)
+  drawThresholdChip(ctx, w, mid, half, scope, start, n)
 }
+
+/**
+ * dBFS gridlines, mirrored about the centre, labelled on the upper half only —
+ * the two halves are one signal drawn twice, so labelling both would imply
+ * they were separate scales.
+ */
+function drawGrid(ctx, w, mid, half) {
+  ctx.lineWidth = 1
+  ctx.font = "600 8px 'JetBrains Mono',monospace"
+  ctx.textAlign = 'left'
+
+  for (const db of GRID_DB) {
+    const dy = ampToUnit(dbToLin(db)) * half
+    ctx.strokeStyle = 'rgba(255,255,255,.05)'
+    ctx.beginPath()
+    ctx.moveTo(0, Math.round(mid - dy) + 0.5)
+    ctx.lineTo(w, Math.round(mid - dy) + 0.5)
+    ctx.moveTo(0, Math.round(mid + dy) + 0.5)
+    ctx.lineTo(w, Math.round(mid + dy) + 0.5)
+    ctx.stroke()
+
+    ctx.fillStyle = 'rgba(255,255,255,.22)'
+    ctx.fillText(String(db), 5, mid - dy - 3)
+  }
+
+  // Centre line last, brighter — it is zero, not a gridline.
+  ctx.strokeStyle = 'rgba(255,255,255,.1)'
+  ctx.beginPath()
+  ctx.moveTo(0, mid + 0.5)
+  ctx.lineTo(w, mid + 0.5)
+  ctx.stroke()
+}
+
+// Hit rect of the idle label, in CSS pixels — see onPointerDown. Kept as a
+// module-level box rather than recomputed on click so the target is exactly
+// what was painted.
+const idleHit = { x: 0, y: 0, w: 0, h: 0 }
 
 function drawIdleLabel(ctx, w, mid) {
-  ctx.fillStyle = 'rgba(255,255,255,.25)'
+  const text = '▶  press play to see the signal'
   ctx.font = "600 9.5px 'JetBrains Mono',monospace"
   ctx.textAlign = 'center'
-  ctx.fillText('press play to see the signal', w / 2, mid - 8)
+  const tw = ctx.measureText(text).width
+  idleHit.w = tw + 24
+  idleHit.h = 24
+  idleHit.x = (w - idleHit.w) / 2
+  idleHit.y = mid - 12 - 8
+
+  // Given a border, because a bare line of text does not read as a button and
+  // this one is the first thing on the panel worth clicking.
+  ctx.strokeStyle = 'rgba(255,255,255,.12)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.roundRect(idleHit.x + 0.5, idleHit.y + 0.5, idleHit.w, idleHit.h, 12)
+  ctx.stroke()
+
+  ctx.fillStyle = 'rgba(255,255,255,.35)'
+  ctx.fillText(text, w / 2, idleHit.y + 15.5)
   ctx.textAlign = 'left'
 }
 
-function drawLabel(ctx, w, h, mid, half, scope, start, n) {
-  // The newest threshold is the one worth printing — in fixed mode it is the
-  // parameter, in adaptive it is where the detector has currently landed.
-  const latest = scope.threshold[(start + n - 1) % scope.capacity]
-  const db = linToDb(latest)
-  ctx.font = "600 9.5px 'JetBrains Mono',monospace"
+/**
+ * Trace key.
+ *
+ * The shaded excess above the threshold IS the effect, and until now nothing
+ * on the panel named it — the accent fill read as decoration rather than as
+ * "this is the part being removed".
+ */
+function drawLegend(ctx, w, h) {
+  const y = h - 9
+  ctx.font = "600 8px 'JetBrains Mono',monospace"
+  ctx.textAlign = 'left'
+  let x = 6
 
-  ctx.fillStyle = 'rgba(255,255,255,.38)'
-  ctx.fillText(isFixed.value ? 'threshold — drag to set' : 'threshold — follows the voice', 10, 16)
+  for (const [colour, text] of [
+    ['rgba(200,205,215,.55)', 'SIGNAL'],
+    [props.accent, 'REMOVED'],
+  ]) {
+    ctx.fillStyle = colour
+    ctx.fillRect(x, y - 5, 7, 6)
+    x += 11
+    ctx.fillStyle = 'rgba(255,255,255,.34)'
+    ctx.fillText(text, x, y)
+    x += ctx.measureText(text).width + 14
+  }
+
+  // Mode hint on the same line, right-aligned — it says what the threshold
+  // curve is, and belongs with the key rather than floating over the trace.
+  ctx.fillStyle = 'rgba(255,255,255,.3)'
+  ctx.textAlign = 'right'
+  ctx.fillText(
+    isFixed.value ? 'THRESHOLD — DRAG TO SET' : 'THRESHOLD — FOLLOWS THE VOICE',
+    w - 6, y,
+  )
+  ctx.textAlign = 'left'
+}
+
+/**
+ * The threshold's value, printed on a chip riding the upper threshold line.
+ *
+ * It used to sit in the top-right corner, as far from the line it describes as
+ * the canvas allows. In fixed mode that line is the control, so the number and
+ * the grab target should be the same object — a value floating in a corner
+ * gives a draggable line no affordance at all beyond a cursor change on hover.
+ */
+function drawThresholdChip(ctx, w, mid, half, scope, start, n) {
+  const latest = scope.threshold[(start + n - 1) % scope.capacity]
+  const label = `${linToDb(latest).toFixed(1)} dB`
+
+  ctx.font = "700 9px 'JetBrains Mono',monospace"
+  const tw = ctx.measureText(label).width
+  const cw = tw + (isFixed.value ? 22 : 12)
+  const ch = 15
+  const cx = w - cw - 5
+  // Clamped so the chip stays on the face during the warm-up, when the
+  // threshold deliberately sits above full scale.
+  const cy = Math.min(mid - ch - 1, Math.max(1, mid - ampToUnit(latest) * half - ch / 2))
+
+  ctx.fillStyle = '#08060a'
+  ctx.strokeStyle = props.accent
+  ctx.globalAlpha = isFixed.value ? 0.9 : 0.5
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.roundRect(cx + 0.5, cy + 0.5, cw, ch, 7)
+  ctx.fill()
+  ctx.stroke()
+  ctx.globalAlpha = 1
 
   ctx.fillStyle = props.accent
-  ctx.textAlign = 'right'
-  ctx.fillText(`${db.toFixed(1)} dB`, w - 10, 16)
   ctx.textAlign = 'left'
+  ctx.fillText(label, cx + 7, cy + 11)
+
+  // Grip dots, fixed mode only — the one visual difference between a readout
+  // and a handle.
+  if (isFixed.value) {
+    ctx.fillStyle = props.accent
+    ctx.globalAlpha = 0.65
+    for (let i = 0; i < 3; i++) {
+      ctx.fillRect(cx + cw - 11, cy + 4 + i * 3, 6, 1.5)
+    }
+    ctx.globalAlpha = 1
+  }
 }
 
 // ── Drag, fixed mode only ───────────────────────────────────────────────────
@@ -234,6 +371,21 @@ function yToDb(clientY) {
 }
 
 function onPointerDown(e) {
+  // The idle label is a button. It is the first thing anyone reads on this
+  // panel and the only instruction it gives, so it should carry out that
+  // instruction rather than merely state it. Checked before the drag: while
+  // idle there is no threshold curve drawn, so there is nothing to grab.
+  if (isIdle.value) {
+    const rect = canvasEl.value?.getBoundingClientRect()
+    if (!rect) return
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    if (
+      x >= idleHit.x && x <= idleHit.x + idleHit.w &&
+      y >= idleHit.y && y <= idleHit.y + idleHit.h
+    ) emit('requestPlay')
+    return
+  }
   if (!isFixed.value) return
   canvasEl.value?.setPointerCapture?.(e.pointerId)
   emit('update:fixedThresholdDb', yToDb(e.clientY))
@@ -242,7 +394,7 @@ function onPointerDown(e) {
 function onPointerMove(e) {
   // Only while captured — `buttons` is 0 on a hover, so this needs no separate
   // dragging flag.
-  if (!isFixed.value || e.buttons === 0) return
+  if (isIdle.value || !isFixed.value || e.buttons === 0) return
   emit('update:fixedThresholdDb', yToDb(e.clientY))
 }
 
@@ -263,7 +415,7 @@ function onPointerUp(e) {
     <canvas
       ref="canvasEl"
       class="block w-full h-full"
-      :style="{ cursor: isFixed ? 'ns-resize' : 'default' }"
+      :style="{ cursor: isIdle ? 'pointer' : isFixed ? 'ns-resize' : 'default' }"
       :aria-label="title"
       role="img"
       @pointerdown="onPointerDown"

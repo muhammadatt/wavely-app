@@ -37,13 +37,13 @@ import { createBand, getRole, roleForRegion } from '../eqBands.js'
  * nothing they could not already see.
  */
 const SYMPTOMS = {
-  sub_bass: 'Low-end rumble is sitting under the voice',
-  body_warmth: 'The voice sounds thin — it is missing weight',
+  sub_bass: 'Low-end rumble beneath the vocal range',
+  body_warmth: 'The voice sounds thin, missing weight',
   mud: 'Sounds muddy — the low mids are crowded',
-  boxy_honky: 'There is a boxy, hollow ring to this',
+  boxy_honky: 'There is a boxy, hollow ring',
   nasal: 'The voice sounds pinched, like a blocked nose',
-  lower_presence: 'Speech sits back — words are harder to pick out',
-  upper_presence: 'This sounds harsh and forward in the ear',
+  lower_presence: 'The voice sits back — words are harder to pick out',
+  upper_presence: 'This sounds harsh and overly present',
   brilliance: 'The S sounds are sharp',
   air: 'The top end is dull and lacking air around the voice',
 }

@@ -529,6 +529,28 @@ const EMPHASIS_RECOMPUTE_EPS_DB = 0.05
 // drag, slow enough that no step is audible as zipper noise.
 const PARAM_SMOOTH_MS = 8
 
+/**
+ * Averaging window for the ENGAGED readout — the share of voiced blocks in
+ * which the clip curve did anything at all.
+ *
+ * The peak-reduction meter answers "how much" and is structurally bad at
+ * answering "whether": of the blocks that clip, the median reduction is
+ * 0.3-0.4 dB, which on a 12 dB face under VU ballistics is visually nothing
+ * (see the EMPHASIS_CORNER_HZ note). A share-of-blocks figure moves over a
+ * legible range instead — measured 1% / 2% / 3% across emphasis 0 / 6 / 12 at
+ * the default Headroom — and is the number that actually distinguishes "idle"
+ * from "working quietly".
+ *
+ * Averaged over VOICED blocks only. Including pauses would make the reading a
+ * function of how much silence the passage happens to contain rather than of
+ * how hard the stage is working, and would drift toward zero on a slow reader
+ * for reasons that have nothing to do with the setting.
+ *
+ * 2 s is long enough that a single plosive does not swing it and short enough
+ * that moving Headroom shows up while the hand is still on the knob.
+ */
+const ENGAGED_TAU_S = 2.0
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
@@ -637,6 +659,35 @@ export class SoftClipperKernel {
     // ── Metering ──
     this.reductionDb = 0
     this.maxReductionDb = 0
+    // Share of voiced blocks in which the curve engaged, 0-1. See ENGAGED_TAU_S.
+    this.engagedFraction = 0
+
+    // ── Monitoring ──
+    /**
+     * DELTA: pass the residual — what the stage removed — instead of the
+     * processed audio.
+     *
+     * NOT A MEMBER OF `params`, and deliberately so. `applySoftClipperRegion`
+     * spreads a param object straight into the kernel to render into the
+     * timeline, so a monitoring mode living in there would be one careless key
+     * away from writing a difference signal into someone's file. It travels on
+     * its own port message (see setMonitor), which the offline path never
+     * sends and processSoftClipperBuffer never calls. Same arrangement as
+     * ResonanceKernel.
+     */
+    this.monitorDelta = false
+    /**
+     * Dry delay lines, one per output channel, exactly the oversampler's group
+     * delay long — the residual is only meaningful against a time-aligned dry
+     * copy, and the processed path lags by that much.
+     *
+     * Written and read UNCONDITIONALLY rather than only while monitoring, so
+     * switching DELTA on presents correct history immediately instead of 50
+     * samples of whatever was last in the buffer. One read and one write per
+     * sample is nothing beside the oversampled tanh.
+     */
+    this.dryDelay = []
+    this.dryDelayPos = 0
 
     this.tScratch = new Float32Array(128)
     this.trimScratch = new Float32Array(128)
@@ -678,7 +729,21 @@ export class SoftClipperKernel {
   }
 
   getMetering() {
-    return { reductionDb: this.reductionDb, maxReductionDb: this.maxReductionDb }
+    return {
+      reductionDb: this.reductionDb,
+      maxReductionDb: this.maxReductionDb,
+      engagedFraction: this.engagedFraction,
+    }
+  }
+
+  /**
+   * Audition the residual — only what the stage is removing.
+   *
+   * A separate call rather than a parameter: parameters are what the apply
+   * path renders with, and this must never be one of them. See monitorDelta.
+   */
+  setMonitor(delta) {
+    this.monitorDelta = !!delta
   }
 
   /**
@@ -751,6 +816,9 @@ export class SoftClipperKernel {
     let scopePeak = 0
     let scopeThreshold = this.scopeThreshold
     let outputTrimDbSmoothed = this.outputTrimDbSmoothed
+    // Did the gate open at any point in this block? Drives the ENGAGED
+    // readout's denominator — see ENGAGED_TAU_S.
+    let blockVoiced = false
 
     for (let i = 0; i < n; i++) {
       headroomDbSmoothed += this.paramSmoothCoef * (p.headroomDb - headroomDbSmoothed)
@@ -804,6 +872,7 @@ export class SoftClipperKernel {
       // deviation note (5) for why the TRACKER below is gated on the
       // un-held `aboveFloor` instead.
       this.gateOpen = aboveFloor || gateHoldSamples > 0
+      if (this.gateOpen) blockVoiced = true
 
       // speech level tracker (spec §3.2): updates only while the signal is
       // ACTUALLY above the floor — no update, no decay — through pauses.
@@ -858,8 +927,15 @@ export class SoftClipperKernel {
     }
 
     while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler())
+    const D = OVERSAMPLE_LATENCY_SAMPLES
+    while (this.dryDelay.length < nOut) this.dryDelay.push(new Float32Array(D))
     this.preEmphasis.ensureChannels(nOut)
     this.deEmphasis.ensureChannels(nOut)
+
+    // Every channel walks the same delay positions, so the write cursor is
+    // captured once and committed once rather than advanced per channel.
+    const dryPosStart = this.dryDelayPos
+    let dryPosEnd = dryPosStart
 
     const L = OVERSAMPLE_FACTOR
     // Peak reduction is measured AT THE CLIP CURVE ITSELF — the difference in
@@ -921,13 +997,35 @@ export class SoftClipperKernel {
         this.deEmphasis.process(out, out, n, ch)
       }
 
+      // Dry delay, DELTA and output trim in one pass.
+      //
+      // The residual is taken BEFORE the trim and then trimmed along with
+      // everything else, so Output Trim moves the residual's level rather than
+      // becoming part of what the residual reports — a trim of -6 dB should
+      // make the removed material quieter, not add 6 dB of broadband dry signal
+      // to it.
+      const dl = this.dryDelay[ch]
+      let p = dryPosStart
       for (let i = 0; i < n; i++) {
-        out[i] *= trimGain[i]
+        const dry = dl[p]
+        dl[p] = input[i]
+        p = p + 1 === D ? 0 : p + 1
+        out[i] = (this.monitorDelta ? dry - out[i] : out[i]) * trimGain[i]
       }
+      dryPosEnd = p
     }
+
+    this.dryDelayPos = dryPosEnd
 
     this.reductionDb = blockMaxReductionDb
     if (this.reductionDb > this.maxReductionDb) this.maxReductionDb = this.reductionDb
+
+    // ENGAGED: share of VOICED blocks in which the curve did anything. Silent
+    // blocks neither raise nor lower it — see ENGAGED_TAU_S.
+    if (blockVoiced) {
+      const a = Math.min(1, n / (ENGAGED_TAU_S * this.sampleRate))
+      this.engagedFraction += a * ((blockMaxReductionDb > 0 ? 1 : 0) - this.engagedFraction)
+    }
   }
 }
 
@@ -994,6 +1092,7 @@ if (typeof registerProcessor === 'function') {
       this.scopeCount = 0
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
+        else if (e.data?.type === 'monitor') this.kernel.setMonitor(e.data.delta)
       }
     }
 
@@ -1030,6 +1129,7 @@ if (typeof registerProcessor === 'function') {
         this.port.postMessage({
           type: 'gr',
           reductionDb: this.kernel.reductionDb,
+          engagedFraction: this.kernel.engagedFraction,
           // Only the filled prefix, so a short final batch cannot inject
           // stale zero-peak points into the scroll.
           scope: this.scope.subarray(0, this.scopeCount * 2),

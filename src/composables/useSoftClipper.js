@@ -19,6 +19,11 @@ const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
+// Share of voiced blocks the curve engaged on, 0-100. See the kernel's
+// ENGAGED_TAU_S for why this sits beside the dB reading rather than replacing
+// it.
+const clipperEngagedPct = ref(0)
+const clipperDelta = ref(false)
 const clipperInputLevels = ref([])
 const clipperOutputLevels = ref([])
 let meterId = null
@@ -52,6 +57,7 @@ export function useSoftClipper() {
       const nodes = chain.effects.find(e => e.id === softClipperEffect.id)?.nodes
       if (nodes) {
         clipperReduction.value = nodes.getReduction()
+        clipperEngagedPct.value = nodes.getEngagedFraction() * 100
         const chCount = state.currentFile?.channels ?? 1
         clipperInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
         clipperOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
@@ -81,6 +87,7 @@ export function useSoftClipper() {
       meterId = null
     }
     clipperReduction.value = 0
+    clipperEngagedPct.value = 0
     clipperInputLevels.value = []
     clipperOutputLevels.value = []
   }
@@ -89,6 +96,26 @@ export function useSoftClipper() {
     for (const [name, value] of Object.entries(currentParams())) {
       chain.updateParam(softClipperEffect.id, name, value)
     }
+    // Not in currentParams — deliberately, it is a monitoring mode and not a
+    // parameter — so it needs restoring by hand when the preview comes back on.
+    chain.effects.find(e => e.id === softClipperEffect.id)?.nodes
+      ?.setMonitorDelta(clipperDelta.value)
+  }
+
+  /**
+   * Hear only what the stage is removing.
+   *
+   * The most direct answer to the question this plugin actually raises — is
+   * that grit or is that control — and one the meters cannot answer at all: at
+   * the default the clipping blocks take a median of 0.3-0.4 dB, so the panel
+   * can read idle while the residual is plainly audible. Nothing about the
+   * file changes; Apply renders the processed output whatever this is set to.
+   */
+  function toggleDelta() {
+    clipperDelta.value = !clipperDelta.value
+    getEffectChainIfExists()?.effects
+      .find(e => e.id === softClipperEffect.id)?.nodes
+      ?.setMonitorDelta(clipperDelta.value)
   }
 
   function togglePreview() {
@@ -154,6 +181,14 @@ export function useSoftClipper() {
       chain.setEnabled(softClipperEffect.id, false)
       clipperPreview.value = false
     }
+    // Leaving DELTA latched would hand the next session a residual-only
+    // monitor under a header that no longer says so. Read off the chain rather
+    // than a retained handle — apply() has already dropped the meter loop's.
+    if (clipperDelta.value) {
+      clipperDelta.value = false
+      getEffectChainIfExists()?.effects
+        .find(e => e.id === softClipperEffect.id)?.nodes?.setMonitorDelta(false)
+    }
   }
 
   function openModal() {
@@ -172,11 +207,14 @@ export function useSoftClipper() {
     fixedThresholdDb,
     clipperPreview,
     clipperReduction,
+    clipperEngagedPct,
+    clipperDelta,
     clipperInputLevels,
     clipperOutputLevels,
     getScope,
     hasSelection,
     togglePreview,
+    toggleDelta,
     syncHeadroom,
     syncEmphasis,
     syncOutputTrim,
