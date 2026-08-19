@@ -626,6 +626,44 @@ function linToDb(lin) {
  * file settled it in one measurement. Eighth time synthetic material has been
  * too clean to answer the question asked of it.)
  *
+ * WHAT THE HIGHER SHAPES SOUND LIKE, and why the two halves of that have
+ * different causes. Reported from listening at a FIXED threshold: tanh^3 and
+ * tanh^4 distort audibly less overall, but the peaks that do cross read as
+ * "grindy" where tanh^2 reads as "buzzy". Both are real and neither is the
+ * harmonic-tail number above.
+ *
+ * The first half is simply level. Residual (input minus output, the DELTA
+ * path) on the reference clip at Headroom 8: -54.9 / -59.8 / -64.1 dB RMS.
+ * tanh^4 adds 9.2 dB less distortion than tanh^2 at the same threshold.
+ *
+ * The second half is SPARSITY, not tone. The residual's SPECTRUM barely moves
+ * between shapes — centroid 1485 / 1518 / 1556 Hz, energy above 4 kHz 5.1% /
+ * 5.5% / 5.8% — so the difference cannot be brightness. Its TIME structure
+ * moves a lot: crest factor 43.0 / 45.3 / 46.9 dB and audible bursts 3.9 /
+ * 2.4 / 1.4 per second, at an unchanged ~0.1 ms each. tanh^4's distortion is
+ * a third as many isolated ticks; tanh^2's is a more continuous stream that
+ * the voice masks. Sparse distortion is more conspicuous per unit energy than
+ * continuous distortion, which is why halving the energy can still leave the
+ * remainder easier to notice.
+ *
+ * Consistent with the harmonic structure at a fixed threshold, where the
+ * higher shapes are LOWER-order, not higher: on a peak 14 dB over, H3/H5/H7
+ * run 76/53/32% of the distortion for tanh^2 against 86/47/19% for tanh^4,
+ * energy-weighted harmonic centroid 4.25 vs 3.63. Low-order is rough, spread
+ * high-order is fizzy — grind and buzz respectively.
+ *
+ * NOT ALIASING, checked because inharmonic products are the usual suspect for
+ * "grindy" and would have argued for more than 4x oversampling. Through the
+ * full kernel in fixed mode at 48 kHz, inharmonic energy is 0.22-0.29% of the
+ * distortion at 220 Hz / 1.5 kHz / 4 kHz and is the same for all three shapes.
+ * (The first attempt at this probe used adaptive mode on a steady tone, whose
+ * gate never opens, so it measured a stage that was not running — the same
+ * trap recorded further up this file.)
+ *
+ * ⚠ This is the argument against adding tanh^5 and beyond: each step buys less
+ * total distortion and makes what survives more isolated, and past some point
+ * the second effect wins.
+ *
  * WHY NOT THE SMOOTHSTEP FAMILY, which scored better on the harmonic tail
  * (0.025-0.092%): monotonicity needs knee > rMax * max s'(u), and for
  * smoothstep / smootherstep / smoothest-step that is 9.00 / 11.25 / 13.13 dB
