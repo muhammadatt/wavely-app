@@ -160,6 +160,57 @@ const DENORMAL_GUARD = 1e-30
 const T_MIN = 0.10
 const T_MAX = 0.95
 
+/**
+ * Knee sharpness of the soft-clip curve.
+ *
+ * NOT IN THE SPEC, AND THE SPEC NEEDS IT: as written, §4.4's curve cannot
+ * produce the peak reduction §7.1 of the same document calls its usable
+ * operating range. The two sections contradict each other, and the curve is
+ * the half that is wrong.
+ *
+ * The mechanism is the curve's own normalisation. Its tanh argument is
+ * (|x|-T)/(1-T), so at |x| = 1.0 — digital full scale, the loudest sample any
+ * signal can contain — that argument is exactly 1.0 for EVERY threshold. The
+ * output there is therefore always T + tanh(1)·(1-T), and the reduction is
+ * bounded at -20·log10(0.76159 + 0.23841·T): 2.37 dB as T approaches zero, and
+ * less for every real threshold. Within the [-1, 1] domain a digital signal
+ * lives in, the curve only ever traverses the first unit of tanh's argument,
+ * where tanh has barely begun to bend. §7.1 asks for 3-6 dB usable and calls
+ * 6 dB a hard ceiling; the curve cannot reach even the bottom of that range at
+ * any setting.
+ *
+ * Found on a real 35-second narration clip (normalised to -1 dBFS, speech
+ * around -22 dBFS): at minimum Headroom the detector correctly placed the
+ * threshold at -18 dBFS, putting peaks a full 17 dB over it, and the stage
+ * still only took off 1.82 dB — matching the analytical bound of 2.03 dB for
+ * that threshold almost exactly. The detector was never the problem. Note that
+ * the whole synthetic test suite passed throughout: its assertions were about
+ * monotonicity and relative behaviour, none of which this breaks. Eighth time
+ * synthetic material has been too clean to answer the question asked of it.
+ *
+ * The fix divides the curve's output span by k and multiplies its argument by
+ * k, which reaches further along tanh for the same input while leaving every
+ * property the spec relies on intact — unity below T, unit slope at the knee
+ * (sech²(0) = 1 for any k, so C¹ continuity is untouched), a bounded asymptote
+ * at T + (1-T)/k, odd symmetry, monotonicity. k = 1 is the spec's curve
+ * exactly.
+ *
+ * 2.2 is calibrated on that clip. Measured peak reduction on its hottest
+ * transient across the Headroom range: 2.82 dB at 16 (gentlest), 4.48 at 10
+ * (default), 5.45 at 4 (most aggressive) — so the knob's travel brackets the
+ * meter's shaded 3-6 dB target zone, opening just below it and topping out
+ * just under §7.1's stated 6 dB hard ceiling rather than at a quarter of it.
+ * Typical active blocks sit near 1 dB; the figures above are the single
+ * loudest transient in 35 seconds, which is what the meter's peak hold shows.
+ * 2.6 was the alternative and was rejected for reaching 3.28 dB at the
+ * GENTLEST setting — a gentle setting should be able to be gentle — and for
+ * crossing the ceiling at 6.46 at the far end.
+ *
+ * ⚠ One narrator, one clip. This is the first constant to re-derive against a
+ * wider corpus, and the honest read is that it is calibrated, not measured.
+ */
+const KNEE_SHARPNESS = 2.2
+
 // ── Emphasis constants ──────────────────────────────────────────────────────
 
 // ⚠ Spec flags the corner as "consider fixing in v1" (Open Question #1) —
@@ -200,25 +251,34 @@ function linToDb(lin) {
 }
 
 /**
- * Soft-clip curve (spec §4.4).
+ * Soft-clip curve (spec §4.4, with the knee-sharpness term the spec's own
+ * operating range turns out to require — see KNEE_SHARPNESS).
  *
- *   y = x                                                |x| <= T
- *   y = sign(x) * [T + (1-T)*tanh((|x|-T)/(1-T))]         |x| > T
+ *   y = x                                                      |x| <= T
+ *   y = sign(x) * [T + ((1-T)/k)*tanh(k*(|x|-T)/(1-T))]        |x| > T
  *
- * Unity below T (bit-transparent on material that never crosses it), C¹
- * continuous at the knee (both branches have slope 1 at |x| = T, so there is
- * no discontinuity in slope to ring a wideband harmonic burst), asymptotes to
- * 1.0 (never hard-clips), odd symmetry (no DC term, no DC blocker needed).
+ * At k = 1 this is exactly the curve as written in the spec. Every shape
+ * guarantee the spec claims holds for ANY k > 0:
  *
- * Deliberately NOT a plain `tanh(k*x)` — that compresses across the entire
+ * - Unity below T — bit-transparent on material that never crosses it.
+ * - C¹ continuous at the knee. The derivative above the knee is
+ *   sech²(k(|x|-T)/(1-T)), which is 1 at |x| = T for every k, matching the
+ *   unity slope below it. So there is no slope discontinuity to ring a
+ *   wideband harmonic burst, whatever k is set to.
+ * - Bounded, never hard-clips: the asymptote is T + (1-T)/k, which is below
+ *   1.0 for k >= 1.
+ * - Odd symmetry — no DC term, no DC blocker required.
+ * - Monotonic in |x|.
+ *
+ * Deliberately NOT a plain `tanh(k·x)` — that compresses across the entire
  * amplitude range and changes voice character below threshold. The whole
  * "transparent when idle" claim rests on the piecewise form.
  */
-export function softClip(x, T) {
+export function softClip(x, T, k = KNEE_SHARPNESS) {
   const ax = x < 0 ? -x : x
   if (ax <= T) return x
   const span = 1 - T
-  const y = T + span * Math.tanh((ax - T) / span)
+  const y = T + (span / k) * Math.tanh((k * (ax - T)) / span)
   return x < 0 ? -y : y
 }
 
