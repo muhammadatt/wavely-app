@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import {
   SoftClipperKernel, processSoftClipperBuffer, softClip, SOFT_CLIPPER_LATENCY_SAMPLES,
   MAX_REDUCTION_DB, KNEE_DB, SHAPE_EXPONENT, SHAPE_MIN_KNEE_DB,
+  SOFT_CLIPPER_KERNEL_DEFAULTS,
 } from '../../src/audio/softClipperProcessor.js'
 import {
   highShelf, invertBiquad, biquadZerosInsideUnitCircle, BiquadCascade,
@@ -1112,11 +1113,24 @@ test('the shape reaches the kernel, and an unknown value fails safe', () => {
   assert.ok(diff > 1e-5, `tanh4 produced the same audio as tanh2 (max diff ${diff})`)
 
   // A bad param must not throw on the audio thread, and must not process with
-  // some accidental exponent — it falls back to the shipped shape exactly.
+  // some accidental exponent — it falls back to the DEFAULT shape exactly.
+  // Compared against the default read from the kernel rather than a literal,
+  // so moving the default cannot leave this test asserting the old one.
+  const def = SOFT_CLIPPER_KERNEL_DEFAULTS.shape
+  const expected = run(def).channelData[0]
   const bogus = run('not-a-shape').channelData[0]
-  for (let i = 0; i < base.length; i++) {
-    assert.equal(bogus[i], base[i], `unknown shape did not fall back to tanh2 at sample ${i}`)
+  for (let i = 0; i < expected.length; i++) {
+    assert.equal(bogus[i], expected[i], `unknown shape did not fall back to ${def} at sample ${i}`)
   }
+})
+
+test('the default shape is a real shape, and it is the one the panel offers', () => {
+  // The effect wrapper's defaults are spread from this object rather than
+  // restated, so there is no second copy to drift — but a typo here would
+  // silently ship the fallback exponent to every user, which is a working
+  // curve and therefore invisible. Asserted against the shape table itself.
+  assert.ok(SOFT_CLIPPER_KERNEL_DEFAULTS.shape in SHAPE_EXPONENT,
+    `default shape ${SOFT_CLIPPER_KERNEL_DEFAULTS.shape} is not in SHAPE_EXPONENT`)
 })
 
 test('the default shape is bit-identical to the curve before shapes existed', () => {

@@ -13,7 +13,7 @@
  */
 
 import { ensureSoftClipperWorklet } from '../softClipperWorkletLoader.js'
-import { SOFT_CLIPPER_LATENCY_SAMPLES } from '../softClipperProcessor.js'
+import { SOFT_CLIPPER_LATENCY_SAMPLES, SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
 import { createLevelTap } from './levelTap.js'
 
 export { SOFT_CLIPPER_LATENCY_SAMPLES }
@@ -27,17 +27,22 @@ export { SOFT_CLIPPER_LATENCY_SAMPLES }
  */
 export const SCOPE_SECONDS = 4
 
-export const SOFT_CLIPPER_DEFAULTS = {
-  headroomDb: 8, // 4-16, primary control — lower = more clipping
-  emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
-  outputTrimDb: 0, // ±6, gain-match for A/B
-  thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
-  fixedThresholdDb: -10,
-  // Knee contact order. tanh2 is the shipped curve; the higher orders leave
-  // near-threshold material progressively more alone and spend the same
-  // budget on the genuine outliers instead. See SHAPE_EXPONENT in the kernel.
-  shape: 'tanh2', // 'tanh2' | 'tanh3' | 'tanh4'
-}
+/**
+ * DERIVED from the kernel's own defaults rather than restated here.
+ *
+ * These were a second literal listing the same five values, which is one
+ * careless edit away from the preview and the applied audio running different
+ * settings — silently, since every value either object could hold is valid.
+ * The kernel is the source of truth; the panel reads this.
+ *
+ *   headroomDb 4-16, primary control — lower means more clipping
+ *   emphasisDb 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
+ *   outputTrimDb ±6, post-stage gain match for A/B
+ *   thresholdMode 'adaptive' | 'fixed'
+ *   fixedThresholdDb, used only in 'fixed' mode
+ *   shape 'tanh2' | 'tanh3' | 'tanh4', the knee — see SHAPE_EXPONENT
+ */
+export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
 
 /** Params are already kernel-shaped — no renaming needed unlike FET1176/LA2A. */
 export function toKernelParams(params) {

@@ -559,7 +559,7 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
   fixedThresholdDb: -10, // used only in 'fixed' mode
-  shape: 'tanh2', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
+  shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
 }
 
 function clamp(v, lo, hi) {
@@ -576,6 +576,16 @@ function linToDb(lin) {
 
 /**
  * KNEE SHAPES — the exponent on tanh, and what it actually buys.
+ *
+ * THE DEFAULT IS tanh^3, chosen by ear rather than by table. At the shipped
+ * knee a peak 3 dB over the threshold loses 0.98 / 0.40 / 0.16 dB across
+ * n = 2 / 3 / 4 while a peak 12 dB over loses 5.27 / 4.94 / 4.63 — so the
+ * exponent barely touches the deep transients this stage exists for and
+ * almost entirely governs what happens to the shallow ones. tanh^2 was the
+ * original curve; listening at a fixed threshold found it the most audibly
+ * distorted of the three, and tanh^4 the least distorted but the most
+ * conspicuous about what remained (see the sparsity note below). tanh^3 is
+ * the position that was preferred.
  *
  * The reduction law is r = rMax * tanh^n(e / knee). Near the threshold
  * tanh(u) ~ u, so r ~ (e/knee)^n and the exponent IS the order of contact: the
@@ -684,6 +694,9 @@ export const SHAPE_EXPONENT = { tanh2: 2, tanh3: 3, tanh4: 4 }
  * stated numbers rather than re-deriving them from the same code it checks.
  */
 export const SHAPE_MIN_KNEE_DB = { tanh2: 4.62, tanh3: 4.50, tanh4: 4.46 }
+
+/** What an unrecognised `shape` resolves to. Derived, never written twice. */
+const DEFAULT_SHAPE_EXPONENT = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape]
 
 /**
  * Soft-clip curve — level-invariant and reduction-bounded. See
@@ -925,9 +938,11 @@ export class SoftClipperKernel {
     const fixedMode = p.thresholdMode === 'fixed'
     // Resolved once per call: `shape` is a string on the params object and the
     // clip curve runs L times per sample, so the lookup must not sit inside
-    // the inner loop. Unknown values fall back to the shipped shape rather
-    // than throwing — a bad param must not take the audio thread down.
-    const shapeExponent = SHAPE_EXPONENT[p.shape] ?? 2
+    // the inner loop. Unknown values fall back to the DEFAULT shape rather
+    // than throwing — a bad param must not take the audio thread down — and
+    // the fallback is read from the defaults rather than written as a literal,
+    // so moving the default cannot silently leave the two disagreeing.
+    const shapeExponent = SHAPE_EXPONENT[p.shape] ?? DEFAULT_SHAPE_EXPONENT
 
     // ── Detector + threshold, computed once per sample from the unfiltered
     // mono downmix, shared by every channel's clip curve. headroomDb and

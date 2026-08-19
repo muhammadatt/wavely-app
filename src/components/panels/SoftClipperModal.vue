@@ -39,35 +39,40 @@ const MODE_OPTIONS = [
 ]
 
 /**
- * Knee shape, named for what it does rather than for its exponent.
+ * The knee: how sharply reduction ramps in with how far over the threshold a
+ * peak sits.
  *
- * What changes is how far over the threshold a peak has to be before the stage
- * bothers with it. At a FIXED Headroom that reads as strictly less work, on
- * both axes at once — measured on 35 s of real narration at Headroom 8, the
- * fraction of voiced samples touched goes 0.293% / 0.195% / 0.126% and the
- * mean reduction on those samples 0.358 / 0.216 / 0.150 dB.
+ * NAMED "KNEE" AND NOT "SELECTIVITY", and the captions give numbers, because
+ * the first attempt at both was wrong in a way worth not repeating. BROAD /
+ * FOCUSED / SURGICAL implies a width — as if the effect covered more or less
+ * of something — and the side note "every peak over the line" was flatly
+ * untrue: at a given threshold ALL three positions act on exactly the same
+ * samples, because the threshold is what decides that. What changes is how
+ * much each of those samples gets, weighted by its overshoot.
  *
- * SO THE CAPTIONS DESCRIBE WHICH PEAKS GET TOUCHED, NOT A CHANGE OF CHARACTER
- * AT EQUAL DEPTH. Winding Headroom down to recover the depth reverses the
- * ordering — a lower threshold pulls in more samples than the shape excludes,
- * and the higher shapes end up touching MORE of the file (0.293% -> 0.465%),
- * more gently. See SHAPE_EXPONENT in the kernel for both tables and for why
- * the smoothstep family is not on this switch.
+ * The numbers make the real difference legible in one line. At the shipped
+ * knee, a peak 3 dB over the threshold loses 0.98 / 0.40 / 0.16 dB across the
+ * three, while a peak 12 dB over loses 5.27 / 4.94 / 4.63. The deep transients
+ * this stage exists for land in nearly the same place whichever position is
+ * chosen; the control is almost entirely about the shallow ones.
  *
- * The harmonic structure barely moves (0.131% -> 0.068% of harmonic energy
- * above the 11th), so this is deliberately NOT presented as a distortion
- * control.
+ * See SHAPE_EXPONENT in the kernel for the monotonicity bounds, why the
+ * smoothstep family is not offered, and what each position measures like on
+ * real narration.
  */
 const SHAPE_OPTIONS = [
-  { value: 'tanh2', label: 'BROAD', title: 'Eases every peak that crosses the threshold (the original curve)' },
-  { value: 'tanh3', label: 'FOCUSED', title: 'Lets peaks just over the line through; acts on the ones that stand out' },
-  { value: 'tanh4', label: 'SURGICAL', title: 'Acts only on the genuine outliers, and does less overall' },
+  { value: 'tanh2', label: 'EARLY', title: 'Reduction ramps in as soon as a peak crosses the threshold' },
+  { value: 'tanh3', label: 'MID', title: 'Holds off until a peak is clearly over the threshold (default)' },
+  { value: 'tanh4', label: 'LATE', title: 'Reserves the reduction for the deepest overshoots' },
 ]
 
+// The one comparison that separates the three, in the units the panel already
+// speaks. The +12 dB figure is deliberately shown too: it barely moves, which
+// is the fact that stops this reading as a depth control.
 const SHAPE_CAPTION = {
-  tanh2: 'every peak over the line',
-  tanh3: 'the ones that stand out',
-  tanh4: 'only the real outliers — expect less depth',
+  tanh2: '3 dB over → −1.0 dB · 12 dB over → −5.3',
+  tanh3: '3 dB over → −0.4 dB · 12 dB over → −4.9',
+  tanh4: '3 dB over → −0.2 dB · 12 dB over → −4.6',
 }
 
 const MODE_CAPTION = {
@@ -312,12 +317,12 @@ const SCOPE_H = 236
         </div>
       </div>
 
-      <!-- Which peaks count. Sits with the knobs rather than in the
-           instrument strip because it refines what the display already shows,
-           the way HF Emphasis does — the strip is for things that change how
-           to READ the scope, and this changes what gets acted on. -->
+      <!-- How hard the shallow crossings get hit. Sits with the knobs rather
+           than in the instrument strip because it refines what the display
+           already shows, the way HF Emphasis does — the strip is for things
+           that change how to READ the scope. -->
       <div class="flex items-center justify-center gap-[9px] mt-[14px]">
-        <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">SELECTIVITY</span>
+        <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">KNEE</span>
         <SegmentedSwitch
           :model-value="shape"
           @update:model-value="setShape"
