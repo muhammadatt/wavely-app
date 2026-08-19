@@ -19,6 +19,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   SoftClipperKernel, processSoftClipperBuffer, softClip, SOFT_CLIPPER_LATENCY_SAMPLES,
+  MAX_REDUCTION_DB, KNEE_DB,
 } from '../../src/audio/softClipperProcessor.js'
 import {
   highShelf, invertBiquad, biquadZerosInsideUnitCircle, BiquadCascade,
@@ -75,17 +76,19 @@ test('softClip is C1-continuous at the knee: slope is 1 on both sides at |x| = T
   assert.ok(Math.abs(dAbove - 1) < 1e-3, `slope above knee: ${dAbove}`)
 })
 
-test('softClip never reaches or exceeds 1.0 for any input a real signal could present', () => {
-  // Bounded well under the point where tanh(x) itself rounds to exactly 1.0
-  // in float64 (~x > 19 here) — beyond that the curve's OWN math still
-  // asymptotes correctly, but the floating-point representation of tanh's
-  // output no longer distinguishes it from 1.0, which is a precision limit
-  // of IEEE754, not a defect in the curve. 10x full scale already covers any
-  // overshoot a real upstream gain stage could hand this plugin.
-  const T = 0.3
-  for (const x of [1, 2, 5, 10]) {
-    assert.ok(softClip(x, T) < 1, `softClip(${x}) = ${softClip(x, T)}`)
-    assert.ok(softClip(-x, T) > -1, `softClip(${-x}) = ${softClip(-x, T)}`)
+test('softClip never boosts: |y| <= |x| everywhere', () => {
+  // This REPLACES an earlier assertion that the output asymptotes below 1.0.
+  // That property belonged to the full-scale-anchored curve and is
+  // deliberately gone: bounding REDUCTION at MAX_REDUCTION_DB means an input
+  // already above full scale comes back out above full scale, just quieter.
+  // Spec §1.1 is explicit that this stage does not guarantee a peak ceiling
+  // ("that is a separate brickwall stage, not this one"), so the honest
+  // invariant is that it only ever attenuates.
+  for (const T of [0.01, 0.126, 0.3, 0.6]) {
+    for (const x of [0.5, 1, 2, 5, 10, 100]) {
+      assert.ok(Math.abs(softClip(x, T)) <= Math.abs(x) + 1e-12, `T=${T} x=${x}`)
+      assert.ok(Math.abs(softClip(-x, T)) <= Math.abs(x) + 1e-12, `T=${T} x=${-x}`)
+    }
   }
 })
 
@@ -98,7 +101,7 @@ test('softClip has exact odd symmetry', () => {
 
 test('softClip is monotonically increasing (no folding at extreme drive)', () => {
   const T = 0.2
-  let prev = -1
+  let prev = -Infinity   // not -1: outputs are no longer bounded by full scale
   for (let x = -3; x <= 3; x += 0.01) {
     const y = softClip(x, T)
     assert.ok(y >= prev, `not monotonic at x=${x}`)
@@ -251,36 +254,61 @@ test('lower headroom produces more peak reduction (monotonic)', () => {
   assert.ok(sweep[sweep.length - 1] > sweep[0] + 1, 'expected a meaningful spread across the headroom range')
 })
 
-test('fixed mode ignores programme level; adaptive mode tracks it', () => {
-  const quiet = concat(tone(200, 1.0, 0.08), tone(120, 0.05, 0.2), tone(200, 0.5, 0.08))
-  const loud = concat(tone(200, 1.0, 0.4), tone(120, 0.05, 0.98), tone(200, 0.5, 0.4))
+test('adaptive mode is level-invariant; fixed mode is not', () => {
+  // THE TEST THAT WAS MISSING, and the earlier version of it was malformed:
+  // it built "quiet" and "loud" with DIFFERENT relative dynamics (a 20 dB
+  // transient-over-speech against a 9 dB one), so it compared two different
+  // signals and could not have detected level sensitivity in either mode.
+  //
+  // The claim §3.3 makes is specifically that deriving T from the speaker's
+  // own level makes the stage level-invariant. Testing that requires ONE
+  // signal at two levels, so the only thing that changes is absolute level.
+  // The probe needs PAUSES, and that is not incidental. On steady material the
+  // noise-floor valley follower settles at the signal's own level, so the gate
+  // condition (fastRms > noiseEst + GATE_MARGIN_DB) never fires, the speech
+  // tracker never updates, and it sits at its absolute -24 dBFS seed forever —
+  // measured: 6 s of continuous tone left speechLevel at exactly -24.0 at both
+  // test levels, which is not invariance, it is a detector that never ran. A
+  // steady tone is pathological for a gated detector by construction.
+  //
+  // Invariance is also necessarily a STEADY-STATE property: the seed is an
+  // absolute constant because at t=0 there is nothing relative to seed it
+  // from, so the convergence PATH differs with level even though the converged
+  // value does not. Hence the long run-up before the transient under test.
+  const gap = () => noise(0.35, dbToLin(-70))
+  const phrase = amp => tone(200, 0.5, amp)
+  const speechAmp = dbToLin(-22)
+  const base = concat(
+    phrase(speechAmp), gap(), phrase(speechAmp), gap(), phrase(speechAmp), gap(),
+    phrase(speechAmp), gap(), phrase(speechAmp), gap(), phrase(speechAmp), gap(),
+    phrase(speechAmp), gap(), phrase(speechAmp), gap(),
+    tone(120, 0.05, dbToLin(-1)),
+    phrase(speechAmp),
+  )
+  const scaled = new Float32Array(base.length)
+  const TRIM_DB = -18
+  for (let i = 0; i < base.length; i++) scaled[i] = base[i] * dbToLin(TRIM_DB)
 
-  function reduction(signal, params) {
-    return processSoftClipperBuffer([signal], SR, params).metering.maxReductionDb
-  }
+  const red = (sig, params) => processSoftClipperBuffer([sig], SR, params).metering.maxReductionDb
 
-  const fixedParams = { thresholdMode: 'fixed', fixedThresholdDb: -12 }
-  const adaptiveParams = { thresholdMode: 'adaptive', headroomDb: 10 }
-
-  const fixedQuiet = reduction(quiet, fixedParams)
-  const fixedLoud = reduction(loud, fixedParams)
-  const adaptiveQuiet = reduction(quiet, adaptiveParams)
-  const adaptiveLoud = reduction(loud, adaptiveParams)
-
-  // Fixed mode: the quiet take's transient sits under -12 dBFS and should
-  // barely cross T at all; the loud take's sits close to 0 dBFS and should
-  // show a clearly larger reduction. The curve's own bounded reduction range
-  // (spec §7.1: 3-6 dB is the USABLE range even at aggressive settings) means
-  // this is a small-numbers comparison, not a dramatic one.
-  assert.ok(fixedLoud - fixedQuiet > 1, `fixed mode should react to absolute level: ${fixedQuiet.toFixed(3)} vs ${fixedLoud.toFixed(3)}`)
-
-  // Adaptive mode: both takes' transients sit the same number of dB above
-  // their own speech level, so reduction should land much closer together —
-  // a materially smaller gap than fixed mode's, not just a numerically
-  // smaller one.
+  const adaptive = { thresholdMode: 'adaptive', headroomDb: 10, emphasisDb: 0 }
+  const aBase = red(base, adaptive)
+  const aScaled = red(scaled, adaptive)
   assert.ok(
-    Math.abs(adaptiveLoud - adaptiveQuiet) < 0.5 * Math.abs(fixedLoud - fixedQuiet),
-    'adaptive mode should be far less sensitive to absolute level than fixed mode',
+    Math.abs(aBase - aScaled) < 0.5,
+    `adaptive must be level-invariant: ${aBase.toFixed(2)} at 0 dB vs ${aScaled.toFixed(2)} at ${TRIM_DB} dB`,
+  )
+  assert.ok(aBase > 1, `and must actually be doing something: ${aBase.toFixed(2)} dB`)
+
+  // Fixed mode is absolute by definition, so the SAME trim must move it a lot.
+  // This is the control: it proves the trim is large enough to be detectable,
+  // so adaptive's flatness above is invariance and not a dead measurement.
+  const fixed = { thresholdMode: 'fixed', fixedThresholdDb: -12, emphasisDb: 0 }
+  const fBase = red(base, fixed)
+  const fScaled = red(scaled, fixed)
+  assert.ok(
+    fBase - fScaled > 2,
+    `fixed mode should track absolute level: ${fBase.toFixed(2)} vs ${fScaled.toFixed(2)}`,
   )
 })
 
@@ -368,21 +396,23 @@ test('the curve can reach the peak reduction the spec calls its usable range', (
   )
 })
 
-test('the spec-as-written curve (k = 1) is bounded at 2.37 dB — do not go back to it', () => {
-  // Pins the mechanism so the knee-sharpness term cannot be "simplified" out
-  // by someone reading §4.4 and finding an unexplained constant.
+test('the spec-as-written curve is bounded at 2.37 dB — do not go back to it', () => {
+  // Computed INLINE rather than through softClip(), because the shipped curve
+  // no longer has this shape at any parameter setting. Pinning the mechanism
+  // so nobody reads §4.4, finds our constants unfamiliar, and "restores" it.
   //
-  // With k = 1 the tanh argument at |x| = 1.0 is (1-T)/(1-T) = 1 for EVERY
-  // threshold, so the output is always T + tanh(1)·(1-T) and the reduction is
-  // capped at -20·log10(tanh(1)) = 2.37 dB as T approaches zero. Within the
-  // [-1, 1] domain digital audio lives in, that curve only ever traverses the
-  // first unit of tanh's argument.
+  // §4.4: y = T + (1-T)*tanh((|x|-T)/(1-T)). The tanh argument at |x| = 1.0 is
+  // (1-T)/(1-T) = 1 for EVERY threshold, so the output is always
+  // T + tanh(1)*(1-T) and reduction is capped at -20*log10(tanh(1)) = 2.37 dB
+  // as T approaches zero. Within the [-1, 1] domain digital audio occupies,
+  // that curve only ever traverses the first unit of tanh's argument.
+  const specCurve = (x, T) => T + (1 - T) * Math.tanh((x - T) / (1 - T))
   const ceilingDb = -20 * Math.log10(Math.tanh(1))
-  assert.ok(Math.abs(ceilingDb - 2.37) < 0.01, `k=1 ceiling should be 2.37 dB, got ${ceilingDb.toFixed(3)}`)
+  assert.ok(Math.abs(ceilingDb - 2.37) < 0.01, `ceiling should be 2.37 dB, got ${ceilingDb.toFixed(3)}`)
   for (const T of [0.001, 0.05, 0.126, 0.3, 0.5]) {
-    const k1 = -20 * Math.log10(softClip(1.0, T, 1))
-    assert.ok(k1 <= ceilingDb + 1e-9, `k=1 at T=${T} exceeded its own bound: ${k1.toFixed(3)}`)
-    assert.ok(k1 < 3, `k=1 at T=${T} still cannot reach 3 dB: ${k1.toFixed(3)}`)
+    const red = -20 * Math.log10(specCurve(1.0, T))
+    assert.ok(red <= ceilingDb + 1e-9, `T=${T} exceeded its own bound: ${red.toFixed(3)}`)
+    assert.ok(red < 3, `T=${T} still cannot reach 3 dB: ${red.toFixed(3)}`)
   }
 })
 
@@ -404,44 +434,120 @@ test('a real narration peak 17 dB over threshold gets meaningfully reduced', () 
   )
 })
 
-test('C1 continuity at the knee holds for every knee sharpness, not just the shipped one', () => {
-  // The knee-sharpness term is only safe to tune because the unit-slope
-  // property is independent of k — d/dx above the knee is sech²(0) = 1 at
-  // |x| = T whatever k is. Pinned across the range so a future recalibration
-  // cannot quietly introduce a slope discontinuity.
-  const h = 1e-6
-  for (const k of [1, 1.5, 2.2, 3, 6]) {
-    for (const T of [0.1, 0.3, 0.6]) {
-      const dBelow = (softClip(T, T, k) - softClip(T - h, T, k)) / h
-      const dAbove = (softClip(T + h, T, k) - softClip(T, T, k)) / h
-      assert.ok(Math.abs(dBelow - 1) < 1e-3, `k=${k} T=${T}: slope below knee ${dBelow}`)
-      assert.ok(Math.abs(dAbove - 1) < 1e-3, `k=${k} T=${T}: slope above knee ${dAbove}`)
+test('C1 continuity at the knee holds across the whole constant space', () => {
+  // The two shaping constants are only safe to retune because unit slope at
+  // the knee is independent of both: d(reduction)/d(excess) is 0 at excess 0
+  // because tanh^2 is flat at the origin, whatever it is scaled by.
+  const h = 1e-7
+  for (const rMax of [1, 3, 6, 12]) {
+    for (const knee of [6, 11.4, 20, 40]) {
+      for (const T of [0.001, 0.1, 0.3, 0.6]) {
+        const hh = T * h
+        const dBelow = (softClip(T, T, rMax, knee) - softClip(T - hh, T, rMax, knee)) / hh
+        const dAbove = (softClip(T + hh, T, rMax, knee) - softClip(T, T, rMax, knee)) / hh
+        assert.ok(Math.abs(dBelow - 1) < 2e-3, `rMax=${rMax} knee=${knee} T=${T}: below ${dBelow}`)
+        assert.ok(Math.abs(dAbove - 1) < 2e-3, `rMax=${rMax} knee=${knee} T=${T}: above ${dAbove}`)
+      }
     }
   }
 })
 
-test('the shipped curve still never reaches full scale, and stays monotonic', () => {
-  // The bounded-asymptote and monotonicity guarantees are what stop a sharper
-  // knee from becoming a hard clipper. Re-checked at the shipped k rather than
-  // assuming the k=1 proofs above carry over.
-  //
-  // This one fails at k=1 for a DIFFERENT reason than the two capability tests
-  // above, and the distinction is worth keeping straight: k=1's asymptote is
-  // T + (1-T)/1 = exactly 1.0, so once tanh's argument saturates in float64 the
-  // output rounds to full scale. A sharper knee pulls the asymptote down to
-  // T + (1-T)/k — 0.78 at k=2.2, T=0.6 — which float saturation cannot reach.
-  // So the fix incidentally makes the never-hard-clips guarantee hold in
-  // arithmetic and not merely in the limit.
-  for (const T of [0.1, 0.3, 0.6]) {
-    for (const x of [1, 2, 5, 10]) {
-      assert.ok(softClip(x, T) < 1, `T=${T}: softClip(${x}) = ${softClip(x, T)}`)
-      assert.ok(softClip(-x, T) > -1, `T=${T}: softClip(${-x}) reached full scale`)
-    }
-    let prev = -1
-    for (let x = -3; x <= 3; x += 0.01) {
-      const y = softClip(x, T)
-      assert.ok(y >= prev, `T=${T}: not monotonic at x=${x}`)
+test('the shipped curve stays monotonic at every threshold', () => {
+  // Monotonicity is not free here: it requires KNEE_DB > 0.7698*MAX_REDUCTION_DB,
+  // the peak of 2*tanh(u)*sech^2(u). Pinned so a future retune of either
+  // constant cannot silently make a louder input produce a quieter output.
+  assert.ok(
+    KNEE_DB > 0.7698 * MAX_REDUCTION_DB,
+    `KNEE_DB ${KNEE_DB} must exceed 0.7698*MAX_REDUCTION_DB = ${(0.7698 * MAX_REDUCTION_DB).toFixed(3)}`,
+  )
+  for (const T of [0.001, 0.1, 0.3, 0.6]) {
+    let prev = -Infinity
+    for (let e = 0; e < 80; e += 0.05) {
+      const y = softClip(T * dbToLin(e), T)
+      assert.ok(y >= prev, `T=${T}: not monotonic at ${e} dB over threshold`)
       prev = y
     }
   }
+})
+
+// ── Level invariance and bounded reduction ──────────────────────────────────
+//
+// The two properties the shipped curve exists to provide, neither of which the
+// spec's §4.4 curve has. Both were found on a real file after the whole suite
+// above was already green — the level sensitivity because the reporter asked
+// whether an input trim would be principled, and the unboundedness because the
+// first attempt at fixing the level sensitivity produced 29 dB of reduction on
+// a stage whose job is 3-6.
+
+test('the curve is exactly level-invariant: reduction depends only on excess over T', () => {
+  // The property §3.3 claims the adaptive threshold buys, and which the
+  // full-scale-anchored curve threw away. Swept over four decades of
+  // threshold with the overshoot held constant.
+  for (const overDb of [3, 6, 12, 17.6, 30]) {
+    const reductions = [-6, -18, -30, -42, -60].map((tDb) => {
+      const T = dbToLin(tDb)
+      const x = T * dbToLin(overDb)
+      return 20 * Math.log10(x / softClip(x, T))
+    })
+    const spread = Math.max(...reductions) - Math.min(...reductions)
+    assert.ok(
+      spread < 1e-9,
+      `at ${overDb} dB over threshold, reduction varied by ${spread.toExponential(2)} dB across 54 dB of threshold`,
+    )
+  }
+})
+
+test('the spec-as-written curve is NOT level-invariant — the bug this replaced', () => {
+  // Guard against a well-meaning revert to §4.4's form. Its (1-T) span
+  // references digital full scale, so the same overshoot yields wildly
+  // different reduction depending only on where the threshold sits.
+  const specCurve = (x, T) => T + (1 - T) * Math.tanh((x - T) / (1 - T))
+  const red = (tDb) => {
+    const T = dbToLin(tDb)
+    const x = T * dbToLin(17.6)
+    return 20 * Math.log10(x / specCurve(x, T))
+  }
+  const loud = red(-6)
+  const quiet = red(-42)
+  assert.ok(loud - quiet > 10, `expected the old curve to collapse; got ${loud.toFixed(2)} vs ${quiet.toFixed(2)}`)
+})
+
+test('reduction is bounded by MAX_REDUCTION_DB however wrong the threshold is', () => {
+  // Boundedness is a SAFETY property once the curve is level-invariant: with
+  // reduction a function of x/T alone, a mis-tracked threshold is punished in
+  // proportion. Measured on the reference clip during detector convergence, an
+  // unbounded invariant curve produced 29 dB of reduction at t=0.46 s.
+  for (const T of [0.001, 0.01, 0.126, 0.6]) {
+    for (const overDb of [20, 40, 60, 90]) {
+      const x = T * dbToLin(overDb)
+      const reductionDb = 20 * Math.log10(x / softClip(x, T))
+      assert.ok(
+        reductionDb <= MAX_REDUCTION_DB + 1e-9,
+        `T=${T}, ${overDb} dB over: ${reductionDb.toFixed(2)} dB exceeds the ${MAX_REDUCTION_DB} dB ceiling`,
+      )
+    }
+  }
+})
+
+test('the detector warm-up keeps the threshold sane from the first sample', () => {
+  // The valley follower snaps down instantly and fastRms starts at zero, so
+  // without a warm-up the floor locks onto the filter's own start-up transient,
+  // the gate treats near-silence as speech, and the tracker seeds from it.
+  // Measured on the reference clip before the fix: T dived to -52 dBFS and took
+  // ~10 s to climb out, which an unbounded curve turned into 29 dB of gain
+  // reduction. T must never fall far below the seeded speech level.
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 10, emphasisDb: 0 })
+  const quietLeadIn = noise(0.4, dbToLin(-55))
+  const speech = tone(200, 1.0, dbToLin(-20))
+  const signal = concat(quietLeadIn, speech)
+  const out = new Float32Array(signal.length)
+  let minT = Infinity
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    minT = Math.min(minT, kernel.tScratch[len - 1])
+  }
+  const minTDb = 20 * Math.log10(minT)
+  assert.ok(minTDb > -45, `threshold dived to ${minTDb.toFixed(1)} dBFS during start-up`)
 })

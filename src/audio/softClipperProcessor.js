@@ -100,6 +100,39 @@
  *       peaks) and cannot misalign by construction — both sides of the
  *       comparison are read at the same instant.
  *
+ * 6. THE CURVE IS LEVEL-INVARIANT AND REDUCTION-BOUNDED, WHICH §4.4's CURVE IS
+ *    NEITHER. Reported from use: the stage does almost nothing on a quieter
+ *    file. It doesn't — measured, the same audio attenuated 18 dB went from
+ *    5.11 dB of reduction to 0.00, with its relative dynamics untouched. §3.3
+ *    states level invariance as the whole point of deriving T from the
+ *    speaker's own level, and the detector delivers it; the curve then threw
+ *    it away by normalising to digital full scale. The replacement works in
+ *    dB on the RATIO x/T, so invariance holds by construction. See
+ *    MAX_REDUCTION_DB / KNEE_DB for the derivation and the measurements.
+ *
+ *    Two things fell out of that change, both worth keeping in view:
+ *
+ *    a) An INPUT TRIM would have been the wrong fix, and the reason is a
+ *       useful test in general: on a correctly scale-invariant design an input
+ *       trim provably does nothing but change output level. A control that
+ *       only has a function because of a defect is a workaround for it.
+ *
+ *    b) BOUNDING THE REDUCTION IS A SAFETY REQUIREMENT, not a preference,
+ *       once the curve is invariant. Under the old full-scale anchor a badly
+ *       wrong threshold was self-limiting — the curve did nothing down there.
+ *       Under any invariant curve, reduction is a function of x/T alone, so a
+ *       wrong threshold is punished in proportion. The first attempt at this
+ *       fix kept an unbounded invariant curve and was caught by the reference
+ *       clip: during detector convergence T sat at -46 dBFS while real speech
+ *       arrived 29 dB above it, and the stage took 29 dB off a signal it
+ *       exists to trim by 3-6. Invariance without a bound converts every
+ *       detector error into destruction.
+ *
+ *    T_MIN moved with this (-20 dBFS -> -60 dBFS): at -20 it was a second,
+ *    independent level wall, pinning the threshold on any file quieter than a
+ *    mastered one. A noise-floor-relative floor was tried in its place and
+ *    removed; see the note above T_MIN for why it broke continuous material.
+ *
  * ARCHITECTURE (spec §2, unchanged):
  *
  *   input ──┬─► detector (unfiltered, mono downmix) ──────────────┐
@@ -157,59 +190,121 @@ const SPEECH_INIT_DEFAULT_DB = -24
 const DENORMAL_GUARD = 1e-30
 
 // Threshold clamp (spec §3.3) — linear amplitude.
-const T_MIN = 0.10
+//
+// T_MIN WAS 0.10, i.e. -20 dBFS, and that was the stage's hard level wall.
+// The spec sets it to "prevent pathological thresholds on silence", which is
+// a real concern, but -20 dBFS is far above where real material sits: a raw
+// narrator recording with speech RMS near -30 dBFS and Headroom 10 asks for
+// T = -20 and lands exactly on the clamp, at which point the threshold stops
+// tracking the speaker and the whole adaptive premise is dead. Measured on
+// the reported clip: 6 dB of input attenuation was enough to pin T at the
+// floor for the entire file.
+//
+// -60 dBFS is now the absolute backstop, low enough that no real recording
+// reaches it. Damage from a wrong threshold is bounded by MAX_REDUCTION_DB.
+const T_MIN = 0.001 // -60 dBFS
 const T_MAX = 0.95
 
+// A noise-floor-relative floor on T was tried here and REMOVED, which is worth
+// recording because the reasoning for adding it was sound and the measurement
+// still killed it.
+//
+// The worry was real: under the old full-scale-anchored curve an erroneously
+// tiny T was self-limiting (the curve did nothing down there), whereas under a
+// level-invariant curve reduction depends only on x/T, so a wrong T is punished
+// in proportion. Guarding T against the measured noise floor looked principled
+// and free — the detector already has that number.
+//
+// It fails on material without pauses. The floor estimate is a valley follower
+// on fast RMS, so on a continuous tone it settles at the TONE's own level, the
+// guard binds at signal+12 dB, and Headroom stops doing anything at all:
+// measured 0.253 dB of reduction at every setting from 4 to 16 on a sustained
+// synthetic. Real speech has pauses and would not have shown this.
+//
+// It is also unnecessary, which is the stronger reason. T is speechLevel plus
+// a strictly POSITIVE Headroom, so it cannot be low relative to the tracker's
+// estimate by construction — the only way T goes wrong is if the estimate
+// itself is wrong, and that is covered twice over: the detector warm-up fixes
+// the convergence case that prompted this, and MAX_REDUCTION_DB bounds the
+// damage from any tracker error whatsoever. Two mechanisms for one hazard,
+// where the second one is unconditional, did not justify a third that breaks
+// a legitimate class of input.
+
+
 /**
- * Knee sharpness of the soft-clip curve.
+ * The stage's two shaping constants, and the two spec defects behind them.
  *
- * NOT IN THE SPEC, AND THE SPEC NEEDS IT: as written, §4.4's curve cannot
- * produce the peak reduction §7.1 of the same document calls its usable
- * operating range. The two sections contradict each other, and the curve is
- * the half that is wrong.
+ * The curve in §4.4 is `y = T + (1-T)*tanh((|x|-T)/(1-T))`. It fails twice,
+ * in ways that only show up on real files, and this codebase hit both.
  *
- * The mechanism is the curve's own normalisation. Its tanh argument is
+ * DEFECT 1 — IT CANNOT REACH ITS OWN OPERATING RANGE. That tanh argument is
  * (|x|-T)/(1-T), so at |x| = 1.0 — digital full scale, the loudest sample any
- * signal can contain — that argument is exactly 1.0 for EVERY threshold. The
- * output there is therefore always T + tanh(1)·(1-T), and the reduction is
- * bounded at -20·log10(0.76159 + 0.23841·T): 2.37 dB as T approaches zero, and
- * less for every real threshold. Within the [-1, 1] domain a digital signal
- * lives in, the curve only ever traverses the first unit of tanh's argument,
- * where tanh has barely begun to bend. §7.1 asks for 3-6 dB usable and calls
- * 6 dB a hard ceiling; the curve cannot reach even the bottom of that range at
- * any setting.
+ * signal can contain — it is exactly 1.0 for EVERY threshold. The output there
+ * is always T + tanh(1)*(1-T), bounding reduction at 2.37 dB as T approaches
+ * zero and less for every real threshold. §7.1 of the same document calls
+ * 3-6 dB the usable range and 6 dB a hard ceiling. Measured on a 35 s
+ * narration clip normalised to -1 dBFS: peaks sat 17 dB over a correctly
+ * placed threshold and the stage removed 1.82 dB.
  *
- * Found on a real 35-second narration clip (normalised to -1 dBFS, speech
- * around -22 dBFS): at minimum Headroom the detector correctly placed the
- * threshold at -18 dBFS, putting peaks a full 17 dB over it, and the stage
- * still only took off 1.82 dB — matching the analytical bound of 2.03 dB for
- * that threshold almost exactly. The detector was never the problem. Note that
- * the whole synthetic test suite passed throughout: its assertions were about
- * monotonicity and relative behaviour, none of which this breaks. Eighth time
- * synthetic material has been too clean to answer the question asked of it.
+ * DEFECT 2 — IT IS NOT LEVEL-INVARIANT, WHICH IS THE ONE THING §3.3 SAYS THE
+ * ADAPTIVE THRESHOLD BUYS. The `(1-T)` normalisation references digital full
+ * scale, an absolute anchor. So the detector is carefully made level-invariant
+ * and the curve then throws that away. Measured, with the detector held
+ * perfect by construction (fixed mode, threshold moved in lockstep so the
+ * overshoot is pinned at 17.6 dB): 14.36 dB of reduction at T = -6 dBFS,
+ * 5.43 at -18, 0.53 at -30, 0.00 at -60. Identical relative dynamics, and the
+ * stage quietly stops working as the file gets quieter. Combined with the old
+ * T_MIN of -20 dBFS, 6 dB of input attenuation was enough to disable it.
  *
- * The fix divides the curve's output span by k and multiplies its argument by
- * k, which reaches further along tanh for the same input while leaving every
- * property the spec relies on intact — unity below T, unit slope at the knee
- * (sech²(0) = 1 for any k, so C¹ continuity is untouched), a bounded asymptote
- * at T + (1-T)/k, odd symmetry, monotonicity. k = 1 is the spec's curve
- * exactly.
+ * THE CURVE IS THEREFORE EXPRESSED IN dB, where both missing properties are
+ * the natural ones:
  *
- * 2.2 is calibrated on that clip. Measured peak reduction on its hottest
- * transient across the Headroom range: 2.82 dB at 16 (gentlest), 4.48 at 10
- * (default), 5.45 at 4 (most aggressive) — so the knob's travel brackets the
- * meter's shaded 3-6 dB target zone, opening just below it and topping out
- * just under §7.1's stated 6 dB hard ceiling rather than at a quarter of it.
- * Typical active blocks sit near 1 dB; the figures above are the single
- * loudest transient in 35 seconds, which is what the meter's peak hold shows.
- * 2.6 was the alternative and was rejected for reaching 3.28 dB at the
- * GENTLEST setting — a gentle setting should be able to be gentle — and for
- * crossing the ceiling at 6.46 at the far end.
+ *   e = 20*log10(|x| / T)                 excess over threshold, dB
+ *   r = MAX_REDUCTION_DB * tanh^2(e / KNEE_DB)   reduction applied, dB
+ *   y = |x| * 10^(-r/20)
  *
- * ⚠ One narrator, one clip. This is the first constant to re-derive against a
- * wider corpus, and the honest read is that it is calibrated, not measured.
+ * `e` is a RATIO, so scaling the input scales the output identically — level
+ * invariance holds by construction rather than by calibration. `r` saturates,
+ * so reduction is BOUNDED, which is what §1.1 asks for in prose ("does not
+ * catch large outliers... transients beyond that pass through partially
+ * attenuated and remain the downstream compressor's responsibility") and what
+ * the original curve delivered only by accident, at a quarter of the stated
+ * range.
+ *
+ * Every shape guarantee the spec claims still holds, and now for stated
+ * reasons rather than incidental ones:
+ *   - Unity below T — the early-out is untouched, still bit-transparent.
+ *   - C1 at the knee: d(r)/d(e) = 0 at e = 0 because tanh^2 is flat there, so
+ *     the dB-domain slope is 1 on both sides and the linear-domain slope with
+ *     it. Verified numerically across four decades of threshold.
+ *   - Monotonic, provided KNEE_DB > 0.7698 * MAX_REDUCTION_DB — the peak of
+ *     2*tanh(u)*sech^2(u). At the shipped values max d(r)/d(e) = 0.404, so a
+ *     louder input always produces a louder output.
+ *   - Odd symmetric — sign applied outside. No DC term, no DC blocker.
+ *   - Never boosts: r >= 0 always, so |y| <= |x| everywhere.
+ *
+ * BOUNDEDNESS IS A SAFETY PROPERTY HERE, NOT A PREFERENCE, and that was
+ * measured too. Under the old full-scale anchor a badly wrong threshold was
+ * self-limiting — the curve did nothing down there, so a bad T produced a
+ * quiet no-op. Under any level-invariant curve, reduction depends only on
+ * x/T, so a wrong T is punished in proportion. A first attempt at this fix
+ * kept an unbounded invariant curve and was caught by the reported clip: at
+ * t=0.46 s, while the 3 s speech tracker was still converging from its seed,
+ * T sat at -46 dBFS and real speech arrived 29 dB above it, producing 29 dB of
+ * reduction on a stage whose entire job is to remove 3-6. Invariance without
+ * a bound converts every detector error into destruction.
+ *
+ * MAX_REDUCTION_DB = 6 is §7.1's own hard ceiling, now literally enforceable
+ * rather than aspirational — the meter cannot read past it and the user cannot
+ * dial past it.
+ *
+ * KNEE_DB = 11.4 is the only calibrated number, set so a peak 17.6 dB over
+ * threshold — the reported clip's real operating point at minimum Headroom —
+ * receives 5 dB, landing inside the meter's shaded 3-6 dB zone. ⚠ One
+ * narrator, one clip; the first constant to re-derive against a wider corpus.
  */
-const KNEE_SHARPNESS = 2.2
+export const MAX_REDUCTION_DB = 6
+export const KNEE_DB = 11.4
 
 // ── Emphasis constants ──────────────────────────────────────────────────────
 
@@ -251,34 +346,30 @@ function linToDb(lin) {
 }
 
 /**
- * Soft-clip curve (spec §4.4, with the knee-sharpness term the spec's own
- * operating range turns out to require — see KNEE_SHARPNESS).
+ * Soft-clip curve — level-invariant and reduction-bounded. See
+ * MAX_REDUCTION_DB / KNEE_DB above for the derivation and for the two spec
+ * defects that made this shape necessary.
  *
- *   y = x                                                      |x| <= T
- *   y = sign(x) * [T + ((1-T)/k)*tanh(k*(|x|-T)/(1-T))]        |x| > T
+ *   |x| <= T :  y = x                                    (bit-transparent)
+ *   |x| >  T :  e = 20*log10(|x|/T)
+ *               r = rMaxDb * tanh^2(e / kneeDb)
+ *               y = sign(x) * |x| * 10^(-r/20)
  *
- * At k = 1 this is exactly the curve as written in the spec. Every shape
- * guarantee the spec claims holds for ANY k > 0:
+ * The log/exp pair only runs for samples ABOVE the threshold, which on speech
+ * is a small minority — the early-out below carries the overwhelming majority
+ * of samples at the cost of one compare.
  *
- * - Unity below T — bit-transparent on material that never crosses it.
- * - C¹ continuous at the knee. The derivative above the knee is
- *   sech²(k(|x|-T)/(1-T)), which is 1 at |x| = T for every k, matching the
- *   unity slope below it. So there is no slope discontinuity to ring a
- *   wideband harmonic burst, whatever k is set to.
- * - Bounded, never hard-clips: the asymptote is T + (1-T)/k, which is below
- *   1.0 for k >= 1.
- * - Odd symmetry — no DC term, no DC blocker required.
- * - Monotonic in |x|.
- *
- * Deliberately NOT a plain `tanh(k·x)` — that compresses across the entire
+ * Deliberately NOT a plain `tanh(k*x)`: that compresses across the entire
  * amplitude range and changes voice character below threshold. The whole
  * "transparent when idle" claim rests on the piecewise form.
  */
-export function softClip(x, T, k = KNEE_SHARPNESS) {
+export function softClip(x, T, rMaxDb = MAX_REDUCTION_DB, kneeDb = KNEE_DB) {
   const ax = x < 0 ? -x : x
   if (ax <= T) return x
-  const span = 1 - T
-  const y = T + (span / k) * Math.tanh((k * (ax - T)) / span)
+  const excessDb = 20 * Math.log10(ax / T)
+  const t = Math.tanh(excessDb / kneeDb)
+  const reductionDb = rMaxDb * t * t
+  const y = ax * Math.exp(-reductionDb * LN10_OVER_20)
   return x < 0 ? -y : y
 }
 
@@ -295,6 +386,14 @@ export class SoftClipperKernel {
     // ── Detector state (mono, shared across channels) ──
     this.fastRmsMeanSq = 0
     this.noiseEstDb = -80
+    // The valley follower snaps DOWN instantly, and at t=0 fastRms is still
+    // filling from zero — so without a warm-up it snaps to the filter's own
+    // start-up transient (effectively -inf), the gate then treats the quietest
+    // lead-in as speech, and the tracker seeds from it. Measured on the
+    // reported clip: T dived to -52 dBFS and stayed low for seconds. Three
+    // fast-RMS time constants is enough for fastRms to mean something.
+    this.detectorWarmupCount = 0
+    this.detectorWarmupTarget = Math.max(1, Math.round(sampleRate * 0.030))
     this.gateHoldSamples = 0
     this.gateOpen = false
     this.speechLevelDb = SPEECH_INIT_DEFAULT_DB
@@ -426,6 +525,7 @@ export class SoftClipperKernel {
     let speechLevelDb = this.speechLevelDb
     let speechWarmupCount = this.speechWarmupCount
     let speechWarmupSum = this.speechWarmupSum
+    let detectorWarmupCount = this.detectorWarmupCount
     let headroomDbSmoothed = this.headroomDbSmoothed
     let outputTrimDbSmoothed = this.outputTrimDbSmoothed
 
@@ -445,7 +545,18 @@ export class SoftClipperKernel {
 
       // noise_est: decaying valley follower standing in for a running minimum
       // over a trailing 2 s window — see deviation note (2) above.
-      if (fastRmsDb < noiseEstDb) {
+      //
+      // During the first 30 ms the floor is SEEDED from fastRms rather than
+      // chased, because fastRms is still filling from zero and the follower
+      // would otherwise lock onto its start-up transient. Seeding high is the
+      // safe direction: the follower snaps down instantly at the first genuine
+      // pause, so an over-estimate self-corrects within a phrase, whereas the
+      // under-estimate this replaces took seconds to climb out of and left the
+      // threshold far too low the whole time.
+      if (detectorWarmupCount < this.detectorWarmupTarget) {
+        detectorWarmupCount++
+        noiseEstDb = fastRmsDb
+      } else if (fastRmsDb < noiseEstDb) {
         noiseEstDb = fastRmsDb
       } else {
         noiseEstDb += this.noiseFollowCoef * (fastRmsDb - noiseEstDb)
@@ -481,7 +592,8 @@ export class SoftClipperKernel {
         }
       }
 
-      // threshold derivation (spec §3.3)
+      // threshold derivation (spec §3.3). T_MIN is now only a numerical
+      // backstop — softClip takes log(|x|/T), so T must stay off zero.
       const targetDb = fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed
       T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX)
     }
@@ -492,6 +604,7 @@ export class SoftClipperKernel {
     this.speechLevelDb = speechLevelDb
     this.speechWarmupCount = speechWarmupCount
     this.speechWarmupSum = speechWarmupSum
+    this.detectorWarmupCount = detectorWarmupCount
     this.headroomDbSmoothed = headroomDbSmoothed
     this.outputTrimDbSmoothed = outputTrimDbSmoothed
 
