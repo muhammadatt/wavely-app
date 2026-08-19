@@ -5,7 +5,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import GainReductionBar from '../meters/GainReductionBar.vue'
+import ClipLamp from '../meters/ClipLamp.vue'
 import ClipperScope from '../meters/ClipperScope.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
@@ -102,24 +102,31 @@ const thresholdKnob = computed(() => (isFixed.value
       caption: 'lower = more clipping',
     }))
 
-// A share-of-blocks figure, not a dB one, because dB is the wrong instrument
-// for "is this doing anything": the blocks that clip take a median of 0.3-0.4
-// dB, which on a 12 dB face reads as an idle needle while the stage is audibly
-// colouring the passage. See the kernel's ENGAGED_TAU_S.
-const engagedReadout = computed(() => `${clipperEngagedPct.value.toFixed(1)}%`)
+/**
+ * Reduction that lights the lamp fully.
+ *
+ * 6 dB, not the 12 the bar used to run: 6 is MAX_REDUCTION_DB, the kernel's own
+ * hard ceiling and spec §7.1's stated limit, so no setting can drive the lamp
+ * past its top and full brightness means "at the bound" rather than "somewhere
+ * in the upper half". The bar needed the extra headroom to keep its engraved
+ * scale honest; a lamp has no scale to be honest about, only a range to spend,
+ * and spending half of it on readings the kernel cannot produce was the same
+ * mistake at a smaller size.
+ */
+const METER_FULL_SCALE_DB = 6
 
-// Reads as "how hard you are pushing it" per spec §7.1: 3-6 dB is the usable
-// range on speech, past that it starts reading as grit rather than control.
-// 12 dB full scale (rather than the compressors' 24) keeps that band visually
-// legible instead of crammed into the first quarter of the bar.
-const METER_FULL_SCALE_DB = 12
+/**
+ * Display height. The panel's one instrument, so it gets the space the gain
+ * reduction bar and the oversized knob row used to hold between them.
+ */
+const SCOPE_H = 236
 </script>
 
 <template>
   <FloatingWindow
     window-id="soft-clipper"
     :z="z"
-    :width="620"
+    :width="700"
     :top="96"
     :accent="ACCENT"
     brand-lead="SOFT"
@@ -161,130 +168,128 @@ const METER_FULL_SCALE_DB = 12
       </button>
     </template>
 
-    <div class="px-[26px] pt-[16px] pb-[22px]">
-      <!-- THE MODE SWITCH SITS ABOVE THE SCOPE BECAUSE IT GOVERNS IT. It
-           decides what the threshold curve means, whether that curve is
-           draggable, and what the knob below is measuring — and it used to be
-           in the footer, so all three were discovered after the confusion
-           rather than before it. -->
-      <div class="flex items-center justify-center gap-[10px] mb-[12px]">
-        <span style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.4)">THRESHOLD</span>
-        <SegmentedSwitch
-          :model-value="thresholdMode"
-          @update:model-value="setThresholdMode"
-          :options="MODE_OPTIONS"
-          :accent="ACCENT"
-          :disabled="!clipperPreview"
-          :caption="MODE_CAPTION[thresholdMode]"
-          :padding-x="12"
-        />
-      </div>
+    <div class="px-[22px] pt-[14px] pb-[18px]">
+      <!-- ── Instrument strip ──────────────────────────────────────────────
+           Mode on the left because it governs the display below it; the lamp
+           on the right because it reports on the same display. One line, so
+           the scope starts as high on the faceplate as it can. -->
+      <div class="flex items-center justify-between gap-[16px] mb-[10px]">
+        <div class="flex items-center gap-[9px]">
+          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">THRESHOLD</span>
+          <SegmentedSwitch
+            :model-value="thresholdMode"
+            @update:model-value="setThresholdMode"
+            :options="MODE_OPTIONS"
+            :accent="ACCENT"
+            :disabled="!clipperPreview"
+            :padding-x="11"
+          />
+        </div>
 
-      <!-- The scope answers "on what", which the bar below cannot: at the
-           default the blocks that clip take a median of 0.3-0.4 dB, so a
-           working stage reads as an idle needle. Seeing the crossings is what
-           makes Headroom settable by eye. In fixed mode the threshold curve is
-           also the control — drag it. -->
-      <ClipperScope
-        :data-fn="getScope"
-        :mode="thresholdMode"
-        :fixed-threshold-db="fixedThresholdDb"
-        @update:fixed-threshold-db="syncFixedThreshold"
-        @request-play="togglePlayback"
-        :accent="ACCENT"
-        :height="132"
-        title="Clipper scope: input envelope against the threshold"
-      />
-
-      <!-- Peak reduction: what the stage is actually doing, in the same
-           instrument the compressors use, with the 3-6 dB usable range
-           shaded so a user can find their Headroom setting by eye rather
-           than by ear alone (spec §7.2). -->
-      <div class="mt-[14px]">
-        <GainReductionBar
+        <!-- A lamp, not a bar — see ClipLamp for why a full-length GR meter
+             was the wrong instrument for a stage that takes 0.3-0.4 dB off a
+             plosive and nothing off anything else. -->
+        <ClipLamp
           :reduction-db="clipperReduction"
+          :engaged-pct="clipperEngagedPct"
           :accent="ACCENT"
-          title="PEAK REDUCTION"
           :full-scale-db="METER_FULL_SCALE_DB"
-          :zone-min-db="3"
-          :zone-max-db="6"
         />
-        <!-- HOW OFTEN, beside HOW MUCH. The bar above cannot distinguish "idle"
-             from "working quietly", because working quietly is what this stage
-             does: 0.3-0.4 dB on the blocks it touches. This number moves over a
-             legible range and is the one that answers the question. -->
-        <div class="flex justify-end items-baseline gap-[7px] mt-[5px]">
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.32)">ENGAGED</span>
-          <span :style="{ font: `700 10px 'JetBrains Mono',monospace`, color: ACCENT }">{{ engagedReadout }}</span>
-          <span style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.1em;color:rgba(255,255,255,.28)">OF VOICED BLOCKS</span>
-        </div>
       </div>
 
-      <div class="flex items-center justify-between gap-[12px] mt-[18px]">
-        <LevelMeter :levels="clipperInputLevels" label="IN" :height="132" />
+      <!-- ── The instrument ───────────────────────────────────────────────
+           THIS IS THE CONTROL SURFACE, not an illustration of one. The
+           threshold curve is a handle in both modes: in fixed mode the drag
+           sets the ceiling outright, in adaptive it moves Headroom, which IS
+           the curve's offset from the tracked level. The knobs below are the
+           precise way to reach the same two numbers, not the primary way.
+           Flanked by the level meters at full display height so the three
+           read as one instrument. -->
+      <div class="flex items-stretch gap-[10px]">
+        <LevelMeter :levels="clipperInputLevels" label="IN" :height="SCOPE_H" />
 
-        <div class="flex-1 flex justify-center gap-[22px]">
-          <!-- One slot for the threshold, whichever unit the mode expresses it
-               in — see thresholdKnob. Keyed on the mode so the Knob remounts
-               rather than carrying drag state across a range change. -->
-          <div class="w-[118px]">
-            <Knob
-              :key="thresholdMode"
-              :model-value="thresholdKnob.value"
-              @update:model-value="thresholdKnob.sync"
-              :min="thresholdKnob.min" :max="thresholdKnob.max" :step="thresholdKnob.step"
-              :label="thresholdKnob.label" :accent="ACCENT" :format-value="thresholdKnob.format"
-              :disabled="!clipperPreview"
-            />
-            <p class="mt-[5px] text-center" style="font:600 8px 'Inter',system-ui;letter-spacing:.04em;color:rgba(255,255,255,.3)">
-              {{ thresholdKnob.caption }}
-            </p>
-          </div>
-          <div class="w-[118px]">
-            <!-- Harshness-reduction mechanism, not a tone control: it shaves
-                 HF first (where clipping's odd harmonics land) and pulls the
-                 generated harmonics back down with it. The caption is there
-                 because the label alone reads as an EQ. -->
-            <Knob
-              :model-value="emphasisDb"
-              @update:model-value="syncEmphasis"
-              :min="0" :max="12" :step="0.5"
-              label="HF Emphasis" :accent="ACCENT" :format-value="formatGain"
-              :disabled="!clipperPreview"
-            />
-            <p class="mt-[5px] text-center" style="font:600 8px 'Inter',system-ui;letter-spacing:.04em;color:rgba(255,255,255,.3)">
-              harshness, not tone
-            </p>
-          </div>
-          <div class="w-[118px]">
-            <Knob
-              :model-value="outputTrimDb"
-              @update:model-value="syncOutputTrim"
-              :min="-6" :max="6" :step="0.1"
-              label="Output Trim" :accent="ACCENT" :format-value="formatGain"
-              :disabled="!clipperPreview" bipolar
-            />
-            <p class="mt-[5px] text-center" style="font:600 8px 'Inter',system-ui;letter-spacing:.04em;color:rgba(255,255,255,.3)">
-              gain match for A/B
-            </p>
-          </div>
+        <div class="flex-1 min-w-0">
+          <ClipperScope
+            :data-fn="getScope"
+            :mode="thresholdMode"
+            :fixed-threshold-db="fixedThresholdDb"
+            @update:fixed-threshold-db="syncFixedThreshold"
+            :headroom-db="headroomDb"
+            @update:headroom-db="syncHeadroom"
+            @request-play="togglePlayback"
+            :accent="ACCENT"
+            :height="SCOPE_H"
+            title="Clipper scope: input envelope against the threshold. Drag the threshold line to set it."
+          />
         </div>
 
-        <LevelMeter :levels="clipperOutputLevels" label="OUT" :height="132" />
+        <LevelMeter :levels="clipperOutputLevels" label="OUT" :height="SCOPE_H" />
+      </div>
+
+      <!-- ── Secondary controls ───────────────────────────────────────────
+           Deliberately small. Everything here is reachable from the display
+           or is a set-once refinement, so the knobs are sized as the fallback
+           they now are rather than as the panel's centre of gravity. -->
+      <div class="flex justify-center gap-[30px] mt-[14px]">
+        <!-- One slot for the threshold, whichever unit the mode expresses it
+             in — see thresholdKnob. Keyed on the mode so the Knob remounts
+             rather than carrying drag state across a range change. -->
+        <div class="w-[74px]">
+          <Knob
+            :key="thresholdMode"
+            :model-value="thresholdKnob.value"
+            @update:model-value="thresholdKnob.sync"
+            :min="thresholdKnob.min" :max="thresholdKnob.max" :step="thresholdKnob.step"
+            :label="thresholdKnob.label" :accent="ACCENT" :format-value="thresholdKnob.format"
+            :value-font-px="13"
+            :disabled="!clipperPreview"
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            {{ thresholdKnob.caption }}
+          </p>
+        </div>
+        <div class="w-[74px]">
+          <!-- Harshness-reduction mechanism, not a tone control: it shaves
+               HF first (where clipping's odd harmonics land) and pulls the
+               generated harmonics back down with it. The caption is there
+               because the label alone reads as an EQ. -->
+          <Knob
+            :model-value="emphasisDb"
+            @update:model-value="syncEmphasis"
+            :min="0" :max="12" :step="0.5"
+            label="HF Emphasis" :accent="ACCENT" :format-value="formatGain"
+            :value-font-px="13"
+            :disabled="!clipperPreview"
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            harshness, not tone
+          </p>
+        </div>
+        <div class="w-[74px]">
+          <Knob
+            :model-value="outputTrimDb"
+            @update:model-value="syncOutputTrim"
+            :min="-6" :max="6" :step="0.1"
+            label="Output Trim" :accent="ACCENT" :format-value="formatGain"
+            :value-font-px="13"
+            :disabled="!clipperPreview" bipolar
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            gain match for A/B
+          </p>
+        </div>
       </div>
 
       <p
-        class="mt-[14px] text-center"
-        style="font:500 10px/1.5 'Inter';color:rgba(255,255,255,.35)"
+        class="mt-[12px] text-center"
+        style="font:500 9.5px/1.45 'Inter';color:rgba(255,255,255,.32)"
       >
-        Trims the handful of transients that stick out — plosives, hard
-        consonants, a struck desk — so the compressor after it can work on the
-        voice instead of chasing them. The ceiling tracks how loudly this
-        speaker is talking, so the same setting holds across a quiet passage
-        and a loud one.
+        {{ MODE_CAPTION[thresholdMode] }} — trims the few transients that stick
+        out, so the compressor after it works on the voice instead of chasing
+        plosives.
       </p>
 
-      <div class="mt-[14px] pt-[14px]" style="border-top:1px solid rgba(255,255,255,.06)">
+      <div class="mt-[12px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <ApplyAction
           size="md"
           show-preview

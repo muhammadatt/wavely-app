@@ -16,16 +16,34 @@ import { useMeterFrame } from './ballistics.js'
  * crossings themselves, so "it is working here and not there" is visible
  * rather than inferred.
  *
- * THE THRESHOLD IS A CURVE, NOT A LINE, and that is the second reason. In
- * adaptive mode T rides the speaker's own level on a 3 s tracker; drawing it
- * over time is the only way the adaptive behaviour is observable at all —
- * including the warm-up, where it sits above full scale and the stage
- * deliberately does nothing.
+ * THE THRESHOLD IS DRAWN FLAT, AT ITS CURRENT VALUE. An earlier version traced
+ * it over time, on the reasoning that T rides a 3 s tracker in adaptive mode
+ * and only a trace makes that visible. Reported from use as confusing rather
+ * than informative, and the report is right: a trailing curve answers a
+ * question about the detector's behaviour, where the user is asking where their
+ * ceiling is. The line still moves in real time, so adaptive tracking is
+ * visible as motion — it is the history of that motion that is gone. See
+ * drawThresholdLine.
  *
- * READ-ONLY IN ADAPTIVE, DRAGGABLE IN FIXED. In adaptive mode the curve is a
- * readout of a measurement — there is nothing to set, and making it look
- * grabbable would promise a control that cannot exist. In fixed mode it IS the
- * parameter, so it becomes a handle.
+ * DRAGGABLE IN BOTH MODES, AND AN EARLIER VERSION OF THIS FILE ARGUED THE
+ * OPPOSITE. It said the adaptive curve was "a readout of a measurement — there
+ * is nothing to set". That is wrong, and the error is worth stating because it
+ * is what kept this display from being the panel's control surface: the curve
+ * is `speechLevel + Headroom`. Only the first term is a measurement. The second
+ * is a user parameter, and it is exactly the curve's vertical offset from the
+ * envelope — which is the one quantity a vertical drag expresses naturally.
+ *
+ * So both modes drag, and they set different things because the curve means
+ * different things:
+ *   fixed    — the pointer's dB IS the threshold. Absolute.
+ *   adaptive — the pointer's MOVEMENT in dB is added to Headroom. Relative.
+ *
+ * The adaptive case has to be relative rather than absolute, and not as a
+ * refinement: the curve is moving on its own while you hold it, so pinning it
+ * to the cursor would fight the tracker for control of the same line and the
+ * setting would depend on where in a syllable the drag happened to end.
+ * Dragging the OFFSET leaves the tracker in charge of the level and the user in
+ * charge of the headroom, which is the actual division of labour in the kernel.
  */
 const props = defineProps({
   /**
@@ -39,16 +57,23 @@ const props = defineProps({
   mode: { type: String, default: 'adaptive' },
   /** The fixed threshold in dBFS. Only meaningful (and only shown) in fixed mode. */
   fixedThresholdDb: { type: Number, default: -10 },
-  /** Drag limits, matching the Fixed dBFS knob's own range. */
+  /** Drag limits, matching the Ceiling knob's own range. */
   minDb: { type: Number, default: -24 },
   maxDb: { type: Number, default: -1 },
+  /** Headroom in dB — what an adaptive-mode drag moves. */
+  headroomDb: { type: Number, default: 8 },
+  /** Drag limits, matching the Headroom knob's own range. */
+  minHeadroomDb: { type: Number, default: 4 },
+  maxHeadroomDb: { type: Number, default: 16 },
+  /** Quantisation for both drags, matching the knobs' step. */
+  step: { type: Number, default: 0.5 },
   accent: { type: String, default: '#ff8f6b' },
-  height: { type: Number, default: 150 },
+  height: { type: Number, default: 220 },
   /** Canvas is opaque to a screen reader; this is what names it. */
   title: { type: String, default: 'Clipper scope' },
 })
 
-const emit = defineEmits(['update:fixedThresholdDb', 'requestPlay'])
+const emit = defineEmits(['update:fixedThresholdDb', 'update:headroomDb', 'requestPlay'])
 
 const canvasEl = ref(null)
 const isFixed = computed(() => props.mode === 'fixed')
@@ -132,10 +157,31 @@ function draw(dtMs) {
 
   drawGrid(ctx, w, mid, half)
 
+  // Where the threshold IS, right now — one number, not a history.
+  //
+  // In fixed mode it is read straight from the prop rather than from the scope
+  // ring, so the line is live before playback has ever started and during a
+  // drag with the transport stopped. In adaptive mode it can only come from the
+  // kernel: it is speechLevel + Headroom, and speechLevel is a measurement this
+  // component has no way to compute.
+  //
+  // The ring still carries a threshold for every point, and only the newest is
+  // read now. That is deliberate rather than an oversight: it costs 8 floats a
+  // message, it is what makes the kernel's own "did this peak cross" pairing
+  // testable, and it is what a trace would need if one is ever wanted again.
+  const latestT = scope && scope.filled > 0
+    ? scope.threshold[(scope.head - 1 + scope.capacity) % scope.capacity]
+    : null
+  const thresholdLin = isFixed.value ? dbToLin(props.fixedThresholdDb) : latestT
+
   if (!scope || scope.filled === 0) {
     ctx.globalAlpha = 1
     isIdle.value = true
+    // Fixed mode has a threshold whether or not audio is running, so the
+    // control surface works before the first press of play.
+    if (isFixed.value) drawThresholdLine(ctx, w, mid, half, thresholdLin)
     drawIdleLabel(ctx, w, mid)
+    if (isFixed.value) drawThresholdChip(ctx, w, mid, half, thresholdLin)
     return
   }
   isIdle.value = false
@@ -169,18 +215,32 @@ function draw(dtMs) {
   ctx.fill()
 
   // The excess above the threshold, mirrored top and bottom.
+  //
+  // MEASURED AGAINST THE CURRENT THRESHOLD, NOT THE ONE IN FORCE AT EACH POINT.
+  // This follows from drawing the threshold flat: shading a peak that sits
+  // below the drawn line, because the line was lower when that peak arrived,
+  // makes the picture contradict itself, and a self-contradictory display is
+  // worse than a slightly ahistorical one.
+  //
+  // What it costs is small and what it buys is large. The cost: for older parts
+  // of the window the shading is what the CURRENT setting would have done, not
+  // what was done — negligible in fixed mode (the threshold only moves when
+  // dragged) and small in adaptive (a 3 s tracker barely moves inside a 4 s
+  // window). The gain: dragging the line re-shades the whole history live, so
+  // the display answers "what would this setting have done to the last four
+  // seconds" while the hand is still moving. That is what makes it a control
+  // surface rather than a readout.
+  const tY = ampToUnit(thresholdLin) * half
   ctx.fillStyle = props.accent
   for (const sign of [-1, 1]) {
     ctx.beginPath()
     let open = false
     for (let i = 0; i < n; i++) {
-      const idx = (start + i) % scope.capacity
-      const p = scope.peak[idx]
-      const t = scope.threshold[idx]
+      const p = scope.peak[(start + i) % scope.capacity]
       const x = i * xStep
-      if (p > t) {
+      if (p > thresholdLin) {
         const yPeak = mid + sign * ampToUnit(p) * half
-        const yT = mid + sign * ampToUnit(t) * half
+        const yT = mid + sign * tY
         if (!open) { ctx.moveTo(x, yT); open = true }
         ctx.lineTo(x, yPeak)
         ctx.lineTo(x, yT)
@@ -189,27 +249,47 @@ function draw(dtMs) {
     if (open) ctx.fill()
   }
 
-  // ── Threshold ──
-  // Drawn from the kernel's own per-point values, so in adaptive mode this is
-  // the curve the audio was actually decided against rather than a redrawn
-  // approximation of it.
-  ctx.strokeStyle = props.accent
-  ctx.lineWidth = isFixed.value ? 2 : 1.5
-  ctx.globalAlpha = (live ? 1 : 0.35) * (isFixed.value ? 1 : 0.75)
-  for (const sign of [-1, 1]) {
-    ctx.beginPath()
-    for (let i = 0; i < n; i++) {
-      const t = scope.threshold[(start + i) % scope.capacity]
-      const y = mid + sign * ampToUnit(t) * half
-      if (i === 0) ctx.moveTo(i * xStep, y)
-      else ctx.lineTo(i * xStep, y)
-    }
-    ctx.stroke()
-  }
+  ctx.globalAlpha = live ? 1 : 0.35
+  drawThresholdLine(ctx, w, mid, half, thresholdLin)
   ctx.globalAlpha = 1
 
   drawLegend(ctx, w, h)
-  drawThresholdChip(ctx, w, mid, half, scope, start, n)
+  drawThresholdChip(ctx, w, mid, half, thresholdLin)
+}
+
+/**
+ * The threshold: a straight line at its CURRENT value, mirrored top and bottom.
+ *
+ * IT USED TO BE DRAWN AS A CURVE OVER TIME, from the kernel's own per-point
+ * values, and that was the wrong call. The argument for it was that the
+ * threshold really does move in adaptive mode and a trace is the only way to
+ * see it move — true, but it answers a question about the DETECTOR when the
+ * user is asking a question about their SETTING. Reported directly: the trail
+ * reads as confusing rather than informative, because a wobbling line invites
+ * you to interpret every wobble, and none of the wobbles are yours.
+ *
+ * A flat line says the one thing that is actually actionable — here is where
+ * the ceiling is now — and it still moves, in real time, so the adaptive
+ * behaviour remains visible as motion. What is genuinely lost is the HISTORY of
+ * that motion: the warm-up, where the threshold parks above full scale and the
+ * stage deliberately does nothing, is now a line that starts off the top of the
+ * face and drops in, rather than a trace showing where it had been.
+ */
+function drawThresholdLine(ctx, w, mid, half, thresholdLin) {
+  if (thresholdLin === null) return
+  const dy = ampToUnit(thresholdLin) * half
+  ctx.strokeStyle = props.accent
+  // Full strength in both modes — it is a handle in both. It used to be drawn
+  // faint in adaptive mode to say "readout, not control", which was the
+  // display's own explanation of a restriction that turned out to be wrong.
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  for (const sign of [-1, 1]) {
+    const y = mid + sign * dy
+    ctx.moveTo(0, y)
+    ctx.lineTo(w, y)
+  }
+  ctx.stroke()
 }
 
 /**
@@ -297,14 +377,22 @@ function drawLegend(ctx, w, h) {
     x += ctx.measureText(text).width + 14
   }
 
-  // Mode hint on the same line, right-aligned — it says what the threshold
-  // curve is, and belongs with the key rather than floating over the trace.
-  ctx.fillStyle = 'rgba(255,255,255,.3)'
+  // Mode hint on the same line, right-aligned — it says what a drag on the
+  // curve will do, which differs by mode, and carries the Headroom value in
+  // adaptive mode because that number now lives on the display rather than
+  // only on a knob.
   ctx.textAlign = 'right'
-  ctx.fillText(
-    isFixed.value ? 'THRESHOLD — DRAG TO SET' : 'THRESHOLD — FOLLOWS THE VOICE',
-    w - 6, y,
-  )
+  if (isFixed.value) {
+    ctx.fillStyle = 'rgba(255,255,255,.3)'
+    ctx.fillText('DRAG THE LINE — SETS THE CEILING', w - 6, y)
+  } else {
+    const hr = `${props.headroomDb > 0 ? '+' : ''}${props.headroomDb.toFixed(1)}`
+    ctx.fillStyle = props.accent
+    ctx.fillText(hr, w - 6, y)
+    const hrW = ctx.measureText(hr).width
+    ctx.fillStyle = 'rgba(255,255,255,.3)'
+    ctx.fillText('DRAG THE LINE — SETS HEADROOM', w - 10 - hrW, y)
+  }
   ctx.textAlign = 'left'
 }
 
@@ -316,65 +404,91 @@ function drawLegend(ctx, w, h) {
  * the grab target should be the same object — a value floating in a corner
  * gives a draggable line no affordance at all beyond a cursor change on hover.
  */
-function drawThresholdChip(ctx, w, mid, half, scope, start, n) {
-  const latest = scope.threshold[(start + n - 1) % scope.capacity]
-  const label = `${linToDb(latest).toFixed(1)} dB`
+function drawThresholdChip(ctx, w, mid, half, thresholdLin) {
+  if (thresholdLin === null) return
+  const label = `${linToDb(thresholdLin).toFixed(1)} dB`
 
-  ctx.font = "700 9px 'JetBrains Mono',monospace"
+  ctx.font = "700 10px 'JetBrains Mono',monospace"
   const tw = ctx.measureText(label).width
-  const cw = tw + (isFixed.value ? 22 : 12)
-  const ch = 15
+  const cw = tw + 24
+  const ch = 17
   const cx = w - cw - 5
   // Clamped so the chip stays on the face during the warm-up, when the
   // threshold deliberately sits above full scale.
-  const cy = Math.min(mid - ch - 1, Math.max(1, mid - ampToUnit(latest) * half - ch / 2))
+  const cy = Math.min(mid - ch - 1, Math.max(1, mid - ampToUnit(thresholdLin) * half - ch / 2))
 
   ctx.fillStyle = '#08060a'
   ctx.strokeStyle = props.accent
-  ctx.globalAlpha = isFixed.value ? 0.9 : 0.5
+  ctx.globalAlpha = 0.9
   ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.roundRect(cx + 0.5, cy + 0.5, cw, ch, 7)
+  ctx.roundRect(cx + 0.5, cy + 0.5, cw, ch, 8)
   ctx.fill()
   ctx.stroke()
   ctx.globalAlpha = 1
 
   ctx.fillStyle = props.accent
   ctx.textAlign = 'left'
-  ctx.fillText(label, cx + 7, cy + 11)
+  ctx.fillText(label, cx + 8, cy + 12)
 
-  // Grip dots, fixed mode only — the one visual difference between a readout
-  // and a handle.
-  if (isFixed.value) {
-    ctx.fillStyle = props.accent
-    ctx.globalAlpha = 0.65
-    for (let i = 0; i < 3; i++) {
-      ctx.fillRect(cx + cw - 11, cy + 4 + i * 3, 6, 1.5)
-    }
-    ctx.globalAlpha = 1
+  // Grip, in both modes — the curve is a handle in both, and the grip is what
+  // says so before anyone tries.
+  ctx.globalAlpha = 0.65
+  for (let i = 0; i < 3; i++) {
+    ctx.fillRect(cx + cw - 12, cy + 5 + i * 3, 7, 1.5)
   }
+  ctx.globalAlpha = 1
 }
 
 // ── Drag, fixed mode only ───────────────────────────────────────────────────
 
-function yToDb(clientY) {
+/**
+ * The dB the pointer is sitting at, unclamped.
+ *
+ * Symmetric about the centre: grabbing either the upper or the lower trace
+ * reads the same value, because they are two views of one number.
+ */
+function yToDbRaw(clientY) {
   const canvas = canvasEl.value
-  if (!canvas) return props.fixedThresholdDb
+  if (!canvas) return null
   const rect = canvas.getBoundingClientRect()
   const mid = rect.height / 2
   const half = mid - 2
-  // Symmetric: grabbing either the upper or the lower trace sets the same
-  // threshold, because they are two views of one number.
   const unit = Math.min(1, Math.abs(clientY - rect.top - mid) / half)
-  const db = linToDb(unitToAmp(unit))
-  return Math.min(props.maxDb, Math.max(props.minDb, db))
+  return linToDb(unitToAmp(unit))
+}
+
+const quantize = (v) => Math.round(v / props.step) * props.step
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+
+// Where an adaptive drag started, so the movement can be applied as an offset
+// rather than as an absolute position — see the file header.
+let dragStartDb = 0
+let dragStartHeadroom = 0
+
+function applyDrag(clientY) {
+  const db = yToDbRaw(clientY)
+  if (db === null) return
+  if (isFixed.value) {
+    emit('update:fixedThresholdDb', clamp(quantize(db), props.minDb, props.maxDb))
+  } else {
+    const moved = db - dragStartDb
+    emit('update:headroomDb', clamp(
+      quantize(dragStartHeadroom + moved), props.minHeadroomDb, props.maxHeadroomDb,
+    ))
+  }
 }
 
 function onPointerDown(e) {
   // The idle label is a button. It is the first thing anyone reads on this
   // panel and the only instruction it gives, so it should carry out that
-  // instruction rather than merely state it. Checked before the drag: while
-  // idle there is no threshold curve drawn, so there is nothing to grab.
+  // instruction rather than merely state it.
+  //
+  // Only the label itself is a button, though. In fixed mode the rest of an
+  // idle face is still the control surface — the ceiling exists whether or not
+  // audio is running, and having to press play before you can set it would be
+  // an arbitrary gate. Adaptive has nothing to offer here: its threshold is a
+  // measurement plus an offset, and there is no measurement yet.
   if (isIdle.value) {
     const rect = canvasEl.value?.getBoundingClientRect()
     if (!rect) return
@@ -383,19 +497,27 @@ function onPointerDown(e) {
     if (
       x >= idleHit.x && x <= idleHit.x + idleHit.w &&
       y >= idleHit.y && y <= idleHit.y + idleHit.h
-    ) emit('requestPlay')
-    return
+    ) {
+      emit('requestPlay')
+      return
+    }
+    if (!isFixed.value) return
   }
-  if (!isFixed.value) return
   canvasEl.value?.setPointerCapture?.(e.pointerId)
-  emit('update:fixedThresholdDb', yToDb(e.clientY))
+  dragStartDb = yToDbRaw(e.clientY) ?? 0
+  dragStartHeadroom = props.headroomDb
+  // Fixed mode jumps to the pointer on press; adaptive does not, because there
+  // is nothing absolute to jump to — the first movement is what carries the
+  // change.
+  if (isFixed.value) applyDrag(e.clientY)
 }
 
 function onPointerMove(e) {
   // Only while captured — `buttons` is 0 on a hover, so this needs no separate
   // dragging flag.
-  if (isIdle.value || !isFixed.value || e.buttons === 0) return
-  emit('update:fixedThresholdDb', yToDb(e.clientY))
+  if (e.buttons === 0) return
+  if (isIdle.value && !isFixed.value) return
+  applyDrag(e.clientY)
 }
 
 function onPointerUp(e) {
@@ -415,7 +537,7 @@ function onPointerUp(e) {
     <canvas
       ref="canvasEl"
       class="block w-full h-full"
-      :style="{ cursor: isIdle ? 'pointer' : isFixed ? 'ns-resize' : 'default' }"
+      :style="{ cursor: isIdle && !isFixed ? 'pointer' : 'ns-resize' }"
       :aria-label="title"
       role="img"
       @pointerdown="onPointerDown"
