@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applySoftClipperRegion, computePeakCache } from '../audio/processing.js'
-import { getEffectChain } from '../audio/effectChain.js'
+import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -59,6 +59,20 @@ export function useSoftClipper() {
       meterId = requestAnimationFrame(tick)
     }
     meterId = requestAnimationFrame(tick)
+  }
+
+  /**
+   * The live scope ring, or null when nothing is running.
+   *
+   * A function rather than a ref, deliberately: this is ~1400 floats updating
+   * at ~46 Hz feeding a canvas that redraws itself every frame anyway, and
+   * routing it through reactivity would make Vue diff typed arrays for no
+   * benefit. Same arrangement the resonance display uses.
+   */
+  function getScope() {
+    const chain = getEffectChainIfExists()
+    const nodes = chain?.effects.find(e => e.id === softClipperEffect.id)?.nodes
+    return nodes?.getScope?.() ?? null
   }
 
   function stopMeters() {
@@ -160,6 +174,7 @@ export function useSoftClipper() {
     clipperReduction,
     clipperInputLevels,
     clipperOutputLevels,
+    getScope,
     hasSelection,
     togglePreview,
     syncHeadroom,

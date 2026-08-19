@@ -756,3 +756,56 @@ test('the warm-up hold is released, not held forever', () => {
   const { metering } = processSoftClipperBuffer([signal], SR, { headroomDb: 8, emphasisDb: 0 })
   assert.ok(metering.maxReductionDb > 1, `warm-up never released: ${metering.maxReductionDb.toFixed(2)} dB`)
 })
+
+test('the scope pairs each peak with the threshold at that same sample', () => {
+  // The scope's one job is to make crossings visible. That only works if the
+  // peak it reports and the threshold it reports come from the SAME sample:
+  // in adaptive mode T moves within a block, so pairing the block's loudest
+  // sample with (say) the block's final T can draw a crossing that did not
+  // happen, or hide one that did. Asserted against the kernel's own per-sample
+  // threshold scratch rather than against a recomputed estimate.
+  const signal = concat(speechLike(4, 0.6, 29), tone(120, 0.02, 0.95), speechLike(1, 0.5, 31))
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 8, emphasisDb: 6 })
+  const out = new Float32Array(signal.length)
+  let checked = 0
+  let crossings = 0
+  for (let off = 0; off + 128 <= signal.length; off += 128) {
+    kernel.process([signal.subarray(off, off + 128)], [out.subarray(off, off + 128)], 128)
+
+    let want = 0
+    let wantIdx = 0
+    for (let i = 0; i < 128; i++) {
+      const a = Math.abs(signal[off + i])
+      if (a > want) { want = a; wantIdx = i }
+    }
+    assert.ok(
+      Math.abs(kernel.scopePeak - want) < 1e-6,
+      `scope peak ${kernel.scopePeak} != block peak ${want}`,
+    )
+    assert.equal(kernel.scopeThreshold, kernel.tScratch[wantIdx])
+    if (kernel.scopePeak > kernel.scopeThreshold) crossings++
+    checked++
+  }
+  assert.ok(checked > 100, 'not enough blocks to be a real check')
+  // And it must actually report crossings on material the stage works on —
+  // a scope that never draws one would pass every pairing assertion above.
+  assert.ok(crossings > 0, 'the scope reported no crossing on material that clips')
+})
+
+test('the scope threshold starts above full scale, so warm-up draws no crossings', () => {
+  // Failing safe has to be visible too: during warm-up the stage deliberately
+  // processes nothing, and the display must show that rather than showing an
+  // un-initialised threshold sitting at zero with everything above it.
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 8, emphasisDb: 6 })
+  const signal = concat(noise(0.3, dbToLin(-55)), speechLike(1, 0.5, 41))
+  const out = new Float32Array(signal.length)
+  for (let off = 0; off + 128 <= 0.25 * SR; off += 128) {
+    kernel.process([signal.subarray(off, off + 128)], [out.subarray(off, off + 128)], 128)
+    assert.ok(
+      kernel.scopePeak <= kernel.scopeThreshold,
+      `warm-up drew a crossing: peak ${kernel.scopePeak} over T ${kernel.scopeThreshold}`,
+    )
+  }
+})

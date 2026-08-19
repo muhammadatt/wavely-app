@@ -641,6 +641,16 @@ export class SoftClipperKernel {
     this.tScratch = new Float32Array(128)
     this.trimScratch = new Float32Array(128)
 
+    // ── Scope ──
+    // Per-process()-call summary for the scrolling display: the loudest input
+    // sample of the call and the threshold AT THAT SAMPLE. Pairing them rather
+    // than reporting a block-average threshold is what makes "did this peak
+    // cross" answerable from the display exactly as the curve answered it —
+    // T moves within a block, so any other pairing can draw a crossing that
+    // did not happen, or hide one that did.
+    this.scopePeak = 0
+    this.scopeThreshold = 1
+
     this.params = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
     this.setParams({})
   }
@@ -737,6 +747,9 @@ export class SoftClipperKernel {
     let speechWarmupPeak = this.speechWarmupPeak
     let detectorWarmupCount = this.detectorWarmupCount
     let headroomDbSmoothed = this.headroomDbSmoothed
+    // Reset per call: each scope point summarises one process() call.
+    let scopePeak = 0
+    let scopeThreshold = this.scopeThreshold
     let outputTrimDbSmoothed = this.outputTrimDbSmoothed
 
     for (let i = 0; i < n; i++) {
@@ -818,6 +831,10 @@ export class SoftClipperKernel {
       // backstop — softClip takes log(|x|/T), so T must stay off zero.
       const targetDb = fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed
       T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX)
+
+      // Scope: loudest input sample of this call, and T at that instant.
+      const ax = x < 0 ? -x : x
+      if (ax > scopePeak) { scopePeak = ax; scopeThreshold = T[i] }
     }
 
     this.fastRmsMeanSq = fastRmsMeanSq
@@ -829,6 +846,8 @@ export class SoftClipperKernel {
     this.speechWarmupPeak = speechWarmupPeak
     this.detectorWarmupCount = detectorWarmupCount
     this.headroomDbSmoothed = headroomDbSmoothed
+    this.scopePeak = scopePeak
+    this.scopeThreshold = scopeThreshold
     this.outputTrimDbSmoothed = outputTrimDbSmoothed
 
     // Emphasis coefficients recompute only when the raw target has moved
@@ -946,6 +965,20 @@ export function processSoftClipperBuffer(channelData, sampleRate, params = {}) {
 if (typeof registerProcessor === 'function') {
   const METER_INTERVAL_SAMPLES = 1024
 
+  /**
+   * Scope points batched into one message.
+   *
+   * One point per process() call — 128 samples, ~2.9 ms at 44.1 kHz — which is
+   * the resolution the display needs to draw a plosive as a spike rather than
+   * a step. Posting each one individually would be ~344 messages a second per
+   * instance; batching eight of them rides the meter's existing ~46 Hz
+   * cadence instead, for the same information.
+   *
+   * Interleaved [peak, threshold] in one Float32Array so the whole batch is a
+   * single structured clone.
+   */
+  const SCOPE_BATCH = 8
+
   class SoftClipperWorkletProcessor extends AudioWorkletProcessor {
     constructor(options) {
       super()
@@ -954,6 +987,11 @@ if (typeof registerProcessor === 'function') {
         this.kernel.setParams(options.processorOptions.params)
       }
       this.sinceMeter = 0
+      // Reused: postMessage clones synchronously, so the buffer is free to be
+      // overwritten as soon as the call returns — same arrangement as the
+      // resonance kernel's display scratch.
+      this.scope = new Float32Array(SCOPE_BATCH * 2)
+      this.scopeCount = 0
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
       }
@@ -972,10 +1010,31 @@ if (typeof registerProcessor === 'function') {
 
       this.kernel.process(input, output, n)
 
+      // 1024 / 128 is exactly SCOPE_BATCH, so the array fills precisely at the
+      // standard render quantum. If a host ever used a smaller one, the extra
+      // points fold into the last slot by peak rather than being dropped — a
+      // dropped point would silently stretch the scope's time axis, where a
+      // folded one only coarsens it.
+      if (this.scopeCount < SCOPE_BATCH) {
+        this.scope[this.scopeCount * 2] = this.kernel.scopePeak
+        this.scope[this.scopeCount * 2 + 1] = this.kernel.scopeThreshold
+        this.scopeCount++
+      } else if (this.kernel.scopePeak > this.scope[(SCOPE_BATCH - 1) * 2]) {
+        this.scope[(SCOPE_BATCH - 1) * 2] = this.kernel.scopePeak
+        this.scope[(SCOPE_BATCH - 1) * 2 + 1] = this.kernel.scopeThreshold
+      }
+
       this.sinceMeter += n
       if (this.sinceMeter >= METER_INTERVAL_SAMPLES) {
         this.sinceMeter = 0
-        this.port.postMessage({ type: 'gr', reductionDb: this.kernel.reductionDb })
+        this.port.postMessage({
+          type: 'gr',
+          reductionDb: this.kernel.reductionDb,
+          // Only the filled prefix, so a short final batch cannot inject
+          // stale zero-peak points into the scroll.
+          scope: this.scope.subarray(0, this.scopeCount * 2),
+        })
+        this.scopeCount = 0
       }
       return true
     }

@@ -6,6 +6,7 @@ import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
+import ClipperScope from '../meters/ClipperScope.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
@@ -13,7 +14,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb,
-  clipperPreview, clipperReduction, clipperInputLevels, clipperOutputLevels, hasSelection,
+  clipperPreview, clipperReduction, clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, syncHeadroom, syncEmphasis, syncOutputTrim, syncFixedThreshold,
   setThresholdMode, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -89,18 +90,35 @@ const METER_FULL_SCALE_DB = 12
     </template>
 
     <div class="px-[26px] pt-[20px] pb-[26px]">
+      <!-- The scope answers "on what", which the bar below cannot: at the
+           default the blocks that clip take a median of 0.3-0.4 dB, so a
+           working stage reads as an idle needle. Seeing the crossings is what
+           makes Headroom settable by eye. In fixed mode the threshold curve is
+           also the control — drag it. -->
+      <ClipperScope
+        :data-fn="getScope"
+        :mode="thresholdMode"
+        :fixed-threshold-db="fixedThresholdDb"
+        @update:fixed-threshold-db="syncFixedThreshold"
+        :accent="ACCENT"
+        :height="132"
+        title="Clipper scope: input envelope against the threshold"
+      />
+
       <!-- Peak reduction: what the stage is actually doing, in the same
            instrument the compressors use, with the 3-6 dB usable range
            shaded so a user can find their Headroom setting by eye rather
            than by ear alone (spec §7.2). -->
-      <GainReductionBar
-        :reduction-db="clipperReduction"
-        :accent="ACCENT"
-        title="PEAK REDUCTION"
-        :full-scale-db="METER_FULL_SCALE_DB"
-        :zone-min-db="3"
-        :zone-max-db="6"
-      />
+      <div class="mt-[16px]">
+        <GainReductionBar
+          :reduction-db="clipperReduction"
+          :accent="ACCENT"
+          title="PEAK REDUCTION"
+          :full-scale-db="METER_FULL_SCALE_DB"
+          :zone-min-db="3"
+          :zone-max-db="6"
+        />
+      </div>
 
       <div class="flex items-center justify-between gap-[14px] mt-[24px]">
         <LevelMeter :levels="clipperInputLevels" label="IN" :height="132" />
