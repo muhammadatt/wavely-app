@@ -61,7 +61,7 @@ const props = defineProps({
   minDb: { type: Number, default: -24 },
   maxDb: { type: Number, default: -1 },
   /** Headroom in dB — what an adaptive-mode drag moves. */
-  headroomDb: { type: Number, default: 8 },
+  headroomDb: { type: Number, default: 6.5 },
   /** Drag limits, matching the Headroom knob's own range. */
   minHeadroomDb: { type: Number, default: 4 },
   maxHeadroomDb: { type: Number, default: 16 },

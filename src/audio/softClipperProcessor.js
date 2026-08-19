@@ -554,7 +554,15 @@ const ENGAGED_TAU_S = 2.0
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
-  headroomDb: 8, // 4-16, primary control — lower means more clipping
+  // 4-16, primary control — lower means more clipping.
+  //
+  // 6.5 rather than 8 because the default knee moved to tanh^3, which takes
+  // less at a given Headroom: on the reference clip 8 delivered 3.15 dB of
+  // peak reduction under tanh^2 and 2.28 under tanh^3, dropping the stock
+  // patch below the 3-6 dB the lamp's own guidance calls the usable range on
+  // speech. 6.5 restores 3.21 dB with the shipped knee. The two defaults are
+  // coupled through the shape table and must move together.
+  headroomDb: 6.5,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'

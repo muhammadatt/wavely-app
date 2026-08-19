@@ -3,8 +3,8 @@ import { computed, ref } from 'vue'
 import {
   createPeakHold,
   createReadoutThrottle,
-  grFraction,
-  grFractionToDb,
+  lampFraction,
+  lampFractionToDb,
   useMeterFrame,
 } from './ballistics.js'
 
@@ -28,9 +28,16 @@ import {
  * to be seen. The number beside it is throttled separately — a value flickering
  * at frame rate is unreadable however correct it is.
  *
- * The brightness law is grFraction, the same voltage curve the compressors' GR
- * meters use, so "half lit" here and "half way along the bar" there mean the
- * same amount of reduction.
+ * THE BRIGHTNESS LAW IS THE LAMP'S OWN, NOT THE COMPRESSORS' GR CURVE. It
+ * shipped using grFraction on the argument that "half lit" here should mean
+ * what "half way along the bar" means there. Reported from use: the lamp was
+ * barely visible unless the stage was driven hard, and showed almost nothing
+ * when it was doing the job it exists for. A voltage law is near-linear in
+ * amplitude at small reductions, so on this 6 dB scale a 0.3 dB event — the
+ * median of the blocks that clip on real narration — lit 3.9% of the range.
+ * See lampFraction for the replacement and the numbers; the short version is
+ * that consistency with an instrument the user cannot see beside this one was
+ * never worth the visibility it cost.
  */
 const props = defineProps({
   /** Peak reduction, positive or negative dB — the magnitude is used. */
@@ -61,18 +68,24 @@ const props = defineProps({
 // worst possible way: the kernel reports per block, and on speech the
 // overwhelming majority of blocks clip nothing at all, so a 10 Hz sample of
 // the raw value shows a dash on most frames while the lamp beside it is lit.
-// Deriving both from one held quantity is the same rule grFractionToDb exists
-// for — a number and a light that disagree are worse than either alone.
+// Deriving both from one held quantity is the same rule lampFractionToDb
+// exists for — a number and a light that disagree are worse than either alone.
 const brightness = ref(0)
 const readoutDb = ref(0)
-const held = createPeakHold({ holdMs: 400, fallPerSec: 1.1 })
+// Longer hold and a slower fall than the first version, for the same reason
+// the curve changed: the case that reads worst is a single errant peak with
+// quiet either side, and a 400 ms hold falling at 1.1/s gave that event under
+// a second on screen. 700 ms and 0.7/s puts an isolated plosive up for roughly
+// 2 s, which is long enough to look over at. Still a hold, not an average —
+// averaging is what made the bar this replaced unreadable.
+const held = createPeakHold({ holdMs: 700, fallPerSec: 0.7 })
 const throttle = createReadoutThrottle()
 
 useMeterFrame((dtMs) => {
-  const target = grFraction(Math.abs(props.reductionDb), props.fullScaleDb)
+  const target = lampFraction(Math.abs(props.reductionDb), props.fullScaleDb)
   brightness.value = held.push(target, dtMs)
   if (throttle.due(dtMs)) {
-    readoutDb.value = grFractionToDb(brightness.value, props.fullScaleDb)
+    readoutDb.value = lampFractionToDb(brightness.value, props.fullScaleDb)
   }
 })
 
@@ -83,8 +96,12 @@ const lampStyle = computed(() => {
   const b = brightness.value
   return {
     background: `color-mix(in srgb, ${props.accent} ${(6 + b * 94).toFixed(1)}%, #17120f)`,
+    // The glow starts substantial rather than ramping from nothing: the fill
+    // alone at a quarter lit reads as a slightly warm dot, where a halo around
+    // it reads as a lamp that came on. Still exactly absent at rest, so an
+    // idle stage cannot be mistaken for a working one.
     boxShadow: b > 0.01
-      ? `0 0 ${(4 + b * 16).toFixed(1)}px ${(b * 3).toFixed(1)}px color-mix(in srgb, ${props.accent} ${(b * 55).toFixed(0)}%, transparent)`
+      ? `0 0 ${(4 + b * 18).toFixed(1)}px ${(b * 3).toFixed(1)}px color-mix(in srgb, ${props.accent} ${(20 + b * 55).toFixed(0)}%, transparent)`
       : 'none',
     borderColor: `color-mix(in srgb, ${props.accent} ${(18 + b * 60).toFixed(0)}%, transparent)`,
   }
