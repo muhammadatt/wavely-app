@@ -68,6 +68,10 @@ export const ICONS = {
   deesser: '<path d="M3 16c2 0 2.5-6 4.5-6S10 16 12 16s2.5-8 4.5-8S19 16 21 16"/><path d="M5 5h14" stroke-dasharray="3 2"/><path d="M5 4v2M19 4v2"/>',
   // Waveform, flat stretch, waveform — the gap being targeted. Was a second
   // copy of the `cut` scissors, which is the clipboard verb's glyph.
+  // Analysis: an FFT trace over a baseline — a spectrum, not a waveform. Drawn
+  // with a tall narrow peak so it is not mistaken for `eq`, whose curve is
+  // smooth and centred.
+  spectrum: '<path d="M3 20V9M6.5 20v-5M10 20V4M13.5 20v-8M17 20V7M20.5 20v-4"/><path d="M2 22h20" opacity=".35"/>',
   removeSilence: '<path d="M3 6v12M7 9v6"/><path d="M9.5 12h5"/><path d="M17 9v6M21 6v12"/>',
 
   // Presets — keyed by preset id so PresetsPanel can look them up directly
