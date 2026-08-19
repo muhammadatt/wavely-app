@@ -13,11 +13,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb,
+  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncOutputTrim, syncFixedThreshold,
-  setThresholdMode, apply, teardown, closeModal,
+  setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
 
 const { state } = useEditorState()
@@ -37,6 +37,38 @@ const MODE_OPTIONS = [
   { value: 'adaptive', label: 'ADAPTIVE', title: "Threshold rides the speaker's own level" },
   { value: 'fixed', label: 'FIXED', title: 'Threshold is a stated dBFS ceiling' },
 ]
+
+/**
+ * Knee shape, named for what it does rather than for its exponent.
+ *
+ * What changes is how far over the threshold a peak has to be before the stage
+ * bothers with it. At a FIXED Headroom that reads as strictly less work, on
+ * both axes at once — measured on 35 s of real narration at Headroom 8, the
+ * fraction of voiced samples touched goes 0.293% / 0.195% / 0.126% and the
+ * mean reduction on those samples 0.358 / 0.216 / 0.150 dB.
+ *
+ * SO THE CAPTIONS DESCRIBE WHICH PEAKS GET TOUCHED, NOT A CHANGE OF CHARACTER
+ * AT EQUAL DEPTH. Winding Headroom down to recover the depth reverses the
+ * ordering — a lower threshold pulls in more samples than the shape excludes,
+ * and the higher shapes end up touching MORE of the file (0.293% -> 0.465%),
+ * more gently. See SHAPE_EXPONENT in the kernel for both tables and for why
+ * the smoothstep family is not on this switch.
+ *
+ * The harmonic structure barely moves (0.131% -> 0.068% of harmonic energy
+ * above the 11th), so this is deliberately NOT presented as a distortion
+ * control.
+ */
+const SHAPE_OPTIONS = [
+  { value: 'tanh2', label: 'BROAD', title: 'Eases every peak that crosses the threshold (the original curve)' },
+  { value: 'tanh3', label: 'FOCUSED', title: 'Lets peaks just over the line through; acts on the ones that stand out' },
+  { value: 'tanh4', label: 'SURGICAL', title: 'Acts only on the genuine outliers, and does less overall' },
+]
+
+const SHAPE_CAPTION = {
+  tanh2: 'every peak over the line',
+  tanh3: 'the ones that stand out',
+  tanh4: 'only the real outliers — expect less depth',
+}
 
 const MODE_CAPTION = {
   adaptive: 'the ceiling rides the voice',
@@ -278,6 +310,25 @@ const SCOPE_H = 236
             gain match for A/B
           </p>
         </div>
+      </div>
+
+      <!-- Which peaks count. Sits with the knobs rather than in the
+           instrument strip because it refines what the display already shows,
+           the way HF Emphasis does — the strip is for things that change how
+           to READ the scope, and this changes what gets acted on. -->
+      <div class="flex items-center justify-center gap-[9px] mt-[14px]">
+        <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">SELECTIVITY</span>
+        <SegmentedSwitch
+          :model-value="shape"
+          @update:model-value="setShape"
+          :options="SHAPE_OPTIONS"
+          :accent="ACCENT"
+          :disabled="!clipperPreview"
+          :padding-x="11"
+        />
+        <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+          {{ SHAPE_CAPTION[shape] }}
+        </span>
       </div>
 
       <p

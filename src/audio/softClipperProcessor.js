@@ -559,6 +559,7 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
   fixedThresholdDb: -10, // used only in 'fixed' mode
+  shape: 'tanh2', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
 }
 
 function clamp(v, lo, hi) {
@@ -574,13 +575,86 @@ function linToDb(lin) {
 }
 
 /**
+ * KNEE SHAPES — the exponent on tanh, and what it actually buys.
+ *
+ * The reduction law is r = rMax * tanh^n(e / knee). Near the threshold
+ * tanh(u) ~ u, so r ~ (e/knee)^n and the exponent IS the order of contact: the
+ * gain curve joins the unity region with n-1 vanishing derivatives. n = 2 is
+ * C1, n = 3 is C2, n = 4 is C3.
+ *
+ * WHAT IT CHANGES IS SELECTIVITY, NOT DISTORTION, and that ordering was
+ * measured rather than assumed. Matched at 3 dB of reduction on a peak 12 dB
+ * over threshold (so the shapes are compared doing the same amount of work):
+ *
+ *   shape   reduction at +3 dB / +6 / +12 / +18 dB excess   %harmonic energy above H11
+ *   tanh^2      0.28    1.03    3.00    4.51                     0.131
+ *   tanh^3      0.11    0.72    3.00    4.75                     0.102
+ *   tanh^4      0.05    0.53    3.00    4.90                     0.068
+ *
+ * The harmonic tail moves by a factor of two on a quantity that is already a
+ * tenth of a percent — audibly nothing on its own. The left-hand columns are
+ * the real difference: at +3 dB of excess tanh^4 does a SIXTH of what tanh^2
+ * does, then catches up and passes it on the big transients.
+ *
+ * ON A REAL FILE, AT A FIXED HEADROOM, THAT LANDS AS STRICTLY LESS WORK ON
+ * BOTH AXES — which is the reading the panel is captioned for. 35 s of real
+ * narration, Headroom 8, emphasis 6:
+ *
+ *   shape   peak GR   voiced samples touched   mean GR on those samples
+ *   tanh^2   3.15 dB          0.293%                   0.358 dB
+ *   tanh^3   2.28 dB          0.195%                   0.216 dB
+ *   tanh^4   1.66 dB          0.126%                   0.150 dB
+ *
+ * ⚠ AND MATCHING THE DEPTH BACK REVERSES IT, which is worth knowing before
+ * reaching for the Headroom knob to compensate. Depth is matched by LOWERING
+ * Headroom, which lowers the threshold, which brings more samples over the
+ * line — and that move dominates the shape's selectivity. Same clip, each
+ * shape walked down to tanh^2's 3.15 dB of peak reduction:
+ *
+ *   shape   Headroom   peak GR   voiced samples touched   mean GR on those
+ *   tanh^2     8.0      3.15            0.293%                 0.358
+ *   tanh^3     6.5      3.21            0.403%                 0.331
+ *   tanh^4     5.5      3.21            0.465%                 0.308
+ *
+ * So at matched depth the higher shapes are BROADER, not narrower: a smaller
+ * amount spread over more samples. The selectivity is real in excess-dB terms
+ * and is measured at a FIXED threshold; the user does not hold the threshold
+ * fixed when chasing depth. Read this control as "how much it does at your
+ * current Headroom", not as "the same result, more surgically".
+ *
+ * (The matched-GR synthetic figures above predicted the opposite, and one real
+ * file settled it in one measurement. Eighth time synthetic material has been
+ * too clean to answer the question asked of it.)
+ *
+ * WHY NOT THE SMOOTHSTEP FAMILY, which scored better on the harmonic tail
+ * (0.025-0.092%): monotonicity needs knee > rMax * max s'(u), and for
+ * smoothstep / smootherstep / smoothest-step that is 9.00 / 11.25 / 13.13 dB
+ * against our KNEE_DB of 7. They FOLD the waveform at the shipped calibration.
+ * They are reachable only by re-deriving the knee, which moves every other
+ * measurement in this file, so they were left out rather than half-adopted.
+ *
+ * The tanh family costs nothing here — its bound goes 4.62 / 4.50 / 4.46 dB as
+ * n rises, so every shape offered is monotonic with room to spare, and raising
+ * n makes the constraint slightly looser rather than tighter. Pinned in
+ * `test/dsp/softClipper.test.js` against the shipped KNEE_DB.
+ */
+export const SHAPE_EXPONENT = { tanh2: 2, tanh3: 3, tanh4: 4 }
+
+/**
+ * Smallest KNEE_DB that keeps each shape monotonic at MAX_REDUCTION_DB, i.e.
+ * rMax * max_u d/du tanh^n(u). Recorded so the guard test compares against
+ * stated numbers rather than re-deriving them from the same code it checks.
+ */
+export const SHAPE_MIN_KNEE_DB = { tanh2: 4.62, tanh3: 4.50, tanh4: 4.46 }
+
+/**
  * Soft-clip curve — level-invariant and reduction-bounded. See
  * MAX_REDUCTION_DB / KNEE_DB above for the derivation and for the two spec
  * defects that made this shape necessary.
  *
  *   |x| <= T :  y = x                                    (bit-transparent)
  *   |x| >  T :  e = 20*log10(|x|/T)
- *               r = rMaxDb * tanh^2(e / kneeDb)
+ *               r = rMaxDb * tanh^n(e / kneeDb)   n from `shape`
  *               y = sign(x) * |x| * 10^(-r/20)
  *
  * The log/exp pair only runs for samples ABOVE the threshold, which on speech
@@ -591,12 +665,22 @@ function linToDb(lin) {
  * amplitude range and changes voice character below threshold. The whole
  * "transparent when idle" claim rests on the piecewise form.
  */
-export function softClip(x, T, rMaxDb = MAX_REDUCTION_DB, kneeDb = KNEE_DB) {
+export function softClip(x, T, rMaxDb = MAX_REDUCTION_DB, kneeDb = KNEE_DB, exponent = 2) {
   const ax = x < 0 ? -x : x
   if (ax <= T) return x
   const excessDb = 20 * Math.log10(ax / T)
   const t = Math.tanh(excessDb / kneeDb)
-  const reductionDb = rMaxDb * t * t
+  // Repeated multiply rather than Math.pow: this runs per oversampled sample
+  // above the threshold, and the exponent is one of exactly three integers.
+  //
+  // The extra factors are applied to the SCALED reduction rather than to a
+  // separately accumulated tanh^n, so the exponent-2 expression is character
+  // for character the one that shipped before shapes existed. `rMax * (t*t)`
+  // and `(rMax * t) * t` differ in the last ulp, and a default that moves by
+  // an ulp is still a default that moved — pinned by its own test.
+  let reductionDb = rMaxDb * t * t
+  if (exponent >= 3) reductionDb *= t
+  if (exponent >= 4) reductionDb *= t
   const y = ax * Math.exp(-reductionDb * LN10_OVER_20)
   return x < 0 ? -y : y
 }
@@ -714,7 +798,10 @@ export class SoftClipperKernel {
     // deviation note 3); emphasisDb's filter coefficients recompute in
     // process() once the target has moved enough to matter. thresholdMode and
     // fixedThresholdDb take effect immediately — neither drives a filter
-    // coefficient, so there is nothing to click.
+    // coefficient, so there is nothing to click. `shape` is the same: it only
+    // changes the exponent inside the reduction law, and every shape is
+    // exactly unity below the threshold, so switching mid-playback cannot
+    // step the level of anything that was not already being reduced.
   }
 
   /**
@@ -798,6 +885,11 @@ export class SoftClipperKernel {
 
     const p = this.params
     const fixedMode = p.thresholdMode === 'fixed'
+    // Resolved once per call: `shape` is a string on the params object and the
+    // clip curve runs L times per sample, so the lookup must not sit inside
+    // the inner loop. Unknown values fall back to the shipped shape rather
+    // than throwing — a bad param must not take the audio thread down.
+    const shapeExponent = SHAPE_EXPONENT[p.shape] ?? 2
 
     // ── Detector + threshold, computed once per sample from the unfiltered
     // mono downmix, shared by every channel's clip curve. headroomDb and
@@ -980,7 +1072,7 @@ export class SoftClipperKernel {
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           const before = hi[k]
-          const after = softClip(before, t)
+          const after = softClip(before, t, MAX_REDUCTION_DB, KNEE_DB, shapeExponent)
           hi[k] = after
           const ab = before < 0 ? -before : before
           if (ab > t) {

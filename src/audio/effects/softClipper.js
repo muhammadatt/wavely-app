@@ -33,6 +33,10 @@ export const SOFT_CLIPPER_DEFAULTS = {
   outputTrimDb: 0, // ±6, gain-match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
   fixedThresholdDb: -10,
+  // Knee contact order. tanh2 is the shipped curve; the higher orders leave
+  // near-threshold material progressively more alone and spend the same
+  // budget on the genuine outliers instead. See SHAPE_EXPONENT in the kernel.
+  shape: 'tanh2', // 'tanh2' | 'tanh3' | 'tanh4'
 }
 
 /** Params are already kernel-shaped — no renaming needed unlike FET1176/LA2A. */
@@ -43,6 +47,7 @@ export function toKernelParams(params) {
     outputTrimDb: params.outputTrimDb,
     thresholdMode: params.thresholdMode,
     fixedThresholdDb: params.fixedThresholdDb,
+    shape: params.shape,
   }
 }
 

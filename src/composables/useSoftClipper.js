@@ -16,6 +16,7 @@ const emphasisDb = ref(SOFT_CLIPPER_DEFAULTS.emphasisDb)
 const outputTrimDb = ref(SOFT_CLIPPER_DEFAULTS.outputTrimDb)
 const thresholdMode = ref(SOFT_CLIPPER_DEFAULTS.thresholdMode)
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
+const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
@@ -35,6 +36,7 @@ function currentParams() {
     outputTrimDb: outputTrimDb.value,
     thresholdMode: thresholdMode.value,
     fixedThresholdDb: fixedThresholdDb.value,
+    shape: shape.value,
   }
 }
 
@@ -142,6 +144,11 @@ export function useSoftClipper() {
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => { fixedThresholdDb.value = v; pushParam('fixedThresholdDb', v) }
 
+  function setShape(v) {
+    shape.value = v
+    pushParam('shape', v)
+  }
+
   function setThresholdMode(mode) {
     thresholdMode.value = mode
     pushParam('thresholdMode', mode)
@@ -205,6 +212,7 @@ export function useSoftClipper() {
     outputTrimDb,
     thresholdMode,
     fixedThresholdDb,
+    shape,
     clipperPreview,
     clipperReduction,
     clipperEngagedPct,
@@ -220,6 +228,7 @@ export function useSoftClipper() {
     syncOutputTrim,
     syncFixedThreshold,
     setThresholdMode,
+    setShape,
     apply,
     teardown,
     openModal,
