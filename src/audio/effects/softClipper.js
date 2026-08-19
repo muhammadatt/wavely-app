@@ -19,7 +19,7 @@ import { createLevelTap } from './levelTap.js'
 export { SOFT_CLIPPER_LATENCY_SAMPLES }
 
 export const SOFT_CLIPPER_DEFAULTS = {
-  headroomDb: 10, // 4-16, primary control — lower = more clipping
+  headroomDb: 8, // 4-16, primary control — lower = more clipping
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, gain-match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'

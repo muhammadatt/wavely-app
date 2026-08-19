@@ -133,6 +133,44 @@
  *    mastered one. A noise-floor-relative floor was tried in its place and
  *    removed; see the note above T_MIN for why it broke continuous material.
  *
+ * 7. THE SPEECH-LEVEL TRACKER IS PEAK-REFERENCED, NOT RMS-REFERENCED (spec
+ *    §3.2). Reported from listening on headphones: subtle distortion across the
+ *    whole file rather than on peaks. Measured and confirmed — at the default
+ *    the stage was shaping 4.4% of all voiced SAMPLES, with 32% of voiced 50 ms
+ *    blocks carrying residual above -40 dBc and p90 residual at -27 dBc. That
+ *    is waveshaping the programme, not taming transients.
+ *
+ *    The cause is a units mismatch the spec carries: §3.2 tracks fast_rms,
+ *    §3.3 sets T = speech_level + headroom, and T is then compared against
+ *    individual SAMPLES. Speech has a large crest factor, so an RMS-referenced
+ *    threshold lands INSIDE the normal peak distribution. Measured on the
+ *    reference clip: the median voiced block's peak sat 5.3 dB above the
+ *    tracked level, p90 13.0 dB above, p99 18.0 dB above — so at the 10 dB
+ *    default, T was below the peak of a quarter of all voiced blocks. No
+ *    setting in the spec's 4-16 dB range escapes it; the range is ~9 dB too
+ *    low for the quantity it was measured against.
+ *
+ *    Tracking a short-term peak envelope instead makes Headroom mean "dB above
+ *    where syllable peaks normally land", which is what a transient tamer
+ *    needs and is stable across speakers with different crest factors. Simply
+ *    raising the Headroom range would have worked on this one file and needed
+ *    re-tuning per recording — the same class of error as calibrating against
+ *    absolute level, which deviation 6 had just finished removing.
+ *
+ *    Result at the default: 0.23% of voiced samples touched (from 4.4%), 4% of
+ *    blocks above -40 dBc (from 32%), residual p90 -64 dBc (from -27), and
+ *    3.17 dB of peak reduction — inside §7.1's stated range where the old
+ *    build's nominal 3.94 dB was bought by distorting everything.
+ *
+ *    §8.3's onset-excess histogram — the diagnostic that names this exact
+ *    failure, deferred as an offline exercise when this was built and
+ *    therefore never run — now reports median and mode moving 0.00 dB, which
+ *    is its stated pass condition.
+ *
+ *    The default Headroom moved 10 -> 8 with the reference change. The 4-16
+ *    range is kept: against a peak reference, 4 is the aggressive end and 16 is
+ *    effectively off.
+ *
  * ARCHITECTURE (spec §2, unchanged):
  *
  *   input ──┬─► detector (unfiltered, mono downmix) ──────────────┐
@@ -175,6 +213,39 @@ export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES as SOFT_CLIPPER_LATENCY_S
 // ── Detector constants ──────────────────────────────────────────────────────
 
 const FAST_RMS_TAU_MS = 10
+
+/**
+ * The speech-level tracker follows a short-term PEAK envelope, not fast RMS.
+ *
+ * Spec §3.2 tracks fast_rms and §3.3 sets T = speech_level + headroom. But T is
+ * then compared against individual SAMPLES, and speech has a large crest
+ * factor, so an RMS-referenced threshold sits inside the normal peak
+ * distribution rather than above it. Measured on the reference clip: the median
+ * voiced block's peak sits 5.3 dB above the tracked RMS level, p90 sits 13.0 dB
+ * above and p99 18.0 dB above. With Headroom at its 10 dB default that put T
+ * below the peak of 25% of all voiced blocks, and the curve was shaping
+ * ordinary syllables rather than outliers — 4.4% of voiced SAMPLES touched,
+ * with 32% of voiced 50 ms blocks carrying residual above -40 dBc.
+ *
+ * Reported from listening, on headphones, as subtle distortion across the whole
+ * file rather than on peaks. That is exactly the failure §8.3 describes
+ * ("headroom_db too low: the entire distribution slides down — the stage is
+ * attenuating normal speech, not just outliers") and exactly what the
+ * onset-excess histogram it prescribes exists to catch. That diagnostic was
+ * deferred as an offline exercise when this was built, so nothing caught it.
+ *
+ * Referencing the tracker to peaks makes Headroom mean "dB above where syllable
+ * peaks normally land", which is the quantity a transient tamer needs and is
+ * stable across speakers with different crest factors. Raising the Headroom
+ * range instead would have worked on this file and needed re-tuning per
+ * recording — the same class of mistake as calibrating against absolute level.
+ *
+ * Fast attack so a real peak is not missed, ~150 ms release so the envelope
+ * follows syllables rather than individual glottal pulses. The gate and the
+ * noise-floor estimate stay on fast RMS, where an energy measure is correct.
+ */
+const FAST_PEAK_ATTACK_MS = 1
+const FAST_PEAK_RELEASE_MS = 150
 const NOISE_FOLLOW_TAU_MS = 2000 // creep-up rate of the valley follower
 const GATE_MARGIN_DB = 12 // ⚠ spec-flagged for calibration; not user-exposed in v1
 const GATE_HOLD_MS = 200
@@ -298,13 +369,31 @@ const T_MAX = 0.95
  * rather than aspirational — the meter cannot read past it and the user cannot
  * dial past it.
  *
- * KNEE_DB = 11.4 is the only calibrated number, set so a peak 17.6 dB over
- * threshold — the reported clip's real operating point at minimum Headroom —
- * receives 5 dB, landing inside the meter's shaded 3-6 dB zone. ⚠ One
- * narrator, one clip; the first constant to re-derive against a wider corpus.
+ * KNEE_DB = 7 is the only calibrated number, and it was RE-derived once the
+ * tracker became peak-referenced. It was 11.4, set when a peak 17.6 dB over
+ * threshold was the operating point — which it was only because the threshold
+ * was RMS-referenced and therefore far too low. With T placed above typical
+ * syllable peaks the samples that actually cross it sit 1-8 dB over (measured:
+ * p50 1.2 dB, p90 3.0, max 6.1 at the default), so 11.4 delivered almost
+ * nothing: 0.83 dB at the default where the meter's target zone starts at 3.
+ *
+ * THE TWO CONSTANTS DIVIDE THE WORK CLEANLY, which is the useful part.
+ * Headroom (via the threshold) decides HOW MANY samples are touched;
+ * KNEE_DB decides HOW MUCH those get reduced. Measured at the default, sweeping
+ * KNEE_DB from 11.4 to 3 moved peak reduction 2.38 -> 5.92 dB with the touched
+ * fraction pinned at exactly 6% of blocks throughout. So selectivity and depth
+ * can be tuned independently, and depth must never be bought by lowering the
+ * threshold — that is precisely the mistake that produced broadband distortion.
+ *
+ * 7 lands 3.17 dB of peak reduction at the default while touching 0.23% of
+ * voiced samples. Below 4.62 the curve stops being monotonic (see above), so
+ * the usable span is narrow and 6 was rejected for sitting too close to it.
+ *
+ * ⚠ One narrator, one clip; the first constant to re-derive against a wider
+ * corpus.
  */
 export const MAX_REDUCTION_DB = 6
-export const KNEE_DB = 11.4
+export const KNEE_DB = 7
 
 // ── Emphasis constants ──────────────────────────────────────────────────────
 
@@ -326,7 +415,7 @@ const PARAM_SMOOTH_MS = 8
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
-  headroomDb: 10, // 4-16, primary control — lower means more clipping
+  headroomDb: 8, // 4-16, primary control — lower means more clipping
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
@@ -401,6 +490,9 @@ export class SoftClipperKernel {
     this.speechWarmupSum = 0 // cumulative mean of fastRmsLin (linear RMS amplitude) during warmup
     this.speechWarmupTarget = Math.max(1, Math.round(sampleRate * (SPEECH_INIT_WINDOW_MS / 1000)))
 
+    this.fastPeak = 0
+    this.fastPeakAttack = riseCoeff(FAST_PEAK_ATTACK_MS, sampleRate)
+    this.fastPeakRelease = riseCoeff(FAST_PEAK_RELEASE_MS, sampleRate)
     this.fastRmsCoef = riseCoeff(FAST_RMS_TAU_MS, sampleRate)
     this.noiseFollowCoef = riseCoeff(NOISE_FOLLOW_TAU_MS, sampleRate)
     this.speechCoef = riseCoeff(SPEECH_TAU_S * 1000, sampleRate)
@@ -520,6 +612,7 @@ export class SoftClipperKernel {
     // outputTrimDb are smoothed here too — one one-pole each, run exactly
     // once regardless of channel count (deviation note 3) ──
     let fastRmsMeanSq = this.fastRmsMeanSq
+    let fastPeak = this.fastPeak
     let noiseEstDb = this.noiseEstDb
     let gateHoldSamples = this.gateHoldSamples
     let speechLevelDb = this.speechLevelDb
@@ -542,6 +635,13 @@ export class SoftClipperKernel {
       fastRmsMeanSq += this.fastRmsCoef * (x * x - fastRmsMeanSq) + DENORMAL_GUARD
       const fastRmsLin = Math.sqrt(Math.max(0, fastRmsMeanSq))
       const fastRmsDb = linToDb(fastRmsLin)
+
+      // Short-term peak envelope — what the speech-level tracker follows, and
+      // therefore what Headroom is measured from. See FAST_PEAK_ATTACK_MS.
+      const rect = x < 0 ? -x : x
+      fastPeak += (rect > fastPeak ? this.fastPeakAttack : this.fastPeakRelease)
+        * (rect - fastPeak) + DENORMAL_GUARD
+      const fastPeakDb = linToDb(fastPeak)
 
       // noise_est: decaying valley follower standing in for a running minimum
       // over a trailing 2 s window — see deviation note (2) above.
@@ -585,10 +685,10 @@ export class SoftClipperKernel {
       if (aboveFloor) {
         if (speechWarmupCount < this.speechWarmupTarget) {
           speechWarmupCount++
-          speechWarmupSum += (fastRmsLin - speechWarmupSum) / speechWarmupCount
+          speechWarmupSum += (fastPeak - speechWarmupSum) / speechWarmupCount
           speechLevelDb = linToDb(speechWarmupSum)
         } else {
-          speechLevelDb += this.speechCoef * (fastRmsDb - speechLevelDb)
+          speechLevelDb += this.speechCoef * (fastPeakDb - speechLevelDb)
         }
       }
 
@@ -599,6 +699,7 @@ export class SoftClipperKernel {
     }
 
     this.fastRmsMeanSq = fastRmsMeanSq
+    this.fastPeak = fastPeak
     this.noiseEstDb = noiseEstDb
     this.gateHoldSamples = gateHoldSamples
     this.speechLevelDb = speechLevelDb

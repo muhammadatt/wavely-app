@@ -551,3 +551,146 @@ test('the detector warm-up keeps the threshold sane from the first sample', () =
   const minTDb = 20 * Math.log10(minT)
   assert.ok(minTDb > -45, `threshold dived to ${minTDb.toFixed(1)} dBFS during start-up`)
 })
+
+// ── Selectivity: outliers only, not ordinary speech ─────────────────────────
+//
+// THE TESTS THAT WERE MISSING AGAIN, and the omission had the same shape as
+// last time. The whole suite above passed against a build that shaped 4.4% of
+// voiced samples and put residual above -40 dBc on a third of all voiced
+// blocks — reported from listening on headphones as subtle distortion across
+// the entire file, not on peaks. Nothing here asked "how MUCH of the signal is
+// being touched", only "is the curve well-shaped" and "does it reduce peaks".
+//
+// The cause was that the threshold was RMS-referenced while being compared
+// against SAMPLES. Every probe above is a sine (~3 dB crest), so none of them
+// could expose it: it takes material with a realistic speech crest factor.
+// Spec §8.3 names this failure exactly and prescribes the onset-excess
+// histogram for it; that diagnostic was deferred as an offline exercise.
+
+/**
+ * A probe with a realistic speech crest factor (~14 dB), which a sine
+ * (~3 dB) cannot provide. Syllable-shaped bursts of a few harmonics with
+ * inter-syllable dips, amplitudes skewed so a few are much louder.
+ */
+function speechLike(seconds, peakAmp, seed = 11) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  let i = 0
+  while (i < n) {
+    const sylN = Math.round((0.08 + rnd() * 0.14) * SR)
+    const gapN = Math.round((0.02 + rnd() * 0.06) * SR)
+    const amp = peakAmp * (0.25 + 0.75 * rnd() * rnd())
+    const f0 = 100 + rnd() * 60
+    for (let j = 0; j < sylN && i < n; j++, i++) {
+      const env = Math.sin((Math.PI * j) / sylN) ** 1.5
+      const t = i / SR
+      out[i] = (amp * env * (Math.sin(2 * Math.PI * f0 * t) + 0.5 * Math.sin(4 * Math.PI * f0 * t)
+        + 0.33 * Math.sin(6 * Math.PI * f0 * t) + 0.25 * Math.sin(8 * Math.PI * f0 * t))) / 2.08
+    }
+    for (let j = 0; j < gapN && i < n; j++, i++) out[i] = peakAmp * 0.002 * (rnd() - 0.5)
+  }
+  return out
+}
+
+/** Fraction of voiced samples the curve actually touches, past settling. */
+function fractionTouched(signal, params) {
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ emphasisDb: 6, ...params })
+  const out = new Float32Array(signal.length)
+  let above = 0, voiced = 0
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    if (off < 2 * SR) continue
+    for (let i = 0; i < len; i++) {
+      const a = Math.abs(signal[off + i])
+      if (a > 0.003) { voiced++; if (a > kernel.tScratch[i]) above++ }
+    }
+  }
+  return above / voiced
+}
+
+test('the stage touches only a small fraction of ordinary speech samples', () => {
+  // The property the distortion report was about. On material with a real
+  // crest factor the default must shape a small minority of samples — if it
+  // shapes several percent, that is waveshaping the programme, not taming
+  // transients, and it is audible as broadband grit on headphones.
+  const signal = speechLike(8, 0.5)
+  const touched = fractionTouched(signal, {})
+  assert.ok(
+    touched < 0.02,
+    `default settings touched ${(100 * touched).toFixed(2)}% of voiced samples; the reported build touched 4.4%`,
+  )
+})
+
+test('an RMS-referenced threshold would fail that — the bug this replaced', () => {
+  // Pins the mechanism rather than the symptom. The tracker follows a peak
+  // envelope; against a signal with ~14 dB of crest, an RMS reference puts T
+  // roughly a crest factor too low and the touched fraction explodes. Emulated
+  // by asking for a threshold that much lower, which is what RMS-referencing
+  // amounted to.
+  const signal = speechLike(8, 0.5)
+  const proper = fractionTouched(signal, {})
+  const rmsLike = fractionTouched(signal, { headroomDb: 8 - 13 })
+  assert.ok(
+    rmsLike > 8 * proper,
+    `an RMS-referenced threshold should touch far more: ${(100 * rmsLike).toFixed(2)}% vs ${(100 * proper).toFixed(2)}%`,
+  )
+})
+
+test('but genuine outlier transients still get caught', () => {
+  // The other half: selectivity is worthless if the stage now does nothing.
+  // A plosive planted well above the surrounding syllables must still be
+  // reduced, and by an amount inside the operating range §7.1 states.
+  const body = speechLike(6, 0.3)
+  const plosive = tone(120, 0.012, 0.95)
+  const tail = speechLike(2, 0.3, 29)
+  const signal = concat(body, plosive, tail)
+  const { metering } = processSoftClipperBuffer([signal], SR, {})
+  assert.ok(
+    metering.maxReductionDb > 2,
+    `a planted outlier should still be caught, got ${metering.maxReductionDb.toFixed(2)} dB`,
+  )
+  assert.ok(
+    metering.maxReductionDb <= MAX_REDUCTION_DB + 1e-9,
+    `and must stay under the ceiling, got ${metering.maxReductionDb.toFixed(2)} dB`,
+  )
+})
+
+test('the tracked level is peak-referenced, not RMS-referenced', () => {
+  // Direct check on the reference itself, which is the root cause the other
+  // tests here only see the symptom of.
+  //
+  // An earlier version of this test asserted that a PEAKIER signal at matched
+  // RMS raises the tracked level. That premise was wrong and measuring it said
+  // so: the tracker follows a mean of the peak ENVELOPE, i.e. the TYPICAL
+  // syllable peak, not the maximum. A signal built as a few loud syllables
+  // among many quiet ones tracks 12 dB LOWER at the same RMS, and that is the
+  // behaviour we want — T should sit above ordinary peaks so the rare loud
+  // ones are precisely what becomes an outlier.
+  //
+  // The property that actually distinguishes the two references is simpler:
+  // against material with a real crest factor, a peak-referenced tracker
+  // settles well ABOVE the signal's RMS, where an RMS-referenced one settles
+  // on it.
+  const signal = speechLike(10, 0.45, 3)
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 8, emphasisDb: 0 })
+  const out = new Float32Array(signal.length)
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  let sumSq = 0, n = 0
+  for (const x of signal) if (Math.abs(x) > 0.003) { sumSq += x * x; n++ }
+  const voicedRmsDb = 20 * Math.log10(Math.sqrt(sumSq / n))
+  const above = kernel.speechLevelDb - voicedRmsDb
+  assert.ok(
+    above > 3,
+    `tracked level should sit well above voiced RMS; it is ${above.toFixed(2)} dB above `
+    + `(${kernel.speechLevelDb.toFixed(1)} vs ${voicedRmsDb.toFixed(1)} dBFS). `
+    + 'Near 0 would mean the tracker is RMS-referenced again.',
+  )
+})
