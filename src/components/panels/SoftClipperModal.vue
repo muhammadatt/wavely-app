@@ -106,15 +106,20 @@ const METER_FULL_SCALE_DB = 12
         <LevelMeter :levels="clipperInputLevels" label="IN" :height="132" />
 
         <div class="flex-1 flex justify-center gap-[32px]">
-          <div class="w-[100px]">
-            <!-- Primary control. Lower = the threshold sits closer to the
-                 speaker's own level, so more of every transient crosses it. -->
+          <!-- Primary control IN ADAPTIVE MODE ONLY. The threshold is
+               speechLevel + Headroom there; in fixed mode it is the stated
+               dBFS value and Headroom is not read at all. So it dims and
+               stops accepting drags in fixed mode, mirroring how Fixed dBFS
+               behaves in adaptive mode — a knob that looks live but does
+               nothing reads as broken, which this codebase has already
+               learned once on the OptoSmooth's Gain knob. -->
+          <div class="w-[100px]" :style="{ opacity: isFixed ? 0.35 : 1 }">
             <Knob
               :model-value="headroomDb"
               @update:model-value="syncHeadroom"
               :min="4" :max="16" :step="0.5"
               label="Headroom" :accent="ACCENT" :format-value="formatGain"
-              :disabled="!clipperPreview"
+              :disabled="!clipperPreview || isFixed"
             />
           </div>
           <div class="w-[100px]">
