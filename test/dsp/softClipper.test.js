@@ -239,19 +239,33 @@ test('the noise floor estimate does not chase a single loud transient upward', (
 // ── Threshold behaviour (spec §3.3, §5.2) ───────────────────────────────────
 
 test('lower headroom produces more peak reduction (monotonic)', () => {
+  // The probe is speech-like (pauses, realistic crest) rather than a steady
+  // tone, for two reasons that both bite. On steady material the valley
+  // follower settles at the signal's own level so the gate never opens; with
+  // the fail-safe warm-up (see SPEECH_INIT_HOLD_DB) that now means the tracker
+  // never leaves its hold value and the stage does literally nothing at every
+  // Headroom setting. And a sine's ~3 dB crest cannot exercise a threshold
+  // that is compared against samples at all.
   function reductionFor(headroomDb) {
-    const burst = concat(tone(200, 1.0, 0.25), tone(120, 0.05, 0.9), tone(200, 0.5, 0.25))
-    const { metering } = processSoftClipperBuffer([burst], SR, { headroomDb, emphasisDb: 0 })
-    return metering.maxReductionDb
+    const signal = concat(
+      speechLike(5, 0.3, 17),
+      tone(120, 0.015, 0.9),
+      speechLike(1.5, 0.3, 41),
+    )
+    return processSoftClipperBuffer([signal], SR, { headroomDb, emphasisDb: 0 }).metering.maxReductionDb
   }
-  const sweep = [16, 12, 10, 8, 4].map(reductionFor)
+  const headrooms = [16, 12, 10, 8, 4]
+  const sweep = headrooms.map(reductionFor)
   for (let i = 1; i < sweep.length; i++) {
     assert.ok(
       sweep[i] >= sweep[i - 1] - 1e-6,
       `reduction should not fall as headroom decreases: ${sweep.map(v => v.toFixed(2)).join(' → ')}`,
     )
   }
-  assert.ok(sweep[sweep.length - 1] > sweep[0] + 1, 'expected a meaningful spread across the headroom range')
+  assert.ok(
+    sweep[sweep.length - 1] > sweep[0] + 1,
+    `expected a meaningful spread across the headroom range: ${sweep.map(v => v.toFixed(2)).join(' → ')}`,
+  )
 })
 
 test('adaptive mode is level-invariant; fixed mode is not', () => {
@@ -693,4 +707,52 @@ test('the tracked level is peak-referenced, not RMS-referenced', () => {
     + `(${kernel.speechLevelDb.toFixed(1)} vs ${voicedRmsDb.toFixed(1)} dBFS). `
     + 'Near 0 would mean the tracker is RMS-referenced again.',
   )
+})
+
+// ── Cold start: no processing until the detector knows the level ────────────
+
+test('a cold start does not over-process the opening of a file', () => {
+  // Reported from listening: a second or so of distortion at the start of the
+  // file, absent in fixed-threshold mode. Measured on the reference clip, the
+  // opening 3 s saw 5.98 dB of reduction — the ceiling — against 3.17 dB for
+  // the rest of the file, because the warm-up averaged a quiet lead-in and the
+  // onset ramp of the first phrase and read the speech level 44 dB LOW, which
+  // put T under everything.
+  //
+  // The property asserted is the FRACTION of early samples the curve touches,
+  // not the reduction on any one of them. That is what separates the two
+  // failures: the old build clipped essentially the whole opening (broadband
+  // grit), while the fix processes almost none of it. A max-reduction
+  // assertion would not distinguish "one caught transient" from "everything
+  // clipped", and it is the second that was audible.
+  const signal = concat(
+    noise(0.5, dbToLin(-55)),        // room tone before anyone speaks
+    speechLike(6, 0.5, 13),
+  )
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 8, emphasisDb: 6 })
+  const out = new Float32Array(signal.length)
+  let earlyAbove = 0, earlyVoiced = 0
+  for (let off = 0; off + 128 < signal.length; off += 128) {
+    kernel.process([signal.subarray(off, off + 128)], [out.subarray(off, off + 128)], 128)
+    if (off / SR >= 2) continue
+    for (let i = 0; i < 128; i++) {
+      const a = Math.abs(signal[off + i])
+      if (a > 0.003) { earlyVoiced++; if (a > kernel.tScratch[i]) earlyAbove++ }
+    }
+  }
+  const touched = earlyVoiced > 0 ? earlyAbove / earlyVoiced : 0
+  assert.ok(
+    touched < 0.005,
+    `the opening 2 s should be near-untouched; ${(100 * touched).toFixed(2)}% of its voiced samples were clipped`,
+  )
+})
+
+test('the warm-up hold is released, not held forever', () => {
+  // The other side of failing safe: a stage that never engages is also broken.
+  // Pinned separately from the test above so a warm-up that never completes
+  // cannot pass by making both halves quiet.
+  const signal = concat(speechLike(6, 0.5, 71), tone(120, 0.015, 0.95), speechLike(1, 0.5, 5))
+  const { metering } = processSoftClipperBuffer([signal], SR, { headroomDb: 8, emphasisDb: 0 })
+  assert.ok(metering.maxReductionDb > 1, `warm-up never released: ${metering.maxReductionDb.toFixed(2)} dB`)
 })

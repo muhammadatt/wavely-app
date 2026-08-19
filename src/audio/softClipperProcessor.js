@@ -171,6 +171,50 @@
  *    range is kept: against a peak reference, 4 is the aggressive end and 16 is
  *    effectively off.
  *
+ * 8. THE WARM-UP FAILS SAFE: NO PROCESSING UNTIL THE DETECTOR HAS EVIDENCE.
+ *    Reported from listening: a second or so of distortion at the start of the
+ *    file and after pauses, absent in fixed-threshold mode. Measured on the
+ *    reference clip, the opening 3 s took 5.98 dB — the ceiling — against
+ *    3.17 dB for the rest, and speech onsets following >=300 ms of quiet saw
+ *    5.98 and 1.45 dB against a steady-state p99 of 0.78. At t = 0.45 s the
+ *    tracked level read -50.4 dBFS while speech peaked at -6.8: a 44 dB error.
+ *
+ *    Cause: spec §3.2's initialisation, both halves. The -24 dBFS seed is an
+ *    absolute constant unrelated to the material, and averaging "the first
+ *    500 ms of gate-open audio" averages, on a real file, a quiet lead-in and
+ *    the onset ramp of the first phrase rather than representative speech.
+ *    See SPEECH_INIT_HOLD_DB for the replacement.
+ *
+ *    TWO PLAUSIBLE FIXES WERE TRIED AND MEASURED AWAY FIRST, both because the
+ *    cost of a wrong tracked level is asymmetric (too low over-processes, too
+ *    high merely does less) and it seemed the ballistics should reflect that:
+ *
+ *    a) An asymmetric tracker, fast rise and slow fall. It did NOTHING for the
+ *       reported spike — 5.98 dB at attack times from 3000 ms down to 120 ms,
+ *       unchanged — because the spike happens during the warm-up, which does
+ *       not use the tracker's coefficients at all. And it destroyed the effect
+ *       in steady state, monotonically: 3.17 -> 2.26 -> 1.42 -> 0.68 -> 0.34 dB
+ *       across those attack times. A tracker that chases peaks upward raises
+ *       the very threshold those peaks would have crossed.
+ *
+ *    b) Shortening SPEECH_TAU_S. Same shape of result: a +12 dB level jump
+ *       after a pause barely improved (3.88 -> 3.59 dB from tau 3.0 to 1.0)
+ *       while settled reduction collapsed (2.01 -> 0.12 dB).
+ *
+ *    So the 3 s constant is right and the cure was the warm-up. Result: the
+ *    opening 3 s goes 5.98 -> 0.01 dB with steady state preserved at 3.15, and
+ *    post-onset reduction now sits BELOW the rest of the file (0.17 against a
+ *    0.65 p99) rather than five times above it.
+ *
+ *    WHAT REMAINS IS INHERENT, and worth stating plainly rather than tuning
+ *    at. A genuine level jump after a pause — the tracker holds through the
+ *    pause, so a following passage 12 dB louder finds T 12 dB low — still
+ *    draws about 1.9 dB more than settled for roughly 1.5 s, bounded by
+ *    MAX_REDUCTION_DB. Both experiments above show why that cannot be tuned
+ *    out: any tracker fast enough to erase the lag is fast enough to chase the
+ *    peaks it exists to catch. Fixed-threshold mode has no lag because it does
+ *    not adapt at all; that is its trade, not a bug in adaptive mode.
+ *
  * ARCHITECTURE (spec §2, unchanged):
  *
  *   input ──┬─► detector (unfiltered, mono downmix) ──────────────┐
@@ -250,8 +294,47 @@ const NOISE_FOLLOW_TAU_MS = 2000 // creep-up rate of the valley follower
 const GATE_MARGIN_DB = 12 // ⚠ spec-flagged for calibration; not user-exposed in v1
 const GATE_HOLD_MS = 200
 const SPEECH_TAU_S = 3.0
+
+// AN ASYMMETRIC TRACKER (fast rise, slow fall) WAS TRIED HERE AND REMOVED.
+// The reasoning was sound — a tracked level that is too LOW over-processes
+// while one that is too HIGH merely does less, so the dynamics should favour
+// rising — but measurement killed it twice over. It did nothing for the
+// reported start-of-file distortion (5.98 dB at attack times from 3000 ms
+// right down to 120 ms, unchanged), because that spike happens DURING the
+// warm-up, which does not use the tracker's coefficients at all. And it
+// destroyed the effect in steady state, monotonically: peak reduction after
+// the first 3 s fell 3.17 -> 2.26 -> 1.42 -> 0.68 -> 0.34 dB across those same
+// attack times, because a tracker that chases peaks upward raises the very
+// threshold those peaks would have crossed. The cure was the warm-up (see
+// SPEECH_INIT_HOLD_DB), not the ballistics.
 const SPEECH_INIT_WINDOW_MS = 500
-const SPEECH_INIT_DEFAULT_DB = -24
+/**
+ * The level the tracker reports WHILE it is still warming up — high enough
+ * that T lands above any possible sample and the stage processes nothing.
+ *
+ * Spec §3.2 seeds -24 dBFS and averages the first 500 ms of gate-open audio.
+ * Both halves misfire on a cold start, and together they were the reported
+ * "second or so of distortion at the start of the file": the seed is an
+ * absolute constant unrelated to the material, and the average is taken over a
+ * window that on a real file begins with a quiet lead-in and the onset ramp of
+ * the first phrase rather than with representative speech. Measured on the
+ * reference clip, at t = 0.45 s the tracked level read -50.4 dBFS while speech
+ * in the following second peaked at -6.8 — a 44 dB error, which put T far
+ * under everything and clipped the lot at the 6 dB ceiling.
+ *
+ * The principle is simply that an estimator with no data yet should not be
+ * driving anything: hold T above full scale until there is enough gate-open
+ * audio to trust, and process nothing until then. Erring toward inaction is
+ * free here — a missed plosive in the first half second is inaudible, where
+ * half a second of everything clipped is exactly what was reported.
+ *
+ * The estimate handed over at the end of warm-up is the MAX of the peak
+ * envelope across that window, not its mean. A max is biased HIGH, which is
+ * the safe direction (too high merely does less), and the 3 s tracker then
+ * settles down onto the typical peak from above rather than climbing to it
+ * from below.
+ */
+const SPEECH_INIT_HOLD_DB = 0
 
 // A linear one-pole decaying toward silence can sit in denormal range for the
 // whole length of a pause, which is measured to spike CPU on x86 (spec §6.1).
@@ -485,9 +568,9 @@ export class SoftClipperKernel {
     this.detectorWarmupTarget = Math.max(1, Math.round(sampleRate * 0.030))
     this.gateHoldSamples = 0
     this.gateOpen = false
-    this.speechLevelDb = SPEECH_INIT_DEFAULT_DB
+    this.speechLevelDb = SPEECH_INIT_HOLD_DB
     this.speechWarmupCount = 0
-    this.speechWarmupSum = 0 // cumulative mean of fastRmsLin (linear RMS amplitude) during warmup
+    this.speechWarmupPeak = 0 // running MAX of the peak envelope during warm-up
     this.speechWarmupTarget = Math.max(1, Math.round(sampleRate * (SPEECH_INIT_WINDOW_MS / 1000)))
 
     this.fastPeak = 0
@@ -617,7 +700,7 @@ export class SoftClipperKernel {
     let gateHoldSamples = this.gateHoldSamples
     let speechLevelDb = this.speechLevelDb
     let speechWarmupCount = this.speechWarmupCount
-    let speechWarmupSum = this.speechWarmupSum
+    let speechWarmupPeak = this.speechWarmupPeak
     let detectorWarmupCount = this.detectorWarmupCount
     let headroomDbSmoothed = this.headroomDbSmoothed
     let outputTrimDbSmoothed = this.outputTrimDbSmoothed
@@ -684,9 +767,14 @@ export class SoftClipperKernel {
       // deviation note (5).
       if (aboveFloor) {
         if (speechWarmupCount < this.speechWarmupTarget) {
+          // Still gathering evidence: hold T above full scale so nothing is
+          // processed, and accumulate the loudest peak seen. See
+          // SPEECH_INIT_HOLD_DB.
           speechWarmupCount++
-          speechWarmupSum += (fastPeak - speechWarmupSum) / speechWarmupCount
-          speechLevelDb = linToDb(speechWarmupSum)
+          if (fastPeak > speechWarmupPeak) speechWarmupPeak = fastPeak
+          speechLevelDb = speechWarmupCount < this.speechWarmupTarget
+            ? SPEECH_INIT_HOLD_DB
+            : linToDb(speechWarmupPeak)
         } else {
           speechLevelDb += this.speechCoef * (fastPeakDb - speechLevelDb)
         }
@@ -704,7 +792,7 @@ export class SoftClipperKernel {
     this.gateHoldSamples = gateHoldSamples
     this.speechLevelDb = speechLevelDb
     this.speechWarmupCount = speechWarmupCount
-    this.speechWarmupSum = speechWarmupSum
+    this.speechWarmupPeak = speechWarmupPeak
     this.detectorWarmupCount = detectorWarmupCount
     this.headroomDbSmoothed = headroomDbSmoothed
     this.outputTrimDbSmoothed = outputTrimDbSmoothed
