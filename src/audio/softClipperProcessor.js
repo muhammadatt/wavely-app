@@ -1243,6 +1243,13 @@ if (typeof registerProcessor === 'function') {
       // resonance kernel's display scratch.
       this.scope = new Float32Array(SCOPE_BATCH * 2)
       this.scopeCount = 0
+      // Loudest reduction since the last meter message, and the worklet clock
+      // reading of the BLOCK it happened in — not of the message. The message
+      // covers 1024 samples; stamping it with the post time would place every
+      // mark up to 23 ms late and all of them at the same instant. Per block
+      // this resolves to one render quantum, 2.9 ms.
+      this.clipDb = 0
+      this.clipTime = 0
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
         else if (e.data?.type === 'monitor') this.kernel.setMonitor(e.data.delta)
@@ -1276,6 +1283,14 @@ if (typeof registerProcessor === 'function') {
         this.scope[(SCOPE_BATCH - 1) * 2 + 1] = this.kernel.scopeThreshold
       }
 
+      if (this.kernel.reductionDb > this.clipDb) {
+        this.clipDb = this.kernel.reductionDb
+        // `currentTime` in an AudioWorkletGlobalScope is the context clock at
+        // the start of this render quantum, which is what the wrapper's
+        // transport origin is measured against.
+        this.clipTime = currentTime
+      }
+
       this.sinceMeter += n
       if (this.sinceMeter >= METER_INTERVAL_SAMPLES) {
         this.sinceMeter = 0
@@ -1286,8 +1301,11 @@ if (typeof registerProcessor === 'function') {
           // Only the filled prefix, so a short final batch cannot inject
           // stale zero-peak points into the scroll.
           scope: this.scope.subarray(0, this.scopeCount * 2),
+          clipDb: this.clipDb,
+          clipTime: this.clipTime,
         })
         this.scopeCount = 0
+        this.clipDb = 0
       }
       return true
     }

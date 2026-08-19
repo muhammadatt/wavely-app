@@ -336,19 +336,17 @@ export function lampFraction(db, fullScaleDb) {
   return Math.log(1 + LAMP_CURVE_K * amount) / Math.log(1 + LAMP_CURVE_K * fullScaleDb)
 }
 
-/**
- * The inverse, so the numeral beside the lamp can state what the light shows.
+/*
+ * There is deliberately NO lampFractionToDb.
  *
- * Same rule as grFractionToDb and the same reason it sits adjacent: these two
- * have to be exact opposites, and a curve change that updated only one of them
- * would leave the number and the light quietly disagreeing. Pinned in
- * `test/ui/lamp.test.js`.
+ * One existed, and the numeral beside the lamp was derived through it from the
+ * held brightness. That inverse clamps at full scale — it has to, the forward
+ * law does — so the moment full scale dropped below the kernel's own 6 dB
+ * bound, the number would have printed the full-scale value for every reading
+ * above it while the light was correct. The lamp now holds dB directly and
+ * derives brightness from that, which needs no inverse and cannot clamp the
+ * number. Reintroducing one would put the hazard back within reach.
  */
-export function lampFractionToDb(fraction, fullScaleDb) {
-  const f = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction
-  const span = Math.log(1 + LAMP_CURVE_K * fullScaleDb)
-  return Math.min((Math.exp(f * span) - 1) / LAMP_CURVE_K, fullScaleDb)
-}
 
 /**
  * Engraving vocabulary. Only the round numbers get numerals; the rest are bare

@@ -4,7 +4,6 @@ import {
   createPeakHold,
   createReadoutThrottle,
   lampFraction,
-  lampFractionToDb,
   useMeterFrame,
 } from './ballistics.js'
 
@@ -53,40 +52,59 @@ const props = defineProps({
   engagedPct: { type: Number, default: 0 },
   accent: { type: String, default: '#ff8f6b' },
   /**
-   * Reduction that lights the lamp fully. 6 dB is the kernel's own hard
-   * ceiling (MAX_REDUCTION_DB), so the lamp cannot be driven past its top by
-   * any setting — full brightness means the stage is at its bound.
+   * Reduction that lights the lamp fully.
+   *
+   * 3 rather than the kernel's own 6 dB ceiling, and the difference is the
+   * point: this stage spends most of its life between 0 and 3, so anchoring
+   * full brightness at the bound gave away half the lamp's range to readings
+   * it almost never produces. Anything at or past 3 dB now pins — which is
+   * fine, because "deeper than 3" is a single fact and the NUMBER carries the
+   * exact value.
+   *
+   * That split only works because the numeral is no longer derived through
+   * this scale. See the hold below.
    */
-  fullScaleDb: { type: Number, default: 6 },
+  fullScaleDb: { type: Number, default: 3 },
 })
 
-// Brightness carries the ballistics; the numeral is the SAME held value read
-// back through the inverse of the brightness law, throttled so it stays
-// legible.
+// ONE HELD QUANTITY, IN dB, and both readings derived from it.
 //
-// Reading the raw `reductionDb` instead would put the two out of step in the
-// worst possible way: the kernel reports per block, and on speech the
-// overwhelming majority of blocks clip nothing at all, so a 10 Hz sample of
-// the raw value shows a dash on most frames while the lamp beside it is lit.
-// Deriving both from one held quantity is the same rule lampFractionToDb
-// exists for — a number and a light that disagree are worse than either alone.
-const brightness = ref(0)
+// The light and the number must not disagree — the kernel reports per block
+// and on speech the overwhelming majority of blocks clip nothing, so sampling
+// the raw value for the numeral would print a dash on most frames while the
+// lamp beside it was lit. That much was always true.
+//
+// What changed is WHICH quantity is held. It used to be the brightness
+// fraction, with the numeral recovered through the inverse of the brightness
+// law — and that inverse clamps at full scale, because the forward law does.
+// Harmless while full scale was the kernel's own 6 dB bound and nothing could
+// exceed it. The moment full scale dropped to 3 it would have printed "3.0"
+// for every reduction between 3 and 6 dB, with the light entirely correct and
+// the number quietly wrong. Holding dB and deriving brightness from it is the
+// same guarantee with the clamp removed: the lamp pins at 3, the number keeps
+// counting to the kernel's ceiling.
+const heldDbRef = ref(0)
+const brightness = computed(() => lampFraction(heldDbRef.value, props.fullScaleDb))
 const readoutDb = ref(0)
 // Longer hold and a slower fall than the first version, for the same reason
 // the curve changed: the case that reads worst is a single errant peak with
 // quiet either side, and a 400 ms hold falling at 1.1/s gave that event under
-// a second on screen. 700 ms and 0.7/s puts an isolated plosive up for roughly
-// 2 s, which is long enough to look over at. Still a hold, not an average —
-// averaging is what made the bar this replaced unreadable.
-const held = createPeakHold({ holdMs: 700, fallPerSec: 0.7 })
+// a second on screen. Still a hold, not an average — averaging is what made
+// the bar this replaced unreadable.
+//
+// The fall is in dB/s now that dB is what is held. 2.5 dB/s puts a full-scale
+// 3 dB event on screen for roughly 1.9 s including the hold, which is what the
+// fraction-domain rate it replaces gave. ballistics' peak hold is explicitly
+// unit-agnostic, so this is the same mechanism with a different unit.
+const held = createPeakHold({ holdMs: 700, fallPerSec: 2.5 })
 const throttle = createReadoutThrottle()
 
 useMeterFrame((dtMs) => {
-  const target = lampFraction(Math.abs(props.reductionDb), props.fullScaleDb)
-  brightness.value = held.push(target, dtMs)
-  if (throttle.due(dtMs)) {
-    readoutDb.value = lampFractionToDb(brightness.value, props.fullScaleDb)
-  }
+  heldDbRef.value = held.push(Math.abs(props.reductionDb), dtMs)
+  // The numeral is throttled separately — a value flickering at frame rate is
+  // unreadable however correct it is — but it is the same held dB the light
+  // is drawn from, so the two can never say different things.
+  if (throttle.due(dtMs)) readoutDb.value = heldDbRef.value
 })
 
 // TWO MAPPINGS IN SERIES, and only the first is a scale. dB -> fraction is
@@ -134,13 +152,13 @@ const engagedText = computed(() => `${props.engagedPct.toFixed(1)}%`)
 
 <template>
   <!-- The bar this replaced shaded its 3-6 dB usable range on the face (spec
-       §7.2). A lamp has no face to engrave, so that guidance moves here rather
-       than being dropped: full brightness is the kernel's hard 6 dB ceiling, so
-       "at least half lit" is the same reading the shaded band gave. -->
+       §7.2). A lamp has no face to engrave, so that guidance moves into the
+       title: fully lit IS the bottom of that band, so "lamp pinned" is the
+       same reading the shaded band gave, and the numeral covers the rest. -->
   <div
     class="flex items-center gap-[9px]"
     role="img"
-    title="Peak reduction on the loudest transient. 3-6 dB is the usable range on speech; past 6 the kernel bounds it, and much below 3 the stage is barely engaging. The second figure is how often it fires."
+    title="Peak reduction on the loudest transient. The lamp is fully lit at 3 dB and the number keeps counting past it to the kernel's 6 dB ceiling. 3-6 dB is the usable range on speech; much below 3 the stage is barely engaging. The second figure is how often it fires."
     :aria-label="`Peak reduction ${dbText} dB, engaged on ${engagedText} of voiced blocks`"
   >
     <span

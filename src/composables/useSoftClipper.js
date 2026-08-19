@@ -5,6 +5,7 @@ import { applySoftClipperRegion, computePeakCache } from '../audio/processing.js
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { clearClipMarks } from '../audio/clipMarks.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
@@ -124,6 +125,9 @@ export function useSoftClipper() {
     const chain = initChain()
     clipperPreview.value = !clipperPreview.value
     chain.setEnabled(softClipperEffect.id, clipperPreview.value)
+    // Bypassing does not go through setParam, so it would otherwise leave the
+    // timeline marked by a stage that is no longer in circuit.
+    clearClipMarks()
 
     if (clipperPreview.value) {
       pushAllParams(chain)
@@ -182,6 +186,7 @@ export function useSoftClipper() {
 
   function teardown() {
     stopMeters()
+    clearClipMarks()
     if (clipperPreview.value) {
       const ctx = getAudioContext()
       const chain = getEffectChain(ctx)

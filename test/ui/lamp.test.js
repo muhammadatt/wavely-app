@@ -12,20 +12,27 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  lampFraction, lampFractionToDb, grFraction, LAMP_CURVE_K,
+  lampFraction, grFraction, LAMP_CURVE_K,
 } from '../../src/components/meters/ballistics.js'
 
-const FULL = 6 // MAX_REDUCTION_DB, the kernel's own bound
+// The lamp's own full scale, which is deliberately NOT the kernel's 6 dB
+// bound — the stage lives between 0 and 3, so anchoring full brightness at the
+// bound gave half the range to readings it almost never produces. Anything
+// past 3 pins the light; the numeral beside it keeps counting, which is why
+// the numeral is no longer derived through this scale.
+const FULL = 3
 
-test('the lamp law and its inverse are exact opposites', () => {
-  for (let db = 0; db <= FULL; db += 0.01) {
-    const back = lampFractionToDb(lampFraction(db, FULL), FULL)
-    assert.ok(Math.abs(back - db) < 1e-9, `round trip failed at ${db}: got ${back}`)
-  }
-  // And the other way, so neither direction can drift alone.
-  for (let f = 0; f <= 1; f += 0.001) {
-    const back = lampFraction(lampFractionToDb(f, FULL), FULL)
-    assert.ok(Math.abs(back - f) < 1e-9, `inverse round trip failed at ${f}: got ${back}`)
+test('the law is strictly increasing below full scale, so no two readings collide', () => {
+  // What the round-trip test against lampFractionToDb used to establish. The
+  // inverse is gone deliberately — it clamped at full scale, and full scale is
+  // now BELOW the kernel's bound, so deriving the numeral through it would
+  // have printed 3.0 for every reduction from 3 to 6 dB. Strict monotonicity
+  // is the property that actually mattered and it needs no inverse to state.
+  let prev = -1
+  for (let db = 0; db < FULL; db += 0.005) {
+    const f = lampFraction(db, FULL)
+    assert.ok(f > prev, `two distinct reductions share a brightness at ${db}`)
+    prev = f
   }
 })
 
@@ -50,13 +57,13 @@ test('the readings this stage actually produces are visibly lit', () => {
   // The regression guard for the reported bug. These are not aesthetic
   // numbers: 0.3-0.4 dB is the measured median of the blocks that clip on real
   // narration, and the whole complaint was that the lamp did not show it.
-  assert.ok(lampFraction(0.3, FULL) > 0.20, `0.3 dB only lights ${lampFraction(0.3, FULL)}`)
-  assert.ok(lampFraction(1, FULL) > 0.45, `1 dB only lights ${lampFraction(1, FULL)}`)
-  // ...without flattening the range the stage is steered over. 1, 3 and 6 dB
-  // have to stay tellable apart, or the fix has traded one unreadable lamp for
-  // another.
-  assert.ok(lampFraction(3, FULL) - lampFraction(1, FULL) > 0.20)
-  assert.ok(lampFraction(6, FULL) - lampFraction(3, FULL) > 0.15)
+  assert.ok(lampFraction(0.3, FULL) > 0.25, `0.3 dB only lights ${lampFraction(0.3, FULL)}`)
+  assert.ok(lampFraction(1, FULL) > 0.55, `1 dB only lights ${lampFraction(1, FULL)}`)
+  // ...without flattening the range the stage is steered over. The readings
+  // below full scale have to stay tellable apart, or the fix has traded one
+  // unreadable lamp for another.
+  assert.ok(lampFraction(1, FULL) - lampFraction(0.3, FULL) > 0.20)
+  assert.ok(lampFraction(2, FULL) - lampFraction(1, FULL) > 0.15)
 })
 
 test('it is strictly brighter than the voltage law it replaced, everywhere it matters', () => {
@@ -70,6 +77,9 @@ test('it is strictly brighter than the voltage law it replaced, everywhere it ma
   // They must still agree at both ends, or the lamp would be lit at rest.
   assert.equal(lampFraction(0, FULL), grFraction(0, FULL))
   assert.equal(lampFraction(FULL, FULL), grFraction(FULL, FULL))
+  // And past full scale the lamp pins rather than running on — the numeral is
+  // what carries a deeper reading now.
+  assert.equal(lampFraction(FULL * 2, FULL), 1)
 })
 
 test('the curve constant is in the range that keeps the top half legible', () => {

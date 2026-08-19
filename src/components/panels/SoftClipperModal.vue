@@ -150,7 +150,7 @@ const thresholdKnob = computed(() => (isFixed.value
  * and spending half of it on readings the kernel cannot produce was the same
  * mistake at a smaller size.
  */
-const METER_FULL_SCALE_DB = 6
+const METER_FULL_SCALE_DB = 3
 
 /**
  * Display height. The panel's one instrument, so it gets the space the gain
