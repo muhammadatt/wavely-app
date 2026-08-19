@@ -89,6 +89,27 @@ useMeterFrame((dtMs) => {
   }
 })
 
+// TWO MAPPINGS IN SERIES, and only the first is a scale. dB -> fraction is
+// lampFraction, which is where the brightness law lives; fraction -> pixels is
+// this block, which is meant to be a faithful rendering of it rather than a
+// second curve. That distinction is easy to lose, because a color-mix
+// percentage looks like a brightness and is not one: sRGB mixes
+// gamma-encoded values, so 50% mix is not half the luminance.
+//
+// MEASURED, because it was an unstated assumption that the fraction survives
+// the trip to the screen. Perceived lightness (CIE L*, normalised between the
+// unlit and full-lit fills) against the fraction driving it:
+//
+//   fraction   0.00  0.18  0.245  0.34  0.50  0.68  0.797  0.88  1.00
+//   perceived  0.00  0.20  0.27   0.37  0.53  0.71  0.82   0.89  1.00
+//
+// Within 0.03 everywhere, erring bright. That is luck rather than design —
+// sRGB's ~1/2.2 encoding and L*'s ~cube-root of luminance very nearly cancel
+// when gamma-encoded values are mixed directly — but it means the law's
+// numbers are the ones that reach the eye, so lampFraction can be reasoned
+// about on its own. Re-check this if the accent or the unlit colour changes;
+// the cancellation is not guaranteed for an arbitrary pair.
+//
 // A floor of 0.06 keeps the lamp visible as an unlit fixture rather than
 // letting it disappear into the faceplate — an absent lamp and a dark one look
 // the same, and only one of them means "not clipping".
