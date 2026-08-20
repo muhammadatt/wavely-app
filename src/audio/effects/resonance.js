@@ -33,8 +33,12 @@ export {
   RESONANCE_DISPLAY_CURVES,
   RESONANCE_ATTACK_MIN_MS,
   RESONANCE_RELEASE_MIN_MS,
+  RESONANCE_REF_MODE_DEFAULTS,
+  DEFAULT_REF_MODE,
   effectivePitchRange,
+  resolveRefMode,
   resonanceDisplayRange,
+  withRefModeDefaults,
 } from '../resonanceParams.js'
 
 /** This STFT holds back exactly one frame before a sample is reconstructed. */
@@ -54,6 +58,8 @@ export const RESONANCE_DEFAULTS = {
   mode: 'soft', // 'soft' | 'hard'
   preserveHarmonics: true,
   pitchRange: 'voice', // key of PITCH_RANGES
+  // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS in resonanceParams.js.
+  refMode: 'cepstral',
   mix: 1, // 0 = dry, 1 = fully suppressed
   trim: 0, // dB, wet path only
 }
@@ -74,6 +80,7 @@ export function toKernelParams(params) {
     preserveHarmonics: params.preserveHarmonics,
     pitchMinHz: range.minHz,
     pitchMaxHz: range.maxHz,
+    refMode: params.refMode,
     mix: params.mix,
     trimDb: params.trim,
   }

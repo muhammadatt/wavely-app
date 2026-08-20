@@ -25,9 +25,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  ResonanceKernel,
   processResonanceBuffer,
   RESONANCE_KERNEL_DEFAULTS,
 } from '../../src/audio/resonanceProcessor.js'
+import {
+  DEFAULT_REF_MODE,
+  RESONANCE_REF_MODE_DEFAULTS,
+  resolveRefMode,
+  withRefModeDefaults,
+} from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
 
@@ -327,4 +334,146 @@ test('detection still falls away above 4 kHz, and is flat below it', () => {
     top < speech[3] * 0.6,
     `expected a falloff above 4 kHz; 4 kHz ${speech[3].toFixed(1)} dB, 6.4 kHz ${top.toFixed(1)} dB`,
   )
+})
+
+// ── The peak-envelope reference ─────────────────────────────────────────────
+
+const PEAK = {
+  refMode: 'peak',
+  preserveHarmonics: false,
+  selectivity: RESONANCE_REF_MODE_DEFAULTS.peak.selectivity,
+  depth: RESONANCE_REF_MODE_DEFAULTS.peak.depth,
+}
+
+/**
+ * Peak protrusion the kernel measures in a band — what `selectivity` is
+ * thresholding. Read off the kernel's own arrays rather than inferred from the
+ * output, because the question is what the DETECTOR sees.
+ */
+function protrusionDb(sig, params, freqHz, halfHz) {
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, ...params })
+  const scratch = new Float32Array(128)
+  const lo = Math.round((freqHz - halfHz) / kernel.binWidth)
+  const hi = Math.round((freqHz + halfHz) / kernel.binWidth)
+  let acc = 0
+  let n = 0
+  for (let off = 0; off + 128 <= sig.length; off += 128) {
+    kernel.process([sig.subarray(off, off + 128)], [scratch], 128)
+    if (off < SR / 2) continue // let the pitch tracker and the STFT settle
+    let m = -Infinity
+    for (let b = lo; b <= hi; b++) {
+      const v = kernel.magDb[b] - kernel.envDb[b]
+      if (v > m) m = v
+    }
+    acc += m
+    n++
+  }
+  return acc / n
+}
+
+test('the cepstral reference cannot see a defect at all; the peak one can', () => {
+  // THE MEASUREMENT THIS WHOLE DIRECTION RESTS ON. Protrusion is the quantity
+  // `selectivity` thresholds. From the inter-harmonic floor a clean voice
+  // already protrudes by 21-24 dB — that is the comb, not a defect — and adding
+  // a real +10 dB hump moves the reading by essentially nothing. An envelope
+  // drawn through the harmonic peaks reads a clean voice at 2-4 dB and the same
+  // defect at 7-11.
+  const clean = pitched(() => 150, { seconds: 2 })
+  const wet = resonate(clean, 1600, 2, 10)
+
+  const cepClean = protrusionDb(clean, UNPROTECTED, 1600, 400)
+  const cepWet = protrusionDb(wet, UNPROTECTED, 1600, 400)
+  const peakClean = protrusionDb(clean, PEAK, 1600, 400)
+  const peakWet = protrusionDb(wet, PEAK, 1600, 400)
+
+  assert.ok(cepClean > 15, `cepstral floor should be dominated by the comb, got ${cepClean.toFixed(2)} dB`)
+  assert.ok(
+    Math.abs(cepWet - cepClean) < 3,
+    `a +10 dB defect should be nearly invisible to the cepstral reference, moved ${(cepWet - cepClean).toFixed(2)} dB`,
+  )
+  assert.ok(peakClean < 6, `peak reference should read a clean voice as near zero, got ${peakClean.toFixed(2)} dB`)
+  assert.ok(
+    peakWet - peakClean > 4,
+    `the defect should be visible to the peak reference, moved only ${(peakWet - peakClean).toFixed(2)} dB`,
+  )
+})
+
+test('the peak reference is transparent to pitch movement with no mask at all', () => {
+  // The mask's whole job, done by the reference instead. Same assertion as the
+  // protection test above, run with protection OFF.
+  for (const [label, contour, measure] of [
+    ['vibrato', VIBRATO, s => wobbleAt(levelContour(s, [2000, 6000]), VIBRATO_HZ)],
+    ['pitch step', STEP, s => stepExcursion(s, [2000, 6000])],
+  ]) {
+    const sig = pitched(contour)
+    const wet = processResonanceBuffer([sig], SR, { ...RESONANCE_KERNEL_DEFAULTS, ...PEAK })
+      .channelData[0].subarray(LATENCY)
+    const before = measure(sig)
+    const after = measure(wet)
+    assert.ok(
+      Math.abs(after - before) < 0.15,
+      `${label}: ${before.toFixed(3)} -> ${after.toFixed(3)} dB with no harmonic protection`,
+    )
+  }
+})
+
+test('the peak reference cuts pitched material, which the masked path cannot', () => {
+  const sig = pitched(() => 150, { seconds: 3 })
+  for (const f of [1600, 3200]) {
+    const masked = removedFrom(sig, f, 2, 10, {})
+    const peak = removedFrom(sig, f, 2, 10, PEAK)
+    assert.ok(Math.abs(masked) < 0.2, `${f} Hz: masked path should be inert, got ${masked.toFixed(2)}`)
+    assert.ok(peak > 3, `${f} Hz: peak reference removed only ${peak.toFixed(2)} dB of a 10 dB hump`)
+  }
+})
+
+test('the peak reference does not regress unpitched material', () => {
+  // No pitch means no mask, so this is the one regime the shipping path already
+  // treats. It must not be traded away.
+  const n = Math.round(3 * SR)
+  const noise = new Float32Array(n)
+  const amp = Math.pow(10, -20 / 20)
+  let s = 77
+  for (let i = 0; i < n; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff
+    noise[i] = amp * (s / 0x3fffffff - 1)
+  }
+  for (const f of [1200, 2500]) {
+    const shipping = removedFrom(noise, f, 25, 14, {})
+    const peak = removedFrom(noise, f, 25, 14, PEAK)
+    assert.ok(peak > shipping - 0.5, `${f} Hz: ${shipping.toFixed(2)} -> ${peak.toFixed(2)} dB`)
+  }
+})
+
+test('the geometric reference window is geometric', () => {
+  // REGRESSION GUARD, and it caught a real bug. A window whose half-width in
+  // BINS is computed from an octave growth factor is not a log-frequency
+  // window: at 2.5 kHz it spans DC to 6.8 kHz, so the reference is set by the
+  // bass, sits far above the local level, and nothing protrudes. It reads
+  // exactly like a detector blind to broad defects.
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'peak' })
+  kernel.magDb.fill(-100)
+  // A single loud bin high up; with a geometric window the reference below it
+  // must be unaffected well before DC.
+  const spike = Math.round(2500 / kernel.binWidth)
+  kernel.magDb[spike] = 0
+  kernel._peakEnvelope(150)
+  const at = f => kernel.envDb[Math.round(f / kernel.binWidth)]
+  assert.ok(at(2500) > -100, 'the spike should reach its own bin')
+  assert.ok(
+    at(300) < -95,
+    `a 2.5 kHz spike must not move the reference at 300 Hz, got ${at(300).toFixed(1)} dB`,
+  )
+})
+
+test('the reference-mode override falls back rather than passing a typo through', () => {
+  assert.equal(resolveRefMode(), DEFAULT_REF_MODE, 'no window under test means the shipping mode')
+  assert.equal(withRefModeDefaults({ selectivity: 8 }).selectivity, 8)
+  // Peak mode carries its own calibration, because the two references disagree
+  // about what selectivity measures by an order of magnitude.
+  const peak = { ...{ selectivity: 8, depth: 0.67 }, ...RESONANCE_REF_MODE_DEFAULTS.peak }
+  assert.ok(peak.selectivity < 8)
+  assert.equal(peak.preserveHarmonics, false)
 })

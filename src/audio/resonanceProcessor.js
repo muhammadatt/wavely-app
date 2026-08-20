@@ -163,6 +163,63 @@ const LIFTER_SCALE_COARSE_HZ = 2000
 const LIFTER_SCALE_FINE_HZ = 250
 
 /**
+ * Peak-envelope reference — geometry.
+ *
+ * AN ALTERNATIVE TO THE CEPSTRAL REFERENCE, NOT A TUNING OF IT, and the reason
+ * it exists is that three separate shortcomings and the harmonic mask all trace
+ * back to one decision: cepstral liftering puts the reference at the
+ * INTER-HARMONIC FLOOR. From down there every harmonic of a pitched source
+ * protrudes and reads as a resonance, which is why the mask has to exist; the
+ * reference's resolution is then tied to the comb, which is why detection
+ * depends on the speaker's pitch; and its smoothing is uniform in Hz, which is
+ * why detection falls away at the top of the spectrum.
+ *
+ * This reference is drawn THROUGH the harmonic peaks instead of under them:
+ *
+ *   1. a running MAXIMUM over one harmonic spacing — the envelope traced
+ *      through the peaks. A harmonic sliding across bins does not move it, and
+ *      the inter-harmonic floor never enters it.
+ *   2. a wide log-frequency mean of that — the reference proper.
+ *
+ * Protrusion is then a comparison of two quantities that BOTH live on the
+ * harmonic peaks, so the comb cancels out of it and a harmonic is not a
+ * resonance by construction. Measured against the cepstral reference, with no
+ * harmonic mask at all: it matches the mask's transparency to pitch movement on
+ * both a vibrato and a phoneme-boundary step to three decimal places, cuts real
+ * resonances on voiced material where the masked cepstral path cuts nothing,
+ * does roughly a tenth the damage to a clean voice that the unmasked cepstral
+ * path does, and does not regress unpitched material.
+ *
+ * NOT THE DEFAULT, AND NOT CLOSE TO READY. Every number above is synthetic, and
+ * by this project's own count that would be the eighth time a clean corpus
+ * answered a question it could not actually answer. Its absolute removal is
+ * also low at the settings measured, so it needs calibration — which is
+ * precisely the step that must not be taken against synthetics.
+ *
+ * `SPACING_CAP_BINS` bounds the max filter's cost; it binds only at
+ * implausibly high pitches. `REF_FLOOR_FACTOR` is the one constant with a
+ * derivation rather than a fit: the second-stage mean has to be much wider than
+ * the max filter that feeds it, or it follows the resonance instead of passing
+ * under it. Eight harmonic spacings clears that; at F0 150 it is the 1200 Hz
+ * the prototype was measured at.
+ */
+const PEAK_SPACING_CAP_BINS = 64
+const PEAK_REF_FLOOR_FACTOR = 8
+/** Reference width in octaves at Sharpness 0 and 1 — the detection scale. */
+const PEAK_REF_OCT_COARSE = 3.0
+const PEAK_REF_OCT_FINE = 1.2
+/**
+ * Spacing assumed when no pitch has been measured.
+ *
+ * On unpitched material there is no comb for the max filter to step over, so
+ * the stage degenerates to a mild local maximum and the reference is close to a
+ * plain log-frequency smoothing. 150 Hz is what the prototype was measured with
+ * and it did not regress noise; a cepstral fallback on unpitched frames is the
+ * obvious alternative and is untested.
+ */
+const PEAK_FALLBACK_F0_HZ = 150
+
+/**
  * Spread half-width in OCTAVES at Sharpness 0, and the bin cap that bounds its
  * cost.
  *
@@ -275,6 +332,11 @@ export const RESONANCE_KERNEL_DEFAULTS = {
   pitchMaxHz: DEFAULT_PITCH_MAX_HZ,
   mode: 'soft', // 'soft' | 'hard'
   preserveHarmonics: true,
+  // 'cepstral' ships. 'peak' is the alternative reference — see the note on
+  // PEAK_REF_FLOOR_FACTOR. Deliberately independent of preserveHarmonics so
+  // all four combinations can be measured, though the point of 'peak' is that
+  // it does not need the mask.
+  refMode: 'cepstral',
   // Wet/dry blend and wet-path makeup. Both live inside the kernel's per-bin
   // gain rather than as nodes around it — see _mixGain.
   mix: 1,
@@ -325,6 +387,10 @@ export class ResonanceKernel {
     this.envRe = new Float64Array(bins)
     this.envIm = new Float64Array(bins)
     this.reduction = new Float64Array(bins)
+    // Peak-envelope scratch: the max-filtered spectrum and its prefix sum.
+    // Allocated lazily — nothing pays for them on the shipping path.
+    this.peakMax = null
+    this.peakPrefix = null
     // Post-blend reductions for the display; aliases prevGr at mix 1/trim 0.
     this.grDisplay = null
     this.grMixed = null
@@ -463,6 +529,13 @@ export class ResonanceKernel {
         this.spreadInvSigma[k] = sigma > 1e-9 ? 1 / sigma : 0
       }
     }
+
+    // Peak-envelope reference width, from the same Sharpness knob: it is the
+    // same quantity the lifter target is, an envelope feature scale, expressed
+    // in octaves because this reference has no reason to be uniform in Hz.
+    this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
+    this.refOct = PEAK_REF_OCT_COARSE
+      * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, sharpness)
 
     // Cepstral lifter target. Sharpness picks an absolute envelope feature
     // scale; the per-frame F0 clamps it. See LIFTER_SCALE_COARSE_HZ.
@@ -747,6 +820,66 @@ export class ResonanceKernel {
    * mono, the detection mix otherwise. Its unwindowed frame is what pitch is
    * measured from.
    */
+  /**
+   * Reference drawn through the harmonic peaks. See PEAK_REF_FLOOR_FACTOR.
+   *
+   * `f0` is the spacing to step over, not a pitch to be accurate about: the max
+   * filter only needs a window at least one harmonic apart, so an overestimate
+   * costs resolution and an underestimate lets the comb back into the envelope.
+   * That asymmetry is why the fallback is a plausible speaking pitch rather
+   * than something small.
+   */
+  _peakEnvelope(f0) {
+    const { magDb, envDb, binCount, binWidth } = this
+    if (!this.peakMax) {
+      this.peakMax = new Float64Array(binCount)
+      this.peakPrefix = new Float64Array(binCount + 1)
+    }
+    const peak = this.peakMax
+    const prefix = this.peakPrefix
+
+    const spacing = Math.min(
+      Math.max(1, Math.ceil(f0 / binWidth)),
+      PEAK_SPACING_CAP_BINS,
+    )
+    for (let k = 0; k < binCount; k++) {
+      const lo = k - spacing < 0 ? 0 : k - spacing
+      const hi = k + spacing >= binCount ? binCount - 1 : k + spacing
+      let m = -Infinity
+      for (let j = lo; j <= hi; j++) if (magDb[j] > m) m = magDb[j]
+      peak[k] = m
+    }
+
+    // Running mean over a GEOMETRIC window — [k/2^oct, k*2^oct] — via a prefix
+    // sum, so the width can vary per bin without the cost varying with it.
+    //
+    // The window has to be geometric, not a linear one whose half-width is
+    // computed from an octave span. That mistake averages a bin at 2.5 kHz over
+    // everything from DC to 6.8 kHz, so the reference is set by the bass, sits
+    // far above the local level, and nothing protrudes: it took broad-defect
+    // removal at 2.5 kHz to 0.1-0.6 dB whatever the width or the threshold,
+    // which reads exactly like a detector that cannot see broad defects.
+    //
+    // The floor keeps the window wider than the max filter that feeds it. Below
+    // a few hundred Hz the octave span alone is narrower than one harmonic
+    // spacing, and a reference that narrow follows the resonance instead of
+    // passing under it.
+    prefix[0] = 0
+    for (let k = 0; k < binCount; k++) prefix[k + 1] = prefix[k] + peak[k]
+    const up = Math.pow(2, this.refOct)
+    const floorBins = Math.round((PEAK_REF_FLOOR_FACTOR * f0) / binWidth)
+    const last = binCount - 1
+    for (let k = 0; k < binCount; k++) {
+      let lo = Math.round(k / up)
+      let hi = Math.round(k * up)
+      if (k - lo < floorBins) lo = k - floorBins
+      if (hi - k < floorBins) hi = k + floorBins
+      if (lo < 0) lo = 0
+      if (hi > last) hi = last
+      envDb[k] = (prefix[hi + 1] - prefix[lo]) / (hi - lo + 1)
+    }
+  }
+
   _analyzeFrame(specRe, specIm, stft) {
     const {
       magDb, envDb, reduction, spread, prevGr, gain, activeBins, binCount,
@@ -790,7 +923,11 @@ export class ResonanceKernel {
       : DEFAULT_LIFTER_CUTOFF
     const lifterCutoff = Math.min(this.lifterTarget, lifterCeiling)
 
-    this._cepstralEnvelope(lifterCutoff)
+    if (this.refMode === 'peak') {
+      this._peakEnvelope(medianF0 > 0 ? medianF0 : PEAK_FALLBACK_F0_HZ)
+    } else {
+      this._cepstralEnvelope(lifterCutoff)
+    }
 
     const mask = this.preserveHarmonics && pitched ? this._harmonicMask(f0) : null
 

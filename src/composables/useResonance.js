@@ -4,25 +4,39 @@ import { useWindows } from './useWindows.js'
 import { applyResonanceRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
+import { resolveRefMode, withRefModeDefaults } from '../audio/resonanceParams.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
 
+/**
+ * Shipping defaults, with any reference-mode override applied.
+ *
+ * Resolved once, at module load: `?resoRef=peak` seeds the panel's knobs with
+ * that mode's calibration, because the two references disagree about what
+ * `selectivity` measures by an order of magnitude and the same numbers on the
+ * two are not the same setting. See RESONANCE_REF_MODE_DEFAULTS.
+ */
+const DEFAULTS = withRefModeDefaults(RESONANCE_DEFAULTS)
+
+/** True when something has asked for a non-shipping reference. Shown in the panel. */
+export const resRefMode = resolveRefMode()
+
 // Singleton reactive state shared between the sidebar trigger and the modal.
-const resDepth = ref(RESONANCE_DEFAULTS.depth)
-const resSharpness = ref(RESONANCE_DEFAULTS.sharpness)
-const resSelectivity = ref(RESONANCE_DEFAULTS.selectivity)
-const resAttack = ref(RESONANCE_DEFAULTS.attack)
-const resRelease = ref(RESONANCE_DEFAULTS.release)
-const resMaxReduction = ref(RESONANCE_DEFAULTS.maxReduction)
-const resFreqFloor = ref(RESONANCE_DEFAULTS.freqFloor)
-const resFreqCeil = ref(RESONANCE_DEFAULTS.freqCeil)
-const resMode = ref(RESONANCE_DEFAULTS.mode)
-const resPreserveHarmonics = ref(RESONANCE_DEFAULTS.preserveHarmonics)
-const resPitchRange = ref(RESONANCE_DEFAULTS.pitchRange)
-const resMix = ref(RESONANCE_DEFAULTS.mix)
-const resTrim = ref(RESONANCE_DEFAULTS.trim)
+const resDepth = ref(DEFAULTS.depth)
+const resSharpness = ref(DEFAULTS.sharpness)
+const resSelectivity = ref(DEFAULTS.selectivity)
+const resAttack = ref(DEFAULTS.attack)
+const resRelease = ref(DEFAULTS.release)
+const resMaxReduction = ref(DEFAULTS.maxReduction)
+const resFreqFloor = ref(DEFAULTS.freqFloor)
+const resFreqCeil = ref(DEFAULTS.freqCeil)
+const resMode = ref(DEFAULTS.mode)
+const resPreserveHarmonics = ref(DEFAULTS.preserveHarmonics)
+const resPitchRange = ref(DEFAULTS.pitchRange)
+const resMix = ref(DEFAULTS.mix)
+const resTrim = ref(DEFAULTS.trim)
 
 const resPreview = ref(false)
 /**
@@ -64,6 +78,7 @@ function currentParams() {
     maxReduction: resMaxReduction.value,
     mix: resMix.value,
     trim: resTrim.value,
+    refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
     freqFloor: resFreqFloor.value,
     freqCeil: resFreqCeil.value,
     mode: resMode.value,
@@ -244,6 +259,7 @@ export function useResonance() {
     resMaxReduction,
     resMix,
     resTrim,
+    resRefMode,
     resFreqFloor,
     resFreqCeil,
     resMode,

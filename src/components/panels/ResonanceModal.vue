@@ -21,7 +21,7 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resMix, resTrim,
+  resPitchRange, resMix, resTrim, resRefMode,
   resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncDepth, syncSharpness, syncSelectivity, syncAttack,
@@ -82,6 +82,35 @@ function snapHz(v) {
   if (v < 10000) return Math.round(v / 25) * 25
   return Math.round(v / 100) * 100
 }
+
+/**
+ * The protection control means different things under the two references, and
+ * the warning has to follow it.
+ *
+ * Under the cepstral reference the mask is the safety mechanism: it sits at the
+ * inter-harmonic floor, so harmonics protrude and read as resonances, and
+ * turning protection off really will thin the material. The peak-envelope
+ * reference is drawn THROUGH the harmonic peaks, so a harmonic is not a
+ * resonance by construction and the mask has nothing to do — leaving an amber
+ * "risks thinning harmonic frequencies" there would be warning about the one
+ * thing that mode exists to make safe.
+ */
+const protectionIsRisky = computed(
+  () => !resPreserveHarmonics.value && resRefMode === 'cepstral',
+)
+
+const protectionCaption = computed(() => {
+  if (resPreserveHarmonics.value) return 'Preserves harmonic frequencies.'
+  return resRefMode === 'cepstral'
+    ? 'Full suppression — risks thinning harmonic frequencies.'
+    : 'Not needed — this reference sits on the harmonics.'
+})
+
+const protectionTitle = computed(() =>
+  resRefMode === 'cepstral'
+    ? 'Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material.'
+    : 'The peak-envelope reference is drawn through the harmonic peaks, so harmonics are not read as resonances and this mask has nothing to protect against.',
+)
 
 const modeCaption = computed(() =>
   resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
@@ -151,6 +180,18 @@ async function applyAndClose() {
           }"
         >DELTA</span>
       </button>
+      <!-- An override is a thing you forget you turned on. The two references
+           disagree by an order of magnitude about what Selectivity measures, so
+           a panel running the non-shipping one and not saying so is a panel
+           whose numbers mean something other than they appear to. -->
+      <span
+        v-if="resRefMode !== 'cepstral'"
+        class="px-2 py-1 rounded-full"
+        style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em;
+               color:#ffb27a;background:rgba(255,178,122,.12);
+               border:1px solid rgba(255,178,122,.45)"
+        title="Non-shipping reference, selected by ?resoRef. Its knob calibration differs from the default mode's."
+      >{{ resRefMode.toUpperCase() }} REF</span>
     </template>
     <div class="px-[26px] pt-[18px] pb-[18px]">
       <!-- The display, not a meter. This effect cuts a few narrow bands and
@@ -303,12 +344,12 @@ async function applyAndClose() {
           class="shrink-0 px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
           style="width:186px"
           :style="{
-            background: resPreserveHarmonics ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
-            border: `1px solid ${resPreserveHarmonics ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
+            background: protectionIsRisky ? 'rgba(255,178,122,.12)' : 'rgba(141,224,168,.14)',
+            border: `1px solid ${protectionIsRisky ? 'rgba(255,178,122,.45)' : 'rgba(141,224,168,.4)'}`,
             opacity: resPreview ? 1 : 0.4,
           }"
           :disabled="!resPreview"
-          title="Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material."
+          :title="protectionTitle"
           @click="togglePreserveHarmonics"
         >
           <span
@@ -316,15 +357,13 @@ async function applyAndClose() {
             :style="{
               font: `700 8.5px 'JetBrains Mono',monospace`,
               letterSpacing: '.12em',
-              color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
+              color: protectionIsRisky ? '#ffb27a' : '#8de0a8',
             }"
           >{{ resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
           <span
             class="block mt-[3px]"
             style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
-          >{{ resPreserveHarmonics
-            ? 'Preserves harmonic frequencies.'
-            : 'Full suppression — risks thinning harmonic frequencies.' }}</span>
+          >{{ protectionCaption }}</span>
         </button>
 
         <SegmentedSwitch

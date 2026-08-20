@@ -112,3 +112,90 @@ export function resonanceDisplayRange(sampleRate) {
     maxHz: Math.min(RESONANCE_DISPLAY_MAX_HZ, sampleRate * 0.5 * 0.98),
   }
 }
+
+/**
+ * Reference mode override, for hearing the two detectors back to back.
+ *
+ *   ?resoRef=peak                              one page load
+ *   localStorage.setItem('resoRef', 'peak')    until cleared
+ *
+ * The cepstral reference ships. The peak-envelope one is the alternative — see
+ * the note on PEAK_REF_FLOOR_FACTOR in resonanceProcessor.js — and it needs a
+ * way to be listened to on real material before anything is decided, because
+ * every number behind it so far is synthetic.
+ *
+ * Read at module load rather than per-analysis, unlike VoiceRx's equivalent:
+ * these values seed the panel's knobs, and a knob that silently changes value
+ * between two runs of the same session is worse than one that needs a reload.
+ *
+ * An unrecognised value falls back to the shipping mode rather than passing
+ * through, for the reason the VoiceRx override gives: a typo must not quietly
+ * run the other detector while the person at the keyboard believes otherwise.
+ */
+const REF_MODES = new Set(['cepstral', 'peak'])
+export const DEFAULT_REF_MODE = 'cepstral'
+
+/**
+ * Per-mode calibration.
+ *
+ * THE KNOBS ARE NOT COMPARABLE BETWEEN THE TWO MODES, and pretending they are
+ * would make the comparison meaningless. `selectivity` is a threshold on how
+ * far a bin protrudes above the reference, and the two references disagree
+ * about that quantity by an order of magnitude — measured on a clean voice with
+ * no defect present at all, the cepstral reference reads 21-24 dB of
+ * protrusion, because from the inter-harmonic floor the comb itself protrudes;
+ * the peak-envelope reference reads 2.5-4.2 dB, which is what "nothing is
+ * wrong here" ought to measure. Put a +10 dB broad defect in and the cepstral
+ * reading does not move at all (23.40 to 23.40 at 800 Hz) while the peak
+ * reading goes 2.48 to 7.40.
+ *
+ * So the peak reference measures the defect's actual prominence against a near
+ * zero floor, and its threshold belongs just above that floor: selectivity 4
+ * with depth at unity, since protrusion is now roughly the true size of the
+ * thing being removed rather than a number inflated by the comb. Measured at
+ * that point it removes 2.2 / 7.2 / 10.5 dB of a +10 dB broad hump at
+ * 0.8 / 1.6 / 3.2 kHz, at a third the clean-voice damage of the unmasked
+ * cepstral path, with harmonic protection off and pitch transparency intact.
+ * Selectivity 3 removes a little more and starts to lose the transparency.
+ *
+ * This is soothe2's note about its own two algorithms, for the same reason:
+ * "choosing the mode changes everything, as all other controls are relative to
+ * the mode."
+ *
+ * CALIBRATED ON SYNTHETIC MATERIAL. That is the one thing this project has
+ * learned repeatedly not to trust, so these are a starting point for listening,
+ * not a result.
+ */
+export const RESONANCE_REF_MODE_DEFAULTS = {
+  cepstral: {},
+  peak: {
+    refMode: 'peak',
+    selectivity: 4,
+    depth: 1,
+    // The whole point: this reference does not make harmonics look like
+    // resonances, so it does not need the mask that answers that.
+    preserveHarmonics: false,
+  },
+}
+
+export function resolveRefMode() {
+  const requested = readOverride('resoRef')
+  return REF_MODES.has(requested) ? requested : DEFAULT_REF_MODE
+}
+
+/** Shipping defaults, with the selected reference mode's calibration applied. */
+export function withRefModeDefaults(defaults) {
+  return { ...defaults, ...RESONANCE_REF_MODE_DEFAULTS[resolveRefMode()] }
+}
+
+/** Query string, then stored preference. Null when neither has an opinion. */
+function readOverride(key) {
+  try {
+    return new URLSearchParams(window.location.search).get(key)
+      ?? window.localStorage.getItem(key)
+  } catch {
+    // No window under test, or a browser that throws on localStorage in
+    // private mode. Neither is a reason to fail.
+    return null
+  }
+}
