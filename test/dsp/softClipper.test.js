@@ -1430,6 +1430,31 @@ test('the lift can never leave [0, emphasisDb]', () => {
   }
 })
 
+test('quiet HF material does not drive the lift', () => {
+  // WHAT LIFT_GATE_DB FIXES, and the failure is a real-audio one reproduced
+  // here: a bed whose LOUD moments are low-frequency and whose fricatives are
+  // 12 dB quieter. The peaks that reach the curve carry no HF and were never
+  // lifted, so the threshold must not rise for them — but a lift averaged over
+  // all voiced material reads the quiet fricatives and raises it anyway,
+  // over-compensating exactly the peaks the stage exists to catch.
+  //
+  // On 35 s of real narration that error was a factor of two (1.74 dB measured
+  // against a 0.85 dB target at emphasis 12) and it inverted the sign of the
+  // depth drift rather than removing it.
+  const quietHf = () => fricativeNoise(1, 0.5 * Math.pow(10, -12 / 20))
+  const signal = concat(
+    speechLike(3, 0.5, 97), quietHf(),
+    speechLike(3, 0.5, 101), quietHf(),
+    speechLike(3, 0.5, 103), quietHf(),
+  )
+  // 0.31 dB gated against 4.91 ungated on this probe — a 16x separation, so
+  // the bound is nowhere near either value and the test is about the
+  // mechanism rather than about a tuned number.
+  const { liftDb } = meter(signal, { headroomDb: 6.5, emphasisDb: 12 })
+  assert.ok(liftDb < 1.5,
+    `quiet fricatives drove the lift to ${liftDb.toFixed(2)} dB on a bed whose peaks are LF`)
+})
+
 test('emphasis 0 compensates by exactly nothing', () => {
   // The guarantee that keeps the whole feature free for anyone who has the
   // filters bypassed: with no emphasis there is no lift to give back, on any

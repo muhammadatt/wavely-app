@@ -575,6 +575,58 @@ const EMPHASIS_RECOMPUTE_EPS_DB = 0.05
  */
 const LIFT_TAU_S = SPEECH_TAU_S
 
+/**
+ * How far below the tracked speech level a moment may sit and still count
+ * toward the lift measurement, in dB.
+ *
+ * WHY THE LIFT IS NOT MEASURED OVER ALL VOICED MATERIAL, which is what shipped
+ * first and over-read it by roughly a factor of two on real narration. The
+ * quantity being corrected is how much the PEAKS THAT REACH THE CURVE have
+ * been lifted; averaging the follower ratio over every voiced sample instead
+ * measures a different population, because fricative moments raise the
+ * emphasised envelope during instants that never come near the threshold.
+ *
+ * Measured on 35 s of real narration at Headroom 6.5, against the lift that
+ * would hold peak reduction flat across the knob (recovered from the stage's
+ * own Headroom sensitivity, 0.62 dB of reduction per dB of threshold):
+ *
+ *   population                       HFE 6    HFE 12     target
+ *   every voiced sample               0.68      1.74
+ *   within 6 dB of the speech level   0.37      0.96
+ *   within 3 dB of the speech level   0.34      0.85     0.31 / 0.85
+ *
+ * The loud-moment populations land on the target; the all-voiced one does not,
+ * and the error is in the direction that made the compensation OVERSHOOT — it
+ * raised the threshold for plosives, which carry no HF and were never lifted
+ * at all, on evidence gathered from fricatives.
+ *
+ * 0 dB — "at or above the tracked speech level" — needs no calibration: the
+ * tracker is already peak-referenced, so this is just "the moments Headroom is
+ * measured from", which is exactly the population the threshold is placed for.
+ *
+ * WHAT THE GATE BUYS, on the same 35 s of real narration at Headroom 6.5.
+ * Peak reduction across HF Emphasis 0 -> 12:
+ *
+ *   pre-compensation          3.02 -> 3.55 dB   (+0.53)
+ *   compensated, ungated      3.02 -> 2.61      (-0.41)   sign flipped, not fixed
+ *   compensated, gated        3.02 -> 2.92      (-0.10)
+ *
+ * and total added distortion over the same sweep -54.6 -> -52.1 dBFS
+ * uncompensated against -54.6 -> -55.9 gated, while the count of samples the
+ * curve touches still rises 1.8x — the aiming intact, the depth held.
+ *
+ * ⚠ AND THE REAL FILE DEFLATES THE SYNTHETIC HEADLINE. On the corpus's
+ * sibilant bed the uncompensated drift was 4.4 dB; on real narration it is
+ * 0.53. Real speech barely lifts its own PEAK ENVELOPE even where it is rich
+ * in fricatives — 1.74 dB at emphasis 12 measured over all voiced samples,
+ * 0.85 over the loud ones — because a fricative does not dominate a 1 ms /
+ * 150 ms peak follower the way first-differenced noise does. The defect was
+ * real and the fix is real; both are roughly a fifth the size the synthetic
+ * corpus implied. Tenth time synthetic material has failed to answer the
+ * question asked of it, and the first time it has erred by EXAGGERATING.
+ */
+const LIFT_GATE_DB = 0
+
 // Fixed time constant for smoothing headroomDb / outputTrimDb toward their
 // targets — see deviation note 3. Fast enough to feel immediate on a knob
 // drag, slow enough that no step is audible as zipper noise.
@@ -613,6 +665,16 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // patch below the 3-6 dB the lamp's own guidance calls the usable range on
   // speech. 6.5 restores 3.21 dB with the shipped knee. The two defaults are
   // coupled through the shape table and must move together.
+  //
+  // RE-MEASURED ON A SECOND NARRATOR and left alone. That file lands on
+  // exactly 3.21 dB at this Headroom on the pre-compensation build — the same
+  // figure, a different voice — which is the strongest evidence this constant
+  // has. The emphasis lift compensation then costs the stock patch 0.24 dB
+  // (3.21 -> 2.97), and 6.35 would return it. Not taken: 0.24 dB is well
+  // inside the spread between two narrators, and moving a shipped default to
+  // chase it on a sample of one is how a constant stops meaning anything.
+  // (The ungated lift cost 0.36 dB and did argue for a move; the gate removed
+  // most of the shortfall along with the over-compensation that caused it.)
   headroomDb: 6.5,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
@@ -841,10 +903,23 @@ export const SHAPE_MIN_KNEE_DB = { tanh2: 4.62, tanh3: 4.50, tanh4: 4.46 }
  * ⚠ ANCHOR IS THE ONE CONSTANT HERE THAT SYNTHETIC MATERIAL CANNOT CHECK. The
  * test corpus's speechLike() puts its crossings at p50 9.6 dB / max 11.5 —
  * ABOVE the anchor rather than below it — so on synthetics the ordering it
- * produces is the reverse of the one on speech. It inherits the real
- * distribution recorded at KNEE_DB and should be re-derived with it against a
- * wider corpus. Ninth time synthetic material has been too clean to answer the
- * question asked of it.
+ * produces is the reverse of the one on speech.
+ *
+ * CONFIRMED ON A SECOND REAL NARRATOR, 35 s at the shipped default: crossings
+ * sit at p50 1.32 dB / p90 3.45 / p99 5.82 / max 6.99, against the p50 1.2 /
+ * p90 3.0 / max 6.1 recorded at KNEE_DB from a different clip. 6 dB sits
+ * between that file's p99 and its max, which is where the anchor is meant to
+ * be, so it is left as it stands.
+ *
+ * END TO END ON THE SAME FILE, peak reduction across EARLY / MID / LATE:
+ *
+ *   Headroom   shared knee 7        per-shape knees      spread
+ *      5      4.57 3.99 3.49 (1.09)  3.46 3.80 4.03 (0.57)
+ *      6.5    3.95 3.21 2.60 (1.35)  2.77 2.97 3.11 (0.34)
+ *      8      3.15 2.28 1.66 (1.50)  2.02 2.02 2.03 (0.00)
+ *
+ * A 4x tightening at the default and exact at Headroom 8, where that file's
+ * crossings top out at 5.49 dB — just under the anchor.
  */
 export const SHAPE_ANCHOR_DB = 6
 
@@ -1338,8 +1413,20 @@ export class SoftClipperKernel {
         // Clamped to [0, emphasisDb] — the shelf is a pure boost, so anything
         // outside that window is a follower still filling rather than a
         // measurement. See LIFT_TAU_S.
+        // Only the loud moments contribute — see LIFT_GATE_DB. During warm-up
+        // the tracker is parked at SPEECH_INIT_HOLD_DB and means nothing yet,
+        // so the comparison runs against the peak gathered so far instead;
+        // without that the gate would never open during warm-up and the seed
+        // below would never accumulate.
+        const liftRefDb = speechWarmupCount < this.speechWarmupTarget
+          ? linToDb(speechWarmupPeak)
+          : speechLevelDb
+        const atPeak = fastPeakDb >= liftRefDb + LIFT_GATE_DB
         const liftTargetDb = clamp(linToDb(fastPeakEmph) - fastPeakDb, 0, liftMaxDb)
-        if (speechWarmupCount < this.speechWarmupTarget) {
+        if (!atPeak) {
+          // Not a loud moment: contribute nothing rather than dragging the
+          // reading toward a population the threshold is not placed for.
+        } else if (speechWarmupCount < this.speechWarmupTarget) {
           // SEEDED DURING WARM-UP, NOT RAMPED INTO, and this is not a
           // refinement — without it the feature is absent for its first three
           // seconds. The speech tracker adopts a real level the instant its
