@@ -132,12 +132,26 @@ export function createClipGainDeEsser(audioContext) {
    */
   let lastReadIdx = -1
 
-  function stopTransport() {
+  /**
+   * Stop the scheduled envelope. `when` is a context time to stop *at*, which
+   * is what makes a gapless loop possible: the next pass is scheduled slightly
+   * ahead of the seam, and the pass still sounding has to run to the seam
+   * rather than be cut off at the moment the next one is booked. Omitted (a
+   * transport stop, a parameter change) it stops immediately, as before.
+   */
+  function stopTransport(when) {
     lastReadIdx = -1
     if (!modulator) return
+    const node = modulator
     try {
-      modulator.stop()
-      modulator.disconnect()
+      if (when !== undefined && when > audioContext.currentTime) {
+        // Left connected deliberately — it is still sounding until `when`, and
+        // disconnecting now would silence the tail it was given.
+        node.stop(when)
+      } else {
+        node.stop()
+        node.disconnect()
+      }
     } catch {
       // Already stopped — starting and stopping in the same tick is normal.
     }
@@ -154,7 +168,9 @@ export function createClipGainDeEsser(audioContext) {
    * later, playback starting inside it starts the modulator part-way in.
    */
   function startTransport(when, startSec) {
-    stopTransport()
+    // Hand the outgoing envelope the time it is allowed to run to. When `when`
+    // is now, this is the immediate stop it always was.
+    stopTransport(when)
     if (destroyed || !envelopeBuffer) return
 
     const regionEndSec = regionStartSec + envelopeBuffer.duration
@@ -171,7 +187,10 @@ export function createClipGainDeEsser(audioContext) {
     modulator = audioContext.createBufferSource()
     modulator.buffer = envelopeBuffer
     modulator.connect(gainNode.gain)
-    modulator.onended = () => { running = false }
+    // Guarded on identity: an outgoing modulator stopping at the loop seam must
+    // not clear `running` for the pass that has already replaced it.
+    const node = modulator
+    node.onended = () => { if (modulator === node) running = false }
     modulator.start(at, offset)
 
     transportWhen = at

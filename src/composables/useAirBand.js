@@ -114,7 +114,7 @@ export function useAirBand() {
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      const bufferId = replaceRegion(start, end, buffer)
+      const bufferId = replaceRegion(start, end, buffer, 'AirBoost')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast('AirBoost applied')

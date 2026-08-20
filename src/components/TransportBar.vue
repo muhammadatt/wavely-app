@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
-import { startPlayback, stopPlayback } from '../audio/playback.js'
+import { startPlayback, stopPlayback, setPlaybackLoop } from '../audio/playback.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import BaseButton from './ui/BaseButton.vue'
 
@@ -59,12 +59,15 @@ function play() {
     },
     () => {
       state.isPlaying = false
-      if (state.isLooping) {
-        state.playhead = endAt ? startFrom : 0
-        play()
-      }
     },
     endAt,
+    // Looping is handled inside the engine, on the audio clock. Restarting from
+    // here instead — the old arrangement — could only ever begin the next pass
+    // one animation frame after the previous one ended, which is the gap at the
+    // seam. A repeat starts where the selection does, or at zero when the whole
+    // file is playing: looping a file from the middle should come back to the
+    // top, not to wherever playback happened to begin.
+    { loop: state.isLooping, loopStart: endAt !== null ? startFrom : 0 },
   )
 }
 
@@ -72,6 +75,13 @@ function stop() {
   stopPlayback()
   state.isPlaying = false
 }
+
+// The loop button is live during playback, so the engine has to hear about a
+// toggle mid-pass rather than only at the next play().
+watch(() => state.isLooping, (looping) => {
+  if (!state.isPlaying) return
+  setPlaybackLoop(looping, state.selection ? state.selection.start : 0)
+})
 
 function skipToStart() {
   if (state.isPlaying) stop()

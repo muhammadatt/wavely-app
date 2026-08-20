@@ -34,7 +34,7 @@ async function applyNormalize(useSelection = true) {
       state.segments, start, end, targetPeak.value,
       ctx, state.currentFile.sampleRate, state.currentFile.channels
     )
-    const bufferId = replaceRegion(start, end, buffer)
+    const bufferId = replaceRegion(start, end, buffer, 'Normalization')
 
     // Recompute peak cache for new buffer
     const cache = await computePeakCache(buffer, 256)

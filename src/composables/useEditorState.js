@@ -105,7 +105,11 @@ const peakCacheVersion = ref(0)
 // Map<docId, Set<bufferId>> — which buffers each document brought into the pool.
 const docBuffers = new Map()
 
-// Map<docId, { undo: Segment[][], redo: Segment[][] }>
+// Map<docId, { undo: HistoryEntry[], redo: HistoryEntry[] }>, where a
+// HistoryEntry is `{ segments, label }` — the timeline as it stood *before* an
+// operation, tagged with the name of the operation that displaced it. The label
+// is what lets undo say which edit it just took back rather than only that
+// something was undone; an entry with no label falls back to a bare "Undone".
 // Held outside the reactive tree: these are up to 50 full segment-array clones
 // per document, and deep-reactive wrapping them is pure cost — nothing renders
 // from history directly. The reactive `undoCount`/`redoCount` on the document
@@ -154,6 +158,17 @@ const state = new Proxy({}, {
   },
 })
 
+/**
+ * "Trim to selection" → "trim to selection", so it reads inside a sentence.
+ * Labels that start with a proper name ("VoiceRx", "FET Punch") keep their case
+ * — a second capital in the first two characters is the tell.
+ */
+function lowerFirst(label) {
+  if (!label) return label
+  if (label.length > 1 && label[1] === label[1].toUpperCase() && /[A-Z]/.test(label[1])) return label
+  return label[0].toLowerCase() + label.slice(1)
+}
+
 function historyFor(docId) {
   let h = docHistory.get(docId)
   if (!h) {
@@ -197,11 +212,17 @@ export function useEditorState() {
   }
 
   // ── Undo/Redo ──────────────────────────────────────────────────────────────
-  function pushUndo() {
+  /**
+   * Snapshot the timeline before an edit. `label` names the operation about to
+   * happen ("Cut", "Normalization") so undo can report what it took back — every
+   * edit already tells the user what it did via a toast, and an undo that says
+   * nothing is the one step in the loop with no feedback.
+   */
+  function pushUndo(label = '') {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    h.undo.push(cloneSegments(doc.segments))
+    h.undo.push({ segments: cloneSegments(doc.segments), label })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
     doc.undoCount = h.undo.length
@@ -213,11 +234,16 @@ export function useEditorState() {
     if (!doc) return
     const h = historyFor(doc.id)
     if (h.undo.length === 0) return
-    h.redo.push(cloneSegments(doc.segments))
-    doc.segments = h.undo.pop()
+    const entry = h.undo.pop()
+    // The label travels with the state it belongs to: the entry now going onto
+    // the redo stack is the result of that same operation, so redoing it can
+    // name it too.
+    h.redo.push({ segments: cloneSegments(doc.segments), label: entry.label })
+    doc.segments = entry.segments
     doc.selection = null
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
+    showToast(entry.label ? `Undid ${lowerFirst(entry.label)}` : 'Undone')
   }
 
   function redo() {
@@ -225,11 +251,13 @@ export function useEditorState() {
     if (!doc) return
     const h = historyFor(doc.id)
     if (h.redo.length === 0) return
-    h.undo.push(cloneSegments(doc.segments))
-    doc.segments = h.redo.pop()
+    const entry = h.redo.pop()
+    h.undo.push({ segments: cloneSegments(doc.segments), label: entry.label })
+    doc.segments = entry.segments
     doc.selection = null
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
+    showToast(entry.label ? `Redid ${lowerFirst(entry.label)}` : 'Redone')
   }
 
   // ── Buffer pool ────────────────────────────────────────────────────────────
@@ -401,7 +429,7 @@ export function useEditorState() {
   // ── Edit operations — all push undo first ──────────────────────────────────
   function performTrimToSelection() {
     if (!state.selection) return
-    pushUndo()
+    pushUndo('Trim to selection')
     const { start, end } = state.selection
     state.segments = trimToSelection(state.segments, start, end)
     state.selection = null
@@ -410,7 +438,7 @@ export function useEditorState() {
 
   function performTrimBefore() {
     if (!state.selection) return
-    pushUndo()
+    pushUndo('Trim before selection')
     state.segments = trimBefore(state.segments, state.selection.start)
     state.selection = null
     state.playhead = 0
@@ -418,7 +446,7 @@ export function useEditorState() {
 
   function performTrimAfter() {
     if (!state.selection) return
-    pushUndo()
+    pushUndo('Trim after selection')
     state.segments = trimAfter(state.segments, state.selection.end)
     const dur = getTimelineDuration(state.segments)
     state.selection = null
@@ -427,19 +455,19 @@ export function useEditorState() {
 
   function performSilence() {
     if (!state.selection) return
-    pushUndo()
+    pushUndo('Silence')
     const { start, end } = state.selection
     state.segments = silenceRegion(state.segments, start, end)
   }
 
   function performSplit() {
-    pushUndo()
+    pushUndo('Split')
     state.segments = splitAtPlayhead(state.segments, state.playhead)
   }
 
   function performSplitAtSelectionEdges() {
     if (!state.selection) return
-    pushUndo()
+    pushUndo('Split at selection edges')
     let segs = splitAtPlayhead(state.segments, state.selection.start)
     segs = splitAtPlayhead(segs, state.selection.end)
     state.segments = segs
@@ -456,7 +484,7 @@ export function useEditorState() {
 
   function performCut() {
     if (!state.selection) return
-    pushUndo()
+    pushUndo('Cut')
     const { start, end } = state.selection
     const inner = segmentsInRange(state.segments, start, end)
     appState.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
@@ -478,7 +506,7 @@ export function useEditorState() {
   function performPaste(position) {
     const doc = activeDocument.value
     if (!appState.clipboard || !doc) return
-    pushUndo()
+    pushUndo('Paste')
     // Pasting across documents brings in segments whose buffers belong to the
     // source document. Claim shared ownership so closing that document doesn't
     // free a buffer this one is now rendering from.
@@ -493,13 +521,18 @@ export function useEditorState() {
     state.segments = insertSegments(state.segments, position, appState.clipboard)
   }
 
-  function replaceRegion(start, end, newBuffer, docId = appState.activeDocumentId) {
+  /**
+   * Swap a processed buffer into [start, end]. `label` names the effect for the
+   * undo toast; `docId` defaults to the active document, and is only ever passed
+   * explicitly by the preset job, which can land after a tab switch.
+   */
+  function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId) {
     const doc = getDocument(docId)
     if (!doc) return null
     // Undo must land on the document being modified, which is not necessarily
     // the active one — a preset job can finish after the user switched tabs.
     const h = historyFor(doc.id)
-    h.undo.push(cloneSegments(doc.segments))
+    h.undo.push({ segments: cloneSegments(doc.segments), label })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
     doc.undoCount = h.undo.length

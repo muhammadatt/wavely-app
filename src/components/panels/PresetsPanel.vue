@@ -231,7 +231,9 @@ async function handleProcess() {
 
     // Replace that document's entire timeline with the processed audio
     const dur = getTimelineDuration(doc.segments)
-    const bufferId = replaceRegion(0, dur, audioBuffer, docId)
+    const bufferId = replaceRegion(
+      0, dur, audioBuffer, `${PRESETS[preset]?.displayName ?? 'Preset'} mastering`, docId,
+    )
 
     // Sync file metadata to reflect the processed audio properties.
     // Server-side presets can change channel count (e.g. Noise Eraser → mono)
