@@ -562,11 +562,11 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // patch below the 3-6 dB the lamp's own guidance calls the usable range on
   // speech. 6.5 restores 3.21 dB with the shipped knee. The two defaults are
   // coupled through the shape table and must move together.
-  headroomDb: 9,
+  headroomDb: 6.5,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
-  thresholdMode: 'fixed', // 'adaptive' | 'fixed'
-  fixedThresholdDb: -6, // used only in 'fixed' mode
+  thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
+  fixedThresholdDb: -10, // used only in 'fixed' mode
   shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
 }
 
