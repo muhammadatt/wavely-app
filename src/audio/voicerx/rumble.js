@@ -38,7 +38,50 @@
  */
 
 import { getFFT, rfftBinCount } from '../dsp/fft.js'
-import { hannSymmetric, percentile, FRAME_SIZE, HOP_SIZE, N_FFT } from './analysis.js'
+import { hannSymmetric, percentile } from './analysis.js'
+
+/**
+ * THIS MEASUREMENT HAS ITS OWN, MUCH LONGER WINDOW, and running it on the
+ * region machinery's FRAME_SIZE 2048 / N_FFT 4096 was a defect with two
+ * symptoms. Both were found by running the heuristic against real recordings
+ * for the first time.
+ *
+ * SYMPTOM 1 — SILENT TOTAL FAILURE ON LOW CORNERS. The tilt bands are
+ * fractions of the corner, so at 2048 they are one or two bins wide, and below
+ * two bins `bandLevelDb` returns null, `analyzeRumble` returns null, and no
+ * rumble finding is produced at all. Swept across corners 40-100 Hz: at 48 kHz
+ * EVERY corner below 75 failed; at 44.1 kHz every corner below 65 failed, and
+ * 75 failed while 70 and 80 passed — pure bin-alignment luck. A clean
+ * synthetic voice at F0 90 returned null outright. Deep-voiced narrators got
+ * no rumble analysis whatsoever and nothing said so. That is the same
+ * too-few-bins failure this heuristic was written to REPLACE in `sub_bass`,
+ * which the header above criticises for getting 6.5 bins.
+ *
+ * SYMPTOM 2 — LEAKAGE, worth 8 dB and a sign. At 48 kHz a 2048-sample frame
+ * gives 23.4 Hz of true resolution and a Hann mainlobe about 94 Hz wide, so
+ * the whole 20-100 Hz region this heuristic reads sat inside one mainlobe. The
+ * HIGH band, being nearest F0, caught the most leakage, which made every tilt
+ * read steeper than it was. Three real narrators, tilt at frame 2048 / 8192 /
+ * 32768:
+ *
+ *   A (48 kHz, corner 85.8)   -3.28   +4.47   +5.00   <- sign flips
+ *   B (44.1 kHz, corner 100)  -3.43   -3.87   -3.90
+ *   C (22 kHz, corner 65.4)   -9.57   -8.23   -8.35
+ *
+ * B and C were roughly right, having had 3-4 bins. A was wrong by 8.3 dB and
+ * in the wrong DIRECTION — its spectrum genuinely RISES 5 dB toward DC, which
+ * is heavy rumble, and the old window called it a clean-ish fall. Corroborated
+ * independently: that file's 40-60 Hz band sits 7.9 dB below its own
+ * 300-3000 Hz speech band.
+ *
+ * 16384 samples gives 2.9 Hz resolution at 48 kHz and 7+ bins in the narrowest
+ * band at every corner in range, so symptom 1 cannot recur at any supported
+ * rate. It is also CHEAPER than what it replaces — a 16384-point FFT every
+ * 4096 samples against a 4096-point one every 512 — and measured rather than
+ * assumed: 544 ms -> 307 ms on a 35.5 s selection, 56% of the old cost.
+ */
+const RUMBLE_FRAME_SIZE = 16384
+const RUMBLE_HOP_SIZE = 4096
 
 /**
  * Where to put the corner, relative to the pitch the speaker actually uses.
@@ -85,85 +128,56 @@ const HIGH_BAND = [0.72, 1.0]
 /**
  * The tilt a recording with nothing wrong is expected to show.
  *
- * CALIBRATED ON ONE FILE and physically motivated rather than fitted: it stands
- * for the natural fall-off below the fundamental. Anything flatter than this is
- * energy that the voice cannot have put there. This is the weakest constant
- * here and the first thing to re-derive once raw, unmastered narrator
- * recordings exist — every file available when it was written was either
- * synthetic or already mastered, and mastering has usually already high-passed
- * the bottom away.
+ * ⚠ MOVED WITH THE WINDOW, and the two are not separable. Correcting the
+ * leakage shifted every tilt several dB flatter, so the old -14 — calibrated
+ * against the leakage-inflated reading — began offering 8.8 dB of cut on clean
+ * audio the moment the window was fixed. A constant fitted on top of a broken
+ * measurement cannot survive the measurement being repaired.
+ *
+ * ⚠ AND IT IS STILL NOT REALLY A CONSTANT. The clean tilt varies with where
+ * the corner lands, which is a defect in the STATISTIC and is not fixed here.
+ * Clean synthetic voices measure, at the corrected window:
+ *
+ *   F0  90 -> corner 49.5   tilt -20.10
+ *   F0 120 -> corner 66     tilt  -9.49
+ *   F0 180 -> corner 99     tilt -10.27
+ *   F0 220 -> corner 100    tilt  -5.20
+ *
+ * A 15 dB spread across recordings with nothing wrong with them. So any single
+ * number trades false positives against misses, and the only defensible way to
+ * pick one for a consumer tool is to refuse the false positives: -5 is the
+ * FLATTEST clean reading, so nothing measured as clean can be offered a cut.
+ *
+ * Swept over the candidates — worst gain offered on a clean case, against what
+ * survives of detection:
+ *
+ *   candidate    worst false positive    on -30 dBFS rumble
+ *      -4              0.00 dB                 2.0 dB
+ *      -5              0.00                    3.0        <- shipped
+ *      -6              0.80 (not reportable)   4.0
+ *      -7              1.80                    5.0
+ *     -14              8.80                   12.0        <- the old value, post-fix
+ *
+ * -5 is a knee rather than a point on a slope: it is the last value with no
+ * false-positive gain at all, and -6 is the last with none REPORTABLE. On the
+ * three real narrators it gives -10.0 / -1.1 / 0.0 dB, which is the ordering
+ * their absolute band levels support — the one with 40-60 Hz energy 7.9 dB
+ * under its own speech band gets the large cut, the already-high-passed one
+ * gets nothing.
+ *
+ * ⚠ The cost of choosing the conservative end is misses: a genuinely rumbly
+ * recording whose corner happens to land where clean audio reads flat will be
+ * under-corrected. That is the right way round for a tool that runs unasked.
+ *
+ * ⚠ STILL NO KNOWN-CLEAN UNMASTERED NARRATOR RECORDING. The flattest clean
+ * reading above comes from a synthetic voice; the one real file with a clean
+ * bottom end is hard-mastered, so using it as the clean reference would assume
+ * what it is meant to prove. The next step is to make the clean tilt a
+ * function of the corner rather than a constant — or to decide the tilt is the
+ * wrong statistic and measure sub-F0 energy against a proper noise-floor
+ * reference instead.
  */
-const CLEAN_TILT_DB = -14
-
-/**
- * ⚠ MEASURED AGAINST THREE REAL NARRATORS AND NOT RE-DERIVED, because the
- * measurement turns out to have two structural defects that have to be fixed
- * FIRST — and a constant fitted on top of a broken measurement is worse than
- * the one already here. Recorded so the next attempt starts from evidence.
- *
- * DEFECT 1 — SILENT TOTAL FAILURE ON LOW CORNERS. The tilt bands are fractions
- * of the corner, so they are only a few FFT bins wide at the region
- * machinery's FRAME_SIZE 2048 / N_FFT 4096, and below two bins `bandLevelDb`
- * returns null, `analyzeRumble` returns null, and no rumble finding is
- * produced at all. Swept across corners 40-100 Hz: at 48 kHz EVERY corner
- * below 75 fails; at 44.1 kHz every corner below 65 fails, and 75 fails while
- * 70 and 80 pass — pure bin-alignment luck. Reproduced on a synthetic clean
- * voice at F0 90 (corner 49.5), which returns null outright. A deep-voiced
- * narrator gets no rumble analysis whatsoever and nothing says so. This is the
- * same "too few bins" failure this heuristic was written to replace in
- * `sub_bass`, which the note at the top of this file criticises for getting
- * 6.5 bins; the tilt bands get one or two.
- *
- * DEFECT 2 — THE CLEAN TILT IS NOT A CONSTANT. It varies with where the corner
- * lands, so a single CLEAN_TILT_DB cannot be right for every voice. On the
- * shipped build, clean synthetic voices measure:
- *
- *   F0  90  ->  corner 49.5   NULL (defect 1)
- *   F0 120  ->  corner 66     tilt -15.76   gain  0.00   <- what -14 was fitted to
- *   F0 180  ->  corner 99     tilt -10.22   gain -3.78
- *   F0 220  ->  corner 100    tilt  -8.24   gain -5.76
- *
- * So a higher-pitched narrator with a perfectly clean bottom end is already
- * offered a 5.8 dB cut. The constant was calibrated at F0 120 and is a
- * function of the corner, not a property of clean audio.
- *
- * WHAT THE WINDOW IS DOING TO IT. At 48 kHz, FRAME_SIZE 2048 gives 23.4 Hz of
- * true resolution and a Hann mainlobe about 94 Hz wide — the whole 20-100 Hz
- * region this heuristic reads fits inside one mainlobe, and the HIGH band,
- * being nearest F0, catches the most leakage, which makes the tilt look
- * steeper than it is. Re-measuring with 16384-sample frames on three real
- * narrators (tilt at frame 2048 / 8192 / 32768):
- *
- *   A (48 kHz, corner 85.8)   -3.28   +4.47   +5.00   <- sign flips
- *   B (44.1 kHz, corner 100)  -3.43   -3.87   -3.90
- *   C (22 kHz, corner 65.4)   -9.57   -8.23   -8.35
- *
- * B and C were roughly right, having had 3-4 bins. A was wrong by 8.3 dB and
- * in the wrong DIRECTION: its spectrum genuinely RISES 5 dB toward DC, which is
- * heavy rumble, and the shipped window called it a clean-ish fall.
- *
- * WHAT THE THREE FILES ACTUALLY CONTAIN, independently of any of this — mean
- * band level relative to the same file's 300-3000 Hz speech band:
- *
- *   A (normalised)      40-60 Hz  -7.9 dB     <- a great deal of LF energy
- *   B (raw)             40-60 Hz -11.5 dB
- *   C (hard-mastered)   40-60 Hz -16.2 dB, 10-40 Hz -22 to -24  <- high-passed
- *
- * The shipped heuristic offers -10.72 / -10.57 / -4.43 dB on these, which is
- * the right ORDERING and plausibly the right magnitudes for A and B. So the
- * heuristic is not obviously wrong on real rumble; it is wrong about clean
- * audio and blind on low corners.
- *
- * THE ORDER OF WORK IS: give this measurement its own long window (16384
- * samples is cheaper than what runs now — a 16384-point FFT every 4096 samples
- * against a 4096-point one every 512), which fixes defect 1 outright; then
- * decide whether the clean tilt can be predicted from the corner or whether
- * the tilt is simply the wrong statistic. Only then re-derive this number.
- * Re-deriving it now would fit it to leakage.
- *
- * ⚠ Still no KNOWN-CLEAN unmastered narrator recording. C is high-passed, so
- * using it as the clean reference assumes what it is meant to prove.
- */
+const CLEAN_TILT_DB = -5
 
 /** Shelf slope. Gentle, so a slightly misplaced corner costs little. */
 export const RUMBLE_Q = 0.7
@@ -172,27 +186,46 @@ export const RUMBLE_Q = 0.7
 const MAX_RUMBLE_CUT_DB = 12
 const MIN_REPORTABLE_DB = 1.0
 
-/** Mean power spectrum across the whole selection, pauses included. */
-function meanPowerSpectrum(audio, sampleRate) {
-  const fft = getFFT(N_FFT)
-  const bins = rfftBinCount(N_FFT)
-  const window = hannSymmetric(FRAME_SIZE)
-  const padded = new Float64Array(N_FFT)
+/**
+ * Mean power spectrum across the whole selection, pauses included.
+ *
+ * @returns {null | { spectrum: Float64Array, nFft: number }} the transform size
+ *   travels WITH the spectrum, because it is chosen from the selection length —
+ *   a caller converting bins to Hz against a module constant would be wrong on
+ *   any selection shorter than RUMBLE_FRAME_SIZE.
+ */
+function meanPowerSpectrum(audio) {
+  // A selection shorter than the frame would produce no frames at all and
+  // silently disable the heuristic — precisely the class of failure the long
+  // window was introduced to remove, so it must not be reintroduced here.
+  // Halve until it fits, with a floor: below 2048 there is no low-frequency
+  // resolution worth having and null is the honest answer rather than a
+  // number nothing supports.
+  let frameSize = RUMBLE_FRAME_SIZE
+  while (frameSize > audio.length) frameSize >>= 1
+  if (frameSize < 2048) return null
+  const hop = Math.max(1, (frameSize * RUMBLE_HOP_SIZE) / RUMBLE_FRAME_SIZE)
+
+  const nFft = frameSize
+  const fft = getFFT(nFft)
+  const bins = rfftBinCount(nFft)
+  const window = hannSymmetric(frameSize)
+  const padded = new Float64Array(nFft)
   const re = new Float64Array(bins)
   const im = new Float64Array(bins)
   const acc = new Float64Array(bins)
 
   let frames = 0
-  for (let s = 0; s + FRAME_SIZE <= audio.length; s += HOP_SIZE) {
+  for (let s = 0; s + frameSize <= audio.length; s += hop) {
     padded.fill(0)
-    for (let i = 0; i < FRAME_SIZE; i++) padded[i] = audio[s + i] * window[i]
+    for (let i = 0; i < frameSize; i++) padded[i] = audio[s + i] * window[i]
     fft.rfft(padded, re, im)
     for (let k = 0; k < bins; k++) acc[k] += re[k] * re[k] + im[k] * im[k]
     frames++
   }
   if (frames === 0) return null
   for (let k = 0; k < bins; k++) acc[k] /= frames
-  return acc
+  return { spectrum: acc, nFft }
 }
 
 /**
@@ -201,11 +234,11 @@ function meanPowerSpectrum(audio, sampleRate) {
  * Per bin rather than summed, so the two bands being compared are not biased by
  * being different widths — the comparison is of levels, not of totals.
  */
-function bandLevelDb(spectrum, sampleRate, loHz, hiHz) {
+function bandLevelDb(spectrum, nFft, sampleRate, loHz, hiHz) {
   let sum = 0
   let n = 0
   for (let k = 1; k < spectrum.length; k++) {
-    const f = (k * sampleRate) / N_FFT
+    const f = (k * sampleRate) / nFft
     if (f >= loHz && f < hiHz) {
       sum += spectrum[k]
       n++
@@ -237,11 +270,12 @@ export function analyzeRumble(audio, sampleRate, f0Values) {
   const cornerHz = rumbleCornerHz(f0Values)
   if (cornerHz === null) return null
 
-  const spectrum = meanPowerSpectrum(audio, sampleRate)
-  if (!spectrum) return null
+  const measured = meanPowerSpectrum(audio)
+  if (!measured) return null
+  const { spectrum, nFft } = measured
 
-  const low = bandLevelDb(spectrum, sampleRate, cornerHz * LOW_BAND[0], cornerHz * LOW_BAND[1])
-  const high = bandLevelDb(spectrum, sampleRate, cornerHz * HIGH_BAND[0], cornerHz * HIGH_BAND[1])
+  const low = bandLevelDb(spectrum, nFft, sampleRate, cornerHz * LOW_BAND[0], cornerHz * LOW_BAND[1])
+  const high = bandLevelDb(spectrum, nFft, sampleRate, cornerHz * HIGH_BAND[0], cornerHz * HIGH_BAND[1])
   if (low === null || high === null) return null
 
   const tiltDb = low - high

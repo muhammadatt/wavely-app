@@ -32,18 +32,18 @@ function noiseInto(out, amp, seed) {
  * gate is a step, a step is broadband, and the splatter lands exactly in the
  * range this heuristic reads.
  */
-function voice({ f0 = 120, seconds = 4 } = {}) {
-  const n = Math.round(SR * seconds)
+function voice({ f0 = 120, seconds = 4, sr = SR } = {}) {
+  const n = Math.round(sr * seconds)
   const sig = new Float32Array(n)
   const harmonics = Math.floor(5000 / f0)
-  const fade = Math.round(0.02 * SR)
+  const fade = Math.round(0.02 * sr)
   for (let i = 0; i < n; i++) {
-    const t = i / SR
+    const t = i / sr
     const phase = t % 0.75
     if (phase > 0.6) continue
     let env = 1
-    const into = phase * SR
-    const outOf = (0.6 - phase) * SR
+    const into = phase * sr
+    const outOf = (0.6 - phase) * sr
     if (into < fade) env = 0.5 - 0.5 * Math.cos((Math.PI * into) / fade)
     if (outOf < fade) env = Math.min(env, 0.5 - 0.5 * Math.cos((Math.PI * outOf) / fade))
     let v = 0
@@ -145,4 +145,40 @@ test('the cut is bounded however extreme the rumble', () => {
 test('unmeasurable input is refused rather than guessed at', () => {
   assert.equal(analyzeRumble(new Float32Array(64), SR, f0sFor(120)), null)
   assert.equal(analyzeRumble(voice(), SR, []), null)
+})
+
+test('the tilt bands never run out of bins, at any corner or rate', () => {
+  // THE REGRESSION GUARD FOR A DEFECT THAT HAD NO TEST, and which the shipped
+  // build failed silently: the tilt bands are fractions of the corner, so on
+  // the region machinery's 2048-sample frame they held one or two bins, and
+  // below two `analyzeRumble` returned null and produced no finding at all.
+  //
+  // Measured on that build: at 48 kHz EVERY corner below 75 Hz failed; at
+  // 44.1 kHz every corner below 65 failed, and 75 failed while 70 and 80
+  // passed — bin-alignment luck rather than a bound. A deep-voiced narrator
+  // got no rumble analysis and nothing said so.
+  //
+  // Swept end to end across the F0 range that maps onto the whole corner
+  // range, at every rate the app decodes to, because the failure was a
+  // function of both.
+  for (const sr of [22050, 44100, 48000]) {
+    for (const f0 of [80, 90, 100, 120, 140, 170, 200, 240]) {
+      const r = analyzeRumble(voice({ f0, sr }), sr, f0sFor(f0))
+      assert.ok(r !== null,
+        `no rumble analysis at all for F0 ${f0} at ${sr} Hz (corner ${rumbleCornerHz(f0sFor(f0))})`)
+      assert.ok(Number.isFinite(r.tiltDb), `tilt is not a number at F0 ${f0}, ${sr} Hz`)
+    }
+  }
+})
+
+test('a selection too short to measure is refused, not guessed at', () => {
+  // The long window introduces a new way to have no frames at all. Halving
+  // down to a floor keeps short selections working; below the floor the honest
+  // answer is null rather than a tilt nothing supports.
+  const sr = 44100
+  // 0.4 s — shorter than the 16384-sample frame at this rate, still measurable.
+  const short = analyzeRumble(voice({ seconds: 0.4 }), sr, f0sFor(120))
+  assert.ok(short !== null, 'a 0.4 s selection was refused')
+  // 20 ms — below any usable low-frequency resolution.
+  assert.equal(analyzeRumble(voice({ seconds: 0.02 }), sr, f0sFor(120)), null)
 })
