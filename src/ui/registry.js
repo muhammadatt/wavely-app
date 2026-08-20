@@ -19,6 +19,7 @@ import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
 import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
+import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
 
 /**
  * The operation registry — the single source of truth for what this app can do.
@@ -390,6 +391,27 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: RemoveSilenceWindow,
+  },
+
+  // ---- Analysis ----
+  // Its own group because it is the one entry here that measures rather than
+  // changes: it needs a file and a transport, not a selection, and it has no
+  // Apply. Filing it under Dynamics or Tone would put a row that alters nothing
+  // in a list where every other row does.
+  {
+    id: 'spectrum-analyzer',
+    label: 'Spectrum Analyzer',
+    desc: 'See what is in the file, frequency by frequency',
+    category: 'effects',
+    group: 'Analysis',
+    icon: 'spectrum',
+    keywords: [
+      'spectrum', 'analyser', 'analyzer', 'fft', 'frequency', 'rta',
+      'spectral', 'meter', 'display', 'hum', 'noise', 'hiss',
+    ],
+    requires: 'file',
+    surface: 'window',
+    component: SpectrumAnalyzerWindow,
   },
 ]
 

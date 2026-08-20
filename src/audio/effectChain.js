@@ -61,6 +61,18 @@ export class EffectChain {
     return this.inputNode
   }
 
+  /**
+   * The node everything the user hears passes through last.
+   *
+   * Exposed for measurement taps only — the standalone spectrum analyzer hangs
+   * off it so it reads the finished signal, every enabled effect included,
+   * rather than one plugin's private output. Nothing may insert audio here:
+   * `_rebuildChain` owns what connects into this node.
+   */
+  getOutputNode() {
+    return this.outputNode
+  }
+
   _rebuildChain() {
     this.inputNode.disconnect()
     for (const entry of this.effects) {
