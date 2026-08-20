@@ -12,20 +12,46 @@
  */
 
 /**
- * Frequency-domain tap, for the manual EQ's spectrum analyzer.
+ * Drop one edge of the graph, tolerating an edge that has already gone.
+ *
+ * `AudioNode.disconnect(target)` throws InvalidAccessError when there is no
+ * such connection, and there often is not by the time a tap is destroyed: every
+ * effect wrapper calls a wholesale `monitor.disconnect()` before tearing its
+ * taps down, which has already removed this edge. Throwing there would abort
+ * the rest of the teardown — the thing the disconnect exists to make thorough.
+ */
+function dropEdge(from, to) {
+  try {
+    from.disconnect(to)
+  } catch {
+    // Already disconnected upstream; nothing to do.
+  }
+}
+
+/**
+ * Frequency-domain tap — the EQ's backdrop trace and the standalone analyzer.
  *
  * Sized larger than the level tap and with lighter smoothing: this one is read
  * as a curve across frequency rather than as a single number, so resolution
- * matters and inter-frame averaging mostly costs responsiveness. 4096 gives
- * ~10 Hz bins at 44.1 kHz — enough to see a room mode, not so many points that
- * drawing it competes with the audio thread.
+ * matters and inter-frame averaging mostly costs responsiveness. The 4096-point
+ * default gives ~10 Hz bins at 44.1 kHz — enough to see a room mode, not so
+ * many points that drawing it competes with the audio thread.
+ *
+ * Resolution and smoothing are settable because the standalone analyzer offers
+ * them as controls; every effect window takes the defaults, which are the
+ * values this tap shipped with.
  */
-export function createSpectrumTap(audioContext, node) {
+export function createSpectrumTap(audioContext, node, {
+  fftSize = 4096,
+  smoothing = 0.5,
+  minDecibels = -110,
+  maxDecibels = -10,
+} = {}) {
   const analyser = audioContext.createAnalyser()
-  analyser.fftSize = 4096
-  analyser.smoothingTimeConstant = 0.5
-  analyser.minDecibels = -110
-  analyser.maxDecibels = -10
+  analyser.fftSize = fftSize
+  analyser.smoothingTimeConstant = smoothing
+  analyser.minDecibels = minDecibels
+  analyser.maxDecibels = maxDecibels
   node.connect(analyser)
 
   const silentSink = audioContext.createGain()
@@ -33,19 +59,42 @@ export function createSpectrumTap(audioContext, node) {
   analyser.connect(silentSink)
   silentSink.connect(audioContext.destination)
 
-  const bins = new Float32Array(analyser.frequencyBinCount)
+  let bins = new Float32Array(analyser.frequencyBinCount)
 
   return {
     analyser,
-    binCount: analyser.frequencyBinCount,
+    // Getters, not values: resolution is adjustable on the standalone analyzer,
+    // and a consumer that read the bin width once would keep drawing a frame
+    // whose x axis is off by a factor of two after the first size change.
+    get binCount() { return analyser.frequencyBinCount },
     /** Hz per bin, for mapping bins onto a log frequency axis. */
-    binWidthHz: audioContext.sampleRate / analyser.fftSize,
+    get binWidthHz() { return audioContext.sampleRate / analyser.fftSize },
+    /**
+     * Resolution, in FFT points. Larger sees a hum harmonic apart from its
+     * neighbour; smaller follows a transient. Reallocates the read buffer,
+     * because frequencyBinCount moves with it.
+     */
+    setFftSize(size) {
+      if (analyser.fftSize === size) return
+      analyser.fftSize = size
+      bins = new Float32Array(analyser.frequencyBinCount)
+    },
+    /** Inter-frame averaging, 0..1. Smooths the trace, costs responsiveness. */
+    setSmoothing(value) {
+      analyser.smoothingTimeConstant = Math.max(0, Math.min(0.95, value))
+    },
     /** Magnitudes in dBFS, reusing one array — do not retain it. */
     getSpectrumDb() {
       analyser.getFloatFrequencyData(bins)
       return bins
     },
     destroy() {
+      // The source side too. `analyser.disconnect()` drops only what the
+      // analyser feeds — the `node -> analyser` edge made above is the source's
+      // connection, and it survives. A window opened and closed repeatedly
+      // would leave the node feeding a row of orphaned analysers, each still
+      // pulled for every quantum of every playback.
+      dropEdge(node, analyser)
       analyser.disconnect()
       silentSink.disconnect()
     },
@@ -148,6 +197,9 @@ export function createLevelTap(audioContext, node) {
       return levels
     },
     destroy() {
+      // Same source-side edge as the spectrum tap: dropping the splitter's own
+      // outgoing connections leaves `node -> splitter` in place.
+      dropEdge(node, splitter)
       splitter.disconnect()
       for (const analyser of analysers) analyser.disconnect()
       silentSink.disconnect()

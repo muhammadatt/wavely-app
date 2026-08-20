@@ -173,7 +173,7 @@ export function useSoftClipper() {
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels
       )
-      const bufferId = replaceRegion(start, end, buffer)
+      const bufferId = replaceRegion(start, end, buffer, 'Soft Clip')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast('Soft Clipper applied')

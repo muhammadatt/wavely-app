@@ -132,6 +132,52 @@ function dropFinishedNodes(now) {
 }
 
 /**
+ * Stop every node matching `pred` at context time `at`, and pull its tracked
+ * end back to match. The nodes stay tracked: they are still connected until
+ * they actually stop, so dropping them here would leave the graph holding nodes
+ * nothing has a reference to. Their `onended` frees them.
+ */
+function stopNodesAt(at, pred) {
+  for (const entry of activeNodes) {
+    if (!pred(entry)) continue
+    if (entry.endsAt <= at) continue
+    try {
+      entry.node.stop(at)
+    } catch {
+      // Already stopped.
+    }
+    entry.endsAt = at
+  }
+}
+
+/**
+ * Undo a repeat already booked into the lookahead window. Stopping it at the
+ * seam — its own start time — leaves the pass that is sounding untouched.
+ */
+function cancelScheduledPass() {
+  if (segmentsScheduled) stopNodesAt(passEndsAt, entry => entry.pass > passIndex)
+  segmentsScheduled = false
+  transportScheduled = false
+}
+
+/**
+ * Start of a fresh pass at context time `at`, cutting off whatever is sounding.
+ * Used when the play position ends up outside the region — the only case where
+ * a jump is the right answer, since there is no longer anything to play out.
+ */
+function restartPassAt(at) {
+  stopNodesAt(at, () => true)
+  passIndex += 1
+  playbackStartTime = at
+  playbackOffset = loopFrom
+  passEndsAt = at + (passEnd - loopFrom)
+  segmentsScheduled = false
+  transportScheduled = false
+  scheduleSegments(currentSegments, loopFrom, passEnd, at, currentContext, passIndex)
+  scheduleTransport(at, loopFrom)
+}
+
+/**
  * Start playback from a given position.
  * @param {Array} segments - Timeline segments
  * @param {number} startTime - Position in seconds to start from
@@ -229,25 +275,75 @@ export function setPlaybackLoop(enabled, loopStart = null) {
     return
   }
   loopEnabled = false
-  if (!segmentsScheduled) return
-  // Cancel the pass already scheduled into the lookahead window. Stopping it at
-  // the seam — its own start time — leaves the pass that is sounding untouched.
-  //
-  // The cancelled nodes stay tracked, with their end pulled back to the seam:
-  // they are still connected until they stop, so dropping them here would leave
-  // the graph holding nodes nothing has a reference to. Their `onended` frees
-  // them, and stopPlayback covers a transport torn down before then.
-  for (const entry of activeNodes) {
-    if (entry.pass <= passIndex) continue
-    try {
-      entry.node.stop(passEndsAt)
-    } catch {
-      // Already stopped.
+  // Otherwise playback would run one repeat past the click, since the next pass
+  // may already be booked into the lookahead window. stopPlayback covers a
+  // transport torn down before the cancelled nodes reach their own `onended`.
+  cancelScheduledPass()
+}
+
+/**
+ * Move the region being played (and looped) while it is sounding.
+ *
+ * Dragging the edge of a selection under a running loop has to change what the
+ * loop plays *now* — waiting for the next play() means auditioning a boundary
+ * by ear is a stop/adjust/start cycle per attempt, which is the whole reason
+ * the edges are draggable in the first place.
+ *
+ * Everything here is expressed against the same audio clock the seam is, so
+ * adjusting a region does not itself introduce a gap. Three cases:
+ *
+ * - **The end moved later.** The tail past the old end was never scheduled, so
+ *   it is scheduled now, against the pass that is already sounding — its start
+ *   time is the old end's context time, so it joins on sample-accurately.
+ * - **The end moved earlier, but is still ahead of the play position.** The
+ *   nodes sounding are stopped at the new end instead of the old one.
+ * - **The end moved behind the play position.** There is nothing left of this
+ *   pass to play out, so a looping transport wraps immediately and a
+ *   non-looping one ends. This is the one case that jumps, and it jumps because
+ *   the alternative is playing audio the user just excluded.
+ *
+ * A moved *start* needs none of that: it is where the next repeat begins, so it
+ * takes effect at the seam like any other loop bookkeeping.
+ */
+export function setPlaybackRegion(regionStart, regionEnd) {
+  if (!currentContext || !currentSegments) return
+  // A zero-length or inverted region would schedule passes at the same instant
+  // forever. Callers hand these over mid-drag, so ignoring them is routine.
+  if (!(regionEnd > regionStart)) return
+
+  const now = currentContext.currentTime
+  const prevEnd = passEnd
+  const prevEndsAt = passEndsAt
+
+  // Any repeat already booked was booked against the old region.
+  cancelScheduledPass()
+
+  loopFrom = regionStart
+  passEnd = regionEnd
+
+  // Where the new end falls on the clock, in this pass's frame of reference.
+  const endsAt = playbackStartTime + (passEnd - playbackOffset)
+
+  // Past the end already — either the end was dragged behind the play position,
+  // or the seam arrived between the last frame and this call, in which case the
+  // pass being extended is no longer the pass that is sounding.
+  if (endsAt <= now || now >= prevEndsAt) {
+    if (loopEnabled) {
+      restartPassAt(now)
+      return
     }
-    entry.endsAt = passEndsAt
+    stopNodesAt(now, () => true)
+    // tick() reports the end and tears the transport down on the next frame.
+    passEndsAt = now
+    return
   }
-  segmentsScheduled = false
-  transportScheduled = false
+
+  if (passEnd > prevEnd) {
+    scheduleSegments(currentSegments, prevEnd, passEnd, prevEndsAt, currentContext, passIndex)
+  } else if (passEnd < prevEnd) {
+    stopNodesAt(endsAt, entry => entry.pass <= passIndex)
+  }
+  passEndsAt = endsAt
 }
 
 /**
