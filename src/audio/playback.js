@@ -86,6 +86,19 @@ function scheduleSegments(segments, from, to, at, audioContext, pass) {
     const playLen = Math.min(segEnd, to) - Math.max(seg.outputStart, from)
     if (playLen <= 0) continue
 
+    // Disconnect on end rather than only when the tracking array is pruned:
+    // a pass cancelled by setPlaybackLoop is stopped at a *future* time, so
+    // there is no moment at which the caller can safely disconnect it, and the
+    // pruning paths would otherwise drop the reference while the node is still
+    // wired into the graph.
+    node.onended = () => {
+      try {
+        node.disconnect()
+      } catch {
+        // Already disconnected.
+      }
+    }
+
     node.start(scheduleAt, offset, playLen)
     activeNodes.push({ node, endsAt: scheduleAt + playLen, pass })
   }
@@ -219,6 +232,11 @@ export function setPlaybackLoop(enabled, loopStart = null) {
   if (!segmentsScheduled) return
   // Cancel the pass already scheduled into the lookahead window. Stopping it at
   // the seam — its own start time — leaves the pass that is sounding untouched.
+  //
+  // The cancelled nodes stay tracked, with their end pulled back to the seam:
+  // they are still connected until they stop, so dropping them here would leave
+  // the graph holding nodes nothing has a reference to. Their `onended` frees
+  // them, and stopPlayback covers a transport torn down before then.
   for (const entry of activeNodes) {
     if (entry.pass <= passIndex) continue
     try {
@@ -226,8 +244,8 @@ export function setPlaybackLoop(enabled, loopStart = null) {
     } catch {
       // Already stopped.
     }
+    entry.endsAt = passEndsAt
   }
-  activeNodes = activeNodes.filter(entry => entry.pass <= passIndex)
   segmentsScheduled = false
   transportScheduled = false
 }

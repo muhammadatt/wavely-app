@@ -158,17 +158,6 @@ const state = new Proxy({}, {
   },
 })
 
-/**
- * "Trim to selection" → "trim to selection", so it reads inside a sentence.
- * Labels that start with a proper name ("VoiceRx", "FET Punch") keep their case
- * — a second capital in the first two characters is the tell.
- */
-function lowerFirst(label) {
-  if (!label) return label
-  if (label.length > 1 && label[1] === label[1].toUpperCase() && /[A-Z]/.test(label[1])) return label
-  return label[0].toLowerCase() + label.slice(1)
-}
-
 function historyFor(docId) {
   let h = docHistory.get(docId)
   if (!h) {
@@ -214,9 +203,15 @@ export function useEditorState() {
   // ── Undo/Redo ──────────────────────────────────────────────────────────────
   /**
    * Snapshot the timeline before an edit. `label` names the operation about to
-   * happen ("Cut", "Normalization") so undo can report what it took back — every
-   * edit already tells the user what it did via a toast, and an undo that says
-   * nothing is the one step in the loop with no feedback.
+   * happen so undo can report what it took back — every edit already tells the
+   * user what it did via a toast, and an undo that says nothing is the one step
+   * in the loop with no feedback.
+   *
+   * It is used verbatim, as the tail of "Undid …", so it is written the way it
+   * should read there: ordinary operations lower case ("cut", "trim to
+   * selection"), anything opening with a name in its own case ("VoiceRx",
+   * "Scheps Parallel"). Deriving that mechanically is not possible — "Scheps"
+   * and "Silence" are the same shape — so it is not attempted.
    */
   function pushUndo(label = '') {
     const doc = activeDocument.value
@@ -243,7 +238,7 @@ export function useEditorState() {
     doc.selection = null
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
-    showToast(entry.label ? `Undid ${lowerFirst(entry.label)}` : 'Undone')
+    showToast(entry.label ? `Undid ${entry.label}` : 'Undone')
   }
 
   function redo() {
@@ -257,7 +252,7 @@ export function useEditorState() {
     doc.selection = null
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
-    showToast(entry.label ? `Redid ${lowerFirst(entry.label)}` : 'Redone')
+    showToast(entry.label ? `Redid ${entry.label}` : 'Redone')
   }
 
   // ── Buffer pool ────────────────────────────────────────────────────────────
@@ -429,7 +424,7 @@ export function useEditorState() {
   // ── Edit operations — all push undo first ──────────────────────────────────
   function performTrimToSelection() {
     if (!state.selection) return
-    pushUndo('Trim to selection')
+    pushUndo('trim to selection')
     const { start, end } = state.selection
     state.segments = trimToSelection(state.segments, start, end)
     state.selection = null
@@ -438,7 +433,7 @@ export function useEditorState() {
 
   function performTrimBefore() {
     if (!state.selection) return
-    pushUndo('Trim before selection')
+    pushUndo('trim before selection')
     state.segments = trimBefore(state.segments, state.selection.start)
     state.selection = null
     state.playhead = 0
@@ -446,7 +441,7 @@ export function useEditorState() {
 
   function performTrimAfter() {
     if (!state.selection) return
-    pushUndo('Trim after selection')
+    pushUndo('trim after selection')
     state.segments = trimAfter(state.segments, state.selection.end)
     const dur = getTimelineDuration(state.segments)
     state.selection = null
@@ -455,19 +450,19 @@ export function useEditorState() {
 
   function performSilence() {
     if (!state.selection) return
-    pushUndo('Silence')
+    pushUndo('silence')
     const { start, end } = state.selection
     state.segments = silenceRegion(state.segments, start, end)
   }
 
   function performSplit() {
-    pushUndo('Split')
+    pushUndo('split')
     state.segments = splitAtPlayhead(state.segments, state.playhead)
   }
 
   function performSplitAtSelectionEdges() {
     if (!state.selection) return
-    pushUndo('Split at selection edges')
+    pushUndo('split at selection edges')
     let segs = splitAtPlayhead(state.segments, state.selection.start)
     segs = splitAtPlayhead(segs, state.selection.end)
     state.segments = segs
@@ -484,7 +479,7 @@ export function useEditorState() {
 
   function performCut() {
     if (!state.selection) return
-    pushUndo('Cut')
+    pushUndo('cut')
     const { start, end } = state.selection
     const inner = segmentsInRange(state.segments, start, end)
     appState.clipboard = inner.map(seg => ({ ...seg, outputStart: seg.outputStart - start }))
@@ -506,7 +501,7 @@ export function useEditorState() {
   function performPaste(position) {
     const doc = activeDocument.value
     if (!appState.clipboard || !doc) return
-    pushUndo('Paste')
+    pushUndo('paste')
     // Pasting across documents brings in segments whose buffers belong to the
     // source document. Claim shared ownership so closing that document doesn't
     // free a buffer this one is now rendering from.
@@ -523,7 +518,7 @@ export function useEditorState() {
 
   /**
    * Swap a processed buffer into [start, end]. `label` names the effect for the
-   * undo toast; `docId` defaults to the active document, and is only ever passed
+   * undo toast, in the same reading form pushUndo documents; `docId` defaults to the active document, and is only ever passed
    * explicitly by the preset job, which can land after a tab switch.
    */
   function replaceRegion(start, end, newBuffer, label = '', docId = appState.activeDocumentId) {

@@ -307,7 +307,7 @@ export function useDeEsser() {
         state.segments, start, end, slice,
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      const bufferId = replaceRegion(start, end, buffer, 'De-essing')
+      const bufferId = replaceRegion(start, end, buffer, 'de-essing')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast(`De-essed ${treatedCount.value} event${treatedCount.value === 1 ? '' : 's'}`)

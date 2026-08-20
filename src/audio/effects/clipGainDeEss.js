@@ -146,7 +146,8 @@ export function createClipGainDeEsser(audioContext) {
     try {
       if (when !== undefined && when > audioContext.currentTime) {
         // Left connected deliberately — it is still sounding until `when`, and
-        // disconnecting now would silence the tail it was given.
+        // disconnecting now would silence the tail it was given. Its `onended`
+        // frees it once it does stop.
         node.stop(when)
       } else {
         node.stop()
@@ -187,10 +188,20 @@ export function createClipGainDeEsser(audioContext) {
     modulator = audioContext.createBufferSource()
     modulator.buffer = envelopeBuffer
     modulator.connect(gainNode.gain)
-    // Guarded on identity: an outgoing modulator stopping at the loop seam must
-    // not clear `running` for the pass that has already replaced it.
+    // Two jobs, and both matter at the loop seam. The disconnect is
+    // unconditional: an outgoing modulator is stopped at a *future* time, so
+    // this is the only point at which it can be freed — `modulator` no longer
+    // refers to it by then. The `running` flag is guarded on identity, so the
+    // outgoing one cannot clear it for the pass that has already replaced it.
     const node = modulator
-    node.onended = () => { if (modulator === node) running = false }
+    node.onended = () => {
+      if (modulator === node) running = false
+      try {
+        node.disconnect()
+      } catch {
+        // Already disconnected by the immediate stop path.
+      }
+    }
     modulator.start(at, offset)
 
     transportWhen = at

@@ -233,7 +233,7 @@ export function useHumRemover() {
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      const bufferId = replaceRegion(start, end, buffer, 'Hum removal')
+      const bufferId = replaceRegion(start, end, buffer, 'hum removal')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast('Hum removed')

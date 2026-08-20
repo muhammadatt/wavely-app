@@ -41,13 +41,18 @@ test('undo names the operation it took back', () => {
   assert.equal(lastToast(editor), 'Redid cut')
 })
 
-test('a label that opens with a proper name keeps its capitals', () => {
+test('the label is used verbatim, so a proper name keeps its capitals', () => {
   const editor = useEditorState()
   freshDocument(editor, 'proper.wav')
 
-  editor.pushUndo('FET Punch compression')
-  editor.undo()
-  assert.equal(lastToast(editor), 'Undid FET Punch compression')
+  // No case is derived from the label. It cannot be: "Scheps" and "Silence"
+  // are the same shape, and an earlier attempt at a rule turned "VoiceRx" into
+  // "voiceRx" and "Scheps Parallel" into "scheps Parallel".
+  for (const label of ['FET Punch compression', 'VoiceRx', 'Scheps Parallel', 'AirBoost']) {
+    editor.pushUndo(label)
+    editor.undo()
+    assert.equal(lastToast(editor), `Undid ${label}`)
+  }
 })
 
 test('an unlabelled entry still reports that something was undone', () => {

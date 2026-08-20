@@ -26,8 +26,9 @@ import { startPlayback, stopPlayback, setPlaybackLoop } from '../../src/audio/pl
  * "advance 20 ms and deliver a frame" and get deterministic scheduling out.
  */
 function makeFakeContext() {
-  const started = []   // { at, offset, duration }
-  const stopped = []   // { at }
+  const started = []      // { at, offset, duration }
+  const stopped = []      // { at }
+  const disconnected = [] // nodes freed from the graph
   const ctx = {
     currentTime: 0,
     sampleRate: 48000,
@@ -35,15 +36,16 @@ function makeFakeContext() {
     createBufferSource() {
       const node = {
         buffer: null,
+        onended: null,
         connect() {},
-        disconnect() {},
+        disconnect() { disconnected.push(node) },
         start(at, offset, duration) { started.push({ at, offset, duration, node }) },
         stop(at) { stopped.push({ at: at ?? ctx.currentTime, node }) },
       }
       return node
     },
   }
-  return { ctx, started, stopped }
+  return { ctx, started, stopped, disconnected }
 }
 
 let frameCallbacks = []
@@ -166,7 +168,7 @@ test('the playhead reported across the seam wraps to the loop start', () => {
 })
 
 test('turning loop off mid-pass cancels the pass already scheduled ahead', () => {
-  const { ctx, started, stopped } = makeFakeContext()
+  const { ctx, started, stopped, disconnected } = makeFakeContext()
   play(ctx, { start: 0, end: 1, loop: true, loopStart: 0 })
 
   for (let i = 0; i < 120 && started.length < 2; i++) advance(ctx, 1 / 60)
@@ -177,6 +179,15 @@ test('turning loop off mid-pass cancels the pass already scheduled ahead', () =>
     stopped.some(s => s.node === started[1].node && s.at === started[1].at),
     'the pre-scheduled pass is stopped at its own start time, so it never sounds',
   )
+
+  // It is stopped in the future, so nothing can disconnect it at cancel time —
+  // its own `onended` has to, or the graph keeps a node nothing references.
+  const cancelled = started[1].node
+  assert.ok(!disconnected.includes(cancelled), 'not disconnected while still scheduled')
+  assert.equal(typeof cancelled.onended, 'function', 'the node frees itself when it ends')
+  cancelled.onended()
+  assert.ok(disconnected.includes(cancelled), 'ending disconnects it from the graph')
+
   stopPlayback()
 })
 
