@@ -15,7 +15,6 @@
 import { ensureSoftClipperWorklet } from '../softClipperWorkletLoader.js'
 import { SOFT_CLIPPER_LATENCY_SAMPLES, SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
 import { createLevelTap } from './levelTap.js'
-import { recordClipMark, clearClipMarks } from '../clipMarks.js'
 
 export { SOFT_CLIPPER_LATENCY_SAMPLES }
 
@@ -68,12 +67,6 @@ export function createSoftClipper(audioContext) {
   let worklet = null
   let destroyed = false
   let reductionDb = 0
-
-  // Transport origin, for turning the worklet's context-clock stamps into
-  // timeline positions. Null when not playing, which is also the signal to
-  // stop recording marks: a message can arrive after the transport stopped,
-  // and placing that one would put a mark at a position nothing played.
-  let transport = null
   let engagedFraction = 0
 
   // Monitoring mode, kept out of `params` on purpose — see the kernel's
@@ -119,14 +112,6 @@ export function createSoftClipper(audioContext) {
       worklet.port.onmessage = (e) => {
         if (e.data?.type !== 'gr') return
         reductionDb = e.data.reductionDb
-        // Timeline position of the loudest block since the last message. The
-        // worklet stamps the block, not the message, so this is good to one
-        // render quantum; the ~50 samples of oversampler latency between the
-        // clip and the sound leaving the node is another 1.1 ms and is left
-        // uncorrected, being well inside the mark grid.
-        if (transport && e.data.clipDb > 0) {
-          recordClipMark(transport.startSec + (e.data.clipTime - transport.when), e.data.clipDb)
-        }
         engagedFraction = e.data.engagedFraction ?? 0
         const batch = e.data.scope
         if (!batch) return
@@ -157,27 +142,10 @@ export function createSoftClipper(audioContext) {
     input,
     output,
 
-    /**
-     * Playback started: `when` is the context time it begins sounding and
-     * `startSec` the timeline position it begins from. Same contract the
-     * clip-gain de-esser's transport hook uses.
-     */
-    startTransport(when, startSec) {
-      transport = { when, startSec }
-    },
-
-    stopTransport() {
-      transport = null
-    },
-
     setParam(name, value) {
       if (name in params) {
         params[name] = value
         worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
-        // Every existing mark is a claim about what the OLD setting did. One
-        // stale mark next to fresh ones is worse than no marks at all, because
-        // nothing distinguishes them on screen.
-        clearClipMarks()
       }
     },
 
@@ -241,8 +209,6 @@ export function createSoftClipper(audioContext) {
 
     destroy() {
       destroyed = true
-      transport = null
-      clearClipMarks()
       input.disconnect()
       worklet?.disconnect()
       preOutput.disconnect()

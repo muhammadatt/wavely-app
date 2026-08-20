@@ -2,6 +2,8 @@
 import { computed, onMounted } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
+import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -21,6 +23,35 @@ const {
 } = useSoftClipper()
 
 const { state } = useEditorState()
+
+/**
+ * The scope's view of the timeline around the playhead.
+ *
+ * It comes from here rather than from the effect because the effect has not
+ * seen it — the kernel's ring only ever holds audio it has already processed,
+ * which is nothing at all when the stage is bypassed and nothing ahead of the
+ * playhead ever. The scope asks for the half ahead always, and for the half
+ * behind whenever its ring is not live, so that bypassing the stage leaves one
+ * waveform still travelling past the playhead rather than half a frozen one.
+ *
+ * Read live from `state.playhead`, which the transport advances every frame, so
+ * the picture slides under a stationary playhead. It also works with the
+ * transport stopped: park the playhead before a loud passage and the scope
+ * shows what the current setting would do to it before anything is heard.
+ *
+ * ONE SCRATCH PER SIDE. Both are alive in the same frame, so a single shared
+ * buffer would have the second call overwrite the first — the two halves would
+ * show the same audio.
+ */
+const envelopeScratch = { ahead: null, behind: null }
+function envelope(offsetSeconds, seconds, columns) {
+  if (!state.segments?.length) return null
+  const side = offsetSeconds < 0 ? 'behind' : 'ahead'
+  if (envelopeScratch[side]?.length !== columns) envelopeScratch[side] = new Float32Array(columns)
+  return readTimelineEnvelope(
+    state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side],
+  )
+}
 
 // Default to engaged when the panel opens
 onMounted(() => {
@@ -248,6 +279,8 @@ const SCOPE_H = 236
         <div class="flex-1 min-w-0">
           <ClipperScope
             :data-fn="getScope"
+            :envelope-fn="envelope"
+            :window-seconds="SCOPE_SECONDS * 2"
             :mode="thresholdMode"
             :fixed-threshold-db="fixedThresholdDb"
             @update:fixed-threshold-db="syncFixedThreshold"
@@ -256,7 +289,7 @@ const SCOPE_H = 236
             @request-play="togglePlayback"
             :accent="ACCENT"
             :height="SCOPE_H"
-            title="Clipper scope: input envelope against the threshold. Drag the threshold line to set it."
+            title="Clipper scope: input envelope against the threshold, playhead at the centre — played audio to its left, audio about to play to its right. Drag the threshold line to set it."
           />
         </div>
 

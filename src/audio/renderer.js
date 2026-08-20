@@ -15,18 +15,6 @@ const SELECTION_COLOR = 'rgba(53, 211, 230, 0.10)'
 const SELECTION_BORDER_COLOR = 'rgba(126, 240, 255, 0.9)'
 const UNSELECTED_VEIL_COLOR = 'rgba(5, 7, 9, 0.55)'
 const PLAYHEAD_COLOR = '#ff5a4d'
-
-// Clip marks. The colour is the Soft Clipper panel's accent, so a mark on the
-// waveform and the lamp on the faceplate read as the same instrument reporting
-// twice rather than as two unrelated indicators.
-const CLIP_MARK_COLOR = '#ff8f6b'
-const CLIP_MARK_STEM_COLOR = 'rgba(255,143,107,.13)'
-const CLIP_MARK_MIN_PX = 6
-const CLIP_MARK_MAX_PX = 16
-// Matches the lamp's own full scale, so a pinned lamp and a full-height notch
-// mean the same reduction. Moving one without the other would make the panel
-// and the timeline disagree about the same event.
-const CLIP_MARK_FULL_SCALE_DB = 3
 const ZERO_LINE_COLOR = 'rgba(255, 255, 255, 0.07)'
 const LANE_DIVIDER_COLOR = 'rgba(255, 255, 255, 0.14)'
 // Clears the ruler labels, which sit on a 13px baseline in a 10px font. Callers
@@ -308,7 +296,6 @@ export function renderOverlay(canvas, options) {
     pixelsPerSecond = 100,
     selection = null,
     playhead = 0,
-    clipMarks = null,
   } = options
 
   const dpr = window.devicePixelRatio || 1
@@ -350,40 +337,6 @@ export function renderOverlay(canvas, options) {
       ctx.beginPath()
       ctx.moveTo(selEndPx, 0)
       ctx.lineTo(selEndPx, logicalHeight)
-      ctx.stroke()
-    }
-  }
-
-  // Clip marks — where a stage actually did something.
-  //
-  // Drawn UNDER the playhead so the playhead stays the brightest vertical line
-  // on the canvas; two similar lines competing is how a playhead stops reading
-  // as one. A notch at the top rather than a full-height rule for the same
-  // reason: these can number in the hundreds on a long file, and hundreds of
-  // full-height lines is a hatch pattern over the waveform rather than an
-  // annotation of it. The faint stem under each notch is what makes a single
-  // mark findable without the notch having to be tall.
-  if (clipMarks && clipMarks.length) {
-    for (const m of clipMarks) {
-      const x = (m.t - scrollLeft) * pixelsPerSecond
-      if (x < -1 || x > logicalWidth + 1) continue
-      // Depth sets height, over the same 3 dB the panel's lamp is scaled to,
-      // so a deep mark and a bright lamp mean the same thing.
-      const depth = Math.min(1, m.db / CLIP_MARK_FULL_SCALE_DB)
-      const h = CLIP_MARK_MIN_PX + depth * (CLIP_MARK_MAX_PX - CLIP_MARK_MIN_PX)
-
-      ctx.strokeStyle = CLIP_MARK_STEM_COLOR
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(Math.round(x) + 0.5, 0)
-      ctx.lineTo(Math.round(x) + 0.5, logicalHeight)
-      ctx.stroke()
-
-      ctx.strokeStyle = CLIP_MARK_COLOR
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(Math.round(x) + 0.5, 0)
-      ctx.lineTo(Math.round(x) + 0.5, h)
       ctx.stroke()
     }
   }

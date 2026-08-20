@@ -1,10 +1,33 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useMeterFrame } from './ballistics.js'
+import { crossingRuns } from './clipperRuns.js'
 
 /**
  * Scrolling scope for the Soft Clipper: the input envelope, the threshold, and
  * the part of each transient that crosses it.
+ *
+ * THE PLAYHEAD IS AT THE CENTRE, and the face is half history, half lookahead.
+ * An earlier version ended at "now" on the right-hand edge, the way a hardware
+ * scope does, and it left the panel unable to answer the first question anyone
+ * asks of it: which part of my file am I looking at. There was no marker
+ * because there was nowhere to put one — every pixel was the past, and the edge
+ * was the present. Centring the playhead gives the eye a fixed reference and
+ * makes room for the half that turned out to be the useful one: the audio about
+ * to arrive, shaded against the current setting, so the display says what the
+ * clipper is going to do a second before it does it.
+ *
+ * The two halves come from different places. Left is the kernel's ring — real
+ * measured reduction, with the threshold that was in force. Right is the
+ * timeline itself, read through `envelopeFn`, because the effect has not seen
+ * that audio yet. Drawn dimmer for exactly that reason: it is a prediction, and
+ * in adaptive mode the tracker will have moved by the time it arrives.
+ *
+ * WHERE THE HALVES COME FROM IS AN IMPLEMENTATION FACT AND MUST NOT BE VISIBLE
+ * AS MOTION. When the ring stops filling — bypass, or a stopped transport — the
+ * left half falls back to the timeline too, so the whole picture keeps moving
+ * with the playhead as one waveform. It reads as one; anything that makes half
+ * of it stop while the other half scrolls reads as broken.
  *
  * WHY THIS EXISTS. The peak-reduction bar answers "how much" and cannot answer
  * "on what" — and on this stage those come apart badly. Measured on a real
@@ -53,6 +76,30 @@ const props = defineProps({
    * arrays for nothing. Same arrangement as ResonanceSpectrum's dataFn.
    */
   dataFn: { type: Function, required: true },
+  /**
+   * Peak envelope of the timeline around the playhead —
+   * `(offsetSeconds, seconds, columns) => Float32Array | null`, where the offset
+   * is relative to the playhead and may be negative. A function for the same
+   * reason dataFn is: it is read once a frame into a canvas and has no business
+   * going through reactivity.
+   *
+   * Called for the half ahead of the playhead always, and for the half behind it
+   * whenever the kernel's ring is not live — see the layout note in draw().
+   * Two calls in one frame, so an implementation that reuses a scratch buffer
+   * needs one per side.
+   *
+   * Optional. Without it the face shows only what the effect has processed,
+   * which is what a scope with no access to the timeline can honestly show.
+   */
+  envelopeFn: { type: Function, default: null },
+  /**
+   * Total time across the face, in seconds — half behind the playhead, half
+   * ahead of it. The behind half is the effect's whole ring, so this should be
+   * twice the effect's SCOPE_SECONDS: pass less and the lookahead runs at a
+   * different scale from the history, which would make one timeline read as
+   * two.
+   */
+  windowSeconds: { type: Number, default: 8 },
   /** 'adaptive' | 'fixed' — decides whether the curve is a handle. */
   mode: { type: String, default: 'adaptive' },
   /** The fixed threshold in dBFS. Only meaningful (and only shown) in fixed mode. */
@@ -116,6 +163,22 @@ const linToDb = (a) => (a > 1e-6 ? 20 * Math.log10(a) : -120)
  */
 const GRID_DB = [-1, -3, -6, -12, -24]
 
+/**
+ * Columns in the lookahead half.
+ *
+ * Fixed rather than derived from the ring's own resolution: the ring's column
+ * is one render quantum because that is what the kernel reports, which at any
+ * sample rate is far finer than the face is wide. 512 is more than a pixel per
+ * column on any panel width this window reaches, and it bounds the per-frame
+ * scan of the timeline at a known cost.
+ */
+const LOOKAHEAD_COLUMNS = 512
+
+// Scratch for the history half, so a frame that reads the ring does not
+// allocate. Sized for the largest ring any sample rate produces over the
+// window — one column per 128 samples, 6000 at 192 kHz — with room to spare.
+const histScratch = new Float32Array(8192)
+
 // Staleness: a stopped transport leaves the last picture up but dimmed, rather
 // than blanking — the frozen scroll is still the truth about the moment it
 // stopped, and a blank panel reads as broken.
@@ -147,8 +210,11 @@ function draw(dtMs) {
     staleMs += dtMs
   }
   const live = scope !== null && staleMs < STALE_MS
-  ctx.globalAlpha = live ? 1 : 0.35
 
+  // The face itself is always painted at full strength. Staleness is expressed
+  // per band now (see `frozen` below), because the picture is no longer
+  // necessarily stale when the kernel is: the timeline half keeps moving.
+  ctx.globalAlpha = 1
   ctx.fillStyle = '#08060a'
   ctx.fillRect(0, 0, w, h)
 
@@ -174,87 +240,194 @@ function draw(dtMs) {
     : null
   const thresholdLin = isFixed.value ? dbToLin(props.fixedThresholdDb) : latestT
 
-  if (!scope || scope.filled === 0) {
+  // ── The two halves of the face ──
+  //
+  // The playhead sits at the CENTRE, not at the right-hand edge, and that is
+  // the whole layout. A scope that ends at "now" puts every event on a conveyor
+  // moving away from the only place you are listening; a centred playhead gives
+  // the eye a fixed point to read against, and it is the one thing this display
+  // was missing when the question "which part am I hearing" came up.
+  //
+  // Left of centre is the kernel's own ring: audio that has been through the
+  // stage, with the reduction it actually took. Right of centre is audio the
+  // transport has not reached yet, read straight from the timeline — the effect
+  // cannot supply it, because it has not seen it.
+  //
+  // THE HISTORY FALLS BACK TO THE TIMELINE WHENEVER THE RING IS NOT LIVE, and
+  // that is not a nicety. Reported from use: bypass the stage and the left half
+  // freezes while the right half keeps scrolling, because a bypassed effect is
+  // out of circuit and its ring stops filling. Two sources is an implementation
+  // fact; on screen this is ONE waveform travelling past a playhead, and half of
+  // it stopping while the other half moves is simply broken. The same applies
+  // with the transport stopped: dragging the playhead should slide the whole
+  // picture, not only the part ahead of it.
+  //
+  // The fallback is drawn at the prediction alpha, so what is measured and what
+  // is merely read off the file still look different — the brightness says
+  // "the stage did this" versus "the stage would do this", which is exactly the
+  // distinction bypass is being used to investigate.
+  const centreX = Math.round(w / 2)
+  const halfSeconds = props.windowSeconds / 2
+  const PREDICTED_ALPHA = 0.45
+
+  const future = props.envelopeFn?.(0, halfSeconds, LOOKAHEAD_COLUMNS) ?? null
+  const ringLive = live && scope && scope.filled > 0
+  const behind = ringLive ? null : (props.envelopeFn?.(-halfSeconds, halfSeconds, LOOKAHEAD_COLUMNS) ?? null)
+
+  // Both halves share one seconds-per-pixel, which is what makes the picture
+  // read as a single timeline with a marker on it rather than as two panes.
+  const historyColumns = scope ? scope.capacity : 0
+  const histStep = centreX / Math.max(1, historyColumns - 1)
+  const futStep = (w - centreX) / Math.max(1, LOOKAHEAD_COLUMNS - 1)
+  const behindStep = centreX / Math.max(1, LOOKAHEAD_COLUMNS - 1)
+
+  // Drawn from the centre LEFTWARDS, so a partly filled ring is short rather
+  // than stretched. The old full-width layout compressed a partial history
+  // across the whole face, which was right when the newest sample owned the
+  // right edge and is wrong now: the playhead is a fixed reference, and a
+  // picture that slides under it while the buffer fills would undo that.
+  const haveRing = scope !== null && scope.filled > 0
+  // Frozen: no live kernel data AND no timeline to fall back on. Only then does
+  // the old behaviour apply — the last picture left up but dimmed, because a
+  // stopped scroll is still the truth about the moment it stopped and a blank
+  // panel reads as broken.
+  const frozen = !ringLive && !behind
+
+  if (ringLive || (frozen && haveRing)) {
+    const m = Math.min(scope.filled, historyColumns, histScratch.length)
+    const start = (scope.head - m + scope.capacity) % scope.capacity
+    for (let i = 0; i < m; i++) histScratch[i] = scope.peak[(start + i) % scope.capacity]
+    drawBand(ctx, histScratch, m, centreX - (m - 1) * histStep, histStep, mid, half,
+      thresholdLin, ringLive ? 1 : 0.35)
+  } else if (behind) {
+    drawBand(ctx, behind, LOOKAHEAD_COLUMNS, centreX - (LOOKAHEAD_COLUMNS - 1) * behindStep,
+      behindStep, mid, half, thresholdLin, PREDICTED_ALPHA)
+  }
+
+  // Idle means the stage has never passed audio, which is what the label offers
+  // to fix. Deliberately NOT tied to whether anything is on the face: the
+  // timeline fallback can fill the whole window before a note has been played,
+  // and the panel's one play affordance should not disappear because of it.
+  isIdle.value = !haveRing
+
+  // The lookahead is shaded against the CURRENT threshold, which is the same
+  // rule the history already follows (see drawBand) — so it answers "what will
+  // this setting do to what is coming", and dragging the line re-shades it live.
+  // Dimmed because it is a prediction: in adaptive mode the tracker will have
+  // moved by the time that audio arrives.
+  if (future) drawBand(ctx, future, LOOKAHEAD_COLUMNS, centreX, futStep, mid, half, thresholdLin, PREDICTED_ALPHA)
+
+  ctx.globalAlpha = frozen ? 0.35 : 1
+  drawThresholdLine(ctx, w, mid, half, thresholdLin)
+  ctx.globalAlpha = 1
+
+  drawPlayhead(ctx, centreX, h)
+
+  if (isIdle.value) {
     ctx.globalAlpha = 1
-    isIdle.value = true
-    // Fixed mode has a threshold whether or not audio is running, so the
-    // control surface works before the first press of play.
-    if (isFixed.value) drawThresholdLine(ctx, w, mid, half, thresholdLin)
     drawIdleLabel(ctx, w, mid)
     if (isFixed.value) drawThresholdChip(ctx, w, mid, half, thresholdLin)
     return
   }
-  isIdle.value = false
-
-  // Oldest sample sits at x=0 and the newest at x=w, so the picture scrolls
-  // leftward the way every scope does. When the ring is not yet full the
-  // history is short, and it is drawn compressed into the full width rather
-  // than left-aligned — a partially filled buffer should read as "less
-  // history", not as a signal that stops halfway across.
-  const n = scope.filled
-  const start = (scope.head - n + scope.capacity) % scope.capacity
-  const xStep = w / Math.max(1, n - 1)
-
-  // ── Envelope, split at the threshold ──
-  // Two passes over the same points: the body below the threshold in grey, and
-  // only the part standing above it in accent. Drawing the whole envelope
-  // accent-coloured wherever it clips would exaggerate the effect wildly —
-  // 0.3 dB of reduction would light a full-height transient.
-  ctx.fillStyle = 'rgba(200,205,215,.55)'
-  ctx.beginPath()
-  ctx.moveTo(0, mid)
-  for (let i = 0; i < n; i++) {
-    const p = scope.peak[(start + i) % scope.capacity]
-    ctx.lineTo(i * xStep, mid - ampToUnit(p) * half)
-  }
-  for (let i = n - 1; i >= 0; i--) {
-    const p = scope.peak[(start + i) % scope.capacity]
-    ctx.lineTo(i * xStep, mid + ampToUnit(p) * half)
-  }
-  ctx.closePath()
-  ctx.fill()
-
-  // The excess above the threshold, mirrored top and bottom.
-  //
-  // MEASURED AGAINST THE CURRENT THRESHOLD, NOT THE ONE IN FORCE AT EACH POINT.
-  // This follows from drawing the threshold flat: shading a peak that sits
-  // below the drawn line, because the line was lower when that peak arrived,
-  // makes the picture contradict itself, and a self-contradictory display is
-  // worse than a slightly ahistorical one.
-  //
-  // What it costs is small and what it buys is large. The cost: for older parts
-  // of the window the shading is what the CURRENT setting would have done, not
-  // what was done — negligible in fixed mode (the threshold only moves when
-  // dragged) and small in adaptive (a 3 s tracker barely moves inside a 4 s
-  // window). The gain: dragging the line re-shades the whole history live, so
-  // the display answers "what would this setting have done to the last four
-  // seconds" while the hand is still moving. That is what makes it a control
-  // surface rather than a readout.
-  const tY = ampToUnit(thresholdLin) * half
-  ctx.fillStyle = props.accent
-  for (const sign of [-1, 1]) {
-    ctx.beginPath()
-    let open = false
-    for (let i = 0; i < n; i++) {
-      const p = scope.peak[(start + i) % scope.capacity]
-      const x = i * xStep
-      if (p > thresholdLin) {
-        const yPeak = mid + sign * ampToUnit(p) * half
-        const yT = mid + sign * tY
-        if (!open) { ctx.moveTo(x, yT); open = true }
-        ctx.lineTo(x, yPeak)
-        ctx.lineTo(x, yT)
-      }
-    }
-    if (open) ctx.fill()
-  }
-
-  ctx.globalAlpha = live ? 1 : 0.35
-  drawThresholdLine(ctx, w, mid, half, thresholdLin)
-  ctx.globalAlpha = 1
 
   drawLegend(ctx, w, h)
   drawThresholdChip(ctx, w, mid, half, thresholdLin)
+}
+
+/**
+ * One half of the face: the grey envelope, and the part of it standing above
+ * the threshold in accent.
+ *
+ * Two passes over the same points. Drawing the whole envelope accent-coloured
+ * wherever it clips would exaggerate the effect wildly — 0.3 dB of reduction
+ * would light a full-height transient.
+ *
+ * THE EXCESS IS MEASURED AGAINST THE CURRENT THRESHOLD, NOT THE ONE IN FORCE AT
+ * EACH POINT. This follows from drawing the threshold flat: shading a peak that
+ * sits below the drawn line, because the line was lower when that peak arrived,
+ * makes the picture contradict itself, and a self-contradictory display is worse
+ * than a slightly ahistorical one.
+ *
+ * What it costs is small and what it buys is large. The cost: for older parts of
+ * the window the shading is what the CURRENT setting would have done, not what
+ * was done — negligible in fixed mode (the threshold only moves when dragged)
+ * and small in adaptive (a 3 s tracker barely moves inside a 2 s half-window).
+ * The gain: dragging the line re-shades the whole picture live, so the display
+ * answers "what would this setting have done" while the hand is still moving.
+ * That is what makes it a control surface rather than a readout.
+ */
+function drawBand(ctx, peaks, n, x0, xStep, mid, half, thresholdLin, alpha) {
+  if (n <= 0) return
+  const xAt = (i) => x0 + i * xStep
+  const prevAlpha = ctx.globalAlpha
+  ctx.globalAlpha = prevAlpha * alpha
+
+  ctx.fillStyle = 'rgba(200,205,215,.55)'
+  ctx.beginPath()
+  ctx.moveTo(x0, mid)
+  for (let i = 0; i < n; i++) ctx.lineTo(xAt(i), mid - ampToUnit(peaks[i]) * half)
+  for (let i = n - 1; i >= 0; i--) ctx.lineTo(xAt(i), mid + ampToUnit(peaks[i]) * half)
+  ctx.closePath()
+  ctx.fill()
+
+  if (thresholdLin === null) { ctx.globalAlpha = prevAlpha; return }
+
+  // ONE CLOSED POLYGON PER RUN OF CROSSING COLUMNS, never one path across the
+  // whole band. See crossingRuns for what a single shared path did instead.
+  const tY = ampToUnit(thresholdLin) * half
+  // Each column stands for a slice of time, not an instant, so a run is widened
+  // by half a column at each end. Without it a single-column crossing — which is
+  // most of them, at 0.3-0.4 dB on real speech — is a zero-width polygon and
+  // draws nothing at all: the commonest event on this stage would be invisible.
+  const pad = Math.max(xStep / 2, 0.5)
+  ctx.fillStyle = props.accent
+  for (const [from, to] of crossingRuns(peaks, 0, n, n, thresholdLin)) {
+    for (const sign of [-1, 1]) {
+      const yT = mid + sign * tY
+      ctx.beginPath()
+      ctx.moveTo(xAt(from) - pad, yT)
+      for (let i = from; i <= to; i++) ctx.lineTo(xAt(i), mid + sign * ampToUnit(peaks[i]) * half)
+      ctx.lineTo(xAt(to) + pad, yT)
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
+
+  ctx.globalAlpha = prevAlpha
+}
+
+/**
+ * The playhead: where the transport is, now.
+ *
+ * WHITE, NOT THE ACCENT AND NOT THE WAVEFORM'S RED. On this face every orange
+ * pixel means "this is being removed", so a marker in the accent colour would
+ * be the one orange thing on screen that does not mean that. The main
+ * waveform's own playhead red sits close enough to the accent to read as a
+ * variation of it at a glance. White belongs to neither trace, which is exactly
+ * what a cursor should be.
+ *
+ * Full height with a head at the top only: the line says where, the head says
+ * it is a marker rather than a feature of the signal. Top only because the
+ * bottom of the face carries the legend, and a marker sitting in the middle of
+ * the mode hint would collide with it on a narrow panel — the same reason the
+ * main waveform's playhead wears its head in the ruler gutter.
+ */
+function drawPlayhead(ctx, x, h) {
+  ctx.globalAlpha = 1
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(x + 0.5, 0)
+  ctx.lineTo(x + 0.5, h)
+  ctx.stroke()
+
+  ctx.fillStyle = 'rgba(255,255,255,.85)'
+  ctx.beginPath()
+  ctx.moveTo(x - 4.5, 0)
+  ctx.lineTo(x + 5.5, 0)
+  ctx.lineTo(x + 0.5, 6)
+  ctx.closePath()
+  ctx.fill()
 }
 
 /**

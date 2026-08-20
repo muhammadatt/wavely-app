@@ -1,7 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { renderWaveform, renderOverlay, RULER_GUTTER_HEIGHT } from '../audio/renderer.js'
-import { getClipMarks, getClipMarksVersion, setClipMarksScope } from '../audio/clipMarks.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 
@@ -134,31 +133,13 @@ function drawMain() {
   }))
 }
 
-// Clip marks are rebuilt from the registry only when it reports a change, not
-// on every overlay paint. The overlay repaints on every playhead tick, and the
-// registry's read path sorts — cheap once, wasteful sixty times a second.
-let clipMarks = []
-let clipMarksVersion = -1
-
 function drawOverlay() {
   if (!overlayCanvas.value || !state.currentFile) return
-
-  // Asserted on every draw rather than watched: marks are positions in THIS
-  // file's timeline, and the component that knows which file is on screen is
-  // this one. See clipMarks.js.
-  setClipMarksScope(state.activeDocumentId ?? null)
-  const v = getClipMarksVersion()
-  if (v !== clipMarksVersion) {
-    clipMarksVersion = v
-    clipMarks = getClipMarks()
-  }
-
   renderOverlay(overlayCanvas.value, {
     scrollLeft: scrollLeft.value,
     pixelsPerSecond: pixelsPerSecond.value,
     selection: state.selection,
     playhead: state.playhead,
-    clipMarks,
   })
 }
 
@@ -403,11 +384,6 @@ watch(
 // → overlay only; peaks are unchanged
 watch(() => state.selection, () => drawOverlay(), { deep: true })
 watch(() => state.playhead, () => drawOverlay())
-// Also on transport state, so the last clip marks of a pass are painted. They
-// can be recorded a few milliseconds after the final playhead tick — the
-// kernel reports on its own cadence — and without this the newest mark would
-// sit invisible until the next unrelated interaction repainted the overlay.
-watch(() => state.isPlaying, () => drawOverlay())
 
 // Peak cache updated → full redraw. Not drawMain alone: it re-establishes the
 // zoom and scroll bounds, and a processed file that changed duration moves the

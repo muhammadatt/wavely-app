@@ -562,11 +562,11 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // patch below the 3-6 dB the lamp's own guidance calls the usable range on
   // speech. 6.5 restores 3.21 dB with the shipped knee. The two defaults are
   // coupled through the shape table and must move together.
-  headroomDb: 6.5,
+  headroomDb: 9,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
-  thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
-  fixedThresholdDb: -10, // used only in 'fixed' mode
+  thresholdMode: 'fixed', // 'adaptive' | 'fixed'
+  fixedThresholdDb: -6, // used only in 'fixed' mode
   shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
 }
 
@@ -1243,13 +1243,6 @@ if (typeof registerProcessor === 'function') {
       // resonance kernel's display scratch.
       this.scope = new Float32Array(SCOPE_BATCH * 2)
       this.scopeCount = 0
-      // Loudest reduction since the last meter message, and the worklet clock
-      // reading of the BLOCK it happened in — not of the message. The message
-      // covers 1024 samples; stamping it with the post time would place every
-      // mark up to 23 ms late and all of them at the same instant. Per block
-      // this resolves to one render quantum, 2.9 ms.
-      this.clipDb = 0
-      this.clipTime = 0
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
         else if (e.data?.type === 'monitor') this.kernel.setMonitor(e.data.delta)
@@ -1283,14 +1276,6 @@ if (typeof registerProcessor === 'function') {
         this.scope[(SCOPE_BATCH - 1) * 2 + 1] = this.kernel.scopeThreshold
       }
 
-      if (this.kernel.reductionDb > this.clipDb) {
-        this.clipDb = this.kernel.reductionDb
-        // `currentTime` in an AudioWorkletGlobalScope is the context clock at
-        // the start of this render quantum, which is what the wrapper's
-        // transport origin is measured against.
-        this.clipTime = currentTime
-      }
-
       this.sinceMeter += n
       if (this.sinceMeter >= METER_INTERVAL_SAMPLES) {
         this.sinceMeter = 0
@@ -1301,11 +1286,8 @@ if (typeof registerProcessor === 'function') {
           // Only the filled prefix, so a short final batch cannot inject
           // stale zero-peak points into the scroll.
           scope: this.scope.subarray(0, this.scopeCount * 2),
-          clipDb: this.clipDb,
-          clipTime: this.clipTime,
         })
         this.scopeCount = 0
-        this.clipDb = 0
       }
       return true
     }
