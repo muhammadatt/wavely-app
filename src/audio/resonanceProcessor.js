@@ -13,14 +13,19 @@
  * THE ALGORITHM IS ALREADY CAUSAL. That is the whole reason this port is
  * possible without an analysis pass. Per frame:
  *
- *   1. magnitude in dB
- *   2. cepstral lifter → reference envelope at the inter-harmonic floor
+ *   1. magnitude in dB — of the channel mean on stereo, of the sole channel
+ *      on mono
+ *   2. cepstral lifter → reference envelope at the inter-harmonic floor, at a
+ *      feature scale `sharpness` asks for and the measured F0 caps
  *   3. spike = magnitude − envelope, thresholded at `selectivity`, soft-kneed,
  *      scaled by `depth`, clipped to `maxReductionDb`
- *   4. harmonic-protected bins zeroed, Gaussian spread along the bin axis,
- *      zeroed again, out-of-band zeroed
+ *   4. harmonic-protected bins zeroed, Gaussian spread of constant width in
+ *      OCTAVES, zeroed again, out-of-band zeroed
  *   5. per-bin attack/release IIR at the frame rate
- *   6. gain applied to the complex spectrum, inverse FFT, overlap-add
+ *   6. `mix` blends the resulting gain against unity and `trimDb` scales the
+ *      wet side, both inside the per-bin gain rather than around the effect
+ *   7. gain applied to every channel's complex spectrum, inverse FFT,
+ *      overlap-add
  *
  * The 1394-line Python is mostly machinery this port does not need: multi-pass
  * chains, `sibilant_only` gating, band-summary reporting, and the pitch
@@ -52,6 +57,18 @@
  *     file's median.
  *   - Frame activity comes from an absolute energy floor in place of Silero
  *     labels. Silent frames get a zero target so the IIR decays through them.
+ *   - The lifter cutoff is `min(sharpness target, 0.40 * sr / F0)` rather than
+ *     the server's `0.40 * sr / F0` outright, and the spread kernel is a
+ *     constant width in octaves rather than a constant count of bins. Both are
+ *     the same correction: the server's constants make the detector's
+ *     resolution a function of the speaker's pitch and of where on the
+ *     frequency axis a defect happens to sit. Measured on a broad +10 dB hump
+ *     swept 500 Hz → 6 kHz, the server's geometry removes 25.2 / 15.4 / 10.2 /
+ *     6.3 dB; this one removes 11.3 / 12.3 / 10.2 / 9.6. `server/scripts/
+ *     resonance_suppressor.py` still has the original geometry.
+ *   - `mix` and `trimDb` do not exist on the server, where the stage is one
+ *     link in a chain that has its own gain staging. Here it is a plugin a
+ *     person points at a selection, and suppression only ever removes energy.
  *   - The cepstral reference is computed over the full spectrum rather than the
  *     server's band-restricted variant. Band restriction exists for passes with
  *     a very small lifter cutoff (L≈3, the sibilant-only passes), where the
@@ -92,6 +109,68 @@ const MAG_EPS = 1e-10
  * resonance in noise).
  */
 const DEFAULT_LIFTER_CUTOFF = 60
+
+/**
+ * Envelope feature scale the lifter aims for, in Hz, at the two ends of the
+ * Sharpness knob.
+ *
+ * THE LIFTER CUTOFF USED TO BE F0 AND NOTHING ELSE, and that made the
+ * detector's spectral resolution a property of the speaker rather than of the
+ * settings. `L = 0.40 * sr / F0` means the envelope can follow any feature
+ * wider than `sr / L` Hz, so a 200 Hz voice got a 500 Hz envelope and a 100 Hz
+ * voice a 250 Hz one — the deeper the voice, the finer the reference, the less
+ * anything protrudes, the less the effect did. Measured on the same synthetic
+ * resonance: nothing about the resonance changed, only the pitch of the carrier
+ * under it, and the removal moved by several dB.
+ *
+ * Sharpness now sets an ABSOLUTE target scale and F0 only CLAMPS it. The clamp
+ * is the part that is physics — an envelope finer than the harmonic spacing
+ * starts tracing the comb instead of passing under it, which is the whole
+ * reason the cutoff was tied to F0 in the first place — but there is no reason
+ * the target has to sit exactly on that limit for every speaker.
+ *
+ * Calibrated so the default Sharpness of 0.8 lands on ~380 Hz, which is what
+ * `0.40 * sr / F0` gave for a 150 Hz voice: the tuning pitch this parameter set
+ * was chosen against is unmoved, deeper voices get the resolution they were
+ * always supposed to have, and higher voices stay comb-limited as they must.
+ */
+const LIFTER_SCALE_COARSE_HZ = 2000
+const LIFTER_SCALE_FINE_HZ = 250
+
+/**
+ * Spread half-width in OCTAVES at Sharpness 0, and the bin cap that bounds its
+ * cost.
+ *
+ * The spread kernel used to be `30 * (1 - sharpness)` FFT BINS wide, which is a
+ * constant width in Hz — ±129 bins-worth at the default, everywhere. That is
+ * ±1.9 octaves at 60 Hz and ±0.02 octaves at 8 kHz: the same knob produced a
+ * cut two orders of magnitude different in Q depending only on where on the
+ * axis it landed. Every other tool in this category specifies this control as a
+ * Q, and the ear hears it as one.
+ *
+ * 0.3 octaves is chosen so the default Sharpness of 0.8 gives ±6 bins at
+ * 3 kHz — exactly what the linear kernel gave there. The mid band is unmoved;
+ * the ends are what change, and they change toward being the same width in
+ * octaves as the middle.
+ *
+ * The cap exists only so the widest setting cannot make the top of the spectrum
+ * quadratically expensive. It binds above ~10 kHz at Sharpness 0 and nowhere at
+ * the default.
+ */
+const SPREAD_MAX_OCTAVES = 0.3
+const SPREAD_MAX_HALF_BINS = 96
+
+/** exp(-x²/2) sampled over 0..SPREAD_LUT_MAX sigma, so the hot loop has no exp. */
+const SPREAD_LUT_MAX = 3.5
+const SPREAD_LUT_SIZE = 512
+const SPREAD_LUT = (() => {
+  const lut = new Float64Array(SPREAD_LUT_SIZE + 1)
+  for (let i = 0; i <= SPREAD_LUT_SIZE; i++) {
+    const x = (i / SPREAD_LUT_SIZE) * SPREAD_LUT_MAX
+    lut[i] = Math.exp(-0.5 * x * x)
+  }
+  return lut
+})()
 
 // Harmonic protection geometry — DEFAULT_PARAMS in resonance_suppressor.py.
 const HARMONIC_WIDTH_BINS = 2
@@ -171,6 +250,10 @@ export const RESONANCE_KERNEL_DEFAULTS = {
   pitchMaxHz: DEFAULT_PITCH_MAX_HZ,
   mode: 'soft', // 'soft' | 'hard'
   preserveHarmonics: true,
+  // Wet/dry blend and wet-path makeup. Both live inside the kernel's per-bin
+  // gain rather than as nodes around it — see _mixGain.
+  mix: 1,
+  trimDb: 0,
 }
 
 function clamp(v, lo, hi) {
@@ -193,12 +276,22 @@ export class ResonanceKernel {
       maxHz: DEFAULT_PITCH_MAX_HZ,
     })
 
-    // One STFT per channel. Detection runs on channel 0 and the resulting gain
-    // is applied to every channel: a spectral cut computed independently per
-    // channel would move the stereo image around on correlated material, and
-    // for mono — what narrators actually record — it is identical to the
-    // server either way.
+    // One STFT per channel, plus — on anything wider than mono — one more fed
+    // the channel mean, which is what detection reads.
+    //
+    // A cut computed per channel independently would move the stereo image
+    // around on correlated material, so one shared gain is right. THE SHARED
+    // GAIN USED TO COME FROM CHANNEL 0 ALONE, which is not "linked" detection
+    // but left-channel detection: a resonance present only in the right channel
+    // was invisible, and on a two-host podcast recorded to separate channels
+    // that is half the material. The mean, not the sum, so correlated content
+    // does not arrive 6 dB hot and shift what clears `selectivity`.
+    //
+    // Mono keeps the old path exactly — the single channel's own frame both
+    // decides and receives the gain, and no second transform is run.
     this.stfts = []
+    this.detStft = null
+    this.detMix = null
 
     const bins = this.binCount
     this.magDb = new Float64Array(bins)
@@ -207,6 +300,9 @@ export class ResonanceKernel {
     this.envRe = new Float64Array(bins)
     this.envIm = new Float64Array(bins)
     this.reduction = new Float64Array(bins)
+    // Post-blend reductions for the display; aliases prevGr at mix 1/trim 0.
+    this.grDisplay = null
+    this.grMixed = null
     this.spread = new Float64Array(bins)
     this.prevGr = new Float64Array(bins)
     this.gain = new Float64Array(bins)
@@ -239,9 +335,12 @@ export class ResonanceKernel {
 
     // Bound once so the hot path passes a stable reference rather than
     // allocating a closure per block.
-    this._analyzeAndApply = (re, im, bins) => {
-      this._analyzeFrame(re, im)
+    this._analyzeAndApply = (re, im, bins, self) => {
+      this._analyzeFrame(re, im, self)
       this._applyGain(re, im, bins)
+    }
+    this._analyzeOnly = (re, im, bins, self) => {
+      this._analyzeFrame(re, im, self)
     }
     this._applyGain = (re, im, bins) => {
       const g = this.gain
@@ -294,27 +393,57 @@ export class ResonanceKernel {
       this.activeBins[k] = f >= this.freqFloorHz && f <= this.freqCeilHz ? 1 : 0
     }
 
-    // Gaussian spread kernel, width set by sharpness.
-    // spread_bins = int(30 * (1 - sharpness)); sigma = spread_bins / 3.
+    // Wet/dry blend and output trim, folded into the per-bin gain:
+    // gain = trim * ((1 - mix) + mix * g).
+    //
+    // Inside the gain rather than as nodes around the effect, which is what
+    // keeps the delta monitor exact: the output is ISTFT(X * gain) and the
+    // delta is ISTFT(X * (1 - gain)), so the two still sum to the input at
+    // every setting. A dry node running beside the effect would have to be
+    // delayed by the STFT's latency to line up, and a trim node after the sum
+    // would leave the delta describing a signal nobody hears.
+    //
+    // TRIM SITS AFTER THE BLEND, not on the wet path as soothe's does. Its job
+    // here is to give back the level suppression took away — this is a plugin
+    // pointed at a selection, not a link in a chain with its own gain staging
+    // downstream — and a wet-path trim silently changes the wet/dry ratio, so
+    // reaching for makeup would deepen the notches as a side effect.
+    this.mix = clamp(p.mix ?? 1, 0, 1)
+    this.trimLin = Math.pow(10, (p.trimDb ?? 0) / 20)
+    this.mixDry = (1 - this.mix) * this.trimLin
+    this.mixWet = this.mix * this.trimLin
+    this.mixIsWetOnly = this.mix === 1
+
+    // Gaussian spread, width set by sharpness — in OCTAVES, not bins.
+    // Per-bin geometry, since a constant width in octaves is a width in bins
+    // that grows with frequency. See SPREAD_MAX_OCTAVES.
     const sharpness = clamp(p.sharpness, 0, 1)
-    const spreadBins = Math.trunc(30 * (1 - sharpness))
-    if (spreadBins >= 2) {
-      const sigma = spreadBins / 3
-      const half = spreadBins
-      const kernel = new Float64Array(2 * half + 1)
-      let peak = 0
-      for (let i = -half; i <= half; i++) {
-        const v = Math.exp(-0.5 * (i / sigma) ** 2)
-        kernel[i + half] = v
-        if (v > peak) peak = v
+    const spreadOct = SPREAD_MAX_OCTAVES * (1 - sharpness)
+    this.spreadEnabled = spreadOct > 1e-3
+    if (this.spreadEnabled) {
+      if (!this.spreadHalfBins) {
+        this.spreadHalfBins = new Int32Array(this.binCount)
+        this.spreadInvSigma = new Float64Array(this.binCount)
       }
-      for (let i = 0; i < kernel.length; i++) kernel[i] /= peak
-      this.spreadKernel = kernel
-      this.spreadHalf = half
-    } else {
-      this.spreadKernel = null
-      this.spreadHalf = 0
+      // Half-width and sigma as a FRACTION of the bin index: a span of
+      // ±`oct` octaves around bin k covers k·(2^oct − 2^-oct)/2 bins either
+      // side, to first order symmetric about k.
+      const halfFrac = (Math.pow(2, spreadOct) - Math.pow(2, -spreadOct)) / 2
+      const sigmaOct = spreadOct / 3
+      const sigmaFrac = (Math.pow(2, sigmaOct) - Math.pow(2, -sigmaOct)) / 2
+      for (let k = 0; k < this.binCount; k++) {
+        const half = Math.min(Math.round(k * halfFrac), SPREAD_MAX_HALF_BINS)
+        this.spreadHalfBins[k] = half
+        const sigma = k * sigmaFrac
+        this.spreadInvSigma[k] = sigma > 1e-9 ? 1 / sigma : 0
+      }
     }
+
+    // Cepstral lifter target. Sharpness picks an absolute envelope feature
+    // scale; the per-frame F0 clamps it. See LIFTER_SCALE_COARSE_HZ.
+    const targetHz = LIFTER_SCALE_COARSE_HZ
+      * Math.pow(LIFTER_SCALE_FINE_HZ / LIFTER_SCALE_COARSE_HZ, sharpness)
+    this.lifterTarget = Math.max(20, Math.round(this.sampleRate / targetHz))
 
     // Attack/release at the frame rate: exp(-frame_period / tau).
     this.attackCoeff = p.attackMs > 0
@@ -356,8 +485,26 @@ export class ResonanceKernel {
     this.monitorDelta = !!delta
   }
 
+  /**
+   * Depth of a notch as it survives the wet/dry blend, in dB.
+   *
+   * Measured against a bin the suppressor did not touch, so it is the depth of
+   * the notch relative to the rest of the output rather than an absolute level
+   * change: at mix 1 it is exactly `grDb`, at mix 0 it is exactly 0, and
+   * `trimDb` — which moves every bin together — cancels out of it entirely.
+   * That matches what the reduction curve is for. Monotone
+   * in `grDb`, which is why the display can summarise raw reductions first and
+   * map once per display point rather than once per FFT bin.
+   */
+  _mixDepth(grDb) {
+    if (this.mixIsWetOnly || grDb <= 0) return grDb
+    const g = (1 - this.mix) + this.mix * Math.pow(10, -grDb / 20)
+    return -20 * Math.log10(g)
+  }
+
   reset() {
     for (const s of this.stfts) s.reset()
+    this.detStft?.reset()
     this.f0.reset()
     this.prevGr.fill(0)
     this.frameIndex = 0
@@ -424,9 +571,12 @@ export class ResonanceKernel {
    */
   _snapshotDisplay() {
     const {
-      magDb, envDb, prevGr,
+      magDb, envDb,
       displayMag, displayEnv, displayOut, displayGrNow, displayGrHeld,
     } = this
+    // Post-blend reductions — the notch the listener actually gets. Aliases
+    // prevGr whenever mix and trim are at their neutral settings.
+    const prevGr = this.grDisplay ?? this.prevGr
     const last = this.binCount - 1
 
     for (let d = 0; d < this.displayBins; d++) {
@@ -565,8 +715,14 @@ export class ResonanceKernel {
     for (let k = 0; k < binCount; k++) envDb[k] = envRe[k]
   }
 
-  /** One analysis frame: measure, decide a per-bin gain, leave it in `gain`. */
-  _analyzeFrame(specRe, specIm) {
+  /**
+   * One analysis frame: measure, decide a per-bin gain, leave it in `gain`.
+   *
+   * `stft` is whichever instance produced this spectrum — the sole channel on
+   * mono, the detection mix otherwise. Its unwindowed frame is what pitch is
+   * measured from.
+   */
+  _analyzeFrame(specRe, specIm, stft) {
     const {
       magDb, envDb, reduction, spread, prevGr, gain, activeBins, binCount,
       selectivity, depth, maxReductionDb, softKnee, kneeWidth,
@@ -579,7 +735,7 @@ export class ResonanceKernel {
 
     // Pitch drives both the lifter cutoff and the protection mask, so it is
     // measured from the unwindowed frame the STFT kept for us.
-    const raw = this.stfts[0].rawFrame
+    const raw = (stft ?? this.stfts[0]).rawFrame
     let sumSq = 0
     for (let i = 0; i < FFT_SIZE; i++) sumSq += raw[i] * raw[i]
     const frameDb = 10 * Math.log10(sumSq / FFT_SIZE + 1e-20)
@@ -601,9 +757,13 @@ export class ResonanceKernel {
     // no pitch has been measured yet — the two branches of
     // resonance_suppressor.py:343-346.
     const medianF0 = this.f0.median
-    const lifterCutoff = medianF0 > 0
+    // The comb limit: an envelope finer than this starts tracing the harmonics
+    // instead of passing under them. Sharpness asks for a scale; this is the
+    // most it can have.
+    const lifterCeiling = medianF0 > 0
       ? Math.max(20, Math.trunc((0.4 * this.sampleRate) / medianF0))
       : DEFAULT_LIFTER_CUTOFF
+    const lifterCutoff = Math.min(this.lifterTarget, lifterCeiling)
 
     this._cepstralEnvelope(lifterCutoff)
 
@@ -633,15 +793,30 @@ export class ResonanceKernel {
       for (let k = 0; k < binCount; k++) if (mask[k]) reduction[k] = 0
     }
 
-    // Gaussian spread along the bin axis.
-    if (this.spreadKernel) {
-      const kern = this.spreadKernel
-      const half = this.spreadHalf
+    // Gaussian spread along the log-frequency axis: a constant width in
+    // octaves, so the Q of a cut is the same wherever it lands.
+    if (this.spreadEnabled) {
+      const halfBins = this.spreadHalfBins
+      const invSigma = this.spreadInvSigma
+      const lutScale = SPREAD_LUT_SIZE / SPREAD_LUT_MAX
       for (let k = 0; k < binCount; k++) {
+        const half = halfBins[k]
+        if (half < 1) {
+          const v = reduction[k]
+          spread[k] = v > maxReductionDb ? maxReductionDb : v
+          continue
+        }
+        const inv = invSigma[k]
         let acc = 0
-        const lo = Math.max(0, k - half)
-        const hi = Math.min(binCount - 1, k + half)
-        for (let j = lo; j <= hi; j++) acc += reduction[j] * kern[j - k + half]
+        const lo = k - half >= 0 ? k - half : 0
+        const hi = k + half < binCount ? k + half : binCount - 1
+        for (let j = lo; j <= hi; j++) {
+          const r = reduction[j]
+          if (r === 0) continue
+          const x = (j < k ? k - j : j - k) * inv
+          if (x >= SPREAD_LUT_MAX) continue
+          acc += r * SPREAD_LUT[(x * lutScale) | 0]
+        }
         spread[k] = acc > maxReductionDb ? maxReductionDb : acc
       }
       // Post-spread: re-protect harmonics that neighbouring spikes bled into,
@@ -658,8 +833,8 @@ export class ResonanceKernel {
     // an unpitched frame is still processed.
     if (!active) reduction.fill(0)
 
-    // Per-bin attack/release at the frame rate.
-    const { attackCoeff, releaseCoeff } = this
+    // Per-bin attack/release at the frame rate, then the mix/trim blend.
+    const { attackCoeff, releaseCoeff, mixDry, mixWet } = this
     let frameMax = 0
     for (let k = 0; k < binCount; k++) {
       const target = reduction[k]
@@ -667,9 +842,21 @@ export class ResonanceKernel {
       const v = c * prevGr[k] + (1 - c) * target
       prevGr[k] = v
       if (v > frameMax) frameMax = v
-      gain[k] = Math.pow(10, -v / 20)
+      gain[k] = mixDry + mixWet * Math.pow(10, -v / 20)
     }
     if (frameMax > this.maxReductionSeen) this.maxReductionSeen = frameMax
+
+    // What the notches look like AFTER the blend, for the display and the
+    // meter. Aliased to the raw reduction on the default path so nothing pays
+    // for a mix that is not being used, and so the display stays bit-identical
+    // at mix 1 / trim 0.
+    if (this.mixIsWetOnly) {
+      this.grDisplay = prevGr
+    } else {
+      if (!this.grMixed) this.grMixed = new Float64Array(binCount)
+      for (let k = 0; k < binCount; k++) this.grMixed[k] = this._mixDepth(prevGr[k])
+      this.grDisplay = this.grMixed
+    }
 
     // Unconditional: at ~2000 operations per frame this costs less than one of
     // the three transforms above, and a display that only fills once someone is
@@ -679,9 +866,16 @@ export class ResonanceKernel {
     this.frameIndex++
   }
 
-  _ensureChannels(n) {
+  _ensureChannels(n, detectFrom = n) {
     while (this.stfts.length < n) {
       this.stfts.push(new StftProcessor({ fftSize: FFT_SIZE, hopSize: HOP_SIZE }))
+    }
+    // Only worth a second transform when there is genuinely more than one
+    // input to combine; a mono source fanned out to several outputs is still
+    // decided by its own frame.
+    if (detectFrom > 1 && !this.detStft) {
+      this.detStft = new StftProcessor({ fftSize: FFT_SIZE, hopSize: HOP_SIZE })
+      this.detMix = new Float64Array(HOP_SIZE)
     }
   }
 
@@ -700,7 +894,7 @@ export class ResonanceKernel {
       return
     }
 
-    this._ensureChannels(nOut)
+    this._ensureChannels(nOut, nIn)
 
     // Walk the block in pieces no longer than one hop, so at most one STFT
     // frame completes per piece. Channel 0 computes the gain for that frame and
@@ -712,6 +906,20 @@ export class ResonanceKernel {
     while (off < n) {
       const len = Math.min(HOP_SIZE, n - off)
       const whole = off === 0 && len === n
+
+      // Detection first, so the gain a frame boundary inside this piece
+      // produces is the one every channel then applies at that same boundary.
+      if (this.detStft) {
+        const mix = this.detMix
+        const scale = 1 / nIn
+        for (let i = 0; i < len; i++) {
+          let acc = 0
+          for (let ch = 0; ch < nIn; ch++) acc += inputChannels[ch][off + i]
+          mix[i] = acc * scale
+        }
+        this.detStft.analyze(mix, len, this._analyzeOnly)
+      }
+
       for (let ch = 0; ch < nOut; ch++) {
         const source = inputChannels[ch < nIn ? ch : nIn - 1]
         const target = outputChannels[ch]
@@ -719,18 +927,18 @@ export class ResonanceKernel {
           whole ? source : source.subarray(off, off + len),
           whole ? target : target.subarray(off, off + len),
           len,
-          ch === 0 ? this._analyzeAndApply : this._applyGain,
+          ch === 0 && !this.detStft ? this._analyzeAndApply : this._applyGain,
         )
       }
       off += len
     }
   }
 
-  /** Peak reduction since the last call, in dB. */
+  /** Peak reduction since the last call, in dB, as the blend leaves it. */
   readMetering() {
     const v = this.maxReductionSeen
     this.maxReductionSeen = 0
-    return v
+    return this._mixDepth(v)
   }
 }
 

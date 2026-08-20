@@ -31,6 +31,8 @@ export {
   RESONANCE_FRAME_SIZE,
   RESONANCE_DISPLAY_BINS,
   RESONANCE_DISPLAY_CURVES,
+  RESONANCE_ATTACK_MIN_MS,
+  RESONANCE_RELEASE_MIN_MS,
   effectivePitchRange,
   resonanceDisplayRange,
 } from '../resonanceParams.js'
@@ -52,6 +54,8 @@ export const RESONANCE_DEFAULTS = {
   mode: 'soft', // 'soft' | 'hard'
   preserveHarmonics: true,
   pitchRange: 'voice', // key of PITCH_RANGES
+  mix: 1, // 0 = dry, 1 = fully suppressed
+  trim: 0, // dB, wet path only
 }
 
 /** Map UI param names to kernel param names. */
@@ -70,6 +74,8 @@ export function toKernelParams(params) {
     preserveHarmonics: params.preserveHarmonics,
     pitchMinHz: range.minHz,
     pitchMaxHz: range.maxHz,
+    mix: params.mix,
+    trimDb: params.trim,
   }
 }
 

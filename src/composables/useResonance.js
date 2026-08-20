@@ -21,6 +21,8 @@ const resFreqCeil = ref(RESONANCE_DEFAULTS.freqCeil)
 const resMode = ref(RESONANCE_DEFAULTS.mode)
 const resPreserveHarmonics = ref(RESONANCE_DEFAULTS.preserveHarmonics)
 const resPitchRange = ref(RESONANCE_DEFAULTS.pitchRange)
+const resMix = ref(RESONANCE_DEFAULTS.mix)
+const resTrim = ref(RESONANCE_DEFAULTS.trim)
 
 const resPreview = ref(false)
 /**
@@ -60,6 +62,8 @@ function currentParams() {
     attack: resAttack.value,
     release: resRelease.value,
     maxReduction: resMaxReduction.value,
+    mix: resMix.value,
+    trim: resTrim.value,
     freqFloor: resFreqFloor.value,
     freqCeil: resFreqCeil.value,
     mode: resMode.value,
@@ -167,6 +171,8 @@ export function useResonance() {
   const syncAttack = v => syncParam('attack', resAttack, v)
   const syncRelease = v => syncParam('release', resRelease, v)
   const syncMaxReduction = v => syncParam('maxReduction', resMaxReduction, v)
+  const syncMix = v => syncParam('mix', resMix, v)
+  const syncTrim = v => syncParam('trim', resTrim, v)
   const syncFreqFloor = v => syncParam('freqFloor', resFreqFloor, v)
   const syncFreqCeil = v => syncParam('freqCeil', resFreqCeil, v)
   const syncMode = v => syncParam('mode', resMode, v)
@@ -236,6 +242,8 @@ export function useResonance() {
     resAttack,
     resRelease,
     resMaxReduction,
+    resMix,
+    resTrim,
     resFreqFloor,
     resFreqCeil,
     resMode,
@@ -256,6 +264,8 @@ export function useResonance() {
     syncAttack,
     syncRelease,
     syncMaxReduction,
+    syncMix,
+    syncTrim,
     syncFreqFloor,
     syncFreqCeil,
     syncMode,

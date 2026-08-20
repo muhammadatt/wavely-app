@@ -49,6 +49,20 @@ export function effectivePitchRange(sampleRate, rangeKey) {
 }
 
 /**
+ * Slowest ballistic setting that is indistinguishable from instantaneous.
+ *
+ * The per-bin attack/release IIR steps once per STFT hop — 11.6 ms at 44.1 kHz,
+ * 10.7 at 48. A time constant at or below that leaves a coefficient near zero,
+ * so every setting under it produces the same jump-to-target and the bottom of
+ * each knob was travel that did nothing. The minima below start where the
+ * coefficient becomes something a listener can hear: ~0.3 for attack, ~0.6 for
+ * release, which is where the notch takes visibly more than one frame to open
+ * or close.
+ */
+export const RESONANCE_ATTACK_MIN_MS = 12
+export const RESONANCE_RELEASE_MIN_MS = 25
+
+/**
  * Geometry of the per-frequency display the panel draws.
  *
  * Lives here rather than in the kernel for the same reason the pitch clamp

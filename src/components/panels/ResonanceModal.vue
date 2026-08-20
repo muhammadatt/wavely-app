@@ -1,7 +1,12 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
-import { PITCH_RANGES, effectivePitchRange } from '../../audio/resonanceParams.js'
+import {
+  PITCH_RANGES,
+  effectivePitchRange,
+  RESONANCE_ATTACK_MIN_MS,
+  RESONANCE_RELEASE_MIN_MS,
+} from '../../audio/resonanceParams.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
@@ -16,11 +21,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
+  resPitchRange, resMix, resTrim,
+  resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncDepth, syncSharpness, syncSelectivity, syncAttack,
-  syncRelease, syncMaxReduction, syncFreqFloor, syncFreqCeil, syncMode,
-  syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
+  syncRelease, syncMaxReduction, syncMix, syncTrim, syncFreqFloor, syncFreqCeil,
+  syncMode, syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
 
 const { state } = useEditorState()
@@ -48,6 +54,7 @@ const percent = v => `${Math.round(v * 100)}`
 const oneDp = v => v.toFixed(1)
 const ms = v => `${Math.round(v)}`
 const db = v => `${Math.round(v)}`
+const signedDb = v => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
 
 /**
  * Frequency for the range readout. Carries its unit, because the two ends of
@@ -205,28 +212,52 @@ async function applyAndClose() {
           :caption="modeCaption"
         />
 
-        <div class="flex gap-[20px]">
-          <div class="w-[66px]">
+        <!-- The ballistic minima are the STFT hop, not 0. A time constant
+             shorter than one hop leaves the IIR coefficient at zero, so every
+             setting below it is the same instantaneous jump — the bottom of
+             both knobs used to be travel that could not be heard. See
+             RESONANCE_ATTACK_MIN_MS. -->
+        <div class="flex gap-[16px]">
+          <div class="w-[62px]">
             <Knob
               :model-value="resAttack" @update:model-value="syncAttack"
-              :min="1" :max="100" :step="1" :value-font-px="13"
+              :min="RESONANCE_ATTACK_MIN_MS" :max="100" :step="1" :value-font-px="13"
               label="Attack ms" :accent="ACCENT" :format-value="ms"
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[66px]">
+          <div class="w-[62px]">
             <Knob
               :model-value="resRelease" @update:model-value="syncRelease"
-              :min="10" :max="500" :step="5" :value-font-px="13"
+              :min="RESONANCE_RELEASE_MIN_MS" :max="500" :step="5" :value-font-px="13"
               label="Release ms" :accent="ACCENT" :format-value="ms"
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[66px]">
+          <div class="w-[62px]">
             <Knob
               :model-value="resMaxReduction" @update:model-value="syncMaxReduction"
               :min="3" :max="48" :step="1" :value-font-px="13"
               label="Max Cut dB" :accent="ACCENT" :format-value="db"
+              :disabled="!resPreview"
+            />
+          </div>
+          <!-- Mix and Trim end the row because they are the output stage: the
+               three knobs to their left decide what gets cut, these two decide
+               how much of that cut reaches the file and at what level. -->
+          <div class="w-[62px]">
+            <Knob
+              :model-value="resMix" @update:model-value="syncMix"
+              :min="0" :max="1" :step="0.01" :value-font-px="13"
+              label="Mix" :accent="ACCENT" :format-value="percent"
+              :disabled="!resPreview"
+            />
+          </div>
+          <div class="w-[62px]">
+            <Knob
+              :model-value="resTrim" @update:model-value="syncTrim"
+              :min="-12" :max="12" :step="0.5" :value-font-px="13"
+              label="Trim dB" :accent="ACCENT" :format-value="signedDb"
               :disabled="!resPreview"
             />
           </div>

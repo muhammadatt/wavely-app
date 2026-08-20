@@ -12,6 +12,8 @@ import {
   effectivePitchRange,
   PITCH_RANGES,
   resonanceDisplayRange,
+  RESONANCE_ATTACK_MIN_MS,
+  RESONANCE_RELEASE_MIN_MS,
 } from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -754,4 +756,220 @@ test('monitoring is off by default and unreachable through the parameters', () =
     worst = Math.max(worst, Math.abs(rendered[i] - expected[i]))
   }
   assert.ok(worst < 1e-9, `the render path did not produce the processed output (${worst})`)
+})
+
+// ── Log-frequency geometry, ballistics, stereo detection, mix and trim ──────
+
+test('the spread kernel is a constant width in octaves, not in bins', () => {
+  // The width used to be `30 * (1 - sharpness)` FFT bins — the same width in
+  // Hz everywhere, which is ~1.9 octaves at 60 Hz and 0.02 at 8 kHz. Pinned
+  // here as a ratio to the bin index, which is what "constant in octaves"
+  // means: half-width proportional to frequency.
+  const k = new ResonanceKernel(SR)
+  k.setParams({ sharpness: 0.8 })
+  const at = f => k.spreadHalfBins[Math.round(f / k.binWidth)]
+
+  // 3 kHz is the calibration point: ±6 bins, exactly what the linear kernel
+  // gave there. Everything else follows from proportionality.
+  assert.equal(at(3000), 6)
+  for (const [lo, hi] of [[1000, 2000], [2000, 4000], [4000, 8000]]) {
+    const ratio = at(hi) / at(lo)
+    assert.ok(
+      ratio > 1.8 && ratio < 2.2,
+      `an octave should double the half-width, ${lo}->${hi} gave ${ratio.toFixed(2)}`,
+    )
+  }
+  // Wider at lower sharpness, everywhere.
+  const wide = new ResonanceKernel(SR)
+  wide.setParams({ sharpness: 0.2 })
+  for (const f of [1000, 3000, 9000]) {
+    const bin = Math.round(f / wide.binWidth)
+    assert.ok(
+      wide.spreadHalfBins[bin] > k.spreadHalfBins[bin],
+      `sharpness did not widen the cut at ${f} Hz`,
+    )
+  }
+})
+
+test('a broad defect is removed by a similar amount wherever it sits', () => {
+  // THE REGRESSION THIS EXISTS FOR. With a spread fixed in bins and a lifter
+  // fixed to F0, the same +10 dB hump swept across the spectrum was removed by
+  // 25 dB at 500 Hz and 6 dB at 6 kHz — one setting behaving as two orders of
+  // magnitude of Q depending only on where the problem was.
+  // Probe frequencies stay inside the carrier's own content: `voice` runs 30
+  // harmonics, so at F0 150 there is nothing but noise floor above ~4.5 kHz
+  // and a probe up there measures the generator, not the suppressor.
+  const dry = voice({ f0: 150 })
+  const removed = [500, 1200, 2500, 4000].map(
+    f => boostRemoved(dry, f, 1.5, 10, UNPROTECTED),
+  )
+  const lo = Math.min(...removed)
+  const hi = Math.max(...removed)
+  assert.ok(
+    hi - lo < 5,
+    `spread across the axis was ${(hi - lo).toFixed(1)} dB: ${removed.map(v => v.toFixed(1)).join(', ')}`,
+  )
+  assert.ok(lo > 5, `least-removed band only lost ${lo.toFixed(1)} dB`)
+})
+
+test('sharpness moves the detection scale, not just the cut width', () => {
+  // The lifter cutoff used to be F0 and nothing else, so nothing the user
+  // could touch changed what counted as a resonance in the first place.
+  const dry = voice({ f0: 150 })
+  const broad = boostRemoved(dry, 3000, 1.5, 10, { ...UNPROTECTED, sharpness: 0.4 })
+  const surgical = boostRemoved(dry, 3000, 1.5, 10, { ...UNPROTECTED, sharpness: 1 })
+  assert.ok(
+    broad > surgical + 8,
+    `low sharpness should catch a broad hump the high setting walks past: ${broad.toFixed(1)} vs ${surgical.toFixed(1)}`,
+  )
+})
+
+test('the envelope is no finer than the harmonic comb, and no finer than asked', () => {
+  // Two separate bounds, and the F0 one is the physical half: an envelope
+  // finer than the harmonic spacing traces the comb instead of passing under
+  // it. The sharpness target is the half that used to be missing, which is why
+  // a deep voice got a reference four times finer than a high one and the
+  // effect quietly did less on it.
+  const k = new ResonanceKernel(SR)
+  k.setParams({ sharpness: 0.8 })
+  const combLimit = f0 => Math.max(20, Math.trunc((0.4 * SR) / f0))
+
+  // A 220 Hz voice is comb-limited: the target is finer than the comb allows.
+  assert.ok(k.lifterTarget > combLimit(220))
+  // An 80 Hz voice is not, and used to be given nearly twice the resolution.
+  assert.ok(k.lifterTarget < combLimit(80))
+  assert.ok(combLimit(80) / k.lifterTarget > 1.7)
+})
+
+test('the ballistic minima are settings the frame rate can express', () => {
+  // Below one STFT hop the IIR coefficient rounds to zero and every setting is
+  // the same instantaneous jump, so the bottom of both knobs was inert travel.
+  const hopMs = (512 / SR) * 1000
+  assert.ok(RESONANCE_ATTACK_MIN_MS >= hopMs)
+  assert.ok(RESONANCE_RELEASE_MIN_MS >= 2 * hopMs)
+
+  const k = new ResonanceKernel(SR)
+  k.setParams({ attackMs: RESONANCE_ATTACK_MIN_MS, releaseMs: RESONANCE_RELEASE_MIN_MS })
+  assert.ok(k.attackCoeff > 0.25, `attack coefficient ${k.attackCoeff} is indistinguishable from instant`)
+  assert.ok(k.releaseCoeff > 0.55, `release coefficient ${k.releaseCoeff} is indistinguishable from instant`)
+})
+
+test('detection reads every channel, not just the first', () => {
+  // It used to run on channel 0 alone and call the result "linked". A
+  // resonance living only in the right channel was invisible — which on a
+  // two-host podcast tracked to separate channels is half the material.
+  const dry = voice({ seconds: 2 })
+  const right = resonate(dry, 3000, 40, 14)
+  const { channelData } = processResonanceBuffer(
+    [dry.slice(), right.slice()], SR, UNPROTECTED,
+  )
+  const removed = bandDb(right, 3000, SR) - bandDb(channelData[1], 3000, SR + LATENCY)
+  assert.ok(removed > 6, `only ${removed.toFixed(1)} dB came out of the right channel`)
+})
+
+test('one shared gain still reaches every channel', () => {
+  // The detection mix must not turn into per-channel processing: identical
+  // channels have to stay identical, or the image wanders.
+  const sig = voice({ seconds: 1.5 })
+  const { channelData } = processResonanceBuffer(
+    [sig.slice(), sig.slice()], SR, RESONANCE_KERNEL_DEFAULTS,
+  )
+  let maxErr = 0
+  for (let i = 0; i < sig.length; i++) {
+    maxErr = Math.max(maxErr, Math.abs(channelData[0][i] - channelData[1][i]))
+  }
+  assert.ok(maxErr < 1e-9, `channels diverged by ${maxErr}`)
+})
+
+test('mono is untouched by the stereo detection path', () => {
+  // One channel runs no second transform and takes exactly the code it always
+  // did, so nothing a narrator records can have moved.
+  const sig = voice({ seconds: 1.5 })
+  const k = new ResonanceKernel(SR)
+  k.process([sig.subarray(0, 512)], [new Float32Array(512)], 512)
+  assert.equal(k.detStft, null)
+})
+
+test('mix 0 is the input, sample for sample', () => {
+  const sig = resonate(voice({ seconds: 2 }), 3000, 40, 14)
+  const { channelData } = processResonanceBuffer([sig], SR, { ...UNPROTECTED, mix: 0 })
+  let maxErr = 0
+  for (let i = LATENCY; i < sig.length; i++) {
+    maxErr = Math.max(maxErr, Math.abs(channelData[0][i] - sig[i - LATENCY]))
+  }
+  assert.ok(maxErr < 1e-6, `mix 0 was not the dry signal: max error ${maxErr}`)
+})
+
+test('mix blends monotonically between dry and fully suppressed', () => {
+  const dry = voice({ seconds: 2 })
+  const removed = [0, 0.25, 0.5, 0.75, 1].map(
+    mix => boostRemoved(dry, 3000, 40, 14, { ...UNPROTECTED, mix }),
+  )
+  assert.ok(Math.abs(removed[0]) < 0.05, `mix 0 removed ${removed[0].toFixed(2)} dB`)
+  for (let i = 1; i < removed.length; i++) {
+    assert.ok(
+      removed[i] > removed[i - 1],
+      `mix is not monotone: ${removed.map(v => v.toFixed(2)).join(', ')}`,
+    )
+  }
+})
+
+test('trim is a clean output gain on the wet path', () => {
+  const sig = resonate(voice({ seconds: 2 }), 3000, 40, 14)
+  const flat = processResonanceBuffer([sig], SR, UNPROTECTED).channelData[0]
+  const lifted = processResonanceBuffer([sig], SR, { ...UNPROTECTED, trimDb: 6 }).channelData[0]
+  let a = 0
+  let b = 0
+  for (let i = LATENCY + 4096; i < sig.length - 4096; i++) {
+    a += flat[i] * flat[i]
+    b += lifted[i] * lifted[i]
+  }
+  const gained = 10 * Math.log10(b / a)
+  assert.ok(Math.abs(gained - 6) < 0.05, `+6 dB of trim gave ${gained.toFixed(3)} dB`)
+})
+
+test('the delta monitor stays exact under mix and trim', () => {
+  // The blend lives inside the per-bin gain, so 1 - gain is still literally
+  // input minus output. Had mix been staged as a node around the effect this
+  // would not hold.
+  const sig = resonate(voice({ seconds: 1.5 }), 3000, 40, 14)
+  const params = { ...UNPROTECTED, mix: 0.6, trimDb: 3 }
+  const wet = processResonanceBuffer([sig], SR, params).channelData[0]
+
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams(params)
+  kernel.setMonitor(true)
+  const delta = new Float32Array(sig.length)
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [delta.subarray(off, off + len)], len)
+  }
+
+  let maxErr = 0
+  for (let i = LATENCY; i < sig.length; i++) {
+    maxErr = Math.max(maxErr, Math.abs(wet[i] + delta[i] - sig[i - LATENCY]))
+  }
+  assert.ok(maxErr < 1e-6, `output + delta drifted from the input by ${maxErr}`)
+})
+
+test('the reduction the meter reports is the one the blend leaves', () => {
+  // Soothe shows shallower notches as mix comes down and says so in its
+  // manual; anything else makes the meter disagree with the ears. Trim moves
+  // every bin together, so it must cancel out of a notch depth.
+  const k = new ResonanceKernel(SR)
+  k.setParams({ mix: 1, trimDb: 0 })
+  assert.equal(k._mixDepth(12), 12)
+
+  k.setParams({ mix: 0 })
+  assert.ok(Math.abs(k._mixDepth(12)) < 1e-12)
+
+  k.setParams({ mix: 0.5, trimDb: 0 })
+  const half = k._mixDepth(12)
+  assert.ok(half > 0 && half < 12, `half-mix depth ${half} is not between dry and wet`)
+
+  k.setParams({ mix: 0.5, trimDb: 6 })
+  assert.ok(
+    Math.abs(k._mixDepth(12) - half) < 1e-9,
+    'trim leaked into a notch depth it should cancel out of',
+  )
 })
