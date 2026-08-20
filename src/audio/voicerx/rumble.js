@@ -95,6 +95,76 @@ const HIGH_BAND = [0.72, 1.0]
  */
 const CLEAN_TILT_DB = -14
 
+/**
+ * ⚠ MEASURED AGAINST THREE REAL NARRATORS AND NOT RE-DERIVED, because the
+ * measurement turns out to have two structural defects that have to be fixed
+ * FIRST — and a constant fitted on top of a broken measurement is worse than
+ * the one already here. Recorded so the next attempt starts from evidence.
+ *
+ * DEFECT 1 — SILENT TOTAL FAILURE ON LOW CORNERS. The tilt bands are fractions
+ * of the corner, so they are only a few FFT bins wide at the region
+ * machinery's FRAME_SIZE 2048 / N_FFT 4096, and below two bins `bandLevelDb`
+ * returns null, `analyzeRumble` returns null, and no rumble finding is
+ * produced at all. Swept across corners 40-100 Hz: at 48 kHz EVERY corner
+ * below 75 fails; at 44.1 kHz every corner below 65 fails, and 75 fails while
+ * 70 and 80 pass — pure bin-alignment luck. Reproduced on a synthetic clean
+ * voice at F0 90 (corner 49.5), which returns null outright. A deep-voiced
+ * narrator gets no rumble analysis whatsoever and nothing says so. This is the
+ * same "too few bins" failure this heuristic was written to replace in
+ * `sub_bass`, which the note at the top of this file criticises for getting
+ * 6.5 bins; the tilt bands get one or two.
+ *
+ * DEFECT 2 — THE CLEAN TILT IS NOT A CONSTANT. It varies with where the corner
+ * lands, so a single CLEAN_TILT_DB cannot be right for every voice. On the
+ * shipped build, clean synthetic voices measure:
+ *
+ *   F0  90  ->  corner 49.5   NULL (defect 1)
+ *   F0 120  ->  corner 66     tilt -15.76   gain  0.00   <- what -14 was fitted to
+ *   F0 180  ->  corner 99     tilt -10.22   gain -3.78
+ *   F0 220  ->  corner 100    tilt  -8.24   gain -5.76
+ *
+ * So a higher-pitched narrator with a perfectly clean bottom end is already
+ * offered a 5.8 dB cut. The constant was calibrated at F0 120 and is a
+ * function of the corner, not a property of clean audio.
+ *
+ * WHAT THE WINDOW IS DOING TO IT. At 48 kHz, FRAME_SIZE 2048 gives 23.4 Hz of
+ * true resolution and a Hann mainlobe about 94 Hz wide — the whole 20-100 Hz
+ * region this heuristic reads fits inside one mainlobe, and the HIGH band,
+ * being nearest F0, catches the most leakage, which makes the tilt look
+ * steeper than it is. Re-measuring with 16384-sample frames on three real
+ * narrators (tilt at frame 2048 / 8192 / 32768):
+ *
+ *   A (48 kHz, corner 85.8)   -3.28   +4.47   +5.00   <- sign flips
+ *   B (44.1 kHz, corner 100)  -3.43   -3.87   -3.90
+ *   C (22 kHz, corner 65.4)   -9.57   -8.23   -8.35
+ *
+ * B and C were roughly right, having had 3-4 bins. A was wrong by 8.3 dB and
+ * in the wrong DIRECTION: its spectrum genuinely RISES 5 dB toward DC, which is
+ * heavy rumble, and the shipped window called it a clean-ish fall.
+ *
+ * WHAT THE THREE FILES ACTUALLY CONTAIN, independently of any of this — mean
+ * band level relative to the same file's 300-3000 Hz speech band:
+ *
+ *   A (normalised)      40-60 Hz  -7.9 dB     <- a great deal of LF energy
+ *   B (raw)             40-60 Hz -11.5 dB
+ *   C (hard-mastered)   40-60 Hz -16.2 dB, 10-40 Hz -22 to -24  <- high-passed
+ *
+ * The shipped heuristic offers -10.72 / -10.57 / -4.43 dB on these, which is
+ * the right ORDERING and plausibly the right magnitudes for A and B. So the
+ * heuristic is not obviously wrong on real rumble; it is wrong about clean
+ * audio and blind on low corners.
+ *
+ * THE ORDER OF WORK IS: give this measurement its own long window (16384
+ * samples is cheaper than what runs now — a 16384-point FFT every 4096 samples
+ * against a 4096-point one every 512), which fixes defect 1 outright; then
+ * decide whether the clean tilt can be predicted from the corner or whether
+ * the tilt is simply the wrong statistic. Only then re-derive this number.
+ * Re-deriving it now would fit it to leakage.
+ *
+ * ⚠ Still no KNOWN-CLEAN unmastered narrator recording. C is high-passed, so
+ * using it as the clean reference assumes what it is meant to prove.
+ */
+
 /** Shelf slope. Gentle, so a slightly misplaced corner costs little. */
 export const RUMBLE_Q = 0.7
 
