@@ -190,11 +190,37 @@ const LIFTER_SCALE_FINE_HZ = 250
  * does roughly a tenth the damage to a clean voice that the unmasked cepstral
  * path does, and does not regress unpitched material.
  *
- * NOT THE DEFAULT, AND NOT CLOSE TO READY. Every number above is synthetic, and
- * by this project's own count that would be the eighth time a clean corpus
- * answered a question it could not actually answer. Its absolute removal is
- * also low at the settings measured, so it needs calibration — which is
- * precisely the step that must not be taken against synthetics.
+ * NOT THE DEFAULT, AND THE FIRST REAL FILE SAYS IT SHOULD NOT BECOME ONE.
+ * Every number above is synthetic. On 46 s of real narration (`npm run
+ * reso:real`), with both configurations solved to the SAME 3 dB mean cut in
+ * 100-400 Hz — which is the only fair comparison, since a config that cuts less
+ * has fewer artefacts for free — the gain jitter goes the other way:
+ *
+ *                                slow pitch   fast pitch
+ *     cepstral, protection off      0.90         1.25
+ *     peak-envelope, no mask        1.23         1.77
+ *
+ * So on real speech this reference is 37% WORSE at the thing it was built to
+ * fix, and its fast/slow ratio (1.44 against 1.39) says it chases pitch just as
+ * much. The transparency it showed on synthetics — matching the mask to three
+ * decimal places — does not survive contact with a voice. Eighth time a clean
+ * corpus has been too clean to answer the question asked of it, and the first
+ * time one has reversed a result outright rather than merely flattering it.
+ *
+ * TWO HYPOTHESES FOR THE GAP, BOTH TESTED, BOTH WRONG. It is not the pitch
+ * estimate feeding the max filter: per-frame F0, rolling median, and a fixed
+ * 300 or 500 Hz window all land within 1.19-1.30 dB of jitter. It is not the
+ * calibration either — the numbers above are already solved to matched cut. The
+ * remaining candidate is that real voiced speech simply is not a clean comb:
+ * jitter, shimmer, breath and formant transitions mean the "harmonic peaks" the
+ * max filter traces are themselves moving, so an envelope drawn through them is
+ * not the stable thing a synthetic stack made it look like.
+ *
+ * The calibration was also 4-5x too hot. Selectivity 4 came from a synthetic
+ * clean voice whose protrusion floor was 2.5-4.2 dB; real narration measures
+ * p75 at 8.9 dB and p90 at 17.2 in the same band, so that threshold treated
+ * well over a quarter of every time-frequency cell and removed 12 dB on
+ * average. Reaching 3 dB needs selectivity ~17.
  *
  * `SPACING_CAP_BINS` bounds the max filter's cost; it binds only at
  * implausibly high pitches. `REF_FLOOR_FACTOR` is the one constant with a
@@ -204,6 +230,8 @@ const LIFTER_SCALE_FINE_HZ = 250
  * the prototype was measured at.
  */
 const PEAK_SPACING_CAP_BINS = 64
+/** Err wide on the max filter's window — see the note at its call site. */
+const PEAK_SPACING_MARGIN = 1.25
 const PEAK_REF_FLOOR_FACTOR = 8
 /** Reference width in octaves at Sharpness 0 and 1 — the detection scale. */
 const PEAK_REF_OCT_COARSE = 3.0
@@ -218,6 +246,27 @@ const PEAK_REF_OCT_FINE = 1.2
  * obvious alternative and is untested.
  */
 const PEAK_FALLBACK_F0_HZ = 150
+
+/**
+ * What the shipping configuration does to real narration, for the record.
+ *
+ * The same 46 s file, cepstral reference with the mask on, at its own default
+ * selectivity of 8: it removes 0.09 dB in 100-400 Hz and 0.14 dB in 2-6 kHz.
+ * The synthetic finding — that harmonic protection makes the effect inert on
+ * pitched material — reproduces on a voice, on the material this product is
+ * built for.
+ *
+ * Two further facts from that file worth having written down. Reaching 3 dB of
+ * cut in the fundamental region with protection off needs selectivity 19, more
+ * than twice the shipping default, so the default is not merely masked into
+ * inertness — it is set below where it would do useful work either way. And the
+ * pitch tracker reports 5% octave jumps and 14% jumps over a tritone between
+ * consecutive voiced frames, which is the estimate BOTH the harmonic mask and
+ * this reference are built on. Widening the search range does not help: p95
+ * simply tracks whatever ceiling it is given (397 Hz at a 400 limit, 1189 at
+ * 1200), which is the tracker returning the rail rather than a high voice, and
+ * the wild-jump rate rises from 14% to 18%.
+ */
 
 /**
  * Spread half-width in OCTAVES at Sharpness 0, and the bin cap that bounds its
@@ -924,7 +973,16 @@ export class ResonanceKernel {
     const lifterCutoff = Math.min(this.lifterTarget, lifterCeiling)
 
     if (this.refMode === 'peak') {
-      this._peakEnvelope(medianF0 > 0 ? medianF0 : PEAK_FALLBACK_F0_HZ)
+      // THE CURRENT FRAME'S PITCH, NOT THE ROLLING MEDIAN, and the asymmetry
+      // is the reason. The max filter's window has to span at least one
+      // harmonic spacing: too wide only blunts the envelope, too narrow lets
+      // the comb straight into it, which is the one thing this reference
+      // exists to prevent. The median is safe for the cepstral lifter, where
+      // both errors degrade gracefully, and unsafe here. On a narrator ranging
+      // 87-397 Hz around a median of 195 the high-pitched frames were getting
+      // half a spacing. Margin for the same reason: err wide.
+      const spacingHz = (pitched && f0 > 0 ? f0 : medianF0) || PEAK_FALLBACK_F0_HZ
+      this._peakEnvelope(spacingHz * PEAK_SPACING_MARGIN)
     } else {
       this._cepstralEnvelope(lifterCutoff)
     }
