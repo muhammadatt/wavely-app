@@ -170,8 +170,19 @@ export const RESONANCE_REF_MODE_DEFAULTS = {
   cepstral: {},
   peak: {
     refMode: 'peak',
-    selectivity: 4,
+    // RE-CALIBRATED ON REAL NARRATION. This was 4, from a synthetic clean voice
+    // whose protrusion floor measured 2.5-4.2 dB. Real speech measures p75 at
+    // 8.9 dB and p90 at 17.2 in the same band, so 4 treated over a quarter of
+    // every time-frequency cell and removed 12 dB on average. 20 is where a
+    // 46 s narrator clip lands on ~3 dB of mean cut in the fundamental region.
+    selectivity: 20,
     depth: 1,
+    // Slow, because the two mechanisms are complementary and measurably
+    // superadditive: the stable envelope removes the frequency-domain source of
+    // gain movement and these remove the time-domain residue. Alone they are
+    // worth 21% and 11%; together, 62%.
+    attack: 100,
+    release: 500,
     // The whole point: this reference does not make harmonics look like
     // resonances, so it does not need the mask that answers that.
     preserveHarmonics: false,

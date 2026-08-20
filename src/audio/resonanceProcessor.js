@@ -1018,12 +1018,33 @@ export class ResonanceKernel {
     const mask = this.preserveHarmonics && pitched ? this._harmonicMask(f0) : null
 
     // Spike detection → soft knee → depth → clip.
+    // WHAT PROTRUSION IS MEASURED FROM. Against the cepstral reference it is the
+    // bin's own magnitude, as the server does. Against the peak envelope it is
+    // the ENVELOPE's value at that bin, and the difference is the whole point:
+    //
+    // `magDb[k]` moves every time a harmonic slides across bin k, which IS
+    // reason 1 — the detector reads the passing harmonic as a resonance
+    // arriving and leaving, and the gain chases it. The peak envelope is a
+    // maximum over one harmonic spacing, so a harmonic moving inside that span
+    // does not change it. Detecting on it makes the gain a smooth, stable
+    // function of frequency instead of a per-bin one.
+    //
+    // Fixing the reference and leaving the measurement on the raw magnitude was
+    // half a fix, and measurably so: on real narration at matched treatment it
+    // left gain jitter at 1.23/1.78 dB against the cepstral path's 0.94/1.25 —
+    // WORSE than what it replaced. Moving detection onto the envelope takes it
+    // to 0.97/1.34, and with slow ballistics to 0.36/0.77.
+    // `?? magDb` is unreachable through _analyzeFrame, which always builds the
+    // envelope first in peak mode. It is here so a future caller that reorders
+    // those two gets the shipping behaviour rather than a null dereference on
+    // the audio thread.
+    const detect = (this.refMode === 'peak' ? this.peakMax : magDb) ?? magDb
     for (let k = 0; k < binCount; k++) {
       if (!activeBins[k]) {
         reduction[k] = 0
         continue
       }
-      const above = magDb[k] - envDb[k] - selectivity
+      const above = detect[k] - envDb[k] - selectivity
       if (above <= 0) {
         reduction[k] = 0
         continue

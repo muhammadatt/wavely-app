@@ -81,21 +81,18 @@ const CONFIGS = [
     solveFor: 3,
   },
   {
-    slug: 'cepstral-slower',
-    label: 'cepstral, off, atk100/rel1500',
-    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 1500 },
-    solveFor: 3,
-  },
-  {
-    slug: 'cepstral-blunt',
-    label: 'cepstral, off, sharpness 0.2',
-    params: { preserveHarmonics: false, sharpness: 0.2 },
-    solveFor: 3,
-  },
-  {
     slug: 'peak',
     label: 'peak-envelope, no mask',
     params: { refMode: 'peak', preserveHarmonics: false, depth: 1 },
+    solveFor: 3,
+  },
+  {
+    slug: 'peak-slow',
+    label: 'peak-envelope + slow ballistics',
+    params: {
+      refMode: 'peak', preserveHarmonics: false, depth: 1,
+      attackMs: 100, releaseMs: 500,
+    },
     solveFor: 3,
   },
 ]

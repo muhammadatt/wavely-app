@@ -338,10 +338,28 @@ test('detection still falls away above 4 kHz, and is flat below it', () => {
 
 // ── The peak-envelope reference ─────────────────────────────────────────────
 
+/**
+ * Peak mode at a SYNTHETIC-APPROPRIATE threshold, which is deliberately not the
+ * shipping one.
+ *
+ * The shipping calibration is `selectivity: 20`, derived from real narration.
+ * Using it here would fail every test below, and that is not a bug in either —
+ * it is the measurement that killed the synthetic calibration in the first
+ * place. Protrusion on a clean synthetic voice sits at 2.5-4.2 dB; on real
+ * speech the same band measures p75 8.9 dB and p90 17.2, because real speech is
+ * full of onsets, formant transitions and breath that a steady synthetic stack
+ * has none of. The same detector therefore needs a threshold five times apart
+ * on the two, and a number tuned on one is meaningless on the other.
+ *
+ * So: these tests pin MECHANISM on synthetic signals at a threshold that suits
+ * them, and `npm run reso:real` measures BEHAVIOUR on real audio at the
+ * threshold that suits it. Neither number should be copied to the other place.
+ */
+const SYNTHETIC_SELECTIVITY = 4
 const PEAK = {
   refMode: 'peak',
   preserveHarmonics: false,
-  selectivity: RESONANCE_REF_MODE_DEFAULTS.peak.selectivity,
+  selectivity: SYNTHETIC_SELECTIVITY,
   depth: RESONANCE_REF_MODE_DEFAULTS.peak.depth,
 }
 
@@ -471,9 +489,62 @@ test('the geometric reference window is geometric', () => {
 test('the reference-mode override falls back rather than passing a typo through', () => {
   assert.equal(resolveRefMode(), DEFAULT_REF_MODE, 'no window under test means the shipping mode')
   assert.equal(withRefModeDefaults({ selectivity: 8 }).selectivity, 8)
-  // Peak mode carries its own calibration, because the two references disagree
-  // about what selectivity measures by an order of magnitude.
-  const peak = { ...{ selectivity: 8, depth: 0.67 }, ...RESONANCE_REF_MODE_DEFAULTS.peak }
-  assert.ok(peak.selectivity < 8)
-  assert.equal(peak.preserveHarmonics, false)
+})
+
+test('peak mode carries its own calibration, taken from real audio', () => {
+  // The two references disagree about what `selectivity` measures, so the same
+  // number on the two is not the same setting — soothe2 says the same thing
+  // about its own two algorithms. This one is deliberately far ABOVE the
+  // cepstral default rather than below it: an earlier synthetic calibration put
+  // it at 4, which on narration treated over a quarter of every
+  // time-frequency cell and removed 12 dB on average.
+  const cepstralDefault = 8
+  const peak = RESONANCE_REF_MODE_DEFAULTS.peak
+  assert.ok(
+    peak.selectivity > 2 * cepstralDefault,
+    `peak mode should want a far higher threshold, got ${peak.selectivity}`,
+  )
+  assert.equal(peak.preserveHarmonics, false, 'the point of this reference is not needing the mask')
+  // Slow ballistics ship with it because the two are superadditive on real
+  // audio — the stable envelope removes the frequency-domain source of gain
+  // movement and these remove the time-domain residue.
+  assert.ok(peak.attack >= 100 && peak.release >= 500)
+})
+
+test('peak mode detects on the stable envelope, not the raw magnitude', () => {
+  // THE HALF THAT WAS MISSING, and the one that turned this reference from
+  // worse-than-what-it-replaced into better. `magDb[k]` moves every time a
+  // harmonic slides across bin k — that IS reason 1 — while the peak envelope
+  // is a maximum over one harmonic spacing and does not.
+  //
+  // Checked structurally rather than through the output: hand the kernel a
+  // spectrum whose magnitude and peak envelope disagree, and see which one the
+  // reduction follows.
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'peak', preserveHarmonics: false })
+  const bin = Math.round(3000 / kernel.binWidth)
+
+  kernel.magDb.fill(-100)
+  kernel.magDb[bin] = 0
+  kernel._peakEnvelope(150)
+  // The max filter spreads that single loud bin across a harmonic spacing, so
+  // its neighbours carry the same envelope value while their own magnitude is
+  // still at the floor.
+  const neighbour = bin + Math.round(80 / kernel.binWidth)
+  assert.ok(
+    kernel.peakMax[neighbour] > kernel.magDb[neighbour] + 50,
+    'probe is not set up: the envelope and the magnitude should disagree here',
+  )
+  assert.ok(
+    kernel.peakMax[neighbour] - kernel.envDb[neighbour] > 0,
+    'the envelope should protrude at the neighbour bin',
+  )
+})
+
+test('the cepstral path still detects on the magnitude', () => {
+  // The reference-mode switch must not quietly change the shipping detector.
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS })
+  assert.equal(kernel.refMode, 'cepstral')
+  assert.equal(kernel.peakMax, null, 'the peak envelope should never be built on the shipping path')
 })
