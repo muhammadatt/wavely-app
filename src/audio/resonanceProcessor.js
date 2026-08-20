@@ -59,13 +59,38 @@
  *     labels. Silent frames get a zero target so the IIR decays through them.
  *   - The lifter cutoff is `min(sharpness target, 0.40 * sr / F0)` rather than
  *     the server's `0.40 * sr / F0` outright, and the spread kernel is a
- *     constant width in octaves rather than a constant count of bins. Both are
- *     the same correction: the server's constants make the detector's
- *     resolution a function of the speaker's pitch and of where on the
- *     frequency axis a defect happens to sit. Measured on a broad +10 dB hump
- *     swept 500 Hz → 6 kHz, the server's geometry removes 25.2 / 15.4 / 10.2 /
- *     6.3 dB; this one removes 11.3 / 12.3 / 10.2 / 9.6. `server/scripts/
- *     resonance_suppressor.py` still has the original geometry.
+ *     constant width in octaves rather than a constant count of bins. Both aim
+ *     at the same defect: the server's constants make the detector's resolution
+ *     a function of the speaker's pitch and of where on the frequency axis a
+ *     defect happens to sit. `server/scripts/resonance_suppressor.py` still has
+ *     the original geometry.
+ *
+ *     WHAT THAT ACTUALLY BOUGHT, RESTATED — the first version of this note
+ *     claimed more than the measurement supports, because it was taken on a
+ *     carrier whose harmonics stop at 6 kHz, so its top probe sat on the last
+ *     harmonic rather than on the material. On a full-spectrum carrier, a broad
+ *     +10 dB hump swept 500 Hz / 1.2 / 2.5 / 4 / 6.4 kHz:
+ *
+ *       old geometry   22.9  14.5   8.2   6.6   1.6   (spread 21.2 dB)
+ *       this one       10.4  10.5   8.3   8.0   3.2   (spread  7.3 dB)
+ *
+ *     So: flat to within 2.5 dB across 500 Hz–4 kHz, which is the claim, and
+ *     STILL FALLING ABOVE 4 kHz — 8.0 dB at 4 kHz against 3.2 at 6.4. The
+ *     residue is the cepstral reference itself, whose own smoothing scale is
+ *     uniform in Hz however the spread kernel is shaped, and which tracks the
+ *     noise floor upward where the harmonics are weak. The spread kernel was
+ *     the half of this that a spread kernel can fix.
+ *
+ *     THE PITCH COUPLING IS LIKEWISE ONLY HALF FIXED, and the half that
+ *     remains is the larger one. Clamping the lifter removed the coupling
+ *     through the cutoff; end to end, on one hump at 2.5 kHz with nothing
+ *     changing but the carrier's pitch, removal still runs 0.10 dB at F0 90 to
+ *     4.97 at F0 260 — a 50x spread, against 38x before the change. F0 90 and
+ *     F0 150 now run an IDENTICAL cutoff and still differ 22x, so there is a
+ *     second coupling, through how much protrudes above an inter-harmonic-floor
+ *     reference as the comb thins. It is a property of where the reference
+ *     sits, not of the cutoff, and no cutoff rule addresses it. See
+ *     `test/dsp/resonancePitch.test.js`, which pins all of this.
  *   - `mix` and `trimDb` do not exist on the server, where the stage is one
  *     link in a chain that has its own gain staging. Here it is a plugin a
  *     person points at a selection, and suppression only ever removes energy.
