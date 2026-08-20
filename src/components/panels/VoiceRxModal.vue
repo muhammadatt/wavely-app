@@ -41,6 +41,18 @@ onMounted(() => {
 
 const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
 
+/**
+ * Plot height, opened at 200 px like every other faceplate and grown by
+ * FloatingWindow's corner grip from there. Shared with the meters either
+ * side for the same reason EqModal shares its PLOT_HEIGHT with them — see
+ * that file. Everything above the plot (the findings list, the "also found"
+ * block) and everything below the role columns (the apply bar) keeps its own
+ * natural height; only the display and its meters grow.
+ */
+const PLOT_H_BASE = 200
+const heightDelta = ref(0)
+const plotHeight = computed(() => PLOT_H_BASE + heightDelta.value)
+
 const activeBandCount = computed(() => vox.activeBands.value.length)
 
 const atRecommendedCount = computed(() =>
@@ -117,6 +129,8 @@ async function applyAndClose() {
     brand-lead="VOICE"
     brand-tail="RX"
     :engaged="vox.eqPreview.value"
+    resizable
+    @update:height-delta="heightDelta = $event"
     @toggle-engaged="vox.togglePreview()"
     @close="close"
   >
@@ -327,7 +341,7 @@ async function applyAndClose() {
       </p>
 
       <div class="flex gap-[16px]">
-        <LevelMeter :levels="vox.inputLevels.value" label="IN" :height="200" />
+        <LevelMeter :levels="vox.inputLevels.value" label="IN" :height="plotHeight" />
 
         <div class="flex-1 min-w-0">
           <VoiceRxView
@@ -335,11 +349,12 @@ async function applyAndClose() {
             :accent="ACCENT"
             :sample-rate="sampleRate"
             :marked-region="hoveredRowRegion"
+            :plot-height="plotHeight"
             @update:hovered-region="hoveredPlotRegion = $event"
           />
         </div>
 
-        <LevelMeter :levels="vox.outputLevels.value" label="OUT" :height="200" />
+        <LevelMeter :levels="vox.outputLevels.value" label="OUT" :height="plotHeight" />
       </div>
 
       <div class="flex items-center justify-end mt-[14px] gap-[14px]">

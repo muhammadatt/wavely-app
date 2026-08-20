@@ -42,14 +42,76 @@ const props = defineProps({
   // i.e. effects that preview in real time.
   showEngage: { type: Boolean, default: true },
   engaged: { type: Boolean, default: false },
+
+  /**
+   * Let the user drag a handle to make the window — and whatever real-time
+   * display it holds — bigger. Off by default: most of these faceplates are
+   * hand-fitted to their controls at one width, and a resize handle on a
+   * window with nothing that benefits from the extra room would just be a way
+   * to break the layout. Opt in on the handful that hold a graphical display
+   * worth enlarging (ResoTame, the parametric EQ, VoiceRx).
+   */
+  resizable: { type: Boolean, default: false },
+  /**
+   * Floor for a drag-resize. Defaults to the window's own opening width —
+   * this is an EXPAND handle, not a shrink one, so the layout it was fitted to
+   * is never the thing at risk.
+   */
+  minWidth: { type: Number, default: null },
+  /**
+   * Ceiling on how much taller a drag-resize can ask a caller's content to
+   * grow, in pixels. FloatingWindow does not know what "taller" means to the
+   * plugin inside it — see heightDelta below — so this is the one guard
+   * against a runaway drag it can enforce on the caller's behalf.
+   */
+  maxHeightDelta: { type: Number, default: 360 },
 })
 
-const emit = defineEmits(['toggle-engaged', 'close'])
+const emit = defineEmits([
+  'toggle-engaged', 'close',
+  /**
+   * How much extra height a resize drag has asked for, in pixels. Emitted on
+   * mount (0, or whatever was remembered) and on every subsequent drag.
+   *
+   * FloatingWindow does not resize its own body to this number — the body
+   * already grows to fit its content, up to the viewport, and scrolls beyond
+   * that (see bodyMaxHeight). What "taller" means is entirely the caller's:
+   * usually adding this figure to a plot's own height prop, which is what
+   * actually makes the content taller and lets the existing grow-then-scroll
+   * behaviour take it from there.
+   */
+  'update:heightDelta',
+])
 
-const { focusWindow, closeWindow, savePosition, getPosition } = useWindows()
+const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
 
-const width = computed(() => props.width)
 const accent = computed(() => props.accent)
+
+// The window's own opening width unless a resize has changed it. A ref, not a
+// computed off the prop, because a resize drag has to be able to win —
+// nothing about a caller re-rendering with the same `width` prop should snap
+// a manually-widened window back down.
+const boxWidth = ref(props.width)
+/** See the `update:heightDelta` emit above. */
+const heightDelta = ref(0)
+const resizing = ref(false)
+let resizeStartX = 0
+let resizeStartY = 0
+let resizeStartWidth = 0
+let resizeStartDelta = 0
+
+const minWidthPx = computed(() => props.minWidth ?? props.width)
+
+function clampWidth(w) {
+  // Leaves the same margin clampToViewport does, so a fully-expanded window
+  // still reads as a window rather than a panel welded to the screen edge.
+  const maxW = Math.max(minWidthPx.value, window.innerWidth - pos.value.x - 20)
+  return Math.min(Math.max(minWidthPx.value, w), maxW)
+}
+
+function clampHeightDelta(d) {
+  return Math.min(props.maxHeightDelta, Math.max(0, d))
+}
 
 // The faceplate is a near-black tinted toward the plugin's accent. Keeping the
 // tint this weak is what lets six different hues still read as one product.
@@ -120,12 +182,22 @@ let previouslyFocused = null
 const label = computed(() => `${props.brandLead} ${props.brandTail}`.trim())
 
 onMounted(() => {
+  // A window that was resized before is reopened at the size it was left, the
+  // same courtesy the position gets. Restored before the position fallback
+  // below, which reads it for the first-open case.
+  const rememberedSize = getSize(props.windowId)
+  if (rememberedSize) {
+    boxWidth.value = clampWidth(rememberedSize.width ?? props.width)
+    heightDelta.value = clampHeightDelta(rememberedSize.heightDelta ?? 0)
+  }
+  emit('update:heightDelta', heightDelta.value)
+
   const remembered = getPosition(props.windowId)
   if (remembered) {
     pos.value = { ...remembered }
   } else {
     // First open: rest near the top-right so the waveform stays visible.
-    pos.value = { x: Math.max(16, window.innerWidth - width.value - 40), y: props.top }
+    pos.value = { x: Math.max(16, window.innerWidth - boxWidth.value - 40), y: props.top }
   }
   clampToViewport()
 
@@ -175,7 +247,7 @@ function onViewportResize() {
 function clampToViewport() {
   const maxX = window.innerWidth - 120
   const maxY = window.innerHeight - 60
-  pos.value.x = Math.min(Math.max(-width.value + 120, pos.value.x), maxX)
+  pos.value.x = Math.min(Math.max(-boxWidth.value + 120, pos.value.x), maxX)
   pos.value.y = Math.min(Math.max(0, pos.value.y), maxY)
 }
 
@@ -199,6 +271,54 @@ function onDragEnd(e) {
   try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
   clampToViewport()
   savePosition(props.windowId, pos.value)
+}
+
+/**
+ * The corner grip: one drag, two numbers.
+ *
+ * Horizontal movement is this component's own business — it is the frame's
+ * width, clamped and applied exactly like a drag. Vertical movement is not:
+ * FloatingWindow has no notion of what "taller" means to whatever is in the
+ * slot, so it only tracks and reports the raw pixel delta (see the
+ * `update:heightDelta` emit) and lets the body's existing grow-then-scroll
+ * behaviour do the rest once the caller acts on it.
+ */
+function onResizeStart(e) {
+  // Propagation is stopped on this handler (see the template), so the frame's
+  // own pointerdown-raises-it wiring never runs for this press.
+  raise()
+  resizing.value = true
+  resizeStartX = e.clientX
+  resizeStartY = e.clientY
+  resizeStartWidth = boxWidth.value
+  resizeStartDelta = heightDelta.value
+  e.currentTarget.setPointerCapture(e.pointerId)
+}
+
+function onResizeMove(e) {
+  if (!resizing.value) return
+  boxWidth.value = clampWidth(resizeStartWidth + (e.clientX - resizeStartX))
+  const nextDelta = clampHeightDelta(resizeStartDelta + (e.clientY - resizeStartY))
+  if (nextDelta !== heightDelta.value) {
+    heightDelta.value = nextDelta
+    emit('update:heightDelta', nextDelta)
+  }
+}
+
+function onResizeEnd(e) {
+  if (!resizing.value) return
+  resizing.value = false
+  try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
+  clampToViewport()
+  saveSize(props.windowId, { width: boxWidth.value, heightDelta: heightDelta.value })
+}
+
+/** Back to the size this opened at — the same gesture every knob here resets with. */
+function resetSize() {
+  boxWidth.value = props.width
+  heightDelta.value = 0
+  emit('update:heightDelta', 0)
+  saveSize(props.windowId, { width: boxWidth.value, heightDelta: 0 })
 }
 
 // Touching or tabbing into the frame raises it. Without this, two open windows
@@ -232,13 +352,13 @@ function requestClose() {
     :aria-label="label"
     tabindex="-1"
     :style="{
-      left: pos.x + 'px', top: pos.y + 'px', width: width + 'px',
+      left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px',
       zIndex: z,
       background,
       boxShadow: '0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.05)',
       fontFamily: `'Inter',system-ui,sans-serif`,
-      animation: dragging ? 'none' : 'pluginBounceIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both',
-      userSelect: dragging ? 'none' : 'auto',
+      animation: dragging || resizing ? 'none' : 'pluginBounceIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both',
+      userSelect: dragging || resizing ? 'none' : 'auto',
     }"
     @pointerdown="raise"
     @focusin="raise"
@@ -348,6 +468,39 @@ function requestClose() {
         >MORE ↓</span>
       </div>
     </div>
+
+    <!--
+      Expand handle — grow-only, hence one icon rather than the usual
+      four-way resize cursor: this widens the frame and asks the caller's
+      content to grow taller with it, and never the reverse. A window fitted
+      by hand to its controls has no shrink case worth offering; the only
+      failure mode a smaller-than-designed version would have is controls
+      overlapping each other.
+
+      Sits on the frame itself, not inside the scrolling body — a handle that
+      scrolled out of reach the moment content grew past the fold would defeat
+      the thing it exists to do.
+    -->
+    <button
+      v-if="resizable"
+      type="button"
+      class="win-resize absolute flex items-end justify-end cursor-nwse-resize"
+      style="width:22px;height:22px;right:3px;bottom:3px;touch-action:none"
+      aria-label="Drag to expand the display. Double-click to reset to the default size."
+      title="Drag to expand · double-click to reset"
+      @pointerdown.stop="onResizeStart"
+      @pointermove.stop="onResizeMove"
+      @pointerup.stop="onResizeEnd"
+      @pointercancel.stop="onResizeEnd"
+      @dblclick.stop="resetSize"
+    >
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" style="margin:0 4px 4px 0">
+        <g :stroke="`color-mix(in srgb, ${accent} 70%, #ffffff)`" stroke-width="1.5" stroke-linecap="round" opacity="0.55">
+          <line x1="9" y1="1" x2="1" y2="9" />
+          <line x1="9" y1="5" x2="5" y2="9" />
+        </g>
+      </svg>
+    </button>
   </div>
 </template>
 
@@ -405,6 +558,25 @@ function requestClose() {
 .win-close:focus-visible {
   outline: 2px solid #7fe9f6;
   outline-offset: 2px;
+}
+
+/* Quiet until asked for — a corner grip drawn at full strength on every
+   faceplate would compete with the controls it sits beside for no reason
+   most of a session, since it is only ever touched once in a while. */
+.win-resize {
+  background: transparent;
+  border: none;
+  padding: 0;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+.win-resize:hover,
+.win-resize:focus-visible {
+  opacity: 1;
+}
+.win-resize:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: -2px;
 }
 
 @keyframes pluginBounceIn {
