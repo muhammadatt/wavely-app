@@ -296,6 +296,59 @@ export function grFractionToDb(fraction, fullScaleDb) {
 }
 
 /**
+ * Brightness law for an event LAMP, as opposed to a gain-reduction SCALE.
+ *
+ * WHY THE LAMP DOES NOT USE grFraction, which is what it shipped with. The
+ * argument for reusing it was consistency: "half lit here and half way along
+ * the bar there mean the same reduction". That argument is wrong about what a
+ * lamp is. A bar is read against its own engraved face, so its law has to be
+ * the one the engraving assumes; a lamp has no face, is never seen beside a
+ * compressor's meter, and answers one question — did it just do something.
+ * Consistency with an instrument the user cannot see costs nothing to break.
+ *
+ * WHAT IT COST TO KEEP was reported from use: the lamp is barely visible
+ * unless the stage is driven hard, and shows almost nothing when it is doing
+ * the job it exists for. grFraction is a voltage law, near-linear in amplitude
+ * at small reductions, and on a 6 dB full scale that puts the readings this
+ * stage actually produces at the very bottom of its range: 0.3 dB — the median
+ * of the blocks that clip on real narration — lands at 3.9% lit, and 1 dB at
+ * 19%. Against the faceplate those are an unlit fixture.
+ *
+ * The log law expands exactly that region. On the same 6 dB scale:
+ *
+ *            0.2   0.3   0.5    1     2     3     4    6 dB
+ *   voltage  3.9   5.9   9.7   19    37    54    70   100 %
+ *   this     18    24    34    50    68    80    88   100 %
+ *
+ * so an isolated peak taking half a dB is a third lit rather than a tenth, and
+ * the 1-to-6 dB span the stage is actually steered over still occupies half
+ * the range rather than being crushed into the top.
+ *
+ * K sets how hard the bottom is expanded. 4 keeps a visible step between 1, 3
+ * and 6 dB (50 / 80 / 100%); much above it the top three quarters of the
+ * useful range start to flatten into each other.
+ */
+export const LAMP_CURVE_K = 4
+
+/** Lamp brightness, 0 at rest to 1 at full scale. */
+export function lampFraction(db, fullScaleDb) {
+  const amount = Math.min(Math.abs(db), fullScaleDb)
+  return Math.log(1 + LAMP_CURVE_K * amount) / Math.log(1 + LAMP_CURVE_K * fullScaleDb)
+}
+
+/*
+ * There is deliberately NO lampFractionToDb.
+ *
+ * One existed, and the numeral beside the lamp was derived through it from the
+ * held brightness. That inverse clamps at full scale — it has to, the forward
+ * law does — so the moment full scale dropped below the kernel's own 6 dB
+ * bound, the number would have printed the full-scale value for every reading
+ * above it while the light was correct. The lamp now holds dB directly and
+ * derives brightness from that, which needs no inverse and cannot clamp the
+ * number. Reintroducing one would put the hazard back within reach.
+ */
+
+/**
  * Engraving vocabulary. Only the round numbers get numerals; the rest are bare
  * ticks, because past 10 dB the curve crowds them together faster than 8px
  * type can be read. Full scale is always numbered, whatever it is.

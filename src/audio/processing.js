@@ -9,6 +9,12 @@ import {
   FET1176_LATENCY_SAMPLES,
   toKernelParams as toFET1176KernelParams,
 } from './effects/fet1176Compressor.js'
+import { ensureSoftClipperWorklet } from './softClipperWorkletLoader.js'
+import {
+  SOFT_CLIPPER_DEFAULTS,
+  SOFT_CLIPPER_LATENCY_SAMPLES,
+  toKernelParams as toSoftClipperKernelParams,
+} from './effects/softClipper.js'
 import { ensureAirBandWorklet } from './airBandWorkletLoader.js'
 import {
   AIR_BAND_DEFAULTS,
@@ -413,6 +419,16 @@ export function applyFET1176Region(segments, start, end, params, sampleRate, cha
     processorName: 'fet1176-processor',
     kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
     latencySamples: FET1176_LATENCY_SAMPLES,
+  })
+}
+
+/** Apply the Adaptive Soft Clipper to a region. */
+export function applySoftClipperRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureSoftClipperWorklet,
+    processorName: 'soft-clipper-processor',
+    kernelParams: toSoftClipperKernelParams({ ...SOFT_CLIPPER_DEFAULTS, ...params }),
+    latencySamples: SOFT_CLIPPER_LATENCY_SAMPLES,
   })
 }
 
