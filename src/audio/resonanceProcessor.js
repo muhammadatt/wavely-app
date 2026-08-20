@@ -356,6 +356,32 @@ const DEFAULT_PITCH_MIN_HZ = 70
 const DEFAULT_PITCH_MAX_HZ = 400
 
 /**
+ * Voicing gate and hold for the pitch this effect acts on.
+ *
+ * EVERYTHING PITCH-DEPENDENT HERE IS ONLY AS GOOD AS THIS ESTIMATE — the
+ * harmonic protection mask lands on bins chosen by it, and the peak-envelope
+ * reference sizes its max filter from it — and at the tracker's default gate of
+ * 0.1 the estimate is frequently not an estimate at all. Measured on 46 s of
+ * narration against an independent check of whether the harmonic comb is even
+ * measurable: 14.0% of consecutive voiced frames jumped by more than a tritone,
+ * and of the frames scraping in just above the default gate, 2% had a comb
+ * clear enough to verify.
+ *
+ * 0.7 with a 16-frame hold takes those jumps to 0.8% while still giving 90% of
+ * active frames a pitch to work with — against 99% before, and against 69% for
+ * the same gate with no hold. THE HOLD IS THE HALF THAT MATTERS: a higher gate
+ * on its own converts a bad pitch into no pitch, and no pitch means no mask,
+ * which is a worse failure than a slightly stale one. 16 frames is 186 ms at
+ * 44.1 kHz — long enough to carry across a consonant inside a word, short
+ * enough that it cannot survive a pause.
+ *
+ * ONE FILE, ONE NARRATOR. The direction is well evidenced and the exact numbers
+ * are not; a second voice is the thing to check before treating them as settled.
+ */
+const PITCH_MIN_RATIO = 0.7
+const PITCH_HOLD_FRAMES = 16
+
+/**
  * Level that reads as 0 on the displayed spectrum, in dB of raw bin magnitude.
  *
  * The FFT is unnormalised and the analysis window is a periodic Hann, so a
@@ -410,6 +436,8 @@ export class ResonanceKernel {
       defaultF0: null,
       minHz: DEFAULT_PITCH_MIN_HZ,
       maxHz: DEFAULT_PITCH_MAX_HZ,
+      minRatio: PITCH_MIN_RATIO,
+      holdFrames: PITCH_HOLD_FRAMES,
     })
 
     // One STFT per channel, plus — on anything wider than mono — one more fed

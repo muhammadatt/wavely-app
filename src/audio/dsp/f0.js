@@ -33,6 +33,22 @@ import { getFFT } from './fft.js'
 
 export const F0_MIN_HZ = 70.0
 export const F0_MAX_HZ = 400.0
+/**
+ * Correlation ratio a frame must clear to count as pitched.
+ *
+ * KEPT AT THE SERVER'S VALUE AS THE DEFAULT, and it is far too permissive for
+ * anything that acts on the pitch it returns. Measured on 46 s of narration
+ * against an independent check of whether the harmonic comb is even
+ * measurable: of the frames landing in ratio 0.1-0.2, TWO PERCENT have a comb
+ * clear enough to verify, against 71% of frames above 0.7. Everything in
+ * between is the tracker reporting a confident pitch for a frame that does not
+ * have one, and the estimate there is close to arbitrary.
+ *
+ * Not lowered globally because three other consumers are calibrated against
+ * this number (voicerx/analysis.js, which already works around the same
+ * permissiveness with its own energy margin, voicerx/v2/envelope.js, and
+ * humDetect.js). Callers that act on the pitch pass their own `minRatio`.
+ */
 export const MIN_CORR_RATIO = 0.1
 
 /** Rolling-median window, matching sibilance_detector.py's F0_ROLLING_WINDOW_SIZE. */
@@ -63,6 +79,8 @@ export class F0Tracker {
    * @param {number} [opts.defaultF0=null] seed used before the first pitched frame
    * @param {number} [opts.minHz=70] low end of the pitch search
    * @param {number} [opts.maxHz=400] high end of the pitch search
+   * @param {number} [opts.minRatio=0.1] correlation ratio required to be pitched
+   * @param {number} [opts.holdFrames=0] frames to carry the last confident pitch
    */
   constructor({
     sampleRate,
@@ -71,6 +89,8 @@ export class F0Tracker {
     defaultF0 = null,
     minHz = F0_MIN_HZ,
     maxHz = F0_MAX_HZ,
+    minRatio = MIN_CORR_RATIO,
+    holdFrames = 0,
   }) {
     this.sampleRate = sampleRate
     this.frameSize = frameSize
@@ -89,9 +109,14 @@ export class F0Tracker {
     this._centred = new Float64Array(frameSize)
     this._corr = new Float64Array(this.corrSize)
 
+    this.minRatio = minRatio
+    this.holdFrames = holdFrames
+
     this._history = []
     this._sorted = []
     this.lastF0 = null
+    this._heldF0 = 0
+    this._sinceConfident = Infinity
   }
 
   /**
@@ -126,6 +151,8 @@ export class F0Tracker {
   reset() {
     this._history.length = 0
     this.lastF0 = null
+    this._heldF0 = 0
+    this._sinceConfident = Infinity
   }
 
   /**
@@ -140,6 +167,18 @@ export class F0Tracker {
    * in for on the server, labels fricatives and breaths as speech while this
    * returns false for them. Callers that gate audible behaviour on speech
    * presence must not use this flag for it.
+   *
+   * `held` marks a frame whose pitch was CARRIED FROM AN EARLIER FRAME rather
+   * than measured on this one — see `holdFrames`. The hold exists because
+   * raising `minRatio` on its own is a bad trade for anything that acts on the
+   * pitch: it converts a badly-estimated pitch into no pitch, and for the
+   * resonance suppressor that means harmonic protection switching off in the
+   * middle of a word, which is worse than a slightly stale mask. Measured on
+   * narration, a gate of 0.7 alone takes the share of active frames carrying
+   * any pitch from 99% to 69%; the same gate with a 16-frame hold puts it back
+   * to 90% while frame-to-frame jumps over a tritone fall from 14.0% to 0.8%.
+   *
+   * A held frame is not a measurement and does not enter the rolling median.
    */
   estimate(frame, energyGate = true) {
     const n = this.frameSize
@@ -178,9 +217,18 @@ export class F0Tracker {
     }
 
     const ratio = corr0 > 0 ? peak / corr0 : 0
-    const pitched = peakLag > 0 && peak > MIN_CORR_RATIO * corr0 && energyGate
-    if (!pitched) {
-      return { f0: null, pitched: false, ratio }
+    const confident = peakLag > 0 && peak > this.minRatio * corr0 && energyGate
+    if (!confident) {
+      this._sinceConfident++
+      if (
+        this.holdFrames > 0
+        && this._heldF0 > 0
+        && this._sinceConfident <= this.holdFrames
+        && energyGate
+      ) {
+        return { f0: this._heldF0, pitched: true, ratio, held: true }
+      }
+      return { f0: null, pitched: false, ratio, held: false }
     }
 
     // Parabolic interpolation around the peak, guarded exactly as the Python is.
@@ -197,10 +245,12 @@ export class F0Tracker {
     }
 
     this.lastF0 = f0
+    this._heldF0 = f0
+    this._sinceConfident = 0
     this._history.push(f0)
     if (this._history.length > this.medianWindow) this._history.shift()
 
-    return { f0, pitched: true, ratio }
+    return { f0, pitched: true, ratio, held: false }
   }
 
   /**

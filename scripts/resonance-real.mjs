@@ -75,6 +75,24 @@ const CONFIGS = [
     solveFor: 3,
   },
   {
+    slug: 'cepstral-slow',
+    label: 'cepstral, off, slow ballistics',
+    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 500 },
+    solveFor: 3,
+  },
+  {
+    slug: 'cepstral-slower',
+    label: 'cepstral, off, atk100/rel1500',
+    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 1500 },
+    solveFor: 3,
+  },
+  {
+    slug: 'cepstral-blunt',
+    label: 'cepstral, off, sharpness 0.2',
+    params: { preserveHarmonics: false, sharpness: 0.2 },
+    solveFor: 3,
+  },
+  {
     slug: 'peak',
     label: 'peak-envelope, no mask',
     params: { refMode: 'peak', preserveHarmonics: false, depth: 1 },
@@ -151,9 +169,9 @@ function writeWav(file, channelData, sampleRate) {
 }
 
 /** Pitch contour, activity, and how much the tracker can be trusted on it. */
-function analysePitch(x, sampleRate) {
+function analysePitch(x, sampleRate, gate = {}) {
   const tracker = new F0Tracker({
-    sampleRate, frameSize: FRAME, defaultF0: null, minHz: 70, maxHz: 400,
+    sampleRate, frameSize: FRAME, defaultF0: null, minHz: 70, maxHz: 400, ...gate,
   })
   const frame = new Float32Array(FRAME)
   const f0 = []
@@ -279,10 +297,16 @@ function run(file) {
     `\n  pitch: ${(100 * pitch.voicedFraction).toFixed(0)}% voiced, `
     + `F0 p5 ${pitch.f0p5.toFixed(0)} / median ${pitch.f0median.toFixed(0)} / p95 ${pitch.f0p95.toFixed(0)} Hz`,
   )
+  // Reported under both gates: the effect no longer uses the tracker's default,
+  // so quoting only the default would describe an estimate nothing consumes.
+  const gated = analysePitch(x, sampleRate, { minRatio: 0.7, holdFrames: 16 })
   console.log(
-    `  TRACKER HEALTH: ${(100 * pitch.octaveJumpRate).toFixed(1)}% octave jumps, `
-    + `${(100 * pitch.wildJumpRate).toFixed(1)}% jumps over a tritone`
-    + (pitch.wildJumpRate > 0.1 ? '   <- both mechanisms are built on this estimate' : ''),
+    `  TRACKER HEALTH   default gate: ${(100 * pitch.octaveJumpRate).toFixed(1)}% octave jumps, `
+    + `${(100 * pitch.wildJumpRate).toFixed(1)}% over a tritone`,
+  )
+  console.log(
+    `                   as the effect runs it: ${(100 * gated.octaveJumpRate).toFixed(1)}% / `
+    + `${(100 * gated.wildJumpRate).toFixed(1)}%`,
   )
 
   // Only frames with a usable velocity: an octave error is a tracking failure,

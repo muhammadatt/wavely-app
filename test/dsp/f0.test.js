@@ -3,7 +3,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { F0Tracker, F0_MIN_HZ, F0_MAX_HZ } from '../../src/audio/dsp/f0.js'
+import { F0Tracker, F0_MIN_HZ, F0_MAX_HZ, MIN_CORR_RATIO } from '../../src/audio/dsp/f0.js'
 
 const SR = 44100
 const FRAME = 2048
@@ -175,4 +175,105 @@ test('reset clears history', () => {
   assert.ok(Math.abs(t.median - 200) < 5)
   t.reset()
   assert.equal(t.median, 60)
+})
+
+// ── Voicing gate and hold ───────────────────────────────────────────────────
+
+/**
+ * Noisy signal with a weak periodic component — the kind of frame the default
+ * gate admits and cannot actually measure.
+ */
+function weaklyPitched(f0, periodicAmp, seconds = 0.5) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  let s = 31337
+  for (let i = 0; i < n; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff
+    out[i] = 0.3 * (s / 0x3fffffff - 1) + periodicAmp * Math.sin((2 * Math.PI * f0 * i) / SR)
+  }
+  return out
+}
+
+test('the default gate is unchanged, so other consumers are untouched', () => {
+  assert.equal(MIN_CORR_RATIO, 0.1)
+  const t = makeTracker()
+  assert.equal(t.minRatio, MIN_CORR_RATIO)
+  assert.equal(t.holdFrames, 0)
+})
+
+test('a stricter gate rejects frames the default one admits', () => {
+  // Measured on narration: of the frames scraping in just above the default
+  // gate, 2% had a harmonic comb clear enough to verify independently, against
+  // 71% of frames above 0.7. The gate is what separates them.
+  const sig = weaklyPitched(150, 0.15)
+  const frame = new Float32Array(FRAME)
+  frame.set(sig.subarray(0, FRAME))
+
+  const lenient = makeTracker().estimate(frame)
+  const strict = makeTracker({ minRatio: 0.7 }).estimate(frame)
+  assert.ok(lenient.ratio < 0.7, `probe is not weak enough: ratio ${lenient.ratio}`)
+  assert.equal(lenient.pitched, true, 'the default gate should admit this frame')
+  assert.equal(strict.pitched, false, 'a 0.7 gate should reject it')
+})
+
+test('the hold carries the last confident pitch, and only so far', () => {
+  // THE HOLD IS THE HALF THAT MATTERS. A higher gate on its own converts a bad
+  // pitch into NO pitch, and for the resonance suppressor no pitch means no
+  // harmonic protection — switching the mask off mid-word is a worse failure
+  // than a slightly stale mask.
+  const t = makeTracker({ minRatio: 0.7, holdFrames: 3 })
+  const strong = new Float32Array(FRAME)
+  strong.set(sawFrame(200))
+  const first = t.estimate(strong)
+  assert.equal(first.pitched, true)
+  assert.equal(first.held, false)
+  assert.ok(Math.abs(first.f0 - 200) < 5)
+
+  const weak = new Float32Array(FRAME)
+  weak.set(weaklyPitched(150, 0.15).subarray(0, FRAME))
+  for (let i = 1; i <= 3; i++) {
+    const r = t.estimate(weak)
+    assert.equal(r.pitched, true, `frame ${i} should still be held`)
+    assert.equal(r.held, true)
+    assert.ok(Math.abs(r.f0 - first.f0) < 1e-9, 'the held value should be the last confident one')
+  }
+  const past = t.estimate(weak)
+  assert.equal(past.pitched, false, 'the hold must expire')
+  assert.equal(past.f0, null)
+})
+
+test('the hold does not survive silence', () => {
+  // It is gated on the caller's activity flag, so a pause ends it however many
+  // frames are left. A mask held across a pause would land on the next word's
+  // harmonics, which are not the ones it was built from.
+  const t = makeTracker({ minRatio: 0.7, holdFrames: 100 })
+  const strong = new Float32Array(FRAME)
+  strong.set(sawFrame(200))
+  t.estimate(strong)
+  const silence = new Float32Array(FRAME)
+  assert.equal(t.estimate(silence, false).pitched, false)
+})
+
+test('a held frame is not a measurement and stays out of the median', () => {
+  const t = makeTracker({ minRatio: 0.7, holdFrames: 5 })
+  const strong = new Float32Array(FRAME)
+  strong.set(sawFrame(200))
+  t.estimate(strong)
+  const before = t.median
+  const weak = new Float32Array(FRAME)
+  weak.set(weaklyPitched(150, 0.15).subarray(0, FRAME))
+  t.estimate(weak)
+  t.estimate(weak)
+  assert.equal(t.median, before, 'held frames must not enter the rolling median')
+})
+
+test('reset clears the hold', () => {
+  const t = makeTracker({ minRatio: 0.7, holdFrames: 5 })
+  const strong = new Float32Array(FRAME)
+  strong.set(sawFrame(200))
+  t.estimate(strong)
+  t.reset()
+  const weak = new Float32Array(FRAME)
+  weak.set(weaklyPitched(150, 0.15).subarray(0, FRAME))
+  assert.equal(t.estimate(weak).pitched, false, 'nothing should be left to hold')
 })
