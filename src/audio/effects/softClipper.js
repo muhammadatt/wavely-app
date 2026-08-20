@@ -40,7 +40,9 @@ export const SCOPE_SECONDS = 4
  *   outputTrimDb ±6, post-stage gain match for A/B
  *   thresholdMode 'adaptive' | 'fixed'
  *   fixedThresholdDb, used only in 'fixed' mode
- *   shape 'tanh2' | 'tanh3' | 'tanh4', the knee — see SHAPE_EXPONENT
+ *   shape 'tanh2' | 'tanh3' | 'tanh4', the knee — see SHAPE_EXPONENT and
+ *     SHAPE_ANCHOR_DB (the positions are depth-matched, so this changes
+ *     character rather than how much the stage does)
  */
 export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
 

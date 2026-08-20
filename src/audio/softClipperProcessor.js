@@ -585,15 +585,26 @@ function linToDb(lin) {
 /**
  * KNEE SHAPES — the exponent on tanh, and what it actually buys.
  *
- * THE DEFAULT IS tanh^3, chosen by ear rather than by table. At the shipped
- * knee a peak 3 dB over the threshold loses 0.98 / 0.40 / 0.16 dB across
- * n = 2 / 3 / 4 while a peak 12 dB over loses 5.27 / 4.94 / 4.63 — so the
- * exponent barely touches the deep transients this stage exists for and
- * almost entirely governs what happens to the shallow ones. tanh^2 was the
- * original curve; listening at a fixed threshold found it the most audibly
- * distorted of the three, and tanh^4 the least distorted but the most
- * conspicuous about what remained (see the sparsity note below). tanh^3 is
- * the position that was preferred.
+ * ⚠ READ SHAPE_ANCHOR_DB FIRST. Each shape now carries its OWN knee, set so
+ * all three deliver identical reduction at a peak SHAPE_ANCHOR_DB over the
+ * threshold. Every figure in this block that predates that change describes a
+ * SHARED knee of 7 and is marked; under a shared knee the exponent was a
+ * depth control as much as a shape one, which is the defect the anchor fixes.
+ *
+ * THE DEFAULT IS tanh^3, chosen by ear rather than by table, and it is the
+ * shape the other two are normalised ONTO — so nothing below changes for
+ * anyone who leaves the switch alone. At the shipped knees a peak 3 dB over
+ * the threshold loses 0.61 / 0.40 / 0.27 dB across n = 2 / 3 / 4, a peak 6 dB
+ * over loses 2.01 whichever is selected, and a peak 12 dB over loses
+ * 4.51 / 4.94 / 5.18. The exponent is now what its label claims: where in the
+ * overshoot range the reduction is spent, pivoting about the anchor.
+ *
+ * tanh^2 was the original curve; listening at a fixed threshold found it the
+ * most audibly distorted of the three, and tanh^4 the least distorted but the
+ * most conspicuous about what remained (see the sparsity note below). tanh^3
+ * is the position that was preferred. ⚠ That listening was done at the shared
+ * knee, so most of "least distorted" was "did least" — see the matched-depth
+ * measurement below for how much of the difference survives normalisation.
  *
  * The reduction law is r = rMax * tanh^n(e / knee). Near the threshold
  * tanh(u) ~ u, so r ~ (e/knee)^n and the exponent IS the order of contact: the
@@ -601,8 +612,10 @@ function linToDb(lin) {
  * C1, n = 3 is C2, n = 4 is C3.
  *
  * WHAT IT CHANGES IS SELECTIVITY, NOT DISTORTION, and that ordering was
- * measured rather than assumed. Matched at 3 dB of reduction on a peak 12 dB
- * over threshold (so the shapes are compared doing the same amount of work):
+ * measured rather than assumed. Matched BY HAND at 3 dB of reduction on a peak
+ * 12 dB over threshold (so the shapes are compared doing the same amount of
+ * work) — this table is what SHAPE_ANCHOR_DB later made structural, at an
+ * anchor of 6 dB rather than 12 because that is where real peaks sit:
  *
  *   shape   reduction at +3 dB / +6 / +12 / +18 dB excess   %harmonic energy above H11
  *   tanh^2      0.28    1.03    3.00    4.51                     0.131
@@ -614,17 +627,21 @@ function linToDb(lin) {
  * the real difference: at +3 dB of excess tanh^4 does a SIXTH of what tanh^2
  * does, then catches up and passes it on the big transients.
  *
- * ON A REAL FILE, AT A FIXED HEADROOM, THAT LANDS AS STRICTLY LESS WORK ON
- * BOTH AXES — which is the reading the panel is captioned for. 35 s of real
- * narration, Headroom 8, emphasis 6:
+ * ⚠ PRE-NORMALISATION (shared knee 7). ON A REAL FILE, AT A FIXED HEADROOM,
+ * THAT LANDED AS STRICTLY LESS WORK ON BOTH AXES — which is exactly the defect
+ * SHAPE_ANCHOR_DB exists to remove, and it was captioned as a feature for one
+ * release. 35 s of real narration, Headroom 8, emphasis 6:
  *
  *   shape   peak GR   voiced samples touched   mean GR on those samples
  *   tanh^2   3.15 dB          0.293%                   0.358 dB
  *   tanh^3   2.28 dB          0.195%                   0.216 dB
  *   tanh^4   1.66 dB          0.126%                   0.150 dB
  *
- * ⚠ AND MATCHING THE DEPTH BACK REVERSES IT, which is worth knowing before
- * reaching for the Headroom knob to compensate. Depth is matched by LOWERING
+ * ⚠ PRE-NORMALISATION, AND STILL LIVE AS A WARNING: MATCHING THE DEPTH BACK
+ * BY EAR REVERSES IT. Normalisation matches depth by moving the KNEE, which
+ * leaves the threshold — and therefore the set of touched samples — untouched.
+ * Matching it with the Headroom knob instead does not, and is worth knowing
+ * before reaching for that knob to compensate. Depth is matched by LOWERING
  * Headroom, which lowers the threshold, which brings more samples over the
  * line — and that move dominates the shape's selectivity. Same clip, each
  * shape walked down to tanh^2's 3.15 dB of peak reduction:
@@ -644,8 +661,9 @@ function linToDb(lin) {
  * file settled it in one measurement. Eighth time synthetic material has been
  * too clean to answer the question asked of it.)
  *
- * WHAT THE HIGHER SHAPES SOUND LIKE, and why the two halves of that have
- * different causes. Reported from listening at a FIXED threshold: tanh^3 and
+ * WHAT THE HIGHER SHAPES SOUND LIKE (⚠ pre-normalisation, shared knee 7), and
+ * why the two halves of that have different causes. Reported from listening at
+ * a FIXED threshold: tanh^3 and
  * tanh^4 distort audibly less overall, but the peaks that do cross read as
  * "grindy" where tanh^2 reads as "buzzy". Both are real and neither is the
  * harmonic-tail number above.
@@ -691,8 +709,39 @@ function linToDb(lin) {
  *
  * The tanh family costs nothing here — its bound goes 4.62 / 4.50 / 4.46 dB as
  * n rises, so every shape offered is monotonic with room to spare, and raising
- * n makes the constraint slightly looser rather than tighter. Pinned in
- * `test/dsp/softClipper.test.js` against the shipped KNEE_DB.
+ * n makes the constraint slightly looser rather than tighter. Normalisation
+ * spends part of that room (the knees are 9.08 / 7 / 6.01), and every one
+ * still clears its bound. Pinned in `test/dsp/softClipper.test.js` against the
+ * shipped per-shape knees.
+ *
+ * ── WHAT NORMALISATION COSTS AND BUYS, MEASURED ────────────────────────────
+ *
+ * Reported symptom: LATE sounds cleaner at the same threshold, and it is hard
+ * to tell whether that is character or simply less processing. It was mostly
+ * the latter, and the size of it is the point.
+ *
+ * The honest probe is a signal whose crossings reproduce the real narration
+ * distribution recorded at KNEE_DB (p50 1.2 dB over, p90 3.0, max 6.1). The
+ * corpus's own speechLike() does NOT — at the default its syllables never
+ * reach the threshold at all, so the entire output is one outlier and the
+ * shapes have nothing to redistribute between. A wider-dynamics variant at
+ * Headroom 4 lands at p50 1.25 / p90 2.93 / max 4.16, and on that:
+ *
+ *   shared knee 7      peak GR 1.72 / 0.92 / 0.49 dB   residual -48.1 / -55.3 / -62.0 dBFS
+ *   per-shape knees    peak GR 1.12 / 0.92 / 0.79 dB   residual -52.0 / -55.3 / -57.8 dBFS
+ *
+ * So the old switch changed the depth by 3.5x and the distortion by 13.9 dB
+ * together — a shape control that was mostly a second, hidden depth control.
+ * Normalised, depth holds to a 0.33 dB spread and 5.8 dB of distortion
+ * difference survives. THAT REMAINDER IS THE CONTROL: the same depth spent on
+ * fewer, deeper crossings.
+ *
+ * ⚠ Depth matches EXACTLY only at the anchor, by construction. On a probe
+ * whose outlier sits 6.65 dB over, peak GR goes 3.29 / 2.43 / 1.80 dB before
+ * and 2.34 / 2.43 / 2.50 after — a 1.49 dB spread down to 0.15. On one whose
+ * outlier sits 10.35 dB over, well past the anchor, 0.92 down to 0.67: the
+ * shapes are diverging again above the anchor, in the opposite direction, and
+ * that is the design rather than a shortfall.
  */
 export const SHAPE_EXPONENT = { tanh2: 2, tanh3: 3, tanh4: 4 }
 
@@ -703,8 +752,98 @@ export const SHAPE_EXPONENT = { tanh2: 2, tanh3: 3, tanh4: 4 }
  */
 export const SHAPE_MIN_KNEE_DB = { tanh2: 4.62, tanh3: 4.50, tanh4: 4.46 }
 
-/** What an unrecognised `shape` resolves to. Derived, never written twice. */
-const DEFAULT_SHAPE_EXPONENT = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape]
+/**
+ * EXCESS AT WHICH ALL THREE SHAPES DELIVER THE SAME REDUCTION.
+ *
+ * WHY THE SHAPES ARE KNEE-NORMALISED AT ALL, and the reported symptom that
+ * forced it: switching to LATE at a fixed threshold "sounds cleaner", and it
+ * does — because it is doing less. At one shared KNEE_DB, tanh^n < tanh^2
+ * everywhere for n > 2 (t < 1, so each extra factor can only take away), so
+ * raising the shape lowered the reduction at EVERY excess and only converged
+ * back at the bound. The switch was therefore a depth control wearing a shape
+ * control's label, and no A/B through it was ever comparing shapes: it was
+ * comparing amounts. That the two were tangled is already recorded upstream —
+ * the default Headroom had to move 8 -> 6.5 when the default shape moved
+ * tanh^2 -> tanh^3, purely to put the depth back.
+ *
+ * Each shape now gets its OWN knee, chosen so that a peak this far over the
+ * threshold receives identical reduction whichever shape is selected. What
+ * changes is only how that reduction is DISTRIBUTED across overshoot depth:
+ * below the anchor EARLY does more, above it LATE does more, and they cross
+ * exactly here. That is what a knee control is, and it is also the behaviour
+ * the panel's own captions have always described.
+ *
+ * ⚠ THIS DOES NOT MAKE THE SHAPES EQUAL IN TOTAL WORK ON A FILE, and it must
+ * not be read that way. Only the anchor point is pinned. Real speech puts most
+ * of its crossings well below the anchor, so EARLY still touches those harder
+ * and still produces more total distortion — the difference is that the DEEP
+ * transients the stage exists for now land in the same place, which is what
+ * the lamp reads and what "how hard is this thing working" means to the ear.
+ *
+ * 6 dB IS THE MEASURED PEAK OVERSHOOT ON REAL NARRATION, not a round number:
+ * see KNEE_DB above, where the crossings at the default sit at p50 1.2 dB,
+ * p90 3.0 and max 6.1. Pinning the anchor at the top of that distribution is
+ * what makes the peak reduction — the reading the meter shows and the user
+ * hears as depth — hold still across the switch, while the p50/p90 bulk stays
+ * free to differ, which is the character.
+ *
+ * ⚠ ANCHOR IS THE ONE CONSTANT HERE THAT SYNTHETIC MATERIAL CANNOT CHECK. The
+ * test corpus's speechLike() puts its crossings at p50 9.6 dB / max 11.5 —
+ * ABOVE the anchor rather than below it — so on synthetics the ordering it
+ * produces is the reverse of the one on speech. It inherits the real
+ * distribution recorded at KNEE_DB and should be re-derived with it against a
+ * wider corpus. Ninth time synthetic material has been too clean to answer the
+ * question asked of it.
+ */
+export const SHAPE_ANCHOR_DB = 6
+
+/**
+ * Per-shape knee, derived from the anchor rather than tabulated.
+ *
+ * Anchored ON THE DEFAULT SHAPE at the shipped KNEE_DB, so the default curve
+ * is bit-identical to the one that shipped before normalisation and the stock
+ * patch (Headroom 6.5, tanh^3) does not move by an ulp. Only the two
+ * non-default positions change, and each changes toward the other's depth.
+ *
+ * Solving tanh^n(A/k_n) = tanh^d(A/KNEE_DB) for k_n gives
+ *   k_n = A / atanh( tanh(A/KNEE_DB)^(d/n) )
+ * with d the default shape's exponent. Monotonic in n, so the ordering of the
+ * knees is guaranteed rather than checked: 9.075 / 7 / 6.008 dB at A = 6.
+ * Every one of those clears its SHAPE_MIN_KNEE_DB bound with room to spare
+ * (4.62 / 4.50 / 4.46), which is the property the guard test asserts —
+ * normalisation is not allowed to buy matched depth with a folded curve.
+ */
+export const SHAPE_KNEE_DB = Object.fromEntries(
+  Object.entries(SHAPE_EXPONENT).map(([shape, n]) => {
+    const d = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape]
+    // The default's own knee is RETURNED, not recomputed. Algebraically the
+    // formula collapses to atanh(tanh(A/KNEE_DB)) there, but that round-trip
+    // is not exact in floating point, and a default that moves by an ulp is
+    // still a default that moved — the same rule the exponent unrolling in
+    // softClip() follows, and pinned by its own test.
+    if (n === d) return [shape, KNEE_DB]
+    const anchored = Math.pow(Math.tanh(SHAPE_ANCHOR_DB / KNEE_DB), d / n)
+    return [shape, SHAPE_ANCHOR_DB / Math.atanh(anchored)]
+  }),
+)
+
+/**
+ * What an unrecognised `shape` resolves to — exponent and knee together.
+ *
+ * ONE RESOLVER FOR BOTH, deliberately. Two independent lookups with two
+ * independent `??` fallbacks can disagree: a shape present in one table and
+ * absent from the other would silently pair one curve's exponent with
+ * another's knee, which is a valid-looking curve at the wrong depth and
+ * therefore invisible. Derived from the defaults object, never written twice.
+ */
+function resolveShape(shape) {
+  const exponent = SHAPE_EXPONENT[shape]
+  return exponent === undefined ? DEFAULT_SHAPE : { exponent, kneeDb: SHAPE_KNEE_DB[shape] }
+}
+const DEFAULT_SHAPE = {
+  exponent: SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape],
+  kneeDb: SHAPE_KNEE_DB[SOFT_CLIPPER_KERNEL_DEFAULTS.shape],
+}
 
 /**
  * Soft-clip curve — level-invariant and reduction-bounded. See
@@ -713,8 +852,14 @@ const DEFAULT_SHAPE_EXPONENT = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape
  *
  *   |x| <= T :  y = x                                    (bit-transparent)
  *   |x| >  T :  e = 20*log10(|x|/T)
- *               r = rMaxDb * tanh^n(e / kneeDb)   n from `shape`
+ *               r = rMaxDb * tanh^n(e / kneeDb)   n AND kneeDb from `shape`
  *               y = sign(x) * |x| * 10^(-r/20)
+ *
+ * `exponent` and `kneeDb` are NOT independent in shipped use: they are paired
+ * per shape by SHAPE_KNEE_DB so that every shape delivers the same reduction
+ * at SHAPE_ANCHOR_DB. Callers inside the kernel take both from resolveShape().
+ * The two stay separate arguments because the tests sweep the knee against a
+ * fixed exponent to locate the fold bounds.
  *
  * The log/exp pair only runs for samples ABOVE the threshold, which on speech
  * is a small minority — the early-out below carries the overwhelming majority
@@ -950,7 +1095,11 @@ export class SoftClipperKernel {
     // than throwing — a bad param must not take the audio thread down — and
     // the fallback is read from the defaults rather than written as a literal,
     // so moving the default cannot silently leave the two disagreeing.
-    const shapeExponent = SHAPE_EXPONENT[p.shape] ?? DEFAULT_SHAPE_EXPONENT
+    //
+    // Exponent and knee travel together (see resolveShape): the knee is what
+    // normalises the shapes to equal reduction at SHAPE_ANCHOR_DB, so a curve
+    // run with one shape's exponent and another's knee is neither shape.
+    const { exponent: shapeExponent, kneeDb: shapeKneeDb } = resolveShape(p.shape)
 
     // ── Detector + threshold, computed once per sample from the unfiltered
     // mono downmix, shared by every channel's clip curve. headroomDb and
@@ -1133,7 +1282,7 @@ export class SoftClipperKernel {
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           const before = hi[k]
-          const after = softClip(before, t, MAX_REDUCTION_DB, KNEE_DB, shapeExponent)
+          const after = softClip(before, t, MAX_REDUCTION_DB, shapeKneeDb, shapeExponent)
           hi[k] = after
           const ab = before < 0 ? -before : before
           if (ab > t) {

@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import {
   SoftClipperKernel, processSoftClipperBuffer, softClip, SOFT_CLIPPER_LATENCY_SAMPLES,
   MAX_REDUCTION_DB, KNEE_DB, SHAPE_EXPONENT, SHAPE_MIN_KNEE_DB,
+  SHAPE_KNEE_DB, SHAPE_ANCHOR_DB,
   SOFT_CLIPPER_KERNEL_DEFAULTS,
 } from '../../src/audio/softClipperProcessor.js'
 import {
@@ -609,6 +610,49 @@ function speechLike(seconds, peakAmp, seed = 11) {
   return out
 }
 
+/** A single voiced burst, used as a plosive-shaped outlier. */
+function plosiveBurst(seconds, amp, sr = SR) {
+  const n = Math.round(seconds * sr)
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    out[i] = amp * (Math.sin((Math.PI * i) / n) ** 2) * Math.sin((2 * Math.PI * 110 * i) / sr)
+  }
+  return out
+}
+
+/**
+ * speechLike with a realistic dynamic spread — syllable peaks vary over ~12 dB
+ * rather than clustering.
+ *
+ * WHY IT EXISTS: speechLike's syllables all land within a few dB of each
+ * other, so at any Headroom the stage either touches all of them or none. Real
+ * narration crosses the threshold constantly and shallowly (p50 1.2 dB over,
+ * p90 3.0, max 6.1 — see KNEE_DB), and a probe with no shallow crossings
+ * cannot see anything a knee does. This one reproduces that distribution to
+ * p50 1.25 / p90 2.93 / max 4.16 at Headroom 4.
+ */
+function variedSpeech(seconds, peakAmp, seed = 11) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  let i = 0
+  while (i < n) {
+    const sylN = Math.round((0.08 + rnd() * 0.14) * SR)
+    const gapN = Math.round((0.02 + rnd() * 0.06) * SR)
+    const amp = peakAmp * Math.pow(10, (-10 + 12 * rnd()) / 20)
+    const f0 = 100 + rnd() * 60
+    for (let j = 0; j < sylN && i < n; j++, i++) {
+      const env = Math.sin((Math.PI * j) / sylN) ** 1.5
+      const t = i / SR
+      out[i] = (amp * env * (Math.sin(2 * Math.PI * f0 * t) + 0.5 * Math.sin(4 * Math.PI * f0 * t)
+        + 0.33 * Math.sin(6 * Math.PI * f0 * t) + 0.25 * Math.sin(8 * Math.PI * f0 * t))) / 2.08
+    }
+    for (let j = 0; j < gapN && i < n; j++, i++) out[i] = peakAmp * 0.002 * (rnd() - 0.5)
+  }
+  return out
+}
+
 /** Fraction of voiced samples the curve actually touches, past settling. */
 function fractionTouched(signal, params) {
   const kernel = new SoftClipperKernel(SR)
@@ -1001,13 +1045,13 @@ test('every shape is still exactly bit-transparent below the threshold', () => {
     const n = SHAPE_EXPONENT[shape]
     for (let i = 0; i <= 2000; i++) {
       const x = -T + (2 * T * i) / 2000
-      assert.equal(softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n), x,
+      assert.equal(softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n), x,
         `${shape} altered a below-threshold sample at x=${x}`)
     }
   }
 })
 
-test('every shape is monotonic at the shipped KNEE_DB', () => {
+test('every shape is monotonic at its shipped knee', () => {
   // Non-monotonic means the transfer curve folds: a louder input producing a
   // quieter output, which is the one failure mode here that sounds like
   // destruction rather than colour. Swept across four decades of threshold
@@ -1018,7 +1062,7 @@ test('every shape is monotonic at the shipped KNEE_DB', () => {
       let prev = -Infinity
       for (let i = 0; i <= 20000; i++) {
         const x = (i / 20000) * 1.5
-        const y = softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n)
+        const y = softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n)
         assert.ok(y >= prev, `${shape} folded at T=${T}, x=${x}: ${y} < ${prev}`)
         prev = y
       }
@@ -1047,7 +1091,11 @@ test('the recorded monotonicity bounds are the real ones, per shape', () => {
     const bound = SHAPE_MIN_KNEE_DB[shape]
     assert.ok(!foldsAt(n, bound * 1.01), `${shape} folds above its stated bound ${bound}`)
     assert.ok(foldsAt(n, bound * 0.97), `${shape} does not fold below its stated bound ${bound}`)
-    assert.ok(bound < KNEE_DB, `${shape} is not usable at the shipped KNEE_DB ${KNEE_DB}`)
+    // Against the shape's OWN knee, not the shared one: normalisation spends
+    // part of the margin (9.08 / 7 / 6.01 dB), and buying matched depth with a
+    // folded curve would be a much worse bug than the one it fixes.
+    assert.ok(bound < SHAPE_KNEE_DB[shape],
+      `${shape}'s knee ${SHAPE_KNEE_DB[shape].toFixed(3)} is below its fold bound ${bound}`)
   }
 })
 
@@ -1058,14 +1106,12 @@ test('higher shapes spend proportionally more of the budget on the big peaks', (
   // getting more selective, which is what "transparency" means here — the
   // near-threshold material is ordinary speech.
   const T = 0.25
-  const at = (n, excessDb) => {
+  const at = (shape, excessDb) => {
     const x = T * dbToLin(excessDb)
-    return -20 * Math.log10(softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n) / x)
+    return -20 * Math.log10(
+      softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], SHAPE_EXPONENT[shape]) / x)
   }
-  const ratios = SHAPES.map(shape => {
-    const n = SHAPE_EXPONENT[shape]
-    return at(n, 3) / at(n, 12)
-  })
+  const ratios = SHAPES.map(shape => at(shape, 3) / at(shape, 12))
   for (let i = 1; i < ratios.length; i++) {
     assert.ok(ratios[i] < ratios[i - 1] * 0.75,
       `${SHAPES[i]} is not meaningfully more selective than ${SHAPES[i - 1]}: ` +
@@ -1074,8 +1120,8 @@ test('higher shapes spend proportionally more of the budget on the big peaks', (
   // And the ordering must not come from simply doing less overall — every
   // shape still reaches real depth on a genuine outlier.
   for (const shape of SHAPES) {
-    assert.ok(at(SHAPE_EXPONENT[shape], 12) > 4,
-      `${shape} barely works on a +12 dB peak: ${at(SHAPE_EXPONENT[shape], 12).toFixed(2)} dB`)
+    assert.ok(at(shape, 12) > 4,
+      `${shape} barely works on a +12 dB peak: ${at(shape, 12).toFixed(2)} dB`)
   }
 })
 
@@ -1089,12 +1135,13 @@ test('every shape keeps level invariance and the reduction bound', () => {
     let first = null
     for (const T of [0.001, 0.01, 0.1, 0.5]) {
       const x = T * dbToLin(excessDb)
-      const red = -20 * Math.log10(softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n) / x)
+      const red = -20 * Math.log10(softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n) / x)
       if (first === null) first = red
       assert.ok(Math.abs(red - first) < 1e-9, `${shape} is not level-invariant at T=${T}`)
     }
     // Bound: even a threshold 60 dB too low cannot cost more than the cap.
-    const worst = -20 * Math.log10(softClip(0.9, 0.0009, MAX_REDUCTION_DB, KNEE_DB, n) / 0.9)
+    const worst = -20 * Math.log10(
+      softClip(0.9, 0.0009, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n) / 0.9)
     assert.ok(worst <= MAX_REDUCTION_DB + 1e-9,
       `${shape} exceeded the reduction bound: ${worst.toFixed(3)} dB`)
   }
@@ -1133,10 +1180,12 @@ test('the default shape is a real shape, and it is the one the panel offers', ()
     `default shape ${SOFT_CLIPPER_KERNEL_DEFAULTS.shape} is not in SHAPE_EXPONENT`)
 })
 
-test('the default shape is bit-identical to the curve before shapes existed', () => {
-  // The regression guard for the whole change: adding a switch must not move
-  // anyone who never touches it. tanh^2 with the exponent path in place has
-  // to equal the two-multiply form it replaced, exactly.
+test('the exponent path is bit-identical to the two-multiply form it replaced', () => {
+  // The regression guard for the exponent unrolling: tanh^2 at a given knee
+  // has to equal the hand-written two-multiply curve that predates shapes,
+  // exactly. (This is no longer the DEFAULT shape, and no longer the knee any
+  // shape ships with — see the anchor test below for the guard that the stock
+  // patch itself has not moved.)
   const T = 0.2
   for (let i = 0; i <= 5000; i++) {
     const x = -1.2 + (2.4 * i) / 5000
@@ -1151,39 +1200,116 @@ test('the default shape is bit-identical to the curve before shapes existed', ()
   }
 })
 
-test('at a fixed Headroom, higher shapes do strictly less on both axes', () => {
-  // The claim the panel actually makes, pinned end-to-end rather than on the
-  // curve alone: at the SAME setting, raising the shape touches fewer samples
-  // AND takes less off each one. Measured this way round because the reverse
-  // reading -- matching the depth by winding Headroom down -- reverses the
-  // sample-count ordering on real audio, and a test asserting the wrong one of
-  // those two would enshrine the framing that measurement overturned. See the
-  // shape table in the kernel for both.
+test('every shape delivers the same reduction at the anchor', () => {
+  // THE POINT OF SHAPE_ANCHOR_DB, asserted on the curve itself. A peak this
+  // far over the threshold must lose the same amount whichever position is
+  // selected — otherwise the switch is a depth control again and no A/B
+  // through it compares shapes.
+  const T = 0.25
+  const at = (shape, excessDb) => {
+    const x = T * dbToLin(excessDb)
+    return -20 * Math.log10(
+      softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], SHAPE_EXPONENT[shape]) / x)
+  }
+  const anchored = SHAPES.map(shape => at(shape, SHAPE_ANCHOR_DB))
+  for (const r of anchored) {
+    assert.ok(Math.abs(r - anchored[0]) < 1e-9,
+      `shapes disagree at the anchor: ${anchored.map(v => v.toFixed(6)).join(' / ')}`)
+  }
+  // And it is a genuine pivot, not a curve collapse: strictly ordered one way
+  // below the anchor and strictly the other way above it. Checked at both
+  // sides rather than only at the anchor, because three identical curves
+  // would satisfy the assertion above and would be a broken control.
+  for (let i = 1; i < SHAPES.length; i++) {
+    assert.ok(at(SHAPES[i], SHAPE_ANCHOR_DB / 2) < at(SHAPES[i - 1], SHAPE_ANCHOR_DB / 2),
+      `${SHAPES[i]} does not do less than ${SHAPES[i - 1]} below the anchor`)
+    assert.ok(at(SHAPES[i], SHAPE_ANCHOR_DB * 2) > at(SHAPES[i - 1], SHAPE_ANCHOR_DB * 2),
+      `${SHAPES[i]} does not do more than ${SHAPES[i - 1]} above the anchor`)
+  }
+})
+
+test('the default shape ships at exactly KNEE_DB, so the stock patch has not moved', () => {
+  // Normalisation is anchored ON the default shape, which is what makes it
+  // free for anyone who never touches the switch. If this drifts, the shipped
+  // Headroom default (6.5, itself calibrated against this curve) is wrong too
+  // — the two are coupled and the kernel says so.
+  assert.equal(SHAPE_KNEE_DB[SOFT_CLIPPER_KERNEL_DEFAULTS.shape], KNEE_DB)
+})
+
+test('the recorded per-shape knees are the ones the derivation produces', () => {
+  // The knees are computed, not tabulated, so the numbers quoted throughout
+  // the kernel comments and the panel captions have nothing pinning them.
+  // Stated here to three decimals so a change to the anchor or to the default
+  // shape fails loudly rather than silently re-tuning a shipped control.
+  const stated = { tanh2: 9.075, tanh3: 7.000, tanh4: 6.008 }
+  for (const shape of SHAPES) {
+    assert.ok(Math.abs(SHAPE_KNEE_DB[shape] - stated[shape]) < 0.001,
+      `${shape} knee is ${SHAPE_KNEE_DB[shape].toFixed(4)}, not the recorded ${stated[shape]}`)
+  }
+})
+
+test('at a fixed Headroom, the shapes now land at the same depth', () => {
+  // The end-to-end version of the anchor guarantee, and the reported symptom
+  // it answers: switching to LATE at a fixed threshold used to sound cleaner
+  // largely because it was doing less. Peak reduction is read from the
+  // kernel's own meter — the number the lamp shows and the ear reads as depth.
+  //
+  // The probe's outlier is placed near the anchor deliberately. Depth matches
+  // EXACTLY only there; well above it the shapes diverge again by design, so a
+  // probe with a 10 dB outlier would fail an assertion this tight and would be
+  // testing the wrong claim.
   const signal = concat(
     speechLike(5, 0.5, 97),
-    tone(120, 0.02, 0.95),
-    speechLike(2, 0.5, 101),
+    plosiveBurst(0.03, 0.62),
+    speechLike(3, 0.5, 101),
   )
-  const stats = SHAPES.map(shape => {
-    const out = processSoftClipperBuffer([signal], SR, { headroomDb: 6, emphasisDb: 0, shape }).channelData[0]
-    const ref = processSoftClipperBuffer([signal], SR, { headroomDb: 60, emphasisDb: 0, shape }).channelData[0]
-    let touched = 0, voiced = 0, sum = 0
-    for (let i = 0; i < signal.length; i++) {
-      const a = Math.abs(ref[i])
-      if (a < 0.005) continue
-      voiced++
-      const d = 20 * Math.log10(a / Math.max(Math.abs(out[i]), 1e-12))
-      if (d > 0.02) { touched++; sum += d }
+  const peakGr = (shape) => {
+    const kernel = new SoftClipperKernel(SR)
+    kernel.setParams({ headroomDb: 6.5, emphasisDb: 6, shape })
+    const out = new Float32Array(signal.length)
+    for (let off = 0; off < signal.length; off += 128) {
+      const len = Math.min(128, signal.length - off)
+      kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
     }
-    return { shape, frac: touched / voiced, mean: touched ? sum / touched : 0 }
-  })
-  assert.ok(stats[0].frac > 0, 'the probe never engaged the stage at all')
-  for (let i = 1; i < stats.length; i++) {
-    assert.ok(stats[i].frac < stats[i - 1].frac,
-      `${stats[i].shape} touched more samples than ${stats[i - 1].shape}: ` +
-      stats.map(s => `${s.shape} ${(100 * s.frac).toFixed(3)}%`).join(', '))
-    assert.ok(stats[i].mean < stats[i - 1].mean,
-      `${stats[i].shape} took more off each sample than ${stats[i - 1].shape}: ` +
-      stats.map(s => `${s.shape} ${s.mean.toFixed(3)} dB`).join(', '))
+    return kernel.getMetering().maxReductionDb
   }
+  const grs = SHAPES.map(peakGr)
+  assert.ok(grs[0] > 1, `the probe never engaged the stage: ${grs.join(', ')}`)
+  const spread = Math.max(...grs) - Math.min(...grs)
+  // 1.49 dB before normalisation, 0.15 after, on this probe.
+  assert.ok(spread < 0.4,
+    `the shapes still differ in depth at a fixed Headroom: ` +
+    SHAPES.map((sh, i) => `${sh} ${grs[i].toFixed(2)}`).join(', '))
+})
+
+test('what survives normalisation is where the distortion is spent', () => {
+  // The other half of the same claim: matching the depth must not flatten the
+  // control into three identical curves. On crossings distributed like real
+  // narration (p50 1.25 dB over, p90 2.93, max 4.16 — the figures recorded at
+  // KNEE_DB are p50 1.2 / p90 3.0 / max 6.1) the same depth is spent on fewer,
+  // deeper crossings as the shape rises, and the residual falls monotonically.
+  //
+  // variedSpeech, not speechLike: at the shipped Headroom speechLike's
+  // syllables never reach the threshold at all, so its entire output is one
+  // outlier and there is nothing for a knee to redistribute between.
+  const signal = variedSpeech(12, 0.9, 41)
+  const residualDb = (shape) => {
+    const wet = processSoftClipperBuffer([signal], SR, { headroomDb: 4, emphasisDb: 6, shape }).channelData[0]
+    const dry = processSoftClipperBuffer([signal], SR, { headroomDb: 60, emphasisDb: 6, shape }).channelData[0]
+    let sq = 0
+    for (let i = 0; i < signal.length; i++) { const d = dry[i] - wet[i]; sq += d * d }
+    return 10 * Math.log10(sq / signal.length)
+  }
+  const res = SHAPES.map(residualDb)
+  for (let i = 1; i < res.length; i++) {
+    assert.ok(res[i] < res[i - 1] - 1,
+      `${SHAPES[i]} does not distort measurably less than ${SHAPES[i - 1]}: ` +
+      SHAPES.map((sh, k) => `${sh} ${res[k].toFixed(1)}`).join(', '))
+  }
+  // -52.0 / -55.3 / -57.8 dBFS measured. Under the shared knee this spread was
+  // 13.9 dB and came with a 3.5x depth difference; the depth is now held and
+  // the remainder is the control.
+  assert.ok(res[0] - res[res.length - 1] < 10,
+    `the shapes still differ like a depth control: ` +
+    SHAPES.map((sh, k) => `${sh} ${res[k].toFixed(1)}`).join(', '))
 })
