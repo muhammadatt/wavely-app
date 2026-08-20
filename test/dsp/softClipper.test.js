@@ -1279,7 +1279,7 @@ test('the recorded per-shape knees are the ones the derivation produces', () => 
   // the kernel comments and the panel captions have nothing pinning them.
   // Stated here to three decimals so a change to the anchor or to the default
   // shape fails loudly rather than silently re-tuning a shipped control.
-  const stated = { tanh2: 9.075, tanh3: 7.000, tanh4: 6.008 }
+  const stated = { tanh2: 8.490, tanh3: 7.000, tanh4: 6.221 }
   for (const shape of SHAPES) {
     assert.ok(Math.abs(SHAPE_KNEE_DB[shape] - stated[shape]) < 0.001,
       `${shape} knee is ${SHAPE_KNEE_DB[shape].toFixed(4)}, not the recorded ${stated[shape]}`)
@@ -1546,7 +1546,16 @@ test('emphasis still aims the stage at HF peaks and away from LF ones', () => {
     lf.map(v => v.toFixed(2)).join(' -> '))
 })
 
-test('depth holds across the emphasis knob on every kind of material', () => {
+test('depth holds across the emphasis knob on synthetic beds', () => {
+  // ⚠ SCOPED TO SYNTHETIC MATERIAL DELIBERATELY, and the name says so. On two
+  // of three real narrators the depth does NOT hold across the knob, because
+  // their peak reduction is set by a single event far more HF-rich than the
+  // passage average, and no statistic slow enough to leave an isolated
+  // fricative its extra reduction can also cancel it on a peak that IS one.
+  // See LIFT_GATE_DB for the three-file table. What this test pins is that the
+  // broad inflation is gone on material where the lift is measurable at all —
+  // asserting more than that would be asserting something untrue of real
+  // audio.
   // The claim the compensation exists to make, end-to-end on three beds
   // spanning no sibilance to heavy sibilance. Uncompensated, peak reduction
   // drifted 1.45 -> 5.45 dB across the knob on the mixed bed and 1.28 -> 5.68

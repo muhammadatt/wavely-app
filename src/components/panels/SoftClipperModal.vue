@@ -82,10 +82,10 @@ const MODE_OPTIONS = [
  * much each of those samples gets, weighted by its overshoot.
  *
  * THE CAPTIONS SHOW A CROSSOVER, AND THAT IS THE WHOLE CONTROL. Each position
- * carries its own knee, set so a peak SHAPE_ANCHOR_DB (6 dB) over the
- * threshold loses the same 2.0 dB whichever is selected — so the switch moves
- * character, not depth. Below the anchor EARLY does more (0.61 / 0.40 / 0.27
- * dB at +3), above it LATE does (4.51 / 4.94 / 5.18 at +12). Both numbers are
+ * carries its own knee, set so a peak SHAPE_ANCHOR_DB (8 dB) over the
+ * threshold loses the same 3.3 dB whichever is selected — so the switch moves
+ * character, not depth. Below the anchor EARLY does more (0.69 / 0.40 / 0.24
+ * dB at +3), above it LATE does (4.73 / 4.94 / 5.07 at +12). Both numbers are
  * shown, with the anchor between them, because reading the three as one line is
  * what stops the control being taken for a second volume knob.
  *
@@ -102,15 +102,15 @@ const SHAPE_OPTIONS = [
 ]
 
 // THREE POINTS, NOT TWO, and the middle one is the reason. It is the anchor,
-// so it reads −2.0 in all three positions — the caption therefore shows the
+// so it reads −3.3 in all three positions — the caption therefore shows the
 // pivot happening rather than asserting it, and a user switching positions can
 // see at a glance that the depth is held and only the ends move. Two points
 // would have left "does LATE just do less?" open, which is the question the
 // whole normalisation exists to close.
 const SHAPE_CAPTION = {
-  tanh2: '3 dB over → −0.6 · 6 → −2.0 · 12 → −4.5 dB',
-  tanh3: '3 dB over → −0.4 · 6 → −2.0 · 12 → −4.9 dB',
-  tanh4: '3 dB over → −0.3 · 6 → −2.0 · 12 → −5.2 dB',
+  tanh2: '3 dB over → −0.7 · 8 → −3.3 · 12 → −4.7 dB',
+  tanh3: '3 dB over → −0.4 · 8 → −3.3 · 12 → −4.9 dB',
+  tanh4: '3 dB over → −0.2 · 8 → −3.3 · 12 → −5.1 dB',
 }
 
 const MODE_CAPTION = {

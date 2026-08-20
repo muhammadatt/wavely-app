@@ -615,15 +615,44 @@ const LIFT_TAU_S = SPEECH_TAU_S
  * uncompensated against -54.6 -> -55.9 gated, while the count of samples the
  * curve touches still rises 1.8x — the aiming intact, the depth held.
  *
- * ⚠ AND THE REAL FILE DEFLATES THE SYNTHETIC HEADLINE. On the corpus's
- * sibilant bed the uncompensated drift was 4.4 dB; on real narration it is
- * 0.53. Real speech barely lifts its own PEAK ENVELOPE even where it is rich
- * in fricatives — 1.74 dB at emphasis 12 measured over all voiced samples,
- * 0.85 over the loud ones — because a fricative does not dominate a 1 ms /
- * 150 ms peak follower the way first-differenced noise does. The defect was
- * real and the fix is real; both are roughly a fifth the size the synthetic
- * corpus implied. Tenth time synthetic material has failed to answer the
- * question asked of it, and the first time it has erred by EXAGGERATING.
+ * ⚠ IT DOES NOT HOLD PEAK REDUCTION FLAT ON EVERY FILE, and an earlier version
+ * of this note claimed it did on the evidence of one narrator. Three real
+ * files, Headroom 6.5, peak GR and total added distortion across HFE 0 -> 12:
+ *
+ *   file                    peak GR: pre-comp    compensated    residual dBFS
+ *   A (normalised)           3.02 -> 3.55        3.02 -> 2.92    -54.6 -> -55.9  (was -52.1)
+ *   B (raw)                  2.21 -> 5.63        2.21 -> 5.47    -58.5 -> -57.5  (was -53.9)
+ *   C (hard-mastered)        2.77 -> 5.49        2.77 -> 5.17    -61.4 -> -53.7  (was -50.6)
+ *
+ * On A the depth holds. On B and C it does not, and the reason is structural
+ * rather than a tuning error: the loud-moment average lift reads 0.65 and 1.63
+ * dB there while the single deepest event is lifted by around 9 dB. Peak GR is
+ * set by that one event. A statistic slow enough to leave an isolated fricative
+ * its extra reduction — which is the whole feature — cannot also cancel the
+ * extra reduction on a peak that IS an isolated fricative. THE TWO GOALS ARE
+ * CONTRADICTORY, and this stage resolves them in favour of the aiming.
+ *
+ * WHAT IT DOES DELIVER, on all three: the BROAD inflation is removed. Growth
+ * in total added distortion across the knob falls from +2.5 / +4.6 / +10.8 dB
+ * to -1.3 / +1.0 / +7.7, and the growth in samples touched roughly halves
+ * (C: 10x -> 6x). So "raising HFE quietly makes the whole stage work harder"
+ * is fixed; "raising HFE never deepens anything" was never achievable and is
+ * not claimed.
+ *
+ * ⚠ HARD-LIMITED MATERIAL IS THE WORST CASE, by a wide margin — file C is a
+ * heavily mastered clip and shows 6x the crossings and +7.7 dB of distortion
+ * at HFE 12 even compensated. Limiting flattens the peak envelope, so a small
+ * threshold change moves an enormous number of samples across it. On that kind
+ * of input HF Emphasis is a much stronger control than the panel implies.
+ *
+ * ⚠ THE SYNTHETIC CORPUS EXAGGERATED THE PROBLEM AND FLATTERED THE FIX. On its
+ * sibilant bed the uncompensated drift was 4.4 dB and the compensated drift
+ * -0.06; on real narration the numbers above. Real speech barely lifts its own
+ * PEAK ENVELOPE even where it is rich in fricatives — 1.74 dB at emphasis 12
+ * over all voiced samples, 0.85 over the loud ones — because a fricative does
+ * not dominate a 1 ms / 150 ms follower the way first-differenced noise does.
+ * Tenth time synthetic material has failed to answer the question asked of it,
+ * and the first time it has erred by EXAGGERATING.
  */
 const LIFT_GATE_DB = 0
 
@@ -893,12 +922,48 @@ export const SHAPE_MIN_KNEE_DB = { tanh2: 4.62, tanh3: 4.50, tanh4: 4.46 }
  * transients the stage exists for now land in the same place, which is what
  * the lamp reads and what "how hard is this thing working" means to the ear.
  *
- * 6 dB IS THE MEASURED PEAK OVERSHOOT ON REAL NARRATION, not a round number:
- * see KNEE_DB above, where the crossings at the default sit at p50 1.2 dB,
- * p90 3.0 and max 6.1. Pinning the anchor at the top of that distribution is
- * what makes the peak reduction — the reading the meter shows and the user
- * hears as depth — hold still across the switch, while the p50/p90 bulk stays
- * free to differ, which is the character.
+ * 8 dB IS A MIN-MAX FIT OVER THREE REAL NARRATORS, and the number it replaces
+ * was derived from a broken proxy.
+ *
+ * ⚠ THE CROSSING FIGURES QUOTED AT KNEE_DB (p50 1.2 dB, p90 3.0, max 6.1) ARE
+ * MEASURED ON THE RAW SIGNAL AT BASE RATE. The curve does not see that signal:
+ * it sees the PRE-EMPHASISED, 4x OVERSAMPLED one, whose peaks are higher. The
+ * anchor was originally set to 6 from those figures, which is the wrong
+ * domain. Recovering the excess the curve actually saw — by inverting the
+ * shipped curve through the reduction it actually applied, which needs no new
+ * instrumentation — gives, at the default Headroom:
+ *
+ *   file                     raw-signal proxy max    true max excess
+ *   narrator A (normalised)          7.19                  7.52
+ *   narrator B (raw)                 5.58                  9.95
+ *   narrator C (hard-mastered)       6.28                  9.24
+ *
+ * The proxy under-reads by 0.3 to 4.4 dB, and it under-reads MOST on the files
+ * where the stage works hardest.
+ *
+ * Peak-GR spread across the three shapes is a pure function of the true excess
+ * and the anchor, so it can be swept exactly over the excesses those files
+ * produce across Headroom 4-8 — the range where the stage does real work (at
+ * Headroom 10 it delivers 0.74 dB and matching there is worth little):
+ *
+ *   anchor      6     7     8    8.5     9    9.5    10
+ *   mean      0.53  0.34  0.22  0.19   0.17  0.17   0.18
+ *   worst     0.68  0.48  0.36  0.42   0.48  0.54   0.59
+ *
+ * 8 minimises the WORST case and sits within 0.05 dB of the best mean. Lower
+ * anchors do better at high Headroom, where the excess is small; higher ones
+ * at low Headroom. The optimum is broad, which is the useful part — the exact
+ * value is not load-bearing, and anything from 7 to 9 beats the shipped 6.
+ *
+ * Pinning the anchor near where real peaks land is what makes peak reduction —
+ * the reading the meter shows and the user hears as depth — hold still across
+ * the switch, while the p50/p90 bulk stays free to differ, which is the
+ * character.
+ *
+ * ⚠ MOVING THE ANCHOR CANNOT MOVE THE DEFAULT PATCH. The default shape's knee
+ * is RETURNED as KNEE_DB rather than recomputed (see SHAPE_KNEE_DB), so only
+ * the two non-default positions change. That is what made this re-derivation
+ * safe to do at all.
  *
  * ⚠ ANCHOR IS THE ONE CONSTANT HERE THAT SYNTHETIC MATERIAL CANNOT CHECK. The
  * test corpus's speechLike() puts its crossings at p50 9.6 dB / max 11.5 —
@@ -921,7 +986,7 @@ export const SHAPE_MIN_KNEE_DB = { tanh2: 4.62, tanh3: 4.50, tanh4: 4.46 }
  * A 4x tightening at the default and exact at Headroom 8, where that file's
  * crossings top out at 5.49 dB — just under the anchor.
  */
-export const SHAPE_ANCHOR_DB = 6
+export const SHAPE_ANCHOR_DB = 8
 
 /**
  * Per-shape knee, derived from the anchor rather than tabulated.
@@ -934,7 +999,7 @@ export const SHAPE_ANCHOR_DB = 6
  * Solving tanh^n(A/k_n) = tanh^d(A/KNEE_DB) for k_n gives
  *   k_n = A / atanh( tanh(A/KNEE_DB)^(d/n) )
  * with d the default shape's exponent. Monotonic in n, so the ordering of the
- * knees is guaranteed rather than checked: 9.075 / 7 / 6.008 dB at A = 6.
+ * knees is guaranteed rather than checked: 8.490 / 7 / 6.221 dB at A = 8.
  * Every one of those clears its SHAPE_MIN_KNEE_DB bound with room to spare
  * (4.62 / 4.50 / 4.46), which is the property the guard test asserts —
  * normalisation is not allowed to buy matched depth with a folded curve.
