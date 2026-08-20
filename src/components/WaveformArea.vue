@@ -16,6 +16,19 @@ const scrollLeft = ref(0)
 const pixelsPerSecond = ref(100)
 const isSelecting = ref(false)
 const selectionAnchor = ref(0)
+
+// Where the pointer went down, and whether it has since travelled far enough to
+// count as a drag rather than a click.
+const selectionAnchorPx = ref(0)
+const dragExceededThreshold = ref(false)
+
+// A click is never perfectly still — a few pixels of travel between mousedown
+// and mouseup is normal, and treating that as a drag left a sliver of a
+// selection behind every attempt to just move the playhead. Everything
+// downstream then acts on that sliver: Space plays the sliver instead of the
+// file, the effect windows apply to it, and the trim operations light up. Below
+// this many pixels the gesture is a click and the selection stays cleared.
+const SELECTION_DRAG_THRESHOLD_PX = 4
 const containerWidth = ref(0)
 // Whether the view is pinned to "whole file fits the viewport". Starts true so
 // a freshly opened file shows end to end rather than the first few seconds at
@@ -169,6 +182,8 @@ function handleMouseDown(e) {
 
   isSelecting.value = true
   selectionAnchor.value = time
+  selectionAnchorPx.value = x
+  dragExceededThreshold.value = false
   setPlayhead(time)
   setSelection(time, time) // Clear / start fresh
 
@@ -180,6 +195,15 @@ function handleMouseMove(e) {
   if (!isSelecting.value) return
   const rect = canvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
+
+  // The threshold latches: once the gesture has been read as a drag it stays a
+  // drag, so dragging out a selection and then pulling back to a two-pixel one
+  // is still a selection. Only the opening move decides.
+  if (!dragExceededThreshold.value) {
+    if (Math.abs(x - selectionAnchorPx.value) < SELECTION_DRAG_THRESHOLD_PX) return
+    dragExceededThreshold.value = true
+  }
+
   const time = Math.max(0, Math.min(pxToTime(x), totalDuration.value))
 
   setSelection(selectionAnchor.value, time)

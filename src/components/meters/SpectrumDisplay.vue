@@ -115,7 +115,11 @@ function ensureMapper(binCount, binWidthHz) {
 }
 
 useMeterFrame((dtMs) => {
-  const frame = props.frameFn?.()
+  // Frozen means frozen, whatever arrives. Today's caller withholds frames
+  // while frozen, so this is belt and braces — but the prop documents the
+  // behaviour, and a future caller that keeps feeding frames would otherwise
+  // find the hold quietly decaying under a held reading.
+  const frame = props.frozen ? null : props.frameFn?.()
   if (frame?.db?.length) {
     ensureMapper(frame.db.length, frame.binWidthHz)
     const mapped = mapper.map(frame.db, -200)

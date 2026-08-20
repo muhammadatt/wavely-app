@@ -7,6 +7,7 @@ import PresetsPanel from '../components/panels/PresetsPanel.vue'
 
 import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
+import SoftClipperModal from '../components/panels/SoftClipperModal.vue'
 import SchepsModal from '../components/panels/SchepsModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
@@ -246,6 +247,21 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: FET1176Modal,
+  },
+  {
+    // Filed under Dynamics, ahead of the compressors in the panel: the whole
+    // point is to run before them, taming plosive peaks so they don't slip
+    // past a compressor's attack and get amplified by makeup gain.
+    id: 'soft-clipper',
+    label: 'Soft Clipper',
+    desc: 'Tame transient peaks before compression',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'clipper',
+    keywords: ['clip', 'clipper', 'transient', 'plosive', 'peak', 'soft clip', 'saturation'],
+    requires: 'selection',
+    surface: 'window',
+    component: SoftClipperModal,
   },
   {
     // Filed under Dynamics rather than Tone: the two Pultec stages are there to

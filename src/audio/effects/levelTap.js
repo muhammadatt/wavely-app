@@ -12,6 +12,23 @@
  */
 
 /**
+ * Drop one edge of the graph, tolerating an edge that has already gone.
+ *
+ * `AudioNode.disconnect(target)` throws InvalidAccessError when there is no
+ * such connection, and there often is not by the time a tap is destroyed: every
+ * effect wrapper calls a wholesale `monitor.disconnect()` before tearing its
+ * taps down, which has already removed this edge. Throwing there would abort
+ * the rest of the teardown — the thing the disconnect exists to make thorough.
+ */
+function dropEdge(from, to) {
+  try {
+    from.disconnect(to)
+  } catch {
+    // Already disconnected upstream; nothing to do.
+  }
+}
+
+/**
  * Frequency-domain tap — the EQ's backdrop trace and the standalone analyzer.
  *
  * Sized larger than the level tap and with lighter smoothing: this one is read
@@ -72,6 +89,12 @@ export function createSpectrumTap(audioContext, node, {
       return bins
     },
     destroy() {
+      // The source side too. `analyser.disconnect()` drops only what the
+      // analyser feeds — the `node -> analyser` edge made above is the source's
+      // connection, and it survives. A window opened and closed repeatedly
+      // would leave the node feeding a row of orphaned analysers, each still
+      // pulled for every quantum of every playback.
+      dropEdge(node, analyser)
       analyser.disconnect()
       silentSink.disconnect()
     },
@@ -174,6 +197,9 @@ export function createLevelTap(audioContext, node) {
       return levels
     },
     destroy() {
+      // Same source-side edge as the spectrum tap: dropping the splitter's own
+      // outgoing connections leaves `node -> splitter` in place.
+      dropEdge(node, splitter)
       splitter.disconnect()
       for (const analyser of analysers) analyser.disconnect()
       silentSink.disconnect()

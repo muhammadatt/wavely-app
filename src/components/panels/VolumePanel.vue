@@ -28,7 +28,7 @@ async function applyVolume() {
       state.segments, start, end, gainDb.value,
       ctx, state.currentFile.sampleRate, state.currentFile.channels
     )
-    const bufferId = replaceRegion(start, end, buffer)
+    const bufferId = replaceRegion(start, end, buffer, 'the volume adjustment')
 
     const cache = await computePeakCache(buffer, 256)
     setPeakCache(bufferId, cache)

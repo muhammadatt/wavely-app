@@ -256,7 +256,7 @@ export function useScheps() {
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      const bufferId = replaceRegion(start, end, buffer)
+      const bufferId = replaceRegion(start, end, buffer, 'Scheps Parallel')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast('Scheps Parallel applied')
