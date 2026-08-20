@@ -46,6 +46,17 @@ import {
 } from '../src/audio/resonanceProcessor.js'
 
 const CORPUS = path.join(process.cwd(), 'data/corpus/resonance')
+/**
+ * Renders go in a SUBDIRECTORY, not beside the sources.
+ *
+ * Writing them alongside was a real bug, not an untidiness: the runner
+ * enumerates every WAV it finds, so its own output became input on the next
+ * run and the script cheerfully measured what a suppressor does to
+ * already-suppressed audio. Excluding them by filename is the fix that looks
+ * sufficient and is not — scratch probes drop files here too, and those follow
+ * nobody's convention. A separate directory cannot be got wrong.
+ */
+const RENDERS = path.join(CORPUS, 'rendered')
 const RENDER = process.argv.includes('--render')
 
 const FRAME = 2048
@@ -331,8 +342,9 @@ function run(file) {
     const params = { ...RESONANCE_KERNEL_DEFAULTS, ...cfg.params, selectivity }
     const out = processResonanceBuffer([x], sampleRate, params).channelData[0]
     if (RENDER) {
+      fs.mkdirSync(RENDERS, { recursive: true })
       writeWav(
-        path.join(CORPUS, `${name.replace(/\.wav$/i, '')}__${cfg.slug}.wav`),
+        path.join(RENDERS, `${name.replace(/\.wav$/i, '')}__${cfg.slug}.wav`),
         [out.subarray(LATENCY)],
         sampleRate,
       )
@@ -346,7 +358,10 @@ function run(file) {
 }
 
 const files = fs.existsSync(CORPUS)
-  ? fs.readdirSync(CORPUS).filter(f => /\.wav$/i.test(f) && !f.includes('__')).sort()
+  ? fs.readdirSync(CORPUS, { withFileTypes: true })
+    .filter(e => e.isFile() && /\.wav$/i.test(e.name))
+    .map(e => e.name)
+    .sort()
   : []
 
 if (!files.length) {
