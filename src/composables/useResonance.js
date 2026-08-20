@@ -190,7 +190,7 @@ export function useResonance() {
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      const bufferId = replaceRegion(start, end, buffer)
+      const bufferId = replaceRegion(start, end, buffer, 'resonance suppression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast('Resonance suppression applied')

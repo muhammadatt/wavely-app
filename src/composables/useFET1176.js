@@ -269,7 +269,7 @@ export function useFET1176() {
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels
       )
-      const bufferId = replaceRegion(start, end, buffer)
+      const bufferId = replaceRegion(start, end, buffer, 'FET Punch compression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast('FET Punch compression applied')
