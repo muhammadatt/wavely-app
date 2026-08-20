@@ -621,6 +621,44 @@ function plosiveBurst(seconds, amp, sr = SR) {
 }
 
 /**
+ * A sustained fricative-like band — first-differenced noise, so a 6 dB/octave
+ * HF tilt with most of its energy above the 3.5 kHz emphasis corner.
+ *
+ * The counterpart to plosiveBurst: the two are normalised to the same peak
+ * amplitude and differ only in spectrum, which is what makes them able to
+ * separate "the emphasis moved the threshold" from "the emphasis aimed the
+ * stage somewhere".
+ */
+function fricativeNoise(seconds, amp, seed = 5, sr = SR) {
+  const n = Math.round(seconds * sr)
+  const out = new Float32Array(n)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  let prev = 0, max = 0
+  for (let i = 0; i < n; i++) {
+    const r = rnd() - 0.5
+    const d = r - prev
+    prev = r
+    out[i] = d
+    if (Math.abs(d) > max) max = Math.abs(d)
+  }
+  if (max > 0) for (let i = 0; i < n; i++) out[i] *= amp / max
+  return out
+}
+
+/** Run a signal through a fresh kernel in 128-sample blocks, return metering. */
+function meter(signal, params) {
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ shape: 'tanh3', ...params })
+  const out = new Float32Array(signal.length)
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  return kernel.getMetering()
+}
+
+/**
  * speechLike with a realistic dynamic spread — syllable peaks vary over ~12 dB
  * rather than clustering.
  *
@@ -1312,4 +1350,211 @@ test('what survives normalisation is where the distortion is spent', () => {
   assert.ok(res[0] - res[res.length - 1] < 10,
     `the shapes still differ like a depth control: ` +
     SHAPES.map((sh, k) => `${sh} ${res[k].toFixed(1)}`).join(', '))
+})
+
+// ── HF Emphasis lift compensation (LIFT_TAU_S) ──────────────────────────────
+
+/**
+ * A syllable bed whose voiced parts are part tone and part HF-tilted noise.
+ *
+ * GATED LIKE SPEECH, and that is not cosmetic: the detector's noise floor is a
+ * valley follower, so on CONTINUOUS material it settles at the signal's own
+ * level, the gate never opens, and the speech tracker never updates. A
+ * sustained noise probe therefore measures a stage that is not running — the
+ * same trap recorded twice in the kernel, once for the aliasing sweep and once
+ * for the noise-floor-relative threshold guard. `hfMix` is the share of each
+ * syllable's amplitude that is fricative rather than tone.
+ */
+function sibilantSpeech(seconds, peakAmp, seed, hfMix) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  let i = 0, prev = 0
+  while (i < n) {
+    const sylN = Math.round((0.08 + rnd() * 0.14) * SR)
+    const gapN = Math.round((0.02 + rnd() * 0.06) * SR)
+    const amp = peakAmp * Math.pow(10, (-10 + 12 * rnd()) / 20)
+    const f0 = 100 + rnd() * 60
+    for (let j = 0; j < sylN && i < n; j++, i++) {
+      const env = Math.sin((Math.PI * j) / sylN) ** 1.5
+      const t = i / SR
+      const tone = (Math.sin(2 * Math.PI * f0 * t) + 0.5 * Math.sin(4 * Math.PI * f0 * t)
+        + 0.33 * Math.sin(6 * Math.PI * f0 * t) + 0.25 * Math.sin(8 * Math.PI * f0 * t)) / 2.08
+      const r = rnd() - 0.5
+      const d = (r - prev) * 2.6 // first difference: HF tilt, roughly peak-matched
+      prev = r
+      out[i] = amp * env * ((1 - hfMix) * tone + hfMix * d)
+    }
+    for (let j = 0; j < gapN && i < n; j++, i++) { out[i] = peakAmp * 0.002 * (rnd() - 0.5); prev = 0 }
+  }
+  return out
+}
+
+test('the lift reads zero on low-frequency material and tracks HF material', () => {
+  // The measurement the whole compensation rests on. A signal with no energy
+  // above the 3.5 kHz corner is not lifted by the pre-emphasis at all, so the
+  // threshold must not move for it; a sibilant passage is lifted nearly by
+  // the full knob. Measured: 0.05 dB against 11.6 at emphasis 12.
+  const lf = sibilantSpeech(12, 0.35, 41, 0)
+  const hf = sibilantSpeech(12, 0.35, 41, 0.8)
+  for (const emphasisDb of [3, 6, 12]) {
+    const lfLift = meter(lf, { headroomDb: 6.5, emphasisDb }).liftDb
+    const hfLift = meter(hf, { headroomDb: 6.5, emphasisDb }).liftDb
+    assert.ok(lfLift < 0.1,
+      `emphasis ${emphasisDb} lifted an LF-only signal by ${lfLift.toFixed(3)} dB`)
+    assert.ok(hfLift > 0.85 * emphasisDb,
+      `emphasis ${emphasisDb} only lifted a sibilant passage by ${hfLift.toFixed(2)} dB`)
+  }
+})
+
+test('the lift can never leave [0, emphasisDb]', () => {
+  // Bounded BY CONSTRUCTION — the shelf is a pure boost, magnitude within
+  // [0, N] dB to four decimals at 3, 6 and 12 with no corner overshoot — but
+  // the clamp is what stops a follower still filling from zero producing a
+  // nonsense threshold in the first milliseconds. That failure mode is on
+  // record: an unbounded quantity reaching the threshold once produced 29 dB
+  // of reduction while a tracker was still converging.
+  const cases = [
+    concat(new Float32Array(SR), fricativeNoise(2, 0.95)),
+    fricativeNoise(0.5, 1e-6),
+    sibilantSpeech(2, 0.9, 3, 0.8),
+    new Float32Array(64),
+  ]
+  for (const emphasisDb of [0, 6, 12]) {
+    for (const signal of cases) {
+      const { liftDb } = meter(signal, { headroomDb: 6.5, emphasisDb })
+      assert.ok(liftDb >= 0 && liftDb <= emphasisDb + 1e-9,
+        `lift ${liftDb} escaped [0, ${emphasisDb}]`)
+    }
+  }
+})
+
+test('emphasis 0 compensates by exactly nothing', () => {
+  // The guarantee that keeps the whole feature free for anyone who has the
+  // filters bypassed: with no emphasis there is no lift to give back, on any
+  // material, and the threshold is the one the build before compensation
+  // computed. Exact, not approximate — the clamp's upper bound is 0.
+  for (const signal of [sibilantSpeech(4, 0.35, 11, 0.8), speechLike(4, 0.35, 11)]) {
+    assert.equal(meter(signal, { headroomDb: 6.5, emphasisDb: 0 }).liftDb, 0)
+  }
+})
+
+test('a single fricative does not move the compensation', () => {
+  // THE TEST THE BALLISTICS EXIST FOR, and the one a fast time constant
+  // fails. If the lift tracked transients, a fricative would raise the
+  // threshold as it arrived and receive no extra reduction — the compensation
+  // would cancel exactly the selectivity it is meant to preserve.
+  //
+  // MEASURED AT THE END OF THE BURST, by truncating the signal there, because
+  // getMetering() reports the CURRENT lift: reading it after four more seconds
+  // of bed measures how far it has decayed back, which a 20 ms constant passes
+  // just as easily as a 3 s one. That version of this test did not fail under
+  // mutation, which is how the hole was found.
+  //
+  // DIFFERENTIAL, against the same bed with silence in the burst's place: the
+  // bed is synthetic speech with hard syllable edges, which splatter some HF
+  // of their own, so an absolute reading would be measuring the generator as
+  // much as the burst.
+  const bed = sibilantSpeech(4, 0.35, 97, 0)
+  const gap = new Float32Array(Math.round(0.03 * SR))
+  for (const emphasisDb of [6, 12]) {
+    const without = meter(concat(bed, gap), { headroomDb: 6.5, emphasisDb }).liftDb
+    const withBurst = meter(concat(bed, fricativeNoise(0.03, 0.44)),
+      { headroomDb: 6.5, emphasisDb }).liftDb
+    assert.ok(withBurst - without < 0.5,
+      `one 30 ms fricative moved the compensation by ${(withBurst - without).toFixed(3)} dB ` +
+      `at emphasis ${emphasisDb}`)
+  }
+})
+
+test('the compensation responds over seconds, not milliseconds', () => {
+  // The ballistics asserted directly, as a time constant rather than through
+  // a consequence. A step from an LF passage into a sibilant one is the only
+  // input that separates "slow" from "fast" cleanly — a single burst is short
+  // enough that even a 20 ms constant barely reacts within it, so the burst
+  // test above cannot carry this on its own.
+  //
+  // Bounded on BOTH sides. Too fast and the compensation eats the selectivity
+  // it exists to protect; too slow and it never arrives within a take.
+  const emphasisDb = 12
+  const signal = concat(sibilantSpeech(4, 0.35, 97, 0), sibilantSpeech(10, 0.35, 41, 0.8))
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 6.5, emphasisDb, shape: 'tanh3' })
+  const out = new Float32Array(signal.length)
+  const trace = []
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    trace.push({ t: off / SR, lift: kernel.getMetering().liftDb })
+  }
+  const stepAt = 4
+  const before = trace.find(p => p.t >= stepAt - 0.2).lift
+  const settled = trace[trace.length - 1].lift
+  assert.ok(settled - before > 5, `the step did not move the lift: ${before} -> ${settled}`)
+  const target = before + 0.632 * (settled - before)
+  const riseS = trace.find(p => p.t > stepAt && p.lift >= target).t - stepAt
+  assert.ok(riseS > 0.5 && riseS < 8,
+    `lift reached 63% of its step in ${riseS.toFixed(2)} s — expected the order of ` +
+    `LIFT_TAU_S, not a transient-following constant`)
+})
+
+test('emphasis still aims the stage at HF peaks and away from LF ones', () => {
+  // What the knob is FOR, pinned end-to-end, and the half the compensation
+  // must not flatten. Two outliers of identical peak amplitude differing only
+  // in spectrum, each in its own copy of the same bed: raising emphasis drives
+  // the fricative-shaped one much harder (3.00 -> 5.84 dB measured) and leaves
+  // the low-frequency one alone (1.88 -> 1.82, drifting very slightly DOWN,
+  // which is the pivot pointing the right way).
+  const withBurst = (burst) => concat(speechLike(4, 0.35, 97), burst, speechLike(4, 0.35, 101))
+  const AMP = 0.44
+  const lfSig = withBurst(plosiveBurst(0.03, AMP))
+  const hfSig = withBurst(fricativeNoise(0.03, AMP))
+
+  const lf = [0, 12].map(e => meter(lfSig, { headroomDb: 6.5, emphasisDb: e }).maxReductionDb)
+  const hf = [0, 12].map(e => meter(hfSig, { headroomDb: 6.5, emphasisDb: e }).maxReductionDb)
+
+  assert.ok(hf[1] > hf[0] + 1.5,
+    `emphasis did not reach the HF peak: ${hf.map(v => v.toFixed(2)).join(' -> ')}`)
+  assert.ok(lf[1] <= lf[0] + 0.02 && lf[1] > lf[0] - 0.25,
+    `emphasis moved the LF peak, which has no energy above the corner: ` +
+    lf.map(v => v.toFixed(2)).join(' -> '))
+})
+
+test('depth holds across the emphasis knob on every kind of material', () => {
+  // The claim the compensation exists to make, end-to-end on three beds
+  // spanning no sibilance to heavy sibilance. Uncompensated, peak reduction
+  // drifted 1.45 -> 5.45 dB across the knob on the mixed bed and 1.28 -> 5.68
+  // on the sibilant one — the knob acting as a second, spectrum-dependent
+  // depth control. Measured with the lift in: -0.28 and -0.06 dB of drift.
+  //
+  // The bound is two-sided. Over-compensating would be the subtler failure —
+  // a knob that quietly REDUCES depth as it is raised is just as dishonest an
+  // A/B as one that raises it, and the warm-up seed deliberately takes the
+  // max, which errs in that direction.
+  for (const hfMix of [0, 0.35, 0.8]) {
+    const signal = sibilantSpeech(12, 0.35, 41, hfMix)
+    const grs = [0, 3, 6, 12].map(e => meter(signal, { headroomDb: 6.5, emphasisDb: e }).maxReductionDb)
+    const drift = Math.max(...grs) - Math.min(...grs)
+    assert.ok(drift < 0.6,
+      `hfMix ${hfMix}: depth still moves with the knob — ${grs.map(v => v.toFixed(2)).join(' -> ')}`)
+  }
+})
+
+test('the compensation is seeded during warm-up, not ramped into', () => {
+  // Without the seed the feature is absent for its first three seconds: the
+  // speech tracker adopts a real level the instant its 500 ms window closes
+  // and the stage starts processing, while a lift climbing from zero on a 3 s
+  // constant leaves the threshold uncompensated exactly then. Asserted on the
+  // opening of a file rather than on its whole length, because a running
+  // maximum over a long file hides a short transient — which is how this was
+  // nearly missed.
+  const signal = sibilantSpeech(2.5, 0.35, 41, 0.8)
+  const settled = meter(sibilantSpeech(12, 0.35, 41, 0.8), { headroomDb: 6.5, emphasisDb: 12 })
+  const opening = meter(signal, { headroomDb: 6.5, emphasisDb: 12 })
+  assert.ok(opening.liftDb > 0.8 * settled.liftDb,
+    `lift had only reached ${opening.liftDb.toFixed(2)} dB of ${settled.liftDb.toFixed(2)} ` +
+    `after 2.5 s`)
+  assert.ok(opening.maxReductionDb < 2,
+    `the opening of the file over-clipped: ${opening.maxReductionDb.toFixed(2)} dB`)
 })

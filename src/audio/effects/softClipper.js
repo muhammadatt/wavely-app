@@ -70,6 +70,7 @@ export function createSoftClipper(audioContext) {
   let destroyed = false
   let reductionDb = 0
   let engagedFraction = 0
+  let liftDb = 0
 
   // Monitoring mode, kept out of `params` on purpose — see the kernel's
   // setMonitor. It rides its own port message, so the offline render cannot
@@ -115,6 +116,7 @@ export function createSoftClipper(audioContext) {
         if (e.data?.type !== 'gr') return
         reductionDb = e.data.reductionDb
         engagedFraction = e.data.engagedFraction ?? 0
+        liftDb = e.data.liftDb ?? 0
         const batch = e.data.scope
         if (!batch) return
         for (let i = 0; i + 1 < batch.length; i += 2) {
@@ -170,6 +172,20 @@ export function createSoftClipper(audioContext) {
      */
     getEngagedFraction() {
       return engagedFraction
+    },
+
+    /**
+     * How much of HF Emphasis's boost the threshold is currently giving back,
+     * in dB.
+     *
+     * Surfaced because the compensation moves the threshold silently
+     * otherwise, and a threshold that moves for reasons the panel does not
+     * name is the same failure as a control that looks like a control and is
+     * not one. It is also the most direct readout of what the knob is doing:
+     * near zero means this passage has nothing above the corner to aim at.
+     */
+    getLift() {
+      return liftDb
     },
 
     /**

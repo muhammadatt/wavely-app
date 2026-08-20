@@ -16,7 +16,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape,
-  clipperPreview, clipperReduction, clipperEngagedPct, clipperDelta,
+  clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncOutputTrim, syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
@@ -141,6 +141,20 @@ function formatDb(v) {
 }
 
 const isFixed = computed(() => thresholdMode.value === 'fixed')
+
+/**
+ * What HF Emphasis is doing right now, in one line under the knob.
+ *
+ * Two readings rather than a fixed caption, because the knob's effect is a
+ * property of the MATERIAL and a static caption cannot say so. At 0, or on a
+ * passage with nothing above the corner, there is nothing to aim at and the
+ * panel says so instead of implying the control is live.
+ */
+const emphasisCaption = computed(() => {
+  if (emphasisDb.value <= 0) return 'aims at consonants'
+  if (clipperLiftDb.value < 0.15) return 'nothing up there to aim at'
+  return `aiming — ceiling +${clipperLiftDb.value.toFixed(1)} dB`
+})
 
 /**
  * Headroom and Fixed dBFS are ONE control, and used to be two.
@@ -326,10 +340,21 @@ const SCOPE_H = 236
           </p>
         </div>
         <div class="w-[74px]">
-          <!-- Harshness-reduction mechanism, not a tone control: it shaves
-               HF first (where clipping's odd harmonics land) and pulls the
-               generated harmonics back down with it. The caption is there
-               because the label alone reads as an EQ. -->
+          <!-- AIMS the stage, and the caption names that rather than the
+               mechanism. "harshness, not tone" shipped here and was the wrong
+               shape of statement twice over: it described what the control is
+               not, and the thing it was defending against was — as shipped —
+               true. Uncompensated, raising this knob tripled peak reduction
+               on any HF-rich passage, so "turn it up to add harshness" was a
+               fair reading of the measurements rather than a misconception.
+               With the lift compensation in place depth holds and what is
+               left is pure aim: measured on two bursts of identical peak
+               amplitude, 110 Hz stays at 1.88 dB of reduction across the
+               whole knob while a fricative goes 3.00 -> 5.84.
+
+               The live figure is the compensation itself, and it doubles as
+               the honest answer to "is this knob doing anything here?" — on
+               material with nothing above 3.5 kHz to aim at, it reads 0.0. -->
           <Knob
             :model-value="emphasisDb"
             @update:model-value="syncEmphasis"
@@ -339,7 +364,7 @@ const SCOPE_H = 236
             :disabled="!clipperPreview"
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            harshness, not tone
+            {{ emphasisCaption }}
           </p>
         </div>
         <div class="w-[74px]">

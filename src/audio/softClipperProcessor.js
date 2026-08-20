@@ -497,6 +497,14 @@ export const KNEE_DB = 7
  * 0.26% (emphasis 12), and the share of blocks doing anything at all goes
  * 1% -> 2% -> 3% across 0 / 6 / 12.
  *
+ * ⚠ THOSE TWO FIGURES ARE PRE-COMPENSATION and are no longer what the stage
+ * does. The mechanism above is still exactly right — it is now the mechanism
+ * the lift compensation exists to correct — but the threshold is no longer
+ * held still while the signal is lifted into it: see LIFT_TAU_S, which gives
+ * back the measured lift so that raising Emphasis re-AIMS the stage instead
+ * of also deepening it. The counts above would need re-measuring on the same
+ * clip, which is not available here.
+ *
  * THE COLOURING IS BROADBAND, NOT HF-ONLY, which is the counter-intuitive part.
  * A crossing triggered by sibilance still applies a WIDEBAND gain reduction to
  * that instant, so the added modulation lands wherever the signal's energy is.
@@ -523,6 +531,49 @@ const EMPHASIS_EPSILON_DB = 0.001 // below this, treat as "0 dB" and skip the fi
 // Recompute shelf coefficients only when the ramped value has moved this far
 // since the last computation — see deviation note (3) above.
 const EMPHASIS_RECOMPUTE_EPS_DB = 0.05
+
+/**
+ * TIME CONSTANT FOR THE EMPHASIS LIFT COMPENSATION — the constant this whole
+ * mechanism lives or dies on.
+ *
+ * WHY THE COMPENSATION EXISTS. The detector reads the UNFILTERED downmix but
+ * the clip curve sees the pre-emphasised signal, so raising HF Emphasis lifts
+ * every HF-rich peak toward a threshold that did not move. Measured on two
+ * bursts of IDENTICAL peak amplitude differing only in spectrum, at Headroom
+ * 6.5: the 110 Hz burst holds at 1.88 dB of reduction across the entire knob
+ * — exactly, because de-emphasis is an algebraic inverse and a peak with no
+ * energy above the corner comes back unchanged — while a fricative-shaped
+ * burst goes 3.00 -> 5.85 dB. So the knob was a depth control as well as a
+ * character one, the same defect SHAPE_ANCHOR_DB fixes for the knee, and for
+ * the same reason: the thing that changes character also moves the effective
+ * threshold.
+ *
+ * The fix is to measure how much the loud material is ACTUALLY being lifted
+ * and give it back to the threshold. `liftDb` is the dB difference between a
+ * peak follower on the pre-emphasised downmix and the existing one on the raw
+ * downmix, so it is 0 on an all-LF passage, `emphasisDb` on an all-HF one, and
+ * self-calibrating in between. Nothing is fitted.
+ *
+ * ⚠ THE BALLISTICS ARE THE DESIGN, NOT A TUNING. A fast tracker destroys the
+ * feature by construction: a fricative arrives, raises the tracker, the
+ * threshold rises with it, and the fricative gets no extra reduction — the
+ * compensation would cancel precisely the selectivity it exists to preserve.
+ * It must be far slower than the transients it is meant to leave alone, so it
+ * runs on SPEECH_TAU_S, the same 3 s constant the speech tracker uses. The
+ * reading is therefore per-passage ("this passage is sibilant-heavy, so the
+ * ceiling sits higher") while individual fricatives still ride above it.
+ * `test/dsp/softClipper.test.js` asserts a single fricative in a bed does not
+ * move it — that test is the one a fast constant fails.
+ *
+ * BOUNDED BY CONSTRUCTION, not by a tuned guard. The pre-emphasis shelf is a
+ * pure boost: swept at 3 dB, 6 and 12 its magnitude stays within [0, N] dB to
+ * four decimals with no corner overshoot, so peak(emphasised) >= peak(raw)
+ * always and liftDb lands in [0, emphasisDb]. It is clamped there anyway, so a
+ * follower still filling from zero cannot produce a nonsense threshold during
+ * the first milliseconds — the failure mode that produced 29 dB of reduction
+ * at t = 0.46 s when the tracker was last given an unbounded quantity.
+ */
+const LIFT_TAU_S = SPEECH_TAU_S
 
 // Fixed time constant for smoothing headroomDb / outputTrimDb toward their
 // targets — see deviation note 3. Fast enough to feel immediate on a knob
@@ -918,6 +969,16 @@ export class SoftClipperKernel {
     this.speechWarmupTarget = Math.max(1, Math.round(sampleRate * (SPEECH_INIT_WINDOW_MS / 1000)))
 
     this.fastPeak = 0
+    // Peak follower on the PRE-EMPHASISED downmix, run with the same
+    // ballistics as fastPeak so the two are comparable sample for sample.
+    // Their ratio is the emphasis lift — see LIFT_TAU_S.
+    this.fastPeakEmph = 0
+    this.liftDb = 0
+    // Running MAX of the lift target during the speech tracker's warm-up —
+    // the same shape as speechWarmupPeak, for the same reason. See the
+    // warm-up note in the lift update.
+    this.liftWarmupMax = 0
+    this.liftCoef = riseCoeff(LIFT_TAU_S * 1000, sampleRate)
     this.fastPeakAttack = riseCoeff(FAST_PEAK_ATTACK_MS, sampleRate)
     this.fastPeakRelease = riseCoeff(FAST_PEAK_RELEASE_MS, sampleRate)
     this.fastRmsCoef = riseCoeff(FAST_RMS_TAU_MS, sampleRate)
@@ -938,6 +999,11 @@ export class SoftClipperKernel {
     // ── Emphasis filters (per-channel state, shared coefficients) ──
     this.preEmphasis = new BiquadCascade(1, 1)
     this.deEmphasis = new BiquadCascade(1, 1)
+    // A THIRD cascade, mono, for the detector's pre-emphasised copy. Not the
+    // audio path's `preEmphasis` with an extra channel: that one is fed the
+    // per-channel input and this one the downmix, and sharing an instance
+    // would mean sharing filter state between two different signals.
+    this.preEmphasisDetect = new BiquadCascade(1, 1)
     this.emphasisActive = false
     this.emphasisStable = true
 
@@ -990,6 +1056,11 @@ export class SoftClipperKernel {
     this.scopePeak = 0
     this.scopeThreshold = 1
 
+    // Mono downmix and its pre-emphasised copy, grown on demand. Two buffers
+    // rather than one: the detector reads both per sample.
+    this.monoScratch = new Float32Array(0)
+    this.monoEmphScratch = new Float32Array(0)
+
     this.params = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
     this.setParams({})
   }
@@ -1024,6 +1095,10 @@ export class SoftClipperKernel {
       reductionDb: this.reductionDb,
       maxReductionDb: this.maxReductionDb,
       engagedFraction: this.engagedFraction,
+      // How much of HF Emphasis's boost the threshold is currently giving
+      // back. Reported so the panel can say what the knob is doing rather
+      // than leaving a silently-moving threshold — see LIFT_TAU_S.
+      liftDb: this.liftDb,
     }
   }
 
@@ -1065,6 +1140,10 @@ export class SoftClipperKernel {
     const de = invertBiquad(pre)
     this.preEmphasis.setSections([pre])
     this.deEmphasis.setSections([de])
+    // The detector's own copy gets the SAME section, so the lift is measured
+    // through exactly the filter the curve is fed rather than through a
+    // second design that could drift from it.
+    this.preEmphasisDetect.setSections([pre])
   }
 
   /**
@@ -1101,12 +1180,55 @@ export class SoftClipperKernel {
     // run with one shape's exponent and another's knee is neither shape.
     const { exponent: shapeExponent, kneeDb: shapeKneeDb } = resolveShape(p.shape)
 
+    // Emphasis coefficients recompute only when the raw target has moved
+    // enough to matter (deviation note 3) — cheap on a knob drag, free
+    // otherwise.
+    //
+    // AHEAD OF THE DETECTOR, not after it: the detector now runs its own
+    // pre-emphasised copy of the downmix, and filtering this block's audio
+    // with one set of coefficients while measuring it with the previous
+    // block's would make the lift reading disagree with the signal the curve
+    // actually sees. The audio path is unaffected by the move — it always ran
+    // after this point.
+    if (Math.abs(p.emphasisDb - this.emphasisDbCommitted) > EMPHASIS_RECOMPUTE_EPS_DB) {
+      this._updateEmphasis(p.emphasisDb)
+    }
+
+    // ── Mono downmix, and its pre-emphasised copy ──────────────────────────
+    // Materialised into scratch rather than computed inline in the detector
+    // loop, because the pre-emphasis is a biquad and wants a run of samples.
+    if (this.monoScratch.length < n) {
+      this.monoScratch = new Float32Array(n)
+      this.monoEmphScratch = new Float32Array(n)
+    }
+    const mono = this.monoScratch
+    const monoEmph = this.monoEmphScratch
+    for (let i = 0; i < n; i++) {
+      let acc = inputChannels[0][i]
+      for (let ch = 1; ch < nIn; ch++) acc += inputChannels[ch][i]
+      mono[i] = acc * chScale
+    }
+    if (this.emphasisActive) {
+      this.preEmphasisDetect.process(mono, monoEmph, n, 0)
+    } else {
+      // Emphasis off: the lift is identically zero and the follower must not
+      // carry a stale reading into the next time it is switched on.
+      monoEmph.set(mono.subarray(0, n))
+    }
+
     // ── Detector + threshold, computed once per sample from the unfiltered
     // mono downmix, shared by every channel's clip curve. headroomDb and
     // outputTrimDb are smoothed here too — one one-pole each, run exactly
     // once regardless of channel count (deviation note 3) ──
     let fastRmsMeanSq = this.fastRmsMeanSq
     let fastPeak = this.fastPeak
+    let fastPeakEmph = this.fastPeakEmph
+    let liftDb = this.liftDb
+    let liftWarmupMax = this.liftWarmupMax
+    // Upper bound on the lift, hoisted out of the per-sample loop. Zero when
+    // the emphasis filters are bypassed, which is what makes emphasisDb = 0
+    // bit-identical to the build before compensation existed.
+    const liftMaxDb = this.emphasisActive ? this.emphasisDbCommitted : 0
     let noiseEstDb = this.noiseEstDb
     let gateHoldSamples = this.gateHoldSamples
     let speechLevelDb = this.speechLevelDb
@@ -1127,9 +1249,7 @@ export class SoftClipperKernel {
       outputTrimDbSmoothed += this.paramSmoothCoef * (p.outputTrimDb - outputTrimDbSmoothed)
       trimGain[i] = dbToLin(outputTrimDbSmoothed)
 
-      let x = inputChannels[0][i]
-      for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
-      x *= chScale
+      const x = mono[i]
 
       // fast_rms: one-pole RMS, τ = 10 ms (spec §3.1).
       fastRmsMeanSq += this.fastRmsCoef * (x * x - fastRmsMeanSq) + DENORMAL_GUARD
@@ -1142,6 +1262,18 @@ export class SoftClipperKernel {
       fastPeak += (rect > fastPeak ? this.fastPeakAttack : this.fastPeakRelease)
         * (rect - fastPeak) + DENORMAL_GUARD
       const fastPeakDb = linToDb(fastPeak)
+
+      // The same follower on the pre-emphasised copy. Their ratio is how much
+      // the curve's view of the loud material has been lifted, which is what
+      // the threshold gives back — see LIFT_TAU_S.
+      //
+      // A RATIO OF FOLLOWERS, never of samples: |emphasised[i] / raw[i]| is
+      // unbounded wherever the raw sample passes through zero, and a lift
+      // reading that spikes to infinity between cycles would drive the
+      // threshold to T_MAX and silently disable the stage.
+      const rectEmph = monoEmph[i] < 0 ? -monoEmph[i] : monoEmph[i]
+      fastPeakEmph += (rectEmph > fastPeakEmph ? this.fastPeakAttack : this.fastPeakRelease)
+        * (rectEmph - fastPeakEmph) + DENORMAL_GUARD
 
       // noise_est: decaying valley follower standing in for a running minimum
       // over a trailing 2 s window — see deviation note (2) above.
@@ -1196,12 +1328,65 @@ export class SoftClipperKernel {
         } else {
           speechLevelDb += this.speechCoef * (fastPeakDb - speechLevelDb)
         }
+
+        // Emphasis lift, on the same 3 s constant and behind the same gate as
+        // the speech tracker. Gated for the same reason: through a pause both
+        // followers decay toward the noise floor, where their ratio is a
+        // property of the room rather than of the voice, and an ungated lift
+        // would let the threshold wander between words.
+        //
+        // Clamped to [0, emphasisDb] — the shelf is a pure boost, so anything
+        // outside that window is a follower still filling rather than a
+        // measurement. See LIFT_TAU_S.
+        const liftTargetDb = clamp(linToDb(fastPeakEmph) - fastPeakDb, 0, liftMaxDb)
+        if (speechWarmupCount < this.speechWarmupTarget) {
+          // SEEDED DURING WARM-UP, NOT RAMPED INTO, and this is not a
+          // refinement — without it the feature is absent for its first three
+          // seconds. The speech tracker adopts a real level the instant its
+          // 500 ms window closes, so the stage starts processing immediately;
+          // a lift still climbing from zero on a 3 s constant leaves the
+          // threshold uncompensated exactly then, and the stage over-clips
+          // the start of every file just as hard as it did before the
+          // compensation existed. Measured on a sibilant passage at emphasis
+          // 12, that transient alone accounted for most of the peak reduction
+          // the compensation appeared to be failing to remove.
+          //
+          // The MAX rather than the mean over the window, because a lift that
+          // is too high merely does less while one that is too low
+          // over-processes — the asymmetry the tracker's own warm-up note
+          // records, and the cure there was a warm-up seed rather than
+          // ballistics for the same reason.
+          if (liftTargetDb > liftWarmupMax) liftWarmupMax = liftTargetDb
+          liftDb = liftWarmupMax
+        } else {
+          liftDb += this.liftCoef * (liftTargetDb - liftDb)
+        }
       }
 
       // threshold derivation (spec §3.3). T_MIN is now only a numerical
       // backstop — softClip takes log(|x|/T), so T must stay off zero.
-      const targetDb = fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed
-      T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX)
+      //
+      // liftDb is added in BOTH modes, including fixed. A stated ceiling is
+      // stated about the raw signal, and the curve works on the emphasised
+      // one; without the lift the two disagree by however much HF Emphasis is
+      // boosting, and the number in the box stops describing what happens.
+      // The scope draws T, so the line visibly rises with the knob — which is
+      // the trade being made and worth seeing.
+      const targetDb = (fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed)
+        + liftDb
+      // T_MAX IS SCALED BY THE LIFT, and leaving it unscaled truncated the
+      // compensation exactly where it was needed most. The ceiling bounds T
+      // against the signal the CURVE sees, not against the raw input, and
+      // pre-emphasis has lifted that signal by liftDb — so a threshold above
+      // digital full scale in raw terms is correct here rather than absurd:
+      // it means nothing in the unemphasised signal should be touched and
+      // only the boosted HF peaks can reach the curve.
+      //
+      // Measured before the scaling: on a sibilant passage at emphasis 12 the
+      // lift reached 11.25 dB, T pinned at 0.95, and peak reduction climbed to
+      // 4.98 dB — the clamp handing back the depth the compensation had just
+      // removed, silently, and only on the material the feature exists for.
+      T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX * dbToLin(liftDb))
 
       // Scope: loudest input sample of this call, and T at that instant.
       const ax = x < 0 ? -x : x
@@ -1210,6 +1395,9 @@ export class SoftClipperKernel {
 
     this.fastRmsMeanSq = fastRmsMeanSq
     this.fastPeak = fastPeak
+    this.fastPeakEmph = fastPeakEmph
+    this.liftDb = liftDb
+    this.liftWarmupMax = liftWarmupMax
     this.noiseEstDb = noiseEstDb
     this.gateHoldSamples = gateHoldSamples
     this.speechLevelDb = speechLevelDb
@@ -1220,13 +1408,6 @@ export class SoftClipperKernel {
     this.scopePeak = scopePeak
     this.scopeThreshold = scopeThreshold
     this.outputTrimDbSmoothed = outputTrimDbSmoothed
-
-    // Emphasis coefficients recompute only when the raw target has moved
-    // enough to matter (deviation note 3) — cheap on a knob drag, free
-    // otherwise.
-    if (Math.abs(p.emphasisDb - this.emphasisDbCommitted) > EMPHASIS_RECOMPUTE_EPS_DB) {
-      this._updateEmphasis(p.emphasisDb)
-    }
 
     while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler())
     const D = OVERSAMPLE_LATENCY_SAMPLES
@@ -1432,6 +1613,7 @@ if (typeof registerProcessor === 'function') {
           type: 'gr',
           reductionDb: this.kernel.reductionDb,
           engagedFraction: this.kernel.engagedFraction,
+          liftDb: this.kernel.liftDb,
           // Only the filled prefix, so a short final batch cannot inject
           // stale zero-peak points into the scroll.
           scope: this.scope.subarray(0, this.scopeCount * 2),
