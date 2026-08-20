@@ -736,10 +736,11 @@ function linToDb(lin) {
  * THE DEFAULT IS tanh^3, chosen by ear rather than by table, and it is the
  * shape the other two are normalised ONTO — so nothing below changes for
  * anyone who leaves the switch alone. At the shipped knees a peak 3 dB over
- * the threshold loses 0.61 / 0.40 / 0.27 dB across n = 2 / 3 / 4, a peak 6 dB
- * over loses 2.01 whichever is selected, and a peak 12 dB over loses
- * 4.51 / 4.94 / 5.18. The exponent is now what its label claims: where in the
- * overshoot range the reduction is spent, pivoting about the anchor.
+ * the threshold loses 0.69 / 0.40 / 0.24 dB across n = 2 / 3 / 4, a peak
+ * SHAPE_ANCHOR_DB (8 dB) over loses 3.25 whichever is selected, and a peak
+ * 12 dB over loses 4.73 / 4.94 / 5.07. The exponent is now what its label
+ * claims: where in the overshoot range the reduction is spent, pivoting about
+ * the anchor.
  *
  * tanh^2 was the original curve; listening at a fixed threshold found it the
  * most audibly distorted of the three, and tanh^4 the least distorted but the
@@ -1351,9 +1352,24 @@ export class SoftClipperKernel {
     if (this.emphasisActive) {
       this.preEmphasisDetect.process(mono, monoEmph, n, 0)
     } else {
-      // Emphasis off: the lift is identically zero and the follower must not
-      // carry a stale reading into the next time it is switched on.
+      // Emphasis off: there is no lift, and every piece of state that could
+      // outlive the setting is cleared here rather than left to decay.
+      //
+      // LEAVING IT TO DECAY WAS A BUG, and a long one. `liftDb` only updates
+      // while the gate is open AND the moment is loud, so its 3 s constant is
+      // 3 s of GATED time — many times that in wall clock. Measured by
+      // flipping Emphasis 12 -> 0 mid-file: the threshold was still 2.76 dB
+      // high SIX SECONDS later, so the stage quietly under-processed
+      // everything in between. The filters switch instantly, so the threshold
+      // that compensates for them has to switch instantly too.
       monoEmph.set(mono.subarray(0, n))
+      this.liftWarmupMax = 0
+      this.fastPeakEmph = this.fastPeak
+      // The detector's filter has been fed nothing since it was switched off,
+      // so its state is stale by however long that was. Clearing it here means
+      // re-enabling starts from silence rather than from whatever was in
+      // flight when the knob passed through zero.
+      this.preEmphasisDetect.reset()
     }
 
     // ── Detector + threshold, computed once per sample from the unfiltered
@@ -1369,6 +1385,15 @@ export class SoftClipperKernel {
     // the emphasis filters are bypassed, which is what makes emphasisDb = 0
     // bit-identical to the build before compensation existed.
     const liftMaxDb = this.emphasisActive ? this.emphasisDbCommitted : 0
+    // THE BOUND IS APPLIED TO THE STATE, NOT ONLY TO THE TARGET, and that is
+    // what makes turning the knob DOWN take effect at once. liftDb is a slow
+    // average of past evidence; lowering Emphasis invalidates that evidence
+    // immediately, because the shelf that produced it is no longer in circuit
+    // at that depth. Clamping here costs one compare per block and collapses
+    // the whole class of "the threshold is still compensating for a setting
+    // that is gone" — including Emphasis 0, where the bound is 0 and the lift
+    // snaps to nothing.
+    if (liftDb > liftMaxDb) liftDb = liftMaxDb
     let noiseEstDb = this.noiseEstDb
     let gateHoldSamples = this.gateHoldSamples
     let speechLevelDb = this.speechLevelDb

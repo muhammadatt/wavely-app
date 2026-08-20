@@ -1592,3 +1592,47 @@ test('the compensation is seeded during warm-up, not ramped into', () => {
   assert.ok(opening.maxReductionDb < 2,
     `the opening of the file over-clipped: ${opening.maxReductionDb.toFixed(2)} dB`)
 })
+
+test('turning Emphasis down takes effect at once', () => {
+  // REPORTED IN REVIEW, and worse than it looked. `liftDb` only updates while
+  // the gate is open AND the moment is loud, so its 3 s constant is 3 s of
+  // GATED time — many times that in wall clock. Measured on real audio before
+  // the fix, flipping Emphasis 12 -> 0 mid-file left the threshold 2.76 dB
+  // high SIX SECONDS later, quietly under-processing everything in between.
+  //
+  // The emphasis filters switch the instant the parameter is committed, so the
+  // threshold that exists to compensate for them has to switch with them. The
+  // bound is therefore applied to the lift STATE, not only to its target.
+  const signal = sibilantSpeech(8, 0.35, 41, 0.8)
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 6.5, emphasisDb: 12, shape: 'tanh3' })
+  const out = new Float32Array(signal.length)
+  const run = (from, to) => {
+    for (let off = from; off < to; off += 128) {
+      const len = Math.min(128, to - off)
+      kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    }
+  }
+  const half = Math.round(signal.length / 2)
+  run(0, half)
+  const before = kernel.getMetering().liftDb
+  assert.ok(before > 2, `the probe never built a lift to release: ${before.toFixed(2)} dB`)
+
+  // Emphasis to zero: exactly zero, on the very next block, not eventually.
+  kernel.setParams({ emphasisDb: 0 })
+  run(half, half + 128)
+  assert.equal(kernel.getMetering().liftDb, 0)
+
+  // And a partial move down is bounded by the new setting immediately, with
+  // the rest of the convergence left to the measurement.
+  const k2 = new SoftClipperKernel(SR)
+  k2.setParams({ headroomDb: 6.5, emphasisDb: 12, shape: 'tanh3' })
+  for (let off = 0; off < half; off += 128) {
+    const len = Math.min(128, half - off)
+    k2.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  k2.setParams({ emphasisDb: 4 })
+  k2.process([signal.subarray(half, half + 128)], [out.subarray(half, half + 128)], 128)
+  assert.ok(k2.getMetering().liftDb <= 4 + 1e-9,
+    `lift ${k2.getMetering().liftDb.toFixed(2)} still exceeds the new Emphasis of 4 dB`)
+})

@@ -74,9 +74,13 @@ import { hannSymmetric, percentile } from './analysis.js'
  * independently: that file's 40-60 Hz band sits 7.9 dB below its own
  * 300-3000 Hz speech band.
  *
- * 16384 samples gives 2.9 Hz resolution at 48 kHz and 7+ bins in the narrowest
- * band at every corner in range, so symptom 1 cannot recur at any supported
- * rate. It is also CHEAPER than what it replaces — a 16384-point FFT every
+ * 16384 samples gives 2.9 Hz resolution at 48 kHz. The narrowest case is the
+ * LOW band at the minimum corner, which is 3 bins at 48 kHz, 4 at 44.1 and 7
+ * at 22.05 — thin, but the requirement is two, so symptom 1 cannot recur at
+ * any supported rate or corner. (An earlier version of this note claimed "7+
+ * bins at every corner", which is true only at the top of the corner range and
+ * was flatly wrong at the bottom, i.e. exactly where the failure it describes
+ * used to happen.) At the default-ish corners the bands are 6-9 bins wide. It is also CHEAPER than what it replaces — a 16384-point FFT every
  * 4096 samples against a 4096-point one every 512 — and measured rather than
  * assumed: 544 ms -> 307 ms on a 35.5 s selection, 56% of the old cost.
  */
