@@ -16,7 +16,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startPlayback, stopPlayback, setPlaybackLoop } from '../../src/audio/playback.js'
+import { startPlayback, stopPlayback, setPlaybackLoop, setPlaybackRegion } from '../../src/audio/playback.js'
 
 // ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -198,4 +198,145 @@ test('without loop, playback still ends once at the end', () => {
   for (let i = 0; i < 90; i++) advance(ctx, 1 / 60)
   assert.equal(times.filter(t => t === 'END').length, 1, 'onEnd fired exactly once')
   assert.equal(times[times.length - 2], 1, 'the last position reported is the end')
+})
+
+// ── Moving the region while it loops ────────────────────────────────────────
+//
+// Dragging the edge of a looping selection has to change what the loop plays
+// now. These measure the same way the seam tests do — from the context times
+// the nodes are told to start and stop at — because "did the loop update" and
+// "did it update without a gap" are different questions and only one of them is
+// answerable by ear.
+
+test('moving the end later extends the pass that is already sounding', () => {
+  const { ctx, started } = makeFakeContext()
+  play(ctx, { start: 4, end: 6, loop: true, loopStart: 4 })
+  const first = started[0]
+  assert.equal(first.duration, 2, 'the first pass covers 4 s → 6 s')
+
+  advance(ctx, 0.5)
+  setPlaybackRegion(4, 8)
+
+  assert.equal(started.length, 2, 'the tail past the old end is scheduled')
+  const tail = started[1]
+  // It joins at the old end's context time, reading into the buffer there, so
+  // the extension is as seamless as the loop seam itself.
+  assert.equal(tail.at, first.at + first.duration, 'the tail joins with no gap')
+  assert.equal(tail.offset, 6, 'the tail reads into the buffer at the old end')
+  assert.equal(tail.duration, 2, 'the tail runs to the new end')
+  stopPlayback()
+})
+
+test('moving the end earlier stops the pass at the new end', () => {
+  const { ctx, started, stopped } = makeFakeContext()
+  play(ctx, { start: 4, end: 8, loop: true, loopStart: 4 })
+  const first = started[0]
+
+  advance(ctx, 0.5)
+  setPlaybackRegion(4, 6)
+
+  const cut = stopped.find(s => s.node === first.node)
+  assert.ok(cut, 'the sounding pass is stopped early')
+  assert.equal(cut.at, first.at + 2, 'stopped at the new end, not the old one')
+  stopPlayback()
+})
+
+test('the repeat after a region change plays the new region', () => {
+  const { ctx, started } = makeFakeContext()
+  play(ctx, { start: 4, end: 6, loop: true, loopStart: 4 })
+
+  advance(ctx, 0.5)
+  setPlaybackRegion(5, 6)   // start dragged in by a second
+
+  for (let i = 0; i < 200 && started.length < 2; i++) advance(ctx, 1 / 60)
+  const repeat = started[started.length - 1]
+  assert.equal(repeat.offset, 5, 'the repeat starts at the new region start')
+  assert.equal(repeat.duration, 1, 'and runs to the new region end')
+  stopPlayback()
+})
+
+test('a repeat already booked is rebooked against the new region', () => {
+  const { ctx, started, stopped } = makeFakeContext()
+  play(ctx, { start: 0, end: 1, loop: true, loopStart: 0 })
+
+  // Walk into the lookahead window, so the next pass is sitting there.
+  for (let i = 0; i < 120 && started.length < 2; i++) advance(ctx, 1 / 60)
+  assert.equal(started.length, 2, 'the next pass is booked')
+  const stale = started[1]
+
+  setPlaybackRegion(0, 2)
+
+  // The booked pass covered the old region; it must not sound.
+  assert.ok(
+    stopped.some(s => s.node === stale.node),
+    'the pass booked against the old region is cancelled',
+  )
+  stopPlayback()
+})
+
+test('dragging the end behind the play position wraps immediately', () => {
+  const { ctx, started, stopped } = makeFakeContext()
+  play(ctx, { start: 0, end: 8, loop: true, loopStart: 0 })
+  const first = started[0]
+
+  advance(ctx, 4)             // 4 s into the region
+  setPlaybackRegion(0, 2)     // new end is two seconds behind the playhead
+
+  assert.ok(
+    stopped.some(s => s.node === first.node && s.at === ctx.currentTime),
+    'what is sounding is cut off now — it is audio the user just excluded',
+  )
+  const wrapped = started[started.length - 1]
+  assert.equal(wrapped.at, ctx.currentTime, 'the new pass starts now')
+  assert.equal(wrapped.offset, 0, 'from the region start')
+  assert.equal(wrapped.duration, 2, 'over the new region')
+  stopPlayback()
+})
+
+test('without loop, dragging the end behind the play position ends playback', () => {
+  const { ctx } = makeFakeContext()
+  const times = play(ctx, { start: 0, end: 8, loop: false })
+
+  for (let i = 0; i < 240; i++) advance(ctx, 1 / 60)   // ~4 s in
+  setPlaybackRegion(0, 2)
+  advance(ctx, 1 / 60)
+
+  assert.equal(times.filter(t => t === 'END').length, 1, 'playback ended once')
+})
+
+test('a zero-length or inverted region is ignored', () => {
+  const { ctx, started } = makeFakeContext()
+  play(ctx, { start: 4, end: 6, loop: true, loopStart: 4 })
+  const before = started.length
+
+  // Mid-drag an edge routinely passes through and over its opposite number.
+  setPlaybackRegion(5, 5)
+  setPlaybackRegion(6, 4)
+
+  assert.equal(started.length, before, 'nothing was rescheduled')
+  for (let i = 0; i < 200 && started.length < before + 1; i++) advance(ctx, 1 / 60)
+  const repeat = started[started.length - 1]
+  assert.equal(repeat.offset, 4, 'the region is unchanged')
+  assert.equal(repeat.duration, 2)
+  stopPlayback()
+})
+
+test('an edge dragged in and back out again plays the region continuously', () => {
+  // A drag is a stream of these calls, not one, and each shrink stops the
+  // sounding node early. Extending afterwards has to pick up exactly where the
+  // last stop left off, or the drag leaves a hole in the middle of the region.
+  const { ctx, started, stopped } = makeFakeContext()
+  play(ctx, { start: 4, end: 8, loop: true, loopStart: 4 })
+  const first = started[0]
+
+  setPlaybackRegion(4, 6)
+  setPlaybackRegion(4, 8)
+
+  const cut = stopped.filter(s => s.node === first.node).pop()
+  const tail = started[started.length - 1]
+  assert.equal(cut.at, first.at + 2, 'the sounding node was cut at the shrunk end')
+  assert.equal(tail.at, cut.at, 'the tail picks up at exactly that instant')
+  assert.equal(tail.offset, 6, 'reading into the buffer where the cut landed')
+  assert.equal(tail.duration, 2, 'and running to the restored end')
+  stopPlayback()
 })
