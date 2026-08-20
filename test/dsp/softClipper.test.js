@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import {
   SoftClipperKernel, processSoftClipperBuffer, softClip, SOFT_CLIPPER_LATENCY_SAMPLES,
   MAX_REDUCTION_DB, KNEE_DB, SHAPE_EXPONENT, SHAPE_MIN_KNEE_DB,
+  SHAPE_KNEE_DB, SHAPE_ANCHOR_DB,
   SOFT_CLIPPER_KERNEL_DEFAULTS,
 } from '../../src/audio/softClipperProcessor.js'
 import {
@@ -609,6 +610,87 @@ function speechLike(seconds, peakAmp, seed = 11) {
   return out
 }
 
+/** A single voiced burst, used as a plosive-shaped outlier. */
+function plosiveBurst(seconds, amp, sr = SR) {
+  const n = Math.round(seconds * sr)
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    out[i] = amp * (Math.sin((Math.PI * i) / n) ** 2) * Math.sin((2 * Math.PI * 110 * i) / sr)
+  }
+  return out
+}
+
+/**
+ * A sustained fricative-like band — first-differenced noise, so a 6 dB/octave
+ * HF tilt with most of its energy above the 3.5 kHz emphasis corner.
+ *
+ * The counterpart to plosiveBurst: the two are normalised to the same peak
+ * amplitude and differ only in spectrum, which is what makes them able to
+ * separate "the emphasis moved the threshold" from "the emphasis aimed the
+ * stage somewhere".
+ */
+function fricativeNoise(seconds, amp, seed = 5, sr = SR) {
+  const n = Math.round(seconds * sr)
+  const out = new Float32Array(n)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  let prev = 0, max = 0
+  for (let i = 0; i < n; i++) {
+    const r = rnd() - 0.5
+    const d = r - prev
+    prev = r
+    out[i] = d
+    if (Math.abs(d) > max) max = Math.abs(d)
+  }
+  if (max > 0) for (let i = 0; i < n; i++) out[i] *= amp / max
+  return out
+}
+
+/** Run a signal through a fresh kernel in 128-sample blocks, return metering. */
+function meter(signal, params) {
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ shape: 'tanh3', ...params })
+  const out = new Float32Array(signal.length)
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  return kernel.getMetering()
+}
+
+/**
+ * speechLike with a realistic dynamic spread — syllable peaks vary over ~12 dB
+ * rather than clustering.
+ *
+ * WHY IT EXISTS: speechLike's syllables all land within a few dB of each
+ * other, so at any Headroom the stage either touches all of them or none. Real
+ * narration crosses the threshold constantly and shallowly (p50 1.2 dB over,
+ * p90 3.0, max 6.1 — see KNEE_DB), and a probe with no shallow crossings
+ * cannot see anything a knee does. This one reproduces that distribution to
+ * p50 1.25 / p90 2.93 / max 4.16 at Headroom 4.
+ */
+function variedSpeech(seconds, peakAmp, seed = 11) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  let i = 0
+  while (i < n) {
+    const sylN = Math.round((0.08 + rnd() * 0.14) * SR)
+    const gapN = Math.round((0.02 + rnd() * 0.06) * SR)
+    const amp = peakAmp * Math.pow(10, (-10 + 12 * rnd()) / 20)
+    const f0 = 100 + rnd() * 60
+    for (let j = 0; j < sylN && i < n; j++, i++) {
+      const env = Math.sin((Math.PI * j) / sylN) ** 1.5
+      const t = i / SR
+      out[i] = (amp * env * (Math.sin(2 * Math.PI * f0 * t) + 0.5 * Math.sin(4 * Math.PI * f0 * t)
+        + 0.33 * Math.sin(6 * Math.PI * f0 * t) + 0.25 * Math.sin(8 * Math.PI * f0 * t))) / 2.08
+    }
+    for (let j = 0; j < gapN && i < n; j++, i++) out[i] = peakAmp * 0.002 * (rnd() - 0.5)
+  }
+  return out
+}
+
 /** Fraction of voiced samples the curve actually touches, past settling. */
 function fractionTouched(signal, params) {
   const kernel = new SoftClipperKernel(SR)
@@ -1001,13 +1083,13 @@ test('every shape is still exactly bit-transparent below the threshold', () => {
     const n = SHAPE_EXPONENT[shape]
     for (let i = 0; i <= 2000; i++) {
       const x = -T + (2 * T * i) / 2000
-      assert.equal(softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n), x,
+      assert.equal(softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n), x,
         `${shape} altered a below-threshold sample at x=${x}`)
     }
   }
 })
 
-test('every shape is monotonic at the shipped KNEE_DB', () => {
+test('every shape is monotonic at its shipped knee', () => {
   // Non-monotonic means the transfer curve folds: a louder input producing a
   // quieter output, which is the one failure mode here that sounds like
   // destruction rather than colour. Swept across four decades of threshold
@@ -1018,7 +1100,7 @@ test('every shape is monotonic at the shipped KNEE_DB', () => {
       let prev = -Infinity
       for (let i = 0; i <= 20000; i++) {
         const x = (i / 20000) * 1.5
-        const y = softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n)
+        const y = softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n)
         assert.ok(y >= prev, `${shape} folded at T=${T}, x=${x}: ${y} < ${prev}`)
         prev = y
       }
@@ -1047,7 +1129,11 @@ test('the recorded monotonicity bounds are the real ones, per shape', () => {
     const bound = SHAPE_MIN_KNEE_DB[shape]
     assert.ok(!foldsAt(n, bound * 1.01), `${shape} folds above its stated bound ${bound}`)
     assert.ok(foldsAt(n, bound * 0.97), `${shape} does not fold below its stated bound ${bound}`)
-    assert.ok(bound < KNEE_DB, `${shape} is not usable at the shipped KNEE_DB ${KNEE_DB}`)
+    // Against the shape's OWN knee, not the shared one: normalisation spends
+    // part of the margin (9.08 / 7 / 6.01 dB), and buying matched depth with a
+    // folded curve would be a much worse bug than the one it fixes.
+    assert.ok(bound < SHAPE_KNEE_DB[shape],
+      `${shape}'s knee ${SHAPE_KNEE_DB[shape].toFixed(3)} is below its fold bound ${bound}`)
   }
 })
 
@@ -1058,14 +1144,12 @@ test('higher shapes spend proportionally more of the budget on the big peaks', (
   // getting more selective, which is what "transparency" means here — the
   // near-threshold material is ordinary speech.
   const T = 0.25
-  const at = (n, excessDb) => {
+  const at = (shape, excessDb) => {
     const x = T * dbToLin(excessDb)
-    return -20 * Math.log10(softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n) / x)
+    return -20 * Math.log10(
+      softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], SHAPE_EXPONENT[shape]) / x)
   }
-  const ratios = SHAPES.map(shape => {
-    const n = SHAPE_EXPONENT[shape]
-    return at(n, 3) / at(n, 12)
-  })
+  const ratios = SHAPES.map(shape => at(shape, 3) / at(shape, 12))
   for (let i = 1; i < ratios.length; i++) {
     assert.ok(ratios[i] < ratios[i - 1] * 0.75,
       `${SHAPES[i]} is not meaningfully more selective than ${SHAPES[i - 1]}: ` +
@@ -1074,8 +1158,8 @@ test('higher shapes spend proportionally more of the budget on the big peaks', (
   // And the ordering must not come from simply doing less overall — every
   // shape still reaches real depth on a genuine outlier.
   for (const shape of SHAPES) {
-    assert.ok(at(SHAPE_EXPONENT[shape], 12) > 4,
-      `${shape} barely works on a +12 dB peak: ${at(SHAPE_EXPONENT[shape], 12).toFixed(2)} dB`)
+    assert.ok(at(shape, 12) > 4,
+      `${shape} barely works on a +12 dB peak: ${at(shape, 12).toFixed(2)} dB`)
   }
 })
 
@@ -1089,12 +1173,13 @@ test('every shape keeps level invariance and the reduction bound', () => {
     let first = null
     for (const T of [0.001, 0.01, 0.1, 0.5]) {
       const x = T * dbToLin(excessDb)
-      const red = -20 * Math.log10(softClip(x, T, MAX_REDUCTION_DB, KNEE_DB, n) / x)
+      const red = -20 * Math.log10(softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n) / x)
       if (first === null) first = red
       assert.ok(Math.abs(red - first) < 1e-9, `${shape} is not level-invariant at T=${T}`)
     }
     // Bound: even a threshold 60 dB too low cannot cost more than the cap.
-    const worst = -20 * Math.log10(softClip(0.9, 0.0009, MAX_REDUCTION_DB, KNEE_DB, n) / 0.9)
+    const worst = -20 * Math.log10(
+      softClip(0.9, 0.0009, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], n) / 0.9)
     assert.ok(worst <= MAX_REDUCTION_DB + 1e-9,
       `${shape} exceeded the reduction bound: ${worst.toFixed(3)} dB`)
   }
@@ -1133,10 +1218,12 @@ test('the default shape is a real shape, and it is the one the panel offers', ()
     `default shape ${SOFT_CLIPPER_KERNEL_DEFAULTS.shape} is not in SHAPE_EXPONENT`)
 })
 
-test('the default shape is bit-identical to the curve before shapes existed', () => {
-  // The regression guard for the whole change: adding a switch must not move
-  // anyone who never touches it. tanh^2 with the exponent path in place has
-  // to equal the two-multiply form it replaced, exactly.
+test('the exponent path is bit-identical to the two-multiply form it replaced', () => {
+  // The regression guard for the exponent unrolling: tanh^2 at a given knee
+  // has to equal the hand-written two-multiply curve that predates shapes,
+  // exactly. (This is no longer the DEFAULT shape, and no longer the knee any
+  // shape ships with — see the anchor test below for the guard that the stock
+  // patch itself has not moved.)
   const T = 0.2
   for (let i = 0; i <= 5000; i++) {
     const x = -1.2 + (2.4 * i) / 5000
@@ -1151,39 +1238,401 @@ test('the default shape is bit-identical to the curve before shapes existed', ()
   }
 })
 
-test('at a fixed Headroom, higher shapes do strictly less on both axes', () => {
-  // The claim the panel actually makes, pinned end-to-end rather than on the
-  // curve alone: at the SAME setting, raising the shape touches fewer samples
-  // AND takes less off each one. Measured this way round because the reverse
-  // reading -- matching the depth by winding Headroom down -- reverses the
-  // sample-count ordering on real audio, and a test asserting the wrong one of
-  // those two would enshrine the framing that measurement overturned. See the
-  // shape table in the kernel for both.
+test('every shape delivers the same reduction at the anchor', () => {
+  // THE POINT OF SHAPE_ANCHOR_DB, asserted on the curve itself. A peak this
+  // far over the threshold must lose the same amount whichever position is
+  // selected — otherwise the switch is a depth control again and no A/B
+  // through it compares shapes.
+  const T = 0.25
+  const at = (shape, excessDb) => {
+    const x = T * dbToLin(excessDb)
+    return -20 * Math.log10(
+      softClip(x, T, MAX_REDUCTION_DB, SHAPE_KNEE_DB[shape], SHAPE_EXPONENT[shape]) / x)
+  }
+  const anchored = SHAPES.map(shape => at(shape, SHAPE_ANCHOR_DB))
+  for (const r of anchored) {
+    assert.ok(Math.abs(r - anchored[0]) < 1e-9,
+      `shapes disagree at the anchor: ${anchored.map(v => v.toFixed(6)).join(' / ')}`)
+  }
+  // And it is a genuine pivot, not a curve collapse: strictly ordered one way
+  // below the anchor and strictly the other way above it. Checked at both
+  // sides rather than only at the anchor, because three identical curves
+  // would satisfy the assertion above and would be a broken control.
+  for (let i = 1; i < SHAPES.length; i++) {
+    assert.ok(at(SHAPES[i], SHAPE_ANCHOR_DB / 2) < at(SHAPES[i - 1], SHAPE_ANCHOR_DB / 2),
+      `${SHAPES[i]} does not do less than ${SHAPES[i - 1]} below the anchor`)
+    assert.ok(at(SHAPES[i], SHAPE_ANCHOR_DB * 2) > at(SHAPES[i - 1], SHAPE_ANCHOR_DB * 2),
+      `${SHAPES[i]} does not do more than ${SHAPES[i - 1]} above the anchor`)
+  }
+})
+
+test('the default shape ships at exactly KNEE_DB, so the stock patch has not moved', () => {
+  // Normalisation is anchored ON the default shape, which is what makes it
+  // free for anyone who never touches the switch. If this drifts, the shipped
+  // Headroom default (6.5, itself calibrated against this curve) is wrong too
+  // — the two are coupled and the kernel says so.
+  assert.equal(SHAPE_KNEE_DB[SOFT_CLIPPER_KERNEL_DEFAULTS.shape], KNEE_DB)
+})
+
+test('the recorded per-shape knees are the ones the derivation produces', () => {
+  // The knees are computed, not tabulated, so the numbers quoted throughout
+  // the kernel comments and the panel captions have nothing pinning them.
+  // Stated here to three decimals so a change to the anchor or to the default
+  // shape fails loudly rather than silently re-tuning a shipped control.
+  const stated = { tanh2: 8.490, tanh3: 7.000, tanh4: 6.221 }
+  for (const shape of SHAPES) {
+    assert.ok(Math.abs(SHAPE_KNEE_DB[shape] - stated[shape]) < 0.001,
+      `${shape} knee is ${SHAPE_KNEE_DB[shape].toFixed(4)}, not the recorded ${stated[shape]}`)
+  }
+})
+
+test('at a fixed Headroom, the shapes now land at the same depth', () => {
+  // The end-to-end version of the anchor guarantee, and the reported symptom
+  // it answers: switching to LATE at a fixed threshold used to sound cleaner
+  // largely because it was doing less. Peak reduction is read from the
+  // kernel's own meter — the number the lamp shows and the ear reads as depth.
+  //
+  // The probe's outlier is placed near the anchor deliberately. Depth matches
+  // EXACTLY only there; well above it the shapes diverge again by design, so a
+  // probe with a 10 dB outlier would fail an assertion this tight and would be
+  // testing the wrong claim.
   const signal = concat(
     speechLike(5, 0.5, 97),
-    tone(120, 0.02, 0.95),
-    speechLike(2, 0.5, 101),
+    plosiveBurst(0.03, 0.62),
+    speechLike(3, 0.5, 101),
   )
-  const stats = SHAPES.map(shape => {
-    const out = processSoftClipperBuffer([signal], SR, { headroomDb: 6, emphasisDb: 0, shape }).channelData[0]
-    const ref = processSoftClipperBuffer([signal], SR, { headroomDb: 60, emphasisDb: 0, shape }).channelData[0]
-    let touched = 0, voiced = 0, sum = 0
-    for (let i = 0; i < signal.length; i++) {
-      const a = Math.abs(ref[i])
-      if (a < 0.005) continue
-      voiced++
-      const d = 20 * Math.log10(a / Math.max(Math.abs(out[i]), 1e-12))
-      if (d > 0.02) { touched++; sum += d }
+  const peakGr = (shape) => {
+    const kernel = new SoftClipperKernel(SR)
+    kernel.setParams({ headroomDb: 6.5, emphasisDb: 6, shape })
+    const out = new Float32Array(signal.length)
+    for (let off = 0; off < signal.length; off += 128) {
+      const len = Math.min(128, signal.length - off)
+      kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
     }
-    return { shape, frac: touched / voiced, mean: touched ? sum / touched : 0 }
-  })
-  assert.ok(stats[0].frac > 0, 'the probe never engaged the stage at all')
-  for (let i = 1; i < stats.length; i++) {
-    assert.ok(stats[i].frac < stats[i - 1].frac,
-      `${stats[i].shape} touched more samples than ${stats[i - 1].shape}: ` +
-      stats.map(s => `${s.shape} ${(100 * s.frac).toFixed(3)}%`).join(', '))
-    assert.ok(stats[i].mean < stats[i - 1].mean,
-      `${stats[i].shape} took more off each sample than ${stats[i - 1].shape}: ` +
-      stats.map(s => `${s.shape} ${s.mean.toFixed(3)} dB`).join(', '))
+    return kernel.getMetering().maxReductionDb
   }
+  const grs = SHAPES.map(peakGr)
+  assert.ok(grs[0] > 1, `the probe never engaged the stage: ${grs.join(', ')}`)
+  const spread = Math.max(...grs) - Math.min(...grs)
+  // 1.49 dB before normalisation, 0.15 after, on this probe.
+  assert.ok(spread < 0.4,
+    `the shapes still differ in depth at a fixed Headroom: ` +
+    SHAPES.map((sh, i) => `${sh} ${grs[i].toFixed(2)}`).join(', '))
+})
+
+test('what survives normalisation is where the distortion is spent', () => {
+  // The other half of the same claim: matching the depth must not flatten the
+  // control into three identical curves. On crossings distributed like real
+  // narration (p50 1.25 dB over, p90 2.93, max 4.16 — the figures recorded at
+  // KNEE_DB are p50 1.2 / p90 3.0 / max 6.1) the same depth is spent on fewer,
+  // deeper crossings as the shape rises, and the residual falls monotonically.
+  //
+  // variedSpeech, not speechLike: at the shipped Headroom speechLike's
+  // syllables never reach the threshold at all, so its entire output is one
+  // outlier and there is nothing for a knee to redistribute between.
+  const signal = variedSpeech(12, 0.9, 41)
+  const residualDb = (shape) => {
+    const wet = processSoftClipperBuffer([signal], SR, { headroomDb: 4, emphasisDb: 6, shape }).channelData[0]
+    const dry = processSoftClipperBuffer([signal], SR, { headroomDb: 60, emphasisDb: 6, shape }).channelData[0]
+    let sq = 0
+    for (let i = 0; i < signal.length; i++) { const d = dry[i] - wet[i]; sq += d * d }
+    return 10 * Math.log10(sq / signal.length)
+  }
+  const res = SHAPES.map(residualDb)
+  for (let i = 1; i < res.length; i++) {
+    assert.ok(res[i] < res[i - 1] - 1,
+      `${SHAPES[i]} does not distort measurably less than ${SHAPES[i - 1]}: ` +
+      SHAPES.map((sh, k) => `${sh} ${res[k].toFixed(1)}`).join(', '))
+  }
+  // -52.0 / -55.3 / -57.8 dBFS measured. Under the shared knee this spread was
+  // 13.9 dB and came with a 3.5x depth difference; the depth is now held and
+  // the remainder is the control.
+  assert.ok(res[0] - res[res.length - 1] < 10,
+    `the shapes still differ like a depth control: ` +
+    SHAPES.map((sh, k) => `${sh} ${res[k].toFixed(1)}`).join(', '))
+})
+
+// ── HF Emphasis lift compensation (LIFT_TAU_S) ──────────────────────────────
+
+/**
+ * A syllable bed whose voiced parts are part tone and part HF-tilted noise.
+ *
+ * GATED LIKE SPEECH, and that is not cosmetic: the detector's noise floor is a
+ * valley follower, so on CONTINUOUS material it settles at the signal's own
+ * level, the gate never opens, and the speech tracker never updates. A
+ * sustained noise probe therefore measures a stage that is not running — the
+ * same trap recorded twice in the kernel, once for the aliasing sweep and once
+ * for the noise-floor-relative threshold guard. `hfMix` is the share of each
+ * syllable's amplitude that is fricative rather than tone.
+ */
+function sibilantSpeech(seconds, peakAmp, seed, hfMix) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  let i = 0, prev = 0
+  while (i < n) {
+    const sylN = Math.round((0.08 + rnd() * 0.14) * SR)
+    const gapN = Math.round((0.02 + rnd() * 0.06) * SR)
+    const amp = peakAmp * Math.pow(10, (-10 + 12 * rnd()) / 20)
+    const f0 = 100 + rnd() * 60
+    for (let j = 0; j < sylN && i < n; j++, i++) {
+      const env = Math.sin((Math.PI * j) / sylN) ** 1.5
+      const t = i / SR
+      const tone = (Math.sin(2 * Math.PI * f0 * t) + 0.5 * Math.sin(4 * Math.PI * f0 * t)
+        + 0.33 * Math.sin(6 * Math.PI * f0 * t) + 0.25 * Math.sin(8 * Math.PI * f0 * t)) / 2.08
+      const r = rnd() - 0.5
+      const d = (r - prev) * 2.6 // first difference: HF tilt, roughly peak-matched
+      prev = r
+      out[i] = amp * env * ((1 - hfMix) * tone + hfMix * d)
+    }
+    for (let j = 0; j < gapN && i < n; j++, i++) { out[i] = peakAmp * 0.002 * (rnd() - 0.5); prev = 0 }
+  }
+  return out
+}
+
+test('the lift reads zero on low-frequency material and tracks HF material', () => {
+  // The measurement the whole compensation rests on. A signal with no energy
+  // above the 3.5 kHz corner is not lifted by the pre-emphasis at all, so the
+  // threshold must not move for it; a sibilant passage is lifted nearly by
+  // the full knob. Measured: 0.05 dB against 11.6 at emphasis 12.
+  const lf = sibilantSpeech(12, 0.35, 41, 0)
+  const hf = sibilantSpeech(12, 0.35, 41, 0.8)
+  for (const emphasisDb of [3, 6, 12]) {
+    const lfLift = meter(lf, { headroomDb: 6.5, emphasisDb }).liftDb
+    const hfLift = meter(hf, { headroomDb: 6.5, emphasisDb }).liftDb
+    assert.ok(lfLift < 0.1,
+      `emphasis ${emphasisDb} lifted an LF-only signal by ${lfLift.toFixed(3)} dB`)
+    assert.ok(hfLift > 0.85 * emphasisDb,
+      `emphasis ${emphasisDb} only lifted a sibilant passage by ${hfLift.toFixed(2)} dB`)
+  }
+})
+
+test('the lift can never leave [0, emphasisDb]', () => {
+  // Bounded BY CONSTRUCTION — the shelf is a pure boost, magnitude within
+  // [0, N] dB to four decimals at 3, 6 and 12 with no corner overshoot — but
+  // the clamp is what stops a follower still filling from zero producing a
+  // nonsense threshold in the first milliseconds. That failure mode is on
+  // record: an unbounded quantity reaching the threshold once produced 29 dB
+  // of reduction while a tracker was still converging.
+  const cases = [
+    concat(new Float32Array(SR), fricativeNoise(2, 0.95)),
+    fricativeNoise(0.5, 1e-6),
+    sibilantSpeech(2, 0.9, 3, 0.8),
+    new Float32Array(64),
+  ]
+  for (const emphasisDb of [0, 6, 12]) {
+    for (const signal of cases) {
+      const { liftDb } = meter(signal, { headroomDb: 6.5, emphasisDb })
+      assert.ok(liftDb >= 0 && liftDb <= emphasisDb + 1e-9,
+        `lift ${liftDb} escaped [0, ${emphasisDb}]`)
+    }
+  }
+})
+
+test('quiet HF material does not drive the lift', () => {
+  // WHAT LIFT_GATE_DB FIXES, and the failure is a real-audio one reproduced
+  // here: a bed whose LOUD moments are low-frequency and whose fricatives are
+  // 12 dB quieter. The peaks that reach the curve carry no HF and were never
+  // lifted, so the threshold must not rise for them — but a lift averaged over
+  // all voiced material reads the quiet fricatives and raises it anyway,
+  // over-compensating exactly the peaks the stage exists to catch.
+  //
+  // On 35 s of real narration that error was a factor of two (1.74 dB measured
+  // against a 0.85 dB target at emphasis 12) and it inverted the sign of the
+  // depth drift rather than removing it.
+  const quietHf = () => fricativeNoise(1, 0.5 * Math.pow(10, -12 / 20))
+  const signal = concat(
+    speechLike(3, 0.5, 97), quietHf(),
+    speechLike(3, 0.5, 101), quietHf(),
+    speechLike(3, 0.5, 103), quietHf(),
+  )
+  // 0.31 dB gated against 4.91 ungated on this probe — a 16x separation, so
+  // the bound is nowhere near either value and the test is about the
+  // mechanism rather than about a tuned number.
+  const { liftDb } = meter(signal, { headroomDb: 6.5, emphasisDb: 12 })
+  assert.ok(liftDb < 1.5,
+    `quiet fricatives drove the lift to ${liftDb.toFixed(2)} dB on a bed whose peaks are LF`)
+})
+
+test('emphasis 0 compensates by exactly nothing', () => {
+  // The guarantee that keeps the whole feature free for anyone who has the
+  // filters bypassed: with no emphasis there is no lift to give back, on any
+  // material, and the threshold is the one the build before compensation
+  // computed. Exact, not approximate — the clamp's upper bound is 0.
+  for (const signal of [sibilantSpeech(4, 0.35, 11, 0.8), speechLike(4, 0.35, 11)]) {
+    assert.equal(meter(signal, { headroomDb: 6.5, emphasisDb: 0 }).liftDb, 0)
+  }
+})
+
+test('a single fricative does not move the compensation', () => {
+  // THE TEST THE BALLISTICS EXIST FOR, and the one a fast time constant
+  // fails. If the lift tracked transients, a fricative would raise the
+  // threshold as it arrived and receive no extra reduction — the compensation
+  // would cancel exactly the selectivity it is meant to preserve.
+  //
+  // MEASURED AT THE END OF THE BURST, by truncating the signal there, because
+  // getMetering() reports the CURRENT lift: reading it after four more seconds
+  // of bed measures how far it has decayed back, which a 20 ms constant passes
+  // just as easily as a 3 s one. That version of this test did not fail under
+  // mutation, which is how the hole was found.
+  //
+  // DIFFERENTIAL, against the same bed with silence in the burst's place: the
+  // bed is synthetic speech with hard syllable edges, which splatter some HF
+  // of their own, so an absolute reading would be measuring the generator as
+  // much as the burst.
+  const bed = sibilantSpeech(4, 0.35, 97, 0)
+  const gap = new Float32Array(Math.round(0.03 * SR))
+  for (const emphasisDb of [6, 12]) {
+    const without = meter(concat(bed, gap), { headroomDb: 6.5, emphasisDb }).liftDb
+    const withBurst = meter(concat(bed, fricativeNoise(0.03, 0.44)),
+      { headroomDb: 6.5, emphasisDb }).liftDb
+    assert.ok(withBurst - without < 0.5,
+      `one 30 ms fricative moved the compensation by ${(withBurst - without).toFixed(3)} dB ` +
+      `at emphasis ${emphasisDb}`)
+  }
+})
+
+test('the compensation responds over seconds, not milliseconds', () => {
+  // The ballistics asserted directly, as a time constant rather than through
+  // a consequence. A step from an LF passage into a sibilant one is the only
+  // input that separates "slow" from "fast" cleanly — a single burst is short
+  // enough that even a 20 ms constant barely reacts within it, so the burst
+  // test above cannot carry this on its own.
+  //
+  // Bounded on BOTH sides. Too fast and the compensation eats the selectivity
+  // it exists to protect; too slow and it never arrives within a take.
+  const emphasisDb = 12
+  const signal = concat(sibilantSpeech(4, 0.35, 97, 0), sibilantSpeech(10, 0.35, 41, 0.8))
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 6.5, emphasisDb, shape: 'tanh3' })
+  const out = new Float32Array(signal.length)
+  const trace = []
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    trace.push({ t: off / SR, lift: kernel.getMetering().liftDb })
+  }
+  const stepAt = 4
+  const before = trace.find(p => p.t >= stepAt - 0.2).lift
+  const settled = trace[trace.length - 1].lift
+  assert.ok(settled - before > 5, `the step did not move the lift: ${before} -> ${settled}`)
+  const target = before + 0.632 * (settled - before)
+  const riseS = trace.find(p => p.t > stepAt && p.lift >= target).t - stepAt
+  assert.ok(riseS > 0.5 && riseS < 8,
+    `lift reached 63% of its step in ${riseS.toFixed(2)} s — expected the order of ` +
+    `LIFT_TAU_S, not a transient-following constant`)
+})
+
+test('emphasis still aims the stage at HF peaks and away from LF ones', () => {
+  // What the knob is FOR, pinned end-to-end, and the half the compensation
+  // must not flatten. Two outliers of identical peak amplitude differing only
+  // in spectrum, each in its own copy of the same bed: raising emphasis drives
+  // the fricative-shaped one much harder (3.00 -> 5.84 dB measured) and leaves
+  // the low-frequency one alone (1.88 -> 1.82, drifting very slightly DOWN,
+  // which is the pivot pointing the right way).
+  const withBurst = (burst) => concat(speechLike(4, 0.35, 97), burst, speechLike(4, 0.35, 101))
+  const AMP = 0.44
+  const lfSig = withBurst(plosiveBurst(0.03, AMP))
+  const hfSig = withBurst(fricativeNoise(0.03, AMP))
+
+  const lf = [0, 12].map(e => meter(lfSig, { headroomDb: 6.5, emphasisDb: e }).maxReductionDb)
+  const hf = [0, 12].map(e => meter(hfSig, { headroomDb: 6.5, emphasisDb: e }).maxReductionDb)
+
+  assert.ok(hf[1] > hf[0] + 1.5,
+    `emphasis did not reach the HF peak: ${hf.map(v => v.toFixed(2)).join(' -> ')}`)
+  assert.ok(lf[1] <= lf[0] + 0.02 && lf[1] > lf[0] - 0.25,
+    `emphasis moved the LF peak, which has no energy above the corner: ` +
+    lf.map(v => v.toFixed(2)).join(' -> '))
+})
+
+test('depth holds across the emphasis knob on synthetic beds', () => {
+  // ⚠ SCOPED TO SYNTHETIC MATERIAL DELIBERATELY, and the name says so. On two
+  // of three real narrators the depth does NOT hold across the knob, because
+  // their peak reduction is set by a single event far more HF-rich than the
+  // passage average, and no statistic slow enough to leave an isolated
+  // fricative its extra reduction can also cancel it on a peak that IS one.
+  // See LIFT_GATE_DB for the three-file table. What this test pins is that the
+  // broad inflation is gone on material where the lift is measurable at all —
+  // asserting more than that would be asserting something untrue of real
+  // audio.
+  // The claim the compensation exists to make, end-to-end on three beds
+  // spanning no sibilance to heavy sibilance. Uncompensated, peak reduction
+  // drifted 1.45 -> 5.45 dB across the knob on the mixed bed and 1.28 -> 5.68
+  // on the sibilant one — the knob acting as a second, spectrum-dependent
+  // depth control. Measured with the lift in: -0.28 and -0.06 dB of drift.
+  //
+  // The bound is two-sided. Over-compensating would be the subtler failure —
+  // a knob that quietly REDUCES depth as it is raised is just as dishonest an
+  // A/B as one that raises it, and the warm-up seed deliberately takes the
+  // max, which errs in that direction.
+  for (const hfMix of [0, 0.35, 0.8]) {
+    const signal = sibilantSpeech(12, 0.35, 41, hfMix)
+    const grs = [0, 3, 6, 12].map(e => meter(signal, { headroomDb: 6.5, emphasisDb: e }).maxReductionDb)
+    const drift = Math.max(...grs) - Math.min(...grs)
+    assert.ok(drift < 0.6,
+      `hfMix ${hfMix}: depth still moves with the knob — ${grs.map(v => v.toFixed(2)).join(' -> ')}`)
+  }
+})
+
+test('the compensation is seeded during warm-up, not ramped into', () => {
+  // Without the seed the feature is absent for its first three seconds: the
+  // speech tracker adopts a real level the instant its 500 ms window closes
+  // and the stage starts processing, while a lift climbing from zero on a 3 s
+  // constant leaves the threshold uncompensated exactly then. Asserted on the
+  // opening of a file rather than on its whole length, because a running
+  // maximum over a long file hides a short transient — which is how this was
+  // nearly missed.
+  const signal = sibilantSpeech(2.5, 0.35, 41, 0.8)
+  const settled = meter(sibilantSpeech(12, 0.35, 41, 0.8), { headroomDb: 6.5, emphasisDb: 12 })
+  const opening = meter(signal, { headroomDb: 6.5, emphasisDb: 12 })
+  assert.ok(opening.liftDb > 0.8 * settled.liftDb,
+    `lift had only reached ${opening.liftDb.toFixed(2)} dB of ${settled.liftDb.toFixed(2)} ` +
+    `after 2.5 s`)
+  assert.ok(opening.maxReductionDb < 2,
+    `the opening of the file over-clipped: ${opening.maxReductionDb.toFixed(2)} dB`)
+})
+
+test('turning Emphasis down takes effect at once', () => {
+  // REPORTED IN REVIEW, and worse than it looked. `liftDb` only updates while
+  // the gate is open AND the moment is loud, so its 3 s constant is 3 s of
+  // GATED time — many times that in wall clock. Measured on real audio before
+  // the fix, flipping Emphasis 12 -> 0 mid-file left the threshold 2.76 dB
+  // high SIX SECONDS later, quietly under-processing everything in between.
+  //
+  // The emphasis filters switch the instant the parameter is committed, so the
+  // threshold that exists to compensate for them has to switch with them. The
+  // bound is therefore applied to the lift STATE, not only to its target.
+  const signal = sibilantSpeech(8, 0.35, 41, 0.8)
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 6.5, emphasisDb: 12, shape: 'tanh3' })
+  const out = new Float32Array(signal.length)
+  const run = (from, to) => {
+    for (let off = from; off < to; off += 128) {
+      const len = Math.min(128, to - off)
+      kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    }
+  }
+  const half = Math.round(signal.length / 2)
+  run(0, half)
+  const before = kernel.getMetering().liftDb
+  assert.ok(before > 2, `the probe never built a lift to release: ${before.toFixed(2)} dB`)
+
+  // Emphasis to zero: exactly zero, on the very next block, not eventually.
+  kernel.setParams({ emphasisDb: 0 })
+  run(half, half + 128)
+  assert.equal(kernel.getMetering().liftDb, 0)
+
+  // And a partial move down is bounded by the new setting immediately, with
+  // the rest of the convergence left to the measurement.
+  const k2 = new SoftClipperKernel(SR)
+  k2.setParams({ headroomDb: 6.5, emphasisDb: 12, shape: 'tanh3' })
+  for (let off = 0; off < half; off += 128) {
+    const len = Math.min(128, half - off)
+    k2.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  k2.setParams({ emphasisDb: 4 })
+  k2.process([signal.subarray(half, half + 128)], [out.subarray(half, half + 128)], 128)
+  assert.ok(k2.getMetering().liftDb <= 4 + 1e-9,
+    `lift ${k2.getMetering().liftDb.toFixed(2)} still exceeds the new Emphasis of 4 dB`)
 })

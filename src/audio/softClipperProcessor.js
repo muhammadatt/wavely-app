@@ -497,6 +497,14 @@ export const KNEE_DB = 7
  * 0.26% (emphasis 12), and the share of blocks doing anything at all goes
  * 1% -> 2% -> 3% across 0 / 6 / 12.
  *
+ * ⚠ THOSE TWO FIGURES ARE PRE-COMPENSATION and are no longer what the stage
+ * does. The mechanism above is still exactly right — it is now the mechanism
+ * the lift compensation exists to correct — but the threshold is no longer
+ * held still while the signal is lifted into it: see LIFT_TAU_S, which gives
+ * back the measured lift so that raising Emphasis re-AIMS the stage instead
+ * of also deepening it. The counts above would need re-measuring on the same
+ * clip, which is not available here.
+ *
  * THE COLOURING IS BROADBAND, NOT HF-ONLY, which is the counter-intuitive part.
  * A crossing triggered by sibilance still applies a WIDEBAND gain reduction to
  * that instant, so the added modulation lands wherever the signal's energy is.
@@ -523,6 +531,130 @@ const EMPHASIS_EPSILON_DB = 0.001 // below this, treat as "0 dB" and skip the fi
 // Recompute shelf coefficients only when the ramped value has moved this far
 // since the last computation — see deviation note (3) above.
 const EMPHASIS_RECOMPUTE_EPS_DB = 0.05
+
+/**
+ * TIME CONSTANT FOR THE EMPHASIS LIFT COMPENSATION — the constant this whole
+ * mechanism lives or dies on.
+ *
+ * WHY THE COMPENSATION EXISTS. The detector reads the UNFILTERED downmix but
+ * the clip curve sees the pre-emphasised signal, so raising HF Emphasis lifts
+ * every HF-rich peak toward a threshold that did not move. Measured on two
+ * bursts of IDENTICAL peak amplitude differing only in spectrum, at Headroom
+ * 6.5: the 110 Hz burst holds at 1.88 dB of reduction across the entire knob
+ * — exactly, because de-emphasis is an algebraic inverse and a peak with no
+ * energy above the corner comes back unchanged — while a fricative-shaped
+ * burst goes 3.00 -> 5.85 dB. So the knob was a depth control as well as a
+ * character one, the same defect SHAPE_ANCHOR_DB fixes for the knee, and for
+ * the same reason: the thing that changes character also moves the effective
+ * threshold.
+ *
+ * The fix is to measure how much the loud material is ACTUALLY being lifted
+ * and give it back to the threshold. `liftDb` is the dB difference between a
+ * peak follower on the pre-emphasised downmix and the existing one on the raw
+ * downmix, so it is 0 on an all-LF passage, `emphasisDb` on an all-HF one, and
+ * self-calibrating in between. Nothing is fitted.
+ *
+ * ⚠ THE BALLISTICS ARE THE DESIGN, NOT A TUNING. A fast tracker destroys the
+ * feature by construction: a fricative arrives, raises the tracker, the
+ * threshold rises with it, and the fricative gets no extra reduction — the
+ * compensation would cancel precisely the selectivity it exists to preserve.
+ * It must be far slower than the transients it is meant to leave alone, so it
+ * runs on SPEECH_TAU_S, the same 3 s constant the speech tracker uses. The
+ * reading is therefore per-passage ("this passage is sibilant-heavy, so the
+ * ceiling sits higher") while individual fricatives still ride above it.
+ * `test/dsp/softClipper.test.js` asserts a single fricative in a bed does not
+ * move it — that test is the one a fast constant fails.
+ *
+ * BOUNDED BY CONSTRUCTION, not by a tuned guard. The pre-emphasis shelf is a
+ * pure boost: swept at 3 dB, 6 and 12 its magnitude stays within [0, N] dB to
+ * four decimals with no corner overshoot, so peak(emphasised) >= peak(raw)
+ * always and liftDb lands in [0, emphasisDb]. It is clamped there anyway, so a
+ * follower still filling from zero cannot produce a nonsense threshold during
+ * the first milliseconds — the failure mode that produced 29 dB of reduction
+ * at t = 0.46 s when the tracker was last given an unbounded quantity.
+ */
+const LIFT_TAU_S = SPEECH_TAU_S
+
+/**
+ * How far below the tracked speech level a moment may sit and still count
+ * toward the lift measurement, in dB.
+ *
+ * WHY THE LIFT IS NOT MEASURED OVER ALL VOICED MATERIAL, which is what shipped
+ * first and over-read it by roughly a factor of two on real narration. The
+ * quantity being corrected is how much the PEAKS THAT REACH THE CURVE have
+ * been lifted; averaging the follower ratio over every voiced sample instead
+ * measures a different population, because fricative moments raise the
+ * emphasised envelope during instants that never come near the threshold.
+ *
+ * Measured on 35 s of real narration at Headroom 6.5, against the lift that
+ * would hold peak reduction flat across the knob (recovered from the stage's
+ * own Headroom sensitivity, 0.62 dB of reduction per dB of threshold):
+ *
+ *   population                       HFE 6    HFE 12     target
+ *   every voiced sample               0.68      1.74
+ *   within 6 dB of the speech level   0.37      0.96
+ *   within 3 dB of the speech level   0.34      0.85     0.31 / 0.85
+ *
+ * The loud-moment populations land on the target; the all-voiced one does not,
+ * and the error is in the direction that made the compensation OVERSHOOT — it
+ * raised the threshold for plosives, which carry no HF and were never lifted
+ * at all, on evidence gathered from fricatives.
+ *
+ * 0 dB — "at or above the tracked speech level" — needs no calibration: the
+ * tracker is already peak-referenced, so this is just "the moments Headroom is
+ * measured from", which is exactly the population the threshold is placed for.
+ *
+ * WHAT THE GATE BUYS, on the same 35 s of real narration at Headroom 6.5.
+ * Peak reduction across HF Emphasis 0 -> 12:
+ *
+ *   pre-compensation          3.02 -> 3.55 dB   (+0.53)
+ *   compensated, ungated      3.02 -> 2.61      (-0.41)   sign flipped, not fixed
+ *   compensated, gated        3.02 -> 2.92      (-0.10)
+ *
+ * and total added distortion over the same sweep -54.6 -> -52.1 dBFS
+ * uncompensated against -54.6 -> -55.9 gated, while the count of samples the
+ * curve touches still rises 1.8x — the aiming intact, the depth held.
+ *
+ * ⚠ IT DOES NOT HOLD PEAK REDUCTION FLAT ON EVERY FILE, and an earlier version
+ * of this note claimed it did on the evidence of one narrator. Three real
+ * files, Headroom 6.5, peak GR and total added distortion across HFE 0 -> 12:
+ *
+ *   file                    peak GR: pre-comp    compensated    residual dBFS
+ *   A (normalised)           3.02 -> 3.55        3.02 -> 2.92    -54.6 -> -55.9  (was -52.1)
+ *   B (raw)                  2.21 -> 5.63        2.21 -> 5.47    -58.5 -> -57.5  (was -53.9)
+ *   C (hard-mastered)        2.77 -> 5.49        2.77 -> 5.17    -61.4 -> -53.7  (was -50.6)
+ *
+ * On A the depth holds. On B and C it does not, and the reason is structural
+ * rather than a tuning error: the loud-moment average lift reads 0.65 and 1.63
+ * dB there while the single deepest event is lifted by around 9 dB. Peak GR is
+ * set by that one event. A statistic slow enough to leave an isolated fricative
+ * its extra reduction — which is the whole feature — cannot also cancel the
+ * extra reduction on a peak that IS an isolated fricative. THE TWO GOALS ARE
+ * CONTRADICTORY, and this stage resolves them in favour of the aiming.
+ *
+ * WHAT IT DOES DELIVER, on all three: the BROAD inflation is removed. Growth
+ * in total added distortion across the knob falls from +2.5 / +4.6 / +10.8 dB
+ * to -1.3 / +1.0 / +7.7, and the growth in samples touched roughly halves
+ * (C: 10x -> 6x). So "raising HFE quietly makes the whole stage work harder"
+ * is fixed; "raising HFE never deepens anything" was never achievable and is
+ * not claimed.
+ *
+ * ⚠ HARD-LIMITED MATERIAL IS THE WORST CASE, by a wide margin — file C is a
+ * heavily mastered clip and shows 6x the crossings and +7.7 dB of distortion
+ * at HFE 12 even compensated. Limiting flattens the peak envelope, so a small
+ * threshold change moves an enormous number of samples across it. On that kind
+ * of input HF Emphasis is a much stronger control than the panel implies.
+ *
+ * ⚠ THE SYNTHETIC CORPUS EXAGGERATED THE PROBLEM AND FLATTERED THE FIX. On its
+ * sibilant bed the uncompensated drift was 4.4 dB and the compensated drift
+ * -0.06; on real narration the numbers above. Real speech barely lifts its own
+ * PEAK ENVELOPE even where it is rich in fricatives — 1.74 dB at emphasis 12
+ * over all voiced samples, 0.85 over the loud ones — because a fricative does
+ * not dominate a 1 ms / 150 ms follower the way first-differenced noise does.
+ * Tenth time synthetic material has failed to answer the question asked of it,
+ * and the first time it has erred by EXAGGERATING.
+ */
+const LIFT_GATE_DB = 0
 
 // Fixed time constant for smoothing headroomDb / outputTrimDb toward their
 // targets — see deviation note 3. Fast enough to feel immediate on a knob
@@ -562,6 +694,16 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // patch below the 3-6 dB the lamp's own guidance calls the usable range on
   // speech. 6.5 restores 3.21 dB with the shipped knee. The two defaults are
   // coupled through the shape table and must move together.
+  //
+  // RE-MEASURED ON A SECOND NARRATOR and left alone. That file lands on
+  // exactly 3.21 dB at this Headroom on the pre-compensation build — the same
+  // figure, a different voice — which is the strongest evidence this constant
+  // has. The emphasis lift compensation then costs the stock patch 0.24 dB
+  // (3.21 -> 2.97), and 6.35 would return it. Not taken: 0.24 dB is well
+  // inside the spread between two narrators, and moving a shipped default to
+  // chase it on a sample of one is how a constant stops meaning anything.
+  // (The ungated lift cost 0.36 dB and did argue for a move; the gate removed
+  // most of the shortfall along with the over-compensation that caused it.)
   headroomDb: 6.5,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
@@ -585,15 +727,27 @@ function linToDb(lin) {
 /**
  * KNEE SHAPES — the exponent on tanh, and what it actually buys.
  *
- * THE DEFAULT IS tanh^3, chosen by ear rather than by table. At the shipped
- * knee a peak 3 dB over the threshold loses 0.98 / 0.40 / 0.16 dB across
- * n = 2 / 3 / 4 while a peak 12 dB over loses 5.27 / 4.94 / 4.63 — so the
- * exponent barely touches the deep transients this stage exists for and
- * almost entirely governs what happens to the shallow ones. tanh^2 was the
- * original curve; listening at a fixed threshold found it the most audibly
- * distorted of the three, and tanh^4 the least distorted but the most
- * conspicuous about what remained (see the sparsity note below). tanh^3 is
- * the position that was preferred.
+ * ⚠ READ SHAPE_ANCHOR_DB FIRST. Each shape now carries its OWN knee, set so
+ * all three deliver identical reduction at a peak SHAPE_ANCHOR_DB over the
+ * threshold. Every figure in this block that predates that change describes a
+ * SHARED knee of 7 and is marked; under a shared knee the exponent was a
+ * depth control as much as a shape one, which is the defect the anchor fixes.
+ *
+ * THE DEFAULT IS tanh^3, chosen by ear rather than by table, and it is the
+ * shape the other two are normalised ONTO — so nothing below changes for
+ * anyone who leaves the switch alone. At the shipped knees a peak 3 dB over
+ * the threshold loses 0.69 / 0.40 / 0.24 dB across n = 2 / 3 / 4, a peak
+ * SHAPE_ANCHOR_DB (8 dB) over loses 3.25 whichever is selected, and a peak
+ * 12 dB over loses 4.73 / 4.94 / 5.07. The exponent is now what its label
+ * claims: where in the overshoot range the reduction is spent, pivoting about
+ * the anchor.
+ *
+ * tanh^2 was the original curve; listening at a fixed threshold found it the
+ * most audibly distorted of the three, and tanh^4 the least distorted but the
+ * most conspicuous about what remained (see the sparsity note below). tanh^3
+ * is the position that was preferred. ⚠ That listening was done at the shared
+ * knee, so most of "least distorted" was "did least" — see the matched-depth
+ * measurement below for how much of the difference survives normalisation.
  *
  * The reduction law is r = rMax * tanh^n(e / knee). Near the threshold
  * tanh(u) ~ u, so r ~ (e/knee)^n and the exponent IS the order of contact: the
@@ -601,8 +755,10 @@ function linToDb(lin) {
  * C1, n = 3 is C2, n = 4 is C3.
  *
  * WHAT IT CHANGES IS SELECTIVITY, NOT DISTORTION, and that ordering was
- * measured rather than assumed. Matched at 3 dB of reduction on a peak 12 dB
- * over threshold (so the shapes are compared doing the same amount of work):
+ * measured rather than assumed. Matched BY HAND at 3 dB of reduction on a peak
+ * 12 dB over threshold (so the shapes are compared doing the same amount of
+ * work) — this table is what SHAPE_ANCHOR_DB later made structural, at an
+ * anchor of 6 dB rather than 12 because that is where real peaks sit:
  *
  *   shape   reduction at +3 dB / +6 / +12 / +18 dB excess   %harmonic energy above H11
  *   tanh^2      0.28    1.03    3.00    4.51                     0.131
@@ -614,17 +770,21 @@ function linToDb(lin) {
  * the real difference: at +3 dB of excess tanh^4 does a SIXTH of what tanh^2
  * does, then catches up and passes it on the big transients.
  *
- * ON A REAL FILE, AT A FIXED HEADROOM, THAT LANDS AS STRICTLY LESS WORK ON
- * BOTH AXES — which is the reading the panel is captioned for. 35 s of real
- * narration, Headroom 8, emphasis 6:
+ * ⚠ PRE-NORMALISATION (shared knee 7). ON A REAL FILE, AT A FIXED HEADROOM,
+ * THAT LANDED AS STRICTLY LESS WORK ON BOTH AXES — which is exactly the defect
+ * SHAPE_ANCHOR_DB exists to remove, and it was captioned as a feature for one
+ * release. 35 s of real narration, Headroom 8, emphasis 6:
  *
  *   shape   peak GR   voiced samples touched   mean GR on those samples
  *   tanh^2   3.15 dB          0.293%                   0.358 dB
  *   tanh^3   2.28 dB          0.195%                   0.216 dB
  *   tanh^4   1.66 dB          0.126%                   0.150 dB
  *
- * ⚠ AND MATCHING THE DEPTH BACK REVERSES IT, which is worth knowing before
- * reaching for the Headroom knob to compensate. Depth is matched by LOWERING
+ * ⚠ PRE-NORMALISATION, AND STILL LIVE AS A WARNING: MATCHING THE DEPTH BACK
+ * BY EAR REVERSES IT. Normalisation matches depth by moving the KNEE, which
+ * leaves the threshold — and therefore the set of touched samples — untouched.
+ * Matching it with the Headroom knob instead does not, and is worth knowing
+ * before reaching for that knob to compensate. Depth is matched by LOWERING
  * Headroom, which lowers the threshold, which brings more samples over the
  * line — and that move dominates the shape's selectivity. Same clip, each
  * shape walked down to tanh^2's 3.15 dB of peak reduction:
@@ -644,8 +804,9 @@ function linToDb(lin) {
  * file settled it in one measurement. Eighth time synthetic material has been
  * too clean to answer the question asked of it.)
  *
- * WHAT THE HIGHER SHAPES SOUND LIKE, and why the two halves of that have
- * different causes. Reported from listening at a FIXED threshold: tanh^3 and
+ * WHAT THE HIGHER SHAPES SOUND LIKE (⚠ pre-normalisation, shared knee 7), and
+ * why the two halves of that have different causes. Reported from listening at
+ * a FIXED threshold: tanh^3 and
  * tanh^4 distort audibly less overall, but the peaks that do cross read as
  * "grindy" where tanh^2 reads as "buzzy". Both are real and neither is the
  * harmonic-tail number above.
@@ -691,8 +852,39 @@ function linToDb(lin) {
  *
  * The tanh family costs nothing here — its bound goes 4.62 / 4.50 / 4.46 dB as
  * n rises, so every shape offered is monotonic with room to spare, and raising
- * n makes the constraint slightly looser rather than tighter. Pinned in
- * `test/dsp/softClipper.test.js` against the shipped KNEE_DB.
+ * n makes the constraint slightly looser rather than tighter. Normalisation
+ * spends part of that room (the knees are 9.08 / 7 / 6.01), and every one
+ * still clears its bound. Pinned in `test/dsp/softClipper.test.js` against the
+ * shipped per-shape knees.
+ *
+ * ── WHAT NORMALISATION COSTS AND BUYS, MEASURED ────────────────────────────
+ *
+ * Reported symptom: LATE sounds cleaner at the same threshold, and it is hard
+ * to tell whether that is character or simply less processing. It was mostly
+ * the latter, and the size of it is the point.
+ *
+ * The honest probe is a signal whose crossings reproduce the real narration
+ * distribution recorded at KNEE_DB (p50 1.2 dB over, p90 3.0, max 6.1). The
+ * corpus's own speechLike() does NOT — at the default its syllables never
+ * reach the threshold at all, so the entire output is one outlier and the
+ * shapes have nothing to redistribute between. A wider-dynamics variant at
+ * Headroom 4 lands at p50 1.25 / p90 2.93 / max 4.16, and on that:
+ *
+ *   shared knee 7      peak GR 1.72 / 0.92 / 0.49 dB   residual -48.1 / -55.3 / -62.0 dBFS
+ *   per-shape knees    peak GR 1.12 / 0.92 / 0.79 dB   residual -52.0 / -55.3 / -57.8 dBFS
+ *
+ * So the old switch changed the depth by 3.5x and the distortion by 13.9 dB
+ * together — a shape control that was mostly a second, hidden depth control.
+ * Normalised, depth holds to a 0.33 dB spread and 5.8 dB of distortion
+ * difference survives. THAT REMAINDER IS THE CONTROL: the same depth spent on
+ * fewer, deeper crossings.
+ *
+ * ⚠ Depth matches EXACTLY only at the anchor, by construction. On a probe
+ * whose outlier sits 6.65 dB over, peak GR goes 3.29 / 2.43 / 1.80 dB before
+ * and 2.34 / 2.43 / 2.50 after — a 1.49 dB spread down to 0.15. On one whose
+ * outlier sits 10.35 dB over, well past the anchor, 0.92 down to 0.67: the
+ * shapes are diverging again above the anchor, in the opposite direction, and
+ * that is the design rather than a shortfall.
  */
 export const SHAPE_EXPONENT = { tanh2: 2, tanh3: 3, tanh4: 4 }
 
@@ -703,8 +895,147 @@ export const SHAPE_EXPONENT = { tanh2: 2, tanh3: 3, tanh4: 4 }
  */
 export const SHAPE_MIN_KNEE_DB = { tanh2: 4.62, tanh3: 4.50, tanh4: 4.46 }
 
-/** What an unrecognised `shape` resolves to. Derived, never written twice. */
-const DEFAULT_SHAPE_EXPONENT = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape]
+/**
+ * EXCESS AT WHICH ALL THREE SHAPES DELIVER THE SAME REDUCTION.
+ *
+ * WHY THE SHAPES ARE KNEE-NORMALISED AT ALL, and the reported symptom that
+ * forced it: switching to LATE at a fixed threshold "sounds cleaner", and it
+ * does — because it is doing less. At one shared KNEE_DB, tanh^n < tanh^2
+ * everywhere for n > 2 (t < 1, so each extra factor can only take away), so
+ * raising the shape lowered the reduction at EVERY excess and only converged
+ * back at the bound. The switch was therefore a depth control wearing a shape
+ * control's label, and no A/B through it was ever comparing shapes: it was
+ * comparing amounts. That the two were tangled is already recorded upstream —
+ * the default Headroom had to move 8 -> 6.5 when the default shape moved
+ * tanh^2 -> tanh^3, purely to put the depth back.
+ *
+ * Each shape now gets its OWN knee, chosen so that a peak this far over the
+ * threshold receives identical reduction whichever shape is selected. What
+ * changes is only how that reduction is DISTRIBUTED across overshoot depth:
+ * below the anchor EARLY does more, above it LATE does more, and they cross
+ * exactly here. That is what a knee control is, and it is also the behaviour
+ * the panel's own captions have always described.
+ *
+ * ⚠ THIS DOES NOT MAKE THE SHAPES EQUAL IN TOTAL WORK ON A FILE, and it must
+ * not be read that way. Only the anchor point is pinned. Real speech puts most
+ * of its crossings well below the anchor, so EARLY still touches those harder
+ * and still produces more total distortion — the difference is that the DEEP
+ * transients the stage exists for now land in the same place, which is what
+ * the lamp reads and what "how hard is this thing working" means to the ear.
+ *
+ * 8 dB IS A MIN-MAX FIT OVER THREE REAL NARRATORS, and the number it replaces
+ * was derived from a broken proxy.
+ *
+ * ⚠ THE CROSSING FIGURES QUOTED AT KNEE_DB (p50 1.2 dB, p90 3.0, max 6.1) ARE
+ * MEASURED ON THE RAW SIGNAL AT BASE RATE. The curve does not see that signal:
+ * it sees the PRE-EMPHASISED, 4x OVERSAMPLED one, whose peaks are higher. The
+ * anchor was originally set to 6 from those figures, which is the wrong
+ * domain. Recovering the excess the curve actually saw — by inverting the
+ * shipped curve through the reduction it actually applied, which needs no new
+ * instrumentation — gives, at the default Headroom:
+ *
+ *   file                     raw-signal proxy max    true max excess
+ *   narrator A (normalised)          7.19                  7.52
+ *   narrator B (raw)                 5.58                  9.95
+ *   narrator C (hard-mastered)       6.28                  9.24
+ *
+ * The proxy under-reads by 0.3 to 4.4 dB, and it under-reads MOST on the files
+ * where the stage works hardest.
+ *
+ * Peak-GR spread across the three shapes is a pure function of the true excess
+ * and the anchor, so it can be swept exactly over the excesses those files
+ * produce across Headroom 4-8 — the range where the stage does real work (at
+ * Headroom 10 it delivers 0.74 dB and matching there is worth little):
+ *
+ *   anchor      6     7     8    8.5     9    9.5    10
+ *   mean      0.53  0.34  0.22  0.19   0.17  0.17   0.18
+ *   worst     0.68  0.48  0.36  0.42   0.48  0.54   0.59
+ *
+ * 8 minimises the WORST case and sits within 0.05 dB of the best mean. Lower
+ * anchors do better at high Headroom, where the excess is small; higher ones
+ * at low Headroom. The optimum is broad, which is the useful part — the exact
+ * value is not load-bearing, and anything from 7 to 9 beats the shipped 6.
+ *
+ * Pinning the anchor near where real peaks land is what makes peak reduction —
+ * the reading the meter shows and the user hears as depth — hold still across
+ * the switch, while the p50/p90 bulk stays free to differ, which is the
+ * character.
+ *
+ * ⚠ MOVING THE ANCHOR CANNOT MOVE THE DEFAULT PATCH. The default shape's knee
+ * is RETURNED as KNEE_DB rather than recomputed (see SHAPE_KNEE_DB), so only
+ * the two non-default positions change. That is what made this re-derivation
+ * safe to do at all.
+ *
+ * ⚠ ANCHOR IS THE ONE CONSTANT HERE THAT SYNTHETIC MATERIAL CANNOT CHECK. The
+ * test corpus's speechLike() puts its crossings at p50 9.6 dB / max 11.5 —
+ * ABOVE the anchor rather than below it — so on synthetics the ordering it
+ * produces is the reverse of the one on speech.
+ *
+ * CONFIRMED ON A SECOND REAL NARRATOR, 35 s at the shipped default: crossings
+ * sit at p50 1.32 dB / p90 3.45 / p99 5.82 / max 6.99, against the p50 1.2 /
+ * p90 3.0 / max 6.1 recorded at KNEE_DB from a different clip. 6 dB sits
+ * between that file's p99 and its max, which is where the anchor is meant to
+ * be, so it is left as it stands.
+ *
+ * END TO END ON THE SAME FILE, peak reduction across EARLY / MID / LATE:
+ *
+ *   Headroom   shared knee 7        per-shape knees      spread
+ *      5      4.57 3.99 3.49 (1.09)  3.46 3.80 4.03 (0.57)
+ *      6.5    3.95 3.21 2.60 (1.35)  2.77 2.97 3.11 (0.34)
+ *      8      3.15 2.28 1.66 (1.50)  2.02 2.02 2.03 (0.00)
+ *
+ * A 4x tightening at the default and exact at Headroom 8, where that file's
+ * crossings top out at 5.49 dB — just under the anchor.
+ */
+export const SHAPE_ANCHOR_DB = 8
+
+/**
+ * Per-shape knee, derived from the anchor rather than tabulated.
+ *
+ * Anchored ON THE DEFAULT SHAPE at the shipped KNEE_DB, so the default curve
+ * is bit-identical to the one that shipped before normalisation and the stock
+ * patch (Headroom 6.5, tanh^3) does not move by an ulp. Only the two
+ * non-default positions change, and each changes toward the other's depth.
+ *
+ * Solving tanh^n(A/k_n) = tanh^d(A/KNEE_DB) for k_n gives
+ *   k_n = A / atanh( tanh(A/KNEE_DB)^(d/n) )
+ * with d the default shape's exponent. Monotonic in n, so the ordering of the
+ * knees is guaranteed rather than checked: 8.490 / 7 / 6.221 dB at A = 8.
+ * Every one of those clears its SHAPE_MIN_KNEE_DB bound with room to spare
+ * (4.62 / 4.50 / 4.46), which is the property the guard test asserts —
+ * normalisation is not allowed to buy matched depth with a folded curve.
+ */
+export const SHAPE_KNEE_DB = Object.fromEntries(
+  Object.entries(SHAPE_EXPONENT).map(([shape, n]) => {
+    const d = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape]
+    // The default's own knee is RETURNED, not recomputed. Algebraically the
+    // formula collapses to atanh(tanh(A/KNEE_DB)) there, but that round-trip
+    // is not exact in floating point, and a default that moves by an ulp is
+    // still a default that moved — the same rule the exponent unrolling in
+    // softClip() follows, and pinned by its own test.
+    if (n === d) return [shape, KNEE_DB]
+    const anchored = Math.pow(Math.tanh(SHAPE_ANCHOR_DB / KNEE_DB), d / n)
+    return [shape, SHAPE_ANCHOR_DB / Math.atanh(anchored)]
+  }),
+)
+
+/**
+ * What an unrecognised `shape` resolves to — exponent and knee together.
+ *
+ * ONE RESOLVER FOR BOTH, deliberately. Two independent lookups with two
+ * independent `??` fallbacks can disagree: a shape present in one table and
+ * absent from the other would silently pair one curve's exponent with
+ * another's knee, which is a valid-looking curve at the wrong depth and
+ * therefore invisible. Derived from the defaults object, never written twice.
+ */
+function resolveShape(shape) {
+  const exponent = SHAPE_EXPONENT[shape]
+  return exponent === undefined ? DEFAULT_SHAPE : { exponent, kneeDb: SHAPE_KNEE_DB[shape] }
+}
+const DEFAULT_SHAPE = {
+  exponent: SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape],
+  kneeDb: SHAPE_KNEE_DB[SOFT_CLIPPER_KERNEL_DEFAULTS.shape],
+}
 
 /**
  * Soft-clip curve — level-invariant and reduction-bounded. See
@@ -713,8 +1044,14 @@ const DEFAULT_SHAPE_EXPONENT = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape
  *
  *   |x| <= T :  y = x                                    (bit-transparent)
  *   |x| >  T :  e = 20*log10(|x|/T)
- *               r = rMaxDb * tanh^n(e / kneeDb)   n from `shape`
+ *               r = rMaxDb * tanh^n(e / kneeDb)   n AND kneeDb from `shape`
  *               y = sign(x) * |x| * 10^(-r/20)
+ *
+ * `exponent` and `kneeDb` are NOT independent in shipped use: they are paired
+ * per shape by SHAPE_KNEE_DB so that every shape delivers the same reduction
+ * at SHAPE_ANCHOR_DB. Callers inside the kernel take both from resolveShape().
+ * The two stay separate arguments because the tests sweep the knee against a
+ * fixed exponent to locate the fold bounds.
  *
  * The log/exp pair only runs for samples ABOVE the threshold, which on speech
  * is a small minority — the early-out below carries the overwhelming majority
@@ -773,6 +1110,16 @@ export class SoftClipperKernel {
     this.speechWarmupTarget = Math.max(1, Math.round(sampleRate * (SPEECH_INIT_WINDOW_MS / 1000)))
 
     this.fastPeak = 0
+    // Peak follower on the PRE-EMPHASISED downmix, run with the same
+    // ballistics as fastPeak so the two are comparable sample for sample.
+    // Their ratio is the emphasis lift — see LIFT_TAU_S.
+    this.fastPeakEmph = 0
+    this.liftDb = 0
+    // Running MAX of the lift target during the speech tracker's warm-up —
+    // the same shape as speechWarmupPeak, for the same reason. See the
+    // warm-up note in the lift update.
+    this.liftWarmupMax = 0
+    this.liftCoef = riseCoeff(LIFT_TAU_S * 1000, sampleRate)
     this.fastPeakAttack = riseCoeff(FAST_PEAK_ATTACK_MS, sampleRate)
     this.fastPeakRelease = riseCoeff(FAST_PEAK_RELEASE_MS, sampleRate)
     this.fastRmsCoef = riseCoeff(FAST_RMS_TAU_MS, sampleRate)
@@ -793,6 +1140,11 @@ export class SoftClipperKernel {
     // ── Emphasis filters (per-channel state, shared coefficients) ──
     this.preEmphasis = new BiquadCascade(1, 1)
     this.deEmphasis = new BiquadCascade(1, 1)
+    // A THIRD cascade, mono, for the detector's pre-emphasised copy. Not the
+    // audio path's `preEmphasis` with an extra channel: that one is fed the
+    // per-channel input and this one the downmix, and sharing an instance
+    // would mean sharing filter state between two different signals.
+    this.preEmphasisDetect = new BiquadCascade(1, 1)
     this.emphasisActive = false
     this.emphasisStable = true
 
@@ -845,6 +1197,11 @@ export class SoftClipperKernel {
     this.scopePeak = 0
     this.scopeThreshold = 1
 
+    // Mono downmix and its pre-emphasised copy, grown on demand. Two buffers
+    // rather than one: the detector reads both per sample.
+    this.monoScratch = new Float32Array(0)
+    this.monoEmphScratch = new Float32Array(0)
+
     this.params = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
     this.setParams({})
   }
@@ -879,6 +1236,10 @@ export class SoftClipperKernel {
       reductionDb: this.reductionDb,
       maxReductionDb: this.maxReductionDb,
       engagedFraction: this.engagedFraction,
+      // How much of HF Emphasis's boost the threshold is currently giving
+      // back. Reported so the panel can say what the knob is doing rather
+      // than leaving a silently-moving threshold — see LIFT_TAU_S.
+      liftDb: this.liftDb,
     }
   }
 
@@ -920,6 +1281,10 @@ export class SoftClipperKernel {
     const de = invertBiquad(pre)
     this.preEmphasis.setSections([pre])
     this.deEmphasis.setSections([de])
+    // The detector's own copy gets the SAME section, so the lift is measured
+    // through exactly the filter the curve is fed rather than through a
+    // second design that could drift from it.
+    this.preEmphasisDetect.setSections([pre])
   }
 
   /**
@@ -950,7 +1315,62 @@ export class SoftClipperKernel {
     // than throwing — a bad param must not take the audio thread down — and
     // the fallback is read from the defaults rather than written as a literal,
     // so moving the default cannot silently leave the two disagreeing.
-    const shapeExponent = SHAPE_EXPONENT[p.shape] ?? DEFAULT_SHAPE_EXPONENT
+    //
+    // Exponent and knee travel together (see resolveShape): the knee is what
+    // normalises the shapes to equal reduction at SHAPE_ANCHOR_DB, so a curve
+    // run with one shape's exponent and another's knee is neither shape.
+    const { exponent: shapeExponent, kneeDb: shapeKneeDb } = resolveShape(p.shape)
+
+    // Emphasis coefficients recompute only when the raw target has moved
+    // enough to matter (deviation note 3) — cheap on a knob drag, free
+    // otherwise.
+    //
+    // AHEAD OF THE DETECTOR, not after it: the detector now runs its own
+    // pre-emphasised copy of the downmix, and filtering this block's audio
+    // with one set of coefficients while measuring it with the previous
+    // block's would make the lift reading disagree with the signal the curve
+    // actually sees. The audio path is unaffected by the move — it always ran
+    // after this point.
+    if (Math.abs(p.emphasisDb - this.emphasisDbCommitted) > EMPHASIS_RECOMPUTE_EPS_DB) {
+      this._updateEmphasis(p.emphasisDb)
+    }
+
+    // ── Mono downmix, and its pre-emphasised copy ──────────────────────────
+    // Materialised into scratch rather than computed inline in the detector
+    // loop, because the pre-emphasis is a biquad and wants a run of samples.
+    if (this.monoScratch.length < n) {
+      this.monoScratch = new Float32Array(n)
+      this.monoEmphScratch = new Float32Array(n)
+    }
+    const mono = this.monoScratch
+    const monoEmph = this.monoEmphScratch
+    for (let i = 0; i < n; i++) {
+      let acc = inputChannels[0][i]
+      for (let ch = 1; ch < nIn; ch++) acc += inputChannels[ch][i]
+      mono[i] = acc * chScale
+    }
+    if (this.emphasisActive) {
+      this.preEmphasisDetect.process(mono, monoEmph, n, 0)
+    } else {
+      // Emphasis off: there is no lift, and every piece of state that could
+      // outlive the setting is cleared here rather than left to decay.
+      //
+      // LEAVING IT TO DECAY WAS A BUG, and a long one. `liftDb` only updates
+      // while the gate is open AND the moment is loud, so its 3 s constant is
+      // 3 s of GATED time — many times that in wall clock. Measured by
+      // flipping Emphasis 12 -> 0 mid-file: the threshold was still 2.76 dB
+      // high SIX SECONDS later, so the stage quietly under-processed
+      // everything in between. The filters switch instantly, so the threshold
+      // that compensates for them has to switch instantly too.
+      monoEmph.set(mono.subarray(0, n))
+      this.liftWarmupMax = 0
+      this.fastPeakEmph = this.fastPeak
+      // The detector's filter has been fed nothing since it was switched off,
+      // so its state is stale by however long that was. Clearing it here means
+      // re-enabling starts from silence rather than from whatever was in
+      // flight when the knob passed through zero.
+      this.preEmphasisDetect.reset()
+    }
 
     // ── Detector + threshold, computed once per sample from the unfiltered
     // mono downmix, shared by every channel's clip curve. headroomDb and
@@ -958,6 +1378,22 @@ export class SoftClipperKernel {
     // once regardless of channel count (deviation note 3) ──
     let fastRmsMeanSq = this.fastRmsMeanSq
     let fastPeak = this.fastPeak
+    let fastPeakEmph = this.fastPeakEmph
+    let liftDb = this.liftDb
+    let liftWarmupMax = this.liftWarmupMax
+    // Upper bound on the lift, hoisted out of the per-sample loop. Zero when
+    // the emphasis filters are bypassed, which is what makes emphasisDb = 0
+    // bit-identical to the build before compensation existed.
+    const liftMaxDb = this.emphasisActive ? this.emphasisDbCommitted : 0
+    // THE BOUND IS APPLIED TO THE STATE, NOT ONLY TO THE TARGET, and that is
+    // what makes turning the knob DOWN take effect at once. liftDb is a slow
+    // average of past evidence; lowering Emphasis invalidates that evidence
+    // immediately, because the shelf that produced it is no longer in circuit
+    // at that depth. Clamping here costs one compare per block and collapses
+    // the whole class of "the threshold is still compensating for a setting
+    // that is gone" — including Emphasis 0, where the bound is 0 and the lift
+    // snaps to nothing.
+    if (liftDb > liftMaxDb) liftDb = liftMaxDb
     let noiseEstDb = this.noiseEstDb
     let gateHoldSamples = this.gateHoldSamples
     let speechLevelDb = this.speechLevelDb
@@ -978,9 +1414,7 @@ export class SoftClipperKernel {
       outputTrimDbSmoothed += this.paramSmoothCoef * (p.outputTrimDb - outputTrimDbSmoothed)
       trimGain[i] = dbToLin(outputTrimDbSmoothed)
 
-      let x = inputChannels[0][i]
-      for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
-      x *= chScale
+      const x = mono[i]
 
       // fast_rms: one-pole RMS, τ = 10 ms (spec §3.1).
       fastRmsMeanSq += this.fastRmsCoef * (x * x - fastRmsMeanSq) + DENORMAL_GUARD
@@ -993,6 +1427,18 @@ export class SoftClipperKernel {
       fastPeak += (rect > fastPeak ? this.fastPeakAttack : this.fastPeakRelease)
         * (rect - fastPeak) + DENORMAL_GUARD
       const fastPeakDb = linToDb(fastPeak)
+
+      // The same follower on the pre-emphasised copy. Their ratio is how much
+      // the curve's view of the loud material has been lifted, which is what
+      // the threshold gives back — see LIFT_TAU_S.
+      //
+      // A RATIO OF FOLLOWERS, never of samples: |emphasised[i] / raw[i]| is
+      // unbounded wherever the raw sample passes through zero, and a lift
+      // reading that spikes to infinity between cycles would drive the
+      // threshold to T_MAX and silently disable the stage.
+      const rectEmph = monoEmph[i] < 0 ? -monoEmph[i] : monoEmph[i]
+      fastPeakEmph += (rectEmph > fastPeakEmph ? this.fastPeakAttack : this.fastPeakRelease)
+        * (rectEmph - fastPeakEmph) + DENORMAL_GUARD
 
       // noise_est: decaying valley follower standing in for a running minimum
       // over a trailing 2 s window — see deviation note (2) above.
@@ -1047,12 +1493,77 @@ export class SoftClipperKernel {
         } else {
           speechLevelDb += this.speechCoef * (fastPeakDb - speechLevelDb)
         }
+
+        // Emphasis lift, on the same 3 s constant and behind the same gate as
+        // the speech tracker. Gated for the same reason: through a pause both
+        // followers decay toward the noise floor, where their ratio is a
+        // property of the room rather than of the voice, and an ungated lift
+        // would let the threshold wander between words.
+        //
+        // Clamped to [0, emphasisDb] — the shelf is a pure boost, so anything
+        // outside that window is a follower still filling rather than a
+        // measurement. See LIFT_TAU_S.
+        // Only the loud moments contribute — see LIFT_GATE_DB. During warm-up
+        // the tracker is parked at SPEECH_INIT_HOLD_DB and means nothing yet,
+        // so the comparison runs against the peak gathered so far instead;
+        // without that the gate would never open during warm-up and the seed
+        // below would never accumulate.
+        const liftRefDb = speechWarmupCount < this.speechWarmupTarget
+          ? linToDb(speechWarmupPeak)
+          : speechLevelDb
+        const atPeak = fastPeakDb >= liftRefDb + LIFT_GATE_DB
+        const liftTargetDb = clamp(linToDb(fastPeakEmph) - fastPeakDb, 0, liftMaxDb)
+        if (!atPeak) {
+          // Not a loud moment: contribute nothing rather than dragging the
+          // reading toward a population the threshold is not placed for.
+        } else if (speechWarmupCount < this.speechWarmupTarget) {
+          // SEEDED DURING WARM-UP, NOT RAMPED INTO, and this is not a
+          // refinement — without it the feature is absent for its first three
+          // seconds. The speech tracker adopts a real level the instant its
+          // 500 ms window closes, so the stage starts processing immediately;
+          // a lift still climbing from zero on a 3 s constant leaves the
+          // threshold uncompensated exactly then, and the stage over-clips
+          // the start of every file just as hard as it did before the
+          // compensation existed. Measured on a sibilant passage at emphasis
+          // 12, that transient alone accounted for most of the peak reduction
+          // the compensation appeared to be failing to remove.
+          //
+          // The MAX rather than the mean over the window, because a lift that
+          // is too high merely does less while one that is too low
+          // over-processes — the asymmetry the tracker's own warm-up note
+          // records, and the cure there was a warm-up seed rather than
+          // ballistics for the same reason.
+          if (liftTargetDb > liftWarmupMax) liftWarmupMax = liftTargetDb
+          liftDb = liftWarmupMax
+        } else {
+          liftDb += this.liftCoef * (liftTargetDb - liftDb)
+        }
       }
 
       // threshold derivation (spec §3.3). T_MIN is now only a numerical
       // backstop — softClip takes log(|x|/T), so T must stay off zero.
-      const targetDb = fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed
-      T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX)
+      //
+      // liftDb is added in BOTH modes, including fixed. A stated ceiling is
+      // stated about the raw signal, and the curve works on the emphasised
+      // one; without the lift the two disagree by however much HF Emphasis is
+      // boosting, and the number in the box stops describing what happens.
+      // The scope draws T, so the line visibly rises with the knob — which is
+      // the trade being made and worth seeing.
+      const targetDb = (fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed)
+        + liftDb
+      // T_MAX IS SCALED BY THE LIFT, and leaving it unscaled truncated the
+      // compensation exactly where it was needed most. The ceiling bounds T
+      // against the signal the CURVE sees, not against the raw input, and
+      // pre-emphasis has lifted that signal by liftDb — so a threshold above
+      // digital full scale in raw terms is correct here rather than absurd:
+      // it means nothing in the unemphasised signal should be touched and
+      // only the boosted HF peaks can reach the curve.
+      //
+      // Measured before the scaling: on a sibilant passage at emphasis 12 the
+      // lift reached 11.25 dB, T pinned at 0.95, and peak reduction climbed to
+      // 4.98 dB — the clamp handing back the depth the compensation had just
+      // removed, silently, and only on the material the feature exists for.
+      T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX * dbToLin(liftDb))
 
       // Scope: loudest input sample of this call, and T at that instant.
       const ax = x < 0 ? -x : x
@@ -1061,6 +1572,9 @@ export class SoftClipperKernel {
 
     this.fastRmsMeanSq = fastRmsMeanSq
     this.fastPeak = fastPeak
+    this.fastPeakEmph = fastPeakEmph
+    this.liftDb = liftDb
+    this.liftWarmupMax = liftWarmupMax
     this.noiseEstDb = noiseEstDb
     this.gateHoldSamples = gateHoldSamples
     this.speechLevelDb = speechLevelDb
@@ -1071,13 +1585,6 @@ export class SoftClipperKernel {
     this.scopePeak = scopePeak
     this.scopeThreshold = scopeThreshold
     this.outputTrimDbSmoothed = outputTrimDbSmoothed
-
-    // Emphasis coefficients recompute only when the raw target has moved
-    // enough to matter (deviation note 3) — cheap on a knob drag, free
-    // otherwise.
-    if (Math.abs(p.emphasisDb - this.emphasisDbCommitted) > EMPHASIS_RECOMPUTE_EPS_DB) {
-      this._updateEmphasis(p.emphasisDb)
-    }
 
     while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler())
     const D = OVERSAMPLE_LATENCY_SAMPLES
@@ -1133,7 +1640,7 @@ export class SoftClipperKernel {
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           const before = hi[k]
-          const after = softClip(before, t, MAX_REDUCTION_DB, KNEE_DB, shapeExponent)
+          const after = softClip(before, t, MAX_REDUCTION_DB, shapeKneeDb, shapeExponent)
           hi[k] = after
           const ab = before < 0 ? -before : before
           if (ab > t) {
@@ -1283,6 +1790,7 @@ if (typeof registerProcessor === 'function') {
           type: 'gr',
           reductionDb: this.kernel.reductionDb,
           engagedFraction: this.kernel.engagedFraction,
+          liftDb: this.kernel.liftDb,
           // Only the filled prefix, so a short final batch cannot inject
           // stale zero-peak points into the scroll.
           scope: this.scope.subarray(0, this.scopeCount * 2),

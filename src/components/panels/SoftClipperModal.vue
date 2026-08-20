@@ -16,7 +16,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape,
-  clipperPreview, clipperReduction, clipperEngagedPct, clipperDelta,
+  clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncOutputTrim, syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
@@ -81,29 +81,36 @@ const MODE_OPTIONS = [
  * samples, because the threshold is what decides that. What changes is how
  * much each of those samples gets, weighted by its overshoot.
  *
- * The numbers make the real difference legible in one line. At the shipped
- * knee, a peak 3 dB over the threshold loses 0.98 / 0.40 / 0.16 dB across the
- * three, while a peak 12 dB over loses 5.27 / 4.94 / 4.63. The deep transients
- * this stage exists for land in nearly the same place whichever position is
- * chosen; the control is almost entirely about the shallow ones.
+ * THE CAPTIONS SHOW A CROSSOVER, AND THAT IS THE WHOLE CONTROL. Each position
+ * carries its own knee, set so a peak SHAPE_ANCHOR_DB (8 dB) over the
+ * threshold loses the same 3.3 dB whichever is selected — so the switch moves
+ * character, not depth. Below the anchor EARLY does more (0.69 / 0.40 / 0.24
+ * dB at +3), above it LATE does (4.73 / 4.94 / 5.07 at +12). Both numbers are
+ * shown, with the anchor between them, because reading the three as one line is
+ * what stops the control being taken for a second volume knob.
  *
- * See SHAPE_EXPONENT in the kernel for the monotonicity bounds, why the
- * smoothstep family is not offered, and what each position measures like on
- * real narration.
+ * It used to be one: at a shared knee every position was strictly quieter than
+ * the one before it, so LATE "sounded cleaner" mostly because it was doing
+ * less, and comparing two positions by ear compared two amounts. See
+ * SHAPE_ANCHOR_DB in the kernel for the measurement, and SHAPE_EXPONENT for
+ * the monotonicity bounds and why the smoothstep family is not offered.
  */
 const SHAPE_OPTIONS = [
-  { value: 'tanh2', label: 'EARLY', title: 'Reduction ramps in as soon as a peak crosses the threshold' },
-  { value: 'tanh3', label: 'MID', title: 'Holds off until a peak is clearly over the threshold (default)' },
-  { value: 'tanh4', label: 'LATE', title: 'Reserves the reduction for the deepest overshoots' },
+  { value: 'tanh2', label: 'EARLY', title: 'Spends the reduction on peaks that only just cross the threshold' },
+  { value: 'tanh3', label: 'MID', title: 'Even-handed between shallow crossings and deep ones (default)' },
+  { value: 'tanh4', label: 'LATE', title: 'Holds off on shallow crossings and hits the deepest overshoots harder' },
 ]
 
-// The one comparison that separates the three, in the units the panel already
-// speaks. The +12 dB figure is deliberately shown too: it barely moves, which
-// is the fact that stops this reading as a depth control.
+// THREE POINTS, NOT TWO, and the middle one is the reason. It is the anchor,
+// so it reads −3.3 in all three positions — the caption therefore shows the
+// pivot happening rather than asserting it, and a user switching positions can
+// see at a glance that the depth is held and only the ends move. Two points
+// would have left "does LATE just do less?" open, which is the question the
+// whole normalisation exists to close.
 const SHAPE_CAPTION = {
-  tanh2: '3 dB over → −1.0 dB · 12 dB over → −5.3',
-  tanh3: '3 dB over → −0.4 dB · 12 dB over → −4.9',
-  tanh4: '3 dB over → −0.2 dB · 12 dB over → −4.6',
+  tanh2: '3 dB over → −0.7 · 8 → −3.3 · 12 → −4.7 dB',
+  tanh3: '3 dB over → −0.4 · 8 → −3.3 · 12 → −4.9 dB',
+  tanh4: '3 dB over → −0.2 · 8 → −3.3 · 12 → −5.1 dB',
 }
 
 const MODE_CAPTION = {
@@ -134,6 +141,20 @@ function formatDb(v) {
 }
 
 const isFixed = computed(() => thresholdMode.value === 'fixed')
+
+/**
+ * What HF Emphasis is doing right now, in one line under the knob.
+ *
+ * Two readings rather than a fixed caption, because the knob's effect is a
+ * property of the MATERIAL and a static caption cannot say so. At 0, or on a
+ * passage with nothing above the corner, there is nothing to aim at and the
+ * panel says so instead of implying the control is live.
+ */
+const emphasisCaption = computed(() => {
+  if (emphasisDb.value <= 0) return 'aims at consonants'
+  if (clipperLiftDb.value < 0.15) return 'nothing up there to aim at'
+  return `aiming — ceiling +${clipperLiftDb.value.toFixed(1)} dB`
+})
 
 /**
  * Headroom and Fixed dBFS are ONE control, and used to be two.
@@ -319,10 +340,21 @@ const SCOPE_H = 236
           </p>
         </div>
         <div class="w-[74px]">
-          <!-- Harshness-reduction mechanism, not a tone control: it shaves
-               HF first (where clipping's odd harmonics land) and pulls the
-               generated harmonics back down with it. The caption is there
-               because the label alone reads as an EQ. -->
+          <!-- AIMS the stage, and the caption names that rather than the
+               mechanism. "harshness, not tone" shipped here and was the wrong
+               shape of statement twice over: it described what the control is
+               not, and the thing it was defending against was — as shipped —
+               true. Uncompensated, raising this knob tripled peak reduction
+               on any HF-rich passage, so "turn it up to add harshness" was a
+               fair reading of the measurements rather than a misconception.
+               With the lift compensation in place depth holds and what is
+               left is pure aim: measured on two bursts of identical peak
+               amplitude, 110 Hz stays at 1.88 dB of reduction across the
+               whole knob while a fricative goes 3.00 -> 5.84.
+
+               The live figure is the compensation itself, and it doubles as
+               the honest answer to "is this knob doing anything here?" — on
+               material with nothing above 3.5 kHz to aim at, it reads 0.0. -->
           <Knob
             :model-value="emphasisDb"
             @update:model-value="syncEmphasis"
@@ -332,7 +364,7 @@ const SCOPE_H = 236
             :disabled="!clipperPreview"
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            harshness, not tone
+            {{ emphasisCaption }}
           </p>
         </div>
         <div class="w-[74px]">

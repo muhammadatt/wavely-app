@@ -48,7 +48,7 @@ test('the label is used verbatim, so a proper name keeps its capitals', () => {
   // No case is derived from the label. It cannot be: "Scheps" and "Silence"
   // are the same shape, and an earlier attempt at a rule turned "VoiceRx" into
   // "voiceRx" and "Scheps Parallel" into "scheps Parallel".
-  for (const label of ['FET Punch compression', 'VoiceRx', 'Scheps Parallel', 'AirBoost']) {
+  for (const label of ['FET Punch compression', 'VoiceRx', 'Scheps Parallel', 'AirBoost', 'Soft Clip']) {
     editor.pushUndo(label)
     editor.undo()
     assert.equal(lastToast(editor), `Undid ${label}`)
