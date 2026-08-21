@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
 import {
   PITCH_RANGES,
@@ -37,6 +37,17 @@ onMounted(() => {
 })
 
 const ACCENT = '#8de0a8'
+
+/**
+ * The spectrum display's height — opens at 140, and grows from there. See
+ * FloatingWindow's `resizable`: the corner grip reports how many extra
+ * pixels the user has dragged in, and this is the only thing here that
+ * spends them; the meters, the knobs and the range fader stay exactly the
+ * size they were designed at.
+ */
+const PLOT_H = 140
+const heightDelta = ref(0)
+const plotHeight = computed(() => PLOT_H + heightDelta.value)
 
 const MODE_OPTIONS = [
   { value: 'soft', label: 'SOFT', title: 'Gradual knee above the threshold' },
@@ -169,6 +180,8 @@ async function applyAndClose() {
     brand-lead="RESO"
     brand-tail="TAME"
     :engaged="resPreview"
+    resizable
+    @update:height-delta="heightDelta = $event"
     @toggle-engaged="togglePreview"
     @close="close"
   >
@@ -225,7 +238,7 @@ async function applyAndClose() {
         :selectivity-db="resSelectivity"
         :freq-floor-hz="resFreqFloor"
         :freq-ceil-hz="resFreqCeil"
-        :height="140"
+        :height="plotHeight"
         :delta="resDelta"
         :weight-nodes="resWeightNodes"
         @update:weight-nodes="syncWeightNodes"

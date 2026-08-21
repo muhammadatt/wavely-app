@@ -264,7 +264,7 @@ export function createEqInstance({
           { bands: bands.value, output: outputTrim.value },
           state.currentFile.sampleRate, state.currentFile.channels,
         )
-        const bufferId = replaceRegion(start, end, buffer)
+        const bufferId = replaceRegion(start, end, buffer, label)
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(`${label} applied`)

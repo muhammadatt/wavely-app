@@ -45,6 +45,14 @@ const props = defineProps({
    * component's own hover, and that separation is the point: see hoveredRegion.
    */
   markedRegion: { type: String, default: null },
+  /**
+   * Height of the plot, in pixels. Forwarded straight to EqPlot — the
+   * faceplate is what makes this a fixed 200 by default and a bigger number
+   * once FloatingWindow's corner grip has been dragged; this view has no
+   * opinion of its own about it. The role columns underneath sit at their own
+   * fixed height (COLUMN_H) regardless, so only the picture itself grows.
+   */
+  plotHeight: { type: Number, default: 200 },
 })
 
 const emit = defineEmits(['update:hoveredRegion'])
@@ -482,7 +490,7 @@ function fmtWidth(q) {
     <div
       v-if="showIntro"
       class="rounded-[3px] flex flex-col items-center justify-center gap-[12px] px-[24px] py-[22px]"
-      style="min-height:200px;background:rgba(0,0,0,.28)"
+      :style="{ minHeight: `${plotHeight}px`, background: 'rgba(0,0,0,.28)' }"
     >
       <p
         v-if="errorMessage"
@@ -579,6 +587,7 @@ function fmtWidth(q) {
         :bands="eq.bands.value"
         :sample-rate="sampleRate"
         :accent="accent"
+        :height="plotHeight"
         :handle-ids="roleHandleIds"
         :selected-id="hoveredBandId"
         :solo-id="eq.soloBandId.value"

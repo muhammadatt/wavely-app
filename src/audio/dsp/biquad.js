@@ -145,6 +145,59 @@ export function notch(sampleRate, freqHz, q) {
 }
 
 /**
+ * Exact algebraic inverse of a normalised biquad: `H⁻¹(z) = 1 / H(z)`.
+ *
+ * For any `H(z) = (b0+b1z⁻¹+b2z⁻²) / (1+a1z⁻¹+a2z⁻²)`, the reciprocal is just
+ * numerator and denominator swapped — `(1+a1z⁻¹+a2z⁻²) / (b0+b1z⁻¹+b2z⁻²)` —
+ * renormalised so its own denominator's leading coefficient is 1. That swap is
+ * exact for any biquad; it is not particular to shelving filters. What makes it
+ * *usable* as a de-emphasis stage is that the result is only stable when the
+ * original filter's zeros lie inside the unit circle (minimum phase) — see
+ * `biquadZerosInsideUnitCircle`, meant to be checked before trusting this.
+ *
+ * Used by the soft clipper's de-emphasis stage: pre-emphasis is an RBJ high
+ * shelf, and its inverse via this function is exact by construction rather
+ * than a second shelf fitted to look like a cut.
+ */
+export function invertBiquad(c) {
+  const { b0, b1, b2, a1, a2 } = c
+  const invB0 = 1 / b0
+  return {
+    b0: invB0,
+    b1: a1 * invB0,
+    b2: a2 * invB0,
+    a1: b1 * invB0,
+    a2: b2 * invB0,
+  }
+}
+
+/**
+ * Whether a normalised biquad's ZEROS lie strictly inside the unit circle —
+ * i.e. whether `invertBiquad(c)` would be stable.
+ *
+ * The zeros of `b0 + b1z⁻¹ + b2z⁻²` (as a function of z) are the roots of
+ * `b0·z² + b1·z + b2 = 0`. Solved directly rather than via `Math.hypot` on a
+ * generic complex root finder — this only ever runs at coefficient-update
+ * time, not per sample, so clarity wins over cleverness.
+ */
+export function biquadZerosInsideUnitCircle(c) {
+  const { b0, b1, b2 } = c
+  if (b0 === 0) return false
+  const A = b0, B = b1, C = b2
+  const disc = B * B - 4 * A * C
+  if (disc >= 0) {
+    const sqrtDisc = Math.sqrt(disc)
+    const r1 = (-B + sqrtDisc) / (2 * A)
+    const r2 = (-B - sqrtDisc) / (2 * A)
+    return Math.abs(r1) < 1 && Math.abs(r2) < 1
+  }
+  // Complex conjugate pair: both roots share the same magnitude, and their
+  // product is C/A (the constant term over the leading coefficient) —
+  // standard result for a monic-normalised quadratic's roots.
+  return Math.sqrt(Math.abs(C / A)) < 1
+}
+
+/**
  * Q values for the biquad sections of a Butterworth cascade.
  *
  * `scipy.signal.butter(N, ..., output='sos')` produces ceil(N/2) sections; for

@@ -7,6 +7,7 @@ import PresetsPanel from '../components/panels/PresetsPanel.vue'
 
 import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
+import SoftClipperModal from '../components/panels/SoftClipperModal.vue'
 import SchepsModal from '../components/panels/SchepsModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
@@ -18,6 +19,7 @@ import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
 import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
+import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
 
 /**
  * The operation registry — the single source of truth for what this app can do.
@@ -247,6 +249,21 @@ export const OPERATIONS = [
     component: FET1176Modal,
   },
   {
+    // Filed under Dynamics, ahead of the compressors in the panel: the whole
+    // point is to run before them, taming plosive peaks so they don't slip
+    // past a compressor's attack and get amplified by makeup gain.
+    id: 'soft-clipper',
+    label: 'Soft Clipper',
+    desc: 'Tame transient peaks before compression',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'clipper',
+    keywords: ['clip', 'clipper', 'transient', 'plosive', 'peak', 'soft clip', 'saturation'],
+    requires: 'selection',
+    surface: 'window',
+    component: SoftClipperModal,
+  },
+  {
     // Filed under Dynamics rather than Tone: the two Pultec stages are there to
     // steer the compressor's sidechain, and what the user is reaching for is a
     // parallel compression sound. The EQ is the mechanism, not the offer.
@@ -374,6 +391,27 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: RemoveSilenceWindow,
+  },
+
+  // ---- Analysis ----
+  // Its own group because it is the one entry here that measures rather than
+  // changes: it needs a file and a transport, not a selection, and it has no
+  // Apply. Filing it under Dynamics or Tone would put a row that alters nothing
+  // in a list where every other row does.
+  {
+    id: 'spectrum-analyzer',
+    label: 'Spectrum Analyzer',
+    desc: 'See what is in the file, frequency by frequency',
+    category: 'effects',
+    group: 'Analysis',
+    icon: 'spectrum',
+    keywords: [
+      'spectrum', 'analyser', 'analyzer', 'fft', 'frequency', 'rta',
+      'spectral', 'meter', 'display', 'hum', 'noise', 'hiss',
+    ],
+    requires: 'file',
+    surface: 'window',
+    component: SpectrumAnalyzerWindow,
   },
 ]
 

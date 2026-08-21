@@ -297,9 +297,12 @@ onUnmounted(() => {
       <!-- Workspace -->
       <div class="flex flex-col flex-1 overflow-hidden">
         <FloatingToolbar />
+
+        <FileTabs />  
         <div class="flex-1 min-h-0 p-[14px] pl-5 flex flex-col gap-[10px]">
           <!-- Overview is indented by the dBFS gutter so its time axis shares an
                x-origin with the main waveform below it. -->
+   
           <div class="flex shrink-0" v-if="hasFile">
             <div class="w-7 shrink-0"></div>
             <WaveformOverview class="flex-1" />

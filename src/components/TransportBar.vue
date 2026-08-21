@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
-import { startPlayback, stopPlayback } from '../audio/playback.js'
+import { startPlayback, stopPlayback, setPlaybackLoop, setPlaybackRegion } from '../audio/playback.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import BaseButton from './ui/BaseButton.vue'
 
@@ -37,6 +37,12 @@ function togglePlay() {
   }
 }
 
+// Whether what is sounding is a selection rather than the whole file. Only
+// then does moving the selection mean anything to the transport: with no
+// region playing, drawing a selection is the user marking something up, not
+// asking playback to jump into it.
+const playingRegion = ref(false)
+
 function play() {
   const ctx = getAudioContext()
   state.isPlaying = true
@@ -50,6 +56,8 @@ function play() {
     endAt = null
   }
 
+  playingRegion.value = endAt !== null
+
   startPlayback(
     state.segments,
     startFrom,
@@ -59,19 +67,44 @@ function play() {
     },
     () => {
       state.isPlaying = false
-      if (state.isLooping) {
-        state.playhead = endAt ? startFrom : 0
-        play()
-      }
+      playingRegion.value = false
     },
     endAt,
+    // Looping is handled inside the engine, on the audio clock. Restarting from
+    // here instead — the old arrangement — could only ever begin the next pass
+    // one animation frame after the previous one ended, which is the gap at the
+    // seam. A repeat starts where the selection does, or at zero when the whole
+    // file is playing: looping a file from the middle should come back to the
+    // top, not to wherever playback happened to begin.
+    { loop: state.isLooping, loopStart: endAt !== null ? startFrom : 0 },
   )
 }
 
 function stop() {
   stopPlayback()
   state.isPlaying = false
+  playingRegion.value = false
 }
+
+// The loop button is live during playback, so the engine has to hear about a
+// toggle mid-pass rather than only at the next play().
+watch(() => state.isLooping, (looping) => {
+  if (!state.isPlaying) return
+  setPlaybackLoop(looping, state.selection ? state.selection.start : 0)
+})
+
+// So are the selection's edges. Dragging one while a selection loops has to
+// change what the loop plays now — otherwise auditioning a boundary by ear is a
+// stop/adjust/start cycle for every attempt, which is most of what the edges
+// are for.
+//
+// A cleared selection is deliberately not a region change: it happens on every
+// click in the waveform, and stopping or re-scoping playback on a stray click
+// would be worse than letting the loop run on.
+watch(() => state.selection, (sel) => {
+  if (!state.isPlaying || !playingRegion.value || !sel) return
+  setPlaybackRegion(sel.start, sel.end)
+}, { deep: true })
 
 function skipToStart() {
   if (state.isPlaying) stop()

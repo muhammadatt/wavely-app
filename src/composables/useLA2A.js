@@ -257,7 +257,7 @@ export function useLA2A() {
         currentParams(),
         state.currentFile.sampleRate, state.currentFile.channels
       )
-      const bufferId = replaceRegion(start, end, buffer)
+      const bufferId = replaceRegion(start, end, buffer, 'LA-2A compression')
       const cache = await computePeakCache(buffer, 256)
       setPeakCache(bufferId, cache)
       showToast('LA-2A compression applied')
