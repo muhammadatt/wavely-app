@@ -60,6 +60,8 @@ export const RESONANCE_DEFAULTS = {
   pitchRange: 'voice', // key of PITCH_RANGES
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS in resonanceParams.js.
   refMode: 'cepstral',
+  // Sensitivity weighting nodes — see resonanceParams.js. Not filters.
+  weightNodes: [],
   mix: 1, // 0 = dry, 1 = fully suppressed
   trim: 0, // dB, wet path only
 }
@@ -81,6 +83,7 @@ export function toKernelParams(params) {
     pitchMinHz: range.minHz,
     pitchMaxHz: range.maxHz,
     refMode: params.refMode,
+    weightNodes: params.weightNodes,
     mix: params.mix,
     trimDb: params.trim,
   }

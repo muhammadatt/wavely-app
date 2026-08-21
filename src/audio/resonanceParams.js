@@ -210,3 +210,96 @@ function readOverride(key) {
     return null
   }
 }
+
+/**
+ * Sensitivity weighting curve — EQ-style nodes that are NOT filters.
+ *
+ * A node does not boost or cut the audio. It offsets `selectivity` — the
+ * threshold a bin must protrude above its reference to count as a resonance —
+ * over a region of the spectrum. Positive gain LOWERS the threshold there, so
+ * the effect is more willing to act; negative gain raises it. Soothe2 describes
+ * the same idea as "an inverse EQ or a sidechain EQ": boosting a band makes it
+ * more processed, not louder.
+ *
+ * WHY A SCALAR SELECTIVITY IS STRUCTURALLY WRONG, measured rather than
+ * asserted. The quantity it thresholds does not have a frequency-independent
+ * distribution. Mean protrusion on real narration, by band:
+ *
+ *                60-120   120-180   190-270   300-500   600-1000
+ *     cepstral      3.4      12.5      15.3      13.7       13.9
+ *     peak         17.1      17.5      18.1      18.6       13.1
+ *
+ * A 12 dB spread across the low end for the cepstral reference. One number
+ * cannot be the right threshold at 100 Hz and at 250 Hz at once, and the
+ * consequence is measurable: on a narration clip the suppressor was inert on a
+ * word with an audible low-mid honk, and reaching it by lowering selectivity
+ * globally took gain jitter from 0.85/1.14 to 1.23/1.58 — worse than a
+ * configuration already rejected by ear. The headroom was real and only
+ * reachable per-band.
+ *
+ * Gaussian in LOG frequency, summed across nodes, for the same reason the
+ * spread kernel is: a region of the spectrum is a span in octaves, not in Hz.
+ *
+ * Kept here rather than in the kernel so the panel can draw exactly the curve
+ * the detector uses, the way the display grid is shared.
+ */
+export const RESONANCE_WEIGHT_MAX_NODES = 4
+/** Range of a single node, in dB of threshold offset. */
+export const RESONANCE_WEIGHT_MAX_DB = 12
+/**
+ * Ceiling on the SUM.
+ *
+ * Nodes add, because two overlapping nodes both meaning "be more sensitive
+ * here" should be more sensitive than either alone — anything else is
+ * surprising to move. But an unbounded sum of four nodes could drive the
+ * effective threshold far negative, and a negative threshold does not mean
+ * "very sensitive", it means "treat everything including what sits BELOW the
+ * reference", which is not a resonance by any definition. Bounded here, and
+ * the effective threshold is floored at zero in the kernel as well.
+ */
+export const RESONANCE_WEIGHT_SUM_LIMIT_DB = 24
+export const RESONANCE_WEIGHT_MIN_OCTAVES = 0.15
+export const RESONANCE_WEIGHT_MAX_OCTAVES = 3
+export const RESONANCE_WEIGHT_DEFAULT_OCTAVES = 0.7
+
+function clampNum(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+/** Threshold offset the node set applies at one frequency, in dB. */
+export function resonanceWeightDbAt(nodes, freqHz) {
+  if (!nodes || nodes.length === 0 || !(freqHz > 0)) return 0
+  let acc = 0
+  for (const node of nodes) {
+    if (!node || !(node.freqHz > 0) || !node.gainDb) continue
+    if (node.enabled === false) continue
+    const octaves = clampNum(
+      node.octaves ?? RESONANCE_WEIGHT_DEFAULT_OCTAVES,
+      RESONANCE_WEIGHT_MIN_OCTAVES,
+      RESONANCE_WEIGHT_MAX_OCTAVES,
+    )
+    const x = Math.log2(freqHz / node.freqHz) / octaves
+    acc += clampNum(node.gainDb, -RESONANCE_WEIGHT_MAX_DB, RESONANCE_WEIGHT_MAX_DB)
+      * Math.exp(-0.5 * x * x)
+  }
+  return clampNum(acc, -RESONANCE_WEIGHT_SUM_LIMIT_DB, RESONANCE_WEIGHT_SUM_LIMIT_DB)
+}
+
+/**
+ * Expand a node set onto an FFT bin grid, or null when it would be flat.
+ *
+ * Null rather than a zero-filled array so the detector can skip the lookup
+ * entirely on the overwhelmingly common empty case, and so a file processed
+ * with no nodes is bit-identical to one processed before this existed.
+ */
+export function buildResonanceWeightCurve(nodes, binCount, binWidth) {
+  if (!nodes || nodes.length === 0) return null
+  const live = nodes.filter(n => n && n.enabled !== false && n.gainDb && n.freqHz > 0)
+  if (live.length === 0) return null
+  const curve = new Float64Array(binCount)
+  // Bin 0 is DC; evaluating log2(0) there would be -Infinity. It carries no
+  // audible content and the detector's band limits exclude it in practice.
+  for (let k = 1; k < binCount; k++) curve[k] = resonanceWeightDbAt(live, k * binWidth)
+  curve[0] = curve[1]
+  return curve
+}

@@ -110,6 +110,7 @@ import { getFFT } from './dsp/fft.js'
 import {
   RESONANCE_DISPLAY_BINS,
   RESONANCE_DISPLAY_CURVES,
+  buildResonanceWeightCurve,
   resonanceDisplayRange,
 } from './resonanceParams.js'
 
@@ -457,6 +458,14 @@ export const RESONANCE_KERNEL_DEFAULTS = {
   // all four combinations can be measured, though the point of 'peak' is that
   // it does not need the mask.
   refMode: 'cepstral',
+  /**
+   * Sensitivity weighting nodes — `{ freqHz, gainDb, octaves }`, summed as a
+   * Gaussian in log frequency. NOT filters: they offset `selectivity` over a
+   * region, so a positive gain makes the detector more willing to act there.
+   * See the note in resonanceParams.js. Empty by default, and an empty set is
+   * bit-identical to the behaviour before this existed.
+   */
+  weightNodes: [],
   // Wet/dry blend and wet-path makeup. Both live inside the kernel's per-bin
   // gain rather than as nodes around it — see _mixGain.
   mix: 1,
@@ -636,6 +645,10 @@ export class ResonanceKernel {
      * there is no comb so it reverts to full broadband suppression.
      */
     this.preserveHarmonics = !!p.preserveHarmonics
+
+    // Sensitivity weighting. Rebuilt on any param change rather than diffed:
+    // it is a few thousand exp() on a knob move, and never on the audio path.
+    this.weightDb = buildResonanceWeightCurve(p.weightNodes, this.binCount, this.binWidth)
     this.refOct = PEAK_REF_OCT_COARSE
       * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, clamp(p.sharpness, 0, 1))
 
@@ -1043,7 +1056,7 @@ export class ResonanceKernel {
   _analyzeFrame(specRe, specIm, stft) {
     const {
       magDb, envDb, reduction, spread, prevGr, gain, activeBins, binCount,
-      selectivity, depth, maxReductionDb, softKnee, kneeWidth,
+      selectivity, depth, maxReductionDb, softKnee, kneeWidth, weightDb,
     } = this
 
     for (let k = 0; k < binCount; k++) {
@@ -1127,7 +1140,13 @@ export class ResonanceKernel {
         reduction[k] = 0
         continue
       }
-      const above = detect[k] - envDb[k] - selectivity
+      // The threshold, offset per band by the weighting curve. Floored at zero:
+      // a negative threshold would mean treating bins that sit BELOW the
+      // reference, which is not a resonance under any reading.
+      const threshold = weightDb
+        ? Math.max(0, selectivity - weightDb[k])
+        : selectivity
+      const above = detect[k] - envDb[k] - threshold
       if (above <= 0) {
         reduction[k] = 0
         continue
