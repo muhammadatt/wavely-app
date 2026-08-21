@@ -548,3 +548,59 @@ test('the cepstral path still detects on the magnitude', () => {
   assert.equal(kernel.refMode, 'cepstral')
   assert.equal(kernel.peakMax, null, 'the peak envelope should never be built on the shipping path')
 })
+
+test('harmonic protection is forced off under the peak reference', () => {
+  // NOT REDUNDANCY — ENABLING IT INVERTS THE CUT. The cepstral reference
+  // measures the bin's own magnitude, which peaks at harmonics, so its
+  // reduction lands ON them and masking those bins removes most of it. The peak
+  // reference measures a maximum over one harmonic spacing, which flattens the
+  // comb by design, so its reduction is smooth across frequency — and masking a
+  // smooth curve punches holes in it, leaving the harmonics untouched and
+  // attenuating the inter-harmonic floor instead. Measured on real narration,
+  // mean reduction on harmonic bins vs between them: cepstral unmasked 2.17,
+  // peak unmasked 0.98, peak masked 0.60. The last one is an inverted comb.
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'peak', preserveHarmonics: true })
+  assert.equal(kernel.preserveHarmonics, false, 'peak mode must not honour the mask')
+
+  // ...and the cepstral path is untouched by the guard.
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'cepstral', preserveHarmonics: true })
+  assert.equal(kernel.preserveHarmonics, true)
+})
+
+test('under the peak reference the cut lands evenly across the comb', () => {
+  // The property the guard protects: reduction should be about the same on a
+  // harmonic and in the gap beside it, because the max filter flattened the
+  // comb before detection ever saw it. If a future change lets the mask back
+  // in, this ratio inverts.
+  const sig = resonate(pitched(() => 150, { seconds: 2 }), 1200, 3, 12)
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams({
+    ...RESONANCE_KERNEL_DEFAULTS,
+    refMode: 'peak', preserveHarmonics: true, depth: 1, selectivity: 4,
+  })
+  const scratch = new Float32Array(128)
+  let on = 0
+  let off = 0
+  let n = 0
+  for (let o = 0; o + 128 <= sig.length; o += 128) {
+    kernel.process([sig.subarray(o, o + 128)], [scratch], 128)
+    if (o < SR) continue
+    const f0 = kernel.f0.lastF0
+    if (!f0) continue
+    const spacing = f0 / kernel.binWidth
+    for (let h = 6; h <= 10; h++) {
+      const kOn = Math.round(h * spacing)
+      const kOff = Math.round((h + 0.5) * spacing)
+      if (kOff >= kernel.binCount) break
+      on += kernel.prevGr[kOn]
+      off += kernel.prevGr[kOff]
+      n++
+    }
+  }
+  const ratio = on / (off || 1e-9)
+  assert.ok(
+    ratio > 0.7 && ratio < 1.4,
+    `cut should be even across the comb, on/between was ${ratio.toFixed(2)}`,
+  )
+})

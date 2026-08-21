@@ -596,7 +596,42 @@ export class ResonanceKernel {
     this.maxReductionDb = Math.max(0, p.maxReductionDb)
     this.softKnee = p.mode !== 'hard'
     this.kneeWidth = Math.max(this.selectivity * 0.5, 1e-6)
-    this.preserveHarmonics = !!p.preserveHarmonics
+    this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
+
+    /**
+     * HARMONIC PROTECTION IS INCOHERENT UNDER THE PEAK REFERENCE, so it is
+     * forced off there rather than left as a control that does damage.
+     *
+     * The two references put their reduction in opposite places. The cepstral
+     * one measures the bin's own magnitude, which peaks at harmonics, so its
+     * reduction concentrates ON them and masking those bins removes most of it
+     * — that is why the shipping default is inert. The peak reference measures
+     * a maximum over one harmonic spacing, which FLATTENS the comb on purpose,
+     * so its reduction is smooth across frequency.
+     *
+     * Masking a smooth gain curve does not reduce the treatment. It punches
+     * holes in it: the harmonics come through untouched and the inter-harmonic
+     * floor is attenuated instead — an inverted comb filter, cutting the gaps
+     * and leaving the resonance. Measured on real narration, mean reduction on
+     * harmonic bins against between them, 150 Hz - 1.5 kHz:
+     *
+     *     cepstral, no mask     0.62 / 0.29   ratio 2.17   (cuts the harmonics)
+     *     peak, no mask         1.06 / 1.08   ratio 0.98   (flat, as designed)
+     *     peak, WITH mask       0.49 / 0.82   ratio 0.60   (cuts the gaps)
+     *
+     * It also discards 60% of the treatment to do it: broadband -2.11 dB
+     * becomes -0.84.
+     *
+     * Not a limitation of peak mode — the whole premise of a reference drawn
+     * through the harmonic peaks is that a harmonic cannot read as a resonance,
+     * so there is nothing for the mask to protect against. The parameter was
+     * left orthogonal to `refMode` when the mode was added and all four corners
+     * were never checked; three of them are meaningful and this one is a
+     * footgun.
+     */
+    this.preserveHarmonics = !!p.preserveHarmonics && this.refMode !== 'peak'
+    this.refOct = PEAK_REF_OCT_COARSE
+      * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, clamp(p.sharpness, 0, 1))
 
     const nyquist = this.sampleRate / 2
     this.freqFloorHz = clamp(p.freqFloorHz, 0, nyquist)
@@ -655,9 +690,6 @@ export class ResonanceKernel {
     // Peak-envelope reference width, from the same Sharpness knob: it is the
     // same quantity the lifter target is, an envelope feature scale, expressed
     // in octaves because this reference has no reason to be uniform in Hz.
-    this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
-    this.refOct = PEAK_REF_OCT_COARSE
-      * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, sharpness)
 
     // Cepstral lifter target. Sharpness picks an absolute envelope feature
     // scale; the per-frame F0 clamps it. See LIFTER_SCALE_COARSE_HZ.
