@@ -178,16 +178,13 @@ export const RESONANCE_REF_MODE_DEFAULTS = {
     // Applied to every zone by withRefModeDefaults. Not a zone array here:
     // DEFAULT_RESONANCE_ZONES is declared further down this file, and a
     // reference to it at module-evaluation time is a temporal-dead-zone throw.
-    zoneOverrides: { selectivity: 20, depth: 1 },
+    zoneOverrides: { selectivity: 20, depth: 1, protect: false },
     // Slow, because the two mechanisms are complementary and measurably
     // superadditive: the stable envelope removes the frequency-domain source of
     // gain movement and these remove the time-domain residue. Alone they are
     // worth 21% and 11%; together, 62%.
     attack: 100,
     release: 500,
-    // The whole point: this reference does not make harmonics look like
-    // resonances, so it does not need the mask that answers that.
-    preserveHarmonics: false,
   },
 }
 
@@ -285,6 +282,7 @@ export const RESONANCE_ZONE_RANGES = {
   depth: { min: 0, max: 1 },
   sharpness: { min: 0, max: 1 },
   selectivity: { min: 3, max: 24 },
+  maxCut: { min: 3, max: 48 },
 }
 
 /**
@@ -298,7 +296,32 @@ export const RESONANCE_ZONE_RANGES = {
  * narrators' fundamentals, 1.1 kHz is the bottom of the presence range, and
  * 5 kHz is where sibilance starts to dominate.
  */
-const ZONE_STOCK = { depth: 0.67, sharpness: 0.8, selectivity: 8, enabled: true }
+const ZONE_STOCK = {
+  depth: 0.67,
+  sharpness: 0.8,
+  selectivity: 8,
+  maxCut: 36,
+  /**
+   * Harmonic protection, PER ZONE, and the measurement is why.
+   *
+   * The mask zeroes reduction at every bin near a harmonic of the measured F0,
+   * and its coverage does not fall off with frequency: measured at F0 90 / 140
+   * it blocks 67–77% of every octave from 60 Hz to 20 kHz, and at F0 220 it
+   * blocks 88% above 10 kHz. Down where the partials are widely spaced and
+   * dominant that is real protection — thinning the comb there is exactly the
+   * damage it exists to prevent. Up where sibilance and hiss live it is a
+   * blanket veto over the band, and the "harmonics" being protected are a comb
+   * so dense that nothing about it is separable by ear.
+   *
+   * So "protect the fundamental region, work freely above 5 kHz" is the setting
+   * this effect most wants and could not express while the mask was global.
+   *
+   * The PITCH RANGE stays global, and that is not an oversight: it tells one
+   * tracker which F0 to look for, and there is one signal and one pitch.
+   */
+  protect: true,
+  enabled: true,
+}
 export const DEFAULT_RESONANCE_ZONES = [
   { id: 'z1', hiHz: 180, ...ZONE_STOCK },
   { id: 'z2', hiHz: 1100, ...ZONE_STOCK },
@@ -333,6 +356,8 @@ export function zoneSettings(zone) {
     // the kernel as "remove none of what you find here", which is what bypass
     // means for a suppressor and needs no second mechanism.
     depth: enabled ? clampNum(zone?.depth ?? ZONE_STOCK.depth, R.depth.min, R.depth.max) : 0,
+    maxCut: clampNum(zone?.maxCut ?? ZONE_STOCK.maxCut, R.maxCut.min, R.maxCut.max),
+    protect: (zone?.protect ?? ZONE_STOCK.protect) !== false,
     sharpness: clampNum(zone?.sharpness ?? ZONE_STOCK.sharpness, R.sharpness.min, R.sharpness.max),
     selectivity: clampNum(
       zone?.selectivity ?? ZONE_STOCK.selectivity, R.selectivity.min, R.selectivity.max),
@@ -393,13 +418,14 @@ export function zoneWeightsAt(zones, freqHz) {
 export function zoneSettingsAt(zones, freqHz) {
   if (!zones || zones.length === 0) return { ...ZONE_STOCK, depth: ZONE_STOCK.depth }
   const w = zoneWeightsAt(zones, freqHz)
-  const out = { depth: 0, sharpness: 0, selectivity: 0 }
+  const out = { depth: 0, sharpness: 0, selectivity: 0, maxCut: 0 }
   for (let i = 0; i < zones.length; i++) {
     if (!w[i]) continue
     const s = zoneSettings(zones[i])
     out.depth += w[i] * s.depth
     out.sharpness += w[i] * s.sharpness
     out.selectivity += w[i] * s.selectivity
+    out.maxCut += w[i] * s.maxCut
   }
   return out
 }
@@ -425,6 +451,12 @@ export function buildResonanceZoneCurves(zones, binCount, binWidth) {
   const depth = new Float64Array(binCount)
   const sharpness = new Float64Array(binCount)
   const selectivity = new Float64Array(binCount)
+  const maxCut = new Float64Array(binCount)
+  // 1 where the harmonic mask applies, 0 where it does not, crossfaded between.
+  // A fraction rather than a flag so a boundary between a protected zone and an
+  // unprotected one is the same soft edge every other zone setting has — a hard
+  // step here would put a partial half in and half out of the mask.
+  const protect = new Float64Array(binCount)
 
   // Distinct sharpness values, to a resolution finer than the knob's step. Each
   // becomes one reference envelope; the kernel pays one inverse transform per
@@ -450,6 +482,8 @@ export function buildResonanceZoneCurves(zones, binCount, binWidth) {
       depth[k] += w[i] * settings[i].depth
       sharpness[k] += w[i] * settings[i].sharpness
       selectivity[k] += w[i] * settings[i].selectivity
+      maxCut[k] += w[i] * settings[i].maxCut
+      protect[k] += w[i] * (settings[i].protect ? 1 : 0)
       zoneGroup[i].weight[k] += w[i]
     }
   }
@@ -458,9 +492,22 @@ export function buildResonanceZoneCurves(zones, binCount, binWidth) {
     depth[0] = depth[1]
     sharpness[0] = sharpness[1]
     selectivity[0] = selectivity[1]
+    maxCut[0] = maxCut[1]
+    protect[0] = protect[1]
     for (const g of groups) g.weight[0] = g.weight[1]
   }
-  return { depth, sharpness, selectivity, groups, uniform: groups.length === 1 }
+  return {
+    depth,
+    sharpness,
+    selectivity,
+    maxCut,
+    protect,
+    groups,
+    uniform: groups.length === 1,
+    // Whether the mask is worth building at all this frame. It depends only on
+    // F0, so one zone wanting it is enough to pay for it.
+    anyProtect: zones.some(z => zoneSettings(z).protect),
+  }
 }
 
 /**
@@ -480,6 +527,8 @@ export function copyZones(zones) {
     depth: z.depth,
     sharpness: z.sharpness,
     selectivity: z.selectivity,
+    maxCut: z.maxCut,
+    protect: z.protect,
     enabled: z.enabled,
   }))
 }
@@ -493,9 +542,7 @@ export const RESONANCE_DEFAULTS = {
   // switched off, which says the same thing in a control that already exists.
   attack: 15, // ms
   release: 80, // ms
-  maxReduction: 36, // dB
   mode: 'soft', // 'soft' | 'hard'
-  preserveHarmonics: true,
   pitchRange: 'voice', // key of PITCH_RANGES
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
   refMode: 'cepstral',
@@ -511,9 +558,7 @@ export function toKernelParams(params) {
   return {
     attackMs: params.attack,
     releaseMs: params.release,
-    maxReductionDb: params.maxReduction,
     mode: params.mode,
-    preserveHarmonics: params.preserveHarmonics,
     pitchMinHz: range.minHz,
     pitchMaxHz: range.maxHz,
     refMode: params.refMode,

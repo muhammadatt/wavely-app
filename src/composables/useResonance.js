@@ -26,9 +26,7 @@ export const resRefMode = resolveRefMode()
 // Singleton reactive state shared between the sidebar trigger and the modal.
 const resAttack = ref(DEFAULTS.attack)
 const resRelease = ref(DEFAULTS.release)
-const resMaxReduction = ref(DEFAULTS.maxReduction)
 const resMode = ref(DEFAULTS.mode)
-const resPreserveHarmonics = ref(DEFAULTS.preserveHarmonics)
 const resPitchRange = ref(DEFAULTS.pitchRange)
 const resMix = ref(DEFAULTS.mix)
 /**
@@ -103,13 +101,11 @@ function currentParams() {
   return {
     attack: resAttack.value,
     release: resRelease.value,
-    maxReduction: resMaxReduction.value,
     mix: resMix.value,
     trim: resTrim.value,
     zones: resZones.value,
     refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
     mode: resMode.value,
-    preserveHarmonics: resPreserveHarmonics.value,
     pitchRange: resPitchRange.value,
   }
 }
@@ -210,7 +206,6 @@ export function useResonance() {
 
   const syncAttack = v => syncParam('attack', resAttack, v)
   const syncRelease = v => syncParam('release', resRelease, v)
-  const syncMaxReduction = v => syncParam('maxReduction', resMaxReduction, v)
   const syncMix = v => syncParam('mix', resMix, v)
   const syncTrim = v => syncParam('trim', resTrim, v)
   function pushZones() {
@@ -241,10 +236,6 @@ export function useResonance() {
   }
   const syncMode = v => syncParam('mode', resMode, v)
   const syncPitchRange = v => syncParam('pitchRange', resPitchRange, v)
-
-  function togglePreserveHarmonics() {
-    syncParam('preserveHarmonics', resPreserveHarmonics, !resPreserveHarmonics.value)
-  }
 
   async function apply() {
     if (!state.selection) return
@@ -306,7 +297,6 @@ export function useResonance() {
   return {
     resAttack,
     resRelease,
-    resMaxReduction,
     resMix,
     resTrim,
     resZones,
@@ -314,7 +304,6 @@ export function useResonance() {
     resSoloZone,
     resRefMode,
     resMode,
-    resPreserveHarmonics,
     resPitchRange,
     resPreview,
     resDelta,
@@ -326,7 +315,6 @@ export function useResonance() {
     toggleDelta,
     syncAttack,
     syncRelease,
-    syncMaxReduction,
     syncMix,
     syncTrim,
     syncZones,
@@ -334,7 +322,6 @@ export function useResonance() {
     clearSolo,
     syncMode,
     syncPitchRange,
-    togglePreserveHarmonics,
     apply,
     teardown,
     openModal,

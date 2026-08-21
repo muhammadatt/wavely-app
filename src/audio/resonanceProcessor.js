@@ -18,7 +18,7 @@
  *   2. cepstral lifter → reference envelope at the inter-harmonic floor, at a
  *      feature scale `sharpness` asks for and the measured F0 caps
  *   3. spike = magnitude − envelope, thresholded at `selectivity`, soft-kneed,
- *      scaled by `depth`, clipped to `maxReductionDb`
+ *      scaled by the zone's `depth`, clipped to its `maxCut`
  *   4. harmonic-protected bins zeroed, Gaussian spread of constant width in
  *      OCTAVES, zeroed again, out-of-band zeroed
  *   5. per-bin attack/release IIR at the frame rate
@@ -455,15 +455,13 @@ const SPECTRUM_REF_DB = 20 * Math.log10(FFT_SIZE / 4)
 export const RESONANCE_KERNEL_DEFAULTS = {
   attackMs: 15,
   releaseMs: 80,
-  maxReductionDb: 36,
   pitchMinHz: DEFAULT_PITCH_MIN_HZ,
   pitchMaxHz: DEFAULT_PITCH_MAX_HZ,
   mode: 'soft', // 'soft' | 'hard'
-  preserveHarmonics: true,
   // 'cepstral' ships. 'peak' is the alternative reference — see the note on
-  // PEAK_REF_FLOOR_FACTOR. Deliberately independent of preserveHarmonics so
-  // all four combinations can be measured, though the point of 'peak' is that
-  // it does not need the mask.
+  // PEAK_REF_FLOOR_FACTOR. Deliberately independent of the zones' protection
+  // setting so all four combinations can be measured, though the point of
+  // 'peak' is that it does not need the mask.
   refMode: 'cepstral',
   /**
    * Contiguous frequency zones, each carrying its own depth, sharpness and
@@ -607,7 +605,6 @@ export class ResonanceKernel {
     const p = { ...this.params, ...partial }
     this.params = p
 
-    this.maxReductionDb = Math.max(0, p.maxReductionDb)
     this.softKnee = p.mode !== 'hard'
     this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
 
@@ -648,7 +645,6 @@ export class ResonanceKernel {
      * gaps are misplaced and it cuts partials instead, and on unpitched frames
      * there is no comb so it reverts to full broadband suppression.
      */
-    this.preserveHarmonics = !!p.preserveHarmonics
 
     // Sensitivity zones. Rebuilt on any param change rather than diffed: it is
     // a few thousand lookups on a knob move, and never on the audio path.
@@ -669,6 +665,9 @@ export class ResonanceKernel {
     this.zoneDepth = curves.depth
     this.zoneSelectivity = curves.selectivity
     this.zoneSharpness = curves.sharpness
+    this.zoneMaxCut = curves.maxCut
+    this.zoneProtect = curves.protect
+    this.anyProtect = curves.anyProtect
 
     // One reference envelope per DISTINCT sharpness, not per zone: sharpness
     // sets the scale of the envelope, which is a property of the whole
@@ -1174,7 +1173,7 @@ export class ResonanceKernel {
   _analyzeFrame(specRe, specIm, stft) {
     const {
       magDb, envDb, reduction, spread, prevGr, gain, activeBins, binCount,
-      maxReductionDb, softKnee, kneeWidth, zoneDepth, zoneSelectivity,
+      softKnee, kneeWidth, zoneDepth, zoneSelectivity, zoneMaxCut,
     } = this
 
     for (let k = 0; k < binCount; k++) {
@@ -1227,7 +1226,10 @@ export class ResonanceKernel {
       this._cepstralEnvelopeBlended(lifterCeiling)
     }
 
-    const mask = this.preserveHarmonics && pitched ? this._harmonicMask(f0) : null
+    // Built when ANY zone asks for it: the mask depends only on F0, so one
+    // zone wanting it pays for the whole thing, and where it applies is decided
+    // per bin below.
+    const mask = this.anyProtect && pitched ? this._harmonicMask(f0) : null
 
     // Spike detection → soft knee → depth → clip.
     // WHAT PROTRUSION IS MEASURED FROM. Against the cepstral reference it is the
@@ -1267,10 +1269,17 @@ export class ResonanceKernel {
       reduction[k] = softKnee && above < knee ? (above * above) / (2 * knee) : above
     }
 
-    // Harmonic protection, pre-spread: zero these before the kernel runs so a
-    // harmonic's own prominence is never smeared into the gaps beside it.
+    // Harmonic protection, pre-spread: attenuate these before the spread kernel
+    // runs so a harmonic's own prominence is never smeared into the gaps beside
+    // it. Scaled by the zone's protection weight rather than zeroed outright —
+    // the weight is 1 inside a protecting zone, 0 inside one that is not, and
+    // crossfades between, so a partial sitting on a boundary is not half masked
+    // by a step.
+    const protect = this.zoneProtect
     if (mask) {
-      for (let k = 0; k < binCount; k++) if (mask[k]) reduction[k] = 0
+      for (let k = 0; k < binCount; k++) {
+        if (mask[k] && protect[k] > 0) reduction[k] *= 1 - protect[k]
+      }
     }
 
     // Gaussian spread along the log-frequency axis: a constant width in
@@ -1300,10 +1309,14 @@ export class ResonanceKernel {
       }
       // Post-spread: re-protect harmonics that neighbouring spikes bled into,
       // and hard-limit the reduction to the active band. Without a spread
-      // kernel neither is needed — the pre-spread pass already zeroed the mask,
-      // and the detection loop never wrote outside the active band.
+      // kernel neither is needed — the pre-spread pass already attenuated the
+      // mask, and the detection loop never wrote outside the active band.
       for (let k = 0; k < binCount; k++) {
-        reduction[k] = (mask && mask[k]) || !activeBins[k] ? 0 : spread[k]
+        if (!activeBins[k]) {
+          reduction[k] = 0
+          continue
+        }
+        reduction[k] = mask && mask[k] ? spread[k] * (1 - protect[k]) : spread[k]
       }
     }
 
@@ -1318,12 +1331,18 @@ export class ResonanceKernel {
     // It costs nothing to move it. The spread is a linear operator, so scaling
     // before and scaling after are the same arithmetic wherever depth is
     // uniform, which is every patch that has not been zoned. The one real
-    // change is that `maxReductionDb` now clips the finished reduction rather
-    // than an intermediate — it is a ceiling on what comes out, and that is
-    // where a ceiling belongs.
+    // change is that the ceiling clips the finished reduction rather than an
+    // intermediate — it is a ceiling on what comes out, and that is where a
+    // ceiling belongs.
+    //
+    // BOTH ARE PER ZONE. Max Cut is a bound on how much this effect will ever
+    // take out of a band, and the honest answer differs by band: a low-mid
+    // resonance can lose 12 dB before it is obviously gone, where the same
+    // number spent on sibilance is a lisp.
     for (let k = 0; k < binCount; k++) {
       const r = reduction[k] * zoneDepth[k]
-      reduction[k] = r > maxReductionDb ? maxReductionDb : r
+      const ceiling = zoneMaxCut[k]
+      reduction[k] = r > ceiling ? ceiling : r
     }
 
     // Silent frames target zero, so the IIR decays through silence rather than

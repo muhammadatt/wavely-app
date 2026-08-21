@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
 import {
   PITCH_RANGES,
+  zoneSettings,
   effectivePitchRange,
   RESONANCE_ATTACK_MIN_MS,
   RESONANCE_RELEASE_MIN_MS,
@@ -21,13 +22,13 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   resAttack, resRelease,
-  resMaxReduction, resMode, resPreserveHarmonics,
+  resMode,
   resPitchRange, resMix, resTrim, resZones, resSelectedZone, resSoloZone, resRefMode,
   resPreview, resDelta, resReduction, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncAttack,
-  syncRelease, syncMaxReduction, syncMix, syncTrim, syncZones, toggleSolo,
-  syncMode, syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
+  syncRelease, syncMix, syncTrim, syncZones, toggleSolo,
+  syncMode, syncPitchRange, apply, teardown, closeModal,
 } = useResonance()
 
 const { state } = useEditorState()
@@ -76,57 +77,20 @@ const db = v => `${Math.round(v)}`
 const signedDb = v => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
 
 /**
- * The protection control means different things under the two references, and
- * the warning has to follow it.
+ * Harmonic protection is per zone, so the panel-level statement about it is a
+ * summary rather than a control: which zones, if any, are running unmasked.
  *
- * Under the cepstral reference the mask is the safety mechanism: it sits at the
- * inter-harmonic floor, so harmonics protrude and read as resonances, and
- * turning protection off really will thin the material. The peak-envelope
- * reference is drawn THROUGH the harmonic peaks, so a harmonic is not a
- * resonance by construction and the mask has nothing to do — leaving an amber
- * "risks thinning harmonic frequencies" there would be warning about the one
- * thing that mode exists to make safe.
+ * Kept because this is the one setting here that can quietly wreck the
+ * material. It used to be a caption under a global button; with the control
+ * distributed to the zones the warning has to be too, and naming the zones is
+ * what makes it actionable rather than ominous.
  */
-/**
- * The same switch does two different things under the two references, so it is
- * labelled for the one in use rather than carrying one name over both.
- *
- * Under the cepstral reference it is PROTECTION: that reference sits at the
- * inter-harmonic floor, so harmonics protrude and read as resonances, and
- * turning the mask off really will thin the material — hence the amber warning.
- *
- * Under the peak reference nothing protrudes at a harmonic, so there is nothing
- * to protect against and the warning would be false. What the mask does there
- * is invert the cut — the partials are held and the floor between them is
- * attenuated. That is a different process, not a broken one, so the control
- * stays live; it just must not claim to be protecting anything.
- */
-const protectionIsProtection = computed(() => resRefMode === 'cepstral')
+const unprotectedZones = computed(() => resZones.value
+  .map((z, i) => (zoneSettings(z).protect ? null : `Z${i + 1}`))
+  .filter(Boolean))
 
-const protectionIsRisky = computed(
-  () => protectionIsProtection.value && !resPreserveHarmonics.value,
-)
-
-const protectionCaption = computed(() => {
-  if (!protectionIsProtection.value) {
-    return resPreserveHarmonics.value
-      ? 'Cuts between the partials, not on them.'
-      : 'Cuts evenly across the spectrum.'
-  }
-  return resPreserveHarmonics.value
-    ? 'Preserves harmonic frequencies.'
-    : 'Full suppression — risks thinning harmonic frequencies.'
-})
-
-const protectionTitle = computed(() =>
-  protectionIsProtection.value
-    ? 'Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material.'
-    : 'Under the peak-envelope reference a harmonic cannot read as a resonance, so this is not protection. It inverts where the cut lands: the partials are held and the floor between them is attenuated. Measured on real narration it does not improve the harmonic-to-noise ratio — it is quieter, not cleaner.',
-)
-
-const modeCaption = computed(() =>
-  resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
-)
+const anyProtected = computed(() =>
+  resZones.value.some(z => zoneSettings(z).protect))
 
 // The kernel clamps the low end to what its analysis frame can resolve, so show
 // what it will actually search rather than what the preset asked for.
@@ -235,7 +199,19 @@ async function applyAndClose() {
         @update:selected-zone="resSelectedZone = $event"
       />
       </div>
-        <LevelMeter :levels="resOutputLevels" label="OUT" :height="plotHeight - 46" />
+        <!-- TRIM SITS WITH THE METER because it is the same subject: the meter
+             says what the output level is and this is the control that moves
+             it. It was among the timing knobs, which put the reading and the
+             adjustment two rows apart. -->
+        <div class="flex flex-col items-center gap-[8px]">
+          <LevelMeter :levels="resOutputLevels" label="OUT" :height="plotHeight - 96" />
+          <DeviceField
+            :model-value="resTrim" @update:model-value="syncTrim"
+            :min="-12" :max="12" :step="0.5" :width="48"
+            label="Trim" unit="dB" :accent="ACCENT"
+            :format-value="signedDb" :disabled="!resPreview"
+          />
+        </div>
       </div>
 
       <!-- Directly under the plot because the two are one control split by what
@@ -256,23 +232,15 @@ async function applyAndClose() {
         />
       </div>
 
-      <!-- ONE GLOBAL ROW, and everything in it earned its width rather than
-           being given a knob by default.
-           Depth, Sharpness and Selectivity are per zone and live above. What is
-           left describes the effect as a whole, and it used to occupy two rows
-           plus an input meter — about 150 px for eight settings, all of it taken
-           from the display, which is the thing in this panel with something to
-           say.
-           THE INPUT METER IS GONE. Two meters answer "how much did this change
-           the level", and this effect cuts a few narrow bands: the answer is
-           always "barely", so the pair spent 60 px of width to show two columns
-           at the same height. The output meter stays because clipping after
-           Trim is a real thing to watch for.
-           MAX CUT AND TRIM ARE FIELDS, NOT KNOBS. A dial costs 70 px of height
-           to express one number and earns it when the number is swept by ear;
-           a ceiling and an output trim are set once and read often. Soothe puts
-           its own max cut and wet trim in the same shape. -->
-      <div class="flex items-end gap-[10px] mt-[13px]">
+      <!-- ONE GLOBAL ROW, and there is very little left in it.
+           Depth, Sharpness, Selectivity, Max Cut and harmonic protection are
+           all per zone now, with no global value for a zone to be an offset
+           from. What remains describes the effect as a whole: how fast the
+           detector moves, how much of its work reaches the output, the shape of
+           its knee, and which pitches the protection mask should look for —
+           that last one stays global because there is one tracker and one
+           signal, however many zones read its answer. -->
+      <div class="flex items-end gap-[12px] mt-[13px]">
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
              setting below it is the same instantaneous jump — the bottom of
@@ -324,30 +292,8 @@ async function applyAndClose() {
             />
           </div>
 
-          <DeviceField
-            :model-value="resMaxReduction" @update:model-value="syncMaxReduction"
-            :min="3" :max="48" :step="1" :width="54"
-            label="Max Cut" unit="dB" :accent="ACCENT"
-            :format-value="db" :disabled="!resPreview"
-          />
-          <DeviceField
-            :model-value="resTrim" @update:model-value="syncTrim"
-            :min="-12" :max="12" :step="0.5" :width="54"
-            label="Trim" unit="dB" :accent="ACCENT"
-            :format-value="signedDb" :disabled="!resPreview"
-          />
-
-      </div>
-
-      <!-- The knee, the protection mask and the pitch range decide how the
-           DETECTOR behaves rather than how much of it there is, so they sit
-           together on one short line. None of them carries a caption any more:
-           each is two states of one idea and the label already names the state.
-           26 px for three settings, against the 60 this cost as a row of
-           captioned controls with a two-line button in the middle. -->
-      <div class="flex items-start gap-[10px] mt-[11px]">
           <SegmentedSwitch
-            class="shrink-0"
+            class="shrink-0 mb-[3px]"
             :padding-x="9"
             :model-value="resMode"
             @update:model-value="syncMode"
@@ -355,53 +301,29 @@ async function applyAndClose() {
             :accent="ACCENT"
             :disabled="!resPreview"
           />
-
-          <!-- THE WARNING IS NOW CONDITIONAL RATHER THAN PERMANENT, which is
-               what let this shrink from 186 px and two lines to a lamp.
-               The sentence under the label was there because this is the one
-               control on the panel that can quietly wreck the material and a
-               tooltip is invisible to anyone who has not already decided the
-               control is worth hovering. That argument only ever applied to the
-               dangerous state: "Preserves harmonic frequencies." explains a
-               setting that needs no explaining. So the caption appears when
-               protection is OFF, in amber, and the safe state is a lamp. -->
-          <button
-            class="shrink-0 px-[9px] py-[6px] rounded-md cursor-pointer transition-all text-left disabled:cursor-default"
-            :style="{
-              background: protectionIsRisky ? 'rgba(255,178,122,.14)' : 'rgba(141,224,168,.13)',
-              border: `1px solid ${protectionIsRisky ? 'rgba(255,178,122,.5)' : 'rgba(141,224,168,.35)'}`,
-              opacity: resPreview ? 1 : 0.4,
-            }"
-            :disabled="!resPreview"
-            :title="protectionTitle"
-            @click="togglePreserveHarmonics"
-          >
-            <span
-              class="block whitespace-nowrap"
-              :style="{
-                font: `700 8.5px 'JetBrains Mono',monospace`,
-                letterSpacing: '.1em',
-                color: protectionIsRisky ? '#ffb27a' : '#8de0a8',
-              }"
-            >{{ protectionIsProtection
-              ? (resPreserveHarmonics ? 'HARMONICS ON' : 'HARMONICS OFF')
-              : (resPreserveHarmonics ? 'BETWEEN PARTIALS' : 'ACROSS SPECTRUM') }}</span>
-            <span
-              v-if="protectionIsRisky"
-              class="block mt-[2px] whitespace-nowrap"
-              style="font:500 8.5px/1.2 'Inter';color:rgba(255,178,122,.7)"
-            >{{ protectionCaption }}</span>
-          </button>
-
           <SegmentedSwitch
-            class="shrink-0"
+            class="shrink-0 mb-[3px]"
             :padding-x="9"
             :model-value="resPitchRange"
             @update:model-value="syncPitchRange"
             :options="PITCH_RANGE_OPTIONS"
             :accent="ACCENT"
-            :disabled="!resPreview || !resPreserveHarmonics"
+            :disabled="!resPreview || !anyProtected"
           />
+
+          <!-- THE WARNING SURVIVED THE CONTROL MOVING.
+               Protection is a per-zone toggle now, so there is no global button
+               left to carry a caption — but this is still the one setting on
+               the panel that can quietly wreck the material, and a per-zone
+               lamp is a small thing to notice. The sentence appears here
+               whenever ANY zone has it off, names the zones, and is absent the
+               rest of the time. -->
+          <span
+            v-if="unprotectedZones.length"
+            class="flex-1 min-w-0 self-center"
+            style="font:500 9px/1.3 'Inter';color:rgba(255,178,122,.8)"
+          >Full suppression in {{ unprotectedZones.join(', ') }} — risks thinning
+            harmonic frequencies there.</span>
       </div>
 
       <div class="mt-[14px]">

@@ -122,7 +122,9 @@ function boostRemoved(dry, freqHz, q, gainDb, params) {
  * frequency is reachable depends on where the measured pitch put its harmonics
  * that frame — which makes for a flaky test of the wrong thing.
  */
-const UNPROTECTED = { ...RESONANCE_KERNEL_DEFAULTS, preserveHarmonics: false }
+// Harmonic protection is per zone now, so "unprotected" is a zone set, not a
+// flag. `zoned()` below layers a setting onto it.
+const UNPROTECTED = { ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ protect: false }) }
 
 /**
  * Kernel params with one zone spanning everything.
@@ -133,7 +135,7 @@ const UNPROTECTED = { ...RESONANCE_KERNEL_DEFAULTS, preserveHarmonics: false }
  * uniform looks like in it.
  */
 function zoned(base, settings) {
-  return { ...base, zones: uniformZones(settings) }
+  return { ...base, zones: uniformZones({ protect: false, ...settings }) }
 }
 
 test('reports a latency of exactly one FFT frame', () => {
@@ -262,7 +264,7 @@ test('selectivity gates what counts as a resonance', () => {
 
 test('max reduction caps the cut', () => {
   const dry = voice()
-  const capped = boostRemoved(dry, 3000, 40, 18, { ...UNPROTECTED, maxReductionDb: 3 })
+  const capped = boostRemoved(dry, 3000, 40, 18, zoned(UNPROTECTED, { maxCut: 3 }))
   const uncapped = boostRemoved(dry, 3000, 40, 18, UNPROTECTED)
   assert.ok(capped < uncapped - 4, `cap had no effect: ${capped.toFixed(1)} vs ${uncapped.toFixed(1)}`)
 })

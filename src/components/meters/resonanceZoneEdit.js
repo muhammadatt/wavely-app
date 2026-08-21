@@ -138,6 +138,12 @@ export function toggleZone(zones, index) {
   return patchZone(zones, index, { enabled: zones[index].enabled === false })
 }
 
+/** Harmonic protection for one zone. Absent means protected — see ZONE_STOCK. */
+export function toggleZoneProtect(zones, index) {
+  if (index < 0 || index >= zones.length) return zones
+  return patchZone(zones, index, { protect: zones[index].protect === false })
+}
+
 /**
  * Split the zone under a frequency in two, inheriting its settings.
  *

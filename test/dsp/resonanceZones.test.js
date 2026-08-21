@@ -53,8 +53,11 @@ const BW = SR / 2048
 const axis = { w: 600, minHz: 20, maxHz: 20000 }
 
 function zones(...specs) {
+  // protect defaults OFF here: these tests are about what the detector does,
+  // and the harmonic mask blocks 67-77% of every octave, which would swamp any
+  // measurement of a zone setting.
   return specs.map((s, i) => ({
-    id: `z${i}`, hiHz: s.hiHz ?? 20000, ...RESONANCE_ZONE_STOCK, ...s,
+    id: `z${i}`, hiHz: s.hiHz ?? 20000, ...RESONANCE_ZONE_STOCK, protect: false, ...s,
   }))
 }
 
@@ -193,11 +196,11 @@ function aligned(x) {
   return x.subarray(0, x.length - 2048)
 }
 
-const UNPROTECTED = { preserveHarmonics: false }
+const UNPROTECTED = {}
 
 test('a zone with a lower threshold cuts what a higher one leaves alone', () => {
   const x = bandTone(3000)
-  const quiet = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 24, depth: 1 }) })
+  const quiet = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 24, depth: 1, protect: false }) })
   const keen = render(x, {
     ...UNPROTECTED,
     zones: zones({ hiHz: 2000, selectivity: 24, depth: 1 }, { selectivity: 4, depth: 1 }),
@@ -211,7 +214,7 @@ test('A ZONE SWITCHED OFF IS EXACTLY OFF, even beside one working hard', () => {
   // let a neighbouring zone's reduction smear straight through the boundary and
   // left 0.68 dB of cut on a tone 1.6 octaves clear of the edge.
   const x = bandTone(3000)
-  const on = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 6, depth: 1 }) })
+  const on = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 6, depth: 1, protect: false }) })
   const off = render(x, {
     ...UNPROTECTED,
     zones: zones({ hiHz: 2000, selectivity: 6, depth: 1 }, { selectivity: 6, enabled: false }),
@@ -223,7 +226,7 @@ test('A ZONE SWITCHED OFF IS EXACTLY OFF, even beside one working hard', () => {
 
 test('per-zone depth scales the cut in its own band only', () => {
   const x = bandTone(3000)
-  const full = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 6, depth: 1 }) })
+  const full = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 6, depth: 1, protect: false }) })
   const half = render(x, {
     ...UNPROTECTED,
     zones: zones({ hiHz: 2000, selectivity: 6, depth: 1 }, { selectivity: 6, depth: 0.4 }),
@@ -234,6 +237,73 @@ test('per-zone depth scales the cut in its own band only', () => {
   assert.ok(shallow > 0.5 && shallow < deep - 1, `${shallow.toFixed(2)} vs ${deep.toFixed(2)}`)
 })
 
+test('per-zone Max Cut bounds its own band and nothing else', () => {
+  const x = bandTone(3000)
+  const dry = rmsAt(aligned(x), 3000)
+  const open = render(x, { zones: zones({ selectivity: 4, depth: 1, maxCut: 48 }) })
+  const capped = render(x, {
+    zones: zones(
+      { hiHz: 2000, selectivity: 4, depth: 1, maxCut: 48 },
+      { selectivity: 4, depth: 1, maxCut: 3 },
+    ),
+  })
+  const deep = dry - rmsAt(open, 3000)
+  const shallow = dry - rmsAt(capped, 3000)
+  assert.ok(deep > 6, `uncapped removed only ${deep.toFixed(1)} dB`)
+  // The ceiling is on the finished reduction, so a 3 dB cap really does mean
+  // three-ish decibels — allow for the spread kernel's shoulders.
+  assert.ok(shallow > 0.5 && shallow < 5, `capped removed ${shallow.toFixed(1)} dB`)
+})
+
+test('HARMONIC PROTECTION IS PER ZONE', () => {
+  // The argument for making it per zone, measured: the mask blocks 67-77% of
+  // EVERY octave at a typical F0 and 88% above 10 kHz at a high one, so where
+  // partials are wide and dominant it is real protection and where sibilance
+  // lives it is a blanket veto. Protecting the bottom while working freely up
+  // top is the setting this effect most wants, and it was unreachable.
+  const kernel = new ResonanceKernel(SR)
+  const split = zones(
+    { hiHz: 1000, protect: true },
+    { protect: false },
+  )
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: split })
+  const bin = hz => Math.round(hz / (SR / 2048))
+  assert.equal(kernel.zoneProtect[bin(300)], 1, 'the low zone protects')
+  assert.equal(kernel.zoneProtect[bin(6000)], 0, 'the high zone does not')
+  // Crossfaded at the boundary, like every other zone setting: a partial
+  // sitting on the line must not be half masked by a step.
+  const edge = kernel.zoneProtect[bin(1000)]
+  assert.ok(edge > 0.2 && edge < 0.8, `boundary weight ${edge}`)
+  assert.equal(kernel.anyProtect, true)
+
+  // The mask is not built at all when nothing asks for it.
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ protect: false }) })
+  assert.equal(kernel.anyProtect, false)
+})
+
+test('protection actually holds the cut off harmonics in its own zone only', () => {
+  // A pitched tone at 3 kHz that IS a harmonic of the source: protected in one
+  // configuration, exposed in the other, with the only difference being which
+  // zone it falls in.
+  const f0 = 150
+  const n = Math.round(SR * 0.7)
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    let v = 0
+    for (let h = 1; h <= 40; h++) v += Math.sin((2 * Math.PI * f0 * h * i) / SR + h) / h
+    // A resonance sitting exactly on the 20th harmonic.
+    v += 2.2 * Math.sin((2 * Math.PI * f0 * 20 * i) / SR)
+    x[i] = 0.12 * v
+  }
+  const dry = rmsAt(aligned(x), f0 * 20)
+  const protectedRun = render(x, { zones: zones({ selectivity: 5, depth: 1, protect: true }) })
+  const exposed = render(x, { zones: zones({ selectivity: 5, depth: 1, protect: false }) })
+  const heldBack = dry - rmsAt(protectedRun, f0 * 20)
+  const cut = dry - rmsAt(exposed, f0 * 20)
+  assert.ok(cut > heldBack + 2,
+    `protection made no difference: ${heldBack.toFixed(1)} vs ${cut.toFixed(1)} dB`)
+})
+
 test('the default zone set is BIT-IDENTICAL to one zone carrying the same settings', () => {
   // The guarantee that makes zones safe to ship: four zones all still on the
   // stock settings must be the same audio as the single global setting they
@@ -241,8 +311,8 @@ test('the default zone set is BIT-IDENTICAL to one zone carrying the same settin
   // sum to 1 differs in the last bits, so the kernel takes an assignment path
   // when there is one envelope group.
   const x = bandTone(3000, 0.3)
-  const a = render(x, { zones: uniformZones() })
-  const b = render(x, { zones: DEFAULT_RESONANCE_ZONES })
+  const a = render(x, { zones: uniformZones({ protect: false }) })
+  const b = render(x, { zones: DEFAULT_RESONANCE_ZONES.map(z => ({ ...z, protect: false })) })
   for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `sample ${i}`)
 })
 
@@ -268,7 +338,7 @@ test('the kernel accepts any zone set on a live param push', () => {
   const kernel = new ResonanceKernel(SR, 1)
   const sets = [
     DEFAULT_RESONANCE_ZONES,
-    uniformZones(),
+    uniformZones({ protect: false }),
     zones({ hiHz: 900, sharpness: 0.1 }, { sharpness: 0.9 }),
     zones({ enabled: false }),
   ]

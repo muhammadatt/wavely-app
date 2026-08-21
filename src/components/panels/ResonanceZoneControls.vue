@@ -8,7 +8,10 @@ import {
   zoneBounds,
   zoneSettings,
 } from '../../audio/resonanceParams.js'
-import { removeBoundary, setZoneParam, splitZone, toggleZone } from '../meters/resonanceZoneEdit.js'
+import {
+  removeBoundary, setZoneParam, splitZone, toggleZone, toggleZoneProtect,
+} from '../meters/resonanceZoneEdit.js'
+import DeviceField from '../knobs/DeviceField.vue'
 import Knob from '../knobs/Knob.vue'
 
 /**
@@ -53,6 +56,8 @@ const settings = computed(() => {
     depth: clamp(z?.depth ?? RESONANCE_ZONE_STOCK.depth, R.depth),
     sharpness: clamp(z?.sharpness ?? RESONANCE_ZONE_STOCK.sharpness, R.sharpness),
     selectivity: clamp(z?.selectivity ?? RESONANCE_ZONE_STOCK.selectivity, R.selectivity),
+    maxCut: clamp(z?.maxCut ?? RESONANCE_ZONE_STOCK.maxCut, R.maxCut),
+    protect: (z?.protect ?? RESONANCE_ZONE_STOCK.protect) !== false,
   }
 })
 const index = computed(() =>
@@ -116,6 +121,7 @@ function set(name, value) {
 
 const percent = v => `${Math.round(v * 100)}`
 const oneDp = v => v.toFixed(1)
+const db = v => `${Math.round(v)}`
 </script>
 
 <template>
@@ -178,11 +184,37 @@ const oneDp = v => v.toFixed(1)
           :disabled="disabled"
           @click="emit('solo', index)"
         >SOLO</button>
+        <!-- HARMONIC PROTECTION, PER ZONE, and the measurement is the argument.
+             The mask blocks 67-77% of every octave at a typical F0 and 88%
+             above 10 kHz at a high one, so down where partials are wide and
+             dominant it is real protection and up where sibilance lives it is a
+             blanket veto over the band. Amber when OFF, because that is the
+             state that can thin the material. -->
+        <button
+          class="rounded-[4px] cursor-pointer disabled:cursor-default"
+          style="padding:2px 6px;font:700 8px 'JetBrains Mono',monospace;letter-spacing:.1em"
+          :style="{
+            background: settings.protect
+              ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'rgba(255,178,122,.16)',
+            color: settings.protect
+              ? `color-mix(in srgb, ${accent} 55%, #ffffff)` : '#ffb27a',
+            boxShadow: settings.protect
+              ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)`
+              : 'inset 0 0 0 1px rgba(255,178,122,.5)',
+          }"
+          :aria-pressed="String(settings.protect)"
+          :aria-label="`Zone ${index + 1} harmonic protection`"
+          :title="settings.protect
+            ? 'Harmonics in this band are protected from being treated as resonances.'
+            : 'Full suppression in this band — risks thinning its harmonics.'"
+          :disabled="disabled"
+          @click="emit('update:zones', toggleZoneProtect(zones, index))"
+        >{{ settings.protect ? 'HARM' : 'HARM✕' }}</button>
       </div>
     </div>
 
-    <div class="flex-1 flex justify-evenly">
-      <div class="w-[78px]">
+    <div class="flex-1 flex justify-center gap-[2px]">
+      <div class="w-[88px] shrink-0">
         <Knob
           :model-value="settings.depth" @update:model-value="set('depth', $event)"
           :min="RESONANCE_ZONE_RANGES.depth.min" :max="RESONANCE_ZONE_RANGES.depth.max"
@@ -191,7 +223,7 @@ const oneDp = v => v.toFixed(1)
           :disabled="disabled"
         />
       </div>
-      <div class="w-[78px]">
+      <div class="w-[88px] shrink-0">
         <Knob
           :model-value="settings.sharpness" @update:model-value="set('sharpness', $event)"
           :min="RESONANCE_ZONE_RANGES.sharpness.min" :max="RESONANCE_ZONE_RANGES.sharpness.max"
@@ -200,7 +232,7 @@ const oneDp = v => v.toFixed(1)
           :disabled="disabled"
         />
       </div>
-      <div class="w-[78px]">
+      <div class="w-[88px] shrink-0">
         <Knob
           :model-value="settings.selectivity" @update:model-value="set('selectivity', $event)"
           :min="RESONANCE_ZONE_RANGES.selectivity.min" :max="RESONANCE_ZONE_RANGES.selectivity.max"
@@ -209,6 +241,18 @@ const oneDp = v => v.toFixed(1)
           :disabled="disabled"
         />
       </div>
+      <!-- A ceiling is set once and read often, so it is a field rather than a
+           dial — and it belongs here rather than among the global controls
+           because the honest answer differs by band: a low-mid resonance can
+           lose 12 dB before it is obviously gone, where the same number spent
+           on sibilance is a lisp. -->
+      <DeviceField
+        :model-value="settings.maxCut" @update:model-value="set('maxCut', $event)"
+        :min="RESONANCE_ZONE_RANGES.maxCut.min" :max="RESONANCE_ZONE_RANGES.maxCut.max"
+        :step="1" :width="54"
+        label="Max Cut" unit="dB" :accent="accent"
+        :format-value="db" :disabled="disabled"
+      />
     </div>
 
     <div class="shrink-0 flex items-center gap-[7px]">

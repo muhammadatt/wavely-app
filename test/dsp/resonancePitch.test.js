@@ -186,7 +186,7 @@ function removedFrom(sig, freqHz, q, gainDb, params) {
 const VIBRATO_HZ = 5
 const VIBRATO = t => 150 * (1 + 0.06 * Math.sin(2 * Math.PI * VIBRATO_HZ * t))
 const STEP = t => (t < 2 ? 150 : 195)
-const UNPROTECTED = { preserveHarmonics: false }
+const UNPROTECTED = { zones: uniformZones({ protect: false }) }
 
 // ── Reason 1: what pitch movement does to a per-bin dynamic suppressor ───────
 
@@ -360,8 +360,8 @@ test('detection still falls away above 4 kHz, and is flat below it', () => {
 const SYNTHETIC_SELECTIVITY = 4
 const PEAK = {
   refMode: 'peak',
-  preserveHarmonics: false,
   zones: uniformZones({
+    protect: false,
     selectivity: SYNTHETIC_SELECTIVITY,
     depth: RESONANCE_REF_MODE_DEFAULTS.peak.zoneOverrides.depth,
   }),
@@ -510,7 +510,8 @@ test('peak mode carries its own calibration, taken from real audio', () => {
     peak.zoneOverrides.selectivity > 2 * cepstralDefault,
     `peak mode should want a far higher threshold, got ${peak.zoneOverrides.selectivity}`,
   )
-  assert.equal(peak.preserveHarmonics, false, 'the point of this reference is not needing the mask')
+  assert.equal(peak.zoneOverrides.protect, false,
+    'the point of this reference is not needing the mask')
   // Slow ballistics ship with it because the two are superadditive on real
   // audio — the stable envelope removes the frequency-domain source of gain
   // movement and these remove the time-domain residue.
@@ -527,7 +528,9 @@ test('peak mode detects on the stable envelope, not the raw magnitude', () => {
   // spectrum whose magnitude and peak envelope disagree, and see which one the
   // reduction follows.
   const kernel = new ResonanceKernel(SR)
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'peak', preserveHarmonics: false })
+  kernel.setParams({
+    ...RESONANCE_KERNEL_DEFAULTS, refMode: 'peak', zones: uniformZones({ protect: false }),
+  })
   const bin = Math.round(3000 / kernel.binWidth)
 
   kernel.magDb.fill(-100)
@@ -568,8 +571,10 @@ test('the mask is honoured under both references, and inverts under peak', () =>
   //     them attenuated. This is a different process, not protection.
   const kernel = new ResonanceKernel(SR)
   for (const refMode of ['cepstral', 'peak']) {
-    kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode, preserveHarmonics: true })
-    assert.equal(kernel.preserveHarmonics, true, `${refMode} must honour the mask`)
+    kernel.setParams({
+      ...RESONANCE_KERNEL_DEFAULTS, refMode, zones: uniformZones({ protect: true }),
+    })
+    assert.equal(kernel.anyProtect, true, `${refMode} must honour the mask`)
   }
 })
 
@@ -578,11 +583,11 @@ test('under peak, the mask moves the cut off the partials and into the gaps', ()
   // future change makes the peak path concentrate on harmonics like the
   // cepstral one, this catches it.
   const sig = resonate(pitched(() => 150, { seconds: 2 }), 1200, 3, 12)
-  const measure = preserveHarmonics => {
+  const measure = protect => {
     const kernel = new ResonanceKernel(SR)
     kernel.setParams({
       ...RESONANCE_KERNEL_DEFAULTS,
-      refMode: 'peak', preserveHarmonics, zones: uniformZones({ depth: 1, selectivity: 4 }),
+      refMode: 'peak', zones: uniformZones({ depth: 1, selectivity: 4, protect }),
     })
     const scratch = new Float32Array(128)
     let on = 0
@@ -652,7 +657,9 @@ test('what the inverted cut does NOT do is raise the harmonic-to-noise ratio', (
     return 10 * Math.log10(harm / n) - 10 * Math.log10(gap / n)
   }
   const dry = ratio({ zones: uniformZones({ depth: 0 }) })
-  const masked = ratio({ refMode: 'peak', preserveHarmonics: true, zones: uniformZones({ depth: 1, selectivity: 4 }) })
+  const masked = ratio({
+    refMode: 'peak', zones: uniformZones({ depth: 1, selectivity: 4, protect: true }),
+  })
   assert.ok(
     masked < dry + 1.5,
     `the mask under peak should not be sold as denoising; ratio ${dry.toFixed(2)} -> ${masked.toFixed(2)}`,
