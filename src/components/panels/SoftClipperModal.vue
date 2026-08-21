@@ -15,11 +15,12 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape,
+  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncOutputTrim, syncFixedThreshold,
+  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncOutputTrim,
+  syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
 
@@ -367,6 +368,31 @@ const SCOPE_H = 236
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             {{ emphasisCaption }}
+          </p>
+        </div>
+        <div class="w-[74px]">
+          <!-- THE ONLY CONTROL HERE THAT ADDS SOMETHING RATHER THAN REMOVING
+               IT, and the caption says which harmonics because "warmth" alone
+               is unfalsifiable — this panel has already shipped one caption
+               that described what a control was not.
+
+               The curve is odd symmetric, so it generates odd harmonics and
+               NOTHING else: measured, H2 sits at -144 dB on a tone and the
+               even-order energy on real narration is exactly zero. This offset
+               is the only way to reach second and fourth order, which is what
+               tube and tape warmth actually is. It is additive rather than a
+               rebalancing — H3 moves by at most 1 dB across the whole sweep —
+               so it colours without changing how hard the stage works. -->
+          <Knob
+            :model-value="asymmetry"
+            @update:model-value="syncAsymmetry"
+            :min="0" :max="100" :step="1"
+            label="Asymmetry" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            :value-font-px="13"
+            :disabled="!clipperPreview"
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            even-order warmth
           </p>
         </div>
         <div class="w-[74px]">

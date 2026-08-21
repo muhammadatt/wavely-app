@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import {
   SoftClipperKernel, processSoftClipperBuffer, softClip, SOFT_CLIPPER_LATENCY_SAMPLES,
   MAX_REDUCTION_DB, KNEE_DB, SHAPE_EXPONENT, SHAPE_MIN_KNEE_DB,
+  ASYM_MAX_FRACTION, ASYM_MAX_BOUND_EXCESS_DB,
   SHAPE_KNEE_DB, SHAPE_ANCHOR_DB,
   SOFT_CLIPPER_KERNEL_DEFAULTS,
 } from '../../src/audio/softClipperProcessor.js'
@@ -1761,4 +1762,224 @@ test('the residual readout tracks the emphasis knob the way the offline sweep do
       `${i - 1} and ${i}: ${curve.map(v => v.toFixed(1)).join(',')} vs ` +
       offline.map(v => v.toFixed(1)).join(','))
   }
+})
+
+// ── Asymmetry (ASYM_MAX_FRACTION / DC_BLOCK_HZ) ─────────────────────────────
+
+/**
+ * EXACT even/odd decomposition, valid on any material.
+ *
+ * Any system splits as F = F_even + F_odd with F_even(x) = (F(x) + F(-x))/2.
+ * This chain is odd everywhere except the deliberate offset — the detector
+ * reads |x| so it is identical for x and -x, and every filter is linear — so
+ * F_even IS the asymmetry's contribution and nothing else. No spectral
+ * estimation, no windowing choice, no tolerance to argue about.
+ */
+function evenOddDbc(signal, params, sr = SR) {
+  const neg = new Float32Array(signal.length)
+  for (let i = 0; i < signal.length; i++) neg[i] = -signal[i]
+  const y1 = processSoftClipperBuffer([signal], sr, params).channelData[0]
+  const y2 = processSoftClipperBuffer([neg], sr, params).channelData[0]
+  let even = 0, dry = 0
+  for (let i = Math.round(sr); i < signal.length; i++) {
+    const e = (y1[i] + y2[i]) / 2
+    even += e * e
+    dry += signal[i] * signal[i]
+  }
+  return { evenDbc: even > 0 ? 10 * Math.log10(even / dry) : -Infinity, evenEnergy: even }
+}
+
+test('the stage generates exactly zero even harmonics until asked to', () => {
+  // THE GUARANTEE THIS FEATURE DELIBERATELY BREAKS, pinned in its unbroken
+  // state. "Odd symmetric — sign applied outside. No DC term, no DC blocker"
+  // is one of the five guarantees at MAX_REDUCTION_DB, and it is exact rather
+  // than approximate: the even component is a buffer of zeros to the last bit,
+  // which is why this asserts 0 and not "small".
+  for (const signal of [speechLike(4, 0.5, 97), fricativeNoise(2, 0.6)]) {
+    const { evenEnergy } = evenOddDbc(signal, { headroomDb: 6.5, emphasisDb: 6, asymmetry: 0 })
+    assert.equal(evenEnergy, 0)
+  }
+})
+
+test('asymmetry adds even harmonics, monotonically, without touching the odd ones', () => {
+  // Both halves matter. The even content has to arrive — that is the feature —
+  // and the odd content has to stay put, or this is a second depth control
+  // wearing a character control's label, which is the mistake this panel has
+  // made twice.
+  //
+  // Measured on real narration: even-order content -50 dBc at asymmetry 15,
+  // rising to -34 at 100, within 2 dB across three very different files.
+  const signal = concat(speechLike(4, 0.5, 97), fricativeNoise(1, 0.4), speechLike(3, 0.5, 101))
+  const base = { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }
+  const evens = [15, 30, 60, 100].map(a => evenOddDbc(signal, { ...base, asymmetry: a }).evenDbc)
+  for (let i = 1; i < evens.length; i++) {
+    assert.ok(evens[i] > evens[i - 1] + 2,
+      `asymmetry is not buying even harmonics: ${evens.map(v => v.toFixed(1)).join(' -> ')}`)
+  }
+  assert.ok(evens[0] < -35, `even content at the lowest setting is already loud: ${evens[0].toFixed(1)} dBc`)
+
+  // The ODD side — measured as the third harmonic of a tone, which is where
+  // the additive claim is checked rather than asserted.
+  const T = 0.25, f0 = 220
+  const n = 32768 + 8192
+  const tone = new Float32Array(n)
+  for (let i = 0; i < n; i++) tone[i] = T * dbToLin(6) * Math.sin((2 * Math.PI * f0 * i) / SR)
+  const h3 = (asymmetry) => {
+    const y = processSoftClipperBuffer([tone], SR,
+      { thresholdMode: 'fixed', fixedThresholdDb: 20 * Math.log10(T), emphasisDb: 0, shape: 'tanh3', asymmetry })
+      .channelData[0]
+    let re = 0, im = 0, re1 = 0, im1 = 0
+    for (let i = 4096; i < 4096 + 32768; i++) {
+      const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * (i - 4096)) / 32768)
+      re += y[i] * w * Math.cos((2 * Math.PI * 3 * f0 * i) / SR)
+      im += y[i] * w * Math.sin((2 * Math.PI * 3 * f0 * i) / SR)
+      re1 += y[i] * w * Math.cos((2 * Math.PI * f0 * i) / SR)
+      im1 += y[i] * w * Math.sin((2 * Math.PI * f0 * i) / SR)
+    }
+    return 20 * Math.log10(Math.hypot(re, im) / Math.hypot(re1, im1))
+  }
+  const odd0 = h3(0), odd100 = h3(100)
+  assert.ok(Math.abs(odd100 - odd0) < 3,
+    `asymmetry moved the third harmonic ${odd0.toFixed(1)} -> ${odd100.toFixed(1)} dB, so it is ` +
+    'rebalancing the character rather than adding to it')
+})
+
+test('asymmetry 0 is bit-identical, and does not engage the DC blocker', () => {
+  // What buys the right to put a colouring control inside a stage whose
+  // identity is transparency: at 0 the offset and the blocker are not flat,
+  // they are ABSENT. Compared against a params object that never mentions
+  // asymmetry at all, so a default drifting away from 0 fails here.
+  const signal = concat(speechLike(4, 0.5, 11), fricativeNoise(1, 0.5))
+  const withParam = processSoftClipperBuffer([signal], SR,
+    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', asymmetry: 0 }).channelData[0]
+  const without = processSoftClipperBuffer([signal], SR,
+    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }).channelData[0]
+  for (let i = 0; i < signal.length; i++) {
+    assert.equal(withParam[i], without[i], `asymmetry 0 altered sample ${i}`)
+  }
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.asymmetry, 0,
+    'the shipped default engages a colouring stage')
+})
+
+test('asymmetry keeps the guarantees the stage is allowed to keep', () => {
+  // Four of the five survive by design and are checked here; the fifth (odd
+  // symmetry) is the control itself. Boundedness and level-invariance, stated
+  // separately from that list, are checked too.
+  const T = 0.2
+  const asym = 100
+  const params = { thresholdMode: 'fixed', fixedThresholdDb: 20 * Math.log10(T), emphasisDb: 0, shape: 'tanh3', asymmetry: asym }
+
+  // NEVER BOOSTS. The blocker is Butterworth so it has no passband overshoot;
+  // this checks the whole path rather than the curve alone.
+  const loud = new Float32Array(Math.round(2 * SR))
+  for (let i = 0; i < loud.length; i++) loud[i] = 0.9 * Math.sin((2 * Math.PI * 300 * i) / SR)
+  const out = processSoftClipperBuffer([loud], SR, params).channelData[0]
+  let peakIn = 0, peakOut = 0
+  for (let i = Math.round(0.5 * SR); i < loud.length; i++) {
+    peakIn = Math.max(peakIn, Math.abs(loud[i]))
+    peakOut = Math.max(peakOut, Math.abs(out[i]))
+  }
+  assert.ok(peakOut <= peakIn + 1e-6,
+    `full asymmetry boosted the peak ${peakIn.toFixed(4)} -> ${peakOut.toFixed(4)}`)
+
+  // LEVEL INVARIANT. The offset is a fraction of T, so scaling the input and
+  // the threshold together must produce a scaled output — a fixed offset would
+  // break this, which is why it is not one.
+  const probe = concat(speechLike(3, 0.4, 31), speechLike(2, 0.4, 33))
+  const a = processSoftClipperBuffer([probe], SR,
+    { ...params, fixedThresholdDb: -14 }).channelData[0]
+  const louder = new Float32Array(probe.length)
+  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
+  const b = processSoftClipperBuffer([louder], SR,
+    { ...params, fixedThresholdDb: -8 }).channelData[0]
+  let worst = 0
+  for (let i = Math.round(SR); i < probe.length; i++) {
+    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
+  }
+  assert.ok(worst < 2e-3, `asymmetry is not level-invariant: worst deviation ${worst}`)
+
+  // BOUNDED, to a STATED relaxation. The curve's bound is relative to what it
+  // sees (x + off); the stage's attenuation is measured against x, and
+  // subtracting the offset afterwards separates the two slightly. See
+  // ASYM_MAX_BOUND_EXCESS_DB — the number is recorded rather than tolerated.
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ ...params, fixedThresholdDb: -40 })
+  const o = new Float32Array(probe.length)
+  for (let off = 0; off < probe.length; off += 128) {
+    const len = Math.min(128, probe.length - off)
+    kernel.process([probe.subarray(off, off + len)], [o.subarray(off, off + len)], len)
+  }
+  assert.ok(kernel.getMetering().maxReductionDb <= MAX_REDUCTION_DB + ASYM_MAX_BOUND_EXCESS_DB + 1e-9,
+    `asymmetry exceeded even the relaxed bound: ${kernel.getMetering().maxReductionDb}`)
+})
+
+test('asymmetry never flips the sign of a sample', () => {
+  // THE FAILURE THAT WOULD ACTUALLY MATTER, and the reason subtracting a
+  // constant after a gain needs checking: for a small positive sample,
+  // g*(x + off) - off goes negative if g is small enough. It does not happen
+  // here because g only drops below 1 once |x + off| passes T, by which point
+  // x is large enough to survive — but that is an argument, and this is the
+  // measurement. Swept across every shape and four decades of input.
+  const T = 0.25
+  const off = ASYM_MAX_FRACTION * T
+  for (const shape of SHAPES) {
+    const n = SHAPE_EXPONENT[shape], knee = SHAPE_KNEE_DB[shape]
+    for (let i = -200000; i <= 200000; i++) {
+      const x = (i / 200000) * 4
+      if (x === 0) continue
+      const y = softClip(x + off, T, MAX_REDUCTION_DB, knee, n) - off
+      if (y === 0) continue
+      assert.equal(Math.sign(y), Math.sign(x),
+        `${shape} flipped the sign at x=${x}: got ${y}`)
+    }
+  }
+})
+
+test('the DC blocker earns its place under overdrive', () => {
+  // ⚠ THIS FEATURE WAS NEARLY SHIPPED WITHOUT ONE, on a measurement taken at
+  // the default operating point where the DC is 70-90 dB below peak and looks
+  // like nothing. Under drive it is a different quantity entirely, and an
+  // input that ALREADY carries DC is the case that settles it: without a
+  // blocker that came out 5.1 dB below its own peak.
+  const n = Math.round(3 * SR)
+  const withDc = new Float32Array(n)
+  for (let i = 0; i < n; i++) withDc[i] = 0.5 + 0.4 * Math.sin((2 * Math.PI * 200 * i) / SR)
+  const y = processSoftClipperBuffer([withDc], SR, {
+    thresholdMode: 'fixed', fixedThresholdDb: -30, emphasisDb: 0, shape: 'tanh3', asymmetry: 100,
+  }).channelData[0]
+  let mean = 0, peak = 0
+  for (let i = SR; i < n; i++) { mean += y[i]; peak = Math.max(peak, Math.abs(y[i])) }
+  mean /= (n - SR)
+  const belowPeak = 20 * Math.log10(Math.abs(mean) / peak)
+  assert.ok(belowPeak < -60,
+    `DC survived at ${belowPeak.toFixed(1)} dB below peak — the blocker is not doing its job`)
+})
+
+test('the offset is removed by the shaper, not left for the DC blocker', () => {
+  // A HOLE FOUND BY MUTATION. Dropping the `- off` after the curve leaves the
+  // whole offset in the signal and lets the blocker take it out, which sounds
+  // almost the same in steady state and is not the same thing at all: the
+  // blocker then has to charge from a step of up to 0.35*T — tens of dB of DC
+  // — every time playback starts, and again slowly whenever the tracked
+  // threshold moves. Subtracting it at the curve means the blocker only ever
+  // sees the shaping residue, which is 70-90 dB down.
+  //
+  // Probed on material that never reaches the threshold, so the ONLY thing
+  // that could displace the output is the offset itself.
+  const quiet = new Float32Array(Math.round(0.5 * SR))
+  for (let i = 0; i < quiet.length; i++) {
+    quiet[i] = 0.02 * Math.sin((2 * Math.PI * 300 * i) / SR)
+  }
+  const out = processSoftClipperBuffer([quiet], SR, {
+    thresholdMode: 'fixed', fixedThresholdDb: -6, emphasisDb: 0, shape: 'tanh3', asymmetry: 100,
+  }).channelData[0]
+  // Compare against the input, delay-aligned, from the very first samples —
+  // the transient is what this is looking for, so it must not be skipped.
+  let worst = 0
+  for (let i = 0; i + SOFT_CLIPPER_LATENCY_SAMPLES < quiet.length; i++) {
+    worst = Math.max(worst, Math.abs(out[i + SOFT_CLIPPER_LATENCY_SAMPLES] - quiet[i]))
+  }
+  assert.ok(worst < 0.002,
+    `below-threshold material was displaced by ${worst.toFixed(5)} — the offset is reaching ` +
+    'the output instead of being removed at the curve')
 })

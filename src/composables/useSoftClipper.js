@@ -17,6 +17,7 @@ const outputTrimDb = ref(SOFT_CLIPPER_DEFAULTS.outputTrimDb)
 const thresholdMode = ref(SOFT_CLIPPER_DEFAULTS.thresholdMode)
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
+const asymmetry = ref(SOFT_CLIPPER_DEFAULTS.asymmetry)
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
@@ -42,6 +43,7 @@ function currentParams() {
     thresholdMode: thresholdMode.value,
     fixedThresholdDb: fixedThresholdDb.value,
     shape: shape.value,
+    asymmetry: asymmetry.value,
   }
 }
 
@@ -150,6 +152,7 @@ export function useSoftClipper() {
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
   const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v) }
+  const syncAsymmetry = (v) => { asymmetry.value = v; pushParam('asymmetry', v) }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => { fixedThresholdDb.value = v; pushParam('fixedThresholdDb', v) }
 
@@ -222,6 +225,7 @@ export function useSoftClipper() {
     thresholdMode,
     fixedThresholdDb,
     shape,
+    asymmetry,
     clipperPreview,
     clipperReduction,
     clipperEngagedPct,
@@ -236,6 +240,7 @@ export function useSoftClipper() {
     toggleDelta,
     syncHeadroom,
     syncEmphasis,
+    syncAsymmetry,
     syncOutputTrim,
     syncFixedThreshold,
     setThresholdMode,

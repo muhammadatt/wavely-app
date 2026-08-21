@@ -248,7 +248,7 @@ import {
   Oversampler, OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES,
 } from './dsp/oversample.js'
 import {
-  highShelf, invertBiquad, biquadZerosInsideUnitCircle, BiquadCascade,
+  highShelf, highpass, invertBiquad, biquadZerosInsideUnitCircle, BiquadCascade,
 } from './dsp/biquad.js'
 import { riseCoeff } from './dsp/envelope.js'
 
@@ -759,6 +759,134 @@ const RESIDUAL_TAU_S = 2.0
  */
 const RESIDUAL_FLOOR_DBC = -120
 
+/**
+ * ASYMMETRY — a DC offset before the waveshaper, and the only thing in this
+ * stage that generates EVEN harmonics.
+ *
+ * WHY IT IS HERE AT ALL. The curve is odd symmetric (see the guarantee list at
+ * MAX_REDUCTION_DB), and an odd curve produces odd harmonics and nothing else.
+ * Measured, and it is not "very little": on a 220 Hz tone 6 dB over the
+ * threshold, H2 sits at -144.3 dB and H4 at -164.2, and on three real
+ * narrators the even-order energy is EXACTLY zero — the decomposition
+ * F_even(x) = (F(x) + F(-x))/2 returns a buffer of zeros to the last bit.
+ * Odd harmonics are the buzz and fizz this file already documents; the warmth
+ * and density people describe as tube or tape is second and fourth order, and
+ * no setting of this stage could produce any of it.
+ *
+ * A small offset before the shaper breaks the symmetry and unlocks the whole
+ * family. Measured on that same tone at 6 dB over:
+ *
+ *   asym   H2       H3      H4       even/odd
+ *   0     -144.3   -22.7   -164.2     -121.7 dB
+ *   0.05   -38.8   -22.7    -76.1      -15.9
+ *   0.20   -26.8   -23.0    -67.1       -3.7
+ *   0.35   -22.2   -23.7    -86.6       +1.6   <- H2 overtakes H3
+ *
+ * IT IS ADDITIVE, NOT A REBALANCING, which is the property that makes it a
+ * character control rather than a second depth control — the mistake this
+ * panel has already made twice. H3 moves by at most 1 dB across the entire
+ * sweep; the offset ADDS a harmonic family without disturbing the one that was
+ * there. On real narration the even-order content lands at -49 dBc at asym
+ * 0.05 rising to -29 at 0.35, within 2 dB of each other across three very
+ * different files, and output level moves by 0.04 to 0.16 dB.
+ *
+ * SCALED TO THE THRESHOLD, NEVER ABSOLUTE. `off = fraction * T` keeps the
+ * whole stage level-invariant, which a fixed offset would destroy — the same
+ * property `e = 20log10(|x|/T)` exists to provide, and whose loss once made
+ * the stage quietly stop working on quiet files (14.36 dB of reduction at
+ * T = -6 dBFS against 0.53 at -30).
+ *
+ * 0.35 IS FULL SCALE because that is where H2 overtakes H3 on the tone above —
+ * the point at which the character stops being a seasoning and becomes the
+ * dominant colour. Past it the even orders keep climbing with nothing new to
+ * hear, so the knob would be spending travel on a distinction the ear does not
+ * make.
+ *
+ * ⚠ THE SIGN IS NOT ARBITRARY AND IS NOT YET CHOSEN WELL. Even-order content
+ * is IDENTICAL for +/- offset (-37.4 dBc either way at 0.2, on all three
+ * files), but total distortion is not, and the difference tracks the material's
+ * own waveform skew: on a file with skew -1.47 a positive offset gives -33.2
+ * dBc against -25.3 for negative, and on one with skew +1.48 the ordering
+ * reverses (-32.8 against -27.9). Speech is asymmetric by nature and the
+ * polarity depends on the speaker and the microphone. So the offset should
+ * OPPOSE the skew, which is one pass of a third moment to measure — deliberately
+ * left for its own change rather than smuggled in here.
+ */
+export const ASYM_MAX_FRACTION = 0.35
+
+/** Below this the offset is treated as zero and the whole path is bypassed. */
+const ASYM_EPSILON = 1e-4
+
+/**
+ * How far asymmetry relaxes the MAX_REDUCTION_DB bound, in dB.
+ *
+ * ⚠ THE BOUND IS ON THE CURVE, AND THE OFFSET MOVES THE STAGE OFF IT. The
+ * curve still reduces by at most MAX_REDUCTION_DB relative to what it SEES,
+ * which is `x + off`; the stage's effective attenuation is measured against
+ * `x`, and subtracting the offset afterwards makes those two slightly
+ * different. Swept across every shape and four decades of input:
+ *
+ *   asymmetry    15     30     60    100
+ *   worst red   6.008  6.036  6.109  6.249 dB
+ *
+ * So the guarantee becomes "bounded at MAX_REDUCTION_DB + 0.25" at full
+ * asymmetry, and is unchanged at 0. Recorded rather than quietly tolerated,
+ * because "bounded" is one of the stage's stated guarantees and a reader is
+ * entitled to know the number moved.
+ *
+ * THE FAILURE THAT WOULD MATTER DOES NOT HAPPEN: the output never changes sign
+ * relative to the input. That was the real risk of subtracting a constant
+ * after a gain — for a small positive sample, `g·(x+off) − off` can go negative
+ * if g is small enough — and it does not occur because g is only below 1 once
+ * `|x + off|` exceeds T, by which point x is large enough to survive. Zero
+ * flips across a full sweep at maximum asymmetry, and it is its own test.
+ */
+export const ASYM_MAX_BOUND_EXCESS_DB = 0.25
+
+/**
+ * DC blocker corner, Hz. Runs only while asymmetry is engaged.
+ *
+ * ⚠ IT IS LOAD-BEARING, AND I NEARLY DROPPED IT ON A MEASUREMENT TAKEN AT ONE
+ * OPERATING POINT. At the realistic setting — peaks about 7 dB over threshold
+ * — the DC the asymmetry produces is negligible: the output mean measures
+ * -80.9 to -92.6 dBFS on three real narrators, 68 to 89 dB below their peaks,
+ * which argued for leaving the blocker out entirely.
+ *
+ * Under overdrive it is a completely different quantity. With the threshold
+ * 30 dB below the signal and asymmetry at full, and NO blocker:
+ *
+ *   120 Hz tone at 0.9          DC  -45.2 dBFS   (38.4 dB below its own peak)
+ *   80 Hz square at 0.95        DC  -45.2        (39.1 below)
+ *   200 Hz on a +0.5 DC input   DC  -12.1        (5.1 below)
+ *
+ * The last case is the one that settles it: an input that already carries DC
+ * comes out with an offset 5 dB below its own peak. That shifts the waveform
+ * bodily, wastes headroom, and corrupts the peak measurement that ACX
+ * certification is built on. A stage that is fine at the default and broken
+ * under drive is exactly the class of defect this file keeps recording.
+ *
+ * 2 Hz, AND THE CORNER IS CHOSEN RATHER THAN ASSUMED. Rejection is total at
+ * any corner — a highpass has zero gain at DC by construction — so the corner
+ * only trades settling time against how much of the real signal it disturbs.
+ * On the worst case above: 1 Hz leaves -73.5 dBFS and takes 0.12 s to settle,
+ * 2 Hz leaves -123.5 dBFS in 0.04 s, and there is nothing to gain above that.
+ * Meanwhile the cost, measured as the residual of the blocker ALONE on real
+ * narration with no clipping at all, runs -35.1 dBc at 2 Hz against -29.9 at
+ * 5, -22.5 at 10 and -17.2 at 20. 2 Hz is full rejection at the lowest price.
+ *
+ * ⚠ THAT PRICE IS STILL THE LARGEST SINGLE ITEM IN THIS FEATURE, and it lands
+ * on the RESIDUAL readout: engaging asymmetry at all raises the reading by
+ * several dB before the asymmetry itself contributes anything. Most of it is
+ * phase shift on real low-frequency content rather than anything audible — the
+ * readout overstates a linear filter badly — but the number moves, and it
+ * moves at the first click of the knob rather than progressively.
+ *
+ * Q is left at the Butterworth default: a highpass at 1/sqrt(2) has no
+ * passband overshoot, which is what keeps the stage's "never boosts"
+ * guarantee intact through the blocker.
+ */
+const DC_BLOCK_HZ = 2
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
@@ -786,6 +914,10 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
   fixedThresholdDb: -10, // used only in 'fixed' mode
   shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
+  // 0-100, share of ASYM_MAX_FRACTION. 0 bypasses the offset AND the DC
+  // blocker entirely, which is what keeps the shipped patch bit-identical to
+  // the build before even harmonics existed.
+  asymmetry: 0,
 }
 
 function clamp(v, lo, hi) {
@@ -1221,6 +1353,12 @@ export class SoftClipperKernel {
     // per-channel input and this one the downmix, and sharing an instance
     // would mean sharing filter state between two different signals.
     this.preEmphasisDetect = new BiquadCascade(1, 1)
+
+    // DC blocker, per output channel. Runs only while asymmetry is engaged —
+    // see DC_BLOCK_HZ — so the shipped patch never touches it.
+    this.dcBlocker = new BiquadCascade(1, 1)
+    this.dcBlockerRate = 0
+    this.asymActive = false
     this.emphasisActive = false
     this.emphasisStable = true
 
@@ -1415,6 +1553,20 @@ export class SoftClipperKernel {
     // normalises the shapes to equal reduction at SHAPE_ANCHOR_DB, so a curve
     // run with one shape's exponent and another's knee is neither shape.
     const { exponent: shapeExponent, kneeDb: shapeKneeDb } = resolveShape(p.shape)
+
+    // Asymmetry, as a fraction of the threshold — see ASYM_MAX_FRACTION. The
+    // offset itself is per-sample because T is, so only the fraction is
+    // resolved here.
+    const asymFraction = clamp(p.asymmetry ?? 0, 0, 100) / 100 * ASYM_MAX_FRACTION
+    this.asymActive = asymFraction > ASYM_EPSILON
+    if (this.asymActive && this.dcBlockerRate !== this.sampleRate) {
+      // Coefficients depend only on the sample rate, so this runs once per
+      // rate rather than per block. Q is left at the default 1/sqrt(2): a
+      // Butterworth highpass has no passband overshoot, which is what keeps
+      // the stage's "never boosts" guarantee intact through the blocker.
+      this.dcBlocker.setSections([highpass(this.sampleRate, DC_BLOCK_HZ)])
+      this.dcBlockerRate = this.sampleRate
+    }
 
     // Emphasis coefficients recompute only when the raw target has moved
     // enough to matter (deviation note 3) — cheap on a knob drag, free
@@ -1686,6 +1838,7 @@ export class SoftClipperKernel {
     while (this.dryDelay.length < nOut) this.dryDelay.push(new Float32Array(D))
     this.preEmphasis.ensureChannels(nOut)
     this.deEmphasis.ensureChannels(nOut)
+    this.dcBlocker.ensureChannels(nOut)
 
     // Every channel walks the same delay positions, so the write cursor is
     // captured once and committed once rather than advanced per channel.
@@ -1737,10 +1890,15 @@ export class SoftClipperKernel {
       // sub-samples; holding it flat across each group of L is inaudible.
       for (let i = 0; i < n; i++) {
         const t = T[i]
+        // Added before the curve and taken off after it, so material that
+        // never reaches the shifted threshold comes back bit-exact — the
+        // asymmetry narrows the transparent window and moves it off centre,
+        // it does not abolish it.
+        const off = asymFraction * t
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           const before = hi[k]
-          const after = softClip(before, t, MAX_REDUCTION_DB, shapeKneeDb, shapeExponent)
+          const after = softClip(before + off, t, MAX_REDUCTION_DB, shapeKneeDb, shapeExponent) - off
           hi[k] = after
           const ab = before < 0 ? -before : before
           if (ab > t) {
@@ -1755,6 +1913,21 @@ export class SoftClipperKernel {
 
       if (this.emphasisActive) {
         this.deEmphasis.process(out, out, n, ch)
+      }
+
+      // DC blocker, and ONLY while the asymmetry that needs it is engaged.
+      // Not "flat when off" but absent when off: an always-on filter would
+      // cost the stage its bit-transparency below the threshold for every
+      // user who never touches this control. Same rule the emphasis pair
+      // follows, for the same reason.
+      //
+      // It sits after de-emphasis so it is blocking the DC that reaches the
+      // OUTPUT rather than one the de-emphasis would have reshaped, and
+      // before the residual measurement below — so RESIDUAL reports the
+      // blocker's contribution too, which is honest and is why DC_BLOCK_HZ
+      // records what that costs.
+      if (this.asymActive) {
+        this.dcBlocker.process(out, out, n, ch)
       }
 
       // Dry delay, DELTA and output trim in one pass.
