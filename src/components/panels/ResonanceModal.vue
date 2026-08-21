@@ -309,22 +309,6 @@ async function applyAndClose() {
           </div>
 
 
-
-
-          <!-- THE WARNING SURVIVED THE CONTROL MOVING.
-               Protection is a per-zone toggle now, so there is no global button
-               left to carry a caption — but this is still the one setting on
-               the panel that can quietly wreck the material, and a per-zone
-               lamp is a small thing to notice. The sentence appears here
-               whenever ANY zone has it off, names the zones, and is absent the
-               rest of the time. -->
-          <span
-            v-if="unprotectedZones.length"
-            class="flex-1 min-w-0 self-center"
-            style="font:500 9px/1.3 'Inter';color:rgba(255,178,122,.8)"
-          >Full suppression in {{ unprotectedZones.join(', ') }} — risks thinning
-            harmonic frequencies there.</span>
-
           <div class="w-[64px] shrink-0 self-end ml-auto">
             <Knob
               :model-value="resMix" @update:model-value="syncMix"
