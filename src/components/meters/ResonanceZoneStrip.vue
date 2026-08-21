@@ -92,14 +92,37 @@ const info = computed(() => props.zones.map((z, i) => {
   // print: switching a zone off would make the number the user set read as 0,
   // and switching it back on would look like the panel had invented a value.
   const depth = Math.max(0, Math.min(1, z.depth ?? 1))
+  const sens = Math.max(-RESONANCE_ZONE_SENS_MAX_DB,
+    Math.min(RESONANCE_ZONE_SENS_MAX_DB, z.sensitivityDb ?? 0))
   return {
     ...s,
     depth,
     index: i,
     label: `Z${i + 1}`,
     range: `${hz(bounds.value[i].loHz)}–${hz(bounds.value[i].hiHz)}`,
-    sensText: `${(z.sensitivityDb ?? 0) > 0 ? '+' : ''}${(z.sensitivityDb ?? 0).toFixed(1)}`,
-    depthText: `${Math.round(depth * 100)}`,
+    rows: [
+      {
+        field: 'sens',
+        label: 'SENS',
+        aria: 'sensitivity, decibels',
+        text: `${sens > 0 ? '+' : ''}${sens.toFixed(1)}`,
+        ariaNow: sens, ariaMin: -RESONANCE_ZONE_SENS_MAX_DB, ariaMax: RESONANCE_ZONE_SENS_MAX_DB,
+        lit: `color-mix(in srgb, ${props.accent} 55%, #ffffff)`,
+        // Bipolar: half the track is zero, and the fill runs to whichever side.
+        left: 50 + Math.min(0, sens / RESONANCE_ZONE_SENS_MAX_DB) * 50,
+        width: Math.abs(sens / RESONANCE_ZONE_SENS_MAX_DB) * 50,
+      },
+      {
+        field: 'depth',
+        label: 'DEPTH',
+        aria: 'depth, percent',
+        text: `${Math.round(depth * 100)}`,
+        ariaNow: Math.round(depth * 100), ariaMin: 0, ariaMax: 100,
+        lit: 'rgba(255,255,255,.62)',
+        left: 0,
+        width: depth * 100,
+      },
+    ],
   }
 }))
 </script>
@@ -150,41 +173,51 @@ const info = computed(() => props.zones.map((z, i) => {
       <div style="font:600 8px 'JetBrains Mono',monospace;color:rgba(255,255,255,.36)"
            class="mt-[2px] truncate">{{ z.range }} Hz</div>
 
-      <div class="flex items-baseline justify-between mt-[4px] gap-[4px]">
-        <span
-          class="cursor-ns-resize select-none"
-          style="font:600 7.5px 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(255,255,255,.3)"
-        >SENS</span>
-        <span
-          class="cursor-ns-resize select-none tabular-nums"
-          role="slider"
-          tabindex="0"
-          :aria-label="`Zone ${z.index + 1} sensitivity`"
-          :aria-valuenow="z.sensitivityDb"
-          :aria-valuemin="-RESONANCE_ZONE_SENS_MAX_DB"
-          :aria-valuemax="RESONANCE_ZONE_SENS_MAX_DB"
-          :style="{ font: `600 11px 'JetBrains Mono',monospace`, color: z.enabled
-            ? `color-mix(in srgb, ${accent} 55%, #ffffff)` : 'rgba(255,255,255,.3)' }"
-          @pointerdown="startDrag($event, z.index, 'sens')"
-          @keydown="onKey($event, z.index, 'sens')"
-        >{{ z.sensText }}</span>
-      </div>
-
-      <div class="flex items-baseline justify-between gap-[4px]">
-        <span style="font:600 7.5px 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(255,255,255,.3)">DEPTH</span>
-        <span
-          class="cursor-ns-resize select-none tabular-nums"
-          role="slider"
-          tabindex="0"
-          :aria-label="`Zone ${z.index + 1} depth, percent`"
-          :aria-valuenow="Math.round(z.depth * 100)"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :style="{ font: `600 11px 'JetBrains Mono',monospace`, color: z.enabled
-            ? 'rgba(255,255,255,.62)' : 'rgba(255,255,255,.3)' }"
-          @pointerdown="startDrag($event, z.index, 'depth')"
-          @keydown="onKey($event, z.index, 'depth')"
-        >{{ z.depthText }}</span>
+      <!-- EACH VALUE IS A TRACK, not a printed number that happens to respond
+           to a drag. The first version of this cell was label plus number,
+           with the drag discoverable only by trying it — reported, correctly,
+           as "I'm not clear how to set the depth". A number is not a control
+           unless it looks like one, and a filled track says both "this is
+           adjustable" and "here is where it sits in its range" in the same
+           4 px it was already using. The whole row is the target, so the hit
+           area is the cell width rather than the width of two digits. -->
+      <div
+        v-for="row in z.rows"
+        :key="row.field"
+        class="mt-[4px] cursor-ns-resize select-none"
+        role="slider"
+        tabindex="0"
+        :aria-label="`Zone ${z.index + 1} ${row.aria}`"
+        :aria-valuenow="row.ariaNow"
+        :aria-valuemin="row.ariaMin"
+        :aria-valuemax="row.ariaMax"
+        :aria-disabled="String(disabled)"
+        title="Drag up or down to adjust. Arrow keys also work; hold Shift for fine steps."
+        @pointerdown="startDrag($event, z.index, row.field)"
+        @keydown="onKey($event, z.index, row.field)"
+      >
+        <div class="flex items-baseline justify-between gap-[4px]">
+          <span style="font:600 7.5px 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(255,255,255,.32)">{{ row.label }}</span>
+          <span
+            class="tabular-nums"
+            :style="{ font: `600 11px 'JetBrains Mono',monospace`, color: z.enabled
+              ? row.lit : 'rgba(255,255,255,.3)' }"
+          >{{ row.text }}</span>
+        </div>
+        <!-- Sensitivity is bipolar, so its fill grows out of the centre and
+             the direction is part of the reading; depth runs from zero, so
+             its fill grows from the left. Same control, two natural origins. -->
+        <div class="relative mt-[2px]" style="height:3px;border-radius:2px;background:rgba(255,255,255,.07)">
+          <div
+            class="absolute top-0 h-full"
+            :style="{
+              left: `${row.left}%`,
+              width: `${row.width}%`,
+              borderRadius: '2px',
+              background: z.enabled ? row.lit : 'rgba(255,255,255,.22)',
+            }"
+          ></div>
+        </div>
       </div>
     </div>
   </div>
