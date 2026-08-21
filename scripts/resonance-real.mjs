@@ -106,6 +106,46 @@ const CONFIGS = [
     },
     solveFor: 3,
   },
+
+  // MATCHED ON CUT DEPTH RATHER THAN ON THE MEAN. Reported by ear: two configs
+  // matched at 3 dB of mean cut removed visibly different amounts of resonance,
+  // the deeper-and-narrower one sounding like it had done more. The mean cannot
+  // see that difference and p90 can, so the pairs below are matched on it — the
+  // only way to ask "same amount of treatment, which one artefacts less".
+  {
+    slug: 'cepstral-slow-p6',
+    label: 'cepstral+slow @ p90 6 dB',
+    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 500 },
+    solveFor: 6,
+    solveOn: 'p90',
+  },
+  {
+    slug: 'peak-slow-p6',
+    label: 'peak+slow     @ p90 6 dB',
+    params: {
+      refMode: 'peak', preserveHarmonics: false, depth: 1,
+      attackMs: 100, releaseMs: 500,
+    },
+    solveFor: 6,
+    solveOn: 'p90',
+  },
+  {
+    slug: 'cepstral-slow-p10',
+    label: 'cepstral+slow @ p90 10 dB',
+    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 500 },
+    solveFor: 10,
+    solveOn: 'p90',
+  },
+  {
+    slug: 'peak-slow-p10',
+    label: 'peak+slow     @ p90 10 dB',
+    params: {
+      refMode: 'peak', preserveHarmonics: false, depth: 1,
+      attackMs: 100, releaseMs: 500,
+    },
+    solveFor: 10,
+    solveOn: 'p90',
+  },
 ]
 
 function readWav(file) {
@@ -252,12 +292,28 @@ function bandLevels(sig, sampleRate, lo, hi, offset, frames) {
   return out
 }
 
+/**
+ * MEAN CUT CANNOT TELL MANY SHALLOW CUTS FROM A FEW DEEP ONES, and the two do
+ * not sound remotely alike: shallow-and-wide reads as the file getting duller,
+ * deep-and-narrow reads as a resonance being removed. Two configurations
+ * matched on the mean were reported by ear as removing visibly different
+ * amounts of resonance, which is the mean doing exactly what it cannot help
+ * doing.
+ *
+ * So the distribution goes out too. `p90` is the depth of cut where the effect
+ * is actually working, and it is the statistic worth MATCHING on when the
+ * question is "same amount of treatment, which one artefacts less".
+ */
 function measure(inLevels, outLevels, sets) {
   const g = new Float64Array(inLevels.length)
   for (let j = 0; j < g.length; j++) g[j] = outLevels[j] - inLevels[j]
   let cut = 0
   let n = 0
-  for (const i of sets.usable) { cut += g[i]; n++ }
+  const depths = []
+  for (const i of sets.usable) { cut += g[i]; n++; depths.push(-g[i]) }
+  depths.sort((a, b) => a - b)
+  const pct = q => (depths.length ? depths[Math.floor((q / 100) * (depths.length - 1))] : 0)
+  const treated = depths.filter(d => d > 3).length / (depths.length || 1)
   const jitter = set => {
     let s = 0
     let m = 0
@@ -268,7 +324,13 @@ function measure(inLevels, outLevels, sets) {
     }
     return m ? Math.sqrt(s / m) : 0
   }
-  return { cut: n ? cut / n : 0, slow: jitter(sets.slow), fast: jitter(sets.fast) }
+  return {
+    cut: n ? cut / n : 0,
+    p50: pct(50), p90: pct(90), p99: pct(99),
+    treated,
+    slow: jitter(sets.slow),
+    fast: jitter(sets.fast),
+  }
 }
 
 /**
@@ -278,7 +340,7 @@ function measure(inLevels, outLevels, sets) {
  * less gets through the threshold, so the search is stable even where the
  * curve is lumpy.
  */
-function solveSelectivity(x, sampleRate, params, target, inLevels, sets, frames) {
+function solveSelectivity(x, sampleRate, params, target, stat, inLevels, sets, frames) {
   let lo = 2
   let hi = 40
   for (let it = 0; it < 9; it++) {
@@ -287,7 +349,9 @@ function solveSelectivity(x, sampleRate, params, target, inLevels, sets, frames)
       ...RESONANCE_KERNEL_DEFAULTS, ...params, selectivity: mid,
     }).channelData[0]
     const levels = bandLevels(out, sampleRate, BANDS[0].lo, BANDS[0].hi, LATENCY, frames)
-    if (-measure(inLevels, levels, sets).cut > target) lo = mid
+    const m = measure(inLevels, levels, sets)
+    const value = stat === 'p90' ? m.p90 : -m.cut
+    if (value > target) lo = mid
     else hi = mid
   }
   return (lo + hi) / 2
@@ -333,11 +397,14 @@ function run(file) {
 
   const inLevels = BANDS.map(b => bandLevels(x, sampleRate, b.lo, b.hi, 0, frames))
 
-  console.log(`\n  ${'config'.padEnd(28)}${'sel'.padStart(5)}   `
-    + BANDS.map(b => `${b.label}: cut  jitter slow/fast`).join('   '))
+  console.log(`\n  ${'config'.padEnd(31)}${'sel'.padStart(5)}   `
+    + '100-400 Hz: mean   p90  >3dB    jitter slow/fast      2-6 kHz: mean  jitter')
   for (const cfg of CONFIGS) {
     const selectivity = cfg.solveFor
-      ? solveSelectivity(x, sampleRate, cfg.params, cfg.solveFor, inLevels[0], sets, frames)
+      ? solveSelectivity(
+        x, sampleRate, cfg.params, cfg.solveFor, cfg.solveOn ?? 'mean',
+        inLevels[0], sets, frames,
+      )
       : (cfg.params.selectivity ?? RESONANCE_KERNEL_DEFAULTS.selectivity)
     const params = { ...RESONANCE_KERNEL_DEFAULTS, ...cfg.params, selectivity }
     const out = processResonanceBuffer([x], sampleRate, params).channelData[0]
@@ -349,11 +416,14 @@ function run(file) {
         sampleRate,
       )
     }
-    const cells = BANDS.map((b, bi) => {
-      const m = measure(inLevels[bi], bandLevels(out, sampleRate, b.lo, b.hi, LATENCY, frames), sets)
-      return `${m.cut.toFixed(2).padStart(9)}   ${m.slow.toFixed(2)} / ${m.fast.toFixed(2)}`.padEnd(28)
-    })
-    console.log(`  ${cfg.label.padEnd(28)}${selectivity.toFixed(1).padStart(5)}   ${cells.join('   ')}`)
+    const lf = measure(inLevels[0], bandLevels(out, sampleRate, BANDS[0].lo, BANDS[0].hi, LATENCY, frames), sets)
+    const hf = measure(inLevels[1], bandLevels(out, sampleRate, BANDS[1].lo, BANDS[1].hi, LATENCY, frames), sets)
+    console.log(
+      `  ${cfg.label.padEnd(31)}${selectivity.toFixed(1).padStart(5)}   `
+      + `${lf.cut.toFixed(2).padStart(9)}  ${lf.p90.toFixed(1).padStart(4)}  ${(100 * lf.treated).toFixed(0).padStart(3)}%    `
+      + `${lf.slow.toFixed(2)} / ${lf.fast.toFixed(2)}      `
+      + `${hf.cut.toFixed(2).padStart(9)}  ${hf.slow.toFixed(2)} / ${hf.fast.toFixed(2)}`,
+    )
   }
 }
 
