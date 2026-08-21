@@ -46,6 +46,9 @@ export const SCOPE_SECONDS = 4
  *   asymmetry 0-100, the even-harmonic offset — see ASYM_MAX_FRACTION. 0
  *     bypasses both the offset and the DC blocker it needs, so the default
  *     patch is bit-identical to the build before this existed
+ *   hfLoss 0-100, level-dependent HF softening — see HF_LOSS_CORNER_HZ. Not
+ *     gap loss, which is level-independent; this is the self-erasure half,
+ *     and it is what lets the colour vanish on quiet material
  */
 export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
 
@@ -59,6 +62,7 @@ export function toKernelParams(params) {
     fixedThresholdDb: params.fixedThresholdDb,
     shape: params.shape,
     asymmetry: params.asymmetry,
+    hfLoss: params.hfLoss,
   }
 }
 

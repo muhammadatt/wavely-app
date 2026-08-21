@@ -983,6 +983,69 @@ const SKEW_FLIP_MS = 200
  */
 const DC_BLOCK_HZ = 2
 
+/**
+ * HF LOSS — the top end softening as the stage is pushed, tape-style.
+ *
+ * ⚠ IT IS NOT GAP LOSS, and the distinction changed what this is. Gap loss is
+ * the reproduce head averaging flux across a finite gap — sinc(pi*g/lambda),
+ * a purely geometric function of gap width, tape speed and frequency. It does
+ * not depend on level at all: a given head at a given speed has one fixed
+ * curve, which in this architecture would be an always-on shelf.
+ *
+ * What actually makes tape lose top end when it is pushed is SHORT-WAVELENGTH
+ * SELF-ERASURE — high-frequency magnetisation partially erasing itself at high
+ * record levels — along with record-head and bias losses. That is strongly
+ * level-dependent, and it is the audible, characterful half.
+ *
+ * MODELLING THE LEVEL-DEPENDENT ONE IS ALSO WHAT LETS THIS LIVE INSIDE A STAGE
+ * WHOSE IDENTITY IS TRANSPARENCY. A static shelf colours every sample of every
+ * file, which costs the "unity below T" guarantee outright. A loss that
+ * vanishes with level does not: quiet material sees a gain of exactly 1 and
+ * passes bit-exact, and the colour arrives only where the stage is already
+ * working.
+ *
+ * THE STRUCTURE IS A BLEND, NOT A RECOMPUTED FILTER:
+ *
+ *   out = g * x + (1 - g) * lowpass(x)
+ *
+ * with one fixed one-pole and a per-sample g. That is exactly a first-order
+ * high shelf — unity at DC, plateauing at g above the corner — and it has two
+ * properties a recomputed biquad would not. It is EXACTLY transparent at
+ * g = 1, so the bypass is free rather than approximate. And it PROVABLY CANNOT
+ * BOOST: |g + (1-g)*LP| <= g + (1-g)*|LP| <= 1 for any 0 <= g <= 1, since a
+ * one-pole lowpass has magnitude at most 1 everywhere. The stage's "never
+ * boosts" guarantee survives by construction rather than by measurement, which
+ * matters for a filter whose depth moves per sample.
+ *
+ * DRIVEN BY LEVEL RELATIVE TO THE THRESHOLD, so the whole thing stays
+ * level-invariant like everything else here: the same recording 10 dB quieter
+ * gets the same treatment, because the threshold tracks it.
+ */
+const HF_LOSS_CORNER_HZ = 4000
+
+/** Shelf depth at full knob and full drive, dB. */
+const HF_LOSS_MAX_DB = 6
+
+/**
+ * dB over the threshold at which the loss reaches tanh(1) — about 76% — of its
+ * depth. 6 dB, so the loss tracks the same overshoot range the clip curve
+ * works over rather than needing its own calibration.
+ */
+const HF_LOSS_KNEE_DB = 6
+
+/**
+ * Smoothing for the loss itself, ms.
+ *
+ * The peak envelope driving it moves on 1 ms attack / 150 ms release, which is
+ * envelope rate rather than audio rate, but a gain following it directly would
+ * still modulate a shelf fast enough to hear as a flutter on the top end.
+ * 30 ms is slower than any syllable onset and faster than a phrase.
+ */
+const HF_LOSS_SMOOTH_MS = 30
+
+/** Below this the loss is treated as zero and the whole path is bypassed. */
+const HF_LOSS_EPSILON = 1e-4
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
@@ -1014,6 +1077,8 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // blocker entirely, which is what keeps the shipped patch bit-identical to
   // the build before even harmonics existed.
   asymmetry: 0,
+  // 0-100, share of HF_LOSS_MAX_DB. 0 bypasses the shelf entirely.
+  hfLoss: 0,
 }
 
 function clamp(v, lo, hi) {
@@ -1464,6 +1529,16 @@ export class SoftClipperKernel {
 
     // DC blocker, per output channel. Runs only while asymmetry is engaged —
     // see DC_BLOCK_HZ — so the shipped patch never touches it.
+    // One-pole lowpass state per channel, and its coefficient. See
+    // HF_LOSS_CORNER_HZ — the shelf is a blend against this, not a filter
+    // whose coefficients move.
+    this.hfLossLp = []
+    this.hfLossCoef = riseCoeff(1000 / (2 * Math.PI * HF_LOSS_CORNER_HZ), sampleRate)
+    this.hfLossSmoothCoef = riseCoeff(HF_LOSS_SMOOTH_MS, sampleRate)
+    this.hfLossDb = 0
+    this.hfLossActive = false
+    this.hfLossGain = new Float32Array(0)
+
     this.dcBlocker = new BiquadCascade(1, 1)
     this.dcBlockerRate = 0
     this.asymActive = false
@@ -1666,6 +1741,9 @@ export class SoftClipperKernel {
     // offset itself is per-sample because T is, so only the fraction is
     // resolved here.
     const asymFraction = clamp(p.asymmetry ?? 0, 0, 100) / 100 * ASYM_MAX_FRACTION
+    const hfLossMaxDb = clamp(p.hfLoss ?? 0, 0, 100) / 100 * HF_LOSS_MAX_DB
+    this.hfLossActive = hfLossMaxDb > HF_LOSS_EPSILON
+    if (this.hfLossGain.length < n) this.hfLossGain = new Float32Array(n)
     this.asymActive = asymFraction > ASYM_EPSILON
     if (this.asymActive && this.dcBlockerRate !== this.sampleRate) {
       // Coefficients depend only on the sample rate, so this runs once per
@@ -1736,6 +1814,7 @@ export class SoftClipperKernel {
     let fastPeakEmph = this.fastPeakEmph
     let liftDb = this.liftDb
     let liftWarmupMax = this.liftWarmupMax
+    let hfLossDb = this.hfLossDb
     let skewM2 = this.skewM2
     let skewM3 = this.skewM3
     let asymSign = this.asymSign
@@ -1958,6 +2037,18 @@ export class SoftClipperKernel {
       // removed, silently, and only on the material the feature exists for.
       T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX * dbToLin(liftDb))
 
+      // HF loss, driven by how far the envelope sits ABOVE the threshold — so
+      // it is level-invariant, and so it is exactly absent on material the
+      // stage is not working on. See HF_LOSS_CORNER_HZ.
+      if (this.hfLossActive) {
+        const overDb = fastPeakDb - linToDb(T[i])
+        const target = overDb > 0
+          ? hfLossMaxDb * Math.tanh(overDb / HF_LOSS_KNEE_DB)
+          : 0
+        hfLossDb += this.hfLossSmoothCoef * (target - hfLossDb)
+        this.hfLossGain[i] = dbToLin(-hfLossDb)
+      }
+
       // Scope: loudest input sample of this call, and T at that instant.
       const ax = x < 0 ? -x : x
       if (ax > scopePeak) { scopePeak = ax; scopeThreshold = T[i] }
@@ -1968,6 +2059,7 @@ export class SoftClipperKernel {
     this.fastPeakEmph = fastPeakEmph
     this.liftDb = liftDb
     this.liftWarmupMax = liftWarmupMax
+    this.hfLossDb = hfLossDb
     this.skewM2 = skewM2
     this.skewM3 = skewM3
     this.asymSign = asymSign
@@ -2088,6 +2180,22 @@ export class SoftClipperKernel {
       // records what that costs.
       if (this.asymActive) {
         this.dcBlocker.process(out, out, n, ch)
+      }
+
+      // HF loss. A blend between the signal and its own lowpass, which IS a
+      // first-order high shelf and is exactly transparent at gain 1 — see
+      // HF_LOSS_CORNER_HZ for why that matters and why it cannot boost.
+      if (this.hfLossActive) {
+        while (this.hfLossLp.length <= ch) this.hfLossLp.push(0)
+        let lp = this.hfLossLp[ch]
+        const a = this.hfLossCoef
+        const gains = this.hfLossGain
+        for (let i = 0; i < n; i++) {
+          lp += a * (out[i] - lp)
+          const g = gains[i]
+          out[i] = g * out[i] + (1 - g) * lp
+        }
+        this.hfLossLp[ch] = lp
       }
 
       // Dry delay, DELTA and output trim in one pass.

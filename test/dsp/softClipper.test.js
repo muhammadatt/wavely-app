@@ -2129,3 +2129,110 @@ test('the sign waits for evidence, and holds the shipped default until it has it
   assert.equal(flat.sign, 1,
     `symmetric material latched a sign: skew ${flat.skew.toFixed(4)} moved it to ${flat.sign}`)
 })
+
+// ── HF Loss (HF_LOSS_CORNER_HZ) ─────────────────────────────────────────────
+
+/** Wideband gain of the stage at one frequency and one input level. */
+function bandGainDb(freqHz, ampDb, params, sr = SR) {
+  const n = Math.round(3 * sr)
+  const amp = dbToLin(ampDb)
+  const period = Math.round(0.25 * sr)
+  const sig = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    // Gated bursts: a steady tone never opens the detector's gate, so it would
+    // measure a stage that is not running. That trap is recorded four times in
+    // the kernel and once in the rumble heuristic.
+    const ph = (i % period) / period
+    const env = ph < 0.7 ? Math.min(1, ph / 0.02) * Math.min(1, (0.7 - ph) / 0.02) : 0
+    sig[i] = amp * env * Math.sin((2 * Math.PI * freqHz * i) / sr)
+  }
+  const y = processSoftClipperBuffer([sig], sr, { shape: 'tanh3', ...params }).channelData[0]
+  let a = 0, b = 0
+  for (let i = sr; i < n; i++) { a += sig[i] * sig[i]; b += y[i] * y[i] }
+  return 10 * Math.log10(b / a)
+}
+
+test('HF Loss does nothing at all until the stage is being pushed', () => {
+  // The property that lets a colouring filter live inside a transparency
+  // guarantee. Gap loss proper is level-INDEPENDENT and would be an always-on
+  // shelf, costing every user of this stage its bit-transparency; the
+  // self-erasure half vanishes with level, so quiet material sees a gain of
+  // exactly 1. Measured: 0.00 dB at every frequency at and below the
+  // threshold, at full knob.
+  const params = { thresholdMode: 'fixed', fixedThresholdDb: -14, emphasisDb: 0, hfLoss: 100 }
+  for (const freq of [100, 1000, 4000, 8000, 16000]) {
+    for (const ampDb of [-30, -20, -14]) {
+      const g = bandGainDb(freq, ampDb, params)
+      assert.ok(Math.abs(g) < 0.05,
+        `${freq} Hz at ${ampDb} dBFS moved by ${g.toFixed(3)} dB with nothing over the threshold`)
+    }
+  }
+})
+
+test('HF Loss is a shelf, and it deepens with level', () => {
+  // Both halves of the claim. The SHAPE is isolated by subtracting the same
+  // measurement with the knob at zero, so the clipping the stage was doing
+  // anyway is not counted as shelf. Measured at -2 dBFS into a -14 dBFS
+  // threshold: 0.00 / -0.17 / -1.62 / -2.87 / -3.64 dB from 100 Hz to 16 kHz.
+  const base = { thresholdMode: 'fixed', fixedThresholdDb: -14, emphasisDb: 0 }
+  const shelfAt = (ampDb) => [100, 1000, 4000, 8000, 16000].map(f =>
+    bandGainDb(f, ampDb, { ...base, hfLoss: 100 }) - bandGainDb(f, ampDb, { ...base, hfLoss: 0 }))
+
+  const hot = shelfAt(-2)
+  assert.ok(Math.abs(hot[0]) < 0.15, `the shelf is cutting at 100 Hz: ${hot[0].toFixed(2)} dB`)
+  for (let i = 1; i < hot.length; i++) {
+    assert.ok(hot[i] < hot[i - 1] + 0.02,
+      `the shelf is not monotonic with frequency: ${hot.map(v => v.toFixed(2)).join(', ')}`)
+  }
+  assert.ok(hot[hot.length - 1] < -2, `the shelf never reaches any depth: ${hot[4].toFixed(2)} dB`)
+
+  // And it is LEVEL-dependent, which is the whole point of modelling
+  // self-erasure rather than gap loss.
+  const mild = shelfAt(-8)
+  assert.ok(mild[4] > hot[4] + 0.5,
+    `the shelf did not deepen with level: ${mild[4].toFixed(2)} at -8 dBFS against ` +
+    `${hot[4].toFixed(2)} at -2`)
+})
+
+test('HF Loss cannot boost, at any level or setting', () => {
+  // PROVABLE RATHER THAN MEASURED, and the test is here because the filter's
+  // depth moves per sample and a recomputed biquad would have needed the
+  // measurement. The structure is g*x + (1-g)*lowpass(x), so
+  // |g + (1-g)*LP| <= g + (1-g)*|LP| <= 1 for any 0 <= g <= 1 — a one-pole
+  // lowpass has magnitude at most 1 everywhere. Swept anyway, because the
+  // proof is about the structure and this is about the code.
+  const params = { thresholdMode: 'fixed', fixedThresholdDb: -20, emphasisDb: 0, hfLoss: 100 }
+  for (const freq of [50, 200, 1000, 4000, 10000, 18000]) {
+    for (const ampDb of [-24, -12, -6, -1]) {
+      const g = bandGainDb(freq, ampDb, params)
+      assert.ok(g <= 0.02, `${freq} Hz at ${ampDb} dBFS was BOOSTED by ${g.toFixed(3)} dB`)
+    }
+  }
+})
+
+test('HF Loss is level-invariant and bypassed at zero', () => {
+  // Same two properties every other control here has to hold. The loss is
+  // driven by level RELATIVE to the threshold, so the same recording at a
+  // different level gets the same treatment.
+  const probe = concat(speechLike(4, 0.4, 71), speechLike(3, 0.4, 73))
+  const base = { thresholdMode: 'fixed', emphasisDb: 0, shape: 'tanh3', hfLoss: 100 }
+  const a = processSoftClipperBuffer([probe], SR, { ...base, fixedThresholdDb: -14 }).channelData[0]
+  const louder = new Float32Array(probe.length)
+  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
+  const b = processSoftClipperBuffer([louder], SR, { ...base, fixedThresholdDb: -8 }).channelData[0]
+  let worst = 0
+  for (let i = Math.round(SR); i < probe.length; i++) {
+    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
+  }
+  assert.ok(worst < 2e-3, `HF Loss is not level-invariant: worst deviation ${worst}`)
+
+  // And at 0 the filter is absent, not flat.
+  const withParam = processSoftClipperBuffer([probe], SR,
+    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', hfLoss: 0 }).channelData[0]
+  const without = processSoftClipperBuffer([probe], SR,
+    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }).channelData[0]
+  for (let i = 0; i < probe.length; i++) {
+    assert.equal(withParam[i], without[i], `hfLoss 0 altered sample ${i}`)
+  }
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hfLoss, 0, 'the shipped default engages HF Loss')
+})

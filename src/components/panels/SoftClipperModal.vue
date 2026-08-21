@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry,
+  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -393,6 +393,30 @@ const SCOPE_H = 236
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             even-order warmth
+          </p>
+        </div>
+        <div class="w-[74px]">
+          <!-- ⚠ NOT GAP LOSS, whatever the tape literature suggests. Gap loss
+               is the reproduce head averaging flux across a finite gap —
+               sinc(pi*g/lambda) — which depends on gap width, tape speed and
+               frequency and NOT on level. Modelled faithfully it would be an
+               always-on shelf, and an always-on shelf costs this stage its
+               bit-transparency below the threshold.
+
+               What makes tape actually lose top end when pushed is
+               short-wavelength self-erasure, which is strongly level-dependent
+               — and that is the version worth having here, because a colour
+               that vanishes with level leaves quiet material untouched. -->
+          <Knob
+            :model-value="hfLoss"
+            @update:model-value="syncHfLoss"
+            :min="0" :max="100" :step="1"
+            label="HF Loss" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            :value-font-px="13"
+            :disabled="!clipperPreview"
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            softens under level
           </p>
         </div>
         <div class="w-[74px]">
