@@ -431,9 +431,21 @@ const T_MAX = 0.95
  *   - C1 at the knee: d(r)/d(e) = 0 at e = 0 because tanh^2 is flat there, so
  *     the dB-domain slope is 1 on both sides and the linear-domain slope with
  *     it. Verified numerically across four decades of threshold.
- *   - Monotonic, provided KNEE_DB > 0.7698 * MAX_REDUCTION_DB — the peak of
- *     2*tanh(u)*sech^2(u). At the shipped values max d(r)/d(e) = 0.404, so a
- *     louder input always produces a louder output.
+ *   - Monotonic: a louder input always produces a louder output, so the
+ *     transfer curve never folds back on itself. Output in dB is e - r(e), so
+ *     this needs d(r)/d(e) <= 1, and with r = rMax * tanh^n(e/knee) the slope
+ *     peaks at (rMax/knee) * max_u [n * tanh^(n-1)(u) * sech^2(u)]. For n = 2
+ *     that maximum is 0.7698, giving the familiar knee > 0.7698 * rMax; the
+ *     per-shape bounds are SHAPE_MIN_KNEE_DB.
+ *
+ *     ⚠ A SINGLE FIGURE FOR "THE SHIPPED VALUE" NO LONGER EXISTS, and the one
+ *     that used to sit here (0.404) went stale unnoticed when the shapes were
+ *     given their own knees. Measured at the current knees, max d(r)/d(e) is
+ *     0.544 / 0.643 / 0.717 for EARLY / MID / LATE — worst case 0.717 against
+ *     a limit of 1, so the margin is real but smaller than the old number
+ *     implied. Pinned in `test/dsp/softClipper.test.js` so it cannot drift
+ *     again: a constant quoted in a comment with no test is how this one
+ *     survived two knee changes.
  *   - Odd symmetric — sign applied outside. No DC term, no DC blocker.
  *   - Never boosts: r >= 0 always, so |y| <= |x| everywhere.
  *

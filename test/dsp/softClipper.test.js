@@ -2236,3 +2236,36 @@ test('HF Loss is level-invariant and bypassed at zero', () => {
   }
   assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hfLoss, 0, 'the shipped default engages HF Loss')
 })
+
+test('the recorded transfer slopes are the real ones, and stay clear of folding', () => {
+  // ⚠ THE NUMBER THIS REPLACES WAS STALE. The kernel recorded "max d(r)/d(e) =
+  // 0.404 at the shipped values", which corresponded to no shipped
+  // configuration after the shapes were given their own knees — it survived
+  // two changes to KNEE_DB unnoticed because nothing checked it.
+  //
+  // Monotonicity is what stops the transfer curve folding back on itself, and
+  // a fold is the one failure in this stage that sounds like destruction
+  // rather than colour. The slope has to stay under 1; these are how much room
+  // is actually left.
+  const stated = { tanh2: 0.544, tanh3: 0.643, tanh4: 0.717 }
+  const h = 1e-6
+  for (const shape of SHAPES) {
+    const knee = SHAPE_KNEE_DB[shape]
+    const n = SHAPE_EXPONENT[shape]
+    const r = (e) => {
+      const t = Math.tanh(e / knee)
+      let v = MAX_REDUCTION_DB * t * t
+      if (n >= 3) v *= t
+      if (n >= 4) v *= t
+      return v
+    }
+    let maxSlope = 0
+    for (let e = h; e < 60; e += 1e-3) {
+      maxSlope = Math.max(maxSlope, (r(e + h) - r(e - h)) / (2 * h))
+    }
+    assert.ok(Math.abs(maxSlope - stated[shape]) < 0.002,
+      `${shape} max slope is ${maxSlope.toFixed(4)}, not the recorded ${stated[shape]}`)
+    assert.ok(maxSlope < 1,
+      `${shape} folds: max d(r)/d(e) = ${maxSlope.toFixed(4)}`)
+  }
+})
