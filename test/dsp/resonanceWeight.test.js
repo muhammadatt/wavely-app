@@ -18,6 +18,11 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { reactive } from 'vue'
+import {
+  RESONANCE_DEFAULTS,
+  toKernelParams as toResonanceKernelParams,
+} from '../../src/audio/resonanceParams.js'
 import {
   ResonanceKernel,
   processResonanceBuffer,
@@ -213,4 +218,37 @@ test('the curve follows the sample rate, not a fixed bin index', () => {
       `${sr} Hz: node landed at ${kernel.weightDb[bin].toFixed(2)} dB instead of 6`,
     )
   }
+})
+
+/**
+ * The param object crosses a structured clone twice — `postMessage` to the
+ * worklet on every knob move, and `processorOptions` on the offline render —
+ * and a Vue ref holding an array hands out a reactive Proxy, which
+ * structuredClone refuses. Passing the nodes straight through therefore threw
+ * DataCloneError on the FIRST param push, which took down the rest of the push
+ * with it: the meter loop never started, so the spectrum display and the DELTA
+ * monitor both stayed dark and the failure looked nothing like "a node was not
+ * copied". Asserted at the boundary that owns the constraint rather than
+ * through a live panel, which no test here can build.
+ */
+test('kernel params survive a structured clone when the nodes are reactive', () => {
+  const nodes = reactive([{ freqHz: 1000, gainDb: 6, octaves: 0.5, enabled: true }])
+  const kernelParams = toResonanceKernelParams({ ...RESONANCE_DEFAULTS, weightNodes: nodes })
+
+  assert.doesNotThrow(() => structuredClone(kernelParams))
+  const cloned = structuredClone(kernelParams)
+  assert.deepEqual(cloned.weightNodes, [
+    { freqHz: 1000, gainDb: 6, octaves: 0.5, enabled: true },
+  ])
+})
+
+test('an empty node set clones too, which is the case every panel starts in', () => {
+  // ref([]) is a proxy as much as a populated one is, so the default path is
+  // exactly as breakable — and it is the one every user hits.
+  const kernelParams = toResonanceKernelParams({
+    ...RESONANCE_DEFAULTS,
+    weightNodes: reactive([]),
+  })
+  assert.doesNotThrow(() => structuredClone(kernelParams))
+  assert.deepEqual(kernelParams.weightNodes, [])
 })

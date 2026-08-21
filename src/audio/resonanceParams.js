@@ -320,3 +320,59 @@ export function buildResonanceWeightCurve(nodes, binCount, binWidth) {
   curve[0] = curve[1]
   return curve
 }
+
+// Defaults are the acx_audiobook preset's resonanceSuppressor block
+// (src/audio/presets.js), which is the tuning these were chosen against.
+export const RESONANCE_DEFAULTS = {
+  depth: 0.67,
+  sharpness: 0.8,
+  selectivity: 8,
+  attack: 15, // ms
+  release: 80, // ms
+  maxReduction: 36, // dB
+  freqFloor: 40, // Hz
+  freqCeil: 20000, // Hz
+  mode: 'soft', // 'soft' | 'hard'
+  preserveHarmonics: true,
+  pitchRange: 'voice', // key of PITCH_RANGES
+  // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
+  refMode: 'cepstral',
+  // Sensitivity weighting nodes — see resonanceWeightDbAt above. Not filters.
+  weightNodes: [],
+  mix: 1, // 0 = dry, 1 = fully suppressed
+  trim: 0, // dB, wet path only
+}
+
+/** Map UI param names to kernel param names. */
+export function toKernelParams(params) {
+  const range = PITCH_RANGES[params.pitchRange] ?? PITCH_RANGES.voice
+  return {
+    depth: params.depth,
+    sharpness: params.sharpness,
+    selectivity: params.selectivity,
+    attackMs: params.attack,
+    releaseMs: params.release,
+    maxReductionDb: params.maxReduction,
+    freqFloorHz: params.freqFloor,
+    freqCeilHz: params.freqCeil,
+    mode: params.mode,
+    preserveHarmonics: params.preserveHarmonics,
+    pitchMinHz: range.minHz,
+    pitchMaxHz: range.maxHz,
+    refMode: params.refMode,
+    // Copied field by field, not passed through. Nodes arrive as Vue reactive
+    // proxies and this object crosses a structured clone — `postMessage` to the
+    // worklet, and `processorOptions` on the offline render — which throws
+    // DataCloneError on a proxy. It is not defensive tidiness: without it the
+    // param push throws, so the meter loop never starts and the display and the
+    // DELTA monitor both stay dark. Same reason manualEq copies its bands.
+    weightNodes: (params.weightNodes ?? []).map(n => ({
+      freqHz: n.freqHz,
+      gainDb: n.gainDb,
+      octaves: n.octaves,
+      enabled: n.enabled,
+    })),
+    mix: params.mix,
+    trimDb: params.trim,
+  }
+}
