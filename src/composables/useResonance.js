@@ -37,14 +37,16 @@ const resPreserveHarmonics = ref(DEFAULTS.preserveHarmonics)
 const resPitchRange = ref(DEFAULTS.pitchRange)
 const resMix = ref(DEFAULTS.mix)
 /**
- * Sensitivity weighting nodes — see resonanceParams.js. Not filters.
+ * Sensitivity zones — see DEFAULT_RESONANCE_ZONES. Not filters.
  *
  * An array rather than a scalar, so every write replaces it: the panel edits
  * these by emitting a new array, and the kernel is handed a fresh copy on each
- * change. Nothing mutates a node in place, which is what keeps the worklet's
+ * change. Nothing mutates a zone in place, which is what keeps the worklet's
  * copy and the panel's copy from diverging.
  */
-const resWeightNodes = ref(DEFAULTS.weightNodes ?? [])
+const resZones = ref(DEFAULTS.zones ?? [])
+/** Which zone the strip is editing. UI state, never sent to the kernel. */
+const resSelectedZone = ref(0)
 const resTrim = ref(DEFAULTS.trim)
 
 const resPreview = ref(false)
@@ -87,7 +89,7 @@ function currentParams() {
     maxReduction: resMaxReduction.value,
     mix: resMix.value,
     trim: resTrim.value,
-    weightNodes: resWeightNodes.value,
+    zones: resZones.value,
     refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
     freqFloor: resFreqFloor.value,
     freqCeil: resFreqCeil.value,
@@ -198,7 +200,7 @@ export function useResonance() {
   const syncMaxReduction = v => syncParam('maxReduction', resMaxReduction, v)
   const syncMix = v => syncParam('mix', resMix, v)
   const syncTrim = v => syncParam('trim', resTrim, v)
-  const syncWeightNodes = v => syncParam('weightNodes', resWeightNodes, v)
+  const syncZones = v => syncParam('zones', resZones, v)
   const syncFreqFloor = v => syncParam('freqFloor', resFreqFloor, v)
   const syncFreqCeil = v => syncParam('freqCeil', resFreqCeil, v)
   const syncMode = v => syncParam('mode', resMode, v)
@@ -270,7 +272,8 @@ export function useResonance() {
     resMaxReduction,
     resMix,
     resTrim,
-    resWeightNodes,
+    resZones,
+    resSelectedZone,
     resRefMode,
     resFreqFloor,
     resFreqCeil,
@@ -294,7 +297,7 @@ export function useResonance() {
     syncMaxReduction,
     syncMix,
     syncTrim,
-    syncWeightNodes,
+    syncZones,
     syncFreqFloor,
     syncFreqCeil,
     syncMode,

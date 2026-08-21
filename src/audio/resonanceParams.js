@@ -212,14 +212,16 @@ function readOverride(key) {
 }
 
 /**
- * Sensitivity weighting curve — EQ-style nodes that are NOT filters.
+ * SENSITIVITY ZONES — contiguous spans of the spectrum, each with its own
+ * settings. Not filters, and not bands in the EQ sense.
  *
- * A node does not boost or cut the audio. It offsets `selectivity` — the
- * threshold a bin must protrude above its reference to count as a resonance —
- * over a region of the spectrum. Positive gain LOWERS the threshold there, so
- * the effect is more willing to act; negative gain raises it. Soothe2 describes
- * the same idea as "an inverse EQ or a sidechain EQ": boosting a band makes it
- * more processed, not louder.
+ * A zone does not boost or cut. It changes how the DETECTOR behaves over a span
+ * of the spectrum: `sensitivityDb` offsets `selectivity` — the threshold a bin
+ * must protrude above its reference before it counts as a resonance — and
+ * `depth` scales how much of that protrusion is removed once it does. Positive
+ * sensitivity LOWERS the threshold, so the effect is more willing to act there;
+ * `enabled: false` takes the zone out of the effect entirely. Soothe2 describes
+ * the same idea as "an inverse EQ": making a band more processed, not louder.
  *
  * WHY A SCALAR SELECTIVITY IS STRUCTURALLY WRONG, measured rather than
  * asserted. The quantity it thresholds does not have a frequency-independent
@@ -237,88 +239,182 @@ function readOverride(key) {
  * configuration already rejected by ear. The headroom was real and only
  * reachable per-band.
  *
- * Gaussian in LOG frequency, summed across nodes, for the same reason the
- * spread kernel is: a region of the spectrum is a span in octaves, not in Hz.
+ * ZONES RATHER THAN THE GAUSSIAN NODES THIS REPLACES. The nodes were bumps at a
+ * centre frequency with a width in octaves, drawn as a dip in the threshold
+ * line. Two things were wrong with that in use. The handle rode the threshold
+ * curve, which moves with the audio, so a control the user was trying to aim
+ * bounced several times a second. And a Gaussian has no edges, so "which part
+ * of the spectrum is this setting for" had no answer you could read off the
+ * screen. A zone has a left edge, a right edge, and one value inside it — the
+ * boundary is a vertical line that does not move unless it is dragged, and the
+ * value is a horizontal segment on a fixed scale.
  *
- * Kept here rather than in the kernel so the panel can draw exactly the curve
- * the detector uses, the way the display grid is shared.
+ * Zones are ORDERED and CONTIGUOUS: `hiHz` is each zone's upper boundary, the
+ * next zone starts where this one ends, and the last zone's `hiHz` is ignored
+ * because it runs to the top of the processed band. There are therefore no gaps
+ * and no overlaps to reason about, which is the other half of what the nodes
+ * made hard — two overlapping Gaussians summed to something neither of them
+ * showed.
  */
-export const RESONANCE_WEIGHT_MAX_NODES = 4
-/** Range of a single node, in dB of threshold offset. */
-export const RESONANCE_WEIGHT_MAX_DB = 12
+export const RESONANCE_ZONE_MIN = 1
+export const RESONANCE_ZONE_MAX = 6
+/** Range of a zone's threshold offset, in dB. */
+export const RESONANCE_ZONE_SENS_MAX_DB = 12
+/** Closest two boundaries may sit, so a zone always has room to be read. */
+export const RESONANCE_ZONE_MIN_OCTAVES = 0.25
 /**
- * Ceiling on the SUM.
+ * Width of the crossfade at a boundary, in octaves, centred on the split.
  *
- * Nodes add, because two overlapping nodes both meaning "be more sensitive
- * here" should be more sensitive than either alone — anything else is
- * surprising to move. But an unbounded sum of four nodes could drive the
- * effective threshold far negative, and a negative threshold does not mean
- * "very sensitive", it means "treat everything including what sits BELOW the
- * reference", which is not a resonance by any definition. Bounded here, and
- * the effective threshold is floored at zero in the kernel as well.
+ * NOT COSMETIC. A hard step in the threshold means the bin just below a split
+ * and the bin just above it are judged by different rules, so a resonance
+ * sitting across the line is half treated — and as the pitch moves it slides
+ * between the two regimes, which is the same per-bin gain movement the whole
+ * effect is built to avoid. A sixth of an octave is about two semitones: wide
+ * enough that no single partial spans it, narrow enough that a zone edge still
+ * lands where the user put it.
  */
-export const RESONANCE_WEIGHT_SUM_LIMIT_DB = 24
-export const RESONANCE_WEIGHT_MIN_OCTAVES = 0.15
-export const RESONANCE_WEIGHT_MAX_OCTAVES = 3
+export const RESONANCE_ZONE_EDGE_OCTAVES = 1 / 6
+
 /**
- * NARROW BY DEFAULT, and that is measured rather than a taste.
+ * The starting zone set: four spans over the speech spectrum.
  *
- * On a narrator clip with an audible low-mid honk, treating it with one wide
- * node (1.0 octave at 450 Hz) against two narrow ones (0.3 octave at 356 and
- * 534, where the source spectrum actually peaks), both at +9 dB:
- *
- *                        mean cut   jitter      honk treated   per unit cut
- *     drive selectivity    -5.52   1.23/1.58        3.90          0.71
- *     one wide node        -4.83   1.13/1.49        4.17          0.86
- *     two narrow nodes     -3.93   1.01/1.36        4.64          1.18
- *
- * The two narrow nodes beat lowering selectivity globally on EVERY axis at
- * once - more treatment where it was wanted, less cutting overall, less gain
- * jitter - where the wide node only improved two of the three. A wide node is
- * most of the way back to being a second selectivity knob.
+ * Every zone is neutral — no offset, full depth, enabled — so a panel that has
+ * never touched this behaves exactly as a panel with no zones at all, and
+ * buildResonanceZoneCurves returns null for it. The boundaries are placed where
+ * the voice changes character rather than on round numbers: 180 Hz is above
+ * most narrators' fundamentals, 1.1 kHz is the bottom of the presence range,
+ * and 5 kHz is where sibilance starts to dominate.
  */
-export const RESONANCE_WEIGHT_DEFAULT_OCTAVES = 0.3
+export const DEFAULT_RESONANCE_ZONES = [
+  { id: 'z1', hiHz: 180, sensitivityDb: 0, depth: 1, enabled: true },
+  { id: 'z2', hiHz: 1100, sensitivityDb: 0, depth: 1, enabled: true },
+  { id: 'z3', hiHz: 5000, sensitivityDb: 0, depth: 1, enabled: true },
+  { id: 'z4', hiHz: 20000, sensitivityDb: 0, depth: 1, enabled: true },
+]
 
 function clampNum(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
 
-/** Threshold offset the node set applies at one frequency, in dB. */
-export function resonanceWeightDbAt(nodes, freqHz) {
-  if (!nodes || nodes.length === 0 || !(freqHz > 0)) return 0
-  let acc = 0
-  for (const node of nodes) {
-    if (!node || !(node.freqHz > 0) || !node.gainDb) continue
-    if (node.enabled === false) continue
-    const octaves = clampNum(
-      node.octaves ?? RESONANCE_WEIGHT_DEFAULT_OCTAVES,
-      RESONANCE_WEIGHT_MIN_OCTAVES,
-      RESONANCE_WEIGHT_MAX_OCTAVES,
-    )
-    const x = Math.log2(freqHz / node.freqHz) / octaves
-    acc += clampNum(node.gainDb, -RESONANCE_WEIGHT_MAX_DB, RESONANCE_WEIGHT_MAX_DB)
-      * Math.exp(-0.5 * x * x)
+/** A zone's settings, normalised and clamped. */
+export function zoneSettings(zone) {
+  if (!zone) return { sensitivityDb: 0, depth: 1, enabled: true }
+  const enabled = zone.enabled !== false
+  return {
+    enabled,
+    sensitivityDb: enabled
+      ? clampNum(zone.sensitivityDb ?? 0, -RESONANCE_ZONE_SENS_MAX_DB, RESONANCE_ZONE_SENS_MAX_DB)
+      : 0,
+    // A disabled zone is depth zero, not a special case downstream. It reaches
+    // the kernel as "remove none of what you find here", which is what bypass
+    // means for a suppressor and needs no second mechanism.
+    depth: enabled ? clampNum(zone.depth ?? 1, 0, 1) : 0,
   }
-  return clampNum(acc, -RESONANCE_WEIGHT_SUM_LIMIT_DB, RESONANCE_WEIGHT_SUM_LIMIT_DB)
 }
 
 /**
- * Expand a node set onto an FFT bin grid, or null when it would be flat.
+ * The span each zone covers, given the processed band.
  *
- * Null rather than a zero-filled array so the detector can skip the lookup
- * entirely on the overwhelmingly common empty case, and so a file processed
- * with no nodes is bit-identical to one processed before this existed.
+ * The band limits are their own parameters and move independently, so a zone's
+ * edges are only meaningful clamped to them — a split dragged to 8 kHz while
+ * the ceiling sits at 6 kHz describes a zone with no width.
  */
-export function buildResonanceWeightCurve(nodes, binCount, binWidth) {
-  if (!nodes || nodes.length === 0) return null
-  const live = nodes.filter(n => n && n.enabled !== false && n.gainDb && n.freqHz > 0)
-  if (live.length === 0) return null
-  const curve = new Float64Array(binCount)
-  // Bin 0 is DC; evaluating log2(0) there would be -Infinity. It carries no
-  // audible content and the detector's band limits exclude it in practice.
-  for (let k = 1; k < binCount; k++) curve[k] = resonanceWeightDbAt(live, k * binWidth)
-  curve[0] = curve[1]
-  return curve
+export function zoneBounds(zones, floorHz = 20, ceilHz = 20000) {
+  const out = []
+  let lo = floorHz
+  for (let i = 0; i < zones.length; i++) {
+    const last = i === zones.length - 1
+    const hi = last ? ceilHz : clampNum(zones[i].hiHz, floorHz, ceilHz)
+    out.push({ loHz: lo, hiHz: Math.max(lo, hi) })
+    lo = Math.max(lo, hi)
+  }
+  return out
+}
+
+/**
+ * Settings in force at one frequency, blended across boundaries.
+ *
+ * Linear in log frequency across RESONANCE_ZONE_EDGE_OCTAVES, which is enough:
+ * the quantity being blended is a threshold in dB, and a kink in it is not
+ * something any downstream stage differentiates.
+ */
+export function zoneSettingsAt(zones, freqHz, floorHz = 20, ceilHz = 20000) {
+  if (!zones || zones.length === 0) return { sensitivityDb: 0, depth: 1 }
+  const bounds = zoneBounds(zones, floorHz, ceilHz)
+  const half = RESONANCE_ZONE_EDGE_OCTAVES / 2
+  let index = bounds.length - 1
+  for (let i = 0; i < bounds.length; i++) {
+    if (freqHz <= bounds[i].hiHz) { index = i; break }
+  }
+  const here = zoneSettings(zones[index])
+  if (freqHz <= 0) return here
+
+  // Which boundary, if any, this frequency is inside the crossfade of.
+  const edgeBelow = index > 0 ? bounds[index - 1].hiHz : null
+  const edgeAbove = index < bounds.length - 1 ? bounds[index].hiHz : null
+  let other = null
+  let t = 1
+  if (edgeBelow && Math.abs(Math.log2(freqHz / edgeBelow)) < half) {
+    other = zoneSettings(zones[index - 1])
+    t = 0.5 + Math.log2(freqHz / edgeBelow) / RESONANCE_ZONE_EDGE_OCTAVES
+  } else if (edgeAbove && Math.abs(Math.log2(freqHz / edgeAbove)) < half) {
+    other = zoneSettings(zones[index + 1])
+    t = 0.5 - Math.log2(freqHz / edgeAbove) / RESONANCE_ZONE_EDGE_OCTAVES
+  }
+  if (!other) return here
+  const mix = clampNum(t, 0, 1)
+  return {
+    sensitivityDb: here.sensitivityDb * mix + other.sensitivityDb * (1 - mix),
+    depth: here.depth * mix + other.depth * (1 - mix),
+  }
+}
+
+/**
+ * Expand a zone set onto an FFT bin grid, or null when it would change nothing.
+ *
+ * Null rather than neutral arrays so the detector can skip two lookups per bin
+ * on the overwhelmingly common untouched case, and so a file processed on the
+ * default zones is bit-identical to one processed before zones existed.
+ */
+export function buildResonanceZoneCurves(zones, binCount, binWidth, floorHz, ceilHz) {
+  if (!zones || zones.length === 0) return null
+  const neutral = zones.every((z) => {
+    const s = zoneSettings(z)
+    return s.sensitivityDb === 0 && s.depth === 1
+  })
+  if (neutral) return null
+  const weightDb = new Float64Array(binCount)
+  const depthScale = new Float64Array(binCount)
+  // Bin 0 is DC; log2(0) is -Infinity. It carries no audible content and the
+  // detector's band limits exclude it in practice.
+  for (let k = 1; k < binCount; k++) {
+    const at = zoneSettingsAt(zones, k * binWidth, floorHz, ceilHz)
+    weightDb[k] = at.sensitivityDb
+    depthScale[k] = at.depth
+  }
+  weightDb[0] = weightDb[1]
+  depthScale[0] = depthScale[1]
+  return { weightDb, depthScale }
+}
+
+/**
+ * Copy a zone set into plain objects.
+ *
+ * The panel holds these in a Vue ref, which hands out a reactive Proxy, and
+ * this object crosses a structured clone on its way to the worklet. Passing the
+ * proxy through throws DataCloneError, and that throw lands on the first param
+ * push — so the meter loop never starts and the display and DELTA monitor both
+ * stay dark, with nothing on screen about zones. Learned the hard way; see the
+ * note on toKernelParams.
+ */
+export function copyZones(zones) {
+  return (zones ?? []).map(z => ({
+    id: z.id,
+    hiHz: z.hiHz,
+    sensitivityDb: z.sensitivityDb,
+    depth: z.depth,
+    enabled: z.enabled,
+  }))
 }
 
 // Defaults are the acx_audiobook preset's resonanceSuppressor block
@@ -337,8 +433,8 @@ export const RESONANCE_DEFAULTS = {
   pitchRange: 'voice', // key of PITCH_RANGES
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
   refMode: 'cepstral',
-  // Sensitivity weighting nodes — see resonanceWeightDbAt above. Not filters.
-  weightNodes: [],
+  // Sensitivity zones — see DEFAULT_RESONANCE_ZONES above. Not filters.
+  zones: DEFAULT_RESONANCE_ZONES,
   mix: 1, // 0 = dry, 1 = fully suppressed
   trim: 0, // dB, wet path only
 }
@@ -360,18 +456,13 @@ export function toKernelParams(params) {
     pitchMinHz: range.minHz,
     pitchMaxHz: range.maxHz,
     refMode: params.refMode,
-    // Copied field by field, not passed through. Nodes arrive as Vue reactive
+    // Copied field by field, not passed through. Zones arrive as Vue reactive
     // proxies and this object crosses a structured clone — `postMessage` to the
     // worklet, and `processorOptions` on the offline render — which throws
     // DataCloneError on a proxy. It is not defensive tidiness: without it the
     // param push throws, so the meter loop never starts and the display and the
     // DELTA monitor both stay dark. Same reason manualEq copies its bands.
-    weightNodes: (params.weightNodes ?? []).map(n => ({
-      freqHz: n.freqHz,
-      gainDb: n.gainDb,
-      octaves: n.octaves,
-      enabled: n.enabled,
-    })),
+    zones: copyZones(params.zones),
     mix: params.mix,
     trimDb: params.trim,
   }

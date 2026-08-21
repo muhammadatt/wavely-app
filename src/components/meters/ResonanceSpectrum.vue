@@ -1,16 +1,21 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { resonanceWeightDbAt } from '../../audio/resonanceParams.js'
 import {
-  addNode,
-  dragNode,
+  RESONANCE_ZONE_SENS_MAX_DB,
+  zoneBounds,
+  zoneSettings,
+  zoneSettingsAt,
+} from '../../audio/resonanceParams.js'
+import {
+  boundaryAt,
   hzFromX,
-  nodeAt,
-  nodeOctaves,
-  nudgeNode,
-  removeNode,
+  moveBoundary,
+  removeBoundary,
+  setSensitivity,
+  splitZone,
   xFromHz,
-} from './resonanceNodes.js'
+  zoneIndexAt,
+} from './resonanceZoneEdit.js'
 import {
   createHeldAverage,
   createReadoutThrottle,
@@ -81,15 +86,16 @@ const props = defineProps({
    */
   delta: { type: Boolean, default: false },
   /**
-   * Sensitivity weighting nodes, edited in place on this plot.
+   * Sensitivity zones, edited in place on this plot.
    *
-   * They are not filters and they are not drawn as filters: a node moves the
-   * DETECTION THRESHOLD over a span of the spectrum, so the thing it changes is
-   * already on this plot as the dashed line. Editing them anywhere else would
-   * mean drawing the threshold here and its controls somewhere else, which is
-   * the arrangement this display was built to replace.
+   * A zone is a span of the spectrum with its own detection threshold offset
+   * and its own share of Depth. They are drawn and edited here because the
+   * thing they change — the threshold — is already on this plot, and because a
+   * span of the spectrum is a horizontal extent, which is what this axis is.
    */
-  weightNodes: { type: Array, default: () => [] },
+  zones: { type: Array, default: () => [] },
+  /** Which zone the strip below is editing. Selection is owned by the panel. */
+  selectedZone: { type: Number, default: -1 },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -98,7 +104,7 @@ const props = defineProps({
   title: { type: String, default: 'Spectral reduction' },
 })
 
-const emit = defineEmits(['update:weightNodes'])
+const emit = defineEmits(['update:zones', 'update:selectedZone'])
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
@@ -122,9 +128,21 @@ const MIN_SCALE_GAP_PX = 11
 /** Below this fraction of the scale the peak hold has nothing to say. */
 const PEAK_VISIBLE = 0.025
 
-const grH = computed(() =>
-  Math.round(Math.max(34, (props.height - LANE_GAP - AXIS_H) * GR_SHARE)))
-const specTop = computed(() => grH.value + LANE_GAP)
+/**
+ * Depth of the zone lane.
+ *
+ * Fixed rather than a share, because what it holds is a fixed-range scale
+ * (±RESONANCE_ZONE_SENS_MAX_DB) rather than a signal: giving it more pixels on
+ * a tall window would only stretch a staircase, where the spectrum genuinely
+ * has more to show. Its whole purpose is a place to put an editable value that
+ * does NOT move with the audio — see drawZones.
+ */
+const ZONE_H = 38
+
+const grH = computed(() => Math.round(Math.max(
+  34, (props.height - LANE_GAP * 2 - AXIS_H - ZONE_H) * GR_SHARE)))
+const zoneTop = computed(() => grH.value + LANE_GAP)
+const specTop = computed(() => zoneTop.value + ZONE_H + LANE_GAP)
 const specH = computed(() => Math.max(40, props.height - specTop.value - AXIS_H))
 
 /**
@@ -299,7 +317,7 @@ function draw(dtMs) {
     drawSpectrum(ctx, w, frame, alpha)
     drawReduction(ctx, w, frame, alpha)
   }
-  drawWeightNodes(ctx, w, xFor, frame)
+  drawZones(ctx, w)
 
   drawOutOfBand(ctx, w, xFor, minHz, maxHz)
   drawGrScale(ctx, w)
@@ -311,10 +329,12 @@ function draw(dtMs) {
 function drawPlates(ctx, w) {
   ctx.fillStyle = 'rgba(0,0,0,.42)'
   ctx.fillRect(0, 0, w, grH.value)
+  ctx.fillRect(0, zoneTop.value, w, ZONE_H)
   ctx.fillRect(0, specTop.value, w, specH.value)
 
   ctx.fillStyle = 'rgba(255,255,255,.07)'
   ctx.fillRect(0, grH.value + (LANE_GAP - 1) / 2, w, 1)
+  ctx.fillRect(0, zoneTop.value + ZONE_H + (LANE_GAP - 1) / 2, w, 1)
 }
 
 function drawGrid(ctx, w, xFor, minHz, maxHz) {
@@ -447,24 +467,27 @@ function drawSpectrum(ctx, w, frame, alpha) {
 
   // Threshold: dashed, because it is a decision boundary rather than a signal.
   //
-  // TWO OF THEM ONCE A SENSITIVITY NODE EXISTS, and the pair is the whole
-  // explanation of the feature. The dim line is the flat threshold Selectivity
-  // asks for; the bright one is what the detector will actually use after the
-  // nodes offset it, floored at zero the way the kernel floors it. The gap
-  // between them is the node — its depth AND its width, drawn at the place the
-  // decision is made rather than as a separate curve needing to be related back
-  // to this one. With no nodes the two coincide and only one is drawn, so a
-  // panel that has never touched this looks exactly as it did.
+  // TWO OF THEM ONCE A ZONE IS OFF NEUTRAL. The dim line is the flat threshold
+  // Selectivity asks for; the bright one is what the detector will actually
+  // use once the zones have offset it, floored at zero the way the kernel
+  // floors it, and stepped at the boundaries with the same crossfade the
+  // kernel applies. The gap between them is what the zones are doing, drawn at
+  // the place the decision is made. On neutral zones the two coincide and only
+  // one is drawn, so a panel that has never touched this looks as it did.
+  //
+  // This is a READOUT, not the editor. It has to be, because it rides
+  // `reference[]` and therefore moves with the audio several times a second —
+  // which is exactly why the editable copy of the same numbers lives in the
+  // zone lane on a fixed scale.
   const spanOct = Math.log2(frame.maxHz / frame.minHz)
   const hzAt = d => frame.minHz * Math.pow(2, (d / (bins - 1)) * spanOct)
-  const nodes = liveNodes.value
-  const thresholdAt = d => nodes.length
-    ? Math.max(0, props.selectivityDb - resonanceWeightDbAt(nodes, hzAt(d)))
+  const shaped = zonesShapeThreshold.value
+  const thresholdAt = d => shaped
+    ? Math.max(0, props.selectivityDb
+        - zoneSettingsAt(props.zones, hzAt(d), props.freqFloorHz, props.freqCeilHz).sensitivityDb)
     : props.selectivityDb
 
-  if (nodes.length) {
-    // Shaded between the two, so the region a node reaches over is legible at a
-    // glance and not only where the line happens to be steep.
+  if (shaped) {
     ctx.beginPath()
     for (let d = 0; d < bins; d++) {
       const y = yFor(reference[d] + props.selectivityDb)
@@ -474,11 +497,6 @@ function drawSpectrum(ctx, w, frame, alpha) {
       ctx.lineTo(d * xStep, yFor(reference[d] + thresholdAt(d)))
     }
     ctx.closePath()
-    // Accent-tinted rather than grey, and not faint. The band is only as tall
-    // as the offset it represents — 6 dB out of a 90 dB window is about five
-    // pixels — so at low contrast a working node reads as a rendering seam.
-    // Exaggerating the height would be a plot that lies about magnitude; making
-    // five honest pixels legible is not.
     ctx.fillStyle = tint(props.accent, 0.3)
     ctx.fill()
 
@@ -534,11 +552,13 @@ function drawOutOfBand(ctx, w, xFor, minHz, maxHz) {
     if (x1 <= x0) return
     ctx.fillStyle = wash
     ctx.fillRect(x0, 0, x1 - x0, grH.value)
+    ctx.fillRect(x0, zoneTop.value, x1 - x0, ZONE_H)
     ctx.fillRect(x0, specTop.value, x1 - x0, bottom - specTop.value)
   }
   const rule = (x) => {
     ctx.fillStyle = edge
     ctx.fillRect(Math.round(x) + 0.5, 0, 1, grH.value)
+    ctx.fillRect(Math.round(x) + 0.5, zoneTop.value, 1, ZONE_H)
     ctx.fillRect(Math.round(x) + 0.5, specTop.value, 1, bottom - specTop.value)
   }
 
@@ -677,195 +697,216 @@ function updatePeaks(frame, dtMs) {
   updateCursorText(frame)
 }
 
-// ── Sensitivity nodes ───────────────────────────────────────────────────────
+// ── Sensitivity zones ───────────────────────────────────────────────────────
 
 /**
- * EQ-style nodes that are not filters, edited directly on the plot.
+ * The zone lane: a fixed scale, and that is the entire reason it exists.
  *
- * A node offsets Selectivity — the threshold a bin must protrude above the
- * reference before it is treated — over a span of the spectrum. Positive is
- * MORE sensitive, because that is the direction the effect moves in: pushing a
- * node up makes the suppressor more willing to act there. It reads backwards as
- * a gain (up means quieter output) and correctly as what it is (up means more
- * treatment), and soothe2 names the same inversion when it calls its own
- * version "an inverse EQ".
+ * The first version of this feature put the editable handle on the threshold
+ * curve in the spectrum lane, on the argument that a control should sit where
+ * the thing it changes is drawn. In use that was wrong in a way no static
+ * screenshot shows: the threshold is `reference + offset`, the reference is
+ * measured from the audio, and the audio arrives at ~46 frames a second — so
+ * the handle bounced several times a second and could not be aimed. A control
+ * cannot live on a moving curve.
  *
- * WHY HERE AND NOT IN A CONTROL STRIP. The quantity a node changes is the
- * dashed line on this plot, and the reason to place one is a peak in the curve
- * underneath it. A node editor anywhere else would mean reading a frequency off
- * this display and typing it into another control, which is the round trip the
- * display was built to remove.
+ * So the editable copy lives here instead, on a scale that depends on nothing
+ * but the parameter: zero across the middle, ±RESONANCE_ZONE_SENS_MAX_DB at the
+ * edges. A zone's sensitivity is a horizontal segment at a fixed height, and it
+ * moves when and only when it is dragged. The threshold curve downstairs still
+ * bends — that is the readout, and it is allowed to move, because nobody has to
+ * hit it.
  */
 
-/** Which node the keyboard and the readout are talking about, or null. */
-const selectedId = ref(null)
-/** Live drag, or null. Held outside reactivity — it changes on pointer events. */
+/** Live drag, or null. Outside reactivity — it changes on pointer events. */
 let drag = null
-/** Set while dragging, so the cursor can say so. */
 const dragging = ref(false)
 
-/** Nodes that would actually change a threshold. Drawing keys off this. */
-const liveNodes = computed(() => props.weightNodes.filter(
-  n => n && n.enabled !== false && n.gainDb && n.freqHz > 0,
-))
+/** True when the zones would change the detector at all. */
+const zonesShapeThreshold = computed(() => props.zones.some(
+  z => zoneSettings(z).sensitivityDb !== 0))
 
-let nextNodeId = 1
+const zonesActive = computed(() => props.zones.some((z) => {
+  const s = zoneSettings(z)
+  return s.sensitivityDb !== 0 || s.depth !== 1
+}))
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
 
-/**
- * Where a node's handle sits: on the threshold curve it is bending.
- *
- * The curve moves with the audio, so the handle bobs — which is why nodeAt()
- * hit-tests on frequency alone.
- */
-function nodeY(node) {
-  const frame = lastFrame
-  const top = specTop.value
-  const height = specH.value
-  if (!frame) return top + height * 0.5
-  const { reference, bins, minHz, maxHz } = frame
-  const t = Math.log2(clamp(node.freqHz, minHz, maxHz) / minHz) / Math.log2(maxHz / minHz)
-  const d = clamp(Math.round(t * (bins - 1)), 0, bins - 1)
-  const offset = Math.max(0, props.selectivityDb - resonanceWeightDbAt(liveNodes.value, node.freqHz))
-  const db = reference[d] + offset
-  const f = clamp((db - SPEC_DB_MIN) / (SPEC_DB_MAX - SPEC_DB_MIN), 0, 1)
-  return top + height - f * height
+const bounds = computed(() =>
+  zoneBounds(props.zones, props.freqFloorHz, props.freqCeilHz))
+
+/** Sensitivity in dB → y in the zone lane. Fixed: no audio in this mapping. */
+function sensY(db) {
+  const t = clamp(db / RESONANCE_ZONE_SENS_MAX_DB, -1, 1)
+  return zoneTop.value + ZONE_H / 2 - (t * (ZONE_H / 2 - 3))
 }
 
-function drawWeightNodes(ctx, w, xFor, frame) {
-  if (props.weightNodes.length === 0) return
-  const top = specTop.value
-  const bottom = top + specH.value
+function sensFromY(y) {
+  const t = (zoneTop.value + ZONE_H / 2 - y) / (ZONE_H / 2 - 3)
+  return clamp(t, -1, 1) * RESONANCE_ZONE_SENS_MAX_DB
+}
+
+function drawZones(ctx, w) {
+  if (props.zones.length === 0) return
+  const top = zoneTop.value
+  const mid = top + ZONE_H / 2
 
   ctx.save()
   ctx.beginPath()
-  ctx.rect(0, top, w, specH.value)
+  ctx.rect(0, top, w, ZONE_H)
   ctx.clip()
 
-  for (const node of props.weightNodes) {
-    const x = xFromHz(node.freqHz, axis)
-    const y = nodeY(node)
-    const selected = node.id === selectedId.value
-    const off = node.enabled === false || !node.gainDb
-    const colour = off
-      ? 'rgba(255,255,255,.28)'
-      : node.gainDb > 0 ? props.accent : '#ffb27a'
+  // Zero datum. A staircase with no baseline reads as an arbitrary set of
+  // heights rather than as offsets from neutral.
+  ctx.fillStyle = 'rgba(255,255,255,.13)'
+  ctx.fillRect(0, Math.round(mid) + 0.5, w, 1)
 
-    // Stem to the floor of the lane. A handle on a moving curve is hard to
-    // find when it is up against a loud partial; the stem is at the node's
-    // frequency whatever the curve is doing, and it is what the eye follows
-    // down to the peak the node was placed for.
-    ctx.beginPath()
-    ctx.moveTo(Math.round(x) + 0.5, y)
-    ctx.lineTo(Math.round(x) + 0.5, bottom)
-    ctx.setLineDash([1, 3])
-    ctx.lineWidth = 1
-    ctx.strokeStyle = off ? 'rgba(255,255,255,.14)' : tint(props.accent, 0.3)
-    ctx.stroke()
-    ctx.setLineDash([])
+  props.zones.forEach((zone, i) => {
+    const { loHz, hiHz } = bounds.value[i]
+    const x0 = xFromHz(loHz, axis)
+    const x1 = xFromHz(hiHz, axis)
+    if (x1 - x0 < 0.5) return
+    const settings = zoneSettings(zone)
+    const selected = i === props.selectedZone
+    const y = sensY(settings.sensitivityDb)
 
-    // Width whisker: the node's sigma either side, in octaves. Drawn because
-    // width is otherwise only readable off the shaded region, which vanishes
-    // wherever the two thresholds meet the floor.
-    const oct = nodeOctaves(node)
-    const x0 = xFromHz(node.freqHz * Math.pow(2, -oct), axis)
-    const x1 = xFromHz(node.freqHz * Math.pow(2, oct), axis)
+    // A disabled zone is drawn as a hatched span rather than as a flat one at
+    // zero. Zero sensitivity and "not processed at all" are different states
+    // and a flat segment would show them identically.
+    if (!settings.enabled) {
+      ctx.fillStyle = 'rgba(255,255,255,.05)'
+      ctx.fillRect(x0, top, x1 - x0, ZONE_H)
+      // Clip FIRST. beginPath() resets the current path, so building the
+      // hatch and then clipping threw the hatch away and drew nothing — a
+      // disabled zone came out as a plain grey block, which is what a zone at
+      // sensitivity zero looks like too.
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(x0, top, x1 - x0, ZONE_H)
+      ctx.clip()
+      ctx.strokeStyle = 'rgba(255,255,255,.16)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      for (let x = x0 - ZONE_H; x < x1; x += 6) {
+        ctx.moveTo(x, top + ZONE_H)
+        ctx.lineTo(x + ZONE_H, top)
+      }
+      ctx.stroke()
+      ctx.restore()
+    } else {
+      // Fill from the datum to the value: the area IS the offset, so a zone
+      // asking for more sensitivity reads as more of something.
+      ctx.fillStyle = tint(props.accent, selected ? 0.34 : 0.2)
+      ctx.fillRect(x0, Math.min(mid, y), x1 - x0, Math.abs(y - mid))
+      // Depth as a bar along the floor of the lane. Two numbers per zone and
+      // only one vertical axis, so the second one gets its own datum rather
+      // than a second scale nobody would read.
+      const dw = (x1 - x0) * settings.depth
+      ctx.fillStyle = tint(props.accent, selected ? 0.5 : 0.3)
+      ctx.fillRect(x0, top + ZONE_H - 2, dw, 2)
+    }
+
     ctx.beginPath()
     ctx.moveTo(x0, y)
     ctx.lineTo(x1, y)
-    ctx.lineWidth = selected ? 1.5 : 1
-    ctx.strokeStyle = off ? 'rgba(255,255,255,.18)' : tint(props.accent, selected ? 0.55 : 0.34)
+    ctx.lineWidth = selected ? 2 : 1.4
+    ctx.strokeStyle = settings.enabled
+      ? tint(props.accent, selected ? 1 : 0.7)
+      : 'rgba(255,255,255,.22)'
     ctx.stroke()
-    for (const cap of [x0, x1]) {
-      ctx.beginPath()
-      ctx.moveTo(Math.round(cap) + 0.5, y - 3)
-      ctx.lineTo(Math.round(cap) + 0.5, y + 3)
-      ctx.stroke()
-    }
 
     if (selected) {
-      ctx.beginPath()
-      ctx.arc(x, y, 8, 0, Math.PI * 2)
-      ctx.fillStyle = tint(props.accent, 0.16)
-      ctx.fill()
+      ctx.fillStyle = tint(props.accent, 0.09)
+      ctx.fillRect(x0, top, x1 - x0, ZONE_H)
     }
-    // Small, because it sits on top of the band it created and the band is
-    // only a few pixels tall — a generous handle would hide the thing it is
-    // there to adjust. The grab radius is unaffected: nodeAt() works in
-    // frequency, so the target is wider than the dot.
-    ctx.beginPath()
-    ctx.arc(x, y, selected ? 4 : 3.2, 0, Math.PI * 2)
-    ctx.fillStyle = colour
-    ctx.fill()
-    ctx.lineWidth = 1
-    ctx.strokeStyle = 'rgba(0,0,0,.55)'
-    ctx.stroke()
+  })
+
+  // Boundaries, through every lane so a zone reads as a column of the display
+  // rather than as a mark in one strip of it.
+  const bottom = specTop.value + specH.value
+  for (let i = 0; i < props.zones.length - 1; i++) {
+    const x = Math.round(xFromHz(props.zones[i].hiHz, axis)) + 0.5
+    ctx.fillStyle = drag?.boundary === i
+      ? tint(props.accent, 0.9)
+      : 'rgba(255,255,255,.34)'
+    ctx.fillRect(x, 0, 1, grH.value)
+    ctx.fillRect(x, top, 1, ZONE_H)
+    ctx.fillStyle = drag?.boundary === i
+      ? tint(props.accent, 0.55)
+      : 'rgba(255,255,255,.16)'
+    ctx.fillRect(x, specTop.value, 1, bottom - specTop.value)
+    // Grip: the only thing that says a line is draggable.
+    ctx.fillStyle = drag?.boundary === i ? props.accent : 'rgba(255,255,255,.42)'
+    ctx.fillRect(x - 1.5, top + 2, 4, 5)
+    ctx.fillRect(x - 1.5, top + ZONE_H - 7, 4, 5)
   }
 
   ctx.restore()
 }
 
-// ── Node editing ────────────────────────────────────────────────────────────
+// ── Zone editing ────────────────────────────────────────────────────────────
 //
-// Every edit replaces the array. The kernel is handed a new copy on each
-// change and nothing mutates a node in place — see resWeightNodes.
+// Every edit replaces the array; nothing mutates a zone in place. The kernel is
+// handed a fresh copy on each change — see copyZones.
 
-function commit(nodes) {
-  if (nodes !== props.weightNodes) emit('update:weightNodes', nodes)
+function commit(zones) {
+  if (zones !== props.zones) emit('update:zones', zones)
 }
 
-function addNodeAt(freqHz) {
-  const id = `w${nextNodeId++}`
-  const next = addNode(props.weightNodes, freqHz, axis, id)
-  if (next === props.weightNodes) return
-  commit(next)
-  selectedId.value = id
+function select(index) {
+  if (index !== props.selectedZone) emit('update:selectedZone', index)
 }
 
-function dropNode(id) {
-  commit(removeNode(props.weightNodes, id))
-  if (selectedId.value === id) selectedId.value = null
-}
-
-function nudge(id, step) {
-  commit(nudgeNode(props.weightNodes, id, step, axis))
-}
+let nextZoneId = 1
 
 function onDown(e) {
   if (e.button !== 0) return
   const rect = canvasEl.value?.getBoundingClientRect()
   if (!rect) return
   const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
   canvasEl.value?.focus({ preventScroll: true })
-  const node = nodeAt(props.weightNodes, x, axis)
-  if (!node) {
-    selectedId.value = null
+
+  const boundary = boundaryAt(props.zones, x, axis)
+  if (boundary >= 0) {
+    drag = { boundary }
+    dragging.value = true
+    canvasEl.value?.setPointerCapture?.(e.pointerId)
+    e.preventDefault()
     return
   }
-  selectedId.value = node.id
-  drag = {
-    id: node.id,
-    // Shift picks width rather than frequency. Width is the one property with
-    // no natural direction on this axis, and the alternative was a third drag
-    // target on a handle that is 8 px across.
-    width: e.shiftKey,
-    x,
-    y: e.clientY,
-    freqHz: node.freqHz,
-    gainDb: node.gainDb,
-    octaves: nodeOctaves(node),
+
+  const index = zoneIndexAt(props.zones, x, axis, props.freqFloorHz, props.freqCeilHz)
+  select(index)
+  // A vertical drag anywhere in the zone lane sets that zone's sensitivity.
+  // ABSOLUTE, not relative: the scale is fixed, so the value under the pointer
+  // is unambiguous and grabbing a thin segment exactly is not required.
+  //
+  // ARMED HERE, COMMITTED ON THE FIRST MOVE. Committing on the press instead
+  // was measurably wrong: a double-click to split a zone is two presses, so it
+  // slammed that zone's sensitivity to wherever the pointer happened to be
+  // before splitting it — a gesture that means "divide this" silently rewrote
+  // the value being divided. A press with no movement is now a selection and
+  // nothing else.
+  if (y >= zoneTop.value && y <= zoneTop.value + ZONE_H) {
+    drag = { zone: index }
+    dragging.value = true
+    canvasEl.value?.setPointerCapture?.(e.pointerId)
+    e.preventDefault()
   }
-  dragging.value = true
-  canvasEl.value?.setPointerCapture?.(e.pointerId)
-  e.preventDefault()
 }
 
-function onDrag(e, x) {
+function onDrag(e, x, y) {
   if (!drag) return
-  commit(dragNode(props.weightNodes, drag, x - drag.x, e.clientY - drag.y, axis))
+  if (drag.boundary !== undefined) {
+    commit(moveBoundary(
+      props.zones, drag.boundary, hzFromX(x, axis), props.freqFloorHz, props.freqCeilHz))
+    return
+  }
+  commit(setSensitivity(props.zones, drag.zone, sensFromY(y)))
 }
 
 function onUp(e) {
@@ -879,78 +920,82 @@ function onDblClick(e) {
   const rect = canvasEl.value?.getBoundingClientRect()
   if (!rect) return
   const x = e.clientX - rect.left
-  const node = nodeAt(props.weightNodes, x, axis)
-  if (node) dropNode(node.id)
-  else addNodeAt(hzFromX(x, axis))
+  const boundary = boundaryAt(props.zones, x, axis)
+  if (boundary >= 0) {
+    commit(removeBoundary(props.zones, boundary))
+    select(Math.min(props.selectedZone, props.zones.length - 2))
+  } else {
+    const next = splitZone(
+      props.zones, hzFromX(x, axis), axis, `z${Date.now()}${nextZoneId++}`,
+      props.freqFloorHz, props.freqCeilHz)
+    commit(next)
+  }
   e.preventDefault()
 }
 
-function onWheel(e) {
-  const rect = canvasEl.value?.getBoundingClientRect()
-  if (!rect) return
-  const node = nodeAt(props.weightNodes, e.clientX - rect.left, axis)
-  if (!node) return
-  selectedId.value = node.id
-  nudge(node.id, { widthFactor: Math.exp(-e.deltaY * 0.0012) })
-}
-
 /**
- * Keyboard equivalents for everything the pointer can do.
+ * Keyboard equivalents for everything the pointer can do here.
  *
- * Not a nicety. Putting the only editor for a parameter inside a canvas makes
- * it unreachable without a mouse, and the rest of this panel is knobs and
- * switches that are not — so this would be the one control in it that some
- * people simply could not use.
+ * Not a nicety. The rest of this panel is knobs and switches that a keyboard
+ * can reach; putting the zone editor inside a canvas with no key handling would
+ * make it the one control in the plugin some people could not use at all.
  */
 function onKeyDown(e) {
-  const nodes = props.weightNodes
-  if (e.key === 'n' || e.key === 'N') {
-    addNodeAt(hzFromX(axis.w * 0.5, axis))
-    e.preventDefault()
-    return
-  }
-  if (nodes.length === 0) return
-  if (selectedId.value === null) {
-    selectedId.value = nodes[0].id
-    e.preventDefault()
-    return
-  }
-  // Coarse by default and finer with Shift, the opposite of the usual pairing:
-  // a node is placed by eye off the curve underneath it, so the first thing
-  // anyone does with the arrows is travel, and the trim comes after.
-  const step = e.shiftKey ? 1 : 4
+  const n = props.zones.length
+  if (n === 0) return
+  const i = props.selectedZone
+  const shift = e.shiftKey
   switch (e.key) {
-    case 'ArrowLeft': nudge(selectedId.value, { octaves: -0.02 * step }); break
-    case 'ArrowRight': nudge(selectedId.value, { octaves: 0.02 * step }); break
-    case 'ArrowUp': nudge(selectedId.value, { db: 0.5 * step }); break
-    case 'ArrowDown': nudge(selectedId.value, { db: -0.5 * step }); break
-    case '[': nudge(selectedId.value, { widthFactor: 1 / 1.12 }); break
-    case ']': nudge(selectedId.value, { widthFactor: 1.12 }); break
+    case 'ArrowLeft':
+      if (shift) {
+        // Shift moves the boundary BELOW the selected zone, which is the one
+        // the arrow points at. Boundary i-1 is `zones[i-1].hiHz`.
+        commit(moveBoundary(props.zones, i - 1,
+          (props.zones[i - 1]?.hiHz ?? 0) * Math.pow(2, -1 / 12),
+          props.freqFloorHz, props.freqCeilHz))
+      } else select(Math.max(0, i - 1))
+      break
+    case 'ArrowRight':
+      if (shift) {
+        commit(moveBoundary(props.zones, i,
+          (props.zones[i]?.hiHz ?? 0) * Math.pow(2, 1 / 12),
+          props.freqFloorHz, props.freqCeilHz))
+      } else select(Math.min(n - 1, i < 0 ? 0 : i + 1))
+      break
+    case 'ArrowUp':
+    case 'ArrowDown': {
+      if (i < 0) { select(0); break }
+      const step = (e.key === 'ArrowUp' ? 1 : -1) * (shift ? 0.5 : 2)
+      commit(setSensitivity(props.zones, i, (props.zones[i].sensitivityDb ?? 0) + step))
+      break
+    }
+    case 'Enter':
+      commit(splitZone(props.zones, hzFromX(axis.w * 0.5, axis), axis,
+        `z${Date.now()}${nextZoneId++}`, props.freqFloorHz, props.freqCeilHz))
+      break
     case 'Delete':
-    case 'Backspace': dropNode(selectedId.value); break
+    case 'Backspace':
+      if (i >= 0) {
+        commit(removeBoundary(props.zones, i < n - 1 ? i : i - 1))
+        select(Math.min(i, props.zones.length - 2))
+      }
+      break
     default: return
   }
   e.preventDefault()
 }
 
-/**
- * What to say when this line has nothing else to say.
- *
- * The nodes live inside a canvas, so there is no control anywhere to suggest
- * they exist — a tooltip only helps someone who already suspects. This borrows
- * the idle state of a line that is otherwise blank, costs no height in a panel
- * that has none to give, and stops the moment the first node is placed.
- */
-const idleHint = computed(() =>
-  props.weightNodes.length ? '' : 'DBL-CLICK: SENSITIVITY NODE')
-
-/** The selected or dragging node, in words. Shares the line with the cursor. */
-const nodeText = computed(() => {
-  const node = props.weightNodes.find(n => n.id === selectedId.value)
-  if (!node) return ''
-  const oct = nodeOctaves(node)
-  const sign = node.gainDb > 0 ? '+' : ''
-  return `SENS ${formatHz(node.freqHz)} · ${sign}${node.gainDb.toFixed(1)} dB · ${oct.toFixed(2)} oct`
+/** The selected zone, in words. Shares the readout line with the cursor. */
+const zoneText = computed(() => {
+  const i = props.selectedZone
+  const zone = props.zones[i]
+  if (!zone) return ''
+  const { loHz, hiHz } = bounds.value[i]
+  const s = zoneSettings(zone)
+  const sign = s.sensitivityDb > 0 ? '+' : ''
+  return s.enabled
+    ? `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)} · SENS ${sign}${s.sensitivityDb.toFixed(1)} · DEPTH ${Math.round(s.depth * 100)}%`
+    : `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)} · OFF`
 })
 
 // ── Pointer readout ─────────────────────────────────────────────────────────
@@ -973,7 +1018,7 @@ function onMove(e) {
   if (!rect) return
   const x = e.clientX - rect.left
   cursorX.value = x
-  onDrag(e, x)
+  onDrag(e, x, e.clientY - rect.top)
 }
 
 function onLeave() {
@@ -1015,13 +1060,18 @@ const plotSummary = computed(() => {
     : 'No reduction.'
   const band = `Processing ${formatHz(props.freqFloorHz)} to ${formatHz(props.freqCeilHz)}.`
   const mode = props.delta ? ' Monitoring the removed signal only.' : ''
-  const nodes = props.weightNodes.length
-    ? ` ${props.weightNodes.length} sensitivity node${props.weightNodes.length > 1 ? 's' : ''}: `
-      + props.weightNodes.map(n =>
-        `${formatHz(n.freqHz)} ${n.gainDb > 0 ? '+' : ''}${n.gainDb.toFixed(1)} decibels`).join(', ')
-      + '.'
+  const zones = props.zones.length
+    ? ` ${props.zones.length} sensitivity zones: ` + props.zones.map((z, i) => {
+      const { loHz, hiHz } = bounds.value[i]
+      const s = zoneSettings(z)
+      return s.enabled
+        ? `${formatHz(loHz)} to ${formatHz(hiHz)}, sensitivity `
+          + `${s.sensitivityDb > 0 ? 'plus ' : ''}${s.sensitivityDb.toFixed(1)} decibels, `
+          + `depth ${Math.round(s.depth * 100)} percent`
+        : `${formatHz(loHz)} to ${formatHz(hiHz)}, off`
+    }).join('; ') + '.'
     : ''
-  return `${props.title}. ${cut} ${band}${mode}${nodes} ${NODE_HINT}`
+  return `${props.title}. ${cut} ${band}${mode}${zones} ${ZONE_HINT}`
 })
 
 /**
@@ -1033,9 +1083,22 @@ const plotSummary = computed(() => {
  * user hovering and a screen-reader user landing on it deserve the same
  * instruction rather than two that have to be kept in step.
  */
-const NODE_HINT = 'Double-click to place a sensitivity node, again to remove it. '
-  + 'Drag to move, shift-drag or scroll for width. '
-  + 'Keyboard: n adds, arrows move, [ and ] set width, Delete removes.'
+const ZONE_HINT = 'Drag in the zone lane to set a zone\u2019s sensitivity, or drag a '
+  + 'boundary line to move it. Double-click to split a zone, or double-click a '
+  + 'boundary to merge. Keyboard: left and right select, up and down set '
+  + 'sensitivity, shift with left and right moves the boundary, Enter splits, '
+  + 'Delete merges.'
+
+/**
+ * What to say when the readout line has nothing else to say.
+ *
+ * The zones are edited inside a canvas, so nothing else on the panel announces
+ * that dragging one does anything. This borrows the idle state of a line that
+ * would otherwise be blank, costs no height, and stops as soon as a zone is
+ * moved off neutral.
+ */
+const idleHint = computed(() =>
+  zonesActive.value ? '' : 'DRAG A ZONE BAR \u00b7 DBL-CLICK TO SPLIT')
 
 </script>
 
@@ -1088,17 +1151,18 @@ const NODE_HINT = 'Double-click to place a sensitivity node, again to remove it.
         <span class="flex items-center gap-[4px]">
           <span :style="{ width: '10px', height: '2px', background: accent }"></span>OUTPUT
         </span>
-        <!-- Only once there is one. With no nodes the two thresholds coincide
-             and there is nothing on the plot for this word to point at. -->
+        <!-- Only once a zone is off neutral. Until then the two thresholds
+             coincide and there is nothing on the plot for this word to point
+             at. -->
         <span
-          v-if="weightNodes.length"
+          v-if="zonesActive"
           class="flex items-center gap-[4px]"
           :style="{ color: `color-mix(in srgb, ${accent} 50%, rgba(255,255,255,.5))` }"
         >
           <span :style="{
             width: '10px', height: '2px',
             background: `color-mix(in srgb, ${accent} 60%, transparent)`,
-          }"></span>SENSITIVITY x{{ weightNodes.length }}
+          }"></span>ZONES
         </span>
       </span>
 
@@ -1109,7 +1173,7 @@ const NODE_HINT = 'Double-click to place a sensitivity node, again to remove it.
         class="flex-1 text-right truncate"
         style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em"
         :style="{ color: cursorText ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)' }"
-      >{{ nodeText || cursorText || hotspotText || idleHint }}</span>
+      >{{ zoneText || cursorText || hotspotText || idleHint }}</span>
     </div>
 
     <div
@@ -1130,7 +1194,7 @@ const NODE_HINT = 'Double-click to place a sensitivity node, again to remove it.
         tabindex="0"
         role="group"
         :aria-label="plotSummary"
-        :title="NODE_HINT"
+        :title="ZONE_HINT"
         :style="{ height: `${height}px`, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'crosshair' }"
         @pointerdown="onDown"
         @pointermove="onMove"

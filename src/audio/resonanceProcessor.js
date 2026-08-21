@@ -110,7 +110,7 @@ import { getFFT } from './dsp/fft.js'
 import {
   RESONANCE_DISPLAY_BINS,
   RESONANCE_DISPLAY_CURVES,
-  buildResonanceWeightCurve,
+  buildResonanceZoneCurves,
   resonanceDisplayRange,
 } from './resonanceParams.js'
 
@@ -465,7 +465,7 @@ export const RESONANCE_KERNEL_DEFAULTS = {
    * See the note in resonanceParams.js. Empty by default, and an empty set is
    * bit-identical to the behaviour before this existed.
    */
-  weightNodes: [],
+  zones: null,
   // Wet/dry blend and wet-path makeup. Both live inside the kernel's per-bin
   // gain rather than as nodes around it — see _mixGain.
   mix: 1,
@@ -646,9 +646,19 @@ export class ResonanceKernel {
      */
     this.preserveHarmonics = !!p.preserveHarmonics
 
-    // Sensitivity weighting. Rebuilt on any param change rather than diffed:
-    // it is a few thousand exp() on a knob move, and never on the audio path.
-    this.weightDb = buildResonanceWeightCurve(p.weightNodes, this.binCount, this.binWidth)
+    // Sensitivity zones. Rebuilt on any param change rather than diffed: it is
+    // a few thousand lookups on a knob move, and never on the audio path.
+    // Null when every zone is neutral, so the untouched case costs the detector
+    // nothing and stays bit-identical to a build without zones.
+    //
+    // Built AFTER the band limits below would be the natural reading, but the
+    // curves only need the limits to place their edges, and freqFloorHz /
+    // freqCeilHz are computed a few lines down from the same `p`. Read from `p`
+    // here for that reason rather than from `this`.
+    const zoneCurves = buildResonanceZoneCurves(
+      p.zones, this.binCount, this.binWidth, p.freqFloorHz, p.freqCeilHz)
+    this.weightDb = zoneCurves?.weightDb ?? null
+    this.zoneDepth = zoneCurves?.depthScale ?? null
     this.refOct = PEAK_REF_OCT_COARSE
       * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, clamp(p.sharpness, 0, 1))
 
@@ -1057,6 +1067,7 @@ export class ResonanceKernel {
     const {
       magDb, envDb, reduction, spread, prevGr, gain, activeBins, binCount,
       selectivity, depth, maxReductionDb, softKnee, kneeWidth, weightDb,
+      zoneDepth,
     } = this
 
     for (let k = 0; k < binCount; k++) {
@@ -1197,6 +1208,23 @@ export class ResonanceKernel {
       for (let k = 0; k < binCount; k++) {
         reduction[k] = (mask && mask[k]) || !activeBins[k] ? 0 : spread[k]
       }
+    }
+
+    // ZONE DEPTH, AFTER THE SPREAD. It scales the global Depth rather than
+    // replacing it, so the Depth knob still means what it says everywhere and a
+    // zone says how much OF it applies here; a disabled zone arrives as zero
+    // and falls out through the same multiply, needing no second mechanism.
+    //
+    // After rather than before, and that is measured. The spread kernel reaches
+    // 96 bins either side, so applying depth first lets a neighbouring zone's
+    // reduction smear straight through a boundary: a bypassed zone still lost
+    // 0.68 dB at a tone 1.6 octaves clear of the edge, which is not what OFF
+    // can be allowed to mean. Applying it here scales whatever reduction ends
+    // up at each bin, which is the reading the control has anyway, and the edge
+    // stays soft because the crossfade lives in the curve rather than in the
+    // ordering.
+    if (zoneDepth) {
+      for (let k = 0; k < binCount; k++) reduction[k] *= zoneDepth[k]
     }
 
     // Silent frames target zero, so the IIR decays through silence rather than

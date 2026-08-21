@@ -13,6 +13,7 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import DeviceRangeSlider from '../knobs/DeviceRangeSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
+import ResonanceZoneStrip from '../meters/ResonanceZoneStrip.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
@@ -21,11 +22,11 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resMix, resTrim, resWeightNodes, resRefMode,
+  resPitchRange, resMix, resTrim, resZones, resSelectedZone, resRefMode,
   resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncDepth, syncSharpness, syncSelectivity, syncAttack,
-  syncRelease, syncMaxReduction, syncMix, syncTrim, syncWeightNodes,
+  syncRelease, syncMaxReduction, syncMix, syncTrim, syncZones,
   syncFreqFloor, syncFreqCeil,
   syncMode, syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
@@ -45,7 +46,13 @@ const ACCENT = '#8de0a8'
  * spends them; the meters, the knobs and the range fader stay exactly the
  * size they were designed at.
  */
-const PLOT_H = 140
+/**
+ * THE DISPLAY IS THE PANEL, and 140 px was the number a cramped layout could
+ * spare rather than the number it needs. Three curves, a reduction lane and now
+ * a zone lane were sharing the height of two rows of knobs. The knobs below it
+ * moved onto one row to pay for this — see the note there.
+ */
+const PLOT_H = 208
 const heightDelta = ref(0)
 const plotHeight = computed(() => PLOT_H + heightDelta.value)
 
@@ -240,55 +247,67 @@ async function applyAndClose() {
         :freq-ceil-hz="resFreqCeil"
         :height="plotHeight"
         :delta="resDelta"
-        :weight-nodes="resWeightNodes"
-        @update:weight-nodes="syncWeightNodes"
+        :zones="resZones"
+        :selected-zone="resSelectedZone"
+        @update:zones="syncZones"
+        @update:selected-zone="resSelectedZone = $event"
       />
 
-      <div class="flex items-center justify-between gap-[18px] mt-[16px]">
-        <LevelMeter :levels="resInputLevels" label="IN" :height="104" />
+      <!-- The zone strip belongs directly under the plot because the two are
+           one control split by what they edit: the plot owns where a zone IS
+           (boundaries are horizontal extents and the axis is horizontal), this
+           owns what it DOES. Selection lights both, so the cell and the span
+           read as the same object. -->
+      <div class="mt-[10px]">
+        <ResonanceZoneStrip
+          :zones="resZones"
+          :selected="resSelectedZone"
+          :freq-floor-hz="resFreqFloor"
+          :freq-ceil-hz="resFreqCeil"
+          :accent="ACCENT"
+          :disabled="!resPreview"
+          @update:zones="syncZones"
+          @update:selected="resSelectedZone = $event"
+        />
+      </div>
 
-        <div class="flex-1 flex justify-center gap-[28px]">
-          <div class="w-[104px]">
+      <!-- ONE ROW OF KNOBS, and it used to be two.
+           Everything here is a global setting — what counts as a resonance,
+           how fast the detector moves, how much of the result reaches the
+           file. They were split across two rows with the level meters beside
+           the first, which cost a divider, a set of labels and about 120 px
+           for no grouping the labels do not already carry. That height went to
+           the display, which is the thing in this panel with something to say.
+           The meters shrank with it: they read peak and average, and neither
+           needs 104 px to be legible. -->
+      <div class="flex items-center justify-between gap-[14px] mt-[14px]">
+        <LevelMeter :levels="resInputLevels" label="IN" :height="92" />
+
+        <div class="flex-1 flex justify-center gap-[11px]">
+          <div class="w-[62px]">
             <Knob
               :model-value="resDepth" @update:model-value="syncDepth"
-              :min="0" :max="1" :step="0.01"
+              :min="0" :max="1" :step="0.01" :value-font-px="13"
               label="Depth" :accent="ACCENT" :format-value="percent"
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[104px]">
+          <div class="w-[62px]">
             <Knob
               :model-value="resSelectivity" @update:model-value="syncSelectivity"
-              :min="3" :max="24" :step="0.5"
+              :min="3" :max="24" :step="0.5" :value-font-px="13"
               label="Selectivity" :accent="ACCENT" :format-value="oneDp"
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[104px]">
+          <div class="w-[62px]">
             <Knob
               :model-value="resSharpness" @update:model-value="syncSharpness"
-              :min="0" :max="1" :step="0.01"
+              :min="0" :max="1" :step="0.01" :value-font-px="13"
               label="Sharpness" :accent="ACCENT" :format-value="percent"
               :disabled="!resPreview"
             />
           </div>
-        </div>
-
-        <LevelMeter :levels="resOutputLevels" label="OUT" :height="104" />
-      </div>
-
-      <!-- Timing + ceiling -->
-      <div class="flex items-center justify-between mt-[14px] pt-[13px]"
-           style="border-top:1px solid rgba(255,255,255,.06)">
-        <SegmentedSwitch
-          :model-value="resMode"
-          @update:model-value="syncMode"
-          :options="MODE_OPTIONS"
-          :accent="ACCENT"
-          :disabled="!resPreview"
-          :caption="modeCaption"
-        />
-
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
              setting below it is the same instantaneous jump — the bottom of
@@ -315,7 +334,6 @@ async function applyAndClose() {
              phrase. Pause bleed FALLS at matched cut, -2.47 to -1.19 dB,
              because the higher selectivity more than pays for the longer
              tail. -->
-        <div class="flex gap-[16px]">
           <div class="w-[62px]">
             <Knob
               :model-value="resAttack" @update:model-value="syncAttack"
@@ -341,8 +359,8 @@ async function applyAndClose() {
             />
           </div>
           <!-- Mix and Trim end the row because they are the output stage: the
-               three knobs to their left decide what gets cut, these two decide
-               how much of that cut reaches the file and at what level. -->
+               knobs to their left decide what gets cut, these two decide how
+               much of that cut reaches the file and at what level. -->
           <div class="w-[62px]">
             <Knob
               :model-value="resMix" @update:model-value="syncMix"
@@ -360,6 +378,8 @@ async function applyAndClose() {
             />
           </div>
         </div>
+
+        <LevelMeter :levels="resOutputLevels" label="OUT" :height="92" />
       </div>
 
       <!-- Range + harmonic protection.
@@ -368,9 +388,21 @@ async function applyAndClose() {
            button over a switch over a caption was the tallest thing here that
            was not a control. Everything in it is now on the baseline the range
            fader sets. -->
-      <div class="flex items-end gap-[20px] mt-[14px] pt-[13px]"
+      <div class="flex items-end gap-[14px] mt-[14px] pt-[13px]"
            style="border-top:1px solid rgba(255,255,255,.06)">
-        <div class="flex-1">
+        <!-- The knee switch lost its own row when the knobs merged and lands
+             here, beside the other two settings that decide how the DETECTOR
+             behaves rather than how much it does. -->
+        <SegmentedSwitch
+          class="shrink-0"
+          :model-value="resMode"
+          @update:model-value="syncMode"
+          :options="MODE_OPTIONS"
+          :accent="ACCENT"
+          :disabled="!resPreview"
+          :caption="modeCaption"
+        />
+        <div class="flex-1 min-w-[110px]">
           <DeviceRangeSlider
             :low="resFreqFloor" :high="resFreqCeil"
             @update:low="syncFreqFloor" @update:high="syncFreqCeil"
