@@ -49,17 +49,110 @@ test('parabolic interpolation is applied', () => {
   assert.ok(Math.abs(f0 - nearestIntegerLagF0) > 1e-6, 'interpolation had no effect')
 })
 
+test('THE INTERPOLATED PITCH STAYS INSIDE THE RANGE IT SEARCHED', () => {
+  // Parabolic interpolation locates a peak lying BETWEEN three samples, so an
+  // offset beyond half a sample is not an interpolation, it is a runaway. The
+  // reference implementation leaves it unbounded, and measured on 46 s of real
+  // narration inside a 70-400 Hz search that produced estimates up to 5664 Hz
+  // and two negative ones — values that feed the harmonic mask's comb spacing
+  // and the cepstral lifter's ceiling directly.
+  //
+  // Half a sample at the edge of the lag window can still round a hair outside
+  // the range, so the bound here is the range plus one lag step rather than the
+  // range exactly.
+  const SR = 44100
+  const N = 2048
+  for (const [lo, hi] of [[70, 400], [40, 1200]]) {
+    const tracker = new F0Tracker({ sampleRate: SR, frameSize: N, defaultF0: null })
+    tracker.setRange(lo, hi)
+    // The exact reachable extremes: the lag window's ends, each moved by the
+    // half-sample the interpolation is now allowed. Quantising a frequency
+    // range to integer lags is what makes these wider than [lo, hi].
+    const hiBound = SR / (Math.floor(SR / hi) - 0.5)
+    const loBound = SR / (Math.floor(SR / lo) + 0.5)
+    for (let seed = 0; seed < 40; seed++) {
+      // Deterministic noise and near-periodic junk: the shapes that make the
+      // correlation flat, which is where the denominator goes to zero.
+      const frame = new Float32Array(N)
+      for (let i = 0; i < N; i++) {
+        frame[i] = Math.sin(i * (0.31 + seed * 0.017)) * 0.4
+          + Math.sin(i * 0.0007 * (seed + 1)) * 0.3
+          + (((i * (seed + 7)) % 97) / 97 - 0.5) * 0.2
+      }
+      const { f0, pitched } = tracker.estimate(frame)
+      if (!pitched) continue
+      assert.ok(f0 > 0, `seed ${seed}: reported a non-positive pitch ${f0}`)
+      assert.ok(f0 >= loBound - 1e-6 && f0 <= hiBound + 1e-6,
+        `seed ${seed}: ${f0.toFixed(1)} Hz is outside the ${lo}-${hi} search `
+        + `(reachable ${loBound.toFixed(1)}-${hiBound.toFixed(1)})`)
+    }
+  }
+})
+
+test('a peak pinned to the edge of the window is trusted only if it is a real peak', () => {
+  // A source outside the search range leaves its correlation peak outside it
+  // too, so the largest value INSIDE the window sits on the boundary and is not
+  // a maximum of anything. Reporting it is how mains hum gets a confident,
+  // rock-steady, wrong pitch — which is exactly what defeated humDetect's
+  // concentration veto once the interpolation above stopped scattering it.
+  //
+  // But a source sitting legitimately AT the limit also pins to the edge, and a
+  // tracker that cannot report its own maximum is broken. The discriminator is
+  // whether the neighbours either side are lower: the correlation is computed
+  // at every lag and only the search is bounded, so they are available.
+  const SR = 44100
+  const N = 2048
+  const harmonic = (f0) => {
+    const x = new Float32Array(N)
+    for (let i = 0; i < N; i++) {
+      let v = 0
+      for (let h = 1; h <= 8; h++) v += Math.sin((2 * Math.PI * f0 * h * i) / SR) / h
+      x[i] = 0.2 * v
+    }
+    return x
+  }
+  const at = (f0, lo, hi) => {
+    const t = new F0Tracker({ sampleRate: SR, frameSize: N, defaultF0: null })
+    t.setRange(lo, hi)
+    return t.estimate(harmonic(f0))
+  }
+  // 60 Hz hum, searched for a voice: its period is outside the window entirely.
+  assert.equal(at(60, 70, 400).pitched, false, '60 Hz hum should not read as a voice')
+  // A source at the top of the range is a real peak and must still be found.
+  const top = at(400, 70, 400)
+  assert.equal(top.pitched, true, 'a source at the range limit must still be found')
+  assert.ok(Math.abs(top.f0 - 400) < 5, `expected ~400 Hz, got ${top.f0}`)
+  // And ordinary in-range material is untouched by either guard.
+  const mid = at(150, 70, 400)
+  assert.equal(mid.pitched, true)
+  assert.ok(Math.abs(mid.f0 - 150) < 2, `expected ~150 Hz, got ${mid.f0}`)
+})
+
 test('matches the Python reference implementation', () => {
   // Golden values captured from server/scripts/estimate_f0_contour.py's
   // _autocorr_f0_batch run over identical frames. Cross-checked over 29 cases:
   // worst deviation 1.2e-9 Hz, zero voiced/unvoiced disagreements.
   //
-  // Some of these are not "correct" pitches — saw65 and saw440 fall outside
-  // [F0_MIN_HZ, F0_MAX_HZ] and land on octave artefacts. They are pinned
-  // deliberately: the contract is fidelity to the reference, quirks included,
-  // so a future optimisation cannot quietly change behaviour.
+  // Some of these are not "correct" pitches — saw440 falls above F0_MAX_HZ and
+  // lands on an octave artefact. That one is pinned deliberately: it is a real
+  // property of autocorrelation pitch tracking, and the contract is fidelity to
+  // the reference so a future optimisation cannot quietly change behaviour.
+  //
+  // SAW65 IS THE ONE PLACE THIS DELIBERATELY DIVERGES FROM THE PYTHON, and it
+  // is a defect there rather than a quirk worth keeping. 65 Hz is below the
+  // 70 Hz search floor, so its correlation peak pins to the longest lag in the
+  // window; the reference then runs an unbounded parabolic interpolation off
+  // that pinned peak and reports 113.82 Hz with confidence. Measured on 46 s of
+  // real narration the same runaway produced estimates up to 5664 Hz and two
+  // NEGATIVE ones inside a 70–400 Hz search — values that go straight into the
+  // harmonic mask's comb spacing. Bounding the offset to half a sample and
+  // rejecting peaks pinned to the window edge makes this case report what is
+  // true: no pitch in the range asked for.
+  //
+  // `server/scripts/estimate_f0_contour.py` still has the original and needs
+  // this ported.
   const golden = [
-    ['saw65', 65, 113.820707],
+    ['saw65', 65, null],
     ['saw80', 80, 80.012255],
     ['saw97.3', 97.3, 97.32528],
     ['saw118.7', 118.7, 118.661028],
@@ -71,8 +164,12 @@ test('matches the Python reference implementation', () => {
   ]
   for (const [label, inputHz, expected] of golden) {
     const { f0 } = makeTracker().estimate(sawFrame(inputHz))
+    if (expected === null) {
+      assert.equal(f0, null, `${label}: expected no pitch, got ${f0}`)
+      continue
+    }
     assert.ok(
-      Math.abs(f0 - expected) < 1e-6,
+      f0 !== null && Math.abs(f0 - expected) < 1e-6,
       `${label}: expected ${expected}, got ${f0}`,
     )
   }

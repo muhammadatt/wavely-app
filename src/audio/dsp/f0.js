@@ -217,7 +217,38 @@ export class F0Tracker {
     }
 
     const ratio = corr0 > 0 ? peak / corr0 : 0
-    const confident = peakLag > 0 && peak > this.minRatio * corr0 && energyGate
+    /**
+     * A PEAK PINNED AT THE EDGE OF THE SEARCH WINDOW IS NOT A MEASUREMENT.
+     *
+     * The search runs over [lagMin, lagMax), so a peak sitting on either
+     * boundary is the largest value in the window rather than a maximum of the
+     * correlation — the real peak is very likely outside the range that was
+     * asked for. Reporting it anyway is how a periodic source outside the range
+     * gets a confident, stable, wrong pitch.
+     *
+     * Found through humDetect: pure 60 Hz hum has a period of 735 samples,
+     * outside the voice range's lag window entirely, and the tracker pinned
+     * every frame at the short-lag end and reported a rock-steady 402.7 Hz.
+     * That defeated humDetect's concentration veto, whose whole job is to
+     * distinguish an autocorrelation lock on mains hum from a real voice. It
+     * had been passing only because the unbounded parabolic interpolation
+     * scattered those pinned frames into incoherence — a check passing for the
+     * wrong reason, which stops passing the moment the reason is fixed.
+     *
+     * A BOUNDARY PEAK IS TRUSTED IFF IT IS A GENUINE LOCAL MAXIMUM. Rejecting
+     * every edge peak was tried first and is wrong in the obvious way: a source
+     * sitting exactly at the top of the range — a 400 Hz saw in a 70–400 search
+     * — also pins at the edge, and a tracker that cannot report its own limit
+     * is broken. The correlation is computed at every lag and only the SEARCH
+     * is bounded, so the neighbours either side are available whether or not
+     * they are in range: a real peak has both of them lower, and a peak that is
+     * merely the largest value in a truncated window does not.
+     */
+    const edge = peakLag === this.lagMin || peakLag === this.lagMax - 1
+    const localMax = peakLag > 0 && peakLag < this.corrSize - 1
+      && corr[peakLag - 1] < peak && corr[peakLag + 1] < peak
+    const confident = peakLag > 0 && (!edge || localMax)
+      && peak > this.minRatio * corr0 && energyGate
     if (!confident) {
       this._sinceConfident++
       if (
@@ -231,7 +262,28 @@ export class F0Tracker {
       return { f0: null, pitched: false, ratio, held: false }
     }
 
-    // Parabolic interpolation around the peak, guarded exactly as the Python is.
+    // Parabolic interpolation around the peak.
+    //
+    // THE OFFSET IS CLAMPED TO HALF A SAMPLE, and leaving it unbounded — as the
+    // Python this was ported from does — is a defect with visible consequences.
+    // The parabola through three samples only locates a peak that lies between
+    // them; when the correlation is flat or slightly concave the denominator
+    // approaches zero and the offset runs away, so `peakLag + delta` can land
+    // near zero or go negative. Measured on 46 s of narration at the shipping
+    // VOICE range: 4.3% of pitched frames reported an F0 OUTSIDE the range they
+    // had been asked to search, the highest at 5664 Hz and two of them
+    // negative; on the WIDE range, 6.8%, with 60 negatives and a peak of
+    // 23881 Hz. Those estimates set the harmonic mask's comb spacing and the
+    // cepstral lifter's ceiling, so a frame with a nonsense F0 puts the mask on
+    // the wrong bins entirely.
+    //
+    // AND NOTHING MORE. Clamping the RESULT into the range as well was tried
+    // and is actively harmful: it turns a nonsense estimate into a plausible
+    // one sitting exactly on the limit, so a run of garbage reads as a tight,
+    // coherent contour. humDetect's concentration veto — which exists to stop
+    // an autocorrelation lock onto mains hum being mistaken for a voice —
+    // stopped firing, because every frame agreed on 399 Hz. Bounding the offset
+    // is the fix; bounding the answer only hides what is left.
     let f0 = this.sampleRate / peakLag
     if (peakLag > 0 && peakLag < n - 1) {
       const y0 = corr[peakLag - 1]
@@ -239,7 +291,8 @@ export class F0Tracker {
       const y2 = corr[peakLag + 1]
       const denom = y0 - 2 * y1 + y2
       if (denom !== 0) {
-        const delta = (0.5 * (y0 - y2)) / denom
+        const raw = (0.5 * (y0 - y2)) / denom
+        const delta = raw > 0.5 ? 0.5 : raw < -0.5 ? -0.5 : raw
         f0 = this.sampleRate / (peakLag + delta)
       }
     }
