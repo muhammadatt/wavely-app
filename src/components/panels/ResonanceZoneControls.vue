@@ -13,7 +13,6 @@ import {
 } from '../meters/resonanceZoneEdit.js'
 import DeviceField from '../knobs/DeviceField.vue'
 import Knob from '../knobs/Knob.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 
 /**
  * One set of controls, showing whichever zone is selected.
@@ -34,19 +33,15 @@ const props = defineProps({
   /** Index of the soloed zone, or -1. Monitoring state, not a parameter. */
   solo: { type: Number, default: -1 },
   /**
-   * The pitch range the protection mask looks for. GLOBAL — one tracker, one
-   * signal, one pitch, however many zones read the answer — but it lives in
-   * this component because it is half of one decision with the per-zone
-   * protection toggle, and the two were a room apart on the faceplate.
+   * The pitch range the protection mask searches, for the caption. Fixed rather
+   * than chosen — see HARMONIC_PITCH_RANGE.
    */
-  pitchRange: { type: String, default: 'voice' },
-  pitchRangeOptions: { type: Array, default: () => [] },
   pitchRangeCaption: { type: String, default: '' },
   accent: { type: String, default: '#8de0a8' },
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:zones', 'update:selected', 'solo', 'update:pitchRange'])
+const emit = defineEmits(['update:zones', 'update:selected', 'solo'])
 
 /**
  * The harmonics decision hides behind a door, and swaps places with the zone's
@@ -114,7 +109,6 @@ const span = computed(() => {
  * looking at, minus folds it into its neighbour, the same two edits the plot's
  * double-click makes.
  */
-const anyProtect = computed(() => props.zones.some(z => zoneSettings(z).protect))
 /** Any zone running unmasked. Tints the closed door, so the state is visible
  *  without opening it — the one thing a hidden control must not cost. */
 const anyUnprotected = computed(() => props.zones.some(z => !zoneSettings(z).protect))
@@ -253,12 +247,13 @@ const db = v => `${Math.round(v)}`
 
 
                   <button
-          class="shrink-0 px-2 py-[6px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
-          style="width:186px"
+          class="w-full px-2 py-[6px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
           :style="{
             background: settings.protect ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
             border: `1px solid ${settings.protect ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
           }"
+          :aria-pressed="String(settings.protect)"
+          :aria-label="`Zone ${index + 1} harmonic protection`"
           title="Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material."
           @click="emit('update:zones', toggleZoneProtect(zones, index))"
         >
@@ -267,35 +262,27 @@ const db = v => `${Math.round(v)}`
             :style="{
               font: `700 8.5px 'JetBrains Mono',monospace`,
               letterSpacing: '.12em',
-              color: resPreserveHarmonics ? '#8de0a8' : '#ffb27a',
+              color: settings.protect ? '#8de0a8' : '#ffb27a',
             }"
           >{{ settings.protect ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
+          <!-- THE RANGE IS A STATEMENT NOW, NOT A CHOICE, and printing it here
+               is what keeps that visible. It used to be a VOICE/WIDE switch on
+               this row; the mask is a comb built from one tracked F0, so it is
+               a voice feature whatever the rest of the effect is pointed at,
+               and WIDE was measurably worse on the only material the mask is
+               for. A zone whose content is not a voice switches this off rather
+               than retuning it. See HARMONIC_PITCH_RANGE. -->
           <span
             class="block mt-[2px]"
-            style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
+            style="font:500 8.5px/1.35 'Inter'"
+            :style="{ color: settings.protect
+              ? 'rgba(255,255,255,.35)' : 'rgba(255,178,122,.75)' }"
           >{{ settings.protect
-            ? 'Preserves harmonic frequencies.'
-            : 'Full suppression enabled.' }}</span>
+            ? `Preserves voice harmonics${pitchRangeCaption ? ` (${pitchRangeCaption})` : ''}.`
+            : 'Full suppression — may thin harmonics.' }}</span>
         </button>
 
-          <!-- Global, and sitting here anyway: it is what the mask hunts for,
-               so it is unreadable apart from the switch that turns the mask on.
-               Inert when no zone protects, because then it steers nothing. -->
-               <span style="font:500 8.5px/1.25 'Inter';color: rgba(255,255,255,.42)"> PROTECTION RANGE:</span>
-          <SegmentedSwitch
-            :padding-x="7"
-            :model-value="pitchRange"
-            @update:model-value="emit('update:pitchRange', $event)"
-            :options="pitchRangeOptions"
-            :accent="accent"
-            :disabled="disabled || !anyProtect"
-          />
         </div>
-
-        <div
-          class="mt-[4px]"
-          style="font:500 8.5px/1.25 'Inter';color: rgba(255,255,255,.42)"
-        >{{ `Protect ${pitchRangeCaption ? ` (${pitchRangeCaption})` : ''}`}}</div>
       </template>
     </div>
 

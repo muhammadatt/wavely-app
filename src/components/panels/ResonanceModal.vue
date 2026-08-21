@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
 import {
-  PITCH_RANGES,
   zoneSettings,
   effectivePitchRange,
   RESONANCE_ATTACK_MIN_MS,
@@ -23,12 +22,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resAttack, resRelease,
   resMode,
-  resPitchRange, resMix, resTrim, resZones, resSelectedZone, resSoloZone, resRefMode,
+  resMix, resTrim, resZones, resSelectedZone, resSoloZone, resRefMode,
   resPreview, resDelta, resReduction, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleSolo,
-  syncMode, syncPitchRange, apply, teardown, closeModal,
+  syncMode, apply, teardown, closeModal,
 } = useResonance()
 
 const { state } = useEditorState()
@@ -68,14 +67,6 @@ const modeCaption = computed(() =>
   resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
 )
 
-// Which pitches harmonic protection looks for. Nothing else about the effect
-// assumes speech, and this should not either — see PITCH_RANGES.
-const PITCH_RANGE_OPTIONS = Object.entries(PITCH_RANGES).map(([value, r]) => ({
-  value,
-  label: r.label,
-  title: r.title,
-}))
-
 const percent = v => `${Math.round(v * 100)}`
 const ms = v => `${Math.round(v)}`
 const db = v => `${Math.round(v)}`
@@ -99,7 +90,7 @@ const unprotectedZones = computed(() => resZones.value
 // what it will actually search rather than what the preset asked for.
 const pitchRangeCaption = computed(() => {
   const sr = state.currentFile?.sampleRate ?? 44100
-  const r = effectivePitchRange(sr, resPitchRange.value)
+  const r = effectivePitchRange(sr)
   return `${Math.round(r.minHz)}–${Math.round(r.maxHz)} Hz`
 })
 
@@ -227,14 +218,11 @@ async function applyAndClose() {
           :zones="resZones"
           :selected="resSelectedZone"
           :solo="resSoloZone"
-          :pitch-range="resPitchRange"
-          :pitch-range-options="PITCH_RANGE_OPTIONS"
           :pitch-range-caption="pitchRangeCaption"
           :accent="ACCENT"
           :disabled="!resPreview"
           @update:zones="syncZones"
           @update:selected="resSelectedZone = $event"
-          @update:pitch-range="syncPitchRange"
           @solo="toggleSolo"
         />
       </div>

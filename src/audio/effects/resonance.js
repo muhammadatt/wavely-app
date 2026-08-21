@@ -20,7 +20,6 @@
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 import {
-  PITCH_RANGES,
   RESONANCE_DEFAULTS,
   RESONANCE_DISPLAY_CURVES,
   RESONANCE_FRAME_SIZE,
@@ -29,7 +28,7 @@ import {
 } from '../resonanceParams.js'
 
 export {
-  PITCH_RANGES,
+  HARMONIC_PITCH_RANGE,
   RESONANCE_FRAME_SIZE,
   RESONANCE_DISPLAY_BINS,
   RESONANCE_DISPLAY_CURVES,

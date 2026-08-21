@@ -27,7 +27,6 @@ export const resRefMode = resolveRefMode()
 const resAttack = ref(DEFAULTS.attack)
 const resRelease = ref(DEFAULTS.release)
 const resMode = ref(DEFAULTS.mode)
-const resPitchRange = ref(DEFAULTS.pitchRange)
 const resMix = ref(DEFAULTS.mix)
 /**
  * Sensitivity zones — see DEFAULT_RESONANCE_ZONES. Not filters.
@@ -106,7 +105,6 @@ function currentParams() {
     zones: resZones.value,
     refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
     mode: resMode.value,
-    pitchRange: resPitchRange.value,
   }
 }
 
@@ -235,7 +233,6 @@ export function useResonance() {
     pushZones()
   }
   const syncMode = v => syncParam('mode', resMode, v)
-  const syncPitchRange = v => syncParam('pitchRange', resPitchRange, v)
 
   async function apply() {
     if (!state.selection) return
@@ -304,7 +301,6 @@ export function useResonance() {
     resSoloZone,
     resRefMode,
     resMode,
-    resPitchRange,
     resPreview,
     resDelta,
     resReduction,
@@ -321,7 +317,6 @@ export function useResonance() {
     toggleSolo,
     clearSolo,
     syncMode,
-    syncPitchRange,
     apply,
     teardown,
     openModal,

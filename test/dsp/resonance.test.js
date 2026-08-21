@@ -10,7 +10,9 @@ import {
 } from '../../src/audio/resonanceProcessor.js'
 import {
   effectivePitchRange,
-  PITCH_RANGES,
+  HARMONIC_PITCH_RANGE,
+  RESONANCE_DEFAULTS,
+  toKernelParams,
   resonanceDisplayRange,
   RESONANCE_ATTACK_MIN_MS,
   RESONANCE_RELEASE_MIN_MS,
@@ -325,10 +327,10 @@ test('suppresses a resonance in unpitched material', () => {
 })
 
 test('the pitch search range is settable and clamped to what the frame resolves', () => {
-  // The server hard-coded 70-400 Hz because it only ever saw speech. An
-  // out-of-range source does not fail quietly here: the peak picker returns the
-  // best lag WITHIN the range, so a 45 Hz source is reported as an octave
-  // artefact with full confidence and the mask lands on non-harmonics.
+  // The kernel keeps the range as a parameter even though the UI no longer
+  // offers a choice: the clamp is what stops a caller asking for a floor the
+  // frame cannot autocorrelate, and a 2048-sample frame cannot reach below
+  // ~43 Hz whatever it is asked for.
   const kernel = new ResonanceKernel(SR)
 
   kernel.setParams({ pitchMinHz: 40, pitchMaxHz: 1200 })
@@ -342,24 +344,29 @@ test('the pitch search range is settable and clamped to what the frame resolves'
   assert.equal(kernel.f0.lagMax, Math.floor(SR / 70))
 })
 
-test('the range the UI shows is the range the kernel uses', () => {
+test('THE HARMONIC MASK SEARCHES ONE FIXED RANGE, and the UI shows what it is', () => {
+  // The VOICE/WIDE switch is gone. The effect is general-purpose; the MASK is
+  // not — it is a comb built from one tracked F0, so it is a voice feature
+  // whatever the effect is pointed at, and WIDE was measurably worse on the
+  // only material the mask is for: on 46 s of real narration the two settings
+  // disagreed on 18.6% of frames, with WIDE's p90 at 849 Hz against a real
+  // median of 191. A zone whose content is not a voice switches protection off
+  // rather than retuning the range.
+  //
   // effectivePitchRange mirrors the kernel's clamp on the main thread, because
   // a worklet has no way to hand a value back for rendering a label. Mirrored
   // logic drifts, so pin the two together.
+  assert.deepEqual(HARMONIC_PITCH_RANGE, { minHz: 70, maxHz: 400 })
   for (const sampleRate of [44100, 48000, 96000]) {
     const kernel = new ResonanceKernel(sampleRate)
-    for (const [key, range] of Object.entries(PITCH_RANGES)) {
-      kernel.setParams({ pitchMinHz: range.minHz, pitchMaxHz: range.maxHz })
-      const shown = effectivePitchRange(sampleRate, key)
-      assert.ok(
-        Math.abs(shown.minHz - kernel.pitchRange.minHz) < 1e-9,
-        `${key} @ ${sampleRate}: UI says ${shown.minHz}, kernel uses ${kernel.pitchRange.minHz}`,
-      )
-      assert.equal(shown.maxHz, kernel.pitchRange.maxHz)
-    }
+    kernel.setParams(toKernelParams(RESONANCE_DEFAULTS))
+    const shown = effectivePitchRange(sampleRate)
+    assert.ok(
+      Math.abs(shown.minHz - kernel.pitchRange.minHz) < 1e-9,
+      `@ ${sampleRate}: UI says ${shown.minHz}, kernel uses ${kernel.pitchRange.minHz}`,
+    )
+    assert.equal(shown.maxHz, kernel.pitchRange.maxHz)
   }
-  // The case that motivated it: 'wide' asks for 40 Hz and does not get it.
-  assert.ok(effectivePitchRange(44100, 'wide').minHz > PITCH_RANGES.wide.minHz)
 })
 
 test('the mask cache survives every param change', () => {

@@ -18,34 +18,47 @@ import { pitchFloorHz } from './dsp/f0.js'
 export const RESONANCE_FRAME_SIZE = 2048
 
 /**
- * Pitch search ranges for harmonic protection.
+ * The pitch range the harmonic-protection mask searches for, in Hz.
  *
- * The server's stage only ever ran on speech, so its range was a constant. This
- * effect is a general tool, and an out-of-range source does not degrade
- * gracefully: the tracker returns the best lag *within* the range, which for an
- * out-of-range pitch is an octave artefact reported with full confidence, and
- * the protection mask then lands on bins that are not harmonics.
+ * FIXED, AND THE SWITCH THAT USED TO SET IT IS GONE. It offered VOICE
+ * (70–400) and WIDE (40–1200) on the argument that nothing else about this
+ * effect assumes speech and this should not either. Measured, that was the
+ * wrong conclusion from a true premise: the EFFECT is general-purpose, but the
+ * MASK is not — it exists to keep a suppressor off the harmonics of a voice,
+ * and its whole mechanism is a comb built from one tracked F0.
  *
- * `wide` asks for 40 Hz, below what a 2048-sample frame can autocorrelate; the
- * kernel clamps it, and `effectivePitchRange` is how the UI finds out to what.
+ * WIDE is measurably harmful on the material this feature is for. On 46 s of
+ * real narration the two settings disagree on 18.6% of frames and WIDE's p90
+ * lands at 849 Hz against a real median of 191 — a comb at the wrong spacing
+ * protects the wrong bins and leaves the actual harmonics exposed. WIDE earns
+ * its place only above 400 Hz, where VOICE cannot track at all (500/800/1000 Hz
+ * sources read as 250/400/333), and a pitched source up there is not something
+ * the harmonic mask was built for.
+ *
+ * Its advertised 40 Hz floor was fiction besides: nothing below about 70 Hz
+ * resolves in a 2048-sample frame, and 45/55/65 Hz sources report no pitch
+ * under either setting.
+ *
+ * So: harmonic protection is a voice feature, switched off per zone when the
+ * material is not one. Everything else in the effect stays general-purpose.
  */
-export const PITCH_RANGES = {
-  voice: { minHz: 70, maxHz: 400, label: 'VOICE', title: 'Speech and vocals (70–400 Hz)' },
-  wide: { minHz: 40, maxHz: 1200, label: 'WIDE', title: 'Instruments and full-range material (40–1200 Hz)' },
-}
+export const HARMONIC_PITCH_RANGE = { minHz: 70, maxHz: 400 }
 
 /**
- * The pitch range actually used, after the kernel's clamp.
+ * The range actually used, after the kernel's clamp.
  *
- * The kernel clamps the requested range to what its frame can autocorrelate and
- * records the result on `kernel.pitchRange` — but that lives inside a worklet
- * and there is no channel back out for a value needed to render a label. So the
- * clamp is mirrored here, and a test pins the two together.
+ * The kernel clamps to what its frame can autocorrelate and records the result
+ * on `kernel.pitchRange` — but that lives inside a worklet with no channel back
+ * to the panel, so the same arithmetic is repeated here for the caption. At
+ * 44.1 kHz the floor is 43 Hz, so the fixed range passes through untouched; it
+ * only bites at low sample rates.
  */
-export function effectivePitchRange(sampleRate, rangeKey) {
-  const range = PITCH_RANGES[rangeKey] ?? PITCH_RANGES.voice
+export function effectivePitchRange(sampleRate) {
   const floor = pitchFloorHz(sampleRate, RESONANCE_FRAME_SIZE)
-  return { minHz: Math.max(floor, range.minHz), maxHz: range.maxHz }
+  return {
+    minHz: Math.max(floor, HARMONIC_PITCH_RANGE.minHz),
+    maxHz: HARMONIC_PITCH_RANGE.maxHz,
+  }
 }
 
 /**
@@ -543,7 +556,6 @@ export const RESONANCE_DEFAULTS = {
   attack: 15, // ms
   release: 80, // ms
   mode: 'soft', // 'soft' | 'hard'
-  pitchRange: 'voice', // key of PITCH_RANGES
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
   refMode: 'cepstral',
   // Sensitivity zones — see DEFAULT_RESONANCE_ZONES above. Not filters.
@@ -554,13 +566,13 @@ export const RESONANCE_DEFAULTS = {
 
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {
-  const range = PITCH_RANGES[params.pitchRange] ?? PITCH_RANGES.voice
   return {
     attackMs: params.attack,
     releaseMs: params.release,
     mode: params.mode,
-    pitchMinHz: range.minHz,
-    pitchMaxHz: range.maxHz,
+    // Fixed: harmonic protection is a voice feature — see HARMONIC_PITCH_RANGE.
+    pitchMinHz: HARMONIC_PITCH_RANGE.minHz,
+    pitchMaxHz: HARMONIC_PITCH_RANGE.maxHz,
     refMode: params.refMode,
     // Copied field by field, not passed through. Zones arrive as Vue reactive
     // proxies and this object crosses a structured clone — `postMessage` to the
