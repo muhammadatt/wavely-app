@@ -599,37 +599,43 @@ export class ResonanceKernel {
     this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
 
     /**
-     * HARMONIC PROTECTION IS INCOHERENT UNDER THE PEAK REFERENCE, so it is
-     * forced off there rather than left as a control that does damage.
+     * HARMONIC PROTECTION MEANS SOMETHING DIFFERENT UNDER EACH REFERENCE, and
+     * it is honoured under both. It was briefly forced off under `peak`; that
+     * was an over-reach and is reverted.
      *
      * The two references put their reduction in opposite places. The cepstral
      * one measures the bin's own magnitude, which peaks at harmonics, so its
      * reduction concentrates ON them and masking those bins removes most of it
-     * — that is why the shipping default is inert. The peak reference measures
-     * a maximum over one harmonic spacing, which FLATTENS the comb on purpose,
-     * so its reduction is smooth across frequency.
+     * — which is why the shipping default is inert on voiced material. The peak
+     * reference measures a maximum over one harmonic spacing, which FLATTENS
+     * the comb on purpose, so its reduction is smooth across frequency and
+     * masking punches holes in it: the partials survive and the inter-harmonic
+     * floor is attenuated instead.
      *
-     * Masking a smooth gain curve does not reduce the treatment. It punches
-     * holes in it: the harmonics come through untouched and the inter-harmonic
-     * floor is attenuated instead — an inverted comb filter, cutting the gaps
-     * and leaving the resonance. Measured on real narration, mean reduction on
-     * harmonic bins against between them, 150 Hz - 1.5 kHz:
+     * So under `cepstral` the control is protection, and under `peak` it is a
+     * different process — attenuate between the partials, leave them alone —
+     * which is a real technique and the reason this is not disabled.
      *
-     *     cepstral, no mask     0.62 / 0.29   ratio 2.17   (cuts the harmonics)
-     *     peak, no mask         1.06 / 1.08   ratio 0.98   (flat, as designed)
-     *     peak, WITH mask       0.49 / 0.82   ratio 0.60   (cuts the gaps)
+     * WHAT IT IS NOT, ON THE EVIDENCE SO FAR: harmonic-selective noise
+     * reduction. If it were removing breath and room from the gaps it would
+     * raise the harmonic-to-inter-harmonic ratio. Measured over the 3rd-12th
+     * harmonic on confidently voiced frames of real narration, against a source
+     * ratio of 14.11 dB:
      *
-     * It also discards 60% of the treatment to do it: broadband -2.11 dB
-     * becomes -0.84.
+     *     peak, mask off,  sel 22    harmonics -0.51  gaps -0.10   ratio -0.40
+     *     peak, mask ON,   sel 22    harmonics -0.36  gaps -0.39   ratio +0.03
+     *     peak, mask ON,   sel 14    harmonics -1.28  gaps -0.84   ratio -0.45
+     *     peak, mask ON,   sel 8     harmonics -3.04  gaps -2.62   ratio -0.42
      *
-     * Not a limitation of peak mode — the whole premise of a reference drawn
-     * through the harmonic peaks is that a harmonic cannot read as a resonance,
-     * so there is nothing for the mask to protect against. The parameter was
-     * left orthogonal to `refMode` when the mode was added and all four corners
-     * were never checked; three of them are meaningful and this one is a
-     * footgun.
+     * The ratio never improves, and driven harder the partials lose MORE than
+     * the gaps. On this file it is quieter, not cleaner. One narrator, one
+     * metric — enough to withhold the claim, not enough to remove the control.
+     *
+     * It also depends entirely on the F0 estimate: where the pitch is wrong the
+     * gaps are misplaced and it cuts partials instead, and on unpitched frames
+     * there is no comb so it reverts to full broadband suppression.
      */
-    this.preserveHarmonics = !!p.preserveHarmonics && this.refMode !== 'peak'
+    this.preserveHarmonics = !!p.preserveHarmonics
     this.refOct = PEAK_REF_OCT_COARSE
       * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, clamp(p.sharpness, 0, 1))
 

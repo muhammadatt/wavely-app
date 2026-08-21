@@ -96,32 +96,40 @@ function snapHz(v) {
  * thing that mode exists to make safe.
  */
 /**
- * The mask is INERT under the peak reference, and the control says so rather
- * than pretending to work.
+ * The same switch does two different things under the two references, so it is
+ * labelled for the one in use rather than carrying one name over both.
  *
- * It is not merely unnecessary there — enabling it inverts the cut, punching
- * holes in a gain curve that is smooth by construction so the harmonics survive
- * and the inter-harmonic floor is attenuated instead. The kernel forces it off
- * for that reason (see setParams), so a toggle that still looked live would be
- * reporting a state the DSP does not honour.
+ * Under the cepstral reference it is PROTECTION: that reference sits at the
+ * inter-harmonic floor, so harmonics protrude and read as resonances, and
+ * turning the mask off really will thin the material — hence the amber warning.
+ *
+ * Under the peak reference nothing protrudes at a harmonic, so there is nothing
+ * to protect against and the warning would be false. What the mask does there
+ * is invert the cut — the partials are held and the floor between them is
+ * attenuated. That is a different process, not a broken one, so the control
+ * stays live; it just must not claim to be protecting anything.
  */
-const protectionAvailable = computed(() => resRefMode === 'cepstral')
+const protectionIsProtection = computed(() => resRefMode === 'cepstral')
 
 const protectionIsRisky = computed(
-  () => protectionAvailable.value && !resPreserveHarmonics.value,
+  () => protectionIsProtection.value && !resPreserveHarmonics.value,
 )
 
 const protectionCaption = computed(() => {
-  if (!protectionAvailable.value) return 'Not used — this reference sits on the harmonics.'
+  if (!protectionIsProtection.value) {
+    return resPreserveHarmonics.value
+      ? 'Cuts between the partials, not on them.'
+      : 'Cuts evenly across the spectrum.'
+  }
   return resPreserveHarmonics.value
     ? 'Preserves harmonic frequencies.'
     : 'Full suppression — risks thinning harmonic frequencies.'
 })
 
 const protectionTitle = computed(() =>
-  protectionAvailable.value
+  protectionIsProtection.value
     ? 'Protects the harmonics of the pitched source in the recording from being treated as resonances. Turning it off is a diagnostic aid — it will thin the material.'
-    : 'The peak-envelope reference is drawn through the harmonic peaks, so a harmonic cannot read as a resonance. Enabling this mask under it would cut between the harmonics instead of on them, so it is disabled.',
+    : 'Under the peak-envelope reference a harmonic cannot read as a resonance, so this is not protection. It inverts where the cut lands: the partials are held and the floor between them is attenuated. Measured on real narration it does not improve the harmonic-to-noise ratio — it is quieter, not cleaner.',
 )
 
 const modeCaption = computed(() =>
@@ -360,7 +368,7 @@ async function applyAndClose() {
             border: `1px solid ${protectionIsRisky ? 'rgba(255,178,122,.45)' : 'rgba(141,224,168,.4)'}`,
             opacity: resPreview ? 1 : 0.4,
           }"
-          :disabled="!resPreview || !protectionAvailable"
+          :disabled="!resPreview"
           :title="protectionTitle"
           @click="togglePreserveHarmonics"
         >
@@ -371,9 +379,9 @@ async function applyAndClose() {
               letterSpacing: '.12em',
               color: protectionIsRisky ? '#ffb27a' : '#8de0a8',
             }"
-          >{{ !protectionAvailable
-            ? 'PROTECTION N/A'
-            : (resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF') }}</span>
+          >{{ protectionIsProtection
+            ? (resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF')
+            : (resPreserveHarmonics ? 'BETWEEN PARTIALS' : 'ACROSS SPECTRUM') }}</span>
           <span
             class="block mt-[3px]"
             style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
@@ -386,7 +394,7 @@ async function applyAndClose() {
           @update:model-value="syncPitchRange"
           :options="PITCH_RANGE_OPTIONS"
           :accent="ACCENT"
-          :disabled="!resPreview || !resPreserveHarmonics || !protectionAvailable"
+          :disabled="!resPreview || !resPreserveHarmonics"
           :caption="`Protect ${pitchRangeCaption}`"
         />
       </div>

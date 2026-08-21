@@ -549,58 +549,106 @@ test('the cepstral path still detects on the magnitude', () => {
   assert.equal(kernel.peakMax, null, 'the peak envelope should never be built on the shipping path')
 })
 
-test('harmonic protection is forced off under the peak reference', () => {
-  // NOT REDUNDANCY — ENABLING IT INVERTS THE CUT. The cepstral reference
-  // measures the bin's own magnitude, which peaks at harmonics, so its
-  // reduction lands ON them and masking those bins removes most of it. The peak
-  // reference measures a maximum over one harmonic spacing, which flattens the
-  // comb by design, so its reduction is smooth across frequency — and masking a
-  // smooth curve punches holes in it, leaving the harmonics untouched and
-  // attenuating the inter-harmonic floor instead. Measured on real narration,
-  // mean reduction on harmonic bins vs between them: cepstral unmasked 2.17,
-  // peak unmasked 0.98, peak masked 0.60. The last one is an inverted comb.
+test('the mask is honoured under both references, and inverts under peak', () => {
+  // BRIEFLY FORCED OFF UNDER PEAK AND REVERTED. "I cannot see a use for it" is
+  // not "it is broken", and this mode exists to be explored. What is true is
+  // that the control does two different things:
+  //
+  //   cepstral — reduction concentrates ON the harmonics (its reference sits at
+  //     the inter-harmonic floor), so masking removes most of the treatment.
+  //     This is protection.
+  //   peak — the max filter flattens the comb, so reduction is smooth across
+  //     frequency and masking punches holes in it: partials held, floor between
+  //     them attenuated. This is a different process, not protection.
   const kernel = new ResonanceKernel(SR)
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'peak', preserveHarmonics: true })
-  assert.equal(kernel.preserveHarmonics, false, 'peak mode must not honour the mask')
-
-  // ...and the cepstral path is untouched by the guard.
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'cepstral', preserveHarmonics: true })
-  assert.equal(kernel.preserveHarmonics, true)
+  for (const refMode of ['cepstral', 'peak']) {
+    kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode, preserveHarmonics: true })
+    assert.equal(kernel.preserveHarmonics, true, `${refMode} must honour the mask`)
+  }
 })
 
-test('under the peak reference the cut lands evenly across the comb', () => {
-  // The property the guard protects: reduction should be about the same on a
-  // harmonic and in the gap beside it, because the max filter flattened the
-  // comb before detection ever saw it. If a future change lets the mask back
-  // in, this ratio inverts.
+test('under peak, the mask moves the cut off the partials and into the gaps', () => {
+  // Pins the inversion as intended behaviour rather than as a defect. If a
+  // future change makes the peak path concentrate on harmonics like the
+  // cepstral one, this catches it.
   const sig = resonate(pitched(() => 150, { seconds: 2 }), 1200, 3, 12)
-  const kernel = new ResonanceKernel(SR)
-  kernel.setParams({
-    ...RESONANCE_KERNEL_DEFAULTS,
-    refMode: 'peak', preserveHarmonics: true, depth: 1, selectivity: 4,
-  })
-  const scratch = new Float32Array(128)
-  let on = 0
-  let off = 0
-  let n = 0
-  for (let o = 0; o + 128 <= sig.length; o += 128) {
-    kernel.process([sig.subarray(o, o + 128)], [scratch], 128)
-    if (o < SR) continue
-    const f0 = kernel.f0.lastF0
-    if (!f0) continue
-    const spacing = f0 / kernel.binWidth
-    for (let h = 6; h <= 10; h++) {
-      const kOn = Math.round(h * spacing)
-      const kOff = Math.round((h + 0.5) * spacing)
-      if (kOff >= kernel.binCount) break
-      on += kernel.prevGr[kOn]
-      off += kernel.prevGr[kOff]
-      n++
+  const measure = preserveHarmonics => {
+    const kernel = new ResonanceKernel(SR)
+    kernel.setParams({
+      ...RESONANCE_KERNEL_DEFAULTS,
+      refMode: 'peak', preserveHarmonics, depth: 1, selectivity: 4,
+    })
+    const scratch = new Float32Array(128)
+    let on = 0
+    let off = 0
+    let n = 0
+    for (let o = 0; o + 128 <= sig.length; o += 128) {
+      kernel.process([sig.subarray(o, o + 128)], [scratch], 128)
+      if (o < SR) continue
+      const f0 = kernel.f0.lastF0
+      if (!f0) continue
+      const spacing = f0 / kernel.binWidth
+      for (let h = 6; h <= 10; h++) {
+        const kOn = Math.round(h * spacing)
+        const kOff = Math.round((h + 0.5) * spacing)
+        if (kOff >= kernel.binCount) break
+        on += kernel.prevGr[kOn]; off += kernel.prevGr[kOff]; n++
+      }
     }
+    return on / (off || 1e-9)
   }
-  const ratio = on / (off || 1e-9)
+  const unmasked = measure(false)
+  const masked = measure(true)
   assert.ok(
-    ratio > 0.7 && ratio < 1.4,
-    `cut should be even across the comb, on/between was ${ratio.toFixed(2)}`,
+    unmasked > 0.7 && unmasked < 1.4,
+    `unmasked, the cut should be even across the comb; on/between was ${unmasked.toFixed(2)}`,
+  )
+  assert.ok(
+    masked < unmasked * 0.7,
+    `masked, the cut should move off the partials; ${unmasked.toFixed(2)} -> ${masked.toFixed(2)}`,
+  )
+})
+
+test('what the inverted cut does NOT do is raise the harmonic-to-noise ratio', () => {
+  // Recorded because it is the obvious thing to hope for and it does not
+  // happen. If the mask under peak were removing breath and room from between
+  // the partials, the harmonic-to-inter-harmonic ratio would rise. Measured
+  // over the 3rd-12th harmonic on real narration against a source ratio of
+  // 14.11 dB, it moves +0.03 at selectivity 22 and -0.45 at 14 — and driven to
+  // 8 the partials lose MORE than the gaps (-3.04 against -2.62). Quieter, not
+  // cleaner. This test pins the direction on a synthetic case rather than the
+  // exact figures, which are one narrator's.
+  const sig = pitched(() => 150, { seconds: 2, noiseDb: -30 })
+  const ratio = params => {
+    const out = processResonanceBuffer([sig], SR, { ...RESONANCE_KERNEL_DEFAULTS, ...params })
+      .channelData[0].subarray(LATENCY)
+    const probe = new ResonanceKernel(SR)
+    probe.setParams({ ...RESONANCE_KERNEL_DEFAULTS, depth: 0 })
+    const scratch = new Float32Array(128)
+    let harm = 0
+    let gap = 0
+    let n = 0
+    for (let o = 0; o + 128 <= out.length; o += 128) {
+      probe.process([out.subarray(o, o + 128)], [scratch], 128)
+      if (o < SR) continue
+      const f0 = probe.f0.lastF0
+      if (!f0) continue
+      const spacing = f0 / probe.binWidth
+      for (let h = 3; h <= 12; h++) {
+        const kOn = Math.round(h * spacing)
+        const kOff = Math.round((h + 0.5) * spacing)
+        if (kOff >= probe.binCount) break
+        harm += Math.pow(10, probe.magDb[kOn] / 10)
+        gap += Math.pow(10, probe.magDb[kOff] / 10)
+        n++
+      }
+    }
+    return 10 * Math.log10(harm / n) - 10 * Math.log10(gap / n)
+  }
+  const dry = ratio({ depth: 0 })
+  const masked = ratio({ refMode: 'peak', preserveHarmonics: true, depth: 1, selectivity: 4 })
+  assert.ok(
+    masked < dry + 1.5,
+    `the mask under peak should not be sold as denoising; ratio ${dry.toFixed(2)} -> ${masked.toFixed(2)}`,
   )
 })
