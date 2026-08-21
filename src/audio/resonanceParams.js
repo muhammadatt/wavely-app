@@ -260,7 +260,24 @@ export const RESONANCE_WEIGHT_MAX_DB = 12
 export const RESONANCE_WEIGHT_SUM_LIMIT_DB = 24
 export const RESONANCE_WEIGHT_MIN_OCTAVES = 0.15
 export const RESONANCE_WEIGHT_MAX_OCTAVES = 3
-export const RESONANCE_WEIGHT_DEFAULT_OCTAVES = 0.7
+/**
+ * NARROW BY DEFAULT, and that is measured rather than a taste.
+ *
+ * On a narrator clip with an audible low-mid honk, treating it with one wide
+ * node (1.0 octave at 450 Hz) against two narrow ones (0.3 octave at 356 and
+ * 534, where the source spectrum actually peaks), both at +9 dB:
+ *
+ *                        mean cut   jitter      honk treated   per unit cut
+ *     drive selectivity    -5.52   1.23/1.58        3.90          0.71
+ *     one wide node        -4.83   1.13/1.49        4.17          0.86
+ *     two narrow nodes     -3.93   1.01/1.36        4.64          1.18
+ *
+ * The two narrow nodes beat lowering selectivity globally on EVERY axis at
+ * once - more treatment where it was wanted, less cutting overall, less gain
+ * jitter - where the wide node only improved two of the three. A wide node is
+ * most of the way back to being a second selectivity knob.
+ */
+export const RESONANCE_WEIGHT_DEFAULT_OCTAVES = 0.3
 
 function clampNum(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
