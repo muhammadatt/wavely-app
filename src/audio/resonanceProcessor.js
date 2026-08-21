@@ -248,6 +248,51 @@ const PEAK_REF_OCT_FINE = 1.2
 const PEAK_FALLBACK_F0_HZ = 150
 
 /**
+ * KNOWN DEFECT: THIS REFERENCE OVER-CUTS BELOW THE FUNDAMENTAL. Measured, not
+ * yet fixed.
+ *
+ * The max filter's window is `spacing * PEAK_SPACING_MARGIN` — about +-244 Hz
+ * on a narrator at F0 195. Applied to a bin at 60-120 Hz that window reaches UP
+ * ACROSS THE F0 STEP and imports the fundamental region's far higher level,
+ * while the wide reference smoothing does not rise as fast. Bins below F0
+ * therefore inherit a peak value they do not have, read as protruding, and get
+ * cut. Measured on 46 s of narration, at the selectivity each reference needs
+ * for the same 3 dB of mean cut:
+ *
+ *                    cepstral            peak
+ *     60-120 Hz      3.4 dB / 3.5%     17.1 dB / 26.6%
+ *    190-270 Hz     15.3 dB / 41.6%    18.1 dB / 32.0%
+ *
+ * (mean protrusion, and how often it clears its own threshold). Five times the
+ * protrusion below F0 and it acts seven times as often, which comes out as a
+ * broad 1.6-2.2 dB cut across 60-135 Hz that the cepstral reference does not
+ * make at all. Reported by ear as "it removed more resonances", and it is not
+ * removing resonances — it is thinning the low end.
+ *
+ * THE CEPSTRAL REFERENCE GETS THIS RIGHT FOR FREE: its envelope is a smooth
+ * low-order fit that simply follows the falling spectrum below F0, so nothing
+ * down there protrudes and it leaves the region alone without being told to.
+ *
+ * A fixed `freqFloorHz` of 160 removes the broad cut entirely and leaves the
+ * 190-270 Hz resonance trench bit-identical (-2.61 / -3.09 / -4.01 either way),
+ * but that is declining to process, not a repair, and 160 Hz is one narrator's
+ * number. The principled fix is to stop the max window crossing the F0 step —
+ * floor detection at the measured per-frame F0 — which tracks a speaker instead
+ * of assuming one. Not done here because which reference ships is undecided.
+ *
+ * TWO WRONG READINGS ON THE WAY, and the second is the reusable one. I first
+ * proposed this mechanism from theory and reached for the floor before testing
+ * it. Then I checked peak's 60-120 Hz protrusion against PEAK'S OWN 190-270 Hz,
+ * saw 17.1 against 18.1, and withdrew the hypothesis as unsupported. Both
+ * numbers were right; the comparison was meaningless. The question was never
+ * "is this band unusual for this reference" — it was "do the two references
+ * disagree here", and against the other reference at the same frequencies the
+ * gap is enormous. A within-condition comparison cannot answer a
+ * between-condition question, and the fix appearing to work nearly let the
+ * wrong explanation stand.
+ */
+
+/**
  * What the shipping configuration does to real narration, for the record.
  *
  * The same 46 s file, cepstral reference with the mask on, at its own default
