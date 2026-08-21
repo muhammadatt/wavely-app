@@ -21,11 +21,11 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resAttack, resRelease,
   resMaxReduction, resMode, resPreserveHarmonics,
-  resPitchRange, resMix, resTrim, resZones, resSelectedZone, resRefMode,
+  resPitchRange, resMix, resTrim, resZones, resSelectedZone, resSoloZone, resRefMode,
   resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncAttack,
-  syncRelease, syncMaxReduction, syncMix, syncTrim, syncZones,
+  syncRelease, syncMaxReduction, syncMix, syncTrim, syncZones, toggleSolo,
   syncMode, syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
 
@@ -216,6 +216,7 @@ async function applyAndClose() {
         :delta="resDelta"
         :zones="resZones"
         :selected-zone="resSelectedZone"
+        :solo-zone="resSoloZone"
         @update:zones="syncZones"
         @update:selected-zone="resSelectedZone = $event"
       />
@@ -229,10 +230,12 @@ async function applyAndClose() {
         <ResonanceZoneControls
           :zones="resZones"
           :selected="resSelectedZone"
+          :solo="resSoloZone"
           :accent="ACCENT"
           :disabled="!resPreview"
           @update:zones="syncZones"
           @update:selected="resSelectedZone = $event"
+          @solo="toggleSolo"
         />
       </div>
 
@@ -242,10 +245,10 @@ async function applyAndClose() {
            describe the effect as a whole rather than a band of it. The Range
            fader went with them: a band you want left alone is a zone switched
            off, and two controls that can both exclude a band is one too many. -->
-      <div class="flex items-center justify-between gap-[14px] mt-[14px]">
+      <div class="flex items-center gap-[10px] mt-[14px]">
         <LevelMeter :levels="resInputLevels" label="IN" :height="92" />
 
-        <div class="flex-1 flex justify-center gap-[14px]">
+        <div class="flex-1 flex justify-between px-[6px]">
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
              setting below it is the same instantaneous jump — the bottom of
@@ -272,7 +275,7 @@ async function applyAndClose() {
              phrase. Pause bleed FALLS at matched cut, -2.47 to -1.19 dB,
              because the higher selectivity more than pays for the longer
              tail. -->
-          <div class="w-[62px]">
+          <div class="w-[88px]">
             <Knob
               :model-value="resAttack" @update:model-value="syncAttack"
               :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="13"
@@ -280,7 +283,7 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[62px]">
+          <div class="w-[88px]">
             <Knob
               :model-value="resRelease" @update:model-value="syncRelease"
               :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="13"
@@ -288,7 +291,7 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[62px]">
+          <div class="w-[88px]">
             <Knob
               :model-value="resMaxReduction" @update:model-value="syncMaxReduction"
               :min="3" :max="48" :step="1" :value-font-px="13"
@@ -299,7 +302,7 @@ async function applyAndClose() {
           <!-- Mix and Trim end the row because they are the output stage: the
                knobs to their left decide what gets cut, these two decide how
                much of that cut reaches the file and at what level. -->
-          <div class="w-[62px]">
+          <div class="w-[88px]">
             <Knob
               :model-value="resMix" @update:model-value="syncMix"
               :min="0" :max="1" :step="0.01" :value-font-px="13"
@@ -307,7 +310,7 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[62px]">
+          <div class="w-[88px]">
             <Knob
               :model-value="resTrim" @update:model-value="syncTrim"
               :min="-12" :max="12" :step="0.5" :value-font-px="13"
@@ -328,9 +331,8 @@ async function applyAndClose() {
            fader sets. -->
       <div class="flex items-end gap-[14px] mt-[14px] pt-[13px]"
            style="border-top:1px solid rgba(255,255,255,.06)">
-        <!-- The knee switch lost its own row when the knobs merged and lands
-             here, beside the other two settings that decide how the DETECTOR
-             behaves rather than how much it does. -->
+        <!-- The knee switch sits with the other two settings that decide how
+             the DETECTOR behaves rather than how much it does. -->
         <SegmentedSwitch
           class="shrink-0"
           :model-value="resMode"
@@ -340,7 +342,6 @@ async function applyAndClose() {
           :disabled="!resPreview"
           :caption="modeCaption"
         />
-        <div class="flex-1"></div>
 
         <!-- Harmonic protection is the safety mechanism, not a flavour
              control: without it the cepstral reference sits at the
@@ -359,8 +360,7 @@ async function applyAndClose() {
              moved to the title attribute to buy 30 px and has been put back;
              the height came out of the plot instead. -->
         <button
-          class="shrink-0 px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
-          style="width:186px"
+          class="flex-1 min-w-[186px] px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
           :style="{
             background: protectionIsRisky ? 'rgba(255,178,122,.12)' : 'rgba(141,224,168,.14)',
             border: `1px solid ${protectionIsRisky ? 'rgba(255,178,122,.45)' : 'rgba(141,224,168,.4)'}`,

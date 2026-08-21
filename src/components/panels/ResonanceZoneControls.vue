@@ -8,7 +8,7 @@ import {
   zoneBounds,
   zoneSettings,
 } from '../../audio/resonanceParams.js'
-import { setZoneCount, setZoneParam, toggleZone } from '../meters/resonanceZoneEdit.js'
+import { removeBoundary, setZoneParam, splitZone, toggleZone } from '../meters/resonanceZoneEdit.js'
 import Knob from '../knobs/Knob.vue'
 
 /**
@@ -27,11 +27,13 @@ import Knob from '../knobs/Knob.vue'
 const props = defineProps({
   zones: { type: Array, required: true },
   selected: { type: Number, default: 0 },
+  /** Index of the soloed zone, or -1. Monitoring state, not a parameter. */
+  solo: { type: Number, default: -1 },
   accent: { type: String, default: '#8de0a8' },
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:zones', 'update:selected'])
+const emit = defineEmits(['update:zones', 'update:selected', 'solo'])
 
 const zone = computed(() => props.zones[props.selected] ?? props.zones[0] ?? null)
 /**
@@ -59,21 +61,53 @@ const index = computed(() =>
 const span = computed(() => {
   const b = zoneBounds(props.zones, 20, 20000)[index.value]
   if (!b) return ''
-  const f = v => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)} kHz` : `${Math.round(v)} Hz`)
-  return `${f(b.loHz)} – ${f(b.hiHz)}`
+  const f = v => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `${Math.round(v)}`)
+  return `${f(b.loHz)}–${f(b.hiHz)} Hz`
 })
 
-const counts = Array.from(
-  { length: RESONANCE_ZONE_MAX - RESONANCE_ZONE_MIN + 1 },
-  (_, i) => RESONANCE_ZONE_MIN + i,
-)
+/**
+ * Add and remove act on the SELECTED zone, not on the set as a whole.
+ *
+ * The control this replaces was a row of the numbers 1 to 6 with the current
+ * count lit, borrowed from the reference design — and it read as a selector for
+ * which zone was active, which is the one thing on this panel it was not. The
+ * numbers were the problem: six of them in a row, next to a row that says
+ * ZONE 3, cannot help but look like a way to choose zone 3.
+ *
+ * A pair of buttons around a count cannot be misread that way, and acting on
+ * the selection makes both of them predictable — plus splits the zone you are
+ * looking at, minus folds it into its neighbour, the same two edits the plot's
+ * double-click makes.
+ */
+const canSplit = computed(() => props.zones.length < RESONANCE_ZONE_MAX)
+const canMerge = computed(() => props.zones.length > RESONANCE_ZONE_MIN)
 
+const AXIS = { w: 600, minHz: 20, maxHz: 20000 }
 let seq = 0
-function setCount(n) {
-  emit('update:zones', setZoneCount(
-    props.zones, n, { w: 600, minHz: 20, maxHz: 20000 }, 20, 20000,
-    () => `z${Date.now()}${seq++}`))
-  emit('update:selected', Math.min(props.selected, n - 1))
+
+function addZone() {
+  const i = index.value
+  const b = zoneBounds(props.zones, 20, 20000)[i]
+  // The geometric centre, because the axis is logarithmic: the arithmetic
+  // midpoint of 180 Hz and 5 kHz is 2.6 kHz, which sits three quarters of the
+  // way along the span as drawn.
+  const mid = Math.sqrt(b.loHz * b.hiHz)
+  const next = splitZone(props.zones, mid, AXIS, `z${Date.now()}${seq++}`, 20, 20000)
+  if (next === props.zones) return
+  emit('update:zones', next)
+  emit('update:selected', i)
+}
+
+function removeZone() {
+  const i = index.value
+  // Merging the last zone means dropping the divider below it; any other zone
+  // absorbs the one above it. Either way the selection lands on the zone that
+  // now covers where the old one was.
+  const divider = i < props.zones.length - 1 ? i : i - 1
+  const next = removeBoundary(props.zones, divider)
+  if (next === props.zones) return
+  emit('update:zones', next)
+  emit('update:selected', Math.min(i, next.length - 1))
 }
 
 function set(name, value) {
@@ -95,89 +129,116 @@ const oneDp = v => v.toFixed(1)
   >
     <!-- Identity first: these knobs mean nothing without it, because the same
          three knobs show six different sets of values. -->
-    <div class="w-[112px] shrink-0">
-      <div class="flex items-center gap-[7px]">
-        <span
-          style="font:700 12px 'JetBrains Mono',monospace;letter-spacing:.08em"
-          :style="{ color: settings.enabled
-            ? `color-mix(in srgb, ${accent} 60%, #ffffff)` : 'rgba(255,255,255,.35)' }"
-        >ZONE {{ index + 1 }}</span>
+    <div class="w-[128px] shrink-0">
+      <div
+        style="font:700 12px 'JetBrains Mono',monospace;letter-spacing:.08em;white-space:nowrap"
+        :style="{ color: settings.enabled
+          ? `color-mix(in srgb, ${accent} 60%, #ffffff)` : 'rgba(255,255,255,.35)' }"
+      >ZONE {{ index + 1 }}</div>
+      <div style="font:600 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.4);white-space:nowrap"
+           class="mt-[2px]">{{ span }}</div>
+
+      <!-- BYPASS AND SOLO ARE NOT THE SAME KIND OF CONTROL, and the panel has
+           to say so. Bypass is a setting: it is stored, it is rendered, a file
+           applied with a zone off really has that band untreated. Solo is a
+           monitoring state that never reaches Apply — the same distinction as
+           DELTA in the header, which is why solo is lettered rather than shown
+           as a second lamp. -->
+      <div class="flex items-center gap-[5px] mt-[6px]">
         <button
-          class="rounded-full cursor-pointer disabled:cursor-default"
+          class="rounded-[4px] cursor-pointer disabled:cursor-default"
+          style="padding:2px 6px;font:700 8px 'JetBrains Mono',monospace;letter-spacing:.1em"
           :style="{
-            width: '10px', height: '10px',
-            background: settings.enabled ? accent : 'transparent',
+            background: settings.enabled
+              ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'transparent',
+            color: settings.enabled
+              ? `color-mix(in srgb, ${accent} 55%, #ffffff)` : 'rgba(255,255,255,.4)',
             boxShadow: settings.enabled
-              ? `0 0 6px color-mix(in srgb, ${accent} 70%, transparent)`
-              : 'inset 0 0 0 1px rgba(255,255,255,.3)',
+              ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)`
+              : 'inset 0 0 0 1px rgba(255,255,255,.16)',
           }"
-          :aria-pressed="String(settings.enabled)"
-          :aria-label="`Zone ${index + 1}, ${settings.enabled ? 'on' : 'off'}`"
-          title="Switch this zone off — the effect leaves that band alone."
+          :aria-pressed="String(!settings.enabled)"
+          :aria-label="`Zone ${index + 1} bypass, currently ${settings.enabled ? 'off' : 'on'}`"
+          title="Bypass this zone — the effect leaves that band alone. Stored, and applied to the file."
           :disabled="disabled"
           @click="emit('update:zones', toggleZone(zones, index))"
-        ></button>
+        >{{ settings.enabled ? 'ON' : 'BYP' }}</button>
+        <button
+          class="rounded-[4px] cursor-pointer disabled:cursor-default"
+          style="padding:2px 6px;font:700 8px 'JetBrains Mono',monospace;letter-spacing:.1em"
+          :style="{
+            background: solo === index ? '#ffb27a' : 'transparent',
+            color: solo === index ? '#20160c' : 'rgba(255,255,255,.4)',
+            boxShadow: solo === index
+              ? '0 0 7px rgba(255,178,122,.5)' : 'inset 0 0 0 1px rgba(255,255,255,.16)',
+          }"
+          :aria-pressed="String(solo === index)"
+          :aria-label="`Solo zone ${index + 1}`"
+          title="Hear this zone's processing alone. Monitoring only — Apply always renders every zone."
+          :disabled="disabled"
+          @click="emit('solo', index)"
+        >SOLO</button>
       </div>
-      <div style="font:600 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.4)"
-           class="mt-[3px]">{{ span }}</div>
     </div>
 
-    <div class="flex-1 flex justify-center gap-[22px]">
-      <div class="w-[72px]">
+    <div class="flex-1 flex justify-evenly">
+      <div class="w-[78px]">
         <Knob
           :model-value="settings.depth" @update:model-value="set('depth', $event)"
           :min="RESONANCE_ZONE_RANGES.depth.min" :max="RESONANCE_ZONE_RANGES.depth.max"
           :step="0.01" :value-font-px="13"
           label="Depth" :accent="accent" :format-value="percent"
-          :disabled="disabled || !settings.enabled"
+          :disabled="disabled"
         />
       </div>
-      <div class="w-[72px]">
+      <div class="w-[78px]">
         <Knob
           :model-value="settings.sharpness" @update:model-value="set('sharpness', $event)"
           :min="RESONANCE_ZONE_RANGES.sharpness.min" :max="RESONANCE_ZONE_RANGES.sharpness.max"
           :step="0.01" :value-font-px="13"
           label="Sharpness" :accent="accent" :format-value="percent"
-          :disabled="disabled || !settings.enabled"
+          :disabled="disabled"
         />
       </div>
-      <div class="w-[72px]">
+      <div class="w-[78px]">
         <Knob
           :model-value="settings.selectivity" @update:model-value="set('selectivity', $event)"
           :min="RESONANCE_ZONE_RANGES.selectivity.min" :max="RESONANCE_ZONE_RANGES.selectivity.max"
           :step="0.5" :value-font-px="13"
           label="Selectivity" :accent="accent" :format-value="oneDp"
-          :disabled="disabled || !settings.enabled"
+          :disabled="disabled"
         />
       </div>
     </div>
 
-    <!-- Count, not a stepper: the reference this borrows from lists the numbers
-         so the one in force is readable at a glance, and going from four zones
-         to two is one click rather than two. -->
-    <div class="shrink-0 text-right">
-      <div style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.1em;color:rgba(255,255,255,.32)"
-           class="mb-[4px]">ZONES</div>
-      <div class="flex gap-[2px]" role="radiogroup" aria-label="Number of zones">
-        <button
-          v-for="n in counts"
-          :key="n"
-          class="cursor-pointer disabled:cursor-default"
-          style="width:19px;height:19px;border-radius:4px;font:700 10px 'JetBrains Mono',monospace"
-          :style="{
-            background: n === zones.length
-              ? `color-mix(in srgb, ${accent} 26%, transparent)` : 'rgba(255,255,255,.05)',
-            color: n === zones.length
-              ? `color-mix(in srgb, ${accent} 55%, #ffffff)` : 'rgba(255,255,255,.42)',
-            boxShadow: n === zones.length
-              ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 50%, transparent)` : 'none',
-          }"
-          role="radio"
-          :aria-checked="String(n === zones.length)"
-          :disabled="disabled"
-          @click="setCount(n)"
-        >{{ n }}</button>
+    <div class="shrink-0 flex items-center gap-[7px]">
+      <button
+        class="cursor-pointer disabled:cursor-default disabled:opacity-30"
+        style="width:23px;height:23px;border-radius:5px;font:700 14px/1 'JetBrains Mono',monospace;
+               background:rgba(255,255,255,.06);color:rgba(255,255,255,.6)"
+        :disabled="disabled || !canMerge"
+        title="Merge this zone into its neighbour"
+        aria-label="Merge this zone into its neighbour"
+        @click="removeZone"
+      >−</button>
+      <div class="text-center" style="width:52px">
+        <div style="font:700 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.62)">
+          {{ zones.length }}</div>
+        <div style="font:600 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em;color:rgba(255,255,255,.3)">
+          {{ zones.length === 1 ? 'ZONE' : 'ZONES' }}</div>
       </div>
+      <button
+        class="cursor-pointer disabled:cursor-default disabled:opacity-30"
+        style="width:23px;height:23px;border-radius:5px;font:700 14px/1 'JetBrains Mono',monospace"
+        :style="{
+          background: `color-mix(in srgb, ${accent} 20%, transparent)`,
+          color: `color-mix(in srgb, ${accent} 60%, #ffffff)`,
+        }"
+        :disabled="disabled || !canSplit"
+        title="Split this zone in two"
+        aria-label="Split this zone in two"
+        @click="addZone"
+      >+</button>
     </div>
   </div>
 </template>

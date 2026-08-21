@@ -87,8 +87,17 @@ const props = defineProps({
    * span of the spectrum is a horizontal extent, which is what this axis is.
    */
   zones: { type: Array, default: () => [] },
-  /** Which zone the strip below is editing. Selection is owned by the panel. */
+  /** Which zone the controls below are editing. Selection is owned by the panel. */
   selectedZone: { type: Number, default: -1 },
+  /**
+   * Soloed zone, or -1.
+   *
+   * Drawn, because solo changes what is being heard and a display that did not
+   * show it would disagree with the speakers — the same reason the DELTA badge
+   * is repeated on this line. It arrives separately from `zones` rather than
+   * baked into them so the knobs keep reading the stored settings.
+   */
+  soloZone: { type: Number, default: -1 },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -668,9 +677,10 @@ function drawZones(ctx, w) {
   // A zone switched off is washed out across the whole column, which is what
   // the out-of-band wash used to do for the band limits. Same statement, and
   // now there is only one control that can make it.
+  const solo = props.soloZone
   props.zones.forEach((zone, i) => {
-    if (zoneSettings(zone).enabled) return
-    paintColumn(i, 'rgba(6,8,7,.62)')
+    const silent = solo >= 0 ? i !== solo : !zoneSettings(zone).enabled
+    if (silent) paintColumn(i, 'rgba(6,8,7,.62)')
   })
   if (props.selectedZone >= 0 && props.selectedZone < props.zones.length) {
     paintColumn(props.selectedZone, tint(props.accent, 0.07))

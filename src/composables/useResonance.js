@@ -44,6 +44,19 @@ const resZones = ref(DEFAULTS.zones ?? [])
 const resSelectedZone = ref(0)
 const resTrim = ref(DEFAULTS.trim)
 
+/**
+ * Zone being soloed, or -1. UI STATE, NEVER A PARAMETER.
+ *
+ * Same rule as resDelta and for the same reason: `applyResonanceRegion` spreads
+ * the param object straight into the kernel, so a monitoring mode living in
+ * there would be one careless key from rendering a soloed pass into the
+ * timeline. Solo is expressible as parameters — it is every other zone at depth
+ * zero — which is exactly what makes it dangerous, and why the transform
+ * happens on the way to the LIVE kernel only. Apply always renders the zones as
+ * they are set.
+ */
+const resSoloZone = ref(-1)
+
 const resPreview = ref(false)
 /**
  * Auditioning the difference rather than the result.
@@ -72,6 +85,19 @@ let resNodes = null
 /** Latest per-frequency frame, for a display that draws it directly. */
 function resDisplayFn() {
   return resNodes?.getDisplay() ?? null
+}
+
+/**
+ * The zones as the live kernel should hear them.
+ *
+ * Identical to the stored set unless a zone is soloed, in which case every
+ * other zone is switched off — which the kernel already understands, so solo
+ * needs no mechanism of its own in the DSP.
+ */
+function liveZones() {
+  const solo = resSoloZone.value
+  if (solo < 0 || solo >= resZones.value.length) return resZones.value
+  return resZones.value.map((z, i) => ({ ...z, enabled: i === solo }))
 }
 
 function currentParams() {
@@ -138,6 +164,9 @@ export function useResonance() {
     for (const [name, value] of Object.entries(currentParams())) {
       chain.updateParam(resonanceEffect.id, name, value)
     }
+    // Not from currentParams: that object is what Apply renders with, and solo
+    // must never reach it.
+    chain.updateParam(resonanceEffect.id, 'zones', liveZones())
     // Not in currentParams, so it needs restoring by hand when the preview is
     // switched back on.
     chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
@@ -187,7 +216,32 @@ export function useResonance() {
   const syncMaxReduction = v => syncParam('maxReduction', resMaxReduction, v)
   const syncMix = v => syncParam('mix', resMix, v)
   const syncTrim = v => syncParam('trim', resTrim, v)
-  const syncZones = v => syncParam('zones', resZones, v)
+  function pushZones() {
+    pushParam('zones', liveZones())
+  }
+
+  const syncZones = (v) => {
+    resZones.value = v
+    pushZones()
+  }
+
+  /**
+   * Hear one zone's processing alone.
+   *
+   * A second click on the same zone clears it, and selecting solo on a zone
+   * that is switched off is allowed — it means "nothing", which is a legitimate
+   * thing to want to hear when you are deciding whether a band is the problem.
+   */
+  function toggleSolo(index) {
+    resSoloZone.value = resSoloZone.value === index ? -1 : index
+    pushZones()
+  }
+
+  function clearSolo() {
+    if (resSoloZone.value < 0) return
+    resSoloZone.value = -1
+    pushZones()
+  }
   const syncMode = v => syncParam('mode', resMode, v)
   const syncPitchRange = v => syncParam('pitchRange', resPitchRange, v)
 
@@ -233,6 +287,10 @@ export function useResonance() {
     // preview was switched on — under a header that no longer said so. Read off
     // the chain rather than the meter loop's handle, which apply() has already
     // dropped by the time it gets here.
+    // Solo is a monitoring state and the effect entry outlives this panel, so
+    // one left set would come back the next time the preview was switched on —
+    // under a panel that no longer said so. Same reason delta is cleared below.
+    resSoloZone.value = -1
     if (resDelta.value) {
       resDelta.value = false
       getEffectChainIfExists()?.effects
@@ -256,6 +314,7 @@ export function useResonance() {
     resTrim,
     resZones,
     resSelectedZone,
+    resSoloZone,
     resRefMode,
     resMode,
     resPreserveHarmonics,
@@ -275,6 +334,8 @@ export function useResonance() {
     syncMix,
     syncTrim,
     syncZones,
+    toggleSolo,
+    clearSolo,
     syncMode,
     syncPitchRange,
     togglePreserveHarmonics,
