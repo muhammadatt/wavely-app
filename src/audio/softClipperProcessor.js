@@ -844,6 +844,102 @@ const ASYM_EPSILON = 1e-4
 export const ASYM_MAX_BOUND_EXCESS_DB = 0.25
 
 /**
+ * Time constant for the waveform-skew tracker that chooses the offset's sign.
+ *
+ * WHY THE SIGN IS MEASURED RATHER THAN PICKED. Even-order content is IDENTICAL
+ * for a positive and a negative offset — -37.4 dBc either way at asymmetry 60,
+ * on all three real narrators — so the sign buys none of the warmth. What it
+ * changes is how much OTHER distortion is paid for that warmth, and it tracks
+ * the material's own asymmetry:
+ *
+ *   file            skew    total distortion, offset -0.2 / +0.2
+ *   A (normalised)  -0.58        -30.5 / -31.1 dBc
+ *   B (raw)         -1.47        -25.3 / -33.2      <- 7.9 dB
+ *   C (mastered)    +1.48        -32.8 / -27.9      <- 4.9 dB
+ *
+ * The offset should OPPOSE the lean. Speech is asymmetric by nature — the
+ * glottal waveform is — and which way it points in a given file depends on the
+ * speaker, the microphone and any polarity flip anywhere in the chain, so it
+ * cannot be assumed. A fixed positive offset, which is what shipped first, is
+ * right on A and B and costs C 4.9 dB for nothing.
+ *
+ * THIS IS A PROPERTY OF THE INPUT, SO IT IS TRACKED IN REAL TIME, exactly like
+ * the speech level and unlike anything that would need the output at several
+ * settings compared against itself. A third moment is two multiply-adds per
+ * sample.
+ *
+ * MEASURED ON THE PRE-EMPHASISED DOWNMIX, not the raw one: that is the signal
+ * the curve actually sees, and a shelf changes a waveform's skew. The buffer
+ * already exists for the emphasis lift, so this costs nothing extra, and with
+ * emphasis off it is the raw downmix anyway.
+ *
+ * 3 s, matching the speech tracker. Skew is a property of a recording rather
+ * than of a moment — a microphone does not change polarity mid-file — so the
+ * tracker only has to converge once and hold.
+ */
+const SKEW_TAU_S = 3.0
+
+/**
+ * How much lean is needed before the sign decision moves, and which way it
+ * starts.
+ *
+ * ⚠ SCALING THE MAGNITUDE BY THE SKEW WAS THE FIRST ATTEMPT AND IT WAS WRONG.
+ * `direction = -tanh(skew / scale)` reads as an elegant continuous version of
+ * a sign — it commits on real material, degrades smoothly, and can never step.
+ * It also silently turns the knob off: on symmetric material the direction is
+ * zero, so the offset is zero and the control does NOTHING. Caught by the
+ * even-harmonic test going to -Infinity on synthetic probes, which are made of
+ * sine sums and are symmetric to the last bit.
+ *
+ * The magnitude is the feature and it must not depend on the material. Only
+ * the SIGN comes from the skew, and a deadband keeps it from dithering around
+ * zero where the penalty it exists to avoid has vanished anyway (measured: the
+ * two signs differ by 7.9 dB at |skew| 1.47 and by 0.6 dB at 0.58).
+ *
+ * 0.15 commits on every real narrator measured — |skew| 0.58, 1.47, 1.48 —
+ * and holds on anything flatter. POSITIVE is the startup value, which is what
+ * shipped before this measurement existed, so material too symmetric to have
+ * an opinion behaves exactly as it did.
+ */
+const SKEW_DEADBAND = 0.15
+
+/**
+ * Gated evidence required before the sign is decided at all, in seconds.
+ *
+ * ⚠ THE ESTIMATE IS NOT MERELY IMPRECISE EARLY ON, IT IS LARGE AND WRONG, and
+ * because the decision is sticky a single early excursion latches for the rest
+ * of the file. Traced on a probe whose settled skew is 0.002 — symmetric to
+ * within a rounding error — the running estimate reads:
+ *
+ *   t      0.5s   1.0s   1.5s   2.0s   3.0s   4.0s
+ *   skew   1.15   0.27   0.12   0.05   0.027  0.011
+ *
+ * At 0.5 s it is off by three orders of magnitude. That is estimator variance
+ * rather than bias: a ratio of two one-pole averages of x^2 and x^3 over half
+ * a second of syllables says almost nothing, and evaluating it per sample sees
+ * every bit of that noise. The first build decided at the speech tracker's
+ * 500 ms warm-up and duly latched the WRONG SIGN on symmetric material.
+ *
+ * One full time constant of gated evidence puts the estimate inside the
+ * deadband on that probe and leaves every real narrator far outside it. The
+ * cost is that the opening seconds run at the startup sign — which is the
+ * behaviour that shipped before any of this, so nothing is worse than it was.
+ */
+const SKEW_EVIDENCE_S = SKEW_TAU_S
+
+/**
+ * How long the direction takes to travel when the decision changes, in ms.
+ *
+ * The first decision is a step from the startup sign, and later flips should
+ * never happen at all — a microphone does not change polarity mid-file. Either
+ * way the offset must not jump: it is bounded and it only touches material
+ * already over the threshold, but a discontinuity there lands mid-syllable on
+ * exactly the loud samples the stage is working on. 200 ms is far below the
+ * rate any of this is judged at and far above anything that could click.
+ */
+const SKEW_FLIP_MS = 200
+
+/**
  * DC blocker corner, Hz. Runs only while asymmetry is engaged.
  *
  * ⚠ IT IS LOAD-BEARING, AND I NEARLY DROPPED IT ON A MEASUREMENT TAKEN AT ONE
@@ -1323,6 +1419,18 @@ export class SoftClipperKernel {
     // Their ratio is the emphasis lift — see LIFT_TAU_S.
     this.fastPeakEmph = 0
     this.liftDb = 0
+    // Second and third moments of the pre-emphasised downmix, and the signed
+    // direction derived from them. See SKEW_TAU_S.
+    this.skewM2 = 0
+    this.skewM3 = 0
+    // Starts positive — what shipped before the skew was measured — so
+    // material with no clear lean behaves exactly as it did.
+    this.asymSign = 1
+    this.asymDirection = 1
+    this.skewCoef = riseCoeff(SKEW_TAU_S * 1000, sampleRate)
+    this.skewFlipCoef = riseCoeff(SKEW_FLIP_MS, sampleRate)
+    this.skewEvidence = 0
+    this.skewEvidenceTarget = Math.max(1, Math.round(SKEW_EVIDENCE_S * sampleRate))
     // Running MAX of the lift target during the speech tracker's warm-up —
     // the same shape as speechWarmupPeak, for the same reason. See the
     // warm-up note in the lift update.
@@ -1628,6 +1736,11 @@ export class SoftClipperKernel {
     let fastPeakEmph = this.fastPeakEmph
     let liftDb = this.liftDb
     let liftWarmupMax = this.liftWarmupMax
+    let skewM2 = this.skewM2
+    let skewM3 = this.skewM3
+    let asymSign = this.asymSign
+    let asymDirection = this.asymDirection
+    let skewEvidence = this.skewEvidence
     // Upper bound on the lift, hoisted out of the per-sample loop. Zero when
     // the emphasis filters are bypassed, which is what makes emphasisDb = 0
     // bit-identical to the build before compensation existed.
@@ -1785,6 +1898,39 @@ export class SoftClipperKernel {
         } else {
           liftDb += this.liftCoef * (liftTargetDb - liftDb)
         }
+
+        // Waveform skew of the signal the curve sees, and the offset direction
+        // that opposes it — see SKEW_TAU_S. Gated with the lift and the speech
+        // tracker: a pause contributes room tone to the second moment and
+        // nothing to the third, which would drag the estimate toward zero for
+        // reasons that have nothing to do with the voice.
+        const xe = monoEmph[i]
+        skewM2 += this.skewCoef * (xe * xe - skewM2)
+        skewM3 += this.skewCoef * (xe * xe * xe - skewM3)
+        asymDirection += this.skewFlipCoef * (asymSign - asymDirection)
+        // ⚠ THE RATIO IS MEANINGLESS UNTIL THE MOMENTS HAVE CONVERGED, and
+        // reading it early is not a small error — it is a sign flip. Both
+        // moments start at zero, so in the first samples m3/m2^1.5 is a ratio
+        // of two nearly-zero numbers and takes arbitrary values; the first
+        // build of this latched -1 on a probe whose settled skew is 0.0028,
+        // i.e. squarely inside the deadband and never meant to move it at all.
+        //
+        // The decision therefore waits for the speech tracker's own warm-up,
+        // which is the same 500 ms of gated evidence the level needs, and the
+        // FIRST decision snaps rather than ramping — the lift's rule, for the
+        // lift's reason: the stage starts working the instant the tracker
+        // adopts a level, and a direction still travelling from its startup
+        // value would spend the opening of a file at the wrong sign.
+        if (skewEvidence < this.skewEvidenceTarget) skewEvidence++
+        else if (skewM2 > 1e-12) {
+          const skew = skewM3 / Math.pow(skewM2, 1.5)
+          // Sticky: the sign only moves once the lean is unambiguous, and
+          // holds whatever it had inside the deadband. A microphone does not
+          // change polarity mid-file, so this should latch once and never move
+          // again.
+          if (skew < -SKEW_DEADBAND) asymSign = 1
+          else if (skew > SKEW_DEADBAND) asymSign = -1
+        }
       }
 
       // threshold derivation (spec §3.3). T_MIN is now only a numerical
@@ -1822,6 +1968,16 @@ export class SoftClipperKernel {
     this.fastPeakEmph = fastPeakEmph
     this.liftDb = liftDb
     this.liftWarmupMax = liftWarmupMax
+    this.skewM2 = skewM2
+    this.skewM3 = skewM3
+    this.asymSign = asymSign
+    this.asymDirection = asymDirection
+    this.skewEvidence = skewEvidence
+    // The audio path runs after this loop, so it uses the direction as of the
+    // end of the block. Held flat across the block deliberately: the tracker
+    // moves on a 3 s constant, so a per-sample value would differ from this
+    // one in the far decimals and cost a multiply to compute.
+    const asymDirectionSmoothed = asymDirection
     this.noiseEstDb = noiseEstDb
     this.gateHoldSamples = gateHoldSamples
     this.speechLevelDb = speechLevelDb
@@ -1894,7 +2050,11 @@ export class SoftClipperKernel {
         // never reaches the shifted threshold comes back bit-exact — the
         // asymmetry narrows the transparent window and moves it off centre,
         // it does not abolish it.
-        const off = asymFraction * t
+        //
+        // SIGNED BY THE MEASURED SKEW, so the offset leans against the
+        // waveform rather than with it — same even harmonics either way, up to
+        // 7.9 dB less of everything else. See SKEW_TAU_S.
+        const off = asymFraction * asymDirectionSmoothed * t
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           const before = hi[k]

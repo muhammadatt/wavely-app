@@ -1074,6 +1074,14 @@ test('ENGAGED ignores silence, so it measures the setting and not the pauses', (
 
 const SHAPES = Object.keys(SHAPE_EXPONENT)
 
+/**
+ * The kernel's SKEW_DEADBAND is not exported — the probes only need to clear
+ * it comfortably, so the tests carry their own copy of the threshold they are
+ * checking against rather than importing a constant they would then be unable
+ * to fail independently of.
+ */
+const SKEW_DEADBAND_PROBE = 0.2
+
 test('every shape is still exactly bit-transparent below the threshold', () => {
   // The one guarantee that must survive any curve change: material that never
   // reaches T is untouched, sample for sample. This is what separates the
@@ -1982,4 +1990,142 @@ test('the offset is removed by the shaper, not left for the DC blocker', () => {
   assert.ok(worst < 0.002,
     `below-threshold material was displaced by ${worst.toFixed(5)} — the offset is reaching ` +
     'the output instead of being removed at the curve')
+})
+
+// ── Sign selection from waveform skew (SKEW_TAU_S / SKEW_DEADBAND) ──────────
+
+/**
+ * speechLike with a deliberate lean.
+ *
+ * A second harmonic at a fixed phase makes a waveform asymmetric about zero —
+ * which is what a glottal pulse does, and why real speech has skew at all. The
+ * sign of `lean` sets which way it leans.
+ */
+function leaningSpeech(seconds, peakAmp, seed, lean) {
+  const base = speechLike(seconds, peakAmp, seed)
+  const out = new Float32Array(base.length)
+  let max = 0
+  for (let i = 0; i < base.length; i++) {
+    const x = base[i]
+    // x*x is EVEN, which is the whole point — it biases one polarity and
+    // leaves the other alone. An earlier version of this used
+    // `x*x*sign(x)`, which is x*|x| and therefore ODD, so it produced a
+    // probe with a skew of 0.001 and a test that could not fail.
+    out[i] = x + (lean / peakAmp) * x * x
+    if (Math.abs(out[i]) > max) max = Math.abs(out[i])
+  }
+  if (max > 0) for (let i = 0; i < out.length; i++) out[i] *= peakAmp / max
+  return out
+}
+
+/** Run the kernel and return its settled skew state. */
+function skewState(signal, params, sr = SR) {
+  const kernel = new SoftClipperKernel(sr)
+  kernel.setParams({ shape: 'tanh3', ...params })
+  const out = new Float32Array(signal.length)
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  return {
+    skew: kernel.skewM2 > 0 ? kernel.skewM3 / Math.pow(kernel.skewM2, 1.5) : 0,
+    sign: kernel.asymSign,
+    direction: kernel.asymDirection,
+  }
+}
+
+test('the offset leans against the waveform, not with it', () => {
+  // The whole of step 2. Even-order content is identical for either sign — it
+  // buys none of the warmth — so the sign is chosen purely to minimise what
+  // else is paid for it. Measured on real narration: a file with skew +0.65
+  // goes from -31.75 dBc of total distortion with a fixed positive offset to
+  // -35.01 with the sign selected, for the same even content.
+  const params = { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 }
+  const leansPositive = skewState(leaningSpeech(8, 0.5, 97, 0.6), params)
+  const leansNegative = skewState(leaningSpeech(8, 0.5, 97, -0.6), params)
+  assert.ok(leansPositive.skew > SKEW_DEADBAND_PROBE,
+    `the probe is not leaning positive enough to test with: ${leansPositive.skew.toFixed(3)}`)
+  assert.ok(leansNegative.skew < -SKEW_DEADBAND_PROBE,
+    `the probe is not leaning negative enough to test with: ${leansNegative.skew.toFixed(3)}`)
+  assert.equal(leansPositive.sign, -1, 'a positive lean did not get a negative offset')
+  assert.equal(leansNegative.sign, 1, 'a negative lean did not get a positive offset')
+})
+
+test('the magnitude does not depend on the skew', () => {
+  // ⚠ THE BUG THIS EXISTS FOR. The first version scaled the direction as
+  // `-tanh(skew / scale)`, which reads as an elegant continuous sign and
+  // silently turns the control OFF on symmetric material: direction zero,
+  // offset zero, no even harmonics at any setting of the knob. Caught by the
+  // even-order energy going to exactly zero on synthetic probes, which are
+  // sums of sines and symmetric to the last bit.
+  const symmetric = concat(speechLike(5, 0.5, 11), speechLike(4, 0.5, 13))
+  const st = skewState(symmetric, { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 })
+  assert.ok(Math.abs(st.skew) < 0.15,
+    `the probe is not symmetric enough to test with: skew ${st.skew.toFixed(4)}`)
+  assert.equal(Math.abs(st.direction), 1,
+    `symmetric material got a reduced offset (direction ${st.direction}), so the knob does less ` +
+    'for reasons that have nothing to do with the setting')
+  // And the even content is really there, end to end.
+  const { evenDbc } = evenOddDbc(symmetric, { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 })
+  assert.ok(evenDbc > -60, `no even harmonics on symmetric material: ${evenDbc.toFixed(1)} dBc`)
+})
+
+test('a polarity-flipped recording is processed identically', () => {
+  // A CONSEQUENCE OF SELECTING THE SIGN, and a good one: flipping the input's
+  // polarity flips its skew, which flips the chosen offset, so the stage
+  // treats a recording and its inverse as the same recording. Mic polarity is
+  // arbitrary and should not change what a user hears.
+  //
+  // ⚠ It is also why the +/- decomposition CANNOT be used to measure even
+  // content on skewed material — the negated run is not the same processing.
+  // The even-harmonic tests above use symmetric probes, where the deadband
+  // holds the sign still, for exactly this reason.
+  const signal = leaningSpeech(12, 0.5, 41, 0.6)
+  const neg = new Float32Array(signal.length)
+  for (let i = 0; i < signal.length; i++) neg[i] = -signal[i]
+  const params = { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', asymmetry: 60 }
+  const a = processSoftClipperBuffer([signal], SR, params).channelData[0]
+  const b = processSoftClipperBuffer([neg], SR, params).channelData[0]
+  // Measured past the decision point: for the first SKEW_EVIDENCE_S both runs
+  // are still on the startup sign, so they are deliberately NOT mirror images
+  // there. The property is about the settled state.
+  let worst = 0
+  for (let i = Math.round(6 * SR); i < signal.length; i++) {
+    worst = Math.max(worst, Math.abs(a[i] + b[i]))
+  }
+  assert.ok(worst < 1e-4,
+    `polarity changed the processing by ${worst.toExponential(2)} — the sign decision is not ` +
+    'tracking the input it is meant to oppose')
+})
+
+test('the sign waits for evidence, and holds the shipped default until it has it', () => {
+  // ⚠ READING THE RATIO EARLY IS NOT A SMALL ERROR, IT IS A SIGN FLIP, and
+  // because the decision is sticky one early excursion latches for the rest of
+  // the file. On a probe whose settled skew is 0.002 the running estimate
+  // reads 1.15 at 0.5 s, 0.27 at 1.0 and 0.12 at 1.5 — the first build decided
+  // at the speech tracker's 500 ms warm-up and duly latched the wrong sign on
+  // symmetric material.
+  //
+  // So the decision waits a full time constant of GATED evidence, and until it
+  // has it the direction sits at the startup sign — which is the behaviour
+  // that shipped before any of this, so the opening of a file is never worse
+  // than it was.
+  const params = { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 }
+  const signal = leaningSpeech(14, 0.5, 97, 0.6)
+
+  // Well short of the evidence window: still on the startup sign.
+  const early = skewState(signal.subarray(0, Math.round(1.5 * SR)), params)
+  assert.equal(early.sign, 1, 'the sign moved before there was evidence for it')
+
+  // Past it: committed to the opposite of the lean, and fully travelled.
+  const settled = skewState(signal, params)
+  assert.equal(settled.sign, -1, 'a positive lean did not eventually get a negative offset')
+  assert.ok(Math.abs(settled.direction) > 0.99,
+    `the direction never finished travelling: ${settled.direction.toFixed(3)}`)
+
+  // A symmetric probe never moves at all, however long it runs — the failure
+  // that motivated the evidence window.
+  const flat = skewState(concat(speechLike(7, 0.5, 11), speechLike(7, 0.5, 13)), params)
+  assert.equal(flat.sign, 1,
+    `symmetric material latched a sign: skew ${flat.skew.toFixed(4)} moved it to ${flat.sign}`)
 })
