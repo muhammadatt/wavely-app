@@ -12,7 +12,8 @@ import {
   RESONANCE_ZONE_MAX,
   RESONANCE_ZONE_MIN,
   RESONANCE_ZONE_MIN_OCTAVES,
-  RESONANCE_ZONE_SENS_MAX_DB,
+  RESONANCE_ZONE_RANGES,
+  RESONANCE_ZONE_STOCK,
   zoneBounds,
 } from '../../audio/resonanceParams.js'
 
@@ -87,16 +88,49 @@ export function moveBoundary(zones, index, freqHz, floorHz, ceilHz) {
   return patchZone(zones, index, { hiHz: Math.round(clamp(freqHz, lo, hi)) })
 }
 
-export function setSensitivity(zones, index, db) {
-  if (index < 0 || index >= zones.length) return zones
-  return patchZone(zones, index, {
-    sensitivityDb: clamp(db, -RESONANCE_ZONE_SENS_MAX_DB, RESONANCE_ZONE_SENS_MAX_DB),
-  })
+/** Set one of a zone's three settings, clamped to that parameter's range. */
+export function setZoneParam(zones, index, name, value) {
+  const range = RESONANCE_ZONE_RANGES[name]
+  if (index < 0 || index >= zones.length || !range) return zones
+  return patchZone(zones, index, { [name]: clamp(value, range.min, range.max) })
 }
 
-export function setDepth(zones, index, depth) {
-  if (index < 0 || index >= zones.length) return zones
-  return patchZone(zones, index, { depth: clamp(depth, 0, 1) })
+/**
+ * Add or remove zones until there are `count` of them.
+ *
+ * Growing splits the WIDEST zone in octaves, shrinking removes the boundary
+ * with the narrowest zone under it — so repeatedly stepping the count up and
+ * down tends back toward evenly spread boundaries rather than piling splits
+ * into one corner of the spectrum. Returns the list unchanged, by identity,
+ * when it is already the right length or there is no room.
+ */
+export function setZoneCount(zones, count, axis, floorHz, ceilHz, idFor) {
+  let next = zones
+  const target = clamp(count, RESONANCE_ZONE_MIN, RESONANCE_ZONE_MAX)
+  let guard = RESONANCE_ZONE_MAX * 2
+  while (next.length < target && guard-- > 0) {
+    const b = zoneBounds(next, floorHz, ceilHz)
+    let widest = 0
+    for (let i = 1; i < b.length; i++) {
+      if (b[i].hiHz / b[i].loHz > b[widest].hiHz / b[widest].loHz) widest = i
+    }
+    const mid = Math.sqrt(b[widest].loHz * b[widest].hiHz)
+    const grown = splitZone(next, mid, axis, idFor(next.length), floorHz, ceilHz)
+    if (grown === next) break
+    next = grown
+  }
+  guard = RESONANCE_ZONE_MAX * 2
+  while (next.length > target && guard-- > 0) {
+    const b = zoneBounds(next, floorHz, ceilHz)
+    let narrowest = 0
+    for (let i = 1; i < b.length; i++) {
+      if (b[i].hiHz / b[i].loHz < b[narrowest].hiHz / b[narrowest].loHz) narrowest = i
+    }
+    const shrunk = removeBoundary(next, Math.min(narrowest, next.length - 2))
+    if (shrunk === next) break
+    next = shrunk
+  }
+  return next
 }
 
 export function toggleZone(zones, index) {

@@ -14,6 +14,8 @@ import {
   resonanceDisplayRange,
   RESONANCE_ATTACK_MIN_MS,
   RESONANCE_RELEASE_MIN_MS,
+  uniformZones,
+  RESONANCE_ZONE_STOCK as ZONE_STOCK,
 } from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -122,13 +124,25 @@ function boostRemoved(dry, freqHz, q, gainDb, params) {
  */
 const UNPROTECTED = { ...RESONANCE_KERNEL_DEFAULTS, preserveHarmonics: false }
 
+/**
+ * Kernel params with one zone spanning everything.
+ *
+ * Depth, sharpness and selectivity are per-zone settings — there is no global
+ * value for any of them — so a test that wants "this setting, everywhere" says
+ * so with a uniform zone. Not a shim: the kernel has one path and this is what
+ * uniform looks like in it.
+ */
+function zoned(base, settings) {
+  return { ...base, zones: uniformZones(settings) }
+}
+
 test('reports a latency of exactly one FFT frame', () => {
   assert.equal(new ResonanceKernel(SR).latencySamples, LATENCY)
 })
 
 test('passes audio through delayed, not mangled, at zero depth', () => {
   const sig = voice({ seconds: 2 })
-  const { channelData } = processResonanceBuffer([sig], SR, { depth: 0 })
+  const { channelData } = processResonanceBuffer([sig], SR, { zones: uniformZones({ depth: 0 }) })
   let maxErr = 0
   for (let i = LATENCY; i + LATENCY < sig.length; i++) {
     maxErr = Math.max(maxErr, Math.abs(channelData[0][i + LATENCY] - sig[i]))
@@ -144,7 +158,7 @@ test('the delay is measurable, not merely advertised', () => {
   for (let i = 2000; i < 2400; i++) {
     sig[i] = Math.sin((2 * Math.PI * 800 * i) / SR) * Math.sin((Math.PI * (i - 2000)) / 400)
   }
-  const out = processResonanceBuffer([sig], SR, { depth: 0 }).channelData[0]
+  const out = processResonanceBuffer([sig], SR, { zones: uniformZones({ depth: 0 }) }).channelData[0]
 
   const argmax = buf => {
     let idx = -1
@@ -174,7 +188,10 @@ test('harmonic mask geometry is pinned', () => {
   // coverage measured 100% for every f0 at or below 82 Hz — "protect the
   // harmonics" collapses into "protect everything" and the effect goes inert.
   const kernel = new ResonanceKernel(SR)
-  const golden = { 100: 600, 120.5: 495, 150: 665, 154.7: 645, 220: 694, 300: 578 }
+  // Re-recorded when the adjustable band ceiling was removed: the walk now runs
+  // to Nyquist rather than stopping at a 20 kHz default, so every count is
+  // higher by the harmonics between the two.
+  const golden = { 100: 660, 120.5: 546, 150: 730, 154.7: 710, 220: 782, 300: 655 }
   for (const [f0, expected] of Object.entries(golden)) {
     const mask = kernel._harmonicMask(parseFloat(f0))
     let count = 0
@@ -232,14 +249,14 @@ test('suppresses a narrow resonance', () => {
 
 test('depth scales how much comes out', () => {
   const dry = voice()
-  const light = boostRemoved(dry, 3000, 40, 12, { ...UNPROTECTED, depth: 0.2 })
-  const heavy = boostRemoved(dry, 3000, 40, 12, { ...UNPROTECTED, depth: 1.0 })
+  const light = boostRemoved(dry, 3000, 40, 12, zoned(UNPROTECTED, { depth: 0.2 }))
+  const heavy = boostRemoved(dry, 3000, 40, 12, zoned(UNPROTECTED, { depth: 1.0 }))
   assert.ok(heavy > light + 2, `depth barely mattered: ${light.toFixed(1)} vs ${heavy.toFixed(1)}`)
 })
 
 test('selectivity gates what counts as a resonance', () => {
   const dry = voice()
-  const removed = boostRemoved(dry, 3000, 40, 12, { ...UNPROTECTED, selectivity: 60 })
+  const removed = boostRemoved(dry, 3000, 40, 12, zoned(UNPROTECTED, { selectivity: 24 }))
   assert.ok(removed < 2, `expected almost nothing at selectivity 60, got ${removed.toFixed(1)} dB`)
 })
 
@@ -253,7 +270,10 @@ test('max reduction caps the cut', () => {
 test('band limits confine the reduction', () => {
   const dry = voice()
   const inBand = boostRemoved(dry, 3000, 40, 12, UNPROTECTED)
-  const outOfBand = boostRemoved(dry, 3000, 40, 12, { ...UNPROTECTED, freqCeilHz: 2000 })
+  const outOfBand = boostRemoved(dry, 3000, 40, 12, { ...UNPROTECTED, zones: [
+    { id: 'a', hiHz: 2000, depth: 1, sharpness: 0.8, selectivity: 6, enabled: true },
+    { id: 'b', hiHz: 20000, depth: 1, sharpness: 0.8, selectivity: 6, enabled: false },
+  ] })
   assert.ok(inBand > 6, `in-band removal was only ${inBand.toFixed(1)} dB`)
   assert.ok(outOfBand < 1.5, `above the ceiling should be untouched, got ${outOfBand.toFixed(1)} dB`)
 })
@@ -340,18 +360,21 @@ test('the range the UI shows is the range the kernel uses', () => {
   assert.ok(effectivePitchRange(44100, 'wide').minHz > PITCH_RANGES.wide.minHz)
 })
 
-test('the mask cache survives a knob move that does not change its geometry', () => {
-  // The effect wrapper posts the whole param object on every knob move, so an
-  // `in partial` test on the key would clear the cache on every twist.
+test('the mask cache survives every param change', () => {
+  // It used to depend on the band ceiling, which ended the harmonic walk. There
+  // is no adjustable ceiling any more — the walk runs to Nyquist — so the mask
+  // is a function of F0 alone and nothing a knob can do invalidates it. The
+  // effect wrapper posts the whole param object on every move, so a cache that
+  // cleared on any change would in practice never survive one.
   const kernel = new ResonanceKernel(SR)
   kernel._harmonicMask(150)
   assert.equal(kernel.maskCache.size, 1)
 
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, depth: 0.4 })
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ depth: 0.4 }) })
   assert.equal(kernel.maskCache.size, 1, 'depth does not move a single harmonic')
 
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, freqCeilHz: 12000 })
-  assert.equal(kernel.maskCache.size, 0, 'the ceiling ends the harmonic walk')
+  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ selectivity: 12 }) })
+  assert.equal(kernel.maskCache.size, 1, 'nor does selectivity')
 })
 
 test('output is independent of the block size it was fed in', () => {
@@ -535,7 +558,7 @@ test('the displayed spectrum is calibrated in dBFS', () => {
   const sig = new Float32Array(n)
   for (let i = 0; i < n; i++) sig[i] = Math.sin((2 * Math.PI * hz * i) / SR)
 
-  const d = readDisplay(runKernel(sig, { ...UNPROTECTED, depth: 0 }))
+  const d = readDisplay(runKernel(sig, zoned(UNPROTECTED, { depth: 0 })))
   const peak = argmax(d.mag)
   assert.ok(
     Math.abs(Math.log2(d.hz(peak) / hz)) < 0.05,
@@ -555,7 +578,7 @@ test('the reference sits below a resonance by more than the selectivity', () => 
   const d = readDisplay(kernel)
   const at = argmax(d.reduction)
   assert.ok(
-    d.mag[at] - d.reference[at] > RESONANCE_KERNEL_DEFAULTS.selectivity,
+    d.mag[at] - d.reference[at] > ZONE_STOCK.selectivity,
     `peak stood only ${(d.mag[at] - d.reference[at]).toFixed(1)} dB over the reference`,
   )
 })
@@ -703,7 +726,7 @@ test('output plus delta reconstructs the input', () => {
   // At zero depth the gain is 1 everywhere, so this is the input as the STFT
   // reconstructs it — the only fair reference, since it carries the same
   // latency and the same overlap-add normalisation as the other two.
-  const dry = renderKernel(sig, { ...UNPROTECTED, depth: 0 })
+  const dry = renderKernel(sig, zoned(UNPROTECTED, { depth: 0 }))
 
   let worst = 0
   for (let i = 0; i < sig.length; i++) {
@@ -719,7 +742,7 @@ test('delta carries what was removed, and only that', () => {
   // delta measured there says more about the mask than about this feature.
   const sig = resonate(noise(), 3000, 40, 18)
   const delta = renderKernel(sig, UNPROTECTED, { monitorDelta: true })
-  const dry = renderKernel(sig, { ...UNPROTECTED, depth: 0 })
+  const dry = renderKernel(sig, zoned(UNPROTECTED, { depth: 0 }))
 
   // Something is there: a silent delta would satisfy the reconstruction test
   // above whenever the suppressor happened to be doing nothing.
@@ -766,7 +789,7 @@ test('the spread kernel is a constant width in octaves, not in bins', () => {
   // here as a ratio to the bin index, which is what "constant in octaves"
   // means: half-width proportional to frequency.
   const k = new ResonanceKernel(SR)
-  k.setParams({ sharpness: 0.8 })
+  k.setParams({ zones: uniformZones({ sharpness: 0.8 }) })
   const at = f => k.spreadHalfBins[Math.round(f / k.binWidth)]
 
   // 3 kHz is the calibration point: ±6 bins, exactly what the linear kernel
@@ -781,7 +804,7 @@ test('the spread kernel is a constant width in octaves, not in bins', () => {
   }
   // Wider at lower sharpness, everywhere.
   const wide = new ResonanceKernel(SR)
-  wide.setParams({ sharpness: 0.2 })
+  wide.setParams({ zones: uniformZones({ sharpness: 0.2 }) })
   for (const f of [1000, 3000, 9000]) {
     const bin = Math.round(f / wide.binWidth)
     assert.ok(
@@ -816,8 +839,8 @@ test('sharpness moves the detection scale, not just the cut width', () => {
   // The lifter cutoff used to be F0 and nothing else, so nothing the user
   // could touch changed what counted as a resonance in the first place.
   const dry = voice({ f0: 150 })
-  const broad = boostRemoved(dry, 3000, 1.5, 10, { ...UNPROTECTED, sharpness: 0.4 })
-  const surgical = boostRemoved(dry, 3000, 1.5, 10, { ...UNPROTECTED, sharpness: 1 })
+  const broad = boostRemoved(dry, 3000, 1.5, 10, zoned(UNPROTECTED, { sharpness: 0.4 }))
+  const surgical = boostRemoved(dry, 3000, 1.5, 10, zoned(UNPROTECTED, { sharpness: 1 }))
   assert.ok(
     broad > surgical + 8,
     `low sharpness should catch a broad hump the high setting walks past: ${broad.toFixed(1)} vs ${surgical.toFixed(1)}`,
@@ -831,14 +854,18 @@ test('the envelope is no finer than the harmonic comb, and no finer than asked',
   // a deep voice got a reference four times finer than a high one and the
   // effect quietly did less on it.
   const k = new ResonanceKernel(SR)
-  k.setParams({ sharpness: 0.8 })
+  k.setParams({ zones: uniformZones({ sharpness: 0.8 }) })
+  // The target lives on the envelope group now — one per distinct zone
+  // sharpness, because sharpness sets the scale of a whole transform and a
+  // zone asking for a different one needs its own envelope.
+  const target = k.envGroups[0].lifterTarget
   const combLimit = f0 => Math.max(20, Math.trunc((0.4 * SR) / f0))
 
   // A 220 Hz voice is comb-limited: the target is finer than the comb allows.
-  assert.ok(k.lifterTarget > combLimit(220))
+  assert.ok(target > combLimit(220))
   // An 80 Hz voice is not, and used to be given nearly twice the resolution.
-  assert.ok(k.lifterTarget < combLimit(80))
-  assert.ok(combLimit(80) / k.lifterTarget > 1.7)
+  assert.ok(target < combLimit(80))
+  assert.ok(combLimit(80) / target > 1.7)
 })
 
 test('the ballistic minima are settings the frame rate can express', () => {

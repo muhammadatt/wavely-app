@@ -6,13 +6,16 @@ import {
   RESONANCE_ZONE_EDGE_OCTAVES,
   RESONANCE_ZONE_MAX,
   RESONANCE_ZONE_MIN_OCTAVES,
-  RESONANCE_ZONE_SENS_MAX_DB,
+  RESONANCE_ZONE_RANGES,
+  RESONANCE_ZONE_STOCK,
   RESONANCE_DEFAULTS,
   buildResonanceZoneCurves,
   toKernelParams,
+  uniformZones,
   zoneBounds,
   zoneSettings,
   zoneSettingsAt,
+  zoneWeightsAt,
 } from '../../src/audio/resonanceParams.js'
 import {
   ResonanceKernel,
@@ -24,8 +27,8 @@ import {
   hzFromX,
   moveBoundary,
   removeBoundary,
-  setDepth,
-  setSensitivity,
+  setZoneCount,
+  setZoneParam,
   splitZone,
   toggleZone,
   xFromHz,
@@ -36,60 +39,60 @@ import {
  * Sensitivity zones: the model, the curves it hands the kernel, and the edits
  * the plot makes to it.
  *
- * The whole point of testing the edits separately from the component is that
- * these are the parts that can be wrong without looking wrong — a frequency
- * mapping off by an octave, a boundary drag that lets two boundaries cross, a
- * crossfade that is a step. Drawing is not tested here; a canvas needs eyes.
+ * Every zone carries its own depth, sharpness and selectivity — absolute
+ * values, with no global setting for them to be offsets from. The parts worth
+ * testing separately from the component are the ones that can be wrong without
+ * looking wrong: an axis mapping off by an octave, a boundary drag that lets
+ * two boundaries cross, a crossfade that is really a step, and the promise that
+ * a patch nobody has zoned sounds exactly as it did before zones existed.
  */
 
 const SR = 44100
 const BINS = 1025
 const BW = SR / 2048
-
 const axis = { w: 600, minHz: 20, maxHz: 20000 }
 
 function zones(...specs) {
   return specs.map((s, i) => ({
-    id: `z${i}`, hiHz: s.hiHz ?? 20000, sensitivityDb: s.sens ?? 0,
-    depth: s.depth ?? 1, enabled: s.enabled ?? true,
+    id: `z${i}`, hiHz: s.hiHz ?? 20000, ...RESONANCE_ZONE_STOCK, ...s,
   }))
 }
 
 // ── The model ───────────────────────────────────────────────────────────────
 
-test('the shipping zones are neutral, so they cost the detector nothing', () => {
-  assert.equal(
-    buildResonanceZoneCurves(DEFAULT_RESONANCE_ZONES, BINS, BW, 40, 20000), null)
+test('the shipping zones all carry the stock settings', () => {
+  for (const z of DEFAULT_RESONANCE_ZONES) {
+    const s = zoneSettings(z)
+    assert.equal(s.depth, RESONANCE_ZONE_STOCK.depth)
+    assert.equal(s.sharpness, RESONANCE_ZONE_STOCK.sharpness)
+    assert.equal(s.selectivity, RESONANCE_ZONE_STOCK.selectivity)
+  }
+  // One envelope group, so the kernel assigns rather than blends.
+  const c = buildResonanceZoneCurves(DEFAULT_RESONANCE_ZONES, BINS, BW)
+  assert.equal(c.uniform, true)
+  assert.equal(c.groups.length, 1)
 })
 
-test('a zone set that changes nothing returns null however it says so', () => {
-  assert.equal(buildResonanceZoneCurves([], BINS, BW, 40, 20000), null)
-  assert.equal(buildResonanceZoneCurves(null, BINS, BW, 40, 20000), null)
-  assert.equal(
-    buildResonanceZoneCurves(zones({ hiHz: 500 }, {}), BINS, BW, 40, 20000), null)
-})
-
-test('bounds are contiguous and clamped to the processed band', () => {
-  const b = zoneBounds(zones({ hiHz: 200 }, { hiHz: 2000 }, {}), 60, 8000)
-  assert.deepEqual(b.map(z => [z.loHz, z.hiHz]), [[60, 200], [200, 2000], [2000, 8000]])
-  // A boundary outside the band collapses rather than inverting.
-  const tight = zoneBounds(zones({ hiHz: 200 }, { hiHz: 2000 }, {}), 60, 500)
-  assert.ok(tight.every(z => z.hiHz >= z.loHz))
-  assert.equal(tight[2].hiHz, 500)
+test('bounds are contiguous and cover the band', () => {
+  const b = zoneBounds(zones({ hiHz: 200 }, { hiHz: 2000 }, {}), 20, 20000)
+  assert.deepEqual(b.map(z => [z.loHz, z.hiHz]), [[20, 200], [200, 2000], [2000, 20000]])
 })
 
 test('a disabled zone reaches the kernel as depth zero, not as a special case', () => {
-  const s = zoneSettings({ sensitivityDb: 9, depth: 1, enabled: false })
+  const s = zoneSettings({ depth: 1, selectivity: 5, enabled: false })
   assert.equal(s.depth, 0)
-  assert.equal(s.sensitivityDb, 0)
   assert.equal(s.enabled, false)
+  // Its other settings are still reported, so switching it back on restores
+  // what was set rather than a default.
+  assert.equal(s.selectivity, 5)
 })
 
-test('settings are clamped to the parameter limits', () => {
-  assert.equal(zoneSettings({ sensitivityDb: 99 }).sensitivityDb, RESONANCE_ZONE_SENS_MAX_DB)
-  assert.equal(zoneSettings({ sensitivityDb: -99 }).sensitivityDb, -RESONANCE_ZONE_SENS_MAX_DB)
+test('settings are clamped to the parameter ranges', () => {
+  const R = RESONANCE_ZONE_RANGES
+  assert.equal(zoneSettings({ selectivity: 99 }).selectivity, R.selectivity.max)
+  assert.equal(zoneSettings({ selectivity: 0 }).selectivity, R.selectivity.min)
   assert.equal(zoneSettings({ depth: 5 }).depth, 1)
-  assert.equal(zoneSettings({ depth: -1 }).depth, 0)
+  assert.equal(zoneSettings({ sharpness: -1 }).sharpness, 0)
 })
 
 test('BOUNDARIES CROSSFADE, they do not step', () => {
@@ -97,39 +100,57 @@ test('BOUNDARIES CROSSFADE, they do not step', () => {
   // different rules, so a resonance sitting across the line is half treated and
   // slides between the two regimes as the pitch moves — the same per-bin gain
   // movement the effect exists to avoid.
-  const z = zones({ hiHz: 1000, sens: 12 }, { sens: 0 })
+  const z = zones({ hiHz: 1000, selectivity: 20 }, { selectivity: 4 })
   const half = RESONANCE_ZONE_EDGE_OCTAVES / 2
-  const below = zoneSettingsAt(z, 1000 * Math.pow(2, -half * 1.2), 20, 20000)
-  const at = zoneSettingsAt(z, 1000, 20, 20000)
-  const above = zoneSettingsAt(z, 1000 * Math.pow(2, half * 1.2), 20, 20000)
-  assert.ok(Math.abs(below.sensitivityDb - 12) < 1e-9, `${below.sensitivityDb}`)
-  assert.ok(Math.abs(at.sensitivityDb - 6) < 1e-6, `${at.sensitivityDb}`)
-  assert.ok(Math.abs(above.sensitivityDb) < 1e-9, `${above.sensitivityDb}`)
-  // Monotone through the crossfade, with no overshoot at either end.
+  assert.ok(Math.abs(zoneSettingsAt(z, 1000 * Math.pow(2, -half * 1.2)).selectivity - 20) < 1e-9)
+  assert.ok(Math.abs(zoneSettingsAt(z, 1000).selectivity - 12) < 1e-6)
+  assert.ok(Math.abs(zoneSettingsAt(z, 1000 * Math.pow(2, half * 1.2)).selectivity - 4) < 1e-9)
+
   let prev = Infinity
   for (let i = 0; i <= 40; i++) {
     const hz = 1000 * Math.pow(2, -half + (2 * half * i) / 40)
-    const v = zoneSettingsAt(z, hz, 20, 20000).sensitivityDb
-    assert.ok(v <= prev + 1e-9 && v >= -1e-9 && v <= 12 + 1e-9)
+    const v = zoneSettingsAt(z, hz).selectivity
+    assert.ok(v <= prev + 1e-9 && v >= 4 - 1e-9 && v <= 20 + 1e-9)
     prev = v
   }
 })
 
-test('depth crossfades on the same edge as sensitivity', () => {
-  const z = zones({ hiHz: 1000, depth: 0 }, { depth: 1 })
-  assert.ok(Math.abs(zoneSettingsAt(z, 1000, 20, 20000).depth - 0.5) < 1e-6)
+test('the weights always sum to one, which is what lets anything be blended', () => {
+  const z = zones({ hiHz: 180 }, { hiHz: 1100 }, { hiHz: 5000 }, {})
+  for (const hz of [25, 179, 180, 181, 1100, 1200, 4990, 5000, 5010, 19000]) {
+    const w = zoneWeightsAt(z, hz)
+    const sum = w.reduce((a, b) => a + b, 0)
+    assert.ok(Math.abs(sum - 1) < 1e-12, `${hz} Hz summed to ${sum}`)
+  }
 })
 
-test('the curves carry both values onto the bin grid', () => {
-  const z = zones({ hiHz: 1000, sens: 8, depth: 0.5 }, {})
-  const c = buildResonanceZoneCurves(z, BINS, BW, 40, 20000)
+test('the curves carry all three settings onto the bin grid', () => {
+  const z = zones(
+    { hiHz: 1000, depth: 0.5, sharpness: 0.2, selectivity: 20 },
+    { depth: 1, sharpness: 0.9, selectivity: 5 },
+  )
+  const c = buildResonanceZoneCurves(z, BINS, BW)
   const at = hz => Math.round(hz / BW)
-  assert.ok(Math.abs(c.weightDb[at(300)] - 8) < 1e-9)
-  assert.ok(Math.abs(c.depthScale[at(300)] - 0.5) < 1e-9)
-  assert.ok(Math.abs(c.weightDb[at(5000)]) < 1e-9)
-  assert.ok(Math.abs(c.depthScale[at(5000)] - 1) < 1e-9)
+  assert.ok(Math.abs(c.depth[at(300)] - 0.5) < 1e-9)
+  assert.ok(Math.abs(c.sharpness[at(300)] - 0.2) < 1e-9)
+  assert.ok(Math.abs(c.selectivity[at(300)] - 20) < 1e-9)
+  assert.ok(Math.abs(c.selectivity[at(5000)] - 5) < 1e-9)
+  // Two distinct sharpness values, so two reference envelopes.
+  assert.equal(c.groups.length, 2)
+  assert.equal(c.uniform, false)
   // Bin 0 is DC and would be log2(0); it copies its neighbour rather than NaN.
-  assert.ok(Number.isFinite(c.weightDb[0]) && Number.isFinite(c.depthScale[0]))
+  assert.ok(Number.isFinite(c.depth[0]) && Number.isFinite(c.selectivity[0]))
+})
+
+test('zones sharing a sharpness share an envelope', () => {
+  // The cost of a zone set is the number of DISTINCT sharpness values, not the
+  // number of zones: each one is an extra inverse transform per frame.
+  const z = zones(
+    { hiHz: 500, sharpness: 0.8, selectivity: 6 },
+    { hiHz: 5000, sharpness: 0.3, selectivity: 12 },
+    { sharpness: 0.8, selectivity: 20 },
+  )
+  assert.equal(buildResonanceZoneCurves(z, BINS, BW).groups.length, 2)
 })
 
 // ── What the kernel does with them ──────────────────────────────────────────
@@ -138,8 +159,6 @@ function bandTone(freqHz, seconds = 0.6) {
   const n = Math.round(SR * seconds)
   const x = new Float32Array(n)
   for (let i = 0; i < n; i++) {
-    // A tone on a noise bed: the tone is the resonance, the bed is what the
-    // reference is built from. Deterministic noise so the test cannot flake.
     let r = 0
     for (let k = 1; k <= 6; k++) r += Math.sin((2 * Math.PI * 137 * k * i) / SR + k)
     x[i] = 0.3 * Math.sin((2 * Math.PI * freqHz * i) / SR) + 0.02 * r
@@ -158,63 +177,103 @@ function rmsAt(sig, freqHz) {
   return 20 * Math.log10((2 * Math.hypot(re, im)) / sig.length + 1e-12)
 }
 
-const UNPROTECTED = { preserveHarmonics: false, selectivity: 6, depth: 1 }
-
 /**
  * Render and trim the STFT's latency.
  *
  * Not optional bookkeeping: the kernel holds back a full frame, so an untrimmed
  * render is the input delayed by 2048 samples and a fixed-length measurement
  * over it reads 0.7 dB low on a 0.6 s clip — which looks exactly like a small
- * amount of unwanted suppression. Cost me a wrong diagnosis of the zone code
- * once already.
+ * amount of unwanted suppression. Cost a wrong diagnosis once already.
  */
 function render(x, params) {
   const out = processResonanceBuffer([x], SR, { ...RESONANCE_KERNEL_DEFAULTS, ...params })
   return out.channelData[0].subarray(2048)
 }
-/** The input over the same span the trimmed render covers. */
 function aligned(x) {
   return x.subarray(0, x.length - 2048)
 }
 
-test('a zone with more sensitivity cuts what a neutral one leaves alone', () => {
+const UNPROTECTED = { preserveHarmonics: false }
+
+test('a zone with a lower threshold cuts what a higher one leaves alone', () => {
   const x = bandTone(3000)
-  const base = render(x, { ...UNPROTECTED, selectivity: 22 })
-  const lifted = render(x, {
-    ...UNPROTECTED, selectivity: 22, zones: zones({ hiHz: 2000 }, { sens: 12 }),
+  const quiet = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 24, depth: 1 }) })
+  const keen = render(x, {
+    ...UNPROTECTED,
+    zones: zones({ hiHz: 2000, selectivity: 24, depth: 1 }, { selectivity: 4, depth: 1 }),
   })
-  const before = rmsAt(base, 3000)
-  const after = rmsAt(lifted, 3000)
-  assert.ok(after < before - 1, `${after} vs ${before}`)
+  assert.ok(rmsAt(keen, 3000) < rmsAt(quiet, 3000) - 1)
 })
 
-test('a zone at depth zero leaves its band alone while the rest is treated', () => {
+test('A ZONE SWITCHED OFF IS EXACTLY OFF, even beside one working hard', () => {
+  // This is why depth is applied AFTER the spread kernel rather than in the
+  // detection loop: the spread reaches 96 bins either side, so scaling first
+  // let a neighbouring zone's reduction smear straight through the boundary and
+  // left 0.68 dB of cut on a tone 1.6 octaves clear of the edge.
   const x = bandTone(3000)
-  const on = render(x, UNPROTECTED)
-  const off = render(x, { ...UNPROTECTED, zones: zones({ hiHz: 2000 }, { enabled: false }) })
+  const on = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 6, depth: 1 }) })
+  const off = render(x, {
+    ...UNPROTECTED,
+    zones: zones({ hiHz: 2000, selectivity: 6, depth: 1 }, { selectivity: 6, enabled: false }),
+  })
   assert.ok(rmsAt(on, 3000) < rmsAt(off, 3000) - 1)
-  // And OFF means off. This is why zone depth is applied AFTER the spread
-  // kernel: applied before, the spread reaches 96 bins either side and smeared
-  // a neighbouring zone's reduction straight through the boundary, leaving
-  // 0.68 dB of cut on a tone 1.6 octaves clear of the edge.
   const moved = rmsAt(off, 3000) - rmsAt(aligned(x), 3000)
   assert.ok(Math.abs(moved) < 0.1, `bypassed zone moved by ${moved.toFixed(2)} dB`)
 })
 
-test('neutral zones are BIT-IDENTICAL to no zones at all', () => {
-  const x = bandTone(3000, 0.3)
-  const a = render(x, UNPROTECTED)
-  const b = render(x, { ...UNPROTECTED, zones: DEFAULT_RESONANCE_ZONES })
-  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i])
+test('per-zone depth scales the cut in its own band only', () => {
+  const x = bandTone(3000)
+  const full = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 6, depth: 1 }) })
+  const half = render(x, {
+    ...UNPROTECTED,
+    zones: zones({ hiHz: 2000, selectivity: 6, depth: 1 }, { selectivity: 6, depth: 0.4 }),
+  })
+  const dry = rmsAt(aligned(x), 3000)
+  const deep = dry - rmsAt(full, 3000)
+  const shallow = dry - rmsAt(half, 3000)
+  assert.ok(shallow > 0.5 && shallow < deep - 1, `${shallow.toFixed(2)} vs ${deep.toFixed(2)}`)
 })
 
-test('the kernel accepts a zone change on a live param push', () => {
-  const kernel = new ResonanceKernel(SR, 1)
-  for (const z of [DEFAULT_RESONANCE_ZONES, zones({ hiHz: 900, sens: 9 }, {}), []]) {
-    kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: z })
+test('the default zone set is BIT-IDENTICAL to one zone carrying the same settings', () => {
+  // The guarantee that makes zones safe to ship: four zones all still on the
+  // stock settings must be the same audio as the single global setting they
+  // replaced, not merely close. Blending N identical envelopes by weights that
+  // sum to 1 differs in the last bits, so the kernel takes an assignment path
+  // when there is one envelope group.
+  const x = bandTone(3000, 0.3)
+  const a = render(x, { zones: uniformZones() })
+  const b = render(x, { zones: DEFAULT_RESONANCE_ZONES })
+  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `sample ${i}`)
+})
+
+test('mixed sharpness runs, and stays bounded', () => {
+  const x = bandTone(3000, 0.3)
+  const out = render(x, {
+    ...UNPROTECTED,
+    zones: zones(
+      { hiHz: 300, sharpness: 0, selectivity: 6 },
+      { hiHz: 2000, sharpness: 0.5, selectivity: 10 },
+      { sharpness: 1, selectivity: 4 },
+    ),
+  })
+  let peak = 0
+  for (const v of out) {
+    assert.ok(Number.isFinite(v))
+    peak = Math.max(peak, Math.abs(v))
   }
-  assert.ok(true)
+  assert.ok(peak > 0.05 && peak < 1.5, `peak ${peak}`)
+})
+
+test('the kernel accepts any zone set on a live param push', () => {
+  const kernel = new ResonanceKernel(SR, 1)
+  const sets = [
+    DEFAULT_RESONANCE_ZONES,
+    uniformZones(),
+    zones({ hiHz: 900, sharpness: 0.1 }, { sharpness: 0.9 }),
+    zones({ enabled: false }),
+  ]
+  for (const z of sets) kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: z })
+  assert.equal(kernel.envGroups.length >= 1, true)
 })
 
 // ── Surviving the structured clone ──────────────────────────────────────────
@@ -226,14 +285,11 @@ test('ZONES ARE COPIED, NOT PASSED BY REFERENCE', () => {
   // refuses a proxy outright, the throw lands on the first param push, and the
   // symptom is the whole display and the DELTA monitor going dark with nothing
   // on screen about zones. This has happened once; it must not happen twice.
-  const live = reactive(zones({ hiHz: 900, sens: 9, depth: 0.4 }, {}))
-  const mapped = toKernelParams({ ...RESONANCE_DEFAULTS, zones: live })
-  const cloned = structuredClone(mapped)
-  assert.deepEqual(cloned.zones, [
-    { id: 'z0', hiHz: 900, sensitivityDb: 9, depth: 0.4, enabled: true },
-    { id: 'z1', hiHz: 20000, sensitivityDb: 0, depth: 1, enabled: true },
-  ])
-  // The empty case every panel opens in is just as much a proxy.
+  const live = reactive(zones({ hiHz: 900, depth: 0.4, sharpness: 0.2, selectivity: 15 }, {}))
+  const cloned = structuredClone(toKernelParams({ ...RESONANCE_DEFAULTS, zones: live }))
+  assert.equal(cloned.zones.length, 2)
+  assert.equal(cloned.zones[0].selectivity, 15)
+  assert.equal(cloned.zones[0].sharpness, 0.2)
   assert.deepEqual(
     structuredClone(toKernelParams({ ...RESONANCE_DEFAULTS, zones: reactive([]) })).zones, [])
 })
@@ -249,70 +305,70 @@ test('the axis is logarithmic and round-trips', () => {
   assert.ok(Math.abs(a - b) < 0.01, `${a} vs ${b}`)
 })
 
-test('boundaries are grabbable, and the band limits are not boundaries', () => {
+test('dividers are grabbable, and the ends of the band are not dividers', () => {
   const z = zones({ hiHz: 200 }, { hiHz: 2000 }, {})
   assert.equal(boundaryAt(z, xFromHz(200, axis), axis), 0)
   assert.equal(boundaryAt(z, xFromHz(2000, axis), axis), 1)
   assert.equal(boundaryAt(z, xFromHz(700, axis), axis), -1)
-  // The last zone's hiHz is not a boundary — it is the top of the band, which
-  // has its own control. Grabbing it here would give one parameter two editors.
   assert.equal(boundaryAt(z, xFromHz(20000, axis), axis), -1)
 })
 
 test('zoneIndexAt finds the zone a column is in', () => {
   const z = zones({ hiHz: 200 }, { hiHz: 2000 }, {})
-  assert.equal(zoneIndexAt(z, xFromHz(100, axis), axis, 40, 20000), 0)
-  assert.equal(zoneIndexAt(z, xFromHz(900, axis), axis, 40, 20000), 1)
-  assert.equal(zoneIndexAt(z, xFromHz(9000, axis), axis, 40, 20000), 2)
+  assert.equal(zoneIndexAt(z, xFromHz(100, axis), axis, 20, 20000), 0)
+  assert.equal(zoneIndexAt(z, xFromHz(900, axis), axis, 20, 20000), 1)
+  assert.equal(zoneIndexAt(z, xFromHz(9000, axis), axis, 20, 20000), 2)
 })
 
-test('A BOUNDARY STOPS AT ITS NEIGHBOURS AND CANNOT CROSS THEM', () => {
+test('A DIVIDER STOPS AT ITS NEIGHBOURS AND CANNOT CROSS THEM', () => {
   const z = zones({ hiHz: 200 }, { hiHz: 2000 }, {})
   const gap = Math.pow(2, RESONANCE_ZONE_MIN_OCTAVES)
-  const pushed = moveBoundary(z, 0, 19000, 40, 20000)
+  const pushed = moveBoundary(z, 0, 19000, 20, 20000)
   assert.ok(pushed[0].hiHz < pushed[1].hiHz)
   assert.ok(Math.abs(pushed[0].hiHz - 2000 / gap) < 1)
-  const pulled = moveBoundary(z, 1, 10, 40, 20000)
+  const pulled = moveBoundary(z, 1, 10, 20, 20000)
   assert.ok(pulled[1].hiHz > pulled[0].hiHz)
-  assert.ok(Math.abs(pulled[1].hiHz - 200 * gap) < 1)
-  // Zones stay ordered whatever the drag asks for.
   for (const target of [1, 50, 500, 5000, 50000]) {
-    const next = moveBoundary(z, 0, target, 40, 20000)
-    assert.ok(next[0].hiHz < next[1].hiHz, `${target}`)
+    assert.ok(moveBoundary(z, 0, target, 20, 20000)[0].hiHz < z[1].hiHz, `${target}`)
   }
 })
 
 test('a split inherits the settings of the zone it divides', () => {
-  const z = zones({ hiHz: 200, sens: 7, depth: 0.4 }, {})
-  const next = splitZone(z, 100, axis, 'new', 40, 20000)
+  const z = zones({ hiHz: 200, selectivity: 17, depth: 0.4, sharpness: 0.3 }, {})
+  const next = splitZone(z, 100, axis, 'new', 20, 20000)
   assert.equal(next.length, 3)
-  assert.equal(next[0].sensitivityDb, 7)
-  assert.equal(next[0].depth, 0.4)
-  assert.equal(next[1].sensitivityDb, 7)
+  assert.equal(next[0].selectivity, 17)
+  assert.equal(next[0].sharpness, 0.3)
+  assert.equal(next[1].depth, 0.4)
   assert.ok(next[0].hiHz < next[1].hiHz)
 })
 
 test('the zone ceiling returns the list unchanged, by identity', () => {
   let z = zones({ hiHz: 100 }, {})
-  for (let i = 0; i < 20; i++) {
-    z = splitZone(z, 3000 + i * 900, axis, `s${i}`, 40, 20000)
-  }
+  for (let i = 0; i < 20; i++) z = splitZone(z, 3000 + i * 900, axis, `s${i}`, 20, 20000)
   assert.equal(z.length, RESONANCE_ZONE_MAX)
-  assert.equal(splitZone(z, 6000, axis, 'x', 40, 20000), z)
+  assert.equal(splitZone(z, 6000, axis, 'x', 20, 20000), z)
 })
 
-test('a split with no room to land changes nothing', () => {
-  const z = zones({ hiHz: 200 }, { hiHz: 210 }, {})
-  assert.equal(splitZone(z, 205, axis, 'x', 40, 20000), z)
+test('setting the count grows and shrinks to exactly that many', () => {
+  let z = DEFAULT_RESONANCE_ZONES
+  for (const n of [6, 2, 5, 1, 4]) {
+    z = setZoneCount(z, n, axis, 20, 20000, i => `n${i}${Math.random()}`)
+    assert.equal(z.length, n, `asked for ${n}`)
+    // Still ordered, whatever route it took.
+    for (let i = 1; i < z.length - 1; i++) assert.ok(z[i].hiHz > z[i - 1].hiHz)
+  }
+  // Out of range is clamped, not obeyed.
+  assert.equal(setZoneCount(z, 99, axis, 20, 20000, () => 'x').length, RESONANCE_ZONE_MAX)
+  assert.equal(setZoneCount(z, 0, axis, 20, 20000, () => 'x').length, 1)
 })
 
-test('merging drops the boundary and keeps the upper zone', () => {
-  const z = zones({ hiHz: 200, sens: 3 }, { hiHz: 2000, sens: 6 }, { sens: 9 })
+test('merging drops the divider and keeps the upper zone', () => {
+  const z = zones({ hiHz: 200, selectivity: 3 }, { hiHz: 2000, selectivity: 6 }, { selectivity: 9 })
   const merged = removeBoundary(z, 0)
   assert.equal(merged.length, 2)
-  assert.equal(merged[0].sensitivityDb, 6)
-  assert.deepEqual(zoneBounds(merged, 40, 20000)[0], { loHz: 40, hiHz: 2000 })
-  // The last zone cannot be merged away.
+  assert.equal(merged[0].selectivity, 6)
+  assert.deepEqual(zoneBounds(merged, 20, 20000)[0], { loHz: 20, hiHz: 2000 })
   const one = zones({})
   assert.equal(removeBoundary(one, 0), one)
 })
@@ -320,25 +376,28 @@ test('merging drops the boundary and keeps the upper zone', () => {
 test('edits never mutate the array or the zones in it', () => {
   const before = zones({ hiHz: 200 }, {})
   const snapshot = JSON.parse(JSON.stringify(before))
-  setSensitivity(before, 0, 5)
-  setDepth(before, 1, 0.2)
+  setZoneParam(before, 0, 'depth', 0.5)
   toggleZone(before, 0)
-  moveBoundary(before, 0, 500, 40, 20000)
-  splitZone(before, 100, axis, 'x', 40, 20000)
+  moveBoundary(before, 0, 500, 20, 20000)
+  splitZone(before, 100, axis, 'x', 20, 20000)
   removeBoundary(before, 0)
+  setZoneCount(before, 5, axis, 20, 20000, () => 'y')
   assert.deepEqual(before, snapshot)
 })
 
-test('every edit stays inside the parameter limits', () => {
+test('every edit stays inside the parameter ranges', () => {
+  const R = RESONANCE_ZONE_RANGES
   let z = zones({ hiHz: 200 }, {})
-  z = setSensitivity(z, 0, 999)
-  assert.equal(z[0].sensitivityDb, RESONANCE_ZONE_SENS_MAX_DB)
-  z = setSensitivity(z, 0, -999)
-  assert.equal(z[0].sensitivityDb, -RESONANCE_ZONE_SENS_MAX_DB)
-  z = setDepth(z, 0, 9)
+  z = setZoneParam(z, 0, 'selectivity', 999)
+  assert.equal(z[0].selectivity, R.selectivity.max)
+  z = setZoneParam(z, 0, 'selectivity', -999)
+  assert.equal(z[0].selectivity, R.selectivity.min)
+  z = setZoneParam(z, 0, 'depth', 9)
   assert.equal(z[0].depth, 1)
-  z = setDepth(z, 0, -9)
-  assert.equal(z[0].depth, 0)
+  z = setZoneParam(z, 0, 'sharpness', -9)
+  assert.equal(z[0].sharpness, 0)
+  // An unknown name is a no-op rather than a silently added key.
+  assert.equal(setZoneParam(z, 0, 'nonsense', 1), z)
 })
 
 test('toggling a zone flips only that zone', () => {

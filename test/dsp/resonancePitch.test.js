@@ -34,6 +34,8 @@ import {
   RESONANCE_REF_MODE_DEFAULTS,
   resolveRefMode,
   withRefModeDefaults,
+  uniformZones,
+  RESONANCE_ZONE_STOCK,
 } from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -359,8 +361,10 @@ const SYNTHETIC_SELECTIVITY = 4
 const PEAK = {
   refMode: 'peak',
   preserveHarmonics: false,
-  selectivity: SYNTHETIC_SELECTIVITY,
-  depth: RESONANCE_REF_MODE_DEFAULTS.peak.depth,
+  zones: uniformZones({
+    selectivity: SYNTHETIC_SELECTIVITY,
+    depth: RESONANCE_REF_MODE_DEFAULTS.peak.zoneOverrides.depth,
+  }),
 }
 
 /**
@@ -498,11 +502,13 @@ test('peak mode carries its own calibration, taken from real audio', () => {
   // cepstral default rather than below it: an earlier synthetic calibration put
   // it at 4, which on narration treated over a quarter of every
   // time-frequency cell and removed 12 dB on average.
-  const cepstralDefault = 8
+  const cepstralDefault = RESONANCE_ZONE_STOCK.selectivity
   const peak = RESONANCE_REF_MODE_DEFAULTS.peak
+  // Its calibration reaches the zones rather than a global knob, because there
+  // is no global knob — withRefModeDefaults folds these into every zone.
   assert.ok(
-    peak.selectivity > 2 * cepstralDefault,
-    `peak mode should want a far higher threshold, got ${peak.selectivity}`,
+    peak.zoneOverrides.selectivity > 2 * cepstralDefault,
+    `peak mode should want a far higher threshold, got ${peak.zoneOverrides.selectivity}`,
   )
   assert.equal(peak.preserveHarmonics, false, 'the point of this reference is not needing the mask')
   // Slow ballistics ship with it because the two are superadditive on real
@@ -576,7 +582,7 @@ test('under peak, the mask moves the cut off the partials and into the gaps', ()
     const kernel = new ResonanceKernel(SR)
     kernel.setParams({
       ...RESONANCE_KERNEL_DEFAULTS,
-      refMode: 'peak', preserveHarmonics, depth: 1, selectivity: 4,
+      refMode: 'peak', preserveHarmonics, zones: uniformZones({ depth: 1, selectivity: 4 }),
     })
     const scratch = new Float32Array(128)
     let on = 0
@@ -623,7 +629,7 @@ test('what the inverted cut does NOT do is raise the harmonic-to-noise ratio', (
     const out = processResonanceBuffer([sig], SR, { ...RESONANCE_KERNEL_DEFAULTS, ...params })
       .channelData[0].subarray(LATENCY)
     const probe = new ResonanceKernel(SR)
-    probe.setParams({ ...RESONANCE_KERNEL_DEFAULTS, depth: 0 })
+    probe.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ depth: 0 }) })
     const scratch = new Float32Array(128)
     let harm = 0
     let gap = 0
@@ -645,8 +651,8 @@ test('what the inverted cut does NOT do is raise the harmonic-to-noise ratio', (
     }
     return 10 * Math.log10(harm / n) - 10 * Math.log10(gap / n)
   }
-  const dry = ratio({ depth: 0 })
-  const masked = ratio({ refMode: 'peak', preserveHarmonics: true, depth: 1, selectivity: 4 })
+  const dry = ratio({ zones: uniformZones({ depth: 0 }) })
+  const masked = ratio({ refMode: 'peak', preserveHarmonics: true, zones: uniformZones({ depth: 1, selectivity: 4 }) })
   assert.ok(
     masked < dry + 1.5,
     `the mask under peak should not be sold as denoising; ratio ${dry.toFixed(2)} -> ${masked.toFixed(2)}`,

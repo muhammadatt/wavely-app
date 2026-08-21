@@ -175,8 +175,10 @@ export const RESONANCE_REF_MODE_DEFAULTS = {
     // 8.9 dB and p90 at 17.2 in the same band, so 4 treated over a quarter of
     // every time-frequency cell and removed 12 dB on average. 20 is where a
     // 46 s narrator clip lands on ~3 dB of mean cut in the fundamental region.
-    selectivity: 20,
-    depth: 1,
+    // Applied to every zone by withRefModeDefaults. Not a zone array here:
+    // DEFAULT_RESONANCE_ZONES is declared further down this file, and a
+    // reference to it at module-evaluation time is a temporal-dead-zone throw.
+    zoneOverrides: { selectivity: 20, depth: 1 },
     // Slow, because the two mechanisms are complementary and measurably
     // superadditive: the stable envelope removes the frequency-domain source of
     // gain movement and these remove the time-domain residue. Alone they are
@@ -196,7 +198,12 @@ export function resolveRefMode() {
 
 /** Shipping defaults, with the selected reference mode's calibration applied. */
 export function withRefModeDefaults(defaults) {
-  return { ...defaults, ...RESONANCE_REF_MODE_DEFAULTS[resolveRefMode()] }
+  const { zoneOverrides, ...rest } = RESONANCE_REF_MODE_DEFAULTS[resolveRefMode()]
+  const merged = { ...defaults, ...rest }
+  if (zoneOverrides) {
+    merged.zones = (merged.zones ?? []).map(z => ({ ...z, ...zoneOverrides }))
+  }
+  return merged
 }
 
 /** Query string, then stored preference. Null when neither has an opinion. */
@@ -258,39 +265,59 @@ function readOverride(key) {
  */
 export const RESONANCE_ZONE_MIN = 1
 export const RESONANCE_ZONE_MAX = 6
-/** Range of a zone's threshold offset, in dB. */
-export const RESONANCE_ZONE_SENS_MAX_DB = 12
 /** Closest two boundaries may sit, so a zone always has room to be read. */
 export const RESONANCE_ZONE_MIN_OCTAVES = 0.25
 /**
  * Width of the crossfade at a boundary, in octaves, centred on the split.
  *
- * NOT COSMETIC. A hard step in the threshold means the bin just below a split
- * and the bin just above it are judged by different rules, so a resonance
- * sitting across the line is half treated — and as the pitch moves it slides
- * between the two regimes, which is the same per-bin gain movement the whole
- * effect is built to avoid. A sixth of an octave is about two semitones: wide
- * enough that no single partial spans it, narrow enough that a zone edge still
- * lands where the user put it.
+ * NOT COSMETIC. A hard step means the bin just below a split and the bin just
+ * above it are judged by different rules, so a resonance sitting across the
+ * line is half treated — and as the pitch moves it slides between the two
+ * regimes, which is the same per-bin gain movement the whole effect is built to
+ * avoid. A sixth of an octave is about two semitones: wide enough that no
+ * single partial spans it, narrow enough that a zone edge still lands where the
+ * user put it.
  */
 export const RESONANCE_ZONE_EDGE_OCTAVES = 1 / 6
+
+/** Per-zone parameter ranges. Absolute values, not offsets from anything. */
+export const RESONANCE_ZONE_RANGES = {
+  depth: { min: 0, max: 1 },
+  sharpness: { min: 0, max: 1 },
+  selectivity: { min: 3, max: 24 },
+}
 
 /**
  * The starting zone set: four spans over the speech spectrum.
  *
- * Every zone is neutral — no offset, full depth, enabled — so a panel that has
- * never touched this behaves exactly as a panel with no zones at all, and
- * buildResonanceZoneCurves returns null for it. The boundaries are placed where
- * the voice changes character rather than on round numbers: 180 Hz is above
- * most narrators' fundamentals, 1.1 kHz is the bottom of the presence range,
- * and 5 kHz is where sibilance starts to dominate.
+ * Every zone carries the values that used to be the single global setting, so
+ * an untouched panel behaves exactly as the panel did before zones existed —
+ * and buildResonanceZoneCurves takes its uniform fast path, which keeps that
+ * bit-identical rather than merely close. The boundaries are placed where the
+ * voice changes character rather than on round numbers: 180 Hz is above most
+ * narrators' fundamentals, 1.1 kHz is the bottom of the presence range, and
+ * 5 kHz is where sibilance starts to dominate.
  */
+const ZONE_STOCK = { depth: 0.67, sharpness: 0.8, selectivity: 8, enabled: true }
 export const DEFAULT_RESONANCE_ZONES = [
-  { id: 'z1', hiHz: 180, sensitivityDb: 0, depth: 1, enabled: true },
-  { id: 'z2', hiHz: 1100, sensitivityDb: 0, depth: 1, enabled: true },
-  { id: 'z3', hiHz: 5000, sensitivityDb: 0, depth: 1, enabled: true },
-  { id: 'z4', hiHz: 20000, sensitivityDb: 0, depth: 1, enabled: true },
+  { id: 'z1', hiHz: 180, ...ZONE_STOCK },
+  { id: 'z2', hiHz: 1100, ...ZONE_STOCK },
+  { id: 'z3', hiHz: 5000, ...ZONE_STOCK },
+  { id: 'z4', hiHz: 20000, ...ZONE_STOCK },
 ]
+export const RESONANCE_ZONE_STOCK = ZONE_STOCK
+
+/**
+ * One zone spanning everything, carrying the settings given.
+ *
+ * The shape a caller wants when it has no opinion about frequency — a preset
+ * block, a test, or any code that predates zones and thinks in one depth and
+ * one selectivity. It is a real zone set, not a compatibility mode: the kernel
+ * has one path, and this is what "the same everywhere" looks like in it.
+ */
+export function uniformZones(settings = {}) {
+  return [{ id: 'z1', hiHz: 20000, ...ZONE_STOCK, ...settings }]
+}
 
 function clampNum(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
@@ -298,26 +325,26 @@ function clampNum(v, lo, hi) {
 
 /** A zone's settings, normalised and clamped. */
 export function zoneSettings(zone) {
-  if (!zone) return { sensitivityDb: 0, depth: 1, enabled: true }
-  const enabled = zone.enabled !== false
+  const enabled = zone ? zone.enabled !== false : true
+  const R = RESONANCE_ZONE_RANGES
   return {
     enabled,
-    sensitivityDb: enabled
-      ? clampNum(zone.sensitivityDb ?? 0, -RESONANCE_ZONE_SENS_MAX_DB, RESONANCE_ZONE_SENS_MAX_DB)
-      : 0,
     // A disabled zone is depth zero, not a special case downstream. It reaches
     // the kernel as "remove none of what you find here", which is what bypass
     // means for a suppressor and needs no second mechanism.
-    depth: enabled ? clampNum(zone.depth ?? 1, 0, 1) : 0,
+    depth: enabled ? clampNum(zone?.depth ?? ZONE_STOCK.depth, R.depth.min, R.depth.max) : 0,
+    sharpness: clampNum(zone?.sharpness ?? ZONE_STOCK.sharpness, R.sharpness.min, R.sharpness.max),
+    selectivity: clampNum(
+      zone?.selectivity ?? ZONE_STOCK.selectivity, R.selectivity.min, R.selectivity.max),
   }
 }
 
 /**
- * The span each zone covers, given the processed band.
+ * The span each zone covers.
  *
- * The band limits are their own parameters and move independently, so a zone's
- * edges are only meaningful clamped to them — a split dragged to 8 kHz while
- * the ceiling sits at 6 kHz describes a zone with no width.
+ * `hiHz` is each zone's upper boundary, the next starts where this one ends,
+ * and the last zone's `hiHz` is ignored because it runs to the top. There are
+ * therefore no gaps and no overlaps to reason about.
  */
 export function zoneBounds(zones, floorHz = 20, ceilHz = 20000) {
   const out = []
@@ -332,69 +359,108 @@ export function zoneBounds(zones, floorHz = 20, ceilHz = 20000) {
 }
 
 /**
- * Settings in force at one frequency, blended across boundaries.
+ * Per-zone weights at one frequency: 1 inside a zone, crossfading at the edges.
  *
- * Linear in log frequency across RESONANCE_ZONE_EDGE_OCTAVES, which is enough:
- * the quantity being blended is a threshold in dB, and a kink in it is not
- * something any downstream stage differentiates.
+ * Always sums to 1, which is what lets the caller blend anything per bin —
+ * a threshold, a depth, or a whole reference envelope — by the same weights.
  */
-export function zoneSettingsAt(zones, freqHz, floorHz = 20, ceilHz = 20000) {
-  if (!zones || zones.length === 0) return { sensitivityDb: 0, depth: 1 }
-  const bounds = zoneBounds(zones, floorHz, ceilHz)
+export function zoneWeightsAt(zones, freqHz) {
+  const w = new Array(zones.length).fill(0)
+  if (zones.length === 0) return w
   const half = RESONANCE_ZONE_EDGE_OCTAVES / 2
-  let index = bounds.length - 1
-  for (let i = 0; i < bounds.length; i++) {
-    if (freqHz <= bounds[i].hiHz) { index = i; break }
+  let index = zones.length - 1
+  for (let i = 0; i < zones.length - 1; i++) {
+    if (freqHz <= zones[i].hiHz) { index = i; break }
   }
-  const here = zoneSettings(zones[index])
-  if (freqHz <= 0) return here
+  w[index] = 1
+  if (!(freqHz > 0)) return w
 
-  // Which boundary, if any, this frequency is inside the crossfade of.
-  const edgeBelow = index > 0 ? bounds[index - 1].hiHz : null
-  const edgeAbove = index < bounds.length - 1 ? bounds[index].hiHz : null
-  let other = null
-  let t = 1
-  if (edgeBelow && Math.abs(Math.log2(freqHz / edgeBelow)) < half) {
-    other = zoneSettings(zones[index - 1])
-    t = 0.5 + Math.log2(freqHz / edgeBelow) / RESONANCE_ZONE_EDGE_OCTAVES
-  } else if (edgeAbove && Math.abs(Math.log2(freqHz / edgeAbove)) < half) {
-    other = zoneSettings(zones[index + 1])
-    t = 0.5 - Math.log2(freqHz / edgeAbove) / RESONANCE_ZONE_EDGE_OCTAVES
+  const edgeBelow = index > 0 ? zones[index - 1].hiHz : null
+  const edgeAbove = index < zones.length - 1 ? zones[index].hiHz : null
+  if (edgeBelow > 0 && Math.abs(Math.log2(freqHz / edgeBelow)) < half) {
+    const t = clampNum(0.5 + Math.log2(freqHz / edgeBelow) / RESONANCE_ZONE_EDGE_OCTAVES, 0, 1)
+    w[index] = t
+    w[index - 1] = 1 - t
+  } else if (edgeAbove > 0 && Math.abs(Math.log2(freqHz / edgeAbove)) < half) {
+    const t = clampNum(0.5 - Math.log2(freqHz / edgeAbove) / RESONANCE_ZONE_EDGE_OCTAVES, 0, 1)
+    w[index] = t
+    w[index + 1] = 1 - t
   }
-  if (!other) return here
-  const mix = clampNum(t, 0, 1)
-  return {
-    sensitivityDb: here.sensitivityDb * mix + other.sensitivityDb * (1 - mix),
-    depth: here.depth * mix + other.depth * (1 - mix),
+  return w
+}
+
+/** Settings in force at one frequency, blended across boundaries. */
+export function zoneSettingsAt(zones, freqHz) {
+  if (!zones || zones.length === 0) return { ...ZONE_STOCK, depth: ZONE_STOCK.depth }
+  const w = zoneWeightsAt(zones, freqHz)
+  const out = { depth: 0, sharpness: 0, selectivity: 0 }
+  for (let i = 0; i < zones.length; i++) {
+    if (!w[i]) continue
+    const s = zoneSettings(zones[i])
+    out.depth += w[i] * s.depth
+    out.sharpness += w[i] * s.sharpness
+    out.selectivity += w[i] * s.selectivity
   }
+  return out
 }
 
 /**
- * Expand a zone set onto an FFT bin grid, or null when it would change nothing.
+ * Expand a zone set onto an FFT bin grid.
  *
- * Null rather than neutral arrays so the detector can skip two lookups per bin
- * on the overwhelmingly common untouched case, and so a file processed on the
- * default zones is bit-identical to one processed before zones existed.
+ * Returns per-bin curves for the three settings, plus what the kernel needs to
+ * build a reference envelope per distinct sharpness: `groups` lists the
+ * DISTINCT sharpness values with the bins each covers, and `uniform` says the
+ * whole spectrum shares one setting.
+ *
+ * THE UNIFORM FLAG IS NOT AN OPTIMISATION, IT IS A GUARANTEE. Blending N
+ * identical envelopes by weights that sum to 1 is not exactly the envelope —
+ * `0.3·e + 0.7·e` differs from `e` in the last bits — so a panel whose zones
+ * all still carry the stock settings would drift from the build before zones
+ * existed by an amount that is inaudible and impossible to prove absent. With
+ * one group the kernel assigns rather than blends, and the default patch stays
+ * bit-identical.
  */
-export function buildResonanceZoneCurves(zones, binCount, binWidth, floorHz, ceilHz) {
+export function buildResonanceZoneCurves(zones, binCount, binWidth) {
   if (!zones || zones.length === 0) return null
-  const neutral = zones.every((z) => {
-    const s = zoneSettings(z)
-    return s.sensitivityDb === 0 && s.depth === 1
+  const depth = new Float64Array(binCount)
+  const sharpness = new Float64Array(binCount)
+  const selectivity = new Float64Array(binCount)
+
+  // Distinct sharpness values, to a resolution finer than the knob's step. Each
+  // becomes one reference envelope; the kernel pays one inverse transform per
+  // group per frame, so this is the number worth keeping small.
+  const groups = []
+  const keyOf = v => Math.round(v * 1000)
+  const zoneGroup = zones.map((z) => {
+    const key = keyOf(zoneSettings(z).sharpness)
+    let g = groups.find(x => x.key === key)
+    if (!g) {
+      g = { key, sharpness: zoneSettings(z).sharpness, weight: new Float64Array(binCount) }
+      groups.push(g)
+    }
+    return g
   })
-  if (neutral) return null
-  const weightDb = new Float64Array(binCount)
-  const depthScale = new Float64Array(binCount)
-  // Bin 0 is DC; log2(0) is -Infinity. It carries no audible content and the
-  // detector's band limits exclude it in practice.
-  for (let k = 1; k < binCount; k++) {
-    const at = zoneSettingsAt(zones, k * binWidth, floorHz, ceilHz)
-    weightDb[k] = at.sensitivityDb
-    depthScale[k] = at.depth
+
+  const settings = zones.map(zoneSettings)
+  for (let k = 0; k < binCount; k++) {
+    const hz = k * binWidth
+    const w = zoneWeightsAt(zones, hz)
+    for (let i = 0; i < zones.length; i++) {
+      if (!w[i]) continue
+      depth[k] += w[i] * settings[i].depth
+      sharpness[k] += w[i] * settings[i].sharpness
+      selectivity[k] += w[i] * settings[i].selectivity
+      zoneGroup[i].weight[k] += w[i]
+    }
   }
-  weightDb[0] = weightDb[1]
-  depthScale[0] = depthScale[1]
-  return { weightDb, depthScale }
+  // Bin 0 is DC; log2(0) is -Infinity, so it copies its neighbour.
+  if (binCount > 1) {
+    depth[0] = depth[1]
+    sharpness[0] = sharpness[1]
+    selectivity[0] = selectivity[1]
+    for (const g of groups) g.weight[0] = g.weight[1]
+  }
+  return { depth, sharpness, selectivity, groups, uniform: groups.length === 1 }
 }
 
 /**
@@ -411,8 +477,9 @@ export function copyZones(zones) {
   return (zones ?? []).map(z => ({
     id: z.id,
     hiHz: z.hiHz,
-    sensitivityDb: z.sensitivityDb,
     depth: z.depth,
+    sharpness: z.sharpness,
+    selectivity: z.selectivity,
     enabled: z.enabled,
   }))
 }
@@ -420,14 +487,13 @@ export function copyZones(zones) {
 // Defaults are the acx_audiobook preset's resonanceSuppressor block
 // (src/audio/presets.js), which is the tuning these were chosen against.
 export const RESONANCE_DEFAULTS = {
-  depth: 0.67,
-  sharpness: 0.8,
-  selectivity: 8,
+  // Depth, sharpness and selectivity are NOT here. They are per-zone settings
+  // now, with no global value to be an offset from — see DEFAULT_RESONANCE_ZONES.
+  // Nor are the low/high band limits: a band you want left alone is a zone
+  // switched off, which says the same thing in a control that already exists.
   attack: 15, // ms
   release: 80, // ms
   maxReduction: 36, // dB
-  freqFloor: 40, // Hz
-  freqCeil: 20000, // Hz
   mode: 'soft', // 'soft' | 'hard'
   preserveHarmonics: true,
   pitchRange: 'voice', // key of PITCH_RANGES
@@ -443,14 +509,9 @@ export const RESONANCE_DEFAULTS = {
 export function toKernelParams(params) {
   const range = PITCH_RANGES[params.pitchRange] ?? PITCH_RANGES.voice
   return {
-    depth: params.depth,
-    sharpness: params.sharpness,
-    selectivity: params.selectivity,
     attackMs: params.attack,
     releaseMs: params.release,
     maxReductionDb: params.maxReduction,
-    freqFloorHz: params.freqFloor,
-    freqCeilHz: params.freqCeil,
     mode: params.mode,
     preserveHarmonics: params.preserveHarmonics,
     pitchMinHz: range.minHz,

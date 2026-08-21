@@ -110,6 +110,7 @@ import { getFFT } from './dsp/fft.js'
 import {
   RESONANCE_DISPLAY_BINS,
   RESONANCE_DISPLAY_CURVES,
+  DEFAULT_RESONANCE_ZONES,
   buildResonanceZoneCurves,
   resonanceDisplayRange,
 } from './resonanceParams.js'
@@ -334,6 +335,17 @@ const PEAK_FALLBACK_F0_HZ = 150
  * quadratically expensive. It binds above ~10 kHz at Sharpness 0 and nowhere at
  * the default.
  */
+/**
+ * The one fixed band limit left, in Hz.
+ *
+ * An ANALYSIS limit, not a taste. The adjustable low/high pair is gone — a band
+ * you want left alone is a zone switched off — but below this a 2048-point
+ * frame has under two bins to work with, so the envelope there is not a
+ * measurement of anything. It replaces a default floor of 40 Hz that was doing
+ * the same job under a name that implied it was a preference.
+ */
+const ANALYSIS_FLOOR_HZ = 20
+
 const SPREAD_MAX_OCTAVES = 0.3
 const SPREAD_MAX_HALF_BINS = 96
 
@@ -441,14 +453,9 @@ const PITCH_HOLD_FRAMES = 16
 const SPECTRUM_REF_DB = 20 * Math.log10(FFT_SIZE / 4)
 
 export const RESONANCE_KERNEL_DEFAULTS = {
-  depth: 0.67,
-  sharpness: 0.8,
-  selectivity: 8,
   attackMs: 15,
   releaseMs: 80,
   maxReductionDb: 36,
-  freqFloorHz: 40,
-  freqCeilHz: 20000,
   pitchMinHz: DEFAULT_PITCH_MIN_HZ,
   pitchMaxHz: DEFAULT_PITCH_MAX_HZ,
   mode: 'soft', // 'soft' | 'hard'
@@ -459,13 +466,14 @@ export const RESONANCE_KERNEL_DEFAULTS = {
   // it does not need the mask.
   refMode: 'cepstral',
   /**
-   * Sensitivity weighting nodes — `{ freqHz, gainDb, octaves }`, summed as a
-   * Gaussian in log frequency. NOT filters: they offset `selectivity` over a
-   * region, so a positive gain makes the detector more willing to act there.
-   * See the note in resonanceParams.js. Empty by default, and an empty set is
-   * bit-identical to the behaviour before this existed.
+   * Contiguous frequency zones, each carrying its own depth, sharpness and
+   * selectivity — ABSOLUTE values, not offsets from a global setting, because
+   * there is no longer a global setting for any of the three. See
+   * DEFAULT_RESONANCE_ZONES. Also the only thing that decides which part of the
+   * spectrum is processed: a zone switched off is a band left alone, which is
+   * what the separate low/high limit pair used to do.
    */
-  zones: null,
+  zones: DEFAULT_RESONANCE_ZONES,
   // Wet/dry blend and wet-path makeup. Both live inside the kernel's per-bin
   // gain rather than as nodes around it — see _mixGain.
   mix: 1,
@@ -596,15 +604,11 @@ export class ResonanceKernel {
 
   /** Merge a partial param update and recompute derived state. */
   setParams(partial) {
-    const prevCeilHz = this.freqCeilHz
     const p = { ...this.params, ...partial }
     this.params = p
 
-    this.depth = clamp(p.depth, 0, 1)
-    this.selectivity = Math.max(0, p.selectivity)
     this.maxReductionDb = Math.max(0, p.maxReductionDb)
     this.softKnee = p.mode !== 'hard'
-    this.kneeWidth = Math.max(this.selectivity * 0.5, 1e-6)
     this.refMode = p.refMode === 'peak' ? 'peak' : 'cepstral'
 
     /**
@@ -655,19 +659,58 @@ export class ResonanceKernel {
     // curves only need the limits to place their edges, and freqFloorHz /
     // freqCeilHz are computed a few lines down from the same `p`. Read from `p`
     // here for that reason rather than from `this`.
-    const zoneCurves = buildResonanceZoneCurves(
-      p.zones, this.binCount, this.binWidth, p.freqFloorHz, p.freqCeilHz)
-    this.weightDb = zoneCurves?.weightDb ?? null
-    this.zoneDepth = zoneCurves?.depthScale ?? null
-    this.refOct = PEAK_REF_OCT_COARSE
-      * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, clamp(p.sharpness, 0, 1))
+    // The zones ARE the settings. Depth, sharpness and selectivity have no
+    // global value any more: each zone carries its own, and these curves are
+    // how the per-bin detector reads them. Rebuilt on any param change rather
+    // than diffed — a few thousand lookups on a knob move, never on the audio
+    // path.
+    const zones = p.zones ?? DEFAULT_RESONANCE_ZONES
+    const curves = buildResonanceZoneCurves(zones, this.binCount, this.binWidth)
+    this.zoneDepth = curves.depth
+    this.zoneSelectivity = curves.selectivity
+    this.zoneSharpness = curves.sharpness
 
-    const nyquist = this.sampleRate / 2
-    this.freqFloorHz = clamp(p.freqFloorHz, 0, nyquist)
-    this.freqCeilHz = clamp(p.freqCeilHz, this.freqFloorHz, nyquist)
+    // One reference envelope per DISTINCT sharpness, not per zone: sharpness
+    // sets the scale of the envelope, which is a property of the whole
+    // transform rather than of a bin, so a zone asking for a different one
+    // needs its own envelope. The forward cepstrum is shared, so the cost is
+    // one extra inverse transform per distinct value — at most five more per
+    // frame, and exactly none on the overwhelmingly common uniform case.
+    this.envGroups = curves.groups.map(g => ({
+      weight: g.weight,
+      // Cepstral lifter target. Sharpness picks an absolute envelope feature
+      // scale; the per-frame F0 clamps it. See LIFTER_SCALE_COARSE_HZ.
+      lifterTarget: Math.max(20, Math.round(this.sampleRate / (LIFTER_SCALE_COARSE_HZ
+        * Math.pow(LIFTER_SCALE_FINE_HZ / LIFTER_SCALE_COARSE_HZ, g.sharpness)))),
+      // Peak-envelope reference width, from the same knob: it is the same
+      // quantity the lifter target is, an envelope feature scale, expressed in
+      // octaves because this reference has no reason to be uniform in Hz.
+      refOct: PEAK_REF_OCT_COARSE
+        * Math.pow(PEAK_REF_OCT_FINE / PEAK_REF_OCT_COARSE, g.sharpness),
+      buffer: null,
+    }))
+    this.envUniform = curves.uniform
+    // A default for callers that reach _peakEnvelope directly rather than
+    // through the blended wrapper — the blended one sets it per group.
+    this.refOct = this.envGroups[0].refOct
+
+    // The knee is half the threshold, and the threshold is now per bin. Held as
+    // its own curve rather than recomputed in the detection loop so the loop
+    // stays a read per bin.
+    if (!this.kneeWidth || this.kneeWidth.length !== this.binCount) {
+      this.kneeWidth = new Float64Array(this.binCount)
+    }
     for (let k = 0; k < this.binCount; k++) {
-      const f = k * this.binWidth
-      this.activeBins[k] = f >= this.freqFloorHz && f <= this.freqCeilHz ? 1 : 0
+      this.kneeWidth[k] = Math.max(this.zoneSelectivity[k] * 0.5, 1e-6)
+    }
+
+    // WHAT GETS PROCESSED IS NOW ONLY THE ZONES. The low/high limit pair is
+    // gone: a band you want left alone is a zone switched off, which says the
+    // same thing in the control that already exists. The floor is the one
+    // remaining fixed bound, and it is an analysis limit rather than a taste —
+    // below it a 2048-point frame has under two bins to work with.
+    for (let k = 0; k < this.binCount; k++) {
+      this.activeBins[k] = k * this.binWidth >= ANALYSIS_FLOOR_HZ ? 1 : 0
     }
 
     // Wet/dry blend and output trim, folded into the per-bin gain:
@@ -691,40 +734,33 @@ export class ResonanceKernel {
     this.mixWet = this.mix * this.trimLin
     this.mixIsWetOnly = this.mix === 1
 
-    // Gaussian spread, width set by sharpness — in OCTAVES, not bins.
-    // Per-bin geometry, since a constant width in octaves is a width in bins
-    // that grows with frequency. See SPREAD_MAX_OCTAVES.
-    const sharpness = clamp(p.sharpness, 0, 1)
-    const spreadOct = SPREAD_MAX_OCTAVES * (1 - sharpness)
-    this.spreadEnabled = spreadOct > 1e-3
-    if (this.spreadEnabled) {
-      if (!this.spreadHalfBins) {
-        this.spreadHalfBins = new Int32Array(this.binCount)
-        this.spreadInvSigma = new Float64Array(this.binCount)
+    // Gaussian spread, width set by sharpness — in OCTAVES, not bins, and now
+    // per bin twice over: a constant width in octaves is already a width in
+    // bins that grows with frequency, and sharpness itself now varies with
+    // frequency. See SPREAD_MAX_OCTAVES.
+    if (!this.spreadHalfBins) {
+      this.spreadHalfBins = new Int32Array(this.binCount)
+      this.spreadInvSigma = new Float64Array(this.binCount)
+    }
+    this.spreadEnabled = false
+    for (let k = 0; k < this.binCount; k++) {
+      const spreadOct = SPREAD_MAX_OCTAVES * (1 - this.zoneSharpness[k])
+      if (spreadOct <= 1e-3) {
+        this.spreadHalfBins[k] = 0
+        this.spreadInvSigma[k] = 0
+        continue
       }
+      this.spreadEnabled = true
       // Half-width and sigma as a FRACTION of the bin index: a span of
       // ±`oct` octaves around bin k covers k·(2^oct − 2^-oct)/2 bins either
       // side, to first order symmetric about k.
       const halfFrac = (Math.pow(2, spreadOct) - Math.pow(2, -spreadOct)) / 2
       const sigmaOct = spreadOct / 3
       const sigmaFrac = (Math.pow(2, sigmaOct) - Math.pow(2, -sigmaOct)) / 2
-      for (let k = 0; k < this.binCount; k++) {
-        const half = Math.min(Math.round(k * halfFrac), SPREAD_MAX_HALF_BINS)
-        this.spreadHalfBins[k] = half
-        const sigma = k * sigmaFrac
-        this.spreadInvSigma[k] = sigma > 1e-9 ? 1 / sigma : 0
-      }
+      this.spreadHalfBins[k] = Math.min(Math.round(k * halfFrac), SPREAD_MAX_HALF_BINS)
+      const sigma = k * sigmaFrac
+      this.spreadInvSigma[k] = sigma > 1e-9 ? 1 / sigma : 0
     }
-
-    // Peak-envelope reference width, from the same Sharpness knob: it is the
-    // same quantity the lifter target is, an envelope feature scale, expressed
-    // in octaves because this reference has no reason to be uniform in Hz.
-
-    // Cepstral lifter target. Sharpness picks an absolute envelope feature
-    // scale; the per-frame F0 clamps it. See LIFTER_SCALE_COARSE_HZ.
-    const targetHz = LIFTER_SCALE_COARSE_HZ
-      * Math.pow(LIFTER_SCALE_FINE_HZ / LIFTER_SCALE_COARSE_HZ, sharpness)
-    this.lifterTarget = Math.max(20, Math.round(this.sampleRate / targetHz))
 
     // Attack/release at the frame rate: exp(-frame_period / tau).
     this.attackCoeff = p.attackMs > 0
@@ -744,11 +780,9 @@ export class ResonanceKernel {
       p.pitchMaxHz ?? DEFAULT_PITCH_MAX_HZ,
     )
 
-    // The harmonic walk now ends at freqCeilHz, so that is the only param the
-    // cached masks depend on. Compare values rather than key presence: the
-    // effect wrapper posts the full param object on every knob move, so an
-    // `in partial` test is true on every twist and never lets the cache survive.
-    if (this.freqCeilHz !== prevCeilHz) this.maskCache.clear()
+    // The harmonic walk runs to Nyquist now that there is no adjustable band
+    // ceiling, so the mask depends on F0 alone and the cache never needs
+    // clearing on a param change.
   }
 
   /**
@@ -963,7 +997,7 @@ export class ResonanceKernel {
 
     for (let h = 1; h <= MAX_HARMONIC; h++) {
       const freq = h * f0
-      if (freq > this.freqCeilHz || freq >= nyquist) break
+      if (freq >= nyquist) break
       const center = Math.round(freq / this.binWidth)
       const pctHalf = Math.round((freq * HARMONIC_WIDTH_PCT) / this.binWidth)
       const half = Math.min(Math.max(HARMONIC_WIDTH_BINS, pctHalf), maxHalf)
@@ -982,6 +1016,80 @@ export class ResonanceKernel {
    * floor rather than riding the harmonic peaks, so a resonance is visible at
    * its true prominence even when it sits next to a harmonic.
    */
+  /**
+   * The reference envelope, one per DISTINCT zone sharpness, blended per bin.
+   *
+   * Sharpness sets the SCALE of the envelope — how much spectral detail it
+   * follows — and that is a property of the whole transform, not of a bin. A
+   * zone asking for a different sharpness therefore needs its own envelope, and
+   * the per-bin answer is the weighted sum, using the same weights that
+   * crossfade every other zone setting at a boundary.
+   *
+   * The forward cepstrum is computed once and shared, so each extra distinct
+   * sharpness costs one inverse transform per frame — at most five more, and
+   * exactly none in the uniform case, which is the one every untouched panel is
+   * in. `envUniform` also takes the assignment path rather than the blend path:
+   * summing N identical envelopes by weights that sum to 1 differs from the
+   * envelope in the last bits, and the default patch is meant to be
+   * bit-identical to the build before zones existed, not merely close.
+   */
+  _cepstralEnvelopeBlended(lifterCeiling) {
+    const groups = this.envGroups
+    if (this.envUniform) {
+      this._cepstralEnvelope(Math.min(groups[0].lifterTarget, lifterCeiling))
+      return
+    }
+    const { envDb, binCount } = this
+    for (const g of groups) {
+      if (!g.buffer || g.buffer.length !== binCount) g.buffer = new Float64Array(binCount)
+      this._cepstralEnvelope(Math.min(g.lifterTarget, lifterCeiling))
+      g.buffer.set(envDb.subarray(0, binCount))
+    }
+    envDb.fill(0, 0, binCount)
+    for (const g of groups) {
+      const { weight, buffer } = g
+      for (let k = 0; k < binCount; k++) {
+        if (weight[k]) envDb[k] += weight[k] * buffer[k]
+      }
+    }
+  }
+
+  /**
+   * The same, for the peak-envelope reference.
+   *
+   * This one needs the max filter re-run per group as well as the geometric
+   * mean, because both widths come from sharpness — and `peakMax` is what the
+   * detector measures protrusion against in this mode, so it is blended too.
+   */
+  _peakEnvelopeBlended(f0) {
+    const groups = this.envGroups
+    if (this.envUniform) {
+      this.refOct = groups[0].refOct
+      this._peakEnvelope(f0)
+      return
+    }
+    const { envDb, binCount } = this
+    for (const g of groups) {
+      if (!g.buffer || g.buffer.length !== binCount * 2) {
+        g.buffer = new Float64Array(binCount * 2)
+      }
+      this.refOct = g.refOct
+      this._peakEnvelope(f0)
+      g.buffer.set(envDb.subarray(0, binCount), 0)
+      g.buffer.set(this.peakMax.subarray(0, binCount), binCount)
+    }
+    envDb.fill(0, 0, binCount)
+    this.peakMax.fill(0, 0, binCount)
+    for (const g of groups) {
+      const { weight, buffer } = g
+      for (let k = 0; k < binCount; k++) {
+        if (!weight[k]) continue
+        envDb[k] += weight[k] * buffer[k]
+        this.peakMax[k] += weight[k] * buffer[binCount + k]
+      }
+    }
+  }
+
   _cepstralEnvelope(lifterCutoff) {
     const { fft, magDb, cepstrum, envRe, envIm, envDb, binCount } = this
 
@@ -1066,8 +1174,7 @@ export class ResonanceKernel {
   _analyzeFrame(specRe, specIm, stft) {
     const {
       magDb, envDb, reduction, spread, prevGr, gain, activeBins, binCount,
-      selectivity, depth, maxReductionDb, softKnee, kneeWidth, weightDb,
-      zoneDepth,
+      maxReductionDb, softKnee, kneeWidth, zoneDepth, zoneSelectivity,
     } = this
 
     for (let k = 0; k < binCount; k++) {
@@ -1105,8 +1212,6 @@ export class ResonanceKernel {
     const lifterCeiling = medianF0 > 0
       ? Math.max(20, Math.trunc((0.4 * this.sampleRate) / medianF0))
       : DEFAULT_LIFTER_CUTOFF
-    const lifterCutoff = Math.min(this.lifterTarget, lifterCeiling)
-
     if (this.refMode === 'peak') {
       // THE CURRENT FRAME'S PITCH, NOT THE ROLLING MEDIAN, and the asymmetry
       // is the reason. The max filter's window has to span at least one
@@ -1117,9 +1222,9 @@ export class ResonanceKernel {
       // 87-397 Hz around a median of 195 the high-pitched frames were getting
       // half a spacing. Margin for the same reason: err wide.
       const spacingHz = (pitched && f0 > 0 ? f0 : medianF0) || PEAK_FALLBACK_F0_HZ
-      this._peakEnvelope(spacingHz * PEAK_SPACING_MARGIN)
+      this._peakEnvelopeBlended(spacingHz * PEAK_SPACING_MARGIN)
     } else {
-      this._cepstralEnvelope(lifterCutoff)
+      this._cepstralEnvelopeBlended(lifterCeiling)
     }
 
     const mask = this.preserveHarmonics && pitched ? this._harmonicMask(f0) : null
@@ -1151,22 +1256,15 @@ export class ResonanceKernel {
         reduction[k] = 0
         continue
       }
-      // The threshold, offset per band by the weighting curve. Floored at zero:
-      // a negative threshold would mean treating bins that sit BELOW the
-      // reference, which is not a resonance under any reading.
-      const threshold = weightDb
-        ? Math.max(0, selectivity - weightDb[k])
-        : selectivity
-      const above = detect[k] - envDb[k] - threshold
+      // Threshold and knee come from the zone this bin falls in. DEPTH DOES
+      // NOT APPLY HERE — it is applied once, after the spread. See below.
+      const above = detect[k] - envDb[k] - zoneSelectivity[k]
       if (above <= 0) {
         reduction[k] = 0
         continue
       }
-      const curve = softKnee && above < kneeWidth
-        ? (above * above) / (2 * kneeWidth)
-        : above
-      const r = curve * depth
-      reduction[k] = r > maxReductionDb ? maxReductionDb : r
+      const knee = kneeWidth[k]
+      reduction[k] = softKnee && above < knee ? (above * above) / (2 * knee) : above
     }
 
     // Harmonic protection, pre-spread: zero these before the kernel runs so a
@@ -1184,8 +1282,7 @@ export class ResonanceKernel {
       for (let k = 0; k < binCount; k++) {
         const half = halfBins[k]
         if (half < 1) {
-          const v = reduction[k]
-          spread[k] = v > maxReductionDb ? maxReductionDb : v
+          spread[k] = reduction[k]
           continue
         }
         const inv = invSigma[k]
@@ -1199,7 +1296,7 @@ export class ResonanceKernel {
           if (x >= SPREAD_LUT_MAX) continue
           acc += r * SPREAD_LUT[(x * lutScale) | 0]
         }
-        spread[k] = acc > maxReductionDb ? maxReductionDb : acc
+        spread[k] = acc
       }
       // Post-spread: re-protect harmonics that neighbouring spikes bled into,
       // and hard-limit the reduction to the active band. Without a spread
@@ -1210,21 +1307,23 @@ export class ResonanceKernel {
       }
     }
 
-    // ZONE DEPTH, AFTER THE SPREAD. It scales the global Depth rather than
-    // replacing it, so the Depth knob still means what it says everywhere and a
-    // zone says how much OF it applies here; a disabled zone arrives as zero
-    // and falls out through the same multiply, needing no second mechanism.
+    // DEPTH AND THE CEILING, ONCE, AFTER THE SPREAD.
     //
-    // After rather than before, and that is measured. The spread kernel reaches
-    // 96 bins either side, so applying depth first lets a neighbouring zone's
-    // reduction smear straight through a boundary: a bypassed zone still lost
-    // 0.68 dB at a tone 1.6 octaves clear of the edge, which is not what OFF
-    // can be allowed to mean. Applying it here scales whatever reduction ends
-    // up at each bin, which is the reading the control has anyway, and the edge
-    // stays soft because the crossfade lives in the curve rather than in the
-    // ordering.
-    if (zoneDepth) {
-      for (let k = 0; k < binCount; k++) reduction[k] *= zoneDepth[k]
+    // After rather than in the detection loop, and it has to be after: the
+    // spread kernel reaches up to 96 bins either side, so scaling first lets a
+    // neighbouring zone's reduction smear straight through a boundary — a zone
+    // switched off still lost 0.68 dB on a tone 1.6 octaves clear of the edge,
+    // which is not what OFF can be allowed to mean.
+    //
+    // It costs nothing to move it. The spread is a linear operator, so scaling
+    // before and scaling after are the same arithmetic wherever depth is
+    // uniform, which is every patch that has not been zoned. The one real
+    // change is that `maxReductionDb` now clips the finished reduction rather
+    // than an intermediate — it is a ceiling on what comes out, and that is
+    // where a ceiling belongs.
+    for (let k = 0; k < binCount; k++) {
+      const r = reduction[k] * zoneDepth[k]
+      reduction[k] = r > maxReductionDb ? maxReductionDb : r
     }
 
     // Silent frames target zero, so the IIR decays through silence rather than

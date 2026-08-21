@@ -1,7 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
 import {
-  RESONANCE_ZONE_SENS_MAX_DB,
   zoneBounds,
   zoneSettings,
   zoneSettingsAt,
@@ -11,7 +10,6 @@ import {
   hzFromX,
   moveBoundary,
   removeBoundary,
-  setSensitivity,
   splitZone,
   xFromHz,
   zoneIndexAt,
@@ -69,11 +67,6 @@ const props = defineProps({
   /** Broadband peak reduction, negative dB — drives the numeric readouts. */
   reductionDb: { type: Number, default: 0 },
   accent: { type: String, default: '#8de0a8' },
-  /** Detection threshold above the reference, in dB. */
-  selectivityDb: { type: Number, default: 8 },
-  /** Processing band. Outside it the display is washed out, as the effect is. */
-  freqFloorHz: { type: Number, default: 40 },
-  freqCeilHz: { type: Number, default: 20000 },
   /** Reduction that fills the top lane. Matches GainReductionBar's default. */
   fullScaleDb: { type: Number, default: 24 },
   /**
@@ -128,21 +121,9 @@ const MIN_SCALE_GAP_PX = 11
 /** Below this fraction of the scale the peak hold has nothing to say. */
 const PEAK_VISIBLE = 0.025
 
-/**
- * Depth of the zone lane.
- *
- * Fixed rather than a share, because what it holds is a fixed-range scale
- * (±RESONANCE_ZONE_SENS_MAX_DB) rather than a signal: giving it more pixels on
- * a tall window would only stretch a staircase, where the spectrum genuinely
- * has more to show. Its whole purpose is a place to put an editable value that
- * does NOT move with the audio — see drawZones.
- */
-const ZONE_H = 38
-
-const grH = computed(() => Math.round(Math.max(
-  34, (props.height - LANE_GAP * 2 - AXIS_H - ZONE_H) * GR_SHARE)))
-const zoneTop = computed(() => grH.value + LANE_GAP)
-const specTop = computed(() => zoneTop.value + ZONE_H + LANE_GAP)
+const grH = computed(() =>
+  Math.round(Math.max(34, (props.height - LANE_GAP - AXIS_H) * GR_SHARE)))
+const specTop = computed(() => grH.value + LANE_GAP)
 const specH = computed(() => Math.max(40, props.height - specTop.value - AXIS_H))
 
 /**
@@ -319,7 +300,6 @@ function draw(dtMs) {
   }
   drawZones(ctx, w)
 
-  drawOutOfBand(ctx, w, xFor, minHz, maxHz)
   drawGrScale(ctx, w)
   drawAxis(ctx, w, xFor, minHz, maxHz)
   drawCursor(ctx, w)
@@ -329,12 +309,10 @@ function draw(dtMs) {
 function drawPlates(ctx, w) {
   ctx.fillStyle = 'rgba(0,0,0,.42)'
   ctx.fillRect(0, 0, w, grH.value)
-  ctx.fillRect(0, zoneTop.value, w, ZONE_H)
   ctx.fillRect(0, specTop.value, w, specH.value)
 
   ctx.fillStyle = 'rgba(255,255,255,.07)'
   ctx.fillRect(0, grH.value + (LANE_GAP - 1) / 2, w, 1)
-  ctx.fillRect(0, zoneTop.value + ZONE_H + (LANE_GAP - 1) / 2, w, 1)
 }
 
 function drawGrid(ctx, w, xFor, minHz, maxHz) {
@@ -467,50 +445,17 @@ function drawSpectrum(ctx, w, frame, alpha) {
 
   // Threshold: dashed, because it is a decision boundary rather than a signal.
   //
-  // TWO OF THEM ONCE A ZONE IS OFF NEUTRAL. The dim line is the flat threshold
-  // Selectivity asks for; the bright one is what the detector will actually
-  // use once the zones have offset it, floored at zero the way the kernel
-  // floors it, and stepped at the boundaries with the same crossfade the
-  // kernel applies. The gap between them is what the zones are doing, drawn at
-  // the place the decision is made. On neutral zones the two coincide and only
-  // one is drawn, so a panel that has never touched this looks as it did.
+  // ONE LINE, STEPPED PER ZONE. Each zone carries its own Selectivity, so the
+  // threshold is a staircase with the same crossfade at each boundary that the
+  // kernel applies — this is the kernel's decision boundary drawn where the
+  // decision is made.
   //
-  // This is a READOUT, not the editor. It has to be, because it rides
-  // `reference[]` and therefore moves with the audio several times a second —
-  // which is exactly why the editable copy of the same numbers lives in the
-  // zone lane on a fixed scale.
+  // A READOUT, NOT THE EDITOR. It rides `reference[]`, so it moves with the
+  // audio several times a second; the editable copy of the same number is a
+  // knob under the plot, which does not.
   const spanOct = Math.log2(frame.maxHz / frame.minHz)
   const hzAt = d => frame.minHz * Math.pow(2, (d / (bins - 1)) * spanOct)
-  const shaped = zonesShapeThreshold.value
-  const thresholdAt = d => shaped
-    ? Math.max(0, props.selectivityDb
-        - zoneSettingsAt(props.zones, hzAt(d), props.freqFloorHz, props.freqCeilHz).sensitivityDb)
-    : props.selectivityDb
-
-  if (shaped) {
-    ctx.beginPath()
-    for (let d = 0; d < bins; d++) {
-      const y = yFor(reference[d] + props.selectivityDb)
-      d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
-    }
-    for (let d = bins - 1; d >= 0; d--) {
-      ctx.lineTo(d * xStep, yFor(reference[d] + thresholdAt(d)))
-    }
-    ctx.closePath()
-    ctx.fillStyle = tint(props.accent, 0.3)
-    ctx.fill()
-
-    ctx.beginPath()
-    for (let d = 0; d < bins; d++) {
-      const y = yFor(reference[d] + props.selectivityDb)
-      d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
-    }
-    ctx.setLineDash([2, 4])
-    ctx.lineWidth = 1
-    ctx.strokeStyle = 'rgba(255,255,255,.20)'
-    ctx.stroke()
-    ctx.setLineDash([])
-  }
+  const thresholdAt = d => zoneSettingsAt(props.zones, hzAt(d)).selectivity
 
   ctx.beginPath()
   for (let d = 0; d < bins; d++) {
@@ -540,38 +485,6 @@ function drawSpectrum(ctx, w, frame, alpha) {
 
   ctx.restore()
   ctx.globalAlpha = 1
-}
-
-/** Out-of-band frequencies, washed out in both lanes with the limit marked. */
-function drawOutOfBand(ctx, w, xFor, minHz, maxHz) {
-  const wash = 'rgba(6,8,7,.72)'
-  const edge = 'rgba(255,255,255,.14)'
-  const bottom = specTop.value + specH.value
-
-  const paint = (x0, x1) => {
-    if (x1 <= x0) return
-    ctx.fillStyle = wash
-    ctx.fillRect(x0, 0, x1 - x0, grH.value)
-    ctx.fillRect(x0, zoneTop.value, x1 - x0, ZONE_H)
-    ctx.fillRect(x0, specTop.value, x1 - x0, bottom - specTop.value)
-  }
-  const rule = (x) => {
-    ctx.fillStyle = edge
-    ctx.fillRect(Math.round(x) + 0.5, 0, 1, grH.value)
-    ctx.fillRect(Math.round(x) + 0.5, zoneTop.value, 1, ZONE_H)
-    ctx.fillRect(Math.round(x) + 0.5, specTop.value, 1, bottom - specTop.value)
-  }
-
-  if (props.freqFloorHz > minHz) {
-    const x = Math.min(xFor(props.freqFloorHz), w)
-    paint(0, x)
-    rule(x)
-  }
-  if (props.freqCeilHz < maxHz) {
-    const x = Math.max(0, xFor(props.freqCeilHz))
-    paint(x, w)
-    rule(x)
-  }
 }
 
 /**
@@ -700,151 +613,81 @@ function updatePeaks(frame, dtMs) {
 // ── Sensitivity zones ───────────────────────────────────────────────────────
 
 /**
- * The zone lane: a fixed scale, and that is the entire reason it exists.
+ * Zones are drawn as full-height dividers, not as a lane of their own.
  *
- * The first version of this feature put the editable handle on the threshold
- * curve in the spectrum lane, on the argument that a control should sit where
- * the thing it changes is drawn. In use that was wrong in a way no static
- * screenshot shows: the threshold is `reference + offset`, the reference is
- * measured from the audio, and the audio arrives at ~46 frames a second — so
- * the handle bounced several times a second and could not be aimed. A control
- * cannot live on a moving curve.
+ * The lane this replaces held an editable value on a fixed scale, which was the
+ * right answer to the problem before it — a handle riding the threshold curve
+ * bounced with the audio and could not be aimed. But it cost 38 px of a display
+ * that is the point of the panel, and it put a zone's settings in two places at
+ * once. A multiband compressor solves the same problem with a divider: the zone
+ * is a COLUMN of the display, its boundary is a line you drag, and its settings
+ * live in one control row that follows the selection.
  *
- * So the editable copy lives here instead, on a scale that depends on nothing
- * but the parameter: zero across the middle, ±RESONANCE_ZONE_SENS_MAX_DB at the
- * edges. A zone's sensitivity is a horizontal segment at a fixed height, and it
- * moves when and only when it is dragged. The threshold curve downstairs still
- * bends — that is the readout, and it is allowed to move, because nobody has to
- * hit it.
+ * So nothing here is a value editor. The dividers say where the zones are and
+ * which one is selected; the knobs under the plot say what it does.
  */
+
+/** How close the pointer must be to a divider to grab it, in pixels. */
+const DIVIDER_HIT_PX = 7
 
 /** Live drag, or null. Outside reactivity — it changes on pointer events. */
 let drag = null
 const dragging = ref(false)
+/** Divider under the pointer, for the hover cursor. -1 for none. */
+const hoverDivider = ref(-1)
 
-/** True when the zones would change the detector at all. */
-const zonesShapeThreshold = computed(() => props.zones.some(
-  z => zoneSettings(z).sensitivityDb !== 0))
-
-const zonesActive = computed(() => props.zones.some((z) => {
-  const s = zoneSettings(z)
-  return s.sensitivityDb !== 0 || s.depth !== 1
-}))
+const bounds = computed(() => zoneBounds(props.zones, 20, 20000))
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
 
-const bounds = computed(() =>
-  zoneBounds(props.zones, props.freqFloorHz, props.freqCeilHz))
-
-/** Sensitivity in dB → y in the zone lane. Fixed: no audio in this mapping. */
-function sensY(db) {
-  const t = clamp(db / RESONANCE_ZONE_SENS_MAX_DB, -1, 1)
-  return zoneTop.value + ZONE_H / 2 - (t * (ZONE_H / 2 - 3))
-}
-
-function sensFromY(y) {
-  const t = (zoneTop.value + ZONE_H / 2 - y) / (ZONE_H / 2 - 3)
-  return clamp(t, -1, 1) * RESONANCE_ZONE_SENS_MAX_DB
-}
-
+/**
+ * Dividers and the selected column.
+ *
+ * Drawn UNDER the curves rather than over them — a divider is a boundary in the
+ * control, not a feature of the audio, and a bright line across a spectrum
+ * trace reads as a notch in the trace. The selected column is the faintest tint
+ * that survives a photograph, for the same reason: it has to say "this one"
+ * without competing with the thing being looked at.
+ */
 function drawZones(ctx, w) {
   if (props.zones.length === 0) return
-  const top = zoneTop.value
-  const mid = top + ZONE_H / 2
+  const bottom = specTop.value + specH.value
 
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(0, top, w, ZONE_H)
-  ctx.clip()
-
-  // Zero datum. A staircase with no baseline reads as an arbitrary set of
-  // heights rather than as offsets from neutral.
-  ctx.fillStyle = 'rgba(255,255,255,.13)'
-  ctx.fillRect(0, Math.round(mid) + 0.5, w, 1)
-
-  props.zones.forEach((zone, i) => {
+  const paintColumn = (i, fill) => {
     const { loHz, hiHz } = bounds.value[i]
     const x0 = xFromHz(loHz, axis)
     const x1 = xFromHz(hiHz, axis)
-    if (x1 - x0 < 0.5) return
-    const settings = zoneSettings(zone)
-    const selected = i === props.selectedZone
-    const y = sensY(settings.sensitivityDb)
-
-    // A disabled zone is drawn as a hatched span rather than as a flat one at
-    // zero. Zero sensitivity and "not processed at all" are different states
-    // and a flat segment would show them identically.
-    if (!settings.enabled) {
-      ctx.fillStyle = 'rgba(255,255,255,.05)'
-      ctx.fillRect(x0, top, x1 - x0, ZONE_H)
-      // Clip FIRST. beginPath() resets the current path, so building the
-      // hatch and then clipping threw the hatch away and drew nothing — a
-      // disabled zone came out as a plain grey block, which is what a zone at
-      // sensitivity zero looks like too.
-      ctx.save()
-      ctx.beginPath()
-      ctx.rect(x0, top, x1 - x0, ZONE_H)
-      ctx.clip()
-      ctx.strokeStyle = 'rgba(255,255,255,.16)'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      for (let x = x0 - ZONE_H; x < x1; x += 6) {
-        ctx.moveTo(x, top + ZONE_H)
-        ctx.lineTo(x + ZONE_H, top)
-      }
-      ctx.stroke()
-      ctx.restore()
-    } else {
-      // Fill from the datum to the value: the area IS the offset, so a zone
-      // asking for more sensitivity reads as more of something.
-      ctx.fillStyle = tint(props.accent, selected ? 0.34 : 0.2)
-      ctx.fillRect(x0, Math.min(mid, y), x1 - x0, Math.abs(y - mid))
-      // Depth as a bar along the floor of the lane. Two numbers per zone and
-      // only one vertical axis, so the second one gets its own datum rather
-      // than a second scale nobody would read.
-      const dw = (x1 - x0) * settings.depth
-      ctx.fillStyle = tint(props.accent, selected ? 0.5 : 0.3)
-      ctx.fillRect(x0, top + ZONE_H - 2, dw, 2)
-    }
-
-    ctx.beginPath()
-    ctx.moveTo(x0, y)
-    ctx.lineTo(x1, y)
-    ctx.lineWidth = selected ? 2 : 1.4
-    ctx.strokeStyle = settings.enabled
-      ? tint(props.accent, selected ? 1 : 0.7)
-      : 'rgba(255,255,255,.22)'
-    ctx.stroke()
-
-    if (selected) {
-      ctx.fillStyle = tint(props.accent, 0.09)
-      ctx.fillRect(x0, top, x1 - x0, ZONE_H)
-    }
-  })
-
-  // Boundaries, through every lane so a zone reads as a column of the display
-  // rather than as a mark in one strip of it.
-  const bottom = specTop.value + specH.value
-  for (let i = 0; i < props.zones.length - 1; i++) {
-    const x = Math.round(xFromHz(props.zones[i].hiHz, axis)) + 0.5
-    ctx.fillStyle = drag?.boundary === i
-      ? tint(props.accent, 0.9)
-      : 'rgba(255,255,255,.34)'
-    ctx.fillRect(x, 0, 1, grH.value)
-    ctx.fillRect(x, top, 1, ZONE_H)
-    ctx.fillStyle = drag?.boundary === i
-      ? tint(props.accent, 0.55)
-      : 'rgba(255,255,255,.16)'
-    ctx.fillRect(x, specTop.value, 1, bottom - specTop.value)
-    // Grip: the only thing that says a line is draggable.
-    ctx.fillStyle = drag?.boundary === i ? props.accent : 'rgba(255,255,255,.42)'
-    ctx.fillRect(x - 1.5, top + 2, 4, 5)
-    ctx.fillRect(x - 1.5, top + ZONE_H - 7, 4, 5)
+    if (x1 <= x0) return
+    ctx.fillStyle = fill
+    ctx.fillRect(x0, 0, x1 - x0, grH.value)
+    ctx.fillRect(x0, specTop.value, x1 - x0, bottom - specTop.value)
   }
 
-  ctx.restore()
+  // A zone switched off is washed out across the whole column, which is what
+  // the out-of-band wash used to do for the band limits. Same statement, and
+  // now there is only one control that can make it.
+  props.zones.forEach((zone, i) => {
+    if (zoneSettings(zone).enabled) return
+    paintColumn(i, 'rgba(6,8,7,.62)')
+  })
+  if (props.selectedZone >= 0 && props.selectedZone < props.zones.length) {
+    paintColumn(props.selectedZone, tint(props.accent, 0.07))
+  }
+
+  for (let i = 0; i < props.zones.length - 1; i++) {
+    const x = Math.round(xFromHz(props.zones[i].hiHz, axis)) + 0.5
+    const live = drag?.divider === i || hoverDivider.value === i
+    ctx.fillStyle = live ? tint(props.accent, 0.95) : 'rgba(255,255,255,.34)'
+    ctx.fillRect(x, 0, 1, grH.value)
+    ctx.fillRect(x, specTop.value, 1, bottom - specTop.value)
+    // Grips at both ends. A full-height hairline with nothing on it reads as a
+    // grid rule; two 5 px tabs are what say it can be moved.
+    ctx.fillStyle = live ? props.accent : 'rgba(255,255,255,.5)'
+    ctx.fillRect(x - 1.5, 1, 4, 6)
+    ctx.fillRect(x - 1.5, bottom - 7, 4, 6)
+  }
 }
 
 // ── Zone editing ────────────────────────────────────────────────────────────
@@ -867,46 +710,25 @@ function onDown(e) {
   const rect = canvasEl.value?.getBoundingClientRect()
   if (!rect) return
   const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
   canvasEl.value?.focus({ preventScroll: true })
 
-  const boundary = boundaryAt(props.zones, x, axis)
-  if (boundary >= 0) {
-    drag = { boundary }
+  const divider = boundaryAt(props.zones, x, axis, DIVIDER_HIT_PX)
+  if (divider >= 0) {
+    drag = { divider }
     dragging.value = true
     canvasEl.value?.setPointerCapture?.(e.pointerId)
     e.preventDefault()
     return
   }
-
-  const index = zoneIndexAt(props.zones, x, axis, props.freqFloorHz, props.freqCeilHz)
-  select(index)
-  // A vertical drag anywhere in the zone lane sets that zone's sensitivity.
-  // ABSOLUTE, not relative: the scale is fixed, so the value under the pointer
-  // is unambiguous and grabbing a thin segment exactly is not required.
-  //
-  // ARMED HERE, COMMITTED ON THE FIRST MOVE. Committing on the press instead
-  // was measurably wrong: a double-click to split a zone is two presses, so it
-  // slammed that zone's sensitivity to wherever the pointer happened to be
-  // before splitting it — a gesture that means "divide this" silently rewrote
-  // the value being divided. A press with no movement is now a selection and
-  // nothing else.
-  if (y >= zoneTop.value && y <= zoneTop.value + ZONE_H) {
-    drag = { zone: index }
-    dragging.value = true
-    canvasEl.value?.setPointerCapture?.(e.pointerId)
-    e.preventDefault()
-  }
+  // Anywhere else in the plot selects the zone under the pointer. Selection is
+  // the ONLY thing a click in the display does now: the values moved to knobs,
+  // so there is no gesture here that can change the sound by accident.
+  select(zoneIndexAt(props.zones, x, axis, 20, 20000))
 }
 
-function onDrag(e, x, y) {
+function onDrag(e, x) {
   if (!drag) return
-  if (drag.boundary !== undefined) {
-    commit(moveBoundary(
-      props.zones, drag.boundary, hzFromX(x, axis), props.freqFloorHz, props.freqCeilHz))
-    return
-  }
-  commit(setSensitivity(props.zones, drag.zone, sensFromY(y)))
+  commit(moveBoundary(props.zones, drag.divider, hzFromX(x, axis), 20, 20000))
 }
 
 function onUp(e) {
@@ -920,25 +742,25 @@ function onDblClick(e) {
   const rect = canvasEl.value?.getBoundingClientRect()
   if (!rect) return
   const x = e.clientX - rect.left
-  const boundary = boundaryAt(props.zones, x, axis)
-  if (boundary >= 0) {
-    commit(removeBoundary(props.zones, boundary))
+  const divider = boundaryAt(props.zones, x, axis, DIVIDER_HIT_PX)
+  if (divider >= 0) {
+    commit(removeBoundary(props.zones, divider))
     select(Math.min(props.selectedZone, props.zones.length - 2))
   } else {
-    const next = splitZone(
-      props.zones, hzFromX(x, axis), axis, `z${Date.now()}${nextZoneId++}`,
-      props.freqFloorHz, props.freqCeilHz)
+    const before = props.zones
+    const next = splitZone(before, hzFromX(x, axis), axis, `z${Date.now()}${nextZoneId++}`, 20, 20000)
     commit(next)
+    if (next !== before) select(zoneIndexAt(next, x, axis, 20, 20000))
   }
   e.preventDefault()
 }
 
 /**
- * Keyboard equivalents for everything the pointer can do here.
+ * Keyboard equivalents for the two gestures the plot owns.
  *
- * Not a nicety. The rest of this panel is knobs and switches that a keyboard
- * can reach; putting the zone editor inside a canvas with no key handling would
- * make it the one control in the plugin some people could not use at all.
+ * Not a nicety. The rest of this panel is knobs and switches a keyboard can
+ * reach; leaving the zone boundaries reachable by pointer alone would make them
+ * the one thing in the plugin some people could not set.
  */
 function onKeyDown(e) {
   const n = props.zones.length
@@ -948,30 +770,19 @@ function onKeyDown(e) {
   switch (e.key) {
     case 'ArrowLeft':
       if (shift) {
-        // Shift moves the boundary BELOW the selected zone, which is the one
-        // the arrow points at. Boundary i-1 is `zones[i-1].hiHz`.
         commit(moveBoundary(props.zones, i - 1,
-          (props.zones[i - 1]?.hiHz ?? 0) * Math.pow(2, -1 / 12),
-          props.freqFloorHz, props.freqCeilHz))
+          (props.zones[i - 1]?.hiHz ?? 0) * Math.pow(2, -1 / 12), 20, 20000))
       } else select(Math.max(0, i - 1))
       break
     case 'ArrowRight':
       if (shift) {
         commit(moveBoundary(props.zones, i,
-          (props.zones[i]?.hiHz ?? 0) * Math.pow(2, 1 / 12),
-          props.freqFloorHz, props.freqCeilHz))
+          (props.zones[i]?.hiHz ?? 0) * Math.pow(2, 1 / 12), 20, 20000))
       } else select(Math.min(n - 1, i < 0 ? 0 : i + 1))
       break
-    case 'ArrowUp':
-    case 'ArrowDown': {
-      if (i < 0) { select(0); break }
-      const step = (e.key === 'ArrowUp' ? 1 : -1) * (shift ? 0.5 : 2)
-      commit(setSensitivity(props.zones, i, (props.zones[i].sensitivityDb ?? 0) + step))
-      break
-    }
     case 'Enter':
       commit(splitZone(props.zones, hzFromX(axis.w * 0.5, axis), axis,
-        `z${Date.now()}${nextZoneId++}`, props.freqFloorHz, props.freqCeilHz))
+        `z${Date.now()}${nextZoneId++}`, 20, 20000))
       break
     case 'Delete':
     case 'Backspace':
@@ -992,9 +803,8 @@ const zoneText = computed(() => {
   if (!zone) return ''
   const { loHz, hiHz } = bounds.value[i]
   const s = zoneSettings(zone)
-  const sign = s.sensitivityDb > 0 ? '+' : ''
   return s.enabled
-    ? `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)} · SENS ${sign}${s.sensitivityDb.toFixed(1)} · DEPTH ${Math.round(s.depth * 100)}%`
+    ? `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)}`
     : `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)} · OFF`
 })
 
@@ -1065,9 +875,9 @@ const plotSummary = computed(() => {
       const { loHz, hiHz } = bounds.value[i]
       const s = zoneSettings(z)
       return s.enabled
-        ? `${formatHz(loHz)} to ${formatHz(hiHz)}, sensitivity `
-          + `${s.sensitivityDb > 0 ? 'plus ' : ''}${s.sensitivityDb.toFixed(1)} decibels, `
-          + `depth ${Math.round(s.depth * 100)} percent`
+        ? `${formatHz(loHz)} to ${formatHz(hiHz)}, selectivity ${s.selectivity.toFixed(1)} `
+          + `decibels, depth ${Math.round(s.depth * 100)} percent, `
+          + `sharpness ${Math.round(s.sharpness * 100)} percent`
         : `${formatHz(loHz)} to ${formatHz(hiHz)}, off`
     }).join('; ') + '.'
     : ''
@@ -1098,7 +908,7 @@ const ZONE_HINT = 'Drag in the zone lane to set a zone\u2019s sensitivity, or dr
  * moved off neutral.
  */
 const idleHint = computed(() =>
-  zonesActive.value ? '' : 'DRAG A ZONE BAR \u00b7 DBL-CLICK TO SPLIT')
+  props.zones.length > 1 ? '' : 'DBL-CLICK TO SPLIT A ZONE')
 
 </script>
 
@@ -1151,19 +961,7 @@ const idleHint = computed(() =>
         <span class="flex items-center gap-[4px]">
           <span :style="{ width: '10px', height: '2px', background: accent }"></span>OUTPUT
         </span>
-        <!-- Only once a zone is off neutral. Until then the two thresholds
-             coincide and there is nothing on the plot for this word to point
-             at. -->
-        <span
-          v-if="zonesActive"
-          class="flex items-center gap-[4px]"
-          :style="{ color: `color-mix(in srgb, ${accent} 50%, rgba(255,255,255,.5))` }"
-        >
-          <span :style="{
-            width: '10px', height: '2px',
-            background: `color-mix(in srgb, ${accent} 60%, transparent)`,
-          }"></span>ZONES
-        </span>
+
       </span>
 
       <!-- Whatever the pointer is over, or where the deepest cut is when it is

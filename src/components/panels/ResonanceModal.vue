@@ -10,24 +10,22 @@ import {
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
-import DeviceRangeSlider from '../knobs/DeviceRangeSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
-import ResonanceZoneStrip from '../meters/ResonanceZoneStrip.vue'
+import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  resDepth, resSharpness, resSelectivity, resAttack, resRelease,
-  resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
+  resAttack, resRelease,
+  resMaxReduction, resMode, resPreserveHarmonics,
   resPitchRange, resMix, resTrim, resZones, resSelectedZone, resRefMode,
   resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
   resDisplayFn, hasSelection,
-  togglePreview, toggleDelta, syncDepth, syncSharpness, syncSelectivity, syncAttack,
+  togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMaxReduction, syncMix, syncTrim, syncZones,
-  syncFreqFloor, syncFreqCeil,
   syncMode, syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
 
@@ -70,37 +68,9 @@ const PITCH_RANGE_OPTIONS = Object.entries(PITCH_RANGES).map(([value, r]) => ({
 }))
 
 const percent = v => `${Math.round(v * 100)}`
-const oneDp = v => v.toFixed(1)
 const ms = v => `${Math.round(v)}`
 const db = v => `${Math.round(v)}`
 const signedDb = v => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
-
-/**
- * Frequency for the range readout. Carries its unit, because the two ends of
- * the band now share one readout and "40 – 20k" reads as a pair of unrelated
- * numbers where "40 Hz – 20 kHz" reads as a span.
- */
-const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v)} Hz`)
-
-/**
- * Round a frequency off the range track to something printable.
- *
- * The track steps in constant octaves, so its raw values are things like
- * 8347.2 Hz. Snapping by decade keeps the readout to three figures at every
- * point on the scale, and keeps a handle nudged with the arrow keys landing on
- * round numbers rather than drifting through the decimals.
- *
- * Every step here is finer than one step of the track, which is ~1.4% of the
- * frequency wherever you are on it. A coarser snap would quantise the drag
- * itself — the thumb would sit still through several steps and then jump —
- * because the accepted value is written back to the element on every event.
- */
-function snapHz(v) {
-  if (v < 100) return Math.round(v)
-  if (v < 1000) return Math.round(v / 5) * 5
-  if (v < 10000) return Math.round(v / 25) * 25
-  return Math.round(v / 100) * 100
-}
 
 /**
  * The protection control means different things under the two references, and
@@ -242,9 +212,6 @@ async function applyAndClose() {
         :data-fn="resDisplayFn"
         :reduction-db="resReduction"
         :accent="ACCENT"
-        :selectivity-db="resSelectivity"
-        :freq-floor-hz="resFreqFloor"
-        :freq-ceil-hz="resFreqCeil"
         :height="plotHeight"
         :delta="resDelta"
         :zones="resZones"
@@ -253,17 +220,15 @@ async function applyAndClose() {
         @update:selected-zone="resSelectedZone = $event"
       />
 
-      <!-- The zone strip belongs directly under the plot because the two are
-           one control split by what they edit: the plot owns where a zone IS
-           (boundaries are horizontal extents and the axis is horizontal), this
-           owns what it DOES. Selection lights both, so the cell and the span
-           read as the same object. -->
-      <div class="mt-[10px]">
-        <ResonanceZoneStrip
+      <!-- Directly under the plot because the two are one control split by what
+           they edit: the plot owns where a zone IS — boundaries are horizontal
+           extents and the axis is horizontal — and this owns what it DOES.
+           Selection lights both, so the column and the row read as the same
+           object. -->
+      <div class="mt-[11px]">
+        <ResonanceZoneControls
           :zones="resZones"
           :selected="resSelectedZone"
-          :freq-floor-hz="resFreqFloor"
-          :freq-ceil-hz="resFreqCeil"
           :accent="ACCENT"
           :disabled="!resPreview"
           @update:zones="syncZones"
@@ -271,43 +236,16 @@ async function applyAndClose() {
         />
       </div>
 
-      <!-- ONE ROW OF KNOBS, and it used to be two.
-           Everything here is a global setting — what counts as a resonance,
-           how fast the detector moves, how much of the result reaches the
-           file. They were split across two rows with the level meters beside
-           the first, which cost a divider, a set of labels and about 120 px
-           for no grouping the labels do not already carry. That height went to
-           the display, which is the thing in this panel with something to say.
-           The meters shrank with it: they read peak and average, and neither
-           needs 104 px to be legible. -->
+      <!-- WHAT IS LEFT THAT IS GLOBAL. Depth, Sharpness and Selectivity used to
+           sit here and are now per zone, with no global value for a zone to be
+           an offset from — the three that remain are timing and output, which
+           describe the effect as a whole rather than a band of it. The Range
+           fader went with them: a band you want left alone is a zone switched
+           off, and two controls that can both exclude a band is one too many. -->
       <div class="flex items-center justify-between gap-[14px] mt-[14px]">
         <LevelMeter :levels="resInputLevels" label="IN" :height="92" />
 
-        <div class="flex-1 flex justify-center gap-[11px]">
-          <div class="w-[62px]">
-            <Knob
-              :model-value="resDepth" @update:model-value="syncDepth"
-              :min="0" :max="1" :step="0.01" :value-font-px="13"
-              label="Depth" :accent="ACCENT" :format-value="percent"
-              :disabled="!resPreview"
-            />
-          </div>
-          <div class="w-[62px]">
-            <Knob
-              :model-value="resSelectivity" @update:model-value="syncSelectivity"
-              :min="3" :max="24" :step="0.5" :value-font-px="13"
-              label="Selectivity" :accent="ACCENT" :format-value="oneDp"
-              :disabled="!resPreview"
-            />
-          </div>
-          <div class="w-[62px]">
-            <Knob
-              :model-value="resSharpness" @update:model-value="syncSharpness"
-              :min="0" :max="1" :step="0.01" :value-font-px="13"
-              label="Sharpness" :accent="ACCENT" :format-value="percent"
-              :disabled="!resPreview"
-            />
-          </div>
+        <div class="flex-1 flex justify-center gap-[14px]">
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
              setting below it is the same instantaneous jump — the bottom of
@@ -402,16 +340,7 @@ async function applyAndClose() {
           :disabled="!resPreview"
           :caption="modeCaption"
         />
-        <div class="flex-1 min-w-[110px]">
-          <DeviceRangeSlider
-            :low="resFreqFloor" :high="resFreqCeil"
-            @update:low="syncFreqFloor" @update:high="syncFreqCeil"
-            :min="20" :max="20000"
-            :snap="snapHz"
-            label="Range" :accent="ACCENT" :format-value="hz"
-            :disabled="!resPreview"
-          />
-        </div>
+        <div class="flex-1"></div>
 
         <!-- Harmonic protection is the safety mechanism, not a flavour
              control: without it the cepstral reference sits at the

@@ -24,14 +24,9 @@ const DEFAULTS = withRefModeDefaults(RESONANCE_DEFAULTS)
 export const resRefMode = resolveRefMode()
 
 // Singleton reactive state shared between the sidebar trigger and the modal.
-const resDepth = ref(DEFAULTS.depth)
-const resSharpness = ref(DEFAULTS.sharpness)
-const resSelectivity = ref(DEFAULTS.selectivity)
 const resAttack = ref(DEFAULTS.attack)
 const resRelease = ref(DEFAULTS.release)
 const resMaxReduction = ref(DEFAULTS.maxReduction)
-const resFreqFloor = ref(DEFAULTS.freqFloor)
-const resFreqCeil = ref(DEFAULTS.freqCeil)
 const resMode = ref(DEFAULTS.mode)
 const resPreserveHarmonics = ref(DEFAULTS.preserveHarmonics)
 const resPitchRange = ref(DEFAULTS.pitchRange)
@@ -81,9 +76,6 @@ function resDisplayFn() {
 
 function currentParams() {
   return {
-    depth: resDepth.value,
-    sharpness: resSharpness.value,
-    selectivity: resSelectivity.value,
     attack: resAttack.value,
     release: resRelease.value,
     maxReduction: resMaxReduction.value,
@@ -91,8 +83,6 @@ function currentParams() {
     trim: resTrim.value,
     zones: resZones.value,
     refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
-    freqFloor: resFreqFloor.value,
-    freqCeil: resFreqCeil.value,
     mode: resMode.value,
     preserveHarmonics: resPreserveHarmonics.value,
     pitchRange: resPitchRange.value,
@@ -192,17 +182,12 @@ export function useResonance() {
     pushParam(name, value)
   }
 
-  const syncDepth = v => syncParam('depth', resDepth, v)
-  const syncSharpness = v => syncParam('sharpness', resSharpness, v)
-  const syncSelectivity = v => syncParam('selectivity', resSelectivity, v)
   const syncAttack = v => syncParam('attack', resAttack, v)
   const syncRelease = v => syncParam('release', resRelease, v)
   const syncMaxReduction = v => syncParam('maxReduction', resMaxReduction, v)
   const syncMix = v => syncParam('mix', resMix, v)
   const syncTrim = v => syncParam('trim', resTrim, v)
   const syncZones = v => syncParam('zones', resZones, v)
-  const syncFreqFloor = v => syncParam('freqFloor', resFreqFloor, v)
-  const syncFreqCeil = v => syncParam('freqCeil', resFreqCeil, v)
   const syncMode = v => syncParam('mode', resMode, v)
   const syncPitchRange = v => syncParam('pitchRange', resPitchRange, v)
 
@@ -264,9 +249,6 @@ export function useResonance() {
   }
 
   return {
-    resDepth,
-    resSharpness,
-    resSelectivity,
     resAttack,
     resRelease,
     resMaxReduction,
@@ -275,8 +257,6 @@ export function useResonance() {
     resZones,
     resSelectedZone,
     resRefMode,
-    resFreqFloor,
-    resFreqCeil,
     resMode,
     resPreserveHarmonics,
     resPitchRange,
@@ -289,17 +269,12 @@ export function useResonance() {
     hasSelection,
     togglePreview,
     toggleDelta,
-    syncDepth,
-    syncSharpness,
-    syncSelectivity,
     syncAttack,
     syncRelease,
     syncMaxReduction,
     syncMix,
     syncTrim,
     syncZones,
-    syncFreqFloor,
-    syncFreqCeil,
     syncMode,
     syncPitchRange,
     togglePreserveHarmonics,
