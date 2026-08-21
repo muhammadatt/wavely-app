@@ -63,6 +63,11 @@ const MODE_OPTIONS = [
   { value: 'hard', label: 'HARD', title: 'Linear above the threshold' },
 ]
 
+
+const modeCaption = computed(() =>
+  resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
+)
+
 // Which pitches harmonic protection looks for. Nothing else about the effect
 // assumes speech, and this should not either — see PITCH_RANGES.
 const PITCH_RANGE_OPTIONS = Object.entries(PITCH_RANGES).map(([value, r]) => ({
@@ -240,7 +245,7 @@ async function applyAndClose() {
            its knee, and which pitches the protection mask should look for —
            that last one stays global because there is one tracker and one
            signal, however many zones read its answer. -->
-      <div class="flex items-end gap-[12px] mt-[13px]">
+      <div class="flex items-center gap-[12px] mt-[13px] p-2">
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
              setting below it is the same instantaneous jump — the bottom of
@@ -267,7 +272,9 @@ async function applyAndClose() {
              phrase. Pause bleed FALLS at matched cut, -2.47 to -1.19 dB,
              because the higher selectivity more than pays for the longer
              tail. -->
-        <div class="w-[64px] shrink-0">
+
+          <div class="flex items-center gap-4">   
+          <div class="w-[64px] shrink-0">
             <Knob
               :model-value="resAttack" @update:model-value="syncAttack"
               :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="12"
@@ -283,15 +290,8 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[64px] shrink-0">
-            <Knob
-              :model-value="resMix" @update:model-value="syncMix"
-              :min="0" :max="1" :step="0.01" :value-font-px="12"
-              label="Mix" :accent="ACCENT" :format-value="percent"
-              :disabled="!resPreview"
-            />
-          </div>
 
+          <div class="flex flex-col items-center">
           <SegmentedSwitch
             class="shrink-0 mb-[3px]"
             :padding-x="9"
@@ -300,7 +300,13 @@ async function applyAndClose() {
             :options="MODE_OPTIONS"
             :accent="ACCENT"
             :disabled="!resPreview"
+            :caption="modeCaption"
           />
+          </div>
+          </div>
+
+
+
           <SegmentedSwitch
             class="shrink-0 mb-[3px]"
             :padding-x="9"
@@ -324,6 +330,15 @@ async function applyAndClose() {
             style="font:500 9px/1.3 'Inter';color:rgba(255,178,122,.8)"
           >Full suppression in {{ unprotectedZones.join(', ') }} — risks thinning
             harmonic frequencies there.</span>
+
+          <div class="w-[64px] shrink-0 self-end ml-auto">
+            <Knob
+              :model-value="resMix" @update:model-value="syncMix"
+              :min="0" :max="1" :step="0.01" :value-font-px="12"
+              label="Mix" :accent="ACCENT" :format-value="percent"
+              :disabled="!resPreview"
+            />
+          </div>
       </div>
 
       <div class="mt-[14px]">

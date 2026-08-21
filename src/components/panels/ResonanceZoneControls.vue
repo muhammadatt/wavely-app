@@ -213,13 +213,13 @@ const db = v => `${Math.round(v)}`
       </div>
     </div>
 
-    <div class="flex-1 flex justify-center gap-[2px]">
+    <div class="flex-1 flex justify-center items-center gap-[8px]">
       <div class="w-[88px] shrink-0">
         <Knob
-          :model-value="settings.depth" @update:model-value="set('depth', $event)"
-          :min="RESONANCE_ZONE_RANGES.depth.min" :max="RESONANCE_ZONE_RANGES.depth.max"
-          :step="0.01" :value-font-px="13"
-          label="Depth" :accent="accent" :format-value="percent"
+          :model-value="settings.selectivity" @update:model-value="set('selectivity', $event)"
+          :min="RESONANCE_ZONE_RANGES.selectivity.min" :max="RESONANCE_ZONE_RANGES.selectivity.max"
+          :step="0.5" :value-font-px="13"
+          label="Selectivity" :accent="accent" :format-value="oneDp"
           :disabled="disabled"
         />
       </div>
@@ -234,10 +234,10 @@ const db = v => `${Math.round(v)}`
       </div>
       <div class="w-[88px] shrink-0">
         <Knob
-          :model-value="settings.selectivity" @update:model-value="set('selectivity', $event)"
-          :min="RESONANCE_ZONE_RANGES.selectivity.min" :max="RESONANCE_ZONE_RANGES.selectivity.max"
-          :step="0.5" :value-font-px="13"
-          label="Selectivity" :accent="accent" :format-value="oneDp"
+          :model-value="settings.depth" @update:model-value="set('depth', $event)"
+          :min="RESONANCE_ZONE_RANGES.depth.min" :max="RESONANCE_ZONE_RANGES.depth.max"
+          :step="0.01" :value-font-px="13"
+          label="Depth" :accent="accent" :format-value="percent"
           :disabled="disabled"
         />
       </div>
@@ -255,6 +255,14 @@ const db = v => `${Math.round(v)}`
       />
     </div>
 
+    <div>
+          <div class="text-center mb-2" style="width:52px">
+        <div style="font:700 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.62)">
+          {{ zones.length }}</div>
+        <div style="font:600 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em;color:rgba(255,255,255,.3)">
+          {{ zones.length === 1 ? 'ZONE' : 'ZONES' }}</div>
+      </div>
+
     <div class="shrink-0 flex items-center gap-[7px]">
       <button
         class="cursor-pointer disabled:cursor-default disabled:opacity-30"
@@ -265,12 +273,7 @@ const db = v => `${Math.round(v)}`
         aria-label="Merge this zone into its neighbour"
         @click="removeZone"
       >−</button>
-      <div class="text-center" style="width:52px">
-        <div style="font:700 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.62)">
-          {{ zones.length }}</div>
-        <div style="font:600 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em;color:rgba(255,255,255,.3)">
-          {{ zones.length === 1 ? 'ZONE' : 'ZONES' }}</div>
-      </div>
+
       <button
         class="cursor-pointer disabled:cursor-default disabled:opacity-30"
         style="width:23px;height:23px;border-radius:5px;font:700 14px/1 'JetBrains Mono',monospace"
@@ -284,5 +287,8 @@ const db = v => `${Math.round(v)}`
         @click="addZone"
       >+</button>
     </div>
+  </div>
+
+
   </div>
 </template>
