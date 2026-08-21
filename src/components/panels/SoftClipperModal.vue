@@ -16,7 +16,8 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape,
-  clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb, clipperDelta,
+  clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
+  clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncOutputTrim, syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
@@ -281,6 +282,7 @@ const SCOPE_H = 236
         <ClipLamp
           :reduction-db="clipperReduction"
           :engaged-pct="clipperEngagedPct"
+          :residual-dbc="clipperResidualDbc"
           :accent="ACCENT"
           :full-scale-db="METER_FULL_SCALE_DB"
         />

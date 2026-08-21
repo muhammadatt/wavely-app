@@ -38,6 +38,14 @@ import {
  * that consistency with an instrument the user cannot see beside this one was
  * never worth the visibility it cost.
  */
+/**
+ * Below this the residual reads as "nothing to report" rather than as a
+ * number. -90 dBc rather than the kernel's -120 floor: a ratio that low is a
+ * few LSBs of a 16-bit file and is not distinguishable from an idle stage by
+ * any means the user has, so the dash is the more honest rendering.
+ */
+const RESIDUAL_IDLE_DBC = -90
+
 const props = defineProps({
   /** Peak reduction, positive or negative dB — the magnitude is used. */
   reductionDb: { type: Number, required: true },
@@ -65,6 +73,22 @@ const props = defineProps({
    * this scale. See the hold below.
    */
   fullScaleDb: { type: Number, default: 3 },
+  /**
+   * Level of what the stage is removing, dB relative to the signal.
+   *
+   * THE THIRD READING, and it is here rather than anywhere else because the
+   * other two cannot answer the question it does. Peak reduction says how
+   * deep, ENGAGED says how often, and a setting can hold both steady while
+   * doubling the damage — measured across HF Emphasis on real narration, peak
+   * reduction moves 0.1 dB while this moves 2.5. It is also the number behind
+   * the DELTA button: what that mode auditions, this reports.
+   *
+   * NOT PEAK-HELD, unlike the dB figure beside it. That one is held because
+   * the event it reports is a single transient that would otherwise flash past
+   * unseen. This is already a 2 s average in the kernel, and holding an
+   * average would report a window that has passed while implying it is now.
+   */
+  residualDbc: { type: Number, default: -120 },
 })
 
 // ONE HELD QUANTITY, IN dB, and both readings derived from it.
@@ -148,6 +172,19 @@ const lampStyle = computed(() => {
 
 const dbText = computed(() => (readoutDb.value < 0.05 ? '—' : readoutDb.value.toFixed(1)))
 const engagedText = computed(() => `${props.engagedPct.toFixed(1)}%`)
+
+/**
+ * The residual, and the dash it prints when there is nothing to report.
+ *
+ * The stage is bit-transparent below its threshold, so on a passage it never
+ * engages the residual is exactly zero and the ratio is negative infinity. The
+ * kernel floors that; the dash is what the floor looks like. Printing "-120.0"
+ * instead would be a meter reporting a number for silence, which reads as a
+ * broken instrument rather than as an idle one — the same failure the spectrum
+ * analyzer's off-scale readout exists to avoid.
+ */
+const residualIdle = computed(() => props.residualDbc <= RESIDUAL_IDLE_DBC)
+const residualText = computed(() => (residualIdle.value ? '—' : props.residualDbc.toFixed(1)))
 </script>
 
 <template>
@@ -158,8 +195,8 @@ const engagedText = computed(() => `${props.engagedPct.toFixed(1)}%`)
   <div
     class="flex items-center gap-[9px]"
     role="img"
-    title="Peak reduction on the loudest transient. The lamp is fully lit at 3 dB and the number keeps counting past it to the kernel's 6 dB ceiling. 3-6 dB is the usable range on speech; much below 3 the stage is barely engaging. The second figure is how often it fires."
-    :aria-label="`Peak reduction ${dbText} dB, engaged on ${engagedText} of voiced blocks`"
+    title="Peak reduction on the loudest transient. The lamp is fully lit at 3 dB and the number keeps counting past it to the kernel's 6 dB ceiling. 3-6 dB is the usable range on speech; much below 3 the stage is barely engaging. ENGAGED is how often it fires. RESIDUAL is the level of what it is removing, relative to the signal — the same material the DELTA button auditions. Lower is less damage, and it is the reading that separates two settings the other two agree on."
+    :aria-label="`Peak reduction ${dbText} dB, engaged on ${engagedText} of voiced blocks, residual ${residualText} dBc`"
   >
     <span
       class="rounded-full border transition-none"
@@ -193,6 +230,21 @@ const engagedText = computed(() => `${props.engagedPct.toFixed(1)}%`)
     >{{ engagedText }}</span>
     <span style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.3)">
       ENGAGED
+    </span>
+
+    <span class="mx-[2px]" style="width:1px;height:12px;background:rgba(255,255,255,.1)"></span>
+
+    <span
+      class="tabular-nums"
+      :style="{
+        font: `700 11px 'JetBrains Mono',monospace`,
+        color: residualIdle ? 'rgba(255,255,255,.25)' : 'rgba(255,255,255,.62)',
+        minWidth: '40px',
+        textAlign: 'right',
+      }"
+    >{{ residualText }}</span>
+    <span style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.3)">
+      dBc RESIDUAL
     </span>
   </div>
 </template>

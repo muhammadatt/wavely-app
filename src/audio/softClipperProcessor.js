@@ -683,6 +683,82 @@ const PARAM_SMOOTH_MS = 8
  */
 const ENGAGED_TAU_S = 2.0
 
+/**
+ * Averaging window for the RESIDUAL readout — the level of what the stage is
+ * removing, relative to the signal it was removed from.
+ *
+ * WHY A THIRD NUMBER. The lamp answers "how deep" and ENGAGED answers "how
+ * often", and neither answers "how much damage". They come apart here more
+ * than on any other stage in the app: measured across HF Emphasis on real
+ * narration, peak reduction moves 0.1 dB while the residual moves 2.5, and on
+ * one file the residual FALLS as the knob is raised while the number of
+ * samples touched doubles. A setting that touches twice as much material for
+ * less total distortion is strictly better, and neither of the existing
+ * readouts can say so.
+ *
+ * REPORTED IN dBc, NOT dBFS — residual energy against dry energy over the same
+ * blocks. Three reasons, in order of importance: it is invariant to how loud
+ * the file happens to be, so two recordings can be compared; it is invariant
+ * to Output Trim, which is a gain match for A/B and has no business moving a
+ * diagnostic; and it is the unit this stage's own measurements are already
+ * recorded in (see the emphasis note at EMPHASIS_CORNER_HZ, "-40 / -37 / -31
+ * dBc at emphasis 0 / 6 / 12").
+ *
+ * ENERGY IS AVERAGED AND THEN CONVERTED, never the reverse. A mean of dB
+ * values is a geometric mean of powers, which on a quantity that is zero for
+ * most blocks and large for a few — exactly this one — reads far below the
+ * actual ratio.
+ *
+ * AND THE TWO ENERGIES ARE SMOOTHED SEPARATELY, with the ratio taken at read
+ * time. Smoothing the RATIO is the version that shipped first and it measures
+ * something else: a per-block ratio is large wherever dry is small, so a
+ * running mean of it is dominated by the quietest voiced blocks — the ones
+ * carrying almost none of the actual distortion. Measured against a
+ * whole-file energy ratio across HF Emphasis 0 -> 12, the smoothed-ratio
+ * version reported a MINIMUM at 5-6 on a file whose true residual falls
+ * monotonically to 12, and compressed a real 2.4 dB span to 0.4 dB on
+ * another. Two smoothed energies and one division reproduce the whole-file
+ * figure to a constant offset, which is what a readout used to compare
+ * settings has to do.
+ *
+ * GATED ON VOICED BLOCKS, for the reason ENGAGED_TAU_S records: an ungated
+ * average is a function of how much silence a passage happens to contain
+ * rather than of what the stage is doing, and would drift toward zero on a
+ * slow reader for reasons that have nothing to do with the setting.
+ *
+ * 2 s, matching ENGAGED, so the two figures beside each other describe the
+ * same stretch of audio. A longer window would read steadier and would make
+ * the two disagree about what "now" means.
+ */
+const RESIDUAL_TAU_S = 2.0
+
+/**
+ * Floor for the reported ratio, in dB.
+ *
+ * Before anything has been measured the ratio is 0/0, and the panel prints a
+ * dash for this value rather than rendering an infinity.
+ *
+ * ⚠ IT IS NOT THE FLOOR THE READOUT ACTUALLY REACHES ON AUDIO, and the
+ * difference is worth knowing before reading a low number as "clean". The
+ * residual is taken between the RAW input and the finished output, so it
+ * contains everything the stage does — including the oversampler's own
+ * reconstruction error, which is present whether or not the curve fires.
+ * Measured with the curve fully bypassed (Headroom 60, so nothing crosses):
+ * -70.7 dBc on speech-like material, identical at every input level and at
+ * every emphasis setting, which is what a linear error looks like.
+ *
+ * That is the readout's real noise floor. It sits 25-40 dB below the range
+ * this stage produces in use (-30 to -45 dBc measured on three real
+ * narrators), so it does not affect a comparison between settings — but a
+ * reading near -70 means "the oversampler and nothing else", not "no
+ * distortion at all".
+ *
+ * (A steady tone reports the floor instead, because the noise gate never opens
+ * on continuous material and no block is ever counted. That is the trap this
+ * file has recorded three times; it is not a property of the readout.)
+ */
+const RESIDUAL_FLOOR_DBC = -120
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
@@ -1154,6 +1230,10 @@ export class SoftClipperKernel {
     // ── Metering ──
     this.reductionDb = 0
     this.maxReductionDb = 0
+    // Smoothed residual and signal POWER, separately — the ratio is taken at
+    // read time. See RESIDUAL_TAU_S for why not the other way round.
+    this.residualPower = 0
+    this.dryPower = 0
     // Share of voiced blocks in which the curve engaged, 0-1. See ENGAGED_TAU_S.
     this.engagedFraction = 0
 
@@ -1231,6 +1311,17 @@ export class SoftClipperKernel {
     return OVERSAMPLE_LATENCY_SAMPLES
   }
 
+  /**
+   * Residual level in dBc, floored. A getter rather than a field because it is
+   * a division of two smoothed powers — computing it per block would be work
+   * done ~46x more often than it is read.
+   */
+  get residualDbc() {
+    return this.residualPower > 0 && this.dryPower > 0
+      ? Math.max(RESIDUAL_FLOOR_DBC, 10 * Math.log10(this.residualPower / this.dryPower))
+      : RESIDUAL_FLOOR_DBC
+  }
+
   getMetering() {
     return {
       reductionDb: this.reductionDb,
@@ -1240,6 +1331,10 @@ export class SoftClipperKernel {
       // back. Reported so the panel can say what the knob is doing rather
       // than leaving a silently-moving threshold — see LIFT_TAU_S.
       liftDb: this.liftDb,
+      // Level of what the stage is removing, relative to the signal it came
+      // from. Floored rather than allowed to reach -Infinity on material the
+      // stage never engages — see RESIDUAL_FLOOR_DBC.
+      residualDbc: this.residualDbc,
     }
   }
 
@@ -1615,6 +1710,11 @@ export class SoftClipperKernel {
     // immune to the issue by construction — there is nothing to misalign
     // when both sides of the comparison are read at the same instant.
     let blockMaxReductionDb = 0
+    // Summed across channels, both terms, so the ratio is energy-weighted
+    // rather than an average of per-channel ratios — a silent channel should
+    // dilute the reading, not contribute a 0/0 to it.
+    let residualSq = 0
+    let drySq = 0
 
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
@@ -1670,7 +1770,21 @@ export class SoftClipperKernel {
         const dry = dl[p]
         dl[p] = input[i]
         p = p + 1 === D ? 0 : p + 1
-        out[i] = (this.monitorDelta ? dry - out[i] : out[i]) * trimGain[i]
+        // The residual, measured HERE and nowhere else. This is the only point
+        // in the kernel where a delay-aligned dry signal and the finished wet
+        // one exist together, which is what makes it the only point the
+        // difference means anything: the oversampler's group delay would
+        // otherwise be compared against itself. It is also, exactly, what
+        // DELTA auditions — the readout and the monitoring mode report the
+        // same signal, so they cannot disagree.
+        //
+        // BEFORE THE TRIM, like DELTA. Output Trim is a gain match for A/B;
+        // letting it move a diagnostic would mean the number changed when
+        // nothing about the processing had.
+        const d = dry - out[i]
+        residualSq += d * d
+        drySq += dry * dry
+        out[i] = (this.monitorDelta ? d : out[i]) * trimGain[i]
       }
       dryPosEnd = p
     }
@@ -1685,6 +1799,17 @@ export class SoftClipperKernel {
     if (blockVoiced) {
       const a = Math.min(1, n / (ENGAGED_TAU_S * this.sampleRate))
       this.engagedFraction += a * ((blockMaxReductionDb > 0 ? 1 : 0) - this.engagedFraction)
+    }
+
+    // RESIDUAL: same gate, same window, energy domain. drySq can only be zero
+    // on a block of digital silence, which the voiced gate already excludes —
+    // the guard is against a block that is silent on every channel slipping
+    // through some future change to what "voiced" means, not against normal
+    // material.
+    if (blockVoiced && drySq > 0) {
+      const a = Math.min(1, n / (RESIDUAL_TAU_S * this.sampleRate))
+      this.residualPower += a * (residualSq / n - this.residualPower)
+      this.dryPower += a * (drySq / n - this.dryPower)
     }
   }
 }
@@ -1791,6 +1916,7 @@ if (typeof registerProcessor === 'function') {
           reductionDb: this.kernel.reductionDb,
           engagedFraction: this.kernel.engagedFraction,
           liftDb: this.kernel.liftDb,
+          residualDbc: this.kernel.residualDbc,
           // Only the filled prefix, so a short final batch cannot inject
           // stale zero-peak points into the scroll.
           scope: this.scope.subarray(0, this.scopeCount * 2),

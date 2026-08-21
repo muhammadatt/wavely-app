@@ -1636,3 +1636,129 @@ test('turning Emphasis down takes effect at once', () => {
   assert.ok(k2.getMetering().liftDb <= 4 + 1e-9,
     `lift ${k2.getMetering().liftDb.toFixed(2)} still exceeds the new Emphasis of 4 dB`)
 })
+
+// ── RESIDUAL readout (RESIDUAL_TAU_S) ───────────────────────────────────────
+
+/** The kernel's own residual reading, averaged in the energy domain. */
+function residualDbc(signal, params, sr = SR) {
+  const kernel = new SoftClipperKernel(sr)
+  kernel.setParams({ shape: 'tanh3', ...params })
+  const out = new Float32Array(signal.length)
+  let sum = 0, n = 0
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    if (off <= 3 * sr) continue
+    const r = kernel.getMetering().residualDbc
+    if (r > -120) { sum += Math.pow(10, r / 10); n++ }
+  }
+  return n ? 10 * Math.log10(sum / n) : -Infinity
+}
+
+/** The same quantity computed independently, as a ratio of whole-file energies. */
+function residualDbcOffline(signal, params, sr = SR) {
+  const wet = processSoftClipperBuffer([signal], sr, { shape: 'tanh3', ...params }).channelData[0]
+  const dry = processSoftClipperBuffer([signal], sr, { shape: 'tanh3', ...params, headroomDb: 60 }).channelData[0]
+  let res = 0, sig = 0
+  for (let i = 3 * sr; i < signal.length; i++) {
+    const d = dry[i] - wet[i]
+    res += d * d
+    sig += dry[i] * dry[i]
+  }
+  return 10 * Math.log10(res / sig)
+}
+
+test('the residual readout matches an independent measurement of the same thing', () => {
+  // THE CORRECTNESS TEST. The readout exists so a setting can be compared
+  // against another one, so what matters is that it reproduces a whole-file
+  // energy ratio — computed here from two renders, which is how the same
+  // number was measured offline before the meter existed.
+  //
+  // The probe deliberately carries BOTH loud material that clips and quiet
+  // voiced material that does not, because that mixture is what separates a
+  // ratio of averaged energies from an average of per-block ratios. The
+  // second is what shipped first: a per-block ratio is large wherever dry is
+  // small, so its running mean is dominated by the quietest voiced blocks —
+  // the ones carrying almost none of the distortion.
+  const signal = concat(
+    speechLike(4, 0.5, 97),
+    speechLike(3, 0.06, 101), // voiced, far below the threshold, clips nothing
+    speechLike(4, 0.5, 103),
+  )
+  for (const emphasisDb of [0, 6, 12]) {
+    const mine = residualDbc(signal, { headroomDb: 6.5, emphasisDb })
+    const theirs = residualDbcOffline(signal, { headroomDb: 6.5, emphasisDb })
+    assert.ok(Math.abs(mine - theirs) < 2,
+      `emphasis ${emphasisDb}: readout ${mine.toFixed(2)} dBc against ${theirs.toFixed(2)} measured directly`)
+  }
+})
+
+test('the residual readout is a ratio, so level and trim cannot move it', () => {
+  // Both properties are what dBc buys over dBFS, and both are the reason the
+  // readout can be compared across files at all. Output Trim especially: it is
+  // a gain match for A/B, and a diagnostic that moved when it did would be
+  // reporting the user's monitoring rather than the processing.
+  const signal = concat(speechLike(5, 0.4, 11), speechLike(4, 0.4, 13))
+  const base = residualDbc(signal, { headroomDb: 6.5, emphasisDb: 6 })
+
+  const louder = new Float32Array(signal.length)
+  for (let i = 0; i < signal.length; i++) louder[i] = signal[i] * dbToLin(6)
+  const scaled = residualDbc(louder, { headroomDb: 6.5, emphasisDb: 6 })
+  assert.ok(Math.abs(scaled - base) < 0.5,
+    `6 dB of input gain moved the readout ${base.toFixed(2)} -> ${scaled.toFixed(2)} dBc`)
+
+  for (const outputTrimDb of [-6, 6]) {
+    const trimmed = residualDbc(signal, { headroomDb: 6.5, emphasisDb: 6, outputTrimDb })
+    assert.ok(Math.abs(trimmed - base) < 0.1,
+      `Output Trim ${outputTrimDb} moved the readout ${base.toFixed(2)} -> ${trimmed.toFixed(2)} dBc`)
+  }
+})
+
+test('the residual readout bottoms out at the oversampler, not at zero', () => {
+  // ⚠ AN IDLE STAGE DOES NOT READ ZERO, and finding out why is the reason this
+  // test exists rather than asserting the floor. The residual is taken between
+  // the RAW input and the finished output, so it includes the oversampler's
+  // reconstruction error, which is there whether or not the curve fires.
+  //
+  // Measured at -70.7 dBc with the curve fully bypassed, identical at every
+  // input level and every emphasis setting — the signature of a linear error.
+  // That is 25-40 dB below the range the stage produces in use, so it cannot
+  // affect a comparison between settings, but it means a low reading means
+  // "the oversampler and nothing else" rather than "nothing".
+  const signal = speechLike(6, 0.5, 11)
+  const bypassed = residualDbc(signal, { headroomDb: 60, emphasisDb: 0 })
+  assert.ok(bypassed < -60,
+    `a bypassed stage reported ${bypassed.toFixed(1)} dBc — far too much to be the oversampler`)
+  assert.ok(bypassed > -90,
+    `a bypassed stage reported ${bypassed.toFixed(1)} dBc — the oversampler error has vanished, ` +
+    'which means this test is no longer measuring what it claims')
+  // Level-independent, which is what makes it an error rather than a signal.
+  const louder = new Float32Array(signal.length)
+  for (let i = 0; i < signal.length; i++) louder[i] = signal[i] * dbToLin(6)
+  assert.ok(Math.abs(residualDbc(louder, { headroomDb: 60, emphasisDb: 0 }) - bypassed) < 0.5,
+    'the bypassed reading moved with input level, so it is not a linear error')
+
+  // And with nothing measured at all it is the floor, finite, for the dash.
+  const fresh = new SoftClipperKernel(SR)
+  fresh.setParams({ headroomDb: 6.5, emphasisDb: 0, shape: 'tanh3' })
+  const r = fresh.getMetering().residualDbc
+  assert.equal(r, -120)
+  assert.ok(Number.isFinite(r), 'the readout reached an infinity instead of its floor')
+})
+
+test('the residual readout tracks the emphasis knob the way the offline sweep does', () => {
+  // The reason the readout was built: on real narration the residual has a
+  // minimum partway up the HF Emphasis knob on some material and falls
+  // monotonically on other material, and neither the lamp nor ENGAGED can see
+  // it. Pinned as a SHAPE rather than as values — the absolute figure depends
+  // on the probe, the ordering is the claim.
+  const signal = concat(speechLike(5, 0.5, 41), fricativeNoise(3, 0.3), speechLike(4, 0.5, 43))
+  const curve = [0, 3, 6, 9, 12].map(e => residualDbc(signal, { headroomDb: 6.5, emphasisDb: e }))
+  const offline = [0, 3, 6, 9, 12].map(e => residualDbcOffline(signal, { headroomDb: 6.5, emphasisDb: e }))
+  for (let i = 1; i < curve.length; i++) {
+    assert.equal(Math.sign(curve[i] - curve[i - 1]), Math.sign(offline[i] - offline[i - 1]),
+      `the readout and the direct measurement disagree about direction between steps ` +
+      `${i - 1} and ${i}: ${curve.map(v => v.toFixed(1)).join(',')} vs ` +
+      offline.map(v => v.toFixed(1)).join(','))
+  }
+})

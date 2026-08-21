@@ -27,6 +27,8 @@ const clipperEngagedPct = ref(0)
 // How much of HF Emphasis's boost the threshold is giving back, dB. See
 // LIFT_TAU_S in the kernel.
 const clipperLiftDb = ref(0)
+// Residual level in dBc — see RESIDUAL_TAU_S in the kernel.
+const clipperResidualDbc = ref(-120)
 const clipperDelta = ref(false)
 const clipperInputLevels = ref([])
 const clipperOutputLevels = ref([])
@@ -64,6 +66,7 @@ export function useSoftClipper() {
         clipperReduction.value = nodes.getReduction()
         clipperEngagedPct.value = nodes.getEngagedFraction() * 100
         clipperLiftDb.value = nodes.getLift()
+        clipperResidualDbc.value = nodes.getResidualDbc()
         const chCount = state.currentFile?.channels ?? 1
         clipperInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
         clipperOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
@@ -95,6 +98,7 @@ export function useSoftClipper() {
     clipperReduction.value = 0
     clipperEngagedPct.value = 0
     clipperLiftDb.value = 0
+    clipperResidualDbc.value = -120
     clipperInputLevels.value = []
     clipperOutputLevels.value = []
   }
@@ -222,6 +226,7 @@ export function useSoftClipper() {
     clipperReduction,
     clipperEngagedPct,
     clipperLiftDb,
+    clipperResidualDbc,
     clipperDelta,
     clipperInputLevels,
     clipperOutputLevels,

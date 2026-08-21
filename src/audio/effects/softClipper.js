@@ -71,6 +71,7 @@ export function createSoftClipper(audioContext) {
   let reductionDb = 0
   let engagedFraction = 0
   let liftDb = 0
+  let residualDbc = -120
 
   // Monitoring mode, kept out of `params` on purpose — see the kernel's
   // setMonitor. It rides its own port message, so the offline render cannot
@@ -117,6 +118,7 @@ export function createSoftClipper(audioContext) {
         reductionDb = e.data.reductionDb
         engagedFraction = e.data.engagedFraction ?? 0
         liftDb = e.data.liftDb ?? 0
+        residualDbc = e.data.residualDbc ?? -120
         const batch = e.data.scope
         if (!batch) return
         for (let i = 0; i + 1 < batch.length; i += 2) {
@@ -186,6 +188,18 @@ export function createSoftClipper(audioContext) {
      */
     getLift() {
       return liftDb
+    },
+
+    /**
+     * Level of what the stage is removing, in dB relative to the signal it was
+     * removed from.
+     *
+     * The number behind the DELTA button: the same residual that mode
+     * auditions, measured rather than heard. It is the readout that separates
+     * two settings the lamp cannot — same peak reduction, twice the damage.
+     */
+    getResidualDbc() {
+      return residualDbc
     },
 
     /**
