@@ -94,8 +94,6 @@ const unprotectedZones = computed(() => resZones.value
   .map((z, i) => (zoneSettings(z).protect ? null : `Z${i + 1}`))
   .filter(Boolean))
 
-const anyProtected = computed(() =>
-  resZones.value.some(z => zoneSettings(z).protect))
 
 // The kernel clamps the low end to what its analysis frame can resolve, so show
 // what it will actually search rather than what the preset asked for.
@@ -229,10 +227,14 @@ async function applyAndClose() {
           :zones="resZones"
           :selected="resSelectedZone"
           :solo="resSoloZone"
+          :pitch-range="resPitchRange"
+          :pitch-range-options="PITCH_RANGE_OPTIONS"
+          :pitch-range-caption="pitchRangeCaption"
           :accent="ACCENT"
           :disabled="!resPreview"
           @update:zones="syncZones"
           @update:selected="resSelectedZone = $event"
+          @update:pitch-range="syncPitchRange"
           @solo="toggleSolo"
         />
       </div>
@@ -242,9 +244,10 @@ async function applyAndClose() {
            all per zone now, with no global value for a zone to be an offset
            from. What remains describes the effect as a whole: how fast the
            detector moves, how much of its work reaches the output, the shape of
-           its knee, and which pitches the protection mask should look for —
-           that last one stays global because there is one tracker and one
-           signal, however many zones read its answer. -->
+           and the shape of its knee. The pitch range is global too but it does
+           not live here: it is what the protection mask hunts for, so it is
+           unreadable apart from the switch that turns the mask on, and both now
+           sit behind the zone block's HARM door. -->
       <div class="flex items-center gap-[12px] mt-[13px] p-2">
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
@@ -307,15 +310,6 @@ async function applyAndClose() {
 
 
 
-          <SegmentedSwitch
-            class="shrink-0 mb-[3px]"
-            :padding-x="9"
-            :model-value="resPitchRange"
-            @update:model-value="syncPitchRange"
-            :options="PITCH_RANGE_OPTIONS"
-            :accent="ACCENT"
-            :disabled="!resPreview || !anyProtected"
-          />
 
           <!-- THE WARNING SURVIVED THE CONTROL MOVING.
                Protection is a per-zone toggle now, so there is no global button

@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   RESONANCE_ZONE_MAX,
   RESONANCE_ZONE_MIN,
@@ -13,6 +13,7 @@ import {
 } from '../meters/resonanceZoneEdit.js'
 import DeviceField from '../knobs/DeviceField.vue'
 import Knob from '../knobs/Knob.vue'
+import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 
 /**
  * One set of controls, showing whichever zone is selected.
@@ -32,11 +33,40 @@ const props = defineProps({
   selected: { type: Number, default: 0 },
   /** Index of the soloed zone, or -1. Monitoring state, not a parameter. */
   solo: { type: Number, default: -1 },
+  /**
+   * The pitch range the protection mask looks for. GLOBAL — one tracker, one
+   * signal, one pitch, however many zones read the answer — but it lives in
+   * this component because it is half of one decision with the per-zone
+   * protection toggle, and the two were a room apart on the faceplate.
+   */
+  pitchRange: { type: String, default: 'voice' },
+  pitchRangeOptions: { type: Array, default: () => [] },
+  pitchRangeCaption: { type: String, default: '' },
   accent: { type: String, default: '#8de0a8' },
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:zones', 'update:selected', 'solo'])
+const emit = defineEmits(['update:zones', 'update:selected', 'solo', 'update:pitchRange'])
+
+/**
+ * The harmonics decision hides behind a door, and swaps places with the zone's
+ * identity rather than opening beside it.
+ *
+ * Two reasons for the door. The protection toggle and the pitch range are ONE
+ * decision — what counts as a harmonic here, and what pitch to look for — and
+ * they were on opposite sides of the faceplate, one per zone and one global,
+ * with nothing saying they were related. And the panel has no room for a third
+ * cluster: everything added to this row so far has come out of the display.
+ *
+ * Swapping in place rather than expanding keeps the row height fixed, so
+ * opening it never moves the knobs beside it. It closes on Escape and on
+ * selecting a different zone — the settings inside are per zone, and a panel
+ * left open on zone 2's harmonics while zone 4 is selected would be showing one
+ * zone's identity and another's settings.
+ */
+const harmonicsOpen = ref(false)
+
+watch(() => props.selected, () => { harmonicsOpen.value = false })
 
 const zone = computed(() => props.zones[props.selected] ?? props.zones[0] ?? null)
 /**
@@ -84,6 +114,11 @@ const span = computed(() => {
  * looking at, minus folds it into its neighbour, the same two edits the plot's
  * double-click makes.
  */
+const anyProtect = computed(() => props.zones.some(z => zoneSettings(z).protect))
+/** Any zone running unmasked. Tints the closed door, so the state is visible
+ *  without opening it — the one thing a hidden control must not cost. */
+const anyUnprotected = computed(() => props.zones.some(z => !zoneSettings(z).protect))
+
 const canSplit = computed(() => props.zones.length < RESONANCE_ZONE_MAX)
 const canMerge = computed(() => props.zones.length > RESONANCE_ZONE_MIN)
 
@@ -127,6 +162,7 @@ const db = v => `${Math.round(v)}`
 <template>
   <div
     class="flex items-center gap-[16px] rounded-[7px] px-[14px] py-[10px]"
+    @keydown.escape="harmonicsOpen = false"
     :style="{
       background: 'rgba(0,0,0,.28)',
       boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accent} 20%, transparent)`,
@@ -135,14 +171,27 @@ const db = v => `${Math.round(v)}`
   >
     <!-- Identity first: these knobs mean nothing without it, because the same
          three knobs show six different sets of values. -->
+    <!-- The identity block, or the harmonics door in its place. -->
     <div class="w-[128px] shrink-0">
+      <template v-if="!harmonicsOpen">
       <div
         style="font:700 12px 'JetBrains Mono',monospace;letter-spacing:.08em;white-space:nowrap"
         :style="{ color: settings.enabled
           ? `color-mix(in srgb, ${accent} 60%, #ffffff)` : 'rgba(255,255,255,.35)' }"
       >ZONE {{ index + 1 }}</div>
-      <div style="font:600 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.4);white-space:nowrap"
-           class="mt-[2px]">{{ span }}</div>
+      <div class="flex items-baseline justify-between gap-[6px] mt-[2px]">
+        <span style="font:600 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.4);white-space:nowrap"
+        >{{ span }}</span>
+        <button
+          class="cursor-pointer shrink-0 disabled:cursor-default"
+          style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap"
+          :style="{ color: anyUnprotected ? '#ffb27a' : 'rgba(255,255,255,.38)' }"
+          :aria-expanded="String(harmonicsOpen)"
+          title="Harmonic protection for this zone, and the pitch range the mask looks for."
+          :disabled="disabled"
+          @click="harmonicsOpen = true"
+        >HARM ›</button>
+      </div>
 
       <!-- BYPASS AND SOLO ARE NOT THE SAME KIND OF CONTROL, and the panel has
            to say so. Bypass is a setting: it is stored, it is rendered, a file
@@ -184,33 +233,59 @@ const db = v => `${Math.round(v)}`
           :disabled="disabled"
           @click="emit('solo', index)"
         >SOLO</button>
-        <!-- HARMONIC PROTECTION, PER ZONE, and the measurement is the argument.
-             The mask blocks 67-77% of every octave at a typical F0 and 88%
-             above 10 kHz at a high one, so down where partials are wide and
-             dominant it is real protection and up where sibilance lives it is a
-             blanket veto over the band. Amber when OFF, because that is the
-             state that can thin the material. -->
-        <button
-          class="rounded-[4px] cursor-pointer disabled:cursor-default"
-          style="padding:2px 6px;font:700 8px 'JetBrains Mono',monospace;letter-spacing:.1em"
-          :style="{
-            background: settings.protect
-              ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'rgba(255,178,122,.16)',
-            color: settings.protect
-              ? `color-mix(in srgb, ${accent} 55%, #ffffff)` : '#ffb27a',
-            boxShadow: settings.protect
-              ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)`
-              : 'inset 0 0 0 1px rgba(255,178,122,.5)',
-          }"
-          :aria-pressed="String(settings.protect)"
-          :aria-label="`Zone ${index + 1} harmonic protection`"
-          :title="settings.protect
-            ? 'Harmonics in this band are protected from being treated as resonances.'
-            : 'Full suppression in this band — risks thinning its harmonics.'"
-          :disabled="disabled"
-          @click="emit('update:zones', toggleZoneProtect(zones, index))"
-        >{{ settings.protect ? 'HARM' : 'HARM✕' }}</button>
       </div>
+      </template>
+
+      <template v-else>
+        <button
+          class="flex items-center gap-[4px] cursor-pointer"
+          style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.5)"
+          @click="harmonicsOpen = false"
+        >‹ <span>HARMONICS</span></button>
+
+        <!-- Stacked, not side by side: the two together are wider than the
+             identity block they replace, and letting them spill would push the
+             knobs beside them. The row's height is set by those knobs, so there
+             is vertical room going spare and none horizontally. -->
+        <div class="flex flex-col items-start gap-[4px] mt-[5px]">
+          <button
+            class="rounded-[4px] cursor-pointer disabled:cursor-default"
+            style="padding:2px 8px;font:700 8px 'JetBrains Mono',monospace;letter-spacing:.1em"
+            :style="{
+              background: settings.protect
+                ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'rgba(255,178,122,.16)',
+              color: settings.protect
+                ? `color-mix(in srgb, ${accent} 55%, #ffffff)` : '#ffb27a',
+              boxShadow: settings.protect
+                ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)`
+                : 'inset 0 0 0 1px rgba(255,178,122,.5)',
+            }"
+            :aria-pressed="String(settings.protect)"
+            :aria-label="`Zone ${index + 1} harmonic protection`"
+            :disabled="disabled"
+            @click="emit('update:zones', toggleZoneProtect(zones, index))"
+          >{{ settings.protect ? 'PROTECTED' : 'FULL SUPPRESSION' }}</button>
+          <!-- Global, and sitting here anyway: it is what the mask hunts for,
+               so it is unreadable apart from the switch that turns the mask on.
+               Inert when no zone protects, because then it steers nothing. -->
+          <SegmentedSwitch
+            :padding-x="7"
+            :model-value="pitchRange"
+            @update:model-value="emit('update:pitchRange', $event)"
+            :options="pitchRangeOptions"
+            :accent="accent"
+            :disabled="disabled || !anyProtect"
+          />
+        </div>
+
+        <div
+          class="mt-[4px]"
+          style="font:500 8.5px/1.25 'Inter'"
+          :style="{ color: settings.protect ? 'rgba(255,255,255,.42)' : 'rgba(255,178,122,.8)' }"
+        >{{ settings.protect
+          ? `Preserves harmonics${pitchRangeCaption ? ` (${pitchRangeCaption})` : ''}.`
+          : 'Full suppression — may thin harmonics.' }}</div>
+      </template>
     </div>
 
     <div class="flex-1 flex justify-center items-center gap-[8px]">
