@@ -21,11 +21,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resDepth, resSharpness, resSelectivity, resAttack, resRelease,
   resMaxReduction, resFreqFloor, resFreqCeil, resMode, resPreserveHarmonics,
-  resPitchRange, resMix, resTrim, resRefMode,
+  resPitchRange, resMix, resTrim, resWeightNodes, resRefMode,
   resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncDepth, syncSharpness, syncSelectivity, syncAttack,
-  syncRelease, syncMaxReduction, syncMix, syncTrim, syncFreqFloor, syncFreqCeil,
+  syncRelease, syncMaxReduction, syncMix, syncTrim, syncWeightNodes,
+  syncFreqFloor, syncFreqCeil,
   syncMode, syncPitchRange, togglePreserveHarmonics, apply, teardown, closeModal,
 } = useResonance()
 
@@ -226,6 +227,8 @@ async function applyAndClose() {
         :freq-ceil-hz="resFreqCeil"
         :height="140"
         :delta="resDelta"
+        :weight-nodes="resWeightNodes"
+        @update:weight-nodes="syncWeightNodes"
       />
 
       <div class="flex items-center justify-between gap-[18px] mt-[16px]">
