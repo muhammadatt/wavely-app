@@ -9,6 +9,7 @@ import {
 } from '../../audio/resonanceParams.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
+import DeviceField from '../knobs/DeviceField.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
@@ -22,7 +23,7 @@ const {
   resAttack, resRelease,
   resMaxReduction, resMode, resPreserveHarmonics,
   resPitchRange, resMix, resTrim, resZones, resSelectedZone, resSoloZone, resRefMode,
-  resPreview, resDelta, resReduction, resInputLevels, resOutputLevels,
+  resPreview, resDelta, resReduction, resOutputLevels,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMaxReduction, syncMix, syncTrim, syncZones, toggleSolo,
@@ -45,12 +46,14 @@ const ACCENT = '#8de0a8'
  * size they were designed at.
  */
 /**
- * THE DISPLAY IS THE PANEL, and 140 px was the number a cramped layout could
- * spare rather than the number it needs. Three curves, a reduction lane and now
- * a zone lane were sharing the height of two rows of knobs. The knobs below it
- * moved onto one row to pay for this — see the note there.
+ * THE DISPLAY IS THE PANEL. 140 px was the number a cramped layout could spare
+ * rather than the number it needs; every step since has been the controls
+ * giving height back to it. What paid for this one: the two rows of global
+ * knobs became one, the input meter went, Max Cut and Trim became fields
+ * instead of dials, and the protection button lost a permanent caption it only
+ * ever needed in one of its two states. See the notes on that row.
  */
-const PLOT_H = 208
+const PLOT_H = 280
 const heightDelta = ref(0)
 const plotHeight = computed(() => PLOT_H + heightDelta.value)
 
@@ -208,6 +211,17 @@ async function applyAndClose() {
       <!-- The display, not a meter. This effect cuts a few narrow bands and
            leaves the rest alone, so "how much" without "where" describes almost
            nothing about it — see the note in ResonanceSpectrum. -->
+      <!-- THE OUTPUT METER LIVES BESIDE THE DISPLAY, not in a control row.
+           A vertical meter is 54 px of scale and labels around whatever bar
+           height it is given, so in a row of 76 px knobs it was the tallest
+           thing there and set the row height for everything else. Beside the
+           plot it gets the plot's full height for free and costs no row at all.
+           The INPUT meter is gone entirely: two meters answer "how much did
+           this change the level", and an effect that cuts a few narrow bands
+           always answers "barely" — the pair spent width to show two columns at
+           the same height. -->
+      <div class="flex items-end gap-[10px]">
+      <div class="flex-1 min-w-0">
       <ResonanceSpectrum
         :data-fn="resDisplayFn"
         :reduction-db="resReduction"
@@ -220,6 +234,9 @@ async function applyAndClose() {
         @update:zones="syncZones"
         @update:selected-zone="resSelectedZone = $event"
       />
+      </div>
+        <LevelMeter :levels="resOutputLevels" label="OUT" :height="plotHeight - 46" />
+      </div>
 
       <!-- Directly under the plot because the two are one control split by what
            they edit: the plot owns where a zone IS — boundaries are horizontal
@@ -239,16 +256,23 @@ async function applyAndClose() {
         />
       </div>
 
-      <!-- WHAT IS LEFT THAT IS GLOBAL. Depth, Sharpness and Selectivity used to
-           sit here and are now per zone, with no global value for a zone to be
-           an offset from — the three that remain are timing and output, which
-           describe the effect as a whole rather than a band of it. The Range
-           fader went with them: a band you want left alone is a zone switched
-           off, and two controls that can both exclude a band is one too many. -->
-      <div class="flex items-center gap-[10px] mt-[14px]">
-        <LevelMeter :levels="resInputLevels" label="IN" :height="92" />
-
-        <div class="flex-1 flex justify-between px-[6px]">
+      <!-- ONE GLOBAL ROW, and everything in it earned its width rather than
+           being given a knob by default.
+           Depth, Sharpness and Selectivity are per zone and live above. What is
+           left describes the effect as a whole, and it used to occupy two rows
+           plus an input meter — about 150 px for eight settings, all of it taken
+           from the display, which is the thing in this panel with something to
+           say.
+           THE INPUT METER IS GONE. Two meters answer "how much did this change
+           the level", and this effect cuts a few narrow bands: the answer is
+           always "barely", so the pair spent 60 px of width to show two columns
+           at the same height. The output meter stays because clipping after
+           Trim is a real thing to watch for.
+           MAX CUT AND TRIM ARE FIELDS, NOT KNOBS. A dial costs 70 px of height
+           to express one number and earns it when the number is swept by ear;
+           a ceiling and an output trim are set once and read often. Soothe puts
+           its own max cut and wet trim in the same shape. -->
+      <div class="flex items-end gap-[10px] mt-[13px]">
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
              setting below it is the same instantaneous jump — the bottom of
@@ -275,126 +299,109 @@ async function applyAndClose() {
              phrase. Pause bleed FALLS at matched cut, -2.47 to -1.19 dB,
              because the higher selectivity more than pays for the longer
              tail. -->
-          <div class="w-[88px]">
+        <div class="w-[64px] shrink-0">
             <Knob
               :model-value="resAttack" @update:model-value="syncAttack"
-              :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="13"
-              label="Attack ms" :accent="ACCENT" :format-value="ms"
+              :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="12"
+              label="Attack" :accent="ACCENT" :format-value="ms"
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[88px]">
+          <div class="w-[64px] shrink-0">
             <Knob
               :model-value="resRelease" @update:model-value="syncRelease"
-              :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="13"
-              label="Release ms" :accent="ACCENT" :format-value="ms"
+              :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="12"
+              label="Release" :accent="ACCENT" :format-value="ms"
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[88px]">
-            <Knob
-              :model-value="resMaxReduction" @update:model-value="syncMaxReduction"
-              :min="3" :max="48" :step="1" :value-font-px="13"
-              label="Max Cut dB" :accent="ACCENT" :format-value="db"
-              :disabled="!resPreview"
-            />
-          </div>
-          <!-- Mix and Trim end the row because they are the output stage: the
-               knobs to their left decide what gets cut, these two decide how
-               much of that cut reaches the file and at what level. -->
-          <div class="w-[88px]">
+          <div class="w-[64px] shrink-0">
             <Knob
               :model-value="resMix" @update:model-value="syncMix"
-              :min="0" :max="1" :step="0.01" :value-font-px="13"
+              :min="0" :max="1" :step="0.01" :value-font-px="12"
               label="Mix" :accent="ACCENT" :format-value="percent"
               :disabled="!resPreview"
             />
           </div>
-          <div class="w-[88px]">
-            <Knob
-              :model-value="resTrim" @update:model-value="syncTrim"
-              :min="-12" :max="12" :step="0.5" :value-font-px="13"
-              label="Trim dB" :accent="ACCENT" :format-value="signedDb"
-              :disabled="!resPreview"
-            />
-          </div>
-        </div>
 
-        <LevelMeter :levels="resOutputLevels" label="OUT" :height="92" />
+          <DeviceField
+            :model-value="resMaxReduction" @update:model-value="syncMaxReduction"
+            :min="3" :max="48" :step="1" :width="54"
+            label="Max Cut" unit="dB" :accent="ACCENT"
+            :format-value="db" :disabled="!resPreview"
+          />
+          <DeviceField
+            :model-value="resTrim" @update:model-value="syncTrim"
+            :min="-12" :max="12" :step="0.5" :width="54"
+            label="Trim" unit="dB" :accent="ACCENT"
+            :format-value="signedDb" :disabled="!resPreview"
+          />
+
       </div>
 
-      <!-- Range + harmonic protection.
-           One line, and it has to be: this panel outgrew the viewport when the
-           spectrum display went in, and a section that stacked a two-line
-           button over a switch over a caption was the tallest thing here that
-           was not a control. Everything in it is now on the baseline the range
-           fader sets. -->
-      <div class="flex items-end gap-[14px] mt-[14px] pt-[13px]"
-           style="border-top:1px solid rgba(255,255,255,.06)">
-        <!-- The knee switch sits with the other two settings that decide how
-             the DETECTOR behaves rather than how much it does. -->
-        <SegmentedSwitch
-          class="shrink-0"
-          :model-value="resMode"
-          @update:model-value="syncMode"
-          :options="MODE_OPTIONS"
-          :accent="ACCENT"
-          :disabled="!resPreview"
-          :caption="modeCaption"
-        />
+      <!-- The knee, the protection mask and the pitch range decide how the
+           DETECTOR behaves rather than how much of it there is, so they sit
+           together on one short line. None of them carries a caption any more:
+           each is two states of one idea and the label already names the state.
+           26 px for three settings, against the 60 this cost as a row of
+           captioned controls with a two-line button in the middle. -->
+      <div class="flex items-start gap-[10px] mt-[11px]">
+          <SegmentedSwitch
+            class="shrink-0"
+            :padding-x="9"
+            :model-value="resMode"
+            @update:model-value="syncMode"
+            :options="MODE_OPTIONS"
+            :accent="ACCENT"
+            :disabled="!resPreview"
+          />
 
-        <!-- Harmonic protection is the safety mechanism, not a flavour
-             control: without it the cepstral reference sits at the
-             inter-harmonic floor and the suppressor eats the harmonics of
-             whatever is playing. The range picker sits with it because it
-             feeds it — protection is only as good as the pitch it is handed,
-             and a source outside the range reports an octave artefact rather
-             than nothing, which puts the mask on the wrong bins.
-
-             The state sentence under the label is not decoration and does not
-             belong in a tooltip. This is the one control here that can quietly
-             wreck the material, its two states are not opposites of one name,
-             and a tooltip is invisible to anyone who has not already decided
-             the control is worth hovering — which is exactly the person about
-             to turn protection off without knowing what it protects. It was
-             moved to the title attribute to buy 30 px and has been put back;
-             the height came out of the plot instead. -->
-        <button
-          class="flex-1 min-w-[186px] px-3 py-[9px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
-          :style="{
-            background: protectionIsRisky ? 'rgba(255,178,122,.12)' : 'rgba(141,224,168,.14)',
-            border: `1px solid ${protectionIsRisky ? 'rgba(255,178,122,.45)' : 'rgba(141,224,168,.4)'}`,
-            opacity: resPreview ? 1 : 0.4,
-          }"
-          :disabled="!resPreview"
-          :title="protectionTitle"
-          @click="togglePreserveHarmonics"
-        >
-          <span
-            class="block"
+          <!-- THE WARNING IS NOW CONDITIONAL RATHER THAN PERMANENT, which is
+               what let this shrink from 186 px and two lines to a lamp.
+               The sentence under the label was there because this is the one
+               control on the panel that can quietly wreck the material and a
+               tooltip is invisible to anyone who has not already decided the
+               control is worth hovering. That argument only ever applied to the
+               dangerous state: "Preserves harmonic frequencies." explains a
+               setting that needs no explaining. So the caption appears when
+               protection is OFF, in amber, and the safe state is a lamp. -->
+          <button
+            class="shrink-0 px-[9px] py-[6px] rounded-md cursor-pointer transition-all text-left disabled:cursor-default"
             :style="{
-              font: `700 8.5px 'JetBrains Mono',monospace`,
-              letterSpacing: '.12em',
-              color: protectionIsRisky ? '#ffb27a' : '#8de0a8',
+              background: protectionIsRisky ? 'rgba(255,178,122,.14)' : 'rgba(141,224,168,.13)',
+              border: `1px solid ${protectionIsRisky ? 'rgba(255,178,122,.5)' : 'rgba(141,224,168,.35)'}`,
+              opacity: resPreview ? 1 : 0.4,
             }"
-          >{{ protectionIsProtection
-            ? (resPreserveHarmonics ? 'PRESERVE HARMONICS' : 'PROTECTION OFF')
-            : (resPreserveHarmonics ? 'BETWEEN PARTIALS' : 'ACROSS SPECTRUM') }}</span>
-          <span
-            class="block mt-[3px]"
-            style="font:500 9px/1.4 'Inter';color:rgba(255,255,255,.35)"
-          >{{ protectionCaption }}</span>
-        </button>
+            :disabled="!resPreview"
+            :title="protectionTitle"
+            @click="togglePreserveHarmonics"
+          >
+            <span
+              class="block whitespace-nowrap"
+              :style="{
+                font: `700 8.5px 'JetBrains Mono',monospace`,
+                letterSpacing: '.1em',
+                color: protectionIsRisky ? '#ffb27a' : '#8de0a8',
+              }"
+            >{{ protectionIsProtection
+              ? (resPreserveHarmonics ? 'HARMONICS ON' : 'HARMONICS OFF')
+              : (resPreserveHarmonics ? 'BETWEEN PARTIALS' : 'ACROSS SPECTRUM') }}</span>
+            <span
+              v-if="protectionIsRisky"
+              class="block mt-[2px] whitespace-nowrap"
+              style="font:500 8.5px/1.2 'Inter';color:rgba(255,178,122,.7)"
+            >{{ protectionCaption }}</span>
+          </button>
 
-        <SegmentedSwitch
-          class="shrink-0"
-          :model-value="resPitchRange"
-          @update:model-value="syncPitchRange"
-          :options="PITCH_RANGE_OPTIONS"
-          :accent="ACCENT"
-          :disabled="!resPreview || !resPreserveHarmonics"
-          :caption="`Protect ${pitchRangeCaption}`"
-        />
+          <SegmentedSwitch
+            class="shrink-0"
+            :padding-x="9"
+            :model-value="resPitchRange"
+            @update:model-value="syncPitchRange"
+            :options="PITCH_RANGE_OPTIONS"
+            :accent="ACCENT"
+            :disabled="!resPreview || !resPreserveHarmonics"
+          />
       </div>
 
       <div class="mt-[14px]">

@@ -67,7 +67,6 @@ const resPreview = ref(false)
  */
 const resDelta = ref(false)
 const resReduction = ref(0)
-const resInputLevels = ref([])
 const resOutputLevels = ref([])
 let meterId = null
 
@@ -141,7 +140,6 @@ export function useResonance() {
         // Only meter channels the source really has: the splitter is
         // discrete, so asking for stereo on a mono file adds a dead bar.
         const chCount = state.currentFile?.channels ?? 1
-        resInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
         resOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
@@ -156,7 +154,6 @@ export function useResonance() {
     }
     resNodes = null
     resReduction.value = 0
-    resInputLevels.value = []
     resOutputLevels.value = []
   }
 
@@ -322,7 +319,6 @@ export function useResonance() {
     resPreview,
     resDelta,
     resReduction,
-    resInputLevels,
     resOutputLevels,
     resDisplayFn,
     hasSelection,
