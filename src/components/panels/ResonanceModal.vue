@@ -278,11 +278,32 @@ async function applyAndClose() {
              setting below it is the same instantaneous jump — the bottom of
              both knobs used to be travel that could not be heard. See
              RESONANCE_ATTACK_MIN_MS. -->
+        <!-- The TOPS were inherited from the shipping panel and were never
+             measured. Swept past them on real narration (cepstral reference,
+             PROTECTION OFF), and the two knobs turn out not to be the same
+             lever. At fixed selectivity, longer attack looks like it cleans
+             up but is only refusing to act — jitter per dB removed gets
+             WORSE, 0.351 at 12 ms to 0.417 at 800 ms, and at 800 ms it
+             removes 0.87 dB, barely more than the mask-on config's 0.20.
+             Longer release genuinely improves per dB, 0.416 to 0.299.
+             Matched at 3.0 dB of cut (selectivity solved per cell) the whole
+             effect is modest and saturates: jitter 0.96/1.29 at 12/80 to
+             0.80/1.02 at 200/500 and then flat out to 200/4000. What keeps
+             improving past there is p90 depth, 8.5 to 5.2 dB — same average
+             cut spread more evenly instead of concentrated in momentary
+             deep notches, which is the plausible mechanism for the pitch
+             artefacts being audible at all. 400/2000 captures nearly all of
+             it (0.77/0.95, p90 5.3); 800/4000 is marginally better still
+             (0.73/0.90) but needs selectivity dropped to 13.5 to hold the
+             same cut, and an attack near a second no longer tracks a
+             phrase. Pause bleed FALLS at matched cut, -2.47 to -1.19 dB,
+             because the higher selectivity more than pays for the longer
+             tail. -->
         <div class="flex gap-[16px]">
           <div class="w-[62px]">
             <Knob
               :model-value="resAttack" @update:model-value="syncAttack"
-              :min="RESONANCE_ATTACK_MIN_MS" :max="100" :step="1" :value-font-px="13"
+              :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="13"
               label="Attack ms" :accent="ACCENT" :format-value="ms"
               :disabled="!resPreview"
             />
@@ -290,7 +311,7 @@ async function applyAndClose() {
           <div class="w-[62px]">
             <Knob
               :model-value="resRelease" @update:model-value="syncRelease"
-              :min="RESONANCE_RELEASE_MIN_MS" :max="500" :step="5" :value-font-px="13"
+              :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="13"
               label="Release ms" :accent="ACCENT" :format-value="ms"
               :disabled="!resPreview"
             />
