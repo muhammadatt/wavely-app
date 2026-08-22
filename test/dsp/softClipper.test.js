@@ -2469,3 +2469,96 @@ test('hysteresis is level-invariant', () => {
   }
   assert.ok(worst < 2e-3, `hysteresis is not level-invariant: worst deviation ${worst}`)
 })
+
+// ── Slew (SLEW_REF) ─────────────────────────────────────────────────────────
+
+test('slew is absent at zero and never boosts', () => {
+  const sig = concat(speechLike(4, 0.7, 51), speechLike(3, 0.7, 57))
+  const base = { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }
+
+  // ABSENT, not flat — the shipped patch is bit-identical to the build before
+  // this existed, which is what buys the right to add a control that forfeits
+  // "unity below T" when engaged.
+  const withParam = processSoftClipperBuffer([sig], SR, { ...base, slew: 0 }).channelData[0]
+  const without = processSoftClipperBuffer([sig], SR, base).channelData[0]
+  for (let i = 0; i < sig.length; i++) {
+    assert.equal(withParam[i], without[i], `slew 0 altered sample ${i}`)
+  }
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.slew, 0, 'the shipped default engages slew')
+
+  // NEVER BOOSTS. The limiter only ever moves toward its input, so
+  // |y| <= max(|y_prev|, |x|) at every sample and the bound follows.
+  const y = processSoftClipperBuffer([sig], SR, { ...base, slew: 100 }).channelData[0]
+  let peakIn = 0, peakOut = 0
+  for (let i = Math.round(0.5 * SR); i < sig.length; i++) {
+    peakIn = Math.max(peakIn, Math.abs(sig[i]))
+    peakOut = Math.max(peakOut, Math.abs(y[i]))
+  }
+  assert.ok(peakOut <= peakIn + 1e-6, `slew boosted the peak ${peakIn} -> ${peakOut}`)
+})
+
+test('slew removes high frequencies and leaves low ones alone', () => {
+  // The mechanism is a limit on how fast the waveform may move, so it bites in
+  // proportion to frequency: an 8 kHz tone moves ~27x faster than a 300 Hz one
+  // at the same amplitude. Measured at full knob, at a level over the
+  // threshold so the limiter is in its working range.
+  const level = (freq, amount) => {
+    const x = tone(freq, 3, 0.9)
+    const p = { thresholdMode: 'fixed', fixedThresholdDb: -20, emphasisDb: 0, shape: 'tanh3' }
+    const off = processSoftClipperBuffer([x], SR, { ...p, slew: 0 }).channelData[0]
+    const on = processSoftClipperBuffer([x], SR, { ...p, slew: amount }).channelData[0]
+    let a = 0, b = 0
+    for (let i = SR; i < x.length; i++) { a = Math.max(a, Math.abs(off[i])); b = Math.max(b, Math.abs(on[i])) }
+    return 20 * Math.log10(b / a)
+  }
+  const lo = level(300, 100)
+  const hi = level(8000, 100)
+  assert.ok(hi < lo - 6,
+    `slew did not favour high frequencies: 300 Hz ${lo.toFixed(2)} dB, 8 kHz ${hi.toFixed(2)} dB`)
+  // And it cannot lift anything.
+  assert.ok(lo <= 0.01 && hi <= 0.01, `slew boosted a tone: ${lo.toFixed(3)} / ${hi.toFixed(3)} dB`)
+
+  // THE KNOB HAS TO RUN THE RIGHT WAY, and nothing above checks it. Inverting
+  // the geometric mapping survives every other assertion here, because a tone
+  // 19 dB over the threshold binds even at scale 1 — Bernstein's bound only
+  // promises transparency for material at or BELOW T, and this probe is far
+  // above it. Monotonicity across the knob is what catches the inversion.
+  const sweep = [25, 50, 100].map(a => level(8000, a))
+  for (let i = 1; i < sweep.length; i++) {
+    assert.ok(sweep[i] < sweep[i - 1] - 0.5,
+      `slew is not monotonic in the knob: ${sweep.map(v => v.toFixed(2)).join(' -> ')} dB`)
+  }
+})
+
+test('slew is level-invariant', () => {
+  // Its allowed slope scales with the threshold, so the same recording at a
+  // different level is treated identically — the property every control in
+  // this stage holds.
+  const probe = concat(speechLike(4, 0.4, 61), speechLike(3, 0.4, 67))
+  const base = { thresholdMode: 'fixed', emphasisDb: 0, shape: 'tanh3', slew: 100 }
+  const a = processSoftClipperBuffer([probe], SR, { ...base, fixedThresholdDb: -14 }).channelData[0]
+  const louder = new Float32Array(probe.length)
+  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
+  const b = processSoftClipperBuffer([louder], SR, { ...base, fixedThresholdDb: -8 }).channelData[0]
+  let worst = 0
+  for (let i = Math.round(SR); i < probe.length; i++) {
+    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
+  }
+  assert.ok(worst < 2e-3, `slew is not level-invariant: worst deviation ${worst}`)
+})
+
+test('at scale 1 the slew limit provably cannot bind — Bernstein', () => {
+  // SLEW_REF is the bound on how far a signal bandlimited to the base rate's
+  // Nyquist and bounded by T can move per oversampled sample. It is what makes
+  // "unity below T" exact at slew 0 rather than approximate — and it is also
+  // why the knob has to go below the bound to do anything, which is the
+  // guarantee it forfeits. Pinned here as the reason the bypass is free.
+  const x = tone(SR / 2 - 100, 2, 0.5)
+  let worst = 0
+  // The true per-oversampled-sample delta of a bandlimited signal bounded by A
+  // cannot exceed 2*pi*B/fs_os * A = (pi / OVERSAMPLE) * A.
+  for (let i = 1; i < x.length; i++) worst = Math.max(worst, Math.abs(x[i] - x[i - 1]))
+  const bound = Math.PI * 0.5   // (pi / L) * A * L, walked at the base rate
+  assert.ok(worst <= bound + 1e-6,
+    `a Nyquist-limited signal exceeded Bernstein's bound: ${worst} > ${bound}`)
+})

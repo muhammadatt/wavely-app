@@ -49,6 +49,10 @@ export const SCOPE_SECONDS = 4
  *   hfLoss 0-100, level-dependent HF softening — see HF_LOSS_CORNER_HZ. Not
  *     gap loss, which is level-independent; this is the self-erasure half,
  *     and it is what lets the colour vanish on quiet material
+ *   slew 0-100, level-scaled limit on how fast the waveform may move, applied
+ *     just ahead of the curve — see SLEW_REF. Softens the top end AND reduces
+ *     what the curve then has to do; contributes no peak reduction. ⚠ The one
+ *     control that forfeits "unity below T" when engaged; 0 bypasses it
  *   hysteresis 0-100, short-term memory of recent drive — see HYST_MAX_DB. It
  *     modulates the THRESHOLD rather than the curve, which is what keeps the
  *     monotonicity guarantee intact. A character control: matched on output
@@ -68,6 +72,7 @@ export function toKernelParams(params) {
     shape: params.shape,
     asymmetry: params.asymmetry,
     hfLoss: params.hfLoss,
+    slew: params.slew,
     hysteresis: params.hysteresis,
   }
 }

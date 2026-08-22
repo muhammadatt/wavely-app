@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss, hysteresis,
+  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss, hysteresis, slew,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncHysteresis, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncHysteresis, syncSlew, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -324,7 +324,7 @@ const SCOPE_H = 236
            Deliberately small. Everything here is reachable from the display
            or is a set-once refinement, so the knobs are sized as the fallback
            they now are rather than as the panel's centre of gravity. -->
-      <div class="flex justify-center gap-[30px] mt-[14px]">
+      <div class="flex justify-center gap-[16px] mt-[14px]">
         <!-- One slot for the threshold, whichever unit the mode expresses it
              in — see thresholdKnob. Keyed on the mode so the Knob remounts
              rather than carrying drag state across a range change. -->
@@ -438,6 +438,29 @@ const SCOPE_H = 236
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             memory of recent drive
+          </p>
+        </div>
+        <div class="w-[74px]">
+          <!-- THE TAPE EFFECT "Hysteresis" IS NAMED AFTER AND IS NOT: a limit
+               on how fast the waveform may move, scaled to the threshold and
+               applied just ahead of the curve. It softens the top end and cuts
+               what the curve then has to do (measured at matched output peak:
+               3.9 dB less curve distortion, 10 dB less above 8 kHz at the top
+               of the knob) — and contributes no peak reduction at all, which
+               is why it is captioned as tone.
+               ⚠ The one control here that gives up bit-transparency below the
+               threshold. It has to: everything a voice does is far under the
+               bound that would preserve it. See SLEW_REF. -->
+          <Knob
+            :model-value="slew"
+            @update:model-value="syncSlew"
+            :min="0" :max="100" :step="1"
+            label="Slew" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            :value-font-px="13"
+            :disabled="!clipperPreview"
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            rounds the fastest edges
           </p>
         </div>
         <div class="w-[74px]">
