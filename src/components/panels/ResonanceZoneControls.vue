@@ -1,15 +1,13 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import {
-  RESONANCE_ZONE_MAX,
-  RESONANCE_ZONE_MIN,
   RESONANCE_ZONE_RANGES,
   RESONANCE_ZONE_STOCK,
   zoneBounds,
   zoneSettings,
 } from '../../audio/resonanceParams.js'
 import {
-  removeBoundary, setZoneParam, splitZone, toggleZone, toggleZoneProtect,
+  setZoneParam, toggleZone, toggleZoneProtect,
 } from '../meters/resonanceZoneEdit.js'
 import DeviceField from '../knobs/DeviceField.vue'
 import Knob from '../knobs/Knob.vue'
@@ -24,8 +22,10 @@ import Knob from '../knobs/Knob.vue'
  * multiband compressor shows one band's controls at a time for the same reason,
  * and the plot above already says which band is which.
  *
- * The count picker lives here rather than on the plot because it is the one
- * zone control that is not about a particular zone.
+ * How MANY zones there are is not here: it is the one zone control that is not
+ * about a particular zone, and on a plate showing ZONE 3's identity and ZONE
+ * 3's settings it read as belonging to zone 3. It sits beside the plot now —
+ * see ResonanceZoneCount.
  */
 const props = defineProps({
   zones: { type: Array, required: true },
@@ -46,7 +46,7 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:zones', 'update:selected', 'solo'])
+const emit = defineEmits(['update:zones', 'solo'])
 
 /**
  * The harmonics decision hides behind a door, and swaps places with the zone's
@@ -100,20 +100,6 @@ const span = computed(() => {
   return `${f(b.loHz)}–${f(b.hiHz)} Hz`
 })
 
-/**
- * Add and remove act on the SELECTED zone, not on the set as a whole.
- *
- * The control this replaces was a row of the numbers 1 to 6 with the current
- * count lit, borrowed from the reference design — and it read as a selector for
- * which zone was active, which is the one thing on this panel it was not. The
- * numbers were the problem: six of them in a row, next to a row that says
- * ZONE 3, cannot help but look like a way to choose zone 3.
- *
- * A pair of buttons around a count cannot be misread that way, and acting on
- * the selection makes both of them predictable — plus splits the zone you are
- * looking at, minus folds it into its neighbour, the same two edits the plot's
- * double-click makes.
- */
 /** Any zone running unmasked. Tints the closed door, so the state is visible
  *  without opening it — the one thing a hidden control must not cost. */
 /**
@@ -152,37 +138,6 @@ const maskCopy = computed(() => {
 const anyUnprotected = computed(() => maskIsProtection.value
   && props.zones.some(z => !zoneSettings(z).protect))
 
-const canSplit = computed(() => props.zones.length < RESONANCE_ZONE_MAX)
-const canMerge = computed(() => props.zones.length > RESONANCE_ZONE_MIN)
-
-const AXIS = { w: 600, minHz: 20, maxHz: 20000 }
-let seq = 0
-
-function addZone() {
-  const i = index.value
-  const b = zoneBounds(props.zones, 20, 20000)[i]
-  // The geometric centre, because the axis is logarithmic: the arithmetic
-  // midpoint of 180 Hz and 5 kHz is 2.6 kHz, which sits three quarters of the
-  // way along the span as drawn.
-  const mid = Math.sqrt(b.loHz * b.hiHz)
-  const next = splitZone(props.zones, mid, AXIS, `z${Date.now()}${seq++}`, 20, 20000)
-  if (next === props.zones) return
-  emit('update:zones', next)
-  emit('update:selected', i)
-}
-
-function removeZone() {
-  const i = index.value
-  // Merging the last zone means dropping the divider below it; any other zone
-  // absorbs the one above it. Either way the selection lands on the zone that
-  // now covers where the old one was.
-  const divider = i < props.zones.length - 1 ? i : i - 1
-  const next = removeBoundary(props.zones, divider)
-  if (next === props.zones) return
-  emit('update:zones', next)
-  emit('update:selected', Math.min(i, next.length - 1))
-}
-
 function set(name, value) {
   emit('update:zones', setZoneParam(props.zones, index.value, name, value))
 }
@@ -210,10 +165,10 @@ const db = v => `${Math.round(v)}`
       <div
         style="font:700 12px 'JetBrains Mono',monospace;letter-spacing:.08em;white-space:nowrap"
         :style="{ color: settings.enabled
-          ? `color-mix(in srgb, ${accent} 60%, #ffffff)` : 'rgba(255,255,255,.35)' }"
+          ? `color-mix(in srgb, ${accent} 60%, #ffffff)` : 'var(--color-text-faint)' }"
       >ZONE {{ index + 1 }}</div>
       <div class="flex items-baseline justify-between gap-[6px] mt-[2px]">
-        <span style="font:600 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.4);white-space:nowrap"
+        <span style="font:600 9px 'JetBrains Mono',monospace;color:var(--color-text-muted);white-space:nowrap"
         >{{ span }}</span>
       </div>
 
@@ -225,33 +180,37 @@ const db = v => `${Math.round(v)}`
            DELTA in the header, which is why solo is lettered rather than shown
            as a second lamp. -->
       <div class="flex items-center gap-[5px] mt-[6px]">
+        <!-- The OFF look is the base, in classes; the ON look overrides it
+             inline, because all three of its values are mixed from the accent
+             prop and a utility cannot hold a colour that is not known until
+             render. Layering that way round means each property still has one
+             owner — the inline value simply wins whenever it is set. -->
         <button
-          class="rounded-[4px] cursor-pointer disabled:cursor-default"
-          style="padding:2px 6px;font:700 8px 'JetBrains Mono',monospace;letter-spacing:.1em"
-          :style="{
-            background: settings.enabled
-              ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'transparent',
-            color: settings.enabled
-              ? `color-mix(in srgb, ${accent} 55%, #ffffff)` : 'rgba(255,255,255,.4)',
-            boxShadow: settings.enabled
-              ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)`
-              : 'inset 0 0 0 1px rgba(255,255,255,.16)',
-          }"
+          class="rounded-[4px] px-[6px] py-[2px] font-mono text-[8px] font-bold leading-[normal]
+                 tracking-[.1em] text-text-muted inset-ring-1 inset-ring-[rgba(255,255,255,.16)]
+                 cursor-pointer disabled:cursor-default"
+          :style="settings.enabled ? {
+            background: `color-mix(in srgb, ${accent} 22%, transparent)`,
+            color: `color-mix(in srgb, ${accent} 55%, #ffffff)`,
+            boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)`,
+          } : null"
           :aria-pressed="String(!settings.enabled)"
           :aria-label="`Zone ${index + 1} bypass, currently ${settings.enabled ? 'off' : 'on'}`"
           title="Bypass this zone — the effect leaves that band alone. Stored, and applied to the file."
           :disabled="disabled"
           @click="emit('update:zones', toggleZone(zones, index))"
         >{{ settings.enabled ? 'ON' : 'BYP' }}</button>
+        <!-- No inline style at all: solo's lit colour is the fixed amber, not
+             the accent, so both states are static and both can be classes.
+             Note the two shadows are different KINDS — an outward glow when
+             lit, an inset hairline when not — which is why this is a ternary
+             between whole classes rather than one utility with a colour swap. -->
         <button
-          class="rounded-[4px] cursor-pointer disabled:cursor-default"
-          style="padding:2px 6px;font:700 8px 'JetBrains Mono',monospace;letter-spacing:.1em"
-          :style="{
-            background: solo === index ? '#ffb27a' : 'transparent',
-            color: solo === index ? '#20160c' : 'rgba(255,255,255,.4)',
-            boxShadow: solo === index
-              ? '0 0 7px rgba(255,178,122,.5)' : 'inset 0 0 0 1px rgba(255,255,255,.16)',
-          }"
+          class="rounded-[4px] px-[6px] py-[2px] font-mono text-[8px] font-bold leading-[normal]
+                 tracking-[.1em] cursor-pointer disabled:cursor-default"
+          :class="solo === index
+            ? 'bg-[#ffb27a] text-[#20160c] shadow-[0_0_7px_rgba(255,178,122,.5)]'
+            : 'text-text-muted inset-ring-1 inset-ring-[rgba(255,255,255,.16)]'"
           :aria-pressed="String(solo === index)"
           :aria-label="`Solo zone ${index + 1}`"
           title="Hear this zone's processing alone. Monitoring only — Apply always renders every zone."
@@ -262,8 +221,7 @@ const db = v => `${Math.round(v)}`
 
         <button
           class="cursor-pointer shrink-0 disabled:cursor-default"
-          style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap"
-          :style="{ color: anyUnprotected ? '#ffb27a' : 'rgba(255,255,255,.38)' }"
+          style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;color:var(--color-text-dim)"
           :aria-expanded="String(harmonicsOpen)"
           title="Harmonic protection for this zone, and the pitch range the mask looks for."
           :disabled="disabled"
@@ -274,7 +232,7 @@ const db = v => `${Math.round(v)}`
       <template v-else>
         <button
           class="flex items-center gap-[4px] cursor-pointer"
-          style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.5)"
+          style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:var(--color-text-dim)"
           @click="harmonicsOpen = false"
         >‹ <span>HARMONIC MASK</span></button>
 
@@ -317,7 +275,7 @@ const db = v => `${Math.round(v)}`
             class="block mt-[2px]"
             style="font:500 8.5px/1.35 'Inter'"
             :style="{ color: settings.protect || !maskIsProtection
-              ? 'rgba(255,255,255,.35)' : 'rgba(255,178,122,.75)' }"
+              ? 'var(--color-text-faint)' : 'rgba(255,178,122,.75)' }"
           >{{ maskCopy.caption }}</span>
         </button>
 
@@ -366,40 +324,6 @@ const db = v => `${Math.round(v)}`
         :format-value="db" :disabled="disabled"
       />
     </div>
-
-    <div>
-          <div class="text-center mb-2" style="width:52px">
-        <div style="font:700 12px 'JetBrains Mono',monospace;color:rgba(255,255,255,.62)">
-          {{ zones.length }}</div>
-        <div style="font:600 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em;color:rgba(255,255,255,.3)">
-          {{ zones.length === 1 ? 'ZONE' : 'ZONES' }}</div>
-      </div>
-
-    <div class="shrink-0 flex items-center gap-[7px]">
-      <button
-        class="cursor-pointer disabled:cursor-default disabled:opacity-30"
-        style="width:23px;height:23px;border-radius:5px;font:700 14px/1 'JetBrains Mono',monospace;
-               background:rgba(255,255,255,.06);color:rgba(255,255,255,.6)"
-        :disabled="disabled || !canMerge"
-        title="Merge this zone into its neighbour"
-        aria-label="Merge this zone into its neighbour"
-        @click="removeZone"
-      >−</button>
-
-      <button
-        class="cursor-pointer disabled:cursor-default disabled:opacity-30"
-        style="width:23px;height:23px;border-radius:5px;font:700 14px/1 'JetBrains Mono',monospace"
-        :style="{
-          background: `color-mix(in srgb, ${accent} 20%, transparent)`,
-          color: `color-mix(in srgb, ${accent} 60%, #ffffff)`,
-        }"
-        :disabled="disabled || !canSplit"
-        title="Split this zone in two"
-        aria-label="Split this zone in two"
-        @click="addZone"
-      >+</button>
-    </div>
-  </div>
 
 
   </div>

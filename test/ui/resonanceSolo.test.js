@@ -56,10 +56,19 @@ test('THE COMPOSABLE KEEPS SOLO OUT OF WHAT APPLY RENDERS', async () => {
   // is the object handed to applyResonanceRegion, and the moment solo appears
   // in it a soloed pass gets written to the timeline.
   const { readFile } = await import('node:fs/promises')
-  const src = await readFile(
-    new URL('../../src/composables/useResonance.js', import.meta.url), 'utf8')
+  // NEWLINES NORMALISED BEFORE ANYTHING IS SLICED. The end-of-function search
+  // below looks for a bare LF, so on a CRLF copy of the source it found
+  // nothing, returned -1, and `slice(0, -1)` handed the whole module to the
+  // assertions — which then failed on the first mention of solo ANYWHERE in a
+  // file that is largely about solo. A source check has to be indifferent to
+  // how the file was written to disk, or it reports the checkout rather than
+  // the code.
+  const src = (await readFile(
+    new URL('../../src/composables/useResonance.js', import.meta.url), 'utf8'))
+    .replace(/\r\n/g, '\n')
   const body = src.slice(src.indexOf('function currentParams()'))
   const end = body.indexOf('\n}\n')
+  assert.ok(end > 0, 'currentParams end not found — the slice below would be the whole module')
   const params = body.slice(0, end)
   assert.ok(!params.includes('Solo'), 'currentParams must not consult the solo state')
   assert.ok(!params.includes('liveZones'), 'currentParams must push the stored zones')

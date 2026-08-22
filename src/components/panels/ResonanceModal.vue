@@ -12,9 +12,9 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceField from '../knobs/DeviceField.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
-import LevelMeter from '../meters/LevelMeter.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
+import ResonanceZoneCount from './ResonanceZoneCount.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
@@ -24,7 +24,7 @@ const {
   resAttack, resRelease,
   resMode,
   resMix, resTrim, resZones, resSelectedZone, resSoloZone, resRefMode,
-  resPreview, resDelta, resReduction, resOutputLevels,
+  resPreview, resDelta, resReduction,
   resDisplayFn, hasSelection,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleSolo,
@@ -129,14 +129,14 @@ async function applyAndClose() {
          Putting it down among the parameters would have implied it was one. -->
     <template #header-center>
       <button
-        class="flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-opacity disabled:cursor-default"
-        :style="{
-          background: resDelta ? `color-mix(in srgb, ${ACCENT} 26%, transparent)` : 'transparent',
-          borderColor: resDelta
-            ? `color-mix(in srgb, ${ACCENT} 55%, transparent)`
-            : 'rgba(255,255,255,.14)',
-          opacity: resPreview ? 1 : 0.4,
-        }"
+        class="flex items-center gap-2 px-3 py-1.5 rounded-full border
+               border-[rgba(255,255,255,.14)] cursor-pointer transition-opacity
+               disabled:cursor-default"
+        :class="{ 'opacity-40': !resPreview }"
+        :style="resDelta ? {
+          background: `color-mix(in srgb, ${ACCENT} 26%, transparent)`,
+          borderColor: `color-mix(in srgb, ${ACCENT} 55%, transparent)`,
+        } : null"
         :disabled="!resPreview"
         :aria-pressed="String(resDelta)"
         title="Hear only what is being removed. Monitoring only — Apply always renders the processed audio."
@@ -149,7 +149,7 @@ async function applyAndClose() {
             letterSpacing: '.14em',
             color: resDelta
               ? `color-mix(in srgb, ${ACCENT} 55%, #ffffff)`
-              : 'rgba(255,255,255,.45)',
+              : 'var(--color-text-muted)',
           }"
         >DELTA</span>
       </button>
@@ -170,16 +170,22 @@ async function applyAndClose() {
       <!-- The display, not a meter. This effect cuts a few narrow bands and
            leaves the rest alone, so "how much" without "where" describes almost
            nothing about it — see the note in ResonanceSpectrum. -->
-      <!-- THE OUTPUT METER LIVES BESIDE THE DISPLAY, not in a control row.
-           A vertical meter is 54 px of scale and labels around whatever bar
-           height it is given, so in a row of 76 px knobs it was the tallest
-           thing there and set the row height for everything else. Beside the
-           plot it gets the plot's full height for free and costs no row at all.
-           The INPUT meter is gone entirely: two meters answer "how much did
-           this change the level", and an effect that cuts a few narrow bands
-           always answers "barely" — the pair spent width to show two columns at
-           the same height. -->
-      <div class="flex items-end gap-[10px]">
+      <!-- THE COLUMN BESIDE THE DISPLAY, and what is in it has changed twice.
+           It began as two level meters, then one — two meters answer "how much
+           did this change the level", and an effect that cuts a few narrow
+           bands always answers "barely", so the pair spent width to show two
+           columns at the same height. Now the last one is gone too, for the
+           same reason taken one step further: a bar that reads "barely" at
+           every setting is a bar nobody looks at, and the plot beside it
+           already says exactly what came out and where. The zone count moved
+           into the space, where it sits next to the row of columns it counts
+           rather than on a plate showing one zone's settings.
+
+           TRIM STAYS, because it is the odd one out: it moves the level rather
+           than reporting it, and it belongs with the display for the same
+           reason the meter did — it is the one control here whose subject is
+           the whole output. -->
+      <div class="flex items-center gap-[10px]">
       <div class="flex-1 min-w-0">
       <ResonanceSpectrum
         :data-fn="resDisplayFn"
@@ -194,12 +200,14 @@ async function applyAndClose() {
         @update:selected-zone="resSelectedZone = $event"
       />
       </div>
-        <!-- TRIM SITS WITH THE METER because it is the same subject: the meter
-             says what the output level is and this is the control that moves
-             it. It was among the timing knobs, which put the reading and the
-             adjustment two rows apart. -->
-        <div class="flex flex-col items-center gap-[8px]">
-          <LevelMeter :levels="resOutputLevels" label="OUT" :height="plotHeight - 96" />
+        <div class="flex flex-col items-center gap-[14px]">
+          <ResonanceZoneCount
+            :zones="resZones"
+            :selected="resSelectedZone"
+            :disabled="!resPreview"
+            @update:zones="syncZones"
+            @update:selected="resSelectedZone = $event"
+          />
           <DeviceField
             :model-value="resTrim" @update:model-value="syncTrim"
             :min="-12" :max="12" :step="0.5" :width="48"
@@ -224,7 +232,6 @@ async function applyAndClose() {
           :accent="ACCENT"
           :disabled="!resPreview"
           @update:zones="syncZones"
-          @update:selected="resSelectedZone = $event"
           @solo="toggleSolo"
         />
       </div>
