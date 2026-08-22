@@ -146,58 +146,78 @@ export function resonanceDisplayRange(sampleRate) {
  * run the other detector while the person at the keyboard believes otherwise.
  */
 const REF_MODES = new Set(['cepstral', 'peak'])
-export const DEFAULT_REF_MODE = 'cepstral'
+export const DEFAULT_REF_MODE = 'peak'
 
 /**
  * Per-mode calibration.
  *
- * THE KNOBS ARE NOT COMPARABLE BETWEEN THE TWO MODES, and pretending they are
- * would make the comparison meaningless. `selectivity` is a threshold on how
- * far a bin protrudes above the reference, and the two references disagree
- * about that quantity by an order of magnitude — measured on a clean voice with
- * no defect present at all, the cepstral reference reads 21-24 dB of
- * protrusion, because from the inter-harmonic floor the comb itself protrudes;
- * the peak-envelope reference reads 2.5-4.2 dB, which is what "nothing is
- * wrong here" ought to measure. Put a +10 dB broad defect in and the cepstral
- * reading does not move at all (23.40 to 23.40 at 800 Hz) while the peak
- * reading goes 2.48 to 7.40.
+ * THE PEAK-ENVELOPE REFERENCE SHIPS. The cepstral one is the override, and the
+ * swap was made on measurement rather than taste.
  *
- * So the peak reference measures the defect's actual prominence against a near
- * zero floor, and its threshold belongs just above that floor: selectivity 4
- * with depth at unity, since protrusion is now roughly the true size of the
- * thing being removed rather than a number inflated by the comb. Measured at
- * that point it removes 2.2 / 7.2 / 10.5 dB of a +10 dB broad hump at
- * 0.8 / 1.6 / 3.2 kHz, at a third the clean-voice damage of the unmasked
- * cepstral path, with harmonic protection off and pitch transparency intact.
- * Selectivity 3 removes a little more and starts to lose the transparency.
+ * WHAT THE CEPSTRAL REFERENCE COULD NOT SEE. A +12 dB Q=8 resonance planted on
+ * 46 s of real narration (median F0 195 Hz), dB removed at that frequency:
  *
+ *          60 Hz   80    110    150    250    400    900   2.5k    6k
+ *   cep    -0.01  0.00   0.06   4.63   7.56   6.22   1.86   0.01   0.00
+ *   peak    1.74  2.76   0.34   4.00   4.66   6.52   0.86   0.76   4.39
+ *
+ * It works in a band roughly 150–900 Hz and nowhere else — blind below the
+ * fundamental, where rumble and room modes live, and blind above about 1 kHz,
+ * where sibilance and ring live. That is most of what a resonance suppressor
+ * is asked to remove.
+ *
+ * THE FIRST EXPLANATION OFFERED FOR THE HIGH END WAS WRONG and the measurement
+ * that killed it is worth keeping: the cepstral envelope's resolution is
+ * uniform in Hz, so the obvious theory was that it tracks (and therefore hides)
+ * resonances that are wide in Hz. Swept at 6 kHz by bandwidth, cepstral removes
+ * 0.03 / 0.00 / 0.01 / 0.01 dB at Q 40 / 20 / 8 / 3 against peak's 6.08 / 6.33
+ * / 6.05 / 4.96. Bandwidth is irrelevant; it does not see anything up there at
+ * any width. The remaining explanation — unproven — is that cepstral compares a
+ * RAW bin against a smooth envelope, and at high frequencies the raw spectrum's
+ * own bin-to-bin scatter is comparable to the threshold, where the peak path
+ * compares a max-filtered value against a wide octave-scale average.
+ *
+ * THE HISTORICAL OBJECTION TO PEAK NO LONGER REPRODUCES. It was rejected once
+ * for worse pitch-movement artefacts; matched at 3.0 dB of cut on the same
+ * clip with stock ballistics, gain jitter is 2.59/3.52 cepstral against
+ * 2.51/3.73 peak — a wash. That finding predates the F0 tracker's bounded
+ * interpolation and the slow-ballistics work, both of which moved it.
+ *
+ * ⚠ THE ONE THING MEASURED AGAINST THE SWAP, and it is unresolved: peak spreads
+ * its work far more widely on material with nothing planted in it. Matched at
+ * 3.0 dB, mean reduction per band on untouched narration —
+ *
+ *            60    120    250    500     1k   2.5k     6k
+ *   cep    -0.01  -6.66  -2.67  -1.66  -0.52  -0.07  -0.00
+ *   peak   -4.24  -5.52  -5.70  -2.20  -0.25  -0.70  -0.58
+ *
+ * −4.24 dB at 60 Hz on a file with nothing deliberately wrong there. On this
+ * clip that is very likely room rumble and welcome, but a number cannot say so,
+ * and it is the axis on which peak may turn out to be less surgical rather than
+ * more capable. One narrator, one clip.
+ *
+ * THE KNOBS ARE NOT COMPARABLE BETWEEN THE TWO MODES. `selectivity` thresholds
+ * how far a bin protrudes above the reference, and the two disagree about that
+ * quantity by an order of magnitude — on a clean voice with no defect at all
+ * the cepstral reference reads 21–24 dB of protrusion, because from the
+ * inter-harmonic floor the comb itself protrudes, while the peak reference
+ * reads 2.5–4.2 dB, which is what "nothing is wrong here" ought to measure.
  * This is soothe2's note about its own two algorithms, for the same reason:
  * "choosing the mode changes everything, as all other controls are relative to
  * the mode."
- *
- * CALIBRATED ON SYNTHETIC MATERIAL. That is the one thing this project has
- * learned repeatedly not to trust, so these are a starting point for listening,
- * not a result.
  */
 export const RESONANCE_REF_MODE_DEFAULTS = {
-  cepstral: {},
-  peak: {
-    refMode: 'peak',
-    // RE-CALIBRATED ON REAL NARRATION. This was 4, from a synthetic clean voice
-    // whose protrusion floor measured 2.5-4.2 dB. Real speech measures p75 at
-    // 8.9 dB and p90 at 17.2 in the same band, so 4 treated over a quarter of
-    // every time-frequency cell and removed 12 dB on average. 20 is where a
-    // 46 s narrator clip lands on ~3 dB of mean cut in the fundamental region.
-    // Applied to every zone by withRefModeDefaults. Not a zone array here:
-    // DEFAULT_RESONANCE_ZONES is declared further down this file, and a
-    // reference to it at module-evaluation time is a temporal-dead-zone throw.
-    zoneOverrides: { selectivity: 20, depth: 1, protect: false },
-    // Slow, because the two mechanisms are complementary and measurably
-    // superadditive: the stable envelope removes the frequency-domain source of
-    // gain movement and these remove the time-domain residue. Alone they are
-    // worth 21% and 11%; together, 62%.
-    attack: 100,
-    release: 500,
+  // The shipping reference. Its calibration lives in RESONANCE_ZONE_STOCK
+  // rather than here, because that is now what a fresh panel starts from.
+  peak: {},
+  cepstral: {
+    refMode: 'cepstral',
+    // What the zones carried while the cepstral reference shipped, restored so
+    // the override is the old panel rather than the new numbers on the old
+    // detector. See RESONANCE_ZONE_STOCK for why 8 and 20 are not comparable.
+    zoneOverrides: { selectivity: 8, depth: 0.67 },
+    attack: 15,
+    release: 80,
   },
 }
 
@@ -309,10 +329,27 @@ export const RESONANCE_ZONE_RANGES = {
  * narrators' fundamentals, 1.1 kHz is the bottom of the presence range, and
  * 5 kHz is where sibilance starts to dominate.
  */
+/**
+ * ⚠ CALIBRATED FOR THE CEPSTRAL REFERENCE AND CARRIED OVER TO THE PEAK ONE.
+ *
+ * `selectivity` and `depth` here are the peak reference's previous calibration
+ * (20 / 1), which was derived on real narration as "where a 46 s narrator clip
+ * lands on ~3 dB of mean cut in the fundamental region" — with harmonic
+ * protection OFF and against the old F0 tracker. A fresh solve on the same clip
+ * with the current build puts the 3 dB point nearer 16.3. Neither number has
+ * been listened to as a shipping default.
+ *
+ * `sharpness` and `maxCut` are unchanged from the cepstral era and have not
+ * been re-derived against the peak envelope at all. Sharpness in particular
+ * means something different there: it sets the geometric window of the peak
+ * reference rather than a cepstral lifter cutoff.
+ *
+ * These are a starting point for listening, not a result.
+ */
 const ZONE_STOCK = {
-  depth: 0.67,
+  depth: 1,
   sharpness: 0.8,
-  selectivity: 8,
+  selectivity: 20,
   maxCut: 36,
   /**
    * Harmonic protection, PER ZONE, and the measurement is why.
@@ -332,7 +369,20 @@ const ZONE_STOCK = {
    * The PITCH RANGE stays global, and that is not an oversight: it tells one
    * tracker which F0 to look for, and there is one signal and one pitch.
    */
-  protect: true,
+  /**
+   * ⚠ OFF UNDER THE SHIPPING REFERENCE, and that is a behavioural default
+   * rather than a number to be re-tuned.
+   *
+   * The mask exists because the CEPSTRAL reference sits at the inter-harmonic
+   * floor, so every harmonic protrudes and reads as a resonance. The peak
+   * envelope is drawn THROUGH the harmonic peaks, so nothing protrudes at a
+   * harmonic and there is nothing for the mask to protect against. Switched on
+   * there it does something else entirely — it holds the partials and
+   * attenuates the floor between them, pinned in resonancePitch.test.js — and
+   * measured on real narration that does not improve the harmonic-to-noise
+   * ratio: quieter, not cleaner.
+   */
+  protect: false,
   enabled: true,
 }
 export const DEFAULT_RESONANCE_ZONES = [
@@ -557,7 +607,7 @@ export const RESONANCE_DEFAULTS = {
   release: 80, // ms
   mode: 'soft', // 'soft' | 'hard'
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
-  refMode: 'cepstral',
+  refMode: 'peak',
   // Sensitivity zones — see DEFAULT_RESONANCE_ZONES above. Not filters.
   zones: DEFAULT_RESONANCE_ZONES,
   mix: 1, // 0 = dry, 1 = fully suppressed

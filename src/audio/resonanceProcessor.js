@@ -458,11 +458,11 @@ export const RESONANCE_KERNEL_DEFAULTS = {
   pitchMinHz: DEFAULT_PITCH_MIN_HZ,
   pitchMaxHz: DEFAULT_PITCH_MAX_HZ,
   mode: 'soft', // 'soft' | 'hard'
-  // 'cepstral' ships. 'peak' is the alternative reference — see the note on
-  // PEAK_REF_FLOOR_FACTOR. Deliberately independent of the zones' protection
-  // setting so all four combinations can be measured, though the point of
-  // 'peak' is that it does not need the mask.
-  refMode: 'cepstral',
+  // 'peak' ships — see RESONANCE_REF_MODE_DEFAULTS for the measurement that
+  // moved it there. 'cepstral' is the alternative, reachable by override.
+  // Deliberately independent of the zones' protection setting so all four
+  // combinations can be measured.
+  refMode: 'peak',
   /**
    * Contiguous frequency zones, each carrying its own depth, sharpness and
    * selectivity — ABSOLUTE values, not offsets from a global setting, because

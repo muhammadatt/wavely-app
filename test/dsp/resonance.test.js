@@ -126,7 +126,27 @@ function boostRemoved(dry, freqHz, q, gainDb, params) {
  */
 // Harmonic protection is per zone now, so "unprotected" is a zone set, not a
 // flag. `zoned()` below layers a setting onto it.
-const UNPROTECTED = { ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ protect: false }) }
+/**
+ * THESE ARE MECHANISM TESTS AND THEY PIN THE CEPSTRAL REFERENCE EXPLICITLY.
+ *
+ * They were written and their thresholds derived against it, and they are about
+ * the parts both references share — the detection threshold, the knee, depth,
+ * the spread kernel, the mask, the mix law — which sit downstream of the one
+ * thing the two modes differ in, the envelope. Pinning the mode here means the
+ * shipping default can move (it has: peak ships now) without silently
+ * re-tuning what these measure. The peak path's own behaviour is covered in
+ * resonancePitch.test.js and resonanceZones.test.js.
+ *
+ * The zone settings are the cepstral era's stock, for the same reason: the two
+ * references disagree about what `selectivity` measures by an order of
+ * magnitude, so 20 on this path is not 20 on the other.
+ */
+const CEPSTRAL_STOCK = { refMode: 'cepstral', selectivity: 8, depth: 0.67 }
+const UNPROTECTED = {
+  ...RESONANCE_KERNEL_DEFAULTS,
+  refMode: 'cepstral',
+  zones: uniformZones({ ...CEPSTRAL_STOCK, protect: false }),
+}
 
 /**
  * Kernel params with one zone spanning everything.
@@ -137,7 +157,11 @@ const UNPROTECTED = { ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ protec
  * uniform looks like in it.
  */
 function zoned(base, settings) {
-  return { ...base, zones: uniformZones({ protect: false, ...settings }) }
+  return {
+    ...base,
+    refMode: 'cepstral',
+    zones: uniformZones({ ...CEPSTRAL_STOCK, protect: false, ...settings }),
+  }
 }
 
 test('reports a latency of exactly one FFT frame', () => {
@@ -146,7 +170,7 @@ test('reports a latency of exactly one FFT frame', () => {
 
 test('passes audio through delayed, not mangled, at zero depth', () => {
   const sig = voice({ seconds: 2 })
-  const { channelData } = processResonanceBuffer([sig], SR, { zones: uniformZones({ depth: 0 }) })
+  const { channelData } = processResonanceBuffer([sig], SR, zoned(RESONANCE_KERNEL_DEFAULTS, { depth: 0 }))
   let maxErr = 0
   for (let i = LATENCY; i + LATENCY < sig.length; i++) {
     maxErr = Math.max(maxErr, Math.abs(channelData[0][i + LATENCY] - sig[i]))
@@ -162,7 +186,7 @@ test('the delay is measurable, not merely advertised', () => {
   for (let i = 2000; i < 2400; i++) {
     sig[i] = Math.sin((2 * Math.PI * 800 * i) / SR) * Math.sin((Math.PI * (i - 2000)) / 400)
   }
-  const out = processResonanceBuffer([sig], SR, { zones: uniformZones({ depth: 0 }) }).channelData[0]
+  const out = processResonanceBuffer([sig], SR, zoned(RESONANCE_KERNEL_DEFAULTS, { depth: 0 })).channelData[0]
 
   const argmax = buf => {
     let idx = -1
@@ -287,7 +311,11 @@ test('harmonic protection holds the suppressor off the voice', () => {
   // it on, a signal that is nothing but voice should come through close to
   // untouched; with it off the suppressor starts eating harmonics.
   const sig = voice()
-  const withMask = processResonanceBuffer([sig], SR, RESONANCE_KERNEL_DEFAULTS).channelData[0]
+  // protect: true explicitly — the stock zone's default went to false when the
+  // peak envelope became the shipping reference, because there it is not
+  // protection at all. This test is about the cepstral path, where it is.
+  const withMask = processResonanceBuffer([sig], SR, { ...RESONANCE_KERNEL_DEFAULTS, refMode: 'cepstral',
+    zones: uniformZones({ ...CEPSTRAL_STOCK, protect: true }) }).channelData[0]
   const without = processResonanceBuffer([sig], SR, UNPROTECTED).channelData[0]
 
   const departure = out => {
@@ -313,7 +341,8 @@ test('suppresses a resonance in unpitched material', () => {
   // effect did nothing at all. Drums, cymbals, synths, room tone and every
   // fricative in a narration land in the same hole.
   const sig = resonate(noise(), 3000, 40, 14)
-  const out = processResonanceBuffer([sig], SR, RESONANCE_KERNEL_DEFAULTS).channelData[0]
+  const out = processResonanceBuffer([sig], SR, { ...RESONANCE_KERNEL_DEFAULTS, refMode: 'cepstral',
+    zones: uniformZones(CEPSTRAL_STOCK) }).channelData[0]
 
   const change = f => bandDb(out, f, SR + LATENCY) - bandDb(sig, f, SR)
   const onResonance = change(3000)
@@ -379,10 +408,10 @@ test('the mask cache survives every param change', () => {
   kernel._harmonicMask(150)
   assert.equal(kernel.maskCache.size, 1)
 
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ depth: 0.4 }) })
+  kernel.setParams(zoned(RESONANCE_KERNEL_DEFAULTS, { depth: 0.4 }))
   assert.equal(kernel.maskCache.size, 1, 'depth does not move a single harmonic')
 
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS, zones: uniformZones({ selectivity: 12 }) })
+  kernel.setParams(zoned(RESONANCE_KERNEL_DEFAULTS, { selectivity: 12 }))
   assert.equal(kernel.maskCache.size, 1, 'nor does selectivity')
 })
 
@@ -391,10 +420,11 @@ test('output is independent of the block size it was fed in', () => {
   // frames cannot leave later channels applying the wrong frame's gain.
   const sig = voice({ seconds: 1.5 })
   const n = sig.length
-  const oneShot = processResonanceBuffer([sig], SR, RESONANCE_KERNEL_DEFAULTS).channelData[0]
+  const params = zoned(RESONANCE_KERNEL_DEFAULTS, {})
+  const oneShot = processResonanceBuffer([sig], SR, params).channelData[0]
 
   const kernel = new ResonanceKernel(SR)
-  kernel.setParams(RESONANCE_KERNEL_DEFAULTS)
+  kernel.setParams(params)
   const chunked = new Float32Array(n)
   const sizes = [1, 128, 999, 2048, 37]
   let off = 0
@@ -587,7 +617,7 @@ test('the reference sits below a resonance by more than the selectivity', () => 
   const d = readDisplay(kernel)
   const at = argmax(d.reduction)
   assert.ok(
-    d.mag[at] - d.reference[at] > ZONE_STOCK.selectivity,
+    d.mag[at] - d.reference[at] > CEPSTRAL_STOCK.selectivity,
     `peak stood only ${(d.mag[at] - d.reference[at]).toFixed(1)} dB over the reference`,
   )
 })
@@ -798,7 +828,7 @@ test('the spread kernel is a constant width in octaves, not in bins', () => {
   // here as a ratio to the bin index, which is what "constant in octaves"
   // means: half-width proportional to frequency.
   const k = new ResonanceKernel(SR)
-  k.setParams({ zones: uniformZones({ sharpness: 0.8 }) })
+  k.setParams(zoned(RESONANCE_KERNEL_DEFAULTS, { sharpness: 0.8 }))
   const at = f => k.spreadHalfBins[Math.round(f / k.binWidth)]
 
   // 3 kHz is the calibration point: ±6 bins, exactly what the linear kernel
@@ -813,7 +843,7 @@ test('the spread kernel is a constant width in octaves, not in bins', () => {
   }
   // Wider at lower sharpness, everywhere.
   const wide = new ResonanceKernel(SR)
-  wide.setParams({ zones: uniformZones({ sharpness: 0.2 }) })
+  wide.setParams(zoned(RESONANCE_KERNEL_DEFAULTS, { sharpness: 0.2 }))
   for (const f of [1000, 3000, 9000]) {
     const bin = Math.round(f / wide.binWidth)
     assert.ok(
@@ -863,7 +893,7 @@ test('the envelope is no finer than the harmonic comb, and no finer than asked',
   // a deep voice got a reference four times finer than a high one and the
   // effect quietly did less on it.
   const k = new ResonanceKernel(SR)
-  k.setParams({ zones: uniformZones({ sharpness: 0.8 }) })
+  k.setParams(zoned(RESONANCE_KERNEL_DEFAULTS, { sharpness: 0.8 }))
   // The target lives on the envelope group now — one per distinct zone
   // sharpness, because sharpness sets the scale of a whole transform and a
   // zone asking for a different one needs its own envelope.

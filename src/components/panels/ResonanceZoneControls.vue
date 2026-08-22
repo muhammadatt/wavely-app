@@ -37,6 +37,11 @@ const props = defineProps({
    * than chosen — see HARMONIC_PITCH_RANGE.
    */
   pitchRangeCaption: { type: String, default: '' },
+  /**
+   * Which reference the detector is using. The mask means DIFFERENT THINGS
+   * under the two, so the control cannot carry one name over both.
+   */
+  refMode: { type: String, default: 'peak' },
   accent: { type: String, default: '#8de0a8' },
   disabled: { type: Boolean, default: false },
 })
@@ -111,7 +116,41 @@ const span = computed(() => {
  */
 /** Any zone running unmasked. Tints the closed door, so the state is visible
  *  without opening it — the one thing a hidden control must not cost. */
-const anyUnprotected = computed(() => props.zones.some(z => !zoneSettings(z).protect))
+/**
+ * THE MASK IS NOT THE SAME CONTROL UNDER THE TWO REFERENCES, and labelling it
+ * as though it were would make the panel lie on the shipping path.
+ *
+ *   cepstral — the reference sits at the inter-harmonic floor, so harmonics
+ *     protrude and read as resonances. The mask holds the suppressor off them.
+ *     That is protection, and turning it off really will thin the material —
+ *     hence the amber.
+ *   peak — the envelope is drawn through the harmonic peaks, so nothing
+ *     protrudes at a harmonic and there is nothing to protect against. What the
+ *     mask does there is INVERT where the cut lands: partials held, the floor
+ *     between them attenuated. A different process, not a broken one, so the
+ *     control stays live — it just must not claim to be protecting anything,
+ *     and its off state is not a warning.
+ */
+const maskIsProtection = computed(() => props.refMode === 'cepstral')
+
+const maskCopy = computed(() => {
+  const on = settings.value.protect
+  if (!maskIsProtection.value) {
+    return on
+      ? { label: 'BETWEEN PARTIALS', caption: 'Cuts between the partials, not on them.' }
+      : { label: 'ACROSS SPECTRUM', caption: 'Cuts evenly across the spectrum.' }
+  }
+  return on
+    ? {
+      label: 'PRESERVE HARMONICS',
+      caption: `Preserves voice harmonics${props.pitchRangeCaption ? ` (${props.pitchRangeCaption})` : ''}.`,
+    }
+    : { label: 'PROTECTION OFF', caption: 'Full suppression — may thin harmonics.' }
+})
+
+/** Only under the cepstral reference is an unmasked zone a hazard. */
+const anyUnprotected = computed(() => maskIsProtection.value
+  && props.zones.some(z => !zoneSettings(z).protect))
 
 const canSplit = computed(() => props.zones.length < RESONANCE_ZONE_MAX)
 const canMerge = computed(() => props.zones.length > RESONANCE_ZONE_MIN)
@@ -249,8 +288,10 @@ const db = v => `${Math.round(v)}`
                   <button
           class="w-full px-2 py-[6px] rounded-lg cursor-pointer transition-all text-left disabled:cursor-default"
           :style="{
-            background: settings.protect ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
-            border: `1px solid ${settings.protect ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
+            background: settings.protect || !maskIsProtection
+              ? 'rgba(141,224,168,.14)' : 'rgba(255,178,122,.12)',
+            border: `1px solid ${settings.protect || !maskIsProtection
+              ? 'rgba(141,224,168,.4)' : 'rgba(255,178,122,.45)'}`,
           }"
           :aria-pressed="String(settings.protect)"
           :aria-label="`Zone ${index + 1} harmonic protection`"
@@ -262,9 +303,9 @@ const db = v => `${Math.round(v)}`
             :style="{
               font: `700 8.5px 'JetBrains Mono',monospace`,
               letterSpacing: '.12em',
-              color: settings.protect ? '#8de0a8' : '#ffb27a',
+              color: settings.protect || !maskIsProtection ? '#8de0a8' : '#ffb27a',
             }"
-          >{{ settings.protect ? 'PRESERVE HARMONICS' : 'PROTECTION OFF' }}</span>
+          >{{ maskCopy.label }}</span>
           <!-- THE RANGE IS A STATEMENT NOW, NOT A CHOICE, and printing it here
                is what keeps that visible. It used to be a VOICE/WIDE switch on
                this row; the mask is a comb built from one tracked F0, so it is
@@ -275,11 +316,9 @@ const db = v => `${Math.round(v)}`
           <span
             class="block mt-[2px]"
             style="font:500 8.5px/1.35 'Inter'"
-            :style="{ color: settings.protect
+            :style="{ color: settings.protect || !maskIsProtection
               ? 'rgba(255,255,255,.35)' : 'rgba(255,178,122,.75)' }"
-          >{{ settings.protect
-            ? `Preserves voice harmonics${pitchRangeCaption ? ` (${pitchRangeCaption})` : ''}.`
-            : 'Full suppression — may thin harmonics.' }}</span>
+          >{{ maskCopy.caption }}</span>
         </button>
 
         </div>

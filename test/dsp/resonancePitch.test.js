@@ -186,7 +186,18 @@ function removedFrom(sig, freqHz, q, gainDb, params) {
 const VIBRATO_HZ = 5
 const VIBRATO = t => 150 * (1 + 0.06 * Math.sin(2 * Math.PI * VIBRATO_HZ * t))
 const STEP = t => (t < 2 ? 150 : 195)
-const UNPROTECTED = { zones: uniformZones({ protect: false }) }
+/**
+ * These document the CEPSTRAL reference's failure modes — reason 1, what the
+ * mask costs, and detection falling away above 4 kHz — so they pin that mode
+ * explicitly rather than inheriting the shipping default, which is now the peak
+ * envelope. Half of them are the evidence for that swap; they would say nothing
+ * if they silently followed it.
+ */
+const CEPSTRAL_STOCK = { refMode: 'cepstral', selectivity: 8, depth: 0.67 }
+const UNPROTECTED = {
+  refMode: 'cepstral',
+  zones: uniformZones({ ...CEPSTRAL_STOCK, protect: false }),
+}
 
 // ── Reason 1: what pitch movement does to a per-bin dynamic suppressor ───────
 
@@ -282,7 +293,9 @@ test('the one regime that works is unpitched material', () => {
     s = (s * 1103515245 + 12345) & 0x7fffffff
     noise[i] = amp * (s / 0x3fffffff - 1)
   }
-  const removed = removedFrom(noise, 2500, 25, 14, {})
+  const removed = removedFrom(noise, 2500, 25, 14, {
+    refMode: 'cepstral', zones: uniformZones(CEPSTRAL_STOCK),
+  })
   assert.ok(removed > 1, `unpitched removal collapsed to ${removed.toFixed(2)} dB`)
 })
 
@@ -363,7 +376,7 @@ const PEAK = {
   zones: uniformZones({
     protect: false,
     selectivity: SYNTHETIC_SELECTIVITY,
-    depth: RESONANCE_REF_MODE_DEFAULTS.peak.zoneOverrides.depth,
+    depth: RESONANCE_ZONE_STOCK.depth,
   }),
 }
 
@@ -495,27 +508,28 @@ test('the reference-mode override falls back rather than passing a typo through'
   assert.equal(withRefModeDefaults({ selectivity: 8 }).selectivity, 8)
 })
 
-test('peak mode carries its own calibration, taken from real audio', () => {
-  // The two references disagree about what `selectivity` measures, so the same
-  // number on the two is not the same setting — soothe2 says the same thing
-  // about its own two algorithms. This one is deliberately far ABOVE the
-  // cepstral default rather than below it: an earlier synthetic calibration put
-  // it at 4, which on narration treated over a quarter of every
-  // time-frequency cell and removed 12 dB on average.
-  const cepstralDefault = RESONANCE_ZONE_STOCK.selectivity
-  const peak = RESONANCE_REF_MODE_DEFAULTS.peak
-  // Its calibration reaches the zones rather than a global knob, because there
-  // is no global knob — withRefModeDefaults folds these into every zone.
+test('THE PEAK ENVELOPE SHIPS, and the cepstral override carries its own numbers', () => {
+  // The two references disagree about what `selectivity` measures by an order
+  // of magnitude, so the same number on the two is not the same setting —
+  // soothe2 says the same thing about its own two algorithms. The stock zone
+  // therefore has to be calibrated for whichever one ships, and the override
+  // has to restore the other's.
+  assert.equal(DEFAULT_REF_MODE, 'peak')
+  assert.deepEqual(RESONANCE_REF_MODE_DEFAULTS.peak, {},
+    'the shipping reference needs no overrides — its numbers ARE the stock zone')
+
+  const cepstral = RESONANCE_REF_MODE_DEFAULTS.cepstral
+  assert.equal(cepstral.refMode, 'cepstral')
+  // Far BELOW the shipping stock, which is the direction that matters: from the
+  // inter-harmonic floor a clean comb already protrudes 21-24 dB, so the
+  // cepstral path thresholds a much smaller number than the peak path does.
   assert.ok(
-    peak.zoneOverrides.selectivity > 2 * cepstralDefault,
-    `peak mode should want a far higher threshold, got ${peak.zoneOverrides.selectivity}`,
+    cepstral.zoneOverrides.selectivity < RESONANCE_ZONE_STOCK.selectivity / 2,
+    `cepstral wants a far lower threshold, got ${cepstral.zoneOverrides.selectivity}`,
   )
-  assert.equal(peak.zoneOverrides.protect, false,
-    'the point of this reference is not needing the mask')
-  // Slow ballistics ship with it because the two are superadditive on real
-  // audio — the stable envelope removes the frequency-domain source of gain
-  // movement and these remove the time-domain residue.
-  assert.ok(peak.attack >= 100 && peak.release >= 500)
+  // And an override that changed the reference without changing the numbers
+  // would be measuring the old panel on the new detector.
+  assert.ok(cepstral.zoneOverrides.depth < RESONANCE_ZONE_STOCK.depth)
 })
 
 test('peak mode detects on the stable envelope, not the raw magnitude', () => {
@@ -550,12 +564,20 @@ test('peak mode detects on the stable envelope, not the raw magnitude', () => {
   )
 })
 
-test('the cepstral path still detects on the magnitude', () => {
-  // The reference-mode switch must not quietly change the shipping detector.
-  const kernel = new ResonanceKernel(SR)
-  kernel.setParams({ ...RESONANCE_KERNEL_DEFAULTS })
-  assert.equal(kernel.refMode, 'cepstral')
-  assert.equal(kernel.peakMax, null, 'the peak envelope should never be built on the shipping path')
+test('the shipping path builds the peak envelope, and the override does not', () => {
+  // The reference-mode switch must not quietly change which detector runs.
+  const shipping = new ResonanceKernel(SR)
+  shipping.setParams({ ...RESONANCE_KERNEL_DEFAULTS })
+  assert.equal(shipping.refMode, 'peak')
+
+  const override = new ResonanceKernel(SR)
+  override.setParams({ ...RESONANCE_KERNEL_DEFAULTS, refMode: 'cepstral' })
+  assert.equal(override.refMode, 'cepstral')
+  // The peak envelope is allocated lazily on first use, so a kernel that has
+  // never run it has nothing there — which is what says the cepstral path does
+  // not touch it.
+  assert.equal(override.peakMax, null,
+    'the peak envelope should never be built on the cepstral path')
 })
 
 test('the mask is honoured under both references, and inverts under peak', () => {

@@ -225,11 +225,19 @@ test('A ZONE SWITCHED OFF IS EXACTLY OFF, even beside one working hard', () => {
 })
 
 test('per-zone depth scales the cut in its own band only', () => {
+  // Selectivity high enough that the raw reduction stays under Max Cut. Depth
+  // is applied before the ceiling, so a saturated cut is saturated at both
+  // depths and the test would measure the clip rather than the control — which
+  // is exactly what happened when the shipping reference moved to the peak
+  // envelope and the same settings started removing 36 dB of this tone.
   const x = bandTone(3000)
-  const full = render(x, { ...UNPROTECTED, zones: uniformZones({ selectivity: 6, depth: 1, protect: false }) })
+  const SEL = 22
+  const full = render(x, {
+    ...UNPROTECTED, zones: uniformZones({ selectivity: SEL, depth: 1, protect: false }),
+  })
   const half = render(x, {
     ...UNPROTECTED,
-    zones: zones({ hiHz: 2000, selectivity: 6, depth: 1 }, { selectivity: 6, depth: 0.4 }),
+    zones: zones({ hiHz: 2000, selectivity: SEL, depth: 1 }, { selectivity: SEL, depth: 0.4 }),
   })
   const dry = rmsAt(aligned(x), 3000)
   const deep = dry - rmsAt(full, 3000)

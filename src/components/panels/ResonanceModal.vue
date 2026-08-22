@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
 import {
+  DEFAULT_REF_MODE,
   zoneSettings,
   effectivePitchRange,
   RESONANCE_ATTACK_MIN_MS,
@@ -81,9 +82,9 @@ const signedDb = v => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
  * distributed to the zones the warning has to be too, and naming the zones is
  * what makes it actionable rather than ominous.
  */
-const unprotectedZones = computed(() => resZones.value
+const unprotectedZones = computed(() => (resRefMode !== 'cepstral' ? [] : resZones.value
   .map((z, i) => (zoneSettings(z).protect ? null : `Z${i + 1}`))
-  .filter(Boolean))
+  .filter(Boolean)))
 
 
 // The kernel clamps the low end to what its analysis frame can resolve, so show
@@ -157,7 +158,7 @@ async function applyAndClose() {
            a panel running the non-shipping one and not saying so is a panel
            whose numbers mean something other than they appear to. -->
       <span
-        v-if="resRefMode !== 'cepstral'"
+        v-if="resRefMode !== DEFAULT_REF_MODE"
         class="px-2 py-1 rounded-full"
         style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em;
                color:#ffb27a;background:rgba(255,178,122,.12);
@@ -219,6 +220,7 @@ async function applyAndClose() {
           :selected="resSelectedZone"
           :solo="resSoloZone"
           :pitch-range-caption="pitchRangeCaption"
+          :ref-mode="resRefMode"
           :accent="ACCENT"
           :disabled="!resPreview"
           @update:zones="syncZones"
