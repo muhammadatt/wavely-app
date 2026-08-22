@@ -1161,6 +1161,16 @@ const HYST_MAX_DB = 3
  *     4.0          9.92         -38.51        0.36%     0.258
  *     8.0         10.45         -39.71        0.25%     0.286
  *
+ * ⚠ EVERY ROW OF THAT TABLE RAISED HYST_MAX_DB ALONGSIDE THE SLOPE, and the
+ * cap is only inert at the shipped 0.5. It binds above about 6 dB of drive, so
+ * at slope 2 with the cap left at 3 the saturation arrives at 1.5 dB instead —
+ * often, on real speech. Measured at matched depth: slope 2 with cap 12 gives
+ * -37.11 dBc on 0.53% of samples, slope 2 with cap 3 gives -35.90 on 0.65%.
+ * Half the table's benefit is the cap moving. So editing this constant alone
+ * does NOT reproduce a row above, and the "only the ratio matters" finding
+ * that justified this reparameterisation is a statement about the shipped
+ * operating point, not about the whole parameter space.
+ *
  * Three reasons it stays at 0.5 despite that. The returns flatten past 4 and
  * AVERAGE gain reduction turns back up there (0.258 -> 0.286), so 4 is where
  * the concentrate-on-transients story stops improving. Every step raises the
