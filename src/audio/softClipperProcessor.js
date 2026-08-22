@@ -1202,7 +1202,7 @@ const HYST_EPSILON = 1e-4
  * path — where the memory that modulates T does not.
  *
  * ⚠ IT IS THE FIRST CONTROL IN THIS STAGE THAT FORFEITS "UNITY BELOW T", and
- * that is deliberate rather than overlooked. `SLEW_REF` is Bernstein's bound —
+ * that is deliberate rather than overlooked. `SOFTEN_REF` is Bernstein's bound —
  * a signal bandlimited to the base rate's Nyquist and bounded by T cannot move
  * more than 2*pi*B/fs_os * T per oversampled sample — so at scale 1 the limit
  * provably cannot bind on anything at or below T, and the guarantee holds
@@ -1213,7 +1213,7 @@ const HYST_EPSILON = 1e-4
  * 0 and 0.273 at emphasis 6. Everything a voice does is far under the bound,
  * so a limit that respects it does exactly nothing — measured, bit-identical
  * at every setting. To do anything at all it has to bind below T. The stage's
- * first guarantee therefore reads "unity below T **when Slew is 0**", and 0 is
+ * first guarantee therefore reads "unity below T **when Soften is 0**", and 0 is
  * the default, so the shipped patch keeps it.
  *
  * WHAT IT ACTUALLY BUYS, measured at matched output peak (-3 dBFS) on 35.5 s
@@ -1238,21 +1238,21 @@ const HYST_EPSILON = 1e-4
  * 0.2 dB, so this is a structural preference rather than a measured one: it is
  * the position where the distortion reduction has a mechanism.
  */
-const SLEW_REF = Math.PI / OVERSAMPLE_FACTOR
+const SOFTEN_REF = Math.PI / OVERSAMPLE_FACTOR
 
 /**
- * Allowed slope at the top of the knob, as a fraction of SLEW_REF.
+ * Allowed slope at the top of the knob, as a fraction of SOFTEN_REF.
  *
  * 0.02 is where the effect is unmistakable without being a lowpass: it lands
  * the allowed slope at 0.0157 against a p99-of-all-samples of 0.031, so it
  * catches a couple of percent of the file. The mapping is geometric —
- * `pow(SLEW_MIN_SCALE, amount/100)` — because the interesting range is all
+ * `pow(SOFTEN_MIN_SCALE, amount/100)` — because the interesting range is all
  * near the bottom: half the knob is already down at 0.14.
  */
-const SLEW_MIN_SCALE = 0.02
+const SOFTEN_MIN_SCALE = 0.02
 
 /** Below this the whole path is bypassed and the audio is untouched. */
-const SLEW_EPSILON = 1e-4
+const SOFTEN_EPSILON = 1e-4
 
 const LN10_OVER_20 = Math.LN10 / 20
 
@@ -1293,10 +1293,10 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   asymmetry: 0,
   // 0-100, share of HF_LOSS_MAX_DB. 0 bypasses the shelf entirely.
   hfLoss: 0,
-  // 0-100, geometric into SLEW_MIN_SCALE. 0 bypasses the limiter entirely,
-  // which is what keeps "unity below T" — see SLEW_REF, the one guarantee this
+  // 0-100, geometric into SOFTEN_MIN_SCALE. 0 bypasses the limiter entirely,
+  // which is what keeps "unity below T" — see SOFTEN_REF, the one guarantee this
   // control forfeits when engaged.
-  slew: 0,
+  soften: 0,
   // 0-100, share of HYST_MAX_DB. 0 leaves the threshold exactly as computed,
   // so the shipped patch is bit-identical to the build before this existed.
   // A character control, not a quality one — see HYST_MAX_DB.
@@ -1760,8 +1760,8 @@ export class SoftClipperKernel {
     this.hfLossDb = 0
     // Memory of recent drive, 0-1. See HYST_MAX_DB.
     this.hystState = 0
-    // One slew-limiter state per channel — see SLEW_REF.
-    this.slewState = []
+    // One soften-limiter state per channel — see SOFTEN_REF.
+    this.softenState = []
     this.hystCoef = riseCoeff(HYST_TAU_MS, sampleRate)
     this.hfLossActive = false
     this.hfLossGain = new Float32Array(0)
@@ -1971,9 +1971,9 @@ export class SoftClipperKernel {
     const hfLossMaxDb = clamp(p.hfLoss ?? 0, 0, 100) / 100 * HF_LOSS_MAX_DB
     // 0-1 rather than dB now: the state itself is in dB, so this only scales
     // it. Pinned at 1 in practice — see HYST_MAX_DB.
-    const slewAmount = clamp(p.slew ?? 0, 0, 100) / 100
-    const slewActive = slewAmount > SLEW_EPSILON
-    const slewScale = slewActive ? Math.pow(SLEW_MIN_SCALE, slewAmount) : 1
+    const softenAmount = clamp(p.soften ?? 0, 0, 100) / 100
+    const softenActive = softenAmount > SOFTEN_EPSILON
+    const softenScale = softenActive ? Math.pow(SOFTEN_MIN_SCALE, softenAmount) : 1
     const hystScale = clamp(p.hysteresis ?? 0, 0, 100) / 100
     const hystActive = hystScale > HYST_EPSILON
     this.hfLossActive = hfLossMaxDb > HF_LOSS_EPSILON
@@ -2339,7 +2339,7 @@ export class SoftClipperKernel {
     this.scopeThreshold = scopeThreshold
     this.outputTrimDbSmoothed = outputTrimDbSmoothed
 
-    while (this.slewState.length < nOut) this.slewState.push(0)
+    while (this.softenState.length < nOut) this.softenState.push(0)
     while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler())
     const D = OVERSAMPLE_LATENCY_SAMPLES
     while (this.dryDelay.length < nOut) this.dryDelay.push(new Float32Array(D))
@@ -2390,7 +2390,7 @@ export class SoftClipperKernel {
       }
 
       const hi = oversampler.up(stagedInput, n)
-      let slewState = this.slewState[ch]
+      let softenState = this.softenState[ch]
 
       // T changes on time constants no faster than a few milliseconds — the
       // speech tracker alone is 3 s — so unlike a fast compressor's gain
@@ -2410,16 +2410,16 @@ export class SoftClipperKernel {
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           let before = hi[k]
-          if (slewActive) {
+          if (softenActive) {
             // Scaled by t, so the same recording at a different level is
             // treated identically — the property every control here holds.
             // It cannot boost: the output only ever moves TOWARD the input,
             // so |y| <= max(|y_prev|, |x|) at every sample.
-            const S = SLEW_REF * slewScale * t
-            let prev = slewState
+            const S = SOFTEN_REF * softenScale * t
+            let prev = softenState
             const d = before - prev
             prev += d > S ? S : d < -S ? -S : d
-            slewState = prev
+            softenState = prev
             before = prev
           }
           const after = softClip(before + off, t, MAX_REDUCTION_DB, shapeKneeDb, shapeExponent) - off
@@ -2432,7 +2432,7 @@ export class SoftClipperKernel {
           }
         }
       }
-      this.slewState[ch] = slewState
+      this.softenState[ch] = softenState
 
       oversampler.down(out, n)
 

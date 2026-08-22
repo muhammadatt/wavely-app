@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss, hysteresis, slew,
+  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss, hysteresis, soften,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncHysteresis, syncSlew, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncHysteresis, syncSoften, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -450,12 +450,12 @@ const SCOPE_H = 236
                is why it is captioned as tone.
                ⚠ The one control here that gives up bit-transparency below the
                threshold. It has to: everything a voice does is far under the
-               bound that would preserve it. See SLEW_REF. -->
+               bound that would preserve it. See SOFTEN_REF. -->
           <Knob
-            :model-value="slew"
-            @update:model-value="syncSlew"
+            :model-value="soften"
+            @update:model-value="syncSoften"
             :min="0" :max="100" :step="1"
-            label="Slew" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            label="Soften" :accent="ACCENT" :format-value="v => v.toFixed(0)"
             :value-font-px="13"
             :disabled="!clipperPreview"
           />
