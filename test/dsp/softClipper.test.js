@@ -2269,3 +2269,184 @@ test('the recorded transfer slopes are the real ones, and stay clear of folding'
       `${shape} folds: max d(r)/d(e) = ${maxSlope.toFixed(4)}`)
   }
 })
+
+// ── Hysteresis (HYST_MAX_DB) ────────────────────────────────────────────────
+
+/** A triangular level ramp: up through a range of amplitudes, then back down. */
+function levelRamp(seconds, peakAmp, freqHz = 300, sr = SR) {
+  const n = Math.round(seconds * sr)
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const ph = i / n
+    const env = ph < 0.5 ? ph * 2 : (1 - ph) * 2
+    out[i] = peakAmp * env * Math.sin((2 * Math.PI * freqHz * i) / sr)
+  }
+  return out
+}
+
+/**
+ * Widest difference in reduction between the rising and falling halves of a
+ * ramp, at matched input level. Zero for a memoryless stage; the loop is the
+ * whole point of hysteresis, so this is what measures it.
+ */
+function loopWidthDb(seconds, params, sr = SR) {
+  const sig = levelRamp(seconds, 0.9, 300, sr)
+  const kernel = new SoftClipperKernel(sr)
+  kernel.setParams({ thresholdMode: 'fixed', fixedThresholdDb: -18, emphasisDb: 0, shape: 'tanh3', ...params })
+  const out = new Float32Array(sig.length)
+  const pts = []
+  const hop = 64
+  for (let off = 0; off < sig.length; off += hop) {
+    const len = Math.min(hop, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    let peak = 0
+    for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(sig[off + i]))
+    pts.push({ t: off / sr, inDb: 20 * Math.log10(peak + 1e-12), red: kernel.getMetering().reductionDb })
+  }
+  const half = seconds / 2
+  let worst = 0
+  const nearest = (list, target) =>
+    list.reduce((b, p) => (Math.abs(p.inDb - target) < Math.abs(b.inDb - target) ? p : b))
+  for (const target of [-15, -14, -13, -12, -11, -10]) {
+    const up = nearest(pts.filter(p => p.t < half * 0.95), target)
+    const dn = nearest(pts.filter(p => p.t > half * 1.05), target)
+    worst = Math.max(worst, Math.abs(dn.red - up.red))
+  }
+  return worst
+}
+
+test('hysteresis makes the response a loop, and the knob widens it', () => {
+  // WHAT SEPARATES THIS FROM ONE MORE ENVELOPE FOLLOWER. The threshold moves
+  // down with recent drive, so a level arrived at from below maps to a
+  // different threshold than the same level arrived at from above. Measured at
+  // syllabic rate (a 100 ms ramp): 0.61 dB of loop at zero, 1.31 at half, 1.88
+  // at full.
+  //
+  // ⚠ THE BASELINE IS NOT ZERO, and that is worth knowing rather than
+  // explaining away: the detector's own follower is already asymmetric (1 ms
+  // attack, 150 ms release), so the stage always had a little of this. The
+  // knob deepens an effect that exists, it does not introduce one — and that
+  // same upstream follower, not this stage's ballistics, is where the loop
+  // comes from. See HYST_TAU_MS for the sweep that established it.
+  const widths = [0, 50, 100].map(hysteresis => loopWidthDb(0.1, { hysteresis }))
+  for (let i = 1; i < widths.length; i++) {
+    assert.ok(widths[i] > widths[i - 1] + 0.5,
+      `the knob did not widen the loop: ${widths.map(v => v.toFixed(2)).join(' -> ')} dB`)
+  }
+  // And it needs the level to be MOVING at a rate the state can lag behind.
+  // On a slow ramp any follower keeps up and the loop nearly closes.
+  const slow = loopWidthDb(2.0, { hysteresis: 100 })
+  assert.ok(slow < widths[2] - 0.8,
+    `the loop did not narrow on a slow ramp: ${slow.toFixed(2)} against ${widths[2].toFixed(2)} dB`)
+})
+
+test('hysteresis moves the threshold slowly enough that it cannot waveshape', () => {
+  // THE SAFETY PROPERTY, and the reason the memory modulates T rather than the
+  // drive or the knee. Moving T translates the curve without reshaping it, so
+  // it is monotonic at any frozen state whatever the memory does — but only if
+  // the state moves on an ENVELOPE time scale. A state moving at audio rate
+  // would be a nonlinearity wearing an envelope's clothing, and would put the
+  // fold risk straight back.
+  //
+  // Bounded from the attack coefficient: HYST_MAX_DB * (1 - exp(-1/(tau*sr)))
+  // is about 0.0125 dB per sample at 48 kHz.
+  const sr = 48000
+  const sig = concat(speechLike(3, 0.6, 17, sr), levelRamp(0.2, 0.95, 200, sr), speechLike(2, 0.6, 19, sr))
+  const kernel = new SoftClipperKernel(sr)
+  kernel.setParams({ thresholdMode: 'fixed', fixedThresholdDb: -18, emphasisDb: 0, shape: 'tanh3', hysteresis: 100 })
+  const out = new Float32Array(sig.length)
+  let worstStep = 0
+  let prev = null
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    for (let i = 0; i < len; i++) {
+      const tDb = 20 * Math.log10(kernel.tScratch[i])
+      if (prev !== null) worstStep = Math.max(worstStep, Math.abs(tDb - prev))
+      prev = tDb
+    }
+  }
+  assert.ok(worstStep < 0.02,
+    `the threshold moved ${worstStep.toFixed(4)} dB in one sample — fast enough to shape a waveform`)
+})
+
+test('hysteresis keeps the bound, never boosts, and is absent at zero', () => {
+  const sig = concat(speechLike(4, 0.6, 23), speechLike(3, 0.6, 29))
+  const params = { thresholdMode: 'fixed', fixedThresholdDb: -24, emphasisDb: 0, shape: 'tanh3', hysteresis: 100 }
+
+  // BOUNDED. Lowering the threshold cannot raise the reduction ceiling — the
+  // curve is the same curve, and its cap travels with it.
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams(params)
+  const out = new Float32Array(sig.length)
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  assert.ok(kernel.getMetering().maxReductionDb <= MAX_REDUCTION_DB + 1e-9,
+    `hysteresis exceeded the reduction bound: ${kernel.getMetering().maxReductionDb}`)
+
+  // AND THE THRESHOLD ITSELF MOVES BY AT MOST HYST_MAX_DB (3). Without this,
+  // dropping the knee normalisation — feeding raw dB-over into the state
+  // instead of `min(1, over / HYST_KNEE_DB)` — passes every other assertion
+  // here while letting the threshold fall by tens of dB.
+  const trace = (hysteresis) => {
+    const k = new SoftClipperKernel(SR)
+    k.setParams({ ...params, hysteresis })
+    const o = new Float32Array(sig.length)
+    const t = []
+    for (let off = 0; off < sig.length; off += 128) {
+      const len = Math.min(128, sig.length - off)
+      k.process([sig.subarray(off, off + len)], [o.subarray(off, off + len)], len)
+      for (let i = 0; i < len; i++) t.push(20 * Math.log10(k.tScratch[i]))
+    }
+    return t
+  }
+  const flat = trace(0)
+  const moved = trace(100)
+  let deepest = 0
+  let highest = 0
+  for (let i = 0; i < flat.length; i++) {
+    deepest = Math.max(deepest, flat[i] - moved[i])
+    highest = Math.max(highest, moved[i] - flat[i])
+  }
+  assert.ok(deepest > 0.5, `the memory barely moved the threshold: ${deepest.toFixed(3)} dB`)
+  assert.ok(deepest <= 3 + 1e-6, `the threshold fell ${deepest.toFixed(3)} dB, past HYST_MAX_DB`)
+  assert.ok(highest <= 1e-9, `the memory RAISED the threshold by ${highest.toFixed(4)} dB`)
+
+  // NEVER BOOSTS.
+  const y = processSoftClipperBuffer([sig], SR, params).channelData[0]
+  let peakIn = 0, peakOut = 0
+  for (let i = Math.round(0.5 * SR); i < sig.length; i++) {
+    peakIn = Math.max(peakIn, Math.abs(sig[i]))
+    peakOut = Math.max(peakOut, Math.abs(y[i]))
+  }
+  assert.ok(peakOut <= peakIn + 1e-6, `hysteresis boosted the peak ${peakIn} -> ${peakOut}`)
+
+  // ABSENT at zero, not merely flat.
+  const withParam = processSoftClipperBuffer([sig], SR,
+    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', hysteresis: 0 }).channelData[0]
+  const without = processSoftClipperBuffer([sig], SR,
+    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }).channelData[0]
+  for (let i = 0; i < sig.length; i++) {
+    assert.equal(withParam[i], without[i], `hysteresis 0 altered sample ${i}`)
+  }
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hysteresis, 0, 'the shipped default engages hysteresis')
+})
+
+test('hysteresis is level-invariant', () => {
+  // The memory is measured relative to the threshold, so the same recording at
+  // a different level gets the same treatment — the property every control in
+  // this stage has to hold.
+  const probe = concat(speechLike(4, 0.4, 83), speechLike(3, 0.4, 89))
+  const base = { thresholdMode: 'fixed', emphasisDb: 0, shape: 'tanh3', hysteresis: 100 }
+  const a = processSoftClipperBuffer([probe], SR, { ...base, fixedThresholdDb: -14 }).channelData[0]
+  const louder = new Float32Array(probe.length)
+  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
+  const b = processSoftClipperBuffer([louder], SR, { ...base, fixedThresholdDb: -8 }).channelData[0]
+  let worst = 0
+  for (let i = Math.round(SR); i < probe.length; i++) {
+    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
+  }
+  assert.ok(worst < 2e-3, `hysteresis is not level-invariant: worst deviation ${worst}`)
+})

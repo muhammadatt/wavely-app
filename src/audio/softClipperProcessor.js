@@ -1058,6 +1058,79 @@ const HF_LOSS_SMOOTH_MS = 30
 /** Below this the loss is treated as zero and the whole path is bypassed. */
 const HF_LOSS_EPSILON = 1e-4
 
+/**
+ * HYSTERESIS — a short-term memory of how hard the stage has been driven.
+ *
+ * WHAT IT MODELS, AND WHAT IT DOES NOT CLAIM TO. Magnetic hysteresis is the
+ * B-H loop: the medium's response depends on its history, not just on the
+ * field applied now. This is the "lite" version the architecture asked for —
+ * a one-pole lag, not a Jiles-Atherton model — and it should be described as a
+ * memory effect rather than as a physical simulation of magnetisation.
+ *
+ * IT MODULATES THE THRESHOLD, AND THAT CHOICE IS THE WHOLE SAFETY ARGUMENT.
+ * The obvious alternatives are to modulate the drive into the curve or the
+ * knee, and both reshape the curve — which puts the monotonicity guarantee
+ * (see MAX_REDUCTION_DB) back in play, on a curve already spending 0.717 of
+ * its slope budget at LATE. Moving T instead TRANSLATES the curve without
+ * changing its shape, and a translated monotonic curve is monotonic. The
+ * guarantee survives by construction rather than by measurement.
+ *
+ * ⚠ WHAT DOES NOT SURVIVE, AND SHOULD NOT BE CLAIMED. "A louder input always
+ * produces a louder output" is a statement about a MEMORYLESS curve. No
+ * state-dependent gain can keep it — hold the input constant while the state
+ * moves and the output changes on its own, which is what every compressor in
+ * this app already does and what nobody calls a fold. The property that
+ * actually prevents the destructive sound is NO INSTANTANEOUS FOLD: at any
+ * frozen state the transfer curve is monotonic. That is what translating T
+ * guarantees, and it is what the tests check.
+ *
+ * WHERE THE LOOP COMES FROM — and it is NOT this stage's own ballistics.
+ * The threshold moves DOWN with recent drive, so a level arrived at from below
+ * maps to a different threshold than the same level arrived at from above, and
+ * that difference is the loop. What supplies the asymmetry is the DETECTOR's
+ * follower upstream (1 ms attack, 150 ms release), which is what `fastPeakDb`
+ * has already been through by the time the memory sees it.
+ *
+ * ⚠ THIS SHIPPED WITH A SEPARATE 80 ms RELEASE AND THE RELEASE DID NOTHING.
+ * A one-pole chasing a signal that already falls with a 150 ms release just
+ * tracks it. Swept 5 / 80 / 150 / 300 / 600 / 1200 ms against a fixed 5 ms
+ * attack, the measured loop width is **identical to three decimals at every
+ * value** — 1.881 dB on a 100 ms ramp, 1.508 on a 500 ms one. A constant that
+ * cannot move any measurement is not a tuning, so there is one time constant
+ * here rather than two, and the comment that credited the loop to asymmetric
+ * ballistics was wrong: symmetric 5/5 reproduces 5/80 exactly.
+ */
+const HYST_MAX_DB = 3
+
+/** dB over the threshold at which the memory saturates. */
+const HYST_KNEE_DB = 6
+
+/**
+ * The memory's time constant, ms.
+ *
+ * Milliseconds, not microseconds: this has to be slow enough to read as the
+ * stage responding to a passage rather than as waveshaping — a state that
+ * moved at audio rate would be a nonlinearity wearing an envelope's clothing,
+ * and would put the fold risk straight back.
+ *
+ * Loop width at hysteresis 100, by ramp speed (hyst 0 baseline 0.614 / 0.328 /
+ * 0.119 dB):
+ *
+ *     tau      100 ms   200 ms   2 s
+ *     0.5 ms    1.570    1.349   0.557
+ *       5 ms    1.881    1.522   0.653
+ *      30 ms    2.135    1.801   1.083
+ *
+ * It is a slope, not a knee, so 5 is a choice rather than a fit: far enough
+ * above the detector's own 1 ms attack to add something, far enough below the
+ * syllable rate that the effect stays tied to transients instead of becoming a
+ * third level control.
+ */
+const HYST_TAU_MS = 5
+
+/** Below this the memory is bypassed and the threshold is untouched. */
+const HYST_EPSILON = 1e-4
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
@@ -1091,6 +1164,8 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   asymmetry: 0,
   // 0-100, share of HF_LOSS_MAX_DB. 0 bypasses the shelf entirely.
   hfLoss: 0,
+  // 0-100, share of HYST_MAX_DB. 0 leaves the threshold exactly as computed.
+  hysteresis: 0,
 }
 
 function clamp(v, lo, hi) {
@@ -1548,6 +1623,9 @@ export class SoftClipperKernel {
     this.hfLossCoef = riseCoeff(1000 / (2 * Math.PI * HF_LOSS_CORNER_HZ), sampleRate)
     this.hfLossSmoothCoef = riseCoeff(HF_LOSS_SMOOTH_MS, sampleRate)
     this.hfLossDb = 0
+    // Memory of recent drive, 0-1. See HYST_MAX_DB.
+    this.hystState = 0
+    this.hystCoef = riseCoeff(HYST_TAU_MS, sampleRate)
     this.hfLossActive = false
     this.hfLossGain = new Float32Array(0)
 
@@ -1754,6 +1832,8 @@ export class SoftClipperKernel {
     // resolved here.
     const asymFraction = clamp(p.asymmetry ?? 0, 0, 100) / 100 * ASYM_MAX_FRACTION
     const hfLossMaxDb = clamp(p.hfLoss ?? 0, 0, 100) / 100 * HF_LOSS_MAX_DB
+    const hystDepthDb = clamp(p.hysteresis ?? 0, 0, 100) / 100 * HYST_MAX_DB
+    const hystActive = hystDepthDb > HYST_EPSILON
     this.hfLossActive = hfLossMaxDb > HF_LOSS_EPSILON
     if (this.hfLossGain.length < n) this.hfLossGain = new Float32Array(n)
     this.asymActive = asymFraction > ASYM_EPSILON
@@ -1827,6 +1907,7 @@ export class SoftClipperKernel {
     let liftDb = this.liftDb
     let liftWarmupMax = this.liftWarmupMax
     let hfLossDb = this.hfLossDb
+    let hystState = this.hystState
     let skewM2 = this.skewM2
     let skewM3 = this.skewM3
     let asymSign = this.asymSign
@@ -2033,8 +2114,26 @@ export class SoftClipperKernel {
       // boosting, and the number in the box stops describing what happens.
       // The scope draws T, so the line visibly rises with the knob — which is
       // the trade being made and worth seeing.
-      const targetDb = (fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed)
+      // The threshold BEFORE the memory. Everything the memory measures is
+      // relative to this rather than to the modulated value — feeding a
+      // modulated threshold back into the measurement that drives it would
+      // close a loop with no reason to settle.
+      const baseDb = (fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed)
         + liftDb
+
+      if (hystActive) {
+        const overDb = fastPeakDb - baseDb
+        const drive = overDb > 0 ? Math.min(1, overDb / HYST_KNEE_DB) : 0
+        // One coefficient both ways. A second one for the release measured as
+        // exactly inert — see HYST_MAX_DB — because the drive this follows has
+        // already been through the detector's own asymmetric follower.
+        hystState += this.hystCoef * (drive - hystState)
+      }
+
+      // TRANSLATED, NEVER RESHAPED — see HYST_MAX_DB. The curve that runs is
+      // the same curve at a different height, so it is monotonic at any frozen
+      // state whatever the memory is doing.
+      const targetDb = baseDb - hystDepthDb * hystState
       // T_MAX IS SCALED BY THE LIFT, and leaving it unscaled truncated the
       // compensation exactly where it was needed most. The ceiling bounds T
       // against the signal the CURVE sees, not against the raw input, and
@@ -2072,6 +2171,7 @@ export class SoftClipperKernel {
     this.liftDb = liftDb
     this.liftWarmupMax = liftWarmupMax
     this.hfLossDb = hfLossDb
+    this.hystState = hystState
     this.skewM2 = skewM2
     this.skewM3 = skewM3
     this.asymSign = asymSign
