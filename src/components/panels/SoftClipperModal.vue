@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss, hysteresis,
+  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncHysteresis, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -417,28 +417,6 @@ const SCOPE_H = 236
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             softens under level
-          </p>
-        </div>
-        <div class="w-[74px]">
-          <!-- A short-term memory of recent drive, not a second depth control.
-               It lowers the THRESHOLD rather than reshaping the curve, which
-               is what keeps the monotonicity guarantee intact by construction
-               — a translated monotonic curve is still monotonic, whatever the
-               memory is doing. Asymmetric ballistics (5 ms up, 80 ms down) are
-               what make it a loop rather than one more envelope: the same
-               level maps to a different threshold on the way up than on the
-               way down. Measured on a 100 ms ramp, that loop widens 0.68 ->
-               2.49 dB across the knob. -->
-          <Knob
-            :model-value="hysteresis"
-            @update:model-value="syncHysteresis"
-            :min="0" :max="100" :step="1"
-            label="Hysteresis" :accent="ACCENT" :format-value="v => v.toFixed(0)"
-            :value-font-px="13"
-            :disabled="!clipperPreview"
-          />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            memory of recent drive
           </p>
         </div>
         <div class="w-[74px]">

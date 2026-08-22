@@ -1084,6 +1084,38 @@ const HF_LOSS_EPSILON = 1e-4
  * frozen state the transfer curve is monotonic. That is what translating T
  * guarantees, and it is what the tests check.
  *
+ * ⚠ IT IS PINNED AT 100 AND HAS NO KNOB. It shipped as a control for one
+ * revision and the measurements took it away again, which is the unusual case
+ * of a feature earning its place by being made non-optional. At a FIXED
+ * Headroom the knob is a depth control — it deepens and it distorts more — but
+ * DEPTH-MATCHED, re-deriving the Headroom that reproduces a given peak
+ * reduction at every step, every step of the knob is strictly better on all
+ * three of residual, samples touched and output crest, with no interior
+ * optimum. Measured on real narration at a 3 dB peak-reduction target:
+ * −33.82 → −35.38 dBc and 1.57% → 0.96% of samples across 0 → 100; at a 5 dB
+ * target, −22.12 → −23.83 dBc and 10.28% → 4.17%. A control whose best setting
+ * is the same at every operating point is not a control, it is a default that
+ * has not been applied yet — and leaving it on the panel only offered the user
+ * a way to make the stage worse. What the user sets is Headroom; this makes
+ * Headroom's depth cost less distortion.
+ *
+ * The `hysteresis` kernel param survives so the tests can still run 0 against
+ * 100 and mutate it, but nothing in the product surface passes it — see
+ * SOFT_CLIPPER_KERNEL_DEFAULTS, and `toKernelParams` in effects/softClipper.js,
+ * which deliberately does not forward it.
+ *
+ * ⚠ PINNING IT MOVED THE DEFAULT HEADROOM 6.5 → 7.5, and the two changes are
+ * not separable. Hysteresis is worth about 1.8 dB of effective headroom at the
+ * shipped depth, so leaving Headroom alone would have deepened the stock patch
+ * from 2.97 to 3.93 dB of peak reduction — a silent depth change made two
+ * layers away, which is exactly the failure recorded for Squash under the Opto
+ * taper fix. At Headroom 7.5 the stock patch lands at 3.14 dB (0.17 deeper,
+ * inside the spread between two narrators) with residual −34.66 against −34.00
+ * and 1.01% of samples touched against 1.53%. The win is taken as quality, not
+ * as depth. ⚠ EVERY HEADROOM FIGURE RECORDED BEFORE THIS REFERS TO THE OLD
+ * SCALE, and the offset is depth-dependent (~1.2 dB shallow, ~2.6 dB deep), so
+ * no single number converts one to the other.
+ *
  * WHERE THE LOOP COMES FROM — and it is NOT this stage's own ballistics.
  * The threshold moves DOWN with recent drive, so a level arrived at from below
  * maps to a different threshold than the same level arrived at from above, and
@@ -1152,7 +1184,21 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // chase it on a sample of one is how a constant stops meaning anything.
   // (The ungated lift cost 0.36 dB and did argue for a move; the gate removed
   // most of the shortfall along with the over-compensation that caused it.)
-  headroomDb: 6.5,
+  //
+  // ⚠ IT IS 7.5 NOW, AND EVERY FIGURE ABOVE REFERS TO THE OLD 6.5 SCALE.
+  // Pinning hysteresis at 100 (see HYST_MAX_DB) is worth about 1.8 dB of
+  // effective headroom, so holding Headroom still would have deepened the
+  // stock patch 2.97 -> 3.93 dB of peak reduction — a silent depth change made
+  // two layers away, the same failure recorded for Squash under the Opto taper
+  // fix. 7.5 lands the reference clip at 3.14 dB: 0.17 deeper than before,
+  // well inside the spread between two narrators, with residual -34.66 dBc
+  // against -34.00 and 1.01% of samples touched against 1.53%. The pin's win
+  // is taken as quality rather than as depth, which is what it is for.
+  //
+  // The offset is depth-dependent (~1.2 dB at shallow settings, ~2.6 dB at
+  // deep ones), so there is no single number converting an old Headroom
+  // reading to a new one. This default and the shape table are still coupled.
+  headroomDb: 7.5,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
@@ -1164,8 +1210,10 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   asymmetry: 0,
   // 0-100, share of HF_LOSS_MAX_DB. 0 bypasses the shelf entirely.
   hfLoss: 0,
-  // 0-100, share of HYST_MAX_DB. 0 leaves the threshold exactly as computed.
-  hysteresis: 0,
+  // 0-100, share of HYST_MAX_DB. PINNED AT 100 and not exposed — see
+  // HYST_MAX_DB for why it stopped being a control. Kept as a param only so
+  // the tests can run 0 against 100.
+  hysteresis: 100,
 }
 
 function clamp(v, lo, hi) {
