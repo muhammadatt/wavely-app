@@ -49,10 +49,11 @@ export const SCOPE_SECONDS = 4
  *   hfLoss 0-100, level-dependent HF softening — see HF_LOSS_CORNER_HZ. Not
  *     gap loss, which is level-independent; this is the self-erasure half,
  *     and it is what lets the colour vanish on quiet material
- *
- * `hysteresis` is absent from this list on purpose: it is pinned at 100 in the
- * kernel and has no control, because depth-matched it is better at every
- * setting with no interior optimum. See HYST_MAX_DB.
+ *   hysteresis 0-100, short-term memory of recent drive — see HYST_MAX_DB. It
+ *     modulates the THRESHOLD rather than the curve, which is what keeps the
+ *     monotonicity guarantee intact. A character control: matched on output
+ *     peak it costs about 1 dB of residual rather than saving any. 0 leaves
+ *     the threshold untouched
  */
 export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
 
@@ -67,9 +68,7 @@ export function toKernelParams(params) {
     shape: params.shape,
     asymmetry: params.asymmetry,
     hfLoss: params.hfLoss,
-    // hysteresis is DELIBERATELY NOT FORWARDED — it is pinned at 100 in
-    // SOFT_CLIPPER_KERNEL_DEFAULTS and has no control. Forwarding it would
-    // let an absent key overwrite the pin with undefined. See HYST_MAX_DB.
+    hysteresis: params.hysteresis,
   }
 }
 

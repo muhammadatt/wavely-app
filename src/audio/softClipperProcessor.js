@@ -1084,37 +1084,42 @@ const HF_LOSS_EPSILON = 1e-4
  * frozen state the transfer curve is monotonic. That is what translating T
  * guarantees, and it is what the tests check.
  *
- * ⚠ IT IS PINNED AT 100 AND HAS NO KNOB. It shipped as a control for one
- * revision and the measurements took it away again, which is the unusual case
- * of a feature earning its place by being made non-optional. At a FIXED
- * Headroom the knob is a depth control — it deepens and it distorts more — but
- * DEPTH-MATCHED, re-deriving the Headroom that reproduces a given peak
- * reduction at every step, every step of the knob is strictly better on all
- * three of residual, samples touched and output crest, with no interior
- * optimum. Measured on real narration at a 3 dB peak-reduction target:
- * −33.82 → −35.38 dBc and 1.57% → 0.96% of samples across 0 → 100; at a 5 dB
- * target, −22.12 → −23.83 dBc and 10.28% → 4.17%. A control whose best setting
- * is the same at every operating point is not a control, it is a default that
- * has not been applied yet — and leaving it on the panel only offered the user
- * a way to make the stage worse. What the user sets is Headroom; this makes
- * Headroom's depth cost less distortion.
+ * ⚠ IT WAS PINNED AT 100 FOR ONE REVISION ON A BROKEN MEASUREMENT, and the
+ * pin is reverted. The evidence was a "depth-matched" sweep that held PEAK
+ * GAIN REDUCTION constant — the deepest reduction the curve applied at any one
+ * instant. That is not what this stage does. Its job is peak CONTROL, and the
+ * quantity that measures it is the OUTPUT PEAK. The two come apart precisely
+ * because the memory dips the threshold on transients: a higher Headroom plus
+ * a deeper dip produces the same reduction figure from a higher starting
+ * point, so the peak lands higher while the meter reads the same.
  *
- * The `hysteresis` kernel param survives so the tests can still run 0 against
- * 100 and mutate it, but nothing in the product surface passes it — see
- * SOFT_CLIPPER_KERNEL_DEFAULTS, and `toKernelParams` in effects/softClipper.js,
- * which deliberately does not forward it.
+ * Re-matched on output peak, on the same 35 s of real narration, the result
+ * inverts. Every row lands at -2.765 dBFS out:
  *
- * ⚠ PINNING IT MOVED THE DEFAULT HEADROOM 6.5 → 7.5, and the two changes are
- * not separable. Hysteresis is worth about 1.8 dB of effective headroom at the
- * shipped depth, so leaving Headroom alone would have deepened the stock patch
- * from 2.97 to 3.93 dB of peak reduction — a silent depth change made two
- * layers away, which is exactly the failure recorded for Squash under the Opto
- * taper fix. At Headroom 7.5 the stock patch lands at 3.14 dB (0.17 deeper,
- * inside the spread between two narrators) with residual −34.66 against −34.00
- * and 1.01% of samples touched against 1.53%. The win is taken as quality, not
- * as depth. ⚠ EVERY HEADROOM FIGURE RECORDED BEFORE THIS REFERS TO THE OLD
- * SCALE, and the offset is depth-dependent (~1.2 dB shallow, ~2.6 dB deep), so
- * no single number converts one to the other.
+ *     setting                  Headroom   residual     touched
+ *     hysteresis 0               6.98     -35.73 dBc    1.21%
+ *     hysteresis 100             7.50     -34.66        1.01%
+ *     slope 2.0 (cap 12)         7.72     -28.59        1.00%
+ *     slope 4.0 (cap 24)         7.81     -24.38        1.01%
+ *
+ * Raising the slope is far WORSE at matched output peak — 6 dB more distortion
+ * at slope 2, 10 dB at slope 4 — for the same peak control on the same share
+ * of samples. And the memory itself costs about 1 dB: at matched output peak,
+ * hysteresis 0 and 100 are identical on RMS and on every percentile of the
+ * output level distribution (p99, p99.9, p99.99 all within 0.05 dB), so they
+ * do the same job, and 0 does it with less distortion.
+ *
+ * WHAT IS LEFT IS A CHARACTER CONTROL, NOT A QUALITY ONE. The loop and the
+ * onset bias below are real and measured; they are simply not free, and the
+ * claim that they bought cleanliness was an artefact of the matching variable.
+ * The default is 0, so the shipped patch is bit-identical to the build before
+ * this existed, and the knob is on the panel for anyone who wants the effect.
+ *
+ * ⚠ THE LESSON IS THE MATCHING VARIABLE. "Depth-matched" is only meaningful
+ * once the depth in question is the one the stage exists to deliver. Peak gain
+ * reduction is an instrument reading; output peak is the deliverable. Matching
+ * on the reading flattered every setting that reached the same reading by
+ * doing more shaping from a higher threshold.
  *
  * WHERE THE LOOP COMES FROM — and it is NOT this stage's own ballistics.
  * The threshold moves DOWN with recent drive, so a level arrived at from below
@@ -1150,39 +1155,13 @@ const HYST_MAX_DB = 3
  * 0.5 is exactly the old 3 / 6, so this reparameterisation is bit-identical on
  * real audio — verified sample for sample, not argued from the algebra.
  *
- * ⚠ MEASURED, RAISING IT KEEPS PAYING, AND IT IS DELIBERATELY NOT RAISED.
- * Depth-matched to the shipped patch's 3.14 dB of peak reduction, residual and
- * samples touched run:
- *
- *     slope   Headroom needed   residual     touched   avg GR
- *     0.5          7.50         -34.65 dBc    1.02%     0.345
- *     1.0          8.32         -35.93        0.74%     0.300
- *     2.0          9.15         -37.09        0.53%     0.276
- *     4.0          9.92         -38.51        0.36%     0.258
- *     8.0         10.45         -39.71        0.25%     0.286
- *
- * ⚠ EVERY ROW OF THAT TABLE RAISED HYST_MAX_DB ALONGSIDE THE SLOPE, and the
- * cap is only inert at the shipped 0.5. It binds above about 6 dB of drive, so
- * at slope 2 with the cap left at 3 the saturation arrives at 1.5 dB instead —
- * often, on real speech. Measured at matched depth: slope 2 with cap 12 gives
- * -37.11 dBc on 0.53% of samples, slope 2 with cap 3 gives -35.90 on 0.65%.
- * Half the table's benefit is the cap moving. So editing this constant alone
- * does NOT reproduce a row above, and the "only the ratio matters" finding
- * that justified this reparameterisation is a statement about the shipped
- * operating point, not about the whole parameter space.
- *
- * Three reasons it stays at 0.5 despite that. The returns flatten past 4 and
- * AVERAGE gain reduction turns back up there (0.258 -> 0.286), so 4 is where
- * the concentrate-on-transients story stops improving. Every step raises the
- * Headroom needed to hold depth, and by slope 4 the threshold sits above full
- * scale on ordinary passages — the stage would do nothing at all except on the
- * hottest transients, which is a different product. And most importantly the
- * whole table is measured energy, on ONE file: this stage has a recorded case
- * (the KNEE shapes) where 9.2 dB LESS residual energy sounded MORE conspicuous
- * because sparse distortion is more noticeable per unit energy, and raising
- * this constant pushes in exactly that direction — 0.36% of samples against
- * 1.02%. The number to beat before moving it is an A/B by ear at matched
- * depth, not a lower dBc.
+ * ⚠ RAISING IT IS WORSE, AND AN EARLIER NOTE HERE CLAIMED THE OPPOSITE.
+ * That claim came from a sweep matched on peak gain reduction, which is an
+ * instrument reading rather than the stage's deliverable — see HYST_MAX_DB for
+ * the full retraction. Matched on OUTPUT PEAK, which is what a peak-control
+ * stage is for, slope 0.5 / 2.0 / 4.0 give residual -34.66 / -28.59 / -24.38
+ * dBc on 1.01 / 1.00 / 1.01% of samples: the same peak control, the same
+ * coverage, and up to 10 dB more distortion. There is nothing to gain here.
  */
 const HYST_SLOPE_DB_PER_DB = 0.5
 
@@ -1234,20 +1213,12 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // (The ungated lift cost 0.36 dB and did argue for a move; the gate removed
   // most of the shortfall along with the over-compensation that caused it.)
   //
-  // ⚠ IT IS 7.5 NOW, AND EVERY FIGURE ABOVE REFERS TO THE OLD 6.5 SCALE.
-  // Pinning hysteresis at 100 (see HYST_MAX_DB) is worth about 1.8 dB of
-  // effective headroom, so holding Headroom still would have deepened the
-  // stock patch 2.97 -> 3.93 dB of peak reduction — a silent depth change made
-  // two layers away, the same failure recorded for Squash under the Opto taper
-  // fix. 7.5 lands the reference clip at 3.14 dB: 0.17 deeper than before,
-  // well inside the spread between two narrators, with residual -34.66 dBc
-  // against -34.00 and 1.01% of samples touched against 1.53%. The pin's win
-  // is taken as quality rather than as depth, which is what it is for.
-  //
-  // The offset is depth-dependent (~1.2 dB at shallow settings, ~2.6 dB at
-  // deep ones), so there is no single number converting an old Headroom
-  // reading to a new one. This default and the shape table are still coupled.
-  headroomDb: 7.5,
+  // ⚠ IT WENT TO 7.5 FOR ONE REVISION alongside the hysteresis pin and came
+  // straight back, because the measurement that justified the pin matched on
+  // peak gain reduction rather than on output peak — see HYST_MAX_DB. With the
+  // pin reverted there is nothing to compensate for, and every figure above is
+  // on this scale again.
+  headroomDb: 6.5,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
@@ -1259,10 +1230,10 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   asymmetry: 0,
   // 0-100, share of HF_LOSS_MAX_DB. 0 bypasses the shelf entirely.
   hfLoss: 0,
-  // 0-100, share of HYST_MAX_DB. PINNED AT 100 and not exposed — see
-  // HYST_MAX_DB for why it stopped being a control. Kept as a param only so
-  // the tests can run 0 against 100.
-  hysteresis: 100,
+  // 0-100, share of HYST_MAX_DB. 0 leaves the threshold exactly as computed,
+  // so the shipped patch is bit-identical to the build before this existed.
+  // A character control, not a quality one — see HYST_MAX_DB.
+  hysteresis: 0,
 }
 
 function clamp(v, lo, hi) {

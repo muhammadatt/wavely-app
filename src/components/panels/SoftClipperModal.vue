@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss,
+  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss, hysteresis,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncHysteresis, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -417,6 +417,27 @@ const SCOPE_H = 236
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             softens under level
+          </p>
+        </div>
+        <div class="w-[74px]">
+          <!-- A short-term memory of recent drive: it lowers the THRESHOLD
+               rather than reshaping the curve, so the monotonicity guarantee
+               survives by construction. A CHARACTER control, and the caption
+               says so rather than promising cleanliness — matched on output
+               peak it costs about 1 dB of residual rather than saving any.
+               What it buys is the loop (0.61 -> 1.88 dB across the knob on a
+               100 ms ramp) and a bias toward onsets. See HYST_MAX_DB for the
+               retraction of the earlier, better-sounding claim. -->
+          <Knob
+            :model-value="hysteresis"
+            @update:model-value="syncHysteresis"
+            :min="0" :max="100" :step="1"
+            label="Hysteresis" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            :value-font-px="13"
+            :disabled="!clipperPreview"
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            memory of recent drive
           </p>
         </div>
         <div class="w-[74px]">
