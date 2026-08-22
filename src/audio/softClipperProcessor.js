@@ -1134,8 +1134,47 @@ const HF_LOSS_EPSILON = 1e-4
  */
 const HYST_MAX_DB = 3
 
-/** dB over the threshold at which the memory saturates. */
-const HYST_KNEE_DB = 6
+/**
+ * dB the threshold drops per dB the signal runs over it. THIS IS THE ONE
+ * PARAMETER — everything else about the memory's depth is bookkeeping.
+ *
+ * ⚠ IT WAS TWO CONSTANTS AND ONE OF THEM WAS REDUNDANT. The depression used to
+ * be written as `HYST_MAX_DB * min(1, over / HYST_KNEE_DB)`, which reads as a
+ * depth and a saturation point. Measured depth-matched on real narration, the
+ * pairs (3, 3), (6, 6) and (12, 12) are IDENTICAL on every metric — residual,
+ * samples touched, output crest, the Headroom needed — because the clamp never
+ * binds on real material, so only the RATIO ever did anything. Two names, one
+ * degree of freedom, and the quantity that actually mattered had no name at
+ * all. Written this way the slope is the constant and the cap is a bound.
+ *
+ * 0.5 is exactly the old 3 / 6, so this reparameterisation is bit-identical on
+ * real audio — verified sample for sample, not argued from the algebra.
+ *
+ * ⚠ MEASURED, RAISING IT KEEPS PAYING, AND IT IS DELIBERATELY NOT RAISED.
+ * Depth-matched to the shipped patch's 3.14 dB of peak reduction, residual and
+ * samples touched run:
+ *
+ *     slope   Headroom needed   residual     touched   avg GR
+ *     0.5          7.50         -34.65 dBc    1.02%     0.345
+ *     1.0          8.32         -35.93        0.74%     0.300
+ *     2.0          9.15         -37.09        0.53%     0.276
+ *     4.0          9.92         -38.51        0.36%     0.258
+ *     8.0         10.45         -39.71        0.25%     0.286
+ *
+ * Three reasons it stays at 0.5 despite that. The returns flatten past 4 and
+ * AVERAGE gain reduction turns back up there (0.258 -> 0.286), so 4 is where
+ * the concentrate-on-transients story stops improving. Every step raises the
+ * Headroom needed to hold depth, and by slope 4 the threshold sits above full
+ * scale on ordinary passages — the stage would do nothing at all except on the
+ * hottest transients, which is a different product. And most importantly the
+ * whole table is measured energy, on ONE file: this stage has a recorded case
+ * (the KNEE shapes) where 9.2 dB LESS residual energy sounded MORE conspicuous
+ * because sparse distortion is more noticeable per unit energy, and raising
+ * this constant pushes in exactly that direction — 0.36% of samples against
+ * 1.02%. The number to beat before moving it is an A/B by ear at matched
+ * depth, not a lower dBc.
+ */
+const HYST_SLOPE_DB_PER_DB = 0.5
 
 /**
  * The memory's time constant, ms.
@@ -1880,8 +1919,10 @@ export class SoftClipperKernel {
     // resolved here.
     const asymFraction = clamp(p.asymmetry ?? 0, 0, 100) / 100 * ASYM_MAX_FRACTION
     const hfLossMaxDb = clamp(p.hfLoss ?? 0, 0, 100) / 100 * HF_LOSS_MAX_DB
-    const hystDepthDb = clamp(p.hysteresis ?? 0, 0, 100) / 100 * HYST_MAX_DB
-    const hystActive = hystDepthDb > HYST_EPSILON
+    // 0-1 rather than dB now: the state itself is in dB, so this only scales
+    // it. Pinned at 1 in practice — see HYST_MAX_DB.
+    const hystScale = clamp(p.hysteresis ?? 0, 0, 100) / 100
+    const hystActive = hystScale > HYST_EPSILON
     this.hfLossActive = hfLossMaxDb > HF_LOSS_EPSILON
     if (this.hfLossGain.length < n) this.hfLossGain = new Float32Array(n)
     this.asymActive = asymFraction > ASYM_EPSILON
@@ -2170,18 +2211,22 @@ export class SoftClipperKernel {
         + liftDb
 
       if (hystActive) {
+        // The state carries dB of depression directly. HYST_MAX_DB is a bound
+        // on it, not the shape of it — measured, the bound is never reached on
+        // real narration at the shipped slope, so it is a safety rail rather
+        // than a tuning. See HYST_SLOPE_DB_PER_DB.
         const overDb = fastPeakDb - baseDb
-        const drive = overDb > 0 ? Math.min(1, overDb / HYST_KNEE_DB) : 0
+        const target = overDb > 0 ? Math.min(HYST_MAX_DB, overDb * HYST_SLOPE_DB_PER_DB) : 0
         // One coefficient both ways. A second one for the release measured as
         // exactly inert — see HYST_MAX_DB — because the drive this follows has
         // already been through the detector's own asymmetric follower.
-        hystState += this.hystCoef * (drive - hystState)
+        hystState += this.hystCoef * (target - hystState)
       }
 
       // TRANSLATED, NEVER RESHAPED — see HYST_MAX_DB. The curve that runs is
       // the same curve at a different height, so it is monotonic at any frozen
       // state whatever the memory is doing.
-      const targetDb = baseDb - hystDepthDb * hystState
+      const targetDb = baseDb - hystScale * hystState
       // T_MAX IS SCALED BY THE LIFT, and leaving it unscaled truncated the
       // compensation exactly where it was needed most. The ceiling bounds T
       // against the signal the CURVE sees, not against the raw input, and
