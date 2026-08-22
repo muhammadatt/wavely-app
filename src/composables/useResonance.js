@@ -5,7 +5,6 @@ import { applyResonanceRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
 import { resolveRefMode, withRefModeDefaults } from '../audio/resonanceParams.js'
-import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
@@ -64,7 +63,6 @@ const resPreview = ref(false)
  */
 const resDelta = ref(false)
 const resReduction = ref(0)
-const resOutputLevels = ref([])
 let meterId = null
 
 /**
@@ -131,10 +129,6 @@ export function useResonance() {
       const nodes = resNodes
       if (nodes) {
         resReduction.value = nodes.getReduction()
-        // Only meter channels the source really has: the splitter is
-        // discrete, so asking for stereo on a mono file adds a dead bar.
-        const chCount = state.currentFile?.channels ?? 1
-        resOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -148,7 +142,6 @@ export function useResonance() {
     }
     resNodes = null
     resReduction.value = 0
-    resOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
@@ -304,7 +297,6 @@ export function useResonance() {
     resPreview,
     resDelta,
     resReduction,
-    resOutputLevels,
     resDisplayFn,
     hasSelection,
     togglePreview,

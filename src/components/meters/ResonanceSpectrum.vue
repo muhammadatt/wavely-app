@@ -244,6 +244,83 @@ let staleMs = 0
 /** Beyond this with no new frame, nothing is playing and the curves fade. */
 const STALE_MS = 300
 
+// ── Display averaging ───────────────────────────────────────────────────────
+
+/**
+ * How long the drawn curves take to reach a new reading, as a time constant.
+ *
+ * THE SAME QUANTITY THE SPECTRUM ANALYZER CALLS "AVERAGING", stated in the unit
+ * that survives a change of frame rate. That slider is an AnalyserNode's
+ * `smoothingTimeConstant`, a per-FFT pole applied once per read — so its
+ * percentage only means anything alongside the interval it is applied over
+ * (there, one animation frame, ~16.7 ms): alpha 0.50 is tau 24 ms, the 0.72
+ * default is 51 ms, and alpha 0.80 is 75 ms.
+ *
+ * This plot is fed from the worklet every 1024 samples (~23 ms) and drawn on
+ * rAF, two rates that need not agree, so a per-frame pole would drift with
+ * either. Holding tau and deriving the coefficient from the elapsed time makes
+ * the settling time the thing that is fixed, which is what the analyzer's knob
+ * is understood to mean even though its own implementation cannot promise it.
+ *
+ * 75 ms = the analyzer at 80% averaging, which is what this was asked for:
+ * unaveraged, the trace steps at the post rate and reads about like 50%.
+ */
+const DISPLAY_TAU_MS = 75
+
+/**
+ * Smoothed copies of the four continuous curves, and the frame view drawn from
+ * them.
+ *
+ * `reductionHeld` is deliberately NOT smoothed and not copied here: it is the
+ * maximum since the previous read, and averaging a maximum is the one operation
+ * that destroys what it is for — a peak landing on a single frame is exactly
+ * the event the hold exists to catch.
+ *
+ * Averaged in dB rather than in magnitude. AnalyserNode does the opposite, and
+ * on a decaying trace the difference shows as a slightly faster fall there than
+ * here; dB is what these arrays already carry, and converting twice per bin per
+ * frame to inherit a detail of somebody else's implementation is not worth it.
+ */
+const SMOOTHED = ['mag', 'reference', 'output', 'reduction']
+let smoothArrays = null
+let smoothView = null
+
+function smoothFrame(frame, dtMs) {
+  const { bins } = frame
+  if (!smoothArrays || smoothArrays.mag.length !== bins) {
+    smoothArrays = {
+      mag: new Float32Array(bins),
+      reference: new Float32Array(bins),
+      output: new Float32Array(bins),
+      reduction: new Float32Array(bins),
+    }
+    // Seeded from the frame, not from zero: a fade up from silence on the first
+    // frame after the window opens would read as the effect starting to work.
+    for (const key of SMOOTHED) smoothArrays[key].set(frame[key])
+    smoothView = { ...smoothArrays }
+  }
+
+  // Frame-rate independent one-pole. Clamped for the same reason the peak hold
+  // clamps its step: a backgrounded tab returns with a dt of seconds, and
+  // 1 - exp(-dt/tau) is 1 there, which would snap the trace rather than average
+  // it — harmless, but it would land on whichever frame the tab woke up on.
+  const coef = 1 - Math.exp(-Math.min(dtMs, 100) / DISPLAY_TAU_MS)
+  for (const key of SMOOTHED) {
+    const dst = smoothArrays[key]
+    const src = frame[key]
+    for (let d = 0; d < bins; d++) dst[d] += (src[d] - dst[d]) * coef
+  }
+
+  // Everything the drawing code reads that is not a smoothed curve — the bin
+  // count, the axis, and the held curve — passes through untouched.
+  smoothView.bins = bins
+  smoothView.minHz = frame.minHz
+  smoothView.maxHz = frame.maxHz
+  smoothView.reductionHeld = frame.reductionHeld
+  return smoothView
+}
+
+
 // ── Frame loop ──────────────────────────────────────────────────────────────
 
 useMeterFrame((dtMs) => {
@@ -302,10 +379,15 @@ function draw(dtMs) {
   drawPlates(ctx, w)
   drawGrid(ctx, w, xFor, minHz, maxHz)
 
-  updatePeaks(frame, dtMs)
-  if (frame) {
-    drawSpectrum(ctx, w, frame, alpha)
-    drawReduction(ctx, w, frame, alpha)
+  // Averaged before anything reads it, so the curves, the peak hold's live
+  // floor and the hotspot readout all describe the same trace. The held curve
+  // inside it is still the kernel's raw maximum — see smoothFrame.
+  const shown = frame ? smoothFrame(frame, dtMs) : null
+
+  updatePeaks(shown, dtMs)
+  if (shown) {
+    drawSpectrum(ctx, w, shown, alpha)
+    drawReduction(ctx, w, shown, alpha)
   }
   drawZones(ctx, w)
 
