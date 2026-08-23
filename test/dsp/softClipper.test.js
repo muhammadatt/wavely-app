@@ -1918,8 +1918,16 @@ test('asymmetry keeps the guarantees the stage is allowed to keep', () => {
 
   // BOUNDED, to a STATED relaxation. The curve's bound is relative to what it
   // sees (x + off); the stage's attenuation is measured against x, and
-  // subtracting the offset afterwards separates the two slightly. See
-  // ASYM_MAX_BOUND_EXCESS_DB — the number is recorded rather than tolerated.
+  // subtracting the offset afterwards separates the two.
+  //
+  // ⚠ AT ASYM_MAX_FRACTION = 1 THIS IS AN EMPIRICAL WORST CASE, NOT A PROOF.
+  // The output past the crossing is at least `t - off`, which at frac 1 is
+  // zero — so the attenuation measured against x has no finite dB bound in
+  // principle. Measured it stays well inside: 1.52 dB over MAX_REDUCTION_DB on
+  // this synthetic probe, and BELOW MAX_REDUCTION_DB entirely on all three
+  // real narrators (worst 5.47 dB at asymmetry 100). The guarantee that IS
+  // provable is the sign-flip one in the next test; this is a regression
+  // tracker with the number recorded.
   const kernel = new SoftClipperKernel(SR)
   kernel.setParams({ ...params, fixedThresholdDb: -40 })
   const o = new Float32Array(probe.length)

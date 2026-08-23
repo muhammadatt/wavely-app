@@ -824,7 +824,22 @@ const RESIDUAL_FLOOR_DBC = -120
  * OPPOSE the skew, which is one pass of a third moment to measure — deliberately
  * left for its own change rather than smuggled in here.
  */
-export const ASYM_MAX_FRACTION = 0.35
+/**
+ * ⚠ 1 IS A PROVABLE CEILING, NOT A TASTE. The offset is `frac * charRef` and
+ * charRef is clamped to T, so `off <= frac * t`. The curve is monotone with
+ * f(t) = t, so any input past the crossing comes out at least `t - off` — non-
+ * negative exactly when `off <= t`, i.e. when `frac <= 1`. Above that the
+ * stage FOLDS: measured at frac 1.2, real samples change sign. That is the one
+ * failure this control was built to avoid, so the fraction is pinned at the
+ * largest value that cannot cause it.
+ *
+ * ⚠ IT WAS 0.35, and the re-reference is why it moved. The offset used to
+ * scale to T; it now scales to the speech level, which sits a Headroom below
+ * T, so the same fraction buys a smaller offset. At 0.35 against the new
+ * reference the whole knob spanned about **1 dB** of added content on three
+ * real narrators — a control that does nothing. At 1 it spans 6-14 dB.
+ */
+export const ASYM_MAX_FRACTION = 1
 
 /** Below this the offset is treated as zero and the whole path is bypassed. */
 const ASYM_EPSILON = 1e-4
@@ -853,7 +868,7 @@ const ASYM_EPSILON = 1e-4
  * `|x + off|` exceeds T, by which point x is large enough to survive. Zero
  * flips across a full sweep at maximum asymmetry, and it is its own test.
  */
-export const ASYM_MAX_BOUND_EXCESS_DB = 0.25
+export const ASYM_MAX_BOUND_EXCESS_DB = 1.6
 
 /**
  * Time constant for the waveform-skew tracker that chooses the offset's sign.
@@ -1036,7 +1051,7 @@ const DC_BLOCK_HZ = 2
 const HF_LOSS_CORNER_HZ = 4000
 
 /** Shelf depth at full knob and full drive, dB. */
-const HF_LOSS_MAX_DB = 6
+const HF_LOSS_MAX_DB = 12
 
 /**
  * dB over the threshold at which the loss reaches tanh(1) — about 76% — of its
@@ -2387,8 +2402,17 @@ export class SoftClipperKernel {
       // whole file — measured, 121 dB of attenuation before the clamp was
       // added. A medium whose colour is referenced above the level the signal
       // is allowed to reach is incoherent, so the reference cannot exceed T.
-      charRefDb = Math.min(speechRefDb, targetDb)
-      charRef[i] = dbToLin(charRefDb)
+      // ⚠ CLAMPED TO T ITSELF, not to targetDb, and that is what makes the
+      // no-sign-flip guarantee provable rather than measured. The asymmetry
+      // offset is `frac * charRef`; the curve is monotone with f(t) = t, so
+      // for any input above the crossing the output is at least `t - off`.
+      // With `off <= t` that is non-negative and the sample cannot change
+      // sign. `off <= t` requires BOTH `charRef <= t` and `frac <= 1`, which
+      // is exactly why ASYM_MAX_FRACTION is 1 and not a matter of taste —
+      // measured, 1.2 folds. targetDb is the pre-clamp value and can exceed
+      // T when T_MAX binds, so clamping to it is not sufficient.
+      charRef[i] = Math.min(dbToLin(speechRefDb), T[i])
+      charRefDb = linToDb(charRef[i])
 
       // HF loss, driven by how far the envelope sits ABOVE the threshold — so
       // it is level-invariant, and so it is exactly absent on material the
