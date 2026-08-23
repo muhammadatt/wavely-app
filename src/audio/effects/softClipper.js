@@ -53,11 +53,10 @@ export const SCOPE_SECONDS = 4
  *     just ahead of the curve — see SOFTEN_REF. Softens the top end AND reduces
  *     what the curve then has to do; contributes no peak reduction. ⚠ The one
  *     control that forfeits "unity below T" when engaged; 0 bypasses it
- *   hysteresis 0-100, short-term memory of recent drive — see HYST_MAX_DB. It
- *     modulates the THRESHOLD rather than the curve, which is what keeps the
- *     monotonicity guarantee intact. A character control: matched on output
- *     peak it costs about 1 dB of residual rather than saving any. 0 leaves
- *     the threshold untouched
+ *
+ * `hysteresis` is absent from this list on purpose: it is pinned at 100 in the
+ * kernel and has no control — see HYST_MAX_DB. Forwarding the key would let an
+ * absent value overwrite the pin with undefined, so it is deliberately omitted.
  */
 export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
 
@@ -73,7 +72,6 @@ export function toKernelParams(params) {
     asymmetry: params.asymmetry,
     hfLoss: params.hfLoss,
     soften: params.soften,
-    hysteresis: params.hysteresis,
   }
 }
 

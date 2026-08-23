@@ -20,7 +20,6 @@ const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
 const asymmetry = ref(SOFT_CLIPPER_DEFAULTS.asymmetry)
 const hfLoss = ref(SOFT_CLIPPER_DEFAULTS.hfLoss)
 const soften = ref(SOFT_CLIPPER_DEFAULTS.soften)
-const hysteresis = ref(SOFT_CLIPPER_DEFAULTS.hysteresis)
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
@@ -49,7 +48,6 @@ function currentParams() {
     asymmetry: asymmetry.value,
     hfLoss: hfLoss.value,
     soften: soften.value,
-    hysteresis: hysteresis.value,
   }
 }
 
@@ -161,7 +159,6 @@ export function useSoftClipper() {
   const syncAsymmetry = (v) => { asymmetry.value = v; pushParam('asymmetry', v) }
   const syncHfLoss = (v) => { hfLoss.value = v; pushParam('hfLoss', v) }
   const syncSoften = (v) => { soften.value = v; pushParam('soften', v) }
-  const syncHysteresis = (v) => { hysteresis.value = v; pushParam('hysteresis', v) }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => { fixedThresholdDb.value = v; pushParam('fixedThresholdDb', v) }
 
@@ -237,7 +234,6 @@ export function useSoftClipper() {
     asymmetry,
     hfLoss,
     soften,
-    hysteresis,
     clipperPreview,
     clipperReduction,
     clipperEngagedPct,
@@ -255,7 +251,6 @@ export function useSoftClipper() {
     syncAsymmetry,
     syncHfLoss,
     syncSoften,
-    syncHysteresis,
     syncOutputTrim,
     syncFixedThreshold,
     setThresholdMode,

@@ -1084,8 +1084,29 @@ const HF_LOSS_EPSILON = 1e-4
  * frozen state the transfer curve is monotonic. That is what translating T
  * guarantees, and it is what the tests check.
  *
- * ⚠ IT WAS PINNED AT 100 FOR ONE REVISION ON A BROKEN MEASUREMENT, and the
- * pin is reverted. The evidence was a "depth-matched" sweep that held PEAK
+ * ⚠ IT IS PINNED AT 100 AND HAS NO KNOB — the SECOND time it was pinned, on
+ * different evidence from the first, after listening.
+ *
+ * THE FIRST PIN WAS WRONG AND IS DESCRIBED BELOW; this one rests on a matched-
+ * output-peak comparison and on hearing it. At matched output peak the memory
+ * costs about 1 dB of total residual, but that total hides what it does: it
+ * moves **2.6 dB of distortion OFF sustained speech and 1.3 dB ONTO onsets**
+ * (onsets −28.54 → −27.24 dBc, sustained −50.50 → −53.08, onset advantage
+ * 21.97 → 25.84 dB). Sustained speech is where distortion is most exposed, so
+ * a worse total with a better distribution is a reasonable trade — and the
+ * A/B confirmed it does no harm, if modestly.
+ *
+ * ⚠ PINNING IT MOVES THE DEFAULT HEADROOM 6.5 → 7.0, and this time the offset
+ * is measured on OUTPUT PEAK rather than on peak gain reduction. The exact
+ * match is 7.155; 7.0 is the step-grid value and lands the stock patch at
+ * −3.095 dBFS against today's −2.986, a difference of 0.11 dB. ⚠ THE FIRST
+ * PIN MOVED IT TO 7.5 ON THE PEAK-GR MATCH, which overstated the offset by a
+ * full dB — the same error that invalidated the pin itself.
+ *
+ * Cost of leaving it on: the kernel runs at **54x realtime against 60x**
+ * with it bypassed, measured over 60 s of audio in 128-sample blocks.
+ *
+ * ⚠ THE FIRST PIN WAS MADE ON A BROKEN MEASUREMENT and was reverted. The evidence was a "depth-matched" sweep that held PEAK
  * GAIN REDUCTION constant — the deepest reduction the curve applied at any one
  * instant. That is not what this stage does. Its job is peak CONTROL, and the
  * quantity that measures it is the OUTPUT PEAK. The two come apart precisely
@@ -1276,12 +1297,15 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // (The ungated lift cost 0.36 dB and did argue for a move; the gate removed
   // most of the shortfall along with the over-compensation that caused it.)
   //
-  // ⚠ IT WENT TO 7.5 FOR ONE REVISION alongside the hysteresis pin and came
-  // straight back, because the measurement that justified the pin matched on
-  // peak gain reduction rather than on output peak — see HYST_MAX_DB. With the
-  // pin reverted there is nothing to compensate for, and every figure above is
-  // on this scale again.
-  headroomDb: 6.5,
+  // ⚠ IT IS 7.0 NOW, and every figure above refers to the 6.5 scale.
+  // Hysteresis is pinned at 100 (see HYST_MAX_DB) and is worth 0.66 dB of
+  // effective headroom measured on OUTPUT PEAK — the exact match is 7.155, and
+  // 7.0 is the step-grid value, landing the stock patch at −3.095 dBFS against
+  // 6.5/hysteresis-0's −2.986. ⚠ An earlier revision moved this to 7.5 for the
+  // same reason and was wrong by a full dB, because it matched on peak gain
+  // reduction rather than on output peak. This default and the shape table are
+  // still coupled.
+  headroomDb: 7.0,
   emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
@@ -1297,10 +1321,9 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // which is what keeps "unity below T" — see SOFTEN_REF, the one guarantee this
   // control forfeits when engaged.
   soften: 0,
-  // 0-100, share of HYST_MAX_DB. 0 leaves the threshold exactly as computed,
-  // so the shipped patch is bit-identical to the build before this existed.
-  // A character control, not a quality one — see HYST_MAX_DB.
-  hysteresis: 0,
+  // 0-100, share of HYST_MAX_DB. PINNED AT 100 and not exposed — see
+  // HYST_MAX_DB. Kept as a param only so the tests can run 0 against 100.
+  hysteresis: 100,
 }
 
 function clamp(v, lo, hi) {

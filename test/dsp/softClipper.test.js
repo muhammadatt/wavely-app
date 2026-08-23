@@ -2433,24 +2433,32 @@ test('hysteresis keeps the bound, never boosts, and is absent at zero', () => {
   }
   assert.ok(peakOut <= peakIn + 1e-6, `hysteresis boosted the peak ${peakIn} -> ${peakOut}`)
 
-  // ABSENT AT ZERO, not merely flat — the same rule the emphasis pair and the
-  // asymmetry offset follow, so the shipped patch is bit-identical to the
-  // build before this existed.
-  //
-  // ⚠ IT WAS PINNED AT 100 FOR ONE REVISION and the pin is reverted: the
-  // measurement behind it matched on peak gain reduction rather than on output
-  // peak, and re-matched on output peak the memory costs about 1 dB of
-  // residual rather than saving 2. See HYST_MAX_DB. What survives is a
-  // character control, so the default is off.
-  const withParam = processSoftClipperBuffer([sig], SR,
-    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', hysteresis: 0 }).channelData[0]
-  const without = processSoftClipperBuffer([sig], SR,
-    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }).channelData[0]
-  for (let i = 0; i < sig.length; i++) {
-    assert.equal(withParam[i], without[i], `hysteresis 0 altered sample ${i}`)
+  // PINNED AT 100 AND OFF THE PANEL — the second pin, on different evidence
+  // from the first. At matched OUTPUT PEAK it costs ~1 dB of total residual
+  // while moving 2.6 dB of distortion off sustained speech onto onsets, and
+  // listening confirmed it does no harm. See HYST_MAX_DB, which also records
+  // why the first pin was wrong.
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hysteresis, 100,
+    'hysteresis is no longer pinned on')
+  // The product surface reaches the kernel through `toKernelParams`, which
+  // deliberately omits the key. That file cannot be imported here (it pulls a
+  // Vite worker URL), so what is pinned instead is the property that makes
+  // omitting it safe: an absent key leaves the pin on.
+  const absent = new SoftClipperKernel(SR)
+  absent.setParams({ headroomDb: 7.0, emphasisDb: 6, shape: 'tanh3' })
+  assert.equal(absent.params.hysteresis, 100,
+    'an absent hysteresis key unpinned the memory')
+  // The bypass path stays reachable from the kernel, because the tests above
+  // measure 0 against 100.
+  const off = new SoftClipperKernel(SR)
+  off.setParams({ ...params, hysteresis: 0 })
+  const oo = new Float32Array(sig.length)
+  for (let o2 = 0; o2 < sig.length; o2 += 128) {
+    const len = Math.min(128, sig.length - o2)
+    off.process([sig.subarray(o2, o2 + len)], [oo.subarray(o2, o2 + len)], len)
   }
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hysteresis, 0,
-    'the shipped default engages hysteresis')
+  assert.ok(off.getMetering().maxReductionDb < kernel.getMetering().maxReductionDb,
+    'hysteresis 0 did not reduce less than hysteresis 100 at the same Headroom')
 })
 
 test('hysteresis is level-invariant', () => {
