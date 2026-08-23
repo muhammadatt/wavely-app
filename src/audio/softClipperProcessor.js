@@ -245,6 +245,7 @@
  */
 
 import { LookaheadLimiter } from './dsp/lookaheadLimiter.js'
+import { BandSplitLimiter } from './dsp/bandSplitLimiter.js'
 import {
   Oversampler, OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES,
   COMPRESSOR_OVERSAMPLE, COMPRESSOR_OVERSAMPLE_8X,
@@ -1851,6 +1852,19 @@ export class SoftClipperKernel {
     this.limiterHalfWidth = Math.max(1, Math.round((LIMITER_LOOKAHEAD_MS / 1000) * sampleRate))
     this.limiterActive = false
     this.limiterScratch = new Float32Array(0)
+    /**
+     * Research option, NOT a parameter: crossover frequencies for a band-split
+     * limiter in place of the broadband one. Deliberately in `options` rather
+     * than in `params` — the apply path renders from params, and a limiter
+     * topology that changes the stage's latency has no business being one
+     * message away from the timeline. Null keeps the shipping broadband path.
+     */
+    this.limiterCrossovers = Array.isArray(options.limiterCrossovers) && options.limiterCrossovers.length
+      ? options.limiterCrossovers.slice()
+      : null
+    this.limiterSafety = options.limiterSafety === true
+    this.limiterCeilingFactor = options.limiterCeilingFactor ?? 1
+    this.limiterLatency = 2 * this.limiterHalfWidth * (this.limiterCrossovers && this.limiterSafety ? 2 : 1)
     this.osProfile = options.oversample === 8 ? COMPRESSOR_OVERSAMPLE_8X : COMPRESSOR_OVERSAMPLE
     this.osFactor = this.osProfile.factor
     this.osLatency = this.osProfile.latencySamples
@@ -2037,7 +2051,7 @@ export class SoftClipperKernel {
     // ⚠ VARIABLE. The limiter's delay is only present while it is engaged, so
     // this changes with the parameter — see LIMITER_MAX_ABOVE_DB. The offline
     // path reads it per render and is correct either way.
-    return this.osLatency + (this.limiterActive ? 2 * this.limiterHalfWidth : 0)
+    return this.osLatency + (this.limiterActive ? this.limiterLatency : 0)
   }
 
   /**
@@ -2158,7 +2172,12 @@ export class SoftClipperKernel {
     const limiterAmount = clamp(p.limiter ?? 0, 0, 100) / 100
     this.limiterActive = limiterAmount > 1e-4
     // The limiter aims this far ABOVE T; the knob closes the gap.
+    // ⚠ THE CEILING FACTOR IS APPLIED HERE FOR THE BROADBAND PATH ONLY —
+    // BandSplitLimiter applies its own internally, per band. Both are research
+    // options; at the shipped default (no crossovers, factor 1) this is exactly
+    // the expression it replaced.
     const limiterCeilFactor = dbToLin(LIMITER_MAX_ABOVE_DB * (1 - limiterAmount))
+      * (this.limiterCrossovers ? 1 : this.limiterCeilingFactor)
     const driveAmount = clamp(p.drive ?? 0, 0, 100)
     // ⚠ TEMPORARY: `driveRatios` lets the panel move the split by ear — see
     // softClipperTuning.js. Absent, which is the shipped case, the constants
@@ -2572,7 +2591,11 @@ export class SoftClipperKernel {
     while (this.softenState.length < nOut) this.softenState.push(0)
     while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler(this.osProfile))
     if (this.limiterActive) {
-      while (this.limiters.length < nOut) this.limiters.push(new LookaheadLimiter(this.limiterHalfWidth))
+      while (this.limiters.length < nOut) {
+        this.limiters.push(this.limiterCrossovers
+          ? new BandSplitLimiter(this.limiterHalfWidth, this.limiterCrossovers, this.sampleRate, { safety: this.limiterSafety, ceilingFactor: this.limiterCeilingFactor })
+          : new LookaheadLimiter(this.limiterHalfWidth))
+      }
       if (this.limiterScratch.length < n) this.limiterScratch = new Float32Array(n)
     }
     // ⚠ THE OVERSAMPLER'S LATENCY ONLY, not the stage's. The dry side of this
