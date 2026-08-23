@@ -5,6 +5,7 @@ import { applySoftClipperRegion, computePeakCache } from '../audio/processing.js
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { DEFAULT_DRIVE_RATIOS, driveTuningEnabled, clampRatio } from '../audio/softClipperTuning.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
@@ -17,6 +18,11 @@ const thresholdMode = ref(SOFT_CLIPPER_DEFAULTS.thresholdMode)
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
 const drive = ref(SOFT_CLIPPER_DEFAULTS.drive)
+// ⚠ TEMPORARY: the Drive split, adjustable by ear behind a flag. See
+// softClipperTuning.js — this and the three knobs come out once the ratios
+// are settled.
+const tuningOn = driveTuningEnabled()
+const driveRatios = ref({ ...DEFAULT_DRIVE_RATIOS })
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
@@ -42,6 +48,7 @@ function currentParams() {
     fixedThresholdDb: fixedThresholdDb.value,
     shape: shape.value,
     drive: drive.value,
+    ...(tuningOn ? { driveRatios: { ...driveRatios.value } } : {}),
   }
 }
 
@@ -150,6 +157,10 @@ export function useSoftClipper() {
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
   const syncDrive = (v) => { drive.value = v; pushParam('drive', v) }
+  const syncRatio = (name, v) => {
+    driveRatios.value = { ...driveRatios.value, [name]: clampRatio(v) }
+    pushParam('driveRatios', { ...driveRatios.value })
+  }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => { fixedThresholdDb.value = v; pushParam('fixedThresholdDb', v) }
 
@@ -222,6 +233,8 @@ export function useSoftClipper() {
     fixedThresholdDb,
     shape,
     drive,
+    tuningOn,
+    driveRatios,
     clipperPreview,
     clipperReduction,
     clipperEngagedPct,
@@ -236,6 +249,7 @@ export function useSoftClipper() {
     toggleDelta,
     syncHeadroom,
     syncDrive,
+    syncRatio,
     syncOutputTrim,
     syncFixedThreshold,
     setThresholdMode,

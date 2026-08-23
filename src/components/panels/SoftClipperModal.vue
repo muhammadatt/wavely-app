@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive,
+  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive, tuningOn, driveRatios,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncRatio, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -360,6 +360,44 @@ const SCOPE_H = 236
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             gain match for A/B
           </p>
+        </div>
+      </div>
+
+      <!-- ⚠ TEMPORARY TUNING ROW — see softClipperTuning.js. Hidden unless
+           ?driveTuning=1 (or the localStorage key) is set, so a half-finished
+           tuning session cannot reach a user and the shipped panel stays two
+           knobs. The amber badge is the same signal VoiceRx's baseline
+           override uses, for the same reason: an override that is not visibly
+           an override is how a measurement gets taken against the wrong
+           build. This row and the driveRatios param come out once the ratios
+           are chosen. -->
+      <div v-if="tuningOn" class="mt-[16px] pt-[12px]" style="border-top:1px dashed rgba(255,176,32,.35)">
+        <div class="flex items-center justify-center gap-[8px] mb-[8px]">
+          <span style="font:700 8px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,176,32,.9)">
+            ⚠ DRIVE TUNING — NOT SHIPPED
+          </span>
+          <span style="font:600 8px ui-monospace,monospace;color:rgba(255,255,255,.45)">
+            {{ driveRatios.asymmetry.toFixed(2) }} / {{ driveRatios.hfLoss.toFixed(2) }} / {{ driveRatios.soften.toFixed(2) }}
+          </span>
+        </div>
+        <div class="flex justify-center gap-[16px]">
+          <div class="w-[74px]" v-for="r in [
+            { key: 'asymmetry', label: 'Asym x', caption: 'even harmonics' },
+            { key: 'hfLoss', label: 'HF Loss x', caption: 'fixed shelf' },
+            { key: 'soften', label: 'Soften x', caption: 'least predictable' },
+          ]" :key="r.key">
+            <Knob
+              :model-value="driveRatios[r.key]"
+              @update:model-value="v => syncRatio(r.key, v)"
+              :min="0" :max="1.5" :step="0.05"
+              :label="r.label" accent="#ffb020" :format-value="v => v.toFixed(2)"
+              :value-font-px="13"
+              :disabled="!clipperPreview"
+            />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ r.caption }}
+            </p>
+          </div>
         </div>
       </div>
 

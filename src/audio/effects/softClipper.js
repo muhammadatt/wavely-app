@@ -61,6 +61,8 @@ export function toKernelParams(params) {
     fixedThresholdDb: params.fixedThresholdDb,
     shape: params.shape,
     drive: params.drive,
+    // ⚠ TEMPORARY tuning override — see softClipperTuning.js.
+    driveRatios: params.driveRatios,
   }
 }
 

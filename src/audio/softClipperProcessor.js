@@ -2096,11 +2096,17 @@ export class SoftClipperKernel {
     // DRIVE_ASYM_RATIO. An explicit key still overrides, which is how the
     // tests reach each of them individually.
     const driveAmount = clamp(p.drive ?? 0, 0, 100)
-    const asymFraction = clamp(p.asymmetry ?? driveAmount * DRIVE_ASYM_RATIO, 0, 100) / 100 * ASYM_MAX_FRACTION
-    const hfLossMaxDb = clamp(p.hfLoss ?? driveAmount * DRIVE_HF_LOSS_RATIO, 0, 100) / 100 * HF_LOSS_MAX_DB
+    // ⚠ TEMPORARY: `driveRatios` lets the panel move the split by ear — see
+    // softClipperTuning.js. Absent, which is the shipped case, the constants
+    // are used and this costs nothing. It comes out with the tuning panel.
+    const ratios = p.driveRatios
+    const asymFraction = clamp(p.asymmetry
+      ?? driveAmount * (ratios?.asymmetry ?? DRIVE_ASYM_RATIO), 0, 100) / 100 * ASYM_MAX_FRACTION
+    const hfLossMaxDb = clamp(p.hfLoss
+      ?? driveAmount * (ratios?.hfLoss ?? DRIVE_HF_LOSS_RATIO), 0, 100) / 100 * HF_LOSS_MAX_DB
     // 0-1 rather than dB now: the state itself is in dB, so this only scales
     // it. Pinned at 1 in practice — see HYST_MAX_DB.
-    const softenAmount = clamp(p.soften ?? driveAmount * DRIVE_SOFTEN_RATIO, 0, 100) / 100
+    const softenAmount = clamp(p.soften ?? driveAmount * (ratios?.soften ?? DRIVE_SOFTEN_RATIO), 0, 100) / 100
     const softenActive = softenAmount > SOFTEN_EPSILON
     const softenScale = softenActive ? Math.pow(SOFTEN_MIN_SCALE, softenAmount) : 1
     const hystScale = clamp(p.hysteresis ?? 0, 0, 100) / 100
