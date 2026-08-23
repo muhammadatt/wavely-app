@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import {
   DEFAULT_DRIVE_RATIOS, driveTuningEnabled, clampRatio,
 } from '../../src/audio/softClipperTuning.js'
+import {
+  SOFT_CLIPPER_DEFAULTS, toKernelParams,
+} from '../../src/audio/effects/softClipperParams.js'
 
 test('the tuning panel is off unless explicitly asked for', () => {
   // ⚠ THE POINT OF THE FLAG. These ratios are scaffolding; the failure to
@@ -37,4 +40,44 @@ test('the seeded ratios match what the kernel ships', async () => {
   assert.equal(DEFAULT_DRIVE_RATIOS.hfLoss, read('DRIVE_HF_LOSS_RATIO'))
   assert.equal(DEFAULT_DRIVE_RATIOS.soften, read('DRIVE_SOFTEN_RATIO'))
   assert.ok(kernel.SOFT_CLIPPER_KERNEL_DEFAULTS.drive === 0)
+})
+
+test('every param the panel can set survives the setParam guard', () => {
+  // ⚠ THE BUG THIS EXISTS FOR, and it was found by ear rather than by the
+  // suite. `createSoftClipper.setParam` guards with `name in params`, where
+  // params is a copy of SOFT_CLIPPER_DEFAULTS — so a key missing from that
+  // object is not rejected, it is SILENTLY DROPPED. `driveRatios` was missing,
+  // the ratio knobs pushed updates that never reached the kernel, the fixed
+  // constants ran unchanged, and the panel showed values that described
+  // nothing. A whole listening session was spent tuning a dead control.
+  //
+  // The guard is worth keeping — it stops a typo'd param name from reaching
+  // the worklet — so what has to be pinned is that the panel's surface and the
+  // guard's allowlist agree.
+  for (const key of ['headroomDb', 'outputTrimDb', 'thresholdMode',
+    'fixedThresholdDb', 'shape', 'drive', 'driveRatios']) {
+    assert.ok(key in SOFT_CLIPPER_DEFAULTS,
+      `${key} is not in SOFT_CLIPPER_DEFAULTS — setParam will drop it silently`)
+  }
+})
+
+test('toKernelParams forwards exactly what the kernel reads, and nothing pinned', () => {
+  const out = toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, drive: 40, driveRatios: { asymmetry: 0 } })
+  assert.equal(out.drive, 40)
+  assert.deepEqual(out.driveRatios, { asymmetry: 0 })
+  // The pinned params must NOT be forwarded: an absent key would overwrite the
+  // kernel's pin with undefined. See HYST_MAX_DB and the emphasis pin.
+  assert.ok(!('hysteresis' in out), 'hysteresis is forwarded, which would unpin it')
+  assert.ok(!('emphasisDb' in out), 'emphasisDb is forwarded, which would unpin it')
+})
+
+test('a zeroed ratio actually zeroes its component', () => {
+  // The failure mode the ear caught: ratios at 0 still colouring. `??` only
+  // falls back on null/undefined, so a real 0 must survive to the kernel.
+  assert.equal(clampRatio(0), 0)
+  const out = toKernelParams({
+    ...SOFT_CLIPPER_DEFAULTS, drive: 100,
+    driveRatios: { asymmetry: 0, hfLoss: 0, soften: 0 },
+  })
+  assert.deepEqual(out.driveRatios, { asymmetry: 0, hfLoss: 0, soften: 0 })
 })

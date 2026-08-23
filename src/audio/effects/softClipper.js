@@ -13,7 +13,8 @@
  */
 
 import { ensureSoftClipperWorklet } from '../softClipperWorkletLoader.js'
-import { SOFT_CLIPPER_LATENCY_SAMPLES, SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
+import { SOFT_CLIPPER_LATENCY_SAMPLES } from '../softClipperProcessor.js'
+import { SOFT_CLIPPER_DEFAULTS, toKernelParams } from './softClipperParams.js'
 import { createLevelTap } from './levelTap.js'
 
 export { SOFT_CLIPPER_LATENCY_SAMPLES }
@@ -27,44 +28,11 @@ export { SOFT_CLIPPER_LATENCY_SAMPLES }
  */
 export const SCOPE_SECONDS = 4
 
-/**
- * DERIVED from the kernel's own defaults rather than restated here.
- *
- * These were a second literal listing the same five values, which is one
- * careless edit away from the preview and the applied audio running different
- * settings — silently, since every value either object could hold is valid.
- * The kernel is the source of truth; the panel reads this.
- *
- *   headroomDb 4-16, primary control — lower means more clipping
- *   drive 0-100, the whole character group behind one control — asymmetry,
- *     HF Loss and Soften at fixed internal ratios. See DRIVE_ASYM_RATIO
- *   outputTrimDb ±6, post-stage gain match for A/B
- *   thresholdMode 'adaptive' | 'fixed'
- *   fixedThresholdDb, used only in 'fixed' mode
- *   shape 'tanh2' | 'tanh3' | 'tanh4', the knee — see SHAPE_EXPONENT and
- *     SHAPE_ANCHOR_DB (the positions are depth-matched, so this changes
- *     character rather than how much the stage does)
- *
- * `emphasisDb` is absent too: it is pinned at 3 in the kernel. `hysteresis` is
- * absent on purpose: it is pinned at 100 in the
- * kernel and has no control — see HYST_MAX_DB. Forwarding the key would let an
- * absent value overwrite the pin with undefined, so it is deliberately omitted.
- */
-export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
-
-/** Params are already kernel-shaped — no renaming needed unlike FET1176/LA2A. */
-export function toKernelParams(params) {
-  return {
-    headroomDb: params.headroomDb,
-    outputTrimDb: params.outputTrimDb,
-    thresholdMode: params.thresholdMode,
-    fixedThresholdDb: params.fixedThresholdDb,
-    shape: params.shape,
-    drive: params.drive,
-    // ⚠ TEMPORARY tuning override — see softClipperTuning.js.
-    driveRatios: params.driveRatios,
-  }
-}
+// The param contract lives in its own module so it can be imported under node.
+// ⚠ THIS FILE CANNOT BE: it pulls a Vite `?worker&url` specifier that only the
+// bundler resolves, which is exactly why a param silently dropped by
+// `setParam`'s guard was invisible to the test suite until someone heard it.
+export { SOFT_CLIPPER_DEFAULTS, toKernelParams } from './softClipperParams.js'
 
 export function createSoftClipper(audioContext) {
   const input = audioContext.createGain()
