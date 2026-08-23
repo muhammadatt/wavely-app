@@ -37,6 +37,7 @@ const DOC_FIELDS = new Set([
   'currentFile', 'selectedPreset', 'selectedOutputProfile', 'processingReport',
   'isProcessing', 'processingMessage', 'processingStage', 'processingProgress',
   'undoCount', 'redoCount', 'status', 'name',
+  'revision', 'savedRevision',
 ])
 
 // Returned for document fields when no document is open. The empty segments
@@ -61,6 +62,8 @@ const DOC_FIELD_FALLBACKS = {
   redoCount: 0,
   status: 'empty',
   name: '',
+  revision: 0,
+  savedRevision: 0,
 }
 
 // App-level state — everything that is not per-document.
@@ -105,11 +108,27 @@ const peakCacheVersion = ref(0)
 // Map<docId, Set<bufferId>> — which buffers each document brought into the pool.
 const docBuffers = new Map()
 
+// Map<docId, FileSystemFileHandle> — where each document last saved to.
+//
+// Held outside the reactive tree deliberately: a handle is a host object with
+// internal slots, and calling createWritable() through a Vue proxy of one
+// throws "Illegal invocation". Same reason the buffer pool lives out here.
+const docSaveTargets = new Map()
+
+// Monotonic across every document, so a revision number identifies a timeline
+// state uniquely and for the life of the session. A per-document counter would
+// do for dirty-checking, but a global one means a stale revision can never
+// collide with a live one after an undo/redo shuffle.
+let revisionSeq = 0
+
 // Map<docId, { undo: HistoryEntry[], redo: HistoryEntry[] }>, where a
-// HistoryEntry is `{ segments, label }` — the timeline as it stood *before* an
-// operation, tagged with the name of the operation that displaced it. The label
-// is what lets undo say which edit it just took back rather than only that
-// something was undone; an entry with no label falls back to a bare "Undone".
+// HistoryEntry is `{ segments, label, revision }` — the timeline as it stood
+// *before* an operation, tagged with the name of the operation that displaced
+// it. The label is what lets undo say which edit it just took back rather than
+// only that something was undone; an entry with no label falls back to a bare
+// "Undone". The revision travels with the segments so undoing back to the state
+// that was last saved reports the document clean again — comparing stack depth
+// instead cannot do that, because the 50-entry cap shifts the bottom off.
 // Held outside the reactive tree: these are up to 50 full segment-array clones
 // per document, and deep-reactive wrapping them is pure cost — nothing renders
 // from history directly. The reactive `undoCount`/`redoCount` on the document
@@ -217,9 +236,10 @@ export function useEditorState() {
     const doc = activeDocument.value
     if (!doc) return
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label })
+    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
+    doc.revision = ++revisionSeq
     doc.undoCount = h.undo.length
     doc.redoCount = 0
   }
@@ -233,8 +253,9 @@ export function useEditorState() {
     // The label travels with the state it belongs to: the entry now going onto
     // the redo stack is the result of that same operation, so redoing it can
     // name it too.
-    h.redo.push({ segments: cloneSegments(doc.segments), label: entry.label })
+    h.redo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
     doc.segments = entry.segments
+    doc.revision = entry.revision
     doc.selection = null
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
@@ -247,8 +268,9 @@ export function useEditorState() {
     const h = historyFor(doc.id)
     if (h.redo.length === 0) return
     const entry = h.redo.pop()
-    h.undo.push({ segments: cloneSegments(doc.segments), label: entry.label })
+    h.undo.push({ segments: cloneSegments(doc.segments), label: entry.label, revision: doc.revision })
     doc.segments = entry.segments
+    doc.revision = entry.revision
     doc.selection = null
     doc.undoCount = h.undo.length
     doc.redoCount = h.redo.length
@@ -282,6 +304,7 @@ export function useEditorState() {
   function makeDocument(name, audioBuffer) {
     const docId = uuidv4()
     const bufferId = uuidv4()
+    const openedAt = ++revisionSeq
 
     const segment = {
       id: uuidv4(),
@@ -317,6 +340,12 @@ export function useEditorState() {
       processingProgress: 0,
       undoCount: 0,
       redoCount: 0,
+      // A freshly imported document matches the bytes it was read from, so it
+      // opens clean — both counters start on the same revision. "Never saved
+      // *by us*" is a different question, and it is answered by the absence of
+      // a save target, not by this pair.
+      revision: openedAt,
+      savedRevision: openedAt,
     }
   }
 
@@ -350,10 +379,37 @@ export function useEditorState() {
     appState.activeDocumentId = docId
   }
 
-  /** True when the document has edits that closing it would discard. */
+  /**
+   * True when the document has edits that closing it would discard.
+   *
+   * This is the *saved* question, not the *edited* one: a document edited and
+   * then written to disk is clean, and so is one undone back to the state it
+   * was saved in. Both were false under the old "has any undo history" test,
+   * which could only ever go one way.
+   */
   function documentHasUnsavedWork(docId) {
-    const h = docHistory.get(docId)
-    return !!h && h.undo.length > 0
+    const doc = getDocument(docId)
+    return !!doc && doc.revision !== doc.savedRevision
+  }
+
+  /** True when any open document has unsaved edits. */
+  const anyUnsavedWork = computed(() =>
+    appState.documents.some(d => d.revision !== d.savedRevision)
+  )
+
+  /** Record that the document's current timeline is what's now on disk. */
+  function markDocumentSaved(docId) {
+    const doc = getDocument(docId)
+    if (doc) doc.savedRevision = doc.revision
+  }
+
+  /** The file handle this document last saved to, or undefined. */
+  function getSaveTarget(docId) {
+    return docSaveTargets.get(docId)
+  }
+
+  function setSaveTarget(docId, handle) {
+    docSaveTargets.set(docId, handle)
   }
 
   function closeDocument(docId) {
@@ -379,6 +435,7 @@ export function useEditorState() {
     }
     docBuffers.delete(docId)
     docHistory.delete(docId)
+    docSaveTargets.delete(docId)
 
     const wasActive = appState.activeDocumentId === docId
     appState.documents.splice(idx, 1)
@@ -527,9 +584,10 @@ export function useEditorState() {
     // Undo must land on the document being modified, which is not necessarily
     // the active one — a preset job can finish after the user switched tabs.
     const h = historyFor(doc.id)
-    h.undo.push({ segments: cloneSegments(doc.segments), label })
+    h.undo.push({ segments: cloneSegments(doc.segments), label, revision: doc.revision })
     if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
     h.redo.length = 0
+    doc.revision = ++revisionSeq
     doc.undoCount = h.undo.length
     doc.redoCount = 0
 
@@ -725,6 +783,10 @@ export function useEditorState() {
     reorderDocument,
     cycleDocument,
     documentHasUnsavedWork,
+    anyUnsavedWork,
+    markDocumentSaved,
+    getSaveTarget,
+    setSaveTarget,
 
     // Edit operations
     performTrimToSelection,

@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
+import { useFileSave } from '../composables/useFileSave.js'
 import BaseButton from './ui/BaseButton.vue'
 import Icon from './ui/Icon.vue'
 import FileTabs from './FileTabs.vue'
@@ -9,8 +10,36 @@ import FileTabs from './FileTabs.vue'
 
 const {
   state, appState, hasFile, documentCount, undo, redo, canUndo, canRedo,
+  activeDoc, documentHasUnsavedWork,
 } = useEditorState()
 const { promptForFiles } = useFileImport()
+const { saveDocument, saveDocumentAs, isSaving } = useFileSave()
+
+// The dot on the Save button. It is the only place the app says "you have work
+// that isn't on disk yet", so it tracks the same predicate the close guard and
+// the beforeunload handler use rather than a second idea of dirtiness.
+const isDirty = computed(() => !!activeDoc.value && documentHasUnsavedWork(activeDoc.value.id))
+
+// Save As lives behind a caret rather than as a second full button: this row
+// runs out of width the moment the tab strip fills, and Save As is the rarer
+// of the two by a wide margin once a document has a destination.
+const saveMenuOpen = ref(false)
+
+function toggleSaveMenu() {
+  saveMenuOpen.value = !saveMenuOpen.value
+}
+
+function runSaveAs() {
+  saveMenuOpen.value = false
+  saveDocumentAs()
+}
+
+function closeSaveMenu(e) {
+  if (!e.target.closest?.('[data-save-menu]')) saveMenuOpen.value = false
+}
+
+onMounted(() => window.addEventListener('click', closeSaveMenu))
+onUnmounted(() => window.removeEventListener('click', closeSaveMenu))
 
 function formatDuration(seconds) {
   const m = Math.floor(seconds / 60)
@@ -90,6 +119,50 @@ const fileMeta = computed(() => {
       </BaseButton>
 
       <div class="w-px h-[18px] bg-[rgba(255,255,255,.12)] mx-1"></div>
+
+      <!-- Save + Save As. The caret's menu is a single item today; it exists
+           because a Save that silently retargets is worse than one extra
+           click, and "save a copy somewhere else" has to be reachable. -->
+      <div class="flex items-center" data-save-menu>
+        <BaseButton
+          size="md" color="ghost" :pill="false"
+          :disabled="!hasFile || isSaving"
+          @click="saveDocument()"
+          :title="isDirty ? 'Save — unsaved edits (Ctrl+S)' : 'Save (Ctrl+S)'"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+          {{ isSaving ? 'Saving…' : 'Save' }}
+          <span
+            v-if="isDirty && !isSaving"
+            class="w-[6px] h-[6px] rounded-full shrink-0"
+            style="background:#e0b84a"
+            aria-label="Unsaved changes"
+          ></span>
+        </BaseButton>
+        <div class="relative">
+          <button
+            class="h-[30px] w-[18px] flex items-center justify-center rounded-[7px] transition-colors hover:bg-[rgba(255,255,255,.09)] disabled:opacity-40"
+            style="color:rgba(255,255,255,.55)"
+            :disabled="!hasFile || isSaving"
+            title="Save As… (Ctrl+Shift+S)"
+            aria-label="Save As"
+            @click.stop="toggleSaveMenu"
+          >
+            <svg viewBox="0 0 24 24" class="w-[11px] h-[11px] fill-none stroke-current" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div
+            v-if="saveMenuOpen"
+            class="absolute right-0 top-[34px] z-[400] min-w-[150px] rounded-[10px] overflow-hidden py-1"
+            style="background:linear-gradient(155deg,#181c22,#0d1013);box-shadow:0 16px 40px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.08)"
+          >
+            <button
+              class="w-full text-left px-3 py-[7px] text-[12px] font-semibold transition-colors hover:bg-[rgba(255,255,255,.08)]"
+              style="color:#eaf6f8"
+              @click="runSaveAs"
+            >Save As…</button>
+          </div>
+        </div>
+      </div>
 
       <BaseButton
         size="md" :pill="false"
