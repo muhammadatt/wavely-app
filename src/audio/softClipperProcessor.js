@@ -246,6 +246,7 @@
 
 import {
   Oversampler, OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES,
+  COMPRESSOR_OVERSAMPLE, COMPRESSOR_OVERSAMPLE_8X,
 } from './dsp/oversample.js'
 import {
   highShelf, highpass, invertBiquad, biquadZerosInsideUnitCircle, BiquadCascade,
@@ -1796,7 +1797,18 @@ export function softClip(x, T, rMaxDb = MAX_REDUCTION_DB, kneeDb = KNEE_DB, expo
  * count (spec §6.3).
  */
 export class SoftClipperKernel {
-  constructor(sampleRate) {
+  /**
+   * @param {number} sampleRate
+   * @param {{oversample?: 4|8}} [options] EXPERIMENTAL. 8 selects the 8x
+   *   profile — not a shipping path, and it changes the reported latency from
+   *   50 to 52 samples, so anything differencing the two must align on each
+   *   instance's own `latencySamples` rather than assuming they match. See
+   *   COMPRESSOR_OVERSAMPLE_8X.
+   */
+  constructor(sampleRate, options = {}) {
+    this.osProfile = options.oversample === 8 ? COMPRESSOR_OVERSAMPLE_8X : COMPRESSOR_OVERSAMPLE
+    this.osFactor = this.osProfile.factor
+    this.osLatency = this.osProfile.latencySamples
     this.sampleRate = sampleRate
 
     // ── Detector state (mono, shared across channels) ──
@@ -1977,7 +1989,7 @@ export class SoftClipperKernel {
    * shift the timeline under a running preview.
    */
   get latencySamples() {
-    return OVERSAMPLE_LATENCY_SAMPLES
+    return this.osLatency
   }
 
   /**
@@ -2506,8 +2518,8 @@ export class SoftClipperKernel {
     this.outputTrimDbSmoothed = outputTrimDbSmoothed
 
     while (this.softenState.length < nOut) this.softenState.push(0)
-    while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler())
-    const D = OVERSAMPLE_LATENCY_SAMPLES
+    while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler(this.osProfile))
+    const D = this.osLatency
     while (this.dryDelay.length < nOut) this.dryDelay.push(new Float32Array(D))
     this.preEmphasis.ensureChannels(nOut)
     this.deEmphasis.ensureChannels(nOut)
@@ -2518,7 +2530,7 @@ export class SoftClipperKernel {
     const dryPosStart = this.dryDelayPos
     let dryPosEnd = dryPosStart
 
-    const L = OVERSAMPLE_FACTOR
+    const L = this.osFactor
     // Peak reduction is measured AT THE CLIP CURVE ITSELF — the difference in
     // dB between what went into softClip() and what came out, at whichever
     // oversampled sample this block reduced the most — rather than by
@@ -2582,7 +2594,9 @@ export class SoftClipperKernel {
             // treated identically — the property every control here holds.
             // It cannot boost: the output only ever moves TOWARD the input,
             // so |y| <= max(|y_prev|, |x|) at every sample.
-            const S = SOFTEN_REF * softenScale * cr
+            // Bernstein's bound scales with the oversampling factor, so it is
+            // taken from the instance rather than the module constant.
+            const S = (Math.PI / L) * softenScale * cr
             let prev = softenState
             const d = before - prev
             prev += d > S ? S : d < -S ? -S : d
@@ -2701,8 +2715,8 @@ export class SoftClipperKernel {
  * an OfflineAudioContext running the worklet so preview and apply share the
  * exact same code path.
  */
-export function processSoftClipperBuffer(channelData, sampleRate, params = {}) {
-  const kernel = new SoftClipperKernel(sampleRate)
+export function processSoftClipperBuffer(channelData, sampleRate, params = {}, options = {}) {
+  const kernel = new SoftClipperKernel(sampleRate, options)
   kernel.setParams(params)
 
   const n = channelData[0].length
