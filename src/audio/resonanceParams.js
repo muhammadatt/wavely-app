@@ -310,11 +310,44 @@ export const RESONANCE_ZONE_MIN_OCTAVES = 0.25
  */
 export const RESONANCE_ZONE_EDGE_OCTAVES = 1 / 6
 
-/** Per-zone parameter ranges. Absolute values, not offsets from anything. */
+/**
+ * Per-zone parameter ranges. Absolute values, not offsets from anything.
+ *
+ * SELECTIVITY'S TOP WAS 24, WHICH DID NOT REACH ZERO — the knob's gentlest
+ * setting still removed audible material. Selectivity is a threshold, so it
+ * runs backwards: higher means less gets through it and less is cut. Measured
+ * on 46 s of real narration under the shipping peak reference, with protection
+ * off and depth 1, mean / p90 cut in 100–400 Hz:
+ *
+ *     sel      3      8     12     16     20     24     28     34     40
+ *     mean  17.92  13.11   9.34   5.76   3.05   1.30   0.39   0.05   0.00
+ *     p90   26.30  21.40  17.30  13.30   8.60   3.60   1.10   0.10   0.00
+ *
+ * So the old maximum sat at 1.3 dB mean and 3.6 dB p90 — winding the control
+ * fully "off" left several dB of cut in place on the peaks, and the only way to
+ * stop a band being treated was to switch the zone off entirely. That is the
+ * one thing a threshold's top end has to be able to say.
+ *
+ * The range was set for the CEPSTRAL reference, whose stock selectivity was 8 —
+ * mid-travel there. Peak's stock is 20, so the same window put the default at
+ * 71% of the travel with 1.3 dB of authority left above it.
+ *
+ * 36 rather than 34. The effect is already inaudible by 30 (0.18 dB) and
+ * measures 0.03 at 34 on THIS file, which is one recording: material with more
+ * low-frequency energy needs a higher threshold to null, and a knob whose top
+ * fails to reach zero on some inputs is a worse error than a few degrees of
+ * dead travel at the end on others. Stock 20 lands at 52% of the new range.
+ *
+ * The MINIMUM stays at 3, which is not a lack of nerve. Below it the curve
+ * saturates — 0.5 removes 20.30 dB against 3's 17.92, a 2.4 dB spread across
+ * five sixths of the remaining travel — and every setting down there is well
+ * past destroying the material. Lowering it would spend real estate on
+ * differences nobody can use, and would clamp nothing that exists today.
+ */
 export const RESONANCE_ZONE_RANGES = {
   depth: { min: 0, max: 1 },
   sharpness: { min: 0, max: 1 },
-  selectivity: { min: 3, max: 24 },
+  selectivity: { min: 3, max: 36 },
   maxCut: { min: 3, max: 48 },
 }
 

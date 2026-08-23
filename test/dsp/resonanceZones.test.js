@@ -33,7 +33,9 @@ import {
   toggleZone,
   xFromHz,
   zoneIndexAt,
+  zonePeakReductions,
 } from '../../src/components/meters/resonanceZoneEdit.js'
+import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 
 /**
  * Sensitivity zones: the model, the curves it hands the kernel, and the edits
@@ -169,6 +171,41 @@ function bandTone(freqHz, seconds = 0.6) {
   return x
 }
 
+/**
+ * A pitched voice and a planted resonance, for the threshold-range test.
+ *
+ * Copied rather than imported: `resonance.test.js` is a test file, not a
+ * fixture module, and a shared helper that two suites tune independently is how
+ * a probe ends up measuring something neither of them meant.
+ */
+function voice({ seconds = 1.5, f0 = 150, jitterHz = 3, amp = 0.2, noiseDb = -45 } = {}) {
+  const n = Math.round(seconds * SR)
+  const out = new Float32Array(n)
+  const noiseAmp = Math.pow(10, noiseDb / 20)
+  let phase = 0
+  let s = 4242
+  for (let i = 0; i < n; i++) {
+    const pitch = f0 + jitterHz * Math.sin(2 * Math.PI * 2.7 * (i / SR))
+    phase += (2 * Math.PI * pitch) / SR
+    let v = 0
+    for (let k = 1; k <= 30; k++) {
+      if (pitch * k >= SR / 2) break
+      v += (amp / k) * Math.sin(k * phase + k * 0.9)
+    }
+    s = (s * 1103515245 + 12345) & 0x7fffffff
+    out[i] = v + noiseAmp * (s / 0x3fffffff - 1)
+  }
+  return out
+}
+
+function resonate(sig, freqHz, q, gainDb) {
+  const cascade = new BiquadCascade(1, 1)
+  cascade.setSections([peaking(SR, freqHz, q, gainDb)])
+  const out = new Float32Array(sig.length)
+  cascade.process(sig, out, sig.length, 0)
+  return out
+}
+
 function rmsAt(sig, freqHz) {
   let re = 0
   let im = 0
@@ -197,6 +234,45 @@ function aligned(x) {
 }
 
 const UNPROTECTED = {}
+
+test('the top of the selectivity range leaves a real resonance alone', () => {
+  // WHY THE MAXIMUM MOVED 24 → 36, and why this test cannot prove it.
+  //
+  // Selectivity runs backwards — it is a threshold, so higher means less clears
+  // it and less is cut. The range was inherited from the CEPSTRAL reference,
+  // whose stock was 8 and for which 24 was a genuine ceiling. Under the peak
+  // reference that now ships, 24 still removed 1.30 dB of mean and 3.60 dB of
+  // p90 cut on 46 s of real narration, so winding a zone fully gentle left
+  // audible suppression in place and the only way to stop a band being treated
+  // was to switch the zone off entirely. Measured there, the cut reaches 0.05 dB
+  // at 34 and 0.00 at 40; 36 is the shipped top with margin for material more
+  // resonant than one clip.
+  //
+  // ⚠ NO SYNTHETIC SIGNAL IN THIS SUITE REPRODUCES THAT RESIDUAL, so the half of
+  // the property that motivated the change is guarded by the real-audio sweep
+  // (`npm run reso:real`) and not by this test. Three probes were tried and all
+  // three say the effect is already idle at 24: a pure tone (cut 27 dB at ANY
+  // top — a sine sits ~35 dB above its own peak envelope whatever its level,
+  // because the reference scales with it), a planted peaking resonance up to
+  // +30 dB at Q=20 (untouched at 24, because the peak envelope is drawn THROUGH
+  // a boost that wide), and a voice with its noise floor raised to −20 dB
+  // (untouched at 18, where the real clip loses 4.3 dB). Real narration's
+  // residual comes from narrow, moving spectral structure none of these have.
+  // Eleventh time synthetic material has been too clean to answer the question
+  // asked of it.
+  //
+  // What this DOES guard is the direction of the fix: the new top must be a
+  // genuine no-op on material the effect is pointed at. If a future change makes
+  // the maximum start cutting again, this fails.
+  const x = resonate(voice({ seconds: 1.5, f0: 150 }), 900, 6, 10)
+  const top = RESONANCE_ZONE_RANGES.selectivity.max
+  const wet = render(x, { zones: uniformZones({ selectivity: top, depth: 1, protect: false }) })
+  const moved = rmsAt(wet, 900) - rmsAt(aligned(x), 900)
+  assert.ok(
+    Math.abs(moved) < 0.3,
+    `at selectivity ${top} a +10 dB Q=6 resonance should pass untouched, moved ${moved.toFixed(2)} dB`,
+  )
+})
 
 test('a zone with a lower threshold cuts what a higher one leaves alone', () => {
   const x = bandTone(3000)
@@ -483,4 +559,56 @@ test('toggling a zone flips only that zone', () => {
   assert.equal(z[0].enabled, false)
   assert.equal(z[1].enabled, true)
   assert.equal(toggleZone(z, 0)[0].enabled, true)
+})
+
+// ── Per-zone readouts ───────────────────────────────────────────────────────
+//
+// The plot prints each zone's deepest cut at the top of its own column, and the
+// readout line scopes to the selected zone. What can be wrong here is invisible
+// on screen: a number attributed to the wrong column looks exactly like a
+// number attributed to the right one.
+
+/** A log-grid reduction curve with a single spike at `hz`. */
+function spikeAt(hz, db, bins = 192, minHz = 20, maxHz = 20000) {
+  const r = new Float32Array(bins)
+  const d = Math.round((Math.log2(hz / minHz) / Math.log2(maxHz / minHz)) * (bins - 1))
+  r[d] = db
+  return r
+}
+
+test('a cut is reported by the zone it falls in, and by no other', () => {
+  const z = zones({ hiHz: 500 }, { hiHz: 4000 }, {})
+  const peaks = zonePeakReductions(z, spikeAt(1000, 7), 192, 20, 20000)
+  assert.deepEqual(peaks.map(v => Math.round(v)), [0, 7, 0])
+})
+
+test('the readout is the DEEPEST cut in a zone, not its average', () => {
+  // The average over a zone is dominated by the bins the effect is correctly
+  // leaving alone, so it reads near zero whatever is happening in the band.
+  const r = spikeAt(1000, 9)
+  const peaks = zonePeakReductions(zones({}), r, 192, 20, 20000)
+  assert.equal(Math.round(peaks[0]), 9)
+})
+
+test('A SILENT ZONE READS null, NOT ZERO', () => {
+  // Zero is a measurement. A bypassed band printing `-0.0` says the effect
+  // looked and found nothing, where the truth is that it never looked.
+  const z = zones({ hiHz: 500, enabled: false }, {})
+  const peaks = zonePeakReductions(z, spikeAt(200, 5), 192, 20, 20000)
+  assert.equal(peaks[0], null)
+
+  // Solo is the same statement about every zone but one, and it must not be
+  // read out of the stored settings — an unsoloed zone is still `enabled`.
+  const soloed = zonePeakReductions(zones({ hiHz: 500 }, {}), spikeAt(200, 5), 192, 20, 20000, 1)
+  assert.equal(soloed[0], null)
+  assert.equal(Math.round(soloed[1]), 0)
+})
+
+test('a zone narrower than one display cell still reads the cell it is in', () => {
+  // Rounding outward. Rounding to nearest lets a narrow zone map to an empty
+  // range and report nothing, which on screen is a zone that looks idle while
+  // it is working.
+  const z = zones({ hiHz: 1000 }, { hiHz: 1020 }, {})
+  const peaks = zonePeakReductions(z, spikeAt(1010, 6), 192, 20, 20000)
+  assert.ok(peaks[1] > 0, 'the narrow middle zone should report the cut inside it')
 })

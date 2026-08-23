@@ -13,6 +13,7 @@ import {
   splitZone,
   xFromHz,
   zoneIndexAt,
+  zonePeakReductions,
 } from './resonanceZoneEdit.js'
 import {
   createHeldAverage,
@@ -209,6 +210,27 @@ const hasAverage = ref(false)
 const hotHz = ref(0)
 const hotDb = ref(0)
 
+/**
+ * PEAK REDUCTION PER ZONE — the display's one number was still single-band.
+ *
+ * The detector became multiband and the readout did not: a single global
+ * `PEAK 3.2k · -4.1 dB` describes a panel with one set of settings, and this one
+ * has up to six. It is the same objection that got the gain-reduction meter
+ * replaced by this plot in the first place — one number cannot distinguish a
+ * surgical notch from the same depth spread across half the spectrum — quietly
+ * reintroduced in the text line above it.
+ *
+ * So each zone gets its own reading, printed at the top of its own column, and
+ * the line readout scopes to the SELECTED zone. Deepest cut inside the zone
+ * rather than a mean: the mean over a whole zone is dominated by the bins the
+ * effect is correctly leaving alone, so it reads near zero whatever is
+ * happening, and "how deep is the deepest cut in this band" is the question the
+ * knobs beneath are answering.
+ *
+ * Indexed by zone.
+ */
+const zonePeaks = ref([])
+
 /** Frequency under the pointer, or null. */
 const cursorX = ref(null)
 const cursorText = ref('')
@@ -390,6 +412,7 @@ function draw(dtMs) {
     drawReduction(ctx, w, shown, alpha)
   }
   drawZones(ctx, w)
+  drawZoneReadouts(ctx, w)
 
   drawGrScale(ctx, w)
   drawAxis(ctx, w, xFor, minHz, maxHz)
@@ -657,6 +680,7 @@ function updatePeaks(frame, dtMs) {
       }
     }
     hotDb.value = 0
+    if (zonePeaks.value.length) zonePeaks.value = []
     cursorText.value = ''
     return
   }
@@ -697,6 +721,11 @@ function updatePeaks(frame, dtMs) {
   if (hotThrottle.due(dtMs)) {
     hotDb.value = reduction[hotIndex]
     hotHz.value = minHz * Math.pow(2, (hotIndex / (bins - 1)) * Math.log2(maxHz / minHz))
+    // Arithmetic lives in resonanceZoneEdit so it can be tested without a
+    // canvas, like every other zone geometry function.
+    zonePeaks.value = zonePeakReductions(
+      props.zones, reduction, bins, minHz, maxHz, props.soloZone,
+    )
   }
   updateCursorText(frame)
 }
@@ -780,6 +809,60 @@ function drawZones(ctx, w) {
     ctx.fillRect(x - 1.5, 1, 4, 6)
     ctx.fillRect(x - 1.5, bottom - 7, 4, 6)
   }
+}
+
+/**
+ * Each zone's deepest cut, printed at the top of its own column.
+ *
+ * In the REDUCTION lane, where reduction hangs from the top — so the number
+ * sits at the origin of the thing it measures rather than floating over the
+ * spectrum. Right-aligned to the divider on its right, which is where the eye
+ * already is when reading a boundary, and inset so it never touches the line.
+ *
+ * Drawn only where it fits. A zone dragged narrow has no room for four
+ * characters, and a number clipped by a divider or overlapping its neighbour is
+ * worse than no number: it can be misread as the adjacent zone's. Below
+ * MIN_READOUT_PX the column simply carries no reading, which is legible on its
+ * own because the column is visibly too narrow to hold one.
+ *
+ * A silent zone reads OFF rather than a depth. See zonePeakReductions.
+ */
+const MIN_READOUT_PX = 30
+const READOUT_INSET_PX = 4
+
+function drawZoneReadouts(ctx, w) {
+  const peaks = zonePeaks.value
+  if (!peaks.length || peaks.length !== props.zones.length) return
+  ctx.save()
+  ctx.font = "600 8px 'JetBrains Mono',monospace"
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'top'
+  for (let i = 0; i < props.zones.length; i++) {
+    const { loHz, hiHz } = bounds.value[i]
+    const x0 = xFromHz(loHz, axis)
+    const x1 = Math.min(xFromHz(hiHz, axis), w)
+    if (x1 - x0 < MIN_READOUT_PX) continue
+    const db = peaks[i]
+    const selected = i === props.selectedZone
+    let text
+    if (db === null) {
+      text = 'OFF'
+      ctx.fillStyle = 'rgba(255,255,255,.26)'
+    } else if (db < 0.3) {
+      // Below the threshold the hotspot line uses, so the two readouts agree
+      // about when the effect is doing nothing. A dash rather than `-0.0`,
+      // which reads as a measurement of zero rather than as idle.
+      text = '–'
+      ctx.fillStyle = 'rgba(255,255,255,.26)'
+    } else {
+      text = `-${db.toFixed(1)}`
+      // The selected zone's number is the one the knobs below are editing, so
+      // it is lit; the rest stay legible without competing with it.
+      ctx.fillStyle = selected ? props.accent : 'rgba(255,255,255,.5)'
+    }
+    ctx.fillText(text, x1 - READOUT_INSET_PX, 3)
+  }
+  ctx.restore()
 }
 
 // ── Zone editing ────────────────────────────────────────────────────────────
@@ -888,16 +971,29 @@ function onKeyDown(e) {
   e.preventDefault()
 }
 
-/** The selected zone, in words. Shares the readout line with the cursor. */
+/**
+ * The selected zone, in words, WITH ITS OWN DEEPEST CUT.
+ *
+ * This line used to fall back to a single global `PEAK <hz> · -<db>` covering
+ * the whole spectrum. In practice it almost never appeared — a zone is
+ * essentially always selected and `zoneText` wins the slot — so the panel's one
+ * numeric reading was both hidden and, when it did show, describing all six
+ * zones at once. Scoping it to the selection makes it agree with the knobs
+ * underneath, which edit exactly that zone.
+ *
+ * The depth is dropped while the zone is silent or idle: `Z2 … · OFF · -0.0`
+ * says the effect measured nothing there, where the truth is that it never
+ * looked.
+ */
 const zoneText = computed(() => {
   const i = props.selectedZone
   const zone = props.zones[i]
   if (!zone) return ''
   const { loHz, hiHz } = bounds.value[i]
-  const s = zoneSettings(zone)
-  return s.enabled
-    ? `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)}`
-    : `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)} · OFF`
+  const span = `Z${i + 1} ${formatHz(loHz)}–${formatHz(hiHz)}`
+  if (!zoneSettings(zone).enabled) return `${span} · OFF`
+  const db = zonePeaks.value[i]
+  return db != null && db > 0.3 ? `${span} · -${db.toFixed(1)} dB` : span
 })
 
 // ── Pointer readout ─────────────────────────────────────────────────────────
@@ -938,7 +1034,13 @@ function formatHz(hz) {
   return `${Math.round(hz)} Hz`
 }
 
-/** Where the deepest cut is right now, or nothing when the effect is idling. */
+/**
+ * Where the deepest cut is anywhere, for the case where no zone is selected.
+ *
+ * Kept rather than deleted because a panel with the selection cleared still has
+ * to say something, and "the deepest cut is here" is the one reading that needs
+ * no zone to be meaningful. Every other case is served by zoneText.
+ */
 const hotspotText = computed(() =>
   hotDb.value > 0.3 ? `PEAK ${formatHz(hotHz.value)} · -${hotDb.value.toFixed(1)} dB` : '',
 )

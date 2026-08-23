@@ -15,6 +15,7 @@ import {
   RESONANCE_ZONE_RANGES,
   RESONANCE_ZONE_STOCK,
   zoneBounds,
+  zoneSettings,
 } from '../../audio/resonanceParams.js'
 
 /** How close the pointer must be to a boundary to grab it, in pixels. */
@@ -180,4 +181,46 @@ export function splitZone(zones, freqHz, axis, id, floorHz, ceilHz) {
 export function removeBoundary(zones, index) {
   if (zones.length <= RESONANCE_ZONE_MIN || index < 0 || index >= zones.length - 1) return zones
   return zones.filter((_, i) => i !== index)
+}
+
+/**
+ * Deepest live cut inside each zone, for the per-zone readouts on the plot.
+ *
+ * The display's one number used to be a single global `PEAK <hz> · -<db>`
+ * spanning the whole spectrum. That is the objection that got the
+ * gain-reduction meter replaced by this plot in the first place — one number
+ * cannot distinguish a surgical notch from the same depth spread across half
+ * the spectrum — quietly reintroduced in the text line above it, and it had
+ * outlived the detector besides: the detector is multiband and the readout was
+ * not.
+ *
+ * DEEPEST CUT, NOT THE MEAN. A zone's mean is dominated by the bins the effect
+ * is correctly leaving alone, so it reads near zero whatever is happening in
+ * the band. "How deep is the deepest cut here" is the question the knobs
+ * underneath are answering.
+ *
+ * A SILENT ZONE READS `null`, NOT 0. Zero is a measurement — a bypassed band
+ * printing `-0.0` says the effect looked and found nothing, where the truth is
+ * that it never looked. The caller renders the two differently.
+ *
+ * The reduction array is on the display's LOG grid, so the zone's Hz span is
+ * converted rather than assumed, rounding outward — floor on the low edge, ceil
+ * on the high — so a zone narrower than one display cell still reads the cell
+ * it sits inside instead of reporting nothing.
+ */
+export function zonePeakReductions(zones, reduction, bins, minHz, maxHz, soloZone = -1, floorHz = 20, ceilHz = 20000) {
+  const bounds = zoneBounds(zones, floorHz, ceilHz)
+  const octaves = Math.log2(maxHz / minHz)
+  const binAt = hz => (Math.log2(clamp(hz, minHz, maxHz) / minHz) / octaves) * (bins - 1)
+  const out = new Array(zones.length)
+  for (let i = 0; i < zones.length; i++) {
+    const silent = soloZone >= 0 ? i !== soloZone : !zoneSettings(zones[i]).enabled
+    if (silent) { out[i] = null; continue }
+    const lo = Math.max(0, Math.floor(binAt(bounds[i].loHz)))
+    const hi = Math.min(bins - 1, Math.ceil(binAt(bounds[i].hiHz)))
+    let peak = 0
+    for (let d = lo; d <= hi; d++) if (reduction[d] > peak) peak = reduction[d]
+    out[i] = peak
+  }
+  return out
 }

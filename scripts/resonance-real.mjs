@@ -44,6 +44,40 @@ import {
   processResonanceBuffer,
   RESONANCE_KERNEL_DEFAULTS,
 } from '../src/audio/resonanceProcessor.js'
+import { uniformZones, RESONANCE_ZONE_STOCK } from '../src/audio/resonanceParams.js'
+
+/**
+ * THE KERNEL HAS NO FLAT `selectivity`, `depth`, `maxCut` OR `preserveHarmonics`
+ * — IT READS `zones`, AND PASSING THEM FLAT IS SILENTLY IGNORED.
+ *
+ * This script passed them flat for a while after the zone refactor, which does
+ * not throw and does not warn: every configuration below quietly measured the
+ * same default zone patch, differing only in the params that ARE still flat
+ * (refMode, ballistics, mix). `solveSelectivity` was bisecting a value nothing
+ * read, so it returned the midpoint of its own search window and reported it as
+ * a calibration. Any number taken from this harness between the zone refactor
+ * and this fix describes the stock patch, whatever its row was labelled.
+ *
+ * Configs therefore declare the per-band settings under `zone` and this turns
+ * them into the single uniform zone the kernel wants. A flat key that belongs
+ * in a zone is now a hard error rather than a silent no-op — the whole failure
+ * was that it looked like it worked.
+ */
+const ZONE_KEYS = ['selectivity', 'depth', 'sharpness', 'maxCut', 'protect']
+
+function kernelParams(cfg, selectivity) {
+  for (const k of ZONE_KEYS) {
+    if (k in cfg.params) throw new Error(`${cfg.slug}: '${k}' is a ZONE setting — put it under \`zone\`, not \`params\``)
+  }
+  if ('preserveHarmonics' in cfg.params) {
+    throw new Error(`${cfg.slug}: 'preserveHarmonics' is now the per-zone 'protect' — put it under \`zone\``)
+  }
+  return {
+    ...RESONANCE_KERNEL_DEFAULTS,
+    ...cfg.params,
+    zones: uniformZones({ ...cfg.zone, selectivity }),
+  }
+}
 
 const CORPUS = path.join(process.cwd(), 'data/corpus/resonance')
 /**
@@ -78,32 +112,33 @@ const BANDS = [
  * comparison is decided by whichever config happens to be set louder.
  */
 const CONFIGS = [
-  { slug: 'shipping', label: 'shipping (cepstral + mask)', params: {} },
+  { slug: 'shipping', label: 'shipping (stock zones)', params: {}, zone: {} },
   {
     slug: 'cepstral-nomask',
     label: 'cepstral, protection off',
-    params: { preserveHarmonics: false },
+    params: { refMode: 'cepstral' },
+    zone: { protect: false, depth: 0.67 },
     solveFor: 3,
   },
   {
     slug: 'cepstral-slow',
     label: 'cepstral, off, slow ballistics',
-    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 500 },
+    params: { refMode: 'cepstral', attackMs: 100, releaseMs: 500 },
+    zone: { protect: false, depth: 0.67 },
     solveFor: 3,
   },
   {
     slug: 'peak',
     label: 'peak-envelope, no mask',
-    params: { refMode: 'peak', preserveHarmonics: false, depth: 1 },
+    params: { refMode: 'peak' },
+    zone: { protect: false, depth: 1 },
     solveFor: 3,
   },
   {
     slug: 'peak-slow',
     label: 'peak-envelope + slow ballistics',
-    params: {
-      refMode: 'peak', preserveHarmonics: false, depth: 1,
-      attackMs: 100, releaseMs: 500,
-    },
+    params: { refMode: 'peak', attackMs: 100, releaseMs: 500 },
+    zone: { protect: false, depth: 1 },
     solveFor: 3,
   },
 
@@ -115,34 +150,32 @@ const CONFIGS = [
   {
     slug: 'cepstral-slow-p6',
     label: 'cepstral+slow @ p90 6 dB',
-    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 500 },
+    params: { refMode: 'cepstral', attackMs: 100, releaseMs: 500 },
+    zone: { protect: false, depth: 0.67 },
     solveFor: 6,
     solveOn: 'p90',
   },
   {
     slug: 'peak-slow-p6',
     label: 'peak+slow     @ p90 6 dB',
-    params: {
-      refMode: 'peak', preserveHarmonics: false, depth: 1,
-      attackMs: 100, releaseMs: 500,
-    },
+    params: { refMode: 'peak', attackMs: 100, releaseMs: 500 },
+    zone: { protect: false, depth: 1 },
     solveFor: 6,
     solveOn: 'p90',
   },
   {
     slug: 'cepstral-slow-p10',
     label: 'cepstral+slow @ p90 10 dB',
-    params: { preserveHarmonics: false, attackMs: 100, releaseMs: 500 },
+    params: { refMode: 'cepstral', attackMs: 100, releaseMs: 500 },
+    zone: { protect: false, depth: 0.67 },
     solveFor: 10,
     solveOn: 'p90',
   },
   {
     slug: 'peak-slow-p10',
     label: 'peak+slow     @ p90 10 dB',
-    params: {
-      refMode: 'peak', preserveHarmonics: false, depth: 1,
-      attackMs: 100, releaseMs: 500,
-    },
+    params: { refMode: 'peak', attackMs: 100, releaseMs: 500 },
+    zone: { protect: false, depth: 1 },
     solveFor: 10,
     solveOn: 'p90',
   },
@@ -340,14 +373,14 @@ function measure(inLevels, outLevels, sets) {
  * less gets through the threshold, so the search is stable even where the
  * curve is lumpy.
  */
-function solveSelectivity(x, sampleRate, params, target, stat, inLevels, sets, frames) {
+function solveSelectivity(x, sampleRate, cfg, target, stat, inLevels, sets, frames) {
   let lo = 2
   let hi = 40
   for (let it = 0; it < 9; it++) {
     const mid = (lo + hi) / 2
-    const out = processResonanceBuffer([x], sampleRate, {
-      ...RESONANCE_KERNEL_DEFAULTS, ...params, selectivity: mid,
-    }).channelData[0]
+    const out = processResonanceBuffer(
+      [x], sampleRate, kernelParams(cfg, mid),
+    ).channelData[0]
     const levels = bandLevels(out, sampleRate, BANDS[0].lo, BANDS[0].hi, LATENCY, frames)
     const m = measure(inLevels, levels, sets)
     const value = stat === 'p90' ? m.p90 : -m.cut
@@ -402,12 +435,13 @@ function run(file) {
   for (const cfg of CONFIGS) {
     const selectivity = cfg.solveFor
       ? solveSelectivity(
-        x, sampleRate, cfg.params, cfg.solveFor, cfg.solveOn ?? 'mean',
+        x, sampleRate, cfg, cfg.solveFor, cfg.solveOn ?? 'mean',
         inLevels[0], sets, frames,
       )
-      : (cfg.params.selectivity ?? RESONANCE_KERNEL_DEFAULTS.selectivity)
-    const params = { ...RESONANCE_KERNEL_DEFAULTS, ...cfg.params, selectivity }
-    const out = processResonanceBuffer([x], sampleRate, params).channelData[0]
+      : (cfg.zone?.selectivity ?? RESONANCE_ZONE_STOCK.selectivity)
+    const out = processResonanceBuffer(
+      [x], sampleRate, kernelParams(cfg, selectivity),
+    ).channelData[0]
     if (RENDER) {
       fs.mkdirSync(RENDERS, { recursive: true })
       writeWav(
