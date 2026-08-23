@@ -111,30 +111,55 @@ const emit = defineEmits(['update:zones', 'update:selectedZone'])
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
-/** Gap between the lanes, carrying the divider rule. */
-const LANE_GAP = 7
 /** Strip along the bottom for the frequency numerals. */
 const AXIS_H = 13
+
 /**
- * Share of the plot given to the reduction lane.
+ * ONE LANE, WITH REDUCTION AS THE HERO. It was two, and the split was backwards.
  *
- * A fraction rather than a fixed depth, because the panel sizes this display to
- * whatever height it can spare and a fixed lane takes the whole cut out of the
- * spectrum: at 188 px the split was 56/112, and the same 56 at 140 px would
- * leave the spectrum 64 px to draw a harmonic comb, a reference and an output
- * curve in. Reduction needs less room than the spectrum — it is one curve
- * against a scale, not three against each other.
+ * The reduction lane took 36% of the height and the spectrum 64%, on the
+ * argument that reduction is one curve against a scale where the spectrum is
+ * several against each other. True, and beside the point: the two lanes were
+ * drawn on scales four times apart in sensitivity, and the big one could not
+ * resolve the effect at all.
+ *
+ * The spectrum spans 90 dB (-102..-12); reduction spans `fullScaleDb` = 24 on a
+ * voltage law. At the old 280 px that is 166 px and 94 px of lane, and per dB of
+ * actual cut:
+ *
+ *     cut          3 dB    9 dB   12 dB     (3 = stock mean on real narration,
+ *     reduction   19.9    50.8    62.6       9 = stock p90)
+ *     spectrum     5.5    16.6    22.1
+ *
+ * So the SMALLER lane was 3-4x more legible per dB, and the shaded sliver
+ * between input and output — the one thing in the spectrum lane that showed the
+ * effect — rendered at about 5 px at the normal operating point, the same order
+ * as the stroke widths around it. It said "something happened" and could not be
+ * measured. 64% of the display was spent on the file and the decision boundary,
+ * which is the EXPLANATION of a cut rather than its RESULT.
+ *
+ * Merged, reduction gets the full lane on its own scale and lands directly over
+ * the peak that caused it instead of in a box above it. The two do not fight for
+ * ink as much as it sounds: the spectrum window tops out at -12 dBFS while
+ * per-bin speech peaks sit near -35, so the top quarter of the plot is normally
+ * empty and that is exactly where reduction hangs. A cut deep enough to reach
+ * into the trace is a cut deep enough to be worth seeing there.
+ *
+ * The output curve and the sliver are gone with the split — see drawSpectrum.
  */
-const GR_SHARE = 0.36
+const laneH = computed(() => Math.max(60, props.height - AXIS_H))
 /** Vertical clearance between two numerals on the reduction scale. */
 const MIN_SCALE_GAP_PX = 11
 /** Below this fraction of the scale the peak hold has nothing to say. */
 const PEAK_VISIBLE = 0.025
-
-const grH = computed(() =>
-  Math.round(Math.max(34, (props.height - LANE_GAP - AXIS_H) * GR_SHARE)))
-const specTop = computed(() => grH.value + LANE_GAP)
-const specH = computed(() => Math.max(40, props.height - specTop.value - AXIS_H))
+/**
+ * Below this many dB the reduction trace is not drawn at all.
+ *
+ * The same figure the per-zone readouts and the hotspot line use, so the trace,
+ * the number over the column and the text line all start saying something on the
+ * same frame.
+ */
+const REDUCTION_VISIBLE_DB = 0.3
 
 /**
  * Spectrum window, dBFS.
@@ -290,8 +315,12 @@ const STALE_MS = 300
 const DISPLAY_TAU_MS = 75
 
 /**
- * Smoothed copies of the four continuous curves, and the frame view drawn from
- * them.
+ * Smoothed copies of the continuous curves that are DRAWN, and the frame view
+ * drawn from them.
+ *
+ * `output` is not among them any more. The kernel still posts it and the merged
+ * display no longer draws it, so smoothing it here was a per-bin pass every
+ * frame feeding nothing.
  *
  * `reductionHeld` is deliberately NOT smoothed and not copied here: it is the
  * maximum since the previous read, and averaging a maximum is the one operation
@@ -303,7 +332,7 @@ const DISPLAY_TAU_MS = 75
  * here; dB is what these arrays already carry, and converting twice per bin per
  * frame to inherit a detail of somebody else's implementation is not worth it.
  */
-const SMOOTHED = ['mag', 'reference', 'output', 'reduction']
+const SMOOTHED = ['mag', 'reference', 'reduction']
 let smoothArrays = null
 let smoothView = null
 
@@ -313,7 +342,6 @@ function smoothFrame(frame, dtMs) {
     smoothArrays = {
       mag: new Float32Array(bins),
       reference: new Float32Array(bins),
-      output: new Float32Array(bins),
       reduction: new Float32Array(bins),
     }
     // Seeded from the frame, not from zero: a fade up from silence on the first
@@ -419,14 +447,10 @@ function draw(dtMs) {
   drawCursor(ctx, w)
 }
 
-/** The two recessed lanes and the rule between them. */
+/** The recessed plate the whole plot sits in. */
 function drawPlates(ctx, w) {
   ctx.fillStyle = 'rgba(0,0,0,.42)'
-  ctx.fillRect(0, 0, w, grH.value)
-  ctx.fillRect(0, specTop.value, w, specH.value)
-
-  ctx.fillStyle = 'rgba(255,255,255,.07)'
-  ctx.fillRect(0, grH.value + (LANE_GAP - 1) / 2, w, 1)
+  ctx.fillRect(0, 0, w, laneH.value)
 }
 
 function drawGrid(ctx, w, xFor, minHz, maxHz) {
@@ -435,29 +459,42 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
     if (hz < minHz || hz > maxHz) continue
     const x = Math.round(xFor(hz)) + 0.5
     if (x >= w) continue
-    ctx.fillRect(x, 0, 1, grH.value)
-    ctx.fillRect(x, specTop.value, 1, specH.value)
+    ctx.fillRect(x, 0, 1, laneH.value)
   }
 }
 
 /**
- * Reduction, hanging from the top of its lane.
+ * Reduction, hanging from the top of the plot. THE HERO CURVE.
  *
  * Downward because that is the direction of the thing: a cut. The filled area
  * is this frame; the outline behind it is the peak hold, which is what turns an
  * intermittent ring into something you can point at — a resonance that only
  * sounds on certain words is a flicker in the live fill and a standing shape in
  * the hold.
+ *
+ * FULL LANE HEIGHT, ON ITS OWN SCALE. It shares the plot with the spectrum but
+ * not the spectrum's axis: this is `fullScaleDb` of reduction on a voltage law,
+ * where the trace underneath is 90 dB of level. Two scales in one box is what
+ * every plugin in this class does, and it works because the two are drawn as
+ * opposites — reduction filled downward from the top in the accent, spectrum
+ * filled upward from the bottom in grey. The numerals down the right belong to
+ * this one; the spectrum carries none, so there is nothing to confuse them with.
+ *
+ * THE FILL IS LIGHTER THAN IT WAS BECAUSE IT NOW COVERS GROUND THAT HAS SOMETHING
+ * UNDER IT. In its own lane it could be near-opaque; over the spectrum the same
+ * ink hides the peak that explains the cut. The 1.5 px stroke is what carries
+ * the reading, and the fill only says which side of it was removed.
  */
 function drawReduction(ctx, w, frame, alpha) {
   const { reduction, bins } = frame
+  const h = laneH.value
   const xStep = w / (bins - 1)
-  const yFor = db => grFraction(db, props.fullScaleDb) * grH.value
+  const yFor = db => grFraction(db, props.fullScaleDb) * h
 
   ctx.globalAlpha = alpha
   ctx.save()
   ctx.beginPath()
-  ctx.rect(0, 0, w, grH.value)
+  ctx.rect(0, 0, w, h)
   ctx.clip()
 
   ctx.beginPath()
@@ -465,16 +502,40 @@ function drawReduction(ctx, w, frame, alpha) {
   for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(reduction[d]))
   ctx.lineTo(w, 0)
   ctx.closePath()
-  const grad = ctx.createLinearGradient(0, 0, 0, grH.value)
-  grad.addColorStop(0, tint(props.accent, 0.62))
-  grad.addColorStop(1, tint(props.accent, 0.18))
+  const grad = ctx.createLinearGradient(0, 0, 0, h)
+  // DELTA is expressed here now the sliver is gone, and this is its natural
+  // home rather than a substitute for one: in DELTA the removed signal is what
+  // is being heard, so the curve bounding it is the thing to light up.
+  const topAlpha = props.delta ? 0.58 : 0.40
+  grad.addColorStop(0, tint(props.accent, topAlpha))
+  grad.addColorStop(1, tint(props.accent, 0.05))
   ctx.fillStyle = grad
   ctx.fill()
 
+  // DRAWN ONLY WHERE THERE IS A CUT, for the reason the peak hold already is.
+  // In its own lane a continuous stroke along the top read as that lane's zero
+  // datum; across the full plot it reads as a frame edge, or worse as activity —
+  // a bright accent line spanning the width of a display where the effect is
+  // doing nothing. Breaking it at the same 0.3 dB the per-zone readouts use
+  // means the trace and the numbers appear together.
+  // Each segment opens on the bin BEFORE it crosses the threshold and closes on
+  // the one after, so a feature is drawn with its shoulders and comes back to
+  // the datum at both ends. Starting at the first bin over the threshold instead
+  // was tried: on a resonance a few bins wide the curve is already several dB
+  // down by then, so the trace began mid-descent and drew a stub rather than a
+  // trough.
   ctx.beginPath()
+  let live = false
   for (let d = 0; d < bins; d++) {
-    const y = yFor(reduction[d])
-    d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
+    const over = reduction[d] >= REDUCTION_VISIBLE_DB
+    if (!over && !live) continue
+    if (!live) {
+      const from = d > 0 ? d - 1 : d
+      ctx.moveTo(from * xStep, yFor(reduction[from]))
+      live = true
+    }
+    ctx.lineTo(d * xStep, yFor(reduction[d]))
+    if (!over) live = false
   }
   ctx.lineWidth = 1.5
   ctx.strokeStyle = props.accent
@@ -491,7 +552,7 @@ function drawReduction(ctx, w, frame, alpha) {
         open = false
         continue
       }
-      const y = peakBins[d] * grH.value
+      const y = peakBins[d] * h
       const x = d * xStep
       open ? ctx.lineTo(x, y) : ctx.moveTo(x, y)
       open = true
@@ -506,18 +567,33 @@ function drawReduction(ctx, w, frame, alpha) {
 }
 
 /**
- * Input, threshold and output over one another.
+ * Input and threshold, as the GROUND the reduction curve is read against.
  *
  * The threshold is the reference plus Selectivity, added here rather than in the
  * kernel so the line moves with the knob on the frame it is turned instead of
  * on the next one out of the worklet. Everything at or under it is left alone;
- * everything over it is what the top lane is taking out.
+ * everything over it is what the reduction curve is taking out — which is now
+ * drawn directly above it in the same box rather than in a lane of its own.
+ *
+ * THE OUTPUT CURVE AND THE REMOVED SLIVER ARE GONE, and neither was carrying its
+ * weight. On this 90 dB window the sliver measured about 5 px at the stock mean
+ * cut — the thickness of the strokes around it — so the one element that claimed
+ * to show removed resonance could not be read; the reduction curve says the same
+ * thing 3-4x larger and against numerals. The output curve went with it because
+ * it is the input minus that same reduction, and a third curve tracing the
+ * input everywhere the effect is idle is ink spent on agreement. What remains is
+ * the pair that the reduction curve cannot say by itself: what the file has, and
+ * where the line was drawn.
+ *
+ * (The kernel still computes and posts `output` — it is summarised per display
+ * cell from its own bin rather than derived here, which is a real distinction
+ * and worth keeping until this display has been listened to. Nothing draws it.)
  */
 function drawSpectrum(ctx, w, frame, alpha) {
-  const { mag, reference, output, bins } = frame
-  const top = specTop.value
-  const height = specH.value
-  const bottom = top + height
+  const { mag, reference, bins } = frame
+  const top = 0
+  const height = laneH.value
+  const bottom = height
   const xStep = w / (bins - 1)
   const yFor = (db) => {
     const t = (db - SPEC_DB_MIN) / (SPEC_DB_MAX - SPEC_DB_MIN)
@@ -542,20 +618,6 @@ function drawSpectrum(ctx, w, frame, alpha) {
   ctx.lineWidth = 1
   ctx.strokeStyle = 'rgba(255,255,255,.26)'
   ctx.stroke()
-
-  // What is being removed: the sliver between input and output. Only visible
-  // where the effect is doing something, which is the point of drawing it.
-  ctx.beginPath()
-  for (let d = 0; d < bins; d++) {
-    const x = d * xStep
-    d === 0 ? ctx.moveTo(x, yFor(mag[d])) : ctx.lineTo(x, yFor(mag[d]))
-  }
-  for (let d = bins - 1; d >= 0; d--) {
-    ctx.lineTo(d * xStep, yFor(output[d]))
-  }
-  ctx.closePath()
-  ctx.fillStyle = tint(props.accent, props.delta ? 0.5 : 0.24)
-  ctx.fill()
 
   // Threshold: dashed, because it is a decision boundary rather than a signal.
   //
@@ -582,32 +644,23 @@ function drawSpectrum(ctx, w, frame, alpha) {
   ctx.stroke()
   ctx.setLineDash([])
 
-  // Output: the one bright curve, and the kernel's own summary of it rather
-  // than this frame's magnitude minus this frame's reduction. Those are drawn
-  // from different FFT bins inside a display cell — see RESONANCE_DISPLAY_CURVES
-  // — so subtracting them here would carve a notch nothing in the audio has.
-  // Coincides with the input outline wherever nothing is being done, so any gap
-  // between the two is the effect working.
-  ctx.beginPath()
-  for (let d = 0; d < bins; d++) {
-    const y = yFor(output[d])
-    d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
-  }
-  ctx.lineWidth = 1.6
-  ctx.strokeStyle = props.accent
-  ctx.stroke()
-
   ctx.restore()
   ctx.globalAlpha = 1
 }
 
 /**
- * Numerals down the right of the reduction lane.
+ * Numerals down the right, and the rules that carry them across.
  *
  * Thinned by pixel spacing, not by dB. The scale is a voltage law, so the top
  * of it is crowded — on a 56 px lane the bar's own -1, -3 and -5 land within
  * 15 px of each other and print as one smear. Keeping whichever marks survive
- * a minimum gap means the lane can be any height and the engraving still reads.
+ * a minimum gap means the plot can be any height and the engraving still reads.
+ *
+ * FULL-WIDTH RULES, KEPT DELIBERATELY NOW THAT THEY CROSS THE SPECTRUM. They are
+ * the reason the merged plot is worth having: judging the depth of a cut at
+ * 3 kHz against numerals 500 px away on the right edge is not reading a
+ * measurement, it is estimating one. Faint enough to sit under the trace — the
+ * same weight as the frequency grid they cross.
  */
 function drawGrScale(ctx, w) {
   ctx.font = "600 7.5px 'JetBrains Mono',monospace"
@@ -616,10 +669,10 @@ function drawGrScale(ctx, w) {
   let lastY = -Infinity
   for (const mark of grScaleMarks(props.fullScaleDb)) {
     if (!mark.label || mark.db === 0) continue
-    const y = mark.fraction * grH.value
-    if (y < MIN_SCALE_GAP_PX / 2 || y > grH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
+    const y = mark.fraction * laneH.value
+    if (y < MIN_SCALE_GAP_PX / 2 || y > laneH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
     lastY = y
-    ctx.fillStyle = 'rgba(255,255,255,.06)'
+    ctx.fillStyle = 'rgba(255,255,255,.05)'
     ctx.fillRect(0, Math.round(y) + 0.5, w - 20, 1)
     ctx.fillStyle = 'rgba(255,255,255,.32)'
     ctx.fillText(`-${mark.label}`, w - 4, y)
@@ -655,8 +708,7 @@ function drawCursor(ctx, w) {
   const x = Math.round(cursorX.value) + 0.5
   if (x < 0 || x > w) return
   ctx.fillStyle = 'rgba(255,255,255,.22)'
-  ctx.fillRect(x, 0, 1, grH.value)
-  ctx.fillRect(x, specTop.value, 1, specH.value)
+  ctx.fillRect(x, 0, 1, laneH.value)
 }
 
 /**
@@ -773,7 +825,7 @@ function clamp(v, lo, hi) {
  */
 function drawZones(ctx, w) {
   if (props.zones.length === 0) return
-  const bottom = specTop.value + specH.value
+  const bottom = laneH.value
 
   const paintColumn = (i, fill) => {
     const { loHz, hiHz } = bounds.value[i]
@@ -781,8 +833,7 @@ function drawZones(ctx, w) {
     const x1 = xFromHz(hiHz, axis)
     if (x1 <= x0) return
     ctx.fillStyle = fill
-    ctx.fillRect(x0, 0, x1 - x0, grH.value)
-    ctx.fillRect(x0, specTop.value, x1 - x0, bottom - specTop.value)
+    ctx.fillRect(x0, 0, x1 - x0, bottom)
   }
 
   // A zone switched off is washed out across the whole column, which is what
@@ -801,8 +852,7 @@ function drawZones(ctx, w) {
     const x = Math.round(xFromHz(props.zones[i].hiHz, axis)) + 0.5
     const live = drag?.divider === i || hoverDivider.value === i
     ctx.fillStyle = live ? tint(props.accent, 0.95) : 'rgba(255,255,255,.34)'
-    ctx.fillRect(x, 0, 1, grH.value)
-    ctx.fillRect(x, specTop.value, 1, bottom - specTop.value)
+    ctx.fillRect(x, 0, 1, bottom)
     // Grips at both ends. A full-height hairline with nothing on it reads as a
     // grid rule; two 5 px tabs are what say it can be moved.
     ctx.fillStyle = live ? props.accent : 'rgba(255,255,255,.5)'
@@ -845,22 +895,34 @@ function drawZoneReadouts(ctx, w) {
     const db = peaks[i]
     const selected = i === props.selectedZone
     let text
+    let colour
     if (db === null) {
       text = 'OFF'
-      ctx.fillStyle = 'rgba(255,255,255,.26)'
+      colour = 'rgba(255,255,255,.3)'
     } else if (db < 0.3) {
       // Below the threshold the hotspot line uses, so the two readouts agree
       // about when the effect is doing nothing. A dash rather than `-0.0`,
       // which reads as a measurement of zero rather than as idle.
       text = '–'
-      ctx.fillStyle = 'rgba(255,255,255,.26)'
+      colour = 'rgba(255,255,255,.3)'
     } else {
       text = `-${db.toFixed(1)}`
       // The selected zone's number is the one the knobs below are editing, so
       // it is lit; the rest stay legible without competing with it.
-      ctx.fillStyle = selected ? props.accent : 'rgba(255,255,255,.5)'
+      colour = selected ? props.accent : 'rgba(255,255,255,.62)'
     }
-    ctx.fillText(text, x1 - READOUT_INSET_PX, 3)
+
+    // BACKED, BECAUSE THE MERGE PUT THESE ON TOP OF THE REDUCTION FILL. In two
+    // lanes this row sat on bare plate; now the deepest cut in a zone is drawn
+    // in the accent directly beneath its own number, also in the accent. The
+    // plate colour behind each reading is what keeps it a number rather than a
+    // slightly different shade of the fill.
+    const right = x1 - READOUT_INSET_PX
+    const tw = ctx.measureText(text).width
+    ctx.fillStyle = 'rgba(8,10,9,.78)'
+    ctx.fillRect(right - tw - 3, 1, tw + 6, 12)
+    ctx.fillStyle = colour
+    ctx.fillText(text, right, 3)
   }
   ctx.restore()
 }
@@ -1153,7 +1215,7 @@ const idleHint = computed(() =>
           }"></span>THRESHOLD
         </span>
         <span class="flex items-center gap-[4px]">
-          <span :style="{ width: '10px', height: '2px', background: accent }"></span>OUTPUT
+          <span :style="{ width: '10px', height: '2px', background: accent }"></span>REDUCTION
         </span>
 
       </span>
