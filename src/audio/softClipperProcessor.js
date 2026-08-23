@@ -1043,7 +1043,13 @@ const HF_LOSS_MAX_DB = 6
  * depth. 6 dB, so the loss tracks the same overshoot range the clip curve
  * works over rather than needing its own calibration.
  */
-const HF_LOSS_KNEE_DB = 6
+/**
+ * ⚠ RETIRED. It set how fast the shelf reached full depth as the signal ran
+ * over the threshold, and the shelf no longer follows the signal at all — see
+ * CHARACTER_REFERENCE. Kept named here only so that the sweep recorded against
+ * it is not mistaken for a live tuning.
+ */
+const HF_LOSS_KNEE_DB_RETIRED = 6
 
 /**
  * Smoothing for the loss itself, ms.
@@ -1274,6 +1280,46 @@ const SOFTEN_MIN_SCALE = 0.02
 
 /** Below this the whole path is bypassed and the audio is untouched. */
 const SOFTEN_EPSILON = 1e-4
+
+/**
+ * CHARACTER_REFERENCE — the level the colouring controls are measured against.
+ *
+ * ⚠ IT IS THE SPEECH LEVEL, NOT THE THRESHOLD, and that is a deliberate break
+ * from how this stage was built. Everything here used to be referenced to T,
+ * which is peak-referenced and moves with Headroom. Tape's colouration is
+ * referenced to the medium's own operating level, which is a property of the
+ * body of the signal — so tying character to the peak detector produced
+ * controls that only ever touched peaks and were therefore weak: measured, the
+ * three of them barely engaged on ordinary material at any setting.
+ *
+ * ⚠ AND THE DEPTH IS CONSTANT, NOT MODULATED BY THE INSTANTANEOUS LEVEL. The
+ * obvious design — depth as a function of `instantaneous - reference` — makes
+ * the colour fade through every pause, which is a room that BREATHES. Reported
+ * as the thing to avoid, and it is right: a listener hears the room change
+ * character between phrases long before they hear the character itself. Real
+ * tape does not do this either; the medium colours the room tone and the voice
+ * alike. So the reference sets the SCALE of the effect and the knob sets its
+ * DEPTH, and neither tracks the envelope.
+ *
+ * WHAT MAKES THAT SAFE IS THE TRACKER'S OWN BEHAVIOUR. `speechLevelDb` updates
+ * only while the noise gate is open and HOLDS its reading through a pause
+ * rather than decaying, so a constant depth referenced to it is genuinely
+ * constant across speech and silence. An earlier scoping note called that hold
+ * a hazard; with constant depth it is the mechanism.
+ *
+ * ⚠ THE WARM-UP FALLBACK IS NOT OPTIONAL. `speechLevelDb` parks at
+ * SPEECH_INIT_HOLD_DB — above full scale — for the first 500 ms, so character
+ * referenced to it during warm-up would be inverted rather than merely absent.
+ * It falls back to the peak gathered so far, exactly as the emphasis lift does.
+ * Third time this trap has been recorded in this file.
+ *
+ * ⚠ WHAT IT COSTS: "unity below T" no longer holds for HF Loss or Soften at
+ * any non-zero setting, because a constant-depth effect by definition touches
+ * quiet material. All the character controls still default to 0, so the
+ * shipped patch keeps the guarantee — but the guarantee is now a property of
+ * the default patch rather than of the stage.
+ */
+const CHARACTER_WARMUP_FALLBACK = true
 
 const LN10_OVER_20 = Math.LN10 / 20
 
@@ -1785,6 +1831,10 @@ export class SoftClipperKernel {
     this.hystState = 0
     // One soften-limiter state per channel — see SOFTEN_REF.
     this.softenState = []
+    // The level the CHARACTER controls are measured against — see
+    // CHARACTER_REFERENCE. Filled beside T in the control loop, read by the
+    // audio loop.
+    this.charRef = new Float32Array(0)
     this.hystCoef = riseCoeff(HYST_TAU_MS, sampleRate)
     this.hfLossActive = false
     this.hfLossGain = new Float32Array(0)
@@ -1968,8 +2018,12 @@ export class SoftClipperKernel {
     }
 
     if (this.tScratch.length < n) this.tScratch = new Float32Array(n)
+
+    if (this.charRef.length < n) this.charRef = new Float32Array(n)
     if (this.trimScratch.length < n) this.trimScratch = new Float32Array(n)
     const T = this.tScratch
+    const charRef = this.charRef
+    let charRefDb = 0
     const trimGain = this.trimScratch
     const chScale = 1 / nIn
 
@@ -2317,15 +2371,37 @@ export class SoftClipperKernel {
       // removed, silently, and only on the material the feature exists for.
       T[i] = clamp(dbToLin(targetDb), T_MIN, T_MAX * dbToLin(liftDb))
 
+      // THE CHARACTER REFERENCE — see CHARACTER_REFERENCE. Speech level, not
+      // the threshold, and held flat through pauses so the room does not
+      // breathe. During warm-up the tracker is parked above full scale and
+      // means nothing yet, so the peak gathered so far stands in.
+      const speechRefDb = speechWarmupCount < this.speechWarmupTarget
+        ? linToDb(speechWarmupPeak)
+        : speechLevelDb
+      // ⚠ BOUNDED BY THE THRESHOLD, and leaving it unbounded was a real defect
+      // rather than a moved goalpost. In ADAPTIVE mode the clamp never binds —
+      // T is the speech level plus Headroom, and Headroom is 4 dB at its
+      // lowest. In FIXED mode the two decouple completely: a ceiling set at
+      // -30 dBFS under speech at -3 leaves the asymmetry offset EIGHT TIMES
+      // the threshold, which pins the curve at its reduction bound for the
+      // whole file — measured, 121 dB of attenuation before the clamp was
+      // added. A medium whose colour is referenced above the level the signal
+      // is allowed to reach is incoherent, so the reference cannot exceed T.
+      charRefDb = Math.min(speechRefDb, targetDb)
+      charRef[i] = dbToLin(charRefDb)
+
       // HF loss, driven by how far the envelope sits ABOVE the threshold — so
       // it is level-invariant, and so it is exactly absent on material the
       // stage is not working on. See HF_LOSS_CORNER_HZ.
       if (this.hfLossActive) {
-        const overDb = fastPeakDb - linToDb(T[i])
-        const target = overDb > 0
-          ? hfLossMaxDb * Math.tanh(overDb / HF_LOSS_KNEE_DB)
-          : 0
-        hfLossDb += this.hfLossSmoothCoef * (target - hfLossDb)
+        // CONSTANT DEPTH — see CHARACTER_REFERENCE. It used to be
+        // `hfLossMaxDb * tanh((fastPeakDb - T) / HF_LOSS_KNEE_DB)`, which made
+        // the shelf follow the envelope: full depth on a loud syllable, none
+        // through the pause after it. That is a room that breathes, and it is
+        // audible as pumping long before the colour itself is. The smoother
+        // stays so that moving the knob does not click; the target no longer
+        // moves with the signal.
+        hfLossDb += this.hfLossSmoothCoef * (hfLossMaxDb - hfLossDb)
         this.hfLossGain[i] = dbToLin(-hfLossDb)
       }
 
@@ -2429,7 +2505,8 @@ export class SoftClipperKernel {
         // SIGNED BY THE MEASURED SKEW, so the offset leans against the
         // waveform rather than with it — same even harmonics either way, up to
         // 7.9 dB less of everything else. See SKEW_TAU_S.
-        const off = asymFraction * asymDirectionSmoothed * t
+        const cr = charRef[i]
+        const off = asymFraction * asymDirectionSmoothed * cr
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           let before = hi[k]
@@ -2438,7 +2515,7 @@ export class SoftClipperKernel {
             // treated identically — the property every control here holds.
             // It cannot boost: the output only ever moves TOWARD the input,
             // so |y| <= max(|y_prev|, |x|) at every sample.
-            const S = SOFTEN_REF * softenScale * t
+            const S = SOFTEN_REF * softenScale * cr
             let prev = softenState
             const d = before - prev
             prev += d > S ? S : d < -S ? -S : d

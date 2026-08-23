@@ -2162,46 +2162,39 @@ function bandGainDb(freqHz, ampDb, params, sr = SR) {
   return 10 * Math.log10(b / a)
 }
 
-test('HF Loss does nothing at all until the stage is being pushed', () => {
-  // The property that lets a colouring filter live inside a transparency
-  // guarantee. Gap loss proper is level-INDEPENDENT and would be an always-on
-  // shelf, costing every user of this stage its bit-transparency; the
-  // self-erasure half vanishes with level, so quiet material sees a gain of
-  // exactly 1. Measured: 0.00 dB at every frequency at and below the
-  // threshold, at full knob.
-  const params = { thresholdMode: 'fixed', fixedThresholdDb: -14, emphasisDb: 0, hfLoss: 100 }
-  for (const freq of [100, 1000, 4000, 8000, 16000]) {
-    for (const ampDb of [-30, -20, -14]) {
-      const g = bandGainDb(freq, ampDb, params)
-      assert.ok(Math.abs(g) < 0.05,
-        `${freq} Hz at ${ampDb} dBFS moved by ${g.toFixed(3)} dB with nothing over the threshold`)
-    }
-  }
-})
-
-test('HF Loss is a shelf, and it deepens with level', () => {
-  // Both halves of the claim. The SHAPE is isolated by subtracting the same
-  // measurement with the knob at zero, so the clipping the stage was doing
-  // anyway is not counted as shelf. Measured at -2 dBFS into a -14 dBFS
-  // threshold: 0.00 / -0.17 / -1.62 / -2.87 / -3.64 dB from 100 Hz to 16 kHz.
+test('HF Loss is CONSTANT — the room does not breathe', () => {
+  // ⚠ THIS TEST REPLACES ONE THAT PINNED THE OPPOSITE, and the reversal is the
+  // point of the re-reference. HF Loss used to follow the envelope: full depth
+  // on a loud syllable, none through the pause after it. That is a room whose
+  // character changes between phrases, and a listener hears it as pumping long
+  // before they hear the colour itself. It is now a constant shelf scaled to
+  // the speech level — see CHARACTER_REFERENCE.
+  //
+  // The direct form of the claim: measure the shelf during a loud passage and
+  // during a quiet one, and they have to agree.
   const base = { thresholdMode: 'fixed', fixedThresholdDb: -14, emphasisDb: 0 }
   const shelfAt = (ampDb) => [100, 1000, 4000, 8000, 16000].map(f =>
     bandGainDb(f, ampDb, { ...base, hfLoss: 100 }) - bandGainDb(f, ampDb, { ...base, hfLoss: 0 }))
-
-  const hot = shelfAt(-2)
-  assert.ok(Math.abs(hot[0]) < 0.15, `the shelf is cutting at 100 Hz: ${hot[0].toFixed(2)} dB`)
-  for (let i = 1; i < hot.length; i++) {
-    assert.ok(hot[i] < hot[i - 1] + 0.02,
-      `the shelf is not monotonic with frequency: ${hot.map(v => v.toFixed(2)).join(', ')}`)
+  const loud = shelfAt(-2)
+  const quiet = shelfAt(-24)
+  for (let i = 0; i < loud.length; i++) {
+    assert.ok(Math.abs(loud[i] - quiet[i]) < 0.35,
+      `the shelf changed with level — the room breathes: ` +
+      `${loud.map(v => v.toFixed(2)).join(', ')} at -2 dBFS against ` +
+      `${quiet.map(v => v.toFixed(2)).join(', ')} at -24`)
   }
-  assert.ok(hot[hot.length - 1] < -2, `the shelf never reaches any depth: ${hot[4].toFixed(2)} dB`)
+})
 
-  // And it is LEVEL-dependent, which is the whole point of modelling
-  // self-erasure rather than gap loss.
-  const mild = shelfAt(-8)
-  assert.ok(mild[4] > hot[4] + 0.5,
-    `the shelf did not deepen with level: ${mild[4].toFixed(2)} at -8 dBFS against ` +
-    `${hot[4].toFixed(2)} at -2`)
+test('HF Loss is a shelf: flat low, monotonic, and it reaches depth', () => {
+  const base = { thresholdMode: 'fixed', fixedThresholdDb: -14, emphasisDb: 0 }
+  const shelf = [100, 1000, 4000, 8000, 16000].map(f =>
+    bandGainDb(f, -2, { ...base, hfLoss: 100 }) - bandGainDb(f, -2, { ...base, hfLoss: 0 }))
+  assert.ok(Math.abs(shelf[0]) < 0.15, `the shelf is cutting at 100 Hz: ${shelf[0].toFixed(2)} dB`)
+  for (let i = 1; i < shelf.length; i++) {
+    assert.ok(shelf[i] < shelf[i - 1] + 0.02,
+      `the shelf is not monotonic with frequency: ${shelf.map(v => v.toFixed(2)).join(', ')}`)
+  }
+  assert.ok(shelf[shelf.length - 1] < -2, `the shelf never reaches any depth: ${shelf[4].toFixed(2)} dB`)
 })
 
 test('HF Loss cannot boost, at any level or setting', () => {
