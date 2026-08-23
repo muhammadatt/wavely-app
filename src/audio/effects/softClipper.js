@@ -36,25 +36,17 @@ export const SCOPE_SECONDS = 4
  * The kernel is the source of truth; the panel reads this.
  *
  *   headroomDb 4-16, primary control — lower means more clipping
- *   emphasisDb 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
+ *   drive 0-100, the whole character group behind one control — asymmetry,
+ *     HF Loss and Soften at fixed internal ratios. See DRIVE_ASYM_RATIO
  *   outputTrimDb ±6, post-stage gain match for A/B
  *   thresholdMode 'adaptive' | 'fixed'
  *   fixedThresholdDb, used only in 'fixed' mode
  *   shape 'tanh2' | 'tanh3' | 'tanh4', the knee — see SHAPE_EXPONENT and
  *     SHAPE_ANCHOR_DB (the positions are depth-matched, so this changes
  *     character rather than how much the stage does)
- *   asymmetry 0-100, the even-harmonic offset — see ASYM_MAX_FRACTION. 0
- *     bypasses both the offset and the DC blocker it needs, so the default
- *     patch is bit-identical to the build before this existed
- *   hfLoss 0-100, level-dependent HF softening — see HF_LOSS_CORNER_HZ. Not
- *     gap loss, which is level-independent; this is the self-erasure half,
- *     and it is what lets the colour vanish on quiet material
- *   soften 0-100, level-scaled limit on how fast the waveform may move, applied
- *     just ahead of the curve — see SOFTEN_REF. Softens the top end AND reduces
- *     what the curve then has to do; contributes no peak reduction. ⚠ The one
- *     control that forfeits "unity below T" when engaged; 0 bypasses it
  *
- * `hysteresis` is absent from this list on purpose: it is pinned at 100 in the
+ * `emphasisDb` is absent too: it is pinned at 3 in the kernel. `hysteresis` is
+ * absent on purpose: it is pinned at 100 in the
  * kernel and has no control — see HYST_MAX_DB. Forwarding the key would let an
  * absent value overwrite the pin with undefined, so it is deliberately omitted.
  */
@@ -64,14 +56,11 @@ export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
 export function toKernelParams(params) {
   return {
     headroomDb: params.headroomDb,
-    emphasisDb: params.emphasisDb,
     outputTrimDb: params.outputTrimDb,
     thresholdMode: params.thresholdMode,
     fixedThresholdDb: params.fixedThresholdDb,
     shape: params.shape,
-    asymmetry: params.asymmetry,
-    hfLoss: params.hfLoss,
-    soften: params.soften,
+    drive: params.drive,
   }
 }
 

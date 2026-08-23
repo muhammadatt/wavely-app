@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, emphasisDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, asymmetry, hfLoss, soften,
+  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncEmphasis, syncAsymmetry, syncHfLoss, syncSoften, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -144,19 +144,6 @@ function formatDb(v) {
 
 const isFixed = computed(() => thresholdMode.value === 'fixed')
 
-/**
- * What HF Emphasis is doing right now, in one line under the knob.
- *
- * Two readings rather than a fixed caption, because the knob's effect is a
- * property of the MATERIAL and a static caption cannot say so. At 0, or on a
- * passage with nothing above the corner, there is nothing to aim at and the
- * panel says so instead of implying the control is live.
- */
-const emphasisCaption = computed(() => {
-  if (emphasisDb.value <= 0) return 'aims at consonants'
-  if (clipperLiftDb.value < 0.15) return 'nothing up there to aim at'
-  return `aiming — ceiling +${clipperLiftDb.value.toFixed(1)} dB`
-})
 
 /**
  * Headroom and Fixed dBFS are ONE control, and used to be two.
@@ -343,103 +330,22 @@ const SCOPE_H = 236
           </p>
         </div>
         <div class="w-[74px]">
-          <!-- AIMS the stage, and the caption names that rather than the
-               mechanism. "harshness, not tone" shipped here and was the wrong
-               shape of statement twice over: it described what the control is
-               not, and the thing it was defending against was — as shipped —
-               true. Uncompensated, raising this knob tripled peak reduction
-               on any HF-rich passage, so "turn it up to add harshness" was a
-               fair reading of the measurements rather than a misconception.
-               With the lift compensation in place depth holds and what is
-               left is pure aim: measured on two bursts of identical peak
-               amplitude, 110 Hz stays at 1.88 dB of reduction across the
-               whole knob while a fricative goes 3.00 -> 5.84.
-
-               The live figure is the compensation itself, and it doubles as
-               the honest answer to "is this knob doing anything here?" — on
-               material with nothing above 3.5 kHz to aim at, it reads 0.0. -->
+          <!-- ONE KNOB FOR THE WHOLE CHARACTER GROUP — asymmetry, HF Loss and
+               Soften at fixed internal ratios, see DRIVE_ASYM_RATIO. They were
+               four separate colour controls defaulting to 0 on a panel whose
+               identity is transparency, and nobody sets them independently on
+               purpose. 0 bypasses all three, so the stock patch is exactly the
+               clipper and nothing else. -->
           <Knob
-            :model-value="emphasisDb"
-            @update:model-value="syncEmphasis"
-            :min="0" :max="12" :step="0.5"
-            label="HF Emphasis" :accent="ACCENT" :format-value="formatGain"
-            :value-font-px="13"
-            :disabled="!clipperPreview"
-          />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            {{ emphasisCaption }}
-          </p>
-        </div>
-        <div class="w-[74px]">
-          <!-- THE ONLY CONTROL HERE THAT ADDS SOMETHING RATHER THAN REMOVING
-               IT, and the caption says which harmonics because "warmth" alone
-               is unfalsifiable — this panel has already shipped one caption
-               that described what a control was not.
-
-               The curve is odd symmetric, so it generates odd harmonics and
-               NOTHING else: measured, H2 sits at -144 dB on a tone and the
-               even-order energy on real narration is exactly zero. This offset
-               is the only way to reach second and fourth order, which is what
-               tube and tape warmth actually is. It is additive rather than a
-               rebalancing — H3 moves by at most 1 dB across the whole sweep —
-               so it colours without changing how hard the stage works. -->
-          <Knob
-            :model-value="asymmetry"
-            @update:model-value="syncAsymmetry"
+            :model-value="drive"
+            @update:model-value="syncDrive"
             :min="0" :max="100" :step="1"
-            label="Asymmetry" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            label="Drive" :accent="ACCENT" :format-value="v => v.toFixed(0)"
             :value-font-px="13"
             :disabled="!clipperPreview"
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            even-order warmth
-          </p>
-        </div>
-        <div class="w-[74px]">
-          <!-- ⚠ NOT GAP LOSS, whatever the tape literature suggests. Gap loss
-               is the reproduce head averaging flux across a finite gap —
-               sinc(pi*g/lambda) — which depends on gap width, tape speed and
-               frequency and NOT on level. Modelled faithfully it would be an
-               always-on shelf, and an always-on shelf costs this stage its
-               bit-transparency below the threshold.
-
-               What makes tape actually lose top end when pushed is
-               short-wavelength self-erasure, which is strongly level-dependent
-               — and that is the version worth having here, because a colour
-               that vanishes with level leaves quiet material untouched. -->
-          <Knob
-            :model-value="hfLoss"
-            @update:model-value="syncHfLoss"
-            :min="0" :max="100" :step="1"
-            label="HF Loss" :accent="ACCENT" :format-value="v => v.toFixed(0)"
-            :value-font-px="13"
-            :disabled="!clipperPreview"
-          />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            softens under level
-          </p>
-        </div>
-        <div class="w-[74px]">
-          <!-- THE TAPE EFFECT "Hysteresis" IS NAMED AFTER AND IS NOT: a limit
-               on how fast the waveform may move, scaled to the threshold and
-               applied just ahead of the curve. It softens the top end and cuts
-               what the curve then has to do (measured at matched output peak:
-               3.9 dB less curve distortion, 10 dB less above 8 kHz at the top
-               of the knob) — and contributes no peak reduction at all, which
-               is why it is captioned as tone.
-               ⚠ The one control here that gives up bit-transparency below the
-               threshold. It has to: everything a voice does is far under the
-               bound that would preserve it. See SOFTEN_REF. -->
-          <Knob
-            :model-value="soften"
-            @update:model-value="syncSoften"
-            :min="0" :max="100" :step="1"
-            label="Soften" :accent="ACCENT" :format-value="v => v.toFixed(0)"
-            :value-font-px="13"
-            :disabled="!clipperPreview"
-          />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            rounds the fastest edges
+            tape character
           </p>
         </div>
         <div class="w-[74px]">

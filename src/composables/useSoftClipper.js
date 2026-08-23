@@ -12,14 +12,11 @@ export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
 // Singleton reactive state shared between the sidebar trigger and the modal —
 // same pattern as useFET1176.js / useLA2A.js.
 const headroomDb = ref(SOFT_CLIPPER_DEFAULTS.headroomDb)
-const emphasisDb = ref(SOFT_CLIPPER_DEFAULTS.emphasisDb)
 const outputTrimDb = ref(SOFT_CLIPPER_DEFAULTS.outputTrimDb)
 const thresholdMode = ref(SOFT_CLIPPER_DEFAULTS.thresholdMode)
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
-const asymmetry = ref(SOFT_CLIPPER_DEFAULTS.asymmetry)
-const hfLoss = ref(SOFT_CLIPPER_DEFAULTS.hfLoss)
-const soften = ref(SOFT_CLIPPER_DEFAULTS.soften)
+const drive = ref(SOFT_CLIPPER_DEFAULTS.drive)
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
@@ -40,14 +37,11 @@ let meterId = null
 function currentParams() {
   return {
     headroomDb: headroomDb.value,
-    emphasisDb: emphasisDb.value,
     outputTrimDb: outputTrimDb.value,
     thresholdMode: thresholdMode.value,
     fixedThresholdDb: fixedThresholdDb.value,
     shape: shape.value,
-    asymmetry: asymmetry.value,
-    hfLoss: hfLoss.value,
-    soften: soften.value,
+    drive: drive.value,
   }
 }
 
@@ -155,10 +149,7 @@ export function useSoftClipper() {
   }
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
-  const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v) }
-  const syncAsymmetry = (v) => { asymmetry.value = v; pushParam('asymmetry', v) }
-  const syncHfLoss = (v) => { hfLoss.value = v; pushParam('hfLoss', v) }
-  const syncSoften = (v) => { soften.value = v; pushParam('soften', v) }
+  const syncDrive = (v) => { drive.value = v; pushParam('drive', v) }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => { fixedThresholdDb.value = v; pushParam('fixedThresholdDb', v) }
 
@@ -226,14 +217,11 @@ export function useSoftClipper() {
 
   return {
     headroomDb,
-    emphasisDb,
     outputTrimDb,
     thresholdMode,
     fixedThresholdDb,
     shape,
-    asymmetry,
-    hfLoss,
-    soften,
+    drive,
     clipperPreview,
     clipperReduction,
     clipperEngagedPct,
@@ -247,10 +235,7 @@ export function useSoftClipper() {
     togglePreview,
     toggleDelta,
     syncHeadroom,
-    syncEmphasis,
-    syncAsymmetry,
-    syncHfLoss,
-    syncSoften,
+    syncDrive,
     syncOutputTrim,
     syncFixedThreshold,
     setThresholdMode,

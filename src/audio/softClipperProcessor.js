@@ -1336,6 +1336,38 @@ const SOFTEN_EPSILON = 1e-4
  */
 const CHARACTER_WARMUP_FALLBACK = true
 
+/**
+ * DRIVE — one knob for the whole character group.
+ *
+ * Asymmetry, HF Loss and Soften are three views of the same idea: how hard the
+ * material is being pushed into the medium. Nobody sets them independently on
+ * purpose, and shipped separately they were four colour knobs defaulting to 0
+ * on a panel whose identity is transparency. Drive replaces them with one
+ * control and fixes the ratios here, where they can be measured.
+ *
+ * THE RATIOS ARE NOT EQUAL, and the reason is how differently the three scale.
+ * Measured solo at full, on three narrators:
+ *
+ *   asymmetry  adds -29.1 / -33.5 / -35.4 dBc and changes HF by 0.00 dB
+ *   HF Loss    cuts  -2.38 / -3.93 / -2.16 dB above 4 kHz, adds no distortion
+ *   Soften     cuts  -8.41 / -11.92 / -3.27 dB above 4 kHz
+ *
+ * Soften at full is drastic — it removes nearly as much as the signal contains
+ * — so it tops out partway. Asymmetry is mild at full and runs the whole way.
+ *
+ * ⚠ SOFTEN IS ALSO THE LEAST PREDICTABLE MEMBER, and that is the weakest part
+ * of this design. At a single setting it ranges across the three files by
+ * nearly 5 dB (at soften 65: -1.66 / -4.81 / -0.06 dB above 4 kHz) because it
+ * depends on how fast each voice's waveform moves relative to its own speech
+ * level, which is a property of the speaker and the room. HF Loss, a fixed
+ * linear filter, spans 1.7 dB on the same files. So the same Drive setting
+ * will colour two narrators by noticeably different amounts, and the knob
+ * cannot be calibrated out of that.
+ */
+const DRIVE_ASYM_RATIO = 1
+const DRIVE_HF_LOSS_RATIO = 1
+const DRIVE_SOFTEN_RATIO = 0.65
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
@@ -1367,21 +1399,22 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // reduction rather than on output peak. This default and the shape table are
   // still coupled.
   headroomDb: 7.0,
-  emphasisDb: 6, // 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
+  // ⚠ PINNED AT 3 AND NOT EXPOSED. Peak-matched, 0 is the cleanest setting by
+  // 2.2-3.4 dB — the only measured evidence there is — but the knob's job is
+  // AIMING, deciding which transients the curve works on, and that has never
+  // been measured. 3 keeps the aiming at roughly half strength for about
+  // 0.7 dB of the cleanliness cost, and keeps the lift compensation live and
+  // justified rather than turning it into dead code. A compromise with no
+  // measurement behind the specific value, recorded as such.
+  emphasisDb: 3,
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
   fixedThresholdDb: -10, // used only in 'fixed' mode
   shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
-  // 0-100, share of ASYM_MAX_FRACTION. 0 bypasses the offset AND the DC
-  // blocker entirely, which is what keeps the shipped patch bit-identical to
-  // the build before even harmonics existed.
-  asymmetry: 0,
-  // 0-100, share of HF_LOSS_MAX_DB. 0 bypasses the shelf entirely.
-  hfLoss: 0,
-  // 0-100, geometric into SOFTEN_MIN_SCALE. 0 bypasses the limiter entirely,
-  // which is what keeps "unity below T" — see SOFTEN_REF, the one guarantee this
-  // control forfeits when engaged.
-  soften: 0,
+  // 0-100, the whole character group behind one control — see DRIVE_ASYM_RATIO.
+  // 0 bypasses all three, so the shipped patch is bit-identical to the build
+  // before any of them existed.
+  drive: 0,
   // 0-100, share of HYST_MAX_DB. PINNED AT 100 and not exposed — see
   // HYST_MAX_DB. Kept as a param only so the tests can run 0 against 100.
   hysteresis: 100,
@@ -2059,11 +2092,15 @@ export class SoftClipperKernel {
     // Asymmetry, as a fraction of the threshold — see ASYM_MAX_FRACTION. The
     // offset itself is per-sample because T is, so only the fraction is
     // resolved here.
-    const asymFraction = clamp(p.asymmetry ?? 0, 0, 100) / 100 * ASYM_MAX_FRACTION
-    const hfLossMaxDb = clamp(p.hfLoss ?? 0, 0, 100) / 100 * HF_LOSS_MAX_DB
+    // The three character controls are derived from one knob — see
+    // DRIVE_ASYM_RATIO. An explicit key still overrides, which is how the
+    // tests reach each of them individually.
+    const driveAmount = clamp(p.drive ?? 0, 0, 100)
+    const asymFraction = clamp(p.asymmetry ?? driveAmount * DRIVE_ASYM_RATIO, 0, 100) / 100 * ASYM_MAX_FRACTION
+    const hfLossMaxDb = clamp(p.hfLoss ?? driveAmount * DRIVE_HF_LOSS_RATIO, 0, 100) / 100 * HF_LOSS_MAX_DB
     // 0-1 rather than dB now: the state itself is in dB, so this only scales
     // it. Pinned at 1 in practice — see HYST_MAX_DB.
-    const softenAmount = clamp(p.soften ?? 0, 0, 100) / 100
+    const softenAmount = clamp(p.soften ?? driveAmount * DRIVE_SOFTEN_RATIO, 0, 100) / 100
     const softenActive = softenAmount > SOFTEN_EPSILON
     const softenScale = softenActive ? Math.pow(SOFTEN_MIN_SCALE, softenAmount) : 1
     const hystScale = clamp(p.hysteresis ?? 0, 0, 100) / 100

@@ -1875,8 +1875,13 @@ test('asymmetry 0 is bit-identical, and does not engage the DC blocker', () => {
   for (let i = 0; i < signal.length; i++) {
     assert.equal(withParam[i], without[i], `asymmetry 0 altered sample ${i}`)
   }
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.asymmetry, 0,
+  // ⚠ THE THREE CHARACTER PARAMS NO LONGER APPEAR IN THE DEFAULTS — they are
+  // derived from `drive`, which is the only one on the panel. See
+  // DRIVE_ASYM_RATIO. What has to hold is that drive 0 leaves all three off.
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.drive, 0,
     'the shipped default engages a colouring stage')
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.asymmetry, undefined,
+    'asymmetry is still its own default — it should be derived from drive')
 })
 
 test('asymmetry keeps the guarantees the stage is allowed to keep', () => {
@@ -2245,7 +2250,9 @@ test('HF Loss is level-invariant and bypassed at zero', () => {
   for (let i = 0; i < probe.length; i++) {
     assert.equal(withParam[i], without[i], `hfLoss 0 altered sample ${i}`)
   }
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hfLoss, 0, 'the shipped default engages HF Loss')
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.drive, 0, 'the shipped default engages HF Loss through drive')
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hfLoss, undefined,
+    'hfLoss is still its own default — it should be derived from drive')
 })
 
 test('the recorded transfer slopes are the real ones, and stay clear of folding', () => {
@@ -2493,7 +2500,9 @@ test('soften is absent at zero and never boosts', () => {
   for (let i = 0; i < sig.length; i++) {
     assert.equal(withParam[i], without[i], `soften 0 altered sample ${i}`)
   }
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.soften, 0, 'the shipped default engages soften')
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.drive, 0, 'the shipped default engages soften through drive')
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.soften, undefined,
+    'soften is still its own default — it should be derived from drive')
 
   // NEVER BOOSTS. The limiter only ever moves toward its input, so
   // |y| <= max(|y_prev|, |x|) at every sample and the bound follows.
@@ -2570,4 +2579,85 @@ test('at scale 1 the soften limit provably cannot bind — Bernstein', () => {
   const bound = Math.PI * 0.5   // (pi / L) * A * L, walked at the base rate
   assert.ok(worst <= bound + 1e-6,
     `a Nyquist-limited signal exceeded Bernstein's bound: ${worst} > ${bound}`)
+})
+
+// ── Drive (DRIVE_ASYM_RATIO) ────────────────────────────────────────────────
+
+test('drive 0 is bit-identical, and drive is monotonic', () => {
+  const sig = concat(speechLike(4, 0.7, 71), speechLike(3, 0.7, 79))
+  const base = { headroomDb: 7.0, shape: 'tanh3' }
+
+  // ABSENT AT ZERO. Drive stands in for three controls, so this is the one
+  // assertion that keeps the stock patch equal to the clipper and nothing
+  // else — the property that lets a colouring group live inside a stage whose
+  // identity is transparency.
+  const zero = processSoftClipperBuffer([sig], SR, { ...base, drive: 0 }).channelData[0]
+  const none = processSoftClipperBuffer([sig], SR, base).channelData[0]
+  for (let i = 0; i < sig.length; i++) {
+    assert.equal(zero[i], none[i], `drive 0 altered sample ${i}`)
+  }
+
+  // MONOTONIC. The three components have different shapes and one of them
+  // (Soften) is geometric in its own knob, so "more drive is more character"
+  // is a property of the RATIOS rather than of any one control.
+  const added = [25, 50, 75, 100].map(d => {
+    const y = processSoftClipperBuffer([sig], SR, { ...base, drive: d }).channelData[0]
+    let e = 0, r = 0, n = 0
+    for (let i = Math.round(SR); i < sig.length; i++) { e += (y[i] - zero[i]) ** 2; r += zero[i] ** 2; n++ }
+    return 20 * Math.log10(Math.sqrt(e / n) / Math.sqrt(r / n))
+  })
+  for (let i = 1; i < added.length; i++) {
+    assert.ok(added[i] > added[i - 1] + 0.5,
+      `drive is not monotonic: ${added.map(v => v.toFixed(1)).join(' -> ')} dBc`)
+  }
+
+  // ⚠ AND IT HAS TO REACH ALL THREE. Monotonicity is satisfied by any ONE of
+  // them being wired up — measured, cutting drive's path to Asymmetry or to
+  // Soften left every other assertion here passing. Each component is pinned
+  // by overriding it back to 0 and requiring the output to change.
+  //
+  // ⚠ ON A DIFFERENT PROBE, and that is not incidental. `speechLike` does not
+  // move fast enough for Soften to engage AT ALL at this ratio — measured,
+  // pinning it to 0 changes the output by 4e-8, so the wiring check silently
+  // could not see it. Twelfth time synthetic material has been too clean to
+  // answer the question asked of it. A sibilant bed reaches it.
+  const fast = sibilantSpeech(5, 0.7, 91, 0.8)
+  const full = processSoftClipperBuffer([fast], SR, { ...base, drive: 100 }).channelData[0]
+  for (const component of ['asymmetry', 'hfLoss', 'soften']) {
+    const without = processSoftClipperBuffer([fast], SR,
+      { ...base, drive: 100, [component]: 0 }).channelData[0]
+    let worst = 0
+    for (let i = Math.round(SR); i < fast.length; i++) {
+      worst = Math.max(worst, Math.abs(full[i] - without[i]))
+    }
+    assert.ok(worst > 1e-5,
+      `drive does not reach ${component}: pinning it to 0 changed nothing (worst ${worst})`)
+  }
+})
+
+test('drive does not move loudness', () => {
+  // A character control that changes level cannot be A/B'd honestly, and this
+  // one drives three things at once so the risk compounds. Measured on real
+  // narration the whole sweep moves output RMS by 0.11-0.21 dB.
+  const sig = concat(speechLike(4, 0.7, 83), speechLike(3, 0.7, 89))
+  const base = { headroomDb: 7.0, shape: 'tanh3' }
+  const level = d => {
+    const y = processSoftClipperBuffer([sig], SR, { ...base, drive: d }).channelData[0]
+    let e = 0, n = 0
+    for (let i = Math.round(SR); i < sig.length; i++) { e += y[i] ** 2; n++ }
+    return 20 * Math.log10(Math.sqrt(e / n))
+  }
+  const a = level(0), b = level(100)
+  assert.ok(Math.abs(b - a) < 0.6, `drive moved output RMS ${a.toFixed(2)} -> ${b.toFixed(2)} dBFS`)
+})
+
+test('HF Emphasis is pinned and off the surface', () => {
+  // Pinned at 3: peak-matched, 0 is cleanest by 2.2-3.4 dB, but the knob's job
+  // is AIMING and that has never been measured. 3 keeps the aiming at roughly
+  // half strength and keeps the lift compensation live rather than dead code.
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb, 3,
+    'the HF Emphasis pin moved')
+  const absent = new SoftClipperKernel(SR)
+  absent.setParams({ headroomDb: 7.0, shape: 'tanh3' })
+  assert.equal(absent.params.emphasisDb, 3, 'an absent emphasisDb key unpinned the emphasis')
 })
