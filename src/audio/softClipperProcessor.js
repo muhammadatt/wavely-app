@@ -244,6 +244,7 @@
  * own. The clip curve is the only thing that needs headroom above Nyquist.
  */
 
+import { LookaheadLimiter } from './dsp/lookaheadLimiter.js'
 import {
   Oversampler, OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES,
   COMPRESSOR_OVERSAMPLE, COMPRESSOR_OVERSAMPLE_8X,
@@ -1369,6 +1370,42 @@ const DRIVE_ASYM_RATIO = 1
 const DRIVE_HF_LOSS_RATIO = 1
 const DRIVE_SOFTEN_RATIO = 0.65
 
+/**
+ * HYBRID PEAK PATH — a lookahead limiter ahead of the curve.
+ *
+ * The curve takes peaks down by reshaping samples, which generates genuine
+ * in-band harmonics: −16 dBc at 13 dB of drive, and 8× oversampling changes it
+ * by nothing, so the distortion is not fold-back and cannot be filtered away.
+ * The limiter takes the same peaks down with a smooth gain envelope instead —
+ * its error is intermodulation and slight pumping rather than a harmonic series
+ * on the voice. Running it first means most of the peak reduction stops passing
+ * through the distortion-generating path at all, and the curve is left catching
+ * what slips past: intersample peaks and whatever the smoothing lets through.
+ *
+ * THE KNOB IS A BALANCE, NOT A DEPTH. The limiter aims at a ceiling ABOVE the
+ * stage's threshold, and the knob closes that gap: at 0 the ceiling is
+ * LIMITER_MAX_ABOVE_DB above T and the limiter is bypassed outright; at 100 it
+ * aims at T itself and does as much of the work as it can. So the knob decides
+ * how the peak control is SHARED, and Headroom still decides how much there is.
+ *
+ * ⚠ IT ADDS LATENCY, and that is not free. The limiter's is 2L — about 4 ms at
+ * the default half-width, against the oversampler's ~1 ms — so the stage's
+ * reported latency roughly quintuples while it is engaged. The offline apply
+ * path reads `latencySamples` and is correct either way; toggling it under a
+ * running preview shifts the timeline by that much, which is why it is a
+ * research control rather than something to automate.
+ *
+ * ⚠ THE LIMITER'S GAIN REDUCTION IS DELIBERATELY NOT COUNTED AS RESIDUAL. The
+ * dry side of the residual measurement is fed POST-limiter, so RESIDUAL keeps
+ * meaning "what the curve added" rather than silently absorbing intended gain
+ * change. Conflating the two is exactly what made a direct residual comparison
+ * between the limiter and the curve meaningless.
+ */
+const LIMITER_MAX_ABOVE_DB = 12
+
+/** Lookahead half-width in ms; total added latency is twice this. */
+const LIMITER_LOOKAHEAD_MS = 2
+
 const LN10_OVER_20 = Math.LN10 / 20
 
 export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
@@ -1412,6 +1449,10 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
   fixedThresholdDb: -10, // used only in 'fixed' mode
   shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
+  // 0-100, how much of the peak control the lookahead limiter takes from the
+  // curve — see LIMITER_MAX_ABOVE_DB. 0 bypasses it entirely, including its
+  // latency, so the shipped patch is bit-identical to the build before it.
+  limiter: 0,
   // 0-100, the whole character group behind one control — see DRIVE_ASYM_RATIO.
   // 0 bypasses all three, so the shipped patch is bit-identical to the build
   // before any of them existed.
@@ -1806,6 +1847,10 @@ export class SoftClipperKernel {
    *   COMPRESSOR_OVERSAMPLE_8X.
    */
   constructor(sampleRate, options = {}) {
+    this.limiters = []
+    this.limiterHalfWidth = Math.max(1, Math.round((LIMITER_LOOKAHEAD_MS / 1000) * sampleRate))
+    this.limiterActive = false
+    this.limiterScratch = new Float32Array(0)
     this.osProfile = options.oversample === 8 ? COMPRESSOR_OVERSAMPLE_8X : COMPRESSOR_OVERSAMPLE
     this.osFactor = this.osProfile.factor
     this.osLatency = this.osProfile.latencySamples
@@ -1989,7 +2034,10 @@ export class SoftClipperKernel {
    * shift the timeline under a running preview.
    */
   get latencySamples() {
-    return this.osLatency
+    // ⚠ VARIABLE. The limiter's delay is only present while it is engaged, so
+    // this changes with the parameter — see LIMITER_MAX_ABOVE_DB. The offline
+    // path reads it per render and is correct either way.
+    return this.osLatency + (this.limiterActive ? 2 * this.limiterHalfWidth : 0)
   }
 
   /**
@@ -2107,6 +2155,10 @@ export class SoftClipperKernel {
     // The three character controls are derived from one knob — see
     // DRIVE_ASYM_RATIO. An explicit key still overrides, which is how the
     // tests reach each of them individually.
+    const limiterAmount = clamp(p.limiter ?? 0, 0, 100) / 100
+    this.limiterActive = limiterAmount > 1e-4
+    // The limiter aims this far ABOVE T; the knob closes the gap.
+    const limiterCeilFactor = dbToLin(LIMITER_MAX_ABOVE_DB * (1 - limiterAmount))
     const driveAmount = clamp(p.drive ?? 0, 0, 100)
     // ⚠ TEMPORARY: `driveRatios` lets the panel move the split by ear — see
     // softClipperTuning.js. Absent, which is the shipped case, the constants
@@ -2519,6 +2571,15 @@ export class SoftClipperKernel {
 
     while (this.softenState.length < nOut) this.softenState.push(0)
     while (this.oversamplers.length < nOut) this.oversamplers.push(new Oversampler(this.osProfile))
+    if (this.limiterActive) {
+      while (this.limiters.length < nOut) this.limiters.push(new LookaheadLimiter(this.limiterHalfWidth))
+      if (this.limiterScratch.length < n) this.limiterScratch = new Float32Array(n)
+    }
+    // ⚠ THE OVERSAMPLER'S LATENCY ONLY, not the stage's. The dry side of this
+    // delay is fed POST-limiter, so it already carries the limiter's 2L —
+    // adding it again over-delays the dry signal and the "residual" becomes
+    // the difference between two unrelated moments. Measured when it was
+    // wrong: +4.9 dBc, i.e. larger than the signal.
     const D = this.osLatency
     while (this.dryDelay.length < nOut) this.dryDelay.push(new Float32Array(D))
     this.preEmphasis.ensureChannels(nOut)
@@ -2555,11 +2616,25 @@ export class SoftClipperKernel {
     let drySq = 0
 
     for (let ch = 0; ch < nOut; ch++) {
-      const input = inputChannels[ch < nIn ? ch : nIn - 1]
+      let input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
       const oversampler = this.oversamplers[ch]
 
       let stagedInput = input
+      if (this.limiterActive) {
+        // The limiter reads T for the sample ARRIVING, and its own smoothing
+        // delays the resulting gain so it lands on that sample when it emerges
+        // — which is why a moving threshold is safe here and is its own test.
+        const lim = this.limiters[ch]
+        const scratch = this.limiterScratch
+        for (let i = 0; i < n; i++) scratch[i] = lim.processSample(input[i], T[i] * limiterCeilFactor)
+        // ⚠ THE DRY SIDE OF THE RESIDUAL IS FED FROM HERE, post-limiter. The
+        // limiter's gain reduction is intended, not distortion, and counting
+        // it as residual would make the readout report the balance knob rather
+        // than what the curve added. See LIMITER_MAX_ABOVE_DB.
+        input = scratch
+        stagedInput = scratch
+      }
       if (this.emphasisActive) {
         // Pre-emphasis runs at the base rate, in place into a scratch view —
         // BiquadCascade.process supports output aliasing input.

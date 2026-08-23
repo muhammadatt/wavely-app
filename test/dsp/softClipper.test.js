@@ -2661,3 +2661,107 @@ test('HF Emphasis is pinned and off the surface', () => {
   absent.setParams({ headroomDb: 7.0, shape: 'tanh3' })
   assert.equal(absent.params.emphasisDb, 3, 'an absent emphasisDb key unpinned the emphasis')
 })
+
+// ── Hybrid peak path (LIMITER_MAX_ABOVE_DB) ─────────────────────────────────
+
+test('the limiter is absent at zero, latency included', () => {
+  // The stock patch has to be the build before the limiter existed — not
+  // merely similar. A bypass that still runs the delay would shift every
+  // user's timeline by 4 ms for a control none of them touched.
+  const sig = concat(speechLike(4, 0.7, 97), speechLike(3, 0.7, 101))
+  const base = { headroomDb: 7.0, shape: 'tanh3' }
+  const a = processSoftClipperBuffer([sig], SR, { ...base, limiter: 0 })
+  const b = processSoftClipperBuffer([sig], SR, base)
+  assert.equal(a.latencySamples, b.latencySamples, 'limiter 0 changed the latency')
+  assert.equal(a.latencySamples, SOFT_CLIPPER_LATENCY_SAMPLES)
+  for (let i = 0; i < sig.length; i++) {
+    assert.equal(a.channelData[0][i], b.channelData[0][i], `limiter 0 altered sample ${i}`)
+  }
+})
+
+test('the balance moves peak control off the curve and onto the limiter', () => {
+  // THE CLAIM THE HYBRID IS FOR. Raising the knob should leave the curve with
+  // progressively less to do — that is the whole point, since the curve is the
+  // part that makes harmonics. Measured on real narration the curve's peak
+  // reduction runs 3.57 -> 2.45 -> 0.85 -> 0.02 dB across the knob.
+  // ⚠ THE PROBE NEEDS REAL PEAKS, and plain speechLike does not have them —
+  // at any sane Headroom the curve reaches 0.08 dB on it and the gradation is
+  // invisible. Plosive-shaped outliers on top of it are what actually reach
+  // the curve. Thirteenth time synthetic material has been too clean.
+  const sig = speechLike(6, 0.55, 103)
+  {
+    const burst = Math.round(0.03 * SR)
+    for (let k = 0; k < 12; k++) {
+      const at = Math.round((0.4 + k * 0.45) * SR)
+      for (let j = 0; j < burst && at + j < sig.length; j++) {
+        sig[at + j] += 0.9 * Math.sin((Math.PI * j) / burst) ** 2 * Math.sin((2 * Math.PI * 110 * j) / SR)
+      }
+    }
+  }
+  const curveWork = (limiter) => {
+    const k = new SoftClipperKernel(SR)
+    k.setParams({ headroomDb: 2.0, shape: 'tanh3', limiter })
+    const o = new Float32Array(sig.length)
+    let gr = 0
+    for (let off = 0; off < sig.length; off += 128) {
+      const n = Math.min(128, sig.length - off)
+      k.process([sig.subarray(off, off + n)], [o.subarray(off, off + n)], n)
+      if (off > SR) gr = Math.max(gr, k.getMetering().maxReductionDb)
+    }
+    return gr
+  }
+  const work = [0, 50, 100].map(curveWork)
+  assert.ok(work[2] < work[0] * 0.5,
+    `the limiter did not take work off the curve: ${work.map(v => v.toFixed(2)).join(' -> ')} dB`)
+  for (let i = 1; i < work.length; i++) {
+    assert.ok(work[i] <= work[i - 1] + 0.2,
+      `curve work did not fall monotonically: ${work.map(v => v.toFixed(2)).join(' -> ')} dB`)
+  }
+  // ⚠ AND THE MIDDLE HAS TO BE GENUINELY IN THE MIDDLE. Dropping the ceiling
+  // factor — so the limiter always aims at T regardless of the knob — turns
+  // the balance into an on/off switch and still satisfies both assertions
+  // above, because the endpoints are unchanged and the sequence stays
+  // monotonic. Only the gradation catches it.
+  assert.ok(work[1] > work[2] + 0.5 && work[1] < work[0] - 0.2,
+    `the balance is not gradual, it is a switch: ${work.map(v => v.toFixed(2)).join(' -> ')} dB`)
+})
+
+test('the reported latency matches where the audio actually is', () => {
+  // ⚠ THE LATENCY IS VARIABLE, so a caller that assumed the constant would
+  // misalign by 4 ms. An impulse is the cleanest way to ask where the output
+  // really landed.
+  for (const limiter of [0, 100]) {
+    const N = SR
+    const x = new Float32Array(N)
+    x[N >> 1] = 0.02      // well under any threshold, so nothing reshapes it
+    const r = processSoftClipperBuffer([x], SR, { headroomDb: 7.0, shape: 'tanh3', limiter })
+    let at = -1, best = 0
+    for (let i = 0; i < N; i++) {
+      const v = Math.abs(r.channelData[0][i])
+      if (v > best) { best = v; at = i }
+    }
+    assert.equal(at - (N >> 1), r.latencySamples,
+      `limiter ${limiter}: impulse landed ${at - (N >> 1)} samples late, reported ${r.latencySamples}`)
+  }
+})
+
+test('the residual reports the curve, not the limiter', () => {
+  // ⚠ THE DISTINCTION THAT MADE THE HEAD-TO-HEAD COMPARISON MEANINGLESS. The
+  // limiter's gain reduction is intended, not distortion; feeding the dry side
+  // of the residual post-limiter is what keeps RESIDUAL meaning "what the
+  // curve added". With the limiter doing all the work the curve is idle, so
+  // the residual has to fall, not rise.
+  const sig = concat(speechLike(5, 0.8, 109), speechLike(4, 0.8, 113))
+  const residual = (limiter) => {
+    const k = new SoftClipperKernel(SR)
+    k.setParams({ headroomDb: 5.0, shape: 'tanh3', limiter })
+    const o = new Float32Array(sig.length)
+    for (let off = 0; off < sig.length; off += 128) {
+      const n = Math.min(128, sig.length - off)
+      k.process([sig.subarray(off, off + n)], [o.subarray(off, off + n)], n)
+    }
+    return k.residualDbc
+  }
+  assert.ok(residual(100) < residual(0) - 3,
+    `the residual did not fall as the curve went idle: ${residual(0).toFixed(1)} -> ${residual(100).toFixed(1)} dBc`)
+})

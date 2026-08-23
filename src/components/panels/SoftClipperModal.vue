@@ -15,11 +15,11 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive, tuningOn, driveRatios,
+  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive, limiter, tuningOn, driveRatios,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncRatio, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncLimiter, syncRatio, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
 } = useSoftClipper()
@@ -346,6 +346,27 @@ const SCOPE_H = 236
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             tape character
+          </p>
+        </div>
+        <div class="w-[74px]">
+          <!-- THE HYBRID PEAK PATH. A lookahead limiter ahead of the curve,
+               taking peaks down with a smooth gain envelope instead of by
+               reshaping samples — so its error is intermodulation and slight
+               pumping rather than the harmonic series the curve makes. The
+               knob is a BALANCE: it decides how the peak control is shared,
+               not how much of it there is. Headroom still sets that.
+               ⚠ It adds about 4 ms of latency while engaged, against the
+               oversampler's 1 ms. See LIMITER_MAX_ABOVE_DB. -->
+          <Knob
+            :model-value="limiter"
+            @update:model-value="syncLimiter"
+            :min="0" :max="100" :step="1"
+            label="Limiter" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            :value-font-px="13"
+            :disabled="!clipperPreview"
+          />
+          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            {{ limiter > 0 ? 'gain, not shaping (+4 ms)' : 'gain, not shaping' }}
           </p>
         </div>
         <div class="w-[74px]">

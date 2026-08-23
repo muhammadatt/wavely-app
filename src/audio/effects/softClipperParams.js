@@ -18,6 +18,9 @@ import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
  * The kernel is the source of truth; the panel reads this.
  *
  *   headroomDb 4-16, primary control — lower means more clipping
+ *   limiter 0-100, how much of the peak control the lookahead limiter takes
+ *     from the curve — see LIMITER_MAX_ABOVE_DB. 0 bypasses it entirely,
+ *     including its latency. ⚠ It CHANGES THE STAGE'S LATENCY while engaged
  *   drive 0-100, the whole character group behind one control — asymmetry,
  *     HF Loss and Soften at fixed internal ratios. See DRIVE_ASYM_RATIO
  *   outputTrimDb ±6, post-stage gain match for A/B
@@ -42,6 +45,8 @@ export const SOFT_CLIPPER_DEFAULTS = {
   // that was doing nothing. Null rather than undefined so the key genuinely
   // exists; the kernel's `ratios?.x ?? CONSTANT` treats null as absent.
   driveRatios: null,
+  // Present so `setParam` accepts it — the guard drops anything absent here.
+  limiter: 0,
 }
 
 /** Params are already kernel-shaped — no renaming needed unlike FET1176/LA2A. */
@@ -53,6 +58,7 @@ export function toKernelParams(params) {
     fixedThresholdDb: params.fixedThresholdDb,
     shape: params.shape,
     drive: params.drive,
+    limiter: params.limiter,
     // ⚠ TEMPORARY tuning override — see softClipperTuning.js.
     driveRatios: params.driveRatios,
   }

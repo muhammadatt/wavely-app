@@ -55,7 +55,7 @@ test('every param the panel can set survives the setParam guard', () => {
   // the worklet — so what has to be pinned is that the panel's surface and the
   // guard's allowlist agree.
   for (const key of ['headroomDb', 'outputTrimDb', 'thresholdMode',
-    'fixedThresholdDb', 'shape', 'drive', 'driveRatios']) {
+    'fixedThresholdDb', 'shape', 'drive', 'driveRatios', 'limiter']) {
     assert.ok(key in SOFT_CLIPPER_DEFAULTS,
       `${key} is not in SOFT_CLIPPER_DEFAULTS — setParam will drop it silently`)
   }

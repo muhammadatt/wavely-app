@@ -18,6 +18,7 @@ const thresholdMode = ref(SOFT_CLIPPER_DEFAULTS.thresholdMode)
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
 const drive = ref(SOFT_CLIPPER_DEFAULTS.drive)
+const limiter = ref(SOFT_CLIPPER_DEFAULTS.limiter)
 // ⚠ TEMPORARY: the Drive split, adjustable by ear behind a flag. See
 // softClipperTuning.js — this and the three knobs come out once the ratios
 // are settled.
@@ -48,6 +49,7 @@ function currentParams() {
     fixedThresholdDb: fixedThresholdDb.value,
     shape: shape.value,
     drive: drive.value,
+    limiter: limiter.value,
     ...(tuningOn ? { driveRatios: { ...driveRatios.value } } : {}),
   }
 }
@@ -157,6 +159,7 @@ export function useSoftClipper() {
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
   const syncDrive = (v) => { drive.value = v; pushParam('drive', v) }
+  const syncLimiter = (v) => { limiter.value = v; pushParam('limiter', v) }
   const syncRatio = (name, v) => {
     driveRatios.value = { ...driveRatios.value, [name]: clampRatio(v) }
     pushParam('driveRatios', { ...driveRatios.value })
@@ -233,6 +236,7 @@ export function useSoftClipper() {
     fixedThresholdDb,
     shape,
     drive,
+    limiter,
     tuningOn,
     driveRatios,
     clipperPreview,
@@ -249,6 +253,7 @@ export function useSoftClipper() {
     toggleDelta,
     syncHeadroom,
     syncDrive,
+    syncLimiter,
     syncRatio,
     syncOutputTrim,
     syncFixedThreshold,
