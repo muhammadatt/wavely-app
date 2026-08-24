@@ -21,8 +21,8 @@ const {
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, toggleDelta, syncHeadroom, syncDrive, syncLimiter, syncRatio, syncOutputTrim,
   syncFixedThreshold,
-  setThresholdMode, setShape, apply, teardown, closeModal,
-  speechLevelDb, speechLevelBusy, scheduleSpeechLevel,
+  setShape, apply, teardown, closeModal,
+  ceilingPreset, ceilingBusy, CEILING_PRESETS, applyCeilingPreset, scheduleCeilingPreset,
 } = useSoftClipper()
 
 const { state } = useEditorState()
@@ -67,12 +67,8 @@ onMounted(() => {
 // differently at a glance.
 const ACCENT = '#ff8f6b'
 
-const MODE_OPTIONS = [
-  { value: 'adaptive', label: 'ADAPTIVE', title: "Threshold rides the speaker's own level" },
-  { value: 'static', label: 'STATIC', title: "Threshold is set once from the selection's own level, then holds still" },
-  { value: 'fixed', label: 'FIXED', title: 'Threshold is a stated dBFS ceiling' },
-]
-
+// The THRESHOLD mode switch is gone: the panel is fixed-ceiling only. See
+// useSoftClipper's thresholdMode note for why adaptive stopped being offered.
 /**
  * The knee: how sharply reduction ramps in with how far over the threshold a
  * peak sits.
@@ -117,11 +113,6 @@ const SHAPE_CAPTION = {
   tanh4: '3 dB over → −0.2 · 8 → −3.3 · 12 → −5.1 dB',
 }
 
-const MODE_CAPTION = {
-  adaptive: 'the ceiling rides the voice',
-  static: 'the ceiling is measured once, then holds',
-  fixed: 'the ceiling is a stated dBFS value',
-}
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -145,64 +136,29 @@ function formatDb(v) {
   return v.toFixed(1)
 }
 
-const isFixed = computed(() => thresholdMode.value === 'fixed')
-const isStatic = computed(() => thresholdMode.value === 'static')
-
-/**
- * What the measured level reads as on the faceplate.
- *
- * ⚠ IT MUST SAY WHEN THERE IS NO MEASUREMENT, because the kernel silently
- * falls back to the adaptive tracker in that case — a mode that quietly
- * behaves like a different mode is exactly the "control that looks like a
- * control and is not one" failure this panel has already fixed twice.
- */
-const speechLevelReadout = computed(() => {
-  if (speechLevelBusy.value) return 'measuring…'
-  if (speechLevelDb.value === null) return 'no measurement — using ADAPTIVE'
-  return `${speechLevelDb.value.toFixed(1)} dBFS`
-})
-
-// The measurement belongs to the region, not to the knobs — no soft clipper
-// parameter changes what the tracker reads — so this is the only thing that
-// needs to re-run it. Debounced, because dragging a selection edge is a stream
-// of these.
-watch(() => state.selection, () => scheduleSpeechLevel(), { deep: true })
+// A preset re-runs for a changed region, but only while one is active — once
+// the ceiling has been turned by hand it is the user's number. Debounced,
+// because dragging a selection edge is a stream of these.
+watch(() => state.selection, () => scheduleCeilingPreset(), { deep: true })
 
 
 /**
- * Headroom and Fixed dBFS are ONE control, and used to be two.
+ * ONE THRESHOLD CONTROL: the ceiling, in dBFS.
  *
- * They express the same idea — where the ceiling sits — in two units, and only
- * ever one of them is live: in adaptive mode the threshold is speechLevel +
- * Headroom and the dBFS value is not read at all, and in fixed mode the
- * reverse. As two knobs that meant one of them was always dimmed to 35%,
- * costing a knob position and a whole footer row to display a control that
- * does nothing. A permanently ghosted knob is the quieter version of the
- * failure this codebase has already learned twice — on the OptoSmooth's Gain
- * knob and on ResoTame's range limits — that a control which looks like a
- * control and is not one reads as broken.
- *
- * One slot, swapping label, range, formatter and caption with the mode. The
- * panel is a row shorter for it, and there is never a question about which of
- * the two the user is supposed to touch.
+ * This slot used to swap between Headroom (adaptive) and Ceiling (fixed) with
+ * the mode, which was already an improvement on having two knobs with one of
+ * them permanently ghosted. The mode switch is gone now — the panel is
+ * fixed-only — so the slot is simply the ceiling, and the preset buttons below
+ * are what put it in the right place for the material.
  */
-const thresholdKnob = computed(() => (isFixed.value
-  ? {
-      value: fixedThresholdDb.value,
-      sync: syncFixedThreshold,
-      min: -24, max: -1, step: 0.5,
-      label: 'Ceiling',
-      format: formatDb,
-      caption: 'peaks stop here',
-    }
-  : {
-      value: headroomDb.value,
-      sync: syncHeadroom,
-      min: 4, max: 16, step: 0.5,
-      label: 'Headroom',
-      format: formatGain,
-      caption: 'lower = more clipping',
-    }))
+const thresholdKnob = computed(() => ({
+  value: fixedThresholdDb.value,
+  sync: syncFixedThreshold,
+  min: -24, max: -1, step: 0.5,
+  label: 'Ceiling',
+  format: formatDb,
+  caption: ceilingPreset.value ? `${ceilingPreset.value} — peaks stop here` : 'peaks stop here',
+}))
 
 /**
  * Reduction that lights the lamp fully.
@@ -272,20 +228,37 @@ const SCOPE_H = 236
 
     <div class="px-[22px] pt-[14px] pb-[18px]">
       <!-- ── Instrument strip ──────────────────────────────────────────────
-           Mode on the left because it governs the display below it; the lamp
-           on the right because it reports on the same display. One line, so
-           the scope starts as high on the faceplate as it can. -->
+           Presets on the left because they move the threshold line drawn on
+           the display below; the lamp on the right because it reports on the
+           same display. One line, so the scope starts as high on the faceplate
+           as it can.
+
+           These are BUTTONS, not a mode switch: each one measures the region
+           and writes the ceiling, after which the ceiling is an ordinary number
+           the user can turn. The lit one says where the current value came
+           from, and goes out the moment the knob is touched. -->
       <div class="flex items-center justify-between gap-[16px] mb-[10px]">
         <div class="flex items-center gap-[9px]">
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">THRESHOLD</span>
-          <SegmentedSwitch
-            :model-value="thresholdMode"
-            @update:model-value="setThresholdMode"
-            :options="MODE_OPTIONS"
-            :accent="ACCENT"
-            :disabled="!clipperPreview"
-            :padding-x="11"
-          />
+          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">CEILING</span>
+          <div class="flex items-center gap-[3px]">
+            <button
+              v-for="p in CEILING_PRESETS"
+              :key="p.id"
+              type="button"
+              :title="p.title"
+              :disabled="!clipperPreview || ceilingBusy"
+              @click="applyCeilingPreset(p.id)"
+              class="px-[8px] py-[3px] rounded-[3px] transition-colors"
+              style="font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.12em"
+              :style="ceilingPreset === p.id
+                ? { background: ACCENT, color: '#12100e', opacity: clipperPreview ? 1 : .35 }
+                : { background: 'rgba(255,255,255,.05)', color: 'rgba(255,255,255,.45)', opacity: clipperPreview ? 1 : .35 }"
+            >{{ p.label }}</button>
+          </div>
+          <span
+            v-if="ceilingBusy"
+            style="font:600 7.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
+          >measuring…</span>
         </div>
 
         <!-- A lamp, not a bar — see ClipLamp for why a full-length GR meter
@@ -316,7 +289,7 @@ const SCOPE_H = 236
             :data-fn="getScope"
             :envelope-fn="envelope"
             :window-seconds="SCOPE_SECONDS * 2"
-            :mode="thresholdMode"
+            mode="fixed"
             :fixed-threshold-db="fixedThresholdDb"
             @update:fixed-threshold-db="syncFixedThreshold"
             :headroom-db="headroomDb"
@@ -336,12 +309,9 @@ const SCOPE_H = 236
            or is a set-once refinement, so the knobs are sized as the fallback
            they now are rather than as the panel's centre of gravity. -->
       <div class="flex justify-center gap-[16px] mt-[14px]">
-        <!-- One slot for the threshold, whichever unit the mode expresses it
-             in — see thresholdKnob. Keyed on the mode so the Knob remounts
-             rather than carrying drag state across a range change. -->
+        <!-- One slot for the threshold — see thresholdKnob. -->
         <div class="w-[74px]">
           <Knob
-            :key="thresholdMode"
             :model-value="thresholdKnob.value"
             @update:model-value="thresholdKnob.sync"
             :min="thresholdKnob.min" :max="thresholdKnob.max" :step="thresholdKnob.step"
@@ -465,33 +435,14 @@ const SCOPE_H = 236
         </span>
       </div>
 
-      <!-- STATIC's measured level, stated rather than implied. Headroom is
-           still the live knob in this mode, so without this the panel would
-           give no indication of what it is headroom ABOVE — and no indication
-           at all when the measurement is missing and the kernel has quietly
-           fallen back to the adaptive tracker. -->
-      <div
-        v-if="isStatic"
-        class="mt-[10px] flex items-center justify-center gap-[7px]"
-      >
-        <span style="font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.3)">
-          SPEECH LEVEL
-        </span>
-        <span
-          style="font:600 9.5px 'JetBrains Mono',monospace"
-          :style="{ color: speechLevelDb === null && !speechLevelBusy ? '#e0a03a' : ACCENT }"
-        >
-          {{ speechLevelReadout }}
-        </span>
-      </div>
-
       <p
         class="mt-[12px] text-center"
         style="font:500 9.5px/1.45 'Inter';color:rgba(255,255,255,.32)"
       >
-        {{ MODE_CAPTION[thresholdMode] }} — trims the few transients that stick
+        The ceiling is a stated dBFS value — trims the few transients that stick
         out, so the compressor after it works on the voice instead of chasing
-        plosives.
+        plosives. The presets put it where this recording's own peaks say it
+        should go.
       </p>
 
       <div class="mt-[12px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">

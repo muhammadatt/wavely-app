@@ -24,12 +24,9 @@ import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
  *   drive 0-100, the whole character group behind one control — asymmetry,
  *     HF Loss and Soften at fixed internal ratios. See DRIVE_ASYM_RATIO
  *   outputTrimDb ±6, post-stage gain match for A/B
- *   thresholdMode 'adaptive' | 'fixed' | 'static'
- *   fixedThresholdDb, used only in 'fixed' mode
- *   staticSpeechLevelDb, used only in 'static' mode — the region's measured
- *     speech level, from measureSpeechLevelDb. Inherited from the kernel
- *     defaults as null, which is what makes static mode fall back to the
- *     tracker rather than render against a missing measurement
+ *   thresholdMode 'adaptive' | 'fixed' — the panel only ever sets 'fixed'
+ *   fixedThresholdDb, the ceiling in dBFS. The panel's preset buttons measure
+ *     the region and write this; see ceilingPresets.js
  *   shape 'tanh2' | 'tanh3' | 'tanh4', the knee — see SHAPE_EXPONENT and
  *     SHAPE_ANCHOR_DB (the positions are depth-matched, so this changes
  *     character rather than how much the stage does)
@@ -60,10 +57,6 @@ export function toKernelParams(params) {
     outputTrimDb: params.outputTrimDb,
     thresholdMode: params.thresholdMode,
     fixedThresholdDb: params.fixedThresholdDb,
-    // ⚠ MUST be forwarded or static mode silently runs adaptive: the kernel
-    // requires a finite value before it will leave the tracker behind, so a
-    // dropped key degrades to the old behaviour with nothing said.
-    staticSpeechLevelDb: params.staticSpeechLevelDb,
     shape: params.shape,
     drive: params.drive,
     limiter: params.limiter,

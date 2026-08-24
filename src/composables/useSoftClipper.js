@@ -2,12 +2,13 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
-  applySoftClipperRegion, computePeakCache, computeSoftClipperSpeechLevel,
+  applySoftClipperRegion, computePeakCache, computeSoftClipperCeiling,
 } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { DEFAULT_DRIVE_RATIOS, driveTuningEnabled, clampRatio } from '../audio/softClipperTuning.js'
+import { CEILING_PRESETS, DEFAULT_CEILING_PRESET, presetById } from '../audio/ceilingPresets.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
@@ -16,7 +17,17 @@ export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
 // same pattern as useFET1176.js / useLA2A.js.
 const headroomDb = ref(SOFT_CLIPPER_DEFAULTS.headroomDb)
 const outputTrimDb = ref(SOFT_CLIPPER_DEFAULTS.outputTrimDb)
-const thresholdMode = ref(SOFT_CLIPPER_DEFAULTS.thresholdMode)
+/**
+ * ⚠ THE PANEL IS FIXED-ONLY, and this deliberately overrides the kernel default.
+ *
+ * The kernel still defaults to 'adaptive' so anything rendering without the
+ * panel is untouched, but the panel never offers it: measured, a threshold that
+ * follows the speech level rises exactly where the peaks are and costs 4-10x
+ * more program energy for the same peak control (see CLAUDE.md). What the user
+ * gets instead is one ceiling in dBFS, put in the right place for the material
+ * by the preset buttons.
+ */
+const thresholdMode = ref('fixed')
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
 const drive = ref(SOFT_CLIPPER_DEFAULTS.drive)
@@ -28,38 +39,29 @@ const tuningOn = driveTuningEnabled()
 const driveRatios = ref({ ...DEFAULT_DRIVE_RATIOS })
 
 /**
- * The region's measured speech level, for STATIC threshold mode.
+ * Which ceiling preset was last applied, and whether a measurement is running.
  *
- * A MEASURED PARAMETER, exactly like Scheps' wet trim and the compressors'
- * auto-makeup: measured once in the worker, handed to the kernel as a number,
- * used unchanged by both the preview and the apply render. That is what keeps
- * the two sample-identical — there is no second pass, nothing settles under a
- * running preview, and nothing depends on how much audio has been heard.
- *
- * null means "not measured", and the kernel falls back to the adaptive tracker
- * rather than rendering against a missing number. See staticThreshold.js.
+ * The preset is a STARTING POINT, not a mode: it measures the region and writes
+ * `fixedThresholdDb`, after which the ceiling is an ordinary number the user can
+ * turn. Turning it clears the preset lamp, because a ceiling that has been
+ * nudged is no longer "MEDIUM" and saying otherwise would be a readout that
+ * stops being true the moment anything changes — the same failure the Scheps
+ * auto-trim note records.
  */
-const speechLevelDb = ref(null)
-const speechLevelBusy = ref(false)
-/**
- * WHICH REGION THE MEASUREMENT BELONGS TO.
- *
- * Without this, moving the selection leaves the previous region's level in
- * place until the new measurement lands, and an Apply in that window renders
- * against a threshold measured somewhere else — silently, and differently from
- * what was previewed. Invalidating to null instead would be worse: the preview
- * would audibly drop back to adaptive on every selection nudge. So the value is
- * kept for the preview and CHECKED at apply.
- */
-let speechLevelRegion = null
+const ceilingPreset = ref(null)
+const ceilingBusy = ref(false)
+// Has the user turned the ceiling knob themselves this session? Once they have,
+// opening the preview must not overwrite it with a preset — that would be the
+// panel discarding a deliberate choice, which is exactly what "the Gain knob
+// discarded the drag" already cost this plugin once.
+let userSetCeiling = false
 
-// Debounce + supersede, shared across every useSoftClipper() caller. Unlike the
-// trim measurements this does NOT follow the knobs — no soft clipper parameter
-// changes what the tracker reads, only the region does — so it fires on
-// selection changes and on entering static mode, and a debounce is enough.
-const SPEECH_LEVEL_DEBOUNCE_MS = 90
-let speechTimer = null
-let speechSeq = 0
+// Debounce + supersede, shared across every useSoftClipper() caller. The
+// measurement depends on the REGION and the chosen percentile only — no other
+// soft clipper parameter changes it — so knob drags never trigger it.
+const CEILING_DEBOUNCE_MS = 90
+let ceilingTimer = null
+let ceilingSeq = 0
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
@@ -86,7 +88,6 @@ function currentParams() {
     shape: shape.value,
     drive: drive.value,
     limiter: limiter.value,
-    staticSpeechLevelDb: speechLevelDb.value,
     ...(tuningOn ? { driveRatios: { ...driveRatios.value } } : {}),
   }
 }
@@ -183,7 +184,11 @@ export function useSoftClipper() {
     if (clipperPreview.value) {
       pushAllParams(chain)
       startMeters(chain)
-      refreshSpeechLevel()
+      // A ceiling in dBFS means nothing until it is placed against the
+      // material, and the kernel's -10 default is arbitrary for any given
+      // recording. Land on the default preset unless the user has already
+      // chosen a ceiling this session.
+      if (ceilingPreset.value === null && !userSetCeiling) applyCeilingPreset(DEFAULT_CEILING_PRESET)
     } else {
       stopMeters()
     }
@@ -196,47 +201,56 @@ export function useSoftClipper() {
   }
 
   /**
-   * Re-measure the region's speech level for static mode.
+   * Measure the region and put the ceiling where the named preset says.
    *
-   * Superseded calls are discarded by sequence number, so dragging a selection
-   * edge cannot land an older measurement after a newer one — the same guard
-   * the trim measurements use, and it matters more here: a stale speech level
-   * puts the threshold in the wrong place for the whole region rather than
-   * merely mis-trimming it.
+   * Superseded calls are discarded by sequence number, so clicking two presets
+   * quickly — or dragging a selection edge under one — cannot land an older
+   * measurement after a newer one.
+   *
+   * ⚠ A null measurement LEAVES THE CEILING ALONE. A region with no measurable
+   * content has no sensible ceiling, and moving the knob to some fallback would
+   * be worse than not moving it: the user asked for a value derived from this
+   * material and there isn't one.
    */
-  async function refreshSpeechLevel() {
-    if (thresholdMode.value !== 'static') return
-    if (!state.selection || !state.currentFile) return
+  async function applyCeilingPreset(id) {
+    const preset = presetById(id)
+    if (!preset || !state.selection || !state.currentFile) return
 
     const { start, end } = state.selection
-    const seq = ++speechSeq
-    speechLevelBusy.value = true
+    const seq = ++ceilingSeq
+    ceilingBusy.value = true
     try {
-      const measured = await computeSoftClipperSpeechLevel(
-        state.segments, start, end,
+      const measured = await computeSoftClipperCeiling(
+        state.segments, start, end, preset.percentile,
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      if (seq !== speechSeq) return // a newer measurement is already in flight
-      speechLevelDb.value = measured
-      speechLevelRegion = { start, end }
-      pushParam('staticSpeechLevelDb', measured)
+      if (seq !== ceilingSeq) return // a newer measurement is already in flight
+      if (measured === null) return
+      fixedThresholdDb.value = measured
+      ceilingPreset.value = preset.id
+      pushParam('fixedThresholdDb', measured)
     } catch (err) {
-      console.error('Soft Clipper speech level measurement failed:', err)
-      // Leave the previous value alone rather than clearing it: falling back to
-      // adaptive on a transient worker failure would change the sound without
-      // the user touching anything.
+      console.error('Soft Clipper ceiling measurement failed:', err)
     } finally {
-      if (seq === speechSeq) speechLevelBusy.value = false
+      if (seq === ceilingSeq) ceilingBusy.value = false
     }
   }
 
-  function scheduleSpeechLevel() {
-    if (thresholdMode.value !== 'static') return
-    if (speechTimer !== null) clearTimeout(speechTimer)
-    speechTimer = setTimeout(() => {
-      speechTimer = null
-      refreshSpeechLevel()
-    }, SPEECH_LEVEL_DEBOUNCE_MS)
+  /**
+   * Re-run the current preset for a changed region, debounced.
+   *
+   * Only if a preset is actually active: once the user has turned the ceiling
+   * by hand it is THEIR number, and moving it because the selection changed
+   * would be the panel overwriting a deliberate choice.
+   */
+  function scheduleCeilingPreset() {
+    if (ceilingPreset.value === null) return
+    const id = ceilingPreset.value
+    if (ceilingTimer !== null) clearTimeout(ceilingTimer)
+    ceilingTimer = setTimeout(() => {
+      ceilingTimer = null
+      applyCeilingPreset(id)
+    }, CEILING_DEBOUNCE_MS)
   }
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
@@ -247,7 +261,13 @@ export function useSoftClipper() {
     pushParam('driveRatios', { ...driveRatios.value })
   }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
-  const syncFixedThreshold = (v) => { fixedThresholdDb.value = v; pushParam('fixedThresholdDb', v) }
+  const syncFixedThreshold = (v) => {
+    fixedThresholdDb.value = v
+    userSetCeiling = true
+    // Hand-turned: it is no longer the preset's number, so stop claiming it is.
+    ceilingPreset.value = null
+    pushParam('fixedThresholdDb', v)
+  }
 
   function setShape(v) {
     shape.value = v
@@ -257,9 +277,6 @@ export function useSoftClipper() {
   function setThresholdMode(mode) {
     thresholdMode.value = mode
     pushParam('thresholdMode', mode)
-    // Entering static mode with no measurement would silently run adaptive —
-    // the kernel's fallback is a safety net, not a mode.
-    if (mode === 'static') refreshSpeechLevel()
   }
 
   async function apply() {
@@ -271,18 +288,6 @@ export function useSoftClipper() {
 
     startProcessing('Applying Soft Clipper...')
     try {
-      // ⚠ NEVER APPLY STATIC MODE AGAINST A MISSING MEASUREMENT. The kernel
-      // falls back to the adaptive tracker when staticSpeechLevelDb is not
-      // finite, which is right as a safety net and wrong as a silent outcome:
-      // the render would differ from the preview and nothing would say so.
-      // The measurement is deterministic for a given region, so measuring here
-      // returns the number the preview already used.
-      const stale = speechLevelRegion === null
-        || speechLevelRegion.start !== start
-        || speechLevelRegion.end !== end
-      if (thresholdMode.value === 'static' && (speechLevelDb.value === null || stale)) {
-        await refreshSpeechLevel()
-      }
       const buffer = await applySoftClipperRegion(
         state.segments, start, end,
         currentParams(),
@@ -304,12 +309,12 @@ export function useSoftClipper() {
     stopMeters()
     // A measurement landing after the panel is gone would push a param at a
     // chain that is no longer previewing, and leave `busy` lit forever.
-    if (speechTimer !== null) {
-      clearTimeout(speechTimer)
-      speechTimer = null
+    if (ceilingTimer !== null) {
+      clearTimeout(ceilingTimer)
+      ceilingTimer = null
     }
-    speechSeq++
-    speechLevelBusy.value = false
+    ceilingSeq++
+    ceilingBusy.value = false
     if (clipperPreview.value) {
       const ctx = getAudioContext()
       const chain = getEffectChain(ctx)
@@ -339,8 +344,9 @@ export function useSoftClipper() {
     outputTrimDb,
     thresholdMode,
     fixedThresholdDb,
-    speechLevelDb,
-    speechLevelBusy,
+    ceilingPreset,
+    ceilingBusy,
+    CEILING_PRESETS,
     shape,
     drive,
     limiter,
@@ -366,8 +372,8 @@ export function useSoftClipper() {
     syncFixedThreshold,
     setThresholdMode,
     setShape,
-    refreshSpeechLevel,
-    scheduleSpeechLevel,
+    applyCeilingPreset,
+    scheduleCeilingPreset,
     apply,
     teardown,
     openModal,

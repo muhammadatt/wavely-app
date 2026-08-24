@@ -323,19 +323,18 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
 }
 
 /**
- * Measure the speech level of a region for the soft clipper's STATIC threshold
- * mode. Resolves the level in dBFS, or null if the region cannot be measured.
+ * Where a soft clipper ceiling preset lands for a region, in dBFS. Resolves
+ * null if the region has no measurable content.
  *
  * ⚠ THE ANALYSIS WINDOW IS CAPPED like every other measured parameter's (see
  * AUTO_MAKEUP_MAX_ANALYSIS_S), so on a long region this is a centred excerpt
- * rather than the whole thing. That is deliberate and harmless here — the
- * statistic is a high percentile of a 3 s tracker, which 30 s samples
- * perfectly well — and it is DETERMINISTIC, which is what keeps preview and
- * apply on the identical number.
+ * rather than the whole thing. Harmless for a percentile of block peaks, and
+ * DETERMINISTIC — which matters because the user can nudge the ceiling
+ * afterwards and must not find it moving under them.
  */
-export function computeSoftClipperSpeechLevel(segments, start, end, sampleRate, channels) {
-  return measureInWorker('softClipperSpeechLevel', segments, start, end, {}, sampleRate, channels)
-    .then(d => (Number.isFinite(d.speechLevelDb) ? d.speechLevelDb : null))
+export function computeSoftClipperCeiling(segments, start, end, percentile, sampleRate, channels) {
+  return measureInWorker('softClipperCeiling', segments, start, end, { percentile }, sampleRate, channels)
+    .then(d => (Number.isFinite(d.ceilingDb) ? d.ceilingDb : null))
 }
 
 /**
