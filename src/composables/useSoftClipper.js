@@ -8,7 +8,7 @@ import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
 import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../audio/softClipperProcessor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
-import { DEFAULT_DRIVE_RATIOS, tuningEnabled, clampRatio } from '../audio/softClipperTuning.js'
+import { tuningEnabled } from '../audio/softClipperTuning.js'
 import { CEILING_PRESETS, DEFAULT_CEILING_PRESET, presetById } from '../audio/ceilingPresets.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -31,7 +31,7 @@ const outputTrimDb = ref(SOFT_CLIPPER_DEFAULTS.outputTrimDb)
 const thresholdMode = ref('fixed')
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
-const drive = ref(SOFT_CLIPPER_DEFAULTS.drive)
+const soften = ref(SOFT_CLIPPER_DEFAULTS.soften)
 /**
  * ⚠ HIDDEN CONTROLS. Limiter, the knee and HF Emphasis are shipped kernel
  * behaviour whose knobs live on the admin tuning panel rather than the
@@ -45,10 +45,6 @@ const limiter = ref(SOFT_CLIPPER_DEFAULTS.limiter)
 // needs a real number to display and to turn from.
 const emphasisDb = ref(SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb)
 const tuningOn = tuningEnabled()
-// ⚠ TEMPORARY: the Drive split, adjustable by ear behind the same flag. See
-// softClipperTuning.js — this and the three ratio knobs come out once the
-// ratios are settled.
-const driveRatios = ref({ ...DEFAULT_DRIVE_RATIOS })
 
 /**
  * Which ceiling preset was last applied, and whether a measurement is running.
@@ -98,12 +94,12 @@ function currentParams() {
     thresholdMode: thresholdMode.value,
     fixedThresholdDb: fixedThresholdDb.value,
     shape: shape.value,
-    drive: drive.value,
+    soften: soften.value,
     limiter: limiter.value,
     // Only when the tuning panel is open: on the shipped path emphasisDb must
     // stay absent so the kernel's pin governs, and forwarding a mirrored copy
     // of a pin is how a pin quietly stops being one.
-    ...(tuningOn ? { driveRatios: { ...driveRatios.value }, emphasisDb: emphasisDb.value } : {}),
+    ...(tuningOn ? { emphasisDb: emphasisDb.value } : {}),
   }
 }
 
@@ -277,12 +273,8 @@ export function useSoftClipper() {
   }
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
-  const syncDrive = (v) => { drive.value = v; pushParam('drive', v) }
+  const syncSoften = (v) => { soften.value = v; pushParam('soften', v) }
   const syncLimiter = (v) => { limiter.value = v; pushParam('limiter', v) }
-  const syncRatio = (name, v) => {
-    driveRatios.value = { ...driveRatios.value, [name]: clampRatio(v) }
-    pushParam('driveRatios', { ...driveRatios.value })
-  }
   const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v) }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => {
@@ -372,11 +364,10 @@ export function useSoftClipper() {
     ceilingBusy,
     CEILING_PRESETS,
     shape,
-    drive,
+    soften,
     limiter,
     emphasisDb,
     tuningOn,
-    driveRatios,
     clipperPreview,
     clipperReduction,
     clipperEngagedPct,
@@ -390,10 +381,9 @@ export function useSoftClipper() {
     togglePreview,
     toggleDelta,
     syncHeadroom,
-    syncDrive,
+    syncSoften,
     syncLimiter,
     syncEmphasis,
-    syncRatio,
     syncOutputTrim,
     syncFixedThreshold,
     setThresholdMode,

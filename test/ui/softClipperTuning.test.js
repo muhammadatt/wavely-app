@@ -1,13 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  DEFAULT_DRIVE_RATIOS, tuningEnabled, clampRatio,
-} from '../../src/audio/softClipperTuning.js'
+import { tuningEnabled } from '../../src/audio/softClipperTuning.js'
 import {
   SOFT_CLIPPER_DEFAULTS, toKernelParams,
 } from '../../src/audio/effects/softClipperParams.js'
 import {
-  SOFT_CLIPPER_KERNEL_DEFAULTS,
+  SOFT_CLIPPER_KERNEL_DEFAULTS, SOFT_CLIPPER_LATENCY_SAMPLES, softClipperLatencySamples,
 } from '../../src/audio/softClipperProcessor.js'
 
 test('the tuning panel is off unless explicitly asked for', () => {
@@ -18,33 +16,15 @@ test('the tuning panel is off unless explicitly asked for', () => {
   assert.equal(tuningEnabled(), false, 'admin tuning is on by default')
 })
 
-test('ratios are clamped to a range where the knob still teaches you something', () => {
-  // Above 1.5 a component reaches its own full travel before Drive is halfway
-  // and the rest of the sweep does nothing — the saturating-control failure
-  // this collapse existed to remove.
-  assert.equal(clampRatio(2.5), 1.5)
-  assert.equal(clampRatio(-1), 0)
-  assert.equal(clampRatio(0.65), 0.65)
-  // Garbage from a stored string must not become NaN and silently disable a
-  // component: NaN * anything is NaN, and clamp() would pass it through.
-  assert.equal(clampRatio('nonsense'), 0)
-  assert.equal(clampRatio(undefined), 0)
-})
-
-test('the seeded ratios match what the kernel ships', async () => {
-  // The panel seeds its knobs from here rather than from the kernel, so the
-  // two can drift. If they do, opening the tuning panel would silently change
-  // the sound before anyone touched a knob — and the first measurement taken
-  // in that session would be against a build nobody chose.
-  const kernel = await import('../../src/audio/softClipperProcessor.js')
-  const src = await import('node:fs').then(fs =>
-    fs.readFileSync('src/audio/softClipperProcessor.js', 'utf8'))
-  const read = name => Number(src.match(new RegExp(`^const ${name} = ([\\d.]+)`, 'm'))[1])
-  assert.equal(DEFAULT_DRIVE_RATIOS.asymmetry, read('DRIVE_ASYM_RATIO'))
-  assert.equal(DEFAULT_DRIVE_RATIOS.hfLoss, read('DRIVE_HF_LOSS_RATIO'))
-  assert.equal(DEFAULT_DRIVE_RATIOS.soften, read('DRIVE_SOFTEN_RATIO'))
-  assert.ok(kernel.SOFT_CLIPPER_KERNEL_DEFAULTS.drive === 0)
-})
+// ── The Drive ratios and their two tests are gone ──────────────────────────
+//
+// They pinned that the ratios clamped to [0, 1.5] (above which a component
+// reaches full travel before Drive is halfway and the rest of the knob does
+// nothing) and that the panel's seeded values matched the kernel's constants
+// (if they drifted, opening the tuning panel changed the sound before anyone
+// touched a knob). Both described a knob that split Drive between Asymmetry,
+// HF Loss and Soften. Asymmetry is deleted and HF Loss moved to Tube
+// Saturation, so there is one member left and nothing to split.
 
 test('every param the panel can set survives the setParam guard', () => {
   // ⚠ THE BUG THIS EXISTS FOR, and it was found by ear rather than by the
@@ -59,31 +39,30 @@ test('every param the panel can set survives the setParam guard', () => {
   // the worklet — so what has to be pinned is that the panel's surface and the
   // guard's allowlist agree.
   for (const key of ['headroomDb', 'outputTrimDb', 'thresholdMode',
-    'fixedThresholdDb', 'shape', 'drive', 'driveRatios', 'limiter']) {
+    'fixedThresholdDb', 'shape', 'soften', 'limiter']) {
     assert.ok(key in SOFT_CLIPPER_DEFAULTS,
       `${key} is not in SOFT_CLIPPER_DEFAULTS — setParam will drop it silently`)
   }
 })
 
 test('toKernelParams forwards exactly what the kernel reads, and nothing pinned', () => {
-  const out = toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, drive: 40, driveRatios: { asymmetry: 0 } })
-  assert.equal(out.drive, 40)
-  assert.deepEqual(out.driveRatios, { asymmetry: 0 })
+  const out = toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, soften: 40 })
+  assert.equal(out.soften, 40)
+  assert.ok(!('drive' in out), 'the drive knob is back')
+  assert.ok(!('driveRatios' in out), 'the ratio override is back')
   // The pinned params must NOT be forwarded: an absent key would overwrite the
   // kernel's pin with undefined. See HYST_MAX_DB and the emphasis pin.
   assert.ok(!('hysteresis' in out), 'hysteresis is forwarded, which would unpin it')
   assert.ok(!('emphasisDb' in out), 'emphasisDb is forwarded, which would unpin it')
 })
 
-test('a zeroed ratio actually zeroes its component', () => {
-  // The failure mode the ear caught: ratios at 0 still colouring. `??` only
-  // falls back on null/undefined, so a real 0 must survive to the kernel.
-  assert.equal(clampRatio(0), 0)
-  const out = toKernelParams({
-    ...SOFT_CLIPPER_DEFAULTS, drive: 100,
-    driveRatios: { asymmetry: 0, hfLoss: 0, soften: 0 },
-  })
-  assert.deepEqual(out.driveRatios, { asymmetry: 0, hfLoss: 0, soften: 0 })
+test('a real zero reaches the kernel rather than reading as absent', () => {
+  // ⚠ THE FAILURE MODE THE EAR CAUGHT, kept after the ratios went. The kernel
+  // reads these with `??`, which falls back only on null and undefined — so a
+  // genuine 0 has to survive the whole path or a control set to off keeps
+  // colouring. It cost a listening session once already.
+  assert.equal(toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, soften: 0 }).soften, 0)
+  assert.equal(toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, limiter: 0 }).limiter, 0)
 })
 
 test('the faceplate defaults come from the kernel, not from a second copy', () => {
@@ -128,4 +107,21 @@ test('every param the hidden panel can set survives the setParam guard', () => {
     assert.ok(key in SOFT_CLIPPER_DEFAULTS,
       `${key} is not in SOFT_CLIPPER_DEFAULTS — setParam will drop it silently`)
   }
+})
+
+test('the apply path can reach the real latency, not just the bypass constant', () => {
+  // ⚠ THE BUILD CAUGHT THIS AND THE SUITE COULD NOT. `effects/softClipper.js`
+  // pulls a Vite `?worker&url` specifier, so nothing in it is reachable from
+  // node — the same blind spot that hid a silently-dropped param once already.
+  // processing.js imports the latency function THROUGH that file, so a missing
+  // re-export is a broken build rather than a failing test.
+  //
+  // This pins the contract from the importable side: the processor exports the
+  // function, it disagrees with the bypass constant at the shipped default, and
+  // it agrees with it when the limiter is off.
+  const SR = 44100
+  assert.equal(typeof softClipperLatencySamples, 'function')
+  assert.equal(softClipperLatencySamples({ limiter: 0 }, SR), SOFT_CLIPPER_LATENCY_SAMPLES)
+  assert.ok(softClipperLatencySamples(SOFT_CLIPPER_KERNEL_DEFAULTS, SR) > SOFT_CLIPPER_LATENCY_SAMPLES,
+    'the shipped default reports the bypass latency — the apply path will mis-trim')
 })

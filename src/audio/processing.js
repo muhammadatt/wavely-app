@@ -12,7 +12,7 @@ import {
 import { ensureSoftClipperWorklet } from './softClipperWorkletLoader.js'
 import {
   SOFT_CLIPPER_DEFAULTS,
-  SOFT_CLIPPER_LATENCY_SAMPLES,
+  softClipperLatencySamples,
   toKernelParams as toSoftClipperKernelParams,
 } from './effects/softClipper.js'
 import { ensureAirBandWorklet } from './airBandWorkletLoader.js'
@@ -437,13 +437,21 @@ export function applyFET1176Region(segments, start, end, params, sampleRate, cha
   })
 }
 
-/** Apply the Adaptive Soft Clipper to a region. */
+/**
+ * Apply the Adaptive Soft Clipper to a region.
+ *
+ * ⚠ THE LATENCY IS PER-PATCH, NOT A CONSTANT. The limiter adds its lookahead
+ * only while engaged, and it ships engaged — trimming the oversampler's 50
+ * samples when the stage actually delays 226 shifts the whole region 176
+ * samples late and drops that much of its tail.
+ */
 export function applySoftClipperRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toSoftClipperKernelParams({ ...SOFT_CLIPPER_DEFAULTS, ...params })
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureSoftClipperWorklet,
     processorName: 'soft-clipper-processor',
-    kernelParams: toSoftClipperKernelParams({ ...SOFT_CLIPPER_DEFAULTS, ...params }),
-    latencySamples: SOFT_CLIPPER_LATENCY_SAMPLES,
+    kernelParams,
+    latencySamples: softClipperLatencySamples(kernelParams, sampleRate),
   })
 }
 

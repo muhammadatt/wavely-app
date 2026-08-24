@@ -251,7 +251,7 @@ import {
   COMPRESSOR_OVERSAMPLE, COMPRESSOR_OVERSAMPLE_8X,
 } from './dsp/oversample.js'
 import {
-  highShelf, highpass, invertBiquad, biquadZerosInsideUnitCircle, BiquadCascade,
+  highShelf, invertBiquad, biquadZerosInsideUnitCircle, BiquadCascade,
 } from './dsp/biquad.js'
 import { riseCoeff } from './dsp/envelope.js'
 
@@ -775,314 +775,51 @@ const RESIDUAL_TAU_S = 2.0
 const RESIDUAL_FLOOR_DBC = -120
 
 /**
- * ASYMMETRY — a DC offset before the waveshaper, and the only thing in this
- * stage that generates EVEN harmonics.
+ * ⚠ ASYMMETRY, ITS SKEW TRACKER AND ITS DC BLOCKER ARE GONE, and the reason is
+ * worth keeping because it is the reason they could not be moved either.
  *
- * WHY IT IS HERE AT ALL. The curve is odd symmetric (see the guarantee list at
- * MAX_REDUCTION_DB), and an odd curve produces odd harmonics and nothing else.
- * Measured, and it is not "very little": on a 220 Hz tone 6 dB over the
- * threshold, H2 sits at -144.3 dB and H4 at -164.2, and on three real
- * narrators the even-order energy is EXACTLY zero — the decomposition
- * F_even(x) = (F(x) + F(-x))/2 returns a buffer of zeros to the last bit.
- * Odd harmonics are the buzz and fizz this file already documents; the warmth
- * and density people describe as tube or tape is second and fourth order, and
- * no setting of this stage could produce any of it.
+ * Asymmetry was a DC offset added before the clip curve and subtracted after
+ * it — `softClip(x + off, T) - off` — and it was this stage's only source of
+ * EVEN harmonics, which are the warmth people describe as tube or tape. It
+ * worked, it was measured, and it is deleted anyway, because it was never a
+ * separate process: add-then-subtract is the identity function, so the offset
+ * did nothing whatsoever except reposition THIS curve. Every harmonic it
+ * produced was this curve's own, generated off-centre.
  *
- * A small offset before the shaper breaks the symmetry and unlocks the whole
- * family. Measured on that same tone at 6 dB over:
+ * That is what made it unportable. HF Loss moved to Tube Saturation as a copy
+ * because a shelf is a shelf anywhere; asymmetry could only have been
+ * "moved" by writing a new offset against that plugin's tanh/arctan, with
+ * different harmonic behaviour, its own bound argument, and none of the
+ * recorded measurements carrying over. Tube Saturation is an asymmetric-capable
+ * saturator already, so the capability is not lost — only this implementation
+ * of it, inside a stage whose identity is transparency.
  *
- *   asym   H2       H3      H4       even/odd
- *   0     -144.3   -22.7   -164.2     -121.7 dB
- *   0.05   -38.8   -22.7    -76.1      -15.9
- *   0.20   -26.8   -23.0    -67.1       -3.7
- *   0.35   -22.2   -23.7    -86.6       +1.6   <- H2 overtakes H3
- *
- * IT IS ADDITIVE, NOT A REBALANCING, which is the property that makes it a
- * character control rather than a second depth control — the mistake this
- * panel has already made twice. H3 moves by at most 1 dB across the entire
- * sweep; the offset ADDS a harmonic family without disturbing the one that was
- * there. On real narration the even-order content lands at -49 dBc at asym
- * 0.05 rising to -29 at 0.35, within 2 dB of each other across three very
- * different files, and output level moves by 0.04 to 0.16 dB.
- *
- * SCALED TO THE THRESHOLD, NEVER ABSOLUTE. `off = fraction * T` keeps the
- * whole stage level-invariant, which a fixed offset would destroy — the same
- * property `e = 20log10(|x|/T)` exists to provide, and whose loss once made
- * the stage quietly stop working on quiet files (14.36 dB of reduction at
- * T = -6 dBFS against 0.53 at -30).
- *
- * 0.35 IS FULL SCALE because that is where H2 overtakes H3 on the tone above —
- * the point at which the character stops being a seasoning and becomes the
- * dominant colour. Past it the even orders keep climbing with nothing new to
- * hear, so the knob would be spending travel on a distinction the ear does not
- * make.
- *
- * ⚠ THE SIGN IS NOT ARBITRARY AND IS NOT YET CHOSEN WELL. Even-order content
- * is IDENTICAL for +/- offset (-37.4 dBc either way at 0.2, on all three
- * files), but total distortion is not, and the difference tracks the material's
- * own waveform skew: on a file with skew -1.47 a positive offset gives -33.2
- * dBc against -25.3 for negative, and on one with skew +1.48 the ordering
- * reverses (-32.8 against -27.9). Speech is asymmetric by nature and the
- * polarity depends on the speaker and the microphone. So the offset should
- * OPPOSE the skew, which is one pass of a third moment to measure — deliberately
- * left for its own change rather than smuggled in here.
+ * ⚠ WHAT WENT WITH IT: the third-moment waveform-skew tracker that chose the
+ * offset's sign (the offset had to lean AGAINST the material's own lean, worth
+ * up to 7.9 dB of other distortion), and the 2 Hz DC blocker that existed only
+ * to catch what the offset left behind. Neither had any other caller. If even
+ * harmonics are ever wanted in this stage again, note that the sign question is
+ * real and the deadband/evidence machinery that solved it is in this file's
+ * history — a running skew estimate is off by three orders of magnitude at
+ * half a second and latches the wrong sign if read early.
  */
-/**
- * ⚠ 1 IS A PROVABLE CEILING, NOT A TASTE. The offset is `frac * charRef` and
- * charRef is clamped to T, so `off <= frac * t`. The curve is monotone with
- * f(t) = t, so any input past the crossing comes out at least `t - off` — non-
- * negative exactly when `off <= t`, i.e. when `frac <= 1`. Above that the
- * stage FOLDS: measured at frac 1.2, real samples change sign. That is the one
- * failure this control was built to avoid, so the fraction is pinned at the
- * largest value that cannot cause it.
- *
- * ⚠ IT WAS 0.35, and the re-reference is why it moved. The offset used to
- * scale to T; it now scales to the speech level, which sits a Headroom below
- * T, so the same fraction buys a smaller offset. At 0.35 against the new
- * reference the whole knob spanned about **1 dB** of added content on three
- * real narrators — a control that does nothing. At 1 it spans 6-14 dB.
- */
-export const ASYM_MAX_FRACTION = 1
-
-/** Below this the offset is treated as zero and the whole path is bypassed. */
-const ASYM_EPSILON = 1e-4
 
 /**
- * How far asymmetry relaxes the MAX_REDUCTION_DB bound, in dB.
+ * ⚠ HF LOSS LIVES IN TUBE SATURATION NOW (vocalSatProcessor.js).
  *
- * ⚠ THE BOUND IS ON THE CURVE, AND THE OFFSET MOVES THE STAGE OFF IT. The
- * curve still reduces by at most MAX_REDUCTION_DB relative to what it SEES,
- * which is `x + off`; the stage's effective attenuation is measured against
- * `x`, and subtracting the offset afterwards makes those two slightly
- * different. Swept across every shape and four decades of input:
+ * It was a first-order high shelf — `g*x + (1-g)*lowpass(x)` — with a constant
+ * depth, and it had no dependence at all on the clip curve, the threshold or
+ * the character reference. A linear filter with a knob on it, sitting inside a
+ * stage whose identity is transparency. The move was a copy rather than a
+ * re-derivation, which is exactly what "it never belonged here" looks like.
  *
- *   asymmetry    15     30     60    100
- *   worst red   6.008  6.036  6.109  6.249 dB
- *
- * So the guarantee becomes "bounded at MAX_REDUCTION_DB + 0.25" at full
- * asymmetry, and is unchanged at 0. Recorded rather than quietly tolerated,
- * because "bounded" is one of the stage's stated guarantees and a reader is
- * entitled to know the number moved.
- *
- * THE FAILURE THAT WOULD MATTER DOES NOT HAPPEN: the output never changes sign
- * relative to the input. That was the real risk of subtracting a constant
- * after a gain — for a small positive sample, `g·(x+off) − off` can go negative
- * if g is small enough — and it does not occur because g is only below 1 once
- * `|x + off|` exceeds T, by which point x is large enough to survive. Zero
- * flips across a full sweep at maximum asymmetry, and it is its own test.
+ * Measured in its new home at full knob: -0.22 / -0.79 / -2.34 / -4.75 / -6.51
+ * dB at 1k / 2k / 4k / 8k / 16k, and there it acts on the finished output
+ * rather than a wet path, because it models the MEDIUM's bandwidth.
  */
-export const ASYM_MAX_BOUND_EXCESS_DB = 1.6
 
 /**
- * Time constant for the waveform-skew tracker that chooses the offset's sign.
- *
- * WHY THE SIGN IS MEASURED RATHER THAN PICKED. Even-order content is IDENTICAL
- * for a positive and a negative offset — -37.4 dBc either way at asymmetry 60,
- * on all three real narrators — so the sign buys none of the warmth. What it
- * changes is how much OTHER distortion is paid for that warmth, and it tracks
- * the material's own asymmetry:
- *
- *   file            skew    total distortion, offset -0.2 / +0.2
- *   A (normalised)  -0.58        -30.5 / -31.1 dBc
- *   B (raw)         -1.47        -25.3 / -33.2      <- 7.9 dB
- *   C (mastered)    +1.48        -32.8 / -27.9      <- 4.9 dB
- *
- * The offset should OPPOSE the lean. Speech is asymmetric by nature — the
- * glottal waveform is — and which way it points in a given file depends on the
- * speaker, the microphone and any polarity flip anywhere in the chain, so it
- * cannot be assumed. A fixed positive offset, which is what shipped first, is
- * right on A and B and costs C 4.9 dB for nothing.
- *
- * THIS IS A PROPERTY OF THE INPUT, SO IT IS TRACKED IN REAL TIME, exactly like
- * the speech level and unlike anything that would need the output at several
- * settings compared against itself. A third moment is two multiply-adds per
- * sample.
- *
- * MEASURED ON THE PRE-EMPHASISED DOWNMIX, not the raw one: that is the signal
- * the curve actually sees, and a shelf changes a waveform's skew. The buffer
- * already exists for the emphasis lift, so this costs nothing extra, and with
- * emphasis off it is the raw downmix anyway.
- *
- * 3 s, matching the speech tracker. Skew is a property of a recording rather
- * than of a moment — a microphone does not change polarity mid-file — so the
- * tracker only has to converge once and hold.
- */
-const SKEW_TAU_S = 3.0
-
-/**
- * How much lean is needed before the sign decision moves, and which way it
- * starts.
- *
- * ⚠ SCALING THE MAGNITUDE BY THE SKEW WAS THE FIRST ATTEMPT AND IT WAS WRONG.
- * `direction = -tanh(skew / scale)` reads as an elegant continuous version of
- * a sign — it commits on real material, degrades smoothly, and can never step.
- * It also silently turns the knob off: on symmetric material the direction is
- * zero, so the offset is zero and the control does NOTHING. Caught by the
- * even-harmonic test going to -Infinity on synthetic probes, which are made of
- * sine sums and are symmetric to the last bit.
- *
- * The magnitude is the feature and it must not depend on the material. Only
- * the SIGN comes from the skew, and a deadband keeps it from dithering around
- * zero where the penalty it exists to avoid has vanished anyway (measured: the
- * two signs differ by 7.9 dB at |skew| 1.47 and by 0.6 dB at 0.58).
- *
- * 0.15 commits on every real narrator measured — |skew| 0.58, 1.47, 1.48 —
- * and holds on anything flatter. POSITIVE is the startup value, which is what
- * shipped before this measurement existed, so material too symmetric to have
- * an opinion behaves exactly as it did.
- */
-const SKEW_DEADBAND = 0.15
-
-/**
- * Gated evidence required before the sign is decided at all, in seconds.
- *
- * ⚠ THE ESTIMATE IS NOT MERELY IMPRECISE EARLY ON, IT IS LARGE AND WRONG, and
- * because the decision is sticky a single early excursion latches for the rest
- * of the file. Traced on a probe whose settled skew is 0.002 — symmetric to
- * within a rounding error — the running estimate reads:
- *
- *   t      0.5s   1.0s   1.5s   2.0s   3.0s   4.0s
- *   skew   1.15   0.27   0.12   0.05   0.027  0.011
- *
- * At 0.5 s it is off by three orders of magnitude. That is estimator variance
- * rather than bias: a ratio of two one-pole averages of x^2 and x^3 over half
- * a second of syllables says almost nothing, and evaluating it per sample sees
- * every bit of that noise. The first build decided at the speech tracker's
- * 500 ms warm-up and duly latched the WRONG SIGN on symmetric material.
- *
- * One full time constant of gated evidence puts the estimate inside the
- * deadband on that probe and leaves every real narrator far outside it. The
- * cost is that the opening seconds run at the startup sign — which is the
- * behaviour that shipped before any of this, so nothing is worse than it was.
- */
-const SKEW_EVIDENCE_S = SKEW_TAU_S
-
-/**
- * How long the direction takes to travel when the decision changes, in ms.
- *
- * The first decision is a step from the startup sign, and later flips should
- * never happen at all — a microphone does not change polarity mid-file. Either
- * way the offset must not jump: it is bounded and it only touches material
- * already over the threshold, but a discontinuity there lands mid-syllable on
- * exactly the loud samples the stage is working on. 200 ms is far below the
- * rate any of this is judged at and far above anything that could click.
- */
-const SKEW_FLIP_MS = 200
-
-/**
- * DC blocker corner, Hz. Runs only while asymmetry is engaged.
- *
- * ⚠ IT IS LOAD-BEARING, AND I NEARLY DROPPED IT ON A MEASUREMENT TAKEN AT ONE
- * OPERATING POINT. At the realistic setting — peaks about 7 dB over threshold
- * — the DC the asymmetry produces is negligible: the output mean measures
- * -80.9 to -92.6 dBFS on three real narrators, 68 to 89 dB below their peaks,
- * which argued for leaving the blocker out entirely.
- *
- * Under overdrive it is a completely different quantity. With the threshold
- * 30 dB below the signal and asymmetry at full, and NO blocker:
- *
- *   120 Hz tone at 0.9          DC  -45.2 dBFS   (38.4 dB below its own peak)
- *   80 Hz square at 0.95        DC  -45.2        (39.1 below)
- *   200 Hz on a +0.5 DC input   DC  -12.1        (5.1 below)
- *
- * The last case is the one that settles it: an input that already carries DC
- * comes out with an offset 5 dB below its own peak. That shifts the waveform
- * bodily, wastes headroom, and corrupts the peak measurement that ACX
- * certification is built on. A stage that is fine at the default and broken
- * under drive is exactly the class of defect this file keeps recording.
- *
- * 2 Hz, AND THE CORNER IS CHOSEN RATHER THAN ASSUMED. Rejection is total at
- * any corner — a highpass has zero gain at DC by construction — so the corner
- * only trades settling time against how much of the real signal it disturbs.
- * On the worst case above: 1 Hz leaves -73.5 dBFS and takes 0.12 s to settle,
- * 2 Hz leaves -123.5 dBFS in 0.04 s, and there is nothing to gain above that.
- * Meanwhile the cost, measured as the residual of the blocker ALONE on real
- * narration with no clipping at all, runs -35.1 dBc at 2 Hz against -29.9 at
- * 5, -22.5 at 10 and -17.2 at 20. 2 Hz is full rejection at the lowest price.
- *
- * ⚠ THAT PRICE IS STILL THE LARGEST SINGLE ITEM IN THIS FEATURE, and it lands
- * on the RESIDUAL readout: engaging asymmetry at all raises the reading by
- * several dB before the asymmetry itself contributes anything. Most of it is
- * phase shift on real low-frequency content rather than anything audible — the
- * readout overstates a linear filter badly — but the number moves, and it
- * moves at the first click of the knob rather than progressively.
- *
- * Q is left at the Butterworth default: a highpass at 1/sqrt(2) has no
- * passband overshoot, which is what keeps the stage's "never boosts"
- * guarantee intact through the blocker.
- */
-const DC_BLOCK_HZ = 2
-
-/**
- * HF LOSS — the top end softening as the stage is pushed, tape-style.
- *
- * ⚠ IT IS NOT GAP LOSS, and the distinction changed what this is. Gap loss is
- * the reproduce head averaging flux across a finite gap — sinc(pi*g/lambda),
- * a purely geometric function of gap width, tape speed and frequency. It does
- * not depend on level at all: a given head at a given speed has one fixed
- * curve, which in this architecture would be an always-on shelf.
- *
- * What actually makes tape lose top end when it is pushed is SHORT-WAVELENGTH
- * SELF-ERASURE — high-frequency magnetisation partially erasing itself at high
- * record levels — along with record-head and bias losses. That is strongly
- * level-dependent, and it is the audible, characterful half.
- *
- * MODELLING THE LEVEL-DEPENDENT ONE IS ALSO WHAT LETS THIS LIVE INSIDE A STAGE
- * WHOSE IDENTITY IS TRANSPARENCY. A static shelf colours every sample of every
- * file, which costs the "unity below T" guarantee outright. A loss that
- * vanishes with level does not: quiet material sees a gain of exactly 1 and
- * passes bit-exact, and the colour arrives only where the stage is already
- * working.
- *
- * THE STRUCTURE IS A BLEND, NOT A RECOMPUTED FILTER:
- *
- *   out = g * x + (1 - g) * lowpass(x)
- *
- * with one fixed one-pole and a per-sample g. That is exactly a first-order
- * high shelf — unity at DC, plateauing at g above the corner — and it has two
- * properties a recomputed biquad would not. It is EXACTLY transparent at
- * g = 1, so the bypass is free rather than approximate. And it PROVABLY CANNOT
- * BOOST: |g + (1-g)*LP| <= g + (1-g)*|LP| <= 1 for any 0 <= g <= 1, since a
- * one-pole lowpass has magnitude at most 1 everywhere. The stage's "never
- * boosts" guarantee survives by construction rather than by measurement, which
- * matters for a filter whose depth moves per sample.
- *
- * DRIVEN BY LEVEL RELATIVE TO THE THRESHOLD, so the whole thing stays
- * level-invariant like everything else here: the same recording 10 dB quieter
- * gets the same treatment, because the threshold tracks it.
- */
-const HF_LOSS_CORNER_HZ = 4000
-
-/** Shelf depth at full knob and full drive, dB. */
-const HF_LOSS_MAX_DB = 12
-
-/**
- * dB over the threshold at which the loss reaches tanh(1) — about 76% — of its
- * depth. 6 dB, so the loss tracks the same overshoot range the clip curve
- * works over rather than needing its own calibration.
- */
-/**
- * ⚠ RETIRED. It set how fast the shelf reached full depth as the signal ran
- * over the threshold, and the shelf no longer follows the signal at all — see
- * CHARACTER_REFERENCE. Kept named here only so that the sweep recorded against
- * it is not mistaken for a live tuning.
- */
-const HF_LOSS_KNEE_DB_RETIRED = 6
-
-/**
- * Smoothing for the loss itself, ms.
- *
- * The peak envelope driving it moves on 1 ms attack / 150 ms release, which is
- * envelope rate rather than audio rate, but a gain following it directly would
- * still modulate a shelf fast enough to hear as a flutter on the top end.
- * 30 ms is slower than any syllable onset and faster than a phrase.
- */
-const HF_LOSS_SMOOTH_MS = 30
-
-/** Below this the loss is treated as zero and the whole path is bypassed. */
-const HF_LOSS_EPSILON = 1e-4
-
-/**
+ * HYSTERESIS — a short-term memory of how hard the stage has been driven./**
  * HYSTERESIS — a short-term memory of how hard the stage has been driven.
  *
  * WHAT IT MODELS, AND WHAT IT DOES NOT CLAIM TO. Magnetic hysteresis is the
@@ -1288,89 +1025,106 @@ const SOFTEN_REF = Math.PI / OVERSAMPLE_FACTOR
 /**
  * Allowed slope at the top of the knob, as a fraction of SOFTEN_REF.
  *
- * 0.02 is where the effect is unmistakable without being a lowpass: it lands
- * the allowed slope at 0.0157 against a p99-of-all-samples of 0.031, so it
- * catches a couple of percent of the file. The mapping is geometric —
- * `pow(SOFTEN_MIN_SCALE, amount/100)` — because the interesting range is all
- * near the bottom: half the knob is already down at 0.14.
+ * The mapping is geometric — `pow(SOFTEN_MIN_SCALE, amount/100)` — because the
+ * interesting range is all near the bottom: half the knob is already down at
+ * 0.14 of the reference.
+ *
+ * ⚠ RE-DERIVED 0.02 -> 0.014 WHEN THE REFERENCE MOVED TO `T`, and the two must
+ * move together. The allowance is proportional to the reference, and on the
+ * reference clip the ceiling sits about 3 dB above the speech level, so the
+ * same knob position became about 1.4x more permissive the moment the
+ * reference changed — Soften 100 fell from -8.08 dB above 4 kHz to -6.12.
+ * 0.014 restores it: measured -8.13 dB in preview and -8.12 applied, against
+ * the old preview's -8.08.
+ *
+ * The value recalibrates travel; it makes no new claim. What the move buys is
+ * that the knob now means one fixed thing, where its depth used to move both
+ * with where the ceiling happened to sit relative to the speaker and with how
+ * long the preview had been running.
  */
-const SOFTEN_MIN_SCALE = 0.02
+const SOFTEN_MIN_SCALE = 0.014
 
 /** Below this the whole path is bypassed and the audio is untouched. */
 const SOFTEN_EPSILON = 1e-4
 
 /**
- * CHARACTER_REFERENCE — the level the colouring controls are measured against.
+ * CHARACTER_REFERENCE — the level Soften's allowance is measured against.
  *
- * ⚠ IT IS THE SPEECH LEVEL, NOT THE THRESHOLD, and that is a deliberate break
- * from how this stage was built. Everything here used to be referenced to T,
- * which is peak-referenced and moves with Headroom. Tape's colouration is
- * referenced to the medium's own operating level, which is a property of the
- * body of the signal — so tying character to the peak detector produced
- * controls that only ever touched peaks and were therefore weak: measured, the
- * three of them barely engaged on ordinary material at any setting.
+ * ⚠ IT IS THE THRESHOLD `T`, AND IT USED TO BE THE SPEECH-LEVEL TRACKER. That
+ * change was forced by a reported defect and it reverses an argument recorded
+ * at length in CLAUDE.md, so the reversal is set out here rather than quietly
+ * made.
  *
- * ⚠ AND THE DEPTH IS CONSTANT, NOT MODULATED BY THE INSTANTANEOUS LEVEL. The
- * obvious design — depth as a function of `instantaneous - reference` — makes
- * the colour fade through every pause, which is a room that BREATHES. Reported
- * as the thing to avoid, and it is right: a listener hears the room change
- * character between phrases long before they hear the character itself. Real
- * tape does not do this either; the medium colours the room tone and the voice
- * alike. So the reference sets the SCALE of the effect and the knob sets its
- * DEPTH, and neither tracks the envelope.
+ * THE DEFECT: the applied audio did not match what the preview played, and the
+ * preview was always the more softened of the two. Measured on real narration,
+ * a 10 s region at Soften 100 came out 1.5-2.3 dB less softened when applied.
+ * Cause: `speechLevelDb` is a 3 s gated tracker, and an offline region render
+ * starts it COLD. Preview had it settled at -12.96 dB; the apply render was
+ * still at 0.00 after a second, -9.88 at three, -11.41 at six, and never
+ * reached the settled value inside the region. A larger reference is a larger
+ * allowance, so the limiter bit less, all the way through.
  *
- * WHAT MAKES THAT SAFE IS THE TRACKER'S OWN BEHAVIOUR. `speechLevelDb` updates
- * only while the noise gate is open and HOLDS its reading through a pause
- * rather than decaying, so a constant depth referenced to it is genuinely
- * constant across speech and silence. An earlier scoping note called that hold
- * a hazard; with constant depth it is the mechanism.
+ * ⚠ NO AMOUNT OF PRE-ROLL FIXES IT, MEASURED: feeding the render real audio
+ * from before the region narrows the gap 1.59 -> 0.59 dB at 4 s and 0.19 at 8 s
+ * and never closes it, at a cost of nearly doubling the render. And it cannot
+ * work at all near the start of a file. The deeper problem is that "what the
+ * preview played" is not a fixed target either — the tracker's state depends on
+ * where playback started, so two previews of the same region can differ.
+ * A control whose result gets committed to the timeline cannot be
+ * history-dependent.
  *
- * ⚠ THE WARM-UP FALLBACK IS NOT OPTIONAL. `speechLevelDb` parks at
- * SPEECH_INIT_HOLD_DB — above full scale — for the first 500 ms, so character
- * referenced to it during warm-up would be inverted rather than merely absent.
- * It falls back to the peak gathered so far, exactly as the emphasis lift does.
- * Third time this trap has been recorded in this file.
+ * REFERENCED TO `T` THE WHOLE STAGE BECOMES HISTORY-FREE in the mode the panel
+ * uses. `T` in fixed mode is the ceiling the user set, plus a lift that is zero
+ * at the shipped emphasis — a constant, known at sample 0. Measured: preview
+ * and apply now agree to 0.01 dB at every setting on two real files, against a
+ * 1.5-2.3 dB gap before.
  *
- * ⚠ WHAT IT COSTS: "unity below T" no longer holds for HF Loss or Soften at
- * any non-zero setting, because a constant-depth effect by definition touches
- * quiet material. All the character controls still default to 0, so the
- * shipped patch keeps the guarantee — but the guarantee is now a property of
- * the default patch rather than of the stage.
+ * ⚠ THE ARGUMENT THIS OVERTURNS, AND WHY IT NO LONGER APPLIES. The note that
+ * stood here said character must not be referenced to the threshold because
+ * "tying character to the peak detector produced controls that only touched
+ * peaks and were therefore weak". That was measured when the threshold was
+ * ADAPTIVE — a quantity that follows the speech level and rises exactly where
+ * the peaks are. The panel does not offer adaptive any more; `T` is now a
+ * number the user reads and turns. A fixed ceiling is not a peak detector, and
+ * the objection was to the peak detector.
+ *
+ * IT ALSO RESTORES THE GUARANTEE THIS CONTROL CLAIMS. Bernstein's bound says a
+ * signal bandlimited to the base rate's Nyquist and bounded by A cannot move
+ * more than `(pi/L)*A` per oversampled sample. Soften's allowance is
+ * `SOFTEN_REF * scale * charRef`, so "at scale 1 the limit provably cannot bind
+ * on material at or below T" is exact only when charRef IS T. Referenced to the
+ * speech level it was a bound on a different quantity, and the guarantee was
+ * approximate in a direction nobody had measured.
+ *
+ * ⚠ CONSTANT DEPTH REMAINS THE RULE, and the reason is unchanged: a depth that
+ * follows the envelope fades the colour through every pause, which a listener
+ * hears as pumping long before they hear the colour. `T` is motionless in fixed
+ * mode, so this is now constant by construction rather than by holding a
+ * tracker flat through pauses.
+ *
+ * ⚠ IN ADAPTIVE MODE `T` STILL FOLLOWS THE TRACKER (speech level + Headroom),
+ * so nothing here makes that mode history-free. Adaptive is the kernel default
+ * for renders that bypass the panel and for the tests that measure what a
+ * moving threshold costs; the app never sets it.
  */
-const CHARACTER_WARMUP_FALLBACK = true
 
 /**
- * DRIVE — one knob for the whole character group.
+ * ⚠ THERE IS NO DRIVE KNOB ANY MORE — the group it collapsed had three members
+ * and two of them have left, so what remains is Soften under its own name.
  *
- * Asymmetry, HF Loss and Soften are three views of the same idea: how hard the
- * material is being pushed into the medium. Nobody sets them independently on
- * purpose, and shipped separately they were four colour knobs defaulting to 0
- * on a panel whose identity is transparency. Drive replaces them with one
- * control and fixes the ratios here, where they can be measured.
+ * Drive existed because Asymmetry, HF Loss and Soften were three views of one
+ * idea and nobody set them independently on purpose. Asymmetry is deleted (it
+ * was this curve wearing a different hat — see the note above MAX_REDUCTION_DB's
+ * neighbours) and HF Loss moved to Tube Saturation, so a knob that splits one
+ * component between one component is just that component with an extra
+ * multiply. `DRIVE_ASYM_RATIO` and friends are gone with it, along with the
+ * `driveRatios` tuning override that existed to set them by ear.
  *
- * THE RATIOS ARE NOT EQUAL, and the reason is how differently the three scale.
- * Measured solo at full, on three narrators:
- *
- *   asymmetry  adds -29.1 / -33.5 / -35.4 dBc and changes HF by 0.00 dB
- *   HF Loss    cuts  -2.38 / -3.93 / -2.16 dB above 4 kHz, adds no distortion
- *   Soften     cuts  -8.41 / -11.92 / -3.27 dB above 4 kHz
- *
- * Soften at full is drastic — it removes nearly as much as the signal contains
- * — so it tops out partway. Asymmetry is mild at full and runs the whole way.
- *
- * ⚠ SOFTEN IS ALSO THE LEAST PREDICTABLE MEMBER, and that is the weakest part
- * of this design. At a single setting it ranges across the three files by
- * nearly 5 dB (at soften 65: -1.66 / -4.81 / -0.06 dB above 4 kHz) because it
- * depends on how fast each voice's waveform moves relative to its own speech
- * level, which is a property of the speaker and the room. HF Loss, a fixed
- * linear filter, spans 1.7 dB on the same files. So the same Drive setting
- * will colour two narrators by noticeably different amounts, and the knob
- * cannot be calibrated out of that.
+ * ⚠ EVERY RECORDED DRIVE MEASUREMENT IS THEREFORE VOID. The sweeps in
+ * CLAUDE.md — added content -27.4 to -13.2 dBc, HF change -0.98 to -3.90 dB
+ * across the knob — were the three components together at fixed ratios and
+ * describe nothing that still exists. Soften's own solo figures survive.
  */
-const DRIVE_ASYM_RATIO = 1
-const DRIVE_HF_LOSS_RATIO = 1
-const DRIVE_SOFTEN_RATIO = 0.65
-
 /**
  * HYBRID PEAK PATH — a lookahead limiter ahead of the curve.
  *
@@ -1521,10 +1275,12 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // suite does; anything measuring the curve against this default is measuring
   // the limiter and calling it the curve.
   limiter: 100,
-  // 0-100, the whole character group behind one control — see DRIVE_ASYM_RATIO.
-  // 0 bypasses all three, so the shipped patch is bit-identical to the build
-  // before any of them existed.
-  drive: 0,
+  // 0-100. A limit on how fast the waveform may move, applied inside the
+  // oversampled path just ahead of the curve — see SOFTEN_REF. 0 bypasses it
+  // entirely, so the shipped patch is bit-identical to the build before it
+  // existed. ⚠ IT WAS REACHED THROUGH A `drive` KNOB UNTIL THAT KNOB'S OTHER
+  // TWO COMPONENTS LEFT; nothing about the effect itself changed.
+  soften: 0,
   // 0-100, share of HYST_MAX_DB. PINNED AT 100 and not exposed — see
   // HYST_MAX_DB. Kept as a param only so the tests can run 0 against 100.
   hysteresis: 100,
@@ -1922,6 +1678,34 @@ export function softClip(x, T, rMaxDb = MAX_REDUCTION_DB, kneeDb = KNEE_DB, expo
  * coefficient derives from sample rate and time constants, never from block
  * count (spec §6.3).
  */
+/**
+ * The stage's latency for a given patch, without building a kernel.
+ *
+ * ⚠ THE CALLERS NEEDED THIS AND WERE USING A CONSTANT THAT IS ONLY RIGHT WHEN
+ * THE LIMITER IS OFF. `SOFT_CLIPPER_LATENCY_SAMPLES` is the OVERSAMPLER's 50
+ * samples; with the limiter engaged the stage delays by 226 at 44.1 kHz. Both
+ * the effect-chain's delay compensation and the offline apply path took the
+ * constant, so once `limiter` defaulted to 100 the applied region came out
+ * shifted by 176 samples and lost that much of its tail — a seam at both
+ * boundaries, for a control nobody touched.
+ *
+ * A comment on the getter above claimed "the offline path reads it per render
+ * and is correct either way". It did not; it read the constant. This is that
+ * claim made true.
+ *
+ * Mirrors the getter deliberately rather than instantiating a kernel: the apply
+ * path needs the number BEFORE it builds the OfflineAudioContext, because the
+ * context's length depends on it. Pinned against a real kernel by its test, so
+ * the two cannot drift.
+ */
+export function softClipperLatencySamples(params, sampleRate) {
+  const osLatency = COMPRESSOR_OVERSAMPLE.latencySamples
+  const limiterAmount = clamp(params?.limiter ?? SOFT_CLIPPER_KERNEL_DEFAULTS.limiter, 0, 100)
+  if (limiterAmount <= 1e-4) return osLatency
+  const halfWidth = Math.max(1, Math.round((LIMITER_LOOKAHEAD_MS / 1000) * sampleRate))
+  return osLatency + 2 * halfWidth
+}
+
 export class SoftClipperKernel {
   /**
    * @param {number} sampleRate
@@ -1978,18 +1762,7 @@ export class SoftClipperKernel {
     // Their ratio is the emphasis lift — see LIFT_TAU_S.
     this.fastPeakEmph = 0
     this.liftDb = 0
-    // Second and third moments of the pre-emphasised downmix, and the signed
-    // direction derived from them. See SKEW_TAU_S.
-    this.skewM2 = 0
-    this.skewM3 = 0
-    // Starts positive — what shipped before the skew was measured — so
     // material with no clear lean behaves exactly as it did.
-    this.asymSign = 1
-    this.asymDirection = 1
-    this.skewCoef = riseCoeff(SKEW_TAU_S * 1000, sampleRate)
-    this.skewFlipCoef = riseCoeff(SKEW_FLIP_MS, sampleRate)
-    this.skewEvidence = 0
-    this.skewEvidenceTarget = Math.max(1, Math.round(SKEW_EVIDENCE_S * sampleRate))
     // Running MAX of the lift target during the speech tracker's warm-up —
     // the same shape as speechWarmupPeak, for the same reason. See the
     // warm-up note in the lift update.
@@ -2026,10 +1799,6 @@ export class SoftClipperKernel {
     // One-pole lowpass state per channel, and its coefficient. See
     // HF_LOSS_CORNER_HZ — the shelf is a blend against this, not a filter
     // whose coefficients move.
-    this.hfLossLp = []
-    this.hfLossCoef = riseCoeff(1000 / (2 * Math.PI * HF_LOSS_CORNER_HZ), sampleRate)
-    this.hfLossSmoothCoef = riseCoeff(HF_LOSS_SMOOTH_MS, sampleRate)
-    this.hfLossDb = 0
     // Memory of recent drive, 0-1. See HYST_MAX_DB.
     this.hystState = 0
     // One soften-limiter state per channel — see SOFTEN_REF.
@@ -2039,12 +1808,7 @@ export class SoftClipperKernel {
     // audio loop.
     this.charRef = new Float32Array(0)
     this.hystCoef = riseCoeff(HYST_TAU_MS, sampleRate)
-    this.hfLossActive = false
-    this.hfLossGain = new Float32Array(0)
 
-    this.dcBlocker = new BiquadCascade(1, 1)
-    this.dcBlockerRate = 0
-    this.asymActive = false
     this.emphasisActive = false
     this.emphasisStable = true
 
@@ -2133,8 +1897,8 @@ export class SoftClipperKernel {
    */
   get latencySamples() {
     // ⚠ VARIABLE. The limiter's delay is only present while it is engaged, so
-    // this changes with the parameter — see LIMITER_MAX_ABOVE_DB. The offline
-    // path reads it per render and is correct either way.
+    // this changes with the parameter — see LIMITER_MAX_ABOVE_DB, and
+    // softClipperLatencySamples() for the standalone form the callers need.
     return this.osLatency + (this.limiterActive ? this.limiterLatency : 0)
   }
 
@@ -2229,7 +1993,6 @@ export class SoftClipperKernel {
     if (this.trimScratch.length < n) this.trimScratch = new Float32Array(n)
     const T = this.tScratch
     const charRef = this.charRef
-    let charRefDb = 0
     const trimGain = this.trimScratch
     const chScale = 1 / nIn
 
@@ -2262,33 +2025,11 @@ export class SoftClipperKernel {
     // the expression it replaced.
     const limiterCeilFactor = dbToLin(LIMITER_MAX_ABOVE_DB * (1 - limiterAmount))
       * (this.limiterCrossovers ? 1 : this.limiterCeilingFactor)
-    const driveAmount = clamp(p.drive ?? 0, 0, 100)
-    // ⚠ TEMPORARY: `driveRatios` lets the panel move the split by ear — see
-    // softClipperTuning.js. Absent, which is the shipped case, the constants
-    // are used and this costs nothing. It comes out with the tuning panel.
-    const ratios = p.driveRatios
-    const asymFraction = clamp(p.asymmetry
-      ?? driveAmount * (ratios?.asymmetry ?? DRIVE_ASYM_RATIO), 0, 100) / 100 * ASYM_MAX_FRACTION
-    const hfLossMaxDb = clamp(p.hfLoss
-      ?? driveAmount * (ratios?.hfLoss ?? DRIVE_HF_LOSS_RATIO), 0, 100) / 100 * HF_LOSS_MAX_DB
-    // 0-1 rather than dB now: the state itself is in dB, so this only scales
-    // it. Pinned at 1 in practice — see HYST_MAX_DB.
-    const softenAmount = clamp(p.soften ?? driveAmount * (ratios?.soften ?? DRIVE_SOFTEN_RATIO), 0, 100) / 100
+    const softenAmount = clamp(p.soften ?? 0, 0, 100) / 100
     const softenActive = softenAmount > SOFTEN_EPSILON
     const softenScale = softenActive ? Math.pow(SOFTEN_MIN_SCALE, softenAmount) : 1
     const hystScale = clamp(p.hysteresis ?? 0, 0, 100) / 100
     const hystActive = hystScale > HYST_EPSILON
-    this.hfLossActive = hfLossMaxDb > HF_LOSS_EPSILON
-    if (this.hfLossGain.length < n) this.hfLossGain = new Float32Array(n)
-    this.asymActive = asymFraction > ASYM_EPSILON
-    if (this.asymActive && this.dcBlockerRate !== this.sampleRate) {
-      // Coefficients depend only on the sample rate, so this runs once per
-      // rate rather than per block. Q is left at the default 1/sqrt(2): a
-      // Butterworth highpass has no passband overshoot, which is what keeps
-      // the stage's "never boosts" guarantee intact through the blocker.
-      this.dcBlocker.setSections([highpass(this.sampleRate, DC_BLOCK_HZ)])
-      this.dcBlockerRate = this.sampleRate
-    }
 
     // Emphasis coefficients recompute only when the raw target has moved
     // enough to matter (deviation note 3) — cheap on a knob drag, free
@@ -2350,13 +2091,7 @@ export class SoftClipperKernel {
     let fastPeakEmph = this.fastPeakEmph
     let liftDb = this.liftDb
     let liftWarmupMax = this.liftWarmupMax
-    let hfLossDb = this.hfLossDb
     let hystState = this.hystState
-    let skewM2 = this.skewM2
-    let skewM3 = this.skewM3
-    let asymSign = this.asymSign
-    let asymDirection = this.asymDirection
-    let skewEvidence = this.skewEvidence
     // Upper bound on the lift, hoisted out of the per-sample loop. Zero when
     // the emphasis filters are bypassed, which is what makes emphasisDb = 0
     // bit-identical to the build before compensation existed.
@@ -2514,39 +2249,6 @@ export class SoftClipperKernel {
         } else {
           liftDb += this.liftCoef * (liftTargetDb - liftDb)
         }
-
-        // Waveform skew of the signal the curve sees, and the offset direction
-        // that opposes it — see SKEW_TAU_S. Gated with the lift and the speech
-        // tracker: a pause contributes room tone to the second moment and
-        // nothing to the third, which would drag the estimate toward zero for
-        // reasons that have nothing to do with the voice.
-        const xe = monoEmph[i]
-        skewM2 += this.skewCoef * (xe * xe - skewM2)
-        skewM3 += this.skewCoef * (xe * xe * xe - skewM3)
-        asymDirection += this.skewFlipCoef * (asymSign - asymDirection)
-        // ⚠ THE RATIO IS MEANINGLESS UNTIL THE MOMENTS HAVE CONVERGED, and
-        // reading it early is not a small error — it is a sign flip. Both
-        // moments start at zero, so in the first samples m3/m2^1.5 is a ratio
-        // of two nearly-zero numbers and takes arbitrary values; the first
-        // build of this latched -1 on a probe whose settled skew is 0.0028,
-        // i.e. squarely inside the deadband and never meant to move it at all.
-        //
-        // The decision therefore waits for the speech tracker's own warm-up,
-        // which is the same 500 ms of gated evidence the level needs, and the
-        // FIRST decision snaps rather than ramping — the lift's rule, for the
-        // lift's reason: the stage starts working the instant the tracker
-        // adopts a level, and a direction still travelling from its startup
-        // value would spend the opening of a file at the wrong sign.
-        if (skewEvidence < this.skewEvidenceTarget) skewEvidence++
-        else if (skewM2 > 1e-12) {
-          const skew = skewM3 / Math.pow(skewM2, 1.5)
-          // Sticky: the sign only moves once the lean is unambiguous, and
-          // holds whatever it had inside the deadband. A microphone does not
-          // change polarity mid-file, so this should latch once and never move
-          // again.
-          if (skew < -SKEW_DEADBAND) asymSign = 1
-          else if (skew > SKEW_DEADBAND) asymSign = -1
-        }
       }
 
       // threshold derivation (spec §3.3). T_MIN is now only a numerical
@@ -2621,23 +2323,8 @@ export class SoftClipperKernel {
       // is exactly why ASYM_MAX_FRACTION is 1 and not a matter of taste —
       // measured, 1.2 folds. targetDb is the pre-clamp value and can exceed
       // T when T_MAX binds, so clamping to it is not sufficient.
-      charRef[i] = Math.min(dbToLin(speechRefDb), T[i])
-      charRefDb = linToDb(charRef[i])
-
-      // HF loss, driven by how far the envelope sits ABOVE the threshold — so
-      // it is level-invariant, and so it is exactly absent on material the
-      // stage is not working on. See HF_LOSS_CORNER_HZ.
-      if (this.hfLossActive) {
-        // CONSTANT DEPTH — see CHARACTER_REFERENCE. It used to be
-        // `hfLossMaxDb * tanh((fastPeakDb - T) / HF_LOSS_KNEE_DB)`, which made
-        // the shelf follow the envelope: full depth on a loud syllable, none
-        // through the pause after it. That is a room that breathes, and it is
-        // audible as pumping long before the colour itself is. The smoother
-        // stays so that moving the knob does not click; the target no longer
-        // moves with the signal.
-        hfLossDb += this.hfLossSmoothCoef * (hfLossMaxDb - hfLossDb)
-        this.hfLossGain[i] = dbToLin(-hfLossDb)
-      }
+      // ⚠ THE THRESHOLD, NOT THE SPEECH TRACKER — see CHARACTER_REFERENCE.
+      charRef[i] = T[i]
 
       // Scope: loudest input sample of this call, and T at that instant.
       const ax = x < 0 ? -x : x
@@ -2649,18 +2336,7 @@ export class SoftClipperKernel {
     this.fastPeakEmph = fastPeakEmph
     this.liftDb = liftDb
     this.liftWarmupMax = liftWarmupMax
-    this.hfLossDb = hfLossDb
     this.hystState = hystState
-    this.skewM2 = skewM2
-    this.skewM3 = skewM3
-    this.asymSign = asymSign
-    this.asymDirection = asymDirection
-    this.skewEvidence = skewEvidence
-    // The audio path runs after this loop, so it uses the direction as of the
-    // end of the block. Held flat across the block deliberately: the tracker
-    // moves on a 3 s constant, so a per-sample value would differ from this
-    // one in the far decimals and cost a multiply to compute.
-    const asymDirectionSmoothed = asymDirection
     this.noiseEstDb = noiseEstDb
     this.gateHoldSamples = gateHoldSamples
     this.speechLevelDb = speechLevelDb
@@ -2691,7 +2367,6 @@ export class SoftClipperKernel {
     while (this.dryDelay.length < nOut) this.dryDelay.push(new Float32Array(D))
     this.preEmphasis.ensureChannels(nOut)
     this.deEmphasis.ensureChannels(nOut)
-    this.dcBlocker.ensureChannels(nOut)
 
     // Every channel walks the same delay positions, so the write cursor is
     // captured once and committed once rather than advanced per channel.
@@ -2758,16 +2433,7 @@ export class SoftClipperKernel {
       // sub-samples; holding it flat across each group of L is inaudible.
       for (let i = 0; i < n; i++) {
         const t = T[i]
-        // Added before the curve and taken off after it, so material that
-        // never reaches the shifted threshold comes back bit-exact — the
-        // asymmetry narrows the transparent window and moves it off centre,
-        // it does not abolish it.
-        //
-        // SIGNED BY THE MEASURED SKEW, so the offset leans against the
-        // waveform rather than with it — same even harmonics either way, up to
-        // 7.9 dB less of everything else. See SKEW_TAU_S.
         const cr = charRef[i]
-        const off = asymFraction * asymDirectionSmoothed * cr
         for (let j = 0; j < L; j++) {
           const k = i * L + j
           let before = hi[k]
@@ -2785,7 +2451,7 @@ export class SoftClipperKernel {
             softenState = prev
             before = prev
           }
-          const after = softClip(before + off, t, MAX_REDUCTION_DB, shapeKneeDb, shapeExponent) - off
+          const after = softClip(before, t, MAX_REDUCTION_DB, shapeKneeDb, shapeExponent)
           hi[k] = after
           const ab = before < 0 ? -before : before
           if (ab > t) {
@@ -2801,37 +2467,6 @@ export class SoftClipperKernel {
 
       if (this.emphasisActive) {
         this.deEmphasis.process(out, out, n, ch)
-      }
-
-      // DC blocker, and ONLY while the asymmetry that needs it is engaged.
-      // Not "flat when off" but absent when off: an always-on filter would
-      // cost the stage its bit-transparency below the threshold for every
-      // user who never touches this control. Same rule the emphasis pair
-      // follows, for the same reason.
-      //
-      // It sits after de-emphasis so it is blocking the DC that reaches the
-      // OUTPUT rather than one the de-emphasis would have reshaped, and
-      // before the residual measurement below — so RESIDUAL reports the
-      // blocker's contribution too, which is honest and is why DC_BLOCK_HZ
-      // records what that costs.
-      if (this.asymActive) {
-        this.dcBlocker.process(out, out, n, ch)
-      }
-
-      // HF loss. A blend between the signal and its own lowpass, which IS a
-      // first-order high shelf and is exactly transparent at gain 1 — see
-      // HF_LOSS_CORNER_HZ for why that matters and why it cannot boost.
-      if (this.hfLossActive) {
-        while (this.hfLossLp.length <= ch) this.hfLossLp.push(0)
-        let lp = this.hfLossLp[ch]
-        const a = this.hfLossCoef
-        const gains = this.hfLossGain
-        for (let i = 0; i < n; i++) {
-          lp += a * (out[i] - lp)
-          const g = gains[i]
-          out[i] = g * out[i] + (1 - g) * lp
-        }
-        this.hfLossLp[ch] = lp
       }
 
       // Dry delay, DELTA and output trim in one pass.

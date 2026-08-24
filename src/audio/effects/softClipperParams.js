@@ -21,8 +21,10 @@ import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
  *   limiter 0-100, how much of the peak control the lookahead limiter takes
  *     from the curve — see LIMITER_MAX_ABOVE_DB. 0 bypasses it entirely,
  *     including its latency. ⚠ It CHANGES THE STAGE'S LATENCY while engaged
- *   drive 0-100, the whole character group behind one control — asymmetry,
- *     HF Loss and Soften at fixed internal ratios. See DRIVE_ASYM_RATIO
+ *   soften 0-100, a limit on how fast the waveform may move, inside the
+ *     oversampled path just ahead of the curve. See SOFTEN_REF. ⚠ It reached
+ *     the kernel through a `drive` knob until that knob's other two members
+ *     left — asymmetry deleted, HF Loss moved to Tube Saturation
  *   outputTrimDb ±6, post-stage gain match for A/B
  *   thresholdMode 'adaptive' | 'fixed' — the panel only ever sets 'fixed'
  *   fixedThresholdDb, the ceiling in dBFS. The panel's preset buttons measure
@@ -42,14 +44,6 @@ import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
  */
 export const SOFT_CLIPPER_DEFAULTS = {
   ...SOFT_CLIPPER_KERNEL_DEFAULTS,
-  // ⚠ TEMPORARY, and it MUST be listed here even though it has no default
-  // value worth stating. `setParam` guards with `name in params`, so a key
-  // absent from this object is silently dropped rather than rejected — the
-  // ratio knobs pushed updates that never reached the kernel, the constants
-  // ran unchanged, and a whole listening session was spent tuning a control
-  // that was doing nothing. Null rather than undefined so the key genuinely
-  // exists; the kernel's `ratios?.x ?? CONSTANT` treats null as absent.
-  driveRatios: null,
   // ⚠ NULL, NOT THE KERNEL'S VALUE. The key has to exist or `setParam` drops
   // it silently, but its value must not be forwarded on the shipped path: the
   // pin lives in the kernel, and a panel that mirrors a pinned constant is one
@@ -65,10 +59,8 @@ export function toKernelParams(params) {
     thresholdMode: params.thresholdMode,
     fixedThresholdDb: params.fixedThresholdDb,
     shape: params.shape,
-    drive: params.drive,
+    soften: params.soften,
     limiter: params.limiter,
-    // ⚠ TEMPORARY tuning override — see softClipperTuning.js.
-    driveRatios: params.driveRatios,
     // Forwarded ONLY when the hidden tuning panel has set a real number.
     // The kernel merges partials over its own defaults, so an `emphasisDb:
     // undefined` in this object would not fall back to the pin — it would

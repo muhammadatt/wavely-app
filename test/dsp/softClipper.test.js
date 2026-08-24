@@ -20,8 +20,8 @@ import assert from 'node:assert/strict'
 import {
   SoftClipperKernel, processSoftClipperBuffer, softClip, SOFT_CLIPPER_LATENCY_SAMPLES,
   MAX_REDUCTION_DB, KNEE_DB, SHAPE_EXPONENT, SHAPE_MIN_KNEE_DB,
-  ASYM_MAX_FRACTION, ASYM_MAX_BOUND_EXCESS_DB,
   SHAPE_KNEE_DB, SHAPE_ANCHOR_DB, SHAPE_KNEE_ANCHOR_SHAPE,
+  softClipperLatencySamples,
   SOFT_CLIPPER_KERNEL_DEFAULTS,
 } from '../../src/audio/softClipperProcessor.js'
 import {
@@ -1811,512 +1811,35 @@ test('the residual readout tracks the emphasis knob the way the offline sweep do
   }
 })
 
-// ── Asymmetry (ASYM_MAX_FRACTION / DC_BLOCK_HZ) ─────────────────────────────
+// ── Asymmetry, its skew tracker and its DC blocker: REMOVED ────────────────
+//
+// Eleven tests lived here and every one of them is deleted rather than skipped,
+// because the code they guarded is deleted. Worth knowing what went, in case
+// even harmonics are ever wanted in this stage again: the even/odd
+// decomposition F_even(x) = (F(x) + F(-x))/2 pinned that the stage produced
+// EXACTLY zero even content until asked; the offset was measured additive
+// rather than a rebalancing (H3 moved at most 1 dB across the whole sweep);
+// the no-sign-flip guarantee was its own test; and the DC blocker's tests
+// caught the one operating point (heavy drive, DC already in the input) where
+// dropping it shifts the waveform bodily and corrupts the peak measurement ACX
+// is built on.
+//
+// ⚠ THE SKEW TRACKER'S TESTS ARE THE ONES TO RE-READ FIRST if this is ever
+// revisited: they pinned that only the SIGN may come from the material and the
+// magnitude may not (scaling by skew silently turns the knob off on symmetric
+// input), and that the decision has to wait a full time constant of gated
+// evidence — a running skew estimate reads 1.15 at 0.5 s on a probe whose
+// settled value is 0.002, so an early read latches the wrong sign for the whole
+// file.
 
-/**
- * EXACT even/odd decomposition, valid on any material.
- *
- * Any system splits as F = F_even + F_odd with F_even(x) = (F(x) + F(-x))/2.
- * This chain is odd everywhere except the deliberate offset — the detector
- * reads |x| so it is identical for x and -x, and every filter is linear — so
- * F_even IS the asymmetry's contribution and nothing else. No spectral
- * estimation, no windowing choice, no tolerance to argue about.
- */
-function evenOddDbc(signal, params, sr = SR) {
-  const neg = new Float32Array(signal.length)
-  for (let i = 0; i < signal.length; i++) neg[i] = -signal[i]
-  const y1 = processSoftClipperBuffer([signal], sr, params).channelData[0]
-  const y2 = processSoftClipperBuffer([neg], sr, params).channelData[0]
-  let even = 0, dry = 0
-  for (let i = Math.round(sr); i < signal.length; i++) {
-    const e = (y1[i] + y2[i]) / 2
-    even += e * e
-    dry += signal[i] * signal[i]
-  }
-  return { evenDbc: even > 0 ? 10 * Math.log10(even / dry) : -Infinity, evenEnergy: even }
-}
-
-test('the stage generates exactly zero even harmonics until asked to', () => {
-  // THE GUARANTEE THIS FEATURE DELIBERATELY BREAKS, pinned in its unbroken
-  // state. "Odd symmetric — sign applied outside. No DC term, no DC blocker"
-  // is one of the five guarantees at MAX_REDUCTION_DB, and it is exact rather
-  // than approximate: the even component is a buffer of zeros to the last bit,
-  // which is why this asserts 0 and not "small".
-  for (const signal of [speechLike(4, 0.5, 97), fricativeNoise(2, 0.6)]) {
-    const { evenEnergy } = evenOddDbc(signal, { headroomDb: 6.5, emphasisDb: 6, asymmetry: 0 })
-    assert.equal(evenEnergy, 0)
-  }
-})
-
-test('asymmetry adds even harmonics, monotonically, without touching the odd ones', () => {
-  // Both halves matter. The even content has to arrive — that is the feature —
-  // and the odd content has to stay put, or this is a second depth control
-  // wearing a character control's label, which is the mistake this panel has
-  // made twice.
-  //
-  // Measured on real narration: even-order content -50 dBc at asymmetry 15,
-  // rising to -34 at 100, within 2 dB across three very different files.
-  const signal = concat(speechLike(4, 0.5, 97), fricativeNoise(1, 0.4), speechLike(3, 0.5, 101))
-  const base = { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }
-  const evens = [15, 30, 60, 100].map(a => evenOddDbc(signal, { ...base, asymmetry: a }).evenDbc)
-  for (let i = 1; i < evens.length; i++) {
-    assert.ok(evens[i] > evens[i - 1] + 2,
-      `asymmetry is not buying even harmonics: ${evens.map(v => v.toFixed(1)).join(' -> ')}`)
-  }
-  assert.ok(evens[0] < -35, `even content at the lowest setting is already loud: ${evens[0].toFixed(1)} dBc`)
-
-  // The ODD side — measured as the third harmonic of a tone, which is where
-  // the additive claim is checked rather than asserted.
-  const T = 0.25, f0 = 220
-  const n = 32768 + 8192
-  const tone = new Float32Array(n)
-  for (let i = 0; i < n; i++) tone[i] = T * dbToLin(6) * Math.sin((2 * Math.PI * f0 * i) / SR)
-  const h3 = (asymmetry) => {
-    const y = processSoftClipperBuffer([tone], SR,
-      { thresholdMode: 'fixed', fixedThresholdDb: 20 * Math.log10(T), emphasisDb: 0, shape: 'tanh3', asymmetry })
-      .channelData[0]
-    let re = 0, im = 0, re1 = 0, im1 = 0
-    for (let i = 4096; i < 4096 + 32768; i++) {
-      const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * (i - 4096)) / 32768)
-      re += y[i] * w * Math.cos((2 * Math.PI * 3 * f0 * i) / SR)
-      im += y[i] * w * Math.sin((2 * Math.PI * 3 * f0 * i) / SR)
-      re1 += y[i] * w * Math.cos((2 * Math.PI * f0 * i) / SR)
-      im1 += y[i] * w * Math.sin((2 * Math.PI * f0 * i) / SR)
-    }
-    return 20 * Math.log10(Math.hypot(re, im) / Math.hypot(re1, im1))
-  }
-  const odd0 = h3(0), odd100 = h3(100)
-  assert.ok(Math.abs(odd100 - odd0) < 3,
-    `asymmetry moved the third harmonic ${odd0.toFixed(1)} -> ${odd100.toFixed(1)} dB, so it is ` +
-    'rebalancing the character rather than adding to it')
-})
-
-test('asymmetry 0 is bit-identical, and does not engage the DC blocker', () => {
-  // What buys the right to put a colouring control inside a stage whose
-  // identity is transparency: at 0 the offset and the blocker are not flat,
-  // they are ABSENT. Compared against a params object that never mentions
-  // asymmetry at all, so a default drifting away from 0 fails here.
-  const signal = concat(speechLike(4, 0.5, 11), fricativeNoise(1, 0.5))
-  const withParam = processSoftClipperBuffer([signal], SR,
-    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', asymmetry: 0 }).channelData[0]
-  const without = processSoftClipperBuffer([signal], SR,
-    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }).channelData[0]
-  for (let i = 0; i < signal.length; i++) {
-    assert.equal(withParam[i], without[i], `asymmetry 0 altered sample ${i}`)
-  }
-  // ⚠ THE THREE CHARACTER PARAMS NO LONGER APPEAR IN THE DEFAULTS — they are
-  // derived from `drive`, which is the only one on the panel. See
-  // DRIVE_ASYM_RATIO. What has to hold is that drive 0 leaves all three off.
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.drive, 0,
-    'the shipped default engages a colouring stage')
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.asymmetry, undefined,
-    'asymmetry is still its own default — it should be derived from drive')
-})
-
-test('asymmetry keeps the guarantees the stage is allowed to keep', () => {
-  // Four of the five survive by design and are checked here; the fifth (odd
-  // symmetry) is the control itself. Boundedness and level-invariance, stated
-  // separately from that list, are checked too.
-  const T = 0.2
-  const asym = 100
-  const params = { thresholdMode: 'fixed', fixedThresholdDb: 20 * Math.log10(T), emphasisDb: 0, shape: 'tanh3', asymmetry: asym }
-
-  // NEVER BOOSTS. The blocker is Butterworth so it has no passband overshoot;
-  // this checks the whole path rather than the curve alone.
-  const loud = new Float32Array(Math.round(2 * SR))
-  for (let i = 0; i < loud.length; i++) loud[i] = 0.9 * Math.sin((2 * Math.PI * 300 * i) / SR)
-  const out = processSoftClipperBuffer([loud], SR, params).channelData[0]
-  let peakIn = 0, peakOut = 0
-  for (let i = Math.round(0.5 * SR); i < loud.length; i++) {
-    peakIn = Math.max(peakIn, Math.abs(loud[i]))
-    peakOut = Math.max(peakOut, Math.abs(out[i]))
-  }
-  assert.ok(peakOut <= peakIn + 1e-6,
-    `full asymmetry boosted the peak ${peakIn.toFixed(4)} -> ${peakOut.toFixed(4)}`)
-
-  // LEVEL INVARIANT. The offset is a fraction of T, so scaling the input and
-  // the threshold together must produce a scaled output — a fixed offset would
-  // break this, which is why it is not one.
-  const probe = concat(speechLike(3, 0.4, 31), speechLike(2, 0.4, 33))
-  const a = processSoftClipperBuffer([probe], SR,
-    { ...params, fixedThresholdDb: -14 }).channelData[0]
-  const louder = new Float32Array(probe.length)
-  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
-  const b = processSoftClipperBuffer([louder], SR,
-    { ...params, fixedThresholdDb: -8 }).channelData[0]
-  let worst = 0
-  for (let i = Math.round(SR); i < probe.length; i++) {
-    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
-  }
-  assert.ok(worst < 2e-3, `asymmetry is not level-invariant: worst deviation ${worst}`)
-
-  // BOUNDED, to a STATED relaxation. The curve's bound is relative to what it
-  // sees (x + off); the stage's attenuation is measured against x, and
-  // subtracting the offset afterwards separates the two.
-  //
-  // ⚠ AT ASYM_MAX_FRACTION = 1 THIS IS AN EMPIRICAL WORST CASE, NOT A PROOF.
-  // The output past the crossing is at least `t - off`, which at frac 1 is
-  // zero — so the attenuation measured against x has no finite dB bound in
-  // principle. Measured it stays well inside: 1.52 dB over MAX_REDUCTION_DB on
-  // this synthetic probe, and BELOW MAX_REDUCTION_DB entirely on all three
-  // real narrators (worst 5.47 dB at asymmetry 100). The guarantee that IS
-  // provable is the sign-flip one in the next test; this is a regression
-  // tracker with the number recorded.
-  const kernel = new SoftClipperKernel(SR)
-  kernel.setParams({ ...params, fixedThresholdDb: -40 })
-  const o = new Float32Array(probe.length)
-  for (let off = 0; off < probe.length; off += 128) {
-    const len = Math.min(128, probe.length - off)
-    kernel.process([probe.subarray(off, off + len)], [o.subarray(off, off + len)], len)
-  }
-  assert.ok(kernel.getMetering().maxReductionDb <= MAX_REDUCTION_DB + ASYM_MAX_BOUND_EXCESS_DB + 1e-9,
-    `asymmetry exceeded even the relaxed bound: ${kernel.getMetering().maxReductionDb}`)
-})
-
-test('asymmetry never flips the sign of a sample', () => {
-  // THE FAILURE THAT WOULD ACTUALLY MATTER, and the reason subtracting a
-  // constant after a gain needs checking: for a small positive sample,
-  // g*(x + off) - off goes negative if g is small enough. It does not happen
-  // here because g only drops below 1 once |x + off| passes T, by which point
-  // x is large enough to survive — but that is an argument, and this is the
-  // measurement. Swept across every shape and four decades of input.
-  const T = 0.25
-  const off = ASYM_MAX_FRACTION * T
-  for (const shape of SHAPES) {
-    const n = SHAPE_EXPONENT[shape], knee = SHAPE_KNEE_DB[shape]
-    for (let i = -200000; i <= 200000; i++) {
-      const x = (i / 200000) * 4
-      if (x === 0) continue
-      const y = softClip(x + off, T, MAX_REDUCTION_DB, knee, n) - off
-      if (y === 0) continue
-      assert.equal(Math.sign(y), Math.sign(x),
-        `${shape} flipped the sign at x=${x}: got ${y}`)
-    }
-  }
-})
-
-test('the DC blocker earns its place under overdrive', () => {
-  // ⚠ THIS FEATURE WAS NEARLY SHIPPED WITHOUT ONE, on a measurement taken at
-  // the default operating point where the DC is 70-90 dB below peak and looks
-  // like nothing. Under drive it is a different quantity entirely, and an
-  // input that ALREADY carries DC is the case that settles it: without a
-  // blocker that came out 5.1 dB below its own peak.
-  const n = Math.round(3 * SR)
-  const withDc = new Float32Array(n)
-  for (let i = 0; i < n; i++) withDc[i] = 0.5 + 0.4 * Math.sin((2 * Math.PI * 200 * i) / SR)
-  const y = processSoftClipperBuffer([withDc], SR, {
-    thresholdMode: 'fixed', fixedThresholdDb: -30, emphasisDb: 0, shape: 'tanh3', asymmetry: 100,
-  }).channelData[0]
-  let mean = 0, peak = 0
-  for (let i = SR; i < n; i++) { mean += y[i]; peak = Math.max(peak, Math.abs(y[i])) }
-  mean /= (n - SR)
-  const belowPeak = 20 * Math.log10(Math.abs(mean) / peak)
-  assert.ok(belowPeak < -60,
-    `DC survived at ${belowPeak.toFixed(1)} dB below peak — the blocker is not doing its job`)
-})
-
-test('the offset is removed by the shaper, not left for the DC blocker', () => {
-  // A HOLE FOUND BY MUTATION. Dropping the `- off` after the curve leaves the
-  // whole offset in the signal and lets the blocker take it out, which sounds
-  // almost the same in steady state and is not the same thing at all: the
-  // blocker then has to charge from a step of up to 0.35*T — tens of dB of DC
-  // — every time playback starts, and again slowly whenever the tracked
-  // threshold moves. Subtracting it at the curve means the blocker only ever
-  // sees the shaping residue, which is 70-90 dB down.
-  //
-  // Probed on material that never reaches the threshold, so the ONLY thing
-  // that could displace the output is the offset itself.
-  const quiet = new Float32Array(Math.round(0.5 * SR))
-  for (let i = 0; i < quiet.length; i++) {
-    quiet[i] = 0.02 * Math.sin((2 * Math.PI * 300 * i) / SR)
-  }
-  const out = processSoftClipperBuffer([quiet], SR, {
-    ...CURVE_ONLY,
-    thresholdMode: 'fixed', fixedThresholdDb: -6, emphasisDb: 0, shape: 'tanh3', asymmetry: 100,
-  }).channelData[0]
-  // Compare against the input, delay-aligned, from the very first samples —
-  // the transient is what this is looking for, so it must not be skipped.
-  let worst = 0
-  for (let i = 0; i + SOFT_CLIPPER_LATENCY_SAMPLES < quiet.length; i++) {
-    worst = Math.max(worst, Math.abs(out[i + SOFT_CLIPPER_LATENCY_SAMPLES] - quiet[i]))
-  }
-  assert.ok(worst < 0.002,
-    `below-threshold material was displaced by ${worst.toFixed(5)} — the offset is reaching ` +
-    'the output instead of being removed at the curve')
-})
-
-// ── Sign selection from waveform skew (SKEW_TAU_S / SKEW_DEADBAND) ──────────
-
-/**
- * speechLike with a deliberate lean.
- *
- * A second harmonic at a fixed phase makes a waveform asymmetric about zero —
- * which is what a glottal pulse does, and why real speech has skew at all. The
- * sign of `lean` sets which way it leans.
- */
-function leaningSpeech(seconds, peakAmp, seed, lean) {
-  const base = speechLike(seconds, peakAmp, seed)
-  const out = new Float32Array(base.length)
-  let max = 0
-  for (let i = 0; i < base.length; i++) {
-    const x = base[i]
-    // x*x is EVEN, which is the whole point — it biases one polarity and
-    // leaves the other alone. An earlier version of this used
-    // `x*x*sign(x)`, which is x*|x| and therefore ODD, so it produced a
-    // probe with a skew of 0.001 and a test that could not fail.
-    out[i] = x + (lean / peakAmp) * x * x
-    if (Math.abs(out[i]) > max) max = Math.abs(out[i])
-  }
-  if (max > 0) for (let i = 0; i < out.length; i++) out[i] *= peakAmp / max
-  return out
-}
-
-/** Run the kernel and return its settled skew state. */
-function skewState(signal, params, sr = SR) {
-  const kernel = new SoftClipperKernel(sr)
-  kernel.setParams({ shape: 'tanh3', ...params })
-  const out = new Float32Array(signal.length)
-  for (let off = 0; off < signal.length; off += 128) {
-    const len = Math.min(128, signal.length - off)
-    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
-  }
-  return {
-    skew: kernel.skewM2 > 0 ? kernel.skewM3 / Math.pow(kernel.skewM2, 1.5) : 0,
-    sign: kernel.asymSign,
-    direction: kernel.asymDirection,
-  }
-}
-
-test('the offset leans against the waveform, not with it', () => {
-  // The whole of step 2. Even-order content is identical for either sign — it
-  // buys none of the warmth — so the sign is chosen purely to minimise what
-  // else is paid for it. Measured on real narration: a file with skew +0.65
-  // goes from -31.75 dBc of total distortion with a fixed positive offset to
-  // -35.01 with the sign selected, for the same even content.
-  const params = { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 }
-  const leansPositive = skewState(leaningSpeech(8, 0.5, 97, 0.6), params)
-  const leansNegative = skewState(leaningSpeech(8, 0.5, 97, -0.6), params)
-  assert.ok(leansPositive.skew > SKEW_DEADBAND_PROBE,
-    `the probe is not leaning positive enough to test with: ${leansPositive.skew.toFixed(3)}`)
-  assert.ok(leansNegative.skew < -SKEW_DEADBAND_PROBE,
-    `the probe is not leaning negative enough to test with: ${leansNegative.skew.toFixed(3)}`)
-  assert.equal(leansPositive.sign, -1, 'a positive lean did not get a negative offset')
-  assert.equal(leansNegative.sign, 1, 'a negative lean did not get a positive offset')
-})
-
-test('the magnitude does not depend on the skew', () => {
-  // ⚠ THE BUG THIS EXISTS FOR. The first version scaled the direction as
-  // `-tanh(skew / scale)`, which reads as an elegant continuous sign and
-  // silently turns the control OFF on symmetric material: direction zero,
-  // offset zero, no even harmonics at any setting of the knob. Caught by the
-  // even-order energy going to exactly zero on synthetic probes, which are
-  // sums of sines and symmetric to the last bit.
-  const symmetric = concat(speechLike(5, 0.5, 11), speechLike(4, 0.5, 13))
-  const st = skewState(symmetric, { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 })
-  assert.ok(Math.abs(st.skew) < 0.15,
-    `the probe is not symmetric enough to test with: skew ${st.skew.toFixed(4)}`)
-  assert.equal(Math.abs(st.direction), 1,
-    `symmetric material got a reduced offset (direction ${st.direction}), so the knob does less ` +
-    'for reasons that have nothing to do with the setting')
-  // And the even content is really there, end to end.
-  const { evenDbc } = evenOddDbc(symmetric, { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 })
-  assert.ok(evenDbc > -60, `no even harmonics on symmetric material: ${evenDbc.toFixed(1)} dBc`)
-})
-
-test('a polarity-flipped recording is processed identically', () => {
-  // A CONSEQUENCE OF SELECTING THE SIGN, and a good one: flipping the input's
-  // polarity flips its skew, which flips the chosen offset, so the stage
-  // treats a recording and its inverse as the same recording. Mic polarity is
-  // arbitrary and should not change what a user hears.
-  //
-  // ⚠ It is also why the +/- decomposition CANNOT be used to measure even
-  // content on skewed material — the negated run is not the same processing.
-  // The even-harmonic tests above use symmetric probes, where the deadband
-  // holds the sign still, for exactly this reason.
-  const signal = leaningSpeech(12, 0.5, 41, 0.6)
-  const neg = new Float32Array(signal.length)
-  for (let i = 0; i < signal.length; i++) neg[i] = -signal[i]
-  const params = { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', asymmetry: 60 }
-  const a = processSoftClipperBuffer([signal], SR, params).channelData[0]
-  const b = processSoftClipperBuffer([neg], SR, params).channelData[0]
-  // Measured past the decision point: for the first SKEW_EVIDENCE_S both runs
-  // are still on the startup sign, so they are deliberately NOT mirror images
-  // there. The property is about the settled state.
-  let worst = 0
-  for (let i = Math.round(6 * SR); i < signal.length; i++) {
-    worst = Math.max(worst, Math.abs(a[i] + b[i]))
-  }
-  assert.ok(worst < 1e-4,
-    `polarity changed the processing by ${worst.toExponential(2)} — the sign decision is not ` +
-    'tracking the input it is meant to oppose')
-})
-
-test('the sign waits for evidence, and holds the shipped default until it has it', () => {
-  // ⚠ READING THE RATIO EARLY IS NOT A SMALL ERROR, IT IS A SIGN FLIP, and
-  // because the decision is sticky one early excursion latches for the rest of
-  // the file. On a probe whose settled skew is 0.002 the running estimate
-  // reads 1.15 at 0.5 s, 0.27 at 1.0 and 0.12 at 1.5 — the first build decided
-  // at the speech tracker's 500 ms warm-up and duly latched the wrong sign on
-  // symmetric material.
-  //
-  // So the decision waits a full time constant of GATED evidence, and until it
-  // has it the direction sits at the startup sign — which is the behaviour
-  // that shipped before any of this, so the opening of a file is never worse
-  // than it was.
-  const params = { headroomDb: 6.5, emphasisDb: 6, asymmetry: 60 }
-  const signal = leaningSpeech(14, 0.5, 97, 0.6)
-
-  // Well short of the evidence window: still on the startup sign.
-  const early = skewState(signal.subarray(0, Math.round(1.5 * SR)), params)
-  assert.equal(early.sign, 1, 'the sign moved before there was evidence for it')
-
-  // Past it: committed to the opposite of the lean, and fully travelled.
-  const settled = skewState(signal, params)
-  assert.equal(settled.sign, -1, 'a positive lean did not eventually get a negative offset')
-  assert.ok(Math.abs(settled.direction) > 0.99,
-    `the direction never finished travelling: ${settled.direction.toFixed(3)}`)
-
-  // A symmetric probe never moves at all, however long it runs — the failure
-  // that motivated the evidence window.
-  const flat = skewState(concat(speechLike(7, 0.5, 11), speechLike(7, 0.5, 13)), params)
-  assert.equal(flat.sign, 1,
-    `symmetric material latched a sign: skew ${flat.skew.toFixed(4)} moved it to ${flat.sign}`)
-})
-
-// ── HF Loss (HF_LOSS_CORNER_HZ) ─────────────────────────────────────────────
-
-/** Wideband gain of the stage at one frequency and one input level. */
-function bandGainDb(freqHz, ampDb, params, sr = SR) {
-  const n = Math.round(3 * sr)
-  const amp = dbToLin(ampDb)
-  const period = Math.round(0.25 * sr)
-  const sig = new Float32Array(n)
-  for (let i = 0; i < n; i++) {
-    // Gated bursts: a steady tone never opens the detector's gate, so it would
-    // measure a stage that is not running. That trap is recorded four times in
-    // the kernel and once in the rumble heuristic.
-    const ph = (i % period) / period
-    const env = ph < 0.7 ? Math.min(1, ph / 0.02) * Math.min(1, (0.7 - ph) / 0.02) : 0
-    sig[i] = amp * env * Math.sin((2 * Math.PI * freqHz * i) / sr)
-  }
-  const y = processSoftClipperBuffer([sig], sr, { shape: 'tanh3', ...params }).channelData[0]
-  let a = 0, b = 0
-  for (let i = sr; i < n; i++) { a += sig[i] * sig[i]; b += y[i] * y[i] }
-  return 10 * Math.log10(b / a)
-}
-
-test('HF Loss is CONSTANT — the room does not breathe', () => {
-  // ⚠ THIS TEST REPLACES ONE THAT PINNED THE OPPOSITE, and the reversal is the
-  // point of the re-reference. HF Loss used to follow the envelope: full depth
-  // on a loud syllable, none through the pause after it. That is a room whose
-  // character changes between phrases, and a listener hears it as pumping long
-  // before they hear the colour itself. It is now a constant shelf scaled to
-  // the speech level — see CHARACTER_REFERENCE.
-  //
-  // The direct form of the claim: measure the shelf during a loud passage and
-  // during a quiet one, and they have to agree.
-  const base = { thresholdMode: 'fixed', fixedThresholdDb: -14, emphasisDb: 0 }
-  const shelfAt = (ampDb) => [100, 1000, 4000, 8000, 16000].map(f =>
-    bandGainDb(f, ampDb, { ...base, hfLoss: 100 }) - bandGainDb(f, ampDb, { ...base, hfLoss: 0 }))
-  const loud = shelfAt(-2)
-  const quiet = shelfAt(-24)
-  for (let i = 0; i < loud.length; i++) {
-    assert.ok(Math.abs(loud[i] - quiet[i]) < 0.35,
-      `the shelf changed with level — the room breathes: ` +
-      `${loud.map(v => v.toFixed(2)).join(', ')} at -2 dBFS against ` +
-      `${quiet.map(v => v.toFixed(2)).join(', ')} at -24`)
-  }
-})
-
-test('HF Loss is a shelf: flat low, monotonic, and it reaches depth', () => {
-  const base = { thresholdMode: 'fixed', fixedThresholdDb: -14, emphasisDb: 0 }
-  const shelf = [100, 1000, 4000, 8000, 16000].map(f =>
-    bandGainDb(f, -2, { ...base, hfLoss: 100 }) - bandGainDb(f, -2, { ...base, hfLoss: 0 }))
-  assert.ok(Math.abs(shelf[0]) < 0.15, `the shelf is cutting at 100 Hz: ${shelf[0].toFixed(2)} dB`)
-  for (let i = 1; i < shelf.length; i++) {
-    assert.ok(shelf[i] < shelf[i - 1] + 0.02,
-      `the shelf is not monotonic with frequency: ${shelf.map(v => v.toFixed(2)).join(', ')}`)
-  }
-  assert.ok(shelf[shelf.length - 1] < -2, `the shelf never reaches any depth: ${shelf[4].toFixed(2)} dB`)
-})
-
-test('HF Loss cannot boost, at any level or setting', () => {
-  // PROVABLE RATHER THAN MEASURED, and the test is here because the filter's
-  // depth moves per sample and a recomputed biquad would have needed the
-  // measurement. The structure is g*x + (1-g)*lowpass(x), so
-  // |g + (1-g)*LP| <= g + (1-g)*|LP| <= 1 for any 0 <= g <= 1 — a one-pole
-  // lowpass has magnitude at most 1 everywhere. Swept anyway, because the
-  // proof is about the structure and this is about the code.
-  const params = { thresholdMode: 'fixed', fixedThresholdDb: -20, emphasisDb: 0, hfLoss: 100 }
-  for (const freq of [50, 200, 1000, 4000, 10000, 18000]) {
-    for (const ampDb of [-24, -12, -6, -1]) {
-      const g = bandGainDb(freq, ampDb, params)
-      assert.ok(g <= 0.02, `${freq} Hz at ${ampDb} dBFS was BOOSTED by ${g.toFixed(3)} dB`)
-    }
-  }
-})
-
-test('HF Loss is level-invariant and bypassed at zero', () => {
-  // Same two properties every other control here has to hold. The loss is
-  // driven by level RELATIVE to the threshold, so the same recording at a
-  // different level gets the same treatment.
-  const probe = concat(speechLike(4, 0.4, 71), speechLike(3, 0.4, 73))
-  const base = { thresholdMode: 'fixed', emphasisDb: 0, shape: 'tanh3', hfLoss: 100 }
-  const a = processSoftClipperBuffer([probe], SR, { ...base, fixedThresholdDb: -14 }).channelData[0]
-  const louder = new Float32Array(probe.length)
-  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
-  const b = processSoftClipperBuffer([louder], SR, { ...base, fixedThresholdDb: -8 }).channelData[0]
-  let worst = 0
-  for (let i = Math.round(SR); i < probe.length; i++) {
-    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
-  }
-  assert.ok(worst < 2e-3, `HF Loss is not level-invariant: worst deviation ${worst}`)
-
-  // And at 0 the filter is absent, not flat.
-  const withParam = processSoftClipperBuffer([probe], SR,
-    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3', hfLoss: 0 }).channelData[0]
-  const without = processSoftClipperBuffer([probe], SR,
-    { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }).channelData[0]
-  for (let i = 0; i < probe.length; i++) {
-    assert.equal(withParam[i], without[i], `hfLoss 0 altered sample ${i}`)
-  }
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.drive, 0, 'the shipped default engages HF Loss through drive')
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hfLoss, undefined,
-    'hfLoss is still its own default — it should be derived from drive')
-})
-
-test('the recorded transfer slopes are the real ones, and stay clear of folding', () => {
-  // ⚠ THE NUMBER THIS REPLACES WAS STALE. The kernel recorded "max d(r)/d(e) =
-  // 0.404 at the shipped values", which corresponded to no shipped
-  // configuration after the shapes were given their own knees — it survived
-  // two changes to KNEE_DB unnoticed because nothing checked it.
-  //
-  // Monotonicity is what stops the transfer curve folding back on itself, and
-  // a fold is the one failure in this stage that sounds like destruction
-  // rather than colour. The slope has to stay under 1; these are how much room
-  // is actually left.
-  const stated = { tanh2: 0.544, tanh3: 0.643, tanh4: 0.717 }
-  const h = 1e-6
-  for (const shape of SHAPES) {
-    const knee = SHAPE_KNEE_DB[shape]
-    const n = SHAPE_EXPONENT[shape]
-    const r = (e) => {
-      const t = Math.tanh(e / knee)
-      let v = MAX_REDUCTION_DB * t * t
-      if (n >= 3) v *= t
-      if (n >= 4) v *= t
-      return v
-    }
-    let maxSlope = 0
-    for (let e = h; e < 60; e += 1e-3) {
-      maxSlope = Math.max(maxSlope, (r(e + h) - r(e - h)) / (2 * h))
-    }
-    assert.ok(Math.abs(maxSlope - stated[shape]) < 0.002,
-      `${shape} max slope is ${maxSlope.toFixed(4)}, not the recorded ${stated[shape]}`)
-    assert.ok(maxSlope < 1,
-      `${shape} folds: max d(r)/d(e) = ${maxSlope.toFixed(4)}`)
-  }
-})
+// ── HF Loss: MOVED TO TUBE SATURATION ──────────────────────────────────────
+//
+// Its tests moved with it, to test/dsp/vocalSat.test.js, which is where the
+// filter now is. Two of them did not survive the move unchanged and the
+// difference is worth noting: "level-invariant" and "bypassed at zero" were one
+// test here, and in the new home level invariance is not claimed at all —
+// Tube Saturation multiplies absolute sample values into a fixed transfer, so
+// nothing in it is level-invariant. Bit-identical bypass is claimed, and pinned.
 
 // ── Hysteresis (HYST_MAX_DB) ────────────────────────────────────────────────
 
@@ -2533,9 +2056,13 @@ test('soften is absent at zero and never boosts', () => {
   for (let i = 0; i < sig.length; i++) {
     assert.equal(withParam[i], without[i], `soften 0 altered sample ${i}`)
   }
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.drive, 0, 'the shipped default engages soften through drive')
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.soften, undefined,
-    'soften is still its own default — it should be derived from drive')
+  // ⚠ IT IS ITS OWN PARAMETER NOW. It used to be reached only through `drive`,
+  // which split one knob across Asymmetry, HF Loss and Soften — and this
+  // assertion was the inverse of what it is now, pinning that soften had NO
+  // default of its own. Asymmetry is deleted and HF Loss moved to Tube
+  // Saturation, so the split has one member left and the knob is that member.
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.soften, 0, 'soften does not ship off')
+  assert.ok(!('drive' in SOFT_CLIPPER_KERNEL_DEFAULTS), 'the drive knob is back')
 
   // NEVER BOOSTS. The limiter only ever moves toward its input, so
   // |y| <= max(|y_prev|, |x|) at every sample and the bound follows.
@@ -2614,75 +2141,15 @@ test('at scale 1 the soften limit provably cannot bind — Bernstein', () => {
     `a Nyquist-limited signal exceeded Bernstein's bound: ${worst} > ${bound}`)
 })
 
-// ── Drive (DRIVE_ASYM_RATIO) ────────────────────────────────────────────────
-
-test('drive 0 is bit-identical, and drive is monotonic', () => {
-  const sig = concat(speechLike(4, 0.7, 71), speechLike(3, 0.7, 79))
-  const base = { headroomDb: 7.0, shape: 'tanh3' }
-
-  // ABSENT AT ZERO. Drive stands in for three controls, so this is the one
-  // assertion that keeps the stock patch equal to the clipper and nothing
-  // else — the property that lets a colouring group live inside a stage whose
-  // identity is transparency.
-  const zero = processSoftClipperBuffer([sig], SR, { ...base, drive: 0 }).channelData[0]
-  const none = processSoftClipperBuffer([sig], SR, base).channelData[0]
-  for (let i = 0; i < sig.length; i++) {
-    assert.equal(zero[i], none[i], `drive 0 altered sample ${i}`)
-  }
-
-  // MONOTONIC. The three components have different shapes and one of them
-  // (Soften) is geometric in its own knob, so "more drive is more character"
-  // is a property of the RATIOS rather than of any one control.
-  const added = [25, 50, 75, 100].map(d => {
-    const y = processSoftClipperBuffer([sig], SR, { ...base, drive: d }).channelData[0]
-    let e = 0, r = 0, n = 0
-    for (let i = Math.round(SR); i < sig.length; i++) { e += (y[i] - zero[i]) ** 2; r += zero[i] ** 2; n++ }
-    return 20 * Math.log10(Math.sqrt(e / n) / Math.sqrt(r / n))
-  })
-  for (let i = 1; i < added.length; i++) {
-    assert.ok(added[i] > added[i - 1] + 0.5,
-      `drive is not monotonic: ${added.map(v => v.toFixed(1)).join(' -> ')} dBc`)
-  }
-
-  // ⚠ AND IT HAS TO REACH ALL THREE. Monotonicity is satisfied by any ONE of
-  // them being wired up — measured, cutting drive's path to Asymmetry or to
-  // Soften left every other assertion here passing. Each component is pinned
-  // by overriding it back to 0 and requiring the output to change.
-  //
-  // ⚠ ON A DIFFERENT PROBE, and that is not incidental. `speechLike` does not
-  // move fast enough for Soften to engage AT ALL at this ratio — measured,
-  // pinning it to 0 changes the output by 4e-8, so the wiring check silently
-  // could not see it. Twelfth time synthetic material has been too clean to
-  // answer the question asked of it. A sibilant bed reaches it.
-  const fast = sibilantSpeech(5, 0.7, 91, 0.8)
-  const full = processSoftClipperBuffer([fast], SR, { ...base, drive: 100 }).channelData[0]
-  for (const component of ['asymmetry', 'hfLoss', 'soften']) {
-    const without = processSoftClipperBuffer([fast], SR,
-      { ...base, drive: 100, [component]: 0 }).channelData[0]
-    let worst = 0
-    for (let i = Math.round(SR); i < fast.length; i++) {
-      worst = Math.max(worst, Math.abs(full[i] - without[i]))
-    }
-    assert.ok(worst > 1e-5,
-      `drive does not reach ${component}: pinning it to 0 changed nothing (worst ${worst})`)
-  }
-})
-
-test('drive does not move loudness', () => {
-  // A character control that changes level cannot be A/B'd honestly, and this
-  // one drives three things at once so the risk compounds. Measured on real
-  // narration the whole sweep moves output RMS by 0.11-0.21 dB.
-  const sig = concat(speechLike(4, 0.7, 83), speechLike(3, 0.7, 89))
-  const base = { headroomDb: 7.0, shape: 'tanh3' }
-  const level = d => {
-    const y = processSoftClipperBuffer([sig], SR, { ...base, drive: d }).channelData[0]
-    let e = 0, n = 0
-    for (let i = Math.round(SR); i < sig.length; i++) { e += y[i] ** 2; n++ }
-    return 20 * Math.log10(Math.sqrt(e / n))
-  }
-  const a = level(0), b = level(100)
-  assert.ok(Math.abs(b - a) < 0.6, `drive moved output RMS ${a.toFixed(2)} -> ${b.toFixed(2)} dBFS`)
-})
+// ── Drive: REMOVED, the group had three members and one is left ───────────
+//
+// Both tests here are deleted rather than repointed at Soften. They were about
+// the COLLAPSE — that one knob reached all three components, that each
+// component's path was live (two mutations survived the first version of that
+// test: cutting drive's path to Asymmetry, and to Soften, because monotonicity
+// is satisfied by any ONE component being wired), and that the group did not
+// move loudness. None of those claims exist any more. Soften's own tests are
+// above and are unchanged.
 
 test('HF Emphasis is pinned and off the faceplate', () => {
   // ⚠ THE PIN IS 0 NOW, AND IT IS NO LONGER A JUDGEMENT — it is what the
@@ -2833,4 +2300,66 @@ test('the residual reports the curve, not the limiter', () => {
   }
   assert.ok(residual(100) < residual(0) - 3,
     `the residual did not fall as the curve went idle: ${residual(0).toFixed(1)} -> ${residual(100).toFixed(1)} dBc`)
+})
+
+// ── Preview / apply agreement ──────────────────────────────────────────────
+
+test('Soften delivers the same depth cold as it does warmed up', () => {
+  // ⚠ THE REPORTED DEFECT: the applied audio was less softened than the
+  // preview, every time. The preview runs the kernel continuously, so its
+  // speech tracker is settled; an offline region render starts it COLD, and
+  // Soften's allowance was scaled by that tracker. A larger reference is a
+  // larger allowance, so the apply path bit less all the way through — measured
+  // at 1.5-2.3 dB on a 10 s region of real narration.
+  //
+  // Referencing the allowance to T instead makes the whole thing history-free
+  // in fixed mode, since T is then a constant the user set. This is that
+  // property: the same audio through a WARMED kernel and a COLD one must give
+  // the same Soften, and the mutation it catches is scaling the allowance by
+  // anything that has to converge.
+  const lead = concat(speechLike(6, 0.55, 11), speechLike(6, 0.2, 13))
+  const region = concat(speechLike(4, 0.5, 71), speechLike(3, 0.5, 73))
+  const patch = { thresholdMode: 'fixed', fixedThresholdDb: -12, emphasisDb: 0, shape: 'tanh3' }
+
+  const depth = (signal, offset, soften) => {
+    const wet = processSoftClipperBuffer([signal], SR, { ...patch, soften }).channelData[0]
+    const dry = processSoftClipperBuffer([signal], SR, { ...patch, soften: 0 }).channelData[0]
+    let sq = 0, n = 0
+    for (let i = offset; i < signal.length; i++) { const d = wet[i] - dry[i]; sq += d * d; n++ }
+    return 10 * Math.log10(sq / n + 1e-30)
+  }
+
+  for (const soften of [60, 100]) {
+    // Warmed: the region preceded by 12 s of real material, measured from the
+    // region only. Cold: the region on its own, measured from its start.
+    const warmed = depth(concat(lead, region), lead.length, soften)
+    const cold = depth(region, 0, soften)
+    assert.ok(Math.abs(warmed - cold) < 0.5,
+      `soften ${soften}: cold and warm disagree — ${cold.toFixed(2)} vs ${warmed.toFixed(2)} dB`)
+  }
+})
+
+test('the reported latency is per-patch, and the apply path can ask for it', () => {
+  // ⚠ THE SECOND HALF OF THE SAME REPORT. `SOFT_CLIPPER_LATENCY_SAMPLES` is the
+  // OVERSAMPLER's 50 samples; the limiter adds its lookahead on top and the
+  // limiter now ships engaged. The apply path was trimming 50 from a render
+  // that was delayed by 226, which shifts the applied region 176 samples late
+  // and drops that much of its tail.
+  //
+  // The function has to agree with a real kernel or the two drift, and it must
+  // work WITHOUT one — the offline context's length depends on the answer, so
+  // it is needed before anything can be built.
+  for (const params of [{}, { limiter: 0 }, { limiter: 1 }, { limiter: 50 }, { limiter: 100 }]) {
+    const kernel = new SoftClipperKernel(SR)
+    kernel.setParams(params)
+    // The kernel's own flag is only set once it has seen audio, so run a block.
+    const x = new Float32Array(512), y = new Float32Array(512)
+    kernel.process([x], [y], 512)
+    assert.equal(softClipperLatencySamples(params, SR), kernel.latencySamples,
+      `latency disagrees for ${JSON.stringify(params)}`)
+  }
+  // And the shipped patch is NOT the bypass figure — the bug was assuming it.
+  assert.ok(softClipperLatencySamples({}, SR) > SOFT_CLIPPER_LATENCY_SAMPLES,
+    'the shipped default no longer engages the limiter, or the constant is back')
+  assert.equal(softClipperLatencySamples({ limiter: 0 }, SR), SOFT_CLIPPER_LATENCY_SAMPLES)
 })

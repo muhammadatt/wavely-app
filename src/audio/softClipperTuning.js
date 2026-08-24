@@ -22,34 +22,18 @@
  *                  interior optimum, so there is nothing here for a user to
  *                  find by turning it — but the aiming has never been measured
  *                  and the knob is how that gets done.
- *   Drive ratios   the split of Drive between Asymmetry, HF Loss and Soften.
- *                  Measurement can rank the three and cannot say which blend
- *                  SOUNDS like tape; that decision needs a person, one file
- *                  and no rebuild — the same reason `voicerxBaseline` exists,
- *                  and this follows its pattern deliberately.
- *
- * ⚠ THE DRIVE RATIOS ARE SCAFFOLDING AND ARE MEANT TO COME OUT. Once they are
- * settled the constants get the chosen values and those three knobs go. The
- * other three are shipped kernel behaviour with the control hidden, not
- * scaffolding: hiding a control is not the same as not having one, and the
+ * ⚠ THE DRIVE RATIOS ARE GONE, and with them the last of the scaffolding this
+ * module was originally written for. They split one knob between Asymmetry,
+ * HF Loss and Soften; asymmetry is deleted and HF Loss moved to Tube
+ * Saturation, so the split has one member left and the panel shows it under
+ * its own name. What is left behind this flag is all shipped kernel behaviour
+ * with the control hidden — which is not the same as not having one, and the
  * kernel's defaults are what a user gets either way.
  *
  * Its own module rather than a function inside useSoftClipper.js so it can be
  * tested under node — importing the composable drags in Vite's `?worker&url`
  * specifiers, which only the bundler can resolve.
  */
-
-/** Shipping ratios, mirrored from the kernel so the panel can seed its knobs. */
-export const DEFAULT_DRIVE_RATIOS = { asymmetry: 1, hfLoss: 1, soften: 0.65 }
-
-/**
- * Ratios are clamped to [0, 1.5]. Above 1.5 a component reaches its own full
- * travel before Drive is halfway and the rest of the knob does nothing, which
- * is the failure this whole collapse was meant to remove — a control that
- * saturates early teaches the listener nothing about the blend.
- */
-const MIN_RATIO = 0
-const MAX_RATIO = 1.5
 
 /**
  * Is the hidden tuning panel on?
@@ -63,12 +47,6 @@ export function tuningEnabled() {
     if (raw === '1' || raw === 'true') return true
   }
   return false
-}
-
-export function clampRatio(value) {
-  const v = Number(value)
-  if (!Number.isFinite(v)) return 0
-  return v < MIN_RATIO ? MIN_RATIO : v > MAX_RATIO ? MAX_RATIO : v
 }
 
 /** Query string, then stored preference. Null when neither has an opinion. */

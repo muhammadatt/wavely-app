@@ -13,11 +13,15 @@
  */
 
 import { ensureSoftClipperWorklet } from '../softClipperWorkletLoader.js'
-import { SOFT_CLIPPER_LATENCY_SAMPLES } from '../softClipperProcessor.js'
+import {
+  SOFT_CLIPPER_LATENCY_SAMPLES, softClipperLatencySamples,
+} from '../softClipperProcessor.js'
 import { SOFT_CLIPPER_DEFAULTS, toKernelParams } from './softClipperParams.js'
 import { createLevelTap } from './levelTap.js'
 
-export { SOFT_CLIPPER_LATENCY_SAMPLES }
+// ⚠ THE FUNCTION, NOT JUST THE CONSTANT. The constant is the bypass figure and
+// the apply path needs the real one — see softClipperLatencySamples.
+export { SOFT_CLIPPER_LATENCY_SAMPLES, softClipperLatencySamples }
 
 /**
  * How much history the scrolling scope keeps, in seconds.
@@ -232,6 +236,13 @@ export function createSoftClipper(audioContext) {
 export const softClipperEffect = {
   id: 'soft-clipper',
   name: 'Adaptive Soft Clipper',
+  // ⚠ THE BYPASS FIGURE, NOT THE STAGE'S. This is the oversampler's 50 samples;
+  // with the limiter engaged — which is the shipped default — the stage delays
+  // by 226 at 44.1 kHz. Nothing in the live chain reads this today, so it is
+  // wrong metadata rather than a live defect, but the apply path made exactly
+  // this assumption and shifted every applied region by 176 samples. Anything
+  // that wires delay compensation through the chain must call
+  // softClipperLatencySamples(params, sampleRate) instead of reading this.
   latencySamples: SOFT_CLIPPER_LATENCY_SAMPLES,
   createNodes(audioContext) {
     return createSoftClipper(audioContext)

@@ -19,6 +19,7 @@ const vsMidCrossover = ref(VOCAL_SAT_DEFAULTS.midCrossover)
 const vsLowDriveMult = ref(VOCAL_SAT_DEFAULTS.lowDriveMult)
 const vsMidDriveMult = ref(VOCAL_SAT_DEFAULTS.midDriveMult)
 const vsHighDriveMult = ref(VOCAL_SAT_DEFAULTS.highDriveMult)
+const vsHfLoss = ref(VOCAL_SAT_DEFAULTS.hfLoss)
 
 const vsPreview = ref(false)
 const vsInputLevels = ref([])
@@ -36,6 +37,7 @@ function currentParams() {
     lowDriveMult: vsLowDriveMult.value,
     midDriveMult: vsMidDriveMult.value,
     highDriveMult: vsHighDriveMult.value,
+    hfLoss: vsHfLoss.value,
   }
 }
 
@@ -119,6 +121,7 @@ export function useVocalSaturation() {
   const syncLowDriveMult = v => syncParam('lowDriveMult', vsLowDriveMult, v)
   const syncMidDriveMult = v => syncParam('midDriveMult', vsMidDriveMult, v)
   const syncHighDriveMult = v => syncParam('highDriveMult', vsHighDriveMult, v)
+  const syncHfLoss = v => syncParam('hfLoss', vsHfLoss, v)
 
   async function apply() {
     if (!state.selection) return
@@ -173,6 +176,7 @@ export function useVocalSaturation() {
     vsLowDriveMult,
     vsMidDriveMult,
     vsHighDriveMult,
+    vsHfLoss,
     vsPreview,
     vsInputLevels,
     vsOutputLevels,
@@ -187,6 +191,7 @@ export function useVocalSaturation() {
     syncLowDriveMult,
     syncMidDriveMult,
     syncHighDriveMult,
+    syncHfLoss,
     apply,
     teardown,
     openModal,

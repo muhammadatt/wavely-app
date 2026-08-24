@@ -15,12 +15,12 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive, limiter,
-  emphasisDb, tuningOn, driveRatios,
+  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, soften, limiter,
+  emphasisDb, tuningOn,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncLimiter, syncEmphasis, syncRatio,
+  togglePreview, toggleDelta, syncHeadroom, syncSoften, syncLimiter, syncEmphasis,
   syncOutputTrim,
   syncFixedThreshold,
   setShape, apply, teardown, closeModal,
@@ -361,22 +361,28 @@ const SCOPE_H = 236
           </p>
         </div>
         <div class="w-[74px]">
-          <!-- ONE KNOB FOR THE WHOLE CHARACTER GROUP — asymmetry, HF Loss and
-               Soften at fixed internal ratios, see DRIVE_ASYM_RATIO. They were
-               four separate colour controls defaulting to 0 on a panel whose
-               identity is transparency, and nobody sets them independently on
-               purpose. 0 bypasses all three, so the stock patch is exactly the
-               clipper and nothing else. -->
+          <!-- ⚠ THIS WAS "DRIVE", one knob over a group of three — asymmetry,
+               HF Loss and Soften at fixed internal ratios. Asymmetry is deleted
+               (it was this stage's own curve worked off-centre, so there was
+               never a separate thing to keep) and HF Loss moved to Tube
+               Saturation, where a linear shelf belongs. A knob that splits one
+               component between one component is that component with an extra
+               multiply, so it shows the component.
+               Soften limits how fast the waveform may move, inside the
+               oversampled path just ahead of the curve: it softens the top end
+               and rounds an edge before the curve sees it, which measurably
+               reduces what the curve then has to do. 0 bypasses it, so the
+               stock patch is exactly the clipper and nothing else. -->
           <Knob
-            :model-value="drive"
-            @update:model-value="syncDrive"
+            :model-value="soften"
+            @update:model-value="syncSoften"
             :min="0" :max="100" :step="1"
-            label="Drive" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+            label="Soften" :accent="ACCENT" :format-value="v => v.toFixed(0)"
             :value-font-px="13"
             :disabled="!clipperPreview"
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            tape character
+            {{ soften > 0 ? 'rounds the top end' : 'off' }}
           </p>
         </div>
         <div class="w-[74px]">
@@ -486,35 +492,6 @@ const SCOPE_H = 236
           </span>
         </div>
 
-        <!-- ⚠ SCAFFOLDING, unlike everything above it: these three override
-             fixed kernel constants and come out once the ratios are chosen. -->
-        <div class="flex items-center justify-center gap-[8px] mt-[14px] mb-[8px]">
-          <span style="font:700 8px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,176,32,.65)">
-            DRIVE SPLIT
-          </span>
-          <span style="font:600 8px ui-monospace,monospace;color:rgba(255,255,255,.45)">
-            {{ driveRatios.asymmetry.toFixed(2) }} / {{ driveRatios.hfLoss.toFixed(2) }} / {{ driveRatios.soften.toFixed(2) }}
-          </span>
-        </div>
-        <div class="flex justify-center gap-[16px]">
-          <div class="w-[74px]" v-for="r in [
-            { key: 'asymmetry', label: 'Asym x', caption: 'even harmonics' },
-            { key: 'hfLoss', label: 'HF Loss x', caption: 'fixed shelf' },
-            { key: 'soften', label: 'Soften x', caption: 'least predictable' },
-          ]" :key="r.key">
-            <Knob
-              :model-value="driveRatios[r.key]"
-              @update:model-value="v => syncRatio(r.key, v)"
-              :min="0" :max="1.5" :step="0.05"
-              :label="r.label" accent="#ffb020" :format-value="v => v.toFixed(2)"
-              :value-font-px="13"
-              :disabled="!clipperPreview"
-            />
-            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-              {{ r.caption }}
-            </p>
-          </div>
-        </div>
       </div>
 
       <p
