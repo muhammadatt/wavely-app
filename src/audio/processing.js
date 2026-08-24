@@ -323,6 +323,22 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
 }
 
 /**
+ * Measure the speech level of a region for the soft clipper's STATIC threshold
+ * mode. Resolves the level in dBFS, or null if the region cannot be measured.
+ *
+ * ⚠ THE ANALYSIS WINDOW IS CAPPED like every other measured parameter's (see
+ * AUTO_MAKEUP_MAX_ANALYSIS_S), so on a long region this is a centred excerpt
+ * rather than the whole thing. That is deliberate and harmless here — the
+ * statistic is a high percentile of a 3 s tracker, which 30 s samples
+ * perfectly well — and it is DETERMINISTIC, which is what keeps preview and
+ * apply on the identical number.
+ */
+export function computeSoftClipperSpeechLevel(segments, start, end, sampleRate, channels) {
+  return measureInWorker('softClipperSpeechLevel', segments, start, end, {}, sampleRate, channels)
+    .then(d => (Number.isFinite(d.speechLevelDb) ? d.speechLevelDb : null))
+}
+
+/**
  * Render a region through an effect's worklet in an OfflineAudioContext.
  *
  * Every effect applies this way, running the exact same worklet module as the

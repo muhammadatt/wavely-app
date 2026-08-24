@@ -3,11 +3,12 @@
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
- * schepsAutoTrim
+ * schepsAutoTrim, softClipperSpeechLevel
  */
 import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
+import { measureSpeechLevelDb } from '../audio/staticThreshold.js'
 
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
@@ -27,6 +28,9 @@ self.onmessage = function (e) {
       break
     case 'schepsAutoTrim':
       schepsAutoTrim(channelData, sampleRate, params)
+      break
+    case 'softClipperSpeechLevel':
+      softClipperSpeechLevel(channelData, sampleRate)
       break
     default:
       self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
@@ -50,6 +54,25 @@ function schepsAutoTrim(channelData, sampleRate, params) {
   try {
     const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
     self.postMessage({ type: 'done', trimDb, correlation, densityDb })
+  } catch (err) {
+    self.postMessage({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * Speech level for the soft clipper's static threshold mode.
+ *
+ * Same reasoning as autoMakeup — it runs a real SoftClipperKernel over the
+ * region to reuse the stage's own tracker rather than defining a second
+ * "speech level", so it is far too heavy for the main thread.
+ *
+ * ⚠ A null result is a legitimate answer, not a failure: a region too short or
+ * too quiet to measure has no speech level, and the caller must fall back to
+ * the adaptive tracker rather than render against a made-up number.
+ */
+function softClipperSpeechLevel(channelData, sampleRate) {
+  try {
+    self.postMessage({ type: 'done', speechLevelDb: measureSpeechLevelDb(channelData, sampleRate) })
   } catch (err) {
     self.postMessage({ type: 'error', message: err.message })
   }

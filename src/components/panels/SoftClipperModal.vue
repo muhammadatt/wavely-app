@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
@@ -22,6 +22,7 @@ const {
   togglePreview, toggleDelta, syncHeadroom, syncDrive, syncLimiter, syncRatio, syncOutputTrim,
   syncFixedThreshold,
   setThresholdMode, setShape, apply, teardown, closeModal,
+  speechLevelDb, speechLevelBusy, scheduleSpeechLevel,
 } = useSoftClipper()
 
 const { state } = useEditorState()
@@ -68,6 +69,7 @@ const ACCENT = '#ff8f6b'
 
 const MODE_OPTIONS = [
   { value: 'adaptive', label: 'ADAPTIVE', title: "Threshold rides the speaker's own level" },
+  { value: 'static', label: 'STATIC', title: "Threshold is set once from the selection's own level, then holds still" },
   { value: 'fixed', label: 'FIXED', title: 'Threshold is a stated dBFS ceiling' },
 ]
 
@@ -117,6 +119,7 @@ const SHAPE_CAPTION = {
 
 const MODE_CAPTION = {
   adaptive: 'the ceiling rides the voice',
+  static: 'the ceiling is measured once, then holds',
   fixed: 'the ceiling is a stated dBFS value',
 }
 
@@ -143,6 +146,27 @@ function formatDb(v) {
 }
 
 const isFixed = computed(() => thresholdMode.value === 'fixed')
+const isStatic = computed(() => thresholdMode.value === 'static')
+
+/**
+ * What the measured level reads as on the faceplate.
+ *
+ * ⚠ IT MUST SAY WHEN THERE IS NO MEASUREMENT, because the kernel silently
+ * falls back to the adaptive tracker in that case — a mode that quietly
+ * behaves like a different mode is exactly the "control that looks like a
+ * control and is not one" failure this panel has already fixed twice.
+ */
+const speechLevelReadout = computed(() => {
+  if (speechLevelBusy.value) return 'measuring…'
+  if (speechLevelDb.value === null) return 'no measurement — using ADAPTIVE'
+  return `${speechLevelDb.value.toFixed(1)} dBFS`
+})
+
+// The measurement belongs to the region, not to the knobs — no soft clipper
+// parameter changes what the tracker reads — so this is the only thing that
+// needs to re-run it. Debounced, because dragging a selection edge is a stream
+// of these.
+watch(() => state.selection, () => scheduleSpeechLevel(), { deep: true })
 
 
 /**
@@ -438,6 +462,26 @@ const SCOPE_H = 236
         />
         <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
           {{ SHAPE_CAPTION[shape] }}
+        </span>
+      </div>
+
+      <!-- STATIC's measured level, stated rather than implied. Headroom is
+           still the live knob in this mode, so without this the panel would
+           give no indication of what it is headroom ABOVE — and no indication
+           at all when the measurement is missing and the kernel has quietly
+           fallen back to the adaptive tracker. -->
+      <div
+        v-if="isStatic"
+        class="mt-[10px] flex items-center justify-center gap-[7px]"
+      >
+        <span style="font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.3)">
+          SPEECH LEVEL
+        </span>
+        <span
+          style="font:600 9.5px 'JetBrains Mono',monospace"
+          :style="{ color: speechLevelDb === null && !speechLevelBusy ? '#e0a03a' : ACCENT }"
+        >
+          {{ speechLevelReadout }}
         </span>
       </div>
 
