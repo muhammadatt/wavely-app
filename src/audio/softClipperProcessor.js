@@ -1447,8 +1447,13 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // measurement behind the specific value, recorded as such.
   emphasisDb: 3,
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
-  thresholdMode: 'adaptive', // 'adaptive' | 'fixed'
+  thresholdMode: 'adaptive', // 'adaptive' | 'fixed' | 'static'
   fixedThresholdDb: -10, // used only in 'fixed' mode
+  // Used only in 'static' mode: the region's speech level, measured once by
+  // measureSpeechLevelDb and supplied as a parameter. null falls back to the
+  // adaptive tracker, so a static render can never silently run on a stale or
+  // missing measurement. See SPEECH_LEVEL_PERCENTILE.
+  staticSpeechLevelDb: null,
   shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
   // 0-100, how much of the peak control the lookahead limiter takes from the
   // curve — see LIMITER_MAX_ABOVE_DB. 0 bypasses it entirely, including its
@@ -2151,6 +2156,29 @@ export class SoftClipperKernel {
 
     const p = this.params
     const fixedMode = p.thresholdMode === 'fixed'
+    /**
+     * STATIC MODE — level-invariant like adaptive, motionless like fixed.
+     *
+     * The speech tracker is taken out of the loop and replaced by ONE number
+     * measured over the region ahead of time (see measureSpeechLevelDb).
+     * Headroom keeps its meaning — it is still dB above the speech level — so
+     * every calibration derived against the tracker carries over, which is the
+     * criterion SPEECH_LEVEL_PERCENTILE was fitted to.
+     *
+     * WHY, measured: an adaptive threshold RISES with the speech level, so it
+     * lifts at exactly the moment peak control is wanted and the whole file
+     * pays the compensation. On real narration it removes 4-10x more program
+     * energy than a motionless threshold for the same peak control once a
+     * limiter reads the same moving T, and even at the shipped default it costs
+     * up to 39.6 dB of extra shaping residual for the identical output peak.
+     *
+     * ⚠ "MOTIONLESS" MEANS THE TRACKER IS OUT, NOT THAT T IS CONSTANT. The
+     * emphasis lift still moves (it is the aiming compensation and belongs to
+     * the signal, not the level), Headroom still smooths when the knob moves,
+     * and the hysteresis memory still modulates. Those are all small and
+     * bounded; the speech tracker was neither.
+     */
+    const staticMode = p.thresholdMode === 'static' && Number.isFinite(p.staticSpeechLevelDb)
     // Resolved once per call: `shape` is a string on the params object and the
     // clip curve runs L times per sample, so the lookup must not sit inside
     // the inner loop. Unknown values fall back to the DEFAULT shape rather
@@ -2478,7 +2506,9 @@ export class SoftClipperKernel {
       // relative to this rather than to the modulated value — feeding a
       // modulated threshold back into the measurement that drives it would
       // close a loop with no reason to settle.
-      const baseDb = (fixedMode ? p.fixedThresholdDb : speechLevelDb + headroomDbSmoothed)
+      const baseDb = (fixedMode
+        ? p.fixedThresholdDb
+        : (staticMode ? p.staticSpeechLevelDb : speechLevelDb) + headroomDbSmoothed)
         + liftDb
 
       if (hystActive) {
