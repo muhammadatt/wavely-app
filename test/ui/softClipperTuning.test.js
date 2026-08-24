@@ -1,17 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  DEFAULT_DRIVE_RATIOS, driveTuningEnabled, clampRatio,
+  DEFAULT_DRIVE_RATIOS, tuningEnabled, clampRatio,
 } from '../../src/audio/softClipperTuning.js'
 import {
   SOFT_CLIPPER_DEFAULTS, toKernelParams,
 } from '../../src/audio/effects/softClipperParams.js'
+import {
+  SOFT_CLIPPER_KERNEL_DEFAULTS,
+} from '../../src/audio/softClipperProcessor.js'
 
 test('the tuning panel is off unless explicitly asked for', () => {
-  // ⚠ THE POINT OF THE FLAG. These ratios are scaffolding; the failure to
+  // ⚠ THE POINT OF THE FLAG. What is behind it is scaffolding (the drive
+  // ratios) and research controls (Limiter, Knee, HF Emphasis); the failure to
   // prevent is a half-finished tuning session reaching a user, so the default
   // has to be off with no window, no query string and no stored preference.
-  assert.equal(driveTuningEnabled(), false, 'drive tuning is on by default')
+  assert.equal(tuningEnabled(), false, 'admin tuning is on by default')
 })
 
 test('ratios are clamped to a range where the knob still teaches you something', () => {
@@ -80,4 +84,48 @@ test('a zeroed ratio actually zeroes its component', () => {
     driveRatios: { asymmetry: 0, hfLoss: 0, soften: 0 },
   })
   assert.deepEqual(out.driveRatios, { asymmetry: 0, hfLoss: 0, soften: 0 })
+})
+
+test('the faceplate defaults come from the kernel, not from a second copy', () => {
+  // Limiter and the knee came OFF the faceplate onto the hidden tuning panel,
+  // which only works if the values a user gets are the kernel's own. A panel
+  // default restated here would be a second source of truth for a control
+  // nobody can see to correct — the worst possible place for a divergence.
+  assert.equal(SOFT_CLIPPER_DEFAULTS.limiter, SOFT_CLIPPER_KERNEL_DEFAULTS.limiter)
+  assert.equal(SOFT_CLIPPER_DEFAULTS.shape, SOFT_CLIPPER_KERNEL_DEFAULTS.shape)
+  // And the two the panel now ships with, stated so a silent move fails here.
+  assert.equal(SOFT_CLIPPER_DEFAULTS.limiter, 100)
+  assert.equal(SOFT_CLIPPER_DEFAULTS.shape, 'tanh4')
+})
+
+test('emphasisDb reaches the kernel only when the tuning panel sets a number', () => {
+  // ⚠ THE PIN AND THE KNOB HAVE TO COEXIST. emphasisDb is pinned in the kernel
+  // and reachable from the hidden panel, which means three states rather than
+  // two: shipped (forward nothing, the pin governs), tuned (forward the
+  // number), and the trap in between — forwarding the key with no value. The
+  // kernel merges partials over its own defaults, so `emphasisDb: undefined`
+  // does not fall back to the pin, it OVERWRITES it and NaNs its way through
+  // the recompute guard. Hence null in the defaults and a spread-or-nothing in
+  // toKernelParams.
+  assert.equal(SOFT_CLIPPER_DEFAULTS.emphasisDb, null,
+    'the panel mirrors the pin, which is one stale copy away from overriding it')
+  assert.ok(!('emphasisDb' in toKernelParams(SOFT_CLIPPER_DEFAULTS)),
+    'the shipped path forwards emphasisDb, which unpins it')
+  assert.ok(!('emphasisDb' in toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, emphasisDb: undefined })))
+  assert.ok(!('emphasisDb' in toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, emphasisDb: NaN })))
+  assert.equal(toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, emphasisDb: 6 }).emphasisDb, 6)
+  // 0 is a real setting — the cleanest one, measured — so it must not be read
+  // as "absent" the way the ratio knobs' 0 nearly was.
+  assert.equal(toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, emphasisDb: 0 }).emphasisDb, 0)
+})
+
+test('every param the hidden panel can set survives the setParam guard', () => {
+  // Same failure the drive ratios hit: `setParam` guards with `name in params`,
+  // so a key missing from SOFT_CLIPPER_DEFAULTS is silently dropped and the
+  // knob describes nothing. The hidden knobs are the ones this matters most
+  // for — nobody is watching them by accident.
+  for (const key of ['limiter', 'shape', 'emphasisDb']) {
+    assert.ok(key in SOFT_CLIPPER_DEFAULTS,
+      `${key} is not in SOFT_CLIPPER_DEFAULTS — setParam will drop it silently`)
+  }
 })

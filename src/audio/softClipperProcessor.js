@@ -1437,15 +1437,32 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // same reason and was wrong by a full dB, because it matched on peak gain
   // reduction rather than on output peak. This default and the shape table are
   // still coupled.
+  //
+  // The knee default has since moved to tanh^4, which does NOT unsettle this
+  // the way the tanh^2 -> tanh^3 move did: with the per-shape knees anchored
+  // at SHAPE_ANCHOR_DB the three positions land within a few tenths of a dB
+  // of each other on real crossings (2.77 / 2.97 / 3.11 dB at Headroom 6.5 on
+  // the reference clip), which is the whole point of anchoring them. The
+  // coupling is real but is now worth tenths rather than a dB.
   headroomDb: 7.0,
-  // ⚠ PINNED AT 3 AND NOT EXPOSED. Peak-matched, 0 is the cleanest setting by
-  // 2.2-3.4 dB — the only measured evidence there is — but the knob's job is
-  // AIMING, deciding which transients the curve works on, and that has never
-  // been measured. 3 keeps the aiming at roughly half strength for about
-  // 0.7 dB of the cleanliness cost, and keeps the lift compensation live and
-  // justified rather than turning it into dead code. A compromise with no
-  // measurement behind the specific value, recorded as such.
-  emphasisDb: 3,
+  // ⚠ PINNED, AND OFF THE FACEPLATE — reachable only from the hidden admin
+  // tuning panel (softClipperTuning.js), which is deliberately not the same as
+  // being unreachable: the pin lives here, and a panel that mirrored it would
+  // be one stale copy away from overriding it. See softClipperParams.js for
+  // how the key is forwarded only when the panel has set a real number.
+  //
+  // Peak-matched, 0 is the cleanest setting by 2.2-3.4 dB — the only measured
+  // evidence there is — but the knob's job is AIMING, deciding which
+  // transients the curve works on, and that has never been measured. Keeping
+  // it non-zero also keeps the lift compensation live and justified rather
+  // than turning ~200 lines into dead code.
+  //
+  // ⚠ IT WAS 3, AND THE ARGUMENT FOR 3 DOES NOT TRANSFER TO 7. 3 was chosen as
+  // "roughly half the aiming for about 0.7 dB of the cleanliness cost"; 7 has
+  // no measurement behind it. A compromise with no number under it, recorded
+  // as such — and the reason the knob exists on the admin panel is so that a
+  // number can eventually be put under it.
+  emphasisDb: 7,
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   // 'adaptive' | 'fixed'.
   //
@@ -1459,11 +1476,35 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // learning not to ship.
   thresholdMode: 'adaptive',
   fixedThresholdDb: -10, // used only in 'fixed' mode
-  shape: 'tanh3', // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT
+  // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT.
+  //
+  // ⚠ THIS IS NOT THE CALIBRATED SHAPE, and the two used to be the same thing.
+  // KNEE_DB is a measurement of tanh^3; the per-shape knees are anchored onto
+  // it via SHAPE_KNEE_ANCHOR_SHAPE, which is stated separately precisely so
+  // that moving this line changes which curve opens by default and nothing
+  // else. While the anchor read this field, moving it here re-derived all
+  // three curves — see the note above SHAPE_KNEE_DB.
+  //
+  // ⚠ OFF THE FACEPLATE: the KNEE switch lives on the hidden admin tuning
+  // panel. Peak-matched the shapes are worth at most 0.7 dB of residual
+  // against HF Emphasis's 3.4, which is the smaller lever by a factor of five.
+  shape: 'tanh4',
   // 0-100, how much of the peak control the lookahead limiter takes from the
   // curve — see LIMITER_MAX_ABOVE_DB. 0 bypasses it entirely, including its
-  // latency, so the shipped patch is bit-identical to the build before it.
-  limiter: 0,
+  // latency, so limiter 0 is bit-identical to the build before it existed.
+  //
+  // ⚠ THE DEFAULT IS 100 NOW, WHICH IS NOT A COSMETIC DEFAULT. The stage
+  // delays by 242 samples rather than 50, and the limiter's gain envelope is
+  // smoothed over its lookahead window, so it reaches BELOW the threshold —
+  // measured at 24-36% of sub-threshold samples reduced by 2.2-5.4 dB. "Unity
+  // below T" is a property of the CURVE, and at this default the curve is no
+  // longer the only thing acting. What it buys is 2-9 dB less shaping residual
+  // for the same peak control, growing with how hard the material is.
+  //
+  // ⚠ EVERY CURVE-ONLY MEASUREMENT MUST SET limiter: 0 EXPLICITLY. The test
+  // suite does; anything measuring the curve against this default is measuring
+  // the limiter and calling it the curve.
+  limiter: 100,
   // 0-100, the whole character group behind one control — see DRIVE_ASYM_RATIO.
   // 0 bypasses all three, so the shipped patch is bit-identical to the build
   // before any of them existed.
@@ -1753,27 +1794,44 @@ export const SHAPE_ANCHOR_DB = 8
 /**
  * Per-shape knee, derived from the anchor rather than tabulated.
  *
- * Anchored ON THE DEFAULT SHAPE at the shipped KNEE_DB, so the default curve
- * is bit-identical to the one that shipped before normalisation and the stock
- * patch (Headroom 6.5, tanh^3) does not move by an ulp. Only the two
- * non-default positions change, and each changes toward the other's depth.
+ * Anchored ON THE CALIBRATED SHAPE at the shipped KNEE_DB, so that curve is
+ * bit-identical to the one that shipped before normalisation and every figure
+ * measured against it still holds. Only the two other positions are derived,
+ * and each is derived toward the calibrated one's depth.
+ *
+ * ⚠ THE ANCHOR SHAPE IS NOT THE DEFAULT SHAPE, and tying the two together was
+ * a real defect for the time it existed. KNEE_DB = 7 is a measurement of
+ * tanh^3 — the one calibrated number in this stage — so reading the anchor off
+ * `SOFT_CLIPPER_KERNEL_DEFAULTS.shape` meant that changing which position the
+ * panel opens on silently re-derived ALL THREE curves: moving the default to
+ * tanh^4 took the knees from 8.490 / 7 / 6.221 to 9.982 / 7.997 / 7, i.e. the
+ * whole family got shallower (2.57 dB at the anchor against 3.25) from an edit
+ * that reads as a UI preference. Which curve is calibrated and which curve
+ * opens by default are separate facts and are now written separately.
  *
  * Solving tanh^n(A/k_n) = tanh^d(A/KNEE_DB) for k_n gives
  *   k_n = A / atanh( tanh(A/KNEE_DB)^(d/n) )
- * with d the default shape's exponent. Monotonic in n, so the ordering of the
- * knees is guaranteed rather than checked: 8.490 / 7 / 6.221 dB at A = 8.
+ * with d the CALIBRATED shape's exponent. Monotonic in n, so the ordering of
+ * the knees is guaranteed rather than checked: 8.490 / 7 / 6.221 dB at A = 8.
  * Every one of those clears its SHAPE_MIN_KNEE_DB bound with room to spare
  * (4.62 / 4.50 / 4.46), which is the property the guard test asserts —
  * normalisation is not allowed to buy matched depth with a folded curve.
  */
+/**
+ * The shape KNEE_DB was measured on, and the one the other two are normalised
+ * onto. A property of the calibration, NOT of which position the panel opens
+ * on — see the note above.
+ */
+export const SHAPE_KNEE_ANCHOR_SHAPE = 'tanh3'
+
 export const SHAPE_KNEE_DB = Object.fromEntries(
   Object.entries(SHAPE_EXPONENT).map(([shape, n]) => {
-    const d = SHAPE_EXPONENT[SOFT_CLIPPER_KERNEL_DEFAULTS.shape]
-    // The default's own knee is RETURNED, not recomputed. Algebraically the
-    // formula collapses to atanh(tanh(A/KNEE_DB)) there, but that round-trip
-    // is not exact in floating point, and a default that moves by an ulp is
-    // still a default that moved — the same rule the exponent unrolling in
-    // softClip() follows, and pinned by its own test.
+    const d = SHAPE_EXPONENT[SHAPE_KNEE_ANCHOR_SHAPE]
+    // The calibrated shape's own knee is RETURNED, not recomputed.
+    // Algebraically the formula collapses to atanh(tanh(A/KNEE_DB)) there, but
+    // that round-trip is not exact in floating point, and a constant that
+    // moves by an ulp is still a constant that moved — the same rule the
+    // exponent unrolling in softClip() follows, and pinned by its own test.
     if (n === d) return [shape, KNEE_DB]
     const anchored = Math.pow(Math.tanh(SHAPE_ANCHOR_DB / KNEE_DB), d / n)
     return [shape, SHAPE_ANCHOR_DB / Math.atanh(anchored)]

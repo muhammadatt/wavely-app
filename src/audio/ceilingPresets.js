@@ -52,13 +52,13 @@ const VOICED_FLOOR_DB = 40
  */
 export const CEILING_PRESETS = [
   { id: 'soft', label: 'SOFT', percentile: 0.97, title: 'Ceiling at the top 3% of peaks' },
-  { id: 'medium', label: 'MEDIUM', percentile: 0.93, title: 'Ceiling at the top 7% of peaks' },
+  { id: 'medium', label: 'MED', percentile: 0.93, title: 'Ceiling at the top 7% of peaks' },
   { id: 'hard', label: 'HARD', percentile: 0.85, title: 'Ceiling at the top 15% of peaks' },
   { id: 'squash', label: 'SQUASH', percentile: 0.78, title: 'Ceiling at the top 22% of peaks' },
 ]
 
 /** The preset a freshly-opened panel lands on. */
-export const DEFAULT_CEILING_PRESET = 'medium'
+export const DEFAULT_CEILING_PRESET = 'soft'
 
 export function presetById(id) {
   return CEILING_PRESETS.find(p => p.id === id) ?? null

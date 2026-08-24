@@ -1,22 +1,38 @@
 /**
- * TEMPORARY: expose the Drive ratios on the panel so they can be tuned by ear.
+ * ADMIN TUNING PANEL: the Soft Clipper's research controls, hidden behind a
+ * flag so a half-finished tuning session cannot reach a user.
  *
- *   ?driveTuning=1                                one page load
- *   localStorage.setItem('driveTuning', '1')      until cleared
+ *   ?softClipperTuning=1                          one page load
+ *   localStorage.setItem('softClipperTuning','1') until cleared
+ *   ?driveTuning=1                                the original key, still read
  *
- * The ratios that split Drive between Asymmetry, HF Loss and Soften are fixed
- * constants (DRIVE_ASYM_RATIO and friends) chosen by measurement: each control
- * scales completely differently, so equal ratios would let Soften dominate and
- * Asymmetry do nothing. But measurement can rank them and cannot say which
- * blend SOUNDS like tape, and that decision needs a person, one file, and a way
- * to move the ratios without a rebuild — the same reason `voicerxBaseline`
- * exists, and this follows its pattern deliberately.
+ * WHAT IS BEHIND IT, and why each one is there rather than on the faceplate:
  *
- * ⚠ THIS IS SCAFFOLDING AND IS MEANT TO COME OUT. Once the ratios are settled
- * the constants get the chosen values and this module, the three knobs and the
- * badge all go. It is behind a flag rather than shipped-but-hidden so that a
- * half-finished tuning session cannot reach a user: with no flag set the panel
- * is exactly the two-knob panel and the kernel reads its constants.
+ *   Limiter        how the peak control is split between the lookahead limiter
+ *                  and the curve. ⚠ It CHANGES THE STAGE'S LATENCY while
+ *                  engaged (50 samples -> 242), which is why it is a research
+ *                  control rather than something a user turns under a running
+ *                  timeline.
+ *   Knee           EARLY / MID / LATE. Depth-matched at SHAPE_ANCHOR_DB, so it
+ *                  moves character rather than amount — and peak-matched it is
+ *                  worth at most 0.7 dB of residual against HF Emphasis's 3.4.
+ *                  The smaller lever by a factor of five, on a two-knob panel.
+ *   HF Emphasis    AIMING: which transients the curve works on. Peak-matched,
+ *                  0 is the cleanest setting by 2.2-3.4 dB and there is no
+ *                  interior optimum, so there is nothing here for a user to
+ *                  find by turning it — but the aiming has never been measured
+ *                  and the knob is how that gets done.
+ *   Drive ratios   the split of Drive between Asymmetry, HF Loss and Soften.
+ *                  Measurement can rank the three and cannot say which blend
+ *                  SOUNDS like tape; that decision needs a person, one file
+ *                  and no rebuild — the same reason `voicerxBaseline` exists,
+ *                  and this follows its pattern deliberately.
+ *
+ * ⚠ THE DRIVE RATIOS ARE SCAFFOLDING AND ARE MEANT TO COME OUT. Once they are
+ * settled the constants get the chosen values and those three knobs go. The
+ * other three are shipped kernel behaviour with the control hidden, not
+ * scaffolding: hiding a control is not the same as not having one, and the
+ * kernel's defaults are what a user gets either way.
  *
  * Its own module rather than a function inside useSoftClipper.js so it can be
  * tested under node — importing the composable drags in Vite's `?worker&url`
@@ -35,9 +51,18 @@ export const DEFAULT_DRIVE_RATIOS = { asymmetry: 1, hfLoss: 1, soften: 0.65 }
 const MIN_RATIO = 0
 const MAX_RATIO = 1.5
 
-export function driveTuningEnabled() {
-  const raw = read('driveTuning')
-  return raw === '1' || raw === 'true'
+/**
+ * Is the hidden tuning panel on?
+ *
+ * Two keys, because the drive ratios shipped behind `driveTuning` first and a
+ * flag that stops working is indistinguishable from a panel that broke.
+ */
+export function tuningEnabled() {
+  for (const key of ['softClipperTuning', 'driveTuning']) {
+    const raw = read(key)
+    if (raw === '1' || raw === 'true') return true
+  }
+  return false
 }
 
 export function clampRatio(value) {

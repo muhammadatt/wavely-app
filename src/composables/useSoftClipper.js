@@ -6,8 +6,9 @@ import {
 } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
+import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../audio/softClipperProcessor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
-import { DEFAULT_DRIVE_RATIOS, driveTuningEnabled, clampRatio } from '../audio/softClipperTuning.js'
+import { DEFAULT_DRIVE_RATIOS, tuningEnabled, clampRatio } from '../audio/softClipperTuning.js'
 import { CEILING_PRESETS, DEFAULT_CEILING_PRESET, presetById } from '../audio/ceilingPresets.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -31,11 +32,22 @@ const thresholdMode = ref('fixed')
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
 const drive = ref(SOFT_CLIPPER_DEFAULTS.drive)
+/**
+ * ⚠ HIDDEN CONTROLS. Limiter, the knee and HF Emphasis are shipped kernel
+ * behaviour whose knobs live on the admin tuning panel rather than the
+ * faceplate — see softClipperTuning.js for what each is and why. Their values
+ * still come from the kernel's defaults, so a user who never sets the flag
+ * gets exactly what the kernel ships and these refs simply never move.
+ */
 const limiter = ref(SOFT_CLIPPER_DEFAULTS.limiter)
-// ⚠ TEMPORARY: the Drive split, adjustable by ear behind a flag. See
-// softClipperTuning.js — this and the three knobs come out once the ratios
-// are settled.
-const tuningOn = driveTuningEnabled()
+// Seeded from the KERNEL's pin rather than from SOFT_CLIPPER_DEFAULTS, which
+// holds null there on purpose so the shipped path forwards nothing. The panel
+// needs a real number to display and to turn from.
+const emphasisDb = ref(SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb)
+const tuningOn = tuningEnabled()
+// ⚠ TEMPORARY: the Drive split, adjustable by ear behind the same flag. See
+// softClipperTuning.js — this and the three ratio knobs come out once the
+// ratios are settled.
 const driveRatios = ref({ ...DEFAULT_DRIVE_RATIOS })
 
 /**
@@ -88,7 +100,10 @@ function currentParams() {
     shape: shape.value,
     drive: drive.value,
     limiter: limiter.value,
-    ...(tuningOn ? { driveRatios: { ...driveRatios.value } } : {}),
+    // Only when the tuning panel is open: on the shipped path emphasisDb must
+    // stay absent so the kernel's pin governs, and forwarding a mirrored copy
+    // of a pin is how a pin quietly stops being one.
+    ...(tuningOn ? { driveRatios: { ...driveRatios.value }, emphasisDb: emphasisDb.value } : {}),
   }
 }
 
@@ -242,10 +257,18 @@ export function useSoftClipper() {
    * Only if a preset is actually active: once the user has turned the ceiling
    * by hand it is THEIR number, and moving it because the selection changed
    * would be the panel overwriting a deliberate choice.
+   *
+   * ⚠ IT ALSO HAS TO PLACE THE FIRST ONE. Opening the panel runs the default
+   * preset, but that measurement needs a region and there may not be one yet —
+   * the presets are disabled until there is, and the ceiling then sat at the
+   * kernel's arbitrary -10 dBFS until the user clicked a button they had no
+   * reason to think was waiting for them. The first selection is exactly the
+   * moment the opening measurement becomes possible, so it runs then instead.
+   * Still never over a hand-set ceiling.
    */
   function scheduleCeilingPreset() {
-    if (ceilingPreset.value === null) return
-    const id = ceilingPreset.value
+    if (ceilingPreset.value === null && (userSetCeiling || !clipperPreview.value)) return
+    const id = ceilingPreset.value ?? DEFAULT_CEILING_PRESET
     if (ceilingTimer !== null) clearTimeout(ceilingTimer)
     ceilingTimer = setTimeout(() => {
       ceilingTimer = null
@@ -260,6 +283,7 @@ export function useSoftClipper() {
     driveRatios.value = { ...driveRatios.value, [name]: clampRatio(v) }
     pushParam('driveRatios', { ...driveRatios.value })
   }
+  const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v) }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => {
     fixedThresholdDb.value = v
@@ -350,6 +374,7 @@ export function useSoftClipper() {
     shape,
     drive,
     limiter,
+    emphasisDb,
     tuningOn,
     driveRatios,
     clipperPreview,
@@ -367,6 +392,7 @@ export function useSoftClipper() {
     syncHeadroom,
     syncDrive,
     syncLimiter,
+    syncEmphasis,
     syncRatio,
     syncOutputTrim,
     syncFixedThreshold,

@@ -15,11 +15,13 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive, limiter, tuningOn, driveRatios,
+  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, drive, limiter,
+  emphasisDb, tuningOn, driveRatios,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncLimiter, syncRatio, syncOutputTrim,
+  togglePreview, toggleDelta, syncHeadroom, syncDrive, syncLimiter, syncEmphasis, syncRatio,
+  syncOutputTrim,
   syncFixedThreshold,
   setShape, apply, teardown, closeModal,
   ceilingPreset, ceilingBusy, CEILING_PRESETS, applyCeilingPreset, scheduleCeilingPreset,
@@ -73,6 +75,12 @@ const ACCENT = '#ff8f6b'
  * The knee: how sharply reduction ramps in with how far over the threshold a
  * peak sits.
  *
+ * ⚠ IT IS ON THE HIDDEN TUNING PANEL NOW, not the faceplate. Peak-matched it
+ * is worth at most 0.7 dB of residual against HF Emphasis's 3.4 — the smaller
+ * lever by a factor of five — and a two-knob panel cannot afford a control
+ * that small. The default is LATE; see SHAPE_KNEE_ANCHOR_SHAPE for why moving
+ * which position opens by default no longer moves the curves themselves.
+ *
  * NAMED "KNEE" AND NOT "SELECTIVITY", and the captions give numbers, because
  * the first attempt at both was wrong in a way worth not repeating. BROAD /
  * FOCUSED / SURGICAL implies a width — as if the effect covered more or less
@@ -97,8 +105,8 @@ const ACCENT = '#ff8f6b'
  */
 const SHAPE_OPTIONS = [
   { value: 'tanh2', label: 'EARLY', title: 'Spends the reduction on peaks that only just cross the threshold' },
-  { value: 'tanh3', label: 'MID', title: 'Even-handed between shallow crossings and deep ones (default)' },
-  { value: 'tanh4', label: 'LATE', title: 'Holds off on shallow crossings and hits the deepest overshoots harder' },
+  { value: 'tanh3', label: 'MID', title: 'Even-handed between shallow crossings and deep ones' },
+  { value: 'tanh4', label: 'LATE', title: 'Holds off on shallow crossings and hits the deepest overshoots harder (default)' },
 ]
 
 // THREE POINTS, NOT TWO, and the middle one is the reason. It is the anchor,
@@ -113,6 +121,28 @@ const SHAPE_CAPTION = {
   tanh4: '3 dB over → −0.2 · 8 → −3.3 · 12 → −5.1 dB',
 }
 
+
+/**
+ * Why the ceiling presets cannot be clicked, or null when they can.
+ *
+ * ⚠ THEY NEEDED A REASON, NOT JUST A DISABLED ATTRIBUTE. Reported from use: the
+ * buttons do nothing with no selection made, and nothing on the panel says so.
+ * Two separate bugs behind that. `applyCeilingPreset` bails on a missing
+ * selection but the button was never marked disabled for it, so the click was
+ * accepted and silently dropped — the worst of the three states. And the
+ * disabled styling that did exist covered only the bypassed case, so a busy or
+ * unclickable button looked exactly like a clickable one.
+ *
+ * A preset MEASURES THE SELECTED REGION, so a selection is not incidental to it
+ * — it is the input. Saying which of the three reasons applies is what turns a
+ * dead button into an instruction.
+ */
+const ceilingDisabledReason = computed(() => {
+  if (!clipperPreview.value) return 'Turn Soft Clipper on to measure a ceiling'
+  if (!hasSelection.value) return 'Select a region — the preset measures its peaks'
+  if (ceilingBusy.value) return 'Measuring…'
+  return null
+})
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -245,20 +275,27 @@ const SCOPE_H = 236
               v-for="p in CEILING_PRESETS"
               :key="p.id"
               type="button"
-              :title="p.title"
-              :disabled="!clipperPreview || ceilingBusy"
+              :title="ceilingDisabledReason ?? p.title"
+              :disabled="!!ceilingDisabledReason"
               @click="applyCeilingPreset(p.id)"
-              class="px-[8px] py-[3px] rounded-[3px] transition-colors"
+              class="px-[8px] py-[3px] rounded-[3px] transition-colors cursor-pointer disabled:cursor-not-allowed"
               style="font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.12em"
-              :style="ceilingPreset === p.id
-                ? { background: ACCENT, color: '#12100e', opacity: clipperPreview ? 1 : .35 }
-                : { background: 'rgba(255,255,255,.05)', color: 'rgba(255,255,255,.45)', opacity: clipperPreview ? 1 : .35 }"
+              :style="[
+                ceilingPreset === p.id
+                  ? { background: ACCENT, color: '#12100e' }
+                  : { background: 'rgba(255,255,255,.05)', color: 'rgba(255,255,255,.45)' },
+                ceilingDisabledReason ? { opacity: .3, filter: 'grayscale(1)' } : { opacity: 1 },
+              ]"
             >{{ p.label }}</button>
           </div>
+          <!-- SAYS WHY, not just that. A row of greyed buttons with nothing
+               beside them is legible as "off" and illegible as "off because
+               you have not selected anything yet", which is the one state the
+               user can do something about. -->
           <span
-            v-if="ceilingBusy"
-            style="font:600 7.5px 'JetBrains Mono',monospace;color:rgba(255,255,255,.3)"
-          >measuring…</span>
+            v-if="ceilingDisabledReason"
+            style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.3)"
+          >{{ ceilingDisabledReason }}</span>
         </div>
 
         <!-- A lamp, not a bar — see ClipLamp for why a full-length GR meter
@@ -343,27 +380,6 @@ const SCOPE_H = 236
           </p>
         </div>
         <div class="w-[74px]">
-          <!-- THE HYBRID PEAK PATH. A lookahead limiter ahead of the curve,
-               taking peaks down with a smooth gain envelope instead of by
-               reshaping samples — so its error is intermodulation and slight
-               pumping rather than the harmonic series the curve makes. The
-               knob is a BALANCE: it decides how the peak control is shared,
-               not how much of it there is. Headroom still sets that.
-               ⚠ It adds about 4 ms of latency while engaged, against the
-               oversampler's 1 ms. See LIMITER_MAX_ABOVE_DB. -->
-          <Knob
-            :model-value="limiter"
-            @update:model-value="syncLimiter"
-            :min="0" :max="100" :step="1"
-            label="Limiter" :accent="ACCENT" :format-value="v => v.toFixed(0)"
-            :value-font-px="13"
-            :disabled="!clipperPreview"
-          />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            {{ limiter > 0 ? 'gain, not shaping (+4 ms)' : 'gain, not shaping' }}
-          </p>
-        </div>
-        <div class="w-[74px]">
           <Knob
             :model-value="outputTrimDb"
             @update:model-value="syncOutputTrim"
@@ -378,18 +394,103 @@ const SCOPE_H = 236
         </div>
       </div>
 
-      <!-- ⚠ TEMPORARY TUNING ROW — see softClipperTuning.js. Hidden unless
-           ?driveTuning=1 (or the localStorage key) is set, so a half-finished
-           tuning session cannot reach a user and the shipped panel stays two
-           knobs. The amber badge is the same signal VoiceRx's baseline
-           override uses, for the same reason: an override that is not visibly
-           an override is how a measurement gets taken against the wrong
-           build. This row and the driveRatios param come out once the ratios
-           are chosen. -->
+      <!-- ⚠ HIDDEN ADMIN TUNING PANEL — see softClipperTuning.js. Off unless
+           ?softClipperTuning=1 (or the localStorage key) is set, so the shipped
+           panel stays a ceiling, two knobs and the presets. The amber badge is
+           the same signal VoiceRx's baseline override uses, for the same
+           reason: an override that is not visibly an override is how a
+           measurement gets taken against the wrong build.
+
+           TWO KINDS OF CONTROL LIVE HERE and the difference matters. Limiter,
+           Knee and HF Emphasis are SHIPPED kernel behaviour whose knobs are
+           hidden because they are research controls — the kernel's defaults
+           are what a user gets either way, and turning one here changes only
+           this session. The Drive ratios are SCAFFOLDING: they override fixed
+           constants, and they come out once the ratios are chosen. -->
       <div v-if="tuningOn" class="mt-[16px] pt-[12px]" style="border-top:1px dashed rgba(255,176,32,.35)">
-        <div class="flex items-center justify-center gap-[8px] mb-[8px]">
+        <div class="flex items-center justify-center mb-[10px]">
           <span style="font:700 8px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,176,32,.9)">
-            ⚠ DRIVE TUNING — NOT SHIPPED
+            ⚠ ADMIN TUNING — NOT SHIPPED
+          </span>
+        </div>
+
+        <!-- Shipped behaviour, hidden controls. -->
+        <div class="flex justify-center items-start gap-[16px]">
+          <div class="w-[74px]">
+            <!-- THE HYBRID PEAK PATH. A lookahead limiter ahead of the curve,
+                 taking peaks down with a smooth gain envelope instead of by
+                 reshaping samples — so its error is intermodulation and
+                 slight pumping rather than the harmonic series the curve
+                 makes. The knob is a BALANCE: it decides how the peak control
+                 is shared, not how much of it there is. The ceiling still sets
+                 that.
+                 ⚠ OFF THE FACEPLATE BECAUSE IT CHANGES THE STAGE'S LATENCY
+                 while engaged (50 samples -> 242): toggling it under a running
+                 preview shifts the timeline by that much, which is a research
+                 control's business and not a user's. See LIMITER_MAX_ABOVE_DB. -->
+            <Knob
+              :model-value="limiter"
+              @update:model-value="syncLimiter"
+              :min="0" :max="100" :step="1"
+              label="Limiter" accent="#ffb020" :format-value="v => v.toFixed(0)"
+              :value-font-px="13"
+              :disabled="!clipperPreview"
+            />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ limiter > 0 ? 'gain, not shaping (+4 ms)' : 'gain, not shaping' }}
+            </p>
+          </div>
+          <div class="w-[74px]">
+            <!-- AIMING, not cleanliness. The detector reads the unfiltered
+                 downmix while the curve sees the pre-emphasised one, so this
+                 decides WHICH transients get worked on. Peak-matched, 0 is the
+                 cleanest setting by 2.2-3.4 dB and there is no interior
+                 optimum — so there is nothing here for a user to find by
+                 turning it, and the pinned value is a judgement rather than a
+                 measurement. That is exactly why the knob is here: the aiming
+                 has never been measured, and this is how it gets measured.
+                 The caption reads back the lift the compensation is giving the
+                 threshold, which is the most direct evidence of what the knob
+                 is doing on THIS material — near zero means this passage has
+                 nothing above the corner to aim at. -->
+            <Knob
+              :model-value="emphasisDb"
+              @update:model-value="syncEmphasis"
+              :min="0" :max="12" :step="0.5"
+              label="HF Emph" accent="#ffb020" :format-value="v => v.toFixed(1)"
+              :value-font-px="13"
+              :disabled="!clipperPreview"
+            />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              aiming · lift {{ clipperLiftDb.toFixed(2) }} dB
+            </p>
+          </div>
+        </div>
+
+        <!-- The knee. Depth-matched at the anchor, so this moves character and
+             not amount — and peak-matched it is worth at most 0.7 dB against
+             HF Emphasis's 3.4, which is why it is the one that came off the
+             faceplate rather than Drive. -->
+        <div class="flex items-center justify-center gap-[9px] mt-[12px]">
+          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">KNEE</span>
+          <SegmentedSwitch
+            :model-value="shape"
+            @update:model-value="setShape"
+            :options="SHAPE_OPTIONS"
+            accent="#ffb020"
+            :disabled="!clipperPreview"
+            :padding-x="11"
+          />
+          <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+            {{ SHAPE_CAPTION[shape] }}
+          </span>
+        </div>
+
+        <!-- ⚠ SCAFFOLDING, unlike everything above it: these three override
+             fixed kernel constants and come out once the ratios are chosen. -->
+        <div class="flex items-center justify-center gap-[8px] mt-[14px] mb-[8px]">
+          <span style="font:700 8px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,176,32,.65)">
+            DRIVE SPLIT
           </span>
           <span style="font:600 8px ui-monospace,monospace;color:rgba(255,255,255,.45)">
             {{ driveRatios.asymmetry.toFixed(2) }} / {{ driveRatios.hfLoss.toFixed(2) }} / {{ driveRatios.soften.toFixed(2) }}
@@ -414,25 +515,6 @@ const SCOPE_H = 236
             </p>
           </div>
         </div>
-      </div>
-
-      <!-- How hard the shallow crossings get hit. Sits with the knobs rather
-           than in the instrument strip because it refines what the display
-           already shows, the way HF Emphasis does — the strip is for things
-           that change how to READ the scope. -->
-      <div class="flex items-center justify-center gap-[9px] mt-[14px]">
-        <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">KNEE</span>
-        <SegmentedSwitch
-          :model-value="shape"
-          @update:model-value="setShape"
-          :options="SHAPE_OPTIONS"
-          :accent="ACCENT"
-          :disabled="!clipperPreview"
-          :padding-x="11"
-        />
-        <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-          {{ SHAPE_CAPTION[shape] }}
-        </span>
       </div>
 
       <p

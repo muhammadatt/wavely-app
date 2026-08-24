@@ -80,12 +80,24 @@ test('a null measurement leaves the ceiling where it is', () => {
   assert.match(fn.slice(0, 1200), /if \(measured === null\) return/)
 })
 
-test('a preset only re-runs while one is active', () => {
+test('a region change never re-measures over a hand-set ceiling', () => {
   // Once the ceiling is hand-set it is the user's number; re-measuring on a
-  // selection change would overwrite a deliberate choice.
+  // selection change would overwrite a deliberate choice. `userSetCeiling` is
+  // the flag that records that, so the guard has to consult it.
+  //
+  // ⚠ IT IS NOT SIMPLY "ONLY WHILE A PRESET IS ACTIVE" ANY MORE, and it could
+  // not stay that way: the panel's open-time measurement needs a region, the
+  // presets are disabled until there is one, and with the old guard a user who
+  // opened the panel before selecting got no measurement at all — the ceiling
+  // sat at the kernel's arbitrary -10 dBFS until they clicked a button they
+  // had no reason to think was waiting for them. The first selection is the
+  // moment that measurement becomes possible, so it runs then.
   const src = read('../../src/composables/useSoftClipper.js')
   const fn = src.slice(src.indexOf('function scheduleCeilingPreset'))
-  assert.match(fn.slice(0, 400), /if \(ceilingPreset\.value === null\) return/)
+  assert.match(fn.slice(0, 400), /userSetCeiling/,
+    'a hand-set ceiling can be overwritten by a selection change')
+  assert.match(fn.slice(0, 400), /DEFAULT_CEILING_PRESET/,
+    'the first selection does not place the opening measurement')
 })
 
 test('teardown cancels a pending measurement', () => {

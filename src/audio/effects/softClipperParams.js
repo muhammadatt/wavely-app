@@ -31,10 +31,14 @@ import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
  *     SHAPE_ANCHOR_DB (the positions are depth-matched, so this changes
  *     character rather than how much the stage does)
  *
- * `emphasisDb` is absent too: it is pinned at 3 in the kernel. `hysteresis` is
- * absent on purpose: it is pinned at 100 in the
- * kernel and has no control — see HYST_MAX_DB. Forwarding the key would let an
- * absent value overwrite the pin with undefined, so it is deliberately omitted.
+ * `hysteresis` is absent on purpose: it is pinned in the kernel and has no
+ * control at all — see HYST_MAX_DB. Forwarding the key would let an absent
+ * value overwrite the pin with undefined, so it is deliberately omitted.
+ *
+ * `emphasisDb` is a special case: pinned for everyone, but reachable from the
+ * hidden tuning panel (see softClipperTuning.js). It is null here so the
+ * shipped path forwards nothing and the kernel's pin governs; a real number
+ * set by the tuning panel is forwarded. See toKernelParams.
  */
 export const SOFT_CLIPPER_DEFAULTS = {
   ...SOFT_CLIPPER_KERNEL_DEFAULTS,
@@ -46,8 +50,11 @@ export const SOFT_CLIPPER_DEFAULTS = {
   // that was doing nothing. Null rather than undefined so the key genuinely
   // exists; the kernel's `ratios?.x ?? CONSTANT` treats null as absent.
   driveRatios: null,
-  // Present so `setParam` accepts it — the guard drops anything absent here.
-  limiter: 0,
+  // ⚠ NULL, NOT THE KERNEL'S VALUE. The key has to exist or `setParam` drops
+  // it silently, but its value must not be forwarded on the shipped path: the
+  // pin lives in the kernel, and a panel that mirrors a pinned constant is one
+  // careless edit away from overriding it with a stale copy of itself.
+  emphasisDb: null,
 }
 
 /** Params are already kernel-shaped — no renaming needed unlike FET1176/LA2A. */
@@ -62,6 +69,12 @@ export function toKernelParams(params) {
     limiter: params.limiter,
     // ⚠ TEMPORARY tuning override — see softClipperTuning.js.
     driveRatios: params.driveRatios,
+    // Forwarded ONLY when the hidden tuning panel has set a real number.
+    // The kernel merges partials over its own defaults, so an `emphasisDb:
+    // undefined` in this object would not fall back to the pin — it would
+    // overwrite it with undefined and NaN its way through the recompute
+    // guard. Spread-or-nothing rather than a value, for that reason.
+    ...(Number.isFinite(params.emphasisDb) ? { emphasisDb: params.emphasisDb } : {}),
   }
 }
 
