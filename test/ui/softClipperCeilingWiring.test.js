@@ -15,6 +15,32 @@ import { CEILING_PRESETS, measurePeakCeilingDb } from '../../src/audio/ceilingPr
  */
 
 const SR = 48000
+/**
+ * Broadband sibilance between the low-frequency peaks.
+ *
+ * ⚠ WITHOUT THIS THE EMPHASIS TEST BELOW GUARDS NOTHING. The lift compensation
+ * raises the threshold by the HF boost measured at loud moments, so a probe
+ * with no sibilance produces a lift of 0.05 dB and emphasis 7 looks harmless
+ * (0.10 dB of escape). Real speech has fricatives between its plosives: add
+ * them and the same setting lets peaks escape by 6.00 dB, which is what the
+ * reported tutorial file does. Sixteenth time synthetic material has been too
+ * clean, and the missing ingredient was HF CONTENT BETWEEN the peaks rather
+ * than anything about the peaks themselves.
+ */
+function withSibilance(x, levelDb, seed = 7) {
+  const y = Float32Array.from(x)
+  let s = seed
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  const amp = Math.pow(10, levelDb / 20)
+  let lp = 0
+  for (let i = 0; i < y.length; i++) {
+    const noise = rnd() * 2 - 1
+    lp = 0.85 * lp + 0.15 * noise
+    if (Math.abs(x[i]) > 0.02) y[i] += amp * (noise - lp)
+  }
+  return y
+}
+
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
 
 function narration(seconds, peakDb, seed = 11) {
@@ -127,6 +153,48 @@ test('static mode is gone from the kernel and the param contract', () => {
   assert.ok(!('staticSpeechLevelDb' in toKernelParams(SOFT_CLIPPER_DEFAULTS)))
   const kernel = read('../../src/audio/softClipperProcessor.js')
   assert.doesNotMatch(kernel, /staticMode/)
+})
+
+test('THE CEILING MEANS WHAT IT SAYS — the output peak lands on it', () => {
+  // The panel's whole contract, and the thing two reported bugs turned out to
+  // be: "almost no lowering of the loudest peaks even on HARD or SQUASH", and
+  // "dragging the threshold into the waveform doesn't match the reduction that
+  // occurs". Both were emphasisDb.
+  //
+  // ⚠ WHY IT CANNOT BE COMPENSATED AWAY. The curve compares the PRE-EMPHASISED
+  // signal against the threshold, so where a sample crosses depends on its own
+  // HF content. A file whose loudest peaks are low-frequency has them pushed
+  // further below a threshold raised on account of its sibilants — measured on
+  // a real tutorial recording, SQUASH delivered 0.000 dB of peak reduction at
+  // emphasis 7 and 4.027 dB at emphasis 0.
+  const sig = withSibilance(narration(10, -1), -14)
+  const escape = (ceilingDb, over = {}) => {
+    const params = toKernelParams({
+      ...SOFT_CLIPPER_DEFAULTS,
+      thresholdMode: 'fixed',
+      fixedThresholdDb: ceilingDb,
+    })
+    const r = processSoftClipperBuffer([sig], SR, { ...params, ...over })
+    const y = r.channelData[0].subarray(r.latencySamples)
+    let out = 0
+    for (let i = 0; i < y.length; i++) if (Math.abs(y[i]) > out) out = Math.abs(y[i])
+    return 20 * Math.log10(out) - ceilingDb
+  }
+
+  for (const preset of CEILING_PRESETS) {
+    const ceilingDb = measurePeakCeilingDb([sig], SR, preset.percentile)
+    assert.ok(escape(ceilingDb) < 1.0,
+      `${preset.id}: peaks escaped ${escape(ceilingDb).toFixed(3)} dB above the ceiling`)
+    // And the mutation this exists to catch: restoring a non-zero emphasis must
+    // visibly break the promise, or the assertion above is passing for the
+    // wrong reason.
+    assert.ok(escape(ceilingDb, { emphasisDb: 7 }) > 3,
+      `${preset.id}: emphasis 7 should break the ceiling and did not — the probe is too clean`)
+  }
+})
+
+test('the shipped emphasis is zero, because a ceiling in dBFS requires it', () => {
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb, 0)
 })
 
 test('end to end: measure, set the ceiling, and the curve does more at each step', () => {

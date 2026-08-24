@@ -1445,24 +1445,40 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // the reference clip), which is the whole point of anchoring them. The
   // coupling is real but is now worth tenths rather than a dB.
   headroomDb: 7.0,
-  // ⚠ PINNED, AND OFF THE FACEPLATE — reachable only from the hidden admin
-  // tuning panel (softClipperTuning.js), which is deliberately not the same as
-  // being unreachable: the pin lives here, and a panel that mirrored it would
-  // be one stale copy away from overriding it. See softClipperParams.js for
-  // how the key is forwarded only when the panel has set a real number.
+  // ⚠ ZERO, AND THE PANEL'S CONTRACT REQUIRES IT.
   //
-  // Peak-matched, 0 is the cleanest setting by 2.2-3.4 dB — the only measured
-  // evidence there is — but the knob's job is AIMING, deciding which
-  // transients the curve works on, and that has never been measured. Keeping
-  // it non-zero also keeps the lift compensation live and justified rather
-  // than turning ~200 lines into dead code.
+  // The panel is one ceiling in dBFS whose caption is "peaks stop here". Any
+  // non-zero emphasis breaks that promise, and not by a fixed offset that could
+  // be compensated away: the curve compares the PRE-EMPHASISED signal against
+  // the threshold, so where a sample crosses depends on ITS OWN HF content. The
+  // lift compensation raises T by the average lift measured at loud moments,
+  // which is the right thing for holding depth and the wrong thing here — a
+  // file whose loudest peaks are low-frequency has them pushed FURTHER below a
+  // threshold raised on account of its sibilants.
   //
-  // ⚠ IT WAS 3, AND THE ARGUMENT FOR 3 DOES NOT TRANSFER TO 7. 3 was chosen as
-  // "roughly half the aiming for about 0.7 dB of the cleanliness cost"; 7 has
-  // no measurement behind it. A compromise with no number under it, recorded
-  // as such — and the reason the knob exists on the admin panel is so that a
-  // number can eventually be put under it.
-  emphasisDb: 7,
+  // Reported from use on a tutorial recording: "almost no lowering of the
+  // loudest peaks even on HARD or SQUASH", and "dragging the threshold into the
+  // body of the waveform doesn't match the reduction that actually occurs".
+  // Both were one bug. Measured on that file, its 20 loudest 10 ms blocks carry
+  // -22.6 dB of HF-to-LF energy against -6.3 dB at median loudness — the peaks
+  // are nearly pure low frequency — so they took no lift while T rose 2.67 dB,
+  // and SQUASH delivered 0.000 dB of peak reduction where the same patch at
+  // emphasis 0 delivers 4.027.
+  //
+  // OUTPUT PEAK MINUS THE CEILING SET, four real files x two presets:
+  // at emphasis 7, peaks escape by 1.43 / 1.47 / 3.13 / 3.13 / 1.77 / 2.58 /
+  // 4.03 / 5.04 dB; at emphasis 0 it is 0.000 on every one of them.
+  //
+  // ⚠ THE AIMING IS GENUINELY LOST, and that is the trade. Non-zero emphasis
+  // decides WHICH transients the curve works on, which is a real feature and
+  // was never measured; what it cannot coexist with is a single dBFS number
+  // that says where peaks stop. The panel chose the number. `emphasisDb` is
+  // still a live kernel parameter and the admin tuning panel can still set it,
+  // so the aiming is one flag away for anyone measuring it.
+  //
+  // It also happens to be the cleanest setting: peak-matched, 0 beats every
+  // other value by 2.2-3.4 dB of residual (see the DRIVE notes in CLAUDE.md).
+  emphasisDb: 0,
   outputTrimDb: 0, // ±6, post-stage gain match for A/B
   // 'adaptive' | 'fixed'.
   //

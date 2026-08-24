@@ -2685,9 +2685,16 @@ test('drive does not move loudness', () => {
 })
 
 test('HF Emphasis is pinned and off the faceplate', () => {
-  // Peak-matched, 0 is cleanest by 2.2-3.4 dB, but the knob's job is AIMING and
-  // that has never been measured — so the pinned value is a judgement, stated
-  // here so it cannot drift silently.
+  // ⚠ THE PIN IS 0 NOW, AND IT IS NO LONGER A JUDGEMENT — it is what the
+  // panel's contract requires. The panel is one ceiling in dBFS captioned
+  // "peaks stop here"; the curve compares the PRE-EMPHASISED signal against the
+  // threshold, so with any non-zero emphasis where a sample crosses depends on
+  // its own HF content and no single dBFS number can describe it. Measured on
+  // four real files x two presets, output peak minus the ceiling set: 1.43 to
+  // 5.04 dB of escape at emphasis 7, and 0.000 at emphasis 0.
+  //
+  // The aiming is genuinely given up. It remains reachable from the admin
+  // tuning panel for anyone who wants to measure it.
   //
   // ⚠ "OFF THE SURFACE" IS NOW "OFF THE FACEPLATE": the knob exists on the
   // hidden admin tuning panel (softClipperTuning.js). What must still hold is
@@ -2695,7 +2702,7 @@ test('HF Emphasis is pinned and off the faceplate', () => {
   // its own defaults, so a param object that carries `emphasisDb: undefined`
   // would overwrite the pin rather than fall back to it. That is why
   // toKernelParams forwards the key only when it holds a real number.
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb, 7,
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb, 0,
     'the HF Emphasis pin moved')
   const absent = new SoftClipperKernel(SR)
   absent.setParams({ headroomDb: 7.0, shape: 'tanh3' })
