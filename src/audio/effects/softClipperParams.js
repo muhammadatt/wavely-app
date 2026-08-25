@@ -21,10 +21,6 @@ import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
  *   limiter 0-100, how much of the peak control the lookahead limiter takes
  *     from the curve — see LIMITER_MAX_ABOVE_DB. 0 bypasses it entirely,
  *     including its latency. ⚠ It CHANGES THE STAGE'S LATENCY while engaged
- *   soften 0-100, a limit on how fast the waveform may move, inside the
- *     oversampled path just ahead of the curve. See SOFTEN_REF. ⚠ It reached
- *     the kernel through a `drive` knob until that knob's other two members
- *     left — asymmetry deleted, HF Loss moved to Tube Saturation
  *   outputTrimDb ±6, post-stage gain match for A/B
  *   thresholdMode 'adaptive' | 'fixed' — the panel only ever sets 'fixed'
  *   fixedThresholdDb, the ceiling in dBFS. The panel's preset buttons measure
@@ -59,7 +55,6 @@ export function toKernelParams(params) {
     thresholdMode: params.thresholdMode,
     fixedThresholdDb: params.fixedThresholdDb,
     shape: params.shape,
-    soften: params.soften,
     limiter: params.limiter,
     // Forwarded ONLY when the hidden tuning panel has set a real number.
     // The kernel merges partials over its own defaults, so an `emphasisDb:

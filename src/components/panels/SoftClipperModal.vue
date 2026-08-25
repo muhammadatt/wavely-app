@@ -15,12 +15,12 @@ import ApplyAction from '../ui/ApplyAction.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, soften, limiter,
+  headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, limiter,
   emphasisDb, tuningOn,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
-  togglePreview, toggleDelta, syncHeadroom, syncSoften, syncLimiter, syncEmphasis,
+  togglePreview, toggleDelta, syncHeadroom, syncLimiter, syncEmphasis,
   syncOutputTrim,
   syncFixedThreshold,
   setShape, apply, teardown, closeModal,
@@ -358,31 +358,6 @@ const SCOPE_H = 236
           />
           <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             {{ thresholdKnob.caption }}
-          </p>
-        </div>
-        <div class="w-[74px]">
-          <!-- ⚠ THIS WAS "DRIVE", one knob over a group of three — asymmetry,
-               HF Loss and Soften at fixed internal ratios. Asymmetry is deleted
-               (it was this stage's own curve worked off-centre, so there was
-               never a separate thing to keep) and HF Loss moved to Tube
-               Saturation, where a linear shelf belongs. A knob that splits one
-               component between one component is that component with an extra
-               multiply, so it shows the component.
-               Soften limits how fast the waveform may move, inside the
-               oversampled path just ahead of the curve: it softens the top end
-               and rounds an edge before the curve sees it, which measurably
-               reduces what the curve then has to do. 0 bypasses it, so the
-               stock patch is exactly the clipper and nothing else. -->
-          <Knob
-            :model-value="soften"
-            @update:model-value="syncSoften"
-            :min="0" :max="100" :step="1"
-            label="Soften" :accent="ACCENT" :format-value="v => v.toFixed(0)"
-            :value-font-px="13"
-            :disabled="!clipperPreview"
-          />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            {{ soften > 0 ? 'rounds the top end' : 'off' }}
           </p>
         </div>
         <div class="w-[74px]">

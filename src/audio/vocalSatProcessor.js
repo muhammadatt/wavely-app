@@ -69,7 +69,8 @@
 
 import { lowpass, highpass, butterworthQs, BiquadCascade } from './dsp/biquad.js'
 import { Oversampler, DelayLine, VOCAL_SAT_OVERSAMPLE } from './dsp/oversample.js'
-import { RmsFollower, riseCoeff } from './dsp/envelope.js'
+import { RmsFollower } from './dsp/envelope.js'
+import { HfLossShelf } from './dsp/tapeCharacter.js'
 
 export const VOCAL_SAT_LATENCY_SAMPLES = VOCAL_SAT_OVERSAMPLE.latencySamples
 
@@ -95,59 +96,18 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
 /**
  * HF LOSS — the top end softening as the medium is pushed, tape-style.
  *
- * ⚠ MOVED HERE FROM THE SOFT CLIPPER, where it was one third of that stage's
- * Drive knob. It never belonged there: the soft clipper's identity is
- * transparency and this is a colour, and — unlike the asymmetry it shipped
- * beside — it has no dependence at all on the clip curve or its threshold. It
- * is a plain linear filter, so the move is a copy rather than a re-derivation.
+ * ⚠ THE FILTER AND ITS CONSTANTS LIVE IN dsp/tapeCharacter.js, not here. It
+ * arrived from the soft clipper, where it was one third of a Drive knob inside
+ * a stage whose identity is transparency; it is a plain linear filter and
+ * belonged in neither place as a private copy. That module is where the rest of
+ * the tape-character family waits for the plugin that will use it, and keeping
+ * one owner is what stops this becoming two constants that drift.
  *
- * WHAT IT MODELS, AND WHAT IT DELIBERATELY DOES NOT. Gap loss — the reproduce
- * head averaging flux across a finite gap — is `sinc(pi*g/lambda)`, a function
- * of gap width, tape speed and frequency and NOT of level. Modelled faithfully
- * it is an always-on shelf. What actually makes tape lose top end when pushed
- * is short-wavelength self-erasure, which is level-dependent. This is the
- * second one in spirit and a fixed shelf in fact: the depth is a knob, not an
- * envelope.
- *
- * ⚠ CONSTANT DEPTH, NOT ENVELOPE-FOLLOWING, and that was a correction made in
- * its previous home rather than a simplification made in this one. Following
- * the envelope gives full depth on a loud syllable and none through the pause
- * after it, which is a room that BREATHES — audible as pumping long before the
- * colour itself is. The smoother below stays so that moving the knob does not
- * click; the target does not move with the signal.
- *
- * THE STRUCTURE IS A BLEND, NOT A RECOMPUTED FILTER:
- *   out = g*x + (1-g)*lowpass(x)
- * one fixed one-pole and a per-sample `g`. That is exactly a first-order high
- * shelf — unity at DC, plateauing at `g` above the corner — with two properties
- * a moving biquad would not have. It is EXACTLY transparent at g = 1, so the
- * bypass is free rather than approximate. And it PROVABLY CANNOT BOOST:
- * |g + (1-g)*LP| <= g + (1-g)*|LP| <= 1 for any 0 <= g <= 1, since a one-pole
- * lowpass has magnitude at most 1 everywhere.
- *
- * MEASURED IN ITS PREVIOUS HOME, at full knob: -0.63 / -1.87 / -2.28 / -3.51 dB
- * at 2k / 4k / 8k / 16k with HF_LOSS_MAX_DB at 6, and -0.80 / -2.47 / -3.69 /
- * -6.00 at 12. Returns halve between 12 and 18, so 12 is the knee. The transfer
- * is a fixed linear filter and therefore file-independent; what varies between
- * recordings is only how much program each depth removes.
- *
- * ⚠ DEEPER HF LOSS THAN THIS NEEDS A LOWER CORNER OR A STEEPER FILTER, NOT A
- * BIGGER CONSTANT. The shelf saturates: as depth grows the output tends to the
- * one-pole itself and no further, so the constant scales the plateau and cannot
- * steepen the slope.
+ * What it is: a first-order high shelf built as a blend, `g*x + (1-g)*LP(x)`,
+ * with a constant depth. Exactly transparent at g = 1 and provably incapable of
+ * boosting. Measured here at full knob: -0.22 / -0.79 / -2.34 / -4.75 / -6.51
+ * dB at 1k / 2k / 4k / 8k / 16k.
  */
-const HF_LOSS_CORNER_HZ = 4000
-
-/** Plateau depth at full knob, dB. See the note above for why 12 is the knee. */
-const HF_LOSS_MAX_DB = 12
-
-/**
- * Smoothing on the depth, ms. Only so a knob drag does not click — this is not
- * an envelope, and nothing about the signal moves it.
- */
-const HF_LOSS_SMOOTH_MS = 30
-
-const HF_LOSS_EPSILON = 1e-4
 
 /**
  * ⚠ SOFTEN IS NOT HERE, AND THE ATTEMPT TO BRING IT IS WORTH RECORDING.
@@ -236,9 +196,6 @@ class ChannelState {
     this.lp = new BiquadCascade(qs.length, 1)
     this.hp = new BiquadCascade(qs.length, 1)
     this.dryRms = new RmsFollower(sampleRate, RMS_TAU_MS, RMS_FLOOR)
-    // Medium-control state: one lowpass accumulator for the HF shelf, at the
-    // base rate — see HF_LOSS_CORNER_HZ.
-    this.hfLossLp = 0
     this.wetRms = new RmsFollower(sampleRate, RMS_TAU_MS, RMS_FLOOR)
     this.outRms = new RmsFollower(sampleRate, RMS_TAU_MS, RMS_FLOOR)
 
@@ -262,10 +219,11 @@ export class VocalSatKernel {
     this.butterQs = butterworthQs(4)
     this.channels = []
     this.params = { ...VOCAL_SAT_KERNEL_DEFAULTS }
-    // Smoothed HF-loss depth. Per KERNEL rather than per channel: it is a
-    // parameter ramp, not a measurement, so every channel must reach the same
-    // depth at the same instant or a stereo image shifts while a knob moves.
-    this.hfLossDb = 0
+    // The shelf owns its own filter state and its depth ramp — see HfLossShelf,
+    // which advances the ramp once per BLOCK rather than once per channel per
+    // sample. The inline version this replaced advanced it inside the channel
+    // loop, so on stereo the 30 ms ramp converged in 15.
+    this.hfLoss = new HfLossShelf(sampleRate)
     this.setParams({})
   }
 
@@ -290,10 +248,8 @@ export class VocalSatKernel {
     // ── Medium control ───────────────────────────────────────────────────
     // Read as 0-100 and ABSENT below the epsilon, so the shipped patch runs
     // no filter and takes no branch.
-    this.hfLossMaxDb = (clamp(p.hfLoss ?? 0, 0, 100) / 100) * HF_LOSS_MAX_DB
-    this.hfLossActive = this.hfLossMaxDb > HF_LOSS_EPSILON
-    this.hfLossCoef = riseCoeff(1000 / (2 * Math.PI * HF_LOSS_CORNER_HZ), this.sampleRate)
-    this.hfLossSmoothCoef = riseCoeff(HF_LOSS_SMOOTH_MS, this.sampleRate)
+    this.hfLossMaxDb = HfLossShelf.depthFor(p.hfLoss ?? 0)
+    this.hfLossActive = HfLossShelf.isActive(this.hfLossMaxDb)
 
     this.softness = clamp(p.softness, 0, 1)
     this.bias = p.bias
@@ -333,6 +289,11 @@ export class VocalSatKernel {
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
     const { low: lowBuf, high: highBuf, mid: midBuf, wet: wetBuf } = this._scratch(n)
+
+    // ONCE PER BLOCK, BEFORE THE CHANNEL LOOP — see HfLossShelf. The depth is a
+    // parameter ramp shared by every channel; advancing it per channel makes it
+    // converge N times faster on N channels.
+    const hfLossGain = this.hfLossActive ? this.hfLoss.advance(this.hfLossMaxDb, n) : 1
 
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
@@ -380,37 +341,39 @@ export class VocalSatKernel {
         const blended = x + wetDry * wetMatched
         // output *= dry_rms / out_rms
         const outRms = st.outRms.process(blended)
-        let y = blended * (dryRms / outRms)
-
-        // HF LOSS — see HF_LOSS_CORNER_HZ.
-        //
-        // ⚠ ON THE FINISHED OUTPUT, NOT ON THE WET PATH, and that is a claim
-        // about what is being modelled. This is the MEDIUM's bandwidth, not
-        // the saturation's: a tape machine does not roll off only the part of
-        // the signal that saturated. Blending a dulled copy underneath a
-        // full-bandwidth dry copy nets very little HF change at any ordinary
-        // Wet/Dry, which is the measurement that settles it rather than the
-        // metaphor.
-        //
-        // ⚠ AFTER THE OUTPUT NORMALISATION, deliberately. Placed before it,
-        // the `dry_rms / out_rms` match would read the energy this filter just
-        // removed as a level drop and push the whole signal back up to
-        // compensate — the level match undoing the tone control, silently.
-        //
-        // ⚠ THE COST: Wet/Dry 0 is no longer the dry signal once this is
-        // engaged. That is intended and is the one place this plugin's
-        // parallel-blend contract is deliberately broken, because a medium the
-        // dry path bypasses is not a medium. The knob is absent at 0, so the
-        // contract holds for anyone who does not reach for it.
-        if (this.hfLossActive) {
-          this.hfLossDb += this.hfLossSmoothCoef * (this.hfLossMaxDb - this.hfLossDb)
-          const g = Math.pow(10, -this.hfLossDb / 20)
-          st.hfLossLp += this.hfLossCoef * (y - st.hfLossLp)
-          y = g * y + (1 - g) * st.hfLossLp
-        }
+        const y = blended * (dryRms / outRms)
 
         out[i] = y > 1 ? 1 : y < -1 ? -1 : y
       }
+
+      // HF LOSS — see dsp/tapeCharacter.js.
+      //
+      // ⚠ ON THE FINISHED OUTPUT, NOT ON THE WET PATH, and that is a claim
+      // about what is being modelled. This is the MEDIUM's bandwidth, not the
+      // saturation's: a tape machine does not roll off only the part of the
+      // signal that saturated. Blending a dulled copy underneath a
+      // full-bandwidth dry copy nets very little HF change at any ordinary
+      // Wet/Dry — measured, 0.79 dB against 3.77 at the default blend.
+      //
+      // ⚠ AFTER THE OUTPUT NORMALISATION, deliberately. Placed before it, the
+      // `dry_rms / out_rms` match reads the energy this filter just removed as
+      // a level drop and pushes the whole signal back up to compensate — the
+      // level match undoing the tone control, silently.
+      //
+      // ⚠ THE COST: Wet/Dry 0 is no longer the dry signal once this is engaged.
+      // That is intended and is the one place this plugin's parallel-blend
+      // contract is deliberately broken, because a medium the dry path bypasses
+      // is not a medium. The knob is absent at 0, so the contract holds for
+      // anyone who does not reach for it.
+      //
+      // ⚠ IT NOW RUNS AFTER THE ±1 CLAMP, WHERE THE INLINE VERSION RAN BEFORE
+      // IT. A block pass cannot sit inside the per-sample loop, and the move is
+      // safe in both directions that matter: the clamp only acts on overload,
+      // and the shelf provably cannot boost, so the ±1 guarantee survives
+      // either ordering. On overload it now softens the corner the clamp
+      // squared off rather than handing the clamp an already-softened edge,
+      // which is if anything the more faithful of the two.
+      if (this.hfLossActive) this.hfLoss.process(out, n, ch, hfLossGain)
     }
   }
 

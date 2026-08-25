@@ -39,15 +39,19 @@ test('every param the panel can set survives the setParam guard', () => {
   // the worklet — so what has to be pinned is that the panel's surface and the
   // guard's allowlist agree.
   for (const key of ['headroomDb', 'outputTrimDb', 'thresholdMode',
-    'fixedThresholdDb', 'shape', 'soften', 'limiter']) {
+    'fixedThresholdDb', 'shape', 'limiter']) {
     assert.ok(key in SOFT_CLIPPER_DEFAULTS,
       `${key} is not in SOFT_CLIPPER_DEFAULTS — setParam will drop it silently`)
   }
 })
 
 test('toKernelParams forwards exactly what the kernel reads, and nothing pinned', () => {
-  const out = toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, soften: 40 })
-  assert.equal(out.soften, 40)
+  const out = toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, limiter: 40 })
+  assert.equal(out.limiter, 40)
+  // ⚠ THE COLOUR CONTROLS ARE ALL GONE FROM THIS STAGE. Asymmetry deleted,
+  // HF Loss and Soften in dsp/tapeCharacter.js. A `soften` key arriving here
+  // means someone put a colour back into a peak-control stage.
+  assert.ok(!('soften' in out), 'soften is back in the soft clipper')
   assert.ok(!('drive' in out), 'the drive knob is back')
   assert.ok(!('driveRatios' in out), 'the ratio override is back')
   // The pinned params must NOT be forwarded: an absent key would overwrite the
@@ -61,8 +65,8 @@ test('a real zero reaches the kernel rather than reading as absent', () => {
   // reads these with `??`, which falls back only on null and undefined — so a
   // genuine 0 has to survive the whole path or a control set to off keeps
   // colouring. It cost a listening session once already.
-  assert.equal(toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, soften: 0 }).soften, 0)
   assert.equal(toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, limiter: 0 }).limiter, 0)
+  assert.equal(toKernelParams({ ...SOFT_CLIPPER_DEFAULTS, outputTrimDb: 0 }).outputTrimDb, 0)
 })
 
 test('the faceplate defaults come from the kernel, not from a second copy', () => {

@@ -2042,114 +2042,20 @@ test('hysteresis is level-invariant', () => {
   assert.ok(worst < 2e-3, `hysteresis is not level-invariant: worst deviation ${worst}`)
 })
 
-// ── Soften (SOFTEN_REF) ─────────────────────────────────────────────────────────
-
-test('soften is absent at zero and never boosts', () => {
-  const sig = concat(speechLike(4, 0.7, 51), speechLike(3, 0.7, 57))
-  const base = { headroomDb: 6.5, emphasisDb: 6, shape: 'tanh3' }
-
-  // ABSENT, not flat — the shipped patch is bit-identical to the build before
-  // this existed, which is what buys the right to add a control that forfeits
-  // "unity below T" when engaged.
-  const withParam = processSoftClipperBuffer([sig], SR, { ...base, soften: 0 }).channelData[0]
-  const without = processSoftClipperBuffer([sig], SR, base).channelData[0]
-  for (let i = 0; i < sig.length; i++) {
-    assert.equal(withParam[i], without[i], `soften 0 altered sample ${i}`)
-  }
-  // ⚠ IT IS ITS OWN PARAMETER NOW. It used to be reached only through `drive`,
-  // which split one knob across Asymmetry, HF Loss and Soften — and this
-  // assertion was the inverse of what it is now, pinning that soften had NO
-  // default of its own. Asymmetry is deleted and HF Loss moved to Tube
-  // Saturation, so the split has one member left and the knob is that member.
-  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.soften, 0, 'soften does not ship off')
-  assert.ok(!('drive' in SOFT_CLIPPER_KERNEL_DEFAULTS), 'the drive knob is back')
-
-  // NEVER BOOSTS. The limiter only ever moves toward its input, so
-  // |y| <= max(|y_prev|, |x|) at every sample and the bound follows.
-  const y = processSoftClipperBuffer([sig], SR, { ...base, soften: 100 }).channelData[0]
-  let peakIn = 0, peakOut = 0
-  for (let i = Math.round(0.5 * SR); i < sig.length; i++) {
-    peakIn = Math.max(peakIn, Math.abs(sig[i]))
-    peakOut = Math.max(peakOut, Math.abs(y[i]))
-  }
-  assert.ok(peakOut <= peakIn + 1e-6, `soften boosted the peak ${peakIn} -> ${peakOut}`)
-})
-
-test('soften removes high frequencies and leaves low ones alone', () => {
-  // The mechanism is a limit on how fast the waveform may move, so it bites in
-  // proportion to frequency: an 8 kHz tone moves ~27x faster than a 300 Hz one
-  // at the same amplitude. Measured at full knob, at a level over the
-  // threshold so the limiter is in its working range.
-  const level = (freq, amount) => {
-    const x = tone(freq, 3, 0.9)
-    const p = { thresholdMode: 'fixed', fixedThresholdDb: -20, emphasisDb: 0, shape: 'tanh3' }
-    const off = processSoftClipperBuffer([x], SR, { ...p, soften: 0 }).channelData[0]
-    const on = processSoftClipperBuffer([x], SR, { ...p, soften: amount }).channelData[0]
-    let a = 0, b = 0
-    for (let i = SR; i < x.length; i++) { a = Math.max(a, Math.abs(off[i])); b = Math.max(b, Math.abs(on[i])) }
-    return 20 * Math.log10(b / a)
-  }
-  const lo = level(300, 100)
-  const hi = level(8000, 100)
-  assert.ok(hi < lo - 6,
-    `soften did not favour high frequencies: 300 Hz ${lo.toFixed(2)} dB, 8 kHz ${hi.toFixed(2)} dB`)
-  // And it cannot lift anything.
-  assert.ok(lo <= 0.01 && hi <= 0.01, `soften boosted a tone: ${lo.toFixed(3)} / ${hi.toFixed(3)} dB`)
-
-  // THE KNOB HAS TO RUN THE RIGHT WAY, and nothing above checks it. Inverting
-  // the geometric mapping survives every other assertion here, because a tone
-  // 19 dB over the threshold binds even at scale 1 — Bernstein's bound only
-  // promises transparency for material at or BELOW T, and this probe is far
-  // above it. Monotonicity across the knob is what catches the inversion.
-  const sweep = [25, 50, 100].map(a => level(8000, a))
-  for (let i = 1; i < sweep.length; i++) {
-    assert.ok(sweep[i] < sweep[i - 1] - 0.5,
-      `soften is not monotonic in the knob: ${sweep.map(v => v.toFixed(2)).join(' -> ')} dB`)
-  }
-})
-
-test('soften is level-invariant', () => {
-  // Its allowed slope scales with the threshold, so the same recording at a
-  // different level is treated identically — the property every control in
-  // this stage holds.
-  const probe = concat(speechLike(4, 0.4, 61), speechLike(3, 0.4, 67))
-  const base = { thresholdMode: 'fixed', emphasisDb: 0, shape: 'tanh3', soften: 100 }
-  const a = processSoftClipperBuffer([probe], SR, { ...base, fixedThresholdDb: -14 }).channelData[0]
-  const louder = new Float32Array(probe.length)
-  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
-  const b = processSoftClipperBuffer([louder], SR, { ...base, fixedThresholdDb: -8 }).channelData[0]
-  let worst = 0
-  for (let i = Math.round(SR); i < probe.length; i++) {
-    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
-  }
-  assert.ok(worst < 2e-3, `soften is not level-invariant: worst deviation ${worst}`)
-})
-
-test('at scale 1 the soften limit provably cannot bind — Bernstein', () => {
-  // SOFTEN_REF is the bound on how far a signal bandlimited to the base rate's
-  // Nyquist and bounded by T can move per oversampled sample. It is what makes
-  // "unity below T" exact at soften 0 rather than approximate — and it is also
-  // why the knob has to go below the bound to do anything, which is the
-  // guarantee it forfeits. Pinned here as the reason the bypass is free.
-  const x = tone(SR / 2 - 100, 2, 0.5)
-  let worst = 0
-  // The true per-oversampled-sample delta of a bandlimited signal bounded by A
-  // cannot exceed 2*pi*B/fs_os * A = (pi / OVERSAMPLE) * A.
-  for (let i = 1; i < x.length; i++) worst = Math.max(worst, Math.abs(x[i] - x[i - 1]))
-  const bound = Math.PI * 0.5   // (pi / L) * A * L, walked at the base rate
-  assert.ok(worst <= bound + 1e-6,
-    `a Nyquist-limited signal exceeded Bernstein's bound: ${worst} > ${bound}`)
-})
-
-// ── Drive: REMOVED, the group had three members and one is left ───────────
+// ── Soften: MOVED TO dsp/tapeCharacter.js ─────────────────────────────────
 //
-// Both tests here are deleted rather than repointed at Soften. They were about
-// the COLLAPSE — that one knob reached all three components, that each
-// component's path was live (two mutations survived the first version of that
-// test: cutting drive's path to Asymmetry, and to Soften, because monotonicity
-// is satisfied by any ONE component being wired), and that the group did not
-// move loudness. None of those claims exist any more. Soften's own tests are
-// above and are unchanged.
+// Four tests went with it, and one of them is worth naming here because it was
+// about THIS stage rather than about the limiter: `soften is absent at zero and
+// never boosts` pinned that the shipped patch was bit-identical to the build
+// before Soften existed. That guarantee is now unconditional — there is no
+// control here that can forfeit it — so the stage's transparency tests carry it
+// instead.
+//
+// ⚠ THE ONE THAT DID NOT SURVIVE INTACT: `soften is level-invariant`. Soften's
+// allowance scaled with this stage's character reference, so its invariance was
+// this stage's invariance. In the module the reference is the caller's to
+// choose, and the test that replaced it pins the weaker, true thing — that the
+// allowance scales with whatever reference it is given.
 
 test('HF Emphasis is pinned and off the faceplate', () => {
   // ⚠ THE PIN IS 0 NOW, AND IT IS NO LONGER A JUDGEMENT — it is what the

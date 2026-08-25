@@ -31,7 +31,6 @@ const outputTrimDb = ref(SOFT_CLIPPER_DEFAULTS.outputTrimDb)
 const thresholdMode = ref('fixed')
 const fixedThresholdDb = ref(SOFT_CLIPPER_DEFAULTS.fixedThresholdDb)
 const shape = ref(SOFT_CLIPPER_DEFAULTS.shape)
-const soften = ref(SOFT_CLIPPER_DEFAULTS.soften)
 /**
  * ⚠ HIDDEN CONTROLS. Limiter, the knee and HF Emphasis are shipped kernel
  * behaviour whose knobs live on the admin tuning panel rather than the
@@ -94,7 +93,6 @@ function currentParams() {
     thresholdMode: thresholdMode.value,
     fixedThresholdDb: fixedThresholdDb.value,
     shape: shape.value,
-    soften: soften.value,
     limiter: limiter.value,
     // Only when the tuning panel is open: on the shipped path emphasisDb must
     // stay absent so the kernel's pin governs, and forwarding a mirrored copy
@@ -273,7 +271,6 @@ export function useSoftClipper() {
   }
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
-  const syncSoften = (v) => { soften.value = v; pushParam('soften', v) }
   const syncLimiter = (v) => { limiter.value = v; pushParam('limiter', v) }
   const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v) }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
@@ -364,7 +361,6 @@ export function useSoftClipper() {
     ceilingBusy,
     CEILING_PRESETS,
     shape,
-    soften,
     limiter,
     emphasisDb,
     tuningOn,
@@ -381,7 +377,6 @@ export function useSoftClipper() {
     togglePreview,
     toggleDelta,
     syncHeadroom,
-    syncSoften,
     syncLimiter,
     syncEmphasis,
     syncOutputTrim,
