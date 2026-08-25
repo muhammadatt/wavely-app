@@ -11,6 +11,7 @@ import {
 } from '../audio/effects/softClipperParams.js'
 import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../audio/softClipperProcessor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { createPeakHold, createReadoutThrottle } from '../components/meters/ballistics.js'
 import { tuningEnabled } from '../audio/softClipperTuning.js'
 import { CEILING_PRESETS, DEFAULT_CEILING_PRESET, presetById } from '../audio/ceilingPresets.js'
 
@@ -60,6 +61,22 @@ const tuningOn = tuningEnabled()
  */
 const ceilingPreset = ref(null)
 const ceilingBusy = ref(false)
+/**
+ * What each preset WOULD write for the current region, in dBFS — keyed by
+ * preset id, `{}` before anything has been measured.
+ *
+ * ⚠ THE BUTTONS PRINT THIS, WHICH IS WHAT MAKES THEM SETTERS RATHER THAN A
+ * MODE SWITCH. A latching bank asks the user to believe a label: MEDIUM means
+ * whatever MEDIUM means. A bank that shows "-8.2" under MEDIUM has already
+ * answered the question the label raises, and the click is then a transfer of a
+ * number the user can see into a knob they can see — after which the value is
+ * plainly theirs, not the button's.
+ *
+ * All four are measured together because the cost is the measurement pass over
+ * the region, not the percentile: four percentiles of one sorted block-peak
+ * distribution is the same work as one.
+ */
+const ceilingChoices = ref({})
 // Has the user turned the ceiling knob themselves this session? Once they have,
 // opening the preview must not overwrite it with a preset — that would be the
 // panel discarding a deliberate choice, which is exactly what "the Gain knob
@@ -71,7 +88,21 @@ let userSetCeiling = false
 // soft clipper parameter changes it — so knob drags never trigger it.
 const CEILING_DEBOUNCE_MS = 90
 let ceilingTimer = null
+/**
+ * ⚠ TWO COUNTERS, NOT ONE, AND SHARING ONE WAS A LATCHING BUG. Placing the
+ * ceiling and labelling the buttons are two independent measurements that run
+ * back to back — opening the panel fires both. On one counter the second call
+ * invalidates the first, so the placement was always discarded... and
+ * `applyCeilingPreset` clears `ceilingBusy` only `if (seq === ceilingSeq)`, so
+ * the flag it had already raised was never lowered. `ceilingBusy` latched true,
+ * `ceilingDisabledReason` read "Measuring…" forever, and all four setter
+ * buttons stayed disabled for the life of the panel.
+ *
+ * Supersession is per-measurement because that is what it means: a newer
+ * placement should cancel an older placement, not an unrelated labelling pass.
+ */
 let ceilingSeq = 0
+let choicesSeq = 0
 
 const clipperPreview = ref(false)
 const clipperReduction = ref(0)
@@ -87,7 +118,28 @@ const clipperResidualDbc = ref(-120)
 const clipperDelta = ref(false)
 const clipperInputLevels = ref([])
 const clipperOutputLevels = ref([])
+/**
+ * The readout strip's damped readings.
+ *
+ * ⚠ DAMPED HERE RATHER THAN IN THE PANEL, and the first attempt did it there.
+ * A raw per-frame value is unreadable however correct it is — but a second rAF
+ * loop in the component is a second thing that has to be running, and when it
+ * was not the lamp and the numeral simply froze. This loop is the one that
+ * already reads the kernel; damping belongs beside the read, where a value
+ * cannot be live in one place and stale in another.
+ *
+ * Constants are ClipLamp's, unchanged: a 700 ms hold falling at 2.5 dB/s, and a
+ * numeral that steps ten times a second rather than sixty. The lamp is drawn
+ * from the same held dB the numeral shows, so the light and the number can
+ * never disagree.
+ */
+const clipperReductionHeld = ref(0)
+const clipperReductionReadout = ref(0)
+const clipperEngagedReadout = ref(0)
+const reductionHold = createPeakHold({ holdMs: 700, fallPerSec: 2.5 })
+const reductionThrottle = createReadoutThrottle()
 let meterId = null
+let meterLastTs = 0
 
 function currentParams() {
   return {
@@ -119,13 +171,30 @@ export function useSoftClipper() {
 
   function startMeters(chain) {
     stopMeters()
-    function tick() {
+    meterLastTs = 0
+    function tick(ts) {
+      const dtMs = meterLastTs ? ts - meterLastTs : 0
+      meterLastTs = ts
       const nodes = chain.effects.find(e => e.id === softClipperEffect.id)?.nodes
       if (nodes) {
         clipperReduction.value = nodes.getReduction()
         clipperEngagedPct.value = nodes.getEngagedFraction() * 100
         clipperLiftDb.value = nodes.getLift()
         clipperResidualDbc.value = nodes.getResidualDbc()
+
+        // Peak reduction is an instantaneous reading of the loudest transient,
+        // so it needs a hold or the eye never catches it.
+        clipperReductionHeld.value = reductionHold.push(
+          Math.abs(clipperReduction.value), dtMs)
+        if (reductionThrottle.due(dtMs)) {
+          clipperReductionReadout.value = clipperReductionHeld.value
+          // ⚠ ENGAGED IS THROTTLED BUT NOT HELD. It is already a 2 s average
+          // inside the kernel (ENGAGED_TAU_S); holding a running average damps
+          // a damped quantity twice, and `fallPerSec` is a dB rate that would
+          // be applied to a percentage. It only needs to stop stepping at
+          // 60 Hz.
+          clipperEngagedReadout.value = clipperEngagedPct.value
+        }
         const chCount = state.currentFile?.channels ?? 1
         clipperInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
         clipperOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
@@ -156,6 +225,10 @@ export function useSoftClipper() {
     }
     clipperReduction.value = 0
     clipperEngagedPct.value = 0
+    clipperReductionHeld.value = 0
+    clipperReductionReadout.value = 0
+    clipperEngagedReadout.value = 0
+    reductionHold.reset(0)
     clipperLiftDb.value = 0
     clipperResidualDbc.value = -120
     clipperInputLevels.value = []
@@ -201,6 +274,7 @@ export function useSoftClipper() {
       // recording. Land on the default preset unless the user has already
       // chosen a ceiling this session.
       if (ceilingPreset.value === null && !userSetCeiling) applyCeilingPreset(DEFAULT_CEILING_PRESET)
+      measureCeilingChoices()
     } else {
       stopMeters()
     }
@@ -249,6 +323,54 @@ export function useSoftClipper() {
   }
 
   /**
+   * Measure what every preset would write for the current region.
+   *
+   * Superseded by sequence number like the setter itself, so a stale pass
+   * cannot relabel the buttons after a newer region has been measured. A region
+   * with nothing measurable leaves the labels EMPTY rather than stale: a button
+   * offering a number from a region the user has navigated away from is worse
+   * than one offering none.
+   */
+  async function measureCeilingChoices() {
+    if (!state.selection || !state.currentFile) { ceilingChoices.value = {}; return }
+    const { start, end } = state.selection
+    const seq = ++choicesSeq
+    try {
+      const measured = await Promise.all(CEILING_PRESETS.map(preset =>
+        computeSoftClipperCeiling(
+          state.segments, start, end, preset.percentile,
+          state.currentFile.sampleRate, state.currentFile.channels,
+        )))
+      if (seq !== choicesSeq) return
+      const next = {}
+      CEILING_PRESETS.forEach((preset, i) => {
+        if (measured[i] !== null) next[preset.id] = measured[i]
+      })
+      ceilingChoices.value = next
+    } catch (err) {
+      console.error('Soft Clipper ceiling measurement failed:', err)
+      ceilingChoices.value = {}
+    }
+  }
+
+  /**
+   * Write a preset's ceiling. A SETTER: it moves the knob and then has no
+   * further claim on the value.
+   *
+   * ⚠ IT PREFERS THE ALREADY-MEASURED NUMBER — the one the button is printing —
+   * over measuring again. Re-measuring could land on a different value than the
+   * label promised if the region moved in between, and a button that writes
+   * something other than what it says is the worst of the three states.
+   */
+  function setCeilingFromPreset(id) {
+    const measured = ceilingChoices.value[id]
+    if (!Number.isFinite(measured)) return
+    fixedThresholdDb.value = measured
+    userSetCeiling = true
+    pushParam('fixedThresholdDb', measured)
+  }
+
+  /**
    * Re-run the current preset for a changed region, debounced.
    *
    * Only if a preset is actually active: once the user has turned the ceiling
@@ -264,12 +386,16 @@ export function useSoftClipper() {
    * Still never over a hand-set ceiling.
    */
   function scheduleCeilingPreset() {
-    if (ceilingPreset.value === null && (userSetCeiling || !clipperPreview.value)) return
-    const id = ceilingPreset.value ?? DEFAULT_CEILING_PRESET
     if (ceilingTimer !== null) clearTimeout(ceilingTimer)
     ceilingTimer = setTimeout(() => {
       ceilingTimer = null
-      applyCeilingPreset(id)
+      // The LABELS always follow the region — they describe what a click would
+      // do here, so they are wrong the moment the region moves.
+      measureCeilingChoices()
+      // The VALUE follows it only while it is still the panel's to place. Once
+      // the ceiling has been set — by a preset click or by hand — it is the
+      // user's number and a region change must not overwrite it.
+      if (!userSetCeiling && clipperPreview.value) applyCeilingPreset(DEFAULT_CEILING_PRESET)
     }, CEILING_DEBOUNCE_MS)
   }
 
@@ -356,7 +482,10 @@ export function useSoftClipper() {
       clearTimeout(ceilingTimer)
       ceilingTimer = null
     }
+    // BOTH counters, or a labelling pass still in flight lands after the panel
+    // has closed and writes ceilings measured for a region nobody is looking at.
     ceilingSeq++
+    choicesSeq++
     ceilingBusy.value = false
     if (clipperPreview.value) {
       const ctx = getAudioContext()
@@ -389,6 +518,9 @@ export function useSoftClipper() {
     fixedThresholdDb,
     ceilingPreset,
     ceilingBusy,
+    ceilingChoices,
+    setCeilingFromPreset,
+    measureCeilingChoices,
     CEILING_PRESETS,
     shape,
     limiter,
@@ -400,7 +532,10 @@ export function useSoftClipper() {
     tuningOn,
     clipperPreview,
     clipperReduction,
+    clipperReductionHeld,
+    clipperReductionReadout,
     clipperEngagedPct,
+    clipperEngagedReadout,
     clipperLiftDb,
     clipperResidualDbc,
     clipperDelta,

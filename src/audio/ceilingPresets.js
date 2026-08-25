@@ -51,10 +51,10 @@ const VOICED_FLOOR_DB = 40
  * ladder was completely inert.
  */
 export const CEILING_PRESETS = [
-  { id: 'soft', label: 'SOFT', percentile: 0.97, title: 'Ceiling at the top 3% of peaks' },
-  { id: 'medium', label: 'MED', percentile: 0.93, title: 'Ceiling at the top 7% of peaks' },
-  { id: 'hard', label: 'HARD', percentile: 0.85, title: 'Ceiling at the top 15% of peaks' },
-  { id: 'squash', label: 'SQUASH', percentile: 0.78, title: 'Ceiling at the top 22% of peaks' },
+  { id: 'soft', label: 'GENTLE', percentile: 0.97, title: 'Top 3% of peaks' },
+  { id: 'medium', label: 'MED', percentile: 0.93, title: 'Top 7% of peaks' },
+  { id: 'hard', label: 'HARD', percentile: 0.85, title: 'Top 15% of peaks' },
+  { id: 'squash', label: 'SQUASH', percentile: 0.75, title: 'Top 25% of peaks' },
 ]
 
 /** The preset a freshly-opened panel lands on. */

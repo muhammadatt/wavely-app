@@ -118,12 +118,34 @@ test('a region change never re-measures over a hand-set ceiling', () => {
   // sat at the kernel's arbitrary -10 dBFS until they clicked a button they
   // had no reason to think was waiting for them. The first selection is the
   // moment that measurement becomes possible, so it runs then.
+  //
+  // ⚠ THE PRESETS ARE SETTERS NOW, so there is no "active preset" to re-run.
+  // What follows the region are the LABELS — what each button would write here
+  // — and the value follows only while it is still the panel's to place.
   const src = read('../../src/composables/useSoftClipper.js')
   const fn = src.slice(src.indexOf('function scheduleCeilingPreset'))
-  assert.match(fn.slice(0, 400), /userSetCeiling/,
+  const body = fn.slice(0, 700)
+  assert.match(body, /userSetCeiling/,
     'a hand-set ceiling can be overwritten by a selection change')
-  assert.match(fn.slice(0, 400), /DEFAULT_CEILING_PRESET/,
+  assert.match(body, /DEFAULT_CEILING_PRESET/,
     'the first selection does not place the opening measurement')
+  assert.match(body, /measureCeilingChoices/,
+    'the button labels do not follow the region — they would promise stale numbers')
+})
+
+test('a setter writes the number its button is printing', () => {
+  // ⚠ THE WORST OF THE THREE STATES would be a button that writes something
+  // other than what it says. `setCeilingFromPreset` therefore uses the ALREADY
+  // MEASURED value rather than measuring again on click: a fresh measurement
+  // could land elsewhere if the region moved between the label and the press.
+  const src = read('../../src/composables/useSoftClipper.js')
+  const fn = src.slice(src.indexOf('function setCeilingFromPreset'), src.indexOf('function setCeilingFromPreset') + 500)
+  assert.match(fn, /ceilingChoices\.value\[id\]/,
+    'the setter re-measures instead of writing the number it displayed')
+  assert.doesNotMatch(fn, /computeSoftClipperCeiling/)
+  // And it marks the value as the user's, because a setter hands ownership over
+  // rather than keeping a claim on it.
+  assert.match(fn, /userSetCeiling = true/)
 })
 
 test('teardown cancels a pending measurement', () => {
@@ -136,9 +158,27 @@ test('the panel is fixed-only and offers the presets', () => {
   const src = read('../../src/components/panels/SoftClipperModal.vue')
   assert.doesNotMatch(src, /MODE_OPTIONS/, 'the threshold mode switch must be gone')
   assert.doesNotMatch(src, /setThresholdMode/, 'the panel must not set the mode any more')
-  assert.match(src, /v-for="p in CEILING_PRESETS"/, 'the presets must be reachable')
-  assert.match(src, /applyCeilingPreset\(p\.id\)/)
+  assert.match(src, /v-for="p in ceilingSetters"/, 'the ceiling setters must be reachable')
+  assert.match(src, /setCeilingFromPreset\(p\.id\)/)
   assert.match(src, /watch\(\(\) => state\.selection/, 're-measure when the region changes')
+  // ⚠ THE CAPTION REPORTS THE CURRENT SETTING, NOT A PREVIEW. It names the
+  // preset the ceiling is sitting on and prints its dBFS, and reads empty the
+  // rest of the time.
+  //
+  // Two earlier states were removed on purpose — a hover preview, and the
+  // disabled reason — because both put text under the bank that was about
+  // something other than the current setting, so the line changed identity as
+  // the pointer moved. What must not regress is that it stays DERIVED: driven
+  // by `active`, which is itself a live comparison against the ceiling, so it
+  // goes out by itself rather than needing to be cleared.
+  assert.match(src, /const setterCaption = computed/, 'the setter caption is gone')
+  assert.match(src, /find\(x => x\.active && x\.ready\)/,
+    'the caption is no longer driven by which setter the ceiling is sitting on')
+  assert.match(src, /\$\{active\.db\}/, 'the caption no longer prints the value')
+  assert.doesNotMatch(src, /hoveredSetterId/,
+    'the hover preview is back — the line changes identity under the pointer again')
+  assert.doesNotMatch(src, /ceilingPreset ===/,
+    "a latching preset lamp is back — the value belongs to the knob, not a button")
 
   const composable = read('../../src/composables/useSoftClipper.js')
   assert.match(composable, /const thresholdMode = ref\('fixed'\)/,
@@ -235,4 +275,104 @@ test('the peak switch is on the faceplate and the knob stays on the tuning panel
   const composable = read('../../src/composables/useSoftClipper.js')
   assert.match(composable, /limiterMode/, 'the composable does not derive a mode')
   assert.match(composable, /function setLimiterMode/)
+})
+
+test('the two ceiling measurements supersede independently', () => {
+  // ⚠ THE LATCHING BUG THIS EXISTS FOR. Placing the ceiling and labelling the
+  // setter buttons are two measurements that run back to back — opening the
+  // panel fires both. On ONE shared sequence counter the second invalidates the
+  // first, so the placement was always discarded; worse, `applyCeilingPreset`
+  // lowers `ceilingBusy` only `if (seq === ceilingSeq)`, so the flag it had
+  // already raised was never lowered. `ceilingBusy` latched true,
+  // `ceilingDisabledReason` read "Measuring…" for the life of the panel, and
+  // all four buttons stayed disabled.
+  //
+  // Supersession is per-measurement because that is what it means: a newer
+  // placement cancels an older placement, not an unrelated labelling pass.
+  const src = read('../../src/composables/useSoftClipper.js')
+  assert.match(src, /let ceilingSeq = 0/)
+  assert.match(src, /let choicesSeq = 0/, 'the two measurements share one counter again')
+
+  const choices = src.slice(src.indexOf('async function measureCeilingChoices'))
+  const choicesBody = choices.slice(0, choices.indexOf('\n  }\n'))
+  assert.match(choicesBody, /\+\+choicesSeq/)
+  assert.doesNotMatch(choicesBody, /ceilingSeq/,
+    'labelling the buttons still touches the placement counter')
+
+  const place = src.slice(src.indexOf('async function applyCeilingPreset'))
+  const placeBody = place.slice(0, place.indexOf('\n  }\n'))
+  assert.doesNotMatch(placeBody, /choicesSeq/,
+    'placing the ceiling still touches the labelling counter')
+
+  // And teardown has to cancel both, or a labelling pass lands after the panel
+  // closed and writes ceilings for a region nobody is looking at.
+  const teardown = src.slice(src.indexOf('function teardown()'))
+  assert.match(teardown.slice(0, 900), /ceilingSeq\+\+/)
+  assert.match(teardown.slice(0, 900), /choicesSeq\+\+/)
+})
+
+test('the strip readings are damped where they are read, not in the panel', () => {
+  // ⚠ THE FREEZE THIS EXISTS FOR. Damping the lamp and the dB PEAK numeral in
+  // the panel meant a SECOND rAF loop that had to be running for either to move
+  // — and when it was not, both simply froze at zero. The composable already
+  // runs a frame loop to read the kernel; the ballistics belong beside that
+  // read, where a value cannot be live in one place and stale in another.
+  const composable = read('../../src/composables/useSoftClipper.js')
+  assert.match(composable, /createPeakHold/, 'the reduction reading is no longer held')
+  assert.match(composable, /clipperReductionHeld/)
+  assert.match(composable, /reductionThrottle\.due/)
+
+  const panel = read('../../src/components/panels/SoftClipperModal.vue')
+  assert.doesNotMatch(panel, /useMeterFrame/,
+    'the panel runs its own meter loop again — the one that froze')
+  assert.doesNotMatch(panel, /createPeakHold/)
+  // The lamp and the numeral must read the SAME held value, or they can drift
+  // apart and say different things about one event.
+  assert.match(panel, /lampFraction\(clipperReductionHeld\.value/)
+  assert.match(panel, /clipperReductionReadout\.value\.toFixed/)
+})
+
+test('the setter highlight is derived from the ceiling, never remembered', () => {
+  // ⚠ THE FAILURE THIS AVOIDS is the one this panel already shipped once: a
+  // latching preset lamp that kept claiming a value after the knob or the line
+  // had moved away from it. A stored "last clicked" flag is a claim about the
+  // PAST and stops being true the moment anything changes; comparing the
+  // setter's own number against the live ceiling asks about the PRESENT, so it
+  // lights when they agree and goes out when they do not — nothing to clear,
+  // and no way to be wrong.
+  //
+  // The consequence worth keeping: it is not a selection. Land on a preset's
+  // value by dragging the line and its button lights, which is correct — the
+  // button describes a value, and that value is what the ceiling holds.
+  const panel = read('../../src/components/panels/SoftClipperModal.vue')
+  const setters = panel.slice(panel.indexOf('const ceilingSetters = computed'))
+  const body = setters.slice(0, setters.indexOf('}))') + 3)
+  assert.match(body, /fixedThresholdDb\.value/,
+    'the highlight does not compare against the live ceiling')
+  assert.match(body, /SETTER_MATCH_DB/)
+  // No stored selection anywhere: a ref holding the active id would be the
+  // latch coming back by another name.
+  assert.doesNotMatch(panel, /activeSetter\s*=\s*ref|selectedPreset\s*=\s*ref/)
+
+  // The tolerance has to be tighter than one detent of the ceiling knob, or a
+  // nudge would leave the old button lit.
+  const tol = Number(panel.match(/const SETTER_MATCH_DB = ([\d.]+)/)[1])
+  assert.ok(tol > 0 && tol < 0.5,
+    `SETTER_MATCH_DB ${tol} is not inside one 0.5 dB knob step`)
+})
+
+test('the strip numerals cannot re-flow the row', () => {
+  // They change ten times a second, and a proportional numeral set makes "3.2"
+  // and "0.4" different widths — so the label after them slides and the whole
+  // strip reads as twitching. Tabular figures in a fixed box, right-aligned so
+  // the decimal point stays put as the integer digit comes and goes.
+  const panel = read('../../src/components/panels/SoftClipperModal.vue')
+  for (const binding of ['peakOverText', 'engagedText']) {
+    const at = panel.indexOf(`{{ ${binding} }}`)
+    assert.ok(at > 0, `${binding} is not rendered`)
+    const span = panel.slice(panel.lastIndexOf('<span', at), at)
+    assert.match(span, /tabular-nums/, `${binding} is not set in tabular figures`)
+    assert.match(span, /min-width/, `${binding} has no fixed box`)
+    assert.match(span, /text-align:right/, `${binding} is not right-aligned in its box`)
+  }
 })

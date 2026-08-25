@@ -150,20 +150,6 @@ const dbToLin = (db) => Math.pow(10, db / 20)
 const linToDb = (a) => (a > 1e-6 ? 20 * Math.log10(a) : -120)
 
 /**
- * dBFS gridlines.
- *
- * Without these the vertical axis is unreadable: it is amplitude^0.45, so it
- * is neither linear nor logarithmic and nothing on screen says where -6 is.
- * That matters twice over in fixed mode, where the drag has no other ruler —
- * the whole -24…-1 dBFS travel of the control is this axis.
- *
- * Spaced to cover the fixed range's ends and the middle where thresholds
- * actually land, rather than at even dB intervals, which the power law would
- * bunch against the top.
- */
-const GRID_DB = [-1, -3, -6, -12, -24]
-
-/**
  * Columns in the lookahead half.
  *
  * Fixed rather than derived from the ring's own resolution: the ring's column
@@ -221,7 +207,7 @@ function draw(dtMs) {
   const mid = h / 2
   const half = mid - 2
 
-  drawGrid(ctx, w, mid, half)
+  drawScale(ctx, w, mid, half)
 
   // Where the threshold IS, right now — one number, not a history.
   //
@@ -470,26 +456,36 @@ function drawThresholdLine(ctx, w, mid, half, thresholdLin) {
  * the two halves are one signal drawn twice, so labelling both would imply
  * they were separate scales.
  */
-function drawGrid(ctx, w, mid, half) {
-  ctx.lineWidth = 1
+/**
+ * dBFS marks on the vertical axis: the numerals, and zero.
+ *
+ * The vertical axis is amplitude^0.45 — neither linear nor logarithmic — so
+ * without marks nothing on screen says where -6 is. The numerals are what
+ * answers that; the ladder is not at even dB intervals because the power law
+ * bunches even spacing against the top, so these five cover the range's ends
+ * and the middle where ceilings actually land.
+ *
+ * ⚠ THE HORIZONTAL RULES ARE GONE AND THE NUMERALS ARE NOT. The rules were a
+ * ruler for a drag whose value used to live on a knob at the other end of the
+ * faceplate; the line now carries its own value in 26 px right where the
+ * pointer is, so five rules across the waveform were five things competing
+ * with the one line that matters. The numerals cost nothing and still label an
+ * axis that genuinely needs labelling — which is the distinction between the
+ * two, and the reason removing both was wrong.
+ */
+const SCALE_DB = [-1, -3, -6, -12, -24]
+
+function drawScale(ctx, w, mid, half) {
   ctx.font = "600 8px 'JetBrains Mono',monospace"
   ctx.textAlign = 'left'
-
-  for (const db of GRID_DB) {
+  ctx.fillStyle = 'rgba(255,255,255,.22)'
+  for (const db of SCALE_DB) {
     const dy = ampToUnit(dbToLin(db)) * half
-    ctx.strokeStyle = 'rgba(255,255,255,.05)'
-    ctx.beginPath()
-    ctx.moveTo(0, Math.round(mid - dy) + 0.5)
-    ctx.lineTo(w, Math.round(mid - dy) + 0.5)
-    ctx.moveTo(0, Math.round(mid + dy) + 0.5)
-    ctx.lineTo(w, Math.round(mid + dy) + 0.5)
-    ctx.stroke()
-
-    ctx.fillStyle = 'rgba(255,255,255,.22)'
     ctx.fillText(String(db), 5, mid - dy - 3)
   }
 
-  // Centre line last, brighter — it is zero, not a gridline.
+  ctx.lineWidth = 1
+  // Zero: not a gridline, the axis.
   ctx.strokeStyle = 'rgba(255,255,255,.1)'
   ctx.beginPath()
   ctx.moveTo(0, mid + 0.5)
@@ -540,7 +536,7 @@ function drawLegend(ctx, w, h) {
 
   for (const [colour, text] of [
     ['rgba(200,205,215,.55)', 'SIGNAL'],
-    [props.accent, 'REMOVED'],
+    [props.accent, 'CLIPPED'],
   ]) {
     ctx.fillStyle = colour
     ctx.fillRect(x, y - 5, 7, 6)
@@ -557,7 +553,7 @@ function drawLegend(ctx, w, h) {
   ctx.textAlign = 'right'
   if (isFixed.value) {
     ctx.fillStyle = 'rgba(255,255,255,.3)'
-    ctx.fillText('DRAG THE LINE — SETS THE CEILING', w - 6, y)
+    ctx.fillText('DRAG THE LINE TO SET THE CEILING', w - 6, y)
   } else {
     const hr = `${props.headroomDb > 0 ? '+' : ''}${props.headroomDb.toFixed(1)}`
     ctx.fillStyle = props.accent
@@ -570,47 +566,102 @@ function drawLegend(ctx, w, h) {
 }
 
 /**
- * The threshold's value, printed on a chip riding the upper threshold line.
+ * The threshold line's two labels: what it IS on the left, what it READS on the
+ * right, both riding the line itself.
  *
- * It used to sit in the top-right corner, as far from the line it describes as
- * the canvas allows. In fixed mode that line is the control, so the number and
- * the grab target should be the same object — a value floating in a corner
- * gives a draggable line no affordance at all beyond a cursor change on hover.
+ * The value used to sit in the top-right corner, as far from the line it
+ * describes as the canvas allows. In fixed mode that line is the control, so
+ * the number and the grab target should be the same object — a value floating
+ * in a corner gives a draggable line no affordance at all beyond a cursor
+ * change on hover.
+ *
+ * TWO LABELS RATHER THAN ONE, from the design. They answer different questions
+ * and a single chip can only answer one: the pill names the line (a horizontal
+ * rule across a waveform is not self-evidently a ceiling), the readout gives
+ * its value. Splitting them left and right also means the number is never the
+ * thing the pointer is about to grab.
+ *
+ * ⚠ NO GRIP MARKS. The pill used to carry three little bars saying "this is
+ * draggable". The affordance survives without them — the cursor turns to
+ * ns-resize over the whole display and the legend says DRAG THE LINE in as many
+ * words — and inside a pill this size the grip was competing with the one word
+ * the pill exists to say.
+ *
+ * THE READOUT IS LARGE BECAUSE IT IS THE PANEL'S PRIMARY VALUE. It is set from
+ * three places — these buttons, this line, that knob — and it is what the user
+ * is actually choosing; at 10 px it read as an annotation on the display rather
+ * than as the number the panel exists to set.
  */
+const CEILING_PILL_TEXT = 'CEILING'
+const CEILING_READOUT_PX = 20
+
 function drawThresholdChip(ctx, w, mid, half, thresholdLin) {
   if (thresholdLin === null) return
-  const label = `${linToDb(thresholdLin).toFixed(1)} dB`
 
-  ctx.font = "700 10px 'JetBrains Mono',monospace"
-  const tw = ctx.measureText(label).width
-  const cw = tw + 24
-  const ch = 17
-  const cx = w - cw - 5
-  // Clamped so the chip stays on the face during the warm-up, when the
+  // ⚠ ALPHA RESET ON ENTRY. Both boxes here are opaque BY DESIGN — they ride on
+  // top of the line they describe and must not let it strike their text
+  // through — and an opaque fill is only opaque if the context agrees. Several
+  // callers up the draw order leave globalAlpha wherever they finished; this
+  // stops the guarantee depending on which of them ran last.
+  ctx.globalAlpha = 1
+
+  // Clamped so both labels stay on the face during the warm-up, when the
   // threshold deliberately sits above full scale.
-  const cy = Math.min(mid - ch - 1, Math.max(1, mid - ampToUnit(thresholdLin) * half - ch / 2))
+  const lineY = Math.min(mid - 2, Math.max(CEILING_READOUT_PX * 0.6, mid - ampToUnit(thresholdLin) * half))
 
-  ctx.fillStyle = '#08060a'
+  // ── The pill, left, naming the line ──
+  ctx.font = "700 9px 'JetBrains Mono',monospace"
+  ctx.textAlign = 'left'
+  const pillTw = ctx.measureText(CEILING_PILL_TEXT).width + 3 * (CEILING_PILL_TEXT.length - 1)
+  const pillW = pillTw + 24
+  const pillH = 18
+  const pillX = 40
+  const pillY = lineY - pillH / 2
+
+  // ⚠ OPAQUE, NOT NEARLY OPAQUE. Both labels are drawn AFTER the threshold
+  // line and sit on top of it, so any alpha at all lets the line show through
+  // — and a horizontal rule behind a word at this size reads as a strikethrough
+  // rather than as depth. 0.92 was enough to do it.
+  ctx.fillStyle = '#140c0a'
   ctx.strokeStyle = props.accent
-  ctx.globalAlpha = 0.9
   ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.roundRect(cx + 0.5, cy + 0.5, cw, ch, 8)
+  ctx.roundRect(pillX + 0.5, pillY + 0.5, pillW, pillH, 999)
+  // ⚠ FILL AT FULL ALPHA, THEN DIM ONLY THE STROKE. `globalAlpha` applies to
+  // both, so setting it before the fill makes the "opaque" background 75% —
+  // which is exactly the strikethrough this was meant to stop. The softening
+  // was only ever wanted on the border.
   ctx.fill()
+  ctx.globalAlpha = 0.75
   ctx.stroke()
   ctx.globalAlpha = 1
 
-  ctx.fillStyle = props.accent
-  ctx.textAlign = 'left'
-  ctx.fillText(label, cx + 8, cy + 12)
-
-  // Grip, in both modes — the curve is a handle in both, and the grip is what
-  // says so before anyone tries.
-  ctx.globalAlpha = 0.65
-  for (let i = 0; i < 3; i++) {
-    ctx.fillRect(cx + cw - 12, cy + 5 + i * 3, 7, 1.5)
+  // Letter-spaced by hand: canvas has no letterSpacing in every engine this
+  // ships to, and the design's .14em is what makes a 9 px caps label legible.
+  ctx.fillStyle = '#ffb094'
+  let lx = pillX + 12
+  for (const ch of CEILING_PILL_TEXT) {
+    ctx.fillText(ch, lx, lineY + 3)
+    lx += ctx.measureText(ch).width + 3
   }
-  ctx.globalAlpha = 1
+
+  // ── The readout, right, giving its value ──
+  const label = `${linToDb(thresholdLin).toFixed(1)}db`
+  ctx.font = `700 ${CEILING_READOUT_PX}px 'JetBrains Mono',monospace`
+  const tw = ctx.measureText(label).width
+  const boxW = tw + 22
+  const boxH = CEILING_READOUT_PX + 8
+  const boxX = w - boxW - 14
+
+  // Opaque for the same reason as the pill — see above.
+  ctx.fillStyle = '#090605'
+  ctx.beginPath()
+  ctx.roundRect(boxX, lineY - boxH / 2, boxW, boxH, 8)
+  ctx.fill()
+
+  ctx.fillStyle = '#ffb094'
+  ctx.textAlign = 'left'
+  ctx.fillText(label, boxX + 11, lineY + CEILING_READOUT_PX * 0.36)
 }
 
 // ── Drag, fixed mode only ───────────────────────────────────────────────────

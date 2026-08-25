@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
@@ -7,8 +7,8 @@ import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import ClipLamp from '../meters/ClipLamp.vue'
 import ClipperScope from '../meters/ClipperScope.vue'
+import { lampFraction } from '../meters/ballistics.js'
 import FloatingWindow from './FloatingWindow.vue'
 import ApplyAction from '../ui/ApplyAction.vue'
 
@@ -18,14 +18,16 @@ const {
   headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, limiter,
   limiterMode, LIMITER_MODES, setLimiterMode, limiterLatencyMs,
   emphasisDb, tuningOn,
-  clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
+  clipperPreview, clipperReductionHeld, clipperReductionReadout,
+  clipperEngagedReadout, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, toggleDelta, syncHeadroom, syncLimiter, syncEmphasis,
   syncOutputTrim,
   syncFixedThreshold,
   setShape, apply, teardown, closeModal,
-  ceilingPreset, ceilingBusy, CEILING_PRESETS, applyCeilingPreset, scheduleCeilingPreset,
+  ceilingBusy, CEILING_PRESETS, scheduleCeilingPreset,
+  ceilingChoices, setCeilingFromPreset,
 } = useSoftClipper()
 
 const { state } = useEditorState()
@@ -190,38 +192,204 @@ function formatDb(v) {
 watch(() => state.selection, () => scheduleCeilingPreset(), { deep: true })
 
 
-/**
- * Reduction that lights the lamp fully.
- *
- * 6 dB, not the 12 the bar used to run: 6 is MAX_REDUCTION_DB, the kernel's own
- * hard ceiling and spec §7.1's stated limit, so no setting can drive the lamp
- * past its top and full brightness means "at the bound" rather than "somewhere
- * in the upper half". The bar needed the extra headroom to keep its engraved
- * scale honest; a lamp has no scale to be honest about, only a range to spend,
- * and spending half of it on readings the kernel cannot produce was the same
- * mistake at a smaller size.
- */
-const METER_FULL_SCALE_DB = 3
 
 /**
- * Display height. The panel's one instrument, so it gets the space the gain
- * reduction bar and the oversized knob row used to hold between them.
+ * Display height — where it opens, and the only thing a resize spends.
+ *
+ * 250 px, from the design. The waveform is the instrument and the ceiling is
+ * set by dragging a line on it, so the display's height IS the resolution of
+ * the primary control — at 236 a dB was about four pixels of travel. Which is
+ * also the argument for making the window resizable at all: a taller display is
+ * a finer ceiling control, not just a bigger picture.
+ *
+ * ⚠ THE DISPLAY SPENDS THE EXTRA PIXELS AND NOTHING ELSE DOES, the same rule
+ * ResonanceModal follows. The meters, the knobs, the setter bank and the mode
+ * switch stay exactly the size they were designed at: they are read at a
+ * glance and none of them gets better for being larger, so growing them would
+ * spend a drag on the parts nobody dragged for.
+ *
+ * WIDTH NEEDS NO WIRING. The scope is the flex child that grows, and
+ * FloatingWindow's `minWidth` defaults to `width` — so the handle is
+ * expand-only and the design's 1040 is the floor rather than something a drag
+ * can collapse.
  */
-const SCOPE_H = 236
+const SCOPE_H = 250
+const heightDelta = ref(0)
+const scopeHeight = computed(() => SCOPE_H + heightDelta.value)
+
+/**
+ * Faceplate width — the opening size, and the floor.
+ *
+ * The design draws it at 1040. What actually SETS a minimum is the control
+ * band, whose two knobs, two dividers, padding and gaps are fixed cost and
+ * whose middle holds four setter buttons beside a two-position switch:
+ *
+ *   fixed chrome (body + band padding, 2 knobs, 2 rules, 5 gaps)   372 px
+ *   setter bank (4 buttons at 69 px + three 8 px gaps)             300
+ *   mode switch (CLIP | LIMIT)                                     124
+ *   gap between the two middle groups                               28
+ *                                                                  ---
+ *                                                                  824
+ *
+ * 900 leaves about 76 px of slack over that, which is the margin for the one
+ * thing this arithmetic cannot do: it is computed from nominal font advances
+ * (0.6em mono, 0.5em Inter) rather than measured in a browser, so it is right
+ * to within a fitting error, not exactly right.
+ *
+ * ⚠ THE LAYOUT FAILS LOUDLY RATHER THAN SILENTLY IF THAT ESTIMATE IS OFF. Every
+ * fixed-size child in the band carries `flex-shrink:0`, so a band that does not
+ * fit OVERFLOWS — visibly, off the edge — instead of compressing the knobs and
+ * the buttons into each other, which is the failure that is easy to miss in a
+ * screenshot and impossible to miss in use.
+ *
+ * `minWidth` is not set, so FloatingWindow uses this as the floor too: the grip
+ * only ever expands, and the size is remembered per window.
+ */
+const PANEL_W = 900
+
+/**
+ * ⚠ THE FACEPLATE IS LIT SO THE WELLS READ AS RECESSED. It was
+ * `#1a1613 -> #0d0a08`, which is darker than the control band's own
+ * `rgba(0,0,0,.28)` wash and barely lighter than the display's `#07090b` — so
+ * the two sunken areas, which are most of the panel, had almost no edge against
+ * the surface they are sunk into. The layout reads as depth or it reads as
+ * nothing, and it was reading as nothing.
+ *
+ * Warm, because the accent is, and still dark enough that the display is
+ * plainly the brightest thing on the panel — which it should be, since it is
+ * the instrument.
+ */
+const FACEPLATE = 'linear-gradient(155deg,#2b2320,#191310 62%)'
+const HEADER = 'linear-gradient(#372c26,#221a16)'
+
+/**
+ * ⚠ THE STRIP'S TWO LIVE READINGS ARE DAMPED IN THE COMPOSABLE, beside the loop
+ * that reads them off the kernel — see `clipperReductionHeld`. The first
+ * attempt damped them here, in a second rAF loop owned by this component, and
+ * when that loop was not running the lamp and the numeral simply froze. One
+ * loop, one place, no way for a value to be live in one and stale in the other.
+ *
+ * What is left here is presentation: the held dB becomes a brightness through
+ * `lampFraction`, and the throttled dB becomes text. Both read the SAME held
+ * value, so the light and the number can never say different things.
+ */
+
+/**
+ * Reduction that lights the lamp fully — MAX_REDUCTION_DB's usable half.
+ * Matches what ClipLamp was given, so the light means the same thing it did.
+ */
+const LAMP_FULL_SCALE_DB = 3
+
+const lampBrightness = computed(() =>
+  lampFraction(clipperReductionHeld.value, LAMP_FULL_SCALE_DB))
+/**
+ * The line under the bank: which preset the ceiling is currently sitting on.
+ *
+ * ⚠ IT DESCRIBES THE ACTIVE SETTER ONLY, and reads empty the rest of the time.
+ * Two earlier states were removed deliberately:
+ *
+ *   - a HOVER preview, which answered "what would this one do" before a press;
+ *   - the DISABLED REASON, which said why the bank was dead.
+ *
+ * Both put text under the bank that was about something other than the current
+ * setting, so the line changed identity as the pointer moved and could not be
+ * read as a statement about the panel's state. It is now one thing: the preset
+ * the ceiling is on, or nothing.
+ *
+ * ⚠ WHAT THAT GIVES UP, stated plainly because a test used to pin it: the dBFS
+ * a setter would write is no longer visible BEFORE it is pressed. The button's
+ * `title` still carries it on hover, and pressing is cheap and reversible, but
+ * the bank no longer previews. That is a deliberate trade of preview for a
+ * quieter faceplate.
+ *
+ * ⚠ AND THE DISABLED REASON NOW HAS NO VISIBLE HOME. The buttons still grey out
+ * and still carry the reason in their `title`, but nothing on the faceplate
+ * says why in words any more. If "the presets do nothing and I cannot tell
+ * why" comes back as a report, this is where it went.
+ */
+const setterCaption = computed(() => {
+  const active = ceilingSetters.value.find(x => x.active && x.ready)
+  return active ? `${active.title}  (${active.db} dB)` : ''
+})
+
+const peakOverText = computed(() =>
+  (clipperReductionReadout.value < 0.05 ? '—' : clipperReductionReadout.value.toFixed(1)))
+const engagedText = computed(() => `${clipperEngagedReadout.value.toFixed(0)}%`)
+
+
+
+/**
+ * Length of the horizontal IN/OUT ladders.
+ *
+ * 396 in the design, against its 1040 faceplate — a little under half the body
+ * width, so the pair spans it with the two readouts between them. At 900 that
+ * same proportion is 336; a fixed 396 would have the two meters and their
+ * readouts filling the row edge to edge with nothing between them.
+ *
+ * The ladder rounds this down to whole segments internally (see LevelMeter's
+ * `rows`), so a few pixels either way costs a segment at most.
+ */
+const METER_LEN = 336
+
+/**
+ * How close the ceiling has to be to a setter's value to count as "this is what
+ * the ceiling is holding", in dB.
+ *
+ * Tight enough that one detent of the knob clears it — the knob's step is 0.5 —
+ * and loose enough to survive the float round trip through the worker and the
+ * kernel. It is a tolerance on equality, not a range.
+ */
+const SETTER_MATCH_DB = 0.05
+
+/**
+ * The four ceiling setters, each carrying the dBFS it would write and whether
+ * the ceiling is currently sitting on it.
+ *
+ * ⚠ THE HIGHLIGHT IS DERIVED, NOT REMEMBERED, and that is the whole of why it
+ * is safe. A stored "last clicked" flag is a claim about the past that stops
+ * being true the moment the knob or the line moves — the readout-goes-stale
+ * failure this panel has already shipped once, as a latching preset lamp.
+ * Comparing the setter's own number against the live ceiling asks a question
+ * about the PRESENT instead: it lights when they agree and goes out when they
+ * do not, with nothing to clear and no way to be wrong.
+ *
+ * It is therefore not a selection. Land on a preset's value by dragging the
+ * line and its button lights, which is correct — the button describes a value,
+ * and that value is what the ceiling holds.
+ *
+ * ⚠ A BUTTON WITH NO NUMBER IS DISABLED RATHER THAN OPTIMISTIC. Until the
+ * region has been measured there is nothing to promise, and a setter that
+ * writes an unknown value on click is the failure the printed number exists to
+ * remove.
+ */
+const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
+  const db = ceilingChoices.value[p.id]
+  const ready = Number.isFinite(db)
+  return {
+    ...p,
+    db: ready ? `${db.toFixed(1)}` : '—',
+    ready,
+    active: ready && Math.abs(db - fixedThresholdDb.value) <= SETTER_MATCH_DB,
+  }
+}))
+
+
 </script>
 
 <template>
   <FloatingWindow
     window-id="soft-clipper"
     :z="z"
-    :width="700"
-    :top="96"
+    :width="PANEL_W"
+    :top="72"
     :accent="ACCENT"
     brand-lead="SOFT"
     brand-tail="CLIPPER"
-    background="linear-gradient(155deg,#1a1613,#0d0a08 60%)"
-    header-background="linear-gradient(#241d18,#15100d)"
+    :background="FACEPLATE"
+    :header-background="HEADER"
     :engaged="clipperPreview"
+    resizable
+    @update:height-delta="heightDelta = $event"
     @toggle-engaged="togglePreview"
     @close="close"
   >
@@ -256,180 +424,198 @@ const SCOPE_H = 236
       </button>
     </template>
 
-    <div class="px-[22px] pt-[14px] pb-[18px]">
-      <!-- ── The instrument ───────────────────────────────────────────────
-           THIS IS THE CONTROL SURFACE, not an illustration of one. The
-           threshold curve is a handle in both modes: in fixed mode the drag
-           sets the ceiling outright, in adaptive it moves Headroom, which IS
-           the curve's offset from the tracked level. The knobs below are the
-           precise way to reach the same two numbers, not the primary way.
-           Flanked by the level meters at full display height so the three
-           read as one instrument. -->
-      <div class="flex items-start gap-[10px]">
-        <LevelMeter :levels="clipperInputLevels" label="IN" :height="SCOPE_H" />
+    <div style="padding:20px 26px 24px;display:flex;flex-direction:column;gap:16px">
+      <!-- ── Readout strip ────────────────────────────────────────────────
+           Right-aligned above the display: three readings about the stage, in
+           the order they answer questions about it — is it clipping, how hard,
+           how often.
 
-        <div class="flex-1 min-w-0">
-          <ClipperScope
-            :data-fn="getScope"
-            :envelope-fn="envelope"
-            :window-seconds="SCOPE_SECONDS * 2"
-            mode="fixed"
-            :fixed-threshold-db="fixedThresholdDb"
-            @update:fixed-threshold-db="syncFixedThreshold"
-            :headroom-db="headroomDb"
-            @update:headroom-db="syncHeadroom"
-            @request-play="togglePlayback"
-            :accent="ACCENT"
-            :height="SCOPE_H"
-            title="Clipper scope: input envelope against the threshold, playhead at the centre — played audio to its left, audio about to play to its right. Drag the threshold line to set it."
+           ⚠ RESIDUAL IS NOT HERE. It is on the tuning panel instead: it is the
+           reading that separates two settings the other two agree on, which is
+           a research question rather than a working one, and the design gives
+           this strip three slots. -->
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:20px;padding:0 4px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span
+            style="width:15px;height:15px;border-radius:50%;border:1px solid rgba(255,255,255,.12)"
+            :style="{
+              background: `color-mix(in srgb, ${ACCENT} ${(lampBrightness * 100).toFixed(1)}%, #1a1512)`,
+              boxShadow: lampBrightness > 0.02
+                ? `0 0 ${(4 + lampBrightness * 12).toFixed(1)}px color-mix(in srgb, ${ACCENT} ${(lampBrightness * 70).toFixed(0)}%, transparent)`
+                : 'none',
+            }"
+          ></span>
+          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">CLIP LAMP</span>
+        </div>
+        <span style="width:1px;height:12px;background:rgba(255,255,255,.09)"></span>
+        <!-- ⚠ FIXED WIDTH AND TABULAR FIGURES. These change every tenth of a
+             second, and a proportional numeral set re-flows the row on every
+             digit change — "3.2" and "0.4" are different widths, and so are
+             "9%" and "100%". The label after them then slides, which reads as
+             the whole strip twitching. Right-aligned inside the fixed box so
+             the decimal point stays put as the integer digit comes and goes. -->
+        <div style="display:flex;align-items:baseline;gap:7px">
+          <span style="font:700 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.72);font-variant-numeric:tabular-nums;min-width:30px;text-align:right">{{ peakOverText }}</span>
+          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">dB PEAK</span>
+        </div>
+        <span style="width:1px;height:12px;background:rgba(255,255,255,.09)"></span>
+        <div style="display:flex;align-items:baseline;gap:7px">
+          <span style="font:700 11px 'JetBrains Mono',monospace;color:#ffb094;font-variant-numeric:tabular-nums;min-width:34px;text-align:right">{{ engagedText }}</span>
+          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">ENGAGED</span>
+        </div>
+      </div>
+
+      <!-- ── The instrument ───────────────────────────────────────────────
+           THIS IS THE CONTROL SURFACE, not an illustration of one. The ceiling
+           line is the primary control: drag it and the whole picture re-shades
+           live, because the shading is computed against the current threshold
+           rather than the one each point was recorded under. The knob below is
+           the precise way to reach the same number, not the primary way. -->
+      <ClipperScope
+        :data-fn="getScope"
+        :envelope-fn="envelope"
+        :window-seconds="SCOPE_SECONDS * 2"
+        mode="fixed"
+        :fixed-threshold-db="fixedThresholdDb"
+        @update:fixed-threshold-db="syncFixedThreshold"
+        :headroom-db="headroomDb"
+        @update:headroom-db="syncHeadroom"
+        @request-play="togglePlayback"
+        :accent="ACCENT"
+        :height="scopeHeight"
+        title="Clipper scope: input envelope against the ceiling, playhead at the centre — played audio to its left, audio about to play to its right. Drag the line to set the ceiling."
+      />
+
+      <!-- ── Level ladders ────────────────────────────────────────────────
+           HORIZONTAL AND SIDE BY SIDE, which is the design's reading of what
+           these are for: IN and OUT are a comparison, and a comparison wants
+           the two scales parallel and adjacent rather than at opposite edges of
+           the faceplate with the display between them.
+
+           Rotated rather than reimplemented — the ladder, its zones and its
+           clip lamp are the same instrument every other plugin uses, and a
+           second horizontal variant would be the same thing twice. -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:24px">
+        <LevelMeter
+          label="IN"
+          orientation="horizontal"
+          :levels="clipperInputLevels"
+          :height="METER_LEN"
+          :show-scale="false"
+        />
+        <LevelMeter
+          label="OUT"
+          orientation="horizontal"
+          :levels="clipperOutputLevels"
+          :height="METER_LEN"
+          :show-scale="false"
+        />
+      </div>
+
+      <!-- ── Control band ─────────────────────────────────────────────────
+           One strip: the two knobs at its ends, the two decisions in the
+           middle. The ceiling knob sits beside the setters that write it and
+           the line that drags it, so the three controls for one number are
+           finally adjacent and in reading order — press a setter, see the
+           number, nudge it. -->
+      <div style="display:flex;align-items:center;gap:18px;padding:16px 22px;border-radius:12px;background:rgba(0,0,0,.28);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)">
+        <div style="width:92px;flex-shrink:0">
+          <Knob
+            :model-value="fixedThresholdDb"
+            @update:model-value="syncFixedThreshold"
+            :min="-24" :max="-1" :step="0.5"
+            label="Ceiling" :accent="ACCENT" :format-value="formatDb"
+            :value-font-px="15"
+            :disabled="!clipperPreview"
+            title="Where peaks stop, in dBFS. Set it from the buttons, by dragging the line, or here."
           />
         </div>
 
-        <!-- OUTPUT TRIM BELONGS TO THE OUTPUT, not to the row of knobs it used
-             to sit in. It was next to Ceiling because both are knobs, which is
-             grouping by widget type rather than by what the control does — the
-             one place this panel broke its own rule. Under the meter, adjacency
-             does the explaining: the meter reads the output level, the knob
-             moves it.
+        <div style="width:1px;align-self:stretch;background:rgba(255,255,255,.07);flex-shrink:0"></div>
 
-             ⚠ THE ASYMMETRY IS DELIBERATE. Nothing hangs under IN because
-             there is nothing to adjust on the input, and an empty slot there
-             would be a control that looks like a control and is not one. -->
-        <LevelMeter :levels="clipperOutputLevels" label="OUT" :height="SCOPE_H" />
+        <div style="flex:1;display:flex;align-items:flex-start;justify-content:space-evenly;gap:28px">
+          <!-- ── The setters ─────────────────────────────────────────────
+               ⚠ THESE DO NOT LATCH, AND THAT IS THE DESIGN'S POINT. A latching
+               bank claims to own the value, which stops being true the moment
+               the knob or the line is touched — the readout-that-goes-stale
+               failure this panel has hit before. The line under the bank
+               reports which preset the ceiling is CURRENTLY sitting on, derived
+               live rather than remembered — so it goes out by itself the moment
+               the knob or the line moves the value elsewhere. -->
+          <div style="display:flex;flex-direction:column;align-items:center;gap:9px;flex-shrink:0">
+            <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4);white-space:nowrap">SET CEILING</span>
+            <div style="display:flex;align-items:stretch;gap:8px">
+              <button
+                v-for="p in ceilingSetters"
+                :key="p.id"
+                type="button"
+                :title="ceilingDisabledReason ?? p.title"
+                :disabled="!!ceilingDisabledReason || !p.ready"
+                @click="setCeilingFromPreset(p.id)"
+                class="cursor-pointer disabled:cursor-not-allowed"
+                :style="[
+                  {
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '9px 14px', borderRadius: '10px',
+                    transition: 'background-color .15s ease, border-color .15s ease',
+                  },
+                  p.active
+                    ? {
+                      background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
+                      border: `1px solid color-mix(in srgb, ${ACCENT} 55%, transparent)`,
+                    }
+                    : { background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)' },
+                  (!!ceilingDisabledReason || !p.ready)
+                    ? { opacity: .3, filter: 'grayscale(1)' }
+                    : { opacity: 1 },
+                ]"
+              >
+                <span
+                  style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.12em"
+                  :style="{ color: p.active ? '#ffb094' : 'rgba(255,255,255,.75)' }"
+                >{{ p.label }}</span>
+              </button>
+            </div>
 
-        <!-- ⚠ BESIDE THE METER, NOT UNDER IT. Under it, this column became the
-             tallest in the row and left about 100 px of dead space beneath the
-             scope — measured by rendering it, not by reading the markup.
-             Beside is just as adjacent and costs the scope ~60 px of width.
-             Bottom-aligned rather than centred: at the meter's mid-height it
-             read as a dial floating next to the display rather than as the
-             output column's own control. -->
-        <div class="w-[52px] shrink-0 self-end mb-[26px]">
+            <!-- ⚠ RESERVED HEIGHT, NOT A CONDITIONAL. The line is empty
+                 whenever the ceiling is not sitting on a preset, which is most
+                 of the time — and an element that disappears would change the
+                 band's height every time the ceiling was nudged off a preset
+                 value, jumping the display above it. Always present, always one
+                 line, sometimes blank. -->
+            <span
+              style="font:600 8.5px 'Inter',system-ui;letter-spacing:.08em;white-space:nowrap;color:rgba(255,255,255,.35);min-height:11px;font-variant-numeric:tabular-nums"
+            >{{ setterCaption }}</span>
+          </div>
+
+          <!-- ── Peak control ───────────────────────────────────────────── -->
+          <div style="display:flex;flex-direction:column;align-items:center;gap:9px;flex-shrink:0">
+            <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4);white-space:nowrap">PEAK CONTROL</span>
+            <SegmentedSwitch
+              :model-value="limiterMode"
+              @update:model-value="setLimiterMode"
+              :options="LIMITER_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))"
+              :accent="ACCENT"
+              :caption="limiterCaption"
+              :disabled="!clipperPreview"
+              :padding-x="16"
+            />
+          </div>
+        </div>
+
+        <div style="width:1px;align-self:stretch;background:rgba(255,255,255,.07);flex-shrink:0"></div>
+
+        <div style="width:92px;flex-shrink:0">
           <Knob
             :model-value="outputTrimDb"
             @update:model-value="syncOutputTrim"
             :min="-6" :max="6" :step="0.1"
             label="Trim" :accent="ACCENT" :format-value="formatGain"
-            :value-font-px="11"
+            :value-font-px="15"
             :disabled="!clipperPreview" bipolar
-            title="Post-stage gain match, so an A/B is decided by character rather than by loudness. Does not change what the clipper does."
+            title="Post-stage gain match, for an honest A/B."
           />
         </div>
-      </div>
-
-      <!-- ── CEILING ──────────────────────────────────────────────────────
-           ONE BAND FOR ONE VALUE. The ceiling had three controls — these
-           buttons, the draggable line on the scope, and a knob — separated by
-           the largest element on the faceplate, with nothing to say they were
-           the same number. They are now adjacent and in reading order: pick a
-           preset, see the dBFS it chose, nudge it.
-
-           THE PRESETS ARE THE PRIMARY CONTROL and are sized as such. They were
-           the smallest thing on the panel while being the thing most users
-           should touch first. The hierarchy the panel now expresses is:
-           presets choose, the scope adjusts by eye against the waveform, the
-           knob is for precision.
-
-           The lamp comes along because it reports on the same stage and there
-           is no longer a strip above the scope for it to sit in — which is the
-           point: the display now starts at the top of the faceplate. -->
-      <div class="flex items-center justify-between gap-[14px] mt-[12px]">
-        <div class="flex items-center gap-[9px] min-w-0">
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">CEILING</span>
-
-          <div class="flex items-center gap-[4px]">
-            <button
-              v-for="p in CEILING_PRESETS"
-              :key="p.id"
-              type="button"
-              :title="ceilingDisabledReason ?? p.title"
-              :disabled="!!ceilingDisabledReason"
-              @click="applyCeilingPreset(p.id)"
-              class="px-[9px] py-[6px] rounded-[4px] transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap"
-              style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.1em"
-              :style="[
-                ceilingPreset === p.id
-                  ? { background: ACCENT, color: '#12100e' }
-                  : { background: 'rgba(255,255,255,.06)', color: 'rgba(255,255,255,.5)' },
-                ceilingDisabledReason ? { opacity: .3, filter: 'grayscale(1)' } : { opacity: 1 },
-              ]"
-            >{{ p.label }}</button>
-          </div>
-
-          <!-- The number the presets produce, and the fine adjust for it — one
-               control, because a separate readout beside a knob that already
-               shows its value is the same number printed twice. Label omitted:
-               the band is already called CEILING. -->
-          <div class="w-[52px] shrink-0">
-            <Knob
-              :model-value="fixedThresholdDb"
-              @update:model-value="syncFixedThreshold"
-              :min="-24" :max="-1" :step="0.5"
-              label="" :accent="ACCENT" :format-value="formatDb"
-              :value-font-px="11"
-              :disabled="!clipperPreview"
-              title="Where peaks stop, in dBFS. Set by the presets from the region's own peaks; turn to nudge."
-            />
-          </div>
-
-          <!-- Only the states that are not already obvious get words: why the
-               buttons are dead, or that a measurement is in flight. The steady
-               state says nothing here — the knob shows the dBFS and the scope
-               prints its own drag hint. -->
-          <span
-            v-if="ceilingDisabledReason || ceilingBusy"
-            class="whitespace-nowrap"
-            style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.3)"
-          >{{ ceilingDisabledReason ?? 'measuring…' }}</span>
-        </div>
-
-        <!-- A lamp, not a bar — see ClipLamp for why a full-length GR meter
-             was the wrong instrument for a stage that takes 0.3-0.4 dB off a
-             plosive and nothing off anything else. -->
-        <div class="shrink-0">
-          <ClipLamp
-            :reduction-db="clipperReduction"
-            :engaged-pct="clipperEngagedPct"
-            :residual-dbc="clipperResidualDbc"
-            :accent="ACCENT"
-            :full-scale-db="METER_FULL_SCALE_DB"
-          />
-        </div>
-      </div>
-
-      <!-- ── How the peak gets controlled ─────────────────────────────────
-           TWO POSITIONS, NOT A KNOB, and the measurement is why. `limiter` is
-           a continuous balance underneath (still continuous on the tuning
-           panel) but its middle is the worst place to sit: the latency is
-           BINARY — about 1.1 ms at 0 and 5.1 ms above it — while the
-           benefit is wildly non-linear. Matched on output peak, the curve's
-           residual runs -33.3 / -34.0 / -34.4 / -50.9 / -76.5 dBc across
-           0 / 25 / 50 / 75 / 100. Limiter 50 pays the whole latency for about
-           1 dB. See LIMITER_MODES.
-
-           ⚠ AT LIMIT THE CURVE IS IDLE — 0.00 dB of peak reduction — so the
-           stage is a lookahead limiter with a clipper behind it as a safety
-           net, not a gentler clipper. The LABELS name the two mechanisms for
-           that reason: CLIP and LIMIT are different processes, not two
-           strengths of one.
-
-           ⚠ AND THROWING IT SHIFTS THE PREVIEW BY ~4 ms. The apply path reads
-           the latency per render so the timeline is right either way; the
-           preview jumps, which is inherent to putting a lookahead in circuit.
-           The caption states the latency for that reason. -->
-      <div class="flex items-center justify-center gap-[10px] mt-[14px]">
-        <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">PEAK CONTROL</span>
-        <SegmentedSwitch
-          :model-value="limiterMode"
-          @update:model-value="setLimiterMode"
-          :options="LIMITER_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))"
-          :accent="ACCENT"
-          :disabled="!clipperPreview"
-          :padding-x="13"
-        />
-        <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-          {{ limiterCaption }}
-        </span>
       </div>
 
       <!-- ⚠ HIDDEN ADMIN TUNING PANEL — see softClipperTuning.js. Off unless
@@ -449,6 +635,15 @@ const SCOPE_H = 236
         <div class="flex items-center justify-center mb-[10px]">
           <span style="font:700 8px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,176,32,.9)">
             ⚠ ADMIN TUNING — NOT SHIPPED
+          </span>
+          <!-- ⚠ RESIDUAL LIVES HERE NOW, not on the faceplate. It is the
+               reading that separates two settings the lamp and ENGAGED agree
+               on — measured, peak reduction can move 0.1 dB across a knob
+               while the residual moves 2.5 — which makes it a research
+               instrument rather than a working one. The design gives the
+               readout strip three slots; this is the one that came off. -->
+          <span style="font:600 8px ui-monospace,monospace;color:rgba(255,255,255,.45)">
+            {{ clipperResidualDbc <= -120 ? '—' : clipperResidualDbc.toFixed(1) }} dBc RESIDUAL
           </span>
         </div>
 
@@ -525,16 +720,6 @@ const SCOPE_H = 236
         </div>
 
       </div>
-
-      <p
-        class="mt-[12px] text-center"
-        style="font:500 9.5px/1.45 'Inter';color:rgba(255,255,255,.32)"
-      >
-        The ceiling is a stated dBFS value — trims the few transients that stick
-        out, so the compressor after it works on the voice instead of chasing
-        plosives. The presets put it where this recording's own peaks say it
-        should go.
-      </p>
 
       <div class="mt-[12px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <ApplyAction
