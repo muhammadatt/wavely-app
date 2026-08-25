@@ -191,24 +191,6 @@ watch(() => state.selection, () => scheduleCeilingPreset(), { deep: true })
 
 
 /**
- * ONE THRESHOLD CONTROL: the ceiling, in dBFS.
- *
- * This slot used to swap between Headroom (adaptive) and Ceiling (fixed) with
- * the mode, which was already an improvement on having two knobs with one of
- * them permanently ghosted. The mode switch is gone now — the panel is
- * fixed-only — so the slot is simply the ceiling, and the preset buttons below
- * are what put it in the right place for the material.
- */
-const thresholdKnob = computed(() => ({
-  value: fixedThresholdDb.value,
-  sync: syncFixedThreshold,
-  min: -24, max: -1, step: 0.5,
-  label: 'Ceiling',
-  format: formatDb,
-  caption: ceilingPreset.value ? `${ceilingPreset.value} — peaks stop here` : 'peaks stop here',
-}))
-
-/**
  * Reduction that lights the lamp fully.
  *
  * 6 dB, not the 12 the bar used to run: 6 is MAX_REDUCTION_DB, the kernel's own
@@ -275,59 +257,6 @@ const SCOPE_H = 236
     </template>
 
     <div class="px-[22px] pt-[14px] pb-[18px]">
-      <!-- ── Instrument strip ──────────────────────────────────────────────
-           Presets on the left because they move the threshold line drawn on
-           the display below; the lamp on the right because it reports on the
-           same display. One line, so the scope starts as high on the faceplate
-           as it can.
-
-           These are BUTTONS, not a mode switch: each one measures the region
-           and writes the ceiling, after which the ceiling is an ordinary number
-           the user can turn. The lit one says where the current value came
-           from, and goes out the moment the knob is touched. -->
-      <div class="flex items-center justify-between gap-[16px] mb-[10px]">
-        <div class="flex items-center gap-[9px]">
-          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">CEILING</span>
-          <div class="flex items-center gap-[3px]">
-            <button
-              v-for="p in CEILING_PRESETS"
-              :key="p.id"
-              type="button"
-              :title="ceilingDisabledReason ?? p.title"
-              :disabled="!!ceilingDisabledReason"
-              @click="applyCeilingPreset(p.id)"
-              class="px-[8px] py-[3px] rounded-[3px] transition-colors cursor-pointer disabled:cursor-not-allowed"
-              style="font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.12em"
-              :style="[
-                ceilingPreset === p.id
-                  ? { background: ACCENT, color: '#12100e' }
-                  : { background: 'rgba(255,255,255,.05)', color: 'rgba(255,255,255,.45)' },
-                ceilingDisabledReason ? { opacity: .3, filter: 'grayscale(1)' } : { opacity: 1 },
-              ]"
-            >{{ p.label }}</button>
-          </div>
-          <!-- SAYS WHY, not just that. A row of greyed buttons with nothing
-               beside them is legible as "off" and illegible as "off because
-               you have not selected anything yet", which is the one state the
-               user can do something about. -->
-          <span
-            v-if="ceilingDisabledReason"
-            style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.3)"
-          >{{ ceilingDisabledReason }}</span>
-        </div>
-
-        <!-- A lamp, not a bar — see ClipLamp for why a full-length GR meter
-             was the wrong instrument for a stage that takes 0.3-0.4 dB off a
-             plosive and nothing off anything else. -->
-        <ClipLamp
-          :reduction-db="clipperReduction"
-          :engaged-pct="clipperEngagedPct"
-          :residual-dbc="clipperResidualDbc"
-          :accent="ACCENT"
-          :full-scale-db="METER_FULL_SCALE_DB"
-        />
-      </div>
-
       <!-- ── The instrument ───────────────────────────────────────────────
            THIS IS THE CONTROL SURFACE, not an illustration of one. The
            threshold curve is a handle in both modes: in fixed mode the drag
@@ -336,7 +265,7 @@ const SCOPE_H = 236
            precise way to reach the same two numbers, not the primary way.
            Flanked by the level meters at full display height so the three
            read as one instrument. -->
-      <div class="flex items-stretch gap-[10px]">
+      <div class="flex items-start gap-[10px]">
         <LevelMeter :levels="clipperInputLevels" label="IN" :height="SCOPE_H" />
 
         <div class="flex-1 min-w-0">
@@ -356,40 +285,115 @@ const SCOPE_H = 236
           />
         </div>
 
-        <LevelMeter :levels="clipperOutputLevels" label="OUT" :height="SCOPE_H" />
-      </div>
+        <!-- OUTPUT TRIM BELONGS TO THE OUTPUT, not to the row of knobs it used
+             to sit in. It was next to Ceiling because both are knobs, which is
+             grouping by widget type rather than by what the control does — the
+             one place this panel broke its own rule. Under the meter, adjacency
+             does the explaining: the meter reads the output level, the knob
+             moves it.
 
-      <!-- ── Secondary controls ───────────────────────────────────────────
-           Deliberately small. Everything here is reachable from the display
-           or is a set-once refinement, so the knobs are sized as the fallback
-           they now are rather than as the panel's centre of gravity. -->
-      <div class="flex justify-center gap-[16px] mt-[14px]">
-        <!-- One slot for the threshold — see thresholdKnob. -->
-        <div class="w-[74px]">
-          <Knob
-            :model-value="thresholdKnob.value"
-            @update:model-value="thresholdKnob.sync"
-            :min="thresholdKnob.min" :max="thresholdKnob.max" :step="thresholdKnob.step"
-            :label="thresholdKnob.label" :accent="ACCENT" :format-value="thresholdKnob.format"
-            :value-font-px="13"
-            :disabled="!clipperPreview"
-          />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            {{ thresholdKnob.caption }}
-          </p>
-        </div>
-        <div class="w-[74px]">
+             ⚠ THE ASYMMETRY IS DELIBERATE. Nothing hangs under IN because
+             there is nothing to adjust on the input, and an empty slot there
+             would be a control that looks like a control and is not one. -->
+        <LevelMeter :levels="clipperOutputLevels" label="OUT" :height="SCOPE_H" />
+
+        <!-- ⚠ BESIDE THE METER, NOT UNDER IT. Under it, this column became the
+             tallest in the row and left about 100 px of dead space beneath the
+             scope — measured by rendering it, not by reading the markup.
+             Beside is just as adjacent and costs the scope ~60 px of width.
+             Bottom-aligned rather than centred: at the meter's mid-height it
+             read as a dial floating next to the display rather than as the
+             output column's own control. -->
+        <div class="w-[52px] shrink-0 self-end mb-[26px]">
           <Knob
             :model-value="outputTrimDb"
             @update:model-value="syncOutputTrim"
             :min="-6" :max="6" :step="0.1"
-            label="Output Trim" :accent="ACCENT" :format-value="formatGain"
-            :value-font-px="13"
+            label="Trim" :accent="ACCENT" :format-value="formatGain"
+            :value-font-px="11"
             :disabled="!clipperPreview" bipolar
+            title="Post-stage gain match, so an A/B is decided by character rather than by loudness. Does not change what the clipper does."
           />
-          <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-            gain match for A/B
-          </p>
+        </div>
+      </div>
+
+      <!-- ── CEILING ──────────────────────────────────────────────────────
+           ONE BAND FOR ONE VALUE. The ceiling had three controls — these
+           buttons, the draggable line on the scope, and a knob — separated by
+           the largest element on the faceplate, with nothing to say they were
+           the same number. They are now adjacent and in reading order: pick a
+           preset, see the dBFS it chose, nudge it.
+
+           THE PRESETS ARE THE PRIMARY CONTROL and are sized as such. They were
+           the smallest thing on the panel while being the thing most users
+           should touch first. The hierarchy the panel now expresses is:
+           presets choose, the scope adjusts by eye against the waveform, the
+           knob is for precision.
+
+           The lamp comes along because it reports on the same stage and there
+           is no longer a strip above the scope for it to sit in — which is the
+           point: the display now starts at the top of the faceplate. -->
+      <div class="flex items-center justify-between gap-[14px] mt-[12px]">
+        <div class="flex items-center gap-[9px] min-w-0">
+          <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">CEILING</span>
+
+          <div class="flex items-center gap-[4px]">
+            <button
+              v-for="p in CEILING_PRESETS"
+              :key="p.id"
+              type="button"
+              :title="ceilingDisabledReason ?? p.title"
+              :disabled="!!ceilingDisabledReason"
+              @click="applyCeilingPreset(p.id)"
+              class="px-[9px] py-[6px] rounded-[4px] transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap"
+              style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.1em"
+              :style="[
+                ceilingPreset === p.id
+                  ? { background: ACCENT, color: '#12100e' }
+                  : { background: 'rgba(255,255,255,.06)', color: 'rgba(255,255,255,.5)' },
+                ceilingDisabledReason ? { opacity: .3, filter: 'grayscale(1)' } : { opacity: 1 },
+              ]"
+            >{{ p.label }}</button>
+          </div>
+
+          <!-- The number the presets produce, and the fine adjust for it — one
+               control, because a separate readout beside a knob that already
+               shows its value is the same number printed twice. Label omitted:
+               the band is already called CEILING. -->
+          <div class="w-[52px] shrink-0">
+            <Knob
+              :model-value="fixedThresholdDb"
+              @update:model-value="syncFixedThreshold"
+              :min="-24" :max="-1" :step="0.5"
+              label="" :accent="ACCENT" :format-value="formatDb"
+              :value-font-px="11"
+              :disabled="!clipperPreview"
+              title="Where peaks stop, in dBFS. Set by the presets from the region's own peaks; turn to nudge."
+            />
+          </div>
+
+          <!-- Only the states that are not already obvious get words: why the
+               buttons are dead, or that a measurement is in flight. The steady
+               state says nothing here — the knob shows the dBFS and the scope
+               prints its own drag hint. -->
+          <span
+            v-if="ceilingDisabledReason || ceilingBusy"
+            class="whitespace-nowrap"
+            style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.3)"
+          >{{ ceilingDisabledReason ?? 'measuring…' }}</span>
+        </div>
+
+        <!-- A lamp, not a bar — see ClipLamp for why a full-length GR meter
+             was the wrong instrument for a stage that takes 0.3-0.4 dB off a
+             plosive and nothing off anything else. -->
+        <div class="shrink-0">
+          <ClipLamp
+            :reduction-db="clipperReduction"
+            :engaged-pct="clipperEngagedPct"
+            :residual-dbc="clipperResidualDbc"
+            :accent="ACCENT"
+            :full-scale-db="METER_FULL_SCALE_DB"
+          />
         </div>
       </div>
 
