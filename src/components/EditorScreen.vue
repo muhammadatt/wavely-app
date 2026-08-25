@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
+import { useFileSave } from '../composables/useFileSave.js'
 import { useWindows } from '../composables/useWindows.js'
 import TopBar from './TopBar.vue'
 import FileTabs from './FileTabs.vue'
@@ -22,9 +23,10 @@ const {
   selectAll, clearSelection, setPlayhead, totalDuration,
   closeRail, openCommandPalette, closeCommandPalette, closeContextMenu,
   documents, cycleDocument, setActiveDocument, closeDocument,
-  documentHasUnsavedWork, activeDoc,
+  documentHasUnsavedWork, anyUnsavedWork, activeDoc,
 } = useEditorState()
 const { importFiles, promptForFiles } = useFileImport()
+const { saveDocument, saveDocumentAs } = useFileSave()
 const { closeTopWindow, anyWindowOpen } = useWindows()
 
 const NUDGE_SECONDS = 1
@@ -117,6 +119,17 @@ function handleKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && key === 'o') {
     e.preventDefault()
     promptForFiles()
+    return
+  }
+
+  // Ctrl+S / Ctrl+Shift+S. Above the hasFile guard's siblings for the same
+  // reason Ctrl+O is: saving is a document-level action, and the browser's own
+  // "save this page" is never what someone means with a file open here.
+  if ((e.ctrlKey || e.metaKey) && key === 's') {
+    if (!hasFile.value) return
+    e.preventDefault()
+    if (e.shiftKey) saveDocumentAs()
+    else saveDocument()
     return
   }
 
@@ -273,12 +286,24 @@ function handleKeydown(e) {
   }
 }
 
+// The browser's own guard, for the ways out of the app that aren't the close
+// button: reload, back, closing the tab. It can only ask the generic question —
+// the string is ignored by every current browser — but it is the difference
+// between losing an hour's edits to a stray Ctrl+W and being asked first.
+function handleBeforeUnload(e) {
+  if (!anyUnsavedWork.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
 

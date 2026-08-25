@@ -31,8 +31,15 @@ export function documentStatus(doc) {
     return { kind: 'mastered', color: '#7fe9f6', label: 'Mastered', title: 'Mastered' }
   }
 
-  if (doc.undoCount > 0) {
-    return { kind: 'edited', color: 'rgba(255,255,255,.45)', label: 'Edited', title: 'Edited' }
+  // Edited-and-unsaved, rather than merely edited: once the timeline has been
+  // written to disk there is nothing here for the user to act on. Falls back to
+  // the old undo-history test for document-shaped objects that predate
+  // revision tracking.
+  const dirty = doc.revision === undefined
+    ? doc.undoCount > 0
+    : doc.revision !== doc.savedRevision
+  if (dirty) {
+    return { kind: 'edited', color: '#e0b84a', label: 'Unsaved', title: 'Unsaved edits' }
   }
 
   return null

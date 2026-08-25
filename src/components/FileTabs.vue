@@ -98,7 +98,8 @@ onUnmounted(() => {
 
 function handleClose(doc) {
   if (documentHasUnsavedWork(doc.id)) {
-    // Nothing is persisted, so closing genuinely discards the edits.
+    // Edits made since the last save are held in memory only, so closing
+    // genuinely discards them.
     const ok = window.confirm(`"${doc.name}" has unsaved edits. Close it anyway?`)
     if (!ok) return
   }
@@ -158,8 +159,10 @@ const statusOf = documentStatus
         @dblclick.stop="startRename(doc)"
         @auxclick="handleAuxClick($event, doc)"
       >
-        <!-- Status dot -->
-        <template v-if="statusOf(doc)">
+        <!-- Status dot. The 'edited' state is deliberately excluded: the
+             unsaved marker to the right of the name already says it, and two
+             dots on one tab for one fact reads as two facts. -->
+        <template v-if="statusOf(doc) && statusOf(doc).kind !== 'edited'">
           <div
             v-if="statusOf(doc).kind === 'processing'"
             class="w-[9px] h-[9px] rounded-full shrink-0"
@@ -189,6 +192,16 @@ const statusOf = documentStatus
           class="flex-1 min-w-0 truncate text-[11.5px] font-semibold"
           :style="{ color: doc.id === appState.activeDocumentId ? '#eaf6f8' : 'rgba(255,255,255,.5)' }"
         >{{ doc.name }}</span>
+
+        <!-- Unsaved marker. Separate from the status dot on the left, which
+             answers a different question (has this been mastered, did it
+             certify) and would otherwise have to mean two things at once. -->
+        <span
+          v-if="documentHasUnsavedWork(doc.id)"
+          class="w-[6px] h-[6px] rounded-full shrink-0 group-hover:hidden"
+          style="background:#e0b84a"
+          title="Unsaved edits"
+        ></span>
 
         <!-- Close — revealed on hover or when active, so idle tabs stay quiet -->
         <button

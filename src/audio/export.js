@@ -1,5 +1,6 @@
 import { renderRegionToBuffer } from './processing.js'
 import { getTimelineDuration } from './operations.js'
+import { toWavFileName, downloadBlob } from './download.js'
 
 /**
  * Render a timeline to a WAV ArrayBuffer.
@@ -15,23 +16,6 @@ export function renderTimelineToWav(segments, sampleRate, channels) {
 
   const channelData = renderRegionToBuffer(segments, 0, totalDuration, sampleRate, channels)
   return encodeWav(channelData, sampleRate, channels)
-}
-
-/** Swap a filename's extension for .wav. */
-export function toWavFileName(fileName) {
-  return fileName.replace(/\.[^.]+$/, '') + '.wav'
-}
-
-/** Trigger a browser download for a Blob. */
-export function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = fileName
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }
 
 /**
