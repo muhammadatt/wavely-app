@@ -1935,7 +1935,13 @@ export class SoftClipperKernel {
       // high SIX SECONDS later, so the stage quietly under-processed
       // everything in between. The filters switch instantly, so the threshold
       // that compensates for them has to switch instantly too.
-      monoEmph.set(mono.subarray(0, n))
+      // ⚠ THE COPY THAT USED TO LIVE HERE IS GONE. `monoEmph` had a second
+      // reader — the asymmetry offset's skew tracker — which needed the
+      // emphasised downmix whether or not the emphasis was engaged. That
+      // tracker left with asymmetry, so the only remaining reader is the lift
+      // follower, which is now gated off in exactly this case. Copying a block
+      // per call to feed nothing is what made "the filters are bypassed" and
+      // "the feature costs nothing" two different claims.
       this.liftWarmupMax = 0
       this.fastPeakEmph = this.fastPeak
       // The detector's filter has been fed nothing since it was switched off,
@@ -1959,6 +1965,20 @@ export class SoftClipperKernel {
     // the emphasis filters are bypassed, which is what makes emphasisDb = 0
     // bit-identical to the build before compensation existed.
     const liftMaxDb = this.emphasisActive ? this.emphasisDbCommitted : 0
+    // ⚠ THE WHOLE LIFT PATH IS GATED ON THIS, and at the shipped pin of
+    // emphasisDb 0 that is the difference between paying for the feature and
+    // not. The FILTERS were already bypassed when inactive, but the detector
+    // work around them was not: a full monoEmph copy per block, a peak
+    // follower per sample, and a linToDb per voiced sample, all feeding a
+    // value that is then clamped to zero. Measured on 17.7 s of real
+    // narration: 40x realtime against 43-44x with this gate, i.e. about 7-8%
+    // of the stage spent on a reading that cannot move anything.
+    //
+    // Bit-identical at every setting — verified by rendering both builds and
+    // differencing them, worst |diff| = 0 — because when the flag is false the
+    // gated work only ever produced liftDb = 0, which is what the ungated path
+    // clamped it to anyway.
+    const emphasisOn = this.emphasisActive
     // THE BOUND IS APPLIED TO THE STATE, NOT ONLY TO THE TARGET, and that is
     // what makes turning the knob DOWN take effect at once. liftDb is a slow
     // average of past evidence; lowering Emphasis invalidates that evidence
@@ -2010,9 +2030,23 @@ export class SoftClipperKernel {
       // unbounded wherever the raw sample passes through zero, and a lift
       // reading that spikes to infinity between cycles would drive the
       // threshold to T_MAX and silently disable the stage.
-      const rectEmph = monoEmph[i] < 0 ? -monoEmph[i] : monoEmph[i]
-      fastPeakEmph += (rectEmph > fastPeakEmph ? this.fastPeakAttack : this.fastPeakRelease)
-        * (rectEmph - fastPeakEmph) + DENORMAL_GUARD
+      //
+      // Skipped entirely when the emphasis is off — see `emphasisOn`. The
+      // else-branch above parks fastPeakEmph on fastPeak while it is skipped,
+      // so re-enabling starts from a sane value rather than a stale one.
+      //
+      // ⚠ THAT PARKING IS HYGIENE, NOT A GUARANTEE, and an earlier draft of
+      // this comment claimed otherwise. Mutation-tested: deleting it fails no
+      // test, because on re-enable the follower's 1 ms attack / 150 ms release
+      // catches up long before liftDb — clamped to [0, emphasisDb] and moving
+      // on a 3 s GATED constant — can be shifted by it. It is kept because a
+      // follower carrying a value from an arbitrary time ago is a trap for the
+      // next person, not because anything measurable depends on it.
+      if (emphasisOn) {
+        const rectEmph = monoEmph[i] < 0 ? -monoEmph[i] : monoEmph[i]
+        fastPeakEmph += (rectEmph > fastPeakEmph ? this.fastPeakAttack : this.fastPeakRelease)
+          * (rectEmph - fastPeakEmph) + DENORMAL_GUARD
+      }
 
       // noise_est: decaying valley follower standing in for a running minimum
       // over a trailing 2 s window — see deviation note (2) above.
@@ -2074,6 +2108,11 @@ export class SoftClipperKernel {
         // property of the room rather than of the voice, and an ungated lift
         // would let the threshold wander between words.
         //
+        // ⚠ AND BEHIND `emphasisOn` AS WELL, which is a different gate for a
+        // different reason: with no emphasis there is no lift to measure, and
+        // every term below resolves to zero. Two gates, two reasons — do not
+        // collapse them.
+        //
         // Clamped to [0, emphasisDb] — the shelf is a pure boost, so anything
         // outside that window is a follower still filling rather than a
         // measurement. See LIFT_TAU_S.
@@ -2082,35 +2121,37 @@ export class SoftClipperKernel {
         // so the comparison runs against the peak gathered so far instead;
         // without that the gate would never open during warm-up and the seed
         // below would never accumulate.
-        const liftRefDb = speechWarmupCount < this.speechWarmupTarget
-          ? linToDb(speechWarmupPeak)
-          : speechLevelDb
-        const atPeak = fastPeakDb >= liftRefDb + LIFT_GATE_DB
-        const liftTargetDb = clamp(linToDb(fastPeakEmph) - fastPeakDb, 0, liftMaxDb)
-        if (!atPeak) {
-          // Not a loud moment: contribute nothing rather than dragging the
-          // reading toward a population the threshold is not placed for.
-        } else if (speechWarmupCount < this.speechWarmupTarget) {
-          // SEEDED DURING WARM-UP, NOT RAMPED INTO, and this is not a
-          // refinement — without it the feature is absent for its first three
-          // seconds. The speech tracker adopts a real level the instant its
-          // 500 ms window closes, so the stage starts processing immediately;
-          // a lift still climbing from zero on a 3 s constant leaves the
-          // threshold uncompensated exactly then, and the stage over-clips
-          // the start of every file just as hard as it did before the
-          // compensation existed. Measured on a sibilant passage at emphasis
-          // 12, that transient alone accounted for most of the peak reduction
-          // the compensation appeared to be failing to remove.
-          //
-          // The MAX rather than the mean over the window, because a lift that
-          // is too high merely does less while one that is too low
-          // over-processes — the asymmetry the tracker's own warm-up note
-          // records, and the cure there was a warm-up seed rather than
-          // ballistics for the same reason.
-          if (liftTargetDb > liftWarmupMax) liftWarmupMax = liftTargetDb
-          liftDb = liftWarmupMax
-        } else {
-          liftDb += this.liftCoef * (liftTargetDb - liftDb)
+        if (emphasisOn) {
+          const liftRefDb = speechWarmupCount < this.speechWarmupTarget
+            ? linToDb(speechWarmupPeak)
+            : speechLevelDb
+          const atPeak = fastPeakDb >= liftRefDb + LIFT_GATE_DB
+          const liftTargetDb = clamp(linToDb(fastPeakEmph) - fastPeakDb, 0, liftMaxDb)
+          if (!atPeak) {
+            // Not a loud moment: contribute nothing rather than dragging the
+            // reading toward a population the threshold is not placed for.
+          } else if (speechWarmupCount < this.speechWarmupTarget) {
+            // SEEDED DURING WARM-UP, NOT RAMPED INTO, and this is not a
+            // refinement — without it the feature is absent for its first three
+            // seconds. The speech tracker adopts a real level the instant its
+            // 500 ms window closes, so the stage starts processing immediately;
+            // a lift still climbing from zero on a 3 s constant leaves the
+            // threshold uncompensated exactly then, and the stage over-clips
+            // the start of every file just as hard as it did before the
+            // compensation existed. Measured on a sibilant passage at emphasis
+            // 12, that transient alone accounted for most of the peak reduction
+            // the compensation appeared to be failing to remove.
+            //
+            // The MAX rather than the mean over the window, because a lift that
+            // is too high merely does less while one that is too low
+            // over-processes — the asymmetry the tracker's own warm-up note
+            // records, and the cure there was a warm-up seed rather than
+            // ballistics for the same reason.
+            if (liftTargetDb > liftWarmupMax) liftWarmupMax = liftTargetDb
+            liftDb = liftWarmupMax
+          } else {
+            liftDb += this.liftCoef * (liftTargetDb - liftDb)
+          }
         }
       }
 

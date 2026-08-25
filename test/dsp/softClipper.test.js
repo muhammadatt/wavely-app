@@ -1683,6 +1683,84 @@ test('turning Emphasis down takes effect at once', () => {
     `lift ${k2.getMetering().liftDb.toFixed(2)} still exceeds the new Emphasis of 4 dB`)
 })
 
+test('turning Emphasis UP from a long stretch at zero still measures a lift', () => {
+  // ⚠ THE RISK THE `emphasisOn` GATE CREATES, and the direction the test above
+  // does not cover. The per-sample lift work — the follower on the emphasised
+  // downmix and the measurement it feeds — is skipped entirely while emphasis
+  // is off, so a kernel that has run for a long time at zero has a follower
+  // that has been parked rather than tracking. Re-enabling has to start from a
+  // sane value, not from whatever was in flight when the knob passed through
+  // zero seconds or minutes earlier.
+  //
+  // What makes it safe is the else-branch parking `fastPeakEmph` on `fastPeak`
+  // every block while off, and resetting the detector's own filter so it starts
+  // from silence rather than from a stale tail. Both of those are load-bearing
+  // now in a way they were not when the follower ran regardless.
+  const signal = sibilantSpeech(12, 0.35, 41, 0.8)
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 6.5, emphasisDb: 0, shape: 'tanh3' })
+  const out = new Float32Array(signal.length)
+  const run = (from, to) => {
+    for (let off = from; off < to; off += 128) {
+      const len = Math.min(128, to - off)
+      kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    }
+  }
+  const half = Math.round(signal.length / 2)
+  run(0, half)
+  assert.equal(kernel.getMetering().liftDb, 0, 'a lift accumulated with emphasis off')
+
+  kernel.setParams({ emphasisDb: 12 })
+  run(half, signal.length)
+  const after = kernel.getMetering().liftDb
+
+  // ⚠ WHAT THIS CAN AND CANNOT ASSERT. The obvious check — compare against a
+  // kernel that ran at 12 all along — FAILS, and it fails identically on the
+  // build without this gate, so it is not about the gate at all. Two mechanisms
+  // put the two kernels in different places and keep them there:
+  //
+  //   - a kernel starting at 12 SEEDS its lift from the MAX over the warm-up
+  //     window (deliberately: a lift that is too high merely does less, one
+  //     that is too low over-processes), so it starts high;
+  //   - and `liftDb` only converges while the gate is open AND the moment is
+  //     loud, so its 3 s constant is 3 s of GATED time — many times that in
+  //     wall clock. Measured on this probe, the always-on kernel is still at
+  //     11.66 dB after twelve seconds while the measurement it is converging
+  //     toward is 6.29.
+  //
+  // So the reachable property is that the gate does not leave the measurement
+  // DEAD or UNBOUNDED, and that it is genuinely converging rather than stuck.
+  assert.ok(after > 0.5, `the lift never recovered after re-enabling: ${after.toFixed(3)} dB`)
+  assert.ok(after <= 12 + 1e-9, `the lift exceeded its bound: ${after.toFixed(3)} dB`)
+
+  // ⚠ A HYGIENE PIN, ASSERTED WHITE-BOX BECAUSE NOTHING BEHAVIOURAL CATCHES IT.
+  // While the emphasis is off the follower on the emphasised copy does not run,
+  // so it is parked on the raw peak follower every block instead of being left
+  // to hold a value from an arbitrary time ago. Mutation-tested: deleting that
+  // parking fails no behavioural test — the follower's 1 ms attack catches up
+  // long before a 3 s gated lift can be shifted by it. Pinned anyway, so the
+  // next reader does not have to rediscover which of the two it is.
+  // ⚠ IT IS PARKED AT THE START OF A BLOCK, so it holds the RAW follower's
+  // value as of the previous block's end — not its current one. Asserting
+  // against the current value fails for a reason that has nothing to do with
+  // staleness, which is exactly the sort of test that gets deleted later.
+  const parked = new SoftClipperKernel(SR)
+  parked.setParams({ headroomDb: 6.5, emphasisDb: 0, shape: 'tanh3' })
+  const scratch = new Float32Array(1024)
+  parked.process([signal.subarray(0, 1024)], [scratch], 1024)
+  const rawAtBlockEnd = parked.fastPeak
+  parked.process([signal.subarray(1024, 2048)], [scratch], 1024)
+  assert.equal(parked.fastPeakEmph, rawAtBlockEnd,
+    'the emphasised follower was left stale while the emphasis was off')
+
+  // Still climbing on more of the same material — a parked follower would sit.
+  const before = after
+  run(0, half) // more sibilant material through the same kernel
+  assert.ok(kernel.getMetering().liftDb > before,
+    `the lift stopped moving after re-enabling: ${before.toFixed(3)} -> ` +
+    `${kernel.getMetering().liftDb.toFixed(3)} dB`)
+})
+
 // ── RESIDUAL readout (RESIDUAL_TAU_S) ───────────────────────────────────────
 
 /** The kernel's own residual reading, averaged in the energy domain. */
