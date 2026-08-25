@@ -11,7 +11,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { useEditorState } from '../../src/composables/useEditorState.js'
-import { saveTargetKind } from '../../src/audio/fileSave.js'
+import { saveTargetKind, ensureWritePermission } from '../../src/audio/fileSave.js'
+import { toWavFileName } from '../../src/audio/download.js'
 import { documentStatus } from '../../src/utils/documentStatus.js'
 
 function fakeBuffer(duration = 4) {
@@ -156,4 +157,46 @@ test('unsaved work is visible across documents, not just the active one', () => 
 
   editor.markDocumentSaved(a)
   assert.equal(editor.anyUnsavedWork.value, false)
+})
+
+test('a browser with no permission methods is treated as "cannot ask", not "refused"', async () => {
+  // Optional-chaining these calls returns undefined, which compares unequal to
+  // 'granted' — so an engine that ships the pickers without the permission
+  // methods would have been blocked behind a message nobody sent.
+  assert.equal(await ensureWritePermission({ name: 'a.wav' }), true)
+
+  // A query that can be answered is still obeyed, in both directions.
+  assert.equal(await ensureWritePermission({
+    queryPermission: async () => 'granted',
+  }), true)
+  assert.equal(await ensureWritePermission({
+    queryPermission: async () => 'denied',
+    requestPermission: async () => 'denied',
+  }), false)
+  assert.equal(await ensureWritePermission({
+    queryPermission: async () => 'prompt',
+    requestPermission: async () => 'granted',
+  }), true)
+  // Queryable but not requestable: fall through to attempting the write.
+  assert.equal(await ensureWritePermission({
+    queryPermission: async () => 'prompt',
+  }), true)
+})
+
+test('the .wav name is idempotent and survives awkward inputs', () => {
+  assert.equal(toWavFileName('chapter01.mp3'), 'chapter01.wav')
+  assert.equal(toWavFileName('chapter01.wav'), 'chapter01.wav')
+  // Applied twice wherever it is convenient, so it has to be a no-op the
+  // second time — the save path normalises before both the write and the toast.
+  assert.equal(toWavFileName(toWavFileName('chapter01.aiff')), 'chapter01.wav')
+  assert.equal(toWavFileName('no extension'), 'no extension.wav')
+  // A name ending in a dot is legal on POSIX and used to gain a second one.
+  assert.equal(toWavFileName('take2.'), 'take2.wav')
+  assert.equal(toWavFileName('take2. '), 'take2.wav')
+  // A dotfile has no extension to strip; stripping the one it looks like it
+  // has leaves a file called '.wav'.
+  assert.equal(toWavFileName('.hidden'), '.hidden.wav')
+  assert.equal(toWavFileName(''), 'untitled.wav')
+  // Dots inside the name are not extensions.
+  assert.equal(toWavFileName('ch.01.take3.flac'), 'ch.01.take3.wav')
 })

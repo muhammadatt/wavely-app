@@ -412,7 +412,7 @@ These apply only to the `acx_audiobook` preset:
 - **Payment / tier enforcement** — Gate logic not present; all tiers currently serve same output
 - **Batch processing** — Sprint 5; multi-file + cross-chapter consistency pass
 - **API access** — Sprint 6 / Pro tier
-- **Test infrastructure** — Partial. `npm test` runs a `node:test` unit suite over the client DSP (`test/dsp/`, `test/voicerx/`, `test/ui/`, 463 tests). No integration or E2E tests, and no coverage of the server pipeline, Vue components or the async job flow — `test/ui/` reaches the editor state composable and the playback scheduler by faking the AudioContext, which is as far up as this suite goes
+- **Test infrastructure** — Partial. `npm test` runs a `node:test` unit suite over the client DSP (`test/dsp/`, `test/voicerx/`, `test/ui/`, 465 tests). No integration or E2E tests, and no coverage of the server pipeline, Vue components or the async job flow — `test/ui/` reaches the editor state composable and the playback scheduler by faking the AudioContext, which is as far up as this suite goes
 - **Persistent job storage** — Jobs are in-memory; server restart loses them
 - **`docs/acx_production_workflow.md`** and **`docs/instant_polish_gtm.md`** — Referenced but not created
 

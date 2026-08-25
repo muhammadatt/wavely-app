@@ -53,11 +53,20 @@ export function pickSaveTarget(suggestedName) {
  * case this is a no-op query. It still has to be asked: the user can revoke
  * the grant from the site controls mid-session, and `createWritable` on a
  * revoked handle throws a NotAllowedError that reads like a bug.
+ *
+ * The permission methods are the newest part of this API and not every engine
+ * that ships the pickers ships them. A browser with no `queryPermission` is not
+ * refusing us — it has nothing to ask — so "cannot be queried" resolves to
+ * "attempt the write", and a genuine refusal surfaces as the write throwing.
+ * Optional-chaining the calls instead returns undefined, which compares unequal
+ * to 'granted' and blocks the save behind a permission message nobody sent.
  */
 export async function ensureWritePermission(handle) {
+  if (typeof handle.queryPermission !== 'function') return true
   const opts = { mode: 'readwrite' }
-  if (await handle.queryPermission?.(opts) === 'granted') return true
-  return await handle.requestPermission?.(opts) === 'granted'
+  if (await handle.queryPermission(opts) === 'granted') return true
+  if (typeof handle.requestPermission !== 'function') return true
+  return await handle.requestPermission(opts) === 'granted'
 }
 
 /**

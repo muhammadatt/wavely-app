@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { renderTimelineToWav } from '../audio/export.js'
+import { toWavFileName } from '../audio/download.js'
 import {
   canSaveInPlace, isCancellation, pickSaveTarget, ensureWritePermission,
   writeWavToHandle, saveTargetKind, downloadWav,
@@ -60,9 +61,13 @@ export function useFileSave() {
     if (!handle) {
       // No write API in this browser. The bytes still reach the disk, just via
       // the download folder and under whatever name it picks on a collision.
-      downloadWav(wav, doc.name)
+      // The toast names the file that was written, not the document: saving an
+      // imported .mp3 produces a .wav, and reporting the source name sends the
+      // user looking for a file that isn't there.
+      const savedAs = toWavFileName(doc.name)
+      downloadWav(wav, savedAs)
       markDocumentSaved(doc.id)
-      showToast(`Saved ${doc.name} to your downloads`)
+      showToast(`Saved ${savedAs} to your downloads`)
       return true
     }
 
