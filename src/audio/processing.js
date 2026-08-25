@@ -12,7 +12,7 @@ import {
 import { ensureSoftClipperWorklet } from './softClipperWorkletLoader.js'
 import {
   SOFT_CLIPPER_DEFAULTS,
-  SOFT_CLIPPER_LATENCY_SAMPLES,
+  softClipperLatencySamples,
   toKernelParams as toSoftClipperKernelParams,
 } from './effects/softClipper.js'
 import { ensureAirBandWorklet } from './airBandWorkletLoader.js'
@@ -323,6 +323,21 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
 }
 
 /**
+ * Where a soft clipper ceiling preset lands for a region, in dBFS. Resolves
+ * null if the region has no measurable content.
+ *
+ * ⚠ THE ANALYSIS WINDOW IS CAPPED like every other measured parameter's (see
+ * AUTO_MAKEUP_MAX_ANALYSIS_S), so on a long region this is a centred excerpt
+ * rather than the whole thing. Harmless for a percentile of block peaks, and
+ * DETERMINISTIC — which matters because the user can nudge the ceiling
+ * afterwards and must not find it moving under them.
+ */
+export function computeSoftClipperCeiling(segments, start, end, percentile, sampleRate, channels) {
+  return measureInWorker('softClipperCeiling', segments, start, end, { percentile }, sampleRate, channels)
+    .then(d => (Number.isFinite(d.ceilingDb) ? d.ceilingDb : null))
+}
+
+/**
  * Render a region through an effect's worklet in an OfflineAudioContext.
  *
  * Every effect applies this way, running the exact same worklet module as the
@@ -422,13 +437,21 @@ export function applyFET1176Region(segments, start, end, params, sampleRate, cha
   })
 }
 
-/** Apply the Adaptive Soft Clipper to a region. */
+/**
+ * Apply the Adaptive Soft Clipper to a region.
+ *
+ * ⚠ THE LATENCY IS PER-PATCH, NOT A CONSTANT. The limiter adds its lookahead
+ * only while engaged, and it ships engaged — trimming the oversampler's 50
+ * samples when the stage actually delays 226 (at 44.1 kHz) shifts the region 176
+ * samples late and drops that much of its tail.
+ */
 export function applySoftClipperRegion(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toSoftClipperKernelParams({ ...SOFT_CLIPPER_DEFAULTS, ...params })
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureSoftClipperWorklet,
     processorName: 'soft-clipper-processor',
-    kernelParams: toSoftClipperKernelParams({ ...SOFT_CLIPPER_DEFAULTS, ...params }),
-    latencySamples: SOFT_CLIPPER_LATENCY_SAMPLES,
+    kernelParams,
+    latencySamples: softClipperLatencySamples(kernelParams, sampleRate),
   })
 }
 

@@ -26,6 +26,24 @@ const props = defineProps({
   // Peak at or above this latches the clip lamp. 0 dBFS is the point a float
   // sample can no longer survive the trip to an integer file.
   clipDb: { type: Number, default: 0 },
+  /**
+   * 'vertical' | 'horizontal'.
+   *
+   * ⚠ A REAL LAYOUT RATHER THAN A CSS ROTATION, and the difference is not
+   * cosmetic. A rotated component takes its READOUT with it: the number ends up
+   * on its side, so the caller turns the readout off and prints its own — and
+   * the caller has no access to the ballistics that make the number readable.
+   * That is exactly what happened; the hand-rolled readout showed the raw
+   * per-frame peak and flickered, because the hold and the throttle live in
+   * here.
+   *
+   * Everything positional keys off this: the ladder runs left-to-right, the
+   * peak hold is a vertical hairline at a percentage from the left, the clip
+   * lamp becomes a bar down the hot end, and the readout sits after the ladder
+   * instead of under it. The BALLISTICS are untouched — they are about time,
+   * not direction, which is the whole point of doing it this way.
+   */
+  orientation: { type: String, default: 'vertical' },
   showScale: { type: Boolean, default: true },
   showReadout: { type: Boolean, default: true },
   showOver: { type: Boolean, default: true },
@@ -107,6 +125,7 @@ function dbToPct(db) {
 // One entry per channel: `{ displayDb, heldPeakDb }` after ballistics.
 const bars = ref([])
 const clipped = ref(false)
+const isHorizontal = computed(() => props.orientation === 'horizontal')
 let holdUntil = []
 let lastTs = 0
 let rafId = null
@@ -257,8 +276,13 @@ const ladders = computed(() => {
         glow: on,
       }
     })
-    // Drawn top-down.
-    segments.reverse()
+    // ⚠ ORDERED FOR THE DIRECTION IT IS DRAWN IN. `segMeta` runs quietest
+    // first. A vertical ladder is a flex COLUMN, whose first child is at the
+    // TOP, so it has to be reversed for the loud end to be up there. A
+    // horizontal ladder is a flex ROW, whose first child is at the LEFT — so
+    // reversing it there puts the loud end on the left and the meter fills
+    // right-to-left, which is what it did.
+    if (!isHorizontal.value) segments.reverse()
 
     // The hold is a hairline riding over the ladder, not a lit segment. Drawn
     // in the ladder's own vocabulary it reads as "the level is briefly up
@@ -313,9 +337,11 @@ const housingWidth = computed(() =>
 const visibleTicks = computed(() => TICKS.filter(t => t > props.floorDb))
 
 function segStyle(seg) {
+  // The segment is a rung: thin along the ladder, wide across it. Which screen
+  // axis those are is the only thing orientation changes here.
   return {
-    width: segWidth.value + 'px',
-    height: SEG_H + 'px',
+    width: (isHorizontal.value ? SEG_H : segWidth.value) + 'px',
+    height: (isHorizontal.value ? segWidth.value : SEG_H) + 'px',
     borderRadius: '1px',
     background: seg.color,
     opacity: seg.opacity,
@@ -329,12 +355,20 @@ function ariaText(bar) {
 </script>
 
 <template>
-  <div class="flex flex-col items-start gap-[7px]">
-    <div class="flex items-end" :style="{ gap: showScale ? '5px' : '0' }">
+  <div
+    class="flex gap-[7px]"
+    :class="isHorizontal ? 'flex-row items-center' : 'flex-col items-start'"
+  >
+    <div
+      class="flex"
+      :class="isHorizontal ? 'flex-col items-start' : 'items-end'"
+      :style="{ gap: showScale ? '5px' : '0' }"
+    >
       <!-- Ladder housing. The lamp lives inside it, on the faceplate, rather
            than floating above the component. -->
       <div
-        class="flex flex-col items-center"
+        class="flex items-center"
+        :class="isHorizontal ? 'flex-row-reverse' : 'flex-col'"
         style="padding:5px;border-radius:5px;background:#0b0e13;border:1px solid #1c222c"
       >
         <!-- Clip lamp. Latches, and clears on click the way a console does:
@@ -342,9 +376,10 @@ function ariaText(bar) {
              peak that overshot ten seconds ago leaves no trace. -->
         <div
           v-if="showOver"
-          class="mb-[6px]"
-          :style="{ width: ladderBlockWidth + 'px' }"
-          :class="clipped ? 'cursor-pointer' : ''"
+          :class="[isHorizontal ? 'ml-[6px]' : 'mb-[6px]', clipped ? 'cursor-pointer' : '']"
+          :style="isHorizontal
+            ? { height: ladderBlockWidth + 'px' }
+            : { width: ladderBlockWidth + 'px' }"
           :role="clipped ? 'button' : 'status'"
           :tabindex="clipped ? 0 : -1"
           :title="clipped ? 'Peak reached 0 dBFS — click to reset' : 'No overs'"
@@ -353,7 +388,8 @@ function ariaText(bar) {
           @keydown.enter.space.prevent="clipped = false"
         >
           <div :style="{
-            height: '5px',
+            height: isHorizontal ? '100%' : '5px',
+            width: isHorizontal ? '5px' : 'auto',
             borderRadius: '1.5px',
             background: clipped ? HOT : '#262c37',
             boxShadow: clipped ? `0 0 10px ${HOT}, 0 0 3px ${HOT}` : 'none',
@@ -361,12 +397,15 @@ function ariaText(bar) {
           }"></div>
         </div>
 
-        <div class="flex" :style="{ gap: CH_GAP + 'px' }">
+        <div class="flex" :class="isHorizontal ? 'flex-col' : ''" :style="{ gap: CH_GAP + 'px' }">
           <div
             v-for="(ladder, ch) in ladders"
             :key="ch"
-            class="relative flex flex-col"
-            :style="{ gap: SEG_GAP + 'px', height: ladderHeight + 'px' }"
+            class="relative flex"
+            :class="isHorizontal ? 'flex-row' : 'flex-col'"
+            :style="isHorizontal
+              ? { gap: SEG_GAP + 'px', width: ladderHeight + 'px' }
+              : { gap: SEG_GAP + 'px', height: ladderHeight + 'px' }"
             role="meter"
             :aria-valuemin="floorDb"
             :aria-valuemax="0"
@@ -382,11 +421,13 @@ function ariaText(bar) {
             <!-- Peak hold. Last child so it paints over the ladder. -->
             <div
               v-if="ladder.peak"
-              class="absolute left-0 right-0 pointer-events-none"
+              class="absolute pointer-events-none"
+              :class="isHorizontal ? 'top-0 bottom-0' : 'left-0 right-0'"
               :style="{
-                bottom: `calc(${ladder.peak.pct}% - 1px)`,
+                ...(isHorizontal
+                  ? { left: `calc(${ladder.peak.pct}% - 1px)`, width: '3px' }
+                  : { bottom: `calc(${ladder.peak.pct}% - 1px)`, height: '3px' }),
                 background: ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)',
-                height: '3px',
                 borderRadius: '1px',
                 boxShadow: `0 0 6px ${ladder.peak.hot ? '#ff8a7a' : 'rgba(255,255,255,.85)'}`,
               }"
@@ -400,13 +441,19 @@ function ariaText(bar) {
            inset by the housing padding so it lines up with the segments. -->
       <div
         v-if="showScale"
-        class="relative mb-[5px]"
-        :style="{ height: ladderHeight + 'px', width: '18px' }"
+        class="relative"
+        :class="isHorizontal ? 'mt-[1px]' : 'mb-[5px]'"
+        :style="isHorizontal
+          ? { width: ladderHeight + 'px', height: '10px', marginLeft: '5px' }
+          : { height: ladderHeight + 'px', width: '18px' }"
       >
         <div
           v-for="tick in visibleTicks" :key="tick"
-          class="absolute left-0 flex items-center gap-[4px]"
-          :style="{ bottom: `calc(${dbToPct(tick)}% - 3px)`, height: '6px' }"
+          class="absolute flex items-center gap-[4px]"
+          :class="isHorizontal ? 'top-0 -translate-x-1/2' : 'left-0'"
+          :style="isHorizontal
+            ? { left: `${dbToPct(tick)}%` }
+            : { bottom: `calc(${dbToPct(tick)}% - 3px)`, height: '6px' }"
         >
           <span
             v-if="LABELLED.has(tick)"
@@ -416,10 +463,15 @@ function ariaText(bar) {
       </div>
     </div>
 
+    <!-- ⚠ HORIZONTALLY THE READOUT LEADS, NOT TRAILS. The label sits before the
+         ladder because it names it, and the number after it because it reports
+         it — which is the order the eye already reads the row in. Vertically
+         both stack under the housing, which is where they have always been. -->
     <div
       v-if="showReadout || label"
-      class="flex flex-col items-center gap-[7px]"
-      :style="{ width: housingWidth + 'px' }"
+      class="flex gap-[7px]"
+      :class="isHorizontal ? 'flex-row items-center' : 'flex-col items-center'"
+      :style="isHorizontal ? { minWidth: '38px' } : { width: housingWidth + 'px' }"
     >
       <span
         v-if="showReadout"

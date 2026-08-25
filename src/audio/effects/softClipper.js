@@ -13,10 +13,15 @@
  */
 
 import { ensureSoftClipperWorklet } from '../softClipperWorkletLoader.js'
-import { SOFT_CLIPPER_LATENCY_SAMPLES, SOFT_CLIPPER_KERNEL_DEFAULTS } from '../softClipperProcessor.js'
+import {
+  SOFT_CLIPPER_LATENCY_SAMPLES, softClipperLatencySamples,
+} from '../softClipperProcessor.js'
+import { SOFT_CLIPPER_DEFAULTS, toKernelParams } from './softClipperParams.js'
 import { createLevelTap } from './levelTap.js'
 
-export { SOFT_CLIPPER_LATENCY_SAMPLES }
+// ⚠ THE FUNCTION, NOT JUST THE CONSTANT. The constant is the bypass figure and
+// the apply path needs the real one — see softClipperLatencySamples.
+export { SOFT_CLIPPER_LATENCY_SAMPLES, softClipperLatencySamples }
 
 /**
  * How much history the scrolling scope keeps, in seconds.
@@ -27,36 +32,11 @@ export { SOFT_CLIPPER_LATENCY_SAMPLES }
  */
 export const SCOPE_SECONDS = 4
 
-/**
- * DERIVED from the kernel's own defaults rather than restated here.
- *
- * These were a second literal listing the same five values, which is one
- * careless edit away from the preview and the applied audio running different
- * settings — silently, since every value either object could hold is valid.
- * The kernel is the source of truth; the panel reads this.
- *
- *   headroomDb 4-16, primary control — lower means more clipping
- *   emphasisDb 0-12, HF pre/de-emphasis depth; 0 = bypass both filters
- *   outputTrimDb ±6, post-stage gain match for A/B
- *   thresholdMode 'adaptive' | 'fixed'
- *   fixedThresholdDb, used only in 'fixed' mode
- *   shape 'tanh2' | 'tanh3' | 'tanh4', the knee — see SHAPE_EXPONENT and
- *     SHAPE_ANCHOR_DB (the positions are depth-matched, so this changes
- *     character rather than how much the stage does)
- */
-export const SOFT_CLIPPER_DEFAULTS = { ...SOFT_CLIPPER_KERNEL_DEFAULTS }
-
-/** Params are already kernel-shaped — no renaming needed unlike FET1176/LA2A. */
-export function toKernelParams(params) {
-  return {
-    headroomDb: params.headroomDb,
-    emphasisDb: params.emphasisDb,
-    outputTrimDb: params.outputTrimDb,
-    thresholdMode: params.thresholdMode,
-    fixedThresholdDb: params.fixedThresholdDb,
-    shape: params.shape,
-  }
-}
+// The param contract lives in its own module so it can be imported under node.
+// ⚠ THIS FILE CANNOT BE: it pulls a Vite `?worker&url` specifier that only the
+// bundler resolves, which is exactly why a param silently dropped by
+// `setParam`'s guard was invisible to the test suite until someone heard it.
+export { SOFT_CLIPPER_DEFAULTS, toKernelParams } from './softClipperParams.js'
 
 export function createSoftClipper(audioContext) {
   const input = audioContext.createGain()
@@ -71,6 +51,7 @@ export function createSoftClipper(audioContext) {
   let reductionDb = 0
   let engagedFraction = 0
   let liftDb = 0
+  let residualDbc = -120
 
   // Monitoring mode, kept out of `params` on purpose — see the kernel's
   // setMonitor. It rides its own port message, so the offline render cannot
@@ -117,6 +98,7 @@ export function createSoftClipper(audioContext) {
         reductionDb = e.data.reductionDb
         engagedFraction = e.data.engagedFraction ?? 0
         liftDb = e.data.liftDb ?? 0
+        residualDbc = e.data.residualDbc ?? -120
         const batch = e.data.scope
         if (!batch) return
         for (let i = 0; i + 1 < batch.length; i += 2) {
@@ -189,6 +171,18 @@ export function createSoftClipper(audioContext) {
     },
 
     /**
+     * Level of what the stage is removing, in dB relative to the signal it was
+     * removed from.
+     *
+     * The number behind the DELTA button: the same residual that mode
+     * auditions, measured rather than heard. It is the readout that separates
+     * two settings the lamp cannot — same peak reduction, twice the damage.
+     */
+    getResidualDbc() {
+      return residualDbc
+    },
+
+    /**
      * Audition the residual — only what the stage is removing.
      *
      * A separate call rather than a parameter: parameters are what the apply
@@ -242,6 +236,14 @@ export function createSoftClipper(audioContext) {
 export const softClipperEffect = {
   id: 'soft-clipper',
   name: 'Adaptive Soft Clipper',
+  // ⚠ THE BYPASS FIGURE, NOT THE STAGE'S. This is the oversampler's 50 samples;
+  // with the limiter engaged — which is the shipped default — the stage delays
+  // by about 5 ms — 226 samples at 44.1 kHz, 242 at 48, since the lookahead is
+  // a fixed number of MILLISECONDS. Nothing in the live chain reads this today, so it is
+  // wrong metadata rather than a live defect, but the apply path made exactly
+  // this assumption and shifted every applied region by 176 samples. Anything
+  // that wires delay compensation through the chain must call
+  // softClipperLatencySamples(params, sampleRate) instead of reading this.
   latencySamples: SOFT_CLIPPER_LATENCY_SAMPLES,
   createNodes(audioContext) {
     return createSoftClipper(audioContext)

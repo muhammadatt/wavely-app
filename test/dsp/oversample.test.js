@@ -216,3 +216,56 @@ test('DelayLine delays by exactly its length', () => {
     }
   }
 })
+
+// ── 8x profile (COMPRESSOR_OVERSAMPLE_8X) ───────────────────────────────────
+
+test('the 8x profile reconstructs as cleanly as the 4x one', async () => {
+  // EXPERIMENTAL PATH, built to answer whether the soft clipper's residual is
+  // fold-back from 4x. It is not on any shipping chain, but it has to be
+  // correct or the answer it gives is worthless — two improvised instruments
+  // had already produced confident nonsense on this question.
+  const { Oversampler, COMPRESSOR_OVERSAMPLE, COMPRESSOR_OVERSAMPLE_8X } =
+    await import('../../src/audio/dsp/oversample.js')
+  const SR = 48000, N = SR
+  const x = new Float32Array(N)
+  for (let i = 0; i < N; i++) {
+    x[i] = 0.5 * Math.sin((2 * Math.PI * 1000 * i) / SR)
+      + 0.2 * Math.sin((2 * Math.PI * 7000 * i) / SR)
+  }
+  for (const profile of [COMPRESSOR_OVERSAMPLE, COMPRESSOR_OVERSAMPLE_8X]) {
+    const os = new Oversampler(profile)
+    const y = new Float32Array(N)
+    for (let o = 0; o < N; o += 128) {
+      const n = Math.min(128, N - o)
+      os.up(x.subarray(o, o + n), n)
+      os.down(y.subarray(o, o + n), n)
+    }
+    const D = profile.latencySamples
+    let e = 0, r = 0, c = 0
+    for (let i = SR / 2; i + D < N; i++) { const d = y[i + D] - x[i]; e += d * d; r += x[i] * x[i]; c++ }
+    const dbc = 20 * Math.log10(Math.sqrt(e / c) / Math.sqrt(r / c))
+    assert.ok(dbc < -65,
+      `${profile.name} round-trip error ${dbc.toFixed(1)} dBc — the path is broken`)
+  }
+})
+
+test('the 8x latency is a whole number of base-rate samples, and differs from 4x', async () => {
+  // ⚠ 52 RATHER THAN 50, so anything differencing the two paths must align on
+  // each profile's own latency. Assuming they matched is exactly the class of
+  // error that invalidated two earlier attempts at this measurement.
+  const { COMPRESSOR_OVERSAMPLE, COMPRESSOR_OVERSAMPLE_8X } =
+    await import('../../src/audio/dsp/oversample.js')
+  assert.equal(COMPRESSOR_OVERSAMPLE.latencySamples, 50)
+  assert.equal(COMPRESSOR_OVERSAMPLE_8X.latencySamples, 52)
+  assert.equal(COMPRESSOR_OVERSAMPLE_8X.factor, 8)
+  assert.ok(Number.isInteger(COMPRESSOR_OVERSAMPLE_8X.upsampleDelaySamples))
+})
+
+test('the soft clipper reports the latency of whichever profile it was given', async () => {
+  const { SoftClipperKernel } = await import('../../src/audio/softClipperProcessor.js')
+  assert.equal(new SoftClipperKernel(48000).latencySamples, 50)
+  assert.equal(new SoftClipperKernel(48000, { oversample: 8 }).latencySamples, 52)
+  // An unrecognised value must fall back to the shipping path rather than
+  // producing a third behaviour.
+  assert.equal(new SoftClipperKernel(48000, { oversample: 3 }).latencySamples, 50)
+})

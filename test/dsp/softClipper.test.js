@@ -20,7 +20,8 @@ import assert from 'node:assert/strict'
 import {
   SoftClipperKernel, processSoftClipperBuffer, softClip, SOFT_CLIPPER_LATENCY_SAMPLES,
   MAX_REDUCTION_DB, KNEE_DB, SHAPE_EXPONENT, SHAPE_MIN_KNEE_DB,
-  SHAPE_KNEE_DB, SHAPE_ANCHOR_DB,
+  SHAPE_KNEE_DB, SHAPE_ANCHOR_DB, SHAPE_KNEE_ANCHOR_SHAPE,
+  softClipperLatencySamples,
   SOFT_CLIPPER_KERNEL_DEFAULTS,
 } from '../../src/audio/softClipperProcessor.js'
 import {
@@ -28,6 +29,24 @@ import {
 } from '../../src/audio/dsp/biquad.js'
 
 const SR = 44100
+
+/**
+ * ⚠ CURVE-ONLY PROBES PIN `limiter: 0`, AND THEY HAVE TO NOW.
+ *
+ * The kernel ships the hybrid peak path engaged (`limiter: 100`), so the stage's
+ * default behaviour is a lookahead limiter feeding the curve: 242 samples of
+ * latency instead of 50, and a gain envelope that ducks sub-threshold material
+ * by design. Every guarantee in this file that belongs to the CURVE — unity
+ * below the threshold, the delta reconstruction at SOFT_CLIPPER_LATENCY_SAMPLES,
+ * the knee anchoring, the residual readout, the emphasis compensation — has to
+ * say so, or it is measuring the limiter and reporting it as the curve.
+ *
+ * The same convention this file already follows for `shape` and `emphasisDb`:
+ * a probe that cares about a default states it rather than inheriting it, so
+ * moving a default breaks the tests that are ABOUT the default and leaves the
+ * rest alone. The hybrid path has its own tests at the end of the file.
+ */
+const CURVE_ONLY = { limiter: 0 }
 
 const dbToLin = db => Math.pow(10, db / 20)
 
@@ -163,7 +182,8 @@ test('material well below threshold passes through nearly unchanged', () => {
   // (oversample.js: flat to 0.01 dB through 19 kHz). The bound here is set
   // from that, not copied from the spec unchanged.
   const quiet = tone(400, 0.5, 0.05) // well under the 0.10 clamp floor on T
-  const { channelData } = processSoftClipperBuffer([quiet], SR, { headroomDb: 16, emphasisDb: 0 })
+  const { channelData } = processSoftClipperBuffer([quiet], SR,
+    { ...CURVE_ONLY, headroomDb: 16, emphasisDb: 0 })
   const out = channelData[0]
 
   const latency = SOFT_CLIPPER_LATENCY_SAMPLES
@@ -254,7 +274,8 @@ test('lower headroom produces more peak reduction (monotonic)', () => {
       tone(120, 0.015, 0.9),
       speechLike(1.5, 0.3, 41),
     )
-    return processSoftClipperBuffer([signal], SR, { headroomDb, emphasisDb: 0 }).metering.maxReductionDb
+    return processSoftClipperBuffer([signal], SR,
+      { ...CURVE_ONLY, headroomDb, emphasisDb: 0 }).metering.maxReductionDb
   }
   const headrooms = [16, 12, 10, 8, 4]
   const sweep = headrooms.map(reductionFor)
@@ -307,7 +328,7 @@ test('adaptive mode is level-invariant; fixed mode is not', () => {
 
   const red = (sig, params) => processSoftClipperBuffer([sig], SR, params).metering.maxReductionDb
 
-  const adaptive = { thresholdMode: 'adaptive', headroomDb: 10, emphasisDb: 0 }
+  const adaptive = { ...CURVE_ONLY, thresholdMode: 'adaptive', headroomDb: 10, emphasisDb: 0 }
   const aBase = red(base, adaptive)
   const aScaled = red(scaled, adaptive)
   assert.ok(
@@ -319,7 +340,7 @@ test('adaptive mode is level-invariant; fixed mode is not', () => {
   // Fixed mode is absolute by definition, so the SAME trim must move it a lot.
   // This is the control: it proves the trim is large enough to be detectable,
   // so adaptive's flatness above is invariance and not a dead measurement.
-  const fixed = { thresholdMode: 'fixed', fixedThresholdDb: -12, emphasisDb: 0 }
+  const fixed = { ...CURVE_ONLY, thresholdMode: 'fixed', fixedThresholdDb: -12, emphasisDb: 0 }
   const fBase = red(base, fixed)
   const fScaled = red(scaled, fixed)
   assert.ok(
@@ -442,7 +463,7 @@ test('a real narration peak 17 dB over threshold gets meaningfully reduced', () 
   const transient = tone(120, 0.02, dbToLin(-1))
   const signal = concat(body, transient, tone(200, 0.4, dbToLin(-22)))
   const { metering } = processSoftClipperBuffer([signal], SR, {
-    thresholdMode: 'fixed', fixedThresholdDb: -18, emphasisDb: 0,
+    ...CURVE_ONLY, thresholdMode: 'fixed', fixedThresholdDb: -18, emphasisDb: 0,
   })
   assert.ok(
     metering.maxReductionDb >= 3,
@@ -649,7 +670,7 @@ function fricativeNoise(seconds, amp, seed = 5, sr = SR) {
 /** Run a signal through a fresh kernel in 128-sample blocks, return metering. */
 function meter(signal, params) {
   const kernel = new SoftClipperKernel(SR)
-  kernel.setParams({ shape: 'tanh3', ...params })
+  kernel.setParams({ ...CURVE_ONLY, shape: 'tanh3', ...params })
   const out = new Float32Array(signal.length)
   for (let off = 0; off < signal.length; off += 128) {
     const len = Math.min(128, signal.length - off)
@@ -745,7 +766,7 @@ test('but genuine outlier transients still get caught', () => {
   const plosive = tone(120, 0.012, 0.95)
   const tail = speechLike(2, 0.3, 29)
   const signal = concat(body, plosive, tail)
-  const { metering } = processSoftClipperBuffer([signal], SR, {})
+  const { metering } = processSoftClipperBuffer([signal], SR, { ...CURVE_ONLY })
   assert.ok(
     metering.maxReductionDb > 2,
     `a planted outlier should still be caught, got ${metering.maxReductionDb.toFixed(2)} dB`,
@@ -836,7 +857,8 @@ test('the warm-up hold is released, not held forever', () => {
   // Pinned separately from the test above so a warm-up that never completes
   // cannot pass by making both halves quiet.
   const signal = concat(speechLike(6, 0.5, 71), tone(120, 0.015, 0.95), speechLike(1, 0.5, 5))
-  const { metering } = processSoftClipperBuffer([signal], SR, { headroomDb: 8, emphasisDb: 0 })
+  const { metering } = processSoftClipperBuffer([signal], SR,
+    { ...CURVE_ONLY, headroomDb: 8, emphasisDb: 0 })
   assert.ok(metering.maxReductionDb > 1, `warm-up never released: ${metering.maxReductionDb.toFixed(2)} dB`)
 })
 
@@ -921,7 +943,7 @@ test('DELTA plus the processed output reconstructs the input exactly', () => {
   // against the un-delayed original would fail for a reason that has nothing
   // to do with the residual.
   const signal = speechLike(3, 0.6, 23)
-  const params = { headroomDb: 6, emphasisDb: 6 }
+  const params = { ...CURVE_ONLY, headroomDb: 6, emphasisDb: 6 }
   const wet = renderKernel(signal, params).out
   const delta = renderKernel(signal, params, { monitorDelta: true }).out
 
@@ -958,9 +980,9 @@ test("DELTA's floor is the oversampler, and clipping stands far above it", () =>
   }
 
   // Headroom at the top of its range is effectively off — nothing crosses.
-  const idle = peakDb({ headroomDb: 16, emphasisDb: 6 })
+  const idle = peakDb({ ...CURVE_ONLY, headroomDb: 16, emphasisDb: 6 })
   // Headroom at the bottom is the aggressive end.
-  const working = peakDb({ headroomDb: 4, emphasisDb: 6 })
+  const working = peakDb({ ...CURVE_ONLY, headroomDb: 4, emphasisDb: 6 })
 
   assert.ok(idle < -60, `residual on an untouched signal peaked at ${idle.toFixed(1)} dBFS`)
   assert.ok(working > -35, `residual on heavily clipped material only reached ${working.toFixed(1)} dBFS`)
@@ -1072,6 +1094,14 @@ test('ENGAGED ignores silence, so it measures the setting and not the pauses', (
 // ── Knee shapes (SELECTIVITY: tanh^2 / tanh^3 / tanh^4) ─────────────────────
 
 const SHAPES = Object.keys(SHAPE_EXPONENT)
+
+/**
+ * The kernel's SKEW_DEADBAND is not exported — the probes only need to clear
+ * it comfortably, so the tests carry their own copy of the threshold they are
+ * checking against rather than importing a constant they would then be unable
+ * to fail independently of.
+ */
+const SKEW_DEADBAND_PROBE = 0.2
 
 test('every shape is still exactly bit-transparent below the threshold', () => {
   // The one guarantee that must survive any curve change: material that never
@@ -1266,12 +1296,16 @@ test('every shape delivers the same reduction at the anchor', () => {
   }
 })
 
-test('the default shape ships at exactly KNEE_DB, so the stock patch has not moved', () => {
-  // Normalisation is anchored ON the default shape, which is what makes it
-  // free for anyone who never touches the switch. If this drifts, the shipped
-  // Headroom default (6.5, itself calibrated against this curve) is wrong too
-  // — the two are coupled and the kernel says so.
-  assert.equal(SHAPE_KNEE_DB[SOFT_CLIPPER_KERNEL_DEFAULTS.shape], KNEE_DB)
+test('the CALIBRATED shape ships at exactly KNEE_DB, whatever the default is', () => {
+  // ⚠ THE ANCHOR IS NOT THE DEFAULT, and it used to be — which made moving
+  // which position the panel opens on silently re-derive all three curves.
+  // KNEE_DB is a measurement of one shape; the anchor has to name that shape,
+  // not whichever one happens to be shipped. Pinned from both sides: the
+  // calibrated shape sits exactly on KNEE_DB, and the default is free to be
+  // something else without moving it.
+  assert.equal(SHAPE_KNEE_DB[SHAPE_KNEE_ANCHOR_SHAPE], KNEE_DB)
+  assert.equal(SHAPE_KNEE_ANCHOR_SHAPE, 'tanh3', 'the calibrated shape moved')
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.shape, 'tanh4', 'the shipped knee default moved')
 })
 
 test('the recorded per-shape knees are the ones the derivation produces', () => {
@@ -1303,7 +1337,7 @@ test('at a fixed Headroom, the shapes now land at the same depth', () => {
   )
   const peakGr = (shape) => {
     const kernel = new SoftClipperKernel(SR)
-    kernel.setParams({ headroomDb: 6.5, emphasisDb: 6, shape })
+    kernel.setParams({ ...CURVE_ONLY, headroomDb: 6.5, emphasisDb: 6, shape })
     const out = new Float32Array(signal.length)
     for (let off = 0; off < signal.length; off += 128) {
       const len = Math.min(128, signal.length - off)
@@ -1332,8 +1366,10 @@ test('what survives normalisation is where the distortion is spent', () => {
   // outlier and there is nothing for a knee to redistribute between.
   const signal = variedSpeech(12, 0.9, 41)
   const residualDb = (shape) => {
-    const wet = processSoftClipperBuffer([signal], SR, { headroomDb: 4, emphasisDb: 6, shape }).channelData[0]
-    const dry = processSoftClipperBuffer([signal], SR, { headroomDb: 60, emphasisDb: 6, shape }).channelData[0]
+    const wet = processSoftClipperBuffer([signal], SR,
+      { ...CURVE_ONLY, headroomDb: 4, emphasisDb: 6, shape }).channelData[0]
+    const dry = processSoftClipperBuffer([signal], SR,
+      { ...CURVE_ONLY, headroomDb: 60, emphasisDb: 6, shape }).channelData[0]
     let sq = 0
     for (let i = 0; i < signal.length; i++) { const d = dry[i] - wet[i]; sq += d * d }
     return 10 * Math.log10(sq / signal.length)
@@ -1505,7 +1541,7 @@ test('the compensation responds over seconds, not milliseconds', () => {
   const emphasisDb = 12
   const signal = concat(sibilantSpeech(4, 0.35, 97, 0), sibilantSpeech(10, 0.35, 41, 0.8))
   const kernel = new SoftClipperKernel(SR)
-  kernel.setParams({ headroomDb: 6.5, emphasisDb, shape: 'tanh3' })
+  kernel.setParams({ ...CURVE_ONLY, headroomDb: 6.5, emphasisDb, shape: 'tanh3' })
   const out = new Float32Array(signal.length)
   const trace = []
   for (let off = 0; off < signal.length; off += 128) {
@@ -1570,7 +1606,17 @@ test('depth holds across the emphasis knob on synthetic beds', () => {
     const signal = sibilantSpeech(12, 0.35, 41, hfMix)
     const grs = [0, 3, 6, 12].map(e => meter(signal, { headroomDb: 6.5, emphasisDb: e }).maxReductionDb)
     const drift = Math.max(...grs) - Math.min(...grs)
-    assert.ok(drift < 0.6,
+    // ⚠ THE BOUND WAS 0.6 AND PINNING HYSTERESIS WIDENED IT TO 0.72 on the
+    // mixed bed. The mechanism is real: the memory measures drive against the
+    // lift-compensated threshold, so a rising lift lowers the drive and the
+    // depression with it, which compounds the compensation's existing slight
+    // OVER-correction — depth falling as the knob rises (1.70 -> 0.98 here).
+    // Measured on real narration the same sweep drifts 0.10 dB before the pin
+    // and 0.19 after, so this is the sibilant synthetic bed exaggerating
+    // again, exactly as it did by a factor of eight on the uncompensated
+    // drift. The bound is loosened to what the pin actually costs rather than
+    // tightened by weakening the probe.
+    assert.ok(drift < 0.8,
       `hfMix ${hfMix}: depth still moves with the knob — ${grs.map(v => v.toFixed(2)).join(' -> ')}`)
   }
 })
@@ -1635,4 +1681,669 @@ test('turning Emphasis down takes effect at once', () => {
   k2.process([signal.subarray(half, half + 128)], [out.subarray(half, half + 128)], 128)
   assert.ok(k2.getMetering().liftDb <= 4 + 1e-9,
     `lift ${k2.getMetering().liftDb.toFixed(2)} still exceeds the new Emphasis of 4 dB`)
+})
+
+test('turning Emphasis UP from a long stretch at zero still measures a lift', () => {
+  // ⚠ THE RISK THE `emphasisOn` GATE CREATES, and the direction the test above
+  // does not cover. The per-sample lift work — the follower on the emphasised
+  // downmix and the measurement it feeds — is skipped entirely while emphasis
+  // is off, so a kernel that has run for a long time at zero has a follower
+  // that has been parked rather than tracking. Re-enabling has to start from a
+  // sane value, not from whatever was in flight when the knob passed through
+  // zero seconds or minutes earlier.
+  //
+  // What makes it safe is the else-branch parking `fastPeakEmph` on `fastPeak`
+  // every block while off, and resetting the detector's own filter so it starts
+  // from silence rather than from a stale tail. Both of those are load-bearing
+  // now in a way they were not when the follower ran regardless.
+  const signal = sibilantSpeech(12, 0.35, 41, 0.8)
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams({ headroomDb: 6.5, emphasisDb: 0, shape: 'tanh3' })
+  const out = new Float32Array(signal.length)
+  const run = (from, to) => {
+    for (let off = from; off < to; off += 128) {
+      const len = Math.min(128, to - off)
+      kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    }
+  }
+  const half = Math.round(signal.length / 2)
+  run(0, half)
+  assert.equal(kernel.getMetering().liftDb, 0, 'a lift accumulated with emphasis off')
+
+  kernel.setParams({ emphasisDb: 12 })
+  run(half, signal.length)
+  const after = kernel.getMetering().liftDb
+
+  // ⚠ WHAT THIS CAN AND CANNOT ASSERT. The obvious check — compare against a
+  // kernel that ran at 12 all along — FAILS, and it fails identically on the
+  // build without this gate, so it is not about the gate at all. Two mechanisms
+  // put the two kernels in different places and keep them there:
+  //
+  //   - a kernel starting at 12 SEEDS its lift from the MAX over the warm-up
+  //     window (deliberately: a lift that is too high merely does less, one
+  //     that is too low over-processes), so it starts high;
+  //   - and `liftDb` only converges while the gate is open AND the moment is
+  //     loud, so its 3 s constant is 3 s of GATED time — many times that in
+  //     wall clock. Measured on this probe, the always-on kernel is still at
+  //     11.66 dB after twelve seconds while the measurement it is converging
+  //     toward is 6.29.
+  //
+  // So the reachable property is that the gate does not leave the measurement
+  // DEAD or UNBOUNDED, and that it is genuinely converging rather than stuck.
+  assert.ok(after > 0.5, `the lift never recovered after re-enabling: ${after.toFixed(3)} dB`)
+  assert.ok(after <= 12 + 1e-9, `the lift exceeded its bound: ${after.toFixed(3)} dB`)
+
+  // ⚠ A HYGIENE PIN, ASSERTED WHITE-BOX BECAUSE NOTHING BEHAVIOURAL CATCHES IT.
+  // While the emphasis is off the follower on the emphasised copy does not run,
+  // so it is parked on the raw peak follower every block instead of being left
+  // to hold a value from an arbitrary time ago. Mutation-tested: deleting that
+  // parking fails no behavioural test — the follower's 1 ms attack catches up
+  // long before a 3 s gated lift can be shifted by it. Pinned anyway, so the
+  // next reader does not have to rediscover which of the two it is.
+  // ⚠ IT IS PARKED AT THE START OF A BLOCK, so it holds the RAW follower's
+  // value as of the previous block's end — not its current one. Asserting
+  // against the current value fails for a reason that has nothing to do with
+  // staleness, which is exactly the sort of test that gets deleted later.
+  const parked = new SoftClipperKernel(SR)
+  parked.setParams({ headroomDb: 6.5, emphasisDb: 0, shape: 'tanh3' })
+  const scratch = new Float32Array(1024)
+  parked.process([signal.subarray(0, 1024)], [scratch], 1024)
+  const rawAtBlockEnd = parked.fastPeak
+  parked.process([signal.subarray(1024, 2048)], [scratch], 1024)
+  assert.equal(parked.fastPeakEmph, rawAtBlockEnd,
+    'the emphasised follower was left stale while the emphasis was off')
+
+  // Still climbing on more of the same material — a parked follower would sit.
+  const before = after
+  run(0, half) // more sibilant material through the same kernel
+  assert.ok(kernel.getMetering().liftDb > before,
+    `the lift stopped moving after re-enabling: ${before.toFixed(3)} -> ` +
+    `${kernel.getMetering().liftDb.toFixed(3)} dB`)
+})
+
+// ── RESIDUAL readout (RESIDUAL_TAU_S) ───────────────────────────────────────
+
+/** The kernel's own residual reading, averaged in the energy domain. */
+function residualDbc(signal, params, sr = SR) {
+  const kernel = new SoftClipperKernel(sr)
+  kernel.setParams({ ...CURVE_ONLY, shape: 'tanh3', ...params })
+  const out = new Float32Array(signal.length)
+  let sum = 0, n = 0
+  for (let off = 0; off < signal.length; off += 128) {
+    const len = Math.min(128, signal.length - off)
+    kernel.process([signal.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    if (off <= 3 * sr) continue
+    const r = kernel.getMetering().residualDbc
+    if (r > -120) { sum += Math.pow(10, r / 10); n++ }
+  }
+  return n ? 10 * Math.log10(sum / n) : -Infinity
+}
+
+/** The same quantity computed independently, as a ratio of whole-file energies. */
+function residualDbcOffline(signal, params, sr = SR) {
+  const wet = processSoftClipperBuffer([signal], sr,
+    { ...CURVE_ONLY, shape: 'tanh3', ...params }).channelData[0]
+  const dry = processSoftClipperBuffer([signal], sr,
+    { ...CURVE_ONLY, shape: 'tanh3', ...params, headroomDb: 60 }).channelData[0]
+  let res = 0, sig = 0
+  for (let i = 3 * sr; i < signal.length; i++) {
+    const d = dry[i] - wet[i]
+    res += d * d
+    sig += dry[i] * dry[i]
+  }
+  return 10 * Math.log10(res / sig)
+}
+
+test('the residual readout matches an independent measurement of the same thing', () => {
+  // THE CORRECTNESS TEST. The readout exists so a setting can be compared
+  // against another one, so what matters is that it reproduces a whole-file
+  // energy ratio — computed here from two renders, which is how the same
+  // number was measured offline before the meter existed.
+  //
+  // The probe deliberately carries BOTH loud material that clips and quiet
+  // voiced material that does not, because that mixture is what separates a
+  // ratio of averaged energies from an average of per-block ratios. The
+  // second is what shipped first: a per-block ratio is large wherever dry is
+  // small, so its running mean is dominated by the quietest voiced blocks —
+  // the ones carrying almost none of the distortion.
+  const signal = concat(
+    speechLike(4, 0.5, 97),
+    speechLike(3, 0.06, 101), // voiced, far below the threshold, clips nothing
+    speechLike(4, 0.5, 103),
+  )
+  for (const emphasisDb of [0, 6, 12]) {
+    const mine = residualDbc(signal, { headroomDb: 6.5, emphasisDb })
+    const theirs = residualDbcOffline(signal, { headroomDb: 6.5, emphasisDb })
+    assert.ok(Math.abs(mine - theirs) < 2,
+      `emphasis ${emphasisDb}: readout ${mine.toFixed(2)} dBc against ${theirs.toFixed(2)} measured directly`)
+  }
+})
+
+test('the residual readout is a ratio, so level and trim cannot move it', () => {
+  // Both properties are what dBc buys over dBFS, and both are the reason the
+  // readout can be compared across files at all. Output Trim especially: it is
+  // a gain match for A/B, and a diagnostic that moved when it did would be
+  // reporting the user's monitoring rather than the processing.
+  const signal = concat(speechLike(5, 0.4, 11), speechLike(4, 0.4, 13))
+  const base = residualDbc(signal, { headroomDb: 6.5, emphasisDb: 6 })
+
+  const louder = new Float32Array(signal.length)
+  for (let i = 0; i < signal.length; i++) louder[i] = signal[i] * dbToLin(6)
+  const scaled = residualDbc(louder, { headroomDb: 6.5, emphasisDb: 6 })
+  assert.ok(Math.abs(scaled - base) < 0.5,
+    `6 dB of input gain moved the readout ${base.toFixed(2)} -> ${scaled.toFixed(2)} dBc`)
+
+  for (const outputTrimDb of [-6, 6]) {
+    const trimmed = residualDbc(signal, { headroomDb: 6.5, emphasisDb: 6, outputTrimDb })
+    assert.ok(Math.abs(trimmed - base) < 0.1,
+      `Output Trim ${outputTrimDb} moved the readout ${base.toFixed(2)} -> ${trimmed.toFixed(2)} dBc`)
+  }
+})
+
+test('the residual readout bottoms out at the oversampler, not at zero', () => {
+  // ⚠ AN IDLE STAGE DOES NOT READ ZERO, and finding out why is the reason this
+  // test exists rather than asserting the floor. The residual is taken between
+  // the RAW input and the finished output, so it includes the oversampler's
+  // reconstruction error, which is there whether or not the curve fires.
+  //
+  // Measured at -70.7 dBc with the curve fully bypassed, identical at every
+  // input level and every emphasis setting — the signature of a linear error.
+  // That is 25-40 dB below the range the stage produces in use, so it cannot
+  // affect a comparison between settings, but it means a low reading means
+  // "the oversampler and nothing else" rather than "nothing".
+  const signal = speechLike(6, 0.5, 11)
+  const bypassed = residualDbc(signal, { headroomDb: 60, emphasisDb: 0 })
+  assert.ok(bypassed < -60,
+    `a bypassed stage reported ${bypassed.toFixed(1)} dBc — far too much to be the oversampler`)
+  assert.ok(bypassed > -90,
+    `a bypassed stage reported ${bypassed.toFixed(1)} dBc — the oversampler error has vanished, ` +
+    'which means this test is no longer measuring what it claims')
+  // Level-independent, which is what makes it an error rather than a signal.
+  const louder = new Float32Array(signal.length)
+  for (let i = 0; i < signal.length; i++) louder[i] = signal[i] * dbToLin(6)
+  assert.ok(Math.abs(residualDbc(louder, { headroomDb: 60, emphasisDb: 0 }) - bypassed) < 0.5,
+    'the bypassed reading moved with input level, so it is not a linear error')
+
+  // And with nothing measured at all it is the floor, finite, for the dash.
+  const fresh = new SoftClipperKernel(SR)
+  fresh.setParams({ ...CURVE_ONLY, headroomDb: 6.5, emphasisDb: 0, shape: 'tanh3' })
+  const r = fresh.getMetering().residualDbc
+  assert.equal(r, -120)
+  assert.ok(Number.isFinite(r), 'the readout reached an infinity instead of its floor')
+})
+
+test('the residual readout tracks the emphasis knob the way the offline sweep does', () => {
+  // The reason the readout was built: on real narration the residual has a
+  // minimum partway up the HF Emphasis knob on some material and falls
+  // monotonically on other material, and neither the lamp nor ENGAGED can see
+  // it. Pinned as a SHAPE rather than as values — the absolute figure depends
+  // on the probe, the ordering is the claim.
+  const signal = concat(speechLike(5, 0.5, 41), fricativeNoise(3, 0.3), speechLike(4, 0.5, 43))
+  const curve = [0, 3, 6, 9, 12].map(e => residualDbc(signal, { headroomDb: 6.5, emphasisDb: e }))
+  const offline = [0, 3, 6, 9, 12].map(e => residualDbcOffline(signal, { headroomDb: 6.5, emphasisDb: e }))
+  for (let i = 1; i < curve.length; i++) {
+    assert.equal(Math.sign(curve[i] - curve[i - 1]), Math.sign(offline[i] - offline[i - 1]),
+      `the readout and the direct measurement disagree about direction between steps ` +
+      `${i - 1} and ${i}: ${curve.map(v => v.toFixed(1)).join(',')} vs ` +
+      offline.map(v => v.toFixed(1)).join(','))
+  }
+})
+
+// ── Asymmetry, its skew tracker and its DC blocker: REMOVED ────────────────
+//
+// Eleven tests lived here and every one of them is deleted rather than skipped,
+// because the code they guarded is deleted. Worth knowing what went, in case
+// even harmonics are ever wanted in this stage again: the even/odd
+// decomposition F_even(x) = (F(x) + F(-x))/2 pinned that the stage produced
+// EXACTLY zero even content until asked; the offset was measured additive
+// rather than a rebalancing (H3 moved at most 1 dB across the whole sweep);
+// the no-sign-flip guarantee was its own test; and the DC blocker's tests
+// caught the one operating point (heavy drive, DC already in the input) where
+// dropping it shifts the waveform bodily and corrupts the peak measurement ACX
+// is built on.
+//
+// ⚠ THE SKEW TRACKER'S TESTS ARE THE ONES TO RE-READ FIRST if this is ever
+// revisited: they pinned that only the SIGN may come from the material and the
+// magnitude may not (scaling by skew silently turns the knob off on symmetric
+// input), and that the decision has to wait a full time constant of gated
+// evidence — a running skew estimate reads 1.15 at 0.5 s on a probe whose
+// settled value is 0.002, so an early read latches the wrong sign for the whole
+// file.
+
+// ── HF Loss: MOVED TO TUBE SATURATION ──────────────────────────────────────
+//
+// Its tests moved with it, to test/dsp/vocalSat.test.js, which is where the
+// filter now is. Two of them did not survive the move unchanged and the
+// difference is worth noting: "level-invariant" and "bypassed at zero" were one
+// test here, and in the new home level invariance is not claimed at all —
+// Tube Saturation multiplies absolute sample values into a fixed transfer, so
+// nothing in it is level-invariant. Bit-identical bypass is claimed, and pinned.
+
+// ── Hysteresis (HYST_MAX_DB) ────────────────────────────────────────────────
+
+/** A triangular level ramp: up through a range of amplitudes, then back down. */
+function levelRamp(seconds, peakAmp, freqHz = 300, sr = SR) {
+  const n = Math.round(seconds * sr)
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const ph = i / n
+    const env = ph < 0.5 ? ph * 2 : (1 - ph) * 2
+    out[i] = peakAmp * env * Math.sin((2 * Math.PI * freqHz * i) / sr)
+  }
+  return out
+}
+
+/**
+ * Widest difference in reduction between the rising and falling halves of a
+ * ramp, at matched input level. Zero for a memoryless stage; the loop is the
+ * whole point of hysteresis, so this is what measures it.
+ */
+function loopWidthDb(seconds, params, sr = SR) {
+  const sig = levelRamp(seconds, 0.9, 300, sr)
+  const kernel = new SoftClipperKernel(sr)
+  kernel.setParams({
+    ...CURVE_ONLY,
+    thresholdMode: 'fixed', fixedThresholdDb: -18, emphasisDb: 0, shape: 'tanh3', ...params,
+  })
+  const out = new Float32Array(sig.length)
+  const pts = []
+  const hop = 64
+  for (let off = 0; off < sig.length; off += hop) {
+    const len = Math.min(hop, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    let peak = 0
+    for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(sig[off + i]))
+    pts.push({ t: off / sr, inDb: 20 * Math.log10(peak + 1e-12), red: kernel.getMetering().reductionDb })
+  }
+  const half = seconds / 2
+  let worst = 0
+  const nearest = (list, target) =>
+    list.reduce((b, p) => (Math.abs(p.inDb - target) < Math.abs(b.inDb - target) ? p : b))
+  for (const target of [-15, -14, -13, -12, -11, -10]) {
+    const up = nearest(pts.filter(p => p.t < half * 0.95), target)
+    const dn = nearest(pts.filter(p => p.t > half * 1.05), target)
+    worst = Math.max(worst, Math.abs(dn.red - up.red))
+  }
+  return worst
+}
+
+test('hysteresis makes the response a loop, and the knob widens it', () => {
+  // WHAT SEPARATES THIS FROM ONE MORE ENVELOPE FOLLOWER. The threshold moves
+  // down with recent drive, so a level arrived at from below maps to a
+  // different threshold than the same level arrived at from above. Measured at
+  // syllabic rate (a 100 ms ramp): 0.61 dB of loop at zero, 1.31 at half, 1.88
+  // at full.
+  //
+  // ⚠ THE BASELINE IS NOT ZERO, and that is worth knowing rather than
+  // explaining away: the detector's own follower is already asymmetric (1 ms
+  // attack, 150 ms release), so the stage always had a little of this. The
+  // knob deepens an effect that exists, it does not introduce one — and that
+  // same upstream follower, not this stage's ballistics, is where the loop
+  // comes from. See HYST_TAU_MS for the sweep that established it.
+  const widths = [0, 50, 100].map(hysteresis => loopWidthDb(0.1, { hysteresis }))
+  for (let i = 1; i < widths.length; i++) {
+    assert.ok(widths[i] > widths[i - 1] + 0.5,
+      `the knob did not widen the loop: ${widths.map(v => v.toFixed(2)).join(' -> ')} dB`)
+  }
+  // And it needs the level to be MOVING at a rate the state can lag behind.
+  // On a slow ramp any follower keeps up and the loop nearly closes.
+  const slow = loopWidthDb(2.0, { hysteresis: 100 })
+  assert.ok(slow < widths[2] - 0.8,
+    `the loop did not narrow on a slow ramp: ${slow.toFixed(2)} against ${widths[2].toFixed(2)} dB`)
+})
+
+test('hysteresis moves the threshold slowly enough that it cannot waveshape', () => {
+  // THE SAFETY PROPERTY, and the reason the memory modulates T rather than the
+  // drive or the knee. Moving T translates the curve without reshaping it, so
+  // it is monotonic at any frozen state whatever the memory does — but only if
+  // the state moves on an ENVELOPE time scale. A state moving at audio rate
+  // would be a nonlinearity wearing an envelope's clothing, and would put the
+  // fold risk straight back.
+  //
+  // Bounded from the attack coefficient: HYST_MAX_DB * (1 - exp(-1/(tau*sr)))
+  // is about 0.0125 dB per sample at 48 kHz.
+  const sr = 48000
+  const sig = concat(speechLike(3, 0.6, 17, sr), levelRamp(0.2, 0.95, 200, sr), speechLike(2, 0.6, 19, sr))
+  const kernel = new SoftClipperKernel(sr)
+  kernel.setParams({ thresholdMode: 'fixed', fixedThresholdDb: -18, emphasisDb: 0, shape: 'tanh3', hysteresis: 100 })
+  const out = new Float32Array(sig.length)
+  let worstStep = 0
+  let prev = null
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+    for (let i = 0; i < len; i++) {
+      const tDb = 20 * Math.log10(kernel.tScratch[i])
+      if (prev !== null) worstStep = Math.max(worstStep, Math.abs(tDb - prev))
+      prev = tDb
+    }
+  }
+  assert.ok(worstStep < 0.02,
+    `the threshold moved ${worstStep.toFixed(4)} dB in one sample — fast enough to shape a waveform`)
+})
+
+test('hysteresis keeps the bound, never boosts, and is absent at zero', () => {
+  const sig = concat(speechLike(4, 0.6, 23), speechLike(3, 0.6, 29))
+  const params = { thresholdMode: 'fixed', fixedThresholdDb: -24, emphasisDb: 0, shape: 'tanh3', hysteresis: 100 }
+
+  // BOUNDED. Lowering the threshold cannot raise the reduction ceiling — the
+  // curve is the same curve, and its cap travels with it.
+  const kernel = new SoftClipperKernel(SR)
+  kernel.setParams(params)
+  const out = new Float32Array(sig.length)
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  assert.ok(kernel.getMetering().maxReductionDb <= MAX_REDUCTION_DB + 1e-9,
+    `hysteresis exceeded the reduction bound: ${kernel.getMetering().maxReductionDb}`)
+
+  // AND THE THRESHOLD ITSELF MOVES BY AT MOST HYST_MAX_DB (3). Without this,
+  // dropping the knee normalisation — feeding raw dB-over into the state
+  // instead of `min(1, over / HYST_KNEE_DB)` — passes every other assertion
+  // here while letting the threshold fall by tens of dB.
+  const trace = (hysteresis) => {
+    const k = new SoftClipperKernel(SR)
+    k.setParams({ ...params, hysteresis })
+    const o = new Float32Array(sig.length)
+    const t = []
+    for (let off = 0; off < sig.length; off += 128) {
+      const len = Math.min(128, sig.length - off)
+      k.process([sig.subarray(off, off + len)], [o.subarray(off, off + len)], len)
+      for (let i = 0; i < len; i++) t.push(20 * Math.log10(k.tScratch[i]))
+    }
+    return t
+  }
+  const flat = trace(0)
+  const moved = trace(100)
+  let deepest = 0
+  let highest = 0
+  for (let i = 0; i < flat.length; i++) {
+    deepest = Math.max(deepest, flat[i] - moved[i])
+    highest = Math.max(highest, moved[i] - flat[i])
+  }
+  assert.ok(deepest > 0.5, `the memory barely moved the threshold: ${deepest.toFixed(3)} dB`)
+  assert.ok(deepest <= 3 + 1e-6, `the threshold fell ${deepest.toFixed(3)} dB, past HYST_MAX_DB`)
+  assert.ok(highest <= 1e-9, `the memory RAISED the threshold by ${highest.toFixed(4)} dB`)
+
+  // NEVER BOOSTS.
+  const y = processSoftClipperBuffer([sig], SR, params).channelData[0]
+  let peakIn = 0, peakOut = 0
+  for (let i = Math.round(0.5 * SR); i < sig.length; i++) {
+    peakIn = Math.max(peakIn, Math.abs(sig[i]))
+    peakOut = Math.max(peakOut, Math.abs(y[i]))
+  }
+  assert.ok(peakOut <= peakIn + 1e-6, `hysteresis boosted the peak ${peakIn} -> ${peakOut}`)
+
+  // PINNED AT 100 AND OFF THE PANEL — the second pin, on different evidence
+  // from the first. At matched OUTPUT PEAK it costs ~1 dB of total residual
+  // while moving 2.6 dB of distortion off sustained speech onto onsets, and
+  // listening confirmed it does no harm. See HYST_MAX_DB, which also records
+  // why the first pin was wrong.
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.hysteresis, 100,
+    'hysteresis is no longer pinned on')
+  // The product surface reaches the kernel through `toKernelParams`, which
+  // deliberately omits the key. That file cannot be imported here (it pulls a
+  // Vite worker URL), so what is pinned instead is the property that makes
+  // omitting it safe: an absent key leaves the pin on.
+  const absent = new SoftClipperKernel(SR)
+  absent.setParams({ headroomDb: 7.0, emphasisDb: 6, shape: 'tanh3' })
+  assert.equal(absent.params.hysteresis, 100,
+    'an absent hysteresis key unpinned the memory')
+  // The bypass path stays reachable from the kernel, because the tests above
+  // measure 0 against 100.
+  const off = new SoftClipperKernel(SR)
+  off.setParams({ ...params, hysteresis: 0 })
+  const oo = new Float32Array(sig.length)
+  for (let o2 = 0; o2 < sig.length; o2 += 128) {
+    const len = Math.min(128, sig.length - o2)
+    off.process([sig.subarray(o2, o2 + len)], [oo.subarray(o2, o2 + len)], len)
+  }
+  assert.ok(off.getMetering().maxReductionDb < kernel.getMetering().maxReductionDb,
+    'hysteresis 0 did not reduce less than hysteresis 100 at the same Headroom')
+})
+
+test('hysteresis is level-invariant', () => {
+  // The memory is measured relative to the threshold, so the same recording at
+  // a different level gets the same treatment — the property every control in
+  // this stage has to hold.
+  const probe = concat(speechLike(4, 0.4, 83), speechLike(3, 0.4, 89))
+  const base = { thresholdMode: 'fixed', emphasisDb: 0, shape: 'tanh3', hysteresis: 100 }
+  const a = processSoftClipperBuffer([probe], SR, { ...base, fixedThresholdDb: -14 }).channelData[0]
+  const louder = new Float32Array(probe.length)
+  for (let i = 0; i < probe.length; i++) louder[i] = probe[i] * dbToLin(6)
+  const b = processSoftClipperBuffer([louder], SR, { ...base, fixedThresholdDb: -8 }).channelData[0]
+  let worst = 0
+  for (let i = Math.round(SR); i < probe.length; i++) {
+    worst = Math.max(worst, Math.abs(b[i] / dbToLin(6) - a[i]))
+  }
+  assert.ok(worst < 2e-3, `hysteresis is not level-invariant: worst deviation ${worst}`)
+})
+
+// ── Soften: MOVED TO dsp/tapeCharacter.js ─────────────────────────────────
+//
+// Four tests went with it, and one of them is worth naming here because it was
+// about THIS stage rather than about the limiter: `soften is absent at zero and
+// never boosts` pinned that the shipped patch was bit-identical to the build
+// before Soften existed. That guarantee is now unconditional — there is no
+// control here that can forfeit it — so the stage's transparency tests carry it
+// instead.
+//
+// ⚠ THE ONE THAT DID NOT SURVIVE INTACT: `soften is level-invariant`. Soften's
+// allowance scaled with this stage's character reference, so its invariance was
+// this stage's invariance. In the module the reference is the caller's to
+// choose, and the test that replaced it pins the weaker, true thing — that the
+// allowance scales with whatever reference it is given.
+
+test('HF Emphasis is pinned and off the faceplate', () => {
+  // ⚠ THE PIN IS 0 NOW, AND IT IS NO LONGER A JUDGEMENT — it is what the
+  // panel's contract requires. The panel is one ceiling in dBFS captioned
+  // "peaks stop here"; the curve compares the PRE-EMPHASISED signal against the
+  // threshold, so with any non-zero emphasis where a sample crosses depends on
+  // its own HF content and no single dBFS number can describe it. Measured on
+  // four real files x two presets, output peak minus the ceiling set: 1.43 to
+  // 5.04 dB of escape at emphasis 7, and 0.000 at emphasis 0.
+  //
+  // The aiming is genuinely given up. It remains reachable from the admin
+  // tuning panel for anyone who wants to measure it.
+  //
+  // ⚠ "OFF THE SURFACE" IS NOW "OFF THE FACEPLATE": the knob exists on the
+  // hidden admin tuning panel (softClipperTuning.js). What must still hold is
+  // that an ABSENT key leaves the pin alone — the kernel merges partials over
+  // its own defaults, so a param object that carries `emphasisDb: undefined`
+  // would overwrite the pin rather than fall back to it. That is why
+  // toKernelParams forwards the key only when it holds a real number.
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb, 0,
+    'the HF Emphasis pin moved')
+  const absent = new SoftClipperKernel(SR)
+  absent.setParams({ headroomDb: 7.0, shape: 'tanh3' })
+  assert.equal(absent.params.emphasisDb, SOFT_CLIPPER_KERNEL_DEFAULTS.emphasisDb,
+    'an absent emphasisDb key unpinned the emphasis')
+})
+
+// ── Hybrid peak path (LIMITER_MAX_ABOVE_DB) ─────────────────────────────────
+
+test('the limiter is absent at zero, latency included', () => {
+  // A bypass that still ran the delay would shift the timeline by 4 ms for a
+  // control set to zero, so zero has to mean the build before the limiter
+  // existed — not merely something similar.
+  //
+  // ⚠ THIS IS NO LONGER THE DEFAULT PATCH. The kernel ships `limiter: 100`, so
+  // what this pins is the bypass, and the comparison is against a second
+  // explicit render rather than against the default. Reading a bypass off a
+  // default is exactly how a moved default turns a guarantee into a tautology.
+  const sig = concat(speechLike(4, 0.7, 97), speechLike(3, 0.7, 101))
+  const base = { headroomDb: 7.0, shape: 'tanh3' }
+  const a = processSoftClipperBuffer([sig], SR, { ...base, limiter: 0 })
+  const b = processSoftClipperBuffer([sig], SR, { ...base, limiter: 0 })
+  assert.equal(a.latencySamples, b.latencySamples, 'limiter 0 changed the latency')
+  assert.equal(a.latencySamples, SOFT_CLIPPER_LATENCY_SAMPLES)
+  for (let i = 0; i < sig.length; i++) {
+    assert.equal(a.channelData[0][i], b.channelData[0][i], `limiter 0 altered sample ${i}`)
+  }
+})
+
+test('the shipped default runs the hybrid path, latency and all', () => {
+  // ⚠ THE DEFAULT MOVED TO limiter 100, AND IT IS NOT A COSMETIC DEFAULT.
+  // Engaged, the stage delays by 242 samples instead of 50 and its gain
+  // envelope reaches below the threshold — measured elsewhere in this repo at
+  // 24-36% of sub-threshold samples ducked by 2.2-5.4 dB. Anything that
+  // renders through this stage inherits both. Pinned so the change is visible
+  // from the tests rather than only from the audio.
+  const sig = concat(speechLike(4, 0.7, 97), speechLike(3, 0.7, 101))
+  const base = { headroomDb: 7.0, shape: 'tanh3' }
+  const shipped = processSoftClipperBuffer([sig], SR, base)
+  const bypassed = processSoftClipperBuffer([sig], SR, { ...base, limiter: 0 })
+  assert.equal(SOFT_CLIPPER_KERNEL_DEFAULTS.limiter, 100, 'the limiter default moved')
+  assert.ok(shipped.latencySamples > bypassed.latencySamples,
+    `the default did not engage the limiter: ${shipped.latencySamples} samples`)
+})
+
+test('the balance moves peak control off the curve and onto the limiter', () => {
+  // THE CLAIM THE HYBRID IS FOR. Raising the knob should leave the curve with
+  // progressively less to do — that is the whole point, since the curve is the
+  // part that makes harmonics. Measured on real narration the curve's peak
+  // reduction runs 3.57 -> 2.45 -> 0.85 -> 0.02 dB across the knob.
+  // ⚠ THE PROBE NEEDS REAL PEAKS, and plain speechLike does not have them —
+  // at any sane Headroom the curve reaches 0.08 dB on it and the gradation is
+  // invisible. Plosive-shaped outliers on top of it are what actually reach
+  // the curve. Thirteenth time synthetic material has been too clean.
+  const sig = speechLike(6, 0.55, 103)
+  {
+    const burst = Math.round(0.03 * SR)
+    for (let k = 0; k < 12; k++) {
+      const at = Math.round((0.4 + k * 0.45) * SR)
+      for (let j = 0; j < burst && at + j < sig.length; j++) {
+        sig[at + j] += 0.9 * Math.sin((Math.PI * j) / burst) ** 2 * Math.sin((2 * Math.PI * 110 * j) / SR)
+      }
+    }
+  }
+  const curveWork = (limiter) => {
+    const k = new SoftClipperKernel(SR)
+    k.setParams({ headroomDb: 2.0, shape: 'tanh3', limiter })
+    const o = new Float32Array(sig.length)
+    let gr = 0
+    for (let off = 0; off < sig.length; off += 128) {
+      const n = Math.min(128, sig.length - off)
+      k.process([sig.subarray(off, off + n)], [o.subarray(off, off + n)], n)
+      if (off > SR) gr = Math.max(gr, k.getMetering().maxReductionDb)
+    }
+    return gr
+  }
+  const work = [0, 50, 100].map(curveWork)
+  assert.ok(work[2] < work[0] * 0.5,
+    `the limiter did not take work off the curve: ${work.map(v => v.toFixed(2)).join(' -> ')} dB`)
+  for (let i = 1; i < work.length; i++) {
+    assert.ok(work[i] <= work[i - 1] + 0.2,
+      `curve work did not fall monotonically: ${work.map(v => v.toFixed(2)).join(' -> ')} dB`)
+  }
+  // ⚠ AND THE MIDDLE HAS TO BE GENUINELY IN THE MIDDLE. Dropping the ceiling
+  // factor — so the limiter always aims at T regardless of the knob — turns
+  // the balance into an on/off switch and still satisfies both assertions
+  // above, because the endpoints are unchanged and the sequence stays
+  // monotonic. Only the gradation catches it.
+  assert.ok(work[1] > work[2] + 0.5 && work[1] < work[0] - 0.2,
+    `the balance is not gradual, it is a switch: ${work.map(v => v.toFixed(2)).join(' -> ')} dB`)
+})
+
+test('the reported latency matches where the audio actually is', () => {
+  // ⚠ THE LATENCY IS VARIABLE, so a caller that assumed the constant would
+  // misalign by 4 ms. An impulse is the cleanest way to ask where the output
+  // really landed.
+  for (const limiter of [0, 100]) {
+    const N = SR
+    const x = new Float32Array(N)
+    x[N >> 1] = 0.02      // well under any threshold, so nothing reshapes it
+    const r = processSoftClipperBuffer([x], SR, { headroomDb: 7.0, shape: 'tanh3', limiter })
+    let at = -1, best = 0
+    for (let i = 0; i < N; i++) {
+      const v = Math.abs(r.channelData[0][i])
+      if (v > best) { best = v; at = i }
+    }
+    assert.equal(at - (N >> 1), r.latencySamples,
+      `limiter ${limiter}: impulse landed ${at - (N >> 1)} samples late, reported ${r.latencySamples}`)
+  }
+})
+
+test('the residual reports the curve, not the limiter', () => {
+  // ⚠ THE DISTINCTION THAT MADE THE HEAD-TO-HEAD COMPARISON MEANINGLESS. The
+  // limiter's gain reduction is intended, not distortion; feeding the dry side
+  // of the residual post-limiter is what keeps RESIDUAL meaning "what the
+  // curve added". With the limiter doing all the work the curve is idle, so
+  // the residual has to fall, not rise.
+  const sig = concat(speechLike(5, 0.8, 109), speechLike(4, 0.8, 113))
+  const residual = (limiter) => {
+    const k = new SoftClipperKernel(SR)
+    k.setParams({ headroomDb: 5.0, shape: 'tanh3', limiter })
+    const o = new Float32Array(sig.length)
+    for (let off = 0; off < sig.length; off += 128) {
+      const n = Math.min(128, sig.length - off)
+      k.process([sig.subarray(off, off + n)], [o.subarray(off, off + n)], n)
+    }
+    return k.residualDbc
+  }
+  assert.ok(residual(100) < residual(0) - 3,
+    `the residual did not fall as the curve went idle: ${residual(0).toFixed(1)} -> ${residual(100).toFixed(1)} dBc`)
+})
+
+// ── Preview / apply agreement ──────────────────────────────────────────────
+
+test('Soften delivers the same depth cold as it does warmed up', () => {
+  // ⚠ THE REPORTED DEFECT: the applied audio was less softened than the
+  // preview, every time. The preview runs the kernel continuously, so its
+  // speech tracker is settled; an offline region render starts it COLD, and
+  // Soften's allowance was scaled by that tracker. A larger reference is a
+  // larger allowance, so the apply path bit less all the way through — measured
+  // at 1.5-2.3 dB on a 10 s region of real narration.
+  //
+  // Referencing the allowance to T instead makes the whole thing history-free
+  // in fixed mode, since T is then a constant the user set. This is that
+  // property: the same audio through a WARMED kernel and a COLD one must give
+  // the same Soften, and the mutation it catches is scaling the allowance by
+  // anything that has to converge.
+  const lead = concat(speechLike(6, 0.55, 11), speechLike(6, 0.2, 13))
+  const region = concat(speechLike(4, 0.5, 71), speechLike(3, 0.5, 73))
+  const patch = { thresholdMode: 'fixed', fixedThresholdDb: -12, emphasisDb: 0, shape: 'tanh3' }
+
+  const depth = (signal, offset, soften) => {
+    const wet = processSoftClipperBuffer([signal], SR, { ...patch, soften }).channelData[0]
+    const dry = processSoftClipperBuffer([signal], SR, { ...patch, soften: 0 }).channelData[0]
+    let sq = 0, n = 0
+    for (let i = offset; i < signal.length; i++) { const d = wet[i] - dry[i]; sq += d * d; n++ }
+    return 10 * Math.log10(sq / n + 1e-30)
+  }
+
+  for (const soften of [60, 100]) {
+    // Warmed: the region preceded by 12 s of real material, measured from the
+    // region only. Cold: the region on its own, measured from its start.
+    const warmed = depth(concat(lead, region), lead.length, soften)
+    const cold = depth(region, 0, soften)
+    assert.ok(Math.abs(warmed - cold) < 0.5,
+      `soften ${soften}: cold and warm disagree — ${cold.toFixed(2)} vs ${warmed.toFixed(2)} dB`)
+  }
+})
+
+test('the reported latency is per-patch, and the apply path can ask for it', () => {
+  // ⚠ THE SECOND HALF OF THE SAME REPORT. `SOFT_CLIPPER_LATENCY_SAMPLES` is the
+  // OVERSAMPLER's 50 samples; the limiter adds its lookahead on top and the
+  // limiter now ships engaged. The apply path was trimming 50 from a render
+  // that was delayed by 226, which shifts the applied region 176 samples late
+  // and drops that much of its tail.
+  //
+  // The function has to agree with a real kernel or the two drift, and it must
+  // work WITHOUT one — the offline context's length depends on the answer, so
+  // it is needed before anything can be built.
+  for (const params of [{}, { limiter: 0 }, { limiter: 1 }, { limiter: 50 }, { limiter: 100 }]) {
+    const kernel = new SoftClipperKernel(SR)
+    kernel.setParams(params)
+    // The kernel's own flag is only set once it has seen audio, so run a block.
+    const x = new Float32Array(512), y = new Float32Array(512)
+    kernel.process([x], [y], 512)
+    assert.equal(softClipperLatencySamples(params, SR), kernel.latencySamples,
+      `latency disagrees for ${JSON.stringify(params)}`)
+  }
+  // And the shipped patch is NOT the bypass figure — the bug was assuming it.
+  assert.ok(softClipperLatencySamples({}, SR) > SOFT_CLIPPER_LATENCY_SAMPLES,
+    'the shipped default no longer engages the limiter, or the constant is back')
+  assert.equal(softClipperLatencySamples({ limiter: 0 }, SR), SOFT_CLIPPER_LATENCY_SAMPLES)
 })

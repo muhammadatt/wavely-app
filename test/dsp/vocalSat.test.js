@@ -313,3 +313,80 @@ test('survives silence without producing NaN', () => {
     assert.ok(Number.isFinite(channelData[0][i]), `non-finite output at ${i}`)
   }
 })
+
+// ── HF Loss (moved here from the soft clipper's Drive knob) ─────────────────
+
+test('HF Loss is absent at zero, not merely flat', () => {
+  // THE RULE THAT BUYS THE RIGHT TO PUT A COLOUR INSIDE AN EXISTING PLUGIN.
+  // People already rely on this plugin's defaults, so the patch that shipped
+  // before this control existed has to be bit-identical rather than close: the
+  // filter is skipped outright at 0, not run at unity gain.
+  const n = 16384
+  const sig = tone(n, 300, 0.5)
+  const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { hfLoss: 0 }).channelData[0]
+  for (let i = 0; i < n; i++) {
+    assert.equal(a[i], b[i], `hfLoss 0 altered sample ${i}`)
+  }
+})
+
+test('HF Loss is a shelf that cuts, never boosts, and deepens with the knob', () => {
+  // The structure is `g*x + (1-g)*lowpass(x)`, which is provably incapable of
+  // boosting: |g + (1-g)*LP| <= g + (1-g)*|LP| <= 1 for any 0 <= g <= 1. The
+  // measurement is here so the proof cannot quietly stop describing the code.
+  //
+  // Drive 0 / bias 0 makes the saturation silent, so the shelf is the only
+  // thing running and the numbers are the filter rather than the plugin.
+  const base = { drive: 0, bias: 0, wetDry: 0 }
+  const at = (f, knob) => {
+    const sig = tone(32768, f, 0.5)
+    const off = processVocalSatBuffer([sig], SR, { ...base, hfLoss: 0 }).channelData[0]
+    const on = processVocalSatBuffer([sig], SR, { ...base, hfLoss: knob }).channelData[0]
+    return 20 * Math.log10(rms(on, 8000) / rms(off, 8000))
+  }
+  // Measured at full knob: -0.22 / -0.79 / -2.34 / -4.75 / -6.51 dB at
+  // 1k / 2k / 4k / 8k / 16k. Stated loosely enough to be about the shape
+  // rather than the fourth decimal, and tightly enough to fail on a corner or
+  // depth change.
+  const full = [1000, 2000, 4000, 8000, 16000].map(f => at(f, 100))
+  for (const v of full) assert.ok(v <= 0.01, `the shelf boosted: ${full.map(x => x.toFixed(2))}`)
+  for (let i = 1; i < full.length; i++) {
+    assert.ok(full[i] < full[i - 1], `not monotonic in frequency: ${full.map(x => x.toFixed(2))}`)
+  }
+  assert.ok(Math.abs(full[0]) < 0.5, `too much at 1 kHz: ${full[0].toFixed(2)} dB`)
+  assert.ok(full[3] < -3 && full[3] > -7, `8 kHz depth moved: ${full[3].toFixed(2)} dB`)
+  // Deeper at a higher setting, at the frequency the control is about.
+  assert.ok(at(8000, 100) < at(8000, 50) - 1, 'the knob is not monotonic in depth')
+})
+
+test('HF Loss acts on the output, so Wet/Dry does not bypass it', () => {
+  // ⚠ THE ONE PLACE THIS PLUGIN'S PARALLEL-BLEND CONTRACT IS DELIBERATELY
+  // BROKEN, and it is the whole claim about what is being modelled: this is the
+  // MEDIUM's bandwidth, not the saturation's, and a medium the dry path
+  // bypasses is not a medium. Measured on real narration, a wet-path version
+  // manages 0.79 dB above 4 kHz at the default blend where this manages 3.77.
+  //
+  // The mutation this catches is moving the filter onto the wet path, where at
+  // wetDry 0 it would do nothing at all.
+  const sig = tone(16384, 8000, 0.5)
+  const base = { drive: 2, bias: 0.5, wetDry: 0 }
+  const off = processVocalSatBuffer([sig], SR, { ...base, hfLoss: 0 }).channelData[0]
+  const on = processVocalSatBuffer([sig], SR, { ...base, hfLoss: 100 }).channelData[0]
+  const cut = 20 * Math.log10(rms(on, 8000) / rms(off, 8000))
+  assert.ok(cut < -3, `HF Loss did nothing at Wet/Dry 0 — it is on the wet path: ${cut.toFixed(2)} dB`)
+})
+
+test('HF Loss is not undone by the output level match', () => {
+  // ⚠ PLACED AFTER `out *= dryRms/outRms`, deliberately. Before it, the level
+  // match reads the energy the filter just removed as a level drop and pushes
+  // the whole signal back up to compensate — the match silently undoing the
+  // tone control. The tell is broadband level: with the filter after the match,
+  // removing treble must make the output QUIETER, not the same.
+  const sig = tone(65536, 8000, 0.5)
+  const base = { drive: 2, bias: 0.5, wetDry: 0.3 }
+  const off = processVocalSatBuffer([sig], SR, { ...base, hfLoss: 0 }).channelData[0]
+  const on = processVocalSatBuffer([sig], SR, { ...base, hfLoss: 100 }).channelData[0]
+  const level = 20 * Math.log10(rms(on, 20000) / rms(off, 20000))
+  assert.ok(level < -2,
+    `removing treble did not lower the output — the level match is undoing it: ${level.toFixed(2)} dB`)
+})

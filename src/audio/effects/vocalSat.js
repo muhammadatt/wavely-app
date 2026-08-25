@@ -31,6 +31,10 @@ export const VOCAL_SAT_DEFAULTS = {
   lowDriveMult: 8.0,
   midDriveMult: 8,
   highDriveMult: 8,
+  // The medium's own bandwidth, 0-100. Moved here from the soft clipper's
+  // Drive knob, where a linear shelf sat inside a stage whose identity is
+  // transparency. 0 is absent, not flat — see HF_LOSS_CORNER_HZ.
+  hfLoss: 0,
 }
 
 /** Map UI param names to kernel param names — 1:1 for this effect. */
@@ -45,6 +49,7 @@ export function toKernelParams(params) {
     lowDriveMult: params.lowDriveMult,
     midDriveMult: params.midDriveMult,
     highDriveMult: params.highDriveMult,
+    hfLoss: params.hfLoss,
   }
 }
 

@@ -251,18 +251,23 @@ class HalfbandStage {
  * that would leave a fractional delay, since a control signal generated at the
  * base rate could then never be aligned exactly with the audio.
  */
-function buildProfile({ name, factor, stage1Taps, stage1Beta, stage2Taps, stage2Beta }) {
-  if (factor !== 2 && factor !== 4) {
-    throw new Error(`oversampling factor must be 2 or 4, got ${factor}`)
+function buildProfile({
+  name, factor, stage1Taps, stage1Beta, stage2Taps, stage2Beta, stage3Taps, stage3Beta,
+}) {
+  if (factor !== 2 && factor !== 4 && factor !== 8) {
+    throw new Error(`oversampling factor must be 2, 4 or 8, got ${factor}`)
   }
   const stage1H = halfbandTaps(stage1Taps, stage1Beta)
-  const stage2H = factor === 4 ? halfbandTaps(stage2Taps, stage2Beta) : null
+  const stage2H = factor >= 4 ? halfbandTaps(stage2Taps, stage2Beta) : null
+  const stage3H = factor === 8 ? halfbandTaps(stage3Taps, stage3Beta) : null
 
   const m1 = (stage1Taps - 1) / 2
-  const m2 = factor === 4 ? (stage2Taps - 1) / 2 : 0
-  // Each stage delays by M samples at the rate it outputs, so the upsample path
-  // costs m1/2 + m2/4 base-rate samples and the downsample path the same again.
-  const upsampleDelaySamples = factor === 4 ? m1 / 2 + m2 / 4 : m1 / 2
+  const m2 = factor >= 4 ? (stage2Taps - 1) / 2 : 0
+  const m3 = factor === 8 ? (stage3Taps - 1) / 2 : 0
+  // Each stage delays by M samples at the rate it OUTPUTS, so stage 1 costs
+  // m1/2 base-rate samples, stage 2 m2/4 and stage 3 m3/8 — and the downsample
+  // path costs the same again.
+  const upsampleDelaySamples = m1 / 2 + m2 / 4 + m3 / 8
   if (!Number.isInteger(upsampleDelaySamples)) {
     throw new Error(
       `${name}: oversampler delays must be whole base-rate samples, got ${upsampleDelaySamples}`,
@@ -274,6 +279,7 @@ function buildProfile({ name, factor, stage1Taps, stage1Beta, stage2Taps, stage2
     factor,
     stage1H,
     stage2H,
+    stage3H,
     upsampleDelaySamples,
     latencySamples: 2 * upsampleDelaySamples,
   }
@@ -294,6 +300,33 @@ export const COMPRESSOR_OVERSAMPLE = buildProfile({
   stage1Beta: 9.5,
   stage2Taps: 17,
   stage2Beta: 7.0,
+})
+
+/**
+ * Compressor profile at 8x — EXPERIMENTAL, not on any shipping path.
+ *
+ * Exists to answer one question: how much of the soft clipper's residual is
+ * fold-back from the 4x path rather than genuine in-band harmonics. Two
+ * improvised instruments failed to measure that (see the aliasing note in
+ * CLAUDE.md); building the real thing and differencing the outputs uses tested
+ * code instead, which is why this is here.
+ *
+ * Stage 3 runs 4x -> 8x, where the transition band is enormous and a short
+ * filter is plenty — the same 17 taps stage 2 uses. Latency works out at
+ * 23 + 2 + 1 = 26 base-rate samples each way, so 52 rather than 4x's 50.
+ * ⚠ THAT DIFFERENCE MATTERS FOR THE COMPARISON: the two paths do not have the
+ * same delay, so anything differencing them must align on each profile's own
+ * latency rather than assuming they match.
+ */
+export const COMPRESSOR_OVERSAMPLE_8X = buildProfile({
+  name: 'compressor8x',
+  factor: 8,
+  stage1Taps: 93,
+  stage1Beta: 9.5,
+  stage2Taps: 17,
+  stage2Beta: 7.0,
+  stage3Taps: 17,
+  stage3Beta: 7.0,
 })
 
 /**
@@ -359,19 +392,26 @@ export class Oversampler {
     this.factor = profile.factor
     this.stage1 = new HalfbandStage(profile.stage1H)
     this.stage2 = profile.stage2H ? new HalfbandStage(profile.stage2H) : null
+    this.stage3 = profile.stage3H ? new HalfbandStage(profile.stage3H) : null
     this.mid = new Float64Array(256)
+    // Only the 8x path needs a second intermediate buffer; at 2x and 4x this
+    // stays empty and costs nothing.
+    this.mid2 = new Float64Array(profile.stage3H ? 512 : 0)
     this.high = new Float64Array(512)
   }
 
   reset() {
     this.stage1.reset()
     this.stage2?.reset()
+    this.stage3?.reset()
     this.mid.fill(0)
+    this.mid2.fill(0)
     this.high.fill(0)
   }
 
   _ensure(n) {
     if (this.mid.length < n * 2) this.mid = new Float64Array(n * 2)
+    if (this.stage3 && this.mid2.length < n * 4) this.mid2 = new Float64Array(n * 4)
     if (this.high.length < n * this.factor) this.high = new Float64Array(n * this.factor)
   }
 
@@ -383,9 +423,13 @@ export class Oversampler {
     this._ensure(n)
     if (this.factor === 2) {
       this.stage1.up(input, this.high, n)
-    } else {
+    } else if (this.factor === 4) {
       this.stage1.up(input, this.mid, n)
       this.stage2.up(this.mid, this.high, 2 * n)
+    } else {
+      this.stage1.up(input, this.mid, n)
+      this.stage2.up(this.mid, this.mid2, 2 * n)
+      this.stage3.up(this.mid2, this.high, 4 * n)
     }
     return this.high
   }
@@ -410,8 +454,14 @@ export class Oversampler {
   down(output, n) {
     if (this.factor === 2) {
       this.stage1.down(this.high, output, n)
-    } else {
+    } else if (this.factor === 4) {
       this.stage2.down(this.high, this.mid, 2 * n)
+      this.stage1.down(this.mid, output, n)
+    } else {
+      // Unwound in the exact reverse of `up`, so the two paths cancel: stage 3
+      // last on the way in is stage 3 first on the way out.
+      this.stage3.down(this.high, this.mid2, 4 * n)
+      this.stage2.down(this.mid2, this.mid, 2 * n)
       this.stage1.down(this.mid, output, n)
     }
   }

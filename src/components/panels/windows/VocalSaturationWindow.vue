@@ -13,12 +13,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   vsDrive, vsWetDry, vsBias, vsSoftness,
   vsLowCrossover, vsMidCrossover,
-  vsLowDriveMult, vsMidDriveMult, vsHighDriveMult,
+  vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
   vsPreview, vsInputLevels, vsOutputLevels, hasSelection,
   togglePreview,
   syncDrive, syncWetDry, syncBias, syncSoftness,
   syncLowCrossover, syncMidCrossover,
-  syncLowDriveMult, syncMidDriveMult, syncHighDriveMult,
+  syncLowDriveMult, syncMidDriveMult, syncHighDriveMult, syncHfLoss,
   apply, teardown, closeModal,
 } = useVocalSaturation()
 
@@ -93,6 +93,23 @@ async function applyAndClose() {
                   :value-font-px="13"
                   label="Wet / Dry" :accent="ACCENT" :format-value="percent"
                   :disabled="!vsPreview" />
+          </div>
+          <!-- THE MEDIUM'S OWN BANDWIDTH, not the saturation's — which is why
+               it is the one control here that acts on the finished output
+               rather than on the wet path, and therefore the one that is not
+               bypassed at Wet/Dry 0. Measured: on the output it takes 3.77 dB
+               out above 4 kHz at the default blend, where a wet-path version
+               manages 0.79. A tape machine does not roll off only the part of
+               the signal that saturated. -->
+          <div class="w-[72px] pt-[8px]">
+            <Knob :model-value="vsHfLoss" @update:model-value="syncHfLoss"
+                  :min="0" :max="100" :step="1"
+                  :value-font-px="13"
+                  label="HF Loss" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+                  :disabled="!vsPreview" />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ vsHfLoss > 0 ? 'shelf above 4 kHz' : 'off' }}
+            </p>
           </div>
         </div>
 

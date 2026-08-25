@@ -70,6 +70,7 @@
 import { lowpass, highpass, butterworthQs, BiquadCascade } from './dsp/biquad.js'
 import { Oversampler, DelayLine, VOCAL_SAT_OVERSAMPLE } from './dsp/oversample.js'
 import { RmsFollower } from './dsp/envelope.js'
+import { HfLossShelf } from './dsp/tapeCharacter.js'
 
 export const VOCAL_SAT_LATENCY_SAMPLES = VOCAL_SAT_OVERSAMPLE.latencySamples
 
@@ -83,7 +84,80 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
   lowDriveMult: 5.0,
   midDriveMult: 0.1,
   highDriveMult: 0.1,
+  // ── Medium control (see HF_LOSS_CORNER_HZ) ───────────────────────────────
+  // 0-100, and ABSENT at 0 rather than flat: the filter is skipped outright, so
+  // the patch that shipped before it existed is bit-identical. The same rule the
+  // soft clipper's emphasis pair follows, and the thing that buys the right to
+  // put medium colouring inside a plugin whose existing defaults people already
+  // rely on.
+  hfLoss: 0,
 }
+
+/**
+ * HF LOSS — the top end softening as the medium is pushed, tape-style.
+ *
+ * ⚠ THE FILTER AND ITS CONSTANTS LIVE IN dsp/tapeCharacter.js, not here. It
+ * arrived from the soft clipper, where it was one third of a Drive knob inside
+ * a stage whose identity is transparency; it is a plain linear filter and
+ * belonged in neither place as a private copy. That module is where the rest of
+ * the tape-character family waits for the plugin that will use it, and keeping
+ * one owner is what stops this becoming two constants that drift.
+ *
+ * What it is: a first-order high shelf built as a blend, `g*x + (1-g)*LP(x)`,
+ * with a constant depth. Exactly transparent at g = 1 and provably incapable of
+ * boosting. Measured here at full knob: -0.22 / -0.79 / -2.34 / -4.75 / -6.51
+ * dB at 1k / 2k / 4k / 8k / 16k.
+ */
+
+/**
+ * ⚠ SOFTEN IS NOT HERE, AND THE ATTEMPT TO BRING IT IS WORTH RECORDING.
+ *
+ * Soften — a limit on how fast the waveform may move — was the soft clipper's
+ * other colour control and was meant to land here beside HF Loss. It was built,
+ * measured in three placements at three depths on real narration, and removed
+ * again. What follows is why, so nobody spends the afternoon twice.
+ *
+ * WHAT IT NEEDS TO WORK: a CLEAN, BROADBAND signal, at the oversampled rate,
+ * just ahead of ONE nonlinearity, with its allowance referenced near the level
+ * that nonlinearity acts at. In the soft clipper it had all four, and took
+ * 4-10 kHz down 3.31 dB at full knob while REDUCING that stage's own distortion
+ * by 3.9 dB. This plugin's topology offers none of them:
+ *
+ *  - The band split means there is no broadband signal at the oversampled rate
+ *    until AFTER the three transfer curves. Limiting there measured a tilt of
+ *    +0.66 and +1.38 dB — HF RISING, on a control that provably cannot boost.
+ *    Slew-limiting an already-saturated, LF-dominated sum makes it triangular,
+ *    and a triangle is harmonics: past a certain depth it stops being a
+ *    softener and becomes a distortion generator. At MIN_SCALE 0.001 that
+ *    reaches +3.29 dB.
+ *  - Limiting the high band alone before its transfer is inert — worst -0.13 dB
+ *    at any depth, because that band is already band-limited and lightly driven.
+ *  - Limiting all three bands before their transfers is the best of them and is
+ *    still only -0.11 to -0.21 dB of tilt, and it turns positive too (+0.65) as
+ *    soon as the depth is enough to bite the low band.
+ *
+ * So the ceiling on what Soften can do here is about -0.2 dB against -3.31 in
+ * its previous home, and every route to more inverts its sign. A control that
+ * is inert until it starts doing the opposite of its name is not a control.
+ *
+ * ⚠ THE SECOND HALF OF THE PROBLEM IS THE REFERENCE, and it is worth stating
+ * separately because it would bite any future attempt. This plugin is not
+ * level-invariant — drive multiplies absolute sample values into a fixed
+ * tanh/arctan — so there is no tracked operating level to reference an
+ * allowance to, and importing the clipper's gated speech tracker would mean
+ * carrying a copy of its detector. Against a full-scale reference the shipped
+ * MIN_SCALE of 0.02 puts the allowance at 0.0314, which sits at the p99 of the
+ * wet path's own slope distribution (measured: p99 3.0e-2 to 5.5e-2, p50 1.8e-4
+ * to 2.1e-3) — it bites the top 1% of samples and nothing else.
+ *
+ * ⚠ AND THE FIRST MEASUREMENT OF ALL THIS READ POSITIVE FOR A SECOND REASON
+ * THAT IS NOT THE EFFECT. Soften would sit inside the wet path, upstream of
+ * both `wet *= dryRms/wetRms` and `out *= dryRms/outRms`, so whatever energy it
+ * removes is partly handed back as broadband gain. An absolute >4 kHz reading
+ * therefore rises even where the filter is working. Any future attempt must
+ * measure TILT — the band against the broadband — or it is measuring the level
+ * match.
+ */
 
 /**
  * Time constant for the three level-matching followers. Long enough not to
@@ -145,6 +219,11 @@ export class VocalSatKernel {
     this.butterQs = butterworthQs(4)
     this.channels = []
     this.params = { ...VOCAL_SAT_KERNEL_DEFAULTS }
+    // The shelf owns its own filter state and its depth ramp — see HfLossShelf,
+    // which advances the ramp once per BLOCK rather than once per channel per
+    // sample. The inline version this replaced advanced it inside the channel
+    // loop, so on stereo the 30 ms ramp converged in 15.
+    this.hfLoss = new HfLossShelf(sampleRate)
     this.setParams({})
   }
 
@@ -165,6 +244,12 @@ export class VocalSatKernel {
       c.lp.setSections(this.lpSections)
       c.hp.setSections(this.hpSections)
     }
+
+    // ── Medium control ───────────────────────────────────────────────────
+    // Read as 0-100 and ABSENT below the epsilon, so the shipped patch runs
+    // no filter and takes no branch.
+    this.hfLossMaxDb = HfLossShelf.depthFor(p.hfLoss ?? 0)
+    this.hfLossActive = HfLossShelf.isActive(this.hfLossMaxDb)
 
     this.softness = clamp(p.softness, 0, 1)
     this.bias = p.bias
@@ -205,6 +290,11 @@ export class VocalSatKernel {
 
     const { low: lowBuf, high: highBuf, mid: midBuf, wet: wetBuf } = this._scratch(n)
 
+    // ONCE PER BLOCK, BEFORE THE CHANNEL LOOP — see HfLossShelf. The depth is a
+    // parameter ramp shared by every channel; advancing it per channel makes it
+    // converge N times faster on N channels.
+    const hfLossGain = this.hfLossActive ? this.hfLoss.advance(this.hfLossMaxDb, n) : 1
+
     for (let ch = 0; ch < nOut; ch++) {
       const input = inputChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
@@ -233,6 +323,7 @@ export class VocalSatKernel {
           applyTransfer(midUp[j] * midDrive + bias, softness, bias) +
           applyTransfer(highUp[j] * highDrive + bias, softness, bias)
       }
+
       st.downWet.down(wetBuf, n)
 
       // Level matching and the blend stay at the base rate, where the Python
@@ -254,6 +345,35 @@ export class VocalSatKernel {
 
         out[i] = y > 1 ? 1 : y < -1 ? -1 : y
       }
+
+      // HF LOSS — see dsp/tapeCharacter.js.
+      //
+      // ⚠ ON THE FINISHED OUTPUT, NOT ON THE WET PATH, and that is a claim
+      // about what is being modelled. This is the MEDIUM's bandwidth, not the
+      // saturation's: a tape machine does not roll off only the part of the
+      // signal that saturated. Blending a dulled copy underneath a
+      // full-bandwidth dry copy nets very little HF change at any ordinary
+      // Wet/Dry — measured, 0.79 dB against 3.77 at the default blend.
+      //
+      // ⚠ AFTER THE OUTPUT NORMALISATION, deliberately. Placed before it, the
+      // `dry_rms / out_rms` match reads the energy this filter just removed as
+      // a level drop and pushes the whole signal back up to compensate — the
+      // level match undoing the tone control, silently.
+      //
+      // ⚠ THE COST: Wet/Dry 0 is no longer the dry signal once this is engaged.
+      // That is intended and is the one place this plugin's parallel-blend
+      // contract is deliberately broken, because a medium the dry path bypasses
+      // is not a medium. The knob is absent at 0, so the contract holds for
+      // anyone who does not reach for it.
+      //
+      // ⚠ IT NOW RUNS AFTER THE ±1 CLAMP, WHERE THE INLINE VERSION RAN BEFORE
+      // IT. A block pass cannot sit inside the per-sample loop, and the move is
+      // safe in both directions that matter: the clamp only acts on overload,
+      // and the shelf provably cannot boost, so the ±1 guarantee survives
+      // either ordering. On overload it now softens the corner the clamp
+      // squared off rather than handing the clamp an already-softened edge,
+      // which is if anything the more faithful of the two.
+      if (this.hfLossActive) this.hfLoss.process(out, n, ch, hfLossGain)
     }
   }
 
