@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import {
   zoneBounds,
   zoneSettings,
@@ -15,6 +15,8 @@ import {
   zoneIndexAt,
   zonePeakReductions,
 } from './resonanceZoneEdit.js'
+import { HISTORY_SECONDS, ResonanceHistory } from './resonanceHistory.js'
+import { MARK_MIN_DB, findResonanceMarks } from './resonanceMarks.js'
 import {
   createHeldAverage,
   createReadoutThrottle,
@@ -162,17 +164,67 @@ const PEAK_VISIBLE = 0.025
 const REDUCTION_VISIBLE_DB = 0.3
 
 /**
- * Spectrum window, dBFS.
+ * The three overlays, and why they are not parameters.
  *
- * Fixed rather than auto-scaled. An analyser that rescales itself turns "the
- * resonance got quieter" into "everything moved", which is the one comparison
- * this display exists to support. The window is chosen for per-bin levels
- * rather than programme level: speech at -20 dBFS spreads across ~1000 bins, so
- * its formants land near -35 and its noise floor near -85. -102 to -12 puts
- * that in the middle with room for a tone, which reads at its true dBFS.
+ * The default view (design 1c) is removal only: nothing on the plot but what is
+ * being taken out. These fold context back in, and each is independent rather
+ * than the design's single DETAIL button, because they answer different
+ * questions and a user who wants the grid rarely wants a waterfall behind it.
+ *
+ * KEPT OUT OF `params`, like DELTA and SOLO. `applyResonanceRegion` spreads the
+ * param object straight into the kernel, so anything living there is one
+ * careless key away from being rendered into the timeline. These are purely
+ * about what is drawn — the kernel neither sends nor receives them — so the
+ * safest place for them is component state that has no route to the worklet at
+ * all.
+ *
+ * PERSISTED, unlike DELTA and SOLO, and the difference is intent. A monitoring
+ * mode is something you switch on to check one thing and switch off again, so
+ * carrying it across sessions would be a trap. A preference for seeing the grid
+ * is a preference; making someone re-set it every time they open the panel is
+ * the trap.
  */
-const SPEC_DB_MIN = -102
-const SPEC_DB_MAX = -12
+const OVERLAY_STORE_KEY = 'wavely.resotame.overlays'
+
+function loadOverlays() {
+  // Wrapped because a browser set to block site data throws on the accessor
+  // itself rather than returning null, and a panel that will not open because
+  // a preference could not be read is a worse failure than a lost preference.
+  try {
+    const raw = window.localStorage.getItem(OVERLAY_STORE_KEY)
+    if (!raw) return {}
+    const v = JSON.parse(raw)
+    return v && typeof v === 'object' ? v : {}
+  } catch {
+    return {}
+  }
+}
+
+const stored = loadOverlays()
+const showGrid = ref(stored.grid === true)
+const showHistory = ref(stored.history === true)
+const showSpectro = ref(stored.spectro === true)
+
+function toggleOverlay(which) {
+  const ref_ = which === 'grid' ? showGrid : which === 'history' ? showHistory : showSpectro
+  ref_.value = !ref_.value
+  try {
+    window.localStorage.setItem(OVERLAY_STORE_KEY, JSON.stringify({
+      grid: showGrid.value, history: showHistory.value, spectro: showSpectro.value,
+    }))
+  } catch {
+    // A viewer who cannot store the preference still gets it for this session.
+  }
+}
+
+/**
+ * The rolling waterfalls. Built lazily on the first frame that carries a bin
+ * count, and recorded continuously whether or not an overlay is showing — see
+ * resonanceHistory for why.
+ */
+let history = null
+
+onBeforeUnmount(() => { history = null })
 
 /** Frequency grid. Same vocabulary as the EQ plot, so the two read alike. */
 const GRID_HZ = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
@@ -227,6 +279,8 @@ const readoutThrottle = createReadoutThrottle()
  * pair would alternate rather than both refreshing at 10 Hz.
  */
 const hotThrottle = createReadoutThrottle()
+/** The header count and average. Text, so it reads on the readout cadence. */
+const summaryThrottle = createReadoutThrottle()
 const readingDb = ref(0)
 const averageDb = ref(0)
 const hasAverage = ref(false)
@@ -255,6 +309,27 @@ const hotDb = ref(0)
  * Indexed by zone.
  */
 const zonePeaks = ref([])
+
+/**
+ * The named resonances, and why they are recomputed on their own clock.
+ *
+ * A mark is a pill sitting on the plot with a frequency and a depth in it, so
+ * it has to hold still long enough to be read. Recomputing it every frame makes
+ * the set flicker between neighbouring peaks of nearly equal depth and the
+ * pills jump; the source design settles them roughly four times a second and
+ * that is slow enough to read and fast enough to follow a phrase.
+ */
+const MARK_INTERVAL_MS = 280
+/**
+ * Hysteresis on a mark already placed.
+ *
+ * A resonance hovering at the threshold would otherwise have its pill picked up
+ * and dropped every quarter second. Once named, a mark survives down to half
+ * the floor before it goes.
+ */
+const MARK_KEEP_FRACTION = 0.5
+let markAcc = MARK_INTERVAL_MS
+let marks = []
 
 /** Frequency under the pointer, or null. */
 const cursorX = ref(null)
@@ -427,24 +502,91 @@ function draw(dtMs) {
   axis.maxHz = maxHz
 
   drawPlates(ctx, w)
-  drawGrid(ctx, w, xFor, minHz, maxHz)
 
-  // Averaged before anything reads it, so the curves, the peak hold's live
-  // floor and the hotspot readout all describe the same trace. The held curve
-  // inside it is still the kernel's raw maximum — see smoothFrame.
+  // Averaged before anything reads it, so the trace, the peak hold's live floor
+  // and the hotspot readout all describe the same curve. The held curve inside
+  // it is still the kernel's raw maximum — see smoothFrame.
   const shown = frame ? smoothFrame(frame, dtMs) : null
 
-  updatePeaks(shown, dtMs)
-  if (shown) {
-    drawSpectrum(ctx, w, shown, alpha)
-    drawReduction(ctx, w, shown, alpha)
+  // Recorded before anything is drawn and whether or not an overlay is showing:
+  // an overlay switched on to a blank plot cannot answer the question it was
+  // switched on for. Fed the RAW frame rather than the smoothed one — the
+  // smoothing exists to steady a curve being watched, and a waterfall row is a
+  // record of an instant.
+  if (frame) {
+    if (!history) history = new ResonanceHistory(frame.bins, props.accent)
+    else history.reshape(frame.bins, props.accent)
+    history.advance(dtMs, frame)
   }
+
+  // ORDER IS THE DESIGN. Everything before the reduction curve is ground for it;
+  // nothing after it is allowed to cover it except the zone furniture, which is
+  // the control surface rather than a reading.
+  drawWaterfalls(ctx, w)
+  if (showGrid.value) drawGrid(ctx, w, xFor, minHz, maxHz)
+  drawZeroRail(ctx, w)
+
+  updatePeaks(shown, dtMs)
+  if (shown) drawReduction(ctx, w, shown, alpha)
+
   drawZones(ctx, w)
   drawZoneReadouts(ctx, w)
+  drawMarks(ctx, w, alpha)
 
-  drawGrScale(ctx, w)
+  if (showGrid.value) drawGrScale(ctx, w)
   drawAxis(ctx, w, xFor, minHz, maxHz)
   drawCursor(ctx, w)
+}
+
+/**
+ * The two waterfall overlays, behind everything.
+ *
+ * Stretched over the whole plot, which means their vertical axis is TIME while
+ * the curve above them is measured in decibels of reduction. That is the source
+ * design's arrangement and it is deliberate: these are texture, not a second
+ * reading, and the dark scrim over them is what says so. It is also why the
+ * input spectrum CURVE and the threshold staircase have no home in this layout
+ * — a level axis and a time axis cannot share one box, and 1c chose time.
+ *
+ * Both at once is allowed and legible, because they are different pictures: the
+ * carve is mostly dark with white cut marks, the spectrogram is mostly lit.
+ */
+function drawWaterfalls(ctx, w) {
+  if (!history || (!showHistory.value && !showSpectro.value)) return
+  const h = laneH.value
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, 0, w, h)
+  ctx.clip()
+  ctx.imageSmoothingEnabled = true
+  if (showSpectro.value) {
+    ctx.globalAlpha = showHistory.value ? 0.28 : 0.46
+    ctx.drawImage(history.spectro, 0, 0, w, h)
+  }
+  if (showHistory.value) {
+    ctx.globalAlpha = showSpectro.value ? 0.5 : 0.62
+    ctx.drawImage(history.carve, 0, 0, w, h)
+  }
+  ctx.globalAlpha = 1
+  // The scrim is what makes an underlay an underlay. Without it the waterfall
+  // is as loud as the curve and the plot has two heroes.
+  ctx.fillStyle = 'rgba(8,10,13,.42)'
+  ctx.fillRect(0, 0, w, h)
+  ctx.restore()
+}
+
+/**
+ * The 0 dB rail the reduction curve hangs from.
+ *
+ * Always drawn, grid or no grid. With the grid off it is the only horizontal
+ * reference on the plot, and a curve hanging from nothing reads as a curve
+ * floating; with the grid on it is the top line of the scale, brighter than the
+ * rest because zero is where the effect is doing nothing and every trough is
+ * measured from it.
+ */
+function drawZeroRail(ctx, w) {
+  ctx.fillStyle = 'rgba(255,255,255,.16)'
+  ctx.fillRect(0, 0.5, w, 1)
 }
 
 /** The recessed plate the whole plot sits in. */
@@ -453,6 +595,13 @@ function drawPlates(ctx, w) {
   ctx.fillRect(0, 0, w, laneH.value)
 }
 
+/**
+ * Frequency rules up, reduction rules across.
+ *
+ * Only drawn when the GRID overlay is on. In the default view the plot carries
+ * the 0 dB rail and nothing else, which is what "removal only" means — the
+ * numbers are on the marks and in the header, not ruled across the plot.
+ */
 function drawGrid(ctx, w, xFor, minHz, maxHz) {
   ctx.fillStyle = 'rgba(255,255,255,.05)'
   for (const hz of GRID_HZ) {
@@ -460,6 +609,14 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
     const x = Math.round(xFor(hz)) + 0.5
     if (x >= w) continue
     ctx.fillRect(x, 0, 1, laneH.value)
+  }
+  // Horizontals come from the same marks the numerals use, so a rule and its
+  // number can never disagree about where a decibel is.
+  for (const mark of grScaleMarks(props.fullScaleDb)) {
+    if (mark.db === 0) continue
+    const y = Math.round(mark.fraction * laneH.value) + 0.5
+    if (y >= laneH.value - 2) continue
+    ctx.fillRect(0, y, w, 1)
   }
 }
 
@@ -567,86 +724,113 @@ function drawReduction(ctx, w, frame, alpha) {
 }
 
 /**
- * Input and threshold, as the GROUND the reduction curve is read against.
+ * The named resonances: a dot on the trace, and a pill under it.
  *
- * The threshold is the reference plus Selectivity, added here rather than in the
- * kernel so the line moves with the knob on the frame it is turned instead of
- * on the next one out of the worklet. Everything at or under it is left alone;
- * everything over it is what the reduction curve is taking out — which is now
- * drawn directly above it in the same box rather than in a lane of its own.
+ * This is the one thing the per-zone readouts cannot say. A zone number tells
+ * you which BAND is being worked; a mark tells you which FREQUENCY, which is
+ * what someone reaches for the EQ with. The two coexist rather than replacing
+ * each other — the numbers stay tied to the columns the knobs edit, and the
+ * pills float wherever the peaks actually are.
  *
- * THE OUTPUT CURVE AND THE REMOVED SLIVER ARE GONE, and neither was carrying its
- * weight. On this 90 dB window the sliver measured about 5 px at the stock mean
- * cut — the thickness of the strokes around it — so the one element that claimed
- * to show removed resonance could not be read; the reduction curve says the same
- * thing 3-4x larger and against numerals. The output curve went with it because
- * it is the input minus that same reduction, and a third curve tracing the
- * input everywhere the effect is idle is ink spent on agreement. What remains is
- * the pair that the reduction curve cannot say by itself: what the file has, and
- * where the line was drawn.
+ * ALTERNATING VERTICAL OFFSET, because pills are wider than the resonances they
+ * name. Two peaks a third of an octave apart put their labels on top of one
+ * another at any real plot width; dropping every other pill by its own height
+ * turns a collision into a stagger. The marks arrive in frequency order so that
+ * alternation is left-to-right rather than arbitrary.
  *
- * (The kernel still computes and posts `output` — it is summarised per display
- * cell from its own bin rather than derived here, which is a real distinction
- * and worth keeping until this display has been listened to. Nothing draws it.)
+ * Clamped away from both edges so a pill near 20 Hz or 20 kHz is not half cut
+ * off by the plate — the dot stays at the true frequency, only the label moves,
+ * because the dot is the measurement and the label is the annotation.
  */
-function drawSpectrum(ctx, w, frame, alpha) {
-  const { mag, reference, bins } = frame
-  const top = 0
-  const height = laneH.value
-  const bottom = height
-  const xStep = w / (bins - 1)
-  const yFor = (db) => {
-    const t = (db - SPEC_DB_MIN) / (SPEC_DB_MAX - SPEC_DB_MIN)
-    return bottom - Math.max(0, Math.min(1, t)) * height
-  }
+const PILL_W = 96
+const PILL_H = 20
 
-  ctx.globalAlpha = alpha
+function drawMarks(ctx, w, alpha) {
+  if (!marks.length) return
+  const h = laneH.value
+  const yFor = db => grFraction(db, props.fullScaleDb) * h
+
   ctx.save()
-  ctx.beginPath()
-  ctx.rect(0, top, w, height)
-  ctx.clip()
+  ctx.globalAlpha = alpha
+  ctx.textBaseline = 'middle'
+  marks.forEach((m, i) => {
+    const x = (m.pos) * w
+    const yDot = yFor(m.db)
+    // Below the dot normally; above it when the trough is deep enough that a
+    // pill underneath would run off the bottom of the plot.
+    const below = yDot + PILL_H + 16 < h
+    const yPill = below ? yDot + 10 + (i % 2 ? PILL_H + 4 : 0)
+      : yDot - PILL_H - 10 - (i % 2 ? PILL_H + 4 : 0)
+    const cx = Math.max(PILL_W / 2 + 2, Math.min(w - PILL_W / 2 - 2, x))
 
-  // Input: filled, low contrast. It is the ground the other two are read
-  // against, not a curve to be followed.
-  ctx.beginPath()
-  ctx.moveTo(0, bottom)
-  for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(mag[d]))
-  ctx.lineTo(w, bottom)
-  ctx.closePath()
-  ctx.fillStyle = 'rgba(255,255,255,.07)'
-  ctx.fill()
-  ctx.lineWidth = 1
-  ctx.strokeStyle = 'rgba(255,255,255,.26)'
-  ctx.stroke()
+    ctx.fillStyle = props.accent
+    ctx.beginPath()
+    ctx.arc(x, yDot, 3, 0, Math.PI * 2)
+    ctx.fill()
 
-  // Threshold: dashed, because it is a decision boundary rather than a signal.
-  //
-  // ONE LINE, STEPPED PER ZONE. Each zone carries its own Selectivity, so the
-  // threshold is a staircase with the same crossfade at each boundary that the
-  // kernel applies — this is the kernel's decision boundary drawn where the
-  // decision is made.
-  //
-  // A READOUT, NOT THE EDITOR. It rides `reference[]`, so it moves with the
-  // audio several times a second; the editable copy of the same number is a
-  // knob under the plot, which does not.
-  const spanOct = Math.log2(frame.maxHz / frame.minHz)
-  const hzAt = d => frame.minHz * Math.pow(2, (d / (bins - 1)) * spanOct)
-  const thresholdAt = d => zoneSettingsAt(props.zones, hzAt(d)).selectivity
+    // A leader only when the label had to move sideways to fit, so the common
+    // case carries no extra ink.
+    if (Math.abs(cx - x) > 1) {
+      ctx.strokeStyle = tint(props.accent, 0.35)
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x, yDot)
+      ctx.lineTo(cx, yPill + PILL_H / 2)
+      ctx.stroke()
+    }
 
-  ctx.beginPath()
-  for (let d = 0; d < bins; d++) {
-    const y = yFor(reference[d] + thresholdAt(d))
-    d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
-  }
-  ctx.setLineDash([3, 3])
-  ctx.lineWidth = 1
-  ctx.strokeStyle = 'rgba(255,255,255,.42)'
-  ctx.stroke()
-  ctx.setLineDash([])
+    ctx.fillStyle = 'rgba(8,10,13,.82)'
+    ctx.beginPath()
+    roundRect(ctx, cx - PILL_W / 2, yPill, PILL_W, PILL_H, 5)
+    ctx.fill()
+    ctx.strokeStyle = tint(props.accent, 0.4)
+    ctx.lineWidth = 1
+    ctx.stroke()
 
+    ctx.font = "600 10px 'JetBrains Mono',monospace"
+    ctx.textAlign = 'left'
+    ctx.fillStyle = `color-mix(in srgb, ${props.accent} 60%, #ffffff)`
+    ctx.fillText(formatHz(m.hz), cx - PILL_W / 2 + 8, yPill + PILL_H / 2 + 0.5)
+    ctx.textAlign = 'right'
+    ctx.font = "500 10px 'JetBrains Mono',monospace"
+    ctx.fillStyle = 'rgba(255,255,255,.55)'
+    ctx.fillText(`-${m.db.toFixed(1)}`, cx + PILL_W / 2 - 8, yPill + PILL_H / 2 + 0.5)
+  })
   ctx.restore()
   ctx.globalAlpha = 1
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
 }
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
+}
+
+/**
+ * ⚠ THE INPUT SPECTRUM CURVE AND THE THRESHOLD STAIRCASE ARE GONE, and this is
+ * the real cost of the 1c layout rather than a simplification.
+ *
+ * 1c is "removal only": the plot's vertical axis is decibels of REDUCTION, and
+ * the overlays that fold context back in are waterfalls whose vertical axis is
+ * TIME. Neither is a level axis, so there is nowhere in this layout for a curve
+ * measured in dBFS to be drawn — not behind the trace, not with an overlay on.
+ * It is not a matter of ink.
+ *
+ * What that costs: the threshold staircase was the only place per-zone
+ * Selectivity was legible WHILE the knob was being turned — the kernel's own
+ * decision boundary, drawn where the decision is made. Under 1c, Selectivity is
+ * judged by the cut it produces instead: the trace, the per-zone deepest-cut
+ * numbers and the marks. That is a slower loop for setting a threshold, and it
+ * is the deliberate trade the layout makes.
+ *
+ * If it turns out to matter, the way back is a fourth overlay carrying its own
+ * level-axis lane rather than a curve squeezed into this one.
+ */
 
 /**
  * Numerals down the right, and the rules that carry them across.
@@ -732,6 +916,8 @@ function updatePeaks(frame, dtMs) {
       }
     }
     hotDb.value = 0
+    if (marks.length) marks = []
+    if (markSummary.value.count) markSummary.value = { count: 0, avgDb: 0 }
     if (zonePeaks.value.length) zonePeaks.value = []
     cursorText.value = ''
     return
@@ -768,6 +954,34 @@ function updatePeaks(frame, dtMs) {
       hotFraction = f
       hotIndex = d
     }
+  }
+
+  // WHICH resonances are named is decided four times a second, so the pills hold
+  // still long enough to read. HOW DEEP each one is, is re-read every frame from
+  // the same curve everything else on the plot is drawn from.
+  //
+  // Both halves are needed. Recomputing the set every frame makes the pills
+  // flicker between neighbouring peaks of nearly equal depth; leaving the depth
+  // frozen for a quarter second makes the pill disagree with the trough directly
+  // under it and with the per-zone number above it — reported as exactly that,
+  // a pill reading -6.1 in a zone whose own readout said -5.6.
+  markAcc += dtMs
+  if (markAcc >= MARK_INTERVAL_MS) {
+    markAcc = 0
+    marks = findResonanceMarks(reduction, bins, minHz, maxHz)
+  }
+  if (marks.length) {
+    const floor = MARK_MIN_DB * MARK_KEEP_FRACTION
+    marks = marks.filter(m => {
+      m.db = reduction[m.bin]
+      return m.db >= floor
+    })
+  }
+
+  let sum = 0
+  for (let d = 0; d < bins; d++) sum += reduction[d]
+  if (summaryThrottle.due(dtMs)) {
+    markSummary.value = { count: marks.length, avgDb: sum / bins }
   }
 
   if (hotThrottle.due(dtMs)) {
@@ -1163,6 +1377,38 @@ const ZONE_HINT = 'Drag in the zone lane to set a zone\u2019s sensitivity, or dr
  * would otherwise be blank, costs no height, and stops as soon as a zone is
  * moved off neutral.
  */
+/**
+ * The header's right-hand summary, refreshed on the marks' own clock.
+ *
+ * A count that flickers between three and four several times a second is worse
+ * than no count, so it is republished only when the mark set is, and the
+ * average comes from the same frame the marks were found in.
+ */
+const markSummary = ref({ count: 0, avgDb: 0 })
+
+/** 1c's right-hand line: how many resonances are being worked, and how hard. */
+const headerSummary = computed(() => {
+  const { count, avgDb } = markSummary.value
+  if (!count) return 'NO RESONANCES TRACKED'
+  return `${count} RESONANCE${count === 1 ? '' : 'S'} TRACKED  ·  AVG -${avgDb.toFixed(2)} dB`
+})
+
+const overlayButtons = computed(() => [
+  { key: 'grid', label: 'GRID', on: showGrid.value, title: 'Frequency and reduction rules' },
+  {
+    key: 'history',
+    label: 'HISTORY',
+    on: showHistory.value,
+    title: `What has been carved over the last ${HISTORY_SECONDS} seconds`,
+  },
+  {
+    key: 'spectro',
+    label: 'SPECTRO',
+    on: showSpectro.value,
+    title: `Input spectrum over the last ${HISTORY_SECONDS} seconds`,
+  },
+])
+
 const idleHint = computed(() =>
   props.zones.length > 1 ? '' : 'DBL-CLICK TO SPLIT A ZONE')
 
@@ -1177,23 +1423,37 @@ const idleHint = computed(() =>
          the scale down the right of the top lane names what it measures, and a
          title naming the panel a second time was the only line here that told
          you nothing you could not read off the plot. -->
-    <div class="flex items-baseline gap-[14px] mb-1.5">
-      <span class="flex items-baseline gap-[9px] shrink-0">
-        <span :style="{
-                font: `700 12px 'JetBrains Mono',monospace`,
-                color: `color-mix(in srgb, ${accent} 65%, #ffffff)`,
-                textShadow: `0 0 8px color-mix(in srgb, ${accent} 55%, transparent)`,
-              }">{{ readingDb.toFixed(1) }} dB</span>
-        <span style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.38)">
-          AVG {{ hasAverage ? averageDb.toFixed(1) : '—' }}
+    <!-- 1c's header: what was taken out, at the size of the thing the panel is
+         for, with the overlay switches beside it.
+
+         The old line led with a running reduction figure and an average, in
+         12 px, sharing a row with a three-item curve legend. Under "removal
+         only" the deepest cut IS the reading — there is no longer a second
+         curve for it to be one of — so it gets the size, and the legend goes:
+         two of the three curves it named no longer exist. -->
+    <div class="flex items-end justify-between gap-[14px] mb-[7px]">
+      <span class="flex items-end gap-[10px] shrink-0">
+        <span class="flex flex-col">
+          <span style="font:500 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">
+            DEEPEST CUT
+          </span>
+          <span class="flex items-baseline gap-[4px]">
+            <span :style="{
+                    font: `500 30px 'Inter',system-ui`,
+                    lineHeight: '1',
+                    color: `color-mix(in srgb, ${accent} 45%, #ffffff)`,
+                    textShadow: `0 0 12px color-mix(in srgb, ${accent} 45%, transparent)`,
+                  }">-{{ readingDb.toFixed(1) }}</span>
+            <span style="font:500 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.35)">dB</span>
+          </span>
         </span>
-        <!-- Second statement of a mode the header pill already shows, and
-             worth the duplication: someone reading the plot to decide whether
-             a cut is landing where they want has their eyes here, not on the
-             title bar, and the sliver being loud is otherwise unexplained. -->
+        <!-- Second statement of a mode the title bar already shows, and worth
+             the duplication: someone reading the plot to decide whether a cut is
+             landing where they want has their eyes here, not on the title bar,
+             and the trace being loud is otherwise unexplained. -->
         <span
           v-show="delta"
-          class="px-[5px] py-[1px] rounded"
+          class="px-[5px] py-[1px] rounded mb-[3px]"
           :style="{
             font: `700 8px 'JetBrains Mono',monospace`,
             letterSpacing: '.12em',
@@ -1203,32 +1463,45 @@ const idleHint = computed(() =>
         >DELTA</span>
       </span>
 
-      <span class="flex items-center gap-[11px] shrink-0"
-            style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(255,255,255,.32)">
-        <span class="flex items-center gap-[4px]">
-          <span :style="{ width: '10px', height: '2px', background: 'rgba(255,255,255,.3)' }"></span>INPUT
-        </span>
-        <span class="flex items-center gap-[4px]">
-          <span :style="{
-            width: '10px', height: '2px',
-            backgroundImage: 'repeating-linear-gradient(90deg,rgba(255,255,255,.45) 0 3px,transparent 3px 6px)',
-          }"></span>THRESHOLD
-        </span>
-        <span class="flex items-center gap-[4px]">
-          <span :style="{ width: '10px', height: '2px', background: accent }"></span>REDUCTION
-        </span>
+      <span class="flex flex-col items-end gap-[5px] min-w-0">
+        <span
+          class="truncate"
+          style="font:500 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)"
+        >{{ headerSummary }}</span>
 
+        <!-- The three overlays. Independent rather than the source design's one
+             DETAIL button: they answer different questions, and someone who
+             wants a grid rarely wants a waterfall behind it. Lit when on, in the
+             accent, so the row reads at a glance as "what is folded in". -->
+        <span class="flex items-center gap-[4px]">
+          <button
+            v-for="o in overlayButtons"
+            :key="o.key"
+            type="button"
+            class="px-[7px] py-[3px] rounded-full transition-colors"
+            :aria-pressed="String(o.on)"
+            :title="o.title"
+            :style="{
+              font: `600 8px 'JetBrains Mono',monospace`,
+              letterSpacing: '.1em',
+              color: o.on ? `color-mix(in srgb, ${accent} 45%, #ffffff)` : 'rgba(255,255,255,.36)',
+              background: o.on ? `color-mix(in srgb, ${accent} 20%, transparent)` : 'rgba(255,255,255,.05)',
+              boxShadow: o.on ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)` : 'inset 0 0 0 1px rgba(255,255,255,.06)',
+            }"
+            @click="toggleOverlay(o.key)"
+          >{{ o.label }}</button>
+        </span>
       </span>
-
-      <!-- Whatever the pointer is over, or where the deepest cut is when it is
-           over nothing. Right-aligned into the space left over, so the text
-           changing length moves nothing else on the line. -->
-      <span
-        class="flex-1 text-right truncate"
-        style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em"
-        :style="{ color: cursorText ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)' }"
-      >{{ zoneText || cursorText || hotspotText || idleHint }}</span>
     </div>
+
+    <!-- Whatever the pointer is over, or the selected zone when it is over
+         nothing. Its own line under the header row, right-aligned, so the text
+         changing length moves nothing else. -->
+    <div
+      class="text-right truncate mb-1.5"
+      style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em"
+      :style="{ color: cursorText ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)' }"
+    >{{ zoneText || cursorText || hotspotText || idleHint }}</div>
 
     <div
       :style="{
