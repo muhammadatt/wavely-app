@@ -442,7 +442,7 @@ export function applyFET1176Region(segments, start, end, params, sampleRate, cha
  *
  * ⚠ THE LATENCY IS PER-PATCH, NOT A CONSTANT. The limiter adds its lookahead
  * only while engaged, and it ships engaged — trimming the oversampler's 50
- * samples when the stage actually delays 226 shifts the whole region 176
+ * samples when the stage actually delays 226 (at 44.1 kHz) shifts the region 176
  * samples late and drops that much of its tail.
  */
 export function applySoftClipperRegion(segments, start, end, params, sampleRate, channels) {

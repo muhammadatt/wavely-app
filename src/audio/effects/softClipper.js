@@ -238,7 +238,8 @@ export const softClipperEffect = {
   name: 'Adaptive Soft Clipper',
   // ⚠ THE BYPASS FIGURE, NOT THE STAGE'S. This is the oversampler's 50 samples;
   // with the limiter engaged — which is the shipped default — the stage delays
-  // by 226 at 44.1 kHz. Nothing in the live chain reads this today, so it is
+  // by about 5 ms — 226 samples at 44.1 kHz, 242 at 48, since the lookahead is
+  // a fixed number of MILLISECONDS. Nothing in the live chain reads this today, so it is
   // wrong metadata rather than a live defect, but the apply path made exactly
   // this assumption and shifted every applied region by 176 samples. Anything
   // that wires delay compensation through the chain must call

@@ -16,6 +16,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, limiter,
+  limiterMode, LIMITER_MODES, setLimiterMode, limiterLatencyMs,
   emphasisDb, tuningOn,
   clipperPreview, clipperReduction, clipperEngagedPct, clipperLiftDb,
   clipperResidualDbc, clipperDelta,
@@ -142,6 +143,23 @@ const ceilingDisabledReason = computed(() => {
   if (!hasSelection.value) return 'Select a region — the preset measures its peaks'
   if (ceilingBusy.value) return 'Measuring…'
   return null
+})
+
+/**
+ * The one thing that decides between the two positions.
+ *
+ * ⚠ THE CAPTION COMES FROM THE MODE TABLE, not from a branch here. Two places
+ * describing the same switch drift, and the one on the faceplate is the one a
+ * user reads. The latency each costs is in the buttons' titles — see
+ * LIMITER_MODES for why it is disclosed there rather than on the faceplate.
+ */
+const limiterCaption = computed(() => {
+  const mode = LIMITER_MODES.find(m => m.id === limiterMode.value)
+  if (mode) return mode.caption
+  // The admin knob has been put between the two. Say where, rather than
+  // lighting a position it is not at.
+  const sr = state.currentFile?.sampleRate ?? 44100
+  return `limiter ${limiter} · ${limiterLatencyMs(sr).toFixed(1)} ms`
 })
 
 function togglePlayback() {
@@ -375,6 +393,41 @@ const SCOPE_H = 236
         </div>
       </div>
 
+      <!-- ── How the peak gets controlled ─────────────────────────────────
+           TWO POSITIONS, NOT A KNOB, and the measurement is why. `limiter` is
+           a continuous balance underneath (still continuous on the tuning
+           panel) but its middle is the worst place to sit: the latency is
+           BINARY — about 1.1 ms at 0 and 5.1 ms above it — while the
+           benefit is wildly non-linear. Matched on output peak, the curve's
+           residual runs -33.3 / -34.0 / -34.4 / -50.9 / -76.5 dBc across
+           0 / 25 / 50 / 75 / 100. Limiter 50 pays the whole latency for about
+           1 dB. See LIMITER_MODES.
+
+           ⚠ AT LIMIT THE CURVE IS IDLE — 0.00 dB of peak reduction — so the
+           stage is a lookahead limiter with a clipper behind it as a safety
+           net, not a gentler clipper. The LABELS name the two mechanisms for
+           that reason: CLIP and LIMIT are different processes, not two
+           strengths of one.
+
+           ⚠ AND THROWING IT SHIFTS THE PREVIEW BY ~4 ms. The apply path reads
+           the latency per render so the timeline is right either way; the
+           preview jumps, which is inherent to putting a lookahead in circuit.
+           The caption states the latency for that reason. -->
+      <div class="flex items-center justify-center gap-[10px] mt-[14px]">
+        <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">PEAK CONTROL</span>
+        <SegmentedSwitch
+          :model-value="limiterMode"
+          @update:model-value="setLimiterMode"
+          :options="LIMITER_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))"
+          :accent="ACCENT"
+          :disabled="!clipperPreview"
+          :padding-x="13"
+        />
+        <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+          {{ limiterCaption }}
+        </span>
+      </div>
+
       <!-- ⚠ HIDDEN ADMIN TUNING PANEL — see softClipperTuning.js. Off unless
            ?softClipperTuning=1 (or the localStorage key) is set, so the shipped
            panel stays a ceiling, two knobs and the presets. The amber badge is
@@ -418,7 +471,7 @@ const SCOPE_H = 236
               :disabled="!clipperPreview"
             />
             <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-              {{ limiter > 0 ? 'gain, not shaping (+4 ms)' : 'gain, not shaping' }}
+              {{ limiterMode ? limiterMode.toUpperCase() : 'between modes' }}
             </p>
           </div>
           <div class="w-[74px]">

@@ -1557,7 +1557,10 @@ export function softClip(x, T, rMaxDb = MAX_REDUCTION_DB, kneeDb = KNEE_DB, expo
  *
  * ⚠ THE CALLERS NEEDED THIS AND WERE USING A CONSTANT THAT IS ONLY RIGHT WHEN
  * THE LIMITER IS OFF. `SOFT_CLIPPER_LATENCY_SAMPLES` is the OVERSAMPLER's 50
- * samples; with the limiter engaged the stage delays by 226 at 44.1 kHz. Both
+ * samples; with the limiter engaged the stage delays by about 5 ms — 226
+ * samples at 44.1 kHz, 242 at 48. ⚠ QUOTE THE MILLISECONDS, NOT THE COUNT: the
+ * lookahead is a fixed LIMITER_LOOKAHEAD_MS, so the sample count scales with
+ * the rate and only the time is stable. Both
  * the effect-chain's delay compensation and the offline apply path took the
  * constant, so once `limiter` defaulted to 100 the applied region came out
  * shifted by 176 samples and lost that much of its tail — a seam at both

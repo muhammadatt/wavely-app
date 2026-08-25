@@ -220,3 +220,19 @@ test('end to end: measure, set the ceiling, and the curve does more at each step
     last = ceilingDb
   }
 })
+
+test('the peak switch is on the faceplate and the knob stays on the tuning panel', () => {
+  // The two have to coexist: a switch for the two positions worth being in, and
+  // the continuous knob underneath for measuring the ones in between. Wiring
+  // one without the other leaves either an unreachable middle or a faceplate
+  // control with no research path behind it.
+  const panel = read('../../src/components/panels/SoftClipperModal.vue')
+  assert.match(panel, /:model-value="limiterMode"/, 'the mode switch is not wired')
+  assert.match(panel, /@update:model-value="setLimiterMode"/)
+  assert.match(panel, /v-if="tuningOn"[\s\S]*:model-value="limiter"/,
+    'the continuous Limiter knob left the tuning panel')
+
+  const composable = read('../../src/composables/useSoftClipper.js')
+  assert.match(composable, /limiterMode/, 'the composable does not derive a mode')
+  assert.match(composable, /function setLimiterMode/)
+})

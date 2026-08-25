@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
@@ -6,6 +6,9 @@ import {
 } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
+import {
+  LIMITER_MODES, limiterModeFor, limiterModeById, limiterModeLatencyMs,
+} from '../audio/effects/softClipperParams.js'
 import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../audio/softClipperProcessor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { tuningEnabled } from '../audio/softClipperTuning.js'
@@ -272,6 +275,33 @@ export function useSoftClipper() {
 
   const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
   const syncLimiter = (v) => { limiter.value = v; pushParam('limiter', v) }
+
+  /**
+   * Which of the two faceplate positions the current `limiter` value is, or ''
+   * when the admin knob has been put somewhere between them — see
+   * limiterModeFor.
+   */
+  const limiterMode = computed(() => limiterModeFor(limiter.value))
+
+  /**
+   * ⚠ THIS CHANGES THE STAGE'S LATENCY, about 1.1 ms to 5.1 ms (50 samples to
+   * 226 at 44.1 kHz, 242 at 48 — the lookahead is a fixed number of
+   * milliseconds, so the count moves with the rate and the time does not).
+   * The offline apply
+   * path reads the latency per render, so what lands on the timeline is right
+   * either way; what moves is the PREVIEW, which shifts by ~4 ms the moment the
+   * switch is thrown. That is inherent to putting a lookahead in circuit and is
+   * why the panel says so rather than hiding it.
+   */
+  function setLimiterMode(id) {
+    const mode = limiterModeById(id)
+    if (mode) syncLimiter(mode.limiter)
+  }
+
+  /** Latency of the current mode in ms, at the file's own rate. */
+  function limiterLatencyMs(sampleRate) {
+    return limiterModeLatencyMs(limiter.value, sampleRate)
+  }
   const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v) }
   const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
   const syncFixedThreshold = (v) => {
@@ -362,6 +392,10 @@ export function useSoftClipper() {
     CEILING_PRESETS,
     shape,
     limiter,
+    limiterMode,
+    LIMITER_MODES,
+    setLimiterMode,
+    limiterLatencyMs,
     emphasisDb,
     tuningOn,
     clipperPreview,
