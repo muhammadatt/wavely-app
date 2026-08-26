@@ -1,32 +1,28 @@
 /**
- * Rolling spectral history for the resonance display's two overlays.
+ * Rolling spectral history for the resonance display's HISTORY overlay.
  *
  * The panel's default view (design 1c) shows nothing but what is being removed.
- * Two optional overlays fold context back in, and both are the same shape — a
- * waterfall on the display's own 192-point log-frequency grid, scrolling down,
- * newest row at the top:
+ * HISTORY folds the last few seconds back in as a waterfall on the display's own
+ * 192-point log-frequency grid, scrolling down, newest row at the top: the
+ * CARVED signal, output level per bin, with the moments a cut actually landed
+ * lit up. It is the grooves the plugin has been cutting, and it is what answers
+ * "is it working the same band over and over".
  *
- *   HISTORY   the CARVED signal: output level per bin, with the moments a cut
- *             actually landed lit up. This is the grooves the plugin has been
- *             cutting over the last few seconds, and it is the overlay that
- *             answers "is it working the same band over and over".
- *
- *   SPECTRO   the INPUT spectrum, untouched. What the file has, regardless of
- *             what the effect is doing about it.
- *
- * ⚠ THE TWO ARE DIFFERENT PICTURES, AND IN THE SOURCE DESIGN THEY WERE NOT.
- * Design 1a's underlay and 1c's DETAIL "spectrum" are the same input waterfall
- * at two opacities; there was no carved-history overlay outside 1b's lower lane
- * and 1c's own 38 px strip. Splitting them this way was a deliberate call —
- * two overlays drawing the same buffer at different alpha is one control too
- * many, and for a suppressor the carve is the more interesting of the two.
+ * ⚠ THERE WAS A SECOND WATERFALL HERE — SPECTRO, the untouched input — AND IT
+ * IS GONE. Design 1a's underlay and 1c's DETAIL "spectrum" are that same input
+ * waterfall at two opacities, so it was the design's own overlay; it was
+ * dropped because the question it answers ("what does the file have") is
+ * answered better by the input spectrum CURVE, live and against a level axis,
+ * which is what the SPECTRUM overlay now draws. A waterfall of the input says
+ * roughly the same thing a second later and without a number on it.
  *
  * WHY CANVASES RATHER THAN A NUMERIC RING BUFFER. Repainting 368 columns of
  * 192 bins from numbers every frame is ~70k fills; scrolling an offscreen
  * canvas by one pixel and writing a single new row is two operations and a
  * row. The cost of that choice is that history cannot be re-coloured after the
- * fact — changing the accent repaints only new columns — which is why
- * `setAccent` clears rather than pretending to restyle what is already drawn.
+ * fact — a repaint would only reach new columns. Nothing needs to: the ramp is
+ * a fixed table (see HEAT_STOPS), so the only thing that discards the buffer is
+ * a change in bin count.
  *
  * The arithmetic that decides WHAT gets drawn lives here as pure functions so
  * it can be tested without a canvas, the same split `resonanceZoneEdit` and
@@ -76,45 +72,68 @@ export function historyLevel(db, minDb = HISTORY_DB_MIN, maxDb = HISTORY_DB_MAX)
   return Math.pow(t < 0 ? 0 : t > 1 ? 1 : t, 1.2)
 }
 
-function hexToRgb(hex) {
-  const h = hex.replace('#', '')
-  const s = h.length === 3 ? h.split('').map(c => c + c).join('') : h
-  const n = parseInt(s, 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+/**
+ * THE BRIGHTNESS RAMP IS THE DESIGN BRIEF'S HEAT RAMP, teal → mint → amber →
+ * red, and it used to be generated from the panel's accent instead.
+ *
+ * The argument for generating it was that importing a five-stop heat ramp puts
+ * a second palette on a faceplate that takes its accent as a prop. True, and
+ * the brief answers it: the accent this panel is given IS the ramp's mint
+ * (`--plugin-resonance`, #8de0a8, the brief's MINT), so the ramp does not
+ * introduce a second hue family — it extends the one already there past the top
+ * of the accent, which is what a level ramp needs and a single hue cannot do.
+ * The app's own meter ladder (`--meter-cool` → `--meter-hot`) is built the same
+ * way, so a hot bin here now reads like a hot segment there.
+ *
+ * ⚠ BRIGHTNESS IS NO LONGER MONOTONE ACROSS THE WHOLE RAMP, and that is
+ * inherent to a heat ramp rather than an oversight: amber and red are darker in
+ * luminance than the mint below them and hotter in hue, which is the trade every
+ * meter in this class makes. It rises monotonically up to the mint apex, which
+ * covers everything below -30 dBFS — the whole of speech and all of the floor —
+ * and only the top ~5% of the window trades brightness for warmth.
+ *
+ * THE STOP POSITIONS ARE OURS, NOT THE BRIEF'S, and that is calibration rather
+ * than taste. Per-bin speech sits around -35 dBFS, which is 0.7-0.8 of this
+ * window, so the brief's ramp — full mint by 0.78 — would paint most of the plot
+ * at full mint and the waterfall would stop being ground and start competing
+ * with the trace it sits behind. Seen exactly that on the first render of the
+ * generated ramp, which is why the positions below hold the deep teals until
+ * 0.68 and reach mint only at 0.88. The brief's own colours, at our measured
+ * levels.
+ */
+export const HEAT_STOPS = [
+  [0, [8, 10, 13]],
+  [0.42, [16, 32, 38]],
+  [0.68, [26, 74, 84]],
+  [0.88, [111, 214, 192]],
+  [0.95, [124, 224, 168]],
+  [0.985, [232, 163, 61]],
+  [1, [255, 90, 78]],
+]
+
+/** Where the ramp stops gaining brightness and starts gaining heat. */
+export const HEAT_APEX = 0.95
+
+/**
+ * The ramp, as a fixed table.
+ *
+ * Kept as a function rather than exported as the array alone so the call sites
+ * read the same as they did when it was derived, and so a future panel that
+ * wants its own ramp has one place to branch.
+ */
+export function rampStops() {
+  return HEAT_STOPS
 }
 
 /**
- * Brightness ramp, built from the panel's accent rather than imported.
+ * Ink for the white-hot mark over a bin that was cut this row.
  *
- * The source design ships a five-stop heat ramp running teal → mint → amber →
- * red. Bringing that in would put a second palette on a faceplate that takes
- * its accent as a prop and is amber today, so the ramp is generated from
- * whatever accent it is given: plate → a third of the way up → the accent →
- * near-white at the very top. Monochrome also keeps the carve overlay's cut
- * marks (pure white) as the only thing on the plot that is not the accent,
- * which is what makes them read as events rather than as loud bins.
+ * The brief's value: the pale mint end of the ramp rather than pure white, so
+ * the marks sit in the same palette as everything else on the plate while still
+ * being the only thing on the waterfall that is brighter than its own hot end.
  */
-export function rampStops(accent) {
-  const [r, g, b] = hexToRgb(accent)
-  // WEIGHTED DARK, and that is calibration rather than taste. Per-bin speech sits
-  // around -35 dBFS, which is 0.7-0.8 of this window — so a ramp that reaches
-  // full accent by 0.7 paints most of the plot at full accent, and the waterfall
-  // stops being ground and starts competing with the trace it sits behind. Seen
-  // exactly that on the first render. The stops below hold under a third of the
-  // accent until 0.66 and only saturate in the top tenth, which is the same
-  // proportion the source design's heat ramp uses.
-  const mix = (f, add = 0) => [
-    Math.min(255, Math.round(r * f) + add),
-    Math.min(255, Math.round(g * f) + add),
-    Math.min(255, Math.round(b * f) + add),
-  ]
-  return [
-    [0, [8, 10, 13]],
-    [0.40, mix(0.14, 6)],
-    [0.66, mix(0.34)],
-    [0.86, mix(0.78)],
-    [1, mix(1, 55)],
-  ]
+export function cutMark(reductionDb) {
+  return `rgba(205,244,220,${Math.min(0.85, reductionDb / 8)})`
 }
 
 /** Sample a ramp built by rampStops. Returns a canvas fillStyle string. */
@@ -154,31 +173,26 @@ export function rowsDue(accMs, rowMs = HISTORY_ROW_MS, maxRows = 8) {
 }
 
 /**
- * The two waterfalls, and the scroll that feeds them.
+ * The waterfall, and the scroll that feeds it.
  *
- * Recorded CONTINUOUSLY, whether or not an overlay is showing. An overlay
+ * Recorded CONTINUOUSLY, whether or not the overlay is showing. An overlay
  * switched on to a blank plot is an overlay that cannot answer the question it
- * was switched on for, and the whole cost of keeping it filled is two 192x368
- * canvases and one row of fills every 22 ms.
+ * was switched on for, and the whole cost of keeping it filled is one 192x368
+ * canvas and one row of fills every 22 ms.
  */
 export class ResonanceHistory {
-  constructor(bins, accent) {
+  constructor(bins) {
     this.bins = bins
-    this.accent = accent
-    this.stops = rampStops(accent)
+    this.stops = rampStops()
     this.acc = 0
     this.carve = makeBuffer(bins, HISTORY_COLS)
-    this.spectro = makeBuffer(bins, HISTORY_COLS)
   }
 
-  /** Rebuild for a new bin count, or a new accent. Both discard what is held. */
-  reshape(bins, accent) {
-    if (bins === this.bins && accent === this.accent) return
+  /** Rebuild for a new bin count. Discards what is held. */
+  reshape(bins) {
+    if (bins === this.bins) return
     this.bins = bins
-    this.accent = accent
-    this.stops = rampStops(accent)
     this.carve = makeBuffer(bins, HISTORY_COLS)
-    this.spectro = makeBuffer(bins, HISTORY_COLS)
     this.acc = 0
   }
 
@@ -201,21 +215,17 @@ export class ResonanceHistory {
     const { mag, reduction, bins } = frame
     if (bins !== this.bins) return
     const c = this.carve.getContext('2d')
-    const s = this.spectro.getContext('2d')
     c.drawImage(this.carve, 0, 1)
-    s.drawImage(this.spectro, 0, 1)
     for (let i = 0; i < bins; i++) {
-      s.fillStyle = sampleRamp(this.stops, historyLevel(mag[i]))
-      s.fillRect(i, 0, 1, 1)
       // The carve is the OUTPUT — what survived — so a band being worked shows
       // as a dark groove opening up over time rather than as a bright streak.
       c.fillStyle = sampleRamp(this.stops, historyLevel(mag[i] - reduction[i]))
       c.fillRect(i, 0, 1, 1)
       if (reduction[i] > HISTORY_CUT_DB) {
-        // And the moment of the cut is marked white over that groove, which is
-        // the half a plain output waterfall cannot say: a band that is simply
-        // quiet looks identical to one being suppressed.
-        c.fillStyle = `rgba(255,255,255,${Math.min(0.8, reduction[i] / 9)})`
+        // And the moment of the cut is marked over that groove, which is the
+        // half a plain output waterfall cannot say: a band that is simply quiet
+        // looks identical to one being suppressed.
+        c.fillStyle = cutMark(reduction[i])
         c.fillRect(i, 0, 1, 1)
       }
     }

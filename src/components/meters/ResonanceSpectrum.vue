@@ -40,17 +40,15 @@ import {
  * those are the only questions the knobs can answer. The bar could not
  * distinguish a surgical 6 dB notch from 6 dB taken off half the spectrum.
  *
- * Two lanes over one shared log-frequency axis, so a peak in the lower lane and
- * the cut taken out of it line up vertically:
+ * ONE lane over a log-frequency axis, showing REMOVAL ONLY: reduction hanging
+ * from the zero rail on the same voltage-law scale the other panels' GR meters
+ * use — so a depth here reads the same as a depth there — with a decaying
+ * peak-hold outline behind it, which is what makes an intermittent resonance
+ * findable at all, and the deepest resonances named by frequency.
  *
- *   TOP     reduction, hanging from the zero line, on the same voltage-law
- *           scale the other panels' GR meters use — so a depth here reads the
- *           same as a depth there. A decaying peak-hold outline behind it shows
- *           where the effect has been working over the last second or so, which
- *           is what makes an intermittent resonance findable at all.
- *   BOTTOM  the spectrum this was decided from: the input, the reference
- *           threshold, and the output. The shaded sliver between input and
- *           output is what is being removed.
+ * Three overlays fold context back in, none of them on by default: GRID (the
+ * rules), HISTORY (the last few seconds of carve as a waterfall) and SPECTRUM
+ * (the input curve and the detection threshold this frame was decided from).
  *
  * THE CURVES COME FROM THE KERNEL, NOT FROM AN ANALYSER ON THE OUTPUT. A second
  * FFT on the output would show the result of the cut but could never show the
@@ -164,6 +162,17 @@ const PEAK_VISIBLE = 0.025
 const REDUCTION_VISIBLE_DB = 0.3
 
 /**
+ * dBFS window the SPECTRUM overlay's curves are drawn against.
+ *
+ * The same pair the two-lane display used, so a level reads here exactly where
+ * it read there. Wide enough that per-bin speech peaks (near -35) sit in the
+ * lower half and the top quarter stays clear for the reduction trace hanging
+ * into it.
+ */
+const SPEC_DB_MIN = -102
+const SPEC_DB_MAX = -12
+
+/**
  * The three overlays, and why they are not parameters.
  *
  * The default view (design 1c) is removal only: nothing on the plot but what is
@@ -203,14 +212,14 @@ function loadOverlays() {
 const stored = loadOverlays()
 const showGrid = ref(stored.grid === true)
 const showHistory = ref(stored.history === true)
-const showSpectro = ref(stored.spectro === true)
+const showSpectrum = ref(stored.spectrum === true)
 
 function toggleOverlay(which) {
-  const ref_ = which === 'grid' ? showGrid : which === 'history' ? showHistory : showSpectro
+  const ref_ = which === 'grid' ? showGrid : which === 'history' ? showHistory : showSpectrum
   ref_.value = !ref_.value
   try {
     window.localStorage.setItem(OVERLAY_STORE_KEY, JSON.stringify({
-      grid: showGrid.value, history: showHistory.value, spectro: showSpectro.value,
+      grid: showGrid.value, history: showHistory.value, spectrum: showSpectrum.value,
     }))
   } catch {
     // A viewer who cannot store the preference still gets it for this session.
@@ -218,8 +227,8 @@ function toggleOverlay(which) {
 }
 
 /**
- * The rolling waterfalls. Built lazily on the first frame that carries a bin
- * count, and recorded continuously whether or not an overlay is showing — see
+ * The rolling carve history. Built lazily on the first frame that carries a bin
+ * count, and recorded continuously whether or not the overlay is showing — see
  * resonanceHistory for why.
  */
 let history = null
@@ -252,6 +261,40 @@ const axis = { w: 600, minHz: 20, maxHz: 20000 }
  * Hex to rgba. Canvas has no color-mix(), and every tint on this plot is the
  * accent at some opacity, so the panel stays one colour when the accent changes.
  */
+/**
+ * THE PLATE, THE RING AND THE RADIUS COME FROM THE DESIGN SYSTEM, and they were
+ * the part of the brief the display had not taken.
+ *
+ * `--bg-canvas-flat` for the recess, `--color-border-1` for the hairline around
+ * it, `--radius-lg` for the corner. Every canvas in the brief is drawn as a
+ * recessed plate with a rounded clip and a single hairline ring — the system's
+ * own rule that "inset hairlines do the structural work; drop shadows are
+ * reserved for things that genuinely float" — and this plot was a square box
+ * filled with flat black instead, which is the one thing on the faceplate that
+ * did not look machined.
+ */
+const PLATE_INK = '#080a0d'
+const PLATE_RING = 'rgba(255,255,255,.06)'
+const PLATE_RADIUS = 12
+/** The brief's veil over anything the effect is not touching. `--bg-scrim`. */
+const VEIL = 'rgba(5,7,9,.66)'
+/** Pill backing, from the brief's mark labels. */
+const PILL_INK = 'rgba(10,14,16,.8)'
+
+/**
+ * The pale end of the accent — the brief's MINT_HI, #cdf4dc, against its
+ * MINT #8de0a8.
+ *
+ * Derived from the accent rather than pasted in so the panel's prop still
+ * governs the whole plot: at the accent this panel is given the two agree to
+ * within a couple of levels per channel. It carries every stroke and numeral
+ * that is meant to read as lit — the hero curve's outline, the header figure,
+ * the frequency on a mark pill — where the accent itself carries fills.
+ */
+function bright(hex) {
+  return `color-mix(in srgb, ${hex} 55%, #ffffff)`
+}
+
 function tint(hex, alpha) {
   let h = hex.replace('#', '')
   if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
@@ -514,16 +557,17 @@ function draw(dtMs) {
   // smoothing exists to steady a curve being watched, and a waterfall row is a
   // record of an instant.
   if (frame) {
-    if (!history) history = new ResonanceHistory(frame.bins, props.accent)
-    else history.reshape(frame.bins, props.accent)
+    if (!history) history = new ResonanceHistory(frame.bins)
+    else history.reshape(frame.bins)
     history.advance(dtMs, frame)
   }
 
   // ORDER IS THE DESIGN. Everything before the reduction curve is ground for it;
   // nothing after it is allowed to cover it except the zone furniture, which is
   // the control surface rather than a reading.
-  drawWaterfalls(ctx, w)
+  drawCarveHistory(ctx, w)
   if (showGrid.value) drawGrid(ctx, w, xFor, minHz, maxHz)
+  if (showSpectrum.value && shown) drawSpectrum(ctx, w, shown, alpha)
   drawZeroRail(ctx, w)
 
   updatePeaks(shown, dtMs)
@@ -534,39 +578,34 @@ function draw(dtMs) {
   drawMarks(ctx, w, alpha)
 
   if (showGrid.value) drawGrScale(ctx, w)
-  drawAxis(ctx, w, xFor, minHz, maxHz)
   drawCursor(ctx, w)
+  drawPlateRing(ctx, w)
+  drawAxis(ctx, w, xFor, minHz, maxHz)
 }
 
 /**
- * The two waterfall overlays, behind everything.
+ * The carve waterfall, behind everything.
  *
- * Stretched over the whole plot, which means their vertical axis is TIME while
- * the curve above them is measured in decibels of reduction. That is the source
- * design's arrangement and it is deliberate: these are texture, not a second
- * reading, and the dark scrim over them is what says so. It is also why the
- * input spectrum CURVE and the threshold staircase have no home in this layout
- * — a level axis and a time axis cannot share one box, and 1c chose time.
- *
- * Both at once is allowed and legible, because they are different pictures: the
- * carve is mostly dark with white cut marks, the spectrogram is mostly lit.
+ * Stretched over the whole plot, which means its vertical axis is TIME while the
+ * curve above it is measured in decibels of reduction. That is deliberate: this
+ * is texture, not a second reading, and the dark scrim over it is what says so.
+ * It also means it does not compete with the SPECTRUM overlay's level axis —
+ * one is a picture of the last few seconds, the other of this instant, and with
+ * both on the scrim keeps the waterfall the ground of the two.
  */
-function drawWaterfalls(ctx, w) {
-  if (!history || (!showHistory.value && !showSpectro.value)) return
+function drawCarveHistory(ctx, w) {
+  if (!history || !showHistory.value) return
   const h = laneH.value
   ctx.save()
-  ctx.beginPath()
-  ctx.rect(0, 0, w, h)
-  ctx.clip()
+  clipPlate(ctx, w)
   ctx.imageSmoothingEnabled = true
-  if (showSpectro.value) {
-    ctx.globalAlpha = showHistory.value ? 0.28 : 0.46
-    ctx.drawImage(history.spectro, 0, 0, w, h)
-  }
-  if (showHistory.value) {
-    ctx.globalAlpha = showSpectro.value ? 0.5 : 0.62
-    ctx.drawImage(history.carve, 0, 0, w, h)
-  }
+  // The brief's own underlay weights: half opacity under a 42% scrim. It was
+  // 0.62 with the same scrim, tuned against a ramp that held the plate colour
+  // far longer; the heat ramp reaches mint sooner and by design goes brighter
+  // than mint at the top, so it needs the brief's number rather than the old
+  // one to stay ground.
+  ctx.globalAlpha = 0.5
+  ctx.drawImage(history.carve, 0, 0, w, h)
   ctx.globalAlpha = 1
   // The scrim is what makes an underlay an underlay. Without it the waterfall
   // is as loud as the curve and the plot has two heroes.
@@ -585,14 +624,49 @@ function drawWaterfalls(ctx, w) {
  * measured from it.
  */
 function drawZeroRail(ctx, w) {
+  ctx.save()
+  clipPlate(ctx, w)
   ctx.fillStyle = 'rgba(255,255,255,.16)'
   ctx.fillRect(0, 0.5, w, 1)
+  ctx.restore()
 }
 
 /** The recessed plate the whole plot sits in. */
 function drawPlates(ctx, w) {
-  ctx.fillStyle = 'rgba(0,0,0,.42)'
-  ctx.fillRect(0, 0, w, laneH.value)
+  ctx.beginPath()
+  roundRect(ctx, 0, 0, w, laneH.value, PLATE_RADIUS)
+  ctx.fillStyle = PLATE_INK
+  ctx.fill()
+}
+
+/**
+ * The plate's clip, shared by everything drawn inside it.
+ *
+ * Every layer has to use the same rounded path or the corner is squared off by
+ * whichever one clips to a rectangle — the waterfall does it with an image, the
+ * zone columns with a fillRect, and either is enough to make the ring look like
+ * it is drawn over the artwork rather than around it.
+ */
+function clipPlate(ctx, w) {
+  ctx.beginPath()
+  roundRect(ctx, 0, 0, w, laneH.value, PLATE_RADIUS)
+  ctx.clip()
+}
+
+/**
+ * The hairline around the plate, drawn last so nothing paints over it.
+ *
+ * One rule at `--color-border-1`, inset half a pixel so it lands on the pixel
+ * grid rather than straddling it. This is the whole of the plate's elevation:
+ * the design system reserves drop shadows for things that float, and a recess
+ * does not.
+ */
+function drawPlateRing(ctx, w) {
+  ctx.beginPath()
+  roundRect(ctx, 0.5, 0.5, w - 1, laneH.value - 1, PLATE_RADIUS - 0.5)
+  ctx.strokeStyle = PLATE_RING
+  ctx.lineWidth = 1
+  ctx.stroke()
 }
 
 /**
@@ -603,6 +677,8 @@ function drawPlates(ctx, w) {
  * numbers are on the marks and in the header, not ruled across the plot.
  */
 function drawGrid(ctx, w, xFor, minHz, maxHz) {
+  ctx.save()
+  clipPlate(ctx, w)
   ctx.fillStyle = 'rgba(255,255,255,.05)'
   for (const hz of GRID_HZ) {
     if (hz < minHz || hz > maxHz) continue
@@ -618,6 +694,7 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
     if (y >= laneH.value - 2) continue
     ctx.fillRect(0, y, w, 1)
   }
+  ctx.restore()
 }
 
 /**
@@ -650,9 +727,7 @@ function drawReduction(ctx, w, frame, alpha) {
 
   ctx.globalAlpha = alpha
   ctx.save()
-  ctx.beginPath()
-  ctx.rect(0, 0, w, h)
-  ctx.clip()
+  clipPlate(ctx, w)
 
   ctx.beginPath()
   ctx.moveTo(0, 0)
@@ -663,9 +738,9 @@ function drawReduction(ctx, w, frame, alpha) {
   // DELTA is expressed here now the sliver is gone, and this is its natural
   // home rather than a substitute for one: in DELTA the removed signal is what
   // is being heard, so the curve bounding it is the thing to light up.
-  const topAlpha = props.delta ? 0.58 : 0.40
+  const topAlpha = props.delta ? 0.58 : 0.34
   grad.addColorStop(0, tint(props.accent, topAlpha))
-  grad.addColorStop(1, tint(props.accent, 0.05))
+  grad.addColorStop(1, tint(props.accent, 0.03))
   ctx.fillStyle = grad
   ctx.fill()
 
@@ -694,9 +769,18 @@ function drawReduction(ctx, w, frame, alpha) {
     ctx.lineTo(d * xStep, yFor(reduction[d]))
     if (!over) live = false
   }
-  ctx.lineWidth = 1.5
-  ctx.strokeStyle = props.accent
+  // THE BRIEF'S OUTLINE: 1.6 px in the pale tint, over a glow of the accent.
+  // The glow is what makes a one-pixel line read as lit rather than as drawn,
+  // and it is the only place on the plate that carries one — the design system
+  // spends its accent glow on the things that are actually emitting (`--glow-
+  // accent-sm` on meter segments and knob arcs), which here is the cut.
+  ctx.lineWidth = 1.6
+  ctx.strokeStyle = bright(props.accent)
+  ctx.shadowColor = tint(props.accent, 0.8)
+  ctx.shadowBlur = 10
   ctx.stroke()
+  ctx.shadowBlur = 0
+  ctx.shadowColor = 'transparent'
 
   // Peak hold, drawn only where there is a peak to hold. Running it across the
   // whole width would lay a white line along the zero datum on top of the live
@@ -715,7 +799,9 @@ function drawReduction(ctx, w, frame, alpha) {
       open = true
     }
     ctx.lineWidth = 1
-    ctx.strokeStyle = 'rgba(255,255,255,.32)'
+    // The pale end of the ramp rather than white, so the hold reads as the
+    // trace's own shadow rather than as a second, colder measurement.
+    ctx.strokeStyle = 'rgba(205,244,220,.32)'
     ctx.stroke()
   }
 
@@ -742,8 +828,8 @@ function drawReduction(ctx, w, frame, alpha) {
  * off by the plate — the dot stays at the true frequency, only the label moves,
  * because the dot is the measurement and the label is the annotation.
  */
-const PILL_W = 96
-const PILL_H = 20
+const PILL_W = 98
+const PILL_H = 22
 
 function drawMarks(ctx, w, alpha) {
   if (!marks.length) return
@@ -763,9 +849,9 @@ function drawMarks(ctx, w, alpha) {
       : yDot - PILL_H - 10 - (i % 2 ? PILL_H + 4 : 0)
     const cx = Math.max(PILL_W / 2 + 2, Math.min(w - PILL_W / 2 - 2, x))
 
-    ctx.fillStyle = props.accent
+    ctx.fillStyle = tint(props.accent, 0.9)
     ctx.beginPath()
-    ctx.arc(x, yDot, 3, 0, Math.PI * 2)
+    ctx.arc(x, yDot, 3.4, 0, Math.PI * 2)
     ctx.fill()
 
     // A leader only when the label had to move sideways to fit, so the common
@@ -779,21 +865,21 @@ function drawMarks(ctx, w, alpha) {
       ctx.stroke()
     }
 
-    ctx.fillStyle = 'rgba(8,10,13,.82)'
+    ctx.fillStyle = PILL_INK
     ctx.beginPath()
-    roundRect(ctx, cx - PILL_W / 2, yPill, PILL_W, PILL_H, 5)
+    roundRect(ctx, cx - PILL_W / 2, yPill, PILL_W, PILL_H, 6)
     ctx.fill()
     ctx.strokeStyle = tint(props.accent, 0.4)
     ctx.lineWidth = 1
     ctx.stroke()
 
-    ctx.font = "600 10px 'JetBrains Mono',monospace"
+    ctx.font = "600 11px 'JetBrains Mono',monospace"
     ctx.textAlign = 'left'
-    ctx.fillStyle = `color-mix(in srgb, ${props.accent} 60%, #ffffff)`
+    ctx.fillStyle = bright(props.accent)
     ctx.fillText(formatHz(m.hz), cx - PILL_W / 2 + 8, yPill + PILL_H / 2 + 0.5)
     ctx.textAlign = 'right'
     ctx.font = "500 10px 'JetBrains Mono',monospace"
-    ctx.fillStyle = 'rgba(255,255,255,.55)'
+    ctx.fillStyle = 'rgba(255,255,255,.5)'
     ctx.fillText(`-${m.db.toFixed(1)}`, cx + PILL_W / 2 - 8, yPill + PILL_H / 2 + 0.5)
   })
   ctx.restore()
@@ -812,25 +898,88 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 /**
- * ⚠ THE INPUT SPECTRUM CURVE AND THE THRESHOLD STAIRCASE ARE GONE, and this is
- * the real cost of the 1c layout rather than a simplification.
+ * THE SPECTRUM OVERLAY: the input curve and the threshold staircase, back as
+ * ground under the reduction trace.
  *
- * 1c is "removal only": the plot's vertical axis is decibels of REDUCTION, and
- * the overlays that fold context back in are waterfalls whose vertical axis is
- * TIME. Neither is a level axis, so there is nowhere in this layout for a curve
- * measured in dBFS to be drawn — not behind the trace, not with an overlay on.
- * It is not a matter of ink.
+ * They were dropped with the 1c layout, on the argument that the plot's vertical
+ * axis is decibels of REDUCTION and a curve measured in dBFS therefore has
+ * nowhere to live. That argument holds for the AXIS and not for the PICTURE:
+ * what the staircase says is where the line was drawn, which is read against the
+ * shape of the input beside it rather than against the numerals on the right, so
+ * both curves can carry their own 90 dB window inside the same box as long as
+ * nothing invites them to be measured against the reduction scale. Nothing does
+ * — they are faint, unlabelled and behind everything, exactly as the waterfall
+ * is, and the numerals down the right belong to the trace.
  *
- * What that costs: the threshold staircase was the only place per-zone
- * Selectivity was legible WHILE the knob was being turned — the kernel's own
- * decision boundary, drawn where the decision is made. Under 1c, Selectivity is
- * judged by the cut it produces instead: the trace, the per-zone deepest-cut
- * numbers and the marks. That is a slower loop for setting a threshold, and it
- * is the deliberate trade the layout makes.
+ * WHAT IT BUYS BACK is the one real cost of 1c: the threshold was the only place
+ * per-zone Selectivity was legible WHILE the knob was being turned — the
+ * kernel's own decision boundary drawn where the decision is made. Without it
+ * Selectivity is judged by the cut it produces, which is a slower loop.
  *
- * If it turns out to matter, the way back is a fourth overlay carrying its own
- * level-axis lane rather than a curve squeezed into this one.
+ * The threshold is `reference + Selectivity`, added here rather than in the
+ * kernel so the line moves with the knob on the frame it is turned instead of on
+ * the next one out of the worklet. It is a READOUT, NOT AN EDITOR: it rides
+ * `reference[]`, so it moves with the audio several times a second, and a handle
+ * on a curve that bounces at 46 Hz cannot be aimed — the editable copy of the
+ * same number is a knob under the plot, which holds still.
+ *
+ * The OUTPUT curve and the shaded sliver between input and output stay gone.
+ * Output is the input minus the same reduction the trace above already draws
+ * 3-4x larger, and at this window the sliver measured about 5 px at the stock
+ * mean cut — the thickness of the strokes around it.
  */
+function drawSpectrum(ctx, w, frame, alpha) {
+  const { mag, reference, bins } = frame
+  const height = laneH.value
+  const bottom = height
+  const xStep = w / (bins - 1)
+  const yFor = (db) => {
+    const t = (db - SPEC_DB_MIN) / (SPEC_DB_MAX - SPEC_DB_MIN)
+    return bottom - Math.max(0, Math.min(1, t)) * height
+  }
+
+  ctx.globalAlpha = alpha
+  ctx.save()
+  clipPlate(ctx, w)
+
+  // Input: filled, low contrast. It is the ground the threshold and the trace
+  // are read against, not a curve to be followed. Lighter than it was in the
+  // two-lane display, because there it was the subject of its own lane and here
+  // it is underneath the hero.
+  ctx.beginPath()
+  ctx.moveTo(0, bottom)
+  for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(mag[d]))
+  ctx.lineTo(w, bottom)
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(255,255,255,.055)'
+  ctx.fill()
+  ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(255,255,255,.22)'
+  ctx.stroke()
+
+  // Threshold: dashed, because it is a decision boundary rather than a signal.
+  //
+  // ONE LINE, STEPPED PER ZONE. Each zone carries its own Selectivity, so the
+  // threshold is a staircase — with the same crossfade at each boundary that the
+  // kernel applies, since it is read through the same zone lookup.
+  const spanOct = Math.log2(frame.maxHz / frame.minHz)
+  const hzAt = d => frame.minHz * Math.pow(2, (d / (bins - 1)) * spanOct)
+  const thresholdAt = d => zoneSettingsAt(props.zones, hzAt(d)).selectivity
+
+  ctx.beginPath()
+  for (let d = 0; d < bins; d++) {
+    const y = yFor(reference[d] + thresholdAt(d))
+    d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
+  }
+  ctx.setLineDash([3, 3])
+  ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(255,255,255,.38)'
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  ctx.restore()
+  ctx.globalAlpha = 1
+}
 
 /**
  * Numerals down the right, and the rules that carry them across.
@@ -847,7 +996,9 @@ function roundRect(ctx, x, y, w, h, r) {
  * same weight as the frequency grid they cross.
  */
 function drawGrScale(ctx, w) {
-  ctx.font = "600 7.5px 'JetBrains Mono',monospace"
+  ctx.save()
+  clipPlate(ctx, w)
+  ctx.font = "500 9px 'JetBrains Mono',monospace"
   ctx.textAlign = 'right'
   ctx.textBaseline = 'middle'
   let lastY = -Infinity
@@ -863,6 +1014,7 @@ function drawGrScale(ctx, w) {
   }
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
+  ctx.restore()
 }
 
 function hzLabel(hz) {
@@ -870,8 +1022,8 @@ function hzLabel(hz) {
 }
 
 function drawAxis(ctx, w, xFor, minHz, maxHz) {
-  ctx.font = "600 7.5px 'JetBrains Mono',monospace"
-  ctx.fillStyle = 'rgba(255,255,255,.3)'
+  ctx.font = "500 9px 'JetBrains Mono',monospace"
+  ctx.fillStyle = 'rgba(255,255,255,.32)'
   ctx.textBaseline = 'bottom'
   const y = props.height - 2
   for (const hz of GRID_HZ) {
@@ -891,8 +1043,11 @@ function drawCursor(ctx, w) {
   if (cursorX.value === null) return
   const x = Math.round(cursorX.value) + 0.5
   if (x < 0 || x > w) return
+  ctx.save()
+  clipPlate(ctx, w)
   ctx.fillStyle = 'rgba(255,255,255,.22)'
   ctx.fillRect(x, 0, 1, laneH.value)
+  ctx.restore()
 }
 
 /**
@@ -1040,6 +1195,8 @@ function clamp(v, lo, hi) {
 function drawZones(ctx, w) {
   if (props.zones.length === 0) return
   const bottom = laneH.value
+  ctx.save()
+  clipPlate(ctx, w)
 
   const paintColumn = (i, fill) => {
     const { loHz, hiHz } = bounds.value[i]
@@ -1056,7 +1213,7 @@ function drawZones(ctx, w) {
   const solo = props.soloZone
   props.zones.forEach((zone, i) => {
     const silent = solo >= 0 ? i !== solo : !zoneSettings(zone).enabled
-    if (silent) paintColumn(i, 'rgba(6,8,7,.62)')
+    if (silent) paintColumn(i, VEIL)
   })
   if (props.selectedZone >= 0 && props.selectedZone < props.zones.length) {
     paintColumn(props.selectedZone, tint(props.accent, 0.07))
@@ -1073,6 +1230,7 @@ function drawZones(ctx, w) {
     ctx.fillRect(x - 1.5, 1, 4, 6)
     ctx.fillRect(x - 1.5, bottom - 7, 4, 6)
   }
+  ctx.restore()
 }
 
 /**
@@ -1402,10 +1560,10 @@ const overlayButtons = computed(() => [
     title: `What has been carved over the last ${HISTORY_SECONDS} seconds`,
   },
   {
-    key: 'spectro',
-    label: 'SPECTRO',
-    on: showSpectro.value,
-    title: `Input spectrum over the last ${HISTORY_SECONDS} seconds`,
+    key: 'spectrum',
+    label: 'SPECTRUM',
+    on: showSpectrum.value,
+    title: 'Input spectrum and the detection threshold, as they are now',
   },
 ])
 
@@ -1434,15 +1592,19 @@ const idleHint = computed(() =>
     <div class="flex items-end justify-between gap-[14px] mb-[7px]">
       <span class="flex items-end gap-[10px] shrink-0">
         <span class="flex flex-col">
-          <span style="font:500 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">
+          <span style="font:500 9px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">
             DEEPEST CUT
           </span>
           <span class="flex items-baseline gap-[4px]">
+            <!-- The brief sets this at 46 px against a 1000 px card; this
+                 faceplate is 640 (`--w-faceplate`), so the same figure lands at
+                 30. Everything else about it is the brief's: Inter 500, the pale
+                 tint, and a mono `dB` at the text-mini step beside it. -->
             <span :style="{
                     font: `500 30px 'Inter',system-ui`,
                     lineHeight: '1',
-                    color: `color-mix(in srgb, ${accent} 45%, #ffffff)`,
-                    textShadow: `0 0 12px color-mix(in srgb, ${accent} 45%, transparent)`,
+                    color: bright(accent),
+                    textShadow: `0 0 12px ${tint(accent, 0.45)}`,
                   }">-{{ readingDb.toFixed(1) }}</span>
             <span style="font:500 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.35)">dB</span>
           </span>
@@ -1457,8 +1619,9 @@ const idleHint = computed(() =>
           :style="{
             font: `700 8px 'JetBrains Mono',monospace`,
             letterSpacing: '.12em',
-            color: `color-mix(in srgb, ${accent} 55%, #ffffff)`,
-            background: `color-mix(in srgb, ${accent} 22%, transparent)`,
+            color: bright(accent),
+            background: tint(accent, 0.14),
+            boxShadow: `inset 0 0 0 1px ${tint(accent, 0.3)}`,
           }"
         >DELTA</span>
       </span>
@@ -1484,9 +1647,9 @@ const idleHint = computed(() =>
             :style="{
               font: `600 8px 'JetBrains Mono',monospace`,
               letterSpacing: '.1em',
-              color: o.on ? `color-mix(in srgb, ${accent} 45%, #ffffff)` : 'rgba(255,255,255,.36)',
-              background: o.on ? `color-mix(in srgb, ${accent} 20%, transparent)` : 'rgba(255,255,255,.05)',
-              boxShadow: o.on ? `inset 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent)` : 'inset 0 0 0 1px rgba(255,255,255,.06)',
+              color: o.on ? bright(accent) : 'rgba(255,255,255,.36)',
+              background: o.on ? tint(accent, 0.14) : 'rgba(255,255,255,.03)',
+              boxShadow: o.on ? `inset 0 0 0 1px ${tint(accent, 0.5)}` : 'inset 0 0 0 1px rgba(255,255,255,.06)',
             }"
             @click="toggleOverlay(o.key)"
           >{{ o.label }}</button>
@@ -1503,12 +1666,17 @@ const idleHint = computed(() =>
       :style="{ color: cursorText ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)' }"
     >{{ zoneText || cursorText || hotspotText || idleHint }}</div>
 
+    <!-- The recess, per the design system: `--bg-canvas-flat` under a ring of
+         `--color-border-1`, at `--radius-lg` plus the 3 px of bezel, and the
+         `--inset-canvas` shadow that gives it depth without floating. The old
+         plate was a warm near-black (#0a0806) at 9 px with a single flat ring,
+         which read as a different material from every other canvas in the app. -->
     <div
       :style="{
         padding: '3px',
-        borderRadius: '9px',
-        background: '#0a0806',
-        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.05)',
+        borderRadius: '15px',
+        background: '#080a0d',
+        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.06), inset 0 2px 16px rgba(0,0,0,.7)',
       }"
     >
       <!-- role="group" rather than "img" now that it is operable: an image is
@@ -1522,7 +1690,7 @@ const idleHint = computed(() =>
         role="group"
         :aria-label="plotSummary"
         :title="ZONE_HINT"
-        :style="{ height: `${height}px`, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'crosshair' }"
+        :style="{ height: `${height}px`, borderRadius: '12px', cursor: dragging ? 'grabbing' : 'crosshair' }"
         @pointerdown="onDown"
         @pointermove="onMove"
         @pointerup="onUp"
