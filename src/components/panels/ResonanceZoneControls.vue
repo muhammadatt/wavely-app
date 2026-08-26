@@ -30,8 +30,12 @@ import Knob from '../knobs/Knob.vue'
 const props = defineProps({
   zones: { type: Array, required: true },
   selected: { type: Number, default: 0 },
-  /** Index of the soloed zone, or -1. Monitoring state, not a parameter. */
-  solo: { type: Number, default: -1 },
+  /**
+   * Index of the zone whose removal is being auditioned, or -1.
+   *
+   * Monitoring state, not a parameter — see useResonance's resDeltaZone.
+   */
+  deltaZone: { type: Number, default: -1 },
   /**
    * The pitch range the protection mask searches, for the caption. Fixed rather
    * than chosen — see HARMONIC_PITCH_RANGE.
@@ -46,7 +50,7 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:zones', 'solo'])
+const emit = defineEmits(['update:zones', 'zone-delta'])
 
 /**
  * The harmonics decision hides behind a door, and swaps places with the zone's
@@ -173,12 +177,12 @@ const db = v => `${Math.round(v)}`
       </div>
 
 
-      <!-- BYPASS AND SOLO ARE NOT THE SAME KIND OF CONTROL, and the panel has
+      <!-- BYPASS AND DELTA ARE NOT THE SAME KIND OF CONTROL, and the panel has
            to say so. Bypass is a setting: it is stored, it is rendered, a file
-           applied with a zone off really has that band untreated. Solo is a
-           monitoring state that never reaches Apply — the same distinction as
-           DELTA in the header, which is why solo is lettered rather than shown
-           as a second lamp. -->
+           applied with a zone off really has that band untreated. This DELTA is
+           a monitoring state that never reaches Apply — the same thing the
+           header's DELTA is, scoped to one band, which is why it is lettered
+           rather than shown as a second lamp. -->
       <div class="flex items-center gap-[5px] mt-[6px]">
         <!-- The OFF look is the base, in classes; the ON look overrides it
              inline, because all three of its values are mixed from the accent
@@ -200,23 +204,25 @@ const db = v => `${Math.round(v)}`
           :disabled="disabled"
           @click="emit('update:zones', toggleZone(zones, index))"
         >{{ settings.enabled ? 'ON' : 'BYP' }}</button>
-        <!-- No inline style at all: solo's lit colour is the fixed amber, not
-             the accent, so both states are static and both can be classes.
+        <!-- No inline style at all: the lit colour is the fixed amber, not the
+             accent, so both states are static and both can be classes. It is
+             amber for the reason solo was — a monitoring state is not a setting
+             and must not wear the accent that every stored control wears.
              Note the two shadows are different KINDS — an outward glow when
              lit, an inset hairline when not — which is why this is a ternary
              between whole classes rather than one utility with a colour swap. -->
         <button
           class="rounded-[4px] px-[6px] py-[2px] font-mono text-[8px] font-bold leading-[normal]
                  tracking-[.1em] cursor-pointer disabled:cursor-default"
-          :class="solo === index
+          :class="deltaZone === index
             ? 'bg-[#ffb27a] text-[#20160c] shadow-[0_0_7px_rgba(255,178,122,.5)]'
             : 'text-text-muted inset-ring-1 inset-ring-[rgba(255,255,255,.16)]'"
-          :aria-pressed="String(solo === index)"
-          :aria-label="`Solo zone ${index + 1}`"
-          title="Hear this zone's processing alone. Monitoring only — Apply always renders every zone."
+          :aria-pressed="String(deltaZone === index)"
+          :aria-label="`Hear what zone ${index + 1} removes`"
+          title="Hear what this zone is removing, and nothing else. Monitoring only — Apply always renders the processed signal."
           :disabled="disabled"
-          @click="emit('solo', index)"
-        >SOLO</button>
+          @click="emit('zone-delta', index)"
+        >DELTA</button>
       </div>
 
         <button

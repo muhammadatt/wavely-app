@@ -42,17 +42,26 @@ const resSelectedZone = ref(0)
 const resTrim = ref(DEFAULTS.trim)
 
 /**
- * Zone being soloed, or -1. UI STATE, NEVER A PARAMETER.
+ * Zone whose removal is being auditioned, or -1. UI STATE, NEVER A PARAMETER.
+ *
+ * ⚠ THIS REPLACED PER-ZONE SOLO, and the two are one gesture apart: solo
+ * isolated a zone and played what SURVIVED it, this isolates a zone and plays
+ * what it TOOK OUT. Isolating is the same transform either way — every other
+ * zone switched off — and the difference is the monitor the kernel is put in
+ * while it holds. Solo answered "what does the file sound like with only this
+ * band worked", which the global bypass already answers well enough; the
+ * question a suppressor is actually asked is "what is this band removing", and
+ * that needs the delta scoped to one zone rather than to the whole effect.
  *
  * Same rule as resDelta and for the same reason: `applyResonanceRegion` spreads
  * the param object straight into the kernel, so a monitoring mode living in
- * there would be one careless key from rendering a soloed pass into the
- * timeline. Solo is expressible as parameters — it is every other zone at depth
- * zero — which is exactly what makes it dangerous, and why the transform
- * happens on the way to the LIVE kernel only. Apply always renders the zones as
- * they are set.
+ * there would be one careless key from rendering an isolated pass into the
+ * timeline. The isolation is expressible as ordinary parameters — every other
+ * zone at depth zero — which is exactly what makes it dangerous, and why the
+ * transform happens on the way to the LIVE kernel only. Apply always renders
+ * the zones as they are set, in the processed monitor.
  */
-const resSoloZone = ref(-1)
+const resDeltaZone = ref(-1)
 
 /**
  * The voice the zones were last placed from, or null.
@@ -109,14 +118,27 @@ function resDisplayFn() {
 /**
  * The zones as the live kernel should hear them.
  *
- * Identical to the stored set unless a zone is soloed, in which case every
- * other zone is switched off — which the kernel already understands, so solo
- * needs no mechanism of its own in the DSP.
+ * Identical to the stored set unless a zone's delta is being auditioned, in
+ * which case every other zone is switched off — which the kernel already
+ * understands, so zone-scoped monitoring needs no mechanism of its own in the
+ * DSP beyond the delta monitor it shares with the header's DELTA.
  */
 function liveZones() {
-  const solo = resSoloZone.value
-  if (solo < 0 || solo >= resZones.value.length) return resZones.value
-  return resZones.value.map((z, i) => ({ ...z, enabled: i === solo }))
+  const only = resDeltaZone.value
+  if (only < 0 || only >= resZones.value.length) return resZones.value
+  return resZones.value.map((z, i) => ({ ...z, enabled: i === only }))
+}
+
+/**
+ * Whether the kernel should be inverting: the header's DELTA, or a zone's.
+ *
+ * One monitor, two ways to ask for it. A zone delta forces it on regardless of
+ * the header switch and hands the header switch back untouched when it clears,
+ * so switching a zone's delta on and off again cannot silently turn the global
+ * one off underneath someone.
+ */
+function monitoringDelta() {
+  return resDelta.value || resDeltaZone.value >= 0
 }
 
 function currentParams() {
@@ -173,13 +195,13 @@ export function useResonance() {
     for (const [name, value] of Object.entries(currentParams())) {
       chain.updateParam(resonanceEffect.id, name, value)
     }
-    // Not from currentParams: that object is what Apply renders with, and solo
-    // must never reach it.
+    // Not from currentParams: that object is what Apply renders with, and a
+    // zone's delta isolation must never reach it.
     chain.updateParam(resonanceEffect.id, 'zones', liveZones())
     // Not in currentParams, so it needs restoring by hand when the preview is
     // switched back on.
     chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
-      ?.setMonitorDelta(resDelta.value)
+      ?.setMonitorDelta(monitoringDelta())
   }
 
   /**
@@ -193,7 +215,7 @@ export function useResonance() {
    */
   function toggleDelta() {
     resDelta.value = !resDelta.value
-    resNodes?.setMonitorDelta(resDelta.value)
+    resNodes?.setMonitorDelta(monitoringDelta())
   }
 
   function togglePreview() {
@@ -234,21 +256,26 @@ export function useResonance() {
   }
 
   /**
-   * Hear one zone's processing alone.
+   * Hear what one zone is removing, and nothing else.
    *
-   * A second click on the same zone clears it, and selecting solo on a zone
-   * that is switched off is allowed — it means "nothing", which is a legitimate
-   * thing to want to hear when you are deciding whether a band is the problem.
+   * Every other zone off plus the delta monitor: the kernel then computes its
+   * gain from this zone alone and plays the complement, so what comes out is
+   * that band's cut and silence everywhere else. A second click on the same
+   * zone clears it, and asking it of a zone that is switched off is allowed —
+   * the honest answer is nothing, which is a legitimate thing to hear when you
+   * are deciding whether a band is the problem.
    */
-  function toggleSolo(index) {
-    resSoloZone.value = resSoloZone.value === index ? -1 : index
+  function toggleZoneDelta(index) {
+    resDeltaZone.value = resDeltaZone.value === index ? -1 : index
     pushZones()
+    resNodes?.setMonitorDelta(monitoringDelta())
   }
 
-  function clearSolo() {
-    if (resSoloZone.value < 0) return
-    resSoloZone.value = -1
+  function clearZoneDelta() {
+    if (resDeltaZone.value < 0) return
+    resDeltaZone.value = -1
     pushZones()
+    resNodes?.setMonitorDelta(monitoringDelta())
   }
   const syncMode = v => syncParam('mode', resMode, v)
 
@@ -295,7 +322,10 @@ export function useResonance() {
       // The count can grow, so a selection past the new end would point at
       // nothing; it cannot shrink, but clamping costs nothing and says so.
       resSelectedZone.value = Math.min(resSelectedZone.value, placed.zones.length - 1)
-      clearSolo()
+      // A zone delta names a zone BY INDEX, and a re-partition moves every
+      // index — so an audition left running would silently be of a different
+      // band than the one it was switched on for.
+      clearZoneDelta()
       pushZones()
       showToast(`Zones fitted to voice (F0 ${Math.round(profile.medianF0Hz)} Hz)`)
     } catch (err) {
@@ -344,13 +374,18 @@ export function useResonance() {
     // preview was switched on — under a header that no longer said so. Read off
     // the chain rather than the meter loop's handle, which apply() has already
     // dropped by the time it gets here.
-    // Solo is a monitoring state and the effect entry outlives this panel, so
-    // one left set would come back the next time the preview was switched on —
-    // under a panel that no longer said so. Same reason delta is cleared below.
-    resSoloZone.value = -1
+    // A zone delta is a monitoring state and the effect entry outlives this
+    // panel, so one left set would come back the next time the preview was
+    // switched on — under a panel that no longer said so. Same reason the
+    // header's delta is cleared below.
+    const wasMonitoring = monitoringDelta()
+    resDeltaZone.value = -1
+    resDelta.value = false
+    // The measured voice goes too, and for the same reason: it describes the
+    // file that was open, and coming back under a panel showing a different one
+    // would put a stale F0 beside boundaries that were never placed from it.
     resVoiceProfile.value = null
-    if (resDelta.value) {
-      resDelta.value = false
+    if (wasMonitoring) {
       getEffectChainIfExists()?.effects
         .find(e => e.id === resonanceEffect.id)?.nodes?.setMonitorDelta(false)
     }
@@ -371,7 +406,7 @@ export function useResonance() {
     resTrim,
     resZones,
     resSelectedZone,
-    resSoloZone,
+    resDeltaZone,
     resRefMode,
     resMode,
     resPreview,
@@ -389,8 +424,8 @@ export function useResonance() {
     resVoiceProfile,
     resPlacementBusy,
     fitZonesToVoice,
-    toggleSolo,
-    clearSolo,
+    toggleZoneDelta,
+    clearZoneDelta,
     syncMode,
     apply,
     teardown,

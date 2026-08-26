@@ -71,13 +71,23 @@ const ANCHORS = {
 }
 
 /**
- * The stock boundaries these anchors are calibrated against, in order.
+ * The anchors in frequency order, one per calibrated boundary.
  *
- * Read from DEFAULT_RESONANCE_ZONES rather than repeated, so a change to the
- * calibrated set cannot silently leave this scaling anchored to a value nobody
- * ships any more.
+ * ⚠ THE SHIPPED ZONE SET IS NOT A FIXED LENGTH, and assuming it was cost this
+ * module a silent failure. It was three boundaries (180 / 1100 / 5000) when
+ * this was written; the panel has since folded the upper-mid and air zones
+ * together and ships two (180 / 1100), and a hard `length !== 3` guard turned
+ * that into `placeResonanceZones` returning null — FIT enabled, pressed, and
+ * doing nothing, with no error anywhere.
+ *
+ * So the list is read as "the anchors for however many boundaries there are",
+ * low to high, and `calibratedBoundaries` reads the set itself. Re-splitting at
+ * 5 kHz brings `sibilance` back with no edit here. The assumption that remains
+ * — that the shipped boundaries are these anchors in this order — is what the
+ * placement means, and it is pinned per-boundary in the tests rather than
+ * left to the count.
  */
-const CALIBRATED_ANCHOR_ORDER = ['fundamental', 'presence', 'sibilance']
+const ANCHOR_ORDER = ['fundamental', 'presence', 'sibilance']
 
 /** The reference voice the stock numbers were calibrated on. */
 const CALIBRATION_F0_HZ = 110
@@ -95,12 +105,13 @@ const CALIBRATION_F0_HZ = 110
  * @param {number[]} stock     the calibrated boundaries, male-derived
  */
 export function voiceZoneBoundaries(medianF0Hz, cornerHz, stock) {
-  if (!(medianF0Hz > 0) || !(cornerHz > 0) || stock?.length !== 3) return null
+  const n = stock?.length ?? 0
+  if (!(medianF0Hz > 0) || !(cornerHz > 0) || n < 1 || n > ANCHOR_ORDER.length) return null
 
   const { regions, voiceType } = classifyVoice(medianF0Hz)
   const { regions: reference } = classifyVoice(CALIBRATION_F0_HZ)
 
-  const scaled = CALIBRATED_ANCHOR_ORDER.map((name, i) => {
+  const scaled = ANCHOR_ORDER.slice(0, n).map((name, i) => {
     const anchor = ANCHORS[name]
     const ref = anchor(reference)
     return ref > 0 ? (stock[i] * anchor(regions)) / ref : stock[i]
@@ -220,5 +231,14 @@ function calibratedBoundaries() {
   return DEFAULT_RESONANCE_ZONES.slice(0, -1).map(z => z.hiHz)
 }
 
-/** Placement always produces this many zones. Pinned against RESONANCE_ZONE_MAX. */
-export const PLACED_ZONE_COUNT = 5
+/**
+ * How many zones a placement produces: the shipped boundaries, plus the
+ * sub-fundamental split, plus one because n boundaries make n+1 zones.
+ *
+ * Derived rather than written down for the same reason the boundaries are —
+ * the shipped set has already changed length once underneath this file.
+ * Pinned against RESONANCE_ZONE_MAX in the tests.
+ */
+export function placedZoneCount() {
+  return calibratedBoundaries().length + 2
+}

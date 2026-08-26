@@ -34,6 +34,9 @@ import {
   xFromHz,
   zoneIndexAt,
   zonePeakReductions,
+  zoneDotAt,
+  zoneDotX,
+  ZONE_DOT_HIT_PX,
 } from '../../src/components/meters/resonanceZoneEdit.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 
@@ -76,6 +79,53 @@ test('the shipping zones all carry the stock settings', () => {
   const c = buildResonanceZoneCurves(DEFAULT_RESONANCE_ZONES, BINS, BW)
   assert.equal(c.uniform, true)
   assert.equal(c.groups.length, 1)
+})
+
+// ── Zone dots ───────────────────────────────────────────────────────────────
+//
+// The dot replaced the selected column's tint, so it is now the only thing on
+// the plot that says which zone the knobs are editing — and the only handle
+// that says the columns can be selected at all. A dot drawn in the wrong column
+// looks exactly like a dot drawn in the right one.
+
+const AXIS = { w: 640, minHz: 20, maxHz: 20000 }
+
+test('a zone dot sits in the middle of its own column', () => {
+  const z = zones({ hiHz: 200 }, { hiHz: 2000 }, {})
+  for (let i = 0; i < z.length; i++) {
+    const x = zoneDotX(z, i, AXIS)
+    // Inside its own column, by the plot's own axis mapping.
+    assert.equal(zoneIndexAt(z, x, AXIS, 20, 20000), i, `dot ${i} landed in the wrong zone`)
+  }
+  // And centred: the two halves of the column are the same width in PIXELS,
+  // which on a log axis is not the same as being centred in Hz.
+  const x0 = xFromHz(200, AXIS)
+  const x1 = xFromHz(2000, AXIS)
+  assert.ok(Math.abs(zoneDotX(z, 1, AXIS) - (x0 + x1) / 2) < 1e-9)
+})
+
+test('the dots are in frequency order and never collide', () => {
+  const z = zones({ hiHz: 180 }, { hiHz: 1100 }, {})
+  const xs = z.map((_, i) => zoneDotX(z, i, AXIS))
+  for (let i = 1; i < xs.length; i++) {
+    assert.ok(xs[i] > xs[i - 1], 'dots must run left to right')
+    assert.ok(xs[i] - xs[i - 1] > ZONE_DOT_HIT_PX * 2,
+      `dots ${i - 1} and ${i} are close enough for one click to hit both`)
+  }
+})
+
+test('a click near a dot names its zone, and one away from it names none', () => {
+  const z = zones({ hiHz: 200 }, { hiHz: 2000 }, {})
+  const dotY = 180
+  const x = zoneDotX(z, 1, AXIS)
+  assert.equal(zoneDotAt(z, x, dotY, dotY, AXIS), 1)
+  // Just inside the radius, diagonally, is still a hit.
+  assert.equal(zoneDotAt(z, x + 5, dotY - 5, dotY, AXIS), 1)
+  // The same column, but well above the row of dots, is not: that click belongs
+  // to the plate, which selects the zone by a different route.
+  assert.equal(zoneDotAt(z, x, dotY - 60, dotY, AXIS), -1)
+  // A zone so narrow that its dot is off the drawn plate cannot be hit either.
+  assert.equal(zoneDotAt(z, -40, dotY, dotY, AXIS), -1)
 })
 
 test('bounds are contiguous and cover the band', () => {

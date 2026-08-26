@@ -23,12 +23,12 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   resAttack, resRelease,
   resMode,
-  resMix, resTrim, resZones, resSelectedZone, resSoloZone, resRefMode,
+  resMix, resTrim, resZones, resSelectedZone, resDeltaZone, resRefMode,
   resPreview, resDelta, resReduction,
   resDisplayFn, hasSelection,
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
   togglePreview, toggleDelta, syncAttack,
-  syncRelease, syncMix, syncTrim, syncZones, toggleSolo,
+  syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
   syncMode, apply, teardown, closeModal,
 } = useResonance()
 
@@ -196,7 +196,7 @@ async function applyAndClose() {
         :delta="resDelta"
         :zones="resZones"
         :selected-zone="resSelectedZone"
-        :solo-zone="resSoloZone"
+        :delta-zone="resDeltaZone"
         @update:zones="syncZones"
         @update:selected-zone="resSelectedZone = $event"
       />
@@ -231,13 +231,13 @@ async function applyAndClose() {
         <ResonanceZoneControls
           :zones="resZones"
           :selected="resSelectedZone"
-          :solo="resSoloZone"
+          :delta-zone="resDeltaZone"
           :pitch-range-caption="pitchRangeCaption"
           :ref-mode="resRefMode"
           :accent="ACCENT"
           :disabled="!resPreview"
           @update:zones="syncZones"
-          @solo="toggleSolo"
+          @zone-delta="toggleZoneDelta"
         />
       </div>
 
