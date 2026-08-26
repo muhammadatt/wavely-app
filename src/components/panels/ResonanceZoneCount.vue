@@ -191,11 +191,12 @@ function removeZone() {
     </div>
 
     <!-- The boundaries this panel ships are the MALE region table applied to
-         every voice — 5 kHz is exactly `upper_presence`'s top edge, 180 Hz is
-         `body_warmth`'s geometric centre. FIT measures the speaker and scales
-         them by their own anchors' ratios, and adds the sub-fundamental split.
-         A male narrator reproduces the shipped set exactly, which is the point:
-         nothing already listened to moves. See resonanceZonePlacement.js. -->
+         every voice — 180 Hz is `body_warmth`'s geometric centre, 1100 Hz is
+         within an eighth of an octave of `lower_presence`'s bottom (1200). FIT
+         measures the speaker and scales them by their own anchors' ratios, and
+         adds the sub-fundamental split. A male narrator reproduces the shipped
+         set exactly, which is the point: nothing already listened to moves. See
+         resonanceZonePlacement.js. -->
     <button
       class="mt-[10px] px-[7px] py-[3px] rounded-[5px] font-mono text-[7.5px] font-semibold
              leading-[normal] tracking-[.1em] bg-surface-2 text-text-softer

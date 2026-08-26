@@ -2,12 +2,11 @@
  * Where a voice's zone boundaries belong.
  *
  * THE STOCK BOUNDARIES ARE THE MALE REGION TABLE, APPLIED TO EVERY VOICE.
- * DEFAULT_RESONANCE_ZONES splits at 180 / 1100 / 5000 Hz, and its comment
- * explains them as "above most narrators' fundamentals", "the bottom of the
- * presence range" and "where sibilance starts to dominate". Those are the
- * MALE_REGIONS edges written out in prose: 5000 is exactly `upper_presence`'s
- * top, 1100 is within an eighth of an octave of `lower_presence`'s bottom
- * (1200), and 180 is the geometric centre of `body_warmth` (183.3).
+ * DEFAULT_RESONANCE_ZONES currently splits at 180 / 1100 Hz, and those numbers
+ * come from the MALE_REGIONS edges: 1100 is within an eighth of an octave of
+ * `lower_presence`'s bottom (1200), and 180 is the geometric centre of
+ * `body_warmth` (183.3). (When a sibilance boundary is re-added it will be
+ * `upper_presence`'s top — 5000 for a male voice.)
  *
  * VoiceRx already measures the thing those numbers stand in for. Its region
  * tables MOVE with the voice — mud is 200-420 Hz for a male narrator and
@@ -93,12 +92,13 @@ const ANCHOR_ORDER = ['fundamental', 'presence', 'sibilance']
 const CALIBRATION_F0_HZ = 110
 
 /**
- * Boundaries for a voice, low to high: [subF0, fundamental, presence, sibilance].
+ * Boundaries for a voice, low to high: [subF0, ...calibrated].
  *
  * The first is the rumble corner — measured, not scaled, because "below this
  * there cannot be voice" is a statement about this speaker rather than about a
- * region table. The other three are the stock boundaries scaled by their
- * anchors' ratios against the calibration voice.
+ * region table. The rest are the stock boundaries (currently [fundamental,
+ * presence], i.e. 180 / 1100 Hz for a male voice) scaled by their anchors'
+ * ratios against the calibration voice.
  *
  * @param {number} medianF0Hz  median of the tracker's voiced-frame estimates
  * @param {number} cornerHz    rumbleCornerHz() for the same F0 population
@@ -165,15 +165,15 @@ function settingsOf(zone) {
 /**
  * Rewrite a zone set's geometry from a measured voice.
  *
- * FIVE ZONES, BECAUSE THE SUB-FUNDAMENTAL REGION IS PARTITIONED OFF. Below the
- * corner there is no voice content, but there is very often sub-vocal energy —
- * HVAC, traffic, handling, plosive thump — and while it shares a zone with the
- * fundamental it is not separately controllable. It is not only that the
- * settings are shared: the detector's spread kernel reaches ±96 bins, and
- * reduction is spread BEFORE the per-zone depth and ceiling are applied, so a
- * deep cut taken on a 45 Hz rumble smears up into the fundamental unless a
- * boundary confines it. Partitioning is what makes "leave the voice alone and
- * deal with the rumble" expressible at all.
+ * ONE MORE ZONE THAN THE SHIPPED BOUNDARIES, BECAUSE THE SUB-FUNDAMENTAL
+ * REGION IS PARTITIONED OFF. Below the corner there is no voice content, but
+ * there is very often sub-vocal energy — HVAC, traffic, handling, plosive
+ * thump — and while it shares a zone with the fundamental it is not separately
+ * controllable. It is not only that the settings are shared: the detector's
+ * spread kernel reaches ±96 bins, and reduction is spread BEFORE the per-zone
+ * depth and ceiling are applied, so a deep cut taken on a 45 Hz rumble smears
+ * up into the fundamental unless a boundary confines it. Partitioning is what
+ * makes "leave the voice alone and deal with the rumble" expressible at all.
  *
  * EQ is usually the better answer down there and this does not pretend
  * otherwise — a fixed high-pass removes rumble without a detector having an
@@ -206,7 +206,7 @@ export function placeResonanceZones(zones, profile) {
   for (let i = 0; i + 1 < edges.length; i++) {
     const last = i + 2 === edges.length
     // Geometric, because the axis is logarithmic: the arithmetic midpoint of
-    // 180 Hz and 5 kHz sits three quarters of the way along the span as drawn.
+    // 180 Hz and 1100 Hz sits well past centre as drawn on a log scale.
     const centre = Math.sqrt(edges[i] * edges[i + 1])
     const from = source
       ? source[Math.max(0, bounds.findIndex(b => centre <= b.hiHz))] ?? source[source.length - 1]
@@ -225,7 +225,8 @@ export function placeResonanceZones(zones, profile) {
  * recording.
  *
  * The last zone's `hiHz` is the top of the band, not a boundary, so it is
- * dropped; what remains is [fundamental, presence, sibilance].
+ * dropped; what remains is the calibrated boundaries in frequency order
+ * (currently [fundamental, presence], i.e. two values).
  */
 function calibratedBoundaries() {
   return DEFAULT_RESONANCE_ZONES.slice(0, -1).map(z => z.hiHz)
