@@ -14,6 +14,9 @@ import {
   xFromHz,
   zoneIndexAt,
   zonePeakReductions,
+  zoneDotAt,
+  zoneDotX,
+  ZONE_DOT_R,
 } from './resonanceZoneEdit.js'
 import { HISTORY_SECONDS, ResonanceHistory } from './resonanceHistory.js'
 import { MARK_MIN_DB, findResonanceMarks } from './resonanceMarks.js'
@@ -91,14 +94,14 @@ const props = defineProps({
   /** Which zone the controls below are editing. Selection is owned by the panel. */
   selectedZone: { type: Number, default: -1 },
   /**
-   * Soloed zone, or -1.
+   * Zone whose removal is being auditioned alone, or -1.
    *
-   * Drawn, because solo changes what is being heard and a display that did not
+   * Drawn, because it changes what is being heard and a display that did not
    * show it would disagree with the speakers — the same reason the DELTA badge
    * is repeated on this line. It arrives separately from `zones` rather than
    * baked into them so the knobs keep reading the stored settings.
    */
-  soloZone: { type: Number, default: -1 },
+  deltaZone: { type: Number, default: -1 },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -438,10 +441,11 @@ let peakAges = null
  * the settling time the thing that is fixed, which is what the analyzer's knob
  * is understood to mean even though its own implementation cannot promise it.
  *
- * 75 ms = the analyzer at 80% averaging, which is what this was asked for:
- * unaveraged, the trace steps at the post rate and reads about like 50%.
+ * 103 ms = the analyzer at 85% averaging, which is what this was asked for:
+ * tau = 16.7 ms / -ln(0.85). It was 75, i.e. 80%; unaveraged, the trace steps
+ * at the post rate and reads about like 50%.
  */
-const DISPLAY_TAU_MS = 75
+const DISPLAY_TAU_MS = 103
 
 /**
  * Smoothed copies of the continuous curves that are DRAWN, and the frame view
@@ -1240,7 +1244,7 @@ function updatePeaks(frame, dtMs) {
     // Arithmetic lives in resonanceZoneEdit so it can be tested without a
     // canvas, like every other zone geometry function.
     zonePeaks.value = zonePeakReductions(
-      props.zones, reduction, bins, minHz, maxHz, props.soloZone,
+      props.zones, reduction, bins, minHz, maxHz, props.deltaZone,
     )
   }
   updateCursorText(frame)
@@ -1271,6 +1275,20 @@ let drag = null
 const dragging = ref(false)
 /** Divider under the pointer, for the hover cursor. -1 for none. */
 const hoverDivider = ref(-1)
+/** Zone dot under the pointer, for the hover cursor and the dot's own size. */
+const hoverZoneDot = ref(-1)
+
+/**
+ * Where the row of zone dots sits: just above the bottom of the plate.
+ *
+ * The BOTTOM, because reduction hangs from the top and the per-zone numbers are
+ * printed there too — the two ends of a column are already spoken for
+ * differently, so the handles go where nothing else lives. It clears the
+ * dividers' lower grips (6 px tall, 7 px up from the bottom) by sitting above
+ * them rather than beside them, since a zone dot and a boundary grip are
+ * different gestures and must not be one pixel apart.
+ */
+const zoneDotY = computed(() => laneH.value - 17)
 
 const bounds = computed(() => zoneBounds(props.zones, 20, 20000))
 
@@ -1305,15 +1323,11 @@ function drawZones(ctx, w) {
   // A zone switched off is washed out across the whole column, which is what
   // the out-of-band wash used to do for the band limits. Same statement, and
   // now there is only one control that can make it.
-  const solo = props.soloZone
+  const only = props.deltaZone
   props.zones.forEach((zone, i) => {
-    const silent = solo >= 0 ? i !== solo : !zoneSettings(zone).enabled
+    const silent = only >= 0 ? i !== only : !zoneSettings(zone).enabled
     if (silent) paintColumn(i, VEIL)
   })
-  if (props.selectedZone >= 0 && props.selectedZone < props.zones.length) {
-    paintColumn(props.selectedZone, tint(props.accent, 0.07))
-  }
-
   for (let i = 0; i < props.zones.length - 1; i++) {
     const x = Math.round(xFromHz(props.zones[i].hiHz, axis)) + 0.5
     const live = drag?.divider === i || hoverDivider.value === i
@@ -1325,7 +1339,66 @@ function drawZones(ctx, w) {
     ctx.fillRect(x - 1.5, 1, 4, 6)
     ctx.fillRect(x - 1.5, bottom - 7, 4, 6)
   }
+  drawZoneDots(ctx)
   ctx.restore()
+}
+
+/**
+ * ONE DOT PER ZONE, AND IT IS WHAT SELECTS THE ZONE. The tint is gone.
+ *
+ * The selected column used to be washed in 7% of the accent. Two things were
+ * wrong with that. It is a WHOLE-COLUMN statement about a whole-column area
+ * that is already carrying three other whole-column statements — the veil over
+ * a silent zone, the reduction fill, and (with the overlay on) the waterfall —
+ * so the faintest of them was the one being asked to say which zone the knobs
+ * were editing. And a wash is not a target: it says "this one is selected" and
+ * nothing at all about how to select another, which left clicking anywhere in a
+ * column as an undiscoverable gesture.
+ *
+ * A dot is both. It reads as a handle, so it says the columns are selectable,
+ * and it is small enough to sit under the curves rather than behind them.
+ * Clicking the plate anywhere in a column still selects it — the dot is the
+ * signpost, not a narrowing of the gesture.
+ *
+ * FILLED FOR THE SELECTED ONE, RINGED FOR THE REST, which is the same
+ * vocabulary the resonance marks use one layer up: a filled dot is the thing
+ * being pointed at.
+ */
+function drawZoneDots(ctx) {
+  const y = zoneDotY.value
+  props.zones.forEach((zone, i) => {
+    const x = zoneDotX(props.zones, i, axis)
+    const on = i === props.selectedZone
+    const hot = on || hoverZoneDot.value === i
+    ctx.beginPath()
+    ctx.arc(x, y, hot ? ZONE_DOT_R + 1 : ZONE_DOT_R, 0, Math.PI * 2)
+    if (on) {
+      ctx.fillStyle = props.accent
+      ctx.fill()
+      // A ring off the fill, so the selected dot survives being drawn over the
+      // reduction fill in its own colour.
+      ctx.strokeStyle = 'rgba(8,10,13,.75)'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+    } else {
+      ctx.fillStyle = 'rgba(8,10,13,.62)'
+      ctx.fill()
+      ctx.strokeStyle = tint(props.accent, hot ? 0.8 : 0.45)
+      ctx.lineWidth = 1.25
+      ctx.stroke()
+    }
+    // Bypassed zones say so here too: the dot is the one part of a veiled
+    // column that is drawn at full strength, so without this the handle of a
+    // switched-off zone looks as live as any other.
+    if (!zoneSettings(zone).enabled) {
+      ctx.strokeStyle = 'rgba(255,255,255,.5)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x - 5, y + 5)
+      ctx.lineTo(x + 5, y - 5)
+      ctx.stroke()
+    }
+  })
 }
 
 /**
@@ -1434,6 +1507,16 @@ function onDown(e) {
   }
   // Anywhere else, including the plate around a dot, clears the label.
   selectedMarkHz.value = null
+
+  // A zone dot before a divider, for the reason a resonance dot comes before
+  // both: a dot is a point target that exists in one place, a divider is a line
+  // that can be grabbed at any other height.
+  const dot = zoneDotAt(props.zones, x, y, zoneDotY.value, axis)
+  if (dot >= 0) {
+    select(dot)
+    e.preventDefault()
+    return
+  }
 
   const divider = boundaryAt(props.zones, x, axis, DIVIDER_HIT_PX)
   if (divider >= 0) {
@@ -1590,6 +1673,9 @@ function onMove(e) {
   // picture is discoverable only by accident — the same argument the selection
   // edges' ew-resize cursor makes in the waveform.
   hoverMark.value = !drag && markAt(x, y) >= 0
+  hoverZoneDot.value = drag || hoverMark.value
+    ? -1
+    : zoneDotAt(props.zones, x, y, zoneDotY.value, axis)
   onDrag(e, x, y)
 }
 
@@ -1601,6 +1687,7 @@ function onLeave() {
   cursorX.value = null
   cursorText.value = ''
   hoverMark.value = false
+  hoverZoneDot.value = -1
 }
 
 function formatHz(hz) {
@@ -1678,7 +1765,8 @@ const plotSummary = computed(() => {
  * instruction rather than two that have to be kept in step.
  */
 const ZONE_HINT = 'Click a resonance dot to label it with its frequency and '
-  + 'depth, or click it again to put the label away. Drag a '
+  + 'depth, or click it again to put the label away. Click a zone dot along the '
+  + 'bottom to select that zone. Drag a '
   + 'boundary line to move a zone. Double-click to split a zone, or double-click a '
   + 'boundary to merge. Keyboard: up and down label each resonance in turn, '
   + 'left and right select a zone, shift with left and right moves the '
@@ -1850,7 +1938,8 @@ const idleHint = computed(() =>
         :style="{
           height: `${height}px`,
           borderRadius: '12px',
-          cursor: dragging ? 'grabbing' : hoverMark ? 'pointer' : 'crosshair',
+          cursor: dragging ? 'grabbing'
+            : hoverMark || hoverZoneDot >= 0 ? 'pointer' : 'crosshair',
         }"
         @pointerdown="onDown"
         @pointermove="onMove"

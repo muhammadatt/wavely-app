@@ -418,11 +418,20 @@ const ZONE_STOCK = {
   protect: false,
   enabled: true,
 }
+/**
+ * THREE ZONES, NOT FOUR. The 5 kHz boundary is the one that went.
+ *
+ * 180 Hz and 1.1 kHz are the two splits the panel's own reasoning rests on —
+ * below the first is where rumble and the fundamental live and where the
+ * harmonic mask earns its place, and above the second is where sibilance and
+ * ring do — so a three-way keeps both of those and folds the old upper-mid and
+ * air zones into one. Splitting 1.1 kHz upward again is one double-click for
+ * anyone who wants it back, and a split inherits its parent's settings.
+ */
 export const DEFAULT_RESONANCE_ZONES = [
   { id: 'z1', hiHz: 180, ...ZONE_STOCK },
   { id: 'z2', hiHz: 1100, ...ZONE_STOCK },
-  { id: 'z3', hiHz: 5000, ...ZONE_STOCK },
-  { id: 'z4', hiHz: 20000, ...ZONE_STOCK },
+  { id: 'z3', hiHz: 20000, ...ZONE_STOCK },
 ]
 export const RESONANCE_ZONE_STOCK = ZONE_STOCK
 
@@ -636,8 +645,14 @@ export const RESONANCE_DEFAULTS = {
   // now, with no global value to be an offset from — see DEFAULT_RESONANCE_ZONES.
   // Nor are the low/high band limits: a band you want left alone is a zone
   // switched off, which says the same thing in a control that already exists.
-  attack: 15, // ms
-  release: 80, // ms
+  // BALLISTICS SLOW ENOUGH TO LEVEL A PHRASE RATHER THAN A SYLLABLE, which is
+  // the regime the sweep found: at matched cut, a longer release is better per
+  // dB removed (0.416 -> 0.299 out to 4 s) and p90 depth falls 8.5 -> 5.2 dB,
+  // the same average spread evenly instead of concentrated in momentary deep
+  // notches. 15/80 was inherited from the server stage, where the suppressor
+  // runs inside a chain rather than as something set by ear.
+  attack: 300, // ms
+  release: 1500, // ms
   mode: 'soft', // 'soft' | 'hard'
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
   refMode: 'peak',

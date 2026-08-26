@@ -58,6 +58,59 @@ export function boundaryAt(zones, x, axis, radiusPx = BOUNDARY_HIT_PX) {
   return best
 }
 
+/**
+ * Radius of a zone's selection dot, and how far from it a click still counts.
+ *
+ * The dot is small because it is furniture, not a reading; the hit radius is
+ * more than twice it for the same reason every other target on this plot is
+ * generous — the plate is 640 px wide and a zone can be a fifth of that.
+ */
+export const ZONE_DOT_R = 3.5
+export const ZONE_DOT_HIT_PX = 9
+
+/**
+ * Where a zone's dot sits: the geometric centre of its column.
+ *
+ * The MIDPOINT IN PIXELS rather than the geometric mean of its two frequencies,
+ * which on a log axis is the same number — the axis is logarithmic, so the
+ * centre of the drawn column and sqrt(lo*hi) are one point. Computing it in
+ * pixels means a zone clamped at either end of the plot puts its dot in the
+ * middle of what is actually drawn rather than in the middle of a span that
+ * runs off the edge.
+ */
+export function zoneDotX(zones, index, axis, floorHz = 20, ceilHz = 20000) {
+  const bounds = zoneBounds(zones, floorHz, ceilHz)
+  const b = bounds[index]
+  if (!b) return 0
+  const x0 = xFromHz(b.loHz, axis)
+  const x1 = xFromHz(b.hiHz, axis)
+  return (x0 + x1) / 2
+}
+
+/**
+ * Index of the zone dot under a point, or -1.
+ *
+ * Measured to the dot itself, in both axes, so a click low in a column that is
+ * nowhere near the dot falls through to the plate — where it selects the zone
+ * anyway, which is the same outcome by a different route. That redundancy is
+ * deliberate: the dot is what SAYS the column is selectable, and someone who
+ * has learned that can also just click the column.
+ */
+export function zoneDotAt(zones, x, y, dotY, axis, floorHz = 20, ceilHz = 20000) {
+  let best = -1
+  let bestD = ZONE_DOT_HIT_PX * ZONE_DOT_HIT_PX
+  for (let i = 0; i < zones.length; i++) {
+    const dx = zoneDotX(zones, i, axis, floorHz, ceilHz) - x
+    const dy = dotY - y
+    const d = dx * dx + dy * dy
+    if (d <= bestD) {
+      bestD = d
+      best = i
+    }
+  }
+  return best
+}
+
 /** Index of the zone containing a pixel column. */
 export function zoneIndexAt(zones, x, axis, floorHz, ceilHz) {
   const hz = hzFromX(x, axis)
