@@ -578,8 +578,32 @@ export class ResonanceKernel {
         // ISTFT(X·(1−G)) is ISTFT(X) − ISTFT(X·G) sample for sample — the
         // difference between the input and the output, with no delay to line
         // up and no second signal path to drift.
+        //
+        // ⚠ THE COMPLEMENT IS TAKEN AGAINST THE TRIM, NOT AGAINST UNITY, and
+        // `1 - g[k]` was a real bug rather than a nicety. `gain` carries the
+        // output trim (see the blend in setParams: gain = trim·((1−mix) +
+        // mix·g)), so on a patch that is removing NOTHING — every zone
+        // bypassed, depth at zero — the complement of unity is `1 − trim`,
+        // which is not zero unless the trim is. Reported from use as "DELTA
+        // keeps playing the file with everything switched off", and it does:
+        // at +6 dB of trim `1 − trim` is −1, so DELTA plays the whole file back
+        // at full level with its polarity flipped. Measured on a 180 Hz tone at
+        // 0.2: delta peak 0.199 at +6 dB of trim, 0.058 at −3 dB, 0.000 at 0.
+        //
+        // `trimLin − g[k]` is the same arithmetic with the trim factored out of
+        // the complement and left on the result: trim·(1 − blend). So the delta
+        // is the removed signal, monitored through the same output trim the
+        // processed signal is, and it is silent whenever nothing is removed
+        // whatever the trim says. Mix needs no such treatment — it scales how
+        // much is removed, so a delta that goes quiet as mix falls is correct.
+        //
+        // What that costs is the exact form of the identity: output + delta is
+        // now the TRIMMED input rather than the input. At trim 0 dB — the
+        // default, and every setting the old line was ever right for — this is
+        // bit-identical to what it replaced.
+        const trim = this.trimLin
         for (let k = 0; k < bins; k++) {
-          const d = 1 - g[k]
+          const d = trim - g[k]
           re[k] *= d
           im[k] *= d
         }

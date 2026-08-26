@@ -995,11 +995,13 @@ test('trim is a clean output gain on the wet path', () => {
 })
 
 test('the delta monitor stays exact under mix and trim', () => {
-  // The blend lives inside the per-bin gain, so 1 - gain is still literally
-  // input minus output. Had mix been staged as a node around the effect this
-  // would not hold.
+  // The blend lives inside the per-bin gain, so the delta is still literally
+  // input minus output — up to the output trim, which both are monitored
+  // through. Had mix been staged as a node around the effect this would not
+  // hold at all.
   const sig = resonate(voice({ seconds: 1.5 }), 3000, 40, 14)
-  const params = { ...UNPROTECTED, mix: 0.6, trimDb: 3 }
+  const trimDb = 3
+  const params = { ...UNPROTECTED, mix: 0.6, trimDb }
   const wet = processResonanceBuffer([sig], SR, params).channelData[0]
 
   const kernel = new ResonanceKernel(SR)
@@ -1011,11 +1013,39 @@ test('the delta monitor stays exact under mix and trim', () => {
     kernel.process([sig.subarray(off, off + len)], [delta.subarray(off, off + len)], len)
   }
 
+  // THE TRIMMED input, not the input. The trim is factored out of the
+  // complement and left on both signals, which is what stops it leaking the
+  // whole file into the delta — see the next test.
+  const trim = Math.pow(10, trimDb / 20)
   let maxErr = 0
   for (let i = LATENCY; i < sig.length; i++) {
-    maxErr = Math.max(maxErr, Math.abs(wet[i] + delta[i] - sig[i - LATENCY]))
+    maxErr = Math.max(maxErr, Math.abs(wet[i] + delta[i] - trim * sig[i - LATENCY]))
   }
-  assert.ok(maxErr < 1e-6, `output + delta drifted from the input by ${maxErr}`)
+  assert.ok(maxErr < 1e-6, `output + delta drifted from the trimmed input by ${maxErr}`)
+})
+
+test('A DELTA THAT IS REMOVING NOTHING IS SILENT, AT ANY TRIM', () => {
+  // Reported from use: with every zone bypassed and depth at zero, DELTA kept
+  // playing the file. It did. `gain` carries the output trim, so a complement
+  // taken against unity is `1 - trim` on a patch that removes nothing — at
+  // +6 dB that is -1, i.e. the whole file at full level with its polarity
+  // flipped. Nothing about the bypassed zones was wrong; the complement was.
+  const sig = resonate(voice({ seconds: 1 }), 3000, 40, 14)
+  const off = uniformZones({ depth: 0 }).map(z => ({ ...z, enabled: false, depth: 0 }))
+  for (const trimDb of [-6, -3, 0, 3, 6]) {
+    const kernel = new ResonanceKernel(SR)
+    kernel.setParams({ zones: off, trimDb })
+    kernel.setMonitor(true)
+    const out = new Float32Array(sig.length)
+    for (let o = 0; o < sig.length; o += 128) {
+      const len = Math.min(128, sig.length - o)
+      kernel.process([sig.subarray(o, o + len)], [out.subarray(o, o + len)], len)
+    }
+    assert.ok(
+      maxAbs(out) < 1e-9,
+      `delta was not silent at ${trimDb} dB of trim: ${maxAbs(out).toExponential(2)}`,
+    )
+  }
 })
 
 test('the reduction the meter reports is the one the blend leaves', () => {
