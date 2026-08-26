@@ -403,11 +403,22 @@ const cursorText = ref('')
 let peakBins = null
 let peakAges = null
 
-/** Last frame identity, so a stopped transport reads as stale rather than live. */
-let lastFrame = null
-let staleMs = 0
-/** Beyond this with no new frame, nothing is playing and the curves fade. */
-const STALE_MS = 300
+/**
+ * THE PLOT NO LONGER DIMS WHEN THE TRANSPORT STOPS.
+ *
+ * It used to fade to 0.3 once no new frame had arrived for 300 ms, on the
+ * argument that a frozen last frame is still true about the moment playback
+ * stopped and dimming reads as "not moving" where blanking reads as broken.
+ * That is right about the fading and wrong about what the plot is FOR: with the
+ * resonance marks now revealed by clicking one, a stopped transport is exactly
+ * when someone reads the display — playback stops, and then you go and find out
+ * what that ring at 3 kHz was. A picture you have to squint at, whose marks are
+ * dimmed to a third while you aim at them, is at its faintest precisely when it
+ * is being studied.
+ *
+ * What says the transport is stopped is the transport. The curves hold their
+ * last frame, which is the reading being examined.
+ */
 
 // ── Display averaging ───────────────────────────────────────────────────────
 
@@ -521,17 +532,6 @@ function draw(dtMs) {
   width.value = w
 
   const frame = props.dataFn?.() ?? null
-  if (frame && frame !== lastFrame) {
-    lastFrame = frame
-    staleMs = 0
-  } else {
-    staleMs += dtMs
-  }
-  const live = frame !== null && staleMs < STALE_MS
-  // Fades rather than blanks: a frozen last frame is still the truth about the
-  // moment the transport stopped, and blanking it would make a paused plugin
-  // look broken. Dimmed, it reads as "not moving".
-  const alpha = live ? 1 : 0.3
 
   const minHz = frame?.minHz ?? 20
   const maxHz = frame?.maxHz ?? 20000
@@ -567,15 +567,15 @@ function draw(dtMs) {
   // the control surface rather than a reading.
   drawCarveHistory(ctx, w)
   if (showGrid.value) drawGrid(ctx, w, xFor, minHz, maxHz)
-  if (showSpectrum.value && shown) drawSpectrum(ctx, w, shown, alpha)
+  if (showSpectrum.value && shown) drawSpectrum(ctx, w, shown)
   drawZeroRail(ctx, w)
 
   updatePeaks(shown, dtMs)
-  if (shown) drawReduction(ctx, w, shown, alpha)
+  if (shown) drawReduction(ctx, w, shown)
 
   drawZones(ctx, w)
   drawZoneReadouts(ctx, w)
-  drawMarks(ctx, w, alpha)
+  drawMarks(ctx, w)
 
   if (showGrid.value) drawGrScale(ctx, w)
   drawCursor(ctx, w)
@@ -719,13 +719,12 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
  * ink hides the peak that explains the cut. The 1.5 px stroke is what carries
  * the reading, and the fill only says which side of it was removed.
  */
-function drawReduction(ctx, w, frame, alpha) {
+function drawReduction(ctx, w, frame) {
   const { reduction, bins } = frame
   const h = laneH.value
   const xStep = w / (bins - 1)
   const yFor = db => grFraction(db, props.fullScaleDb) * h
 
-  ctx.globalAlpha = alpha
   ctx.save()
   clipPlate(ctx, w)
 
@@ -806,23 +805,45 @@ function drawReduction(ctx, w, frame, alpha) {
   }
 
   ctx.restore()
-  ctx.globalAlpha = 1
 }
 
 /**
- * The named resonances: a dot on the trace, and a pill under it.
+ * The named resonances: a dot on the trace, and a pill on the one you click.
  *
  * This is the one thing the per-zone readouts cannot say. A zone number tells
  * you which BAND is being worked; a mark tells you which FREQUENCY, which is
  * what someone reaches for the EQ with. The two coexist rather than replacing
  * each other — the numbers stay tied to the columns the knobs edit, and the
- * pills float wherever the peaks actually are.
+ * dots float wherever the peaks actually are.
  *
- * ALTERNATING VERTICAL OFFSET, because pills are wider than the resonances they
- * name. Two peaks a third of an octave apart put their labels on top of one
- * another at any real plot width; dropping every other pill by its own height
- * turns a collision into a stagger. The marks arrive in frequency order so that
- * alternation is left-to-right rather than arbitrary.
+ * ⚠ THE PILLS USED TO BE DRAWN FOR EVERY MARK, ALL THE TIME, AND THAT WAS TOO
+ * MUCH IN MOTION. Up to four labels, each re-placed four times a second as the
+ * mark set is republished, each carrying a depth that changes every frame,
+ * sitting on top of the one curve the panel exists to show. Reported as
+ * distracting, and the mechanism is that a label is a fixed-size object on a
+ * plot whose features are not: four of them cover a real fraction of the plate
+ * whatever the audio is doing, so the display was at its busiest exactly when
+ * the effect was working hardest.
+ *
+ * THE DOTS STAY. They are 3.4 px and they sit on the trace rather than over it,
+ * they are what says a peak has been identified as a resonance rather than as
+ * ripple, and they are the target you aim at — a reveal whose trigger is
+ * invisible is not discoverable at all. What is deferred is the ANNOTATION.
+ *
+ * SELECTION IS BY FREQUENCY, NOT BY INDEX, and that is what makes it survive
+ * the mark set being recomputed 4x a second: the same ring is the same
+ * resonance whether it comes back as marks[0] or marks[2]. It is matched to the
+ * nearest mark within a sixth of an octave, which is wide enough to hold a peak
+ * that wanders with the voice and narrow enough that two named resonances
+ * cannot be confused for one another (findResonanceMarks already keeps them
+ * further apart than that).
+ *
+ * A SELECTION WHOSE RESONANCE HAS GONE QUIET IS KEPT, NOT DROPPED. An
+ * intermittent ring is the whole reason the peak hold exists, and dropping the
+ * label the moment its resonance falls under the threshold would mean the one
+ * kind of resonance that is hardest to catch is also the one whose name will
+ * not stay on screen. The pill simply disappears with the mark and comes back
+ * with it.
  *
  * Clamped away from both edges so a pill near 20 Hz or 20 kHz is not half cut
  * off by the plate — the dot stays at the true frequency, only the label moves,
@@ -831,28 +852,104 @@ function drawReduction(ctx, w, frame, alpha) {
 const PILL_W = 98
 const PILL_H = 22
 
-function drawMarks(ctx, w, alpha) {
+/** How close a click has to land to a dot to name it, in pixels. */
+const MARK_HIT_PX = 12
+
+/**
+ * The named resonance, held as a frequency. Display state, like the overlays.
+ *
+ * NOT persisted, and the difference from the overlay toggles is the same one
+ * that separates them from DELTA and SOLO: a preference for seeing the grid is
+ * a preference, but "I am looking at this particular ring" is about one moment
+ * in one file, and restoring it into a different file next session would put a
+ * label on a resonance nobody asked about.
+ */
+const selectedMarkHz = ref(null)
+/** True while the pointer is over a dot, for the cursor. */
+const hoverMark = ref(false)
+
+/** Within this many octaves, a mark and a remembered frequency are the same. */
+const MARK_MATCH_OCTAVES = 1 / 6
+
+function markIndexNear(hz) {
+  if (hz === null) return -1
+  let best = -1
+  let bestOct = MARK_MATCH_OCTAVES
+  marks.forEach((m, i) => {
+    const oct = Math.abs(Math.log2(m.hz / hz))
+    if (oct < bestOct) {
+      bestOct = oct
+      best = i
+    }
+  })
+  return best
+}
+
+/**
+ * The mark under a point, or -1.
+ *
+ * Measured to the DOT rather than to the column, because the dot is what is
+ * drawn and a hit target that is not the thing you can see is a hit target
+ * nobody can aim at. Circular: the dots sit on a curve, so a wide-and-short
+ * target would claim clicks from the plate above a shallow cut.
+ */
+function markAt(x, y) {
+  const h = laneH.value
+  const w = width.value
+  let best = -1
+  let bestD = MARK_HIT_PX * MARK_HIT_PX
+  marks.forEach((m, i) => {
+    const dx = m.pos * w - x
+    const dy = grFraction(m.db, props.fullScaleDb) * h - y
+    const d = dx * dx + dy * dy
+    if (d <= bestD) {
+      bestD = d
+      best = i
+    }
+  })
+  return best
+}
+
+function drawMarks(ctx, w) {
   if (!marks.length) return
   const h = laneH.value
   const yFor = db => grFraction(db, props.fullScaleDb) * h
+  const named = markIndexNear(selectedMarkHz.value)
 
   ctx.save()
-  ctx.globalAlpha = alpha
   ctx.textBaseline = 'middle'
-  marks.forEach((m, i) => {
-    const x = (m.pos) * w
-    const yDot = yFor(m.db)
-    // Below the dot normally; above it when the trough is deep enough that a
-    // pill underneath would run off the bottom of the plot.
-    const below = yDot + PILL_H + 16 < h
-    const yPill = below ? yDot + 10 + (i % 2 ? PILL_H + 4 : 0)
-      : yDot - PILL_H - 10 - (i % 2 ? PILL_H + 4 : 0)
-    const cx = Math.max(PILL_W / 2 + 2, Math.min(w - PILL_W / 2 - 2, x))
 
-    ctx.fillStyle = tint(props.accent, 0.9)
+  // Dots first, all of them, so the named one is not drawn under a neighbour's
+  // pill.
+  marks.forEach((m, i) => {
+    const x = m.pos * w
+    const yDot = yFor(m.db)
+    ctx.fillStyle = tint(props.accent, i === named ? 1 : 0.9)
     ctx.beginPath()
     ctx.arc(x, yDot, 3.4, 0, Math.PI * 2)
     ctx.fill()
+    // A halo on the named one, so the pill has something to belong to and the
+    // dot stays findable while the label is read.
+    if (i === named) {
+      ctx.strokeStyle = tint(props.accent, 0.45)
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.arc(x, yDot, 7, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+  })
+
+  if (named >= 0) {
+    const m = marks[named]
+    const x = m.pos * w
+    const yDot = yFor(m.db)
+    // Below the dot normally; above it when the trough is deep enough that a
+    // pill underneath would run off the bottom of the plot. The alternating
+    // row offset is gone with the other pills — there is only one now, so it
+    // has nothing to collide with.
+    const below = yDot + PILL_H + 16 < h
+    const yPill = below ? yDot + 10 : yDot - PILL_H - 10
+    const cx = Math.max(PILL_W / 2 + 2, Math.min(w - PILL_W / 2 - 2, x))
 
     // A leader only when the label had to move sideways to fit, so the common
     // case carries no extra ink.
@@ -881,9 +978,9 @@ function drawMarks(ctx, w, alpha) {
     ctx.font = "500 10px 'JetBrains Mono',monospace"
     ctx.fillStyle = 'rgba(255,255,255,.5)'
     ctx.fillText(`-${m.db.toFixed(1)}`, cx + PILL_W / 2 - 8, yPill + PILL_H / 2 + 0.5)
-  })
+  }
+
   ctx.restore()
-  ctx.globalAlpha = 1
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
 }
@@ -928,7 +1025,7 @@ function roundRect(ctx, x, y, w, h, r) {
  * 3-4x larger, and at this window the sliver measured about 5 px at the stock
  * mean cut — the thickness of the strokes around it.
  */
-function drawSpectrum(ctx, w, frame, alpha) {
+function drawSpectrum(ctx, w, frame) {
   const { mag, reference, bins } = frame
   const height = laneH.value
   const bottom = height
@@ -938,7 +1035,6 @@ function drawSpectrum(ctx, w, frame, alpha) {
     return bottom - Math.max(0, Math.min(1, t)) * height
   }
 
-  ctx.globalAlpha = alpha
   ctx.save()
   clipPlate(ctx, w)
 
@@ -978,7 +1074,6 @@ function drawSpectrum(ctx, w, frame, alpha) {
   ctx.setLineDash([])
 
   ctx.restore()
-  ctx.globalAlpha = 1
 }
 
 /**
@@ -1319,7 +1414,26 @@ function onDown(e) {
   const rect = canvasEl.value?.getBoundingClientRect()
   if (!rect) return
   const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
   canvasEl.value?.focus({ preventScroll: true })
+
+  // A DOT IS CHECKED FIRST, AND IT TAKES THE CLICK. A dot can land anywhere,
+  // including on a divider; the divider is a full-height line that can be
+  // grabbed at any other height, where the dot is a 12 px target that exists
+  // nowhere else. Naming it also suppresses the zone selection this click would
+  // otherwise make, so one click does one thing.
+  const mark = markAt(x, y)
+  if (mark >= 0) {
+    // Clicking the named one again puts the label away, which is the only way
+    // back to a clean plot without hunting for empty plate to click on.
+    selectedMarkHz.value = mark === markIndexNear(selectedMarkHz.value)
+      ? null
+      : marks[mark].hz
+    e.preventDefault()
+    return
+  }
+  // Anywhere else, including the plate around a dot, clears the label.
+  selectedMarkHz.value = null
 
   const divider = boundaryAt(props.zones, x, axis, DIVIDER_HIT_PX)
   if (divider >= 0) {
@@ -1373,7 +1487,7 @@ function onDblClick(e) {
  */
 function onKeyDown(e) {
   const n = props.zones.length
-  if (n === 0) return
+  if (n === 0 && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
   const i = props.selectedZone
   const shift = e.shiftKey
   switch (e.key) {
@@ -1389,6 +1503,27 @@ function onKeyDown(e) {
           (props.zones[i]?.hiHz ?? 0) * Math.pow(2, 1 / 12), 20, 20000))
       } else select(Math.min(n - 1, i < 0 ? 0 : i + 1))
       break
+    // UP AND DOWN WALK THE RESONANCES, and this is the keyboard equivalent of
+    // clicking a dot. Without it the frequencies the pills carry would be
+    // reachable by pointer alone, which is the one thing this panel has
+    // consistently refused to let a canvas control do — and it is worse here
+    // than for the zones, because the accessible name can describe a zone's
+    // settings but a resonance's frequency exists nowhere else on the panel.
+    //
+    // The walk includes "none", so the label can be put away from the keyboard
+    // without borrowing Escape, which belongs to the window.
+    case 'ArrowDown':
+    case 'ArrowUp': {
+      if (!marks.length) return
+      const at = markIndexNear(selectedMarkHz.value)
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      // -1 (nothing named) sits at the start of the cycle, so stepping down
+      // from it lands on the lowest resonance and stepping up wraps to the
+      // highest.
+      const next = ((at + 1 + step) + (marks.length + 1)) % (marks.length + 1) - 1
+      selectedMarkHz.value = next < 0 ? null : marks[next].hz
+      break
+    }
     case 'Enter':
       commit(splitZone(props.zones, hzFromX(axis.w * 0.5, axis), axis,
         `z${Date.now()}${nextZoneId++}`, 20, 20000))
@@ -1449,8 +1584,13 @@ function onMove(e) {
   const rect = canvasEl.value?.getBoundingClientRect()
   if (!rect) return
   const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
   cursorX.value = x
-  onDrag(e, x, e.clientY - rect.top)
+  // Say that a dot is a target. A reveal whose trigger looks like part of the
+  // picture is discoverable only by accident — the same argument the selection
+  // edges' ew-resize cursor makes in the waveform.
+  hoverMark.value = !drag && markAt(x, y) >= 0
+  onDrag(e, x, y)
 }
 
 function onLeave() {
@@ -1460,6 +1600,7 @@ function onLeave() {
   // user did not aim for.
   cursorX.value = null
   cursorText.value = ''
+  hoverMark.value = false
 }
 
 function formatHz(hz) {
@@ -1496,8 +1637,23 @@ const plotSummary = computed(() => {
   const cut = hotDb.value > 0.3
     ? `Deepest cut ${Math.round(hotDb.value)} dB at ${formatHz(hotHz.value)}.`
     : 'No reduction.'
-  const band = `Processing ${formatHz(props.freqFloorHz)} to ${formatHz(props.freqCeilHz)}.`
+  // THE BAND SENTENCE IS GONE, AND IT WAS PRINTING "NaN Hz TO NaN Hz". It read
+  // `props.freqFloorHz` / `freqCeilHz`, which went with the low/high Range
+  // fader — the props no longer exist, so `formatHz(undefined)` rounded to NaN
+  // and every screen reader landing on this canvas heard it. Nothing is lost by
+  // dropping it: what gets processed IS the zones, and they are listed below
+  // with their own bounds.
   const mode = props.delta ? ' Monitoring the removed signal only.' : ''
+  // The resonances, which used to be readable off the pills and now are not.
+  // A canvas is opaque to a screen reader either way, but while every mark
+  // carried a label there was at least a sighted equivalent; with the labels
+  // behind a click, this text is the only complete list there is.
+  const named = markIndexNear(selectedMarkHz.value)
+  const found = marks.length
+    ? ` ${marks.length} resonance${marks.length === 1 ? '' : 's'} tracked: `
+      + marks.map((m, i) => `${formatHz(m.hz)} at minus ${m.db.toFixed(1)} decibels`
+        + (i === named ? ', selected' : '')).join('; ') + '.'
+    : ''
   const zones = props.zones.length
     ? ` ${props.zones.length} sensitivity zones: ` + props.zones.map((z, i) => {
       const { loHz, hiHz } = bounds.value[i]
@@ -1509,7 +1665,7 @@ const plotSummary = computed(() => {
         : `${formatHz(loHz)} to ${formatHz(hiHz)}, off`
     }).join('; ') + '.'
     : ''
-  return `${props.title}. ${cut} ${band}${mode}${zones} ${ZONE_HINT}`
+  return `${props.title}. ${cut}${mode}${found}${zones} ${ZONE_HINT}`
 })
 
 /**
@@ -1521,11 +1677,12 @@ const plotSummary = computed(() => {
  * user hovering and a screen-reader user landing on it deserve the same
  * instruction rather than two that have to be kept in step.
  */
-const ZONE_HINT = 'Drag in the zone lane to set a zone\u2019s sensitivity, or drag a '
-  + 'boundary line to move it. Double-click to split a zone, or double-click a '
-  + 'boundary to merge. Keyboard: left and right select, up and down set '
-  + 'sensitivity, shift with left and right moves the boundary, Enter splits, '
-  + 'Delete merges.'
+const ZONE_HINT = 'Click a resonance dot to label it with its frequency and '
+  + 'depth, or click it again to put the label away. Drag a '
+  + 'boundary line to move a zone. Double-click to split a zone, or double-click a '
+  + 'boundary to merge. Keyboard: up and down label each resonance in turn, '
+  + 'left and right select a zone, shift with left and right moves the '
+  + 'boundary, Enter splits, Delete merges.'
 
 /**
  * What to say when the readout line has nothing else to say.
@@ -1690,7 +1847,11 @@ const idleHint = computed(() =>
         role="group"
         :aria-label="plotSummary"
         :title="ZONE_HINT"
-        :style="{ height: `${height}px`, borderRadius: '12px', cursor: dragging ? 'grabbing' : 'crosshair' }"
+        :style="{
+          height: `${height}px`,
+          borderRadius: '12px',
+          cursor: dragging ? 'grabbing' : hoverMark ? 'pointer' : 'crosshair',
+        }"
         @pointerdown="onDown"
         @pointermove="onMove"
         @pointerup="onUp"
