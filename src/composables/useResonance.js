@@ -1,10 +1,11 @@
 import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { applyResonanceRegion, computePeakCache } from '../audio/processing.js'
+import { applyResonanceRegion, computePeakCache, computeVoiceProfile } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
 import { resolveRefMode, withRefModeDefaults } from '../audio/resonanceParams.js'
+import { placeResonanceZones } from '../audio/resonanceZonePlacement.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
@@ -52,6 +53,30 @@ const resTrim = ref(DEFAULTS.trim)
  * they are set.
  */
 const resSoloZone = ref(-1)
+
+/**
+ * The voice the zones were last placed from, or null.
+ *
+ * `{ medianF0Hz, cornerHz, voiceType, boundaries }`. Kept so the panel can say
+ * WHAT it measured rather than only that it measured — a boundary set that
+ * moved for reasons the user cannot see is worse than one that did not move.
+ * Cleared on teardown for the same reason the monitoring modes are: the effect
+ * entry outlives the panel, and a stale reading would come back describing a
+ * file that is no longer open.
+ */
+const resVoiceProfile = ref(null)
+const resPlacementBusy = ref(false)
+
+/**
+ * ⚠ ITS OWN COUNTER, not one shared with any other measurement.
+ *
+ * Sharing a sequence number across two independent measurements is a latching
+ * bug, and the soft clipper shipped it: the second call invalidates the first,
+ * the first's `finally` then declines to lower the flag it raised, and the busy
+ * state never clears. Supersession is per-measurement because that is what it
+ * means — a newer placement cancels an older placement and nothing else.
+ */
+let placementSeq = 0
 
 const resPreview = ref(false)
 /**
@@ -227,6 +252,60 @@ export function useResonance() {
   }
   const syncMode = v => syncParam('mode', resMode, v)
 
+  /**
+   * Put the zone boundaries where this voice's spectrum actually changes.
+   *
+   * A STARTING POINT THAT WRITES VALUES, not a mode — the same shape as the
+   * soft clipper's ceiling presets. It measures the selection once, rewrites
+   * the four boundaries, and gets out of the way; every boundary is an ordinary
+   * draggable line afterwards, and nothing re-runs on its own.
+   *
+   * ⚠ IT IS NOT WIRED TO SELECTION CHANGES, deliberately. The ceiling presets
+   * re-measure on every new region because a ceiling in dBFS is meaningless
+   * until it is placed against material. A zone boundary is not: it describes
+   * the speaker, and re-placing it under the user every time they drag a
+   * selection would move controls they had set by hand.
+   *
+   * ⚠ A null measurement LEAVES THE ZONES ALONE. A region with no pitched
+   * material has no voice to aim at, and moving the boundaries to some fallback
+   * would be worse than not moving them — the user asked for geometry derived
+   * from this speaker and there isn't any.
+   */
+  async function fitZonesToVoice() {
+    if (!state.selection || !state.currentFile) return
+
+    const { start, end } = state.selection
+    const seq = ++placementSeq
+    resPlacementBusy.value = true
+    try {
+      const profile = await computeVoiceProfile(
+        state.segments, start, end,
+        state.currentFile.sampleRate, state.currentFile.channels,
+      )
+      if (seq !== placementSeq) return // a newer placement is already in flight
+      if (!profile) {
+        showToast('Not enough voiced audio to fit zones')
+        return
+      }
+      const placed = placeResonanceZones(resZones.value, profile)
+      if (!placed) return
+
+      resZones.value = placed.zones
+      resVoiceProfile.value = { ...profile, voiceType: placed.voiceType, boundaries: placed.boundaries }
+      // The count can grow, so a selection past the new end would point at
+      // nothing; it cannot shrink, but clamping costs nothing and says so.
+      resSelectedZone.value = Math.min(resSelectedZone.value, placed.zones.length - 1)
+      clearSolo()
+      pushZones()
+      showToast(`Zones fitted to voice (F0 ${Math.round(profile.medianF0Hz)} Hz)`)
+    } catch (err) {
+      console.error('Zone placement failed:', err)
+      showToast('Zone placement failed')
+    } finally {
+      if (seq === placementSeq) resPlacementBusy.value = false
+    }
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
@@ -269,6 +348,7 @@ export function useResonance() {
     // one left set would come back the next time the preview was switched on —
     // under a panel that no longer said so. Same reason delta is cleared below.
     resSoloZone.value = -1
+    resVoiceProfile.value = null
     if (resDelta.value) {
       resDelta.value = false
       getEffectChainIfExists()?.effects
@@ -306,6 +386,9 @@ export function useResonance() {
     syncMix,
     syncTrim,
     syncZones,
+    resVoiceProfile,
+    resPlacementBusy,
+    fitZonesToVoice,
     toggleSolo,
     clearSolo,
     syncMode,

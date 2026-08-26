@@ -37,9 +37,30 @@ const props = defineProps({
   // No `accent`: both colours this control draws are resolved literals now,
   // so a prop for it would be a knob wired to nothing.
   disabled: { type: Boolean, default: false },
+  /** A measurement is in flight. FIT is not clickable and says why. */
+  busy: { type: Boolean, default: false },
+  /**
+   * Whether there is a region to measure.
+   *
+   * ⚠ FIT MEASURES THE SELECTION, so a selection is its INPUT rather than
+   * something incidental to it — and without this prop the button was
+   * clickable with nothing selected, the composable bailed on the missing
+   * region, and the click was accepted and discarded. That is the worst of the
+   * three states and this panel's ceiling presets already shipped it once.
+   */
+  hasSelection: { type: Boolean, default: false },
+  /**
+   * What FIT last measured, or null — `{ medianF0Hz, voiceType }`.
+   *
+   * Shown because a set of boundaries that moved for reasons the user cannot
+   * see is worse than one that did not move. The pitch is the whole input to
+   * the placement, so printing it is the difference between a button that did
+   * something and a button that can be checked.
+   */
+  profile: { type: Object, default: null },
 })
 
-const emit = defineEmits(['update:zones', 'update:selected'])
+const emit = defineEmits(['update:zones', 'update:selected', 'fit'])
 
 const index = computed(() =>
   Math.max(0, Math.min(props.selected, props.zones.length - 1)))
@@ -57,6 +78,35 @@ const canMerge = computed(() => props.zones.length > RESONANCE_ZONE_MIN)
  * measured width.
  */
 const AXIS = { w: 600, minHz: 20, maxHz: 20000 }
+
+/**
+ * FIT sits with the count because it is the other control that is about the
+ * ROW of zones rather than about one of them — it rewrites every boundary at
+ * once. Putting it in the per-zone strip would read as an operation on ZONE 3,
+ * which is the category error the count row already had once.
+ */
+const fitLabel = computed(() => (props.busy ? 'FITTING' : 'FIT TO VOICE'))
+
+/**
+ * Why FIT cannot be pressed, or null.
+ *
+ * Printed rather than left to the disabled styling alone: a greyed button with
+ * nothing beside it says only that something is wrong, and the three reasons
+ * have three different fixes. Same rule the ceiling presets ended up with.
+ */
+const fitDisabledReason = computed(() => {
+  if (props.busy) return 'Measuring pitch\u2026'
+  if (props.disabled) return 'Turn ResoTame on'
+  if (!props.hasSelection) return 'Select audio to fit'
+  return null
+})
+const fitDisabled = computed(() => fitDisabledReason.value !== null)
+
+const fitCaption = computed(() => {
+  if (fitDisabledReason.value) return fitDisabledReason.value
+  const f0 = props.profile?.medianF0Hz
+  return f0 > 0 ? `F0 ${Math.round(f0)} Hz` : 'Places zones from pitch'
+})
 let seq = 0
 
 function addZone() {
@@ -138,9 +188,24 @@ function removeZone() {
         aria-label="Split this zone in two"
         @click="addZone"
       >+</button>
-
-
-
     </div>
+
+    <!-- The boundaries this panel ships are the MALE region table applied to
+         every voice — 5 kHz is exactly `upper_presence`'s top edge, 180 Hz is
+         `body_warmth`'s geometric centre. FIT measures the speaker and scales
+         them by their own anchors' ratios, and adds the sub-fundamental split.
+         A male narrator reproduces the shipped set exactly, which is the point:
+         nothing already listened to moves. See resonanceZonePlacement.js. -->
+    <button
+      class="mt-[10px] px-[7px] py-[3px] rounded-[5px] font-mono text-[7.5px] font-semibold
+             leading-[normal] tracking-[.1em] bg-surface-2 text-text-softer
+             hover:bg-[#8de0a833] hover:text-[#bbeccb]
+             cursor-pointer disabled:cursor-default disabled:opacity-30"
+      :disabled="fitDisabled"
+      title="Measure the voice and place the zone boundaries from its pitch"
+      @click="emit('fit')"
+    >{{ fitLabel }}</button>
+    <div class="mt-[3px] font-mono text-[7px] leading-[normal] tracking-[.06em] text-text-faint">
+      {{ fitCaption }}</div>
   </div>
 </template>
