@@ -24,9 +24,12 @@
  * WHY CANVASES RATHER THAN A NUMERIC RING BUFFER. Repainting 368 columns of
  * 192 bins from numbers every frame is ~70k fills; scrolling an offscreen
  * canvas by one pixel and writing a single new row is two operations and a
- * row. The cost of that choice is that history cannot be re-coloured after the
- * fact — changing the accent repaints only new columns — which is why
- * `setAccent` clears rather than pretending to restyle what is already drawn.
+ * row. The cost is that what is already drawn cannot be re-coloured — the
+ * pixels no longer know what level produced them — so a change of accent would
+ * otherwise leave the buffer two-toned, old rows in the previous accent and new
+ * ones in the current. `reshape` discards on an accent change for that reason,
+ * which is the honest option: eight seconds of history is cheap to lose and a
+ * two-toned waterfall reads as the effect having changed behaviour.
  *
  * The arithmetic that decides WHAT gets drawn lives here as pure functions so
  * it can be tested without a canvas, the same split `resonanceZoneEdit` and
