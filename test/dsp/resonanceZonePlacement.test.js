@@ -17,6 +17,7 @@ import {
   placedZoneCount,
   voiceZoneBoundaries,
 } from '../../src/audio/resonanceZonePlacement.js'
+import { FEMALE_REGIONS, MALE_REGIONS, SCAN_LOW } from '../../src/audio/voicerx/regions.js'
 import {
   DEFAULT_RESONANCE_ZONES,
   RESONANCE_ZONE_MAX,
@@ -38,12 +39,59 @@ test('placement never exceeds the zone editor cap', () => {
   assert.equal(placedZoneCount(), DEFAULT_RESONANCE_ZONES.length + 1)
 })
 
-test('a male voice reproduces the shipped boundaries exactly', () => {
-  // THE WHOLE POINT. The stock set is the male region table; scaling it by its
-  // own anchors' ratios against a male reference must be the identity. If this
+test('a male voice reproduces the shipped UPPER boundaries exactly', () => {
+  // The upper boundaries are the male region table scaled by its own anchors'
+  // ratios against a male reference, so that must be the identity. If this
   // fails, every listening result recorded against the stock zones is void.
+  //
+  // ⚠ THE FUNDAMENTAL BOUNDARY IS DELIBERATELY EXCLUDED. It is derived from the
+  // measured pitch now rather than scaled, so it moves off the stock 180 on
+  // every voice — see the Z2 tests below.
   const { boundaries } = placeResonanceZones(null, MALE)
-  assert.deepEqual(boundaries.slice(1), STOCK_BOUNDARIES)
+  assert.deepEqual(boundaries.slice(2), STOCK_BOUNDARIES.slice(1))
+})
+
+test('Z2 CONTAINS THE FUNDAMENTAL at every pitch the tracker can report', () => {
+  // ⚠ THE GUARANTEE, and the old rule broke it at the top. Z2's top used to be
+  // body_warmth's geometric centre, and classifyVoice saturates above F0 200 —
+  // so every voice from 210 up got a top of 251 Hz while F0 kept rising, and by
+  // F0 340 the zone named after the fundamental did not contain it.
+  for (let f0 = 70; f0 <= 400; f0 += 5) {
+    const corner = Math.min(100, Math.max(40, 0.55 * f0))
+    const { boundaries } = placeResonanceZones(null, { medianF0Hz: f0, cornerHz: corner })
+    assert.ok(f0 > boundaries[0], `F0 ${f0} above the corner`)
+    assert.ok(f0 <= boundaries[1], `F0 ${f0} inside Z2 (top ${boundaries[1]})`)
+    // With real margin, not by a hair: pitch moves around the median.
+    assert.ok(Math.log2(boundaries[1] / f0) >= 0.25,
+      `F0 ${f0} has headroom (${Math.log2(boundaries[1] / f0).toFixed(2)} oct)`)
+  }
+})
+
+test('Z2 reaches for the 2nd harmonic but stops at mud', () => {
+  // Best-effort, not a guarantee, and the cap binds on almost every real voice:
+  // 2.5 x F0 only clears mud's bottom edge below about F0 80. Saying which is
+  // which is the point of this test.
+  const low = placeResonanceZones(null, { medianF0Hz: 70, cornerHz: 40 }).boundaries
+  assert.ok(2 * 70 <= low[1], 'a very low voice gets its 2nd harmonic')
+  assert.equal(low[1], Math.round(2.5 * 70), 'and the reach, not the cap, set it')
+
+  // A typical male narrator: the cap binds, so Z2 ends exactly where mud starts
+  // and 2F0 falls into Z3. Reaching it would cost the bottom of mud.
+  const male = placeResonanceZones(null, MALE).boundaries
+  assert.equal(male[1], MALE_REGIONS.mud[SCAN_LOW])
+  assert.ok(2 * MALE.medianF0Hz > male[1])
+
+  const female = placeResonanceZones(null, FEMALE).boundaries
+  assert.equal(female[1], FEMALE_REGIONS.mud[SCAN_LOW])
+})
+
+test('Z2 never starts below the fundamental margin, even where mud is lower', () => {
+  // The F0-containment floor outranks the mud cap, and where it binds Z2 does
+  // cross into mud. Intended precedence: a zone that excludes the fundamental
+  // is broken, one that overlaps mud is merely wide.
+  const { boundaries } = placeResonanceZones(null, { medianF0Hz: 340, cornerHz: 100 })
+  assert.ok(boundaries[1] > FEMALE_REGIONS.mud[SCAN_LOW])
+  assert.equal(boundaries[1], Math.round(1.2 * 340))
 })
 
 test('a female voice moves every boundary up, and by the table\'s own ratios', () => {
@@ -51,9 +99,6 @@ test('a female voice moves every boundary up, and by the table\'s own ratios', (
   assert.equal(voiceType, 'female')
   // lower_presence's bottom is 1200 / 1500, a ratio of exactly 1.25.
   assert.equal(boundaries[2], Math.round(1100 * 1.25))
-  // body_warmth's geometric centre, sqrt(120*280) -> sqrt(180*350).
-  const ratio = Math.sqrt(180 * 350) / Math.sqrt(120 * 280)
-  assert.equal(boundaries[1], Math.round(180 * ratio))
 
   for (let i = 1; i < boundaries.length; i++) {
     assert.ok(boundaries[i] > STOCK_BOUNDARIES[i - 1], `boundary ${i} moved up`)
@@ -61,6 +106,8 @@ test('a female voice moves every boundary up, and by the table\'s own ratios', (
 })
 
 test('the anchor list follows the shipped set\'s LENGTH, not a fixed count', () => {
+  // Boundary 0 is the corner and boundary 1 is the derived fundamental top, so
+  // only boundaries 2+ come from the anchor list.
   // ⚠ THE REGRESSION THIS EXISTS FOR. The shipped set was three boundaries when
   // the placement was written and is two now; a hard length check turned that
   // into placeResonanceZones() returning null, i.e. FIT enabled, pressed, and
@@ -68,14 +115,15 @@ test('the anchor list follows the shipped set\'s LENGTH, not a fixed count', () 
   // with no edit to the module.
   const resplit = [...STOCK_BOUNDARIES, 5000]
   const male = voiceZoneBoundaries(MALE.medianF0Hz, MALE.cornerHz, resplit)
-  assert.deepEqual(male.boundaries.slice(1), resplit)
+  assert.deepEqual(male.boundaries.slice(2), resplit.slice(1))
 
   // upper_presence's top edge is 5000 male / 6000 female, and 5000 IS that
   // edge, so this lands on the table value with no rounding to hide in.
   const female = voiceZoneBoundaries(FEMALE.medianF0Hz, FEMALE.cornerHz, resplit)
   assert.equal(female.boundaries[3], 6000)
 
-  // And one boundary is still a placement, not a degenerate case.
+  // And one boundary is still a placement, not a degenerate case: corner plus
+  // the derived fundamental top, with no anchors consulted at all.
   assert.equal(voiceZoneBoundaries(110, 60, [180]).boundaries.length, 2)
 })
 
