@@ -20,58 +20,40 @@
 import { ensureResonanceWorklet } from '../resonanceWorkletLoader.js'
 import { createLevelTap } from './levelTap.js'
 import {
-  PITCH_RANGES,
+  RESONANCE_DEFAULTS,
   RESONANCE_DISPLAY_CURVES,
   RESONANCE_FRAME_SIZE,
   resonanceDisplayRange,
+  toKernelParams,
 } from '../resonanceParams.js'
 
 export {
-  PITCH_RANGES,
+  HARMONIC_PITCH_RANGE,
   RESONANCE_FRAME_SIZE,
   RESONANCE_DISPLAY_BINS,
   RESONANCE_DISPLAY_CURVES,
+  RESONANCE_ATTACK_MIN_MS,
+  RESONANCE_RELEASE_MIN_MS,
+  RESONANCE_REF_MODE_DEFAULTS,
+  DEFAULT_REF_MODE,
   effectivePitchRange,
+  resolveRefMode,
   resonanceDisplayRange,
+  withRefModeDefaults,
 } from '../resonanceParams.js'
 
 /** This STFT holds back exactly one frame before a sample is reconstructed. */
 export const RESONANCE_LATENCY_SAMPLES = RESONANCE_FRAME_SIZE
 
-// Defaults are the acx_audiobook preset's resonanceSuppressor block
-// (src/audio/presets.js), which is the tuning these were chosen against.
-export const RESONANCE_DEFAULTS = {
-  depth: 0.67,
-  sharpness: 0.8,
-  selectivity: 8,
-  attack: 15, // ms
-  release: 80, // ms
-  maxReduction: 36, // dB
-  freqFloor: 40, // Hz
-  freqCeil: 20000, // Hz
-  mode: 'soft', // 'soft' | 'hard'
-  preserveHarmonics: true,
-  pitchRange: 'voice', // key of PITCH_RANGES
-}
-
-/** Map UI param names to kernel param names. */
-export function toKernelParams(params) {
-  const range = PITCH_RANGES[params.pitchRange] ?? PITCH_RANGES.voice
-  return {
-    depth: params.depth,
-    sharpness: params.sharpness,
-    selectivity: params.selectivity,
-    attackMs: params.attack,
-    releaseMs: params.release,
-    maxReductionDb: params.maxReduction,
-    freqFloorHz: params.freqFloor,
-    freqCeilHz: params.freqCeil,
-    mode: params.mode,
-    preserveHarmonics: params.preserveHarmonics,
-    pitchMinHz: range.minHz,
-    pitchMaxHz: range.maxHz,
-  }
-}
+/**
+ * Defaults and the UI→kernel param mapping live in resonanceParams.js and are
+ * re-exported here, where every caller already looks for them.
+ *
+ * They moved because `toKernelParams` is what makes the params survive a
+ * structured clone, and this module cannot be loaded outside a bundler — it
+ * imports the worklet loader — so the mapping could not be tested where it sat.
+ */
+export { RESONANCE_DEFAULTS, toKernelParams }
 
 export function createResonance(audioContext) {
   const input = audioContext.createGain()

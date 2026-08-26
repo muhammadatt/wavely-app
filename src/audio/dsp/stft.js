@@ -125,6 +125,45 @@ export class StftProcessor {
     }
   }
 
+  /**
+   * Push a block of input WITHOUT producing output.
+   *
+   * For a caller that needs the spectrum of one signal to decide something
+   * about another — a detector fed the channel sum while the channels
+   * themselves are processed separately. Frame boundaries land on the same
+   * sample counts as `process`, so instances driven with the same block sizes
+   * stay in lockstep; the inverse transform and the overlap-add are skipped,
+   * which is most of the cost.
+   *
+   * `frameFn` must not rely on the spectrum being written back — nothing
+   * downstream reads it.
+   */
+  analyze(input, n, frameFn) {
+    const { fftSize, hopSize } = this
+    for (let i = 0; i < n; i++) {
+      this.inRing[this.inWrite] = input[i]
+      this.inWrite = this.inWrite + 1 === fftSize ? 0 : this.inWrite + 1
+      if (++this.sinceHop === hopSize) {
+        this.sinceHop = 0
+        this._analyzeFrame(frameFn)
+      }
+    }
+  }
+
+  /** Gather, window and transform the current frame; no synthesis. */
+  _analyzeFrame(frameFn) {
+    const { fftSize, window, inRing, frame, rawFrame, specRe, specIm } = this
+    let r = this.inWrite
+    for (let i = 0; i < fftSize; i++) {
+      const x = inRing[r]
+      rawFrame[i] = x
+      frame[i] = x * window[i]
+      r = r + 1 === fftSize ? 0 : r + 1
+    }
+    this.fft.rfft(frame, specRe, specIm)
+    if (frameFn) frameFn(specRe, specIm, this.binCount, this)
+  }
+
   _processFrame(frameFn) {
     const { fftSize, hopSize, window, inRing, frame, rawFrame, ola, olaWin,
       specRe, specIm } = this

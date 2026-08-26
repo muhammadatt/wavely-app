@@ -4,23 +4,54 @@ import { useWindows } from './useWindows.js'
 import { applyResonanceRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
-import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { resolveRefMode, withRefModeDefaults } from '../audio/resonanceParams.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
 
+/**
+ * Shipping defaults, with any reference-mode override applied.
+ *
+ * Resolved once, at module load: `?resoRef=peak` seeds the panel's knobs with
+ * that mode's calibration, because the two references disagree about what
+ * `selectivity` measures by an order of magnitude and the same numbers on the
+ * two are not the same setting. See RESONANCE_REF_MODE_DEFAULTS.
+ */
+const DEFAULTS = withRefModeDefaults(RESONANCE_DEFAULTS)
+
+/** True when something has asked for a non-shipping reference. Shown in the panel. */
+export const resRefMode = resolveRefMode()
+
 // Singleton reactive state shared between the sidebar trigger and the modal.
-const resDepth = ref(RESONANCE_DEFAULTS.depth)
-const resSharpness = ref(RESONANCE_DEFAULTS.sharpness)
-const resSelectivity = ref(RESONANCE_DEFAULTS.selectivity)
-const resAttack = ref(RESONANCE_DEFAULTS.attack)
-const resRelease = ref(RESONANCE_DEFAULTS.release)
-const resMaxReduction = ref(RESONANCE_DEFAULTS.maxReduction)
-const resFreqFloor = ref(RESONANCE_DEFAULTS.freqFloor)
-const resFreqCeil = ref(RESONANCE_DEFAULTS.freqCeil)
-const resMode = ref(RESONANCE_DEFAULTS.mode)
-const resPreserveHarmonics = ref(RESONANCE_DEFAULTS.preserveHarmonics)
-const resPitchRange = ref(RESONANCE_DEFAULTS.pitchRange)
+const resAttack = ref(DEFAULTS.attack)
+const resRelease = ref(DEFAULTS.release)
+const resMode = ref(DEFAULTS.mode)
+const resMix = ref(DEFAULTS.mix)
+/**
+ * Sensitivity zones — see DEFAULT_RESONANCE_ZONES. Not filters.
+ *
+ * An array rather than a scalar, so every write replaces it: the panel edits
+ * these by emitting a new array, and the kernel is handed a fresh copy on each
+ * change. Nothing mutates a zone in place, which is what keeps the worklet's
+ * copy and the panel's copy from diverging.
+ */
+const resZones = ref(DEFAULTS.zones ?? [])
+/** Which zone the strip is editing. UI state, never sent to the kernel. */
+const resSelectedZone = ref(0)
+const resTrim = ref(DEFAULTS.trim)
+
+/**
+ * Zone being soloed, or -1. UI STATE, NEVER A PARAMETER.
+ *
+ * Same rule as resDelta and for the same reason: `applyResonanceRegion` spreads
+ * the param object straight into the kernel, so a monitoring mode living in
+ * there would be one careless key from rendering a soloed pass into the
+ * timeline. Solo is expressible as parameters — it is every other zone at depth
+ * zero — which is exactly what makes it dangerous, and why the transform
+ * happens on the way to the LIVE kernel only. Apply always renders the zones as
+ * they are set.
+ */
+const resSoloZone = ref(-1)
 
 const resPreview = ref(false)
 /**
@@ -32,8 +63,6 @@ const resPreview = ref(false)
  */
 const resDelta = ref(false)
 const resReduction = ref(0)
-const resInputLevels = ref([])
-const resOutputLevels = ref([])
 let meterId = null
 
 /**
@@ -52,19 +81,28 @@ function resDisplayFn() {
   return resNodes?.getDisplay() ?? null
 }
 
+/**
+ * The zones as the live kernel should hear them.
+ *
+ * Identical to the stored set unless a zone is soloed, in which case every
+ * other zone is switched off — which the kernel already understands, so solo
+ * needs no mechanism of its own in the DSP.
+ */
+function liveZones() {
+  const solo = resSoloZone.value
+  if (solo < 0 || solo >= resZones.value.length) return resZones.value
+  return resZones.value.map((z, i) => ({ ...z, enabled: i === solo }))
+}
+
 function currentParams() {
   return {
-    depth: resDepth.value,
-    sharpness: resSharpness.value,
-    selectivity: resSelectivity.value,
     attack: resAttack.value,
     release: resRelease.value,
-    maxReduction: resMaxReduction.value,
-    freqFloor: resFreqFloor.value,
-    freqCeil: resFreqCeil.value,
+    mix: resMix.value,
+    trim: resTrim.value,
+    zones: resZones.value,
+    refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
     mode: resMode.value,
-    preserveHarmonics: resPreserveHarmonics.value,
-    pitchRange: resPitchRange.value,
   }
 }
 
@@ -91,11 +129,6 @@ export function useResonance() {
       const nodes = resNodes
       if (nodes) {
         resReduction.value = nodes.getReduction()
-        // Only meter channels the source really has: the splitter is
-        // discrete, so asking for stereo on a mono file adds a dead bar.
-        const chCount = state.currentFile?.channels ?? 1
-        resInputLevels.value = snapshotLevels(nodes.getInputLevels(chCount))
-        resOutputLevels.value = snapshotLevels(nodes.getOutputLevels(chCount))
       }
       meterId = requestAnimationFrame(tick)
     }
@@ -109,14 +142,15 @@ export function useResonance() {
     }
     resNodes = null
     resReduction.value = 0
-    resInputLevels.value = []
-    resOutputLevels.value = []
   }
 
   function pushAllParams(chain) {
     for (const [name, value] of Object.entries(currentParams())) {
       chain.updateParam(resonanceEffect.id, name, value)
     }
+    // Not from currentParams: that object is what Apply renders with, and solo
+    // must never reach it.
+    chain.updateParam(resonanceEffect.id, 'zones', liveZones())
     // Not in currentParams, so it needs restoring by hand when the preview is
     // switched back on.
     chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
@@ -161,20 +195,37 @@ export function useResonance() {
     pushParam(name, value)
   }
 
-  const syncDepth = v => syncParam('depth', resDepth, v)
-  const syncSharpness = v => syncParam('sharpness', resSharpness, v)
-  const syncSelectivity = v => syncParam('selectivity', resSelectivity, v)
   const syncAttack = v => syncParam('attack', resAttack, v)
   const syncRelease = v => syncParam('release', resRelease, v)
-  const syncMaxReduction = v => syncParam('maxReduction', resMaxReduction, v)
-  const syncFreqFloor = v => syncParam('freqFloor', resFreqFloor, v)
-  const syncFreqCeil = v => syncParam('freqCeil', resFreqCeil, v)
-  const syncMode = v => syncParam('mode', resMode, v)
-  const syncPitchRange = v => syncParam('pitchRange', resPitchRange, v)
-
-  function togglePreserveHarmonics() {
-    syncParam('preserveHarmonics', resPreserveHarmonics, !resPreserveHarmonics.value)
+  const syncMix = v => syncParam('mix', resMix, v)
+  const syncTrim = v => syncParam('trim', resTrim, v)
+  function pushZones() {
+    pushParam('zones', liveZones())
   }
+
+  const syncZones = (v) => {
+    resZones.value = v
+    pushZones()
+  }
+
+  /**
+   * Hear one zone's processing alone.
+   *
+   * A second click on the same zone clears it, and selecting solo on a zone
+   * that is switched off is allowed — it means "nothing", which is a legitimate
+   * thing to want to hear when you are deciding whether a band is the problem.
+   */
+  function toggleSolo(index) {
+    resSoloZone.value = resSoloZone.value === index ? -1 : index
+    pushZones()
+  }
+
+  function clearSolo() {
+    if (resSoloZone.value < 0) return
+    resSoloZone.value = -1
+    pushZones()
+  }
+  const syncMode = v => syncParam('mode', resMode, v)
 
   async function apply() {
     if (!state.selection) return
@@ -214,6 +265,10 @@ export function useResonance() {
     // preview was switched on — under a header that no longer said so. Read off
     // the chain rather than the meter loop's handle, which apply() has already
     // dropped by the time it gets here.
+    // Solo is a monitoring state and the effect entry outlives this panel, so
+    // one left set would come back the next time the preview was switched on —
+    // under a panel that no longer said so. Same reason delta is cleared below.
+    resSoloZone.value = -1
     if (resDelta.value) {
       resDelta.value = false
       getEffectChainIfExists()?.effects
@@ -230,37 +285,30 @@ export function useResonance() {
   }
 
   return {
-    resDepth,
-    resSharpness,
-    resSelectivity,
     resAttack,
     resRelease,
-    resMaxReduction,
-    resFreqFloor,
-    resFreqCeil,
+    resMix,
+    resTrim,
+    resZones,
+    resSelectedZone,
+    resSoloZone,
+    resRefMode,
     resMode,
-    resPreserveHarmonics,
-    resPitchRange,
     resPreview,
     resDelta,
     resReduction,
-    resInputLevels,
-    resOutputLevels,
     resDisplayFn,
     hasSelection,
     togglePreview,
     toggleDelta,
-    syncDepth,
-    syncSharpness,
-    syncSelectivity,
     syncAttack,
     syncRelease,
-    syncMaxReduction,
-    syncFreqFloor,
-    syncFreqCeil,
+    syncMix,
+    syncTrim,
+    syncZones,
+    toggleSolo,
+    clearSolo,
     syncMode,
-    syncPitchRange,
-    togglePreserveHarmonics,
     apply,
     teardown,
     openModal,
