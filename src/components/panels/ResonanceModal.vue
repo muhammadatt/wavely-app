@@ -26,6 +26,7 @@ const {
   resMix, resTrim, resZones, resSelectedZone, resDeltaZone, resRefMode,
   resPreview, resDelta, resReduction,
   resDisplayFn, hasSelection,
+  resVoiceProfile, resPlacementBusy, fitZonesToVoice,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
   syncMode, apply, teardown, closeModal,
@@ -205,8 +206,12 @@ async function applyAndClose() {
             :zones="resZones"
             :selected="resSelectedZone"
             :disabled="!resPreview"
+            :busy="resPlacementBusy"
+            :has-selection="hasSelection"
+            :profile="resVoiceProfile"
             @update:zones="syncZones"
             @update:selected="resSelectedZone = $event"
+            @fit="fitZonesToVoice"
           />
           <DeviceField
             :model-value="resTrim" @update:model-value="syncTrim"

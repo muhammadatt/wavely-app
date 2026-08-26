@@ -338,6 +338,23 @@ export function computeSoftClipperCeiling(segments, start, end, percentile, samp
 }
 
 /**
+ * Measure this speaker's pitch for a region, for zone placement.
+ *
+ * Goes through measureInWorker like the makeup measurements, so it inherits
+ * their 30 s centred cap. That is right for this quantity and wrong for very
+ * few: pitch is a property of the speaker, not of the passage, so a
+ * representative half-minute answers the question as well as ten minutes would
+ * and costs a bounded amount of time.
+ *
+ * ⚠ Resolves null when the region holds no pitched material. Not an error — the
+ * caller must leave the zones alone rather than placing them from a fallback.
+ */
+export function computeVoiceProfile(segments, start, end, sampleRate, channels) {
+  return measureInWorker('voiceProfile', segments, start, end, {}, sampleRate, channels)
+    .then(d => d.profile ?? null)
+}
+
+/**
  * Render a region through an effect's worklet in an OfflineAudioContext.
  *
  * Every effect applies this way, running the exact same worklet module as the

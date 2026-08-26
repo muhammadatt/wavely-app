@@ -3,12 +3,13 @@
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
- * schepsAutoTrim, softClipperCeiling
+ * schepsAutoTrim, softClipperCeiling, voiceProfile
  */
 import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
+import { measureVoiceProfile } from '../audio/voiceProfile.js'
 
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
@@ -31,6 +32,9 @@ self.onmessage = function (e) {
       break
     case 'softClipperCeiling':
       softClipperCeiling(channelData, sampleRate, params)
+      break
+    case 'voiceProfile':
+      voiceProfile(channelData, sampleRate)
       break
     default:
       self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
@@ -75,6 +79,25 @@ function softClipperCeiling(channelData, sampleRate, params) {
   try {
     const ceilingDb = measurePeakCeilingDb(channelData, sampleRate, params.percentile)
     self.postMessage({ type: 'done', ceilingDb })
+  } catch (err) {
+    self.postMessage({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * This speaker's median pitch and sub-fundamental corner.
+ *
+ * The heaviest of the measurements here — it runs the F0 tracker over every
+ * frame of the region — which is exactly why it is on this side of the
+ * boundary. It is triggered by a button rather than a drag, so it does not need
+ * to be fast; it does need not to freeze the panel while it runs.
+ *
+ * ⚠ A null profile is a legitimate answer. A region with no pitched material
+ * has no voice to aim at, and the caller must leave the zones where they are.
+ */
+function voiceProfile(channelData, sampleRate) {
+  try {
+    self.postMessage({ type: 'done', profile: measureVoiceProfile(channelData, sampleRate) })
   } catch (err) {
     self.postMessage({ type: 'error', message: err.message })
   }
