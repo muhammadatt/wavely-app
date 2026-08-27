@@ -152,11 +152,12 @@ onBeforeUnmount(() => ro?.disconnect())
   flex-direction: column;
   /* Hue-locked like the rest of the window, and sitting between the faceplate
      it covers and the chassis around it — a page laid on the face rather than
-     a hole cut in it. `--face` comes from the frame, so this needs no prop. */
+     a hole cut in it. The tokens come from the frame, so this panel follows
+     whichever chassis is lit without knowing which one that is. */
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--face, #f5a623) 7%, #171b21),
-    color-mix(in srgb, var(--face, #f5a623) 4%, #101319)
+    var(--chrome-help-top),
+    var(--chrome-help-bottom)
   );
   animation: helpIn 0.15s ease both;
 }
@@ -270,9 +271,12 @@ onBeforeUnmount(() => ro?.disconnect())
   right: 0;
   bottom: 0;
   height: 34px;
+  /* Transparent at the top, the panel's own bottom colour at the bottom —
+     `color-mix` with a transparent end would fade toward that colour's own
+     alpha, so the fade is expressed as an alpha ramp over one token instead. */
   background: linear-gradient(
-    color-mix(in srgb, var(--face, #f5a623) 4%, rgba(16, 19, 25, 0)),
-    color-mix(in srgb, var(--face, #f5a623) 4%, #101319)
+    rgb(from var(--chrome-help-bottom) r g b / 0),
+    var(--chrome-help-bottom)
   );
 }
 

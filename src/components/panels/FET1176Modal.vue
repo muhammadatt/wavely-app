@@ -108,7 +108,6 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
     :accent="ACCENT"
     brand-lead="FET"
     brand-tail="PUNCH"
-    background="linear-gradient(155deg,#171a1f,#0b0d10 60%)"
     :engaged="fetPreview"
     show-preview
     previewable

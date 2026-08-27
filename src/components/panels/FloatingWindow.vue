@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { helpFor } from '../../content/help/index.js'
+import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import Icon from '../ui/Icon.vue'
 import HelpOverlay from './HelpOverlay.vue'
 
@@ -209,6 +210,15 @@ const accent = computed(() => props.accent)
 const help = computed(() => helpFor(props.windowId))
 const helpOpen = ref(false)
 
+/**
+ * Which chassis this window wears — see `ui/harnessChrome.js`.
+ *
+ * Resolved once per window rather than per render: it cannot change while a
+ * window is open, and re-reading it on every paint would mean a `localStorage`
+ * hit inside the render path.
+ */
+const chrome = resolveHarnessChrome()
+
 // The window's own opening width unless a resize has changed it. A ref, not a
 // computed off the prop, because a resize drag has to be able to win —
 // nothing about a caller re-rendering with the same `width` prop should snap
@@ -235,13 +245,14 @@ function clampHeightDelta(d) {
   return Math.min(props.maxHeightDelta, Math.max(0, d))
 }
 
-// The faceplate is a near-black tinted toward the plugin's accent. Keeping the
-// tint this weak is what lets fifteen different hues still read as one product
-// — and it is now the ONLY place in the window the hue appears.
-const background = computed(() =>
-  props.background ??
-  `linear-gradient(155deg, color-mix(in srgb, ${accent.value} 10%, #16191e), color-mix(in srgb, ${accent.value} 4%, #0b0d10) 60%)`
-)
+// The faceplate's tint comes from `--chrome-face-*` in the stylesheet, not from
+// here, because it is one of the two things the chassis variants disagree
+// about. Building it in script put an inline style on every window, which wins
+// over the class — so the dark chassis rendered its own face at the light
+// chassis's values and 5b's whole point (a face lit against a darker shell)
+// came out at a fraction of its contrast. Only a caller with a hand-tuned
+// faceplate overrides it now.
+const background = computed(() => props.background)
 
 const hasFooter = computed(() => props.showApply || props.showPreview)
 // A selection is what Apply acts on. Without one the footer offers to make one
@@ -509,6 +520,7 @@ function requestClose() {
   <div
     ref="frameEl"
     class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
+    :data-chrome="chrome"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
@@ -633,7 +645,7 @@ function requestClose() {
       against the content itself — inside the scroller it would sit at the
       bottom of the scrolled content, which is the one place it is not needed.
     -->
-    <div class="relative min-h-0 flex flex-col" :style="{ background }">
+    <div class="win-face relative min-h-0 flex flex-col" :style="background ? { background } : null">
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
@@ -788,19 +800,46 @@ function requestClose() {
 </template>
 
 <style scoped>
-/* ── The chassis: hue-locked titanium ───────────────────────────────────────
-   The chrome steps LIGHTER than the face it holds, so the faceplate reads as
-   the recessed part and the shell as the thing it is set into — and it carries
-   the plugin's own hue at 5–9% so the lift cannot clash with the face. A
-   hue-FREE titanium was tried at this brightness and does clash: zero chroma
-   next to a cold plugin reads as a different material, not a lighter one. */
+/* ── The chassis: hue-locked, in two exposures ──────────────────────────────
+
+   Both variants mix the plugin's own accent into the chrome at 5–9%. That part
+   is settled: it is what stops the chassis clashing with any faceplate, and a
+   hue-FREE chrome was tried and does clash — zero chroma next to a cold plugin
+   reads as a different material rather than a lighter one.
+
+   What differs is which side of the face the chrome sits on, and the whole
+   difference is these tokens. Every rule below reads them, so neither variant
+   can acquire a value the other forgot.
+
+     light (5a)  chrome ABOVE the face: the faceplate is the recessed part
+     dark  (5b)  chrome BELOW the face: the faceplate is the only lit surface
+
+   Two things move with the exposure beyond the greys. The dark chassis takes a
+   1px white BEVEL along its top edge — without it a near-black shell reads as
+   a hole rather than as metal — and its hairlines drop to .10 over a heavier
+   black drop line, because separation on a dark chassis comes from the shadow
+   rather than from the lit edge. The face is mixed HOTTER under dark chrome
+   (12/5% against 10/4%): it is carrying the whole window's light there. */
 .win-frame {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--face, #f5a623) 8%, #2a2c2f),
-    color-mix(in srgb, var(--face, #f5a623) 5%, #1a1b1d)
-  );
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.11);
+  --chrome-shell-top: color-mix(in srgb, var(--face, #f5a623) 8%, #2a2c2f);
+  --chrome-shell-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #1a1b1d);
+  --chrome-header-top: color-mix(in srgb, var(--face, #f5a623) 9%, #33353a);
+  --chrome-header-bottom: color-mix(in srgb, var(--face, #f5a623) 6%, #212325);
+  --chrome-footer-top: color-mix(in srgb, var(--face, #f5a623) 8%, #2a2c2f);
+  --chrome-footer-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #1c1e20);
+  --chrome-face-top: color-mix(in srgb, var(--face, #f5a623) 10%, #16191e);
+  --chrome-face-bottom: color-mix(in srgb, var(--face, #f5a623) 4%, #0b0d10);
+  --chrome-help-top: color-mix(in srgb, var(--face, #f5a623) 7%, #171b21);
+  --chrome-help-bottom: color-mix(in srgb, var(--face, #f5a623) 4%, #101319);
+  --chrome-hairline: rgba(255, 255, 255, 0.13);
+  --chrome-drop: rgba(0, 0, 0, 0.5);
+  --chrome-frame-shadow: 0 24px 60px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.11);
+  --chrome-close-bg: rgba(255, 255, 255, 0.06);
+  --chrome-close-fg: rgba(255, 255, 255, 0.55);
+
+  background: linear-gradient(180deg, var(--chrome-shell-top), var(--chrome-shell-bottom));
+  box-shadow: var(--chrome-frame-shadow);
   font-family: 'Inter', system-ui, sans-serif;
   /*
     The footer adapts to the FRAME's width, not the viewport's — a 360px window
@@ -816,27 +855,54 @@ function requestClose() {
    they are stronger than the .06 rule they replaced and each carries a 1px
    black drop line under it — a lit edge and a shadow, which is what reads as
    two planes meeting rather than as a border drawn on one. */
+.win-frame[data-chrome='dark'] {
+  --chrome-shell-top: color-mix(in srgb, var(--face, #f5a623) 8%, #101215);
+  --chrome-shell-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #08090b);
+  --chrome-header-top: color-mix(in srgb, var(--face, #f5a623) 9%, #14171a);
+  --chrome-header-bottom: color-mix(in srgb, var(--face, #f5a623) 6%, #0c0e10);
+  --chrome-footer-top: color-mix(in srgb, var(--face, #f5a623) 8%, #111316);
+  --chrome-footer-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #090a0c);
+  --chrome-face-top: color-mix(in srgb, var(--face, #f5a623) 12%, #191c21);
+  --chrome-face-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #0d0f12);
+  --chrome-help-top: color-mix(in srgb, var(--face, #f5a623) 9%, #181b20);
+  --chrome-help-bottom: color-mix(in srgb, var(--face, #f5a623) 5%, #0d1013);
+  --chrome-hairline: rgba(255, 255, 255, 0.1);
+  --chrome-drop: rgba(0, 0, 0, 0.7);
+  /* The bevel is what keeps this reading as metal rather than as a hole. */
+  --chrome-frame-shadow: 0 24px 60px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --chrome-close-bg: rgba(255, 255, 255, 0.05);
+  --chrome-close-fg: rgba(255, 255, 255, 0.5);
+}
+
+/* The faceplate's default tint, and the second thing the two chassis disagree
+   about: 5a sets the face below the shell, 5b lifts it above.
+
+   The Soft Clipper overrides it inline and is the only window that does. Its
+   faceplate is deliberately the lightest surface in the app so its sunken
+   display and control band read as recessed, which is a statement about that
+   panel rather than about the chassis, and it holds either way round. FET
+   Punch used to override it too, with the pre-hue-lock default minus the tint
+   — no reason recorded, and it made that one window's face hue-free under 5a
+   and darker than its own header under 5b. That was a leftover, not a tune. */
+.win-face {
+  background: linear-gradient(155deg, var(--chrome-face-top), var(--chrome-face-bottom) 60%);
+}
+
 /* The header is the brightest plane in the window — the top of the chassis,
    catching the most light. One percent more hue than the shell with it. */
 .win-header {
   grid-template-columns: 1fr auto 1fr;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--face, #f5a623) 9%, #33353a),
-    color-mix(in srgb, var(--face, #f5a623) 6%, #212325)
-  );
-  border-bottom: 1px solid rgba(255, 255, 255, 0.13);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  background: linear-gradient(180deg, var(--chrome-header-top), var(--chrome-header-bottom));
+  border-bottom: 1px solid var(--chrome-hairline);
+  box-shadow: 0 1px 0 var(--chrome-drop);
 }
 
 .win-footer {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--face, #f5a623) 8%, #2a2c2f),
-    color-mix(in srgb, var(--face, #f5a623) 5%, #1c1e20)
-  );
-  border-top: 1px solid rgba(255, 255, 255, 0.13);
-  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.5);
+  background: linear-gradient(180deg, var(--chrome-footer-top), var(--chrome-footer-bottom));
+  border-top: 1px solid var(--chrome-hairline);
+  box-shadow: 0 -1px 0 var(--chrome-drop);
 }
 
 .win-rule {
@@ -911,8 +977,8 @@ function requestClose() {
 
 /* Help and close: the two window-level controls, one shape. */
 .win-icon-btn {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.55);
+  background: var(--chrome-close-bg);
+  color: var(--chrome-close-fg);
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .win-icon-btn:hover {
