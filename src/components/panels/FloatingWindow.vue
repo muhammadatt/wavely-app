@@ -1,20 +1,42 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
+import { useEditorState } from '../../composables/useEditorState.js'
 import Icon from '../ui/Icon.vue'
 
 /**
- * Shared shell for every effect window — the outboard-gear faceplate.
+ * The plugin harness — the chassis every effect window is mounted into.
  *
- * Owns the chrome each one needs and nothing about any one of them: the
- * draggable frame, the brand header, the engage/bypass pill, the close button
- * and its place in the stacking order. Contents arrive through the default slot.
+ * It owns everything that is true of ALL plugins and nothing that is true of
+ * any one of them: the draggable frame, the brand mark, DELTA, ON/BYPASS, the
+ * close button, the selection readout, Preview and Apply. The plugin's own face
+ * arrives through the default slot and is the only part that varies.
  *
- * There used to be a second, flat "utility" variant for the effects that only
- * had a few sliders. Two looks for one kind of object is the inconsistency this
- * whole restructure exists to remove, so every effect now wears the faceplate
- * and the faceplate is derived from the plugin's own accent — a family
- * resemblance that costs each window one colour.
+ * ── THE HARNESS CHROME CARRIES NO PLUGIN ACCENT, AND THAT IS THE POINT. ──────
+ * Every one of these controls used to be rebuilt inside each faceplate, tinted
+ * with that plugin's hue: an amber ON pill over an amber face, an amber DELTA
+ * beside it, an amber Apply under it. Fifteen hues each used five times over,
+ * so the one colour that is supposed to mean "this is the parameter you are
+ * moving" also meant "this is the window chrome" — the accent stopped
+ * distinguishing anything. The chassis is now neutral graphite end to end and
+ * the accent lives only inside the face, where it marks the controls.
+ *
+ * The engage lamp is the one lit thing up here and it is the app's own status
+ * green (--color-ok), not the plugin's hue: it reports a state, it does not
+ * identify the plugin. Apply is near-white — the highest-contrast element on
+ * the window, which is what the primary action of a window should be.
+ *
+ * ── THE FACE IS FLUSH INTO THE CHASSIS. ─────────────────────────────────────
+ * No inner radius, no padding, no second border around the face. Separation is
+ * carried by the header and footer hairlines alone — 9% white with a 1px black
+ * drop line under it — which is enough for the tinted face to read as its own
+ * plane against the neutral chrome without spending 14px of chassis on a frame
+ * around a frame.
+ *
+ * ── APPLY IS IN THE FOOTER, WHICH MEANS IT CANNOT SCROLL AWAY. ──────────────
+ * It used to be the last row of the panel body, so on a short viewport the
+ * primary action of the window sat below the fold behind a "MORE ↓" hint. The
+ * footer is pinned outside the scroller: the body scrolls, the actions do not.
  */
 const props = defineProps({
   // Registry id. Identifies this window to the manager for focus and for
@@ -26,22 +48,99 @@ const props = defineProps({
   // Vertical offset of the initial resting place, used only the first time a
   // window opens; after that the remembered position wins.
   top: { type: Number, default: 90 },
+  /**
+   * The plugin's hue. Used for the FACE ONLY — the tinted faceplate behind the
+   * slot. Nothing in the header or the footer reads it.
+   */
   accent: { type: String, default: '#f5a623' },
 
   // Two-part brand mark, e.g. "OPTO" + "SMOOTH" — the first word solid, the
   // second lighter.
   brandLead: { type: String, required: true },
   brandTail: { type: String, default: '' },
+  /**
+   * The mono word after the brand rule. Says what KIND of window this is, which
+   * is the one thing the brand mark cannot: "EFFECT" for something that
+   * processes audio, "ANALYZER" for something that only looks at it.
+   */
+  kicker: { type: String, default: 'EFFECT' },
 
-  // Override the derived faceplate. Only FET Punch does — its steel-blue accent
-  // tints too cold through the generic recipe, so it keeps a hand-tuned pair.
+  // Override the derived faceplate tint. Only FET Punch does — its steel-blue
+  // accent tints too cold through the generic recipe.
   background: { type: String, default: null },
-  headerBackground: { type: String, default: null },
 
+  // ── Header controls ───────────────────────────────────────────────────────
   // The ON/BYPASS pill only makes sense where there is something to bypass —
   // i.e. effects that preview in real time.
   showEngage: { type: Boolean, default: true },
   engaged: { type: Boolean, default: false },
+
+  /**
+   * DELTA — audition only what the effect is changing.
+   *
+   * It sits in the header with ON/BYPASS because it is the same kind of
+   * control: both change what reaches the speakers and neither changes the
+   * file. Down among the parameters it would read as one.
+   */
+  showDelta: { type: Boolean, default: false },
+  delta: { type: Boolean, default: false },
+  // Delta means nothing while the effect is bypassed — there is no difference
+  // to hear — so callers gate it on their own engaged state.
+  deltaDisabled: { type: Boolean, default: false },
+  deltaTitle: { type: String, default: 'Hear only what the effect changes' },
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  /**
+   * Whether this window can commit anything to the timeline. An analyzer
+   * cannot, and gets no footer at all.
+   */
+  showApply: { type: Boolean, default: false },
+  /**
+   * Apply's label.
+   *
+   * "Apply to selection" rather than "Apply <plugin name>" on every window: the
+   * brand mark two rows up already says which plugin this is, and repeating it
+   * on the button spends the one string that could say what the button acts on.
+   * The readout beside it names the region, so the two together read as one
+   * sentence. Overridable for anything whose scope is genuinely different.
+   */
+  applyLabel: { type: String, default: 'Apply to selection' },
+  /**
+   * What Apply says on a narrow window.
+   *
+   * The brief was drawn at 860px; the app has windows down to 360, where the
+   * full label plus Preview plus the readout do not fit in one row and the
+   * readout wraps to two lines inside a fixed-height footer. Rather than let
+   * the label truncate — losing the end of the sentence, which is the half that
+   * says what is acted on — the footer swaps in a short form and drops the
+   * readout, which the app's own selection bar carries anyway.
+   */
+  applyLabelShort: { type: String, default: 'Apply' },
+  applyIcon: { type: String, default: 'check' },
+  /**
+   * A gate applied on top of the selection requirement — e.g. an effect that is
+   * currently bypassed has nothing to render. The button stays visible but
+   * inert, with the reason in its tooltip.
+   */
+  applyDisabled: { type: Boolean, default: false },
+  applyDisabledHint: { type: String, default: '' },
+  /**
+   * Whether Apply needs a selection. True for every effect that processes a
+   * region, which is all of them today; false leaves Apply live on an empty
+   * selection for anything that operates on the whole file.
+   */
+  requiresSelection: { type: Boolean, default: true },
+
+  // Preview — present on every effect, enabled only where the effect can run
+  // live in the playback chain. A disabled control with a tooltip teaches that
+  // real-time tuning exists; omitting it teaches nothing.
+  showPreview: { type: Boolean, default: false },
+  previewable: { type: Boolean, default: true },
+  previewing: { type: Boolean, default: false },
+  previewHint: {
+    type: String,
+    default: 'Real-time preview isn’t available for this effect — apply to hear the result (Ctrl+Z undoes it)',
+  },
 
   /**
    * Let the user drag a handle to make the window — and whatever real-time
@@ -68,7 +167,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'toggle-engaged', 'close',
+  'toggle-engaged', 'toggle-delta', 'toggle-preview', 'apply', 'close',
   /**
    * How much extra height a resize drag has asked for, in pixels. Emitted on
    * mount (0, or whatever was remembered) and on every subsequent drag.
@@ -84,6 +183,11 @@ const emit = defineEmits([
 ])
 
 const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize } = useWindows()
+// The harness reads the selection itself rather than taking it as a prop.
+// Every plugin was passing the same `hasSelection` through to the same row and
+// printing the same unmet message; one readout that is right by construction
+// beats fifteen that agree by convention.
+const { state, hasSelection, selectAll } = useEditorState()
 
 const accent = computed(() => props.accent)
 
@@ -114,15 +218,44 @@ function clampHeightDelta(d) {
 }
 
 // The faceplate is a near-black tinted toward the plugin's accent. Keeping the
-// tint this weak is what lets six different hues still read as one product.
+// tint this weak is what lets fifteen different hues still read as one product
+// — and it is now the ONLY place in the window the hue appears.
 const background = computed(() =>
   props.background ??
   `linear-gradient(155deg, color-mix(in srgb, ${accent.value} 10%, #16191e), color-mix(in srgb, ${accent.value} 4%, #0b0d10) 60%)`
 )
-const headerBackground = computed(() =>
-  props.headerBackground ??
-  `linear-gradient(color-mix(in srgb, ${accent.value} 14%, #1c2026), color-mix(in srgb, ${accent.value} 7%, #121418))`
-)
+
+const hasFooter = computed(() => props.showApply || props.showPreview)
+// A selection is what Apply acts on. Without one the footer offers to make one
+// rather than printing a notice about its absence — "select all" is a button,
+// "make a selection to apply" is a complaint.
+const applyBlocked = computed(() => props.applyDisabled || (props.requiresSelection && !hasSelection.value))
+const applyTitle = computed(() => {
+  if (props.applyDisabled) return props.applyDisabledHint
+  if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
+  return ''
+})
+
+const EMPTY_TIME = '—'
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds)) return EMPTY_TIME
+  const m = Math.floor(seconds / 60)
+  const s = (seconds % 60).toFixed(2)
+  return `${m}:${s.padStart(5, '0')}`
+}
+
+/**
+ * The selection, in the selection bar's own words.
+ *
+ * Same formatter, same `→` between the ends and `·` before the duration, so a
+ * reading taken here and a reading taken from the bar at the bottom of the app
+ * are recognisably the same number rather than two renderings of it.
+ */
+const selectionText = computed(() => {
+  if (!hasSelection.value) return ''
+  const { start, end } = state.selection
+  return `${formatTime(start)} → ${formatTime(end)} · ${formatTime(end - start)} SELECTED`
+})
 
 const pos = ref({ x: 0, y: props.top })
 const dragging = ref(false)
@@ -136,8 +269,9 @@ const VIEWPORT_MARGIN = 16
 // Below this the body is not worth scrolling — a window dragged almost off the
 // bottom keeps a usable sliver and hangs over the edge instead of collapsing.
 const MIN_BODY_PX = 160
-// Header height, fixed by its own h-12 class. The body gets what is left.
-const HEADER_PX = 48
+// Chrome heights, fixed by their own classes. The body gets what is left.
+const HEADER_PX = 56
+const FOOTER_PX = 68
 
 const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
 
@@ -145,15 +279,17 @@ const viewportH = ref(typeof window === 'undefined' ? 800 : window.innerHeight)
  * How tall the scrolling body may be.
  *
  * Windows are sized by their contents and some of them are tall — VoiceRx runs
- * a 200 px plot, a findings list, a knob row and an apply bar, which together
- * outrun a laptop viewport. The frame is overflow:hidden, so before this the
- * overflow was not merely off screen but unreachable: Apply could sit below the
- * fold with no scrollbar anywhere and no way to drag the window high enough to
- * reveal it.
+ * a 200 px plot, a findings list and a knob row, which together outrun a laptop
+ * viewport. The frame is overflow:hidden, so before this the overflow was not
+ * merely off screen but unreachable.
+ *
+ * The footer is subtracted because it is pinned outside the scroller: the whole
+ * reason Apply moved down there is that it must never be the thing below the
+ * fold, and that only holds if the body's ceiling accounts for it.
  */
 const bodyMaxHeight = computed(() => Math.max(
   MIN_BODY_PX,
-  viewportH.value - pos.value.y - HEADER_PX - VIEWPORT_MARGIN,
+  viewportH.value - pos.value.y - HEADER_PX - (hasFooter.value ? FOOTER_PX : 0) - VIEWPORT_MARGIN,
 ))
 
 const frameEl = ref(null)
@@ -347,16 +483,13 @@ function requestClose() {
 <template>
   <div
     ref="frameEl"
-    class="win-frame fixed rounded-2xl overflow-hidden flex flex-col"
+    class="win-frame fixed rounded-[18px] overflow-hidden flex flex-col"
     role="dialog"
     :aria-label="label"
     tabindex="-1"
     :style="{
       left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px',
       zIndex: z,
-      background,
-      boxShadow: '0 24px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.05)',
-      fontFamily: `'Inter',system-ui,sans-serif`,
       animation: dragging || resizing ? 'none' : 'pluginBounceIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both',
       userSelect: dragging || resizing ? 'none' : 'auto',
     }"
@@ -364,54 +497,73 @@ function requestClose() {
     @focusin="raise"
     @keydown.escape="onEscape"
   >
-    <!-- Header (drag handle) -->
+    <!--
+      Header (drag handle).
+
+      Three groups under space-between: identity on the left, DELTA in the
+      middle, monitoring and close on the right. DELTA is centred rather than
+      docked beside ON/BYPASS because the two are peers — one says whether the
+      effect is in circuit, the other says which half of it you are listening
+      to — and a recessed tray around the pair made them read as one switch
+      with two positions.
+    -->
     <div
-      class="flex items-center justify-between touch-none px-[18px] h-12 shrink-0"
+      class="win-header flex items-center justify-between touch-none h-14 shrink-0 pl-5 pr-[14px]"
       :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
-      style="border-bottom:1px solid rgba(255,255,255,.06)"
-      :style="{ background: headerBackground }"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
       @pointercancel="onDragEnd"
     >
-      <!-- Brand mark -->
-      <div class="flex items-center gap-2.5">
-        <div class="w-3.5 h-3.5 rounded-full"
-             :style="{
-               background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 45%, #ffffff), ${accent})`,
-               boxShadow: `0 0 10px color-mix(in srgb, ${accent} 65%, transparent)`,
-             }"></div>
-        <!-- Brand text is a very light tint of the accent rather than a fixed
-             cream, which was tuned for OptoSmooth's amber and read wrong on
-             every other hue. -->
+      <!-- Brand mark. No hue dot: the face behind it is already the plugin's
+           colour, and a lit dot up here was the accent's fifth appearance in
+           one window. -->
+      <div class="flex items-center gap-3">
+        <span style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f2fafc">
+          {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.45)">{{ brandTail }}</span></template>
+        </span>
+        <span v-if="kicker" class="win-rule"></span>
         <span
-          style="font:800 13px/1 'Inter';letter-spacing:.22em"
-          :style="{ color: `color-mix(in srgb, ${accent} 20%, #ffffff)` }"
-        >{{ brandLead }}&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.4)">{{ brandTail }}</span></span>
+          v-if="kicker"
+          style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)"
+        >{{ kicker }}</span>
       </div>
 
       <!-- Optional middle slot (preset selector and the like) -->
       <slot name="header-center" />
 
-      <div class="flex items-center gap-2">
+      <button
+        v-if="showDelta"
+        type="button"
+        class="win-chip"
+        :class="{ 'win-chip--on': delta }"
+        :disabled="deltaDisabled"
+        :aria-pressed="String(delta)"
+        :title="deltaTitle"
+        @pointerdown.stop
+        @click="emit('toggle-delta')"
+      >
+        <span class="win-chip-text">DELTA</span>
+      </button>
+
+      <div class="flex items-center gap-2.5">
         <button
           v-if="showEngage"
-          class="flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-opacity"
-          :style="{
-            background: `color-mix(in srgb, ${accent} 14%, transparent)`,
-            borderColor: `color-mix(in srgb, ${accent} 40%, transparent)`,
-            opacity: engaged ? 1 : 0.55,
-          }"
+          type="button"
+          class="win-chip"
+          :class="{ 'win-chip--on': engaged }"
           :aria-pressed="String(engaged)"
+          title="Engage or bypass the effect"
           @pointerdown.stop
           @click="emit('toggle-engaged')"
         >
-          <span class="w-[7px] h-[7px] rounded-full" :style="{ background: accent, boxShadow: `0 0 7px ${accent}` }"></span>
-          <span :style="{ font: `700 9px 'JetBrains Mono',monospace`, letterSpacing: '.14em', color: `color-mix(in srgb, ${accent} 65%, #ffffff)` }">{{ engaged ? 'ON' : 'BYPASS' }}</span>
+          <span class="win-lamp" :class="{ 'win-lamp--on': engaged }"></span>
+          <span class="win-chip-text">{{ engaged ? 'ON' : 'BYPASS' }}</span>
         </button>
+        <span v-if="showEngage" class="win-rule win-rule--tall"></span>
         <button
-          class="win-close flex items-center justify-center w-7 h-7 rounded-full border-none cursor-pointer"
+          type="button"
+          class="win-close flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
           aria-label="Close window"
           @pointerdown.stop
           @click="requestClose"
@@ -422,16 +574,18 @@ function requestClose() {
     </div>
 
     <!--
-      The body scrolls; the header does not. min-height:0 is what makes that
-      true — without it a flex child refuses to shrink below its content and the
-      max-height lands on a box that never gets to enforce it.
+      The body scrolls; the header and footer do not. min-height:0 is what makes
+      that true — without it a flex child refuses to shrink below its content and
+      the max-height lands on a box that never gets to enforce it.
 
-      The wrapper exists only to hang the overflow hint off, which has to be
-      positioned against the viewport onto the content rather than against the
-      content itself — inside the scroller it would sit at the bottom of the
-      scrolled content, which is the one place it is not needed.
+      This wrapper carries the faceplate tint, and it is flush: the face runs
+      edge to edge between the two hairlines with no inner radius and no padding
+      of its own. The wrapper also exists to hang the overflow hint off, which
+      has to be positioned against the viewport onto the content rather than
+      against the content itself — inside the scroller it would sit at the
+      bottom of the scrolled content, which is the one place it is not needed.
     -->
-    <div class="relative min-h-0 flex flex-col">
+    <div class="relative min-h-0 flex flex-col" :style="{ background }">
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
@@ -451,6 +605,8 @@ function requestClose() {
         panel with no such controls — reported twice as a control that had
         "disappeared". Shortening the panel fixes one viewport; saying so fixes
         every viewport.
+
+        It no longer has to cover for Apply, which is pinned in the footer.
       -->
       <div
         v-show="canScrollDown"
@@ -459,13 +615,68 @@ function requestClose() {
       >
         <span
           class="mb-[3px] px-2 py-[2px] rounded-full"
-          :style="{
-            font: `700 8px 'JetBrains Mono',monospace`,
-            letterSpacing: '.14em',
-            color: `color-mix(in srgb, ${accent} 55%, #ffffff)`,
-            background: 'rgba(0,0,0,.55)',
-          }"
+          style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(234,246,248,.75);background:rgba(0,0,0,.55)"
         >MORE ↓</span>
+      </div>
+    </div>
+
+    <!--
+      Footer — the selection on the left, the actions on the right.
+
+      Preview and Apply are one right-aligned action group rather than a full
+      width row, because they are not equals: Preview is reversible and Apply
+      writes to the timeline. Apply is the only near-white surface in the
+      window, so the primary action is also the brightest thing in it.
+    -->
+    <div v-if="hasFooter" class="win-footer flex items-center gap-5 h-[68px] shrink-0 pl-5 pr-[14px]">
+      <span
+        v-if="hasSelection"
+        class="win-sel"
+        style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.4);font-variant-numeric:tabular-nums;white-space:nowrap"
+      >{{ selectionText }}</span>
+      <!-- No selection is not an error state, it is a missing input with an
+           obvious default. The notice this replaced could only be read; this
+           can be pressed. -->
+      <button
+        v-else
+        type="button"
+        class="win-selectall flex items-center gap-2 h-8 px-3.5 rounded-full cursor-pointer whitespace-nowrap"
+        title="Select the whole file"
+        @click="selectAll()"
+      >
+        <Icon name="selectAll" :size="13" :stroke-width="2" />
+        <span>Select all</span>
+      </button>
+
+      <div class="win-actions flex items-center gap-2">
+        <button
+          v-if="showPreview"
+          type="button"
+          class="win-preview"
+          :class="{ 'win-preview--on': previewing }"
+          :disabled="!previewable"
+          :title="previewable
+            ? (previewing ? 'Stop preview' : 'Play the selection through this effect')
+            : previewHint"
+          :aria-pressed="String(previewing)"
+          @click="emit('toggle-preview')"
+        >
+          <Icon :name="previewing ? 'stop' : 'play'" :size="13" />
+          <span class="win-btn-label">{{ previewing ? 'Stop preview' : 'Preview' }}</span>
+        </button>
+
+        <button
+          v-if="showApply"
+          type="button"
+          class="win-apply"
+          :disabled="applyBlocked"
+          :title="applyTitle"
+          @click="emit('apply')"
+        >
+          <Icon :name="applyIcon" :size="15" :stroke-width="2.5" />
+          <span class="win-btn-label">{{ applyLabel }}</span>
+          <span class="win-btn-label-short">{{ applyLabelShort }}</span>
+        </button>
       </div>
     </div>
 
@@ -495,7 +706,7 @@ function requestClose() {
       @dblclick.stop="resetSize"
     >
       <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" style="margin:0 4px 4px 0">
-        <g :stroke="`color-mix(in srgb, ${accent} 70%, #ffffff)`" stroke-width="1.5" stroke-linecap="round" opacity="0.55">
+        <g stroke="rgba(255,255,255,.7)" stroke-width="1.5" stroke-linecap="round" opacity="0.55">
           <line x1="9" y1="1" x2="1" y2="9" />
           <line x1="9" y1="5" x2="5" y2="9" />
         </g>
@@ -505,6 +716,233 @@ function requestClose() {
 </template>
 
 <style scoped>
+/* ── The chassis ────────────────────────────────────────────────────────────
+   Brushed titanium: the chrome steps LIGHTER than the face it holds, so the
+   faceplate reads as the recessed part and the shell as the thing it is set
+   into. Neutral end to end — no plugin hue reaches any of this. */
+.win-frame {
+  background: linear-gradient(180deg, #242a35, #171b22);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.11);
+  font-family: 'Inter', system-ui, sans-serif;
+  /*
+    The footer adapts to the FRAME's width, not the viewport's — a 360px window
+    and a 900px one sit side by side on the same screen, so a media query would
+    answer the wrong question. It also means a resize drag re-lays the footer
+    out for free, with no width threshold duplicated in JS.
+  */
+  container-type: inline-size;
+  container-name: win;
+}
+
+/* The hairlines are the whole separation story now that the face is flush, so
+   they are stronger than the .06 rule they replaced and each carries a 1px
+   black drop line under it — a lit edge and a shadow, which is what reads as
+   two planes meeting rather than as a border drawn on one. */
+.win-header {
+  background: linear-gradient(180deg, #2b313d, #1d222b);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.win-footer {
+  background: linear-gradient(180deg, #232832, #1a1e26);
+  border-top: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.win-rule {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.13);
+}
+.win-rule--tall {
+  height: 20px;
+}
+
+/* ── Monitoring chips (DELTA, ON/BYPASS) ────────────────────────────────────
+   One shape for both, because they are the same kind of control. Off is an
+   outline, on is a raised white wash — a value step rather than a colour
+   change, which is what keeps the hue out of the chrome. */
+.win-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 13px;
+  border-radius: 9999px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.45);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+.win-chip:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+.win-chip--on {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #eaf6f8;
+}
+.win-chip--on:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  color: #eaf6f8;
+}
+.win-chip:active:not(:disabled) {
+  filter: brightness(0.96);
+}
+.win-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.win-chip:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}
+.win-chip-text {
+  font: 700 9px 'JetBrains Mono', monospace;
+  letter-spacing: 0.14em;
+}
+
+/* The one lit thing in the chrome. Status green, not the plugin's hue: it
+   reports whether the effect is in circuit, which is the same fact whatever
+   plugin this is. */
+.win-lamp {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--meter-lamp-off, #262c37);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.win-lamp--on {
+  background: var(--color-ok, #5fd39a);
+  box-shadow: 0 0 7px var(--color-ok, #5fd39a);
+}
+
+.win-close {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.win-close:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: #f2fafc;
+}
+.win-close:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}
+
+/* ── Footer actions ─────────────────────────────────────────────────────── */
+
+/* The actions stay right-aligned whether or not anything is on the left, so a
+   window too narrow for the readout does not drag Apply into the middle. */
+.win-actions {
+  margin-left: auto;
+}
+
+.win-btn-label-short {
+  display: none;
+}
+
+.win-selectall {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font: 600 12px 'Inter', system-ui, sans-serif;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.win-selectall:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #eaf6f8;
+}
+.win-selectall:active {
+  filter: brightness(0.96);
+}
+.win-selectall:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}
+
+/*
+  Preview holds a fixed width across both its states.
+
+  "Preview" and "Stop preview" are different lengths, so a button sized to its
+  own text changes width when it is pressed — which shifts Apply sideways under
+  the pointer at the exact moment the user might be reaching for it.
+*/
+.win-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  flex-shrink: 0;
+  min-width: 142px;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.85);
+  font: 600 13px 'Inter', system-ui, sans-serif;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+.win-preview:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #eaf6f8;
+}
+.win-preview--on {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #eaf6f8;
+}
+.win-preview:active:not(:disabled) {
+  filter: brightness(0.96);
+}
+.win-preview:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.win-preview:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}
+
+/* Near-white, and the only near-white surface in the window. It is the primary
+   action; it is also the one control here that writes to the file. */
+.win-apply {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 40px;
+  padding: 0 22px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  background: #eaf6f8;
+  color: #08161a;
+  font: 600 13px 'Inter', system-ui, sans-serif;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+.win-apply:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.win-apply:active:not(:disabled) {
+  filter: brightness(0.96);
+}
+.win-apply:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.win-apply:focus-visible {
+  outline: 2px solid #7fe9f6;
+  outline-offset: 2px;
+}
+
 /* The hint's own height is the fade: tall enough that the gradient reads as
    depth rather than as a border, short enough not to dim a control that is
    fully visible. */
@@ -546,20 +984,6 @@ function requestClose() {
   background-clip: content-box;
 }
 
-.win-close {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.55);
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-.win-close:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.9);
-}
-.win-close:focus-visible {
-  outline: 2px solid #7fe9f6;
-  outline-offset: 2px;
-}
-
 /* Quiet until asked for — a corner grip drawn at full strength on every
    faceplate would compete with the controls it sits beside for no reason
    most of a session, since it is only ever touched once in a while. */
@@ -577,6 +1001,38 @@ function requestClose() {
 .win-resize:focus-visible {
   outline: 2px solid #7fe9f6;
   outline-offset: -2px;
+}
+
+/*
+  Two steps down from the width the brief was drawn at.
+
+  First the readout goes: it is a reading, the selection bar at the bottom of
+  the app carries the same one, and losing it costs nothing that cannot be read
+  elsewhere. Only then do the buttons shrink — Preview to its glyph, Apply to
+  its short label — because those are the controls, and a control that has
+  shrunk is worse than a reading that has gone.
+*/
+@container win (max-width: 660px) {
+  .win-sel {
+    display: none;
+  }
+}
+
+@container win (max-width: 520px) {
+  .win-preview {
+    min-width: 0;
+    padding: 0;
+    width: 40px;
+  }
+  .win-preview .win-btn-label {
+    display: none;
+  }
+  .win-apply .win-btn-label {
+    display: none;
+  }
+  .win-apply .win-btn-label-short {
+    display: inline;
+  }
 }
 
 @keyframes pluginBounceIn {

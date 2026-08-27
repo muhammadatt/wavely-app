@@ -4,12 +4,11 @@ import { useEditorState } from '../../../composables/useEditorState.js'
 import { normalizeRegion, computePeakCache } from '../../../audio/processing.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import Knob from '../../knobs/Knob.vue'
-import ApplyAction from '../../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
+  state, getAudioContext, replaceRegion, setPeakCache,
   startProcessing, endProcessing, showToast, totalDuration,
 } = useEditorState()
 
@@ -59,6 +58,10 @@ async function applyNormalize(useSelection = true) {
     brand-lead="PEAK"
     brand-tail="NORM"
     :show-engage="false"
+    show-preview
+    :previewable="false"
+    show-apply
+    @apply="applyNormalize()"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
       <!-- One parameter, so it carries the face: a single large knob rather
@@ -77,20 +80,6 @@ async function applyNormalize(useSelection = true) {
         Scales the selection so its loudest peak lands at
         <span class="font-['JetBrains_Mono']" :style="{ color: ACCENT }">{{ formatDb(targetPeak) }} dBFS</span>.
       </p>
-
-      <div class="mt-[18px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          :previewable="false"
-          :accent="ACCENT"
-          text-color="#08211a"
-          :met="hasSelection"
-          message="Make a selection to normalize"
-          label="Apply Normalize"
-          @apply="applyNormalize()"
-        />
-      </div>
     </div>
   </FloatingWindow>
 </template>

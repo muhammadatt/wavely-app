@@ -4,7 +4,6 @@ import { useManualEq } from '../../composables/useManualEq.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 import GeneralView from './eq/GeneralView.vue'
 
 /**
@@ -75,9 +74,19 @@ async function applyAndClose() {
     brand-lead="EQ"
     brand-tail="PARAMETRIC"
     :engaged="eq.eqPreview.value"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!eq.eqPreview.value || activeBandCount === 0"
+    :apply-disabled-hint="activeBandCount === 0
+      ? 'Move a band before applying'
+      : 'Turn the EQ on to apply it'"
     resizable
     @update:height-delta="heightDelta = $event"
     @toggle-engaged="eq.togglePreview()"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <div class="px-[22px] pt-[18px] pb-[22px]">
@@ -120,26 +129,6 @@ async function applyAndClose() {
         </div>
 
         <LevelMeter :levels="eq.outputLevels.value" label="OUT" :height="PLOT_HEIGHT" />
-      </div>
-
-      <div class="mt-[16px] pt-[14px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#0a1410"
-          :met="eq.hasSelection.value"
-          message="Make a selection to equalise"
-          label="Apply EQ"
-          :disabled="!eq.eqPreview.value || activeBandCount === 0"
-          :disabled-hint="activeBandCount === 0
-            ? 'Move a band before applying'
-            : 'Turn the EQ on to apply it'"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
       </div>
     </div>
   </FloatingWindow>

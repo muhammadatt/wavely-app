@@ -6,7 +6,6 @@ import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -140,7 +139,17 @@ async function applyAndClose() {
     brand-lead="HUM"
     brand-tail="REMOVER"
     :engaged="humPreview"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!humPreview || !hasEnabledNotches"
+    :apply-disabled-hint="!humPreview
+      ? 'Turn Hum Remover on to apply it'
+      : 'Analyse and select at least one frequency to notch'"
     @toggle-engaged="togglePreview"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
@@ -291,25 +300,6 @@ async function applyAndClose() {
         </div>
       </div>
 
-      <div class="mt-[16px]">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#1a1024"
-          :met="hasSelection"
-          message="Make a selection to remove hum"
-          label="Apply Hum Removal"
-          :disabled="!humPreview || !hasEnabledNotches"
-          :disabled-hint="!humPreview
-            ? 'Turn Hum Remover on to apply it'
-            : 'Analyse and select at least one frequency to notch'"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
-      </div>
     </div>
   </FloatingWindow>
 </template>

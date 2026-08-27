@@ -8,13 +8,12 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
-  fetAutoMakeup, fetPreview, fetReduction, fetInputLevels, fetOutputLevels, hasSelection,
+  fetAutoMakeup, fetPreview, fetReduction, fetInputLevels, fetOutputLevels,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup,
   apply, teardown, closeModal,
@@ -110,17 +109,19 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
     brand-lead="FET"
     brand-tail="PUNCH"
     background="linear-gradient(155deg,#171a1f,#0b0d10 60%)"
-    header-background="linear-gradient(#1e2229,#13161a)"
+    kicker="FET LIMITING AMPLIFIER"
     :engaged="fetPreview"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!fetPreview"
+    apply-disabled-hint="Turn FET Punch on to apply it"
     @toggle-engaged="togglePreview"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
-    <template #header-center>
-      <span style="font:600 9.5px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.32)">
-        FET LIMITING AMPLIFIER
-      </span>
-    </template>
-
     <div class="px-[26px] pt-[20px] pb-[26px]">
       <!-- Gain reduction across the full width, then the gain staging under it.
            Same meter and same layout as the OptoSmooth panel: the two
@@ -268,24 +269,6 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
             />
           </div>
         </div>
-      </div>
-
-      <div class="mt-4">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#0c1218"
-          :met="hasSelection"
-          message="Make a selection to compress"
-          label="Apply compression"
-          :disabled="!fetPreview"
-          disabled-hint="Turn FET Punch on to apply it"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
       </div>
     </div>
   </FloatingWindow>
