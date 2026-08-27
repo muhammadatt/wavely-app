@@ -2,7 +2,9 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { helpFor } from '../../content/help/index.js'
 import Icon from '../ui/Icon.vue'
+import HelpOverlay from './HelpOverlay.vue'
 
 /**
  * The plugin harness — the chassis every effect window is mounted into.
@@ -190,6 +192,17 @@ const { focusWindow, closeWindow, savePosition, getPosition, saveSize, getSize }
 const { state, hasSelection, selectAll } = useEditorState()
 
 const accent = computed(() => props.accent)
+
+/**
+ * Help for THIS effect, looked up by the id the harness was already given.
+ *
+ * No plugin passes it and no plugin can pass the wrong one — `src/content/help`
+ * is keyed by the same window id, so a faceplate showing another effect's
+ * instructions is not expressible. Null where nothing is written yet, and the
+ * button is then absent rather than opening an empty panel.
+ */
+const help = computed(() => helpFor(props.windowId))
+const helpOpen = ref(false)
 
 // The window's own opening width unless a resize has changed it. A ref, not a
 // computed off the prop, because a resize drag has to be able to win —
@@ -469,6 +482,13 @@ function raise() {
 function onEscape(e) {
   e.preventDefault()
   e.stopPropagation()
+  // A ladder, not a shortcut to the bottom: Escape puts the help away before it
+  // closes the window. Reading the instructions and then losing the whole panel
+  // on the key you reach for to dismiss them is the wrong outcome.
+  if (helpOpen.value) {
+    helpOpen.value = false
+    return
+  }
   requestClose()
 }
 
@@ -560,10 +580,28 @@ function requestClose() {
           <span class="win-lamp" :class="{ 'win-lamp--on': engaged }"></span>
           <span class="win-chip-text">{{ engaged ? 'ON' : 'BYPASS' }}</span>
         </button>
+        <!--
+          Help sits with close rather than with the monitoring chips: those two
+          are about the WINDOW, where DELTA and ON/BYPASS are about the audio.
+          Same reasoning that put DELTA beside ON/BYPASS in the first place.
+        -->
         <span v-if="showEngage" class="win-rule win-rule--tall"></span>
         <button
+          v-if="help"
           type="button"
-          class="win-close flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
+          class="win-icon-btn flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
+          :class="{ 'win-icon-btn--on': helpOpen }"
+          :aria-label="helpOpen ? 'Close help' : 'How to use this effect'"
+          :aria-expanded="String(helpOpen)"
+          :title="helpOpen ? 'Close help' : 'How to use this effect'"
+          @pointerdown.stop
+          @click="helpOpen = !helpOpen"
+        >
+          <Icon name="help" :size="15" :stroke-width="2" />
+        </button>
+        <button
+          type="button"
+          class="win-icon-btn flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
           aria-label="Close window"
           @pointerdown.stop
           @click="requestClose"
@@ -608,8 +646,15 @@ function requestClose() {
 
         It no longer has to cover for Apply, which is pinned in the footer.
       -->
+      <HelpOverlay
+        v-if="help && helpOpen"
+        :help="help"
+        :title="label"
+        @close="helpOpen = false"
+      />
+
       <div
-        v-show="canScrollDown"
+        v-show="canScrollDown && !helpOpen"
         class="win-more absolute left-0 right-0 bottom-0 flex items-end justify-center pointer-events-none"
         aria-hidden="true"
       >
@@ -837,16 +882,23 @@ function requestClose() {
   box-shadow: 0 0 7px var(--color-ok, #5fd39a);
 }
 
-.win-close {
+/* Help and close: the two window-level controls, one shape. */
+.win-icon-btn {
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.55);
   transition: background-color 0.15s ease, color 0.15s ease;
 }
-.win-close:hover {
+.win-icon-btn:hover {
   background: rgba(255, 255, 255, 0.13);
   color: #f2fafc;
 }
-.win-close:focus-visible {
+/* Held open, so the button reads as a toggle rather than as something that
+   fired once. Same white wash the monitoring chips use for their on state. */
+.win-icon-btn--on {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f2fafc;
+}
+.win-icon-btn:focus-visible {
   outline: 2px solid #7fe9f6;
   outline-offset: 2px;
 }
