@@ -14,26 +14,33 @@ import HelpOverlay from './HelpOverlay.vue'
  * close button, the selection readout, Preview and Apply. The plugin's own face
  * arrives through the default slot and is the only part that varies.
  *
- * ── THE HARNESS CHROME CARRIES NO PLUGIN ACCENT, AND THAT IS THE POINT. ──────
- * Every one of these controls used to be rebuilt inside each faceplate, tinted
- * with that plugin's hue: an amber ON pill over an amber face, an amber DELTA
- * beside it, an amber Apply under it. Fifteen hues each used five times over,
- * so the one colour that is supposed to mean "this is the parameter you are
- * moving" also meant "this is the window chrome" — the accent stopped
- * distinguishing anything. The chassis is now neutral graphite end to end and
- * the accent lives only inside the face, where it marks the controls.
+ * ── HUE-LOCKED TITANIUM: THE CHROME SHARES THE FACE'S HUE, WEAKLY ───────────
+ * Every one of these controls used to be rebuilt inside each faceplate at full
+ * accent strength: an amber ON pill over an amber face, an amber DELTA beside
+ * it, an amber Apply under it. Fifteen hues each used five times over, so the
+ * colour that is supposed to mean "this is the parameter you are moving" also
+ * meant "this is the window chrome", and the accent stopped distinguishing
+ * anything.
  *
- * The engage lamp is the one lit thing up here and it is the app's own status
- * green (--color-ok), not the plugin's hue: it reports a state, it does not
- * identify the plugin. Apply is near-white — the highest-contrast element on
- * the window, which is what the primary action of a window should be.
+ * The fix is not a neutral chassis — that was tried, and a hue-free titanium
+ * lit brighter than the face clashes with the colder plugins. The chassis
+ * instead carries the plugin's OWN hue at 5–9%, lifted above the faceplate.
+ * Sharing the hue is what makes it safe: the chrome cannot clash with a face it
+ * is derived from, whatever that face's colour is. The accent is still spent
+ * only once at full strength, inside the face, on the controls.
+ *
+ * The engage lamp is the one thing up here that ignores the hue — it is the
+ * app's status green (--color-ok), because it reports a state rather than
+ * identifying a plugin. Apply is the brightest surface in the window, warmed by
+ * the same hue at 14% so it belongs to this plugin rather than to the app.
  *
  * ── THE FACE IS FLUSH INTO THE CHASSIS. ─────────────────────────────────────
  * No inner radius, no padding, no second border around the face. Separation is
- * carried by the header and footer hairlines alone — 9% white with a 1px black
- * drop line under it — which is enough for the tinted face to read as its own
- * plane against the neutral chrome without spending 14px of chassis on a frame
- * around a frame.
+ * carried by the header and footer hairlines alone — 13% white over a 1px black
+ * drop line — which is enough for the face to read as its own plane against the
+ * lifted chassis without spending 14px of chrome on a frame around a frame. The
+ * hairlines do more work now that the two planes share a hue, which is why they
+ * are the stronger pair rather than the .06 rule this replaced.
  *
  * ── APPLY IS IN THE FOOTER, WHICH MEANS IT CANNOT SCROLL AWAY. ──────────────
  * It used to be the last row of the panel body, so on a short viewport the
@@ -51,8 +58,12 @@ const props = defineProps({
   // window opens; after that the remembered position wins.
   top: { type: Number, default: 90 },
   /**
-   * The plugin's hue. Used for the FACE ONLY — the tinted faceplate behind the
-   * slot. Nothing in the header or the footer reads it.
+   * The plugin's hue.
+   *
+   * Reaches the whole window as the `--face` custom property: the faceplate
+   * takes it at 4–10%, the chassis at 5–9% and Apply at 14%. Every one of those
+   * is weak enough that fifteen hues still read as one product, and derived
+   * from one value so they cannot disagree with each other.
    */
   accent: { type: String, default: '#f5a623' },
 
@@ -60,12 +71,6 @@ const props = defineProps({
   // second lighter.
   brandLead: { type: String, required: true },
   brandTail: { type: String, default: '' },
-  /**
-   * The mono word after the brand rule. Says what KIND of window this is, which
-   * is the one thing the brand mark cannot: "EFFECT" for something that
-   * processes audio, "ANALYZER" for something that only looks at it.
-   */
-  kicker: { type: String, default: 'EFFECT' },
 
   // Override the derived faceplate tint. Only FET Punch does — its steel-blue
   // accent tints too cold through the generic recipe.
@@ -510,6 +515,11 @@ function requestClose() {
     :style="{
       left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px',
       zIndex: z,
+      // One value, read by the chassis, the faceplate and Apply. Passing the
+      // hue as a custom property rather than composing each gradient in JS is
+      // what lets the stylesheet hold the recipe — and what stops three
+      // separately-built colour strings drifting out of agreement.
+      '--face': accent,
       animation: dragging || resizing ? 'none' : 'pluginBounceIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both',
       userSelect: dragging || resizing ? 'none' : 'auto',
     }"
@@ -520,53 +530,53 @@ function requestClose() {
     <!--
       Header (drag handle).
 
-      Three groups under space-between: identity on the left, DELTA in the
-      middle, monitoring and close on the right. DELTA is centred rather than
-      docked beside ON/BYPASS because the two are peers — one says whether the
-      effect is in circuit, the other says which half of it you are listening
-      to — and a recessed tray around the pair made them read as one switch
-      with two positions.
+      A 1fr / auto / 1fr grid rather than space-between: identity left,
+      monitoring and presets centred, window controls right. Space-between put
+      the middle group wherever the two outer groups' widths happened to leave
+      it, so DELTA sat visibly off-centre and moved as a brand mark got longer.
+      A grid centres the middle column against the WINDOW, which is what makes
+      it read as the header's own axis instead of as a gap.
     -->
     <div
-      class="win-header flex items-center justify-between touch-none h-14 shrink-0 pl-5 pr-[14px]"
+      class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
       :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
       @pointercancel="onDragEnd"
     >
-      <!-- Brand mark. No hue dot: the face behind it is already the plugin's
-           colour, and a lit dot up here was the accent's fifth appearance in
-           one window. -->
-      <div class="flex items-center gap-3">
-        <span style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f2fafc">
-          {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.45)">{{ brandTail }}</span></template>
-        </span>
-        <span v-if="kicker" class="win-rule"></span>
-        <span
-          v-if="kicker"
-          style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.4)"
-        >{{ kicker }}</span>
+      <!-- Brand mark, and nothing else. The "EFFECT" kicker went with this
+           layout: it said the same thing on fourteen of fifteen windows, and
+           the centre column is worth more to the controls that live there. -->
+      <span style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
+        {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.45)">{{ brandTail }}</span></template>
+      </span>
+
+      <!--
+        The centre column: monitoring, presets, or both. DELTA sits here rather
+        than beside ON/BYPASS because the two are peers — one says whether the
+        effect is in circuit, the other which half of it you are listening to —
+        and a tray around the pair made them read as one switch with two
+        positions.
+      -->
+      <div class="flex items-center gap-2">
+        <button
+          v-if="showDelta"
+          type="button"
+          class="win-chip"
+          :class="{ 'win-chip--on': delta }"
+          :disabled="deltaDisabled"
+          :aria-pressed="String(delta)"
+          :title="deltaTitle"
+          @pointerdown.stop
+          @click="emit('toggle-delta')"
+        >
+          <span class="win-chip-text">DELTA</span>
+        </button>
+        <slot name="header-center" />
       </div>
 
-      <!-- Optional middle slot (preset selector and the like) -->
-      <slot name="header-center" />
-
-      <button
-        v-if="showDelta"
-        type="button"
-        class="win-chip"
-        :class="{ 'win-chip--on': delta }"
-        :disabled="deltaDisabled"
-        :aria-pressed="String(delta)"
-        :title="deltaTitle"
-        @pointerdown.stop
-        @click="emit('toggle-delta')"
-      >
-        <span class="win-chip-text">DELTA</span>
-      </button>
-
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-center justify-end gap-2.5">
         <button
           v-if="showEngage"
           type="button"
@@ -778,12 +788,18 @@ function requestClose() {
 </template>
 
 <style scoped>
-/* ── The chassis ────────────────────────────────────────────────────────────
-   Brushed titanium: the chrome steps LIGHTER than the face it holds, so the
-   faceplate reads as the recessed part and the shell as the thing it is set
-   into. Neutral end to end — no plugin hue reaches any of this. */
+/* ── The chassis: hue-locked titanium ───────────────────────────────────────
+   The chrome steps LIGHTER than the face it holds, so the faceplate reads as
+   the recessed part and the shell as the thing it is set into — and it carries
+   the plugin's own hue at 5–9% so the lift cannot clash with the face. A
+   hue-FREE titanium was tried at this brightness and does clash: zero chroma
+   next to a cold plugin reads as a different material, not a lighter one. */
 .win-frame {
-  background: linear-gradient(180deg, #242a35, #171b22);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--face, #f5a623) 8%, #2a2c2f),
+    color-mix(in srgb, var(--face, #f5a623) 5%, #1a1b1d)
+  );
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.11);
   font-family: 'Inter', system-ui, sans-serif;
   /*
@@ -800,14 +816,25 @@ function requestClose() {
    they are stronger than the .06 rule they replaced and each carries a 1px
    black drop line under it — a lit edge and a shadow, which is what reads as
    two planes meeting rather than as a border drawn on one. */
+/* The header is the brightest plane in the window — the top of the chassis,
+   catching the most light. One percent more hue than the shell with it. */
 .win-header {
-  background: linear-gradient(180deg, #2b313d, #1d222b);
+  grid-template-columns: 1fr auto 1fr;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--face, #f5a623) 9%, #33353a),
+    color-mix(in srgb, var(--face, #f5a623) 6%, #212325)
+  );
   border-bottom: 1px solid rgba(255, 255, 255, 0.13);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
 .win-footer {
-  background: linear-gradient(180deg, #232832, #1a1e26);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--face, #f5a623) 8%, #2a2c2f),
+    color-mix(in srgb, var(--face, #f5a623) 5%, #1c1e20)
+  );
   border-top: 1px solid rgba(255, 255, 255, 0.13);
   box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.5);
 }
@@ -829,7 +856,7 @@ function requestClose() {
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 28px;
+  height: 30px;
   padding: 0 13px;
   border-radius: 9999px;
   cursor: pointer;
@@ -997,8 +1024,12 @@ function requestClose() {
   border-radius: 10px;
   cursor: pointer;
   white-space: nowrap;
-  background: #eaf6f8;
-  color: #08161a;
+  /* Warmed by the same hue at 14%: still the brightest surface in the window,
+     but belonging to this plugin rather than sitting on it as app chrome. The
+     ink is a near-black carrying the same lean, so the pairing holds on every
+     hue rather than only on the warm ones. */
+  background: color-mix(in srgb, var(--face, #f5a623) 14%, #f4f4f5);
+  color: #14100e;
   font: 600 13px 'Inter', system-ui, sans-serif;
   transition: filter 0.15s ease, opacity 0.15s ease;
 }

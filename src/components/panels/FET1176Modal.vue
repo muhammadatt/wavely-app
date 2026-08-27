@@ -109,7 +109,6 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
     brand-lead="FET"
     brand-tail="PUNCH"
     background="linear-gradient(155deg,#171a1f,#0b0d10 60%)"
-    kicker="FET LIMITING AMPLIFIER"
     :engaged="fetPreview"
     show-preview
     previewable

@@ -111,7 +111,7 @@ function selectMockPreset(name) {
       <div class="relative" @pointerdown.stop>
         <button
           class="cursor-pointer"
-          style="padding:6px 16px;border-radius:6px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);font:600 10.5px 'Inter';letter-spacing:.05em;color:rgba(255,255,255,.7)"
+          style="display:flex;align-items:center;gap:9px;height:30px;padding:0 18px;border:none;border-radius:10px;background:rgba(255,255,255,.11);font:600 11px 'Inter';letter-spacing:.03em;color:#f2f6f7"
           @click="togglePresetMenu"
         >
           {{ selectedMockPreset }} ▾

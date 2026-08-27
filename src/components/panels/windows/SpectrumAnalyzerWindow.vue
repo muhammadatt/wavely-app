@@ -50,7 +50,6 @@ function togglePeakHold() {
     :accent="ACCENT"
     brand-lead="SPECTRUM"
     brand-tail="ANALYZER"
-    kicker=""
     :show-engage="false"
     @close="close"
   >

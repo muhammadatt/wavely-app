@@ -150,7 +150,14 @@ onBeforeUnmount(() => ro?.disconnect())
   z-index: 2;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #12161d, #0d1014);
+  /* Hue-locked like the rest of the window, and sitting between the faceplate
+     it covers and the chassis around it — a page laid on the face rather than
+     a hole cut in it. `--face` comes from the frame, so this needs no prop. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--face, #f5a623) 7%, #171b21),
+    color-mix(in srgb, var(--face, #f5a623) 4%, #101319)
+  );
   animation: helpIn 0.15s ease both;
 }
 
@@ -263,7 +270,10 @@ onBeforeUnmount(() => ro?.disconnect())
   right: 0;
   bottom: 0;
   height: 34px;
-  background: linear-gradient(rgba(13, 16, 20, 0), rgba(13, 16, 20, 0.94));
+  background: linear-gradient(
+    color-mix(in srgb, var(--face, #f5a623) 4%, rgba(16, 19, 25, 0)),
+    color-mix(in srgb, var(--face, #f5a623) 4%, #101319)
+  );
 }
 
 .help-more-pill {
