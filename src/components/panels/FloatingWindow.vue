@@ -649,21 +649,38 @@ function requestClose() {
       </button>
 
       <div class="win-actions flex items-center gap-2">
-        <button
+        <!--
+          The title sits on the WRAPPER, not on the button.
+
+          Chrome and Safari suppress pointer events on a disabled control, so a
+          `title` there never opens — which silently cost the disabled Preview
+          the one thing that justified rendering it at all: the sentence saying
+          why this effect cannot be auditioned live. A plain span still receives
+          hover, so the tooltip works in both states.
+        -->
+        <span
           v-if="showPreview"
-          type="button"
-          class="win-preview"
-          :class="{ 'win-preview--on': previewing }"
-          :disabled="!previewable"
+          class="win-preview-slot"
+          :class="{ 'win-preview-slot--inert': !previewable }"
           :title="previewable
             ? (previewing ? 'Stop preview' : 'Play the selection through this effect')
             : previewHint"
-          :aria-pressed="String(previewing)"
-          @click="emit('toggle-preview')"
         >
-          <Icon :name="previewing ? 'stop' : 'play'" :size="13" />
-          <span class="win-btn-label">{{ previewing ? 'Stop preview' : 'Preview' }}</span>
-        </button>
+          <button
+            type="button"
+            class="win-preview"
+            :class="{ 'win-preview--on': previewing }"
+            :disabled="!previewable"
+            :aria-label="previewable
+              ? (previewing ? 'Stop preview' : 'Preview')
+              : previewHint"
+            :aria-pressed="String(previewing)"
+            @click="emit('toggle-preview')"
+          >
+            <Icon :name="previewing ? 'stop' : 'play'" :size="13" />
+            <span class="win-btn-label">{{ previewing ? 'Stop preview' : 'Preview' }}</span>
+          </button>
+        </span>
 
         <button
           v-if="showApply"
@@ -872,6 +889,11 @@ function requestClose() {
   own text changes width when it is pressed — which shifts Apply sideways under
   the pointer at the exact moment the user might be reaching for it.
 */
+/* Carries the tooltip; contributes nothing to layout of its own. */
+.win-preview-slot {
+  display: flex;
+}
+
 .win-preview {
   display: flex;
   align-items: center;
@@ -1019,6 +1041,18 @@ function requestClose() {
 }
 
 @container win (max-width: 520px) {
+  /*
+    A Preview that cannot preview does not survive the shrink.
+
+    It is shown disabled at full width on purpose — a greyed control with a
+    tooltip teaches that real-time tuning exists on the effects that have it,
+    where omitting it teaches nothing. That argument is entirely about the
+    LABEL. Stripped to a dimmed triangle it teaches nobody anything and reads
+    as a broken button, which is exactly how it was reported.
+  */
+  .win-preview-slot--inert {
+    display: none;
+  }
   .win-preview {
     min-width: 0;
     padding: 0;
