@@ -43,16 +43,46 @@ function withStorage({ stored = null, throws = false }, fn) {
   }
 }
 
-test('the default view is all overlays off', () => {
+test('the default view is the trace alone', () => {
+  // `removed` is the only one that defaults on: it is the plot, not an overlay
+  // of it. The other four are context folded in around it.
   withStorage({}, () => {
-    assert.deepEqual(loadOverlays(), { grid: false, history: false, spectrum: false })
+    assert.deepEqual(loadOverlays(), {
+      grid: false, history: false, spectrum: false, margin: false, removed: true,
+    })
+  })
+})
+
+test('an ABSENT key takes its default, a stored false does not', () => {
+  // ⚠ The distinction only matters for a key whose default is on, and getting
+  // it wrong is silent: `=== true` alone cannot tell "nobody has written this
+  // yet" from "the user switched it off", and for `removed` those are opposite
+  // answers. A preference file written before an overlay existed would have
+  // started it off rather than at its intended state.
+  withStorage({ stored: '{"grid":true}' }, () => {
+    assert.equal(loadOverlays().removed, true, 'absent means default')
+  })
+  withStorage({ stored: '{"removed":false}' }, () => {
+    assert.equal(loadOverlays().removed, false, 'stored false must survive')
+  })
+})
+
+test('a preference stored under `spectrum` still means the spectrum', () => {
+  // ⚠ `margin` was briefly a RENAME of `spectrum`, and that was wrong — the two
+  // answer different questions and both are switches now. Anyone who had the
+  // spectrum on gets it back.
+  withStorage({ stored: '{"spectrum":true}' }, () => {
+    assert.equal(loadOverlays().spectrum, true)
+    assert.equal(loadOverlays().margin, false)
   })
 })
 
 test('a stored preference round-trips', () => {
   withStorage({}, () => {
-    saveOverlays({ grid: true, history: false, spectrum: true })
-    assert.deepEqual(loadOverlays(), { grid: true, history: false, spectrum: true })
+    saveOverlays({ grid: true, history: false, spectrum: false, margin: true, removed: false })
+    assert.deepEqual(loadOverlays(), {
+      grid: true, history: false, spectrum: false, margin: true, removed: false,
+    })
   })
 })
 
@@ -60,8 +90,10 @@ test('only exactly true counts, so a half-written entry degrades to off', () => 
   // Coercing instead would make `{"grid":"false"}` — a plausible thing to find
   // in a hand-edited entry — read as ON, which is the wrong direction for a
   // preference whose default is "show nothing but the removal".
-  withStorage({ stored: '{"grid":"false","history":1,"spectrum":true}' }, () => {
-    assert.deepEqual(loadOverlays(), { grid: false, history: false, spectrum: true })
+  withStorage({ stored: '{"grid":"false","history":1,"margin":true,"removed":"yes"}' }, () => {
+    const v = loadOverlays()
+    assert.deepEqual(
+      [v.grid, v.history, v.margin, v.removed], [false, false, true, false])
   })
 })
 
