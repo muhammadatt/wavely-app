@@ -16,7 +16,6 @@ import Knob from '../knobs/Knob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -129,7 +128,21 @@ async function applyAndClose() {
     brand-lead="DE"
     brand-tail="ESSER"
     :engaged="preview"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!preview || !envelopeValid || treatedCount === 0"
+    :apply-disabled-hint="!preview
+      ? 'Turn the de-esser on to apply it'
+      : !hasAnalysis
+        ? 'Analyse the selection first'
+        : isStale
+          ? 'Selection moved outside the analysed region — analyse again'
+          : 'No events are above their ceiling — lower it to treat some'"
     @toggle-engaged="togglePreview"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
@@ -296,29 +309,6 @@ async function applyAndClose() {
         @toggle="tuningOpen = !tuningOpen"
       />
 
-      <div class="mt-[16px]">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#0b1a26"
-          :met="hasSelection"
-          message="Make a selection to de-ess"
-          label="Apply De-Essing"
-          :disabled="!preview || !envelopeValid || treatedCount === 0"
-          :disabled-hint="!preview
-            ? 'Turn the de-esser on to apply it'
-            : !hasAnalysis
-              ? 'Analyse the selection first'
-              : isStale
-                ? 'Selection moved outside the analysed region — analyse again'
-                : 'No events are above their ceiling — lower it to treat some'"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
-      </div>
     </div>
   </FloatingWindow>
 </template>

@@ -9,7 +9,6 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -17,7 +16,7 @@ const {
   schepsCharacter, schepsSquash, schepsMix, schepsOutput,
   schepsAutoTrim, schepsAutoTrimBusy, schepsWetTrimDb,
   schepsPreview, schepsReduction, schepsInputLevels, schepsOutputLevels,
-  hasSelection, togglePreview, syncCharacter, syncSquash, syncMix, syncOutput,
+  togglePreview, syncCharacter, syncSquash, syncMix, syncOutput,
   toggleAutoTrim, refreshAutoTrim, apply, teardown, closeModal,
 } = useScheps()
 
@@ -152,7 +151,15 @@ async function applyAndClose() {
     brand-lead="SCHEPS"
     brand-tail="PARALLEL"
     :engaged="schepsPreview"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!schepsPreview"
+    apply-disabled-hint="Turn Scheps Parallel on to apply it"
     @toggle-engaged="togglePreview"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <div class="px-[26px] pt-[20px] pb-[26px]">
@@ -303,24 +310,6 @@ async function applyAndClose() {
         second Pultec puts the low end back, and the whole squashed copy is
         blended under the original.
       </p>
-
-      <div class="mt-[16px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#1a0f1f"
-          :met="hasSelection"
-          message="Make a selection to blend in a parallel channel"
-          label="Apply Scheps Parallel"
-          :disabled="!schepsPreview"
-          disabled-hint="Turn Scheps Parallel on to apply it"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
-      </div>
     </div>
   </FloatingWindow>
 </template>

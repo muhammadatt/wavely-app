@@ -10,7 +10,6 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import ClipperScope from '../meters/ClipperScope.vue'
 import { lampFraction } from '../meters/ballistics.js'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -260,7 +259,6 @@ const PANEL_W = 900
  * the instrument.
  */
 const FACEPLATE = 'linear-gradient(155deg,#2b2320,#191310 62%)'
-const HEADER = 'linear-gradient(#372c26,#221a16)'
 
 /**
  * ⚠ THE STRIP'S TWO LIVE READINGS ARE DAMPED IN THE COMPOSABLE, beside the loop
@@ -386,44 +384,25 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     brand-lead="SOFT"
     brand-tail="CLIPPER"
     :background="FACEPLATE"
-    :header-background="HEADER"
     :engaged="clipperPreview"
+    show-delta
+    :delta="clipperDelta"
+    :delta-disabled="!clipperPreview"
+    delta-title="Hear only what is being removed — the harmonics the clipper is generating, on their own. Monitoring only: Apply always renders the processed audio."
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!clipperPreview"
+    apply-disabled-hint="Turn Soft Clipper on to apply it"
     resizable
     @update:height-delta="heightDelta = $event"
     @toggle-engaged="togglePreview"
+    @toggle-delta="toggleDelta"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
-    <!-- Delta sits beside ON/BYPASS because it is the same kind of control:
-         both change what reaches the speakers and neither changes the file.
-         Putting it down among the parameters would have implied it was one. -->
-    <template #header-center>
-      <button
-        class="flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-opacity disabled:cursor-default"
-        :style="{
-          background: clipperDelta ? `color-mix(in srgb, ${ACCENT} 26%, transparent)` : 'transparent',
-          borderColor: clipperDelta
-            ? `color-mix(in srgb, ${ACCENT} 55%, transparent)`
-            : 'rgba(255,255,255,.14)',
-          opacity: clipperPreview ? 1 : 0.4,
-        }"
-        :disabled="!clipperPreview"
-        :aria-pressed="String(clipperDelta)"
-        title="Hear only what is being removed — the harmonics the clipper is generating, on their own. Monitoring only: Apply always renders the processed audio."
-        @pointerdown.stop
-        @click="toggleDelta"
-      >
-        <span
-          :style="{
-            font: `700 9px 'JetBrains Mono',monospace`,
-            letterSpacing: '.14em',
-            color: clipperDelta
-              ? `color-mix(in srgb, ${ACCENT} 55%, #ffffff)`
-              : 'rgba(255,255,255,.45)',
-          }"
-        >DELTA</span>
-      </button>
-    </template>
-
     <div style="padding:20px 26px 24px;display:flex;flex-direction:column;gap:16px">
       <!-- ── Readout strip ────────────────────────────────────────────────
            Right-aligned above the display: three readings about the stage, in
@@ -719,24 +698,6 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
           </span>
         </div>
 
-      </div>
-
-      <div class="mt-[12px] pt-[12px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#0c1218"
-          :met="hasSelection"
-          message="Make a selection to process"
-          label="Apply soft clipper"
-          :disabled="!clipperPreview"
-          disabled-hint="Turn Soft Clipper on to apply it"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
       </div>
     </div>
   </FloatingWindow>

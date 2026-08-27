@@ -5,7 +5,6 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { isBandActive } from '../../audio/eqBands.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 import VoiceRxView from './eq/VoiceRxView.vue'
 
 /**
@@ -129,9 +128,19 @@ async function applyAndClose() {
     brand-lead="VOICE"
     brand-tail="RX"
     :engaged="vox.eqPreview.value"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!vox.eqPreview.value || activeBandCount === 0"
+    :apply-disabled-hint="activeBandCount === 0
+      ? 'Apply a suggestion, or move a knob, before applying'
+      : 'Turn VoiceRx on to apply it'"
     resizable
     @update:height-delta="heightDelta = $event"
     @toggle-engaged="vox.togglePreview()"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <div class="px-[22px] pt-[18px] pb-[22px]">
@@ -375,26 +384,6 @@ async function applyAndClose() {
           title="Move these corrections into the EQ, where you can shape them further"
           @click="vox.sendToEq()"
         >TRANSFER TO EQ →</button>
-      </div>
-
-      <div class="mt-[16px] pt-[14px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#0a1410"
-          :met="vox.hasSelection.value"
-          message="Make a selection to apply these to"
-          label="Apply corrections"
-          :disabled="!vox.eqPreview.value || activeBandCount === 0"
-          :disabled-hint="activeBandCount === 0
-            ? 'Apply a suggestion, or move a knob, before applying'
-            : 'Turn VoiceRx on to apply it'"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
       </div>
     </div>
   </FloatingWindow>

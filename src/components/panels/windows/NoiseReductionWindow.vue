@@ -3,11 +3,10 @@ import { ref } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import Knob from '../../knobs/Knob.vue'
-import ApplyAction from '../../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
-const { hasSelection, showToast } = useEditorState()
+const { showToast } = useEditorState()
 
 const ACCENT = '#a78bfa'
 
@@ -36,6 +35,10 @@ function percent(v) {
     brand-lead="NOISE"
     brand-tail="REDUCE"
     :show-engage="false"
+    show-preview
+    :previewable="false"
+    show-apply
+    @apply="showToast('Spot noise reduction via DeepFilterNet3 — coming in Sprint 2')"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
       <div class="flex items-start justify-center gap-[38px]">
@@ -60,20 +63,6 @@ function percent(v) {
         DeepFilterNet3 runs on the server. Higher strength removes more noise
         but risks thinning the voice.
       </p>
-
-      <div class="mt-[18px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          :previewable="false"
-          :accent="ACCENT"
-          text-color="#150d28"
-          :met="hasSelection"
-          message="Make a selection to reduce noise"
-          label="Apply Noise Reduction"
-          @apply="showToast('Spot noise reduction via DeepFilterNet3 — coming in Sprint 2')"
-        />
-      </div>
     </div>
   </FloatingWindow>
 </template>

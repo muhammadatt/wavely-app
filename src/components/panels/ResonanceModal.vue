@@ -16,7 +16,6 @@ import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -120,40 +119,28 @@ async function applyAndClose() {
     brand-lead="RESO"
     brand-tail="TAME"
     :engaged="resPreview"
+    show-delta
+    :delta="resDelta"
+    :delta-disabled="!resPreview"
+    delta-title="Hear only what is being removed. Monitoring only — Apply always renders the processed audio."
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!resPreview"
+    apply-disabled-hint="Turn ResoTame on to apply it"
     resizable
     @update:height-delta="heightDelta = $event"
     @toggle-engaged="togglePreview"
+    @toggle-delta="toggleDelta"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <!-- Delta sits beside ON/BYPASS because it is the same kind of control:
          both change what reaches the speakers and neither changes the file.
          Putting it down among the parameters would have implied it was one. -->
     <template #header-center>
-      <button
-        class="flex items-center gap-2 px-3 py-1.5 rounded-full border
-               border-[rgba(255,255,255,.14)] cursor-pointer transition-opacity
-               disabled:cursor-default"
-        :class="{ 'opacity-40': !resPreview }"
-        :style="resDelta ? {
-          background: `color-mix(in srgb, ${ACCENT} 26%, transparent)`,
-          borderColor: `color-mix(in srgb, ${ACCENT} 55%, transparent)`,
-        } : null"
-        :disabled="!resPreview"
-        :aria-pressed="String(resDelta)"
-        title="Hear only what is being removed. Monitoring only — Apply always renders the processed audio."
-        @pointerdown.stop
-        @click="toggleDelta"
-      >
-        <span
-          :style="{
-            font: `700 9px 'JetBrains Mono',monospace`,
-            letterSpacing: '.14em',
-            color: resDelta
-              ? `color-mix(in srgb, ${ACCENT} 55%, #ffffff)`
-              : 'var(--color-text-muted)',
-          }"
-        >DELTA</span>
-      </button>
       <!-- An override is a thing you forget you turned on. The two references
            disagree by an order of magnitude about what Selectivity measures, so
            a panel running the non-shipping one and not saying so is a panel
@@ -319,24 +306,6 @@ async function applyAndClose() {
               :disabled="!resPreview"
             />
           </div>
-      </div>
-
-      <div class="mt-[14px]">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#0c1f14"
-          :met="hasSelection"
-          message="Make a selection to tame resonances"
-          label="Apply Resonance Suppression"
-          :disabled="!resPreview"
-          disabled-hint="Turn ResoTame on to apply it"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
       </div>
     </div>
   </FloatingWindow>

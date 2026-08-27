@@ -7,14 +7,13 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aR37,
   la2aAutoMakeup, la2aAutoMakeupBusy,
-  la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels, hasSelection,
+  la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
   syncR37, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
 } = useLA2A()
@@ -96,7 +95,15 @@ function selectMockPreset(name) {
     brand-lead="OPTO"
     brand-tail="SMOOTH"
     :engaged="la2aPreview"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!la2aPreview"
+    apply-disabled-hint="Turn OptoSmooth on to apply it"
     @toggle-engaged="togglePreview"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <!-- Preset selector — visual mockup only, not yet wired to real presets -->
@@ -104,20 +111,20 @@ function selectMockPreset(name) {
       <div class="relative" @pointerdown.stop>
         <button
           class="cursor-pointer"
-          style="padding:6px 16px;border-radius:6px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);font:600 10.5px 'Inter';letter-spacing:.05em;color:#e8d4b4"
+          style="display:flex;align-items:center;gap:9px;height:30px;padding:0 18px;border:none;border-radius:10px;background:rgba(255,255,255,.11);font:600 11px 'Inter';letter-spacing:.03em;color:#f2f6f7"
           @click="togglePresetMenu"
         >
           {{ selectedMockPreset }} ▾
         </button>
         <div v-if="presetMenuOpen"
              class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 min-w-[150px] rounded-lg overflow-hidden z-10"
-             style="background:#221f1a;border:1px solid rgba(255,255,255,.08);box-shadow:0 12px 30px rgba(0,0,0,.5)"
+             style="background:#1d222b;border:1px solid rgba(255,255,255,.1);box-shadow:0 12px 30px rgba(0,0,0,.5)"
         >
           <button
             v-for="name in MOCK_PRESETS" :key="name"
             class="w-full text-left px-3.5 py-2 border-none cursor-pointer transition-colors"
-            :style="{ background: name === selectedMockPreset ? 'rgba(245,166,35,.14)' : 'transparent' }"
-            style="font:600 11px 'Inter';color:#e8d4b4"
+            :style="{ background: name === selectedMockPreset ? 'rgba(255,255,255,.12)' : 'transparent' }"
+            style="font:600 11px 'Inter';color:#eaf6f8"
             @click="selectMockPreset(name)"
           >
             {{ name }}
@@ -225,24 +232,6 @@ function selectMockPreset(name) {
             />
           </div>
         </div>
-      </div>
-
-      <div class="mt-3">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#1a1310"
-          :met="hasSelection"
-          message="Make a selection to compress"
-          label="Apply compression"
-          :disabled="!la2aPreview"
-          disabled-hint="Turn OptoSmooth on to apply it"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
       </div>
     </div>
   </FloatingWindow>

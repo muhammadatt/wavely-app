@@ -6,7 +6,6 @@ import FloatingWindow from '../FloatingWindow.vue'
 import Knob from '../../knobs/Knob.vue'
 import DeviceSlider from '../../knobs/DeviceSlider.vue'
 import LevelMeter from '../../meters/LevelMeter.vue'
-import ApplyAction from '../../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -14,7 +13,7 @@ const {
   vsDrive, vsWetDry, vsBias, vsSoftness,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
-  vsPreview, vsInputLevels, vsOutputLevels, hasSelection,
+  vsPreview, vsInputLevels, vsOutputLevels,
   togglePreview,
   syncDrive, syncWetDry, syncBias, syncSoftness,
   syncLowCrossover, syncMidCrossover,
@@ -60,7 +59,15 @@ async function applyAndClose() {
     brand-lead="TUBE"
     brand-tail="SAT"
     :engaged="vsPreview"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!vsPreview"
+    apply-disabled-hint="Turn TubeSat on to apply it"
     @toggle-engaged="togglePreview"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <div class="px-[22px] pt-[22px] pb-[24px]">
@@ -158,24 +165,6 @@ async function applyAndClose() {
                   :disabled="!vsPreview" />
           </div>
         </div>
-      </div>
-
-      <div class="mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#2b1006"
-          :met="hasSelection"
-          message="Make a selection to saturate"
-          label="Apply Tube Saturation"
-          :disabled="!vsPreview"
-          disabled-hint="Turn TubeSat on to apply it"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
       </div>
     </div>
   </FloatingWindow>
