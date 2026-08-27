@@ -1423,6 +1423,14 @@ export class ResonanceKernel {
   /**
    * Process one block.
    *
+   * ⚠ THE COST OF THIS IS BURSTY AND THE AVERAGE HIDES IT. Hop is 512, so three
+   * 128-sample quanta in four do nothing and the fourth does the whole frame:
+   * measured at median 0.001 ms against max 1.617, which is 56% of the 2.90 ms
+   * quantum deadline from one mono instance. Open, not fixed — the analysis
+   * reads frame N and modifies its spectrum before the inverse transform in the
+   * same quantum, so spreading it costs either latency or a stale control
+   * signal. Routes, figures and the profile split are in CLAUDE.md.
+   *
    * @param {Float32Array[]} inputChannels
    * @param {Float32Array[]} outputChannels
    * @param {number} n
