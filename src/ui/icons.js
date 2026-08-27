@@ -100,6 +100,10 @@ export const ICONS = {
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
   close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
   window: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/>',
+  // Three strokes, like every other glyph here: ring, hook, dot. The dot is a
+  // zero-length line so the round cap draws it — a filled circle would be the
+  // only fill in a set that is stroked throughout.
+  help: '<circle cx="12" cy="12" r="9.5"/><path d="M9.2 9.3a2.9 2.9 0 015.7.7c0 1.9-2.9 2.5-2.9 4.2"/><line x1="12" y1="17.4" x2="12" y2="17.4"/>',
 }
 
 export function getIcon(name) {

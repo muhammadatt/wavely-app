@@ -57,17 +57,11 @@ function togglePeakHold() {
       <!-- Freeze belongs in the header rather than with the settings below: it
            is the one control you reach for while looking at the plot, usually
            the instant something interesting goes past. -->
+      <!-- Neutral like every other control in the chrome: this is a monitoring
+           state, and the accent belongs to the plot below. -->
       <button
-        class="px-3 py-1.5 rounded-full border cursor-pointer transition-colors"
-        :style="{
-          background: frozen ? `color-mix(in srgb, ${ACCENT} 26%, transparent)` : 'transparent',
-          borderColor: frozen
-            ? `color-mix(in srgb, ${ACCENT} 55%, transparent)`
-            : 'rgba(255,255,255,.14)',
-          font: `700 9px 'JetBrains Mono',monospace`,
-          letterSpacing: '.16em',
-          color: frozen ? `color-mix(in srgb, ${ACCENT} 60%, #ffffff)` : 'rgba(255,255,255,.45)',
-        }"
+        class="freeze-chip px-3 py-1.5 rounded-full border cursor-pointer transition-colors"
+        :class="{ 'freeze-chip--on': frozen }"
         :aria-pressed="String(frozen)"
         title="Hold the display where it is, to read a moment that has gone past"
         @pointerdown.stop
@@ -139,3 +133,29 @@ function togglePeakHold() {
     </div>
   </FloatingWindow>
 </template>
+
+<style scoped>
+/* Matches the harness's own monitoring chips: off is an outline, on is a raised
+   white wash. A value step rather than a colour change, so the plugin hue never
+   reaches the chrome. */
+.freeze-chip {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.45);
+  font: 700 9px 'JetBrains Mono', monospace;
+  letter-spacing: 0.16em;
+}
+.freeze-chip:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+.freeze-chip--on {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #eaf6f8;
+}
+.freeze-chip--on:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #eaf6f8;
+}
+</style>

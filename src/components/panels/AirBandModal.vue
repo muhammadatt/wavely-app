@@ -7,13 +7,12 @@ import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import Knob from '../knobs/Knob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
-import ApplyAction from '../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
   airBandAir, airBandOutput, airBandPreview, airBandInputLevels, airBandOutputLevels,
-  hasSelection, togglePreview, syncAir, syncOutput, apply, teardown, closeModal,
+  togglePreview, syncAir, syncOutput, apply, teardown, closeModal,
 } = useAirBand()
 
 const { state } = useEditorState()
@@ -121,7 +120,15 @@ async function applyAndClose() {
     brand-lead="AIR"
     brand-tail="BOOST"
     :engaged="airBandPreview"
+    show-preview
+    previewable
+    :previewing="state.isPlaying"
+    show-apply
+    :apply-disabled="!airBandPreview"
+    apply-disabled-hint="Turn AirBoost on to apply it"
     @toggle-engaged="togglePreview"
+    @toggle-preview="togglePlayback"
+    @apply="applyAndClose"
     @close="close"
   >
     <div class="px-[26px] pt-[22px] pb-[26px]">
@@ -195,24 +202,6 @@ async function applyAndClose() {
         Maag-style air lift — a wide shelf shaped by five overlapping bells.
         Adds presence without the harshness of a narrow high boost.
       </p>
-
-      <div class="mt-[16px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          previewable
-          :previewing="state.isPlaying"
-          :accent="ACCENT"
-          text-color="#08171c"
-          :met="hasSelection"
-          message="Make a selection to add air"
-          label="Apply AirBoost"
-          :disabled="!airBandPreview"
-          disabled-hint="Turn AirBoost on to apply it"
-          @toggle-preview="togglePlayback"
-          @apply="applyAndClose"
-        />
-      </div>
     </div>
   </FloatingWindow>
 </template>

@@ -3,11 +3,10 @@ import { ref } from 'vue'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import Knob from '../../knobs/Knob.vue'
-import ApplyAction from '../../ui/ApplyAction.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
-const { hasSelection, showToast } = useEditorState()
+const { showToast } = useEditorState()
 
 const ACCENT = '#fb7185'
 
@@ -34,6 +33,11 @@ function formatSeconds(v) {
     brand-lead="SILENCE"
     brand-tail="TRIM"
     :show-engage="false"
+    show-preview
+    :previewable="false"
+    show-apply
+    apply-label="Remove silence"
+    @apply="showToast('Remove silence coming soon')"
   >
     <div class="px-[26px] pt-[22px] pb-[24px]">
       <div class="flex items-start justify-center gap-[38px]">
@@ -59,20 +63,6 @@ function formatSeconds(v) {
         that last longer than
         <span class="font-['JetBrains_Mono']" :style="{ color: ACCENT }">{{ formatSeconds(minLengthTenths) }} s</span>.
       </p>
-
-      <div class="mt-[18px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
-        <ApplyAction
-          size="md"
-          show-preview
-          :previewable="false"
-          :accent="ACCENT"
-          text-color="#2b0d13"
-          :met="hasSelection"
-          message="Make a selection to remove silence"
-          label="Remove Silence"
-          @apply="showToast('Remove silence coming soon')"
-        />
-      </div>
     </div>
   </FloatingWindow>
 </template>

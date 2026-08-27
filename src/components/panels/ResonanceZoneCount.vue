@@ -10,14 +10,24 @@ import { removeBoundary, splitZone } from '../meters/resonanceZoneEdit.js'
 /**
  * How many zones there are, and the pair that changes it.
  *
- * IT LIVES BESIDE THE PLOT, in the column the output meter used to have. Two
- * reasons, and the first is the stronger: this is the one zone control that is
- * not about a particular zone, so sitting inside a row that shows ONE zone's
- * identity and settings was a category error — the count was reading as
- * something belonging to ZONE 3 because it was on the same plate. Beside the
- * plot it sits next to the thing it actually describes, which is the row of
- * columns, not the knobs. The second is height: that column already exists and
- * was carrying a meter, so the count costs the panel nothing.
+ * IT SITS IN THE DISPLAY'S HEADER ROW, BESIDE THE DEEPEST-CUT FIGURE. It began
+ * inside the per-zone row, which was a category error — the count is the one
+ * zone control that is not about a particular zone, and on a plate showing
+ * ZONE 3's identity and settings it read as belonging to zone 3. Beside the
+ * plot fixed that and cost the plot its WIDTH: a column carrying a 32 px
+ * numeral, two buttons, FIT and a caption is ~90 px of horizontal extent spent
+ * on a control nobody turns twice, on a plot whose axis is frequency and which
+ * therefore wants every pixel of width it can get.
+ *
+ * In the header row it costs neither. That row is ~42 px tall because of the
+ * 30 px reading at its left, and this is one 22 px line, so it fits in space
+ * the numeral already holds — which is why it is laid out horizontally, and
+ * why FIT stacks over its own caption rather than sitting beside it. It also
+ * lands next to the thing it actually counts, which is the row of zone columns
+ * on the plot directly below.
+ *
+ * ⚠ NOTHING IN HERE MAY GROW A SECOND LINE. The row's height is the numeral's,
+ * and anything taller pushes the whole display down.
  *
  * NOT A ROW OF NUMBERS 1..6 WITH THE CURRENT COUNT LIT. That was the first
  * version, borrowed from the reference design, and it read as a selector for
@@ -85,7 +95,7 @@ const AXIS = { w: 600, minHz: 20, maxHz: 20000 }
  * once. Putting it in the per-zone strip would read as an operation on ZONE 3,
  * which is the category error the count row already had once.
  */
-const fitLabel = computed(() => (props.busy ? 'FITTING' : 'FIT TO VOICE'))
+const fitLabel = computed(() => (props.busy ? 'FITTING' : 'VOICE FIT'))
 
 /**
  * Why FIT cannot be pressed, or null.
@@ -137,57 +147,54 @@ function removeZone() {
 </script>
 
 <!--
-  Utilities rather than inline style, with two deliberate exceptions below.
-
-  `leading-none` on the buttons and `leading-[normal]` on the readout are both
-  carrying their weight. These were `font:` shorthands, and that property resets
-  line-height — to `1` where it was written `14px/1`, and to `normal` where no
-  slash appeared. Preflight sets 1.5 on the root, so dropping the leading
-  entirely does not preserve the layout: it makes the 24 px numeral's box 36 px
-  instead of ~28, which moves both buttons.
+  Utilities rather than inline style, and every `leading-none` here is carrying
+  its weight. These were `font:` shorthands, and that property resets
+  line-height. Preflight sets 1.5 on the root, so dropping the leading does not
+  preserve the layout — and in this row that is not a nicety: 1.5 on the numeral
+  alone makes this taller than the reading it sits beside, which sets the header
+  row's height and pushes the whole display down.
 -->
 <template>
-  <div class="flex flex-col items-center" :class="{ 'opacity-40': disabled }">
-          <div class="text-center mb-1">
-        <div class="font-mono text-[32px] font-bold leading-[normal] text-text-softer">
-          {{ zones.length }}</div>
-        <div class="font-mono text-[7.5px] font-semibold leading-[normal] tracking-[.1em] text-text-faint">
-          {{ zones.length === 1 ? 'ZONE' : 'ZONES' }}</div>
-      </div>
+  <div class="flex flex-col items-center">
+  <div class="flex items-center gap-[16px] shrink-0" :class="{ 'opacity-40': disabled }">
+    <!-- THE TWO ACCENT MIXES ARE RESOLVED TO LITERALS, which is what lets
+         these buttons be classes rather than a bound style: a utility is a
+         static string, and color-mix() over a runtime prop is not.
 
-    <div class="flex items-center gap-[8px] mt-[6px]">
-      <!-- THE TWO ACCENT MIXES ARE RESOLVED TO LITERALS, which is what lets
-           this button be classes rather than a bound style: a utility is a
-           static string, and color-mix() over a runtime prop is not.
+         Both are exact rather than eyeballed, computed against ResoTame's
+         #8de0a8. `color-mix(in srgb, X 20%, transparent)` is premultiplied,
+         so it resolves to the accent at alpha 0.2 — #8de0a833, since 0x33 is
+         51/255 = 0.2 — and `X 60%, #ffffff` interpolates each channel in
+         gamma-encoded sRGB to #bbeccb.
 
-           Both are exact rather than eyeballed, computed against ResoTame's
-           #8de0a8. `color-mix(in srgb, X 20%, transparent)` is premultiplied,
-           so it resolves to the accent at alpha 0.2 — #8de0a833, since 0x33 is
-           51/255 = 0.2 — and `X 60%, #ffffff` interpolates each channel in
-           gamma-encoded sRGB to #bbeccb.
+         THE COST IS THAT THIS NO LONGER FOLLOWS THE PANEL. ResoTame's accent
+         is a constant today, so nothing is lost; if the panel is ever
+         re-tinted, or this control is reused under a different one, these two
+         literals are what will not move with it. -->
+    <span class="ml-[4px] font-mono text-[9px] font-semibold leading-none tracking-[.1em] text-text-faint">
+        {{ zones.length === 1 ? 'ZONE' : 'ZONES' }}</span>
 
-           THE COST IS THAT THIS NO LONGER FOLLOWS THE PANEL. ResoTame's accent
-           is a constant today, so nothing is lost; if the panel is ever
-           re-tinted, or this control is reused under a different one, these two
-           literals are what will not move with it. -->
-                 <button
-        class="w-[23px] h-[23px] rounded-[5px] font-mono text-[14px] font-bold leading-none
-               bg-surface-2 text-text-softer hover:bg-[#8de0a833] hover:text-[#bbeccb]
-               cursor-pointer disabled:cursor-default disabled:opacity-30"
-        :disabled="disabled || !canMerge"
-        title="Merge this zone into its neighbour"
-        aria-label="Merge this zone into its neighbour"
-        @click="removeZone"
-      >−</button>
-      <button
-        class="w-[23px] h-[23px] rounded-[5px] font-mono text-[14px] font-bold leading-none
-               bg-surface-2 text-text-softer hover:bg-[#8de0a833] hover:text-[#bbeccb]
-               cursor-pointer disabled:cursor-default disabled:opacity-30"
-        :disabled="disabled || !canSplit"
-        title="Split this zone in two"
-        aria-label="Split this zone in two"
-        @click="addZone"
-      >+</button>
+
+    <div class="flex gap-[8px]">    
+    <button
+      class="w-[22px] h-[20px] rounded-[5px] font-mono text-[14px] font-bold leading-none
+             bg-surface-2 text-text-softer hover:bg-[#8de0a833] hover:text-[#bbeccb]
+             cursor-pointer disabled:cursor-default disabled:opacity-30"
+      :disabled="disabled || !canMerge"
+      title="Merge this zone into its neighbour"
+      aria-label="Merge this zone into its neighbour"
+      @click="removeZone"
+    >−</button>
+
+    <!-- Fixed width so the buttons do not step sideways between ZONE and
+         ZONES, which on a horizontal row is a visible twitch rather than the
+         invisible one it was in a centred column. Sized to the longer of the
+         two strings and no wider: this row shares 608 px with two readouts,
+         and the tightest case — DELTA lit, FIT idle, several resonances
+         tracked — has nothing to spare. -->
+    <div class="w-[24px] text-center whitespace-nowrap">
+      <span class="font-mono text-[22px] font-bold leading-none text-text-softer">
+        {{ zones.length }}</span>
     </div>
 
     <!-- The boundaries this panel ships are the MALE region table applied to
@@ -198,16 +205,21 @@ function removeZone() {
          contains the fundamental. A male narrator reproduces the shipped UPPER
          boundaries exactly, so nothing already listened to moves. See
          resonanceZonePlacement.js. -->
-    <button
-      class="mt-[10px] px-[7px] py-[3px] rounded-[5px] font-mono text-[7.5px] font-semibold
-             leading-[normal] tracking-[.1em] bg-surface-2 text-text-softer
-             hover:bg-[#8de0a833] hover:text-[#bbeccb]
-             cursor-pointer disabled:cursor-default disabled:opacity-30"
-      :disabled="fitDisabled"
-      title="Measure the voice and place the zone boundaries from its pitch"
-      @click="emit('fit')"
-    >{{ fitLabel }}</button>
-    <div class="mt-[3px] font-mono text-[7px] leading-[normal] tracking-[.06em] text-text-faint">
-      {{ fitCaption }}</div>
+    <!-- FIT over its caption, mirroring the overlay switches at the other end
+         of the row, which stack under their own summary line for the same
+         reason: side by side these two are ~160 px of a row that has two
+         readouts to fit as well. -->
+    <span class="flex flex-col items-center justify-center gap-[3px]">
+      <button
+        class="px-[7px] py-[3px] rounded-[5px] font-mono text-[9px] font-semibold
+               leading-none tracking-[.1em] bg-surface-2 text-text-softer
+               hover:bg-[#8de0a833] hover:text-[#bbeccb]
+               cursor-pointer disabled:cursor-default disabled:opacity-30"
+        :disabled="fitDisabled"
+        title="Measure the voice and place the zone boundaries from its pitch"
+        @click="emit('fit')"
+      >{{ fitLabel }}</button>
+
+    </span>
   </div>
 </template>
