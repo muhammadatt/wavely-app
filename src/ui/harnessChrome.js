@@ -1,23 +1,29 @@
 /**
  * Which way the harness chassis is lit.
  *
- *   ?harnessChrome=dark                              one page load
- *   localStorage.setItem('harnessChrome', 'dark')    until cleared
+ *   ?harnessChrome=light                              one page load
+ *   localStorage.setItem('harnessChrome', 'light')    until cleared
  *
  * Two designs, one hue recipe. Both mix the plugin's own accent into the
- * chrome at 5–9% — that part is settled, and it is what stops the chassis
- * clashing with any faceplate. What is NOT settled is which side of the face
- * the chrome should sit on:
+ * chrome at 5–9%, which is what stops the chassis clashing with any faceplate.
+ * They differ only in which side of the face the chrome sits on:
  *
  *   light (5a)  chrome lifted ABOVE the face, so the face reads as the
  *               recessed part and the shell as the thing it is set into
  *   dark  (5b)  chrome dropped BELOW the face, so the face is the only lit
  *               surface in the window and the chassis is the room around it
  *
- * They are the same window at two exposures, and no measurement decides
- * between them — it is a question about what the eye goes to first. That needs
- * a person, the real app, all fifteen hues, and a way to flip without a
- * rebuild. Same reasoning and same shape as `voicerx/baselineOverride.js`.
+ * ⚠ 5b SHIPS. That was decided by looking at both in the real app across the
+ * hue circle, which is the only way it could be decided: they are the same
+ * window at two exposures, and no measurement distinguishes them — the
+ * question is what the eye goes to first, and the answer is that it should be
+ * the faceplate rather than the frame around it.
+ *
+ * 5a stays reachable because the comparison is worth being able to re-run
+ * whenever a faceplate is redesigned — a panel tuned against one exposure can
+ * read quite differently against the other, which is exactly how FET Punch's
+ * inherited faceplate was caught. Same reasoning and same shape as
+ * `voicerx/baselineOverride.js`.
  *
  * Its own module rather than a constant inside FloatingWindow.vue so it can be
  * read under node: importing the component drags in Vue's SFC compiler output,
@@ -25,7 +31,7 @@
  */
 
 /** The variant used unless something explicitly asks for the other one. */
-export const DEFAULT_CHROME = 'light'
+export const DEFAULT_CHROME = 'dark'
 
 const KNOWN = new Set(['light', 'dark'])
 

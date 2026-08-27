@@ -42,17 +42,24 @@ function withEnv({ search = '', stored = null, throws = false }, fn) {
   }
 }
 
-test('the shipping chassis is the default', () => {
-  assert.equal(withEnv({}, resolveHarnessChrome), DEFAULT_CHROME)
+test('5b is what ships', () => {
+  // Named rather than compared against DEFAULT_CHROME, which would pass either
+  // way round. Which design a user gets was decided by looking at both in the
+  // real app across the hue circle, and it should take a deliberate edit —
+  // failing this test — to change it back.
+  assert.equal(DEFAULT_CHROME, 'dark')
+  assert.equal(withEnv({}, resolveHarnessChrome), 'dark')
 })
 
 test('the query string selects a chassis, and outranks a stored choice', () => {
   assert.equal(withEnv({ search: '?harnessChrome=dark' }, resolveHarnessChrome), 'dark')
   assert.equal(withEnv({ search: '?harnessChrome=light' }, resolveHarnessChrome), 'light')
   assert.equal(
-    withEnv({ search: '?harnessChrome=light', stored: 'dark' }, resolveHarnessChrome), 'light',
+    withEnv({ search: '?harnessChrome=dark', stored: 'light' }, resolveHarnessChrome), 'dark',
   )
-  assert.equal(withEnv({ stored: 'dark' }, resolveHarnessChrome), 'dark')
+  // Stored on its own, and it has to be the NON-default one or the assertion
+  // holds whether or not localStorage is read at all.
+  assert.equal(withEnv({ stored: 'light' }, resolveHarnessChrome), 'light')
 })
 
 test('an unrecognised value falls back rather than passing through', () => {
