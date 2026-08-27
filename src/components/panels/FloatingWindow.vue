@@ -557,12 +557,44 @@ function requestClose() {
       @pointerup="onDragEnd"
       @pointercancel="onDragEnd"
     >
-      <!-- Brand mark, and nothing else. The "EFFECT" kicker went with this
-           layout: it said the same thing on fourteen of fifteen windows, and
-           the centre column is worth more to the controls that live there. -->
-      <span style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
-        {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.45)">{{ brandTail }}</span></template>
-      </span>
+      <!--
+        Identity, and the one thing that explains it.
+
+        The "EFFECT" kicker went with this layout: it said the same thing on
+        fourteen of fifteen windows, and the centre column is worth more to the
+        controls that live there.
+
+        HELP SITS HERE NOW, NEXT TO THE NAME, and the rule between them is what
+        makes that read as a pair rather than as a longer brand mark. It used to
+        sit beside close, on the argument that both are about the WINDOW where
+        DELTA and ON/BYPASS are about the audio. That argument was sound about
+        close and wrong about help: close is a window control, but help is about
+        the EFFECT — what this plugin does and how to work it — so its subject is
+        the name it now sits beside, not the frame around it. What is left in the
+        right-hand group is genuinely uniform: the audio switches, a rule, and
+        the one button that disposes of the window.
+      -->
+      <div class="flex items-center gap-2.5">
+        <span style="font:800 13px/1 'Inter';letter-spacing:.2em;color:#f6f4f3">
+          {{ brandLead }}<template v-if="brandTail">&nbsp;<span style="font-weight:500;color:rgba(255,255,255,.85)">{{ brandTail }}</span></template>
+        </span>
+        <!-- The short rule, not `--tall`: it is dividing a 13 px word from an
+             icon, where the tall one divides two 30 px chips. -->
+        <span v-if="help" class="win-rule"></span>
+        <button
+          v-if="help"
+          type="button"
+          class="win-icon-btn flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
+          :class="{ 'win-icon-btn--on': helpOpen }"
+          :aria-label="helpOpen ? 'Close help' : 'How to use this effect'"
+          :aria-expanded="String(helpOpen)"
+          :title="helpOpen ? 'Close help' : 'How to use this effect'"
+          @pointerdown.stop
+          @click="helpOpen = !helpOpen"
+        >
+          <Icon name="help" :size="15" :stroke-width="2" />
+        </button>
+      </div>
 
       <!--
         The centre column: monitoring, presets, or both. DELTA sits here rather
@@ -603,24 +635,11 @@ function requestClose() {
           <span class="win-chip-text">{{ engaged ? 'ON' : 'BYPASS' }}</span>
         </button>
         <!--
-          Help sits with close rather than with the monitoring chips: those two
-          are about the WINDOW, where DELTA and ON/BYPASS are about the audio.
-          Same reasoning that put DELTA beside ON/BYPASS in the first place.
+          The rule separates what changes the AUDIO from what disposes of the
+          WINDOW. Help used to sit on the right of it, which is where the pair
+          stopped being uniform — see the note beside the brand mark.
         -->
         <span v-if="showEngage" class="win-rule win-rule--tall"></span>
-        <button
-          v-if="help"
-          type="button"
-          class="win-icon-btn flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
-          :class="{ 'win-icon-btn--on': helpOpen }"
-          :aria-label="helpOpen ? 'Close help' : 'How to use this effect'"
-          :aria-expanded="String(helpOpen)"
-          :title="helpOpen ? 'Close help' : 'How to use this effect'"
-          @pointerdown.stop
-          @click="helpOpen = !helpOpen"
-        >
-          <Icon name="help" :size="15" :stroke-width="2" />
-        </button>
         <button
           type="button"
           class="win-icon-btn flex items-center justify-center w-[30px] h-[30px] rounded-[10px] border-none cursor-pointer"
@@ -1094,7 +1113,7 @@ function requestClose() {
      but belonging to this plugin rather than sitting on it as app chrome. The
      ink is a near-black carrying the same lean, so the pairing holds on every
      hue rather than only on the warm ones. */
-  background: color-mix(in srgb, var(--face, #f5a623) 14%, #f4f4f5);
+  background: #ffffff;
   color: #14100e;
   font: 600 13px 'Inter', system-ui, sans-serif;
   transition: filter 0.15s ease, opacity 0.15s ease;

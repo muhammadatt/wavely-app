@@ -152,6 +152,7 @@ const db = v => `${Math.round(v)}`
 </script>
 
 <template>
+  <div class="flex items-center justify-center">
   <div
     class="flex items-center gap-[16px] rounded-[7px] px-[14px] py-[10px]"
     @keydown.escape="harmonicsOpen = false"
@@ -317,11 +318,14 @@ const db = v => `${Math.round(v)}`
           :disabled="disabled"
         />
       </div>
-      <!-- A ceiling is set once and read often, so it is a field rather than a
+    </div>
+
+          <!-- A ceiling is set once and read often, so it is a field rather than a
            dial — and it belongs here rather than among the global controls
            because the honest answer differs by band: a low-mid resonance can
            lose 12 dB before it is obviously gone, where the same number spent
            on sibilance is a lisp. -->
+      <div class="w-[128px] shrink-0 flex justify-center">     
       <DeviceField
         :model-value="settings.maxCut" @update:model-value="set('maxCut', $event)"
         :min="RESONANCE_ZONE_RANGES.maxCut.min" :max="RESONANCE_ZONE_RANGES.maxCut.max"
@@ -329,8 +333,9 @@ const db = v => `${Math.round(v)}`
         label="Max Cut" unit="dB" :accent="accent"
         :format-value="db" :disabled="disabled"
       />
-    </div>
+      </div>
 
 
   </div>
+</div>
 </template>

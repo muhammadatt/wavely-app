@@ -18,7 +18,8 @@ import {
   zoneDotX,
   ZONE_DOT_R,
 } from './resonanceZoneEdit.js'
-import { HISTORY_SECONDS, ResonanceHistory } from './resonanceHistory.js'
+import { ResonanceHistory } from './resonanceHistory.js'
+import { bright, tint } from '../../ui/accent.js'
 import { MARK_MIN_DB, findResonanceMarks } from './resonanceMarks.js'
 import {
   createHeldAverage,
@@ -108,9 +109,31 @@ const props = defineProps({
    * reader, and this is the only thing that tells one what the element is.
    */
   title: { type: String, default: 'Spectral reduction' },
+  /**
+   * Which overlays are folded in — `{ grid, history, spectrum }`.
+   *
+   * A prop rather than state here because the switches are in the panel
+   * header, beside the readouts they belong with. Absent, everything is off,
+   * which is the default view. See `ui/resonanceOverlays.js`.
+   */
+  overlays: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['update:zones', 'update:selectedZone'])
+/**
+ * The two figures the header prints, published on their own throttles.
+ *
+ * ⚠ THEY ARE MEASURED HERE AND DRAWN ELSEWHERE, and that split is deliberate
+ * rather than awkward. Both come out of the frame loop below — the deepest cut
+ * off the same ballistics the trace is drawn with, the count and average out of
+ * the very frame the marks were found in — so computing them anywhere else
+ * would mean a second reader of the kernel's port, describing a different
+ * instant from the picture beside it. What moved up is the markup, not the
+ * measurement.
+ *
+ * Emitted rather than exposed so the panel can hold them like any other value.
+ * At ~10 Hz apiece, and only when a figure actually changes.
+ */
+const emit = defineEmits(['update:zones', 'update:selectedZone', 'update:reading'])
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
@@ -176,58 +199,19 @@ const SPEC_DB_MIN = -102
 const SPEC_DB_MAX = -12
 
 /**
- * The three overlays, and why they are not parameters.
+ * The three overlays.
  *
- * The default view (design 1c) is removal only: nothing on the plot but what is
- * being taken out. These fold context back in, and each is independent rather
- * than the design's single DETAIL button, because they answer different
- * questions and a user who wants the grid rarely wants a waterfall behind it.
- *
- * KEPT OUT OF `params`, like DELTA and SOLO. `applyResonanceRegion` spreads the
- * param object straight into the kernel, so anything living there is one
- * careless key away from being rendered into the timeline. These are purely
- * about what is drawn — the kernel neither sends nor receives them — so the
- * safest place for them is component state that has no route to the worklet at
- * all.
- *
- * PERSISTED, unlike DELTA and SOLO, and the difference is intent. A monitoring
- * mode is something you switch on to check one thing and switch off again, so
- * carrying it across sessions would be a trap. A preference for seeing the grid
- * is a preference; making someone re-set it every time they open the panel is
- * the trap.
+ * THE FLAGS COME IN AS A PROP AND THE BUTTONS ARE SOMEWHERE ELSE. They were
+ * owned here, next to the drawing code that reads them, which was right while
+ * the switches were here too; the readouts and the switches have since moved up
+ * into the panel header, and a control in one component writing state in
+ * another is the arrangement this codebase keeps having to undo. What decides
+ * where they live is the storage key, and that is in `ui/resonanceOverlays.js`
+ * now — including why they are not parameters, which is the important half.
  */
-const OVERLAY_STORE_KEY = 'wavely.resotame.overlays'
-
-function loadOverlays() {
-  // Wrapped because a browser set to block site data throws on the accessor
-  // itself rather than returning null, and a panel that will not open because
-  // a preference could not be read is a worse failure than a lost preference.
-  try {
-    const raw = window.localStorage.getItem(OVERLAY_STORE_KEY)
-    if (!raw) return {}
-    const v = JSON.parse(raw)
-    return v && typeof v === 'object' ? v : {}
-  } catch {
-    return {}
-  }
-}
-
-const stored = loadOverlays()
-const showGrid = ref(stored.grid === true)
-const showHistory = ref(stored.history === true)
-const showSpectrum = ref(stored.spectrum === true)
-
-function toggleOverlay(which) {
-  const ref_ = which === 'grid' ? showGrid : which === 'history' ? showHistory : showSpectrum
-  ref_.value = !ref_.value
-  try {
-    window.localStorage.setItem(OVERLAY_STORE_KEY, JSON.stringify({
-      grid: showGrid.value, history: showHistory.value, spectrum: showSpectrum.value,
-    }))
-  } catch {
-    // A viewer who cannot store the preference still gets it for this session.
-  }
-}
+const showGrid = computed(() => props.overlays?.grid === true)
+const showHistory = computed(() => props.overlays?.history === true)
+const showSpectrum = computed(() => props.overlays?.spectrum === true)
 
 /**
  * The rolling carve history. Built lazily on the first frame that carries a bin
@@ -294,16 +278,9 @@ const PILL_INK = 'rgba(10,14,16,.8)'
  * that is meant to read as lit — the hero curve's outline, the header figure,
  * the frequency on a mark pill — where the accent itself carries fills.
  */
-function bright(hex) {
-  return `color-mix(in srgb, ${hex} 55%, #ffffff)`
-}
-
-function tint(hex, alpha) {
-  let h = hex.replace('#', '')
-  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
-  const n = parseInt(h, 16)
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`
-}
+// bright() and tint() live in ui/accent.js — the header row derives the same
+// two colours from the same accent, and this component used to be the only
+// copy of them.
 
 // ── Readouts ────────────────────────────────────────────────────────────────
 
@@ -515,7 +492,30 @@ useMeterFrame((dtMs) => {
     readingDb.value = grFractionToDb(fraction, props.fullScaleDb)
   }
   draw(dtMs)
+  publishReading()
 })
+
+/**
+ * Hand the header its two figures, when either has moved.
+ *
+ * After `draw`, because that is what republishes the mark summary — before it,
+ * the count beside the plot would be one frame behind the marks on it. Guarded
+ * on the values rather than on the throttles because the throttles fire on
+ * their own clock whether or not anything changed, and a panel-level ref
+ * assigned 10 times a second with the same number is 10 needless renders.
+ */
+let lastReading = null
+
+function publishReading() {
+  const { count, avgDb } = markSummary.value
+  const deepestDb = readingDb.value
+  if (lastReading
+    && lastReading.deepestDb === deepestDb
+    && lastReading.count === count
+    && lastReading.avgDb === avgDb) return
+  lastReading = { deepestDb, count, avgDb }
+  emit('update:reading', lastReading)
+}
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
 
@@ -1773,15 +1773,8 @@ const ZONE_HINT = 'Click a resonance dot to label it with its frequency and '
   + 'boundary, Enter splits, Delete merges.'
 
 /**
- * What to say when the readout line has nothing else to say.
- *
- * The zones are edited inside a canvas, so nothing else on the panel announces
- * that dragging one does anything. This borrows the idle state of a line that
- * would otherwise be blank, costs no height, and stops as soon as a zone is
- * moved off neutral.
- */
-/**
- * The header's right-hand summary, refreshed on the marks' own clock.
+ * How many resonances are being worked and how hard, refreshed on the marks'
+ * own clock. Printed by the panel header, via `update:reading`.
  *
  * A count that flickers between three and four several times a second is worse
  * than no count, so it is republished only when the mark set is, and the
@@ -1789,29 +1782,14 @@ const ZONE_HINT = 'Click a resonance dot to label it with its frequency and '
  */
 const markSummary = ref({ count: 0, avgDb: 0 })
 
-/** 1c's right-hand line: how many resonances are being worked, and how hard. */
-const headerSummary = computed(() => {
-  const { count, avgDb } = markSummary.value
-  if (!count) return 'NO RESONANCES TRACKED'
-  return `${count} RESONANCE${count === 1 ? '' : 'S'} TRACKED  ·  AVG -${avgDb.toFixed(2)} dB`
-})
-
-const overlayButtons = computed(() => [
-  { key: 'grid', label: 'GRID', on: showGrid.value, title: 'Frequency and reduction rules' },
-  {
-    key: 'history',
-    label: 'HISTORY',
-    on: showHistory.value,
-    title: `What has been carved over the last ${HISTORY_SECONDS} seconds`,
-  },
-  {
-    key: 'spectrum',
-    label: 'SPECTRUM',
-    on: showSpectrum.value,
-    title: 'Input spectrum and the detection threshold, as they are now',
-  },
-])
-
+/**
+ * What to say when the readout line has nothing else to say.
+ *
+ * The zones are edited inside a canvas, so nothing else on the panel announces
+ * that dragging one does anything. This borrows the idle state of a line that
+ * would otherwise be blank, costs no height, and stops as soon as a zone is
+ * moved off neutral.
+ */
 const idleHint = computed(() =>
   props.zones.length > 1 ? '' : 'DBL-CLICK TO SPLIT A ZONE')
 
@@ -1819,97 +1797,6 @@ const idleHint = computed(() =>
 
 <template>
   <div>
-    <!-- One line above the plot, carrying everything that is not the plot.
-         It was two — readouts over the plot, legend and readout under it — and
-         the panel could not afford both once the display went in. What went
-         was the "SPECTRAL REDUCTION" title: the legend names all three curves,
-         the scale down the right of the top lane names what it measures, and a
-         title naming the panel a second time was the only line here that told
-         you nothing you could not read off the plot. -->
-    <!-- 1c's header: what was taken out, at the size of the thing the panel is
-         for, with the overlay switches beside it.
-
-         The old line led with a running reduction figure and an average, in
-         12 px, sharing a row with a three-item curve legend. Under "removal
-         only" the deepest cut IS the reading — there is no longer a second
-         curve for it to be one of — so it gets the size, and the legend goes:
-         two of the three curves it named no longer exist. -->
-    <div class="flex items-end justify-between gap-[14px] mb-[7px]">
-      <span class="flex items-end gap-[10px] shrink-0">
-        <span class="flex flex-col">
-          <span style="font:500 9px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">
-            DEEPEST CUT
-          </span>
-          <span class="flex items-baseline gap-[4px]">
-            <!-- The brief sets this at 46 px against a 1000 px card; this
-                 faceplate is 640 (`--w-faceplate`), so the same figure lands at
-                 30. Everything else about it is the brief's: Inter 500, the pale
-                 tint, and a mono `dB` at the text-mini step beside it. -->
-            <span :style="{
-                    font: `500 30px 'Inter',system-ui`,
-                    lineHeight: '1',
-                    color: bright(accent),
-                    textShadow: `0 0 12px ${tint(accent, 0.45)}`,
-                  }">-{{ readingDb.toFixed(1) }}</span>
-            <span style="font:500 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.35)">dB</span>
-          </span>
-        </span>
-        <!-- Second statement of a mode the title bar already shows, and worth
-             the duplication: someone reading the plot to decide whether a cut is
-             landing where they want has their eyes here, not on the title bar,
-             and the trace being loud is otherwise unexplained. -->
-        <span
-          v-show="delta"
-          class="px-[5px] py-[1px] rounded mb-[3px]"
-          :style="{
-            font: `700 8px 'JetBrains Mono',monospace`,
-            letterSpacing: '.12em',
-            color: bright(accent),
-            background: tint(accent, 0.14),
-            boxShadow: `inset 0 0 0 1px ${tint(accent, 0.3)}`,
-          }"
-        >DELTA</span>
-      </span>
-
-      <span class="flex flex-col items-end gap-[5px] min-w-0">
-        <span
-          class="truncate"
-          style="font:500 9px 'JetBrains Mono',monospace;letter-spacing:.08em;color:rgba(255,255,255,.35)"
-        >{{ headerSummary }}</span>
-
-        <!-- The three overlays. Independent rather than the source design's one
-             DETAIL button: they answer different questions, and someone who
-             wants a grid rarely wants a waterfall behind it. Lit when on, in the
-             accent, so the row reads at a glance as "what is folded in". -->
-        <span class="flex items-center gap-[4px]">
-          <button
-            v-for="o in overlayButtons"
-            :key="o.key"
-            type="button"
-            class="px-[7px] py-[3px] rounded-full transition-colors"
-            :aria-pressed="String(o.on)"
-            :title="o.title"
-            :style="{
-              font: `600 8px 'JetBrains Mono',monospace`,
-              letterSpacing: '.1em',
-              color: o.on ? bright(accent) : 'rgba(255,255,255,.36)',
-              background: o.on ? tint(accent, 0.14) : 'rgba(255,255,255,.03)',
-              boxShadow: o.on ? `inset 0 0 0 1px ${tint(accent, 0.5)}` : 'inset 0 0 0 1px rgba(255,255,255,.06)',
-            }"
-            @click="toggleOverlay(o.key)"
-          >{{ o.label }}</button>
-        </span>
-      </span>
-    </div>
-
-    <!-- Whatever the pointer is over, or the selected zone when it is over
-         nothing. Its own line under the header row, right-aligned, so the text
-         changing length moves nothing else. -->
-    <div
-      class="text-right truncate mb-1.5"
-      style="font:600 8px 'JetBrains Mono',monospace;letter-spacing:.06em"
-      :style="{ color: cursorText ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)' }"
-    >{{ zoneText || cursorText || hotspotText || idleHint }}</div>
 
     <!-- The recess, per the design system: `--bg-canvas-flat` under a ring of
          `--color-border-1`, at `--radius-lg` plus the 3 px of bezel, and the
