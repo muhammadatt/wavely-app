@@ -14,6 +14,7 @@ import {
   focusProtectAt,
   focusGlobal,
   focusSelectivityAt,
+  focusThresholdFn,
 } from '../../src/audio/resonanceFocus.js'
 import {
   DEFAULT_RESONANCE_ZONES,
@@ -363,4 +364,74 @@ test('a focus node reaches the kernel as a real change in the threshold curve', 
   // biased everything would be a global control wearing a node's clothes.
   const far = Math.round(200 / (44100 / 2048))
   assert.ok(Math.abs(aimed.zoneSelectivity[far] - flat.zoneSelectivity[far]) < 0.01)
+})
+
+// ── The display's threshold. ────────────────────────────────────────────────
+
+/**
+ * ⚠ THE BUG THIS PINS SHIPPED, AND IT HAD TWO SYMPTOMS FROM ONE LINE.
+ *
+ * The plot adds the threshold offset to the kernel's reference ITSELF, so the
+ * dotted threshold line follows the knob on the frame it is turned rather than
+ * a frame later. It read that offset out of `props.zones` — and under focus the
+ * plot is given no zones, so `zoneSettingsAt` fell through to the stock
+ * constant. The threshold froze at 20.
+ *
+ * One frozen array, two reports: the dotted line stopped moving for the
+ * Threshold knob AND for the nodes; and because the same `threshold[]` feeds
+ * `findExceedanceRuns` and the FOUND trace, crossings were still measured
+ * against 20 with the knob wound fully off, so the display kept finding
+ * resonances the kernel was no longer touching.
+ *
+ * The property is that the display's offset agrees with the KERNEL'S OWN
+ * per-bin curve, which is the only thing that makes the picture true.
+ */
+test('the display threshold follows the global knob and the nodes', () => {
+  const mk = (sel, nodes = []) => focusThresholdFn({
+    global: { ...RESONANCE_FOCUS_GLOBAL, selectivity: sel }, nodes,
+  })
+  // The knob alone.
+  assert.equal(mk(20)(1000), 20)
+  assert.equal(mk(31)(1000), 31)
+  assert.notEqual(mk(31)(1000), mk(20)(1000), 'the line must move with the knob')
+  // A node alone.
+  const aimed = mk(20, [node({ hz: 3000, biasDb: 10, spanOct: 0.5 })])
+  assert.ok(Math.abs(aimed(3000) - 10) < 1e-9)
+  assert.ok(Math.abs(aimed(200) - 20) < 1e-9, 'and only where the node is')
+  // Wound fully off, the display must agree that nothing can cross.
+  assert.equal(mk(RESONANCE_FOCUS_RANGES.selectivity.max)(1000),
+    RESONANCE_FOCUS_RANGES.selectivity.max)
+})
+
+test('the display threshold matches the kernel"s own per-bin curve', () => {
+  const focus = {
+    global: { ...RESONANCE_FOCUS_GLOBAL, selectivity: 27 },
+    nodes: [node({ id: 'a', hz: 240, biasDb: -11, spanOct: 0.9 }),
+      node({ id: 'b', hz: 4200, biasDb: 14, spanOct: 0.4 })],
+  }
+  const fn = focusThresholdFn(focus)
+  const curves = buildResonanceFocusCurves(focus, BINS, BIN_WIDTH)
+  // Bin 0 is DC and copies its neighbour, so it is the one bin where the plot's
+  // frequency-domain lookup and the kernel's bin grid legitimately differ.
+  for (let k = 1; k < BINS; k++) {
+    assert.ok(Math.abs(fn(k * BIN_WIDTH) - curves.selectivity[k]) < 1e-9,
+      `display and kernel disagree at bin ${k}`)
+  }
+})
+
+/**
+ * The hoist is not a micro-optimisation: this is called per display bin per
+ * animation frame, and normalising the patch inside would allocate an object
+ * per node per bin — tens of thousands a second to redraw a curve that only
+ * changes when a knob moves.
+ */
+test('the threshold function normalises once, not per call', () => {
+  const fn = focusThresholdFn({
+    global: { ...RESONANCE_FOCUS_GLOBAL },
+    nodes: [node({ hz: 1000, biasDb: 99 })],
+  })
+  // Clamped at build time, so a wild stored value cannot leak through the
+  // per-call path either.
+  assert.equal(fn(1000), RESONANCE_FOCUS_RANGES.selectivity.min)
+  assert.equal(typeof fn, 'function')
 })

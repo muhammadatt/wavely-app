@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
+import { focusThresholdFn } from '../../audio/resonanceFocus.js'
 import {
   DEFAULT_REF_MODE,
   zoneSettings,
@@ -56,6 +57,16 @@ const ACCENT = '#8de0a8'
  * purpose.
  */
 const focusMode = resTargeting === 'focus'
+
+/**
+ * The threshold offset the plot draws its dotted line and its crossings from.
+ *
+ * Null under zones, so the plot keeps its own zone lookup and the shipping path
+ * is untouched. A `computed`, so the normalisation inside `focusThresholdFn`
+ * happens once per edit rather than once per display bin per animation frame.
+ */
+const selectivityFn = computed(() =>
+  (focusMode ? focusThresholdFn(resFocus.value) : null))
 
 /**
  * The spectrum display's height — opens at 140, and grows from there. See
@@ -480,6 +491,7 @@ async function applyAndClose() {
         :accent="ACCENT"
         :height="plotHeight"
         :delta="resDelta"
+        :selectivity-fn="selectivityFn"
         :zones="focusMode ? [] : resZones"
         :selected-zone="focusMode ? -1 : resSelectedZone"
         :delta-zone="focusMode ? -1 : resDeltaZone"

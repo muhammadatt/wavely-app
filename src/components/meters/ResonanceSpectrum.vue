@@ -103,6 +103,26 @@ const props = defineProps({
    * baked into them so the knobs keep reading the stored settings.
    */
   deltaZone: { type: Number, default: -1 },
+  /**
+   * The detection threshold OFFSET at one frequency, in dB, or null.
+   *
+   * ⚠ IT EXISTS BECAUSE THE THRESHOLD HAS TWO POSSIBLE AUTHORS NOW. This plot
+   * adds the offset to the kernel's reference itself, so the dotted threshold
+   * line tracks the knob on the frame it is turned rather than a frame later —
+   * and it used to read that offset out of `props.zones`. Under the focus
+   * targeting model the zones are empty, so `zoneSettingsAt` returned the stock
+   * constant and the threshold FROZE: the dotted line stopped following the
+   * Threshold knob, and — the same `threshold[]` array feeding the exceedance
+   * runs and the FOUND trace — crossings were reported against a threshold of
+   * 20 whatever the panel was set to, so the display kept finding resonances
+   * with the knob wound fully off.
+   *
+   * Null keeps the zone lookup, so the shipping path is untouched by
+   * construction. See resonanceFocus.js's focusThresholdFn for why a function
+   * rather than a curve: it is called per display bin per frame, and the
+   * caller hoists its own normalisation out of that loop.
+   */
+  selectivityFn: { type: Function, default: null },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -1550,12 +1570,18 @@ function updateDetection(frame, dtMs) {
     excessAges = new Float32Array(bins)
   }
 
-  // Each zone carries its own Selectivity, read through the same lookup — and
-  // the same boundary crossfade — the kernel applies.
+  // WHERE THE THRESHOLD OFFSET COMES FROM DEPENDS ON THE TARGETING MODEL, and
+  // resolving it once per frame rather than per bin keeps the loop a read.
+  // Under zones each zone carries its own Selectivity, read through the same
+  // lookup — and the same boundary crossfade — the kernel applies; under focus
+  // it is the global threshold biased by the nodes. Both agree with the
+  // kernel's own per-bin curve; neither waits for it.
+  const offsetAt = props.selectivityFn
+    ?? (hz => zoneSettingsAt(props.zones, hz).selectivity)
   const spanOct = Math.log2(frame.maxHz / frame.minHz)
   const hzAt = d => frame.minHz * Math.pow(2, (d / (bins - 1)) * spanOct)
   for (let d = 0; d < bins; d++) {
-    threshold[d] = reference[d] + zoneSettingsAt(props.zones, hzAt(d)).selectivity
+    threshold[d] = reference[d] + offsetAt(hzAt(d))
     // ⚠ `detect`, NOT `mag`. The kernel decides on a max-filtered magnitude in
     // the shipping reference mode, and computing the margin from the raw curve
     // instead reported no crossing on bins it was cutting several dB — see the

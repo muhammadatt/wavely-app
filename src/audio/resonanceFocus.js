@@ -255,6 +255,30 @@ export function focusSelectivityAt(focus, freqHz) {
 }
 
 /**
+ * The effective threshold as a function of frequency, normalised once.
+ *
+ * ⚠ FOR THE DISPLAY, AND THE "ONCE" IS THE POINT. The plot needs the threshold
+ * at every one of its 192 display bins on every animation frame, and
+ * `focusSelectivityAt` normalises the globals and every node on each call — at
+ * 60 fps with a full rail that is tens of thousands of throwaway objects a
+ * second, spent redrawing a curve that only changes when a knob moves. This
+ * hoists the normalisation out, so the per-bin call is the Gaussian sum and
+ * nothing else. Build it in a `computed` and it is rebuilt per edit rather than
+ * per frame.
+ *
+ * The plot adding the threshold itself — rather than reading one the kernel
+ * sends — is what lets the line track the knob on the frame it is turned,
+ * instead of on the next frame out of the worklet. Same reason the zone path
+ * does its own `zoneSettingsAt` lookup.
+ */
+export function focusThresholdFn(focus) {
+  const g = focusGlobal(focus?.global)
+  const nodes = (focus?.nodes ?? []).map(focusNode).filter(n => n.biasDb !== 0)
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  return hz => clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, R.max)
+}
+
+/**
  * Weight of the harmonic mask at one frequency: 1 below the ceiling, 0 above.
  *
  * Crossfaded over the same sixth of an octave a zone boundary uses, for the
