@@ -9,7 +9,6 @@ import {
 import {
   setZoneParam, toggleZone, toggleZoneProtect,
 } from '../meters/resonanceZoneEdit.js'
-import DeviceField from '../knobs/DeviceField.vue'
 import Knob from '../knobs/Knob.vue'
 
 /**
@@ -148,13 +147,12 @@ function set(name, value) {
 
 const percent = v => `${Math.round(v * 100)}`
 const oneDp = v => v.toFixed(1)
-const db = v => `${Math.round(v)}`
 </script>
 
 <template>
   <div class="flex items-center justify-center">
   <div
-    class="flex items-center gap-[16px] rounded-[7px] px-[14px] py-[10px]"
+    class="flex items-center gap-[14px] rounded-[7px] px-[12px] py-[9px]"
     @keydown.escape="harmonicsOpen = false"
     :style="{
       background: 'rgba(0,0,0,.28)',
@@ -165,7 +163,7 @@ const db = v => `${Math.round(v)}`
     <!-- Identity first: these knobs mean nothing without it, because the same
          three knobs show six different sets of values. -->
     <!-- The identity block, or the harmonics door in its place. -->
-    <div class="w-[128px] shrink-0">
+    <div class="w-[116px] shrink-0">
       <template v-if="!harmonicsOpen">
       <div
         style="font:700 12px 'JetBrains Mono',monospace;letter-spacing:.08em;white-space:nowrap"
@@ -290,50 +288,47 @@ const db = v => `${Math.round(v)}`
       </template>
     </div>
 
-    <div class="flex-1 flex justify-center items-center gap-[8px]">
-      <div class="w-[88px] shrink-0">
+    <div class="flex-1 flex justify-center items-center gap-[6px]">
+      <div class="w-[76px] shrink-0">
         <Knob
           :model-value="settings.selectivity" @update:model-value="set('selectivity', $event)"
           :min="RESONANCE_ZONE_RANGES.selectivity.min" :max="RESONANCE_ZONE_RANGES.selectivity.max"
-          :step="0.5" :value-font-px="13"
-          label="Selectivity" :accent="accent" :format-value="oneDp"
+          :step="0.5" :value-font-px="12"
+          label="Threshold" :accent="accent" :format-value="oneDp"
           :disabled="disabled"
         />
       </div>
-      <div class="w-[88px] shrink-0">
+      <div class="w-[76px] shrink-0">
         <Knob
           :model-value="settings.sharpness" @update:model-value="set('sharpness', $event)"
           :min="RESONANCE_ZONE_RANGES.sharpness.min" :max="RESONANCE_ZONE_RANGES.sharpness.max"
-          :step="0.01" :value-font-px="13"
-          label="Sharpness" :accent="accent" :format-value="percent"
+          :step="0.01" :value-font-px="12"
+          label="Sharp" :accent="accent" :format-value="percent"
           :disabled="disabled"
         />
       </div>
-      <div class="w-[88px] shrink-0">
+      <div class="w-[76px] shrink-0">
         <Knob
           :model-value="settings.depth" @update:model-value="set('depth', $event)"
           :min="RESONANCE_ZONE_RANGES.depth.min" :max="RESONANCE_ZONE_RANGES.depth.max"
-          :step="0.01" :value-font-px="13"
+          :step="0.01" :value-font-px="12"
           label="Depth" :accent="accent" :format-value="percent"
           :disabled="disabled"
         />
       </div>
     </div>
 
-          <!-- A ceiling is set once and read often, so it is a field rather than a
-           dial — and it belongs here rather than among the global controls
-           because the honest answer differs by band: a low-mid resonance can
-           lose 12 dB before it is obviously gone, where the same number spent
-           on sibilance is a lisp. -->
-      <div class="w-[128px] shrink-0 flex justify-center">     
-      <DeviceField
-        :model-value="settings.maxCut" @update:model-value="set('maxCut', $event)"
-        :min="RESONANCE_ZONE_RANGES.maxCut.min" :max="RESONANCE_ZONE_RANGES.maxCut.max"
-        :step="1" :width="54"
-        label="Max Cut" unit="dB" :accent="accent"
-        :format-value="db" :disabled="disabled"
-      />
-      </div>
+      <!-- ⚠ MAX CUT IS PINNED AT ITS STOCK 36 dB AND HAS NO CONTROL. It was a
+           field here, on the argument that the honest ceiling differs by band —
+           a low-mid resonance can lose 12 dB before it is obviously gone where
+           the same number spent on sibilance is a lisp. That argument is still
+           true; what changed is the row. Collapsing the global controls and the
+           zone controls onto one line left no room for a setting almost nobody
+           reaches for, and a ceiling is the cheapest of the six to give up
+           because Depth already scales everything under it.
+           IT IS STILL A PER-ZONE PARAMETER and every zone still carries it, so
+           nothing about the kernel or the stored patch changed — only the way
+           in. See RESONANCE_ZONE_STOCK.maxCut. -->
 
 
   </div>

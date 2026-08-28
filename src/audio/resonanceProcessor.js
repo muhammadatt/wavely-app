@@ -555,7 +555,7 @@ export class ResonanceKernel {
     this.displayBins = RESONANCE_DISPLAY_BINS
     this.displayMag = new Float32Array(this.displayBins)
     this.displayEnv = new Float32Array(this.displayBins)
-    this.displayOut = new Float32Array(this.displayBins)
+    this.displayDetect = new Float32Array(this.displayBins)
     this.displayGrNow = new Float32Array(this.displayBins)
     this.displayGrHeld = new Float32Array(this.displayBins)
     this.hasDisplayFrame = false
@@ -910,34 +910,41 @@ export class ResonanceKernel {
   _snapshotDisplay() {
     const {
       magDb, envDb,
-      displayMag, displayEnv, displayOut, displayGrNow, displayGrHeld,
+      displayMag, displayEnv, displayDetect, displayGrNow, displayGrHeld,
     } = this
     // Post-blend reductions — the notch the listener actually gets. Aliases
     // prevGr whenever mix and trim are at their neutral settings.
     const prevGr = this.grDisplay ?? this.prevGr
     const last = this.binCount - 1
+    // ⚠ THE CURVE THE DETECTOR ACTUALLY READS, WHICH IS NOT `magDb`. In the
+    // shipping `peak` reference mode this is `peakMax` — magnitude run through a
+    // max filter — and the decision at line ~1287 is taken against it. Sending
+    // only `magDb` meant the panel recomputed the margin from a curve the kernel
+    // never consults, so a bin whose peak sits one bin over showed NO crossing
+    // while the kernel cut several dB there. Reported exactly that way: 3-5 dB
+    // in the trace and the meters, nothing in FOUND.
+    const detect = (this.refMode === 'peak' ? this.peakMax : this.magDb) ?? this.magDb
 
     for (let d = 0; d < this.displayBins; d++) {
       const lo = this.dLo[d]
       const hi = this.dHi[d]
       let mag
       let env
-      let out
+      let det
       let gr
       if (hi >= lo) {
         mag = -Infinity
         env = 0
-        out = -Infinity
+        det = -Infinity
         gr = 0
         for (let k = lo; k <= hi; k++) {
           if (magDb[k] > mag) mag = magDb[k]
           env += envDb[k]
-          // The output is summarised from the same bin as its own magnitude,
-          // not assembled afterwards from the loudest bin and the most
-          // suppressed one — those are different bins most of the time, and
-          // the difference between them is a notch that never happened.
-          const o = magDb[k] - prevGr[k]
-          if (o > out) out = o
+          // MAX, like `mag` and `gr` and unlike `env`. The decision is taken per
+          // FFT bin, so what a display cell has to report is the strongest
+          // crossing anywhere in it — averaging would hide a one-bin resonance
+          // among its quiet neighbours, which is the whole event.
+          if (detect[k] > det) det = detect[k]
           if (prevGr[k] > gr) gr = prevGr[k]
         }
         env /= hi - lo + 1
@@ -948,13 +955,17 @@ export class ResonanceKernel {
         const t = pos - k0
         mag = magDb[k0] + (magDb[k1] - magDb[k0]) * t
         env = envDb[k0] + (envDb[k1] - envDb[k0]) * t
-        const o0 = magDb[k0] - prevGr[k0]
-        out = o0 + (magDb[k1] - prevGr[k1] - o0) * t
+        // ⚠ MAX RATHER THAN INTERPOLATED, unlike its neighbours here. Below
+        // about 1 kHz a display cell is narrower than one FFT bin, so this
+        // branch samples BETWEEN bins — and interpolating the detect curve there
+        // lands off the peak the kernel decided on and under-reads the margin,
+        // which is the failure this whole curve exists to fix.
+        det = detect[k0] > detect[k1] ? detect[k0] : detect[k1]
         gr = prevGr[k0] > prevGr[k1] ? prevGr[k0] : prevGr[k1]
       }
       displayMag[d] = mag - SPECTRUM_REF_DB
       displayEnv[d] = env - SPECTRUM_REF_DB
-      displayOut[d] = out - SPECTRUM_REF_DB
+      displayDetect[d] = det - SPECTRUM_REF_DB
       displayGrNow[d] = gr
       if (gr > displayGrHeld[d]) displayGrHeld[d] = gr
     }
@@ -968,7 +979,7 @@ export class ResonanceKernel {
 
   /**
    * Copy the display grid into `out` as
-   * [magnitude, reference, output, reduction, held reduction] and clear the
+   * [magnitude, reference, detect, reduction, held reduction] and clear the
    * held accumulator. Returns false before the first frame.
    *
    * One flat array of sections rather than an array each, because this crosses
@@ -979,7 +990,7 @@ export class ResonanceKernel {
     const D = this.displayBins
     out.set(this.displayMag, 0)
     out.set(this.displayEnv, D)
-    out.set(this.displayOut, 2 * D)
+    out.set(this.displayDetect, 2 * D)
     out.set(this.displayGrNow, 3 * D)
     out.set(this.displayGrHeld, 4 * D)
     this.displayGrHeld.fill(0)

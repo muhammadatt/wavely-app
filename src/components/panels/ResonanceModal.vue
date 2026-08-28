@@ -17,7 +17,6 @@ import {
 } from '../../ui/resonanceOverlays.js'
 import { HISTORY_SECONDS } from '../meters/resonanceHistory.js'
 import Knob from '../knobs/Knob.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
@@ -27,14 +26,13 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   resAttack, resRelease,
-  resMode,
   resMix, resTrim, resZones, resSelectedZone, resDeltaZone, resRefMode,
   resPreview, resDelta, resReduction,
   resDisplayFn, hasSelection,
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
-  syncMode, apply, teardown, closeModal,
+  apply, teardown, closeModal,
 } = useResonance()
 
 const { state } = useEditorState()
@@ -124,48 +122,55 @@ function toggleOverlay(key) {
  * The five switches, readings first and context second.
  *
  * REMOVED leads because it is the plot rather than an overlay of it — see the
- * note on its default. SPECTRUM and MARGIN are the two questions asked of the
- * input, and they are independent rather than exclusive: someone placing zone
- * boundaries wants the spectrum with the trace down, someone setting Selectivity
- * wants the margin, and someone can reasonably want both.
+ * note on its default. SPECTRUM and FOUND are the two questions asked of the
+ * input and are independent rather than exclusive: SPECTRUM says which peak is
+ * over the line now and where it sits in the file, FOUND says what has been over
+ * it lately at true depth, and someone can reasonably want both.
  */
 const overlayButtons = computed(() => [
   {
     key: 'removed',
     label: 'REMOVED',
     on: overlays.value.removed,
-    title: 'The reduction trace — what is being taken out',
+    title: 'The suppression trace — what is being taken out',
   },
   {
     key: 'spectrum',
-    label: 'SPECTRUM',
+    label: 'SPECTRO',
     on: overlays.value.spectrum,
     title: 'Input level and the detection threshold across it, for placing zone boundaries',
   },
   {
-    key: 'margin',
-    label: 'MARGIN',
-    on: overlays.value.margin,
-    title: 'How far the input sits above or below the detection threshold',
+    key: 'found',
+    label: 'RESONANCE',
+    on: overlays.value.found,
+    title: 'Resonances found in the last few seconds, at their true depth over the threshold',
   },
   { key: 'grid', label: 'GRID', on: overlays.value.grid, title: 'Frequency and reduction rules' },
+  /*
   {
     key: 'history',
     label: 'HISTORY',
     on: overlays.value.history,
     title: `What has been carved over the last ${HISTORY_SECONDS} seconds`,
   },
+  */
 ])
 
-const MODE_OPTIONS = [
-  { value: 'soft', label: 'SOFT', title: 'Gradual knee above the threshold' },
-  { value: 'hard', label: 'HARD', title: 'Linear above the threshold' },
-]
-
-
-const modeCaption = computed(() =>
-  resMode.value === 'soft' ? 'gradual knee' : 'linear above threshold',
-)
+/**
+ * ⚠ THE SOFT/HARD KNEE SWITCH IS GONE AND `mode` IS PINNED AT ITS STOCK 'soft'.
+ * It was a segmented switch on the old global row, captioned "gradual knee" /
+ * "linear above threshold". What removed it was the row: collapsing the globals
+ * onto the zone line left space for four knobs, and this was the cheapest of the
+ * six controls to give up — the hard knee is the same law with the smoothing
+ * taken out, so what it changes is how abruptly a bin starts being treated as it
+ * crosses, which on real material is a subtler difference than any of Attack,
+ * Release, Mix or Trim make.
+ *
+ * IT REMAINS A PARAMETER at RESONANCE_DEFAULTS.mode, so the kernel is untouched
+ * and a stored patch keeps whatever it had. Only the way in is gone; putting it
+ * back is a SegmentedSwitch and three lines.
+ */
 
 const percent = v => `${Math.round(v * 100)}`
 const ms = v => `${Math.round(v)}`
@@ -210,10 +215,17 @@ async function applyAndClose() {
 </script>
 
 <template>
+  <!-- ⚠ 740 RATHER THAN 660, AND THE SINGLE ROW IS WHY. Attack and Release,
+       the zone plate and Mix and Trim measure 674 px side by side; the old
+       width left 608 of content, so the row overflowed by 66 and the plate
+       would have been clipped rather than merely tight. The alternative was
+       ~52 px knobs and a 100 px identity block, which is smaller than anything
+       else in the app wears. The 80 px also goes to the display, which is the
+       one dimension the frequency axis has been short of throughout. -->
   <FloatingWindow
     window-id="resonance-suppressor"
     :z="z"
-    :width="660"
+    :width="740"
     :accent="ACCENT"
     brand-lead="RESO"
     brand-tail="TAME"
@@ -445,119 +457,96 @@ async function applyAndClose() {
         @update:reading="reading = $event"
       />
 
-      <!-- Directly under the plot because the two are one control split by what
-           they edit: the plot owns where a zone IS — boundaries are horizontal
-           extents and the axis is horizontal — and this owns what it DOES.
-           Selection lights both, so the column and the row read as the same
-           object. -->
-      <div class="mt-[11px]">
-        <ResonanceZoneControls
-          :zones="resZones"
-          :selected="resSelectedZone"
-          :delta-zone="resDeltaZone"
-          :pitch-range-caption="pitchRangeCaption"
-          :ref-mode="resRefMode"
-          :accent="ACCENT"
-          :disabled="!resPreview"
-          @update:zones="syncZones"
-          @zone-delta="toggleZoneDelta"
-        />
-      </div>
+      <!-- ONE ROW FOR EVERYTHING BELOW THE PLOT, and it used to be two.
+           Directly under the display because the row and the plot are one
+           control split by what they edit: the plot owns where a zone IS —
+           boundaries are horizontal extents and the axis is horizontal — and
+           this owns what it DOES. Selection lights both, so the column and the
+           row read as the same object.
 
-      <!-- ONE GLOBAL ROW, and there is very little left in it.
-           Depth, Sharpness, Selectivity, Max Cut and harmonic protection are
-           all per zone now, with no global value for a zone to be an offset
-           from. What remains describes the effect as a whole: how fast the
-           detector moves, how much of its work reaches the output, the shape of
-           and the shape of its knee. The pitch range is global too but it does
-           not live here: it is what the protection mask hunts for, so it is
-           unreadable apart from the switch that turns the mask on, and both now
-           sit behind the zone block's HARM door. -->
-      <div class="flex items-center gap-[12px] mt-[13px] p-2">
+           The global controls used to sit on a second line beneath. Collapsing
+           them cost two settings, and both were chosen because they are pinned
+           to a value nobody was moving rather than because they are unimportant:
+           the SOFT/HARD knee switch and the per-zone
+           Max Cut (see the note in ResonanceZoneControls). Both remain
+           parameters at their stock values; only the controls are gone.
+
+           WHAT IS LEFT IS ORDERED BY SCOPE, OUTSIDE IN. Attack and Release on
+           the left and Mix and Trim on the right describe the effect as a whole
+           — how fast the detector moves, how much of its work reaches the
+           output, and at what level — and the plate between them is the one
+           zone being edited. The globals bracket the per-zone block rather than
+           sitting under it, which is what lets one line say both. -->
+      <div class="flex items-center gap-[10px] mt-[11px]">
         <!-- The ballistic minima are the STFT hop, not 0. A time constant
              shorter than one hop leaves the IIR coefficient at zero, so every
              setting below it is the same instantaneous jump — the bottom of
              both knobs used to be travel that could not be heard. See
-             RESONANCE_ATTACK_MIN_MS. -->
-        <!-- The TOPS were inherited from the shipping panel and were never
-             measured. Swept past them on real narration (cepstral reference,
-             PROTECTION OFF), and the two knobs turn out not to be the same
-             lever. At fixed selectivity, longer attack looks like it cleans
-             up but is only refusing to act — jitter per dB removed gets
-             WORSE, 0.351 at 12 ms to 0.417 at 800 ms, and at 800 ms it
-             removes 0.87 dB, barely more than the mask-on config's 0.20.
-             Longer release genuinely improves per dB, 0.416 to 0.299.
-             Matched at 3.0 dB of cut (selectivity solved per cell) the whole
-             effect is modest and saturates: jitter 0.96/1.29 at 12/80 to
-             0.80/1.02 at 200/500 and then flat out to 200/4000. What keeps
-             improving past there is p90 depth, 8.5 to 5.2 dB — same average
-             cut spread more evenly instead of concentrated in momentary
-             deep notches, which is the plausible mechanism for the pitch
-             artefacts being audible at all. 400/2000 captures nearly all of
-             it (0.77/0.95, p90 5.3); 800/4000 is marginally better still
-             (0.73/0.90) but needs selectivity dropped to 13.5 to hold the
-             same cut, and an attack near a second no longer tracks a
-             phrase. Pause bleed FALLS at matched cut, -2.47 to -1.19 dB,
-             because the higher selectivity more than pays for the longer
-             tail. -->
+             RESONANCE_ATTACK_MIN_MS.
 
-          <div class="flex items-center gap-4">   
-          <div class="w-[64px] shrink-0">
-            <Knob
-              :model-value="resAttack" @update:model-value="syncAttack"
-              :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="12"
-              label="Attack" :accent="ACCENT" :format-value="ms"
-              :disabled="!resPreview"
-            />
-          </div>
-          <div class="w-[64px] shrink-0">
-            <Knob
-              :model-value="resRelease" @update:model-value="syncRelease"
-              :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="12"
-              label="Release" :accent="ACCENT" :format-value="ms"
-              :disabled="!resPreview"
-            />
-          </div>
+             The TOPS were measured rather than inherited. At fixed selectivity
+             a longer attack looks like it cleans up but is only refusing to act
+             — jitter per dB removed gets WORSE, 0.351 at 12 ms to 0.417 at
+             800 ms — while a longer release genuinely improves it, 0.416 to
+             0.299. Matched at 3.0 dB of cut the whole effect saturates by about
+             200/500 ms; what keeps improving past there is p90 depth, 8.5 to
+             5.2 dB, the same average cut spread evenly instead of concentrated
+             in momentary deep notches. 400/2000 captures nearly all of it. -->
+        <div class="w-[60px] shrink-0">
+          <Knob
+            :model-value="resAttack" @update:model-value="syncAttack"
+            :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="11"
+            label="Attack" :accent="ACCENT" :format-value="ms"
+            :disabled="!resPreview"
+          />
+        </div>
+        <div class="w-[60px] shrink-0">
+          <Knob
+            :model-value="resRelease" @update:model-value="syncRelease"
+            :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="11"
+            label="Release" :accent="ACCENT" :format-value="ms"
+            :disabled="!resPreview"
+          />
+        </div>
 
-          <div class="flex flex-col items-center">
-          <SegmentedSwitch
-            class="shrink-0 mb-[3px]"
-            :padding-x="9"
-            :model-value="resMode"
-            @update:model-value="syncMode"
-            :options="MODE_OPTIONS"
+        <!-- min-w-0 so the plate is what gives way if the row ever runs out of
+             width, rather than a knob being clipped off the end. -->
+        <div class="flex-1 min-w-0">
+          <ResonanceZoneControls
+            :zones="resZones"
+            :selected="resSelectedZone"
+            :delta-zone="resDeltaZone"
+            :pitch-range-caption="pitchRangeCaption"
+            :ref-mode="resRefMode"
             :accent="ACCENT"
             :disabled="!resPreview"
-            :caption="modeCaption"
+            @update:zones="syncZones"
+            @zone-delta="toggleZoneDelta"
           />
-          </div>
-          </div>
+        </div>
 
-
-          <!-- Mix and Trim, in that order because that is the order the signal
-               meets them: how much of the detector's work reaches the output,
-               then what level the output leaves at. Trim is `bipolar` — a
-               cut/boost knob filling from its minimum lights half the ring at
-               0 dB, so an untouched trim reads as an applied one. -->
-          <div class="flex items-end gap-4 ml-auto self-end">
-            <div class="w-[64px] shrink-0">
-              <Knob
-                :model-value="resMix" @update:model-value="syncMix"
-                :min="0" :max="1" :step="0.01" :value-font-px="12"
-                label="Mix" :accent="ACCENT" :format-value="percent"
-                :disabled="!resPreview"
-              />
-            </div>
-            <div class="w-[64px] shrink-0">
-              <Knob
-                :model-value="resTrim" @update:model-value="syncTrim"
-                :min="-12" :max="12" :step="0.5" :value-font-px="12"
-                label="Trim" :accent="ACCENT" :format-value="signedDb"
-                :disabled="!resPreview" bipolar
-                title="Output gain, for an honest A/B against the bypass."
-              />
-            </div>
-          </div>
+        <!-- Mix then Trim, in the order the signal meets them: how much of the
+             detector's work reaches the output, then what level it leaves at.
+             Trim is `bipolar` — a cut/boost knob filling from its minimum lights
+             half the ring at 0 dB, so an untouched trim reads as an applied
+             one. -->
+        <div class="w-[60px] shrink-0">
+          <Knob
+            :model-value="resMix" @update:model-value="syncMix"
+            :min="0" :max="1" :step="0.01" :value-font-px="11"
+            label="Mix" :accent="ACCENT" :format-value="percent"
+            :disabled="!resPreview"
+          />
+        </div>
+        <div class="w-[60px] shrink-0">
+          <Knob
+            :model-value="resTrim" @update:model-value="syncTrim"
+            :min="-12" :max="12" :step="0.5" :value-font-px="11"
+            label="Trim" :accent="ACCENT" :format-value="signedDb"
+            :disabled="!resPreview" bipolar
+            title="Output gain, for an honest A/B against the bypass."
+          />
+        </div>
       </div>
     </div>
   </FloatingWindow>

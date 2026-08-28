@@ -35,14 +35,14 @@ const STORE_KEY = 'wavely.resotame.overlays'
 
 /** The keys, in the order the buttons appear. */
 /**
- * ⚠ `margin` IS NEW ALONGSIDE `spectrum`, NOT A RENAME OF IT. It was briefly a
- * rename — the margin lane replaced the absolute spectrum outright — and that
- * was wrong: subtracting the reference is exactly what removes the shape of the
- * file, and the shape is what zone boundaries are placed against. The two answer
- * different questions and both are switches. A preference stored under
- * `spectrum` therefore still means what it always meant.
+ * ⚠ `margin` IS GONE AND `found` REPLACES IT. The margin lane plotted
+ * `input - threshold` against a flat rail in a band of its own; the FOUND strip
+ * carries the same quantity in a fraction of the height, so the lane was a
+ * second answer to a question already answered. A stored `margin` is ignored
+ * like any unknown key, which puts FOUND at its default rather than inheriting a
+ * preference for a different picture.
  */
-export const OVERLAY_KEYS = ['grid', 'history', 'spectrum', 'margin', 'removed']
+export const OVERLAY_KEYS = ['grid', 'history', 'spectrum', 'found', 'removed']
 
 /**
  * What each is when nothing has been stored.
@@ -60,7 +60,7 @@ const DEFAULTS = {
   grid: false,
   history: false,
   spectrum: false,
-  margin: false,
+  found: false,
   removed: true,
 }
 

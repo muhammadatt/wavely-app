@@ -17,6 +17,7 @@ import {
   RESONANCE_ATTACK_MIN_MS,
   RESONANCE_RELEASE_MIN_MS,
   uniformZones,
+  zoneSettings,
   RESONANCE_ZONE_STOCK as ZONE_STOCK,
 } from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
@@ -515,7 +516,7 @@ function readDisplay(kernel) {
     bins: d,
     mag: curve(0),
     reference: curve(1),
-    output: curve(2),
+    detect: curve(2),
     reduction: curve(3),
     reductionHeld: curve(4),
     hz: i => kernel.displayMinHz * Math.pow(2, (i / (d - 1)) * octaves),
@@ -657,28 +658,64 @@ test('the held reduction never reads below the live one', () => {
   }
 })
 
-test('the output curve is the kernel\'s, not magnitude minus reduction', () => {
-  // Both summarise a display cell, but from different FFT bins — magnitude
-  // takes the loudest bin, reduction the most suppressed one, and on speech
-  // those differ in most cells that carry any cut. Subtracting one from the
-  // other draws a deeper notch than the audio has, which is why the output is
-  // measured per bin in the kernel and sent.
-  const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
-  const d = readDisplay(kernel)
-
-  let worst = 0
-  for (let i = 0; i < d.bins; i++) {
-    // It is an output level, so it can never exceed the input at the same place
-    // nor fall below what subtracting the cell's own peak cut would give.
-    assert.ok(d.output[i] <= d.mag[i] + 1e-4, `output above input at bin ${i}`)
-    assert.ok(
-      d.output[i] >= d.mag[i] - d.reduction[i] - 1e-4,
-      `output below the deepest possible cut at bin ${i}`,
-    )
-    worst = Math.max(worst, d.output[i] - (d.mag[i] - d.reduction[i]))
+test('the detect curve is what the kernel decides on, not the raw magnitude', () => {
+  // ⚠ THIS IS THE CURVE THE PANEL COMPUTES ITS MARGIN FROM, AND SENDING THE RAW
+  // MAGNITUDE INSTEAD WAS A REAL BUG. In the shipping `peak` reference mode the
+  // detector reads `peakMax` — magnitude through a max filter — so a bin whose
+  // peak sits a bin or two away is over the line as far as the kernel is
+  // concerned while the raw curve at that bin is not. Reported from use as 3-5
+  // dB of reduction in the trace and the meters with NOTHING in the FOUND strip.
+  const peakParams = {
+    ...RESONANCE_KERNEL_DEFAULTS,
+    refMode: 'peak',
+    zones: uniformZones({ protect: false }),
   }
-  // And it is not merely the subtraction under another name.
-  assert.ok(worst > 0.2, `output never differed from mag - reduction (${worst.toFixed(3)} dB)`)
+  const d = readDisplay(runKernel(resonate(voice(), 3000, 40, 14), peakParams))
+
+  // A max filter can only lift, so the curve the detector sees is never below
+  // the curve the panel draws. This fails outright if the processor goes back to
+  // packing magDb into the slot.
+  for (let i = 0; i < d.bins; i++) {
+    assert.ok(
+      d.detect[i] >= d.mag[i] - 1e-4,
+      `detect below magnitude at bin ${i}: ${d.detect[i]} < ${d.mag[i]}`,
+    )
+  }
+
+  // And it has to differ somewhere, or it is magnitude under another name.
+  let lift = 0
+  for (let i = 0; i < d.bins; i++) lift = Math.max(lift, d.detect[i] - d.mag[i])
+  assert.ok(lift > 0.2, `detect never rose above magnitude (${lift.toFixed(3)} dB)`)
+})
+
+test('the detect margin explains the cut at a planted resonance', () => {
+  // The end-to-end version of the bug: the panel draws `detect - reference -
+  // selectivity`, so wherever the kernel is visibly cutting, that quantity has
+  // to be positive in the same cell. Computed from `mag` it can be negative
+  // there, which is precisely what left the strip empty.
+  const settings = { protect: false }
+  const params = {
+    ...RESONANCE_KERNEL_DEFAULTS,
+    refMode: 'peak',
+    zones: uniformZones(settings),
+  }
+  const d = readDisplay(runKernel(resonate(voice(), 3000, 40, 14), params))
+  const selectivity = zoneSettings(params.zones[0]).selectivity
+
+  let at = 0
+  let best = Infinity
+  for (let i = 0; i < d.bins; i++) {
+    const away = Math.abs(Math.log2(d.hz(i) / 3000))
+    if (away < best) { best = away; at = i }
+  }
+
+  assert.ok(d.reduction[at] > 0.5, `no cut at the planted resonance (${d.reduction[at]})`)
+  const margin = d.detect[at] - d.reference[at] - selectivity
+  assert.ok(
+    margin > 0,
+    `the kernel cut ${d.reduction[at].toFixed(2)} dB where the panel would draw `
+      + `a margin of ${margin.toFixed(2)} dB`,
+  )
 })
 
 test('the display grid covers the documented span at every sample rate', () => {
@@ -706,7 +743,7 @@ test('every displayed value is finite, silence included', () => {
   for (let i = 0; i < d.bins; i++) {
     assert.ok(Number.isFinite(d.mag[i]), `magnitude ${i} was not finite`)
     assert.ok(Number.isFinite(d.reference[i]), `reference ${i} was not finite`)
-    assert.ok(Number.isFinite(d.output[i]), `output ${i} was not finite`)
+    assert.ok(Number.isFinite(d.detect[i]), `detect ${i} was not finite`)
     assert.ok(Number.isFinite(d.reduction[i]), `reduction ${i} was not finite`)
     assert.ok(Number.isFinite(d.reductionHeld[i]), `held reduction ${i} was not finite`)
   }
