@@ -23,6 +23,13 @@
  */
 
 /** Convert a bandwidth in octaves to an equivalent Q (RBJ cookbook). */
+/**
+ * State below this is flushed to zero — see the note in `BiquadCascade.process`.
+ * Chosen to sit far above the IEEE subnormal boundary and far below anything
+ * audible: 1e-30 is about -600 dBFS.
+ */
+export const DENORMAL_FLOOR = 1e-30
+
 export function octavesToQ(octaves) {
   const s = Math.sinh((Math.LN2 / 2) * octaves)
   return s === 0 ? Infinity : 1 / (2 * s)
@@ -303,6 +310,49 @@ export class BiquadCascade {
         x = y
       }
       output[i] = x
+    }
+
+    // ── Denormal flush ──────────────────────────────────────────────────
+    // An IIR fed digital silence decays exponentially and never reaches zero,
+    // so its state spends a very long time in the SUBNORMAL range, where
+    // arithmetic leaves the FPU's fast path for microcode. This app puts exact
+    // zeros into the timeline as a matter of course — `SilenceSegment`, the
+    // silence operation, and anything cut or padded — so it is ordinary use
+    // rather than a synthetic edge case.
+    //
+    // ⚠ THE COST LANDS DOWNSTREAM OF THE FILTER, NOT IN IT. Measured on the
+    // vocal saturator, whose band split feeds three 62-tap FIR upsamplers:
+    // 80.5% of the low band's samples in a silent tail were subnormal, and the
+    // whole plugin ran 2.26x slower on gated material than on the same audio
+    // with a -160 dBFS dither in the gaps. The biquads themselves were ~5% of
+    // that; the FIRs reading their output were 62%.
+    //
+    // ONCE PER BLOCK, NOT PER SAMPLE, and that is enough by construction. The
+    // subnormal range spans some fifteen decades, which an exponential decay
+    // takes far more than one block to cross, so a block-rate check catches the
+    // state on its way down and zeros it before it can matter — at a cost of
+    // `sectionCount` comparisons per block instead of two per sample.
+    //
+    // The threshold is ~-600 dBFS: far above the subnormal boundary (2.2e-308),
+    // so the state never reaches it, and far below anything representable in
+    // the 16-bit output this app encodes.
+    //
+    // ⚠ BOTH HALVES HAVE TO BE TINY, AND THE REASON IS NOT THE OBVIOUS ONE.
+    // The first version of this comment argued that zeroing one half while the
+    // other still held level would truncate a decaying tail; mutation testing
+    // says otherwise — real second-order state decays through the floor in both
+    // halves together, and `||` is bit-identical to `&&` on every second-order
+    // section, resonant ones included. What it is actually for is a FIRST-ORDER
+    // section expressed as a biquad (b2 = a2 = 0), where `z2` is permanently
+    // exactly zero and `z1` carries everything: under `||` the flush would fire
+    // on every block and clear a live filter. Pinned in biquadDenormal.test.js,
+    // which is the only test that can tell the two guards apart.
+    for (let s = 0; s < sectionCount; s++) {
+      const si = s * channelCount + channel
+      if (Math.abs(z1[si]) < DENORMAL_FLOOR && Math.abs(z2[si]) < DENORMAL_FLOOR) {
+        z1[si] = 0
+        z2[si] = 0
+      }
     }
   }
 }
