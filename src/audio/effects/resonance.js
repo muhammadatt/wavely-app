@@ -161,7 +161,7 @@ export function createResonance(audioContext) {
           maxHz: range.maxHz,
           mag: curve(0),
           reference: curve(1),
-          output: curve(2),
+          detect: curve(2),
           reduction: curve(3),
           reductionHeld: curve(4),
         }
