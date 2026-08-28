@@ -34,19 +34,49 @@
 const STORE_KEY = 'wavely.resotame.overlays'
 
 /** The keys, in the order the buttons appear. */
-export const OVERLAY_KEYS = ['grid', 'history', 'spectrum']
+/**
+ * ⚠ `margin` IS NEW ALONGSIDE `spectrum`, NOT A RENAME OF IT. It was briefly a
+ * rename — the margin lane replaced the absolute spectrum outright — and that
+ * was wrong: subtracting the reference is exactly what removes the shape of the
+ * file, and the shape is what zone boundaries are placed against. The two answer
+ * different questions and both are switches. A preference stored under
+ * `spectrum` therefore still means what it always meant.
+ */
+export const OVERLAY_KEYS = ['grid', 'history', 'spectrum', 'margin', 'removed']
 
-/** All off — the default view, and the fallback whenever storage says nothing. */
+/**
+ * What each is when nothing has been stored.
+ *
+ * ⚠ `removed` DEFAULTS ON AND IS THE ONLY ONE THAT DOES, because it is not
+ * really an overlay: the reduction trace IS the plot, and the other four are
+ * context folded in around it. It is a switch at all so the hero can be put down
+ * while reading the spectrum underneath it.
+ *
+ * Per-key defaults are also why `loadOverlays` cannot go on testing `=== true`
+ * alone: that cannot tell a stored `false` from a key nobody has written yet,
+ * and for `removed` those are opposite answers.
+ */
+const DEFAULTS = {
+  grid: false,
+  history: false,
+  spectrum: false,
+  margin: false,
+  removed: true,
+}
+
+/** The default view, and the fallback whenever storage says nothing. */
 export function noOverlays() {
-  return { grid: false, history: false, spectrum: false }
+  return { ...DEFAULTS }
 }
 
 /**
- * The stored preference, or all-off.
+ * The stored preference, falling back per key.
  *
- * Every stored value is compared against `true` rather than coerced, so a
- * half-written or hand-edited entry degrades to the default view rather than
- * to whatever `Boolean` makes of it.
+ * A key that is PRESENT is compared against `true` rather than coerced, so a
+ * half-written or hand-edited entry degrades to off rather than to whatever
+ * `Boolean` makes of it. A key that is ABSENT takes its default — which is how
+ * a preference file written before an overlay existed still gets that overlay's
+ * intended starting state rather than silently off.
  */
 export function loadOverlays() {
   // Wrapped because a browser set to block site data throws on the accessor
@@ -58,7 +88,7 @@ export function loadOverlays() {
     const v = JSON.parse(raw)
     if (!v || typeof v !== 'object') return noOverlays()
     const out = noOverlays()
-    for (const k of OVERLAY_KEYS) out[k] = v[k] === true
+    for (const k of OVERLAY_KEYS) out[k] = k in v ? v[k] === true : DEFAULTS[k]
     return out
   } catch {
     return noOverlays()

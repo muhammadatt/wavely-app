@@ -120,19 +120,40 @@ function toggleOverlay(key) {
   saveOverlays(overlays.value)
 }
 
+/**
+ * The five switches, readings first and context second.
+ *
+ * REMOVED leads because it is the plot rather than an overlay of it — see the
+ * note on its default. SPECTRUM and MARGIN are the two questions asked of the
+ * input, and they are independent rather than exclusive: someone placing zone
+ * boundaries wants the spectrum with the trace down, someone setting Selectivity
+ * wants the margin, and someone can reasonably want both.
+ */
 const overlayButtons = computed(() => [
+  {
+    key: 'removed',
+    label: 'REMOVED',
+    on: overlays.value.removed,
+    title: 'The reduction trace — what is being taken out',
+  },
+  {
+    key: 'spectrum',
+    label: 'SPECTRUM',
+    on: overlays.value.spectrum,
+    title: 'Input level and the detection threshold across it, for placing zone boundaries',
+  },
+  {
+    key: 'margin',
+    label: 'MARGIN',
+    on: overlays.value.margin,
+    title: 'How far the input sits above or below the detection threshold',
+  },
   { key: 'grid', label: 'GRID', on: overlays.value.grid, title: 'Frequency and reduction rules' },
   {
     key: 'history',
     label: 'HISTORY',
     on: overlays.value.history,
     title: `What has been carved over the last ${HISTORY_SECONDS} seconds`,
-  },
-  {
-    key: 'spectrum',
-    label: 'SPECTRUM',
-    on: overlays.value.spectrum,
-    title: 'Input spectrum and the detection threshold, as they are now',
   },
 ])
 
@@ -383,7 +404,12 @@ async function applyAndClose() {
                who wants a grid rarely wants a waterfall behind it. Lit when on,
                in the accent, so the row reads at a glance as "what is folded
                in". -->
-          <span class="flex items-center gap-[4px]">
+          <!-- ⚠ WRAPPED, because five of these do not fit the cell on one
+               line — they run to about 265 px against a track nearer 174. The
+               row has the height for two: it was sized by the 30 px reading
+               opposite, and the sentence that used to sit above these buttons
+               is gone. -->
+          <span class="flex flex-wrap items-center justify-end gap-[4px]">
             <button
               v-for="o in overlayButtons"
               :key="o.key"

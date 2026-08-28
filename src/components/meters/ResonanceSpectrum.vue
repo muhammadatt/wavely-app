@@ -20,7 +20,7 @@ import {
 } from './resonanceZoneEdit.js'
 import { ResonanceHistory } from './resonanceHistory.js'
 import { bright, tint } from '../../ui/accent.js'
-import { MARK_MIN_DB, findResonanceMarks } from './resonanceMarks.js'
+import { MARK_MIN_DB, findExceedanceRuns, findResonanceMarks } from './resonanceMarks.js'
 import {
   createHeldAverage,
   createReadoutThrottle,
@@ -171,7 +171,7 @@ const AXIS_H = 13
  * empty and that is exactly where reduction hangs. A cut deep enough to reach
  * into the trace is a cut deep enough to be worth seeing there.
  *
- * The output curve and the sliver are gone with the split — see drawSpectrum.
+ * The output curve and the sliver are gone with the split — see drawMargin.
  */
 const laneH = computed(() => Math.max(60, props.height - AXIS_H))
 /** Vertical clearance between two numerals on the reduction scale. */
@@ -188,15 +188,115 @@ const PEAK_VISIBLE = 0.025
 const REDUCTION_VISIBLE_DB = 0.3
 
 /**
- * dBFS window the SPECTRUM overlay's curves are drawn against.
+ * dBFS window the SPECTRUM overlay is drawn against.
  *
- * The same pair the two-lane display used, so a level reads here exactly where
- * it read there. Wide enough that per-bin speech peaks (near -35) sit in the
- * lower half and the top quarter stays clear for the reduction trace hanging
- * into it.
+ * Wide enough that per-bin speech peaks (near -35) leave the top quarter clear
+ * for the reduction trace hanging into it.
  */
 const SPEC_DB_MIN = -102
 const SPEC_DB_MAX = -12
+
+/**
+ * How much of the lane the reduction reading spans.
+ *
+ * ⚠ THE LAW IS UNCHANGED — this scales the drawing, not the scale. Reduction is
+ * still `grFraction`, the same voltage law every gain-reduction meter in the app
+ * uses, so the trace has exactly the shape it had; it is drawn into a shorter
+ * box. That distinction is what makes this safe to turn: raising `fullScaleDb`
+ * instead would have been a different curve (and barely helped — 24 to 36 dB
+ * takes a 3 dB cut from 57 px to 48, because this law's compression is almost
+ * all in its numerator), and lowering GR_CURVE would have moved every other
+ * meter in the app.
+ *
+ * 0.55 lands the trace's floor exactly on the margin lane's ceiling, so the two
+ * readings tile instead of overlapping — which also retires the caveat that the
+ * trace reached into the margin band at about 9 dB of reduction. It is FIXED
+ * rather than following whether MARGIN is on: a reading that changes scale
+ * because an unrelated overlay was toggled is a reading nobody can trust twice.
+ *
+ * Everything measured in reduction goes through `reductionH` — the trace, its
+ * peak hold, the marks, the rules and the numerals, and the hit test behind the
+ * marks. ⚠ THE HIT TEST ESPECIALLY: it is the one that fails silently, as dots
+ * that cannot be clicked where they are drawn.
+ */
+const REDUCTION_LANE_FRAC = 0.65
+const reductionH = computed(() => laneH.value * REDUCTION_LANE_FRAC)
+
+/**
+ * THE FOUND-HISTORY STRIP, along the floor of the SPECTRUM overlay.
+ *
+ * The decaying hold — what has crossed the line in the last couple of seconds —
+ * used to be shaded in place, hanging off the threshold like the live crossing
+ * does. Reported from use: useful, but distracting and unclear, because it was
+ * ATTACHED TO A MOVING BASELINE. The threshold rides `reference[]` at ~46 Hz, so
+ * a held shape drawn from it is a still quantity on a bouncing datum — the eye
+ * reads the movement, which belongs to the reference, as movement of the
+ * history, which has none.
+ *
+ * On the floor it has a baseline that cannot move. It stops being part of the
+ * spectrum's shape and becomes what it always was: a strip saying where the
+ * detector has recently found something.
+ *
+ * ⚠ THE LIVE CROSSING STAYS ON THE THRESHOLD, and that split is the point. The
+ * live shading answers "is this peak over the line RIGHT NOW", which is only
+ * meaningful drawn against the line; the strip answers "has anything been over
+ * it lately", which is meaningful anywhere and better somewhere still.
+ *
+ * 36 px is cheap: it covers -102 to -90 dBFS of the overlay's window, which is
+ * below the noise floor of any recording this tool is pointed at. Clamped at the
+ * same 8 dB the margin lane clamps at, so the two agree about what a big
+ * crossing looks like.
+ */
+const HELD_STRIP_PX = 36
+
+/**
+ * THE MARGIN LANE'S GEOMETRY.
+ *
+ * The overlay used to plot the input in absolute dBFS over a 90 dB window and
+ * ask the reader to measure the gap up to a threshold drawn beside it. Three
+ * things were wrong with that at once, all of them arithmetic:
+ *
+ *   1. 90 dB over ~267 px is 2.97 px per dB, against a reduction trace drawn at
+ *      about 20 px per dB near zero. The CAUSE was rendered seven times flatter
+ *      than the effect it produces.
+ *   2. The gap was encoded as the space between two 1 px strokes, both of them
+ *      wandering. Judging "is this curve above that curve" when both move is far
+ *      harder than judging "is this curve above a straight line".
+ *   3. Anything below -102 dBFS clamped, and the threshold clamped with it — so
+ *      at high frequencies, where per-bin levels are lowest, the two collapsed
+ *      onto the same pixel and the margin vanished no matter how many dB it
+ *      actually was. The information was gone before it was drawn.
+ *
+ * Plotting `input - threshold` answers all three. The threshold becomes a
+ * straight rail, the margin becomes a height above it, absolute level leaves the
+ * picture entirely — so a 3 dB margin at 12 kHz looks exactly like one at
+ * 300 Hz — and the whole band can be spent on the dozen or so dB that matter.
+ *
+ * ⚠ AND IT SEPARATES THE TWO READINGS IN SPACE, WHICH IS THE HALF THAT COLOUR
+ * COULD NOT DO. The shading was tried first in the accent and then in white, and
+ * both were reported masked: the trace's fill is painted over the overlay, so a
+ * few-pixel shape underneath it is gone whatever colour it is. The margin lane
+ * now sits in the bottom of the plot and the trace hangs from the top, so on
+ * ordinary material they do not touch at all — the trace only reaches the band's
+ * top edge at about 9 dB of reduction.
+ *
+ * The window is asymmetric because the two directions are not equally
+ * interesting: above the rail is what the detector is acting on, below it is
+ * only "how close is this to crossing", which is worth a glance while turning
+ * Selectivity and no more. Everything past either end clamps, and both clamps
+ * are benign — a margin over 8 dB is unmistakable already and the trace states
+ * its consequence, and a bin more than 5 dB under the line is simply not in
+ * play.
+ */
+const MARGIN_ABOVE_DB = 8
+const MARGIN_BELOW_DB = 5
+/**
+ * The band's share of the lane, measured from the bottom.
+ *
+ * 45% at the default height is ~120 px for 13 dB — 9.2 px per dB, or 3.1x what
+ * the absolute window gave. The rest of the lane stays the trace's.
+ */
+const MARGIN_BAND_FRAC = 0.45
 
 /**
  * The three overlays.
@@ -212,6 +312,19 @@ const SPEC_DB_MAX = -12
 const showGrid = computed(() => props.overlays?.grid === true)
 const showHistory = computed(() => props.overlays?.history === true)
 const showSpectrum = computed(() => props.overlays?.spectrum === true)
+const showMargin = computed(() => props.overlays?.margin === true)
+/**
+ * The reduction reading — the trace, its peak hold, the rail it hangs from, the
+ * marks that sit on it and the numerals that measure it.
+ *
+ * ⚠ THE ONE OVERLAY THAT DEFAULTS ON, because it is not really an overlay: it is
+ * the plot, and the other four are context folded in around it. It is a switch
+ * at all for one reason, reported from use — placing zone boundaries means
+ * reading the SPECTRUM, and a green fill twenty times the size of anything under
+ * it is painted straight over that. Being able to put the hero down for a moment
+ * is what makes the other overlays usable.
+ */
+const showRemoved = computed(() => props.overlays?.removed !== false)
 
 /**
  * The rolling carve history. Built lazily on the first frame that carries a bin
@@ -571,17 +684,28 @@ function draw(dtMs) {
   // the control surface rather than a reading.
   drawCarveHistory(ctx, w)
   if (showGrid.value) drawGrid(ctx, w, xFor, minHz, maxHz)
+  // Absolute first, margin over it: with both on they share the lower half, and
+  // the margin lane is the brighter and harder-edged of the two.
+  if (shown && (showSpectrum.value || showMargin.value)) updateDetection(shown, dtMs)
   if (showSpectrum.value && shown) drawSpectrum(ctx, w, shown)
-  drawZeroRail(ctx, w)
+  if (showMargin.value && shown) drawMargin(ctx, w, shown)
 
+  // ⚠ THE PEAK HOLD ADVANCES WHETHER OR NOT THE TRACE IS SHOWING, for the reason
+  // the waterfall records itself continuously: a reading switched back on to a
+  // cold hold cannot answer the question it was switched on for.
   updatePeaks(shown, dtMs)
-  if (shown) drawReduction(ctx, w, shown)
+  if (showRemoved.value) {
+    drawZeroRail(ctx, w)
+    if (shown) drawReduction(ctx, w, shown)
+  }
 
   drawZones(ctx, w)
   drawZoneReadouts(ctx, w)
-  drawMarks(ctx, w)
+  // The marks sit ON the trace — their vertical position IS the reduction — so
+  // with it hidden they would be dots in empty space rather than annotations.
+  if (showRemoved.value) drawMarks(ctx, w)
 
-  if (showGrid.value) drawGrScale(ctx, w)
+  if (showGrid.value && showRemoved.value) drawGrScale(ctx, w)
   drawCursor(ctx, w)
   drawPlateRing(ctx, w)
   drawAxis(ctx, w, xFor, minHz, maxHz)
@@ -694,8 +818,8 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
   // number can never disagree about where a decibel is.
   for (const mark of grScaleMarks(props.fullScaleDb)) {
     if (mark.db === 0) continue
-    const y = Math.round(mark.fraction * laneH.value) + 0.5
-    if (y >= laneH.value - 2) continue
+    const y = Math.round(mark.fraction * reductionH.value) + 0.5
+    if (y >= reductionH.value - 2) continue
     ctx.fillRect(0, y, w, 1)
   }
   ctx.restore()
@@ -725,7 +849,7 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
  */
 function drawReduction(ctx, w, frame) {
   const { reduction, bins } = frame
-  const h = laneH.value
+  const h = reductionH.value
   const xStep = w / (bins - 1)
   const yFor = db => grFraction(db, props.fullScaleDb) * h
 
@@ -898,7 +1022,7 @@ function markIndexNear(hz) {
  * target would claim clicks from the plate above a shallow cut.
  */
 function markAt(x, y) {
-  const h = laneH.value
+  const h = reductionH.value
   const w = width.value
   let best = -1
   let bestD = MARK_HIT_PX * MARK_HIT_PX
@@ -916,7 +1040,7 @@ function markAt(x, y) {
 
 function drawMarks(ctx, w) {
   if (!marks.length) return
-  const h = laneH.value
+  const h = reductionH.value
   const yFor = db => grFraction(db, props.fullScaleDb) * h
   const named = markIndexNear(selectedMarkHz.value)
 
@@ -999,38 +1123,34 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 /**
- * THE SPECTRUM OVERLAY: the input curve and the threshold staircase, back as
- * ground under the reduction trace.
+ * THE SPECTRUM OVERLAY: the input in absolute dBFS, with the threshold staircase
+ * across it.
  *
- * They were dropped with the 1c layout, on the argument that the plot's vertical
- * axis is decibels of REDUCTION and a curve measured in dBFS therefore has
- * nowhere to live. That argument holds for the AXIS and not for the PICTURE:
- * what the staircase says is where the line was drawn, which is read against the
- * shape of the input beside it rather than against the numerals on the right, so
- * both curves can carry their own 90 dB window inside the same box as long as
- * nothing invites them to be measured against the reduction scale. Nothing does
- * — they are faint, unlabelled and behind everything, exactly as the waterfall
- * is, and the numerals down the right belong to the trace.
+ * ⚠ IT WAS REPLACED BY THE MARGIN LANE AND THEN BROUGHT BACK, and the reason is
+ * the one job the margin cannot do. Margin says how far each bin is from the
+ * line; it says nothing about the SHAPE of the file, because subtracting the
+ * reference is precisely what removes it. But zone boundaries are placed against
+ * that shape — where the fundamental region ends, where sibilance starts, where
+ * this particular voice's energy actually sits — and that is a reading of the
+ * spectrum, not of the margin.
  *
- * WHAT IT BUYS BACK is the one real cost of 1c: the threshold was the only place
- * per-zone Selectivity was legible WHILE the knob was being turned — the
- * kernel's own decision boundary drawn where the decision is made. Without it
- * Selectivity is judged by the cut it produces, which is a slower loop.
+ * So the two are different questions and both are worth a switch: SPECTRUM for
+ * "where should the boundaries go", MARGIN for "what is crossing the line".
+ * Independent rather than exclusive, like every other overlay here. With both on
+ * they share the lower half of the plot; they are told apart by weight, the
+ * margin lane being brighter and carrying a hard rail.
  *
  * The threshold is `reference + Selectivity`, added here rather than in the
- * kernel so the line moves with the knob on the frame it is turned instead of on
- * the next one out of the worklet. It is a READOUT, NOT AN EDITOR: it rides
- * `reference[]`, so it moves with the audio several times a second, and a handle
- * on a curve that bounces at 46 Hz cannot be aimed — the editable copy of the
- * same number is a knob under the plot, which holds still.
- *
- * The OUTPUT curve and the shaded sliver between input and output stay gone.
- * Output is the input minus the same reduction the trace above already draws
- * 3-4x larger, and at this window the sliver measured about 5 px at the stock
- * mean cut — the thickness of the strokes around it.
+ * kernel so the staircase moves with the knob on the frame it is turned instead
+ * of on the next one out of the worklet. It is a READOUT, NOT AN EDITOR: it
+ * rides `reference[]` at ~46 Hz, and a handle on a curve that bounces cannot be
+ * aimed — the editable copy of the same number is a knob under the plot.
  */
 function drawSpectrum(ctx, w, frame) {
-  const { mag, reference, bins } = frame
+  // `threshold` is not read off the frame: it is the shared per-frame array
+  // updateDetection builds, so the staircase here and the rail in the margin
+  // lane cannot disagree about where the line is.
+  const { mag, bins } = frame
   const height = laneH.value
   const bottom = height
   const xStep = w / (bins - 1)
@@ -1042,10 +1162,8 @@ function drawSpectrum(ctx, w, frame) {
   ctx.save()
   clipPlate(ctx, w)
 
-  // Input: filled, low contrast. It is the ground the threshold and the trace
-  // are read against, not a curve to be followed. Lighter than it was in the
-  // two-lane display, because there it was the subject of its own lane and here
-  // it is underneath the hero.
+  // Input: filled, low contrast. It is the ground the threshold is read against,
+  // not a curve to be followed.
   ctx.beginPath()
   ctx.moveTo(0, bottom)
   for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(mag[d]))
@@ -1057,18 +1175,41 @@ function drawSpectrum(ctx, w, frame) {
   ctx.strokeStyle = 'rgba(255,255,255,.22)'
   ctx.stroke()
 
+  drawFoundHistory(ctx, w, bins, xStep, bottom)
+
+  // THE CROSSINGS, SHADED — the part of the input that is over the line.
+  //
+  // ⚠ THIS IS WHAT MAKES THE OVERLAY READABLE ON ITS OWN, and it was removed
+  // once for a reason that no longer holds. It kept being masked by the
+  // reduction trace painted over it, and the answer at the time was to replace
+  // the whole overlay with the margin lane, which sits where the trace does not
+  // reach. But the margin lane is a derived quantity and reads as one — you have
+  // to know what it is before it says anything. Shading here needs no
+  // explanation: it is the peak, and the part of the peak that is over the line
+  // is filled in. Now that REMOVED is a switch, the masking is the reader's to
+  // resolve rather than something the design has to route around.
+  //
+  // Same crossings the margin lane shades and the same tested geometry, just
+  // expressed against absolute level instead of against a rail. Held ghost
+  // first, live fill over it, and a lit edge along the input.
+  // A shade brighter than the same fill in the margin lane, because the same
+  // crossing is about a third as tall here — 2.97 px per dB against 9.24 — and a
+  // shorter shape needs more contrast to read as one.
+  fillRuns(ctx, findExceedanceRuns(mag, threshold, bins), mag, xStep, yFor,
+    { fill: 'rgba(255,255,255,.34)', stroke: 'rgba(255,255,255,.92)', width: 1.5 })
+
   // Threshold: dashed, because it is a decision boundary rather than a signal.
+  // Drawn last so it stays crisp along the bottom of every shaded region — the
+  // fills would otherwise soften the one edge the reader measures against.
   //
   // ONE LINE, STEPPED PER ZONE. Each zone carries its own Selectivity, so the
   // threshold is a staircase — with the same crossfade at each boundary that the
-  // kernel applies, since it is read through the same zone lookup.
-  const spanOct = Math.log2(frame.maxHz / frame.minHz)
-  const hzAt = d => frame.minHz * Math.pow(2, (d / (bins - 1)) * spanOct)
-  const thresholdAt = d => zoneSettingsAt(props.zones, hzAt(d)).selectivity
-
+  // kernel applies, since it is read through the same zone lookup. This is the
+  // one place those steps are visible; in margin space every zone's line is the
+  // same line.
   ctx.beginPath()
   for (let d = 0; d < bins; d++) {
-    const y = yFor(reference[d] + thresholdAt(d))
+    const y = yFor(threshold[d])
     d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
   }
   ctx.setLineDash([3, 3])
@@ -1079,6 +1220,293 @@ function drawSpectrum(ctx, w, frame) {
 
   ctx.restore()
 }
+
+/**
+ * The decaying hold, as a silhouette standing on the floor. See HELD_STRIP_PX.
+ *
+ * Drawn after the input's own fill, which is painted up from the same floor and
+ * would otherwise bury it, and before the live shading, which is the thing that
+ * should win where the two coincide.
+ *
+ * ⚠ NOT ON THE REDUCTION SCALE, and it must not be put on it. This is margin —
+ * how far over the line the input got — where the trace above is reduction, how
+ * much was taken out. They are cause and effect, related by the kernel's depth,
+ * knee and ceiling rather than equal, so a shared axis would invite reading a
+ * difference between them that is mostly the transfer between the two
+ * quantities. Aligning them in FREQUENCY is the comparison that means something:
+ * the detector has been finding something here, is the trace doing anything
+ * about it.
+ */
+function drawFoundHistory(ctx, w, bins, xStep, bottom) {
+  const top = bottom - HELD_STRIP_PX
+  const pxPerDb = HELD_STRIP_PX / MARGIN_ABOVE_DB
+  const yFor = db => bottom - Math.max(0, Math.min(MARGIN_ABOVE_DB, db)) * pxPerDb
+
+  ctx.beginPath()
+  ctx.moveTo(0, bottom)
+  for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(excessHold[d]))
+  ctx.lineTo(w, bottom)
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(255,255,255,.22)'
+  ctx.fill()
+
+  // The silhouette's own outline, so a low, broad stretch of history still reads
+  // as a shape rather than as a change in the plate's tone.
+  ctx.beginPath()
+  for (let d = 0; d < bins; d++) {
+    const y = yFor(excessHold[d])
+    d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
+  }
+  ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(255,255,255,.45)'
+  ctx.stroke()
+
+  // The clamp, marked faintly: without it a strip pinned flat along its ceiling
+  // reads as a measurement rather than as a value that has run out of room.
+  ctx.fillStyle = 'rgba(255,255,255,.05)'
+  ctx.fillRect(0, top, w, 1)
+}
+
+/**
+ * Shade the runs of `top` that are over the threshold curve, in absolute space.
+ *
+ * The stroke is the INPUT SIDE ONLY. Closing it around the region draws a
+ * capsule, which reads as an object in its own right rather than as the stretch
+ * of input curve that happens to be over the line — and the threshold side
+ * already has the dashed rail coming over the top of it.
+ */
+function fillRuns(ctx, runs, top, xStep, yFor, { fill, stroke, width }) {
+  for (const run of runs) {
+    // Out along the top, closing at the two interpolated crossings — where the
+    // curves meet, so the shape tapers to a point rather than opening with a
+    // vertical step taller than the feature itself.
+    ctx.beginPath()
+    ctx.moveTo(run.startPos * xStep, yFor(run.startDb))
+    for (let d = run.startBin; d <= run.endBin; d++) ctx.lineTo(d * xStep, yFor(top[d]))
+    ctx.lineTo(run.endPos * xStep, yFor(run.endDb))
+
+    if (stroke) {
+      ctx.lineWidth = width
+      ctx.strokeStyle = stroke
+      ctx.stroke()
+    }
+    if (fill) {
+      // Back along the threshold to close the region.
+      for (let d = run.endBin; d >= run.startBin; d--) ctx.lineTo(d * xStep, yFor(threshold[d]))
+      ctx.closePath()
+      ctx.fillStyle = fill
+      ctx.fill()
+    }
+  }
+}
+
+/**
+ * THE MARGIN OVERLAY: how far the input sits above or below the detection
+ * threshold, against a flat rail in its own band.
+ *
+ * It was the input curve in absolute dBFS with the threshold staircase drawn
+ * across it. See MARGIN_ABOVE_DB for why that could not be made to work — in
+ * short, the margin was drawn at 2.97 px per dB against a trace at 20, as a gap
+ * between two moving strokes, and it clamped away entirely at high frequencies.
+ *
+ * WHAT IS GIVEN UP is the shape of the file: this no longer says whether the
+ * recording is bright or dull, only where it is relative to the line. That is
+ * the right trade for this plot. Its job is the DECISION — the panel's own
+ * Spectrum Analyzer window exists for "what does this file look like", answers
+ * it against a labelled level axis, and taps the whole chain rather than one
+ * plugin's input.
+ *
+ * The threshold is `reference + Selectivity`, subtracted here rather than in the
+ * kernel so the rail responds on the frame a knob is turned instead of on the
+ * next one out of the worklet. It is a READOUT, NOT AN EDITOR: the editable copy
+ * of the same number is a knob under the plot, which holds still — a handle on
+ * something that moves at 46 Hz cannot be aimed.
+ *
+ * ⚠ THE RAIL IS STRAIGHT AND THE STAIRCASE IS GONE, which is a real loss worth
+ * naming. Per-zone Selectivity used to be visible as steps in the threshold
+ * while the knob was being turned. In this space every zone's line is the same
+ * line, so what a Selectivity change now does is move the CURVE — the whole
+ * zone's margin slides down as the knob comes up. That is arguably the more
+ * direct reading of the same fact, but it is a different one, and someone
+ * looking for the steps will not find them.
+ */
+function drawMargin(ctx, w, frame) {
+  const { bins } = frame
+  const xStep = w / (bins - 1)
+  const { railY, pxPerDb, top } = marginBand()
+  const yFor = db => railY - Math.max(-MARGIN_BELOW_DB, Math.min(MARGIN_ABOVE_DB, db)) * pxPerDb
+
+  ctx.save()
+  clipPlate(ctx, w)
+
+  // The band's ceiling. Faint, but it has to be there: the two halves of this
+  // plot are on scales an order of magnitude apart, and without a boundary the
+  // margin curve invites being measured against the reduction numerals down the
+  // right-hand side.
+  ctx.fillStyle = 'rgba(255,255,255,.05)'
+  ctx.fillRect(0, top, w, 1)
+
+  // Held margin first, as a filled ghost, then the live curve over it. The
+  // ghost is what makes an intermittent resonance findable at all; the live
+  // curve is what says where things are right now, so a ghost is never mistaken
+  // for something currently sounding.
+  fillAboveRail(ctx, excessHold, bins, xStep, yFor, railY, 'rgba(255,255,255,.17)')
+  fillAboveRail(ctx, margin, bins, xStep, yFor, railY, 'rgba(255,255,255,.30)')
+
+  // The whole margin curve, including the part under the rail — that is the
+  // "how close is this to crossing" reading, and it is the only thing on the
+  // plot that answers it while Selectivity is being turned.
+  ctx.beginPath()
+  for (let d = 0; d < bins; d++) {
+    const y = yFor(margin[d])
+    d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
+  }
+  ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(255,255,255,.42)'
+  ctx.stroke()
+
+  // The rail last, so it stays crisp along the bottom of every shaded region —
+  // a fill drawn over it would soften the one edge the reader measures against.
+  // Dashed because it is a decision boundary rather than a signal.
+  ctx.beginPath()
+  ctx.moveTo(0, railY)
+  ctx.lineTo(w, railY)
+  ctx.setLineDash([3, 3])
+  ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  ctx.restore()
+}
+
+/** Where the band sits, in pixels, for the lane's current height. */
+function marginBand() {
+  const height = laneH.value
+  const band = height * MARGIN_BAND_FRAC
+  const pxPerDb = band / (MARGIN_ABOVE_DB + MARGIN_BELOW_DB)
+  const railY = height - MARGIN_BELOW_DB * pxPerDb
+  return { railY, pxPerDb, top: height - band }
+}
+
+/**
+ * Shade the runs of a margin curve that are over the rail.
+ *
+ * The crossings are interpolated, so each region tapers to a point where the
+ * curve meets the rail. Opening it at the first bin already over the line puts a
+ * vertical step at each end — which on a feature this size is a large part of
+ * what gets drawn, and reads as a wall rather than as a peak.
+ */
+function fillAboveRail(ctx, curve, bins, xStep, yFor, railY, ink) {
+  for (const run of findExceedanceRuns(curve, marginZeros, bins)) {
+    ctx.beginPath()
+    ctx.moveTo(run.startPos * xStep, railY)
+    for (let d = run.startBin; d <= run.endBin; d++) ctx.lineTo(d * xStep, yFor(curve[d]))
+    ctx.lineTo(run.endPos * xStep, railY)
+    ctx.closePath()
+    ctx.fillStyle = ink
+    ctx.fill()
+  }
+}
+
+/**
+ * How long a crossing stays visible after it stops, and how fast it goes.
+ *
+ * ⚠ THE HOLD IS THE POINT, NOT A REFINEMENT. Reported from use: the display
+ * moves too fast to read a resonance off. It does — the curves are averaged at
+ * a 103 ms time constant, which is right for a curve being watched and far too
+ * quick for a feature a few pixels tall that has to be FOUND first. A crossing
+ * that lasts two frames is drawn and gone before the eye arrives.
+ *
+ * The plateau is the one every other peak marker in the app holds for. The fall
+ * is the trace's own 0.32-of-full-scale per second read onto this quantity: the
+ * excess that matters here spans roughly a dozen dB, so the same proportion is
+ * about 4 dB a second. A crossing is therefore legible for something over two
+ * seconds — long enough to look at, short enough that the shape still belongs
+ * to the passage being played.
+ *
+ * PER BIN, and that is not a detail. One shared timer is broken by construction
+ * on a 192-point curve: it resets whenever ANY bin rises, something always is,
+ * and the hold never reaches its decay phase — the same failure this file
+ * already records for the reduction trace's peak hold.
+ */
+const EXCESS_FALL_DB_PER_SEC = 4
+
+let excessHold = null
+let excessAges = null
+/** The detection threshold, `reference + Selectivity`, per bin. */
+let threshold = null
+/** The live margin, `input - threshold`, per bin. */
+let margin = null
+/**
+ * A rail's worth of zeros.
+ *
+ * The run finder takes a curve and a threshold to compare it against; in margin
+ * space that threshold IS zero at every bin, and a cached array is what lets the
+ * same tested geometry serve both spaces rather than growing a second code path
+ * for the flat case.
+ */
+let marginZeros = null
+
+/**
+ * The threshold, the margin and the hold — computed once per frame, for both
+ * overlays that need them.
+ *
+ * ⚠ IT WAS INSIDE `drawMargin`, WHICH MADE THE SHADING A PROPERTY OF THE WRONG
+ * OVERLAY. The spectrum shades the same crossings in its own space, so with
+ * MARGIN off its hold never advanced and its ghosts never appeared. Two overlays
+ * reading one measurement is exactly the arrangement that has to be hoisted.
+ *
+ * Skipped entirely when neither is showing. The waterfall records itself
+ * continuously because a time record cannot be reconstructed after the fact;
+ * this can — a two-second hold refills within two seconds of being switched on —
+ * so it is not worth a zone lookup per bin per frame while invisible.
+ */
+function updateDetection(frame, dtMs) {
+  const { mag, reference, bins } = frame
+  if (!margin || margin.length !== bins) {
+    threshold = new Float32Array(bins)
+    margin = new Float32Array(bins)
+    marginZeros = new Float32Array(bins)
+    excessHold = new Float32Array(bins)
+    excessAges = new Float32Array(bins)
+  }
+
+  // Each zone carries its own Selectivity, read through the same lookup — and
+  // the same boundary crossfade — the kernel applies.
+  const spanOct = Math.log2(frame.maxHz / frame.minHz)
+  const hzAt = d => frame.minHz * Math.pow(2, (d / (bins - 1)) * spanOct)
+  for (let d = 0; d < bins; d++) {
+    threshold[d] = reference[d] + zoneSettingsAt(props.zones, hzAt(d)).selectivity
+    margin[d] = mag[d] - threshold[d]
+  }
+
+  advanceHold(bins, dtMs)
+}
+
+/** Advance the per-bin hold. Fed the live margin; leaves the decayed one behind. */
+function advanceHold(bins, dtMs) {
+  // Capped like every other dt in this file: a backgrounded tab returns with
+  // seconds on the clock, and spending them all on decay empties the hold in
+  // one frame.
+  const step = Math.min(dtMs, 100)
+  const fall = (EXCESS_FALL_DB_PER_SEC * step) / 1000
+
+  for (let d = 0; d < bins; d++) {
+    if (margin[d] > excessHold[d]) {
+      // Strictly greater, so a bin sitting at zero against a held zero does not
+      // restart its plateau on every frame forever.
+      excessHold[d] = margin[d]
+      excessAges[d] = 0
+    } else {
+      excessAges[d] += step
+      if (excessAges[d] >= PEAK_HOLD_MS) {
+        excessHold[d] = Math.max(margin[d], excessHold[d] - fall)
+      }
+    }
+  }
+}
+
 
 /**
  * Numerals down the right, and the rules that carry them across.
@@ -1103,8 +1531,8 @@ function drawGrScale(ctx, w) {
   let lastY = -Infinity
   for (const mark of grScaleMarks(props.fullScaleDb)) {
     if (!mark.label || mark.db === 0) continue
-    const y = mark.fraction * laneH.value
-    if (y < MIN_SCALE_GAP_PX / 2 || y > laneH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
+    const y = mark.fraction * reductionH.value
+    if (y < MIN_SCALE_GAP_PX / 2 || y > reductionH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
     lastY = y
     ctx.fillStyle = 'rgba(255,255,255,.05)'
     ctx.fillRect(0, Math.round(y) + 0.5, w - 20, 1)
