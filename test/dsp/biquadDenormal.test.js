@@ -47,6 +47,24 @@ function referenceProcess(sections, input, n) {
   return out
 }
 
+/**
+ * Guard against a vacuous comparison. Caught in review on this very file: two
+ * of these tests called `peaking()` with an options object where it wants
+ * `(sampleRate, freqHz, width, gainDb, widthType)`, which yields NaN
+ * coefficients — and `assert.equal(NaN, NaN)` PASSES, because it compares with
+ * Object.is. So the bit-identity tests ran green while comparing NaN against
+ * NaN at every sample. A test that cannot fail is worse than no test; anything
+ * asserting two signals match has to first establish that there is a signal.
+ */
+function assertLive(signal, label) {
+  let energy = 0
+  for (let i = 0; i < signal.length; i++) {
+    assert.ok(Number.isFinite(signal[i]), `${label}: sample ${i} is ${signal[i]}`)
+    energy += signal[i] * signal[i]
+  }
+  assert.ok(energy > 1e-6, `${label}: no signal to compare (energy ${energy})`)
+}
+
 function runCascade(sections, input, n, block = 128) {
   const cascade = new BiquadCascade(sections.length, 1)
   cascade.setSections(sections)
@@ -63,7 +81,7 @@ test('ordinary audio is bit-identical to the unflushed filter', () => {
   // cycle while z2 still carries full level, so a flush keyed on either half
   // alone — rather than on both — truncates the ring here. That mutation
   // passes every silence test and fails this one.
-  const sections = [peaking(SR, 800, 12, { type: 'q', value: 8 }), lowpass(SR, 4000, 0.7)]
+  const sections = [peaking(SR, 800, 8, 12, 'q'), lowpass(SR, 4000, 0.7)]
   const n = 8192
   const input = new Float64Array(n)
   for (let i = 0; i < n; i++) {
@@ -71,6 +89,7 @@ test('ordinary audio is bit-identical to the unflushed filter', () => {
   }
   const { out } = runCascade(sections, input, n)
   const ref = referenceProcess(sections, input, n)
+  assertLive(ref, 'reference')
   for (let i = 0; i < n; i++) {
     assert.equal(out[i], ref[i], `output moved at sample ${i}`)
   }
@@ -80,13 +99,14 @@ test('a decaying tail is reproduced exactly until it is far below audibility', (
   // The flush must end a tail that is already over, not truncate one that is
   // still running. Everything above the floor has to match the unflushed
   // filter bit for bit, including the whole audible part of the decay.
-  const sections = [peaking(SR, 300, 10, { type: 'q', value: 12 })]
+  const sections = [peaking(SR, 300, 12, 10, 'q')]
   const n = 65536
   const input = new Float64Array(n)
   for (let i = 0; i < 256; i++) input[i] = Math.sin((2 * Math.PI * 300 * i) / SR)
 
   const { out } = runCascade(sections, input, n)
   const ref = referenceProcess(sections, input, n)
+  assertLive(ref, 'reference')
 
   let checked = 0
   for (let i = 0; i < n; i++) {
@@ -117,6 +137,7 @@ test('a first-order section keeps its state — both halves must be tiny to flus
 
   const { out } = runCascade([onePole], input, n)
   const ref = referenceProcess([onePole], input, n)
+  assertLive(ref, 'reference')
   for (let i = 0; i < n; i++) {
     assert.equal(out[i], ref[i], `first-order state was cleared at sample ${i}`)
   }
