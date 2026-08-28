@@ -114,6 +114,7 @@ import {
   buildResonanceZoneCurves,
   resonanceDisplayRange,
 } from './resonanceParams.js'
+import { buildResonanceFocusCurves } from './resonanceFocus.js'
 
 const FFT_SIZE = 2048
 const HOP_SIZE = 512
@@ -472,6 +473,15 @@ export const RESONANCE_KERNEL_DEFAULTS = {
    * what the separate low/high limit pair used to do.
    */
   zones: DEFAULT_RESONANCE_ZONES,
+  /**
+   * Focus patch — `{ global, nodes }` — or null to use `zones`.
+   *
+   * Null rather than absent: this object is merged over the kernel's defaults,
+   * so a key present-but-undefined would overwrite a default rather than fall
+   * back to it. Null is a value that means something ("the other model"), which
+   * is what the dispatch in _deriveParams reads.
+   */
+  focus: null,
   // Wet/dry blend and wet-path makeup. Both live inside the kernel's per-bin
   // gain rather than as nodes around it — see _mixGain.
   mix: 1,
@@ -684,8 +694,17 @@ export class ResonanceKernel {
     // how the per-bin detector reads them. Rebuilt on any param change rather
     // than diffed — a few thousand lookups on a knob move, never on the audio
     // path.
+    //
+    // ⚠ TWO AUTHORING MODELS, ONE KERNEL. `focus` is the prototype targeting
+    // model (see resonanceFocus.js) and takes over when present; `zones` is
+    // what ships. Nothing below this line knows which one drew the curves,
+    // which is the point — the detector loop, the envelope groups, the mask and
+    // the ceiling all read per-bin arrays either way, so an alternative model
+    // is a panel change plus this dispatch rather than a DSP change.
     const zones = p.zones ?? DEFAULT_RESONANCE_ZONES
-    const curves = buildResonanceZoneCurves(zones, this.binCount, this.binWidth)
+    const curves = p.focus
+      ? buildResonanceFocusCurves(p.focus, this.binCount, this.binWidth)
+      : buildResonanceZoneCurves(zones, this.binCount, this.binWidth)
     this.zoneDepth = curves.depth
     this.zoneSelectivity = curves.selectivity
     this.zoneSharpness = curves.sharpness

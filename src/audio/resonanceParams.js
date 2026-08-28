@@ -9,6 +9,7 @@
  */
 
 import { pitchFloorHz } from './dsp/f0.js'
+import { copyFocus } from './resonanceFocus.js'
 
 /**
  * Matches FFT_SIZE in resonanceProcessor.js. Duplicated rather than imported so
@@ -658,6 +659,17 @@ export const RESONANCE_DEFAULTS = {
   refMode: 'peak',
   // Sensitivity zones — see DEFAULT_RESONANCE_ZONES above. Not filters.
   zones: DEFAULT_RESONANCE_ZONES,
+  /**
+   * Focus patch, or null for the zone model. See resonanceFocus.js.
+   *
+   * ⚠ PRESENT AND NULL, NOT ABSENT, and that is load-bearing twice over. The
+   * effect wrapper's `setParam` guards with `name in params`, so a key missing
+   * from this object is not rejected — it is SILENTLY DROPPED, which is exactly
+   * how the soft clipper's drive ratios shipped as a control that did nothing
+   * for a whole listening session. And `toKernelParams` forwards every key, so
+   * null has to be a value the kernel understands rather than a hole.
+   */
+  focus: null,
   mix: 1, // 0 = dry, 1 = fully suppressed
   trim: 0, // dB, wet path only
 }
@@ -679,6 +691,10 @@ export function toKernelParams(params) {
     // param push throws, so the meter loop never starts and the display and the
     // DELTA monitor both stay dark. Same reason manualEq copies its bands.
     zones: copyZones(params.zones),
+    // Copied field by field for the same reason zones are: a Vue reactive proxy
+    // does not survive `structuredClone`, and the throw lands on the first param
+    // push — taking the meter loop, the display and the DELTA monitor with it.
+    focus: copyFocus(params.focus),
     mix: params.mix,
     trimDb: params.trim,
   }

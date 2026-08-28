@@ -20,6 +20,9 @@ import Knob from '../knobs/Knob.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
+import ResonanceFocusControls from './ResonanceFocusControls.vue'
+import ResonanceFocusNode from './ResonanceFocusNode.vue'
+import ResonanceFocusRail from './ResonanceFocusRail.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -30,6 +33,7 @@ const {
   resPreview, resDelta, resReduction,
   resDisplayFn, hasSelection,
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
+  resTargeting, resFocus, resSelectedNode, syncFocus,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
   apply, teardown, closeModal,
@@ -42,6 +46,16 @@ onMounted(() => {
 })
 
 const ACCENT = '#8de0a8'
+
+/**
+ * Running the prototype targeting model — see src/audio/resonanceTargeting.js.
+ *
+ * A const rather than a computed: the model is resolved once at module load, so
+ * a reactive read here would only ever produce the same answer at more cost,
+ * and would imply the panel can switch between them at runtime. It cannot, on
+ * purpose.
+ */
+const focusMode = resTargeting === 'focus'
 
 /**
  * The spectrum display's height — opens at 140, and grows from there. See
@@ -397,6 +411,7 @@ async function applyAndClose() {
              margin left over from when it aligned them to the baseline would
              lift this one 3 px above the axis it is being centred on. -->
         <ResonanceZoneCount
+          v-if="!focusMode"
           :zones="resZones"
           :selected="resSelectedZone"
           :disabled="!resPreview"
@@ -407,6 +422,19 @@ async function applyAndClose() {
           @update:selected="resSelectedZone = $event"
           @fit="fitZonesToVoice"
         />
+        <!-- ⚠ AN OVERRIDE IS A THING YOU FORGET YOU TURNED ON — the same rule
+             the reference-mode badge follows two rows up, and the reason this
+             is a badge rather than nothing. The panel is running a targeting
+             model that does not ship, and everything below the plot is a
+             different control surface from the one the notes describe. -->
+        <span
+          v-else
+          class="px-2 py-1 rounded-full"
+          style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em;
+                 color:#ffb27a;background:rgba(255,178,122,.12);
+                 border:1px solid rgba(255,178,122,.45)"
+          title="Prototype targeting model: one global detector plus focus nodes. ?resoTargeting=zones for the shipping model."
+        >FOCUS · NOT SHIPPED</span>
 
         <span class="flex flex-col items-end self-end gap-[5px] min-w-0">
 
@@ -442,20 +470,60 @@ async function applyAndClose() {
         </span>
       </div>
 
+      <!-- The plot draws zone columns from what it is GIVEN, so in focus mode it
+           is given none. The rail below owns targeting there, and two editors
+           for one idea on one plate is exactly the confusion this prototype
+           exists to remove. -->
       <ResonanceSpectrum
         :data-fn="resDisplayFn"
         :reduction-db="resReduction"
         :accent="ACCENT"
         :height="plotHeight"
         :delta="resDelta"
-        :zones="resZones"
-        :selected-zone="resSelectedZone"
-        :delta-zone="resDeltaZone"
+        :zones="focusMode ? [] : resZones"
+        :selected-zone="focusMode ? -1 : resSelectedZone"
+        :delta-zone="focusMode ? -1 : resDeltaZone"
         :overlays="overlays"
         @update:zones="syncZones"
         @update:selected-zone="resSelectedZone = $event"
         @update:reading="reading = $event"
       />
+
+      <!-- THE RAIL SITS DIRECTLY UNDER THE PLOT AND SHARES ITS X AXIS, with no
+           gap and no divider, because the two are one picture split by what
+           they measure: above is what the detector FOUND, below is where it was
+           told to look. Any separation between them and the frequencies stop
+           reading as the same frequencies.
+
+           `dataFn` goes to both for that reason — the axis is derived from the
+           kernel's own frame, once, so the two cannot disagree about where
+           1 kHz is. -->
+      <ResonanceFocusRail
+        v-if="focusMode"
+        class="mt-[3px]"
+        :nodes="resFocus.nodes"
+        :selected="resSelectedNode"
+        :data-fn="resDisplayFn"
+        :accent="ACCENT"
+        :disabled="!resPreview"
+        @update:nodes="syncFocus({ ...resFocus, nodes: $event })"
+        @update:selected="resSelectedNode = $event"
+      />
+
+      <!-- The selected node's numbers, with the rail rather than with the
+           detector knobs: the rail owns where a node IS, this owns exactly what
+           it is set to. Same division the plot and the zone controls already
+           draw, applied to a different pair. -->
+      <div v-if="focusMode" class="flex items-center mt-[7px]">
+        <ResonanceFocusNode
+          :focus="resFocus"
+          :selected="resSelectedNode"
+          :pitch-range-caption="pitchRangeCaption"
+          :accent="ACCENT"
+          :disabled="!resPreview"
+          @update:focus="syncFocus"
+        />
+      </div>
 
       <!-- ONE ROW FOR EVERYTHING BELOW THE PLOT, and it used to be two.
            Directly under the display because the row and the plot are one
@@ -512,7 +580,15 @@ async function applyAndClose() {
         <!-- min-w-0 so the plate is what gives way if the row ever runs out of
              width, rather than a knob being clipped off the end. -->
         <div class="flex-1 min-w-0">
+          <ResonanceFocusControls
+            v-if="focusMode"
+            :focus="resFocus"
+            :accent="ACCENT"
+            :disabled="!resPreview"
+            @update:focus="syncFocus"
+          />
           <ResonanceZoneControls
+            v-else
             :zones="resZones"
             :selected="resSelectedZone"
             :delta-zone="resDeltaZone"

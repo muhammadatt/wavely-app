@@ -6,6 +6,8 @@ import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
 import { resolveRefMode, withRefModeDefaults } from '../audio/resonanceParams.js'
 import { placeResonanceZones } from '../audio/resonanceZonePlacement.js'
+import { resolveTargeting } from '../audio/resonanceTargeting.js'
+import { DEFAULT_RESONANCE_FOCUS, copyFocus } from '../audio/resonanceFocus.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
@@ -40,6 +42,28 @@ const resZones = ref(DEFAULTS.zones ?? [])
 /** Which zone the strip is editing. UI state, never sent to the kernel. */
 const resSelectedZone = ref(0)
 const resTrim = ref(DEFAULTS.trim)
+
+/**
+ * Which targeting model this session is running: 'zones' (ships) or 'focus'.
+ *
+ * Resolved once at module load rather than per render. Switching models
+ * mid-session would mean two authoring surfaces editing one kernel, and the
+ * question this flag exists to answer — which one can a person think in — is
+ * not asked by flipping between them inside one panel; it is asked by working a
+ * file in one and then working it in the other.
+ */
+export const resTargeting = resolveTargeting()
+
+/**
+ * The focus patch, or null when the zone model is running.
+ *
+ * `copyFocus` rather than the constant itself: DEFAULT_RESONANCE_FOCUS is a
+ * module-level object, and handing it straight to a ref would let the first
+ * knob move edit the default for the rest of the session.
+ */
+const resFocus = ref(resTargeting === 'focus' ? copyFocus(DEFAULT_RESONANCE_FOCUS) : null)
+/** Which focus node the controls strip is editing. UI state, never a parameter. */
+const resSelectedNode = ref(-1)
 
 /**
  * Zone whose removal is being auditioned, or -1. UI STATE, NEVER A PARAMETER.
@@ -148,6 +172,9 @@ function currentParams() {
     mix: resMix.value,
     trim: resTrim.value,
     zones: resZones.value,
+    // Null under the zone model, which is what the kernel's dispatch reads as
+    // "use zones". Present-and-null rather than absent — see RESONANCE_DEFAULTS.
+    focus: resFocus.value,
     refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
     mode: resMode.value,
   }
@@ -253,6 +280,20 @@ export function useResonance() {
   const syncZones = (v) => {
     resZones.value = v
     pushZones()
+  }
+
+  /**
+   * A focus edit: the whole patch at once.
+   *
+   * One ref rather than one per field, and one push rather than several. The
+   * globals and the nodes are read together by `buildResonanceFocusCurves` —
+   * every per-bin threshold is `global.selectivity - bias`, so a node move and a
+   * global move are the same kind of edit to the same curve. Splitting them
+   * would mean two params that must arrive in the same frame to be coherent.
+   */
+  const syncFocus = (v) => {
+    resFocus.value = v
+    pushParam('focus', v)
   }
 
   /**
@@ -407,6 +448,10 @@ export function useResonance() {
     resZones,
     resSelectedZone,
     resDeltaZone,
+    resTargeting,
+    resFocus,
+    resSelectedNode,
+    syncFocus,
     resRefMode,
     resMode,
     resPreview,
