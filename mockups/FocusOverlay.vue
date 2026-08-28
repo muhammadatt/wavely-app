@@ -28,6 +28,9 @@ const props = defineProps({
   treatment: { type: String, default: 'lane' },
   nodes: { type: Array, default: () => [] },
   selected: { type: Number, default: -1 },
+  /** The live frame, needed only by the `over-live` variant. */
+  frame: { type: Object, default: null },
+  globalThresholdDb: { type: Number, default: 20 },
   height: { type: Number, default: 280 },
   accent: { type: String, default: '#8de0a8' },
 })
@@ -62,12 +65,227 @@ function draw() {
 
   const axis = { w, minHz: 20, maxHz: 20000 }
   const A = props.accent
-  if (props.treatment === 'lane') drawLane(ctx, w, axis, A)
+  if (props.treatment === 'lobes') drawLobes(ctx, w, axis, A)
+  else if (props.treatment.startsWith('over-')) drawOver(ctx, w, axis, A, props.treatment)
+  else if (props.treatment === 'lane') drawLane(ctx, w, axis, A)
   else if (props.treatment === 'columns') drawColumns(ctx, w, axis, A)
   else if (props.treatment === 'both') { drawTethers(ctx, w, axis, A); drawLane(ctx, w, axis, A, true) }
   else drawRail(ctx, w, axis, A)
 
   raf = requestAnimationFrame(draw)
+}
+
+/**
+ * The spectrum band's geometry, reproduced from the plot's own constants.
+ *
+ * The plot tiles three bands: the reduction lane (35%) at the top, the FOUND
+ * strip (13%) at the floor, and the spectrum filling exactly what is left. A
+ * curve drawn over the spectrum has to know where that is.
+ */
+const REDUCTION_FRAC = 0.35
+const FOUND_FRAC = 0.13
+const SPEC_DB_MIN = -85
+const SPEC_DB_MAX = -15
+
+function specBand() {
+  const bottom = laneH.value - laneH.value * FOUND_FRAC
+  return { bottom, band: bottom - laneH.value * REDUCTION_FRAC }
+}
+
+/** Below this the bias is not drawn at all — the plot's own figure for "no cut". */
+const BIAS_VISIBLE_DB = 0.3
+
+/**
+ * TREATMENT LOBES — the bias over the spectrum, DRAWN ONLY WHERE IT DEPARTS
+ * FROM NEUTRAL. No rail anywhere, because there is no continuous line.
+ *
+ * ⚠ THIS IS THE FIX FOR THE THING THAT MADE THE OVER-* VARIANTS STILL READ AS
+ * RAILS. A bias curve is flat almost everywhere — that is the point of the
+ * model, an untouched spectrum is untouched — so drawing it edge to edge paints
+ * a full-width horizontal line across the plot, and a full-width horizontal
+ * line IS a rail whatever it is called. The plot already settled this for the
+ * reduction trace: broken at 0.3 dB, "because in its own lane a continuous
+ * stroke along the top read as that lane's zero datum". Same rule, same figure.
+ *
+ * What is left is a lobe per node, sitting on the material it is aimed at, with
+ * its handle at the peak — an annotation on the spectrum rather than a second
+ * instrument beside it. Its datum is still static, for the reason drawOver
+ * records: on the live threshold a handle travels 43 px in two seconds.
+ */
+function drawLobes(ctx, w, axis, A) {
+  const { bottom, band } = specBand()
+  const datum = bottom - band * 0.86
+  const pxPerDb = band * 0.4 / MAX_DB
+  const yAt = hz => datum + focusBiasAt(props.nodes, hz) * pxPerDb
+
+  // Runs of consecutive columns where the bias is worth drawing. Each opens one
+  // column before it crosses and closes one after, so a lobe does not begin
+  // mid-slope — the same rule the reduction trace's runs follow.
+  const runs = []
+  let run = null
+  for (let x = 0; x <= w; x++) {
+    const hz = axis.minHz * Math.pow(2, (x / w) * Math.log2(axis.maxHz / axis.minHz))
+    const db = focusBiasAt(props.nodes, hz)
+    if (Math.abs(db) >= BIAS_VISIBLE_DB) {
+      if (!run) run = { from: Math.max(0, x - 1), pts: [] }
+      run.pts.push({ x, y: datum + db * pxPerDb })
+    } else if (run) {
+      run.to = x
+      runs.push(run)
+      run = null
+    }
+  }
+  if (run) { run.to = w; runs.push(run) }
+
+  for (const r of runs) {
+    // A short dashed segment of the neutral datum under each lobe, so the bow
+    // is readable as a departure FROM something without that something running
+    // the width of the plot.
+    ctx.strokeStyle = 'rgba(255,255,255,.16)'
+    ctx.setLineDash([2, 4])
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(r.from, Math.round(datum) + 0.5)
+    ctx.lineTo(r.to, Math.round(datum) + 0.5)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    ctx.beginPath()
+    ctx.moveTo(r.from, datum)
+    for (const p of r.pts) ctx.lineTo(p.x, p.y)
+    ctx.lineTo(r.to, datum)
+    ctx.closePath()
+    ctx.fillStyle = tint(A, 0.18)
+    ctx.fill()
+
+    ctx.beginPath()
+    ctx.moveTo(r.from, datum)
+    for (const p of r.pts) ctx.lineTo(p.x, p.y)
+    ctx.lineTo(r.to, datum)
+    ctx.strokeStyle = bright(A)
+    ctx.lineWidth = 1.7
+    ctx.shadowColor = tint(A, 0.55)
+    ctx.shadowBlur = 9
+    ctx.stroke()
+    ctx.shadowBlur = 0
+  }
+
+  props.nodes.forEach((n, i) => {
+    const x = xFromHz(n.hz, axis)
+    handle(ctx, x, yAt(n.hz), i === props.selected, n.enabled !== false, A)
+  })
+  if (props.selected >= 0 && props.nodes[props.selected]) {
+    const n = props.nodes[props.selected]
+    const x = xFromHz(n.hz, axis)
+    const y = yAt(n.hz)
+    const span = n.spanOct < 1 ? `${(n.spanOct * 12).toFixed(0)}st` : `${n.spanOct.toFixed(2)}oct`
+    // Outward from the lobe, so the pill never lands on the curve it describes.
+    pill(ctx, x, y + (n.biasDb >= 0 ? 18 : -18),
+      `${hzLabel(n.hz)}  ${span}  ${n.biasDb > 0 ? '+' : ''}${n.biasDb.toFixed(1)}`, A, w)
+  }
+}
+
+/**
+ * TREATMENT C-OVER — THE BIAS CURVE ITSELF, OVER THE SPECTRUM. No rail, no
+ * reserved band, no second picture: one curve laid over the material it is
+ * aimed at, with the handles on it.
+ *
+ * ⚠ ITS DATUM IS STATIC, AND THAT IS THE WHOLE DESIGN. The obvious reading of
+ * "put it over the spectrum" is to hang the handles on the THRESHOLD staircase,
+ * since that is the line a node actually biases. Measured on this probe — a
+ * ±12 dB syllabic modulation, which is conservative against real speech — the
+ * threshold line at one node's frequency travels **43 px in two seconds and up
+ * to 7 px between consecutive frames**, on a spectrum band 139 px tall. That is
+ * the recorded "impossible to aim" report, in numbers.
+ *
+ * So the curve keeps the threshold's PLACE without the threshold's MOTION: a
+ * fixed datum across the plot, the bias bowing off it, the spectrum showing
+ * through. Nothing about it moves except when a knob does.
+ */
+function drawOver(ctx, w, axis, A, mode) {
+  const { bottom, band } = specBand()
+  const datum = mode === 'over-top'
+    ? bottom - band * 0.88
+    : mode === 'over-live'
+      ? null
+      : bottom - band * 0.52
+  const pxPerDb = band * 0.4 / MAX_DB
+  const yFor = db => (bottom - Math.max(0, Math.min(1, (db - SPEC_DB_MIN)
+    / (SPEC_DB_MAX - SPEC_DB_MIN))) * band)
+
+  // Where the curve sits at a given x. On the live variant it rides the actual
+  // threshold, which is what makes that variant unusable — included so the
+  // motion can be seen rather than taken on trust.
+  const yAt = (x, hz) => {
+    if (datum === null) {
+      const f = props.frame
+      const d = Math.round((x / w) * (f.bins - 1))
+      return yFor(f.reference[d] + (props.globalThresholdDb ?? 20) - focusBiasAt(props.nodes, hz))
+    }
+    // Positive bias — more cut — bows the curve DOWN, toward the material,
+    // because that is what lowering a threshold does.
+    return datum + focusBiasAt(props.nodes, hz) * pxPerDb
+  }
+
+  const pts = []
+  for (let x = 0; x <= w; x++) {
+    const hz = axis.minHz * Math.pow(2, (x / w) * Math.log2(axis.maxHz / axis.minHz))
+    pts.push({ x, y: yAt(x, hz), hz })
+  }
+
+  // The neutral datum it departs from, so a bow reads as a departure rather
+  // than as an arbitrary shape. Absent on the live variant, which has no
+  // neutral position to draw.
+  if (datum !== null) {
+    ctx.strokeStyle = 'rgba(255,255,255,.13)'
+    ctx.setLineDash([3, 5])
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(0, Math.round(datum) + 0.5)
+    ctx.lineTo(w, Math.round(datum) + 0.5)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // The fill goes between the curve and its datum, so the shaded area IS the
+    // bias — nothing is shaded where nothing has been asked for.
+    ctx.beginPath()
+    ctx.moveTo(0, datum)
+    for (const p of pts) ctx.lineTo(p.x, p.y)
+    ctx.lineTo(w, datum)
+    ctx.closePath()
+    ctx.fillStyle = tint(A, 0.16)
+    ctx.fill()
+  }
+
+  ctx.beginPath()
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)))
+  ctx.strokeStyle = bright(A)
+  ctx.lineWidth = 1.8
+  ctx.shadowColor = tint(A, 0.55)
+  ctx.shadowBlur = 9
+  ctx.stroke()
+  ctx.shadowBlur = 0
+
+  props.nodes.forEach((n, i) => {
+    const x = xFromHz(n.hz, axis)
+    handle(ctx, x, yAt(x, n.hz), i === props.selected, n.enabled !== false, A)
+  })
+  if (props.selected >= 0 && props.nodes[props.selected]) {
+    const n = props.nodes[props.selected]
+    const x = xFromHz(n.hz, axis)
+    const span = n.spanOct < 1 ? `${(n.spanOct * 12).toFixed(0)}st` : `${n.spanOct.toFixed(2)}oct`
+    pill(ctx, x, yAt(x, n.hz) - 18,
+      `${hzLabel(n.hz)}  ${span}  ${n.biasDb > 0 ? '+' : ''}${n.biasDb.toFixed(1)}`, A, w)
+  }
+
+  if (datum !== null) {
+    ctx.font = "500 8px 'JetBrains Mono',monospace"
+    ctx.fillStyle = 'rgba(255,255,255,.34)'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText('MORE CUT', 7, datum + pxPerDb * MAX_DB * 0.62)
+    ctx.textBaseline = 'top'
+    ctx.fillText('LESS CUT', 7, datum - pxPerDb * MAX_DB * 0.62)
+  }
 }
 
 /**

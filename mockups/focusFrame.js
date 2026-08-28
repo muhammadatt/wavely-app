@@ -45,12 +45,26 @@ function magnitudeAt(hz) {
  * shipping reference draws — so the resonances protrude from it exactly as they
  * do in the real thing.
  */
-export function makeFrame(focus, bins = RESONANCE_DISPLAY_BINS) {
+export function makeFrame(focus, bins = RESONANCE_DISPLAY_BINS, t = 0) {
   const span = Math.log2(MAX_HZ / MIN_HZ)
   const hzAt = d => MIN_HZ * Math.pow(2, (d / (bins - 1)) * span)
 
+  // ⚠ TIME-VARYING, AND THAT IS THE POINT OF THE `t`. A still frame cannot
+  // answer the only question that matters for putting handles on the threshold
+  // line: how far does that line TRAVEL. Real speech swings a per-bin envelope
+  // by tens of dB between a vowel and a pause, so the probe modulates level at
+  // a syllabic rate and tilts the spectrum as it goes — a pause is not merely
+  // quieter, it is a different shape.
+  const syl = Math.sin(t * 2 * Math.PI * 3.1)          // ~3 Hz, syllabic
+  const phrase = Math.sin(t * 2 * Math.PI * 0.35)      // phrase-level drift
+  const level = 9 * syl + 3 * phrase
+  const tilt = 3 * Math.sin(t * 2 * Math.PI * 2.3)
+
   const mag = new Float32Array(bins)
-  for (let d = 0; d < bins; d++) mag[d] = magnitudeAt(hzAt(d))
+  for (let d = 0; d < bins; d++) {
+    const hz = hzAt(d)
+    mag[d] = magnitudeAt(hz) + level + tilt * (Math.log2(hz) - Math.log2(500)) * 0.35
+  }
 
   // The envelope: a wide moving average in log frequency, which is what the
   // peak reference is to within the detail this mockup needs.
