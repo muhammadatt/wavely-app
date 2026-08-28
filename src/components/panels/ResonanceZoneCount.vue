@@ -197,6 +197,17 @@ function removeZone() {
         {{ zones.length }}</span>
     </div>
 
+    <button
+      class="w-[22px] h-[20px] rounded-[5px] font-mono text-[14px] font-bold leading-none
+             bg-surface-2 text-text-softer hover:bg-[#8de0a833] hover:text-[#bbeccb]
+             cursor-pointer disabled:cursor-default disabled:opacity-30"
+      :disabled="disabled || !canSplit"
+      title="Split this zone at its centre"
+      aria-label="Split this zone at its centre"
+      @click="addZone"
+    >+</button>
+    </div>
+
     <!-- The boundaries this panel ships are the MALE region table applied to
          every voice — 1100 Hz is within an eighth of an octave of
          `lower_presence`'s bottom (1200). FIT measures the speaker, scales that
@@ -219,7 +230,8 @@ function removeZone() {
         title="Measure the voice and place the zone boundaries from its pitch"
         @click="emit('fit')"
       >{{ fitLabel }}</button>
-
+      <span class="font-mono text-[8px] leading-none text-text-faint">{{ fitCaption }}</span>
     </span>
+  </div>
   </div>
 </template>
