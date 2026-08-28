@@ -202,19 +202,19 @@ function removeZone() {
              bg-surface-2 text-text-softer hover:bg-[#8de0a833] hover:text-[#bbeccb]
              cursor-pointer disabled:cursor-default disabled:opacity-30"
       :disabled="disabled || !canSplit"
-      title="Split this zone in two"
-      aria-label="Split this zone in two"
+      title="Split this zone at its centre"
+      aria-label="Split this zone at its centre"
       @click="addZone"
     >+</button>
-  </div>
+    </div>
 
-  </div>
-        <!-- The boundaries this panel ships are the MALE region table applied to
-         every voice — 180 Hz is `body_warmth`'s geometric centre, 1100 Hz is
-         within an eighth of an octave of `lower_presence`'s bottom (1200). FIT
-         measures the speaker and scales them by their own anchors' ratios, and
-         adds the sub-fundamental split. A male narrator reproduces the shipped
-         set exactly, which is the point: nothing already listened to moves. See
+    <!-- The boundaries this panel ships are the MALE region table applied to
+         every voice — 1100 Hz is within an eighth of an octave of
+         `lower_presence`'s bottom (1200). FIT measures the speaker, scales that
+         one by its own anchor's ratio, and derives the other two from the
+         measured pitch: the sub-fundamental split, and a Z2 top that actually
+         contains the fundamental. A male narrator reproduces the shipped UPPER
+         boundaries exactly, so nothing already listened to moves. See
          resonanceZonePlacement.js. -->
     <!-- FIT over its caption, mirroring the overlay switches at the other end
          of the row, which stack under their own summary line for the same
@@ -230,7 +230,8 @@ function removeZone() {
         title="Measure the voice and place the zone boundaries from its pitch"
         @click="emit('fit')"
       >{{ fitLabel }}</button>
-
+      <span class="font-mono text-[8px] leading-none text-text-faint">{{ fitCaption }}</span>
     </span>
+  </div>
   </div>
 </template>

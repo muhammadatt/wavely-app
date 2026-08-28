@@ -12,17 +12,24 @@
  * tables MOVE with the voice — mud is 200-420 Hz for a male narrator and
  * 280-550 for a female one, because a region is a fixed interval above the
  * fundamental rather than a fixed frequency — and `classifyVoice` interpolates
- * between them continuously. So the same three boundaries, measured rather than
- * assumed, sit 0.26-0.47 octaves higher for a female narrator. Left where they
- * are, her fundamental at ~220 Hz falls in z2 rather than z1: the zone whose
+ * between them where the two tables meet. Left at the shipped values, a female
+ * narrator's fundamental at ~220 Hz falls in z2 rather than z1: the zone whose
  * whole purpose is the fundamental region does not contain her fundamental.
  *
- * WHAT IS DERIVED IS A RATIO, NOT A FREQUENCY, and that is the point. The stock
- * numbers are the ones that have been listened to; they are simply the ones
- * that were listened to on male narration. Each boundary is scaled by its own
- * anchor's ratio against the male table, so a male voice reproduces the stock
- * set EXACTLY and nothing already calibrated moves. Nothing new is invented —
- * every number here comes out of the region tables.
+ * ⚠ TWO MECHANISMS, NOT ONE, and an earlier version of this note claimed
+ * otherwise. The boundaries divide into:
+ *
+ *  - DERIVED from the measured pitch — the sub-fundamental corner
+ *    (`rumbleCornerHz`) and Z2's top (`fundamentalTopHz`). Neither is a scaled
+ *    stock value, and the shipped 180 is not used for anything at all.
+ *  - SCALED from the shipped value by its own anchor's ratio against the
+ *    calibration voice — presence, and sibilance if the set is re-split. These
+ *    are the ones that have been listened to, and a male voice reproduces them
+ *    EXACTLY, so nothing already calibrated moves.
+ *
+ * The scaled half invents nothing: every number comes out of the region tables.
+ * The derived half carries two constants of its own, `HARMONIC_REACH` and
+ * `MIN_F0_MARGIN`, both argued at their definitions.
  *
  * ⚠ THE CORPUS CANNOT VALIDATE THIS. Every real narrator clip this codebase has
  * measured against is male or near it, so the placement is a near-no-op on all
@@ -47,13 +54,12 @@ export const PLACEMENT_FLOOR_HZ = 20
 export const PLACEMENT_CEIL_HZ = 20000
 
 /**
- * The three anchors, and why each one is the edge it is.
+ * The anchors for the scaled boundaries, and why each one is the edge it is.
  *
- * `fundamental` — the geometric CENTRE of `body_warmth` rather than one of its
- * edges. body_warmth is the chest/fundamental region, and the boundary wants to
- * sit inside it: above the fundamental itself, below the mud that begins where
- * body ends. Its centre is 183.3 Hz for a male voice, which is where the stock
- * 180 came from.
+ * ⚠ THERE IS NO `fundamental` ANCHOR ANY MORE. It was `body_warmth`'s geometric
+ * centre — 183.3 Hz for a male voice, which is where the shipped 180 came from
+ * — and it was replaced by `fundamentalTopHz` because a region-table anchor
+ * does not know where the fundamental is. See the measurements there.
  *
  * `presence` — `lower_presence`'s bottom edge, i.e. exactly where the voice
  * stops being body and starts being articulation. Male 1200, female 1500.
@@ -64,29 +70,87 @@ export const PLACEMENT_CEIL_HZ = 20000
  * stock set is the male table.
  */
 const ANCHORS = {
-  fundamental: r => Math.sqrt(r.body_warmth[SCAN_LOW] * r.body_warmth[SCAN_HIGH]),
   presence: r => r.lower_presence[SCAN_LOW],
   sibilance: r => r.upper_presence[SCAN_HIGH],
 }
 
 /**
- * The anchors in frequency order, one per calibrated boundary.
+ * The anchors for the UPPER boundaries, in frequency order.
+ *
+ * The fundamental boundary is not in this list any more — it is derived from
+ * the measured F0 rather than scaled from a stock value; see
+ * `fundamentalTopHz`. Everything above it is still a ratio against the
+ * calibration voice, so the boundaries that have been listened to do not move.
  *
  * ⚠ THE SHIPPED ZONE SET IS NOT A FIXED LENGTH, and assuming it was cost this
  * module a silent failure. It was three boundaries (180 / 1100 / 5000) when
  * this was written; the panel has since folded the upper-mid and air zones
  * together and ships two (180 / 1100), and a hard `length !== 3` guard turned
  * that into `placeResonanceZones` returning null — FIT enabled, pressed, and
- * doing nothing, with no error anywhere.
- *
- * So the list is read as "the anchors for however many boundaries there are",
- * low to high, and `calibratedBoundaries` reads the set itself. Re-splitting at
- * 5 kHz brings `sibilance` back with no edit here. The assumption that remains
- * — that the shipped boundaries are these anchors in this order — is what the
- * placement means, and it is pinned per-boundary in the tests rather than
- * left to the count.
+ * doing nothing, with no error anywhere. The list is read as "one anchor per
+ * upper boundary", so re-splitting at 5 kHz brings `sibilance` back with no
+ * edit here.
  */
-const ANCHOR_ORDER = ['fundamental', 'presence', 'sibilance']
+const ANCHOR_ORDER = ['presence', 'sibilance']
+
+/**
+ * How far above the fundamental Z2 reaches, and why it is a multiple of F0.
+ *
+ * ⚠ THE OLD RULE DID NOT CONTAIN WHAT THE ZONE IS NAMED AFTER. Z2's top was
+ * `body_warmth`'s geometric centre, which is a region-table anchor and has no
+ * relationship to a harmonic series: measured across F0 90-240 it contained the
+ * fundamental every time and the SECOND HARMONIC exactly never (2F0 landed
+ * above the boundary at every F0 above 90), and the headroom above F0 collapsed
+ * as the voice rose — 0.71 octaves at F0 110, 0.17 at 170, 0.04 at 240. A zone
+ * whose whole purpose is the fundamental region was sized by something that
+ * does not know where the fundamental is.
+ *
+ * 2.5 rather than 2.0 so the 2nd harmonic sits INSIDE the zone with margin
+ * rather than on its edge, where the 1/6-octave crossfade would split it
+ * between two settings.
+ */
+const HARMONIC_REACH = 2.5
+
+/**
+ * The fundamental must be inside its own zone, whatever else happens.
+ *
+ * This is the guarantee that outranks the mud cap. `classifyVoice` saturates —
+ * every voice above F0 200 gets the female table — so a cap read off that table
+ * is a CONSTANT above 200 Hz while F0 keeps rising, and at F0 340 the cap alone
+ * would put Z2's top at 280 Hz, below the speaker's own fundamental. 1.2 leaves
+ * about a fifth of an octave of margin above F0, which is enough that ordinary
+ * pitch movement around the median does not fall out of the zone on every
+ * emphatic syllable.
+ *
+ * ⚠ Where this binds, Z2 DOES cross into mud. That is the intended precedence:
+ * a zone that excludes the fundamental is broken, a zone that overlaps mud is
+ * merely wide.
+ */
+const MIN_F0_MARGIN = 1.2
+
+/**
+ * Where Z2 stops: reach for the 2nd harmonic, stop at mud, never below F0.
+ *
+ * ⚠ THE CAP BINDS ON ALMOST EVERY REAL VOICE, and saying so is the honest
+ * description of this rule. `2.5 x F0` only comes in under mud's bottom edge
+ * below about F0 80 (male table) or F0 112 (female), so for a typical narrator
+ * Z2 ends exactly where mud begins — 200 Hz for a male voice, 280 for a female
+ * one. That is a defensible definition of the fundamental region in its own
+ * right, and it is what keeps Z3 meaning "mud, boxy, nasal" rather than
+ * swallowing the bottom of it.
+ *
+ * ⚠ SO 2F0 IS NOT GUARANTEED. At F0 110 the 2nd harmonic is 220 Hz and the cap
+ * puts the boundary at 200, so it falls into Z3. Reaching it would mean Z2
+ * running to 275 Hz and taking the bottom of mud with it. The reach is
+ * best-effort; the F0 containment below is the guarantee.
+ */
+function fundamentalTopHz(medianF0Hz, regions) {
+  const mudStartsHz = regions.mud[SCAN_LOW]
+  return Math.max(
+    Math.min(HARMONIC_REACH * medianF0Hz, mudStartsHz),
+    MIN_F0_MARGIN * medianF0Hz,
+  )
+}
 
 /** The reference voice the stock numbers were calibrated on. */
 const CALIBRATION_F0_HZ = 110
@@ -94,30 +158,47 @@ const CALIBRATION_F0_HZ = 110
 /**
  * Boundaries for a voice, low to high: [subF0, ...calibrated].
  *
- * The first is the rumble corner — measured, not scaled, because "below this
- * there cannot be voice" is a statement about this speaker rather than about a
- * region table. The rest are the stock boundaries (currently [fundamental,
- * presence], i.e. 180 / 1100 Hz for a male voice) scaled by their anchors'
- * ratios against the calibration voice.
+ * The first two are DERIVED from the measured pitch and owe nothing to the
+ * stock set: the rumble corner, because "below this there cannot be voice" is a
+ * statement about this speaker; and Z2's top, because the zone has to contain
+ * the fundamental it is named after. The rest are the stock boundaries
+ * (currently just `presence`, 1100 Hz for a male voice) scaled by their
+ * anchors' ratios against the calibration voice.
+ *
+ * ⚠ `stock[0]` is therefore READ BUT NOT USED — it is the shipped fundamental
+ * boundary, and it only contributes its position in the list. Only stock[1..]
+ * is scaled.
  *
  * @param {number} medianF0Hz  median of the tracker's voiced-frame estimates
  * @param {number} cornerHz    rumbleCornerHz() for the same F0 population
  * @param {number[]} stock     the calibrated boundaries, male-derived
  */
 export function voiceZoneBoundaries(medianF0Hz, cornerHz, stock) {
+  // n counts the shipped boundaries: one fundamental boundary plus one per
+  // anchor, so the set may be one longer than ANCHOR_ORDER.
   const n = stock?.length ?? 0
-  if (!(medianF0Hz > 0) || !(cornerHz > 0) || n < 1 || n > ANCHOR_ORDER.length) return null
+  if (!(medianF0Hz > 0) || !(cornerHz > 0) || n < 1 || n > ANCHOR_ORDER.length + 1) return null
 
   const { regions, voiceType } = classifyVoice(medianF0Hz)
   const { regions: reference } = classifyVoice(CALIBRATION_F0_HZ)
 
-  const scaled = ANCHOR_ORDER.slice(0, n).map((name, i) => {
+  // The first shipped boundary is the fundamental one, and it is DERIVED from
+  // the measured pitch rather than scaled from its stock value — the stock 180
+  // is not used at all. Everything above it is a ratio against the calibration
+  // voice, so those boundaries reproduce the shipped set exactly on a male
+  // narrator.
+  const scaled = ANCHOR_ORDER.slice(0, n - 1).map((name, i) => {
     const anchor = ANCHORS[name]
     const ref = anchor(reference)
-    return ref > 0 ? (stock[i] * anchor(regions)) / ref : stock[i]
+    return ref > 0 ? (stock[i + 1] * anchor(regions)) / ref : stock[i + 1]
   })
 
-  return { voiceType, boundaries: orderBoundaries([cornerHz, ...scaled]) }
+  return {
+    voiceType,
+    boundaries: orderBoundaries([
+      cornerHz, fundamentalTopHz(medianF0Hz, regions), ...scaled,
+    ]),
+  }
 }
 
 /**
