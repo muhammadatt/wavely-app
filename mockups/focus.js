@@ -43,7 +43,7 @@ const overlaysB = ref({ removed: false, spectrum: true, found: false })
 const playing = ref(true)
 const clock = ref(0)
 
-function panel(title, note, patch, sel, soloRef, overlays) {
+function panel(title, note, patch, sel, soloRef, overlays, reductionStyle = 'hang') {
   const live = soloRef.value >= 0 ? { ...patch.value, solo: soloRef.value } : patch.value
   const thresholdFn = focusThresholdFn(live)
   const frame = makeFrame(live, 192, clock.value)
@@ -75,6 +75,7 @@ function panel(title, note, patch, sel, soloRef, overlays) {
         selectedZone: -1,
         deltaZone: -1,
         soloFocusNode: soloRef.value,
+        reductionStyle,
         overlays: overlays.value,
         'onUpdate:focusNodes': v => { patch.value = { ...patch.value, nodes: v } },
         'onUpdate:selectedFocusNode': v => { sel.value = v },
@@ -141,8 +142,9 @@ const App = {
           onClick: () => { playing.value = !playing.value },
         }, playing.value ? 'PLAYING' : 'STOPPED'),
       ]),
-      panel('ALL OVERLAYS ON · node card open', 'Click a node to open its card: frequency, width and amount as fields, shape, delta, bypass and delete. Reduction lane at the top, FOUND strip at the floor.', focus, selected, solo, overlaysA),
-      panel('REMOVED AND FOUND OFF · the spectrum takes the space back', 'The same patch with the two banded overlays off. Their bands collapse to nothing and the spectrum expands into them, rather than the plot reserving rows for things it is not drawing.', focus, selected, solo, overlaysB),
+      panel('A · HANG — the fill between the rail and the curve', 'The bands swapped: FOUND at the top, REMOVED at the floor. Shading unchanged — the inked area is what was TAKEN, hanging from the lane\'s rail.', focus, selected, solo, overlaysA, 'hang'),
+      panel('B · CARVED — the complement inked', 'The same curve, the other side filled: the lane is solid and the cuts are bitten out of it, so the shaded mass is what SURVIVED. This is the most literal reading of inverting the shading.', focus, selected, solo, overlaysA, 'carved'),
+      panel('C · RISE — the silhouette mirrored', 'Depth grows UP from the floor, so a deep cut is a tall spike. ⚠ It puts two opposite conventions for one idea on one plate: the focus curve two bands up already means down is more cut.', focus, selected, solo, overlaysA, 'rise'),
     ])
   },
 }

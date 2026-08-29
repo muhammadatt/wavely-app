@@ -172,6 +172,16 @@ const props = defineProps({
    * the panel's fields keep reading the stored settings.
    */
   soloFocusNode: { type: Number, default: -1 },
+  /**
+   * ⚠ TEMPORARY, FOR CHOOSING THE REMOVED LANE'S SHADING BY EYE. Three
+   * readings of "invert the fill", rendered side by side in mockups/focus.html;
+   * the losers get deleted once one is picked. Not reachable from the app.
+   *
+   *   hang    the fill between the rail and the curve — what shipped
+   *   carved  the complement: solid lane with the cuts bitten out of it
+   *   rise    the same silhouette mirrored, growing up from the floor
+   */
+  reductionStyle: { type: String, default: 'hang' },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -473,6 +483,30 @@ const REDUCTION_LANE_FRAC = 0.35
  */
 const reductionFrac = computed(() => (showRemoved.value ? REDUCTION_LANE_FRAC : 0))
 const reductionH = computed(() => laneH.value * reductionFrac.value)
+
+/**
+ * ⚠ THE TWO RESERVED BANDS ARE SWAPPED: FOUND at the top, REMOVED at the floor.
+ *
+ * FOUND is what the detector has SEEN and REMOVED is what it DID about it, so
+ * reading the plate top to bottom now runs cause, material, effect — and the
+ * material sits between the two things that describe it rather than under both.
+ *
+ * It also gives the focus curve clean air. Its datum sits near the top of the
+ * spectrum band, which put it immediately under the reduction lane: the two
+ * busiest elements on the plate, one of them a control surface, in the same
+ * few dozen pixels. The FOUND strip is a slow silhouette and a far quieter
+ * neighbour.
+ *
+ * ⚠ IT DOES NOT VIOLATE THE RECORDED REASON FOR THE STRIP'S OLD PLACE. That
+ * note is that the held shape needs "a baseline that cannot move", because
+ * hanging it off the threshold put a still quantity on a bouncing datum. The
+ * plate's top edge is exactly as immovable as its floor. The other note — that
+ * a strip inside the spectrum band collides with crossings wherever it is put —
+ * is about an unreserved row, and this is still a reserved band.
+ */
+const reductionTop = computed(() => laneH.value - reductionH.value)
+/** The FOUND strip's baseline, which its depth grows away from. */
+const foundBase = computed(() => 0)
 
 /**
  * THE FOUND-HISTORY STRIP, along the floor of the SPECTRUM overlay.
@@ -1033,7 +1067,7 @@ function drawZeroRail(ctx, w) {
   ctx.save()
   clipPlate(ctx, w)
   ctx.fillStyle = 'rgba(255,255,255,.16)'
-  ctx.fillRect(0, 0.5, w, 1)
+  ctx.fillRect(0, Math.round(reductionTop.value) + 0.5, w, 1)
   ctx.restore()
 }
 
@@ -1096,8 +1130,8 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
   // number can never disagree about where a decibel is.
   for (const mark of grScaleMarks(props.fullScaleDb)) {
     if (mark.db === 0) continue
-    const y = Math.round(mark.fraction * reductionH.value) + 0.5
-    if (y >= reductionH.value - 2) continue
+    const y = Math.round(reductionTop.value + mark.fraction * reductionH.value) + 0.5
+    if (y >= laneH.value - 2) continue
     ctx.fillRect(0, y, w, 1)
   }
   ctx.restore()
@@ -1128,18 +1162,32 @@ function drawGrid(ctx, w, xFor, minHz, maxHz) {
 function drawReduction(ctx, w, frame) {
   const { reduction, bins } = frame
   const h = reductionH.value
+  const top = reductionTop.value
   const xStep = w / (bins - 1)
-  const yFor = db => grFraction(db, props.fullScaleDb) * h
+  // Still hanging DOWNWARD from its rail, now that the rail is at the top of a
+  // lane sitting on the floor. ⚠ The direction is not a free choice: the focus
+  // curve two bands up already means "down is more cut", and a reduction trace
+  // that grew upward for the same thing would put two opposite conventions for
+  // one idea on one plate.
+  const yFor = props.reductionStyle === 'rise'
+    ? db => top + h - grFraction(db, props.fullScaleDb) * h
+    : db => top + grFraction(db, props.fullScaleDb) * h
 
   ctx.save()
   clipPlate(ctx, w)
 
+  // CARVED fills the complement — the lane is solid and the cuts are bitten out
+  // of it — so the shaded mass is what SURVIVED rather than what was taken. The
+  // curve is identical either way; only which side of it is inked changes.
+  const carved = props.reductionStyle === 'carved'
   ctx.beginPath()
-  ctx.moveTo(0, 0)
+  ctx.moveTo(0, carved ? top + h : top)
   for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(reduction[d]))
-  ctx.lineTo(w, 0)
+  ctx.lineTo(w, carved ? top + h : top)
   ctx.closePath()
-  const grad = ctx.createLinearGradient(0, 0, 0, h)
+  const grad = carved
+    ? ctx.createLinearGradient(0, top + h, 0, top)
+    : ctx.createLinearGradient(0, top, 0, top + h)
   // DELTA is expressed here now the sliver is gone, and this is its natural
   // home rather than a substitute for one: in DELTA the removed signal is what
   // is being heard, so the curve bounding it is the thing to light up.
@@ -1301,12 +1349,17 @@ function markIndexNear(hz) {
  */
 function markAt(x, y) {
   const h = reductionH.value
+  // ⚠ THE LANE'S OFFSET BELONGS HERE TOO. This panel already records that the
+  // hit test is the half that fails silently — as dots that cannot be clicked
+  // where they are drawn — and moving the lane to the floor without moving this
+  // is exactly how that happens.
+  const top = reductionTop.value
   const w = width.value
   let best = -1
   let bestD = MARK_HIT_PX * MARK_HIT_PX
   marks.forEach((m, i) => {
     const dx = m.pos * w - x
-    const dy = grFraction(m.db, props.fullScaleDb) * h - y
+    const dy = top + grFraction(m.db, props.fullScaleDb) * h - y
     const d = dx * dx + dy * dy
     if (d <= bestD) {
       bestD = d
@@ -1319,7 +1372,10 @@ function markAt(x, y) {
 function drawMarks(ctx, w) {
   if (!marks.length) return
   const h = reductionH.value
-  const yFor = db => grFraction(db, props.fullScaleDb) * h
+  const top = reductionTop.value
+  // The marks sit ON the trace — their vertical position IS the reduction — so
+  // they move with the lane or they annotate empty plate.
+  const yFor = db => top + grFraction(db, props.fullScaleDb) * h
   const named = markIndexNear(selectedMarkHz.value)
 
   ctx.save()
@@ -1433,8 +1489,8 @@ function drawSpectrum(ctx, w, frame) {
   // below, and this filling exactly what is left. Both edges are DERIVED from
   // the two fractions rather than stated here — a constant of its own would let
   // them drift back into overlapping from an edit that looks unrelated.
-  const bottom = laneH.value - foundBandH.value
-  const band = bottom - reductionH.value
+  const bottom = reductionTop.value
+  const band = bottom - foundBandH.value
   const xStep = w / (bins - 1)
   const yFor = (db) => {
     const t = (db - SPEC_DB_MIN) / (SPEC_DB_MAX - SPEC_DB_MIN)
@@ -1560,11 +1616,14 @@ function drawSpectrum(ctx, w, frame) {
  */
 function drawFoundHistory(ctx, w, frame) {
   const { bins } = frame
-  const bottom = laneH.value
+  // ⚠ MIRRORED WITH THE SWAP. The baseline is the plate's TOP edge now and the
+  // silhouette hangs from it — the same shape upside down, so a deep crossing
+  // still reads as a large excursion away from an edge that cannot move.
+  const base = foundBase.value
   const xStep = w / (bins - 1)
-  const top = bottom - foundBandH.value
+  const edge = base + foundBandH.value
   const pxPerDb = foundBandH.value / HELD_STRIP_MAX_DB
-  const yFor = db => bottom - Math.max(0, Math.min(HELD_STRIP_MAX_DB, db)) * pxPerDb
+  const yFor = db => base + Math.max(0, Math.min(HELD_STRIP_MAX_DB, db)) * pxPerDb
 
   // Its own save and clip: it is called from `draw` now rather than from inside
   // drawSpectrum, so it cannot inherit that one's.
@@ -1572,9 +1631,9 @@ function drawFoundHistory(ctx, w, frame) {
   clipPlate(ctx, w)
 
   ctx.beginPath()
-  ctx.moveTo(0, bottom)
+  ctx.moveTo(0, base)
   for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(excessHold[d]))
-  ctx.lineTo(w, bottom)
+  ctx.lineTo(w, base)
   ctx.closePath()
   ctx.fillStyle = tint(props.accent, SPEC_HISTORY_FILL_A)
   ctx.fill()
@@ -1594,7 +1653,7 @@ function drawFoundHistory(ctx, w, frame) {
   // because the strip fills its band exactly. Without it a strip pinned flat
   // reads as a measurement rather than as a value that has run out of room.
   ctx.fillStyle = 'rgba(255,255,255,.05)'
-  ctx.fillRect(0, top, w, 1)
+  ctx.fillRect(0, edge, w, 1)
 
   ctx.restore()
 }
@@ -1762,8 +1821,9 @@ function drawGrScale(ctx, w) {
   let lastY = -Infinity
   for (const mark of grScaleMarks(props.fullScaleDb)) {
     if (!mark.label || mark.db === 0) continue
-    const y = mark.fraction * reductionH.value
-    if (y < MIN_SCALE_GAP_PX / 2 || y > reductionH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
+    const y = reductionTop.value + mark.fraction * reductionH.value
+    if (y < reductionTop.value + MIN_SCALE_GAP_PX / 2
+      || y > laneH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
     lastY = y
     ctx.fillStyle = 'rgba(255,255,255,.05)'
     ctx.fillRect(0, Math.round(y) + 0.5, w - 20, 1)
@@ -1978,8 +2038,7 @@ function clamp(v, lo, hi) {
  * that looks unrelated.
  */
 const focusScopeNow = () => {
-  const bottom = laneH.value - foundBandH.value
-  return focusScope(reductionH.value, bottom, RESONANCE_FOCUS_RANGES.biasDb.max)
+  return focusScope(foundBandH.value, reductionTop.value, RESONANCE_FOCUS_RANGES.biasDb.max)
 }
 
 /**

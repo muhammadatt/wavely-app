@@ -31,11 +31,15 @@ import {
 
 const axis = { w: 600, minHz: 20, maxHz: 20000 }
 /**
- * The spectrum band at the plot's shipping height: laneH 267, reduction lane
- * 35% at the top, FOUND strip 13% at the floor, this filling what is left.
+ * The spectrum band at the plot's shipping height: laneH 267, FOUND strip 13%
+ * at the TOP, reduction lane 35% at the floor, this filling what is left.
+ *
+ * ⚠ The two reserved bands were swapped, so the band sits lower than it used to
+ * while keeping the same height — which is why every figure derived from it
+ * (px/dB, the escape checks) is unchanged and only its position moved.
  */
-const BAND_TOP = 267 * 0.35
-const BAND_BOTTOM = 267 - 267 * 0.13
+const BAND_TOP = 267 * 0.13
+const BAND_BOTTOM = 267 - 267 * 0.35
 const rail = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max)
 
 // ── The axis. ───────────────────────────────────────────────────────────────
