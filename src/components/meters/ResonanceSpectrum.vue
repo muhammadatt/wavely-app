@@ -22,6 +22,22 @@ import { ResonanceHistory } from './resonanceHistory.js'
 import { bright, tint } from '../../ui/accent.js'
 import { MARK_MIN_DB, findExceedanceRuns, findResonanceMarks } from './resonanceMarks.js'
 import {
+  NODE_R,
+  addNode,
+  biasRuns,
+  canAddFocusNode,
+  focusScope,
+  makeFocusNode,
+  moveNode,
+  nodeAt,
+  nodePoint,
+  removeNode,
+  scaleNodeSpan,
+  setNodeParam,
+  toggleNode,
+} from './resonanceFocusNodes.js'
+import { RESONANCE_FOCUS_RANGES } from '../../audio/resonanceFocus.js'
+import {
   createHeldAverage,
   createReadoutThrottle,
   createVuBallistics,
@@ -123,6 +139,24 @@ const props = defineProps({
    * caller hoists its own normalisation out of that loop.
    */
   selectivityFn: { type: Function, default: null },
+  /**
+   * Focus nodes, edited on this plot, or null under the zone model.
+   *
+   * ⚠ NULL RATHER THAN AN EMPTY ARRAY, because the two mean different things
+   * here: null is "this panel is not running the focus model", where `[]` is
+   * "it is, and nothing has been placed yet" — a state with its own drawing and
+   * its own gestures. Distinguishing them is what keeps the zone path free of
+   * every focus branch below.
+   *
+   * They live here rather than on a strip of their own because the thing they
+   * bias — the detection threshold — is already read against this spectrum, and
+   * a targeting control beside the picture it aims at is a second instrument to
+   * cross-reference. See resonanceFocusNodes.js for why the curve nonetheless
+   * cannot ride the threshold line itself.
+   */
+  focusNodes: { type: Array, default: null },
+  /** Which focus node the panel is editing, or -1. */
+  selectedFocusNode: { type: Number, default: -1 },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -153,7 +187,13 @@ const props = defineProps({
  * Emitted rather than exposed so the panel can hold them like any other value.
  * At ~10 Hz apiece, and only when a figure actually changes.
  */
-const emit = defineEmits(['update:zones', 'update:selectedZone', 'update:reading'])
+const emit = defineEmits([
+  'update:zones', 'update:selectedZone', 'update:reading',
+  'update:focusNodes', 'update:selectedFocusNode',
+])
+
+/** Running the focus targeting model rather than zones. */
+const focusMode = computed(() => props.focusNodes !== null)
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
@@ -856,6 +896,12 @@ function draw(dtMs) {
 
   drawZones(ctx, w)
   drawZoneReadouts(ctx, w)
+  // ⚠ AFTER THE ZONE FURNITURE AND BEFORE THE MARKS. The focus curve is the
+  // control surface under this model — the same rank the zone dividers hold
+  // under the other — so it goes where they go. The marks stay on top of it
+  // because a named resonance is what a node is usually aimed AT, and a curve
+  // covering the thing it is pointed at would be exactly backwards.
+  if (focusMode.value) drawFocus(ctx, w)
   // The marks sit ON the trace — their vertical position IS the reduction — so
   // with it hidden they would be dots in empty space rather than annotations.
   if (showRemoved.value) drawMarks(ctx, w)
@@ -1808,11 +1854,14 @@ const DIVIDER_HIT_PX = 7
 
 /** Live drag, or null. Outside reactivity — it changes on pointer events. */
 let drag = null
+/** Index of the focus node being dragged, or -1. */
+let focusDrag = -1
 const dragging = ref(false)
 /** Divider under the pointer, for the hover cursor. -1 for none. */
 const hoverDivider = ref(-1)
 /** Zone dot under the pointer, for the hover cursor and the dot's own size. */
 const hoverZoneDot = ref(-1)
+const hoverFocusNode = ref(false)
 
 /**
  * Where the row of zone dots sits: just above the bottom of the plate.
@@ -1841,6 +1890,147 @@ function clamp(v, lo, hi) {
  * that survives a photograph, for the same reason: it has to say "this one"
  * without competing with the thing being looked at.
  */
+/**
+ * The focus curve's vertical mapping, for both drawing and hit testing.
+ *
+ * ⚠ ONE FUNCTION FOR BOTH, and this panel has already recorded why: a hit test
+ * computed from a second copy of the geometry fails silently, as handles that
+ * cannot be clicked where they are drawn. The band edges are derived from the
+ * two lane fractions rather than restated, for the reason drawSpectrum gives —
+ * a constant of its own would let them drift back into overlapping from an edit
+ * that looks unrelated.
+ */
+const focusScopeNow = () => {
+  const bottom = laneH.value - foundBandH.value
+  const top = laneH.value * REDUCTION_LANE_FRAC
+  return focusScope(top, bottom, RESONANCE_FOCUS_RANGES.biasDb.max)
+}
+
+/**
+ * THE FOCUS CURVE — the sensitivity bias, floating over the spectrum.
+ *
+ * ⚠ DRAWN ONLY WHERE IT DEPARTS FROM NEUTRAL, and that is what makes it a
+ * floating line rather than a rail. A bias is flat almost everywhere — an
+ * untouched spectrum is untouched, which is the whole argument for the model —
+ * so a continuous stroke paints a full-width horizontal line across the plot,
+ * and a full-width horizontal line reads as an independent display area
+ * whatever it is called. Broken at the same 0.3 dB the reduction trace is, for
+ * the same reason. See biasRuns.
+ *
+ * ⚠ ITS DATUM IS STATIC. The line a node actually biases is the threshold
+ * staircase, and hanging the handles there is the obvious reading of "put it
+ * over the spectrum" — but measured, that line travels 43 px in two seconds and
+ * up to 7 px between consecutive frames on a band 139 px tall. That is the
+ * discarded Gaussian nodes' "impossible to aim" report in numbers. The curve
+ * keeps the threshold's place and not its motion.
+ */
+function drawFocus(ctx, w) {
+  const nodes = props.focusNodes
+  const scope = focusScopeNow()
+  const axisNow = { w, minHz: axis.minHz, maxHz: axis.maxHz }
+  ctx.save()
+  clipPlate(ctx, w)
+
+  for (const run of biasRuns(nodes, axisNow, scope)) {
+    // A short dashed length of the neutral datum under each lobe, so a bow
+    // reads as a departure FROM something — without that something running the
+    // width of the plot, which is the thing being avoided.
+    ctx.strokeStyle = 'rgba(255,255,255,.16)'
+    ctx.setLineDash([2, 4])
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(run.from, Math.round(scope.datum) + 0.5)
+    ctx.lineTo(run.to, Math.round(scope.datum) + 0.5)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    ctx.beginPath()
+    ctx.moveTo(run.from, scope.datum)
+    for (const p of run.pts) ctx.lineTo(p.x, p.y)
+    ctx.lineTo(run.to, scope.datum)
+    ctx.closePath()
+    ctx.fillStyle = tint(props.accent, 0.18)
+    ctx.fill()
+
+    ctx.beginPath()
+    ctx.moveTo(run.from, scope.datum)
+    for (const p of run.pts) ctx.lineTo(p.x, p.y)
+    ctx.lineTo(run.to, scope.datum)
+    ctx.strokeStyle = bright(props.accent)
+    ctx.lineWidth = 1.7
+    ctx.shadowColor = tint(props.accent, 0.55)
+    ctx.shadowBlur = 9
+    ctx.stroke()
+    ctx.shadowBlur = 0
+  }
+
+  nodes.forEach((n, i) => {
+    const p = nodePoint(n, axisNow, scope)
+    const sel = i === props.selectedFocusNode
+    const on = n.enabled !== false
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, sel ? NODE_R + 1.5 : NODE_R, 0, Math.PI * 2)
+    if (!on) {
+      // A bypassed node keeps its place and loses its fill: it is still where
+      // it was put, and still the thing the controls are editing. It is also
+      // the one node with no lobe under it, so without a handle it would vanish
+      // from the panel entirely.
+      ctx.strokeStyle = 'rgba(255,255,255,.34)'
+      ctx.lineWidth = 1.2
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(p.x - NODE_R, p.y + NODE_R)
+      ctx.lineTo(p.x + NODE_R, p.y - NODE_R)
+      ctx.stroke()
+    } else if (sel) {
+      ctx.fillStyle = bright(props.accent)
+      ctx.shadowColor = tint(props.accent, 0.6)
+      ctx.shadowBlur = 9
+      ctx.fill()
+      ctx.shadowBlur = 0
+    } else {
+      ctx.fillStyle = PLATE_INK
+      ctx.fill()
+      ctx.strokeStyle = tint(props.accent, 0.75)
+      ctx.lineWidth = 1.4
+      ctx.stroke()
+    }
+  })
+
+  // The selected node's three numbers, ON the node — which is what replaces the
+  // plate row that used to carry them under the panel.
+  const sel = nodes[props.selectedFocusNode]
+  if (sel) {
+    const p = nodePoint(sel, axisNow, scope)
+    const span = sel.spanOct < 1
+      ? `${(sel.spanOct * 12).toFixed(0)}st`
+      : `${sel.spanOct.toFixed(2)}oct`
+    const text = `${formatHz(sel.hz)}  ${span}  ${sel.biasDb > 0 ? '+' : ''}${sel.biasDb.toFixed(1)}`
+    // Outward from the lobe, so the pill never lands on the curve it describes.
+    drawFocusPill(ctx, w, p.x, p.y + (sel.biasDb >= 0 ? 17 : -17), text)
+  }
+  ctx.restore()
+}
+
+function drawFocusPill(ctx, w, x, y, text) {
+  ctx.font = "600 9px 'JetBrains Mono',monospace"
+  const tw = ctx.measureText(text).width + 14
+  const px = Math.max(2, Math.min(w - tw - 2, x - tw / 2))
+  ctx.beginPath()
+  roundRect(ctx, px, y - 9, tw, 18, 5)
+  ctx.fillStyle = 'rgba(10,14,16,.86)'
+  ctx.fill()
+  ctx.strokeStyle = tint(props.accent, 0.4)
+  ctx.lineWidth = 1
+  ctx.stroke()
+  ctx.fillStyle = bright(props.accent)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, px + tw / 2, y)
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+}
+
 function drawZones(ctx, w) {
   if (props.zones.length === 0) return
   const bottom = laneH.value
@@ -2012,6 +2202,30 @@ function commit(zones) {
   if (zones !== props.zones) emit('update:zones', zones)
 }
 
+// ── Focus editing ───────────────────────────────────────────────────────────
+//
+// Every edit replaces the array, exactly as the zone edits do, so nothing
+// mutates a node in place and the kernel is handed a fresh copy each time.
+
+let nextFocusId = 1
+
+function commitFocus(nodes) {
+  if (nodes !== props.focusNodes) emit('update:focusNodes', nodes)
+}
+
+function selectFocus(index) {
+  if (index !== props.selectedFocusNode) emit('update:selectedFocusNode', index)
+}
+
+/** The node under a point, or -1. Uses the same scope the curve was drawn at. */
+function focusNodeAt(x, y) {
+  return focusMode.value ? nodeAt(props.focusNodes, x, y, axis, focusScopeNow()) : -1
+}
+
+function newFocusNode(hz) {
+  return makeFocusNode(hz, `f${Date.now()}${nextFocusId++}`)
+}
+
 function select(index) {
   if (index !== props.selectedZone) emit('update:selectedZone', index)
 }
@@ -2031,6 +2245,21 @@ function onDown(e) {
   // grabbed at any other height, where the dot is a 12 px target that exists
   // nowhere else. Naming it also suppresses the zone selection this click would
   // otherwise make, so one click does one thing.
+  // A FOCUS HANDLE OUTRANKS EVERYTHING, INCLUDING A RESONANCE MARK. Both are
+  // small round targets that can land on top of one another, and only one of
+  // them is a control: a mis-taken click on a mark costs a label, a mis-taken
+  // click on a handle costs the setting the user was reaching for. The mark is
+  // still reachable everywhere the handle is not.
+  const fnode = focusNodeAt(x, y)
+  if (fnode >= 0) {
+    selectFocus(fnode)
+    focusDrag = fnode
+    dragging.value = true
+    canvasEl.value?.setPointerCapture?.(e.pointerId)
+    e.preventDefault()
+    return
+  }
+
   const mark = markAt(x, y)
   if (mark >= 0) {
     // Clicking the named one again puts the label away, which is the only way
@@ -2062,18 +2291,36 @@ function onDown(e) {
     e.preventDefault()
     return
   }
+  // ⚠ IN FOCUS MODE A CLICK ON EMPTY PLATE DESELECTS, IT DOES NOT CREATE.
+  // Creation is the double-click, matching the vocabulary the zone plot already
+  // teaches — and on a plate this size an accidental node is easy, where an
+  // accidental deselection costs nothing.
+  if (focusMode.value) {
+    selectFocus(-1)
+    return
+  }
   // Anywhere else in the plot selects the zone under the pointer. Selection is
   // the ONLY thing a click in the display does now: the values moved to knobs,
   // so there is no gesture here that can change the sound by accident.
   select(zoneIndexAt(props.zones, x, axis, 20, 20000))
 }
 
-function onDrag(e, x) {
+function onDrag(e, x, y) {
+  if (focusDrag >= 0) {
+    commitFocus(moveNode(props.focusNodes, focusDrag, x, y, axis, focusScopeNow()))
+    return
+  }
   if (!drag) return
   commit(moveBoundary(props.zones, drag.divider, hzFromX(x, axis), 20, 20000))
 }
 
 function onUp(e) {
+  if (focusDrag >= 0) {
+    focusDrag = -1
+    dragging.value = false
+    canvasEl.value?.releasePointerCapture?.(e.pointerId)
+    return
+  }
   if (!drag) return
   drag = null
   dragging.value = false
@@ -2084,6 +2331,20 @@ function onDblClick(e) {
   const rect = canvasEl.value?.getBoundingClientRect()
   if (!rect) return
   const x = e.clientX - rect.left
+  if (focusMode.value) {
+    const y = e.clientY - rect.top
+    const hit = focusNodeAt(x, y)
+    if (hit >= 0) {
+      commitFocus(removeNode(props.focusNodes, hit))
+      selectFocus(-1)
+    } else if (canAddFocusNode(props.focusNodes)) {
+      const next = addNode(props.focusNodes, newFocusNode(hzFromX(x, axis)))
+      commitFocus(next)
+      selectFocus(next.length - 1)
+    }
+    e.preventDefault()
+    return
+  }
   const divider = boundaryAt(props.zones, x, axis, DIVIDER_HIT_PX)
   if (divider >= 0) {
     commit(removeBoundary(props.zones, divider))
@@ -2105,6 +2366,7 @@ function onDblClick(e) {
  * the one thing in the plugin some people could not set.
  */
 function onKeyDown(e) {
+  if (focusMode.value) return onFocusKeyDown(e)
   const n = props.zones.length
   if (n === 0 && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
   const i = props.selectedZone
@@ -2160,6 +2422,62 @@ function onKeyDown(e) {
 }
 
 /**
+ * Keyboard equivalents for every focus gesture.
+ *
+ * Not a nicety, and more load-bearing here than for the zones: a node's
+ * frequency, width and amount exist nowhere else on the panel now that the
+ * plate row is gone, so without this they would be reachable by pointer alone.
+ */
+function onFocusKeyDown(e) {
+  const nodes = props.focusNodes
+  const i = props.selectedFocusNode
+  const step = e.shiftKey ? 10 : 1
+
+  const create = () => {
+    if (!canAddFocusNode(nodes)) return
+    const next = addNode(nodes, newFocusNode(hzFromX(axis.w * 0.5, axis)))
+    commitFocus(next)
+    selectFocus(next.length - 1)
+  }
+
+  // Plain left/right WALK the nodes; shifted, they move the selected one. The
+  // zone editor's own convention, so one plot does not have two.
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey) {
+    if (!nodes.length) return
+    const dir = e.key === 'ArrowRight' ? 1 : -1
+    selectFocus(dir > 0
+      ? (i < 0 || i >= nodes.length - 1 ? 0 : i + 1)
+      : (i <= 0 ? nodes.length - 1 : i - 1))
+  } else if (i < 0 || !nodes[i]) {
+    if (e.key === 'Enter') create()
+    else return
+  } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    // ⚠ UP IS LESS CUT, matching the curve: positive bias draws downward,
+    // because down is toward the material. An arrow that moved the handle one
+    // way and the value the other is the sign error this model is most prone
+    // to, and the only place it would be visible is here.
+    const dir = e.key === 'ArrowDown' ? 1 : -1
+    commitFocus(setNodeParam(nodes, i, 'biasDb', nodes[i].biasDb + dir * step))
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    // In semitones, because the axis is logarithmic and a fixed Hz step is a
+    // different musical distance at either end of it.
+    const dir = e.key === 'ArrowRight' ? 1 : -1
+    const semis = e.shiftKey ? 12 : 1
+    commitFocus(setNodeParam(nodes, i, 'hz', nodes[i].hz * Math.pow(2, (dir * semis) / 12)))
+  } else if (e.key === '[' || e.key === ']') {
+    commitFocus(scaleNodeSpan(nodes, i, e.key === ']' ? 1 : -1))
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    commitFocus(removeNode(nodes, i))
+    selectFocus(-1)
+  } else if (e.key === ' ') {
+    commitFocus(toggleNode(nodes, i))
+  } else if (e.key === 'Enter') {
+    create()
+  } else return
+  e.preventDefault()
+}
+
+/**
  * The selected zone, in words, WITH ITS OWN DEEPEST CUT.
  *
  * This line used to fall back to a single global `PEAK <hz> · -<db>` covering
@@ -2208,8 +2526,11 @@ function onMove(e) {
   // Say that a dot is a target. A reveal whose trigger looks like part of the
   // picture is discoverable only by accident — the same argument the selection
   // edges' ew-resize cursor makes in the waveform.
-  hoverMark.value = !drag && markAt(x, y) >= 0
-  hoverZoneDot.value = drag || hoverMark.value
+  // Ordered as onDown resolves them, so what the cursor promises is what the
+  // click will actually do.
+  hoverFocusNode.value = focusDrag < 0 && focusNodeAt(x, y) >= 0
+  hoverMark.value = !drag && !hoverFocusNode.value && markAt(x, y) >= 0
+  hoverZoneDot.value = drag || hoverMark.value || hoverFocusNode.value
     ? -1
     : zoneDotAt(props.zones, x, y, zoneDotY.value, axis)
   onDrag(e, x, y)
@@ -2224,6 +2545,35 @@ function onLeave() {
   cursorText.value = ''
   hoverMark.value = false
   hoverZoneDot.value = -1
+  hoverFocusNode.value = false
+}
+
+/**
+ * The wheel sets a focus node's WIDTH — its third number, and the one not on a
+ * drag axis.
+ *
+ * ⚠ THE TEMPLATE BOUND `@wheel.prevent="onWheel"` WITH NO SUCH FUNCTION
+ * DEFINED, since before focus existed. Measured rather than reasoned about, and
+ * the first two things I assumed were both wrong: it does NOT throw, and Vue
+ * does not drop the binding either. What it does is apply the `.prevent`
+ * modifier and then call nothing — so wheeling over the plot **silently
+ * swallowed the page scroll and did nothing with it**, which in a window that
+ * can run past the fold is a plot that eats a gesture the panel needs.
+ *
+ * ⚠ SO THE MODIFIER HAD TO GO, NOT JUST THE MISSING HANDLER. `.prevent` is
+ * applied by the template before the handler runs, so an early `return` in here
+ * cannot give the scroll back — the binding is now plain and this function
+ * calls `preventDefault` only on the wheel it actually consumes.
+ */
+function onWheel(e) {
+  // Zone model, or nowhere near a node: the page keeps its scroll.
+  if (!focusMode.value) return
+  const rect = canvasEl.value?.getBoundingClientRect()
+  if (!rect) return
+  const i = focusNodeAt(e.clientX - rect.left, e.clientY - rect.top)
+  if (i < 0) return
+  commitFocus(scaleNodeSpan(props.focusNodes, i, e.deltaY < 0 ? 1 : -1))
+  e.preventDefault()
 }
 
 function formatHz(hz) {
@@ -2277,6 +2627,23 @@ const plotSummary = computed(() => {
       + marks.map((m, i) => `${formatHz(m.hz)} at minus ${m.db.toFixed(1)} decibels`
         + (i === named ? ', selected' : '')).join('; ') + '.'
     : ''
+  // ⚠ THE FOCUS NODES HAVE TO BE IN HERE, and they were not: the separate rail
+  // carried its own accessible name, and deleting the rail deleted the only
+  // description of them there was. A canvas is opaque to a screen reader, and
+  // now that the plate row is gone too, a node's frequency, width and amount
+  // exist NOWHERE else on the panel — this sentence is the whole of it.
+  const focus = focusMode.value
+    ? (props.focusNodes.length
+      ? ` ${props.focusNodes.length} focus node${props.focusNodes.length === 1 ? '' : 's'}: `
+        + props.focusNodes.map((n, i) => {
+          const dir = n.biasDb >= 0 ? 'more' : 'less'
+          const off = n.enabled === false ? ', bypassed' : ''
+          const here = i === props.selectedFocusNode ? ', selected' : ''
+          return `${formatHz(n.hz)}, ${Math.abs(n.biasDb).toFixed(1)} decibels ${dir} cut, `
+            + `${n.spanOct.toFixed(2)} octaves wide${off}${here}`
+        }).join('; ') + '.'
+      : ' No focus nodes: the detector runs at its global setting everywhere.')
+    : ''
   const zones = props.zones.length
     ? ` ${props.zones.length} sensitivity zones: ` + props.zones.map((z, i) => {
       const { loHz, hiHz } = bounds.value[i]
@@ -2288,7 +2655,8 @@ const plotSummary = computed(() => {
         : `${formatHz(loHz)} to ${formatHz(hiHz)}, off`
     }).join('; ') + '.'
     : ''
-  return `${props.title}. ${cut}${mode}${found}${zones} ${ZONE_HINT}`
+  return `${props.title}. ${cut}${mode}${found}${focus}${zones} `
+    + `${focusMode.value ? FOCUS_HINT : ZONE_HINT}`
 })
 
 /**
@@ -2300,6 +2668,16 @@ const plotSummary = computed(() => {
  * user hovering and a screen-reader user landing on it deserve the same
  * instruction rather than two that have to be kept in step.
  */
+/**
+ * How to work the focus nodes, in one string — the tooltip and the tail of the
+ * accessible name, exactly as ZONE_HINT is for the other model. Every gesture
+ * named here has a keyboard equivalent in onFocusKeyDown; a canvas whose only
+ * editor is a pointer is the one control some people cannot use at all.
+ */
+const FOCUS_HINT = 'Drag a node for frequency and amount, wheel over one for '
+  + 'width, double-click to add or remove. With a node selected: arrows move '
+  + 'it, brackets change its width, space bypasses it, delete removes it.'
+
 const ZONE_HINT = 'Click a resonance dot to label it with its frequency and '
   + 'depth, or click it again to put the label away. Click a zone dot along the '
   + 'bottom to select that zone. Drag a '
@@ -2362,6 +2740,7 @@ const idleHint = computed(() =>
           height: `${height}px`,
           borderRadius: '12px',
           cursor: dragging ? 'grabbing'
+            : hoverFocusNode ? 'grab'
             : hoverMark || hoverZoneDot >= 0 ? 'pointer' : 'crosshair',
         }"
         @pointerdown="onDown"
@@ -2370,7 +2749,7 @@ const idleHint = computed(() =>
         @pointercancel="onUp"
         @pointerleave="onLeave"
         @dblclick="onDblClick"
-        @wheel.prevent="onWheel"
+        @wheel="onWheel"
         @keydown="onKeyDown"
       ></canvas>
     </div>

@@ -1,59 +1,69 @@
 /**
- * MOCKUP HARNESS — the focus targeting nodes drawn INSIDE the display.
+ * HARNESS — the focus targeting model in the REAL plot, driven by a synthetic
+ * frame. `npx vite`, then /mockups/focus.html.
  *
- * `npx vite`, then /mockups/focus.html. Nothing here is imported by the app.
+ * It was three overlay mockups while the treatment was being chosen; now that
+ * the curve lives in ResonanceSpectrum itself, it renders the shipping
+ * components and the nodes are genuinely draggable. Nothing here is imported by
+ * the app.
  *
- * ⚠ IT ANIMATES, deliberately. A still frame cannot answer the only question
- * that decides this design — how far the threshold line TRAVELS — and the whole
- * reason the earlier Gaussian-node attempt was abandoned was motion that a
- * screenshot cannot show. Watch the bottom card.
+ * ⚠ IT ANIMATES. A still frame cannot show the one thing that decided this
+ * design — how far the threshold line travels — and it is the reason the
+ * focus curve hangs off a static datum rather than off the threshold itself.
+ * Press STOPPED and watch the dotted staircase against the solid focus curve.
  */
 import '../src/assets/main.css'
 import { createApp, h, ref, computed, onMounted } from 'vue'
 import ResonanceSpectrum from '../src/components/meters/ResonanceSpectrum.vue'
-import FocusOverlay from './FocusOverlay.vue'
+import ResonanceFocusControls from '../src/components/panels/ResonanceFocusControls.vue'
+import Knob from '../src/components/knobs/Knob.vue'
 import { makeFrame } from './focusFrame.js'
 import { focusThresholdFn, RESONANCE_FOCUS_GLOBAL } from '../src/audio/resonanceFocus.js'
 
 const ACCENT = '#8de0a8'
 const H = 280
 
-const nodes = ref([
-  { id: 'a', hz: 205, spanOct: 0.8, biasDb: -9, enabled: true },
-  { id: 'b', hz: 1150, spanOct: 1.3, biasDb: 6, enabled: true },
-  { id: 'c', hz: 3180, spanOct: 0.5, biasDb: 13, enabled: true },
-  { id: 'd', hz: 7000, spanOct: 2.0, biasDb: -5, enabled: false },
-])
+const focus = ref({
+  global: { ...RESONANCE_FOCUS_GLOBAL, protect: true },
+  nodes: [
+    { id: 'a', hz: 205, spanOct: 0.8, biasDb: -9, enabled: true },
+    { id: 'b', hz: 1150, spanOct: 1.3, biasDb: 6, enabled: true },
+    { id: 'c', hz: 3180, spanOct: 0.5, biasDb: 13, enabled: true },
+    { id: 'd', hz: 7000, spanOct: 2.0, biasDb: -5, enabled: false },
+  ],
+})
+const empty = ref({ global: { ...RESONANCE_FOCUS_GLOBAL }, nodes: [] })
 const selected = ref(2)
+const emptySel = ref(-1)
 const playing = ref(true)
 const clock = ref(0)
 
-const focus = computed(() => ({ global: { ...RESONANCE_FOCUS_GLOBAL }, nodes: nodes.value }))
-const frame = computed(() => makeFrame(focus.value, 192, clock.value))
-const thresholdFn = computed(() => focusThresholdFn(focus.value))
-
 const OVERLAYS = { removed: true, spectrum: true, found: true, grid: false, history: false }
 
-const card = (title, note, treatment) => h('div', {
-  style: {
-    width: '740px', background: '#141618', borderRadius: '16px',
-    boxShadow: '0 0 0 1px rgba(255,255,255,.07)', marginBottom: '26px',
-  },
-}, [
-  h('div', { style: { padding: '11px 26px 9px', borderBottom: '1px solid rgba(255,255,255,.06)' } }, [
-    h('div', { style: { font: "700 9.5px 'JetBrains Mono',monospace", letterSpacing: '.14em', color: ACCENT } }, title),
-    h('div', {
-      style: {
-        font: "500 9.5px 'JetBrains Mono',monospace", color: 'rgba(255,255,255,.42)',
-        marginTop: '4px', lineHeight: '1.5',
-      },
-    }, note),
-  ]),
-  h('div', { class: 'px-[26px] pt-[16px] pb-[18px]' }, [
-    h('div', { style: { position: 'relative' } }, [
+function panel(title, note, patch, sel) {
+  const thresholdFn = focusThresholdFn(patch.value)
+  const frame = makeFrame(patch.value, 192, clock.value)
+  return h('div', {
+    style: {
+      width: '740px', background: '#141618', borderRadius: '16px',
+      boxShadow: '0 0 0 1px rgba(255,255,255,.07)', marginBottom: '26px',
+    },
+  }, [
+    h('div', { style: { padding: '11px 26px 9px', borderBottom: '1px solid rgba(255,255,255,.06)' } }, [
+      h('div', { style: { font: "700 9.5px 'JetBrains Mono',monospace", letterSpacing: '.14em', color: ACCENT } }, title),
+      h('div', {
+        style: {
+          font: "500 9.5px 'JetBrains Mono',monospace", color: 'rgba(255,255,255,.42)',
+          marginTop: '4px', lineHeight: '1.5',
+        },
+      }, note),
+    ]),
+    h('div', { class: 'px-[26px] pt-[16px] pb-[18px]' }, [
       h(ResonanceSpectrum, {
-        dataFn: () => frame.value,
-        selectivityFn: thresholdFn.value,
+        dataFn: () => frame,
+        selectivityFn: thresholdFn,
+        focusNodes: patch.value.nodes,
+        selectedFocusNode: sel.value,
         reductionDb: -3.4,
         accent: ACCENT,
         height: H,
@@ -61,19 +71,34 @@ const card = (title, note, treatment) => h('div', {
         selectedZone: -1,
         deltaZone: -1,
         overlays: OVERLAYS,
+        'onUpdate:focusNodes': v => { patch.value = { ...patch.value, nodes: v } },
+        'onUpdate:selectedFocusNode': v => { sel.value = v },
       }),
-      h(FocusOverlay, {
-        treatment,
-        nodes: nodes.value,
-        selected: selected.value,
-        frame: frame.value,
-        globalThresholdDb: RESONANCE_FOCUS_GLOBAL.selectivity,
-        height: H,
-        accent: ACCENT,
-      }),
+      h('div', { class: 'flex items-center gap-[10px] mt-[11px]' }, [
+        h('div', { class: 'w-[60px] shrink-0' }, h(Knob, {
+          modelValue: 300, min: 12, max: 400, step: 5, valueFontPx: 11,
+          label: 'Attack', accent: ACCENT, formatValue: v => `${Math.round(v)}ms`,
+        })),
+        h('div', { class: 'w-[60px] shrink-0' }, h(Knob, {
+          modelValue: 1500, min: 25, max: 2000, step: 10, valueFontPx: 11,
+          label: 'Release', accent: ACCENT, formatValue: v => `${Math.round(v)}ms`,
+        })),
+        h('div', { class: 'flex-1 min-w-0' }, h(ResonanceFocusControls, {
+          focus: patch.value, accent: ACCENT, pitchRangeCaption: '70–400 Hz',
+          'onUpdate:focus': v => { patch.value = v },
+        })),
+        h('div', { class: 'w-[60px] shrink-0' }, h(Knob, {
+          modelValue: 1, min: 0, max: 1, step: 0.01, valueFontPx: 11,
+          label: 'Mix', accent: ACCENT, formatValue: v => `${Math.round(v * 100)}%`,
+        })),
+        h('div', { class: 'w-[60px] shrink-0' }, h(Knob, {
+          modelValue: 0, min: -12, max: 12, step: 0.5, valueFontPx: 11, bipolar: true,
+          label: 'Trim', accent: ACCENT, formatValue: v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`,
+        })),
+      ]),
     ]),
-  ]),
-])
+  ])
+}
 
 const App = {
   setup() {
@@ -96,9 +121,9 @@ const App = {
         h('div', {
           style: {
             font: "600 10.5px 'JetBrains Mono',monospace", letterSpacing: '.1em',
-            color: 'rgba(255,255,255,.5)', lineHeight: '1.7',
+            color: 'rgba(255,255,255,.5)',
           },
-        }, 'NODES: 205 Hz −9 · 1.15k +6 · 3.18k +13 (selected) · 7k −5 (bypassed)'),
+        }, 'DRAG A HANDLE · WHEEL FOR WIDTH · DOUBLE-CLICK TO ADD OR REMOVE'),
         h('button', {
           style: {
             font: "700 9px 'JetBrains Mono',monospace", letterSpacing: '.12em',
@@ -110,16 +135,8 @@ const App = {
           onClick: () => { playing.value = !playing.value },
         }, playing.value ? 'PLAYING' : 'STOPPED'),
       ]),
-      card('C4 · LOBES — drawn only where it departs from neutral',
-        'The same curve, broken at 0.3 dB the way the reduction trace already is. A bias is flat almost everywhere, so drawn edge to edge it paints a full-width horizontal line — and a full-width horizontal line is a rail whatever it is called. What is left is a lobe per node, on the material it is aimed at.', 'lobes'),
-      card('C1 · OVER THE SPECTRUM, MID DATUM',
-        'One curve over the material, bowing down where you asked for more cut. No rail, no reserved band, no second picture. Its datum is fixed, so nothing here moves unless a knob does.', 'over-mid'),
-      card('C2 · OVER THE SPECTRUM, HIGH DATUM',
-        'The same curve sitting where the threshold usually sits — above the peaks — so it reads as the decision boundary rather than as an annotation floating in the middle of the material.', 'over-top'),
-      card('C3 · ON THE LIVE THRESHOLD  (the naive reading — watch it move)',
-        'Handles on the actual threshold staircase, which is the line a node really biases. Measured on this probe: the line at 3.18k travels 43 px in two seconds and up to 7 px between frames, on a band 139 px tall. Press STOPPED to see why it looks fine in a screenshot.', 'over-live'),
-      card('REFERENCE · BOWED RAIL AT THE TOP',
-        'The earlier C, for orientation — same idea, wrong place: it bows the 0 dB reduction rail, which is not the threshold, and it fights the reduction trace.', 'rail'),
+      panel('WORKED PATCH', 'Four nodes: 205 Hz −9 held back, 1.15k +6, 3.18k +13 selected, 7k −5 bypassed. The curve is drawn only where it departs from neutral.', focus, selected),
+      panel('EMPTY DEFAULT', 'No nodes. The detector runs at its global setting everywhere, and the plot shows nothing of the focus model at all — which is what an offset with a true zero buys.', empty, emptySel),
     ])
   },
 }

@@ -22,8 +22,6 @@ import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
 import ResonanceFocusControls from './ResonanceFocusControls.vue'
-import ResonanceFocusNode from './ResonanceFocusNode.vue'
-import ResonanceFocusRail from './ResonanceFocusRail.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -492,50 +490,18 @@ async function applyAndClose() {
         :height="plotHeight"
         :delta="resDelta"
         :selectivity-fn="selectivityFn"
+        :focus-nodes="focusMode ? resFocus.nodes : null"
+        :selected-focus-node="resSelectedNode"
         :zones="focusMode ? [] : resZones"
         :selected-zone="focusMode ? -1 : resSelectedZone"
         :delta-zone="focusMode ? -1 : resDeltaZone"
         :overlays="overlays"
         @update:zones="syncZones"
         @update:selected-zone="resSelectedZone = $event"
+        @update:focus-nodes="syncFocus({ ...resFocus, nodes: $event })"
+        @update:selected-focus-node="resSelectedNode = $event"
         @update:reading="reading = $event"
       />
-
-      <!-- THE RAIL SITS DIRECTLY UNDER THE PLOT AND SHARES ITS X AXIS, with no
-           gap and no divider, because the two are one picture split by what
-           they measure: above is what the detector FOUND, below is where it was
-           told to look. Any separation between them and the frequencies stop
-           reading as the same frequencies.
-
-           `dataFn` goes to both for that reason — the axis is derived from the
-           kernel's own frame, once, so the two cannot disagree about where
-           1 kHz is. -->
-      <ResonanceFocusRail
-        v-if="focusMode"
-        class="mt-[3px]"
-        :nodes="resFocus.nodes"
-        :selected="resSelectedNode"
-        :data-fn="resDisplayFn"
-        :accent="ACCENT"
-        :disabled="!resPreview"
-        @update:nodes="syncFocus({ ...resFocus, nodes: $event })"
-        @update:selected="resSelectedNode = $event"
-      />
-
-      <!-- The selected node's numbers, with the rail rather than with the
-           detector knobs: the rail owns where a node IS, this owns exactly what
-           it is set to. Same division the plot and the zone controls already
-           draw, applied to a different pair. -->
-      <div v-if="focusMode" class="flex items-center mt-[7px]">
-        <ResonanceFocusNode
-          :focus="resFocus"
-          :selected="resSelectedNode"
-          :pitch-range-caption="pitchRangeCaption"
-          :accent="ACCENT"
-          :disabled="!resPreview"
-          @update:focus="syncFocus"
-        />
-      </div>
 
       <!-- ONE ROW FOR EVERYTHING BELOW THE PLOT, and it used to be two.
            Directly under the display because the row and the plot are one
@@ -595,6 +561,7 @@ async function applyAndClose() {
           <ResonanceFocusControls
             v-if="focusMode"
             :focus="resFocus"
+            :pitch-range-caption="pitchRangeCaption"
             :accent="ACCENT"
             :disabled="!resPreview"
             @update:focus="syncFocus"

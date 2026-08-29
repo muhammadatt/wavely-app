@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  FOCUS_DATUM_FRAC,
+  FOCUS_HALF_SPAN_FRAC,
   NODE_HIT_PX,
+  biasRuns,
+  focusScope,
   SPAN_WHEEL_RATIO,
   addNode,
   biasCurvePoints,
@@ -19,7 +23,7 @@ import {
   toggleNode,
   xFromHz,
   yFromBias,
-} from '../../src/components/meters/resonanceFocusRail.js'
+} from '../../src/components/meters/resonanceFocusNodes.js'
 import {
   RESONANCE_FOCUS_MAX_NODES,
   RESONANCE_FOCUS_RANGES,
@@ -27,7 +31,13 @@ import {
 } from '../../src/audio/resonanceFocus.js'
 
 const axis = { w: 600, minHz: 20, maxHz: 20000 }
-const rail = { h: 58, maxDb: RESONANCE_FOCUS_RANGES.biasDb.max }
+/**
+ * The spectrum band at the plot's shipping height: laneH 267, reduction lane
+ * 35% at the top, FOUND strip 13% at the floor, this filling what is left.
+ */
+const BAND_TOP = 267 * 0.35
+const BAND_BOTTOM = 267 - 267 * 0.13
+const rail = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max)
 
 // ── The axis. ───────────────────────────────────────────────────────────────
 
@@ -54,24 +64,101 @@ test('the frequency mapping round-trips and matches the plot"s axis', () => {
  * bottom would draw "leave this alone" and "work a little harder" as
  * neighbouring positions near one end, when they are opposite statements.
  */
-test('zero bias is the centre line, and the scale is symmetric', () => {
-  assert.equal(yFromBias(0, rail), rail.h / 2)
-  assert.equal(yFromBias(rail.maxDb, rail), 0)
-  assert.equal(yFromBias(-rail.maxDb, rail), rail.h)
-  assert.ok(Math.abs(biasFromY(rail.h / 2, rail)) < 1e-12)
+test('zero bias is the datum, and the scale is symmetric about it', () => {
+  assert.equal(yFromBias(0, rail), rail.datum)
+  assert.ok(Math.abs(biasFromY(rail.datum, rail)) < 1e-12)
+  // Symmetric: equal and opposite amounts sit equally far either side.
+  assert.ok(Math.abs((yFromBias(9, rail) - rail.datum)
+    + (yFromBias(-9, rail) - rail.datum)) < 1e-12)
   for (const db of [-12, -3, 0, 5, 17]) {
     assert.ok(Math.abs(biasFromY(yFromBias(db, rail), rail) - db) < 1e-9, `${db} dB`)
   }
 })
 
 /**
+ * ⚠ POSITIVE BIAS GOES DOWN. "More cut" lowers the threshold toward the
+ * material, and on this plot down IS toward the material. A curve that rose for
+ * "more cut" would be the only thing on the plate running the other way — and
+ * nothing downstream would catch it.
+ */
+test('more cut draws downward', () => {
+  assert.ok(yFromBias(9, rail) > rail.datum)
+  assert.ok(yFromBias(-9, rail) < rail.datum)
+})
+
+/**
+ * ⚠ THE CURVE MUST NOT ESCAPE THE SPECTRUM BAND. Above it is the reduction
+ * lane, below it the FOUND strip — both measuring something else entirely, and
+ * a curve drawn over either is the two-lane confusion the plot was already
+ * undone for once. This is what fixes the two fractions, rather than taste.
+ */
+test('the curve stays inside the spectrum band at full travel', () => {
+  const hi = yFromBias(rail.maxDb, rail)
+  const lo = yFromBias(-rail.maxDb, rail)
+  assert.ok(lo > BAND_TOP, `full "less cut" escaped into the reduction lane at ${lo}`)
+  assert.ok(hi < BAND_BOTTOM, `full "more cut" escaped into the FOUND strip at ${hi}`)
+  // And it grows with the plot rather than staying a fixed pixel height.
+  const tall = focusScope(BAND_TOP * 2, BAND_BOTTOM * 2, rail.maxDb)
+  assert.ok(tall.pxPerDb > rail.pxPerDb)
+})
+
+/**
+ * The drag has the same feel it had on the separate rail — 58 px for +/-18 dB
+ * was 1.61 px/dB, and this is within 5% of it. Worth pinning: the curve moved
+ * house, and a control that suddenly needs twice the travel reads as broken
+ * even when every value it produces is correct.
+ */
+test('the drag resolution matches the rail it replaced', () => {
+  assert.ok(Math.abs(rail.pxPerDb - 1.61) < 0.1, `${rail.pxPerDb} px/dB`)
+})
+
+/**
  * The rail's full travel IS the parameter's full range, so there is no position
  * on the strip that means "past the end" and no travel that does nothing.
  */
-test('the rail cannot express a value the parameter cannot hold', () => {
+test('the curve cannot express a value the parameter cannot hold', () => {
   assert.equal(rail.maxDb, RESONANCE_FOCUS_RANGES.biasDb.max)
-  assert.equal(biasFromY(-50, rail), RESONANCE_FOCUS_RANGES.biasDb.max)
-  assert.equal(biasFromY(500, rail), RESONANCE_FOCUS_RANGES.biasDb.min)
+  assert.equal(biasFromY(500, rail), RESONANCE_FOCUS_RANGES.biasDb.max)
+  assert.equal(biasFromY(-500, rail), RESONANCE_FOCUS_RANGES.biasDb.min)
+})
+
+// ── The break that stops it being a rail. ───────────────────────────────────
+
+/**
+ * ⚠ THE PROPERTY THE WHOLE PLACEMENT RESTS ON. A bias is flat almost
+ * everywhere, so a continuous stroke paints a full-width horizontal line across
+ * the plot — and a full-width horizontal line reads as a rail whatever it is
+ * called, which is precisely what moving the curve into the plot was meant to
+ * get rid of. Same 0.3 dB the reduction trace already breaks at.
+ */
+test('nothing is drawn where nothing has been asked for', () => {
+  assert.deepEqual(biasRuns([], axis, rail), [])
+  const far = biasRuns([{ ...makeFocusNode(1000, 'a'), biasDb: 12, spanOct: 0.5 }], axis, rail)
+  assert.equal(far.length, 1)
+  // A lobe, not a line: it covers a fraction of the plot, not all of it.
+  const width = far[0].to - far[0].from
+  assert.ok(width > 20 && width < axis.w * 0.5,
+    `expected a lobe, got a run ${width} px wide on a ${axis.w} px plot`)
+})
+
+test('a run opens before it crosses and closes after, so a lobe is not a stub', () => {
+  const nodes = [{ ...makeFocusNode(1000, 'a'), biasDb: 12, spanOct: 0.5 }]
+  const [run] = biasRuns(nodes, axis, rail)
+  // The first drawn point is inside the run's own span.
+  assert.ok(run.from <= run.pts[0].x)
+  assert.ok(run.to >= run.pts[run.pts.length - 1].x)
+  // Every drawn point really is over the threshold, and the peak is the node.
+  assert.ok(run.pts.every(p => Math.abs(p.db) >= 0.3 - 1e-9))
+  const peak = run.pts.reduce((a, b) => (Math.abs(b.db) > Math.abs(a.db) ? b : a))
+  assert.ok(Math.abs(peak.x - xFromHz(1000, axis)) <= 1)
+})
+
+test('two nodes far apart draw two lobes, not one', () => {
+  const nodes = [
+    { ...makeFocusNode(120, 'a'), biasDb: 10, spanOct: 0.4 },
+    { ...makeFocusNode(9000, 'b'), biasDb: 10, spanOct: 0.4 },
+  ]
+  assert.equal(biasRuns(nodes, axis, rail).length, 2)
 })
 
 // ── Hit testing. ────────────────────────────────────────────────────────────
@@ -119,14 +206,16 @@ test('a drag moves frequency and amount together and leaves width alone', () => 
   assert.equal(nodes[0].hz, 1000)
 })
 
-test('a drag past either end of the strip clamps rather than wrapping', () => {
+test('a drag past any edge of the plot clamps rather than wrapping', () => {
   const nodes = [makeFocusNode(1000, 'a')]
+  // Up and to the left: the lowest frequency, and the least cut. ⚠ Note the
+  // vertical sense — down is MORE cut, because down is toward the material.
   const lo = moveNode(nodes, 0, -400, -400, axis, rail)
   assert.equal(lo[0].hz, RESONANCE_FOCUS_RANGES.hz.min)
-  assert.equal(lo[0].biasDb, RESONANCE_FOCUS_RANGES.biasDb.max)
+  assert.equal(lo[0].biasDb, RESONANCE_FOCUS_RANGES.biasDb.min)
   const hi = moveNode(nodes, 0, 9999, 9999, axis, rail)
   assert.equal(hi[0].hz, RESONANCE_FOCUS_RANGES.hz.max)
-  assert.equal(hi[0].biasDb, RESONANCE_FOCUS_RANGES.biasDb.min)
+  assert.equal(hi[0].biasDb, RESONANCE_FOCUS_RANGES.biasDb.max)
 })
 
 /**
@@ -229,9 +318,12 @@ test('the curve is sampled per pixel column and agrees with the model', () => {
   assert.ok(Math.abs(peak.x - xFromHz(500, axis)) <= 1)
 })
 
-test('an empty rail draws a flat zero line and nothing else', () => {
+test('with no nodes the curve is flat on its datum — and is not drawn at all', () => {
   const pts = biasCurvePoints([], axis, rail, 10)
-  assert.ok(pts.every(p => p.db === 0 && p.y === rail.h / 2))
+  assert.ok(pts.every(p => p.db === 0 && p.y === rail.datum))
+  // ...which is the state `biasRuns` refuses to draw. Both halves matter: the
+  // curve is well defined everywhere, and the plot shows none of it.
+  assert.deepEqual(biasRuns([], axis, rail), [])
 })
 
 /**

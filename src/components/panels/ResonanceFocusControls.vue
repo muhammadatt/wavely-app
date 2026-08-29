@@ -6,11 +6,12 @@
  * with no partition to select first. The focus nodes are offsets FROM these and
  * live with the rail; see ResonanceFocusNode.
  *
- * ⚠ HARMONIC PROTECTION IS NOT HERE, and it was, until the row was rendered and
- * did not fit. It went to the targeting row rather than being shrunk, on its
- * own merits: "hold the harmonics below 5 kHz" is a statement about WHICH
- * FREQUENCIES TO LEAVE ALONE, which is what that row is for and is not what the
- * other three knobs do.
+ * ⚠ MAX CUT HAS NO CONTROL, AND THAT IS THE PRECEDENT RATHER THAN A FUDGE. Ten
+ * controls do not fit one 688 px row; the shipping zone panel hit the identical
+ * wall and resolved it the same way — "collapsing them cost two settings... the
+ * SOFT/HARD knee switch and the per-zone Max Cut. Both remain parameters at
+ * their stock values; only the controls are gone." `maxCut` is still a
+ * parameter, still in the patch, still honoured by the kernel.
  *
  * ⚠ THE EXISTENCE OF THIS BLOCK IS THE MODEL'S MAIN CLAIM. Under zones the same
  * settings are per-zone with no global value at all, so the panel can only ever
@@ -24,11 +25,17 @@
  */
 import { computed } from 'vue'
 import { RESONANCE_FOCUS_RANGES } from '../../audio/resonanceFocus.js'
+import { bright, tint } from '../../ui/accent.js'
 import Knob from '../knobs/Knob.vue'
 import DeviceField from '../knobs/DeviceField.vue'
 
 const props = defineProps({
   focus: { type: Object, required: true },
+  /**
+   * The pitch range the protection mask searches, for the caption. Fixed rather
+   * than chosen — see HARMONIC_PITCH_RANGE.
+   */
+  pitchRangeCaption: { type: String, default: '' },
   accent: { type: String, default: '#8de0a8' },
   disabled: { type: Boolean, default: false },
 })
@@ -42,6 +49,7 @@ function setGlobal(name, value) {
   emit('update:focus', { ...props.focus, global: { ...g.value, [name]: value } })
 }
 
+const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)}k` : String(Math.round(v)))
 const plain = v => v.toFixed(0)
 const pct = v => `${Math.round(v * 100)}%`
 </script>
@@ -99,20 +107,48 @@ const pct = v => `${Math.round(v * 100)}%`
       />
     </div>
 
-    <div class="w-[62px] shrink-0">
-      <!-- ⚠ GLOBAL, AND THIS IS THE ONE THING ZONES COULD SAY THAT FOCUS
-           CANNOT. A bias moves a threshold; it cannot express a per-band
-           CEILING, and the honest ceiling differs by band — 12 dB in the low
-           mids is fine and the same 12 dB on sibilance is a lisp. Recorded as a
-           real cost of the model rather than papered over. If listening misses
-           it, the answer is an optional fourth node field, not a return to
-           absolute per-band values. -->
-      <DeviceField
-        :model-value="g.maxCut" @update:model-value="setGlobal('maxCut', $event)"
-        :min="R.maxCut.min" :max="R.maxCut.max" :step="1" label="Max Cut" unit="dB"
-        :format-value="plain" :accent="accent" :disabled="disabled"
-        title="Ceiling on any one cut, everywhere. A focus bias cannot express a per-band ceiling — see the note in the source."
-      />
+    <!-- HARMONIC PROTECTION: GLOBAL, WITH A CEILING, replacing the per-zone
+         flag — and it loses nothing measured. The flag existed for one reason:
+         the mask blocks 67-88% of every octave from 60 Hz to 20 kHz, which is
+         real protection down where partials are widely spaced and a blanket
+         veto up where sibilance lives, so "protect the fundamental region, work
+         freely above 5 kHz" was the setting the effect most wanted and could
+         not express while the mask was global.
+
+         That is a statement about a FREQUENCY, not about a partition. One
+         switch and one ceiling say it directly, and say the same thing on every
+         file — where a per-zone flag says it only if the zones happen to be
+         placed somewhere sensible on this particular voice. -->
+    <div class="flex items-center gap-[7px] shrink-0">
+      <button
+        type="button"
+        class="px-[9px] py-[5px] rounded-full"
+        :aria-pressed="String(g.protect)"
+        :title="`Hold the harmonics of the tracked voice, below the ceiling. Pitch range ${pitchRangeCaption}.`"
+        :style="{
+          font: `600 8px 'JetBrains Mono',monospace`,
+          letterSpacing: '.1em',
+          color: g.protect ? bright(accent) : 'rgba(255,255,255,.36)',
+          background: g.protect ? tint(accent, 0.14) : 'rgba(255,255,255,.03)',
+          boxShadow: g.protect
+            ? `inset 0 0 0 1px ${tint(accent, 0.5)}`
+            : 'inset 0 0 0 1px rgba(255,255,255,.06)',
+        }"
+        :disabled="disabled"
+        @click="setGlobal('protect', !g.protect)"
+      >HARMONICS</button>
+      <!-- The ceiling only exists while the mask does, and hiding it costs no
+           layout: the slot keeps its width either way, so switching protection
+           on does not shove the row sideways. -->
+      <span class="block" style="width:62px">
+        <DeviceField
+          v-if="g.protect"
+          :model-value="g.protectCeilHz" @update:model-value="setGlobal('protectCeilHz', $event)"
+          :min="R.protectCeilHz.min" :max="R.protectCeilHz.max" :step="50"
+          label="Up to" unit="Hz" :format-value="hz"
+          :accent="accent" :disabled="disabled" :width="62"
+        />
+      </span>
     </div>
   </div>
 </template>

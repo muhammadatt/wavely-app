@@ -1,6 +1,6 @@
 /**
- * Geometry and edits for the focus rail — the node strip under the resonance
- * plot. See src/audio/resonanceFocus.js for what a focus node IS.
+ * Geometry and edits for the focus nodes, which live INSIDE the resonance plot.
+ * See src/audio/resonanceFocus.js for what a focus node IS.
  *
  * Split out of the component for the same reason resonanceZoneEdit.js is: every
  * one of these is a pure function of (nodes, axis, gesture) and none of them
@@ -9,19 +9,27 @@
  * nobody notices — a node editor whose frequency mapping is off by an octave
  * still looks like a working node editor.
  *
- * ⚠ THE RAIL IS ITS OWN STRIP, NOT AN OVERLAY ON THE TRACE, and that is the
- * fix for the failure already on record. The discarded Gaussian nodes put their
- * handles on the threshold line, which is `reference + selectivity` and
- * therefore moves with the audio at ~46 frames a second — reported from use as
- * a control bouncing three or four times a second and impossible to aim. A bias
- * curve is a STATIC function of frequency. It does not move, ever, so its
- * handles hold still and can be hit.
+ * ⚠ THERE IS NO RAIL. It began as a separate strip under the plot, which was
+ * rejected as a second instrument beside the one it describes; the curve now
+ * floats over the spectrum, on the material it is aimed at.
  *
- * It also stops the gesture promising something the effect cannot do. A bell
- * drawn over a spectrum reads as "pinpoint this frequency and notch it", and a
- * node never notches anything — it moves a detection threshold, so on a clean
- * part of the spectrum it does nothing at any setting. On its own rail, below
- * the plot, with dB-of-sensitivity on its axis, it reads as what it is.
+ * ⚠ ITS DATUM IS STATIC, AND THAT IS THE ONE HARD CONSTRAINT. The obvious
+ * reading of "over the spectrum" is to hang the handles on the THRESHOLD
+ * staircase, since that is the line a node actually biases. Measured: the
+ * spectrum band is 70 dB over ~139 px, so 1 dB is ~2 px, and a per-bin envelope
+ * swings tens of dB between a vowel and a pause. On a ±12 dB syllabic probe —
+ * conservative against real speech — the threshold line at one node's frequency
+ * travels **43 px in two seconds and up to 7 px between consecutive frames**.
+ * That is the discarded Gaussian nodes' "impossible to aim" report in numbers.
+ * So the curve keeps the threshold's PLACE and not its MOTION: a fixed datum,
+ * with nothing moving unless a knob does.
+ *
+ * The static datum also stops the gesture promising something the effect cannot
+ * do. A bell drawn on a spectrum reads as "pinpoint this frequency and notch
+ * it", and a node never notches anything — it moves a detection threshold, so
+ * over a clean part of the spectrum it does nothing at any setting. A curve
+ * that visibly is not the spectrum, and visibly is not the threshold, reads as
+ * the third thing it is.
  */
 
 import {
@@ -52,27 +60,57 @@ export function xFromHz(hz, axis) {
 }
 
 /**
- * The rail's vertical mapping: +biasDb at the top, 0 in the middle, -biasDb at
- * the bottom.
+ * Where the curve sits in the plot, and how steeply it responds.
  *
- * SYMMETRIC AROUND A CENTRE LINE, deliberately, because the quantity is signed
- * and its zero is the whole point of the model. A rail whose zero sat at the
- * bottom would draw "leave this alone" and "work a little harder here" as
- * neighbouring positions near one end, when they are opposite statements.
+ * Both are fractions of the SPECTRUM BAND — the middle of the plot's three
+ * tiled bands, between the reduction lane above and the FOUND strip below — so
+ * the curve grows with the plot when it is resized, as everything else in it
+ * does.
+ *
+ * ⚠ THE TWO TOGETHER HAVE TO KEEP THE CURVE INSIDE THE BAND, which is what
+ * decides the numbers rather than taste. The datum sits 0.22 of the band down
+ * from its top, roughly where a threshold sits over speech; full travel either
+ * way is 0.20 of the band, so the curve lives in [0.02, 0.42] of the band and
+ * cannot reach either the reduction lane or the noise floor. A curve that
+ * escaped its band would be drawn over a lane measuring something else entirely
+ * — the mistake the plot's own two-lane split was undone for.
+ *
+ * At the shipping height that is 1.54 px per dB, which is within 5% of the
+ * 1.61 px/dB the separate rail had — so the drag has the same feel it had
+ * before it moved.
  */
-export function yFromBias(db, rail) {
-  const half = rail.h / 2
-  return half - (clamp(db, -rail.maxDb, rail.maxDb) / rail.maxDb) * half
+export const FOCUS_DATUM_FRAC = 0.22
+export const FOCUS_HALF_SPAN_FRAC = 0.20
+
+/**
+ * The vertical mapping, from the spectrum band's own edges.
+ *
+ * ⚠ POSITIVE BIAS GOES DOWN. "More cut" lowers the threshold toward the
+ * material, and on this plot down IS toward the material — the spectrum is
+ * below and the reduction trace already hangs downward for "more". A curve that
+ * rose for "more cut" would be the only thing on the plate running the other
+ * way.
+ */
+export function focusScope(bandTop, bandBottom, maxDb) {
+  const band = Math.max(1, bandBottom - bandTop)
+  return {
+    maxDb,
+    datum: bandTop + band * FOCUS_DATUM_FRAC,
+    pxPerDb: (band * FOCUS_HALF_SPAN_FRAC) / maxDb,
+  }
 }
 
-export function biasFromY(y, rail) {
-  const half = rail.h / 2
-  return clamp(((half - y) / half) * rail.maxDb, -rail.maxDb, rail.maxDb)
+export function yFromBias(db, scope) {
+  return scope.datum + clamp(db, -scope.maxDb, scope.maxDb) * scope.pxPerDb
+}
+
+export function biasFromY(y, scope) {
+  return clamp((y - scope.datum) / scope.pxPerDb, -scope.maxDb, scope.maxDb)
 }
 
 /** Where a node's handle sits: its own frequency, at its own amount. */
-export function nodePoint(node, axis, rail) {
-  return { x: xFromHz(node.hz, axis), y: yFromBias(node.biasDb, rail) }
+export function nodePoint(node, axis, scope) {
+  return { x: xFromHz(node.hz, axis), y: yFromBias(node.biasDb, scope) }
 }
 
 /**
@@ -80,13 +118,13 @@ export function nodePoint(node, axis, rail) {
  *
  * Nearest wins, so two nodes stacked at the same frequency are both reachable
  * by aiming at their amounts — which is the only thing that distinguishes them
- * on this rail.
+ * on the curve.
  */
-export function nodeAt(nodes, x, y, axis, rail, radiusPx = NODE_HIT_PX) {
+export function nodeAt(nodes, x, y, axis, scope, radiusPx = NODE_HIT_PX) {
   let best = -1
   let bestD = radiusPx * radiusPx
   for (let i = 0; i < nodes.length; i++) {
-    const p = nodePoint(nodes[i], axis, rail)
+    const p = nodePoint(nodes[i], axis, scope)
     const d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y)
     if (d <= bestD) {
       bestD = d
@@ -101,16 +139,55 @@ export function nodeAt(nodes, x, y, axis, rail, radiusPx = NODE_HIT_PX) {
  *
  * Sampled in PIXELS rather than in frequency because that is what gets drawn:
  * sampling evenly in Hz puts nine tenths of the points in the top two octaves
- * and draws the bottom of the rail as straight segments between three samples.
+ * and draws the bottom octaves as straight segments between three samples.
  * The same argument the spectrum display's log resample makes.
  */
-export function biasCurvePoints(nodes, axis, rail, step = 1) {
+export function biasCurvePoints(nodes, axis, scope, step = 1) {
   const pts = []
   for (let x = 0; x <= axis.w; x += step) {
     const db = focusBiasAt(nodes, hzFromX(x, axis))
-    pts.push({ x, y: yFromBias(db, rail), db })
+    pts.push({ x, y: yFromBias(db, scope), db })
   }
   return pts
+}
+
+/**
+ * Below this the curve is not drawn at all.
+ *
+ * ⚠ IT IS WHAT STOPS THE CURVE BEING A RAIL. A bias is flat almost everywhere —
+ * that is the model, an untouched spectrum is untouched — so a continuous
+ * stroke paints a full-width horizontal line across the plot, and a full-width
+ * horizontal line reads as a rail whatever it is called. The plot already
+ * settled this for the reduction trace at the same 0.3 dB, "because in its own
+ * lane a continuous stroke along the top read as that lane's zero datum".
+ */
+export const BIAS_VISIBLE_DB = 0.3
+
+/**
+ * Runs of columns where the bias is worth drawing, each opening one column
+ * before it crosses and closing one after.
+ *
+ * Starting at the first column over the threshold was tried on the reduction
+ * trace and is wrong for the same reason here: on a narrow node the curve is
+ * already well away from the datum by then, so the lobe begins mid-slope and
+ * draws a stub instead of a shape.
+ */
+export function biasRuns(nodes, axis, scope, step = 1) {
+  const runs = []
+  let run = null
+  for (let x = 0; x <= axis.w; x += step) {
+    const db = focusBiasAt(nodes, hzFromX(x, axis))
+    if (Math.abs(db) >= BIAS_VISIBLE_DB) {
+      if (!run) run = { from: Math.max(0, x - step), pts: [] }
+      run.pts.push({ x, y: yFromBias(db, scope), db })
+    } else if (run) {
+      run.to = x
+      runs.push(run)
+      run = null
+    }
+  }
+  if (run) { run.to = axis.w; runs.push(run) }
+  return runs
 }
 
 /** A new node with the stock shape, centred where it was asked for. */
@@ -121,7 +198,7 @@ export function makeFocusNode(hz, id) {
     /**
      * One octave, and +6 dB of sensitivity.
      *
-     * A node created at zero would be invisible on the rail and inaudible in
+     * A node created at zero would be invisible on the curve and inaudible in
      * the file, so the gesture that makes one would look broken — the same
      * failure the ceiling presets shipped, where a click was accepted and
      * discarded. It is created DOING something, in the direction the gesture
@@ -154,15 +231,14 @@ export function setNodeParam(nodes, index, name, value) {
  * Move a node in both axes at once — a drag sets frequency AND amount.
  *
  * Two of a node's three numbers on one gesture, and the third (span) on the
- * wheel or in the field beside the rail. That split is not arbitrary: where and
- * how much are what you sweep by ear against the audio, and how wide is what
- * you set once and read.
+ * wheel. That split is not arbitrary: where and how much are what you sweep by
+ * ear against the audio, and how wide is what you set once and read.
  */
-export function moveNode(nodes, index, x, y, axis, rail) {
+export function moveNode(nodes, index, x, y, axis, scope) {
   if (index < 0 || index >= nodes.length) return nodes
   return patchNode(nodes, index, {
     hz: clamp(hzFromX(x, axis), RESONANCE_FOCUS_RANGES.hz.min, RESONANCE_FOCUS_RANGES.hz.max),
-    biasDb: biasFromY(y, rail),
+    biasDb: biasFromY(y, scope),
   })
 }
 
