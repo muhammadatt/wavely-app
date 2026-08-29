@@ -43,7 +43,7 @@ const overlaysB = ref({ removed: false, spectrum: true, found: false })
 const playing = ref(true)
 const clock = ref(0)
 
-function panel(title, note, patch, sel, soloRef, overlays, reductionStyle = 'hang') {
+function panel(title, note, patch, sel, soloRef, overlays) {
   const live = soloRef.value >= 0 ? { ...patch.value, solo: soloRef.value } : patch.value
   const thresholdFn = focusThresholdFn(live)
   const frame = makeFrame(live, 192, clock.value)
@@ -75,7 +75,6 @@ function panel(title, note, patch, sel, soloRef, overlays, reductionStyle = 'han
         selectedZone: -1,
         deltaZone: -1,
         soloFocusNode: soloRef.value,
-        reductionStyle,
         overlays: overlays.value,
         'onUpdate:focusNodes': v => { patch.value = { ...patch.value, nodes: v } },
         'onUpdate:selectedFocusNode': v => { sel.value = v },
@@ -142,9 +141,8 @@ const App = {
           onClick: () => { playing.value = !playing.value },
         }, playing.value ? 'PLAYING' : 'STOPPED'),
       ]),
-      panel('A · HANG — the fill between the rail and the curve', 'The bands swapped: FOUND at the top, REMOVED at the floor. Shading unchanged — the inked area is what was TAKEN, hanging from the lane\'s rail.', focus, selected, solo, overlaysA, 'hang'),
-      panel('B · CARVED — the complement inked', 'The same curve, the other side filled: the lane is solid and the cuts are bitten out of it, so the shaded mass is what SURVIVED. This is the most literal reading of inverting the shading.', focus, selected, solo, overlaysA, 'carved'),
-      panel('C · RISE — the silhouette mirrored', 'Depth grows UP from the floor, so a deep cut is a tall spike. ⚠ It puts two opposite conventions for one idea on one plate: the focus curve two bands up already means down is more cut.', focus, selected, solo, overlaysA, 'rise'),
+      panel('WORKED PATCH · card open', 'FOUND at the top, REMOVED at the floor with the complement inked — the lane is a mass and the cuts are bitten out of it.', focus, selected, solo, overlaysA),
+      panel('IDLE · nothing being removed', '⚠ The case the worked patch cannot show: with the complement inked, a lane doing nothing is a FULL slab. Whether that reads as ground or as a bright block is the question this card exists to answer.', empty, emptySel, emptySolo, overlaysA),
     ])
   },
 }

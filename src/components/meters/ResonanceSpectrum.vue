@@ -172,16 +172,6 @@ const props = defineProps({
    * the panel's fields keep reading the stored settings.
    */
   soloFocusNode: { type: Number, default: -1 },
-  /**
-   * ⚠ TEMPORARY, FOR CHOOSING THE REMOVED LANE'S SHADING BY EYE. Three
-   * readings of "invert the fill", rendered side by side in mockups/focus.html;
-   * the losers get deleted once one is picked. Not reachable from the app.
-   *
-   *   hang    the fill between the rail and the curve — what shipped
-   *   carved  the complement: solid lane with the cuts bitten out of it
-   *   rise    the same silhouette mirrored, growing up from the floor
-   */
-  reductionStyle: { type: String, default: 'hang' },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -1169,25 +1159,27 @@ function drawReduction(ctx, w, frame) {
   // curve two bands up already means "down is more cut", and a reduction trace
   // that grew upward for the same thing would put two opposite conventions for
   // one idea on one plate.
-  const yFor = props.reductionStyle === 'rise'
-    ? db => top + h - grFraction(db, props.fullScaleDb) * h
-    : db => top + grFraction(db, props.fullScaleDb) * h
+  const yFor = db => top + grFraction(db, props.fullScaleDb) * h
 
   ctx.save()
   clipPlate(ctx, w)
 
-  // CARVED fills the complement — the lane is solid and the cuts are bitten out
-  // of it — so the shaded mass is what SURVIVED rather than what was taken. The
-  // curve is identical either way; only which side of it is inked changes.
-  const carved = props.reductionStyle === 'carved'
+  // ⚠ THE COMPLEMENT IS INKED, NOT THE CUT — the lane is a mass and the
+  // reductions are bitten out of it. The curve is identical either way; only
+  // which side of it carries the fill changes.
+  //
+  // It reads better than the fill it replaced, and it costs one thing worth
+  // knowing: on this plate ink means ACTIVITY everywhere else — the focus
+  // curve's fill is the bias, the FOUND strip's fill is the crossing — and here
+  // it means what SURVIVED. The mass is anchored at the floor and fades upward
+  // so it reads as ground rather than as a reading, which is what keeps that
+  // inversion from being confusing.
   ctx.beginPath()
-  ctx.moveTo(0, carved ? top + h : top)
+  ctx.moveTo(0, top + h)
   for (let d = 0; d < bins; d++) ctx.lineTo(d * xStep, yFor(reduction[d]))
-  ctx.lineTo(w, carved ? top + h : top)
+  ctx.lineTo(w, top + h)
   ctx.closePath()
-  const grad = carved
-    ? ctx.createLinearGradient(0, top + h, 0, top)
-    : ctx.createLinearGradient(0, top, 0, top + h)
+  const grad = ctx.createLinearGradient(0, top + h, 0, top)
   // DELTA is expressed here now the sliver is gone, and this is its natural
   // home rather than a substitute for one: in DELTA the removed signal is what
   // is being heard, so the curve bounding it is the thing to light up.
@@ -2126,13 +2118,23 @@ function drawFocus(ctx, w) {
   // Which way is which. A signed quantity on a line with no scale beside it is
   // otherwise a guess, and this one runs the opposite way to the knob it
   // offsets — down is MORE cut, because down is toward the material.
+  // ⚠ ON A BACKING, because the threshold staircase runs THROUGH them. Both
+  // labels sit at the left edge, which is exactly where the reference is lowest
+  // on speech — so the dotted line descends across "MORE CUT" and cuts the
+  // glyphs in half. Only visible by rendering it; the two are drawn by
+  // different functions and neither looks wrong on its own.
   ctx.font = "500 8px 'JetBrains Mono',monospace"
-  ctx.fillStyle = 'rgba(255,255,255,.32)'
   const reach = scope.pxPerDb * scope.maxDb * 0.62
-  ctx.textBaseline = 'bottom'
-  ctx.fillText('MORE CUT', 7, scope.datum + reach)
-  ctx.textBaseline = 'top'
-  ctx.fillText('LESS CUT', 7, scope.datum - reach)
+  const label = (text, y, baseline) => {
+    const tw = ctx.measureText(text).width
+    ctx.fillStyle = 'rgba(8,10,13,.72)'
+    ctx.fillRect(5, y - (baseline === 'bottom' ? 9 : 1), tw + 4, 10)
+    ctx.fillStyle = 'rgba(255,255,255,.34)'
+    ctx.textBaseline = baseline
+    ctx.fillText(text, 7, y)
+  }
+  label('MORE CUT', scope.datum + reach, 'bottom')
+  label('LESS CUT', scope.datum - reach, 'top')
   ctx.textBaseline = 'alphabetic'
 
   nodes.forEach((n, i) => {
