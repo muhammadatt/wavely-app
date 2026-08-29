@@ -71,15 +71,15 @@ const pct = v => `${Math.round(v * 100)}%`
        GLOBAL settings and a plate is what this panel uses to mean "one thing
        selected out of several". -->
   <div class="flex items-center justify-center gap-[9px]">
-    <div class="w-[76px] shrink-0">
+    <div class="w-[68px] shrink-0">
       <Knob
         :model-value="g.selectivity" @update:model-value="setGlobal('selectivity', $event)"
         :min="R.selectivity.min" :max="R.selectivity.max" :step="0.5" :value-font-px="11"
         label="Threshold" :accent="accent" :format-value="plain" :disabled="disabled"
-        title="The detection threshold, everywhere. Focus nodes offset this — they do not replace it."
+        title="The global detection threshold. Use focus nodes to offset this."
       />
     </div>
-    <div class="w-[76px] shrink-0">
+    <div class="w-[68px] shrink-0">
       <!-- ⚠ GLOBAL, AND THAT IS THE DESIGN RATHER THAN A SIMPLIFICATION.
            Sharpness says WHAT SHAPE counts as a resonance — a property of the
            detector. A node's Width says WHERE you are paying attention — a
@@ -98,7 +98,7 @@ const pct = v => `${Math.round(v * 100)}%`
         title="What shape counts as a resonance. Not a node width."
       />
     </div>
-    <div class="w-[76px] shrink-0">
+    <div class="w-[68px] shrink-0">
       <Knob
         :model-value="g.depth" @update:model-value="setGlobal('depth', $event)"
         :min="R.depth.min" :max="R.depth.max" :step="0.01" :value-font-px="11"

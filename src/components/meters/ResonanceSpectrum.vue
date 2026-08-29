@@ -25,7 +25,6 @@ import {
   NODE_R,
   addNode,
   biasCurvePoints,
-  patchNode,
   canAddFocusNode,
   focusScope,
   makeFocusNode,
@@ -42,7 +41,6 @@ import {
   focusNode,
   focusNodeWeightAt,
 } from '../../audio/resonanceFocus.js'
-import FocusNodePanel from '../panels/FocusNodePanel.vue'
 import {
   createHeldAverage,
   createReadoutThrottle,
@@ -210,43 +208,6 @@ const emit = defineEmits([
 /** Running the focus targeting model rather than zones. */
 const focusMode = computed(() => props.focusNodes !== null)
 
-/**
- * Whether the node editor is showing.
- *
- * Its own flag rather than "a node is selected", because the two are different
- * questions: a node stays selected while it is dragged, walked to with the
- * arrow keys, or soloed, and a card that reopened on every one of those would
- * be in the way. It opens on a click and closes on the ×, on Escape, or on
- * deselecting.
- */
-const panelOpen = ref(false)
-/** Where the panel sits, in plot pixels. Recomputed as the node moves. */
-const panelPos = ref({ x: 0, y: 0 })
-
-const panelNode = computed(() =>
-  (focusMode.value && panelOpen.value ? props.focusNodes[props.selectedFocusNode] ?? null : null))
-
-/**
- * Place the card near its node without letting it hang off the plate.
- *
- * Below the handle by default and above it when there is no room, which is the
- * same rule the resonance pills follow — and it keeps the card off the curve it
- * is editing, since a node's own lobe is on the side the amount points.
- */
-const PANEL_W = 268
-const PANEL_H = 92
-function placePanel() {
-  const n = props.focusNodes?.[props.selectedFocusNode]
-  if (!n) return
-  const p = nodePoint(n, { w: width.value, minHz: axis.minHz, maxHz: axis.maxHz }, focusScopeNow())
-  const below = p.y + 14
-  const above = p.y - 14 - PANEL_H
-  panelPos.value = {
-    x: Math.max(4, Math.min(width.value - PANEL_W - 4, p.x - PANEL_W / 2)),
-    y: below + PANEL_H <= laneH.value - 4 || above < 4 ? below : above,
-  }
-}
-
 // ── Geometry ────────────────────────────────────────────────────────────────
 
 /** Strip along the bottom for the frequency numerals. */
@@ -353,6 +314,69 @@ const SPEC_CROSS_EDGE_PX = 2
 /** The strip: the same crossings, decayed. Quieter, because it is the past. */
 const SPEC_HISTORY_FILL_A = 0.34
 const SPEC_HISTORY_EDGE_A = 0.62
+
+/**
+ * THE FOCUS MODEL'S INKS.
+ *
+ * Lifted out of `drawFocus` to sit with the rest. They arrived as literals
+ * inline in the drawing code, from a branch written alongside this one, and the
+ * two conventions met in the middle of one file: the overlay's values are a
+ * table because they trade against each other, and these were five `rgba(...)`
+ * strings and three alphas scattered through 130 lines.
+ *
+ * They obey the same rule as everything else here — white is the file, the
+ * accent is the effect — and a focus node is squarely the effect: it is a bias
+ * the user has placed on the detector. So the curve, its fill and the node
+ * handles are all accent, and the only neutral things are the datum it is
+ * measured against and the backings that keep text legible.
+ *
+ * ⚠ THE GLOW IS THE THIRD CLAIMANT ON THE PLATE AND THE COMMENT ON THE FIRST IS
+ * NOW WRONG. `drawReduction` still says its outline is "the only place on the
+ * plate that carries one — the design system spends its accent glow on the
+ * things that are actually emitting". The focus curve and the selected node
+ * both carry one too, and in focus mode they arguably ARE the emitting thing.
+ * Recorded rather than resolved: which of the three should glow is a judgement
+ * to make with all three on screen, not from the source.
+ */
+/** The neutral datum the bias curve is read against — zero bias, full width. */
+const FOCUS_DATUM = 'rgba(255,255,255,.13)'
+const FOCUS_DATUM_DASH = [3, 5]
+/** Fill between the curve and its datum, so the shaded area IS the bias. */
+const FOCUS_CURVE_FILL_A = 0.01
+const FOCUS_CURVE_PX = 1.7
+const FOCUS_CURVE_GLOW_A = 0.55
+const FOCUS_GLOW_PX = 9
+/** A bypassed node: its place kept, its fill gone. */
+const FOCUS_NODE_OFF = 'rgba(255,255,255,.34)'
+const FOCUS_NODE_OFF_PX = 1.2
+/** An unselected node: plate-filled, ringed. */
+const FOCUS_NODE_RING_A = 0.75
+const FOCUS_NODE_RING_PX = 1.4
+const FOCUS_NODE_GLOW_A = 0.6
+/**
+ * Backings.
+ *
+ * ⚠ THE SOLO VEIL AND THE LABEL BACKING ARE THE PLATE COLOUR, NOT BLACK, and
+ * they have to be: they are painted OVER the waterfall and the spectrum, so a
+ * neutral black would read as a hole punched in the plate rather than as the
+ * plate showing through. Both are `plateAlpha()` of `PLATE_INK` rather than the
+ * triple written out again — it was written out twice in the drawing code, and
+ * a third copy is how a re-tinted plate ends up with two colours in it.
+ *
+ * The PILL is the one deliberate exception: it is `#0a0e10`, a touch lighter and
+ * cooler than the plate, because it sits ON the curve rather than on the plate
+ * and has to separate from what is behind it.
+ */
+const FOCUS_VEIL_MAX_A = 0.55
+const FOCUS_LABEL_BACKING_A = 0.72
+const FOCUS_LABEL_INK = 'rgba(255,255,255,.34)'
+const FOCUS_PILL_BACKING = 'rgba(10,14,16,.86)'
+const FOCUS_PILL_RING_A = 0.4
+
+/** `PLATE_INK` at an alpha, for anything laid over the plate's own contents. */
+function plateAlpha(a) {
+  return `rgba(8,10,13,${a})`
+}
 
 /**
  * The SPECTRUM overlay's band and the dBFS window drawn into it.
@@ -993,7 +1017,6 @@ function draw(dtMs) {
   // moves on a drag, on an arrow key, on a resize and on an overlay toggle —
   // the last two change the band the curve hangs in — and this is the one place
   // that sees all four. One `nodePoint` per frame while it is open.
-  if (panelOpen.value) placePanel()
 
   drawZones(ctx, w)
   drawZoneReadouts(ctx, w)
@@ -1039,7 +1062,7 @@ function drawCarveHistory(ctx, w) {
   ctx.globalAlpha = 1
   // The scrim is what makes an underlay an underlay. Without it the waterfall
   // is as loud as the curve and the plot has two heroes.
-  ctx.fillStyle = 'rgba(8,10,13,.42)'
+  ctx.fillStyle = plateAlpha(0.42)
   ctx.fillRect(0, 0, w, h)
   ctx.restore()
 }
@@ -2071,8 +2094,8 @@ function drawFocus(ctx, w) {
   // The neutral datum, full width and faint. It is what the curve is read
   // against — without it a displaced curve says how the bias VARIES and not
   // which side of nothing it is on.
-  ctx.strokeStyle = 'rgba(255,255,255,.13)'
-  ctx.setLineDash([3, 5])
+  ctx.strokeStyle = FOCUS_DATUM
+  ctx.setLineDash(FOCUS_DATUM_DASH)
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(0, Math.round(scope.datum) + 0.5)
@@ -2090,9 +2113,9 @@ function drawFocus(ctx, w) {
   if (soloed) {
     for (let x = 0; x < w; x++) {
       const hz = axisNow.minHz * Math.pow(2, (x / w) * Math.log2(axisNow.maxHz / axisNow.minHz))
-      const a = 0.55 * (1 - focusNodeWeightAt(focusNode(soloed), hz))
+      const a = FOCUS_VEIL_MAX_A * (1 - focusNodeWeightAt(focusNode(soloed), hz))
       if (a <= 0.01) continue
-      ctx.fillStyle = `rgba(8,10,13,${a})`
+      ctx.fillStyle = plateAlpha(a)
       ctx.fillRect(x, 0, 1, laneH.value)
     }
   }
@@ -2108,15 +2131,15 @@ function drawFocus(ctx, w) {
   for (const p of pts) ctx.lineTo(p.x, p.y)
   ctx.lineTo(w, scope.datum)
   ctx.closePath()
-  ctx.fillStyle = tint(props.accent, 0.18)
+  ctx.fillStyle = tint(props.accent, FOCUS_CURVE_FILL_A)
   ctx.fill()
 
   ctx.beginPath()
   pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)))
   ctx.strokeStyle = bright(props.accent)
-  ctx.lineWidth = 1.7
-  ctx.shadowColor = tint(props.accent, 0.55)
-  ctx.shadowBlur = 9
+  ctx.lineWidth = FOCUS_CURVE_PX
+  ctx.shadowColor = tint(props.accent, FOCUS_CURVE_GLOW_A)
+  ctx.shadowBlur = FOCUS_GLOW_PX
   ctx.stroke()
   ctx.shadowBlur = 0
 
@@ -2132,9 +2155,9 @@ function drawFocus(ctx, w) {
   const reach = scope.pxPerDb * scope.maxDb * 0.62
   const label = (text, y, baseline) => {
     const tw = ctx.measureText(text).width
-    ctx.fillStyle = 'rgba(8,10,13,.72)'
+    ctx.fillStyle = plateAlpha(FOCUS_LABEL_BACKING_A)
     ctx.fillRect(5, y - (baseline === 'bottom' ? 9 : 1), tw + 4, 10)
-    ctx.fillStyle = 'rgba(255,255,255,.34)'
+    ctx.fillStyle = FOCUS_LABEL_INK
     ctx.textBaseline = baseline
     ctx.fillText(text, 7, y)
   }
@@ -2151,8 +2174,8 @@ function drawFocus(ctx, w) {
     if (!on) {
       // A bypassed node keeps its place and loses its fill: it is still where
       // it was put, and still the thing the controls are editing.
-      ctx.strokeStyle = 'rgba(255,255,255,.34)'
-      ctx.lineWidth = 1.2
+      ctx.strokeStyle = FOCUS_NODE_OFF
+      ctx.lineWidth = FOCUS_NODE_OFF_PX
       ctx.stroke()
       ctx.beginPath()
       ctx.moveTo(p.x - NODE_R, p.y + NODE_R)
@@ -2160,15 +2183,15 @@ function drawFocus(ctx, w) {
       ctx.stroke()
     } else if (sel) {
       ctx.fillStyle = bright(props.accent)
-      ctx.shadowColor = tint(props.accent, 0.6)
-      ctx.shadowBlur = 9
+      ctx.shadowColor = tint(props.accent, FOCUS_NODE_GLOW_A)
+      ctx.shadowBlur = FOCUS_GLOW_PX
       ctx.fill()
       ctx.shadowBlur = 0
     } else {
       ctx.fillStyle = PLATE_INK
       ctx.fill()
-      ctx.strokeStyle = tint(props.accent, 0.75)
-      ctx.lineWidth = 1.4
+      ctx.strokeStyle = tint(props.accent, FOCUS_NODE_RING_A)
+      ctx.lineWidth = FOCUS_NODE_RING_PX
       ctx.stroke()
     }
   })
@@ -2179,7 +2202,7 @@ function drawFocus(ctx, w) {
   // ⚠ NOT WHILE THE CARD IS OPEN. The card carries the same three values as
   // editable fields a few pixels away, so the pill would be the same numbers
   // printed twice, with the card drawn over the top of one of them.
-  const sel = panelOpen.value ? null : nodes[props.selectedFocusNode]
+  const sel = nodes[props.selectedFocusNode]
   if (sel) {
     const p = nodePoint(sel, axisNow, scope)
     const span = sel.spanOct < 1
@@ -2198,9 +2221,9 @@ function drawFocusPill(ctx, w, x, y, text) {
   const px = Math.max(2, Math.min(w - tw - 2, x - tw / 2))
   ctx.beginPath()
   roundRect(ctx, px, y - 9, tw, 18, 5)
-  ctx.fillStyle = 'rgba(10,14,16,.86)'
+  ctx.fillStyle = FOCUS_PILL_BACKING
   ctx.fill()
-  ctx.strokeStyle = tint(props.accent, 0.4)
+  ctx.strokeStyle = tint(props.accent, FOCUS_PILL_RING_A)
   ctx.lineWidth = 1
   ctx.stroke()
   ctx.fillStyle = bright(props.accent)
@@ -2283,11 +2306,11 @@ function drawZoneDots(ctx) {
       ctx.fill()
       // A ring off the fill, so the selected dot survives being drawn over the
       // reduction fill in its own colour.
-      ctx.strokeStyle = 'rgba(8,10,13,.75)'
+      ctx.strokeStyle = plateAlpha(0.75)
       ctx.lineWidth = 1.5
       ctx.stroke()
     } else {
-      ctx.fillStyle = 'rgba(8,10,13,.62)'
+      ctx.fillStyle = plateAlpha(0.62)
       ctx.fill()
       ctx.strokeStyle = tint(props.accent, hot ? 0.8 : 0.45)
       ctx.lineWidth = 1.25
@@ -2433,11 +2456,6 @@ function onDown(e) {
   const fnode = focusNodeAt(x, y)
   if (fnode >= 0) {
     selectFocus(fnode)
-    // Clicking the open one again puts the card away, which is the only route
-    // back to an unobstructed plot that does not involve hunting for empty
-    // plate — the same rule the resonance marks' labels follow.
-    panelOpen.value = !(panelOpen.value && fnode === props.selectedFocusNode)
-    placePanel()
     focusDrag = fnode
     dragging.value = true
     canvasEl.value?.setPointerCapture?.(e.pointerId)
@@ -2482,7 +2500,6 @@ function onDown(e) {
   // accidental deselection costs nothing.
   if (focusMode.value) {
     selectFocus(-1)
-    panelOpen.value = false
     return
   }
   // Anywhere else in the plot selects the zone under the pointer. Selection is
@@ -2523,13 +2540,10 @@ function onDblClick(e) {
     if (hit >= 0) {
       commitFocus(removeNode(props.focusNodes, hit))
       selectFocus(-1)
-      panelOpen.value = false
     } else if (canAddFocusNode(props.focusNodes)) {
       const next = addNode(props.focusNodes, newFocusNode(hzFromX(x, axis)))
       commitFocus(next)
       selectFocus(next.length - 1)
-      panelOpen.value = true
-      placePanel()
     }
     e.preventDefault()
     return
@@ -2610,25 +2624,6 @@ function onKeyDown(e) {
   e.preventDefault()
 }
 
-/** One field of the open node, from the card. */
-function patchFocusNode(patch) {
-  const i = props.selectedFocusNode
-  let next = props.focusNodes
-  for (const [name, value] of Object.entries(patch)) {
-    // `shape` and `enabled` are not numbers, so they bypass the clamping setter
-    // rather than being silently rejected by it.
-    next = name === 'shape' || name === 'enabled'
-      ? patchNode(next, i, { [name]: value })
-      : setNodeParam(next, i, name, value)
-  }
-  commitFocus(next)
-}
-
-function deleteFocusNode() {
-  commitFocus(removeNode(props.focusNodes, props.selectedFocusNode))
-  selectFocus(-1)
-  panelOpen.value = false
-}
 
 /**
  * Keyboard equivalents for every focus gesture.
@@ -2647,8 +2642,6 @@ function onFocusKeyDown(e) {
     const next = addNode(nodes, newFocusNode(hzFromX(axis.w * 0.5, axis)))
     commitFocus(next)
     selectFocus(next.length - 1)
-    panelOpen.value = true
-    placePanel()
   }
 
   // Plain left/right WALK the nodes; shifted, they move the selected one. The
@@ -2680,12 +2673,12 @@ function onFocusKeyDown(e) {
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     commitFocus(removeNode(nodes, i))
     selectFocus(-1)
-    panelOpen.value = false
   } else if (e.key === 'Escape') {
-    // Only when the card is open, so Escape still reaches the window manager
-    // and closes the plugin when it is not — the window owns that key.
-    if (!panelOpen.value) return
-    panelOpen.value = false
+    // ⚠ ESCAPE DESELECTS RATHER THAN CLOSING A CARD, and it still has to pass
+    // through when there is nothing selected: the window owns that key, and
+    // swallowing it unconditionally would stop Escape closing the plugin.
+    if (props.selectedFocusNode < 0) return
+    selectFocus(-1)
   } else if (e.key === ' ') {
     commitFocus(toggleNode(nodes, i))
   } else if (e.key === 'Enter') {
@@ -2873,35 +2866,28 @@ const plotSummary = computed(() => {
     }).join('; ') + '.'
     : ''
   return `${props.title}. ${cut}${mode}${found}${focus}${zones} `
-    + `${focusMode.value ? FOCUS_HINT : ZONE_HINT}`
+    + `${focusMode.value ? FOCUS_HINT : ''}`
 })
 
 /**
- * How to work the nodes, in one string, used as both the tooltip and the tail
- * of the accessible name.
+ * How to work the focus nodes, in one string — the tail of the accessible name.
+ * Every gesture named here has a keyboard equivalent in onFocusKeyDown; a canvas
+ * whose only editor is a pointer is the one control some people cannot use at
+ * all.
  *
- * The same sentence in both places on purpose: this is a canvas, so there is no
- * other way to discover that double-clicking it does anything, and a sighted
- * user hovering and a screen-reader user landing on it deserve the same
- * instruction rather than two that have to be kept in step.
- */
-/**
- * How to work the focus nodes, in one string — the tooltip and the tail of the
- * accessible name, exactly as ZONE_HINT is for the other model. Every gesture
- * named here has a keyboard equivalent in onFocusKeyDown; a canvas whose only
- * editor is a pointer is the one control some people cannot use at all.
+ * ⚠ THE ZONE MODEL HAD THE SAME THING AND NO LONGER DOES. `ZONE_HINT` named
+ * every zone gesture — the resonance dots, the zone dots, the boundary drags,
+ * the double-click split and merge and their keyboard equivalents — and it was
+ * the canvas `title` as well as the tail of this name. It is removed. That takes
+ * the hover tooltip with it, which is what it was asked to do, and it also takes
+ * the only announcement that the zone editor is operable at all: nothing else
+ * tells a screen-reader user that arrows select a zone or that Enter splits one.
+ * Putting a shorter version back in the accessible name only, without the
+ * tooltip, is a one-line change.
  */
 const FOCUS_HINT = 'Drag a node for frequency and amount, wheel over one for '
   + 'width, double-click to add or remove. With a node selected: arrows move '
   + 'it, brackets change its width, space bypasses it, delete removes it.'
-
-const ZONE_HINT = 'Click a resonance dot to label it with its frequency and '
-  + 'depth, or click it again to put the label away. Click a zone dot along the '
-  + 'bottom to select that zone. Drag a '
-  + 'boundary line to move a zone. Double-click to split a zone, or double-click a '
-  + 'boundary to merge. Keyboard: up and down label each resonance in turn, '
-  + 'left and right select a zone, shift with left and right moves the '
-  + 'boundary, Enter splits, Delete merges.'
 
 /**
  * How many resonances are being worked and how hard, refreshed on the marks'
@@ -2953,7 +2939,6 @@ const idleHint = computed(() =>
         tabindex="0"
         role="group"
         :aria-label="plotSummary"
-        :title="ZONE_HINT"
         :style="{
           height: `${height}px`,
           borderRadius: '12px',
@@ -2971,25 +2956,28 @@ const idleHint = computed(() =>
         @keydown="onKeyDown"
       ></canvas>
 
-      <!-- ⚠ ABSOLUTE OVER THE PLATE, INSIDE THE SAME WRAPPER. It has to be
-           positioned from the node's pixel coordinates, and those exist only in
-           here — a card hosted by the panel would need the plot to publish its
-           geometry, which is a second copy of the mapping and this component
-           has already recorded what that costs. -->
-      <FocusNodePanel
-        v-if="panelNode"
-        class="absolute"
-        :style="{ left: `${panelPos.x + 3}px`, top: `${panelPos.y + 3}px` }"
-        :node="panelNode"
-        :index="selectedFocusNode"
-        :count="focusNodes.length"
-        :solo="soloFocusNode === selectedFocusNode"
-        :accent="accent"
-        @patch="patchFocusNode"
-        @delete="deleteFocusNode"
-        @solo="emit('focus-solo', selectedFocusNode)"
-        @close="panelOpen = false"
-      />
+      
+
+      <!-- ⚠ A SLOT, NOT A CARD THIS COMPONENT OWNS. The node's fields used to
+           be a FocusNodePanel mounted here and positioned from the node's own
+           pixel coordinates — which is why they lived in this file, and which
+           was the defect: at the node's y ± 14 the card covered the curve it was
+           editing, and it moved every time the node did.
+
+           What the plot still owns is WHERE the foot of the plate is. What it no
+           longer owns is the node's state, which lives with the rest of the
+           panel's state. A slot is exactly that split: the panel decides what
+           goes in and this decides where the bottom is.
+
+           Pinned to the foot rather than tracking anything, so the fields are in
+           one predictable place and the reader's eye can learn it. ⚠ IT DOES
+           COVER THE BOTTOM OF THE PLOT WHILE A NODE IS SELECTED, the FOUND strip
+           included — that is the trade against the control row, which occludes
+           nothing and is easy to miss. See ui/focusNodeDock.js. -->
+      <div
+        v-if="$slots.dock"
+        class="absolute left-0 right-0 bottom-[20px] flex justify-center"
+      ><slot name="dock" /></div>
     </div>
   </div>
 </template>

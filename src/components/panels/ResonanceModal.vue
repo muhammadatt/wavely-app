@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
 import { focusThresholdFn } from '../../audio/resonanceFocus.js'
 import {
@@ -17,6 +17,13 @@ import {
   toggleOverlay as flipOverlay,
 } from '../../ui/resonanceOverlays.js'
 import { HISTORY_SECONDS } from '../meters/resonanceHistory.js'
+import {
+  patchNode,
+  removeNode,
+  setNodeParam,
+} from '../meters/resonanceFocusNodes.js'
+import { resolveFocusDock } from '../../ui/focusNodeDock.js'
+import FocusNodePanel from './FocusNodePanel.vue'
 import Knob from '../knobs/Knob.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
@@ -99,6 +106,69 @@ const plotHeight = computed(() => PLOT_H + heightDelta.value)
  * anything computing them out here would be a second reader of the kernel's
  * port describing a different instant from the picture beside it.
  */
+/**
+ * The selected focus node, or null — what the control row shows in its place.
+ *
+ * ⚠ SELECTION DRIVES IT NOW, WHERE A SEPARATE "OPEN" STATE USED TO. As a
+ * floating card the node's fields had to be opened and closed, because they
+ * covered the plot: `panelOpen`, a click to open, another to dismiss, Escape,
+ * and a close button. Docked in the row there is nothing to dismiss — the row
+ * shows the settings of whatever is selected, exactly as it does for a zone, and
+ * clicking empty plate deselects.
+ */
+/**
+ * Which of the two placements is in force — see ui/focusNodeDock.js.
+ *
+ * Resolved once, not reactive: it is a comparison switch for deciding between
+ * two designs by looking at them, and a placement that could change mid-session
+ * would be a third thing to reason about rather than a way of choosing between
+ * two.
+ */
+const focusDock = resolveFocusDock()
+
+/**
+ * Whether the node's fields are showing, as distinct from whether a node is
+ * selected.
+ *
+ * ⚠ A DISMISSED PANEL IS NOT A DESELECTED NODE. The `×` puts the fields down and
+ * leaves the node selected — still lit on the plot, still the thing the arrow
+ * keys walk from — because at the foot of the plate the panel covers the bottom
+ * of the display, and wanting to SEE that is not wanting to stop editing.
+ *
+ * It reopens on the next selection change, so dismissing is per-node rather than
+ * a mode: clicking another node shows its fields, which is what a reader who
+ * just dismissed one and clicked the next expects.
+ */
+const nodePanelOpen = ref(true)
+watch(() => resSelectedNode.value, () => { nodePanelOpen.value = true })
+
+const selectedNode = computed(() => (focusMode
+  ? resFocus.value.nodes[resSelectedNode.value] ?? null
+  : null))
+
+/**
+ * Node edits, applied here rather than in the plot.
+ *
+ * They lived in ResonanceSpectrum because the card did. `shape` and `enabled`
+ * are not numbers, so they take `patchNode` rather than the clamping setter
+ * `setNodeParam`, which would silently reject them.
+ */
+function patchFocusNode(patch) {
+  const i = resSelectedNode.value
+  let next = resFocus.value.nodes
+  for (const [name, value] of Object.entries(patch)) {
+    next = name === 'shape' || name === 'enabled'
+      ? patchNode(next, i, { [name]: value })
+      : setNodeParam(next, i, name, value)
+  }
+  syncFocus({ ...resFocus.value, nodes: next })
+}
+
+function deleteFocusNode() {
+  syncFocus({ ...resFocus.value, nodes: removeNode(resFocus.value.nodes, resSelectedNode.value) })
+  resSelectedNode.value = -1
+}
+
 const reading = ref({ deepestDb: 0, count: 0, avgDb: 0 })
 
 /**
@@ -238,17 +308,17 @@ async function applyAndClose() {
 </script>
 
 <template>
-  <!-- ⚠ 740 RATHER THAN 660, AND THE SINGLE ROW IS WHY. Attack and Release,
-       the zone plate and Mix and Trim measure 674 px side by side; the old
-       width left 608 of content, so the row overflowed by 66 and the plate
-       would have been clipped rather than merely tight. The alternative was
-       ~52 px knobs and a 100 px identity block, which is smaller than anything
-       else in the app wears. The 80 px also goes to the display, which is the
-       one dimension the frequency axis has been short of throughout. -->
+  <!-- ⚠ BACK TO 660, AND THE ROW WAS MADE TO FIT RATHER THAN THE WINDOW GROWN.
+       It went to 740 when the two control rows collapsed into one, because the
+       row measured 674 against 608 of content. The knobs came down instead:
+       the four globals to 54 and the zone plate to a 100 px identity and 68 px
+       knobs, which is 348 in a 352 px slot. The arithmetic is in the widths
+       below and it has almost nothing spare, so anything added to this row
+       needs the sums redone rather than a nudge. -->
   <FloatingWindow
     window-id="resonance-suppressor"
     :z="z"
-    :width="740"
+    :width="660"
     :accent="ACCENT"
     brand-lead="RESO"
     brand-tail="TAME"
@@ -503,7 +573,25 @@ async function applyAndClose() {
         @update:selected-focus-node="resSelectedNode = $event"
         @focus-solo="toggleFocusSolo"
         @update:reading="reading = $event"
-      />
+      >
+        <!-- The bottom placement. Same component and the same handlers as the
+             row one — only where it is mounted differs, which is what makes the
+             two comparable rather than two designs that happen to look alike. -->
+        <template v-if="focusDock === 'bottom' && focusMode && selectedNode && nodePanelOpen" #dock>
+          <FocusNodePanel
+            docked
+            :node="selectedNode"
+            :index="resSelectedNode"
+            :count="resFocus.nodes.length"
+            :solo="resSoloNode === resSelectedNode"
+            :accent="ACCENT"
+            @patch="patchFocusNode"
+            @delete="deleteFocusNode"
+            @solo="toggleFocusSolo(resSelectedNode)"
+            @close="nodePanelOpen = false"
+          />
+        </template>
+      </ResonanceSpectrum>
 
       <!-- ONE ROW FOR EVERYTHING BELOW THE PLOT, and it used to be two.
            Directly under the display because the row and the plot are one
@@ -540,7 +628,7 @@ async function applyAndClose() {
              200/500 ms; what keeps improving past there is p90 depth, 8.5 to
              5.2 dB, the same average cut spread evenly instead of concentrated
              in momentary deep notches. 400/2000 captures nearly all of it. -->
-        <div class="w-[60px] shrink-0">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resAttack" @update:model-value="syncAttack"
             :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="11"
@@ -548,7 +636,7 @@ async function applyAndClose() {
             :disabled="!resPreview"
           />
         </div>
-        <div class="w-[60px] shrink-0">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resRelease" @update:model-value="syncRelease"
             :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="11"
@@ -560,8 +648,44 @@ async function applyAndClose() {
         <!-- min-w-0 so the plate is what gives way if the row ever runs out of
              width, rather than a knob being clipped off the end. -->
         <div class="flex-1 min-w-0">
+          <!-- ⚠ THE SELECTED NODE TAKES THE SLOT, SWAPPING WITH THE GLOBAL
+               FOCUS KNOBS RATHER THAN OPENING BESIDE THEM. Same move the HARM
+               door makes inside the zone plate, for the same reason: the row's
+               height is set by what is in it, so a swap moves nothing while an
+               expansion moves everything below.
+
+               It also puts the two models on the same footing at last. Under
+               zones, the plot owns WHERE a zone is and this slot owns what the
+               SELECTED one does; under focus, the plot owned where a node was
+               and its settings floated over the plot in a card placed at the
+               node's own y — covering the curve being edited. Now both models
+               read the same way.
+
+               ⚠ ResonanceFocusControls IS THE UNSELECTED STATE, NOT DEAD CODE.
+               It carries the settings that are global to the focus model —
+               Threshold, Sharp, Depth and the range — which have nowhere else to
+               live and are what the row should show when no node is selected. -->
+          <!-- Centred, not stretched — the zone plate this swaps with is sized
+               by its contents too. -->
+          <div
+            v-if="focusMode && selectedNode && nodePanelOpen && focusDock === 'row'"
+            class="flex justify-center"
+          >
+            <FocusNodePanel
+              docked
+              :node="selectedNode"
+              :index="resSelectedNode"
+              :count="resFocus.nodes.length"
+              :solo="resSoloNode === resSelectedNode"
+              :accent="ACCENT"
+              @patch="patchFocusNode"
+              @delete="deleteFocusNode"
+              @solo="toggleFocusSolo(resSelectedNode)"
+              @close="nodePanelOpen = false"
+            />
+          </div>
           <ResonanceFocusControls
-            v-if="focusMode"
+            v-else-if="focusMode"
             :focus="resFocus"
             :pitch-range-caption="pitchRangeCaption"
             :accent="ACCENT"
@@ -587,7 +711,7 @@ async function applyAndClose() {
              Trim is `bipolar` — a cut/boost knob filling from its minimum lights
              half the ring at 0 dB, so an untouched trim reads as an applied
              one. -->
-        <div class="w-[60px] shrink-0">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resMix" @update:model-value="syncMix"
             :min="0" :max="1" :step="0.01" :value-font-px="11"
@@ -595,7 +719,7 @@ async function applyAndClose() {
             :disabled="!resPreview"
           />
         </div>
-        <div class="w-[60px] shrink-0">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resTrim" @update:model-value="syncTrim"
             :min="-12" :max="12" :step="0.5" :value-font-px="11"

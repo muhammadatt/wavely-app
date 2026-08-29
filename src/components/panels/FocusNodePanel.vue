@@ -31,8 +31,40 @@ const props = defineProps({
   /** Auditioning this node's region alone. Monitoring state, never a parameter. */
   solo: { type: Boolean, default: false },
   accent: { type: String, default: '#8de0a8' },
+  /** Sitting in the control row rather than floating over the plot. */
+  docked: { type: Boolean, default: false },
 })
 
+/**
+ * ⚠ DOCKED IS THE SHIPPING SHAPE; FLOATING IS WHAT IT REPLACED. As a card
+ * hovering beside its node it competed with the very curve it was editing —
+ * `placePanel` put it at the node's own y ± 14, which is the one place
+ * guaranteed to cover the thing under the pointer, and at 268 x 92 it was a
+ * third of the lane.
+ *
+ * Docked it takes either the foot of the plate or the slot in the control row
+ * that the SELECTED ZONE's settings take under the other model — see
+ * ui/focusNodeDock.js. Two differences from the floating card, both chrome: no
+ * fixed width, so it fills whichever slot it is in, and no drop shadow, because
+ * it is not floating over anything.
+ *
+ * ⚠ IT KEEPS ITS 268 px WHEREVER IT IS DOCKED. It was `w-full` when docked, on
+ * the reflex that a docked thing fills its slot. Wrong on both counts here: at
+ * the foot of the plate a full-width panel covers the whole bottom of the
+ * display across every frequency, where the same fields centred cover under half
+ * of it — and in the control row it made this the one block that stretched,
+ * where the zone plate beside it is sized by its contents and centred. Three
+ * fields and a chip row have a natural width; stretching them only spreads them
+ * out.
+ *
+ * ⚠ THE CLOSE BUTTON STAYS IN BOTH. It was dropped when this docked, on the
+ * argument that selection opens and closes it the way selecting a zone does.
+ * True of the control row, where the panel occupies space nothing else wanted;
+ * false at the foot of the plate, where it covers the bottom of the display
+ * including the FOUND strip. There the reader needs a way to put it down that is
+ * not "find empty plate and click it" — and a dismissed panel is not a
+ * deselected node, so the `×` emits `close` and leaves the selection alone.
+ */
 const emit = defineEmits(['patch', 'delete', 'close', 'solo'])
 
 const R = RESONANCE_FOCUS_RANGES
@@ -70,8 +102,12 @@ function chip(on, warn = false) {
 <template>
   <div
     class="rounded-[10px] px-[10px] py-[8px]"
-    style="width:268px;background:rgba(14,18,20,.96)"
-    :style="{ boxShadow: `inset 0 0 0 1px ${tint(accent, 0.28)}, 0 8px 24px rgba(0,0,0,.6)` }"
+    :style="[
+      { background: 'rgba(14,18,20,1)', width: '268px' },
+      { boxShadow: docked
+        ? `inset 0 0 0 1px ${tint(accent, 0.28)}`
+        : `inset 0 0 0 1px ${tint(accent, 0.28)}, 0 8px 24px rgba(0,0,0,.6)` },
+    ]"
     role="group"
     :aria-label="`Focus node ${index + 1} of ${count}`"
     @keydown.esc.stop="emit('close')"
@@ -83,18 +119,18 @@ function chip(on, warn = false) {
       <span
         style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em"
         :style="{ color: bright(accent) }"
-      >FOCUS {{ index + 1 }} OF {{ count }}</span>
+      >NODE {{ index + 1 }} OF {{ count }}</span>
       <button
         type="button"
         class="px-[5px] leading-none rounded"
-        style="font:600 11px 'JetBrains Mono',monospace;color:rgba(255,255,255,.45)"
+        style="font:600 20px 'JetBrains Mono',monospace;color:rgba(255,255,255,.45)"
         aria-label="Close"
         title="Close (Esc)"
         @click="emit('close')"
       >×</button>
     </div>
 
-    <div class="flex items-start gap-[7px]">
+    <div class="flex items-start justify-center gap-[7px]">
       <DeviceField
         :model-value="node.hz" :min="R.hz.min" :max="R.hz.max" :step="1" log
         label="Freq" unit="Hz" :format-value="hz" :accent="accent" :width="66"

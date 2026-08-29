@@ -113,7 +113,16 @@ test('the accessible name describes the focus nodes and how to work them', () =>
   assert.match(PLOT, /decibels \$\{dir\} cut/)
   assert.match(PLOT, /octaves wide/)
   assert.match(PLOT, /const FOCUS_HINT =/)
-  assert.match(PLOT, /focusMode\.value \? FOCUS_HINT : ZONE_HINT/)
+  // ⚠ THE ZONE BRANCH IS DELIBERATELY EMPTY AND THIS IS NOT A REGRESSION TO
+  // "FIX". `ZONE_HINT` was removed on request — it was the canvas tooltip as
+  // well as the tail of this name, and the tooltip was the objection. What went
+  // with it is the only announcement that the ZONE editor is operable; the focus
+  // model keeps its own hint, which is what this test is about. Restoring a
+  // short zone sentence here, without a tooltip, is a one-line change.
+  assert.match(PLOT, /focusMode\.value \? FOCUS_HINT : ''/)
+  // The DECLARATION, not the word: the component's own comment explains the
+  // removal and names it, which is the point of the comment.
+  assert.doesNotMatch(PLOT, /const ZONE_HINT\s*=/, 'ZONE_HINT is gone; see the note above')
 })
 
 /**
