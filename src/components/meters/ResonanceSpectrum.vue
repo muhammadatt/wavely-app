@@ -25,6 +25,7 @@ import {
   NODE_R,
   addNode,
   biasCurvePoints,
+  patchNode,
   canAddFocusNode,
   focusScope,
   makeFocusNode,
@@ -36,7 +37,12 @@ import {
   setNodeParam,
   toggleNode,
 } from './resonanceFocusNodes.js'
-import { RESONANCE_FOCUS_RANGES } from '../../audio/resonanceFocus.js'
+import {
+  RESONANCE_FOCUS_RANGES,
+  focusNode,
+  focusNodeWeightAt,
+} from '../../audio/resonanceFocus.js'
+import FocusNodePanel from '../panels/FocusNodePanel.vue'
 import {
   createHeldAverage,
   createReadoutThrottle,
@@ -157,6 +163,15 @@ const props = defineProps({
   focusNodes: { type: Array, default: null },
   /** Which focus node the panel is editing, or -1. */
   selectedFocusNode: { type: Number, default: -1 },
+  /**
+   * Index of the node whose region is being auditioned alone, or -1.
+   *
+   * ⚠ MONITORING STATE, NEVER A PARAMETER — drawn here because it changes what
+   * is being heard, and a display that did not show it would disagree with the
+   * speakers. Arrives separately from the nodes rather than baked into them, so
+   * the panel's fields keep reading the stored settings.
+   */
+  soloFocusNode: { type: Number, default: -1 },
   height: { type: Number, default: 188 },
   /**
    * Accessible name for the plot. Not drawn — a canvas is opaque to a screen
@@ -189,11 +204,48 @@ const props = defineProps({
  */
 const emit = defineEmits([
   'update:zones', 'update:selectedZone', 'update:reading',
-  'update:focusNodes', 'update:selectedFocusNode',
+  'update:focusNodes', 'update:selectedFocusNode', 'focus-solo',
 ])
 
 /** Running the focus targeting model rather than zones. */
 const focusMode = computed(() => props.focusNodes !== null)
+
+/**
+ * Whether the node editor is showing.
+ *
+ * Its own flag rather than "a node is selected", because the two are different
+ * questions: a node stays selected while it is dragged, walked to with the
+ * arrow keys, or soloed, and a card that reopened on every one of those would
+ * be in the way. It opens on a click and closes on the ×, on Escape, or on
+ * deselecting.
+ */
+const panelOpen = ref(false)
+/** Where the panel sits, in plot pixels. Recomputed as the node moves. */
+const panelPos = ref({ x: 0, y: 0 })
+
+const panelNode = computed(() =>
+  (focusMode.value && panelOpen.value ? props.focusNodes[props.selectedFocusNode] ?? null : null))
+
+/**
+ * Place the card near its node without letting it hang off the plate.
+ *
+ * Below the handle by default and above it when there is no room, which is the
+ * same rule the resonance pills follow — and it keeps the card off the curve it
+ * is editing, since a node's own lobe is on the side the amount points.
+ */
+const PANEL_W = 268
+const PANEL_H = 92
+function placePanel() {
+  const n = props.focusNodes?.[props.selectedFocusNode]
+  if (!n) return
+  const p = nodePoint(n, { w: width.value, minHz: axis.minHz, maxHz: axis.maxHz }, focusScopeNow())
+  const below = p.y + 14
+  const above = p.y - 14 - PANEL_H
+  panelPos.value = {
+    x: Math.max(4, Math.min(width.value - PANEL_W - 4, p.x - PANEL_W / 2)),
+    y: below + PANEL_H <= laneH.value - 4 || above < 4 ? below : above,
+  }
+}
 
 // ── Geometry ────────────────────────────────────────────────────────────────
 
@@ -403,7 +455,24 @@ const REDUCTION_FILL_ALPHA_FOOT = 0.015
  * that cannot be clicked where they are drawn.
  */
 const REDUCTION_LANE_FRAC = 0.35
-const reductionH = computed(() => laneH.value * REDUCTION_LANE_FRAC)
+/**
+ * ⚠ THE BAND IS ZERO WHEN ITS OVERLAY IS OFF, so the space goes to the
+ * spectrum rather than being reserved for something that is not being drawn.
+ *
+ * The three bands tile the lane, and until now they tiled it at fixed
+ * fractions whatever was showing — so switching REMOVED off left a third of
+ * the plot empty and the spectrum no larger. Reported as the display feeling
+ * cramped, and it was: on a 280 px plot, turning both off hands the spectrum
+ * **128 px back**, nearly doubling it.
+ *
+ * A COMPUTED FRACTION RATHER THAN A SECOND SET OF CONSTANTS. Everything that
+ * lays out against these — the trace, the marks, the GR scale, the FOUND strip,
+ * and the focus curve's datum — reads them through `reductionH` / `foundBandH`
+ * or derives from the fractions directly, so one conditional here moves all of
+ * them together. A parallel "collapsed" geometry is how two layouts drift apart.
+ */
+const reductionFrac = computed(() => (showRemoved.value ? REDUCTION_LANE_FRAC : 0))
+const reductionH = computed(() => laneH.value * reductionFrac.value)
 
 /**
  * THE FOUND-HISTORY STRIP, along the floor of the SPECTRUM overlay.
@@ -453,7 +522,9 @@ const reductionH = computed(() => laneH.value * REDUCTION_LANE_FRAC)
  * with it.
  */
 const FOUND_BAND_FRAC = 0.13
-const foundBandH = computed(() => laneH.value * FOUND_BAND_FRAC)
+/** Zero when the strip is not showing — see the note on `reductionFrac`. */
+const foundFrac = computed(() => (showFound.value ? FOUND_BAND_FRAC : 0))
+const foundBandH = computed(() => laneH.value * foundFrac.value)
 
 /**
  * The deepest crossing the FOUND strip can draw.
@@ -893,6 +964,12 @@ function draw(dtMs) {
     drawZeroRail(ctx, w)
     if (shown) drawReduction(ctx, w, shown)
   }
+
+  // ⚠ THE CARD IS PLACED FROM THE FRAME LOOP, not from the gestures. Its node
+  // moves on a drag, on an arrow key, on a resize and on an overlay toggle —
+  // the last two change the band the curve hangs in — and this is the one place
+  // that sees all four. One `nodePoint` per frame while it is open.
+  if (panelOpen.value) placePanel()
 
   drawZones(ctx, w)
   drawZoneReadouts(ctx, w)
@@ -1357,7 +1434,7 @@ function drawSpectrum(ctx, w, frame) {
   // the two fractions rather than stated here — a constant of its own would let
   // them drift back into overlapping from an edit that looks unrelated.
   const bottom = laneH.value - foundBandH.value
-  const band = bottom - laneH.value * REDUCTION_LANE_FRAC
+  const band = bottom - reductionH.value
   const xStep = w / (bins - 1)
   const yFor = (db) => {
     const t = (db - SPEC_DB_MIN) / (SPEC_DB_MAX - SPEC_DB_MIN)
@@ -1902,8 +1979,7 @@ function clamp(v, lo, hi) {
  */
 const focusScopeNow = () => {
   const bottom = laneH.value - foundBandH.value
-  const top = laneH.value * REDUCTION_LANE_FRAC
-  return focusScope(top, bottom, RESONANCE_FOCUS_RANGES.biasDb.max)
+  return focusScope(reductionH.value, bottom, RESONANCE_FOCUS_RANGES.biasDb.max)
 }
 
 /**
@@ -1947,6 +2023,23 @@ function drawFocus(ctx, w) {
   ctx.lineTo(w, Math.round(scope.datum) + 0.5)
   ctx.stroke()
   ctx.setLineDash([])
+
+  // ⚠ THE SOLOED NODE'S REGION IS DRAWN, because it changes what is being heard
+  // and a display that did not show it would disagree with the speakers — the
+  // same reason a bypassed zone was washed out. Everything OUTSIDE the region
+  // is veiled: the wash marks what is silent, not what is sounding.
+  const soloed = nodes.length && props.soloFocusNode >= 0
+    ? props.focusNodes[props.soloFocusNode]
+    : null
+  if (soloed) {
+    for (let x = 0; x < w; x++) {
+      const hz = axisNow.minHz * Math.pow(2, (x / w) * Math.log2(axisNow.maxHz / axisNow.minHz))
+      const a = 0.55 * (1 - focusNodeWeightAt(focusNode(soloed), hz))
+      if (a <= 0.01) continue
+      ctx.fillStyle = `rgba(8,10,13,${a})`
+      ctx.fillRect(x, 0, 1, laneH.value)
+    }
+  }
 
   const pts = biasCurvePoints(nodes, axisNow, scope)
 
@@ -2016,7 +2109,11 @@ function drawFocus(ctx, w) {
 
   // The selected node's three numbers, ON the node — which is what replaces the
   // plate row that used to carry them under the panel.
-  const sel = nodes[props.selectedFocusNode]
+  //
+  // ⚠ NOT WHILE THE CARD IS OPEN. The card carries the same three values as
+  // editable fields a few pixels away, so the pill would be the same numbers
+  // printed twice, with the card drawn over the top of one of them.
+  const sel = panelOpen.value ? null : nodes[props.selectedFocusNode]
   if (sel) {
     const p = nodePoint(sel, axisNow, scope)
     const span = sel.spanOct < 1
@@ -2270,6 +2367,11 @@ function onDown(e) {
   const fnode = focusNodeAt(x, y)
   if (fnode >= 0) {
     selectFocus(fnode)
+    // Clicking the open one again puts the card away, which is the only route
+    // back to an unobstructed plot that does not involve hunting for empty
+    // plate — the same rule the resonance marks' labels follow.
+    panelOpen.value = !(panelOpen.value && fnode === props.selectedFocusNode)
+    placePanel()
     focusDrag = fnode
     dragging.value = true
     canvasEl.value?.setPointerCapture?.(e.pointerId)
@@ -2314,6 +2416,7 @@ function onDown(e) {
   // accidental deselection costs nothing.
   if (focusMode.value) {
     selectFocus(-1)
+    panelOpen.value = false
     return
   }
   // Anywhere else in the plot selects the zone under the pointer. Selection is
@@ -2354,10 +2457,13 @@ function onDblClick(e) {
     if (hit >= 0) {
       commitFocus(removeNode(props.focusNodes, hit))
       selectFocus(-1)
+      panelOpen.value = false
     } else if (canAddFocusNode(props.focusNodes)) {
       const next = addNode(props.focusNodes, newFocusNode(hzFromX(x, axis)))
       commitFocus(next)
       selectFocus(next.length - 1)
+      panelOpen.value = true
+      placePanel()
     }
     e.preventDefault()
     return
@@ -2438,6 +2544,26 @@ function onKeyDown(e) {
   e.preventDefault()
 }
 
+/** One field of the open node, from the card. */
+function patchFocusNode(patch) {
+  const i = props.selectedFocusNode
+  let next = props.focusNodes
+  for (const [name, value] of Object.entries(patch)) {
+    // `shape` and `enabled` are not numbers, so they bypass the clamping setter
+    // rather than being silently rejected by it.
+    next = name === 'shape' || name === 'enabled'
+      ? patchNode(next, i, { [name]: value })
+      : setNodeParam(next, i, name, value)
+  }
+  commitFocus(next)
+}
+
+function deleteFocusNode() {
+  commitFocus(removeNode(props.focusNodes, props.selectedFocusNode))
+  selectFocus(-1)
+  panelOpen.value = false
+}
+
 /**
  * Keyboard equivalents for every focus gesture.
  *
@@ -2455,6 +2581,8 @@ function onFocusKeyDown(e) {
     const next = addNode(nodes, newFocusNode(hzFromX(axis.w * 0.5, axis)))
     commitFocus(next)
     selectFocus(next.length - 1)
+    panelOpen.value = true
+    placePanel()
   }
 
   // Plain left/right WALK the nodes; shifted, they move the selected one. The
@@ -2486,6 +2614,12 @@ function onFocusKeyDown(e) {
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     commitFocus(removeNode(nodes, i))
     selectFocus(-1)
+    panelOpen.value = false
+  } else if (e.key === 'Escape') {
+    // Only when the card is open, so Escape still reaches the window manager
+    // and closes the plugin when it is not — the window owns that key.
+    if (!panelOpen.value) return
+    panelOpen.value = false
   } else if (e.key === ' ') {
     commitFocus(toggleNode(nodes, i))
   } else if (e.key === 'Enter') {
@@ -2735,6 +2869,7 @@ const idleHint = computed(() =>
          plate was a warm near-black (#0a0806) at 9 px with a single flat ring,
          which read as a different material from every other canvas in the app. -->
     <div
+      class="relative"
       :style="{
         padding: '3px',
         borderRadius: '15px',
@@ -2769,6 +2904,26 @@ const idleHint = computed(() =>
         @wheel="onWheel"
         @keydown="onKeyDown"
       ></canvas>
+
+      <!-- ⚠ ABSOLUTE OVER THE PLATE, INSIDE THE SAME WRAPPER. It has to be
+           positioned from the node's pixel coordinates, and those exist only in
+           here — a card hosted by the panel would need the plot to publish its
+           geometry, which is a second copy of the mapping and this component
+           has already recorded what that costs. -->
+      <FocusNodePanel
+        v-if="panelNode"
+        class="absolute"
+        :style="{ left: `${panelPos.x + 3}px`, top: `${panelPos.y + 3}px` }"
+        :node="panelNode"
+        :index="selectedFocusNode"
+        :count="focusNodes.length"
+        :solo="soloFocusNode === selectedFocusNode"
+        :accent="accent"
+        @patch="patchFocusNode"
+        @delete="deleteFocusNode"
+        @solo="emit('focus-solo', selectedFocusNode)"
+        @close="panelOpen = false"
+      />
     </div>
   </div>
 </template>

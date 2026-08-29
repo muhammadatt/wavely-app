@@ -106,6 +106,31 @@ export const FOCUS_FWHM_TO_SIGMA = 1 / (2 * Math.sqrt(2 * Math.LN2))
  * right floor here for the same reason. It tops out at 4 octaves, which is a
  * broad tilt across most of the voice against a display spanning about ten.
  */
+/**
+ * A node's SHAPE — how its amount is spread over frequency.
+ *
+ * `bell` is the original and the default: a Gaussian in log frequency, for
+ * "work harder around here". The two shelves say "work harder on everything
+ * below/above here", which a bell cannot express at any width — a wide bell
+ * still falls away on both sides, so aiming one at "all the air" also lifts the
+ * midrange on its way past.
+ *
+ * ⚠ THE SHELF IS A WEIGHT, NOT A SECOND MECHANISM. Every shape returns a number
+ * in [0, 1] that the amount is multiplied by, so everything downstream — the
+ * sum, the clamp, the curve, the solo window — is unchanged and shape-blind.
+ */
+export const FOCUS_SHAPES = ['bell', 'low', 'high']
+
+/**
+ * Steepness of a shelf's transition, in the same `spanOct` units the bell uses.
+ *
+ * Chosen so the shelf reaches 95% of its amount half a span below the corner
+ * and 5% half a span above it — so `spanOct` means the same kind of thing on
+ * both shapes ("about this wide a transition"), and a shelf at the default
+ * 1 octave moves from doing nothing to doing everything across one octave.
+ */
+const SHELF_K = 2 * Math.log(19)
+
 export const RESONANCE_FOCUS_RANGES = {
   biasDb: { min: -18, max: 18 },
   spanOct: { min: 1 / 6, max: 4 },
@@ -178,6 +203,10 @@ export function focusNode(node) {
   const R = RESONANCE_FOCUS_RANGES
   return {
     id: node?.id ?? 'n',
+    // An unrecognised shape falls back to the default rather than passing
+    // through: a typo must not produce a fourth behaviour, and a node whose
+    // shape is `undefined` should draw the same curve it always did.
+    shape: FOCUS_SHAPES.includes(node?.shape) ? node.shape : 'bell',
     hz: clampNum(node?.hz ?? 1000, R.hz.min, R.hz.max),
     spanOct: clampNum(node?.spanOct ?? 1, R.spanOct.min, R.spanOct.max),
     // A disabled node is amount zero, not a special case downstream — the same
@@ -207,6 +236,34 @@ export function focusGlobal(g) {
 }
 
 /**
+ * A node's own influence at one frequency, in [0, 1], independent of its amount.
+ *
+ * The shape and nothing else. Two callers need it separately from the bias: the
+ * sum below multiplies it by the amount, and the SOLO window uses it to decide
+ * where a node's region is — which has to work for a node whose amount is zero,
+ * where the bias carries no shape at all.
+ *
+ * Gaussian in LOG frequency, and the shelves likewise, which is what makes a
+ * node's width mean the same thing at 200 Hz and at 8 kHz. Uniform-in-Hz would
+ * give a node at the top of the spectrum a hundredth of the reach of one at the
+ * bottom — the same mistake the cepstral reference's uniform resolution makes,
+ * and this codebase has already measured what that costs.
+ */
+export function focusNodeWeightAt(node, freqHz) {
+  if (!(freqHz > 0) || !(node.hz > 0)) return 0
+  const oct = Math.log2(freqHz / node.hz)
+  if (node.shape === 'low') return 1 / (1 + Math.exp((SHELF_K * oct) / node.spanOct))
+  if (node.shape === 'high') return 1 / (1 + Math.exp((-SHELF_K * oct) / node.spanOct))
+  const d = oct / (node.spanOct * FOCUS_FWHM_TO_SIGMA)
+  // Beyond about four sigma the term is under 0.03% and cannot move a threshold
+  // quantised to a tenth of a dB. Skipped so a narrow bell costs nothing across
+  // the rest of the spectrum. ⚠ Shelves have no such cutoff — a shelf that
+  // stopped being full amount far from its corner would not be a shelf.
+  if (d > 4 || d < -4) return 0
+  return Math.exp(-0.5 * d * d)
+}
+
+/**
  * Total bias at one frequency, in dB. Positive means "work harder here".
  *
  * A sum of Gaussians in LOG frequency, which is what makes a node's span mean
@@ -225,13 +282,7 @@ export function focusBiasAt(nodes, freqHz) {
   for (const raw of nodes) {
     const n = focusNode(raw)
     if (!n.biasDb) continue
-    const sigma = n.spanOct * FOCUS_FWHM_TO_SIGMA
-    const d = Math.log2(freqHz / n.hz) / sigma
-    // Beyond about four sigma the term is under 0.03% of its amount and cannot
-    // move a threshold quantised to a tenth of a dB. Skipped so a narrow node
-    // costs nothing across the rest of the spectrum.
-    if (d > 4 || d < -4) continue
-    sum += n.biasDb * Math.exp(-0.5 * d * d)
+    sum += n.biasDb * focusNodeWeightAt(n, freqHz)
   }
   return sum
 }
@@ -273,9 +324,19 @@ export function focusSelectivityAt(focus, freqHz) {
  */
 export function focusThresholdFn(focus) {
   const g = focusGlobal(focus?.global)
-  const nodes = (focus?.nodes ?? []).map(focusNode).filter(n => n.biasDb !== 0)
+  const all = (focus?.nodes ?? []).map(focusNode)
+  const nodes = all.filter(n => n.biasDb !== 0)
   const R = RESONANCE_FOCUS_RANGES.selectivity
-  return hz => clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, R.max)
+  // ⚠ SOLO IS IN HERE TOO, or the dotted threshold on the plot would describe a
+  // patch the ear is not hearing — which is the whole failure the frozen
+  // threshold already cost once.
+  const solo = Number.isInteger(focus?.solo) && all[focus.solo] ? all[focus.solo] : null
+  return (hz) => {
+    const effective = clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, R.max)
+    if (!solo) return effective
+    const w = focusNodeWeightAt(solo, hz)
+    return effective * w + R.max * (1 - w)
+  }
 }
 
 /**
@@ -315,8 +376,36 @@ export function focusProtectAt(g, freqHz) {
  */
 export function buildResonanceFocusCurves(focus, binCount, binWidth) {
   const g = focusGlobal(focus?.global)
-  const nodes = (focus?.nodes ?? []).map(focusNode).filter(n => n.biasDb !== 0)
+  const all = (focus?.nodes ?? []).map(focusNode)
+  const nodes = all.filter(n => n.biasDb !== 0)
   const R = RESONANCE_FOCUS_RANGES.selectivity
+
+  /**
+   * SOLO — hear what ONE node's region is removing, and nothing else.
+   *
+   * ⚠ MONITORING STATE. It is never in what Apply renders; `useResonance`
+   * applies it on the way to the LIVE kernel only, exactly as a zone's delta
+   * was applied. See the note there, and test/ui/resonanceFocusSolo.test.js.
+   *
+   * The zone version isolated a BAND — every other zone switched off — and a
+   * node is not a band, so the transform cannot be copied literally. What
+   * carries over is the intent: a zone delta answered "what is being taken out
+   * HERE", and a node has a "here" of its own, namely its own influence.
+   *
+   * So the threshold is crossfaded between what the patch really does and OFF,
+   * by the soloed node's own weight:
+   *
+   *     selectivity = effective·w + max·(1 - w)
+   *
+   * Where the node has full influence you hear exactly what the full patch does
+   * there; where it has none, nothing is touched. It needs no special case for
+   * shape — a shelf solos its whole shelf, a bell its own bell — and none for a
+   * node at amount zero, because the WEIGHT carries the region where the bias
+   * would not. That last case is deliberately audible rather than silent: a
+   * node set to "no opinion" still sits over a region the global detector is
+   * working, and hearing that is the point of asking.
+   */
+  const solo = Number.isInteger(focus?.solo) && all[focus.solo] ? all[focus.solo] : null
 
   const depth = new Float64Array(binCount).fill(g.depth)
   const sharpness = new Float64Array(binCount).fill(g.sharpness)
@@ -326,7 +415,13 @@ export function buildResonanceFocusCurves(focus, binCount, binWidth) {
 
   for (let k = 0; k < binCount; k++) {
     const hz = k * binWidth
-    selectivity[k] = clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, R.max)
+    const effective = clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, R.max)
+    if (solo) {
+      const w = focusNodeWeightAt(solo, hz)
+      selectivity[k] = effective * w + R.max * (1 - w)
+    } else {
+      selectivity[k] = effective
+    }
     protect[k] = focusProtectAt(g, hz)
   }
   // Bin 0 is DC; log2(0) is -Infinity, so it copies its neighbour. Same guard
@@ -363,6 +458,10 @@ export function copyFocus(focus) {
   if (!focus) return null
   const g = focus.global ?? {}
   return {
+    // ⚠ COPIED, BUT ONLY EVER SET ON THE LIVE PATH. `solo` crosses to the
+    // kernel like any other field — it has to, or the monitor could not work —
+    // and it is `useResonance` that keeps it out of what Apply renders.
+    solo: Number.isInteger(focus.solo) ? focus.solo : undefined,
     global: {
       depth: g.depth,
       sharpness: g.sharpness,
@@ -376,6 +475,7 @@ export function copyFocus(focus) {
       hz: n.hz,
       spanOct: n.spanOct,
       biasDb: n.biasDb,
+      shape: n.shape,
       enabled: n.enabled,
     })),
   }

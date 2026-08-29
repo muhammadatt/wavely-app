@@ -15,6 +15,7 @@ import {
   focusGlobal,
   focusSelectivityAt,
   focusThresholdFn,
+  focusNodeWeightAt,
 } from '../../src/audio/resonanceFocus.js'
 import {
   DEFAULT_RESONANCE_ZONES,
@@ -434,4 +435,160 @@ test('the threshold function normalises once, not per call', () => {
   // per-call path either.
   assert.equal(fn(1000), RESONANCE_FOCUS_RANGES.selectivity.min)
   assert.equal(typeof fn, 'function')
+})
+
+// ── Shapes. ─────────────────────────────────────────────────────────────────
+
+/**
+ * ⚠ A SHELF IS A WEIGHT, NOT A SECOND MECHANISM. Every shape returns a number
+ * in [0, 1] that the amount is multiplied by, so the sum, the clamp, the curve
+ * and the solo window are all shape-blind.
+ */
+test('a shelf says what no bell can: everything above or below here', () => {
+  const lo = { ...node({ hz: 1000, spanOct: 1, biasDb: 10 }), shape: 'low' }
+  const hi = { ...node({ hz: 1000, spanOct: 1, biasDb: 10 }), shape: 'high' }
+  // Full amount well into the passband, none well into the stop band, and the
+  // corner is the half-way point.
+  assert.ok(Math.abs(focusBiasAt([lo], 60) - 10) < 0.01)
+  assert.ok(Math.abs(focusBiasAt([lo], 1000) - 5) < 1e-9)
+  assert.ok(focusBiasAt([lo], 16000) < 0.01)
+  assert.ok(focusBiasAt([hi], 60) < 0.01)
+  assert.ok(Math.abs(focusBiasAt([hi], 1000) - 5) < 1e-9)
+  assert.ok(Math.abs(focusBiasAt([hi], 16000) - 10) < 0.01)
+  // A bell cannot: it falls away on BOTH sides at any width, which is the whole
+  // reason the shelves exist.
+  const wide = node({ hz: 1000, spanOct: 4, biasDb: 10 })
+  assert.ok(focusBiasAt([wide], 60) < 9.9 && focusBiasAt([wide], 16000) < 9.9)
+})
+
+test('a shelf is monotone, and spans the same octaves wherever it sits', () => {
+  for (const centre of [120, 1000, 8000]) {
+    const n = { ...node({ hz: centre, spanOct: 1, biasDb: 10 }), shape: 'high' }
+    let prev = -1
+    for (let o = -4; o <= 4; o += 0.25) {
+      const v = focusBiasAt([n], centre * Math.pow(2, o))
+      assert.ok(v >= prev - 1e-9, `not monotone at ${centre} Hz`)
+      prev = v
+    }
+    // 5% half a span below the corner, 95% half a span above — so `spanOct`
+    // means "about this wide a transition" on both shapes.
+    const w = h => focusNodeWeightAt(focusNode({ ...n, biasDb: 10 }), centre * Math.pow(2, h))
+    assert.ok(Math.abs(w(-0.5) - 0.05) < 0.005)
+    assert.ok(Math.abs(w(0.5) - 0.95) < 0.005)
+  }
+})
+
+test('an unrecognised shape falls back to a bell rather than a fourth behaviour', () => {
+  assert.equal(focusNode({ ...node({}), shape: 'wobble' }).shape, 'bell')
+  assert.equal(focusNode(node({})).shape, 'bell')
+  const typo = [{ ...node({ hz: 1000, biasDb: 10 }), shape: 'belll' }]
+  const bell = [node({ hz: 1000, biasDb: 10 })]
+  assert.equal(focusBiasAt(typo, 700), focusBiasAt(bell, 700))
+})
+
+test('the default patch is untouched by shapes existing', () => {
+  const f = buildResonanceFocusCurves(DEFAULT_RESONANCE_FOCUS, BINS, BIN_WIDTH)
+  const z = buildResonanceZoneCurves(DEFAULT_RESONANCE_ZONES, BINS, BIN_WIDTH)
+  for (let k = 0; k < BINS; k++) assert.equal(f.selectivity[k], z.selectivity[k])
+})
+
+// ── Solo. ───────────────────────────────────────────────────────────────────
+
+/**
+ * SOLO — hear what ONE node's region removes. The zone version isolated a BAND;
+ * a node is not a band, so what carries over is the intent rather than the
+ * transform: the threshold is crossfaded between what the patch really does and
+ * OFF, by the soloed node's own weight.
+ */
+test('solo keeps the real threshold inside the node and turns it off outside', () => {
+  const nodes = [node({ id: 'a', hz: 300, spanOct: 0.6, biasDb: 10 }),
+    node({ id: 'b', hz: 5000, spanOct: 0.6, biasDb: 12 })]
+  const patch = { global: { ...RESONANCE_FOCUS_GLOBAL }, nodes }
+  const full = buildResonanceFocusCurves(patch, BINS, BIN_WIDTH)
+  const solo = buildResonanceFocusCurves({ ...patch, solo: 0 }, BINS, BIN_WIDTH)
+  const at = (c, hz) => c.selectivity[Math.round(hz / BIN_WIDTH)]
+  // Inside the soloed node: exactly what the full patch does there.
+  assert.ok(Math.abs(at(solo, 300) - at(full, 300)) < 0.05)
+  // Everywhere else: off, including the OTHER node's region.
+  assert.equal(at(solo, 5000), RESONANCE_FOCUS_RANGES.selectivity.max)
+  assert.equal(at(solo, 1000), RESONANCE_FOCUS_RANGES.selectivity.max)
+})
+
+test('solo works on a shelf, isolating the whole shelf', () => {
+  const nodes = [{ ...node({ id: 'a', hz: 4000, spanOct: 1, biasDb: 12 }), shape: 'high' }]
+  const c = buildResonanceFocusCurves(
+    { global: { ...RESONANCE_FOCUS_GLOBAL }, nodes, solo: 0 }, BINS, BIN_WIDTH)
+  const at = hz => c.selectivity[Math.round(hz / BIN_WIDTH)]
+  // ⚠ 10 kHz, not 12: `BINS` is 512 at this bin width, so the last bin is
+  // 11.0 kHz and anything past it reads `undefined` — which compares false
+  // against everything and would have passed a broken build just as happily.
+  assert.ok(at(10000) < RESONANCE_FOCUS_GLOBAL.selectivity, 'the shelf itself is live')
+  // ⚠ A TOLERANCE, NOT AN EQUALITY. A shelf has no distance cutoff — one that
+  // stopped being full amount far from its corner would not be a shelf — so its
+  // weight approaches zero rather than reaching it, and the threshold lands a
+  // ten-billionth short of the maximum.
+  assert.ok(Math.abs(at(300) - RESONANCE_FOCUS_RANGES.selectivity.max) < 1e-6,
+    'below it, nothing')
+})
+
+/**
+ * ⚠ A BYPASSED NODE SOLOS TO ITS REGION, NOT TO SILENCE — the one place this
+ * differs from the zone delta it replaces. A bypassed ZONE removed nothing, so
+ * soloing it was honestly silent; a bypassed NODE only means "no opinion here",
+ * and the global detector is still working that region. What you hear is what
+ * the region is losing anyway, which is the true answer to the question asked.
+ * The WEIGHT carries the region where the bias does not.
+ */
+test('a node at no opinion still has a region to solo', () => {
+  for (const n of [node({ hz: 800, spanOct: 0.5, biasDb: 0 }),
+    node({ hz: 800, spanOct: 0.5, biasDb: 9, enabled: false })]) {
+    const c = buildResonanceFocusCurves(
+      { global: { ...RESONANCE_FOCUS_GLOBAL }, nodes: [n], solo: 0 }, BINS, BIN_WIDTH)
+    const at = hz => c.selectivity[Math.round(hz / BIN_WIDTH)]
+    assert.ok(Math.abs(at(800) - RESONANCE_FOCUS_GLOBAL.selectivity) < 0.05,
+      'inside, the global setting is what is running')
+    assert.equal(at(80), RESONANCE_FOCUS_RANGES.selectivity.max, 'outside, nothing')
+  }
+})
+
+test('an absent or out-of-range solo changes nothing', () => {
+  const nodes = [node({ hz: 300, biasDb: 10 })]
+  const base = buildResonanceFocusCurves({ global: { ...RESONANCE_FOCUS_GLOBAL }, nodes },
+    BINS, BIN_WIDTH)
+  for (const solo of [undefined, -1, 7, null, 1.5]) {
+    const c = buildResonanceFocusCurves(
+      { global: { ...RESONANCE_FOCUS_GLOBAL }, nodes, solo }, BINS, BIN_WIDTH)
+    for (let k = 0; k < BINS; k++) {
+      assert.equal(c.selectivity[k], base.selectivity[k], `solo=${solo} moved bin ${k}`)
+    }
+  }
+})
+
+/**
+ * The display's threshold has to agree with the kernel's WHILE SOLOED, or the
+ * dotted staircase describes a patch the ear is not hearing — which is exactly
+ * what the frozen threshold cost once already.
+ */
+test('the display threshold follows a solo', () => {
+  const patch = {
+    global: { ...RESONANCE_FOCUS_GLOBAL },
+    nodes: [node({ hz: 300, spanOct: 0.6, biasDb: 10 })],
+    solo: 0,
+  }
+  const fn = focusThresholdFn(patch)
+  const curves = buildResonanceFocusCurves(patch, BINS, BIN_WIDTH)
+  for (let k = 1; k < BINS; k++) {
+    assert.ok(Math.abs(fn(k * BIN_WIDTH) - curves.selectivity[k]) < 1e-9, `bin ${k}`)
+  }
+})
+
+test('shape and solo survive the structured clone', () => {
+  const copied = copyFocus({
+    global: { ...RESONANCE_FOCUS_GLOBAL },
+    nodes: [{ ...node({ id: 'a' }), shape: 'high' }],
+    solo: 0,
+  })
+  assert.doesNotThrow(() => structuredClone(copied))
+  assert.equal(copied.nodes[0].shape, 'high')
+  assert.equal(copied.solo, 0)
 })

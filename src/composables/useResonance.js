@@ -66,6 +66,24 @@ const resFocus = ref(resTargeting === 'focus' ? copyFocus(DEFAULT_RESONANCE_FOCU
 const resSelectedNode = ref(-1)
 
 /**
+ * Focus node whose region is being auditioned, or -1. UI STATE, NEVER A
+ * PARAMETER.
+ *
+ * ⚠ THE SAME RULE AND THE SAME DANGER AS THE ZONE DELTA IT REPLACES, and for
+ * the identical reason: `applyResonanceRegion` spreads the param object
+ * straight into the kernel, and the isolation this rides on IS expressible as
+ * an ordinary parameter — `focus.solo`. Nothing about it would LOOK wrong if it
+ * leaked into what Apply renders. It would simply write a one-node pass into
+ * the timeline.
+ *
+ * So `liveFocus()` applies it on the way to the live kernel only, and
+ * `currentParams()` never consults it. Pinned by reading the source in
+ * test/ui/resonanceFocusSolo.test.js, which is the only way to reach a
+ * guarantee about a composable that cannot be imported under node.
+ */
+const resSoloNode = ref(-1)
+
+/**
  * Zone whose removal is being auditioned, or -1. UI STATE, NEVER A PARAMETER.
  *
  * ⚠ THIS REPLACED PER-ZONE SOLO, and the two are one gesture apart: solo
@@ -162,7 +180,21 @@ function liveZones() {
  * one off underneath someone.
  */
 function monitoringDelta() {
-  return resDelta.value || resDeltaZone.value >= 0
+  return resDelta.value || resDeltaZone.value >= 0 || resSoloNode.value >= 0
+}
+
+/**
+ * The focus patch as the LIVE kernel should hear it.
+ *
+ * Identical to the stored patch unless a node's region is being auditioned, in
+ * which case `solo` is set — which the curve builder already understands, so
+ * node-scoped monitoring needs no mechanism of its own in the DSP beyond the
+ * delta monitor it shares with the header's DELTA.
+ */
+function liveFocus() {
+  const f = resFocus.value
+  if (!f || resSoloNode.value < 0) return f
+  return { ...f, solo: resSoloNode.value }
 }
 
 function currentParams() {
@@ -225,6 +257,7 @@ export function useResonance() {
     // Not from currentParams: that object is what Apply renders with, and a
     // zone's delta isolation must never reach it.
     chain.updateParam(resonanceEffect.id, 'zones', liveZones())
+    chain.updateParam(resonanceEffect.id, 'focus', liveFocus())
     // Not in currentParams, so it needs restoring by hand when the preview is
     // switched back on.
     chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
@@ -293,7 +326,28 @@ export function useResonance() {
    */
   const syncFocus = (v) => {
     resFocus.value = v
-    pushParam('focus', v)
+    pushParam('focus', liveFocus())
+  }
+
+  /**
+   * Hear what one node's region is removing, and nothing else.
+   *
+   * The node's own influence scoped to the delta monitor: inside its reach the
+   * detector runs exactly as the full patch does, outside it nothing is
+   * touched, and the kernel plays the complement. A second click on the same
+   * node clears it.
+   *
+   * ⚠ ASKING IT OF A BYPASSED NODE IS NOT SILENCE, and that is the one place
+   * this differs from the zone delta it replaces. A bypassed ZONE removed
+   * nothing, so soloing it was honestly silent; a bypassed NODE only means "no
+   * opinion here", and the global detector is still working that region — so
+   * what you hear is what the region is losing anyway. That is the true answer
+   * to the question being asked, and it is the more useful one.
+   */
+  function toggleFocusSolo(index) {
+    resSoloNode.value = resSoloNode.value === index ? -1 : index
+    pushParam('focus', liveFocus())
+    resNodes?.setMonitorDelta(monitoringDelta())
   }
 
   /**
@@ -421,6 +475,7 @@ export function useResonance() {
     // header's delta is cleared below.
     const wasMonitoring = monitoringDelta()
     resDeltaZone.value = -1
+    resSoloNode.value = -1
     resDelta.value = false
     // The measured voice goes too, and for the same reason: it describes the
     // file that was open, and coming back under a panel showing a different one
@@ -451,7 +506,9 @@ export function useResonance() {
     resTargeting,
     resFocus,
     resSelectedNode,
+    resSoloNode,
     syncFocus,
+    toggleFocusSolo,
     resRefMode,
     resMode,
     resPreview,

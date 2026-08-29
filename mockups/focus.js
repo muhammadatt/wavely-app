@@ -35,14 +35,18 @@ const focus = ref({
 const empty = ref({ global: { ...RESONANCE_FOCUS_GLOBAL }, nodes: [] })
 const selected = ref(2)
 const emptySel = ref(-1)
+const solo = ref(-1)
+const emptySolo = ref(-1)
+/** Which overlays each card shows, so the reclaimed space can be compared. */
+const overlaysA = ref({ removed: true, spectrum: true, found: true })
+const overlaysB = ref({ removed: false, spectrum: true, found: false })
 const playing = ref(true)
 const clock = ref(0)
 
-const OVERLAYS = { removed: true, spectrum: true, found: true, grid: false, history: false }
-
-function panel(title, note, patch, sel) {
-  const thresholdFn = focusThresholdFn(patch.value)
-  const frame = makeFrame(patch.value, 192, clock.value)
+function panel(title, note, patch, sel, soloRef, overlays) {
+  const live = soloRef.value >= 0 ? { ...patch.value, solo: soloRef.value } : patch.value
+  const thresholdFn = focusThresholdFn(live)
+  const frame = makeFrame(live, 192, clock.value)
   return h('div', {
     style: {
       width: '740px', background: '#141618', borderRadius: '16px',
@@ -70,9 +74,11 @@ function panel(title, note, patch, sel) {
         zones: [],
         selectedZone: -1,
         deltaZone: -1,
-        overlays: OVERLAYS,
+        soloFocusNode: soloRef.value,
+        overlays: overlays.value,
         'onUpdate:focusNodes': v => { patch.value = { ...patch.value, nodes: v } },
         'onUpdate:selectedFocusNode': v => { sel.value = v },
+        'onFocusSolo': i => { soloRef.value = soloRef.value === i ? -1 : i },
       }),
       h('div', { class: 'flex items-center gap-[10px] mt-[11px]' }, [
         h('div', { class: 'w-[60px] shrink-0' }, h(Knob, {
@@ -123,7 +129,7 @@ const App = {
             font: "600 10.5px 'JetBrains Mono',monospace", letterSpacing: '.1em',
             color: 'rgba(255,255,255,.5)',
           },
-        }, 'DRAG A HANDLE · WHEEL FOR WIDTH · DOUBLE-CLICK TO ADD OR REMOVE'),
+        }, 'CLICK A NODE FOR ITS CARD · DRAG IT FOR FREQUENCY AND AMOUNT · DOUBLE-CLICK TO ADD OR REMOVE'),
         h('button', {
           style: {
             font: "700 9px 'JetBrains Mono',monospace", letterSpacing: '.12em',
@@ -135,8 +141,8 @@ const App = {
           onClick: () => { playing.value = !playing.value },
         }, playing.value ? 'PLAYING' : 'STOPPED'),
       ]),
-      panel('WORKED PATCH', 'Four nodes: 205 Hz −9 held back, 1.15k +6, 3.18k +13 selected, 7k −5 bypassed. One line, edge to edge, on a datum that does not move.', focus, selected),
-      panel('EMPTY DEFAULT', 'No nodes. The line sits flat on its datum and the detector runs at its global setting everywhere — an offset with a true zero, so an untouched patch is visibly untouched.', empty, emptySel),
+      panel('ALL OVERLAYS ON · node card open', 'Click a node to open its card: frequency, width and amount as fields, shape, delta, bypass and delete. Reduction lane at the top, FOUND strip at the floor.', focus, selected, solo, overlaysA),
+      panel('REMOVED AND FOUND OFF · the spectrum takes the space back', 'The same patch with the two banded overlays off. Their bands collapse to nothing and the spectrum expands into them, rather than the plot reserving rows for things it is not drawing.', focus, selected, solo, overlaysB),
     ])
   },
 }

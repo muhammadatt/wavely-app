@@ -32,7 +32,7 @@ const {
   resPreview, resDelta, resReduction,
   resDisplayFn, hasSelection,
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
-  resTargeting, resFocus, resSelectedNode, syncFocus,
+  resTargeting, resFocus, resSelectedNode, resSoloNode, syncFocus, toggleFocusSolo,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
   apply, teardown, closeModal,
@@ -492,6 +492,7 @@ async function applyAndClose() {
         :selectivity-fn="selectivityFn"
         :focus-nodes="focusMode ? resFocus.nodes : null"
         :selected-focus-node="resSelectedNode"
+        :solo-focus-node="resSoloNode"
         :zones="focusMode ? [] : resZones"
         :selected-zone="focusMode ? -1 : resSelectedZone"
         :delta-zone="focusMode ? -1 : resDeltaZone"
@@ -500,6 +501,7 @@ async function applyAndClose() {
         @update:selected-zone="resSelectedZone = $event"
         @update:focus-nodes="syncFocus({ ...resFocus, nodes: $event })"
         @update:selected-focus-node="resSelectedNode = $event"
+        @focus-solo="toggleFocusSolo"
         @update:reading="reading = $event"
       />
 
