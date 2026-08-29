@@ -567,7 +567,6 @@ export class ResonanceKernel {
     this.displayEnv = new Float32Array(this.displayBins)
     this.displayDetect = new Float32Array(this.displayBins)
     this.displayGrNow = new Float32Array(this.displayBins)
-    this.displayGrHeld = new Float32Array(this.displayBins)
     this.hasDisplayFrame = false
     this._buildDisplayGrid()
 
@@ -866,7 +865,6 @@ export class ResonanceKernel {
     this.prevGr.fill(0)
     this.frameIndex = 0
     this.maskCache.clear()
-    this.displayGrHeld.fill(0)
     this.hasDisplayFrame = false
   }
 
@@ -929,7 +927,7 @@ export class ResonanceKernel {
   _snapshotDisplay() {
     const {
       magDb, envDb,
-      displayMag, displayEnv, displayDetect, displayGrNow, displayGrHeld,
+      displayMag, displayEnv, displayDetect, displayGrNow,
     } = this
     // Post-blend reductions — the notch the listener actually gets. Aliases
     // prevGr whenever mix and trim are at their neutral settings.
@@ -986,7 +984,6 @@ export class ResonanceKernel {
       displayEnv[d] = env - SPECTRUM_REF_DB
       displayDetect[d] = det - SPECTRUM_REF_DB
       displayGrNow[d] = gr
-      if (gr > displayGrHeld[d]) displayGrHeld[d] = gr
     }
     this.hasDisplayFrame = true
   }
@@ -998,7 +995,7 @@ export class ResonanceKernel {
 
   /**
    * Copy the display grid into `out` as
-   * [magnitude, reference, detect, reduction, held reduction] and clear the
+   * [magnitude, reference, detect, reduction] and clear the
    * held accumulator. Returns false before the first frame.
    *
    * One flat array of sections rather than an array each, because this crosses
@@ -1011,8 +1008,6 @@ export class ResonanceKernel {
     out.set(this.displayEnv, D)
     out.set(this.displayDetect, 2 * D)
     out.set(this.displayGrNow, 3 * D)
-    out.set(this.displayGrHeld, 4 * D)
-    this.displayGrHeld.fill(0)
     return true
   }
 

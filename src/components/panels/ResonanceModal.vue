@@ -22,7 +22,6 @@ import {
   removeNode,
   setNodeParam,
 } from '../meters/resonanceFocusNodes.js'
-import { resolveFocusDock } from '../../ui/focusNodeDock.js'
 import FocusNodePanel from './FocusNodePanel.vue'
 import Knob from '../knobs/Knob.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
@@ -91,16 +90,6 @@ const selectivityFn = computed(() =>
 const PLOT_H = 280
 const heightDelta = ref(0)
 const plotHeight = computed(() => PLOT_H + heightDelta.value)
-
-/**
- * Which of the two placements is in force — see ui/focusNodeDock.js.
- *
- * Resolved once, not reactive: it is a comparison switch for deciding between
- * two designs by looking at them, and a placement that could change mid-session
- * would be a third thing to reason about rather than a way of choosing between
- * two.
- */
-const focusDock = resolveFocusDock()
 
 /**
  * Whether the node's fields are showing, as distinct from whether a node is
@@ -480,7 +469,7 @@ async function applyAndClose() {
         <!-- The bottom placement. Same component and the same handlers as the
              row one — only where it is mounted differs, which is what makes the
              two comparable rather than two designs that happen to look alike. -->
-        <template v-if="focusDock === 'bottom' && focusMode && selectedNode && nodePanelOpen" #dock>
+        <template v-if="focusMode && selectedNode && nodePanelOpen" #dock>
           <FocusNodePanel
             docked
             :node="selectedNode"
@@ -551,44 +540,24 @@ async function applyAndClose() {
         <!-- min-w-0 so the plate is what gives way if the row ever runs out of
              width, rather than a knob being clipped off the end. -->
         <div class="flex-1 min-w-0">
-          <!-- ⚠ THE SELECTED NODE TAKES THE SLOT, SWAPPING WITH THE GLOBAL
-               FOCUS KNOBS RATHER THAN OPENING BESIDE THEM. Same move the HARM
-               door makes inside the zone plate, for the same reason: the row's
-               height is set by what is in it, so a swap moves nothing while an
-               expansion moves everything below.
+          <!-- ⚠ THE SELECTED NODE'S FIELDS ARE NOT IN THIS SLOT. They were, for
+               one revision, swapping with the global focus knobs the way the
+               HARM door swaps inside the zone plate — it cost no height and no
+               occlusion, and it was rejected on use: a swap down here is outside
+               the display, and it is easy to miss while the pointer is on a node
+               up there. They are docked at the foot of the plate instead, where
+               the change happens where the reader is already looking. The cost,
+               which was weighed and accepted, is that the panel covers the
+               bottom of the plot — the FOUND strip included — while a node is
+               selected, and the `×` is there to put it down.
 
-               It also puts the two models on the same footing at last. Under
-               zones, the plot owns WHERE a zone is and this slot owns what the
-               SELECTED one does; under focus, the plot owned where a node was
-               and its settings floated over the plot in a card placed at the
-               node's own y — covering the curve being edited. Now both models
-               read the same way.
-
-               ⚠ ResonanceFocusControls IS THE UNSELECTED STATE, NOT DEAD CODE.
-               It carries the settings that are global to the focus model —
-               Threshold, Sharp, Depth and the range — which have nowhere else to
-               live and are what the row should show when no node is selected. -->
-          <!-- Centred, not stretched — the zone plate this swaps with is sized
-               by its contents too. -->
-          <div
-            v-if="focusMode && selectedNode && nodePanelOpen && focusDock === 'row'"
-            class="flex justify-center"
-          >
-            <FocusNodePanel
-              docked
-              :node="selectedNode"
-              :index="resSelectedNode"
-              :count="resFocus.nodes.length"
-              :solo="resSoloNode === resSelectedNode"
-              :accent="ACCENT"
-              @patch="patchFocusNode"
-              @delete="deleteFocusNode"
-              @solo="toggleFocusSolo(resSelectedNode)"
-              @close="nodePanelOpen = false"
-            />
-          </div>
+               So this slot always holds the FOCUS MODEL'S GLOBAL settings:
+               Threshold, Sharp, Depth and the range. They have nowhere else to
+               live, and unlike the zone model there is no per-zone/global split
+               to reflect here — under focus, "the selected object" is on the
+               plot with its fields. -->
           <ResonanceFocusControls
-            v-else-if="focusMode"
+            v-if="focusMode"
             :focus="resFocus"
             :pitch-range-caption="pitchRangeCaption"
             :accent="ACCENT"

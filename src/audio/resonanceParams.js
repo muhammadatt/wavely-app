@@ -94,22 +94,21 @@ export const RESONANCE_RELEASE_MIN_MS = 25
  */
 export const RESONANCE_DISPLAY_BINS = 192
 /**
- * Curves the kernel posts per frame, in order: magnitude, reference, output,
- * reduction, held reduction.
+ * Curves in one display frame: magnitude, reference, detect, reduction.
  *
- * The output curve is sent rather than derived on the far side as
- * `magnitude - reduction`. Those two are summarised from different FFT bins —
- * magnitude takes the loudest bin in a display cell, reduction the most
- * suppressed one, and on real speech they are different bins in 65% of the
- * cells that carry any cut. Subtracting one from the other draws a notch up to
- * 2 dB deeper than the one that happened.
+ * ⚠ IT WAS 5 TWICE, AND BOTH TIMES THE FIFTH HAD OUTLIVED ITS READER. First
+ * `output`, kept after the two lanes merged and drawn by nothing; it was reused
+ * for `detect` rather than removed. Then `reductionHeld` — the maximum since the
+ * previous read, which existed solely so the trace's peak-hold outline could
+ * catch a peak landing on a frame the reader never saw. The hold is gone and so
+ * is the curve.
  *
- * Reduction is sent twice for a related reason. The live curve is this frame's,
- * so it agrees with the spectrum beside it; the held curve is the maximum since
- * the last read, which is what the peak-hold outline needs and what nothing
- * else should be drawn from.
+ * Worth stating because the count is DECLARED rather than derived: it sizes the
+ * buffer, slices the view and crosses a postMessage every 23 ms, so a curve
+ * nothing reads is paid for on every frame and nothing complains. If a third one
+ * ever goes the same way, derive this from the view's own key list instead.
  */
-export const RESONANCE_DISPLAY_CURVES = 5
+export const RESONANCE_DISPLAY_CURVES = 4
 export const RESONANCE_DISPLAY_MIN_HZ = 20
 export const RESONANCE_DISPLAY_MAX_HZ = 20000
 

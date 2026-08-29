@@ -920,7 +920,6 @@ function smoothFrame(frame, dtMs) {
   smoothView.bins = bins
   smoothView.minHz = frame.minHz
   smoothView.maxHz = frame.maxHz
-  smoothView.reductionHeld = frame.reductionHeld
   return smoothView
 }
 

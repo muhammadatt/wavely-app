@@ -1,69 +1,24 @@
 /**
- * Which resonances the display names, and where.
+ * Which parts of a display frame are notable, as pure functions.
  *
- * Design 1c marks the deepest cuts with a pill carrying a frequency and a
- * depth — "1.75 kHz  −9.5". That is the one thing the per-zone readouts cannot
- * say: a zone number tells you which BAND is being worked, and a mark tells you
- * which FREQUENCY, which is what someone reaches for the EQ with.
+ * Split out of the component for the reason the zone geometry is: picking the
+ * wrong feature, or placing one at the wrong frequency, looks exactly like
+ * picking the right one. None of it can be reviewed by looking at the plot.
  *
- * Split out of the component for the same reason the zone geometry is: picking
- * the wrong peak, or labelling a peak at the wrong frequency, looks exactly
- * like picking the right one.
+ * ⚠ THE MARKS HALF IS GONE. `findResonanceMarks` named the deepest few cuts with
+ * a frequency and a depth — "1.75 kHz -9.5" — as dots on the reduction trace.
+ * Both it and the trace's peak-hold outline said where the reduction HAS been,
+ * and the FOUND strip now answers that in a band of its own, at true depth over
+ * the threshold and without stacking two histories on one curve. The marks, the
+ * pills, their hit test, their keyboard walk and their four constants went with
+ * it, and so did the tests that pinned them.
+ *
+ * Deleted rather than left unwired, which is the opposite of the call made for
+ * `bandSplitLimiter.js`. The difference is what the code is worth: that module
+ * carries measurements nobody wants to repeat, and its tests are the record. The
+ * marks were a display decision that has been reversed, and everything worth
+ * keeping about them is the sentence above.
  */
-
-/** A cut shallower than this is not a resonance worth naming. */
-export const MARK_MIN_DB = 2.2
-/**
- * Minimum separation between two marks, as a fraction of the log-frequency
- * axis. A resonance is a few bins wide and its shoulders are local maxima too,
- * so without this the four slots fill with one peak's flanks.
- */
-export const MARK_MIN_SEPARATION = 0.05
-/** How many marks the plot will carry. More than this and the pills collide. */
-export const MARK_MAX = 4
-
-/**
- * Local maxima of the reduction curve, deepest first, thinned by separation,
- * returned in frequency order.
- *
- * ±1 AND ±3 BINS. Comparing only against immediate neighbours accepts every
- * ripple on a broad cut as its own peak; ±3 requires the peak to still be the
- * largest thing across roughly the width of a real resonance on this grid. The
- * ends are skipped rather than clamped — a "peak" at the first or last bin has
- * no shoulder on one side and cannot be shown to be a maximum of anything,
- * which is the same rule the F0 tracker's edge-peak guard applies.
- *
- * Returned sorted by FREQUENCY, not by depth, because the caller lays the pills
- * out left to right and alternates their vertical offset to avoid collisions —
- * an ordering by depth would make that alternation arbitrary.
- */
-export function findResonanceMarks(reduction, bins, minHz, maxHz, opts = {}) {
-  const minDb = opts.minDb ?? MARK_MIN_DB
-  const separation = opts.separation ?? MARK_MIN_SEPARATION
-  const max = opts.max ?? MARK_MAX
-  if (!reduction || bins < 7) return []
-
-  const found = []
-  for (let i = 3; i < bins - 3; i++) {
-    const v = reduction[i]
-    if (v < minDb) continue
-    if (v >= reduction[i - 1] && v >= reduction[i + 1]
-      && v >= reduction[i - 3] && v >= reduction[i + 3]) {
-      found.push({ bin: i, db: v, pos: i / (bins - 1) })
-    }
-  }
-  found.sort((a, b) => b.db - a.db)
-
-  const kept = []
-  for (const m of found) {
-    if (kept.every(k => Math.abs(k.pos - m.pos) > separation)) kept.push(m)
-    if (kept.length === max) break
-  }
-
-  const octaves = Math.log2(maxHz / minHz)
-  for (const m of kept) m.hz = minHz * Math.pow(2, m.pos * octaves)
-  return kept.sort((a, b) => a.hz - b.hz)
-}
 
 /**
  * The shallowest crossing worth shading.
