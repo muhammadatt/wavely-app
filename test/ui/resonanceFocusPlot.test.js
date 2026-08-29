@@ -27,6 +27,23 @@ test('the plot takes the nodes and the selection, and reports both back', () => 
 })
 
 /**
+ * ⚠ THE CURVE RUNS THE FULL WIDTH. It was broken at 0.3 dB for a while, on the
+ * argument that a flat full-width stroke reads as a rail; overruled by looking
+ * at it, since over the spectrum with no plate and no band it reads as a
+ * floating line ON the display. Pinned because the break is an easy thing to
+ * reintroduce as a "tidy-up", and it costs continuity: the curve would appear
+ * and vanish as a node is dragged past the threshold.
+ */
+test('the curve is drawn edge to edge, not only where it departs from neutral', () => {
+  const fn = PLOT.slice(PLOT.indexOf('function drawFocus'), PLOT.indexOf('function drawFocusPill'))
+  assert.match(fn, /biasCurvePoints/)
+  assert.doesNotMatch(fn, /biasRuns|BIAS_VISIBLE_DB/)
+  // The fill and the stroke both start at column 0 and end at the full width.
+  assert.match(fn, /ctx\.moveTo\(0, scope\.datum\)/)
+  assert.match(fn, /ctx\.lineTo\(w, scope\.datum\)/)
+})
+
+/**
  * ⚠ NULL, NOT AN EMPTY ARRAY, is what says "this panel is not running the focus
  * model" — where `[]` says "it is, and nothing has been placed yet", a state
  * with its own drawing and its own gestures. Collapsing the two would put every
@@ -50,7 +67,7 @@ test('the curve and its hit test share one vertical mapping', () => {
   assert.match(PLOT, /const focusScopeNow = \(\) =>/)
   // Both readers go through it rather than computing a scope of their own.
   assert.match(PLOT, /nodeAt\(props\.focusNodes, x, y, axis, focusScopeNow\(\)\)/)
-  assert.match(PLOT, /biasRuns\(nodes, axisNow, scope\)/)
+  assert.match(PLOT, /biasCurvePoints\(nodes, axisNow, scope\)/)
   assert.match(PLOT, /moveNode\(props\.focusNodes, focusDrag, x, y, axis, focusScopeNow\(\)\)/)
 })
 

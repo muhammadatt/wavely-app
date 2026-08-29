@@ -24,7 +24,7 @@ import { MARK_MIN_DB, findExceedanceRuns, findResonanceMarks } from './resonance
 import {
   NODE_R,
   addNode,
-  biasRuns,
+  biasCurvePoints,
   canAddFocusNode,
   focusScope,
   makeFocusNode,
@@ -1909,20 +1909,25 @@ const focusScopeNow = () => {
 /**
  * THE FOCUS CURVE — the sensitivity bias, floating over the spectrum.
  *
- * ⚠ DRAWN ONLY WHERE IT DEPARTS FROM NEUTRAL, and that is what makes it a
- * floating line rather than a rail. A bias is flat almost everywhere — an
- * untouched spectrum is untouched, which is the whole argument for the model —
- * so a continuous stroke paints a full-width horizontal line across the plot,
- * and a full-width horizontal line reads as an independent display area
- * whatever it is called. Broken at the same 0.3 dB the reduction trace is, for
- * the same reason. See biasRuns.
+ * ⚠ IT RUNS THE FULL WIDTH, CONTINUOUSLY. It was drawn only where it departed
+ * from neutral for a while, on the argument that a bias is flat almost
+ * everywhere so an edge-to-edge stroke paints a horizontal line across the
+ * plot, and a horizontal line is a rail. That argument is real and it was
+ * OVERRULED BY LOOKING AT IT: a full-width line laid over the spectrum, with no
+ * plate, no band and no reserved row, reads as a floating line ON the display
+ * rather than as an independent display area. Being technically a rail is not
+ * the same as reading as one.
  *
- * ⚠ ITS DATUM IS STATIC. The line a node actually biases is the threshold
- * staircase, and hanging the handles there is the obvious reading of "put it
- * over the spectrum" — but measured, that line travels 43 px in two seconds and
- * up to 7 px between consecutive frames on a band 139 px tall. That is the
- * discarded Gaussian nodes' "impossible to aim" report in numbers. The curve
- * keeps the threshold's place and not its motion.
+ * What the break cost was continuity: the curve appeared and vanished as a node
+ * was dragged past 0.3 dB, and with several nodes it broke into pieces that
+ * looked like separate objects rather than one adjustable line.
+ *
+ * ⚠ ITS DATUM IS STATIC, and that is the one hard constraint. The line a node
+ * actually biases is the threshold staircase, and hanging the handles there is
+ * the obvious reading of "put it over the spectrum" — but measured, that line
+ * travels 43 px in two seconds and up to 7 px between consecutive frames on a
+ * band 139 px tall. That is the discarded Gaussian nodes' "impossible to aim"
+ * report in numbers. The curve keeps the threshold's place and not its motion.
  */
 function drawFocus(ctx, w) {
   const nodes = props.focusNodes
@@ -1931,38 +1936,52 @@ function drawFocus(ctx, w) {
   ctx.save()
   clipPlate(ctx, w)
 
-  for (const run of biasRuns(nodes, axisNow, scope)) {
-    // A short dashed length of the neutral datum under each lobe, so a bow
-    // reads as a departure FROM something — without that something running the
-    // width of the plot, which is the thing being avoided.
-    ctx.strokeStyle = 'rgba(255,255,255,.16)'
-    ctx.setLineDash([2, 4])
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(run.from, Math.round(scope.datum) + 0.5)
-    ctx.lineTo(run.to, Math.round(scope.datum) + 0.5)
-    ctx.stroke()
-    ctx.setLineDash([])
+  // The neutral datum, full width and faint. It is what the curve is read
+  // against — without it a displaced curve says how the bias VARIES and not
+  // which side of nothing it is on.
+  ctx.strokeStyle = 'rgba(255,255,255,.13)'
+  ctx.setLineDash([3, 5])
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(0, Math.round(scope.datum) + 0.5)
+  ctx.lineTo(w, Math.round(scope.datum) + 0.5)
+  ctx.stroke()
+  ctx.setLineDash([])
 
-    ctx.beginPath()
-    ctx.moveTo(run.from, scope.datum)
-    for (const p of run.pts) ctx.lineTo(p.x, p.y)
-    ctx.lineTo(run.to, scope.datum)
-    ctx.closePath()
-    ctx.fillStyle = tint(props.accent, 0.18)
-    ctx.fill()
+  const pts = biasCurvePoints(nodes, axisNow, scope)
 
-    ctx.beginPath()
-    ctx.moveTo(run.from, scope.datum)
-    for (const p of run.pts) ctx.lineTo(p.x, p.y)
-    ctx.lineTo(run.to, scope.datum)
-    ctx.strokeStyle = bright(props.accent)
-    ctx.lineWidth = 1.7
-    ctx.shadowColor = tint(props.accent, 0.55)
-    ctx.shadowBlur = 9
-    ctx.stroke()
-    ctx.shadowBlur = 0
-  }
+  // The fill goes between the curve and its datum, so the shaded area IS the
+  // bias and collapses to nothing where none has been asked for. That is what
+  // lets the curve run the full width without the flat stretches claiming any
+  // ink beyond the stroke itself.
+  ctx.beginPath()
+  ctx.moveTo(0, scope.datum)
+  for (const p of pts) ctx.lineTo(p.x, p.y)
+  ctx.lineTo(w, scope.datum)
+  ctx.closePath()
+  ctx.fillStyle = tint(props.accent, 0.18)
+  ctx.fill()
+
+  ctx.beginPath()
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)))
+  ctx.strokeStyle = bright(props.accent)
+  ctx.lineWidth = 1.7
+  ctx.shadowColor = tint(props.accent, 0.55)
+  ctx.shadowBlur = 9
+  ctx.stroke()
+  ctx.shadowBlur = 0
+
+  // Which way is which. A signed quantity on a line with no scale beside it is
+  // otherwise a guess, and this one runs the opposite way to the knob it
+  // offsets — down is MORE cut, because down is toward the material.
+  ctx.font = "500 8px 'JetBrains Mono',monospace"
+  ctx.fillStyle = 'rgba(255,255,255,.32)'
+  const reach = scope.pxPerDb * scope.maxDb * 0.62
+  ctx.textBaseline = 'bottom'
+  ctx.fillText('MORE CUT', 7, scope.datum + reach)
+  ctx.textBaseline = 'top'
+  ctx.fillText('LESS CUT', 7, scope.datum - reach)
+  ctx.textBaseline = 'alphabetic'
 
   nodes.forEach((n, i) => {
     const p = nodePoint(n, axisNow, scope)
@@ -1972,9 +1991,7 @@ function drawFocus(ctx, w) {
     ctx.arc(p.x, p.y, sel ? NODE_R + 1.5 : NODE_R, 0, Math.PI * 2)
     if (!on) {
       // A bypassed node keeps its place and loses its fill: it is still where
-      // it was put, and still the thing the controls are editing. It is also
-      // the one node with no lobe under it, so without a handle it would vanish
-      // from the panel entirely.
+      // it was put, and still the thing the controls are editing.
       ctx.strokeStyle = 'rgba(255,255,255,.34)'
       ctx.lineWidth = 1.2
       ctx.stroke()
@@ -2006,7 +2023,7 @@ function drawFocus(ctx, w) {
       ? `${(sel.spanOct * 12).toFixed(0)}st`
       : `${sel.spanOct.toFixed(2)}oct`
     const text = `${formatHz(sel.hz)}  ${span}  ${sel.biasDb > 0 ? '+' : ''}${sel.biasDb.toFixed(1)}`
-    // Outward from the lobe, so the pill never lands on the curve it describes.
+    // Outward from the curve, so the pill never lands on the line it describes.
     drawFocusPill(ctx, w, p.x, p.y + (sel.biasDb >= 0 ? 17 : -17), text)
   }
   ctx.restore()

@@ -151,45 +151,6 @@ export function biasCurvePoints(nodes, axis, scope, step = 1) {
   return pts
 }
 
-/**
- * Below this the curve is not drawn at all.
- *
- * ⚠ IT IS WHAT STOPS THE CURVE BEING A RAIL. A bias is flat almost everywhere —
- * that is the model, an untouched spectrum is untouched — so a continuous
- * stroke paints a full-width horizontal line across the plot, and a full-width
- * horizontal line reads as a rail whatever it is called. The plot already
- * settled this for the reduction trace at the same 0.3 dB, "because in its own
- * lane a continuous stroke along the top read as that lane's zero datum".
- */
-export const BIAS_VISIBLE_DB = 0.3
-
-/**
- * Runs of columns where the bias is worth drawing, each opening one column
- * before it crosses and closing one after.
- *
- * Starting at the first column over the threshold was tried on the reduction
- * trace and is wrong for the same reason here: on a narrow node the curve is
- * already well away from the datum by then, so the lobe begins mid-slope and
- * draws a stub instead of a shape.
- */
-export function biasRuns(nodes, axis, scope, step = 1) {
-  const runs = []
-  let run = null
-  for (let x = 0; x <= axis.w; x += step) {
-    const db = focusBiasAt(nodes, hzFromX(x, axis))
-    if (Math.abs(db) >= BIAS_VISIBLE_DB) {
-      if (!run) run = { from: Math.max(0, x - step), pts: [] }
-      run.pts.push({ x, y: yFromBias(db, scope), db })
-    } else if (run) {
-      run.to = x
-      runs.push(run)
-      run = null
-    }
-  }
-  if (run) { run.to = axis.w; runs.push(run) }
-  return runs
-}
-
 /** A new node with the stock shape, centred where it was asked for. */
 export function makeFocusNode(hz, id) {
   return {

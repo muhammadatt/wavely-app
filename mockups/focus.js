@@ -135,8 +135,8 @@ const App = {
           onClick: () => { playing.value = !playing.value },
         }, playing.value ? 'PLAYING' : 'STOPPED'),
       ]),
-      panel('WORKED PATCH', 'Four nodes: 205 Hz −9 held back, 1.15k +6, 3.18k +13 selected, 7k −5 bypassed. The curve is drawn only where it departs from neutral.', focus, selected),
-      panel('EMPTY DEFAULT', 'No nodes. The detector runs at its global setting everywhere, and the plot shows nothing of the focus model at all — which is what an offset with a true zero buys.', empty, emptySel),
+      panel('WORKED PATCH', 'Four nodes: 205 Hz −9 held back, 1.15k +6, 3.18k +13 selected, 7k −5 bypassed. One line, edge to edge, on a datum that does not move.', focus, selected),
+      panel('EMPTY DEFAULT', 'No nodes. The line sits flat on its datum and the detector runs at its global setting everywhere — an offset with a true zero, so an untouched patch is visibly untouched.', empty, emptySel),
     ])
   },
 }

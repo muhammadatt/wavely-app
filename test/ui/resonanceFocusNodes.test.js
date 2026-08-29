@@ -4,7 +4,6 @@ import {
   FOCUS_DATUM_FRAC,
   FOCUS_HALF_SPAN_FRAC,
   NODE_HIT_PX,
-  biasRuns,
   focusScope,
   SPAN_WHEEL_RATIO,
   addNode,
@@ -120,45 +119,6 @@ test('the curve cannot express a value the parameter cannot hold', () => {
   assert.equal(rail.maxDb, RESONANCE_FOCUS_RANGES.biasDb.max)
   assert.equal(biasFromY(500, rail), RESONANCE_FOCUS_RANGES.biasDb.max)
   assert.equal(biasFromY(-500, rail), RESONANCE_FOCUS_RANGES.biasDb.min)
-})
-
-// ── The break that stops it being a rail. ───────────────────────────────────
-
-/**
- * ⚠ THE PROPERTY THE WHOLE PLACEMENT RESTS ON. A bias is flat almost
- * everywhere, so a continuous stroke paints a full-width horizontal line across
- * the plot — and a full-width horizontal line reads as a rail whatever it is
- * called, which is precisely what moving the curve into the plot was meant to
- * get rid of. Same 0.3 dB the reduction trace already breaks at.
- */
-test('nothing is drawn where nothing has been asked for', () => {
-  assert.deepEqual(biasRuns([], axis, rail), [])
-  const far = biasRuns([{ ...makeFocusNode(1000, 'a'), biasDb: 12, spanOct: 0.5 }], axis, rail)
-  assert.equal(far.length, 1)
-  // A lobe, not a line: it covers a fraction of the plot, not all of it.
-  const width = far[0].to - far[0].from
-  assert.ok(width > 20 && width < axis.w * 0.5,
-    `expected a lobe, got a run ${width} px wide on a ${axis.w} px plot`)
-})
-
-test('a run opens before it crosses and closes after, so a lobe is not a stub', () => {
-  const nodes = [{ ...makeFocusNode(1000, 'a'), biasDb: 12, spanOct: 0.5 }]
-  const [run] = biasRuns(nodes, axis, rail)
-  // The first drawn point is inside the run's own span.
-  assert.ok(run.from <= run.pts[0].x)
-  assert.ok(run.to >= run.pts[run.pts.length - 1].x)
-  // Every drawn point really is over the threshold, and the peak is the node.
-  assert.ok(run.pts.every(p => Math.abs(p.db) >= 0.3 - 1e-9))
-  const peak = run.pts.reduce((a, b) => (Math.abs(b.db) > Math.abs(a.db) ? b : a))
-  assert.ok(Math.abs(peak.x - xFromHz(1000, axis)) <= 1)
-})
-
-test('two nodes far apart draw two lobes, not one', () => {
-  const nodes = [
-    { ...makeFocusNode(120, 'a'), biasDb: 10, spanOct: 0.4 },
-    { ...makeFocusNode(9000, 'b'), biasDb: 10, spanOct: 0.4 },
-  ]
-  assert.equal(biasRuns(nodes, axis, rail).length, 2)
 })
 
 // ── Hit testing. ────────────────────────────────────────────────────────────
@@ -318,12 +278,36 @@ test('the curve is sampled per pixel column and agrees with the model', () => {
   assert.ok(Math.abs(peak.x - xFromHz(500, axis)) <= 1)
 })
 
-test('with no nodes the curve is flat on its datum — and is not drawn at all', () => {
-  const pts = biasCurvePoints([], axis, rail, 10)
+/**
+ * ⚠ THE CURVE RUNS THE FULL WIDTH, CONTINUOUSLY, and an untouched patch draws a
+ * flat line on the datum rather than nothing.
+ *
+ * It was broken at 0.3 dB for a while, on the argument that a flat full-width
+ * stroke is a rail. That was overruled by looking at it: over the spectrum,
+ * with no plate and no reserved band, it reads as a floating line ON the
+ * display. What the break cost was continuity — the curve appeared and vanished
+ * as a node was dragged past the threshold.
+ */
+test('the curve is continuous edge to edge, flat on the datum where untouched', () => {
+  const pts = biasCurvePoints([], axis, rail, 1)
+  assert.equal(pts.length, axis.w + 1)
+  assert.equal(pts[0].x, 0)
+  assert.equal(pts[pts.length - 1].x, axis.w)
   assert.ok(pts.every(p => p.db === 0 && p.y === rail.datum))
-  // ...which is the state `biasRuns` refuses to draw. Both halves matter: the
-  // curve is well defined everywhere, and the plot shows none of it.
-  assert.deepEqual(biasRuns([], axis, rail), [])
+})
+
+test('a single node leaves the curve continuous, and flat away from itself', () => {
+  const nodes = [{ ...makeFocusNode(1000, 'a'), biasDb: 12, spanOct: 0.5 }]
+  const pts = biasCurvePoints(nodes, axis, rail, 1)
+  assert.equal(pts.length, axis.w + 1)
+  // Defined at every column — no gaps for a caller to have to stitch.
+  assert.ok(pts.every(p => Number.isFinite(p.y)))
+  // Flat at both ends, displaced in the middle.
+  assert.ok(Math.abs(pts[0].y - rail.datum) < 0.01)
+  assert.ok(Math.abs(pts[pts.length - 1].y - rail.datum) < 0.01)
+  const peak = pts.reduce((a, b) => (Math.abs(b.db) > Math.abs(a.db) ? b : a))
+  assert.ok(Math.abs(peak.x - xFromHz(1000, axis)) <= 1)
+  assert.ok(Math.abs(peak.db - 12) < 0.01)
 })
 
 /**
