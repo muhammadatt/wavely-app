@@ -96,7 +96,7 @@ function chip(on, warn = false) {
 
     <div class="flex items-start gap-[7px]">
       <DeviceField
-        :model-value="node.hz" :min="R.hz.min" :max="R.hz.max" :step="1"
+        :model-value="node.hz" :min="R.hz.min" :max="R.hz.max" :step="1" log
         label="Freq" unit="Hz" :format-value="hz" :accent="accent" :width="66"
         @update:model-value="emit('patch', { hz: $event })"
       />

@@ -144,7 +144,7 @@ const pct = v => `${Math.round(v * 100)}%`
         <DeviceField
           v-if="g.protect"
           :model-value="g.protectCeilHz" @update:model-value="setGlobal('protectCeilHz', $event)"
-          :min="R.protectCeilHz.min" :max="R.protectCeilHz.max" :step="50"
+          :min="R.protectCeilHz.min" :max="R.protectCeilHz.max" :step="50" log
           label="Up to" unit="Hz" :format-value="hz"
           :accent="accent" :disabled="disabled" :width="62"
         />

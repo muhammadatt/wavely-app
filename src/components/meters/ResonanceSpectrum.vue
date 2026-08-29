@@ -1238,7 +1238,12 @@ function drawReduction(ctx, w, frame) {
         open = false
         continue
       }
-      const y = peakBins[d] * h
+      // ⚠ `top +`, WHICH THIS LINE WAS MISSING WHEN THE LANE MOVED TO THE
+      // FLOOR — it uses the local `h` rather than `reductionH`, so the sweep
+      // that offset everything else by grepping for `reductionH.value` walked
+      // straight past it. The hold went on being drawn from the plate's top
+      // edge, and read as a stray trace left over from the old layout.
+      const y = top + peakBins[d] * h
       const x = d * xStep
       open ? ctx.lineTo(x, y) : ctx.moveTo(x, y)
       open = true
