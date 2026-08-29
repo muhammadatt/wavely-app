@@ -69,10 +69,45 @@ const emit = defineEmits(['patch', 'delete', 'close', 'solo'])
 
 const R = RESONANCE_FOCUS_RANGES
 
+/**
+ * Shape as a picture of where the attention goes, not as a word.
+ *
+ * ⚠ BELL / LOW / HIGH WERE THE WRONG KIND OF LABEL, for the reason the EQ's own
+ * shape picker already records: "bell" is trade vocabulary a narrator has no
+ * reason to know, and LOW and HIGH read as which END OF THE SPECTRUM rather than
+ * which SIDE OF THIS NODE — which is the actual question, since every one of
+ * these is anchored at the node's own frequency. The curve each one draws says
+ * it without a word.
+ *
+ * Same 30x14 box, the same flat line at y=7 and the same 1.6 px stroke as
+ * `eq/FilterShapePicker`, so the two read as one vocabulary rather than two
+ * dialects of it. They are caricatures, not renders of the weighting: the point
+ * is that three are unmistakable from each other at 30 px.
+ *
+ * ⚠ THE PLAIN-LANGUAGE SENTENCE STAYS, in the title and the accessible name. A
+ * picture with no name is unusable to a screen reader, and these buttons are the
+ * only place the LOW/HIGH distinction is explained at all — a wide bell cannot
+ * say "everything below here", because it falls away on both sides.
+ */
 const SHAPES = [
-  { id: 'bell', label: 'BELL', title: 'Work harder around this frequency.' },
-  { id: 'low', label: 'LOW', title: 'Work harder on everything BELOW this frequency. A wide bell cannot say this — it falls away on both sides.' },
-  { id: 'high', label: 'HIGH', title: 'Work harder on everything ABOVE this frequency.' },
+  {
+    id: 'bell',
+    label: 'Bell',
+    d: 'M1 11 L8 11 Q15 -1 22 11 L29 11',
+    title: 'Work harder around this frequency.',
+  },
+  {
+    id: 'low',
+    label: 'Low side',
+    d: 'M1 3 L9 3 Q14 3 16 8 L20 11 L29 11',
+    title: 'Work harder on everything BELOW this frequency. A wide bell cannot say this — it falls away on both sides.',
+  },
+  {
+    id: 'high',
+    label: 'High side',
+    d: 'M1 11 L10 11 L14 8 Q16 3 21 3 L29 3',
+    title: 'Work harder on everything ABOVE this frequency.',
+  },
 ]
 
 const shape = computed(() => props.node.shape ?? 'bell')
@@ -122,8 +157,8 @@ function chip(on, warn = false) {
       >NODE {{ index + 1 }} OF {{ count }}</span>
       <button
         type="button"
-        class="px-[5px] leading-none rounded"
-        style="font:600 20px 'JetBrains Mono',monospace;color:rgba(255,255,255,.45)"
+        class="px-[5px] leading-none rounded cursor-pointer text-[color:rgba(255,255,255,.45)] hover:text-[color:rgba(255,255,255,.65)]"
+        style="font:600 20px 'JetBrains Mono',monospace;"
         aria-label="Close"
         title="Close (Esc)"
         @click="emit('close')"
@@ -159,12 +194,25 @@ function chip(on, warn = false) {
         v-for="s in SHAPES"
         :key="s.id"
         type="button"
-        class="px-[7px] py-[3px] rounded-full"
+        class="px-[5px] py-[3px] rounded-full flex items-center"
         :aria-pressed="String(shape === s.id)"
+        :aria-label="s.label"
         :title="s.title"
         :style="chip(shape === s.id)"
         @click="emit('patch', { shape: s.id })"
-      >{{ s.label }}</button>
+      >
+        <!-- 22 px rather than the picker's 30: three of these share the row
+             with DELTA, ON/BYP and DEL inside a 268 px panel, and at 26 the row
+             measured 254 against 248 of usable width. The viewBox is unchanged,
+             so the curves are the picker's exactly, drawn smaller. -->
+        <svg width="22" height="10" viewBox="0 0 30 14" aria-hidden="true">
+          <path
+            :d="s.d" fill="none"
+            :stroke="shape === s.id ? bright(accent) : 'rgba(255,255,255,.45)'"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+          />
+        </svg>
+      </button>
 
       <span class="flex-1"></span>
 

@@ -93,30 +93,6 @@ const heightDelta = ref(0)
 const plotHeight = computed(() => PLOT_H + heightDelta.value)
 
 /**
- * THE READOUT ROW IS THE PANEL'S, NOT THE PLOT'S.
- *
- * It used to live inside ResonanceSpectrum, above the canvas, which is where it
- * is drawn and so looked like where it belonged. It is not: the row is a header
- * for the whole display area rather than a part of the picture, and keeping it
- * inside the plot meant the panel could not put anything else in it — which is
- * exactly what the zone count needed. The plot now draws the plot.
- *
- * The two figures are still MEASURED inside the plot, on the frame loop that
- * draws it, and arrive by `update:reading` at ~10 Hz. That split is the point:
- * anything computing them out here would be a second reader of the kernel's
- * port describing a different instant from the picture beside it.
- */
-/**
- * The selected focus node, or null — what the control row shows in its place.
- *
- * ⚠ SELECTION DRIVES IT NOW, WHERE A SEPARATE "OPEN" STATE USED TO. As a
- * floating card the node's fields had to be opened and closed, because they
- * covered the plot: `panelOpen`, a click to open, another to dismiss, Escape,
- * and a close button. Docked in the row there is nothing to dismiss — the row
- * shows the settings of whatever is selected, exactly as it does for a zone, and
- * clicking empty plate deselects.
- */
-/**
  * Which of the two placements is in force — see ui/focusNodeDock.js.
  *
  * Resolved once, not reactive: it is a comparison switch for deciding between
@@ -142,6 +118,7 @@ const focusDock = resolveFocusDock()
 const nodePanelOpen = ref(true)
 watch(() => resSelectedNode.value, () => { nodePanelOpen.value = true })
 
+/** The selected focus node, or null — what the fields are shown for. */
 const selectedNode = computed(() => (focusMode
   ? resFocus.value.nodes[resSelectedNode.value] ?? null
   : null))
@@ -149,9 +126,9 @@ const selectedNode = computed(() => (focusMode
 /**
  * Node edits, applied here rather than in the plot.
  *
- * They lived in ResonanceSpectrum because the card did. `shape` and `enabled`
- * are not numbers, so they take `patchNode` rather than the clamping setter
- * `setNodeParam`, which would silently reject them.
+ * They lived in ResonanceSpectrum because the floating card did. `shape` and
+ * `enabled` are not numbers, so they take `patchNode` rather than the clamping
+ * setter `setNodeParam`, which would silently reject them.
  */
 function patchFocusNode(patch) {
   const i = resSelectedNode.value
@@ -169,38 +146,13 @@ function deleteFocusNode() {
   resSelectedNode.value = -1
 }
 
-const reading = ref({ deepestDb: 0, count: 0, avgDb: 0 })
-
 /**
- * The two figures beside each other, and the string that reserves their width.
- *
- * ⚠ A READOUT THAT RESIZES ITSELF MOVES EVERYTHING TO ITS RIGHT. These update
- * ~10 times a second, so `-6.4` becoming `-12.1` shunted the MAX pair sideways
- * several times a second — the number was legible and the row was not. Two
- * distinct causes, and fixing one leaves the other: the glyph COUNT changes at
- * 10 dB, and Inter's default figures are proportional, so `-11.1` is narrower
- * than `-88.8` at the same length. `tabular-nums` answers the second; only
- * reserving the width answers the first.
- *
- * WIDEST is a real string rendered invisibly in the same box rather than a
- * min-width in `ch` or px. `ch` is the width of a digit, so a value made of a
- * minus, a point and three digits is not a whole number of them — sizing that
- * way means guessing at Inter's metrics for the minus and the point, and being
- * wrong in the loose direction leaves a permanent gap. A hidden copy of the
- * widest string is exact by construction and stays exact if the face or the
- * size ever changes.
- *
- * -24.0 is the widest either figure can be: both are bounded by the plot's
- * `fullScaleDb`, which is 24. A value past it would widen the box rather than
- * be clipped, so the failure mode of getting this wrong is the old behaviour
- * rather than a truncated number.
+ * ⚠ THE PLOT KEEPS ITS OWN READINGS NOW, so nothing here holds them. AVE and
+ * MAX are drawn inside the REMOVED band by the component that measures them,
+ * which removes the hop they used to make: measured in the frame loop, emitted
+ * at ~10 Hz, held in a ref here, and printed a few pixels above the plot. The
+ * `update:reading` emit went with them.
  */
-const READOUT_WIDEST = '-24.0'
-
-const readouts = computed(() => [
-  { key: 'ave', db: reading.value.avgDb, label: 'AVE dB' },
-  { key: 'max', db: reading.value.deepestDb, label: 'MAX dB' },
-])
 
 // Display state, persisted, and deliberately nowhere near `params` — see
 // ui/resonanceOverlays.js for both halves of that.
@@ -407,72 +359,24 @@ async function applyAndClose() {
            their widest string, the switches carry fixed labels — so the centre
            holds still frame to frame as well as file to file. -->
       <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-[14px] mb-[7px]">
-        <!-- 1c's header figures: what was taken out, at the size of the thing
-             the panel is for. The old line led with a running reduction figure
-             and an average in 12 px, sharing a row with a three-item curve
-             legend. Under "removal only" the reduction IS the reading — there
-             is no second curve for it to be one of — so it gets the size, and
-             the legend goes: two of the three curves it named no longer exist.
-             The average and the deepest are both here because they answer
-             different questions: how much the effect is doing overall, and how
-             hard it is working at its worst moment. -->
+        <!-- ⚠ THE AVE AND MAX FIGURES ARE INSIDE THE PLOT NOW, in the REMOVED
+             band, so this cell is empty. They were the largest text on the panel
+             and a summary of its smallest band, sitting outside the display —
+             two places to look to read one cut. See drawReductionReadouts.
+
+             The cell stays rather than the grid dropping to two columns: it is
+             what centres the zone count against the ROW, and a two-column grid
+             would centre it against whatever the switches happen to measure.
+             ⚠ DELTA MOVED IN HERE with them, because it belongs beside a
+             reading rather than beside nothing. -->
         <span class="flex items-end gap-[10px] min-w-0">
-          <span class="flex flex-col">
-            <span style="font:500 9px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">
-              RESONANCES SUPPRESSED
-            </span>
-            <!-- The brief sets this at 46 px against a 1000 px card; this
-                 faceplate is 640 (`--w-faceplate`), so the same figure lands at
-                 30, and at 24 with two of them side by side. Everything else
-                 about it is the brief's: Inter 500, the pale tint, and a mono
-                 `dB` at the text-mini step beside it.
-
-                 One loop rather than two copies: the pair differ in a number
-                 and a word, and the width reservation below has to be identical
-                 on both or the one that drifts moves the other. -->
-            <div class="flex gap-2 mt-1">
-              <span
-                v-for="r in readouts"
-                :key="r.key"
-                class="flex items-baseline gap-[4px]"
-              >
-                <!-- The invisible copy sets the width; the real value is laid
-                     over it, right-aligned, so the decimal point holds still
-                     rather than the leading digit. -->
-                <span class="relative inline-block">
-                  <span
-                    aria-hidden="true"
-                    class="invisible"
-                    :style="{
-                      font: `500 24px 'Inter',system-ui`,
-                      lineHeight: '1',
-                      fontVariantNumeric: 'tabular-nums',
-                    }"
-                  >{{ READOUT_WIDEST }}</span>
-                  <span
-                    class="absolute inset-0 text-right"
-                    :style="{
-                      font: `500 24px 'Inter',system-ui`,
-                      lineHeight: '1',
-                      fontVariantNumeric: 'tabular-nums',
-                      color: bright(ACCENT),
-                      textShadow: `0 0 12px ${tint(ACCENT, 0.45)}`,
-                    }"
-                  >-{{ r.db.toFixed(1) }}</span>
-                </span>
-                <span style="font:500 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.35)">{{ r.label }}</span>
-              </span>
-            </div>
-
-          </span>
-
           <!-- Second statement of a mode the title bar already shows, and worth
                the duplication: someone reading the plot to decide whether a cut
                is landing where they want has their eyes here, not on the title
                bar, and the trace being loud is otherwise unexplained. -->
           <span
             v-show="resDelta"
-            class="px-[5px] py-[1px] rounded mb-[3px]"
+            class="px-[5px] py-[1px] rounded"
             :style="{
               font: `700 8px 'JetBrains Mono',monospace`,
               letterSpacing: '.12em',
@@ -572,7 +476,6 @@ async function applyAndClose() {
         @update:focus-nodes="syncFocus({ ...resFocus, nodes: $event })"
         @update:selected-focus-node="resSelectedNode = $event"
         @focus-solo="toggleFocusSolo"
-        @update:reading="reading = $event"
       >
         <!-- The bottom placement. Same component and the same handlers as the
              row one — only where it is mounted differs, which is what makes the

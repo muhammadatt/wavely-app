@@ -20,7 +20,7 @@ import {
 } from './resonanceZoneEdit.js'
 import { ResonanceHistory } from './resonanceHistory.js'
 import { bright, tint } from '../../ui/accent.js'
-import { MARK_MIN_DB, findExceedanceRuns, findResonanceMarks } from './resonanceMarks.js'
+import { findExceedanceRuns } from './resonanceMarks.js'
 import {
   NODE_R,
   addNode,
@@ -48,7 +48,6 @@ import {
   grFraction,
   grFractionToDb,
   grScaleMarks,
-  PEAK_FALL_PER_SEC,
   PEAK_HOLD_MS,
   useMeterFrame,
 } from './ballistics.js'
@@ -187,21 +186,14 @@ const props = defineProps({
 })
 
 /**
- * The two figures the header prints, published on their own throttles.
- *
- * ⚠ THEY ARE MEASURED HERE AND DRAWN ELSEWHERE, and that split is deliberate
- * rather than awkward. Both come out of the frame loop below — the deepest cut
- * off the same ballistics the trace is drawn with, the count and average out of
- * the very frame the marks were found in — so computing them anywhere else
- * would mean a second reader of the kernel's port, describing a different
- * instant from the picture beside it. What moved up is the markup, not the
- * measurement.
- *
- * Emitted rather than exposed so the panel can hold them like any other value.
- * At ~10 Hz apiece, and only when a figure actually changes.
+ * ⚠ THERE IS NO `update:reading` ANY MORE. The plot measured AVE and MAX in its
+ * frame loop and emitted them at ~10 Hz for the panel header to print; they are
+ * drawn inside the REMOVED band now, by the same component that measures them,
+ * so the trip out and back is gone along with the change-guard that kept it from
+ * re-rendering the panel ten times a second with the same numbers.
  */
 const emit = defineEmits([
-  'update:zones', 'update:selectedZone', 'update:reading',
+  'update:zones', 'update:selectedZone',
   'update:focusNodes', 'update:selectedFocusNode', 'focus-solo',
 ])
 
@@ -249,8 +241,6 @@ const AXIS_H = 13
 const laneH = computed(() => Math.max(60, props.height - AXIS_H))
 /** Vertical clearance between two numerals on the reduction scale. */
 const MIN_SCALE_GAP_PX = 11
-/** Below this fraction of the scale the peak hold has nothing to say. */
-const PEAK_VISIBLE = 0.025
 /**
  * Below this many dB the reduction trace is not drawn at all.
  *
@@ -300,7 +290,26 @@ const REDUCTION_VISIBLE_DB = 0.3
  */
 const SPEC_FILL = 'rgba(255,255,255,.085)'
 const SPEC_STROKE = 'rgba(255,255,255,.40)'
-const SPEC_THRESHOLD = 'rgba(255,255,255,.52)'
+/**
+ * ⚠ THE THRESHOLD IS A GLOWING SOLID LINE NOW, AND IT SWAPPED APPEARANCES WITH
+ * THE FOCUS CURVE. It was a white dash at .52; the focus curve was a lit accent
+ * solid with a glow. They have traded.
+ *
+ * That also settles the one edge the panel's colour rule did not cleanly cover.
+ * The rule is that white is the file and the accent is the effect, and the
+ * threshold — `reference + Selectivity` — is squarely the effect's own decision
+ * boundary. It was kept neutral on the argument that it is read AGAINST the
+ * input curve and a two-family comparison is harder. Now it is the effect's
+ * colour, and what tells it from the input is that it is the lit one.
+ *
+ * A dash said "decision boundary rather than signal", which was worth saying
+ * when it was one faint line among several. It is the line every crossing is
+ * measured against, so being the most legible thing in the overlay is not the
+ * wrong emphasis.
+ */
+const SPEC_THRESHOLD_PX = 1.5
+const SPEC_THRESHOLD_GLOW_A = 0.55
+const SPEC_THRESHOLD_GLOW_PX = 8
 /**
  * The crossing, in the accent.
  *
@@ -330,21 +339,37 @@ const SPEC_HISTORY_EDGE_A = 0.62
  * handles are all accent, and the only neutral things are the datum it is
  * measured against and the backings that keep text legible.
  *
- * ⚠ THE GLOW IS THE THIRD CLAIMANT ON THE PLATE AND THE COMMENT ON THE FIRST IS
- * NOW WRONG. `drawReduction` still says its outline is "the only place on the
- * plate that carries one — the design system spends its accent glow on the
- * things that are actually emitting". The focus curve and the selected node
- * both carry one too, and in focus mode they arguably ARE the emitting thing.
- * Recorded rather than resolved: which of the three should glow is a judgement
- * to make with all three on screen, not from the source.
+ * ⚠ THE GLOW HAD THREE CLAIMANTS AND NOW HAS TWO, WHICH IS THE RESOLUTION OF A
+ * QUESTION THIS COMMENT USED TO ONLY RECORD. The reduction trace, the focus
+ * curve and the selected node all carried one, while the trace's own comment
+ * still claimed it was the only place on the plate that did. Decided by looking:
+ * the trace lost its lit outline entirely — it is drawn at ten times the
+ * spectrum's sensitivity and was the reading the panel kept asking to be
+ * quieter — and the focus curve gave its glow to the THRESHOLD, which is the
+ * line every crossing is measured against. What still glows is that threshold
+ * and the selected node: one boundary, and one handle.
  */
 /** The neutral datum the bias curve is read against — zero bias, full width. */
 const FOCUS_DATUM = 'rgba(255,255,255,.13)'
 const FOCUS_DATUM_DASH = [3, 5]
 /** Fill between the curve and its datum, so the shaded area IS the bias. */
 const FOCUS_CURVE_FILL_A = 0.01
-const FOCUS_CURVE_PX = 1.7
-const FOCUS_CURVE_GLOW_A = 0.55
+/**
+ * ⚠ DOTTED AND UNLIT, HAVING TRADED APPEARANCES WITH THE THRESHOLD. It was a
+ * 1.7 px lit solid over a 9 px glow. The two lines were competing for the same
+ * job — the loudest line on the plate — and only one of them is a boundary
+ * things are measured against. This one is a BIAS the user has placed: it says
+ * where attention has been moved, which is a statement about the settings
+ * rather than about the audio, and a dotted line is the vocabulary this plot
+ * already uses for exactly that (the datum below it, and the threshold before
+ * the swap).
+ *
+ * The glow constant stays for the selected NODE, which is a different claim —
+ * one handle, the thing being edited right now, rather than a line spanning the
+ * plate.
+ */
+const FOCUS_CURVE_PX = 1.5
+const FOCUS_CURVE_DASH = [3, 3]
 const FOCUS_GLOW_PX = 9
 /** A bypassed node: its place kept, its fill gone. */
 const FOCUS_NODE_OFF = 'rgba(255,255,255,.34)'
@@ -445,8 +470,8 @@ const SPEC_DB_MAX = -15
  * DELTA keeps a heavier fill because there the removed signal is the thing being
  * heard, so the region bounding it is the subject rather than an annotation.
  */
-const REDUCTION_FILL_ALPHA = 0.14
-const REDUCTION_FILL_ALPHA_DELTA = 0.3
+const REDUCTION_FILL_ALPHA = 0.3
+const REDUCTION_FILL_ALPHA_DELTA = 0.14
 /** At the foot of the lane. Near zero either way; it keeps the gradient a gradient. */
 const REDUCTION_FILL_ALPHA_FOOT = 0.015
 
@@ -764,7 +789,6 @@ const zonePeaks = ref([])
  * pills jump; the source design settles them roughly four times a second and
  * that is slow enough to read and fast enough to follow a phrase.
  */
-const MARK_INTERVAL_MS = 280
 /**
  * Hysteresis on a mark already placed.
  *
@@ -772,9 +796,6 @@ const MARK_INTERVAL_MS = 280
  * and dropped every quarter second. Once named, a mark survives down to half
  * the floor before it goes.
  */
-const MARK_KEEP_FRACTION = 0.5
-let markAcc = MARK_INTERVAL_MS
-let marks = []
 
 /** Frequency under the pointer, or null. */
 const cursorX = ref(null)
@@ -802,8 +823,6 @@ const cursorText = ref('')
  * between events, which makes it a slow copy of the live trace rather than a
  * record of where the effect has been working.)
  */
-let peakBins = null
-let peakAges = null
 
 /**
  * THE PLOT NO LONGER DIMS WHEN THE TRANSPORT STOPS.
@@ -917,29 +936,58 @@ useMeterFrame((dtMs) => {
     readingDb.value = grFractionToDb(fraction, props.fullScaleDb)
   }
   draw(dtMs)
-  publishReading()
 })
 
-/**
- * Hand the header its two figures, when either has moved.
- *
- * After `draw`, because that is what republishes the mark summary — before it,
- * the count beside the plot would be one frame behind the marks on it. Guarded
- * on the values rather than on the throttles because the throttles fire on
- * their own clock whether or not anything changed, and a panel-level ref
- * assigned 10 times a second with the same number is 10 needless renders.
- */
-let lastReading = null
 
-function publishReading() {
-  const { count, avgDb } = markSummary.value
-  const deepestDb = readingDb.value
-  if (lastReading
-    && lastReading.deepestDb === deepestDb
-    && lastReading.count === count
-    && lastReading.avgDb === avgDb) return
-  lastReading = { deepestDb, count, avgDb }
-  emit('update:reading', lastReading)
+/**
+ * The per-frame readings the trace does not draw itself: the deepest cut and
+ * where it is, each zone's own peak, and the average across the band.
+ *
+ * ⚠ IT WAS `updatePeaks` AND IT DID MORE THAN ITS NAME. The peak-hold outline
+ * was computed here alongside all of this, so removing the hold took the
+ * hotspot line, the per-zone readouts and the header's AVE figure with it — the
+ * function was named for the one thing in it that has now gone. Renamed for
+ * what is left, which is everything the panel prints in words or numerals.
+ */
+function updateReadings(frame, dtMs) {
+  if (!frame) {
+    // Nothing playing: drop the hotspot line rather than freezing a shape that
+    // no longer describes anything.
+    hotDb.value = 0
+    if (markSummary.value.avgDb) markSummary.value = { avgDb: 0 }
+    if (zonePeaks.value.length) zonePeaks.value = []
+    cursorText.value = ''
+    return
+  }
+
+  const { reduction, bins, minHz, maxHz } = frame
+
+  let hotFraction = 0
+  let hotIndex = 0
+  let sum = 0
+  for (let d = 0; d < bins; d++) {
+    sum += reduction[d]
+    const f = grFraction(reduction[d], props.fullScaleDb)
+    if (f > hotFraction) {
+      hotFraction = f
+      hotIndex = d
+    }
+  }
+
+  if (summaryThrottle.due(dtMs)) {
+    markSummary.value = { avgDb: sum / bins }
+  }
+
+  if (hotThrottle.due(dtMs)) {
+    hotDb.value = reduction[hotIndex]
+    hotHz.value = minHz * Math.pow(2, (hotIndex / (bins - 1)) * Math.log2(maxHz / minHz))
+    // Arithmetic lives in resonanceZoneEdit so it can be tested without a
+    // canvas, like every other zone geometry function.
+    zonePeaks.value = zonePeakReductions(
+      props.zones, reduction, bins, minHz, maxHz, props.deltaZone,
+    )
+  }
+  updateCursorText(frame)
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
@@ -1004,13 +1052,15 @@ function draw(dtMs) {
   // near the floor — the strip is a finding and the curve there is context.
   if (showFound.value && shown) drawFoundHistory(ctx, w, shown)
 
-  // ⚠ THE PEAK HOLD ADVANCES WHETHER OR NOT THE TRACE IS SHOWING, for the reason
-  // the waterfall records itself continuously: a reading switched back on to a
-  // cold hold cannot answer the question it was switched on for.
-  updatePeaks(shown, dtMs)
+  // ⚠ THE READINGS ARE TAKEN WHETHER OR NOT THE TRACE IS SHOWING. The header's
+  // figures, the hotspot line and the per-zone numbers are not part of the
+  // REMOVED overlay — they are the panel's, and putting the trace down to read
+  // the spectrum under it must not blank them.
+  updateReadings(shown, dtMs)
   if (showRemoved.value) {
     drawZeroRail(ctx, w)
     if (shown) drawReduction(ctx, w, shown)
+    drawReductionReadouts(ctx, w)
   }
 
   // ⚠ THE CARD IS PLACED FROM THE FRAME LOOP, not from the gestures. Its node
@@ -1026,9 +1076,6 @@ function draw(dtMs) {
   // because a named resonance is what a node is usually aimed AT, and a curve
   // covering the thing it is pointed at would be exactly backwards.
   if (focusMode.value) drawFocus(ctx, w)
-  // The marks sit ON the trace — their vertical position IS the reduction — so
-  // with it hidden they would be dots in empty space rather than annotations.
-  if (showRemoved.value) drawMarks(ctx, w)
 
   if (showGrid.value && showRemoved.value) drawGrScale(ctx, w)
   drawCursor(ctx, w)
@@ -1237,46 +1284,32 @@ function drawReduction(ctx, w, frame) {
     ctx.lineTo(d * xStep, yFor(reduction[d]))
     if (!over) live = false
   }
-  // THE BRIEF'S OUTLINE: 1.6 px in the pale tint, over a glow of the accent.
-  // The glow is what makes a one-pixel line read as lit rather than as drawn,
-  // and it is the only place on the plate that carries one — the design system
-  // spends its accent glow on the things that are actually emitting (`--glow-
-  // accent-sm` on meter segments and knob arcs), which here is the cut.
-  ctx.lineWidth = 1.6
-  ctx.strokeStyle = bright(props.accent)
-  ctx.shadowColor = tint(props.accent, 0.8)
-  ctx.shadowBlur = 10
-  ctx.stroke()
-  ctx.shadowBlur = 0
-  ctx.shadowColor = 'transparent'
-
-  // Peak hold, drawn only where there is a peak to hold. Running it across the
-  // whole width would lay a white line along the zero datum on top of the live
-  // trace, which reads as a border on the lane rather than as a measurement.
-  if (peakBins) {
-    ctx.beginPath()
-    let open = false
-    for (let d = 0; d < bins; d++) {
-      if (peakBins[d] <= PEAK_VISIBLE) {
-        open = false
-        continue
-      }
-      // ⚠ `top +`, WHICH THIS LINE WAS MISSING WHEN THE LANE MOVED TO THE
-      // FLOOR — it uses the local `h` rather than `reductionH`, so the sweep
-      // that offset everything else by grepping for `reductionH.value` walked
-      // straight past it. The hold went on being drawn from the plate's top
-      // edge, and read as a stray trace left over from the old layout.
-      const y = top + peakBins[d] * h
-      const x = d * xStep
-      open ? ctx.lineTo(x, y) : ctx.moveTo(x, y)
-      open = true
-    }
-    ctx.lineWidth = 1
-    // The pale end of the ramp rather than white, so the hold reads as the
-    // trace's own shadow rather than as a second, colder measurement.
-    ctx.strokeStyle = 'rgba(205,244,220,.32)'
-    ctx.stroke()
-  }
+  // ⚠ THE LIT OUTLINE IS GONE, AND WITH IT THE PLATE'S ORIGINAL GLOW. It was
+  // 1.6 px of the pale tint over a 10 px accent glow, on the brief's argument
+  // that a glow is what makes a one-pixel line read as lit rather than drawn,
+  // and that the design system spends it on the thing actually emitting — which
+  // here was the cut.
+  //
+  // What changed is what else is on the plate. The glow ended up on three things
+  // (this, the focus curve, the selected node) and the trace is the one of them
+  // the panel keeps asking to be QUIETER: it is drawn at 20 px per dB near zero
+  // against the spectrum's 2, so it is already the loudest reading here by an
+  // order of magnitude, and the fill came down to .14 for the same reason. A
+  // filled shape with no rim is what is left, and the rim was most of what made
+  // it dominate.
+  //
+  // ⚠ THE PEAK HOLD IS GONE, AND SO ARE THE MARKS THAT SAT ON THIS TRACE. Both
+  // said where the reduction HAS been rather than where it is — the hold as a
+  // decaying pale outline, the marks as dots naming the deepest few by
+  // frequency — and the FOUND strip now answers that question in its own band,
+  // at true depth over the threshold and without competing with the live curve
+  // for the same pixels. Two readings of recent history on one plot, one of them
+  // drawn on top of the other, was one too many.
+  //
+  // It also takes the last of the plate's original ink with it: the hold was the
+  // pale end of the heat ramp, kept so it read as the trace's own shadow rather
+  // than as a second, colder measurement. With the lit outline gone too, what is
+  // left of REMOVED is one filled shape.
 
   ctx.restore()
 }
@@ -1327,7 +1360,6 @@ const PILL_W = 98
 const PILL_H = 22
 
 /** How close a click has to land to a dot to name it, in pixels. */
-const MARK_HIT_PX = 12
 
 /**
  * The named resonance, held as a frequency. Display state, like the overlays.
@@ -1338,134 +1370,10 @@ const MARK_HIT_PX = 12
  * in one file, and restoring it into a different file next session would put a
  * label on a resonance nobody asked about.
  */
-const selectedMarkHz = ref(null)
 /** True while the pointer is over a dot, for the cursor. */
-const hoverMark = ref(false)
 
-/** Within this many octaves, a mark and a remembered frequency are the same. */
-const MARK_MATCH_OCTAVES = 1 / 6
 
-function markIndexNear(hz) {
-  if (hz === null) return -1
-  let best = -1
-  let bestOct = MARK_MATCH_OCTAVES
-  marks.forEach((m, i) => {
-    const oct = Math.abs(Math.log2(m.hz / hz))
-    if (oct < bestOct) {
-      bestOct = oct
-      best = i
-    }
-  })
-  return best
-}
 
-/**
- * The mark under a point, or -1.
- *
- * Measured to the DOT rather than to the column, because the dot is what is
- * drawn and a hit target that is not the thing you can see is a hit target
- * nobody can aim at. Circular: the dots sit on a curve, so a wide-and-short
- * target would claim clicks from the plate above a shallow cut.
- */
-function markAt(x, y) {
-  const h = reductionH.value
-  // ⚠ THE LANE'S OFFSET BELONGS HERE TOO. This panel already records that the
-  // hit test is the half that fails silently — as dots that cannot be clicked
-  // where they are drawn — and moving the lane to the floor without moving this
-  // is exactly how that happens.
-  const top = reductionTop.value
-  const w = width.value
-  let best = -1
-  let bestD = MARK_HIT_PX * MARK_HIT_PX
-  marks.forEach((m, i) => {
-    const dx = m.pos * w - x
-    const dy = top + grFraction(m.db, props.fullScaleDb) * h - y
-    const d = dx * dx + dy * dy
-    if (d <= bestD) {
-      bestD = d
-      best = i
-    }
-  })
-  return best
-}
-
-function drawMarks(ctx, w) {
-  if (!marks.length) return
-  const h = reductionH.value
-  const top = reductionTop.value
-  // The marks sit ON the trace — their vertical position IS the reduction — so
-  // they move with the lane or they annotate empty plate.
-  const yFor = db => top + grFraction(db, props.fullScaleDb) * h
-  const named = markIndexNear(selectedMarkHz.value)
-
-  ctx.save()
-  ctx.textBaseline = 'middle'
-
-  // Dots first, all of them, so the named one is not drawn under a neighbour's
-  // pill.
-  marks.forEach((m, i) => {
-    const x = m.pos * w
-    const yDot = yFor(m.db)
-    ctx.fillStyle = tint(props.accent, i === named ? 1 : 0.9)
-    ctx.beginPath()
-    ctx.arc(x, yDot, 3.4, 0, Math.PI * 2)
-    ctx.fill()
-    // A halo on the named one, so the pill has something to belong to and the
-    // dot stays findable while the label is read.
-    if (i === named) {
-      ctx.strokeStyle = tint(props.accent, 0.45)
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.arc(x, yDot, 7, 0, Math.PI * 2)
-      ctx.stroke()
-    }
-  })
-
-  if (named >= 0) {
-    const m = marks[named]
-    const x = m.pos * w
-    const yDot = yFor(m.db)
-    // Below the dot normally; above it when the trough is deep enough that a
-    // pill underneath would run off the bottom of the plot. The alternating
-    // row offset is gone with the other pills — there is only one now, so it
-    // has nothing to collide with.
-    const below = yDot + PILL_H + 16 < h
-    const yPill = below ? yDot + 10 : yDot - PILL_H - 10
-    const cx = Math.max(PILL_W / 2 + 2, Math.min(w - PILL_W / 2 - 2, x))
-
-    // A leader only when the label had to move sideways to fit, so the common
-    // case carries no extra ink.
-    if (Math.abs(cx - x) > 1) {
-      ctx.strokeStyle = tint(props.accent, 0.35)
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(x, yDot)
-      ctx.lineTo(cx, yPill + PILL_H / 2)
-      ctx.stroke()
-    }
-
-    ctx.fillStyle = PILL_INK
-    ctx.beginPath()
-    roundRect(ctx, cx - PILL_W / 2, yPill, PILL_W, PILL_H, 6)
-    ctx.fill()
-    ctx.strokeStyle = tint(props.accent, 0.4)
-    ctx.lineWidth = 1
-    ctx.stroke()
-
-    ctx.font = "600 11px 'JetBrains Mono',monospace"
-    ctx.textAlign = 'left'
-    ctx.fillStyle = bright(props.accent)
-    ctx.fillText(formatHz(m.hz), cx - PILL_W / 2 + 8, yPill + PILL_H / 2 + 0.5)
-    ctx.textAlign = 'right'
-    ctx.font = "500 10px 'JetBrains Mono',monospace"
-    ctx.fillStyle = 'rgba(255,255,255,.5)'
-    ctx.fillText(`-${m.db.toFixed(1)}`, cx + PILL_W / 2 - 8, yPill + PILL_H / 2 + 0.5)
-  }
-
-  ctx.restore()
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'alphabetic'
-}
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.moveTo(x + r, y)
@@ -1608,11 +1516,12 @@ function drawSpectrum(ctx, w, frame) {
     const y = yFor(threshold[d])
     d === 0 ? ctx.moveTo(0, y) : ctx.lineTo(d * xStep, y)
   }
-  ctx.setLineDash([3, 3])
-  ctx.lineWidth = 1
-  ctx.strokeStyle = SPEC_THRESHOLD
+  ctx.lineWidth = SPEC_THRESHOLD_PX
+  ctx.strokeStyle = bright(props.accent)
+  ctx.shadowColor = tint(props.accent, SPEC_THRESHOLD_GLOW_A)
+  ctx.shadowBlur = SPEC_THRESHOLD_GLOW_PX
   ctx.stroke()
-  ctx.setLineDash([])
+  ctx.shadowBlur = 0
 
   ctx.restore()
 }
@@ -1888,106 +1797,6 @@ function drawCursor(ctx, w) {
   ctx.restore()
 }
 
-/**
- * Peak hold and the hotspot readout.
- *
- * The hold falls as one shape rather than per bin with its own timer each: a
- * single fall rate across the whole trace keeps it readable as a curve, and a
- * per-bin timer array would have to be reallocated whenever the bin count moved.
- */
-function updatePeaks(frame, dtMs) {
-  const step = Math.min(dtMs, 100)
-
-  const fall = (PEAK_FALL_PER_SEC * step) / 1000
-
-  if (!frame) {
-    // Nothing playing: let the hold run down rather than freezing a shape that
-    // no longer describes anything, and drop the hotspot line.
-    if (peakBins) {
-      for (let d = 0; d < peakBins.length; d++) {
-        peakBins[d] = Math.max(0, peakBins[d] - fall)
-      }
-    }
-    hotDb.value = 0
-    if (marks.length) marks = []
-    if (markSummary.value.count) markSummary.value = { count: 0, avgDb: 0 }
-    if (zonePeaks.value.length) zonePeaks.value = []
-    cursorText.value = ''
-    return
-  }
-
-  const { reduction, reductionHeld, bins, minHz, maxHz } = frame
-  if (!peakBins || peakBins.length !== bins) {
-    peakBins = new Float32Array(bins)
-    peakAges = new Float32Array(bins)
-  }
-
-  let hotFraction = 0
-  let hotIndex = 0
-  for (let d = 0; d < bins; d++) {
-    // The hold is fed by the held curve, which is the only thing that value is
-    // for: it catches a peak landing on a frame the reader never saw.
-    const held = grFraction(reductionHeld[d], props.fullScaleDb)
-    if (held > peakBins[d]) {
-      // Strictly greater. Equal is not a rise — a bin sitting at zero against a
-      // held zero would otherwise restart its plateau on every frame forever.
-      peakBins[d] = held
-      peakAges[d] = 0
-    } else {
-      peakAges[d] += step
-      // Flat for the plateau every other peak marker in the app holds for, then
-      // down at the rate they all fall at, never below the live reading.
-      if (peakAges[d] >= PEAK_HOLD_MS) {
-        peakBins[d] = Math.max(held, peakBins[d] - fall)
-      }
-    }
-
-    const f = grFraction(reduction[d], props.fullScaleDb)
-    if (f > hotFraction) {
-      hotFraction = f
-      hotIndex = d
-    }
-  }
-
-  // WHICH resonances are named is decided four times a second, so the pills hold
-  // still long enough to read. HOW DEEP each one is, is re-read every frame from
-  // the same curve everything else on the plot is drawn from.
-  //
-  // Both halves are needed. Recomputing the set every frame makes the pills
-  // flicker between neighbouring peaks of nearly equal depth; leaving the depth
-  // frozen for a quarter second makes the pill disagree with the trough directly
-  // under it and with the per-zone number above it — reported as exactly that,
-  // a pill reading -6.1 in a zone whose own readout said -5.6.
-  markAcc += dtMs
-  if (markAcc >= MARK_INTERVAL_MS) {
-    markAcc = 0
-    marks = findResonanceMarks(reduction, bins, minHz, maxHz)
-  }
-  if (marks.length) {
-    const floor = MARK_MIN_DB * MARK_KEEP_FRACTION
-    marks = marks.filter(m => {
-      m.db = reduction[m.bin]
-      return m.db >= floor
-    })
-  }
-
-  let sum = 0
-  for (let d = 0; d < bins; d++) sum += reduction[d]
-  if (summaryThrottle.due(dtMs)) {
-    markSummary.value = { count: marks.length, avgDb: sum / bins }
-  }
-
-  if (hotThrottle.due(dtMs)) {
-    hotDb.value = reduction[hotIndex]
-    hotHz.value = minHz * Math.pow(2, (hotIndex / (bins - 1)) * Math.log2(maxHz / minHz))
-    // Arithmetic lives in resonanceZoneEdit so it can be tested without a
-    // canvas, like every other zone geometry function.
-    zonePeaks.value = zonePeakReductions(
-      props.zones, reduction, bins, minHz, maxHz, props.deltaZone,
-    )
-  }
-  updateCursorText(frame)
-}
 
 // ── Sensitivity zones ───────────────────────────────────────────────────────
 
@@ -2138,10 +1947,9 @@ function drawFocus(ctx, w) {
   pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)))
   ctx.strokeStyle = bright(props.accent)
   ctx.lineWidth = FOCUS_CURVE_PX
-  ctx.shadowColor = tint(props.accent, FOCUS_CURVE_GLOW_A)
-  ctx.shadowBlur = FOCUS_GLOW_PX
+  ctx.setLineDash(FOCUS_CURVE_DASH)
   ctx.stroke()
-  ctx.shadowBlur = 0
+  ctx.setLineDash([])
 
   // Which way is which. A signed quantity on a line with no scale beside it is
   // otherwise a guess, and this one runs the opposite way to the knob it
@@ -2161,8 +1969,8 @@ function drawFocus(ctx, w) {
     ctx.textBaseline = baseline
     ctx.fillText(text, 7, y)
   }
-  label('MORE CUT', scope.datum + reach, 'bottom')
-  label('LESS CUT', scope.datum - reach, 'top')
+  label('CUT MORE', scope.datum + reach, 'bottom')
+  label('CUT LESS', scope.datum - reach, 'top')
   ctx.textBaseline = 'alphabetic'
 
   nodes.forEach((n, i) => {
@@ -2349,6 +2157,61 @@ function drawZoneDots(ctx) {
 const MIN_READOUT_PX = 30
 const READOUT_INSET_PX = 4
 
+/**
+ * AVE and MAX, printed inside the REMOVED band.
+ *
+ * ⚠ THEY WERE IN THE PANEL HEADER, ABOVE THE PLOT, at 24 px. Two problems with
+ * that, and the second is the one that moved them. They were the largest text
+ * on the panel while being a summary of the smallest band on it — and they were
+ * outside the display, so reading a cut and reading its number were two places
+ * to look. Inside the band they are where the thing they describe is, and the
+ * band's own emptiness pays for them: the trace hangs from the top rail and on
+ * real material reaches a third of the way down, so the lower half of this band
+ * is clear far more often than not.
+ *
+ * ⚠ DRAWN AFTER THE TRACE, and they have to be. A deep cut reaches wherever
+ * these sit, and a numeral half-covered by the shape it measures is worse than
+ * one sitting on top of it — which is also why they carry a backing.
+ *
+ * Bottom-left of the band rather than top: the trace grows DOWNWARD from the
+ * rail, so the top is where it always is and the bottom is where it only
+ * sometimes is.
+ */
+const READOUT_PAD = 6
+
+function drawReductionReadouts(ctx, w) {
+  const { avgDb } = markSummary.value
+  const bottom = reductionTop.value + reductionH.value
+  ctx.save()
+  clipPlate(ctx, w)
+  ctx.textBaseline = 'alphabetic'
+
+  const pair = (label, db, x) => {
+    const value = `-${Math.abs(db).toFixed(1)}`
+    ctx.font = "500 15px 'Inter',system-ui"
+    const vw = ctx.measureText(value).width
+    ctx.font = "600 8px 'JetBrains Mono',monospace"
+    const lw = ctx.measureText(label).width
+
+    // One backing under both, so the pair reads as a unit and neither is legible
+    // only where the trace happens not to be.
+    ctx.fillStyle = plateAlpha(0.66)
+    ctx.fillRect(x - 3, bottom - READOUT_PAD - 15, vw + lw + 11, 18)
+
+    ctx.fillStyle = 'rgba(255,255,255,.4)'
+    ctx.fillText(label, x, bottom - READOUT_PAD - 3)
+    ctx.font = "500 15px 'Inter',system-ui"
+    ctx.fillStyle = bright(props.accent)
+    ctx.fillText(value, x + lw + 5, bottom - READOUT_PAD - 2)
+    return vw + lw + 16
+  }
+
+  let x = READOUT_PAD
+  x += pair('AVE CUT', avgDb, x)
+  pair('MAX CUT', readingDb.value, x)
+  ctx.restore()
+}
+
 function drawZoneReadouts(ctx, w) {
   const peaks = zonePeaks.value
   if (!peaks.length || peaks.length !== props.zones.length) return
@@ -2463,22 +2326,8 @@ function onDown(e) {
     return
   }
 
-  const mark = markAt(x, y)
-  if (mark >= 0) {
-    // Clicking the named one again puts the label away, which is the only way
-    // back to a clean plot without hunting for empty plate to click on.
-    selectedMarkHz.value = mark === markIndexNear(selectedMarkHz.value)
-      ? null
-      : marks[mark].hz
-    e.preventDefault()
-    return
-  }
-  // Anywhere else, including the plate around a dot, clears the label.
-  selectedMarkHz.value = null
-
-  // A zone dot before a divider, for the reason a resonance dot comes before
-  // both: a dot is a point target that exists in one place, a divider is a line
-  // that can be grabbed at any other height.
+  // A zone dot before a divider: a dot is a point target that exists in one
+  // place, where a divider is a line that can be grabbed at any height.
   const dot = zoneDotAt(props.zones, x, y, zoneDotY.value, axis)
   if (dot >= 0) {
     select(dot)
@@ -2587,27 +2436,6 @@ function onKeyDown(e) {
           (props.zones[i]?.hiHz ?? 0) * Math.pow(2, 1 / 12), 20, 20000))
       } else select(Math.min(n - 1, i < 0 ? 0 : i + 1))
       break
-    // UP AND DOWN WALK THE RESONANCES, and this is the keyboard equivalent of
-    // clicking a dot. Without it the frequencies the pills carry would be
-    // reachable by pointer alone, which is the one thing this panel has
-    // consistently refused to let a canvas control do — and it is worse here
-    // than for the zones, because the accessible name can describe a zone's
-    // settings but a resonance's frequency exists nowhere else on the panel.
-    //
-    // The walk includes "none", so the label can be put away from the keyboard
-    // without borrowing Escape, which belongs to the window.
-    case 'ArrowDown':
-    case 'ArrowUp': {
-      if (!marks.length) return
-      const at = markIndexNear(selectedMarkHz.value)
-      const step = e.key === 'ArrowDown' ? 1 : -1
-      // -1 (nothing named) sits at the start of the cycle, so stepping down
-      // from it lands on the lowest resonance and stepping up wraps to the
-      // highest.
-      const next = ((at + 1 + step) + (marks.length + 1)) % (marks.length + 1) - 1
-      selectedMarkHz.value = next < 0 ? null : marks[next].hz
-      break
-    }
     case 'Enter':
       commit(splitZone(props.zones, hzFromX(axis.w * 0.5, axis), axis,
         `z${Date.now()}${nextZoneId++}`, 20, 20000))
@@ -2739,8 +2567,7 @@ function onMove(e) {
   // Ordered as onDown resolves them, so what the cursor promises is what the
   // click will actually do.
   hoverFocusNode.value = focusDrag < 0 && focusNodeAt(x, y) >= 0
-  hoverMark.value = !drag && !hoverFocusNode.value && markAt(x, y) >= 0
-  hoverZoneDot.value = drag || hoverMark.value || hoverFocusNode.value
+  hoverZoneDot.value = drag || hoverFocusNode.value
     ? -1
     : zoneDotAt(props.zones, x, y, zoneDotY.value, axis)
   onDrag(e, x, y)
@@ -2753,7 +2580,6 @@ function onLeave() {
   // user did not aim for.
   cursorX.value = null
   cursorText.value = ''
-  hoverMark.value = false
   hoverZoneDot.value = -1
   hoverFocusNode.value = false
 }
@@ -2827,16 +2653,6 @@ const plotSummary = computed(() => {
   // dropping it: what gets processed IS the zones, and they are listed below
   // with their own bounds.
   const mode = props.delta ? ' Monitoring the removed signal only.' : ''
-  // The resonances, which used to be readable off the pills and now are not.
-  // A canvas is opaque to a screen reader either way, but while every mark
-  // carried a label there was at least a sighted equivalent; with the labels
-  // behind a click, this text is the only complete list there is.
-  const named = markIndexNear(selectedMarkHz.value)
-  const found = marks.length
-    ? ` ${marks.length} resonance${marks.length === 1 ? '' : 's'} tracked: `
-      + marks.map((m, i) => `${formatHz(m.hz)} at minus ${m.db.toFixed(1)} decibels`
-        + (i === named ? ', selected' : '')).join('; ') + '.'
-    : ''
   // ⚠ THE FOCUS NODES HAVE TO BE IN HERE, and they were not: the separate rail
   // carried its own accessible name, and deleting the rail deleted the only
   // description of them there was. A canvas is opaque to a screen reader, and
@@ -2865,7 +2681,7 @@ const plotSummary = computed(() => {
         : `${formatHz(loHz)} to ${formatHz(hiHz)}, off`
     }).join('; ') + '.'
     : ''
-  return `${props.title}. ${cut}${mode}${found}${focus}${zones} `
+  return `${props.title}. ${cut}${mode}${focus}${zones} `
     + `${focusMode.value ? FOCUS_HINT : ''}`
 })
 
@@ -2891,13 +2707,13 @@ const FOCUS_HINT = 'Drag a node for frequency and amount, wheel over one for '
 
 /**
  * How many resonances are being worked and how hard, refreshed on the marks'
- * own clock. Printed by the panel header, via `update:reading`.
+ * own clock. Printed inside the REMOVED band by drawReductionReadouts.
  *
  * A count that flickers between three and four several times a second is worse
  * than no count, so it is republished only when the mark set is, and the
  * average comes from the same frame the marks were found in.
  */
-const markSummary = ref({ count: 0, avgDb: 0 })
+const markSummary = ref({ avgDb: 0 })
 
 /**
  * What to say when the readout line has nothing else to say.
@@ -2944,7 +2760,7 @@ const idleHint = computed(() =>
           borderRadius: '12px',
           cursor: dragging ? 'grabbing'
             : hoverFocusNode ? 'grab'
-            : hoverMark || hoverZoneDot >= 0 ? 'pointer' : 'crosshair',
+            : hoverZoneDot >= 0 ? 'pointer' : 'crosshair',
         }"
         @pointerdown="onDown"
         @pointermove="onMove"
