@@ -890,6 +890,20 @@ export class ResonanceKernel {
      * clamped the range to what the frame supports, so the comparison is
      * against what was ASKED for, not against what it settled on — the clamp
      * is exactly the information being tested for.
+     *
+     * ⚠ AND THE MASK IS THE SECONDARY CONSUMER, NOT THE PRIMARY ONE. Under the
+     * shipped `refMode: 'peak'` the mask is off by default, so what F0 is
+     * really doing is setting `_peakEnvelope`'s window geometry — the max
+     * filter's half-width and the floor under the geometric averaging window.
+     * Measured by substituting the constant fallback for the tracked value: on
+     * an F0 90 voice carrying a 250 Hz resonance that costs **1 dB off the
+     * whole 200 Hz-4 kHz band** (the reference sits too high, so the stage
+     * attenuates rather than finds), while at F0 130 and above, or anywhere
+     * past about 3 kHz, the difference is under 0.15 dB. That asymmetry is the
+     * evidence for this gate: a window spanning one harmonic spacing is many
+     * bins at 100 Hz and a rounding error at 7 kHz, so a band-limited HF
+     * instance loses nothing by falling back to PEAK_FALLBACK_F0_HZ — and a
+     * full-range one cannot. See CLAUDE.md for the table.
      */
     this.pitchTrackable = pitchFloorHz(this.sampleRate, this.frameSize) <= requestedMinHz
 
