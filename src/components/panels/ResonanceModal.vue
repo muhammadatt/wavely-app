@@ -181,7 +181,6 @@ const overlayButtons = computed(() => [
     on: overlays.value.found,
     title: 'Resonances found in the last few seconds, at their true depth over the threshold',
   },
-  { key: 'grid', label: 'GRID', on: overlays.value.grid, title: 'Frequency and reduction rules' },
   /*
   {
     key: 'history',

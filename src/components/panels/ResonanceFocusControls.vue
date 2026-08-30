@@ -137,7 +137,7 @@ const pct = v => `${Math.round(v * 100)}%`
          switch and one ceiling say it directly, and say the same thing on every
          file — where a per-zone flag says it only if the zones happen to be
          placed somewhere sensible on this particular voice. -->
-    <div class="flex items-center gap-[7px] shrink-0">
+    <div class="hidden flex items-center gap-[7px] shrink-0">
       <button
         type="button"
         class="px-[9px] py-[5px] rounded-full"

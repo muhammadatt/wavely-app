@@ -158,7 +158,7 @@ function chip(on, warn = false) {
 
 <template>
   <div
-    class="rounded-[10px] px-[10px] py-[8px]"
+    class="relative rounded-[10px] px-[10px] pt-[14px] pb-[8px]"
     :style="[
       { background: 'rgba(14,18,20,1)', width: '268px' },
       { boxShadow: docked
@@ -172,22 +172,40 @@ function chip(on, warn = false) {
     @dblclick.stop
     @wheel.stop
   >
-    <div class="flex items-center justify-between mb-[7px]">
-      <!-- ⚠ THE GRIP, AND ONLY THIS. The card sits on the foot of the plate,
-           which is over the middle of the spectrum — where the voice is, and
-           where the node being edited most often is too. It slides along the
-           foot rather than being pinned to the centre, and the label is what
-           you slide it by: a card draggable from anywhere would fight every
-           field and button on it, and the × in this same row is exactly the
-           kind of thing a whole-header grip would swallow.
+    <!-- ⚠ THE HANDLE IS AT THE TOP EDGE, CENTRED, AND IT IS THE WHOLE TARGET.
+         It began as `cursor-grab` on the label — draggable with no sign of it —
+         and then as six dots beside that label, which fixed the affordance but
+         left it reading as decoration on a piece of text. At the top edge,
+         centred, a short bar is the one place a handle is a handle without
+         being labelled: it is where a window title bar, a sheet and a drawer all
+         put theirs.
 
-           The attribute is the whole contract with the plot — see the dock in
-           ResonanceSpectrum. It is inert when this card is docked in the
-           control row instead, which has no track to slide along. -->
+         ⚠ IT CARRIES `data-dock-grip` AND THE LABEL NO LONGER DOES. The plot
+         finds the grip with `closest()` and slides the card along the foot of
+         the plate — see onDockDown in ResonanceSpectrum. Moving the attribute
+         moves the target: dragging by the label is gone, which is the point.
+         Affordance and target are the same object again, which is what the dots
+         beside the label had just stopped being.
+
+         The bar is 28 px in a 44 x 12 hit area, so the thing to aim at is
+         comfortably larger than the thing that is drawn — and it sits in the
+         panel's own top padding, so it costs no height that the fields wanted.
+         `touch-none` because a drag that scrolls the page instead is worse than
+         no drag at all. -->
+    <span
+      data-dock-grip
+      class="absolute left-1/2 -translate-x-1/2 top-0 flex items-center justify-center
+             w-[44px] h-[12px] touch-none select-none cursor-grab active:cursor-grabbing"
+      title="Drag to slide the card along the bottom of the plot"
+    >
       <span
-        data-dock-grip
-        class="cursor-grab active:cursor-grabbing select-none"
-        title="Drag to slide the card along the bottom of the plot"
+        class="block rounded-full"
+        style="width:28px;height:3px;background:rgba(255,255,255,.28)"
+      ></span>
+    </span>
+
+    <div class="flex items-center justify-between mb-[7px]">
+      <span
         style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em"
         :style="{ color: bright(accent) }"
       >NODE {{ (rank ?? index) + 1 }} OF {{ count }}</span>

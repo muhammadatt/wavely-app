@@ -399,6 +399,16 @@ const FOCUS_LABEL_BACKING_A = 0.72
 const FOCUS_LABEL_INK = 'rgba(255,255,255,.34)'
 const FOCUS_PILL_BACKING = 'rgba(10,14,16,.86)'
 const FOCUS_PILL_RING_A = 0.4
+/**
+ * The focus pill's height. Named because the clamp and the rounded rect have to
+ * agree about it — a mismatch there is a pill clipped by its own guard.
+ *
+ * ⚠ IT IS NOT THE OLD `PILL_H`. That one was 22 and belonged to the resonance
+ * MARKS, which are gone; it and `PILL_W` outlived them as orphans and were
+ * removed with this. Two constants of the same name for two different pills is
+ * how the wrong one gets picked up.
+ */
+const FOCUS_PILL_H = 18
 
 /** `PLATE_INK` at an alpha, for anything laid over the plate's own contents. */
 function plateAlpha(a) {
@@ -478,6 +488,33 @@ const REDUCTION_FILL_ALPHA_DELTA = 0.14
 const REDUCTION_FILL_ALPHA_FOOT = 0.015
 
 /**
+ * The FOUND strip's own band, at the bottom of the lane.
+ *
+ * ⚠ IT IS A RESERVED BAND NOW, NOT 36 PX SITTING INSIDE THE SPECTRUM'S. Reported
+ * from use: the strip and the shaded crossings wash each other out where they
+ * overlap. They did, and hue could not fix it — they are deliberately the same
+ * colour, being one quantity at two ages — while dimming one only made the
+ * weaker of the two harder to read.
+ *
+ * ⚠ AND MOVING IT ELSEWHERE IN THE BAND WOULD NOT HAVE WORKED EITHER, which is
+ * what makes the reservation necessary rather than lazy. A crossing follows the
+ * spectrum's own contour: it spans from the threshold up to a peak, so a LOUD
+ * crossing sits high in the band and a QUIET one sits near the floor. Against a
+ * -85..-15 window, low-frequency peaks near -30 dBFS put their crossings in the
+ * top third while high-frequency peaks near -70 put theirs in the bottom fifth.
+ * A strip at the floor collides with the HF crossings; a strip under the
+ * reduction lane would collide with the LF ones. There is no free row.
+ *
+ * A FRACTION rather than pixels, which also fixes something already on record:
+ * the plot is resizable, and the strip was the one element that did not grow
+ * with it.
+ */
+const FOUND_BAND_FRAC = 0.13
+/** Zero when the strip is not showing — see the note on `reductionFrac`. */
+const foundFrac = computed(() => (showFound.value ? FOUND_BAND_FRAC : 0))
+const foundBandH = computed(() => laneH.value * foundFrac.value)
+
+/**
  * How much of the lane the reduction reading spans.
  *
  * ⚠ THE LAW IS UNCHANGED — this scales the drawing, not the scale. Reduction is
@@ -522,7 +559,30 @@ const REDUCTION_LANE_FRAC = 0.35
  * or derives from the fractions directly, so one conditional here moves all of
  * them together. A parallel "collapsed" geometry is how two layouts drift apart.
  */
-const reductionFrac = computed(() => (showRemoved.value ? REDUCTION_LANE_FRAC : 0))
+const reductionFrac = computed(() => {
+  if (!showRemoved.value) return 0
+  // ⚠ IT EXPANDS TOO, and only the spectrum used to. Switching SPECTRUM off
+  // left the trace at its 35% with the freed space going nowhere, which is the
+  // same complaint that made the bands collapse in the first place — a reading
+  // that does not grow when it is the only one showing.
+  //
+  // The share is the REMAINDER AFTER FOUND rather than the whole lane: the strip
+  // is a fixed indicator, not a competitor for space. And when both readings are
+  // up the split is the calibrated one, so nothing moves in the case that was
+  // tuned by eye.
+  const rest = 1 - foundFrac.value
+  // ⚠ THE FOCUS CURVE HOLDS THE MIDDLE BAND OPEN, AND FORGETTING IT COLLAPSED
+  // THE CURVE TO NOTHING. The middle is where the bias curve is drawn and
+  // dragged, and it is derived as "what the other two leave" — so expanding
+  // REMOVED into it whenever SPECTRUM was off took the curve's height to zero
+  // and left focus mode with a control surface one pixel tall.
+  //
+  // The curve is a CONTROL, not a reading: it does not have an overlay switch
+  // and must not be squeezed out by one. So the middle stays reserved whenever
+  // the model that draws it is running, exactly as if SPECTRUM were on.
+  const middleClaimed = showSpectrum.value || focusMode.value
+  return middleClaimed ? REDUCTION_LANE_FRAC : rest
+})
 const reductionH = computed(() => laneH.value * reductionFrac.value)
 
 /**
@@ -574,32 +634,6 @@ const foundBase = computed(() => 0)
  * same 8 dB the margin lane clamps at, so the two agree about what a big
  * crossing looks like.
  */
-/**
- * The FOUND strip's own band, at the bottom of the lane.
- *
- * ⚠ IT IS A RESERVED BAND NOW, NOT 36 PX SITTING INSIDE THE SPECTRUM'S. Reported
- * from use: the strip and the shaded crossings wash each other out where they
- * overlap. They did, and hue could not fix it — they are deliberately the same
- * colour, being one quantity at two ages — while dimming one only made the
- * weaker of the two harder to read.
- *
- * ⚠ AND MOVING IT ELSEWHERE IN THE BAND WOULD NOT HAVE WORKED EITHER, which is
- * what makes the reservation necessary rather than lazy. A crossing follows the
- * spectrum's own contour: it spans from the threshold up to a peak, so a LOUD
- * crossing sits high in the band and a QUIET one sits near the floor. Against a
- * -85..-15 window, low-frequency peaks near -30 dBFS put their crossings in the
- * top third while high-frequency peaks near -70 put theirs in the bottom fifth.
- * A strip at the floor collides with the HF crossings; a strip under the
- * reduction lane would collide with the LF ones. There is no free row.
- *
- * A FRACTION rather than pixels, which also fixes something already on record:
- * the plot is resizable, and the strip was the one element that did not grow
- * with it.
- */
-const FOUND_BAND_FRAC = 0.13
-/** Zero when the strip is not showing — see the note on `reductionFrac`. */
-const foundFrac = computed(() => (showFound.value ? FOUND_BAND_FRAC : 0))
-const foundBandH = computed(() => laneH.value * foundFrac.value)
 
 /**
  * The deepest crossing the FOUND strip can draw.
@@ -637,7 +671,6 @@ const HELD_STRIP_MAX_DB = 8
  * where they live is the storage key, and that is in `ui/resonanceOverlays.js`
  * now — including why they are not parameters, which is the important half.
  */
-const showGrid = computed(() => props.overlays?.grid === true)
 const showHistory = computed(() => props.overlays?.history === true)
 const showSpectrum = computed(() => props.overlays?.spectrum === true)
 /**
@@ -1044,7 +1077,6 @@ function draw(dtMs) {
   // nothing after it is allowed to cover it except the zone furniture, which is
   // the control surface rather than a reading.
   drawCarveHistory(ctx, w)
-  if (showGrid.value) drawGrid(ctx, w, xFor, minHz, maxHz)
   // SPECTRUM first, FOUND over it: with both on they share the floor, and the
   // strip is a finding where the curve down there is context.
   if (shown && (showSpectrum.value || showFound.value)) updateDetection(shown, dtMs)
@@ -1078,7 +1110,11 @@ function draw(dtMs) {
   // covering the thing it is pointed at would be exactly backwards.
   if (focusMode.value) drawFocus(ctx, w)
 
-  if (showGrid.value && showRemoved.value) drawGrScale(ctx, w)
+  // ⚠ THE NUMERALS FOLLOW THE TRACE, NOT A SWITCH OF THEIR OWN. They were
+  // behind GRID, which also drew rules across the whole plot — so reading a
+  // depth off the trace meant turning on a grid over everything else to get the
+  // scale that measures it. A reading and the scale beside it are one thing.
+  if (showRemoved.value) drawGrScale(ctx, w)
   drawCursor(ctx, w)
   drawPlateRing(ctx, w)
   drawAxis(ctx, w, xFor, minHz, maxHz)
@@ -1170,33 +1206,6 @@ function drawPlateRing(ctx, w) {
   ctx.stroke()
 }
 
-/**
- * Frequency rules up, reduction rules across.
- *
- * Only drawn when the GRID overlay is on. In the default view the plot carries
- * the 0 dB rail and nothing else, which is what "removal only" means — the
- * numbers are on the marks and in the header, not ruled across the plot.
- */
-function drawGrid(ctx, w, xFor, minHz, maxHz) {
-  ctx.save()
-  clipPlate(ctx, w)
-  ctx.fillStyle = 'rgba(255,255,255,.05)'
-  for (const hz of GRID_HZ) {
-    if (hz < minHz || hz > maxHz) continue
-    const x = Math.round(xFor(hz)) + 0.5
-    if (x >= w) continue
-    ctx.fillRect(x, 0, 1, laneH.value)
-  }
-  // Horizontals come from the same marks the numerals use, so a rule and its
-  // number can never disagree about where a decibel is.
-  for (const mark of grScaleMarks(props.fullScaleDb)) {
-    if (mark.db === 0) continue
-    const y = Math.round(reductionTop.value + mark.fraction * reductionH.value) + 0.5
-    if (y >= laneH.value - 2) continue
-    ctx.fillRect(0, y, w, 1)
-  }
-  ctx.restore()
-}
 
 /**
  * Reduction, hanging from the top of the plot. THE HERO CURVE.
@@ -1315,50 +1324,6 @@ function drawReduction(ctx, w, frame) {
   ctx.restore()
 }
 
-/**
- * The named resonances: a dot on the trace, and a pill on the one you click.
- *
- * This is the one thing the per-zone readouts cannot say. A zone number tells
- * you which BAND is being worked; a mark tells you which FREQUENCY, which is
- * what someone reaches for the EQ with. The two coexist rather than replacing
- * each other — the numbers stay tied to the columns the knobs edit, and the
- * dots float wherever the peaks actually are.
- *
- * ⚠ THE PILLS USED TO BE DRAWN FOR EVERY MARK, ALL THE TIME, AND THAT WAS TOO
- * MUCH IN MOTION. Up to four labels, each re-placed four times a second as the
- * mark set is republished, each carrying a depth that changes every frame,
- * sitting on top of the one curve the panel exists to show. Reported as
- * distracting, and the mechanism is that a label is a fixed-size object on a
- * plot whose features are not: four of them cover a real fraction of the plate
- * whatever the audio is doing, so the display was at its busiest exactly when
- * the effect was working hardest.
- *
- * THE DOTS STAY. They are 3.4 px and they sit on the trace rather than over it,
- * they are what says a peak has been identified as a resonance rather than as
- * ripple, and they are the target you aim at — a reveal whose trigger is
- * invisible is not discoverable at all. What is deferred is the ANNOTATION.
- *
- * SELECTION IS BY FREQUENCY, NOT BY INDEX, and that is what makes it survive
- * the mark set being recomputed 4x a second: the same ring is the same
- * resonance whether it comes back as marks[0] or marks[2]. It is matched to the
- * nearest mark within a sixth of an octave, which is wide enough to hold a peak
- * that wanders with the voice and narrow enough that two named resonances
- * cannot be confused for one another (findResonanceMarks already keeps them
- * further apart than that).
- *
- * A SELECTION WHOSE RESONANCE HAS GONE QUIET IS KEPT, NOT DROPPED. An
- * intermittent ring is the whole reason the peak hold exists, and dropping the
- * label the moment its resonance falls under the threshold would mean the one
- * kind of resonance that is hardest to catch is also the one whose name will
- * not stay on screen. The pill simply disappears with the mark and comes back
- * with it.
- *
- * Clamped away from both edges so a pill near 20 Hz or 20 kHz is not half cut
- * off by the plate — the dot stays at the true frequency, only the label moves,
- * because the dot is the measurement and the label is the annotation.
- */
-const PILL_W = 98
-const PILL_H = 22
 
 /** How close a click has to land to a dot to name it, in pixels. */
 
@@ -1755,8 +1720,12 @@ function drawGrScale(ctx, w) {
     if (y < reductionTop.value + MIN_SCALE_GAP_PX / 2
       || y > laneH.value - 3 || y - lastY < MIN_SCALE_GAP_PX) continue
     lastY = y
-    ctx.fillStyle = 'rgba(255,255,255,.05)'
-    ctx.fillRect(0, Math.round(y) + 0.5, w - 20, 1)
+    // ⚠ NUMERALS ONLY — the rule that used to run left from each one is gone.
+    // It was the last of the GRID overlay still being drawn, and it was the
+    // half that cost something: a set of horizontal lines across the trace,
+    // under the fill, at the exact heights the eye is trying to read a curve
+    // against. The numeral says where the level is without laying anything over
+    // the reading it measures.
     ctx.fillStyle = 'rgba(255,255,255,.32)'
     ctx.fillText(`-${mark.label}`, w - 4, y)
   }
@@ -2090,8 +2059,16 @@ function drawFocusPill(ctx, w, x, y, text) {
   ctx.font = "600 9px 'JetBrains Mono',monospace"
   const tw = ctx.measureText(text).width + 14
   const px = Math.max(2, Math.min(w - tw - 2, x - tw / 2))
+  // ⚠ CLAMPED IN Y AS WELL AS X, WHICH IT WAS NOT. The caller places the pill
+  // outward from the curve — above the node when the bias is negative — so a
+  // node near the top of its band put the pill off the top of the plate, where
+  // the numbers it carries exist nowhere else. The horizontal clamp had been
+  // there since the pill was written; the vertical one was simply missed,
+  // because a node has to be near the edge before it shows.
+  const py = Math.max(FOCUS_PILL_H / 2 + 2,
+    Math.min(laneH.value - FOCUS_PILL_H / 2 - 2, y))
   ctx.beginPath()
-  roundRect(ctx, px, y - 9, tw, 18, 5)
+  roundRect(ctx, px, py - FOCUS_PILL_H / 2, tw, FOCUS_PILL_H, 5)
   ctx.fillStyle = FOCUS_PILL_BACKING
   ctx.fill()
   ctx.strokeStyle = tint(props.accent, FOCUS_PILL_RING_A)
@@ -2100,7 +2077,7 @@ function drawFocusPill(ctx, w, x, y, text) {
   ctx.fillStyle = bright(props.accent)
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(text, px + tw / 2, y)
+  ctx.fillText(text, px + tw / 2, py)
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
 }

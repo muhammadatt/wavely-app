@@ -48,7 +48,7 @@ test('the default view is the trace alone', () => {
   // of it. The other four are context folded in around it.
   withStorage({}, () => {
     assert.deepEqual(loadOverlays(), {
-      grid: false, history: false, spectrum: false, found: false, removed: true,
+      history: false, spectrum: false, found: false, removed: true,
     })
   })
 })
@@ -59,7 +59,7 @@ test('an ABSENT key takes its default, a stored false does not', () => {
   // yet" from "the user switched it off", and for `removed` those are opposite
   // answers. A preference file written before an overlay existed would have
   // started it off rather than at its intended state.
-  withStorage({ stored: '{"grid":true}' }, () => {
+  withStorage({ stored: '{"history":true}' }, () => {
     assert.equal(loadOverlays().removed, true, 'absent means default')
   })
   withStorage({ stored: '{"removed":false}' }, () => {
@@ -89,9 +89,9 @@ test('a stored `margin` is ignored rather than inherited by FOUND', () => {
 
 test('a stored preference round-trips', () => {
   withStorage({}, () => {
-    saveOverlays({ grid: true, history: false, spectrum: false, found: true, removed: false })
+    saveOverlays({ history: false, spectrum: false, found: true, removed: false })
     assert.deepEqual(loadOverlays(), {
-      grid: true, history: false, spectrum: false, found: true, removed: false,
+      history: false, spectrum: false, found: true, removed: false,
     })
   })
 })
@@ -100,10 +100,10 @@ test('only exactly true counts, so a half-written entry degrades to off', () => 
   // Coercing instead would make `{"grid":"false"}` — a plausible thing to find
   // in a hand-edited entry — read as ON, which is the wrong direction for a
   // preference whose default is "show nothing but the removal".
-  withStorage({ stored: '{"grid":"false","history":1,"found":true,"removed":"yes"}' }, () => {
+  withStorage({ stored: '{"spectrum":"false","history":1,"found":true,"removed":"yes"}' }, () => {
     const v = loadOverlays()
     assert.deepEqual(
-      [v.grid, v.history, v.found, v.removed], [false, false, true, false])
+      [v.spectrum, v.history, v.found, v.removed], [false, false, true, false])
   })
 })
 
@@ -148,7 +148,7 @@ test('saving keeps only the known keys', () => {
   // The store is written from panel state; a stray key reaching it would be
   // persisted for good and read back by every future session.
   withStorage({}, read => {
-    saveOverlays({ grid: true, waterfall: true })
+    saveOverlays({ history: true, waterfall: true })
     assert.deepEqual(Object.keys(JSON.parse(read())), OVERLAY_KEYS)
   })
 })
