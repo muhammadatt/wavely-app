@@ -67,19 +67,36 @@ export function xFromHz(hz, axis) {
  * the curve grows with the plot when it is resized, as everything else in it
  * does.
  *
- * ⚠ THE TWO TOGETHER HAVE TO KEEP THE CURVE INSIDE THE BAND, which is what
- * decides the numbers rather than taste. The datum sits 0.22 of the band down
- * from its top, roughly where a threshold sits over speech; full travel either
- * way is 0.20 of the band, so the curve lives in [0.02, 0.42] of the band and
- * cannot reach either the reduction lane or the noise floor. A curve that
- * escaped its band would be drawn over a lane measuring something else entirely
- * — the mistake the plot's own two-lane split was undone for.
+ * ⚠ THE DATUM TRACKS THE THRESHOLD KNOB NOW, AND IT USED TO BE A CONSTANT. It
+ * sat at a fixed 0.22 of the band whatever the global Threshold was set to — a
+ * layout number wearing the appearance of a reading, so the one line on the
+ * plate that means "zero bias, this is where the detector sits" could not be
+ * moved by the control that moves the detector. It travels
+ * [FOCUS_DATUM_MIN_FRAC, FOCUS_DATUM_MAX_FRAC] as Selectivity runs from its
+ * maximum to its minimum: HIGHER selectivity is LESS cut, and on this plot less
+ * cut is up.
+ *
+ * ⚠ THE DEFAULT POSITION MOVED, 0.22 to about 0.35, AND IT COULD NOT NOT MOVE.
+ * The curve has to stay inside the band — full bias either way is 0.20 of it, so
+ * the datum is confined to [0.20, 0.80] — and 0.22 leaves only 0.02 of headroom
+ * above. Anchoring the shipped default there caps the whole travel at 0.041 of
+ * the band, which is 5.7 px at the shipping height: a rail that technically
+ * tracks the knob and visibly does not. Keeping the guarantee and losing the
+ * exact starting position is the better trade; a curve that escaped its band
+ * would be drawn over a lane measuring something else entirely, which is the
+ * mistake the plot's own two-lane split was undone for.
+ *
+ * ⚠ `pxPerDb` IS UNCHANGED BY ANY OF THIS. Only the origin moves, so the curve's
+ * shape and the drag's feel are identical at every threshold — a mapping that
+ * stretched as the rail moved would make turning Threshold silently re-scale
+ * every node's amount.
  *
  * At the shipping height that is 1.54 px per dB, which is within 5% of the
  * 1.61 px/dB the separate rail had — so the drag has the same feel it had
  * before it moved.
  */
-export const FOCUS_DATUM_FRAC = 0.22
+export const FOCUS_DATUM_MIN_FRAC = 0.20
+export const FOCUS_DATUM_MAX_FRAC = 0.50
 export const FOCUS_HALF_SPAN_FRAC = 0.20
 
 /**
@@ -91,13 +108,54 @@ export const FOCUS_HALF_SPAN_FRAC = 0.20
  * rose for "more cut" would be the only thing on the plate running the other
  * way.
  */
-export function focusScope(bandTop, bandBottom, maxDb) {
+export function focusScope(bandTop, bandBottom, maxDb, thresholdT = 0.5) {
   const band = Math.max(1, bandBottom - bandTop)
+  // 0 is the least selective setting — the most cut — and sits lowest, because
+  // down is toward the material everywhere else on this plate.
+  const t = clamp(thresholdT, 0, 1)
+  const frac = FOCUS_DATUM_MAX_FRAC - t * (FOCUS_DATUM_MAX_FRAC - FOCUS_DATUM_MIN_FRAC)
   return {
     maxDb,
-    datum: bandTop + band * FOCUS_DATUM_FRAC,
+    datum: bandTop + band * frac,
     pxPerDb: (band * FOCUS_HALF_SPAN_FRAC) / maxDb,
   }
+}
+
+/**
+ * The inverse: a y on the plate back to a threshold position, 0..1.
+ *
+ * ⚠ IT INVERTS `focusScope`'s DATUM MAPPING AND MUST STAY ITS EXACT MIRROR. The
+ * panel has recorded twice what a second copy of a mapping costs — a hit test
+ * derived independently fails silently, as handles that cannot be grabbed where
+ * they are drawn — so this is written as the algebraic inverse of the one
+ * expression above rather than as its own idea of where the rail is.
+ *
+ * Clamped, so a drag past either end parks at the end instead of running the
+ * value off its range.
+ */
+export function thresholdFractionFromY(y, bandTop, bandBottom) {
+  const band = Math.max(1, bandBottom - bandTop)
+  const frac = (y - bandTop) / band
+  const span = FOCUS_DATUM_MAX_FRAC - FOCUS_DATUM_MIN_FRAC
+  return clamp((FOCUS_DATUM_MAX_FRAC - frac) / span, 0, 1)
+}
+
+/** A 0..1 position back to a value in a control's range. */
+export function selectivityFromFraction(t, range) {
+  return range.min + clamp(t, 0, 1) * (range.max - range.min)
+}
+
+/**
+ * Where a Selectivity value sits in its own range, as 0..1 — the only thing
+ * `focusScope` needs to know about the threshold.
+ *
+ * A fraction rather than the dB, so the mapping from a control's range to a
+ * position on the plate lives in one place and the scope needs no opinion about
+ * what Selectivity means.
+ */
+export function thresholdFraction(selectivity, range) {
+  const span = range.max - range.min
+  return span > 0 ? clamp((selectivity - range.min) / span, 0, 1) : 0.5
 }
 
 export function yFromBias(db, scope) {

@@ -27,6 +27,9 @@ import {
   biasCurvePoints,
   canAddFocusNode,
   focusScope,
+  thresholdFraction,
+  thresholdFractionFromY,
+  selectivityFromFraction,
   makeFocusNode,
   moveNode,
   nodeAt,
@@ -113,6 +116,16 @@ const props = defineProps({
    * span of the spectrum is a horizontal extent, which is what this axis is.
    */
   zones: { type: Array, default: () => [] },
+  /**
+   * The focus model's global Selectivity, which is where the datum sits.
+   *
+   * ⚠ NOT `selectivityFn`, WHICH IS A DIFFERENT QUANTITY. That one is per
+   * frequency and already carries every node's bias, so reading the datum off it
+   * would place the zero-bias rail at whatever the bias happens to be — the rail
+   * would move as nodes were edited, which is precisely what it exists not to
+   * do. This is the one scalar the knob sets.
+   */
+  focusThreshold: { type: Number, default: RESONANCE_FOCUS_RANGES.selectivity.min },
   /** Which zone the controls below are editing. Selection is owned by the panel. */
   selectedZone: { type: Number, default: -1 },
   /**
@@ -196,7 +209,7 @@ const props = defineProps({
  */
 const emit = defineEmits([
   'update:zones', 'update:selectedZone',
-  'update:focusNodes', 'update:selectedFocusNode', 'focus-solo',
+  'update:focusNodes', 'update:selectedFocusNode', 'update:focusThreshold', 'focus-solo',
 ])
 
 /** Running the focus targeting model rather than zones. */
@@ -335,11 +348,24 @@ const SPEC_HISTORY_EDGE_A = 0.62
  * table because they trade against each other, and these were five `rgba(...)`
  * strings and three alphas scattered through 130 lines.
  *
- * They obey the same rule as everything else here — white is the file, the
- * accent is the effect — and a focus node is squarely the effect: it is a bias
- * the user has placed on the detector. So the curve, its fill and the node
- * handles are all accent, and the only neutral things are the datum it is
- * measured against and the backings that keep text legible.
+ * ⚠ THE RULE IS NARROWER THAN IT WAS, AND THIS IS THE CASE THAT NARROWED IT. It
+ * read "white is the file, the accent is the effect", and by that a focus node
+ * is squarely the effect — a bias the user has placed on the detector — so the
+ * curve, its fill and the handles were all accent. That collapsed once the
+ * THRESHOLD became a lit accent line: two green things in one band, one of them
+ * the detector's own boundary and the other the user's hand on it, told apart
+ * only by dash pattern.
+ *
+ * The rule now distinguishes WHO PUT IT THERE. The accent is the detector — its
+ * threshold, the crossings it finds, what it removes. White is everything a
+ * person placed or is looking at: the input curve, and the focus nodes and the
+ * bias curve through them. The green line is what the effect is doing; the white
+ * one is what you told it to do.
+ *
+ * ⚠ THE INPUT CURVE IS ALSO WHITE, which is the cost, and the two are separated
+ * by form rather than hue: the input is a thin unbroken line with a faint fill
+ * under it, the bias curve is dotted and carries handles. Worth watching in the
+ * middle band, where both are drawn.
  *
  * ⚠ THE GLOW HAD THREE CLAIMANTS AND NOW HAS TWO, WHICH IS THE RESOLUTION OF A
  * QUESTION THIS COMMENT USED TO ONLY RECORD. The reduction trace, the focus
@@ -352,10 +378,8 @@ const SPEC_HISTORY_EDGE_A = 0.62
  * and the selected node: one boundary, and one handle.
  */
 /** The neutral datum the bias curve is read against — zero bias, full width. */
-const FOCUS_DATUM = 'rgba(255,255,255,.13)'
+const FOCUS_DATUM = 'rgba(255,255,255,.16)'
 const FOCUS_DATUM_DASH = [3, 5]
-/** Fill between the curve and its datum, so the shaded area IS the bias. */
-const FOCUS_CURVE_FILL_A = 0.01
 /**
  * ⚠ DOTTED AND UNLIT, HAVING TRADED APPEARANCES WITH THE THRESHOLD. It was a
  * 1.7 px lit solid over a 9 px glow. The two lines were competing for the same
@@ -377,9 +401,19 @@ const FOCUS_GLOW_PX = 9
 const FOCUS_NODE_OFF = 'rgba(255,255,255,.34)'
 const FOCUS_NODE_OFF_PX = 1.2
 /** An unselected node: plate-filled, ringed. */
-const FOCUS_NODE_RING_A = 0.75
+/**
+ * The handles and the curve, in white rather than the accent.
+ *
+ * Held as full ink strings instead of alphas on the accent, because there is no
+ * longer an accent involved — an `_A` suffix here would be a name promising a
+ * tint that never happens.
+ */
+const FOCUS_CURVE_INK = 'rgba(255,255,255,.82)'
+const FOCUS_CURVE_FILL = 'rgba(255,255,255,.05)'
+const FOCUS_NODE_INK = 'rgba(255,255,255,.92)'
+const FOCUS_NODE_RING = 'rgba(255,255,255,.6)'
+const FOCUS_NODE_GLOW = 'rgba(255,255,255,.45)'
 const FOCUS_NODE_RING_PX = 1.4
-const FOCUS_NODE_GLOW_A = 0.6
 /**
  * Backings.
  *
@@ -397,8 +431,19 @@ const FOCUS_NODE_GLOW_A = 0.6
 const FOCUS_VEIL_MAX_A = 0.55
 const FOCUS_LABEL_BACKING_A = 0.72
 const FOCUS_LABEL_INK = 'rgba(255,255,255,.34)'
-const FOCUS_PILL_BACKING = 'rgba(10,14,16,.86)'
-const FOCUS_PILL_RING_A = 0.4
+/** The threshold reading on the rail. A value, so brighter than the direction
+ *  labels beside it — but under the handles, which are what you aim at. */
+const FOCUS_READOUT_INK = 'rgba(255,255,255,.66)'
+/**
+ * ⚠ SLATE, NOT NEAR-BLACK. It was `rgba(10,14,16,.86)` — the plate's own colour
+ * a shade lighter — which over a black plate is barely a shape at all: the pill
+ * read as floating text with a faint ring rather than as a label on something.
+ * A slate backing separates from the ground on its own, so the pill stays
+ * readable wherever on the plate it lands, including over the waterfall.
+ */
+const FOCUS_PILL_BACKING = 'rgba(46,54,62,.94)'
+const FOCUS_PILL_INK = 'rgba(255,255,255,.94)'
+const FOCUS_PILL_RING = 'rgba(255,255,255,.30)'
 /**
  * The focus pill's height. Named because the clamp and the rounded rect have to
  * agree about it — a mismatch there is a pill clipped by its own guard.
@@ -481,11 +526,22 @@ const SPEC_DB_MAX = -15
  *
  * DELTA keeps a heavier fill because there the removed signal is the thing being
  * heard, so the region bounding it is the subject rather than an annotation.
+ *
+ * ⚠ THEY WENT BACK UP, AND NOT ALL THE WAY. Taking the fill to .14 with the lit
+ * outline gone left the trace reading as a smudge on the plate rather than as a
+ * shape on it — the asymmetry argument was right about which lever to pull and
+ * went one step too far with it. The foot moved most in proportion (0.015 to
+ * .06): a gradient that fades to nothing gives a deep cut no bottom edge, so the
+ * shape dissolved exactly where it was largest.
+ *
+ * ⚠ AND THE DELTA/NORMAL ORDER WAS INVERTED — .14 against a .30 normal, so the
+ * mode where the removed signal IS what you are hearing was drawn FAINTER than
+ * the mode where it is an annotation. Restored the right way round.
  */
-const REDUCTION_FILL_ALPHA = 0.3
-const REDUCTION_FILL_ALPHA_DELTA = 0.14
+const REDUCTION_FILL_ALPHA = 0.44
+const REDUCTION_FILL_ALPHA_DELTA = 0.62
 /** At the foot of the lane. Near zero either way; it keeps the gradient a gradient. */
-const REDUCTION_FILL_ALPHA_FOOT = 0.015
+const REDUCTION_FILL_ALPHA_FOOT = 0.06
 
 /**
  * The FOUND strip's own band, at the bottom of the lane.
@@ -1860,6 +1916,8 @@ const hoverDivider = ref(-1)
 /** Zone dot under the pointer, for the hover cursor and the dot's own size. */
 const hoverZoneDot = ref(-1)
 const hoverFocusNode = ref(false)
+/** Over the rail, so the cursor can say it is grabbable before it is grabbed. */
+const hoverRail = ref(false)
 
 /**
  * Where the row of zone dots sits: just above the bottom of the plate.
@@ -1899,7 +1957,12 @@ function clamp(v, lo, hi) {
  * that looks unrelated.
  */
 const focusScopeNow = () => {
-  return focusScope(foundBandH.value, reductionTop.value, RESONANCE_FOCUS_RANGES.biasDb.max)
+  return focusScope(
+    foundBandH.value,
+    reductionTop.value,
+    RESONANCE_FOCUS_RANGES.biasDb.max,
+    thresholdFraction(props.focusThreshold, RESONANCE_FOCUS_RANGES.selectivity),
+  )
 }
 
 /**
@@ -1944,6 +2007,37 @@ function drawFocus(ctx, w) {
   ctx.stroke()
   ctx.setLineDash([])
 
+  // ⚠ THE GRAB TAB. The rail sets the global threshold now, and a line that can
+  // be dragged with nothing to say so is a line nobody drags — the same lesson
+  // the node card's own handle went through twice, from an invisible
+  // `cursor-grab` to dots to a bar at its top edge.
+  //
+  // At the RIGHT edge because the left carries the CUT MORE / CUT LESS labels,
+  // and it brightens on hover rather than being loud all the time: this is a
+  // control that is used occasionally and read constantly, so its resting state
+  // belongs with the rail it sits on rather than competing with the curve.
+  const tabY = Math.round(scope.datum) + 0.5
+  ctx.beginPath()
+  roundRect(ctx, w - RAIL_TAB_W - 3, tabY - RAIL_TAB_H / 2, RAIL_TAB_W, RAIL_TAB_H, 3)
+  ctx.fillStyle = plateAlpha(0.8)
+  ctx.fill()
+  // ⚠ WHITE ON HOVER, NOT THE ACCENT. The tab belongs to the rail, and the rail
+  // is the user's line under the rule above — lighting it green on hover would
+  // have it change sides the moment it was reached for, and green is what the
+  // detector's own threshold is drawn in a band away.
+  ctx.strokeStyle = hoverRail.value || railDrag ? FOCUS_NODE_INK : 'rgba(255,255,255,.28)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+  // Two lines rather than dots: the tab is 7 px tall and dots at that size read
+  // as noise, where two rules read as a grip at any weight.
+  ctx.strokeStyle = hoverRail.value || railDrag ? FOCUS_NODE_INK : 'rgba(255,255,255,.4)'
+  for (const dy of [-1.5, 1.5]) {
+    ctx.beginPath()
+    ctx.moveTo(w - RAIL_TAB_W + 1, tabY + dy)
+    ctx.lineTo(w - 5, tabY + dy)
+    ctx.stroke()
+  }
+
   // ⚠ THE SOLOED NODE'S REGION IS DRAWN, because it changes what is being heard
   // and a display that did not show it would disagree with the speakers — the
   // same reason a bypassed zone was washed out. Everything OUTSIDE the region
@@ -1972,12 +2066,12 @@ function drawFocus(ctx, w) {
   for (const p of pts) ctx.lineTo(p.x, p.y)
   ctx.lineTo(w, scope.datum)
   ctx.closePath()
-  ctx.fillStyle = tint(props.accent, FOCUS_CURVE_FILL_A)
+  ctx.fillStyle = FOCUS_CURVE_FILL
   ctx.fill()
 
   ctx.beginPath()
   pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)))
-  ctx.strokeStyle = bright(props.accent)
+  ctx.strokeStyle = FOCUS_CURVE_INK
   ctx.lineWidth = FOCUS_CURVE_PX
   ctx.setLineDash(FOCUS_CURVE_DASH)
   ctx.stroke()
@@ -2003,6 +2097,37 @@ function drawFocus(ctx, w) {
   }
   label('CUT MORE', scope.datum + reach, 'bottom')
   label('CUT LESS', scope.datum - reach, 'top')
+
+  // ⚠ THE NUMBER RIDES THE RAIL, which is the whole reason it is here rather
+  // than only on the knob. The rail's HEIGHT is the threshold now, and nothing
+  // said so: the line moved when the knob turned and a reader had no way to know
+  // the two were the same fact. Printed immediately above it and moving with it,
+  // the position and the value are one object.
+  //
+  // Brighter than CUT MORE / CUT LESS, and it should be: those name a direction
+  // and never change, this is a reading. It shares their backing because it sits
+  // in the same place for the same reason — the threshold staircase and the
+  // input curve both run through here.
+  //
+  // ⚠ ROUNDED THE WAY THE KNOB ROUNDS IT (`toFixed(0)`), so the plate and the
+  // control cannot print two different numbers for one value. A rail reading 20
+  // beside a knob reading 21 is worse than no rail reading at all.
+  // ⚠ AT THE RIGHT END, NOT THE LEFT, AND THE ARITHMETIC IS WHY. CUT LESS sits
+  // `reach` above the rail — 17 px at the shipping height — and carries a 10 px
+  // backing, so a readout in the same column overlaps it at every threshold.
+  // Measured, not guessed: the two boxes share 6 px of one another wherever the
+  // rail happens to be. The right end is empty, and it puts the number beside
+  // the tab that changes it.
+  ctx.font = "600 8.5px 'JetBrains Mono',monospace"
+  const readout = `THRESHOLD ${props.focusThreshold.toFixed(0)}`
+  const rw = ctx.measureText(readout).width
+  const rx = w - RAIL_TAB_W - 8 - rw
+  ctx.fillStyle = plateAlpha(FOCUS_LABEL_BACKING_A)
+  ctx.fillRect(rx - 3, scope.datum - 14, rw + 6, 11)
+  ctx.fillStyle = FOCUS_READOUT_INK
+  ctx.textBaseline = 'bottom'
+  ctx.fillText(readout, rx, scope.datum - 4)
+
   ctx.textBaseline = 'alphabetic'
 
   nodes.forEach((n, i) => {
@@ -2022,15 +2147,15 @@ function drawFocus(ctx, w) {
       ctx.lineTo(p.x + NODE_R, p.y - NODE_R)
       ctx.stroke()
     } else if (sel) {
-      ctx.fillStyle = bright(props.accent)
-      ctx.shadowColor = tint(props.accent, FOCUS_NODE_GLOW_A)
+      ctx.fillStyle = FOCUS_NODE_INK
+      ctx.shadowColor = FOCUS_NODE_GLOW
       ctx.shadowBlur = FOCUS_GLOW_PX
       ctx.fill()
       ctx.shadowBlur = 0
     } else {
       ctx.fillStyle = PLATE_INK
       ctx.fill()
-      ctx.strokeStyle = tint(props.accent, FOCUS_NODE_RING_A)
+      ctx.strokeStyle = FOCUS_NODE_RING
       ctx.lineWidth = FOCUS_NODE_RING_PX
       ctx.stroke()
     }
@@ -2071,10 +2196,10 @@ function drawFocusPill(ctx, w, x, y, text) {
   roundRect(ctx, px, py - FOCUS_PILL_H / 2, tw, FOCUS_PILL_H, 5)
   ctx.fillStyle = FOCUS_PILL_BACKING
   ctx.fill()
-  ctx.strokeStyle = tint(props.accent, FOCUS_PILL_RING_A)
+  ctx.strokeStyle = FOCUS_PILL_RING
   ctx.lineWidth = 1
   ctx.stroke()
-  ctx.fillStyle = bright(props.accent)
+  ctx.fillStyle = FOCUS_PILL_INK
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(text, px + tw / 2, py)
@@ -2323,6 +2448,38 @@ function selectFocus(index) {
   if (index !== props.selectedFocusNode) emit('update:selectedFocusNode', index)
 }
 
+/**
+ * How close a press has to land to the rail to grab it, in pixels.
+ *
+ * Generous, because the rail is one pixel of dashed line and a hit target the
+ * size of what is drawn is a target nobody can hit — the same reasoning behind
+ * the node handles' own radius and the zone dividers' 6 px.
+ */
+const RAIL_HIT_PX = 7
+/** The grab tab drawn at the rail's right end. */
+const RAIL_TAB_W = 16
+const RAIL_TAB_H = 11
+
+/** Whether a press at this height is a grab on the rail rather than the plate. */
+function onRail(y) {
+  if (!focusMode.value) return false
+  return Math.abs(y - focusScopeNow().datum) <= RAIL_HIT_PX
+}
+
+/**
+ * Set the global threshold from a y on the plate.
+ *
+ * ⚠ IT GOES THROUGH THE SAME INVERSE THE MODULE OWNS, not a second mapping
+ * written here. This panel has twice recorded what an independently derived hit
+ * test costs, and a rail that sets a value its own drawn position disagrees with
+ * is that failure with a number attached.
+ */
+function setThresholdFromY(y) {
+  const t = thresholdFractionFromY(y, foundBandH.value, reductionTop.value)
+  const next = selectivityFromFraction(t, RESONANCE_FOCUS_RANGES.selectivity)
+  if (next !== props.focusThreshold) emit('update:focusThreshold', next)
+}
+
 /** The node under a point, or -1. Uses the same scope the curve was drawn at. */
 function focusNodeAt(x, y) {
   return focusMode.value ? nodeAt(props.focusNodes, x, y, axis, focusScopeNow()) : -1
@@ -2366,6 +2523,20 @@ function onDown(e) {
     return
   }
 
+  // ⚠ THE RAIL IS CHECKED AFTER THE NODES AND BEFORE THE DESELECT. A node at
+  // zero bias sits exactly ON the rail, and the node has to win — it is the
+  // smaller target and the more specific one. Below the nodes and above the
+  // empty-plate deselect, because a press that grabs the rail is not a press on
+  // empty plate and must not clear the selection under it.
+  if (onRail(y)) {
+    railDrag = true
+    dragging.value = true
+    setThresholdFromY(y)
+    canvasEl.value?.setPointerCapture?.(e.pointerId)
+    e.preventDefault()
+    return
+  }
+
   // A zone dot before a divider: a dot is a point target that exists in one
   // place, where a divider is a line that can be grabbed at any height.
   const dot = zoneDotAt(props.zones, x, y, zoneDotY.value, axis)
@@ -2397,7 +2568,13 @@ function onDown(e) {
   select(zoneIndexAt(props.zones, x, axis, 20, 20000))
 }
 
+let railDrag = false
+
 function onDrag(e, x, y) {
+  if (railDrag) {
+    setThresholdFromY(y)
+    return
+  }
   if (focusDrag >= 0) {
     commitFocus(moveNode(props.focusNodes, focusDrag, x, y, axis, focusScopeNow()))
     return
@@ -2407,6 +2584,12 @@ function onDrag(e, x, y) {
 }
 
 function onUp(e) {
+  if (railDrag) {
+    railDrag = false
+    dragging.value = false
+    canvasEl.value?.releasePointerCapture?.(e.pointerId)
+    return
+  }
   if (focusDrag >= 0) {
     focusDrag = -1
     dragging.value = false
@@ -2522,7 +2705,19 @@ function onFocusKeyDown(e) {
     // shows, which are the left-to-right ranks.
     selectFocus(focusNeighbour(nodes, i, e.key === 'ArrowRight' ? 1 : -1))
   } else if (i < 0 || !nodes[i]) {
-    if (e.key === 'Enter') create()
+    // ⚠ WITH NOTHING SELECTED, UP AND DOWN MOVE THE RAIL. This is the keyboard
+    // equivalent of dragging it — the commitment this panel makes everywhere a
+    // canvas owns a parameter — and the slot was free: with no node selected
+    // these keys did nothing at all. The meaning stays the same either way, "move
+    // the line up or down"; what changes is which line, and that is exactly what
+    // the selection says. UP IS LESS CUT, matching the node case below and the
+    // labels on the rail itself.
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const dir = e.key === 'ArrowDown' ? -1 : 1
+      const R = RESONANCE_FOCUS_RANGES.selectivity
+      const next = Math.min(R.max, Math.max(R.min, props.focusThreshold + dir * step))
+      if (next !== props.focusThreshold) emit('update:focusThreshold', next)
+    } else if (e.key === 'Enter') create()
     else return
   } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     // ⚠ UP IS LESS CUT, matching the curve: positive bias draws downward,
@@ -2608,6 +2803,7 @@ function onMove(e) {
   // Ordered as onDown resolves them, so what the cursor promises is what the
   // click will actually do.
   hoverFocusNode.value = focusDrag < 0 && focusNodeAt(x, y) >= 0
+  hoverRail.value = !drag && !hoverFocusNode.value && onRail(y)
   hoverZoneDot.value = drag || hoverFocusNode.value
     ? -1
     : zoneDotAt(props.zones, x, y, zoneDotY.value, axis)
@@ -2623,6 +2819,7 @@ function onLeave() {
   cursorText.value = ''
   hoverZoneDot.value = -1
   hoverFocusNode.value = false
+  hoverRail.value = false
 }
 
 /**
@@ -2807,6 +3004,7 @@ const idleHint = computed(() =>
           borderRadius: '12px',
           cursor: dragging ? 'grabbing'
             : hoverFocusNode ? 'grab'
+            : hoverRail ? 'ns-resize'
             : hoverZoneDot >= 0 ? 'pointer' : 'crosshair',
         }"
         @pointerdown="onDown"

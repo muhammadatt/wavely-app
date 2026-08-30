@@ -454,6 +454,7 @@ async function applyAndClose() {
         :delta="resDelta"
         :selectivity-fn="selectivityFn"
         :focus-nodes="focusMode ? resFocus.nodes : null"
+        :focus-threshold="resFocus.global.selectivity"
         :selected-focus-node="resSelectedNode"
         :solo-focus-node="resSoloNode"
         :zones="focusMode ? [] : resZones"
@@ -463,6 +464,9 @@ async function applyAndClose() {
         @update:zones="syncZones"
         @update:selected-zone="resSelectedZone = $event"
         @update:focus-nodes="syncFocus({ ...resFocus, nodes: $event })"
+        @update:focus-threshold="syncFocus({
+          ...resFocus, global: { ...resFocus.global, selectivity: $event },
+        })"
         @update:selected-focus-node="resSelectedNode = $event"
         @focus-solo="toggleFocusSolo"
       >

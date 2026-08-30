@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  FOCUS_DATUM_FRAC,
+  FOCUS_DATUM_MAX_FRAC,
+  thresholdFraction,
+  thresholdFractionFromY,
+  selectivityFromFraction,
+  FOCUS_DATUM_MIN_FRAC,
   FOCUS_HALF_SPAN_FRAC,
   NODE_HIT_PX,
   focusNeighbour,
@@ -43,7 +47,13 @@ const axis = { w: 600, minHz: 20, maxHz: 20000 }
  */
 const BAND_TOP = 267 * 0.13
 const BAND_BOTTOM = 267 - 267 * 0.35
-const rail = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max)
+/**
+ * ⚠ THE SCOPE TAKES A THRESHOLD POSITION NOW. The datum used to sit at a fixed
+ * fraction of the band; it tracks the global Selectivity knob, so every test
+ * that wants a rail has to say where that knob is. 0.5 is mid-travel and is not
+ * the shipped default — the default is stated where it matters.
+ */
+const rail = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 0.5)
 
 // ── The axis. ───────────────────────────────────────────────────────────────
 
@@ -104,7 +114,7 @@ test('the curve stays inside the spectrum band at full travel', () => {
   assert.ok(lo > BAND_TOP, `full "less cut" escaped into the reduction lane at ${lo}`)
   assert.ok(hi < BAND_BOTTOM, `full "more cut" escaped into the FOUND strip at ${hi}`)
   // And it grows with the plot rather than staying a fixed pixel height.
-  const tall = focusScope(BAND_TOP * 2, BAND_BOTTOM * 2, rail.maxDb)
+  const tall = focusScope(BAND_TOP * 2, BAND_BOTTOM * 2, rail.maxDb, 0.5)
   assert.ok(tall.pxPerDb > rail.pxPerDb)
 })
 
@@ -376,4 +386,105 @@ test('ties break on array position rather than arbitrarily', () => {
   const nodes = [{ ...makeFocusNode(1000, 'a') }, { ...makeFocusNode(1000, 'b') }]
   assert.deepEqual(focusRanks(nodes), [0, 1])
   assert.deepEqual(focusOrder(nodes), [0, 1])
+})
+
+/**
+ * The datum tracks the Threshold knob.
+ *
+ * ⚠ IT WAS A CONSTANT, AND THAT IS THE WHOLE POINT OF THESE. The rail means
+ * "zero bias — this is where the detector sits", and it sat at a fixed 0.22 of
+ * the band whatever Selectivity was set to: the one line that says where the
+ * threshold is could not be moved by the control that moves the threshold.
+ */
+test('the datum moves with the threshold, and up means less cut', () => {
+  const most = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 0)
+  const least = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 1)
+  // t=0 is the least selective setting — the most cut — and down is toward the
+  // material everywhere else on this plate, so it sits lower on screen.
+  assert.ok(most.datum > least.datum, 'more cut should sit lower')
+  const band = BAND_BOTTOM - BAND_TOP
+  assert.ok(
+    Math.abs((most.datum - least.datum) / band
+      - (FOCUS_DATUM_MAX_FRAC - FOCUS_DATUM_MIN_FRAC)) < 1e-9,
+    'the travel should be exactly the two fractions apart',
+  )
+})
+
+test('the curve stays inside its band at every threshold', () => {
+  // ⚠ THE GUARANTEE THE TRAVEL WAS SIZED AROUND. A curve that escaped its band
+  // would be drawn over a lane measuring something else entirely — the mistake
+  // the plot's two-lane split was undone for. Full bias either way is
+  // FOCUS_HALF_SPAN_FRAC of the band, so the datum can never come within less
+  // than that of an edge.
+  for (let t = 0; t <= 1; t += 0.05) {
+    const s = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, t)
+    const reach = s.pxPerDb * s.maxDb
+    assert.ok(s.datum - reach >= BAND_TOP - 1e-9, `escaped the top at t=${t.toFixed(2)}`)
+    assert.ok(s.datum + reach <= BAND_BOTTOM + 1e-9, `escaped the bottom at t=${t.toFixed(2)}`)
+  }
+})
+
+test('the bias mapping does not stretch as the datum moves', () => {
+  // Only the origin moves. A mapping that scaled with the rail would make
+  // turning Threshold silently re-scale every node's amount on the plot.
+  const a = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 0)
+  const b = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 1)
+  assert.equal(a.pxPerDb, b.pxPerDb)
+})
+
+test('a Selectivity value maps to its place in its own range', () => {
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  assert.equal(thresholdFraction(R.min, R), 0)
+  assert.equal(thresholdFraction(R.max, R), 1)
+  // Out of range clamps rather than running off the band.
+  assert.equal(thresholdFraction(R.min - 100, R), 0)
+  assert.equal(thresholdFraction(R.max + 100, R), 1)
+})
+
+/**
+ * The rail's drag, as a pure mapping.
+ *
+ * ⚠ THE INVERSE HAS TO BE THE EXACT MIRROR OF THE DRAW. This panel has twice
+ * recorded what a second, independently derived copy of a mapping costs — a hit
+ * test that fails silently, as handles which cannot be grabbed where they are
+ * drawn. Here it would be worse than silent: the rail would set a value its own
+ * position disagrees with, so the line would drift away from the pointer as it
+ * was dragged.
+ */
+test('a datum drawn at a threshold reads back as that threshold', () => {
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  for (const sel of [R.min, 8, 14, 20, 27, R.max]) {
+    const t = thresholdFraction(sel, R)
+    const scope = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, t)
+    const back = selectivityFromFraction(
+      thresholdFractionFromY(scope.datum, BAND_TOP, BAND_BOTTOM), R,
+    )
+    assert.ok(Math.abs(back - sel) < 1e-9, `${sel} came back as ${back}`)
+  }
+})
+
+test('dragging past either end parks at the end', () => {
+  // A drag that ran the value off its range would let the rail leave the band,
+  // which is the containment guarantee the travel was sized around.
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  const above = selectivityFromFraction(
+    thresholdFractionFromY(BAND_TOP - 500, BAND_TOP, BAND_BOTTOM), R,
+  )
+  const below = selectivityFromFraction(
+    thresholdFractionFromY(BAND_BOTTOM + 500, BAND_TOP, BAND_BOTTOM), R,
+  )
+  assert.equal(above, R.max, 'dragging up past the top is the least cut')
+  assert.equal(below, R.min, 'dragging down past the bottom is the most cut')
+})
+
+test('dragging down is more cut, matching the rail labels', () => {
+  // The sign error this model is most prone to, and the one place it shows.
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  const high = selectivityFromFraction(
+    thresholdFractionFromY(BAND_TOP + 40, BAND_TOP, BAND_BOTTOM), R,
+  )
+  const low = selectivityFromFraction(
+    thresholdFractionFromY(BAND_TOP + 80, BAND_TOP, BAND_BOTTOM), R,
+  )
+  assert.ok(low < high, 'lower on the plate should be the lower threshold')
 })
