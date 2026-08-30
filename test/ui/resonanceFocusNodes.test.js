@@ -4,6 +4,9 @@ import {
   FOCUS_DATUM_FRAC,
   FOCUS_HALF_SPAN_FRAC,
   NODE_HIT_PX,
+  focusNeighbour,
+  focusOrder,
+  focusRanks,
   focusScope,
   SPAN_WHEEL_RATIO,
   addNode,
@@ -323,4 +326,54 @@ test('nodeNearHz finds an existing node within a musical tolerance', () => {
   assert.equal(nodeNearHz(nodes, 3040), 1)
   assert.equal(nodeNearHz(nodes, 3600), -1, 'a third of an octave away is a different resonance')
   assert.equal(nodeNearHz(nodes, 305), 0)
+})
+
+// ── Left-to-right order. ────────────────────────────────────────────────────
+
+/**
+ * ⚠ THE ARRAY IS NOT SORTED, AND MUST NOT BE. Nodes are stored in the order
+ * they were added, and selection, solo and the drag in progress are all indices
+ * into that array — re-sorting on a frequency change would renumber them under
+ * a drag, which is the one moment an index has to hold still. The order is a
+ * VIEW: ranks for display, `focusNeighbour` for the arrow keys.
+ */
+test('ranks number the nodes left to right, whatever order they were added', () => {
+  const nodes = [
+    { ...makeFocusNode(3180, 'c') },
+    { ...makeFocusNode(205, 'a') },
+    { ...makeFocusNode(7000, 'd') },
+    { ...makeFocusNode(1150, 'b') },
+  ]
+  assert.deepEqual(focusOrder(nodes), [1, 3, 0, 2])
+  assert.deepEqual(focusRanks(nodes), [2, 0, 3, 1])
+  // The array itself is untouched — the whole point of it being a view.
+  assert.deepEqual(nodes.map(n => n.id), ['c', 'a', 'd', 'b'])
+})
+
+test('the arrows walk by frequency and wrap, not by array position', () => {
+  const nodes = [
+    { ...makeFocusNode(3180, 'c') },
+    { ...makeFocusNode(205, 'a') },
+    { ...makeFocusNode(7000, 'd') },
+    { ...makeFocusNode(1150, 'b') },
+  ]
+  // From the leftmost (205 Hz, array index 1), right is 1150 Hz (index 3).
+  assert.equal(focusNeighbour(nodes, 1, 1), 3)
+  // ...and left wraps to the rightmost, 7 kHz (index 2).
+  assert.equal(focusNeighbour(nodes, 1, -1), 2)
+  assert.equal(focusNeighbour(nodes, 2, 1), 1, 'right from the rightmost wraps')
+  // With nothing selected, a step lands on the end the arrow points from.
+  assert.equal(focusNeighbour(nodes, -1, 1), 1)
+  assert.equal(focusNeighbour(nodes, -1, -1), 2)
+  assert.equal(focusNeighbour([], 0, 1), -1)
+})
+
+/**
+ * Two nodes stacked at one frequency still need a stable, distinct number, or
+ * the card's heading swaps between them on a repaint.
+ */
+test('ties break on array position rather than arbitrarily', () => {
+  const nodes = [{ ...makeFocusNode(1000, 'a') }, { ...makeFocusNode(1000, 'b') }]
+  assert.deepEqual(focusRanks(nodes), [0, 1])
+  assert.deepEqual(focusOrder(nodes), [0, 1])
 })

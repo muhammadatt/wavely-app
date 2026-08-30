@@ -82,6 +82,20 @@ const resSelectedNode = ref(-1)
  * guarantee about a composable that cannot be imported under node.
  */
 const resSoloNode = ref(-1)
+/**
+ * The `id` of the soloed node, so the solo can be reconciled after an edit.
+ *
+ * ⚠ THE INDEX ALONE IS NOT AN IDENTITY. Reported from use: deleting a node left
+ * the delta monitor on, auditioning whatever node had shifted into that slot —
+ * or, when the deleted node was the last one, nothing at all, with the panel
+ * still lit. Every edit replaces the array, so an index survives a deletion
+ * happily and silently means something else afterwards.
+ *
+ * The id is what does not move. `syncFocus` re-finds it on every edit and
+ * clears the solo when it is gone, which covers deletion, reordering and
+ * replacement with one rule rather than a special case per gesture.
+ */
+let soloId = null
 
 /**
  * Zone whose removal is being auditioned, or -1. UI STATE, NEVER A PARAMETER.
@@ -324,9 +338,30 @@ export function useResonance() {
    * global move are the same kind of edit to the same curve. Splitting them
    * would mean two params that must arrive in the same frame to be coherent.
    */
+  /**
+   * A focus edit, with the solo reconciled against it.
+   *
+   * The reconcile is here rather than in the gestures because every route that
+   * can invalidate a solo — the card's DELETE, the plot's double-click, the
+   * keyboard's Delete — arrives through this one function, and a rule applied
+   * per gesture is a rule with a gesture missing from it.
+   */
   const syncFocus = (v) => {
     resFocus.value = v
+    if (soloId !== null) {
+      const at = (v?.nodes ?? []).findIndex(n => n.id === soloId)
+      if (at < 0) clearFocusSolo()
+      else resSoloNode.value = at
+    }
     pushParam('focus', liveFocus())
+  }
+
+  /** Stop auditioning a node's region, and put the monitor back. */
+  function clearFocusSolo() {
+    if (resSoloNode.value < 0 && soloId === null) return
+    resSoloNode.value = -1
+    soloId = null
+    resNodes?.setMonitorDelta(monitoringDelta())
   }
 
   /**
@@ -345,7 +380,9 @@ export function useResonance() {
    * to the question being asked, and it is the more useful one.
    */
   function toggleFocusSolo(index) {
-    resSoloNode.value = resSoloNode.value === index ? -1 : index
+    const on = resSoloNode.value !== index
+    resSoloNode.value = on ? index : -1
+    soloId = on ? (resFocus.value?.nodes?.[index]?.id ?? null) : null
     pushParam('focus', liveFocus())
     resNodes?.setMonitorDelta(monitoringDelta())
   }
@@ -476,6 +513,7 @@ export function useResonance() {
     const wasMonitoring = monitoringDelta()
     resDeltaZone.value = -1
     resSoloNode.value = -1
+    soloId = null
     resDelta.value = false
     // The measured voice goes too, and for the same reason: it describes the
     // file that was open, and coming back under a panel showing a different one
@@ -509,6 +547,7 @@ export function useResonance() {
     resSoloNode,
     syncFocus,
     toggleFocusSolo,
+    clearFocusSolo,
     resRefMode,
     resMode,
     resPreview,

@@ -18,6 +18,7 @@ import {
 } from '../../ui/resonanceOverlays.js'
 import { HISTORY_SECONDS } from '../meters/resonanceHistory.js'
 import {
+  focusRanks,
   patchNode,
   removeNode,
   setNodeParam,
@@ -382,6 +383,14 @@ async function applyAndClose() {
         <!-- No nudge of its own: the row centres its items now, and a bottom
              margin left over from when it aligned them to the baseline would
              lift this one 3 px above the axis it is being centred on. -->
+        <span
+          v-if="!focusMode"
+          class="px-2 py-1 rounded-full shrink-0"
+          style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em;
+                 color:#ffb27a;background:rgba(255,178,122,.12);
+                 border:1px solid rgba(255,178,122,.45)"
+          title="Zone targeting, selected by ?resoTargeting=zones. Focus nodes are the shipping model."
+        >ZONES</span>
         <ResonanceZoneCount
           v-if="!focusMode"
           :zones="resZones"
@@ -394,19 +403,11 @@ async function applyAndClose() {
           @update:selected="resSelectedZone = $event"
           @fit="fitZonesToVoice"
         />
-        <!-- ⚠ AN OVERRIDE IS A THING YOU FORGET YOU TURNED ON — the same rule
-             the reference-mode badge follows two rows up, and the reason this
-             is a badge rather than nothing. The panel is running a targeting
-             model that does not ship, and everything below the plot is a
-             different control surface from the one the notes describe. -->
-        <span
-          v-else
-          class="px-2 py-1 rounded-full"
-          style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em;
-                 color:#ffb27a;background:rgba(255,178,122,.12);
-                 border:1px solid rgba(255,178,122,.45)"
-          title="Prototype targeting model: one global detector plus focus nodes. ?resoTargeting=zones for the shipping model."
-        >FOCUS · NOT SHIPPED</span>
+        <!-- ⚠ THE BADGE MOVED TO THE OTHER MODEL WITH THE PROMOTION. An
+             override is a thing you forget you turned on, so the one that is
+             NOT the default is the one that has to announce itself — and it is
+             now zones. Under focus there is nothing to say, which is what
+             shipping means. Same rule the reference-mode badge follows. -->
 
         <span class="flex flex-col items-end self-end gap-[5px] min-w-0">
 
@@ -474,6 +475,7 @@ async function applyAndClose() {
             docked
             :node="selectedNode"
             :index="resSelectedNode"
+            :rank="focusRanks(resFocus.nodes)[resSelectedNode]"
             :count="resFocus.nodes.length"
             :solo="resSoloNode === resSelectedNode"
             :accent="ACCENT"

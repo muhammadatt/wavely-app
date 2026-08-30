@@ -19,9 +19,18 @@ import { readFileSync } from 'node:fs'
 const SRC = readFileSync(
   new URL('../../src/composables/useResonance.js', import.meta.url), 'utf8')
 
+/**
+ * One declaration's body. ⚠ Both spellings — this file mixes `function f()` and
+ * `const f = (v) => {`, and a helper that only knew the first reported
+ * "syncFocus not found" as though the guarantee were missing rather than the
+ * helper being narrow.
+ */
 function body(name) {
-  const at = SRC.indexOf(`function ${name}(`)
-  assert.ok(at >= 0, `${name} not found`)
+  const at = [`function ${name}(`, `const ${name} = (`]
+    .map(pat => SRC.indexOf(pat))
+    .filter(i => i >= 0)
+    .sort((a, b) => a - b)[0]
+  assert.ok(at >= 0 && at !== undefined, `${name} not found`)
   return SRC.slice(at, SRC.indexOf('\n  }', at))
 }
 
@@ -69,8 +78,48 @@ test('teardown clears it, as it does the other monitors', () => {
 })
 
 test('a second click on the same node clears it', () => {
-  assert.match(body('toggleFocusSolo'),
-    /resSoloNode\.value = resSoloNode\.value === index \? -1 : index/)
+  const t = body('toggleFocusSolo')
+  assert.match(t, /const on = resSoloNode\.value !== index/)
+  assert.match(t, /resSoloNode\.value = on \? index : -1/)
+})
+
+/**
+ * ⚠ THE SOLO IS RECONCILED BY ID, NOT BY INDEX — reported from use: deleting a
+ * node left the delta monitor on, auditioning whatever node had shifted into
+ * that slot, or nothing at all with the panel still lit. Every edit replaces
+ * the array, so an index survives a deletion happily and silently means
+ * something else afterwards.
+ *
+ * The reconcile lives in `syncFocus` rather than in the gestures because every
+ * route that can invalidate a solo — the card's DELETE, the plot's
+ * double-click, the keyboard's Delete — arrives through that one function, and
+ * a rule applied per gesture is a rule with a gesture missing from it.
+ */
+test('deleting the soloed node clears the solo, and an earlier deletion does not', () => {
+  const sync = body('syncFocus')
+  assert.match(sync, /findIndex\(n => n\.id === soloId\)/)
+  assert.match(sync, /if \(at < 0\) clearFocusSolo\(\)/)
+  assert.match(sync, /else resSoloNode\.value = at/)
+  // Clearing puts the kernel's monitor back, or the delta keeps sounding with
+  // nothing soloed.
+  assert.match(body('clearFocusSolo'), /setMonitorDelta\(monitoringDelta\(\)\)/)
+  // And the id is captured when the solo is set, or there is nothing to re-find.
+  assert.match(body('toggleFocusSolo'), /soloId = on \? \(resFocus\.value\?\.nodes\?\.\[index\]\?\.id/)
+})
+
+/**
+ * The rule itself, reproduced exactly as the composable applies it — the source
+ * check above pins that the composable still has it, this pins what it does.
+ */
+test('the reconcile rule survives an earlier deletion and clears on its own', () => {
+  const reconcile = (nodes, soloId) => {
+    const at = nodes.findIndex(n => n.id === soloId)
+    return at < 0 ? { solo: -1, soloId: null } : { solo: at, soloId }
+  }
+  const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+  assert.deepEqual(reconcile(nodes.filter(n => n.id !== 'a'), 'b'), { solo: 0, soloId: 'b' })
+  assert.deepEqual(reconcile(nodes.filter(n => n.id !== 'b'), 'b'), { solo: -1, soloId: null })
+  assert.deepEqual(reconcile([], 'b'), { solo: -1, soloId: null })
 })
 
 /**

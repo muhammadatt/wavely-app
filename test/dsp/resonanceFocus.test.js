@@ -313,9 +313,15 @@ test('focus is a key on the shipping defaults, so setParam cannot drop it', () =
   assert.ok('focus' in toKernelParams(RESONANCE_DEFAULTS))
 })
 
-test('the flag defaults to zones and rejects a typo rather than inventing a third model', () => {
-  assert.equal(DEFAULT_TARGETING, 'zones')
-  assert.equal(resolveTargeting(), 'zones')
+/**
+ * ⚠ FOCUS IS THE DEFAULT NOW. The flag survives the promotion rather than being
+ * deleted with the loser: the decision rested on working a file in one model
+ * and then the other, and `?resoTargeting=zones` is the only way back to that
+ * comparison — or to a patch built under zones — without a rebuild.
+ */
+test('the flag defaults to focus and rejects a typo rather than inventing a third model', () => {
+  assert.equal(DEFAULT_TARGETING, 'focus')
+  assert.equal(resolveTargeting(), 'focus')
 })
 
 // ── Against the kernel. ─────────────────────────────────────────────────────

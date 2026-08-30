@@ -31,6 +31,8 @@ import {
   moveNode,
   nodeAt,
   nodePoint,
+  focusNeighbour,
+  focusOrder,
   removeNode,
   scaleNodeSpan,
   setNodeParam,
@@ -1821,6 +1823,68 @@ const DIVIDER_HIT_PX = 7
 let drag = null
 /** Index of the focus node being dragged, or -1. */
 let focusDrag = -1
+
+/**
+ * How far along the foot the node card sits, in pixels from the plate's left
+ * edge, or null while it is still centred.
+ *
+ * ⚠ NULL IS NOT ZERO. Centred is a RELATIVE position that survives the plot
+ * being resized; a pixel offset does not. Until the card is dragged it keeps
+ * the centring, and only a deliberate move pins it to a number.
+ */
+const dockEl = ref(null)
+const dockX = ref(null)
+const dockDragging = ref(false)
+let dockGrab = null
+
+/** The offset actually used, clamped so the card cannot leave the plate. */
+const dockLeft = computed(() => {
+  // ⚠ `width.value` IS A DEPENDENCY, NOT A STRAY READ. The rest of this reads
+  // the DOM, which is not reactive — so without something that changes on a
+  // resize the clamp would never re-run, and the plot IS resizable: dragging
+  // the window's grip narrower would leave a pinned card hanging off the plate
+  // with no way back. The frame loop writes this ref, and only when it actually
+  // changes.
+  void width.value
+  const track = dockEl.value?.clientWidth ?? 0
+  const card = dockEl.value?.firstElementChild?.offsetWidth ?? 0
+  const centred = Math.max(0, (track - card) / 2)
+  if (dockX.value === null) return centred
+  return Math.max(0, Math.min(Math.max(0, track - card), dockX.value))
+})
+
+/**
+ * The card slides only from its GRIP, marked by the card itself.
+ *
+ * A data attribute rather than a slot prop: the card is the panel's, the track
+ * is this component's, and neither needs to know anything else about the other
+ * for this to work. Dragging from anywhere on the card would fight every field
+ * and button on it.
+ */
+function onDockDown(e) {
+  const grip = e.target.closest?.('[data-dock-grip]')
+  if (!grip || e.button !== 0) return
+  dockGrab = { x: e.clientX, from: dockLeft.value }
+  dockDragging.value = true
+  e.currentTarget.setPointerCapture?.(e.pointerId)
+  e.preventDefault()
+}
+
+function onDockMove(e) {
+  if (!dockGrab) return
+  dockX.value = dockGrab.from + (e.clientX - dockGrab.x)
+  e.preventDefault()
+}
+
+function onDockUp(e) {
+  if (!dockGrab) return
+  // Settle on the clamped value, so a drag that ran past the edge does not
+  // leave a stored offset the card can never reach.
+  dockX.value = dockLeft.value
+  dockGrab = null
+  dockDragging.value = false
+  e.currentTarget.releasePointerCapture?.(e.pointerId)
+}
 const dragging = ref(false)
 /** Divider under the pointer, for the hover cursor. -1 for none. */
 const hoverDivider = ref(-1)
@@ -2475,10 +2539,11 @@ function onFocusKeyDown(e) {
   // zone editor's own convention, so one plot does not have two.
   if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey) {
     if (!nodes.length) return
-    const dir = e.key === 'ArrowRight' ? 1 : -1
-    selectFocus(dir > 0
-      ? (i < 0 || i >= nodes.length - 1 ? 0 : i + 1)
-      : (i <= 0 ? nodes.length - 1 : i - 1))
+    // ⚠ LEFT AND RIGHT WALK LEFT TO RIGHT, not through the array. The nodes are
+    // stored in the order they were added, so walking the array made the arrows
+    // jump about the spectrum — and it disagreed with the numbers the card
+    // shows, which are the left-to-right ranks.
+    selectFocus(focusNeighbour(nodes, i, e.key === 'ArrowRight' ? 1 : -1))
   } else if (i < 0 || !nodes[i]) {
     if (e.key === 'Enter') create()
     else return
@@ -2659,12 +2724,18 @@ const plotSummary = computed(() => {
   // exist NOWHERE else on the panel — this sentence is the whole of it.
   const focus = focusMode.value
     ? (props.focusNodes.length
-      ? ` ${props.focusNodes.length} focus node${props.focusNodes.length === 1 ? '' : 's'}: `
-        + props.focusNodes.map((n, i) => {
+      // ⚠ LISTED LEFT TO RIGHT, and numbered by that order rather than by the
+      // array's. Read out in the order they were added, the list is a different
+      // sequence from the one the arrows walk and the numbers the card shows,
+      // which is a worse problem for a reader who cannot see the plot than for
+      // one who can.
+      ? ` ${props.focusNodes.length} focus node${props.focusNodes.length === 1 ? '' : 's'}, low to high: `
+        + focusOrder(props.focusNodes).map((i, rank) => {
+          const n = props.focusNodes[i]
           const dir = n.biasDb >= 0 ? 'more' : 'less'
           const off = n.enabled === false ? ', bypassed' : ''
           const here = i === props.selectedFocusNode ? ', selected' : ''
-          return `${formatHz(n.hz)}, ${Math.abs(n.biasDb).toFixed(1)} decibels ${dir} cut, `
+          return `${rank + 1}: ${formatHz(n.hz)}, ${Math.abs(n.biasDb).toFixed(1)} decibels ${dir} cut, `
             + `${n.spanOct.toFixed(2)} octaves wide${off}${here}`
         }).join('; ') + '.'
       : ' No focus nodes: the detector runs at its global setting everywhere.')
@@ -2784,14 +2855,26 @@ const idleHint = computed(() =>
            panel's state. A slot is exactly that split: the panel decides what
            goes in and this decides where the bottom is.
 
-           Pinned to the foot rather than tracking anything, so the fields are in
-           one predictable place and the reader's eye can learn it. ⚠ IT DOES
-           COVER THE BOTTOM OF THE PLOT WHILE A NODE IS SELECTED, the FOUND strip
-           included — that is the trade against the control row, which occludes
-           nothing and is easy to miss. See ui/focusNodeDock.js. -->
+           Pinned to the FOOT rather than tracking the node, so the fields are
+           in one predictable place and the reader's eye can learn it — but
+           SLIDEABLE along it, because a card centred on the foot sits over the
+           middle of the spectrum, which is where the voice is and where the
+           node being edited most often is too. Reported as the centre always
+           being blocked. Dragging it is the smallest fix that keeps the
+           predictable row: it stays on the foot, and which part of the foot is
+           the user's to choose. -->
       <div
         v-if="$slots.dock"
-        class="absolute left-0 right-0 bottom-[20px] flex justify-center"
+        ref="dockEl"
+        class="absolute left-0 right-0 bottom-[20px] flex"
+        :class="dockDragging ? 'justify-start' : 'justify-center'"
+        :style="dockDragging || dockX !== null
+          ? { justifyContent: 'flex-start', paddingLeft: `${dockLeft}px` }
+          : null"
+        @pointerdown="onDockDown"
+        @pointermove="onDockMove"
+        @pointerup="onDockUp"
+        @pointercancel="onDockUp"
       ><slot name="dock" /></div>
     </div>
   </div>

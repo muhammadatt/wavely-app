@@ -27,6 +27,15 @@ import DeviceField from '../knobs/DeviceField.vue'
 const props = defineProps({
   node: { type: Object, required: true },
   index: { type: Number, required: true },
+  /**
+   * The node's position read LEFT TO RIGHT, which is what gets printed.
+   *
+   * ⚠ NOT `index`. Nodes are stored in the order they were added, so the array
+   * index numbered them by age — the third node placed read "3 OF 4" wherever
+   * it sat on the spectrum, which is no help at all in finding it. `index` is
+   * still what every edit addresses; this is only what the reader sees.
+   */
+  rank: { type: Number, default: null },
   count: { type: Number, default: 1 },
   /** Auditioning this node's region alone. Monitoring state, never a parameter. */
   solo: { type: Boolean, default: false },
@@ -66,6 +75,19 @@ const props = defineProps({
  * deselected node, so the `×` emits `close` and leaves the selection alone.
  */
 const emit = defineEmits(['patch', 'delete', 'close', 'solo'])
+
+/**
+ * Keep presses off whatever is behind the card — except on the grip, which the
+ * dock needs in order to start a slide.
+ *
+ * ⚠ IT WAS A BARE `@pointerdown.stop`, and that swallowed the grip entirely:
+ * the dock's handler is on the card's PARENT, so stopping propagation at the
+ * card means the parent never hears the press at all.
+ */
+function onRootPointerDown(e) {
+  if (e.target.closest?.('[data-dock-grip]')) return
+  e.stopPropagation()
+}
 
 const R = RESONANCE_FOCUS_RANGES
 
@@ -144,17 +166,31 @@ function chip(on, warn = false) {
         : `inset 0 0 0 1px ${tint(accent, 0.28)}, 0 8px 24px rgba(0,0,0,.6)` },
     ]"
     role="group"
-    :aria-label="`Focus node ${index + 1} of ${count}`"
+    :aria-label="`Focus node ${(rank ?? index) + 1} of ${count}, low to high`"
     @keydown.esc.stop="emit('close')"
-    @pointerdown.stop
+    @pointerdown="onRootPointerDown"
     @dblclick.stop
     @wheel.stop
   >
     <div class="flex items-center justify-between mb-[7px]">
+      <!-- ⚠ THE GRIP, AND ONLY THIS. The card sits on the foot of the plate,
+           which is over the middle of the spectrum — where the voice is, and
+           where the node being edited most often is too. It slides along the
+           foot rather than being pinned to the centre, and the label is what
+           you slide it by: a card draggable from anywhere would fight every
+           field and button on it, and the × in this same row is exactly the
+           kind of thing a whole-header grip would swallow.
+
+           The attribute is the whole contract with the plot — see the dock in
+           ResonanceSpectrum. It is inert when this card is docked in the
+           control row instead, which has no track to slide along. -->
       <span
+        data-dock-grip
+        class="cursor-grab active:cursor-grabbing select-none"
+        title="Drag to slide the card along the bottom of the plot"
         style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em"
         :style="{ color: bright(accent) }"
-      >NODE {{ index + 1 }} OF {{ count }}</span>
+      >NODE {{ (rank ?? index) + 1 }} OF {{ count }}</span>
       <button
         type="button"
         class="px-[5px] leading-none rounded cursor-pointer text-[color:rgba(255,255,255,.45)] hover:text-[color:rgba(255,255,255,.65)]"

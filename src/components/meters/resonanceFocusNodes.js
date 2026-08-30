@@ -173,6 +173,42 @@ export function makeFocusNode(hz, id) {
   }
 }
 
+/**
+ * Each node's position when read LEFT TO RIGHT, and the array order that walks
+ * them that way.
+ *
+ * ⚠ THE ARRAY IS NOT SORTED, AND MUST NOT BE. Nodes are stored in the order they
+ * were added, and selection, solo and the drag in progress are all indices into
+ * that array — re-sorting on every frequency change would renumber them under a
+ * drag, which is the one moment the index has to hold still. So the order is a
+ * VIEW: `focusRanks` gives each node its left-to-right number for display, and
+ * `focusOrder` gives the sequence the arrow keys walk.
+ *
+ * Ties break on the array index, so two nodes stacked at one frequency still
+ * have a stable, distinct number rather than swapping on a repaint.
+ */
+export function focusOrder(nodes) {
+  return nodes
+    .map((n, i) => ({ i, hz: n.hz }))
+    .sort((a, b) => (a.hz - b.hz) || (a.i - b.i))
+    .map(e => e.i)
+}
+
+export function focusRanks(nodes) {
+  const ranks = new Array(nodes.length)
+  focusOrder(nodes).forEach((nodeIndex, rank) => { ranks[nodeIndex] = rank })
+  return ranks
+}
+
+/** The node one step left or right of `index`, by frequency. Wraps. */
+export function focusNeighbour(nodes, index, dir) {
+  if (nodes.length === 0) return -1
+  const order = focusOrder(nodes)
+  const at = order.indexOf(index)
+  if (at < 0) return order[dir > 0 ? 0 : order.length - 1]
+  return order[(at + dir + order.length) % order.length]
+}
+
 /** Replace one node, leaving the array's identity fresh for Vue. */
 export function patchNode(nodes, index, patch) {
   if (index < 0 || index >= nodes.length) return nodes

@@ -4,11 +4,12 @@
  *   ?resoTargeting=focus                              one page load
  *   localStorage.setItem('resoTargeting', 'focus')    until cleared
  *
- * ZONES SHIP. Focus is the prototype — see resonanceFocus.js for what it is and
- * why. This flag exists for the same reason `voicerxBaseline` does: the two
- * models make different bargains, no corpus can say which one a person can
- * think in, and the decision needs a listener, one file, and a way to flip
- * between them without a rebuild.
+ * FOCUS SHIPS NOW. Zones are what it replaced — see resonanceFocus.js for what
+ * the two models are and why. The flag survives the promotion rather than being
+ * deleted with the loser, for the reason `voicerxBaseline` keeps its: the
+ * decision rested on working a file in one model and then the other, and the
+ * only way to check it still holds — or to reach a patch built under zones — is
+ * to be able to flip back without a rebuild.
  *
  * ⚠ IT IS A TARGETING MODEL, NOT A TUNING. Both start from the same detector
  * numbers (RESONANCE_FOCUS_GLOBAL is ZONE_STOCK), and a focus patch with no
@@ -23,7 +24,7 @@
  */
 
 /** The model used unless something explicitly asks for the other one. */
-export const DEFAULT_TARGETING = 'zones'
+export const DEFAULT_TARGETING = 'focus'
 
 const KNOWN = new Set(['zones', 'focus'])
 
@@ -31,9 +32,9 @@ const KNOWN = new Set(['zones', 'focus'])
  * Resolve the targeting model.
  *
  * An unrecognised value falls back to the default rather than passing through.
- * A typo must not quietly produce a third behaviour, or a panel running zones
- * while the person at the keyboard believes they are listening to focus — which
- * is precisely the confusion that makes an A/B worthless.
+ * A typo must not quietly produce a third behaviour, or a panel running one
+ * model while the person at the keyboard believes they are listening to the
+ * other — which is precisely the confusion that makes an A/B worthless.
  */
 export function resolveTargeting() {
   const requested = read('resoTargeting')

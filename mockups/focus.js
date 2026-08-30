@@ -16,6 +16,9 @@ import '../src/assets/main.css'
 import { createApp, h, ref, computed, onMounted } from 'vue'
 import ResonanceSpectrum from '../src/components/meters/ResonanceSpectrum.vue'
 import ResonanceFocusControls from '../src/components/panels/ResonanceFocusControls.vue'
+import FocusNodePanel from '../src/components/panels/FocusNodePanel.vue'
+import { focusRanks, patchNode, removeNode, setNodeParam }
+  from '../src/components/meters/resonanceFocusNodes.js'
 import Knob from '../src/components/knobs/Knob.vue'
 import { makeFrame } from './focusFrame.js'
 import { focusThresholdFn, RESONANCE_FOCUS_GLOBAL } from '../src/audio/resonanceFocus.js'
@@ -68,17 +71,44 @@ function panel(title, note, patch, sel, soloRef, overlays) {
         selectivityFn: thresholdFn,
         focusNodes: patch.value.nodes,
         selectedFocusNode: sel.value,
+        soloFocusNode: soloRef.value,
         reductionDb: -3.4,
         accent: ACCENT,
         height: H,
         zones: [],
         selectedZone: -1,
         deltaZone: -1,
-        soloFocusNode: soloRef.value,
         overlays: overlays.value,
         'onUpdate:focusNodes': v => { patch.value = { ...patch.value, nodes: v } },
         'onUpdate:selectedFocusNode': v => { sel.value = v },
         'onFocusSolo': i => { soloRef.value = soloRef.value === i ? -1 : i },
+      }, {
+        dock: () => (sel.value >= 0 && patch.value.nodes[sel.value]
+          ? h(FocusNodePanel, {
+            docked: true,
+            node: patch.value.nodes[sel.value],
+            index: sel.value,
+            rank: focusRanks(patch.value.nodes)[sel.value],
+            count: patch.value.nodes.length,
+            solo: soloRef.value === sel.value,
+            accent: ACCENT,
+            onPatch: (p2) => {
+              let next = patch.value.nodes
+              for (const [name, value] of Object.entries(p2)) {
+                next = name === 'shape' || name === 'enabled'
+                  ? patchNode(next, sel.value, { [name]: value })
+                  : setNodeParam(next, sel.value, name, value)
+              }
+              patch.value = { ...patch.value, nodes: next }
+            },
+            onDelete: () => {
+              patch.value = { ...patch.value, nodes: removeNode(patch.value.nodes, sel.value) }
+              sel.value = -1
+            },
+            onSolo: () => { soloRef.value = soloRef.value === sel.value ? -1 : sel.value },
+            onClose: () => { sel.value = -1 },
+          })
+          : null),
       }),
       h('div', { class: 'flex items-center gap-[10px] mt-[11px]' }, [
         h('div', { class: 'w-[60px] shrink-0' }, h(Knob, {

@@ -63,14 +63,31 @@ const pct = v => `${Math.round(v * 100)}%`
        vocabularies. They are also short enough to fit a 58 px knob: rendered at
        full length, "Sensitivity" and "Sharpness" overlapped their neighbours
        and the row was unreadable. -->
-  <!-- CENTRED IN ITS TRACK. The block is narrower than the flex-1 slot the row
-       gives it, and left-packed the leftover reads as a missing control at the
-       end of the row rather than as spacing. The shipping panel does not have
-       this problem because its zone plate has a visible background that fills
-       the slot; a plate would be wrong here, since these are the effect's
-       GLOBAL settings and a plate is what this panel uses to mean "one thing
-       selected out of several". -->
-  <div class="flex items-center justify-center gap-[9px]">
+  <!-- ⚠ ON A PLATE, AND THE ARGUMENT AGAINST ONE WAS WRONG. It was left
+       unplated on the reasoning that a plate is what this panel uses to mean
+       "one thing selected out of several", which these are not. True of the
+       zone plate's PURPOSE and beside the point about its EFFECT: without a
+       background the three knobs float in a flex-1 slot wider than they are,
+       and centring them only moves the gap to both ends — reported as looking
+       off-centre, which is what a group with no edges in a track it does not
+       fill always looks like. The plate is the same one ResonanceZoneControls
+       wears, so the row reads the same under either model.
+
+       HARMONICS STAYS OUTSIDE IT. The plate is the detector — the three
+       settings that decide what counts as a resonance and how much of it goes.
+       Harmonic protection is a statement about which frequencies to leave
+       alone, which is targeting, and it is the one targeting rule that is not
+       a node. Different kind of thing, so it sits beside the box rather than
+       in it. -->
+  <div class="flex items-center justify-center gap-[10px]">
+    <div
+      class="flex items-center gap-[9px] rounded-[7px] px-[10px] py-[9px]"
+      :style="{
+        background: 'rgba(0,0,0,.28)',
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accent} 20%, transparent)`,
+        opacity: disabled ? 0.4 : 1,
+      }"
+    >
     <div class="w-[68px] shrink-0">
       <Knob
         :model-value="g.selectivity" @update:model-value="setGlobal('selectivity', $event)"
@@ -105,6 +122,7 @@ const pct = v => `${Math.round(v * 100)}%`
         label="Depth" :accent="accent" :format-value="pct" :disabled="disabled"
         title="How much of what is found gets removed."
       />
+    </div>
     </div>
 
     <!-- HARMONIC PROTECTION: GLOBAL, WITH A CEILING, replacing the per-zone
