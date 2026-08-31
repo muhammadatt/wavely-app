@@ -486,6 +486,7 @@ async function applyAndClose() {
         @update:focus-threshold="syncFocus({
           ...resFocus, global: { ...resFocus.global, selectivity: $event },
         })"
+        @focus-node-clicked="nodePanelOpen = true"
         @update:selected-focus-node="resSelectedNode = $event"
         @focus-solo="toggleFocusSolo"
       >

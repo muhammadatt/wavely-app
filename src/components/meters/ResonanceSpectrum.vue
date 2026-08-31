@@ -209,7 +209,8 @@ const props = defineProps({
  */
 const emit = defineEmits([
   'update:zones', 'update:selectedZone',
-  'update:focusNodes', 'update:selectedFocusNode', 'update:focusThreshold', 'focus-solo',
+  'update:focusNodes', 'update:selectedFocusNode', 'update:focusThreshold',
+  'focus-node-clicked', 'focus-solo',
 ])
 
 /** Running the focus targeting model rather than zones. */
@@ -787,7 +788,11 @@ const showRemoved = computed(() => props.overlays?.removed !== false)
  */
 let history = null
 
-onBeforeUnmount(() => { history = null })
+onBeforeUnmount(() => {
+  history = null
+  // A timer outliving the component fires into a torn-down ref.
+  if (dwellTimer !== null) clearTimeout(dwellTimer)
+})
 
 /** Frequency grid. Same vocabulary as the EQ plot, so the two read alike. */
 const GRID_HZ = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
@@ -920,6 +925,57 @@ const zonePeaks = ref([])
 /** Frequency under the pointer, or null. */
 const cursorX = ref(null)
 const cursorText = ref('')
+
+/**
+ * HOW LONG THE POINTER MUST BE STILL BEFORE THE PROBE APPEARS.
+ *
+ * ⚠ A DWELL RATHER THAN A CLICK, and the click was the first idea. Every press
+ * in this plot is already spoken for: on empty plate it deselects, on a node it
+ * selects and starts a drag, on the rail it starts a threshold drag, and a
+ * double-click creates or removes a node. Adding "and it also opens a readout"
+ * to a gesture that already does something is how a panel gets a control nobody
+ * can predict.
+ *
+ * Long enough that sweeping across the plate on the way somewhere else does not
+ * leave a trail of pills, short enough that it does not feel broken while you
+ * wait. It is the pointer being STILL that starts the clock, not the pointer
+ * being present — moving resets it, which is what makes a deliberate stop
+ * different from a pass.
+ */
+const PROBE_DWELL_MS = 380
+/** Movement under this counts as still, in pixels. A hand is never perfectly steady. */
+const PROBE_STILL_PX = 3
+
+const probeAt = ref(null)
+let dwellTimer = null
+let dwellFrom = null
+
+function cancelDwell() {
+  if (dwellTimer !== null) clearTimeout(dwellTimer)
+  dwellTimer = null
+  probeAt.value = null
+}
+
+/**
+ * Restart the dwell clock unless the pointer has effectively stopped.
+ *
+ * ⚠ IT MUST NOT RESTART ON EVERY MOVE EVENT. A pointer resting on a plate still
+ * emits a slow drizzle of one-pixel moves, so a timer reset on any movement at
+ * all never fires and the probe never appears — which looks exactly like the
+ * feature not being wired.
+ */
+function noteDwell(x, y) {
+  if (dwellFrom && Math.abs(x - dwellFrom.x) <= PROBE_STILL_PX
+    && Math.abs(y - dwellFrom.y) <= PROBE_STILL_PX) return
+  dwellFrom = { x, y }
+  if (probeAt.value) probeAt.value = null
+  if (dwellTimer !== null) clearTimeout(dwellTimer)
+  dwellTimer = setTimeout(() => {
+    dwellTimer = null
+    probeAt.value = { x, y }
+  }, PROBE_DWELL_MS)
+}
+
 
 /**
  * Per-display-bin peak hold, and how long each bin has gone without a rise.
@@ -1200,6 +1256,7 @@ function draw(dtMs) {
   // depth off the trace meant turning on a grid over everything else to get the
   // scale that measures it. A reading and the scale beside it are one thing.
   if (showRemoved.value) drawGrScale(ctx, w)
+  drawProbe(ctx, w)
   drawCursor(ctx, w)
   drawPlateRing(ctx, w)
   drawAxis(ctx, w, xFor, minHz, maxHz)
@@ -2190,51 +2247,87 @@ function drawFocus(ctx, w) {
     }
   })
 
-  // The selected node's three numbers, ON the node — which is what replaces the
-  // plate row that used to carry them under the panel.
-  //
-  // ⚠ NOT WHILE THE CARD IS OPEN. The card carries the same three values as
-  // editable fields a few pixels away, so the pill would be the same numbers
-  // printed twice, with the card drawn over the top of one of them.
-  const sel = nodes[props.selectedFocusNode]
-  if (sel) {
-    const p = nodePoint(sel, axisNow, scope)
-    const span = sel.spanOct < 1
-      ? `${(sel.spanOct * 12).toFixed(0)}st`
-      : `${sel.spanOct.toFixed(2)}oct`
-    const text = `${formatHz(sel.hz)}  ${span}  ${sel.biasDb > 0 ? '+' : ''}${sel.biasDb.toFixed(1)}`
-    // Outward from the curve, so the pill never lands on the line it describes.
-    drawFocusPill(ctx, w, p.x, p.y + (sel.biasDb >= 0 ? 17 : -17), text)
-  }
+  // ⚠ THE SELECTED NODE'S PILL IS GONE, REPLACED BY THE PROBE. It printed that
+  // node's own three settings on top of it — which are the three fields already
+  // open in the card a few pixels below, so it was the same numbers twice, and
+  // it could only ever answer a question about a place a node already exists.
+  // The probe answers the question actually being asked of this plot: what is
+  // happening HERE, at a frequency the reader is pointing at, whether or not
+  // anything has been placed there. See drawProbe.
   ctx.restore()
 }
 
-function drawFocusPill(ctx, w, x, y, text) {
+/**
+ * What is happening at the frequency under the pointer, after a dwell.
+ *
+ * ⚠ IT REPLACED THE SELECTED NODE'S PILL, and it answers a different question.
+ * That one printed a node's own settings on top of it — the same three numbers
+ * the card below already shows as editable fields — and could only ever describe
+ * a place where something had already been placed. The question this plot is
+ * actually asked is "what is going on HERE", at a frequency the reader is
+ * pointing at, before deciding whether to put a node there at all.
+ *
+ * THREE NUMBERS: the frequency, the threshold at it, and the margin — how far
+ * the input sits above or below the line. The margin is the one that matters and
+ * is signed, because its SIGN is the answer: positive is a crossing, and the
+ * detector is acting there.
+ *
+ * ⚠ IT NEEDS `updateDetection` TO HAVE RUN, which happens only while SPECTRUM or
+ * FOUND is showing. Rather than force that pass on for a readout nobody has
+ * asked for yet, the probe simply does not appear — the alternative is a pill
+ * that prints a stale threshold from whenever those overlays were last on.
+ */
+const PROBE_PAD = 9
+
+function drawProbe(ctx, w) {
+  const at = probeAt.value
+  if (!at || !margin || !threshold) return
+  const bins = margin.length
+  const t = Math.max(0, Math.min(1, at.x / w))
+  const d = Math.round(t * (bins - 1))
+  const hz = axis.minHz * Math.pow(2, t * Math.log2(axis.maxHz / axis.minHz))
+  const m = margin[d]
+  const text = `${formatHz(hz)}   ${threshold[d].toFixed(0)} dB   `
+    + `${m >= 0 ? '+' : ''}${m.toFixed(1)}`
+
+  ctx.save()
+  clipPlate(ctx, w)
   ctx.font = "600 9px 'JetBrains Mono',monospace"
-  const tw = ctx.measureText(text).width + 14
-  const px = Math.max(2, Math.min(w - tw - 2, x - tw / 2))
-  // ⚠ CLAMPED IN Y AS WELL AS X, WHICH IT WAS NOT. The caller places the pill
-  // outward from the curve — above the node when the bias is negative — so a
-  // node near the top of its band put the pill off the top of the plate, where
-  // the numbers it carries exist nowhere else. The horizontal clamp had been
-  // there since the pill was written; the vertical one was simply missed,
-  // because a node has to be near the edge before it shows.
+  const tw = ctx.measureText(text).width + 16
+  // Clamped on both axes, for the reason the node pill had to be: a probe near
+  // an edge is exactly where a reader points when they are checking the ends of
+  // the spectrum, and a readout half off the plate is no readout.
+  const px = Math.max(2, Math.min(w - tw - 2, at.x - tw / 2))
   const py = Math.max(FOCUS_PILL_H / 2 + 2,
-    Math.min(laneH.value - FOCUS_PILL_H / 2 - 2, y))
+    Math.min(laneH.value - FOCUS_PILL_H / 2 - 2, at.y - PROBE_PAD - FOCUS_PILL_H / 2))
+
+  // A hairline from the pill to the point it describes. Without it the pill is
+  // a fact about somewhere nearby rather than about a frequency.
+  ctx.beginPath()
+  ctx.moveTo(at.x + 0.5, py + FOCUS_PILL_H / 2)
+  ctx.lineTo(at.x + 0.5, at.y)
+  ctx.strokeStyle = 'rgba(255,255,255,.3)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
   ctx.beginPath()
   roundRect(ctx, px, py - FOCUS_PILL_H / 2, tw, FOCUS_PILL_H, 5)
   ctx.fillStyle = FOCUS_PILL_BACKING
   ctx.fill()
-  ctx.strokeStyle = FOCUS_PILL_RING
+  ctx.strokeStyle = m >= 0 ? tint(props.accent, 0.7) : FOCUS_PILL_RING
   ctx.lineWidth = 1
   ctx.stroke()
-  ctx.fillStyle = FOCUS_PILL_INK
+  // The margin's sign decides the ink: over the line is the detector's colour,
+  // under it is neutral. One glance answers "is anything happening here".
+  ctx.fillStyle = m >= 0 ? bright(props.accent) : FOCUS_PILL_INK
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(text, px + tw / 2, py)
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
+  ctx.restore()
 }
+
 
 function drawZones(ctx, w) {
   if (props.zones.length === 0) return
@@ -2545,6 +2638,13 @@ function onDown(e) {
   const fnode = focusNodeAt(x, y)
   if (fnode >= 0) {
     selectFocus(fnode)
+    // ⚠ A SEPARATE EVENT FROM SELECTION, because clicking the node that is
+    // ALREADY selected changes nothing and must still reopen its card.
+    // `selectFocus` guards on the index differing — correctly, or every press
+    // would push a redundant update — so a panel watching the selection alone
+    // never hears the second click. Reported as exactly that: dismiss the card
+    // with its ×, click the same node, nothing happens.
+    emit('focus-node-clicked', fnode)
     focusDrag = fnode
     dragging.value = true
     canvasEl.value?.setPointerCapture?.(e.pointerId)
@@ -2826,6 +2926,10 @@ function onMove(e) {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
   cursorX.value = x
+  // A drag is not a dwell: the pointer can sit still mid-drag and the reader is
+  // busy moving something, not asking about it.
+  if (dragging.value) cancelDwell()
+  else noteDwell(x, y)
   // Say that a dot is a target. A reveal whose trigger looks like part of the
   // picture is discoverable only by accident — the same argument the selection
   // edges' ew-resize cursor makes in the waveform.
