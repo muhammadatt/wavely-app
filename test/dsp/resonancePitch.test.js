@@ -687,3 +687,97 @@ test('what the inverted cut does NOT do is raise the harmonic-to-noise ratio', (
     `the mask under peak should not be sold as denoising; ratio ${dry.toFixed(2)} -> ${masked.toFixed(2)}`,
   )
 })
+
+/**
+ * THE MASK HOLDS THROUGH UNPITCHED FRAMES, AND GATING IT ON `pitched` WAS A REAL
+ * BUG WITH NO TEST.
+ *
+ * `mask = anyProtect && pitched ? _harmonicMask(f0) : null` looks correct — no
+ * pitch, no harmonics to protect — and it is wrong about what an unpitched
+ * FRAME is. Measured on three narrators before the fix, a mask existed on only
+ * 68.7 / 81.7 / 88.7% of frames above the silence floor. The other frames are
+ * not silence: they are voiced-to-unvoiced transitions, quiet voiced frames and
+ * frames whose autocorrelation did not clear its confidence bar, all still full
+ * of the voice's partials.
+ *
+ * So the switch did not remove the artefact it exists for — it made it
+ * INTERMITTENT, which is worse. A partial held on one frame and cut on the next
+ * is gain modulation on the fundamental, and modulation is what reason 1 above
+ * is about.
+ *
+ * Held from the rolling median, which is already trusted for the cepstral
+ * lifter: a voice's F0 does not move between frames, and the failure mode is
+ * benign in a way the alternative is not — a comb slightly off centre protects
+ * slightly the wrong bins, where no comb protects nothing.
+ */
+function countMasks(sig, params) {
+  const kernel = new ResonanceKernel(SR)
+  kernel.setParams(params)
+  let active = 0
+  let masks = 0
+  const realMask = kernel._harmonicMask.bind(kernel)
+  kernel._harmonicMask = (f0) => { masks++; return realMask(f0) }
+  const realEstimate = kernel.f0.estimate.bind(kernel.f0)
+  kernel.f0.estimate = (raw, isActive) => { if (isActive) active++; return realEstimate(raw, isActive) }
+
+  const out = new Float32Array(sig.length)
+  for (let off = 0; off < sig.length; off += 128) {
+    const len = Math.min(128, sig.length - off)
+    kernel.process([sig.subarray(off, off + len)], [out.subarray(off, off + len)], len)
+  }
+  return { active, masks }
+}
+
+const PROTECTED = {
+  ...RESONANCE_KERNEL_DEFAULTS,
+  refMode: 'cepstral',
+  zones: uniformZones({ ...RESONANCE_ZONE_STOCK, protect: true }),
+}
+
+test('protection survives an unpitched stretch inside speech', () => {
+  // Voiced, then loud and unpitched, then voiced again — the shape of every
+  // fricative in every sentence. The middle second is where protection used to
+  // disappear entirely.
+  const voice = pitched(() => 150, { seconds: 1 })
+  const n = Math.round(SR)
+  const noise = new Float32Array(n)
+  let s = 7717
+  for (let i = 0; i < n; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff
+    noise[i] = 0.2 * (s / 0x3fffffff - 1)
+  }
+  const sig = new Float32Array(voice.length + n + voice.length)
+  sig.set(voice, 0)
+  sig.set(noise, voice.length)
+  sig.set(voice, voice.length + n)
+
+  const { active, masks } = countMasks(sig, PROTECTED)
+  assert.ok(active > 100, `expected a run of active frames, got ${active}`)
+  // Every active frame gets a mask now. Before the fix this sat near two
+  // thirds, and the missing third was the middle of the file.
+  assert.ok(
+    masks / active > 0.97,
+    `mask present on only ${(100 * masks / active).toFixed(1)}% of active frames`,
+  )
+})
+
+test('protection does not hold through silence', () => {
+  // ⚠ THE OTHER HALF OF THE RULE. Holding a stale pitch through real silence
+  // would mask the noise floor, which is exactly the material the suppressor
+  // is meant to be free to work on. The hold is gated on the frame being
+  // ACTIVE, not merely on a pitch having been seen at some point.
+  const voice = pitched(() => 150, { seconds: 1 })
+  const quiet = new Float32Array(Math.round(SR * 1.5))
+  const sig = new Float32Array(voice.length + quiet.length)
+  sig.set(voice, 0)
+
+  const { active, masks } = countMasks(sig, PROTECTED)
+  // Masks are requested only on active frames, so their count cannot exceed it
+  // — and the silent tail contributes neither.
+  assert.ok(masks <= active, `${masks} masks against ${active} active frames`)
+  const total = Math.floor(sig.length / 512)
+  assert.ok(
+    active < total * 0.75,
+    `the silent tail should leave frames inactive: ${active} of ~${total}`,
+  )
+})

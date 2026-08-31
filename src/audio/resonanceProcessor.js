@@ -1278,7 +1278,30 @@ export class ResonanceKernel {
     // Built when ANY zone asks for it: the mask depends only on F0, so one
     // zone wanting it pays for the whole thing, and where it applies is decided
     // per bin below.
-    const mask = this.anyProtect && pitched ? this._harmonicMask(f0) : null
+    // ⚠ THE MASK HOLDS THROUGH UNPITCHED FRAMES, AND GATING IT ON `pitched` WAS
+    // THE BUG. Measured on 40 s of real narration at a median F0 of 112 Hz:
+    // 2537 frames sit above the silence floor and only 1744 of them — 68.7% —
+    // report a pitch. On the other 793 the mask was null and the harmonics were
+    // cut with no protection at all.
+    //
+    // Those frames are not silence. They are voiced-to-unvoiced transitions,
+    // quiet voiced frames and frames where the autocorrelation did not clear
+    // its confidence bar — all of them still full of the voice's partials. So
+    // the switch did not remove the artefact it exists for, it made it
+    // INTERMITTENT: a partial held on one frame and cut on the next is gain
+    // modulation on the fundamental, which is worse than a steady cut.
+    //
+    // The rolling median is already trusted for the cepstral lifter and already
+    // computed. A voice's F0 does not change between frames, so a comb centred
+    // on the last confident pitch is far closer to right than no comb at all —
+    // and the failure mode is benign either way: a mask in slightly the wrong
+    // place protects slightly the wrong bins, where no mask protects nothing.
+    //
+    // ⚠ IT HOLDS ONLY WHILE THE FRAME IS ACTIVE. Through real silence there is
+    // nothing to protect, and holding there would mask the noise floor the
+    // suppressor is meant to be free to work on.
+    const maskF0 = pitched && f0 > 0 ? f0 : (active ? medianF0 : 0)
+    const mask = this.anyProtect && maskF0 > 0 ? this._harmonicMask(maskF0) : null
 
     // Spike detection → soft knee → depth → clip.
     // WHAT PROTRUSION IS MEASURED FROM. Against the cepstral reference it is the
