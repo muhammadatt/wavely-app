@@ -479,8 +479,10 @@ function plateAlpha(a) {
  *
  * ⚠ THE WINDOW HAD TO NARROW WITH IT, and that is the price. Half the height at
  * the old 90 dB window would be 1.48 px/dB, halving the crossing shading this
- * display was rebuilt around. -85..-15 is 70 dB in the same space: 1.91 px/dB,
- * a 36% loss rather than 50%. What is given up at each end is content nobody
+ * display was rebuilt around. -85..-15 was 70 dB in the same space: 1.91 px/dB,
+ * a 36% loss rather than 50%. ⚠ THE TOP HAS SINCE MOVED TO 0 dBFS to stop the
+ * threshold clamping — see SPEC_DB_MAX — so the window is 85 dB and the figures
+ * in this paragraph are the history rather than the current numbers. What is given up at each end is content nobody
  * reads — below -85 is under the per-bin noise floor of any narration (the
  * waterfall's own ramp is calibrated at -95..-25 against a floor near -85), and
  * above -15 is above anything a per-bin level reaches on speech, where the
@@ -492,7 +494,34 @@ function plateAlpha(a) {
  * readings share one axis and every pixel one gives up the other takes.
  */
 const SPEC_DB_MIN = -85
-const SPEC_DB_MAX = -15
+/**
+ * ⚠ THE TOP IS 0 dBFS BECAUSE THE THRESHOLD LIVES ABOVE THE SPECTRUM, NOT IN IT.
+ * It was -15, sized so per-bin speech peaks near -35 sat comfortably inside —
+ * which is correct for the input curve and forgets the line drawn from it. The
+ * threshold is `reference + Selectivity`, and the reference tracks the peaks, so
+ * at the stock Selectivity of 20 it rides about 20 dB ABOVE everything the
+ * window was sized for. Reported from use as the threshold squashing against the
+ * top of the display whenever the spectrum filled it.
+ *
+ * Measured on three narrators at the stock setting: the threshold's p99 is
+ * -6.5 / -8.5 / -1.8 dBFS and its maximum +1.3 — so it spent the loudest
+ * passages pinned to a ceiling 15 dB below where it actually was, which is
+ * exactly where crossings happen and the margin matters most.
+ *
+ * FULL SCALE IS THE PRINCIPLED TOP rather than a fitted one: a threshold above
+ * 0 dBFS cannot be crossed by anything, so there is nothing above it worth
+ * drawing. It clips the +1.3 outlier and nothing else.
+ *
+ * ⚠ THE FLOOR STAYS AT -85 AND RAISING IT IS NOT A FREE WAY TO BUY THE
+ * RESOLUTION BACK. The threshold's own p1 is -93 to -96, and 19-34% of its
+ * values sit below -70 — so a floor raised to pay for the new top would clip the
+ * same line at the quiet end instead, trading one clamp for another.
+ *
+ * The cost is real and stated: the window goes 70 dB to 85, so at the shipping
+ * band height the spectrum reads 1.63 px/dB against 1.98. `REDUCTION_LANE_FRAC`
+ * is the lever that buys it back — every pixel the trace gives up, this takes.
+ */
+const SPEC_DB_MAX = 0
 
 /**
  * How solid the reduction trace's fill is, at the rail and at the foot.
@@ -538,10 +567,10 @@ const SPEC_DB_MAX = -15
  * mode where the removed signal IS what you are hearing was drawn FAINTER than
  * the mode where it is an annotation. Restored the right way round.
  */
-const REDUCTION_FILL_ALPHA = 0.44
+const REDUCTION_FILL_ALPHA = 0.06
 const REDUCTION_FILL_ALPHA_DELTA = 0.62
 /** At the foot of the lane. Near zero either way; it keeps the gradient a gradient. */
-const REDUCTION_FILL_ALPHA_FOOT = 0.06
+const REDUCTION_FILL_ALPHA_FOOT = 0.94
 
 /**
  * The FOUND strip's own band, at the bottom of the lane.
@@ -556,8 +585,8 @@ const REDUCTION_FILL_ALPHA_FOOT = 0.06
  * what makes the reservation necessary rather than lazy. A crossing follows the
  * spectrum's own contour: it spans from the threshold up to a peak, so a LOUD
  * crossing sits high in the band and a QUIET one sits near the floor. Against a
- * -85..-15 window, low-frequency peaks near -30 dBFS put their crossings in the
- * top third while high-frequency peaks near -70 put theirs in the bottom fifth.
+ * window, low-frequency peaks near -30 dBFS put their crossings high in the band
+ * while high-frequency peaks near -70 put theirs near its floor.
  * A strip at the floor collides with the HF crossings; a strip under the
  * reduction lane would collide with the LF ones. There is no free row.
  *
@@ -587,7 +616,7 @@ const foundBandH = computed(() => laneH.value * foundFrac.value)
  * cannot collide — which is what finally made the identified resonances legible
  * against the spectrum, after shading them in the accent and then in white had
  * both failed. Every pixel this gives up the spectrum takes: at 0.35 the
- * spectrum has 174 px for its 70 dB window, or 2.48 px per dB.
+ * spectrum has 174 px for its 85 dB window, or 2.05 px per dB.
  *
  * It is FIXED rather than following which overlays are on: a reading that
  * changes scale because an unrelated switch was thrown is one nobody can trust
