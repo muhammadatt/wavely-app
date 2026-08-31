@@ -1,6 +1,9 @@
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useLA2A } from '../../composables/useLA2A.js'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { OPTO_SMOOTH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
+import PresetMenu from './PresetMenu.vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
 import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
@@ -12,7 +15,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aR37,
-  la2aAutoMakeup, la2aAutoMakeupBusy,
+  la2aAutoMakeup, la2aAutoMakeupBusy, toggleAutoMakeup: toggleAuto,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
   syncR37, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
@@ -70,20 +73,41 @@ function formatPercent(v) {
   return String(Math.round(v * 100))
 }
 
-// Preset dropdown — visual mockup only. No presets are defined for this
-// effect yet, so selecting an option doesn't change anything.
-const MOCK_PRESETS = ['Drum Glue', 'Vocal Bus', 'Master Bus', 'Podcast Voice']
-const selectedMockPreset = ref(MOCK_PRESETS[0])
-const presetMenuOpen = ref(false)
-
-function togglePresetMenu() {
-  presetMenuOpen.value = !presetMenuOpen.value
-}
-
-function selectMockPreset(name) {
-  selectedMockPreset.value = name
-  presetMenuOpen.value = false
-}
+/**
+ * Presets. This replaced a mock dropdown that displayed four names and changed
+ * nothing — the placeholder that made this plugin the one asking for a real
+ * preset architecture.
+ *
+ * Reading the params is just the knobs. Writing them has one ordering
+ * constraint worth stating: the Gain knob goes LAST and goes through the AUTO
+ * decision, because `syncGain` is a take-over — it drops AUTO and accepts the
+ * value. Setting the gain before deciding the AUTO state would therefore leave
+ * AUTO off whatever the preset asked for.
+ */
+const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
+  read: () => ({
+    mode: la2aMode.value,
+    peakReduction: la2aPeakReduction.value,
+    gain: la2aGain.value,
+    tubeDrive: la2aTubeDrive.value,
+    r37: la2aR37.value,
+    autoMakeup: la2aAutoMakeup.value,
+  }),
+  write: (p) => {
+    syncMode(p.mode)
+    syncPeakReduction(p.peakReduction)
+    syncTubeDrive(p.tubeDrive)
+    syncR37(p.r37)
+    if (p.autoMakeup) {
+      // Already on: the syncs above have each scheduled a re-measure, so the
+      // knob lands on the new settings without a second toggle.
+      if (!la2aAutoMakeup.value) toggleAuto()
+    } else {
+      if (la2aAutoMakeup.value) toggleAuto()
+      syncGain(p.gain)
+    }
+  },
+})
 </script>
 
 <template>
@@ -106,31 +130,13 @@ function selectMockPreset(name) {
     @apply="applyAndClose"
     @close="close"
   >
-    <!-- Preset selector — visual mockup only, not yet wired to real presets -->
     <template #header-center>
-      <div class="relative" @pointerdown.stop>
-        <button
-          class="cursor-pointer"
-          style="display:flex;align-items:center;gap:9px;height:30px;padding:0 18px;border:none;border-radius:10px;background:rgba(255,255,255,.11);font:600 11px 'Inter';letter-spacing:.03em;color:#f2f6f7"
-          @click="togglePresetMenu"
-        >
-          {{ selectedMockPreset }} ▾
-        </button>
-        <div v-if="presetMenuOpen"
-             class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 min-w-[150px] rounded-lg overflow-hidden z-10"
-             style="background:#1d222b;border:1px solid rgba(255,255,255,.1);box-shadow:0 12px 30px rgba(0,0,0,.5)"
-        >
-          <button
-            v-for="name in MOCK_PRESETS" :key="name"
-            class="w-full text-left px-3.5 py-2 border-none cursor-pointer transition-colors"
-            :style="{ background: name === selectedMockPreset ? 'rgba(255,255,255,.12)' : 'transparent' }"
-            style="font:600 11px 'Inter';color:#eaf6f8"
-            @click="selectMockPreset(name)"
-          >
-            {{ name }}
-          </button>
-        </div>
-      </div>
+      <PresetMenu
+        :presets="presets"
+        :accent="ACCENT"
+        :disabled="!la2aPreview"
+        disabled-hint="Turn OptoSmooth on to use presets"
+      />
     </template>
 
     <div class="px-[26px] pt-[22px] pb-[28px]">

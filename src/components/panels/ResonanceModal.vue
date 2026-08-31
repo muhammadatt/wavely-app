@@ -21,6 +21,9 @@ import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import PresetMenu from './PresetMenu.vue'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { RESO_TAME_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -31,9 +34,52 @@ const {
   resDisplayFn, hasSelection,
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
   togglePreview, toggleDelta, syncAttack,
-  syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
+  syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta, clearZoneDelta,
+  resMode, syncMode,
   apply, teardown, closeModal,
 } = useResonance()
+
+/**
+ * Presets. Mostly a zone SHAPE rather than a set of numbers — which spans
+ * exist is as much of the preset as what each one does.
+ *
+ * Two things a preset must not carry, and neither is an oversight:
+ *
+ *   `refMode`, because it is a build-level research override resolved once at
+ *   module load, and the two references disagree about what Selectivity
+ *   measures by an order of magnitude. A menu click has no business changing
+ *   which detector is running.
+ *
+ *   The monitoring modes. DELTA and the per-zone delta are UI state, and the
+ *   zone delta is the more dangerous of the two because it IS expressible as
+ *   ordinary parameters — every other zone at depth zero. The store's
+ *   whitelist is what keeps either out of a preset; what this write does is
+ *   CLEAR the zone delta, because a preset arriving with a different number of
+ *   zones can leave an isolation pointing at a zone that no longer exists.
+ */
+const presets = usePluginPresets(RESO_TAME_PRESET_PLUGIN, {
+  read: () => ({
+    attack: resAttack.value,
+    release: resRelease.value,
+    mode: resMode.value,
+    mix: resMix.value,
+    trim: resTrim.value,
+    zones: resZones.value,
+  }),
+  write: (p) => {
+    clearZoneDelta()
+    syncAttack(p.attack)
+    syncRelease(p.release)
+    syncMode(p.mode)
+    syncMix(p.mix)
+    syncTrim(p.trim)
+    syncZones(p.zones)
+    // The strip edits one zone by index, and a preset can be shorter than the
+    // set it replaces — leaving the selection past the end would point the
+    // knobs at nothing.
+    if (resSelectedZone.value >= p.zones.length) resSelectedZone.value = 0
+  },
+})
 
 const { state } = useEditorState()
 
@@ -252,6 +298,12 @@ async function applyAndClose() {
          both change what reaches the speakers and neither changes the file.
          Putting it down among the parameters would have implied it was one. -->
     <template #header-center>
+      <PresetMenu
+        :presets="presets"
+        :accent="ACCENT"
+        :disabled="!resPreview"
+        disabled-hint="Turn ResoTame on to use presets"
+      />
       <!-- An override is a thing you forget you turned on. The two references
            disagree by an order of magnitude about what Selectivity measures, so
            a panel running the non-shipping one and not saying so is a panel

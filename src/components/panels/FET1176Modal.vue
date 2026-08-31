@@ -8,6 +8,9 @@ import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import PresetMenu from './PresetMenu.vue'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { FET_PUNCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -18,6 +21,40 @@ const {
   syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup,
   apply, teardown, closeModal,
 } = useFET1176()
+
+/**
+ * Presets. Same two functions and the same ordering constraint as OptoSmooth:
+ * Output goes last and through the AUTO decision, because `syncOutput` is a
+ * take-over that drops AUTO and accepts the value.
+ */
+const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, {
+  read: () => ({
+    inputDrive: fetInput.value,
+    output: fetOutput.value,
+    attack: fetAttack.value,
+    release: fetRelease.value,
+    ratio: fetRatio.value,
+    fetDrive: fetDrive.value,
+    scHpf: fetScHpf.value,
+    mix: fetMix.value,
+    autoMakeup: fetAutoMakeup.value,
+  }),
+  write: (p) => {
+    syncInput(p.inputDrive)
+    syncAttack(p.attack)
+    syncRelease(p.release)
+    syncRatio(p.ratio)
+    syncDrive(p.fetDrive)
+    syncScHpf(p.scHpf)
+    syncMix(p.mix)
+    if (p.autoMakeup) {
+      if (!fetAutoMakeup.value) toggleAutoMakeup()
+    } else {
+      if (fetAutoMakeup.value) toggleAutoMakeup()
+      syncOutput(p.output)
+    }
+  },
+})
 
 const { state } = useEditorState()
 
@@ -120,6 +157,15 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
     @apply="applyAndClose"
     @close="close"
   >
+    <template #header-center>
+      <PresetMenu
+        :presets="presets"
+        :accent="ACCENT"
+        :disabled="!fetPreview"
+        disabled-hint="Turn FET Punch on to use presets"
+      />
+    </template>
+
     <div class="px-[26px] pt-[20px] pb-[26px]">
       <!-- Gain reduction across the full width, then the gain staging under it.
            Same meter and same layout as the OptoSmooth panel: the two
