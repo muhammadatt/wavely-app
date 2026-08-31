@@ -17,6 +17,7 @@ import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
+import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
 import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
 import SpectrumAnalyzerWindow from '../components/panels/windows/SpectrumAnalyzerWindow.vue'
@@ -292,6 +293,21 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: VocalSaturationWindow,
+  },
+  {
+    id: 'inflator',
+    label: 'Inflator',
+    desc: 'Raise quiet detail without moving the peaks',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'saturation',
+    keywords: [
+      'inflator', 'inflate', 'sonnox', 'density', 'loudness', 'punch',
+      'presence', 'thickness', 'curve', 'harmonic', 'clip', 'band split',
+    ],
+    requires: 'selection',
+    surface: 'window',
+    component: InflatorWindow,
   },
   {
     id: 'manual-eq',

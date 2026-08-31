@@ -68,6 +68,7 @@ import resonanceSuppressor from './resonance-suppressor.js'
 import schepsParallel from './scheps-parallel.js'
 import softClipper from './soft-clipper.js'
 import spectrumAnalyzer from './spectrum-analyzer.js'
+import inflator from './inflator.js'
 import vocalSaturation from './vocal-saturation.js'
 import voicerx from './voicerx.js'
 
@@ -85,6 +86,7 @@ export const HELP = {
   'scheps-parallel': schepsParallel,
   'soft-clipper': softClipper,
   'spectrum-analyzer': spectrumAnalyzer,
+  'inflator': inflator,
   'vocal-saturation': vocalSaturation,
   voicerx,
 }
