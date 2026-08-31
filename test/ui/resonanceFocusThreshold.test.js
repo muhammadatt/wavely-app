@@ -55,7 +55,19 @@ test('with no function given the plot falls back to the zone lookup', () => {
 })
 
 test('the panel hands the plot a threshold under focus and nothing under zones', () => {
-  assert.match(PANEL, /import \{ focusThresholdFn \}/)
+  // ⚠ NO REGEX ON THE IMPORT, DELIBERATELY. This pinned the whole clause —
+  // `import { focusThresholdFn }` — so adding a second name to it broke a test
+  // that has no opinion about how many things are imported. The obvious
+  // loosening was a word boundary, and the escape for one reached the file as a
+  // literal backspace through the layers between the source and disk; the
+  // replacement after that put a real newline inside a string literal. Two
+  // failures in a row from escaping, on an assertion that is a substring search.
+  const at = PANEL.indexOf("from '../../audio/resonanceFocus.js'")
+  assert.ok(at > 0, 'the panel must import from resonanceFocus.js')
+  assert.ok(
+    PANEL.slice(Math.max(0, at - 200), at).includes('focusThresholdFn'),
+    'the panel must import focusThresholdFn',
+  )
   // Built from the live patch, so it is rebuilt when a knob moves...
   assert.match(PANEL, /focusMode \? focusThresholdFn\(resFocus\.value\) : null/)
   // ...in a computed, so it is NOT rebuilt per display bin per animation frame.

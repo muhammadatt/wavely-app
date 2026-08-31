@@ -378,7 +378,7 @@ const SPEC_HISTORY_EDGE_A = 0.62
  * and the selected node: one boundary, and one handle.
  */
 /** The neutral datum the bias curve is read against — zero bias, full width. */
-const FOCUS_DATUM = 'rgba(255,255,255,.16)'
+const FOCUS_DATUM = 'rgba(255,255,255,.22)'
 const FOCUS_DATUM_DASH = [3, 5]
 /**
  * ⚠ DOTTED AND UNLIT, HAVING TRADED APPEARANCES WITH THE THRESHOLD. It was a
@@ -395,7 +395,7 @@ const FOCUS_DATUM_DASH = [3, 5]
  * plate.
  */
 const FOCUS_CURVE_PX = 1.5
-const FOCUS_CURVE_DASH = [3, 3]
+const FOCUS_CURVE_DASH = [3, 5]
 const FOCUS_GLOW_PX = 9
 /** A bypassed node: its place kept, its fill gone. */
 const FOCUS_NODE_OFF = 'rgba(255,255,255,.34)'
@@ -408,8 +408,8 @@ const FOCUS_NODE_OFF_PX = 1.2
  * longer an accent involved — an `_A` suffix here would be a name promising a
  * tint that never happens.
  */
-const FOCUS_CURVE_INK = 'rgba(255,255,255,.82)'
-const FOCUS_CURVE_FILL = 'rgba(255,255,255,.05)'
+const FOCUS_CURVE_INK = 'rgba(255,255,255,35)'
+const FOCUS_CURVE_FILL = 'rgba(255,255,255,.00)'
 const FOCUS_NODE_INK = 'rgba(255,255,255,.92)'
 const FOCUS_NODE_RING = 'rgba(255,255,255,.6)'
 const FOCUS_NODE_GLOW = 'rgba(255,255,255,.45)'
@@ -430,10 +430,10 @@ const FOCUS_NODE_RING_PX = 1.4
  */
 const FOCUS_VEIL_MAX_A = 0.55
 const FOCUS_LABEL_BACKING_A = 0.72
-const FOCUS_LABEL_INK = 'rgba(255,255,255,.34)'
+const FOCUS_LABEL_INK = 'rgba(255,255,255,.54)'
 /** The threshold reading on the rail. A value, so brighter than the direction
  *  labels beside it — but under the handles, which are what you aim at. */
-const FOCUS_READOUT_INK = 'rgba(255,255,255,.66)'
+const FOCUS_READOUT_INK = 'rgba(141,224,168,.66)'
 /**
  * ⚠ SLATE, NOT NEAR-BLACK. It was `rgba(10,14,16,.86)` — the plate's own colour
  * a shade lighter — which over a black plate is barely a shape at all: the pill
@@ -441,9 +441,9 @@ const FOCUS_READOUT_INK = 'rgba(255,255,255,.66)'
  * A slate backing separates from the ground on its own, so the pill stays
  * readable wherever on the plate it lands, including over the waterfall.
  */
-const FOCUS_PILL_BACKING = 'rgba(46,54,62,.94)'
-const FOCUS_PILL_INK = 'rgba(255,255,255,.94)'
-const FOCUS_PILL_RING = 'rgba(255,255,255,.30)'
+const FOCUS_PILL_BACKING = 'rgba(22,22,22,.94)'
+const FOCUS_PILL_INK = 'rgba(255,255,255,.64)'
+const FOCUS_PILL_RING = 'rgba(255,255,255,.54)'
 /**
  * The focus pill's height. Named because the clamp and the rounded rect have to
  * agree about it — a mismatch there is a pill clipped by its own guard.

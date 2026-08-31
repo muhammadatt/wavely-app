@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
-import { focusThresholdFn } from '../../audio/resonanceFocus.js'
+import { RESONANCE_FOCUS_RANGES, focusThresholdFn } from '../../audio/resonanceFocus.js'
 import {
   DEFAULT_REF_MODE,
   zoneSettings,
@@ -24,6 +24,9 @@ import {
   setNodeParam,
 } from '../meters/resonanceFocusNodes.js'
 import FocusNodePanel from './FocusNodePanel.vue'
+import Icon from '../ui/Icon.vue'
+import DeviceField from '../knobs/DeviceField.vue'
+import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import Knob from '../knobs/Knob.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
@@ -209,6 +212,22 @@ const overlayButtons = computed(() => [
 const percent = v => `${Math.round(v * 100)}`
 const ms = v => `${Math.round(v)}`
 const db = v => `${Math.round(v)}`
+/**
+ * The harmonic mask's two positions.
+ *
+ * ⚠ THE ICON MOVED INTO THE "ON" LABEL. A glyph is what told this control apart
+ * from the view switches it used to sit among; among knobs that job is done by
+ * shape, and a switch that carried an icon on only one of its two cells would
+ * read as the cells meaning different KINDS of thing rather than two states of
+ * one. The caption underneath carries the name instead, which is what every
+ * other switch on this faceplate does.
+ */
+const HARMONIC_MODES = [
+  { value: 'on', label: 'ON', title: 'Hold the harmonics of the tracked voice, below the ceiling' },
+  { value: 'off', label: 'OFF', title: 'Treat harmonics like any other peak. It will thin the material' },
+]
+
+const protectHz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)))
 const signedDb = v => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
 
 /**
@@ -525,6 +544,16 @@ async function applyAndClose() {
              200/500 ms; what keeps improving past there is p90 depth, 8.5 to
              5.2 dB, the same average cut spread evenly instead of concentrated
              in momentary deep notches. 400/2000 captures nearly all of it. -->
+        <!-- ⚠ A WRAPPING GROUP, WHICH IS WHAT LETS A FOURTH CONTROL LAND HERE AT
+             ALL. The row has almost no slack — the zone plate is 348 px in a
+             352 px slot — so anything added beside Attack and Release has to be
+             able to fall to a second line instead of pushing the plate out. The
+             cap is 150 px: Attack and Release sit together on the first line at
+             116, and the harmonics pair goes to the second at 149.
+
+             In zone mode the group is 116 wide and never wraps, so the row is
+             exactly what it was. The cap costs nothing when nothing needs it. -->
+        <div class="flex flex-wrap items-center gap-[8px] shrink-0 max-w-[150px]">
         <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resAttack" @update:model-value="syncAttack"
@@ -540,6 +569,75 @@ async function applyAndClose() {
             label="Release" :accent="ACCENT" :format-value="ms"
             :disabled="!resPreview"
           />
+        </div>
+
+        <!-- ⚠ HARMONIC PROTECTION SITS WITH THE BALLISTICS, NOT WITH THE VIEW
+             SWITCHES. It went to the header row first, which was wrong on the
+             one distinction that matters here: everything in that row changes
+             what is DRAWN, and this changes the audio. Beside Attack and Release
+             it is among its own kind — global settings of the detector.
+
+             The icon still earns its place. These are the only two words in the
+             row that name a frequency-domain idea rather than a time one, and a
+             glyph says "harmonics" faster than the word does at 8 px.
+
+             ⚠ FOCUS MODE ONLY. Under zones, harmonic protection is per zone and
+             lives behind that panel's HARM door; a global switch here would be a
+             second control for a setting the zones already own. -->
+        <span v-if="focusMode" class="flex items-end gap-[7px] shrink-0">
+          <!-- ⚠ A TWO-POSITION SWITCH, NOT A LIT BUTTON. It was a pill that took
+               the accent when engaged, which is exactly how the overlay switches
+               read their state — and that works THERE because there are four of
+               them side by side, so lit and unlit are visible against each
+               other. Alone among knobs it has nothing to be compared with: a
+               single slightly-brighter pill says "there is a button here", not
+               "the thing this controls is on". Reported as exactly that.
+               ON and OFF are always both drawn, so the answer is legible from
+               the one control without a second to compare it to — the same
+               reason ON/BYPASS in the title bar prints the word rather than
+               relying on a lamp alone. -->
+          <!-- ⚠ THE GLYPH SITS BESIDE THE SWITCH, NOT INSIDE A CELL. It is what
+               says at a glance which of the row's controls is about frequency
+               rather than time, and it cannot go in a cell: an icon on ON and
+               none on OFF would read as the two cells meaning different KINDS of
+               thing rather than two states of one. Aligned to the bank rather
+               than the group, so it sits with the cells and not with the caption
+               under them. -->
+          <Icon
+            name="harmonics" :size="13" :stroke-width="1.8"
+            class="self-start mt-[4px] shrink-0"
+            :style="{ color: resFocus.global.protect ? bright(ACCENT) : 'rgba(255,255,255,.32)' }"
+          />
+          <SegmentedSwitch
+            :model-value="resFocus.global.protect ? 'on' : 'off'"
+            :options="HARMONIC_MODES"
+            :padding-x="8"
+            :accent="ACCENT"
+            :disabled="!resPreview"
+            caption="preserve harmonics"
+            @update:model-value="syncFocus({
+              ...resFocus,
+              global: { ...resFocus.global, protect: $event === 'on' },
+            })"
+          />
+          <!-- The ceiling only exists while the mask does, and the slot keeps
+               its width either way — switching protection on must not shove the
+               row sideways. -->
+          <span class="block" style="width:56px">
+            <DeviceField
+              v-if="resFocus.global.protect"
+              :model-value="resFocus.global.protectCeilHz"
+              :min="RESONANCE_FOCUS_RANGES.protectCeilHz.min"
+              :max="RESONANCE_FOCUS_RANGES.protectCeilHz.max"
+              :step="10" log
+              label="Up to" unit="Hz" :format-value="protectHz"
+              :accent="ACCENT" :disabled="!resPreview" :width="56"
+              @update:model-value="syncFocus({
+                ...resFocus, global: { ...resFocus.global, protectCeilHz: $event },
+              })"
+            />
+          </span>
+        </span>
         </div>
 
         <!-- min-w-0 so the plate is what gives way if the row ever runs out of
@@ -564,7 +662,6 @@ async function applyAndClose() {
           <ResonanceFocusControls
             v-if="focusMode"
             :focus="resFocus"
-            :pitch-range-caption="pitchRangeCaption"
             :accent="ACCENT"
             :disabled="!resPreview"
             @update:focus="syncFocus"

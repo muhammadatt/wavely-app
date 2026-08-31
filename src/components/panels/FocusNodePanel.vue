@@ -122,7 +122,7 @@ const SHAPES = [
     id: 'low',
     label: 'Low side',
     d: 'M1 3 L9 3 Q14 3 16 8 L20 11 L29 11',
-    title: 'Work harder on everything BELOW this frequency. A wide bell cannot say this — it falls away on both sides.',
+    title: 'Work harder on everything BELOW this frequency.',
   },
   {
     id: 'high',
@@ -195,12 +195,12 @@ function chip(on, warn = false) {
     <span
       data-dock-grip
       class="absolute left-1/2 -translate-x-1/2 top-0 flex items-center justify-center
-             w-[44px] h-[12px] touch-none select-none cursor-grab active:cursor-grabbing"
+             w-[200px] h-[12px] touch-none select-none cursor-grab active:cursor-grabbing"
       title="Drag to slide the card along the bottom of the plot"
     >
       <span
         class="block rounded-full"
-        style="width:28px;height:3px;background:rgba(255,255,255,.28)"
+        style="width:50px;height:3px;background:rgba(255,255,255,.28)"
       ></span>
     </span>
 

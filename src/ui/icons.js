@@ -104,6 +104,18 @@ export const ICONS = {
   // zero-length line so the round cap draws it — a filled circle would be the
   // only fill in a set that is stroked throughout.
   help: '<circle cx="12" cy="12" r="9.5"/><path d="M9.2 9.3a2.9 2.9 0 015.7.7c0 1.9-2.9 2.5-2.9 4.2"/><line x1="12" y1="17.4" x2="12" y2="17.4"/>',
+
+  // Harmonics: a partial series — evenly spaced lines of falling height over a
+  // baseline, which is what a harmonic stack looks like on any spectrum anyone
+  // has seen. EVENLY SPACED IS THE POINT: harmonics are integer multiples, and a
+  // comb at equal spacing is exactly the mask this toggles. Lines that crowded
+  // together would draw the same series on a LOG axis, which is what the plot
+  // shows — but as a glyph it reads as "getting faster", not "harmonics".
+  //
+  // Falling height because the fundamental is loudest; a flat comb reads as a
+  // grid or a barcode. Five partials rather than three or four: three is too few
+  // to establish a pattern, and beyond five they merge at 15 px.
+  harmonics: '<line x1="3" y1="20" x2="21" y2="20"/><line x1="4.5" y1="20" x2="4.5" y2="4"/><line x1="8.6" y1="20" x2="8.6" y2="8"/><line x1="12.7" y1="20" x2="12.7" y2="11"/><line x1="16.8" y1="20" x2="16.8" y2="13.5"/><line x1="20.9" y1="20" x2="20.9" y2="15.5"/>',
 }
 
 export function getIcon(name) {

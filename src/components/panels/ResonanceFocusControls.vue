@@ -27,16 +27,10 @@ import { computed } from 'vue'
 import { RESONANCE_FOCUS_RANGES } from '../../audio/resonanceFocus.js'
 import { bright, tint } from '../../ui/accent.js'
 import Knob from '../knobs/Knob.vue'
-import DeviceField from '../knobs/DeviceField.vue'
 
 const props = defineProps({
   focus: { type: Object, required: true },
-  /**
-   * The pitch range the protection mask searches, for the caption. Fixed rather
-   * than chosen — see HARMONIC_PITCH_RANGE.
-   */
-  pitchRangeCaption: { type: String, default: '' },
-  accent: { type: String, default: '#8de0a8' },
+    accent: { type: String, default: '#8de0a8' },
   disabled: { type: Boolean, default: false },
 })
 
@@ -49,7 +43,6 @@ function setGlobal(name, value) {
   emit('update:focus', { ...props.focus, global: { ...g.value, [name]: value } })
 }
 
-const hz = v => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)}k` : String(Math.round(v)))
 const plain = v => v.toFixed(0)
 const pct = v => `${Math.round(v * 100)}%`
 </script>
@@ -125,48 +118,25 @@ const pct = v => `${Math.round(v * 100)}%`
     </div>
     </div>
 
-    <!-- HARMONIC PROTECTION: GLOBAL, WITH A CEILING, replacing the per-zone
-         flag — and it loses nothing measured. The flag existed for one reason:
-         the mask blocks 67-88% of every octave from 60 Hz to 20 kHz, which is
-         real protection down where partials are widely spaced and a blanket
-         veto up where sibilance lives, so "protect the fundamental region, work
-         freely above 5 kHz" was the setting the effect most wanted and could
-         not express while the mask was global.
+    <!-- ⚠ HARMONIC PROTECTION MOVED TO THE PANEL HEADER, and its CEILING went
+         with it — as a number in the button's tooltip rather than as a control.
+         Both were here inside a `hidden` wrapper, so neither had been reachable
+         for some time; moving the switch is what made that visible.
 
-         That is a statement about a FREQUENCY, not about a partition. One
-         switch and one ceiling say it directly, and say the same thing on every
-         file — where a per-zone flag says it only if the zones happen to be
-         placed somewhere sensible on this particular voice. -->
-    <div class="hidden flex items-center gap-[7px] shrink-0">
-      <button
-        type="button"
-        class="px-[9px] py-[5px] rounded-full"
-        :aria-pressed="String(g.protect)"
-        :title="`Hold the harmonics of the tracked voice, below the ceiling. Pitch range ${pitchRangeCaption}.`"
-        :style="{
-          font: `600 8px 'JetBrains Mono',monospace`,
-          letterSpacing: '.1em',
-          color: g.protect ? bright(accent) : 'rgba(255,255,255,.36)',
-          background: g.protect ? tint(accent, 0.14) : 'rgba(255,255,255,.03)',
-          boxShadow: g.protect
-            ? `inset 0 0 0 1px ${tint(accent, 0.5)}`
-            : 'inset 0 0 0 1px rgba(255,255,255,.06)',
-        }"
-        :disabled="disabled"
-        @click="setGlobal('protect', !g.protect)"
-      >HARMONICS</button>
-      <!-- The ceiling only exists while the mask does, and hiding it costs no
-           layout: the slot keeps its width either way, so switching protection
-           on does not shove the row sideways. -->
-      <span class="block" style="width:62px">
-        <DeviceField
-          v-if="g.protect"
-          :model-value="g.protectCeilHz" @update:model-value="setGlobal('protectCeilHz', $event)"
-          :min="R.protectCeilHz.min" :max="R.protectCeilHz.max" :step="50" log
-          label="Up to" unit="Hz" :format-value="hz"
-          :accent="accent" :disabled="disabled" :width="62"
-        />
-      </span>
-    </div>
+         The switch is global with a ceiling because the flag it replaced was per
+         zone, and it loses nothing measured: the mask blocks 67-88% of every
+         octave from 60 Hz to 20 kHz, which is real protection down where
+         partials are widely spaced and a blanket veto up where sibilance lives.
+         "Protect the fundamental region, work freely above 5 kHz" is the setting
+         the effect most wants, and that is a statement about a FREQUENCY rather
+         than about a partition — one switch and one ceiling say it directly, and
+         say the same thing on every file, where a per-zone flag says it only if
+         the zones happen to be placed sensibly on this particular voice.
+
+         ⚠ `protectCeilHz` IS THEREFORE PINNED AT ITS DEFAULT, 5000 Hz. It is
+         still a parameter and the kernel still reads it; nothing sets it. If it
+         earns a control again it belongs beside the switch, not back here — this
+         plate is the DETECTOR, three knobs describing one decision, and a
+         frequency bound is a different kind of statement. -->
   </div>
 </template>
