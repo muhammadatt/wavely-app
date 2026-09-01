@@ -60,20 +60,36 @@ export function usePluginPresets(pluginId, { read, write }) {
   })
 
   /**
-   * True when a preset is selected and the knobs have since moved off it.
+   * The preset the menu is lit on: the one selected, or failing that the one
+   * the settings happen to match.
    *
-   * With nothing selected there is nothing to be dirty against, so the menu
-   * reads "Presets" rather than "Modified" — a file opened and never given a
-   * preset has not been modified, it has never been set.
+   * ⚠ IT IS RECONCILED AGAINST THE LIST, NOT TRUSTED. A `selectedId` naming a
+   * preset that is no longer there resolves to null, which is what makes every
+   * readout below safe by construction rather than by each one remembering to
+   * check. `remove()` clears the id eagerly too — that is the better answer
+   * where it applies, because falling back to `matchedId` names the factory
+   * preset the settings still match instead of going blank — but a rule
+   * applied per gesture is a rule with a gesture missing from it, which is the
+   * lesson the focus solo's own id reconcile already records.
    */
-  const dirty = computed(() =>
-    !!selectedId.value && matchedId.value !== selectedId.value
-  )
-
   const activePreset = computed(() => {
     const id = selectedId.value ?? matchedId.value
     return presets.value.find(p => p.id === id) ?? null
   })
+
+  /**
+   * True when a preset is lit and the knobs have since moved off it.
+   *
+   * With nothing lit there is nothing to be dirty against, so the menu reads
+   * "Presets" rather than "Modified" — a file opened and never given a preset
+   * has not been modified, it has never been set. A vanished preset takes the
+   * same path: measured against `activePreset` rather than against the raw id,
+   * so it cannot leave the trigger lit as modified while naming nothing and
+   * offering a "Revert to " with an empty name after it.
+   */
+  const dirty = computed(() =>
+    !!activePreset.value && activePreset.value.id !== matchedId.value
+  )
 
   const label = computed(() => {
     if (!activePreset.value) return 'Presets'

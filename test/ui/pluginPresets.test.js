@@ -7,6 +7,8 @@ import {
   pickParams, paramsEqual, clonePlain, PRESET_STORAGE_KEY,
 } from '../../src/audio/pluginPresets/store.js'
 import { registerPluginPresets } from '../../src/audio/pluginPresets/index.js'
+import { usePluginPresets } from '../../src/composables/usePluginPresets.js'
+import { readFileSync } from 'node:fs'
 
 import {
   OPTO_SMOOTH_PRESETS, OPTO_SMOOTH_PARAM_KEYS, OPTO_SMOOTH_PRESET_PLUGIN,
@@ -234,6 +236,88 @@ test('no storage at all still gives a working session', () => {
   definePluginPresets({ pluginId: 'p', paramKeys: ['a'], factory: [] })
   const saved = saveUserPreset('p', 'Mine', { a: 1 })
   assert.equal(presetParams('p', saved.id).a, 1)
+})
+
+// ── The menu composable ───────────────────────────────────────────────────
+
+test('a preset that disappears leaves nothing lit and nothing dirty', () => {
+  // ⚠ THE READOUTS ARE MEASURED AGAINST THE RECONCILED PRESET, NOT THE RAW ID.
+  // A `selectedId` naming something no longer in the list used to leave `dirty`
+  // true with `activePreset` null — a trigger lit as modified while naming
+  // nothing, and a "Revert to " item with an empty name after it, calling
+  // revert with an id that can no longer be loaded. `remove()` clears the id on
+  // its own path, but a rule applied per gesture is a rule with a gesture
+  // missing from it.
+  withStorage(() => {
+    resetPluginPresets()
+    definePluginPresets({ pluginId: 'p', paramKeys: ['a'], factory: [] })
+    const live = { a: 1 }
+    const presets = usePluginPresets('p', { read: () => ({ ...live }), write: (v) => Object.assign(live, v) })
+
+    const saved = saveUserPreset('p', 'Mine', { a: 1 })
+    presets.select(saved.id)
+    live.a = 2
+    assert.equal(presets.dirty.value, true, 'a moved knob is not reported as modified')
+
+    // Deleted straight through the store, which is the path `remove()` does not
+    // cover.
+    deleteUserPreset('p', saved.id)
+    assert.equal(presets.activePreset.value, null)
+    assert.equal(presets.dirty.value, false, 'a vanished preset still reads as modified')
+    assert.equal(presets.label.value, 'Presets')
+    assert.equal(presets.revert(), false, 'revert claimed to reload a preset that is gone')
+  })
+})
+
+test('deleting the selected preset falls back to whatever the settings match', () => {
+  // Why `remove()` clears the id eagerly rather than leaving it to the
+  // reconcile: naming the factory preset the settings still match is more
+  // informative than going blank.
+  withStorage(() => {
+    resetPluginPresets()
+    definePluginPresets({
+      pluginId: 'p', paramKeys: ['a'],
+      factory: [{ id: 'f1', name: 'One', params: { a: 1 } }],
+    })
+    const live = { a: 1 }
+    const presets = usePluginPresets('p', { read: () => ({ ...live }), write: (v) => Object.assign(live, v) })
+    const mine = saveUserPreset('p', 'Mine', { a: 1 })
+    presets.select(mine.id)
+    presets.remove(mine.id)
+    assert.equal(presets.activePreset.value?.id, 'f1')
+    assert.equal(presets.dirty.value, false)
+  })
+})
+
+test('nothing selected is not the same as modified', () => {
+  resetPluginPresets()
+  definePluginPresets({
+    pluginId: 'p', paramKeys: ['a'],
+    factory: [{ id: 'f1', name: 'One', params: { a: 1 } }],
+  })
+  const live = { a: 99 }
+  const presets = usePluginPresets('p', { read: () => ({ ...live }), write: (v) => Object.assign(live, v) })
+  assert.equal(presets.dirty.value, false, 'a file never given a preset reads as modified')
+  assert.equal(presets.label.value, 'Presets')
+})
+
+test('the menu routes REVERT through the same disabled guard a selection takes', () => {
+  // ⚠ REVERTING IS A PARAMETER CHANGE, which is exactly what `disabled` refuses
+  // — so a bypassed plugin whose menu prints "turn this on to use presets" was
+  // still one click from having its settings rewritten (pick a preset, move a
+  // knob, bypass, open the menu). Read from the source the way
+  // resonanceZoneDelta.test.js reads its own guarantee: this suite stops below
+  // the components, so the wiring cannot be exercised, only pinned.
+  const src = readFileSync(
+    new URL('../../src/components/panels/PresetMenu.vue', import.meta.url), 'utf8')
+  assert.match(src, /function revert\(\)\s*\{\s*if \(props\.disabled\) return/,
+    'revert() does not check disabled')
+  assert.equal(/@click="presets\.revert\(\)/.test(src), false,
+    'the template calls presets.revert() directly, bypassing the guard')
+  // Saving and deleting stay available while disabled on purpose: neither
+  // changes the sound, which is the same reasoning that lets a delete need no
+  // confirmation.
+  assert.match(src, /@click="startSave"/)
 })
 
 test('paramsEqual is structural over nested arrays and objects', () => {

@@ -120,6 +120,23 @@ function choose(id) {
   closeMenu()
 }
 
+/**
+ * Revert goes through the SAME guard selection does, and it did not.
+ *
+ * ⚠ REVERTING IS A PARAMETER CHANGE, which is the whole reason `disabled`
+ * refuses a selection — so a bypassed plugin whose menu prints "turn this on to
+ * use presets" was still one click from having its settings rewritten. Reachable
+ * in the obvious order: pick a preset, move a knob, bypass, open the menu.
+ * Deleting and saving stay available while disabled on purpose: neither changes
+ * the sound, which is the same reasoning that lets a delete need no
+ * confirmation.
+ */
+function revert() {
+  if (props.disabled) return
+  props.presets.revert()
+  closeMenu()
+}
+
 async function startSave() {
   saving.value = true
   error.value = ''
@@ -284,8 +301,8 @@ onBeforeUnmount(() => {
         type="button"
         class="w-full text-left px-3.5 py-2 border-none bg-transparent cursor-pointer"
         style="font:600 10.5px 'Inter'"
-        :style="{ color: accent }"
-        @click="presets.revert(); closeMenu()"
+        :style="{ color: accent, opacity: disabled ? 0.45 : 1 }"
+        @click="revert"
       >Revert to {{ presets.activePreset.value?.name }}</button>
 
       <button
