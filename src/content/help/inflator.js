@@ -1,10 +1,10 @@
 export default {
-  summary: 'Raises quiet detail while leaving the peaks exactly where they are',
+  summary: 'Raises quiet detail faster than it raises peaks, and never past full scale',
 
   whenToUse: [
     'A recording is technically fine but sounds thin or far away',
     'You want density without a compressor pumping on the syllables',
-    'You want more apparent level but the peaks are already where you need them',
+    'You want more apparent level without pushing anything past full scale',
   ],
 
   controls: [
@@ -27,5 +27,6 @@ export default {
     'It is not a peak controller. The curve cannot reduce a peak, and with Clip off, material above full scale folds back rather than limiting — reach for the Soft Clipper for peak control, after this',
     'Band Split can exceed full scale even though the curve cannot: three bands each bounded at full scale still sum to more than one. Turn Clip on when using it',
     'Curve changes shape and never the ceiling, so it is safe to explore — it is the one knob here that cannot make the file louder at the top',
+    'It holds the CEILING, not every peak. A file already peaking at full scale comes back at full scale; a quieter one has its peaks lifted too, just by less than its quiet detail — measured, +1.5 dB peak against +1.8 dB RMS on a file peaking at -6.6 dBFS',
   ],
 }

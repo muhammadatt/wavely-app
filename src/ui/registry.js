@@ -297,7 +297,7 @@ export const OPERATIONS = [
   {
     id: 'inflator',
     label: 'Inflator',
-    desc: 'Raise quiet detail without moving the peaks',
+    desc: 'Raise quiet detail without raising the ceiling',
     category: 'effects',
     group: 'Dynamics',
     icon: 'saturation',

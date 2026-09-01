@@ -141,7 +141,11 @@ test('the curve is odd, so it generates odd harmonics only', () => {
   const co = inflatorCoefficients(30)
   for (let i = 1; i <= 200; i++) {
     const x = i / 100
-    assert.equal(inflatorCurve(-x, co), -inflatorCurve(x, co), `not odd at ${x}`)
+    // `===` rather than assert.equal, which is strict-mode Object.is and so
+    // separates 0 from -0. The curve returns +0 at and past the fold-back's
+    // root, and negating that gives -0 — the NEGATION's sign, not the
+    // function's. f(-x) === -f(x) is the property; 0 === -0 is true.
+    assert.ok(inflatorCurve(-x, co) === -inflatorCurve(x, co), `not odd at ${x}`)
   }
 })
 
@@ -517,4 +521,31 @@ test('Effect blends linearly, and both code paths use the same dry signal', () =
     }
     assert.ok(worst < 1e-6, `Effect ${e} is not a linear blend: worst ${worst}`)
   }
+})
+
+test('the curve never returns negative zero, at any input or Curve setting', () => {
+  // Reported on the PR. `sign = x > 0 ? 1 : -1` — the reference's own
+  // expression — gives x = 0 a sign of -1, so f(0) came back as -0 and
+  // `Object.is(f(0), 0)` was false for a curve that must map 0 to 0. The
+  // `s >= 2` guard had the same fault by a different route: it computed 0 and
+  // then multiplied by the sign.
+  //
+  // ⚠ IT NEVER REACHED THE AUDIO, and the fix is not justified on that. The
+  // blend sums the wet side against a positive zero and IEEE gives
+  // `+0 + -0 = +0`, as does the downsampler's tap sum — measured, zero -0
+  // samples in a silent region's output at every setting. What makes it worth
+  // fixing is that `inflatorCurve` is exported and asserted against directly:
+  // a -0 in the public API is a trap for the next bit-exact assertion.
+  for (const curve of [...CURVES, -37, 13]) {
+    const co = inflatorCoefficients(curve)
+    for (let i = -400; i <= 400; i++) {
+      const y = inflatorCurve(i / 100, co)
+      assert.ok(!Object.is(y, -0), `Curve ${curve}: f(${i / 100}) is -0`)
+    }
+  }
+  // The two inputs that produced it, named explicitly.
+  const co = inflatorCoefficients(0)
+  assert.ok(Object.is(inflatorCurve(0, co), 0), 'f(0) is not +0')
+  assert.ok(Object.is(inflatorCurve(-0, co), 0), 'f(-0) is not +0')
+  assert.ok(Object.is(inflatorCurve(-3, co), 0), 'f(-3) past the guard is not +0')
 })

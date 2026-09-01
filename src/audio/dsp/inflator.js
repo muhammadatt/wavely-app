@@ -104,12 +104,30 @@ export function inflatorCoefficients(curvePct) {
  * the parabola turning back up past its own root, not a special case.
  */
 export function inflatorCurve(x, co) {
-  const s = x < 0 ? -x : x
-  const sign = x > 0 ? 1 : -1
+  // ⚠ `Math.abs` AND `x < 0`, NOT `x > 0 ? 1 : -1`, AND THAT IS NOT A STYLE
+  // CHOICE. The reference writes `if (in > 0) sign = 1; else sign = -1;`, which
+  // hands x = 0 a sign of -1 and returns NEGATIVE ZERO — so a transfer curve
+  // that should map 0 to 0 maps it to -0, and `Object.is(0, -0)` is false.
+  //
+  // It never reached the audio: the blend's `dry*(1-effect) + wet*effect` sums
+  // it against a positive zero, and IEEE gives `+0 + -0 = +0`, as does the
+  // downsampler's tap sum — verified, zero -0 samples in a silent region's
+  // output at any setting. But `inflatorCurve` is exported and the tests call
+  // it directly, and this file's guarantees are asserted bit-exactly all over
+  // the suite, so a -0 sitting in the public API is a trap laid for the next
+  // person to write `assert.equal(f(0), 0)` with Object.is semantics.
+  //
+  // `Math.abs` rather than `x < 0 ? -x : x` because the latter leaves s = -0
+  // for an input of -0, which propagates through the polynomial and puts the
+  // problem back.
+  const s = Math.abs(x)
+  const sign = x < 0 ? -1 : 1
 
   let y
   if (s >= 2) {
-    y = 0
+    // Returned rather than falling through to `y * sign`, which would hand a
+    // negative input back -0 for the same reason the sign expression did.
+    return 0
   } else if (s > 1) {
     y = 2 * s - s * s
   } else {
