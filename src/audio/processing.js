@@ -27,11 +27,17 @@ import {
   toKernelParams as toSchepsKernelParams,
 } from './effects/scheps.js'
 import { ensureVocalSatWorklet } from './vocalSatWorkletLoader.js'
+import { ensureInflatorWorklet } from './inflatorWorkletLoader.js'
 import {
   VOCAL_SAT_DEFAULTS,
   VOCAL_SAT_LATENCY_SAMPLES,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
+import {
+  INFLATOR_DEFAULTS,
+  INFLATOR_LATENCY_SAMPLES,
+  toKernelParams as toInflatorKernelParams,
+} from './effects/inflator.js'
 import { ensureResonanceWorklet } from './resonanceWorkletLoader.js'
 import {
   RESONANCE_DEFAULTS,
@@ -498,6 +504,16 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
     latencySamples: VOCAL_SAT_LATENCY_SAMPLES,
+  })
+}
+
+/** Apply the Inflator to a region. */
+export function applyInflatorRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureInflatorWorklet,
+    processorName: 'inflator-processor',
+    kernelParams: toInflatorKernelParams({ ...INFLATOR_DEFAULTS, ...params }),
+    latencySamples: INFLATOR_LATENCY_SAMPLES,
   })
 }
 
