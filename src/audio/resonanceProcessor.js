@@ -914,15 +914,19 @@ export class ResonanceKernel {
   /**
    * Resample this frame's measurements onto the display grid.
    *
-   * Everything here is this frame's except the held reduction, which is the
-   * maximum since the last read. The display is read at half the frame rate, so
-   * a peak landing on the unread frame would otherwise be lost — but only the
-   * peak-hold outline wants that value. Anything drawn against the spectrum
-   * uses the live curve, so the two agree about the same instant.
+   * ALL FOUR CURVES DESCRIBE THIS FRAME, so anything drawn from them agrees
+   * about one instant. There used to be a fifth carrying the maximum since the
+   * last read, because the display is read at half the frame rate and a peak
+   * landing on an unread frame was otherwise lost; it existed for the trace's
+   * peak-hold outline alone, and went when that did.
    *
    * The reference goes out without `selectivity` added — the panel adds it when
    * drawing, so turning the knob moves the threshold line immediately rather
    * than on the next frame out of the worklet.
+   *
+   * `detect` is NOT `mag`: it is the curve the detector reads, which in the
+   * shipping peak reference mode is a max-filtered magnitude. A margin computed
+   * from `mag` reports no crossing on bins the kernel is cutting.
    */
   _snapshotDisplay() {
     const {

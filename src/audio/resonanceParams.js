@@ -129,13 +129,15 @@ export function resonanceDisplayRange(sampleRate) {
 /**
  * Reference mode override, for hearing the two detectors back to back.
  *
- *   ?resoRef=peak                              one page load
- *   localStorage.setItem('resoRef', 'peak')    until cleared
+ *   ?resoRef=cepstral                              one page load
+ *   localStorage.setItem('resoRef', 'cepstral')    until cleared
  *
- * The cepstral reference ships. The peak-envelope one is the alternative — see
- * the note on PEAK_REF_FLOOR_FACTOR in resonanceProcessor.js — and it needs a
- * way to be listened to on real material before anything is decided, because
- * every number behind it so far is synthetic.
+ * ⚠ THE ROLES SWAPPED AND THIS NOTE HAD THEM THE OLD WAY ROUND, examples
+ * included. The PEAK ENVELOPE ships; cepstral is the override. The swap was made
+ * on the measurement in RESONANCE_REF_MODE_DEFAULTS below: the cepstral
+ * reference works in roughly 150-900 Hz and is blind either side of it — below
+ * the fundamental where rumble and room modes live, and above about 1 kHz where
+ * sibilance and ring do, which is most of what this effect is asked to remove.
  *
  * Read at module load rather than per-analysis, unlike VoiceRx's equivalent:
  * these values seed the panel's knobs, and a knob that silently changes value
@@ -651,8 +653,20 @@ export const RESONANCE_DEFAULTS = {
   // the same average spread evenly instead of concentrated in momentary deep
   // notches. 15/80 was inherited from the server stage, where the suppressor
   // runs inside a chain rather than as something set by ear.
-  attack: 300, // ms
-  release: 1500, // ms
+  //
+  // 200/500 IS WHERE THAT SWEEP SATURATES, which is why it is the default rather
+  // than the slowest setting the sweep liked. Matched at 3.0 dB of cut, gain
+  // jitter runs 0.96/1.29 at 12/80 ms, reaches 0.80/1.02 by 200/500, and is then
+  // FLAT out to 200/4000 — so everything past this pair buys nothing measurable
+  // while making the effect slower to respond. It was 300/1500, which is inside
+  // that flat region and therefore not wrong, only unnecessarily sluggish.
+  //
+  // ⚠ THE KNOB TOPS STAY AT 400/2000. What keeps improving past the knee is p90
+  // depth rather than jitter, and a narrator with an unusually resonant room is
+  // the case that wants it — the sweep is the argument for the range, this pair
+  // is the argument for where to start.
+  attack: 200, // ms
+  release: 500, // ms
   mode: 'soft', // 'soft' | 'hard'
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
   refMode: 'peak',

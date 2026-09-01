@@ -41,38 +41,34 @@ const props = defineProps({
   solo: { type: Boolean, default: false },
   accent: { type: String, default: '#8de0a8' },
   /** Sitting in the control row rather than floating over the plot. */
-  docked: { type: Boolean, default: false },
 })
 
 /**
- * ⚠ DOCKED IS THE SHIPPING SHAPE; FLOATING IS WHAT IT REPLACED. As a card
- * hovering beside its node it competed with the very curve it was editing —
- * `placePanel` put it at the node's own y ± 14, which is the one place
- * guaranteed to cover the thing under the pointer, and at 268 x 92 it was a
- * third of the lane.
+ * ⚠ IT DOCKS AT THE FOOT OF THE PLATE, AND IT USED TO FLOAT. As a card hovering
+ * beside its node it competed with the very curve it was editing — `placePanel`
+ * put it at the node's own y ± 14, which is the one place guaranteed to cover
+ * the thing under the pointer, and at 268 x 92 it was a third of the lane. No
+ * drop shadow any more, because it is not floating over anything.
  *
- * Docked it takes either the foot of the plate or the slot in the control row
- * that the SELECTED ZONE's settings take under the other model — see
- * ui/focusNodeDock.js. Two differences from the floating card, both chrome: no
- * fixed width, so it fills whichever slot it is in, and no drop shadow, because
- * it is not floating over anything.
+ * ⚠ A SECOND DOCK WAS TRIED AND DELETED — the slot in the control row that the
+ * SELECTED ZONE's settings take under the other model, chosen between by
+ * `ui/focusNodeDock.js`. It was rejected on one observation: a panel that
+ * appears outside the display is easy to miss changing, so the swap read as
+ * nothing having happened. The module and the row branch went with it.
  *
- * ⚠ IT KEEPS ITS 268 px WHEREVER IT IS DOCKED. It was `w-full` when docked, on
- * the reflex that a docked thing fills its slot. Wrong on both counts here: at
- * the foot of the plate a full-width panel covers the whole bottom of the
- * display across every frequency, where the same fields centred cover under half
- * of it — and in the control row it made this the one block that stretched,
- * where the zone plate beside it is sized by its contents and centred. Three
- * fields and a chip row have a natural width; stretching them only spreads them
- * out.
+ * ⚠ IT KEEPS ITS 268 px RATHER THAN FILLING THE SLOT. It was `w-full` on the
+ * reflex that a docked thing fills its dock; at the foot of the plate that
+ * covers the whole bottom of the display across every frequency, where the same
+ * fields centred cover under half of it. Three fields and a chip row have a
+ * natural width; stretching them only spreads them out.
  *
- * ⚠ THE CLOSE BUTTON STAYS IN BOTH. It was dropped when this docked, on the
- * argument that selection opens and closes it the way selecting a zone does.
- * True of the control row, where the panel occupies space nothing else wanted;
- * false at the foot of the plate, where it covers the bottom of the display
- * including the FOUND strip. There the reader needs a way to put it down that is
- * not "find empty plate and click it" — and a dismissed panel is not a
- * deselected node, so the `×` emits `close` and leaves the selection alone.
+ * ⚠ THE CLOSE BUTTON STAYS. It was dropped when this docked, on the argument
+ * that selection opens and closes it the way selecting a zone does — which
+ * would hold in a slot nothing else wants, and does not here, where the panel
+ * covers the bottom of the display including the FOUND strip. The reader needs a
+ * way to put it down that is not "find empty plate and click it" — and a
+ * dismissed panel is not a deselected node, so the `×` emits `close` and leaves
+ * the selection alone.
  */
 const emit = defineEmits(['patch', 'delete', 'close', 'solo'])
 
@@ -161,9 +157,7 @@ function chip(on, warn = false) {
     class="relative rounded-[10px] px-[10px] pt-[14px] pb-[8px]"
     :style="[
       { background: 'rgba(14,18,20,1)', width: '268px' },
-      { boxShadow: docked
-        ? `inset 0 0 0 1px ${tint(accent, 0.28)}`
-        : `inset 0 0 0 1px ${tint(accent, 0.28)}, 0 8px 24px rgba(0,0,0,.6)` },
+      { boxShadow: `inset 0 0 0 1px ${tint(accent, 0.28)}` },
     ]"
     role="group"
     :aria-label="`Focus node ${(rank ?? index) + 1} of ${count}, low to high`"

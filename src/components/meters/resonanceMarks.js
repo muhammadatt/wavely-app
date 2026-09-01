@@ -23,28 +23,29 @@
 /**
  * The shallowest crossing worth shading.
  *
- * ⚠ IT WAS A PIXEL BUDGET AND IT IS NOT ONE ANY MORE, which is why it moved.
- * Against the old absolute window a margin was drawn at about 3 px per dB and
- * 0.3 dB was the point where a fill became thinner than the strokes around it.
- * The margin lane draws the same dB at ~9.2 px, so that floor now admits
- * three-pixel shading of sub-decibel wobble — visible, and about nothing.
+ * IT IS A PIXEL BUDGET AGAIN, having twice not been one. The spectrum's window
+ * is 85 dB over a band of about 139 px, so a decibel is 1.6 px and this floor is
+ * 0.8 — right at the point where a fill becomes thinner than the strokes around
+ * it, which is where it started life against a different window. That is
+ * coincidence rather than derivation; the value has not moved.
  *
- * What it guards instead is CLUTTER, and only because the shading is held. The
- * reference is a smoothed envelope, so bins sitting within a fraction of a dB of
- * the line cross back and forth continuously; each crossing leaves a ghost for
- * something over two seconds, and without a floor the band fills with ghosts
- * that describe nothing and hide the ones that do.
+ * ⚠ THE CLUTTER ARGUMENT IT CARRIED IS VOID. It read that the floor guards
+ * against ghosts, "and only because the shading is held" — the shading here is
+ * LIVE, and has been since the crossing history moved into the FOUND band. A bin
+ * hovering either side of the line now flickers rather than accumulating, which
+ * is a smaller problem and still worth suppressing.
+ *
+ * ⚠ AND IT IS ONE FLOOR FOR ONE SPACE, not two. It used to be shared with the
+ * margin lane, on the argument that two overlays must not disagree about what is
+ * happening. That lane is gone, and the FOUND band that replaced it applies no
+ * floor of its own — it draws the held excess as a silhouette, where a shallow
+ * crossing is simply a low one rather than a thin sliver that needs suppressing.
+ * So this governs the spectrum's crossings and nothing else.
  *
  * ⚠ 0.5 dB IS A JUDGEMENT, NOT A MEASUREMENT — the first thing to tune by eye,
  * in both directions: too low and the display silts up, too high and a genuine
  * shallow resonance never appears. It is compared against a run's PEAK, so a
  * broad resonance keeps its shallow flanks either way.
- *
- * ONE FLOOR FOR BOTH SPACES. The same crossings are shaded twice over — against
- * absolute level in the SPECTRUM overlay at ~3 px per dB, and against the rail
- * in MARGIN at ~9 — and a crossing worth showing in one is worth showing in the
- * other. Splitting it per space would let the two overlays disagree about what
- * is happening, which is worse than either floor being slightly off.
  */
 export const EXCEEDANCE_MIN_DB = 0.5
 
