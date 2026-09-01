@@ -42,7 +42,7 @@ const STORE_KEY = 'wavely.resotame.overlays'
  * like any unknown key, which puts FOUND at its default rather than inheriting a
  * preference for a different picture.
  */
-export const OVERLAY_KEYS = ['grid', 'history', 'spectrum', 'found', 'removed']
+export const OVERLAY_KEYS = ['history', 'spectrum', 'found', 'removed']
 
 /**
  * What each is when nothing has been stored.
@@ -56,8 +56,16 @@ export const OVERLAY_KEYS = ['grid', 'history', 'spectrum', 'found', 'removed']
  * alone: that cannot tell a stored `false` from a key nobody has written yet,
  * and for `removed` those are opposite answers.
  */
+/**
+ * ⚠ `grid` IS GONE. It drew frequency and reduction rules across the whole plot
+ * AND gated the reduction numerals down the right-hand edge — so reading a depth
+ * off the trace meant switching on a grid over everything else to get the scale
+ * that measures it. The numerals now follow REMOVED, which is the reading they
+ * belong to, and the rules are not missed: the frequency labels along the axis
+ * never depended on the switch, and the reduction figures are printed in the
+ * band itself. A stored `grid` is ignored like any unknown key.
+ */
 const DEFAULTS = {
-  grid: false,
   history: false,
   spectrum: false,
   found: false,

@@ -152,7 +152,7 @@ const oneDp = v => v.toFixed(1)
 <template>
   <div class="flex items-center justify-center">
   <div
-    class="flex items-center gap-[14px] rounded-[7px] px-[12px] py-[9px]"
+    class="flex items-center gap-[12px] rounded-[7px] px-[10px] py-[9px]"
     @keydown.escape="harmonicsOpen = false"
     :style="{
       background: 'rgba(0,0,0,.28)',
@@ -163,7 +163,7 @@ const oneDp = v => v.toFixed(1)
     <!-- Identity first: these knobs mean nothing without it, because the same
          three knobs show six different sets of values. -->
     <!-- The identity block, or the harmonics door in its place. -->
-    <div class="w-[116px] shrink-0">
+    <div class="w-[100px] shrink-0">
       <template v-if="!harmonicsOpen">
       <div
         style="font:700 12px 'JetBrains Mono',monospace;letter-spacing:.08em;white-space:nowrap"
@@ -289,7 +289,7 @@ const oneDp = v => v.toFixed(1)
     </div>
 
     <div class="flex-1 flex justify-center items-center gap-[6px]">
-      <div class="w-[76px] shrink-0">
+      <div class="w-[68px] shrink-0">
         <Knob
           :model-value="settings.selectivity" @update:model-value="set('selectivity', $event)"
           :min="RESONANCE_ZONE_RANGES.selectivity.min" :max="RESONANCE_ZONE_RANGES.selectivity.max"
@@ -298,7 +298,7 @@ const oneDp = v => v.toFixed(1)
           :disabled="disabled"
         />
       </div>
-      <div class="w-[76px] shrink-0">
+      <div class="w-[68px] shrink-0">
         <Knob
           :model-value="settings.sharpness" @update:model-value="set('sharpness', $event)"
           :min="RESONANCE_ZONE_RANGES.sharpness.min" :max="RESONANCE_ZONE_RANGES.sharpness.max"
@@ -307,7 +307,7 @@ const oneDp = v => v.toFixed(1)
           :disabled="disabled"
         />
       </div>
-      <div class="w-[76px] shrink-0">
+      <div class="w-[68px] shrink-0">
         <Knob
           :model-value="settings.depth" @update:model-value="set('depth', $event)"
           :min="RESONANCE_ZONE_RANGES.depth.min" :max="RESONANCE_ZONE_RANGES.depth.max"

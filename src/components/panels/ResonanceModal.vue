@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
+import { RESONANCE_FOCUS_RANGES, focusThresholdFn } from '../../audio/resonanceFocus.js'
 import {
   DEFAULT_REF_MODE,
   zoneSettings,
@@ -16,10 +17,21 @@ import {
   toggleOverlay as flipOverlay,
 } from '../../ui/resonanceOverlays.js'
 import { HISTORY_SECONDS } from '../meters/resonanceHistory.js'
+import {
+  focusRanks,
+  patchNode,
+  removeNode,
+  setNodeParam,
+} from '../meters/resonanceFocusNodes.js'
+import FocusNodePanel from './FocusNodePanel.vue'
+import Icon from '../ui/Icon.vue'
+import DeviceField from '../knobs/DeviceField.vue'
+import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
 import Knob from '../knobs/Knob.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
+import ResonanceFocusControls from './ResonanceFocusControls.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -30,6 +42,7 @@ const {
   resPreview, resDelta, resReduction,
   resDisplayFn, hasSelection,
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
+  resTargeting, resFocus, resSelectedNode, resSoloNode, syncFocus, toggleFocusSolo,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
   apply, teardown, closeModal,
@@ -42,6 +55,26 @@ onMounted(() => {
 })
 
 const ACCENT = '#8de0a8'
+
+/**
+ * Running the prototype targeting model — see src/audio/resonanceTargeting.js.
+ *
+ * A const rather than a computed: the model is resolved once at module load, so
+ * a reactive read here would only ever produce the same answer at more cost,
+ * and would imply the panel can switch between them at runtime. It cannot, on
+ * purpose.
+ */
+const focusMode = resTargeting === 'focus'
+
+/**
+ * The threshold offset the plot draws its dotted line and its crossings from.
+ *
+ * Null under zones, so the plot keeps its own zone lookup and the shipping path
+ * is untouched. A `computed`, so the normalisation inside `focusThresholdFn`
+ * happens once per edit rather than once per display bin per animation frame.
+ */
+const selectivityFn = computed(() =>
+  (focusMode ? focusThresholdFn(resFocus.value) : null))
 
 /**
  * The spectrum display's height — opens at 140, and grows from there. See
@@ -63,51 +96,56 @@ const heightDelta = ref(0)
 const plotHeight = computed(() => PLOT_H + heightDelta.value)
 
 /**
- * THE READOUT ROW IS THE PANEL'S, NOT THE PLOT'S.
+ * Whether the node's fields are showing, as distinct from whether a node is
+ * selected.
  *
- * It used to live inside ResonanceSpectrum, above the canvas, which is where it
- * is drawn and so looked like where it belonged. It is not: the row is a header
- * for the whole display area rather than a part of the picture, and keeping it
- * inside the plot meant the panel could not put anything else in it — which is
- * exactly what the zone count needed. The plot now draws the plot.
+ * ⚠ A DISMISSED PANEL IS NOT A DESELECTED NODE. The `×` puts the fields down and
+ * leaves the node selected — still lit on the plot, still the thing the arrow
+ * keys walk from — because at the foot of the plate the panel covers the bottom
+ * of the display, and wanting to SEE that is not wanting to stop editing.
  *
- * The two figures are still MEASURED inside the plot, on the frame loop that
- * draws it, and arrive by `update:reading` at ~10 Hz. That split is the point:
- * anything computing them out here would be a second reader of the kernel's
- * port describing a different instant from the picture beside it.
+ * It reopens on the next selection change, so dismissing is per-node rather than
+ * a mode: clicking another node shows its fields, which is what a reader who
+ * just dismissed one and clicked the next expects.
  */
-const reading = ref({ deepestDb: 0, count: 0, avgDb: 0 })
+const nodePanelOpen = ref(true)
+watch(() => resSelectedNode.value, () => { nodePanelOpen.value = true })
+
+/** The selected focus node, or null — what the fields are shown for. */
+const selectedNode = computed(() => (focusMode
+  ? resFocus.value.nodes[resSelectedNode.value] ?? null
+  : null))
 
 /**
- * The two figures beside each other, and the string that reserves their width.
+ * Node edits, applied here rather than in the plot.
  *
- * ⚠ A READOUT THAT RESIZES ITSELF MOVES EVERYTHING TO ITS RIGHT. These update
- * ~10 times a second, so `-6.4` becoming `-12.1` shunted the MAX pair sideways
- * several times a second — the number was legible and the row was not. Two
- * distinct causes, and fixing one leaves the other: the glyph COUNT changes at
- * 10 dB, and Inter's default figures are proportional, so `-11.1` is narrower
- * than `-88.8` at the same length. `tabular-nums` answers the second; only
- * reserving the width answers the first.
- *
- * WIDEST is a real string rendered invisibly in the same box rather than a
- * min-width in `ch` or px. `ch` is the width of a digit, so a value made of a
- * minus, a point and three digits is not a whole number of them — sizing that
- * way means guessing at Inter's metrics for the minus and the point, and being
- * wrong in the loose direction leaves a permanent gap. A hidden copy of the
- * widest string is exact by construction and stays exact if the face or the
- * size ever changes.
- *
- * -24.0 is the widest either figure can be: both are bounded by the plot's
- * `fullScaleDb`, which is 24. A value past it would widen the box rather than
- * be clipped, so the failure mode of getting this wrong is the old behaviour
- * rather than a truncated number.
+ * They lived in ResonanceSpectrum because the floating card did. `shape` and
+ * `enabled` are not numbers, so they take `patchNode` rather than the clamping
+ * setter `setNodeParam`, which would silently reject them.
  */
-const READOUT_WIDEST = '-24.0'
+function patchFocusNode(patch) {
+  const i = resSelectedNode.value
+  let next = resFocus.value.nodes
+  for (const [name, value] of Object.entries(patch)) {
+    next = name === 'shape' || name === 'enabled'
+      ? patchNode(next, i, { [name]: value })
+      : setNodeParam(next, i, name, value)
+  }
+  syncFocus({ ...resFocus.value, nodes: next })
+}
 
-const readouts = computed(() => [
-  { key: 'ave', db: reading.value.avgDb, label: 'AVE dB' },
-  { key: 'max', db: reading.value.deepestDb, label: 'MAX dB' },
-])
+function deleteFocusNode() {
+  syncFocus({ ...resFocus.value, nodes: removeNode(resFocus.value.nodes, resSelectedNode.value) })
+  resSelectedNode.value = -1
+}
+
+/**
+ * ⚠ THE PLOT KEEPS ITS OWN READINGS NOW, so nothing here holds them. AVE and
+ * MAX are drawn inside the REMOVED band by the component that measures them,
+ * which removes the hop they used to make: measured in the frame loop, emitted
+ * at ~10 Hz, held in a ref here, and printed a few pixels above the plot. The
+ * `update:reading` emit went with them.
+ */
 
 // Display state, persisted, and deliberately nowhere near `params` — see
 // ui/resonanceOverlays.js for both halves of that.
@@ -146,7 +184,6 @@ const overlayButtons = computed(() => [
     on: overlays.value.found,
     title: 'Resonances found in the last few seconds, at their true depth over the threshold',
   },
-  { key: 'grid', label: 'GRID', on: overlays.value.grid, title: 'Frequency and reduction rules' },
   /*
   {
     key: 'history',
@@ -175,6 +212,22 @@ const overlayButtons = computed(() => [
 const percent = v => `${Math.round(v * 100)}`
 const ms = v => `${Math.round(v)}`
 const db = v => `${Math.round(v)}`
+/**
+ * The harmonic mask's two positions.
+ *
+ * ⚠ THE ICON MOVED INTO THE "ON" LABEL. A glyph is what told this control apart
+ * from the view switches it used to sit among; among knobs that job is done by
+ * shape, and a switch that carried an icon on only one of its two cells would
+ * read as the cells meaning different KINDS of thing rather than two states of
+ * one. The caption underneath carries the name instead, which is what every
+ * other switch on this faceplate does.
+ */
+const HARMONIC_MODES = [
+  { value: 'on', label: 'ON', title: 'Hold the harmonics of the tracked voice, below the ceiling' },
+  { value: 'off', label: 'OFF', title: 'Treat harmonics like any other peak. It will thin the material' },
+]
+
+const protectHz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)))
 const signedDb = v => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
 
 /**
@@ -215,17 +268,17 @@ async function applyAndClose() {
 </script>
 
 <template>
-  <!-- ⚠ 740 RATHER THAN 660, AND THE SINGLE ROW IS WHY. Attack and Release,
-       the zone plate and Mix and Trim measure 674 px side by side; the old
-       width left 608 of content, so the row overflowed by 66 and the plate
-       would have been clipped rather than merely tight. The alternative was
-       ~52 px knobs and a 100 px identity block, which is smaller than anything
-       else in the app wears. The 80 px also goes to the display, which is the
-       one dimension the frequency axis has been short of throughout. -->
+  <!-- ⚠ BACK TO 660, AND THE ROW WAS MADE TO FIT RATHER THAN THE WINDOW GROWN.
+       It went to 740 when the two control rows collapsed into one, because the
+       row measured 674 against 608 of content. The knobs came down instead:
+       the four globals to 54 and the zone plate to a 100 px identity and 68 px
+       knobs, which is 348 in a 352 px slot. The arithmetic is in the widths
+       below and it has almost nothing spare, so anything added to this row
+       needs the sums redone rather than a nudge. -->
   <FloatingWindow
     window-id="resonance-suppressor"
     :z="z"
-    :width="740"
+    :width="660"
     :accent="ACCENT"
     brand-lead="RESO"
     brand-tail="TAME"
@@ -314,72 +367,24 @@ async function applyAndClose() {
            their widest string, the switches carry fixed labels — so the centre
            holds still frame to frame as well as file to file. -->
       <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-[14px] mb-[7px]">
-        <!-- 1c's header figures: what was taken out, at the size of the thing
-             the panel is for. The old line led with a running reduction figure
-             and an average in 12 px, sharing a row with a three-item curve
-             legend. Under "removal only" the reduction IS the reading — there
-             is no second curve for it to be one of — so it gets the size, and
-             the legend goes: two of the three curves it named no longer exist.
-             The average and the deepest are both here because they answer
-             different questions: how much the effect is doing overall, and how
-             hard it is working at its worst moment. -->
+        <!-- ⚠ THE AVE AND MAX FIGURES ARE INSIDE THE PLOT NOW, in the REMOVED
+             band, so this cell is empty. They were the largest text on the panel
+             and a summary of its smallest band, sitting outside the display —
+             two places to look to read one cut. See drawReductionReadouts.
+
+             The cell stays rather than the grid dropping to two columns: it is
+             what centres the zone count against the ROW, and a two-column grid
+             would centre it against whatever the switches happen to measure.
+             ⚠ DELTA MOVED IN HERE with them, because it belongs beside a
+             reading rather than beside nothing. -->
         <span class="flex items-end gap-[10px] min-w-0">
-          <span class="flex flex-col">
-            <span style="font:500 9px 'JetBrains Mono',monospace;letter-spacing:.14em;color:rgba(255,255,255,.35)">
-              RESONANCES SUPPRESSED
-            </span>
-            <!-- The brief sets this at 46 px against a 1000 px card; this
-                 faceplate is 640 (`--w-faceplate`), so the same figure lands at
-                 30, and at 24 with two of them side by side. Everything else
-                 about it is the brief's: Inter 500, the pale tint, and a mono
-                 `dB` at the text-mini step beside it.
-
-                 One loop rather than two copies: the pair differ in a number
-                 and a word, and the width reservation below has to be identical
-                 on both or the one that drifts moves the other. -->
-            <div class="flex gap-2 mt-1">
-              <span
-                v-for="r in readouts"
-                :key="r.key"
-                class="flex items-baseline gap-[4px]"
-              >
-                <!-- The invisible copy sets the width; the real value is laid
-                     over it, right-aligned, so the decimal point holds still
-                     rather than the leading digit. -->
-                <span class="relative inline-block">
-                  <span
-                    aria-hidden="true"
-                    class="invisible"
-                    :style="{
-                      font: `500 24px 'Inter',system-ui`,
-                      lineHeight: '1',
-                      fontVariantNumeric: 'tabular-nums',
-                    }"
-                  >{{ READOUT_WIDEST }}</span>
-                  <span
-                    class="absolute inset-0 text-right"
-                    :style="{
-                      font: `500 24px 'Inter',system-ui`,
-                      lineHeight: '1',
-                      fontVariantNumeric: 'tabular-nums',
-                      color: bright(ACCENT),
-                      textShadow: `0 0 12px ${tint(ACCENT, 0.45)}`,
-                    }"
-                  >-{{ r.db.toFixed(1) }}</span>
-                </span>
-                <span style="font:500 9px 'JetBrains Mono',monospace;color:rgba(255,255,255,.35)">{{ r.label }}</span>
-              </span>
-            </div>
-
-          </span>
-
           <!-- Second statement of a mode the title bar already shows, and worth
                the duplication: someone reading the plot to decide whether a cut
                is landing where they want has their eyes here, not on the title
                bar, and the trace being loud is otherwise unexplained. -->
           <span
             v-show="resDelta"
-            class="px-[5px] py-[1px] rounded mb-[3px]"
+            class="px-[5px] py-[1px] rounded"
             :style="{
               font: `700 8px 'JetBrains Mono',monospace`,
               letterSpacing: '.12em',
@@ -396,7 +401,16 @@ async function applyAndClose() {
         <!-- No nudge of its own: the row centres its items now, and a bottom
              margin left over from when it aligned them to the baseline would
              lift this one 3 px above the axis it is being centred on. -->
+        <span
+          v-if="!focusMode"
+          class="px-2 py-1 rounded-full shrink-0"
+          style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.12em;
+                 color:#ffb27a;background:rgba(255,178,122,.12);
+                 border:1px solid rgba(255,178,122,.45)"
+          title="Zone targeting, selected by ?resoTargeting=zones. Focus nodes are the shipping model."
+        >ZONES</span>
         <ResonanceZoneCount
+          v-if="!focusMode"
           :zones="resZones"
           :selected="resSelectedZone"
           :disabled="!resPreview"
@@ -407,6 +421,11 @@ async function applyAndClose() {
           @update:selected="resSelectedZone = $event"
           @fit="fitZonesToVoice"
         />
+        <!-- ⚠ THE BADGE MOVED TO THE OTHER MODEL WITH THE PROMOTION. An
+             override is a thing you forget you turned on, so the one that is
+             NOT the default is the one that has to announce itself — and it is
+             now zones. Under focus there is nothing to say, which is what
+             shipping means. Same rule the reference-mode badge follows. -->
 
         <span class="flex flex-col items-end self-end gap-[5px] min-w-0">
 
@@ -442,20 +461,53 @@ async function applyAndClose() {
         </span>
       </div>
 
+      <!-- The plot draws zone columns from what it is GIVEN, so in focus mode it
+           is given none. The rail below owns targeting there, and two editors
+           for one idea on one plate is exactly the confusion this prototype
+           exists to remove. -->
       <ResonanceSpectrum
         :data-fn="resDisplayFn"
         :reduction-db="resReduction"
         :accent="ACCENT"
         :height="plotHeight"
         :delta="resDelta"
-        :zones="resZones"
-        :selected-zone="resSelectedZone"
-        :delta-zone="resDeltaZone"
+        :selectivity-fn="selectivityFn"
+        :focus-nodes="focusMode ? resFocus.nodes : null"
+        :focus-threshold="resFocus.global.selectivity"
+        :selected-focus-node="resSelectedNode"
+        :solo-focus-node="resSoloNode"
+        :zones="focusMode ? [] : resZones"
+        :selected-zone="focusMode ? -1 : resSelectedZone"
+        :delta-zone="focusMode ? -1 : resDeltaZone"
         :overlays="overlays"
         @update:zones="syncZones"
         @update:selected-zone="resSelectedZone = $event"
-        @update:reading="reading = $event"
-      />
+        @update:focus-nodes="syncFocus({ ...resFocus, nodes: $event })"
+        @update:focus-threshold="syncFocus({
+          ...resFocus, global: { ...resFocus.global, selectivity: $event },
+        })"
+        @update:selected-focus-node="resSelectedNode = $event"
+        @focus-solo="toggleFocusSolo"
+      >
+        <!-- The bottom placement. Same component and the same handlers as the
+             row one — only where it is mounted differs, which is what makes the
+             two comparable rather than two designs that happen to look alike. -->
+        <template v-if="focusMode && selectedNode && nodePanelOpen" #dock>
+          <FocusNodePanel
+            docked
+            :node="selectedNode"
+            :index="resSelectedNode"
+            :rank="focusRanks(resFocus.nodes)[resSelectedNode]"
+            :count="resFocus.nodes.length"
+            :solo="resSoloNode === resSelectedNode"
+            :accent="ACCENT"
+            @patch="patchFocusNode"
+            @delete="deleteFocusNode"
+            @solo="toggleFocusSolo(resSelectedNode)"
+            @close="nodePanelOpen = false"
+          />
+        </template>
+      </ResonanceSpectrum>
 
       <!-- ONE ROW FOR EVERYTHING BELOW THE PLOT, and it used to be two.
            Directly under the display because the row and the plot are one
@@ -492,7 +544,17 @@ async function applyAndClose() {
              200/500 ms; what keeps improving past there is p90 depth, 8.5 to
              5.2 dB, the same average cut spread evenly instead of concentrated
              in momentary deep notches. 400/2000 captures nearly all of it. -->
-        <div class="w-[60px] shrink-0">
+        <!-- ⚠ A WRAPPING GROUP, WHICH IS WHAT LETS A FOURTH CONTROL LAND HERE AT
+             ALL. The row has almost no slack — the zone plate is 348 px in a
+             352 px slot — so anything added beside Attack and Release has to be
+             able to fall to a second line instead of pushing the plate out. The
+             cap is 150 px: Attack and Release sit together on the first line at
+             116, and the harmonics pair goes to the second at 149.
+
+             In zone mode the group is 116 wide and never wraps, so the row is
+             exactly what it was. The cap costs nothing when nothing needs it. -->
+        <div class="flex flex-wrap items-center gap-[8px] shrink-0 max-w-[150px]">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resAttack" @update:model-value="syncAttack"
             :min="RESONANCE_ATTACK_MIN_MS" :max="400" :step="5" :value-font-px="11"
@@ -500,7 +562,7 @@ async function applyAndClose() {
             :disabled="!resPreview"
           />
         </div>
-        <div class="w-[60px] shrink-0">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resRelease" @update:model-value="syncRelease"
             :min="RESONANCE_RELEASE_MIN_MS" :max="2000" :step="10" :value-font-px="11"
@@ -509,10 +571,103 @@ async function applyAndClose() {
           />
         </div>
 
+        <!-- ⚠ HARMONIC PROTECTION SITS WITH THE BALLISTICS, NOT WITH THE VIEW
+             SWITCHES. It went to the header row first, which was wrong on the
+             one distinction that matters here: everything in that row changes
+             what is DRAWN, and this changes the audio. Beside Attack and Release
+             it is among its own kind — global settings of the detector.
+
+             The icon still earns its place. These are the only two words in the
+             row that name a frequency-domain idea rather than a time one, and a
+             glyph says "harmonics" faster than the word does at 8 px.
+
+             ⚠ FOCUS MODE ONLY. Under zones, harmonic protection is per zone and
+             lives behind that panel's HARM door; a global switch here would be a
+             second control for a setting the zones already own. -->
+        <span v-if="focusMode" class="flex items-end gap-[7px] shrink-0">
+          <!-- ⚠ A TWO-POSITION SWITCH, NOT A LIT BUTTON. It was a pill that took
+               the accent when engaged, which is exactly how the overlay switches
+               read their state — and that works THERE because there are four of
+               them side by side, so lit and unlit are visible against each
+               other. Alone among knobs it has nothing to be compared with: a
+               single slightly-brighter pill says "there is a button here", not
+               "the thing this controls is on". Reported as exactly that.
+               ON and OFF are always both drawn, so the answer is legible from
+               the one control without a second to compare it to — the same
+               reason ON/BYPASS in the title bar prints the word rather than
+               relying on a lamp alone. -->
+          <!-- ⚠ THE GLYPH SITS BESIDE THE SWITCH, NOT INSIDE A CELL. It is what
+               says at a glance which of the row's controls is about frequency
+               rather than time, and it cannot go in a cell: an icon on ON and
+               none on OFF would read as the two cells meaning different KINDS of
+               thing rather than two states of one. Aligned to the bank rather
+               than the group, so it sits with the cells and not with the caption
+               under them. -->
+          <Icon
+            name="harmonics" :size="13" :stroke-width="1.8"
+            class="self-start mt-[4px] shrink-0"
+            :style="{ color: resFocus.global.protect ? bright(ACCENT) : 'rgba(255,255,255,.32)' }"
+          />
+          <SegmentedSwitch
+            :model-value="resFocus.global.protect ? 'on' : 'off'"
+            :options="HARMONIC_MODES"
+            :padding-x="8"
+            :accent="ACCENT"
+            :disabled="!resPreview"
+            caption="preserve harmonics"
+            @update:model-value="syncFocus({
+              ...resFocus,
+              global: { ...resFocus.global, protect: $event === 'on' },
+            })"
+          />
+          <!-- The ceiling only exists while the mask does, and the slot keeps
+               its width either way — switching protection on must not shove the
+               row sideways. -->
+          <span class="block" style="width:56px">
+            <DeviceField
+              v-if="resFocus.global.protect"
+              :model-value="resFocus.global.protectCeilHz"
+              :min="RESONANCE_FOCUS_RANGES.protectCeilHz.min"
+              :max="RESONANCE_FOCUS_RANGES.protectCeilHz.max"
+              :step="10" log
+              label="Up to" unit="Hz" :format-value="protectHz"
+              :accent="ACCENT" :disabled="!resPreview" :width="56"
+              @update:model-value="syncFocus({
+                ...resFocus, global: { ...resFocus.global, protectCeilHz: $event },
+              })"
+            />
+          </span>
+        </span>
+        </div>
+
         <!-- min-w-0 so the plate is what gives way if the row ever runs out of
              width, rather than a knob being clipped off the end. -->
         <div class="flex-1 min-w-0">
+          <!-- ⚠ THE SELECTED NODE'S FIELDS ARE NOT IN THIS SLOT. They were, for
+               one revision, swapping with the global focus knobs the way the
+               HARM door swaps inside the zone plate — it cost no height and no
+               occlusion, and it was rejected on use: a swap down here is outside
+               the display, and it is easy to miss while the pointer is on a node
+               up there. They are docked at the foot of the plate instead, where
+               the change happens where the reader is already looking. The cost,
+               which was weighed and accepted, is that the panel covers the
+               bottom of the plot — the FOUND strip included — while a node is
+               selected, and the `×` is there to put it down.
+
+               So this slot always holds the FOCUS MODEL'S GLOBAL settings:
+               Threshold, Sharp, Depth and the range. They have nowhere else to
+               live, and unlike the zone model there is no per-zone/global split
+               to reflect here — under focus, "the selected object" is on the
+               plot with its fields. -->
+          <ResonanceFocusControls
+            v-if="focusMode"
+            :focus="resFocus"
+            :accent="ACCENT"
+            :disabled="!resPreview"
+            @update:focus="syncFocus"
+          />
           <ResonanceZoneControls
+            v-else
             :zones="resZones"
             :selected="resSelectedZone"
             :delta-zone="resDeltaZone"
@@ -530,7 +685,7 @@ async function applyAndClose() {
              Trim is `bipolar` — a cut/boost knob filling from its minimum lights
              half the ring at 0 dB, so an untouched trim reads as an applied
              one. -->
-        <div class="w-[60px] shrink-0">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resMix" @update:model-value="syncMix"
             :min="0" :max="1" :step="0.01" :value-font-px="11"
@@ -538,7 +693,7 @@ async function applyAndClose() {
             :disabled="!resPreview"
           />
         </div>
-        <div class="w-[60px] shrink-0">
+        <div class="w-[54px] shrink-0">
           <Knob
             :model-value="resTrim" @update:model-value="syncTrim"
             :min="-12" :max="12" :step="0.5" :value-font-px="11"

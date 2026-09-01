@@ -31,6 +31,20 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   /** Pixels of vertical drag for the full range. Matches Knob's own travel. */
   travelPx: { type: Number, default: 150 },
+  /**
+   * Move the value MULTIPLICATIVELY rather than by equal increments.
+   *
+   * ⚠ FOR FREQUENCY, WHERE A LINEAR FIELD IS NOT A CONTROL AT ALL. Over
+   * 20 Hz–20 kHz the linear drag is 133 Hz per pixel, so one pixel at the
+   * bottom of the range jumps 200 Hz to 333, and a 1 Hz wheel notch does not
+   * move the readout at all — 3180 to 3181 still prints "3.18k". Both were
+   * true of this control before anything wheeled: the field was usable for a
+   * ceiling in dB and quietly useless for a frequency.
+   *
+   * In log mode a wheel notch is one SEMITONE, which is the same unit the
+   * plot's own arrow keys move a node by, so the two agree.
+   */
+  log: { type: Boolean, default: false },
   width: { type: Number, default: 62 },
 })
 
@@ -50,6 +64,30 @@ function clamp(v) {
   return Math.max(props.min, Math.min(props.max, v))
 }
 
+/**
+ * Value to a 0..1 position on the control's travel, and back.
+ *
+ * The linear path is arithmetically what it always was — `(v - min) / (max -
+ * min)` — so nothing that does not opt in moves by a single bit.
+ */
+function toPos(v) {
+  return props.log
+    ? Math.log(clamp(v) / props.min) / Math.log(props.max / props.min)
+    : (clamp(v) - props.min) / (props.max - props.min)
+}
+
+function fromPos(t) {
+  const p = Math.max(0, Math.min(1, t))
+  return props.log
+    ? props.min * Math.pow(props.max / props.min, p)
+    : props.min + p * (props.max - props.min)
+}
+
+/** One wheel notch, in position units: a semitone on a log field, else a step. */
+const wheelPos = computed(() => (props.log
+  ? (1 / 12) / Math.log2(props.max / props.min)
+  : props.step / (props.max - props.min)))
+
 function quantise(v) {
   const stepped = Math.round((v - props.min) / props.step) * props.step + props.min
   // Steps like 0.5 leave float dust that shows up in the readout; round to the
@@ -61,6 +99,28 @@ function quantise(v) {
 function commit(v) {
   const next = quantise(v)
   if (next !== props.modelValue) emit('update:modelValue', next)
+}
+
+/**
+ * THE WHEEL, matching the knob's.
+ *
+ * ⚠ A DRAG IS NOT ENOUGH ON A TRACKPAD. This control was a drag or a typed
+ * number, which covers a mouse and a keyboard and leaves a trackpad with the
+ * worst of both — a two-finger scroll is the gesture people reach for over a
+ * number, and without it the only way to nudge one of these was to select the
+ * text and retype it.
+ *
+ * One `step` per notch, the same as the knob's linear case, so the two controls
+ * feel alike where they sit side by side. Shift takes ten, matching the arrow
+ * keys below rather than inventing a third increment.
+ */
+function onWheel(e) {
+  if (props.disabled || editing.value) return
+  const dir = e.deltaY < 0 ? 1 : -1
+  const v = fromPos(toPos(props.modelValue) + dir * wheelPos.value * (e.shiftKey ? 10 : 1))
+  if (quantise(v) === props.modelValue) return
+  e.preventDefault()
+  commit(v)
 }
 
 function onPointerDown(e) {
@@ -77,7 +137,7 @@ function onPointerMove(e) {
   const dy = start.y - e.clientY
   if (!moved && Math.abs(dy) < 3) return
   moved = true
-  commit(start.value + (dy / props.travelPx) * (props.max - props.min))
+  commit(fromPos(toPos(start.value) + dy / props.travelPx))
   e.preventDefault()
 }
 
@@ -116,11 +176,14 @@ function onKeyDown(e) {
   // is the most likely person to want to nudge it. ONE STEP, ten with Shift —
   // the other way round jumped a 0.5 dB trim by 5 dB on the first press, which
   // reads as the field having ignored the key and done something else.
+  // ⚠ Through the same position mapping as the drag and the wheel, or a log
+  // field's arrows step by 1 Hz and do not move the readout.
   const mult = e.shiftKey ? 10 : 1
+  const nudge = dir => commit(fromPos(toPos(props.modelValue) + dir * wheelPos.value * mult))
   if (e.key === 'ArrowUp') {
-    commit(props.modelValue + props.step * mult)
+    nudge(1)
   } else if (e.key === 'ArrowDown') {
-    commit(props.modelValue - props.step * mult)
+    nudge(-1)
   } else if (e.key === 'Enter') {
     endEdit(true)
   } else if (e.key === 'Escape') {
@@ -140,6 +203,7 @@ function onKeyDown(e) {
     <div
       class="w-full rounded-[5px] text-center"
       :class="disabled ? 'cursor-default' : (editing ? 'cursor-text' : 'cursor-ns-resize')"
+      @wheel="onWheel"
       :style="{
         padding: '5px 4px',
         background: 'rgba(0,0,0,.34)',
