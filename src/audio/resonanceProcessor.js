@@ -114,6 +114,7 @@ import {
   buildResonanceZoneCurves,
   resonanceDisplayRange,
 } from './resonanceParams.js'
+import { buildResonanceFocusCurves } from './resonanceFocus.js'
 
 /**
  * The default frame, and the only one the full-range plugin uses.
@@ -527,6 +528,15 @@ export const RESONANCE_KERNEL_DEFAULTS = {
    * what the separate low/high limit pair used to do.
    */
   zones: DEFAULT_RESONANCE_ZONES,
+  /**
+   * Focus patch — `{ global, nodes }` — or null to use `zones`.
+   *
+   * Null rather than absent: this object is merged over the kernel's defaults,
+   * so a key present-but-undefined would overwrite a default rather than fall
+   * back to it. Null is a value that means something ("the other model"), which
+   * is what the dispatch in _deriveParams reads.
+   */
+  focus: null,
   // Wet/dry blend and wet-path makeup. Both live inside the kernel's per-bin
   // gain rather than as nodes around it — see _mixGain.
   mix: 1,
@@ -625,7 +635,6 @@ export class ResonanceKernel {
     this.displayEnv = new Float32Array(this.displayBins)
     this.displayDetect = new Float32Array(this.displayBins)
     this.displayGrNow = new Float32Array(this.displayBins)
-    this.displayGrHeld = new Float32Array(this.displayBins)
     this.hasDisplayFrame = false
     this._buildDisplayGrid()
 
@@ -752,8 +761,17 @@ export class ResonanceKernel {
     // how the per-bin detector reads them. Rebuilt on any param change rather
     // than diffed — a few thousand lookups on a knob move, never on the audio
     // path.
+    //
+    // ⚠ TWO AUTHORING MODELS, ONE KERNEL. `focus` is the prototype targeting
+    // model (see resonanceFocus.js) and takes over when present; `zones` is
+    // what ships. Nothing below this line knows which one drew the curves,
+    // which is the point — the detector loop, the envelope groups, the mask and
+    // the ceiling all read per-bin arrays either way, so an alternative model
+    // is a panel change plus this dispatch rather than a DSP change.
     const zones = p.zones ?? DEFAULT_RESONANCE_ZONES
-    const curves = buildResonanceZoneCurves(zones, this.binCount, this.binWidth)
+    const curves = p.focus
+      ? buildResonanceFocusCurves(p.focus, this.binCount, this.binWidth)
+      : buildResonanceZoneCurves(zones, this.binCount, this.binWidth)
     this.zoneDepth = curves.depth
     this.zoneSelectivity = curves.selectivity
     this.zoneSharpness = curves.sharpness
@@ -951,7 +969,6 @@ export class ResonanceKernel {
     this.prevGr.fill(0)
     this.frameIndex = 0
     this.maskCache.clear()
-    this.displayGrHeld.fill(0)
     this.hasDisplayFrame = false
   }
 
@@ -1001,20 +1018,24 @@ export class ResonanceKernel {
   /**
    * Resample this frame's measurements onto the display grid.
    *
-   * Everything here is this frame's except the held reduction, which is the
-   * maximum since the last read. The display is read at half the frame rate, so
-   * a peak landing on the unread frame would otherwise be lost — but only the
-   * peak-hold outline wants that value. Anything drawn against the spectrum
-   * uses the live curve, so the two agree about the same instant.
+   * ALL FOUR CURVES DESCRIBE THIS FRAME, so anything drawn from them agrees
+   * about one instant. There used to be a fifth carrying the maximum since the
+   * last read, because the display is read at half the frame rate and a peak
+   * landing on an unread frame was otherwise lost; it existed for the trace's
+   * peak-hold outline alone, and went when that did.
    *
    * The reference goes out without `selectivity` added — the panel adds it when
    * drawing, so turning the knob moves the threshold line immediately rather
    * than on the next frame out of the worklet.
+   *
+   * `detect` is NOT `mag`: it is the curve the detector reads, which in the
+   * shipping peak reference mode is a max-filtered magnitude. A margin computed
+   * from `mag` reports no crossing on bins the kernel is cutting.
    */
   _snapshotDisplay() {
     const {
       magDb, envDb,
-      displayMag, displayEnv, displayDetect, displayGrNow, displayGrHeld,
+      displayMag, displayEnv, displayDetect, displayGrNow,
     } = this
     // Post-blend reductions — the notch the listener actually gets. Aliases
     // prevGr whenever mix and trim are at their neutral settings.
@@ -1071,7 +1092,6 @@ export class ResonanceKernel {
       displayEnv[d] = env - this.spectrumRefDb
       displayDetect[d] = det - this.spectrumRefDb
       displayGrNow[d] = gr
-      if (gr > displayGrHeld[d]) displayGrHeld[d] = gr
     }
     this.hasDisplayFrame = true
   }
@@ -1083,7 +1103,7 @@ export class ResonanceKernel {
 
   /**
    * Copy the display grid into `out` as
-   * [magnitude, reference, detect, reduction, held reduction] and clear the
+   * [magnitude, reference, detect, reduction] and clear the
    * held accumulator. Returns false before the first frame.
    *
    * One flat array of sections rather than an array each, because this crosses
@@ -1096,8 +1116,6 @@ export class ResonanceKernel {
     out.set(this.displayEnv, D)
     out.set(this.displayDetect, 2 * D)
     out.set(this.displayGrNow, 3 * D)
-    out.set(this.displayGrHeld, 4 * D)
-    this.displayGrHeld.fill(0)
     return true
   }
 
@@ -1376,7 +1394,30 @@ export class ResonanceKernel {
     // Built when ANY zone asks for it: the mask depends only on F0, so one
     // zone wanting it pays for the whole thing, and where it applies is decided
     // per bin below.
-    const mask = this.anyProtect && pitched ? this._harmonicMask(f0) : null
+    // ⚠ THE MASK HOLDS THROUGH UNPITCHED FRAMES, AND GATING IT ON `pitched` WAS
+    // THE BUG. Measured on 40 s of real narration at a median F0 of 112 Hz:
+    // 2537 frames sit above the silence floor and only 1744 of them — 68.7% —
+    // report a pitch. On the other 793 the mask was null and the harmonics were
+    // cut with no protection at all.
+    //
+    // Those frames are not silence. They are voiced-to-unvoiced transitions,
+    // quiet voiced frames and frames where the autocorrelation did not clear
+    // its confidence bar — all of them still full of the voice's partials. So
+    // the switch did not remove the artefact it exists for, it made it
+    // INTERMITTENT: a partial held on one frame and cut on the next is gain
+    // modulation on the fundamental, which is worse than a steady cut.
+    //
+    // The rolling median is already trusted for the cepstral lifter and already
+    // computed. A voice's F0 does not change between frames, so a comb centred
+    // on the last confident pitch is far closer to right than no comb at all —
+    // and the failure mode is benign either way: a mask in slightly the wrong
+    // place protects slightly the wrong bins, where no mask protects nothing.
+    //
+    // ⚠ IT HOLDS ONLY WHILE THE FRAME IS ACTIVE. Through real silence there is
+    // nothing to protect, and holding there would mask the noise floor the
+    // suppressor is meant to be free to work on.
+    const maskF0 = pitched && f0 > 0 ? f0 : (active ? medianF0 : 0)
+    const mask = this.anyProtect && maskF0 > 0 ? this._harmonicMask(maskF0) : null
 
     // Spike detection → soft knee → depth → clip.
     // WHAT PROTRUSION IS MEASURED FROM. Against the cepstral reference it is the

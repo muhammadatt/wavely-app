@@ -15,8 +15,14 @@ import {
   FET_PUNCH_PRESETS, FET_PUNCH_PARAM_KEYS, FET_PUNCH_PRESET_PLUGIN,
 } from '../../src/audio/pluginPresets/fetPunch.js'
 import {
-  RESO_TAME_PRESETS, RESO_TAME_PARAM_KEYS, RESO_TAME_PRESET_PLUGIN,
+  RESO_TAME_PARAM_KEYS, RESO_TAME_PRESET_PLUGIN,
+  RESO_TAME_FOCUS_PRESETS, RESO_TAME_ZONE_PRESETS,
+  resoTamePresetsFor, resoTamePluginId, registerResoTamePresets,
 } from '../../src/audio/pluginPresets/resoTame.js'
+import {
+  RESONANCE_FOCUS_RANGES, RESONANCE_FOCUS_MAX_NODES, FOCUS_SHAPES,
+} from '../../src/audio/resonanceFocus.js'
+import { DEFAULT_TARGETING } from '../../src/audio/resonanceTargeting.js'
 import {
   RESONANCE_ZONE_RANGES, RESONANCE_ZONE_MAX,
   RESONANCE_ATTACK_MIN_MS, RESONANCE_RELEASE_MIN_MS,
@@ -58,6 +64,9 @@ function withStorage(fn) {
 function isolate() {
   resetPluginPresets()
   registerPluginPresets()
+  // ResoTame registers only the LIVE model's table under its own id, so the
+  // other model's collection has to be asked for by name.
+  registerResoTamePresets(DEFAULT_TARGETING === 'zones' ? 'focus' : 'zones')
 }
 
 // ── The two rules the store exists to enforce ─────────────────────────────
@@ -236,10 +245,15 @@ test('paramsEqual is structural over nested arrays and objects', () => {
 
 // ── The shipped collections ───────────────────────────────────────────────
 
+const RESO_TAME_PRESETS = resoTamePresetsFor(DEFAULT_TARGETING)
+
 const COLLECTIONS = [
   ['OptoSmooth', OPTO_SMOOTH_PRESET_PLUGIN, OPTO_SMOOTH_PRESETS, OPTO_SMOOTH_PARAM_KEYS],
   ['FET Punch', FET_PUNCH_PRESET_PLUGIN, FET_PUNCH_PRESETS, FET_PUNCH_PARAM_KEYS],
   ['ResoTame', RESO_TAME_PRESET_PLUGIN, RESO_TAME_PRESETS, RESO_TAME_PARAM_KEYS],
+  // The other targeting model's table is authored content, not dead code: the
+  // flag is what reaches it, and it has to hold up to the same rules.
+  ['ResoTame (zones)', resoTamePluginId('zones'), RESO_TAME_ZONE_PRESETS, RESO_TAME_PARAM_KEYS],
 ]
 
 for (const [label, pluginId, presets, keys] of COLLECTIONS) {
@@ -311,9 +325,9 @@ test('the auto-owned makeup knob is not part of the comparison while AUTO is on'
 test('ResoTame presets carry neither the reference mode nor any monitoring state', () => {
   isolate()
   // refMode is a build-level research override and the two references disagree
-  // about what Selectivity measures by an order of magnitude; the monitoring
-  // modes are the delta trap above. Neither is a preset param.
-  for (const key of ['refMode', 'delta', 'deltaZone', 'selectedZone']) {
+  // about what Selectivity measures by an order of magnitude. The monitoring
+  // modes are the delta trap. Neither is a preset param.
+  for (const key of ['refMode', 'delta', 'deltaZone', 'selectedZone', 'selectedNode']) {
     assert.equal(RESO_TAME_PARAM_KEYS.includes(key), false, `${key} is a preset param`)
   }
   const smuggled = pickParams(RESO_TAME_PRESET_PLUGIN, {
@@ -323,11 +337,102 @@ test('ResoTame presets carry neither the reference mode nor any monitoring state
   assert.equal('deltaZone' in smuggled, false)
 })
 
+test('the focus SOLO is dropped, and it is the one that would not look wrong', () => {
+  // ⚠ SOLO IS A MONITORING MODE LIVING ON THE PARAMS OBJECT. Unlike DELTA it is
+  // an ordinary field on the focus patch — `focus.solo` — so a preset carrying
+  // it would round-trip through the whitelist untouched and Apply would render
+  // a ONE-NODE PASS into the timeline, with nothing about the stored object
+  // looking wrong. The whitelist cannot catch it, because `focus` IS a param;
+  // normalisation has to rebuild the patch field by field instead.
+  isolate()
+  const smuggled = pickParams(RESO_TAME_PRESET_PLUGIN, {
+    ...RESO_TAME_PRESETS[1].params,
+    focus: { ...RESO_TAME_PRESETS[1].params.focus, solo: 0 },
+  })
+  assert.equal('solo' in (smuggled.focus ?? {}), false, 'a preset can carry a solo')
+})
+
+test('the two targeting models get separate collections, factory AND user', () => {
+  // ⚠ THE HAZARD THIS CLOSES. The kernel dispatches on `focus`: a non-null
+  // patch TAKES OVER from the zone set. User presets persist across sessions
+  // and are keyed by plugin id, so one saved under zones would appear in a
+  // focus session's menu carrying `focus: null` — and selecting it would switch
+  // the model under a panel still showing focus controls, from a menu click,
+  // with nothing saying so.
+  assert.notEqual(resoTamePluginId('focus'), resoTamePluginId('zones'))
+  withStorage(() => {
+    isolate()
+    saveUserPreset(resoTamePluginId('zones'), 'Zone Patch', RESO_TAME_ZONE_PRESETS[1].params)
+    const focusNames = listPresets(resoTamePluginId('focus')).map(p => p.name)
+    assert.equal(focusNames.includes('Zone Patch'), false,
+      'a zone-model preset reached the focus-model menu')
+  })
+})
+
+test('normalisation cannot switch the targeting model out from under a session', () => {
+  isolate()
+  // In a focus session a null patch is repaired rather than passed through:
+  // null is not a missing value, it is the instruction to read the zone set.
+  const repaired = pickParams(resoTamePluginId('focus'), {
+    ...RESO_TAME_FOCUS_PRESETS[0].params, focus: null,
+  })
+  assert.notEqual(repaired.focus, null, 'a null patch survived into a focus collection')
+  assert.deepEqual(repaired.focus.nodes, [])
+
+  // And the reverse: nothing out of storage can hand a zone session a patch.
+  const dropped = pickParams(resoTamePluginId('zones'), {
+    ...RESO_TAME_ZONE_PRESETS[0].params, focus: RESO_TAME_FOCUS_PRESETS[1].params.focus,
+  })
+  assert.equal(dropped.focus, null, 'a focus patch survived into a zone collection')
+})
+
+test('every ResoTame focus patch is one the panel could have produced', () => {
+  isolate()
+  const R = RESONANCE_FOCUS_RANGES
+  for (const p of RESO_TAME_FOCUS_PRESETS) {
+    const { focus, attack, release } = pickParams(resoTamePluginId('focus'), p.params)
+    assert.notEqual(focus, null, `${p.id}: a focus preset with no patch`)
+    const g = focus.global
+    assert.ok(g.selectivity >= R.selectivity.min && g.selectivity <= R.selectivity.max, `${p.id}: threshold`)
+    assert.ok(g.depth >= R.depth.min && g.depth <= R.depth.max, `${p.id}: depth`)
+    assert.ok(g.maxCut >= R.maxCut.min && g.maxCut <= R.maxCut.max, `${p.id}: maxCut`)
+    assert.ok(g.sharpness >= R.sharpness.min && g.sharpness <= R.sharpness.max, `${p.id}: sharpness`)
+    assert.ok(focus.nodes.length <= RESONANCE_FOCUS_MAX_NODES, `${p.id}: too many nodes`)
+    const ids = new Set()
+    for (const n of focus.nodes) {
+      assert.equal(ids.has(n.id), false, `${p.id}: duplicate node id ${n.id}`)
+      ids.add(n.id)
+      assert.ok(FOCUS_SHAPES.includes(n.shape), `${p.id}: unknown shape ${n.shape}`)
+      assert.ok(n.hz >= R.hz.min && n.hz <= R.hz.max, `${p.id}: node frequency`)
+      assert.ok(n.spanOct >= R.spanOct.min && n.spanOct <= R.spanOct.max, `${p.id}: node span`)
+      assert.ok(n.biasDb >= R.biasDb.min && n.biasDb <= R.biasDb.max, `${p.id}: node amount`)
+    }
+    assert.ok(attack >= RESONANCE_ATTACK_MIN_MS, `${p.id}: attack below the floor that does anything`)
+    assert.ok(release >= RESONANCE_RELEASE_MIN_MS, `${p.id}: release below the floor that does anything`)
+  }
+})
+
+test('a focus node that stands a band down carries a NEGATIVE amount', () => {
+  // ⚠ THE SIGN IS THE OPPOSITE OF THE ARITHMETIC. Selectivity is a THRESHOLD, so
+  // it runs backwards — higher means less is cut — and a node's amount is stated
+  // the way a person thinks about it, positive being "work harder here", which
+  // means it is SUBTRACTED from the global. Getting it backwards produces a
+  // preset that looks entirely functional and does the reverse of its name, so
+  // the intent is asserted here rather than left to a downstream measurement.
+  isolate()
+  const sib = pickParams(resoTamePluginId('focus'), RESO_TAME_FOCUS_PRESETS[1].params).focus
+  const worked = sib.nodes.find(n => n.shape === 'high')
+  const stoodDown = sib.nodes.find(n => n.shape === 'low')
+  assert.ok(worked.biasDb > 0, 'Sibilance Tame does not work the top harder')
+  assert.ok(stoodDown.biasDb < 0, 'Sibilance Tame does not stand the bottom down')
+})
+
 test('every ResoTame zone set is one the editor could have produced', () => {
   isolate()
   const R = RESONANCE_ZONE_RANGES
-  for (const p of RESO_TAME_PRESETS) {
-    const { zones, attack, release } = pickParams(RESO_TAME_PRESET_PLUGIN, p.params)
+  for (const p of RESO_TAME_ZONE_PRESETS) {
+    const { zones, attack, release, focus } = pickParams(resoTamePluginId('zones'), p.params)
+    assert.equal(focus, null, `${p.id}: a zone preset carrying a focus patch`)
     assert.ok(zones.length >= 1 && zones.length <= RESONANCE_ZONE_MAX, `${p.id}: zone count`)
     // The top zone reaches the top of the spectrum, or there is a band with no
     // zone over it — a state the editor cannot produce and the kernel has no
@@ -352,8 +457,8 @@ test('ResoTame normalisation repairs a stored zone set rather than passing it on
   // Unlike a knob value, a stored zone set never went through a control. Out of
   // order, out of range, and stopping short of the top are all reachable from
   // an older build's storage, and all three reach the kernel if nothing checks.
-  const repaired = pickParams(RESO_TAME_PRESET_PLUGIN, {
-    attack: 1, release: 99999, mode: 'nonsense', mix: 5, trim: -99,
+  const repaired = pickParams(resoTamePluginId('zones'), {
+    attack: 1, release: 99999, mode: 'nonsense', mix: 5, trim: -99, focus: null,
     zones: [
       { id: 'z1', hiHz: 5000, depth: 4, selectivity: 900, maxCut: 900, sharpness: -1 },
       { id: 'z2', hiHz: 200, depth: 0.5 },
@@ -369,6 +474,29 @@ test('ResoTame normalisation repairs a stored zone set rather than passing it on
     assert.ok(z.selectivity <= RESONANCE_ZONE_RANGES.selectivity.max)
     assert.ok(z.sharpness >= 0)
   }
+})
+
+test('ResoTame normalisation repairs a stored focus patch too', () => {
+  isolate()
+  const repaired = pickParams(resoTamePluginId('focus'), {
+    ...RESO_TAME_FOCUS_PRESETS[0].params,
+    focus: {
+      global: { selectivity: 900, depth: -4, maxCut: 900, protectCeilHz: 1 },
+      nodes: [
+        { id: 'n1', shape: 'wobble', hz: 99999, spanOct: 99, biasDb: 900 },
+        ...Array.from({ length: RESONANCE_FOCUS_MAX_NODES + 3 }, (_, i) => ({ id: `x${i}`, hz: 1000 })),
+      ],
+    },
+  })
+  const R = RESONANCE_FOCUS_RANGES
+  assert.equal(repaired.focus.global.selectivity, R.selectivity.max)
+  assert.equal(repaired.focus.global.depth, R.depth.min)
+  assert.equal(repaired.focus.nodes.length, RESONANCE_FOCUS_MAX_NODES, 'node list not capped')
+  // An unrecognised shape falls back rather than passing through — a typo must
+  // not produce a fourth behaviour downstream.
+  assert.equal(repaired.focus.nodes[0].shape, 'bell')
+  assert.equal(repaired.focus.nodes[0].hz, R.hz.max)
+  assert.equal(repaired.focus.nodes[0].biasDb, R.biasDb.max)
 })
 
 test('FET Punch normalisation keeps the dials on their detents and the ratio on a real position', () => {

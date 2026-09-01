@@ -137,13 +137,15 @@ export function createResonance(audioContext) {
      * The kernel's own view of the last frame, on a log-frequency grid, or null
      * before the worklet has produced one.
      *
-     * `mag`, `reference` and `output` are dBFS; the two reduction curves are
-     * positive dB of cut. All but `reductionHeld` describe the same single
-     * frame, so anything drawn from them agrees about one instant;
-     * `reductionHeld` is the maximum since the previous read and exists for the
-     * peak-hold trace alone. `reference` does NOT include `selectivity` — the
-     * caller adds it, so the threshold line tracks the knob without waiting for
-     * the audio thread.
+     * `mag`, `reference` and `detect` are dBFS; `reduction` is positive dB of
+     * cut. All four describe the same single frame, so anything drawn from them
+     * agrees about one instant.
+     *
+     * `reference` does NOT include `selectivity` — the caller adds it, so the
+     * threshold line tracks the knob without waiting for the audio thread. And
+     * `detect` is the curve the DETECTOR reads, which is not `mag`: in the
+     * shipping peak reference mode it is a max-filtered magnitude, so a margin
+     * computed from `mag` reports no crossing on bins the kernel is cutting.
      *
      * Returns a live view onto the latest frame rather than a copy. It is valid
      * until the next message arrives, which is what a per-frame drawing loop
@@ -163,7 +165,6 @@ export function createResonance(audioContext) {
           reference: curve(1),
           detect: curve(2),
           reduction: curve(3),
-          reductionHeld: curve(4),
         }
       }
       return displayView

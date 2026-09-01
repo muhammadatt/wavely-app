@@ -11,11 +11,6 @@ import {
   rowsDue,
   sampleRamp,
 } from '../../src/components/meters/resonanceHistory.js'
-import {
-  MARK_MAX,
-  MARK_MIN_DB,
-  findResonanceMarks,
-} from '../../src/components/meters/resonanceMarks.js'
 
 /**
  * The 1c display's two overlays and its resonance marks.
@@ -142,60 +137,8 @@ function curveWith(peaks, bins = 192) {
   return r
 }
 
-test('a mark lands on the peak, and reports its frequency', () => {
-  const bins = 192
-  const marks = findResonanceMarks(curveWith([[96, 9, 3]]), bins, 20, 20000)
-  assert.equal(marks.length, 1)
-  assert.equal(marks[0].bin, 96)
-  // bin 96 of 192 on a 20 Hz - 20 kHz log axis is the geometric middle
-  const expected = 20 * Math.pow(2, (96 / 191) * Math.log2(20000 / 20))
-  assert.ok(
-    Math.abs(marks[0].hz - expected) < 1,
-    `expected ~${expected.toFixed(0)} Hz, got ${marks[0].hz.toFixed(0)}`,
-  )
-})
 
-test('A BROAD CUT GETS ONE MARK, NOT ONE PER RIPPLE', () => {
-  // Every shoulder of a wide resonance is a local maximum against its immediate
-  // neighbours, so a plain neighbour test fills all four slots with one peak.
-  const r = curveWith([[96, 9, 14]])
-  for (let i = 0; i < r.length; i++) r[i] += 0.04 * Math.sin(i * 1.9)
-  const marks = findResonanceMarks(r, 192, 20, 20000)
-  assert.equal(marks.length, 1, `expected one mark, got ${marks.map(m => m.bin).join(', ')}`)
-})
 
-test('marks come back in frequency order however deep they are', () => {
-  // The caller lays pills out left to right and alternates their vertical
-  // offset to keep them from colliding; an ordering by depth makes that
-  // alternation arbitrary.
-  const marks = findResonanceMarks(
-    curveWith([[40, 4, 3], [96, 11, 3], [150, 7, 3]]), 192, 20, 20000,
-  )
-  assert.deepEqual(marks.map(m => m.bin), [40, 96, 150])
-})
 
-test('only the deepest survive the cap, and shallow cuts are not named', () => {
-  const marks = findResonanceMarks(
-    curveWith([[20, 9, 2], [50, 8, 2], [80, 7, 2], [110, 6, 2], [140, 5, 2], [170, 4, 2]]),
-    192, 20, 20000,
-  )
-  assert.equal(marks.length, MARK_MAX)
-  assert.deepEqual(marks.map(m => m.bin), [20, 50, 80, 110])
 
-  const quiet = findResonanceMarks(curveWith([[96, MARK_MIN_DB - 0.5, 3]]), 192, 20, 20000)
-  assert.equal(quiet.length, 0, 'a cut under the floor is not a resonance worth naming')
-})
 
-test('an edge peak is not a mark', () => {
-  // Same rule the F0 tracker applies: a peak with no shoulder on one side cannot
-  // be shown to be a maximum of anything.
-  const r = new Float32Array(192)
-  r[0] = 12
-  r[1] = 11
-  r[191] = 12
-  assert.equal(findResonanceMarks(r, 192, 20, 20000).length, 0)
-})
-
-test('an idle curve names nothing', () => {
-  assert.deepEqual(findResonanceMarks(new Float32Array(192), 192, 20, 20000), [])
-})

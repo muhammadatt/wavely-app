@@ -518,7 +518,6 @@ function readDisplay(kernel) {
     reference: curve(1),
     detect: curve(2),
     reduction: curve(3),
-    reductionHeld: curve(4),
     hz: i => kernel.displayMinHz * Math.pow(2, (i / (d - 1)) * octaves),
   }
 }
@@ -527,12 +526,18 @@ function readDisplay(kernel) {
  * Mean reduction per display bin over a whole run, read the way the worklet
  * reads it — every 1024 samples.
  *
- * Reading once at the end instead would report the maximum over every frame in
- * the file, and on noise that saturates: somewhere in three seconds nearly
- * every bin momentarily pokes over the threshold, so the peak of a
- * read-once trace is wherever the noise happened to be loudest. Averaging the
- * reads is both what the display shows over time and the only way to ask where
- * the effect is *consistently* working.
+ * Averaging the reads is both what the display shows over time and the only way
+ * to ask where the effect is *consistently* working: on noise, somewhere in
+ * three seconds nearly every bin momentarily pokes over the threshold, so the
+ * peak of any single frame is wherever the noise happened to be loudest.
+ *
+ * ⚠ IT AVERAGED THE HELD CURVE AT INDEX 4, WHICH IS NOW PAST THE END. That curve
+ * carried the maximum since the previous read and went with the peak-hold
+ * outline it existed for; a `Float32Array.subarray` past the end is empty rather
+ * than an error, so this silently averaged nothing and reported the deepest cut
+ * at the lowest bin. Reading the LIVE curve is the honest equivalent — the mean
+ * over many reads is what this was after, and the held curve only ever added the
+ * frames between them.
  */
 function meanReduction(sig, params) {
   const kernel = new ResonanceKernel(SR)
@@ -550,7 +555,7 @@ function meanReduction(sig, params) {
     if (since < 1024) continue
     since = 0
     if (!kernel.readDisplay(buf)) continue
-    for (let i = 0; i < d; i++) sum[i] += buf[4 * d + i]
+    for (let i = 0; i < d; i++) sum[i] += buf[3 * d + i]
     reads++
   }
   const octaves = Math.log2(kernel.displayMaxHz / kernel.displayMinHz)
@@ -623,98 +628,25 @@ test('the reference sits below a resonance by more than the selectivity', () => 
   )
 })
 
-test('reduction between two reads is held, not lost', () => {
-  // The worklet reads at half the frame rate, so a peak landing on an unread
-  // frame has to survive to the next read — that peak is the transient ring
-  // the user is looking for. Only the held curve carries it.
+test('reading the display does not consume it', () => {
+  // ⚠ THE HELD CURVE IS GONE AND SO ARE THE TWO TESTS THAT PINNED IT. It was a
+  // fifth curve carrying the maximum since the previous read, cleared on every
+  // read, and it existed for the trace's peak-hold outline alone — which has
+  // been removed, so a peak landing on a frame between two reads is no longer
+  // recovered anywhere. Nothing regressed visually: the trace only ever drew the
+  // live curve.
+  //
+  // What is still worth pinning is the other half of what that test said: the
+  // live curve is a SNAPSHOT, not an accumulator, so reading it twice reports
+  // the same frame rather than draining it.
   const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
   const first = readDisplay(kernel)
-  const held = Math.max(...first.reductionHeld)
-  assert.ok(held > 3, `expected a real cut to report, got ${held.toFixed(1)} dB`)
-
-  // A second read with no further audio holds nothing: the accumulator was
-  // cleared, so a stale peak cannot be shown twice. The live curve is a
-  // snapshot rather than an accumulator, so it still reports the last frame.
   const second = readDisplay(kernel)
-  assert.equal(Math.max(...second.reductionHeld), 0)
+  assert.ok(Math.max(...first.reduction) > 3, 'expected a real cut to report')
   assert.deepEqual(
     Array.from(second.reduction),
     Array.from(first.reduction),
     'the live curve should be the last frame, unchanged by being read',
-  )
-})
-
-test('the held reduction never reads below the live one', () => {
-  // The held curve is a maximum taken over the frames the live curve is the
-  // last of, so it can only ever be the larger of the two. If that inverts,
-  // the peak-hold outline would sit under the fill it is meant to cap.
-  const kernel = runKernel(resonate(voice(), 3000, 40, 14), UNPROTECTED)
-  const d = readDisplay(kernel)
-  for (let i = 0; i < d.bins; i++) {
-    assert.ok(
-      d.reductionHeld[i] >= d.reduction[i] - 1e-6,
-      `held ${d.reductionHeld[i].toFixed(2)} below live ${d.reduction[i].toFixed(2)} at bin ${i}`,
-    )
-  }
-})
-
-test('the detect curve is what the kernel decides on, not the raw magnitude', () => {
-  // ⚠ THIS IS THE CURVE THE PANEL COMPUTES ITS MARGIN FROM, AND SENDING THE RAW
-  // MAGNITUDE INSTEAD WAS A REAL BUG. In the shipping `peak` reference mode the
-  // detector reads `peakMax` — magnitude through a max filter — so a bin whose
-  // peak sits a bin or two away is over the line as far as the kernel is
-  // concerned while the raw curve at that bin is not. Reported from use as 3-5
-  // dB of reduction in the trace and the meters with NOTHING in the FOUND strip.
-  const peakParams = {
-    ...RESONANCE_KERNEL_DEFAULTS,
-    refMode: 'peak',
-    zones: uniformZones({ protect: false }),
-  }
-  const d = readDisplay(runKernel(resonate(voice(), 3000, 40, 14), peakParams))
-
-  // A max filter can only lift, so the curve the detector sees is never below
-  // the curve the panel draws. This fails outright if the processor goes back to
-  // packing magDb into the slot.
-  for (let i = 0; i < d.bins; i++) {
-    assert.ok(
-      d.detect[i] >= d.mag[i] - 1e-4,
-      `detect below magnitude at bin ${i}: ${d.detect[i]} < ${d.mag[i]}`,
-    )
-  }
-
-  // And it has to differ somewhere, or it is magnitude under another name.
-  let lift = 0
-  for (let i = 0; i < d.bins; i++) lift = Math.max(lift, d.detect[i] - d.mag[i])
-  assert.ok(lift > 0.2, `detect never rose above magnitude (${lift.toFixed(3)} dB)`)
-})
-
-test('the detect margin explains the cut at a planted resonance', () => {
-  // The end-to-end version of the bug: the panel draws `detect - reference -
-  // selectivity`, so wherever the kernel is visibly cutting, that quantity has
-  // to be positive in the same cell. Computed from `mag` it can be negative
-  // there, which is precisely what left the strip empty.
-  const settings = { protect: false }
-  const params = {
-    ...RESONANCE_KERNEL_DEFAULTS,
-    refMode: 'peak',
-    zones: uniformZones(settings),
-  }
-  const d = readDisplay(runKernel(resonate(voice(), 3000, 40, 14), params))
-  const selectivity = zoneSettings(params.zones[0]).selectivity
-
-  let at = 0
-  let best = Infinity
-  for (let i = 0; i < d.bins; i++) {
-    const away = Math.abs(Math.log2(d.hz(i) / 3000))
-    if (away < best) { best = away; at = i }
-  }
-
-  assert.ok(d.reduction[at] > 0.5, `no cut at the planted resonance (${d.reduction[at]})`)
-  const margin = d.detect[at] - d.reference[at] - selectivity
-  assert.ok(
-    margin > 0,
-    `the kernel cut ${d.reduction[at].toFixed(2)} dB where the panel would draw `
-      + `a margin of ${margin.toFixed(2)} dB`,
   )
 })
 
@@ -745,7 +677,6 @@ test('every displayed value is finite, silence included', () => {
     assert.ok(Number.isFinite(d.reference[i]), `reference ${i} was not finite`)
     assert.ok(Number.isFinite(d.detect[i]), `detect ${i} was not finite`)
     assert.ok(Number.isFinite(d.reduction[i]), `reduction ${i} was not finite`)
-    assert.ok(Number.isFinite(d.reductionHeld[i]), `held reduction ${i} was not finite`)
   }
 })
 

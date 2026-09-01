@@ -1,13 +1,19 @@
 /**
- * ResoTame's three display overlays, and where the preference lives.
+ * ResoTame's display overlays, and where the preference lives.
  *
- * The default view (design 1c) is removal only: nothing on the plot but what
- * is being taken out. GRID (the rules), HISTORY (the last few seconds of carve
- * as a waterfall) and SPECTRUM (the input curve and the detection threshold
- * this frame was decided from) fold context back in. Each is independent
- * rather than the source design's single DETAIL button, because they answer
- * different questions and someone who wants the grid rarely wants a waterfall
- * behind it.
+ * The default view (design 1c) is removal only: nothing on the plot but what is
+ * being taken out. HISTORY (the last few seconds of carve as a waterfall),
+ * SPECTRUM (the input curve and the detection threshold this frame was decided
+ * from) and FOUND (the recent crossings, at their depth over that threshold)
+ * fold context back in. Each is independent rather than the source design's
+ * single DETAIL button, because they answer different questions and someone who
+ * wants the spectrum rarely wants a waterfall behind it.
+ *
+ * ⚠ GRID WAS A FOURTH AND IS GONE. It drew horizontal rules across REMOVED with
+ * the dB numerals down the right edge; the rules were the part that crossed the
+ * reduction fill, so what survives is the numerals, drawn unconditionally
+ * whenever REMOVED is on. A scale is not context to be folded in — it is how the
+ * band it labels is read at all, so it was never really an overlay.
  *
  * KEPT OUT OF `params`, like DELTA and the per-zone deltas. `applyResonanceRegion`
  * spreads the param object straight into the kernel, so anything living there
@@ -42,7 +48,7 @@ const STORE_KEY = 'wavely.resotame.overlays'
  * like any unknown key, which puts FOUND at its default rather than inheriting a
  * preference for a different picture.
  */
-export const OVERLAY_KEYS = ['grid', 'history', 'spectrum', 'found', 'removed']
+export const OVERLAY_KEYS = ['history', 'spectrum', 'found', 'removed']
 
 /**
  * What each is when nothing has been stored.
@@ -56,8 +62,16 @@ export const OVERLAY_KEYS = ['grid', 'history', 'spectrum', 'found', 'removed']
  * alone: that cannot tell a stored `false` from a key nobody has written yet,
  * and for `removed` those are opposite answers.
  */
+/**
+ * ⚠ `grid` IS GONE. It drew frequency and reduction rules across the whole plot
+ * AND gated the reduction numerals down the right-hand edge — so reading a depth
+ * off the trace meant switching on a grid over everything else to get the scale
+ * that measures it. The numerals now follow REMOVED, which is the reading they
+ * belong to, and the rules are not missed: the frequency labels along the axis
+ * never depended on the switch, and the reduction figures are printed in the
+ * band itself. A stored `grid` is ignored like any unknown key.
+ */
 const DEFAULTS = {
-  grid: false,
   history: false,
   spectrum: false,
   found: false,

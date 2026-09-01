@@ -6,6 +6,8 @@ import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { resonanceEffect, RESONANCE_DEFAULTS } from '../audio/effects/resonance.js'
 import { resolveRefMode, withRefModeDefaults } from '../audio/resonanceParams.js'
 import { placeResonanceZones } from '../audio/resonanceZonePlacement.js'
+import { resolveTargeting } from '../audio/resonanceTargeting.js'
+import { DEFAULT_RESONANCE_FOCUS, copyFocus } from '../audio/resonanceFocus.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
@@ -13,7 +15,7 @@ export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
 /**
  * Shipping defaults, with any reference-mode override applied.
  *
- * Resolved once, at module load: `?resoRef=peak` seeds the panel's knobs with
+ * Resolved once, at module load: `?resoRef=cepstral` seeds the panel's knobs with
  * that mode's calibration, because the two references disagree about what
  * `selectivity` measures by an order of magnitude and the same numbers on the
  * two are not the same setting. See RESONANCE_REF_MODE_DEFAULTS.
@@ -40,6 +42,60 @@ const resZones = ref(DEFAULTS.zones ?? [])
 /** Which zone the strip is editing. UI state, never sent to the kernel. */
 const resSelectedZone = ref(0)
 const resTrim = ref(DEFAULTS.trim)
+
+/**
+ * Which targeting model this session is running: 'zones' (ships) or 'focus'.
+ *
+ * Resolved once at module load rather than per render. Switching models
+ * mid-session would mean two authoring surfaces editing one kernel, and the
+ * question this flag exists to answer — which one can a person think in — is
+ * not asked by flipping between them inside one panel; it is asked by working a
+ * file in one and then working it in the other.
+ */
+export const resTargeting = resolveTargeting()
+
+/**
+ * The focus patch, or null when the zone model is running.
+ *
+ * `copyFocus` rather than the constant itself: DEFAULT_RESONANCE_FOCUS is a
+ * module-level object, and handing it straight to a ref would let the first
+ * knob move edit the default for the rest of the session.
+ */
+const resFocus = ref(resTargeting === 'focus' ? copyFocus(DEFAULT_RESONANCE_FOCUS) : null)
+/** Which focus node the controls strip is editing. UI state, never a parameter. */
+const resSelectedNode = ref(-1)
+
+/**
+ * Focus node whose region is being auditioned, or -1. UI STATE, NEVER A
+ * PARAMETER.
+ *
+ * ⚠ THE SAME RULE AND THE SAME DANGER AS THE ZONE DELTA IT REPLACES, and for
+ * the identical reason: `applyResonanceRegion` spreads the param object
+ * straight into the kernel, and the isolation this rides on IS expressible as
+ * an ordinary parameter — `focus.solo`. Nothing about it would LOOK wrong if it
+ * leaked into what Apply renders. It would simply write a one-node pass into
+ * the timeline.
+ *
+ * So `liveFocus()` applies it on the way to the live kernel only, and
+ * `currentParams()` never consults it. Pinned by reading the source in
+ * test/ui/resonanceFocusSolo.test.js, which is the only way to reach a
+ * guarantee about a composable that cannot be imported under node.
+ */
+const resSoloNode = ref(-1)
+/**
+ * The `id` of the soloed node, so the solo can be reconciled after an edit.
+ *
+ * ⚠ THE INDEX ALONE IS NOT AN IDENTITY. Reported from use: deleting a node left
+ * the delta monitor on, auditioning whatever node had shifted into that slot —
+ * or, when the deleted node was the last one, nothing at all, with the panel
+ * still lit. Every edit replaces the array, so an index survives a deletion
+ * happily and silently means something else afterwards.
+ *
+ * The id is what does not move. `syncFocus` re-finds it on every edit and
+ * clears the solo when it is gone, which covers deletion, reordering and
+ * replacement with one rule rather than a special case per gesture.
+ */
+let soloId = null
 
 /**
  * Zone whose removal is being auditioned, or -1. UI STATE, NEVER A PARAMETER.
@@ -138,7 +194,21 @@ function liveZones() {
  * one off underneath someone.
  */
 function monitoringDelta() {
-  return resDelta.value || resDeltaZone.value >= 0
+  return resDelta.value || resDeltaZone.value >= 0 || resSoloNode.value >= 0
+}
+
+/**
+ * The focus patch as the LIVE kernel should hear it.
+ *
+ * Identical to the stored patch unless a node's region is being auditioned, in
+ * which case `solo` is set — which the curve builder already understands, so
+ * node-scoped monitoring needs no mechanism of its own in the DSP beyond the
+ * delta monitor it shares with the header's DELTA.
+ */
+function liveFocus() {
+  const f = resFocus.value
+  if (!f || resSoloNode.value < 0) return f
+  return { ...f, solo: resSoloNode.value }
 }
 
 function currentParams() {
@@ -148,6 +218,9 @@ function currentParams() {
     mix: resMix.value,
     trim: resTrim.value,
     zones: resZones.value,
+    // Null under the zone model, which is what the kernel's dispatch reads as
+    // "use zones". Present-and-null rather than absent — see RESONANCE_DEFAULTS.
+    focus: resFocus.value,
     refMode: DEFAULTS.refMode ?? RESONANCE_DEFAULTS.refMode,
     mode: resMode.value,
   }
@@ -198,6 +271,7 @@ export function useResonance() {
     // Not from currentParams: that object is what Apply renders with, and a
     // zone's delta isolation must never reach it.
     chain.updateParam(resonanceEffect.id, 'zones', liveZones())
+    chain.updateParam(resonanceEffect.id, 'focus', liveFocus())
     // Not in currentParams, so it needs restoring by hand when the preview is
     // switched back on.
     chain.effects.find(e => e.id === resonanceEffect.id)?.nodes
@@ -253,6 +327,64 @@ export function useResonance() {
   const syncZones = (v) => {
     resZones.value = v
     pushZones()
+  }
+
+  /**
+   * A focus edit: the whole patch at once.
+   *
+   * One ref rather than one per field, and one push rather than several. The
+   * globals and the nodes are read together by `buildResonanceFocusCurves` —
+   * every per-bin threshold is `global.selectivity - bias`, so a node move and a
+   * global move are the same kind of edit to the same curve. Splitting them
+   * would mean two params that must arrive in the same frame to be coherent.
+   */
+  /**
+   * A focus edit, with the solo reconciled against it.
+   *
+   * The reconcile is here rather than in the gestures because every route that
+   * can invalidate a solo — the card's DELETE, the plot's double-click, the
+   * keyboard's Delete — arrives through this one function, and a rule applied
+   * per gesture is a rule with a gesture missing from it.
+   */
+  const syncFocus = (v) => {
+    resFocus.value = v
+    if (soloId !== null) {
+      const at = (v?.nodes ?? []).findIndex(n => n.id === soloId)
+      if (at < 0) clearFocusSolo()
+      else resSoloNode.value = at
+    }
+    pushParam('focus', liveFocus())
+  }
+
+  /** Stop auditioning a node's region, and put the monitor back. */
+  function clearFocusSolo() {
+    if (resSoloNode.value < 0 && soloId === null) return
+    resSoloNode.value = -1
+    soloId = null
+    resNodes?.setMonitorDelta(monitoringDelta())
+  }
+
+  /**
+   * Hear what one node's region is removing, and nothing else.
+   *
+   * The node's own influence scoped to the delta monitor: inside its reach the
+   * detector runs exactly as the full patch does, outside it nothing is
+   * touched, and the kernel plays the complement. A second click on the same
+   * node clears it.
+   *
+   * ⚠ ASKING IT OF A BYPASSED NODE IS NOT SILENCE, and that is the one place
+   * this differs from the zone delta it replaces. A bypassed ZONE removed
+   * nothing, so soloing it was honestly silent; a bypassed NODE only means "no
+   * opinion here", and the global detector is still working that region — so
+   * what you hear is what the region is losing anyway. That is the true answer
+   * to the question being asked, and it is the more useful one.
+   */
+  function toggleFocusSolo(index) {
+    const on = resSoloNode.value !== index
+    resSoloNode.value = on ? index : -1
+    soloId = on ? (resFocus.value?.nodes?.[index]?.id ?? null) : null
+    pushParam('focus', liveFocus())
+    resNodes?.setMonitorDelta(monitoringDelta())
   }
 
   /**
@@ -380,6 +512,8 @@ export function useResonance() {
     // header's delta is cleared below.
     const wasMonitoring = monitoringDelta()
     resDeltaZone.value = -1
+    resSoloNode.value = -1
+    soloId = null
     resDelta.value = false
     // The measured voice goes too, and for the same reason: it describes the
     // file that was open, and coming back under a panel showing a different one
@@ -407,6 +541,13 @@ export function useResonance() {
     resZones,
     resSelectedZone,
     resDeltaZone,
+    resTargeting,
+    resFocus,
+    resSelectedNode,
+    resSoloNode,
+    syncFocus,
+    toggleFocusSolo,
+    clearFocusSolo,
     resRefMode,
     resMode,
     resPreview,

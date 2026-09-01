@@ -9,6 +9,7 @@
  */
 
 import { pitchFloorHz } from './dsp/f0.js'
+import { copyFocus } from './resonanceFocus.js'
 
 /**
  * Matches FFT_SIZE in resonanceProcessor.js. Duplicated rather than imported so
@@ -93,22 +94,21 @@ export const RESONANCE_RELEASE_MIN_MS = 25
  */
 export const RESONANCE_DISPLAY_BINS = 192
 /**
- * Curves the kernel posts per frame, in order: magnitude, reference, output,
- * reduction, held reduction.
+ * Curves in one display frame: magnitude, reference, detect, reduction.
  *
- * The output curve is sent rather than derived on the far side as
- * `magnitude - reduction`. Those two are summarised from different FFT bins —
- * magnitude takes the loudest bin in a display cell, reduction the most
- * suppressed one, and on real speech they are different bins in 65% of the
- * cells that carry any cut. Subtracting one from the other draws a notch up to
- * 2 dB deeper than the one that happened.
+ * ⚠ IT WAS 5 TWICE, AND BOTH TIMES THE FIFTH HAD OUTLIVED ITS READER. First
+ * `output`, kept after the two lanes merged and drawn by nothing; it was reused
+ * for `detect` rather than removed. Then `reductionHeld` — the maximum since the
+ * previous read, which existed solely so the trace's peak-hold outline could
+ * catch a peak landing on a frame the reader never saw. The hold is gone and so
+ * is the curve.
  *
- * Reduction is sent twice for a related reason. The live curve is this frame's,
- * so it agrees with the spectrum beside it; the held curve is the maximum since
- * the last read, which is what the peak-hold outline needs and what nothing
- * else should be drawn from.
+ * Worth stating because the count is DECLARED rather than derived: it sizes the
+ * buffer, slices the view and crosses a postMessage every 23 ms, so a curve
+ * nothing reads is paid for on every frame and nothing complains. If a third one
+ * ever goes the same way, derive this from the view's own key list instead.
  */
-export const RESONANCE_DISPLAY_CURVES = 5
+export const RESONANCE_DISPLAY_CURVES = 4
 export const RESONANCE_DISPLAY_MIN_HZ = 20
 export const RESONANCE_DISPLAY_MAX_HZ = 20000
 
@@ -129,13 +129,15 @@ export function resonanceDisplayRange(sampleRate) {
 /**
  * Reference mode override, for hearing the two detectors back to back.
  *
- *   ?resoRef=peak                              one page load
- *   localStorage.setItem('resoRef', 'peak')    until cleared
+ *   ?resoRef=cepstral                              one page load
+ *   localStorage.setItem('resoRef', 'cepstral')    until cleared
  *
- * The cepstral reference ships. The peak-envelope one is the alternative — see
- * the note on PEAK_REF_FLOOR_FACTOR in resonanceProcessor.js — and it needs a
- * way to be listened to on real material before anything is decided, because
- * every number behind it so far is synthetic.
+ * ⚠ THE ROLES SWAPPED AND THIS NOTE HAD THEM THE OLD WAY ROUND, examples
+ * included. The PEAK ENVELOPE ships; cepstral is the override. The swap was made
+ * on the measurement in RESONANCE_REF_MODE_DEFAULTS below: the cepstral
+ * reference works in roughly 150-900 Hz and is blind either side of it — below
+ * the fundamental where rumble and room modes live, and above about 1 kHz where
+ * sibilance and ring do, which is most of what this effect is asked to remove.
  *
  * Read at module load rather than per-analysis, unlike VoiceRx's equivalent:
  * these values seed the panel's knobs, and a knob that silently changes value
@@ -651,13 +653,36 @@ export const RESONANCE_DEFAULTS = {
   // the same average spread evenly instead of concentrated in momentary deep
   // notches. 15/80 was inherited from the server stage, where the suppressor
   // runs inside a chain rather than as something set by ear.
-  attack: 300, // ms
-  release: 1500, // ms
+  //
+  // 200/500 IS WHERE THAT SWEEP SATURATES, which is why it is the default rather
+  // than the slowest setting the sweep liked. Matched at 3.0 dB of cut, gain
+  // jitter runs 0.96/1.29 at 12/80 ms, reaches 0.80/1.02 by 200/500, and is then
+  // FLAT out to 200/4000 — so everything past this pair buys nothing measurable
+  // while making the effect slower to respond. It was 300/1500, which is inside
+  // that flat region and therefore not wrong, only unnecessarily sluggish.
+  //
+  // ⚠ THE KNOB TOPS STAY AT 400/2000. What keeps improving past the knee is p90
+  // depth rather than jitter, and a narrator with an unusually resonant room is
+  // the case that wants it — the sweep is the argument for the range, this pair
+  // is the argument for where to start.
+  attack: 200, // ms
+  release: 500, // ms
   mode: 'soft', // 'soft' | 'hard'
   // 'cepstral' | 'peak' — see RESONANCE_REF_MODE_DEFAULTS above.
   refMode: 'peak',
   // Sensitivity zones — see DEFAULT_RESONANCE_ZONES above. Not filters.
   zones: DEFAULT_RESONANCE_ZONES,
+  /**
+   * Focus patch, or null for the zone model. See resonanceFocus.js.
+   *
+   * ⚠ PRESENT AND NULL, NOT ABSENT, and that is load-bearing twice over. The
+   * effect wrapper's `setParam` guards with `name in params`, so a key missing
+   * from this object is not rejected — it is SILENTLY DROPPED, which is exactly
+   * how the soft clipper's drive ratios shipped as a control that did nothing
+   * for a whole listening session. And `toKernelParams` forwards every key, so
+   * null has to be a value the kernel understands rather than a hole.
+   */
+  focus: null,
   mix: 1, // 0 = dry, 1 = fully suppressed
   trim: 0, // dB, wet path only
 }
@@ -679,6 +704,10 @@ export function toKernelParams(params) {
     // param push throws, so the meter loop never starts and the display and the
     // DELTA monitor both stay dark. Same reason manualEq copies its bands.
     zones: copyZones(params.zones),
+    // Copied field by field for the same reason zones are: a Vue reactive proxy
+    // does not survive `structuredClone`, and the throw lands on the first param
+    // push — taking the meter loop, the display and the DELTA monitor with it.
+    focus: copyFocus(params.focus),
     mix: params.mix,
     trimDb: params.trim,
   }

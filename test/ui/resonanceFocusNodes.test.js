@@ -1,0 +1,490 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  FOCUS_DATUM_MAX_FRAC,
+  thresholdFraction,
+  thresholdFractionFromY,
+  selectivityFromFraction,
+  FOCUS_DATUM_MIN_FRAC,
+  FOCUS_HALF_SPAN_FRAC,
+  NODE_HIT_PX,
+  focusNeighbour,
+  focusOrder,
+  focusRanks,
+  focusScope,
+  SPAN_WHEEL_RATIO,
+  addNode,
+  biasCurvePoints,
+  biasFromY,
+  canAddFocusNode,
+  hzFromX,
+  makeFocusNode,
+  moveNode,
+  nodeAt,
+  nodeNearHz,
+  nodePoint,
+  removeNode,
+  scaleNodeSpan,
+  setNodeParam,
+  toggleNode,
+  xFromHz,
+  yFromBias,
+} from '../../src/components/meters/resonanceFocusNodes.js'
+import {
+  RESONANCE_FOCUS_MAX_NODES,
+  RESONANCE_FOCUS_RANGES,
+  focusBiasAt,
+} from '../../src/audio/resonanceFocus.js'
+
+const axis = { w: 600, minHz: 20, maxHz: 20000 }
+/**
+ * The spectrum band at the plot's shipping height: laneH 267, FOUND strip 13%
+ * at the TOP, reduction lane 35% at the floor, this filling what is left.
+ *
+ * ⚠ The two reserved bands were swapped, so the band sits lower than it used to
+ * while keeping the same height — which is why every figure derived from it
+ * (px/dB, the escape checks) is unchanged and only its position moved.
+ */
+const BAND_TOP = 267 * 0.13
+const BAND_BOTTOM = 267 - 267 * 0.35
+/**
+ * ⚠ THE SCOPE TAKES A THRESHOLD POSITION NOW. The datum used to sit at a fixed
+ * fraction of the band; it tracks the global Selectivity knob, so every test
+ * that wants a rail has to say where that knob is. 0.5 is mid-travel and is not
+ * the shipped default — the default is stated where it matters.
+ */
+const rail = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 0.5)
+
+// ── The axis. ───────────────────────────────────────────────────────────────
+
+/**
+ * ⚠ THE FAILURE THIS FILE EXISTS FOR: a node editor whose frequency mapping is
+ * off by an octave still looks like a working node editor. The same reason
+ * resonanceZoneEdit.js is a separate module from the plot that draws it.
+ */
+test('the frequency mapping round-trips and matches the plot"s axis', () => {
+  for (const hz of [20, 60, 250, 1000, 4400, 20000]) {
+    assert.ok(Math.abs(hzFromX(xFromHz(hz, axis), axis) - hz) < 1e-6, `${hz} Hz`)
+  }
+  // Logarithmic, so equal octaves are equal widths — the property that makes a
+  // node's span mean the same thing everywhere on the strip.
+  const oct = xFromHz(200, axis) - xFromHz(100, axis)
+  assert.ok(Math.abs((xFromHz(8000, axis) - xFromHz(4000, axis)) - oct) < 1e-9)
+  assert.equal(Math.round(xFromHz(20, axis)), 0)
+  assert.equal(Math.round(xFromHz(20000, axis)), 600)
+})
+
+/**
+ * The rail is SYMMETRIC AROUND A CENTRE LINE because the quantity is signed and
+ * its zero is the whole point of the model. A scale whose zero sat at the
+ * bottom would draw "leave this alone" and "work a little harder" as
+ * neighbouring positions near one end, when they are opposite statements.
+ */
+test('zero bias is the datum, and the scale is symmetric about it', () => {
+  assert.equal(yFromBias(0, rail), rail.datum)
+  assert.ok(Math.abs(biasFromY(rail.datum, rail)) < 1e-12)
+  // Symmetric: equal and opposite amounts sit equally far either side.
+  assert.ok(Math.abs((yFromBias(9, rail) - rail.datum)
+    + (yFromBias(-9, rail) - rail.datum)) < 1e-12)
+  for (const db of [-12, -3, 0, 5, 17]) {
+    assert.ok(Math.abs(biasFromY(yFromBias(db, rail), rail) - db) < 1e-9, `${db} dB`)
+  }
+})
+
+/**
+ * ⚠ POSITIVE BIAS GOES DOWN. "More cut" lowers the threshold toward the
+ * material, and on this plot down IS toward the material. A curve that rose for
+ * "more cut" would be the only thing on the plate running the other way — and
+ * nothing downstream would catch it.
+ */
+test('more cut draws downward', () => {
+  assert.ok(yFromBias(9, rail) > rail.datum)
+  assert.ok(yFromBias(-9, rail) < rail.datum)
+})
+
+/**
+ * ⚠ THE CURVE MUST NOT ESCAPE THE SPECTRUM BAND. Above it is the reduction
+ * lane, below it the FOUND strip — both measuring something else entirely, and
+ * a curve drawn over either is the two-lane confusion the plot was already
+ * undone for once. This is what fixes the two fractions, rather than taste.
+ */
+test('the curve stays inside the spectrum band at full travel', () => {
+  const hi = yFromBias(rail.maxDb, rail)
+  const lo = yFromBias(-rail.maxDb, rail)
+  assert.ok(lo > BAND_TOP, `full "less cut" escaped into the reduction lane at ${lo}`)
+  assert.ok(hi < BAND_BOTTOM, `full "more cut" escaped into the FOUND strip at ${hi}`)
+  // And it grows with the plot rather than staying a fixed pixel height.
+  const tall = focusScope(BAND_TOP * 2, BAND_BOTTOM * 2, rail.maxDb, 0.5)
+  assert.ok(tall.pxPerDb > rail.pxPerDb)
+})
+
+/**
+ * The drag has the same feel it had on the separate rail — 58 px for +/-18 dB
+ * was 1.61 px/dB, and this is within 5% of it. Worth pinning: the curve moved
+ * house, and a control that suddenly needs twice the travel reads as broken
+ * even when every value it produces is correct.
+ */
+test('the drag resolution matches the rail it replaced', () => {
+  assert.ok(Math.abs(rail.pxPerDb - 1.61) < 0.1, `${rail.pxPerDb} px/dB`)
+})
+
+/**
+ * The rail's full travel IS the parameter's full range, so there is no position
+ * on the strip that means "past the end" and no travel that does nothing.
+ */
+test('the curve cannot express a value the parameter cannot hold', () => {
+  assert.equal(rail.maxDb, RESONANCE_FOCUS_RANGES.biasDb.max)
+  assert.equal(biasFromY(500, rail), RESONANCE_FOCUS_RANGES.biasDb.max)
+  assert.equal(biasFromY(-500, rail), RESONANCE_FOCUS_RANGES.biasDb.min)
+})
+
+// ── Hit testing. ────────────────────────────────────────────────────────────
+
+test('a node is grabbed at its own frequency and its own amount', () => {
+  const nodes = [makeFocusNode(1000, 'a')]
+  const p = nodePoint(nodes[0], axis, rail)
+  assert.equal(nodeAt(nodes, p.x, p.y, axis, rail), 0)
+  // Not at the centre line under it — the handle is at its VALUE, which is what
+  // makes the amount draggable at all.
+  assert.equal(nodeAt(nodes, p.x, rail.h / 2 + NODE_HIT_PX * 2, axis, rail), -1)
+  assert.equal(nodeAt(nodes, p.x + NODE_HIT_PX * 3, p.y, axis, rail), -1)
+})
+
+/**
+ * Two nodes stacked at one frequency are distinguished only by their amounts,
+ * so nearest-wins has to consider both axes or one of them is unreachable.
+ */
+test('stacked nodes are told apart by amount', () => {
+  const nodes = [
+    { ...makeFocusNode(1000, 'a'), biasDb: 12 },
+    { ...makeFocusNode(1000, 'b'), biasDb: -12 },
+  ]
+  const x = xFromHz(1000, axis)
+  assert.equal(nodeAt(nodes, x, yFromBias(12, rail), axis, rail), 0)
+  assert.equal(nodeAt(nodes, x, yFromBias(-12, rail), axis, rail), 1)
+})
+
+// ── Edits. ──────────────────────────────────────────────────────────────────
+
+/**
+ * A drag sets frequency AND amount — two of the three numbers on one gesture,
+ * with width on the wheel. That split is not arbitrary: where and how much are
+ * what you sweep by ear against the audio; how wide is what you set and read.
+ */
+test('a drag moves frequency and amount together and leaves width alone', () => {
+  const nodes = [makeFocusNode(1000, 'a')]
+  const next = moveNode(nodes, 0, xFromHz(4000, axis), yFromBias(-9, rail), axis, rail)
+  assert.ok(Math.abs(next[0].hz - 4000) < 1)
+  assert.ok(Math.abs(next[0].biasDb + 9) < 1e-9)
+  assert.equal(next[0].spanOct, nodes[0].spanOct)
+  // A new array, so Vue sees the change. Mutating in place is what lets a
+  // panel's copy and the worklet's copy diverge.
+  assert.notEqual(next, nodes)
+  assert.equal(nodes[0].hz, 1000)
+})
+
+test('a drag past any edge of the plot clamps rather than wrapping', () => {
+  const nodes = [makeFocusNode(1000, 'a')]
+  // Up and to the left: the lowest frequency, and the least cut. ⚠ Note the
+  // vertical sense — down is MORE cut, because down is toward the material.
+  const lo = moveNode(nodes, 0, -400, -400, axis, rail)
+  assert.equal(lo[0].hz, RESONANCE_FOCUS_RANGES.hz.min)
+  assert.equal(lo[0].biasDb, RESONANCE_FOCUS_RANGES.biasDb.min)
+  const hi = moveNode(nodes, 0, 9999, 9999, axis, rail)
+  assert.equal(hi[0].hz, RESONANCE_FOCUS_RANGES.hz.max)
+  assert.equal(hi[0].biasDb, RESONANCE_FOCUS_RANGES.biasDb.max)
+})
+
+/**
+ * Width scales GEOMETRICALLY. A fixed step would take forever at the wide end
+ * and jump at the narrow one, because span is read on a log axis for the same
+ * reason frequency is.
+ */
+test('the width wheel is a ratio, and is bounded', () => {
+  // ⚠ CHECKED AT TWO DIFFERENT WIDTHS, and one is not enough: at the stock span
+  // of 1 octave a geometric step of x1.12 and an additive step of +0.12 land on
+  // exactly the same number, so a single-width assertion passes under the
+  // mutation it exists to catch. The property is EQUAL RATIO AT EVERY SIZE.
+  for (const start of [0.25, 1, 3]) {
+    const n0 = [{ ...makeFocusNode(1000, 'a'), spanOct: start }]
+    const up = scaleNodeSpan(n0, 0, 1)[0].spanOct
+    assert.ok(Math.abs(up / start - SPAN_WHEEL_RATIO) < 1e-9,
+      `expected a constant ratio at every width; at ${start} oct it stepped to ${up}`)
+    // And it comes back: a wheel that cannot undo itself is a trap on a
+    // control with no other editor than the number beside it.
+    assert.ok(Math.abs(scaleNodeSpan(up === start ? n0 : [{ ...n0[0], spanOct: up }], 0, -1)[0].spanOct - start) < 1e-9)
+  }
+  let n = [makeFocusNode(1000, 'a')]
+  for (let i = 0; i < 100; i++) n = scaleNodeSpan(n, 0, 1)
+  assert.equal(n[0].spanOct, RESONANCE_FOCUS_RANGES.spanOct.max)
+  for (let i = 0; i < 200; i++) n = scaleNodeSpan(n, 0, -1)
+  assert.equal(n[0].spanOct, RESONANCE_FOCUS_RANGES.spanOct.min)
+})
+
+/**
+ * ⚠ A NEW NODE IS CREATED DOING SOMETHING. One created at zero amount would be
+ * invisible on the rail and inaudible in the file, so the gesture that makes it
+ * looks broken — the same failure the ceiling presets shipped, where a click
+ * was accepted and silently discarded.
+ */
+test('a new node is audible and points the way the gesture implies', () => {
+  const n = makeFocusNode(2500, 'x')
+  assert.ok(n.biasDb > 0, 'you point at a resonance because you want more done about it')
+  assert.ok(n.spanOct >= RESONANCE_FOCUS_RANGES.spanOct.min)
+  assert.equal(n.enabled, true)
+  assert.ok(Math.abs(n.hz - 2500) < 1e-9)
+  assert.ok(Math.abs(focusBiasAt([n], 2500) - n.biasDb) < 1e-9)
+})
+
+/**
+ * ⚠ AT THE CAP, `addNode` RETURNS THE ARRAY UNCHANGED rather than dropping the
+ * oldest or the newest — and the caller checks `canAddFocusNode` and disables
+ * the gesture. A silently discarded edit is the worst of the three available
+ * failures, and this panel has already shipped one.
+ */
+test('the node cap refuses rather than discarding', () => {
+  let nodes = []
+  for (let i = 0; i < RESONANCE_FOCUS_MAX_NODES; i++) {
+    assert.equal(canAddFocusNode(nodes), true)
+    nodes = addNode(nodes, makeFocusNode(100 * (i + 1), `n${i}`))
+  }
+  assert.equal(nodes.length, RESONANCE_FOCUS_MAX_NODES)
+  assert.equal(canAddFocusNode(nodes), false)
+  const after = addNode(nodes, makeFocusNode(999, 'over'))
+  assert.equal(after, nodes, 'the same array, so nothing was silently dropped')
+})
+
+test('removing and bypassing', () => {
+  const nodes = [makeFocusNode(100, 'a'), makeFocusNode(1000, 'b'), makeFocusNode(9000, 'c')]
+  assert.deepEqual(removeNode(nodes, 1).map(n => n.id), ['a', 'c'])
+  assert.equal(removeNode(nodes, 7), nodes)
+  // Bypass keeps the node's position and settings — it is still where you put
+  // it, and still the thing the controls are editing.
+  const off = toggleNode(nodes, 1)
+  assert.equal(off[1].enabled, false)
+  assert.equal(off[1].hz, 1000)
+  assert.equal(off[1].biasDb, nodes[1].biasDb)
+  assert.equal(toggleNode(off, 1)[1].enabled, true)
+})
+
+test('setNodeParam clamps, and rejects a name that is not a parameter', () => {
+  const nodes = [makeFocusNode(1000, 'a')]
+  assert.equal(setNodeParam(nodes, 0, 'biasDb', 999)[0].biasDb, RESONANCE_FOCUS_RANGES.biasDb.max)
+  assert.equal(setNodeParam(nodes, 0, 'hz', 1)[0].hz, RESONANCE_FOCUS_RANGES.hz.min)
+  assert.equal(setNodeParam(nodes, 0, 'enabled', 0), nodes)
+})
+
+// ── Drawing. ────────────────────────────────────────────────────────────────
+
+/**
+ * The curve is sampled in PIXELS, not in frequency. Sampling evenly in Hz puts
+ * nine tenths of the points in the top two octaves and draws the bottom of the
+ * rail as straight segments between three samples — the same argument the
+ * spectrum display's log resample makes.
+ */
+test('the curve is sampled per pixel column and agrees with the model', () => {
+  const nodes = [{ ...makeFocusNode(500, 'a'), biasDb: 10, spanOct: 1 }]
+  const pts = biasCurvePoints(nodes, axis, rail, 1)
+  assert.equal(pts.length, axis.w + 1)
+  for (const p of pts) {
+    assert.ok(Math.abs(p.db - focusBiasAt(nodes, hzFromX(p.x, axis))) < 1e-12)
+    assert.ok(Math.abs(p.y - yFromBias(p.db, rail)) < 1e-12)
+  }
+  // The peak of the drawn curve lands on the node, within a pixel.
+  const peak = pts.reduce((a, b) => (b.db > a.db ? b : a))
+  assert.ok(Math.abs(peak.x - xFromHz(500, axis)) <= 1)
+})
+
+/**
+ * ⚠ THE CURVE RUNS THE FULL WIDTH, CONTINUOUSLY, and an untouched patch draws a
+ * flat line on the datum rather than nothing.
+ *
+ * It was broken at 0.3 dB for a while, on the argument that a flat full-width
+ * stroke is a rail. That was overruled by looking at it: over the spectrum,
+ * with no plate and no reserved band, it reads as a floating line ON the
+ * display. What the break cost was continuity — the curve appeared and vanished
+ * as a node was dragged past the threshold.
+ */
+test('the curve is continuous edge to edge, flat on the datum where untouched', () => {
+  const pts = biasCurvePoints([], axis, rail, 1)
+  assert.equal(pts.length, axis.w + 1)
+  assert.equal(pts[0].x, 0)
+  assert.equal(pts[pts.length - 1].x, axis.w)
+  assert.ok(pts.every(p => p.db === 0 && p.y === rail.datum))
+})
+
+test('a single node leaves the curve continuous, and flat away from itself', () => {
+  const nodes = [{ ...makeFocusNode(1000, 'a'), biasDb: 12, spanOct: 0.5 }]
+  const pts = biasCurvePoints(nodes, axis, rail, 1)
+  assert.equal(pts.length, axis.w + 1)
+  // Defined at every column — no gaps for a caller to have to stitch.
+  assert.ok(pts.every(p => Number.isFinite(p.y)))
+  // Flat at both ends, displaced in the middle.
+  assert.ok(Math.abs(pts[0].y - rail.datum) < 0.01)
+  assert.ok(Math.abs(pts[pts.length - 1].y - rail.datum) < 0.01)
+  const peak = pts.reduce((a, b) => (Math.abs(b.db) > Math.abs(a.db) ? b : a))
+  assert.ok(Math.abs(peak.x - xFromHz(1000, axis)) <= 1)
+  assert.ok(Math.abs(peak.db - 12) < 0.01)
+})
+
+/**
+ * How a click on a named resonance in the plot above finds the node it already
+ * made, instead of stacking a second one on top of the first.
+ */
+test('nodeNearHz finds an existing node within a musical tolerance', () => {
+  const nodes = [makeFocusNode(300, 'a'), makeFocusNode(3000, 'b')]
+  assert.equal(nodeNearHz(nodes, 3040), 1)
+  assert.equal(nodeNearHz(nodes, 3600), -1, 'a third of an octave away is a different resonance')
+  assert.equal(nodeNearHz(nodes, 305), 0)
+})
+
+// ── Left-to-right order. ────────────────────────────────────────────────────
+
+/**
+ * ⚠ THE ARRAY IS NOT SORTED, AND MUST NOT BE. Nodes are stored in the order
+ * they were added, and selection, solo and the drag in progress are all indices
+ * into that array — re-sorting on a frequency change would renumber them under
+ * a drag, which is the one moment an index has to hold still. The order is a
+ * VIEW: ranks for display, `focusNeighbour` for the arrow keys.
+ */
+test('ranks number the nodes left to right, whatever order they were added', () => {
+  const nodes = [
+    { ...makeFocusNode(3180, 'c') },
+    { ...makeFocusNode(205, 'a') },
+    { ...makeFocusNode(7000, 'd') },
+    { ...makeFocusNode(1150, 'b') },
+  ]
+  assert.deepEqual(focusOrder(nodes), [1, 3, 0, 2])
+  assert.deepEqual(focusRanks(nodes), [2, 0, 3, 1])
+  // The array itself is untouched — the whole point of it being a view.
+  assert.deepEqual(nodes.map(n => n.id), ['c', 'a', 'd', 'b'])
+})
+
+test('the arrows walk by frequency and wrap, not by array position', () => {
+  const nodes = [
+    { ...makeFocusNode(3180, 'c') },
+    { ...makeFocusNode(205, 'a') },
+    { ...makeFocusNode(7000, 'd') },
+    { ...makeFocusNode(1150, 'b') },
+  ]
+  // From the leftmost (205 Hz, array index 1), right is 1150 Hz (index 3).
+  assert.equal(focusNeighbour(nodes, 1, 1), 3)
+  // ...and left wraps to the rightmost, 7 kHz (index 2).
+  assert.equal(focusNeighbour(nodes, 1, -1), 2)
+  assert.equal(focusNeighbour(nodes, 2, 1), 1, 'right from the rightmost wraps')
+  // With nothing selected, a step lands on the end the arrow points from.
+  assert.equal(focusNeighbour(nodes, -1, 1), 1)
+  assert.equal(focusNeighbour(nodes, -1, -1), 2)
+  assert.equal(focusNeighbour([], 0, 1), -1)
+})
+
+/**
+ * Two nodes stacked at one frequency still need a stable, distinct number, or
+ * the card's heading swaps between them on a repaint.
+ */
+test('ties break on array position rather than arbitrarily', () => {
+  const nodes = [{ ...makeFocusNode(1000, 'a') }, { ...makeFocusNode(1000, 'b') }]
+  assert.deepEqual(focusRanks(nodes), [0, 1])
+  assert.deepEqual(focusOrder(nodes), [0, 1])
+})
+
+/**
+ * The datum tracks the Threshold knob.
+ *
+ * ⚠ IT WAS A CONSTANT, AND THAT IS THE WHOLE POINT OF THESE. The rail means
+ * "zero bias — this is where the detector sits", and it sat at a fixed 0.22 of
+ * the band whatever Selectivity was set to: the one line that says where the
+ * threshold is could not be moved by the control that moves the threshold.
+ */
+test('the datum moves with the threshold, and up means less cut', () => {
+  const most = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 0)
+  const least = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 1)
+  // t=0 is the least selective setting — the most cut — and down is toward the
+  // material everywhere else on this plate, so it sits lower on screen.
+  assert.ok(most.datum > least.datum, 'more cut should sit lower')
+  const band = BAND_BOTTOM - BAND_TOP
+  assert.ok(
+    Math.abs((most.datum - least.datum) / band
+      - (FOCUS_DATUM_MAX_FRAC - FOCUS_DATUM_MIN_FRAC)) < 1e-9,
+    'the travel should be exactly the two fractions apart',
+  )
+})
+
+test('the curve stays inside its band at every threshold', () => {
+  // ⚠ THE GUARANTEE THE TRAVEL WAS SIZED AROUND. A curve that escaped its band
+  // would be drawn over a lane measuring something else entirely — the mistake
+  // the plot's two-lane split was undone for. Full bias either way is
+  // FOCUS_HALF_SPAN_FRAC of the band, so the datum can never come within less
+  // than that of an edge.
+  for (let t = 0; t <= 1; t += 0.05) {
+    const s = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, t)
+    const reach = s.pxPerDb * s.maxDb
+    assert.ok(s.datum - reach >= BAND_TOP - 1e-9, `escaped the top at t=${t.toFixed(2)}`)
+    assert.ok(s.datum + reach <= BAND_BOTTOM + 1e-9, `escaped the bottom at t=${t.toFixed(2)}`)
+  }
+})
+
+test('the bias mapping does not stretch as the datum moves', () => {
+  // Only the origin moves. A mapping that scaled with the rail would make
+  // turning Threshold silently re-scale every node's amount on the plot.
+  const a = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 0)
+  const b = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, 1)
+  assert.equal(a.pxPerDb, b.pxPerDb)
+})
+
+test('a Selectivity value maps to its place in its own range', () => {
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  assert.equal(thresholdFraction(R.min, R), 0)
+  assert.equal(thresholdFraction(R.max, R), 1)
+  // Out of range clamps rather than running off the band.
+  assert.equal(thresholdFraction(R.min - 100, R), 0)
+  assert.equal(thresholdFraction(R.max + 100, R), 1)
+})
+
+/**
+ * The rail's drag, as a pure mapping.
+ *
+ * ⚠ THE INVERSE HAS TO BE THE EXACT MIRROR OF THE DRAW. This panel has twice
+ * recorded what a second, independently derived copy of a mapping costs — a hit
+ * test that fails silently, as handles which cannot be grabbed where they are
+ * drawn. Here it would be worse than silent: the rail would set a value its own
+ * position disagrees with, so the line would drift away from the pointer as it
+ * was dragged.
+ */
+test('a datum drawn at a threshold reads back as that threshold', () => {
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  for (const sel of [R.min, 8, 14, 20, 27, R.max]) {
+    const t = thresholdFraction(sel, R)
+    const scope = focusScope(BAND_TOP, BAND_BOTTOM, RESONANCE_FOCUS_RANGES.biasDb.max, t)
+    const back = selectivityFromFraction(
+      thresholdFractionFromY(scope.datum, BAND_TOP, BAND_BOTTOM), R,
+    )
+    assert.ok(Math.abs(back - sel) < 1e-9, `${sel} came back as ${back}`)
+  }
+})
+
+test('dragging past either end parks at the end', () => {
+  // A drag that ran the value off its range would let the rail leave the band,
+  // which is the containment guarantee the travel was sized around.
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  const above = selectivityFromFraction(
+    thresholdFractionFromY(BAND_TOP - 500, BAND_TOP, BAND_BOTTOM), R,
+  )
+  const below = selectivityFromFraction(
+    thresholdFractionFromY(BAND_BOTTOM + 500, BAND_TOP, BAND_BOTTOM), R,
+  )
+  assert.equal(above, R.max, 'dragging up past the top is the least cut')
+  assert.equal(below, R.min, 'dragging down past the bottom is the most cut')
+})
+
+test('dragging down is more cut, matching the rail labels', () => {
+  // The sign error this model is most prone to, and the one place it shows.
+  const R = RESONANCE_FOCUS_RANGES.selectivity
+  const high = selectivityFromFraction(
+    thresholdFractionFromY(BAND_TOP + 40, BAND_TOP, BAND_BOTTOM), R,
+  )
+  const low = selectivityFromFraction(
+    thresholdFractionFromY(BAND_TOP + 80, BAND_TOP, BAND_BOTTOM), R,
+  )
+  assert.ok(low < high, 'lower on the plate should be the lower threshold')
+})

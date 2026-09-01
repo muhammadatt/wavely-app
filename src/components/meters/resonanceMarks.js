@@ -1,95 +1,51 @@
 /**
- * Which resonances the display names, and where.
+ * Which parts of a display frame are notable, as pure functions.
  *
- * Design 1c marks the deepest cuts with a pill carrying a frequency and a
- * depth — "1.75 kHz  −9.5". That is the one thing the per-zone readouts cannot
- * say: a zone number tells you which BAND is being worked, and a mark tells you
- * which FREQUENCY, which is what someone reaches for the EQ with.
+ * Split out of the component for the reason the zone geometry is: picking the
+ * wrong feature, or placing one at the wrong frequency, looks exactly like
+ * picking the right one. None of it can be reviewed by looking at the plot.
  *
- * Split out of the component for the same reason the zone geometry is: picking
- * the wrong peak, or labelling a peak at the wrong frequency, looks exactly
- * like picking the right one.
+ * ⚠ THE MARKS HALF IS GONE. `findResonanceMarks` named the deepest few cuts with
+ * a frequency and a depth — "1.75 kHz -9.5" — as dots on the reduction trace.
+ * Both it and the trace's peak-hold outline said where the reduction HAS been,
+ * and the FOUND strip now answers that in a band of its own, at true depth over
+ * the threshold and without stacking two histories on one curve. The marks, the
+ * pills, their hit test, their keyboard walk and their four constants went with
+ * it, and so did the tests that pinned them.
+ *
+ * Deleted rather than left unwired, which is the opposite of the call made for
+ * `bandSplitLimiter.js`. The difference is what the code is worth: that module
+ * carries measurements nobody wants to repeat, and its tests are the record. The
+ * marks were a display decision that has been reversed, and everything worth
+ * keeping about them is the sentence above.
  */
-
-/** A cut shallower than this is not a resonance worth naming. */
-export const MARK_MIN_DB = 2.2
-/**
- * Minimum separation between two marks, as a fraction of the log-frequency
- * axis. A resonance is a few bins wide and its shoulders are local maxima too,
- * so without this the four slots fill with one peak's flanks.
- */
-export const MARK_MIN_SEPARATION = 0.05
-/** How many marks the plot will carry. More than this and the pills collide. */
-export const MARK_MAX = 4
-
-/**
- * Local maxima of the reduction curve, deepest first, thinned by separation,
- * returned in frequency order.
- *
- * ±1 AND ±3 BINS. Comparing only against immediate neighbours accepts every
- * ripple on a broad cut as its own peak; ±3 requires the peak to still be the
- * largest thing across roughly the width of a real resonance on this grid. The
- * ends are skipped rather than clamped — a "peak" at the first or last bin has
- * no shoulder on one side and cannot be shown to be a maximum of anything,
- * which is the same rule the F0 tracker's edge-peak guard applies.
- *
- * Returned sorted by FREQUENCY, not by depth, because the caller lays the pills
- * out left to right and alternates their vertical offset to avoid collisions —
- * an ordering by depth would make that alternation arbitrary.
- */
-export function findResonanceMarks(reduction, bins, minHz, maxHz, opts = {}) {
-  const minDb = opts.minDb ?? MARK_MIN_DB
-  const separation = opts.separation ?? MARK_MIN_SEPARATION
-  const max = opts.max ?? MARK_MAX
-  if (!reduction || bins < 7) return []
-
-  const found = []
-  for (let i = 3; i < bins - 3; i++) {
-    const v = reduction[i]
-    if (v < minDb) continue
-    if (v >= reduction[i - 1] && v >= reduction[i + 1]
-      && v >= reduction[i - 3] && v >= reduction[i + 3]) {
-      found.push({ bin: i, db: v, pos: i / (bins - 1) })
-    }
-  }
-  found.sort((a, b) => b.db - a.db)
-
-  const kept = []
-  for (const m of found) {
-    if (kept.every(k => Math.abs(k.pos - m.pos) > separation)) kept.push(m)
-    if (kept.length === max) break
-  }
-
-  const octaves = Math.log2(maxHz / minHz)
-  for (const m of kept) m.hz = minHz * Math.pow(2, m.pos * octaves)
-  return kept.sort((a, b) => a.hz - b.hz)
-}
 
 /**
  * The shallowest crossing worth shading.
  *
- * ⚠ IT WAS A PIXEL BUDGET AND IT IS NOT ONE ANY MORE, which is why it moved.
- * Against the old absolute window a margin was drawn at about 3 px per dB and
- * 0.3 dB was the point where a fill became thinner than the strokes around it.
- * The margin lane draws the same dB at ~9.2 px, so that floor now admits
- * three-pixel shading of sub-decibel wobble — visible, and about nothing.
+ * IT IS A PIXEL BUDGET AGAIN, having twice not been one. The spectrum's window
+ * is 85 dB over a band of about 139 px, so a decibel is 1.6 px and this floor is
+ * 0.8 — right at the point where a fill becomes thinner than the strokes around
+ * it, which is where it started life against a different window. That is
+ * coincidence rather than derivation; the value has not moved.
  *
- * What it guards instead is CLUTTER, and only because the shading is held. The
- * reference is a smoothed envelope, so bins sitting within a fraction of a dB of
- * the line cross back and forth continuously; each crossing leaves a ghost for
- * something over two seconds, and without a floor the band fills with ghosts
- * that describe nothing and hide the ones that do.
+ * ⚠ THE CLUTTER ARGUMENT IT CARRIED IS VOID. It read that the floor guards
+ * against ghosts, "and only because the shading is held" — the shading here is
+ * LIVE, and has been since the crossing history moved into the FOUND band. A bin
+ * hovering either side of the line now flickers rather than accumulating, which
+ * is a smaller problem and still worth suppressing.
+ *
+ * ⚠ AND IT IS ONE FLOOR FOR ONE SPACE, not two. It used to be shared with the
+ * margin lane, on the argument that two overlays must not disagree about what is
+ * happening. That lane is gone, and the FOUND band that replaced it applies no
+ * floor of its own — it draws the held excess as a silhouette, where a shallow
+ * crossing is simply a low one rather than a thin sliver that needs suppressing.
+ * So this governs the spectrum's crossings and nothing else.
  *
  * ⚠ 0.5 dB IS A JUDGEMENT, NOT A MEASUREMENT — the first thing to tune by eye,
  * in both directions: too low and the display silts up, too high and a genuine
  * shallow resonance never appears. It is compared against a run's PEAK, so a
  * broad resonance keeps its shallow flanks either way.
- *
- * ONE FLOOR FOR BOTH SPACES. The same crossings are shaded twice over — against
- * absolute level in the SPECTRUM overlay at ~3 px per dB, and against the rail
- * in MARGIN at ~9 — and a crossing worth showing in one is worth showing in the
- * other. Splitting it per space would let the two overlays disagree about what
- * is happening, which is worse than either floor being slightly off.
  */
 export const EXCEEDANCE_MIN_DB = 0.5
 

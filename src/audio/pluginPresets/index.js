@@ -16,7 +16,9 @@ import { registerResoTamePresets } from './resoTame.js'
 
 export { OPTO_SMOOTH_PRESET_PLUGIN, registerOptoSmoothPresets } from './optoSmooth.js'
 export { FET_PUNCH_PRESET_PLUGIN, registerFetPunchPresets } from './fetPunch.js'
-export { RESO_TAME_PRESET_PLUGIN, registerResoTamePresets } from './resoTame.js'
+export {
+  RESO_TAME_PRESET_PLUGIN, registerResoTamePresets, RESO_TAME_STOCK_ZONES,
+} from './resoTame.js'
 export * from './store.js'
 
 /**
