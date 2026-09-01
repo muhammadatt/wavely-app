@@ -116,11 +116,11 @@ function commit(v) {
  */
 function onWheel(e) {
   if (props.disabled || editing.value) return
-  // Only consumed when it actually moves something, so a wheel over a disabled
-  // field still scrolls whatever the field is sitting in.
-  e.preventDefault()
   const dir = e.deltaY < 0 ? 1 : -1
-  commit(fromPos(toPos(props.modelValue) + dir * wheelPos.value * (e.shiftKey ? 10 : 1)))
+  const v = fromPos(toPos(props.modelValue) + dir * wheelPos.value * (e.shiftKey ? 10 : 1))
+  if (quantise(v) === props.modelValue) return
+  e.preventDefault()
+  commit(v)
 }
 
 function onPointerDown(e) {
