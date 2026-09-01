@@ -26,7 +26,7 @@ import {
 import FocusNodePanel from './FocusNodePanel.vue'
 import Icon from '../ui/Icon.vue'
 import DeviceField from '../knobs/DeviceField.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import Knob from '../knobs/Knob.vue'
 import ResonanceSpectrum from '../meters/ResonanceSpectrum.vue'
 import ResonanceZoneControls from './ResonanceZoneControls.vue'
@@ -290,7 +290,7 @@ const overlayButtons = computed(() => [
  *
  * IT REMAINS A PARAMETER at RESONANCE_DEFAULTS.mode, so the kernel is untouched
  * and a stored patch keeps whatever it had. Only the way in is gone; putting it
- * back is a SegmentedSwitch and three lines.
+ * back is a DeviceChoiceRocker and three lines.
  */
 
 const percent = v => `${Math.round(v * 100)}`
@@ -683,25 +683,31 @@ async function applyAndClose() {
                ON and OFF are always both drawn, so the answer is legible from
                the one control without a second to compare it to — the same
                reason ON/BYPASS in the title bar prints the word rather than
-               relying on a lamp alone. -->
-          <!-- ⚠ THE GLYPH SITS BESIDE THE SWITCH, NOT INSIDE A CELL. It is what
+               relying on a lamp alone.
+
+               ⚠ WHICH IS WHY THIS IS `DeviceChoiceRocker` AND NOT
+               `DeviceLampPill`. The pill IS the lit-button shape reported above;
+               a lamp bead states its state better than a bare wash did, but it
+               still answers "on or off?" with one object, and that is the exact
+               question this control was found unable to answer alone. -->
+          <!-- ⚠ THE GLYPH SITS BESIDE THE SWITCH, NOT INSIDE A HALF. It is what
                says at a glance which of the row's controls is about frequency
-               rather than time, and it cannot go in a cell: an icon on ON and
-               none on OFF would read as the two cells meaning different KINDS of
-               thing rather than two states of one. Aligned to the bank rather
-               than the group, so it sits with the cells and not with the caption
-               under them. -->
+               rather than time, and it cannot go in a half: an icon on ON and
+               none on OFF would read as the two halves meaning different KINDS
+               of thing rather than two states of one. Aligned to the switch body
+               rather than the group, so it sits with the engraving and not with
+               the caption under it. -->
           <Icon
             name="harmonics" :size="13" :stroke-width="1.8"
             class="self-start mt-[4px] shrink-0"
             :style="{ color: resFocus.global.protect ? bright(ACCENT) : 'rgba(255,255,255,.32)' }"
           />
-          <SegmentedSwitch
+          <DeviceChoiceRocker
             :model-value="resFocus.global.protect ? 'on' : 'off'"
             :options="HARMONIC_MODES"
-            :padding-x="8"
             :accent="ACCENT"
             :disabled="!resPreview"
+            label="Harmonic protection"
             caption="preserve harmonics"
             @update:model-value="syncFocus({
               ...resFocus,

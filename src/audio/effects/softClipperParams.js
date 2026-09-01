@@ -153,7 +153,9 @@ export const LIMITER_MODES = [
  * between, and a switch that lit a position it was not actually at would be a
  * readout that stops being true the moment anything changes — the same failure
  * the ceiling presets' lamp is written to avoid. It is a string rather than
- * null because SegmentedSwitch compares with String() and requires a value.
+ * null because DeviceChoiceRocker compares with String() and requires a value.
+ * A value matching neither option lights neither position, which is exactly
+ * the state this returns it for.
  */
 export function limiterModeFor(limiter) {
   const m = LIMITER_MODES.find(x => x.limiter === limiter)

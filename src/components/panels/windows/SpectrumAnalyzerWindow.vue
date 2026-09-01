@@ -4,7 +4,7 @@ import {
   useSpectrumAnalyzer, FFT_OPTIONS, SLOPE_OPTIONS,
 } from '../../../composables/useSpectrumAnalyzer.js'
 import FloatingWindow from '../FloatingWindow.vue'
-import SegmentedSwitch from '../../knobs/SegmentedSwitch.vue'
+import DeviceTravelSlide from '../../knobs/DeviceTravelSlide.vue'
 import DeviceSlider from '../../knobs/DeviceSlider.vue'
 import SpectrumDisplay from '../../meters/SpectrumDisplay.vue'
 
@@ -83,21 +83,23 @@ function togglePeakHold() {
 
       <div class="mt-[16px] pt-[14px] flex items-end gap-[20px]"
            style="border-top:1px solid rgba(255,255,255,.06)">
-        <SegmentedSwitch
+        <DeviceTravelSlide
           class="shrink-0"
           v-model="fftSize"
           :options="FFT_OPTIONS"
           :accent="ACCENT"
           caption="Resolution"
-          :padding-x="11"
+          label="FFT size"
+          :width="146"
         />
-        <SegmentedSwitch
+        <DeviceTravelSlide
           class="shrink-0"
           v-model="slope"
           :options="SLOPE_OPTIONS"
           :accent="ACCENT"
           caption="Tilt dB/oct"
-          :padding-x="11"
+          label="Tilt"
+          :width="122"
         />
 
         <!-- Peak hold reads as a lamp rather than a switch bank: it is on or

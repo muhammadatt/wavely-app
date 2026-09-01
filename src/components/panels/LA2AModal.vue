@@ -6,7 +6,7 @@ import { OPTO_SMOOTH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import PresetMenu from './PresetMenu.vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -202,12 +202,13 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
       <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 trimmer) -->
       <div class="flex items-center justify-between mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <!-- Compress / Limit — the hardware's rear-panel switch -->
-        <SegmentedSwitch
+        <DeviceChoiceRocker
           :model-value="la2aMode"
           @update:model-value="syncMode"
           :options="MODE_OPTIONS"
           :accent="ACCENT"
           :disabled="!la2aPreview"
+          label="Mode"
           :caption="la2aMode === 'compress' ? '~3:1 leveling' : 'hard ceiling'"
         />
 

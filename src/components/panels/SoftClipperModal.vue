@@ -5,7 +5,8 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
 import Knob from '../knobs/Knob.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
+import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import ClipperScope from '../meters/ClipperScope.vue'
 import { lampFraction } from '../meters/ballistics.js'
@@ -570,14 +571,14 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
           <!-- ── Peak control ───────────────────────────────────────────── -->
           <div style="display:flex;flex-direction:column;align-items:center;gap:9px;flex-shrink:0">
             <span style="font:600 9px 'Inter',system-ui;letter-spacing:.14em;color:rgba(255,255,255,.4);white-space:nowrap">PEAK CONTROL</span>
-            <SegmentedSwitch
+            <DeviceChoiceRocker
               :model-value="limiterMode"
               @update:model-value="setLimiterMode"
               :options="LIMITER_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))"
               :accent="ACCENT"
               :caption="limiterCaption"
               :disabled="!clipperPreview"
-              :padding-x="16"
+              label="Peak control"
             />
           </div>
         </div>
@@ -685,13 +686,14 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
              faceplate rather than Drive. -->
         <div class="flex items-center justify-center gap-[9px] mt-[12px]">
           <span style="font:700 8px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.35)">KNEE</span>
-          <SegmentedSwitch
+          <DeviceTravelSlide
             :model-value="shape"
             @update:model-value="setShape"
             :options="SHAPE_OPTIONS"
             accent="#ffb020"
             :disabled="!clipperPreview"
-            :padding-x="11"
+            :width="120"
+            label="Knee"
           />
           <span style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
             {{ SHAPE_CAPTION[shape] }}
