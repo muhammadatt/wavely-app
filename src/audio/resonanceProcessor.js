@@ -105,7 +105,7 @@
  */
 
 import { StftProcessor } from './dsp/stft.js'
-import { F0Tracker } from './dsp/f0.js'
+import { F0Tracker, pitchFloorHz } from './dsp/f0.js'
 import { getFFT } from './dsp/fft.js'
 import {
   RESONANCE_DISPLAY_BINS,
@@ -116,8 +116,61 @@ import {
 } from './resonanceParams.js'
 import { buildResonanceFocusCurves } from './resonanceFocus.js'
 
+/**
+ * The default frame, and the only one the full-range plugin uses.
+ *
+ * ⚠ IT IS A PER-INSTANCE PROPERTY NOW, NOT A CONSTANT — see `frameSize` in the
+ * constructor. The frame is the latency (`latencySamples`), so a caller that
+ * needs a shorter one is also choosing a shorter delay, and the offline apply
+ * path has to read the instance's own figure rather than this.
+ */
 const FFT_SIZE = 2048
-const HOP_SIZE = 512
+
+/**
+ * Frames this kernel will accept, smallest first.
+ *
+ * Powers of two only — the FFT requires it — and the hop is always a quarter of
+ * the frame, because the periodic-Hann overlap-add in `StftProcessor` is built
+ * around 4x overlap and is not a free parameter.
+ *
+ * The floor is 256 rather than lower because below it the frame stops
+ * resolving anything a suppressor is asked about: at 44.1 kHz a 256-point
+ * frame is already 172 Hz per bin. The ceiling is the shipping frame — a
+ * LONGER frame would buy low-end resolution the full-range stage does not need
+ * and cost latency it cannot afford.
+ */
+const SUPPORTED_FRAME_SIZES = [256, 512, 1024, 2048]
+
+/** Hop is structurally a quarter of the frame — see SUPPORTED_FRAME_SIZES. */
+const HOP_DIVISOR = 4
+
+/**
+ * Resolve a requested frame to one this kernel can actually run.
+ *
+ * An unrecognised value falls back to the shipping frame rather than producing
+ * a third behaviour, which is the rule `SoftClipperKernel`'s `oversample`
+ * option already follows: a typo in an option should give the shipped path, not
+ * a silently different one.
+ */
+export function resolveResonanceFrameSize(frameSize) {
+  return SUPPORTED_FRAME_SIZES.includes(frameSize) ? frameSize : FFT_SIZE
+}
+
+/**
+ * Latency, in samples, for a given frame — without instantiating a kernel.
+ *
+ * The offline apply path needs this BEFORE anything exists to ask, because the
+ * length of the render it allocates depends on the answer. Same reason
+ * `softClipperLatencySamples` exists, and the same hazard it was written for:
+ * an apply path trimming a constant off a render that is delayed by something
+ * else shifts every applied region on the timeline.
+ */
+export function resonanceLatencySamples(frameSize) {
+  return resolveResonanceFrameSize(frameSize)
+}
+
+/** Frozen result handed back when pitch tracking is skipped. */
+const NO_PITCH = Object.freeze({ f0: 0, pitched: false })
 
 /** Matches `eps` in resonance_suppressor.py's process(). */
 const MAG_EPS = 1e-10
@@ -451,7 +504,9 @@ const PITCH_HOLD_FRAMES = 16
  * suppression path sees it, because every decision the kernel makes is a
  * difference between two magnitudes and a constant cancels out of all of them.
  */
-const SPECTRUM_REF_DB = 20 * Math.log10(FFT_SIZE / 4)
+function spectrumRefDb(frameSize) {
+  return 20 * Math.log10(frameSize / 4)
+}
 
 export const RESONANCE_KERNEL_DEFAULTS = {
   attackMs: 15,
@@ -493,16 +548,29 @@ function clamp(v, lo, hi) {
 }
 
 export class ResonanceKernel {
-  constructor(sampleRate) {
+  /**
+   * @param {number} sampleRate
+   * @param {object} [options]
+   * @param {number} [options.frameSize=2048] one of SUPPORTED_FRAME_SIZES.
+   *   A SHORTER FRAME IS FOR A BAND-LIMITED INSTANCE, not a cheaper full-range
+   *   one — see `pitchTrackable`. It is an option rather than a param because
+   *   the frame is the latency: changing it mid-stream would move the timeline
+   *   under a running preview and reallocate every buffer here.
+   */
+  constructor(sampleRate, options = {}) {
     this.sampleRate = sampleRate
-    this.binCount = (FFT_SIZE >>> 1) + 1
-    this.binWidth = sampleRate / FFT_SIZE
-    this.frameRateMs = (HOP_SIZE / sampleRate) * 1000
+    const frameSize = resolveResonanceFrameSize(options.frameSize)
+    this.frameSize = frameSize
+    this.hopSize = frameSize / HOP_DIVISOR
+    this.spectrumRefDb = spectrumRefDb(frameSize)
+    this.binCount = (frameSize >>> 1) + 1
+    this.binWidth = sampleRate / frameSize
+    this.frameRateMs = (this.hopSize / sampleRate) * 1000
 
-    this.fft = getFFT(FFT_SIZE)
+    this.fft = getFFT(frameSize)
     this.f0 = new F0Tracker({
       sampleRate,
-      frameSize: FFT_SIZE,
+      frameSize,
       defaultF0: null,
       minHz: DEFAULT_PITCH_MIN_HZ,
       maxHz: DEFAULT_PITCH_MAX_HZ,
@@ -530,7 +598,7 @@ export class ResonanceKernel {
     const bins = this.binCount
     this.magDb = new Float64Array(bins)
     this.envDb = new Float64Array(bins)
-    this.cepstrum = new Float64Array(FFT_SIZE)
+    this.cepstrum = new Float64Array(frameSize)
     this.envRe = new Float64Array(bins)
     this.envIm = new Float64Array(bins)
     this.reduction = new Float64Array(bins)
@@ -630,7 +698,7 @@ export class ResonanceKernel {
 
   /** Algorithmic latency, in samples. Reported to the offline apply path. */
   get latencySamples() {
-    return FFT_SIZE
+    return this.frameSize
   }
 
   /** Merge a partial param update and recompute derived state. */
@@ -816,10 +884,46 @@ export class ResonanceKernel {
     // in-worklet reporting can read it. The UI mirrors the same clamp on the
     // main thread via effectivePitchRange() — there is no channel out of a
     // worklet for a value that is needed to render a label.
+    const requestedMinHz = p.pitchMinHz ?? DEFAULT_PITCH_MIN_HZ
     this.pitchRange = this.f0.setRange(
-      p.pitchMinHz ?? DEFAULT_PITCH_MIN_HZ,
+      requestedMinHz,
       p.pitchMaxHz ?? DEFAULT_PITCH_MAX_HZ,
     )
+
+    /**
+     * WHETHER THE TRACKER CAN ANSWER THE QUESTION IT IS BEING ASKED, and the
+     * reason a short-frame instance is band-limited rather than merely cheaper.
+     *
+     * Autocorrelation cannot see a period longer than half the frame, so the
+     * lowest pitch a frame can resolve is `pitchFloorHz`. At the shipping 2048
+     * that is 43 Hz at 44.1 kHz — comfortably under the 70 Hz the mask asks
+     * for, so nothing changes. At 512 it is 172 Hz, which is ABOVE most male
+     * fundamentals: the tracker would not fail loudly, it would report the
+     * pitch of whatever partial happens to fall in its remaining window, and a
+     * harmonic mask built on that comb protects the wrong bins.
+     *
+     * ⚠ SO THIS IS A CORRECTNESS GATE FIRST AND A SAVING SECOND. Refusing to
+     * track is what makes a short frame honest; that it also skips ~21% of the
+     * kernel's work is a consequence, not the motive. `setRange` already
+     * clamped the range to what the frame supports, so the comparison is
+     * against what was ASKED for, not against what it settled on — the clamp
+     * is exactly the information being tested for.
+     *
+     * ⚠ AND THE MASK IS THE SECONDARY CONSUMER, NOT THE PRIMARY ONE. Under the
+     * shipped `refMode: 'peak'` the mask is off by default, so what F0 is
+     * really doing is setting `_peakEnvelope`'s window geometry — the max
+     * filter's half-width and the floor under the geometric averaging window.
+     * Measured by substituting the constant fallback for the tracked value: on
+     * an F0 90 voice carrying a 250 Hz resonance that costs **1 dB off the
+     * whole 200 Hz-4 kHz band** (the reference sits too high, so the stage
+     * attenuates rather than finds), while at F0 130 and above, or anywhere
+     * past about 3 kHz, the difference is under 0.15 dB. That asymmetry is the
+     * evidence for this gate: a window spanning one harmonic spacing is many
+     * bins at 100 Hz and a rounding error at 7 kHz, so a band-limited HF
+     * instance loses nothing by falling back to PEAK_FALLBACK_F0_HZ — and a
+     * full-range one cannot. See CLAUDE.md for the table.
+     */
+    this.pitchTrackable = pitchFloorHz(this.sampleRate, this.frameSize) <= requestedMinHz
 
     // The harmonic walk runs to Nyquist now that there is no adjustable band
     // ceiling, so the mask depends on F0 alone and the cache never needs
@@ -984,9 +1088,9 @@ export class ResonanceKernel {
         det = detect[k0] > detect[k1] ? detect[k0] : detect[k1]
         gr = prevGr[k0] > prevGr[k1] ? prevGr[k0] : prevGr[k1]
       }
-      displayMag[d] = mag - SPECTRUM_REF_DB
-      displayEnv[d] = env - SPECTRUM_REF_DB
-      displayDetect[d] = det - SPECTRUM_REF_DB
+      displayMag[d] = mag - this.spectrumRefDb
+      displayEnv[d] = env - this.spectrumRefDb
+      displayDetect[d] = det - this.spectrumRefDb
       displayGrNow[d] = gr
     }
     this.hasDisplayFrame = true
@@ -1147,10 +1251,10 @@ export class ResonanceKernel {
 
     fft.irfft(magDb, null, cepstrum)
 
-    // Zero indices [L, FFT_SIZE - L] inclusive, matching
+    // Zero indices [L, frameSize - L] inclusive, matching
     // `liftered[:, L : n_fft - L + 1] = 0`.
-    const L = Math.max(1, Math.min(lifterCutoff, FFT_SIZE >>> 1))
-    for (let i = L; i <= FFT_SIZE - L; i++) cepstrum[i] = 0
+    const L = Math.max(1, Math.min(lifterCutoff, this.frameSize >>> 1))
+    for (let i = L; i <= this.frameSize - L; i++) cepstrum[i] = 0
 
     fft.rfft(cepstrum, envRe, envIm)
     for (let k = 0; k < binCount; k++) envDb[k] = envRe[k]
@@ -1238,8 +1342,9 @@ export class ResonanceKernel {
     // measured from the unwindowed frame the STFT kept for us.
     const raw = (stft ?? this.stfts[0]).rawFrame
     let sumSq = 0
-    for (let i = 0; i < FFT_SIZE; i++) sumSq += raw[i] * raw[i]
-    const frameDb = 10 * Math.log10(sumSq / FFT_SIZE + 1e-20)
+    const frameSize = this.frameSize
+    for (let i = 0; i < frameSize; i++) sumSq += raw[i] * raw[i]
+    const frameDb = 10 * Math.log10(sumSq / frameSize + 1e-20)
 
     // TWO SEPARATE QUESTIONS, and conflating them is what made this effect
     // switch itself off on anything unpitched:
@@ -1253,7 +1358,14 @@ export class ResonanceKernel {
     // noise sweep — and those frames still need suppressing. They just have no
     // harmonics to protect.
     const active = frameDb > SILENCE_FLOOR_DB
-    const { f0, pitched } = this.f0.estimate(raw, active)
+    // Skipped entirely when the frame cannot resolve the range — see
+    // `pitchTrackable`. Both consumers below already have a no-pitch branch:
+    // the cepstral lifter falls back to DEFAULT_LIFTER_CUTOFF and the peak
+    // envelope to PEAK_FALLBACK_F0_HZ, which is the path an unpitched frame
+    // takes on the shipping configuration anyway.
+    const { f0, pitched } = this.pitchTrackable
+      ? this.f0.estimate(raw, active)
+      : NO_PITCH
     // lifter_cutoff = max(20, int(0.40 * sr / f0)), or the flat default when
     // no pitch has been measured yet — the two branches of
     // resonance_suppressor.py:343-346.
@@ -1461,14 +1573,14 @@ export class ResonanceKernel {
 
   _ensureChannels(n, detectFrom = n) {
     while (this.stfts.length < n) {
-      this.stfts.push(new StftProcessor({ fftSize: FFT_SIZE, hopSize: HOP_SIZE }))
+      this.stfts.push(new StftProcessor({ fftSize: this.frameSize, hopSize: this.hopSize }))
     }
     // Only worth a second transform when there is genuinely more than one
     // input to combine; a mono source fanned out to several outputs is still
     // decided by its own frame.
     if (detectFrom > 1 && !this.detStft) {
-      this.detStft = new StftProcessor({ fftSize: FFT_SIZE, hopSize: HOP_SIZE })
-      this.detMix = new Float64Array(HOP_SIZE)
+      this.detStft = new StftProcessor({ fftSize: this.frameSize, hopSize: this.hopSize })
+      this.detMix = new Float64Array(this.hopSize)
     }
   }
 
@@ -1505,7 +1617,7 @@ export class ResonanceKernel {
     // path and any future caller are free to hand over larger blocks.
     let off = 0
     while (off < n) {
-      const len = Math.min(HOP_SIZE, n - off)
+      const len = Math.min(this.hopSize, n - off)
       const whole = off === 0 && len === n
 
       // Detection first, so the gain a frame boundary inside this piece
@@ -1550,8 +1662,8 @@ export class ResonanceKernel {
  * as the worklet's is — this returns the raw stream without trimming, so a
  * caller comparing against the worklet render sees the same thing.
  */
-export function processResonanceBuffer(channelData, sampleRate, params = {}) {
-  const kernel = new ResonanceKernel(sampleRate)
+export function processResonanceBuffer(channelData, sampleRate, params = {}, options = {}) {
+  const kernel = new ResonanceKernel(sampleRate, options)
   kernel.setParams(params)
 
   const n = channelData[0].length
@@ -1577,7 +1689,12 @@ if (typeof registerProcessor === 'function') {
   class ResonanceWorkletProcessor extends AudioWorkletProcessor {
     constructor(options) {
       super()
-      this.kernel = new ResonanceKernel(sampleRate)
+      // The frame arrives with the node's construction rather than as a param:
+      // it fixes the latency the graph was wired for, so it cannot change
+      // under a running preview. See ResonanceKernel's constructor.
+      this.kernel = new ResonanceKernel(sampleRate, {
+        frameSize: options?.processorOptions?.frameSize,
+      })
       if (options?.processorOptions?.params) {
         this.kernel.setParams(options.processorOptions.params)
       }
