@@ -142,6 +142,27 @@ export const RESONANCE_FOCUS_RANGES = {
   protectCeilHz: { min: 200, max: 20000 },
 }
 
+/**
+ * How far the EFFECTIVE threshold may run, once a node's bias is added to the
+ * global.
+ *
+ * ⚠ A SEPARATE BOUND FROM THE KNOB'S RANGE, AND IT HAS TO BE. Both used
+ * `RANGES.selectivity`, so `global - bias` was clamped to the same 3..36 the
+ * Threshold knob offers — and with the global at its stock 20, a node's +18 dB
+ * of Amount ran out at 16. The top two dB of that control moved a number and
+ * changed nothing. Widening the shared range would have fixed the sum by putting
+ * the same dead travel on the knob instead: a Threshold control reaching 54 has
+ * 18 dB of positions that are all "off".
+ *
+ * ⚠ 54 BUYS NOTHING AUDIBLE AND IS NOT MEANT TO. Measured on real narration, the
+ * mean cut against effective threshold is 0.788 dB at 20, 0.161 at 24, 0.021 at
+ * 28, 0.0009 at 32, and exactly 0.0000 at 36 — and still exactly 0.0000 when
+ * driven to 40, 48 and 54 past the old clamp. Everything from about 34 up is the
+ * same silence. What the wider bound removes is a control that stops responding
+ * before it stops travelling, not a range of settings anyone can hear.
+ */
+export const SELECTIVITY_EFFECTIVE_MAX = 54
+
 /** Bounded so the rail stays legible and the per-bin sum stays cheap. */
 export const RESONANCE_FOCUS_MAX_NODES = 8
 
@@ -301,7 +322,7 @@ export function focusSelectivityAt(focus, freqHz) {
   const R = RESONANCE_FOCUS_RANGES.selectivity
   const bias = focusBiasAt(focus?.nodes, freqHz)
   const raw = g.selectivity - bias
-  const effective = clampNum(raw, R.min, R.max)
+  const effective = clampNum(raw, R.min, SELECTIVITY_EFFECTIVE_MAX)
   return { global: g.selectivity, bias, effective, clamped: raw !== effective }
 }
 
@@ -332,10 +353,10 @@ export function focusThresholdFn(focus) {
   // threshold already cost once.
   const solo = Number.isInteger(focus?.solo) && all[focus.solo] ? all[focus.solo] : null
   return (hz) => {
-    const effective = clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, R.max)
+    const effective = clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, SELECTIVITY_EFFECTIVE_MAX)
     if (!solo) return effective
     const w = focusNodeWeightAt(solo, hz)
-    return effective * w + R.max * (1 - w)
+    return effective * w + SELECTIVITY_EFFECTIVE_MAX * (1 - w)
   }
 }
 
@@ -415,10 +436,10 @@ export function buildResonanceFocusCurves(focus, binCount, binWidth) {
 
   for (let k = 0; k < binCount; k++) {
     const hz = k * binWidth
-    const effective = clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, R.max)
+    const effective = clampNum(g.selectivity - focusBiasAt(nodes, hz), R.min, SELECTIVITY_EFFECTIVE_MAX)
     if (solo) {
       const w = focusNodeWeightAt(solo, hz)
-      selectivity[k] = effective * w + R.max * (1 - w)
+      selectivity[k] = effective * w + SELECTIVITY_EFFECTIVE_MAX * (1 - w)
     } else {
       selectivity[k] = effective
     }

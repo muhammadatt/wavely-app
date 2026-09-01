@@ -15,7 +15,7 @@ export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
 /**
  * Shipping defaults, with any reference-mode override applied.
  *
- * Resolved once, at module load: `?resoRef=peak` seeds the panel's knobs with
+ * Resolved once, at module load: `?resoRef=cepstral` seeds the panel's knobs with
  * that mode's calibration, because the two references disagree about what
  * `selectivity` measures by an order of magnitude and the same numbers on the
  * two are not the same setting. See RESONANCE_REF_MODE_DEFAULTS.

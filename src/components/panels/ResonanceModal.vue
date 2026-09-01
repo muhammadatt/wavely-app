@@ -119,7 +119,8 @@ const selectedNode = computed(() => (focusMode
 /**
  * Node edits, applied here rather than in the plot.
  *
- * They lived in ResonanceSpectrum because the floating card did. `shape` and
+ * They lived in ResonanceSpectrum because the panel did, back when it floated
+ * beside its node. `shape` and
  * `enabled` are not numbers, so they take `patchNode` rather than the clamping
  * setter `setNodeParam`, which would silently reject them.
  */
@@ -231,17 +232,13 @@ const protectHz = v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.ro
 const signedDb = v => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
 
 /**
- * Harmonic protection is per zone, so the panel-level statement about it is a
- * summary rather than a control: which zones, if any, are running unmasked.
- *
- * Kept because this is the one setting here that can quietly wreck the
- * material. It used to be a caption under a global button; with the control
- * distributed to the zones the warning has to be too, and naming the zones is
- * what makes it actionable rather than ominous.
+ * ⚠ THE UNPROTECTED-ZONES WARNING IS GONE, and the switch is why. Harmonic
+ * protection was per zone, so the panel could only state it as a summary —
+ * "Z2, Z4 running unmasked" — because the one setting here that can quietly
+ * wreck the material must stay visible without opening a zone. It is one global
+ * switch now, sitting in this row with its own on/off state, so the summary was
+ * restating what the control already shows.
  */
-const unprotectedZones = computed(() => (resRefMode !== 'cepstral' ? [] : resZones.value
-  .map((z, i) => (zoneSettings(z).protect ? null : `Z${i + 1}`))
-  .filter(Boolean)))
 
 
 // The kernel clamps the low end to what its analysis frame can resolve, so show
@@ -486,15 +483,17 @@ async function applyAndClose() {
         @update:focus-threshold="syncFocus({
           ...resFocus, global: { ...resFocus.global, selectivity: $event },
         })"
+        @focus-node-clicked="nodePanelOpen = true"
         @update:selected-focus-node="resSelectedNode = $event"
         @focus-solo="toggleFocusSolo"
       >
-        <!-- The bottom placement. Same component and the same handlers as the
-             row one — only where it is mounted differs, which is what makes the
-             two comparable rather than two designs that happen to look alike. -->
+        <!-- Mounted into the plot's own `dock` slot, at the foot of the plate.
+             A second placement — this same component in the control row, where
+             the zone settings sit under the other model — was built to compare
+             against and then deleted: a panel appearing outside the display was
+             easy to miss changing. -->
         <template v-if="focusMode && selectedNode && nodePanelOpen" #dock>
           <FocusNodePanel
-            docked
             :node="selectedNode"
             :index="resSelectedNode"
             :rank="focusRanks(resFocus.nodes)[resSelectedNode]"

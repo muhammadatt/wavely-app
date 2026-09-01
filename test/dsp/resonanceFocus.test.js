@@ -7,6 +7,7 @@ import {
   RESONANCE_FOCUS_GLOBAL,
   RESONANCE_FOCUS_MAX_NODES,
   RESONANCE_FOCUS_RANGES,
+  SELECTIVITY_EFFECTIVE_MAX,
   buildResonanceFocusCurves,
   copyFocus,
   focusBiasAt,
@@ -155,14 +156,26 @@ test('the readout reports the three terms the panel prints', () => {
  * completely alone" both have to be sayable, and the second is the one a
  * targeting control cannot do without. Travel past that would do nothing.
  */
-test('one node at full travel reaches both ends of the sensitivity range', () => {
+test('a node at full travel reaches the floor, and past the knob ceiling', () => {
+  // ⚠ THE UPPER HALF OF THIS USED TO ASSERT `R.selectivity.max`, WHICH WAS THE
+  // BUG. `global - bias` was clamped to the same 3..36 the Threshold knob
+  // offers, so with the global at its stock 20 a node's +18 dB of Amount ran out
+  // at 16: the top two dB moved a number and changed nothing. The effective
+  // threshold has its own wider bound now — see SELECTIVITY_EFFECTIVE_MAX.
+  //
+  // The FLOOR is still the knob's, and that half is unchanged: 20 - 18 is 2,
+  // below the range's 3, and there is a real difference between thresholds down
+  // there for the clamp to protect.
   const R = RESONANCE_FOCUS_RANGES
-  const up = focusSelectivityAt({ global: { ...RESONANCE_FOCUS_GLOBAL },
+  const g = RESONANCE_FOCUS_GLOBAL
+  const up = focusSelectivityAt({ global: { ...g },
     nodes: [node({ biasDb: R.biasDb.max })] }, 1000)
-  const down = focusSelectivityAt({ global: { ...RESONANCE_FOCUS_GLOBAL },
+  const down = focusSelectivityAt({ global: { ...g },
     nodes: [node({ biasDb: R.biasDb.min })] }, 1000)
   assert.equal(up.effective, R.selectivity.min)
-  assert.equal(down.effective, R.selectivity.max)
+  assert.equal(down.effective, g.selectivity - R.biasDb.min)
+  assert.ok(down.effective > R.selectivity.max, 'the node must reach past the knob')
+  assert.ok(down.effective <= SELECTIVITY_EFFECTIVE_MAX)
 })
 
 // ── The shape. ──────────────────────────────────────────────────────────────
@@ -516,8 +529,8 @@ test('solo keeps the real threshold inside the node and turns it off outside', (
   // Inside the soloed node: exactly what the full patch does there.
   assert.ok(Math.abs(at(solo, 300) - at(full, 300)) < 0.05)
   // Everywhere else: off, including the OTHER node's region.
-  assert.equal(at(solo, 5000), RESONANCE_FOCUS_RANGES.selectivity.max)
-  assert.equal(at(solo, 1000), RESONANCE_FOCUS_RANGES.selectivity.max)
+  assert.equal(at(solo, 5000), SELECTIVITY_EFFECTIVE_MAX)
+  assert.equal(at(solo, 1000), SELECTIVITY_EFFECTIVE_MAX)
 })
 
 test('solo works on a shelf, isolating the whole shelf', () => {
@@ -533,7 +546,7 @@ test('solo works on a shelf, isolating the whole shelf', () => {
   // stopped being full amount far from its corner would not be a shelf — so its
   // weight approaches zero rather than reaching it, and the threshold lands a
   // ten-billionth short of the maximum.
-  assert.ok(Math.abs(at(300) - RESONANCE_FOCUS_RANGES.selectivity.max) < 1e-6,
+  assert.ok(Math.abs(at(300) - SELECTIVITY_EFFECTIVE_MAX) < 1e-6,
     'below it, nothing')
 })
 
@@ -553,7 +566,7 @@ test('a node at no opinion still has a region to solo', () => {
     const at = hz => c.selectivity[Math.round(hz / BIN_WIDTH)]
     assert.ok(Math.abs(at(800) - RESONANCE_FOCUS_GLOBAL.selectivity) < 0.05,
       'inside, the global setting is what is running')
-    assert.equal(at(80), RESONANCE_FOCUS_RANGES.selectivity.max, 'outside, nothing')
+    assert.equal(at(80), SELECTIVITY_EFFECTIVE_MAX, 'outside, nothing')
   }
 })
 
