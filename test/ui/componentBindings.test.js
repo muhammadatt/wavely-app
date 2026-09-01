@@ -47,8 +47,17 @@ import { dirname, join } from 'node:path'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '../..')
 
-/** The ResoTame surface. Widening this to every .vue is the obvious next step. */
+/**
+ * The ResoTame surface, plus the preset menu. Widening this to every .vue is
+ * the obvious next step.
+ *
+ * PresetMenu is here because it is the one component outside this panel that
+ * reaches into an object of refs from its template (`presets.dirty.value`), so
+ * a rename in `usePluginPresets` breaks it in exactly the way this test exists
+ * to catch — silently at build, on render for the user.
+ */
 const FILES = [
+  'src/components/panels/PresetMenu.vue',
   'src/components/meters/ResonanceSpectrum.vue',
   'src/components/panels/FocusNodePanel.vue',
   'src/components/panels/ResonanceFocusControls.vue',
@@ -199,5 +208,8 @@ test('the file list covers every ResoTame component', () => {
       if (/^(Resonance|Focus).*\.vue$/.test(f)) found.push(`${dir}/${f}`)
     }
   }
-  assert.deepEqual(found.sort(), [...FILES].sort())
+  // PresetMenu is covered too but is not part of this panel, so it is not
+  // expected to turn up in the scan.
+  const panel = FILES.filter(f => /\/(Resonance|Focus)/.test(f))
+  assert.deepEqual(found.sort(), panel.sort())
 })

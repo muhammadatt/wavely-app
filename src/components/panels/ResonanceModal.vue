@@ -33,6 +33,9 @@ import ResonanceZoneControls from './ResonanceZoneControls.vue'
 import ResonanceZoneCount from './ResonanceZoneCount.vue'
 import ResonanceFocusControls from './ResonanceFocusControls.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import PresetMenu from './PresetMenu.vue'
+import { usePluginPresets } from '../../composables/usePluginPresets.js'
+import { RESO_TAME_PRESET_PLUGIN, RESO_TAME_STOCK_ZONES } from '../../audio/pluginPresets/index.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -44,9 +47,83 @@ const {
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
   resTargeting, resFocus, resSelectedNode, resSoloNode, syncFocus, toggleFocusSolo,
   togglePreview, toggleDelta, syncAttack,
-  syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta,
+  syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta, clearZoneDelta,
+  resMode, syncMode,
   apply, teardown, closeModal,
 } = useResonance()
+
+/**
+ * Running the focus targeting model — see src/audio/resonanceTargeting.js.
+ *
+ * A const rather than a computed: the model is resolved once at module load, so
+ * a reactive read here would only ever produce the same answer at more cost,
+ * and would imply the panel can switch between them at runtime. It cannot, on
+ * purpose — which is also what lets the preset collection be chosen per model.
+ */
+const focusMode = resTargeting === 'focus'
+
+/**
+ * Presets.
+ *
+ * ⚠ THE PANEL RUNS ONE TARGETING MODEL AND SO DOES A PRESET. The kernel
+ * dispatches on `focus`: a non-null patch TAKES OVER from the zone set. So
+ * pushing both halves would mean a zone preset silently switching a
+ * focus-model session, or a focus preset arriving in a session whose controls
+ * are showing zones. `read` and `write` therefore touch only the live model's
+ * half, and the preset MODULE registers only that model's table — the two
+ * agree because both ask `resolveTargeting()`, once, at module load.
+ *
+ * The inert half still travels in the params, because a preset states every
+ * one of its plugin's keys rather than inheriting a default that may move. It
+ * is simply not pushed.
+ *
+ * What a preset must never carry, and why this write clears it rather than
+ * setting it: the monitoring modes. DELTA, the per-zone delta and the focus
+ * SOLO are UI state. Two of the three are expressible as ordinary parameters —
+ * a zone delta is every other zone at depth zero, and `focus.solo` is a plain
+ * field on the patch — so nothing about either would LOOK wrong if it leaked
+ * into what Apply renders. `applyResonanceRegion` spreads its param object
+ * straight into the kernel, so that leak is a one-node pass written to the
+ * timeline. The store's whitelist keeps them out of the preset; clearing them
+ * here keeps a stale isolation from surviving a patch that no longer has the
+ * zone or node it was pointing at.
+ */
+const presets = usePluginPresets(RESO_TAME_PRESET_PLUGIN, {
+  read: () => ({
+    attack: resAttack.value,
+    release: resRelease.value,
+    mode: resMode.value,
+    mix: resMix.value,
+    trim: resTrim.value,
+    // The half the panel is not running is reported as the preset's own inert
+    // value, so a preset matches itself rather than reading as MODIFIED
+    // against a zone set nobody can see or edit in this session.
+    zones: focusMode ? RESO_TAME_STOCK_ZONES : resZones.value,
+    focus: focusMode ? resFocus.value : null,
+  }),
+  write: (p) => {
+    if (focusMode) {
+      if (resSoloNode.value >= 0) toggleFocusSolo(resSoloNode.value)
+      // Never null in this collection: the focus model's `normalize` repairs a
+      // null patch to the stock global, because null is the instruction to read
+      // the zone set — i.e. to switch models — rather than a missing value.
+      syncFocus(p.focus)
+      // The node strip edits one node by index, and a preset can carry fewer
+      // nodes than the patch it replaces — leaving the selection past the end
+      // would point the controls at nothing.
+      if (resSelectedNode.value >= (p.focus?.nodes?.length ?? 0)) resSelectedNode.value = -1
+    } else {
+      clearZoneDelta()
+      syncZones(p.zones)
+      if (resSelectedZone.value >= p.zones.length) resSelectedZone.value = 0
+    }
+    syncAttack(p.attack)
+    syncRelease(p.release)
+    syncMode(p.mode)
+    syncMix(p.mix)
+    syncTrim(p.trim)
+  },
+})
 
 const { state } = useEditorState()
 
@@ -57,16 +134,6 @@ onMounted(() => {
 const ACCENT = '#8de0a8'
 
 /**
- * Running the prototype targeting model — see src/audio/resonanceTargeting.js.
- *
- * A const rather than a computed: the model is resolved once at module load, so
- * a reactive read here would only ever produce the same answer at more cost,
- * and would imply the panel can switch between them at runtime. It cannot, on
- * purpose.
- */
-const focusMode = resTargeting === 'focus'
-
-/**
  * The threshold offset the plot draws its dotted line and its crossings from.
  *
  * Null under zones, so the plot keeps its own zone lookup and the shipping path
@@ -75,6 +142,22 @@ const focusMode = resTargeting === 'focus'
  */
 const selectivityFn = computed(() =>
   (focusMode ? focusThresholdFn(resFocus.value) : null))
+
+/**
+ * The global threshold the plot draws its rail from.
+ *
+ * ⚠ GUARDED, AND IT WAS NOT. `resFocus` is null under the zone model, so
+ * reading `.global` off it threw on the panel's FIRST RENDER and took the whole
+ * of ResoTame down under `?resoTargeting=zones` — the neighbouring `focusNodes`
+ * binding had the guard, this one did not. Found by opening the panel, which is
+ * the only way: componentBindings.test.js cannot catch it, because the name IS
+ * declared and it is the VALUE that is null.
+ *
+ * The floor rather than the stock 20 when there is no patch: nothing draws the
+ * rail under zones, so the number only has to be inside the prop's range.
+ */
+const focusThreshold = computed(() =>
+  (focusMode ? resFocus.value.global.selectivity : RESONANCE_FOCUS_RANGES.selectivity.min))
 
 /**
  * The spectrum display's height — opens at 140, and grows from there. See
@@ -302,6 +385,12 @@ async function applyAndClose() {
          both change what reaches the speakers and neither changes the file.
          Putting it down among the parameters would have implied it was one. -->
     <template #header-center>
+      <PresetMenu
+        :presets="presets"
+        :accent="ACCENT"
+        :disabled="!resPreview"
+        disabled-hint="Turn ResoTame on to use presets"
+      />
       <!-- An override is a thing you forget you turned on. The two references
            disagree by an order of magnitude about what Selectivity measures, so
            a panel running the non-shipping one and not saying so is a panel
@@ -470,7 +559,7 @@ async function applyAndClose() {
         :delta="resDelta"
         :selectivity-fn="selectivityFn"
         :focus-nodes="focusMode ? resFocus.nodes : null"
-        :focus-threshold="resFocus.global.selectivity"
+        :focus-threshold="focusThreshold"
         :selected-focus-node="resSelectedNode"
         :solo-focus-node="resSoloNode"
         :zones="focusMode ? [] : resZones"
