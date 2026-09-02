@@ -4,7 +4,8 @@ import { useFET1176 } from '../../composables/useFET1176.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { attackSecondsForDial, releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import Knob from '../knobs/Knob.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
+import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
+import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -246,27 +247,31 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
         <div class="flex flex-col gap-[12px] pt-[6px]">
           <div class="flex items-center gap-[10px]">
             <span class="w-[46px]" style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.4)">RATIO</span>
-            <SegmentedSwitch
+            <DeviceDetentRotary
               :model-value="fetRatio"
               @update:model-value="syncRatio"
               :options="RATIO_OPTIONS"
               :accent="ACCENT"
               :disabled="!fetPreview"
-              :padding-x="11"
-              :caption="ratioCaption"
+              label="Ratio"
+              :show-label="false"
             />
+            <span
+              style="font:600 8px 'Inter',system-ui;line-height:1.4;max-width:118px;color:rgba(255,255,255,.3)"
+            >{{ ratioCaption }}</span>
           </div>
           <div class="flex items-center gap-[10px]">
             <span class="w-[46px]" style="font:700 8.5px 'JetBrains Mono',monospace;letter-spacing:.16em;color:rgba(255,255,255,.4)">SC HPF</span>
             <!-- Not on the original: the 1176's detector is broadband, which
                  lets plosives duck a whole phrase. Off is the stock path. -->
-            <SegmentedSwitch
+            <DeviceTravelSlide
               :model-value="fetScHpf"
               @update:model-value="syncScHpf"
               :options="SC_HPF_OPTIONS"
               :accent="ACCENT"
               :disabled="!fetPreview"
-              :padding-x="13"
+              :width="118"
+              label="Sidechain high-pass"
             />
           </div>
         </div>

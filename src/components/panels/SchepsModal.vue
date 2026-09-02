@@ -5,7 +5,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { pultecNetSections, pultecSections } from '../../audio/dsp/pultec.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import Knob from '../knobs/Knob.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -237,12 +237,13 @@ async function applyAndClose() {
             </span>
           </div>
 
-          <SegmentedSwitch
+          <DeviceChoiceRocker
             :model-value="schepsCharacter"
             @update:model-value="syncCharacter"
             :options="CHARACTER_OPTIONS"
             :accent="ACCENT"
             :disabled="!schepsPreview"
+            label="Character"
             :caption="CHARACTER_CAPTION[schepsCharacter]"
             class="mt-[16px]"
           />

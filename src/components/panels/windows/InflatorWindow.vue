@@ -4,7 +4,7 @@ import { useInflator } from '../../../composables/useInflator.js'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import Knob from '../../knobs/Knob.vue'
-import SegmentedSwitch from '../../knobs/SegmentedSwitch.vue'
+import DeviceLampPill from '../../knobs/DeviceLampPill.vue'
 import LevelMeter from '../../meters/LevelMeter.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
@@ -36,11 +36,6 @@ const signedPct = v => `${v > 0 ? '+' : ''}${Math.round(v)}`
 function liftDb() {
   return (20 * Math.log10(1.5 + inCurve.value / 100)).toFixed(2)
 }
-
-const BOOL_OPTIONS = [
-  { value: 'off', label: 'OFF' },
-  { value: 'on', label: 'ON' },
-]
 
 function togglePlayback() {
   window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
@@ -148,41 +143,33 @@ async function applyAndClose() {
       <div class="mt-[22px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <div class="flex items-start justify-center gap-[46px]">
           <div class="flex flex-col items-center gap-[7px]">
-            <div
-              class="uppercase"
-              style="font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:rgba(255,255,255,.32)"
-            >
-              Band Split
-            </div>
-            <SegmentedSwitch
-              :model-value="inBandSplit ? 'on' : 'off'"
-              @update:model-value="v => syncBandSplit(v === 'on')"
-              :options="BOOL_OPTIONS"
+            <DeviceLampPill
+              :model-value="inBandSplit"
+              @update:model-value="syncBandSplit"
+              label="BAND SPLIT"
               :accent="ACCENT"
               :disabled="!inPreview"
-              :caption="inBandSplit
-                ? 'curve runs on 240 Hz / 2.4 kHz bands'
-                : 'curve runs on the whole signal'"
             />
+            <span style="font:600 8.5px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+              {{ inBandSplit
+                ? 'curve runs on 240 Hz / 2.4 kHz bands'
+                : 'curve runs on the whole signal' }}
+            </span>
           </div>
 
           <div class="flex flex-col items-center gap-[7px]">
-            <div
-              class="uppercase"
-              style="font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:rgba(255,255,255,.32)"
-            >
-              Clip
-            </div>
-            <SegmentedSwitch
-              :model-value="inClip ? 'on' : 'off'"
-              @update:model-value="v => syncClip(v === 'on')"
-              :options="BOOL_OPTIONS"
+            <DeviceLampPill
+              :model-value="inClip"
+              @update:model-value="syncClip"
+              label="CLIP"
               :accent="ACCENT"
               :disabled="!inPreview"
-              :caption="inClip
-                ? 'holds peaks at full scale'
-                : 'peaks past full scale fold back'"
             />
+            <span style="font:600 8.5px 'Inter',system-ui;letter-spacing:.08em;color:rgba(255,255,255,.35)">
+              {{ inClip
+                ? 'holds peaks at full scale'
+                : 'peaks past full scale fold back' }}
+            </span>
           </div>
         </div>
 

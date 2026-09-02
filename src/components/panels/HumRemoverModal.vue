@@ -3,7 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useHumRemover } from '../../composables/useHumRemover.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import Knob from '../knobs/Knob.vue'
-import SegmentedSwitch from '../knobs/SegmentedSwitch.vue'
+import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 
@@ -159,12 +159,13 @@ async function applyAndClose() {
         <div class="flex-1">
           <!-- Mains frequency + analyse -->
           <div class="flex items-center justify-between gap-[16px]">
-            <SegmentedSwitch
+            <DeviceChoiceRocker
               :model-value="humFundamental"
               @update:model-value="setFundamental"
               :options="MAINS_OPTIONS"
               :accent="ACCENT"
               :disabled="humAnalyzing"
+              label="Mains frequency"
               caption="Mains frequency"
             />
             <button
