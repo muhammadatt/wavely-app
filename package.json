@@ -13,7 +13,8 @@
     "scorecard:real": "node scripts/voicerx-real.mjs",
     "robustness": "node scripts/voicerx-robustness.mjs",
     "robustness:real": "node scripts/voicerx-robustness.mjs --real",
-    "reso:real": "node scripts/resonance-real.mjs"
+    "reso:real": "node scripts/resonance-real.mjs",
+    "smoke": "node scripts/panel-smoke.mjs"
   },
   "dependencies": {
     "uuid": "^13.0.0",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
     "@vitejs/plugin-vue": "^6.0.5",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.1"
   }

@@ -34,11 +34,19 @@ const la2aInputLevels = ref([])
 const la2aOutputLevels = ref([])
 let meterId = null
 
-// Debounce + supersede state for the auto-makeup measurement, shared across
-// every useLA2A() caller so knob drags coalesce into one measurement.
-// Keep this short so the Gain knob tracks Peak Reduction closely in AUTO
-// mode, while still avoiding a worker spawn per pointer tick.
+// Supersede counter for the auto-makeup measurement, shared across every
+// caller of this composable so a knob drag coalesces into one measurement.
 let makeupSeq = 0
+
+/**
+ * ⚠ MODULE-LEVEL, NOT PER-CALLER. The sidebar trigger and the modal both call
+ * this composable, and everything else here is a shared singleton for that
+ * reason — a throttle created per call would let the two run concurrent
+ * measurements, which is the coalescing this exists for, defeated. Created
+ * lazily because it closes over `refreshAutoMakeup`, and every instance's
+ * closure reads the same singleton state, so the first one is as good as any.
+ */
+let makeupThrottle = null
 
 function currentParams() {
   return {
