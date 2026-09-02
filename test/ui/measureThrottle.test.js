@@ -55,6 +55,33 @@ test('at most one pass is pending however fast the input arrives', async () => {
   assert.equal(started, 2)
 })
 
+test('cancel does not let a second pass start alongside a running one', async () => {
+  // Reported in review. `cancel()` used to clear `inFlight` too, which marked
+  // the throttle idle while a pass was still awaiting — so the next schedule
+  // (AUTO toggled straight back on, or a panel reopened) started a second
+  // `run()` beside it. Measured two concurrent passes, which is the coalescing
+  // this exists for, defeated.
+  let concurrent = 0
+  let peak = 0
+  const releases = []
+  const t = createMeasureThrottle(() => new Promise(r => {
+    concurrent++
+    peak = Math.max(peak, concurrent)
+    releases.push(() => { concurrent--; r() })
+  }))
+
+  t.schedule()   // pass A is awaiting
+  t.cancel()     // torn down, or AUTO switched off
+  t.schedule()   // and straight back on, before A has landed
+  await tick()
+  assert.equal(peak, 1, `expected one pass at a time, saw ${peak}`)
+
+  // ...and the queued request is not lost: it runs once A lands.
+  releases[0]()
+  await tick()
+  assert.equal(concurrent, 1, 'the schedule made after cancel should still run')
+})
+
 test('cancel stops a landed pass from re-arming', async () => {
   let started = 0
   let release

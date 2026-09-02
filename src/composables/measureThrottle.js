@@ -31,16 +31,13 @@
 export function createMeasureThrottle(run) {
   let inFlight = false
   let dirty = false
-  // Bumped by cancel(), so a pass that lands after teardown cannot re-arm.
-  let generation = 0
 
   async function pump() {
-    const gen = generation
     inFlight = true
     try {
       await run()
     } catch (err) {
-      // ⚠ SWALLOWED ON PURPOSE, and the alternative is the reported symptom.
+      // ⚠ SWALLOWED ON PURPOSE, and the alternative is a reported symptom.
       // A rejection escaping here is an unhandled promise rejection that also
       // skips the re-arm below, so one failed pass would leave the makeup
       // frozen for the rest of the session — "stuck without updates". Callers
@@ -49,7 +46,6 @@ export function createMeasureThrottle(run) {
     } finally {
       inFlight = false
     }
-    if (gen !== generation) return
     if (dirty) {
       dirty = false
       pump()
@@ -62,11 +58,27 @@ export function createMeasureThrottle(run) {
       dirty = false
       pump()
     },
+
+    /**
+     * Stop the throttle re-arming. Used on teardown and when AUTO is switched
+     * off — from that moment no NEW pass is started on the old request's
+     * behalf.
+     *
+     * ⚠ IT DOES NOT CLEAR `inFlight`, AND CLEARING IT ALLOWED TWO PASSES AT
+     * ONCE. A pass that is already awaiting cannot be aborted, so marking the
+     * throttle idle while it runs let the next `schedule()` — AUTO toggled
+     * straight back on, or a panel reopened — start a second `run()` alongside
+     * it. Measured: two concurrent passes, which is exactly the coalescing this
+     * exists to provide, defeated. Leaving `inFlight` set means such a
+     * `schedule()` is queued behind the running pass instead, and still runs.
+     *
+     * A pass in flight across a cancel is not otherwise a hazard: its result is
+     * discarded by the caller's own sequence check.
+     */
     cancel() {
-      generation++
-      inFlight = false
       dirty = false
     },
+
     isBusy: () => inFlight,
   }
 }
