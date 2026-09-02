@@ -86,6 +86,11 @@ export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 // Nominal operating level (0 VU = +4 dBu). The internal threshold sits at
 // line level on the hardware, so Input is referenced to that rather than to
 // digital full scale — see the same constant in la2aProcessor.js.
+// Output-gain smoothing time. Short enough to feel immediate under a knob,
+// long enough that a step of tens of dB cannot click. Matches the soft
+// clipper's PARAM_SMOOTH_MS.
+const OUT_SMOOTH_MS = 8
+
 const NOMINAL_DBFS = -18
 const THRESHOLD_DBFS = NOMINAL_DBFS
 
@@ -225,6 +230,11 @@ export class FET1176Kernel {
 
     this.gainScratch = new Float32Array(128)
     this.wetScratch = new Float64Array(128)
+    this.outScratch = new Float32Array(128)
+    // null = not yet seeded. The first block adopts the target exactly so an
+    // offline render carries its makeup from sample 0; see process().
+    this.outLinSmoothed = null
+    this.outSmoothCoef = 1 - Math.exp(-1 / (sampleRate * (OUT_SMOOTH_MS / 1000)))
 
     this.params = { ...FET1176_KERNEL_DEFAULTS }
     this.setParams({})
@@ -337,8 +347,36 @@ export class FET1176Kernel {
 
     if (this.gainScratch.length < n) this.gainScratch = new Float32Array(n)
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
+    if (this.outScratch.length < n) this.outScratch = new Float32Array(n)
     const gain = this.gainScratch
     const chScale = 1 / nIn
+
+    /**
+     * OUTPUT GAIN, SMOOTHED — it was applied as a bare step.
+     *
+     * `outputLin` was recomputed in setParams and multiplied in directly, so
+     * every param message stepped the gain discontinuously. Inaudible for a
+     * knob nudged by hand; a click for anything that writes this knob rapidly,
+     * which is exactly what AUTO makeup does — reported as zippering on rapid
+     * adjustment.
+     *
+     * ⚠ COMPUTED ONCE PER BLOCK, NOT PER CHANNEL. The smoother has to advance
+     * with TIME, and a per-channel one advances N times faster on N channels —
+     * the bug HfLossShelf's depth ramp already shipped once. Same arrangement
+     * as the gain envelope above it, which is shared for the same reason.
+     *
+     * ⚠ SEEDED ON THE FIRST BLOCK rather than ramped from unity, so an offline
+     * render carries its makeup from sample 0. Ramping in from 0 dB puts a
+     * swell at the head of every applied region.
+     */
+    const outGain = this.outScratch
+    if (this.outLinSmoothed === null) this.outLinSmoothed = this.outputLin
+    let outLinSmoothed = this.outLinSmoothed
+    for (let i = 0; i < n; i++) {
+      outLinSmoothed += this.outSmoothCoef * (this.outputLin - outLinSmoothed)
+      outGain[i] = outLinSmoothed
+    }
+    this.outLinSmoothed = outLinSmoothed
 
     let { hpfLp1, hpfLp2, grMain, grTail } = this
 
@@ -476,7 +514,7 @@ export class FET1176Kernel {
           dcX = w
           w = dcY
         }
-        w *= this.outputLin
+        w *= outGain[i]
         // The dry side of the blend is the untouched input, delayed to meet the
         // wet side, so a parallel setting stays level-sane and phase-coherent
         // and bypass A/B compares like for like.
@@ -510,6 +548,9 @@ export class FET1176Kernel {
    * and the apply path trims a fixed latency that assumes the oversampled path.
    */
   _processChannelBaseRate(input, out, gain, n, ch) {
+    // Filled once per block in process(); read rather than passed so the two
+    // branches cannot drift apart on which gain they apply.
+    const outGain = this.outScratch
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
     for (let i = 0; i < n; i++) {
@@ -521,7 +562,7 @@ export class FET1176Kernel {
         dcX = shaped
         w = dcY
       }
-      w *= this.outputLin
+      w *= outGain[i]
       out[i] = dry * this.dryMix + w * this.wetMix
     }
     this.dcX[ch] = dcX

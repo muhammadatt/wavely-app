@@ -204,6 +204,9 @@ export const LA2A_KERNEL_DEFAULTS = {
   oversample: true,
 }
 
+// Gain-knob smoothing time — the same 8 ms the soft clipper and FET Punch use.
+const MAKEUP_SMOOTH_MS = 8
+
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
@@ -227,6 +230,22 @@ export class LA2AKernel {
     this.shelfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_SHELF_HZ / sampleRate)
     // DC blocker pole (~5 Hz) — the asymmetric shaper shifts the operating point
     this.dcR = 1 - 2 * Math.PI * 5 / sampleRate
+
+    /**
+     * GAIN KNOB (MAKEUP), SMOOTHED — it was applied as a bare step.
+     *
+     * `makeupLin` was recomputed in setParams and multiplied straight into the
+     * gain envelope, so every param message stepped it discontinuously. That is
+     * inaudible for a knob nudged by hand and a click for anything writing the
+     * knob rapidly, which is what AUTO makeup does — reported as zippering on
+     * rapid adjustment.
+     *
+     * ⚠ `null` = not yet seeded. The first block adopts the target exactly, so
+     * an offline render carries its makeup from sample 0 rather than swelling
+     * into it over the smoothing time.
+     */
+    this.makeupLinSmoothed = null
+    this.makeupSmoothCoef = 1 - Math.exp(-1 / (sampleRate * (MAKEUP_SMOOTH_MS / 1000)))
 
     // Sidechain / T4 state
     this.hpfLp = 0
@@ -377,6 +396,11 @@ export class LA2AKernel {
 
     let { hpfLp, shelfLp, env, grFast, grSlow, memory } = this
 
+    // Seeded on the first block; advanced once per sample HERE rather than
+    // per channel, because this envelope loop is already the shared one.
+    if (this.makeupLinSmoothed === null) this.makeupLinSmoothed = this.makeupLin
+    let makeupLinSmoothed = this.makeupLinSmoothed
+
     for (let i = 0; i < n; i++) {
       // Mono sidechain tap
       let x = inputChannels[0][i]
@@ -445,9 +469,11 @@ export class LA2AKernel {
       // Without this the reduction would arrive early — a small look-ahead the
       // hardware does not have. In the base-rate measurement path there is
       // nothing to meet, so the delay would only misalign it.
-      const g = Math.exp(-grNow * LN10_OVER_20) * this.makeupLin
+      makeupLinSmoothed += this.makeupSmoothCoef * (this.makeupLin - makeupLinSmoothed)
+      const g = Math.exp(-grNow * LN10_OVER_20) * makeupLinSmoothed
       gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
     }
+    this.makeupLinSmoothed = makeupLinSmoothed
 
     this.hpfLp = hpfLp
     this.shelfLp = shelfLp

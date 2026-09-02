@@ -268,33 +268,58 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
  * auto-makeups and the Scheps wet trim — which differ only in the kernel they
  * run and the numbers they hand back.
  */
+/**
+ * The measurement worker, kept alive between passes.
+ *
+ * ⚠ IT USED TO BE SPAWNED AND TERMINATED PER MEASUREMENT, and that cost 86 ms
+ * of every pass doing nothing — measured in the browser on a warm module cache,
+ * against 240 ms of actual DSP. Under a knob drag that is a worker construction
+ * and a module-graph load every couple of hundred milliseconds, for no benefit.
+ *
+ * One worker, serialised: with the per-plugin throttles there is at most one
+ * pass in flight per plugin, and two plugins measuring at once are better off
+ * queued than competing for cores. A failed pass terminates it so the next call
+ * gets a clean one — a wedged singleton would freeze every measured parameter
+ * in the app for the rest of the session.
+ */
+let measureWorker = null
+let measureSeq = 0
+const measurePending = new Map()
+
+function getMeasureWorker() {
+  if (measureWorker) return measureWorker
+  measureWorker = new Worker(
+    new URL('../workers/processWorker.js', import.meta.url),
+    { type: 'module' }
+  )
+  measureWorker.onmessage = (e) => {
+    const { __id, ...data } = e.data ?? {}
+    const entry = measurePending.get(__id)
+    if (!entry) return
+    measurePending.delete(__id)
+    if (data.type === 'done') entry.resolve(data)
+    else entry.reject(new Error(data.message ?? 'measurement failed'))
+  }
+  measureWorker.onerror = (err) => {
+    // Fail every waiter rather than leaving them pending forever, then drop the
+    // worker so the next call builds a fresh one.
+    for (const entry of measurePending.values()) entry.reject(err)
+    measurePending.clear()
+    measureWorker?.terminate()
+    measureWorker = null
+  }
+  return measureWorker
+}
+
 function measureInWorker(workerType, segments, start, end, kernelParams, sampleRate, channels) {
   const { start: aStart, end: aEnd } = analysisWindow(start, end)
 
   return new Promise((resolve, reject) => {
     const channelData = renderRegionToBuffer(segments, aStart, aEnd, sampleRate, channels)
-
-    const worker = new Worker(
-      new URL('../workers/processWorker.js', import.meta.url),
-      { type: 'module' }
-    )
-
-    worker.onmessage = (e) => {
-      worker.terminate()
-      if (e.data.type === 'done') {
-        resolve(e.data)
-      } else if (e.data.type === 'error') {
-        reject(new Error(e.data.message))
-      }
-    }
-
-    worker.onerror = (err) => {
-      worker.terminate()
-      reject(err)
-    }
-
-    worker.postMessage(
-      { type: workerType, channelData, sampleRate, params: kernelParams },
+    const id = ++measureSeq
+    measurePending.set(id, { resolve, reject })
+    getMeasureWorker().postMessage(
+      { __id: id, type: workerType, channelData, sampleRate, params: kernelParams },
       channelData.map(c => c.buffer)
     )
   })

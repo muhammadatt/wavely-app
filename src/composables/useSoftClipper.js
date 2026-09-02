@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
@@ -58,11 +59,10 @@ const autoMakeupBusy = ref(false)
  * exactly as useLA2A.js does it and for the same reason: the knob has to
  * respond at once and still settle on the final value.
  */
-const AUTO_MAKEUP_DEBOUNCE_MS = 45
-let makeupTimer = null
 let makeupSeq = 0
-let makeupBurstActive = false
-let makeupBurstDirty = false
+// ⚠ MODULE-LEVEL for the same reason every other singleton here is: two
+// callers must share one throttle or they measure concurrently.
+let makeupThrottle = null
 /**
  * ⚠ THE PANEL IS FIXED-ONLY, and this deliberately overrides the kernel default.
  *
@@ -373,27 +373,10 @@ export function useSoftClipper() {
     }
   }
 
+  if (!makeupThrottle) makeupThrottle = createMeasureThrottle(refreshAutoMakeup)
   function scheduleAutoMakeup() {
     if (!autoMakeup.value) return
-
-    // Leading edge: the first move in a burst measures at once, so the knob
-    // responds rather than waiting out the debounce.
-    if (!makeupBurstActive) {
-      makeupBurstActive = true
-      makeupBurstDirty = false
-      refreshAutoMakeup()
-    } else {
-      makeupBurstDirty = true
-    }
-
-    if (makeupTimer !== null) clearTimeout(makeupTimer)
-    makeupTimer = setTimeout(() => {
-      makeupTimer = null
-      const shouldRunTrailing = makeupBurstDirty
-      makeupBurstActive = false
-      makeupBurstDirty = false
-      if (shouldRunTrailing) refreshAutoMakeup()
-    }, AUTO_MAKEUP_DEBOUNCE_MS)
+    makeupThrottle.schedule()
   }
 
   /**
@@ -404,12 +387,7 @@ export function useSoftClipper() {
    */
   function disableAutoMakeup() {
     autoMakeup.value = false
-    if (makeupTimer !== null) {
-      clearTimeout(makeupTimer)
-      makeupTimer = null
-    }
-    makeupBurstActive = false
-    makeupBurstDirty = false
+    makeupThrottle?.cancel()
     makeupSeq++
     autoMakeupBusy.value = false
   }
@@ -655,12 +633,7 @@ export function useSoftClipper() {
     ceilingBusy.value = false
     // Same reasoning for the makeup: a pass still in flight would push a param
     // at a chain that is no longer previewing and leave `busy` lit forever.
-    if (makeupTimer !== null) {
-      clearTimeout(makeupTimer)
-      makeupTimer = null
-    }
-    makeupBurstActive = false
-    makeupBurstDirty = false
+    makeupThrottle?.cancel()
     makeupSeq++
     autoMakeupBusy.value = false
     if (clipperPreview.value) {

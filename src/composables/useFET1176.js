@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '../audio/processing.js'
@@ -38,13 +39,19 @@ const fetInputLevels = ref([])
 const fetOutputLevels = ref([])
 let meterId = null
 
-// Debounce + supersede state for the auto-makeup measurement, shared across
-// every useFET1176() caller so knob drags coalesce into one measurement.
-const AUTO_MAKEUP_DEBOUNCE_MS = 45
-let makeupTimer = null
+// Supersede counter for the auto-makeup measurement, shared across every
+// caller of this composable so a knob drag coalesces into one measurement.
 let makeupSeq = 0
-let makeupBurstActive = false
-let makeupBurstDirty = false
+
+/**
+ * ⚠ MODULE-LEVEL, NOT PER-CALLER. The sidebar trigger and the modal both call
+ * this composable, and everything else here is a shared singleton for that
+ * reason — a throttle created per call would let the two run concurrent
+ * measurements, which is the coalescing this exists for, defeated. Created
+ * lazily because it closes over `refreshAutoMakeup`, and every instance's
+ * closure reads the same singleton state, so the first one is as good as any.
+ */
+let makeupThrottle = null
 
 function currentParams() {
   return {
@@ -74,7 +81,7 @@ function measurementParams() {
 }
 
 export function useFET1176() {
-  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
+  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
   function initChain() {
@@ -150,9 +157,23 @@ export function useFET1176() {
    * a newer one.
    */
   async function refreshAutoMakeup() {
-    if (!fetAutoMakeup.value || !state.selection || !state.currentFile) return
+    if (!fetAutoMakeup.value || !state.currentFile) return
 
-    const { start, end } = state.selection
+    /**
+     * ⚠ NO SELECTION MEANS THE WHOLE FILE, NOT "DON'T MEASURE".
+     *
+     * This used to bail without a selection, which left the knob at 0 dB while
+     * the AUTO lamp stayed lit — so opening the plugin and pressing play with
+     * nothing selected gave a compressed signal with the makeup silently
+     * negated, under a panel claiming it was applied. Reported exactly that
+     * way.
+     *
+     * The whole file is the right span because it is what preview PLAYS with no
+     * selection. Apply still requires a selection; this is about what you hear.
+     */
+    const start = state.selection ? state.selection.start : 0
+    const end = state.selection ? state.selection.end : totalDuration.value
+    if (!(end > start)) return
     const seq = ++makeupSeq
     fetAutoMakeupBusy.value = true
     try {
@@ -171,29 +192,14 @@ export function useFET1176() {
     }
   }
 
+  /**
+   * Ask for a re-measure. Coalesced by createMeasureThrottle — see there for
+   * why this is a throttle and not the debounce it replaced.
+   */
+  if (!makeupThrottle) makeupThrottle = createMeasureThrottle(refreshAutoMakeup)
   function scheduleAutoMakeup() {
     if (!fetAutoMakeup.value) return
-
-    // Leading edge: first move in a burst measures immediately so the Output
-    // knob responds right away.
-    if (!makeupBurstActive) {
-      makeupBurstActive = true
-      makeupBurstDirty = false
-      refreshAutoMakeup()
-    } else {
-      // Additional moves during the debounce window request one trailing pass
-      // with the final knob value.
-      makeupBurstDirty = true
-    }
-
-    if (makeupTimer !== null) clearTimeout(makeupTimer)
-    makeupTimer = setTimeout(() => {
-      makeupTimer = null
-      const shouldRunTrailing = makeupBurstDirty
-      makeupBurstActive = false
-      makeupBurstDirty = false
-      if (shouldRunTrailing) refreshAutoMakeup()
-    }, AUTO_MAKEUP_DEBOUNCE_MS)
+    makeupThrottle.schedule()
   }
 
   // Params that change how much the compressor reduces (and so how much
@@ -236,12 +242,7 @@ export function useFET1176() {
    */
   function disableAutoMakeup() {
     fetAutoMakeup.value = false
-    if (makeupTimer !== null) {
-      clearTimeout(makeupTimer)
-      makeupTimer = null
-    }
-    makeupBurstActive = false
-    makeupBurstDirty = false
+    makeupThrottle?.cancel()
     makeupSeq++
     fetAutoMakeupBusy.value = false
   }

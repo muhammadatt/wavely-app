@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyLA2ARegion, computeLA2AAutoMakeup, computePeakCache } from '../audio/processing.js'
@@ -37,11 +38,7 @@ let meterId = null
 // every useLA2A() caller so knob drags coalesce into one measurement.
 // Keep this short so the Gain knob tracks Peak Reduction closely in AUTO
 // mode, while still avoiding a worker spawn per pointer tick.
-const AUTO_MAKEUP_DEBOUNCE_MS = 45
-let makeupTimer = null
 let makeupSeq = 0
-let makeupBurstActive = false
-let makeupBurstDirty = false
 
 function currentParams() {
   return {
@@ -65,7 +62,7 @@ function measurementParams() {
 }
 
 export function useLA2A() {
-  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
+  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
   function initChain() {
@@ -141,9 +138,23 @@ export function useLA2A() {
    * a newer one.
    */
   async function refreshAutoMakeup() {
-    if (!la2aAutoMakeup.value || !state.selection || !state.currentFile) return
+    if (!la2aAutoMakeup.value || !state.currentFile) return
 
-    const { start, end } = state.selection
+    /**
+     * ⚠ NO SELECTION MEANS THE WHOLE FILE, NOT "DON'T MEASURE".
+     *
+     * This used to bail without a selection, which left the knob at 0 dB while
+     * the AUTO lamp stayed lit — so opening the plugin and pressing play with
+     * nothing selected gave a compressed signal with the makeup silently
+     * negated, under a panel claiming it was applied. Reported exactly that
+     * way.
+     *
+     * The whole file is the right span because it is what preview PLAYS with no
+     * selection. Apply still requires a selection; this is about what you hear.
+     */
+    const start = state.selection ? state.selection.start : 0
+    const end = state.selection ? state.selection.end : totalDuration.value
+    if (!(end > start)) return
     const seq = ++makeupSeq
     la2aAutoMakeupBusy.value = true
     try {
@@ -162,29 +173,14 @@ export function useLA2A() {
     }
   }
 
+  /**
+   * Ask for a re-measure. Coalesced by createMeasureThrottle — see there for
+   * why this is a throttle and not the debounce it replaced.
+   */
+  if (!makeupThrottle) makeupThrottle = createMeasureThrottle(refreshAutoMakeup)
   function scheduleAutoMakeup() {
     if (!la2aAutoMakeup.value) return
-
-    // Leading edge: first move in a burst measures immediately so the Gain
-    // knob responds right away.
-    if (!makeupBurstActive) {
-      makeupBurstActive = true
-      makeupBurstDirty = false
-      refreshAutoMakeup()
-    } else {
-      // Additional moves during the debounce window request one trailing pass
-      // with the final knob value.
-      makeupBurstDirty = true
-    }
-
-    if (makeupTimer !== null) clearTimeout(makeupTimer)
-    makeupTimer = setTimeout(() => {
-      makeupTimer = null
-      const shouldRunTrailing = makeupBurstDirty
-      makeupBurstActive = false
-      makeupBurstDirty = false
-      if (shouldRunTrailing) refreshAutoMakeup()
-    }, AUTO_MAKEUP_DEBOUNCE_MS)
+    makeupThrottle.schedule()
   }
 
   // Params that change how much the compressor reduces (and so how much
@@ -224,12 +220,7 @@ export function useLA2A() {
    */
   function disableAutoMakeup() {
     la2aAutoMakeup.value = false
-    if (makeupTimer !== null) {
-      clearTimeout(makeupTimer)
-      makeupTimer = null
-    }
-    makeupBurstActive = false
-    makeupBurstDirty = false
+    makeupThrottle?.cancel()
     makeupSeq++
     la2aAutoMakeupBusy.value = false
   }

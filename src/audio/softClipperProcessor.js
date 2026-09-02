@@ -1654,8 +1654,23 @@ export class SoftClipperKernel {
     this.paramSmoothCoef = riseCoeff(PARAM_SMOOTH_MS, sampleRate)
 
     // ── Smoothed scalars (fixed-time-constant one-pole — deviation note 3) ──
-    this.headroomDbSmoothed = SOFT_CLIPPER_KERNEL_DEFAULTS.headroomDb
-    this.outputTrimDbSmoothed = SOFT_CLIPPER_KERNEL_DEFAULTS.outputTrimDb
+    /**
+     * ⚠ SEEDED ON THE FIRST setParams, NOT RAMPED FROM THE DEFAULT.
+     *
+     * These are smoothed so a knob move does not step the gain, and starting
+     * them at the kernel's default meant every OFFLINE render ramped its way in
+     * from 0 dB over the smoothing time. Harmless while `outputTrimDb` was a
+     * ±6 dB A/B trim defaulting to 0; audible the moment AUTO makeup shipped at
+     * ~+10 dB, as a swell at the head of every applied region. Measured before
+     * the fix, gain of a +12 dB render against a 0 dB one: 2.05 dB at 0.5 ms,
+     * 5.16 at 4 ms, 8.10 at 8 ms, reaching 12.000 only by 200 ms.
+     *
+     * `null` means "no value yet"; the first setParams adopts its targets
+     * exactly, and every later one is smoothed toward. So a render is right
+     * from sample 0 and a live knob still cannot click.
+     */
+    this.headroomDbSmoothed = null
+    this.outputTrimDbSmoothed = null
     // emphasisDb is not ramped per-sample like the two scalars above — its
     // effect is a filter coefficient, recomputed once per block rather than
     // crossfaded (see deviation note 3 in the file header). -1 forces a first
@@ -1997,6 +2012,9 @@ export class SoftClipperKernel {
     let speechWarmupCount = this.speechWarmupCount
     let speechWarmupPeak = this.speechWarmupPeak
     let detectorWarmupCount = this.detectorWarmupCount
+    // First block after the first setParams: adopt rather than approach.
+    if (this.headroomDbSmoothed === null) this.headroomDbSmoothed = p.headroomDb
+    if (this.outputTrimDbSmoothed === null) this.outputTrimDbSmoothed = p.outputTrimDb
     let headroomDbSmoothed = this.headroomDbSmoothed
     // Reset per call: each scope point summarises one process() call.
     let scopePeak = 0
