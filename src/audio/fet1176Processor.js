@@ -621,49 +621,89 @@ function rmsOfChannels(channels, skip = 0) {
 }
 
 /**
- * Compute the Output setting (dB) that restores the processed signal's PEAK to
- * the input's — the classic makeup convention; see `peakOfChannels`. Formerly
- * matched RMS, which returns only the average loss and so left the compressor
- * unable to make anything louder.
+ * The Output gain that puts this compressor's output peak back on the input's.
  *
- * This matters more here than on the OptoSmooth: Input drives the audio path
- * as well as the detector, so moving it swings the output level by tens of dB
- * and the user would otherwise be re-trimming Output after every touch.
+ * SOLVED IN ONE RENDER, EXACTLY — it used to be a fixed-point iteration capped
+ * at three passes, and on any parallel setting that cap returned an answer
+ * several dB short.
  *
- * Measured, not derived from the curve: the kernel is run over the actual
- * audio and the output's peak compared to the input's.
+ * ⚠ THE ITERATION DID NOT CONVERGE AT MIX < 1, AND TWO FACTORY PRESETS SHIP
+ * THERE (0.4 and 0.5). Output gain scales the WET path only — the sum is
+ * `dry*(1-mix) + wet*mix*g` — so `makeup += correction` converges at a rate set
+ * by the wet share, which is slow exactly where the wet share is small.
+ * Measured on 30 s of real narration at Input 55, makeup by iteration count:
  *
- * Output is applied after the saturator (as on the hardware), so unlike the
- * LA-2A's makeup it does not change the operating point of the nonlinearity
- * and the first correction is normally exact. The loop is kept for the same
- * shape as its counterpart and simply exits early.
+ *   mix 1.0   10.25 / 10.25 / 10.25 / 10.25          (one pass is already exact)
+ *   mix 0.7    6.51 /  9.95 / 10.92 / 11.20
+ *   mix 0.5    4.11 /  7.23 /  9.35 / 11.98   <- shipped cap returned 9.35
+ *   mix 0.3    2.23 /  4.21 /  5.94 / 12.08   <- 6.1 dB short
+ *
+ * THE SOLVE IS A ONE-PASS SCAN, and it is exact rather than convergent. The
+ * output is AFFINE in the makeup: `out[i] = a[i] + b[i]·g`, where
+ * `a[i] = dry[i]·(1−mix)` and `b[i] = wet[i]·mix`, because `outputLin` is the
+ * last multiply on the wet path and the detector reads the INPUT, so the wet
+ * signal does not depend on g at all. Requiring `|a[i] + b[i]·g| <= P` for
+ * every sample gives one interval per sample; their intersection's upper end is
+ * the largest makeup that keeps the output peak at P, which is the answer. One
+ * render (the wet path, taken at mix 1) plus one O(n) pass, against three to
+ * twenty renders before.
+ *
+ * ⚠ `dry` IS THE UNDELAYED INPUT ONLY BECAUSE THE MEASUREMENT RUNS AT BASE
+ * RATE. The oversampled path delays the dry side by OVERSAMPLE_LATENCY_SAMPLES
+ * to meet the wet side; the base-rate path this measurement forces has no such
+ * delay (`const dry = input[i]`). If the measurement ever moves to the
+ * oversampled path, `a[i]` has to carry that delay or the two sides are
+ * compared at different instants.
+ *
+ * PEAK, NOT RMS: makeup means handing back what came off the peaks. See
+ * peakOfChannels for why a true peak rather than a percentile.
+ *
+ * Measured through the BASE-RATE path: oversampling removes folded harmonics,
+ * which carry almost no energy, and measuring through it was about three times
+ * slower — which the Output knob showed as lag behind a drag.
+ *
+ * @param {Float32Array[]} channelData Region to measure.
+ * @param {number} sampleRate
+ * @param {object} params Kernel params. `outputGainDb` is IGNORED — it is the
+ *   quantity being solved for.
+ * @returns {number} Makeup in dB, clamped to the Output knob's travel.
  */
 export function computeFET1176AutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
-  const { maxIterations = 3, toleranceDb = 0.05 } = options
-
-  // Measured through the base-rate path. The question here is only what the
-  // output's RMS is, and oversampling moves that by at most 0.02 dB across the
-  // whole control range — it removes folded harmonics, which carry almost no
-  // energy. Measuring through the oversampled path instead made this about
-  // three times slower, which the Output knob showed as lag behind a drag.
-  const measureParams = { ...params, oversample: false }
+  const { minDb = -36, maxDb = 36 } = options
 
   const inputPeak = peakOfChannels(channelData)
   if (inputPeak <= 0) return 0
 
-  let makeupDb = 0
-  for (let i = 0; i < maxIterations; i++) {
-    const { channelData: out } = processFET1176Buffer(channelData, sampleRate, {
-      ...measureParams,
-      outputGainDb: makeupDb,
-    })
-    const outPeak = peakOfChannels(out)
-    if (outPeak <= 0) break
-    const correctionDb = 20 * Math.log10(inputPeak / outPeak)
-    makeupDb = clamp(makeupDb + correctionDb, -36, 36)
-    if (Math.abs(correctionDb) < toleranceDb) break
+  const mix = clamp(params.mix ?? FET1176_KERNEL_DEFAULTS.mix, 0, 1)
+  // Mix 0 is the dry signal: there is nothing to make up, and the solve below
+  // would be unconstrained (every b[i] is zero).
+  if (mix <= 0) return 0
+
+  // The wet path alone, at unity output gain. Taken at mix 1 so the render IS
+  // `wet[i]`; mix feeds nothing but the final blend, so this changes no other
+  // part of the kernel's behaviour.
+  const { channelData: wet } = processFET1176Buffer(channelData, sampleRate, {
+    ...params, oversample: false, outputGainDb: 0, mix: 1,
+  })
+
+  const dryMix = 1 - mix
+  // Largest g for which every sample satisfies |a + b·g| <= inputPeak.
+  let gMax = Infinity
+  for (let ch = 0; ch < wet.length; ch++) {
+    const dry = channelData[ch]
+    const w = wet[ch]
+    for (let i = 0; i < w.length; i++) {
+      const b = w[i] * mix
+      if (b === 0) continue
+      const a = dry[i] * dryMix
+      // The binding end of this sample's interval is the one it moves toward.
+      const bound = (b > 0 ? inputPeak - a : -inputPeak - a) / b
+      if (bound < gMax) gMax = bound
+    }
   }
-  return makeupDb
+  if (!Number.isFinite(gMax) || gMax <= 0) return 0
+
+  return clamp(20 * Math.log10(gMax), minDb, maxDb)
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
