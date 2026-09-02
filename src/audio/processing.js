@@ -1,4 +1,5 @@
 import { getSegmentDuration } from './operations.js'
+import { analysisWindow } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import {
   LA2A_DEFAULTS, LA2A_LATENCY_SAMPLES, toKernelParams,
@@ -256,12 +257,10 @@ export function adjustVolumeRegion(segments, start, end, gainDb, audioContext, s
  * so they stay sample-identical and there's no estimator drift baked into
  * the head of the region.
  *
- * Long regions are measured over a centered window rather than end to end:
- * the RMS ratio is stable across a representative stretch, and this keeps
- * the re-measure fast enough to sit behind a knob drag. The window only
+ * Long regions are measured over a capped window rather than end to end, which
+ * keeps the re-measure fast enough to sit behind a knob drag. The window only
  * affects how the number is derived — preview and apply still share it.
  */
-const AUTO_MAKEUP_MAX_ANALYSIS_S = 30
 
 /**
  * Run one measurement pass over a region in the processing worker and resolve
@@ -270,13 +269,7 @@ const AUTO_MAKEUP_MAX_ANALYSIS_S = 30
  * run and the numbers they hand back.
  */
 function measureInWorker(workerType, segments, start, end, kernelParams, sampleRate, channels) {
-  let aStart = start
-  let aEnd = end
-  if (end - start > AUTO_MAKEUP_MAX_ANALYSIS_S) {
-    const mid = (start + end) / 2
-    aStart = mid - AUTO_MAKEUP_MAX_ANALYSIS_S / 2
-    aEnd = mid + AUTO_MAKEUP_MAX_ANALYSIS_S / 2
-  }
+  const { start: aStart, end: aEnd } = analysisWindow(start, end)
 
   return new Promise((resolve, reject) => {
     const channelData = renderRegionToBuffer(segments, aStart, aEnd, sampleRate, channels)
