@@ -2415,6 +2415,114 @@ export function processSoftClipperBuffer(channelData, sampleRate, params = {}, o
   }
 }
 
+// ── Auto makeup ─────────────────────────────────────────────────────────────
+
+/**
+ * Travel of the Output knob, dB. The measured makeup is clamped to it, so a
+ * deep ceiling can UNDERSHOOT — never overshoot, which is the direction that
+ * keeps "the output is never hotter than the source" true at every setting.
+ *
+ * Wider than the ±6 dB this knob had as a pure A/B trim, and it has to be:
+ * measured on real-ish narration the four ceiling presets ask for +9.1 to
+ * +10.4 dB, so the old travel could not reach any of them.
+ */
+export const SOFT_CLIPPER_MAKEUP_MAX_DB = 24
+export const SOFT_CLIPPER_MAKEUP_MIN_DB = -12
+
+/** Peak across every sample of every channel, optionally skipping a lead-in. */
+function peakOfChannels(channels, skip = 0) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > peak) peak = v
+    }
+  }
+  return peak
+}
+
+/**
+ * The Output gain that puts this stage's output peak back on the input's.
+ *
+ * WHAT A CLIPPER'S MAKEUP IS FOR, and why it is not the ceiling being defeated.
+ * The ceiling is an INTERNAL threshold: the curve and the limiter hold peaks to
+ * it, and the makeup then hands the removed peak back as broadband gain. The
+ * output peak lands where the source's was and everything underneath comes up
+ * with it — which is the entire loudness argument for clipping. Measured on
+ * narration-like material at the four ceiling presets, the stage removes
+ * 9.1-10.4 dB of PEAK while removing only 0.23 dB of RMS, because it is
+ * clipping rare transients that carry almost no energy. So the makeup is very
+ * nearly free loudness: about +9 dB at an unchanged output peak.
+ *
+ * ⚠ IT MEANS THE CEILING NO LONGER DESCRIBES THE OUTPUT PEAK. "Peaks stop
+ * here" is true of the signal reaching the curve, not of what leaves the
+ * plugin, and the faceplate says so while AUTO is lit. At AUTO off the old
+ * reading is exactly right again, because the makeup is the only thing that
+ * moved.
+ *
+ * ⚠ ONE PASS, NOT ITERATED — the one real difference from computeAutoMakeupDb
+ * and computeFET1176AutoMakeupDb. Those apply makeup BEFORE a nonlinearity (as
+ * on the hardware, where the Gain knob drives the output amplifier), so raising
+ * it moves the operating point it was measured at and the loop has to
+ * re-measure. `outputTrimDb` is the kernel's FINAL multiply, after the curve,
+ * the limiter and the residual tap — a pure post-stage gain. Scaling the
+ * output by a constant scales its peak by exactly that constant, so a single
+ * measurement is not an approximation that converges, it is the answer.
+ *
+ * PEAK, NOT RMS, for the same reason the compressors use it: makeup means
+ * handing back what came off the peaks. Referencing the average here would be
+ * close to a no-op — the stage barely moves the average at all — so it would
+ * throw away the whole point.
+ *
+ * @param {Float32Array[]} channelData Region to measure.
+ * @param {number} sampleRate
+ * @param {object} params Kernel params. `outputTrimDb` is IGNORED — it is the
+ *   quantity being solved for, so a stale trim in the incoming patch must not
+ *   feed back into its own replacement.
+ * @returns {number} Makeup in dB, clamped to the Output knob's travel.
+ */
+export function computeSoftClipperAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
+  const inputPeak = peakOfChannels(channelData)
+  if (inputPeak <= 0) return 0
+
+  const { channelData: out } = processSoftClipperBuffer(
+    channelData, sampleRate, { ...params, outputTrimDb: 0 }, options,
+  )
+
+  /**
+   * ⚠ SKIP THE STAGE'S OWN LATENCY. `processSoftClipperBuffer` does not
+   * compensate it, so the head of the output is the delay line filling rather
+   * than audio — and at LIMIT that is 226 samples of near-silence. Harmless
+   * for a peak (a quiet lead-in cannot BE the peak) but free to be correct.
+   *
+   * ⚠ AND THE SPEECH TRACKER'S WARM-UP, in adaptive mode only. For the first
+   * SPEECH_INIT_WINDOW_MS the threshold sits high and the stage does
+   * essentially nothing, so a file whose loudest moment lands in that window
+   * would measure a peak the stage never touched and the makeup would come out
+   * near zero. The panel is fixed-only, where the threshold is a constant known
+   * at sample 0 and no warm-up exists — but the kernel still defaults to
+   * adaptive, so anything measuring through it gets the same answer the audio
+   * path gives. Same trap the Soften reference had to be moved off.
+   */
+  const mode = params.thresholdMode ?? SOFT_CLIPPER_KERNEL_DEFAULTS.thresholdMode
+  const warmup = mode === 'fixed'
+    ? 0
+    : Math.round(sampleRate * (SPEECH_INIT_WINDOW_MS / 1000))
+  const skip = Math.min(
+    out[0].length,
+    softClipperLatencySamples(params, sampleRate) + warmup,
+  )
+
+  const outPeak = peakOfChannels(out, skip)
+  if (outPeak <= 0) return 0
+
+  return clamp(
+    20 * Math.log10(inputPeak / outPeak),
+    options.minDb ?? SOFT_CLIPPER_MAKEUP_MIN_DB,
+    options.maxDb ?? SOFT_CLIPPER_MAKEUP_MAX_DB,
+  )
+}
+
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
 
 if (typeof registerProcessor === 'function') {

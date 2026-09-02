@@ -319,6 +319,19 @@ export function computeFET1176AutoMakeup(segments, start, end, kernelParams, sam
 }
 
 /**
+ * Measure the Soft Clipper's auto makeup (Output) for a region.
+ *
+ * Shares measureInWorker's 30 s centred cap like every other measured
+ * parameter. Right for this one: the makeup is the region's peak reduction,
+ * and a representative half-minute of a long take answers that as well as the
+ * whole thing while staying fast enough to sit behind a knob drag.
+ */
+export function computeSoftClipperAutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
+  return measureInWorker('softClipperAutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
+    .then(d => d.makeupDb)
+}
+
+/**
  * Measure the Scheps wet-path makeup, the dry/wet correlation and the density
  * the compression yields, for a region. Resolves
  * `{ trimDb, correlation, densityDb }` — see computeSchepsAutoTrim.

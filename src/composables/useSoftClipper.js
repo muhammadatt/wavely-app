@@ -3,13 +3,17 @@ import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
   applySoftClipperRegion, computePeakCache, computeSoftClipperCeiling,
+  computeSoftClipperAutoMakeup,
 } from '../audio/processing.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { softClipperEffect, SOFT_CLIPPER_DEFAULTS } from '../audio/effects/softClipper.js'
 import {
   LIMITER_MODES, limiterModeFor, limiterModeById, limiterModeLatencyMs,
 } from '../audio/effects/softClipperParams.js'
-import { SOFT_CLIPPER_KERNEL_DEFAULTS } from '../audio/softClipperProcessor.js'
+import {
+  SOFT_CLIPPER_KERNEL_DEFAULTS,
+  SOFT_CLIPPER_MAKEUP_MIN_DB, SOFT_CLIPPER_MAKEUP_MAX_DB,
+} from '../audio/softClipperProcessor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { createPeakHold, createReadoutThrottle } from '../components/meters/ballistics.js'
 import { tuningEnabled } from '../audio/softClipperTuning.js'
@@ -22,6 +26,43 @@ export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
 // same pattern as useFET1176.js / useLA2A.js.
 const headroomDb = ref(SOFT_CLIPPER_DEFAULTS.headroomDb)
 const outputTrimDb = ref(SOFT_CLIPPER_DEFAULTS.outputTrimDb)
+/**
+ * AUTO MAKEUP — ON BY DEFAULT, and it owns the Output knob while it is.
+ *
+ * A clipper's makeup is what converts peak reduction into loudness: the ceiling
+ * holds the peaks down, the makeup hands the removed peak back as broadband
+ * gain, and the output peak lands back on the source's with everything
+ * underneath raised. Measured on narration-like material, the four ceiling
+ * presets take 9.1-10.4 dB of PEAK while taking 0.23 dB of RMS, so that is
+ * close to free loudness — and before this the user had to find it by hand on a
+ * ±6 dB trim knob that could not even reach it.
+ *
+ * ⚠ IT CHANGES THE SHIPPED DEFAULT PATCH, deliberately. Every other stage here
+ * that added a control shipped bit-identical to the build before it; this one
+ * cannot, because the whole point is that the stage is louder than it was. Same
+ * arrangement as OptoSmooth and FET Punch, whose AUTO is on for the related
+ * reason: an unmatched level at a selection boundary is an audible step.
+ *
+ * ⚠ THE CEILING PRESETS WERE DERIVED AND LISTENED TO AGAINST THE UNMADE-UP
+ * OUTPUT. Their percentiles are statements about the input's peak distribution
+ * and so are unaffected, but how each one SOUNDS now includes the makeup, and
+ * they have not been re-listened to at this default.
+ */
+const autoMakeup = ref(true)
+const autoMakeupBusy = ref(false)
+
+/**
+ * Debounce + supersede for the makeup measurement, shared across every
+ * useSoftClipper() caller so a knob drag coalesces into one measurement rather
+ * than spawning a worker per pointer tick. Leading edge plus one trailing pass,
+ * exactly as useLA2A.js does it and for the same reason: the knob has to
+ * respond at once and still settle on the final value.
+ */
+const AUTO_MAKEUP_DEBOUNCE_MS = 45
+let makeupTimer = null
+let makeupSeq = 0
+let makeupBurstActive = false
+let makeupBurstDirty = false
 /**
  * ⚠ THE PANEL IS FIXED-ONLY, and this deliberately overrides the kernel default.
  *
@@ -156,6 +197,16 @@ function currentParams() {
   }
 }
 
+/**
+ * Params for the measurement pass. `outputTrimDb` is omitted because it is the
+ * quantity being solved for — computeSoftClipperAutoMakeupDb ignores it anyway,
+ * and sending it would suggest otherwise.
+ */
+function measurementParams() {
+  const { outputTrimDb: _ignored, ...rest } = currentParams()
+  return rest
+}
+
 export function useSoftClipper() {
   const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
   const { openWindow, closeWindow } = useWindows()
@@ -275,6 +326,9 @@ export function useSoftClipper() {
       // chosen a ceiling this session.
       if (ceilingPreset.value === null && !userSetCeiling) applyCeilingPreset(DEFAULT_CEILING_PRESET)
       measureCeilingChoices()
+      // Also when the ceiling is already the user's and no preset runs — the
+      // makeup still has to be measured for THIS region before anything sounds.
+      scheduleAutoMakeup()
     } else {
       stopMeters()
     }
@@ -284,6 +338,88 @@ export function useSoftClipper() {
     if (!clipperPreview.value) return
     const chain = getEffectChain(getAudioContext())
     chain.updateParam(softClipperEffect.id, name, value)
+  }
+
+  /**
+   * Re-measure the makeup for the current selection and settings and drive the
+   * Output knob to it. Superseded by sequence number so a fast drag cannot land
+   * an older measurement after a newer one.
+   *
+   * ⚠ ONE MEASUREMENT, NOT A CONVERGING LOOP, unlike the compressors' — the
+   * trim is the kernel's final multiply, so the answer is exact rather than
+   * approached. See computeSoftClipperAutoMakeupDb.
+   */
+  async function refreshAutoMakeup() {
+    if (!autoMakeup.value || !clipperPreview.value) return
+    if (!state.selection || !state.currentFile) return
+
+    const { start, end } = state.selection
+    const seq = ++makeupSeq
+    autoMakeupBusy.value = true
+    try {
+      const makeupDb = await computeSoftClipperAutoMakeup(
+        state.segments, start, end,
+        measurementParams(),
+        state.currentFile.sampleRate, state.currentFile.channels,
+      )
+      if (seq !== makeupSeq) return // a newer measurement is already in flight
+      outputTrimDb.value = Math.max(
+        SOFT_CLIPPER_MAKEUP_MIN_DB, Math.min(SOFT_CLIPPER_MAKEUP_MAX_DB, makeupDb))
+      pushParam('outputTrimDb', outputTrimDb.value)
+    } catch (err) {
+      console.error('Soft Clipper auto makeup measurement failed:', err)
+    } finally {
+      if (seq === makeupSeq) autoMakeupBusy.value = false
+    }
+  }
+
+  function scheduleAutoMakeup() {
+    if (!autoMakeup.value) return
+
+    // Leading edge: the first move in a burst measures at once, so the knob
+    // responds rather than waiting out the debounce.
+    if (!makeupBurstActive) {
+      makeupBurstActive = true
+      makeupBurstDirty = false
+      refreshAutoMakeup()
+    } else {
+      makeupBurstDirty = true
+    }
+
+    if (makeupTimer !== null) clearTimeout(makeupTimer)
+    makeupTimer = setTimeout(() => {
+      makeupTimer = null
+      const shouldRunTrailing = makeupBurstDirty
+      makeupBurstActive = false
+      makeupBurstDirty = false
+      if (shouldRunTrailing) refreshAutoMakeup()
+    }, AUTO_MAKEUP_DEBOUNCE_MS)
+  }
+
+  /**
+   * Leave AUTO with the knob exactly where it stands, so going manual is a
+   * takeover rather than a jump back to 0 dB. Any in-flight measurement is
+   * discarded by sequence number so it cannot land afterwards and move a value
+   * the user now owns.
+   */
+  function disableAutoMakeup() {
+    autoMakeup.value = false
+    if (makeupTimer !== null) {
+      clearTimeout(makeupTimer)
+      makeupTimer = null
+    }
+    makeupBurstActive = false
+    makeupBurstDirty = false
+    makeupSeq++
+    autoMakeupBusy.value = false
+  }
+
+  function toggleAutoMakeup() {
+    if (autoMakeup.value) disableAutoMakeup()
+    else {
+      autoMakeup.value = true
+      refreshAutoMakeup()
+    }
   }
 
   /**
@@ -315,6 +451,9 @@ export function useSoftClipper() {
       fixedThresholdDb.value = measured
       ceilingPreset.value = preset.id
       pushParam('fixedThresholdDb', measured)
+      // A new ceiling is a new peak reduction, so the makeup that went with the
+      // old one is stale the instant this lands.
+      scheduleAutoMakeup()
     } catch (err) {
       console.error('Soft Clipper ceiling measurement failed:', err)
     } finally {
@@ -368,6 +507,7 @@ export function useSoftClipper() {
     fixedThresholdDb.value = measured
     userSetCeiling = true
     pushParam('fixedThresholdDb', measured)
+    scheduleAutoMakeup()
   }
 
   /**
@@ -396,11 +536,21 @@ export function useSoftClipper() {
       // the ceiling has been set — by a preset click or by hand — it is the
       // user's number and a region change must not overwrite it.
       if (!userSetCeiling && clipperPreview.value) applyCeilingPreset(DEFAULT_CEILING_PRESET)
+      // ⚠ UNCONDITIONALLY, unlike the ceiling. The ceiling stops following the
+      // region once the user has set it by hand, because it is then their
+      // number. The makeup is never the user's number while AUTO is on — it is
+      // a measurement of the region, so a new region makes the old one wrong.
+      scheduleAutoMakeup()
     }, CEILING_DEBOUNCE_MS)
   }
 
-  const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v) }
-  const syncLimiter = (v) => { limiter.value = v; pushParam('limiter', v) }
+  /**
+   * Params that change how much PEAK the stage removes change how much makeup
+   * is needed, so each re-measures. The Output knob itself does not — it is
+   * the answer, not an input to it.
+   */
+  const syncHeadroom = (v) => { headroomDb.value = v; pushParam('headroomDb', v); scheduleAutoMakeup() }
+  const syncLimiter = (v) => { limiter.value = v; pushParam('limiter', v); scheduleAutoMakeup() }
 
   /**
    * Which of the two faceplate positions the current `limiter` value is, or ''
@@ -428,24 +578,40 @@ export function useSoftClipper() {
   function limiterLatencyMs(sampleRate) {
     return limiterModeLatencyMs(limiter.value, sampleRate)
   }
-  const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v) }
-  const syncOutputTrim = (v) => { outputTrimDb.value = v; pushParam('outputTrimDb', v) }
+  const syncEmphasis = (v) => { emphasisDb.value = v; pushParam('emphasisDb', v); scheduleAutoMakeup() }
+  /**
+   * Touch-to-take-over: turning Output while AUTO is on switches AUTO off and
+   * ACCEPTS the value rather than discarding it.
+   *
+   * Discarding it is what OptoSmooth shipped once, and it reads as a broken
+   * knob — an "OptoSmooth at 75 with no makeup gain" comparison turned out to
+   * carry 9.45 dB because setting the knob to 0 never took and nothing said so.
+   * AUTO owns the value right up to the moment the user disagrees with it.
+   */
+  const syncOutputTrim = (v) => {
+    if (autoMakeup.value) disableAutoMakeup()
+    outputTrimDb.value = v
+    pushParam('outputTrimDb', v)
+  }
   const syncFixedThreshold = (v) => {
     fixedThresholdDb.value = v
     userSetCeiling = true
     // Hand-turned: it is no longer the preset's number, so stop claiming it is.
     ceilingPreset.value = null
     pushParam('fixedThresholdDb', v)
+    scheduleAutoMakeup()
   }
 
   function setShape(v) {
     shape.value = v
     pushParam('shape', v)
+    scheduleAutoMakeup()
   }
 
   function setThresholdMode(mode) {
     thresholdMode.value = mode
     pushParam('thresholdMode', mode)
+    scheduleAutoMakeup()
   }
 
   async function apply() {
@@ -487,6 +653,16 @@ export function useSoftClipper() {
     ceilingSeq++
     choicesSeq++
     ceilingBusy.value = false
+    // Same reasoning for the makeup: a pass still in flight would push a param
+    // at a chain that is no longer previewing and leave `busy` lit forever.
+    if (makeupTimer !== null) {
+      clearTimeout(makeupTimer)
+      makeupTimer = null
+    }
+    makeupBurstActive = false
+    makeupBurstDirty = false
+    makeupSeq++
+    autoMakeupBusy.value = false
     if (clipperPreview.value) {
       const ctx = getAudioContext()
       const chain = getEffectChain(ctx)
@@ -514,6 +690,11 @@ export function useSoftClipper() {
   return {
     headroomDb,
     outputTrimDb,
+    autoMakeup,
+    autoMakeupBusy,
+    toggleAutoMakeup,
+    SOFT_CLIPPER_MAKEUP_MIN_DB,
+    SOFT_CLIPPER_MAKEUP_MAX_DB,
     thresholdMode,
     fixedThresholdDb,
     ceilingPreset,

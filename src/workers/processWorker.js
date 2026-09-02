@@ -3,11 +3,12 @@
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
- * schepsAutoTrim, softClipperCeiling, voiceProfile
+ * softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling, voiceProfile
  */
 import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
+import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
 
@@ -26,6 +27,9 @@ self.onmessage = function (e) {
       break
     case 'fet1176AutoMakeup':
       autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
+      break
+    case 'softClipperAutoMakeup':
+      autoMakeup(computeSoftClipperAutoMakeupDb, channelData, sampleRate, params)
       break
     case 'schepsAutoTrim':
       schepsAutoTrim(channelData, sampleRate, params)
