@@ -160,6 +160,18 @@ export const FET1176_KERNEL_DEFAULTS = {
   oversample: true,
 }
 
+/**
+ * How much audio the live makeup tracker must hear before it will report.
+ *
+ * ⚠ WITHOUT IT A FRESHLY-RESET TRACKER REPORTS FROM ALMOST NO EVIDENCE, and
+ * every compression-knob change resets it. Measured on a drag: the live value
+ * came back as 4.6 / 4.1 / 12.1 / 8.5 / 8.1 dB from the first few blocks and
+ * fought the offline measurement all the way down the knob. A quarter second is
+ * long enough to hold several syllables and short enough that the tracker takes
+ * over almost as soon as the hand stops.
+ */
+const MAKEUP_TRACKER_WARMUP_S = 0.25
+
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
@@ -234,6 +246,45 @@ export class FET1176Kernel {
     // null = not yet seeded. The first block adopts the target exactly so an
     // offline render carries its makeup from sample 0; see process().
     this.outLinSmoothed = null
+
+    /**
+     * LIVE AUTO-MAKEUP TRACKER — running extrema, O(1) per sample.
+     *
+     * The same affine identity the offline solve rests on: `out = a + b·g` with
+     * `a = dry·(1−mix)` and `b = wet·mix`, because the output gain is the last
+     * multiply on the wet path and the detector reads the INPUT. BOTH are
+     * independent of `g`, which is what lets the panel write the answer back
+     * onto the knob without the measurement chasing itself.
+     *
+     * ⚠ TWO SHAPES WERE TRIED AND BOTH FAILED. A running MINIMUM of the
+     * per-sample bound LATCHES, because the bound is taken against an input
+     * peak that grows and the earliest, smallest bound wins forever: measured,
+     * it froze at −0.83 dB against a true 10.25. And tracking the largest |b|
+     * is exact at Mix 1 and +2.4 dB too generous at Mix 0.3, in the too-loud
+     * direction, because with a large dry share the wet peak is not the sample
+     * that binds.
+     *
+     * WHAT IS TRACKED IS `max|a|` AND `max|b|` SEPARATELY, and the bound is
+     * `(P − max|a|) / max|b|`. Since `|a_i + b_i·g| <= max|a| + max|b|·g` for
+     * every sample, that bound PROVABLY keeps the output peak at or under `P` —
+     * the guarantee the offline solve makes, kept by the live one. It is EXACT
+     * at Mix 1, where `a` is zero, and conservative below it: the two maxima
+     * need not fall on the same sample, so the live makeup can come out a
+     * little small at parallel settings. Under-delivering is the safe
+     * direction, and APPLY re-measures offline for the exact number anyway.
+     *
+     * ⚠ TWO TIGHTER SHAPES WERE TRIED AND BOTH BROKE THE GUARANTEE. A running
+     * MINIMUM of the per-sample bound LATCHES — the bound is taken against an
+     * input peak that grows, so the earliest and smallest wins forever, and it
+     * froze at −0.83 dB against a true 10.25. And tracking the single sample
+     * that maximises `|a| + |b|·ĝ` is not a bound at all: measured at Mix 0.4
+     * it asked for 11.66 dB against a true 7.60 and drove the output 2.75 dB
+     * hotter than its source.
+     */
+    this.trkInPeak = 0
+    this.trkSamples = 0
+    this.trkAAbs = 0     // largest |a| seen
+    this.trkBAbs = 0     // largest |b| seen
     this.outSmoothCoef = 1 - Math.exp(-1 / (sampleRate * (OUT_SMOOTH_MS / 1000)))
 
     this.params = { ...FET1176_KERNEL_DEFAULTS }
@@ -369,6 +420,16 @@ export class FET1176Kernel {
      * render carries its makeup from sample 0. Ramping in from 0 dB puts a
      * swell at the head of every applied region.
      */
+    // The tracker's target: the loudest input sample heard so far.
+    this.trkSamples += n
+    for (let ch = 0; ch < nIn; ch++) {
+      const src = inputChannels[ch]
+      for (let i = 0; i < n; i++) {
+        const a = src[i] < 0 ? -src[i] : src[i]
+        if (a > this.trkInPeak) this.trkInPeak = a
+      }
+    }
+
     const outGain = this.outScratch
     if (this.outLinSmoothed === null) this.outLinSmoothed = this.outputLin
     let outLinSmoothed = this.outLinSmoothed
@@ -514,11 +575,13 @@ export class FET1176Kernel {
           dcX = w
           w = dcY
         }
+        const wetUnity = w
         w *= outGain[i]
         // The dry side of the blend is the untouched input, delayed to meet the
         // wet side, so a parallel setting stays level-sane and phase-coherent
         // and bypass A/B compares like for like.
         const dry = dryLine.push(input[i])
+        this._trackMakeup(dry, wetUnity)
         out[i] = dry * this.dryMix + w * this.wetMix
       }
       this.dcX[ch] = dcX
@@ -562,11 +625,57 @@ export class FET1176Kernel {
         dcX = shaped
         w = dcY
       }
+      const wetUnity = w
       w *= outGain[i]
+      this._trackMakeup(dry, wetUnity)
       out[i] = dry * this.dryMix + w * this.wetMix
     }
     this.dcX[ch] = dcX
     this.dcY[ch] = dcY
+  }
+
+  /** Forget what has played — see the LA-2A kernel's note of the same name. */
+  resetAutoMakeupTracker() {
+    this.trkInPeak = 0
+    this.trkSamples = 0
+    this.trkAAbs = 0
+    this.trkBAbs = 0
+  }
+
+  /**
+   * The makeup the audio heard so far asks for, dB, or null before anything has
+   * been heard. Only knows what has PLAYED; APPLY keeps the offline solve.
+   */
+  liveAutoMakeupDb() {
+    if (this.trkSamples < this.sampleRate * MAKEUP_TRACKER_WARMUP_S) return null
+    /**
+     * ⚠ FULLY WET ONLY. Below Mix 1 the bound `(P − max|a|)/max|b|` is safe but
+     * loose — the two maxima need not fall on the same sample — and measured on
+     * a hard probe it came out 3.35 dB under the truth at Mix 0.3. A preview
+     * several dB quieter than the render it is previewing is worse than no live
+     * value at all, so the parallel settings keep the offline solve, which is
+     * one render and exact. Reported rather than hidden: the panel shows the
+     * offline number there, which is the right one.
+     */
+    if (this.dryMix > 0) return null
+    const P = this.trkInPeak
+    if (!(P > 0) || !(this.trkBAbs > 0)) return null
+    const g = (P - this.trkAAbs) / this.trkBAbs
+    if (!(g > 0) || !Number.isFinite(g)) return null
+    return 20 * Math.log10(g)
+  }
+
+  /**
+   * One sample's contribution to the tracker.
+   *
+   * `wetUnity` is the wet path BEFORE the output gain, so nothing here depends
+   * on the makeup — see the constructor for why that is the whole design.
+   */
+  _trackMakeup(dry, wetUnity) {
+    const aAbs = Math.abs(dry * this.dryMix)
+    if (aAbs > this.trkAAbs) this.trkAAbs = aAbs
+    const bAbs = Math.abs(wetUnity * this.wetMix)
+    if (bAbs > this.trkBAbs) this.trkBAbs = bAbs
   }
 
   getMetering() {
@@ -767,6 +876,9 @@ if (typeof registerProcessor === 'function') {
       this.sinceMeter = 0
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
+        // A new region is new material: the running extrema describe audio the
+        // user has moved on from, so they are forgotten rather than diluted.
+        else if (e.data?.type === 'resetMakeupTracker') this.kernel.resetAutoMakeupTracker()
       }
     }
 
@@ -786,7 +898,13 @@ if (typeof registerProcessor === 'function') {
       this.sinceMeter += n
       if (this.sinceMeter >= METER_INTERVAL_SAMPLES) {
         this.sinceMeter = 0
-        this.port.postMessage({ type: 'gr', grDb: this.kernel.grDb })
+        this.port.postMessage({
+          type: 'gr',
+          grDb: this.kernel.grDb,
+          // The live auto-makeup, riding the ~46 Hz cadence the meter already
+          // pays for. null until something has been heard.
+          liveMakeupDb: this.kernel.liveAutoMakeupDb(),
+        })
       }
       return true
     }

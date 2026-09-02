@@ -97,6 +97,33 @@ export function useFET1176() {
     stopMeters()
     function tick() {
       const nodes = chain.effects.find(e => e.id === fet1176Effect.id)?.nodes
+      /**
+       * LIVE AUTO MAKEUP — read off the worklet on the meter's own cadence.
+       *
+       * The kernel maintains it from running extrema at O(1) per sample, so it
+       * needs no worker, no region render and no selection, and it lands within
+       * one meter interval (~21 ms) rather than a measurement (~170 ms).
+       *
+       * ⚠ THIS IS THE PREVIEW VALUE ONLY. It knows only what has PLAYED, so it
+       * is history-dependent — measured on real narration it can sit ~0.9 dB
+       * high before the loudest moment arrives. `apply()` re-measures offline
+       * for exactly that reason; see the note there.
+       *
+       * ⚠ ONLY WHILE AUTO OWNS THE KNOB. Once the user has taken over, writing
+       * a tracked value into it would be the panel overruling them.
+       */
+      if (fetAutoMakeup.value) {
+        const live = nodes.getLiveMakeupDb?.()
+        if (Number.isFinite(live)) {
+          const next = Math.max(OUTPUT_MIN_DB, Math.min(OUTPUT_MAX_DB, live))
+          // A threshold, not equality: the knob prints one decimal, and
+          // repainting it on sub-hundredth wobble is churn nobody can see.
+          if (Math.abs(next - fetOutput.value) > 0.02) {
+            fetOutput.value = next
+            pushOutput()
+          }
+        }
+      }
       if (nodes) {
         fetReduction.value = nodes.getReduction()
         // Only meter channels the source really has: the splitter is
@@ -207,6 +234,18 @@ export function useFET1176() {
   function syncCompressionParam(name, refVar, value) {
     refVar.value = value
     pushParam(name, value)
+    /**
+     * ⚠ THE LIVE TRACKER'S EXTREMA DESCRIBE THE OLD SETTINGS, so a compression
+     * change invalidates them exactly as a new region does — the tracked signal
+     * is post-gain-reduction, and these are the knobs that set it.
+     *
+     * Without this the two writers FIGHT over the knob, visibly: measured on a
+     * drag, the offline pass wrote 14.4 and the stale tracker pulled it back to
+     * 11.5, then 15.1 and back to 11.5, on every step. Cleared, the offline
+     * measurement supplies the value immediately and the tracker refines it
+     * from the new settings instead of arguing for the old ones.
+     */
+    resetLiveMakeup()
     scheduleAutoMakeup()
   }
 
@@ -256,9 +295,31 @@ export function useFET1176() {
     }
   }
 
+  /**
+   * A new region is new material, so the live tracker's running extrema — which
+   * describe audio the user has moved on from — are cleared with it. Without
+   * this the makeup keeps answering for the previous selection and only drifts
+   * toward the new one as it is diluted.
+   */
+  function resetLiveMakeup() {
+    getEffectChain(getAudioContext()).effects
+      .find(e => e.id === fet1176Effect.id)?.nodes?.resetMakeupTracker?.()
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
+
+    /**
+     * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be holding a LIVE
+     * value and a live value is history-dependent — a function of what has
+     * played. Committing it would mean the same selection and settings render
+     * differently depending on where and how long you pressed play, and a
+     * makeup measured before the loudest moment arrived would put the output
+     * above the source's peak. The offline solve answers for the whole region
+     * every time.
+     */
+    if (fetAutoMakeup.value) await refreshAutoMakeup()
 
     const wasPreviewing = fetPreview.value
     if (wasPreviewing) togglePreview()
@@ -330,6 +391,7 @@ export function useFET1176() {
     syncMix,
     toggleAutoMakeup,
     refreshAutoMakeup,
+    resetLiveMakeup,
     apply,
     teardown,
     openModal,

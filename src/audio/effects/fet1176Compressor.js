@@ -61,6 +61,7 @@ export function createFET1176Compressor(audioContext) {
   let worklet = null
   let destroyed = false
   let grDb = 0
+  let liveMakeupDb = null
 
   // Pass through until the worklet module is loaded, then splice it in.
   input.connect(preOutput)
@@ -73,7 +74,10 @@ export function createFET1176Compressor(audioContext) {
         processorOptions: { params: toKernelParams(params) },
       })
       worklet.port.onmessage = (e) => {
-        if (e.data?.type === 'gr') grDb = e.data.grDb
+        if (e.data?.type === 'gr') {
+          grDb = e.data.grDb
+          liveMakeupDb = e.data.liveMakeupDb ?? null
+        }
       }
       input.disconnect(preOutput)
       input.connect(worklet)
@@ -109,6 +113,22 @@ export function createFET1176Compressor(audioContext) {
     },
 
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.
+    /**
+     * The makeup the audio heard so far asks for, dB, or null before anything
+     * has played. A LIVE reading — it only knows what has been through the
+     * worklet — so APPLY re-measures offline rather than committing it.
+     */
+    getLiveMakeupDb() {
+      return liveMakeupDb
+    },
+
+    
+    /** Forget what has played. A new region is new material. */
+    resetMakeupTracker() {
+      liveMakeupDb = null
+      worklet?.port.postMessage({ type: 'resetMakeupTracker' })
+    },
+
     getReduction() {
       return -grDb
     },

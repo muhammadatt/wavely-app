@@ -18,7 +18,7 @@ const {
   la2aAutoMakeup, la2aAutoMakeupBusy, toggleAutoMakeup: toggleAuto,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
-  syncR37, toggleAutoMakeup, refreshAutoMakeup, apply, teardown, closeModal,
+  syncR37, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup, apply, teardown, closeModal,
 } = useLA2A()
 
 const { state } = useEditorState()
@@ -30,7 +30,9 @@ onMounted(() => {
 
 // The makeup is measured from the selected region, so a new selection needs
 // a fresh measurement.
-watch(() => state.selection, () => refreshAutoMakeup(), { deep: true })
+// A new selection is new material: the live tracker's extrema describe the old
+// region, so they are cleared before the offline measurement re-runs.
+watch(() => state.selection, () => { resetLiveMakeup(); refreshAutoMakeup() }, { deep: true })
 
 const autoMakeupLabel = computed(() =>
   la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO' : 'AUTO'
