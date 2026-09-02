@@ -35,6 +35,32 @@ const props = defineProps({
   quantize: { type: Function, default: null },
   /** Let the centre read-out be double-clicked and typed into. */
   editable: { type: Boolean, default: false },
+  /**
+   * Ride a bead on the head of the value arc as well as the cap's own mark.
+   * Off by default: the cap mark and the bead sit on one radius, so two marks
+   * are two readings of the same angle — worth it only where the arc is the
+   * thing being watched.
+   */
+  arcHead: { type: Boolean, default: false },
+  /**
+   * How loud that bead is. 'bright' is 75% white with a 3px glow — brighter
+   * than anything else on a faceplate, which is why it is not the default.
+   * 'soft' is 22% white at a 2px glow; 'flush' is the accent itself with no
+   * glow at all, so the bead reads as a thickening of the arc rather than as
+   * a lamp.
+   */
+  beadTone: {
+    type: String,
+    default: 'soft',
+    validator: (v) => ['bright', 'soft', 'flush'].includes(v),
+  },
+  /**
+   * Width of the cap's raised rib, in the knob's own 100-unit space. 4.2 is
+   * the settled value: at 3.3 the crown is too narrow to catch the light
+   * along its length, and by 6.0 the mark is wider than it is long and reads
+   * as a lozenge rather than as a pointer.
+   */
+  ribWidth: { type: Number, default: 4.2 },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -98,6 +124,44 @@ const ticks = computed(() => {
 })
 
 const valColor = computed(() => `color-mix(in srgb, ${props.accent} 60%, #ffffff)`)
+
+// ── Cap mark ───────────────────────────────────────────────────────────────
+// A raised rib machined into the cap, not a hole drilled through it: lit from
+// above with a cast shadow below, in the cap's own metal rather than in the
+// accent, so the indicator reads the same on every faceplate hue and does not
+// compete with the lit arc for the eye.
+const RIB_H = 4.9
+const RIB_Y = 16.7
+
+const rib = computed(() => {
+  const w = props.ribWidth
+  const sw = w + 0.3
+  return {
+    x: (50 - w / 2).toFixed(2), w: w.toFixed(2), r: (w / 2).toFixed(2),
+    shadowX: (50 - sw / 2).toFixed(2), shadowW: sw.toFixed(2), shadowR: (sw / 2).toFixed(2),
+  }
+})
+
+const BEAD = {
+  bright: { r: 2.6, white: 75, glow: 3 },
+  soft: { r: 2.2, white: 22, glow: 2 },
+  flush: { r: 2.0, white: 0, glow: 0 },
+}
+
+/** The bead riding the end of the arc, when `arcHead` is on. */
+const bead = computed(() => {
+  const tone = BEAD[props.beadTone] ?? BEAD.soft
+  const ang = (135 + pct.value * 270) * Math.PI / 180
+  return {
+    cx: (50 + R * Math.cos(ang)).toFixed(2),
+    cy: (50 + R * Math.sin(ang)).toFixed(2),
+    r: tone.r,
+    fill: tone.white
+      ? `color-mix(in srgb, ${props.accent} ${100 - tone.white}%, #ffffff)`
+      : props.accent,
+    style: tone.glow ? { filter: `drop-shadow(0 0 ${tone.glow}px ${props.accent})` } : {},
+  }
+})
 
 // Drag-to-adjust: vertical drag, 150px traverses the full range
 const DRAG_RANGE_PX = 150
@@ -204,10 +268,6 @@ function cancelEdit() {
         <div class="absolute inset-[9%] rounded-full overflow-hidden"
              style="background:linear-gradient(160deg,#1f252d,#1b212a);box-shadow:inset 0 0 0 1px rgba(0,0,0,.32)">
         </div>
-        <div class="absolute inset-0" :style="{ transform: `rotate(${indicatorDeg}deg)` }">
-          <div class="absolute top-[15%] left-1/2 -translate-x-1/2 w-[6%] h-[6%] rounded-full"
-               style="background: #000000;"></div>
-        </div>
         <div
           class="absolute inset-0 flex items-center justify-center"
           :class="editing ? '' : 'pointer-events-none'"
@@ -230,6 +290,24 @@ function cancelEdit() {
           >{{ formatValue(modelValue) }}</span>
         </div>
       </div>
+      <svg viewBox="0 0 100 100" class="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+        <defs>
+          <linearGradient id="wvKnobRib" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#39414a" />
+            <stop offset="34%" stop-color="#8f979f" />
+            <stop offset="62%" stop-color="#6a727b" />
+            <stop offset="100%" stop-color="#2f363e" />
+          </linearGradient>
+        </defs>
+        <g :transform="`rotate(${indicatorDeg} 50 50)`">
+          <rect :x="rib.shadowX" :y="RIB_Y + 0.5" :width="rib.shadowW" :height="RIB_H + 0.1"
+                :rx="rib.shadowR" fill="rgba(0,0,0,.6)" />
+          <rect :x="rib.x" :y="RIB_Y" :width="rib.w" :height="RIB_H" :rx="rib.r"
+                fill="url(#wvKnobRib)" />
+        </g>
+        <circle v-if="arcHead" :cx="bead.cx" :cy="bead.cy" :r="bead.r" :fill="bead.fill"
+                :style="bead.style" />
+      </svg>
     </div>
     <span v-if="label" class="uppercase" style="font:600 10px/1 'Inter',system-ui;letter-spacing:0.14em;color:rgba(255,255,255,0.55)">{{ label }}</span>
   </div>
