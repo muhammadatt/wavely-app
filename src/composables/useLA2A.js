@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyLA2ARegion, computeLA2AAutoMakeup, computePeakCache } from '../audio/processing.js'
@@ -33,15 +34,19 @@ const la2aInputLevels = ref([])
 const la2aOutputLevels = ref([])
 let meterId = null
 
-// Debounce + supersede state for the auto-makeup measurement, shared across
-// every useLA2A() caller so knob drags coalesce into one measurement.
-// Keep this short so the Gain knob tracks Peak Reduction closely in AUTO
-// mode, while still avoiding a worker spawn per pointer tick.
-const AUTO_MAKEUP_DEBOUNCE_MS = 45
-let makeupTimer = null
+// Supersede counter for the auto-makeup measurement, shared across every
+// caller of this composable so a knob drag coalesces into one measurement.
 let makeupSeq = 0
-let makeupBurstActive = false
-let makeupBurstDirty = false
+
+/**
+ * ⚠ MODULE-LEVEL, NOT PER-CALLER. The sidebar trigger and the modal both call
+ * this composable, and everything else here is a shared singleton for that
+ * reason — a throttle created per call would let the two run concurrent
+ * measurements, which is the coalescing this exists for, defeated. Created
+ * lazily because it closes over `refreshAutoMakeup`, and every instance's
+ * closure reads the same singleton state, so the first one is as good as any.
+ */
+let makeupThrottle = null
 
 function currentParams() {
   return {
@@ -65,7 +70,7 @@ function measurementParams() {
 }
 
 export function useLA2A() {
-  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast } = useEditorState()
+  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
   function initChain() {
@@ -81,6 +86,33 @@ export function useLA2A() {
     stopMeters()
     function tick() {
       const nodes = chain.effects.find(e => e.id === la2aEffect.id)?.nodes
+      /**
+       * LIVE AUTO MAKEUP — read off the worklet on the meter's own cadence.
+       *
+       * The kernel maintains it from running extrema at O(1) per sample, so it
+       * needs no worker, no region render and no selection, and it lands within
+       * one meter interval (~21 ms) rather than a measurement (~170 ms).
+       *
+       * ⚠ THIS IS THE PREVIEW VALUE ONLY. It knows only what has PLAYED, so it
+       * is history-dependent — measured on real narration it can sit ~0.9 dB
+       * high before the loudest moment arrives. `apply()` re-measures offline
+       * for exactly that reason; see the note there.
+       *
+       * ⚠ ONLY WHILE AUTO OWNS THE KNOB. Once the user has taken over, writing
+       * a tracked value into it would be the panel overruling them.
+       */
+      if (la2aAutoMakeup.value) {
+        const live = nodes.getLiveMakeupDb?.()
+        if (Number.isFinite(live)) {
+          const next = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, live))
+          // A threshold, not equality: the knob prints one decimal, and
+          // repainting it on sub-hundredth wobble is churn nobody can see.
+          if (Math.abs(next - la2aGain.value) > 0.02) {
+            la2aGain.value = next
+            pushGain()
+          }
+        }
+      }
       if (nodes) {
         la2aReduction.value = nodes.getReduction()
         // Only meter channels the source really has: the splitter is
@@ -141,9 +173,23 @@ export function useLA2A() {
    * a newer one.
    */
   async function refreshAutoMakeup() {
-    if (!la2aAutoMakeup.value || !state.selection || !state.currentFile) return
+    if (!la2aAutoMakeup.value || !state.currentFile) return
 
-    const { start, end } = state.selection
+    /**
+     * ⚠ NO SELECTION MEANS THE WHOLE FILE, NOT "DON'T MEASURE".
+     *
+     * This used to bail without a selection, which left the knob at 0 dB while
+     * the AUTO lamp stayed lit — so opening the plugin and pressing play with
+     * nothing selected gave a compressed signal with the makeup silently
+     * negated, under a panel claiming it was applied. Reported exactly that
+     * way.
+     *
+     * The whole file is the right span because it is what preview PLAYS with no
+     * selection. Apply still requires a selection; this is about what you hear.
+     */
+    const start = state.selection ? state.selection.start : 0
+    const end = state.selection ? state.selection.end : totalDuration.value
+    if (!(end > start)) return
     const seq = ++makeupSeq
     la2aAutoMakeupBusy.value = true
     try {
@@ -162,29 +208,14 @@ export function useLA2A() {
     }
   }
 
+  /**
+   * Ask for a re-measure. Coalesced by createMeasureThrottle — see there for
+   * why this is a throttle and not the debounce it replaced.
+   */
+  if (!makeupThrottle) makeupThrottle = createMeasureThrottle(refreshAutoMakeup)
   function scheduleAutoMakeup() {
     if (!la2aAutoMakeup.value) return
-
-    // Leading edge: first move in a burst measures immediately so the Gain
-    // knob responds right away.
-    if (!makeupBurstActive) {
-      makeupBurstActive = true
-      makeupBurstDirty = false
-      refreshAutoMakeup()
-    } else {
-      // Additional moves during the debounce window request one trailing pass
-      // with the final knob value.
-      makeupBurstDirty = true
-    }
-
-    if (makeupTimer !== null) clearTimeout(makeupTimer)
-    makeupTimer = setTimeout(() => {
-      makeupTimer = null
-      const shouldRunTrailing = makeupBurstDirty
-      makeupBurstActive = false
-      makeupBurstDirty = false
-      if (shouldRunTrailing) refreshAutoMakeup()
-    }, AUTO_MAKEUP_DEBOUNCE_MS)
+    makeupThrottle.schedule()
   }
 
   // Params that change how much the compressor reduces (and so how much
@@ -192,6 +223,18 @@ export function useLA2A() {
   function syncCompressionParam(name, refVar, value) {
     refVar.value = value
     pushParam(name, value)
+    /**
+     * ⚠ THE LIVE TRACKER'S EXTREMA DESCRIBE THE OLD SETTINGS, so a compression
+     * change invalidates them exactly as a new region does — the tracked signal
+     * is post-gain-reduction, and these are the knobs that set it.
+     *
+     * Without this the two writers FIGHT over the knob, visibly: measured on a
+     * drag, the offline pass wrote 14.4 and the stale tracker pulled it back to
+     * 11.5, then 15.1 and back to 11.5, on every step. Cleared, the offline
+     * measurement supplies the value immediately and the tracker refines it
+     * from the new settings instead of arguing for the old ones.
+     */
+    resetLiveMakeup()
     scheduleAutoMakeup()
   }
 
@@ -224,12 +267,7 @@ export function useLA2A() {
    */
   function disableAutoMakeup() {
     la2aAutoMakeup.value = false
-    if (makeupTimer !== null) {
-      clearTimeout(makeupTimer)
-      makeupTimer = null
-    }
-    makeupBurstActive = false
-    makeupBurstDirty = false
+    makeupThrottle?.cancel()
     makeupSeq++
     la2aAutoMakeupBusy.value = false
   }
@@ -243,9 +281,31 @@ export function useLA2A() {
     }
   }
 
+  /**
+   * A new region is new material, so the live tracker's running extrema — which
+   * describe audio the user has moved on from — are cleared with it. Without
+   * this the makeup keeps answering for the previous selection and only drifts
+   * toward the new one as it is diluted.
+   */
+  function resetLiveMakeup() {
+    getEffectChain(getAudioContext()).effects
+      .find(e => e.id === la2aEffect.id)?.nodes?.resetMakeupTracker?.()
+  }
+
   async function apply() {
     if (!state.selection) return
     const { start, end } = state.selection
+
+    /**
+     * ⚠ RE-MEASURE BEFORE APPLYING, because the knob may be holding a LIVE
+     * value and a live value is history-dependent — a function of what has
+     * played. Committing it would mean the same selection and settings render
+     * differently depending on where and how long you pressed play, and a
+     * makeup measured before the loudest moment arrived would put the output
+     * above the source's peak. The offline solve answers for the whole region
+     * every time.
+     */
+    if (la2aAutoMakeup.value) await refreshAutoMakeup()
 
     const wasPreviewing = la2aPreview.value
     if (wasPreviewing) togglePreview()
@@ -311,6 +371,7 @@ export function useLA2A() {
     syncR37,
     toggleAutoMakeup,
     refreshAutoMakeup,
+    resetLiveMakeup,
     apply,
     teardown,
     openModal,

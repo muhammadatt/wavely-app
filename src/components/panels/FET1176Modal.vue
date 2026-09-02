@@ -18,7 +18,7 @@ const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
   fetAutoMakeup, fetPreview, fetReduction, fetInputLevels, fetOutputLevels,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
-  syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup,
+  syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
   apply, teardown, closeModal,
 } = useFET1176()
 
@@ -65,7 +65,9 @@ onMounted(() => {
 
 // The makeup is measured from the selected region, so a new selection needs
 // a fresh measurement.
-watch(() => state.selection, () => refreshAutoMakeup(), { deep: true })
+// A new selection is new material: the live tracker's extrema describe the old
+// region, so they are cleared before the offline measurement re-runs.
+watch(() => state.selection, () => { resetLiveMakeup(); refreshAutoMakeup() }, { deep: true })
 
 // Steel blue rather than the OptoSmooth's amber — at a glance you can tell
 // which of the two is on screen.

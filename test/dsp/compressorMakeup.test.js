@@ -368,3 +368,66 @@ test('OptoSmooth tracks its base-rate path across an onset too', () => {
   }
   assert.ok(worst < 0.05, `departs from base-rate by ${worst.toFixed(4)} across the onset`)
 })
+
+// ── FET Punch: the exact one-render solve ───────────────────────────────────
+//
+// The makeup used to be a fixed-point iteration capped at three passes. Output
+// gain scales the WET path only, so `makeup += correction` converges at a rate
+// set by the wet share — and two factory presets ship at mix 0.4 and 0.5, where
+// the cap returned an answer several dB short. It is now solved in closed form
+// from one render; these pin that it is exact at every mix rather than
+// convergent, which is the property the iteration never had.
+
+/** Peak across every channel. */
+function peakOf(channels) {
+  let p = 0
+  for (const ch of channels) for (const v of ch) p = Math.max(p, Math.abs(v))
+  return p
+}
+
+test('FET Punch makeup restores the input peak at EVERY mix, not just at 1', () => {
+  const x = material(3, 0.7)
+  for (const mix of [1, 0.7, 0.5, 0.4, 0.3]) {
+    const p = { inputDrive: 55, attack: 4, release: 5, ratio: '4', fetDrive: 0.35, scHpfHz: 0, mix }
+    const makeupDb = computeFET1176AutoMakeupDb([x], SR, p)
+    const out = processFET1176Buffer([x], SR, { ...p, outputGainDb: makeupDb }).channelData
+    const err = 20 * Math.log10(peakOf(out) / peakOf([x]))
+    assert.ok(
+      Math.abs(err) < 0.25,
+      `mix ${mix}: output peak missed the input's by ${err.toFixed(3)} dB (makeup ${makeupDb.toFixed(2)})`,
+    )
+  }
+})
+
+test('a parallel setting needs MORE makeup than a fully wet one', () => {
+  // The mechanism behind the bug, stated as behaviour: with less wet in the
+  // sum, the wet path has to be lifted further to move the sum's peak. The old
+  // iteration returned LESS at low mix, which is the wrong direction entirely.
+  const x = material(3, 0.7)
+  const at = (mix) => computeFET1176AutoMakeupDb([x], SR, {
+    inputDrive: 55, attack: 4, release: 5, ratio: '4', fetDrive: 0.35, scHpfHz: 0, mix,
+  })
+  assert.ok(at(0.5) > at(1), `mix 0.5 (${at(0.5).toFixed(2)}) should exceed mix 1 (${at(1).toFixed(2)})`)
+})
+
+test('mix 0 asks for no makeup — the output IS the input', () => {
+  const x = material(2, 0.7)
+  assert.equal(computeFET1176AutoMakeupDb([x], SR, {
+    inputDrive: 55, attack: 4, release: 5, ratio: '4', fetDrive: 0.35, scHpfHz: 0, mix: 0,
+  }), 0)
+})
+
+test('the solve never asks for an output hotter than the source', () => {
+  const x = material(3, 0.7)
+  for (const mix of [1, 0.6, 0.3]) {
+    for (const inputDrive of [30, 55, 85]) {
+      const p = { inputDrive, attack: 4, release: 5, ratio: '4', fetDrive: 0.35, scHpfHz: 0, mix }
+      const makeupDb = computeFET1176AutoMakeupDb([x], SR, p)
+      const out = processFET1176Buffer([x], SR, { ...p, outputGainDb: makeupDb }).channelData
+      assert.ok(
+        peakOf(out) <= peakOf([x]) * 1.03,
+        `mix ${mix} drive ${inputDrive}: output peak exceeded the source's`,
+      )
+    }
+  }
+})

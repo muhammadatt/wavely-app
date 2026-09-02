@@ -204,6 +204,21 @@ export const LA2A_KERNEL_DEFAULTS = {
   oversample: true,
 }
 
+// Gain-knob smoothing time — the same 8 ms the soft clipper and FET Punch use.
+const MAKEUP_SMOOTH_MS = 8
+
+/**
+ * How much audio the live makeup tracker must hear before it will report.
+ *
+ * ⚠ WITHOUT IT A FRESHLY-RESET TRACKER REPORTS FROM ALMOST NO EVIDENCE, and
+ * every compression-knob change resets it. Measured on a drag: the live value
+ * came back as 4.6 / 4.1 / 12.1 / 8.5 / 8.1 dB from the first few blocks and
+ * fought the offline measurement all the way down the knob. A quarter second is
+ * long enough to hold several syllables and short enough that the tracker takes
+ * over almost as soon as the hand stops.
+ */
+const MAKEUP_TRACKER_WARMUP_S = 0.25
+
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
@@ -227,6 +242,22 @@ export class LA2AKernel {
     this.shelfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_SHELF_HZ / sampleRate)
     // DC blocker pole (~5 Hz) — the asymmetric shaper shifts the operating point
     this.dcR = 1 - 2 * Math.PI * 5 / sampleRate
+
+    /**
+     * GAIN KNOB (MAKEUP), SMOOTHED — it was applied as a bare step.
+     *
+     * `makeupLin` was recomputed in setParams and multiplied straight into the
+     * gain envelope, so every param message stepped it discontinuously. That is
+     * inaudible for a knob nudged by hand and a click for anything writing the
+     * knob rapidly, which is what AUTO makeup does — reported as zippering on
+     * rapid adjustment.
+     *
+     * ⚠ `null` = not yet seeded. The first block adopts the target exactly, so
+     * an offline render carries its makeup from sample 0 rather than swelling
+     * into it over the smoothing time.
+     */
+    this.makeupLinSmoothed = null
+    this.makeupSmoothCoef = 1 - Math.exp(-1 / (sampleRate * (MAKEUP_SMOOTH_MS / 1000)))
 
     // Sidechain / T4 state
     this.hpfLp = 0
@@ -265,10 +296,101 @@ export class LA2AKernel {
     this.grActive = 0
 
     this.gainScratch = new Float32Array(128)
+    this.preGainScratch = new Float32Array(128)
+
+    /**
+     * LIVE AUTO-MAKEUP TRACKER — running extrema, O(1) per sample.
+     *
+     * ⚠ IT DOES NOT NEED THE MAKEUP MOVED AFTER THE TUBE STAGE. The makeup sits
+     * BEFORE the tube as on the hardware, so the output is not affine in it —
+     * and it does not have to be. The shaper is memoryless and STRICTLY
+     * MONOTONE, so the output peak is a monotone function of the makeup fixed
+     * entirely by two extrema of the PRE-makeup signal, and inverting the
+     * shaper at the target peak solves it in closed form. Verified against the
+     * four-pass offline iteration on 30 s of real narration: within 0.025 dB at
+     * Peak Reduction 40 / 55 / 60 / 75 / 85.
+     *
+     * ⚠ PRE-MAKEUP IS LOAD-BEARING, AND TRACKING POST-MAKEUP DIVERGED. A first
+     * build tracked the signal AFTER the makeup and divided by the makeup in
+     * effect — valid only while that is constant. The panel writes the reported
+     * value back onto the knob, so with the loop closed the division was
+     * applied to extrema accumulated at other gains and it ran away to −4635 dB.
+     * Everything tracked here is independent of the makeup by construction,
+     * which is what makes the loop stable rather than merely tuned.
+     */
+    this.trkInPeak = 0
+    this.trkSamples = 0
+    this.trkVMax = 0
+    this.trkVMin = 0
+
+    /**
+     * The gain reduction WITHOUT makeup — a second array rather than dividing
+     * the makeup back out of `gain[]`, which is precisely the coupling that
+     * made the loop unstable.
+     *
+     * ⚠ UNDELAYED, WHERE `gain[]` IS DELAYED, and that is not an oversight.
+     * `gainDelay` exists to hold the envelope back until the audio emerges from
+     * the upsampler, which has delayed it. The tracker pairs this with the
+     * BASE-RATE input, which no upsampler has delayed, so applying the same
+     * hold would misalign the two by UPSAMPLE_DELAY_SAMPLES — measured, that
+     * paired each transient with the gain from before its own attack and asked
+     * for 7.03 dB against a true 4.22.
+     */
     this.wetScratch = new Float64Array(128)
 
     this.params = { ...LA2A_KERNEL_DEFAULTS }
     this.setParams({})
+  }
+
+  /**
+   * Forget what has played. The tracker is a running measurement over the audio
+   * it has SEEN, so a new region means new material and the old extrema would
+   * keep answering for audio the user has moved on from.
+   */
+  resetAutoMakeupTracker() {
+    this.trkInPeak = 0
+    this.trkSamples = 0
+    this.trkVMax = 0
+    this.trkVMin = 0
+  }
+
+  /**
+   * The makeup the audio heard so far asks for, dB, or null before anything has
+   * been heard.
+   *
+   * Inverts the tube shaper at the target peak. Monotone, so the two extrema of
+   * the pre-makeup signal are all it takes; the binding side is whichever hits
+   * the target first.
+   *
+   * ⚠ IT ONLY KNOWS WHAT HAS PLAYED, so early in a pass it can read high — the
+   * loudest moment may not have arrived. That is why APPLY keeps the
+   * deterministic offline solve rather than committing this number.
+   */
+  liveAutoMakeupDb() {
+    if (this.trkSamples < this.sampleRate * MAKEUP_TRACKER_WARMUP_S) return null
+    const P = this.trkInPeak
+    if (!(P > 0)) return null
+    const vMax = this.trkVMax
+    const vMin = this.trkVMin
+    if (!(vMax > 0) && !(vMin < 0)) return null
+
+    let g = Infinity
+    if (this.applyTube) {
+      const inv = (y) => {
+        const a = y * this.tubeNorm + this.tanhBias
+        // The shaper saturates below the target: no makeup reaches it.
+        if (a >= 1 || a <= -1) return null
+        return (Math.atanh(a) - this.tubeBias) / this.tubeDriveLin
+      }
+      const up = inv(P), dn = inv(-P)
+      if (up !== null && vMax > 0) g = Math.min(g, up / vMax)
+      if (dn !== null && vMin < 0) g = Math.min(g, dn / vMin)
+    } else {
+      if (vMax > 0) g = Math.min(g, P / vMax)
+      if (vMin < 0) g = Math.min(g, P / -vMin)
+    }
+    if (!Number.isFinite(g) || g <= 0) return null
+    return 20 * Math.log10(g)
   }
 
   /** Clear every feedback path in the cell and the tube stage. */
@@ -371,11 +493,28 @@ export class LA2AKernel {
     this.slowRelCoef = 1 - Math.exp(-1 / (this.sampleRate * slowTau))
 
     if (this.gainScratch.length < n) this.gainScratch = new Float32Array(n)
+    if (this.preGainScratch.length < n) this.preGainScratch = new Float32Array(n)
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
+    const preGain = this.preGainScratch
     const chScale = 1 / nIn
 
+    // The tracker's target: the loudest input sample heard so far.
+    this.trkSamples += n
+    for (let ch = 0; ch < nIn; ch++) {
+      const src = inputChannels[ch]
+      for (let i = 0; i < n; i++) {
+        const a = src[i] < 0 ? -src[i] : src[i]
+        if (a > this.trkInPeak) this.trkInPeak = a
+      }
+    }
+
     let { hpfLp, shelfLp, env, grFast, grSlow, memory } = this
+
+    // Seeded on the first block; advanced once per sample HERE rather than
+    // per channel, because this envelope loop is already the shared one.
+    if (this.makeupLinSmoothed === null) this.makeupLinSmoothed = this.makeupLin
+    let makeupLinSmoothed = this.makeupLinSmoothed
 
     for (let i = 0; i < n; i++) {
       // Mono sidechain tap
@@ -445,9 +584,13 @@ export class LA2AKernel {
       // Without this the reduction would arrive early — a small look-ahead the
       // hardware does not have. In the base-rate measurement path there is
       // nothing to meet, so the delay would only misalign it.
-      const g = Math.exp(-grNow * LN10_OVER_20) * this.makeupLin
+      makeupLinSmoothed += this.makeupSmoothCoef * (this.makeupLin - makeupLinSmoothed)
+      const preG = Math.exp(-grNow * LN10_OVER_20)
+      const g = preG * makeupLinSmoothed
       gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
+      preGain[i] = preG
     }
+    this.makeupLinSmoothed = makeupLinSmoothed
 
     this.hpfLp = hpfLp
     this.shelfLp = shelfLp
@@ -456,6 +599,26 @@ export class LA2AKernel {
     this.grSlow = grSlow
     this.memory = memory
     this.grDb = grFast + grSlow
+
+    /**
+     * PRE-MAKEUP EXTREMA, tracked here rather than inside either per-channel
+     * branch.
+     *
+     * ⚠ THE FIRST BUILD TRACKED ONLY IN THE BASE-RATE BRANCH, which the panel
+     * never takes — the shipping path is oversampled — so the tracker never
+     * fired at all and reported null forever. Once, in one place, covering both.
+     *
+     * Base rate even on the oversampled path: it is the same quantity the
+     * offline solve measures, and the tracker's job is to agree with that.
+     */
+    for (let ch = 0; ch < nOut; ch++) {
+      const src = inputChannels[Math.min(ch, nIn - 1)]
+      for (let i = 0; i < n; i++) {
+        const v = src[i] * preGain[i]
+        if (v > this.trkVMax) this.trkVMax = v
+        else if (v < this.trkVMin) this.trkVMin = v
+      }
+    }
 
     // Apply gain curve + tube stage per channel, at the oversampled rate.
     while (this.dcX.length < nOut) {
@@ -731,6 +894,9 @@ if (typeof registerProcessor === 'function') {
       this.sinceMeter = 0
       this.port.onmessage = (e) => {
         if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
+        // A new region is new material: the running extrema describe audio the
+        // user has moved on from, so they are forgotten rather than diluted.
+        else if (e.data?.type === 'resetMakeupTracker') this.kernel.resetAutoMakeupTracker()
       }
     }
 
@@ -750,7 +916,13 @@ if (typeof registerProcessor === 'function') {
       this.sinceMeter += n
       if (this.sinceMeter >= METER_INTERVAL_SAMPLES) {
         this.sinceMeter = 0
-        this.port.postMessage({ type: 'gr', grDb: this.kernel.grDb })
+        this.port.postMessage({
+          type: 'gr',
+          grDb: this.kernel.grDb,
+          // The live auto-makeup, riding the ~46 Hz cadence the meter already
+          // pays for. null until something has been heard.
+          liveMakeupDb: this.kernel.liveAutoMakeupDb(),
+        })
       }
       return true
     }

@@ -3,16 +3,28 @@
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
- * schepsAutoTrim, softClipperCeiling, voiceProfile
+ * softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling, voiceProfile
  */
 import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
+import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
 
+/**
+ * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
+ * now, so replies are routed by request id rather than by "the one worker that
+ * was spawned for this call". `postReply` is the only way to answer.
+ */
+let currentId = null
+function postReply(payload) {
+  self.postMessage({ ...payload, __id: currentId })
+}
+
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
+  currentId = e.data.__id
 
   switch (type) {
     case 'normalize':
@@ -27,6 +39,9 @@ self.onmessage = function (e) {
     case 'fet1176AutoMakeup':
       autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
       break
+    case 'softClipperAutoMakeup':
+      autoMakeup(computeSoftClipperAutoMakeupDb, channelData, sampleRate, params)
+      break
     case 'schepsAutoTrim':
       schepsAutoTrim(channelData, sampleRate, params)
       break
@@ -37,7 +52,7 @@ self.onmessage = function (e) {
       voiceProfile(channelData, sampleRate)
       break
     default:
-      self.postMessage({ type: 'error', message: `Unknown operation: ${type}` })
+      postReply({ type: 'error', message: `Unknown operation: ${type}` })
   }
 }
 
@@ -46,9 +61,9 @@ self.onmessage = function (e) {
 // don't jank the UI while the measurement re-runs.
 function autoMakeup(measure, channelData, sampleRate, params) {
   try {
-    self.postMessage({ type: 'done', makeupDb: measure(channelData, sampleRate, params) })
+    postReply({ type: 'done', makeupDb: measure(channelData, sampleRate, params) })
   } catch (err) {
-    self.postMessage({ type: 'error', message: err.message })
+    postReply({ type: 'error', message: err.message })
   }
 }
 
@@ -57,9 +72,9 @@ function autoMakeup(measure, channelData, sampleRate, params) {
 function schepsAutoTrim(channelData, sampleRate, params) {
   try {
     const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
-    self.postMessage({ type: 'done', trimDb, correlation, densityDb })
+    postReply({ type: 'done', trimDb, correlation, densityDb })
   } catch (err) {
-    self.postMessage({ type: 'error', message: err.message })
+    postReply({ type: 'error', message: err.message })
   }
 }
 
@@ -78,9 +93,9 @@ function schepsAutoTrim(channelData, sampleRate, params) {
 function softClipperCeiling(channelData, sampleRate, params) {
   try {
     const ceilingDb = measurePeakCeilingDb(channelData, sampleRate, params.percentile)
-    self.postMessage({ type: 'done', ceilingDb })
+    postReply({ type: 'done', ceilingDb })
   } catch (err) {
-    self.postMessage({ type: 'error', message: err.message })
+    postReply({ type: 'error', message: err.message })
   }
 }
 
@@ -97,9 +112,9 @@ function softClipperCeiling(channelData, sampleRate, params) {
  */
 function voiceProfile(channelData, sampleRate) {
   try {
-    self.postMessage({ type: 'done', profile: measureVoiceProfile(channelData, sampleRate) })
+    postReply({ type: 'done', profile: measureVoiceProfile(channelData, sampleRate) })
   } catch (err) {
-    self.postMessage({ type: 'error', message: err.message })
+    postReply({ type: 'error', message: err.message })
   }
 }
 

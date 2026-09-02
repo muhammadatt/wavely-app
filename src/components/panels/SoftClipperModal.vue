@@ -23,6 +23,8 @@ const {
   clipperInputLevels, clipperOutputLevels, getScope, hasSelection,
   togglePreview, toggleDelta, syncHeadroom, syncLimiter, syncEmphasis,
   syncOutputTrim,
+  autoMakeup, toggleAutoMakeup,
+  SOFT_CLIPPER_MAKEUP_MIN_DB, SOFT_CLIPPER_MAKEUP_MAX_DB,
   syncFixedThreshold,
   setShape, apply, teardown, closeModal,
   ceilingBusy, CEILING_PRESETS, scheduleCeilingPreset,
@@ -310,6 +312,21 @@ const setterCaption = computed(() => {
   return active ? `${active.title}  (${active.db} dB)` : ''
 })
 
+/**
+ * ⚠ THE CEILING STOPS DESCRIBING THE OUTPUT PEAK ONCE AUTO IS LIT, and saying
+ * otherwise would be a readout that is false on the shipped default patch.
+ *
+ * With AUTO off the old reading is exact: peaks stop at this number. With AUTO
+ * on the ceiling is where peaks stop *inside* the stage, and the makeup then
+ * hands the removed peak back as gain — so the output peak lands back on the
+ * source's and the number here is a threshold rather than an output spec. That
+ * is the whole point of a clipper's makeup, and it is worth one clause rather
+ * than leaving the panel promising something it no longer does.
+ */
+const ceilingTitle = computed(() => (autoMakeup.value
+  ? 'Where peaks stop inside the stage, in dBFS. AUTO hands what it takes off the peaks back as output gain, so the output peak lands where the source\u2019s was. Set it from the buttons, by dragging the line, or here.'
+  : 'Where peaks stop, in dBFS. Set it from the buttons, by dragging the line, or here.'))
+
 const peakOverText = computed(() =>
   (clipperReductionReadout.value < 0.05 ? '—' : clipperReductionReadout.value.toFixed(1)))
 const engagedText = computed(() => `${clipperEngagedReadout.value.toFixed(0)}%`)
@@ -506,7 +523,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
             label="Ceiling" :accent="ACCENT" :format-value="formatDb"
             :value-font-px="15"
             :disabled="!clipperPreview"
-            title="Where peaks stop, in dBFS. Set it from the buttons, by dragging the line, or here."
+            :title="ceilingTitle"
           />
         </div>
 
@@ -584,16 +601,51 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
 
         <div style="width:1px;align-self:stretch;background:rgba(255,255,255,.07);flex-shrink:0"></div>
 
-        <div style="width:92px;flex-shrink:0">
-          <Knob
-            :model-value="outputTrimDb"
-            @update:model-value="syncOutputTrim"
-            :min="-6" :max="6" :step="0.1"
-            label="Trim" :accent="ACCENT" :format-value="formatGain"
-            :value-font-px="15"
-            :disabled="!clipperPreview" bipolar
-            title="Post-stage gain match, for an honest A/B."
-          />
+        <!-- ── Output ───────────────────────────────────────────────────
+             ⚠ THE TRAVEL IS -12..+24, NOT ±6, and it had to widen. As a pure
+             A/B trim ±6 was plenty; as makeup it is not — the four ceiling
+             presets ask for +9.1 to +10.4 dB on real material, so the old knob
+             could not reach any of them. -->
+        <div style="width:92px;flex-shrink:0;display:flex;flex-direction:column;align-items:center">
+          <div class="relative w-full" :style="{ opacity: autoMakeup ? 0.78 : 1 }">
+            <Knob
+              :model-value="outputTrimDb"
+              @update:model-value="syncOutputTrim"
+              :min="SOFT_CLIPPER_MAKEUP_MIN_DB" :max="SOFT_CLIPPER_MAKEUP_MAX_DB" :step="0.1"
+              label="Output" :accent="ACCENT" :format-value="formatGain"
+              :value-font-px="15"
+              :disabled="!clipperPreview" bipolar
+              title="Makeup gain. AUTO hands back what the ceiling took off the peaks, so the output peak lands where the source's was."
+            />
+            <!-- ⚠ NO AUTO BADGE ON THE KNOB, unlike OptoSmooth and FET Punch,
+                 and both reasons were only visible by rendering it. This knob
+                 is 92 px with a 15 px numeral where theirs are 78 px, so a pill
+                 pinned to its top-right is CLIPPED by the column and sits on
+                 the arc. And it would be the second AUTO in a 92 px column —
+                 the button is 40 px below it with only the label between. The
+                 dimmed knob plus the lit button say it once, which is enough
+                 when the two are always on screen together. -->
+          </div>
+          <!-- The knob stays draggable while AUTO is lit: touching it takes
+               over and drops AUTO, which is the only way a user can set an
+               output gain and have it stick. Discarding the drag instead reads
+               as a broken knob — the failure OptoSmooth shipped once. -->
+          <button
+            class="mt-[7px] px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
+            :style="{
+              background: autoMakeup ? 'rgba(245,166,35,.16)' : 'rgba(255,255,255,.05)',
+              border: `1px solid ${autoMakeup ? 'rgba(245,166,35,.42)' : 'rgba(255,255,255,.09)'}`,
+              color: autoMakeup ? '#f7c877' : 'rgba(255,255,255,.4)',
+              font: `700 8.5px 'JetBrains Mono',monospace`,
+              letterSpacing: '.1em',
+              opacity: clipperPreview ? 1 : 0.4,
+            }"
+            :disabled="!clipperPreview"
+            :title="autoMakeup
+              ? 'Auto makeup on. Click to take manual control.'
+              : 'Auto makeup off. Click to hand the removed peak back as gain.'"
+            @click="toggleAutoMakeup"
+          >AUTO</button>
         </div>
       </div>
 
