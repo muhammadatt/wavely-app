@@ -182,6 +182,50 @@ const SC_DRIVE_MAX_DB = 36.24
 const SC_DRIVE_SPAN_DB = 105.9
 const SC_TAPER = 0.4247
 
+/**
+ * DC blocker corner, Hz — a one-pole `y = x - x[-1] + R*y[-1]` after the tube
+ * stage. The asymmetric shaper rectifies, so it shifts the operating point and
+ * the offset has to come back off before it reaches a peak measurement.
+ *
+ * ⚠ INHERITED, NOT DERIVED. `tapeCharacter.js` carries the same idea at 2 Hz
+ * with a measurement behind it; this one was written as a bare `5` and has
+ * never been argued. The two are NOT the same filter — that one is a
+ * Butterworth BIQUAD, this is a naive one-pole — so its constant does not port
+ * even where the corner number would.
+ *
+ * What is measured, at 48 kHz, sweeping this constant against an exact bypass
+ * (`R = 1` telescopes to the signal itself, leaving the oversampler, the
+ * ballistics and the shaper bit-identical):
+ *
+ *   corner   residual DC   40 Hz     phase@120Hz   LF transient tilt
+ *      2     -164 dBFS    -0.010 dB     0.96°           -33.2 dBc
+ *      5     -166 dBFS    -0.065 dB     2.39°           -23.1 dBc
+ *     20     -165 dBFS    -0.960 dB     9.47°           -11.6 dBc
+ *
+ * ⚠ REJECTION IS TOTAL AT ANY CORNER, so nothing here trades against the job
+ * the filter does. And the dBc "cost" figure a sweep first produces is PURE
+ * PHASE ROTATION — `20*log10(2*sin(phi/2))` reproduces it to the last digit at
+ * every corner — which is inaudible on a tone and is not evidence for anything.
+ * The axis that would decide this is the last column: undershoot after a 60 Hz
+ * burst, i.e. baseline wander after a plosive, where 5 Hz is 10 dB worse than
+ * 2. That has been measured on synthetic bursts only.
+ *
+ * ⚠ AND THE PREMISE DIFFERS FROM THE TAPE ONE: that blocker is gated on an
+ * opt-in control, this one runs whenever the tube stage does, and OptoSmooth
+ * ships `tubeDrive: 0.3`. Every stock user pays this, which argues for a lower
+ * corner rather than the same one — on real narration, which this has not seen.
+ *
+ * ⚠ AND THIS FILTER BOOSTS, WHERE THE TAPE ONE PROVABLY CANNOT. A naive
+ * one-pole `(1 - z^-1)/(1 - R*z^-1)` peaks at Nyquist at exactly `2/(1+R)` —
+ * +0.0028 dB at this corner, inaudible, and it scales with the corner, so it is
+ * a cost of RAISING it. `makeDcBlocker` is a Butterworth biquad precisely to
+ * keep a "never boosts" guarantee; nothing here claims that guarantee.
+ *
+ * Left at 5 deliberately: naming it changes no sound, and re-deriving it is a
+ * separate change with its own evidence.
+ */
+export const DC_BLOCK_HZ = 5
+
 // ── Gain computer constants ─────────────────────────────────────────────────
 
 const COMPRESS_KNEE_DB = 20 // wide knee — the "leveling" feel
@@ -240,8 +284,9 @@ export class LA2AKernel {
     this.memDischargeCoef = 1 - Math.exp(-1 / (sampleRate * MEM_DISCHARGE_S))
     this.hpfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_HPF_HZ / sampleRate)
     this.shelfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_SHELF_HZ / sampleRate)
-    // DC blocker pole (~5 Hz) — the asymmetric shaper shifts the operating point
-    this.dcR = 1 - 2 * Math.PI * 5 / sampleRate
+    // DC blocker pole — the asymmetric shaper shifts the operating point.
+    // See DC_BLOCK_HZ for what is and is not measured about the corner.
+    this.dcR = 1 - 2 * Math.PI * DC_BLOCK_HZ / sampleRate
 
     /**
      * GAIN KNOB (MAKEUP), SMOOTHED — it was applied as a bare step.
