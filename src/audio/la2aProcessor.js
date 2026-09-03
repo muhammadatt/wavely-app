@@ -383,43 +383,51 @@ export const DC_BLOCK_HZ = 5
  * `tanh(c*w)/c` has unity slope at the origin for any c, so the stage is
  * transparent as gain reduction goes to zero without any normalisation term.
  *
- * RESULT AT THE CALIBRATED POINT — it lands on the paper almost exactly, on
- * both axes at once, at 1 kHz / -18 dBFS in / 6 dB GR:
+ * THE DEPTH LAW SATURATES, AND THAT CAME FROM LISTENING RATHER THAN FROM THE
+ * PAPER. A drive linear in gain reduction hits the paper's point exactly and
+ * then runs away — 2.15 / 7.98 / 13.41 / 17.84 % at 6 / 13 / 19 / 24 dB of GR.
+ * Auditioned on narration at Peak Reduction 60 that was rejected as far too
+ * much, and scaling the whole law down to taste (0.42x) fixed the listening
+ * and broke the measurement: it lands at 0.43 % at the paper's 6 dB, BELOW the
+ * quietest of the six units, with H3-H2 at +10 dB against a measured window of
+ * +16 to +44.
  *
- *                        THD        H3 - H2
- *   six real units    0.94-4.22 %   +16 to +44 dB   (median 2.19 %, +25.7)
- *   OFF (was)           0.133 %     -16.3 dB
- *   ON  (cellDrive 1)   2.148 %     +25.3 dB
+ * ⚠ THE TWO DISAGREED BECAUSE THEY WERE AT DIFFERENT DEPTHS. The paper measures
+ * 6 dB of gain reduction; the listening test ran at Peak Reduction 60, which is
+ * 10.2 dB average and 19.7 dB peak. The ear was judging an extrapolation, not
+ * the calibration. So the magnitude was never the problem — the SLOPE was.
  *
- * and every one of the paper's five frequencies lands inside its own measured
- * range (1.90 / 2.82 / 2.64 / 2.43 / 2.15 % at 63 / 125 / 250 / 500 / 1000 Hz).
- * The even content is the tube stage's TUBE_BIAS, exactly as intended: the cell
- * supplies the dominant odd, the valves the small even, and the pair lands in
- * the hardware's window without either being tuned to it.
+ * `u` saturates instead: it rises fast out of zero and levels off, which
+ * satisfies both at once. Measured, 1 kHz at -18 dBFS:
  *
- * ⚠⚠ AND THE EXTRAPOLATION IS NOT SHIPPABLE. The paper measures ONE depth,
- * 6 dB of gain reduction. Everything past it is this drive law's invention, and
- * it runs away: THD 0.27 / 2.15 / 7.98 / 13.41 / 17.84 % at 0 / 6 / 13 / 19 /
- * 24 dB of GR. Against the current model on 35 s of real narration,
- * level-matched, the difference is -17.5 dBc at 2.7 dB of GR but -6.8 dBc at
- * 19.5 dB — a fifth of the signal by amplitude, which is a broken plugin, not a
- * colour. OptoSmooth is routinely used at 10-20 dB of reduction; the paper's
- * operating point is the shallow end of where this thing lives.
+ *   GR      THD      H3 - H2     the evidence at that depth
+ *    0     0.271 %   -12.7 dB    <0.5 % manufacturer spec, no GR
+ *    6     2.114 %   +25.2 dB    0.94-4.22 %, +16 to +44 (six units, median 2.19 / +25.7)
+ *   13     2.983 %   +35.5 dB    no data — has to stay plausible, and does
+ *   19     3.122 %   +41.8 dB    no data
+ *   24     3.151 %   +47.2 dB    no data
  *
- * ⚠ THE 1/p IS THE SUSPECT. It was added because without it THD PEAKS at ~6 dB
- * of GR and falls away again, contradicting the one direction the paper is
- * explicit about ("THD rise with compression"). Both laws fit the single
- * measured point equally well and disagree everywhere else, and there is no
- * evidence to choose between them. What is needed is THD at 12, 18 and 24 dB of
- * GR — one more bench measurement, or a second paper — and until then the depth
- * law past 6 dB is a guess with a plausible shape.
+ * Every depth past the measurement now sits INSIDE the band the six units span
+ * at 6 dB, rather than climbing out of it. On narration at PR 60 it is -14.5
+ * dBc from the current model, against -16.4 for the by-ear favourite and -9.9
+ * for the rejected one, and only -24.4 dBc from the favourite itself.
  *
- * SO THIS IS A SPIKE AND STAYS OFF. What it establishes is that the STRUCTURE
- * is right: odd-dominant distortion at the cell, scaling with gain reduction,
- * reproduces the hardware's harmonic signature at the one point anyone has
- * measured, which the output-stage model could not do at any setting.
+ * ⚠ WHAT IS STILL UNMEASURED: everything below the 6 dB row. The saturation
+ * point and time constant are shaped to satisfy one measured depth and one
+ * listening session, which is better than one measured depth alone and is not
+ * the same as evidence. THD at 12 / 18 / 24 dB of GR would settle it.
+ * ⚠ AND H3-H2 DRIFTS OUT OF THE MEASURED WINDOW at depth (+47 against +16 to
+ * +44) — the cell's odd content keeps growing while the tube sees less level
+ * and makes less even. Small, past the data, and worth knowing.
+ *
+ * SO THIS IS STILL A SPIKE AND STAYS OFF, but what it establishes is stronger
+ * than before: odd-dominant distortion AT THE CELL, saturating with gain
+ * reduction, reproduces the hardware's harmonic signature where it was measured
+ * AND survives a listening test where the output-stage model's replacement
+ * did not.
  */
-const CELL_DRIVE_PER_DB = 0.0848
+const CELL_U_MAX = 0.648
+const CELL_GR_TAU_DB = 3.82
 
 const TUBE_DRIVE_LIN = 0.7 // knee at +3.1 dBFS, i.e. 21.1 dB above NOMINAL_DBFS
 const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
@@ -970,9 +978,14 @@ export class LA2AKernel {
             // beat the attenuation, or the shaper sees an ever-smaller signal
             // as the cell works harder and THD PEAKS at ~6 dB of reduction and
             // falls away again — which contradicts the one direction the paper
-            // is explicit about. With 1/p the drive is independent of the
-            // attenuation and THD rises monotonically with gain reduction.
-            const c = this.cellDrive * CELL_DRIVE_PER_DB * grHere / (NOMINAL_LIN * Math.max(p, 0.03))
+            // is explicit about.
+            //
+            // SATURATING IN GAIN REDUCTION. `u` is the drive the shaper sees at
+            // nominal level; it rises fast out of zero and levels off, so THD
+            // climbs to the hardware's band and STAYS there instead of running
+            // away. A drive linear in grDb hit 17.8 % at 24 dB of reduction.
+            const u = CELL_U_MAX * (1 - Math.exp(-grHere / CELL_GR_TAU_DB))
+            const c = this.cellDrive * u / (NOMINAL_LIN * Math.max(p, 0.03))
             if (c > 1e-9) w = Math.tanh(c * w) / c
             // Then the makeup amplifier, then the valves it feeds.
             w *= mCur + mStep * j
