@@ -420,11 +420,44 @@ export const DC_BLOCK_HZ = 5
  * +44) — the cell's odd content keeps growing while the tube sees less level
  * and makes less even. Small, past the data, and worth knowing.
  *
- * SO THIS IS STILL A SPIKE AND STAYS OFF, but what it establishes is stronger
- * than before: odd-dominant distortion AT THE CELL, saturating with gain
- * reduction, reproduces the hardware's harmonic signature where it was measured
- * AND survives a listening test where the output-stage model's replacement
- * did not.
+ * ⚠⚠ AND THEN LISTENING REJECTED THE SATURATING LAW TOO, WHICH SETTLES THAT THE
+ * MECHANISM IS WRONG IN KIND RATHER THAN IN AMOUNT. Measured, on the same
+ * narration at PR 60 (10.2 dB average GR):
+ *
+ *   steady tone at the same gain reduction ... 5.27 % THD  (-25.6 dBc)
+ *   the same settings on speech .............. 18.9 %      (-14.5 dBc)
+ *
+ * SPEECH IS 11.1 dB WORSE THAN THE TONE MEASUREMENT PREDICTS. That gap is
+ * intermodulation: a memoryless waveshaper distorts every pair of partials
+ * against every other, and speech has hundreds where a sine has one. So a
+ * waveshaper calibrated to a sine-THD target is ~11 dB hotter on program
+ * material than the number it was calibrated against, and no depth law fixes
+ * that — it is a property of the shape, not of the schedule. Two listening
+ * sessions rejected it at two different depth laws, which is what that looks
+ * like from the outside.
+ *
+ * ⚠ THE PAPER'S OWN MECHANISM IS NOT A WAVESHAPER, AND THIS IS THE THING TO
+ * BUILD NEXT. It describes "time-varying distortion components that are
+ * particularly prominent during attack and release transitions", arising from
+ * "the nonlinear relationship between lamp brightness and photocell resistance"
+ * — that is the GAIN PATH being modulated, not the waveform being bent. The two
+ * are INDISTINGUISHABLE in the paper's measurement and completely different on
+ * program: for a steady tone at f, a detector rippling at 2f modulates the gain
+ * and puts sidebands at f and 3f, which reads as odd-order THD; on speech the
+ * same mechanism puts sidebands at the ENVELOPE rate, close to each partial,
+ * which is movement and grit rather than broadband harshness.
+ *
+ * That also explains the LAEA capture recorded above: 0.06 % odd-order-only
+ * content appearing ONLY while the cell works is exactly gain modulation, and
+ * it is why that plugin sounds unobjectionable at a THD figure this spike
+ * cannot reach without sounding broken.
+ *
+ * SO: KEEP THE PLACEMENT, DROP THE SHAPE. The distortion belongs at the cell
+ * and belongs scaling with gain reduction — both of those survive. What has to
+ * change is that it should come from modulating the gain (letting the
+ * detector's ripple through rather than smoothing it away) instead of from
+ * bending the waveform. NOT BUILT. This waveshaper stays here, off, as the
+ * record of why.
  */
 const CELL_U_MAX = 0.648
 const CELL_GR_TAU_DB = 3.82
