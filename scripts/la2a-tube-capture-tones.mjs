@@ -53,7 +53,7 @@
 
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const OUT_DIR = join(ROOT, 'data/corpus/la2a/tube_capture')
@@ -202,4 +202,15 @@ function main() {
 // Only when run directly (`node la2a-tube-capture-tones.mjs`), not on import —
 // `la2a-tube-fit.mjs` imports this module for its constants and must not
 // silently regenerate every tone file as a side effect of that import.
-if (import.meta.url === `file://${process.argv[1]}`) main()
+//
+// ⚠ A STRING-BUILT `file://${process.argv[1]}` COMPARISON FAILS ON WINDOWS,
+// SILENTLY. `process.argv[1]` there is a native path with a drive letter and
+// backslashes (`C:\...\script.mjs`); `import.meta.url` is always a proper
+// URL (`file:///C:/.../script.mjs`, forward slashes, three slashes before the
+// drive letter). The two never match, `main()` never runs, and — because
+// nothing in `main()` had a chance to execute — there is no error and no
+// output at all, which is exactly what "npm run ... does nothing" looks like.
+// `resolve()` on both sides normalises through the platform's own `path`
+// module (`path.win32` on Windows, automatically), which is what the actual
+// bug report needed and a Linux dev box cannot reproduce to catch on its own.
+if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) main()
