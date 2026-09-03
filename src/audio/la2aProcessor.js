@@ -139,6 +139,7 @@ const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies th
 // normal program: narration at -20 dBFS RMS would need the knob near 95 to
 // produce 3 dB of reduction. -18 dBFS is the EBU alignment.
 const NOMINAL_DBFS = -18
+const NOMINAL_LIN = Math.pow(10, NOMINAL_DBFS / 20) // reference level for the cell spike
 
 /**
  * Peak Reduction knob → side-chain drive, in dB above NOMINAL_DBFS.
@@ -358,6 +359,68 @@ export const DC_BLOCK_HZ = 5
  * `la2a:tube:fit`) and is correct; it is waiting on a reference that models the
  * output stage, or on a bench measurement of a real unit.
  */
+/**
+ * ⚗ SPIKE — T4 CELL NONLINEARITY. Default 0, i.e. OFF and bit-identical.
+ *
+ * The hardware study (see TUBE_DRIVE_LIN above) puts the LA-2A's distortion in
+ * the T4 electro-optical attenuator rather than the valves, makes it
+ * ODD-dominant, and has it RISE with gain reduction. This models that
+ * directly: a symmetric (unbiased) `tanh` applied to the signal AT THE CELL —
+ * after the attenuation, before the makeup amplifier, which is where the
+ * photoresistor actually sits — with its drive proportional to how hard the
+ * cell is working.
+ *
+ * ODD BY CONSTRUCTION. No bias term, so it generates H3/H5/H7 and EXACTLY no
+ * even harmonics. The small even content the hardware does show is left to the
+ * tube stage's own TUBE_BIAS, which is what that term is for; the two together
+ * are what has to land in the paper's +16 to +44 dB H3-over-H2 window.
+ *
+ * RISES WITH COMPRESSION, which is the behaviour our output-stage-only model
+ * gets backwards. Drive is `CELL_DRIVE_PER_DB x grDb`, referenced to
+ * NOMINAL_DBFS rather than to the signal, so the amount of shaping tracks the
+ * cell's work and not the level arriving at it.
+ *
+ * `tanh(c*w)/c` has unity slope at the origin for any c, so the stage is
+ * transparent as gain reduction goes to zero without any normalisation term.
+ *
+ * RESULT AT THE CALIBRATED POINT — it lands on the paper almost exactly, on
+ * both axes at once, at 1 kHz / -18 dBFS in / 6 dB GR:
+ *
+ *                        THD        H3 - H2
+ *   six real units    0.94-4.22 %   +16 to +44 dB   (median 2.19 %, +25.7)
+ *   OFF (was)           0.133 %     -16.3 dB
+ *   ON  (cellDrive 1)   2.148 %     +25.3 dB
+ *
+ * and every one of the paper's five frequencies lands inside its own measured
+ * range (1.90 / 2.82 / 2.64 / 2.43 / 2.15 % at 63 / 125 / 250 / 500 / 1000 Hz).
+ * The even content is the tube stage's TUBE_BIAS, exactly as intended: the cell
+ * supplies the dominant odd, the valves the small even, and the pair lands in
+ * the hardware's window without either being tuned to it.
+ *
+ * ⚠⚠ AND THE EXTRAPOLATION IS NOT SHIPPABLE. The paper measures ONE depth,
+ * 6 dB of gain reduction. Everything past it is this drive law's invention, and
+ * it runs away: THD 0.27 / 2.15 / 7.98 / 13.41 / 17.84 % at 0 / 6 / 13 / 19 /
+ * 24 dB of GR. Against the current model on 35 s of real narration,
+ * level-matched, the difference is -17.5 dBc at 2.7 dB of GR but -6.8 dBc at
+ * 19.5 dB — a fifth of the signal by amplitude, which is a broken plugin, not a
+ * colour. OptoSmooth is routinely used at 10-20 dB of reduction; the paper's
+ * operating point is the shallow end of where this thing lives.
+ *
+ * ⚠ THE 1/p IS THE SUSPECT. It was added because without it THD PEAKS at ~6 dB
+ * of GR and falls away again, contradicting the one direction the paper is
+ * explicit about ("THD rise with compression"). Both laws fit the single
+ * measured point equally well and disagree everywhere else, and there is no
+ * evidence to choose between them. What is needed is THD at 12, 18 and 24 dB of
+ * GR — one more bench measurement, or a second paper — and until then the depth
+ * law past 6 dB is a guess with a plausible shape.
+ *
+ * SO THIS IS A SPIKE AND STAYS OFF. What it establishes is that the STRUCTURE
+ * is right: odd-dominant distortion at the cell, scaling with gain reduction,
+ * reproduces the hardware's harmonic signature at the one point anyone has
+ * measured, which the output-stage model could not do at any setting.
+ */
+const CELL_DRIVE_PER_DB = 0.0848
+
 const TUBE_DRIVE_LIN = 0.7 // knee at +3.1 dBFS, i.e. 21.1 dB above NOMINAL_DBFS
 const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
 
@@ -377,6 +440,11 @@ export const LA2A_KERNEL_DEFAULTS = {
    * in the app sets it.
    */
   tube: true,
+  /**
+   * ⚗ SPIKE, default 0 (off, bit-identical). Scales CELL_DRIVE_PER_DB; 1 is
+   * the paper-calibrated depth. Nothing in the app sets it.
+   */
+  cellDrive: 0,
   r37: 100, // 0–100 side-chain pre-emphasis, as knob rotation: 100 = flat (factory)
   mix: 1, // wet/dry blend
   /**
@@ -470,6 +538,14 @@ export class LA2AKernel {
     // block's `gain[i-1]` the older one, which is exactly the pair the ramp in
     // `process` consumes.
     this.gainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    // ⚗ SPIKE: the cell path needs the attenuation and the makeup SEPARATELY,
+    // where the shipping path folds them into one `gain[i]`. Delayed to meet
+    // the audio exactly as `gainDelay` is.
+    this.preGainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    this.preGainDelayedScratch = new Float32Array(128)
+    this.makeupScratch = new Float32Array(128)
+    this.lastPreGain = 1
+    this.lastMakeup = 1
     // Last gain of the previous block, for interpolating across the block seam.
     this.lastGain = 1
 
@@ -589,6 +665,9 @@ export class LA2AKernel {
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
     this.gainDelay.reset()
+    this.preGainDelay.reset()
+    this.lastPreGain = 1
+    this.lastMakeup = 1
     for (const line of this.dryLines) line?.reset()
   }
 
@@ -619,6 +698,7 @@ export class LA2AKernel {
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
     this.applyTube = p.tube !== false
+    this.cellDrive = Number.isFinite(p.cellDrive) ? Math.max(0, p.cellDrive) : 0
     this.tubeDriveLin = TUBE_DRIVE_LIN
     this.tubeBias = TUBE_BIAS
     this.tanhBias = Math.tanh(this.tubeBias)
@@ -677,9 +757,13 @@ export class LA2AKernel {
 
     if (this.gainScratch.length < n) this.gainScratch = new Float32Array(n)
     if (this.preGainScratch.length < n) this.preGainScratch = new Float32Array(n)
+    if (this.preGainDelayedScratch.length < n) this.preGainDelayedScratch = new Float32Array(n)
+    if (this.makeupScratch.length < n) this.makeupScratch = new Float32Array(n)
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
     const preGain = this.preGainScratch
+    const preGainDelayed = this.preGainDelayedScratch
+    const makeupArr = this.makeupScratch
     const chScale = 1 / nIn
 
     // The tracker's target: the loudest input sample heard so far.
@@ -772,6 +856,10 @@ export class LA2AKernel {
       const g = preG * makeupLinSmoothed
       gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
       preGain[i] = preG
+      if (this.cellDrive > 0) {
+        preGainDelayed[i] = this.oversampleOn ? this.preGainDelay.push(preG) : preG
+        makeupArr[i] = makeupLinSmoothed
+      }
     }
     this.makeupLinSmoothed = makeupLinSmoothed
 
@@ -848,6 +936,57 @@ export class LA2AKernel {
       // (e.g. FET Punch dial 7 ≈ 20 µs) that was most of the reduction a transient
       // should have received, so the first sample of a hard onset passed through nearly
       // unattenuated and read as a click.
+      if (this.cellDrive > 0) {
+        /**
+         * ⚗ SPIKE PATH — attenuation and makeup applied SEPARATELY so the
+         * cell's nonlinearity can sit between them, which is where the
+         * photoresistor is. See CELL_DRIVE_PER_DB.
+         *
+         * ⚠ A SEPARATE BRANCH RATHER THAN A GENERALISATION OF THE ONE BELOW,
+         * deliberately: `(x*p)*m` and `x*(p*m)` differ in the last bits, so
+         * folding the shipping path into this one would move every sample of
+         * every render for a feature that is off by default. The duplication
+         * is the price of `cellDrive: 0` being bit-identical, and it is the
+         * right price while this is a spike.
+         */
+        let pCur = this.lastPreGain
+        let mCur = this.lastMakeup
+        for (let i = 0; i < n; i++) {
+          const pNext = preGainDelayed[i]
+          const mNext = makeupArr[i]
+          const pStep = (pNext - pCur) * invL
+          const mStep = (mNext - mCur) * invL
+          for (let j = 0; j < L; j++) {
+            const k = i * L + j
+            const p = pCur + pStep * j
+            // Attenuation first: this is the signal the cell actually passes.
+            let w = hi[k] * p
+            // Cell nonlinearity. Drive from how hard the cell is working —
+            // `p` IS the attenuation, so -20log10(p) is its gain reduction —
+            // referenced to nominal rather than to the signal, so the shaping
+            // tracks the compression and not the level.
+            const grHere = p > 0 ? -20 * Math.log10(p) : 0
+            // ⚠ REFERENCED TO THE CELL'S INPUT, hence the 1/p: the drive has to
+            // beat the attenuation, or the shaper sees an ever-smaller signal
+            // as the cell works harder and THD PEAKS at ~6 dB of reduction and
+            // falls away again — which contradicts the one direction the paper
+            // is explicit about. With 1/p the drive is independent of the
+            // attenuation and THD rises monotonically with gain reduction.
+            const c = this.cellDrive * CELL_DRIVE_PER_DB * grHere / (NOMINAL_LIN * Math.max(p, 0.03))
+            if (c > 1e-9) w = Math.tanh(c * w) / c
+            // Then the makeup amplifier, then the valves it feeds.
+            w *= mCur + mStep * j
+            if (this.applyTube) {
+              w = (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
+            }
+            hi[k] = w
+          }
+          pCur = pNext
+          mCur = mNext
+        }
+        if (ch === nOut - 1) { this.lastPreGain = pCur; this.lastMakeup = mCur }
+      } else {
+
       let gCur = seamGain
       for (let i = 0; i < n; i++) {
         const gNext = gain[i]
@@ -861,6 +1000,8 @@ export class LA2AKernel {
           hi[k] = w
         }
         gCur = gNext
+      }
+
       }
 
       this.oversamplers[ch].down(wet, n)
