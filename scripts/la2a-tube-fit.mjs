@@ -242,9 +242,26 @@ function nelderMead(f, x0, { steps, maxIter = 4000, tol = 1e-10 }) {
 
 // ── Main ─────────────────────────────────────────────────────────────────
 
+/**
+ * Finds a capture by its expected filename, tolerating one deviation: a
+ * MISSING SIGN on the level (`level_01000hz_040dbfs.wav` for
+ * `..._-040dbfs.wav`). Real exports came back that way — something in the
+ * round trip through a DAW drops it — and every sweep level here is negative,
+ * so there is no `+040` it could be confused with. Tolerated rather than
+ * demanded because the alternative is renaming twenty-two files by hand, and
+ * warned about rather than silently accepted because a filename convention
+ * that quietly has two spellings is how a capture ends up matched to the
+ * wrong row.
+ */
 function captureFor(file) {
-  const p = join(CAPTURES_DIR, file)
-  return existsSync(p) ? p : null
+  const exact = join(CAPTURES_DIR, file)
+  if (existsSync(exact)) return exact
+  const unsigned = join(CAPTURES_DIR, file.replace(/_-(\d{3})dbfs/, '_$1dbfs'))
+  if (unsigned !== exact && existsSync(unsigned)) {
+    console.log(`  ⚠ matched ${unsigned.split('/').pop()} for ${file} — the level's minus sign is missing from the filename`)
+    return unsigned
+  }
+  return null
 }
 
 /** True if a harmonic's absolute level sits within `marginDb` of the measured noise floor. */
