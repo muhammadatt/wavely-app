@@ -36,6 +36,35 @@ works as written.
 +6.29 dBFS output with zero THD a saturator would already be audible, so the
 conclusion is not in real doubt — but it is one bounce short of airtight.
 
+### Confirmed on real narration, against the obvious objection
+
+The reasonable challenge to a tone-based null result is that **a 1 kHz sine
+might miss distortion that only happens at low frequencies** — which is
+exactly what this protocol's frequency sweep is reserved for, and it was never
+run. So the finding was re-tested on 35 s of real narration through LAEA at
+Gain 70, before/after:
+
+- The transfer is a **flat 21.06 dB linear gain**, 20 Hz to 16 kHz within
+  0.12 dB, and constant to two decimals in every 4-second window (so Peak
+  Reduction is genuinely disengaged, and there is no gain riding).
+- **Residual after removing the best-fit linear filter: −89 to −94 dBc across
+  the whole speech band** (500 Hz–16 kHz). There is no distortion to find.
+- The residual is **larger in the QUIETEST fifth of frames (−25.7 dBc) than in
+  the loudest fifth (−39.2 dBc)**. A nonlinearity does the opposite — it grows
+  with level. This one shrinks, which is the signature of a fixed noise floor,
+  not a saturator.
+- The band where the residual looks worst on paper (20–80 Hz, −41.6 dBc)
+  carries **0.05 % of the file's energy**, 29 dB below the loudest band. That
+  is an estimate against almost no signal, not a measurement of anything.
+
+⚠ **What the audible distortion in that bounce actually was: the output sat at
++20.06 dBFS, with 33 % of its samples above full scale.** LAEA's Gain has no
+ceiling of any kind — it will hand you +21 dB and let the result fly 20 dB past
+0 dBFS — so anything played through a converter, or converted to fixed point,
+clips hard. That is a real and audible defect of the bounce, and it is not the
+plugin distorting; it is the plugin *not* limiting. Our own stage cannot
+produce it, because its Gain drives a `tanh` that saturates.
+
 ---
 
 ## What this answers, and what it does not
