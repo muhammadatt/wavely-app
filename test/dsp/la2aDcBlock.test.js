@@ -7,11 +7,15 @@
  * waveform bodily, and a shifted waveform corrupts the peak measurement ACX
  * compliance is built on. The blocker exists for that and for nothing else.
  *
- * ⚠ THE CORNER IS INHERITED RATHER THAN DERIVED — see DC_BLOCK_HZ, which now
- * carries the sweep. These tests do not claim 5 Hz is right. They pin what a
- * re-derivation would have to move deliberately: that the constant is the one
- * the kernel runs, that the filter is load-bearing, that it is out of circuit
- * when the tube is, and what the shipped corner costs the passband.
+ * THE CORNER IS DERIVED — see DC_BLOCK_HZ for the two-narrator sweep behind it
+ * and `npm run dcblock:real` to re-run it. These tests pin what that argument
+ * rests on: that the constant is the one the kernel runs, that the filter is
+ * load-bearing, that it is out of circuit when the tube is, and what the
+ * shipped corner costs the passband.
+ *
+ * ⚠ THEY CANNOT PIN THE CHOICE ITSELF, and should not be read as doing so. The
+ * corner was settled on peak shift measured on real narration (0.04 dB between
+ * 2 and 5 Hz), which needs audio this suite does not have.
  *
  * ⚠ `dcR = 1` IS AN EXACT BYPASS, which is what makes the sweep clean:
  * `y[n] = x[n] - x[n-1] + y[n-1]` telescopes to `y[n] = x[n] - x[0] + y[0]`,

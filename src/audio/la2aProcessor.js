@@ -187,33 +187,52 @@ const SC_TAPER = 0.4247
  * stage. The asymmetric shaper rectifies, so it shifts the operating point and
  * the offset has to come back off before it reaches a peak measurement.
  *
- * ⚠ INHERITED, NOT DERIVED. `tapeCharacter.js` carries the same idea at 2 Hz
- * with a measurement behind it; this one was written as a bare `5` and has
- * never been argued. The two are NOT the same filter — that one is a
- * Butterworth BIQUAD, this is a naive one-pole — so its constant does not port
- * even where the corner number would.
+ * ⚠ INHERITED, THEN DERIVED — AND IT SURVIVES. It was a bare `5` beside a tape
+ * blocker at 2 Hz that had a measurement behind it. The two are NOT the same
+ * filter — that one is a Butterworth BIQUAD, this is a naive one-pole — so its
+ * constant never ported, and this one is now argued on its own evidence.
  *
- * What is measured, at 48 kHz, sweeping this constant against an exact bypass
- * (`R = 1` telescopes to the signal itself, leaving the oversampler, the
- * ballistics and the shaper bit-identical):
+ * MEASURED ON TWO REAL NARRATORS (`npm run dcblock:real`), sweeping this
+ * constant against an exact bypass (`R = 1` telescopes to the signal itself,
+ * leaving the oversampler, the ballistics and the shaper bit-identical):
  *
- *   corner   residual DC   40 Hz     phase@120Hz   LF transient tilt
- *      2     -164 dBFS    -0.010 dB     0.96°           -33.2 dBc
- *      5     -166 dBFS    -0.065 dB     2.39°           -23.1 dBc
- *     20     -165 dBFS    -0.960 dB     9.47°           -11.6 dBc
+ *   corner   residual DC        peak shift          tilt after plosives
+ *      2     -128 / -165 dBFS   -0.035 / -0.004 dB   -53.7 / -55.8 dBc
+ *      5     -134 / -173 dBFS   -0.076 / -0.016 dB   -46.9 / -49.5 dBc
+ *     20     -144 / -185 dBFS   -0.304 / -0.112 dB   -37.0 / -39.3 dBc
  *
- * ⚠ REJECTION IS TOTAL AT ANY CORNER, so nothing here trades against the job
- * the filter does. And the dBc "cost" figure a sweep first produces is PURE
- * PHASE ROTATION — `20*log10(2*sin(phi/2))` reproduces it to the last digit at
- * every corner — which is inaudible on a tone and is not evidence for anything.
- * The axis that would decide this is the last column: undershoot after a 60 Hz
- * burst, i.e. baseline wander after a plosive, where 5 Hz is 10 dB worse than
- * 2. That has been measured on synthetic bursts only.
+ * REJECTION IS TOTAL AT ANY CORNER >= 1 Hz, so nothing here trades against the
+ * job the filter does — the whole choice is how much of the passband to pay for
+ * a margin that is already enormous. The DC to remove is -76 dBc at the shipped
+ * `tubeDrive` and -65 dBc at the top of the knob.
  *
- * ⚠ AND THE PREMISE DIFFERS FROM THE TAPE ONE: that blocker is gated on an
- * opt-in control, this one runs whenever the tube stage does, and OptoSmooth
- * ships `tubeDrive: 0.3`. Every stock user pays this, which argues for a lower
- * corner rather than the same one — on real narration, which this has not seen.
+ * PEAK SHIFT IS THE COLUMN THAT DECIDES IT, because protecting the peak
+ * measurement ACX compliance is built on is what this filter is for. Moving
+ * 5 -> 2 Hz buys 0.04 dB of peak on the worse file. That is two orders of
+ * magnitude under anything a compliance check or a listener resolves, and not a
+ * reason to move a shipped constant.
+ *
+ * ⚠ THE SYNTHETIC EVIDENCE THAT STARTED THIS OVERSTATED IT BY ~24 dB, AND IT
+ * IS THE SEVENTEENTH TIME SYNTHETIC MATERIAL HAS FAILED TO ANSWER THE QUESTION
+ * ASKED OF IT — this time by EXAGGERATING, as the HF Emphasis sweep did. A
+ * gated 60 Hz burst put the tilt at -23 dBc at 5 Hz and made the corner look
+ * consequential; real plosives put it at -47. A burst stopping dead into
+ * digital silence maximises the filter's error against a vanishing local
+ * signal, which is not a thing speech does.
+ *
+ * ⚠ AND NO WINDOW COULD HAVE FOUND MORE, WHICH IS WORTH KNOWING BEFORE ANYONE
+ * RE-OPENS THIS. The blocker is linear and sits last, so with `y = H(wet)` the
+ * error is exactly `(H - 1)(wet)` — the frequency response applied to the
+ * output, with no mechanism for a transient artefact distinct from it. The
+ * "tilt" column is therefore the same linear error as the `err` column measured
+ * in a narrower window, which is why the two track each other at a constant
+ * offset across every corner and both files. There is no separate phenomenon
+ * here to go looking for.
+ *
+ * ⚠ THE dBc "COST" A NAIVE SWEEP REPORTS IS PURE PHASE ROTATION —
+ * `20*log10(2*sin(phi/2))` reproduces it to the last digit at every corner — so
+ * it is inaudible and is not evidence for anything. Recorded because it is the
+ * first number a sweep produces and it looks like damage.
  *
  * ⚠ AND THIS FILTER BOOSTS, WHERE THE TAPE ONE PROVABLY CANNOT. A naive
  * one-pole `(1 - z^-1)/(1 - R*z^-1)` peaks at Nyquist at exactly `2/(1+R)` —
@@ -221,8 +240,9 @@ const SC_TAPER = 0.4247
  * a cost of RAISING it. `makeDcBlocker` is a Butterworth biquad precisely to
  * keep a "never boosts" guarantee; nothing here claims that guarantee.
  *
- * Left at 5 deliberately: naming it changes no sound, and re-deriving it is a
- * separate change with its own evidence.
+ * Stays at 5, now on evidence rather than by default. ⚠ Two narrators, one of
+ * them already normalised; the margins are wide enough that a third is unlikely
+ * to move it, but it is two.
  */
 export const DC_BLOCK_HZ = 5
 

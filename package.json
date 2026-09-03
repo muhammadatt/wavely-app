@@ -17,6 +17,7 @@
     "robustness": "node scripts/voicerx-robustness.mjs",
     "robustness:real": "node scripts/voicerx-robustness.mjs --real",
     "reso:real": "node scripts/resonance-real.mjs",
+    "dcblock:real": "node scripts/la2a-dcblock-real.mjs",
     "smoke": "node scripts/panel-smoke.mjs"
   },
   "dependencies": {
