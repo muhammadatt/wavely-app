@@ -459,6 +459,66 @@ export const DC_BLOCK_HZ = 5
  * bending the waveform. NOT BUILT. This waveshaper stays here, off, as the
  * record of why.
  */
+/**
+ * ⚗ SPIKE 2 — T4 CELL GAIN MODULATION. Default 0, off, bit-identical.
+ *
+ * The paper's actual mechanism, where CELL_U_MAX's waveshaper was a stand-in
+ * for it: "the nonlinear relationship between lamp brightness and photocell
+ * resistance" producing "time-varying distortion components". That is the GAIN
+ * being modulated by the detector's own ripple, not the waveform being bent.
+ *
+ * The detector rectifies, so for a steady tone at f its output carries a
+ * ripple at 2f. Modulating a carrier at f with 2f puts sidebands at f and 3f —
+ * ODD harmonics, no even, which is the hardware's signature — while on speech
+ * the same ripple follows the actual envelope and puts its sidebands close to
+ * each partial instead of spraying broadband intermodulation. That difference
+ * is the entire reason to build this: the waveshaper measured 11.1 dB worse on
+ * speech than its own tone-THD figure predicted.
+ *
+ * `rect / env - 1` is the ripple as a FRACTION of the smoothed envelope, so the
+ * modulation depth means the same thing at every level and every frequency —
+ * which is what keeps THD roughly flat across 63 Hz-1 kHz as the paper's does.
+ * For a sine the fraction is a known 0.667 (|sin| has a 2f Fourier term of
+ * 4/(3*pi) against a mean of 2/pi), so a depth of a few percent is all it takes;
+ * the lamp's thermal mass is what smooths away the rest in the real unit.
+ *
+ * ⚠ THE DETECTOR RUNS AT BASE RATE, so ripple from content above a quarter of
+ * the sample rate folds. Immaterial on voice, where the energy is under 4 kHz,
+ * and a real limit of this placement rather than of the idea.
+ *
+ * RESULT — it hits the paper where the waveshaper did, and costs a THIRD as
+ * much on speech. At 1 kHz / -18 dBFS in:
+ *
+ *   GR      THD      H3 - H2     evidence at that depth
+ *    0     0.271 %   -12.7 dB    <0.5 % spec, no GR
+ *    6     2.163 %   +24.9 dB    0.94-4.22 %, +16 to +44 (median 2.19 / +25.7)
+ *   13     2.926 %   +34.7 dB    none — inside the measured band
+ *   19     3.124 %   +41.1 dB    none
+ *   24     3.189 %   +46.6 dB    none
+ *
+ * and all five of the paper's frequencies land in their own ranges. The
+ * decisive column is the speech penalty — how much worse a mechanism is on
+ * program than its own tone-THD predicts, measured on 35 s of narration at
+ * PR 60 against a tone at matched gain reduction:
+ *
+ *   waveshaper (CELL_U_MAX) ..... tone 5.27 %, speech 18.9 %   -11.1 dB
+ *   gain modulation (this) ...... tone 4.02 %, speech  8.7 %    -6.7 dB
+ *
+ * On the rendered A/B the whole difference from the shipping model is
+ * -25.0 dBc, against -16.4 for the waveshaper setting that was auditioned as
+ * "closer to usable" and -14.5 for the one rejected outright. So it is
+ * SUBTLER on program than the version chosen by ear, while being CORRECT at
+ * the operating point the hardware was measured at — which is the combination
+ * neither waveshaper setting could reach.
+ *
+ * ⚠ STILL UNMEASURED PAST 6 dB, exactly as before: the saturation constants
+ * are shaped to one measured depth. And H3-H2 drifts to +46.6 dB at deep
+ * compression, outside the +16 to +44 window, for the same reason it did
+ * before — the cell's odd content grows while the tube sees less level.
+ */
+const CELL_MOD_MAX = 0.1225
+const CELL_MOD_TAU_DB = 5.505
+
 const CELL_U_MAX = 0.648
 const CELL_GR_TAU_DB = 3.82
 
@@ -486,6 +546,8 @@ export const LA2A_KERNEL_DEFAULTS = {
    * the paper-calibrated depth. Nothing in the app sets it.
    */
   cellDrive: 0,
+  /** ⚗ SPIKE 2, default 0 (off, bit-identical). Scales CELL_MOD_PER_DB. */
+  cellMod: 0,
   r37: 100, // 0–100 side-chain pre-emphasis, as knob rotation: 100 = flat (factory)
   mix: 1, // wet/dry blend
   /**
@@ -740,6 +802,7 @@ export class LA2AKernel {
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
     this.applyTube = p.tube !== false
     this.cellDrive = Number.isFinite(p.cellDrive) ? Math.max(0, p.cellDrive) : 0
+    this.cellMod = Number.isFinite(p.cellMod) ? Math.max(0, p.cellMod) : 0
     this.tubeDriveLin = TUBE_DRIVE_LIN
     this.tubeBias = TUBE_BIAS
     this.tanhBias = Math.tanh(this.tubeBias)
@@ -893,7 +956,20 @@ export class LA2AKernel {
       // hardware does not have. In the base-rate measurement path there is
       // nothing to meet, so the delay would only misalign it.
       makeupLinSmoothed += this.makeupSmoothCoef * (this.makeupLin - makeupLinSmoothed)
-      const preG = Math.exp(-grNow * LN10_OVER_20)
+      let preG = Math.exp(-grNow * LN10_OVER_20)
+      if (this.cellMod > 0 && env > 1e-6) {
+        // Ripple as a fraction of the smoothed envelope, scaled by how hard
+        // the cell is working. Sign is compressive: an instantaneously loud
+        // sample means an instantaneously brighter lamp, so more attenuation.
+        const rel = rect / env - 1
+        // Saturating in gain reduction, for the reason CELL_U_MAX records: a
+        // depth linear in grDb hits the paper's point and then runs away, 9.3 %
+        // by 24 dB of reduction. This levels off inside the band the six units
+        // span at the one depth anyone measured.
+        const depth = this.cellMod * CELL_MOD_MAX * (1 - Math.exp(-grNow / CELL_MOD_TAU_DB))
+        const m = 1 - depth * rel
+        preG *= m > 0.05 ? (m < 4 ? m : 4) : 0.05
+      }
       const g = preG * makeupLinSmoothed
       gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
       preGain[i] = preG
