@@ -522,6 +522,48 @@ const CELL_MOD_TAU_DB = 5.505
 const CELL_U_MAX = 0.648
 const CELL_GR_TAU_DB = 3.82
 
+/**
+ * ⚗ RE-DERIVED AGAINST THE H2 COLUMN: THE ANSWER IS 0.381, AND IT IS NOT
+ * APPLIED. With the cell supplying the odd content (see CELL_MOD_MAX), the
+ * valves are only asked for the small EVEN component — which is what the paper
+ * says they do, and what nothing else in the model can produce: measured, the
+ * cell modulation adds even content of 0.0 to 0.2 dB at every frequency, i.e.
+ * none at all.
+ *
+ * Fitted to the median of all 30 of the paper's H2 measurements, -63.80 dBc.
+ * At 0.381 the model gives -63.98 at 250 Hz and -63.60 at 1 kHz, mean -63.79,
+ * with THD and H3-H2 both still inside the paper's ranges (2.15 %, +30.1 dB).
+ *
+ * ⚠ FITTED AT 250 Hz AND 1 kHz ONLY, because the compressor's OWN gain ripple
+ * swamps H2 at 80 / 120 / 125 / 160 Hz — it sits at -47 to -50 dBc there with
+ * the tanh bypassed AND the cell modulation off, so it is pre-existing
+ * behaviour of the shipped detector that TUBE_DRIVE_LIN cannot move. That was
+ * briefly mistaken for the cell modulation's own even content; the control that
+ * settled it was rerunning with cellMod 0 and differencing, which came back at
+ * 0.0-0.2 dB.
+ *
+ * ⚠⚠ WHY IT IS NOT APPLIED: THE VALUE IS COUPLED TO THE CELL MODULATION
+ * SHIPPING, AND TWO TESTS PIN THE OLD ARCHITECTURE. With cellMod 0 — the path
+ * as it ships today — the tanh is the ONLY distortion in the plugin, so its
+ * TOTAL THD is what matters rather than its H2 alone, and 0.381 takes nominal
+ * THD from 0.271 % to 0.150 %: still inside the <0.5 % spec 0.7 was fitted to,
+ * and a move AWAY from the hardware, which the same paper puts at 0.94-4.22 %
+ * once the cell is working. Applying it standalone makes the plugin cleaner in
+ * the one direction the evidence says is already wrong.
+ *
+ * The two tests are the same finding from the other side, and both are correct
+ * to fail: `la2aDcBlock.test.js` "it removes the DC the shaper generates, and
+ * the shaper generates some" (a gentler shaper leaves -75.7 dBFS of DC against
+ * a -75 dBFS floor) and `la2aTube.test.js` "saturation follows input level"
+ * (the THD sweep across -40 to -1 dBFS stops clearing its 10x bound). Both
+ * exist to pin "the tanh is this plugin's distortion source", which is exactly
+ * the assumption the cell architecture overturns.
+ *
+ * SO: 0.381 the moment the cell modulation ships, and those two tests get
+ * re-derived with it. 0.7 until then. The knee moves +3.1 -> +8.4 dBFS with it
+ * (21.1 -> 26.4 dB above nominal); the valves still saturate, which is what
+ * stops the makeup running away the way LAEA's does.
+ */
 const TUBE_DRIVE_LIN = 0.7 // knee at +3.1 dBFS, i.e. 21.1 dB above NOMINAL_DBFS
 const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
 
