@@ -5,6 +5,39 @@
 
 ---
 
+## ⚠ RESULT: this capture was run, and LAEA has nothing to give it
+
+**Do not re-run this against LAEA.** The protocol below is correct and the
+tooling works; the reference does not model the stage. Measured at 96 kHz /
+32-bit float, four captures:
+
+| setting | result |
+|---|---|
+| PR 0, Gain 0, input −40 / −30 / −1 dBFS | perfectly linear at every level — unity gain to −0.00003 dB, fixed 0.1481° phase shift (a ~2.6 Hz DC blocker), identical across all 39 dB, harmonics at the DFT's numerical floor |
+| PR 0, **Gain 80 (+24.29 dB)** | output at **+6.29 dBFS — above full scale — and 0.0000 % THD.** `tone × 16.3783` plus the same phase shift, to −51.7 dBc. Our own curve asks for 11.81 % at that operating point |
+| PR engaged, input −1 dBFS | 24.9 dB of real gain reduction with ~0.06 % of **odd-order only** content (H2/H4/H6/H8 at the numerical floor) — the cell's detector ripple modulating the gain, not a saturator: a steady tone through a compressor whose detector ripples at 2f puts sidebands at f and 3f |
+
+LAEA's Gain knob is a clean linear multiply with no valve behind it. Its Peak
+Reduction is real. Its output stage is absent.
+
+**This is the second time this reference has been asked for a control it does
+not have** — see the R37 emphasis note in `la2aProcessor.js`, where the knob
+taken for the emphasis trimmer turned out to be a mix control. The null test
+below exists because of that precedent, and it earned its place: it cost four
+bounces instead of twenty-two.
+
+**What would make this protocol usable:** a reference emulation that actually
+models the output stage, or a bench measurement of a real LA-2A. The tooling
+(`npm run la2a:tube:tones`, `npm run la2a:tube:fit`) is unchanged and verified
+end to end against synthetic captures — point it at a better reference and it
+works as written.
+
+⚠ One honest gap: Gain 80 was the only knob position captured, not 100. At
++6.29 dBFS output with zero THD a saturator would already be audible, so the
+conclusion is not in real doubt — but it is one bounce short of airtight.
+
+---
+
 ## What this answers, and what it does not
 
 OptoSmooth's output tube stage is a fixed, level-driven `tanh` waveshaper:

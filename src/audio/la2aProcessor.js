@@ -289,10 +289,38 @@ export const DC_BLOCK_HZ = 5
  * around -6 dBFS — the triode ordering — and it stays memoryless and strictly
  * monotone, which is what lets both auto-makeup paths invert it in closed form.
  *
- * ⚠ NOT MEASURED AGAINST HARDWARE OR AGAINST A REFERENCE EMULATION. The THD
- * figures are of our own curve; the LA-2A spec is a published number, not a
- * capture. What is established is that one setting is consistent with the spec
- * and the rest of the knob's travel was not — not that this curve is a 12AX7.
+ * ⚠ NOT MEASURED AGAINST HARDWARE. The THD figures are of our own curve; the
+ * LA-2A spec is a published number, not a capture. What is established is that
+ * one setting is consistent with the spec and the rest of the knob's travel was
+ * not — not that this curve is a 12AX7.
+ *
+ * ⚠ AND THE REFERENCE EMULATION CANNOT SUPPLY IT — measured, and it is not a
+ * near miss. Analog Obsession's LAEA, the same plugin the side-chain taper was
+ * fitted to, has NO output-stage saturation at all. Captured per
+ * docs/la2a_tube_capture_protocol.md at 96 kHz / 32-bit float:
+ *
+ *   Peak Reduction 0, Gain 0, input -40 / -30 / -1 dBFS: perfectly linear at
+ *   every level — unity gain to -0.00003 dB and a fixed 0.1481 deg phase shift
+ *   (a ~2.6 Hz DC blocker), IDENTICAL across all 39 dB, with the whole
+ *   difference from the source tone sitting at the fundamental and harmonics at
+ *   the DFT's own numerical floor.
+ *
+ *   Peak Reduction 0, Gain 80 (+24.29 dB): output at +6.29 dBFS — ABOVE digital
+ *   full scale — and still 0.0000 % THD. It is `tone x 16.3783` plus that same
+ *   phase shift, to -51.7 dBc. Our curve at the same operating point asks for
+ *   11.81 %.
+ *
+ * So its Gain knob is a clean linear multiply and there is no valve behind it.
+ * (Its Peak Reduction does do real gain reduction — 24.9 dB measured — with
+ * about 0.06 % of ODD-order content, which is the cell's detector ripple
+ * modulating the gain, not a saturator: a steady tone through a compressor
+ * whose detector ripples at 2f puts sidebands at f and 3f.)
+ *
+ * Second time this reference has been asked for a control it does not have —
+ * see the R37 note above, where the knob taken for the emphasis trimmer was a
+ * mix control. The capture tooling stays (`npm run la2a:tube:tones` /
+ * `la2a:tube:fit`) and is correct; it is waiting on a reference that models the
+ * output stage, or on a bench measurement of a real unit.
  */
 const TUBE_DRIVE_LIN = 0.7 // knee at +3.1 dBFS, i.e. 21.1 dB above NOMINAL_DBFS
 const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
