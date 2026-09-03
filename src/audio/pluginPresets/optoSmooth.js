@@ -121,14 +121,21 @@ export const OPTO_SMOOTH_PRESETS = [
   {
     id: 'factory:podcast-density',
     name: 'Podcast Density',
-    description: 'Loud and forward, with the tube stage working.',
+    description: 'Loud and forward, with the cell working hardest.',
     params: {
       mode: 'compress',
       peakReduction: 75,
       gain: 0,
-      // The one preset that asks for audible tube colour. OptoSmooth's own
-      // measurement says it steadies rather than thickens on fast material —
-      // this is the setting for a voice that is already fairly even.
+      // The one preset that asks for audible colour, and since the T4 cell
+      // became the dominant distortion term that colour is the CELL's rather
+      // than the valves' — depth and distortion now move together instead of
+      // against each other. Measured across the five presets on two real
+      // narrators, the cell's contribution runs -29.9 dBc at Safety Limit to
+      // -21.7 here, so the ladder matches the descriptions.
+      //
+      // OptoSmooth's own measurement still says it steadies rather than
+      // thickens on fast material — this is the setting for a voice that is
+      // already fairly even.
       r37: 100,
       autoMakeup: true,
     },

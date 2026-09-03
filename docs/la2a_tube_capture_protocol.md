@@ -32,11 +32,19 @@ Recordings,"* J. Audio Eng. Soc. 74(1/2):61–72 (2026),
 doi:10.17743/jaes.2022.0240, measures six hardware units and finds the
 distortion is **odd-dominant** (H3 +16 to +44 dB over H2), **0.94–4.22 % THD at
 6 dB of gain reduction**, and attributes it to the **T4 cell, not the valves**.
-Our stage is even-dominant, ~17× cleaner, and moves the wrong way against
-compression — see the `TUBE_DRIVE_LIN` comment. **So this protocol is no longer
-the measurement to run:** it captures an output stage that the hardware barely
-uses. What it should become is a GAIN-REDUCTION sweep — THD against dB of GR at
-a fixed input — which is what the paper's own method measures.
+Our stage *was* even-dominant, ~17× cleaner, and moving the wrong way against
+compression. **That has since been fixed and shipped** — the distortion now
+lives with the gain cell (`cellMod` in `la2aProcessor.js`), it is odd-dominant,
+and it rises with gain reduction; the tube stage was recalibrated against the
+paper's H2 column alone (`TUBE_DRIVE_LIN` 0.7 → 0.381).
+
+**So this protocol is no longer the measurement to run:** it captures an output
+stage that the hardware barely uses, and the constant it was written to fit is
+now derived from the paper instead. What it should become is a GAIN-REDUCTION
+sweep — THD against dB of GR at a fixed input — which is what the paper's own
+method measures, and which is also the one thing the shipped model is
+extrapolating: the paper gives **6 dB of GR and nothing else**, so the depth
+law's behaviour above that is a shape, not a fit.
 
 **What would make this protocol usable:** a reference emulation that actually
 models the output stage, or a bench measurement of a real LA-2A. The tooling

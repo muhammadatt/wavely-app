@@ -89,11 +89,18 @@ test('it removes the DC the shaper generates, and the shaper generates some', ()
   // droppable at one operating point and is load-bearing at another.
   // Driven hard via GAIN, which is how the valves are driven now that the
   // `tubeDrive` knob is gone — makeup sits before the shaper, as on the unit.
+  //
+  // ⚠ +18 dB RATHER THAN +6, RE-DERIVED WITH THE SHAPER. `TUBE_DRIVE_LIN` came
+  // down when the distortion moved to the gain cell, and the offset a gentler
+  // curve rectifies came down with it: +6 dB now leaves -75.4 dBFS of DC
+  // against the -60 this asserted, so the test would have failed for the right
+  // reason on a build that was working. Measured across the knob:
+  // -75.4 / -63.4 / -51.5 / -40.0 dBFS bypassed at +6 / 12 / 18 / 24.
   const x = tone(120, 2, 0.5)
-  const blocked = mean(run(x, { gainDb: 6 }))
-  const bypassed = mean(run(x, { gainDb: 6, corner: null }))
+  const blocked = mean(run(x, { gainDb: 18 }))
+  const bypassed = mean(run(x, { gainDb: 18, corner: null }))
 
-  assert.ok(db(bypassed) > -75, `shaper left only ${db(bypassed).toFixed(1)} dBFS of DC to remove`)
+  assert.ok(db(bypassed) > -60, `shaper left only ${db(bypassed).toFixed(1)} dBFS of DC to remove`)
   assert.ok(db(blocked) < -140, `DC survived the blocker at ${db(blocked).toFixed(1)} dBFS`)
 })
 

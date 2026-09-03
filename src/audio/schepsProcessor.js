@@ -225,6 +225,13 @@ export class SchepsKernel {
       // Measurement mode propagates through: with oversampling off the whole
       // wet path is latency-free, and the dry delay below follows it to zero.
       oversample: p.oversample !== false,
+      // ⚠ SO DOES THE GAIN CELL'S MODULATION, for the same reason and not as a
+      // control. It is the LA-2A's dominant distortion term (Moore, JAES
+      // 74(1/2):61-72) and it ships on, so Scheps carries it by inheriting the
+      // kernel default — but with no pass-through there was NO WAY to difference
+      // against a build without it from outside this file, which is the whole
+      // job of a measurement bypass. Nothing in the app sets it.
+      cellMod: p.cellMod,
     })
 
     this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)
