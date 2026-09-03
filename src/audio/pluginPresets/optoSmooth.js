@@ -66,14 +66,13 @@ function normalize(params) {
     mode: params.mode === 'limit' ? 'limit' : 'compress',
     peakReduction: clamp(params.peakReduction ?? 50, 0, 100),
     gain: autoMakeup ? 0 : clamp(params.gain ?? 0, GAIN_MIN_DB, GAIN_MAX_DB),
-    tubeDrive: clamp(params.tubeDrive ?? 0.3, 0, 1),
     r37: clamp(params.r37 ?? 100, 0, 100),
     autoMakeup,
   }
 }
 
 export const OPTO_SMOOTH_PARAM_KEYS = [
-  'mode', 'peakReduction', 'gain', 'tubeDrive', 'r37', 'autoMakeup',
+  'mode', 'peakReduction', 'gain', 'r37', 'autoMakeup',
 ]
 
 export const OPTO_SMOOTH_PRESETS = [
@@ -85,7 +84,6 @@ export const OPTO_SMOOTH_PRESETS = [
       mode: 'compress',
       peakReduction: 45,
       gain: 0,
-      tubeDrive: 0.3,
       r37: 100,
       autoMakeup: true,
     },
@@ -100,7 +98,6 @@ export const OPTO_SMOOTH_PRESETS = [
       // depth is spent on the body of the phrase rather than on plosives.
       peakReduction: 60,
       gain: 0,
-      tubeDrive: 0.25,
       r37: 82,
       autoMakeup: true,
     },
@@ -117,7 +114,6 @@ export const OPTO_SMOOTH_PRESETS = [
       // it looks because the cell is being fed less.
       peakReduction: 62,
       gain: 0,
-      tubeDrive: 0.28,
       r37: 45,
       autoMakeup: true,
     },
@@ -133,7 +129,6 @@ export const OPTO_SMOOTH_PRESETS = [
       // The one preset that asks for audible tube colour. OptoSmooth's own
       // measurement says it steadies rather than thickens on fast material —
       // this is the setting for a voice that is already fairly even.
-      tubeDrive: 0.45,
       r37: 100,
       autoMakeup: true,
     },
@@ -150,7 +145,6 @@ export const OPTO_SMOOTH_PRESETS = [
       // not sit where that is the normal case.
       peakReduction: 40,
       gain: 0,
-      tubeDrive: 0.2,
       r37: 100,
       autoMakeup: true,
     },

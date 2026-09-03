@@ -46,7 +46,7 @@ import { LA2AKernel, DC_BLOCK_HZ } from '../src/audio/la2aProcessor.js'
 
 const CORPUS = path.join(process.cwd(), 'data/corpus/la2a')
 const CORNERS = [1, 2, DC_BLOCK_HZ, 10, 20]
-const DRIVES = [0.3, 1.0] // the shipped default, and the top of the knob
+const DRIVES = [0, 12] // Gain in dB — the only thing that drives the valves
 
 const db = v => 20 * Math.log10(Math.max(Math.abs(v), 1e-30))
 const rms = (y, a = 0, b = y.length) => { let s = 0; for (let i = a; i < b; i++) s += y[i] * y[i]; return Math.sqrt(s / (b - a)) }
@@ -61,7 +61,7 @@ const peak = y => { let m = 0; for (const v of y) m = Math.max(m, Math.abs(v)); 
  */
 function run(x, sr, { corner, ...p }) {
   const k = new LA2AKernel(sr)
-  k.setParams({ mode: 'compress', peakReduction: 60, gainDb: 0, tubeDrive: 0.3, mix: 1, ...p })
+  k.setParams({ mode: 'compress', peakReduction: 60, gainDb: 0, mix: 1, ...p })
   if (corner !== undefined) k.dcR = corner === null ? 1 : 1 - 2 * Math.PI * corner / sr
   const n = x.length, o = new Float32Array(n)
   for (let f = 0; f < n; f += 128) {
@@ -105,15 +105,15 @@ for (const file of files) {
   const marks = onsets(mono, sr, 12)
 
   for (const drive of DRIVES) {
-    const bypass = run(mono, sr, { corner: null, tubeDrive: drive })
+    const bypass = run(mono, sr, { corner: null, gainDb: drive })
     const dc = mean(bypass)
     const ideal = Float32Array.from(bypass, v => v - dc)
     const oPeak = peak(ideal), oRms = rms(ideal)
-    console.log(`\n  tubeDrive ${drive.toFixed(2)}  —  DC the shaper leaves: ${db(dc).toFixed(1)} dBFS (${(db(dc) - db(oPeak)).toFixed(1)} dBc)`)
+    console.log(`\n  gain +${drive} dB  —  DC the shaper leaves: ${db(dc).toFixed(1)} dBFS (${(db(dc) - db(oPeak)).toFixed(1)} dBc)`)
     console.log('  corner  residualDC    err(all)  err(<100Hz)   peak shift   TILT after plosives')
 
     for (const c of CORNERS) {
-      const y = run(mono, sr, { corner: c, tubeDrive: drive })
+      const y = run(mono, sr, { corner: c, gainDb: drive })
       const err = Float32Array.from(y, (v, i) => v - ideal[i])
       const errLow = lp(err, sr, 100)
       let worst = -Infinity, sum = 0

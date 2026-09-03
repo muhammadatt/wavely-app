@@ -37,7 +37,7 @@ const db = v => 20 * Math.log10(Math.max(Math.abs(v), 1e-30))
  */
 function run(input, { corner, ...params } = {}) {
   const k = new LA2AKernel(SR)
-  k.setParams({ mode: 'compress', peakReduction: 60, gainDb: 0, tubeDrive: 0.3, mix: 1, ...params })
+  k.setParams({ mode: 'compress', peakReduction: 60, gainDb: 0, mix: 1, ...params })
   if (corner !== undefined) k.dcR = corner === null ? 1 : 1 - 2 * Math.PI * corner / SR
   const n = input.length
   const out = new Float32Array(n)
@@ -87,23 +87,26 @@ test('it removes the DC the shaper generates, and the shaper generates some', ()
   // Both halves matter. Without the second the test passes on a build with no
   // shaper at all, and this file's own record is that a DC blocker looks
   // droppable at one operating point and is load-bearing at another.
+  // Driven hard via GAIN, which is how the valves are driven now that the
+  // `tubeDrive` knob is gone — makeup sits before the shaper, as on the unit.
   const x = tone(120, 2, 0.5)
-  const blocked = mean(run(x, { tubeDrive: 1 }))
-  const bypassed = mean(run(x, { tubeDrive: 1, corner: null }))
+  const blocked = mean(run(x, { gainDb: 6 }))
+  const bypassed = mean(run(x, { gainDb: 6, corner: null }))
 
   assert.ok(db(bypassed) > -75, `shaper left only ${db(bypassed).toFixed(1)} dBFS of DC to remove`)
   assert.ok(db(blocked) < -140, `DC survived the blocker at ${db(blocked).toFixed(1)} dBFS`)
 })
 
 test('it is out of circuit when the tube stage is', () => {
-  // The blocker is gated on `applyTube`. An always-on filter would cost the
-  // stage its transparency for everyone who turns the tube off — and it is
-  // linear, so it would go on rotating LF phase with nothing to correct.
+  // The blocker is gated on `applyTube`. ⚠ Since the `tubeDrive` knob went,
+  // nothing a user can reach turns the tube off — `tube` is the kernel's
+  // measurement bypass, the role `oversample` plays. So this pins that the
+  // bypass is a real bypass, which is what the measurements above rely on.
   const x = tone(120, 0.5, 0.5)
-  const a = run(x, { tubeDrive: 0 })
-  const b = run(x, { tubeDrive: 0, corner: 40 })
+  const a = run(x, { tube: false })
+  const b = run(x, { tube: false, corner: 40 })
   for (let i = 0; i < a.length; i++) {
-    assert.equal(a[i], b[i], `a corner change moved the output at tubeDrive 0, sample ${i}`)
+    assert.equal(a[i], b[i], `a corner change moved the output with the tube bypassed, sample ${i}`)
   }
 })
 

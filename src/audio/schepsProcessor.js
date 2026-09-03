@@ -67,7 +67,6 @@ const LN10_OVER_20 = Math.LN10 / 20
 const LA2A_FIXED = {
   mode: 'compress',
   r37: 0,
-  tubeDrive: 0.3,
   mix: 1,
 }
 

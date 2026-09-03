@@ -14,7 +14,6 @@ export const LA2A_WINDOW_ID = 'opto-smooth'
 const la2aMode = ref(LA2A_DEFAULTS.mode)
 const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
-const la2aTubeDrive = ref(LA2A_DEFAULTS.tubeDrive)
 const la2aR37 = ref(LA2A_DEFAULTS.r37)
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
@@ -53,7 +52,6 @@ function currentParams() {
     mode: la2aMode.value,
     peakReduction: la2aPeakReduction.value,
     gain: la2aGain.value,
-    tubeDrive: la2aTubeDrive.value,
     r37: la2aR37.value,
   }
 }
@@ -64,7 +62,6 @@ function measurementParams() {
     mode: la2aMode.value,
     peakReduction: la2aPeakReduction.value,
     gainDb: 0,
-    tubeDrive: la2aTubeDrive.value,
     r37: la2aR37.value,
   }
 }
@@ -240,7 +237,6 @@ export function useLA2A() {
 
   const syncMode = (v) => syncCompressionParam('mode', la2aMode, v)
   const syncPeakReduction = (v) => syncCompressionParam('peakReduction', la2aPeakReduction, v)
-  const syncTubeDrive = (v) => syncCompressionParam('tubeDrive', la2aTubeDrive, v)
   const syncR37 = (v) => syncCompressionParam('r37', la2aR37, v)
 
   /**
@@ -354,7 +350,6 @@ export function useLA2A() {
     la2aMode,
     la2aPeakReduction,
     la2aGain,
-    la2aTubeDrive,
     la2aR37,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
@@ -367,7 +362,6 @@ export function useLA2A() {
     syncMode,
     syncPeakReduction,
     syncGain,
-    syncTubeDrive,
     syncR37,
     toggleAutoMakeup,
     refreshAutoMakeup,

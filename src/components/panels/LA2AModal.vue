@@ -14,10 +14,10 @@ import FloatingWindow from './FloatingWindow.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  la2aMode, la2aPeakReduction, la2aGain, la2aTubeDrive, la2aR37,
+  la2aMode, la2aPeakReduction, la2aGain, la2aR37,
   la2aAutoMakeup, la2aAutoMakeupBusy, toggleAutoMakeup: toggleAuto,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
-  togglePreview, syncMode, syncPeakReduction, syncGain, syncTubeDrive,
+  togglePreview, syncMode, syncPeakReduction, syncGain,
   syncR37, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup, apply, teardown, closeModal,
 } = useLA2A()
 
@@ -71,9 +71,6 @@ function formatPeakReduction(v) {
 function formatGain(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 }
-function formatPercent(v) {
-  return String(Math.round(v * 100))
-}
 
 /**
  * Presets. This replaced a mock dropdown that displayed four names and changed
@@ -91,14 +88,12 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     mode: la2aMode.value,
     peakReduction: la2aPeakReduction.value,
     gain: la2aGain.value,
-    tubeDrive: la2aTubeDrive.value,
     r37: la2aR37.value,
     autoMakeup: la2aAutoMakeup.value,
   }),
   write: (p) => {
     syncMode(p.mode)
     syncPeakReduction(p.peakReduction)
-    syncTubeDrive(p.tubeDrive)
     syncR37(p.r37)
     if (p.autoMakeup) {
       // Already on: the syncs above have each scheduled a re-measure, so the
@@ -201,7 +196,12 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
         <LevelMeter :levels="la2aOutputLevels" label="OUT" />
       </div>
 
-      <!-- Secondary row: Comp/Limit mode + small knobs (tube drive, R37 trimmer) -->
+      <!-- Secondary row: Comp/Limit mode + the R37 side-chain trimmer.
+           ⚠ THERE IS NO SATURATION CONTROL, AND THAT IS THE HARDWARE. A Tube
+           Drive knob used to sit beside R37; an LA-2A has no such thing, and
+           the knob was really moving the level at which the output valves
+           saturate. Gain drives them now, as it does on the unit — see
+           TUBE_DRIVE_LIN in la2aProcessor.js. -->
       <div class="flex items-center justify-between mt-[20px] pt-[16px]" style="border-top:1px solid rgba(255,255,255,.06)">
         <!-- Compress / Limit — the hardware's rear-panel switch -->
         <DeviceChoiceRocker
@@ -215,15 +215,6 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
         />
 
         <div class="flex gap-[26px]">
-          <div class="w-[78px]">
-            <Knob
-              :model-value="la2aTubeDrive"
-              @update:model-value="syncTubeDrive"
-              :min="0" :max="1" :step="0.01" :value-font-px="13"
-              label="Tube Drive" :accent="ACCENT" :format-value="formatPercent"
-              :disabled="!la2aPreview"
-            />
-          </div>
           <!-- R37 filters the SIDE-CHAIN, not the audio, and it reads as knob
                rotation like the hardware trimmer: 100 is fully clockwise and
                flat, which is the factory position and where it sits by default.

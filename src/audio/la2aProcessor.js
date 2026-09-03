@@ -40,7 +40,9 @@
  *      progressively more sensitive to highs as it is turned down.
  *    - Output path: asymmetric tanh waveshaper approximating the harmonic
  *      profile of the input/driver/output tube stages (bias term → 2nd
- *      harmonic, tanh curvature → 3rd), followed by a DC blocker.
+ *      harmonic, tanh curvature → 3rd), followed by a DC blocker. FIXED, with
+ *      no control over it — the hardware has none, and saturation follows the
+ *      level arriving at the valves. See TUBE_DRIVE_LIN.
  *
  * OVERSAMPLING. The gain cell and the tube stage run at OVERSAMPLE_FACTOR times
  * the base rate; the detector, the T4 ballistics and the gain computer stay at
@@ -52,8 +54,10 @@
  * This one benefits more than its FET counterpart, because the Gain knob sits
  * BEFORE the tube stage (as on the hardware). With auto-makeup engaged — the
  * app's default — a Peak Reduction of 70 hands the tubes about 14 dB more
- * signal than the raw defaults suggest, so the stage was being driven hard
- * exactly when nobody had asked for distortion. At 44.1 kHz that measured
+ * signal than the raw defaults suggest, so the stage is driven hard exactly
+ * when nobody has asked for distortion. ⚠ That is now the ONLY way it is
+ * driven, the knob that used to scale it being gone: deep Peak Reduction plus
+ * auto-makeup IS the overdrive path, which is what the hardware does too. At 44.1 kHz that measured
  * -40 dBc of folded product on a 9 kHz tone.
  *
  * The cost is OVERSAMPLE_LATENCY_SAMPLES of latency. Both the dry side of the
@@ -203,8 +207,8 @@ const SC_TAPER = 0.4247
  *
  * REJECTION IS TOTAL AT ANY CORNER >= 1 Hz, so nothing here trades against the
  * job the filter does — the whole choice is how much of the passband to pay for
- * a margin that is already enormous. The DC to remove is -76 dBc at the shipped
- * `tubeDrive` and -65 dBc at the top of the knob.
+ * a margin that is already enormous. The DC to remove is -76 dBc through the
+ * shipped tube stage, and -65 dBc when it is driven hard.
  *
  * PEAK SHIFT IS THE COLUMN THAT DECIDES IT, because protecting the peak
  * measurement ACX compliance is built on is what this filter is for. Moving
@@ -248,6 +252,51 @@ export const DC_BLOCK_HZ = 5
 
 // ── Gain computer constants ─────────────────────────────────────────────────
 
+/**
+ * OUTPUT TUBE STAGE — a fixed 12AX7-shaped curve, driven by LEVEL alone.
+ *
+ * ⚠ THIS REPLACED A `tubeDrive` KNOB, AND THE KNOB WAS NOT A THING THE
+ * HARDWARE HAS. An LA-2A has no saturation control: the T4 cell attenuates,
+ * the Gain knob feeds a 12AX7 makeup amplifier, and how hard those triodes are
+ * pushed is a consequence of the level arriving at them. A knob scaling the
+ * curve's drive is a knob moving the LEVEL AT WHICH THE STAGE SATURATES, which
+ * is a property of the valve and its supply, not of the operator.
+ *
+ * The gain dependence is already wired and always was: makeup is applied
+ * BEFORE the shaper (`g = preG * makeupLinSmoothed`, as on the hardware), so
+ * Gain drives the tubes, and compression backing the level off backs the
+ * saturation off with it. What changes here is only that the reference is
+ * fixed rather than user-set.
+ *
+ * THE CALIBRATION IS THE OLD DEFAULT, AND MEASUREMENT IS WHY IT SURVIVED
+ * RATHER THAN INERTIA. THD against level through this curve, at the knob's
+ * old default and at its top:
+ *
+ *   peak dBFS   rel nominal    THD @ 0.30 (kept)    THD @ 1.00 (was reachable)
+ *      -18          0 dB            0.27 %                2.16 %
+ *      -12         +6 dB            0.58 %                4.25 %
+ *       -6        +12 dB            1.40 %                8.25 %
+ *        0        +18 dB            4.01 %               16.23 %
+ *
+ * The LA-2A's own spec is under 0.5% THD at nominal, so the old default is the
+ * one position on that knob that lands on the hardware, and everything above it
+ * was a valve nothing ever built. Keeping it means the stock patch is
+ * BIT-IDENTICAL and Scheps (which pinned 0.3) does not move either.
+ *
+ * The two numbers are stated in linear form for that bit-identity; their
+ * physical readings are the comments. The curve is `tanh(d*x + b)`, normalised
+ * to unity small-signal gain, so H2 dominates at low level and H3 overtakes it
+ * around -6 dBFS — the triode ordering — and it stays memoryless and strictly
+ * monotone, which is what lets both auto-makeup paths invert it in closed form.
+ *
+ * ⚠ NOT MEASURED AGAINST HARDWARE OR AGAINST A REFERENCE EMULATION. The THD
+ * figures are of our own curve; the LA-2A spec is a published number, not a
+ * capture. What is established is that one setting is consistent with the spec
+ * and the rest of the knob's travel was not — not that this curve is a 12AX7.
+ */
+const TUBE_DRIVE_LIN = 0.7 // knee at +3.1 dBFS, i.e. 21.1 dB above NOMINAL_DBFS
+const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
+
 const COMPRESS_KNEE_DB = 20 // wide knee — the "leveling" feel
 const LIMIT_KNEE_DB = 6
 
@@ -257,7 +306,13 @@ export const LA2A_KERNEL_DEFAULTS = {
   mode: 'compress', // 'compress' | 'limit'
   peakReduction: 50, // 0–100, sidechain drive (hardware Peak Reduction knob)
   gainDb: 0, // makeup gain (hardware Gain knob)
-  tubeDrive: 0.3, // 0–1 tube stage saturation amount
+  /**
+   * Output tube stage. There is no user control over it — saturation follows
+   * level, see TUBE_DRIVE_LIN. This exists so measurement code can difference
+   * the stage against itself, the same role `oversample` plays below; nothing
+   * in the app sets it.
+   */
+  tube: true,
   r37: 100, // 0–100 side-chain pre-emphasis, as knob rotation: 100 = flat (factory)
   mix: 1, // wet/dry blend
   /**
@@ -499,10 +554,9 @@ export class LA2AKernel {
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
-    const amount = clamp(p.tubeDrive, 0, 1)
-    this.applyTube = amount > 0
-    this.tubeDriveLin = 0.25 + 1.5 * amount
-    this.tubeBias = 0.2 * amount
+    this.applyTube = p.tube !== false
+    this.tubeDriveLin = TUBE_DRIVE_LIN
+    this.tubeBias = TUBE_BIAS
     this.tanhBias = Math.tanh(this.tubeBias)
     // Normalize so the shaper has unity small-signal gain
     this.tubeNorm = this.tubeDriveLin * (1 - this.tanhBias * this.tanhBias)
@@ -518,8 +572,8 @@ export class LA2AKernel {
    * renders long and trims.
    *
    * Constant across every setting a listener can reach — the oversampled path
-   * runs even at `tubeDrive: 0`, so switching the tube stage off cannot shift
-   * the timeline underneath a running preview. It is zero only in the
+   * runs even with the tube stage bypassed for measurement, so that bypass
+   * cannot shift the timeline underneath a running preview. It is zero only in the
    * measurement mode described on `oversample`, which nothing renders through.
    */
   get latencySamples() {
