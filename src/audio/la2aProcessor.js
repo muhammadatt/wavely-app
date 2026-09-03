@@ -289,10 +289,46 @@ export const DC_BLOCK_HZ = 5
  * around -6 dBFS — the triode ordering — and it stays memoryless and strictly
  * monotone, which is what lets both auto-makeup paths invert it in closed form.
  *
- * ⚠ NOT MEASURED AGAINST HARDWARE. The THD figures are of our own curve; the
- * LA-2A spec is a published number, not a capture. What is established is that
- * one setting is consistent with the spec and the rest of the knob's travel was
- * not — not that this curve is a 12AX7.
+ * ⚠⚠ SUPERSEDED IN PREMISE BY A HARDWARE STUDY — THIS STAGE IS MODELLING THE
+ * WRONG PART OF THE UNIT, AND THE CONSTANTS BELOW ARE NOT THE FIX.
+ * A. Moore, "Objective Analysis and Perceptual Evaluation of LA-2A Compressors
+ * and Vocal Recordings," J. Audio Eng. Soc. 74(1/2):61-72 (2026),
+ * doi:10.17743/jaes.2022.0240 — six hardware units, three vintage Teletronix
+ * and three UA reissues, THD measured at five tones (63 Hz-1 kHz) with +4 dBu
+ * in and 6 dB of gain reduction. Its findings against ours, at that same
+ * operating point (1 kHz, -18 dBFS in, our Peak Reduction 54 for 6 dB GR):
+ *
+ *                        THD      H3 - H2
+ *   six real units    0.94-4.22 %   +16 to +44 dB   (median 2.19 %, +25.7)
+ *   this model          0.132 %     -16.3 dB
+ *
+ * Three separate errors, and only the first is a constant:
+ *   1. MAGNITUDE — we are ~17x too clean at the normal operating point.
+ *   2. ORDER BALANCE — hardware is ODD-dominant (H3 well above H2); we are
+ *      EVEN-dominant here, because TUBE_BIAS exists to make H2. That is a
+ *      42 dB error in H3/H2, and no value of these two constants fixes it: a
+ *      biased tanh cannot be strongly odd-dominant and still be biased.
+ *   3. DIRECTION AGAINST COMPRESSION — measured on this kernel, THD falls
+ *      0.271 / 0.132 / 0.063 / 0.030 % across 0 / 6 / 13 / 24 dB of gain
+ *      reduction. The hardware RISES, from the <0.5 % no-GR spec to 0.94-4.22 %
+ *      at 6 dB GR. Ours falls because the cell backs the level off before the
+ *      valves see it, which is a correct consequence of putting the
+ *      nonlinearity in the output stage — and the paper says that is the wrong
+ *      place: "the primary contributor to THD during GR is likely the T4
+ *      electro-optical attenuator... the Class A valve stages (typically 12AX7
+ *      and 12BH7) are generally operated near their most linear region in this
+ *      topology and are therefore unlikely to be the dominant source of
+ *      distortion."
+ *
+ * So the fix is STRUCTURAL: the distortion belongs with the gain cell, scaling
+ * with gain reduction, and it should be odd-dominant. That is a redesign, not a
+ * retune, and it is not done. These constants stay only because they are what
+ * has been listened to; the "consistent with the published spec" argument below
+ * is now known to be an argument about the WRONG STAGE — that spec is the unit
+ * with no gain reduction, where the paper agrees the valves are nearly linear.
+ *
+ * ⚠ ALSO NOT MEASURED AGAINST HARDWARE DIRECTLY. The THD figures above are of
+ * our own curve; the <0.5 % spec is a published number, not a capture.
  *
  * ⚠ AND THE REFERENCE EMULATION CANNOT SUPPLY IT — measured, and it is not a
  * near miss. Analog Obsession's LAEA, the same plugin the side-chain taper was
