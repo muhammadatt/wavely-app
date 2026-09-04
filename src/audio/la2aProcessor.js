@@ -42,7 +42,9 @@
  *      profile of the input/driver/output tube stages (bias term → 2nd
  *      harmonic, tanh curvature → 3rd), followed by a DC blocker. FIXED, with
  *      no control over it — the hardware has none, and saturation follows the
- *      level arriving at the valves. See TUBE_DRIVE_LIN.
+ *      level arriving at the valves. See TUBE_DRIVE_LIN — and the ledger above
+ *      it before trusting this stage for anything, because it rests on ONE
+ *      measured point and the ledger is where that is said plainly.
  *
  * OVERSAMPLING. The gain cell and the tube stage run at OVERSAMPLE_FACTOR times
  * the base rate; the detector, the T4 ballistics and the gain computer stay at
@@ -432,6 +434,112 @@ export const DC_BLOCK_HZ = 5
 const CELL_MOD_MAX = 0.1225
 const CELL_MOD_TAU_DB = 5.505
 
+
+/**
+ * ── WHAT THIS STAGE RESTS ON ────────────────────────────────────────────────
+ *
+ * The two constants below each carry their own provenance. This is the thing
+ * neither of them can say alone: what the tube stage as a whole is validated
+ * against, and what it is not. It exists because the notes below were each
+ * individually careful and TWO BAD PREMISES STILL SURVIVED A RELEASE — a fit
+ * run at an operating point nobody re-derived, and an H3 column read as H2 —
+ * which is what happens when every constant is documented and the stage is not.
+ *
+ * ⚠ THE HEADLINE: ONE EXTERNAL ANCHOR AND ONE ONE-SIDED BOUND. Everything else
+ * about this stage — how its distortion scales with level, with frequency,
+ * where it saturates, what it does when driven hard — is unconstrained by any
+ * measurement. Do not read the detail below as saying more than that.
+ *
+ * VALIDATED, against something outside this model
+ *
+ *   1. THAT THE STAGE SHOULD BE SMALL. Moore, JAES 74(1/2):61-72 (2026), names
+ *      the T4 attenuator and not the valves as the primary THD contributor
+ *      during gain reduction. Qualitative, and the architecture reflects it:
+ *      the cell carries the odd content, the valves the small even.
+ *
+ *   2. H2 MAGNITUDE, AT EXACTLY ONE OPERATING POINT. Mean -63.80 dBc against
+ *      the median of the paper's 30 measurements, at nominal in / 6.0 dB gain
+ *      reduction / Gain 0. THIS IS THE ONLY QUANTITATIVE ANCHOR THE STAGE HAS.
+ *      Reproducible: `npm run la2a:h2:refit`. Pinned by la2aTube.test.js, which
+ *      solves for the operating point rather than assuming a knob position.
+ *
+ *   3. THE <0.5 % NO-COMPRESSION SPEC. 0.128 % at true nominal with the cell
+ *      idle. ⚠ ONE-SIDED — it is a ceiling, and the superseded 0.7 drive passed
+ *      it too at 0.271 %. It rules out gross error and nothing finer.
+ *
+ *   4. A NEGATIVE RESULT, AND IT IS A REAL ONE. The reference emulation has no
+ *      output stage at all (see the LAEA note above). That is why
+ *      docs/la2a_tube_capture_protocol.md is complete and unused: the tooling
+ *      is verified end to end against synthetic captures and is waiting on a
+ *      reference that models the stage, or on a bench.
+ *
+ *   ⚠ CORROBORATION IS NOT VALIDATION. With the cell running, THD 1.34-2.13 %
+ *   and H3-H2 +24.4 to +30.9 dB land inside the six units' bands at every
+ *   frequency, and neither was a fit target. Worth something — but those are
+ *   mostly the CELL's numbers with this stage supplying the H2 denominator, so
+ *   they are weak evidence about the valves alone.
+ *
+ * NOT VALIDATED
+ *
+ *   1. TUBE_BIAS, and therefore the even/odd split within this stage. One
+ *      target, two constants; see its own note.
+ *
+ *   2. H2 VERSUS LEVEL — THE MOST LOAD-BEARING GAP. The model asserts 1 dB per
+ *      dB because that is what a tanh's second-order term does. ONE level has
+ *      ever been compared to hardware. Everything audible about "Gain drives
+ *      the valves" rides on an unmeasured slope — including the extra makeup
+ *      the lookahead control asks for, which is the one path that routinely
+ *      pushes this stage somewhere nothing has checked.
+ *
+ *   3. H2 VERSUS FREQUENCY. The model is nearly flat, -63.5 to -64.5 dBc from
+ *      63 Hz to 1 kHz, and structurally so: a memoryless shaper has no
+ *      frequency dependence, so the little spread there is comes from the
+ *      side-chain changing the level reaching it. The paper measured five
+ *      frequencies but only the median ACROSS ALL 30 is transcribed here, so
+ *      per-frequency hardware H2 is unknown. If real units tilt with frequency,
+ *      this stage cannot express it and nothing here would notice.
+ *
+ *   4. THE KNEE, +12.4 dBFS. No hardware data of any kind. It moved 4 dB as a
+ *      side effect of the H2 re-fit — a free rider on a fit that never targeted
+ *      it — and it is load-bearing, being what stops auto-makeup running away.
+ *
+ *   5. BEHAVIOUR UNDER HEAVY DRIVE. +24 dB into the stage is extrapolation. The
+ *      (bias, drive) pairs that all satisfy the anchor span 9 dB of H2 there,
+ *      so the answer in that regime is a consequence of the inherited bias.
+ *
+ *   6. THE CURVE SHAPE. `tanh` is a modelling choice. At one operating point
+ *      nothing distinguishes it from any other odd shaper with a bias term.
+ *
+ *   7. THE TOPOLOGY. Makeup before the shaper is argued from the hardware's
+ *      signal flow, not measured.
+ *
+ *   8. H3 AND H4 FROM THIS STAGE. Never fitted, never measured, and effectively
+ *      arbitrary while the bias is.
+ *
+ *   9. NO COMPARISON TO A REAL UNIT HAS EVER HAPPENED. The paper's figures are
+ *      of six units; every figure in this repo is of our own kernel.
+ *
+ *  10. THE -63.80 TARGET ITSELF. The paper's per-unit table is not transcribed,
+ *      so the median cannot be recomputed here. The one number taken on trust.
+ *
+ * ⚠ MOST OF THE TUBE TESTS ARE SELF-CONSISTENCY, NOT VALIDATION. They assert
+ * DIRECTIONS — THD rises with level, falls with Peak Reduction, the cell adds
+ * odd and not even. Exactly two compare against an external number: the H2
+ * median test and the <0.5 % spec test. Adding a test does not move a row from
+ * the second list to the first; only a measurement does.
+ *
+ * WHAT WOULD BUY THE MOST, IN ORDER
+ *
+ *   1. A bench capture of a real unit. The protocol is written and the tooling
+ *      verified. Unblocks 2, 3, 4 and 6 at once.
+ *   2. Transcribe the paper's H4 column. H4 is even, so it is this stage's too,
+ *      and it pins the (drive, bias) pair outright — closing 1 with no new
+ *      measurement, only a trip to the paper.
+ *   3. Transcribe the per-unit, per-frequency H2. Turns one median into a
+ *      spread and makes 3 and 10 testable.
+ *
+ * ── end ledger ──────────────────────────────────────────────────────────────
+ */
 
 /**
  * DERIVED AGAINST THE H2 COLUMN, which is the only thing this stage is now

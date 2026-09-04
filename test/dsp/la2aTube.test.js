@@ -259,10 +259,18 @@ test('the cell is silent when it is not working', () => {
 test('it is calibrated to the hardware spec at nominal level', () => {
   // The LA-2A's published figure is under 0.5% THD, quoted with the unit not
   // compressing — so this is the VALVES, measured where the cell is idle.
+  // Measured 0.128 %.
   //
-  // ⚠ A PUBLISHED SPEC IS NOT A CAPTURE. This says our curve is not obviously
-  // wrong at one operating point; it is not a claim to be a 12AX7.
-  const got = thd(run(tone(1, lin(-18)), { cellMod: 0 }))
+  // ⚠ NOMINAL RMS, like the H2 test below — a published spec quoted at a
+  // nominal operating level is an absolute comparison, so probing 3 dB under
+  // nominal is answering a different question. This is one of the two tests in
+  // this file that compare against an external number; see the ledger above
+  // TUBE_DRIVE_LIN for what that does and does not establish.
+  //
+  // ⚠ A PUBLISHED SPEC IS NOT A CAPTURE, AND THIS BOUND IS ONE-SIDED. It says
+  // our curve is not GROSSLY wrong at one operating point — the superseded 0.7
+  // drive passed it too, at 0.271 %. It is not a claim to be a 12AX7.
+  const got = thd(run(tone(1, lin(-18) * Math.SQRT2), { cellMod: 0 }))
   assert.ok(got < 0.005, `THD at nominal is ${(got * 100).toFixed(3)}%, over the 0.5% spec`)
 })
 
