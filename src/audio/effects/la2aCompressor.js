@@ -27,7 +27,6 @@ export const LA2A_DEFAULTS = {
   mode: 'compress', // 'compress' | 'limit'
   peakReduction: 50,
   gain: 0, // makeup gain dB
-  tubeDrive: 0.3,
   r37: 100, // R37 side-chain trimmer as knob rotation; 100 = flat (factory)
 }
 
@@ -37,7 +36,6 @@ export function toKernelParams(params) {
     mode: params.mode,
     peakReduction: params.peakReduction,
     gainDb: params.gain,
-    tubeDrive: params.tubeDrive,
     r37: params.r37,
   }
 }

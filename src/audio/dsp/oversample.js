@@ -9,7 +9,7 @@
  * inharmonic product, and unlike the harmonics themselves those products do not
  * sit in a musical relationship to the note that made them — they read as grit.
  * The compressors' tanh stages were measured at roughly -47 dBc (FET Punch,
- * default fetDrive) and -40 dBc (OptoSmooth, default tubeDrive with auto-makeup
+ * default fetDrive) and -40 dBc (OptoSmooth, its fixed tube stage with auto-makeup
  * engaged) on a 9 kHz tone, both squarely in the sibilance band that narration
  * lives in, and both growing about 6 dB per doubling of successive passes
  * because the products land at reproducible frequencies and add coherently.

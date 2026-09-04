@@ -40,7 +40,9 @@
  *      progressively more sensitive to highs as it is turned down.
  *    - Output path: asymmetric tanh waveshaper approximating the harmonic
  *      profile of the input/driver/output tube stages (bias term → 2nd
- *      harmonic, tanh curvature → 3rd), followed by a DC blocker.
+ *      harmonic, tanh curvature → 3rd), followed by a DC blocker. FIXED, with
+ *      no control over it — the hardware has none, and saturation follows the
+ *      level arriving at the valves. See TUBE_DRIVE_LIN.
  *
  * OVERSAMPLING. The gain cell and the tube stage run at OVERSAMPLE_FACTOR times
  * the base rate; the detector, the T4 ballistics and the gain computer stay at
@@ -52,8 +54,10 @@
  * This one benefits more than its FET counterpart, because the Gain knob sits
  * BEFORE the tube stage (as on the hardware). With auto-makeup engaged — the
  * app's default — a Peak Reduction of 70 hands the tubes about 14 dB more
- * signal than the raw defaults suggest, so the stage was being driven hard
- * exactly when nobody had asked for distortion. At 44.1 kHz that measured
+ * signal than the raw defaults suggest, so the stage is driven hard exactly
+ * when nobody has asked for distortion. ⚠ That is now the ONLY way it is
+ * driven, the knob that used to scale it being gone: deep Peak Reduction plus
+ * auto-makeup IS the overdrive path, which is what the hardware does too. At 44.1 kHz that measured
  * -40 dBc of folded product on a 9 kHz tone.
  *
  * The cost is OVERSAMPLE_LATENCY_SAMPLES of latency. Both the dry side of the
@@ -182,7 +186,273 @@ const SC_DRIVE_MAX_DB = 36.24
 const SC_DRIVE_SPAN_DB = 105.9
 const SC_TAPER = 0.4247
 
+/**
+ * DC blocker corner, Hz — a one-pole `y = x - x[-1] + R*y[-1]` after the tube
+ * stage. The asymmetric shaper rectifies, so it shifts the operating point and
+ * the offset has to come back off before it reaches a peak measurement.
+ *
+ * ⚠ INHERITED, THEN DERIVED — AND IT SURVIVES. It was a bare `5` beside a tape
+ * blocker at 2 Hz that had a measurement behind it. The two are NOT the same
+ * filter — that one is a Butterworth BIQUAD, this is a naive one-pole — so its
+ * constant never ported, and this one is now argued on its own evidence.
+ *
+ * MEASURED ON TWO REAL NARRATORS (`npm run dcblock:real`), sweeping this
+ * constant against an exact bypass (`R = 1` telescopes to the signal itself,
+ * leaving the oversampler, the ballistics and the shaper bit-identical):
+ *
+ *   corner   residual DC        peak shift          tilt after plosives
+ *      2     -128 / -165 dBFS   -0.035 / -0.004 dB   -53.7 / -55.8 dBc
+ *      5     -134 / -173 dBFS   -0.076 / -0.016 dB   -46.9 / -49.5 dBc
+ *     20     -144 / -185 dBFS   -0.304 / -0.112 dB   -37.0 / -39.3 dBc
+ *
+ * REJECTION IS TOTAL AT ANY CORNER >= 1 Hz, so nothing here trades against the
+ * job the filter does — the whole choice is how much of the passband to pay for
+ * a margin that is already enormous. The DC to remove is -76 dBc through the
+ * shipped tube stage, and -65 dBc when it is driven hard.
+ *
+ * PEAK SHIFT IS THE COLUMN THAT DECIDES IT, because protecting the peak
+ * measurement ACX compliance is built on is what this filter is for. Moving
+ * 5 -> 2 Hz buys 0.04 dB of peak on the worse file. That is two orders of
+ * magnitude under anything a compliance check or a listener resolves, and not a
+ * reason to move a shipped constant.
+ *
+ * ⚠ THE SYNTHETIC EVIDENCE THAT STARTED THIS OVERSTATED IT BY ~24 dB, AND IT
+ * IS THE SEVENTEENTH TIME SYNTHETIC MATERIAL HAS FAILED TO ANSWER THE QUESTION
+ * ASKED OF IT — this time by EXAGGERATING, as the HF Emphasis sweep did. A
+ * gated 60 Hz burst put the tilt at -23 dBc at 5 Hz and made the corner look
+ * consequential; real plosives put it at -47. A burst stopping dead into
+ * digital silence maximises the filter's error against a vanishing local
+ * signal, which is not a thing speech does.
+ *
+ * ⚠ AND NO WINDOW COULD HAVE FOUND MORE, WHICH IS WORTH KNOWING BEFORE ANYONE
+ * RE-OPENS THIS. The blocker is linear and sits last, so with `y = H(wet)` the
+ * error is exactly `(H - 1)(wet)` — the frequency response applied to the
+ * output, with no mechanism for a transient artefact distinct from it. The
+ * "tilt" column is therefore the same linear error as the `err` column measured
+ * in a narrower window, which is why the two track each other at a constant
+ * offset across every corner and both files. There is no separate phenomenon
+ * here to go looking for.
+ *
+ * ⚠ THE dBc "COST" A NAIVE SWEEP REPORTS IS PURE PHASE ROTATION —
+ * `20*log10(2*sin(phi/2))` reproduces it to the last digit at every corner — so
+ * it is inaudible and is not evidence for anything. Recorded because it is the
+ * first number a sweep produces and it looks like damage.
+ *
+ * ⚠ AND THIS FILTER BOOSTS, WHERE THE TAPE ONE PROVABLY CANNOT. A naive
+ * one-pole `(1 - z^-1)/(1 - R*z^-1)` peaks at Nyquist at exactly `2/(1+R)` —
+ * +0.0028 dB at this corner, inaudible, and it scales with the corner, so it is
+ * a cost of RAISING it. `makeDcBlocker` is a Butterworth biquad precisely to
+ * keep a "never boosts" guarantee; nothing here claims that guarantee.
+ *
+ * Stays at 5, now on evidence rather than by default. ⚠ Two narrators, one of
+ * them already normalised; the margins are wide enough that a third is unlikely
+ * to move it, but it is two.
+ */
+export const DC_BLOCK_HZ = 5
+
 // ── Gain computer constants ─────────────────────────────────────────────────
+
+/**
+ * OUTPUT TUBE STAGE — a fixed 12AX7-shaped curve, driven by LEVEL alone.
+ *
+ * ⚠ THIS REPLACED A `tubeDrive` KNOB, AND THE KNOB WAS NOT A THING THE
+ * HARDWARE HAS. An LA-2A has no saturation control: the T4 cell attenuates,
+ * the Gain knob feeds a 12AX7 makeup amplifier, and how hard those triodes are
+ * pushed is a consequence of the level arriving at them. A knob scaling the
+ * curve's drive is a knob moving the LEVEL AT WHICH THE STAGE SATURATES, which
+ * is a property of the valve and its supply, not of the operator.
+ *
+ * The gain dependence is already wired and always was: makeup is applied
+ * BEFORE the shaper (`g = preG * makeupLinSmoothed`, as on the hardware), so
+ * Gain drives the tubes, and compression backing the level off backs the
+ * saturation off with it. What changes here is only that the reference is
+ * fixed rather than user-set.
+ *
+ * THE CALIBRATION IS THE OLD DEFAULT, AND MEASUREMENT IS WHY IT SURVIVED
+ * RATHER THAN INERTIA. THD against level through this curve, at the knob's
+ * old default and at its top:
+ *
+ *   peak dBFS   rel nominal    THD @ 0.30 (kept)    THD @ 1.00 (was reachable)
+ *      -18          0 dB            0.27 %                2.16 %
+ *      -12         +6 dB            0.58 %                4.25 %
+ *       -6        +12 dB            1.40 %                8.25 %
+ *        0        +18 dB            4.01 %               16.23 %
+ *
+ * The LA-2A's own spec is under 0.5% THD at nominal, so the old default is the
+ * one position on that knob that lands on the hardware, and everything above it
+ * was a valve nothing ever built. Keeping it means the stock patch is
+ * BIT-IDENTICAL and Scheps (which pinned 0.3) does not move either.
+ *
+ * The two numbers are stated in linear form for that bit-identity; their
+ * physical readings are the comments. The curve is `tanh(d*x + b)`, normalised
+ * to unity small-signal gain, so H2 dominates at low level and H3 overtakes it
+ * around -6 dBFS — the triode ordering — and it stays memoryless and strictly
+ * monotone, which is what lets both auto-makeup paths invert it in closed form.
+ *
+ * ⚠⚠ SUPERSEDED IN PREMISE BY A HARDWARE STUDY — THIS STAGE IS MODELLING THE
+ * WRONG PART OF THE UNIT, AND THE CONSTANTS BELOW ARE NOT THE FIX.
+ * A. Moore, "Objective Analysis and Perceptual Evaluation of LA-2A Compressors
+ * and Vocal Recordings," J. Audio Eng. Soc. 74(1/2):61-72 (2026),
+ * doi:10.17743/jaes.2022.0240 — six hardware units, three vintage Teletronix
+ * and three UA reissues, THD measured at five tones (63 Hz-1 kHz) with +4 dBu
+ * in and 6 dB of gain reduction. Its findings against ours, at that same
+ * operating point (1 kHz, -18 dBFS in, our Peak Reduction 54 for 6 dB GR):
+ *
+ *                        THD      H3 - H2
+ *   six real units    0.94-4.22 %   +16 to +44 dB   (median 2.19 %, +25.7)
+ *   this model          0.132 %     -16.3 dB
+ *
+ * Three separate errors, and only the first is a constant:
+ *   1. MAGNITUDE — we are ~17x too clean at the normal operating point.
+ *   2. ORDER BALANCE — hardware is ODD-dominant (H3 well above H2); we are
+ *      EVEN-dominant here, because TUBE_BIAS exists to make H2. That is a
+ *      42 dB error in H3/H2, and no value of these two constants fixes it: a
+ *      biased tanh cannot be strongly odd-dominant and still be biased.
+ *   3. DIRECTION AGAINST COMPRESSION — measured on this kernel, THD falls
+ *      0.271 / 0.132 / 0.063 / 0.030 % across 0 / 6 / 13 / 24 dB of gain
+ *      reduction. The hardware RISES, from the <0.5 % no-GR spec to 0.94-4.22 %
+ *      at 6 dB GR. Ours falls because the cell backs the level off before the
+ *      valves see it, which is a correct consequence of putting the
+ *      nonlinearity in the output stage — and the paper says that is the wrong
+ *      place: "the primary contributor to THD during GR is likely the T4
+ *      electro-optical attenuator... the Class A valve stages (typically 12AX7
+ *      and 12BH7) are generally operated near their most linear region in this
+ *      topology and are therefore unlikely to be the dominant source of
+ *      distortion."
+ *
+ * THE FIX WAS STRUCTURAL AND IT SHIPPED. The distortion now lives with the gain
+ * cell, scales with gain reduction, and is odd-dominant: `cellMod`, below. The
+ * tube stage stays — the paper does not say the valves are linear, it says they
+ * are not DOMINANT — and it was recalibrated against the paper's H2 column
+ * alone (see TUBE_DRIVE_LIN), which is the only thing it is still responsible
+ * for. Measured at the paper's own operating point after the change:
+ *
+ *                        THD      H3 - H2
+ *   six real units    0.94-4.22 %   +16 to +44 dB   (median 2.19 %, +25.7)
+ *   this model          1.51 %       +26.0 dB
+ *
+ * and the direction is right: at Gain +12 into a -12 dBFS tone, THD across
+ * Peak Reduction 0 / 40 / 70 / 90 now runs 1.58 / 1.48 / 2.04 / 2.09 %, where
+ * the valves ALONE run 1.58 / 0.80 / 0.17 / 0.11. The dip at 40 is the two
+ * mechanisms crossing and is real. `test/dsp/la2aTube.test.js` pins all of it.
+ *
+ * ⚠ THE <0.5 % SPEC ARGUMENT NOW APPLIES TO THE RIGHT STAGE. That figure is
+ * the unit with NO gain reduction, where the paper agrees the valves are nearly
+ * linear and the cell modulation is absent by construction — so it is a valid
+ * check on the tube stage and was never a valid check on the whole unit under
+ * compression, which is how it came to justify a value 5.5 dB hot on H2.
+ *
+ * ⚠ STILL NOT MEASURED AGAINST HARDWARE DIRECTLY. The THD figures above are of
+ * our own kernel; the paper's are of six units, and no capture of ours has been
+ * taken on a bench beside one.
+ *
+ * ⚠ AND THE REFERENCE EMULATION CANNOT SUPPLY IT — measured, and it is not a
+ * near miss. Analog Obsession's LAEA, the same plugin the side-chain taper was
+ * fitted to, has NO output-stage saturation at all. Captured per
+ * docs/la2a_tube_capture_protocol.md at 96 kHz / 32-bit float:
+ *
+ *   Peak Reduction 0, Gain 0, input -40 / -30 / -1 dBFS: perfectly linear at
+ *   every level — unity gain to -0.00003 dB and a fixed 0.1481 deg phase shift
+ *   (a ~2.6 Hz DC blocker), IDENTICAL across all 39 dB, with the whole
+ *   difference from the source tone sitting at the fundamental and harmonics at
+ *   the DFT's own numerical floor.
+ *
+ *   Peak Reduction 0, Gain 80 (+24.29 dB): output at +6.29 dBFS — ABOVE digital
+ *   full scale — and still 0.0000 % THD. It is `tone x 16.3783` plus that same
+ *   phase shift, to -51.7 dBc. Our curve at the same operating point asks for
+ *   11.81 %.
+ *
+ * So its Gain knob is a clean linear multiply and there is no valve behind it.
+ * (Its Peak Reduction does do real gain reduction — 24.9 dB measured — with
+ * about 0.06 % of ODD-order content, which is the cell's detector ripple
+ * modulating the gain, not a saturator: a steady tone through a compressor
+ * whose detector ripples at 2f puts sidebands at f and 3f.)
+ *
+ * Second time this reference has been asked for a control it does not have —
+ * see the R37 note above, where the knob taken for the emphasis trimmer was a
+ * mix control. The capture tooling stays (`npm run la2a:tube:tones` /
+ * `la2a:tube:fit`) and is correct; it is waiting on a reference that models the
+ * output stage, or on a bench measurement of a real unit.
+ */
+/**
+ * THE T4 CELL'S GAIN MODULATION — the LA-2A's DOMINANT distortion mechanism,
+ * per the paper quoted above, and the reason this plugin's THD now rises with
+ * compression instead of falling.
+ *
+ * The gain the cell applies is not perfectly smooth: it ripples with the
+ * signal's own instantaneous level around the envelope the detector has
+ * smoothed. On a steady tone at f the detector ripples at 2f, and a carrier at
+ * f multiplied by a 2f ripple puts sidebands at f and 3f — ODD content, which
+ * is what the hardware shows and what a biased tanh structurally cannot make.
+ * It costs one `exp` per base-rate sample; measured, 4.8 % of the kernel.
+ *
+ * DEPTH SATURATES IN GAIN REDUCTION, and that is derived rather than chosen. A
+ * depth linear in grDb hits the paper's operating point and then runs away —
+ * 9.3 % THD by 24 dB of reduction, far outside anything measured. These two
+ * constants put the model inside the six units' band at the one depth anyone
+ * measured and keep it there. Measured on a 200 Hz tone at -18 dBFS, Gain 0:
+ *
+ *   Peak Reduction     0     30     54     70     85    100
+ *   gain reduction  0.00   0.05   7.04  14.07  19.91  25.18 dB
+ *   THD             0.145  0.146  1.511  1.943  2.055  2.092 %
+ *   H3 - H2        -17.6  -14.1   +26.6  +36.2  +43.2  +50.0 dB
+ *
+ * against six real units at 6 dB GR: 0.94-4.22 % THD (median 2.19), H3 sitting
+ * +16 to +44 dB over H2 (median +25.7).
+ *
+ * ⚠ IT IS CALIBRATED AT ONE DEPTH, AND THE TOP OF THE TRAVEL IS EXTRAPOLATION.
+ * The paper measures 6 dB of gain reduction and nothing else, so the saturation
+ * law is a shape chosen to be well-behaved past the data, not a fit to it. By
+ * 20 dB of reduction the order balance runs past the six units' spread (+43 and
+ * +50 against a +44 maximum) — outside the measured range in a regime nobody
+ * measured, which is a statement about the evidence, not a defect that can be
+ * tuned away without more of it.
+ *
+ * ⚠ A WAVESHAPER AT THE CELL WAS TRIED FIRST AND IS GONE. Same placement, same
+ * saturating depth law, but bending the waveform instead of modulating the
+ * gain. It hit the paper's numbers at 6 dB GR exactly — 2.15 % THD, H3-H2
+ * +25.3 dB — and was rejected by ear twice, at two different depth laws.
+ *
+ * The reason is measurable and is why it is not coming back: a memoryless
+ * waveshaper distorts every pair of partials against every other, so on speech
+ * it ran 11.1 dB HOTTER than its own tone-THD figure predicted (tone 5.27 %,
+ * speech 18.9 %). This mechanism measures -6.7 dB on the same test. Tone THD
+ * cannot tell the two apart; program material can, which is the reusable half.
+ */
+const CELL_MOD_MAX = 0.1225
+const CELL_MOD_TAU_DB = 5.505
+
+
+/**
+ * DERIVED AGAINST THE H2 COLUMN, which is the only thing this stage is now
+ * responsible for. The T4 cell modulation supplies the odd content (see
+ * CELL_MOD_MAX); the valves supply the small even component, which is what the
+ * paper says they do and what nothing else in the model can make — measured,
+ * the cell modulation adds even content of 0.0 to 0.2 dB at every frequency,
+ * i.e. none at all.
+ *
+ * Fitted to the median of all 30 of the paper's H2 measurements, -63.80 dBc.
+ * At 0.381 the model gives -63.98 at 250 Hz and -63.60 at 1 kHz, mean -63.79.
+ *
+ * ⚠ FITTED AT 250 Hz AND 1 kHz ONLY, because the compressor's OWN gain ripple
+ * swamps H2 at 80 / 120 / 125 / 160 Hz — it sits at -47 to -50 dBc there with
+ * the tanh bypassed AND the cell modulation off, so it is pre-existing
+ * behaviour of the detector that this constant cannot move. That was briefly
+ * mistaken for the cell modulation's own even content; the control that settled
+ * it was rerunning at cellMod 0 and differencing, which came back at 0.0-0.2 dB.
+ *
+ * ⚠ IT REPLACED 0.7, WHICH WAS FITTED TO A DIFFERENT QUANTITY. That value came
+ * from the LA-2A's <0.5 % THD spec, measured on the whole unit with the cell
+ * idle — a total-THD target, at a time when this stage was the plugin's only
+ * distortion. It is the wrong target now that the cell carries the odd content,
+ * and 0.7 overshoots H2 by 5.5 dB against the hardware.
+ *
+ * The knee moves with it, +3.1 dBFS to +8.4 dBFS (21.1 to 26.4 dB above
+ * nominal), so the valves saturate later. They still saturate, which is what
+ * stops the makeup running away the way LAEA's does.
+ */
+export const TUBE_DRIVE_LIN = 0.381 // knee at +8.4 dBFS, i.e. 26.4 dB above NOMINAL_DBFS
+export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
 
 const COMPRESS_KNEE_DB = 20 // wide knee — the "leveling" feel
 const LIMIT_KNEE_DB = 6
@@ -193,7 +463,19 @@ export const LA2A_KERNEL_DEFAULTS = {
   mode: 'compress', // 'compress' | 'limit'
   peakReduction: 50, // 0–100, sidechain drive (hardware Peak Reduction knob)
   gainDb: 0, // makeup gain (hardware Gain knob)
-  tubeDrive: 0.3, // 0–1 tube stage saturation amount
+  /**
+   * Output tube stage. There is no user control over it — saturation follows
+   * level, see TUBE_DRIVE_LIN. This exists so measurement code can difference
+   * the stage against itself, the same role `oversample` plays below; nothing
+   * in the app sets it.
+   */
+  tube: true,
+  /**
+   * T4 cell gain modulation depth, 1 being the calibrated value. A measurement
+   * bypass rather than a control — nothing in the app sets it, and 0 recovers
+   * the pre-cell build for differencing. See CELL_MOD_MAX.
+   */
+  cellMod: 1,
   r37: 100, // 0–100 side-chain pre-emphasis, as knob rotation: 100 = flat (factory)
   mix: 1, // wet/dry blend
   /**
@@ -240,8 +522,9 @@ export class LA2AKernel {
     this.memDischargeCoef = 1 - Math.exp(-1 / (sampleRate * MEM_DISCHARGE_S))
     this.hpfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_HPF_HZ / sampleRate)
     this.shelfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_SHELF_HZ / sampleRate)
-    // DC blocker pole (~5 Hz) — the asymmetric shaper shifts the operating point
-    this.dcR = 1 - 2 * Math.PI * 5 / sampleRate
+    // DC blocker pole — the asymmetric shaper shifts the operating point.
+    // See DC_BLOCK_HZ for what is and is not measured about the corner.
+    this.dcR = 1 - 2 * Math.PI * DC_BLOCK_HZ / sampleRate
 
     /**
      * GAIN KNOB (MAKEUP), SMOOTHED — it was applied as a bare step.
@@ -434,10 +717,10 @@ export class LA2AKernel {
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
     // below): at the default amount a -6 dBFS peak lands around H3 ≈ -40 dBc
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
-    const amount = clamp(p.tubeDrive, 0, 1)
-    this.applyTube = amount > 0
-    this.tubeDriveLin = 0.25 + 1.5 * amount
-    this.tubeBias = 0.2 * amount
+    this.applyTube = p.tube !== false
+    this.cellMod = Number.isFinite(p.cellMod) ? Math.max(0, p.cellMod) : 1
+    this.tubeDriveLin = TUBE_DRIVE_LIN
+    this.tubeBias = TUBE_BIAS
     this.tanhBias = Math.tanh(this.tubeBias)
     // Normalize so the shaper has unity small-signal gain
     this.tubeNorm = this.tubeDriveLin * (1 - this.tanhBias * this.tanhBias)
@@ -453,8 +736,8 @@ export class LA2AKernel {
    * renders long and trims.
    *
    * Constant across every setting a listener can reach — the oversampled path
-   * runs even at `tubeDrive: 0`, so switching the tube stage off cannot shift
-   * the timeline underneath a running preview. It is zero only in the
+   * runs even with the tube stage bypassed for measurement, so that bypass
+   * cannot shift the timeline underneath a running preview. It is zero only in the
    * measurement mode described on `oversample`, which nothing renders through.
    */
   get latencySamples() {
@@ -585,7 +868,20 @@ export class LA2AKernel {
       // hardware does not have. In the base-rate measurement path there is
       // nothing to meet, so the delay would only misalign it.
       makeupLinSmoothed += this.makeupSmoothCoef * (this.makeupLin - makeupLinSmoothed)
-      const preG = Math.exp(-grNow * LN10_OVER_20)
+      let preG = Math.exp(-grNow * LN10_OVER_20)
+      if (this.cellMod > 0 && env > 1e-6) {
+        // Ripple as a fraction of the smoothed envelope, scaled by how hard
+        // the cell is working. Sign is compressive: an instantaneously loud
+        // sample means an instantaneously brighter lamp, so more attenuation.
+        const rel = rect / env - 1
+        // Saturating in gain reduction: a
+        // depth linear in grDb hits the paper's point and then runs away, 9.3 %
+        // by 24 dB of reduction. This levels off inside the band the six units
+        // span at the one depth anyone measured.
+        const depth = this.cellMod * CELL_MOD_MAX * (1 - Math.exp(-grNow / CELL_MOD_TAU_DB))
+        const m = 1 - depth * rel
+        preG *= m > 0.05 ? (m < 4 ? m : 4) : 0.05
+      }
       const g = preG * makeupLinSmoothed
       gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
       preGain[i] = preG
