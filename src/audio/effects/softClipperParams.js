@@ -23,7 +23,7 @@ import {
  *   limiter 0-100, how much of the peak control the lookahead limiter takes
  *     from the curve — see LIMITER_MAX_ABOVE_DB. 0 bypasses it entirely,
  *     including its latency. ⚠ It CHANGES THE STAGE'S LATENCY while engaged
- *   outputTrimDb ±6, post-stage gain match for A/B
+ *   outputTrimDb 0..+24, makeup gain / post-stage gain match for A/B
  *   thresholdMode 'adaptive' | 'fixed' — the panel only ever sets 'fixed'
  *   fixedThresholdDb, the ceiling in dBFS. The panel's preset buttons measure
  *     the region and write this; see ceilingPresets.js

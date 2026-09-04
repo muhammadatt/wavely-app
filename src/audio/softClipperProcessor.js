@@ -1113,7 +1113,7 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // It also happens to be the cleanest setting: peak-matched, 0 beats every
   // other value by 2.2-3.4 dB of residual (see the DRIVE notes in CLAUDE.md).
   emphasisDb: 0,
-  outputTrimDb: 0, // ±6, post-stage gain match for A/B
+  outputTrimDb: 0, // 0..+24, makeup gain / post-stage gain match for A/B
   // 'adaptive' | 'fixed'.
   //
   // ⚠ THE PANEL ONLY OFFERS FIXED. Adaptive survives here as the kernel default
@@ -2443,9 +2443,18 @@ export function processSoftClipperBuffer(channelData, sampleRate, params = {}, o
  * Wider than the ±6 dB this knob had as a pure A/B trim, and it has to be:
  * measured on real-ish narration the four ceiling presets ask for +9.1 to
  * +10.4 dB, so the old travel could not reach any of them.
+ *
+ * ⚠ THE FLOOR IS 0, NOT −12, AND THE KNOB IS NO LONGER BIPOLAR. Nothing in
+ * this stage raises the signal's peak — the curve and the lookahead limiter
+ * both only reduce — so `inputPeak / outPeak` is at least 1 and the measured
+ * makeup can never be negative. The old −12 dB of travel was unreachable by
+ * AUTO and existed only as a hand A/B trim-down, which cost the knob a third
+ * of its rotation and put 0 dB at about 10 o'clock instead of at the stop.
+ * 0 dB is now the fully counter-clockwise position, which is how a unipolar
+ * gain knob reads.
  */
 export const SOFT_CLIPPER_MAKEUP_MAX_DB = 24
-export const SOFT_CLIPPER_MAKEUP_MIN_DB = -12
+export const SOFT_CLIPPER_MAKEUP_MIN_DB = 0
 
 /** Peak across every sample of every channel, optionally skipping a lead-in. */
 function peakOfChannels(channels, skip = 0) {
