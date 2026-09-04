@@ -227,6 +227,20 @@ function analyse(name, dryPath, wetPath) {
   console.log(`    reference ${rslope.m.toFixed(3)} dB/dB -> ${(1 / (1 - rslope.m)).toFixed(2)}:1   over ${rslope.lo}..${rslope.hi} dBFS`)
   console.log(`    ours      ${oslope.m.toFixed(3)} dB/dB -> ${(1 / (1 - oslope.m)).toFixed(2)}:1   over ${oslope.lo}..${oslope.hi} dBFS`)
 
+  console.log('\n  CREST vs COMPRESSION DEPTH — the acceptance criterion')
+  console.log('    A compressor must not raise peak-to-rms. Ours does, and the error')
+  console.log('    grows with depth, which is why one matched operating point hides it.')
+  console.log('    depth (median GR)   our crest change vs dry')
+  for (const target of [2, 4, 6, 8]) {
+    const knob = matchKnob(dry, target)
+    const o = runModel(dry, { peakReduction: knob })
+    const got = gainStats(blockGain(dry, o)).medGR
+    if (got < target - 0.5) continue          // the knob cannot reach this depth here
+    const dc = crest(o) - crest(dry)
+    console.log(`      ${target} dB   (knob ${knob.toFixed(1)})      ${dc >= 0 ? '+' : ''}${dc.toFixed(2)} dB   ${dc > 0.15 ? '<-- EXPANDING' : ''}`)
+  }
+  console.log(`    reference, for scale: ${dRef.toFixed(2)} dB at ${rs.medGR.toFixed(2)} dB median GR`)
+
   console.log('\n  PEAK ROUNDING (the residual a time-varying gain cannot explain)')
   console.log('    level      reference     ours')
   const rr = new Map(peakRounding(dry, wet).map(p => [p[0], p[1]]))
@@ -238,6 +252,12 @@ function analyse(name, dryPath, wetPath) {
   }
   console.log('    ⚠ positive values near the noise floor are the analog noise itself')
   console.log('      raising a median of |x|, not gain. Read the loud rows only.')
+  const noTube = runModel(dry, { peakReduction: pr, gainDb: rs.open, tube: false, cellMod: 0 })
+  console.log(`\n  TUBE STAGE'S SHARE OF THE CREST: ${(crest(ours) - crest(noTube)).toFixed(2)} dB`)
+  console.log('    Measured, not assumed — the output stage is repeatedly suspected of')
+  console.log('    this and repeatedly is not it. Under a tenth of a dB is the usual answer.')
+
+  console.log('\n  (peak-rounding caveats)')
   console.log('    ⚠ a few tenths is the estimator\'s own floor: the gain is linearly')
   console.log('      interpolated across each block, so fast envelope motion leaves a')
   console.log('      residual that reads as rounding. Only the trend with level is real.')
