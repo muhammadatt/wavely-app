@@ -139,7 +139,6 @@ const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies th
 // normal program: narration at -20 dBFS RMS would need the knob near 95 to
 // produce 3 dB of reduction. -18 dBFS is the EBU alignment.
 const NOMINAL_DBFS = -18
-const NOMINAL_LIN = Math.pow(10, NOMINAL_DBFS / 20) // reference level for the cell spike
 
 /**
  * Peak Reduction knob → side-chain drive, in dB above NOMINAL_DBFS.
@@ -452,8 +451,8 @@ const CELL_MOD_TAU_DB = 5.505
  * nominal), so the valves saturate later. They still saturate, which is what
  * stops the makeup running away the way LAEA's does.
  */
-const TUBE_DRIVE_LIN = 0.381 // knee at +8.4 dBFS, i.e. 26.4 dB above NOMINAL_DBFS
-const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
+export const TUBE_DRIVE_LIN = 0.381 // knee at +8.4 dBFS, i.e. 26.4 dB above NOMINAL_DBFS
+export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
 
 const COMPRESS_KNEE_DB = 20 // wide knee — the "leveling" feel
 const LIMIT_KNEE_DB = 6

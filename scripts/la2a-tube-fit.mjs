@@ -40,7 +40,14 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readWav } from '../test/voicerx/wav.js'
-import { LA2AKernel } from '../src/audio/la2aProcessor.js'
+// ⚠ THE CONSTANTS ARE IMPORTED, NOT RESTATED. They were written out as literal
+// 0.7 / 0.06 in four places here; when TUBE_DRIVE_LIN moved to 0.381 the
+// self-check below started failing with a 5.28 dB disagreement and took the
+// whole script down — reporting a drift between the closed form and the kernel
+// that did not exist, because the only thing that had drifted was this file's
+// copy of the numbers. A script whose job is detecting drift must not keep its
+// own copy of the thing that drifts.
+import { LA2AKernel, TUBE_DRIVE_LIN, TUBE_BIAS } from '../src/audio/la2aProcessor.js'
 import {
   CAPTURES_DIR, NOISE_FLOOR_FILE, sweepEntries, toneFilename,
   LEVEL_SWEEP_FREQ_HZ, FREQ_SWEEP_DBFS,
@@ -186,7 +193,7 @@ function selfCheckAgainstKernel() {
     const h = []
     for (let kHarm = 1; kHarm <= 3; kHarm++) h.push(dftMag(y, start, end - start, SR, CYCLE_HZ, kHarm))
     const kernelDbc = h.slice(1).map(v => db(v / h[0]))
-    const modelDbc = predictDbc(0.7, 0.06, levelDbfs + gainDb, 3)
+    const modelDbc = predictDbc(TUBE_DRIVE_LIN, TUBE_BIAS, levelDbfs + gainDb, 3)
     for (let i = 0; i < 2; i++) {
       const err = Math.abs(kernelDbc[i] - modelDbc[i])
       if (err > 0.05) {
@@ -301,7 +308,7 @@ function main() {
     if (!path) { console.log(`  ${String(dbfs).padStart(4)} dBFS   -- no capture (${e.file}) --`); continue }
     const m = analyzeCapture(path, LEVEL_SWEEP_FREQ_HZ)
     if (m.driftWarning) console.log(`  ⚠ ${e.file}: ${m.driftWarning}`)
-    const model = predictDbc(0.7, 0.06, dbfs) // current shipped constants
+    const model = predictDbc(TUBE_DRIVE_LIN, TUBE_BIAS, dbfs) // current shipped constants
     const fundGain = m.fundamentalDbfs - dbfs
     if (firstFundGain === null) firstFundGain = fundGain
 
@@ -326,7 +333,7 @@ function main() {
   // ── Frequency sweep — hold-out ──────────────────────────────────────────
   console.log(`\n=== FREQUENCY SWEEP (${FREQ_SWEEP_DBFS} dBFS, hold-out — not fit) ===`)
   console.log('freq        H2 meas   H2 @1kHz    H3 meas   H3 @1kHz')
-  const modelAt1kHz = predictDbc(0.7, 0.06, FREQ_SWEEP_DBFS)
+  const modelAt1kHz = predictDbc(TUBE_DRIVE_LIN, TUBE_BIAS, FREQ_SWEEP_DBFS)
   const level1kHzCapture = levelPoints.find(p => p.dbfs === FREQ_SWEEP_DBFS)
   for (const e of entries.filter(e => e.kind === 'freq')) {
     const path = captureFor(e.file)
@@ -385,15 +392,15 @@ function main() {
         }
         return e
       }
-      const starts = [[0.3, 0.02], [0.7, 0.06], [1.2, 0.1], [1.75, 0.2], [2.5, 0.3]]
+      const starts = [[0.3, 0.02], [TUBE_DRIVE_LIN, TUBE_BIAS], [1.2, 0.1], [1.75, 0.2], [2.5, 0.3]]
       let best = null
       for (const s of starts) {
         const r = nelderMead(objective, s, { steps: [0.1, 0.02] })
         if (!best || r.fx < best.fx) best = r
       }
       const [d, b] = best.x
-      const currentResidual = objective([0.7, 0.06])
-      console.log(`  current TUBE_DRIVE_LIN=0.700, TUBE_BIAS=0.060 — objective ${currentResidual.toFixed(3)}`)
+      const currentResidual = objective([TUBE_DRIVE_LIN, TUBE_BIAS])
+      console.log(`  current TUBE_DRIVE_LIN=${TUBE_DRIVE_LIN.toFixed(3)}, TUBE_BIAS=${TUBE_BIAS.toFixed(3)} — objective ${currentResidual.toFixed(3)}`)
       console.log(`  best fit TUBE_DRIVE_LIN=${d.toFixed(3)}, TUBE_BIAS=${b.toFixed(3)} — objective ${best.fx.toFixed(3)}`)
       console.log(`\n  This is a candidate, not a rewrite. Update TUBE_DRIVE_LIN / TUBE_BIAS in`)
       console.log(`  la2aProcessor.js by hand if the fit is trusted, with the capture's own evidence`)

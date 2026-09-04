@@ -260,7 +260,7 @@ These apply only to the `acx_audiobook` preset:
 - Playback with A/B before/after comparison; looping and region changes are scheduled on the audio clock (not animation frames) for sample-accurate seams
 - Preset panel (4 presets) + output profile panel (3 profiles) with dynamic UI rules
 - Processing report panel (measurements, ACX certification, advisory flags)
-- Compressors (OptoSmooth — LA-2A style, FET Punch — 1176 style) with real-time auto makeup gain, closed-form/iterative solves referenced to true peak, and a fitted LA-2A side-chain taper
+- Compressors (OptoSmooth — LA-2A style, FET Punch — 1176 style) with real-time auto makeup gain, closed-form/iterative solves referenced to true peak, and a fitted LA-2A side-chain taper. OptoSmooth's distortion lives with the **T4 gain cell**, not the output valves: the applied gain ripples with the signal around the detector's smoothed envelope, which is odd-dominant and RISES with compression, per six hardware units measured in Moore, JAES 74(1/2):61–72 (2026). There is no tube-drive knob — the valves are driven by level alone. Full derivation in `docs/claude-dev-log.md`
 - Scheps Parallel — Pultec/LA-2A vocal chain composite (push → OptoSmooth → recovery on a wet path, blended against a delay-compensated dry path), with auto output trim
 - Soft Clipper — peak control via a shaped curve plus an optional lookahead limiter hybrid path (CLIP/LIMIT switch), with HF emphasis compensation, an auto makeup trim, and configurable ceiling presets (measured from the selection, not a fixed target)
 - Inflator — level-independent density/harmonic enhancement (ported curve with algebraic ceiling guarantees), optional 3-band split
