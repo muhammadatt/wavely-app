@@ -2,7 +2,7 @@ import { getSegmentDuration } from './operations.js'
 import { analysisWindow } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import {
-  LA2A_DEFAULTS, LA2A_LATENCY_SAMPLES, toKernelParams,
+  LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
 } from './effects/la2aCompressor.js'
 import { ensureFET1176Worklet } from './fet1176WorkletLoader.js'
 import {
@@ -471,13 +471,22 @@ async function applyWorkletRegion(
   return trimmed
 }
 
-/** Apply OptoSmooth (LA-2A) compression to a region. */
+/**
+ * Apply OptoSmooth (LA-2A) compression to a region.
+ *
+ * ⚠ THE LATENCY IS PER-PATCH, NOT A CONSTANT — lookahead adds its own delay on
+ * top of the oversampler's 50 samples, and at the 20 ms ceiling that is 882
+ * more. Trimming the constant instead would splice the region in that far late
+ * and drop that much of its tail, at both boundaries. Same shape as the soft
+ * clipper's limiter; see the note on `applySoftClipperRegion`.
+ */
 export function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...LA2A_DEFAULTS, ...params }
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureLA2AWorklet,
     processorName: 'la2a-processor',
-    kernelParams: toKernelParams({ ...LA2A_DEFAULTS, ...params }),
-    latencySamples: LA2A_LATENCY_SAMPLES,
+    kernelParams: toKernelParams(merged),
+    latencySamples: la2aPatchLatencySamples(merged, sampleRate),
   })
 }
 

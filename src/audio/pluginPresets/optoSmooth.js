@@ -27,6 +27,7 @@
  */
 
 import { definePluginPresets } from './store.js'
+import { LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
 
 /**
  * ⚠ THIS MODULE DELIBERATELY IMPORTS NOTHING FROM `effects/la2aCompressor.js`.
@@ -67,12 +68,21 @@ function normalize(params) {
     peakReduction: clamp(params.peakReduction ?? 50, 0, 100),
     gain: autoMakeup ? 0 : clamp(params.gain ?? 0, GAIN_MIN_DB, GAIN_MAX_DB),
     r37: clamp(params.r37 ?? 100, 0, 100),
+    /**
+     * ⚠ DEFAULTS TO 0 FOR PRESETS SAVED BEFORE THE CONTROL EXISTED, and that
+     * is the only correct default: those patches were auditioned with no
+     * lookahead, so anything else would change how a stored preset sounds.
+     * Every factory preset states it explicitly for the same reason.
+     */
+    lookahead: clamp(params.lookahead ?? 0, 0, LOOKAHEAD_MAX_MS),
     autoMakeup,
   }
 }
 
+// ⚠ A PARAM MISSING FROM THIS LIST IS SILENTLY DROPPED on save and never
+// restored — the preset simply forgets it.
 export const OPTO_SMOOTH_PARAM_KEYS = [
-  'mode', 'peakReduction', 'gain', 'r37', 'autoMakeup',
+  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup',
 ]
 
 export const OPTO_SMOOTH_PRESETS = [
@@ -85,6 +95,7 @@ export const OPTO_SMOOTH_PRESETS = [
       peakReduction: 45,
       gain: 0,
       r37: 100,
+      lookahead: 0,
       autoMakeup: true,
     },
   },
@@ -99,6 +110,7 @@ export const OPTO_SMOOTH_PRESETS = [
       peakReduction: 60,
       gain: 0,
       r37: 82,
+      lookahead: 0,
       autoMakeup: true,
     },
   },
@@ -115,6 +127,7 @@ export const OPTO_SMOOTH_PRESETS = [
       peakReduction: 62,
       gain: 0,
       r37: 45,
+      lookahead: 0,
       autoMakeup: true,
     },
   },
@@ -137,6 +150,7 @@ export const OPTO_SMOOTH_PRESETS = [
       // thickens on fast material — this is the setting for a voice that is
       // already fairly even.
       r37: 100,
+      lookahead: 0,
       autoMakeup: true,
     },
   },
@@ -153,6 +167,7 @@ export const OPTO_SMOOTH_PRESETS = [
       peakReduction: 40,
       gain: 0,
       r37: 100,
+      lookahead: 0,
       autoMakeup: true,
     },
   },

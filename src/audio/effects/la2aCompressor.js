@@ -10,34 +10,23 @@
  *
  * The worklet module loads asynchronously; until it's ready the effect
  * passes audio through unprocessed, then splices the worklet node in.
+ *
+ * Params, defaults and the latency arithmetic live in la2aParams.js — see
+ * there for why they are not in this file — and are re-exported below.
  */
 
 import { ensureLA2AWorklet } from '../la2aWorkletLoader.js'
-import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+import {
+  LA2A_DEFAULTS, LA2A_LATENCY_SAMPLES, LOOKAHEAD_MAX_MS,
+  toKernelParams, la2aPatchLatencySamples,
+} from './la2aParams.js'
 
-/**
- * The tube stage runs oversampled, and the halfband filters that get it there
- * are linear phase, so the plugin delays. Constant at every setting — see
- * `latencySamples` on the kernel.
- */
-export const LA2A_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
-
-export const LA2A_DEFAULTS = {
-  mode: 'compress', // 'compress' | 'limit'
-  peakReduction: 50,
-  gain: 0, // makeup gain dB
-  r37: 100, // R37 side-chain trimmer as knob rotation; 100 = flat (factory)
-}
-
-/** Map UI param names to kernel param names. */
-export function toKernelParams(params) {
-  return {
-    mode: params.mode,
-    peakReduction: params.peakReduction,
-    gainDb: params.gain,
-    r37: params.r37,
-  }
+// Re-exported so callers that already reach for these through the effect keep
+// working; the definitions live in la2aParams.js, which Node can import.
+export {
+  LA2A_DEFAULTS, LA2A_LATENCY_SAMPLES, LOOKAHEAD_MAX_MS,
+  toKernelParams, la2aPatchLatencySamples,
 }
 
 export function createLA2ACompressor(audioContext) {
@@ -150,6 +139,8 @@ export function createLA2ACompressor(audioContext) {
 export const la2aEffect = {
   id: 'la2a-compressor',
   name: 'LA-2A Compressor',
+  // Nominal, for a chain that wants one number. The apply path does not use
+  // this — it asks `la2aPatchLatencySamples` with the params in hand.
   latencySamples: LA2A_LATENCY_SAMPLES,
   createNodes(audioContext) {
     return createLA2ACompressor(audioContext)

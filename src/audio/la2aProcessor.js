@@ -484,7 +484,56 @@ export const LA2A_KERNEL_DEFAULTS = {
    * it off and why that is sound.
    */
   oversample: true,
+  /**
+   * Lookahead, in milliseconds. 0 (the default) is the hardware.
+   *
+   * See LOOKAHEAD_MAX_MS for what it is for and what it costs.
+   */
+  lookaheadMs: 0,
 }
+
+/**
+ * Lookahead ceiling, milliseconds.
+ *
+ * WHAT IT IS. The audio path is delayed; the side-chain is not. Nothing else
+ * changes — not the detector, not the static curve, not the T4's ballistics,
+ * not the LDR memory. The gain envelope is bit-identical at every depth, which
+ * was verified before this shipped. Only WHEN that envelope meets the audio
+ * moves, so a transient arriving at the cell is met by the gain the cell would
+ * otherwise have reached `lookaheadMs` later.
+ *
+ * WHY IT EXISTS. ATTACK_S is 10 ms, so the first ~20 ms of every onset out of
+ * silence passes at 6-12 dB less reduction than the surrounding program. That
+ * is the T4 and it is wanted. What is not wanted is what it does to
+ * `computeAutoMakeupDb`, which is peak-referenced by construction (see
+ * `peakOfChannels`): one un-compressed onset sets the reference for the whole
+ * file, so the makeup comes out small and the compressor ends up REDUCING
+ * average loudness while INCREASING crest factor. Measured on a synthetic
+ * narration signal at Peak Reduction 70, peak-matched: -5.8 dB rms and +5.8 dB
+ * crest against the source, with the binding peak the file's FIRST SYLLABLE.
+ *
+ * The same table, sweeping this control:
+ *
+ *     lookahead   makeup    d-rms    d-crest
+ *     0 (off)     +10.10    -5.81     +5.81
+ *     5 ms        +12.93    -3.78     +3.78
+ *     10 ms       +15.23    -1.87     +1.87
+ *     20 ms       +16.94    -0.65     +0.65
+ *     40 ms       +18.28    +0.58     -0.58
+ *
+ * ⚠ THE CEILING IS WHERE PRE-DUCK BECOMES THE PROBLEM, not where the numbers
+ * stop improving — and the two point opposite ways, which is why the ceiling is
+ * argued rather than maximised. The gain starts falling `lookaheadMs` BEFORE the
+ * onset that caused it. At 40 ms that is an audible suck into every hard
+ * consonant, and the table above shows it is already over-correcting there:
+ * crest below the source means the compressor has become a transient designer.
+ * 20 ms keeps the correction one-sided.
+ *
+ * ⚠ IT IS OFF BY DEFAULT AND MUST STAY OFF BY DEFAULT. An LA-2A has no
+ * lookahead, the transient pass-through is the instrument, and every preset and
+ * every rendered file that predates this control was made without it.
+ */
+export const LOOKAHEAD_MAX_MS = 20
 
 // Gain-knob smoothing time — the same 8 ms the soft clipper and FET Punch use.
 const MAKEUP_SMOOTH_MS = 8
@@ -621,6 +670,16 @@ export class LA2AKernel {
      */
     this.wetScratch = new Float64Array(128)
 
+    /**
+     * LOOKAHEAD — per-channel delay on the AUDIO path only. See
+     * LOOKAHEAD_MAX_MS. Zero-length while the control is off, which is the
+     * default, so the lines are grown on demand like every other per-channel
+     * resource here.
+     */
+    this.lookaheadSamples = 0
+    this.laLines = []
+    this.laScratch = []
+
     this.params = { ...LA2A_KERNEL_DEFAULTS }
     this.setParams({})
   }
@@ -689,6 +748,11 @@ export class LA2AKernel {
     this.dcY = this.dcY.map(() => 0)
     this.gainDelay.reset()
     for (const line of this.dryLines) line?.reset()
+    // ⚠ THE LOOKAHEAD LINES TOO. They hold `lookaheadSamples` of the PREVIOUS
+    // region's audio, and a reset that left them would splice that tail onto
+    // the head of the next one — audible, and exactly the class of thing a
+    // reset exists to prevent.
+    for (const line of this.laLines) line?.reset()
   }
 
   /** Merge a partial param update and recompute derived coefficients. */
@@ -729,6 +793,19 @@ export class LA2AKernel {
     this.dryMix = 1 - this.wetMix
 
     this.oversampleOn = p.oversample !== false
+
+    // Lookahead in ms rather than samples so the same params mean the same
+    // thing at any rate, and so `toKernelParams` needs no sample rate.
+    const laMs = clamp(Number.isFinite(p.lookaheadMs) ? p.lookaheadMs : 0, 0, LOOKAHEAD_MAX_MS)
+    const laSamples = Math.round((laMs / 1000) * this.sampleRate)
+    if (laSamples !== this.lookaheadSamples) {
+      this.lookaheadSamples = laSamples
+      // Dropped rather than resized: a delay line's contents are a length's
+      // worth of history, and there is no meaning to carry across a change of
+      // length. Rebuilt on the next block.
+      this.laLines = []
+      this.laScratch = []
+    }
   }
 
   /**
@@ -741,7 +818,7 @@ export class LA2AKernel {
    * measurement mode described on `oversample`, which nothing renders through.
    */
   get latencySamples() {
-    return this.oversampleOn ? OVERSAMPLE_LATENCY_SAMPLES : 0
+    return (this.oversampleOn ? OVERSAMPLE_LATENCY_SAMPLES : 0) + this.lookaheadSamples
   }
 
   /**
@@ -907,8 +984,47 @@ export class LA2AKernel {
      * Base rate even on the oversampled path: it is the same quantity the
      * offline solve measures, and the tracker's job is to agree with that.
      */
+    /**
+     * LOOKAHEAD — the audio path is delayed here, and ONLY here.
+     *
+     * Everything above this line is the side-chain: the detector, the static
+     * curve, the T4 ballistics and the LDR memory have all just run on the
+     * UNDELAYED input, which is what makes the envelope identical at every
+     * lookahead depth. Everything below consumes audio, and takes the delayed
+     * copy — the tracker's extrema, the oversampled gain cell, the tube stage
+     * and the dry side of the wet/dry blend.
+     *
+     * ⚠ THE TRACKER MUST TAKE THE DELAYED COPY, and that is the whole reason
+     * this sits above it rather than below. `trkVMax`/`trkVMin` pair a sample
+     * with the gain applied TO IT; pairing undelayed audio with `preGain` would
+     * hand every transient the gain from `lookaheadSamples` before its own
+     * attack, which is the same misalignment the note on `wetScratch` describes
+     * and it fails the same way — the live makeup reads high and fights the
+     * offline solve.
+     *
+     * `trkInPeak` above is deliberately left on the undelayed input: it is the
+     * loudest sample HEARD, a target the delay only re-times.
+     */
+    let audioChannels = inputChannels
+    if (this.lookaheadSamples > 0) {
+      while (this.laLines.length < nIn) {
+        this.laLines.push(new DelayLine(this.lookaheadSamples))
+        this.laScratch.push(new Float32Array(0))
+      }
+      const delayed = []
+      for (let ch = 0; ch < nIn; ch++) {
+        if (this.laScratch[ch].length < n) this.laScratch[ch] = new Float32Array(n)
+        const dst = this.laScratch[ch]
+        const line = this.laLines[ch]
+        const src = inputChannels[ch]
+        for (let i = 0; i < n; i++) dst[i] = line.push(src[i])
+        delayed.push(dst.subarray(0, n))
+      }
+      audioChannels = delayed
+    }
+
     for (let ch = 0; ch < nOut; ch++) {
-      const src = inputChannels[Math.min(ch, nIn - 1)]
+      const src = audioChannels[Math.min(ch, nIn - 1)]
       for (let i = 0; i < n; i++) {
         const v = src[i] * preGain[i]
         if (v > this.trkVMax) this.trkVMax = v
@@ -939,7 +1055,7 @@ export class LA2AKernel {
     const wet = this.wetScratch
 
     for (let ch = 0; ch < nOut; ch++) {
-      const input = inputChannels[ch < nIn ? ch : nIn - 1]
+      const input = audioChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
 
       if (!this.oversampleOn) {
@@ -1031,6 +1147,29 @@ export class LA2AKernel {
       avgGainReductionDb: this.grActive > 0 ? this.grSum / this.grActive : 0,
     }
   }
+}
+
+/**
+ * The kernel's algorithmic latency for a set of params, without building one.
+ *
+ * ⚠ THE APPLY PATH CANNOT ASK A KERNEL. `applyWorkletRegion` sizes its
+ * OfflineAudioContext from this number, so it needs it BEFORE any node exists —
+ * which is why the value used to be a module constant, and why that constant
+ * silently became wrong the moment latency stopped being fixed. The soft
+ * clipper hit this first; see `softClipperLatencySamples` for the seam it left
+ * (a region spliced in shifted late, with that much of its tail dropped).
+ *
+ * Mirrors the `latencySamples` getter rather than sharing code with it, and is
+ * pinned against a real kernel by its test so the two cannot drift.
+ *
+ * `params` are KERNEL params (`lookaheadMs`), not the panel's.
+ */
+export function la2aLatencySamples(params, sampleRate) {
+  const osLatency = params?.oversample === false ? 0 : OVERSAMPLE_LATENCY_SAMPLES
+  const laMs = clamp(
+    Number.isFinite(params?.lookaheadMs) ? params.lookaheadMs : 0, 0, LOOKAHEAD_MAX_MS,
+  )
+  return osLatency + Math.round((laMs / 1000) * sampleRate)
 }
 
 /**
@@ -1155,12 +1294,37 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
   const inputPeak = peakOfChannels(channelData)
   if (inputPeak <= 0) return 0
 
+  /**
+   * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK, not the raw render.
+   *
+   * With lookahead the output lags its input, so the last `latency` samples of
+   * the region never emerge and the first `latency` are the delay line filling
+   * with silence. Measuring the render as-is therefore compares a region's
+   * input peak against an output missing that region's tail — and on a short
+   * selection the tail is where the peak often is. `applyWorkletRegion` already
+   * solves this the same way for the render it splices in: extend, then trim.
+   * This is that, so the solve and the apply see the same audio.
+   *
+   * Zero at lookahead 0, where it telescopes to the old behaviour exactly.
+   */
+  const latency = la2aLatencySamples(measureParams, sampleRate)
+  const padded = latency > 0
+    ? channelData.map((ch) => {
+      const p = new Float32Array(ch.length + latency)
+      p.set(ch, 0)
+      return p
+    })
+    : channelData
+
   let makeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
-    const { channelData: out } = processLA2ABuffer(channelData, sampleRate, {
+    const { channelData: rendered } = processLA2ABuffer(padded, sampleRate, {
       ...measureParams,
       gainDb: makeupDb,
     })
+    const out = latency > 0
+      ? rendered.map((ch) => ch.subarray(latency, latency + channelData[0].length))
+      : rendered
     const outPeak = peakOfChannels(out)
     if (outPeak <= 0) break
     const correctionDb = 20 * Math.log10(inputPeak / outPeak)

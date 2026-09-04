@@ -68,6 +68,19 @@ const LA2A_FIXED = {
   mode: 'compress',
   r37: 0,
   mix: 1,
+  /**
+   * ⚠ PINNED OFF, EXPLICITLY, EVEN THOUGH IT IS THE KERNEL DEFAULT. Lookahead
+   * moves `la2a.latencySamples`, which this composite's dry delay follows and
+   * `SCHEPS_LATENCY_SAMPLES` does not — that constant is what the apply path
+   * trims. Inheriting the default would make Scheps' reported latency a
+   * hostage to a default it does not own. Pinning it here means the constant
+   * is true by construction, and its test says so.
+   *
+   * Scheps has the same slow-attack transient behaviour and could reasonably
+   * want this control of its own; that is a deliberate follow-up, not an
+   * oversight. It needs `SCHEPS_LATENCY_SAMPLES` to become per-patch first.
+   */
+  lookaheadMs: 0,
 }
 
 export const SCHEPS_KERNEL_DEFAULTS = {

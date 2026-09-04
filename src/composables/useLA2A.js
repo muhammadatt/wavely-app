@@ -15,6 +15,7 @@ const la2aMode = ref(LA2A_DEFAULTS.mode)
 const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
 const la2aR37 = ref(LA2A_DEFAULTS.r37)
+const la2aLookahead = ref(LA2A_DEFAULTS.lookahead)
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
 // boundary and perturbs the levels the mastering chain later measures.
@@ -53,6 +54,7 @@ function currentParams() {
     peakReduction: la2aPeakReduction.value,
     gain: la2aGain.value,
     r37: la2aR37.value,
+    lookahead: la2aLookahead.value,
   }
 }
 
@@ -63,6 +65,13 @@ function measurementParams() {
     peakReduction: la2aPeakReduction.value,
     gainDb: 0,
     r37: la2aR37.value,
+    /**
+     * ⚠ LOOKAHEAD BELONGS IN THE MEASUREMENT, and it is the whole point of the
+     * control. It is what moves the peak the makeup is referenced to — leaving
+     * it out would solve the makeup for a compressor the user is not listening
+     * to, and hand back exactly the number the control exists to change.
+     */
+    lookaheadMs: la2aLookahead.value,
   }
 }
 
@@ -238,6 +247,9 @@ export function useLA2A() {
   const syncMode = (v) => syncCompressionParam('mode', la2aMode, v)
   const syncPeakReduction = (v) => syncCompressionParam('peakReduction', la2aPeakReduction, v)
   const syncR37 = (v) => syncCompressionParam('r37', la2aR37, v)
+  // A compression param, not a trim: it changes which peak survives, so the
+  // makeup has to be re-solved and the live tracker's extrema are stale.
+  const syncLookahead = (v) => syncCompressionParam('lookahead', la2aLookahead, v)
 
   /**
    * Touch-to-take-over: dragging the knob while AUTO is on switches AUTO off
@@ -351,6 +363,7 @@ export function useLA2A() {
     la2aPeakReduction,
     la2aGain,
     la2aR37,
+    la2aLookahead,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
     la2aPreview,
@@ -363,6 +376,7 @@ export function useLA2A() {
     syncPeakReduction,
     syncGain,
     syncR37,
+    syncLookahead,
     toggleAutoMakeup,
     refreshAutoMakeup,
     resetLiveMakeup,
