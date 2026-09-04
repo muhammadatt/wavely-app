@@ -363,6 +363,11 @@ export function useSoftClipper() {
         state.currentFile.sampleRate, state.currentFile.channels,
       )
       if (seq !== makeupSeq) return // a newer measurement is already in flight
+      // The floor is 0 and the clamp against it is belt-and-braces: nothing in
+      // the stage raises the peak, so `inputPeak / outPeak` is at least 1 and
+      // a negative makeup is unreachable. The TOP is the one that binds — a
+      // deep ceiling undershoots rather than overshooting, which is what keeps
+      // "never hotter than the source" true at every setting.
       outputTrimDb.value = Math.max(
         SOFT_CLIPPER_MAKEUP_MIN_DB, Math.min(SOFT_CLIPPER_MAKEUP_MAX_DB, makeupDb))
       pushParam('outputTrimDb', outputTrimDb.value)

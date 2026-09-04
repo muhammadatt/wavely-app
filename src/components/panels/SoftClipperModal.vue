@@ -603,10 +603,16 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
         <div style="width:1px;align-self:stretch;background:rgba(255,255,255,.07);flex-shrink:0"></div>
 
         <!-- ── Output ───────────────────────────────────────────────────
-             ⚠ THE TRAVEL IS -12..+24, NOT ±6, and it had to widen. As a pure
+             ⚠ THE TRAVEL IS 0..+24, NOT ±6, and it had to widen. As a pure
              A/B trim ±6 was plenty; as makeup it is not — the four ceiling
              presets ask for +9.1 to +10.4 dB on real material, so the old knob
-             could not reach any of them. -->
+             could not reach any of them.
+
+             ⚠ AND IT IS UNIPOLAR: nothing in this stage raises the peak, so
+             the measured makeup is never negative and the -12 dB this knob
+             used to carry was travel AUTO could not reach. It also pushed
+             0 dB round to about 10 o'clock; it is now the counter-clockwise
+             stop, which is where a gain knob's zero belongs. -->
         <div style="width:92px;flex-shrink:0;display:flex;flex-direction:column;align-items:center">
           <div class="relative w-full" :style="{ opacity: autoMakeup ? 0.78 : 1 }">
             <Knob
@@ -615,7 +621,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
               :min="SOFT_CLIPPER_MAKEUP_MIN_DB" :max="SOFT_CLIPPER_MAKEUP_MAX_DB" :step="0.1"
               label="Output" :accent="ACCENT" :format-value="formatGain"
               :value-font-px="15"
-              :disabled="!clipperPreview" bipolar
+              :disabled="!clipperPreview"
               title="Makeup gain. AUTO hands back what the ceiling took off the peaks, so the output peak lands where the source's was."
             />
             <!-- ⚠ NO AUTO BADGE ON THE KNOB, unlike OptoSmooth and FET Punch,

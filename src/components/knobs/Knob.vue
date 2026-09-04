@@ -1,6 +1,10 @@
 <script setup>
 import { computed, ref } from 'vue'
 
+import {
+  clamp01, valueToPct, pctToValue, bipolarOriginPct,
+} from './knobGeometry.js'
+
 const props = defineProps({
   modelValue: { type: Number, required: true },
   min: { type: Number, default: 0 },
@@ -73,28 +77,27 @@ const N_TICKS = 13
 const isLog = computed(() =>
   props.scale === 'log' && props.min > 0 && props.max > props.min)
 
-function clamp01(v) {
-  return Math.max(0, Math.min(1, v))
-}
-
 /** Value → fraction of travel. */
 function toPct(v) {
-  if (isLog.value) return clamp01(Math.log(v / props.min) / Math.log(props.max / props.min))
-  return clamp01((v - props.min) / (props.max - props.min))
+  return valueToPct(v, props.min, props.max, props.scale)
 }
 
 /** Fraction of travel → value. */
 function fromPct(p) {
-  if (isLog.value) return props.min * (props.max / props.min) ** p
-  return props.min + p * (props.max - props.min)
+  return pctToValue(p, props.min, props.max, props.scale)
 }
 
 const pct = computed(() => toPct(props.modelValue))
 
 const trackDash = `${ARC.toFixed(1)} ${CIRCUMFERENCE.toFixed(1)}`
 
-/** Where along the arc the fill starts, as a fraction: 0 normally, 0.5 bipolar. */
-const origin = computed(() => (props.bipolar ? 0.5 : 0))
+/**
+ * Where along the arc the fill starts, as a fraction: 0 normally, and where
+ * ZERO falls when bipolar — not the arc's midpoint, which is only the same
+ * thing on a symmetric range. See `bipolarOriginPct`.
+ */
+const origin = computed(() =>
+  (props.bipolar ? bipolarOriginPct(props.min, props.max, props.scale) : 0))
 
 const valDash = computed(() => {
   const len = Math.abs(pct.value - origin.value) * ARC
