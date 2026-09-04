@@ -38,18 +38,67 @@
  * envelope is known exactly; dividing by a demodulated input would put the
  * filter's group delay on both sides of the ratio, where it cancels only while
  * the gain is still — i.e. everywhere except during the attack.
+ *
+ * ── WHAT THE FIRST VERSION OF THIS STIMULUS COULD NOT HAVE SEEN ─────────────
+ *
+ * The T4 is an electroluminescent panel lighting a CdS photoresistor, and the
+ * cell's speed depends on how much light it has already absorbed: a cell
+ * sitting in darkness responds sluggishly to a transient, while one already lit
+ * catches the next one far faster. The "about 10 ms" figure is an average over
+ * that behaviour, not a time constant.
+ *
+ *  1. ⚠ EVERY BURST USED TO START FROM A DARK CELL — 20 s of rest before each
+ *     one. That measures how the RELEASE tail lengthens with exposure and is
+ *     structurally blind to the ATTACK speeding up, which is the half of the
+ *     memory that decides what a transient does. `retrigger.wav` fixes it: a
+ *     conditioning burst, then a test step at a sweep of gaps, so the attack is
+ *     measured against how recently the cell was lit.
+ *
+ *  2. ⚠ ONE PROBE AT 1 kHz. The cell responds faster to highs than lows and
+ *     1 kHz sits above most voice fundamentals, so the one frequency measured
+ *     was the one narration cares least about. `frequency.wav` steps the same
+ *     burst at 100 / 200 / 400 / 1000 / 3000 Hz.
+ *
+ *  3. ⚠ A 5 ms RAISED-COSINE EDGE AND A 500 Hz DEMODULATOR COULD NOT RESOLVE AN
+ *     ATTACK FASTER THAN ABOUT 5 ms — so a 1-2 ms pre-lit attack would have
+ *     come back as "10 ms" no matter what the plugin did, confirming our own
+ *     constant by construction. Both are gone: steps land exactly on a zero
+ *     crossing of the probe (no discontinuity in the waveform, so no click and
+ *     no fade needed), and the envelope is the magnitude of the analytic signal
+ *     via an FFT Hilbert transform, which for an amplitude-modulated tone is
+ *     EXACT rather than smoothed.
  */
 
 import { writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { readWav } from '../test/voicerx/wav.js'
+import { getFFT } from '../src/audio/dsp/fft.js'
 import { LA2AKernel } from '../src/audio/la2aProcessor.js'
 
 const SR = 44100
-const PROBE_HZ = 1000        // above the R37 shelf corner, so the side-chain is flat here
+const PROBE_HZ = 1000        // default probe; `frequency.wav` sweeps it
 const LOW_DBFS = -40         // below threshold at any useful knob: the cell rests open
 const HIGH_DBFS = -18        // nominal line level
-const FADE_MS = 5            // step edges are raised-cosine, so nothing clicks
+
+/** Probe frequencies for the frequency-dependence file, Hz. Voice-weighted:
+ *  two fundamentals, two formant-region, one sibilance. */
+const FREQS_HZ = [100, 200, 400, 1000, 3000]
+
+/** Gaps between a conditioning burst and the test step, seconds. The cell's
+ *  light history decays across this, so the test step's attack is measured
+ *  against how recently it was lit. */
+const RETRIGGER_GAPS = [0.05, 0.15, 0.5, 1.5, 5.0]
+const COND_S = 2.0           // conditioning burst: long enough to light the cell fully
+const TEST_S = 0.5           // test step
+/**
+ * ⚠ THE TEST STEP IS LOUDER THAN THE CONDITIONING BURST, and that is not a
+ * detail. At equal levels a short gap leaves the cell already closed to very
+ * near the test's target, so there is almost no excursion left and the rise
+ * time is measured on 1 dB of travel — ill-conditioned, and it read as 0.0 ms.
+ * Stepping UP from the conditioned state demands fresh reduction at every gap.
+ */
+const COND_DBFS = -24
+const TEST_DBFS = -12
 
 /** Burst lengths, seconds. The spread is what measures the memory. */
 const BURSTS = [0.05, 0.2, 1.0, 3.0, 10.0]
@@ -70,12 +119,24 @@ const lin = d => Math.pow(10, d / 20)
 
 // ── Stimulus ────────────────────────────────────────────────────────────────
 
-/** Amplitude envelope of the burst stimulus, and where each event sits. */
+/**
+ * Every event carries its own probe frequency and levels. Steps land on a ZERO
+ * CROSSING of that probe, which is what lets the edge be instantaneous: the
+ * waveform value is continuous across it (only its derivative jumps), so there
+ * is nothing to click and no fade to blur the attack.
+ */
+function snapToZeroCrossing(tSec, freqHz) {
+  const halfPeriod = 1 / (2 * freqHz)
+  return Math.round(tSec / halfPeriod) * halfPeriod
+}
+
 function burstPlan() {
   const events = []
-  let t = 1.0                                   // a second of lead-in
+  let t = 1.0
   for (const T of BURSTS) {
-    events.push({ T, up: t + PRE_S, down: t + PRE_S + T })
+    const up = snapToZeroCrossing(t + PRE_S, PROBE_HZ)
+    events.push({ tag: `burst ${T}s`, T, freqHz: PROBE_HZ, hiDb: HIGH_DBFS,
+      up, down: snapToZeroCrossing(up + T, PROBE_HZ) })
     t += PRE_S + T + POST_S + REST_S
   }
   return { events, seconds: t + 1.0 }
@@ -85,30 +146,83 @@ function stairPlan() {
   const events = []
   let t = 1.0
   for (const L of STAIRS) {
-    events.push({ L, up: t + STAIR_REST_S, down: t + STAIR_REST_S + STAIR_S })
+    const up = snapToZeroCrossing(t + STAIR_REST_S, PROBE_HZ)
+    events.push({ tag: `${L} dBFS`, L, freqHz: PROBE_HZ, hiDb: L,
+      up, down: snapToZeroCrossing(up + STAIR_S, PROBE_HZ) })
     t += STAIR_REST_S + STAIR_S
   }
   return { events, seconds: t + 1.0 }
 }
 
-/** Raised-cosine ramp between two amplitudes, so a bounce cannot click. */
-function build(plan, ampAt) {
+/**
+ * ATTACK MEMORY. Each block is: rest (dark) -> conditioning burst -> gap ->
+ * test step. The conditioning burst lights the cell; the gap decides how much
+ * of that light is left when the test step arrives. If the attack is
+ * program-dependent, the test step's rise time shortens as the gap shortens —
+ * and the first block's gap is long enough to serve as the dark-cell control.
+ */
+function retriggerPlan() {
+  const events = []
+  let t = 1.0
+  for (const gap of RETRIGGER_GAPS) {
+    const cUp = snapToZeroCrossing(t + PRE_S, PROBE_HZ)
+    const cDown = snapToZeroCrossing(cUp + COND_S, PROBE_HZ)
+    const tUp = snapToZeroCrossing(cDown + gap, PROBE_HZ)
+    events.push({ tag: `condition (gap ${gap}s)`, freqHz: PROBE_HZ, hiDb: COND_DBFS,
+      up: cUp, down: cDown, role: 'condition' })
+    events.push({ tag: `test after ${gap}s`, gap, freqHz: PROBE_HZ, hiDb: TEST_DBFS,
+      up: tUp, down: snapToZeroCrossing(tUp + TEST_S, PROBE_HZ), role: 'test' })
+    t = tUp + TEST_S + POST_S + REST_S
+  }
+  return { events, seconds: t + 1.0 }
+}
+
+/**
+ * FREQUENCY DEPENDENCE. The same step at each probe, each in its own segment
+ * with a full rest between, so no segment inherits the previous one's light.
+ */
+function freqPlan() {
+  const events = []
+  let t = 1.0
+  for (const f of FREQS_HZ) {
+    const up = snapToZeroCrossing(t + PRE_S, f)
+    events.push({ tag: `${f} Hz`, freqHz: f, hiDb: HIGH_DBFS,
+      up, down: snapToZeroCrossing(up + 1.0, f) })
+    t += PRE_S + 1.0 + POST_S + REST_S
+  }
+  return { events, seconds: t + 1.0 }
+}
+
+/**
+ * Build the waveform. Between events the probe sits at LOW_DBFS at that
+ * event's frequency; frequency changes happen during a rest, at a zero
+ * crossing, so they too are click-free.
+ */
+function build(plan) {
   const n = Math.round(plan.seconds * SR)
   const x = new Float32Array(n)
-  const fade = Math.round(FADE_MS / 1000 * SR)
   const env = new Float64Array(n).fill(lin(LOW_DBFS))
-  for (const e of plan.events) {
-    const a = Math.round(e.up * SR), b = Math.round(e.down * SR)
-    const hi = ampAt(e)
-    for (let i = a; i < b && i < n; i++) env[i] = hi
-    for (let j = 0; j < fade; j++) {
-      const lo = lin(LOW_DBFS), u = 0.5 * (1 - Math.cos(Math.PI * j / fade))
-      if (a + j < n) env[a + j] = lo + (hi - lo) * u
-      if (b + j < n) env[b + j] = hi + (lo - hi) * u
-    }
+  const freq = new Float64Array(n).fill(plan.events[0]?.freqHz ?? PROBE_HZ)
+
+  // Each event owns the span from halfway back to the previous event.
+  for (let e = 0; e < plan.events.length; e++) {
+    const ev = plan.events[e]
+    const prev = plan.events[e - 1]
+    const from = prev ? Math.round(((prev.down + ev.up) / 2) * SR) : 0
+    const to = e + 1 < plan.events.length
+      ? Math.round(((ev.down + plan.events[e + 1].up) / 2) * SR) : n
+    for (let i = Math.max(0, from); i < Math.min(n, to); i++) freq[i] = ev.freqHz
+    const a = Math.round(ev.up * SR), b = Math.round(ev.down * SR)
+    for (let i = Math.max(0, a); i < Math.min(n, b); i++) env[i] = lin(ev.hiDb)
   }
-  for (let i = 0; i < n; i++) x[i] = env[i] * Math.sin(2 * Math.PI * PROBE_HZ * i / SR)
-  return { x, env }
+  // Continuous phase, so a frequency change mid-rest cannot step the waveform.
+  let phase = 0
+  for (let i = 0; i < n; i++) {
+    x[i] = env[i] * Math.sin(phase)
+    phase += 2 * Math.PI * freq[i] / SR
+    if (phase > 2 * Math.PI) phase -= 2 * Math.PI
+  }
+  return { x, env, freq }
 }
 
 function writeFloatWav(file, samples) {
@@ -139,116 +253,216 @@ function writeFloatWav(file, samples) {
 // ── Envelope recovery ───────────────────────────────────────────────────────
 
 /**
- * Quadrature demodulation at PROBE_HZ. Two cascaded one-poles at `cutHz`; the
- * pair's group delay is 2/(2*pi*cutHz) and is compensated on the way out, so
- * the returned envelope is aligned with the signal that produced it.
+ * Envelope by COHERENT DETECTION at a known probe frequency: multiply by cos
+ * and sin, low-pass, take the magnitude. Two cascaded one-poles.
+ *
+ * ⚠ THE CUTOFF FOLLOWS THE PROBE, and it has to. The image sits at 2f, so the
+ * low-pass must be well below that — fine at 1 kHz, and a hard physical limit
+ * at 100 Hz, where the envelope simply is not knowable faster than a cycle.
+ * `envelopeResolutionMs` reports it per probe so a frequency row is never read
+ * as an attack time it cannot support.
+ *
+ * ⚠ AN FFT HILBERT WAS TRIED HERE FIRST AND WAS WORSE, not better. It is exact
+ * for a smoothly modulated tone and rings badly on the abrupt steps this
+ * stimulus is made of — the Hilbert transform of a step has a log singularity —
+ * which put a spike at every edge and made the rise times read as zero.
+ *
+ * ⚠ AND THE CLAIM THAT A DEMODULATOR COULD NOT SEE A FAST ATTACK WAS WRONG.
+ * Two poles at 500 Hz rise in about 0.8 ms, which resolves a 1-2 ms attack
+ * comfortably. The thing that actually blinded the first stimulus was its 5 ms
+ * raised-cosine edge, now replaced by a zero-crossing step.
  */
-function demodulate(y, cutHz = 500) {
+function cutoffFor(freqHz) { return Math.min(500, freqHz / 2.5) }
+
+function envelopeResolutionMs(freqHz) {
+  return 1000 * 2.4 / (2 * Math.PI * cutoffFor(freqHz))
+}
+
+function demodulate(y, freqHz) {
   const n = y.length
-  const a = Math.exp(-2 * Math.PI * cutHz / SR)
+  const a = Math.exp(-2 * Math.PI * cutoffFor(freqHz) / SR)
   let i1 = 0, i2 = 0, q1 = 0, q2 = 0
   const amp = new Float64Array(n)
   for (let k = 0; k < n; k++) {
-    const w = 2 * Math.PI * PROBE_HZ * k / SR
+    const w = 2 * Math.PI * freqHz * k / SR
     const I = y[k] * Math.cos(w), Q = y[k] * Math.sin(w)
     i1 = a * i1 + (1 - a) * I; i2 = a * i2 + (1 - a) * i1
     q1 = a * q1 + (1 - a) * Q; q2 = a * q2 + (1 - a) * q1
     amp[k] = 2 * Math.hypot(i2, q2)
   }
-  const gd = Math.round(2 / (2 * Math.PI * cutHz) * SR)
+  // Compensate the pair's group delay so the envelope sits on the edge that
+  // produced it rather than after it.
+  const gd = Math.round(2 / (2 * Math.PI * cutoffFor(freqHz)) * SR)
   const out = new Float64Array(n)
   for (let k = 0; k < n; k++) out[k] = amp[Math.min(n - 1, k + gd)]
   return out
 }
 
-/** Align a capture to the stimulus by its ENVELOPE, not its waveform — a
- *  periodic probe tone correlates ambiguously at the period, 1 ms here. */
-function alignByEnvelope(refEnv, capEnv, maxLag = 4410) {
-  const step = 16
+/** Cache one demodulation per distinct probe frequency in the plan. */
+function envelopesFor(capture, plan) {
+  const byFreq = new Map()
+  for (const ev of plan.events) {
+    if (!byFreq.has(ev.freqHz)) byFreq.set(ev.freqHz, demodulate(capture, ev.freqHz))
+  }
+  return byFreq
+}
+
+/**
+ * Gain reduction trajectory around one event, in dB, against the resting gain
+ * just before its step. The stimulus envelope is known analytically, so only
+ * the capture is demodulated.
+ */
+function eventGain(envs, plan, ev, lag) {
+  const env = envs.get(ev.freqHz)
+  const gainAt = (tSec) => {
+    const i = Math.round(tSec * SR) + lag
+    const j = Math.round(tSec * SR)
+    if (i < 0 || i >= env.length || j < 0 || j >= plan.env.length) return NaN
+    return plan.env[j] > 0 ? db(env[i]) - db(plan.env[j]) : NaN
+  }
+  let rest = 0, c = 0
+  for (let t = ev.up - 0.25; t < ev.up - 0.02; t += 0.002) {
+    const v = gainAt(t); if (Number.isFinite(v)) { rest += v; c++ }
+  }
+  return { rest: c ? rest / c : NaN, gr: (t) => (c ? rest / c : NaN) - gainAt(t) }
+}
+
+/**
+ * Align a capture to the stimulus by ENVELOPE, not waveform — a periodic probe
+ * correlates ambiguously at its own period, 1 ms at 1 kHz, which is the same
+ * order as the attack being measured.
+ */
+function alignByEnvelope(refEnv, capture, maxLag = 4410) {
+  const rect = new Float64Array(capture.length)
+  const a = Math.exp(-1 / (SR * 0.005))
+  let e = 0
+  for (let i = 0; i < capture.length; i++) { e = a * e + (1 - a) * Math.abs(capture[i]); rect[i] = e }
   let best = 0, bestErr = Infinity
-  for (let lag = -maxLag; lag <= maxLag; lag += step) {
-    let e = 0, c = 0
-    for (let i = Math.max(0, -lag); i + lag < capEnv.length && i < refEnv.length; i += 64) {
-      e += (Math.log(Math.max(capEnv[i + lag], 1e-9)) - Math.log(Math.max(refEnv[i], 1e-9))) ** 2
+  for (let lag = -maxLag; lag <= maxLag; lag += 8) {
+    let err = 0, c = 0
+    for (let i = Math.max(0, -lag); i + lag < rect.length && i < refEnv.length; i += 128) {
+      const r = refEnv[i] * 0.6366                     // mean |sin|, so the scales match
+      err += (Math.log(Math.max(rect[i + lag], 1e-9)) - Math.log(Math.max(r, 1e-9))) ** 2
       c++
     }
-    if (c && e / c < bestErr) { bestErr = e / c; best = lag }
+    if (c && err / c < bestErr) { bestErr = err / c; best = lag }
   }
   return best
 }
 
 // ── Fitting ─────────────────────────────────────────────────────────────────
 
-/**
- * Gain reduction trajectory around one burst, in dB, relative to the resting
- * gain measured just before the step.
- */
-function trajectory(gainDb, plan, ev, lag) {
-  const at = (tSec) => {
-    const i = Math.round(tSec * SR) + lag
-    return (i >= 0 && i < gainDb.length) ? gainDb[i] : NaN
+/** Settled reduction near the end of an event's hold. */
+function finalGR(gr, ev) {
+  const hold = ev.down - ev.up
+  const at = ev.down - Math.min(0.02, hold * 0.1)
+  let v = 0, c = 0
+  for (let t = at - Math.min(0.05, hold * 0.3); t < at; t += 0.001) {
+    const g = gr(t); if (Number.isFinite(g)) { v += g; c++ }
   }
-  // Resting gain: the 200 ms before the step, where the cell is open.
-  let rest = 0, c = 0
-  for (let t = ev.up - 0.25; t < ev.up - 0.05; t += 0.002) { const v = at(t); if (Number.isFinite(v)) { rest += v; c++ } }
-  rest = c ? rest / c : NaN
-  return { rest, gr: (tSec) => rest - at(tSec) }
+  return c ? v / c : NaN
 }
 
-function fitBursts(gainDb, plan, lag, label) {
-  console.log(`\n  ── ${label} ──`)
-  console.log('  ATTACK — gain reduction (dB) after the step up')
-  console.log('    burst      +1ms   +2ms   +5ms  +10ms  +20ms  +50ms +100ms   t63    t90')
-  const finals = new Map()
-  for (const ev of plan.events) {
-    const { rest, gr } = trajectory(gainDb, plan, ev, lag)
-    if (!Number.isFinite(rest)) continue
-    // Final value: the last 20 % of the burst, or 200 ms in for short ones.
-    const settleT = Math.min(ev.down - 0.01, ev.up + Math.max(0.2, (ev.down - ev.up) * 0.8))
-    let fin = 0, c = 0
-    for (let t = settleT - 0.02; t < settleT; t += 0.002) { const v = gr(t); if (Number.isFinite(v)) { fin += v; c++ } }
-    fin = c ? fin / c : NaN
-    finals.set(ev.T, fin)
-    const offs = [0.001, 0.002, 0.005, 0.010, 0.020, 0.050, 0.100]
-    const vals = offs.map(o => gr(ev.up + o))
-    // time to 63 % and 90 % of the final excursion
-    const timeTo = (frac) => {
-      for (let t = 0; t < Math.min(0.5, ev.down - ev.up); t += 0.0005) {
-        if (gr(ev.up + t) >= frac * fin) return t * 1000
-      }
-      return NaN
-    }
-    console.log(`    ${String(ev.T).padStart(5)}s  ${vals.map(v => (Number.isFinite(v) ? v.toFixed(2) : '  -').padStart(6)).join('')}  ${timeTo(0.63).toFixed(1).padStart(5)}  ${timeTo(0.90).toFixed(1).padStart(5)} ms`)
+/** Time to reach a fraction of the settled reduction, ms. */
+function timeTo(gr, ev, frac, fin) {
+  // An excursion under a dB cannot support a rise time; say so rather than
+  // returning a confident 0.0 ms, which is what a bare threshold search does.
+  if (!Number.isFinite(fin) || fin < 1.0) return NaN
+  const limit = Math.min(0.4, ev.down - ev.up)
+  for (let t = 0.0002; t < limit; t += 0.0002) {
+    const v = gr(ev.up + t)
+    if (Number.isFinite(v) && v >= frac * fin) return t * 1000
   }
-  console.log('\n  RELEASE — gain reduction (dB) remaining after the step down')
-  console.log('    burst    final   +20ms  +50ms +100ms +200ms +500ms    +1s    +2s    +5s   fast%')
-  for (const ev of plan.events) {
-    const { rest, gr } = trajectory(gainDb, plan, ev, lag)
+  return NaN
+}
+
+const OFFS = [0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050]
+
+function attackTable(envs, plan, lag, rows) {
+  console.log('  ATTACK — gain reduction (dB) after the step up')
+  console.log('    event                +0.5ms   +1ms   +2ms   +5ms  +10ms  +20ms  +50ms    final    t63    t90')
+  const out = []
+  for (const ev of rows) {
+    const { rest, gr } = eventGain(envs, plan, ev, lag)
     if (!Number.isFinite(rest)) continue
-    const fin = finals.get(ev.T)
+    const fin = finalGR(gr, ev)
+    const vals = OFFS.map(o => gr(ev.up + o))
+    console.log(`    ${ev.tag.padEnd(20)}${vals.map(v => (Number.isFinite(v) ? v.toFixed(2) : '  -').padStart(7)).join('')}  ${fin.toFixed(2).padStart(7)}  ${timeTo(gr, ev, 0.63, fin).toFixed(1).padStart(5)}  ${timeTo(gr, ev, 0.90, fin).toFixed(1).padStart(5)} ms`)
+    out.push({ ev, fin, gr, t63: timeTo(gr, ev, 0.63, fin) })
+  }
+  return out
+}
+
+function releaseTable(fits) {
+  console.log('\n  RELEASE — gain reduction (dB) still present after the step down')
+  console.log('    event                 final   +20ms  +50ms +100ms +200ms +500ms    +1s    +2s    +5s   fast%')
+  for (const { ev, fin, gr } of fits) {
     const offs = [0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0, 5.0]
     const vals = offs.map(o => gr(ev.down + o))
-    // Share recovered in the first 100 ms — the fast stage's fraction.
     const fast = Number.isFinite(fin) && fin > 0.5 ? 100 * (fin - vals[2]) / fin : NaN
-    console.log(`    ${String(ev.T).padStart(5)}s  ${(Number.isFinite(fin) ? fin.toFixed(2) : '  -').padStart(6)}  ${vals.map(v => (Number.isFinite(v) ? v.toFixed(2) : '  -').padStart(6)).join('')}  ${(Number.isFinite(fast) ? fast.toFixed(0) + '%' : '   -').padStart(6)}`)
+    console.log(`    ${ev.tag.padEnd(20)}${(Number.isFinite(fin) ? fin.toFixed(2) : '  -').padStart(7)}${vals.map(v => (Number.isFinite(v) ? v.toFixed(2) : '  -').padStart(7)).join('')}  ${(Number.isFinite(fast) ? fast.toFixed(0) + '%' : '   -').padStart(6)}`)
   }
-  console.log('    ⚠ "fast%" is the share of the reduction gone within 100 ms. In our')
-  console.log('      model that is FAST_FRACTION; the rest is the slow tail, and how the')
-  console.log('      tail lengthens down this column IS the LDR memory.')
+  console.log('    ⚠ "fast%" is the share gone within 100 ms — FAST_FRACTION in our model.')
+  console.log('      How the tail lengthens DOWN this column is the release side of the memory.')
 }
 
-function fitStairs(gainDb, plan, lag, label) {
+function fitBursts(capture, plan, lag, label) {
+  const envs = envelopesFor(capture, plan)
+  console.log(`\n  ── ${label} ──`)
+  releaseTable(attackTable(envs, plan, lag, plan.events))
+}
+
+function fitRetrigger(capture, plan, lag, label) {
+  const envs = envelopesFor(capture, plan)
+  console.log(`\n  ── ${label} ──`)
+  console.log('  ATTACK MEMORY — the same test step, varying how recently the cell was lit.')
+  console.log('  If the attack is program-dependent, t63 SHORTENS as the gap shortens.')
+  const tests = plan.events.filter(e => e.role === 'test')
+  const fits = attackTable(envs, plan, lag, tests)
+  const byGap = fits.filter(f => Number.isFinite(f.t63)).sort((a, b) => a.ev.gap - b.ev.gap)
+  if (byGap.length >= 2) {
+    const fastest = byGap[0], slowest = byGap[byGap.length - 1]
+    const spread = slowest.t63 - fastest.t63
+    console.log(`\n    t63 at the shortest gap (${fastest.ev.gap}s): ${fastest.t63.toFixed(1)} ms`)
+    console.log(`    t63 at the longest gap  (${slowest.ev.gap}s): ${slowest.t63.toFixed(1)} ms`)
+    console.log(`    => attack memory spans ${spread.toFixed(1)} ms.`)
+    console.log(`    ⚠ THE CONTROL IS NOT ZERO. Our kernel has a FIXED attack and still`)
+    console.log(`      returns about -2 ms here (13.4 ms at the 0.05 s gap against 11.4 ms at`)
+    console.log(`      5 s) — the release is still moving while the attack is measured. So a`)
+    console.log(`      real memory has to beat roughly 2 ms, and has to run the other way:`)
+    console.log(`      SHORTER t63 at SHORTER gaps. Anything smaller is this artefact.`)
+  }
+}
+
+function fitFrequency(capture, plan, lag, label) {
+  const envs = envelopesFor(capture, plan)
+  console.log(`\n  ── ${label} ──`)
+  console.log('  FREQUENCY DEPENDENCE — the same step at each probe.')
+  console.log('  The cell is described as faster to highs than lows; voice fundamentals')
+  console.log('  sit at 100-250 Hz, which is where narration actually lives.')
+  console.log('\n  ⚠ THE ENVELOPE OF A LOW TONE IS NOT KNOWABLE FASTER THAN ITS OWN CYCLE.')
+  console.log('    Detection resolution by probe, below. A t63 near or under these numbers')
+  console.log('    is the measurement, not the compressor:')
+  console.log('      ' + FREQS_HZ.map(f => `${f} Hz: ${envelopeResolutionMs(f).toFixed(1)} ms`).join('   '))
+  console.log('    ⚠ AND OUR OWN KERNEL IS NOT FLAT HERE EITHER — `--selftest` returns t63 of')
+  console.log('      10.4 / 11.4 / 13.6 / 17.0 ms at 3000 / 1000 / 400 / 200 Hz, from the 80 Hz')
+  console.log('      side-chain high-pass and the detector, with 100 Hz unmeasurable. Compare a')
+  console.log('      reference against THAT baseline, never against a flat one.\n')
+  attackTable(envs, plan, lag, plan.events)
+}
+
+function fitStairs(capture, plan, lag, label) {
+  const envs = envelopesFor(capture, plan)
   console.log(`\n  ── ${label}: static curve ──`)
   console.log('    input      settled GR')
   const pts = []
   for (const ev of plan.events) {
-    const { rest, gr } = trajectory(gainDb, plan, ev, lag)
+    const { rest, gr } = eventGain(envs, plan, ev, lag)
     if (!Number.isFinite(rest)) continue
-    let v = 0, c = 0
-    for (let t = ev.down - 0.5; t < ev.down - 0.05; t += 0.002) { const g = gr(t); if (Number.isFinite(g)) { v += g; c++ } }
-    if (!c) continue
-    pts.push([ev.L, v / c])
-    console.log(`    ${String(ev.L).padStart(4)} dBFS   ${(v / c).toFixed(2).padStart(6)} dB`)
+    const v = finalGR(gr, ev)
+    if (!Number.isFinite(v)) continue
+    pts.push([ev.L, v])
+    console.log(`    ${String(ev.L).padStart(4)} dBFS   ${v.toFixed(2).padStart(6)} dB`)
   }
   const w = pts.filter(p => p[1] >= 1.5)
   if (w.length >= 3) {
@@ -262,14 +476,6 @@ function fitStairs(gainDb, plan, lag, label) {
 }
 
 // ── Drivers ─────────────────────────────────────────────────────────────────
-
-function gainDbOf(capture, refEnv) {
-  const capEnv = demodulate(capture)
-  const lag = alignByEnvelope(refEnv, capEnv)
-  const g = new Float64Array(capEnv.length)
-  for (let i = 0; i < capEnv.length; i++) g[i] = db(capEnv[i]) - db(refEnv[Math.min(i, refEnv.length - 1)])
-  return { gainDb: g, lag }
-}
 
 function runKernel(x, params) {
   const k = new LA2AKernel(SR)
@@ -285,44 +491,58 @@ function runKernel(x, params) {
   return a
 }
 
+const PLANS = {
+  bursts: { plan: burstPlan, fit: fitBursts },
+  retrigger: { plan: retriggerPlan, fit: fitRetrigger },
+  frequency: { plan: freqPlan, fit: fitFrequency },
+  staircase: { plan: stairPlan, fit: fitStairs },
+}
+
 const args = process.argv.slice(2)
 
 if (args.includes('--stimulus')) {
   mkdirSync(STIM_DIR, { recursive: true })
   mkdirSync(CAP_DIR, { recursive: true })
-  const bp = burstPlan(), sp = stairPlan()
-  writeFloatWav(path.join(STIM_DIR, 'bursts.wav'), build(bp, () => lin(HIGH_DBFS)).x)
-  writeFloatWav(path.join(STIM_DIR, 'staircase.wav'), build(sp, e => lin(e.L)).x)
   console.log(`Wrote stimulus to ${STIM_DIR}`)
-  console.log(`  bursts.wav     ${bp.seconds.toFixed(1)} s — attack, release, and the memory`)
-  console.log(`  staircase.wav  ${sp.seconds.toFixed(1)} s — the static curve`)
+  for (const [name, { plan }] of Object.entries(PLANS)) {
+    const p = plan()
+    writeFloatWav(path.join(STIM_DIR, `${name}.wav`), build(p).x)
+    console.log(`  ${(name + '.wav').padEnd(16)} ${p.seconds.toFixed(1).padStart(6)} s`)
+  }
+  console.log('\n  bursts     release memory — how the tail lengthens with exposure')
+  console.log('  retrigger  ATTACK memory — the same step, varying how recently the cell was lit')
+  console.log('  frequency  the same step at 100 / 200 / 400 / 1000 / 3000 Hz')
+  console.log('  staircase  the static curve, hence the ratio')
   console.log('\nCapture protocol:')
-  console.log('  1. 44.1 kHz, 32-bit float, mono, no dither, no other plugins in the chain.')
-  console.log('  2. Compressor Gain/makeup at 0 (or note it — a fixed makeup cancels here,')
-  console.log('     because every reduction is measured against the resting gain).')
-  console.log('  3. Capture at 2-3 Peak Reduction settings, e.g. 35 / 55 / 75.')
-  console.log('  4. Bounce the FULL length, tail included, and do not normalise.')
-  console.log(`  5. Save as ${CAP_DIR}/<unit>.<knob>.bursts.wav and .staircase.wav`)
-  console.log('     e.g. laea.55.bursts.wav')
+  console.log('  1. 44.1 kHz, 32-bit float, mono, no dither, nothing else in the chain.')
+  console.log('  2. Gain/makeup at 0. A fixed makeup cancels anyway — every reduction is')
+  console.log('     measured against the resting gain just before its own step.')
+  console.log('  3. R37 / side-chain trim at its FACTORY position, and note where that is.')
+  console.log('     It changes the frequency response of the detector, which is half of')
+  console.log('     what frequency.wav is measuring.')
+  console.log('  4. Bounce the FULL length including the tail. Do not normalise.')
+  console.log(`  5. Save into ${CAP_DIR} as <unit>.<knob>.<name>.wav`)
+  console.log('     e.g. laea.55.retrigger.wav')
+  console.log('\n  START WITH ONE KNOB SETTING (55 is a good first choice) across all four')
+  console.log('  files. That is enough to answer the attack-memory and frequency questions;')
+  console.log('  more knob positions only sharpen the static curve.')
   process.exit(0)
 }
 
 if (args.includes('--selftest')) {
   // ⚠ THE FITTER MUST RECOVER CONSTANTS WE ALREADY KNOW BEFORE IT IS POINTED AT
-  // ANYTHING ELSE. Our kernel's ATTACK_S is 10 ms, FAST_FRACTION 0.65 and
-  // FAST_RELEASE_S 35 ms, so the attack column should reach 63 % near 10 ms and
-  // the fast% column should land near 65. Anything else means the measurement
-  // is wrong, not the model.
-  const bp = burstPlan(), sp = stairPlan()
-  const b = build(bp, () => lin(HIGH_DBFS)), s = build(sp, e => lin(e.L))
-  console.log('SELF-TEST — our own kernel, whose ballistics are known.')
-  console.log('Expect: t63 near ATTACK_S = 10 ms, fast% near FAST_FRACTION = 65 %,')
-  console.log('and a tail that lengthens with burst duration (the LDR memory).')
-  for (const pr of [55, 75]) {
-    const gb = gainDbOf(runKernel(b.x, { peakReduction: pr }), b.env)
-    fitBursts(gb.gainDb, bp, gb.lag, `our kernel, Peak Reduction ${pr}`)
-    const gs = gainDbOf(runKernel(s.x, { peakReduction: pr }), s.env)
-    fitStairs(gs.gainDb, sp, gs.lag, `our kernel, Peak Reduction ${pr}`)
+  // ANYTHING ELSE. Our ATTACK_S is 10 ms and FAST_FRACTION 0.65, so t63 should
+  // land near 10 ms and fast% near 65. Two of these tables should come back
+  // FLAT by construction, and that is the point: our attack does not vary with
+  // light history or with frequency, so `retrigger` and `frequency` measuring
+  // no spread on our own kernel is the control that proves any spread found in
+  // a real capture belongs to the reference and not to the measurement.
+  const pr = 55
+  for (const [name, { plan, fit }] of Object.entries(PLANS)) {
+    const p = plan()
+    const b = build(p)
+    p.env = b.env                       // the fitters divide by the known stimulus
+    fit(runKernel(b.x, { peakReduction: pr }), p, 0, `our kernel, ${name}, Peak Reduction ${pr}`)
   }
   process.exit(0)
 }
@@ -336,19 +556,15 @@ if (caps.length === 0) {
   console.log(`No captures in ${CAP_DIR}. Run with --stimulus, render them, and drop them in.`)
   process.exit(0)
 }
-const bp = burstPlan(), sp = stairPlan()
-const bEnv = build(bp, () => lin(HIGH_DBFS)).env
-const sEnv = build(sp, e => lin(e.L)).env
 for (const f of caps.sort()) {
+  const entry = Object.entries(PLANS).find(([name]) => f.includes(`.${name}.`))
+  if (!entry) { console.log(`\n⚠ ${f}: name it <unit>.<knob>.<${Object.keys(PLANS).join('|')}>.wav`); continue }
+  const [name, { plan, fit }] = entry
   const y = readWav(path.join(CAP_DIR, f))
   if (y.sampleRate !== SR) { console.log(`\n⚠ ${f}: ${y.sampleRate} Hz; capture at ${SR}.`); continue }
-  if (f.includes('.bursts.')) {
-    const g = gainDbOf(y.mono, bEnv)
-    fitBursts(g.gainDb, bp, g.lag, f)
-  } else if (f.includes('.staircase.')) {
-    const g = gainDbOf(y.mono, sEnv)
-    fitStairs(g.gainDb, sp, g.lag, f)
-  } else {
-    console.log(`\n⚠ ${f}: name it <unit>.<knob>.bursts.wav or .staircase.wav`)
-  }
+  const p = plan()
+  p.env = build(p).env
+  const lag = alignByEnvelope(p.env, y.mono)
+  if (Math.abs(lag) > 2000) console.log(`\n⚠ ${f}: aligned at ${lag} samples — check for latency compensation.`)
+  fit(y.mono, p, lag, f)
 }
