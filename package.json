@@ -20,6 +20,7 @@
     "dcblock:real": "node scripts/la2a-dcblock-real.mjs",
     "la2a:tube:tones": "node scripts/la2a-tube-capture-tones.mjs",
     "la2a:tube:fit": "node scripts/la2a-tube-fit.mjs",
+    "la2a:h2:refit": "node scripts/la2a-h2-refit.mjs",
     "smoke": "node scripts/panel-smoke.mjs"
   },
   "dependencies": {

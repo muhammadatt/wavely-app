@@ -325,16 +325,19 @@ export const DC_BLOCK_HZ = 5
  * tube stage stays — the paper does not say the valves are linear, it says they
  * are not DOMINANT — and it was recalibrated against the paper's H2 column
  * alone (see TUBE_DRIVE_LIN), which is the only thing it is still responsible
- * for. Measured at the paper's own operating point after the change:
+ * for. Measured at the paper's own operating point after the change — a
+ * nominal-level tone at 6.0 dB of gain reduction, the knob solved for that
+ * rather than assumed:
  *
  *                        THD      H3 - H2
  *   six real units    0.94-4.22 %   +16 to +44 dB   (median 2.19 %, +25.7)
- *   this model          1.51 %       +26.0 dB
+ *   this model        1.34-2.13 %   +24.4 to +30.9   (median 1.54 %, +25.4)
  *
  * and the direction is right: at Gain +12 into a -12 dBFS tone, THD across
- * Peak Reduction 0 / 40 / 70 / 90 now runs 1.58 / 1.48 / 2.04 / 2.09 %, where
- * the valves ALONE run 1.58 / 0.80 / 0.17 / 0.11. The dip at 40 is the two
- * mechanisms crossing and is real. `test/dsp/la2aTube.test.js` pins all of it.
+ * Peak Reduction 0 / 40 / 70 / 90 now runs 0.84 / 1.28 / 2.04 / 2.09 %, where
+ * the valves ALONE run 0.84 / 0.46 / 0.12 / 0.09. The dip the valves alone show
+ * is what an output-stage nonlinearity must do; the sum rising is the cell.
+ * `test/dsp/la2aTube.test.js` pins all of it.
  *
  * ⚠ THE <0.5 % SPEC ARGUMENT NOW APPLIES TO THE RIGHT STAGE. That figure is
  * the unit with NO gain reduction, where the paper agrees the valves are nearly
@@ -393,20 +396,27 @@ export const DC_BLOCK_HZ = 5
  * measured and keep it there. Measured on a 200 Hz tone at -18 dBFS, Gain 0:
  *
  *   Peak Reduction     0     30     54     70     85    100
- *   gain reduction  0.00   0.05   7.04  14.07  19.91  25.18 dB
- *   THD             0.145  0.146  1.511  1.943  2.055  2.092 %
- *   H3 - H2        -17.6  -14.1   +26.6  +36.2  +43.2  +50.0 dB
+ *   gain reduction  0.00   0.05   7.02  14.05  19.89  25.16 dB
+ *   THD             0.090  0.092  1.509  1.943  2.055  2.092 %
+ *   H3 - H2        -21.6  -13.2   +30.8  +40.7  +48.2  +56.2 dB
  *
  * against six real units at 6 dB GR: 0.94-4.22 % THD (median 2.19), H3 sitting
- * +16 to +44 dB over H2 (median +25.7).
+ * +16 to +44 dB over H2 (median +25.7). ⚠ PR 54 IS NOT THE PAPER'S OPERATING
+ * POINT — it is 7.02 dB of reduction here, not 6.00, and this table is a sweep
+ * rather than the comparison. The like-for-like figure is on TUBE_DRIVE_LIN,
+ * where the knob is solved per frequency for 6.0 dB: THD 1.39 %, H3-H2 +29.0.
+ * Reading a sweep row as the operating point is the error that put the drive
+ * constant 4 dB hot for a release.
  *
  * ⚠ IT IS CALIBRATED AT ONE DEPTH, AND THE TOP OF THE TRAVEL IS EXTRAPOLATION.
  * The paper measures 6 dB of gain reduction and nothing else, so the saturation
  * law is a shape chosen to be well-behaved past the data, not a fit to it. By
- * 20 dB of reduction the order balance runs past the six units' spread (+43 and
- * +50 against a +44 maximum) — outside the measured range in a regime nobody
- * measured, which is a statement about the evidence, not a defect that can be
- * tuned away without more of it.
+ * 20 dB of reduction the order balance runs well past the six units' spread
+ * (+48 and +56 against a +44 maximum) — outside the measured range in a regime
+ * nobody measured, which is a statement about the evidence, not a defect that
+ * can be tuned away without more of it. The margin WIDENED when the drive was
+ * re-derived, because a quieter tube stage lowers H2 without touching the
+ * cell's H3; nothing about the cell changed.
  *
  * ⚠ A WAVESHAPER AT THE CELL WAS TRIED FIRST AND IS GONE. Same placement, same
  * saturating depth law, but bending the waveform instead of modulating the
@@ -431,27 +441,87 @@ const CELL_MOD_TAU_DB = 5.505
  * the cell modulation adds even content of 0.0 to 0.2 dB at every frequency,
  * i.e. none at all.
  *
- * Fitted to the median of all 30 of the paper's H2 measurements, -63.80 dBc.
- * At 0.381 the model gives -63.98 at 250 Hz and -63.60 at 1 kHz, mean -63.79.
+ * ⚠ THE DERIVATION IS A SCRIPT, NOT THIS COMMENT: `npm run la2a:h2:refit`
+ * reports at the shipping value, `-- --fit` re-solves. It exists because the
+ * previous derivation lived only in prose, could not be re-run, and two of its
+ * premises did not survive being checked — see below. Re-run it rather than
+ * trusting this paragraph.
  *
- * ⚠ FITTED AT 250 Hz AND 1 kHz ONLY, because the compressor's OWN gain ripple
- * swamps H2 at 80 / 120 / 125 / 160 Hz — it sits at -47 to -50 dBc there with
- * the tanh bypassed AND the cell modulation off, so it is pre-existing
- * behaviour of the detector that this constant cannot move. That was briefly
- * mistaken for the cell modulation's own even content; the control that settled
- * it was rerunning at cellMod 0 and differencing, which came back at 0.0-0.2 dB.
+ * Target: the median of all 30 of the paper's H2 measurements, -63.80 dBc, at
+ * the paper's operating point — a nominal-level tone (NOMINAL_DBFS, standing in
+ * for its +4 dBu) with the knob solved PER FREQUENCY for 6.0 dB of gain
+ * reduction, because the 80 Hz side-chain high-pass makes one knob position
+ * produce different reduction at 63 Hz and at 1 kHz. Fitted at 44.1 kHz, the
+ * rate the app processes at, across every frequency the record names.
  *
- * ⚠ IT REPLACED 0.7, WHICH WAS FITTED TO A DIFFERENT QUANTITY. That value came
- * from the LA-2A's <0.5 % THD spec, measured on the whole unit with the cell
- * idle — a total-THD target, at a time when this stage was the plugin's only
- * distortion. It is the wrong target now that the cell carries the odd content,
- * and 0.7 overshoots H2 by 5.5 dB against the hardware.
+ * At 0.2388 the model gives a mean H2 of -63.80 dBc, spanning -64.44 at 63 Hz
+ * to -63.91 at 1 kHz. With the cell modulation running — the shipping path, and
+ * the configuration the paper's other two columns describe — THD lands
+ * 1.34-2.13 % and H3-H2 +24.4 to +30.9 dB at those same points, inside the six
+ * units' 0.94-4.22 % and +16 to +44 dB at every frequency. Neither of those was
+ * fitted; H3-H2 moving toward the paper's +25.7 median is corroboration, not a
+ * target that was aimed at.
  *
- * The knee moves with it, +3.1 dBFS to +8.4 dBFS (21.1 to 26.4 dB above
+ * ⚠ IT REPLACED 0.381, WHICH WAS FITTED AT THE WRONG OPERATING POINT. That
+ * derivation recorded "Peak Reduction 54 for 6 dB GR". PR 54 produces 8.4 dB at
+ * 1 kHz and 9.2 dB at 250 Hz; 6 dB lands near PR 48. Fitting with ~2.5-3 dB too
+ * much reduction means the valves saw that much less level, so the drive that
+ * hit the target there was hot at the paper's real operating point — measured,
+ * 0.381 gives a mean H2 of -59.78 dBc against the -63.80 target, 4.02 dB hot.
+ *
+ * ⚠ AND THE REASON IT USED ONLY TWO FREQUENCIES DID NOT HOLD. It excluded the
+ * low tones because "the compressor's OWN gain ripple swamps H2" there, quoting
+ * -47 to -50 dBc with the tanh bypassed. Bypassed, H2 at those frequencies
+ * measures -83 to -88 dBc — 25 to 55 dB BELOW the tanh's own contribution, not
+ * above it. What sits at -51 to -66 dBc bypassed is H3, the detector ripple
+ * doing exactly what the note on CELL_MOD_MAX describes: a 2f ripple on an f
+ * carrier lands at f and 3f, odd content. H3 was read for H2. The refit script
+ * prints that comparison on every run, so the claim stays falsifiable.
+ *
+ * ⚠ BEFORE THAT IT WAS 0.7, FITTED TO A DIFFERENT QUANTITY AGAIN — the LA-2A's
+ * <0.5 % THD spec, a TOTAL-THD figure from a time when this stage was the
+ * plugin's only distortion. Wrong target once the cell carries the odd content.
+ *
+ * ⚠ THE -63.80 TARGET IS THE ONE NUMBER STILL TAKEN ON TRUST. This repo has no
+ * copy of the paper's per-unit table, so the median cannot be recomputed here.
+ * Everything else above is measured by the script.
+ *
+ * The knee moves with the drive, +8.4 dBFS to +12.4 dBFS (26.4 to 30.4 dB above
  * nominal), so the valves saturate later. They still saturate, which is what
  * stops the makeup running away the way LAEA's does.
  */
-export const TUBE_DRIVE_LIN = 0.381 // knee at +8.4 dBFS, i.e. 26.4 dB above NOMINAL_DBFS
+export const TUBE_DRIVE_LIN = 0.2388 // knee at +12.4 dBFS, i.e. 30.4 dB above NOMINAL_DBFS
+
+/**
+ * ⚠ CHOSEN, NOT FITTED, AND INHERITED FROM A CONTROL THAT NO LONGER EXISTS.
+ *
+ * H2 for a biased tanh goes as drive^2 * tanh(bias) at the drives this stage
+ * runs at, so the -63.80 dBc target above defines a CURVE in
+ * (TUBE_DRIVE_LIN, TUBE_BIAS) rather than a point. One target, two constants:
+ * the fit solves for the drive with this one held. Pairs that all land on the
+ * target at the paper's operating point, measured:
+ *
+ *     bias    drive      H3          H2 under +24 dB of makeup
+ *     0.02    0.725      -69.2 dBc    -42.9 dBc
+ *     0.06    0.239      -88.3 dBc    -35.3 dBc
+ *     0.40    0.038     -125.3 dBc    -33.8 dBc
+ *
+ * So this constant decides everything about the stage EXCEPT the quantity that
+ * was fitted. The H3 column is the cell's job now and its spread here is moot;
+ * the last column is not, and it is the regime auto-makeup pushes the valves
+ * into.
+ *
+ * WHERE 0.06 CAME FROM. It is the removed Tube Drive knob's default position,
+ * frozen. Before the knob went this read `tubeBias = 0.2 * amount` with
+ * `amount` the knob, default 0.3 — so 0.2 x 0.3 = 0.06, and neither the 0.2 nor
+ * the 0.3 has a derivation anywhere in the history. It survives on the strength
+ * of the fit landing inside the paper's other two columns with it held, which
+ * is evidence that it is not badly wrong and is not a derivation.
+ *
+ * WHAT WOULD SETTLE IT: a second measured even-order quantity, H4 being the
+ * obvious one — it is even, so it is the valves' too, and it would pin the pair
+ * outright. The paper's H4 column is not transcribed in this repo.
+ */
 export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
 
 const COMPRESS_KNEE_DB = 20 // wide knee — the "leveling" feel

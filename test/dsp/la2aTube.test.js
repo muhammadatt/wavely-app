@@ -92,10 +92,38 @@ const thd = y => {
 
 const strictlyRising = xs => xs.every((v, i) => i === 0 || v > xs[i - 1])
 
+/**
+ * The Peak Reduction knob that produces `targetDb` of gain reduction at this
+ * probe, by bisection.
+ *
+ * The knob is side-chain DRIVE into a fixed threshold, not a threshold, and the
+ * 80 Hz side-chain high-pass makes one position mean different reduction at
+ * different frequencies — so any test that wants a stated operating point has
+ * to solve for it. Hardcoding a knob and asserting what it produces is how the
+ * drive constant came to be fitted 4 dB hot.
+ */
+function knobForGainReduction(targetDb, amp) {
+  const x = tone(1.2, amp)
+  let lo = 0, hi = 100
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2
+    const k = new LA2AKernel(SR)
+    k.setParams({ mode: 'compress', peakReduction: mid, gainDb: 0, r37: 100, mix: 1 })
+    const o = new Float32Array(x.length)
+    for (let f = 0; f < x.length; f += 128) {
+      const l = Math.min(128, x.length - f)
+      k.process([x.subarray(f, f + l)], [o.subarray(f, f + l)], l)
+    }
+    if (k.grDb < targetDb) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
 test('saturation follows input level', () => {
   // The valves have no drive of their own: the only thing that decides how hard
-  // they work is how much signal arrives. Measured 0.030 / 0.077 / 0.148 /
-  // 0.297 / 0.638 / 1.342 %, a 44x span.
+  // they work is how much signal arrives. Measured 0.007 / 0.045 / 0.090 /
+  // 0.182 / 0.376 / 0.727 %, a 104x span.
   const levels = [-40, -24, -18, -12, -6, -1]
   const got = levels.map(l => thd(run(tone(1, lin(l)), { cellMod: 0 })))
   assert.ok(strictlyRising(got), `THD did not rise with level: ${got.map(v => (v * 100).toFixed(3))}`)
@@ -104,7 +132,7 @@ test('saturation follows input level', () => {
 
 test('the Gain knob drives the valves', () => {
   // Makeup sits BEFORE the shaper as on the hardware, so Gain is the overdrive
-  // control — and with the knob gone it is the only one. 0.148 -> 4.571 %.
+  // control — and with the knob gone it is the only one. 0.090 -> 2.203 %.
   const got = [0, 6, 12, 18, 24].map(g => thd(run(tone(1, lin(-18)), { gainDb: g, cellMod: 0 })))
   assert.ok(strictlyRising(got), `THD did not rise with gain: ${got.map(v => (v * 100).toFixed(3))}`)
 })
@@ -112,7 +140,7 @@ test('the Gain knob drives the valves', () => {
 test('compression backs the VALVES off at the same Gain', () => {
   // Correct for an output-stage nonlinearity: the cell pulls the level down
   // before the valves see it, so more Peak Reduction is less valve saturation.
-  // 1.581 -> 0.113 %.
+  // 0.839 -> 0.091 %.
   //
   // ⚠ THIS IS NOT THE STAGE'S OVERALL BEHAVIOUR, and taking it for the whole
   // story is exactly the error the paper overturned — see the next test.
@@ -122,11 +150,15 @@ test('compression backs the VALVES off at the same Gain', () => {
 
 test('the shipped stage distorts MORE as it compresses', () => {
   // The hardware direction, and the whole reason `cellMod` exists. Same sweep
-  // as the test above with the cell running: 1.581 / 1.478 / 2.043 / 2.094 %.
+  // as the test above with the cell running: 0.839 / 1.278 / 2.037 / 2.093 %.
   //
-  // The dip at PR 40 is real and is the two mechanisms crossing — the valves
-  // are still losing more than the cell has yet gained — so this asserts the
-  // ENDPOINTS rather than monotonicity, which the sum does not have.
+  // ⚠ THE DIP AT PR 40 IS GONE, and the assertions below deliberately still
+  // allow it. It was the two mechanisms crossing — the valves losing more than
+  // the cell had yet gained — and re-deriving TUBE_DRIVE_LIN quietened the
+  // valves enough that the cell now wins from the first step. That is a
+  // consequence of the drive constant, not a property anything depends on, so
+  // this keeps asserting the ENDPOINTS rather than monotonicity: the sum is not
+  // guaranteed monotone and a future drive change could bring the dip back.
   const got = [0, 40, 70, 90].map(pr => thd(run(tone(1, lin(-12)), { peakReduction: pr, gainDb: 12 })))
   const shown = got.map(v => (v * 100).toFixed(3))
   assert.ok(got[3] > got[0] * 1.2, `deep compression did not raise THD: ${shown}`)
@@ -140,8 +172,23 @@ test('the cell contributes ODD harmonics, where the valves contribute even', () 
   // is what the paper's finding disqualified. Gain modulation can: a detector
   // rippling at 2f on a carrier at f puts sidebands at f and 3f.
   //
-  // At PR 54 (6 dB GR here), -18 dBFS, Gain 0: THD 1.51 %, H3 26.0 dB over H2.
-  const y = run(tone(2, lin(-18)), { peakReduction: 54 })
+  // ⚠ THE KNOB IS SOLVED FOR 6 dB, NOT ASSUMED. This read `peakReduction: 54`
+  // with a comment claiming that was 6 dB of reduction; it is 7.0 dB at this
+  // frequency and over 9 at 250 Hz. The valves see input-minus-reduction, so
+  // fitting the drive constant against that assumption left it 4 dB hot on H2
+  // for a release — see TUBE_DRIVE_LIN. Bisecting costs a few hundred ms and
+  // cannot drift when the side-chain taper is next touched.
+  //
+  // ⚠ AND THE PROBE IS NOMINAL RMS, not `lin(-18)` as a bare amplitude — see
+  // the note in the H2 test below. This assertion compares against the six
+  // units' absolute THD band, so a probe 3 dB under nominal is comparing the
+  // model at one operating point with hardware at another.
+  //
+  // At 6.0 dB GR, nominal in, Gain 0: THD 1.39 %, H3 25.9 dB over H2, against
+  // the six units' median 2.19 % and +25.7.
+  const nominal = lin(-18) * Math.SQRT2
+  const pr6 = knobForGainReduction(6, nominal)
+  const y = run(tone(2, nominal), { peakReduction: pr6 })
   const h1 = harmonic(y, 1), h2 = harmonic(y, 2), h3 = harmonic(y, 3)
   const total = thd(y)
   assert.ok(total > 0.0094 && total < 0.0422, `THD ${(total * 100).toFixed(2)}% is outside the six units' 0.94-4.22%`)
@@ -150,19 +197,51 @@ test('the cell contributes ODD harmonics, where the valves contribute even', () 
 
   // And it is the cell doing it, ADDITIVELY, which is what makes it a mechanism
   // rather than a rebalancing. With the modulation off the same operating point
-  // reads 0.093 % with H3 level with H2 (-63.7 against -64.0 dBc, the existing
+  // reads 0.088 % with H3 level with H2 (-64.4 against -64.1 dBc, the existing
   // detector's own ripple); switching it on leaves H2 within 0.1 dB and lifts
-  // H3 by 26 dB.
+  // H3 by 26.2 dB.
   //
   // ⚠ "THE TUBE STAGE ALONE IS EVEN-DOMINANT" IS TRUE OF THE CURVE AND NOT OF
   // THE STAGE AT THIS OPERATING POINT, and asserting it fails. The gain
-  // computer already ripples a little at PR 54, so a test written against the
-  // shaper's own symmetry would be measuring the compressor as well.
-  const off = run(tone(2, lin(-18)), { peakReduction: 54, cellMod: 0 })
+  // computer already ripples a little at 6 dB of reduction, so a test written
+  // against the shaper's own symmetry would be measuring the compressor too.
+  const off = run(tone(2, nominal), { peakReduction: pr6, cellMod: 0 })
   const dH2 = db(harmonic(y, 2)) - db(harmonic(off, 2))
   const dH3 = db(harmonic(y, 3)) - db(harmonic(off, 3))
   assert.ok(Math.abs(dH2) < 1, `the cell moved H2 by ${dH2.toFixed(1)} dB; it should only add odd content`)
   assert.ok(dH3 > 15, `the cell only added ${dH3.toFixed(1)} dB of H3`)
+})
+
+test('the tube stage lands on the paper\'s H2 median at the paper\'s operating point', () => {
+  // THE DERIVATION OF TUBE_DRIVE_LIN, as an assertion. `npm run la2a:h2:refit`
+  // is the full sweep; this is the one point that must not move without
+  // somebody meaning it.
+  //
+  // ⚠ IT PINS THE OPERATING POINT AS WELL AS THE NUMBER, which is the part that
+  // was missing. The previous constant satisfied its own recorded target and
+  // was still 4 dB hot, because the knob it was measured at produced 8-9 dB of
+  // reduction rather than the 6 the paper used and nothing checked. Solving for
+  // the reduction is what makes this a test of the drive rather than of the
+  // side-chain taper.
+  //
+  // Cell modulation OFF: it adds no even content (the test above pins that
+  // within 0.1 dB), so H2 here is the tanh alone, which is all this stage is
+  // responsible for.
+  //
+  // ⚠ THE PROBE IS -18 dBFS RMS, NOT -18 dBFS PEAK, and the sqrt(2) is the
+  // difference. NOMINAL_DBFS stands in for +4 dBu via the EBU alignment level,
+  // and both of those are RMS figures for a sine — so `lin(-18)` as a bare
+  // amplitude is a tone 3 dB BELOW nominal. Every other test in this file uses
+  // the peak convention and its recorded numbers are all 3 dB light because of
+  // it; harmless there, since they asserted directions and ratios rather than
+  // absolute levels, and not harmless here, where the whole assertion is an
+  // absolute level against a hardware measurement.
+  const nominal = lin(-18) * Math.SQRT2
+  const pr6 = knobForGainReduction(6, nominal)
+  const y = run(tone(2, nominal), { peakReduction: pr6, cellMod: 0 })
+  const h2 = db(harmonic(y, 2)) - db(harmonic(y, 1))
+  assert.ok(Math.abs(h2 - (-63.80)) < 1.5,
+    `H2 is ${h2.toFixed(2)} dBc against the paper's -63.80 median`)
 })
 
 test('the cell is silent when it is not working', () => {
