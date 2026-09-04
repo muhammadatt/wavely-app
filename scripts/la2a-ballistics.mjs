@@ -381,14 +381,23 @@ const OFFS = [0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050]
 function attackTable(envs, plan, lag, rows) {
   console.log('  ATTACK — gain reduction (dB) after the step up')
   console.log('    event                +0.5ms   +1ms   +2ms   +5ms  +10ms  +20ms  +50ms    final    t63    t90')
+  console.log('    (a t63 marked <=res is at or under the detector\'s own step response —')
+  console.log('     the attack is faster than this probe can resolve, not this fast)')
   const out = []
   for (const ev of rows) {
     const { rest, gr } = eventGain(envs, plan, ev, lag)
     if (!Number.isFinite(rest)) continue
     const fin = finalGR(gr, ev)
     const vals = OFFS.map(o => gr(ev.up + o))
-    console.log(`    ${ev.tag.padEnd(20)}${vals.map(v => (Number.isFinite(v) ? v.toFixed(2) : '  -').padStart(7)).join('')}  ${fin.toFixed(2).padStart(7)}  ${timeTo(gr, ev, 0.63, fin).toFixed(1).padStart(5)}  ${timeTo(gr, ev, 0.90, fin).toFixed(1).padStart(5)} ms`)
-    out.push({ ev, fin, gr, t63: timeTo(gr, ev, 0.63, fin) })
+    // ⚠ A RISE TIME AT OR UNDER THE DETECTOR'S OWN RESOLUTION IS THE DETECTOR.
+    // The demodulator's step response is ~1 ms at a 1 kHz probe and ~10 ms at
+    // 100 Hz; without this flag a capture whose attack is genuinely faster than
+    // the probe can resolve comes back as a confident sub-millisecond number.
+    const res = envelopeResolutionMs(ev.freqHz)
+    const t63 = timeTo(gr, ev, 0.63, fin), t90 = timeTo(gr, ev, 0.90, fin)
+    const mark = (Number.isFinite(t63) && t63 <= res * 1.5) ? ' <=res' : ''
+    console.log(`    ${ev.tag.padEnd(20)}${vals.map(v => (Number.isFinite(v) ? v.toFixed(2) : '  -').padStart(7)).join('')}  ${fin.toFixed(2).padStart(7)}  ${t63.toFixed(1).padStart(5)}  ${t90.toFixed(1).padStart(5)} ms${mark}`)
+    out.push({ ev, fin, gr, t63, belowRes: Number.isFinite(t63) && t63 <= res * 1.5 })
   }
   return out
 }
