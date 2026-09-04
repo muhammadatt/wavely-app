@@ -308,6 +308,37 @@ function envelopesFor(capture, plan) {
 }
 
 /**
+ * Stretches where the capture is silent but the stimulus is not.
+ *
+ * ⚠ DEMO PLUGINS MUTE ON A TIMER — Waves inserts a second of silence every
+ * twenty — and a muted second inside a measurement window does not look like an
+ * error, it looks like a compressor that clamped to nothing. Any event whose
+ * windows touch one of these is reported as corrupted rather than read.
+ */
+function findGaps(capture, plan) {
+  const win = Math.round(0.02 * SR)
+  const gaps = []
+  let inGap = false, start = 0
+  for (let i = 0; i + win < capture.length; i += win) {
+    let cm = 0, sm = 0
+    for (let j = 0; j < win; j++) {
+      const a = Math.abs(capture[i + j]); if (a > cm) cm = a
+      const r = plan.env[Math.min(i + j, plan.env.length - 1)]; if (r > sm) sm = r
+    }
+    const dead = cm < 1e-6 && sm > 1e-4
+    if (dead && !inGap) { inGap = true; start = i / SR }
+    if (!dead && inGap) { inGap = false; gaps.push([start, i / SR]) }
+  }
+  if (inGap) gaps.push([start, capture.length / SR])
+  return gaps
+}
+
+/** Does [a,b] touch any gap? */
+function hitsGap(gaps, a, b) {
+  return gaps.some(([g0, g1]) => b >= g0 && a <= g1)
+}
+
+/**
  * Gain reduction trajectory around one event, in dB, against the resting gain
  * just before its step. The stimulus envelope is known analytically, so only
  * the capture is demodulated.
@@ -332,22 +363,53 @@ function eventGain(envs, plan, ev, lag) {
  * correlates ambiguously at its own period, 1 ms at 1 kHz, which is the same
  * order as the attack being measured.
  */
-function alignByEnvelope(refEnv, capture, maxLag = 4410) {
+function alignByEnvelope(refEnv, capture, maxLag = 22050) {
   const rect = new Float64Array(capture.length)
   const a = Math.exp(-1 / (SR * 0.005))
   let e = 0
   for (let i = 0; i < capture.length; i++) { e = a * e + (1 - a) * Math.abs(capture[i]); rect[i] = e }
+
+  // ⚠ EXCLUDE THE DEMO MUTES FROM THE COST, OR THE FIT RAILS. Seven seconds of
+  // silence that the stimulus does not have will dominate a log-envelope
+  // distance, and the search pins itself to the end of its range — measured, it
+  // came back at -4394 against a +/-4410 limit, and every table downstream was
+  // nonsense (22 dB of reduction half a millisecond after a step, negative
+  // reduction during a release). The window is also widened, so a genuine
+  // plugin latency cannot be mistaken for the same failure.
+  const dead = new Uint8Array(capture.length)
+  {
+    const win = Math.round(0.02 * SR)
+    for (let i = 0; i + win < capture.length; i += win) {
+      let cm = 0
+      for (let j = 0; j < win; j++) { const v = Math.abs(capture[i + j]); if (v > cm) cm = v }
+      if (cm < 1e-6) for (let j = 0; j < win; j++) dead[i + j] = 1
+    }
+  }
+
   let best = 0, bestErr = Infinity
   for (let lag = -maxLag; lag <= maxLag; lag += 8) {
     let err = 0, c = 0
     for (let i = Math.max(0, -lag); i + lag < rect.length && i < refEnv.length; i += 128) {
+      if (dead[i + lag]) continue
       const r = refEnv[i] * 0.6366                     // mean |sin|, so the scales match
       err += (Math.log(Math.max(rect[i + lag], 1e-9)) - Math.log(Math.max(r, 1e-9))) ** 2
       c++
     }
-    if (c && err / c < bestErr) { bestErr = err / c; best = lag }
+    if (c > 1000 && err / c < bestErr) { bestErr = err / c; best = lag }
   }
-  return best
+  // Refine to the sample.
+  let refined = best
+  for (let lag = best - 8; lag <= best + 8; lag++) {
+    let err = 0, c = 0
+    for (let i = Math.max(0, -lag); i + lag < rect.length && i < refEnv.length; i += 32) {
+      if (dead[i + lag]) continue
+      const r = refEnv[i] * 0.6366
+      err += (Math.log(Math.max(rect[i + lag], 1e-9)) - Math.log(Math.max(r, 1e-9))) ** 2
+      c++
+    }
+    if (c > 1000 && err / c < bestErr) { bestErr = err / c; refined = lag }
+  }
+  return refined
 }
 
 // ── Fitting ─────────────────────────────────────────────────────────────────
@@ -378,13 +440,19 @@ function timeTo(gr, ev, frac, fin) {
 
 const OFFS = [0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050]
 
-function attackTable(envs, plan, lag, rows) {
+function attackTable(envs, plan, lag, rows, gaps = []) {
   console.log('  ATTACK — gain reduction (dB) after the step up')
   console.log('    event                +0.5ms   +1ms   +2ms   +5ms  +10ms  +20ms  +50ms    final    t63    t90')
   console.log('    (a t63 marked <=res is at or under the detector\'s own step response —')
   console.log('     the attack is faster than this probe can resolve, not this fast)')
   const out = []
   for (const ev of rows) {
+    // The resting window before the step, and the settling window before the
+    // step down, are the two the measurement depends on.
+    if (hitsGap(gaps, ev.up - 0.3, ev.up + 0.15) || hitsGap(gaps, ev.down - 0.6, ev.down + 5.2)) {
+      console.log(`    ${ev.tag.padEnd(20)}  — skipped: a demo mute overlaps this event`)
+      continue
+    }
     const { rest, gr } = eventGain(envs, plan, ev, lag)
     if (!Number.isFinite(rest)) continue
     const fin = finalGR(gr, ev)
@@ -417,17 +485,21 @@ function releaseTable(fits) {
 
 function fitBursts(capture, plan, lag, label) {
   const envs = envelopesFor(capture, plan)
+  const gaps = findGaps(capture, plan)
+  if (gaps.length) console.log(`\n  ⚠ ${gaps.length} demo mute(s) detected; affected events are skipped, not read.`)
   console.log(`\n  ── ${label} ──`)
-  releaseTable(attackTable(envs, plan, lag, plan.events))
+  releaseTable(attackTable(envs, plan, lag, plan.events, gaps))
 }
 
 function fitRetrigger(capture, plan, lag, label) {
   const envs = envelopesFor(capture, plan)
+  const gaps = findGaps(capture, plan)
+  if (gaps.length) console.log(`\n  ⚠ ${gaps.length} demo mute(s) detected; affected events are skipped, not read.`)
   console.log(`\n  ── ${label} ──`)
   console.log('  ATTACK MEMORY — the same test step, varying how recently the cell was lit.')
   console.log('  If the attack is program-dependent, t63 SHORTENS as the gap shortens.')
   const tests = plan.events.filter(e => e.role === 'test')
-  const fits = attackTable(envs, plan, lag, tests)
+  const fits = attackTable(envs, plan, lag, tests, gaps)
   const byGap = fits.filter(f => Number.isFinite(f.t63)).sort((a, b) => a.ev.gap - b.ev.gap)
   if (byGap.length >= 2) {
     const fastest = byGap[0], slowest = byGap[byGap.length - 1]
@@ -445,6 +517,8 @@ function fitRetrigger(capture, plan, lag, label) {
 
 function fitFrequency(capture, plan, lag, label) {
   const envs = envelopesFor(capture, plan)
+  const gaps = findGaps(capture, plan)
+  if (gaps.length) console.log(`\n  ⚠ ${gaps.length} demo mute(s) detected; affected events are skipped, not read.`)
   console.log(`\n  ── ${label} ──`)
   console.log('  FREQUENCY DEPENDENCE — the same step at each probe.')
   console.log('  The cell is described as faster to highs than lows; voice fundamentals')
@@ -457,15 +531,21 @@ function fitFrequency(capture, plan, lag, label) {
   console.log('      10.4 / 11.4 / 13.6 / 17.0 ms at 3000 / 1000 / 400 / 200 Hz, from the 80 Hz')
   console.log('      side-chain high-pass and the detector, with 100 Hz unmeasurable. Compare a')
   console.log('      reference against THAT baseline, never against a flat one.\n')
-  attackTable(envs, plan, lag, plan.events)
+  attackTable(envs, plan, lag, plan.events, gaps)
 }
 
 function fitStairs(capture, plan, lag, label) {
   const envs = envelopesFor(capture, plan)
+  const gaps = findGaps(capture, plan)
+  if (gaps.length) console.log(`\n  ⚠ ${gaps.length} demo mute(s) detected; affected events are skipped, not read.`)
   console.log(`\n  ── ${label}: static curve ──`)
   console.log('    input      settled GR')
   const pts = []
   for (const ev of plan.events) {
+    if (hitsGap(gaps, ev.up - 0.3, ev.down + 0.1)) {
+      console.log(`    ${String(ev.L).padStart(4)} dBFS   — skipped (demo mute)`)
+      continue
+    }
     const { rest, gr } = eventGain(envs, plan, ev, lag)
     if (!Number.isFinite(rest)) continue
     const v = finalGR(gr, ev)
@@ -574,6 +654,6 @@ for (const f of caps.sort()) {
   const p = plan()
   p.env = build(p).env
   const lag = alignByEnvelope(p.env, y.mono)
-  if (Math.abs(lag) > 2000) console.log(`\n⚠ ${f}: aligned at ${lag} samples — check for latency compensation.`)
+  if (Math.abs(lag) > 2000) console.log(`\n⚠ ${f}: aligned at ${lag} samples (${(lag / 44.1).toFixed(1)} ms) — plugin latency, or a failed fit.`)
   fit(y.mono, p, lag, f)
 }
