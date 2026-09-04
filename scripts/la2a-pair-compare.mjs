@@ -151,6 +151,34 @@ function runModel(d, params) {
   return a
 }
 
+/**
+ * Our static curve at a knob, from a settled staircase — 3 s per step, so every
+ * ballistic transient is excluded and what is left is the gain computer alone.
+ */
+function ourStaticSlope(knob) {
+  const levels = [-32, -28, -24, -20, -16]
+  const pts = []
+  for (const L of levels) {
+    const n = SR * 3
+    const x = new Float32Array(n)
+    const amp = Math.pow(10, L / 20) * Math.SQRT2
+    for (let i = 0; i < n; i++) x[i] = amp * Math.sin(2 * Math.PI * 220 * i / SR)
+    const k = new LA2AKernel(SR)
+    k.setParams({ mode: 'compress', peakReduction: knob, gainDb: 0, r37: 100, mix: 1 })
+    const o = new Float32Array(n)
+    for (let f = 0; f < n; f += 128) {
+      const l = Math.min(128, n - f)
+      k.process([x.subarray(f, f + l)], [o.subarray(f, f + l)], l)
+    }
+    pts.push([L, k.grDb])
+  }
+  const w = pts.filter(p => p[1] >= 1.5)
+  if (w.length < 3) return NaN
+  let n = w.length, sx = 0, sy = 0, sxx = 0, sxy = 0
+  for (const [x, y] of w) { sx += x; sy += y; sxx += x * x; sxy += x * y }
+  return (n * sxy - sx * sy) / (n * sxx - sx * sx)
+}
+
 /** The knob at which our median gain reduction matches the reference's. */
 function matchKnob(dry, targetMedGR, params = {}) {
   let lo = 0, hi = 100
@@ -226,6 +254,20 @@ function analyse(name, dryPath, wetPath) {
   console.log('\n  DYNAMIC SLOPE (the static curve as the ballistics actually deliver it)')
   console.log(`    reference ${rslope.m.toFixed(3)} dB/dB -> ${(1 / (1 - rslope.m)).toFixed(2)}:1   over ${rslope.lo}..${rslope.hi} dBFS`)
   console.log(`    ours      ${oslope.m.toFixed(3)} dB/dB -> ${(1 / (1 - oslope.m)).toFixed(2)}:1   over ${oslope.lo}..${oslope.hi} dBFS`)
+
+  // Our own static curve at the matched knob, from a settled staircase. The
+  // ratio of delivered to static slope is the cleanest statement of the bug,
+  // and it needs no opinion about what the reference is.
+  const staticSlope = ourStaticSlope(pr)
+  if (Number.isFinite(staticSlope) && Number.isFinite(oslope.m)) {
+    console.log('\n  DELIVERY — how much of its own static curve each one gets onto program')
+    console.log(`    ours: static ${staticSlope.toFixed(3)} dB/dB, delivered ${oslope.m.toFixed(3)} => ${(100 * oslope.m / staticSlope).toFixed(0)}%`)
+    console.log('    ⚠ A COMPETENT COMPRESSOR DELIVERS ESSENTIALLY ALL OF IT. Measured on a')
+    console.log('      reference capture: static 0.813, delivered 0.855 — 105 %. Ours loses')
+    console.log('      about a third to gain reduction parked in the slow stage, which is')
+    console.log('      reduction that never reaches a peak. This number is the bug, stated')
+    console.log('      without needing to know what the reference actually is.')
+  }
 
   console.log('\n  CREST vs COMPRESSION DEPTH — the acceptance criterion')
   console.log('    A compressor must not raise peak-to-rms. Ours does, and the error')
