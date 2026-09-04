@@ -75,3 +75,46 @@ export async function analyzeSibilance({
     measuredEvents: rescaleEvents(result.measuredEvents ?? [], result.sampleRate, sampleRate),
   }
 }
+
+/**
+ * Run voice-activity detection over a region of the timeline.
+ *
+ * The auto-leveler's one server dependency. Everything else it does — clip
+ * segmentation, per-clip loudness, the gain solve, the crossfades — runs in the
+ * browser against the mask this returns, so this is called once per analysis
+ * and never again while the controls move.
+ *
+ * NO SAMPLE-RATE RESCALING, unlike analyzeSibilance above. The route answers in
+ * frame indices and tells us the frame duration, so a 48 kHz project multiplies
+ * by its own rate and lands on its own grid. That removes the whole class of
+ * bug the rescaleEvents helper exists to patch rather than patching it again.
+ *
+ * @param {object} options
+ * @param {Array}  options.segments   - Timeline segments
+ * @param {number} options.start      - Region start (seconds)
+ * @param {number} options.end        - Region end (seconds)
+ * @param {number} options.sampleRate - Project sample rate
+ * @param {number} options.channels   - Channel count
+ * @returns {Promise<{ voicedRuns: Array<[number,number]>, numFrames: number,
+ *                     frameDurationS: number, noiseFloorDbfs: number|null }>}
+ */
+export async function analyzeVoiceActivity({ segments, start, end, sampleRate, channels }) {
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  const wavBlob = floatChannelsToWavBlob(channelData, sampleRate, channels)
+
+  const formData = new FormData()
+  formData.append('file', wavBlob, 'selection.wav')
+  formData.append('params', JSON.stringify({}))
+
+  const res = await fetch(`${API_BASE}/api/analyze/vad`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `Analysis failed: ${res.status}` }))
+    throw new Error(body.error || `Analysis failed: ${res.status}`)
+  }
+
+  return res.json()
+}

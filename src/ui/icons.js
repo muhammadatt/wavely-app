@@ -38,6 +38,10 @@ export const ICONS = {
 
   // Effects
   normalize: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  // Phrases at uneven levels being brought onto one line — the leveler's whole
+  // job in one glyph, and deliberately unlike `normalize`, which moves the file
+  // as a single block rather than phrase by phrase.
+  autolevel: '<path d="M2 7h4M8 15h4M14 10h3M19 17h3"/><path d="M2 12h20" stroke-dasharray="2.5 2.5" opacity=".5"/><path d="M4 7v3M10 15v-3M15.5 10v2M20.5 17v-5" opacity=".55"/>',
   opto: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   fet: '<polyline points="13 2 4 14 11 14 10 22 20 10 13 10 13 2"/>',
   // Scheps Parallel: one signal splitting into two paths and summing back — the

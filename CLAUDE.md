@@ -55,6 +55,7 @@ Processing is split between client and server based on operation type. This is n
 | Compression | Client | Interactive parameter tweaking expects immediacy. Two emulations — OptoSmooth (LA-2A opto) and FET Punch (1176 FET) — each a kernel run in an AudioWorklet for preview and in an OfflineAudioContext for apply, so the two are sample-identical. Both run their gain cell and saturator 4x oversampled (`src/audio/dsp/oversample.js`); detector and ballistics stay at base rate. Each reports 50 samples of latency, which the apply path compensates |
 | Scheps Parallel | Client | A composite: two fitted Pultec stages around the existing OptoSmooth kernel, blended against a delay-compensated dry path. One worklet node, so the blend's alignment and the preview/apply equivalence are both structural rather than wiring the caller has to get right |
 | Manual EQ and VoiceRx | Client | Two separate plugins, each a biquad cascade cheap enough to run live — the whole usability argument depends on hearing the change while moving the control. VoiceRx's analysis is a client port of Stage 3a — measurement-driven, so it needs no corpus, no reference curve and no preset |
+| Auto Leveler | Hybrid | The DSP is a full client port of the server stage and reproduces its gain curve sample for sample; the one input it cannot compute in the browser is the Silero voiced/silence mask, which comes from `/api/analyze/vad` once per analysis. Every control acts on numbers derived after the mask, so one round trip buys unlimited knob turns. The curve is scheduled onto an AudioParam rather than rendered into a buffer — a per-sample envelope is 317 MB per thirty minutes of mono |
 | Noise reduction | Server (DeepFilterNet3) | Quality gap vs. RNNoise is significant and user-visible. Modal wait is normal for this operation |
 | Full preset chain | Server | Always server-side |
 
@@ -266,6 +267,7 @@ These apply only to the `acx_audiobook` preset:
 - Inflator — level-independent density/harmonic enhancement (ported curve with algebraic ceiling guarantees), optional 3-band split
 - Manual EQ (12-band parametric) and VoiceRx (voice diagnosis/corrective EQ) as separate plugins with separate band pools; VoiceRx can move its corrections into the EQ as ordinary bands
 - ResoTame — dynamic, multiband resonance suppression with a per-frequency spectrum display (not a single gain-reduction meter); two selectable targeting models (Zones and Focus, the shipping default) and two reference envelopes (peak envelope shipping, cepstral available via override)
+- Auto Leveler — client port of the `autoLevel` pipeline stage: VAD voiced runs and sub-phrase splits into clips, per-clip K-weighted LUFS, `shapeDrift` against a global or rolling median target, transparent merge of conflicting neighbours, cosine crossfades at the lowest-energy point of each boundary. Server-side VAD via `/api/analyze/vad`; everything else runs in the browser. Preview and apply read the same segment list, and `test/dsp/autoLevelParity.test.js` runs the real server stage against the client solver on one fixture and compares the curves sample for sample
 - Spectrum Analyzer (conventional RTA-style display on the effect chain output)
 - Plugin presets (factory + user-saved) for OptoSmooth, FET Punch, and ResoTame
 - Tube Saturation — 3-band saturator with denormal-safe biquad state handling
@@ -284,7 +286,7 @@ These apply only to the `acx_audiobook` preset:
 - **Payment / tier enforcement** — Gate logic not present; all tiers currently serve same output
 - **Batch processing** — Sprint 5; multi-file + cross-chapter consistency pass
 - **API access** — Sprint 6 / Pro tier
-- **Test infrastructure** — Partial. `npm test` runs a `node:test` unit suite over the client DSP (`test/dsp/`, `test/voicerx/`, `test/ui/`, 465 tests). No integration or E2E tests, and no coverage of the server pipeline, Vue components or the async job flow — `test/ui/` reaches the editor state composable and the playback scheduler by faking the AudioContext, which is as far up as this suite goes
+- **Test infrastructure** — Partial. `npm test` runs a `node:test` unit suite over the client DSP (`test/dsp/`, `test/voicerx/`, `test/ui/`). The auto-leveler suite is the one place a client port is checked against the server implementation directly — it imports `server/pipeline/autoLeveler.js` and asserts the two produce the same gain curve — rather than against hand-written expectations. No integration or E2E tests, and no coverage of the server pipeline, Vue components or the async job flow — `test/ui/` reaches the editor state composable and the playback scheduler by faking the AudioContext, which is as far up as this suite goes
 - **Persistent job storage** — Jobs are in-memory; server restart loses them
 - **`docs/acx_production_workflow.md`** and **`docs/instant_polish_gtm.md`** — Referenced but not created
 

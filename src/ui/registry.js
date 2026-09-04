@@ -13,6 +13,7 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
+import AutoLevelModal from '../components/panels/AutoLevelModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
@@ -359,6 +360,21 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: ResonanceModal,
+  },
+  {
+    id: 'auto-leveler',
+    label: 'Auto Leveler',
+    desc: 'Even out level between phrases',
+    category: 'effects',
+    group: 'Level',
+    icon: 'autolevel',
+    keywords: [
+      'level', 'leveller', 'leveler', 'auto level', 'ride', 'gain riding',
+      'clip gain', 'consistency', 'even', 'volume', 'quiet passage', 'acx',
+    ],
+    requires: 'selection',
+    surface: 'window',
+    component: AutoLevelModal,
   },
   {
     id: 'clip-gain-deesser',

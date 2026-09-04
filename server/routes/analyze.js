@@ -12,6 +12,7 @@
  *
  * Currently supported kinds:
  *   - sibilance — sibilance event map for the clip-gain de-esser
+ *   - vad       — voiced/silence frame mask for the auto-leveler
  *
  * SAMPLE RATE. The pipeline decodes everything to 44.1 kHz (INTERNAL_SAMPLE_RATE
  * in lib/ffmpeg.js), so returned sample offsets are in the analysis rate, not
@@ -26,6 +27,7 @@ import path from 'path'
 import { unlink } from 'fs/promises'
 import { withAnalysisContext } from '../pipeline/index.js'
 import { applyClipGainDeEsser } from '../pipeline/clipGainDeEsser.js'
+import { FRAME_DURATION_S } from '../pipeline/frameAnalysis.js'
 
 const router = Router()
 
@@ -120,8 +122,73 @@ async function runSibilanceAnalysis(inputPath, params) {
   )
 }
 
+/**
+ * Voice-activity analysis for the realtime auto-leveler.
+ *
+ * The auto-leveler's whole DSP ports to the browser — K-weighting, clip
+ * segmentation, per-clip LUFS, drift shaping, crossfades — except for the one
+ * input it cannot compute there: Silero's voiced/silence labels. So this route
+ * returns that mask and nothing else, and the client does the rest.
+ *
+ * RUNS ARE THE WIRE FORMAT, NOT FRAMES. A frame is 25 ms, so an hour-long
+ * chapter is 144,000 of them; as objects that is tens of megabytes of JSON to
+ * carry one boolean each. Voiced runs are the same information at the size of
+ * the speech structure rather than the frame grid — a few hundred pairs for a
+ * chapter — and the client expands them back to a mask in a loop.
+ *
+ * FRAME INDICES, NOT SAMPLE OFFSETS. The pipeline decodes to 44.1 kHz, so
+ * sample offsets would need the same rescaling the sibilance route documents,
+ * with the same silent drift when a caller forgets. A frame index plus
+ * frameDurationS is rate-free: the client multiplies by its own rate and lands
+ * on its own grid exactly, because that is how frameBoundary defines the grid
+ * on this side too.
+ *
+ * Mono is forced through the preset's channelOutput — VAD is a single-channel
+ * decision, and an unmixed stereo input would reach it as interleaved noise.
+ */
+async function runVadAnalysis(inputPath) {
+  return withAnalysisContext(
+    {
+      inputPath,
+      stages: ['decode', 'monoMixdown', 'analyzeFramesRaw'],
+      preset: { channelOutput: 'mono' },
+    },
+    async (ctx) => {
+      const metrics = ctx.results.metrics ?? {}
+      const frames = metrics.frames ?? []
+
+      // Run-length encode the voiced frames: [startInclusive, endExclusive).
+      const voicedRuns = []
+      let runStart = -1
+      for (let f = 0; f < frames.length; f++) {
+        const voiced = !frames[f].isSilence
+        if (voiced && runStart < 0) runStart = f
+        else if (!voiced && runStart >= 0) {
+          voicedRuns.push([runStart, f])
+          runStart = -1
+        }
+      }
+      if (runStart >= 0) voicedRuns.push([runStart, frames.length])
+
+      return {
+        sampleRate:     ANALYSIS_SAMPLE_RATE,
+        frameDurationS: FRAME_DURATION_S,
+        numFrames:      frames.length,
+        voicedRuns,
+        // The noise floor arms the leveler's headroom cap: it may not lift a
+        // clip so far that the room tone comes up with it.
+        noiseFloorDbfs:       metrics.noiseFloorDbfs ?? null,
+        silenceThresholdDbfs: metrics.silenceThresholdDbfs ?? null,
+        voicedRmsDbfs:        metrics.voicedRmsDbfs ?? null,
+        durationS:            frames.length * FRAME_DURATION_S,
+      }
+    },
+  )
+}
+
 const KINDS = {
   sibilance: { label: 'Sibilance', run: runSibilanceAnalysis },
+  vad:       { label: 'Voice activity', run: runVadAnalysis },
 }
 
 router.post('/analyze/:kind', upload.single('file'), async (req, res) => {
@@ -153,7 +220,9 @@ router.post('/analyze/:kind', upload.single('file'), async (req, res) => {
     const result = await kind.run(uploadedPath, params)
     console.log(
       `[analyze/${req.params.kind}] ${Date.now() - started}ms — ` +
-      `${result.detectedCount ?? 0} events`,
+      (result.voicedRuns
+        ? `${result.voicedRuns.length} voiced runs / ${result.numFrames} frames`
+        : `${result.detectedCount ?? 0} events`),
     )
 
     res.json(result)

@@ -1,4 +1,5 @@
 import { getSegmentDuration } from './operations.js'
+import { applyGainSegments } from './dsp/autoLevel.js'
 import { analysisWindow } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import {
@@ -573,6 +574,33 @@ export function applyHumNotchRegion(segments, start, end, params, sampleRate, ch
     processorName: 'hum-notch-processor',
     kernelParams: toHumNotchKernelParams({ ...HUM_NOTCH_DEFAULTS, ...params }),
   })
+}
+
+/**
+ * Apply a solved auto-leveler curve to a region and return the new buffer.
+ *
+ * The curve is expressed over the ANALYSED region, which is usually larger than
+ * what is being written: analysing a chapter and applying one chapter is the
+ * common case, but narrowing to a paragraph afterwards is allowed and every
+ * clip inside it was already measured. `offsetSamples` is where this region
+ * starts within that one, so the gains stay attached to the audio they were
+ * computed from rather than sliding to the head of the selection.
+ */
+export function applyAutoLevelRegion(
+  segments, start, end, gainSegments, analysisStartSec, sampleRate, channels,
+) {
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  const numSamples = channelData[0].length
+  const offsetSamples = Math.round((start - analysisStartSec) * sampleRate)
+
+  const levelled = applyGainSegments(channelData, gainSegments, numSamples, offsetSamples)
+
+  const ctx = new OfflineAudioContext(channels, numSamples, sampleRate)
+  const out = ctx.createBuffer(channels, numSamples, sampleRate)
+  for (let ch = 0; ch < channels; ch++) {
+    out.getChannelData(ch).set(levelled[ch])
+  }
+  return out
 }
 
 /**
