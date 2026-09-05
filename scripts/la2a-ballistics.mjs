@@ -520,6 +520,47 @@ function findGaps(capture, plan) {
   return gaps
 }
 
+/**
+ * BEFORE FITTING, CHECK THE TWO THINGS A CAPTURE CAN GET WRONG SILENTLY.
+ *
+ * ⚠ (1) THAT THE RENDER STARTED AT SAMPLE 0. The events are POSITIONED around
+ * the demo mute — see MUTE_PERIOD_S — so a bounce that starts late slides every
+ * one of them into the mutes it was placed to avoid, and the only symptom is
+ * events going missing again. The mute grid is absolute (20.01 s, then every
+ * 20.00), so its offset in the capture measures the render offset directly.
+ *
+ * ⚠ (2) THAT THE BOUNCE RAN TO THE END. A tail cut short loses the last event,
+ * and the last event is the longest one in three of the four plans.
+ *
+ * Neither is the fitter's job and both are cheap, so they are reported up front
+ * rather than left to be inferred from a thin table.
+ */
+function preflightCapture(file, capture, plan) {
+  const got = capture.length / SR
+  if (got < plan.seconds - 0.5) {
+    console.log(`\n⚠ ${file}: ${got.toFixed(1)}s against the stimulus's ${plan.seconds.toFixed(1)}s ` +
+      `— the bounce is ${(plan.seconds - got).toFixed(1)}s short and the last event(s) are missing.`)
+  }
+  const gaps = findGaps(capture, plan)
+  if (!gaps.length) return
+  // Each mute should open at 20k + 0.01 s. Its offset IS the render offset.
+  const offsets = gaps
+    .map(([a]) => a - MUTE_PERIOD_S * Math.round(a / MUTE_PERIOD_S))
+    .sort((x, y) => x - y)
+  // ⚠ RESOLUTION IS THE GAP DETECTOR'S 20 ms WINDOW, so this locates a bad
+  // render rather than measuring it: a 400 ms shift reads as about 370. That is
+  // the right precision for the job — the answer is "re-render", not a trim.
+  const median = offsets[Math.floor(offsets.length / 2)] - 0.01
+  if (Math.abs(median) > 0.15) {
+    console.log(`\n⚠ ${file}: THE DEMO MUTES ARE ABOUT ${(median * 1000).toFixed(0)} ms OFF THE GRID (±20 ms).`)
+    console.log('   They should open at 20.01s and every 20.00s after. This capture\'s open at')
+    console.log(`   ${gaps.slice(0, 4).map(([a]) => a.toFixed(2)).join(', ')} ...`)
+    console.log('   The bounce did not start at the file\'s first sample, so the events are no')
+    console.log('   longer sitting in the clean windows they were scheduled into. Re-render from')
+    console.log('   sample 0 — nothing downstream can recover this.')
+  }
+}
+
 /** Does [a,b] touch any gap? */
 function hitsGap(gaps, a, b) {
   return gaps.some(([g0, g1]) => b >= g0 && a <= g1)
@@ -1207,6 +1248,7 @@ for (const f of caps.sort()) {
     console.log('   The insert was bypassed, or the bounce exported the source track.')
     continue
   }
+  preflightCapture(f, y.mono, p)
   const lag = alignByEnvelope(p.env, y.mono)
   if (Math.abs(lag) > 2000) console.log(`\n⚠ ${f}: aligned at ${lag} samples (${(lag / 44.1).toFixed(1)} ms) — plugin latency, or a failed fit.`)
   fit(y.mono, p, lag, f)
