@@ -26,6 +26,7 @@
     "la2a:stimulus": "node scripts/la2a-ballistics.mjs --stimulus",
     "la2a:selftest": "node scripts/la2a-ballistics.mjs --selftest",
     "la2a:detector": "node scripts/la2a-ballistics.mjs --detector",
+    "la2a:emphasis": "node scripts/la2a-ballistics.mjs --emphasis",
     "la2a:taper": "node scripts/la2a-ballistics.mjs --taper",
     "la2a:taper:selftest": "node scripts/la2a-ballistics.mjs --taper --selftest",
     "smoke": "node scripts/panel-smoke.mjs"

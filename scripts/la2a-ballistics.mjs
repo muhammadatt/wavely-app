@@ -1022,6 +1022,115 @@ function reportTaper(points, label) {
 
 
 /**
+ * THE EMPHASIS SWEEP — what the side-chain trimmer actually does, per unit.
+ *
+ * WHY THIS EXISTS. `SC_SHELF_HZ` (1 kHz) and `SC_SHELF_MAX_DB` (10 dB) are the
+ * only part of the side-chain with NOTHING behind them: the R37 note says in as
+ * many words that neither the corner nor the depth is measured. This measures
+ * both, from captures of the stimulus that already exists.
+ *
+ * ⚠ IT ALSO TESTS A SPECIFIC SUSPICION ABOUT LALA, WHICH HAS EVIDENCE. LALA's
+ * frequency capture rises 5.00 dB (detector level) from 1 to 3 kHz where
+ * CLA-2A falls 0.56 — a 7.3 dB disagreement between two emulations of the same
+ * unit. If LALA's emphasis was simply turned up for that take, that is the
+ * tilt, measured with the control engaged rather than a property of the unit.
+ * And its take demonstrably was NOT at its own ramp take's settings: LALA's
+ * ramp at knob 60 predicts 2.33 dB of reduction at -18 dBFS, and its frequency
+ * capture measures 4.81 dB at the same probe and level. The method is not to
+ * blame — the same comparison on our own kernel agrees to 0.01 dB.
+ *
+ * NAMING. `<unit>-e<setting>.<knob>.frequency.wav`, e.g. lala-e0.60.frequency
+ * .wav, lala-e50.60.frequency.wav. The existing capture loop matches on
+ * `.frequency.` so these need no other change, and this mode groups them.
+ *
+ * ⚠ HOLD PEAK REDUCTION HIGH ENOUGH THAT THE MOST-ATTENUATED PROBE STILL
+ * COMPRESSES. If the emphasis takes 10 dB out of the low end, a knob that gives
+ * 13 dB of reduction flat gives about 5 at 100 Hz — measurable. One that gives
+ * 4 dB flat gives nothing there, and the row is a row of zeros.
+ */
+function settledGrByProbe(capture, plan, lag) {
+  const out = []
+  for (const ev of plan.events) {
+    const f = ev.freqHz
+    const amp = (t0, t1) => {
+      const a = Math.max(0, Math.round((t0 + lag / SR) * SR))
+      const b = Math.min(capture.length, Math.round((t1 + lag / SR) * SR))
+      let re = 0, im = 0
+      for (let i = a; i < b; i++) {
+        const ph = 2 * Math.PI * f * i / SR
+        re += capture[i] * Math.cos(ph); im -= capture[i] * Math.sin(ph)
+      }
+      const n = Math.max(1, b - a)
+      return 2 * Math.hypot(re, im) / n
+    }
+    // Rest just before the step, and the last 200 ms of the hold. Coherent at
+    // the probe, so neighbouring events cannot leak in.
+    const rest = amp(ev.up - 1.5, ev.up - 0.2)
+    const hold = amp(ev.down - 0.22, ev.down - 0.02)
+    const step = 20 * Math.log10(Math.max(hold, 1e-30) / Math.max(rest, 1e-30))
+    out.push([f, (HIGH_DBFS - LOW_DBFS) - step])
+  }
+  return out
+}
+
+function reportEmphasis() {
+  const files = existsSync(CAP_DIR)
+    ? readdirSync(CAP_DIR).filter(f => f.includes('.frequency.') && f.endsWith('.wav')).sort() : []
+  if (!files.length) {
+    console.log(`No <unit>.<knob>.frequency.wav captures in ${CAP_DIR}.`)
+    console.log('For an emphasis sweep, name them <unit>-e<setting>.<knob>.frequency.wav')
+    console.log('  e.g. lala-e0.60.frequency.wav, lala-e50.60.frequency.wav, lala-e100.60...')
+    noteArgForwarding()
+    return
+  }
+  const p = freqPlan()
+  const built = build(p)
+  p.env = built.env
+  const rows = []
+  for (const f of files) {
+    const y = readWav(path.join(CAP_DIR, f))
+    if (y.sampleRate !== SR) { console.log(`⚠ ${f}: ${y.sampleRate} Hz; capture at ${SR}.`); continue }
+    const lag = alignByEnvelope(p.env, y.mono)
+    // ⚠ A STALE CAPTURE PRODUCES A CONFIDENT-LOOKING TABLE, NOT AN ERROR, so it
+    // is refused here rather than tabulated. One rendered against the
+    // pre-scheduling stimulus reads 31.60 dB at two probes and 19.63 at a third
+    // — the event times simply point somewhere else. Both checks below already
+    // exist for the fitting path; this mode needs them just as much.
+    preflightCapture(f, y.mono, p)
+    const gr = settledGrByProbe(y.mono, p, lag)
+    const wild = gr.filter(([, v]) => !(v > -3 && v < 25))
+    if (wild.length) {
+      console.log(`⚠ ${f}: implausible reduction at ${wild.map(([hz]) => hz + ' Hz').join(', ')} ` +
+        `(${wild.map(([, v]) => v.toFixed(1)).join(', ')} dB) — the events are not where the plan`)
+      console.log('   expects them. Almost always a capture of an older stimulus; re-render it.')
+      continue
+    }
+    rows.push([f.replace(/\.frequency\.wav$/, ''), gr])
+  }
+  if (!rows.length) return
+  console.log('\n  ── SIDE-CHAIN EMPHASIS: settled gain reduction by probe ──\n')
+  console.log('  Settled GR (dB), measured coherently over the last 200 ms of each hold.')
+  console.log('  capture' + ' '.repeat(22) + FREQS_HZ.map(f => `${f}Hz`.padStart(9)).join(''))
+  for (const [name, gr] of rows) {
+    console.log('  ' + name.padEnd(28) + gr.map(([, v]) => v.toFixed(2).padStart(9)).join(''))
+  }
+  console.log('\n  Same rows as GR RELATIVE TO THE 100 Hz PROBE — this is the shape the')
+  console.log('  emphasis control moves, and comparing a unit against ITSELF needs no')
+  console.log('  ratio correction because its static slope is the same in every row.')
+  console.log('  capture' + ' '.repeat(22) + FREQS_HZ.map(f => `${f}Hz`.padStart(9)).join(''))
+  for (const [name, gr] of rows) {
+    const b = gr[0][1]
+    console.log('  ' + name.padEnd(28) +
+      gr.map(([, v]) => ((v - b >= 0 ? '+' : '') + (v - b).toFixed(2)).padStart(9)).join(''))
+  }
+  console.log('\n  ⚠ A ROW OF NEAR-ZEROS AT THE LOW PROBES MEANS THE KNOB WAS TOO LOW, not')
+  console.log('    that the emphasis is infinitely deep: the attenuated probe fell under the')
+  console.log('    threshold entirely. Re-capture that setting at a higher Peak Reduction.')
+  console.log('\n  Ours, for reference — SC_SHELF_HZ 1000, SC_SHELF_MAX_DB 10, neither of')
+  console.log('  which is measured against anything. That is what this sweep is for.')
+}
+
+/**
  * WHERE THE SIDE-CHAIN'S FREQUENCY RESPONSE ACTUALLY COMES FROM.
  *
  * The reference units take MORE gain reduction as the probe rises; ours peaks
@@ -1125,6 +1234,11 @@ function noteArgForwarding() {
 }
 
 const args = process.argv.slice(2)
+
+if (args.includes('--emphasis')) {
+  reportEmphasis()
+  process.exit(0)
+}
 
 if (args.includes('--detector')) {
   reportDetector()
