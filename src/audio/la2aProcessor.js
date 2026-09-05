@@ -309,14 +309,36 @@ const SC_SHELF_MAX_DB = 10
  * It buys the tilt and pays with the one distortion relationship that ever
  * corroborated against hardware, and it was corroboration nobody aimed at.
  *
- * ⚠ SO THE QUESTION IS OPEN, AND IT IS ONE CAPTURE FROM BEING SETTLED. Either
- * this detector is about right and the references carry a real HF emphasis we
- * do not model — which belongs in the side-chain FILTER, where it is
- * independent of `cellMod` — or the detector is wrong and CELL_MOD_MAX absorbed
- * the error. ⚠ NOTE WE ALREADY MATCH BOTH REFERENCES BELOW 400 Hz, where
- * narration lives, and that the large divergence (LALA's +3.44 dB from 1 to
- * 3 kHz) rests on ONE reference: the CLA-2A frequency capture loses both its
- * 400 Hz and 3 kHz events to demo mutes. A clean one decides it.
+ * ⚠ SETTLED, AND THE ANSWER IS TO CHANGE NOTHING: THE TWO REFERENCES DISAGREE
+ * WITH EACH OTHER AND WE SIT BETWEEN THEM. A clean five-probe CLA-2A capture —
+ * mute-scheduled, event timing within 1.5 ms, and reproduced exactly on a
+ * second render — settles it. Detector-level tilt against the 100 Hz probe,
+ * each unit divided by its OWN static slope so depths compare:
+ *
+ *              100     200     400    1000    3000
+ *     ours    +0.00   +1.15   +1.11   +0.60   +0.20
+ *     CLA-2A  +0.00   +0.19   -1.60   -2.30   -0.56
+ *     LALA    +0.00   +0.90   +1.04   +1.56   +5.00
+ *
+ * They differ by 7.3 dB at 3 kHz. CLA-2A FALLS with frequency — harder than we
+ * do — where LALA rises steeply, and ours lies between the two at every probe
+ * above 200 Hz. There is no "reference behaviour" here to match, so adding an
+ * HF tilt would be picking a side between two emulations that contradict each
+ * other, on a control whose factory position is supposed to be flat.
+ *
+ * ⚠ THE SHAPE IS NOT A TILT AT ALL ON EITHER UNIT THAT HAS ONE. CLA-2A peaks at
+ * 200 Hz, dips through 400-1000 and recovers at 3 kHz; ours peaks at 200 and
+ * falls. Those are qualitatively the SAME shape at different depths, which is
+ * the opposite of what an earlier three-point read of this suggested. Whatever
+ * is left here is not a one-pole slope and is not worth chasing with a shelf.
+ *
+ * ⚠ AN EARLIER, THREE-POINT CLA-2A READ SAID THE OPPOSITE (+1.50 dB at 1 kHz
+ * against this -2.30) AND IS RETIRED. Two of its five probes were lost to demo
+ * mutes; it was rendered before the stimulus was scheduled around them; and its
+ * knob position was never actually stated — the "60" in its filename was an
+ * assumption, so it may not even be the same operating point (its gain
+ * reduction ran 1.5 dB deeper throughout). None of that is true of the capture
+ * above.
  */
 const DETECTOR_S = 0.0005
 
