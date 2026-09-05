@@ -1038,18 +1038,36 @@ function reportTaper(points, label) {
  * side-chain, and one that does not either is not, or does nothing — and a
  * sweep that reports no change is a result, not a failed capture.
  *
- * ⚠ THE CONTROL NAMES DO NOT MAP ACROSS UNITS AND ONE GUESS HERE WAS ALREADY
- * WRONG. LALA has HPF (20-500 Hz), MF (0.5-10 kHz), MG (-6..+6 dB) and HF
- * (-10..0 dB, 0 = flat); CLA-2A has HI FREQ (0-100, 100 = flat). Ours is R37,
- * an attenuator of LOWS. So:
+ * THE CONTROL MAP, FROM THE VENDORS RATHER THAN FROM THE KNOB LABELS. LALA has
+ * HPF (20-500 Hz), MF (0.5-10 kHz), MG (-6..+6 dB) and HF (-10..0 dB, 0 = flat);
+ * CLA-2A has HI FREQ (0-100, 100 = flat); ours is R37, an attenuator of LOWS.
  *   - CLA-2A's HI FREQ is the direct analogue of R37 — same convention, 100 flat.
- *   - LALA's closest analogue is HPF, which also removes lows from the detector.
- *   - LALA's HF is NOT the analogue: it only CUTS highs, so it moves the tilt
- *     NEGATIVE. It cannot explain LALA's +5 dB rise at 3 kHz, and an earlier
- *     note in this file that suspected it was wrong in direction.
- *   - The rise fits a side-chain MID BOOST instead: MG up to +6 dB centred by
- *     MF near 3 kHz would put a bump exactly where the measurement finds one.
- *     That is a candidate to test, not a conclusion.
+ *   - LALA's HF is ALSO the R37 analogue. Analog Obsession's own documentation
+ *     says so in as many words: "HF - Will set sensitivity of compressor for
+ *     high frequencies (Enhanced version of original unit's R37 setting)",
+ *     against "HPF: Will cut low end" and "MF / MG: Will set sensitivity of
+ *     compressor for mid frequencies".
+ *
+ * ⚠ AN EARLIER VERSION OF THIS NOTE RULED HF OUT, FROM ITS NUMERIC LABEL. The
+ * reasoning was that a control running -10..0 dB can only CUT, so it could only
+ * push the tilt negative. That reads the label as if it described the highs it
+ * is named after; on an R37 the depth is what is taken OUT OF THE LOWS, which
+ * makes the side-chain more sensitive to highs and moves the tilt POSITIVE. The
+ * function came from the vendor, the direction was inferred from a number, and
+ * the number was the misleading part.
+ *
+ * ⚠ AND THE CORRECTED READING FITS THE DATA QUANTITATIVELY, which the wrong one
+ * did not. Mapping HF 0 dB to r37 100 and HF -10 dB to r37 0, our own measured
+ * sweep predicts LALA's detector-level tilt at 3 kHz:
+ *
+ *     HF     0.0 dB -> +0.27      HF  -5.0 dB -> +4.59
+ *     HF    -2.5 dB -> +2.40      HF -10.0 dB -> +8.98
+ *
+ * LALA measured +5.00, i.e. HF at about -5.5 dB — engaged, not flat, which is
+ * what its disagreement with its own ramp take already said independently.
+ * ⚠ NOTE ALSO that SC_SHELF_MAX_DB is 10 dB and LALA's HF spans exactly -10..0.
+ * That may be corroboration of a constant we guessed, or both of us reading the
+ * same folklore; the sweep is what tells them apart.
  *
  * ⚠ SOMETHING WAS ENGAGED ON LALA'S TAKE, EVEN IF NOT THE CONTROL FIRST BLAMED.
  * Its frequency capture rises 5.00 dB (detector level) from 1 to 3 kHz where
