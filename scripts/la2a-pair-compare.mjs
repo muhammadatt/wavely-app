@@ -255,18 +255,48 @@ function analyse(name, dryPath, wetPath) {
   console.log(`    reference ${rslope.m.toFixed(3)} dB/dB -> ${(1 / (1 - rslope.m)).toFixed(2)}:1   over ${rslope.lo}..${rslope.hi} dBFS`)
   console.log(`    ours      ${oslope.m.toFixed(3)} dB/dB -> ${(1 / (1 - oslope.m)).toFixed(2)}:1   over ${oslope.lo}..${oslope.hi} dBFS`)
 
-  // Our own static curve at the matched knob, from a settled staircase. The
-  // ratio of delivered to static slope is the cleanest statement of the bug,
-  // and it needs no opinion about what the reference is.
+  /**
+   * DELIVERY — how much of its own static curve the ballistics get onto program.
+   *
+   * ⚠ THIS WAS "THE BUG" AND IS NOT ONE ANY MORE. At 68 % it was: the old
+   * release parked a fixed share of the reduction in a slow stage that could
+   * not follow program, and the ratio matched FAST_FRACTION to two figures.
+   * That stage is gone. What is left is not a defect but a RELEASE-SPEED
+   * DIFFERENCE BETWEEN THE TWO REFERENCES, and the arithmetic is unforgiving:
+   * this number is set almost entirely by release, and almost not at all by
+   * attack. Sweeping ours on the same pair —
+   *
+   *     shipping                86 %      release ~10x faster     100 %
+   *     attack 1 ms fixed       85 %      attack AND release fast  99 %
+   *
+   * ⚠ AND OUR RELEASE MATCHES THE REFERENCE IT WAS FITTED TO. Fitting a
+   * one-pole compressor model to each recovered gain envelope at block rate
+   * (the fit tracks a release we set ourselves: 130 -> 160 ms, 60 -> 85,
+   * 20 -> 23, so it measures what it claims):
+   *
+   *     UAD pair, reference      76 ms        ours   160 ms
+   *     CLA-2A bursts.wav       158 ms   (47 % gone in 100 ms, single-pole
+   *                                       equivalent — a DIRECT measurement)
+   *
+   * So the UAD releases about twice as fast as the CLA-2A, we match the
+   * CLA-2A, and 86 % is simply what a CLA-2A-like release delivers on this
+   * material. Chasing 105 % means adopting the UAD's release and abandoning a
+   * burst capture, which is the better kind of evidence.
+   *
+   * ⚠ THE 105 % ITSELF DESERVES SUSPICION AND ITS PROVENANCE IS LOST. Its
+   * "static 0.813" is a hardcoded historical figure with nothing in the log
+   * behind it, and a unit delivering MORE than its own static curve is odd on
+   * its face. Treat it as an observation about one plugin, not as a target.
+   */
   const staticSlope = ourStaticSlope(pr)
   if (Number.isFinite(staticSlope) && Number.isFinite(oslope.m)) {
-    console.log('\n  DELIVERY — how much of its own static curve each one gets onto program')
+    console.log('\n  DELIVERY — how much of its own static curve the ballistics get onto program')
     console.log(`    ours: static ${staticSlope.toFixed(3)} dB/dB, delivered ${oslope.m.toFixed(3)} => ${(100 * oslope.m / staticSlope).toFixed(0)}%`)
-    console.log('    ⚠ A COMPETENT COMPRESSOR DELIVERS ESSENTIALLY ALL OF IT. Measured on a')
-    console.log('      reference capture: static 0.813, delivered 0.855 — 105 %. Ours loses')
-    console.log('      about a third to gain reduction parked in the slow stage, which is')
-    console.log('      reduction that never reaches a peak. This number is the bug, stated')
-    console.log('      without needing to know what the reference actually is.')
+    console.log('    This is set by RELEASE SPEED, not by a defect: attack barely moves it')
+    console.log('      (85 % at a 1 ms fixed attack), a 10x faster release reaches 100 %.')
+    console.log('    Fitted release, one-pole equivalent: ours 160 ms, UAD reference 76 ms,')
+    console.log('      CLA-2A bursts.wav 158 ms. We match the unit we fitted against; the')
+    console.log('      UAD is simply faster. The old 105 % figure is one plugin, not a target.')
   }
 
   console.log('\n  CREST vs COMPRESSION DEPTH — the acceptance criterion')
