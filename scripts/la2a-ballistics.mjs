@@ -364,6 +364,26 @@ function envelopesFor(capture, plan) {
 }
 
 /**
+ * Is this capture just the stimulus back again?
+ *
+ * ⚠ THE FAILURE THIS CATCHES MISDIAGNOSES ITSELF. A bypassed insert, or a
+ * bounce that exported the source instead of the processed track, produces a
+ * file that is bit-identical to the stimulus — and every downstream reading
+ * then says "no compression", which looks exactly like "the knob is too low".
+ * Measured once: five ramps at knobs 30 through 90 all came back 100 %
+ * identical, and the fitter reported five knobs that never reached 1 dB.
+ *
+ * Bit-identity is the right test rather than a small threshold: even at unity
+ * makeup and no gain reduction, a real plugin's output stage changes SOMETHING.
+ * Zero difference across every sample means the audio never entered it.
+ */
+function isUnprocessed(capture, stimulus) {
+  const n = Math.min(capture.length, stimulus.length)
+  for (let i = 0; i < n; i++) if (capture[i] !== stimulus[i]) return false
+  return n > 0
+}
+
+/**
  * Stretches where the capture is silent but the stimulus is not.
  *
  * ⚠ DEMO PLUGINS MUTE ON A TIMER — Waves inserts a second of silence every
@@ -848,6 +868,11 @@ if (args.includes('--taper')) {
     if (!m) { console.log(`⚠ ${f}: name it <unit>.<knob>.ramp.wav so the knob is recorded`); continue }
     const y = readWav(path.join(CAP_DIR, f))
     if (y.sampleRate !== SR) { console.log(`⚠ ${f}: ${y.sampleRate} Hz; capture at ${SR}.`); continue }
+    if (isUnprocessed(y.mono, b.x)) {
+      console.log(`⚠ ${f}: BIT-IDENTICAL TO THE STIMULUS — nothing processed this file.`)
+      console.log('   The insert was bypassed, or the bounce exported the source track.')
+      continue
+    }
     const lag = alignByEnvelope(p.env, y.mono)
     const c = rampCurve(y.mono, p, lag, findGaps(y.mono, p))
     if (!c || !Number.isFinite(c.t1)) { console.log(`⚠ ${f}: no 1 dB crossing — knob too low, or the ramp never compresses`); continue }
@@ -892,7 +917,13 @@ for (const f of caps.sort()) {
   const y = readWav(path.join(CAP_DIR, f))
   if (y.sampleRate !== SR) { console.log(`\n⚠ ${f}: ${y.sampleRate} Hz; capture at ${SR}.`); continue }
   const p = plan()
-  p.env = build(p).env
+  const built = build(p)
+  p.env = built.env
+  if (isUnprocessed(y.mono, built.x)) {
+    console.log(`\n⚠ ${f}: BIT-IDENTICAL TO THE STIMULUS — nothing processed this file.`)
+    console.log('   The insert was bypassed, or the bounce exported the source track.')
+    continue
+  }
   const lag = alignByEnvelope(p.env, y.mono)
   if (Math.abs(lag) > 2000) console.log(`\n⚠ ${f}: aligned at ${lag} samples (${(lag / 44.1).toFixed(1)} ms) — plugin latency, or a failed fit.`)
   fit(y.mono, p, lag, f)
