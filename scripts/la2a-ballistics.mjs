@@ -627,9 +627,16 @@ function rampCurve(capture, plan, lag, gaps = []) {
   const pts = []
   for (let t = 0.2; t < RAMP_S - 0.2; t += 0.05) {
     const tSec = 5.0 + t
-    if (hitsGap(gaps, tSec - 0.05, tSec + 0.05)) continue
     const i = Math.round(tSec * SR) + lag
     const j = Math.round(tSec * SR)
+    // ⚠ GAPS ARE IN CAPTURE TIME, SO THE CHECK MUST BE TOO. Checking `tSec` —
+    // stimulus time — against them is only right while the lag is zero, and
+    // silently wrong otherwise. The margin is 0.15 s rather than a couple of
+    // samples because a demo mute FADES: measured, the level is clean at
+    // 19.98 s, down 1.1 dB at 20.00 and 78 dB down at 20.02, so the detector
+    // only ever finds the silent core and the corrupted shoulder sits outside
+    // it.
+    if (hitsGap(gaps, (i / SR) - 0.15, (i / SR) + 0.15)) continue
     if (i < 0 || i >= env.length || j >= plan.env.length) continue
     const inDb = db(plan.env[j])
     pts.push([inDb, db(env[i]) - inDb])
@@ -873,7 +880,16 @@ if (args.includes('--taper')) {
       console.log('   The insert was bypassed, or the bounce exported the source track.')
       continue
     }
-    const lag = alignByEnvelope(p.env, y.mono)
+    // ⚠ A RAMP MUST NOT BE ENVELOPE-ALIGNED, AND DOES NOT NEED TO BE. Its
+    // envelope is monotone, so the alignment cost has no minimum worth the
+    // name and the search wanders: measured, it chose 21958 samples — 498 ms —
+    // for four of five CLA-2A captures, which put every gap check half a
+    // second away from the sample it was guarding.
+    //
+    // Alignment is unnecessary here anyway. At 0.5 dB/s, even 100 ms of real
+    // plugin latency is 0.05 dB of level error, far under the 0.15 dB the fit
+    // resolves. So the ramp is read at lag 0 by construction.
+    const lag = 0
     const c = rampCurve(y.mono, p, lag, findGaps(y.mono, p))
     if (!c || !Number.isFinite(c.t1)) { console.log(`⚠ ${f}: no 1 dB crossing — knob too low, or the ramp never compresses`); continue }
     if (!byUnit.has(m[1])) byUnit.set(m[1], [])
@@ -891,7 +907,12 @@ if (args.includes('--selftest')) {
   // light history or with frequency, so `retrigger` and `frequency` measuring
   // no spread on our own kernel is the control that proves any spread found in
   // a real capture belongs to the reference and not to the measurement.
-  const pr = 55
+  // ⚠ 78, NOT 55, BECAUSE THE KNOB'S MEANING MOVED. Re-fitting the taper against
+  // a real LA-2A cut the drive at every position; 55 now yields about 1 dB of
+  // reduction, which is far too little to measure an attack or a release
+  // against. 78 is where the new law puts the drive 55 used to carry, so this
+  // self-test still exercises the ballistics it exists to check.
+  const pr = 78
   for (const [name, { plan, fit }] of Object.entries(PLANS)) {
     const p = plan()
     const b = build(p)
