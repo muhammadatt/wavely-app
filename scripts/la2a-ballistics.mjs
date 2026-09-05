@@ -134,27 +134,116 @@ function snapToZeroCrossing(tSec, freqHz) {
   return Math.round(tSec / halfPeriod) * halfPeriod
 }
 
+/**
+ * THE WAVES DEMO MUTE, AND WHY IT NO LONGER COSTS US EVENTS.
+ *
+ * The demo silences one second in every twenty. That cost the CLA-2A captures
+ * real measurements — the frequency plan lost BOTH its 400 Hz and 3 kHz probes,
+ * which is exactly the pair that would settle whether the side-chain carries a
+ * real HF emphasis, and the retrigger plan lost two of its five gaps.
+ *
+ * ⚠ IT IS NOT RANDOM DAMAGE, IT IS A TIMER, AND THAT MAKES IT SCHEDULABLE.
+ * Measured across NINE captures from three sessions at five knob settings, with
+ * file lengths from 98 s to 162 s, the pattern is identical every time: first
+ * mute at 20.01 s, then every 20.00 s, lasting 0.99 s. The edges are sharp —
+ * last clean sample 19.99 s, dead by 20.01, dead until 20.99, clean again at
+ * 21.01 — so a 0.1 s guard on each side is generous.
+ *
+ * So every event is placed in a clean window instead of wherever the arithmetic
+ * happened to put it. ⚠ THE SHIFT IS TAKEN OUT OF THE REST BETWEEN EVENTS AND
+ * NEVER FROM INSIDE ONE. The rest exists to let the cell go dark and only ever
+ * gets longer, so no measured quantity moves: the conditioning-to-test gap that
+ * IS the retrigger measurement is inside a protected span and travels with it.
+ *
+ * ⚠ IT ONLY WORKS BECAUSE EVERY SPAN FITS. The clean window is 18.80 s after
+ * guards, and the longest protected span is the 10 s burst at 18.00 s — 0.8 s
+ * of slack. Lengthening BURSTS, POST_S or PRE_S can overflow it, so
+ * `assertPlanClear` fails the build rather than shipping a stimulus that
+ * silently loses an event again.
+ */
+const MUTE_PERIOD_S = 20.0
+const MUTE_LEN_S = 1.0
+const MUTE_GUARD_S = 0.1
+
+/** The longest protected span that can fit between two mutes. */
+const CLEAN_WINDOW_S = MUTE_PERIOD_S - MUTE_LEN_S - 2 * MUTE_GUARD_S
+
+/**
+ * Earliest start >= `t` at which a protected span of `span` seconds is clear.
+ *
+ * ⚠ THE INFEASIBLE CASE THROWS RATHER THAN SEARCHING, AND IT HAS TO. Pushing
+ * past a mute is only progress if the span then fits before the NEXT one; for a
+ * span longer than the window every push lands on another mute, and the search
+ * chases `t` forever. Caught by testing it — a 12 s burst hung the stimulus
+ * build instead of failing it.
+ */
+function scheduleClear(t, span, tag = 'event') {
+  if (span > CLEAN_WINDOW_S) {
+    throw new Error(
+      `${tag}: protected span ${span.toFixed(2)}s exceeds the ${CLEAN_WINDOW_S.toFixed(2)}s ` +
+      'clean window between demo mutes, so no placement can avoid one. Shorten the ' +
+      'event, PRE_S or POST_S — or drop the mute scheduling and accept losing it.')
+  }
+  for (let k = 1; k * MUTE_PERIOD_S < t + span + MUTE_PERIOD_S; k++) {
+    const from = k * MUTE_PERIOD_S - MUTE_GUARD_S
+    const to = k * MUTE_PERIOD_S + MUTE_LEN_S + MUTE_GUARD_S
+    if (from >= t + span) break
+    if (to > t) t = to
+  }
+  return t
+}
+
+/**
+ * ⚠ A STIMULUS THAT LOSES AN EVENT MUST NOT BUILD. This is the guard on the
+ * 0.8 s of slack above: it re-derives each protected span from the events
+ * themselves, so it catches an overflow introduced by editing the constants
+ * rather than trusting the scheduler that just ran.
+ */
+function assertPlanClear(name, plan, spans) {
+  for (const [tag, from, to] of spans) {
+    for (let k = 1; k * MUTE_PERIOD_S < to + MUTE_PERIOD_S; k++) {
+      const mFrom = k * MUTE_PERIOD_S - MUTE_GUARD_S
+      const mTo = k * MUTE_PERIOD_S + MUTE_LEN_S + MUTE_GUARD_S
+      if (mFrom < to && mTo > from) {
+        throw new Error(
+          `${name}: "${tag}" spans ${from.toFixed(2)}-${to.toFixed(2)}s and hits the ` +
+          `demo mute at ${(k * MUTE_PERIOD_S).toFixed(2)}s. The protected span is ` +
+          `${(to - from).toFixed(2)}s against an 18.80s clean window — shorten it, ` +
+          'or the capture loses this event.')
+      }
+    }
+  }
+}
+
 function burstPlan() {
   const events = []
   let t = 1.0
+  const spans = []
   for (const T of BURSTS) {
+    t = scheduleClear(t, PRE_S + T + POST_S, `burst ${T}s`)
     const up = snapToZeroCrossing(t + PRE_S, PROBE_HZ)
     events.push({ tag: `burst ${T}s`, T, freqHz: PROBE_HZ, hiDb: HIGH_DBFS,
       up, down: snapToZeroCrossing(up + T, PROBE_HZ) })
+    spans.push([`burst ${T}s`, t, t + PRE_S + T + POST_S])
     t += PRE_S + T + POST_S + REST_S
   }
+  assertPlanClear('bursts', null, spans)
   return { events, seconds: t + 1.0 }
 }
 
 function stairPlan() {
   const events = []
   let t = 1.0
+  const spans = []
   for (const L of STAIRS) {
+    t = scheduleClear(t, STAIR_REST_S + STAIR_S, `${L} dBFS`)
     const up = snapToZeroCrossing(t + STAIR_REST_S, PROBE_HZ)
     events.push({ tag: `${L} dBFS`, L, freqHz: PROBE_HZ, hiDb: L,
       up, down: snapToZeroCrossing(up + STAIR_S, PROBE_HZ) })
+    spans.push([`${L} dBFS`, t, t + STAIR_REST_S + STAIR_S])
     t += STAIR_REST_S + STAIR_S
   }
+  assertPlanClear('staircase', null, spans)
   return { events, seconds: t + 1.0 }
 }
 
@@ -168,7 +257,13 @@ function stairPlan() {
 function retriggerPlan() {
   const events = []
   let t = 1.0
+  const spans = []
   for (const gap of RETRIGGER_GAPS) {
+    // ⚠ THE WHOLE CONDITION-GAP-TEST GROUP IS SCHEDULED AS ONE SPAN. The gap is
+    // the measurement, so nothing may be inserted inside it; pushing the group
+    // moves the conditioning burst and its test step together.
+    t = scheduleClear(t, PRE_S + COND_S + gap + TEST_S + POST_S, `gap ${gap}s`)
+    spans.push([`gap ${gap}s`, t, t + PRE_S + COND_S + gap + TEST_S + POST_S])
     const cUp = snapToZeroCrossing(t + PRE_S, PROBE_HZ)
     const cDown = snapToZeroCrossing(cUp + COND_S, PROBE_HZ)
     const tUp = snapToZeroCrossing(cDown + gap, PROBE_HZ)
@@ -178,6 +273,7 @@ function retriggerPlan() {
       up: tUp, down: snapToZeroCrossing(tUp + TEST_S, PROBE_HZ), role: 'test' })
     t = tUp + TEST_S + POST_S + REST_S
   }
+  assertPlanClear('retrigger', null, spans)
   return { events, seconds: t + 1.0 }
 }
 
@@ -188,12 +284,16 @@ function retriggerPlan() {
 function freqPlan() {
   const events = []
   let t = 1.0
+  const spans = []
   for (const f of FREQS_HZ) {
+    t = scheduleClear(t, PRE_S + 1.0 + POST_S, `${f} Hz`)
     const up = snapToZeroCrossing(t + PRE_S, f)
     events.push({ tag: `${f} Hz`, freqHz: f, hiDb: HIGH_DBFS,
       up, down: snapToZeroCrossing(up + 1.0, f) })
+    spans.push([`${f} Hz`, t, t + PRE_S + 1.0 + POST_S])
     t += PRE_S + 1.0 + POST_S + REST_S
   }
+  assertPlanClear('frequency', null, spans)
   return { events, seconds: t + 1.0 }
 }
 
@@ -921,6 +1021,10 @@ if (args.includes('--stimulus')) {
   console.log('     It changes the frequency response of the detector, which is half of')
   console.log('     what frequency.wav is measuring.')
   console.log('  4. Bounce the FULL length including the tail. Do not normalise.')
+  console.log('     ⚠ START THE BOUNCE AT THE FILE\'S FIRST SAMPLE. On a demo build that')
+  console.log('       mutes on a timer these events are POSITIONED around it, so a render')
+  console.log('       that starts late slides every event into the mutes it was placed to')
+  console.log('       avoid. The fit reports any mute it finds, so a bad render is visible.')
   console.log(`  5. Save into ${CAP_DIR} as <unit>.<knob>.<name>.wav`)
   console.log('     e.g. laea.55.retrigger.wav')
   console.log('\n  FOR THE TAPER: capture ramp.wav at FIVE knob positions and put the knob in')
@@ -931,6 +1035,27 @@ if (args.includes('--stimulus')) {
   console.log('    low end with captures; spread across where the unit actually compresses.')
   console.log('\n  FOR EVERYTHING ELSE: one knob setting across the other four files is enough')
   console.log('  to answer the attack-memory and frequency questions.')
+  console.log('\n  ── DEMO MUTES: THESE FILES ARE SCHEDULED AROUND THEM ──')
+  console.log('  A Waves demo silences 1 s in every 20. Measured across nine captures from')
+  console.log('  three sessions at five knob settings, it is a TIMER and not random damage:')
+  console.log('  first mute at 20.01 s, then every 20.00 s, lasting 0.99 s, identical every')
+  console.log('  time. So every event below sits in a clean window, and the shift is taken')
+  console.log('  out of the REST between events — never from inside one, so no measured')
+  console.log('  quantity moves. Event spans, against mutes at 19.9-21.1, 39.9-41.1, ... :\n')
+  for (const [name, { plan }] of Object.entries(PLANS)) {
+    const p = plan()
+    if (p.isRamp) {
+      console.log(`    ${name.padEnd(10)} continuous sweep — cannot dodge; muted samples are`)
+      console.log('               excluded by the fit instead')
+      continue
+    }
+    const first = p.events.filter(e => e.role !== 'condition')
+    console.log(`    ${name.padEnd(10)} ${first.map(e => `${e.tag} @${e.up.toFixed(0)}s`).join(', ')}`)
+  }
+  console.log('\n  ⚠ CAPTURES TAKEN BEFORE THIS SCHEDULING ARE STALE for every file except')
+  console.log('    ramp.wav, which is unchanged and byte-identical — the taper, ratio and')
+  console.log('    knee fits built on it all still stand. bursts / retrigger / frequency /')
+  console.log('    staircase need re-rendering against the new files.')
   process.exit(0)
 }
 
