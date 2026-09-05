@@ -1029,12 +1029,33 @@ function reportTaper(points, label) {
  * many words that neither the corner nor the depth is measured. This measures
  * both, from captures of the stimulus that already exists.
  *
- * ⚠ IT ALSO TESTS A SPECIFIC SUSPICION ABOUT LALA, WHICH HAS EVIDENCE. LALA's
- * frequency capture rises 5.00 dB (detector level) from 1 to 3 kHz where
+ * ⚠ IT SEES SIDE-CHAIN FILTERS AND NOTHING ELSE, WHICH IS WHAT MAKES IT
+ * DIAGNOSTIC RATHER THAN JUST DESCRIPTIVE. Gain reduction here is measured
+ * against the resting level AT THE SAME PROBE, so any static audio-path EQ
+ * divides out exactly. Verified: a -10 dB and a +6 dB high shelf on the output
+ * of our own kernel both return 11.58 / 12.37 / 12.36 / 12.02 / 11.76 dB,
+ * identical to no shelf at all. So a control that moves these numbers IS in the
+ * side-chain, and one that does not either is not, or does nothing — and a
+ * sweep that reports no change is a result, not a failed capture.
+ *
+ * ⚠ THE CONTROL NAMES DO NOT MAP ACROSS UNITS AND ONE GUESS HERE WAS ALREADY
+ * WRONG. LALA has HPF (20-500 Hz), MF (0.5-10 kHz), MG (-6..+6 dB) and HF
+ * (-10..0 dB, 0 = flat); CLA-2A has HI FREQ (0-100, 100 = flat). Ours is R37,
+ * an attenuator of LOWS. So:
+ *   - CLA-2A's HI FREQ is the direct analogue of R37 — same convention, 100 flat.
+ *   - LALA's closest analogue is HPF, which also removes lows from the detector.
+ *   - LALA's HF is NOT the analogue: it only CUTS highs, so it moves the tilt
+ *     NEGATIVE. It cannot explain LALA's +5 dB rise at 3 kHz, and an earlier
+ *     note in this file that suspected it was wrong in direction.
+ *   - The rise fits a side-chain MID BOOST instead: MG up to +6 dB centred by
+ *     MF near 3 kHz would put a bump exactly where the measurement finds one.
+ *     That is a candidate to test, not a conclusion.
+ *
+ * ⚠ SOMETHING WAS ENGAGED ON LALA'S TAKE, EVEN IF NOT THE CONTROL FIRST BLAMED.
+ * Its frequency capture rises 5.00 dB (detector level) from 1 to 3 kHz where
  * CLA-2A falls 0.56 — a 7.3 dB disagreement between two emulations of the same
- * unit. If LALA's emphasis was simply turned up for that take, that is the
- * tilt, measured with the control engaged rather than a property of the unit.
- * And its take demonstrably was NOT at its own ramp take's settings: LALA's
+ * unit. And its take demonstrably was NOT at its own ramp take's settings:
+ * LALA's
  * ramp at knob 60 predicts 2.33 dB of reduction at -18 dBFS, and its frequency
  * capture measures 4.81 dB at the same probe and level. The method is not to
  * blame — the same comparison on our own kernel agrees to 0.01 dB.
