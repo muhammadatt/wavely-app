@@ -561,6 +561,66 @@ function preflightCapture(file, capture, plan) {
   }
 }
 
+/**
+ * WHERE EACH EVENT'S STEP ACTUALLY IS IN THE CAPTURE, against where the plan
+ * puts it. One number per event, in milliseconds.
+ *
+ * ⚠ THE FAILURE THIS EXISTS FOR READS AS A COMPRESSOR MEASUREMENT, NOT AS AN
+ * ERROR, WHICH IS WHY IT NEEDED ITS OWN CHECK. A capture whose steps land late
+ * is sampled before the step has arrived, so the fitter divides a resting
+ * capture by a risen reference and reports the whole stimulus range as gain
+ * reduction. HIGH_DBFS - LOW_DBFS is 22 dB, so it prints "22.00 dB of reduction
+ * 0.5 ms after the step" with a t63 of 0.2 ms — numbers that look like an
+ * absurdly fast compressor rather than a timing fault, and it happened.
+ *
+ * ⚠ AND ONE GLOBAL LAG CANNOT ALWAYS FIX IT. `alignByEnvelope` fits a single
+ * offset over the whole file and only warns past 2000 samples, so a smaller
+ * constant latency passes silently, and a lag that is right on average can
+ * still be wrong per event. This measures each event on its own.
+ */
+function reportEventTiming(file, capture, plan, lag) {
+  const rect = new Float64Array(capture.length)
+  const a = Math.exp(-1 / (SR * 0.001))
+  let e = 0
+  for (let i = 0; i < capture.length; i++) { e = a * e + (1 - a) * Math.abs(capture[i]); rect[i] = e }
+  const at = (t) => rect[Math.max(0, Math.min(rect.length - 1, Math.round(t * SR)))]
+  const med = (t0, t1) => {
+    const v = []
+    for (let t = t0; t < t1; t += 0.002) v.push(at(t))
+    v.sort((x, y) => x - y)
+    return v.length ? v[Math.floor(v.length / 2)] : 0
+  }
+  const out = []
+  for (const ev of plan.events) {
+    const up = ev.up + lag / SR                  // expected step time IN THE CAPTURE
+    const hold = Math.max(0.01, Math.min(0.25, (ev.down - ev.up) * 0.5))
+    const lo = med(up - 0.15, up - 0.02)
+    const hi = med(up + hold * 0.6, up + hold)
+    if (!(hi > lo * 2)) { out.push([ev.tag, null]); continue }   // no usable step here
+    const thr = Math.sqrt(lo * hi)               // midpoint in dB
+    let cross = null
+    for (let t = up - 0.15; t < up + 0.3; t += 1 / SR) {
+      if (at(t) >= thr) { cross = t; break }
+    }
+    out.push([ev.tag, cross === null ? null : (cross - up) * 1000])
+  }
+  const good = out.filter(([, v]) => v !== null).map(([, v]) => v)
+  if (!good.length) return
+  const worst = Math.max(...good.map(Math.abs))
+  const line = out.map(([tag, v]) => `${tag} ${v === null ? '  --  ' : (v >= 0 ? '+' : '') + v.toFixed(1) + 'ms'}`).join(', ')
+  if (worst > 3) {
+    console.log(`\n⚠ ${file}: EVENT STEPS ARE OFF BY UP TO ${worst.toFixed(1)} ms after alignment.`)
+    console.log(`   ${line}`)
+    console.log('   Positive = the capture steps LATER than the plan. Every attack column is')
+    console.log('   then read before the step arrives, and reports HIGH_DBFS - LOW_DBFS (22 dB)')
+    console.log('   as gain reduction with a near-zero t63. Treat this file\'s ATTACK numbers as')
+    console.log('   invalid; the release columns are only shifted by the same amount.')
+    console.log('   Usual cause is uncompensated plugin latency in the bounce.')
+  } else {
+    console.log(`   event timing OK (worst ${worst.toFixed(1)} ms): ${line}`)
+  }
+}
+
 /** Does [a,b] touch any gap? */
 function hitsGap(gaps, a, b) {
   return gaps.some(([g0, g1]) => b >= g0 && a <= g1)
@@ -1251,5 +1311,6 @@ for (const f of caps.sort()) {
   preflightCapture(f, y.mono, p)
   const lag = alignByEnvelope(p.env, y.mono)
   if (Math.abs(lag) > 2000) console.log(`\n⚠ ${f}: aligned at ${lag} samples (${(lag / 44.1).toFixed(1)} ms) — plugin latency, or a failed fit.`)
+  if (!p.isRamp) reportEventTiming(f, y.mono, p, lag)
   fit(y.mono, p, lag, f)
 }
