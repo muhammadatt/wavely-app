@@ -23,6 +23,11 @@
     "la2a:h2:refit": "node scripts/la2a-h2-refit.mjs",
     "la2a:pairs": "node scripts/la2a-pair-compare.mjs",
     "la2a:ballistics": "node scripts/la2a-ballistics.mjs",
+    "la2a:stimulus": "node scripts/la2a-ballistics.mjs --stimulus",
+    "la2a:selftest": "node scripts/la2a-ballistics.mjs --selftest",
+    "la2a:detector": "node scripts/la2a-ballistics.mjs --detector",
+    "la2a:taper": "node scripts/la2a-ballistics.mjs --taper",
+    "la2a:taper:selftest": "node scripts/la2a-ballistics.mjs --taper --selftest",
     "smoke": "node scripts/panel-smoke.mjs"
   },
   "dependencies": {

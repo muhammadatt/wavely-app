@@ -287,7 +287,7 @@ const SC_SHELF_MAX_DB = 10
  * meant to take the edge off the rectified waveform.
  *
  * ⚠ IT IS ALSO THE WHOLE OF OUR SIDE-CHAIN'S FREQUENCY RESPONSE, WHICH IS NOT
- * WHAT IT LOOKS LIKE, and `npm run la2a:ballistics -- --detector` prints the
+ * WHAT IT LOOKS LIKE, and `npm run la2a:detector` prints the
  * evidence. The detector's MEAN output tracks SC_HPF_HZ exactly — to a
  * hundredth of a dB at every probe, so the filter does what it says. But the
  * ballistics do not read the mean, they ride the RIPPLE, and ripple collapses
@@ -385,7 +385,7 @@ const NOMINAL_DBFS = -18
  * the shift. Change the knee and this must be re-run.
  *
  * THE RE-FIT IS BUILT AND SELF-TESTED, AND IS WAITING ONLY ON CAPTURES:
- * `npm run la2a:ballistics -- --stimulus` writes `ramp.wav`, a slow sweep that
+ * `npm run la2a:stimulus` writes `ramp.wav`, a slow sweep that
  * reads the threshold directly instead of bracketing it between staircase
  * steps; capture it at five knob positions with the knob in the filename and
  * `-- --taper` fits these three constants to it. Run against our own kernel it

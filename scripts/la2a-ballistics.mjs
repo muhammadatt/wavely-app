@@ -1,11 +1,19 @@
 /**
  * OptoSmooth's ballistics, measured directly instead of inferred.
  *
- *   npm run la2a:ballistics -- --stimulus   write the test signals
- *   npm run la2a:ballistics -- --selftest   prove the fitter on our own kernel
- *   npm run la2a:ballistics -- --detector   where the side-chain's frequency
- *                                           response comes from (needs no capture)
- *   npm run la2a:ballistics                 fit whatever captures are present
+ *   npm run la2a:stimulus    write the test signals
+ *   npm run la2a:selftest    prove the fitter on our own kernel
+ *   npm run la2a:detector    where the side-chain's frequency response comes
+ *                            from (needs no capture)
+ *   npm run la2a:taper       fit the taper from the ramp captures
+ *   npm run la2a:ballistics  fit whatever captures are present
+ *
+ * ⚠ EACH MODE HAS ITS OWN SCRIPT WITH THE FLAG BAKED IN, AND THAT IS NOT
+ * COSMETIC. `npm run la2a:ballistics -- --stimulus` can reach this file with an
+ * EMPTY argv on Windows — PowerShell and some npm/shell combinations swallow the
+ * `--` — whereupon it fell through to capture-fitting and told someone who had
+ * just run it to "run with --stimulus first". The flags still work when passed
+ * directly to node.
  *
  * WHY A STEP TEST AND NOT MORE SPEECH. Every ballistic constant in
  * la2aProcessor.js — ATTACK_S, FAST_FRACTION, FAST_RELEASE_S, the
@@ -993,6 +1001,28 @@ function reportDetector() {
   console.log('    400-1000 Hz is in question.')
 }
 
+
+/**
+ * ⚠ A SWALLOWED `--` LOOKS EXACTLY LIKE "NO FLAG WAS PASSED", AND DID. On
+ * Windows `npm run la2a:ballistics -- --stimulus` can arrive here with an EMPTY
+ * argv — PowerShell and some npm/shell combinations eat the separator — so the
+ * script fell through to capture-fitting and reported "No captures. Run with
+ * --stimulus first" at someone who had just run exactly that. Every mode now
+ * has its own npm script with the flag baked in, so nothing depends on `--`
+ * forwarding; this says so at the two places the fall-through can surface.
+ */
+function noteArgForwarding() {
+  if (process.argv.slice(2).length) return
+  console.log('\n  ⚠ THIS RUN RECEIVED NO ARGUMENTS AT ALL. If you passed one, your shell')
+  console.log('    swallowed it — `npm run <script> -- --flag` does not survive every')
+  console.log('    Windows shell. Use the flagless scripts instead, which cannot lose it:')
+  console.log('      npm run la2a:stimulus        write the test signals')
+  console.log('      npm run la2a:selftest        prove the fitters on our own kernel')
+  console.log('      npm run la2a:detector        side-chain frequency response')
+  console.log('      npm run la2a:taper           fit the taper from ramp captures')
+  console.log('    Or call node directly: node scripts/la2a-ballistics.mjs --stimulus')
+}
+
 const args = process.argv.slice(2)
 
 if (args.includes('--detector')) {
@@ -1038,7 +1068,7 @@ if (args.includes('--stimulus')) {
   console.log('     e.g. laea.55.retrigger.wav')
   console.log('\n  FOR THE TAPER: capture ramp.wav at FIVE knob positions and put the knob in')
   console.log('  the filename — lala.30.ramp.wav, lala.45.ramp.wav, and so on. 30 / 45 / 60 /')
-  console.log('  75 / 90 is a good spread. Then: npm run la2a:ballistics -- --taper')
+  console.log('  75 / 90 is a good spread. Then: npm run la2a:taper')
   console.log('  ⚠ BELOW ABOUT KNOB 30 THERE IS NOTHING TO MEASURE — the threshold sits above')
   console.log('    the ramp\'s top and the fit correctly refuses the point. Do not fill the')
   console.log('    low end with captures; spread across where the unit actually compresses.')
@@ -1153,12 +1183,14 @@ if (args.includes('--selftest')) {
 }
 
 if (!existsSync(CAP_DIR)) {
-  console.log(`No captures at ${CAP_DIR}. Run with --stimulus first.`)
+  console.log(`No captures at ${CAP_DIR}. Run \`npm run la2a:stimulus\` first.`)
+  noteArgForwarding()
   process.exit(0)
 }
 const caps = readdirSync(CAP_DIR).filter(f => f.endsWith('.wav'))
 if (caps.length === 0) {
-  console.log(`No captures in ${CAP_DIR}. Run with --stimulus, render them, and drop them in.`)
+  console.log(`No captures in ${CAP_DIR}. Run \`npm run la2a:stimulus\`, render them, and drop them in.`)
+  noteArgForwarding()
   process.exit(0)
 }
 for (const f of caps.sort()) {
