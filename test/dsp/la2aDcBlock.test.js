@@ -37,7 +37,14 @@ const db = v => 20 * Math.log10(Math.max(Math.abs(v), 1e-30))
  */
 function run(input, { corner, ...params } = {}) {
   const k = new LA2AKernel(SR)
-  k.setParams({ mode: 'compress', peakReduction: 60, gainDb: 0, mix: 1, ...params })
+  // ⚠ 84, NOT 60, AND SOLVED RATHER THAN CHOSEN. The knob is side-chain DRIVE,
+  // so a knob number means whatever the taper says it means — and the taper was
+  // re-fitted against a real LA-2A, which moved every position on the travel.
+  // 84 is where the new law puts the drive that 60 used to (33.6 dB), so the
+  // valves see the level this file's measurements were derived at. Hardcoding a
+  // knob and asserting an absolute level is what broke this test; the number is
+  // pinned to the DRIVE it stands for, which is what the DC actually follows.
+  k.setParams({ mode: 'compress', peakReduction: 84, gainDb: 0, mix: 1, ...params })
   if (corner !== undefined) k.dcR = corner === null ? 1 : 1 - 2 * Math.PI * corner / SR
   const n = input.length
   const out = new Float32Array(n)

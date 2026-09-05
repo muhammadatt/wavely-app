@@ -204,9 +204,14 @@ const NOMINAL_DBFS = -18
  * Fitting a knob law to the shape is what let the first fit absorb errors it
  * could not name. Any knee disagreement will survive the re-fit, in the open.
  */
-export const SC_DRIVE_MAX_DB = 36.24
-export const SC_DRIVE_SPAN_DB = 105.9
-export const SC_TAPER = 0.4247
+export const SC_DRIVE_MAX_DB = 23.55
+export const SC_DRIVE_SPAN_DB = 50.36
+/**
+ * ⚠ EXACTLY 1: THE KNOB IS LINEAR IN dB OF DRIVE, 0.504 dB per unit. Pinning
+ * the exponent to 1 fits the reference BETTER than leaving it free (rms 0.053
+ * against 0.090 dB), so this is a measured shape and not a simplification.
+ */
+export const SC_TAPER = 1.0
 export { NOMINAL_DBFS }
 
 /**
