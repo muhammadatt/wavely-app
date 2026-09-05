@@ -901,12 +901,19 @@ if (args.includes('--taper')) {
 
 if (args.includes('--selftest')) {
   // ⚠ THE FITTER MUST RECOVER CONSTANTS WE ALREADY KNOW BEFORE IT IS POINTED AT
-  // ANYTHING ELSE. Our ATTACK_S is 10 ms and FAST_FRACTION 0.65, so t63 should
-  // land near 10 ms and fast% near 65. Two of these tables should come back
-  // FLAT by construction, and that is the point: our attack does not vary with
-  // light history or with frequency, so `retrigger` and `frequency` measuring
-  // no spread on our own kernel is the control that proves any spread found in
-  // a real capture belongs to the reference and not to the measurement.
+  // ANYTHING ELSE. FAST_FRACTION is 0.65, so fast% should land near 65, and
+  // `frequency` should still come back FLAT by construction — our sidechain has
+  // no frequency-dependent attack, so any spread a real capture shows there
+  // belongs to the reference and not to the measurement.
+  //
+  // ⚠ `retrigger` IS NO LONGER SUCH A CONTROL, THE ATTACK HAVING BECOME
+  // PROGRAM-DEPENDENT, and what it measured while it was one is why it cannot
+  // be trusted raw. Run against a FIXED attack it returned 14.4 ms at a 0.05 s
+  // gap falling to 11.4 at 5 s: a +3.0 ms spread out of a kernel with none, in
+  // the OPPOSITE direction to a real cell's, because at a short gap the release
+  // is still moving and the `rest` the fit measures against moves with it.
+  // Every t63 spread this plan reports — ours or a reference's — is sitting on
+  // that. Read spreads relative to +3.0 ms, not to zero.
   // ⚠ 78, NOT 55, BECAUSE THE KNOB'S MEANING MOVED. Re-fitting the taper against
   // a real LA-2A cut the drive at every position; 55 now yields about 1 dB of
   // reduction, which is far too little to measure an attack or a release

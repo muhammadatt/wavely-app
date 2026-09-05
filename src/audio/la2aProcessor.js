@@ -77,7 +77,82 @@ export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 
 // ── T4 optical cell constants ───────────────────────────────────────────────
 
-const ATTACK_S = 0.010 // EL panel turn-on
+/**
+ * ATTACK, PROGRAM-DEPENDENT — the T4 does not have one attack time.
+ *
+ * The cell is an electroluminescent panel lighting a cadmium-sulfide
+ * photoresistor, and a CdS cell's speed depends on the light it has already
+ * absorbed: one sitting in darkness responds sluggishly to a transient, one
+ * already lit catches the next far faster. The familiar "about 10 ms" is an
+ * average over that behaviour, not a time constant, and a fixed coefficient
+ * cannot express it at any value.
+ *
+ * MEASURED, on a Waves CLA-2A capture (`npm run la2a:ballistics`,
+ * `retrigger.wav`): the same test step, varying only how recently the cell was
+ * lit, returns t63 of
+ *
+ *     gap 0.05 s -> 4.6 ms      gap 0.5 s -> 5.0 ms      gap 5 s -> 8.2 ms
+ *
+ * Shorter gap, faster attack. The direction is real: a FIXED-attack kernel run
+ * through the identical harness returns 14.4 -> 11.4 ms over the same gaps, so
+ * the measurement carries a +3.0 ms artefact of its OWN, in the OPPOSITE
+ * direction (at a short gap the cell is still releasing, so the `rest` the fit
+ * measures against is a moving target). The reference's -3.6 ms is therefore
+ * about -6.6 ms of true spread, measured against that.
+ *
+ * ⚠ THESE TWO CONSTANTS ARE NOT FITTED TO THAT CAPTURE — IT CANNOT FIT THEM,
+ * and the reason is a defect somewhere else. Across the 0.05-5 s gaps the test
+ * sweeps, our own cell state `gr/(gr + MEM_HALF_DB)` moves only 0.740 -> 0.489,
+ * because our release still leaves 2.4 dB of reduction standing after a FIVE
+ * SECOND gap. Over a band that narrow the widest t63 ratio ANY monotone
+ * speed-up law can produce is 0.740/0.489 = 1.51; the reference asks for
+ * 8.2/4.6 = 1.78. Unreachable — and unreachable for the law-independent
+ * reason, so no choice of curve here rescues it. THE BINDING CONSTRAINT IS THE
+ * RELEASE, NOT THE ATTACK. Widen that band and this capture becomes fittable.
+ *
+ * SO THEY ARE ANCHORED INSTEAD to the reference's own measured endpoints: 10 ms
+ * is the published nominal and matches our fixed-attack behaviour from dark,
+ * 4.5 ms is the fastest t63 the CLA-2A actually returns. What that buys, on the
+ * analog-unit dry Vox at matched median gain reduction (crest change vs dry):
+ *
+ *     GR             2 dB     4 dB     6 dB     8 dB
+ *     fixed 10 ms   -0.37    +2.94    +5.02    +6.67
+ *     10 / 4.5      -0.34    +2.96    +4.58    +5.49
+ *
+ * Real, and short of the reference (+1.57 dB at 9.8 dB GR). ⚠ DO NOT CLOSE THAT
+ * GAP HERE. Crest alone is matched at ATTACK_LIT_S ~ 0.5 ms (+1.48 at 8 dB) —
+ * an effective ~0.6 ms attack in program, which is not an LA-2A at all and is
+ * flatly contradicted by the 4.6-8.2 ms this same unit measures. That would be
+ * the right number from the wrong mechanism, hiding the release defect above.
+ *
+ * ⚠ THE HISTORY TERM IS THE CURRENT REDUCTION, NOT THE `memory` INTEGRATOR.
+ * Tried `memory` first; it produced a spread in the wrong direction. See the
+ * use site for why the current reduction is also the better physics.
+ *
+ * ⚠ COEFFICIENTS ARE BLENDED, NOT TIME CONSTANTS — and this one IS resolved by
+ * measurement, so it is not merely the cheap option. Interpolating tau costs an
+ * `exp` per sample and, at matched endpoints, does less: tau-blended 10/4.0
+ * leaves +5.82 dB at 8 dB GR against +5.49 for coefficient-blended 10/4.5.
+ * Blending coefficients puts more of the range near the lit end, which is where
+ * program material actually sits — hNorm runs 0.73-0.87 on real speech, and
+ * never approaches the dark end at all.
+ *
+ * WHY THIS IS NOT JUST "A FASTER ATTACK". A fixed attack fast enough to move
+ * crest also clamps the transient the LA-2A is loved for letting through. On a
+ * burst from 3 s of silence vs. the same burst 0.4 s after one (first 5 ms,
+ * gain vs. input):
+ *
+ *                        from dark    already lit
+ *     fixed 10 ms         -0.18 dB      -5.12 dB
+ *     fixed  1 ms         -0.90 dB      -5.97 dB
+ *     10 / 4.5            -0.19 dB      -5.89 dB
+ *
+ * The program-dependent cell keeps the dark onset intact — indistinguishable
+ * from the 10 ms fixed attack — while catching the lit one harder than a fixed
+ * 1 ms attack does. Fixed-fast buys the second column by giving up the first.
+ */
+export const ATTACK_DARK_S = 0.010
+export const ATTACK_LIT_S = 0.0045
 
 // Fraction of gain reduction held by the fast stage, and its release tau.
 // Together tuned so total recovery hits ~50% at 50–60 ms regardless of the
@@ -807,7 +882,8 @@ export class LA2AKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
 
-    this.attackCoef = 1 - Math.exp(-1 / (sampleRate * ATTACK_S))
+    this.attackCoefDark = 1 - Math.exp(-1 / (sampleRate * ATTACK_DARK_S))
+    this.attackCoefLit = 1 - Math.exp(-1 / (sampleRate * ATTACK_LIT_S))
     this.fastRelCoef = 1 - Math.exp(-1 / (sampleRate * FAST_RELEASE_S))
     this.detCoef = 1 - Math.exp(-1 / (sampleRate * DETECTOR_S))
     this.memChargeCoef = 1 - Math.exp(-1 / (sampleRate * MEM_CHARGE_S))
@@ -1180,7 +1256,25 @@ export class LA2AKernel {
       // so sustained program holds its reduction.
       const gr = grFast + grSlow
       if (grTarget > gr) {
-        const delta = (grTarget - gr) * this.attackCoef
+        // How lit the cell is RIGHT NOW, 0 (dark) to 1 (saturated).
+        //
+        // ⚠ THE CURRENT REDUCTION, NOT THE `memory` INTEGRATOR — tried that
+        // first and it produced a spread in the WRONG DIRECTION. `memory`
+        // discharges over 8 s, so across the 0.05-5 s gaps that decide this it
+        // barely moves: hNorm went 0.545 -> 0.39, a 15 % swing on the
+        // coefficient, not enough to overcome the measurement's own ~2 ms
+        // artefact. The result was 8.4 ms at a 0.05 s gap against 7.4 at 5 s —
+        // backwards.
+        //
+        // The current reduction is also the better physics. A CdS cell's speed
+        // depends on its conductance, which is its state now; a cell that is
+        // attenuating IS lit. That falls out correctly at every point: silent
+        // start -> gr 0 -> slow; mid-phrase -> gr high -> fast, so transients
+        // inside speech are caught; after a long gap -> released -> slow again.
+        const hNorm = gr / (gr + MEM_HALF_DB)
+        const attackCoef = this.attackCoefDark
+          + (this.attackCoefLit - this.attackCoefDark) * hNorm
+        const delta = (grTarget - gr) * attackCoef
         grFast += delta * FAST_FRACTION
         grSlow += delta * (1 - FAST_FRACTION)
       } else {
