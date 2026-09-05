@@ -73,7 +73,9 @@ import { writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { readWav } from '../test/voicerx/wav.js'
 import { getFFT } from '../src/audio/dsp/fft.js'
-import { LA2AKernel } from '../src/audio/la2aProcessor.js'
+import {
+  LA2AKernel, scDriveDbFor, SC_DRIVE_MAX_DB, SC_DRIVE_SPAN_DB, SC_TAPER,
+} from '../src/audio/la2aProcessor.js'
 
 const SR = 44100
 const PROBE_HZ = 1000        // default probe; `frequency.wav` sweeps it
@@ -194,6 +196,49 @@ function freqPlan() {
 }
 
 /**
+ * TAPER RAMP — one slow sweep instead of a staircase.
+ *
+ * The Peak Reduction knob is side-chain DRIVE into a fixed internal threshold,
+ * so what a capture has to pin down is WHERE COMPRESSION STARTS at each knob.
+ * A 5 dB staircase can only bracket that between two steps; a ramp reads it
+ * directly, and hands back the whole curve as a bonus — including how the ratio
+ * drifts with level, which is a separate open question.
+ *
+ * ⚠ 0.5 dB/s IS SLOW ENOUGH TO READ AS QUASI-STATIC AND NOT INSTANT. The cell's
+ * memory moves on 0.8-8 s, over which this ramp climbs 0.4-4 dB, so the curve
+ * lags slightly. The same lag applies to our model when its own threshold is
+ * measured the same way, so it largely cancels — but it is a reason to read the
+ * fitted taper as a threshold match, not as a claim about the reference's
+ * instantaneous curve.
+ */
+/**
+ * ⚠ THE RANGE HAS TO COVER THE WHOLE KNOB TRAVEL OR THE FIT IS DRAGGED BY ITS
+ * OWN EDGE. At -55..-5 the self-test lost knob 20 entirely (threshold above the
+ * top) and clipped knob 95 (threshold below the bottom, reported 1.11 dB high),
+ * and that one clipped point pulled a three-constant fit off four good ones.
+ * -70..0 spans it, and `rampCurve` now refuses a crossing that lands within
+ * 3 dB of either end rather than reporting the ramp's own boundary as a
+ * measurement.
+ */
+const RAMP_FROM_DBFS = -70
+const RAMP_TO_DBFS = 0
+const RAMP_S = 140
+
+function rampPlan() {
+  const lead = 5.0
+  return {
+    events: [{ tag: 'ramp', freqHz: PROBE_HZ, hiDb: RAMP_TO_DBFS, up: lead, down: lead + RAMP_S }],
+    seconds: lead + RAMP_S + 2.0,
+    isRamp: true,
+    envAt(t) {
+      if (t < lead) return lin(RAMP_FROM_DBFS)
+      const u = Math.min(1, (t - lead) / RAMP_S)
+      return lin(RAMP_FROM_DBFS + (RAMP_TO_DBFS - RAMP_FROM_DBFS) * u)
+    },
+  }
+}
+
+/**
  * Build the waveform. Between events the probe sits at LOW_DBFS at that
  * event's frequency; frequency changes happen during a rest, at a zero
  * crossing, so they too are click-free.
@@ -201,6 +246,17 @@ function freqPlan() {
 function build(plan) {
   const n = Math.round(plan.seconds * SR)
   const x = new Float32Array(n)
+  if (plan.isRamp) {
+    const env = new Float64Array(n)
+    let phase = 0
+    for (let i = 0; i < n; i++) {
+      env[i] = plan.envAt(i / SR)
+      x[i] = env[i] * Math.sin(phase)
+      phase += 2 * Math.PI * PROBE_HZ / SR
+      if (phase > 2 * Math.PI) phase -= 2 * Math.PI
+    }
+    return { x, env }
+  }
   const env = new Float64Array(n).fill(lin(LOW_DBFS))
   const freq = new Float64Array(n).fill(plan.events[0]?.freqHz ?? PROBE_HZ)
 
@@ -534,6 +590,62 @@ function fitFrequency(capture, plan, lag, label) {
   attackTable(envs, plan, lag, plan.events, gaps)
 }
 
+/**
+ * From a ramp, the settled GR against input level, and T1 — the input level at
+ * which GR reaches 1 dB.
+ *
+ * ⚠ T1 IS THE READOUT THE TAPER IS FITTED TO, and deliberately not the whole
+ * curve. Drive decides WHERE compression starts; the knee and ratio decide the
+ * shape above it. Fitting a knob law to the shape would let our knee's
+ * disagreement with the reference's leak into a constant that has nothing to do
+ * with it — which is exactly how the previous fit absorbed errors it could not
+ * name. T1 depends on drive almost alone.
+ */
+function rampCurve(capture, plan, lag, gaps = []) {
+  const envs = envelopesFor(capture, plan)
+  const env = envs.get(PROBE_HZ)
+  const pts = []
+  for (let t = 0.2; t < RAMP_S - 0.2; t += 0.05) {
+    const tSec = 5.0 + t
+    if (hitsGap(gaps, tSec - 0.05, tSec + 0.05)) continue
+    const i = Math.round(tSec * SR) + lag
+    const j = Math.round(tSec * SR)
+    if (i < 0 || i >= env.length || j >= plan.env.length) continue
+    const inDb = db(plan.env[j])
+    pts.push([inDb, db(env[i]) - inDb])
+  }
+  if (pts.length < 20) return null
+  // Resting gain: the flat stretch before compression begins.
+  const rest = pts.slice(0, 40).reduce((a, p) => a + p[1], 0) / Math.min(40, pts.length)
+  const gr = pts.map(([L, g]) => [L, rest - g])
+  let t1 = NaN
+  for (let k = 1; k < gr.length; k++) {
+    if (gr[k][1] >= 1.0 && gr[k - 1][1] < 1.0) {
+      const [x0, y0] = gr[k - 1], [x1, y1] = gr[k]
+      t1 = x0 + (x1 - x0) * (1.0 - y0) / (y1 - y0)
+      break
+    }
+  }
+  // A crossing at the ramp's own boundary is the boundary, not a threshold.
+  if (Number.isFinite(t1) && (t1 < RAMP_FROM_DBFS + 3 || t1 > RAMP_TO_DBFS - 3)) t1 = NaN
+  return { gr, t1, rest }
+}
+
+function fitRamp(capture, plan, lag, label) {
+  const gaps = findGaps(capture, plan)
+  if (gaps.length) console.log(`\n  ⚠ ${gaps.length} demo mute(s) detected; those samples are excluded.`)
+  const c = rampCurve(capture, plan, lag, gaps)
+  console.log(`\n  ── ${label}: taper ramp ──`)
+  if (!c) { console.log('    not enough usable samples'); return }
+  console.log(`    resting gain ${c.rest.toFixed(2)} dB;  T1 (GR = 1 dB) at ${Number.isFinite(c.t1) ? c.t1.toFixed(2) + ' dBFS' : 'never reached'}`)
+  console.log('    input dBFS     GR')
+  for (let L = -50; L <= -5; L += 5) {
+    const near = c.gr.filter(p => Math.abs(p[0] - L) < 0.4)
+    if (!near.length) continue
+    console.log(`    ${String(L).padStart(4)}      ${(near.reduce((a, p) => a + p[1], 0) / near.length).toFixed(2).padStart(6)} dB`)
+  }
+}
+
 function fitStairs(capture, plan, lag, label) {
   const envs = envelopesFor(capture, plan)
   const gaps = findGaps(capture, plan)
@@ -581,10 +693,92 @@ function runKernel(x, params) {
 }
 
 const PLANS = {
+  ramp: { plan: rampPlan, fit: fitRamp },
   bursts: { plan: burstPlan, fit: fitBursts },
   retrigger: { plan: retriggerPlan, fit: fitRetrigger },
   frequency: { plan: freqPlan, fit: fitFrequency },
   staircase: { plan: stairPlan, fit: fitStairs },
+}
+
+/**
+ * THE TAPER FIT.
+ *
+ * `scDriveDbFor` maps the knob to side-chain drive, which shifts where
+ * compression starts. So for our gain computer there is a constant O1 with
+ *
+ *     T1(knob) = O1 - scDriveDb(knob)
+ *
+ * O1 being the overshoot at which our curve reaches 1 dB of reduction — a
+ * property of the knee and ratio, not of the knob. Measure O1 once from our own
+ * kernel, then fit (max, span, taper) so our T1 lands on the reference's at
+ * every captured knob.
+ *
+ * ⚠ THIS MAKES OUR THRESHOLD TRACK THE REFERENCE'S, NOT OUR CURVE MATCH IT. If
+ * our knee differs from the reference's, that difference stays — it is simply
+ * no longer hidden inside a knob constant, which is what the LAEA-era fit did.
+ */
+function measureO1() {
+  const p = rampPlan()
+  const b = build(p)
+  p.env = b.env
+  const knob = 55
+  const c = rampCurve(runKernel(b.x, { peakReduction: knob }), p, 0)
+  return c && Number.isFinite(c.t1) ? c.t1 + scDriveDbFor(knob) : NaN
+}
+
+function fitTaper(points, o1) {
+  const err = (mx, sp, tp) => points.reduce((a, [knob, t1]) =>
+    a + (o1 - scDriveDbFor(knob, mx, sp, tp) - t1) ** 2, 0) / points.length
+  let best = { mx: SC_DRIVE_MAX_DB, sp: SC_DRIVE_SPAN_DB, tp: SC_TAPER }
+  best.e = err(best.mx, best.sp, best.tp)
+  // Coarse grid, then three rounds of shrinking coordinate search. The surface
+  // is smooth and three-dimensional; nothing cleverer is warranted.
+  for (let mx = 15; mx <= 60; mx += 1.5) {
+    for (let sp = 30; sp <= 220; sp += 5) {
+      for (let tp = 0.15; tp <= 1.6; tp += 0.05) {
+        const e = err(mx, sp, tp)
+        if (e < best.e) best = { mx, sp, tp, e }
+      }
+    }
+  }
+  let step = [1.5, 5, 0.05]
+  for (let round = 0; round < 24; round++) {
+    step = step.map(v => v * 0.7)
+    for (const [i, key] of ['mx', 'sp', 'tp'].entries()) {
+      for (const d of [-step[i], step[i]]) {
+        const t = { ...best, [key]: best[key] + d }
+        const e = err(t.mx, t.sp, t.tp)
+        if (e < best.e) best = { ...t, e }
+      }
+    }
+  }
+  return best
+}
+
+function reportTaper(points, label) {
+  const o1 = measureO1()
+  if (!Number.isFinite(o1)) { console.log('could not measure O1 from our own kernel'); return }
+  console.log(`\n══ TAPER FIT — ${label} ══`)
+  console.log(`  our gain computer reaches 1 dB of reduction at an overshoot of ${o1.toFixed(2)} dB`)
+  console.log('\n  knob   reference T1   ours now      error')
+  for (const [k, t1] of points) {
+    const mine = o1 - scDriveDbFor(k)
+    console.log(`  ${String(k).padStart(4)}   ${t1.toFixed(2).padStart(9)} dBFS  ${mine.toFixed(2).padStart(8)}   ${(mine - t1).toFixed(2).padStart(7)} dB`)
+  }
+  if (points.length < 3) {
+    console.log(`\n  ⚠ ${points.length} knob position(s). The law has THREE constants; a fit needs`)
+    console.log('    at least 3 and really wants 5, spread across the travel. Capture')
+    console.log('    ramp.wav at 20 / 35 / 50 / 65 / 80 and put the knob in the filename.')
+    return
+  }
+  const f = fitTaper(points, o1)
+  console.log(`\n  shipping : max ${SC_DRIVE_MAX_DB}  span ${SC_DRIVE_SPAN_DB}  taper ${SC_TAPER}   rms ${Math.sqrt(points.reduce((a, [k, t1]) => a + (o1 - scDriveDbFor(k) - t1) ** 2, 0) / points.length).toFixed(3)} dB`)
+  console.log(`  FITTED   : max ${f.mx.toFixed(2)}  span ${f.sp.toFixed(2)}  taper ${f.tp.toFixed(4)}   rms ${Math.sqrt(f.e).toFixed(3)} dB`)
+  console.log('\n  knob   reference T1    fitted     error')
+  for (const [k, t1] of points) {
+    const mine = o1 - scDriveDbFor(k, f.mx, f.sp, f.tp)
+    console.log(`  ${String(k).padStart(4)}   ${t1.toFixed(2).padStart(9)} dBFS  ${mine.toFixed(2).padStart(8)}   ${(mine - t1).toFixed(2).padStart(7)} dB`)
+  }
 }
 
 const args = process.argv.slice(2)
@@ -598,7 +792,8 @@ if (args.includes('--stimulus')) {
     writeFloatWav(path.join(STIM_DIR, `${name}.wav`), build(p).x)
     console.log(`  ${(name + '.wav').padEnd(16)} ${p.seconds.toFixed(1).padStart(6)} s`)
   }
-  console.log('\n  bursts     release memory — how the tail lengthens with exposure')
+  console.log('\n  ramp       the Peak Reduction taper — WHERE compression starts, per knob')
+  console.log('  bursts     release memory — how the tail lengthens with exposure')
   console.log('  retrigger  ATTACK memory — the same step, varying how recently the cell was lit')
   console.log('  frequency  the same step at 100 / 200 / 400 / 1000 / 3000 Hz')
   console.log('  staircase  the static curve, hence the ratio')
@@ -612,9 +807,54 @@ if (args.includes('--stimulus')) {
   console.log('  4. Bounce the FULL length including the tail. Do not normalise.')
   console.log(`  5. Save into ${CAP_DIR} as <unit>.<knob>.<name>.wav`)
   console.log('     e.g. laea.55.retrigger.wav')
-  console.log('\n  START WITH ONE KNOB SETTING (55 is a good first choice) across all four')
-  console.log('  files. That is enough to answer the attack-memory and frequency questions;')
-  console.log('  more knob positions only sharpen the static curve.')
+  console.log('\n  FOR THE TAPER: capture ramp.wav at FIVE knob positions and put the knob in')
+  console.log('  the filename — lala.30.ramp.wav, lala.45.ramp.wav, and so on. 30 / 45 / 60 /')
+  console.log('  75 / 90 is a good spread. Then: npm run la2a:ballistics -- --taper')
+  console.log('  ⚠ BELOW ABOUT KNOB 30 THERE IS NOTHING TO MEASURE — the threshold sits above')
+  console.log('    the ramp\'s top and the fit correctly refuses the point. Do not fill the')
+  console.log('    low end with captures; spread across where the unit actually compresses.')
+  console.log('\n  FOR EVERYTHING ELSE: one knob setting across the other four files is enough')
+  console.log('  to answer the attack-memory and frequency questions.')
+  process.exit(0)
+}
+
+if (args.includes('--taper')) {
+  const p = rampPlan()
+  const b = build(p)
+  p.env = b.env
+  if (args.includes('--selftest')) {
+    // ⚠ THE FIT MUST RECOVER OUR OWN CONSTANTS FROM OUR OWN KERNEL BEFORE IT IS
+    // POINTED AT A REFERENCE. If it cannot, an agreeable-looking set of numbers
+    // from a real capture would mean nothing.
+    const pts = [20, 35, 50, 65, 80, 95].map(k => {
+      const c = rampCurve(runKernel(b.x, { peakReduction: k }), p, 0)
+      if (!c || !Number.isFinite(c.t1)) { console.log(`  ⚠ knob ${k}: threshold outside the ramp's range; excluded`); return null }
+      return [k, c.t1]
+    }).filter(Boolean)
+    reportTaper(pts, 'SELF-TEST, our own kernel (the fit should return the shipping constants)')
+    process.exit(0)
+  }
+  const files = existsSync(CAP_DIR)
+    ? readdirSync(CAP_DIR).filter(f => f.includes('.ramp.') && f.endsWith('.wav')) : []
+  if (!files.length) {
+    console.log(`No <unit>.<knob>.ramp.wav captures in ${CAP_DIR}.`)
+    console.log('Run with --stimulus, render ramp.wav at several knob positions, and')
+    console.log('put the knob in the filename — e.g. lala.35.ramp.wav.')
+    process.exit(0)
+  }
+  const byUnit = new Map()
+  for (const f of files.sort()) {
+    const m = f.match(/^(.+?)\.(\d+(?:\.\d+)?)\.ramp\.wav$/)
+    if (!m) { console.log(`⚠ ${f}: name it <unit>.<knob>.ramp.wav so the knob is recorded`); continue }
+    const y = readWav(path.join(CAP_DIR, f))
+    if (y.sampleRate !== SR) { console.log(`⚠ ${f}: ${y.sampleRate} Hz; capture at ${SR}.`); continue }
+    const lag = alignByEnvelope(p.env, y.mono)
+    const c = rampCurve(y.mono, p, lag, findGaps(y.mono, p))
+    if (!c || !Number.isFinite(c.t1)) { console.log(`⚠ ${f}: no 1 dB crossing — knob too low, or the ramp never compresses`); continue }
+    if (!byUnit.has(m[1])) byUnit.set(m[1], [])
+    byUnit.get(m[1]).push([Number(m[2]), c.t1])
+  }
+  for (const [unit, pts] of byUnit) reportTaper(pts.sort((a, b) => a[0] - b[0]), unit)
   process.exit(0)
 }
 

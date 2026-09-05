@@ -183,10 +183,41 @@ const NOMINAL_DBFS = -18
  * behavioural match on average gain reduction, not a claim about the
  * reference's literal side-chain gain. Fitted on ONE clip; a second source
  * would be worth checking before treating the shape as settled.
+ *
+ * ⚠⚠ THE REFERENCE WAS THE WRONG UNIT. Analog Obsession ships TWO opto
+ * compressors and only LALA is the LA-2A; LAEA is a different device. Every
+ * capture behind these three constants is LAEA, so the knob-to-drive law the
+ * whole plugin is calibrated through is fitted to something that is not an
+ * LA-2A emulation. That also retires the "second source would be worth
+ * checking" line above as an understatement: the FIRST source was wrong.
+ *
+ * THE RE-FIT IS BUILT AND SELF-TESTED, AND IS WAITING ONLY ON CAPTURES:
+ * `npm run la2a:ballistics -- --stimulus` writes `ramp.wav`, a slow sweep that
+ * reads the threshold directly instead of bracketing it between staircase
+ * steps; capture it at five knob positions with the knob in the filename and
+ * `-- --taper` fits these three constants to it. Run against our own kernel it
+ * returns 36.24 / 105.87 / 0.4247 for a shipping 36.24 / 105.9 / 0.4247, rms
+ * 0.003 dB, so the machinery is not the uncertainty — the reference is.
+ *
+ * ⚠ AND THE RE-FIT WILL TARGET THE THRESHOLD, NOT THE CURVE. Drive decides
+ * where compression starts; the knee and ratio decide the shape above it.
+ * Fitting a knob law to the shape is what let the first fit absorb errors it
+ * could not name. Any knee disagreement will survive the re-fit, in the open.
  */
-const SC_DRIVE_MAX_DB = 36.24
-const SC_DRIVE_SPAN_DB = 105.9
-const SC_TAPER = 0.4247
+export const SC_DRIVE_MAX_DB = 36.24
+export const SC_DRIVE_SPAN_DB = 105.9
+export const SC_TAPER = 0.4247
+export { NOMINAL_DBFS }
+
+/**
+ * Knob (0-100) to side-chain drive, dB above NOMINAL_DBFS. The one place the
+ * law lives, so a re-fit changes it here and nowhere else.
+ */
+export function scDriveDbFor(peakReduction,
+  maxDb = SC_DRIVE_MAX_DB, spanDb = SC_DRIVE_SPAN_DB, taper = SC_TAPER) {
+  const knob = clamp(peakReduction, 0, 100) / 100
+  return maxDb - NOMINAL_DBFS - spanDb * (1 - Math.pow(knob, taper))
+}
 
 /**
  * DC blocker corner, Hz — a one-pole `y = x - x[-1] + R*y[-1]` after the tube
@@ -946,8 +977,7 @@ export class LA2AKernel {
     // internal threshold referenced to nominal level. Endpoints are -2 dB at
     // knob 0 and +38 dB at knob 100.
     const knob = clamp(p.peakReduction, 0, 100) / 100
-    this.scDriveDb =
-      SC_DRIVE_MAX_DB - NOMINAL_DBFS - SC_DRIVE_SPAN_DB * (1 - Math.pow(knob, SC_TAPER))
+    this.scDriveDb = scDriveDbFor(p.peakReduction)
     // Gain applied to the side-chain's sub-1 kHz content: 1 at r37 100 (fully
     // clockwise, flat, factory), down to -10 dB at r37 0 (fully counter-
     // clockwise). Above the corner the side-chain stays at unity, so this only
