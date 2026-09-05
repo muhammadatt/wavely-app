@@ -312,9 +312,31 @@ const SC_HPF_HZ = 80
  * DEPENDENT in a way the old ones were not; at a rate far from 44.1 kHz the
  * realised curve will drift from the fit.
  *
- * ⚠ PROVISIONAL ON DEPTH. The LALA sweep sits at 1.5-9 dB of reduction, so its
- * 400 Hz point is close to the knee and the implied boost there is the softest
- * number in the fit. A deeper capture (LALA at knob 90) is the check.
+ * CONFIRMED BY A DEEPER CAPTURE, AND THE CONSTANTS DID NOT MOVE. The first fit
+ * was flagged provisional because LALA's sweep sat at 1.5-9 dB of reduction,
+ * putting its 400 Hz point near the knee. Re-run at knob 90 (8.9-11 dB):
+ *
+ *   - THE MECHANISM IS SETTLED. The 100 Hz probe reads 8.85 / 8.86 / 8.90 dB
+ *     across the full HF sweep. At 8.85 dB there is ample room to fall, and it
+ *     does not move — a control that cut lows could not do that.
+ *   - The 200 and 400 Hz boosts come out IDENTICAL at both depths (+0.19 and
+ *     +0.67/+0.68 dB of reduction, 7 dB of depth apart), so the soft point is
+ *     firm.
+ *   - ⚠ 1 kHz AND 3 kHz SATURATE AT KNOB 90 — all three settings pin at 11.00 dB
+ *     — so those two constraints still come from the knob 60 capture. The two
+ *     depths are complementary rather than one superseding the other.
+ *
+ * Re-fitting against all six constraints (100 / 200 / 400 / 1000 / 3000 Hz plus
+ * the manufacturer's 15 kHz) returns 5975 Hz and 21.0 dB — the shipping values
+ * unchanged — at rms 0.51 dB.
+ *
+ * ⚠ CLA-2A'S "HI FREQ" IS NOT THIS CONTROL AND WAS NOT USED IN THE FIT. Swept
+ * 100 -> 0 at PR 65 it takes 8.4 / 13.2 / 13.3 / 12.0 / 9.2 dB OUT of the
+ * side-chain at 100 / 200 / 400 / 1000 / 3000 Hz: a broadband loss, deepest in
+ * the mids and shallowest at both ends. That is neither pre-emphasis nor the
+ * shape the manufacturer describes, and it is the reason an earlier three-point
+ * read of that unit made R37 look like a drive control. Recorded as a
+ * divergence in the reference, not as a constraint on the model.
  */
 const SC_EMPH_HZ = 5975
 const SC_EMPH_MAX_DB = 21.0
