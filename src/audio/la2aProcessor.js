@@ -191,6 +191,14 @@ const NOMINAL_DBFS = -18
  * LA-2A emulation. That also retires the "second source would be worth
  * checking" line above as an understatement: the FIRST source was wrong.
  *
+ * ⚠ THESE CONSTANTS ARE COUPLED TO THE KNEE, AND THE COUPLING IS NOT OPTIONAL.
+ * The fit targets T1 — the input level at which reduction reaches 1 dB — and
+ * T1 = O1 - drive(knob), where O1 is the overshoot at which OUR curve reaches
+ * 1 dB. Narrowing COMPRESS_KNEE_DB from 20 to 5 moved O1 from 0.83 to 4.56 dB,
+ * which put the shipping taper 3.58 dB off the reference until it was re-fitted.
+ * The SPAN barely moved (50.36 -> 49.89, the knob law's own slope); MAX absorbed
+ * the shift. Change the knee and this must be re-run.
+ *
  * THE RE-FIT IS BUILT AND SELF-TESTED, AND IS WAITING ONLY ON CAPTURES:
  * `npm run la2a:ballistics -- --stimulus` writes `ramp.wav`, a slow sweep that
  * reads the threshold directly instead of bracketing it between staircase
@@ -204,8 +212,8 @@ const NOMINAL_DBFS = -18
  * Fitting a knob law to the shape is what let the first fit absorb errors it
  * could not name. Any knee disagreement will survive the re-fit, in the open.
  */
-export const SC_DRIVE_MAX_DB = 23.55
-export const SC_DRIVE_SPAN_DB = 50.36
+export const SC_DRIVE_MAX_DB = 26.93
+export const SC_DRIVE_SPAN_DB = 49.89
 /**
  * ⚠ EXACTLY 1: THE KNOB IS LINEAR IN dB OF DRIVE, 0.504 dB per unit. Pinning
  * the exponent to 1 fits the reference BETTER than leaving it free (rms 0.053
@@ -668,7 +676,28 @@ export const TUBE_DRIVE_LIN = 0.2388 // knee at +12.4 dBFS, i.e. 30.4 dB above N
  */
 export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
 
-const COMPRESS_KNEE_DB = 20 // wide knee — the "leveling" feel
+/**
+ * COMPRESS-MODE KNEE, MEASURED — and it was the larger of the two errors in the
+ * static curve, bigger than the ratio.
+ *
+ * Fitted to two LA-2A emulations' ramp captures (`npm run la2a:ballistics`), a
+ * three-parameter soft-knee model against a continuous sweep, rms 0.017-0.078 dB:
+ *
+ *   LALA    knob 60 / 75 / 90 : ratio 1.98 / 1.98 / 2.00 : 1, knee 1.0 / 1.0 / 2.0 dB
+ *   CLA-2A  knob 60 / 75      : ratio 4.08 / 3.92 : 1,       knee 6.5 / 5.0 dB
+ *
+ * So the references bracket the knee at 1-6.5 dB where this constant was 20 —
+ * three to twenty times too wide. A knee that wide is most of why our delivered
+ * gain-reduction slope on program came out at two thirds of our own static
+ * curve: at moderate drive the operating point never leaves the knee, so the
+ * ratio above it never applies.
+ *
+ * 5 dB sits inside the measured band and near CLA-2A's, which is the reference
+ * whose ratio was adopted below. It is NOT itself a fitted value — the two
+ * references disagree by 6x on this constant as they do on everything else, so
+ * it is a choice inside a measured range, which is the most that data supports.
+ */
+const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
 
 const LN10_OVER_20 = Math.LN10 / 20
@@ -1116,9 +1145,22 @@ export class LA2AKernel {
       const over = levelDb + this.scDriveDb
       let grTarget = 0
       if (over > -this.halfKnee) {
+        // ⚠ COMPRESS MODE'S RATIO IS FIXED, AND THAT IS MEASURED. It used to
+        // drift 3:1 -> 4:1 with drive, which nothing in the references does:
+        // LALA holds 1.98-2.00:1 and CLA-2A 3.92-4.08:1 across every knob
+        // position captured. Ours was the only one of the three that moved.
+        //
+        // 3:1 is the LA-2A's documented compress-mode figure, and it sits
+        // between the two emulations rather than picking a side — they
+        // disagree by 2x, and neither is hardware. Swapping to CLA-2A's 4:1 is
+        // a one-line change if the documented figure ever loses the argument.
+        //
+        // ⚠ LIMIT MODE IS UNTOUCHED AND STILL UNMEASURED. Every capture in this
+        // branch is compress mode, so its ratio keeps the shape it had rather
+        // than inheriting a change nothing tested.
         const ratio = this.isLimit
           ? 12 + 8 * (over > 0 ? over / (over + 6) : 0)
-          : 3 + (over > 0 ? over / (over + 10) : 0)
+          : 3
         const slope = 1 - 1 / ratio
         if (over <= this.halfKnee) {
           const t = over + this.halfKnee
