@@ -71,7 +71,8 @@
  *     EXACT rather than smoothed.
  */
 
-import { writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { readWav } from '../test/voicerx/wav.js'
 import { getFFT } from '../src/audio/dsp/fft.js'
@@ -1003,10 +1004,18 @@ if (args.includes('--stimulus')) {
   mkdirSync(STIM_DIR, { recursive: true })
   mkdirSync(CAP_DIR, { recursive: true })
   console.log(`Wrote stimulus to ${STIM_DIR}`)
+  // ⚠ THE CHECKSUM IS PRINTED BECAUSE "IS THIS THE FILE I ALREADY RENDERED?" IS
+  // A REAL QUESTION AND WAS ASKED. `data/.gitignore` excludes `corpus/`, so the
+  // stimulus is never in the repo and lives only where it was generated —
+  // a stale copy on a capture machine looks exactly like a fresh one. Generation
+  // is deterministic (no randomness anywhere in the plans), so the same commit
+  // always produces the same bytes and these digests identify the version.
   for (const [name, { plan }] of Object.entries(PLANS)) {
     const p = plan()
-    writeFloatWav(path.join(STIM_DIR, `${name}.wav`), build(p).x)
-    console.log(`  ${(name + '.wav').padEnd(16)} ${p.seconds.toFixed(1).padStart(6)} s`)
+    const file = path.join(STIM_DIR, `${name}.wav`)
+    writeFloatWav(file, build(p).x)
+    const md5 = createHash('md5').update(readFileSync(file)).digest('hex').slice(0, 8)
+    console.log(`  ${(name + '.wav').padEnd(16)} ${p.seconds.toFixed(1).padStart(6)} s   ${md5}`)
   }
   console.log('\n  ramp       the Peak Reduction taper — WHERE compression starts, per knob')
   console.log('  bursts     release memory — how the tail lengthens with exposure')
