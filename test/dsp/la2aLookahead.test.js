@@ -121,7 +121,7 @@ test('lookahead 0 is bit-identical to not naming the parameter at all', () => {
 
 test('the gain envelope is identical at every lookahead depth', () => {
   // THE LOAD-BEARING TEST. Lookahead delays the AUDIO; the side-chain, the
-  // static curve, the T4 ballistics and the LDR memory all still run on the
+  // static curve and the T4 ballistics all still run on the
   // undelayed input. If a future change routes the delayed copy into the
   // detector, the compressor silently becomes a different instrument and every
   // preset shifts under the user — so the envelope is compared exactly, not

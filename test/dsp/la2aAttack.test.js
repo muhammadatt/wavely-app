@@ -29,17 +29,24 @@ const SR = 44100
 const db = v => 20 * Math.log10(Math.max(Math.abs(v), 1e-30))
 
 /**
- * A burst from 3 s of silence (the cell dark), then the SAME burst 0.4 s after
+ * A burst from 3 s of silence (the cell dark), then the SAME burst 0.12 s after
  * one (the cell still lit). The two onsets are identical by construction, so
  * any difference in how much of each survives is the cell's state and nothing
  * else.
+ *
+ * ⚠ 0.12 s, NOT THE 0.4 s THIS USED TO USE, BECAUSE THE RELEASE GOT FASTER.
+ * How lit the cell still is at the second onset is a property of the RELEASE,
+ * so replacing the old fast/slow split moved this measurement without the
+ * attack changing at all: the margin fell from 5.70 dB to 3.10 and failed a
+ * threshold calibrated against the old release. A shorter gap puts the cell
+ * back in a state where the attack is what is being measured.
  */
 function twoOnsets() {
   const n = SR * 6
   const x = new Float32Array(n)
   const amp = Math.pow(10, -12 / 20)
   const dark = SR * 3
-  const lit = SR * 3 + SR * 1 + Math.round(SR * 0.4)
+  const lit = SR * 3 + SR * 1 + Math.round(SR * 0.12)
   for (let i = 0; i < SR; i++) {
     const v = amp * Math.sin(2 * Math.PI * 1000 * i / SR)
     x[dark + i] = v
@@ -72,13 +79,13 @@ test('a lit cell catches an onset that a dark cell lets through', () => {
   // Direction first: this is the whole claim.
   assert.ok(d.lit < d.dark, `lit onset ${d.lit.toFixed(2)} dB is not caught harder than dark ${d.dark.toFixed(2)}`)
   // And by a margin worth having. Measured on the shipping constants:
-  // -0.19 dB from dark, -5.89 dB when lit.
-  assert.ok(d.dark - d.lit > 4, `only ${(d.dark - d.lit).toFixed(2)} dB between a dark and a lit onset`)
+  // -0.18 dB from dark, -6.86 dB when lit.
+  assert.ok(d.dark - d.lit > 5, `only ${(d.dark - d.lit).toFixed(2)} dB between a dark and a lit onset`)
 })
 
 test('the dark onset is left as intact as a fixed 10 ms attack leaves it', () => {
   // ⚠ THE POINT OF THE WHOLE MECHANISM, AND THE THING A FIXED FAST ATTACK
-  // CANNOT DO. Measured: fixed 10 ms -0.18 dB, fixed 1 ms -0.90, ours -0.19.
+  // CANNOT DO. Measured: fixed 10 ms -0.18 dB, fixed 1 ms -0.90, ours -0.18.
   // A fixed attack quick enough to move crest factor also clamps the first
   // transient, which is the behaviour an LA-2A is chosen for.
   const { x, dark, lit } = twoOnsets()

@@ -67,7 +67,7 @@ function tone(hz, sec, amp) {
 //
 // ⚠ ONE SECOND IS ENOUGH FOR `rms` AND NOT FOR `mean`, WHICH IS WHY THE DC TEST
 // PASSES ITS OWN. A DC mean is the one measurement here sensitive to the tail:
-// the slow release runs to 5 s and the LDR memory to 8, so the envelope is
+// the phosphorescent release tail runs to seconds, so the envelope is
 // still creeping long after it is audibly settled, and the creep IS a DC term.
 // Measured on the shipping kernel, the residual over the last second of the
 // tone keeps falling with tone length — -136.0 / -145.8 / -154.0 / -166.3 dBFS

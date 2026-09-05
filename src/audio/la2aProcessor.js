@@ -15,12 +15,16 @@
  * Modeled hardware behaviors:
  *
  * 1. T4 optical cell (electroluminescent panel + LDR pair)
- *    - Fixed ~10 ms attack (the panel's turn-on time; not user-adjustable
- *      on the hardware).
- *    - Dual-stage release: a fast stage recovers ~50% of the gain reduction
- *      in 50–60 ms, followed by a slow phosphorescent tail.
- *    - LDR memory: the slow tail's time constant stretches from ~0.5 s to
- *      ~5 s depending on how hard and how long the panel was previously lit.
+ *    - Program-dependent attack, ~10 ms from a dark cell falling toward
+ *      ~4.5 ms as it lights (not user-adjustable on the hardware). See
+ *      ATTACK_DARK_S for what is measured and what is not.
+ *    - Two-phase release of ONE reduction: a fast recovery handing over to a
+ *      phosphorescent tail. ⚠ NOT a split of the reduction between two
+ *      stages — that model left a pedestal on program material; see
+ *      REL_FAST_S.
+ *    - ⚠ No LDR memory integrator. Both reference units release identically
+ *      across a 200x burst-length sweep; the photomemory shows up in the
+ *      attack instead, and that is where this models it.
  *
  * 2. Program-dependent ratio
  *    - Compress mode: gentle, wide-knee curve whose effective ratio drifts
@@ -100,30 +104,49 @@ export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
  * measures against is a moving target). The reference's -3.6 ms is therefore
  * about -6.6 ms of true spread, measured against that.
  *
- * ⚠ THESE TWO CONSTANTS ARE NOT FITTED TO THAT CAPTURE — IT CANNOT FIT THEM,
- * and the reason is a defect somewhere else. Across the 0.05-5 s gaps the test
- * sweeps, our own cell state `gr/(gr + MEM_HALF_DB)` moves only 0.740 -> 0.489,
- * because our release still leaves 2.4 dB of reduction standing after a FIVE
- * SECOND gap. Over a band that narrow the widest t63 ratio ANY monotone
- * speed-up law can produce is 0.740/0.489 = 1.51; the reference asks for
- * 8.2/4.6 = 1.78. Unreachable — and unreachable for the law-independent
- * reason, so no choice of curve here rescues it. THE BINDING CONSTRAINT IS THE
- * RELEASE, NOT THE ATTACK. Widen that band and this capture becomes fittable.
+ * ⚠ THESE TWO CONSTANTS ARE STILL NOT FITTED TO THAT CAPTURE, BUT THE REASON
+ * HAS CHANGED — AND THE FIRST REASON WAS RIGHT. It used to be unfittable
+ * outright: the cell state `gr/(gr + CELL_HALF_DB)` moved only 0.740 -> 0.489
+ * across the gaps the test sweeps, because the old release left 2.4 dB standing
+ * after a FIVE SECOND gap, and over a band that narrow the widest t63 ratio ANY
+ * monotone speed-up law can produce is 1.51 against the 1.78 the reference
+ * asks. Replacing the release split (see REL_FAST_S) widened the band to
+ * 0.327 -> 0.782, a reachable 2.39, exactly as that prediction said it would.
  *
- * SO THEY ARE ANCHORED INSTEAD to the reference's own measured endpoints: 10 ms
- * is the published nominal and matches our fixed-attack behaviour from dark,
- * 4.5 ms is the fastest t63 the CLA-2A actually returns. What that buys, on the
- * analog-unit dry Vox at matched median gain reduction (crest change vs dry):
+ * WHAT THE CAPTURE NOW SAYS, and why it is still not taken. Fitted through the
+ * same harness the reference went through, the retrigger wants ATTACK_DARK_S
+ * around 20-45 ms: at 10 ms the raw spread stays flat or slightly backwards,
+ * and only a much slower dark end reproduces the reference's direction
+ * (45/2.0/4.5 returns 4.8/5.0/5.8 ms against the reference's 4.6/5.0/8.2, still
+ * missing the long gap by 2.4). Three things argue against taking it:
  *
- *     GR             2 dB     4 dB     6 dB     8 dB
- *     fixed 10 ms   -0.37    +2.94    +5.02    +6.67
- *     10 / 4.5      -0.34    +2.96    +4.58    +5.49
+ *   1. IT WOULD MAKE THE ORIGINAL BUG WORSE. A file that starts loud hits a
+ *      fully dark cell, and that overshoot is where this whole investigation
+ *      began. Peak in the first 50 ms above the settled level: 16.10 dB at
+ *      10 ms, 16.52 at 20, 16.63 at 30, 16.77 at 45.
+ *   2. IT BUYS NOTHING ON CREST. The release now does that work — crest change
+ *      at 2/4/6/8 dB of reduction moves by under 0.3 dB across the entire
+ *      20-45 ms range, so no acceptance criterion prefers it.
+ *   3. THE DARK END IS STILL EXTRAPOLATED. Even widened, the test only reaches
+ *      hNorm 0.327; a fully dark cell is never observed, and 45 ms is a
+ *      two-point extrapolation through a reciprocal law far outside the data.
  *
- * Real, and short of the reference (+1.57 dB at 9.8 dB GR). ⚠ DO NOT CLOSE THAT
- * GAP HERE. Crest alone is matched at ATTACK_LIT_S ~ 0.5 ms (+1.48 at 8 dB) —
- * an effective ~0.6 ms attack in program, which is not an LA-2A at all and is
- * flatly contradicted by the 4.6-8.2 ms this same unit measures. That would be
- * the right number from the wrong mechanism, hiding the release defect above.
+ * SO THEY STAY ANCHORED to the reference's measured endpoints: 10 ms is the
+ * published nominal and matches our behaviour from dark, 4.5 ms is the fastest
+ * t63 the CLA-2A actually returns. A hardware capture, or any stimulus that
+ * genuinely darkens the cell, is what settles this. Crest change vs dry on the
+ * analog-unit dry Vox at matched median gain reduction, for the record:
+ *
+ *     GR                          2 dB     4 dB     6 dB     8 dB
+ *     fixed 10 ms, old release   -0.37    +2.94    +5.02    +6.67
+ *     10 / 4.5,    old release   -0.34    +2.96    +4.58    +5.49
+ *     10 / 4.5,    new release   +0.19    +1.97    +2.98    +3.16
+ *
+ * ⚠ DO NOT CLOSE THE REMAINING GAP HERE EITHER. Under the old release, crest
+ * alone was matched at ATTACK_LIT_S ~ 0.5 ms — an effective ~0.6 ms attack in
+ * program, which is not an LA-2A at all and is flatly contradicted by the
+ * 4.6-8.2 ms this same unit measures. That was the right number from the wrong
+ * mechanism, and the release was the actual defect. It was.
  *
  * ⚠ THE HISTORY TERM IS THE CURRENT REDUCTION, NOT THE `memory` INTEGRATOR.
  * Tried `memory` first; it produced a spread in the wrong direction. See the
@@ -143,34 +166,85 @@ export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
  * gain vs. input):
  *
  *                        from dark    already lit
- *     fixed 10 ms         -0.18 dB      -5.12 dB
- *     fixed  1 ms         -0.90 dB      -5.97 dB
- *     10 / 4.5            -0.19 dB      -5.89 dB
+ *     fixed 10 ms         -0.18 dB      -6.69 dB
+ *     fixed  1 ms         -0.90 dB      -7.69 dB
+ *     10 / 4.5            -0.18 dB      -6.86 dB
  *
  * The program-dependent cell keeps the dark onset intact — indistinguishable
- * from the 10 ms fixed attack — while catching the lit one harder than a fixed
- * 1 ms attack does. Fixed-fast buys the second column by giving up the first.
+ * from the 10 ms fixed attack — while catching the lit one harder. A fixed 1 ms
+ * attack reaches further into the lit onset, but pays FIVE TIMES the dark-onset
+ * cost to do it, and that first transient is the thing an LA-2A is chosen for.
+ * ⚠ THE SECOND COLUMN DEPENDS ON THE RELEASE AND THESE NUMBERS MOVED WITH IT —
+ * the gap here is 0.12 s, and under the old release the same test at 0.4 s read
+ * -5.12 / -5.97 / -5.89. Faster recovery means less of the cell is still lit,
+ * so the margin narrows with the gap; the ORDERING is the claim, not the size.
  */
 export const ATTACK_DARK_S = 0.010
 export const ATTACK_LIT_S = 0.0045
 
-// Fraction of gain reduction held by the fast stage, and its release tau.
-// Together tuned so total recovery hits ~50% at 50–60 ms regardless of the
-// slow tail's current length.
-const FAST_FRACTION = 0.65
-const FAST_RELEASE_S = 0.035
+/**
+ * RELEASE — ONE STATE RECOVERING FAST THEN SLOWLY, not two stages splitting the
+ * reduction between them.
+ *
+ * ⚠ THE SPLIT THIS REPLACES WAS THE PLUGIN'S LARGEST SINGLE DEFECT, AND ITS
+ * SIGNATURE WAS EXACT. The old model held `FAST_FRACTION` of the reduction in a
+ * fast stage and the rest in a slow one, each decaying toward its OWN SHARE of
+ * the target. At speech rates the slow stage cannot follow anything, so it
+ * settles into a near-constant pedestal — reduction applied equally to loud and
+ * quiet, doing nothing for peaks and pulling the body down. Only the fast
+ * stage's share of the static curve ever reached program, and the measurement
+ * said so to two figures: delivered slope / static slope came out at 68 %
+ * against a `FAST_FRACTION` of 0.65. A reference capture delivers 105 %.
+ *
+ * THE PEDESTAL IS GONE BY CONSTRUCTION, not by retuning: there is one `gr`, it
+ * always moves toward the target, and nothing owns a fixed fraction of it.
+ *
+ * MEASURED, on Waves CLA-2A `bursts.wav` (`npm run la2a:ballistics`) — gain
+ * reduction remaining after the step down, normalised by the reduction at it:
+ *
+ *     ms        20     50    100    200    500   1000   2000   5000   fast%
+ *     CLA-2A  .843   .695   .527   .345   .151   .084   .053   .017    47 %
+ *     ours    .868   .708   .527   .333   .157   .094   .052   .010    47 %
+ *     was     .735   .524   .402   .359   .334   .297   .236   .114    60 %
+ *
+ * The old row's STALL between 100 and 500 ms is the pedestal, visible directly.
+ *
+ * ⚠ ONE POLE WITH A SLIDING COEFFICIENT BEAT A BI-EXPONENTIAL ON THE SAME DATA,
+ * which is why the structure is not simply the old one unstalled. Fitting both
+ * to the curve above: a fixed-split bi-exponential reaches rms 0.0154, this
+ * reaches 0.0104, and the gap is almost all in the tail (at 2 s it returns
+ * 0.052 against the reference's 0.053, where the bi-exponential gives 0.035).
+ * `REL_PHASE_S` is how quickly the cell hands over from its fast recovery to
+ * the phosphorescent one; the coefficient, not the time constant, is blended,
+ * for the reason given under the attack constants.
+ *
+ * ⚠ THE DOCUMENTED "50 % IN 50-60 ms" IS NOT WHAT THE UNIT DOES. It reaches
+ * 50 % at about 110 ms, and REL_FAST_S is the measurement rather than the
+ * folklore. Recorded because the old constants were built to hit the folklore.
+ */
+const REL_FAST_S = 0.130
+const REL_SLOW_S = 1.800
+const REL_PHASE_S = 0.260
 
-// Slow-tail release range; position within the range is driven by the
-// LDR memory state.
-const SLOW_RELEASE_MIN_S = 0.5
-const SLOW_RELEASE_MAX_S = 5.0
-
-// LDR memory: integrates gain reduction over time. Charges while the panel
-// is lit, bleeds off slowly after. MEM_HALF_DB is the accumulated level (dB
-// of GR) at which the slow tail sits halfway through its range.
-const MEM_CHARGE_S = 0.8
-const MEM_DISCHARGE_S = 8.0
-const MEM_HALF_DB = 2.5
+/**
+ * ⚠ THE LDR MEMORY INTEGRATOR IS GONE, AND BOTH REFERENCES KILLED IT. It
+ * lengthened the release tail with exposure, over a 0.5-5 s range. Neither
+ * reference does that: across a 200x burst-length sweep (0.05 s to 10 s) the
+ * CLA-2A's release rows are identical to three figures and its fast% never
+ * leaves 47 %, and LALA's rows are identical outright. Ours moved a lot — 0.114
+ * against 0.010 remaining at +5 s over the same sweep — so the exposure
+ * dependence was ours alone.
+ *
+ * ⚠ THE PHOTOMEMORY ITSELF IS NOT DENIED BY THIS, it has moved to where the
+ * evidence actually puts it: the ATTACK, driven by the current reduction. That
+ * is the same physical claim (a lit cell behaves differently from a dark one)
+ * carried by a state that program material actually moves.
+ *
+ * CELL_HALF_DB is the reduction at which the cell counts as half-lit. It is the
+ * old `MEM_HALF_DB` value in a new role, and unlike that one it is now FITTED —
+ * see the attack constants.
+ */
+const CELL_HALF_DB = 2.5
 
 // ── Sidechain constants ─────────────────────────────────────────────────────
 
@@ -814,8 +888,8 @@ export const LA2A_KERNEL_DEFAULTS = {
  * Lookahead ceiling, milliseconds.
  *
  * WHAT IT IS. The audio path is delayed; the side-chain is not. Nothing else
- * changes — not the detector, not the static curve, not the T4's ballistics,
- * not the LDR memory. The gain envelope is bit-identical at every depth, which
+ * changes — not the detector, not the static curve, not the T4's ballistics.
+ * The gain envelope is bit-identical at every depth, which
  * was verified before this shipped. Only WHEN that envelope meets the audio
  * moves, so a transient arriving at the cell is met by the gain the cell would
  * otherwise have reached `lookaheadMs` later.
@@ -884,10 +958,10 @@ export class LA2AKernel {
 
     this.attackCoefDark = 1 - Math.exp(-1 / (sampleRate * ATTACK_DARK_S))
     this.attackCoefLit = 1 - Math.exp(-1 / (sampleRate * ATTACK_LIT_S))
-    this.fastRelCoef = 1 - Math.exp(-1 / (sampleRate * FAST_RELEASE_S))
+    this.relFastCoef = 1 - Math.exp(-1 / (sampleRate * REL_FAST_S))
+    this.relSlowCoef = 1 - Math.exp(-1 / (sampleRate * REL_SLOW_S))
+    this.relPhaseCoef = 1 - Math.exp(-1 / (sampleRate * REL_PHASE_S))
     this.detCoef = 1 - Math.exp(-1 / (sampleRate * DETECTOR_S))
-    this.memChargeCoef = 1 - Math.exp(-1 / (sampleRate * MEM_CHARGE_S))
-    this.memDischargeCoef = 1 - Math.exp(-1 / (sampleRate * MEM_DISCHARGE_S))
     this.hpfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_HPF_HZ / sampleRate)
     this.shelfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_SHELF_HZ / sampleRate)
     // DC blocker pole — the asymmetric shaper shifts the operating point.
@@ -914,10 +988,10 @@ export class LA2AKernel {
     this.hpfLp = 0
     this.shelfLp = 0
     this.env = 0
-    this.grFast = 0
-    this.grSlow = 0
-    this.memory = 0
-    this.slowRelCoef = 1 - Math.exp(-1 / (sampleRate * SLOW_RELEASE_MIN_S))
+    // The cell's reduction, and how far its recovery has handed over from the
+    // fast phase to the phosphorescent one (0 = just released, 1 = deep tail).
+    this.gr = 0
+    this.relPhase = 0
 
     // Per-channel DC blocker state (grown on demand)
     this.dcX = []
@@ -1059,9 +1133,8 @@ export class LA2AKernel {
     this.hpfLp = 0
     this.shelfLp = 0
     this.env = 0
-    this.grFast = 0
-    this.grSlow = 0
-    this.memory = 0
+    this.gr = 0
+    this.relPhase = 0
     this.lastGain = 1
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
@@ -1148,12 +1221,12 @@ export class LA2AKernel {
    */
   process(inputChannels, outputChannels, n) {
     // A non-finite value anywhere in the cell's state is unrecoverable on its
-    // own: env, grFast, grSlow and memory all feed back into themselves, so one
-    // NaN makes every future block NaN and the effect goes silent for good.
+    // own: env, gr and relPhase all feed back into themselves, so one NaN makes
+    // every future block NaN and the effect goes silent for good.
     // Params are validated at the boundary, but this kernel is embedded by
     // other plugins and reached from a message port, so it also heals itself.
     // One comparison per block.
-    if (!Number.isFinite(this.env + this.grFast + this.grSlow + this.memory)) {
+    if (!Number.isFinite(this.env + this.gr + this.relPhase)) {
       this.resetState()
     }
 
@@ -1163,12 +1236,6 @@ export class LA2AKernel {
       for (let ch = 0; ch < nOut; ch++) outputChannels[ch].fill(0, 0, n)
       return
     }
-
-    // Refresh the slow-release coefficient from the LDR memory state — the
-    // memory moves on ~1 s time scales, once per block is plenty.
-    const memNorm = this.memory / (this.memory + MEM_HALF_DB)
-    const slowTau = SLOW_RELEASE_MIN_S + (SLOW_RELEASE_MAX_S - SLOW_RELEASE_MIN_S) * memNorm
-    this.slowRelCoef = 1 - Math.exp(-1 / (this.sampleRate * slowTau))
 
     if (this.gainScratch.length < n) this.gainScratch = new Float32Array(n)
     if (this.preGainScratch.length < n) this.preGainScratch = new Float32Array(n)
@@ -1187,7 +1254,7 @@ export class LA2AKernel {
       }
     }
 
-    let { hpfLp, shelfLp, env, grFast, grSlow, memory } = this
+    let { hpfLp, shelfLp, env, gr, relPhase } = this
 
     // Seeded on the first block; advanced once per sample HERE rather than
     // per channel, because this envelope loop is already the shared one.
@@ -1246,15 +1313,10 @@ export class LA2AKernel {
         }
       }
 
-      // LDR memory: charges while gain reduction is demanded, bleeds off after
-      memory += (grTarget - memory) *
-        (grTarget > memory ? this.memChargeCoef : this.memDischargeCoef)
-
-      // T4 dynamics. Attack splits the incoming reduction across both stages
-      // so a release from any state recovers ~50% at the fast rate. Release
-      // decays each stage toward its share of the current target (not zero)
-      // so sustained program holds its reduction.
-      const gr = grFast + grSlow
+      // T4 dynamics: ONE reduction, moving toward the target at a rate that is
+      // program-dependent going up and two-phase coming down. Nothing here owns
+      // a fixed share of the reduction — see REL_FAST_S for the stage split
+      // this replaced and the pedestal it left on program material.
       if (grTarget > gr) {
         // How lit the cell is RIGHT NOW, 0 (dark) to 1 (saturated).
         //
@@ -1271,18 +1333,23 @@ export class LA2AKernel {
         // attenuating IS lit. That falls out correctly at every point: silent
         // start -> gr 0 -> slow; mid-phrase -> gr high -> fast, so transients
         // inside speech are caught; after a long gap -> released -> slow again.
-        const hNorm = gr / (gr + MEM_HALF_DB)
+        const hNorm = gr / (gr + CELL_HALF_DB)
         const attackCoef = this.attackCoefDark
           + (this.attackCoefLit - this.attackCoefDark) * hNorm
-        const delta = (grTarget - gr) * attackCoef
-        grFast += delta * FAST_FRACTION
-        grSlow += delta * (1 - FAST_FRACTION)
+        gr += (grTarget - gr) * attackCoef
+        // The panel is lit again, so the recovery starts over from its fast
+        // phase. This is what keeps the slow tail out of program material:
+        // between syllables the cell is re-lit long before the tail engages,
+        // and the tail only takes over after the signal actually stops.
+        relPhase = 0
       } else {
-        grFast += (grTarget * FAST_FRACTION - grFast) * this.fastRelCoef
-        grSlow += (grTarget * (1 - FAST_FRACTION) - grSlow) * this.slowRelCoef
+        relPhase += (1 - relPhase) * this.relPhaseCoef
+        const relCoef = this.relFastCoef
+          + (this.relSlowCoef - this.relFastCoef) * relPhase
+        gr += (grTarget - gr) * relCoef
       }
 
-      const grNow = grFast + grSlow
+      const grNow = gr
       if (grNow > this.maxGrDb) this.maxGrDb = grNow
       if (grNow > 0.05) {
         this.grSum += grNow
@@ -1317,10 +1384,9 @@ export class LA2AKernel {
     this.hpfLp = hpfLp
     this.shelfLp = shelfLp
     this.env = env
-    this.grFast = grFast
-    this.grSlow = grSlow
-    this.memory = memory
-    this.grDb = grFast + grSlow
+    this.gr = gr
+    this.relPhase = relPhase
+    this.grDb = gr
 
     /**
      * PRE-MAKEUP EXTREMA, tracked here rather than inside either per-channel
@@ -1337,8 +1403,8 @@ export class LA2AKernel {
      * LOOKAHEAD — the audio path is delayed here, and ONLY here.
      *
      * Everything above this line is the side-chain: the detector, the static
-     * curve, the T4 ballistics and the LDR memory have all just run on the
-     * UNDELAYED input, which is what makes the envelope identical at every
+     * curve and the T4 ballistics have all just run on the UNDELAYED
+     * input, which is what makes the envelope identical at every
      * lookahead depth. Everything below consumes audio, and takes the delayed
      * copy — the tracker's extrema, the oversampled gain cell, the tube stage
      * and the dry side of the wet/dry blend.
