@@ -841,9 +841,14 @@ const CELL_MOD_TAU_DB = 5.505
  *
  *   1. A bench capture of a real unit. The protocol is written and the tooling
  *      verified. Unblocks 2, 3, 4 and 6 at once.
- *   2. Transcribe the paper's H4 column. H4 is even, so it is this stage's too,
- *      and it pins the (drive, bias) pair outright — closing 1 with no new
- *      measurement, only a trip to the paper.
+ *   2. ⚠ THIS USED TO READ "transcribe the paper's H4 column", ON THE GROUNDS
+ *      THAT H4 IS EVEN AND WOULD PIN THE (drive, bias) PAIR. IT WOULD NOT: at
+ *      the paper's operating point the model puts H4 at -127 to -180 dBc, far
+ *      below anything reportable, and a louder input does not help because the
+ *      compressor absorbs it. See TUBE_BIAS for both measurements. The trip to
+ *      the paper would have bought nothing; the bench capture in 1 is the only
+ *      route, because the valves must be driven hard for the even series to
+ *      separate at all.
  *   3. Transcribe the per-unit, per-frequency H2. Turns one median into a
  *      spread and makes 3 and 10 testable.
  *
@@ -912,11 +917,18 @@ export const TUBE_DRIVE_LIN = 0.2388 // knee at +12.4 dBFS, i.e. 30.4 dB above N
 /**
  * ⚠ CHOSEN, NOT FITTED, AND INHERITED FROM A CONTROL THAT NO LONGER EXISTS.
  *
- * H2 for a biased tanh goes as drive^2 * tanh(bias) at the drives this stage
- * runs at, so the -63.80 dBc target above defines a CURVE in
- * (TUBE_DRIVE_LIN, TUBE_BIAS) rather than a point. One target, two constants:
- * the fit solves for the drive with this one held. Pairs that all land on the
- * target at the paper's operating point, measured:
+ * H2 for a biased tanh goes as drive * tanh(bias) at the drives this stage runs
+ * at, so the -63.80 dBc target above defines a CURVE in (TUBE_DRIVE_LIN,
+ * TUBE_BIAS) rather than a point. One target, two constants: the fit solves for
+ * the drive with this one held.
+ *
+ * ⚠ THE LAW IS drive * tanh(bias), NOT drive^2 * tanh(bias) AS THIS NOTE USED
+ * TO SAY, and the error mattered — see WHAT WOULD SETTLE IT below. Measured
+ * along the curve, `d * tanh(b)` is constant to three figures (1.455 / 1.453 /
+ * 1.453 / 1.452 / 1.453 / 1.451 e-2 at bias 0.02 / 0.04 / 0.06 / 0.10 / 0.20 /
+ * 0.40) where `d^2 * tanh(b)` varies 19-fold across the same points.
+ *
+ * Pairs that all land on the target at the paper's operating point, measured:
  *
  *     bias    drive      H3          H2 under +24 dB of makeup
  *     0.02    0.725      -69.2 dBc    -42.9 dBc
@@ -935,9 +947,29 @@ export const TUBE_DRIVE_LIN = 0.2388 // knee at +12.4 dBFS, i.e. 30.4 dB above N
  * of the fit landing inside the paper's other two columns with it held, which
  * is evidence that it is not badly wrong and is not a derivation.
  *
- * WHAT WOULD SETTLE IT: a second measured even-order quantity, H4 being the
- * obvious one — it is even, so it is the valves' too, and it would pin the pair
- * outright. The paper's H4 column is not transcribed in this repo.
+ * ⚠ WHAT WOULD SETTLE IT IS NOT H4, AND THIS NOTE SAID IT WAS. The reasoning
+ * was that H4 is even, so it belongs to the valves too, and a second even-order
+ * quantity would pin the pair outright. It discriminates in principle — across
+ * the bias range H4 spreads 53 dB — but it cannot be used, because at the level
+ * the shaper actually sees at the paper's operating point (about -24 dBFS, the
+ * input less 6 dB of reduction) the model puts H4 between -127 and -180 dBc.
+ * Nothing reports a fourth harmonic down there. A measured H4 would not select
+ * a bias; it would falsify the shaper.
+ *
+ * ⚠ AND NEITHER DOES A LOUDER INPUT, WHICH IS THE TRAP WORTH RECORDING. Fed
+ * straight into the shaper, H2 fans out with level exactly as wanted (0.9 dB of
+ * spread at +12 dB, 40.3 at +24). Through the whole kernel it does not:
+ * measured at plugin input -18 / -12 / -6 / 0 / +6 dBFS, the spread is
+ * 0.0 / 0.0 / 0.0 / 0.1 / 0.1 dB. THE COMPRESSOR ABSORBS THE LEVEL — gain
+ * reduction goes 6 -> 22 dB across that sweep, holding the shaper at a nearly
+ * constant operating point, which is what a leveller is FOR. Only gain that
+ * sits BEFORE the shaper moves it, i.e. the makeup, and at the +24 dB maximum
+ * the Gain knob allows that buys just 3.2 dB of spread.
+ *
+ * SO THE ROUTE IS THE BENCH CAPTURE, WHICH IS ALREADY ITEM 1 ON THE LEDGER'S
+ * LIST. The valves have to be driven hard for the even series to separate, and
+ * nothing in the paper's operating point does that. A trip to the paper for the
+ * H4 column would have bought nothing, which is why this is written down.
  */
 export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear range
 

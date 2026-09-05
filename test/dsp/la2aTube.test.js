@@ -295,3 +295,74 @@ test('nothing in the params reaches the curve', () => {
     }
   }
 })
+
+/**
+ * WHY THESE TWO EXIST. `TUBE_BIAS` is the one constant in this stage that was
+ * chosen rather than fitted, and the ledger above it carried a plan for
+ * settling it — transcribe the paper's H4 column, on the grounds that H4 is
+ * even so it belongs to the valves and would pin the (drive, bias) pair. That
+ * plan was wrong, and it was wrong because the note stated the wrong scaling
+ * law. These pin the corrected reasoning so it cannot quietly rot back.
+ */
+
+/** H2 of the shaper alone at a level, for a (drive, bias) pair. Analytic input,
+ *  so this is the shaper's own series with no cell and no oversampler. */
+function shaperH (dbfs, drive, bias, harm) {
+  const f = 1000, n = SR, amp = Math.pow(10, dbfs / 20) * Math.SQRT2
+  const t = Math.tanh(bias), norm = drive * (1 - t * t)
+  const y = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    const x = amp * Math.sin(2 * Math.PI * f * i / SR)
+    y[i] = (Math.tanh(drive * x + bias) - t) / norm
+  }
+  const cyc = SR / f, N = Math.floor(n / cyc) * cyc
+  const mag = h => {
+    let re = 0, im = 0
+    for (let i = 0; i < N; i++) {
+      const p = 2 * Math.PI * h * f * i / SR
+      re += y[i] * Math.cos(p); im += y[i] * Math.sin(p)
+    }
+    return 2 * Math.hypot(re, im) / N
+  }
+  return 20 * Math.log10(mag(harm) / mag(1))
+}
+
+test('H2 is set by drive x tanh(bias), not by drive squared', () => {
+  // ⚠ THE NOTE ON TUBE_BIAS SAID drive^2 * tanh(bias) FOR A LONG TIME. The
+  // difference is not cosmetic: it is why H4 was expected to help and does not.
+  // Pairs holding drive * tanh(bias) constant must give the same H2.
+  const k = 0.01453
+  const biases = [0.02, 0.06, 0.20, 0.40]
+  const h2 = biases.map(b => shaperH(-18, k / Math.tanh(b), b, 2))
+  for (const v of h2) {
+    assert.ok(Math.abs(v - h2[0]) < 0.2,
+      `constant drive*tanh(bias) should fix H2: ${h2.map(x => x.toFixed(2)).join(' / ')}`)
+  }
+  // And the discredited law must NOT hold — pairs holding drive^2*tanh(bias)
+  // constant should disagree badly, or this test proves nothing.
+  const k2 = 0.003521
+  const alt = biases.map(b => shaperH(-18, Math.sqrt(k2 / Math.tanh(b)), b, 2))
+  assert.ok(Math.max(...alt) - Math.min(...alt) > 6,
+    `drive^2*tanh(bias) should NOT fix H2, but spread only ${(Math.max(...alt) - Math.min(...alt)).toFixed(1)} dB`)
+})
+
+test('H4 cannot settle the bias, because the model puts it below measurability', () => {
+  // ⚠ THE FIRST VERSION OF THIS TEST ASSERTED THAT H4 CARRIES NO INFORMATION,
+  // AND THAT WAS WRONG — it came from a kernel measurement that returned a flat
+  // -106 dBc across the bias range, which is that measurement's NOISE FLOOR and
+  // not a property of the shaper. Analytically H4 spreads 53 dB across the same
+  // range, so it discriminates in principle.
+  //
+  // It still cannot settle TUBE_BIAS, for a better reason: at the level the
+  // shaper actually sees at the paper's operating point (about -24 dBFS, the
+  // input less 6 dB of reduction) the model predicts H4 between -127 and
+  // -180 dBc. Nothing reports a fourth harmonic there, so a measured H4 could
+  // not be matched by choosing a bias — it would falsify the shaper instead.
+  const k = 0.01453
+  const biases = [0.02, 0.06, 0.20, 0.40]
+  const h4 = biases.map(b => shaperH(-24, k / Math.tanh(b), b, 4))
+  assert.ok(Math.max(...h4) - Math.min(...h4) > 40,
+    `H4 does discriminate in principle: spread ${(Math.max(...h4) - Math.min(...h4)).toFixed(1)} dB`)
+  assert.ok(Math.max(...h4) < -120,
+    `but every pair puts H4 under -120 dBc; highest was ${Math.max(...h4).toFixed(1)}`)
+})
