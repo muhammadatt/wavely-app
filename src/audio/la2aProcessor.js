@@ -266,22 +266,58 @@ const SC_HPF_HZ = 80
  * inverted both the hardware and every reference plugin — the same number meant
  * opposite things in our panel and in anything we compared it against.
  *
- * MECHANISM: an ATTENUATOR of lows, not a booster of highs. On the hardware R37
- * is a trimmer in a passive network, and a passive network cannot boost:
- * "emphasis" is achieved by discarding low frequencies and letting the
- * side-chain amplifier make the level back up.
+ * MECHANISM: A BOOST OF HIGHS. It is called pre-emphasis and that is literally
+ * what it is. From the manufacturer's own description of the trimmer: "It
+ * controls sidechain pre-emphasis, providing up to 17dB of boost at 15kHz. It
+ * was intended to control high frequencies to prevent overmodulating radio
+ * transmitters with a hot signal. In other words, it makes the compressor more
+ * sensitive to high frequencies, similar to how a de-esser works."
  *
- * That was modelled backwards too, until it was measured against a plosive. As
- * a high SHELF BOOST from unity it left the lows at full level, so sweeping it
- * moved the gain reduction on a 120 Hz thump by 0.06 dB — and upward, because
- * the Peak Reduction knob drives a FIXED internal threshold, so adding
- * side-chain gain adds compression. Attenuating instead gives the control
- * authority over the thing it exists to reject.
+ * ⚠ THIS FILE ARGUED THE OPPOSITE FOR A LONG TIME, AND THE ARGUMENT WAS WRONG.
+ * It reasoned that R37 is a trimmer in a passive network, that a passive network
+ * cannot boost, and therefore that emphasis had to be achieved by discarding
+ * lows and letting the side-chain amplifier make the level back up. Plausible,
+ * self-consistent, and contradicted by both of the things that can settle it:
  *
- * Neither the 1 kHz corner nor the 10 dB depth is measured against hardware.
+ *   1. The manufacturer says boost, in dB, at a stated frequency.
+ *   2. MEASURED on Analog Obsession's LALA, whose HF control the vendor
+ *      documents as "an enhanced version of the original unit's R37". Sweeping
+ *      it 0 -> -10 dB leaves the 100 Hz probe's gain reduction UNMOVED
+ *      (1.53 -> 1.58 dB) while 3 kHz rises 4.03 -> 9.05. A control that cut lows
+ *      would have to pull the 100 Hz row down; ours does exactly that
+ *      (11.58 -> 5.18 at r37 100 -> 0). ⚠ And LALA was not merely out of range
+ *      there: removing 10 dB of low-end drive would push 1.53 dB of reduction to
+ *      essentially zero, so the low path is untouched, not saturated.
+ *
+ * ⚠ THE OLD PLOSIVE MEASUREMENT WAS REAL AND IS NOT EVIDENCE FOR THE OLD MODEL.
+ * A high shelf from unity does leave a 120 Hz thump at full level, so sweeping
+ * the control barely moves the reduction on it — but that is the CORRECT
+ * behaviour for pre-emphasis, not a bug. The knob makes the cell chase presence;
+ * it was never a plosive filter, and reading it as one is what inverted this.
+ *
+ * THE CONSTANTS ARE FITTED TO BOTH AUTHORITIES AT ONCE: LALA's measured boost
+ * (1.34 / 4.84 / 10.04 dB at 400 / 1000 / 3000 Hz, implied from its sweep) and
+ * the manufacturer's 17 dB at 15 kHz. Realised 0.96 / 4.01 / 10.87 / 16.84,
+ * rms 0.62 dB.
+ *
+ * ⚠ THEY ARE FITTED TO THE DISCRETE FILTER, NOT TO AN ANALOG IDEALISATION, and
+ * that is why SC_EMPH_MAX_DB reads 21 dB for a 17 dB shelf. The corner sits at
+ * 27 % of Nyquist, where `1 - exp(-2*pi*f/SR)` no longer puts the one-pole where
+ * the continuous formula says: fitting the analog curve first and trusting the
+ * mapping gave a shelf that measured 13.68 dB at 15 kHz against the 17.05 it was
+ * supposed to have, and was short at every probe. The response of the shipped
+ * structure is exact and cheap to evaluate —
+ *     H = g + (1-g) * a / (1 - (1-a) e^-jw)
+ * — so it is fitted directly. ⚠ These constants are therefore SAMPLE-RATE
+ * DEPENDENT in a way the old ones were not; at a rate far from 44.1 kHz the
+ * realised curve will drift from the fit.
+ *
+ * ⚠ PROVISIONAL ON DEPTH. The LALA sweep sits at 1.5-9 dB of reduction, so its
+ * 400 Hz point is close to the knee and the implied boost there is the softest
+ * number in the fit. A deeper capture (LALA at knob 90) is the check.
  */
-const SC_SHELF_HZ = 1000
-const SC_SHELF_MAX_DB = 10
+const SC_EMPH_HZ = 5975
+const SC_EMPH_MAX_DB = 21.0
 /**
  * Rectifier smoothing. The T4 model supplies the real ballistics; this is only
  * meant to take the edge off the rectified waveform.
@@ -1021,7 +1057,7 @@ export class LA2AKernel {
     this.relPhaseCoef = 1 - Math.exp(-1 / (sampleRate * REL_PHASE_S))
     this.detCoef = 1 - Math.exp(-1 / (sampleRate * DETECTOR_S))
     this.hpfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_HPF_HZ / sampleRate)
-    this.shelfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_SHELF_HZ / sampleRate)
+    this.shelfLpCoef = 1 - Math.exp(-2 * Math.PI * SC_EMPH_HZ / sampleRate)
     // DC blocker pole — the asymmetric shaper shifts the operating point.
     // See DC_BLOCK_HZ for what is and is not measured about the corner.
     this.dcR = 1 - 2 * Math.PI * DC_BLOCK_HZ / sampleRate
@@ -1219,12 +1255,14 @@ export class LA2AKernel {
     // knob 0 and +38 dB at knob 100.
     const knob = clamp(p.peakReduction, 0, 100) / 100
     this.scDriveDb = scDriveDbFor(p.peakReduction)
-    // Gain applied to the side-chain's sub-1 kHz content: 1 at r37 100 (fully
-    // clockwise, flat, factory), down to -10 dB at r37 0 (fully counter-
-    // clockwise). Above the corner the side-chain stays at unity, so this only
-    // ever removes drive — see SC_SHELF_MAX_DB.
+    // Gain applied to the side-chain's content above SC_EMPH_HZ: 1 at r37 100
+    // (fully clockwise, flat, factory), rising to +17.7 dB at r37 0 (fully
+    // counter-clockwise, realising ~17 dB at 15 kHz). Below the corner the
+    // side-chain stays at unity, so
+    // this only ever ADDS drive, and adding drive into a fixed threshold adds
+    // compression — which is what "more sensitive to highs" means.
     const r37 = Number.isFinite(p.r37) ? clamp(p.r37, 0, 100) : LA2A_KERNEL_DEFAULTS.r37
-    this.shelfLowGain = Math.pow(10, (-SC_SHELF_MAX_DB * (1 - r37 / 100)) / 20)
+    this.shelfHighGain = Math.pow(10, (SC_EMPH_MAX_DB * (1 - r37 / 100)) / 20)
     this.makeupLin = Math.exp((Number.isFinite(p.gainDb) ? p.gainDb : 0) * LN10_OVER_20)
 
     // Tube stage. Drive can go sub-unity (slope is normalized back to 1
@@ -1334,7 +1372,12 @@ export class LA2AKernel {
       // skipping it would leave the one-pole holding stale state for the knob
       // to jump off when it next moves.
       shelfLp += (hp - shelfLp) * this.shelfLpCoef
-      const sc = (hp - shelfLp) + this.shelfLowGain * shelfLp
+      // Split at the corner and BOOST the high half. A one-pole split summed
+      // this way is exactly a first-order shelf: |H|^2 = (1 + g^2 x)/(1 + x)
+      // with x = (f/SC_EMPH_HZ)^2, which is the curve the constants were fitted
+      // against. At r37 100 the gain is 1 and the two halves sum back to `hp`,
+      // so the flat position is an algebraic identity rather than a near-miss.
+      const sc = shelfLp + this.shelfHighGain * (hp - shelfLp)
 
       // Rectify + light smoothing
       const rect = sc < 0 ? -sc : sc

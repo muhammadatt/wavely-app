@@ -53,6 +53,23 @@ const LN10_OVER_20 = Math.LN10 / 20
  * is clockwise and flat. `mode: 'compress'` because this is levelling, not
  * limiting. `mix: 1` because the parallel blend is ours, not the compressor's.
  *
+ * ⚠ THIS PLUGIN GOT MARKEDLY MORE COMPRESSED WHEN R37's MECHANISM WAS CORRECTED,
+ * AND THE SETTING WAS DELIBERATELY LEFT ALONE. R37 used to be modelled as an
+ * attenuator of lows; it is pre-emphasis, a BOOST of highs (see SC_EMPH_HZ for
+ * the manufacturer's figure and the measurement that settled it). At `r37: 0`
+ * that is ~17 dB of extra side-chain drive at the top, into a fixed threshold —
+ * so on real narration at Squash's default the peak reduction went 13.02 ->
+ * 20.33 dB and the delivered depth 7.05 -> 9.87.
+ *
+ * ⚠ THE TRICK ITSELF IS UNCHANGED AND ARGUABLY BETTER SERVED: "the cell rides
+ * the presence band" is exactly what pre-emphasis does, where the old model
+ * reached it by a mechanism the hardware does not have. What moved is HOW HARD,
+ * not what. Restoring the previous drive is a one-line change — Squash's Peak
+ * Reduction would go 78 -> 56.1 — but that is a character decision about a
+ * shipping plugin, not a bug fix, so it is left to be made deliberately rather
+ * than folded into the correction. Backing the trimmer off instead does not
+ * work: it takes r37 all the way to 100, which is the trick switched off.
+ *
  * `gainDb` is NOT here: the wet path's makeup is handed to the compressor as
  * its own Gain, in `setParams` below. It used to be pinned to zero with the
  * makeup applied after the post EQ instead, which was the wrong stage. On the

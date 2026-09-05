@@ -65,39 +65,46 @@ test('R37 at 100 is the factory position: exactly flat', () => {
   }
 })
 
-test('winding R37 counter-clockwise makes the cell ignore low frequencies', () => {
-  // The headline claim, and the one the old model failed. Note the direction:
-  // the sweep runs from 100 (clockwise, flat) DOWN to 0 (counter-clockwise),
-  // which is the way the hardware trimmer is described. Monotonic, and by a
-  // wide margin — not a rounding difference.
-  const thump = burst(120)
-  const sweep = [100, 75, 50, 25, 0].map(v => grFor(thump, v))
+test('winding R37 counter-clockwise makes the cell chase highs', () => {
+  // The headline claim. Note the direction: the sweep runs from 100 (clockwise,
+  // flat) DOWN to 0 (counter-clockwise), which is the way the hardware trimmer
+  // is described. Monotonic, and by a wide margin.
+  //
+  // ⚠ THIS TEST ONCE ASSERTED THE OPPOSITE — that a 120 Hz thump loses reduction
+  // as R37 winds down — and it passed for as long as the model was wrong. R37 is
+  // PRE-EMPHASIS: the manufacturer describes "up to 17dB of boost at 15kHz",
+  // making the compressor "more sensitive to high frequencies, similar to how a
+  // de-esser works". It adds highs; it does not remove lows. See SC_EMPH_HZ.
+  const sibilant = burst(8000)
+  const sweep = [100, 75, 50, 25, 0].map(v => grFor(sibilant, v))
   for (let i = 1; i < sweep.length; i++) {
     assert.ok(
-      sweep[i] < sweep[i - 1] - 0.5,
-      `gain reduction should fall as R37 winds down: ${sweep.map(v => v.toFixed(2)).join(' → ')}`,
+      sweep[i] > sweep[i - 1] + 0.5,
+      `gain reduction should RISE as R37 winds down: ${sweep.map(v => v.toFixed(2)).join(' → ')}`,
     )
   }
   assert.ok(
-    sweep[0] - sweep[sweep.length - 1] > 5,
-    `expected several dB of low-frequency rejection, got ${(sweep[0] - sweep[sweep.length - 1]).toFixed(2)} dB`,
+    sweep[sweep.length - 1] - sweep[0] > 5,
+    `expected several dB of added HF sensitivity, got ${(sweep[sweep.length - 1] - sweep[0]).toFixed(2)} dB`,
   )
 })
 
-test('R37 leaves high frequencies driving the cell as before', () => {
-  // The other half: it must reject the lows WITHOUT backing off the sibilance
-  // it is supposed to make the unit more sensitive to. A pure level trim on the
-  // side-chain would fail this.
-  const sibilant = burst(8000)
-  const delta = grFor(sibilant, 100) - grFor(sibilant, 0)
-  assert.ok(Math.abs(delta) < 1, `HF gain reduction moved ${delta.toFixed(2)} dB`)
+test('R37 leaves low frequencies driving the cell as before', () => {
+  // The other half, and the measurement that settled the mechanism. On LALA —
+  // whose HF control its vendor documents as "an enhanced version of the
+  // original unit's R37" — sweeping it fully leaves the 100 Hz probe's gain
+  // reduction at 1.53 -> 1.58 dB while 3 kHz rises 4.03 -> 9.05. A control that
+  // cut lows would have to pull the low row down. Ours must not.
+  const thump = burst(120)
+  const delta = grFor(thump, 0) - grFor(thump, 100)
+  assert.ok(Math.abs(delta) < 1, `LF gain reduction moved ${delta.toFixed(2)} dB`)
 })
 
-test('R37 attenuates the side-chain rather than boosting it', () => {
+test('R37 boosts the side-chain rather than attenuating it', () => {
   // Direction matters because there is no threshold control: Peak Reduction is
-  // side-chain gain into a FIXED threshold, so a model that boosts the top
-  // increases compression where the hardware decreases it. Broadband material
-  // must therefore see less reduction, never more.
+  // side-chain gain into a FIXED threshold, so adding drive adds compression.
+  // That is what "more sensitive to high frequencies" has to mean here, and
+  // broadband material must therefore see MORE reduction, never less.
   const n = SR
   const broadband = new Float32Array(n)
   let seed = 7
@@ -106,8 +113,8 @@ test('R37 attenuates the side-chain rather than boosting it', () => {
     broadband[i] = ((seed / 0x7fffffff) - 0.5) * 0.8
   }
   assert.ok(
-    grFor(broadband, 0) < grFor(broadband, 100),
-    'winding R37 down must remove side-chain drive, not add it',
+    grFor(broadband, 0) > grFor(broadband, 100),
+    'winding R37 down must add side-chain drive, not remove it',
   )
 })
 
