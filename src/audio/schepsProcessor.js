@@ -64,11 +64,9 @@ const LN10_OVER_20 = Math.LN10 / 20
  * ⚠ THE TRICK ITSELF IS UNCHANGED AND ARGUABLY BETTER SERVED: "the cell rides
  * the presence band" is exactly what pre-emphasis does, where the old model
  * reached it by a mechanism the hardware does not have. What moved is HOW HARD,
- * not what. Restoring the previous drive is a one-line change — Squash's Peak
- * Reduction would go 78 -> 56.1 — but that is a character decision about a
- * shipping plugin, not a bug fix, so it is left to be made deliberately rather
- * than folded into the correction. Backing the trimmer off instead does not
- * work: it takes r37 all the way to 100, which is the trick switched off.
+ * not what — and the drive is put back by the `squash` default, below. Backing
+ * the trimmer off instead does not work: it takes r37 to 100, which is the
+ * trick switched off.
  *
  * `gainDb` is NOT here: the wet path's makeup is handed to the compressor as
  * its own Gain, in `setParams` below. It used to be pinned to zero with the
@@ -107,21 +105,45 @@ export const SCHEPS_KERNEL_DEFAULTS = {
    * more of this than a series insert would — the squashed copy is a layer, not
    * the signal.
    *
-   * Set high because the side-chain arrives twice-filtered: the pre EQ takes
-   * ~4.7 dB out of the lows and R37 fully counter-clockwise takes 10 dB more
-   * below 1 kHz, so the cell is looking at far less than the raw signal. On
-   * speech at nominal level this lands around 7 dB of gain reduction on the wet
-   * path; the same number on the Opto Comp panel, with a flat side-chain, gives
-   * 11.6.
+   * ⚠ SET LOW BECAUSE THE SIDE-CHAIN ARRIVES PRE-EMPHASISED, WHICH IS THE
+   * OPPOSITE OF WHY IT USED TO BE SET HIGH. The pre EQ takes ~4.7 dB out of the
+   * lows, and R37 fully counter-clockwise ADDS up to 17 dB above the emphasis
+   * corner, so the cell sees far more presence than the raw signal carries and
+   * needs much less knob to reach the same reduction. On speech at nominal
+   * level this lands around 7.6 dB of gain reduction on the wet path; the same
+   * number on the Opto Comp panel, with a flat side-chain, gives 3.7.
    *
-   * WAS 80, AND THE OPERATING POINT IS WHAT IS PRESERVED HERE, NOT THE NUMBER.
+   * WAS 80, THEN 62, AND THE OPERATING POINT IS WHAT IS PRESERVED HERE, NOT THE
+   * NUMBER — TWICE NOW.
+   *
    * 80 delivered that ~7 dB under the old Peak Reduction taper, which topped out
    * at 13 dB of reduction across its whole travel; the taper is now fitted to a
    * reference LA-2A and reaches 27, so 80 on the same clip became 14.2 dB —
-   * double the compression on the default patch, silently. 62 restores 7.25 dB.
-   * Every Squash figure recorded before the taper fit refers to the old law.
+   * double the compression on the default patch, silently. 62 restored it.
+   *
+   * ⚠ 62 -> 40 BECAUSE R37's MECHANISM WAS CORRECTED. It is pre-emphasis, a
+   * BOOST of highs, where it used to be modelled as an attenuator of lows (see
+   * SC_EMPH_HZ). This plugin pins `r37: 0`, so it went from having ~10 dB of
+   * drive REMOVED to having ~11 dB ADDED — peak reduction on the reference clip
+   * 7.62 -> 20.33 dB at the same knob. 40 puts it back to 7.64.
+   *
+   * ⚠ THE OFFSET IS CONSTANT ACROSS THE KNOB, WHICH IS WHY A NEW DEFAULT IS
+   * ENOUGH AND NO REMAPPING IS NEEDED. Matching the old reduction at squash
+   * 45 / 62 / 80 / 95 needs -21.9 / -22.0 / -21.9 / -21.9 knob units — the
+   * taper is linear, so a fixed drive boost is a fixed knob shift. An offset
+   * inside the mapping was rejected for costing the top of the travel: it would
+   * cap Peak Reduction at 78 and make the knob's last fifth unreachable.
+   *
+   * ⚠ AND PEAK IS WHAT 40 PRESERVES, NOT AVERAGE — no single number restores
+   * both, because pre-emphasis REDISTRIBUTES the reduction rather than scaling
+   * it. On the reference clip: old 62 gave peak 7.62 / average 2.00 dB; new 40
+   * gives 7.64 / 1.23; new 45.6 would give 9.52 / 2.01. Peak is the figure this
+   * note has always quoted, and the layer is deliberately a bit less dense than
+   * before because the cell now spends its reduction on sibilance instead of
+   * spreading it. ⚠ MEASURED ON ONE NARRATION CLIP, so the exact number is
+   * material-dependent; the mechanism is not.
    */
-  squash: 62,
+  squash: 40,
   mix: 0.35, // 0–1 wet
   /**
    * The wet path's makeup, handed to the compressor as its own Gain — so it
