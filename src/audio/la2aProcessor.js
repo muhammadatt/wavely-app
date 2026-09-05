@@ -282,7 +282,43 @@ const SC_HPF_HZ = 80
  */
 const SC_SHELF_HZ = 1000
 const SC_SHELF_MAX_DB = 10
-const DETECTOR_S = 0.0005 // light rectifier smoothing; the T4 model supplies the real ballistics
+/**
+ * Rectifier smoothing. The T4 model supplies the real ballistics; this is only
+ * meant to take the edge off the rectified waveform.
+ *
+ * ⚠ IT IS ALSO THE WHOLE OF OUR SIDE-CHAIN'S FREQUENCY RESPONSE, WHICH IS NOT
+ * WHAT IT LOOKS LIKE, and `npm run la2a:ballistics -- --detector` prints the
+ * evidence. The detector's MEAN output tracks SC_HPF_HZ exactly — to a
+ * hundredth of a dB at every probe, so the filter does what it says. But the
+ * ballistics do not read the mean, they ride the RIPPLE, and ripple collapses
+ * as the probe rises past this corner: 13.5 dB at 100 Hz, 1.8 at 1 kHz, 0.4 at
+ * 8 kHz. So the level the cell acts on FALLS with frequency (peak envelope
+ * +0.78 / +0.27 / -0.56 / -1.07 dB at 200 / 400 / 1000 / 3000 against 100 Hz)
+ * where the mean rises. Both reference units rise.
+ *
+ * ⚠ AND LENGTHENING IT TO FIX THAT WOULD BREAK THE DISTORTION MODEL, which is
+ * why it has not been touched. `cellMod` is driven by `rect / env - 1` — the
+ * same ripple — so a smoother envelope deepens the cell modulation that
+ * CELL_MOD_MAX was fitted to hardware with. Measured at 6 dB of reduction on a
+ * 220 Hz probe, 0.5 -> 5 ms:
+ *
+ *     side-chain tilt, 100-1000 Hz   +0.60 -> +1.37 dB   (references +1.50, +1.56)
+ *     THD                             1.25 ->  2.28 %
+ *     H3 - H2                        +22.9 -> +28.6 dB   (six hardware units: +25.7)
+ *
+ * It buys the tilt and pays with the one distortion relationship that ever
+ * corroborated against hardware, and it was corroboration nobody aimed at.
+ *
+ * ⚠ SO THE QUESTION IS OPEN, AND IT IS ONE CAPTURE FROM BEING SETTLED. Either
+ * this detector is about right and the references carry a real HF emphasis we
+ * do not model — which belongs in the side-chain FILTER, where it is
+ * independent of `cellMod` — or the detector is wrong and CELL_MOD_MAX absorbed
+ * the error. ⚠ NOTE WE ALREADY MATCH BOTH REFERENCES BELOW 400 Hz, where
+ * narration lives, and that the large divergence (LALA's +3.44 dB from 1 to
+ * 3 kHz) rests on ONE reference: the CLA-2A frequency capture loses both its
+ * 400 Hz and 3 kHz events to demo mutes. A clean one decides it.
+ */
+const DETECTOR_S = 0.0005
 
 // Nominal operating level. The hardware's T4 threshold sits at line level
 // (0 VU = +4 dBu), so Peak Reduction is referenced to that, not to digital

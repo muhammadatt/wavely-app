@@ -3,6 +3,8 @@
  *
  *   npm run la2a:ballistics -- --stimulus   write the test signals
  *   npm run la2a:ballistics -- --selftest   prove the fitter on our own kernel
+ *   npm run la2a:ballistics -- --detector   where the side-chain's frequency
+ *                                           response comes from (needs no capture)
  *   npm run la2a:ballistics                 fit whatever captures are present
  *
  * WHY A STEP TEST AND NOT MORE SPEECH. Every ballistic constant in
@@ -808,7 +810,94 @@ function reportTaper(points, label) {
   }
 }
 
+
+/**
+ * WHERE THE SIDE-CHAIN'S FREQUENCY RESPONSE ACTUALLY COMES FROM.
+ *
+ * The reference units take MORE gain reduction as the probe rises; ours peaks
+ * at 200 Hz and falls. This measures why, and the answer is not the filter.
+ *
+ * Our detector is a full-wave rectifier into a one-pole smoother. Its MEAN
+ * output tracks the 80 Hz high-pass exactly — to a hundredth of a dB, so the
+ * filter is doing what it says. But the ballistics do not read the mean, they
+ * ride the RIPPLE, and the ripple shrinks as the probe rises above the
+ * smoother's corner: 13.5 dB of it at 100 Hz, essentially none at 3 kHz. That
+ * is the whole tilt, and it is an artefact of the detector rather than a
+ * modelled behaviour.
+ *
+ * ⚠ AND IT CANNOT BE FIXED HERE WITHOUT BREAKING THE DISTORTION MODEL, which
+ * is why nothing was changed. `cellMod` is driven by `rect / env - 1` — the
+ * same ripple — so lengthening the smoother deepens the cell modulation that
+ * CELL_MOD_MAX was fitted to hardware with. Measured at 6 dB of reduction on a
+ * 220 Hz probe, DETECTOR_S 0.5 -> 5 ms fixes the tilt (+0.60 -> +1.37 dB over
+ * 100-1000 Hz, against the references' +1.50 and +1.56) and costs THD
+ * 1.25 -> 2.28 % with H3-H2 going +22.9 -> +28.6 dB, away from the six-unit
+ * hardware median of +25.7 that the current value corroborates.
+ *
+ * So one of two things is true and this cannot tell which: either the detector
+ * is about right and the references carry a real HF emphasis we do not model,
+ * or the detector is wrong and CELL_MOD_MAX absorbed the error. See the report
+ * this prints for the capture that would decide it.
+ */
+function reportDetector() {
+  const dbv = v => 20 * Math.log10(Math.max(v, 1e-30))
+  console.log('\n  ── SIDE-CHAIN FREQUENCY RESPONSE, measured at the detector ──\n')
+  console.log('  A 0 dBFS sine at each probe, r37 100 (flat), no compression.')
+  console.log('  "mean" is what the smoother settles to; "peak" is what the')
+  console.log('  ballistics actually see, because they ride the ripple.\n')
+  console.log('    Hz        mean     peak    ripple |  80 Hz HPF alone')
+  let base = null
+  for (const f of [100, 200, 400, 1000, 3000, 8000]) {
+    const n = SR * 2
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) x[i] = Math.sin(2 * Math.PI * f * i / SR)
+    const k = new LA2AKernel(SR)
+    k.setParams({ mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1 })
+    const o = new Float32Array(n)
+    // ⚠ ONE SAMPLE PER CALL, AND DELIBERATELY — the kernel writes its detector
+    // state back to `this.env` at the end of every block, so a block of one
+    // makes the whole envelope readable without a debug hook in the audio path.
+    // Ripple is the thing being measured here and a 128-sample block would
+    // alias it away at the top probes. Slow, and this is a diagnostic.
+    const e = []
+    const start = Math.round(SR * 0.5)
+    for (let i = 0; i < n; i++) {
+      k.process([x.subarray(i, i + 1)], [o.subarray(i, i + 1)], 1)
+      if (i >= start) e.push(k.env)
+    }
+    let mx = 0, mn = Infinity, sum = 0
+    for (const v of e) { if (v > mx) mx = v; if (v < mn) mn = v; sum += v }
+    const mean = sum / e.length
+    const hpf = f / Math.hypot(f, 80)
+    if (!base) base = { mean, mx, hpf }
+    const rel = v => ((v >= 0 ? '+' : '') + v.toFixed(2)).padStart(8)
+    console.log('  %s %s %s %s dB | %s',
+      String(f).padStart(5), rel(dbv(mean) - dbv(base.mean)), rel(dbv(mx) - dbv(base.mx)),
+      (dbv(mx) - dbv(mn)).toFixed(1).padStart(6), rel(dbv(hpf) - dbv(base.hpf)))
+  }
+  console.log('\n  REFERENCE TILT, converted to detector level (GR tilt / that unit\'s')
+  console.log('  own static slope, so units at different depths compare):')
+  console.log('              100     200     400    1000    3000')
+  console.log('    ours    +0.00   +1.15   +1.11   +0.60   +0.20')
+  console.log('    LALA    +0.00   +0.90   +1.04   +1.56   +5.00')
+  console.log('    CLA-2A  +0.00   +1.94       -   +1.50       -   (400/3000 muted)')
+  console.log('\n  ⚠ WE ALREADY MATCH BOTH REFERENCES BELOW 400 Hz, which is where')
+  console.log('    narration lives. The divergence is above it, and the large part of')
+  console.log('    it — LALA\'s +3.44 dB from 1 to 3 kHz — rests on ONE reference: the')
+  console.log('    CLA-2A capture\'s 400 Hz and 3 kHz events are both lost to demo mutes.')
+  console.log('\n  WHAT WOULD SETTLE IT: one clean CLA-2A frequency capture. If it also')
+  console.log('    jumps at 3 kHz the emphasis is real and belongs in the side-chain')
+  console.log('    filter, where it is independent of the distortion model. If it does')
+  console.log('    not, the 3 kHz rise is a LALA quirk and only the ~0.9 dB over')
+  console.log('    400-1000 Hz is in question.')
+}
+
 const args = process.argv.slice(2)
+
+if (args.includes('--detector')) {
+  reportDetector()
+  process.exit(0)
+}
 
 if (args.includes('--stimulus')) {
   mkdirSync(STIM_DIR, { recursive: true })
