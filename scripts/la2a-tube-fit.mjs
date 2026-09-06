@@ -412,10 +412,18 @@ function main() {
   // just an x-axis tag, and the report says so.
   console.log(`\n=== GAIN SWEEP (${GAIN_SWEEP_FREQ_HZ} Hz @ ${GAIN_SWEEP_DBFS} dBFS tone, knob label from filename, qualitative) ===`)
   const gainBase = toneFilename('gain', GAIN_SWEEP_FREQ_HZ, GAIN_SWEEP_DBFS).replace(/\.wav$/, '')
-  const gainFilePattern = new RegExp(`^${gainBase}_g(.+)\\.wav$`)
+  // Accept the level's minus sign as optional, for the same reason `captureFor`
+  // does: a DAW round trip drops it, and this matcher is the one place that was
+  // not sharing that tolerance — so a correctly bounced gain sweep read as "no
+  // captures found" and the operator renamed files by hand instead.
+  const gainFilePattern = new RegExp(`^${gainBase.replace(/_-(\d{3})dbfs/, '_-?$1dbfs')}_g(.+)\\.wav$`)
   const gainFiles = existsSync(CAPTURES_DIR)
     ? readdirSync(CAPTURES_DIR).filter(f => gainFilePattern.test(f)).sort()
     : []
+  const unsignedGain = gainFiles.filter(f => !f.startsWith(gainBase))
+  if (unsignedGain.length > 0) {
+    console.log(`  ⚠ ${unsignedGain.length} gain capture(s) matched without the level's minus sign: ${unsignedGain.join(', ')}`)
+  }
   if (gainFiles.length === 0) {
     console.log(`  -- no gain-sweep captures found (expected ${gainBase}_g<label>.wav) --`)
   } else {
