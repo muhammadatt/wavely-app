@@ -27,6 +27,7 @@
     "la2a:cellmod": "node scripts/la2a-cellmod-fit.mjs",
     "la2a:cellmod:fit": "node scripts/la2a-cellmod-fit.mjs --fit",
     "la2a:cellmod:selftest": "node scripts/la2a-cellmod-fit.mjs --selftest",
+    "la2a:makeup": "node scripts/la2a-makeup-ab.mjs",
     "la2a:ballistics": "node scripts/la2a-ballistics.mjs",
     "la2a:stimulus": "node scripts/la2a-ballistics.mjs --stimulus",
     "la2a:selftest": "node scripts/la2a-ballistics.mjs --selftest",
