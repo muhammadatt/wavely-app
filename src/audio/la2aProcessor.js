@@ -1200,6 +1200,61 @@ export const LA2A_KERNEL_DEFAULTS = {
  */
 export const LOOKAHEAD_MAX_MS = 20
 
+/**
+ * The percentile the makeup solve references when it is NOT referencing the
+ * true peak. 0.001 = the 99.9th percentile of sample magnitudes.
+ *
+ * ⚠ THIS IS HALF A MECHANISM AND IS UNSAFE ALONE — see `peakOfChannels`, which
+ * measured the failure and rejected the percentile on its own. It is viable
+ * only paired with `ceilingDb`, which is why `computeAutoMakeupPlan` returns
+ * both and why nothing in this file lets you have one without the other.
+ *
+ * 99.9 rather than 99: at 99 the reference starts to include real programme
+ * peaks, so the solve reads the material rather than the outlier and gives
+ * some of the correction back. Measured on narration at Peak Reduction 50,
+ * delivered rms peak-normalised to -1 dBFS: 99.99th -16.80, 99.9th -16.81,
+ * 99.7th -16.95, against -17.39 peak-referenced. Flat between 99.9 and 99.99,
+ * which is the sign of a reference sitting clear of the programme on one side
+ * and clear of the lone transient on the other.
+ */
+export const MAKEUP_PERCENTILE = 0.001
+
+/**
+ * How far below the ceiling the soft knee starts, dB.
+ *
+ * The knee is C1 at its start — the curve leaves the unity line with unity
+ * slope — so nothing below `ceiling - CEILING_KNEE_DB` is touched at all and
+ * the transition into the ceiling has no corner. 3 dB is wide enough that the
+ * bend is inaudible on the handful of samples that reach it and narrow enough
+ * that it never reaches the programme: measured on narration, the ceiling
+ * attenuates the loudest 0.1 % of samples by 0.00 / 0.07 / 0.19 / 0.24 dB at
+ * Peak Reduction 50 / 60 / 70 / 80, and the 1-10 % band by 0.00 dB at every
+ * one of them.
+ */
+export const CEILING_KNEE_DB = 3
+
+/**
+ * Memoryless soft ceiling. Asymptotic, so |output| < `ceiling` STRICTLY, for
+ * any input, with no lookahead and therefore no latency.
+ *
+ * ⚠ MEMORYLESS AND NOT A LOOKAHEAD LIMITER, WHICH IS A DELIBERATE TRADE. A
+ * lookahead limiter would hold the peak down more transparently, and it would
+ * add latency to a kernel whose preview/apply equivalence and dry-path
+ * alignment are all built on a fixed, known delay — `la2aLatencySamples` feeds
+ * the region sizing, the makeup solve's own padding and the effect chain's
+ * compensation. The measured workload does not justify paying that: the samples
+ * this has to catch are a ten-thousandth of the file and it takes tenths of a
+ * dB off them. A stage that engages this rarely does not need ballistics; it
+ * needs to be exact and free.
+ */
+function softCeiling(x, ceiling, kneeStart) {
+  const a = x < 0 ? -x : x
+  if (a <= kneeStart) return x
+  const span = ceiling - kneeStart
+  const y = kneeStart + span * Math.tanh((a - kneeStart) / span)
+  return x < 0 ? -y : y
+}
+
 // Gain-knob smoothing time — the same 8 ms the soft clipper and FET Punch use.
 const MAKEUP_SMOOTH_MS = 8
 
@@ -1469,6 +1524,23 @@ export class LA2AKernel {
       ? p.cellModTauDb : CELL_MOD_TAU_DB
     this.cellModShape = Number.isFinite(p.cellModShape) && p.cellModShape > 0
       ? p.cellModShape : CELL_MOD_SHAPE
+
+    /**
+     * OUTPUT CEILING, dBFS. Null/absent is OFF and is the shipping path — the
+     * ceiling branch is skipped entirely, so a kernel that never sets this is
+     * sample-identical to one built before it existed.
+     *
+     * ⚠ IT IS WHAT MAKES PERCENTILE-REFERENCED MAKEUP LEGITIMATE. Peak-
+     * referenced makeup guarantees "never louder than the source" by
+     * construction; a percentile reference gives that up, and measured, it
+     * gives it up badly — see `peakOfChannels`. This restores the same
+     * guarantee by enforcement instead of by arithmetic, which is the entire
+     * argument for revisiting a decision that was already settled once.
+     */
+    this.ceilingLin = Number.isFinite(p.ceilingDb)
+      ? Math.exp(p.ceilingDb * LN10_OVER_20) : 0
+    this.ceilingKneeLin = this.ceilingLin > 0
+      ? this.ceilingLin * Math.exp(-CEILING_KNEE_DB * LN10_OVER_20) : 0
     this.tubeDriveLin = Number.isFinite(p.tubeDriveLin) && p.tubeDriveLin > 0
       ? p.tubeDriveLin : TUBE_DRIVE_LIN
     this.tubeBias = Number.isFinite(p.tubeBias) ? p.tubeBias : TUBE_BIAS
@@ -1853,7 +1925,10 @@ export class LA2AKernel {
           w = dcY
         }
         const dry = dryLine.push(input[i])
-        out[i] = dry * this.dryMix + w * this.wetMix
+        const mixed = dry * this.dryMix + w * this.wetMix
+        out[i] = this.ceilingLin > 0
+          ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+          : mixed
       }
       this.dcX[ch] = dcX
       this.dcY[ch] = dcY
@@ -1879,7 +1954,10 @@ export class LA2AKernel {
         dcX = shaped
         w = dcY
       }
-      out[i] = dry * this.dryMix + w * this.wetMix
+      const mixed = dry * this.dryMix + w * this.wetMix
+      out[i] = this.ceilingLin > 0
+        ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+        : mixed
     }
     this.dcX[ch] = dcX
     this.dcY[ch] = dcY
@@ -1963,12 +2041,12 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
 /**
  * Peak magnitude across every sample of every channel, in dB.
  *
- * The makeup reference. Peak rather than RMS, and the distinction is the whole
- * point of makeup gain: the compressor pulls the loud moments down, makeup
- * hands back what it took, the peaks land where they started and everything
- * underneath rises with them. That is a compressor made louder without being
- * merely turned up — which is the comparison a listener is actually running
- * when they A/B it.
+ * The default makeup reference. Peak rather than RMS, and the distinction is
+ * the whole point of makeup gain: the compressor pulls the loud moments down,
+ * makeup hands back what it took, the peaks land where they started and
+ * everything underneath rises with them. That is a compressor made louder
+ * without being merely turned up — which is the comparison a listener is
+ * actually running when they A/B it.
  *
  * Matching RMS instead, as this did, returns only the average loss and
  * therefore leaves the output exactly as loud as the input: a compressor that
@@ -1984,6 +2062,38 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
  * The cost is the opposite failure: a single uncompressed click sets the
  * reference and the makeup comes out small. That is the safe direction — never
  * louder than the source — and the manual trim is there for it.
+ *
+ * ── THE PERCENTILE IS BACK, AND ONLY BECAUSE THE MISSING HALF ARRIVED ───────
+ *
+ * ⚠ NOTHING ABOVE IS WITHDRAWN. The percentile alone still fails exactly as
+ * described, and the failure reproduces on demand: referencing the 99.9th
+ * percentile at Peak Reduction 40 / 50 / 60 / 70 / 80 puts the OUTPUT PEAK at
+ * -3.15 / -0.92 / +1.54 / +2.59 / +3.01 dBFS against a source peaking at
+ * -2.80 — 5.81 dB above it at the top, against the 5.5 the note above
+ * measured. A percentile reference cannot keep the peak guarantee, full stop.
+ *
+ * WHAT CHANGED IS THAT THE GUARANTEE NO LONGER HAS TO COME FROM THE SOLVE.
+ * `ceilingDb` enforces it downstream, so the pair keeps the same promise the
+ * peak reference kept — output peak never exceeds input peak — while spending
+ * the headroom a lone transient was sitting on. That promise is now pinned by
+ * `test/dsp/la2aMakeupReference.test.js` rather than being a property of the
+ * arithmetic, which is the real cost of the change and is stated here so
+ * nobody has to rediscover it: it is enforced, not structural, and the two
+ * halves must ship together. `computeAutoMakeupPlan` is the only way to get
+ * either, and it returns both.
+ *
+ * WHY IT IS WORTH IT. The lone-transient failure the note above calls "the safe
+ * direction" is not free — it is the whole of the Peak Reduction 60 loudness
+ * collapse. On narration whose binding peak is one onset out of a 180 ms pause,
+ * peak-normalised to -1 dBFS at Peak Reduction 50: rms -17.39 -> -16.80 dB and
+ * peak-over-body 4.38 -> 3.78 dB, with delivered speech dynamic range unmoved
+ * at 9.11 -> 9.13. It recovers loudness that was being discarded rather than
+ * buying it by compressing harder — a hardware LA-2A capture of the same take
+ * sits at -16.38 and 3.35.
+ *
+ * ⚠ AND IT IS OFF BY DEFAULT, because the exact guarantee is worth keeping as
+ * the default even where the enforced one would do. Every existing patch and
+ * every rendered file predates this.
  */
 function peakOfChannels(channels, skip = 0) {
   let peak = 0
@@ -1994,6 +2104,36 @@ function peakOfChannels(channels, skip = 0) {
     }
   }
   return peak
+}
+
+/**
+ * The `q`-quantile of sample MAGNITUDE across every channel, counting from the
+ * top: q = 0.001 is the 99.9th percentile.
+ *
+ * ⚠ SAMPLE MAGNITUDES, NOT SHORT-BLOCK PEAKS, and that is the difference
+ * between this and the percentile the note above rejected. A percentile OF
+ * BLOCK PEAKS is a statistic over a few thousand numbers, so one loud syllable
+ * is a meaningful share of it and the reference tracks the programme. Over
+ * every sample it is a statistic on millions, where an isolated transient is
+ * numerically invisible and a sustained one is not — which is exactly the
+ * discrimination the makeup solve needs.
+ *
+ * Copies before sorting: the caller's buffers are the audio, and the offline
+ * solve calls this on the input several times over.
+ */
+function percentileOfChannels(channels, q, skip = 0) {
+  let total = 0
+  for (const ch of channels) total += Math.max(0, ch.length - skip)
+  if (total <= 0) return 0
+  const all = new Float32Array(total)
+  let w = 0
+  for (const ch of channels) {
+    for (let i = skip; i < ch.length; i++) all[w++] = ch[i] < 0 ? -ch[i] : ch[i]
+  }
+  all.sort()
+  // `sort()` is ascending, so the q-from-the-top index counts back from the end.
+  const idx = Math.min(total - 1, Math.max(0, Math.round(total * (1 - q)) - 1))
+  return all[idx]
 }
 
 function rmsOfChannels(channels, skip = 0) {
@@ -2027,17 +2167,51 @@ function rmsOfChannels(channels, skip = 0) {
  * top of it.
  */
 export function computeAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
-  const { maxIterations = 4, toleranceDb = 0.05 } = options
+  return computeAutoMakeupPlan(channelData, sampleRate, params, options).makeupDb
+}
+
+/**
+ * The makeup gain AND the ceiling that makes it safe, as one object.
+ *
+ * ⚠ RETURNING BOTH IS THE POINT OF THE FUNCTION, NOT A CONVENIENCE. Under
+ * `reference: 'percentile'` the makeup no longer guarantees the output stays
+ * under the input peak — measured, it can exceed it by nearly 6 dB — and
+ * `ceilingDb` is what puts the guarantee back. Handing them out separately
+ * would let a caller take the loudness and skip the enforcement, so there is no
+ * API here that yields one without the other. See `peakOfChannels`.
+ *
+ * `reference: 'peak'` (the default) is the shipping behaviour exactly, and
+ * returns `ceilingDb: null` — the peak reference needs no ceiling because its
+ * guarantee is arithmetic.
+ *
+ * ⚠ THE SOLVE MEASURES WITHOUT THE CEILING, DELIBERATELY. Including it would
+ * make the objective non-monotone in the makeup — past the ceiling, more gain
+ * stops moving the measured statistic — and the iteration could run away
+ * against a curve that has flattened. Measuring below it and enforcing above it
+ * keeps the solve on a monotone objective, and the two cannot disagree by much
+ * in any case: the ceiling engages on the top ten-thousandth of samples and the
+ * reference is read at the top thousandth.
+ */
+export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, options = {}) {
+  const { maxIterations = 4, toleranceDb = 0.05, reference = 'peak' } = options
+  if (reference !== 'peak' && reference !== 'percentile') {
+    throw new Error(`unknown makeup reference: ${reference}`)
+  }
 
   // Measured through the base-rate path: oversampling removes folded
   // harmonics, which carry almost no energy, and measuring through it was
   // about three times slower — which the Gain knob showed as lag behind a
   // drag. It does move the peak slightly more than it moves the RMS, so the
   // iteration below re-measures rather than trusting one pass.
-  const measureParams = { ...params, oversample: false }
+  const measureParams = { ...params, oversample: false, ceilingDb: null }
+
+  const measureRef = reference === 'percentile'
+    ? (chs) => percentileOfChannels(chs, MAKEUP_PERCENTILE)
+    : peakOfChannels
 
   const inputPeak = peakOfChannels(channelData)
-  if (inputPeak <= 0) return 0
+  const inputRef = measureRef(channelData)
+  if (!(inputPeak > 0) || !(inputRef > 0)) return { makeupDb: 0, ceilingDb: null }
 
   /**
    * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK, not the raw render.
@@ -2070,13 +2244,19 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
     const out = latency > 0
       ? rendered.map((ch) => ch.subarray(latency, latency + channelData[0].length))
       : rendered
-    const outPeak = peakOfChannels(out)
-    if (outPeak <= 0) break
-    const correctionDb = 20 * Math.log10(inputPeak / outPeak)
+    const outRef = measureRef(out)
+    if (outRef <= 0) break
+    const correctionDb = 20 * Math.log10(inputRef / outRef)
     makeupDb = clamp(makeupDb + correctionDb, -24, 24)
     if (Math.abs(correctionDb) < toleranceDb) break
   }
-  return makeupDb
+  return {
+    makeupDb,
+    // The guarantee, restated as a number the kernel can enforce: the source's
+    // own peak. `softCeiling` is asymptotic, so the output stays strictly under
+    // it rather than merely reaching it.
+    ceilingDb: reference === 'percentile' ? 20 * Math.log10(inputPeak) : null,
+  }
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────
