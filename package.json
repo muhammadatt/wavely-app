@@ -19,6 +19,7 @@
     "reso:real": "node scripts/resonance-real.mjs",
     "dcblock:real": "node scripts/la2a-dcblock-real.mjs",
     "la2a:tube:tones": "node scripts/la2a-tube-capture-tones.mjs",
+    "la2a:tube:split": "node scripts/la2a-tube-capture-tones.mjs --split",
     "la2a:tube:fit": "node scripts/la2a-tube-fit.mjs",
     "la2a:h2:refit": "node scripts/la2a-h2-refit.mjs",
     "la2a:pairs": "node scripts/la2a-pair-compare.mjs",
