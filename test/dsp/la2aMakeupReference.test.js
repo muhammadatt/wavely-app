@@ -22,6 +22,7 @@ import {
   processLA2ABuffer, computeAutoMakeupDb, computeAutoMakeupPlan,
   MAKEUP_PERCENTILE,
 } from '../../src/audio/la2aProcessor.js'
+import { LA2A_DEFAULTS, toKernelParams } from '../../src/audio/effects/la2aParams.js'
 
 const SR = 44100
 const db = x => 20 * Math.log10(Math.max(x, 1e-12))
@@ -104,12 +105,25 @@ test('the ceiling holds the output under the source peak at every setting', () =
   }
 })
 
-test('the ceiling is strict, not merely met, and holds against absurd gain', () => {
+/**
+ * ⚠ THE ASSERTION IS `<=`, NOT `<`, AND THAT IS THE IMPLEMENTATION AND NOT A
+ * WEAKER TEST. `Math.tanh` returns exactly 1 in float64 once its argument
+ * passes ~19, so a signal driven far enough above the knee lands ON the
+ * ceiling. A first draft asserted strict inequality and passed at 24 dB of gain
+ * only because that stimulus never got there; at 18 dB into a -8 dB ceiling it
+ * failed. The guarantee is "never louder than the source", which `<=` states
+ * exactly and `<` overstates.
+ */
+test('the ceiling holds against absurd gain, at every drive', () => {
   const x = stimulus(1)
-  const ceilingDb = -6
-  const y = render(x, { peakReduction: 0, gainDb: 24, ceilingDb })
-  assert.ok(peak(y) < Math.exp(ceilingDb * Math.LN10 / 20),
-    `asymptotic ceiling must not be reached: ${db(peak(y)).toFixed(4)} vs ${ceilingDb}`)
+  for (const ceilingDb of [-6, -8, -12]) {
+    const ceiling = Math.exp(ceilingDb * Math.LN10 / 20)
+    for (const gainDb of [6, 18, 24]) {
+      const y = render(x, { peakReduction: 0, gainDb, ceilingDb })
+      assert.ok(peak(y) <= ceiling,
+        `ceiling ${ceilingDb} at +${gainDb} dB: ${db(peak(y)).toFixed(4)} exceeded it`)
+    }
+  }
 })
 
 test('no ceiling is sample-identical to not passing one', () => {
@@ -137,4 +151,48 @@ test('computeAutoMakeupDb is unchanged and still peak-referenced', () => {
 test('MAKEUP_PERCENTILE sits clear of the programme', () => {
   assert.ok(MAKEUP_PERCENTILE > 0 && MAKEUP_PERCENTILE <= 0.01,
     'a reference below the 99th percentile would track the programme, not the outlier')
+})
+
+/**
+ * ── THE PANEL SEAM ──────────────────────────────────────────────────────────
+ *
+ * ⚠ EVERY LAYER BELOW IS A PLACE THE CEILING CAN BE DROPPED SILENTLY, and a
+ * dropped ceiling is not a missing feature — it is the raised makeup running
+ * with nothing behind it, which is the one failure this pairing exists to
+ * prevent. Two of these were live bugs while the wiring was being built:
+ * `toKernelParams` did not carry the key at all, and `createLA2ACompressor`
+ * gates `setParam` on `name in params`, where a param absent from
+ * `LA2A_DEFAULTS` never matches.
+ */
+
+test('the panel param object carries the ceiling into kernel params', () => {
+  const panel = { ...LA2A_DEFAULTS, ceilingDb: -3.5 }
+  assert.equal(toKernelParams(panel).ceilingDb, -3.5)
+})
+
+test('kernel params omit the ceiling entirely when there is none', () => {
+  for (const absent of [{ ...LA2A_DEFAULTS }, { ...LA2A_DEFAULTS, ceilingDb: null }]) {
+    assert.ok(!('ceilingDb' in toKernelParams(absent)),
+      'an absent ceiling must not appear as a key — la2aTuning.test.js pins this shape')
+  }
+})
+
+test('a panel-shaped patch actually limits when it carries a ceiling', () => {
+  const x = stimulus(2)
+  const panel = { ...LA2A_DEFAULTS, peakReduction: 0, gain: 18 }
+  const ceilingDb = -8
+
+  const loud = processLA2ABuffer([x], SR, toKernelParams(panel)).channelData[0]
+  const held = processLA2ABuffer([x], SR, toKernelParams({ ...panel, ceilingDb })).channelData[0]
+
+  assert.ok(db(peak(loud)) > ceilingDb + 3,
+    `the unguarded render should be well over the ceiling: ${db(peak(loud)).toFixed(2)}`)
+  assert.ok(db(peak(held)) <= ceilingDb + 1e-9,
+    `the guarded one must sit at or under it: ${db(peak(held)).toFixed(4)}`)
+})
+
+test('LA2A_DEFAULTS ships the peak reference and no ceiling', () => {
+  assert.equal(LA2A_DEFAULTS.makeupReference, 'peak')
+  assert.ok(!('ceilingDb' in LA2A_DEFAULTS),
+    'the ceiling is measured from the audio, so it must not be a stored patch value')
 })

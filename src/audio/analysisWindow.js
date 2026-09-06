@@ -1,3 +1,5 @@
+import { getSegmentDuration } from './operations.js'
+
 /**
  * How much of a region the measured-parameter paths analyse, and from where.
  *
@@ -85,4 +87,51 @@ export const AUTO_MAKEUP_MAX_ANALYSIS_S = 30
 export function analysisWindow(start, end, maxSeconds = AUTO_MAKEUP_MAX_ANALYSIS_S) {
   if (!(end - start > maxSeconds)) return { start, end }
   return { start, end: start + maxSeconds }
+}
+
+/**
+ * The peak sample magnitude of a region, in dBFS, WITHOUT rendering it.
+ *
+ * Mirrors `renderRegionToBuffer`'s segment walk exactly — that function is a
+ * straight copy with no per-segment gain, so scanning the same ranges gives the
+ * same answer — but tracks a maximum instead of allocating. An hour of audio
+ * costs a read of every sample and not one byte of buffer.
+ *
+ * ⚠ IT MUST SEE THE WHOLE REGION, WHICH IS WHY IT IS NOT A WORKER MEASUREMENT.
+ * Every measured parameter here goes through `measureInWorker`, which caps the
+ * pass at AUTO_MAKEUP_MAX_ANALYSIS_S anchored at the region's start. That cap
+ * is right for a solve that has to sit behind a knob drag, and it is WRONG for
+ * a ceiling: on a region longer than the cap the loudest moment is routinely
+ * outside the window, and a ceiling set from an excerpt would clamp everything
+ * after it — the whole back half of a take limited to a level the front half
+ * happened to reach. Cheap enough that it does not need the cap.
+ *
+ * Returns -Infinity for an empty or silent region, which callers read as
+ * "no ceiling to set".
+ */
+export function regionPeakDb(segments, start, end, sampleRate, channels) {
+  let peak = 0
+  for (const seg of segments) {
+    const dur = getSegmentDuration(seg)
+    const segEnd = seg.outputStart + dur
+    if (segEnd <= start || seg.outputStart >= end) continue
+    if (seg.sourceBuffer === null) continue // silence
+
+    const overlapStart = Math.max(start, seg.outputStart)
+    const overlapEnd = Math.min(end, segEnd)
+    const sourceOffset = seg.sourceStart + (overlapStart - seg.outputStart)
+    const sourceSampleStart = Math.floor(sourceOffset * sampleRate)
+    const copySamples = Math.floor((overlapEnd - overlapStart) * sampleRate)
+
+    for (let ch = 0; ch < channels; ch++) {
+      const srcData = seg.sourceBuffer.getChannelData(ch)
+      const n = Math.min(copySamples, srcData.length - sourceSampleStart)
+      for (let i = 0; i < n; i++) {
+        const v = srcData[sourceSampleStart + i]
+        const a = v < 0 ? -v : v
+        if (a > peak) peak = a
+      }
+    }
+  }
+  return peak > 0 ? 20 * Math.log10(peak) : -Infinity
 }

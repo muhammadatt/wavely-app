@@ -18,6 +18,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   la2aMode, la2aPeakReduction, la2aGain, la2aR37, la2aLookahead,
+  la2aMakeupReference, la2aCeilingDb, syncMakeupReference,
   la2aAutoMakeup, la2aAutoMakeupBusy, toggleAutoMakeup: toggleAuto,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain,
@@ -48,6 +49,31 @@ watch(() => state.selection, () => { resetLiveMakeup(); refreshAutoMakeup() }, {
 const autoMakeupLabel = computed(() =>
   la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO' : 'AUTO'
 )
+
+const makeupRefActive = computed(() => la2aMakeupReference.value === 'percentile')
+
+/**
+ * The ceiling is reported in the tooltip rather than given a readout of its
+ * own. It is not a setting — it is the region's measured peak — so a lit
+ * numeric field would invite people to reach for it, and there is nothing to
+ * reach for.
+ */
+const makeupRefTitle = computed(() => {
+  if (!la2aAutoMakeup.value) return 'Auto makeup is off — the Gain knob is yours.'
+  if (!makeupRefActive.value) {
+    return 'PEAK: makeup restores the input\u2019s true peak. Exact, but one uncompressed '
+      + 'transient can pin it and leave the file quiet. Click for BODY.'
+  }
+  const ceiling = Number.isFinite(la2aCeilingDb.value)
+    ? `, held under ${la2aCeilingDb.value.toFixed(2)} dBFS`
+    : ''
+  return `BODY: makeup references the 99.9th percentile${ceiling}, so a lone transient `
+    + 'cannot pin it. Louder at the same compression. Click for PEAK.'
+})
+
+function toggleMakeupReference() {
+  syncMakeupReference(makeupRefActive.value ? 'peak' : 'percentile')
+}
 
 const ACCENT = '#f5a623'
 
@@ -104,6 +130,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     gain: la2aGain.value,
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
+    makeupReference: la2aMakeupReference.value,
     autoMakeup: la2aAutoMakeup.value,
   }),
   write: (p) => {
@@ -113,6 +140,10 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     // Absent in every preset saved before the control existed, and 0 is both
     // the default and what those patches were auditioned with.
     syncLookahead(p.lookahead ?? 0)
+    // Absent in every preset saved before the control existed, and 'peak' is
+    // both the default and the solve those patches were auditioned against —
+    // 'percentile' asks for several dB more makeup.
+    syncMakeupReference(p.makeupReference ?? 'peak')
     if (p.autoMakeup) {
       // Already on: the syncs above have each scheduled a re-measure, so the
       // knob lands on the new settings without a second toggle.
@@ -208,6 +239,41 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
                 : 'Auto makeup off. Click to let the plugin automatically set the output gain.'"
               @click="toggleAutoMakeup"
             >{{ autoMakeupLabel }}</button>
+
+            <!-- WHICH STATISTIC AUTO SOLVES AGAINST, and it only means anything
+                 while AUTO is lit — with AUTO off there is no solve and the
+                 Gain knob is the user's, so the control disables rather than
+                 offering a setting that does nothing.
+
+                 PEAK restores the input's true peak. Exact, and it is what
+                 every patch made before this control used, but one uncompressed
+                 transient — a hard onset out of a pause, which the T4's 10 ms
+                 attack passes almost intact — sets the reference for the whole
+                 file and the makeup comes out small. That is the Peak Reduction
+                 60 loudness collapse: past ~50 the knob makes the file QUIETER.
+
+                 BODY references the 99.9th percentile instead, so a lone
+                 transient cannot pin it, and a ceiling measured from the
+                 region's own peak holds the output under the source — the same
+                 promise, enforced rather than arithmetic. Measured on narration
+                 at PR 60, peak-matched: -19.5 -> -15.0 dB rms with delivered
+                 dynamic range unchanged. It holds the transient tighter than
+                 the hardware does, which is the thing to listen for.
+                 See `peakOfChannels` in la2aProcessor.js. -->
+            <button
+              class="mt-[5px] px-2.5 py-[3px] rounded-full cursor-pointer transition-all disabled:cursor-default"
+              :style="{
+                background: makeupRefActive ? 'rgba(245,166,35,.16)' : 'rgba(255,255,255,.05)',
+                border: `1px solid ${makeupRefActive ? 'rgba(245,166,35,.42)' : 'rgba(255,255,255,.09)'}`,
+                color: makeupRefActive ? '#f7c877' : 'rgba(255,255,255,.4)',
+                font: `700 7.5px 'JetBrains Mono',monospace`,
+                letterSpacing: '.09em',
+                opacity: la2aPreview && la2aAutoMakeup ? 1 : 0.35,
+              }"
+              :disabled="!la2aPreview || !la2aAutoMakeup"
+              :title="makeupRefTitle"
+              @click="toggleMakeupReference"
+            >{{ makeupRefActive ? 'BODY' : 'PEAK' }}</button>
           </div>
         </div>
 

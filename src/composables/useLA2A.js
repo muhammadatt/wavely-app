@@ -16,6 +16,17 @@ const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
 const la2aR37 = ref(LA2A_DEFAULTS.r37)
 const la2aLookahead = ref(LA2A_DEFAULTS.lookahead)
+const la2aMakeupReference = ref(LA2A_DEFAULTS.makeupReference)
+/**
+ * The ceiling the last measurement produced, dBFS, or null.
+ *
+ * ⚠ MEASURED STATE, NOT A KNOB, and it is deliberately not in `LA2A_DEFAULTS`.
+ * It is the region's own peak, so it belongs to the audio rather than to the
+ * patch — a preset carrying one would apply another file's peak to this one.
+ * It rides in `currentParams()` so preview and apply cannot disagree about it,
+ * and the preset normaliser's key whitelist keeps it out of stored presets.
+ */
+const la2aCeilingDb = ref(null)
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
 // boundary and perturbs the levels the mastering chain later measures.
@@ -55,6 +66,15 @@ function currentParams() {
     gain: la2aGain.value,
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
+    makeupReference: la2aMakeupReference.value,
+    /**
+     * ⚠ ONLY WHILE AUTO OWNS THE KNOB. The ceiling is the other half of the
+     * percentile solve; with AUTO off there is no solve, the gain is the
+     * user's, and enforcing a ceiling they never asked for would attenuate
+     * their own setting. Dropping it here is what makes "turn AUTO off" a
+     * complete escape from the pairing rather than half of one.
+     */
+    ceilingDb: la2aAutoMakeup.value ? la2aCeilingDb.value : null,
   }
 }
 
@@ -199,12 +219,23 @@ export function useLA2A() {
     const seq = ++makeupSeq
     la2aAutoMakeupBusy.value = true
     try {
-      const makeupDb = await computeLA2AAutoMakeup(
+      const { makeupDb, ceilingDb } = await computeLA2AAutoMakeup(
         state.segments, start, end,
         measurementParams(),
-        state.currentFile.sampleRate, state.currentFile.channels
+        state.currentFile.sampleRate, state.currentFile.channels,
+        la2aMakeupReference.value,
       )
       if (seq !== makeupSeq) return // a newer measurement is already in flight
+      /**
+       * ⚠ THE CEILING GOES FIRST, AND THE ORDER IS THE GUARANTEE. Both reach
+       * the live node as separate param messages, so between them the node
+       * holds one old value and one new one. Gain-then-ceiling would leave the
+       * raised makeup running for that gap with the old ceiling — or none —
+       * which is exactly the overshoot the pairing exists to prevent, audible
+       * as a blip on every re-measure during a drag.
+       */
+      la2aCeilingDb.value = ceilingDb
+      pushParam('ceilingDb', ceilingDb)
       la2aGain.value = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, makeupDb))
       pushGain()
     } catch (err) {
@@ -277,6 +308,25 @@ export function useLA2A() {
    * how much reduction is applied. The tracker's extrema describe the old
    * settings exactly as they do after a Peak Reduction move.
    */
+  /**
+   * Switch which statistic the solve references.
+   *
+   * A measurement change, not a sound change, so nothing is pushed to the node
+   * directly — the re-measure writes both the gain and the ceiling, in that
+   * order, through `refreshAutoMakeup`. Immediate rather than throttled: this
+   * is a click, not a drag, and it moves the makeup by dBs.
+   */
+  function syncMakeupReference(v) {
+    if (v === la2aMakeupReference.value) return
+    la2aMakeupReference.value = v
+    if (v !== 'percentile') {
+      la2aCeilingDb.value = null
+      pushParam('ceilingDb', null)
+    }
+    resetLiveMakeup()
+    refreshAutoMakeup()
+  }
+
   function refreshKernelTuning() {
     getEffectChain(getAudioContext()).effects
       .find(e => e.id === la2aEffect.id)?.nodes?.refreshKernelParams?.()
@@ -295,6 +345,15 @@ export function useLA2A() {
     makeupThrottle?.cancel()
     makeupSeq++
     la2aAutoMakeupBusy.value = false
+    /**
+     * ⚠ THE CEILING LEAVES WITH AUTO. `currentParams()` already drops it while
+     * AUTO is off, but the LIVE node has been told about it and would keep
+     * enforcing it against a gain the user now owns — a manual boost silently
+     * held down by the last measurement's ceiling, with nothing on the panel
+     * saying so.
+     */
+    la2aCeilingDb.value = null
+    pushParam('ceilingDb', null)
   }
 
   function toggleAutoMakeup() {
@@ -381,6 +440,8 @@ export function useLA2A() {
     la2aGain,
     la2aR37,
     la2aLookahead,
+    la2aMakeupReference,
+    la2aCeilingDb,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
     la2aPreview,
@@ -394,6 +455,7 @@ export function useLA2A() {
     syncGain,
     syncR37,
     syncLookahead,
+    syncMakeupReference,
     toggleAutoMakeup,
     refreshAutoMakeup,
     resetLiveMakeup,

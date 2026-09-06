@@ -1234,8 +1234,24 @@ export const MAKEUP_PERCENTILE = 0.001
 export const CEILING_KNEE_DB = 3
 
 /**
- * Memoryless soft ceiling. Asymptotic, so |output| < `ceiling` STRICTLY, for
+ * Memoryless soft ceiling. Asymptotic, so |output| never EXCEEDS `ceiling`, for
  * any input, with no lookahead and therefore no latency.
+ *
+ * ⚠ NEVER EXCEEDS, NOT ALWAYS STRICTLY BELOW, AND THE DIFFERENCE IS FLOAT64.
+ * In exact arithmetic tanh is asymptotic and the ceiling is unreachable; in
+ * float64 `Math.tanh` returns exactly 1 once its argument passes about 19, so
+ * an input driven far enough above the knee lands ON the ceiling. That is still
+ * the guarantee — the promise is "never louder than the source" — but a test
+ * asserting strict inequality passes only for the drive levels it happens to
+ * pick, which is how this got written down wrong the first time.
+ *
+ * ⚠ AND THE FINAL CLAMP IS NOT BELT-AND-BRACES, IT IS LOAD-BEARING. The
+ * asymptote is `kneeStart + span`, and `span` is itself `ceiling - kneeStart`,
+ * so the sum reassociates: in float64 `kneeStart + (ceiling - kneeStart)` can
+ * land one ULP ABOVE `ceiling`. Measured — at a -8 dBFS ceiling the output
+ * peaked fractionally over it and the guarantee test caught it, where the same
+ * code at -6 and -12 passed. One ULP is inaudible and it is still the promise
+ * broken, and a promise that holds at two ceilings out of three is not one.
  *
  * ⚠ MEMORYLESS AND NOT A LOOKAHEAD LIMITER, WHICH IS A DELIBERATE TRADE. A
  * lookahead limiter would hold the peak down more transparently, and it would
@@ -1247,11 +1263,39 @@ export const CEILING_KNEE_DB = 3
  * dB off them. A stage that engages this rarely does not need ballistics; it
  * needs to be exact and free.
  */
+/**
+ * The largest float32 that does not exceed `v`.
+ *
+ * ⚠ THE OUTPUT BUFFER IS A Float32Array, SO A float64 CEILING IS NOT A CEILING.
+ * Clamping to 0.3981071705534972 and storing it writes 0.3981071710586548 —
+ * float32's nearest neighbour, which is ABOVE. Measured on a -8 dBFS ceiling
+ * the peak came back 5e-10 over, some 500,000x more than the one-ULP float64
+ * slop the clamp above deals with, and no amount of care in float64 can fix it
+ * because the excess is created by the store. Rounding the ceiling DOWN into
+ * float32 first makes the clamped value exactly representable, so the store is
+ * lossless and the guarantee survives it.
+ *
+ * Inaudible either way — 1e-8 dB — and the point is that "output peak never
+ * exceeds input peak" is either a guarantee or it is not.
+ */
+function float32AtOrBelow(v) {
+  const f = Math.fround(v)
+  if (f <= v) return f
+  // One step down the float32 ladder, via the bit pattern rather than a
+  // subtraction that would have to guess a magnitude-dependent epsilon.
+  const bits = new Uint32Array(1)
+  const view = new Float32Array(bits.buffer)
+  view[0] = f
+  bits[0] += f > 0 ? -1 : 1
+  return view[0]
+}
+
 function softCeiling(x, ceiling, kneeStart) {
   const a = x < 0 ? -x : x
   if (a <= kneeStart) return x
   const span = ceiling - kneeStart
-  const y = kneeStart + span * Math.tanh((a - kneeStart) / span)
+  let y = kneeStart + span * Math.tanh((a - kneeStart) / span)
+  if (y > ceiling) y = ceiling
   return x < 0 ? -y : y
 }
 
@@ -1538,7 +1582,7 @@ export class LA2AKernel {
      * argument for revisiting a decision that was already settled once.
      */
     this.ceilingLin = Number.isFinite(p.ceilingDb)
-      ? Math.exp(p.ceilingDb * LN10_OVER_20) : 0
+      ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20)) : 0
     this.ceilingKneeLin = this.ceilingLin > 0
       ? this.ceilingLin * Math.exp(-CEILING_KNEE_DB * LN10_OVER_20) : 0
     this.tubeDriveLin = Number.isFinite(p.tubeDriveLin) && p.tubeDriveLin > 0

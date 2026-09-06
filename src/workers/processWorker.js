@@ -5,7 +5,7 @@
  * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
  * softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling, voiceProfile
  */
-import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
+import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
@@ -34,7 +34,7 @@ self.onmessage = function (e) {
       adjustVolume(channelData, params)
       break
     case 'la2aAutoMakeup':
-      autoMakeup(computeAutoMakeupDb, channelData, sampleRate, params)
+      la2aAutoMakeup(channelData, sampleRate, params)
       break
     case 'fet1176AutoMakeup':
       autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
@@ -53,6 +53,28 @@ self.onmessage = function (e) {
       break
     default:
       postReply({ type: 'error', message: `Unknown operation: ${type}` })
+  }
+}
+
+/**
+ * OptoSmooth's makeup, which unlike every other plugin's has a REFERENCE.
+ *
+ * ⚠ `reference` RIDES IN `params` AND IS NOT A KERNEL PARAM. It selects how the
+ * solve measures, not how the kernel renders, so it is pulled back out before
+ * the params reach the kernel — passing it through would have it silently
+ * ignored, which is the failure mode where a control looks wired and is not.
+ *
+ * Only `makeupDb` comes back. The ceiling the percentile reference needs is
+ * measured over the WHOLE region by `computeLA2AAutoMakeup`, not here, because
+ * this worker only ever sees the capped analysis window — see `regionPeakDb`.
+ */
+function la2aAutoMakeup(channelData, sampleRate, params) {
+  const { reference = 'peak', ...kernelParams } = params ?? {}
+  try {
+    const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
+    postReply({ type: 'complete', makeupDb: plan.makeupDb })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
   }
 }
 
