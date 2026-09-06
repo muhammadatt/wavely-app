@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
 import { useLA2A } from '../../composables/useLA2A.js'
+import { LOOKAHEAD_MAX_MS } from '../../audio/effects/la2aCompressor.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { OPTO_SMOOTH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import PresetMenu from './PresetMenu.vue'
@@ -10,16 +11,26 @@ import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import LA2ATuningPanel from './LA2ATuningPanel.vue'
+import { isLA2ATuningVisible } from '../../audio/effects/la2aTuning.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  la2aMode, la2aPeakReduction, la2aGain, la2aR37,
+  la2aMode, la2aPeakReduction, la2aGain, la2aR37, la2aLookahead,
   la2aAutoMakeup, la2aAutoMakeupBusy, toggleAutoMakeup: toggleAuto,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain,
-  syncR37, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup, apply, teardown, closeModal,
+  syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
+  refreshKernelTuning,
+  apply, teardown, closeModal,
 } = useLA2A()
+
+/**
+ * Read once, not reactively: the gate is a build flag plus a localStorage key,
+ * neither of which changes while the panel is open.
+ */
+const showTuningBench = isLA2ATuningVisible()
 
 const { state } = useEditorState()
 
@@ -71,6 +82,9 @@ function formatPeakReduction(v) {
 function formatGain(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 }
+function formatLookahead(v) {
+  return v <= 0 ? 'OFF' : `${v.toFixed(0)}`
+}
 
 /**
  * Presets. This replaced a mock dropdown that displayed four names and changed
@@ -89,12 +103,16 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
     peakReduction: la2aPeakReduction.value,
     gain: la2aGain.value,
     r37: la2aR37.value,
+    lookahead: la2aLookahead.value,
     autoMakeup: la2aAutoMakeup.value,
   }),
   write: (p) => {
     syncMode(p.mode)
     syncPeakReduction(p.peakReduction)
     syncR37(p.r37)
+    // Absent in every preset saved before the control existed, and 0 is both
+    // the default and what those patches were auditioned with.
+    syncLookahead(p.lookahead ?? 0)
     if (p.autoMakeup) {
       // Already on: the syncs above have each scheduled a re-measure, so the
       // knob lands on the new settings without a second toggle.
@@ -215,6 +233,28 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
         />
 
         <div class="flex gap-[26px]">
+          <!-- LOOKAHEAD is OFF by default and that is not timidity: an LA-2A
+               has none, the transient pass-through IS the T4, and every preset
+               and rendered file that predates this knob was made without it.
+               It exists because the 10 ms cell attack lets the first ~20 ms of
+               an onset out of silence through at 6-12 dB less reduction than
+               the surrounding program — musical in itself, but it makes the
+               peak-referenced auto makeup solve against an un-compressed
+               transient, so the compressor comes out QUIETER and MORE dynamic
+               than the source. Delaying the audio (never the side-chain) meets
+               that transient with the gain the cell would have reached later.
+               Capped at 20 ms: past that the duck starts audibly BEFORE the
+               consonant. See LOOKAHEAD_MAX_MS in la2aProcessor.js. -->
+          <div class="w-[78px]">
+            <Knob
+              :model-value="la2aLookahead"
+              @update:model-value="syncLookahead"
+              :min="0" :max="LOOKAHEAD_MAX_MS" :step="1" :value-font-px="13"
+              label="Look" :format-value="formatLookahead" :accent="ACCENT"
+              :disabled="!la2aPreview"
+            />
+          </div>
+
           <!-- R37 filters the SIDE-CHAIN, not the audio, and it reads as knob
                rotation like the hardware trimmer: 100 is fully clockwise and
                flat, which is the factory position and where it sits by default.
@@ -233,6 +273,14 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
           </div>
         </div>
       </div>
+
+      <!-- Bench only: gated off in production builds. See la2aTuning.js. -->
+      <LA2ATuningPanel
+        v-if="showTuningBench"
+        :accent="ACCENT"
+        :disabled="!la2aPreview"
+        @change="refreshKernelTuning"
+      />
     </div>
   </FloatingWindow>
 </template>

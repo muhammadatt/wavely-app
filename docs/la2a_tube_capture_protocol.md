@@ -5,6 +5,38 @@
 
 ---
 
+## How to capture: one bounce, not sixteen
+
+`npm run la2a:tube:tones` now also writes **`concat_gain0_pr0.wav`** — the eight
+level-sweep tones, the seven frequency-sweep tones and the noise-floor slot in a
+single 73.6 s file. Bounce that one file at **Gain 0 / Peak Reduction 0**, then:
+
+```
+npm run la2a:tube:split -- <your-capture.wav>
+```
+
+which cuts it into the per-tone captures the fitter expects, under their exact
+filenames. Then `npm run la2a:tube:fit`.
+
+**The GAIN sweep is not in it** — that tone is the same signal at different Gain
+positions, so it cannot share a bounce. Each is 3 s, which is inherently
+mute-free, so bounce those one position at a time as before.
+
+### ⚠ Start the bounce at the file's first sample
+
+The tones are **placed to dodge a Waves demo mute** (measured across nine
+ballistics captures: first at 20.01 s, then every 20.00 s, lasting 0.99 s). That
+grid is relative to the **render's** start, not the file's — so a bounce with
+pre-roll slides every tone into the mutes they were placed to avoid.
+
+The splitter measures the head slop and checks each tone's *analysis window* for
+it, rather than trusting the head or only checking whether a whole segment went
+silent. That distinction is not theoretical: tested with 1.37 s of slop, a mute
+ate 360 ms inside one tone's window while leaving the rest of the segment loud,
+and a whole-segment test saw nothing wrong.
+
+---
+
 ## ⚠ RESULT: this capture was run, and LAEA has nothing to give it
 
 **Do not re-run this against LAEA.** The protocol below is correct and the

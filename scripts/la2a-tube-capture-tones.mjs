@@ -53,6 +53,7 @@
 
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readWav } from '../test/voicerx/wav.js'
 import { dirname, join, resolve } from 'node:path'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -127,6 +128,70 @@ export function sweepEntries() {
 
 export const NOISE_FLOOR_FILE = 'noise_silence.wav'
 
+/**
+ * ── ONE-BOUNCE CONCATENATION, AND WHY IT IS MUTE-SCHEDULED ─────────────────
+ *
+ * Every tone here is 3 s, and a Waves demo's first mute lands at 20.01 s, so a
+ * tone bounced on its own can never be hit. The trap is the workflow anyone
+ * would actually use: dropping all sixteen on one timeline and bouncing once.
+ * Then the mutes fall wherever they fall, and — as the ballistics captures
+ * showed — a muted tone does not look like an error, it looks like a plugin
+ * that went silent.
+ *
+ * So the concatenated stimulus places each tone inside a clean window. Measured
+ * across nine ballistics captures, the mute is a TIMER: first at 20.01 s, then
+ * every 20.00 s, lasting 0.99 s. With a 0.1 s guard that leaves 18.80 s of
+ * clean audio per cycle, and a 3 s tone plus 1 s of silence fits four to a
+ * window.
+ *
+ * ⚠ ONLY THE LEVEL AND FREQUENCY SWEEPS GO IN, BECAUSE THEY SHARE A SETTING
+ * (Gain 0, Peak Reduction 0). The gain sweep is the same tone at DIFFERENT Gain
+ * positions, so it cannot share a bounce with anything — and at 3 s each,
+ * bounced one position at a time, it is inherently mute-free anyway.
+ *
+ * The noise-floor file rides along as the last slot, which is better than
+ * capturing it separately: it then measures the noise of the same bounce.
+ */
+export const CONCAT_FILE = 'concat_gain0_pr0.wav'
+export const CONCAT_MANIFEST = 'concat_manifest.json'
+const MUTE_PERIOD_S = 20.0
+const MUTE_LEN_S = 1.0
+const MUTE_GUARD_S = 0.1
+const SLOT_GAP_S = 1.0
+const CONCAT_LEAD_S = 0.5
+
+/** Earliest start >= t at which a `span`-second slot clears every mute. */
+function slotClear(t, span) {
+  const window = MUTE_PERIOD_S - MUTE_LEN_S - 2 * MUTE_GUARD_S
+  if (span > window) {
+    throw new Error(`a ${span}s slot cannot fit the ${window.toFixed(2)}s clean window between demo mutes`)
+  }
+  for (let k = 1; k * MUTE_PERIOD_S < t + span + MUTE_PERIOD_S; k++) {
+    const from = k * MUTE_PERIOD_S - MUTE_GUARD_S
+    const to = k * MUTE_PERIOD_S + MUTE_LEN_S + MUTE_GUARD_S
+    if (from >= t + span) break
+    if (to > t) t = to
+  }
+  return t
+}
+
+/** Which tones share the one-bounce file, and where each sits in it. */
+export function concatPlan() {
+  const entries = sweepEntries().filter(e => e.kind !== 'gain')
+  const slots = []
+  let t = CONCAT_LEAD_S
+  for (const e of entries) {
+    t = slotClear(t, TONE_SECONDS)
+    slots.push({ ...e, startS: t })
+    t += TONE_SECONDS + SLOT_GAP_S
+  }
+  t = slotClear(t, TONE_SECONDS)
+  slots.push({ id: 'noise-floor', kind: 'noise', file: NOISE_FLOOR_FILE, startS: t, silent: true })
+  t += TONE_SECONDS + SLOT_GAP_S
+  return { slots, seconds: t + 0.5 }
+}
+
+
 // ── WAV writer — 32-bit float, mono, no quantization of the stimulus ────────
 
 function writeFloatWav(path, samples, sampleRate) {
@@ -181,7 +246,109 @@ function buildTone(freqHz, levelDbfs, sr) {
   return x
 }
 
+/**
+ * ── SPLITTING A ONE-BOUNCE CAPTURE BACK INTO PER-TONE CAPTURES ─────────────
+ *
+ * ⚠ THE CAPTURE'S HEAD IS NOT TRUSTED. A bounce can carry DAW pre-roll, plugin
+ * latency, or dead air, and cutting at nominal offsets would then slice every
+ * tone in the wrong place — quietly, since a mis-cut 1 kHz tone is still a
+ * 1 kHz tone. The offset is measured instead, by matching the capture's
+ * envelope against the stimulus's own, with dead samples excluded so a demo
+ * mute cannot drag the fit (the ballistics alignment railed exactly that way
+ * before it excluded them).
+ */
+function splitCapture(capturePath) {
+  const plan = concatPlan()
+  const wav = readWav(capturePath)
+  if (wav.sampleRate !== CAPTURE_SR) {
+    console.log(`⚠ ${capturePath}: ${wav.sampleRate} Hz; this protocol captures at ${CAPTURE_SR}.`)
+    return
+  }
+  const cap = wav.mono
+  const W = Math.round(0.01 * CAPTURE_SR)              // 10 ms envelope
+  const envOf = (a, n) => {
+    const e = new Float64Array(n)
+    for (let k = 0; k < n; k++) {
+      let m = 0
+      for (let i = k * W; i < Math.min((k + 1) * W, a.length); i++) { const v = Math.abs(a[i]); if (v > m) m = v }
+      e[k] = m
+    }
+    return e
+  }
+  const nRef = Math.floor(Math.round(plan.seconds * CAPTURE_SR) / W)
+  const ref = new Float64Array(nRef)
+  for (const slot of plan.slots) {
+    if (slot.silent) continue
+    const amp = Math.pow(10, slot.levelDbfs / 20)
+    const a = Math.round(slot.startS * CAPTURE_SR / W), b = a + Math.round(TONE_SECONDS * CAPTURE_SR / W)
+    for (let k = a; k < b && k < nRef; k++) ref[k] = amp
+  }
+  const capEnv = envOf(cap, Math.floor(cap.length / W))
+  const maxLag = Math.floor(5 * CAPTURE_SR / W)        // +/- 5 s of head slop
+  let best = 0, bestErr = Infinity
+  for (let lag = -maxLag; lag <= maxLag; lag++) {
+    let err = 0, n = 0
+    for (let k = 0; k < nRef; k++) {
+      const j = k + lag
+      if (j < 0 || j >= capEnv.length) continue
+      if (capEnv[j] < 1e-6 && ref[k] > 1e-4) continue   // a demo mute: not evidence
+      err += (Math.log(Math.max(capEnv[j], 1e-9)) - Math.log(Math.max(ref[k], 1e-9))) ** 2
+      n++
+    }
+    if (n > nRef / 3) { const e = err / n; if (e < bestErr) { bestErr = e; best = lag } }
+  }
+  const lagS = best * W / CAPTURE_SR
+  console.log(`Aligned at ${lagS >= 0 ? '+' : ''}${lagS.toFixed(3)} s (rms ${Math.sqrt(bestErr).toFixed(2)} in log-envelope)`)
+  mkdirSync(CAPTURES_DIR, { recursive: true })
+  const len = Math.round(TONE_SECONDS * CAPTURE_SR)
+  let written = 0, short = 0
+  for (const slot of plan.slots) {
+    const from = Math.round(slot.startS * CAPTURE_SR) + best * W
+    const seg = new Float32Array(len)
+    if (from < 0 || from + len > cap.length) { short++; console.log(`⚠ ${slot.id}: falls outside the capture; skipped`); continue }
+    seg.set(cap.subarray(from, from + len))
+    // A slot that came back silent when it should not have is a mute that the
+    // scheduling was supposed to prevent — say so rather than write a dead file.
+    if (!slot.silent) {
+      let peak = 0
+      for (let i = 0; i < len; i++) { const v = Math.abs(seg[i]); if (v > peak) peak = v }
+      if (peak < 1e-6) { console.log(`⚠ ${slot.id}: SILENT in the capture — a demo mute landed on it`); continue }
+      // ⚠ AND CHECK THE ANALYSIS WINDOW, NOT JUST THE SEGMENT. The scheduling
+      // places tones against the mute grid measured from the RENDER's start; if
+      // the bounce carries head slop, the grid slides relative to the tones and
+      // a mute can eat part of a tone while leaving the rest loud. Found by
+      // testing exactly that: 1.37 s of slop put a mute across the tail of the
+      // 16.5 s tone, and a whole-segment peak test saw nothing wrong.
+      const wFrom = Math.round((TONE_SECONDS - ANALYSIS_WINDOW_END_OFFSET_S - ANALYSIS_WINDOW_LENGTH_S) * CAPTURE_SR)
+      const wTo = Math.round((TONE_SECONDS - ANALYSIS_WINDOW_END_OFFSET_S) * CAPTURE_SR)
+      let dead = 0, run = 0
+      for (let i = wFrom; i < wTo; i++) {
+        if (Math.abs(seg[i]) < 1e-6) { run++; if (run > dead) dead = run } else run = 0
+      }
+      if (dead > CAPTURE_SR * 0.005) {
+        console.log(`⚠ ${slot.id}: ${(1000 * dead / CAPTURE_SR).toFixed(0)} ms of silence INSIDE its analysis window — a demo mute clipped it.`)
+        console.log('   The tones are scheduled against a mute grid measured from the RENDER start,')
+        console.log(`   so a bounce with head slop (this one had ${lagS.toFixed(2)} s) slides them into it.`)
+        console.log('   Re-bounce starting at the first sample, with no pre-roll.')
+        continue
+      }
+    }
+    writeFloatWav(join(CAPTURES_DIR, slot.file), seg, CAPTURE_SR)
+    written++
+  }
+  console.log(`Wrote ${written} per-tone captures to ${CAPTURES_DIR}${short ? ` (${short} outside the file)` : ''}`)
+  console.log('\nStill needed by hand: the GAIN sweep, one bounce per Gain position.')
+  console.log('Then:  npm run la2a:tube:fit')
+}
+
 function main() {
+  const splitArg = process.argv.indexOf('--split')
+  if (splitArg !== -1) {
+    const path = process.argv[splitArg + 1]
+    if (!path) { console.log('usage: --split <captured concat file>'); return }
+    splitCapture(path)
+    return
+  }
   mkdirSync(TONES_DIR, { recursive: true })
   mkdirSync(CAPTURES_DIR, { recursive: true }) // created empty so the DAW has somewhere obvious to export into
 
@@ -191,7 +358,26 @@ function main() {
   }
   writeFloatWav(join(TONES_DIR, NOISE_FLOOR_FILE), new Float32Array(Math.round(TONE_SECONDS * CAPTURE_SR)), CAPTURE_SR)
 
+  // The one-bounce file, mute-scheduled. See CONCAT_FILE.
+  const plan = concatPlan()
+  const cat = new Float32Array(Math.round(plan.seconds * CAPTURE_SR))
+  for (const slot of plan.slots) {
+    if (slot.silent) continue
+    const tone = buildTone(slot.freqHz, slot.levelDbfs, CAPTURE_SR)
+    cat.set(tone, Math.round(slot.startS * CAPTURE_SR))
+  }
+  writeFloatWav(join(TONES_DIR, CONCAT_FILE), cat, CAPTURE_SR)
+  writeFileSync(join(TONES_DIR, CONCAT_MANIFEST),
+    JSON.stringify({ sampleRate: CAPTURE_SR, toneSeconds: TONE_SECONDS, slots: plan.slots }, null, 2))
+
   console.log(`Wrote ${entries.length + 1} tones to ${TONES_DIR}`)
+  console.log(`\nONE-BOUNCE OPTION — ${CONCAT_FILE} (${plan.seconds.toFixed(1)}s, ${plan.slots.length} tones)`)
+  console.log('  Bounce that ONE file at Gain 0 / Peak Reduction 0, then:')
+  console.log(`    npm run la2a:tube:split -- <your-capture.wav>`)
+  console.log('  which cuts it into the per-tone captures the fitter expects.')
+  console.log('  Its tones are placed to dodge a Waves demo mute (20.01s, then every 20.00s).')
+  console.log('  ⚠ The GAIN sweep is NOT in it — that tone is bounced once per Gain position,')
+  console.log('    and at 3s each those are mute-free on their own.')
   console.log(`\nNext: docs/la2a_tube_capture_protocol.md — process each tone through LAEA`)
   console.log(`and save the result under the SAME filename in:\n  ${CAPTURES_DIR}`)
   console.log(`\nThe gain-sweep tone (${toneFilename('gain', GAIN_SWEEP_FREQ_HZ, GAIN_SWEEP_DBFS)}) is bounced`)

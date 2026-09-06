@@ -37,7 +37,14 @@ const db = v => 20 * Math.log10(Math.max(Math.abs(v), 1e-30))
  */
 function run(input, { corner, ...params } = {}) {
   const k = new LA2AKernel(SR)
-  k.setParams({ mode: 'compress', peakReduction: 60, gainDb: 0, mix: 1, ...params })
+  // ⚠ 84, NOT 60, AND SOLVED RATHER THAN CHOSEN. The knob is side-chain DRIVE,
+  // so a knob number means whatever the taper says it means — and the taper was
+  // re-fitted against a real LA-2A, which moved every position on the travel.
+  // 84 is where the new law puts the drive that 60 used to (33.6 dB), so the
+  // valves see the level this file's measurements were derived at. Hardcoding a
+  // knob and asserting an absolute level is what broke this test; the number is
+  // pinned to the DRIVE it stands for, which is what the DC actually follows.
+  k.setParams({ mode: 'compress', peakReduction: 84, gainDb: 0, mix: 1, ...params })
   if (corner !== undefined) k.dcR = corner === null ? 1 : 1 - 2 * Math.PI * corner / SR
   const n = input.length
   const out = new Float32Array(n)
@@ -57,8 +64,20 @@ function tone(hz, sec, amp) {
 
 // Past the ballistics' settling — a mean taken over the attack reads the
 // envelope moving, not the shaper's offset.
+//
+// ⚠ ONE SECOND IS ENOUGH FOR `rms` AND NOT FOR `mean`, WHICH IS WHY THE DC TEST
+// PASSES ITS OWN. A DC mean is the one measurement here sensitive to the tail:
+// the phosphorescent release tail runs to seconds, so the envelope is
+// still creeping long after it is audibly settled, and the creep IS a DC term.
+// Measured on the shipping kernel, the residual over the last second of the
+// tone keeps falling with tone length — -136.0 / -145.8 / -154.0 / -166.3 dBFS
+// at 2 / 3 / 4 / 6 s — against -56.9 bypassed. None of that is the blocker
+// changing; it is how much ballistic settling the window still contains. A 2 s
+// tone read from 1 s therefore pins the ATTACK's early trajectory, not the
+// shaper's offset, and the program-dependent attack duly moved it.
 const SKIP = SR
-const mean = a => { let s = 0; for (let i = SKIP; i < a.length; i++) s += a[i]; return s / (a.length - SKIP) }
+const meanFrom = (a, skip) => { let s = 0; for (let i = skip; i < a.length; i++) s += a[i]; return s / (a.length - skip) }
+const mean = a => meanFrom(a, SKIP)
 const rms = a => { let s = 0; for (let i = SKIP; i < a.length; i++) s += a[i] * a[i]; return Math.sqrt(s / (a.length - SKIP)) }
 
 test('the named constant is the pole the kernel actually runs', () => {
@@ -96,9 +115,12 @@ test('it removes the DC the shaper generates, and the shaper generates some', ()
   // against the -60 this asserted, so the test would have failed for the right
   // reason on a build that was working. Measured across the knob:
   // -75.4 / -63.4 / -51.5 / -40.0 dBFS bypassed at +6 / 12 / 18 / 24.
-  const x = tone(120, 2, 0.5)
-  const blocked = mean(run(x, { gainDb: 18 }))
-  const bypassed = mean(run(x, { gainDb: 18, corner: null }))
+  // 4 s read from 3 s, not 2 s read from 1 s — see `meanFrom` for why this one
+  // measurement needs the ballistics genuinely settled rather than merely past
+  // the attack.
+  const x = tone(120, 4, 0.5)
+  const blocked = meanFrom(run(x, { gainDb: 18 }), 3 * SR)
+  const bypassed = meanFrom(run(x, { gainDb: 18, corner: null }), 3 * SR)
 
   assert.ok(db(bypassed) > -60, `shaper left only ${db(bypassed).toFixed(1)} dBFS of DC to remove`)
   assert.ok(db(blocked) < -140, `DC survived the blocker at ${db(blocked).toFixed(1)} dBFS`)
