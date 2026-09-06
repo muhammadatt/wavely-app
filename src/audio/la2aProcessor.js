@@ -1066,6 +1066,59 @@ export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear rang
  * references disagree by 6x on this constant as they do on everything else, so
  * it is a choice inside a measured range, which is the most that data supports.
  */
+
+/**
+ * ⚠ THE REFERENCES CONTRADICT THE TELETRONIX MANUAL ON WHAT HAPPENS ABOVE THE
+ * KNEE, AND THE CAPTURES ARE NOT THE REASON. Recording this because the fixed
+ * 3:1 below is justified as "the LA-2A's documented compress-mode figure" while
+ * the same document describes something else entirely.
+ *
+ * The manual (Teletronix LA-2A, 3-66, Figure 1 and the text facing it):
+ * "compression occurs and gradually increases over the first 10 DB of input
+ * level rise. The slope of the curve then becomes horizontal, preventing an
+ * increase of output level regardless of input increase." That is a limiter
+ * above roughly 10 dB of overshoot. Ours is 3:1 to full scale and never flattens.
+ *
+ * THE OBVIOUS EXPLANATION IS WRONG: THE RAMP SWEPT FAR ENOUGH. `ramp.wav` runs
+ * -70 to 0 dBFS, and against the fitted taper the captured knobs sit at
+ *
+ *     knob 60   threshold -24.97 dBFS   ->  25.0 dB of ramp above it
+ *     knob 75   threshold -32.46 dBFS   ->  32.5 dB of ramp above it
+ *
+ * — two to three times past the manual's corner. The data to see a horizontal
+ * region was there at every captured knob.
+ *
+ * ⚠ AND THE FITTED RATIO WOULD HAVE SAID SO, WHICH IS THE PART THAT SETTLES IT.
+ * A fixed-ratio soft-knee model CAN absorb a limiting curve to a respectable
+ * residual — fitting one to the manual's curve over 25 dB lands at 0.097 dB rms,
+ * the same order as the 0.017-0.078 the references fitted at — but it can only
+ * do it by REPORTING A HUGE RATIO. Fitted over 10 / 15 / 20 / 25 dB above
+ * threshold it returns 19.7 / 29.6 / 39.6 / 39.6 : 1. It never returns 4:1.
+ * LALA came back at 1.98 and CLA-2A at 4.08, so neither reference goes
+ * horizontal anywhere in the range that was captured. Residual alone could not
+ * have told us this; the ratio the fit reports is the discriminator.
+ *
+ * SO THE 3:1 IS FAITHFUL TO THE REFERENCE PLUGINS AND THE PLUGINS DISAGREE WITH
+ * THE HARDWARE'S OWN MANUAL. There is no hardware ramp capture, so which is
+ * right is open. Weak supporting evidence for the manual, from the settled
+ * blocks of the one hardware program capture we have (`data/corpus/la2a-cellmod`,
+ * 194 blocks spanning only -21 to -12 dBFS, so read it as a hint and nothing
+ * more): the slope falls 0.63 -> 0.28 -> 0.17 across that range for hardware
+ * against 0.57 -> 0.45 -> 0.23 for CLA-2A and 0.48 -> 0.38 -> 0.24 for ours.
+ * The hardware's slope declines fastest and ends lowest, which is the manual's
+ * direction; 9 dB of range cannot establish an asymptote.
+ *
+ * ⚠ DO NOT "FIX" THIS TO CHASE TRANSIENTS — IT WAS TRIED AND IT BACKFIRED.
+ * Bending the curve horizontal 10 dB above the knee, per the manual, makes the
+ * crest problem WORSE on program: at PR 60, peak-normalised, rms -19.73 ->
+ * -20.63 dB and crest 18.73 -> 19.63. A static curve is a steady-state
+ * relationship, and the transients that bind the auto-makeup arrive before the
+ * detector has moved — measured through the binding onset, the gain applied in
+ * the first 5 ms is identical with and without the limiting curve, and the two
+ * only diverge after 15-20 ms, by which time the peak has passed. The extra
+ * reduction lands on the body alone. See LOOKAHEAD_MAX_MS for what does move
+ * that peak, and CELL_MOD_SHAPE for the mechanism fast enough to catch it.
+ */
 const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
 
@@ -1560,7 +1613,11 @@ export class LA2AKernel {
         //
         // 3:1 is the LA-2A's documented compress-mode figure, and it sits
         // between the two emulations rather than picking a side — they
-        // disagree by 2x, and neither is hardware. Swapping to CLA-2A's 4:1 is
+        // disagree by 2x, and neither is hardware. ⚠ THE SAME DOCUMENT SAYS THE
+        // CURVE GOES HORIZONTAL ABOVE ~10 dB OF OVERSHOOT AND NEITHER
+        // EMULATION DOES — see the note above COMPRESS_KNEE_DB for why that is
+        // not a shortfall in the captures, and why bending it back made the
+        // crest problem worse rather than better. Swapping to CLA-2A's 4:1 is
         // a one-line change if the documented figure ever loses the argument.
         //
         // ⚠ LIMIT MODE IS UNTOUCHED AND STILL UNMEASURED. Every capture in this
