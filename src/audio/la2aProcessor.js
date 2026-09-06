@@ -743,6 +743,52 @@ export const DC_BLOCK_HZ = 5
 export const CELL_MOD_MAX = 0.1225
 export const CELL_MOD_TAU_DB = 5.505
 
+/**
+ * Shape exponent on the cell's ripple term, applied to `rect / env - 1`.
+ *
+ * ⚠ 1.0 IS THE SHIPPING LAW AND THIS CONSTANT CHANGES NOTHING AT ITS DEFAULT.
+ * The kernel takes an `=== 1` fast path, so a build that never sets it is
+ * sample-identical to one from before this existed. It is here so
+ * `npm run la2a:cellmod` has a second dimension to search; it is NOT fitted,
+ * and the capture below does not constrain it.
+ *
+ * WHAT THE CAPTURE ACTUALLY SAYS. `npm run la2a:cellmod` measures the
+ * INSTANTANEOUS transfer — dB from a local linear fit, by band of each window's
+ * own peak, inside the loudest windows, which divides out makeup, level and the
+ * whole gain envelope. Against a hardware LA-2A capture, at the Peak Reduction
+ * that matches its delivered dynamic range:
+ *
+ *     band of local peak    40-55%   55-68%   68-80%   80-90%   90-100%  steep
+ *     hardware              -0.116   -0.139   -0.164   -0.188   -0.204    1.4x
+ *     ours, as shipped      -0.232   -0.338   -0.436   -0.484   -0.516    1.9x
+ *     ours, cell off        +0.004   +0.007   +0.010   +0.015   +0.015
+ *     Waves CLA-2A          -0.007   +0.004   +0.012   +0.018   +0.024
+ *
+ * ⚠ THE DISCREPANCY IS DEPTH, NOT SHAPE, AND THE FIRST PASS AT THIS GOT IT
+ * BACKWARDS. Our cell is about 2.1x too deep against this unit — the fit lands
+ * on `cellModMax` 0.058 against the shipping 0.1225 — while the steepening,
+ * 1.9x against 1.4x, is close enough that one capture cannot separate it. An
+ * earlier version of the metric fitted its reference gain on a band OVERLAPPING
+ * the bands it then measured, which flattened our profile and steepened the
+ * hardware's, and produced exactly the opposite conclusion. The self-test
+ * (`npm run la2a:cellmod:selftest`) is what settles which of the two to
+ * believe: the current construction recovers a planted exponent to 1 %.
+ *
+ * ⚠ AND THE EXPONENT IS UNCONSTRAINED BY THAT CAPTURE ANYWAY. Every shape from
+ * 0.6 to 5.4 fits within 0.010 dB once the depth re-solves — the two trade off
+ * along a valley the residual cannot see across. So this constant is a handle
+ * the bench can turn, not a finding.
+ *
+ * ⚠ NONE OF WHICH IS A LICENCE TO HALVE CELL_MOD_MAX. It is one capture of one
+ * unit at an unknown knob position with its own converters and preamp inside
+ * the measurement, against a constant that took six units and a corroborating
+ * H3-H2 relationship. What the row does establish is that the reference PLUGINS
+ * cannot arbitrate this axis at all — the CLA-2A row is flat, i.e. it has no
+ * instantaneous nonlinearity to compare against — so a disagreement with
+ * hardware here will never show up in the fits that target it.
+ */
+export const CELL_MOD_SHAPE = 1.0
+
 
 /**
  * ── WHAT THIS STAGE RESTS ON ────────────────────────────────────────────────
@@ -1368,6 +1414,8 @@ export class LA2AKernel {
       ? p.cellModMax : CELL_MOD_MAX
     this.cellModTauDb = Number.isFinite(p.cellModTauDb) && p.cellModTauDb > 0
       ? p.cellModTauDb : CELL_MOD_TAU_DB
+    this.cellModShape = Number.isFinite(p.cellModShape) && p.cellModShape > 0
+      ? p.cellModShape : CELL_MOD_SHAPE
     this.tubeDriveLin = Number.isFinite(p.tubeDriveLin) && p.tubeDriveLin > 0
       ? p.tubeDriveLin : TUBE_DRIVE_LIN
     this.tubeBias = Number.isFinite(p.tubeBias) ? p.tubeBias : TUBE_BIAS
@@ -1590,7 +1638,13 @@ export class LA2AKernel {
         // by 24 dB of reduction. This levels off inside the band the six units
         // span at the one depth anyone measured.
         const depth = this.cellMod * this.cellModMax * (1 - Math.exp(-grNow / this.cellModTauDb))
-        const m = 1 - depth * rel
+        // Shape exponent, magnitude-only so the sign of the ripple is
+        // untouched. The `=== 1` branch is what keeps the shipping law exact
+        // rather than exact-to-rounding; see CELL_MOD_SHAPE.
+        const shaped = this.cellModShape === 1
+          ? rel
+          : (rel < 0 ? -1 : 1) * Math.pow(Math.abs(rel), this.cellModShape)
+        const m = 1 - depth * shaped
         preG *= m > 0.05 ? (m < 4 ? m : 4) : 0.05
       }
       const g = preG * makeupLinSmoothed
