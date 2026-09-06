@@ -800,12 +800,14 @@ const CELL_MOD_TAU_DB = 5.505
  *      the lookahead control asks for, which is the one path that routinely
  *      pushes this stage somewhere nothing has checked.
  *
- *   3. H2 VERSUS FREQUENCY. The model is nearly flat, -63.5 to -64.5 dBc from
- *      63 Hz to 1 kHz, and structurally so: a memoryless shaper has no
- *      frequency dependence, so the little spread there is comes from the
- *      side-chain changing the level reaching it. The paper measured five
- *      frequencies but only the median ACROSS ALL 30 is transcribed here, so
- *      per-frequency hardware H2 is unknown. If real units tilt with frequency,
+ *   3. H2 VERSUS FREQUENCY — MEASURED, AND THE MEMORYLESS ASSUMPTION SURVIVES.
+ *      A memoryless shaper has no frequency dependence at all. The CLA-2A sweep
+ *      at -6 dBFS returns -49.1 / -50.1 / -50.6 / -50.7 / -50.6 / -50.2 /
+ *      -48.1 dBc at 50 / 100 / 200 / 500 / 1000 / 2000 / 5000 Hz: flat to
+ *      +/-0.5 dB across 100-2000 Hz, with a mild rise of 1.5 and 2.5 dB at the
+ *      two extremes. That is inside the level sweep's own scatter, so nothing
+ *      here demands memory — though the U-shape is real and a memoryless curve
+ *      cannot produce it. Per-unit hardware H2 by frequency is still unknown. If real units tilt with frequency,
  *      this stage cannot express it and nothing here would notice.
  *
  *   4. THE KNEE, +12.4 dBFS. No hardware data of any kind. It moved 4 dB as a
@@ -816,8 +818,32 @@ const CELL_MOD_TAU_DB = 5.505
  *      (bias, drive) pairs that all satisfy the anchor span 9 dB of H2 there,
  *      so the answer in that regime is a consequence of the inherited bias.
  *
- *   6. THE CURVE SHAPE. `tanh` is a modelling choice. At one operating point
- *      nothing distinguishes it from any other odd shaper with a bias term.
+ *   6. ⚠ THE CURVE SHAPE — NO LONGER UNTESTABLE, AND `tanh` FAILED. It was a
+ *      modelling choice that one operating point could not distinguish from any
+ *      other odd shaper with a bias term. A Waves CLA-2A level sweep (eight
+ *      levels, Peak Reduction 0, Gain 0 — the first reference found with a real
+ *      output stage) distinguishes it and rules it out:
+ *
+ *        - Fitted to the measured H2 ALONE a tanh does well: drive 2.39, bias
+ *          0.0087, rms 0.87 dB over 39 dB of level, reproducing even the
+ *          flattening (measured slope 0.88 dB/dB low, 0.50 dB/dB near clip).
+ *        - The SAME fit then puts H3 at -14.9 dBc where the unit measures
+ *          -58.0. Forty-three decibels of distortion that is not there.
+ *        - Fitted to H2 AND H3 together, the best a biased tanh can do is
+ *          rms 12.45 dB. That is a falsification, not a fit.
+ *
+ *      The reason is structural. The unit is EVEN-DOMINANT at every level
+ *      (H3-H2 runs -5.0 to -9.4 dB) and both harmonics grow slowly. A tanh is
+ *      an ODD function: H3 is intrinsic and goes as level squared, while H2
+ *      exists only through the bias — so forcing H2 up needs drive, and drive
+ *      brings H3 with it. It cannot hold H3 below H2.
+ *
+ *      ⚠ NOT ACTED ON YET, AND DELIBERATELY. This is one plugin, its output
+ *      stage may be Waves' invention rather than the hardware's, and the paper
+ *      (six hardware units, at 6 dB of reduction) says the distortion there is
+ *      odd and belongs to the CELL. Both can hold: valves even at rest, cell
+ *      odd under compression. What is settled is that `tanh` cannot be the
+ *      valve curve AND leave the odd content to the cell.
  *
  *   7. THE TOPOLOGY. Makeup before the shaper is argued from the hardware's
  *      signal flow, not measured.
