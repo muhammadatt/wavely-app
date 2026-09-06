@@ -52,9 +52,13 @@
  * record names. It matters little: the model's H2 varies about 1.2 dB across
  * the whole span, so the tone set moves the fitted constant by well under a dB.
  *
- * ⚠ ONE TARGET, TWO CONSTANTS. H2 for a biased tanh goes as drive^2 * tanh(bias)
+ * ⚠ ONE TARGET, TWO CONSTANTS. H2 for a biased tanh goes as drive * tanh(bias)
  * for weak drive, so -63.80 dBc defines a CURVE in (TUBE_DRIVE_LIN, TUBE_BIAS),
- * not a point. This script solves for the drive with the bias held. See
+ * not a point. ⚠ This said drive^2 until the law was measured rather than
+ * assumed: along the H2 = -63.80 dBc curve, `d * tanh(b)` is constant to three
+ * figures across bias 0.02 to 0.40 where `d^2 * tanh(b)` varies 19-fold. The
+ * conclusion is unaffected — either law makes the target a curve — but the
+ * exponent is pinned by `la2aTube.test.js` now, so the two must agree. This script solves for the drive with the bias held. See
  * TUBE_BIAS in la2aProcessor.js for why that constant is held rather than
  * fitted, and for what it is not.
  */

@@ -51,7 +51,7 @@
  * recording of something else.
  */
 
-import { writeFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { readWav } from '../test/voicerx/wav.js'
 import { dirname, join, resolve } from 'node:path'
