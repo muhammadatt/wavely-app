@@ -20,7 +20,7 @@ import assert from 'node:assert/strict'
 
 import {
   processLA2ABuffer, computeAutoMakeupDb, computeAutoMakeupPlan,
-  MAKEUP_PERCENTILE,
+  MAKEUP_PERCENTILE, LA2AKernel,
 } from '../../src/audio/la2aProcessor.js'
 import { LA2A_DEFAULTS, toKernelParams } from '../../src/audio/effects/la2aParams.js'
 
@@ -195,4 +195,91 @@ test('LA2A_DEFAULTS ships the peak reference and no ceiling', () => {
   assert.equal(LA2A_DEFAULTS.makeupReference, 'peak')
   assert.ok(!('ceilingDb' in LA2A_DEFAULTS),
     'the ceiling is measured from the audio, so it must not be a stored patch value')
+})
+
+/**
+ * ── THE LIVE TRACKER CANNOT SPEAK FOR THE PERCENTILE ────────────────────────
+ *
+ * ⚠ THIS IS PINNED AS A LIMITATION, NOT A BUG. `liveAutoMakeupDb` inverts the
+ * tube shaper at the TARGET PEAK from running extrema — that is what makes it
+ * O(1) per sample and what makes it agree with the offline peak solve to
+ * hundredths of a dB. Two extrema cannot express a quantile, so there is no
+ * small fix that would let it answer for BODY; the composable gates the
+ * write-back on the peak reference instead.
+ *
+ * The number below is the whole reason that gate exists: ungated, the tracker
+ * overwrote the offline value on every meter tick and preview played several dB
+ * under apply, reported as makeup gain missing from playback. If this test ever
+ * fails because the two have converged, the gate can go.
+ */
+function runKernel(x, params) {
+  const kernel = new LA2AKernel(SR)
+  kernel.setParams({ lookaheadMs: 0, gainDb: 0, ...params })
+  const out = [new Float32Array(128)]
+  for (let off = 0; off + 128 <= x.length; off += 128) {
+    kernel.process([x.subarray(off, off + 128)], out, 128)
+  }
+  return kernel
+}
+
+test('the live tracker matches the offline PEAK solve', () => {
+  const x = stimulus(4)
+  const kernel = runKernel(x, { peakReduction: 60 })
+  const live = kernel.liveAutoMakeupDb()
+  assert.ok(Number.isFinite(live), 'the tracker should have heard enough to report')
+
+  const offline = computeAutoMakeupPlan([x], SR, { peakReduction: 60 }).makeupDb
+  assert.ok(Math.abs(live - offline) < 0.5,
+    `the tracker is the peak solve's live twin: ${live.toFixed(2)} vs ${offline.toFixed(2)}`)
+})
+
+/**
+ * ⚠ REPRODUCING THE DIVERGENCE NEEDS BOTH HALVES, AND THE OBVIOUS STIMULUS HAS
+ * NEITHER. It took two attempts to write this.
+ *
+ * The transient must be RARER THAN THE PERCENTILE. `stimulus`'s hot onset runs
+ * 50 ms — 1.25 % of a four-second file — so the 99.9th percentile counts it as
+ * PROGRAMME and both references land within 0.24 dB. At 44.1 kHz the top 0.1 %
+ * of four seconds is about 4 ms, so an outlier has to be shorter than that.
+ *
+ * And it must arrive at a DARK CELL. A 1.5 ms tick dropped into the middle of
+ * speech still reads as converged, because the T4 is already lit and compresses
+ * the tick along with everything else — the two solves came back 8.39 against
+ * 8.56. The tick has to land at the end of a long silence, which is where a
+ * plosive after a pause actually lands and is the shape that pinned the makeup
+ * on the narration this whole thread started from.
+ *
+ * With both: live 1.41 dB against a percentile solve's 8.54.
+ */
+function stimulusWithDarkCellClick(seconds = 5) {
+  const n = Math.round(SR * seconds)
+  const x = new Float32Array(n)
+  let phase = 0
+  for (let i = 0; i < n; i++) {
+    const t = i / SR
+    phase += (2 * Math.PI * 130) / SR
+    let s = 0
+    for (let h = 1; h <= 10; h++) s += Math.sin(phase * h) / (h * h)
+    const voiced = t < 2 || t > 3.5
+    const syl = Math.max(0, Math.sin(2 * Math.PI * 3 * t)) ** 2
+    x[i] = voiced ? 0.42 * s * syl : 0.0004 * s
+  }
+  // 1.5 ms, at the end of the silence, into a cell that has fully recovered.
+  const at = Math.round(SR * 3.45)
+  for (let i = 0; i < Math.round(SR * 0.0015); i++) {
+    x[at + i] = 0.95 * Math.sin((2 * Math.PI * 1200 * i) / SR)
+  }
+  return x
+}
+
+test('and is therefore well below the percentile solve, which is why it is gated', () => {
+  const x = stimulusWithDarkCellClick()
+  const live = runKernel(x, { peakReduction: 60 }).liveAutoMakeupDb()
+  const percentile = computeAutoMakeupPlan(
+    [x], SR, { peakReduction: 60 }, { reference: 'percentile' },
+  ).makeupDb
+
+  assert.ok(percentile - live > 1,
+    'if these have converged the composable\'s live-tracker gate is no longer needed: '
+    + `live ${live.toFixed(2)}, percentile ${percentile.toFixed(2)}`)
 })

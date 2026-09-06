@@ -127,7 +127,29 @@ export function useLA2A() {
        * ⚠ ONLY WHILE AUTO OWNS THE KNOB. Once the user has taken over, writing
        * a tracked value into it would be the panel overruling them.
        */
-      if (la2aAutoMakeup.value) {
+      /**
+       * ⚠ AND ONLY UNDER THE PEAK REFERENCE, WHICH IS THE ONE IT CAN ANSWER
+       * FOR. `liveAutoMakeupDb` is peak-referenced by construction — it inverts
+       * the tube shaper at the TARGET PEAK using running extrema, which is what
+       * makes it O(1) per sample and what makes it agree with the offline peak
+       * solve to hundredths. It has no way to express a percentile: a running
+       * quantile is not two extrema.
+       *
+       * Left ungated it does not merely disagree, it OVERWRITES. This runs on
+       * every meter tick (~21 ms), so under BODY the offline solve's value
+       * survived for one frame and was then replaced by the peak-referenced one
+       * for the rest of playback — measured on narration at Peak Reduction 60,
+       * the tracker says 4.20 dB against the percentile solve's 8.66, so
+       * preview played 4.46 dB QUIETER than the same settings applied. Reported
+       * exactly that way, as makeup gain missing from playback.
+       *
+       * So under BODY the knob is owned by the offline solve alone. It still
+       * tracks — `scheduleAutoMakeup` re-measures on every compression change —
+       * just at measurement cadence rather than meter cadence, which is where
+       * this knob sat before the tracker existed. Better a knob that updates in
+       * ~170 ms and is right than one that updates in ~21 ms and is 4 dB wrong.
+       */
+      if (la2aAutoMakeup.value && la2aMakeupReference.value === 'peak') {
         const live = nodes.getLiveMakeupDb?.()
         if (Number.isFinite(live)) {
           const next = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, live))
