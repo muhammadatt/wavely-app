@@ -22,6 +22,23 @@ function postReply(payload) {
   self.postMessage({ ...payload, __id: currentId })
 }
 
+/**
+ * Reply with a SUCCESS. Use this rather than writing the type inline.
+ *
+ * ⚠ THE MAIN THREAD RESOLVES ON `type === 'done'` AND REJECTS EVERYTHING ELSE,
+ * so a success spelled any other way is a rejected measurement, not a warning —
+ * and it fails QUIETLY, because every caller catches. A handler added here
+ * posted `type: 'complete'` and shipped: `refreshAutoMakeup` logged to the
+ * console and left the Gain knob wherever it was, so OptoSmooth's auto makeup
+ * silently stopped working altogether while the panel went on claiming AUTO.
+ *
+ * The string is stated once, here, so a new handler cannot invent a different
+ * word for it. `getMeasureWorker` in processing.js is the other half.
+ */
+function postDone(payload) {
+  postReply({ type: 'done', ...payload })
+}
+
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
   currentId = e.data.__id
@@ -72,7 +89,7 @@ function la2aAutoMakeup(channelData, sampleRate, params) {
   const { reference = 'peak', ...kernelParams } = params ?? {}
   try {
     const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
-    postReply({ type: 'complete', makeupDb: plan.makeupDb })
+    postDone({ makeupDb: plan.makeupDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -83,7 +100,7 @@ function la2aAutoMakeup(channelData, sampleRate, params) {
 // don't jank the UI while the measurement re-runs.
 function autoMakeup(measure, channelData, sampleRate, params) {
   try {
-    postReply({ type: 'done', makeupDb: measure(channelData, sampleRate, params) })
+    postDone({ makeupDb: measure(channelData, sampleRate, params) })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -94,7 +111,7 @@ function autoMakeup(measure, channelData, sampleRate, params) {
 function schepsAutoTrim(channelData, sampleRate, params) {
   try {
     const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
-    postReply({ type: 'done', trimDb, correlation, densityDb })
+    postDone({ trimDb, correlation, densityDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -115,7 +132,7 @@ function schepsAutoTrim(channelData, sampleRate, params) {
 function softClipperCeiling(channelData, sampleRate, params) {
   try {
     const ceilingDb = measurePeakCeilingDb(channelData, sampleRate, params.percentile)
-    postReply({ type: 'done', ceilingDb })
+    postDone({ ceilingDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -134,7 +151,7 @@ function softClipperCeiling(channelData, sampleRate, params) {
  */
 function voiceProfile(channelData, sampleRate) {
   try {
-    postReply({ type: 'done', profile: measureVoiceProfile(channelData, sampleRate) })
+    postDone({ profile: measureVoiceProfile(channelData, sampleRate) })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
