@@ -49,7 +49,7 @@ import { readWav } from '../test/voicerx/wav.js'
 // own copy of the thing that drifts.
 import { LA2AKernel, TUBE_DRIVE_LIN, TUBE_BIAS } from '../src/audio/la2aProcessor.js'
 import {
-  CAPTURES_DIR, NOISE_FLOOR_FILE, sweepEntries, toneFilename,
+  CAPTURES_DIR, TONES_DIR, NOISE_FLOOR_FILE, sweepEntries, toneFilename,
   LEVEL_SWEEP_FREQ_HZ, FREQ_SWEEP_DBFS,
   GAIN_SWEEP_FREQ_HZ, GAIN_SWEEP_DBFS,
   ANALYSIS_WINDOW_END_OFFSET_S, ANALYSIS_WINDOW_LENGTH_S,
@@ -271,9 +271,55 @@ function captureFor(file) {
   return null
 }
 
+// A SILENCE FILE CANNOT BOUND A TONE MEASUREMENT, and the LALA run is the proof.
+// Its rendered silence slot reads -299.1 dBFS — a real bounce (288000/288000
+// samples nonzero, peak 1.1e-15), just from a plugin that is clean on digital
+// silence, where the Waves CLA-2A's reads -175.1. Nothing in an eight-point
+// level sweep ever comes within 6 dB of -299, so `nearFloor()` was inert for
+// the whole run and every point got fitted as clean.
+//
+// The floor that actually applies is the STIMULUS TONE'S OWN harmonic content:
+// a float32 sine is not spectrally pure, and its impurity is per-harmonic and
+// level-dependent. Measured on our own tones, H2 sits at -311 dBc and H4 at
+// -291 at every level — clean — but H3 wanders between -157 and -186 dBc. At
+// -40 dBFS the LALA's H3 is -148.4 dBc, only 8.5 dB above what the stimulus
+// brought with it, which the silence floor rates as 150 dB of headroom.
+//
+// So the reference is the same tone, unrendered, harmonic by harmonic. It is
+// already on disk in TONES_DIR — the file the operator bounced.
+const STIMULUS_MARGIN_DB = 6
+
+// A capture whose harmonics ALL sit at the stimulus's own never went through
+// the plugin — it is the tone file copied into the captures directory. The
+// first LALA gain sweep was five rows of exactly this, H2 -309.8 / H3 -156.9
+// at every knob label from 32 to 100, against the stimulus tone's own -311.4
+// and -156.9. Note that a fixed dBc threshold does NOT catch it: H2 is at the
+// float floor but H3 is at -157, so any cutoff low enough to flag the one
+// clears the other. The stimulus is the only reference that sees both.
+const UNRENDERED_MARGIN_DB = 3
+
 /** True if a harmonic's absolute level sits within `marginDb` of the measured noise floor. */
 function nearFloor(fundamentalDbfs, dBc, floorDbfs, marginDb = 6) {
   return floorDbfs !== null && (fundamentalDbfs + dBc) < floorDbfs + marginDb
+}
+
+/**
+ * The stimulus tone's own harmonics, in dBc, for the capture named `file` —
+ * or null when the tone is not on disk (a capture set copied in from
+ * elsewhere), in which case the guard simply does not apply.
+ */
+const stimulusCache = new Map()
+function stimulusDBc(file, freqHz) {
+  if (!stimulusCache.has(file)) {
+    const path = join(TONES_DIR, file)
+    stimulusCache.set(file, existsSync(path) ? analyzeCapture(path, freqHz).dBc : null)
+  }
+  return stimulusCache.get(file)
+}
+
+/** True if a measured harmonic is within `marginDb` of the same harmonic in the stimulus. */
+function nearStimulus(dBc, stim, i, marginDb = STIMULUS_MARGIN_DB) {
+  return stim !== null && stim[i] !== undefined && dBc < stim[i] + marginDb
 }
 
 function main() {
@@ -292,7 +338,8 @@ function main() {
     let rms = 0
     for (let i = Math.max(0, start); i < end; i++) rms += mono[i] * mono[i]
     floorDbfs = db(Math.sqrt(rms / (end - Math.max(0, start))))
-    console.log(`Noise floor (${NOISE_FLOOR_FILE}): ${floorDbfs.toFixed(1)} dBFS RMS\n`)
+    console.log(`Noise floor (${NOISE_FLOOR_FILE}): ${floorDbfs.toFixed(1)} dBFS RMS`)
+    console.log('')
   } else {
     console.log(`⚠ No ${NOISE_FLOOR_FILE} capture found — harmonics near the noise floor will not be flagged.\n`)
   }
@@ -312,15 +359,22 @@ function main() {
     const fundGain = m.fundamentalDbfs - dbfs
     if (firstFundGain === null) firstFundGain = fundGain
 
+    const stim = stimulusDBc(e.file, LEVEL_SWEEP_FREQ_HZ)
     const cells = m.dBc.slice(0, 3).map((v, i) => {
-      const flag = nearFloor(m.fundamentalDbfs, v, floorDbfs) ? '*' : ' '
+      // Two floors, either of which disqualifies a point: the silence capture
+      // (an absolute floor) and the stimulus tone's own harmonic at the same
+      // level (a relative one). The second is usually the binding constraint —
+      // see the note on STIMULUS_MARGIN_DB.
+      const flag = nearFloor(m.fundamentalDbfs, v, floorDbfs) ? '*'
+        : nearStimulus(v, stim, i) ? 's' : ' '
       return `${v.toFixed(1).padStart(7)}${flag}  ${model[i].toFixed(1).padStart(8)}`
     })
     console.log(`  ${String(dbfs).padStart(4)} dBFS   ${cells.join('   ')}   ${fundGain >= 0 ? '+' : ''}${fundGain.toFixed(2)} dB`)
 
-    levelPoints.push({ dbfs, measured: m.dBc, fundamentalDbfs: m.fundamentalDbfs })
+    levelPoints.push({ dbfs, measured: m.dBc, fundamentalDbfs: m.fundamentalDbfs, stim })
   }
-  console.log('  (* = within 6 dB of the measured noise floor — excluded from the fit)')
+  console.log(`  (* = within 6 dB of the measured noise floor; s = within ${STIMULUS_MARGIN_DB} dB of the`)
+  console.log(`   stimulus tone's OWN harmonic at that level — both excluded from the fit)`)
   if (firstFundGain !== null && levelPoints.length >= 2) {
     const spread = Math.max(...levelPoints.slice(0, 2).map(p => Math.abs(p.fundamentalDbfs - p.dbfs - firstFundGain)))
     if (spread > 0.5) {
@@ -365,19 +419,28 @@ function main() {
   if (gainFiles.length === 0) {
     console.log(`  -- no gain-sweep captures found (expected ${gainBase}_g<label>.wav) --`)
   } else {
+    const gainStim = stimulusDBc(`${gainBase}.wav`, GAIN_SWEEP_FREQ_HZ)
     console.log('  knob label     H2 meas    H3 meas    H2-H4 THD %')
     for (const f of gainFiles) {
       const label = f.match(gainFilePattern)[1]
       const m = analyzeCapture(join(CAPTURES_DIR, f), GAIN_SWEEP_FREQ_HZ)
       const thd = Math.sqrt(m.dBc.reduce((sum, v) => sum + Math.pow(10, v / 10), 0)) * 100
-      console.log(`  ${label.padEnd(12)}   ${m.dBc[0].toFixed(1).padStart(7)}    ${m.dBc[1].toFixed(1).padStart(7)}    ${thd.toFixed(3)}`)
+      // Same tell as the noise floor: harmonics at the arithmetic floor mean the
+      // file never went through the plugin. Worth naming per row, because the
+      // gain sweep is the one sweep with no cross-check inside it — five rows of
+      // identical numbers read as "the knob does nothing" unless this says why.
+      const unrendered = gainStim !== null
+        && m.dBc.every((v, i) => Math.abs(v - gainStim[i]) < UNRENDERED_MARGIN_DB)
+      const note = unrendered ? '   ⚠ not a render — this is the raw stimulus tone' : ''
+      console.log(`  ${label.padEnd(12)}   ${m.dBc[0].toFixed(1).padStart(7)}    ${m.dBc[1].toFixed(1).padStart(7)}    ${thd.toFixed(3)}${note}`)
     }
     console.log('  Expect monotone rising THD. A knob label is NOT assumed to read in dB — see the')
     console.log('  protocol for the calibration check that would let it be used quantitatively.')
   }
 
   // ── Fit ──────────────────────────────────────────────────────────────────
-  const fitData = levelPoints.filter(p => !p.measured.some((v, i) => nearFloor(p.fundamentalDbfs, v, floorDbfs)))
+  const fitData = levelPoints.filter(p => !p.measured.some((v, i) =>
+    nearFloor(p.fundamentalDbfs, v, floorDbfs) || nearStimulus(v, p.stim, i)))
   if (doFit) {
     console.log(`\n=== FIT (${fitData.length}/${levelPoints.length} level-sweep points, floor-contaminated points excluded) ===`)
     if (fitData.length < 3) {
