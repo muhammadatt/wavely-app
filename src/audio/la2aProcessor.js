@@ -740,8 +740,8 @@ export const DC_BLOCK_HZ = 5
  * speech 18.9 %). This mechanism measures -6.7 dB on the same test. Tone THD
  * cannot tell the two apart; program material can, which is the reusable half.
  */
-const CELL_MOD_MAX = 0.1225
-const CELL_MOD_TAU_DB = 5.505
+export const CELL_MOD_MAX = 0.1225
+export const CELL_MOD_TAU_DB = 5.505
 
 
 /**
@@ -1162,6 +1162,9 @@ export class LA2AKernel {
     this.hpfLp = 0
     this.shelfLp = 0
     this.env = 0
+    // The rectifier's own smoothed value, when a rectifier pole is dialled in.
+    // With the pole off its coefficient is 1, so this simply tracks `rect`.
+    this.rectLp = 0
     // The cell's reduction, and how far its recovery has handed over from the
     // fast phase to the phosphorescent one (0 = just released, 1 = deep tail).
     this.gr = 0
@@ -1307,6 +1310,7 @@ export class LA2AKernel {
     this.hpfLp = 0
     this.shelfLp = 0
     this.env = 0
+    this.rectLp = 0
     this.gr = 0
     this.relPhase = 0
     this.lastGain = 1
@@ -1350,11 +1354,43 @@ export class LA2AKernel {
     // — tube warmth at nominal level, not overdrive. Max reaches ~-22 dBc.
     this.applyTube = p.tube !== false
     this.cellMod = Number.isFinite(p.cellMod) ? Math.max(0, p.cellMod) : 1
-    this.tubeDriveLin = TUBE_DRIVE_LIN
-    this.tubeBias = TUBE_BIAS
+    /**
+     * ⚠ THE FOUR CONSTANTS BELOW ARE OVERRIDABLE, AND THE OVERRIDES ARE A BENCH
+     * CONTROL, NOT A PANEL KNOB. Each one defaults to the module constant it
+     * shadows, so a kernel built without them is bit-identical to one built
+     * before they existed — the tuning UI writes them only when it is asked to.
+     * They exist because the distortion cannot be judged by ear without moving
+     * them, and every one of them is fitted to something (the hardware paper,
+     * or a measurement), so anything moved here has to come back through the
+     * ledger before it ships. See `la2aTuning.js` for the panel side.
+     */
+    this.cellModMax = Number.isFinite(p.cellModMax) && p.cellModMax >= 0
+      ? p.cellModMax : CELL_MOD_MAX
+    this.cellModTauDb = Number.isFinite(p.cellModTauDb) && p.cellModTauDb > 0
+      ? p.cellModTauDb : CELL_MOD_TAU_DB
+    this.tubeDriveLin = Number.isFinite(p.tubeDriveLin) && p.tubeDriveLin > 0
+      ? p.tubeDriveLin : TUBE_DRIVE_LIN
+    this.tubeBias = Number.isFinite(p.tubeBias) ? p.tubeBias : TUBE_BIAS
     this.tanhBias = Math.tanh(this.tubeBias)
     // Normalize so the shaper has unity small-signal gain
     this.tubeNorm = this.tubeDriveLin * (1 - this.tanhBias * this.tanhBias)
+    /**
+     * A one-pole on the RECTIFIER, ahead of `rect / env`. 0 is off and is what
+     * ships. It exists because it is the only thing measured that changes the
+     * cell modulation's harmonic PROFILE rather than its level: at 2 ms the
+     * H3-to-H9 spread opens from 32.0 to 41.6 dB, i.e. the high odd orders
+     * — the harsh ones — fall away faster than H3 does.
+     *
+     * ⚠ A POLE AT `DETECTOR_S` NULLS THE MODULATION ENTIRELY. `rel` is
+     * `rect / env - 1`; smooth the numerator to the same time constant as the
+     * denominator and it goes to zero. Measured at 0.5 ms the cell's H3 drops
+     * to -85.1 dBc from -33.8. The panel marks that value; the kernel does not
+     * forbid it, because it is a legitimate thing to hear once.
+     */
+    const rectLpMs = Number.isFinite(p.rectLpMs) ? Math.max(0, p.rectLpMs) : 0
+    this.rectLpCoef = rectLpMs > 0
+      ? 1 - Math.exp(-1 / (this.sampleRate * (rectLpMs / 1000)))
+      : 1
 
     this.wetMix = clamp(p.mix, 0, 1)
     this.dryMix = 1 - this.wetMix
@@ -1430,7 +1466,7 @@ export class LA2AKernel {
       }
     }
 
-    let { hpfLp, shelfLp, env, gr, relPhase } = this
+    let { hpfLp, shelfLp, env, gr, relPhase, rectLp } = this
 
     // Seeded on the first block; advanced once per sample HERE rather than
     // per channel, because this envelope loop is already the shared one.
@@ -1547,12 +1583,13 @@ export class LA2AKernel {
         // Ripple as a fraction of the smoothed envelope, scaled by how hard
         // the cell is working. Sign is compressive: an instantaneously loud
         // sample means an instantaneously brighter lamp, so more attenuation.
-        const rel = rect / env - 1
+        rectLp += (rect - rectLp) * this.rectLpCoef
+        const rel = rectLp / env - 1
         // Saturating in gain reduction: a
         // depth linear in grDb hits the paper's point and then runs away, 9.3 %
         // by 24 dB of reduction. This levels off inside the band the six units
         // span at the one depth anyone measured.
-        const depth = this.cellMod * CELL_MOD_MAX * (1 - Math.exp(-grNow / CELL_MOD_TAU_DB))
+        const depth = this.cellMod * this.cellModMax * (1 - Math.exp(-grNow / this.cellModTauDb))
         const m = 1 - depth * rel
         preG *= m > 0.05 ? (m < 4 ? m : 4) : 0.05
       }
@@ -1562,6 +1599,7 @@ export class LA2AKernel {
     }
     this.makeupLinSmoothed = makeupLinSmoothed
 
+    this.rectLp = rectLp
     this.hpfLp = hpfLp
     this.shelfLp = shelfLp
     this.env = env

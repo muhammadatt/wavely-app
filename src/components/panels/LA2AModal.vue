@@ -11,6 +11,8 @@ import DeviceChoiceRocker from '../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import LA2ATuningPanel from './LA2ATuningPanel.vue'
+import { isLA2ATuningVisible } from '../../audio/effects/la2aTuning.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -20,8 +22,15 @@ const {
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain,
   syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
+  refreshKernelTuning,
   apply, teardown, closeModal,
 } = useLA2A()
+
+/**
+ * Read once, not reactively: the gate is a build flag plus a localStorage key,
+ * neither of which changes while the panel is open.
+ */
+const showTuningBench = isLA2ATuningVisible()
 
 const { state } = useEditorState()
 
@@ -264,6 +273,14 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
           </div>
         </div>
       </div>
+
+      <!-- Bench only: gated off in production builds. See la2aTuning.js. -->
+      <LA2ATuningPanel
+        v-if="showTuningBench"
+        :accent="ACCENT"
+        :disabled="!la2aPreview"
+        @change="refreshKernelTuning"
+      />
     </div>
   </FloatingWindow>
 </template>

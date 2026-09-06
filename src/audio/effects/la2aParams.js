@@ -15,6 +15,7 @@
 
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { la2aLatencySamples, LOOKAHEAD_MAX_MS } from '../la2aProcessor.js'
+import { la2aTuningOverrides } from './la2aTuning.js'
 
 export { LOOKAHEAD_MAX_MS }
 
@@ -44,7 +45,18 @@ export const LA2A_DEFAULTS = {
   lookahead: 0,
 }
 
-/** Map UI param names to kernel param names. */
+/**
+ * Map UI param names to kernel param names.
+ *
+ * ⚠ IT ALSO FOLDS IN THE BENCH TUNING OVERRIDES, WHICH IS A HIDDEN INPUT AND IS
+ * DELIBERATE. Preview (`la2aCompressor.js`) and offline apply
+ * (`applyLA2ARegion`) both build their kernel params here and nowhere else, so
+ * merging at this one point is what keeps them sample-identical — the
+ * alternative is threading the tuning through every caller and relying on none
+ * of them forgetting. `la2aTuningOverrides()` is empty unless the tuning panel
+ * has been touched, so the untouched result is byte-identical to what this
+ * returned before. See `la2aTuning.js`.
+ */
 export function toKernelParams(params) {
   return {
     mode: params.mode,
@@ -52,6 +64,7 @@ export function toKernelParams(params) {
     gainDb: params.gain,
     r37: params.r37,
     lookaheadMs: params.lookahead,
+    ...la2aTuningOverrides(),
   }
 }
 

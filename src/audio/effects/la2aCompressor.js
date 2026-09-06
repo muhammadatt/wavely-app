@@ -93,6 +93,16 @@ export function createLA2ACompressor(audioContext) {
       return params[name]
     },
 
+    /**
+     * Re-send the kernel params without changing a patch param. The bench
+     * tuning is folded in by `toKernelParams` rather than held here, so there
+     * is no param name to set — the tuning panel moves module state and then
+     * asks the live node to pick it up.
+     */
+    refreshKernelParams() {
+      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+    },
+
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.
     /**
      * The makeup the audio heard so far asks for, dB, or null before anything

@@ -268,6 +268,23 @@ export function useLA2A() {
   }
 
   /**
+   * The bench tuning changed. It is not a patch param — it lives in module
+   * state and is folded in by `toKernelParams` — so there is nothing to set;
+   * the live node just has to re-read it.
+   *
+   * Treated as a compression change for makeup purposes, because it is one:
+   * the valve constants move where the peak lands, and the cell constants move
+   * how much reduction is applied. The tracker's extrema describe the old
+   * settings exactly as they do after a Peak Reduction move.
+   */
+  function refreshKernelTuning() {
+    getEffectChain(getAudioContext()).effects
+      .find(e => e.id === la2aEffect.id)?.nodes?.refreshKernelParams?.()
+    resetLiveMakeup()
+    scheduleAutoMakeup()
+  }
+
+  /**
    * Leave AUTO, keeping the knob exactly where it stands, so going manual is a
    * seamless takeover rather than a jump back to 0 dB. Any in-flight
    * measurement is discarded by sequence number so it cannot land afterwards
@@ -380,6 +397,7 @@ export function useLA2A() {
     toggleAutoMakeup,
     refreshAutoMakeup,
     resetLiveMakeup,
+    refreshKernelTuning,
     apply,
     teardown,
     openModal,
