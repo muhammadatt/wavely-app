@@ -2135,9 +2135,22 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
  * buying it by compressing harder — a hardware LA-2A capture of the same take
  * sits at -16.38 and 3.35.
  *
- * ⚠ AND IT IS OFF BY DEFAULT, because the exact guarantee is worth keeping as
- * the default even where the enforced one would do. Every existing patch and
- * every rendered file predates this.
+ * ⚠ AND THE PERCENTILE IS NOW WHAT THE APP USES. It shipped off by default and
+ * behind a panel toggle, was auditioned, and the toggle came back out: there is
+ * no material on which the peak reference is the better answer, so there was
+ * nothing for a user to choose between. `useLA2A` fixes the reference and the
+ * panel has no control for it.
+ *
+ * ⚠ WHICH MEANS EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS
+ * DIFFERENT — several dB louder at the same settings, and louder the further up
+ * the knob. That is the intended change and it is not reversible from the UI.
+ * A file already rendered on disk is untouched; the same patch re-applied to it
+ * is not the same render.
+ *
+ * The peak reference remains the DEFAULT of this function and is what
+ * `npm run la2a:makeup` renders against for comparison. It is the reference
+ * anything measuring "makeup that cannot exceed the source by construction"
+ * should still use.
  */
 function peakOfChannels(channels, skip = 0) {
   let peak = 0

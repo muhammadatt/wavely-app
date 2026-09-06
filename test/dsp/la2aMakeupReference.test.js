@@ -191,10 +191,36 @@ test('a panel-shaped patch actually limits when it carries a ceiling', () => {
     `the guarded one must sit at or under it: ${db(peak(held)).toFixed(4)}`)
 })
 
-test('LA2A_DEFAULTS ships the peak reference and no ceiling', () => {
-  assert.equal(LA2A_DEFAULTS.makeupReference, 'peak')
+/**
+ * ⚠ NEITHER IS A PATCH VALUE, FOR DIFFERENT REASONS, AND BOTH MATTER.
+ *
+ * The REFERENCE is fixed in `useLA2A` and has no control: it was a panel toggle
+ * for one release, was auditioned, and came out — there is no material on which
+ * the peak reference wins, so there was nothing to choose between. Leaving it in
+ * `LA2A_DEFAULTS` would put it back in saved patches and presets as a setting
+ * that no longer exists.
+ *
+ * The CEILING is measured from the region's own peak, so a preset carrying one
+ * would apply one file's peak to another.
+ */
+test('neither the reference nor the ceiling is a stored patch value', () => {
+  assert.ok(!('makeupReference' in LA2A_DEFAULTS),
+    'the reference is fixed in the composable, not stored per patch')
   assert.ok(!('ceilingDb' in LA2A_DEFAULTS),
     'the ceiling is measured from the audio, so it must not be a stored patch value')
+})
+
+/**
+ * The solve still takes both — the bench renders them side by side
+ * (`npm run la2a:makeup`) — and `peak` is still what it does when asked for
+ * nothing, which is what keeps every other caller of this function unchanged.
+ */
+test('the solve still defaults to peak when no reference is named', () => {
+  const x = stimulus(2)
+  assert.equal(
+    computeAutoMakeupPlan([x], SR, { peakReduction: 60 }).makeupDb,
+    computeAutoMakeupPlan([x], SR, { peakReduction: 60 }, { reference: 'peak' }).makeupDb,
+  )
 })
 
 /**
@@ -204,13 +230,14 @@ test('LA2A_DEFAULTS ships the peak reference and no ceiling', () => {
  * tube shaper at the TARGET PEAK from running extrema — that is what makes it
  * O(1) per sample and what makes it agree with the offline peak solve to
  * hundredths of a dB. Two extrema cannot express a quantile, so there is no
- * small fix that would let it answer for BODY; the composable gates the
- * write-back on the peak reference instead.
+ * small fix that would let it answer for the percentile, and with the solve now
+ * fixed there, `useLA2A` no longer consumes the tracker at all.
  *
- * The number below is the whole reason that gate exists: ungated, the tracker
+ * The number below is the whole reason it was dropped: while it still ran, it
  * overwrote the offline value on every meter tick and preview played several dB
- * under apply, reported as makeup gain missing from playback. If this test ever
- * fails because the two have converged, the gate can go.
+ * under apply, reported as makeup gain missing from playback. The kernel-side
+ * tracker is still correct and still tested in liveMakeup.test.js; if these two
+ * ever converge, the panel could consume it again.
  */
 function runKernel(x, params) {
   const kernel = new LA2AKernel(SR)

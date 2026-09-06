@@ -16,7 +16,21 @@ const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
 const la2aR37 = ref(LA2A_DEFAULTS.r37)
 const la2aLookahead = ref(LA2A_DEFAULTS.lookahead)
-const la2aMakeupReference = ref(LA2A_DEFAULTS.makeupReference)
+/**
+ * The statistic the AUTO makeup solve references. Fixed, not a control.
+ *
+ * ⚠ IT WAS A PANEL TOGGLE AND IT IS NOT ANY MORE, ON PURPOSE. Peak-referenced
+ * makeup lets one uncompressed transient set the reference for a whole file, so
+ * past about Peak Reduction 50 the knob made the file QUIETER — measured on
+ * narration, -17.4 dB rms at PR 50 against -19.5 at 60 and -20.0 at 70. There
+ * is no material on which that is the better answer, so there was nothing for a
+ * user to choose between. The bench keeps both (`npm run la2a:makeup`), which
+ * is where a comparison belongs.
+ *
+ * See `peakOfChannels` in la2aProcessor.js for what the percentile gives up and
+ * `computeAutoMakeupPlan` for the ceiling that puts it back.
+ */
+const MAKEUP_REFERENCE = 'percentile'
 /**
  * The ceiling the last measurement produced, dBFS, or null.
  *
@@ -66,7 +80,6 @@ function currentParams() {
     gain: la2aGain.value,
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
-    makeupReference: la2aMakeupReference.value,
     /**
      * ⚠ ONLY WHILE AUTO OWNS THE KNOB. The ceiling is the other half of the
      * percentile solve; with AUTO off there is no solve, the gain is the
@@ -113,54 +126,28 @@ export function useLA2A() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === la2aEffect.id)?.nodes
       /**
-       * LIVE AUTO MAKEUP — read off the worklet on the meter's own cadence.
+       * ⚠ NO LIVE MAKEUP WRITE-BACK, AND THE TRACKER IS WHY RATHER THAN THE
+       * PANEL. `liveAutoMakeupDb` is PEAK-referenced by construction — it
+       * inverts the tube shaper at the target peak from two running extrema,
+       * which is what makes it O(1) per sample — and two extrema cannot express
+       * a quantile. With the solve fixed on the percentile there is nothing it
+       * can correctly say.
        *
-       * The kernel maintains it from running extrema at O(1) per sample, so it
-       * needs no worker, no region render and no selection, and it lands within
-       * one meter interval (~21 ms) rather than a measurement (~170 ms).
+       * It ran here on every meter tick, and it did not merely disagree with
+       * the offline value, it OVERWROTE it: preview played 4.46 dB under apply
+       * on real narration, reported as makeup gain missing from playback.
        *
-       * ⚠ THIS IS THE PREVIEW VALUE ONLY. It knows only what has PLAYED, so it
-       * is history-dependent — measured on real narration it can sit ~0.9 dB
-       * high before the loudest moment arrives. `apply()` re-measures offline
-       * for exactly that reason; see the note there.
+       * The knob is the offline solve's alone now. It still tracks —
+       * `scheduleAutoMakeup` re-measures on every compression change — at
+       * measurement cadence (~170 ms) rather than meter cadence (~21 ms), which
+       * is where it sat before the tracker existed.
        *
-       * ⚠ ONLY WHILE AUTO OWNS THE KNOB. Once the user has taken over, writing
-       * a tracked value into it would be the panel overruling them.
+       * ⚠ THE KERNEL-SIDE TRACKER IS DELIBERATELY LEFT ALONE. It is still
+       * correct, still tested (test/dsp/liveMakeup.test.js), and still the
+       * foundation for a percentile-aware version — which needs a running
+       * quantile, i.e. a histogram, and is its own piece of work. FET Punch
+       * still consumes its own.
        */
-      /**
-       * ⚠ AND ONLY UNDER THE PEAK REFERENCE, WHICH IS THE ONE IT CAN ANSWER
-       * FOR. `liveAutoMakeupDb` is peak-referenced by construction — it inverts
-       * the tube shaper at the TARGET PEAK using running extrema, which is what
-       * makes it O(1) per sample and what makes it agree with the offline peak
-       * solve to hundredths. It has no way to express a percentile: a running
-       * quantile is not two extrema.
-       *
-       * Left ungated it does not merely disagree, it OVERWRITES. This runs on
-       * every meter tick (~21 ms), so under BODY the offline solve's value
-       * survived for one frame and was then replaced by the peak-referenced one
-       * for the rest of playback — measured on narration at Peak Reduction 60,
-       * the tracker says 4.20 dB against the percentile solve's 8.66, so
-       * preview played 4.46 dB QUIETER than the same settings applied. Reported
-       * exactly that way, as makeup gain missing from playback.
-       *
-       * So under BODY the knob is owned by the offline solve alone. It still
-       * tracks — `scheduleAutoMakeup` re-measures on every compression change —
-       * just at measurement cadence rather than meter cadence, which is where
-       * this knob sat before the tracker existed. Better a knob that updates in
-       * ~170 ms and is right than one that updates in ~21 ms and is 4 dB wrong.
-       */
-      if (la2aAutoMakeup.value && la2aMakeupReference.value === 'peak') {
-        const live = nodes.getLiveMakeupDb?.()
-        if (Number.isFinite(live)) {
-          const next = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, live))
-          // A threshold, not equality: the knob prints one decimal, and
-          // repainting it on sub-hundredth wobble is churn nobody can see.
-          if (Math.abs(next - la2aGain.value) > 0.02) {
-            la2aGain.value = next
-            pushGain()
-          }
-        }
-      }
       if (nodes) {
         la2aReduction.value = nodes.getReduction()
         // Only meter channels the source really has: the splitter is
@@ -245,7 +232,7 @@ export function useLA2A() {
         state.segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
-        la2aMakeupReference.value,
+        MAKEUP_REFERENCE,
       )
       if (seq !== makeupSeq) return // a newer measurement is already in flight
       /**
@@ -293,7 +280,6 @@ export function useLA2A() {
      * measurement supplies the value immediately and the tracker refines it
      * from the new settings instead of arguing for the old ones.
      */
-    resetLiveMakeup()
     scheduleAutoMakeup()
   }
 
@@ -330,29 +316,9 @@ export function useLA2A() {
    * how much reduction is applied. The tracker's extrema describe the old
    * settings exactly as they do after a Peak Reduction move.
    */
-  /**
-   * Switch which statistic the solve references.
-   *
-   * A measurement change, not a sound change, so nothing is pushed to the node
-   * directly — the re-measure writes both the gain and the ceiling, in that
-   * order, through `refreshAutoMakeup`. Immediate rather than throttled: this
-   * is a click, not a drag, and it moves the makeup by dBs.
-   */
-  function syncMakeupReference(v) {
-    if (v === la2aMakeupReference.value) return
-    la2aMakeupReference.value = v
-    if (v !== 'percentile') {
-      la2aCeilingDb.value = null
-      pushParam('ceilingDb', null)
-    }
-    resetLiveMakeup()
-    refreshAutoMakeup()
-  }
-
   function refreshKernelTuning() {
     getEffectChain(getAudioContext()).effects
       .find(e => e.id === la2aEffect.id)?.nodes?.refreshKernelParams?.()
-    resetLiveMakeup()
     scheduleAutoMakeup()
   }
 
@@ -385,17 +351,6 @@ export function useLA2A() {
       la2aAutoMakeup.value = true
       refreshAutoMakeup()
     }
-  }
-
-  /**
-   * A new region is new material, so the live tracker's running extrema — which
-   * describe audio the user has moved on from — are cleared with it. Without
-   * this the makeup keeps answering for the previous selection and only drifts
-   * toward the new one as it is diluted.
-   */
-  function resetLiveMakeup() {
-    getEffectChain(getAudioContext()).effects
-      .find(e => e.id === la2aEffect.id)?.nodes?.resetMakeupTracker?.()
   }
 
   async function apply() {
@@ -462,8 +417,6 @@ export function useLA2A() {
     la2aGain,
     la2aR37,
     la2aLookahead,
-    la2aMakeupReference,
-    la2aCeilingDb,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
     la2aPreview,
@@ -477,10 +430,8 @@ export function useLA2A() {
     syncGain,
     syncR37,
     syncLookahead,
-    syncMakeupReference,
     toggleAutoMakeup,
     refreshAutoMakeup,
-    resetLiveMakeup,
     refreshKernelTuning,
     apply,
     teardown,

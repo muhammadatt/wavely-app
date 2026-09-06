@@ -75,18 +75,6 @@ function normalize(params) {
      * Every factory preset states it explicitly for the same reason.
      */
     lookahead: clamp(params.lookahead ?? 0, 0, LOOKAHEAD_MAX_MS),
-    /**
-     * ⚠ DEFAULTS TO 'peak' FOR PRESETS SAVED BEFORE THE CONTROL EXISTED, for
-     * the same reason lookahead defaults to 0: those patches were auditioned
-     * against the peak-referenced solve, and 'percentile' asks for several dB
-     * more makeup. Anything else would change how a stored preset sounds.
-     *
-     * It is stored even while AUTO is off, unlike the gain. The gain is
-     * canonicalised there because the plugin overwrites it; this is not a value
-     * the plugin writes, it is the instruction for how to solve when AUTO comes
-     * back on — dropping it would silently reset the choice.
-     */
-    makeupReference: params.makeupReference === 'percentile' ? 'percentile' : 'peak',
     autoMakeup,
   }
 }
@@ -94,7 +82,7 @@ function normalize(params) {
 // ⚠ A PARAM MISSING FROM THIS LIST IS SILENTLY DROPPED on save and never
 // restored — the preset simply forgets it.
 export const OPTO_SMOOTH_PARAM_KEYS = [
-  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'makeupReference', 'autoMakeup',
+  'mode', 'peakReduction', 'gain', 'r37', 'lookahead', 'autoMakeup',
 ]
 
 export const OPTO_SMOOTH_PRESETS = [
@@ -108,7 +96,6 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 100,
       lookahead: 0,
-      makeupReference: 'peak',
       autoMakeup: true,
     },
   },
@@ -124,7 +111,6 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 82,
       lookahead: 0,
-      makeupReference: 'peak',
       autoMakeup: true,
     },
   },
@@ -142,7 +128,6 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 45,
       lookahead: 0,
-      makeupReference: 'peak',
       autoMakeup: true,
     },
   },
@@ -166,7 +151,6 @@ export const OPTO_SMOOTH_PRESETS = [
       // already fairly even.
       r37: 100,
       lookahead: 0,
-      makeupReference: 'peak',
       autoMakeup: true,
     },
   },
@@ -184,7 +168,6 @@ export const OPTO_SMOOTH_PRESETS = [
       gain: 0,
       r37: 100,
       lookahead: 0,
-      makeupReference: 'peak',
       autoMakeup: true,
     },
   },

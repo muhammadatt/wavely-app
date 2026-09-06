@@ -43,22 +43,6 @@ export const LA2A_DEFAULTS = {
    * measurements and for why the ceiling is 20 and not higher.
    */
   lookahead: 0,
-  /**
-   * Which statistic the AUTO makeup solve references: 'peak' (the shipping
-   * behaviour) or 'percentile'.
-   *
-   * ⚠ IT ONLY MEANS ANYTHING WITH AUTO MAKEUP ON, because it names how the
-   * solve measures — with AUTO off there is no solve and the knob is the
-   * user's. The panel disables the control there rather than showing a setting
-   * that does nothing.
-   *
-   * ⚠ AND IT NEVER TRAVELS ALONE. 'percentile' gives up the arithmetic
-   * guarantee that the output cannot exceed the source, and a ceiling measured
-   * from the region puts it back — see `computeLA2AAutoMakeup`, which returns
-   * both, and `peakOfChannels` in la2aProcessor.js for the measurement that
-   * rejected the percentile on its own.
-   */
-  makeupReference: 'peak',
 }
 
 /**
