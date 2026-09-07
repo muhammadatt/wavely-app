@@ -38,7 +38,16 @@ export function createLA2ACompressor(audioContext) {
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...LA2A_DEFAULTS }
+  /**
+   * ⚠ `ceilingDb` IS SEEDED HERE BECAUSE `setParam` GATES ON `name in params`.
+   * It is measured rather than dialled, so it is deliberately absent from
+   * `LA2A_DEFAULTS` (see there) — and without a seed that gate would drop every
+   * push of it on the floor, silently, leaving the panel's percentile mode
+   * running the raised makeup with no ceiling behind it. That is precisely the
+   * overshoot the pairing exists to prevent, so it would have been the one bug
+   * this feature must not have.
+   */
+  let params = { ...LA2A_DEFAULTS, ceilingDb: null }
   let worklet = null
   let destroyed = false
   let grDb = 0

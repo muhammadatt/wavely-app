@@ -27,7 +27,7 @@
  */
 
 import {
-  TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB,
+  TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
 } from '../la2aProcessor.js'
 
 /**
@@ -42,6 +42,12 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
   cellModMax: CELL_MOD_MAX,
   /** How fast that depth rises with gain reduction, in dB. */
   cellModTauDb: CELL_MOD_TAU_DB,
+  /**
+   * Shape exponent on the cell's ripple. 1 is the shipping law and is linear;
+   * above 1 concentrates the same depth on the loudest samples. NOT fitted —
+   * see CELL_MOD_SHAPE and `npm run la2a:cellmod`.
+   */
+  cellModShape: CELL_MOD_SHAPE,
   /**
    * One-pole on the rectifier ahead of `rect / env`, ms. 0 is off and is what
    * ships. The only control here that changes the harmonic PROFILE rather

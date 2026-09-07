@@ -14,39 +14,27 @@
 import { ensureSchepsWorklet } from '../schepsWorkletLoader.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+import { onLA2ATuningChange } from './la2aTuning.js'
 
 /**
- * The wet path runs through OptoSmooth's oversampled gain cell, whose halfband
- * filters are linear phase and therefore delay. The dry side of the blend is
- * delayed to match inside the kernel; this is the whole plugin's delay, which
- * the offline apply path compensates.
+ * ⚠ THE PARAMS AND THE LATENCY LIVE IN `schepsParams.js` so they can be reached
+ * from Node — see that file. Re-exported here so importers are unchanged.
+ *
+ * ⚠ IMPORTED AND RE-EXPORTED, NOT JUST RE-EXPORTED, AND THE DIFFERENCE IS A
+ * RUNTIME CRASH. `export { X } from '...'` forwards the binding to importers
+ * WITHOUT introducing it into this module's scope, so every local use of X is
+ * an undefined reference. The first cut of this split re-exported all three and
+ * imported only two, and `SCHEPS_LATENCY_SAMPLES` — used by `schepsEffect`
+ * below — threw `ReferenceError` the moment the module was touched. `vite build`
+ * does not catch an undefined identifier, and no test reaches this file because
+ * it pulls the worklet loader, which is the very gap `schepsParams.js` was split
+ * out to close. Import first, re-export from the local binding.
  */
-export const SCHEPS_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
+import {
+  SCHEPS_LATENCY_SAMPLES, SCHEPS_DEFAULTS, toKernelParams,
+} from './schepsParams.js'
 
-export const SCHEPS_DEFAULTS = {
-  character: 'thick', // 'thick' | 'presence'
-  squash: 62, // LA-2A Peak Reduction on the wet path — see the kernel defaults
-  mix: 35, // percent wet — the panel's unit
-  output: 0, // manual trim on the summed output, dB
-  // Measured by the auto trim pass. Held here rather than derived at apply time
-  // so the applied render uses the same two numbers the preview was heard with.
-  wetTrimDb: 0,
-  correlation: 0,
-  densityDb: 0,
-}
-
-/** Map UI param names to kernel param names. */
-export function toKernelParams(params) {
-  return {
-    character: params.character,
-    squash: params.squash,
-    mix: params.mix / 100,
-    outputDb: params.output,
-    wetTrimDb: params.wetTrimDb,
-    correlation: params.correlation,
-    densityDb: params.densityDb,
-  }
-}
+export { SCHEPS_LATENCY_SAMPLES, SCHEPS_DEFAULTS, toKernelParams }
 
 export function createScheps(audioContext) {
   const input = audioContext.createGain()
@@ -93,6 +81,22 @@ export function createScheps(audioContext) {
   const inputTap = createLevelTap(audioContext, inputMonitor)
   const outputTap = createLevelTap(audioContext, outputMonitor)
 
+  /**
+   * FOLLOW THE LA-2A BENCH TUNING WHILE THIS NODE IS ALIVE.
+   *
+   * ⚠ SUBSCRIBED HERE RATHER THAN POKED FROM THE PANEL, because the panel that
+   * owns the tuning is OptoSmooth's and it should not have to know Scheps
+   * exists — `useLA2A.refreshKernelTuning` reaches its own node by id, which is
+   * the pattern that left Scheps behind in the first place. `la2aTuning.js` has
+   * exported this subscriber since it shipped and nothing used it.
+   *
+   * `toKernelParams` folds the current overrides in, so re-sending the same
+   * patch params is all it takes.
+   */
+  const unsubscribeTuning = onLA2ATuningChange(() => {
+    worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+  })
+
   return {
     input,
     output,
@@ -123,8 +127,19 @@ export function createScheps(audioContext) {
       return outputTap.getLevels(channelCount)
     },
 
+    /**
+     * Re-send the kernel params without changing a patch param — the same hook
+     * `la2aCompressor.js` exposes, for the same reason. The subscription above
+     * covers the tuning panel; this is for any caller that moves module state
+     * and needs the live node to pick it up.
+     */
+    refreshKernelParams() {
+      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+    },
+
     destroy() {
       destroyed = true
+      unsubscribeTuning()
       input.disconnect()
       worklet?.disconnect()
       preOutput.disconnect()

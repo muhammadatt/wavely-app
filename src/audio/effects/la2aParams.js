@@ -65,6 +65,21 @@ export function toKernelParams(params) {
     r37: params.r37,
     lookaheadMs: params.lookahead,
     ...la2aTuningOverrides(),
+    /**
+     * ⚠ MEASURED, NOT DIALLED, WHICH IS WHY IT IS NOT IN `LA2A_DEFAULTS`. The
+     * ceiling is a property of the AUDIO — the region's own peak — so it is
+     * handed in by whoever ran the makeup measurement, and is absent for every
+     * other caller including a preset. Storing it in the patch would freeze one
+     * file's peak into a setting that then travelled to another file.
+     *
+     * ⚠ SPREAD IN ONLY WHEN IT IS REAL, so the params object is KEY-FOR-KEY
+     * what it has always been everywhere the ceiling is not in play. An
+     * unconditional `ceilingDb: null` is inert to the kernel and still changes
+     * the shape of this object, which `la2aTuning.test.js` pins deliberately —
+     * that test is the guard on "an untouched bench emits nothing", and it
+     * caught this.
+     */
+    ...(Number.isFinite(params.ceilingDb) ? { ceilingDb: params.ceilingDb } : {}),
   }
 }
 

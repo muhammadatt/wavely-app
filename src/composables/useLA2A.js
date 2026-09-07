@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
@@ -16,6 +17,31 @@ const la2aPeakReduction = ref(LA2A_DEFAULTS.peakReduction)
 const la2aGain = ref(LA2A_DEFAULTS.gain)
 const la2aR37 = ref(LA2A_DEFAULTS.r37)
 const la2aLookahead = ref(LA2A_DEFAULTS.lookahead)
+/**
+ * The statistic the AUTO makeup solve references. Fixed, not a control.
+ *
+ * ⚠ IT WAS A PANEL TOGGLE AND IT IS NOT ANY MORE, ON PURPOSE. Peak-referenced
+ * makeup lets one uncompressed transient set the reference for a whole file, so
+ * past about Peak Reduction 50 the knob made the file QUIETER — measured on
+ * narration, -17.4 dB rms at PR 50 against -19.5 at 60 and -20.0 at 70. There
+ * is no material on which that is the better answer, so there was nothing for a
+ * user to choose between. The bench keeps both (`npm run la2a:makeup`), which
+ * is where a comparison belongs.
+ *
+ * See `peakOfChannels` in la2aProcessor.js for what the percentile gives up and
+ * `computeAutoMakeupPlan` for the ceiling that puts it back.
+ */
+const MAKEUP_REFERENCE = 'percentile'
+/**
+ * The ceiling the last measurement produced, dBFS, or null.
+ *
+ * ⚠ MEASURED STATE, NOT A KNOB, and it is deliberately not in `LA2A_DEFAULTS`.
+ * It is the region's own peak, so it belongs to the audio rather than to the
+ * patch — a preset carrying one would apply another file's peak to this one.
+ * It rides in `currentParams()` so preview and apply cannot disagree about it,
+ * and the preset normaliser's key whitelist keeps it out of stored presets.
+ */
+const la2aCeilingDb = ref(null)
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
 // boundary and perturbs the levels the mastering chain later measures.
@@ -55,6 +81,14 @@ function currentParams() {
     gain: la2aGain.value,
     r37: la2aR37.value,
     lookahead: la2aLookahead.value,
+    /**
+     * ⚠ ONLY WHILE AUTO OWNS THE KNOB. The ceiling is the other half of the
+     * percentile solve; with AUTO off there is no solve, the gain is the
+     * user's, and enforcing a ceiling they never asked for would attenuate
+     * their own setting. Dropping it here is what makes "turn AUTO off" a
+     * complete escape from the pairing rather than half of one.
+     */
+    ceilingDb: la2aAutoMakeup.value ? la2aCeilingDb.value : null,
   }
 }
 
@@ -72,6 +106,28 @@ function measurementParams() {
      * to, and hand back exactly the number the control exists to change.
      */
     lookaheadMs: la2aLookahead.value,
+    /**
+     * ⚠ THE BENCH TUNING BELONGS IN THE MEASUREMENT, and leaving it out meant
+     * the solve modelled a different compressor from the one rendering.
+     * `toKernelParams` folds it into both the preview and the apply path; this
+     * function builds its params by hand and did not, so while the bench was
+     * moved the makeup was solved against the SHIPPING constants and then played
+     * through the BENCH ones. Measured on narration at Peak Reduction 60, makeup
+     * error against a solve that knew: 0.00 dB untouched, 0.04 with the valve
+     * off, -0.50 at `tubeDriveLin` 0.9, 0.57 at `cellMod` 0 and -1.14 at
+     * `cellModMax` 0.5.
+     *
+     * ⚠ AND A LEVEL ERROR IS THE ONE THING A DISTORTION BENCH CANNOT HAVE. It
+     * exists so the cell can be judged BY EAR (see `la2aTuning.js`), and
+     * loudness dominates a perceptual A/B — a dB of level between the two states
+     * being compared is heard as the distortion changing. The ceiling still
+     * held throughout, so this was never an overshoot, only a level.
+     *
+     * FLAT, because `LA2AKernel.setParams` reads these keys directly. Scheps'
+     * equivalent nests them under `la2aTuning` — its kernel is a composite and
+     * has its own `cellMod` to collide with. Empty while the bench is untouched.
+     */
+    ...la2aTuningOverrides(),
   }
 }
 
@@ -93,32 +149,28 @@ export function useLA2A() {
     function tick() {
       const nodes = chain.effects.find(e => e.id === la2aEffect.id)?.nodes
       /**
-       * LIVE AUTO MAKEUP — read off the worklet on the meter's own cadence.
+       * ⚠ NO LIVE MAKEUP WRITE-BACK, AND THE TRACKER IS WHY RATHER THAN THE
+       * PANEL. `liveAutoMakeupDb` is PEAK-referenced by construction — it
+       * inverts the tube shaper at the target peak from two running extrema,
+       * which is what makes it O(1) per sample — and two extrema cannot express
+       * a quantile. With the solve fixed on the percentile there is nothing it
+       * can correctly say.
        *
-       * The kernel maintains it from running extrema at O(1) per sample, so it
-       * needs no worker, no region render and no selection, and it lands within
-       * one meter interval (~21 ms) rather than a measurement (~170 ms).
+       * It ran here on every meter tick, and it did not merely disagree with
+       * the offline value, it OVERWROTE it: preview played 4.46 dB under apply
+       * on real narration, reported as makeup gain missing from playback.
        *
-       * ⚠ THIS IS THE PREVIEW VALUE ONLY. It knows only what has PLAYED, so it
-       * is history-dependent — measured on real narration it can sit ~0.9 dB
-       * high before the loudest moment arrives. `apply()` re-measures offline
-       * for exactly that reason; see the note there.
+       * The knob is the offline solve's alone now. It still tracks —
+       * `scheduleAutoMakeup` re-measures on every compression change — at
+       * measurement cadence (~170 ms) rather than meter cadence (~21 ms), which
+       * is where it sat before the tracker existed.
        *
-       * ⚠ ONLY WHILE AUTO OWNS THE KNOB. Once the user has taken over, writing
-       * a tracked value into it would be the panel overruling them.
+       * ⚠ THE KERNEL-SIDE TRACKER IS DELIBERATELY LEFT ALONE. It is still
+       * correct, still tested (test/dsp/liveMakeup.test.js), and still the
+       * foundation for a percentile-aware version — which needs a running
+       * quantile, i.e. a histogram, and is its own piece of work. FET Punch
+       * still consumes its own.
        */
-      if (la2aAutoMakeup.value) {
-        const live = nodes.getLiveMakeupDb?.()
-        if (Number.isFinite(live)) {
-          const next = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, live))
-          // A threshold, not equality: the knob prints one decimal, and
-          // repainting it on sub-hundredth wobble is churn nobody can see.
-          if (Math.abs(next - la2aGain.value) > 0.02) {
-            la2aGain.value = next
-            pushGain()
-          }
-        }
-      }
       if (nodes) {
         la2aReduction.value = nodes.getReduction()
         // Only meter channels the source really has: the splitter is
@@ -199,12 +251,23 @@ export function useLA2A() {
     const seq = ++makeupSeq
     la2aAutoMakeupBusy.value = true
     try {
-      const makeupDb = await computeLA2AAutoMakeup(
+      const { makeupDb, ceilingDb } = await computeLA2AAutoMakeup(
         state.segments, start, end,
         measurementParams(),
-        state.currentFile.sampleRate, state.currentFile.channels
+        state.currentFile.sampleRate, state.currentFile.channels,
+        MAKEUP_REFERENCE,
       )
       if (seq !== makeupSeq) return // a newer measurement is already in flight
+      /**
+       * ⚠ THE CEILING GOES FIRST, AND THE ORDER IS THE GUARANTEE. Both reach
+       * the live node as separate param messages, so between them the node
+       * holds one old value and one new one. Gain-then-ceiling would leave the
+       * raised makeup running for that gap with the old ceiling — or none —
+       * which is exactly the overshoot the pairing exists to prevent, audible
+       * as a blip on every re-measure during a drag.
+       */
+      la2aCeilingDb.value = ceilingDb
+      pushParam('ceilingDb', ceilingDb)
       la2aGain.value = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, makeupDb))
       pushGain()
     } catch (err) {
@@ -240,7 +303,6 @@ export function useLA2A() {
      * measurement supplies the value immediately and the tracker refines it
      * from the new settings instead of arguing for the old ones.
      */
-    resetLiveMakeup()
     scheduleAutoMakeup()
   }
 
@@ -280,7 +342,6 @@ export function useLA2A() {
   function refreshKernelTuning() {
     getEffectChain(getAudioContext()).effects
       .find(e => e.id === la2aEffect.id)?.nodes?.refreshKernelParams?.()
-    resetLiveMakeup()
     scheduleAutoMakeup()
   }
 
@@ -295,6 +356,15 @@ export function useLA2A() {
     makeupThrottle?.cancel()
     makeupSeq++
     la2aAutoMakeupBusy.value = false
+    /**
+     * ⚠ THE CEILING LEAVES WITH AUTO. `currentParams()` already drops it while
+     * AUTO is off, but the LIVE node has been told about it and would keep
+     * enforcing it against a gain the user now owns — a manual boost silently
+     * held down by the last measurement's ceiling, with nothing on the panel
+     * saying so.
+     */
+    la2aCeilingDb.value = null
+    pushParam('ceilingDb', null)
   }
 
   function toggleAutoMakeup() {
@@ -304,17 +374,6 @@ export function useLA2A() {
       la2aAutoMakeup.value = true
       refreshAutoMakeup()
     }
-  }
-
-  /**
-   * A new region is new material, so the live tracker's running extrema — which
-   * describe audio the user has moved on from — are cleared with it. Without
-   * this the makeup keeps answering for the previous selection and only drifts
-   * toward the new one as it is diluted.
-   */
-  function resetLiveMakeup() {
-    getEffectChain(getAudioContext()).effects
-      .find(e => e.id === la2aEffect.id)?.nodes?.resetMakeupTracker?.()
   }
 
   async function apply() {
@@ -396,7 +455,6 @@ export function useLA2A() {
     syncLookahead,
     toggleAutoMakeup,
     refreshAutoMakeup,
-    resetLiveMakeup,
     refreshKernelTuning,
     apply,
     teardown,

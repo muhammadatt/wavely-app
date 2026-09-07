@@ -93,6 +93,37 @@ page.on('console', m => { if (m.type() === 'error') errors.push(`CONSOLE ${m.tex
 let failures = 0
 try {
   await page.goto(URL_, { waitUntil: 'networkidle' })
+
+  /**
+   * ⚠ CHECK THE BOOT BEFORE TOUCHING THE UI, or a module that throws at load
+   * reports as a 30 s timeout waiting for a file chooser that was never going to
+   * appear. Measured: a re-export without a matching local import threw
+   * `ReferenceError: SCHEPS_LATENCY_SAMPLES is not defined` at module scope, the
+   * app never rendered, and the only output was `waitForEvent: Timeout` — which
+   * points at the harness rather than the bug. The error was already in
+   * `errors`; nothing looked at it until far too late.
+   */
+  /**
+   * ⚠ PAGEERRORS ONLY, NOT EVERY CONSOLE ERROR, and the first cut of this check
+   * got that wrong and failed a healthy app. A dev server being spawned and
+   * killed between runs leaves transient `net::ERR_CONNECTION_RESET` console
+   * entries that say nothing about whether the code loaded. An UNCAUGHT
+   * EXCEPTION is the signal this gate exists for — that is what a module
+   * throwing at load produces, and it cannot be ambient.
+   *
+   * The per-panel checks below still count every console error, because there
+   * they are scoped to one panel opening rather than to whatever the page did
+   * while starting.
+   */
+  const bootFailures = errors.filter(e => e.startsWith('PAGEERROR'))
+  if (bootFailures.length) {
+    console.error('the app failed to boot:')
+    for (const e of bootFailures) console.error(`  ${e}`)
+    await browser.close()
+    if (server) server.kill()
+    process.exit(1)
+  }
+
   const chooser = page.waitForEvent('filechooser')
   await page.getByText('Choose audio files').click()
   await (await chooser).setFiles(wav)

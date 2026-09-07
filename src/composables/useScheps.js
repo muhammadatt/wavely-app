@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applySchepsRegion, computeSchepsTrim, computePeakCache } from '../audio/processing.js'
@@ -30,6 +31,12 @@ const schepsAutoTrimBusy = ref(false)
 const schepsWetTrimDb = ref(SCHEPS_DEFAULTS.wetTrimDb)
 const schepsCorrelation = ref(SCHEPS_DEFAULTS.correlation)
 const schepsDensityDb = ref(SCHEPS_DEFAULTS.densityDb)
+/**
+ * The ceiling the last trim measurement produced, dBFS, or null. Measured
+ * state alongside the other three, and it rides in `currentParams()` for the
+ * same reason they do — so preview and apply cannot disagree about it.
+ */
+const schepsCeilingDb = ref(SCHEPS_DEFAULTS.ceilingDb)
 
 const schepsPreview = ref(false)
 const schepsReduction = ref(0)
@@ -56,6 +63,12 @@ function currentParams() {
     wetTrimDb: schepsWetTrimDb.value,
     correlation: schepsCorrelation.value,
     densityDb: schepsDensityDb.value,
+    /**
+     * ⚠ ONLY WHILE AUTO OWNS THE TRIM. With AUTO off the wet trim is the user's
+     * and there is no measured ceiling behind it; enforcing a stale one would
+     * attenuate a setting they made deliberately. Same rule `useLA2A` follows.
+     */
+    ceilingDb: schepsAutoTrim.value ? schepsCeilingDb.value : null,
   }
 }
 
@@ -64,7 +77,25 @@ function measurementParams() {
   return {
     character: schepsCharacter.value,
     squash: schepsSquash.value,
+    /**
+     * ⚠ THE BENCH TUNING BELONGS IN THE MEASUREMENT — see the same note in
+     * `useLA2A.js` for the measured cost. The trim renders the wet path to solve
+     * itself, so a solve that does not know the bench is levelling a different
+     * compressor from the one being auditioned.
+     *
+     * NESTED, unlike OptoSmooth's. `SchepsKernel` spreads `la2aTuning` into its
+     * embedded `la2a.setParams` after its own allowlist; flattening it here
+     * would collide with Scheps' own `cellMod` kernel param. Absent while the
+     * bench is untouched, so a normal measurement is unchanged.
+     */
+    ...la2aTuningFor(),
   }
+}
+
+/** The nested shape `SchepsKernel` expects, or nothing while at defaults. */
+function la2aTuningFor() {
+  const overrides = la2aTuningOverrides()
+  return Object.keys(overrides).length > 0 ? { la2aTuning: overrides } : {}
 }
 
 export function useScheps() {
@@ -148,12 +179,20 @@ export function useScheps() {
     const seq = ++trimSeq
     schepsAutoTrimBusy.value = true
     try {
-      const { trimDb, correlation, densityDb } = await computeSchepsTrim(
+      const { trimDb, correlation, densityDb, ceilingDb } = await computeSchepsTrim(
         state.segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
       if (seq !== trimSeq) return // a newer measurement is already in flight
+      /**
+       * ⚠ THE CEILING GOES FIRST, AND THE ORDER IS THE GUARANTEE — the same
+       * ordering `useLA2A` needs. These reach the live node as separate param
+       * messages, so between them it holds one old value and one new one; trim
+       * first would run the raised wet path against the old ceiling, or none.
+       */
+      schepsCeilingDb.value = ceilingDb
+      pushParam('ceilingDb', ceilingDb)
       schepsWetTrimDb.value = trimDb
       schepsCorrelation.value = correlation
       schepsDensityDb.value = densityDb
@@ -240,6 +279,14 @@ export function useScheps() {
     pushParam('wetTrimDb', 0)
     pushParam('correlation', 0)
     pushParam('densityDb', 0)
+    /**
+     * ⚠ THE CEILING LEAVES WITH AUTO TOO. `currentParams()` already drops it,
+     * but the LIVE node has been told about it and would keep enforcing a
+     * measured ceiling against a trim the user now owns — a manual setting
+     * silently held down, with nothing on the panel saying so.
+     */
+    schepsCeilingDb.value = null
+    pushParam('ceilingDb', null)
   }
 
   async function apply() {

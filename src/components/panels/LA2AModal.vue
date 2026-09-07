@@ -21,7 +21,7 @@ const {
   la2aAutoMakeup, la2aAutoMakeupBusy, toggleAutoMakeup: toggleAuto,
   la2aPreview, la2aReduction, la2aInputLevels, la2aOutputLevels,
   togglePreview, syncMode, syncPeakReduction, syncGain,
-  syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
+  syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup,
   refreshKernelTuning,
   apply, teardown, closeModal,
 } = useLA2A()
@@ -43,11 +43,12 @@ onMounted(() => {
 // a fresh measurement.
 // A new selection is new material: the live tracker's extrema describe the old
 // region, so they are cleared before the offline measurement re-runs.
-watch(() => state.selection, () => { resetLiveMakeup(); refreshAutoMakeup() }, { deep: true })
+watch(() => state.selection, () => { refreshAutoMakeup() }, { deep: true })
 
 const autoMakeupLabel = computed(() =>
   la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO' : 'AUTO'
 )
+
 
 const ACCENT = '#f5a623'
 
@@ -208,6 +209,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
                 : 'Auto makeup off. Click to let the plugin automatically set the output gain.'"
               @click="toggleAutoMakeup"
             >{{ autoMakeupLabel }}</button>
+
           </div>
         </div>
 

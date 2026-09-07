@@ -5,7 +5,7 @@
  * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
  * softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling, voiceProfile
  */
-import { computeAutoMakeupDb } from '../audio/la2aProcessor.js'
+import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
 import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
@@ -22,6 +22,23 @@ function postReply(payload) {
   self.postMessage({ ...payload, __id: currentId })
 }
 
+/**
+ * Reply with a SUCCESS. Use this rather than writing the type inline.
+ *
+ * ⚠ THE MAIN THREAD RESOLVES ON `type === 'done'` AND REJECTS EVERYTHING ELSE,
+ * so a success spelled any other way is a rejected measurement, not a warning —
+ * and it fails QUIETLY, because every caller catches. A handler added here
+ * posted `type: 'complete'` and shipped: `refreshAutoMakeup` logged to the
+ * console and left the Gain knob wherever it was, so OptoSmooth's auto makeup
+ * silently stopped working altogether while the panel went on claiming AUTO.
+ *
+ * The string is stated once, here, so a new handler cannot invent a different
+ * word for it. `getMeasureWorker` in processing.js is the other half.
+ */
+function postDone(payload) {
+  postReply({ type: 'done', ...payload })
+}
+
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
   currentId = e.data.__id
@@ -34,7 +51,7 @@ self.onmessage = function (e) {
       adjustVolume(channelData, params)
       break
     case 'la2aAutoMakeup':
-      autoMakeup(computeAutoMakeupDb, channelData, sampleRate, params)
+      la2aAutoMakeup(channelData, sampleRate, params)
       break
     case 'fet1176AutoMakeup':
       autoMakeup(computeFET1176AutoMakeupDb, channelData, sampleRate, params)
@@ -56,12 +73,34 @@ self.onmessage = function (e) {
   }
 }
 
+/**
+ * OptoSmooth's makeup, which unlike every other plugin's has a REFERENCE.
+ *
+ * ⚠ `reference` RIDES IN `params` AND IS NOT A KERNEL PARAM. It selects how the
+ * solve measures, not how the kernel renders, so it is pulled back out before
+ * the params reach the kernel — passing it through would have it silently
+ * ignored, which is the failure mode where a control looks wired and is not.
+ *
+ * Only `makeupDb` comes back. The ceiling the percentile reference needs is
+ * measured over the WHOLE region by `computeLA2AAutoMakeup`, not here, because
+ * this worker only ever sees the capped analysis window — see `regionPeakDb`.
+ */
+function la2aAutoMakeup(channelData, sampleRate, params) {
+  const { reference = 'peak', ...kernelParams } = params ?? {}
+  try {
+    const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
+    postDone({ makeupDb: plan.makeupDb })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
+  }
+}
+
 // Runs a compressor kernel over the region purely to measure it — this is why
 // it lives in the worker rather than on the main thread, so knob drags
 // don't jank the UI while the measurement re-runs.
 function autoMakeup(measure, channelData, sampleRate, params) {
   try {
-    postReply({ type: 'done', makeupDb: measure(channelData, sampleRate, params) })
+    postDone({ makeupDb: measure(channelData, sampleRate, params) })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -72,7 +111,7 @@ function autoMakeup(measure, channelData, sampleRate, params) {
 function schepsAutoTrim(channelData, sampleRate, params) {
   try {
     const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
-    postReply({ type: 'done', trimDb, correlation, densityDb })
+    postDone({ trimDb, correlation, densityDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -93,7 +132,7 @@ function schepsAutoTrim(channelData, sampleRate, params) {
 function softClipperCeiling(channelData, sampleRate, params) {
   try {
     const ceilingDb = measurePeakCeilingDb(channelData, sampleRate, params.percentile)
-    postReply({ type: 'done', ceilingDb })
+    postDone({ ceilingDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -112,7 +151,7 @@ function softClipperCeiling(channelData, sampleRate, params) {
  */
 function voiceProfile(channelData, sampleRate) {
   try {
-    postReply({ type: 'done', profile: measureVoiceProfile(channelData, sampleRate) })
+    postDone({ profile: measureVoiceProfile(channelData, sampleRate) })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }

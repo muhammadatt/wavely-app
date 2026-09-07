@@ -76,8 +76,18 @@ import {
   Oversampler, DelayLine, OVERSAMPLE_FACTOR,
   OVERSAMPLE_LATENCY_SAMPLES, UPSAMPLE_DELAY_SAMPLES,
 } from './dsp/oversample.js'
+/**
+ * ⚠ THE MAKEUP REFERENCE AND ITS CEILING LIVE IN `dsp/makeupReference.js` NOW,
+ * because Scheps needs the identical mechanism and two copies of a guarantee is
+ * two guarantees. Re-exported here so importers of the constants are unchanged.
+ */
+import {
+  MAKEUP_PERCENTILE, CEILING_KNEE_DB,
+  softCeiling, float32AtOrBelow, percentileOfChannels,
+} from './dsp/makeupReference.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
+export { MAKEUP_PERCENTILE, CEILING_KNEE_DB }
 
 // ── T4 optical cell constants ───────────────────────────────────────────────
 
@@ -743,6 +753,52 @@ export const DC_BLOCK_HZ = 5
 export const CELL_MOD_MAX = 0.1225
 export const CELL_MOD_TAU_DB = 5.505
 
+/**
+ * Shape exponent on the cell's ripple term, applied to `rect / env - 1`.
+ *
+ * ⚠ 1.0 IS THE SHIPPING LAW AND THIS CONSTANT CHANGES NOTHING AT ITS DEFAULT.
+ * The kernel takes an `=== 1` fast path, so a build that never sets it is
+ * sample-identical to one from before this existed. It is here so
+ * `npm run la2a:cellmod` has a second dimension to search; it is NOT fitted,
+ * and the capture below does not constrain it.
+ *
+ * WHAT THE CAPTURE ACTUALLY SAYS. `npm run la2a:cellmod` measures the
+ * INSTANTANEOUS transfer — dB from a local linear fit, by band of each window's
+ * own peak, inside the loudest windows, which divides out makeup, level and the
+ * whole gain envelope. Against a hardware LA-2A capture, at the Peak Reduction
+ * that matches its delivered dynamic range:
+ *
+ *     band of local peak    40-55%   55-68%   68-80%   80-90%   90-100%  steep
+ *     hardware              -0.116   -0.139   -0.164   -0.188   -0.204    1.4x
+ *     ours, as shipped      -0.232   -0.338   -0.436   -0.484   -0.516    1.9x
+ *     ours, cell off        +0.004   +0.007   +0.010   +0.015   +0.015
+ *     Waves CLA-2A          -0.007   +0.004   +0.012   +0.018   +0.024
+ *
+ * ⚠ THE DISCREPANCY IS DEPTH, NOT SHAPE, AND THE FIRST PASS AT THIS GOT IT
+ * BACKWARDS. Our cell is about 2.1x too deep against this unit — the fit lands
+ * on `cellModMax` 0.058 against the shipping 0.1225 — while the steepening,
+ * 1.9x against 1.4x, is close enough that one capture cannot separate it. An
+ * earlier version of the metric fitted its reference gain on a band OVERLAPPING
+ * the bands it then measured, which flattened our profile and steepened the
+ * hardware's, and produced exactly the opposite conclusion. The self-test
+ * (`npm run la2a:cellmod:selftest`) is what settles which of the two to
+ * believe: the current construction recovers a planted exponent to 1 %.
+ *
+ * ⚠ AND THE EXPONENT IS UNCONSTRAINED BY THAT CAPTURE ANYWAY. Every shape from
+ * 0.6 to 5.4 fits within 0.010 dB once the depth re-solves — the two trade off
+ * along a valley the residual cannot see across. So this constant is a handle
+ * the bench can turn, not a finding.
+ *
+ * ⚠ NONE OF WHICH IS A LICENCE TO HALVE CELL_MOD_MAX. It is one capture of one
+ * unit at an unknown knob position with its own converters and preamp inside
+ * the measurement, against a constant that took six units and a corroborating
+ * H3-H2 relationship. What the row does establish is that the reference PLUGINS
+ * cannot arbitrate this axis at all — the CLA-2A row is flat, i.e. it has no
+ * instantaneous nonlinearity to compare against — so a disagreement with
+ * hardware here will never show up in the fits that target it.
+ */
+export const CELL_MOD_SHAPE = 1.0
+
 
 /**
  * ── WHAT THIS STAGE RESTS ON ────────────────────────────────────────────────
@@ -1020,6 +1076,59 @@ export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear rang
  * references disagree by 6x on this constant as they do on everything else, so
  * it is a choice inside a measured range, which is the most that data supports.
  */
+
+/**
+ * ⚠ THE REFERENCES CONTRADICT THE TELETRONIX MANUAL ON WHAT HAPPENS ABOVE THE
+ * KNEE, AND THE CAPTURES ARE NOT THE REASON. Recording this because the fixed
+ * 3:1 below is justified as "the LA-2A's documented compress-mode figure" while
+ * the same document describes something else entirely.
+ *
+ * The manual (Teletronix LA-2A, 3-66, Figure 1 and the text facing it):
+ * "compression occurs and gradually increases over the first 10 DB of input
+ * level rise. The slope of the curve then becomes horizontal, preventing an
+ * increase of output level regardless of input increase." That is a limiter
+ * above roughly 10 dB of overshoot. Ours is 3:1 to full scale and never flattens.
+ *
+ * THE OBVIOUS EXPLANATION IS WRONG: THE RAMP SWEPT FAR ENOUGH. `ramp.wav` runs
+ * -70 to 0 dBFS, and against the fitted taper the captured knobs sit at
+ *
+ *     knob 60   threshold -24.97 dBFS   ->  25.0 dB of ramp above it
+ *     knob 75   threshold -32.46 dBFS   ->  32.5 dB of ramp above it
+ *
+ * — two to three times past the manual's corner. The data to see a horizontal
+ * region was there at every captured knob.
+ *
+ * ⚠ AND THE FITTED RATIO WOULD HAVE SAID SO, WHICH IS THE PART THAT SETTLES IT.
+ * A fixed-ratio soft-knee model CAN absorb a limiting curve to a respectable
+ * residual — fitting one to the manual's curve over 25 dB lands at 0.097 dB rms,
+ * the same order as the 0.017-0.078 the references fitted at — but it can only
+ * do it by REPORTING A HUGE RATIO. Fitted over 10 / 15 / 20 / 25 dB above
+ * threshold it returns 19.7 / 29.6 / 39.6 / 39.6 : 1. It never returns 4:1.
+ * LALA came back at 1.98 and CLA-2A at 4.08, so neither reference goes
+ * horizontal anywhere in the range that was captured. Residual alone could not
+ * have told us this; the ratio the fit reports is the discriminator.
+ *
+ * SO THE 3:1 IS FAITHFUL TO THE REFERENCE PLUGINS AND THE PLUGINS DISAGREE WITH
+ * THE HARDWARE'S OWN MANUAL. There is no hardware ramp capture, so which is
+ * right is open. Weak supporting evidence for the manual, from the settled
+ * blocks of the one hardware program capture we have (`data/corpus/la2a-cellmod`,
+ * 194 blocks spanning only -21 to -12 dBFS, so read it as a hint and nothing
+ * more): the slope falls 0.63 -> 0.28 -> 0.17 across that range for hardware
+ * against 0.57 -> 0.45 -> 0.23 for CLA-2A and 0.48 -> 0.38 -> 0.24 for ours.
+ * The hardware's slope declines fastest and ends lowest, which is the manual's
+ * direction; 9 dB of range cannot establish an asymptote.
+ *
+ * ⚠ DO NOT "FIX" THIS TO CHASE TRANSIENTS — IT WAS TRIED AND IT BACKFIRED.
+ * Bending the curve horizontal 10 dB above the knee, per the manual, makes the
+ * crest problem WORSE on program: at PR 60, peak-normalised, rms -19.73 ->
+ * -20.63 dB and crest 18.73 -> 19.63. A static curve is a steady-state
+ * relationship, and the transients that bind the auto-makeup arrive before the
+ * detector has moved — measured through the binding onset, the gain applied in
+ * the first 5 ms is identical with and without the limiting curve, and the two
+ * only diverge after 15-20 ms, by which time the peak has passed. The extra
+ * reduction lands on the body alone. See LOOKAHEAD_MAX_MS for what does move
+ * that peak, and CELL_MOD_SHAPE for the mechanism fast enough to catch it.
+ */
 const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
 
@@ -1100,6 +1209,7 @@ export const LA2A_KERNEL_DEFAULTS = {
  * every rendered file that predates this control was made without it.
  */
 export const LOOKAHEAD_MAX_MS = 20
+
 
 // Gain-knob smoothing time — the same 8 ms the soft clipper and FET Punch use.
 const MAKEUP_SMOOTH_MS = 8
@@ -1368,6 +1478,25 @@ export class LA2AKernel {
       ? p.cellModMax : CELL_MOD_MAX
     this.cellModTauDb = Number.isFinite(p.cellModTauDb) && p.cellModTauDb > 0
       ? p.cellModTauDb : CELL_MOD_TAU_DB
+    this.cellModShape = Number.isFinite(p.cellModShape) && p.cellModShape > 0
+      ? p.cellModShape : CELL_MOD_SHAPE
+
+    /**
+     * OUTPUT CEILING, dBFS. Null/absent is OFF and is the shipping path — the
+     * ceiling branch is skipped entirely, so a kernel that never sets this is
+     * sample-identical to one built before it existed.
+     *
+     * ⚠ IT IS WHAT MAKES PERCENTILE-REFERENCED MAKEUP LEGITIMATE. Peak-
+     * referenced makeup guarantees "never louder than the source" by
+     * construction; a percentile reference gives that up, and measured, it
+     * gives it up badly — see `peakOfChannels`. This restores the same
+     * guarantee by enforcement instead of by arithmetic, which is the entire
+     * argument for revisiting a decision that was already settled once.
+     */
+    this.ceilingLin = Number.isFinite(p.ceilingDb)
+      ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20)) : 0
+    this.ceilingKneeLin = this.ceilingLin > 0
+      ? this.ceilingLin * Math.exp(-CEILING_KNEE_DB * LN10_OVER_20) : 0
     this.tubeDriveLin = Number.isFinite(p.tubeDriveLin) && p.tubeDriveLin > 0
       ? p.tubeDriveLin : TUBE_DRIVE_LIN
     this.tubeBias = Number.isFinite(p.tubeBias) ? p.tubeBias : TUBE_BIAS
@@ -1512,7 +1641,11 @@ export class LA2AKernel {
         //
         // 3:1 is the LA-2A's documented compress-mode figure, and it sits
         // between the two emulations rather than picking a side — they
-        // disagree by 2x, and neither is hardware. Swapping to CLA-2A's 4:1 is
+        // disagree by 2x, and neither is hardware. ⚠ THE SAME DOCUMENT SAYS THE
+        // CURVE GOES HORIZONTAL ABOVE ~10 dB OF OVERSHOOT AND NEITHER
+        // EMULATION DOES — see the note above COMPRESS_KNEE_DB for why that is
+        // not a shortfall in the captures, and why bending it back made the
+        // crest problem worse rather than better. Swapping to CLA-2A's 4:1 is
         // a one-line change if the documented figure ever loses the argument.
         //
         // ⚠ LIMIT MODE IS UNTOUCHED AND STILL UNMEASURED. Every capture in this
@@ -1590,7 +1723,13 @@ export class LA2AKernel {
         // by 24 dB of reduction. This levels off inside the band the six units
         // span at the one depth anyone measured.
         const depth = this.cellMod * this.cellModMax * (1 - Math.exp(-grNow / this.cellModTauDb))
-        const m = 1 - depth * rel
+        // Shape exponent, magnitude-only so the sign of the ripple is
+        // untouched. The `=== 1` branch is what keeps the shipping law exact
+        // rather than exact-to-rounding; see CELL_MOD_SHAPE.
+        const shaped = this.cellModShape === 1
+          ? rel
+          : (rel < 0 ? -1 : 1) * Math.pow(Math.abs(rel), this.cellModShape)
+        const m = 1 - depth * shaped
         preG *= m > 0.05 ? (m < 4 ? m : 4) : 0.05
       }
       const g = preG * makeupLinSmoothed
@@ -1742,7 +1881,10 @@ export class LA2AKernel {
           w = dcY
         }
         const dry = dryLine.push(input[i])
-        out[i] = dry * this.dryMix + w * this.wetMix
+        const mixed = dry * this.dryMix + w * this.wetMix
+        out[i] = this.ceilingLin > 0
+          ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+          : mixed
       }
       this.dcX[ch] = dcX
       this.dcY[ch] = dcY
@@ -1768,7 +1910,10 @@ export class LA2AKernel {
         dcX = shaped
         w = dcY
       }
-      out[i] = dry * this.dryMix + w * this.wetMix
+      const mixed = dry * this.dryMix + w * this.wetMix
+      out[i] = this.ceilingLin > 0
+        ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+        : mixed
     }
     this.dcX[ch] = dcX
     this.dcY[ch] = dcY
@@ -1852,12 +1997,12 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
 /**
  * Peak magnitude across every sample of every channel, in dB.
  *
- * The makeup reference. Peak rather than RMS, and the distinction is the whole
- * point of makeup gain: the compressor pulls the loud moments down, makeup
- * hands back what it took, the peaks land where they started and everything
- * underneath rises with them. That is a compressor made louder without being
- * merely turned up — which is the comparison a listener is actually running
- * when they A/B it.
+ * The default makeup reference. Peak rather than RMS, and the distinction is
+ * the whole point of makeup gain: the compressor pulls the loud moments down,
+ * makeup hands back what it took, the peaks land where they started and
+ * everything underneath rises with them. That is a compressor made louder
+ * without being merely turned up — which is the comparison a listener is
+ * actually running when they A/B it.
  *
  * Matching RMS instead, as this did, returns only the average loss and
  * therefore leaves the output exactly as loud as the input: a compressor that
@@ -1873,6 +2018,51 @@ export function processLA2ABuffer(channelData, sampleRate, params = {}) {
  * The cost is the opposite failure: a single uncompressed click sets the
  * reference and the makeup comes out small. That is the safe direction — never
  * louder than the source — and the manual trim is there for it.
+ *
+ * ── THE PERCENTILE IS BACK, AND ONLY BECAUSE THE MISSING HALF ARRIVED ───────
+ *
+ * ⚠ NOTHING ABOVE IS WITHDRAWN. The percentile alone still fails exactly as
+ * described, and the failure reproduces on demand: referencing the 99.9th
+ * percentile at Peak Reduction 40 / 50 / 60 / 70 / 80 puts the OUTPUT PEAK at
+ * -3.15 / -0.92 / +1.54 / +2.59 / +3.01 dBFS against a source peaking at
+ * -2.80 — 5.81 dB above it at the top, against the 5.5 the note above
+ * measured. A percentile reference cannot keep the peak guarantee, full stop.
+ *
+ * WHAT CHANGED IS THAT THE GUARANTEE NO LONGER HAS TO COME FROM THE SOLVE.
+ * `ceilingDb` enforces it downstream, so the pair keeps the same promise the
+ * peak reference kept — output peak never exceeds input peak — while spending
+ * the headroom a lone transient was sitting on. That promise is now pinned by
+ * `test/dsp/la2aMakeupReference.test.js` rather than being a property of the
+ * arithmetic, which is the real cost of the change and is stated here so
+ * nobody has to rediscover it: it is enforced, not structural, and the two
+ * halves must ship together. `computeAutoMakeupPlan` is the only way to get
+ * either, and it returns both.
+ *
+ * WHY IT IS WORTH IT. The lone-transient failure the note above calls "the safe
+ * direction" is not free — it is the whole of the Peak Reduction 60 loudness
+ * collapse. On narration whose binding peak is one onset out of a 180 ms pause,
+ * peak-normalised to -1 dBFS at Peak Reduction 50: rms -17.39 -> -16.80 dB and
+ * peak-over-body 4.38 -> 3.78 dB, with delivered speech dynamic range unmoved
+ * at 9.11 -> 9.13. It recovers loudness that was being discarded rather than
+ * buying it by compressing harder — a hardware LA-2A capture of the same take
+ * sits at -16.38 and 3.35.
+ *
+ * ⚠ AND THE PERCENTILE IS NOW WHAT THE APP USES. It shipped off by default and
+ * behind a panel toggle, was auditioned, and the toggle came back out: there is
+ * no material on which the peak reference is the better answer, so there was
+ * nothing for a user to choose between. `useLA2A` fixes the reference and the
+ * panel has no control for it.
+ *
+ * ⚠ WHICH MEANS EVERY PATCH, PRESET AND PREVIOUSLY RENDERED FILE NOW SOUNDS
+ * DIFFERENT — several dB louder at the same settings, and louder the further up
+ * the knob. That is the intended change and it is not reversible from the UI.
+ * A file already rendered on disk is untouched; the same patch re-applied to it
+ * is not the same render.
+ *
+ * The peak reference remains the DEFAULT of this function and is what
+ * `npm run la2a:makeup` renders against for comparison. It is the reference
+ * anything measuring "makeup that cannot exceed the source by construction"
+ * should still use.
  */
 function peakOfChannels(channels, skip = 0) {
   let peak = 0
@@ -1916,17 +2106,51 @@ function rmsOfChannels(channels, skip = 0) {
  * top of it.
  */
 export function computeAutoMakeupDb(channelData, sampleRate, params = {}, options = {}) {
-  const { maxIterations = 4, toleranceDb = 0.05 } = options
+  return computeAutoMakeupPlan(channelData, sampleRate, params, options).makeupDb
+}
+
+/**
+ * The makeup gain AND the ceiling that makes it safe, as one object.
+ *
+ * ⚠ RETURNING BOTH IS THE POINT OF THE FUNCTION, NOT A CONVENIENCE. Under
+ * `reference: 'percentile'` the makeup no longer guarantees the output stays
+ * under the input peak — measured, it can exceed it by nearly 6 dB — and
+ * `ceilingDb` is what puts the guarantee back. Handing them out separately
+ * would let a caller take the loudness and skip the enforcement, so there is no
+ * API here that yields one without the other. See `peakOfChannels`.
+ *
+ * `reference: 'peak'` (the default) is the shipping behaviour exactly, and
+ * returns `ceilingDb: null` — the peak reference needs no ceiling because its
+ * guarantee is arithmetic.
+ *
+ * ⚠ THE SOLVE MEASURES WITHOUT THE CEILING, DELIBERATELY. Including it would
+ * make the objective non-monotone in the makeup — past the ceiling, more gain
+ * stops moving the measured statistic — and the iteration could run away
+ * against a curve that has flattened. Measuring below it and enforcing above it
+ * keeps the solve on a monotone objective, and the two cannot disagree by much
+ * in any case: the ceiling engages on the top ten-thousandth of samples and the
+ * reference is read at the top thousandth.
+ */
+export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, options = {}) {
+  const { maxIterations = 4, toleranceDb = 0.05, reference = 'peak' } = options
+  if (reference !== 'peak' && reference !== 'percentile') {
+    throw new Error(`unknown makeup reference: ${reference}`)
+  }
 
   // Measured through the base-rate path: oversampling removes folded
   // harmonics, which carry almost no energy, and measuring through it was
   // about three times slower — which the Gain knob showed as lag behind a
   // drag. It does move the peak slightly more than it moves the RMS, so the
   // iteration below re-measures rather than trusting one pass.
-  const measureParams = { ...params, oversample: false }
+  const measureParams = { ...params, oversample: false, ceilingDb: null }
+
+  const measureRef = reference === 'percentile'
+    ? (chs) => percentileOfChannels(chs, MAKEUP_PERCENTILE)
+    : peakOfChannels
 
   const inputPeak = peakOfChannels(channelData)
-  if (inputPeak <= 0) return 0
+  const inputRef = measureRef(channelData)
+  if (!(inputPeak > 0) || !(inputRef > 0)) return { makeupDb: 0, ceilingDb: null }
 
   /**
    * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK, not the raw render.
@@ -1959,13 +2183,20 @@ export function computeAutoMakeupDb(channelData, sampleRate, params = {}, option
     const out = latency > 0
       ? rendered.map((ch) => ch.subarray(latency, latency + channelData[0].length))
       : rendered
-    const outPeak = peakOfChannels(out)
-    if (outPeak <= 0) break
-    const correctionDb = 20 * Math.log10(inputPeak / outPeak)
+    const outRef = measureRef(out)
+    if (outRef <= 0) break
+    const correctionDb = 20 * Math.log10(inputRef / outRef)
     makeupDb = clamp(makeupDb + correctionDb, -24, 24)
     if (Math.abs(correctionDb) < toleranceDb) break
   }
-  return makeupDb
+  return {
+    makeupDb,
+    // The guarantee, restated as a number the kernel can enforce: the source's
+    // own peak. `softCeiling` never lets the output exceed it — at or under,
+    // not strictly under; see the note there for why that distinction is the
+    // honest one and not a weaker claim.
+    ceilingDb: reference === 'percentile' ? 20 * Math.log10(inputPeak) : null,
+  }
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

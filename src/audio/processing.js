@@ -1,5 +1,5 @@
 import { getSegmentDuration } from './operations.js'
-import { analysisWindow } from './analysisWindow.js'
+import { analysisWindow, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import {
   LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
@@ -325,9 +325,34 @@ function measureInWorker(workerType, segments, start, end, kernelParams, sampleR
   })
 }
 
-export function computeLA2AAutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
-  return measureInWorker('la2aAutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => d.makeupDb)
+/**
+ * Measure OptoSmooth's auto-makeup for a region. Resolves
+ * `{ makeupDb, ceilingDb }`.
+ *
+ * ⚠ THE TWO HALVES ARE MEASURED OVER DIFFERENT SPANS, DELIBERATELY. The makeup
+ * comes from the worker's capped, start-anchored window, because solving it
+ * means running the kernel and that has to stay fast enough to sit behind a
+ * knob drag. The ceiling comes from `regionPeakDb` over the WHOLE region,
+ * because it is the guarantee — "never louder than the source" is a claim about
+ * the source, not about the first thirty seconds of it. See both functions for
+ * why each span is right for its job.
+ *
+ * `ceilingDb` is null under the peak reference, which needs no ceiling: its
+ * guarantee is arithmetic. See `peakOfChannels` in la2aProcessor.js.
+ */
+export function computeLA2AAutoMakeup(
+  segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
+) {
+  return measureInWorker(
+    'la2aAutoMakeup', segments, start, end, { ...kernelParams, reference }, sampleRate, channels,
+  ).then((d) => {
+    if (reference !== 'percentile') return { makeupDb: d.makeupDb, ceilingDb: null }
+    const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    return {
+      makeupDb: d.makeupDb,
+      ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+    }
+  })
 }
 
 /** Measure the FET Punch auto-makeup (Output) for a region — see above. */
@@ -356,7 +381,22 @@ export function computeSoftClipperAutoMakeup(segments, start, end, kernelParams,
  */
 export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker('schepsAutoTrim', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => ({ trimDb: d.trimDb, correlation: d.correlation, densityDb: d.densityDb }))
+    .then((d) => {
+      /**
+       * ⚠ THE CEILING IS RE-MEASURED OVER THE WHOLE REGION, exactly as
+       * `computeLA2AAutoMakeup` does and for the same reason: the worker only
+       * ever sees the capped, start-anchored analysis window, and a ceiling from
+       * an excerpt would clamp everything after it. The trim keeps the capped
+       * pass because solving it renders the wet path and has to stay fast.
+       */
+      const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+      return {
+        trimDb: d.trimDb,
+        correlation: d.correlation,
+        densityDb: d.densityDb,
+        ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      }
+    })
 }
 
 /**
