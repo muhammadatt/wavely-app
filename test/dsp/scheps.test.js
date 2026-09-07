@@ -19,6 +19,9 @@ import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
 import { highpass, lowpass, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { percentileOfChannels, MAKEUP_PERCENTILE } from '../../src/audio/dsp/makeupReference.js'
 import { SCHEPS_DEFAULTS, toKernelParams } from '../../src/audio/effects/schepsParams.js'
+import {
+  setLA2ATuning, resetLA2ATuning, la2aTuningOverrides,
+} from '../../src/audio/effects/la2aTuning.js'
 
 const SR = 44100
 
@@ -665,4 +668,75 @@ test('the panel defaults are exactly the kernel defaults, through the mapping', 
 test('the default Squash is the calibrated one, not the value it drifted to', () => {
   assert.equal(SCHEPS_DEFAULTS.squash, 40)
   assert.notEqual(SCHEPS_DEFAULTS.squash, 62, 'the pre-R37-fix value shipped once')
+})
+
+// ── the LA-2A bench tuning ──────────────────────────────────────────────────
+
+/**
+ * ⚠ SCHEPS FOLLOWED EVERY LA-2A CONSTANT EXCEPT THIS ONE, and the exception was
+ * invisible. It holds the kernel rather than a copy, so module constants — the
+ * taper, the ballistics, R37's mechanism, the cell and tube laws — reach it by
+ * construction and always have. The bench tuning is module STATE, read when
+ * kernel params are BUILT, and Scheps built its own: a tuning session moved
+ * OptoSmooth and left Scheps at the shipping constants, with nothing saying so.
+ *
+ * These tests are on the seam rather than the sound, because the seam is what
+ * broke: the value has to survive `toKernelParams` and then the allowlist in
+ * `SchepsKernel.setParams`, and it was the second of those that dropped it.
+ */
+test('an untouched bench adds nothing to the kernel params', () => {
+  resetLA2ATuning()
+  assert.deepEqual(la2aTuningOverrides(), {}, 'precondition: the bench is at defaults')
+  assert.ok(!('la2aTuning' in toKernelParams(SCHEPS_DEFAULTS)),
+    'an untouched bench must leave the params key-for-key as they were')
+})
+
+test('a moved bench reaches the kernel params', () => {
+  try {
+    setLA2ATuning({ cellModMax: 0.5 })
+    const kp = toKernelParams(SCHEPS_DEFAULTS)
+    assert.equal(kp.la2aTuning?.cellModMax, 0.5)
+  } finally {
+    resetLA2ATuning()
+  }
+})
+
+/**
+ * The one that matters: the value has to change the AUDIO, not just the params
+ * object. `cellMod: 0` removes the gain cell's modulation entirely, which is
+ * the LA-2A's dominant distortion term — if the bench reaches the embedded
+ * kernel at all, this is audible in the samples.
+ */
+test('a moved bench actually reaches the embedded cell', () => {
+  const input = voiceLike(2, { envRateHz: 0.5 })
+  const patch = { ...SCHEPS_DEFAULTS, squash: 80, mix: 100 }
+  const shipping = processSchepsBuffer([input], SR, toKernelParams(patch)).channelData[0]
+
+  let benched
+  try {
+    setLA2ATuning({ cellMod: 0 })
+    benched = processSchepsBuffer([input], SR, toKernelParams(patch)).channelData[0]
+  } finally {
+    resetLA2ATuning()
+  }
+
+  let moved = 0
+  for (let i = 0; i < shipping.length; i++) if (shipping[i] !== benched[i]) moved++
+  assert.ok(moved > shipping.length * 0.25,
+    `the bench must reach the audio, moved ${moved}/${shipping.length} samples`)
+})
+
+test('the bench cannot override what Scheps pins', () => {
+  try {
+    // The tuning carries no r37, mode, mix or lookaheadMs, so LA2A_FIXED's
+    // decisions survive a tuning session — pinned because a future tuning key
+    // that DID collide would silently change what the Scheps trick is.
+    setLA2ATuning({ cellModMax: 0.5, tubeDriveLin: 0.9 })
+    for (const key of ['r37', 'mode', 'mix', 'lookaheadMs']) {
+      assert.ok(!(key in la2aTuningOverrides()),
+        `the bench must not carry ${key} — Scheps pins it`)
+    }
+  } finally {
+    resetLA2ATuning()
+  }
 })

@@ -23,6 +23,7 @@ import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
  * that pulls `?worker&url` and cannot, and that is still on the other side.
  */
 import { SCHEPS_KERNEL_DEFAULTS } from '../schepsProcessor.js'
+import { la2aTuningOverrides } from './la2aTuning.js'
 
 /**
  * The wet path runs through OptoSmooth's oversampled gain cell, whose halfband
@@ -89,6 +90,33 @@ export function toKernelParams(params) {
     // everywhere the ceiling is not in play — same reason as `toKernelParams`
     // in la2aParams.js.
     ...(Number.isFinite(params.ceilingDb) ? { ceilingDb: params.ceilingDb } : {}),
+    ...la2aTuningFor(),
   }
+}
+
+/**
+ * The LA-2A bench tuning, for the compressor Scheps embeds.
+ *
+ * ⚠ SCHEPS DID NOT FOLLOW THE BENCH AND OPTOSMOOTH DID, so a tuning session
+ * moved one and left the other — two plugins running the same cell at different
+ * constants, with nothing saying so. Scheps inherits every LA-2A MODULE constant
+ * by construction because it holds the kernel rather than a copy; the tuning is
+ * the one exception, because it is module STATE read when params are built, and
+ * Scheps built its own.
+ *
+ * ⚠ NESTED RATHER THAN SPREAD FLAT, and that is not tidiness. These are the
+ * embedded compressor's params, not Scheps', and one of them — `cellMod` —
+ * already exists as a Scheps kernel param. Flattening would have the two
+ * collide silently on whichever spread came last. `SchepsKernel` spreads this
+ * into `la2a.setParams` after its own allowlist, so the bench wins there and
+ * only there.
+ *
+ * ⚠ AND IT IS ABSENT WHEN THE BENCH IS UNTOUCHED, not an empty object, so the
+ * params are key-for-key what they were before this existed. `la2aTuningOverrides`
+ * returns only the keys that differ from the shipping constants.
+ */
+function la2aTuningFor() {
+  const overrides = la2aTuningOverrides()
+  return Object.keys(overrides).length > 0 ? { la2aTuning: overrides } : {}
 }
 

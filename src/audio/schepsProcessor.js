@@ -287,6 +287,19 @@ export class SchepsKernel {
       // against a build without it from outside this file, which is the whole
       // job of a measurement bypass. Nothing in the app sets it.
       cellMod: p.cellMod,
+      /**
+       * ⚠ LAST, SO THE BENCH WINS — and only over the keys it actually carries.
+       * `la2aTuningOverrides` emits nothing while the tuning panel is untouched,
+       * so this spread is empty on every normal render and the allowlist above
+       * stands unchanged. When it is not empty it may override `cellMod`, which
+       * is the point: the bench exists to move exactly these constants, and
+       * OptoSmooth has followed it since it shipped.
+       *
+       * It cannot reach `LA2A_FIXED`'s pins — the tuning carries no `r37`,
+       * `mode`, `mix` or `lookaheadMs` — so Scheps' own fixed decisions survive
+       * a tuning session intact.
+       */
+      ...(p.la2aTuning ?? {}),
     })
 
     this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)

@@ -14,6 +14,7 @@
 import { ensureSchepsWorklet } from '../schepsWorkletLoader.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+import { onLA2ATuningChange } from './la2aTuning.js'
 
 /**
  * ⚠ THE PARAMS AND THE LATENCY LIVE IN `schepsParams.js` so they can be reached
@@ -80,6 +81,22 @@ export function createScheps(audioContext) {
   const inputTap = createLevelTap(audioContext, inputMonitor)
   const outputTap = createLevelTap(audioContext, outputMonitor)
 
+  /**
+   * FOLLOW THE LA-2A BENCH TUNING WHILE THIS NODE IS ALIVE.
+   *
+   * ⚠ SUBSCRIBED HERE RATHER THAN POKED FROM THE PANEL, because the panel that
+   * owns the tuning is OptoSmooth's and it should not have to know Scheps
+   * exists — `useLA2A.refreshKernelTuning` reaches its own node by id, which is
+   * the pattern that left Scheps behind in the first place. `la2aTuning.js` has
+   * exported this subscriber since it shipped and nothing used it.
+   *
+   * `toKernelParams` folds the current overrides in, so re-sending the same
+   * patch params is all it takes.
+   */
+  const unsubscribeTuning = onLA2ATuningChange(() => {
+    worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+  })
+
   return {
     input,
     output,
@@ -110,8 +127,19 @@ export function createScheps(audioContext) {
       return outputTap.getLevels(channelCount)
     },
 
+    /**
+     * Re-send the kernel params without changing a patch param — the same hook
+     * `la2aCompressor.js` exposes, for the same reason. The subscription above
+     * covers the tuning panel; this is for any caller that moves module state
+     * and needs the live node to pick it up.
+     */
+    refreshKernelParams() {
+      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+    },
+
     destroy() {
       destroyed = true
+      unsubscribeTuning()
       input.disconnect()
       worklet?.disconnect()
       preOutput.disconnect()
