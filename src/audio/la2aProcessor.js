@@ -2310,8 +2310,9 @@ export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, opti
   return {
     makeupDb,
     // The guarantee, restated as a number the kernel can enforce: the source's
-    // own peak. `softCeiling` is asymptotic, so the output stays strictly under
-    // it rather than merely reaching it.
+    // own peak. `softCeiling` never lets the output exceed it — at or under,
+    // not strictly under; see the note there for why that distinction is the
+    // honest one and not a weaker claim.
     ceilingDb: reference === 'percentile' ? 20 * Math.log10(inputPeak) : null,
   }
 }
