@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applySchepsRegion, computeSchepsTrim, computePeakCache } from '../audio/processing.js'
@@ -76,7 +77,25 @@ function measurementParams() {
   return {
     character: schepsCharacter.value,
     squash: schepsSquash.value,
+    /**
+     * ⚠ THE BENCH TUNING BELONGS IN THE MEASUREMENT — see the same note in
+     * `useLA2A.js` for the measured cost. The trim renders the wet path to solve
+     * itself, so a solve that does not know the bench is levelling a different
+     * compressor from the one being auditioned.
+     *
+     * NESTED, unlike OptoSmooth's. `SchepsKernel` spreads `la2aTuning` into its
+     * embedded `la2a.setParams` after its own allowlist; flattening it here
+     * would collide with Scheps' own `cellMod` kernel param. Absent while the
+     * bench is untouched, so a normal measurement is unchanged.
+     */
+    ...la2aTuningFor(),
   }
+}
+
+/** The nested shape `SchepsKernel` expects, or nothing while at defaults. */
+function la2aTuningFor() {
+  const overrides = la2aTuningOverrides()
+  return Object.keys(overrides).length > 0 ? { la2aTuning: overrides } : {}
 }
 
 export function useScheps() {

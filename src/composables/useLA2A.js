@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
@@ -105,6 +106,28 @@ function measurementParams() {
      * to, and hand back exactly the number the control exists to change.
      */
     lookaheadMs: la2aLookahead.value,
+    /**
+     * ⚠ THE BENCH TUNING BELONGS IN THE MEASUREMENT, and leaving it out meant
+     * the solve modelled a different compressor from the one rendering.
+     * `toKernelParams` folds it into both the preview and the apply path; this
+     * function builds its params by hand and did not, so while the bench was
+     * moved the makeup was solved against the SHIPPING constants and then played
+     * through the BENCH ones. Measured on narration at Peak Reduction 60, makeup
+     * error against a solve that knew: 0.00 dB untouched, 0.04 with the valve
+     * off, -0.50 at `tubeDriveLin` 0.9, 0.57 at `cellMod` 0 and -1.14 at
+     * `cellModMax` 0.5.
+     *
+     * ⚠ AND A LEVEL ERROR IS THE ONE THING A DISTORTION BENCH CANNOT HAVE. It
+     * exists so the cell can be judged BY EAR (see `la2aTuning.js`), and
+     * loudness dominates a perceptual A/B — a dB of level between the two states
+     * being compared is heard as the distortion changing. The ceiling still
+     * held throughout, so this was never an overshoot, only a level.
+     *
+     * FLAT, because `LA2AKernel.setParams` reads these keys directly. Scheps'
+     * equivalent nests them under `la2aTuning` — its kernel is a composite and
+     * has its own `cellMod` to collide with. Empty while the bench is untouched.
+     */
+    ...la2aTuningOverrides(),
   }
 }
 

@@ -740,3 +740,38 @@ test('the bench cannot override what Scheps pins', () => {
     resetLA2ATuning()
   }
 })
+
+/**
+ * ⚠ THE TRIM MEASUREMENT HAS TO SEE THE BENCH TOO, and it did not. The bench
+ * reaches the preview and the apply through `toKernelParams`; the trim builds
+ * its params by hand in `useScheps.measurementParams` and was solving against
+ * the SHIPPING constants while the audio played through the BENCH ones. On
+ * OptoSmooth, where the same gap existed, that was worth up to 1.14 dB of makeup
+ * error — and a level error is the one thing a distortion bench cannot have,
+ * because it exists to be judged by ear and loudness dominates an A/B.
+ *
+ * This pins the seam the composable depends on: the nested key has to survive
+ * the worker, `computeSchepsAutoTrim`, its wet-path render and `SchepsKernel`'s
+ * allowlist. Only the last of those had ever carried it.
+ */
+test('the trim measurement honours the nested bench tuning', () => {
+  const input = voiceLike(3, { envRateHz: 0.5 })
+  const patch = { ...SCHEPS_KERNEL_DEFAULTS, squash: 80 }
+
+  const plain = computeSchepsAutoTrim([input], SR, patch)
+  const benched = computeSchepsAutoTrim([input], SR, {
+    ...patch, la2aTuning: { cellMod: 0, cellModMax: 0.5 },
+  })
+
+  assert.notEqual(plain.trimDb, benched.trimDb,
+    'the bench must reach the wet-path render the trim solves against')
+})
+
+test('an absent bench leaves the trim exactly where it was', () => {
+  const input = voiceLike(3, { envRateHz: 0.5 })
+  const patch = { ...SCHEPS_KERNEL_DEFAULTS, squash: 80 }
+  assert.deepEqual(
+    computeSchepsAutoTrim([input], SR, patch),
+    computeSchepsAutoTrim([input], SR, { ...patch, la2aTuning: {} }),
+  )
+})
