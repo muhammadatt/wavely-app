@@ -643,3 +643,26 @@ test('a panel-shaped patch actually limits when it carries a ceiling', () => {
   assert.ok(db(peakOf(held)) <= ceilingDb + 1e-9,
     `the guarded one must sit at or under it: ${db(peakOf(held)).toFixed(4)}`)
 })
+
+/**
+ * ⚠ THE PANEL DEFAULTS AND THE KERNEL DEFAULTS DRIFTED APART AND SHIPPED, which
+ * is why this is a round trip and not a spot check on one key. `squash` was
+ * recalibrated 62 -> 40 when the R37 mechanism was corrected; the move landed on
+ * the kernel and not on the panel, and the panel is the object users open with.
+ * Measured on narration, the wet path ran 4.75 dB of average gain reduction
+ * against the calibrated 1.11 — four times the compression the default patch is
+ * meant to have.
+ *
+ * `SCHEPS_DEFAULTS` now derives every shared key from `SCHEPS_KERNEL_DEFAULTS`,
+ * so this should hold by construction. It is asserted anyway: the failure mode
+ * was someone restating a number, and nothing stops that returning except a test
+ * that notices.
+ */
+test('the panel defaults are exactly the kernel defaults, through the mapping', () => {
+  assert.deepEqual(toKernelParams(SCHEPS_DEFAULTS), SCHEPS_KERNEL_DEFAULTS)
+})
+
+test('the default Squash is the calibrated one, not the value it drifted to', () => {
+  assert.equal(SCHEPS_DEFAULTS.squash, 40)
+  assert.notEqual(SCHEPS_DEFAULTS.squash, 62, 'the pre-R37-fix value shipped once')
+})
