@@ -1,5 +1,5 @@
 # Instant Polish — CLAUDE.md
-> Project intelligence for Claude Code | Last updated: May 2026 | Codebase status: ~60 source files, ~10,000+ lines
+> Project intelligence for Claude Code | Last updated: September 2026 | Codebase status: ~60 source files, ~10,000+ lines
 
 ---
 
@@ -260,7 +260,7 @@ These apply only to the `acx_audiobook` preset:
 - Playback with A/B before/after comparison; looping and region changes are scheduled on the audio clock (not animation frames) for sample-accurate seams
 - Preset panel (4 presets) + output profile panel (3 profiles) with dynamic UI rules
 - Processing report panel (measurements, ACX certification, advisory flags)
-- Compressors (OptoSmooth — LA-2A style, FET Punch — 1176 style) with real-time auto makeup gain, closed-form/iterative solves referenced to true peak, and a fitted LA-2A side-chain taper. OptoSmooth's distortion lives with the **T4 gain cell**, not the output valves: the applied gain ripples with the signal around the detector's smoothed envelope, which is odd-dominant and RISES with compression, per six hardware units measured in Moore, JAES 74(1/2):61–72 (2026). There is no tube-drive knob — the valves are driven by level alone. Full derivation in `docs/claude-dev-log.md`
+- Compressors (OptoSmooth — LA-2A style, FET Punch — 1176 style) with auto makeup gain and a fitted LA-2A side-chain taper. **FET Punch is peak-referenced** (closed-form) and keeps a real-time tracker on the knob. **OptoSmooth references the 99.9th percentile instead**, paired with a memoryless output ceiling at the region's own peak that keeps the "never louder than the source" guarantee by enforcement rather than by arithmetic — the two ship together and there is no way to get one without the other (`computeAutoMakeupPlan`). Peak-referenced makeup let one uncompressed onset pin the whole file, so above Peak Reduction ~50 the knob ran BACKWARDS; delivered rms went −17.4 dB at PR 50 to −20.0 at 70. Not a user choice — the toggle shipped, was auditioned and was removed. OptoSmooth therefore has **no live makeup write-back**: the tracker is peak-referenced by construction and cannot express a quantile. OptoSmooth's distortion lives with the **T4 gain cell**, not the output valves: the applied gain ripples with the signal around the detector's smoothed envelope, which is odd-dominant and RISES with compression, per six hardware units measured in Moore, JAES 74(1/2):61–72 (2026). There is no tube-drive knob — the valves are driven by level alone. Full derivation in `docs/claude-dev-log.md`
 - Scheps Parallel — Pultec/LA-2A vocal chain composite (push → OptoSmooth → recovery on a wet path, blended against a delay-compensated dry path), with auto output trim
 - Soft Clipper — peak control via a shaped curve plus an optional lookahead limiter hybrid path (CLIP/LIMIT switch), with HF emphasis compensation, an auto makeup trim, and configurable ceiling presets (measured from the selection, not a fixed target)
 - Inflator — level-independent density/harmonic enhancement (ported curve with algebraic ceiling guarantees), optional 3-band split
@@ -284,7 +284,7 @@ These apply only to the `acx_audiobook` preset:
 - **Payment / tier enforcement** — Gate logic not present; all tiers currently serve same output
 - **Batch processing** — Sprint 5; multi-file + cross-chapter consistency pass
 - **API access** — Sprint 6 / Pro tier
-- **Test infrastructure** — Partial. `npm test` runs a `node:test` unit suite over the client DSP (`test/dsp/`, `test/voicerx/`, `test/ui/`, 465 tests). No integration or E2E tests, and no coverage of the server pipeline, Vue components or the async job flow — `test/ui/` reaches the editor state composable and the playback scheduler by faking the AudioContext, which is as far up as this suite goes
+- **Test infrastructure** — Partial. `npm test` runs a `node:test` unit suite over the client DSP (`test/dsp/`, `test/voicerx/`, `test/ui/`, 1012 tests). No integration or E2E tests, and no coverage of the server pipeline, Vue components or the async job flow — `test/ui/` reaches the editor state composable and the playback scheduler by faking the AudioContext, which is as far up as this suite goes. **⚠ Two seams are known blind spots and both shipped broken through a green suite in one day:** the measurement worker's reply contract (now driven against a fake `self` in `test/ui/processWorkerContract.test.js`), and the composable→panel destructure — nothing type-checks it, so a composable that stops exporting a function still builds and still passes, and the panel is simply dead on open. Diff a composable's exported keys against its modal's destructure after editing either
 - **Persistent job storage** — Jobs are in-memory; server restart loses them
 - **`docs/acx_production_workflow.md`** and **`docs/instant_polish_gtm.md`** — Referenced but not created
 
