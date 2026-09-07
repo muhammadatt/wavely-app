@@ -18,12 +18,22 @@ import { createLevelTap } from './levelTap.js'
 /**
  * ⚠ THE PARAMS AND THE LATENCY LIVE IN `schepsParams.js` so they can be reached
  * from Node — see that file. Re-exported here so importers are unchanged.
+ *
+ * ⚠ IMPORTED AND RE-EXPORTED, NOT JUST RE-EXPORTED, AND THE DIFFERENCE IS A
+ * RUNTIME CRASH. `export { X } from '...'` forwards the binding to importers
+ * WITHOUT introducing it into this module's scope, so every local use of X is
+ * an undefined reference. The first cut of this split re-exported all three and
+ * imported only two, and `SCHEPS_LATENCY_SAMPLES` — used by `schepsEffect`
+ * below — threw `ReferenceError` the moment the module was touched. `vite build`
+ * does not catch an undefined identifier, and no test reaches this file because
+ * it pulls the worklet loader, which is the very gap `schepsParams.js` was split
+ * out to close. Import first, re-export from the local binding.
  */
-export {
+import {
   SCHEPS_LATENCY_SAMPLES, SCHEPS_DEFAULTS, toKernelParams,
 } from './schepsParams.js'
-import { toKernelParams } from './schepsParams.js'
-import { SCHEPS_DEFAULTS } from './schepsParams.js'
+
+export { SCHEPS_LATENCY_SAMPLES, SCHEPS_DEFAULTS, toKernelParams }
 
 export function createScheps(audioContext) {
   const input = audioContext.createGain()
