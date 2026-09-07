@@ -609,9 +609,15 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
    * Loudest channel, not channel 0: if one side of a stereo pair is hotter, the
    * trim has to follow the same stereo picture the energy and correlation do.
    */
-  const loudestBandDb = bands => percentileOfChannels(bands, MAKEUP_PERCENTILE) > 0
-    ? 20 * Math.log10(percentileOfChannels(bands, MAKEUP_PERCENTILE))
-    : -Infinity
+  // ⚠ MEASURED ONCE. This ran the percentile TWICE — once for the guard and
+  // again for the conversion — and each call copies and partially orders every
+  // sample in the band. It is called on the dry signal and then on every
+  // iteration of the trim solve, so the wasted half was a real cost, not a
+  // tidiness point.
+  const loudestBandDb = (bands) => {
+    const level = percentileOfChannels(bands, MAKEUP_PERCENTILE)
+    return level > 0 ? 20 * Math.log10(level) : -Infinity
+  }
   const dryLoudDb = loudestBandDb(dryBand)
 
   let dryEnergy = 0
