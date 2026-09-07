@@ -17,6 +17,8 @@ import {
 } from '../../src/audio/schepsProcessor.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
 import { highpass, lowpass, BiquadCascade } from '../../src/audio/dsp/biquad.js'
+import { percentileOfChannels, MAKEUP_PERCENTILE } from '../../src/audio/dsp/makeupReference.js'
+import { SCHEPS_DEFAULTS, toKernelParams } from '../../src/audio/effects/schepsParams.js'
 
 const SR = 44100
 
@@ -250,10 +252,40 @@ test('stereo channels stay independent in the EQ and shared in the detector', ()
 
 // ── measured trim ───────────────────────────────────────────────────────────
 
-test('the makeup lands the wet path’s LOUD PARTS on the dry one’s', () => {
-  // What makeup gain has always meant: give back what the compressor took off
-  // the loud moments. Matching the AVERAGE instead — which this used to do — is
-  // a compressor that by construction cannot make anything louder.
+/**
+ * ⚠ THE TRIM REFERENCES THE SHARED SAMPLE PERCENTILE NOW, NOT `loudPartDb`, and
+ * these tests were rewritten around that rather than loosened. The old ones
+ * asserted the wet path's LOUD PARTS land on the dry one's, which was the
+ * invariant while the trim solved for loud parts; it now solves for the same
+ * statistic OptoSmooth does, so that is what has to be checked.
+ *
+ * ⚠ AND IT IS CHECKED IN THE SPEECH BAND, because that is the domain the trim
+ * solves in — matching broadband would let the Pultec low-frequency moves
+ * either side of the compressor dominate a measurement of something else. On
+ * real narration the in-band error is 0.001 dB at every Squash.
+ *
+ * The loud parts now sit ABOUT 1.4 dB ABOVE the dry's, and that is the intended
+ * consequence rather than drift: a percentile-matched compressed copy is louder
+ * on average than a loud-part-matched one, which is the compression's yield and
+ * is exactly what `densityDb` reports — it went 0.95 to 2.46 dB on narration at
+ * Squash 60 when the reference changed.
+ */
+function speechBand(x) {
+  const cascade = new BiquadCascade(2, 1)
+  cascade.setSections([
+    highpass(SR, 300, Math.SQRT1_2),
+    lowpass(SR, 4000, Math.SQRT1_2),
+  ])
+  const y = new Float32Array(x.length)
+  cascade.process(x, y, x.length, 0)
+  return y
+}
+
+const bandPercentileDb = (x, skip) => 20 * Math.log10(
+  percentileOfChannels([speechBand(x.subarray(skip))], MAKEUP_PERCENTILE),
+)
+
+test('the makeup lands the wet path on the dry one at the shared reference', () => {
   const input = voiceLike(4, { envRateHz: 0.5 })
   const skip = OVERSAMPLE_LATENCY_SAMPLES
   for (const character of ['thick', 'presence']) {
@@ -262,10 +294,10 @@ test('the makeup lands the wet path’s LOUD PARTS on the dry one’s', () => {
       character, squash: 65, mix: 1, wetTrimDb: m.trimDb,
       correlation: m.correlation, densityDb: m.densityDb,
     })
-    const errDb = loudPartDb(channelData[0], skip) - loudPartDb(input, skip)
+    const errDb = bandPercentileDb(channelData[0], skip) - bandPercentileDb(input, skip)
     assert.ok(
-      Math.abs(errDb) < 0.7,
-      `${character}: wet loud parts are ${errDb.toFixed(2)} dB off dry`,
+      Math.abs(errDb) < 0.1,
+      `${character}: wet path is ${errDb.toFixed(3)} dB off dry at the reference`,
     )
   }
 })
@@ -278,10 +310,13 @@ test('stereo trim level-matches the louder channel, not channel 0', () => {
     mix: 1, squash: 65, wetTrimDb: measured.trimDb,
   })
   const skip = OVERSAMPLE_LATENCY_SAMPLES
-  const errDb = loudPartDb(channelData[1], skip) - loudPartDb(loud, skip)
+  const errDb = bandPercentileDb(channelData[1], skip) - bandPercentileDb(loud, skip)
+  // Looser than the mono case at 0.1: the quiet channel is the same signal at
+  // 0.35, so the shared detector is riding a sum the louder side dominates but
+  // does not own, and the trim lands the pair rather than either alone.
   assert.ok(
-    Math.abs(errDb) < 0.7,
-    `louder stereo channel is ${errDb.toFixed(2)} dB off after trim`,
+    Math.abs(errDb) < 0.4,
+    `louder stereo channel is ${errDb.toFixed(3)} dB off after trim`,
   )
 })
 
@@ -491,4 +526,120 @@ test('a bad param cannot poison the kernel — it used to, permanently', () => {
   kernel.process([block], [out], 128)
   assert.equal(nonFinite(out), 0)
   assert.ok(out.some(v => v !== 0), 'the kernel went silent instead of recovering')
+})
+
+// ── the output ceiling ──────────────────────────────────────────────────────
+
+const peakOf = (x) => {
+  let p = 0
+  for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > p) p = a }
+  return p
+}
+
+/**
+ * ⚠ SCHEPS NEEDED THIS MORE THAN OPTOSMOOTH DID, AND HAD GONE WITHOUT IT SINCE
+ * IT SHIPPED. A parallel blend sums two paths and nothing in the trim bounds
+ * their sum: measured on narration with the auto trim, the output ran up to
+ * 5.37 dB OVER the source peak and reached +2.57 dBFS at Squash 90 / Mix 1 —
+ * it clipped.
+ *
+ * ⚠ AND THE CEILING IS AT THIS PLUGIN'S OUTPUT, NOT ON THE EMBEDDED LA-2A. In
+ * OptoSmooth the kernel is the last stage so its internal ceiling bounds what
+ * leaves; here the post EQ and the dry sum both come after it, so a ceiling
+ * inside the kernel would be undone downstream. The test that matters is the
+ * one at Mix well below 1, where the dry path — which the kernel never sees at
+ * all — is most of the output.
+ */
+test('the ceiling holds the output under the source peak at every blend', () => {
+  const input = voiceLike(4, { envRateHz: 0.5 })
+  const inPeak = peakOf(input)
+  for (const squash of [45, 65, 90]) {
+    for (const mix of [0.3, 0.5, 1]) {
+      const m = computeSchepsAutoTrim([input], SR, { squash })
+      assert.ok(Number.isFinite(m.ceilingDb), 'the trim must return a ceiling')
+      const { channelData } = processSchepsBuffer([input], SR, {
+        squash, mix, wetTrimDb: m.trimDb, correlation: m.correlation,
+        densityDb: m.densityDb, ceilingDb: m.ceilingDb,
+      })
+      assert.ok(
+        peakOf(channelData[0]) <= inPeak,
+        `squash ${squash} mix ${mix}: ${db(peakOf(channelData[0])).toFixed(3)} `
+        + `exceeded source ${db(inPeak).toFixed(3)}`,
+      )
+    }
+  }
+})
+
+/**
+ * The failure pinned as a failure, exactly as OptoSmooth's is: if this ever
+ * stops overshooting, the blend has become self-bounding and the ceiling is
+ * unnecessary — which is a finding, not a passing test.
+ */
+test('and without it the blend really does exceed the source', () => {
+  const input = voiceLike(4, { envRateHz: 0.5 })
+  const m = computeSchepsAutoTrim([input], SR, { squash: 90 })
+  const { channelData } = processSchepsBuffer([input], SR, {
+    squash: 90, mix: 1, wetTrimDb: m.trimDb, correlation: m.correlation,
+    densityDb: m.densityDb,
+  })
+  assert.ok(
+    peakOf(channelData[0]) > peakOf(input),
+    'expected an unguarded overshoot at Squash 90 / Mix 1',
+  )
+})
+
+test('no ceiling is sample-identical to not passing one', () => {
+  const input = voiceLike(2, { envRateHz: 0.5 })
+  const base = { squash: 65, mix: 0.5, wetTrimDb: 6 }
+  const bare = processSchepsBuffer([input], SR, base).channelData[0]
+  const explicit = processSchepsBuffer([input], SR, { ...base, ceilingDb: null }).channelData[0]
+  for (let i = 0; i < bare.length; i++) assert.equal(bare[i], explicit[i], `sample ${i} moved`)
+})
+
+test('a ceiling above the signal changes nothing', () => {
+  const input = voiceLike(2, { envRateHz: 0.5 })
+  const base = { squash: 65, mix: 0.5, wetTrimDb: 6 }
+  const bare = processSchepsBuffer([input], SR, base).channelData[0]
+  const high = processSchepsBuffer([input], SR, { ...base, ceilingDb: 12 }).channelData[0]
+  for (let i = 0; i < bare.length; i++) {
+    assert.equal(bare[i], high[i], `sample ${i} moved under a ceiling nothing reaches`)
+  }
+})
+
+/**
+ * ── THE PANEL SEAM ──────────────────────────────────────────────────────────
+ *
+ * ⚠ THESE EXIST BECAUSE THE IDENTICAL BUG SHIPPED ON OPTOSMOOTH THIS WEEK:
+ * `toKernelParams` did not carry `ceilingDb` at all, so the panel would have run
+ * the raised makeup with nothing behind it. It was caught only because the
+ * LA-2A params had already been split into a Node-reachable module. Scheps'
+ * were not, until now — `schepsParams.js` is that split, and this is what it
+ * buys.
+ */
+
+test('the panel param object carries the ceiling into kernel params', () => {
+  assert.equal(toKernelParams({ ...SCHEPS_DEFAULTS, ceilingDb: -3.5 }).ceilingDb, -3.5)
+})
+
+test('kernel params omit the ceiling entirely when there is none', () => {
+  for (const absent of [{ ...SCHEPS_DEFAULTS }, { ...SCHEPS_DEFAULTS, ceilingDb: null }]) {
+    assert.ok(!('ceilingDb' in toKernelParams(absent)),
+      'an absent ceiling must not appear as a key')
+  }
+})
+
+test('a panel-shaped patch actually limits when it carries a ceiling', () => {
+  const input = voiceLike(2, { envRateHz: 0.5 })
+  const panel = { ...SCHEPS_DEFAULTS, squash: 90, mix: 100, wetTrimDb: 18 }
+  // Well under the unguarded render's own peak (-5.79 dBFS on this stimulus),
+  // so the assertion below is testing the ceiling rather than the signal.
+  const ceilingDb = -12
+
+  const loud = processSchepsBuffer([input], SR, toKernelParams(panel)).channelData[0]
+  const held = processSchepsBuffer([input], SR, toKernelParams({ ...panel, ceilingDb })).channelData[0]
+
+  assert.ok(db(peakOf(loud)) > ceilingDb + 3,
+    `the unguarded render should be well over the ceiling: ${db(peakOf(loud)).toFixed(2)}`)
+  assert.ok(db(peakOf(held)) <= ceilingDb + 1e-9,
+    `the guarded one must sit at or under it: ${db(peakOf(held)).toFixed(4)}`)
 })

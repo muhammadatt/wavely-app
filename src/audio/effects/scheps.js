@@ -16,37 +16,14 @@ import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
 
 /**
- * The wet path runs through OptoSmooth's oversampled gain cell, whose halfband
- * filters are linear phase and therefore delay. The dry side of the blend is
- * delayed to match inside the kernel; this is the whole plugin's delay, which
- * the offline apply path compensates.
+ * ⚠ THE PARAMS AND THE LATENCY LIVE IN `schepsParams.js` so they can be reached
+ * from Node — see that file. Re-exported here so importers are unchanged.
  */
-export const SCHEPS_LATENCY_SAMPLES = OVERSAMPLE_LATENCY_SAMPLES
-
-export const SCHEPS_DEFAULTS = {
-  character: 'thick', // 'thick' | 'presence'
-  squash: 62, // LA-2A Peak Reduction on the wet path — see the kernel defaults
-  mix: 35, // percent wet — the panel's unit
-  output: 0, // manual trim on the summed output, dB
-  // Measured by the auto trim pass. Held here rather than derived at apply time
-  // so the applied render uses the same two numbers the preview was heard with.
-  wetTrimDb: 0,
-  correlation: 0,
-  densityDb: 0,
-}
-
-/** Map UI param names to kernel param names. */
-export function toKernelParams(params) {
-  return {
-    character: params.character,
-    squash: params.squash,
-    mix: params.mix / 100,
-    outputDb: params.output,
-    wetTrimDb: params.wetTrimDb,
-    correlation: params.correlation,
-    densityDb: params.densityDb,
-  }
-}
+export {
+  SCHEPS_LATENCY_SAMPLES, SCHEPS_DEFAULTS, toKernelParams,
+} from './schepsParams.js'
+import { toKernelParams } from './schepsParams.js'
+import { SCHEPS_DEFAULTS } from './schepsParams.js'
 
 export function createScheps(audioContext) {
   const input = audioContext.createGain()

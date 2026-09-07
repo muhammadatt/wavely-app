@@ -39,6 +39,9 @@
  */
 
 import { LA2AKernel } from './la2aProcessor.js'
+import {
+  MAKEUP_PERCENTILE, CEILING_KNEE_DB, softCeiling, float32AtOrBelow, percentileOfChannels,
+} from './dsp/makeupReference.js'
 import { DelayLine } from './dsp/oversample.js'
 import { BiquadCascade, highpass, lowpass } from './dsp/biquad.js'
 import { pultecSections, PULTEC_STAGES } from './dsp/pultec.js'
@@ -287,6 +290,27 @@ export class SchepsKernel {
     })
 
     this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)
+
+    /**
+     * OUTPUT CEILING, dBFS. Null/absent is off and skips the branch entirely.
+     *
+     * ⚠ IT IS AT THIS PLUGIN'S OUTPUT AND NOT ON THE EMBEDDED LA-2A, AND THAT IS
+     * THE WHOLE POINT OF PUTTING IT HERE. In OptoSmooth the kernel IS the last
+     * stage, so its internal ceiling bounds what leaves. Here the same kernel is
+     * mid-chain — the post EQ and the dry sum both come after it — so a ceiling
+     * inside it would clamp the wet path and then be undone by everything
+     * downstream. `LA2A_FIXED` therefore never sets `ceilingDb`, and this does.
+     *
+     * ⚠ AND SCHEPS NEEDS ONE MORE THAN OPTOSMOOTH DID. Measured on narration
+     * with the auto trim: the output ran up to 5.37 dB OVER the source peak and
+     * reached +2.57 dBFS at Squash 90 / Mix 1 — it clipped, and had done since
+     * the plugin shipped. A parallel blend sums two paths; nothing in the trim
+     * bounds their sum.
+     */
+    this.ceilingLin = Number.isFinite(p.ceilingDb)
+      ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20)) : 0
+    this.ceilingKneeLin = this.ceilingLin > 0
+      ? this.ceilingLin * Math.exp(-CEILING_KNEE_DB * LN10_OVER_20) : 0
     this._updateMix()
 
     // The dry delay has to match the wet path's latency exactly; rebuild it if
@@ -370,7 +394,10 @@ export class SchepsKernel {
         // Read the dry sample before writing the output, so an in-place caller
         // (input and output the same array) still works.
         const dry = line.push(src[i])
-        out[i] = (dry * dryGain + w[i] * wetGain) * outputLin
+        const mixed = (dry * dryGain + w[i] * wetGain) * outputLin
+        out[i] = this.ceilingLin > 0
+          ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+          : mixed
       }
     }
   }
@@ -484,6 +511,18 @@ function speechWeight(x, sampleRate) {
  * Blocks more than 40 dB below the loudest are dropped, so pauses and room tone
  * cannot drag the percentile down on a sparsely-voiced take.
  */
+/** Peak sample magnitude across every channel. */
+function peakOfChannels(channels) {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) {
+      const v = ch[i] < 0 ? -ch[i] : ch[i]
+      if (v > peak) peak = v
+    }
+  }
+  return peak
+}
+
 function loudPartDb(x, sampleRate) {
   const W = Math.round(sampleRate * 0.1)
   if (x.length < W * 4) {
@@ -539,16 +578,32 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
   // Trim must follow the same stereo picture the energy and correlation do: if
   // one side of a stereo pair is hotter, match the loudest channel rather than
   // silently measuring channel 0 alone.
-  const loudestBandDb = (bands) => {
-    let best = -Infinity
-    for (const band of bands) best = Math.max(best, loudPartDb(band, sampleRate))
-    return best
-  }
+  /**
+   * ⚠ THE REFERENCE IS THE SHARED SAMPLE PERCENTILE NOW, NOT `loudPartDb`, so
+   * both compressors answer the same question with the same statistic. It moves
+   * the number a long way — on narration the dry reads -6.48 dB here against
+   * -13.19 from the old P95-of-100 ms-blocks — because a sample percentile is a
+   * PEAK-ish measure and a block-rms percentile is a LOUDNESS one. The trim, and
+   * therefore `densityDb` and the mix law it feeds, move with it.
+   *
+   * ⚠ THE SPEECH BAND STAYS, and that is not an inconsistency. The statistic is
+   * what the two plugins share; WHICH SIGNAL it is taken on is this plugin's own
+   * problem, and Scheps has large Pultec low-frequency moves either side of the
+   * compressor. Matching broadband would let those dominate the wet/dry match
+   * and defeat the reason `speechWeight` exists. See `loudPartDb`, kept below
+   * for the density measurement.
+   *
+   * Loudest channel, not channel 0: if one side of a stereo pair is hotter, the
+   * trim has to follow the same stereo picture the energy and correlation do.
+   */
+  const loudestBandDb = bands => percentileOfChannels(bands, MAKEUP_PERCENTILE) > 0
+    ? 20 * Math.log10(percentileOfChannels(bands, MAKEUP_PERCENTILE))
+    : -Infinity
   const dryLoudDb = loudestBandDb(dryBand)
 
   let dryEnergy = 0
   for (const d of dryBand) for (let i = 0; i < d.length; i++) dryEnergy += d[i] * d[i]
-  if (dryEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0 }
+  if (dryEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0, ceilingDb: null }
 
   // ITERATED, because the makeup is now the compressor's own Gain and that sits
   // BEFORE the tube stage, as on the hardware. Raising it drives the tube a
@@ -577,7 +632,7 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
       crossEnergy += d[i] * w[i]
     }
   }
-  if (wetEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0 }
+  if (wetEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0, ceilingDb: null }
 
   // The rendered wet path ALREADY carries the makeup, so the density is the
   // straight energy ratio — no trim term to add back, unlike when the makeup
@@ -585,7 +640,23 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
   const densityDb = clamp(10 * Math.log10(wetEnergy / dryEnergy), -12, 12)
   // Scaling by a positive gain cannot change a normalised correlation.
   const correlation = clamp(crossEnergy / Math.sqrt(dryEnergy * wetEnergy), -1, 1)
-  return { trimDb, correlation, densityDb }
+
+  /**
+   * ⚠ THE CEILING TRAVELS WITH THE TRIM, for the same reason it travels with
+   * OptoSmooth's makeup: the percentile reference gives up the arithmetic
+   * guarantee that the output cannot exceed the source, and this is what puts it
+   * back. Returning them together is what stops a caller taking the level and
+   * skipping the enforcement. Measured BROADBAND and on the raw input — the
+   * speech band is the right domain for MATCHING two paths and the wrong one for
+   * a guarantee about the samples that actually leave.
+   */
+  const inputPeak = peakOfChannels(channelData)
+  return {
+    trimDb,
+    correlation,
+    densityDb,
+    ceilingDb: inputPeak > 0 ? 20 * Math.log10(inputPeak) : null,
+  }
 }
 
 // ── AudioWorklet registration (worklet scope only) ──────────────────────────

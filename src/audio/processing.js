@@ -381,7 +381,22 @@ export function computeSoftClipperAutoMakeup(segments, start, end, kernelParams,
  */
 export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker('schepsAutoTrim', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => ({ trimDb: d.trimDb, correlation: d.correlation, densityDb: d.densityDb }))
+    .then((d) => {
+      /**
+       * ⚠ THE CEILING IS RE-MEASURED OVER THE WHOLE REGION, exactly as
+       * `computeLA2AAutoMakeup` does and for the same reason: the worker only
+       * ever sees the capped, start-anchored analysis window, and a ceiling from
+       * an excerpt would clamp everything after it. The trim keeps the capped
+       * pass because solving it renders the wet path and has to stay fast.
+       */
+      const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+      return {
+        trimDb: d.trimDb,
+        correlation: d.correlation,
+        densityDb: d.densityDb,
+        ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      }
+    })
 }
 
 /**

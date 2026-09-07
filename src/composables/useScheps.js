@@ -30,6 +30,12 @@ const schepsAutoTrimBusy = ref(false)
 const schepsWetTrimDb = ref(SCHEPS_DEFAULTS.wetTrimDb)
 const schepsCorrelation = ref(SCHEPS_DEFAULTS.correlation)
 const schepsDensityDb = ref(SCHEPS_DEFAULTS.densityDb)
+/**
+ * The ceiling the last trim measurement produced, dBFS, or null. Measured
+ * state alongside the other three, and it rides in `currentParams()` for the
+ * same reason they do — so preview and apply cannot disagree about it.
+ */
+const schepsCeilingDb = ref(SCHEPS_DEFAULTS.ceilingDb)
 
 const schepsPreview = ref(false)
 const schepsReduction = ref(0)
@@ -56,6 +62,12 @@ function currentParams() {
     wetTrimDb: schepsWetTrimDb.value,
     correlation: schepsCorrelation.value,
     densityDb: schepsDensityDb.value,
+    /**
+     * ⚠ ONLY WHILE AUTO OWNS THE TRIM. With AUTO off the wet trim is the user's
+     * and there is no measured ceiling behind it; enforcing a stale one would
+     * attenuate a setting they made deliberately. Same rule `useLA2A` follows.
+     */
+    ceilingDb: schepsAutoTrim.value ? schepsCeilingDb.value : null,
   }
 }
 
@@ -148,12 +160,20 @@ export function useScheps() {
     const seq = ++trimSeq
     schepsAutoTrimBusy.value = true
     try {
-      const { trimDb, correlation, densityDb } = await computeSchepsTrim(
+      const { trimDb, correlation, densityDb, ceilingDb } = await computeSchepsTrim(
         state.segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
       )
       if (seq !== trimSeq) return // a newer measurement is already in flight
+      /**
+       * ⚠ THE CEILING GOES FIRST, AND THE ORDER IS THE GUARANTEE — the same
+       * ordering `useLA2A` needs. These reach the live node as separate param
+       * messages, so between them it holds one old value and one new one; trim
+       * first would run the raised wet path against the old ceiling, or none.
+       */
+      schepsCeilingDb.value = ceilingDb
+      pushParam('ceilingDb', ceilingDb)
       schepsWetTrimDb.value = trimDb
       schepsCorrelation.value = correlation
       schepsDensityDb.value = densityDb
@@ -240,6 +260,14 @@ export function useScheps() {
     pushParam('wetTrimDb', 0)
     pushParam('correlation', 0)
     pushParam('densityDb', 0)
+    /**
+     * ⚠ THE CEILING LEAVES WITH AUTO TOO. `currentParams()` already drops it,
+     * but the LIVE node has been told about it and would keep enforcing a
+     * measured ceiling against a trim the user now owns — a manual setting
+     * silently held down, with nothing on the panel saying so.
+     */
+    schepsCeilingDb.value = null
+    pushParam('ceilingDb', null)
   }
 
   async function apply() {
