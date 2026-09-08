@@ -110,6 +110,8 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
   // same curve to within 3 dB at the 5th harmonic and the blend was not a
   // character control. This one is.
   hardness: 2.5,
+  // Curve family — see cubicShape. 'shape' is what ships.
+  curve: 'shape',
   lowCrossover: 500,
   midCrossover: 3500,
   lowDriveMult: 5.0,
@@ -278,6 +280,106 @@ function shape(x, hardness) {
 }
 
 /**
+ * CUBIC — a bounded-order polynomial, and the one property it has that no
+ * clipping function can.
+ *
+ *   f(x) = x - x^3/6.75   on |x| <= 1.5,   sign(x) beyond
+ *
+ * ⚠ A DEGREE-3 POLYNOMIAL GENERATES EXACTLY THE THIRD HARMONIC AND NOTHING
+ * ELSE. Not "mostly"; the algebra permits no other term — sin^3 expands to
+ * (3sin - sin3)/4, so a cubic in a sine is a fundamental and a third, full
+ * stop. Against the shipping curve at a MATCHED 35% THD, which is what this
+ * plugin puts on an onset in series:
+ *
+ *   curve                  H3      H5      H7      H9     H11   above H5
+ *   shape n=2.5          -10.5   -16.5   -21.3   -25.7   -29.8     9.6%
+ *   this cubic            -9.1       -       -       -       -     0.0%
+ *
+ * That last column is the audible difference. High-order harmonics are what
+ * reads as GRIT; a pure third reads as thickness. Same amount of distortion,
+ * different kind.
+ *
+ * ⚠ AND IT IS ESSENTIALLY ALIAS-FREE AT THIS PLUGIN'S 2x, WHICH THE RATIONAL
+ * FAMILY CAN NEVER BE. Bounded harmonic order is bounded bandwidth: a cubic
+ * triples it, so at 2x a 7 kHz tone's third lands at 21 kHz, under the 22.05
+ * kHz Nyquist, and nothing folds. Measured, 7 kHz probe, matched THD:
+ *
+ *   5% THD    shape n=2.5   -79.0 dBc        this cubic   -151.1 dBc
+ *
+ * 72 dB, and it is structural rather than tuning.
+ *
+ * ⚠ BOTH ADVANTAGES DIE IN THE CLAMP, AND THE CLAMP IS NOT OPTIONAL. A
+ * polynomial diverges — this one turns over at x = 1.5 and heads for -infinity
+ * — so it must be clamped, and a clamp is a hard clipper with UNBOUNDED order.
+ * Everything above holds only while the signal stays inside |x| <= 1.5:
+ *
+ *   5% THD  (in domain)   above H5  0.0%    alias -151.1 dBc
+ *   35% THD (clamped)     above H5  6.3%    alias  -34.9 dBc
+ *
+ * ⚠ AND IN THIS PLUGIN THE CLAMP IS THE NORMAL CASE, NOT THE EDGE CASE, which
+ * is the single most important thing to know before reaching for this curve.
+ * The band mults are 8, so Drive 1 already presents a peak of 3.2 to a curve
+ * whose domain ends at 1.5. Measured in the plugin, series, asymmetry 0:
+ *
+ *   curve   drive    THD      H5      grit (above H5)
+ *   shape    0.3     6.9%   -49.5        0.0%
+ *   cubic    0.3     3.9%   -67.5        0.0%     <- 18 dB less 5th
+ *   shape      1    26.5%   -20.6        2.6%
+ *   cubic      1    30.0%   -19.2        1.6%
+ *   shape      2    35.7%   -16.3       10.6%
+ *   cubic      2    38.9%   -15.2       12.7%     <- WORSE than shape
+ *   shape      4    41.4%   -14.7       19.3%
+ *   cubic      4    43.3%   -14.3       22.3%     <- worse again
+ *
+ * The promise holds at Drive 0.3 and inverts by Drive 2. Past the domain this
+ * is a hard clipper wearing a polynomial's name, and a hard clipper is grittier
+ * than the rational curve it replaced. THE WHOLE VALUE OF THIS CURVE IS
+ * CONDITIONAL ON THE SIGNAL STAYING IN DOMAIN, and nothing here enforces that.
+ *
+ * An envelope-domain limiter ahead of the curve would enforce it, and that is
+ * the obvious next piece. It is deliberately NOT in this change: the curve was
+ * asked for on its own so it could be judged on its own. Judge it at LOW DRIVE,
+ * or the measurement above says you will be listening to the clamp.
+ *
+ * ── THE NORMALISATION, WHICH IS NOT THE TEXTBOOK ONE ───────────────────────
+ *
+ * The usual form is `1.5x - 0.5x^3`, clamped at 1. That has a slope of 1.5 at
+ * the origin — 3.5 dB of gain — so switching to it from `shape` would change
+ * the level as well as the character and an A/B would be measuring the wrong
+ * thing. Solving instead for unity slope at 0, an asymptote of 1, and a C1 join
+ * (no corner where the clamp takes over):
+ *
+ *   f'(0) = 1 -> coefficient of x is 1
+ *   f'(t) = 1 - 3b t^2 = 0     ->  b = 1/(3t^2)
+ *   f(t)  = t - t/3 = 2t/3 = 1 ->  t = 3/2,  b = 1/6.75
+ *
+ * Verified: f(0)=0, f'(0)=1, f(1.5)=1, f'(1.5)=0, monotonic on [0, 1.5], and
+ * within 0.01 dB of `shape` at |x| <= 0.2. So the switch is a change of
+ * character at matched level, which is what makes it auditionable.
+ *
+ * ⚠ IT STILL DISTORTS HARDER AT THE SAME DRIVE, and no normalisation fixes
+ * that because it is not a level difference. Matched THD needs drive 7.45 here
+ * against 14.90 for `shape` at 35%, and 1.81 against 2.03 at 5% — the ratio is
+ * not even constant, so no single trim could compensate it. Expect to back
+ * Drive off when switching to this curve.
+ *
+ * ⚠ HARDNESS DOES NOTHING HERE. It is the knee order of the rational family;
+ * this curve's knee order is 3 by construction. The panel disables the knob.
+ */
+const CUBIC_LIMIT = 1.5
+const CUBIC_COEFF = 1 / 6.75
+
+function cubicShape(x) {
+  if (x >= CUBIC_LIMIT) return 1
+  if (x <= -CUBIC_LIMIT) return -1
+  return x - CUBIC_COEFF * x * x * x
+}
+
+/** Curve families. `shape` is the shipped default; see cubicShape for the other. */
+export const CURVE_SHAPE = 'shape'
+export const CURVE_CUBIC = 'cubic'
+
+/**
  * The curve, run off-centre by `offset` with its operating point removed.
  *
  * ⚠ `shapedOffset` MUST be `shape(offset, hardness)` — the caller passes it in
@@ -287,8 +389,8 @@ function shape(x, hardness) {
  * transparent that expression is exactly `x`. Every harmonic the offset appears
  * to create belongs to THIS curve, generated off-centre.
  */
-function applyTransfer(pre, hardness, offset, shapedOffset) {
-  return shape(pre + offset, hardness) - shapedOffset
+function applyTransfer(curveFn, pre, hardness, offset, shapedOffset) {
+  return curveFn(pre + offset, hardness) - shapedOffset
 }
 
 /**
@@ -682,6 +784,7 @@ export class VocalSatKernel {
     this.hfLossActive = HfLossShelf.isActive(this.hfLossMaxDb)
 
     this.hardness = clamp(p.hardness, HARDNESS_MIN, HARDNESS_MAX)
+    this.curveFn = p.curve === CURVE_CUBIC ? cubicShape : shape
     // Read as 0-100 and ABSENT below the epsilon, so a patch at 0 runs no DC
     // blocker and takes no branch — the same rule HF Loss follows, and the
     // thing that keeps `asymmetry: 0` bit-identical to a build without any of
@@ -750,7 +853,7 @@ export class VocalSatKernel {
 
     const {
       hardness, asymActive, wetDry, lowDrive, midDrive, highDrive,
-      series, emphasisActive, softenActive,
+      series, emphasisActive, softenActive, curveFn,
     } = this
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
@@ -808,7 +911,7 @@ export class VocalSatKernel {
         ? asymmetryOffset(this.asymmetry, st.skew.direction, ASYM_REFERENCE)
         : 0
       // Constant for the block — see applyTransfer on why this is hoisted.
-      const shapedOffset = shape(offset, hardness)
+      const shapedOffset = curveFn(offset, hardness)
 
       // Up to the high rate one band at a time. Upsampling is linear, so the
       // three still sum back to the input there — the complementary split is
@@ -851,14 +954,14 @@ export class VocalSatKernel {
         for (let j = 0; j < n * L; j++) {
           let pre = lowUp[j] * lowDrive + midUp[j] * midDrive + highUp[j] * highDrive
           if (softenActive) pre = st.soften.process(pre, softenScaleValue, softenReference)
-          sum[j] = applyTransfer(pre, hardness, offset, shapedOffset)
+          sum[j] = applyTransfer(curveFn, pre, hardness, offset, shapedOffset)
         }
       } else {
         for (let j = 0; j < n * L; j++) {
           sum[j] =
-            applyTransfer(lowUp[j] * lowDrive, hardness, offset, shapedOffset) +
-            applyTransfer(midUp[j] * midDrive, hardness, offset, shapedOffset) +
-            applyTransfer(highUp[j] * highDrive, hardness, offset, shapedOffset)
+            applyTransfer(curveFn, lowUp[j] * lowDrive, hardness, offset, shapedOffset) +
+            applyTransfer(curveFn, midUp[j] * midDrive, hardness, offset, shapedOffset) +
+            applyTransfer(curveFn, highUp[j] * highDrive, hardness, offset, shapedOffset)
         }
       }
 

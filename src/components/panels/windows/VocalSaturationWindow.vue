@@ -15,12 +15,12 @@ import LevelMeter from '../../meters/LevelMeter.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsMode, vsEmphasis, vsSoften, VOCAL_SAT_MODES,
+  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsCurve, VOCAL_SAT_CURVES, vsMode, vsEmphasis, vsSoften, VOCAL_SAT_MODES,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
   vsPreview, vsInputLevels, vsOutputLevels,
   togglePreview,
-  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncMode, syncEmphasis, syncSoften,
+  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncCurve, syncMode, syncEmphasis, syncSoften,
   syncLowCrossover, syncMidCrossover,
   syncLowDriveMult, syncMidDriveMult, syncHighDriveMult, syncHfLoss,
   apply, teardown, closeModal,
@@ -34,6 +34,12 @@ onMounted(() => {
 })
 
 const ACCENT = '#ff8a5b'
+
+const curveCaption = computed(() => (
+  vsCurve.value === 'cubic'
+    ? 'third harmonic only — needs low Drive to stay in range'
+    : 'rational knee, Hardness sets its order'
+))
 
 const modeCaption = computed(() => (
   vsMode.value === 'series'
@@ -120,9 +126,10 @@ async function applyAndClose() {
             <Knob :model-value="vsHardness" @update:model-value="syncHardness"
                   :min="HARDNESS_MIN" :max="HARDNESS_MAX" :step="0.1"
                   label="Hardness" :accent="ACCENT" :format-value="oneDp"
-                  :disabled="!vsPreview" />
+                  :disabled="!vsPreview || vsCurve === 'cubic'" />
             <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
-              {{ vsHardness > 5.5 ? 'spiky' : vsHardness >= 3 ? 'close-in' : 'dense' }}
+              {{ vsCurve === 'cubic' ? 'n/a for cubic'
+                 : vsHardness > 5.5 ? 'spiky' : vsHardness >= 3 ? 'close-in' : 'dense' }}
             </p>
           </div>
           <div class="w-[72px] pt-[8px]">
@@ -173,6 +180,24 @@ async function applyAndClose() {
              frequencies hardest, which is what rounds an onset rather than
              sharpening it. See MODE_SERIES and EMPHASIS_MAX_DB. -->
         <div class="mb-[16px] flex items-start justify-center gap-[26px]">
+          <!-- CURVE FAMILY. A degree-3 polynomial makes exactly the third
+               harmonic and nothing above it — 0% of its distortion energy sits
+               above the 5th, against ~10% for SHAPE at matched THD — and at 2x
+               it is essentially alias-free (-151 vs -79 dBc). Both properties
+               hold ONLY while Drive keeps the signal inside the polynomial's
+               domain; past it the clamp is a hard clipper and CUBIC measures
+               grittier than SHAPE. See cubicShape. -->
+          <div>
+            <DeviceChoiceRocker
+              :model-value="vsCurve"
+              @update:model-value="syncCurve"
+              :options="VOCAL_SAT_CURVES.map(c => ({ value: c.id, label: c.label, title: c.title }))"
+              :accent="ACCENT"
+              :caption="curveCaption"
+              label="Curve"
+              :disabled="!vsPreview"
+            />
+          </div>
           <div>
             <DeviceChoiceRocker
               :model-value="vsMode"

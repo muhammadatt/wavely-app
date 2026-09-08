@@ -4,7 +4,7 @@ import { useWindows } from './useWindows.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import {
-  vocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES,
+  vocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES,
 } from '../audio/effects/vocalSat.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -19,6 +19,7 @@ const vsMode = ref(VOCAL_SAT_DEFAULTS.mode)
 const vsEmphasis = ref(VOCAL_SAT_DEFAULTS.emphasis)
 const vsSoften = ref(VOCAL_SAT_DEFAULTS.soften)
 const vsHardness = ref(VOCAL_SAT_DEFAULTS.hardness)
+const vsCurve = ref(VOCAL_SAT_DEFAULTS.curve)
 const vsLowCrossover = ref(VOCAL_SAT_DEFAULTS.lowCrossover)
 const vsMidCrossover = ref(VOCAL_SAT_DEFAULTS.midCrossover)
 const vsLowDriveMult = ref(VOCAL_SAT_DEFAULTS.lowDriveMult)
@@ -40,6 +41,7 @@ function currentParams() {
     emphasis: vsEmphasis.value,
     soften: vsSoften.value,
     hardness: vsHardness.value,
+    curve: vsCurve.value,
     lowCrossover: vsLowCrossover.value,
     midCrossover: vsMidCrossover.value,
     lowDriveMult: vsLowDriveMult.value,
@@ -127,6 +129,7 @@ export function useVocalSaturation() {
   const syncEmphasis = v => syncParam('emphasis', vsEmphasis, v)
   const syncSoften = v => syncParam('soften', vsSoften, v)
   const syncHardness = v => syncParam('hardness', vsHardness, v)
+  const syncCurve = v => syncParam('curve', vsCurve, v)
   const syncLowCrossover = v => syncParam('lowCrossover', vsLowCrossover, v)
   const syncMidCrossover = v => syncParam('midCrossover', vsMidCrossover, v)
   const syncLowDriveMult = v => syncParam('lowDriveMult', vsLowDriveMult, v)
@@ -182,6 +185,8 @@ export function useVocalSaturation() {
     vsWetDry,
     vsAsymmetry,
     vsHardness,
+    vsCurve,
+    VOCAL_SAT_CURVES,
     vsMode,
     vsEmphasis,
     vsSoften,
@@ -201,6 +206,7 @@ export function useVocalSaturation() {
     syncWetDry,
     syncAsymmetry,
     syncHardness,
+    syncCurve,
     syncMode,
     syncEmphasis,
     syncSoften,

@@ -12,6 +12,8 @@ import {
   MODE_SERIES,
   MODE_PARALLEL,
   SOFTEN_REFERENCE,
+  CURVE_SHAPE,
+  CURVE_CUBIC,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -596,6 +598,107 @@ test('the soften reference is motionless, not tracked', () => {
   // this asserts it stays one rather than quietly becoming an envelope.
   assert.equal(typeof SOFTEN_REFERENCE, 'number')
   assert.ok(SOFTEN_REFERENCE > 0)
+})
+
+test('the cubic makes ONLY the third harmonic while it stays in domain', () => {
+  // THE ONE PROPERTY THAT MOTIVATES THIS CURVE, and the algebra is why it is a
+  // guarantee rather than a measurement: sin^3 expands to (3sin - sin3)/4, so a
+  // cubic in a sine is a fundamental and a third, full stop. No 5th exists to
+  // be small. Probed at a Drive that keeps the signal inside |x| <= 1.5.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const harmonics = curve => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, drive: 0.3, curve,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    const fund = at(f0)
+    return { h3: at(f0 * 3) / fund, h5: at(f0 * 5) / fund }
+  }
+  const shaped = harmonics(CURVE_SHAPE)
+  const cubic = harmonics(CURVE_CUBIC)
+  const drop = 20 * Math.log10(shaped.h5 / cubic.h5)
+  assert.ok(cubic.h3 > 1e-3, 'the cubic should still make a third harmonic')
+  assert.ok(
+    drop > 12,
+    `the cubic should have far less 5th; only ${drop.toFixed(1)} dB below shape. `
+    + 'If this fell, check the signal is still inside the polynomial domain',
+  )
+})
+
+test('⚠ THE CUBIC IS GRITTIER THAN SHAPE ONCE DRIVE CLAMPS IT', () => {
+  // THE TRAP, PINNED SO IT CANNOT BE FORGOTTEN. A polynomial diverges and must
+  // be clamped; the clamp is a hard clipper with UNBOUNDED harmonic order. In
+  // this plugin the band mults are 8, so Drive 1 already presents a peak of 3.2
+  // to a curve whose domain ends at 1.5 — the clamp is the NORMAL case here,
+  // not the edge case. Share of distortion energy above the 5th harmonic:
+  //
+  //   drive    0.3      1       2       4
+  //   shape    0.0%    2.6%   10.6%   19.3%
+  //   cubic    0.0%    1.6%   12.7%   22.3%
+  //
+  // The promise holds at 0.3 and inverts by 2. Anyone who reads only the
+  // "third harmonic only" claim will ship this at the default Drive and make
+  // the plugin worse.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const grit = (curve, drive) => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, drive, curve,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    const fund = at(f0)
+    let total = 0
+    let high = 0
+    for (let k = 2; k <= 20; k++) {
+      const v = (at(f0 * k) / fund) ** 2
+      total += v
+      if (k > 5) high += v
+    }
+    return (100 * high) / total
+  }
+  assert.ok(grit(CURVE_CUBIC, 0.3) < 1, 'in domain the cubic should have no high-order content')
+  assert.ok(
+    grit(CURVE_CUBIC, 4) > grit(CURVE_SHAPE, 4),
+    'past its domain the cubic hard-clips and should measure GRITTIER than shape. '
+    + 'If that stopped being true, the clamp or the domain changed',
+  )
+})
+
+test('the curve families agree at low level, so the switch is a fair A/B', () => {
+  // The textbook cubic is 1.5x - 0.5x^3, whose slope at the origin is 1.5 —
+  // 3.5 dB of gain. Switching to THAT would change level as well as character
+  // and the comparison would be measuring the wrong thing. This one is solved
+  // for unity slope at 0, an asymptote of 1 and a C1 join; see cubicShape.
+  const n = 16384
+  const sig = tone(n, 220, 0.4)
+  const at = curve => processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, drive: 0.02, curve,
+  }).channelData[0]
+  const a = at(CURVE_SHAPE)
+  const b = at(CURVE_CUBIC)
+  let worst = 0
+  for (let i = 2000; i < n; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]))
+  assert.ok(worst < 1e-3, `curves should agree at low level; max diff ${worst.toExponential(2)}`)
+})
+
+test('the default curve is shape, and the default patch is still bit-identical', () => {
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { curve: CURVE_SHAPE }).channelData[0]
+  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `default curve moved (i=${i})`)
 })
 
 test('hardness is clamped to the measured range', () => {

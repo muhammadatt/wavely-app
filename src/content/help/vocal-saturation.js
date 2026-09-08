@@ -9,6 +9,7 @@ export default {
 
   controls: [
     { label: 'Drive', text: 'How hard the signal is pushed into the curve' },
+    { label: 'Curve', text: 'SHAPE is the standard curve. CUBIC is a polynomial that can only make the third harmonic, so its distortion is thick rather than gritty — but only while Drive is low enough to keep it in range' },
     { label: 'Topology', text: 'PARA adds a saturated copy underneath the original, which keeps every transient intact and thickens what is around it. SERIES puts a single broadband curve in the path, so it can absorb and round transients instead' },
     { label: 'Soften', text: 'Caps how fast the waveform is allowed to move before it reaches the curve, which rounds sharp edges off directly rather than by filtering. Available in SERIES only' },
     { label: 'Emphasis', text: 'Makes the curve act hardest on high frequencies, which takes the edge off attacks while leaving the body thick. This is the control that turns a crisp saturator into a soft one' },
@@ -34,6 +35,8 @@ export default {
   notes: [
     'HF Loss acts on the finished output rather than only the wet path, so with it raised Wet / Dry at 0 no longer bypasses the plugin',
     'Saturation is not level-invariant: a quieter selection is driven less at the same Drive setting',
+    'CUBIC only sounds cleaner at low Drive. Push it and it runs out of range, at which point it hard-clips and measures grittier than SHAPE, not less. Try it around Drive 0.3 and work up until you hear it turn',
+    'Hardness has no effect on CUBIC — a cubic has one fixed knee order by definition, so the knob is disabled there',
     'Hardness does not go below 2, because the soft end of this curve family aliases more than the hard end, not less',
     'In PARA the dry signal always passes at full level, so no setting of Wet / Dry will soften a transient. Use SERIES for that',
     'The Low / Mid / High Drive knobs still work in SERIES, but as a tilt into one shared curve rather than three separate ones. At equal settings the crossovers make no difference there',

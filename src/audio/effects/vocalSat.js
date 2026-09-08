@@ -17,10 +17,29 @@
 import { ensureVocalSatWorklet } from '../vocalSatWorkletLoader.js'
 import {
   VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL,
+  CURVE_SHAPE, CURVE_CUBIC,
 } from '../vocalSatProcessor.js'
 import { createLevelTap } from './levelTap.js'
 
-export { VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL }
+export { VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL, CURVE_SHAPE, CURVE_CUBIC }
+
+/**
+ * The two curve families, for the panel's second rocker. Peers, like the
+ * topology pair: a bounded-order polynomial and a rational clipping function
+ * are two different things, not more and less of one thing.
+ */
+export const VOCAL_SAT_CURVES = [
+  {
+    id: CURVE_SHAPE,
+    label: 'SHAPE',
+    title: 'Rational curve with an adjustable knee order — Hardness applies to this one',
+  },
+  {
+    id: CURVE_CUBIC,
+    label: 'CUBIC',
+    title: 'Degree-3 polynomial: third harmonic only, no high-order grit, but only while Drive keeps it in range',
+  },
+]
 
 /**
  * The two topologies, for the panel's rocker.
@@ -60,6 +79,7 @@ export const VOCAL_SAT_DEFAULTS = {
   soften: 0,
   // Was `softness: 0.5`, a crossfade between two curves that measured the same.
   hardness: 2.5,
+  curve: CURVE_SHAPE,
   lowCrossover: 500,
   midCrossover: 3500,
   lowDriveMult: 8.0,
@@ -81,6 +101,7 @@ export function toKernelParams(params) {
     emphasis: params.emphasis,
     soften: params.soften,
     hardness: params.hardness,
+    curve: params.curve,
     lowCrossover: params.lowCrossover,
     midCrossover: params.midCrossover,
     lowDriveMult: params.lowDriveMult,
