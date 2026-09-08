@@ -45,30 +45,41 @@ const MAKEUP_REFERENCE = 'percentile'
 const la2aCeilingDb = ref(null)
 
 /**
- * INPUT ALIGNMENT — on by default, and the reason it is on is that off is a bug.
+ * INPUT ALIGNMENT — the measured side-chain drive offset. Always on.
  *
- * Neither compressor has a threshold control (see `dsp/inputAlign.js`), so the
- * reduction a knob position delivers is set by the FILE'S level. Measured at
- * Peak Reduction 50: 4.62 dB on a file peaking at -1 dBFS, 0.00 dB on one at
- * -18 dBFS. A narrator who left headroom — which ACX guidance asks for — opens
- * the plugin, sees the default patch, and hears nothing happen.
+ * Neither compressor has a threshold control (see `dsp/inputAlign.js`), so
+ * without this the reduction a knob position delivers is set by the FILE'S
+ * level: 4.62 dB at Peak Reduction 50 on a file peaking at -1 dBFS, 0.00 dB on
+ * one at -18. A narrator who left the headroom ACX guidance asks for opened the
+ * plugin and heard nothing happen.
  *
- * ⚠ IT IS NOT A NO-OP ON WELL-RECORDED MATERIAL EITHER, and that is the cost of
- * the switch being on. The target is anchored to the level of the capture every
- * ballistic and taper constant was fitted against, so THAT file aligns to
- * +0.00 dB — but a file peak-normalised to -1 dBFS trims -1.8 dB and its
- * reduction at PR 50 moves 2.44 -> 1.80 dB. Existing patches therefore compress
- * slightly less on hot material and enormously more on quiet material. The
- * toggle exists so that is recoverable, not so it is unnoticed.
- */
-const la2aInputAlign = ref(true)
-/**
- * The measured offset, dB, or null before the first measurement.
+ * ⚠ PINNED, WITH NO CONTROL, AND THE SWITCH THAT USED TO BE HERE WAS THE WRONG
+ * SHAPE. It could turn alignment OFF but could not set an offset, so it gave up
+ * the correction without offering a way to make one by hand — a mode switch
+ * dressed as an escape hatch. The real manual control is PEAK REDUCTION, which
+ * is the same axis: the knob is 0.4989 dB of drive per unit and an offset is
+ * bit-identical to moving it (`test/dsp/inputAlign.test.js`). So "off" bought
+ * the user nothing they did not already have, at the price of a position in
+ * which the plugin does almost nothing on a quiet file.
  *
- * ⚠ MEASURED STATE, NOT A KNOB, and kept out of `LA2A_DEFAULTS` and out of
- * presets for the same reason as `la2aCeilingDb`: it describes the audio, not
- * the patch. A preset carrying one would apply another recording's gain
- * staging to this file.
+ * Alignment is also what makes Peak Reduction's travel usable at all: unaligned,
+ * a file at -30 dBFS peak needs the knob at 100 and still gets 2.59 dB.
+ *
+ * ⚠ WHICH MAKES THE MEASUREMENT LOAD-BEARING WITH NO USER RECOURSE. Nothing on
+ * the panel can override a misread, so the guards are ALIGN_MAX_DB and the
+ * bench (`npm run la2a:align`), not a control. A class of material that fools
+ * the gate is a bug to fix there, not a switch to flip here.
+ *
+ * ⚠ NOT A NO-OP ON WELL-RECORDED MATERIAL. The target is anchored to the level
+ * of the capture every ballistic and taper constant was fitted against, so THAT
+ * file aligns to +0.00 dB — but a file peak-normalised to -1 dBFS trims -1.8 dB
+ * and its reduction at PR 50 moves 2.44 -> 1.80. Patches saved before this
+ * compress slightly less on hot material and enormously more on quiet material.
+ *
+ * The value itself is MEASURED STATE, not a knob, and is kept out of
+ * `LA2A_DEFAULTS` and out of presets for the same reason as `la2aCeilingDb`: it
+ * describes the audio, not the patch. A preset carrying one would apply another
+ * recording's gain staging to this file.
  */
 const la2aInputAlignDb = ref(null)
 // Auto makeup: on by default so spot compression is level-neutral — an
@@ -125,7 +136,7 @@ function currentParams() {
      * position mean on this file". Turning the makeup off is not a reason to
      * hand the user back a compressor whose knob does nothing.
      */
-    inputAlignDb: la2aInputAlign.value ? la2aInputAlignDb.value : null,
+    inputAlignDb: la2aInputAlignDb.value,
   }
 }
 
@@ -174,7 +185,7 @@ function measurementParams() {
      * the two differ by the whole of the gain reduction, not by a fraction of a
      * dB.
      */
-    ...(Number.isFinite(la2aInputAlign.value ? la2aInputAlignDb.value : null)
+    ...(Number.isFinite(la2aInputAlignDb.value)
       ? { inputAlignDb: la2aInputAlignDb.value } : {}),
   }
 }
@@ -291,11 +302,6 @@ export function useLA2A() {
    */
   function refreshInputAlign() {
     if (!state.currentFile) return
-    if (!la2aInputAlign.value) {
-      la2aInputAlignDb.value = null
-      pushParam('inputAlignDb', null)
-      return
-    }
     const end = totalDuration.value
     if (!(end > 0)) return
     const db = regionAlignDb(
@@ -303,16 +309,6 @@ export function useLA2A() {
     )
     la2aInputAlignDb.value = db
     pushParam('inputAlignDb', db)
-  }
-
-  /**
-   * Turn alignment on or off. Re-measures and re-solves, because both the
-   * rendered signal and the makeup that matches it depend on the offset.
-   */
-  function toggleInputAlign() {
-    la2aInputAlign.value = !la2aInputAlign.value
-    refreshInputAlign()
-    scheduleAutoMakeup()
   }
 
   /**
@@ -338,7 +334,7 @@ export function useLA2A() {
      */
     // Alignment is upstream of the solve and of the render alike, so it is
     // brought up to date first — see refreshInputAlign.
-    if (la2aInputAlign.value && la2aInputAlignDb.value === null) refreshInputAlign()
+    if (la2aInputAlignDb.value === null) refreshInputAlign()
 
     const start = state.selection ? state.selection.start : 0
     const end = state.selection ? state.selection.end : totalDuration.value
@@ -549,8 +545,6 @@ export function useLA2A() {
     la2aLookahead,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
-    la2aInputAlign,
-    la2aInputAlignDb,
     la2aPreview,
     la2aReduction,
     la2aInputLevels,
@@ -563,7 +557,6 @@ export function useLA2A() {
     syncR37,
     syncLookahead,
     toggleAutoMakeup,
-    toggleInputAlign,
     refreshInputAlign,
     refreshAutoMakeup,
     refreshKernelTuning,

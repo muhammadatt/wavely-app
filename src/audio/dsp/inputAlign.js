@@ -20,6 +20,16 @@
  * It also means a saved preset is only valid at the level it was saved at,
  * which quietly breaks the plugin-preset feature rather than degrading it.
  *
+ * ⚠ IT IS PINNED ON, WITH NO CONTROL ON ANY PANEL. A switch was built and
+ * removed before it shipped: it could turn alignment OFF but could not set an
+ * offset by hand, so it gave up the correction without offering a replacement.
+ * The manual control is PEAK REDUCTION — the same axis, 0.4989 dB of drive per
+ * unit, bit-identical to an offset — so "off" bought nothing the user did not
+ * already have, and an INPUT knob calibrated in drive would be a second Peak
+ * Reduction knob for the same reason. Which means the measurement below is
+ * load-bearing with NO user recourse: a class of material that fools the gate
+ * is a bug to fix here, guarded by ALIGN_MAX_DB and `npm run la2a:align`.
+ *
  * ⚠ THIS IS A SIDE-CHAIN DRIVE OFFSET, NOT AN INPUT GAIN, and the distinction
  * is the reason this is safe. Level and drive ADD IN dB inside the gain
  * computer, so adding N dB of drive is algebraically identical to raising the
@@ -57,6 +67,18 @@
  * pinned to 0 dBFS). A near-peak statistic is right on the MAKEUP side, where
  * the question is "how loud is the loudest thing", and wrong here, where the
  * question is "how much energy is driving the detector". Do not unify them.
+ *
+ * ⚠ AND PEAK IS NOT AN ADEQUATE SHORTCUT, WHICH IS NOT OBVIOUS. The expected
+ * cost of a peak reference is a constant bias — a hot-peak file arrives quieter
+ * and wants a little more Peak Reduction — and that would be tolerable. The
+ * real cost is that the error is neither constant nor about level. A 2 ms click
+ * at -1 dBFS moves a peak measurement 1.79 dB and its delivered reduction
+ * 1.80 -> 1.33; gated RMS moves 0.01. And peak converts CREST FACTOR straight
+ * into compression, inverted — same speech at the same gated level, aligned on
+ * peak, delivers 1.80 / 4.19 / 7.12 dB as captured / lightly clipped / hard
+ * clipped, so the already-limited file that needs the least gets the most.
+ * Gated RMS delivers 1.80 / 1.81 / 1.85. If this ever has to get simpler, the
+ * answer is PLAIN RMS (1.89 dB of spread) and not peak (8.22).
  *
  * WHY THE GATE IS LOAD-BEARING. Plain RMS is strong until it is handed a
  * narrator's file with 30 s of head and tail room tone — the ACX case

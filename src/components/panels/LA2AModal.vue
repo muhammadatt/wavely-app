@@ -23,7 +23,6 @@ const {
   togglePreview, syncMode, syncPeakReduction, syncGain,
   syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup,
   refreshKernelTuning,
-  la2aInputAlign, la2aInputAlignDb, toggleInputAlign,
   apply, teardown, closeModal,
 } = useLA2A()
 
@@ -50,20 +49,7 @@ const autoMakeupLabel = computed(() =>
   la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO' : 'AUTO'
 )
 
-/**
- * The measured offset, shown so the hidden gain stage is not hidden.
- *
- * ⚠ READ-ONLY ON PURPOSE. It is a measurement of the file, not a setting: it
- * belongs to the audio the way the makeup ceiling does, and a draggable version
- * would be a second Peak Reduction knob calibrated in the opposite direction.
- * The switch is the control; this is the read-out that makes it legible.
- */
-const inputAlignLabel = computed(() => {
-  if (!la2aInputAlign.value) return 'OFF'
-  const v = la2aInputAlignDb.value
-  if (!Number.isFinite(v)) return '--'
-  return `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
-})
+
 
 
 const ACCENT = '#f5a623'
@@ -251,6 +237,19 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
         />
 
         <div class="flex gap-[26px]">
+          <!-- ⚠ THERE IS NO INPUT / ALIGN CONTROL, AND ONE WAS BUILT AND REMOVED
+               BEFORE IT SHIPPED. Input alignment is pinned on — see
+               `useLA2A.js` and `dsp/inputAlign.js`. The switch could turn the
+               correction OFF but could not set an offset by hand, so it gave up
+               the measurement without offering a replacement: a mode switch
+               dressed as an escape hatch. The manual control is PEAK REDUCTION,
+               which is the same axis (0.4989 dB of side-chain drive per unit,
+               bit-identical to an offset), so "off" bought nothing the user did
+               not already have. An INPUT knob calibrated in drive would be a
+               second Peak Reduction knob for the same reason; a TRUE input gain
+               would be a different feature — it would drive the output valves,
+               and see TUBE_DRIVE_LIN for why this panel has no such control. -->
+
           <!-- LOOKAHEAD is OFF by default and that is not timidity: an LA-2A
                has none, the transient pass-through IS the T4, and every preset
                and rendered file that predates this knob was made without it.
@@ -263,39 +262,6 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
                that transient with the gain the cell would have reached later.
                Capped at 20 ms: past that the duck starts audibly BEFORE the
                consonant. See LOOKAHEAD_MAX_MS in la2aProcessor.js. -->
-          <!-- INPUT ALIGN. Neither this plugin nor the hardware has a threshold
-               control — Peak Reduction is side-chain gain into a fixed internal
-               threshold — so without this the knob's meaning is set by the
-               file's level: 4.6 dB of reduction at PR 50 on a file peaking at
-               -1 dBFS, and 0.0 dB on one at -18. ALIGN measures the whole file's
-               gated RMS and offsets the SIDE-CHAIN DRIVE to nominal, which is
-               algebraically the same as raising the input and touches nothing
-               else — no level change, no tube shift, nothing to undo
-               downstream. Off is the raw hardware behaviour. See
-               dsp/inputAlign.js. -->
-          <div class="flex flex-col items-center justify-center w-[78px]">
-            <button
-              class="px-2.5 py-[4px] rounded-full cursor-pointer transition-all disabled:cursor-default"
-              :style="{
-                background: la2aInputAlign ? 'rgba(245,166,35,.16)' : 'rgba(255,255,255,.05)',
-                border: `1px solid ${la2aInputAlign ? 'rgba(245,166,35,.42)' : 'rgba(255,255,255,.09)'}`,
-                color: la2aInputAlign ? '#f7c877' : 'rgba(255,255,255,.4)',
-                font: `700 8.5px 'JetBrains Mono',monospace`,
-                letterSpacing: '.1em',
-                opacity: la2aPreview ? 1 : 0.4,
-              }"
-              :disabled="!la2aPreview"
-              :title="la2aInputAlign
-                ? 'Input align on: Peak Reduction means the same thing on every file. Click for raw hardware behaviour, where the file\'s own level decides how much it compresses.'
-                : 'Input align off — raw hardware behaviour. A quiet file will compress far less at the same knob position. Click to align.'"
-              @click="toggleInputAlign"
-            >ALIGN</button>
-            <span
-              class="mt-[6px] tabular-nums"
-              style="font:600 9px 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(255,255,255,.42)"
-            >{{ inputAlignLabel }}<template v-if="la2aInputAlign && Number.isFinite(la2aInputAlignDb)"> dB</template></span>
-          </div>
-
           <div class="w-[78px]">
             <Knob
               :model-value="la2aLookahead"

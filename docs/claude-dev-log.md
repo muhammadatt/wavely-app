@@ -1152,12 +1152,73 @@ level; anchoring anywhere else would silently re-voice all of them. ⚠ It is
 **not** `NOMINAL_DBFS` — that is the detector's reference, reached through the
 rectifier and R37 emphasis, and the two numbers are not interchangeable.
 
-**Not a no-op on hot material either**, which is the cost of defaulting on: a
+**Not a no-op on hot material either**, which is the cost of pinning it on: a
 file peak-normalised to −1 dBFS trims −1.8 dB and its PR 50 reduction moves
 2.44 → 1.80 dB. Existing patches compress slightly less on hot files and
-enormously more on quiet ones. The ALIGN switch exists so that is recoverable.
+enormously more on quiet ones.
 
-**Scheps conforms, without a switch.** It embeds the same kernel driven by
+⚠ **An ALIGN switch shipped in the first cut and was removed before merge, and
+the reason is worth keeping.** It looked like the right hedge — an automatic
+correction the user can decline. But it could only turn the correction OFF; it
+could not set an offset by hand, so it gave up the measurement without offering
+a replacement. A mode switch dressed as an escape hatch.
+
+The point that settled it: **Peak Reduction IS the manual control, and always
+was.** The knob is 0.4989 dB of side-chain drive per unit and an offset is
+bit-identical to moving it, so a user could already compensate in either state —
+"off" bought nothing they did not have, at the price of a position where the
+plugin does almost nothing on a quiet file. Alignment is also what makes that
+travel usable: unaligned, a file at −30 dBFS peak needs the knob at 100 and
+still gets 2.59 dB. For the same reason an INPUT knob calibrated in drive would
+be a literal duplicate of Peak Reduction — benched at +12 dB against PR 50 →
+74.1, the two renders differ by −Infinity dBr. A TRUE input gain would be a
+different feature: it drives the output valves, worth −52.6 dBr at matched
+compression, and this panel has no tube control by deliberate decision (see
+TUBE_DRIVE_LIN, and the Tube Drive knob that was removed for being an input
+level in disguise).
+
+⚠ **So the measurement is load-bearing with no user recourse.** Nothing on
+either panel can override a misread. The guards are `ALIGN_MAX_DB` and the
+bench, not a control: a class of material that fools the gate is a bug to fix in
+`inputAlign.js`, not a switch to flip. That raises the bar on the statistic
+rather than lowering it, which is the argument against the simpler alternatives.
+
+**Why not just use peak, which needs no gate and no tuning constant?** Asked
+directly, and the answer is two failures rather than the expected one. The
+anticipated caveat — a hot-peak file arrives quieter and wants a bit more Peak
+Reduction — would be fine if the error were a constant bias. It is not.
+
+*One click.* A 2 ms tick at −1 dBFS added to the reference capture moves a peak
+measurement 1.79 dB and its delivered reduction 1.80 → 1.33 dB; gated RMS moves
+0.01 dB and delivers 1.80 either way. This is the SAME defect this branch
+already root-caused on the makeup side, relocated to the input: peak-referenced
+makeup let one uncompressed onset pin a whole file and made the knob run
+backwards.
+
+*Crest factor, and it is inverted.* Same speech at the same gated level:
+
+```
+                  peak    gated   crest    GR peak-aligned   gated-aligned
+as captured       -2.8    -17.4    15.9         1.80             1.80
+lightly clipped   -9.1    -17.5     9.8         4.19             1.81
+hard clipped     -18.4    -21.8     4.7         7.12             1.85
+```
+
+Peak alignment converts crest-factor variation directly into compression
+variation — a 4x swing — and backwards: the already-limited file, which needs
+the least, gets the most. A narrator who ran their file through a limiter before
+uploading would get 7.12 dB where a raw one gets 1.80.
+
+**The real simplification, if the gate ever has to go, is PLAIN RMS (1.89 dB of
+spread) and not peak (8.22).** An energy statistic sees crest correctly by
+construction and is equally immune to both failures above. The gate buys exactly
+one thing over it: files with long head/tail room tone, where plain RMS errs
++0.57 dB at 10 s and +1.44 dB at 30 s — the ACX narrator case `roomTonePad`
+exists for, i.e. the beachhead specifically. `gatedRmsOfChannels` already falls
+back to plain RMS when everything gates out, so demoting it is a one-line change
+if new material shows the gate is fragile.
+
+**Scheps conforms, and now so does OptoSmooth — neither has a switch.** It embeds the same kernel driven by
 `squash` into the same fixed threshold, so it had the identical bug — and it is
 worse off, because `squash` is a calibrated default nobody is expected to touch,
 so a quiet file makes it sound like the plugin has stopped working with no knob
