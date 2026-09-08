@@ -15,12 +15,12 @@ import LevelMeter from '../../meters/LevelMeter.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsMode, vsEmphasis, VOCAL_SAT_MODES,
+  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsMode, vsEmphasis, vsSoften, VOCAL_SAT_MODES,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
   vsPreview, vsInputLevels, vsOutputLevels,
   togglePreview,
-  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncMode, syncEmphasis,
+  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncMode, syncEmphasis, syncSoften,
   syncLowCrossover, syncMidCrossover,
   syncLowDriveMult, syncMidDriveMult, syncHighDriveMult, syncHfLoss,
   apply, teardown, closeModal,
@@ -183,6 +183,21 @@ async function applyAndClose() {
               label="Topology"
               :disabled="!vsPreview"
             />
+          </div>
+          <!-- SOFTEN is disabled outside SERIES, and the kernel ignores it
+               there regardless. tapeCharacter measured this placement in a
+               band-split topology at +0.66 and +1.38 dB of tilt — HF RISING,
+               on a control that provably cannot boost — because slew-limiting
+               an already-saturated LF-dominated sum makes it triangular, and a
+               triangle is harmonics. See SOFTEN_REFERENCE. -->
+          <div class="w-[82px]">
+            <Knob :model-value="vsSoften" @update:model-value="syncSoften"
+                  :min="0" :max="100" :step="1" :value-font-px="13"
+                  label="Soften" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+                  :disabled="!vsPreview || vsMode !== 'series'" />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ vsMode !== 'series' ? 'series only' : vsSoften > 0 ? 'limits slew rate' : 'off' }}
+            </p>
           </div>
           <div class="w-[82px]">
             <Knob :model-value="vsEmphasis" @update:model-value="syncEmphasis"

@@ -11,6 +11,7 @@ import {
   HARDNESS_MAX,
   MODE_SERIES,
   MODE_PARALLEL,
+  SOFTEN_REFERENCE,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -403,6 +404,90 @@ test('the RMS match is the last thing resisting absorption, and this bounds it',
   )
 })
 
+test('soften is absent at 0 and IGNORED ENTIRELY in parallel', () => {
+  // ⚠ THE KERNEL MUST ENFORCE THIS, NOT THE PANEL. tapeCharacter measured this
+  // limiter ahead of a band split at +0.66 and +1.38 dB of tilt — HF RISING, on
+  // a control that provably cannot boost — because slew-limiting an
+  // already-saturated LF-dominated sum makes it triangular and a triangle is
+  // harmonics. A stale param message from a panel that thinks it is in series
+  // must not be able to reach that placement.
+  const sig = bursts(2)
+  const parallel = v => processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, soften: v,
+  }).channelData[0]
+  const base = parallel(0)
+  for (const v of [1, 50, 100]) {
+    const other = parallel(v)
+    for (let i = 0; i < base.length; i++) {
+      assert.equal(other[i], base[i], `soften ${v} changed the parallel path (i=${i})`)
+    }
+  }
+  // And in series, 0 is absent rather than a limiter running at scale 1: the
+  // branch is skipped, so its state never advances.
+  const a = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES, soften: 0 }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES }).channelData[0]
+  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `soften 0 is not the default (i=${i})`)
+})
+
+test('soften SOFTENS across its whole travel, monotonically', () => {
+  // TWO FAILURE MODES AT ONCE, both of which tapeCharacter records catching in
+  // the wild.
+  //
+  // (1) SIGN. Measured as TILT — the band against the broadband — because the
+  //     module's second measurement trap is that a limiter inside a path that
+  //     is level-matched afterwards reads POSITIVE on an absolute band
+  //     measurement: the match hands the removed energy back as broadband gain.
+  //     Tilt must be NEGATIVE at every setting. Positive means it has become a
+  //     distortion generator, which is what the wrong placement produces.
+  //
+  // (2) MONOTONICITY. "A MUTATION THAT SURVIVED FOUR ASSERTIONS: inverting the
+  //     knob's mapping. Every HF test still passed." Only monotonicity across
+  //     the travel catches that, so the sweep is the test.
+  //
+  //   soften     0      10      25      50      75      90     100
+  //   d tilt  -2.588  -2.600  -3.474  -8.037 -14.764 -18.188 -20.138  dB
+  const sig = bursts()
+  const hp = buf => {
+    const c = new BiquadCascade(2, 1)
+    c.setSections([highpass(SR, 4000), highpass(SR, 4000)])
+    const out = new Float64Array(buf.length)
+    c.process(buf, out, buf.length, 0)
+    return out
+  }
+  const rmsOf = buf => {
+    let s = 0
+    for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]
+    return Math.sqrt(s / buf.length)
+  }
+  const db = v => 20 * Math.log10(Math.max(v, 1e-12))
+  const dryTilt = db(rmsOf(hp(sig))) - db(rmsOf(sig))
+  const tiltAt = soften => {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, soften,
+    })
+    const aligned = new Float64Array(sig.length)
+    for (let i = 0; i < sig.length - latencySamples; i++) {
+      aligned[i] = channelData[0][i + latencySamples]
+    }
+    return (db(rmsOf(hp(aligned))) - db(rmsOf(aligned))) - dryTilt
+  }
+  const sweep = [0, 25, 50, 75, 100].map(tiltAt)
+  for (let i = 0; i < sweep.length; i++) {
+    assert.ok(
+      sweep[i] < 0,
+      `soften should soften, not excite; tilt ${sweep[i].toFixed(2)} dB at step ${i}`,
+    )
+  }
+  for (let i = 1; i < sweep.length; i++) {
+    assert.ok(
+      sweep[i] < sweep[i - 1],
+      `soften must deepen monotonically; ${sweep[i - 1].toFixed(2)} -> ${sweep[i].toFixed(2)} dB. `
+      + 'An inverted knob mapping passes every other assertion here',
+    )
+  }
+  assert.ok(sweep[4] < -12, `full knob should be deep; measured ${sweep[4].toFixed(2)} dB`)
+})
+
 test('asymmetry works AGAINST peak absorption, and by how much', () => {
   // ⚠ AN INTERACTION NOBODY WOULD PREDICT FROM THE TWO CONTROLS' NAMES, and the
   // reason the topology tests above pin asymmetry at 0.
@@ -501,6 +586,16 @@ test('the emphasis pair absorbs the onset edge while the body keeps its harmonic
     on.body > 8,
     `the body should keep its added harmonics; measured ${on.body.toFixed(2)} dB`,
   )
+})
+
+test('the soften reference is motionless, not tracked', () => {
+  // tapeCharacter's third measurement trap: anything whose depth scales with a
+  // TRACKED level cannot be compared between a live preview and an offline
+  // region render, because the tracker starts cold offline. That defect has
+  // shipped in this codebase once already. A plain constant cannot do it, and
+  // this asserts it stays one rather than quietly becoming an envelope.
+  assert.equal(typeof SOFTEN_REFERENCE, 'number')
+  assert.ok(SOFTEN_REFERENCE > 0)
 })
 
 test('hardness is clamped to the measured range', () => {

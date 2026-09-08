@@ -79,6 +79,7 @@ import { Oversampler, DelayLine, VOCAL_SAT_OVERSAMPLE } from './dsp/oversample.j
 import { RmsFollower, riseCoeff, dbToLin } from './dsp/envelope.js'
 import {
   HfLossShelf, SkewTracker, asymmetryOffset, makeDcBlocker, ASYM_EPSILON,
+  SoftenLimiter, softenScale, SOFTEN_EPSILON,
 } from './dsp/tapeCharacter.js'
 
 export const VOCAL_SAT_LATENCY_SAMPLES = VOCAL_SAT_OVERSAMPLE.latencySamples
@@ -101,6 +102,9 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
   // Pre/de-emphasis depth around the curve, 0-100 -> 0-EMPHASIS_MAX_DB. ABSENT
   // at 0, so the patch that shipped before it existed is bit-identical.
   emphasis: 0,
+  // Slew limit ahead of the curve, 0-100. SERIES ONLY and absent at 0 — see
+  // SOFTEN_REFERENCE_NOTE for why it cannot be offered in parallel.
+  soften: 0,
   // Knee order of the transfer curve — see `shape`. Replaces `softness`, which
   // crossfaded tanh against arctan; measured at matched THD those two are the
   // same curve to within 3 dB at the 5th harmonic and the blend was not a
@@ -478,6 +482,80 @@ export const EMPHASIS_CORNER_HZ = 1800
 /** Below this the pair is skipped outright rather than run flat. */
 export const EMPHASIS_EPSILON = 1e-4
 
+/**
+ * SOFTEN — the slew limiter, and the reference it had to be given.
+ *
+ * ⚠ SERIES ONLY, AND THAT IS NOT A UI PREFERENCE. tapeCharacter's finding (2)
+ * is that this needs four things at once: a CLEAN, BROADBAND signal, at the
+ * OVERSAMPLED rate, just ahead of ONE nonlinearity, with its allowance
+ * referenced near the level that nonlinearity acts at. In parallel this plugin
+ * supplies NONE of them — there is no broadband oversampled point until after
+ * the three curves — and that placement was measured there at +0.66 and
+ * +1.38 dB of tilt, HF RISING, on a control that provably cannot boost. Slew
+ * limiting an already-saturated, LF-dominated sum makes it triangular, and a
+ * triangle is harmonics. THE KERNEL IGNORES THE KNOB IN PARALLEL rather than
+ * trusting the panel to hide it; a stale param message must not be able to
+ * reach the one placement the module says is actively harmful.
+ *
+ * The single broadband curve in series is the first place in this codebase that
+ * supplies all four, which is what made wiring this possible at all.
+ *
+ * ── THE REFERENCE, WHICH IS THE WHOLE OF THE DIFFICULTY ────────────────────
+ *
+ * SOFTEN_REFERENCE is 1: the curve's knee, in post-drive units, the same
+ * quantity ASYM_REFERENCE names. "The level the nonlinearity acts at" is the
+ * knee, and the knee is at |x| ~ 1 for every hardness by construction.
+ *
+ * ⚠ THE OBVIOUS CHOICE WAS TRIED FIRST AND MADE THREE QUARTERS OF THE KNOB
+ * INERT. Referencing to the largest amplitude a full-scale input can present,
+ * `drive * max(mult)`, is the choice that preserves Bernstein's guarantee — a
+ * signal bandlimited to the base Nyquist and bounded by A cannot move more than
+ * (pi/L)*A per oversampled sample, so at scale 1 the limit provably cannot
+ * bind. It measured:
+ *
+ *   soften     0      10      25      50      75      90     100
+ *   d tilt  -2.588  -2.588  -2.588  -2.588  -2.600  -3.480  -4.963  dB
+ *
+ * Nothing at all until 75. The reference was about twelve times the level the
+ * curve actually works at, so the allowance was twelve times too generous and
+ * the entire useful range fell off the bottom of the knob. Against the knee:
+ *
+ *   soften     0      10      25      50      75      90     100
+ *   d tilt  -2.588  -2.600  -3.474  -8.037 -14.764 -18.188 -20.138  dB
+ *
+ * Monotonic across the whole travel, negative at every setting — softening, not
+ * the distortion generation the module warns the wrong placement produces.
+ *
+ * ⚠ THIS FORFEITS "CANNOT BIND AT SCALE 1", and that is deliberate and
+ * pre-authorised: the module already records that "to do anything at all it
+ * must bind below the threshold". Bit-identity at soften 0 does NOT rest on
+ * Bernstein here — it rests on `softenActive` skipping the branch outright, so
+ * the limiter's state never even advances on a patch that does not use it.
+ *
+ * ⚠ IT IS MOTIONLESS, WHICH IS THE OTHER HALF OF THE REQUIREMENT. tapeCharacter
+ * records that anything whose depth scales with a TRACKED level cannot be
+ * compared between a live preview and an offline region render, because the
+ * tracker starts cold offline — that defect shipped once, with preview coming
+ * out 1.5-2.3 dB more softened than the applied audio. A constant 1 cannot do
+ * that. It does mean the knob's effect grows with Drive, which is correct
+ * rather than incidental: more drive is faster edges.
+ *
+ * ⚠ SOFTEN_MIN_SCALE IS REUSED UNCHANGED, and the module's warning that a
+ * reuser "must re-derive this or the knob will mean something else" is
+ * satisfied by the table above rather than ignored. Against the knee the
+ * shipped constant lands where its own doc says it should — "half the knob is
+ * already down at 0.14 of the reference" — so re-deriving it would have moved a
+ * shared constant to arrive back where it started.
+ *
+ * ⚠ ONE OF THE MODULE'S CLAIMS DOES NOT SURVIVE THE MOVE. "Output peak does not
+ * move at any setting" was measured in the soft clipper; here the peak drifts
+ * 0.6 dB across the knob (-11.13 to -10.51 dBFS), because this plugin
+ * renormalises against moving RMS followers downstream of the limiter and the
+ * soft clipper did not. Small, but it is not zero and should not be repeated as
+ * though it were.
+ */
+export const SOFTEN_REFERENCE = 1
+
 // ── The voiced gate the skew tracker requires ──────────────────────────────
 
 /** Short-term level, fast enough to open inside a syllable. */
@@ -553,6 +631,7 @@ class ChannelState {
     // the curve sees — which is the whole mechanism.
     this.preEmph = new BiquadCascade(1, 1)
     this.deEmph = new BiquadCascade(1, 1)
+    this.soften = new SoftenLimiter(VOCAL_SAT_OVERSAMPLE.factor)
 
     this.skew = new SkewTracker(sampleRate)
     this.gate = new VoicedGate(sampleRate)
@@ -628,6 +707,15 @@ export class VocalSatKernel {
     this.lowDrive = p.drive * p.lowDriveMult
     this.midDrive = p.drive * p.midDriveMult
     this.highDrive = p.drive * p.highDriveMult
+
+    // SOFTEN — series only, absent at 0, and referenced to a motionless bound.
+    // See SOFTEN_REFERENCE_NOTE. `softenScale` returns exactly 1 below its own
+    // epsilon, but the branch is skipped outright as well so the limiter's
+    // state never advances on a patch that does not use it.
+    this.softenAmount = clamp(p.soften ?? 0, 0, 100)
+    this.softenActive = this.series && this.softenAmount / 100 > SOFTEN_EPSILON
+    this.softenScaleValue = softenScale(this.softenAmount)
+    this.softenReference = SOFTEN_REFERENCE
   }
 
   _ensureChannels(n) {
@@ -662,7 +750,7 @@ export class VocalSatKernel {
 
     const {
       hardness, asymActive, wetDry, lowDrive, midDrive, highDrive,
-      series, emphasisActive,
+      series, emphasisActive, softenActive,
     } = this
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
@@ -754,8 +842,15 @@ export class VocalSatKernel {
       // a different, harder-clipped curve, not the same one applied evenly.
       const sum = st.downWet.scratch(n)
       if (series) {
+        // SOFTEN sits HERE and nowhere else: on the summed, driven, broadband
+        // signal, at the oversampled rate, with exactly one nonlinearity in
+        // front of it. Those are tapeCharacter's four conditions, and this is
+        // the only point in this plugin that satisfies them.
+        const softenScaleValue = this.softenScaleValue
+        const softenReference = this.softenReference
         for (let j = 0; j < n * L; j++) {
-          const pre = lowUp[j] * lowDrive + midUp[j] * midDrive + highUp[j] * highDrive
+          let pre = lowUp[j] * lowDrive + midUp[j] * midDrive + highUp[j] * highDrive
+          if (softenActive) pre = st.soften.process(pre, softenScaleValue, softenReference)
           sum[j] = applyTransfer(pre, hardness, offset, shapedOffset)
         }
       } else {

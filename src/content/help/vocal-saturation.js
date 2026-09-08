@@ -10,6 +10,7 @@ export default {
   controls: [
     { label: 'Drive', text: 'How hard the signal is pushed into the curve' },
     { label: 'Topology', text: 'PARA adds a saturated copy underneath the original, which keeps every transient intact and thickens what is around it. SERIES puts a single broadband curve in the path, so it can absorb and round transients instead' },
+    { label: 'Soften', text: 'Caps how fast the waveform is allowed to move before it reaches the curve, which rounds sharp edges off directly rather than by filtering. Available in SERIES only' },
     { label: 'Emphasis', text: 'Makes the curve act hardest on high frequencies, which takes the edge off attacks while leaving the body thick. This is the control that turns a crisp saturator into a soft one' },
     { label: 'Asymmetry', text: 'Runs the curve off centre, which is the only thing here that makes even harmonics — the warm half of tube colour. Which way it leans is measured from your recording' },
     { label: 'Hardness', text: 'How abruptly the curve bends. Low is dense and buzzy, high is spiky and close to a clipper. It changes the kind of distortion, not the amount' },
@@ -38,6 +39,8 @@ export default {
     'The Low / Mid / High Drive knobs still work in SERIES, but as a tilt into one shared curve rather than three separate ones. At equal settings the crossovers make no difference there',
     'Emphasis and peak control pull against each other: saturation flattens the tops of the waveform, and Emphasis rounds them back off. Raise it for a softer sound, leave it at 0 for a harder, more squashed one',
     'Asymmetry and transient softening pull against each other: an off-centre curve clips one half of the waveform before the other, which makes peaks stand out more. Keep Asymmetry low if you are after the soft, absorbing sound',
+    'Soften is greyed out in PARA on purpose. Ahead of three separate band curves it stops softening and starts adding harmonics instead, which is the opposite of what it is for',
+    'Soften gets stronger as you raise Drive, because harder driving means faster edges for it to catch',
     'Hardness has most to say at lower Drive settings. Once Drive is high enough to square the waveform off there is no knee left for it to shape, and it stops making much difference',
   ],
 }

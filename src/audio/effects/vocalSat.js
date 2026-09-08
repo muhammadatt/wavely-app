@@ -54,6 +54,10 @@ export const VOCAL_SAT_DEFAULTS = {
   // not a better-sounding one, and every saved patch assumes the old wiring.
   mode: MODE_PARALLEL,
   emphasis: 0,
+  // Slew limit ahead of the curve. SERIES ONLY — the kernel ignores it in
+  // parallel, where the module that owns it measured the effect's sign
+  // REVERSED. The panel disables it there too, so the two agree.
+  soften: 0,
   // Was `softness: 0.5`, a crossfade between two curves that measured the same.
   hardness: 2.5,
   lowCrossover: 500,
@@ -75,6 +79,7 @@ export function toKernelParams(params) {
     asymmetry: params.asymmetry,
     mode: params.mode,
     emphasis: params.emphasis,
+    soften: params.soften,
     hardness: params.hardness,
     lowCrossover: params.lowCrossover,
     midCrossover: params.midCrossover,
