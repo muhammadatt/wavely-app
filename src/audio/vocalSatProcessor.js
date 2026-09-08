@@ -67,7 +67,7 @@
  * Only the three transfer curves run high.
  */
 
-import { lowpass, highpass, butterworthQs, BiquadCascade } from './dsp/biquad.js'
+import { lowpass, highpass, highShelf, butterworthQs, BiquadCascade } from './dsp/biquad.js'
 import { Oversampler, DelayLine, VOCAL_SAT_OVERSAMPLE } from './dsp/oversample.js'
 import { RmsFollower, riseCoeff, dbToLin } from './dsp/envelope.js'
 import {
@@ -87,6 +87,13 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
   // shipped patch is unchanged by the rename; only the SIGN is now measured
   // from the material rather than always positive.
   asymmetry: 50,
+  // ── Topology ─────────────────────────────────────────────────────────────
+  // 'parallel' (the shipped behaviour) or 'series'. See MODE_SERIES for what
+  // the difference actually buys and why the default does not move.
+  mode: 'parallel',
+  // Pre/de-emphasis depth around the curve, 0-100 -> 0-EMPHASIS_MAX_DB. ABSENT
+  // at 0, so the patch that shipped before it existed is bit-identical.
+  emphasis: 0,
   // Knee order of the transfer curve — see `shape`. Replaces `softness`, which
   // crossfaded tanh against arctan; measured at matched THD those two are the
   // same curve to within 3 dB at the 5th harmonic and the blend was not a
@@ -341,6 +348,90 @@ export const HARDNESS_MAX = 8
  */
 const ASYM_REFERENCE = 1
 
+// ── Topology and the emphasis pair ─────────────────────────────────────────
+
+/**
+ * SERIES vs PARALLEL, and why this switch exists at all.
+ *
+ * ⚠ THE PARALLEL BLEND IS `x + wetDry*wet` — AN ADD, NOT A CROSSFADE. The dry
+ * path sits at unity for every position of the Wet/Dry knob, so the dry
+ * transient is never attenuated by anything. That is inherited faithfully from
+ * `vocal_saturation.py` (`output = audio + wet_dry * wet`) and it is not a bug;
+ * it is what parallel saturation IS. But it has a consequence nobody had
+ * written down: THE STAGE CANNOT ABSORB A TRANSIENT AT ANY SETTING.
+ *
+ * Measured on bursts with instant onsets, crest factor against the dry:
+ *
+ *   wetDry     0     0.3    0.5     1      2      4
+ *   d crest  0.00  -0.08  +0.09  +0.07  -0.31  -0.14  dB
+ *
+ * Flat, across the whole knob and past anything the panel offers. Meanwhile
+ * THE SAME CURVE AT THE SAME DRIVE, IN SERIES, TAKES 11.7 dB OFF THE CREST.
+ * The nonlinearity is doing enormous peak absorption and the topology throws
+ * all of it away. That is the difference between a stage that makes onsets
+ * crisper and more prominent and one that absorbs and rounds them, and it is a
+ * property of the wiring rather than of the curve.
+ *
+ * Series is therefore `(1-wetDry)*x + wetDry*wet`, a real crossfade.
+ *
+ * ⚠ THE DEFAULT DOES NOT MOVE. `parallel` with `emphasis: 0` is bit-identical
+ * to the build before this existed, and a test pins that. Flipping the default
+ * would change the sound every existing patch relies on; it is a one-word
+ * change here for anyone who decides to make it deliberately.
+ */
+export const MODE_SERIES = 'series'
+export const MODE_PARALLEL = 'parallel'
+
+/**
+ * Emphasis depth at the top of the knob, dB.
+ *
+ * THE PAIR IS WHAT MAKES A WAVESHAPER ABSORB RATHER THAN EXCITE, and it is the
+ * other half of the answer above. A memoryless curve reduces the INSTANTANEOUS
+ * peak, but it generates harmonics loudest exactly where the signal is loudest
+ * — so it drops a burst of new high frequency onto the onset. Squashed but
+ * BRIGHTER, which the ear reads as edge, not softness. To absorb a transient
+ * the nonlinearity has to bite high frequencies harder than low ones.
+ *
+ * A shelf boosted into the curve and cut after it does exactly that: HF reaches
+ * the knee first, is compressed most, and the de-emphasis restores the level
+ * with the edge already rounded. Measured on the same bursts, level-matched,
+ * energy above 4 kHz against the dry:
+ *
+ *   topology                        d crest   onset HF   body HF
+ *   parallel add (what ships)         -3.83     -2.01     +8.76
+ *   series, same curve               -11.69     -3.43    +13.93
+ *   series + this pair               -11.38     -9.34    +12.76
+ *
+ * The last row is the point: 9.3 dB of the onset's top end absorbed while the
+ * body KEEPS its 12.8 dB of added harmonics. Thick and soft, rather than thick
+ * and sharp.
+ *
+ * ⚠ IT IS MUCH WEAKER IN PARALLEL AND THAT IS STRUCTURAL, not a bug to chase.
+ * The pair can only shape what the curve sees, and in parallel the dry path
+ * still delivers the transient at unity underneath whatever the wet path does.
+ * Available in both modes because it is a wet-path pair either way and the
+ * spectrum of the added harmonics is worth controlling on its own; just do not
+ * expect it to round an onset that the dry path is holding up.
+ *
+ * 12 dB because that is what the measurement above used. Deeper keeps working
+ * in the same direction but the de-emphasis starts to audibly dull the body,
+ * which is the thing the pair is supposed to leave alone.
+ */
+export const EMPHASIS_MAX_DB = 12
+
+/**
+ * Corner of the emphasis shelf, Hz.
+ *
+ * Low enough to cover the consonant and attack region a voice puts its edge in,
+ * high enough to leave the fundamental and the first formant out of it — the
+ * pair must not turn into a bass control, because whatever it boosts into the
+ * curve is what the curve distorts most.
+ */
+export const EMPHASIS_CORNER_HZ = 1800
+
+/** Below this the pair is skipped outright rather than run flat. */
+export const EMPHASIS_EPSILON = 1e-4
+
 // ── The voiced gate the skew tracker requires ──────────────────────────────
 
 /** Short-term level, fast enough to open inside a syllable. */
@@ -410,6 +501,13 @@ class ChannelState {
 
     // Asymmetry state. Per channel because the skew is a property of what that
     // channel recorded — a stereo pair miked differently can lean two ways.
+    // The emphasis pair. One section each; the de-emphasis is the exact
+    // inverse shelf, so with a LINEAR path between them the two cancel and the
+    // wet path is unchanged. Everything the pair does, it does by changing what
+    // the curve sees — which is the whole mechanism.
+    this.preEmph = new BiquadCascade(1, 1)
+    this.deEmph = new BiquadCascade(1, 1)
+
     this.skew = new SkewTracker(sampleRate)
     this.gate = new VoicedGate(sampleRate)
     this.dcBlock = makeDcBlocker(sampleRate)
@@ -465,6 +563,21 @@ export class VocalSatKernel {
     // this. `asymmetryOffset` applies the same epsilon to the offset itself.
     this.asymmetry = clamp(p.asymmetry, 0, 100)
     this.asymActive = this.asymmetry / 100 > ASYM_EPSILON
+    this.series = p.mode === MODE_SERIES
+    // Read as 0-100 and ABSENT below the epsilon — the same rule HF Loss and
+    // asymmetry follow, and what keeps the shipped patch bit-identical.
+    this.emphasis = clamp(p.emphasis ?? 0, 0, 100)
+    this.emphasisDb = (this.emphasis / 100) * EMPHASIS_MAX_DB
+    this.emphasisActive = this.emphasisDb > EMPHASIS_EPSILON
+    if (this.emphasisActive) {
+      this.preSections = [highShelf(this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, this.emphasisDb)]
+      this.deSections = [highShelf(this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, -this.emphasisDb)]
+      for (const c of this.channels) {
+        c.preEmph.setSections(this.preSections)
+        c.deEmph.setSections(this.deSections)
+      }
+    }
+
     this.wetDry = Math.max(0, p.wetDry)
     this.lowDrive = p.drive * p.lowDriveMult
     this.midDrive = p.drive * p.midDriveMult
@@ -476,6 +589,10 @@ export class VocalSatKernel {
       const c = new ChannelState(this.sampleRate)
       c.lp.setSections(this.lpSections)
       c.hp.setSections(this.hpSections)
+      if (this.emphasisActive) {
+        c.preEmph.setSections(this.preSections)
+        c.deEmph.setSections(this.deSections)
+      }
       this.channels.push(c)
     }
   }
@@ -497,10 +614,15 @@ export class VocalSatKernel {
 
     this._ensureChannels(nOut)
 
-    const { hardness, asymActive, wetDry, lowDrive, midDrive, highDrive } = this
+    const {
+      hardness, asymActive, wetDry, lowDrive, midDrive, highDrive,
+      series, emphasisActive,
+    } = this
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
-    const { low: lowBuf, high: highBuf, mid: midBuf, wet: wetBuf } = this._scratch(n)
+    const {
+      low: lowBuf, high: highBuf, mid: midBuf, wet: wetBuf, emph: emphBuf,
+    } = this._scratch(n)
 
     // ONCE PER BLOCK, BEFORE THE CHANNEL LOOP — see HfLossShelf. The depth is a
     // parameter ramp shared by every channel; advancing it per channel makes it
@@ -516,9 +638,19 @@ export class VocalSatKernel {
       //   low  = sosfilt(sos_lp, audio)
       //   high = sosfilt(sos_hp, audio)
       //   mid  = audio - low - high      (complementary — sums back exactly)
-      st.lp.process(input, lowBuf, n, 0)
-      st.hp.process(input, highBuf, n, 0)
-      for (let i = 0; i < n; i++) midBuf[i] = input[i] - lowBuf[i] - highBuf[i]
+      // PRE-EMPHASIS GOES HERE, ahead of the split, so it wraps all three
+      // curves rather than one. The dry path is NOT emphasised — it is the raw
+      // input via dryLine — so the pair lives entirely on the wet side and its
+      // only effect is on what the curves see.
+      let wetIn = input
+      if (emphasisActive) {
+        st.preEmph.process(input, emphBuf, n, 0)
+        wetIn = emphBuf
+      }
+
+      st.lp.process(wetIn, lowBuf, n, 0)
+      st.hp.process(wetIn, highBuf, n, 0)
+      for (let i = 0; i < n; i++) midBuf[i] = wetIn[i] - lowBuf[i] - highBuf[i]
 
       // ── Which way the offset should lean ─────────────────────────────────
       // Fed the BROADBAND input, which is exactly what the three curves see
@@ -528,9 +660,14 @@ export class VocalSatKernel {
       //
       // Updated BEFORE the offset is read, so a block uses its own direction
       // rather than the previous one. The ramp is 200 ms; either would do.
+      // ⚠ FED `wetIn`, NOT `input`, and tapeCharacter is explicit about why:
+      // "FEED IT THE SIGNAL THE CURVE ACTUALLY SEES, post any emphasis or
+      // shelving, because a shelf changes a waveform's skew." Emphasis is a
+      // shelf on exactly that path, so reading the raw input here would choose
+      // the offset's sign from a waveform the curve never sees.
       if (asymActive) {
         for (let i = 0; i < n; i++) {
-          if (st.gate.update(input[i])) st.skew.update(input[i])
+          if (st.gate.update(wetIn[i])) st.skew.update(wetIn[i])
         }
       }
       const offset = asymActive
@@ -557,6 +694,12 @@ export class VocalSatKernel {
 
       st.downWet.down(wetBuf, n)
 
+      // DE-EMPHASIS, and it must sit HERE: after the curve, and BEFORE the DC
+      // blocker. tapeCharacter's blocker note is explicit — "Place it AFTER the
+      // curve (and after any de-emphasis), so it blocks the DC that reaches the
+      // output rather than one a later filter would reshape."
+      if (emphasisActive) st.deEmph.process(wetBuf, wetBuf, n, 0)
+
       // ⚠ LOAD-BEARING, AND ONLY WHILE THE OFFSET IS ENGAGED — see DC_BLOCK_HZ.
       // `curve(x + off) - curve(off)` removes the operating point for a SILENT
       // input; under signal the mean of the off-centre curve is not curve(off),
@@ -579,8 +722,16 @@ export class VocalSatKernel {
 
         // wet *= dry_rms / wet_rms
         const wetMatched = wet * (dryRms / wetRms)
-        // output = audio + wet_dry * wet
-        const blended = x + wetDry * wetMatched
+        // PARALLEL: `output = audio + wet_dry * wet`, the Python's add, where
+        // the dry sits at unity and the transient is never touched.
+        // SERIES: a real crossfade, which is what lets the curve's 11.7 dB of
+        // crest reduction actually reach the output. See MODE_SERIES.
+        //
+        // dryGain is clamped rather than written `1 - wetDry` because wetDry is
+        // only clamped below: a patch above 1 would otherwise invert the dry
+        // path's polarity and subtract it from the wet.
+        const dryGain = series ? (wetDry >= 1 ? 0 : 1 - wetDry) : 1
+        const blended = dryGain * x + wetDry * wetMatched
         // output *= dry_rms / out_rms
         const outRms = st.outRms.process(blended)
         const y = blended * (dryRms / outRms)
@@ -640,9 +791,11 @@ export class VocalSatKernel {
       this._highBuf = new Float64Array(n)
       this._midBuf = new Float64Array(n)
       this._wetBuf = new Float64Array(n)
+      this._emphBuf = new Float64Array(n)
     }
     return {
-      low: this._lowBuf, high: this._highBuf, mid: this._midBuf, wet: this._wetBuf,
+      low: this._lowBuf, high: this._highBuf, mid: this._midBuf,
+      wet: this._wetBuf, emph: this._emphBuf,
     }
   }
 }

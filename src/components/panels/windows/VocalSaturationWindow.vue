@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useVocalSaturation } from '../../../composables/useVocalSaturation.js'
 // Bound rather than retyped: HARDNESS_MIN is an aliasing measurement, and a
 // panel that drifted from it would hand the curve an n the kernel then clamps,
@@ -9,17 +9,18 @@ import { useEditorState } from '../../../composables/useEditorState.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import Knob from '../../knobs/Knob.vue'
 import DeviceSlider from '../../knobs/DeviceSlider.vue'
+import DeviceChoiceRocker from '../../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../../meters/LevelMeter.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  vsDrive, vsWetDry, vsAsymmetry, vsHardness,
+  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsMode, vsEmphasis, VOCAL_SAT_MODES,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
   vsPreview, vsInputLevels, vsOutputLevels,
   togglePreview,
-  syncDrive, syncWetDry, syncAsymmetry, syncHardness,
+  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncMode, syncEmphasis,
   syncLowCrossover, syncMidCrossover,
   syncLowDriveMult, syncMidDriveMult, syncHighDriveMult, syncHfLoss,
   apply, teardown, closeModal,
@@ -33,6 +34,12 @@ onMounted(() => {
 })
 
 const ACCENT = '#ff8a5b'
+
+const modeCaption = computed(() => (
+  vsMode.value === 'series'
+    ? 'curve in the path — absorbs, and Wet / Dry crossfades'
+    : 'dry passes at unity, saturated copy added under it'
+))
 
 const twoDp = v => v.toFixed(2)
 const oneDp = v => v.toFixed(1)
@@ -156,6 +163,36 @@ async function applyAndClose() {
           style="font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:rgba(255,255,255,.32)"
         >
           Band Shaping
+        </div>
+
+        <!-- TOPOLOGY. Parallel is `x + wetDry*wet` — an ADD, so the dry
+             transient is at unity at every knob position and the stage cannot
+             absorb a transient at any setting (measured: crest flat within
+             0.3 dB across the whole Wet/Dry range). Series is a real
+             crossfade. Emphasis is the pair that makes the curve bite high
+             frequencies hardest, which is what rounds an onset rather than
+             sharpening it. See MODE_SERIES and EMPHASIS_MAX_DB. -->
+        <div class="mb-[16px] flex items-start justify-center gap-[26px]">
+          <div>
+            <DeviceChoiceRocker
+              :model-value="vsMode"
+              @update:model-value="syncMode"
+              :options="VOCAL_SAT_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))"
+              :accent="ACCENT"
+              :caption="modeCaption"
+              label="Topology"
+              :disabled="!vsPreview"
+            />
+          </div>
+          <div class="w-[82px]">
+            <Knob :model-value="vsEmphasis" @update:model-value="syncEmphasis"
+                  :min="0" :max="100" :step="1" :value-font-px="13"
+                  label="Emphasis" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+                  :disabled="!vsPreview" />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ vsEmphasis > 0 ? 'absorbs onset edge' : 'off' }}
+            </p>
+          </div>
         </div>
 
         <div class="grid grid-cols-2 gap-x-[30px] gap-y-[15px]">

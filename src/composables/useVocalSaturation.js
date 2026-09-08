@@ -3,7 +3,9 @@ import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
-import { vocalSatEffect, VOCAL_SAT_DEFAULTS } from '../audio/effects/vocalSat.js'
+import {
+  vocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES,
+} from '../audio/effects/vocalSat.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -13,6 +15,8 @@ export const VOCAL_SAT_WINDOW_ID = 'vocal-saturation'
 const vsDrive = ref(VOCAL_SAT_DEFAULTS.drive)
 const vsWetDry = ref(VOCAL_SAT_DEFAULTS.wetDry)
 const vsAsymmetry = ref(VOCAL_SAT_DEFAULTS.asymmetry)
+const vsMode = ref(VOCAL_SAT_DEFAULTS.mode)
+const vsEmphasis = ref(VOCAL_SAT_DEFAULTS.emphasis)
 const vsHardness = ref(VOCAL_SAT_DEFAULTS.hardness)
 const vsLowCrossover = ref(VOCAL_SAT_DEFAULTS.lowCrossover)
 const vsMidCrossover = ref(VOCAL_SAT_DEFAULTS.midCrossover)
@@ -31,6 +35,8 @@ function currentParams() {
     drive: vsDrive.value,
     wetDry: vsWetDry.value,
     asymmetry: vsAsymmetry.value,
+    mode: vsMode.value,
+    emphasis: vsEmphasis.value,
     hardness: vsHardness.value,
     lowCrossover: vsLowCrossover.value,
     midCrossover: vsMidCrossover.value,
@@ -115,6 +121,8 @@ export function useVocalSaturation() {
   const syncDrive = v => syncParam('drive', vsDrive, v)
   const syncWetDry = v => syncParam('wetDry', vsWetDry, v)
   const syncAsymmetry = v => syncParam('asymmetry', vsAsymmetry, v)
+  const syncMode = v => syncParam('mode', vsMode, v)
+  const syncEmphasis = v => syncParam('emphasis', vsEmphasis, v)
   const syncHardness = v => syncParam('hardness', vsHardness, v)
   const syncLowCrossover = v => syncParam('lowCrossover', vsLowCrossover, v)
   const syncMidCrossover = v => syncParam('midCrossover', vsMidCrossover, v)
@@ -171,6 +179,9 @@ export function useVocalSaturation() {
     vsWetDry,
     vsAsymmetry,
     vsHardness,
+    vsMode,
+    vsEmphasis,
+    VOCAL_SAT_MODES,
     vsLowCrossover,
     vsMidCrossover,
     vsLowDriveMult,
@@ -186,6 +197,8 @@ export function useVocalSaturation() {
     syncWetDry,
     syncAsymmetry,
     syncHardness,
+    syncMode,
+    syncEmphasis,
     syncLowCrossover,
     syncMidCrossover,
     syncLowDriveMult,

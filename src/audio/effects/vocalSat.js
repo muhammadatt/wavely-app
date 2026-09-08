@@ -15,10 +15,32 @@
  */
 
 import { ensureVocalSatWorklet } from '../vocalSatWorkletLoader.js'
-import { VOCAL_SAT_LATENCY_SAMPLES } from '../vocalSatProcessor.js'
+import {
+  VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL,
+} from '../vocalSatProcessor.js'
 import { createLevelTap } from './levelTap.js'
 
-export { VOCAL_SAT_LATENCY_SAMPLES }
+export { VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL }
+
+/**
+ * The two topologies, for the panel's rocker.
+ *
+ * They are PEERS, not on/off — which is the case DeviceChoiceRocker exists for.
+ * Parallel adds a saturated copy under an untouched dry path; series puts the
+ * curve in the path. Neither is the absence of the other.
+ */
+export const VOCAL_SAT_MODES = [
+  {
+    id: MODE_PARALLEL,
+    label: 'PARA',
+    title: 'Parallel — the dry signal passes at unity and a saturated copy is added under it',
+  },
+  {
+    id: MODE_SERIES,
+    label: 'SERIES',
+    title: 'Series — the curve is in the signal path, so it can absorb transients',
+  },
+]
 
 // Same names and defaults the panel already used, so the UI is unchanged.
 export const VOCAL_SAT_DEFAULTS = {
@@ -27,6 +49,11 @@ export const VOCAL_SAT_DEFAULTS = {
   // Was `bias: 1`. Same offset — the reference is 1 and ASYM_MAX_FRACTION is 1,
   // so 100 here is the 1.0 that shipped. Only the sign is now measured.
   asymmetry: 100,
+  // ⚠ THE DEFAULT STAYS PARALLEL WITH NO EMPHASIS, which is bit-identical to
+  // the build before the switch existed. Series is a different-sounding stage,
+  // not a better-sounding one, and every saved patch assumes the old wiring.
+  mode: MODE_PARALLEL,
+  emphasis: 0,
   // Was `softness: 0.5`, a crossfade between two curves that measured the same.
   hardness: 2.5,
   lowCrossover: 500,
@@ -46,6 +73,8 @@ export function toKernelParams(params) {
     drive: params.drive,
     wetDry: params.wetDry,
     asymmetry: params.asymmetry,
+    mode: params.mode,
+    emphasis: params.emphasis,
     hardness: params.hardness,
     lowCrossover: params.lowCrossover,
     midCrossover: params.midCrossover,

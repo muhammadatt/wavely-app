@@ -9,9 +9,12 @@ import {
   VOCAL_SAT_LATENCY_SAMPLES,
   HARDNESS_MIN,
   HARDNESS_MAX,
+  MODE_SERIES,
+  MODE_PARALLEL,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
+import { highpass, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 
 const SR = 44100
 
@@ -242,6 +245,225 @@ test('hardness tilts the harmonic series, and only below saturation', () => {
   assert.ok(
     swing > 8,
     `hardness should tilt the series; swung ${swing.toFixed(1)} dB (expected ~12.8)`,
+  )
+})
+
+/**
+ * Bursts with instant onsets and a decaying body — the material the
+ * transient-behaviour claims are about. A steady tone cannot probe any of this.
+ */
+function bursts(hits = 8) {
+  const n = SR * 4
+  const sig = new Float32Array(n)
+  for (let k = 0; k < hits; k++) {
+    const h = Math.round(SR * (0.25 + 0.45 * k))
+    for (let i = 0; i < SR * 0.35 && h + i < n; i++) {
+      const t = i / SR
+      const env = Math.exp(-t / 0.045)
+      const body = Math.sin(2 * Math.PI * 180 * t) + 0.5 * Math.sin(2 * Math.PI * 360 * t)
+      const click = Math.exp(-t / 0.004)
+        * (Math.sin(2 * Math.PI * 3200 * t) + Math.sin(2 * Math.PI * 6100 * t))
+      sig[h + i] += 0.30 * env * (body * 0.55 + click * 0.5)
+    }
+  }
+  return sig
+}
+
+function crestDb(buf, latency = 0) {
+  let peak = 0
+  let sum = 0
+  let count = 0
+  for (let i = 0; i < buf.length - latency; i++) {
+    const v = buf[i + latency]
+    peak = Math.max(peak, Math.abs(v))
+    sum += v * v
+    count++
+  }
+  return 20 * Math.log10(peak) - 20 * Math.log10(Math.sqrt(sum / count))
+}
+
+// asymmetry 0 deliberately: it has its own strong effect on crest (see the
+// interaction test below), and the topology claims must not ride on it.
+const HOT = {
+  drive: 2.0, wetDry: 1, asymmetry: 0, hardness: 2.5,
+  lowCrossover: 500, midCrossover: 3500,
+  lowDriveMult: 8, midDriveMult: 8, highDriveMult: 8, hfLoss: 0,
+}
+
+test('the default patch is bit-identical to the build before the switch', () => {
+  // ⚠ THE WHOLE LICENCE FOR ADDING A TOPOLOGY SWITCH TO A SHIPPED STAGE. Series
+  // is a different-sounding stage, not a better one, and every saved patch
+  // assumes the old wiring — so the default must be exactly what it was, and
+  // "exactly" has to mean sample equality rather than "sounds the same".
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, {
+    mode: MODE_PARALLEL, emphasis: 0,
+  }).channelData[0]
+  for (let i = 0; i < a.length; i++) {
+    assert.equal(a[i], b[i], `default is not parallel/emphasis-0 (i=${i})`)
+  }
+})
+
+test('emphasis at 0 is absent, not merely a flat shelf', () => {
+  // Same rule HF Loss and asymmetry follow: below the epsilon the pair is
+  // skipped outright, so a user who never touches it runs no extra biquads and
+  // pays nothing for the feature existing.
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, { emphasis: 0 }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { emphasis: 0.00001 }).channelData[0]
+  for (let i = 0; i < a.length; i++) {
+    assert.equal(a[i], b[i], `emphasis below the epsilon should be absent (i=${i})`)
+  }
+})
+
+test('parallel cannot absorb a transient at ANY Wet/Dry, and series can', () => {
+  // THE MEASUREMENT THE SWITCH EXISTS FOR. Parallel is an add, so the dry
+  // transient is at unity however the knob is set: crest is flat across the
+  // whole range, including past what the panel offers.
+  const sig = bursts()
+  const dry = crestDb(sig)
+  for (const wetDry of [0, 0.3, 0.5, 1, 2, 4]) {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_PARALLEL, wetDry,
+    })
+    const delta = crestDb(channelData[0], latencySamples) - dry
+    assert.ok(
+      Math.abs(delta) < 1,
+      `parallel at wetDry ${wetDry} changed crest by ${delta.toFixed(2)} dB — `
+      + 'if this now absorbs, the blend stopped being an add',
+    )
+  }
+  // Series with a single broadband band is where the curve's peak absorption
+  // actually reaches the output. Crossovers pushed past the band so the low
+  // band carries everything — see the band-split note below for why that
+  // matters so much.
+  const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, lowCrossover: 20000, midCrossover: 20500,
+  })
+  const delta = crestDb(channelData[0], latencySamples) - dry
+  assert.ok(delta < -2, `series should absorb; crest moved ${delta.toFixed(2)} dB`)
+})
+
+test('TWO OTHER MECHANISMS ALSO RESIST PEAK ABSORPTION, and this records them', () => {
+  // Series alone does NOT buy the curve's full 11.7 dB of crest reduction, and
+  // the gap is not a defect in the switch. Two other parts of the design give
+  // it back, both measured:
+  //
+  //  1. THE THREE-BAND SPLIT. A transient is broadband, so each band sees only
+  //     part of it, saturates mildly, and the SUM reconstructs the peak.
+  //     Clipping three bands separately is not clipping their sum.
+  //       3-band, as shipped   +0.25 dB
+  //       one band             -3.55 dB
+  //
+  //  2. THE DOUBLE RMS MATCH. Two 300 ms envelope followers renormalise the wet
+  //     to the dry's MOVING level, which by construction restores dynamics the
+  //     curve removed. Measured on the curve alone, which takes 11.7 dB off:
+  //       constant whole-file scalar   -11.69 dB   (crest is scale-invariant)
+  //       the shipped 300 ms followers  -4.92 dB   (6.8 dB handed back)
+  //
+  // Neither is touched here. The band split is the plugin's identity and the
+  // RMS match is Python parity with a level-neutrality test on it; changing
+  // either is a separate decision. This test exists so that if someone does,
+  // the numbers move and say so.
+  const sig = bursts()
+  const dry = crestDb(sig)
+  const at = params => {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, params)
+    return crestDb(channelData[0], latencySamples) - dry
+  }
+  const split = at({ ...HOT, mode: MODE_SERIES })
+  const single = at({ ...HOT, mode: MODE_SERIES, lowCrossover: 20000, midCrossover: 20500 })
+  assert.ok(
+    single < split - 2,
+    `the band split should resist absorption: split ${split.toFixed(2)} vs `
+    + `single ${single.toFixed(2)} dB`,
+  )
+})
+
+test('asymmetry works AGAINST peak absorption, and by how much', () => {
+  // ⚠ AN INTERACTION NOBODY WOULD PREDICT FROM THE TWO CONTROLS' NAMES, and the
+  // reason the topology tests above pin asymmetry at 0.
+  //
+  // An off-centre curve clips one polarity earlier than the other, so the
+  // output is lopsided: the peak is set by the side that clipped LATE while the
+  // RMS falls with the side that clipped early. Crest therefore RISES. Series,
+  // one band, drive 16:
+  //
+  //   asymmetry     0      25      50     100
+  //   d crest    -3.55   -2.51   +0.76   +5.47  dB
+  //
+  // So the warmth control and the transient-absorption character pull in
+  // opposite directions, and a patch that wants the soft, absorbing sound wants
+  // asymmetry LOW. That is worth knowing before reaching for both at once.
+  const sig = bursts()
+  const dry = crestDb(sig)
+  const at = asymmetry => {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, lowCrossover: 20000, midCrossover: 20500, asymmetry,
+    })
+    return crestDb(channelData[0], latencySamples) - dry
+  }
+  assert.ok(at(100) > at(0) + 4, `asymmetry should raise crest: ${at(0).toFixed(2)} -> ${at(100).toFixed(2)}`)
+})
+
+test('the emphasis pair absorbs the onset edge while the body keeps its harmonics', () => {
+  // THE OTHER HALF OF THE ANSWER. A bare curve adds harmonics loudest where the
+  // signal is loudest, so it drops new HF onto the onset — squashed but
+  // brighter, which reads as edge. Emphasis makes the curve bite HF hardest, so
+  // the onset's top end comes DOWN while the body stays thick.
+  const sig = bursts()
+  const hp = buf => {
+    const c = new BiquadCascade(2, 1)
+    c.setSections([highpass(SR, 4000), highpass(SR, 4000)])
+    const out = new Float64Array(buf.length)
+    c.process(buf, out, buf.length, 0)
+    return out
+  }
+  const energy = (buf, fromS, toS) => {
+    let sum = 0
+    let count = 0
+    for (let k = 0; k < 8; k++) {
+      const h = Math.round(SR * (0.25 + 0.45 * k))
+      for (let i = h + Math.round(SR * fromS); i < h + Math.round(SR * toS); i++) {
+        sum += buf[i] * buf[i]
+        count++
+      }
+    }
+    return Math.sqrt(sum / count)
+  }
+  const wholeRms = buf => {
+    let s = 0
+    for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]
+    return Math.sqrt(s / buf.length)
+  }
+  const dryHf = hp(sig)
+  const measure = emphasis => {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, emphasis,
+    })
+    const aligned = new Float64Array(sig.length)
+    for (let i = 0; i < sig.length - latencySamples; i++) {
+      aligned[i] = channelData[0][i + latencySamples]
+    }
+    // Level-match to the dry, or this measures the output trim, not the tone.
+    const g = wholeRms(sig) / wholeRms(aligned)
+    for (let i = 0; i < aligned.length; i++) aligned[i] *= g
+    const hf = hp(aligned)
+    return {
+      onset: 20 * Math.log10(energy(hf, 0, 0.005) / energy(dryHf, 0, 0.005)),
+      body: 20 * Math.log10(energy(hf, 0.05, 0.20) / energy(dryHf, 0.05, 0.20)),
+    }
+  }
+  const off = measure(0)
+  const on = measure(100)
+  assert.ok(
+    on.onset < off.onset - 5,
+    `emphasis should absorb the onset's top end: ${off.onset.toFixed(2)} -> ${on.onset.toFixed(2)} dB`,
+  )
+  assert.ok(
+    on.body > 8,
+    `the body should keep its added harmonics; measured ${on.body.toFixed(2)} dB`,
   )
 })
 
