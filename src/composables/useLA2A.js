@@ -5,6 +5,7 @@ import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyLA2ARegion, computeLA2AAutoMakeup, computePeakCache } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
+import { INPUT_TRIM_MAX_DB } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { la2aEffect, LA2A_DEFAULTS } from '../audio/effects/la2aCompressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
@@ -45,43 +46,57 @@ const MAKEUP_REFERENCE = 'percentile'
 const la2aCeilingDb = ref(null)
 
 /**
- * INPUT ALIGNMENT — the measured side-chain drive offset. Always on.
+ * INPUT TRIM — the side-chain drive offset, measured by default and overridable.
  *
  * Neither compressor has a threshold control (see `dsp/inputAlign.js`), so
- * without this the reduction a knob position delivers is set by the FILE'S
+ * without an offset the reduction a knob position delivers is set by the FILE'S
  * level: 4.62 dB at Peak Reduction 50 on a file peaking at -1 dBFS, 0.00 dB on
  * one at -18. A narrator who left the headroom ACX guidance asks for opened the
  * plugin and heard nothing happen.
  *
- * ⚠ PINNED, WITH NO CONTROL, AND THE SWITCH THAT USED TO BE HERE WAS THE WRONG
- * SHAPE. It could turn alignment OFF but could not set an offset, so it gave up
- * the correction without offering a way to make one by hand — a mode switch
- * dressed as an escape hatch. The real manual control is PEAK REDUCTION, which
- * is the same axis: the knob is 0.4989 dB of drive per unit and an offset is
- * bit-identical to moving it (`test/dsp/inputAlign.test.js`). So "off" bought
- * the user nothing they did not already have, at the price of a position in
- * which the plugin does almost nothing on a quiet file.
+ * ⚠ THIS IS A SEPARATE AXIS FROM PEAK REDUCTION, AND THAT IS THE WHOLE REASON
+ * THE KNOB EXISTS. The two are interchangeable as DSP — an offset renders
+ * bit-identically to the matching Peak Reduction move, and this was benched —
+ * which is what made a first pass conclude that a manual trim would be a
+ * duplicate control and ship without one. That reasoning was wrong, and it was
+ * wrong by comparing RENDERS when the difference is in what the numbers MEAN.
  *
- * Alignment is also what makes Peak Reduction's travel usable at all: unaligned,
- * a file at -30 dBFS peak needs the knob at 100 and still gets 2.59 dB.
+ * Peak Reduction is a PATCH value: it is saved in presets, and a preset is only
+ * portable because every file it meets has been brought to a common level
+ * first. An input offset is a FILE property, like `la2aCeilingDb` and for the
+ * same reason. A user forced to absorb a bad measurement by moving Peak
+ * Reduction reaches the right sound with the wrong number: the panel now reads
+ * PR 26 for what is meant to be a PR 50 patch, and the compensation has been
+ * written into the patch. That is exactly the portability failure alignment
+ * exists to remove, reintroduced one level up, and no amount of Peak Reduction
+ * range makes it not a category error.
  *
- * ⚠ WHICH MAKES THE MEASUREMENT LOAD-BEARING WITH NO USER RECOURSE. Nothing on
- * the panel can override a misread, so the guards are ALIGN_MAX_DB and the
- * bench (`npm run la2a:align`), not a control. A class of material that fools
- * the gate is a bug to fix there, not a switch to flip here.
+ * ⚠ THE KNOB ALSO REACHES WHERE PEAK REDUCTION CANNOT. Past about -39 dBFS peak
+ * the automatic offset saturates at ALIGN_MAX_DB and the knob starts running out
+ * again: a file at -45 dBFS peak gets 10.47 dB at PR 100 on the automatic
+ * clamp, and 17.28 dB once the trim is wound to INPUT_TRIM_MAX_DB by hand.
+ *
+ * ⚠ MEASURED-THEN-OVERRIDABLE, THE SAME CONTRACT THE GAIN KNOB HAS UNDER AUTO.
+ * While `la2aInputAuto` is set the measurement owns `la2aInputDb`, so the knob
+ * always shows the offset actually in force rather than a delta against a
+ * number kept somewhere else; touching it takes over and drops AUTO. The
+ * alternative — a knob starting at 0 that ADDS to a hidden measured value —
+ * splits the truth across two places, and the one number anybody wants when a
+ * file sounds wrong is the total.
+ *
+ * ⚠ NOT A PRESET KEY EITHER WAY. `la2aInputDb` describes the audio, not the
+ * patch, so it stays out of `LA2A_DEFAULTS` and out of saved presets exactly as
+ * `la2aCeilingDb` does — a preset carrying one would apply another recording's
+ * gain staging to this file, which is the failure this whole mechanism removes.
  *
  * ⚠ NOT A NO-OP ON WELL-RECORDED MATERIAL. The target is anchored to the level
  * of the capture every ballistic and taper constant was fitted against, so THAT
- * file aligns to +0.00 dB — but a file peak-normalised to -1 dBFS trims -1.8 dB
+ * file measures +0.00 dB — but a file peak-normalised to -1 dBFS trims -1.8 dB
  * and its reduction at PR 50 moves 2.44 -> 1.80. Patches saved before this
  * compress slightly less on hot material and enormously more on quiet material.
- *
- * The value itself is MEASURED STATE, not a knob, and is kept out of
- * `LA2A_DEFAULTS` and out of presets for the same reason as `la2aCeilingDb`: it
- * describes the audio, not the patch. A preset carrying one would apply another
- * recording's gain staging to this file.
  */
-const la2aInputAlignDb = ref(null)
+const la2aInputAuto = ref(true)
+const la2aInputDb = ref(0)
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
 // boundary and perturbs the levels the mastering chain later measures.
@@ -136,7 +151,7 @@ function currentParams() {
      * position mean on this file". Turning the makeup off is not a reason to
      * hand the user back a compressor whose knob does nothing.
      */
-    inputAlignDb: la2aInputAlignDb.value,
+    inputAlignDb: la2aInputDb.value,
   }
 }
 
@@ -185,8 +200,8 @@ function measurementParams() {
      * the two differ by the whole of the gain reduction, not by a fraction of a
      * dB.
      */
-    ...(Number.isFinite(la2aInputAlignDb.value)
-      ? { inputAlignDb: la2aInputAlignDb.value } : {}),
+    ...(Number.isFinite(la2aInputDb.value)
+      ? { inputAlignDb: la2aInputDb.value } : {}),
   }
 }
 
@@ -301,14 +316,45 @@ export function useLA2A() {
    * where the solve runs the kernel to convergence.
    */
   function refreshInputAlign() {
+    // ⚠ THE USER'S VALUE IS NEVER OVERWRITTEN. Once AUTO is off the trim is
+    // theirs, and a re-measure triggered by a new selection or an edit must not
+    // walk it back — the same rule the Gain knob follows under AUTO.
+    if (!la2aInputAuto.value) return
     if (!state.currentFile) return
     const end = totalDuration.value
     if (!(end > 0)) return
     const db = regionAlignDb(
       state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
-    la2aInputAlignDb.value = db
+    la2aInputDb.value = db
     pushParam('inputAlignDb', db)
+  }
+
+  /**
+   * The user moved the Input trim: take the knob over from the measurement.
+   *
+   * ⚠ IT RE-SOLVES THE MAKEUP, because this is a compression change. The offset
+   * decides how much reduction the cell applies, so the makeup that matches it
+   * moves too — leaving it alone would drift preview away from the solve
+   * exactly as a Peak Reduction move would.
+   */
+  function syncInput(v) {
+    const clamped = Math.max(-INPUT_TRIM_MAX_DB, Math.min(INPUT_TRIM_MAX_DB, v))
+    la2aInputAuto.value = false
+    la2aInputDb.value = clamped
+    pushParam('inputAlignDb', clamped)
+    scheduleAutoMakeup()
+  }
+
+  /**
+   * Hand the trim back to the measurement. Re-measures immediately so the knob
+   * lands on the file's own value rather than sitting on the user's until
+   * something else happens to trigger a pass.
+   */
+  function resetInputAuto() {
+    la2aInputAuto.value = true
+    refreshInputAlign()
+    scheduleAutoMakeup()
   }
 
   /**
@@ -334,7 +380,7 @@ export function useLA2A() {
      */
     // Alignment is upstream of the solve and of the render alike, so it is
     // brought up to date first — see refreshInputAlign.
-    if (la2aInputAlignDb.value === null) refreshInputAlign()
+    if (la2aInputAuto.value) refreshInputAlign()
 
     const start = state.selection ? state.selection.start : 0
     const end = state.selection ? state.selection.end : totalDuration.value
@@ -545,6 +591,8 @@ export function useLA2A() {
     la2aLookahead,
     la2aAutoMakeup,
     la2aAutoMakeupBusy,
+    la2aInputAuto,
+    la2aInputDb,
     la2aPreview,
     la2aReduction,
     la2aInputLevels,
@@ -557,6 +605,8 @@ export function useLA2A() {
     syncR37,
     syncLookahead,
     toggleAutoMakeup,
+    syncInput,
+    resetInputAuto,
     refreshInputAlign,
     refreshAutoMakeup,
     refreshKernelTuning,

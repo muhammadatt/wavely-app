@@ -19,6 +19,7 @@ import assert from 'node:assert/strict'
 import {
   gatedRmsOfChannels, inputAlignDbFor,
   ALIGN_TARGET_DBFS, ALIGN_MAX_DB, ALIGN_GATE_RANGE_DB, ALIGN_BLOCK_MS,
+  INPUT_TRIM_MAX_DB,
 } from '../../src/audio/dsp/inputAlign.js'
 import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
 
@@ -222,4 +223,27 @@ test('the gate range is the fitted one', () => {
   // noisy files hot, 40 lets a -40 dBFS tone back in). A change here is a
   // re-voicing of every plugin that aligns, so it should not pass silently.
   assert.equal(ALIGN_GATE_RANGE_DB, 30)
+})
+
+
+test('the manual trim range covers everything the measurement can produce', () => {
+  // The Input knob DISPLAYS the measured offset (see useLA2A.js), so a range
+  // narrower than the clamp would show a value the knob cannot represent.
+  assert.ok(INPUT_TRIM_MAX_DB >= ALIGN_MAX_DB,
+    `knob range ${INPUT_TRIM_MAX_DB} cannot show a measured ${ALIGN_MAX_DB}`)
+})
+
+test('the manual trim reaches past the automatic clamp, and that buys travel', () => {
+  // The asymmetry is the point: past ~-39 dBFS peak the automatic offset
+  // saturates and Peak Reduction starts running out again. A user who has
+  // listened to the file can wind further than the guess is allowed to.
+  assert.ok(INPUT_TRIM_MAX_DB > ALIGN_MAX_DB, 'the wider manual range is deliberate')
+
+  const quiet = scaled(speech(4, -1), -44)   // ~-45 dBFS peak, past the clamp
+  assert.equal(inputAlignDbFor([quiet], SR), ALIGN_MAX_DB, 'should be clamped')
+
+  const atClamp = render(quiet, { peakReduction: 100, inputAlignDb: ALIGN_MAX_DB }).avgGr
+  const atManual = render(quiet, { peakReduction: 100, inputAlignDb: INPUT_TRIM_MAX_DB }).avgGr
+  assert.ok(atManual > atClamp + 3,
+    `winding the trim past the clamp should recover real travel: ${atClamp} -> ${atManual}`)
 })

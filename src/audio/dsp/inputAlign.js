@@ -20,15 +20,22 @@
  * It also means a saved preset is only valid at the level it was saved at,
  * which quietly breaks the plugin-preset feature rather than degrading it.
  *
- * ⚠ IT IS PINNED ON, WITH NO CONTROL ON ANY PANEL. A switch was built and
- * removed before it shipped: it could turn alignment OFF but could not set an
- * offset by hand, so it gave up the correction without offering a replacement.
- * The manual control is PEAK REDUCTION — the same axis, 0.4989 dB of drive per
- * unit, bit-identical to an offset — so "off" bought nothing the user did not
- * already have, and an INPUT knob calibrated in drive would be a second Peak
- * Reduction knob for the same reason. Which means the measurement below is
- * load-bearing with NO user recourse: a class of material that fools the gate
- * is a bug to fix here, guarded by ALIGN_MAX_DB and `npm run la2a:align`.
+ * ⚠ THE MEASUREMENT IS THE DEFAULT, AND OPTOSMOOTH'S INPUT KNOB CAN OVERRIDE IT.
+ * AUTO owns the knob until the user touches it, the same contract the Gain knob
+ * has under auto makeup; Scheps has the measurement and no knob. An ALIGN
+ * on/off switch was built and removed first — it could turn the correction off
+ * but could not set an offset by hand — and the knob that replaced it was
+ * itself nearly not built, on the reasoning that an offset renders
+ * BIT-IDENTICALLY to the matching Peak Reduction move and would therefore
+ * duplicate it. That compared renders when the difference is what the numbers
+ * MEAN: Peak Reduction is a patch value presets save, this is a property of the
+ * FILE, and compensating through the former writes a file's gain staging into a
+ * preset. See `useLA2A.js` for the full argument.
+ *
+ * The measurement below is still what every file gets by default and what the
+ * makeup is solved against, so it stays load-bearing: a class of material that
+ * fools the gate is a bug to fix HERE, guarded by ALIGN_MAX_DB and
+ * `npm run la2a:align`, not something to leave to the knob.
  *
  * ⚠ THIS IS A SIDE-CHAIN DRIVE OFFSET, NOT AN INPUT GAIN, and the distinction
  * is the reason this is safe. Level and drive ADD IN dB inside the gain
@@ -154,8 +161,31 @@ export const ALIGN_TARGET_DBFS = -17.35
  * likely to be a mis-decode, a wrong channel, or near-silence than a quiet
  * narrator, and it is better to under-correct it than to raise 39 dB of drive
  * onto whatever is actually in there.
+ *
+ * ⚠ THE MANUAL KNOB DELIBERATELY REACHES FURTHER — see INPUT_TRIM_MAX_DB. This
+ * bound guards an automatic GUESS about unknown audio; that one bounds a value
+ * a person typed while listening, which is a different kind of decision and
+ * does not need the same caution.
  */
 export const ALIGN_MAX_DB = 36
+
+/**
+ * How far the panel's Input trim can be driven by hand, dB.
+ *
+ * ⚠ WIDER THAN THE AUTOMATIC CLAMP, ON PURPOSE, AND THAT ASYMMETRY IS THE POINT.
+ * Past about -39 dBFS peak the automatic offset saturates at ALIGN_MAX_DB and
+ * Peak Reduction starts running out again — measured, a file at -55 dBFS peak
+ * gets 5.34 dB at PR 100 with the clamp in force, which is the "quiet file runs
+ * out of travel" failure this whole mechanism exists to remove, merely pushed
+ * to the far end of the range. The automatic path should not chase that: a file
+ * that quiet is more often broken than quiet. A user who has listened to it and
+ * decided otherwise should not be held to the guess's caution.
+ *
+ * It also has to be at least ALIGN_MAX_DB, because the knob DISPLAYS the
+ * measured offset — a range narrower than the measurement could produce would
+ * show a value the knob cannot represent.
+ */
+export const INPUT_TRIM_MAX_DB = 48
 
 /**
  * Gated RMS of one or more channels, linear.

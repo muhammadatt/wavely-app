@@ -1157,31 +1157,58 @@ file peak-normalised to −1 dBFS trims −1.8 dB and its PR 50 reduction moves
 2.44 → 1.80 dB. Existing patches compress slightly less on hot files and
 enormously more on quiet ones.
 
-⚠ **An ALIGN switch shipped in the first cut and was removed before merge, and
-the reason is worth keeping.** It looked like the right hedge — an automatic
+**The control went through three designs, and the two dead ends are the useful
+part of this entry.**
+
+*First: an ALIGN on/off switch.* It looked like the right hedge — an automatic
 correction the user can decline. But it could only turn the correction OFF; it
 could not set an offset by hand, so it gave up the measurement without offering
-a replacement. A mode switch dressed as an escape hatch.
+a replacement. A mode switch dressed as an escape hatch, and it was removed.
 
-The point that settled it: **Peak Reduction IS the manual control, and always
-was.** The knob is 0.4989 dB of side-chain drive per unit and an offset is
-bit-identical to moving it, so a user could already compensate in either state —
-"off" bought nothing they did not have, at the price of a position where the
-plugin does almost nothing on a quiet file. Alignment is also what makes that
-travel usable: unaligned, a file at −30 dBFS peak needs the knob at 100 and
-still gets 2.59 dB. For the same reason an INPUT knob calibrated in drive would
-be a literal duplicate of Peak Reduction — benched at +12 dB against PR 50 →
-74.1, the two renders differ by −Infinity dBr. A TRUE input gain would be a
-different feature: it drives the output valves, worth −52.6 dBr at matched
-compression, and this panel has no tube control by deliberate decision (see
-TUBE_DRIVE_LIN, and the Tube Drive knob that was removed for being an input
-level in disguise).
+*Second: no control at all.* The reasoning was that **Peak Reduction is already
+the manual control** — the knob is 0.4989 dB of side-chain drive per unit and an
+offset is bit-identical to moving it, benched at +12 dB against PR 50 → 74.1 with
+the two renders differing by −Infinity dBr. Every misread is absorbable: ±20 dB
+of error all land inside the knob's travel. So a trim looked like a duplicate.
 
-⚠ **So the measurement is load-bearing with no user recourse.** Nothing on
-either panel can override a misread. The guards are `ALIGN_MAX_DB` and the
-bench, not a control: a class of material that fools the gate is a bug to fix in
-`inputAlign.js`, not a switch to flip. That raises the bar on the statistic
-rather than lowering it, which is the argument against the simpler alternatives.
+⚠ **THAT WAS WRONG, AND IT WAS WRONG BY COMPARING RENDERS WHEN THE DIFFERENCE IS
+IN WHAT THE NUMBERS MEAN.** Peak Reduction is a PATCH value — presets save it,
+and a preset is only portable because every file it meets has been brought to a
+common level first. An input offset is a FILE property, like `ceilingDb` and
+kept out of presets for the same reason. A user absorbing a bad measurement
+through Peak Reduction reaches the right sound with the wrong number: the panel
+then reads PR 26 for what is meant to be a PR 50 patch, and the compensation has
+been written into the preset. That is precisely the portability failure
+alignment exists to remove, reintroduced one level up, and no amount of Peak
+Reduction range makes it not a category error. The bench could not see this
+because it only ever compared audio.
+
+*Third, and shipped: an INPUT knob that AUTO owns until you touch it*, the same
+contract the Gain knob has under auto makeup. The knob always shows the offset
+actually in force; the rejected alternative — a knob starting at 0 that ADDS to
+a hidden measured value — splits the truth across two places, and the total is
+the one number anybody wants when a file sounds wrong.
+
+⚠ **THE MANUAL RANGE IS DELIBERATELY WIDER THAN THE AUTOMATIC CLAMP** (
+`INPUT_TRIM_MAX_DB` 48 against `ALIGN_MAX_DB` 36), and that asymmetry closes the
+one case where "PR runs out of travel" survives alignment. Measured with the
+automatic clamp in force, a file at −45 dBFS peak gets 0.44 dB at PR 50 and
+10.47 at PR 100; wound to 48 by hand it gets 4.02 and 17.28. The automatic path
+should not chase that — a file that quiet is more often broken than quiet — but
+a person who has listened to it should not be held to the guess's caution.
+
+For completeness on the third option considered: a TRUE input gain (FET Punch's
+`inputLin`, which hits both the side-chain tap and the output) would be a
+different feature again — it drives the output valves, worth −52.6 dBr at
+matched compression — and this panel has no tube control by deliberate decision
+(see TUBE_DRIVE_LIN, and the Tube Drive knob removed for being an input level in
+disguise). The shipped knob is a drive offset, so the audio path is untouched.
+
+⚠ **The measurement is still load-bearing**, the knob notwithstanding: it is
+what every file gets by default and what the makeup is solved against. The
+guards on it are `ALIGN_MAX_DB` and the bench, not the knob — a class of
+material that fools the gate is a bug to fix in `inputAlign.js`, which is the
+argument against the simpler statistics below.
 
 **Why not just use peak, which needs no gate and no tuning constant?** Asked
 directly, and the answer is two failures rather than the expected one. The
