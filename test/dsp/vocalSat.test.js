@@ -334,50 +334,72 @@ test('parallel cannot absorb a transient at ANY Wet/Dry, and series can', () => 
       + 'if this now absorbs, the blend stopped being an add',
     )
   }
-  // Series with a single broadband band is where the curve's peak absorption
-  // actually reaches the output. Crossovers pushed past the band so the low
-  // band carries everything — see the band-split note below for why that
-  // matters so much.
+  // Series runs ONE broadband curve, which is where the crossfade's peak
+  // absorption actually reaches the output.
   const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
-    ...HOT, mode: MODE_SERIES, lowCrossover: 20000, midCrossover: 20500,
+    ...HOT, mode: MODE_SERIES,
   })
   const delta = crestDb(channelData[0], latencySamples) - dry
   assert.ok(delta < -2, `series should absorb; crest moved ${delta.toFixed(2)} dB`)
 })
 
-test('TWO OTHER MECHANISMS ALSO RESIST PEAK ABSORPTION, and this records them', () => {
-  // Series alone does NOT buy the curve's full 11.7 dB of crest reduction, and
-  // the gap is not a defect in the switch. Two other parts of the design give
-  // it back, both measured:
+test('series is ONE curve, so at equal band drives the crossovers stop mattering', () => {
+  // THE STRUCTURAL PROOF THAT THE SPLIT IS GONE FROM THIS PATH. The split is
+  // complementary — low + mid + high is the input exactly — so summing the
+  // DRIVEN bands at equal mults is `mult * input` whatever the corners are set
+  // to. If someone reintroduces a per-band nonlinearity in series, the three
+  // curves start seeing different content and this goes red.
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, lowCrossover: 500, midCrossover: 3500,
+  }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, lowCrossover: 1200, midCrossover: 7000,
+  }).channelData[0]
+  let worst = 0
+  for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]))
+  assert.ok(worst < 1e-6, `series should not depend on the crossovers; max diff ${worst}`)
+
+  // And in PARALLEL the same move changes the output, because there the three
+  // curves genuinely see three different signals.
+  const c = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, lowCrossover: 500, midCrossover: 3500,
+  }).channelData[0]
+  const d = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, lowCrossover: 1200, midCrossover: 7000,
+  }).channelData[0]
+  let parallelDiff = 0
+  for (let i = 0; i < c.length; i++) parallelDiff = Math.max(parallelDiff, Math.abs(c[i] - d[i]))
+  assert.ok(parallelDiff > 1e-4, 'parallel should still depend on the crossovers')
+})
+
+test('the RMS match is the last thing resisting absorption, and this bounds it', () => {
+  // WHERE THE REMAINING GAP GOES, so nobody re-derives it. The curve alone at
+  // this drive takes 11.69 dB off the crest. Series recovers most of the
+  // topology losses but lands near -4.8, and the difference is the double RMS
+  // match: two 300 ms followers renormalising the wet to the dry's MOVING level
+  // is by construction an expander. Measured on the curve alone:
   //
-  //  1. THE THREE-BAND SPLIT. A transient is broadband, so each band sees only
-  //     part of it, saturates mildly, and the SUM reconstructs the peak.
-  //     Clipping three bands separately is not clipping their sum.
-  //       3-band, as shipped   +0.25 dB
-  //       one band             -3.55 dB
+  //   constant whole-file scalar    -11.69 dB   (crest is scale-invariant)
+  //   the shipped 300 ms followers   -4.92 dB   (6.8 dB handed back)
   //
-  //  2. THE DOUBLE RMS MATCH. Two 300 ms envelope followers renormalise the wet
-  //     to the dry's MOVING level, which by construction restores dynamics the
-  //     curve removed. Measured on the curve alone, which takes 11.7 dB off:
-  //       constant whole-file scalar   -11.69 dB   (crest is scale-invariant)
-  //       the shipped 300 ms followers  -4.92 dB   (6.8 dB handed back)
-  //
-  // Neither is touched here. The band split is the plugin's identity and the
-  // RMS match is Python parity with a level-neutrality test on it; changing
-  // either is a separate decision. This test exists so that if someone does,
-  // the numbers move and say so.
+  // -11.69 + 6.8 = -4.9, which is what the whole plugin measures. That match is
+  // the Python's own level matching and the level-neutrality guarantee rests on
+  // it, so it stays. This test is the tripwire if it ever moves.
   const sig = bursts()
   const dry = crestDb(sig)
-  const at = params => {
-    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, params)
-    return crestDb(channelData[0], latencySamples) - dry
-  }
-  const split = at({ ...HOT, mode: MODE_SERIES })
-  const single = at({ ...HOT, mode: MODE_SERIES, lowCrossover: 20000, midCrossover: 20500 })
+  const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES,
+  })
+  const delta = crestDb(channelData[0], latencySamples) - dry
   assert.ok(
-    single < split - 2,
-    `the band split should resist absorption: split ${split.toFixed(2)} vs `
-    + `single ${single.toFixed(2)} dB`,
+    delta < -3,
+    `series should absorb around 4.8 dB of crest; measured ${delta.toFixed(2)} dB`,
+  )
+  assert.ok(
+    delta > -9,
+    `series absorbed ${delta.toFixed(2)} dB — more than the RMS match should allow. `
+    + 'If the match changed, the numbers in this comment need re-measuring',
   )
 })
 
@@ -391,16 +413,20 @@ test('asymmetry works AGAINST peak absorption, and by how much', () => {
   // one band, drive 16:
   //
   //   asymmetry     0      25      50     100
-  //   d crest    -3.55   -2.51   +0.76   +5.47  dB
+  //   d crest    -4.80   -3.14   +0.56   +5.38  dB
   //
   // So the warmth control and the transient-absorption character pull in
   // opposite directions, and a patch that wants the soft, absorbing sound wants
-  // asymmetry LOW. That is worth knowing before reaching for both at once.
+  // asymmetry LOW.
+  //
+  // ⚠ THE PANEL SHIPS ASYMMETRY AT 100, so switching that patch to SERIES makes
+  // transients MORE prominent, not less — the one result a user reaching for
+  // series is not expecting. The help text says so; this records why.
   const sig = bursts()
   const dry = crestDb(sig)
   const at = asymmetry => {
     const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
-      ...HOT, mode: MODE_SERIES, lowCrossover: 20000, midCrossover: 20500, asymmetry,
+      ...HOT, mode: MODE_SERIES, asymmetry,
     })
     return crestDb(channelData[0], latencySamples) - dry
   }
@@ -411,7 +437,17 @@ test('the emphasis pair absorbs the onset edge while the body keeps its harmonic
   // THE OTHER HALF OF THE ANSWER. A bare curve adds harmonics loudest where the
   // signal is loudest, so it drops new HF onto the onset — squashed but
   // brighter, which reads as edge. Emphasis makes the curve bite HF hardest, so
-  // the onset's top end comes DOWN while the body stays thick.
+  // the onset's top end comes DOWN while the body stays thick. Series, one broadband
+  // curve, asymmetry 0:
+  //
+  //   emphasis      0      25      50      75     100
+  //   onset HF   -2.89   -3.29   -3.66   -4.49   -5.19  dB
+  //   body HF   +12.70  +12.06  +11.59  +11.23  +10.90  dB
+  //
+  // 2.3 dB rather than the 5+ the same pair gets around a bare single curve:
+  // here the HF rides on the low-frequency content into ONE shared curve rather
+  // than saturating in a band of its own. See EMPHASIS_MAX_DB, which also
+  // records that this trades crest absorption for HF absorption.
   const sig = bursts()
   const hp = buf => {
     const c = new BiquadCascade(2, 1)
@@ -458,7 +494,7 @@ test('the emphasis pair absorbs the onset edge while the body keeps its harmonic
   const off = measure(0)
   const on = measure(100)
   assert.ok(
-    on.onset < off.onset - 5,
+    on.onset < off.onset - 2,
     `emphasis should absorb the onset's top end: ${off.onset.toFixed(2)} -> ${on.onset.toFixed(2)} dB`,
   )
   assert.ok(

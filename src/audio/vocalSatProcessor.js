@@ -1,9 +1,16 @@
 /**
  * Vocal Saturation — worklet kernel.
  *
- * A realtime port of server/scripts/vocal_saturation.py: a complementary
- * three-band split, a blended tanh/arctan transfer with per-band drive, and a
- * gain-neutral parallel blend back against the dry signal.
+ * Began as a realtime port of server/scripts/vocal_saturation.py: a
+ * complementary three-band split, a blended tanh/arctan transfer with per-band
+ * drive, and a gain-neutral parallel blend back against the dry signal. It has
+ * since diverged from that Python in three ways that matter — the transfer is a
+ * knee-order curve rather than a tanh/arctan blend (see `shape`), the asymmetry
+ * offset takes its sign from the material rather than always leaning positive
+ * (see ASYM_REFERENCE), and the stage can now run in SERIES as one broadband
+ * curve rather than only as a parallel sum of three (see MODE_SERIES). The
+ * server's `vocalSaturation` pipeline stage is still the Python and is
+ * unaffected by any of it.
  *
  * This file is BOTH a normal ES module (exports VocalSatKernel and
  * processVocalSatBuffer) AND an AudioWorklet module (registers
@@ -372,7 +379,25 @@ const ASYM_REFERENCE = 1
  * crisper and more prominent and one that absorbs and rounds them, and it is a
  * property of the wiring rather than of the curve.
  *
- * Series is therefore `(1-wetDry)*x + wetDry*wet`, a real crossfade.
+ * Series is therefore `(1-wetDry)*x + wetDry*wet`, a real crossfade — AND ONE
+ * BROADBAND CURVE INSTEAD OF THREE, because the crossfade alone recovered
+ * almost nothing. Clipping three bands separately is not clipping their sum: a
+ * transient is broadband, so each band saturates mildly and the sum puts the
+ * peak back together. Crest against dry, series, asymmetry 0:
+ *
+ *   three curves (one per band)   +0.25 dB
+ *   one curve on the summed bands  -4.80 dB   (at emphasis 0)
+ *
+ * The per-band Drive knobs survive the change as a tilt applied BEFORE the
+ * single curve — see the topology branch in `process`.
+ *
+ * ⚠ -4.80 dB IS STILL NOT THE CURVE'S 11.69, and the remainder is accounted
+ * for: the double RMS match hands back 6.8 dB of it (11.69 -> 4.92 measured on
+ * the curve alone), because two 300 ms followers renormalising the wet to the
+ * dry's MOVING level is by construction an expander. -11.69 + 6.8 is -4.9,
+ * which is what this measures. THAT is the last mechanism still resisting, and
+ * it is deliberately untouched: it is the Python's own level matching and the
+ * plugin's level-neutrality guarantee rests on it.
  *
  * ⚠ THE DEFAULT DOES NOT MOVE. `parallel` with `emphasis: 0` is bit-identical
  * to the build before this existed, and a test pins that. Flipping the default
@@ -397,14 +422,35 @@ export const MODE_PARALLEL = 'parallel'
  * with the edge already rounded. Measured on the same bursts, level-matched,
  * energy above 4 kHz against the dry:
  *
- *   topology                        d crest   onset HF   body HF
- *   parallel add (what ships)         -3.83     -2.01     +8.76
- *   series, same curve               -11.69     -3.43    +13.93
- *   series + this pair               -11.38     -9.34    +12.76
+ * Measured IN THIS PLUGIN, series, one broadband curve, asymmetry 0, level
+ * matched, energy above 4 kHz against the dry:
  *
- * The last row is the point: 9.3 dB of the onset's top end absorbed while the
- * body KEEPS its 12.8 dB of added harmonics. Thick and soft, rather than thick
- * and sharp.
+ *   emphasis      0      25      50      75     100
+ *   onset HF   -2.89   -3.29   -3.66   -4.49   -5.19  dB
+ *   body HF   +12.70  +12.06  +11.59  +11.23  +10.90  dB
+ *   d crest    -4.80   -3.90   -2.60   -1.35   -0.27  dB
+ *
+ * The onset's top end comes down while the body keeps essentially all of its
+ * added harmonics — thick and soft rather than thick and sharp, which is the
+ * whole point. It reaches -6.37 dB at drive 8.
+ *
+ * ⚠ IT TRADES CREST ABSORPTION FOR HF ABSORPTION AND THE TRADE IS INTRINSIC,
+ * not a tuning miss: -4.80 dB of crest at emphasis 0 becomes -0.27 at 100. The
+ * two goals are opposites. Saturation SQUARES the waveform, and a square wave
+ * has a crest factor of 0 dB; the de-emphasis then low-passes that flat top
+ * back toward a rounded shape, and a sine's crest is 3 dB. Rounding the edges
+ * off is exactly what raises peak-to-RMS again. You cannot both square a wave
+ * and round it.
+ *
+ * So these are two different characters rather than one axis: emphasis up for
+ * SOFT (edges rounded, harshness gone), emphasis at 0 for SQUASHED (peaks
+ * absorbed, sound harder). "Softer and mushier" is the first one.
+ *
+ * ⚠ AND IT IS WEAKER HERE THAN AROUND A BARE SINGLE CURVE, which is worth
+ * knowing before anyone re-tunes EMPHASIS_MAX_DB chasing the difference. A
+ * standalone curve with the same pair reaches -9.34 dB at the onset. In the
+ * plugin the HF does not saturate on its own — it rides on the low-frequency
+ * content into one shared curve — and the RMS match takes some back.
  *
  * ⚠ IT IS MUCH WEAKER IN PARALLEL AND THAT IS STRUCTURAL, not a bug to chase.
  * The pair can only shape what the curve sees, and in parallel the dry path
@@ -684,12 +730,41 @@ export class VocalSatKernel {
       const midUp = st.upMid.up(midBuf, n)
       const highUp = st.upHigh.up(highBuf, n)
 
+      // ── ONE CURVE IN SERIES, THREE IN PARALLEL ───────────────────────────
+      //
+      // ⚠ CLIPPING THREE BANDS SEPARATELY IS NOT CLIPPING THEIR SUM, and that
+      // is why series needs its own topology here rather than just a different
+      // blend. A transient is BROADBAND: split three ways, each band sees only
+      // part of it, saturates mildly, and the sum puts the peak back together.
+      // Measured in series, crest against dry: three bands +0.25 dB against one
+      // band -3.55 dB. The split was cancelling most of what the crossfade had
+      // just bought.
+      //
+      // THE PER-BAND DRIVE KNOBS STILL DO SOMETHING, which is the reason this
+      // sums the DRIVEN bands rather than ignoring the split. `low*lowDrive +
+      // mid*midDrive + high*highDrive` is a tilt applied before a single
+      // nonlinearity, so Low/Mid/High Drive go on shaping what the curve sees
+      // instead of going dead the moment the mode changes. The split is still
+      // complementary, so at equal mults this is exactly `mult * wetIn`.
+      //
+      // ⚠ THE OFFSET IS APPLIED ONCE HERE AND THREE TIMES IN PARALLEL, so the
+      // same Asymmetry setting is a WEAKER effect in series. That is the honest
+      // arrangement rather than a scaling bug to correct: one stage has one
+      // operating point. Do not "fix" it by tripling the offset — that would be
+      // a different, harder-clipped curve, not the same one applied evenly.
       const sum = st.downWet.scratch(n)
-      for (let j = 0; j < n * L; j++) {
-        sum[j] =
-          applyTransfer(lowUp[j] * lowDrive, hardness, offset, shapedOffset) +
-          applyTransfer(midUp[j] * midDrive, hardness, offset, shapedOffset) +
-          applyTransfer(highUp[j] * highDrive, hardness, offset, shapedOffset)
+      if (series) {
+        for (let j = 0; j < n * L; j++) {
+          const pre = lowUp[j] * lowDrive + midUp[j] * midDrive + highUp[j] * highDrive
+          sum[j] = applyTransfer(pre, hardness, offset, shapedOffset)
+        }
+      } else {
+        for (let j = 0; j < n * L; j++) {
+          sum[j] =
+            applyTransfer(lowUp[j] * lowDrive, hardness, offset, shapedOffset) +
+            applyTransfer(midUp[j] * midDrive, hardness, offset, shapedOffset) +
+            applyTransfer(highUp[j] * highDrive, hardness, offset, shapedOffset)
+        }
       }
 
       st.downWet.down(wetBuf, n)
