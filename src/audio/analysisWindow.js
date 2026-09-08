@@ -1,4 +1,7 @@
 import { getSegmentDuration } from './operations.js'
+import {
+  ALIGN_BLOCK_MS, alignDbForRms, gatedRmsFromBlocks,
+} from './dsp/inputAlign.js'
 
 /**
  * How much of a region the measured-parameter paths analyse, and from where.
@@ -134,4 +137,69 @@ export function regionPeakDb(segments, start, end, sampleRate, channels) {
     }
   }
   return peak > 0 ? 20 * Math.log10(peak) : -Infinity
+}
+
+/**
+ * The side-chain drive offset that brings a region to nominal, dB.
+ *
+ * ⚠ IT MUST SEE THE WHOLE FILE, AND FOR A DIFFERENT REASON THAN `regionPeakDb`.
+ * The ceiling needs the whole region because the loudest moment can be
+ * anywhere; alignment needs it because a per-selection offset would make the
+ * plugin a different compressor on every selection. Compress a phrase, then
+ * compress the paragraph containing it, and the phrase would come out
+ * differently the second time — the same edit applied twice, disagreeing with
+ * itself. Callers pass 0..totalDuration REGARDLESS of the selection, and that
+ * is the one thing about this function a caller can get wrong.
+ *
+ * Mirrors `regionPeakDb`'s segment walk, with two differences that matter:
+ * blocks are indexed in OUTPUT time so they stay aligned across segment
+ * boundaries, and samples covered by no segment (silence segments, gaps)
+ * contribute zero energy rather than being skipped — a block half silence and
+ * half programme has to read as half as loud, or the gate sees the wrong level
+ * exactly where an edit put a cut.
+ *
+ * Returns 0 for an empty or silent region, which is "no offset", not "unknown".
+ */
+export function regionAlignDb(segments, start, end, sampleRate, channels) {
+  const block = Math.max(1, Math.round(sampleRate * ALIGN_BLOCK_MS / 1000))
+  const total = Math.floor((end - start) * sampleRate)
+  const nBlocks = Math.floor(total / block)
+  if (nBlocks < 1) return 0
+
+  // Sum of squares per block, over every channel.
+  const energy = new Float64Array(nBlocks)
+
+  for (const seg of segments) {
+    const dur = getSegmentDuration(seg)
+    const segEnd = seg.outputStart + dur
+    if (segEnd <= start || seg.outputStart >= end) continue
+    if (seg.sourceBuffer === null) continue // silence: contributes zero energy
+
+    const overlapStart = Math.max(start, seg.outputStart)
+    const overlapEnd = Math.min(end, segEnd)
+    const sourceOffset = seg.sourceStart + (overlapStart - seg.outputStart)
+    const sourceSampleStart = Math.floor(sourceOffset * sampleRate)
+    const copySamples = Math.floor((overlapEnd - overlapStart) * sampleRate)
+    // Where this segment lands on the region's own timeline, in samples. The
+    // block index comes from here rather than from the segment, so a cut does
+    // not shift every block after it.
+    const outBase = Math.floor((overlapStart - start) * sampleRate)
+
+    for (let ch = 0; ch < channels; ch++) {
+      const srcData = seg.sourceBuffer.getChannelData(ch)
+      const n = Math.min(copySamples, srcData.length - sourceSampleStart)
+      for (let i = 0; i < n; i++) {
+        const b = ((outBase + i) / block) | 0
+        if (b >= nBlocks) break
+        const v = srcData[sourceSampleStart + i]
+        energy[b] += v * v
+      }
+    }
+  }
+
+  // Every block spans the same sample count, so one divisor converts the lot.
+  const per = block * channels
+  for (let b = 0; b < nBlocks; b++) energy[b] = Math.sqrt(energy[b] / per)
+
+  return alignDbForRms(gatedRmsFromBlocks(energy))
 }

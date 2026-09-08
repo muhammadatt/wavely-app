@@ -288,6 +288,18 @@ export class SchepsKernel {
       // job of a measurement bypass. Nothing in the app sets it.
       cellMod: p.cellMod,
       /**
+       * ⚠ SCHEPS INHERITS THE THRESHOLD PROBLEM AND SO IT INHERITS THE FIX. The
+       * embedded kernel is the same one, driven by `squash` into the same fixed
+       * internal threshold, so how much this composite compresses is set by the
+       * FILE's level exactly as OptoSmooth's is — and Scheps is worse off,
+       * because `squash` is a calibrated default nobody is expected to touch, so
+       * there is no knob the user would think to move. Passed straight through:
+       * it is a side-chain drive offset, so it changes what the cell hears and
+       * nothing about the wet path's level, which matters more here than in
+       * OptoSmooth — the ceiling and the dry sum both sit downstream of it.
+       */
+      inputAlignDb: finite(p.inputAlignDb, 0, -60, 60),
+      /**
        * ⚠ LAST, SO THE BENCH WINS — and only over the keys it actually carries.
        * `la2aTuningOverrides` emits nothing while the tuning panel is untouched,
        * so this spread is empty on every normal render and the allowlist above
