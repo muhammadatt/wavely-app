@@ -7,6 +7,8 @@ import {
   VocalSatKernel,
   VOCAL_SAT_KERNEL_DEFAULTS,
   VOCAL_SAT_LATENCY_SAMPLES,
+  HARDNESS_MIN,
+  HARDNESS_MAX,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -33,7 +35,7 @@ test('is transparent at zero drive and zero bias', () => {
   const n = 8192
   const sig = tone(n, 220)
   const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
-    drive: 0, bias: 0, wetDry: 0.5,
+    drive: 0, asymmetry: 0, wetDry: 0.5,
   })
   assert.equal(latencySamples, VOCAL_SAT_LATENCY_SAMPLES)
   let maxErr = 0
@@ -112,16 +114,17 @@ test('actually adds harmonics', () => {
   assert.ok(third / fundamental > 1e-3, `no 3rd harmonic (${third / fundamental})`)
 })
 
-test('bias asymmetry produces even harmonics', () => {
-  // A symmetric transfer generates odd harmonics only; the bias term is what
-  // gives the "tube" second harmonic.
+test('asymmetry produces even harmonics', () => {
+  // A symmetric transfer generates odd harmonics only; running the curve off
+  // centre is the ONLY source of even ones. Was `bias`, and the number is the
+  // same offset scaled by 100 — see ASYM_REFERENCE.
   const n = 32768
   const f0 = 220
   const sig = tone(n, f0, 0.4)
 
-  const measureSecond = biasValue => {
+  const measureSecond = asymmetry => {
     const { channelData } = processVocalSatBuffer([sig], SR, {
-      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 3, wetDry: 0.8, bias: biasValue,
+      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 3, wetDry: 0.8, asymmetry,
     })
     const fft = getFFT(n)
     const bins = rfftBinCount(n)
@@ -136,9 +139,120 @@ test('bias asymmetry produces even harmonics', () => {
   }
 
   assert.ok(
-    measureSecond(0.5) > measureSecond(0) * 5,
-    'bias should raise the second harmonic substantially',
+    measureSecond(50) > measureSecond(0) * 5,
+    'asymmetry should raise the second harmonic substantially',
   )
+  // Additive, not a rebalancing — tapeCharacter's claim, re-pinned here because
+  // it is what makes this a character control rather than a second drive knob.
+  assert.ok(measureSecond(100) > measureSecond(50), 'more asymmetry, more H2')
+})
+
+test('asymmetry at 0 is absent, not merely a zero offset', () => {
+  // The DC blocker must not run for a user who never touches the control, and
+  // `asymActive` is what buys that. Bit-identical, not close.
+  const n = 16384
+  const sig = tone(n, 220)
+  const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { asymmetry: 0 }).channelData[0]
+  const c = processVocalSatBuffer([sig], SR, { asymmetry: 0.001 }).channelData[0]
+  let differs = false
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) differs = true
+  assert.ok(differs, 'the default is not asymmetry 0, so these should differ')
+  // Below ASYM_EPSILON the offset is exactly 0 and the branch is not taken.
+  for (let i = 0; i < n; i++) {
+    assert.equal(b[i], c[i], `asymmetry below the epsilon should be absent (i=${i})`)
+  }
+})
+
+test('the asymmetry offset opposes the material lean', () => {
+  // tapeCharacter measured up to 7.9 dB of OTHER distortion riding on this
+  // choice. The sign is the whole reason the skew tracker is wired in: a fixed
+  // positive offset is right on two of three real narrators and costs the third
+  // 4.9 dB for nothing. Probed with a deliberately skewed wave, gated as voice.
+  const n = SR * 6 // past SKEW_EVIDENCE_S, which is 3 s
+  const skewed = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const t = (2 * Math.PI * 220 * i) / SR
+    // Asymmetric by construction: tall narrow positive lobe, long shallow
+    // negative one. Third moment is strongly positive.
+    skewed[i] = 0.4 * (Math.sin(t) + 0.5 * Math.sin(2 * t))
+  }
+  const flipped = Float32Array.from(skewed, v => -v)
+
+  const distortion = sig => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 3, wetDry: 1, asymmetry: 60,
+    })
+    let s = 0
+    const tail = channelData[0].subarray(n - SR)
+    for (let i = 0; i < tail.length; i++) s += tail[i] * tail[i]
+    return Math.sqrt(s / tail.length)
+  }
+
+  // A polarity flip flips the measured skew and therefore the chosen offset, so
+  // the two must come out at the same level. That symmetry is the property the
+  // tracker exists to give, and it fails outright for a fixed-sign offset.
+  const a = distortion(skewed)
+  const b = distortion(flipped)
+  const diffDb = Math.abs(20 * Math.log10(a / b))
+  assert.ok(diffDb < 0.5, `polarity flip changed the result by ${diffDb.toFixed(2)} dB`)
+})
+
+test('hardness tilts the harmonic series, and only below saturation', () => {
+  // THE CLAIM THAT MAKES THIS A CHARACTER CONTROL, and the limit on it.
+  //
+  // Measured as TILT — the top of the series against the bottom — because an
+  // absolute harmonic level moves with the AMOUNT of distortion as well as its
+  // kind, and hardness changes both (THD 20.0% at n=2 to 23.1% at n=8 at a
+  // fixed drive). A ratio between two harmonics cancels the amount and leaves
+  // the decay rate, which is the thing the knob is actually for.
+  //
+  // ⚠ IT ONLY WORKS BELOW SATURATION, AND THE SHIPPED PATCH IS ABOVE IT. Every
+  // member of this family tends to sign(x) for large |x|, so once the drive has
+  // squared the wave off there is no knee left to shape and the knob converges
+  // to inert. Measured tilt swing from n=2 to n=8:
+  //
+  //   drive 1 (effective 5)    12.8 dB    <- the knob works
+  //   drive 3 (effective 15)    1.4 dB    <- near-inert
+  //
+  // The `softness` control this replaced was inert for the SAME reason, at
+  // every setting, which is the likely explanation for why nobody ever reported
+  // that it did nothing. Lowering the default drive would put the knob inside
+  // its own window; that is a change to the shipped sound and has not been made
+  // here.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const tilt = hardness => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 1, wetDry: 1, asymmetry: 0, hardness,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => {
+      const k = Math.round((f * n) / SR)
+      return Math.hypot(re[k], im[k])
+    }
+    return 20 * Math.log10(at(f0 * 11) / at(f0 * 5))
+  }
+  const swing = tilt(HARDNESS_MAX) - tilt(HARDNESS_MIN)
+  assert.ok(
+    swing > 8,
+    `hardness should tilt the series; swung ${swing.toFixed(1)} dB (expected ~12.8)`,
+  )
+})
+
+test('hardness is clamped to the measured range', () => {
+  // HARDNESS_MIN is an aliasing measurement, not a preference. A param message
+  // from a stale panel must not reach the curve with n below it.
+  const k = new VocalSatKernel(SR)
+  k.setParams({ hardness: 0.5 })
+  assert.equal(k.hardness, HARDNESS_MIN)
+  k.setParams({ hardness: 99 })
+  assert.equal(k.hardness, HARDNESS_MAX)
 })
 
 /** FFT length used by the aliasing measurements. */
@@ -251,11 +365,38 @@ test('the worst folded product on a high tone stays far down', () => {
 
 test('a near-linear band produces essentially no aliasing', () => {
   // Sanity check on the measurement itself: drop the low band's drive below
-  // the point where the transfer curves and the number should fall away.
+  // the point where the transfer curves bite and the number should fall away.
+  //
+  // ⚠ ASYMMETRY MUST BE 0 FOR THIS PROBE TO MEAN WHAT IT SAYS, and that is a
+  // statement about the effect rather than about the test. An odd curve has no
+  // second-order term AT THE ORIGIN, so a small signal centred there is very
+  // nearly linear however curved the transfer is further out. Run the same
+  // curve OFF CENTRE and that cancellation is gone: the small signal now rides
+  // on a part of the curve that bends, and "drop the drive and the
+  // nonlinearity falls away" stops being true at any drive. The offset is not
+  // a bias on the measurement — it is a second nonlinearity the drive knob
+  // does not reach. See the companion test below for what it costs.
   const db = aliasToSignalDb(
-    { ...VOCAL_SAT_KERNEL_DEFAULTS, lowDriveMult: 0.1 }, 235, 0.4,
+    { ...VOCAL_SAT_KERNEL_DEFAULTS, lowDriveMult: 0.1, asymmetry: 0 }, 235, 0.4,
   )
   assert.ok(db < -120, `expected near-nothing, measured ${db.toFixed(1)} dB`)
+})
+
+test('running the curve off centre costs alias margin, and this is how much', () => {
+  // THE PRICE OF THE CURVE CHANGE, pinned rather than described. Same probe as
+  // above with the offset engaged. The tanh build this replaced measured
+  // -139.4 dB here; this curve measures about -109, because a slower-decaying
+  // harmonic series is exactly what folds. That is the trade the curve was
+  // changed to make, and 109 dB down is 39 dB below this file's own -70 dB
+  // audibility bar — but it is a real 30 dB and it should go red if it moves.
+  const off = { ...VOCAL_SAT_KERNEL_DEFAULTS, lowDriveMult: 0.1, asymmetry: 50 }
+  const db = aliasToSignalDb(off, 235, 0.4)
+  assert.ok(db < -100, `off-centre aliasing regressed: ${db.toFixed(1)} dB`)
+  assert.ok(
+    db > -130,
+    `off-centre aliasing improved to ${db.toFixed(1)} dB — if this is real, the `
+    + 'comment above and HARDNESS_MIN both need re-measuring',
+  )
 })
 
 test('block size does not change the result', () => {

@@ -12,8 +12,8 @@ export const VOCAL_SAT_WINDOW_ID = 'vocal-saturation'
 // Singleton reactive state shared between the sidebar trigger and the modal.
 const vsDrive = ref(VOCAL_SAT_DEFAULTS.drive)
 const vsWetDry = ref(VOCAL_SAT_DEFAULTS.wetDry)
-const vsBias = ref(VOCAL_SAT_DEFAULTS.bias)
-const vsSoftness = ref(VOCAL_SAT_DEFAULTS.softness)
+const vsAsymmetry = ref(VOCAL_SAT_DEFAULTS.asymmetry)
+const vsHardness = ref(VOCAL_SAT_DEFAULTS.hardness)
 const vsLowCrossover = ref(VOCAL_SAT_DEFAULTS.lowCrossover)
 const vsMidCrossover = ref(VOCAL_SAT_DEFAULTS.midCrossover)
 const vsLowDriveMult = ref(VOCAL_SAT_DEFAULTS.lowDriveMult)
@@ -30,8 +30,8 @@ function currentParams() {
   return {
     drive: vsDrive.value,
     wetDry: vsWetDry.value,
-    bias: vsBias.value,
-    softness: vsSoftness.value,
+    asymmetry: vsAsymmetry.value,
+    hardness: vsHardness.value,
     lowCrossover: vsLowCrossover.value,
     midCrossover: vsMidCrossover.value,
     lowDriveMult: vsLowDriveMult.value,
@@ -114,8 +114,8 @@ export function useVocalSaturation() {
 
   const syncDrive = v => syncParam('drive', vsDrive, v)
   const syncWetDry = v => syncParam('wetDry', vsWetDry, v)
-  const syncBias = v => syncParam('bias', vsBias, v)
-  const syncSoftness = v => syncParam('softness', vsSoftness, v)
+  const syncAsymmetry = v => syncParam('asymmetry', vsAsymmetry, v)
+  const syncHardness = v => syncParam('hardness', vsHardness, v)
   const syncLowCrossover = v => syncParam('lowCrossover', vsLowCrossover, v)
   const syncMidCrossover = v => syncParam('midCrossover', vsMidCrossover, v)
   const syncLowDriveMult = v => syncParam('lowDriveMult', vsLowDriveMult, v)
@@ -169,8 +169,8 @@ export function useVocalSaturation() {
   return {
     vsDrive,
     vsWetDry,
-    vsBias,
-    vsSoftness,
+    vsAsymmetry,
+    vsHardness,
     vsLowCrossover,
     vsMidCrossover,
     vsLowDriveMult,
@@ -184,8 +184,8 @@ export function useVocalSaturation() {
     togglePreview,
     syncDrive,
     syncWetDry,
-    syncBias,
-    syncSoftness,
+    syncAsymmetry,
+    syncHardness,
     syncLowCrossover,
     syncMidCrossover,
     syncLowDriveMult,

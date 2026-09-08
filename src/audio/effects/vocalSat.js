@@ -2,8 +2,8 @@
  * Vocal Saturation — real-time effect chain wrapper.
  *
  * The DSP lives in ../vocalSatProcessor.js (complementary three-band split,
- * blended tanh/arctan transfer with per-band drive, gain-neutral parallel
- * blend) and runs in an AudioWorklet. The offline apply path renders through
+ * knee-order transfer curve with per-band drive, measured-sign asymmetry, and a
+ * gain-neutral parallel blend) and runs in an AudioWorklet. The offline apply path renders through
  * the same worklet in an OfflineAudioContext, so the preview is
  * sample-identical to what gets written to the timeline.
  *
@@ -24,8 +24,11 @@ export { VOCAL_SAT_LATENCY_SAMPLES }
 export const VOCAL_SAT_DEFAULTS = {
   drive: 2.0,
   wetDry: 1,
-  bias: 1,
-  softness: 0.5,
+  // Was `bias: 1`. Same offset — the reference is 1 and ASYM_MAX_FRACTION is 1,
+  // so 100 here is the 1.0 that shipped. Only the sign is now measured.
+  asymmetry: 100,
+  // Was `softness: 0.5`, a crossfade between two curves that measured the same.
+  hardness: 2.5,
   lowCrossover: 500,
   midCrossover: 3500,
   lowDriveMult: 8.0,
@@ -42,8 +45,8 @@ export function toKernelParams(params) {
   return {
     drive: params.drive,
     wetDry: params.wetDry,
-    bias: params.bias,
-    softness: params.softness,
+    asymmetry: params.asymmetry,
+    hardness: params.hardness,
     lowCrossover: params.lowCrossover,
     midCrossover: params.midCrossover,
     lowDriveMult: params.lowDriveMult,

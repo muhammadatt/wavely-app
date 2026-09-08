@@ -1,6 +1,10 @@
 <script setup>
 import { onMounted } from 'vue'
 import { useVocalSaturation } from '../../../composables/useVocalSaturation.js'
+// Bound rather than retyped: HARDNESS_MIN is an aliasing measurement, and a
+// panel that drifted from it would hand the curve an n the kernel then clamps,
+// leaving a knob whose last stretch of travel does nothing.
+import { HARDNESS_MIN, HARDNESS_MAX } from '../../../audio/vocalSatProcessor.js'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import Knob from '../../knobs/Knob.vue'
@@ -10,12 +14,12 @@ import LevelMeter from '../../meters/LevelMeter.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  vsDrive, vsWetDry, vsBias, vsSoftness,
+  vsDrive, vsWetDry, vsAsymmetry, vsHardness,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
   vsPreview, vsInputLevels, vsOutputLevels,
   togglePreview,
-  syncDrive, syncWetDry, syncBias, syncSoftness,
+  syncDrive, syncWetDry, syncAsymmetry, syncHardness,
   syncLowCrossover, syncMidCrossover,
   syncLowDriveMult, syncMidDriveMult, syncHighDriveMult, syncHfLoss,
   apply, teardown, closeModal,
@@ -31,6 +35,7 @@ onMounted(() => {
 const ACCENT = '#ff8a5b'
 
 const twoDp = v => v.toFixed(2)
+const oneDp = v => v.toFixed(1)
 const percent = v => `${Math.round(v * 100)}`
 const hertz = v => `${Math.round(v)} Hz`
 const multiplier = v => `${v.toFixed(2)}×`
@@ -82,17 +87,36 @@ async function applyAndClose() {
                   label="Drive" :accent="ACCENT" :format-value="twoDp"
                   :disabled="!vsPreview" />
           </div>
+          <!-- ASYMMETRY, not Bias. Same offset the Bias knob wrote — the
+               reference is 1, so this reads as the old number x 100 — but the
+               SIGN is now measured from the material rather than always
+               positive. Even-order content is identical either way; what the
+               sign buys is up to 7.9 dB LESS of everything else. -->
           <div class="w-[100px]">
-            <Knob :model-value="vsBias" @update:model-value="syncBias"
-                  :min="0" :max="1.5" :step="0.01"
-                  label="Bias" :accent="ACCENT" :format-value="twoDp"
+            <Knob :model-value="vsAsymmetry" @update:model-value="syncAsymmetry"
+                  :min="0" :max="100" :step="1"
+                  label="Asymmetry" :accent="ACCENT" :format-value="v => v.toFixed(0)"
                   :disabled="!vsPreview" />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ vsAsymmetry > 0 ? 'even harmonics' : 'off' }}
+            </p>
           </div>
+          <!-- HARDNESS replaces Softness, which crossfaded tanh against arctan
+               — two curves that measure the same once the amount of distortion
+               is matched. This is the knee ORDER: it tilts the harmonic
+               series rather than changing how much of it there is. Lower is
+               NOT cleaner — the range floor is set by aliasing, see
+               HARDNESS_MIN. ⚠ Its authority falls away once Drive has squared
+               the wave off, and the default patch sits past that point; see
+               the tilt table on `shape`. -->
           <div class="w-[100px]">
-            <Knob :model-value="vsSoftness" @update:model-value="syncSoftness"
-                  :min="0" :max="1" :step="0.01"
-                  label="Softness" :accent="ACCENT" :format-value="twoDp"
+            <Knob :model-value="vsHardness" @update:model-value="syncHardness"
+                  :min="HARDNESS_MIN" :max="HARDNESS_MAX" :step="0.1"
+                  label="Hardness" :accent="ACCENT" :format-value="oneDp"
                   :disabled="!vsPreview" />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ vsHardness > 5.5 ? 'spiky' : vsHardness >= 3 ? 'close-in' : 'dense' }}
+            </p>
           </div>
           <div class="w-[72px] pt-[8px]">
             <Knob :model-value="vsWetDry" @update:model-value="syncWetDry"
