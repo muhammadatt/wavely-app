@@ -740,6 +740,36 @@ export const MODE_PARALLEL = 'parallel'
  * SOFT (edges rounded, harshness gone), emphasis at 0 for SQUASHED (peaks
  * absorbed, sound harder). "Softer and mushier" is the first one.
  *
+ * ⚠ AT DEPTH IT READS AS CHORUSING, AND THAT IS THIS MECHANISM WORKING RATHER
+ * THAN A TIMING FAULT. Pre-emphasis boosts HF into the curve, the curve
+ * compresses HF harder when the signal is loud, and the de-emphasis restores
+ * the STATIC tilt but not the dynamic part — so the net shelf around
+ * EMPHASIS_CORNER_HZ has a depth that moves with level, syllable to syllable. A
+ * shelf whose depth breathes is what the ear reads as phasing.
+ *
+ * Coherence against the input (1.000 = linear and time-INVARIANT; any fixed EQ,
+ * however wild, still scores 1.000, so this measures only the moving part):
+ *
+ *   emphasis        0       25       50      100
+ *   mean       0.9997   0.9985   0.9902   0.9643
+ *   min        0.9979   0.9877   0.9218   0.5336
+ *
+ * ⚠ IT IS NOT A SERIES/PARALLEL PROPERTY, though it is heard in series first.
+ * Parallel scores 0.9949 and 0.9995 with emphasis at 50 and 0, so the artefact
+ * is present there too — series simply carries more of it, because parallel
+ * ADDS the wet under a unity dry (at wetDry 0.65 the dry is 60% of the sum)
+ * while series CROSSFADES (the wet is 65%). It tracks the wet share in both:
+ * parallel 0.9977 / 0.9949 / 0.9919 / 0.9861 at wetDry 0.35 / 0.65 / 1 / 2.
+ *
+ * ⚠ AND IT IS NOT A DELAY MISMATCH, which was checked before concluding any of
+ * the above. In a linearised patch the wet path and the dry path each peak-
+ * cross-correlate at lag 62, exactly the reported latency, in both modes; and
+ * the residual against a plain scaled copy is captured by a STATIC 65-tap
+ * filter (-21.6 dBc to -65.0), i.e. it is ordinary frequency response and not a
+ * moving comb. Back Emphasis off to trade the modulation for onset softening:
+ * 25 keeps most of the absorption (-3.29 dB against 50's -3.66) at a quarter of
+ * the coherence cost.
+ *
  * ⚠ AND IT IS WEAKER HERE THAN AROUND A BARE SINGLE CURVE, which is worth
  * knowing before anyone re-tunes EMPHASIS_MAX_DB chasing the difference. A
  * standalone curve with the same pair reaches -9.34 dB at the onset. In the
