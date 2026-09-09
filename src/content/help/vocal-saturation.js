@@ -16,7 +16,7 @@ export default {
     { label: 'Tame', text: 'Holds peaks back before they reach the curve, using a smooth gain rather than by distorting them. This is what keeps CUBIC in the range where it stays clean. Series only, and it costs no extra delay' },
     { label: 'Soften', text: 'Caps how fast the waveform is allowed to move before it reaches the curve, which rounds sharp edges off directly rather than by filtering. Available in SERIES only' },
     { label: 'Emphasis', text: 'Makes the curve act hardest on high frequencies, which takes the edge off attacks while leaving the body thick. This is the control that turns a crisp saturator into a soft one' },
-    { label: 'Asymmetry', text: 'Runs the curve off centre, which is the only thing here that makes even harmonics — the warm half of tube colour. Which way it leans is measured from your recording' },
+    { label: 'Asymmetry', text: 'Treats the two halves of the waveform differently, which is what makes even harmonics — the warm half of tube colour. How it does that is the Asymmetry mode setting; which way it leans is measured from your recording' },
     { label: 'Hardness', text: 'How abruptly the curve bends. Low is dense and buzzy, high is spiky and close to a clipper. It changes the kind of distortion, not the amount' },
     { label: 'Wet / Dry', text: 'How much of the saturated signal is blended against the original' },
     { label: 'HF Loss', text: 'Rolls the top end off the finished output, the way a tape machine does when pushed' },

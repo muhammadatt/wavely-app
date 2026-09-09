@@ -106,12 +106,29 @@ export const VOCAL_SAT_DEFAULTS = {
   // curve's two bounds matched, so it does not undo the onset softening the
   // rest of this patch is built around.
   asymMode: ASYM_MODE_SPLIT,
+  // ⚠ SERIES, WHICH IS A CHANGE OF WHAT THIS PLUGIN IS. It opened in the
+  // parallel-add topology for its whole life before this patch, and a
+  // parallel add cannot soften a transient at any Wet / Dry setting because
+  // the dry path passes at unity. Opening in SERIES is the point of the
+  // patch, not an oversight — see the audition note in the header. It also
+  // decides which controls are live: Soften and Tame are series-only.
   mode: MODE_SERIES,
   emphasis: 50,
   soften: 25,
+  // ⚠ THIS COMMENT DESCRIBES TAME, and it used to sit under the value rather
+  // than over it, where it read as autoDrive's. Just under 50, so the threshold
+  // sits a shade above the curve's edge — this trims peaks rather than strictly
+  // holding the signal in domain.
+  //
+  // At that setting it does almost nothing on speech, and the number is worth
+  // knowing before anyone reaches for it to explain the plugin's compression.
+  // Ablated on a syllabic probe at full wet, zeroing Tame moves crest factor by
+  // 0.00 dB: the waveshaper has already pulled the peaks below where this
+  // threshold sits, so there is nothing left for it to catch. What produces the
+  // patch's 1.9 dB of crest reduction is the curve itself (dropping Drive to
+  // 0.01 removes 1.8 of it), of which SPLIT asymmetry is about 0.8 dB. Lowering
+  // this value is the way to get peak control that does not cost distortion.
   tame: 49,
-  // Just under 50, where the threshold would sit exactly on the curve's edge —
-  // so this trims peaks rather than strictly holding the signal in domain.
   autoDrive: 100,
   hardness: 5,
   curve: CURVE_SHAPE,

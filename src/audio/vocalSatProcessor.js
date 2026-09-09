@@ -102,10 +102,16 @@ export const VOCAL_SAT_LATENCY_SAMPLES = VOCAL_SAT_OVERSAMPLE.latencySamples
  * Measured, preview settled against a cold apply, energy over the first 0.5 s:
  *
  *   patch                                  first 0.5 s
- *   shipped default (parallel, offset)       -0.363 dB
+ *   kernel default (parallel, offset)        -0.363 dB
  *   series + cubic + tame                    -1.275
  *     + autoDrive 100                        -1.678
  *     + asymmetry 100                        -2.055
+ *
+ * Read the BOTTOM of that table, not the top. The first row is
+ * VOCAL_SAT_KERNEL_DEFAULTS; the patch the panel now opens with is series,
+ * autoDrive 100 and asymmetry 100, so the figure that applies to what a user
+ * actually hears is the last one. It is also why VOCAL_SAT_PREROLL_S is 4 s
+ * rather than the 2 s that suffices for OptoSmooth and Scheps.
  *
  * That last figure is inside the range tapeCharacter records for the same
  * defect the last time it shipped. Most of it is NOT new: the three 300 ms RMS
@@ -693,10 +699,14 @@ function splitShape(x, nPos, nNeg) {
  * it is deliberately untouched: it is the Python's own level matching and the
  * plugin's level-neutrality guarantee rests on it.
  *
- * ⚠ THE DEFAULT DOES NOT MOVE. `parallel` with `emphasis: 0` is bit-identical
- * to the build before this existed, and a test pins that. Flipping the default
- * would change the sound every existing patch relies on; it is a one-word
- * change here for anyone who decides to make it deliberately.
+ * ⚠ THE KERNEL DEFAULT DOES NOT MOVE — AND THE PANEL DEFAULT SINCE HAS.
+ * `parallel` with `emphasis: 0` is bit-identical to the build before this
+ * existed, and a test pins that against VOCAL_SAT_KERNEL_DEFAULTS, which is
+ * what `processVocalSatBuffer` runs with no arguments. That is the guarantee,
+ * and it still holds. What it does NOT cover is the sound the plugin opens
+ * with: VOCAL_SAT_DEFAULTS in vocalSatParams.js ships MODE_SERIES, chosen by
+ * ear after this work, so a newly opened panel is not the parallel add it used
+ * to be. The two are separate on purpose; keep them that way.
  */
 export const MODE_SERIES = 'series'
 export const MODE_PARALLEL = 'parallel'

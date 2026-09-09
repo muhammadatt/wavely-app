@@ -487,10 +487,19 @@ async function applyWorkletRegion(
   // warmup exists to prevent. A region at t=0 therefore gets no pre-roll and
   // behaves exactly as it did before.
   //
-  // ⚠ OPT-IN. Every caller of this function has envelope state and the same
-  // bug; turning it on for all of them at once would change the output of five
-  // shipped plugins in one commit. Tube Saturation asks for it; the rest keep
-  // today's behaviour until each is measured on its own.
+  // ⚠ OPT-IN, ONE STAGE AT A TIME. Every caller of this function has envelope
+  // state and the same bug; turning it on for all of them at once would change
+  // the output of five shipped plugins in one commit. Three ask for it, each
+  // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s) and
+  // Scheps (2 s) — see the note beside each call site for what its number
+  // buys. The rest keep today's behaviour until each is measured on its own.
+  //
+  // Two of those measurements say pre-roll is not the answer, and they are the
+  // reason this is not a flag to switch on everywhere. FET Punch's makeup
+  // tracker is a running MAXIMUM, so no length of pre-roll converges it — only
+  // a bounded reference would. ResoTame's error is the STFT grid phase,
+  // (regionStart - preRoll) % hop, which the apply path cannot know; a pre-roll
+  // that happens to land hop-aligned looks exact and is not.
   const wantedPreRoll = Math.max(0, Math.round(preRollSamples))
   const preRoll = Math.min(wantedPreRoll, Math.max(0, Math.floor(start * sampleRate)))
   const renderSamples = preRoll + numSamples + latency
