@@ -15,12 +15,12 @@ import LevelMeter from '../../meters/LevelMeter.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsCurve, VOCAL_SAT_CURVES, vsMode, vsEmphasis, vsSoften, vsTame, vsAutoDrive, VOCAL_SAT_MODES,
+  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsCurve, VOCAL_SAT_CURVES, vsAsymMode, VOCAL_SAT_ASYM_MODES, vsMode, vsEmphasis, vsSoften, vsTame, vsAutoDrive, VOCAL_SAT_MODES,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
   vsPreview, vsInputLevels, vsOutputLevels,
   togglePreview,
-  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncCurve, syncMode, syncEmphasis, syncSoften, syncTame, syncAutoDrive,
+  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncCurve, syncAsymMode, syncMode, syncEmphasis, syncSoften, syncTame, syncAutoDrive,
   syncLowCrossover, syncMidCrossover,
   syncLowDriveMult, syncMidDriveMult, syncHighDriveMult, syncHfLoss,
   apply, teardown, closeModal,
@@ -40,6 +40,13 @@ const curveCaption = computed(() => (
     ? 'third harmonic only — needs low Drive to stay in range'
     : 'rational knee, Hardness sets its order'
 ))
+
+const asymCaption = computed(() => {
+  if (vsCurve.value === 'cubic') return 'offset only — a cubic has no knee to split'
+  return vsAsymMode.value === 'split'
+    ? 'subtle warmth, keeps the onset softening'
+    : 'louder warmth, pushes onsets forward'
+})
 
 const modeCaption = computed(() => (
   vsMode.value === 'series'
@@ -196,6 +203,25 @@ async function applyAndClose() {
               :caption="curveCaption"
               label="Curve"
               :disabled="!vsPreview"
+            />
+          </div>
+          <!-- ASYMMETRY MECHANISM. OFFSET runs the curve off centre, which
+               makes its two bounds unequal — 17.2 dB apart at Asymmetry 100 —
+               and that imbalance, not the even harmonics, is what pushes
+               onsets forward. SPLIT gives each polarity a different knee order
+               instead: both halves keep unity slope at the origin and the same
+               asymptote, so the bounds stay matched. Measured crest at
+               Asymmetry 100: +6.87 dB for offset, -5.06 for split, against
+               -5.01 symmetric. See ASYM_MODE_SPLIT. -->
+          <div>
+            <DeviceChoiceRocker
+              :model-value="vsAsymMode"
+              @update:model-value="syncAsymMode"
+              :options="VOCAL_SAT_ASYM_MODES.map(m => ({ value: m.id, label: m.label, title: m.title }))"
+              :accent="ACCENT"
+              :caption="asymCaption"
+              label="Asymmetry mode"
+              :disabled="!vsPreview || vsCurve === 'cubic'"
             />
           </div>
           <div>

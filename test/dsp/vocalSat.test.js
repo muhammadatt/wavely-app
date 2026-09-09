@@ -15,6 +15,8 @@ import {
   CURVE_SHAPE,
   CURVE_CUBIC,
   TAME_LOOKAHEAD_L,
+  ASYM_MODE_OFFSET,
+  ASYM_MODE_SPLIT,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -919,6 +921,128 @@ test('auto-drive is absent at 0 and works in BOTH topologies', () => {
     let differs = false
     for (let i = 0; i < a.length; i++) if (a[i] !== c[i]) differs = true
     assert.ok(differs, `auto-drive should do something in ${mode}`)
+  }
+})
+
+function evenOddAndCrest(params) {
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const { channelData } = processVocalSatBuffer([sig], SR, params)
+  const fft = getFFT(n)
+  const bins = rfftBinCount(n)
+  const re = new Float64Array(bins)
+  const im = new Float64Array(bins)
+  fft.rfft(channelData[0], re, im)
+  const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+  const fund = at(f0)
+  return { h2: 20 * Math.log10(at(f0 * 2) / fund) }
+}
+
+/** Crest change against the dry bursts, for a given patch. */
+function crestDelta(params) {
+  const sig = bursts()
+  const dry = crestDb(sig)
+  const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, params)
+  return crestDb(channelData[0], latencySamples) - dry
+}
+
+test('SPLIT gives warmth without the onset cost OFFSET charges for it', () => {
+  // THE MEASUREMENT THE MODE EXISTS FOR. An offset makes the curve's two bounds
+  // unequal — 17.2 dB apart at Asymmetry 100 on shape n=2.5 — and THAT, not the
+  // even harmonics, is what raises crest and pushes onsets forward. A split
+  // knee keeps both bounds at +-1 because every `shape` order asymptotes to 1.
+  //
+  // series, shape, hardness 4, drive 2:
+  //
+  //   asym  mode        H2     d crest
+  //     0   (either)  -52.4     -5.01
+  //    50   offset    -22.5     +1.10
+  //    50   split     -41.5     -5.06
+  //   100   offset    -16.5     +6.87
+  //   100   split     -34.3     -5.06
+  const base = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_SHAPE, hardness: 4, drive: 2,
+  }
+  const sym = crestDelta({ ...base, asymmetry: 0 })
+  const offset = crestDelta({ ...base, asymmetry: 100, asymMode: ASYM_MODE_OFFSET })
+  const split = crestDelta({ ...base, asymmetry: 100, asymMode: ASYM_MODE_SPLIT })
+  assert.ok(
+    offset > sym + 5,
+    `offset asymmetry should cost crest: ${sym.toFixed(2)} -> ${offset.toFixed(2)} dB`,
+  )
+  assert.ok(
+    Math.abs(split - sym) < 1,
+    `split should cost essentially nothing: ${sym.toFixed(2)} -> ${split.toFixed(2)} dB`,
+  )
+  // It must still actually produce even harmonics, or it is costing nothing by
+  // doing nothing.
+  const h2Sym = evenOddAndCrest({ ...base, asymmetry: 0 }).h2
+  const h2Split = evenOddAndCrest({ ...base, asymmetry: 100, asymMode: ASYM_MODE_SPLIT }).h2
+  assert.ok(h2Split > h2Sym + 10, `split should make H2: ${h2Sym.toFixed(1)} -> ${h2Split.toFixed(1)} dB`)
+  // ...and honestly less of it than offset does. This is the subtle option.
+  const h2Offset = evenOddAndCrest({ ...base, asymmetry: 100, asymMode: ASYM_MODE_OFFSET }).h2
+  assert.ok(h2Offset > h2Split, 'offset should still be the louder of the two')
+})
+
+test('the split knob is not inert over half its travel', () => {
+  // ⚠ THE THIRD CONTROL IN THIS FILE TO FAIL THIS WAY. A fixed ratio clamped to
+  // [HARDNESS_MIN, HARDNESS_MAX] reached 8/2 at Asymmetry 50 and could not move
+  // after: H2 -34.3 at BOTH 50 and 100, identical. Interpolating toward the
+  // bounds instead uses the whole travel. Soften's first reference and Tame's
+  // first threshold mapping had the same defect; a sweep is the only thing that
+  // catches it.
+  const base = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_SHAPE, hardness: 4, drive: 2,
+    asymMode: ASYM_MODE_SPLIT,
+  }
+  const h2 = a => evenOddAndCrest({ ...base, asymmetry: a }).h2
+  const sweep = [25, 50, 75, 100].map(h2)
+  for (let i = 1; i < sweep.length; i++) {
+    assert.ok(
+      sweep[i] > sweep[i - 1] + 0.5,
+      `split must keep deepening across the knob: ${sweep.map(v => v.toFixed(1)).join(' -> ')} dB`,
+    )
+  }
+})
+
+test('full split travel reaches the same pair at every hardness', () => {
+  // The endpoints ARE the bounds, so Hardness cannot run the knob out of room —
+  // which the clamped form could not promise. Measured H2 -34.3 dB at every
+  // Hardness from 2 to 8 at Asymmetry 100.
+  const base = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_SHAPE, drive: 2,
+    asymmetry: 100, asymMode: ASYM_MODE_SPLIT,
+  }
+  const values = [2, 4, 8].map(hardness => evenOddAndCrest({ ...base, hardness }).h2)
+  const spread = Math.max(...values) - Math.min(...values)
+  assert.ok(spread < 0.5, `should be hardness-independent at full travel; got ${values.map(v => v.toFixed(1)).join(' / ')}`)
+})
+
+test('split falls back to offset on the cubic, and is absent at asymmetry 0', () => {
+  // A cubic's normalisation determines it uniquely — unity slope, asymptote 1,
+  // C1 join — so there is no second cubic to put on the other polarity. The
+  // kernel resolves that rather than silently doing nothing.
+  const sig = bursts(2)
+  const cubicSplit = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, asymmetry: 100, asymMode: ASYM_MODE_SPLIT,
+  }).channelData[0]
+  const cubicOffset = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, asymmetry: 100, asymMode: ASYM_MODE_OFFSET,
+  }).channelData[0]
+  for (let i = 0; i < cubicSplit.length; i++) {
+    assert.equal(cubicSplit[i], cubicOffset[i], `cubic should ignore split mode (i=${i})`)
+  }
+  for (const curve of [CURVE_SHAPE, CURVE_CUBIC]) {
+    const a = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve, asymmetry: 0, asymMode: ASYM_MODE_SPLIT,
+    }).channelData[0]
+    const b = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve, asymmetry: 0, asymMode: ASYM_MODE_OFFSET,
+    }).channelData[0]
+    for (let i = 0; i < a.length; i++) {
+      assert.equal(a[i], b[i], `asymmetry 0 should be mode-independent on ${curve} (i=${i})`)
+    }
   }
 })
 

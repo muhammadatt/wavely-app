@@ -96,6 +96,9 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
   // shipped patch is unchanged by the rename; only the SIGN is now measured
   // from the material rather than always positive.
   asymmetry: 50,
+  // How the asymmetry is produced — see ASYM_MODE_SPLIT. 'offset' is what
+  // ships; 'split' is the variant that does not fight peak absorption.
+  asymMode: 'offset',
   // ── Topology ─────────────────────────────────────────────────────────────
   // 'parallel' (the shipped behaviour) or 'series'. See MODE_SERIES for what
   // the difference actually buys and why the default does not move.
@@ -467,6 +470,130 @@ export const HARDNESS_MAX = 8
  * `asymmetry: 50` to the last bit.
  */
 const ASYM_REFERENCE = 1
+
+/**
+ * THE TWO WAYS TO BE ASYMMETRIC, and why the shipped one fights the rest of
+ * this plugin.
+ *
+ * ⚠ AN OFFSET MAKES THE CURVE'S TWO BOUNDS UNEQUAL, and that — not the even
+ * harmonics — is what pushes onsets forward. `curve(x + off) - curve(off)`
+ * still asymptotes to +-1 BEFORE the subtraction, so afterwards the bounds are
+ * `1 - f(off)` and `-1 - f(off)`: different by `2*f(off)`. Measured on
+ * shape n=2.5:
+ *
+ *   offset 0.25    bounds  +0.753 / -1.247    4.38 dB apart
+ *   offset 0.5     bounds  +0.532 / -1.469    8.83 dB
+ *   offset 1.0     bounds  +0.242 / -1.758   17.22 dB
+ *
+ * At the panel's shipped Asymmetry of 100 the negative bound sits SEVENTEEN dB
+ * above the positive one. The output is grossly lopsided, so the peak is set by
+ * whichever polarity clips late while the RMS falls with the one that clips
+ * early — crest rises and the onset protrudes. That is a property of offsetting
+ * a BOUNDED curve, and has nothing to do with even harmonics as such.
+ *
+ * ── THE SPLIT KNEE ─────────────────────────────────────────────────────────
+ *
+ * Give each polarity a different knee ORDER instead of shifting the operating
+ * point. `shape` has f'(0) = 1 and an asymptote of 1 for EVERY n, so the two
+ * halves meet at the origin with the same slope (no corner at a zero crossing)
+ * and bound to the same +-1. Asymmetric in the middle, symmetric at the
+ * extremes. Measured bound imbalance: -0.01 dB at the mild end, -1.04 dB at the
+ * widest usable spread, against 17.22 dB for the offset.
+ *
+ * Warmth against the onset cost, bare curve at drive 8:
+ *
+ *   mechanism      H2      d crest
+ *   symmetric       -       -8.63
+ *   offset 0.5    -14.2     -4.90     3.7 dB of softening given up
+ *   split k=4     -14.3     -7.38     1.25 dB given up, for the same H2
+ *   offset 1.0     -9.3     -1.10     7.5 dB given up
+ *   split k=8     -10.2     -6.89     1.7 dB, for the same H2
+ *
+ * So warmth and onset prominence are SEPARABLE. They are welded together only
+ * by the offset mechanism.
+ *
+ * ⚠ IT IS NOT A FREE LUNCH — IT MOVES THE COST, IT DOES NOT REMOVE IT. The
+ * k=8 row above needs knee orders of 20 and 0.31, far outside the range
+ * HARDNESS_MIN measured as safe, and aliases at -43.8 dBc accordingly. Held
+ * inside [HARDNESS_MIN, HARDNESS_MAX], which is what this implementation does:
+ *
+ *   curve            H2      d crest    alias
+ *   symmetric n=2.5   -       -8.63    -62.3 dBc
+ *   symmetric n=4     -       -9.12    -47.0 dBc
+ *   split 8 / 2     -24.6     -8.85    -43.1 dBc
+ *   offset 0.5      -14.2     -4.90    -67.1 dBc
+ *
+ * Essentially ZERO crest penalty (-8.85 against -8.63 symmetric), but only
+ * -24.6 dB of H2 — about 10 dB less warmth than the offset reaches — and about
+ * 4 dB worse aliasing than a symmetric curve at the same THD. THIS IS THE
+ * SUBTLE OPTION THAT COSTS NO ONSETS; offset is still the one that gets loud.
+ *
+ * ⚠ SPLIT REQUIRES CURVE = SHAPE. The mechanism needs a family with a shape
+ * parameter that leaves the asymptote alone, and the cubic has none: its
+ * normalisation (unity slope, asymptote 1, C1 join) determines it uniquely, so
+ * there is no second cubic to put on the other polarity. A quintic with one
+ * free parameter would give one; that is a new curve family, not a mode. The
+ * kernel falls back to offset for the cubic rather than silently doing nothing.
+ *
+ * ⚠ AND ON THIS CURVE ASYMMETRY IS PARTLY A REBALANCING, not the pure addition
+ * tapeCharacter records for the curve IT measured ("H3 moves by at most 1 dB
+ * across the entire sweep"). Here H3 goes -20.2 -> -25.1 -> -28.8 as the offset
+ * goes 0 -> 0.5 -> 1.0: odd content is traded for even, which is a larger
+ * character change than that note implies. Measured on shape n=2.5, not on the
+ * soft clipper's knee, so it contradicts nothing — but do not carry the claim
+ * across.
+ */
+export const ASYM_MODE_OFFSET = 'offset'
+export const ASYM_MODE_SPLIT = 'split'
+
+/**
+ * The knee pair, interpolated geometrically from Hardness TOWARD the bounds.
+ *
+ * ⚠ THE OBVIOUS FORM — a fixed ratio, `h * k^d`, CLAMPED to the range — WAS
+ * INERT OVER HALF THE KNOB, and this is the THIRD control in this file to fail
+ * that way (Soften's first reference, Tame's first threshold mapping, this).
+ * With ratio 4 at Hardness 4 the pair hits 8/2 at Asymmetry 50 and then cannot
+ * move: measured H2 -34.3 and crest -5.06 at BOTH 50 and 100, identical.
+ *
+ * Interpolating toward the bounds instead uses the whole travel at every
+ * Hardness and needs no clamp, because the endpoints ARE the bounds:
+ *
+ *   u = |asymmetry/100 * direction|
+ *   nPos = hardness * (target /hardness)^u      target  = MAX (or MIN if leaning)
+ *   nNeg = hardness * (other  /hardness)^u      other   = the opposite bound
+ *
+ * At u = 0 both are Hardness — exactly symmetric, so the mode is absent at 0 by
+ * construction rather than by a branch. At u = 1 the pair is 8/2, the widest
+ * spread the measured-safe range allows.
+ *
+ * ⚠ FULL TRAVEL REACHES 8/2 AT EVERY HARDNESS, which the clamped form could not
+ * promise — the endpoints ARE the bounds, so Hardness cannot run the knob out
+ * of room. Measured H2 at Asymmetry 100: -34.3 dB at every Hardness from 2 to 8.
+ *
+ * What Hardness changes is the PATH, and there it matters: at Asymmetry 50 the
+ * pair runs from 4.0/2.0 at Hardness 2 to 8.0/4.0 at Hardness 8, giving H2 of
+ * -37.1 and -47.4 respectively. Same spread RATIO, 10 dB apart — so it is the
+ * absolute knee orders, not the ratio between them, that set the even content,
+ * and a softer Hardness gives more warmth at the same knob position.
+ */
+function splitKnees(hardness, u, leanPositive) {
+  const hi = leanPositive ? HARDNESS_MAX : HARDNESS_MIN
+  const lo = leanPositive ? HARDNESS_MIN : HARDNESS_MAX
+  const lh = Math.log(hardness)
+  return {
+    nPos: Math.exp(lh + u * (Math.log(hi) - lh)),
+    nNeg: Math.exp(lh + u * (Math.log(lo) - lh)),
+  }
+}
+
+/**
+ * The split curve. Both halves are `shape`, so both have unity slope at the
+ * origin and an asymptote of 1 — see the note above for why that is the whole
+ * point rather than an implementation detail.
+ */
+function splitShape(x, nPos, nNeg) {
+  return x >= 0 ? shape(x, nPos) : shape(x, nNeg)
+}
 
 // ── Topology and the emphasis pair ─────────────────────────────────────────
 
@@ -1007,6 +1134,13 @@ export class VocalSatKernel {
     // this. `asymmetryOffset` applies the same epsilon to the offset itself.
     this.asymmetry = clamp(p.asymmetry, 0, 100)
     this.asymActive = this.asymmetry / 100 > ASYM_EPSILON
+    // ⚠ SPLIT FALLS BACK TO OFFSET ON THE CUBIC, which has no knee order to
+    // split — see ASYM_MODE_SPLIT. Resolved here rather than in the loop so the
+    // panel and the kernel cannot disagree about what is running.
+    this.splitActive = this.asymActive
+      && p.asymMode === ASYM_MODE_SPLIT
+      && this.curveFn !== cubicShape
+    this.splitAmount = this.asymmetry / 100
     this.series = p.mode === MODE_SERIES
     // Read as 0-100 and ABSENT below the epsilon — the same rule HF Loss and
     // asymmetry follow, and what keeps the shipped patch bit-identical.
@@ -1083,6 +1217,7 @@ export class VocalSatKernel {
     const {
       hardness, asymActive, wetDry, lowDrive, midDrive, highDrive,
       series, emphasisActive, softenActive, tameActive, autoActive, curveFn,
+      splitActive,
     } = this
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
@@ -1136,11 +1271,29 @@ export class VocalSatKernel {
           if (st.gate.update(wetIn[i])) st.skew.update(wetIn[i])
         }
       }
-      const offset = asymActive
+      // ⚠ THE TWO MECHANISMS ARE EXCLUSIVE. Split produces its asymmetry in the
+      // curve's shape, so it takes NO offset — running both would put the
+      // offset's bound imbalance straight back, which is the thing split exists
+      // to avoid.
+      const offset = asymActive && !splitActive
         ? asymmetryOffset(this.asymmetry, st.skew.direction, ASYM_REFERENCE)
         : 0
       // Constant for the block — see applyTransfer on why this is hoisted.
       const shapedOffset = curveFn(offset, hardness)
+
+      // WHICH POLARITY GETS THE HARDER KNEE is the same question the offset's
+      // sign answers, so it comes from the same tracker. The direction is
+      // already smoothed over 200 ms and passes through 0, where the exponent
+      // is 0 and the pair collapses to symmetric — so a sign change is a glide
+      // through "no asymmetry" rather than a swap, and cannot click.
+      let nPos = hardness
+      let nNeg = hardness
+      if (splitActive) {
+        const t = this.splitAmount * st.skew.direction
+        const knees = splitKnees(hardness, Math.abs(t), t >= 0)
+        nPos = knees.nPos
+        nNeg = knees.nNeg
+      }
 
       // ── AUTO-DRIVE ───────────────────────────────────────────────────────
       // Fed the RAW input, NOT `wetIn`. Emphasis is a shelf and would change
@@ -1221,15 +1374,20 @@ export class VocalSatKernel {
           // the residual stair is far below the envelope's own movement.
           if (tameActive) pre *= st.tameGain[(base + (j / L | 0) - TAME_UP_DELAY) & TAME_MASK]
           if (softenActive) pre = st.soften.process(pre, softenScaleValue, softenReference)
-          sum[j] = applyTransfer(curveFn, pre, hardness, offset, shapedOffset)
+          sum[j] = splitActive
+            ? splitShape(pre, nPos, nNeg)
+            : applyTransfer(curveFn, pre, hardness, offset, shapedOffset)
         }
         st.tameBase += n
       } else {
         for (let j = 0; j < n * L; j++) {
-          sum[j] =
-            applyTransfer(curveFn, lowUp[j] * lowD, hardness, offset, shapedOffset) +
-            applyTransfer(curveFn, midUp[j] * midD, hardness, offset, shapedOffset) +
-            applyTransfer(curveFn, highUp[j] * highD, hardness, offset, shapedOffset)
+          sum[j] = splitActive
+            ? splitShape(lowUp[j] * lowD, nPos, nNeg)
+              + splitShape(midUp[j] * midD, nPos, nNeg)
+              + splitShape(highUp[j] * highD, nPos, nNeg)
+            : applyTransfer(curveFn, lowUp[j] * lowD, hardness, offset, shapedOffset)
+              + applyTransfer(curveFn, midUp[j] * midD, hardness, offset, shapedOffset)
+              + applyTransfer(curveFn, highUp[j] * highD, hardness, offset, shapedOffset)
         }
       }
 

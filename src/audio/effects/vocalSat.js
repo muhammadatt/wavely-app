@@ -17,11 +17,25 @@
 import { ensureVocalSatWorklet } from '../vocalSatWorkletLoader.js'
 import {
   VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL,
-  CURVE_SHAPE, CURVE_CUBIC,
+  CURVE_SHAPE, CURVE_CUBIC, ASYM_MODE_OFFSET, ASYM_MODE_SPLIT,
 } from '../vocalSatProcessor.js'
 import { createLevelTap } from './levelTap.js'
 
-export { VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL, CURVE_SHAPE, CURVE_CUBIC }
+export {
+  VOCAL_SAT_LATENCY_SAMPLES, MODE_SERIES, MODE_PARALLEL,
+  CURVE_SHAPE, CURVE_CUBIC, ASYM_MODE_OFFSET, ASYM_MODE_SPLIT,
+}
+
+/**
+ * How the asymmetry is produced. Peers: two mechanisms for the same colour,
+ * with different costs, not more and less of one thing.
+ */
+export const VOCAL_SAT_ASYM_MODES = [
+  { id: ASYM_MODE_OFFSET, label: 'OFFSET',
+    title: 'Runs the curve off centre. Louder warmth, but it makes the two peak bounds unequal and pushes onsets forward' },
+  { id: ASYM_MODE_SPLIT, label: 'SPLIT',
+    title: 'Different knee order per polarity. Subtler warmth at no cost in onset softening. Needs the SHAPE curve' },
+]
 
 /**
  * The two curve families, for the panel's second rocker. Peers, like the
@@ -68,6 +82,7 @@ export const VOCAL_SAT_DEFAULTS = {
   // Was `bias: 1`. Same offset — the reference is 1 and ASYM_MAX_FRACTION is 1,
   // so 100 here is the 1.0 that shipped. Only the sign is now measured.
   asymmetry: 100,
+  asymMode: ASYM_MODE_OFFSET,
   // ⚠ THE DEFAULT STAYS PARALLEL WITH NO EMPHASIS, which is bit-identical to
   // the build before the switch existed. Series is a different-sounding stage,
   // not a better-sounding one, and every saved patch assumes the old wiring.
@@ -102,6 +117,7 @@ export function toKernelParams(params) {
     drive: params.drive,
     wetDry: params.wetDry,
     asymmetry: params.asymmetry,
+    asymMode: params.asymMode,
     mode: params.mode,
     emphasis: params.emphasis,
     soften: params.soften,

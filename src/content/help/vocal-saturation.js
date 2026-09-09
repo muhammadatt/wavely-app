@@ -10,6 +10,7 @@ export default {
   controls: [
     { label: 'Drive', text: 'How hard the signal is pushed into the curve' },
     { label: 'Curve', text: 'SHAPE is the standard curve. CUBIC is a polynomial that can only make the third harmonic, so its distortion is thick rather than gritty — but only while Drive is low enough to keep it in range' },
+    { label: 'Asymmetry mode', text: 'OFFSET runs the curve off centre — more warmth, but it makes peaks stand out. SPLIT bends each half of the waveform differently instead, which gives less warmth but leaves the onset softening intact. SPLIT needs the SHAPE curve' },
     { label: 'Topology', text: 'PARA adds a saturated copy underneath the original, which keeps every transient intact and thickens what is around it. SERIES puts a single broadband curve in the path, so it can absorb and round transients instead' },
     { label: 'Auto Drive', text: 'Evens out how hard different recordings hit the curve, so Drive sounds the same on a quiet file as on a loud one. It listens only while there is voice, so pauses are left alone' },
     { label: 'Tame', text: 'Holds peaks back before they reach the curve, using a smooth gain rather than by distorting them. This is what keeps CUBIC in the range where it stays clean. Series only, and it costs no extra delay' },
@@ -46,7 +47,9 @@ export default {
     'In PARA the dry signal always passes at full level, so no setting of Wet / Dry will soften a transient. Use SERIES for that',
     'The Low / Mid / High Drive knobs still work in SERIES, but as a tilt into one shared curve rather than three separate ones. At equal settings the crossovers make no difference there',
     'Emphasis and peak control pull against each other: saturation flattens the tops of the waveform, and Emphasis rounds them back off. Raise it for a softer sound, leave it at 0 for a harder, more squashed one',
-    'Asymmetry and transient softening pull against each other: an off-centre curve clips one half of the waveform before the other, which makes peaks stand out more. Keep Asymmetry low if you are after the soft, absorbing sound',
+    'If you want warmth without losing the onset softening, switch the asymmetry mode to SPLIT. It is quieter than OFFSET but costs nothing in peak control',
+    'SPLIT is unavailable on CUBIC and falls back to OFFSET there: a cubic has only one possible knee shape, so there is no second one to put on the other half',
+    'In OFFSET mode, asymmetry and transient softening pull against each other: an off-centre curve clips one half of the waveform before the other, which makes peaks stand out more. Keep Asymmetry low if you are after the soft, absorbing sound',
     'Soften is greyed out in PARA on purpose. Ahead of three separate band curves it stops softening and starts adding harmonics instead, which is the opposite of what it is for',
     'Soften gets stronger as you raise Drive, because harder driving means faster edges for it to catch',
     'Hardness has most to say at lower Drive settings. Once Drive is high enough to square the waveform off there is no knee left for it to shape, and it stops making much difference',

@@ -4,7 +4,7 @@ import { useWindows } from './useWindows.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import {
-  vocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES,
+  vocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES, VOCAL_SAT_ASYM_MODES,
 } from '../audio/effects/vocalSat.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -15,6 +15,7 @@ export const VOCAL_SAT_WINDOW_ID = 'vocal-saturation'
 const vsDrive = ref(VOCAL_SAT_DEFAULTS.drive)
 const vsWetDry = ref(VOCAL_SAT_DEFAULTS.wetDry)
 const vsAsymmetry = ref(VOCAL_SAT_DEFAULTS.asymmetry)
+const vsAsymMode = ref(VOCAL_SAT_DEFAULTS.asymMode)
 const vsMode = ref(VOCAL_SAT_DEFAULTS.mode)
 const vsEmphasis = ref(VOCAL_SAT_DEFAULTS.emphasis)
 const vsSoften = ref(VOCAL_SAT_DEFAULTS.soften)
@@ -39,6 +40,7 @@ function currentParams() {
     drive: vsDrive.value,
     wetDry: vsWetDry.value,
     asymmetry: vsAsymmetry.value,
+    asymMode: vsAsymMode.value,
     mode: vsMode.value,
     emphasis: vsEmphasis.value,
     soften: vsSoften.value,
@@ -129,6 +131,7 @@ export function useVocalSaturation() {
   const syncDrive = v => syncParam('drive', vsDrive, v)
   const syncWetDry = v => syncParam('wetDry', vsWetDry, v)
   const syncAsymmetry = v => syncParam('asymmetry', vsAsymmetry, v)
+  const syncAsymMode = v => syncParam('asymMode', vsAsymMode, v)
   const syncMode = v => syncParam('mode', vsMode, v)
   const syncEmphasis = v => syncParam('emphasis', vsEmphasis, v)
   const syncSoften = v => syncParam('soften', vsSoften, v)
@@ -190,6 +193,8 @@ export function useVocalSaturation() {
     vsDrive,
     vsWetDry,
     vsAsymmetry,
+    vsAsymMode,
+    VOCAL_SAT_ASYM_MODES,
     vsHardness,
     vsCurve,
     VOCAL_SAT_CURVES,
@@ -213,6 +218,7 @@ export function useVocalSaturation() {
     syncDrive,
     syncWetDry,
     syncAsymmetry,
+    syncAsymMode,
     syncHardness,
     syncCurve,
     syncMode,
