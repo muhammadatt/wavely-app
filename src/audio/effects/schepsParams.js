@@ -74,6 +74,18 @@ export const SCHEPS_DEFAULTS = {
    * values above here for the reason this needs to be here too.
    */
   ceilingDb: null,
+  /**
+   * Side-chain drive offset for the embedded compressor, dB — the file's own
+   * level relative to nominal. Measured from the whole file, like the ceiling
+   * above and for the same reason it is held here rather than derived at apply
+   * time: the applied render must use the number the preview was heard with.
+   *
+   * ⚠ SCHEPS NEEDS THIS MORE THAN OPTOSMOOTH DOES. `squash` is a calibrated
+   * default the user is not expected to touch, so when a quiet file makes the
+   * embedded cell do nothing there is no knob they would think to reach for —
+   * the plugin just sounds like it has stopped working. See dsp/inputAlign.js.
+   */
+  inputAlignDb: null,
 }
 
 /** Map UI param names to kernel param names. */
@@ -90,6 +102,7 @@ export function toKernelParams(params) {
     // everywhere the ceiling is not in play — same reason as `toKernelParams`
     // in la2aParams.js.
     ...(Number.isFinite(params.ceilingDb) ? { ceilingDb: params.ceilingDb } : {}),
+    ...(Number.isFinite(params.inputAlignDb) ? { inputAlignDb: params.inputAlignDb } : {}),
     ...la2aTuningFor(),
   }
 }

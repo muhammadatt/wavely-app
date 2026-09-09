@@ -2,6 +2,7 @@
 import { computed, onMounted, watch } from 'vue'
 import { useLA2A } from '../../composables/useLA2A.js'
 import { LOOKAHEAD_MAX_MS } from '../../audio/effects/la2aCompressor.js'
+import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { OPTO_SMOOTH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import PresetMenu from './PresetMenu.vue'
@@ -23,6 +24,7 @@ const {
   togglePreview, syncMode, syncPeakReduction, syncGain,
   syncR37, syncLookahead, toggleAutoMakeup, refreshAutoMakeup,
   refreshKernelTuning,
+  la2aInputAuto, la2aInputDb, syncInput, resetInputAuto,
   apply, teardown, closeModal,
 } = useLA2A()
 
@@ -49,6 +51,10 @@ const autoMakeupLabel = computed(() =>
   la2aAutoMakeup.value && la2aAutoMakeupBusy.value ? 'AUTO' : 'AUTO'
 )
 
+
+
+
+const formatInput = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
 
 const ACCENT = '#f5a623'
 
@@ -235,6 +241,53 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, {
         />
 
         <div class="flex gap-[26px]">
+          <!-- INPUT trims the SIDE-CHAIN DRIVE, not the audio: it changes what
+               the cell hears and nothing about the output level, so there is
+               nothing to undo downstream and the output valves are untouched.
+               It exists because neither this plugin nor the hardware has a
+               threshold control — Peak Reduction is side-chain gain into a
+               fixed internal threshold — so without it the file's own level
+               decides what the knob does: 4.6 dB of reduction at PR 50 on a
+               file peaking at -1 dBFS, 0.0 dB on one at -18.
+
+               ⚠ IT IS NOT A SECOND PEAK REDUCTION KNOB, THOUGH IT RENDERS LIKE
+               ONE. An offset and the matching PR move are bit-identical as DSP,
+               and a first pass shipped without this control on exactly that
+               reasoning. The difference is what the numbers MEAN: Peak
+               Reduction is a patch value that presets save, and this is a
+               property of the FILE. Absorbing a bad measurement by moving PR
+               gets the right sound with the wrong number — the panel then reads
+               PR 26 for a PR 50 patch, and the compensation has been baked into
+               the preset. See useLA2A.js.
+
+               AUTO measures the whole file's gated RMS and drives this knob;
+               touching it takes over, exactly as the Gain knob behaves. -->
+          <div class="w-[78px] flex flex-col items-center">
+            <div class="relative w-full" :style="{ opacity: la2aInputAuto ? 0.78 : 1 }">
+              <Knob
+                :model-value="la2aInputDb"
+                @update:model-value="syncInput"
+                :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
+                :value-font-px="13"
+                label="Input" :accent="ACCENT" :format-value="formatInput"
+                :disabled="!la2aPreview"
+              />
+              <span
+                v-if="la2aInputAuto"
+                class="absolute top-[2px] right-[2px] px-1 py-[1px] rounded-full pointer-events-none"
+                style="background:rgba(245,166,35,.2);border:1px solid rgba(245,166,35,.4);font:700 6px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#f7c877"
+              >AUTO</span>
+            </div>
+            <button
+              v-if="!la2aInputAuto"
+              class="mt-[5px] px-2 py-[2px] rounded-full cursor-pointer transition-all"
+              style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.4);font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em"
+              :disabled="!la2aPreview"
+              title="Hand the Input trim back to the automatic measurement."
+              @click="resetInputAuto"
+            >AUTO</button>
+          </div>
+
           <!-- LOOKAHEAD is OFF by default and that is not timidity: an LA-2A
                has none, the transient pass-through IS the T4, and every preset
                and rendered file that predates this knob was made without it.
