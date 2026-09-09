@@ -336,6 +336,44 @@ const SPEECH_INIT_WINDOW_MS = 500
  * the safe direction (too high merely does less), and the 3 s tracker then
  * settles down onto the typical peak from above rather than climbing to it
  * from below.
+ *
+ * ⚠ IT IS ALSO THE LARGEST PREVIEW/APPLY DISAGREEMENT IN THE APP, and the two
+ * facts are the same fact. Preview runs the kernel over the whole session; an
+ * offline apply starts here, at 0 dBFS, and has to travel down at 3 s per
+ * e-fold. Where the preview entered a region with a LOW tracker — because the
+ * passage before it was quiet — it clips hard while the cold render, threshold
+ * still up near 0 dBFS, barely clips at all. Measured on a region 18 dB louder
+ * than what preceded it, energy over the region, preview against apply:
+ *
+ *   pre-roll    0 s      2 s      4 s      8 s     12 s     16 s
+ *   stock    -11.44   -2.813   -1.603   -0.400   -0.108    0.000
+ *   lim 0     -4.000   -1.172   -0.632   -0.150   -0.040    0.000
+ *
+ * ⚠ THE DIRECTION IS ASYMMETRIC AND ONLY ONE HALF IS BROKEN. Loud-to-loud and
+ * loud-to-quieter regions are EXACTLY identical at any pre-roll including
+ * none, because there the cold tracker and the settled one land in the same
+ * place. It is quiet-to-loud that fails, which is precisely the case this
+ * constant's "safe direction" reasoning creates.
+ *
+ * ⚠ AND IT IS THE ADAPTIVE TRACKER ALONE. In `fixed` threshold mode the same
+ * probe is exactly identical at every pre-roll — there is no tracker to be cold.
+ *
+ * Nothing here LATCHES, so unlike FET Punch this is fixable: at a pre-roll
+ * equal to all the preceding audio the difference is 0.000 dB. But it converges
+ * far more slowly than any other stage (OptoSmooth and Scheps are bit-exact at
+ * 2 s), because the tracker must traverse ~20 dB at a 3 s time constant.
+ *
+ * NO PRE-ROLL IS WIRED YET. Twelve seconds would be needed for parity with the
+ * others, and seeding the tracker from a fast measurement of the render's
+ * opening — rather than from this constant — would converge immediately and
+ * cost nothing, at the price of changing a deliberate cold-start behaviour.
+ * That is a design decision rather than a plumbing one.
+ *
+ * ⚠ A MEASUREMENT TRAP THAT NEARLY HID ALL OF THIS: a probe quieter than the
+ * threshold shows PERFECT agreement, because a threshold stage below its
+ * threshold is transparent and both runs pass the audio through untouched. The
+ * first sweep run against this stage used a -20 dBFS region and reported 0.0e+0
+ * everywhere. Check the stage is doing something before believing it agrees.
  */
 const SPEECH_INIT_HOLD_DB = 0
 
