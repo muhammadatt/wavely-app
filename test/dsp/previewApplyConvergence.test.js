@@ -35,6 +35,8 @@ import { processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
 import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.js'
 import { LA2A_PREROLL_S } from '../../src/audio/la2aProcessor.js'
 import { SCHEPS_PREROLL_S } from '../../src/audio/schepsProcessor.js'
+import { computeAutoMakeupPlan } from '../../src/audio/la2aProcessor.js'
+import { MAKEUP_PERCENTILE } from '../../src/audio/dsp/makeupReference.js'
 
 const SR = 44100
 const SETTLE = SR * 10
@@ -243,3 +245,119 @@ test('⚠ FET Punch CANNOT be made exact, and this records why', () => {
     + 'stopped latching, wire preRollSamples for it and delete this test',
   )
 })
+
+/**
+ * ── AFTER THE MERGE WITH #150 (input alignment + start-anchored measurement) ──
+ *
+ * That branch touched both stages this file pins, so both of its interactions
+ * with the pre-roll are asserted here rather than reasoned about.
+ */
+
+test('the input-alignment offset introduces no state, so the pre-roll still converges', () => {
+  // `inputAlignDb` is a side-chain DRIVE offset: it lands in `scDriveDb` at
+  // setParams and is read as `over = levelDb + this.scDriveDb`. A scalar added
+  // to a level cannot latch, so the convergence argument is unchanged — but the
+  // whole point of this file is that the argument is checked, not asserted.
+  for (const inputAlignDb of [-12, -6, 6]) {
+    const diff = worstDiff(
+      processLA2ABuffer, { peakReduction: 60, inputAlignDb }, Math.round(LA2A_PREROLL_S * SR),
+    )
+    assert.equal(diff, 0, `OptoSmooth align ${inputAlignDb} dB not exact: ${diff.toExponential(2)}`)
+  }
+  const scheps = worstDiff(processSchepsBuffer, { inputAlignDb: -6 }, Math.round(SCHEPS_PREROLL_S * SR))
+  assert.ok(scheps < 1e-7, `Scheps with alignment not exact: ${scheps.toExponential(2)}`)
+})
+
+test('the pre-roll moves the measured makeup only at a hard level step', () => {
+  /**
+   * ⚠ A CROSS-BRANCH INVARIANT THAT NEITHER SIDE STATES ALONE.
+   *
+   * analysisWindow anchors the measurement at the region start, on the premise
+   * that the apply path starts cold there. Since the pre-roll it does not, for
+   * these two stages: the solver sees a cold kernel and the applied audio
+   * arrives warm. What decides the size of the gap is the LEVEL STEP across the
+   * region boundary, not the compression depth — see the table in
+   * analysisWindow.js.
+   *
+   * Two bounds, because one number would hide the shape. Ordinary material has
+   * to stay tight; the pathological edge is allowed to be looser but not free.
+   */
+  const step = (before, inside) => {
+    const settle = SR * 10
+    const total = settle + SR * 4
+    const full = new Float32Array(total)
+    for (let i = 0; i < total; i++) {
+      const t = i / SR
+      const syllable = Math.max(0, Math.sin(2 * Math.PI * 2.6 * t)) ** 2
+      const amp = i < settle ? before : inside
+      full[i] = amp * syllable * (
+        Math.sin(2 * Math.PI * 160 * t)
+        + 0.5 * Math.sin(2 * Math.PI * 320 * t + 0.9)
+        + 0.25 * Math.sin(2 * Math.PI * 640 * t + 1.7)
+      )
+    }
+    const region = full.slice(settle)
+    const pre = full.slice(settle - Math.round(LA2A_PREROLL_S * SR), settle)
+    let worst = 0
+    for (const peakReduction of [40, 60, 75, 90]) {
+      const params = { peakReduction }
+      const cold = computeAutoMakeupPlan([region], SR, params, { reference: 'percentile' }).makeupDb
+      worst = Math.max(worst, Math.abs(warmSolvedMakeupDb(region, pre, params) - cold))
+    }
+    return worst
+  }
+
+  // Flat, and a 6 dB drop: what ordinary speech does at a selection edge.
+  assert.ok(step(0.35, 0.35) < 0.05, `flat material drifted ${step(0.35, 0.35).toFixed(3)} dB`)
+  assert.ok(step(0.80, 0.40) < 0.05, `a 6 dB step drifted ${step(0.80, 0.40).toFixed(3)} dB`)
+  // A quieter lead-in barely produces it — the warm detector arrives open. Not
+  // exactly zero (4.6e-4 dB): a lead-in 13 dB DOWN still leaves the envelope
+  // marginally off where a cold start puts it.
+  assert.ok(step(0.08, 0.35) < 0.005, `a quiet lead-in drifted ${step(0.08, 0.35).toFixed(4)} dB`)
+
+  // ⚠ THE PATHOLOGICAL EDGE IS PINNED, NOT ASSERTED AWAY. A 25 dB drop right at
+  // the boundary reaches 0.584 dB, and that is recorded as the known ceiling.
+  // If it grows, the measurement window has to learn about preRollSamples.
+  const harsh = step(0.90, 0.05)
+  assert.ok(
+    harsh > 0.1,
+    `a 25 dB step should still show the effect; got ${harsh.toFixed(3)} dB — if it `
+    + 'vanished, something changed and analysisWindow.js needs re-measuring',
+  )
+  assert.ok(
+    harsh < 0.7,
+    `a 25 dB step drifted ${harsh.toFixed(3)} dB, past the 0.584 dB recorded in `
+    + 'analysisWindow.js — teach the measurement window about preRollSamples',
+  )
+})
+
+/**
+ * The makeup that restores the REGION's percentile reference when the kernel
+ * reaches that region warm — i.e. what apply actually needs, post-pre-roll.
+ * Mirrors computeAutoMakeupPlan's iteration; it has no option for a lead-in.
+ */
+function warmSolvedMakeupDb(region, pre, params) {
+  const measureParams = { ...params, oversample: false, ceilingDb: null }
+  const inputRef = percentile(region, MAKEUP_PERCENTILE)
+  let makeupDb = 0
+  for (let i = 0; i < 4; i++) {
+    const fed = new Float32Array(pre.length + region.length)
+    fed.set(pre, 0)
+    fed.set(region, pre.length)
+    const { channelData } = processLA2ABuffer([fed], SR, { ...measureParams, gainDb: makeupDb })
+    const out = channelData[0].subarray(pre.length, pre.length + region.length)
+    const outRef = percentile(out, MAKEUP_PERCENTILE)
+    if (!(outRef > 0)) break
+    const correctionDb = 20 * Math.log10(inputRef / outRef)
+    makeupDb = Math.max(-24, Math.min(24, makeupDb + correctionDb))
+    if (Math.abs(correctionDb) < 0.05) break
+  }
+  return makeupDb
+}
+
+/** |x| at the given top quantile, matching percentileOfChannels' convention. */
+function percentile(ch, q) {
+  const mags = Float64Array.from(ch, Math.abs).sort()
+  const idx = Math.min(mags.length - 1, Math.max(0, Math.floor((1 - q) * mags.length)))
+  return mags[idx]
+}
