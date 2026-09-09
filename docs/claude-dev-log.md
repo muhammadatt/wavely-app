@@ -1044,6 +1044,240 @@ These apply only to the `acx_audiobook` preset:
 - **Persistent job storage** — Jobs are in-memory; server restart loses them
 - **`docs/acx_production_workflow.md`** and **`docs/instant_polish_gtm.md`** — Referenced but not created
 
+### Input Alignment — a knob position that means the same thing on every file
+
+**The question that started it.** "The OptoComp appears sensitive to the input
+level. What I'm not sure about is if raising the PR to accommodate a lower input
+level is bit-identical to raising the file level and applying a lower PR."
+
+**It is, and the proof turned out to be the design.** `scDriveDb` has exactly one
+consumer — `over = levelDb + this.scDriveDb` — so level and drive add in dB.
+Benched: with the tube and cell modulation off, `inputAlignDb = +6.0206` and a
+×2 input gain render **bit-identical output, 100 % of samples**; at 12 and 20 dB
+likewise. The compression is exactly scale-equivalent. Three properties make it
+so, and each was a deliberate earlier decision:
+
+- the gain computer's only input is `over`;
+- the compress ratio is **fixed at 3**, not drive-dependent (the old
+  drift-with-drive ratio would have broken this);
+- `SC_TAPER` is exactly 1.0, so the knob is linear in dB of drive at 0.4989
+  dB/unit.
+
+The cell modulation is `rectLp / env - 1`, a ratio, so it is scale-free too.
+**The output tube is the sole exception** — driven by level alone, so an input
+gain shifts it (rms deviation −56.1 dBr at 6 dB, growing to −50.9 at 20 dB).
+That is correct behaviour, not an error: a hotter signal into the same reduction
+saturates the output stage harder on the hardware too.
+
+**Then the follow-up question, which was the real one.** If reduction depends on
+file level, the same knob position means different things on different files.
+Measured, average GR while active at PR 50 on speech:
+
+```
+peak dBFS |    PR30    PR40    PR50    PR60    PR75    PR90   PR100
+       -1 |    0.58    2.18    4.62    7.30   11.36   15.43   18.15
+       -6 |    0.00    0.57    2.17    4.62    8.65   12.71   15.42
+      -12 |    0.00    0.00    0.36    1.77    5.40    9.45   12.16
+      -18 |    0.00    0.00    0.00    0.20    2.37    6.20    8.90
+      -24 |    0.00    0.00    0.00    0.00    0.45    3.06    5.66
+      -30 |    0.00    0.00    0.00    0.00    0.00    0.82    2.59
+```
+
+**At −18 dBFS peak the default patch does literally nothing** — and −18 to −24
+is a narrator who gain-staged with the headroom ACX guidance asks for, i.e. the
+beachhead user. At −30 the knob runs out of travel. It also means a saved plugin
+preset is only valid at the level it was saved at, so the preset feature was
+quietly broken rather than degraded.
+
+**The statistic, and a correction.** The first recommendation was to reuse
+`MAKEUP_PERCENTILE`, on the reasoning that one shared reference beats two. The
+bench refuted it. Each candidate was calibrated so the reference capture lands at
+exactly 4.00 dB of GR at PR 50, then every case aligned to that same target;
+spread across 36 cases is the score:
+
+```
+gated RMS (30 dB)   1.26     <- shipped
+gated RMS (25 dB)   1.28
+gated RMS (20 dB)   1.36
+plain RMS           1.89
+gated RMS (35 dB)   2.15
+99.9th percentile   4.99     <- the "obvious" standardisation
+true peak           8.22
+---
+peak-normalise      7.26     <- the workflow it replaces
+as captured         3.50     <- at 2.15 dB mean GR, so worse than it looks
+```
+
+Reduction is an integral over the envelope distribution, so an **energy**
+statistic summarises it and a near-peak one does not. `MAKEUP_PERCENTILE` is
+right where the question is "how loud is the loudest thing" and wrong where it
+is "how much energy drives the detector". Reasoning by analogy from the makeup
+side would have shipped the wrong one.
+
+**The gate is load-bearing.** Plain RMS is strong until handed a narrator's file
+with 30 s of head/tail room tone — the case `roomTonePad` exists for — where it
+errs +1.44 dB. The first gate was floor-relative (P10-based) and traded that for
+a worse error on noisy material (−1.31 dB at a −18 dBFS noise floor, against
+−0.20 for plain RMS). Gating relative to **speech level** (blocks within 30 dB
+of the file's own P95 block RMS) fixes both. 20 dB reads noisy files hot; 40 dB
+lets a −40 dBFS tone back in.
+
+**Implemented as a side-chain drive offset, not an input gain, and that is the
+whole safety argument.** An input-gain implementation has to cancel itself
+downstream and still leaves the tube shifted. A drive offset cannot: the audio
+path, tube, cell modulation, ceiling and makeup never see it, so there is
+nothing to undo and preview and apply cannot drift apart on it. `test/dsp/
+inputAlign.test.js` asserts the equivalence directly against the kernel rather
+than arguing it in a comment, because if it ever stops holding, the feature's
+justification is gone and every other test still passes.
+
+⚠ **The exactness test needs an exactly-representable gain.** At 12 dB the two
+paths differ by ~1e-9 in average GR — float32 storage of the scaled input, not
+divergence. At ×2 the rendered gain curve is bit-identical, but `avgGr` still
+differs by 3e-17, because `log10(2·env)` and `log10(env) + 20·log10(2)` differ
+by one ULP. The output is exact; the float64 statistic cannot be, and the test
+says so rather than leaving a tolerance for someone to widen later.
+
+⚠ **A tighter clamp re-created the bug it guarded.** `ALIGN_MAX_DB` started at
+24, on a misplaced worry about extrapolating the taper — `scDriveDbFor` is
+untouched and `over` is unbounded, so a large offset extrapolates nothing. What
+24 actually did was leave a −30 dBFS file 3.2 dB short, delivering 0.98 dB where
+every other level delivered 1.80: the "quiet file runs out of travel" failure,
+moved rather than removed. 36 covers to about −39 dBFS peak.
+
+**Anchored to the reference capture's own level** (−17.35 dBFS gated RMS), so
+`hardware.unknown.dry.wav` trims to +0.00 dB. Every ballistic, taper, tube and
+cell constant was fitted and auditioned against that capture at its native
+level; anchoring anywhere else would silently re-voice all of them. ⚠ It is
+**not** `NOMINAL_DBFS` — that is the detector's reference, reached through the
+rectifier and R37 emphasis, and the two numbers are not interchangeable.
+
+**Not a no-op on hot material either**, which is the cost of pinning it on: a
+file peak-normalised to −1 dBFS trims −1.8 dB and its PR 50 reduction moves
+2.44 → 1.80 dB. Existing patches compress slightly less on hot files and
+enormously more on quiet ones.
+
+**The control went through three designs, and the two dead ends are the useful
+part of this entry.**
+
+*First: an ALIGN on/off switch.* It looked like the right hedge — an automatic
+correction the user can decline. But it could only turn the correction OFF; it
+could not set an offset by hand, so it gave up the measurement without offering
+a replacement. A mode switch dressed as an escape hatch, and it was removed.
+
+*Second: no control at all.* The reasoning was that **Peak Reduction is already
+the manual control** — the knob is 0.4989 dB of side-chain drive per unit and an
+offset is bit-identical to moving it, benched at +12 dB against PR 50 → 74.1 with
+the two renders differing by −Infinity dBr. Every misread is absorbable: ±20 dB
+of error all land inside the knob's travel. So a trim looked like a duplicate.
+
+⚠ **THAT WAS WRONG, AND IT WAS WRONG BY COMPARING RENDERS WHEN THE DIFFERENCE IS
+IN WHAT THE NUMBERS MEAN.** Peak Reduction is a PATCH value — presets save it,
+and a preset is only portable because every file it meets has been brought to a
+common level first. An input offset is a FILE property, like `ceilingDb` and
+kept out of presets for the same reason. A user absorbing a bad measurement
+through Peak Reduction reaches the right sound with the wrong number: the panel
+then reads PR 26 for what is meant to be a PR 50 patch, and the compensation has
+been written into the preset. That is precisely the portability failure
+alignment exists to remove, reintroduced one level up, and no amount of Peak
+Reduction range makes it not a category error. The bench could not see this
+because it only ever compared audio.
+
+*Third, and shipped: an INPUT knob that AUTO owns until you touch it*, the same
+contract the Gain knob has under auto makeup. The knob always shows the offset
+actually in force; the rejected alternative — a knob starting at 0 that ADDS to
+a hidden measured value — splits the truth across two places, and the total is
+the one number anybody wants when a file sounds wrong.
+
+⚠ **THE MANUAL RANGE IS DELIBERATELY WIDER THAN THE AUTOMATIC CLAMP** (
+`INPUT_TRIM_MAX_DB` 48 against `ALIGN_MAX_DB` 36), and that asymmetry closes the
+one case where "PR runs out of travel" survives alignment. Measured with the
+automatic clamp in force, a file at −45 dBFS peak gets 0.44 dB at PR 50 and
+10.47 at PR 100; wound to 48 by hand it gets 4.02 and 17.28. The automatic path
+should not chase that — a file that quiet is more often broken than quiet — but
+a person who has listened to it should not be held to the guess's caution.
+
+For completeness on the third option considered: a TRUE input gain (FET Punch's
+`inputLin`, which hits both the side-chain tap and the output) would be a
+different feature again — it drives the output valves, worth −52.6 dBr at
+matched compression — and this panel has no tube control by deliberate decision
+(see TUBE_DRIVE_LIN, and the Tube Drive knob removed for being an input level in
+disguise). The shipped knob is a drive offset, so the audio path is untouched.
+
+⚠ **The measurement is still load-bearing**, the knob notwithstanding: it is
+what every file gets by default and what the makeup is solved against. The
+guards on it are `ALIGN_MAX_DB` and the bench, not the knob — a class of
+material that fools the gate is a bug to fix in `inputAlign.js`, which is the
+argument against the simpler statistics below.
+
+**Why not just use peak, which needs no gate and no tuning constant?** Asked
+directly, and the answer is two failures rather than the expected one. The
+anticipated caveat — a hot-peak file arrives quieter and wants a bit more Peak
+Reduction — would be fine if the error were a constant bias. It is not.
+
+*One click.* A 2 ms tick at −1 dBFS added to the reference capture moves a peak
+measurement 1.79 dB and its delivered reduction 1.80 → 1.33 dB; gated RMS moves
+0.01 dB and delivers 1.80 either way. This is the SAME defect this branch
+already root-caused on the makeup side, relocated to the input: peak-referenced
+makeup let one uncompressed onset pin a whole file and made the knob run
+backwards.
+
+*Crest factor, and it is inverted.* Same speech at the same gated level:
+
+```
+                  peak    gated   crest    GR peak-aligned   gated-aligned
+as captured       -2.8    -17.4    15.9         1.80             1.80
+lightly clipped   -9.1    -17.5     9.8         4.19             1.81
+hard clipped     -18.4    -21.8     4.7         7.12             1.85
+```
+
+Peak alignment converts crest-factor variation directly into compression
+variation — a 4x swing — and backwards: the already-limited file, which needs
+the least, gets the most. A narrator who ran their file through a limiter before
+uploading would get 7.12 dB where a raw one gets 1.80.
+
+**The real simplification, if the gate ever has to go, is PLAIN RMS (1.89 dB of
+spread) and not peak (8.22).** An energy statistic sees crest correctly by
+construction and is equally immune to both failures above. The gate buys exactly
+one thing over it: files with long head/tail room tone, where plain RMS errs
++0.57 dB at 10 s and +1.44 dB at 30 s — the ACX narrator case `roomTonePad`
+exists for, i.e. the beachhead specifically. `gatedRmsOfChannels` already falls
+back to plain RMS when everything gates out, so demoting it is a one-line change
+if new material shows the gate is fragile.
+
+**Scheps conforms, and now so does OptoSmooth — neither has a switch.** It embeds the same kernel driven by
+`squash` into the same fixed threshold, so it had the identical bug — and it is
+worse off, because `squash` is a calibrated default nobody is expected to touch,
+so a quiet file makes it sound like the plugin has stopped working with no knob
+a user would reach for. Off would only ever mean "does less than it was voiced
+to do", so there is nothing to switch.
+
+⚠ **Both solve paths had to learn about it**, and this is the fifth instance of
+the measurement-path/render-path split on this branch. On a file 15 dB below
+nominal, OptoSmooth's makeup solve returns 0.003 dB without the offset and 5.32
+with it; Scheps' trim goes −0.45 → 2.24 dB and its density 0.56 → 1.67. A solve
+that does not know the offset levels a compressor nobody is listening to.
+
+⚠ **Alignment is measured over the WHOLE FILE, never the selection.** A
+per-selection offset would make the plugin a different compressor on every
+selection: compress a phrase, then the paragraph containing it, and the phrase
+would come out differently the second time. `regionAlignDb` walks the timeline
+in output time so blocks stay aligned across cuts, and counts samples covered by
+no segment as silence rather than skipping them.
+
+⚠ **`totalDuration` was used in `useScheps` before being destructured** — caught
+by `npm run smoke`, not by the 1062-test suite, which is exactly the blind spot
+already documented. That is the fourth time this class has been caught by the
+smoke run.
+
+**Still open:** the gate width is fitted on one recording. `data/corpus/` holds
+one dry source (the two dry files are byte-identical, correlation 1.0000) and
+two wet captures of that same programme, so the 36 cases vary crest factor,
+noise, tilt, room and density but not voice, room or microphone. Same exposure
+SC_DRIVE_MAX_DB carried, where the single reference turned out to be the wrong
+unit entirely. `npm run la2a:align -- --dir <path>` re-scores it. **FET Punch
+has the same fixed-threshold topology and is not yet aligned.**
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

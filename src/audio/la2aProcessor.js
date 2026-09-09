@@ -1205,6 +1205,15 @@ export const LA2A_KERNEL_DEFAULTS = {
    * See LOOKAHEAD_MAX_MS for what it is for and what it costs.
    */
   lookaheadMs: 0,
+  /**
+   * Side-chain drive offset in dB, bringing off-nominal material to the level
+   * the knob was calibrated at. 0 is the raw hardware behaviour, where the
+   * file's own level decides what a knob position does.
+   *
+   * A DRIVE OFFSET, NOT AN INPUT GAIN — it changes what the detector hears and
+   * nothing else. `dsp/inputAlign.js` computes it and documents why.
+   */
+  inputAlignDb: 0,
 }
 
 /**
@@ -1488,7 +1497,19 @@ export class LA2AKernel {
     // internal threshold referenced to nominal level. Endpoints are -2 dB at
     // knob 0 and +38 dB at knob 100.
     const knob = clamp(p.peakReduction, 0, 100) / 100
-    this.scDriveDb = scDriveDbFor(p.peakReduction)
+    /**
+     * ⚠ THE ALIGNMENT OFFSET IS ADDED HERE AND NOWHERE ELSE, and `scDriveDb`
+     * having exactly one consumer (`over = levelDb + this.scDriveDb`) is what
+     * makes that sufficient. Level and drive add in dB inside the gain
+     * computer, so this IS an input gain as far as the detector is concerned
+     * and is not one anywhere else: the audio path, the tube, the cell
+     * modulation, the ceiling and the makeup never see it, so there is nothing
+     * to cancel downstream and preview and apply cannot drift apart on it.
+     * See `dsp/inputAlign.js` for why a file's own level otherwise decides what
+     * the knob does, and for the statistic behind the offset.
+     */
+    const alignDb = Number.isFinite(p.inputAlignDb) ? p.inputAlignDb : 0
+    this.scDriveDb = scDriveDbFor(p.peakReduction) + alignDb
     // Gain applied to the side-chain's content above SC_EMPH_HZ: 1 at r37 100
     // (fully clockwise, flat, factory), rising to +17.7 dB at r37 0 (fully
     // counter-clockwise, realising ~17 dB at 15 kHz). Below the corner the

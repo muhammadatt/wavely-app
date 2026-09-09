@@ -80,6 +80,16 @@ export function toKernelParams(params) {
      * caught this.
      */
     ...(Number.isFinite(params.ceilingDb) ? { ceilingDb: params.ceilingDb } : {}),
+    /**
+     * ⚠ MEASURED FROM THE WHOLE FILE, NOT DIALLED, AND NOT A PRESET KEY — same
+     * reasoning as `ceilingDb` above. It is the file's own level relative to
+     * nominal, so it belongs to the audio; a preset carrying one would apply
+     * another recording's gain staging to this one, which is precisely the
+     * portability problem alignment exists to fix, inverted.
+     *
+     * Spread in only when real, for the same key-shape reason as the ceiling.
+     */
+    ...(Number.isFinite(params.inputAlignDb) ? { inputAlignDb: params.inputAlignDb } : {}),
   }
 }
 

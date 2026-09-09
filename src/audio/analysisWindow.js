@@ -1,4 +1,7 @@
 import { getSegmentDuration } from './operations.js'
+import {
+  ALIGN_BLOCK_MS, alignDbForRms, gatedRmsFromBlocks,
+} from './dsp/inputAlign.js'
 
 /**
  * How much of a region the measured-parameter paths analyse, and from where.
@@ -134,4 +137,97 @@ export function regionPeakDb(segments, start, end, sampleRate, channels) {
     }
   }
   return peak > 0 ? 20 * Math.log10(peak) : -Infinity
+}
+
+/**
+ * The side-chain drive offset that brings a region to nominal, dB.
+ *
+ * ⚠ IT MUST SEE THE WHOLE FILE, AND FOR A DIFFERENT REASON THAN `regionPeakDb`.
+ * The ceiling needs the whole region because the loudest moment can be
+ * anywhere; alignment needs it because a per-selection offset would make the
+ * plugin a different compressor on every selection. Compress a phrase, then
+ * compress the paragraph containing it, and the phrase would come out
+ * differently the second time — the same edit applied twice, disagreeing with
+ * itself. Callers pass 0..totalDuration REGARDLESS of the selection, and that
+ * is the one thing about this function a caller can get wrong.
+ *
+ * Mirrors `regionPeakDb`'s segment walk, with two differences that matter:
+ * blocks are indexed in OUTPUT time so they stay aligned across segment
+ * boundaries, and samples covered by no segment (silence segments, gaps)
+ * contribute zero energy rather than being skipped — a block half silence and
+ * half programme has to read as half as loud, or the gate sees the wrong level
+ * exactly where an edit put a cut.
+ *
+ * Returns 0 for an empty or silent region, which is "no offset", not "unknown".
+ */
+export function regionAlignDb(segments, start, end, sampleRate, channels) {
+  const full = Math.max(1, Math.round(sampleRate * ALIGN_BLOCK_MS / 1000))
+  const total = Math.floor((end - start) * sampleRate)
+  if (total < 1) return 0
+  // ⚠ THE SHORT-REGION FALLBACK MUST MATCH `gatedRmsOfChannels`, and it did not.
+  // This returned 0 — "no offset" — for anything under one block while the
+  // materialised path fell back to measuring the whole thing as a single block,
+  // so the two contracts disagreed for every valid short region. Worse, the
+  // test suite PINNED the disagreement: `regionAlign.test.js` asserted the 0 and
+  // `inputAlign.test.js` asserted the fallback, so the "two paths agree" claim
+  // was tested everywhere except where it was false.
+  const block = total >= full ? full : total
+  const nBlocks = Math.floor(total / block)
+  if (nBlocks < 1) return 0
+
+  const blockRms = new Float64Array(nBlocks)
+  // One block's worth of the MONO SUM, reused. Channels have to be summed per
+  // sample before squaring — the kernel taps `(L + R) / nChannels`, so opposed
+  // content cancels — which is why this accumulates a scratch block rather than
+  // adding each channel's energy independently as an earlier version did.
+  const mono = new Float64Array(block)
+
+  for (let b = 0; b < nBlocks; b++) {
+    mono.fill(0)
+    const blockStart = b * block
+    const blockEnd = blockStart + block
+    // Seconds spanned by this block on the region's own timeline.
+    const tStart = start + blockStart / sampleRate
+    const tEnd = start + blockEnd / sampleRate
+
+    for (const seg of segments) {
+      const dur = getSegmentDuration(seg)
+      const segEnd = seg.outputStart + dur
+      if (segEnd <= tStart || seg.outputStart >= tEnd) continue
+      if (seg.sourceBuffer === null) continue // silence: contributes zero
+
+      const overlapStart = Math.max(tStart, seg.outputStart)
+      const overlapEnd = Math.min(tEnd, segEnd)
+      const sourceOffset = seg.sourceStart + (overlapStart - seg.outputStart)
+      const sourceSampleStart = Math.floor(sourceOffset * sampleRate)
+      const copySamples = Math.floor((overlapEnd - overlapStart) * sampleRate)
+      // Where this overlap lands inside the block.
+      const outBase = Math.floor((overlapStart - start) * sampleRate) - blockStart
+
+      for (let ch = 0; ch < channels; ch++) {
+        const srcData = seg.sourceBuffer.getChannelData(ch)
+        const n = Math.min(copySamples, srcData.length - sourceSampleStart)
+        for (let i = 0; i < n; i++) {
+          const at = outBase + i
+          if (at < 0 || at >= block) continue
+          mono[at] += srcData[sourceSampleStart + i]
+        }
+      }
+    }
+
+    let sum = 0
+    for (let i = 0; i < block; i++) {
+      const v = mono[i] / channels
+      sum += v * v
+    }
+    blockRms[b] = Math.sqrt(sum / block)
+  }
+
+  const gated = gatedRmsFromBlocks(blockRms)
+  if (gated > 0) return alignDbForRms(gated)
+  // Everything gated out — silence, or a region with no programme in it. Same
+  // fallback the materialised path takes.
+  let sum = 0
+  for (let b = 0; b < nBlocks; b++) sum += blockRms[b] * blockRms[b]
+  return alignDbForRms(Math.sqrt(sum / nBlocks))
 }
