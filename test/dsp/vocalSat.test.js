@@ -17,6 +17,7 @@ import {
   TAME_LOOKAHEAD_L,
   ASYM_MODE_OFFSET,
   ASYM_MODE_SPLIT,
+  VOCAL_SAT_PREROLL_S,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -1044,6 +1045,84 @@ test('split falls back to offset on the cubic, and is absent at asymmetry 0', ()
       assert.equal(a[i], b[i], `asymmetry 0 should be mode-independent on ${curve} (i=${i})`)
     }
   }
+})
+
+test('⚠ PREVIEW AND APPLY DIVERGE, AND A PRE-ROLL IS WHAT NARROWS IT', () => {
+  // THE PREMISE BEHIND VOCAL_SAT_PREROLL_S, pinned at DSP level because the
+  // apply path itself needs an OfflineAudioContext that node has not got.
+  //
+  // Preview runs the kernel over everything the user played; apply starts COLD
+  // at the region's first sample. Same code, same params, different state. This
+  // asserts three things in order of importance:
+  //
+  //   1. a cold start really does differ (if this stops being true, the
+  //      pre-roll is dead weight and should come out)
+  //   2. the pre-roll narrows it
+  //   3. a pre-roll equal to ALL preceding audio closes it, which is the proof
+  //      that state history is the ONLY cause
+  //
+  // Measured convergence over the first 0.5 s of the region, full patch:
+  //   pre-roll  0 s  -1.083 dB   2 s  -0.316   4 s  -0.297   all  0.000
+  const SETTLE = SR * 10
+  const REGION = SR * 2
+  const total = SETTLE + REGION
+  const full = new Float32Array(total)
+  for (let i = 0; i < total; i++) {
+    const t = i / SR
+    const syllable = Math.max(0, Math.sin(2 * Math.PI * 2.6 * t)) ** 2
+    // Deliberately skewed, so the skew tracker has an opinion to converge to.
+    const ph = 2 * Math.PI * 160 * t
+    full[i] = 0.24 * syllable * (Math.exp(3 * Math.sin(ph)) - 1) / (Math.exp(3) - 1)
+  }
+  const patch = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 2,
+    asymmetry: 100, asymMode: ASYM_MODE_OFFSET,
+    emphasis: 50, tame: 60, autoDrive: 100,
+  }
+  const settled = processVocalSatBuffer([full], SR, patch).channelData[0]
+  const lat = VOCAL_SAT_LATENCY_SAMPLES
+
+  // Energy over the first half-second of the region, apply against preview.
+  const openingErrorDb = preRollSeconds => {
+    const pre = Math.round(SR * preRollSeconds)
+    const fed = full.slice(SETTLE - pre, SETTLE + REGION)
+    const applied = processVocalSatBuffer([fed], SR, patch).channelData[0]
+    let a = 0
+    let b = 0
+    let n = 0
+    for (let i = 0; i < SR * 0.5; i++) {
+      a += settled[SETTLE + i + lat] ** 2
+      b += applied[pre + i + lat] ** 2
+      n++
+    }
+    return 20 * Math.log10(Math.sqrt(a / n)) - 20 * Math.log10(Math.sqrt(b / n))
+  }
+
+  const cold = Math.abs(openingErrorDb(0))
+  assert.ok(cold > 0.5, `a cold apply should differ audibly; measured ${cold.toFixed(3)} dB`)
+
+  const withPreRoll = Math.abs(openingErrorDb(VOCAL_SAT_PREROLL_S))
+  assert.ok(
+    withPreRoll < cold / 2,
+    `the pre-roll should at least halve the opening error: ${cold.toFixed(3)} -> ${withPreRoll.toFixed(3)} dB`,
+  )
+
+  // ⚠ AND IT DOES NOT REACH ZERO. Stated as an assertion so nobody "fixes" the
+  // residue by lengthening the constant: the voiced gate's valley floor and the
+  // skew sign's stickiness depend on history arbitrarily far back.
+  assert.ok(
+    withPreRoll > 0.02,
+    `if a ${VOCAL_SAT_PREROLL_S}s pre-roll now closes this completely, the kernel's `
+    + 'slow state changed and VOCAL_SAT_PREROLL_S should be re-derived',
+  )
+
+  // The whole preceding file DOES close it — the proof that nothing but state
+  // history is in play.
+  const everything = Math.abs(openingErrorDb(SETTLE / SR))
+  assert.ok(
+    everything < 0.001,
+    `full history should be exact; measured ${everything.toFixed(5)} dB`,
+  )
 })
 
 test('hardness is clamped to the measured range', () => {

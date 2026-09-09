@@ -20,6 +20,12 @@
  * Two deliberate deviations from the Python, both consequences of the fact
  * that a streaming effect cannot see the whole file:
  *
+ * ⚠ 3. PREVIEW AND APPLY ARE NOT SAMPLE-IDENTICAL. This file used to be
+ *    described as producing exactly what the preview produced; it does not, and
+ *    it never quite did. The apply path starts cold while the preview has run
+ *    over the whole session, so every follower in here begins somewhere else.
+ *    VOCAL_SAT_PREROLL_S is what narrows the gap and records how far.
+ *
  * 1. LEVEL MATCHING. The Python normalises twice against whole-file RMS —
  *    `wet *= dry_rms/wet_rms` then `output *= dry_rms/out_rms`. Here each of
  *    those three measurements is a one-pole follower (RMS_TAU_MS). The
@@ -84,6 +90,54 @@ import {
 } from './dsp/tapeCharacter.js'
 
 export const VOCAL_SAT_LATENCY_SAMPLES = VOCAL_SAT_OVERSAMPLE.latencySamples
+
+/**
+ * Seconds of real audio the offline apply path should run through the kernel
+ * BEFORE the region, and discard. See applyWorkletRegion in processing.js.
+ *
+ * ⚠ THIS STAGE IS NOT SAMPLE-IDENTICAL BETWEEN PREVIEW AND APPLY AND CANNOT BE
+ * MADE SO. The preview worklet has been running over everything the user
+ * played; the apply render starts cold at the region's first sample. Every
+ * follower, gate and tracker in here therefore begins in a different state.
+ * Measured, preview settled against a cold apply, energy over the first 0.5 s:
+ *
+ *   patch                                  first 0.5 s
+ *   shipped default (parallel, offset)       -0.363 dB
+ *   series + cubic + tame                    -1.275
+ *     + autoDrive 100                        -1.678
+ *     + asymmetry 100                        -2.055
+ *
+ * That last figure is inside the range tapeCharacter records for the same
+ * defect the last time it shipped. Most of it is NOT new: the three 300 ms RMS
+ * followers alone account for -1.035 dB, and series mode amplifies them because
+ * at wetDry 1 the output is entirely wet.
+ *
+ * AND ONE FAILURE IS WORSE THAN A LEVEL OFFSET. The skew tracker settles to
+ * direction -0.62 on positive-leaning material but reads +1.00 before its 3 s
+ * evidence gate, so a selection shorter than that had its asymmetry leaning the
+ * WRONG WAY — worth up to 7.9 dB of other distortion by that module's own
+ * measurement. A decision, not a settling difference.
+ *
+ * ── WHY 4 AND NOT MORE ─────────────────────────────────────────────────────
+ *
+ * Convergence of a cold apply toward the settled preview, full patch:
+ *
+ *   pre-roll    0 s     1 s     2 s     3 s     4 s     8 s    all
+ *   first .5s  -1.083  -0.645  -0.316  -0.295  -0.297  -0.031  0.000
+ *
+ * It knees at 2-3 s — the skew tracker's SKEW_EVIDENCE_S is 3 — and then
+ * plateaus near -0.3 dB before improving again much later. 4 s covers the
+ * evidence gate plus the flip ramp with margin and costs a 2 s region a 6 s
+ * render, which is nothing offline.
+ *
+ * ⚠ IT DOES NOT REACH IDENTITY AND NOTHING SHORT OF THE WHOLE FILE WOULD. At a
+ * pre-roll equal to ALL the preceding audio the difference is 0.0000 dB, which
+ * is the proof that state history is the only cause — but the voiced gate's
+ * valley floor and the skew sign's stickiness depend on history arbitrarily far
+ * back, so any finite pre-roll leaves a residue. 4 s takes the opening error
+ * from about 1.1 dB to about 0.3.
+ */
+export const VOCAL_SAT_PREROLL_S = 4
 
 export const VOCAL_SAT_KERNEL_DEFAULTS = {
   drive: 2.0,
