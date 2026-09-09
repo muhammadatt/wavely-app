@@ -421,6 +421,32 @@ export class FET1176Kernel {
      * swell at the head of every applied region.
      */
     // The tracker's target: the loudest input sample heard so far.
+    //
+    // ⚠ THIS IS A RUNNING MAXIMUM WITH UNBOUNDED MEMORY, AND IT IS WHY THIS
+    // STAGE CANNOT BE MADE PREVIEW/APPLY EXACT BY A PRE-ROLL. `trkInPeak` only
+    // ever rises, so it carries the loudest sample of the entire preview
+    // session, while an offline render sees only what it was handed. Measured
+    // against a settled preview on an adversarial region (loud right up to the
+    // boundary, then quiet), energy over the first 0.5 s:
+    //
+    //   pre-roll        0 s      0.5 s      1 s      2 s      4 s
+    //   stock         -0.668    -0.253   -0.106   -0.022   -0.001
+    //   attack/rel 1  -5.252    -1.784   -1.460   -0.998   -0.470
+    //
+    // A pre-roll helps a great deal and still does not converge; at the slowest
+    // ballistics it is 0.47 dB out after four seconds, and the residue is
+    // DATA-DEPENDENT — a loud passage anywhere earlier in the session raises
+    // the preview's tracker and nothing the apply path renders can match it.
+    //
+    // OptoSmooth, Scheps and ResoTame all reach BIT-EXACT at 2 s because every
+    // piece of their state is driven by the input and decays. The test that
+    // separates them is simply: does anything LATCH, or does it all decay?
+    // Tube Saturation fails it too (a sticky skew sign, a valley floor).
+    //
+    // Fixing this properly means giving the tracker a bounded reference — a
+    // decaying peak, or a percentile over a window — which changes this
+    // plugin's makeup behaviour and is a deliberate design decision, not a
+    // pre-roll. No pre-roll is wired here for that reason.
     this.trkSamples += n
     for (let ch = 0; ch < nIn; ch++) {
       const src = inputChannels[ch]

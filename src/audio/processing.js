@@ -1,6 +1,7 @@
 import { getSegmentDuration } from './operations.js'
 import { analysisWindow, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
+import { LA2A_PREROLL_S } from './la2aProcessor.js'
 import {
   LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
 } from './effects/la2aCompressor.js'
@@ -22,6 +23,7 @@ import {
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
+import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
   SCHEPS_DEFAULTS,
   SCHEPS_LATENCY_SAMPLES,
@@ -564,6 +566,9 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
     processorName: 'la2a-processor',
     kernelParams: toKernelParams(merged),
     latencySamples: la2aPatchLatencySamples(merged, sampleRate),
+    // Bit-exact against a settled preview at this length — see LA2A_PREROLL_S
+    // for the measurements and for why nothing in this kernel latches.
+    preRollSamples: Math.round(LA2A_PREROLL_S * sampleRate),
   })
 }
 
@@ -611,6 +616,9 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     processorName: 'scheps-processor',
     kernelParams: toSchepsKernelParams({ ...SCHEPS_DEFAULTS, ...params }),
     latencySamples: SCHEPS_LATENCY_SAMPLES,
+    // Inherits the LA-2A kernel, so it inherits its convergence — see
+    // SCHEPS_PREROLL_S. Also bit-exact at this length.
+    preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
   })
 }
 
@@ -775,6 +783,9 @@ export function applyResonanceRegion(segments, start, end, params, sampleRate, c
     processorName: 'resonance-processor',
     kernelParams: toResonanceKernelParams({ ...RESONANCE_DEFAULTS, ...params }),
     latencySamples: RESONANCE_LATENCY_SAMPLES,
+    // ⚠ NO PRE-ROLL, DELIBERATELY — see the note on StftProcessor's use in
+    // resonanceProcessor.js. This stage's disagreement is a frame-PHASE error,
+    // not a convergence one, and a pre-roll cannot fix it.
   })
 }
 

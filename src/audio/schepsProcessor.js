@@ -101,6 +101,23 @@ const LA2A_FIXED = {
   lookaheadMs: 0,
 }
 
+/**
+ * Pre-roll for the offline apply path, seconds. See applyWorkletRegion.
+ *
+ * ⚠ THE SAME NUMBER AS LA2A_PREROLL_S AND FOR THE SAME REASON: this stage HOLDS
+ * the LA-2A kernel rather than a copy, so it inherits its ballistics and its
+ * convergence behaviour exactly. Measured on the adversarial probe (loud right
+ * up to the region boundary, then quiet):
+ *
+ *   pre-roll     0 s      0.5 s      1 s      2 s
+ *   max diff   1.3e-2    1.7e-5   4.5e-8   0.0e+0
+ *   RMS dB    -0.2404   -0.0003  -0.0000   0.0000
+ *
+ * Bit-exact at 2 s. If the embedded kernel's ballistics ever change, this
+ * number is downstream of that change and should be re-measured with it.
+ */
+export const SCHEPS_PREROLL_S = 2
+
 export const SCHEPS_KERNEL_DEFAULTS = {
   character: 'thick', // 'thick' | 'presence'
   /**
