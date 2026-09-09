@@ -52,6 +52,18 @@ const schepsCeilingDb = ref(SCHEPS_DEFAULTS.ceilingDb)
  * same control, shared, rather than a second one that can disagree.
  */
 const schepsInputAlignDb = ref(SCHEPS_DEFAULTS.inputAlignDb)
+/**
+ * Which timeline the offset above was measured from — `docId:revision`.
+ *
+ * ⚠ A NULL CHECK CANNOT ANSWER "IS THIS STILL THE RIGHT FILE", and this state
+ * is a module singleton that outlives the document under it. The first version
+ * refreshed only while `schepsInputAlignDb` was null, so it measured the FIRST
+ * file this panel ever saw and then never again: switching documents left the
+ * embedded compressor and the trim solve running the old file's offset, and
+ * because the selection watcher calls `refreshAutoTrim`, every re-measure after
+ * that reinforced it. `setActiveDocument` does not touch plugin state.
+ */
+let alignedFor = null
 
 const schepsPreview = ref(false)
 const schepsReduction = ref(0)
@@ -136,7 +148,7 @@ function la2aTuningFor() {
 
 export function useScheps() {
   const {
-    state, getAudioContext, hasSelection, replaceRegion, setPeakCache,
+    state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache,
     startProcessing, endProcessing, showToast, totalDuration,
   } = useEditorState()
   const { openWindow, closeWindow } = useWindows()
@@ -220,11 +232,14 @@ export function useScheps() {
    */
   function refreshInputAlign() {
     if (!state.currentFile) return
+    const key = `${appState.activeDocumentId}:${state.revision}`
+    if (alignedFor === key) return // already measured for this exact timeline
     const end = totalDuration.value
     if (!(end > 0)) return
     const db = regionAlignDb(
       state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
+    alignedFor = key
     schepsInputAlignDb.value = db
     pushParam('inputAlignDb', db)
   }
@@ -235,10 +250,15 @@ export function useScheps() {
    * drag can't have an older measurement land after a newer one.
    */
   async function refreshAutoTrim() {
+    /**
+     * ⚠ BEFORE THE GUARDS, NOT AFTER. Alignment is not part of the trim solve —
+     * it decides how hard the embedded cell works at all — so gating it behind
+     * AUTO TRIM or behind a selection left the live compressor on a stale
+     * offset in both cases. It is cheap and idempotent: keyed on the timeline,
+     * so repeat calls cost a string compare.
+     */
+    refreshInputAlign()
     if (!schepsAutoTrim.value || !state.selection || !state.currentFile) return
-
-    // Upstream of the solve and of the render alike — see refreshInputAlign.
-    if (schepsInputAlignDb.value === null) refreshInputAlign()
 
     const { start, end } = state.selection
     const seq = ++trimSeq

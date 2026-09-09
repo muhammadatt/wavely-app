@@ -195,12 +195,52 @@ test('gated RMS is scale-covariant', () => {
   assert.ok(Math.abs(db(b) - (db(a) - 20)) < 1e-3)
 })
 
+/**
+ * ⚠ THESE THREE ARE ONE REGRESSION, AND ONLY THE LAST TWO HAVE TEETH. The first
+ * cut measured mean per-channel power, sqrt((L^2 + R^2)/2), which agrees with
+ * the kernel's `(L + R)/nCh` tap for mono and for identical L/R and disagrees
+ * for everything else — so the duplicated-channel case below PASSED against a
+ * wrong measurement. Opposed and unequal channels are what separate the two.
+ */
 test('gated RMS sums channels as the mono side-chain tap does', () => {
   const x = speech(2, -12)
   const mono = gatedRmsOfChannels([x], SR)
   const dual = gatedRmsOfChannels([x, x], SR)
   assert.ok(Math.abs(db(dual) - db(mono)) < 1e-9,
     'duplicating a channel must not change the measured level')
+})
+
+test('opposed channels measure as the silence the detector would see', () => {
+  const x = speech(2, -12)
+  const flipped = new Float32Array(x.length)
+  for (let i = 0; i < x.length; i++) flipped[i] = Math.fround(-x[i])
+  // (L + -L)/2 is zero at every sample, so the cell never lights. A per-channel
+  // power average reads this as full level and would align it like ordinary
+  // programme.
+  assert.equal(gatedRmsOfChannels([x, flipped], SR), 0)
+  assert.equal(inputAlignDbFor([x, flipped], SR), 0)
+})
+
+test('a dead channel halves the measured level, as the tap does', () => {
+  // An ordinary recording, not a contrived one: one mic into a stereo file.
+  // (L + 0)/2 is exactly 6.02 dB below L. The per-channel power average read
+  // this 3.01 dB hot.
+  const x = speech(3, -12)
+  const dead = new Float32Array(x.length)
+  const oneSided = db(gatedRmsOfChannels([x, dead], SR))
+  const mono = db(gatedRmsOfChannels([x], SR))
+  assert.ok(Math.abs((mono - oneSided) - 6.0206) < 0.05,
+    `expected 6.02 dB below mono, got ${(mono - oneSided).toFixed(3)}`)
+})
+
+test('an unequal pair measures its actual sum', () => {
+  const x = speech(3, -12)
+  const half = new Float32Array(x.length)
+  for (let i = 0; i < x.length; i++) half[i] = Math.fround(x[i] * 0.5)
+  // (L + L/2)/2 = 0.75 L.
+  const got = db(gatedRmsOfChannels([x, half], SR))
+  const want = db(gatedRmsOfChannels([x], SR)) + 20 * Math.log10(0.75)
+  assert.ok(Math.abs(got - want) < 0.01, `got ${got}, want ${want}`)
 })
 
 test('degenerate input cannot produce a trim', () => {

@@ -161,45 +161,73 @@ export function regionPeakDb(segments, start, end, sampleRate, channels) {
  * Returns 0 for an empty or silent region, which is "no offset", not "unknown".
  */
 export function regionAlignDb(segments, start, end, sampleRate, channels) {
-  const block = Math.max(1, Math.round(sampleRate * ALIGN_BLOCK_MS / 1000))
+  const full = Math.max(1, Math.round(sampleRate * ALIGN_BLOCK_MS / 1000))
   const total = Math.floor((end - start) * sampleRate)
+  if (total < 1) return 0
+  // ⚠ THE SHORT-REGION FALLBACK MUST MATCH `gatedRmsOfChannels`, and it did not.
+  // This returned 0 — "no offset" — for anything under one block while the
+  // materialised path fell back to measuring the whole thing as a single block,
+  // so the two contracts disagreed for every valid short region. Worse, the
+  // test suite PINNED the disagreement: `regionAlign.test.js` asserted the 0 and
+  // `inputAlign.test.js` asserted the fallback, so the "two paths agree" claim
+  // was tested everywhere except where it was false.
+  const block = total >= full ? full : total
   const nBlocks = Math.floor(total / block)
   if (nBlocks < 1) return 0
 
-  // Sum of squares per block, over every channel.
-  const energy = new Float64Array(nBlocks)
+  const blockRms = new Float64Array(nBlocks)
+  // One block's worth of the MONO SUM, reused. Channels have to be summed per
+  // sample before squaring — the kernel taps `(L + R) / nChannels`, so opposed
+  // content cancels — which is why this accumulates a scratch block rather than
+  // adding each channel's energy independently as an earlier version did.
+  const mono = new Float64Array(block)
 
-  for (const seg of segments) {
-    const dur = getSegmentDuration(seg)
-    const segEnd = seg.outputStart + dur
-    if (segEnd <= start || seg.outputStart >= end) continue
-    if (seg.sourceBuffer === null) continue // silence: contributes zero energy
+  for (let b = 0; b < nBlocks; b++) {
+    mono.fill(0)
+    const blockStart = b * block
+    const blockEnd = blockStart + block
+    // Seconds spanned by this block on the region's own timeline.
+    const tStart = start + blockStart / sampleRate
+    const tEnd = start + blockEnd / sampleRate
 
-    const overlapStart = Math.max(start, seg.outputStart)
-    const overlapEnd = Math.min(end, segEnd)
-    const sourceOffset = seg.sourceStart + (overlapStart - seg.outputStart)
-    const sourceSampleStart = Math.floor(sourceOffset * sampleRate)
-    const copySamples = Math.floor((overlapEnd - overlapStart) * sampleRate)
-    // Where this segment lands on the region's own timeline, in samples. The
-    // block index comes from here rather than from the segment, so a cut does
-    // not shift every block after it.
-    const outBase = Math.floor((overlapStart - start) * sampleRate)
+    for (const seg of segments) {
+      const dur = getSegmentDuration(seg)
+      const segEnd = seg.outputStart + dur
+      if (segEnd <= tStart || seg.outputStart >= tEnd) continue
+      if (seg.sourceBuffer === null) continue // silence: contributes zero
 
-    for (let ch = 0; ch < channels; ch++) {
-      const srcData = seg.sourceBuffer.getChannelData(ch)
-      const n = Math.min(copySamples, srcData.length - sourceSampleStart)
-      for (let i = 0; i < n; i++) {
-        const b = ((outBase + i) / block) | 0
-        if (b >= nBlocks) break
-        const v = srcData[sourceSampleStart + i]
-        energy[b] += v * v
+      const overlapStart = Math.max(tStart, seg.outputStart)
+      const overlapEnd = Math.min(tEnd, segEnd)
+      const sourceOffset = seg.sourceStart + (overlapStart - seg.outputStart)
+      const sourceSampleStart = Math.floor(sourceOffset * sampleRate)
+      const copySamples = Math.floor((overlapEnd - overlapStart) * sampleRate)
+      // Where this overlap lands inside the block.
+      const outBase = Math.floor((overlapStart - start) * sampleRate) - blockStart
+
+      for (let ch = 0; ch < channels; ch++) {
+        const srcData = seg.sourceBuffer.getChannelData(ch)
+        const n = Math.min(copySamples, srcData.length - sourceSampleStart)
+        for (let i = 0; i < n; i++) {
+          const at = outBase + i
+          if (at < 0 || at >= block) continue
+          mono[at] += srcData[sourceSampleStart + i]
+        }
       }
     }
+
+    let sum = 0
+    for (let i = 0; i < block; i++) {
+      const v = mono[i] / channels
+      sum += v * v
+    }
+    blockRms[b] = Math.sqrt(sum / block)
   }
 
-  // Every block spans the same sample count, so one divisor converts the lot.
-  const per = block * channels
-  for (let b = 0; b < nBlocks; b++) energy[b] = Math.sqrt(energy[b] / per)
-
-  return alignDbForRms(gatedRmsFromBlocks(energy))
+  const gated = gatedRmsFromBlocks(blockRms)
+  if (gated > 0) return alignDbForRms(gated)
+  // Everything gated out — silence, or a region with no programme in it. Same
+  // fallback the materialised path takes.
+  let sum = 0
+  for (let b = 0; b < nBlocks; b++) sum += blockRms[b] * blockRms[b]
+  return alignDbForRms(Math.sqrt(sum / nBlocks))
 }

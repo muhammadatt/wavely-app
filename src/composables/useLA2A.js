@@ -51,8 +51,8 @@ const la2aCeilingDb = ref(null)
  * Neither compressor has a threshold control (see `dsp/inputAlign.js`), so
  * without an offset the reduction a knob position delivers is set by the FILE'S
  * level: 4.62 dB at Peak Reduction 50 on a file peaking at -1 dBFS, 0.00 dB on
- * one at -18. A narrator who left the headroom ACX guidance asks for opened the
- * plugin and heard nothing happen.
+ * one at -18. A narrator who gain-staged with the headroom ACX guidance asks
+ * for would open the plugin and hear nothing happen.
  *
  * ⚠ THIS IS A SEPARATE AXIS FROM PEAK REDUCTION, AND THAT IS THE WHOLE REASON
  * THE KNOB EXISTS. The two are interchangeable as DSP — an offset renders
@@ -97,6 +97,19 @@ const la2aCeilingDb = ref(null)
  */
 const la2aInputAuto = ref(true)
 const la2aInputDb = ref(0)
+/**
+ * Which timeline `la2aInputDb` was measured from — `docId:revision`, or null.
+ *
+ * ⚠ THE STATE HERE IS A MODULE SINGLETON AND THE DOCUMENT UNDER IT CAN CHANGE.
+ * `setActiveDocument` stops playback and swaps the active id; it does not touch
+ * plugin state, so with this panel left open, switching files carried the
+ * PREVIOUS file's offset into the new one's preview, its makeup solve and its
+ * apply. A null check could not catch it — the value is non-null the moment any
+ * file has been measured — so freshness is keyed on identity instead. The
+ * revision is in the key as well as the id, so an edit re-measures too: cutting
+ * a paragraph changes the file's gated level.
+ */
+let alignedFor = null
 // Auto makeup: on by default so spot compression is level-neutral — an
 // unmatched makeup on a selection leaves an audible step at the selection
 // boundary and perturbs the levels the mastering chain later measures.
@@ -206,7 +219,7 @@ function measurementParams() {
 }
 
 export function useLA2A() {
-  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
+  const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
   function initChain() {
@@ -315,17 +328,41 @@ export function useLA2A() {
    * Cheap enough to await — it reads samples and allocates one block array,
    * where the solve runs the kernel to convergence.
    */
+  /** Identity of the timeline currently loaded, for the freshness check above. */
+  function timelineKey() {
+    return state.currentFile ? `${appState.activeDocumentId}:${state.revision}` : null
+  }
+
   function refreshInputAlign() {
-    // ⚠ THE USER'S VALUE IS NEVER OVERWRITTEN. Once AUTO is off the trim is
-    // theirs, and a re-measure triggered by a new selection or an edit must not
-    // walk it back — the same rule the Gain knob follows under AUTO.
-    if (!la2aInputAuto.value) return
     if (!state.currentFile) return
+    const key = timelineKey()
+
+    /**
+     * ⚠ A MANUAL TRIM BELONGS TO THE FILE IT WAS DIALLED ON, so a different
+     * document takes the knob back to AUTO rather than inheriting it. That is
+     * the same principle that keeps this value out of presets: it describes the
+     * audio, and the audio just changed. Within one document the user's value
+     * stands — a new selection or an edit must never walk it back, the rule the
+     * Gain knob follows under AUTO.
+     *
+     * Keyed on the DOCUMENT, not the revision, so editing the file the user
+     * trimmed by hand leaves their setting alone.
+     */
+    const sameDoc = alignedFor !== null
+      && alignedFor.split(':')[0] === String(appState.activeDocumentId)
+    if (!la2aInputAuto.value) {
+      if (sameDoc) return
+      la2aInputAuto.value = true
+    } else if (alignedFor === key) {
+      return // already measured for this exact timeline
+    }
+
     const end = totalDuration.value
     if (!(end > 0)) return
     const db = regionAlignDb(
       state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
     )
+    alignedFor = key
     la2aInputDb.value = db
     pushParam('inputAlignDb', db)
   }
@@ -341,6 +378,7 @@ export function useLA2A() {
   function syncInput(v) {
     const clamped = Math.max(-INPUT_TRIM_MAX_DB, Math.min(INPUT_TRIM_MAX_DB, v))
     la2aInputAuto.value = false
+    alignedFor = timelineKey()
     la2aInputDb.value = clamped
     pushParam('inputAlignDb', clamped)
     scheduleAutoMakeup()
@@ -353,6 +391,7 @@ export function useLA2A() {
    */
   function resetInputAuto() {
     la2aInputAuto.value = true
+    alignedFor = null
     refreshInputAlign()
     scheduleAutoMakeup()
   }
@@ -364,6 +403,15 @@ export function useLA2A() {
    * a newer one.
    */
   async function refreshAutoMakeup() {
+    /**
+     * ⚠ ALIGNMENT IS BROUGHT UP TO DATE BEFORE THE AUTO GUARD, NOT AFTER IT.
+     * It sat below and that was a second staleness hole with nothing to do with
+     * switching documents: alignment is NOT part of the makeup solve — it
+     * decides how much the compressor does at all — so with AUTO makeup off,
+     * the selection watcher that drives this function never refreshed it, and
+     * preview ran on whatever offset was left over.
+     */
+    refreshInputAlign()
     if (!la2aAutoMakeup.value || !state.currentFile) return
 
     /**
@@ -378,10 +426,6 @@ export function useLA2A() {
      * The whole file is the right span because it is what preview PLAYS with no
      * selection. Apply still requires a selection; this is about what you hear.
      */
-    // Alignment is upstream of the solve and of the render alike, so it is
-    // brought up to date first — see refreshInputAlign.
-    if (la2aInputAuto.value) refreshInputAlign()
-
     const start = state.selection ? state.selection.start : 0
     const end = state.selection ? state.selection.end : totalDuration.value
     if (!(end > start)) return

@@ -194,6 +194,24 @@ export const INPUT_TRIM_MAX_DB = 48
  * separately and averaged, matching the kernel's own mono side-chain tap — the
  * thing being aligned is what the detector sees.
  *
+ * ⚠ CHANNELS ARE SUMMED THEN DIVIDED, NOT AVERAGED IN POWER, AND THE FIRST CUT
+ * GOT THIS WRONG. It measured mean per-channel power — sqrt((L^2 + R^2)/2) —
+ * which happens to agree with the detector for a mono file and for identical
+ * L/R, and disagrees for everything else. The kernel's tap is
+ * `(L + R) / nChannels` (la2aProcessor.js, "Mono sidechain tap"), so what
+ * matters is the SUM: correlated content reinforces and opposed content
+ * cancels, exactly as it does in the detector.
+ *
+ * Measured on the two cases that separate them: a stereo file with one dead
+ * channel read 3.01 dB hot, and a polarity-flipped pair read -16.62 dBFS where
+ * the detector sees digital silence. The first is an ordinary recording — one
+ * mic into a stereo file — not a contrived one.
+ *
+ * ⚠ AND A DUPLICATED-CHANNEL TEST CANNOT CATCH THIS. `[x, x]` is precisely the
+ * case where the two formulations agree, so the original test passed while the
+ * measurement was wrong. The regressions that matter are opposed and unequal
+ * channels; both are pinned in `test/dsp/inputAlign.test.js`.
+ *
  * @param {Float32Array[]} channels
  * @param {number} sampleRate
  * @returns {number} linear RMS, or 0 for empty input
@@ -202,19 +220,21 @@ export function gatedRmsOfChannels(channels, sampleRate) {
   if (!channels || channels.length === 0) return 0
   const n = channels[0].length
   if (n === 0) return 0
-  const block = Math.max(1, Math.round(sampleRate * ALIGN_BLOCK_MS / 1000))
-  const nBlocks = Math.floor(n / block)
+  const full = Math.max(1, Math.round(sampleRate * ALIGN_BLOCK_MS / 1000))
   // Shorter than one block: there is no distribution to gate against, so the
-  // gate would be measuring its own single sample. Fall back to plain RMS.
-  if (nBlocks < 1) return plainRms(channels, 0, n)
+  // gate would be measuring its own single sample. Measure the lot as one block
+  // instead — `regionAlignDb` applies the SAME fallback, and the two disagreeing
+  // here was a real defect (see there).
+  const block = n >= full ? full : n
+  const nBlocks = Math.floor(n / block)
 
   const blockRms = new Float64Array(nBlocks)
   for (let b = 0; b < nBlocks; b++) {
-    blockRms[b] = plainRms(channels, b * block, block)
+    blockRms[b] = monoRms(channels, b * block, block)
   }
   const gated = gatedRmsFromBlocks(blockRms)
   // Everything gated out — a silent or DC region.
-  return gated > 0 ? gated : plainRms(channels, 0, nBlocks * block)
+  return gated > 0 ? gated : monoRms(channels, 0, nBlocks * block)
 }
 
 /**
@@ -265,15 +285,24 @@ export function alignDbForRms(gatedRms) {
   return db > ALIGN_MAX_DB ? ALIGN_MAX_DB : (db < -ALIGN_MAX_DB ? -ALIGN_MAX_DB : db)
 }
 
-function plainRms(channels, start, len) {
+/**
+ * RMS of the MONO SUM over a sample range — the signal the kernel's side-chain
+ * actually taps, not the mean of the channels' powers. See the note on
+ * `gatedRmsOfChannels` for what the difference costs.
+ */
+function monoRms(channels, start, len) {
+  const nCh = channels.length
+  if (nCh === 0) return 0
+  const end = Math.min(channels[0].length, start + len)
+  if (end <= start) return 0
   let sum = 0
-  let count = 0
-  for (const ch of channels) {
-    const end = Math.min(ch.length, start + len)
-    for (let i = start; i < end; i++) sum += ch[i] * ch[i]
-    count += Math.max(0, end - start)
+  for (let i = start; i < end; i++) {
+    let x = 0
+    for (let c = 0; c < nCh; c++) x += channels[c][i]
+    x /= nCh
+    sum += x * x
   }
-  return count > 0 ? Math.sqrt(sum / count) : 0
+  return Math.sqrt(sum / (end - start))
 }
 
 /**

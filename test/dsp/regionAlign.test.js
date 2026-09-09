@@ -107,8 +107,50 @@ test('a quiet file asks for more drive, and the amount is the level difference',
 test('degenerate regions return no offset rather than NaN or a clamp', () => {
   assert.equal(regionAlignDb([], 0, 1, SR, 1), 0)
   assert.equal(regionAlignDb([segment(new Float32Array(SR))], 0, 1, SR, 1), 0)
-  // Shorter than one block.
-  assert.equal(regionAlignDb([segment(speech(0.01, -12))], 0, 0.01, SR, 1), 0)
+})
+
+/**
+ * ⚠ THIS TEST USED TO ASSERT THE BUG. It pinned `regionAlignDb` returning 0 for
+ * a sub-block region while `inputAlign.test.js` pinned `gatedRmsOfChannels`
+ * falling back to measuring the lot as one block — so the two contracts
+ * disagreed for every valid short region, and the suite asserted the
+ * disagreement from both ends. The "two paths agree" test above never covered
+ * it because it only ever used long regions.
+ */
+test('a region shorter than one block matches the direct path, not zero', () => {
+  const short = speech(0.02, -12)
+  const viaSegments = regionAlignDb([segment(short)], 0, short.length / SR, SR, 1)
+  const viaChannels = inputAlignDbFor([short], SR)
+  assert.notEqual(viaSegments, 0)
+  assert.ok(Math.abs(viaSegments - viaChannels) < 0.1,
+    `short region: segment walk ${viaSegments} vs direct ${viaChannels}`)
+})
+
+test('the segment walk sums channels as the mono tap does', () => {
+  // The counterpart of the stereo regressions in inputAlign.test.js: this path
+  // accumulates a scratch block rather than adding each channel's energy, and
+  // opposed channels are what tell the two apart.
+  const x = speech(4, -12)
+  const flipped = new Float32Array(x.length)
+  for (let i = 0; i < x.length; i++) flipped[i] = Math.fround(-x[i])
+  const seg = {
+    outputStart: 0,
+    sourceStart: 0,
+    sourceEnd: x.length / SR,
+    sourceBuffer: buffer([x, flipped]),
+  }
+  assert.equal(regionAlignDb([seg], 0, x.length / SR, SR, 2), 0)
+
+  const dead = {
+    outputStart: 0,
+    sourceStart: 0,
+    sourceEnd: x.length / SR,
+    sourceBuffer: buffer([x, new Float32Array(x.length)]),
+  }
+  const oneSided = regionAlignDb([dead], 0, x.length / SR, SR, 2)
+  const mono = regionAlignDb([segment(x)], 0, x.length / SR, SR, 1)
+  assert.ok(Math.abs((oneSided - mono) - 6.0206) < 0.05,
+    `a dead channel should ask for 6.02 dB more drive, got ${(oneSided - mono).toFixed(3)}`)
 })
 
 test('the offset is clamped in both directions', () => {
