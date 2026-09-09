@@ -11,6 +11,7 @@ export default {
     { label: 'Drive', text: 'How hard the signal is pushed into the curve' },
     { label: 'Curve', text: 'SHAPE is the standard curve. CUBIC is a polynomial that can only make the third harmonic, so its distortion is thick rather than gritty — but only while Drive is low enough to keep it in range' },
     { label: 'Topology', text: 'PARA adds a saturated copy underneath the original, which keeps every transient intact and thickens what is around it. SERIES puts a single broadband curve in the path, so it can absorb and round transients instead' },
+    { label: 'Auto Drive', text: 'Evens out how hard different recordings hit the curve, so Drive sounds the same on a quiet file as on a loud one. It listens only while there is voice, so pauses are left alone' },
     { label: 'Tame', text: 'Holds peaks back before they reach the curve, using a smooth gain rather than by distorting them. This is what keeps CUBIC in the range where it stays clean. Series only, and it costs no extra delay' },
     { label: 'Soften', text: 'Caps how fast the waveform is allowed to move before it reaches the curve, which rounds sharp edges off directly rather than by filtering. Available in SERIES only' },
     { label: 'Emphasis', text: 'Makes the curve act hardest on high frequencies, which takes the edge off attacks while leaving the body thick. This is the control that turns a crisp saturator into a soft one' },
@@ -35,7 +36,8 @@ export default {
 
   notes: [
     'HF Loss acts on the finished output rather than only the wet path, so with it raised Wet / Dry at 0 no longer bypasses the plugin',
-    'Saturation is not level-invariant: a quieter selection is driven less at the same Drive setting',
+    'Saturation is not level-invariant: a quieter selection is driven less at the same Drive setting. Auto Drive is the control that fixes this — with it up, the same Drive gives the same result whatever the source level',
+    'Auto Drive works in both PARA and SERIES, unlike Tame and Soften',
     'Tame at 50 or above is what lets you use CUBIC at a useful Drive. Without it the curve runs out of range and hard-clips; with it the distortion stays almost entirely third-harmonic',
     'Above Tame 50 the amount of saturation stops depending on Drive — the curve is held at a fixed operating point, so turning Drive up makes no further difference',
     'CUBIC only sounds cleaner at low Drive. Push it and it runs out of range, at which point it hard-clips and measures grittier than SHAPE, not less. Try it around Drive 0.3 and work up until you hear it turn',

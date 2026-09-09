@@ -109,6 +109,9 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
   // Peak control ahead of the curve, 0-100. SERIES ONLY, absent at 0, and
   // costs NO added latency — see TAME_LOOKAHEAD_L.
   tame: 0,
+  // Programme-level normalisation ahead of the drive, 0-100. Works in BOTH
+  // topologies, unlike Tame and Soften. Absent at 0. See AutoDrive.
+  autoDrive: 0,
   // Knee order of the transfer curve — see `shape`. Replaces `softness`, which
   // crossfaded tanh against arctan; measured at matched THD those two are the
   // same curve to within 3 dB at the 5th harmonic and the blend was not a
@@ -820,6 +823,98 @@ class VoicedGate {
   }
 }
 
+/**
+ * AUTO-DRIVE — makes Drive mean the same thing on a quiet file as a loud one.
+ *
+ * Saturation is not level-invariant: a selection 10 dB quieter is driven 10 dB
+ * less at the same Drive setting, which is already in this plugin's help as a
+ * caveat users have to work around by hand. This normalises the tracked
+ * programme level toward a fixed reference before the drive is applied, so the
+ * knob's meaning stops depending on how hot the recording is.
+ *
+ * It also completes what Tame started from the other end. Tame pins the
+ * operating point for PEAKS, so loud material cannot leave the curve's domain;
+ * it does nothing for quiet material, which simply gets less saturation. This
+ * raises quiet passages INTO the curve. The two together hold the whole file at
+ * a consistent operating point.
+ *
+ * ── TWO RECORDED FAILURES THIS IS BUILT AROUND ─────────────────────────────
+ *
+ * (1) BREATHING. tapeCharacter's HF Loss note: "Following the envelope gives
+ *     full depth on a loud syllable and none through the pause after it — a
+ *     room that BREATHES, which a listener hears as pumping long before they
+ *     hear the colour." An ungated normaliser is worse than that shelf ever
+ *     was, because a pause is where the tracked level is LOWEST and so the gain
+ *     is HIGHEST — it would drive room tone hardest of all.
+ *
+ *     THE TRACKER IS THEREFORE GATED ON VOICE and holds its last value through
+ *     a pause, reusing the VoicedGate the skew tracker already needs. A pause
+ *     changes nothing at all.
+ *
+ * (2) PREVIEW AND OFFLINE DISAGREEING. Same module: "anything whose depth
+ *     scales with a TRACKED level cannot be compared between a live preview and
+ *     an offline region render: the tracker starts cold offline. That defect
+ *     shipped once — preview came out 1.5-2.3 dB more softened than the applied
+ *     audio. Reference colour to something MOTIONLESS, or accept that the two
+ *     will never agree."
+ *
+ *     THE TARGET HERE IS MOTIONLESS — a fixed reference level, not a second
+ *     tracker — so only the MEASUREMENT moves, and it converges to the same
+ *     value from either start. What remains is the opening of a region, which
+ *     is exactly what RmsFollower's warmup priming exists for and what the
+ *     plugin's three existing level-matching followers already rely on. This is
+ *     the fourth tracked gain in this kernel, not the first.
+ *
+ * ⚠ IT IS STILL A TRACKED GAIN, AND THAT IS A REAL COST. A region short
+ * relative to AUTO_TAU_MS is normalised against a level the follower never
+ * fully settled on. The priming bounds it; it does not remove it.
+ */
+const AUTO_TAU_MS = 1500
+
+/**
+ * The level the tracker is normalised toward, linear RMS.
+ *
+ * 0.1 is -20 dBFS, which is both a typical narration working level and ACX's
+ * own RMS target, so a compliant file arrives already at the reference and is
+ * left alone. MOTIONLESS BY CONSTRUCTION — see failure (2) above.
+ */
+const AUTO_REFERENCE_RMS = 0.1
+
+/** Hard bound on the correction, dB. A near-silent passage must not run away. */
+const AUTO_MAX_DB = 12
+
+/** Below this the whole thing is skipped. */
+export const AUTO_EPSILON = 1e-4
+
+/**
+ * Tracks programme level and reports the drive correction.
+ *
+ * The knob is an exponent rather than a blend: `pow(ref/level, amount/100)`
+ * gives 1 at 0, full normalisation at 100, and a partial correction in between
+ * that is still exact in dB terms — half the knob is half the correction.
+ */
+class AutoDrive {
+  constructor(sampleRate) {
+    this.level = new RmsFollower(sampleRate, AUTO_TAU_MS, 1e-6)
+    this.gate = new VoicedGate(sampleRate)
+    this.tracked = AUTO_REFERENCE_RMS
+  }
+
+  /** One base-rate sample of the signal the drive will act on. */
+  update(x) {
+    // GATED: a pause holds the last voiced level rather than dragging the
+    // tracker down and the gain up. See failure (1).
+    if (this.gate.update(x)) this.tracked = this.level.process(x)
+  }
+
+  /** Correction to multiply the per-band drives by. */
+  gain(amount) {
+    const raw = Math.pow(AUTO_REFERENCE_RMS / this.tracked, clamp(amount, 0, 100) / 100)
+    const max = dbToLin(AUTO_MAX_DB)
+    return clamp(raw, 1 / max, max)
+  }
+}
+
 /** Per-channel filter, follower, and resampler state. */
 class ChannelState {
   constructor(sampleRate) {
@@ -855,6 +950,7 @@ class ChannelState {
     this.tameGain = new Float32Array(TAME_RING).fill(1)
     this.tameBase = 0
 
+    this.autoDrive = new AutoDrive(sampleRate)
     this.skew = new SkewTracker(sampleRate)
     this.gate = new VoicedGate(sampleRate)
     this.dcBlock = makeDcBlocker(sampleRate)
@@ -939,6 +1035,9 @@ export class VocalSatKernel {
     // 1.5 for the cubic, where its domain actually ends, and 1 for the rational
     // curve, which has no hard domain but whose knee is the level it acts at.
     // Same quantity ASYM_REFERENCE and SOFTEN_REFERENCE name.
+    this.autoAmount = clamp(p.autoDrive ?? 0, 0, 100)
+    this.autoActive = this.autoAmount / 100 > AUTO_EPSILON
+
     this.tameAmount = clamp(p.tame ?? 0, 0, 100)
     this.tameActive = this.series && this.tameAmount / 100 > TAME_EPSILON
     this.tameThresholdValue = tameThreshold(
@@ -983,7 +1082,7 @@ export class VocalSatKernel {
 
     const {
       hardness, asymActive, wetDry, lowDrive, midDrive, highDrive,
-      series, emphasisActive, softenActive, tameActive, curveFn,
+      series, emphasisActive, softenActive, tameActive, autoActive, curveFn,
     } = this
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
@@ -1043,6 +1142,23 @@ export class VocalSatKernel {
       // Constant for the block — see applyTransfer on why this is hoisted.
       const shapedOffset = curveFn(offset, hardness)
 
+      // ── AUTO-DRIVE ───────────────────────────────────────────────────────
+      // Fed the RAW input, NOT `wetIn`. Emphasis is a shelf and would change
+      // the measured RMS, which would couple two unrelated knobs: raising
+      // Emphasis would quietly pull the drive down. This control is about how
+      // loud the RECORDING is, which is a property of the file rather than of
+      // the patch, so it reads the file.
+      //
+      // Resolved once per block. The time constant is 1.5 s; per-block
+      // granularity is three orders of magnitude finer than that.
+      if (autoActive) {
+        for (let i = 0; i < n; i++) st.autoDrive.update(input[i])
+      }
+      const autoGain = autoActive ? st.autoDrive.gain(this.autoAmount) : 1
+      const lowD = lowDrive * autoGain
+      const midD = midDrive * autoGain
+      const highD = highDrive * autoGain
+
       // Up to the high rate one band at a time. Upsampling is linear, so the
       // three still sum back to the input there — the complementary split is
       // preserved, and each band meets its own transfer curve with room above
@@ -1083,7 +1199,7 @@ export class VocalSatKernel {
         if (tameActive) {
           const threshold = this.tameThresholdValue
           for (let i = 0; i < n; i++) {
-            const d = lowBuf[i] * lowDrive + midBuf[i] * midDrive + highBuf[i] * highDrive
+            const d = lowBuf[i] * lowD + midBuf[i] * midD + highBuf[i] * highD
             st.tame.processSample(d, threshold)
             // Valid for base time (base + i - TAME_ALIGN); negative indices
             // wrap correctly under the mask and find the primed 1s.
@@ -1099,7 +1215,7 @@ export class VocalSatKernel {
         const softenReference = this.softenReference
         const base = st.tameBase
         for (let j = 0; j < n * L; j++) {
-          let pre = lowUp[j] * lowDrive + midUp[j] * midDrive + highUp[j] * highDrive
+          let pre = lowUp[j] * lowD + midUp[j] * midD + highUp[j] * highD
           // Zero-order hold across the two oversampled samples of a base
           // period. The gain is already triangular-smoothed at base rate, so
           // the residual stair is far below the envelope's own movement.
@@ -1111,9 +1227,9 @@ export class VocalSatKernel {
       } else {
         for (let j = 0; j < n * L; j++) {
           sum[j] =
-            applyTransfer(curveFn, lowUp[j] * lowDrive, hardness, offset, shapedOffset) +
-            applyTransfer(curveFn, midUp[j] * midDrive, hardness, offset, shapedOffset) +
-            applyTransfer(curveFn, highUp[j] * highDrive, hardness, offset, shapedOffset)
+            applyTransfer(curveFn, lowUp[j] * lowD, hardness, offset, shapedOffset) +
+            applyTransfer(curveFn, midUp[j] * midD, hardness, offset, shapedOffset) +
+            applyTransfer(curveFn, highUp[j] * highD, hardness, offset, shapedOffset)
         }
       }
 

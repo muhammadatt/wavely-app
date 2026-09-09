@@ -814,6 +814,114 @@ test('above tame 50 the saturation stops depending on Drive', () => {
   }
 })
 
+test('auto-drive makes the saturation independent of source level', () => {
+  // THE POINT OF THE CONTROL. "Saturation is not level-invariant: a quieter
+  // selection is driven less at the same Drive setting" has been in this
+  // plugin's help as a caveat users work around by hand. Measured THD on the
+  // same patch at three input levels 30 dB apart:
+  //
+  //   input     -28 dBFS   -18 dBFS   -8 dBFS
+  //   auto 0        0.3%       1.3%      9.1%
+  //   auto 100      1.7%       1.7%      1.7%
+  const n = SR * 5
+  const f0 = 180
+  const cycles = Math.round((f0 * n) / SR)
+  const thdOf = (amp, autoDrive) => {
+    const sig = new Float32Array(n)
+    for (let i = 0; i < n; i++) sig[i] = amp * Math.sin((2 * Math.PI * cycles * i) / n)
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 1, autoDrive,
+    })
+    const W = 1 << 15
+    const seg = new Float64Array(W)
+    for (let i = 0; i < W; i++) seg[i] = channelData[0][n - W + i]
+    const fft = getFFT(W)
+    const bins = rfftBinCount(W)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(seg, re, im)
+    const k0 = Math.round((f0 * W) / SR)
+    const at = h => Math.hypot(re[h * k0], im[h * k0])
+    let sum = 0
+    for (let h = 2; h <= 20; h++) sum += (at(h) / at(1)) ** 2
+    return Math.sqrt(sum) * 100
+  }
+  const levels = [0.04, 0.126, 0.4]
+  const off = levels.map(a => thdOf(a, 0))
+  const on = levels.map(a => thdOf(a, 100))
+  assert.ok(
+    off[2] > off[0] * 5,
+    `without auto-drive THD should track level hard; got ${off.map(v => v.toFixed(1)).join(' / ')}%`,
+  )
+  const spread = Math.max(...on) / Math.min(...on)
+  assert.ok(
+    spread < 1.3,
+    `auto-drive should flatten it; got ${on.map(v => v.toFixed(1)).join(' / ')}% (spread ${spread.toFixed(2)}x)`,
+  )
+})
+
+test('⚠ AUTO-DRIVE MUST NOT BREATHE — it is gated on voice for this reason', () => {
+  // tapeCharacter's HF Loss note records the failure this is built around:
+  // "Following the envelope gives full depth on a loud syllable and none
+  // through the pause after it — a room that BREATHES, which a listener hears
+  // as pumping long before they hear the colour."
+  //
+  // An UNGATED normaliser is worse than that shelf ever was, because a pause is
+  // where the tracked level is LOWEST and therefore the gain HIGHEST: it would
+  // drive room tone harder than speech. The tracker holds its last voiced value
+  // instead, so raising the knob must not lift the pauses.
+  const n = SR * 8
+  const sig = new Float32Array(n)
+  for (let i = 0; i < n; i++) sig[i] = (Math.random() * 2 - 1) * 1e-4
+  for (let k = 0; k < 5; k++) {
+    const h = Math.round(SR * (0.3 + 1.6 * k))
+    for (let i = 0; i < SR * 0.6 && h + i < n; i++) {
+      const t = i / SR
+      sig[h + i] += 0.25 * (0.6 + 0.4 * Math.sin(2 * Math.PI * 3 * t))
+        * Math.sin(2 * Math.PI * 180 * t)
+    }
+  }
+  const pauseDb = buf => {
+    let sum = 0
+    let count = 0
+    for (let k = 0; k < 4; k++) {
+      const a = Math.round(SR * (1.1 + 1.6 * k))
+      const z = Math.round(SR * (1.7 + 1.6 * k))
+      for (let i = a; i < z; i++) {
+        sum += buf[i] * buf[i]
+        count++
+      }
+    }
+    return 20 * Math.log10(Math.sqrt(sum / count))
+  }
+  const at = autoDrive => pauseDb(processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 1, autoDrive,
+  }).channelData[0])
+  const off = at(0)
+  assert.ok(
+    at(100) <= off + 0.5,
+    `auto-drive lifted the pauses by ${(at(100) - off).toFixed(2)} dB — the voiced `
+    + 'gate is not holding, and this will pump audibly',
+  )
+})
+
+test('auto-drive is absent at 0 and works in BOTH topologies', () => {
+  // Unlike Tame and Soften it needs no broadband oversampled point, so it is
+  // not restricted to series — it is a gain on the drive, nothing more.
+  const sig = bursts(2)
+  for (const mode of [MODE_PARALLEL, MODE_SERIES]) {
+    const a = processVocalSatBuffer([sig], SR, { ...HOT, mode, autoDrive: 0 }).channelData[0]
+    const b = processVocalSatBuffer([sig], SR, { ...HOT, mode }).channelData[0]
+    for (let i = 0; i < a.length; i++) {
+      assert.equal(a[i], b[i], `auto-drive 0 is not absent in ${mode} (i=${i})`)
+    }
+    const c = processVocalSatBuffer([sig], SR, { ...HOT, mode, autoDrive: 100 }).channelData[0]
+    let differs = false
+    for (let i = 0; i < a.length; i++) if (a[i] !== c[i]) differs = true
+    assert.ok(differs, `auto-drive should do something in ${mode}`)
+  }
+})
+
 test('hardness is clamped to the measured range', () => {
   // HARDNESS_MIN is an aliasing measurement, not a preference. A param message
   // from a stale panel must not reach the curve with n below it.

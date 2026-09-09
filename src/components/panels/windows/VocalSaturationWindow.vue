@@ -15,12 +15,12 @@ import LevelMeter from '../../meters/LevelMeter.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsCurve, VOCAL_SAT_CURVES, vsMode, vsEmphasis, vsSoften, vsTame, VOCAL_SAT_MODES,
+  vsDrive, vsWetDry, vsAsymmetry, vsHardness, vsCurve, VOCAL_SAT_CURVES, vsMode, vsEmphasis, vsSoften, vsTame, vsAutoDrive, VOCAL_SAT_MODES,
   vsLowCrossover, vsMidCrossover,
   vsLowDriveMult, vsMidDriveMult, vsHighDriveMult, vsHfLoss,
   vsPreview, vsInputLevels, vsOutputLevels,
   togglePreview,
-  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncCurve, syncMode, syncEmphasis, syncSoften, syncTame,
+  syncDrive, syncWetDry, syncAsymmetry, syncHardness, syncCurve, syncMode, syncEmphasis, syncSoften, syncTame, syncAutoDrive,
   syncLowCrossover, syncMidCrossover,
   syncLowDriveMult, syncMidDriveMult, syncHighDriveMult, syncHfLoss,
   apply, teardown, closeModal,
@@ -208,6 +208,26 @@ async function applyAndClose() {
               label="Topology"
               :disabled="!vsPreview"
             />
+          </div>
+        </div>
+
+        <!-- Structural controls. Split onto their own row: five items plus two
+             rockers overflows the 620 px faceplate. -->
+        <div class="mb-[16px] flex items-start justify-center gap-[20px]">
+          <!-- AUTO-DRIVE. The only one of these four that works in BOTH
+               topologies. It normalises programme level before the drive, so
+               Drive means the same thing on a quiet file as a loud one:
+               measured THD 0.3 / 1.3 / 9.1% across 30 dB of input level at 0,
+               and 1.7 / 1.7 / 1.7% at 100. Gated on voice so a pause does not
+               drive room tone — see AutoDrive. -->
+          <div class="w-[82px]">
+            <Knob :model-value="vsAutoDrive" @update:model-value="syncAutoDrive"
+                  :min="0" :max="100" :step="1" :value-font-px="13"
+                  label="Auto Drive" :accent="ACCENT" :format-value="v => v.toFixed(0)"
+                  :disabled="!vsPreview" />
+            <p class="mt-[3px] text-center" style="font:600 7.5px 'Inter',system-ui;color:rgba(255,255,255,.28)">
+              {{ vsAutoDrive > 0 ? 'levels the source' : 'off' }}
+            </p>
           </div>
           <!-- TAME. Lookahead peak control ahead of the curve, paid for out
                of the oversampler's existing 31-sample group delay, so it adds

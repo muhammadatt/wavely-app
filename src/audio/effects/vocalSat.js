@@ -80,6 +80,8 @@ export const VOCAL_SAT_DEFAULTS = {
   // Peak control ahead of the curve. SERIES ONLY, and it costs no added
   // latency — it is paid for out of the oversampler's existing group delay.
   tame: 0,
+  // Programme-level normalisation. Works in both topologies.
+  autoDrive: 0,
   // Was `softness: 0.5`, a crossfade between two curves that measured the same.
   hardness: 2.5,
   curve: CURVE_SHAPE,
@@ -104,6 +106,7 @@ export function toKernelParams(params) {
     emphasis: params.emphasis,
     soften: params.soften,
     tame: params.tame,
+    autoDrive: params.autoDrive,
     hardness: params.hardness,
     curve: params.curve,
     lowCrossover: params.lowCrossover,
