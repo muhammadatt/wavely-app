@@ -14,6 +14,7 @@ import {
   SOFTEN_REFERENCE,
   CURVE_SHAPE,
   CURVE_CUBIC,
+  TAME_LOOKAHEAD_L,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
@@ -699,6 +700,118 @@ test('the default curve is shape, and the default patch is still bit-identical',
   const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
   const b = processVocalSatBuffer([sig], SR, { curve: CURVE_SHAPE }).channelData[0]
   for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `default curve moved (i=${i})`)
+})
+
+test('TAME ADDS NO LATENCY — the whole design rests on this', () => {
+  // The lookahead is paid for out of the oversampler's existing 31-sample
+  // upsampling group delay: a detector reading the signal BEFORE the upsampler
+  // sees the curve-side audio that many samples early. If this number ever
+  // moves, the delay stopped being free and the design's premise is gone.
+  assert.equal(TAME_LOOKAHEAD_L, 15)
+  const sig = bursts(2)
+  for (const tame of [0, 50, 100]) {
+    const { latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, tame,
+    })
+    assert.equal(
+      latencySamples, VOCAL_SAT_LATENCY_SAMPLES,
+      `tame ${tame} changed the plugin's latency`,
+    )
+  }
+})
+
+test('tame is absent at 0 and ignored in parallel', () => {
+  const sig = bursts(2)
+  const par = v => processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, curve: CURVE_CUBIC, tame: v,
+  }).channelData[0]
+  const base = par(0)
+  for (const v of [1, 50, 100]) {
+    const other = par(v)
+    for (let i = 0; i < base.length; i++) {
+      assert.equal(other[i], base[i], `tame ${v} reached the parallel path (i=${i})`)
+    }
+  }
+  const a = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES, tame: 0 }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES }).channelData[0]
+  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `tame 0 is not absent (i=${i})`)
+})
+
+test('tame keeps the cubic in domain, which is the entire point of it', () => {
+  // THE MEASUREMENT THE FEATURE EXISTS FOR. Series, cubic, drive 2, share of
+  // distortion energy above the 5th harmonic:
+  //
+  //   tame      0      25      50      60      75     100
+  //   THD    38.9%   35.9%   20.0%   14.8%   11.6%   10.1%
+  //   grit   12.7%    7.9%    2.2%    2.4%    2.6%    2.8%
+  //
+  // Every step of the knob does something — an earlier mapping ran 8x edge down
+  // to 1x and was inert below 75; see tameThreshold for why anchoring 50 at the
+  // edge fixes it.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const grit = tame => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 2, tame,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    const fund = at(f0)
+    let total = 0
+    let high = 0
+    for (let k = 2; k <= 20; k++) {
+      const v = (at(f0 * k) / fund) ** 2
+      total += v
+      if (k > 5) high += v
+    }
+    return (100 * high) / total
+  }
+  assert.ok(grit(0) > 8, `unlimited cubic at drive 2 should be gritty; got ${grit(0).toFixed(1)}%`)
+  assert.ok(grit(50) < 4, `tame 50 should hold it in domain; got ${grit(50).toFixed(1)}%`)
+  assert.ok(grit(25) < grit(0), 'the knob should work below 50 as well')
+
+  // ⚠ THE FLOOR IS NOT ZERO, AND THE REASON IS STRUCTURAL. The detector runs at
+  // the BASE rate, so it cannot see intersample peaks — the oversampled signal
+  // between two base samples can exceed a bound the base samples respect. That
+  // residue is the ~2% that survives. Oversampling the detector would remove
+  // it and would cost the free lookahead, since the delay budget is counted in
+  // base samples.
+  assert.ok(grit(50) > 0.5, 'a base-rate detector cannot reach zero; if it did, re-measure')
+})
+
+test('above tame 50 the saturation stops depending on Drive', () => {
+  // A side effect worth pinning because it changes how the plugin is used: the
+  // limiter pins the operating point, so Drive above the threshold no longer
+  // changes the sound. Measured identical at drive 1, 2, 4 and 8.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const thd = drive => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive, tame: 60,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    let total = 0
+    for (let k = 2; k <= 20; k++) total += (at(f0 * k) / at(f0)) ** 2
+    return Math.sqrt(total) * 100
+  }
+  const ref = thd(1)
+  for (const d of [2, 4, 8]) {
+    assert.ok(
+      Math.abs(thd(d) - ref) < 1,
+      `drive ${d} gave ${thd(d).toFixed(1)}% against ${ref.toFixed(1)}% at drive 1`,
+    )
+  }
 })
 
 test('hardness is clamped to the measured range', () => {

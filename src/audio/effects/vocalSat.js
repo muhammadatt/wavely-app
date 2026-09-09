@@ -77,6 +77,9 @@ export const VOCAL_SAT_DEFAULTS = {
   // parallel, where the module that owns it measured the effect's sign
   // REVERSED. The panel disables it there too, so the two agree.
   soften: 0,
+  // Peak control ahead of the curve. SERIES ONLY, and it costs no added
+  // latency — it is paid for out of the oversampler's existing group delay.
+  tame: 0,
   // Was `softness: 0.5`, a crossfade between two curves that measured the same.
   hardness: 2.5,
   curve: CURVE_SHAPE,
@@ -100,6 +103,7 @@ export function toKernelParams(params) {
     mode: params.mode,
     emphasis: params.emphasis,
     soften: params.soften,
+    tame: params.tame,
     hardness: params.hardness,
     curve: params.curve,
     lowCrossover: params.lowCrossover,

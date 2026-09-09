@@ -76,6 +76,7 @@
 
 import { lowpass, highpass, highShelf, butterworthQs, BiquadCascade } from './dsp/biquad.js'
 import { Oversampler, DelayLine, VOCAL_SAT_OVERSAMPLE } from './dsp/oversample.js'
+import { LookaheadLimiter } from './dsp/lookaheadLimiter.js'
 import { RmsFollower, riseCoeff, dbToLin } from './dsp/envelope.js'
 import {
   HfLossShelf, SkewTracker, asymmetryOffset, makeDcBlocker, ASYM_EPSILON,
@@ -105,6 +106,9 @@ export const VOCAL_SAT_KERNEL_DEFAULTS = {
   // Slew limit ahead of the curve, 0-100. SERIES ONLY and absent at 0 — see
   // SOFTEN_REFERENCE_NOTE for why it cannot be offered in parallel.
   soften: 0,
+  // Peak control ahead of the curve, 0-100. SERIES ONLY, absent at 0, and
+  // costs NO added latency — see TAME_LOOKAHEAD_L.
+  tame: 0,
   // Knee order of the transfer curve — see `shape`. Replaces `softness`, which
   // crossfaded tanh against arctan; measured at matched THD those two are the
   // same curve to within 3 dB at the 5th harmonic and the blend was not a
@@ -658,6 +662,115 @@ export const EMPHASIS_EPSILON = 1e-4
  */
 export const SOFTEN_REFERENCE = 1
 
+// ── Tame: lookahead peak control paid for out of latency we already spend ──
+
+/**
+ * TAME — the piece that makes the cubic worth having, at zero added latency.
+ *
+ * THE PROBLEM IT SOLVES. `cubicShape` generates exactly the third harmonic and
+ * essentially no aliasing, but only while the signal stays inside |x| <= 1.5.
+ * Past that it is a hard clipper and measures GRITTIER than the rational curve
+ * it was meant to improve on. Nothing else in this plugin keeps it in domain.
+ *
+ * ⚠ AND IT CANNOT BE DONE WITH A PLAIN ENVELOPE FOLLOWER, WHICH IS CAUSALITY
+ * RATHER THAN AN IMPLEMENTATION LIMIT. A causal follower cannot reduce the gain
+ * before the peak arrives. Measured on bursts, cubic at drive 8, share of
+ * samples the clamp caught:
+ *
+ *   no gain control                 0.26%
+ *   zero-latency env, attack 5 ms   0.26%   the envelope never catches up
+ *   zero-latency env, attack 1 ms   0.26%   still nothing
+ *   zero-latency env, attack 0.3 ms 0.10%
+ *   zero-latency env, attack 0.1 ms 0.07%   but high-order content ROSE
+ *
+ * The usable window is about 0.3-1 ms wide and barely moves the number, and
+ * below it the gain changes appreciably WITHIN a cycle — which is waveshaping,
+ * so you trade one distortion for another. At 0.1 ms the high-order content
+ * came out worse than with no limiter at all.
+ *
+ * ── WHERE THE LOOKAHEAD COMES FROM, WHICH IS THE WHOLE TRICK ───────────────
+ *
+ * The 2x oversampler's upsampling FIR is linear phase and already delays the
+ * signal by `upsampleDelaySamples` = 31 base samples before it reaches the
+ * curve. A detector reading the signal BEFORE the upsampler therefore sees the
+ * curve-side audio 31 samples early. That is lookahead we have already paid
+ * for and were not spending.
+ *
+ * `LookaheadLimiter` needs 2L of delay to align its envelope, so the free
+ * budget supports L = 15: a +/-15 sample (0.34 ms) window, with 2L = 30 against
+ * the 31 available. THE GAIN IS THEREFORE APPLIED ONE SAMPLE EARLY, which is
+ * the safe direction for a limiter — early is conservative, late is an
+ * overshoot.
+ *
+ *   lookahead                     added latency   out of domain
+ *   0.34 ms (this, free)              0 samples       0.00%
+ *   1 ms                             88 samples       0.00%
+ *   2 ms                            176 samples       0.00%
+ *
+ * ⚠ FREE LOOKAHEAD BUYS THE GUARANTEE, NOT THE SMOOTHNESS. A short window means
+ * a fast gain envelope, and fast gain movement has its own modulation cost. On
+ * a proxy for high-order content: 6.08% with no limiter, 5.78% here, 4.35% at
+ * 1 ms, 3.36% at 2 ms. (That proxy is contaminated by programme content, so it
+ * understates the spread; the out-of-domain column is the solid one.) If the
+ * gain movement is ever audible, TAME_LOOKAHEAD_L is the one constant to raise
+ * — and raising it stops being free.
+ *
+ * ⚠ SERIES ONLY, for the same reason Soften is: parallel has no single
+ * broadband driven signal to detect on or apply a gain to. The kernel enforces
+ * it rather than trusting the panel.
+ *
+ * ⚠ THE DETECTOR IS EXACT HERE, unlike Soften's reference. Soften had to bound
+ * `drive * max(mult)` because it acts on the oversampled sum; this detector
+ * runs on `low*lowDrive + mid*midDrive + high*highDrive` at the BASE rate,
+ * which is the pre-curve signal itself rather than a bound on it.
+ */
+export const TAME_LOOKAHEAD_L = Math.floor(VOCAL_SAT_OVERSAMPLE.upsampleDelaySamples / 2)
+
+/** Alignment: gains are stored for base time `i - TAME_ALIGN`. */
+const TAME_ALIGN = 2 * TAME_LOOKAHEAD_L
+
+/** Delay, in base samples, between the detector tap and the curve. */
+const TAME_UP_DELAY = VOCAL_SAT_OVERSAMPLE.upsampleDelaySamples
+
+/**
+ * Ring of base-rate gains. Must exceed TAME_UP_DELAY + TAME_ALIGN so a block
+ * can still read gains written during the previous one. Power of two so the
+ * index can be masked — and JS bitwise AND wraps negatives correctly, which is
+ * what lets the first blocks read "before the beginning" and find the 1s the
+ * ring is primed with.
+ */
+const TAME_RING = 128
+const TAME_MASK = TAME_RING - 1
+
+/** Below this the whole thing is skipped and the ring is never touched. */
+export const TAME_EPSILON = 1e-4
+
+/**
+ * Knob to threshold, as a multiple of the curve's own edge.
+ *
+ *   threshold = edge * 4^(1 - 2a)     4x edge at 0, exactly edge at 50, edge/4 at 100
+ *
+ * ⚠ THE FIRST MAPPING PUT THE WHOLE USEFUL RANGE IN THE TOP QUARTER, which is
+ * the same failure Soften's first reference had and is worth recording twice
+ * because it is easy to reach for. Running 8x edge down to 1x edge measured:
+ *
+ *   tame      0      25      50      75     100
+ *   grit    6.59%  6.59%   6.59%   6.72%   6.70%
+ *
+ * — nothing at all below 75, because at any ordinary Drive the signal's peak
+ * sits under a threshold of 2.8x the edge and the limiter never engages.
+ *
+ * Anchoring 50 AT the edge fixes it: the bottom half brings the threshold down
+ * to where the curve's domain ends, and the top half goes below it, which is
+ * what buys headroom against the intersample peaks the base-rate detector
+ * cannot see. Geometric so the ratio, not the difference, is what the knob
+ * moves — the quantity that matters is how far into the curve the signal gets.
+ */
+function tameThreshold(amount, edge) {
+  const a = clamp(amount, 0, 100) / 100
+  return edge * Math.pow(4, 1 - 2 * a)
+}
+
 // ── The voiced gate the skew tracker requires ──────────────────────────────
 
 /** Short-term level, fast enough to open inside a syllable. */
@@ -734,6 +847,13 @@ class ChannelState {
     this.preEmph = new BiquadCascade(1, 1)
     this.deEmph = new BiquadCascade(1, 1)
     this.soften = new SoftenLimiter(VOCAL_SAT_OVERSAMPLE.factor)
+
+    // Tame. The limiter is used as a GAIN GENERATOR only — its own delayed
+    // output is discarded, because the delay this design runs on is the
+    // oversampler's, not the limiter's. See TAME_LOOKAHEAD_L.
+    this.tame = new LookaheadLimiter(TAME_LOOKAHEAD_L)
+    this.tameGain = new Float32Array(TAME_RING).fill(1)
+    this.tameBase = 0
 
     this.skew = new SkewTracker(sampleRate)
     this.gate = new VoicedGate(sampleRate)
@@ -815,6 +935,16 @@ export class VocalSatKernel {
     // See SOFTEN_REFERENCE_NOTE. `softenScale` returns exactly 1 below its own
     // epsilon, but the branch is skipped outright as well so the limiter's
     // state never advances on a patch that does not use it.
+    // TAME — series only, absent at 0. The threshold is the CURVE'S OWN edge:
+    // 1.5 for the cubic, where its domain actually ends, and 1 for the rational
+    // curve, which has no hard domain but whose knee is the level it acts at.
+    // Same quantity ASYM_REFERENCE and SOFTEN_REFERENCE name.
+    this.tameAmount = clamp(p.tame ?? 0, 0, 100)
+    this.tameActive = this.series && this.tameAmount / 100 > TAME_EPSILON
+    this.tameThresholdValue = tameThreshold(
+      this.tameAmount, this.curveFn === cubicShape ? CUBIC_LIMIT : 1,
+    )
+
     this.softenAmount = clamp(p.soften ?? 0, 0, 100)
     this.softenActive = this.series && this.softenAmount / 100 > SOFTEN_EPSILON
     this.softenScaleValue = softenScale(this.softenAmount)
@@ -853,7 +983,7 @@ export class VocalSatKernel {
 
     const {
       hardness, asymActive, wetDry, lowDrive, midDrive, highDrive,
-      series, emphasisActive, softenActive, curveFn,
+      series, emphasisActive, softenActive, tameActive, curveFn,
     } = this
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
@@ -945,17 +1075,39 @@ export class VocalSatKernel {
       // a different, harder-clipped curve, not the same one applied evenly.
       const sum = st.downWet.scratch(n)
       if (series) {
+        // TAME's DETECTOR PASS, at the BASE rate and BEFORE the upsampler —
+        // which is the entire point. This signal is the pre-curve sum exactly,
+        // and reading it here means the gain has seen TAME_UP_DELAY samples of
+        // the future by the time the audio it modulates reaches the curve.
+        // The limiter's returned sample is discarded; only its gain is wanted.
+        if (tameActive) {
+          const threshold = this.tameThresholdValue
+          for (let i = 0; i < n; i++) {
+            const d = lowBuf[i] * lowDrive + midBuf[i] * midDrive + highBuf[i] * highDrive
+            st.tame.processSample(d, threshold)
+            // Valid for base time (base + i - TAME_ALIGN); negative indices
+            // wrap correctly under the mask and find the primed 1s.
+            st.tameGain[(st.tameBase + i - TAME_ALIGN) & TAME_MASK] = st.tame.gain
+          }
+        }
+
         // SOFTEN sits HERE and nowhere else: on the summed, driven, broadband
         // signal, at the oversampled rate, with exactly one nonlinearity in
         // front of it. Those are tapeCharacter's four conditions, and this is
         // the only point in this plugin that satisfies them.
         const softenScaleValue = this.softenScaleValue
         const softenReference = this.softenReference
+        const base = st.tameBase
         for (let j = 0; j < n * L; j++) {
           let pre = lowUp[j] * lowDrive + midUp[j] * midDrive + highUp[j] * highDrive
+          // Zero-order hold across the two oversampled samples of a base
+          // period. The gain is already triangular-smoothed at base rate, so
+          // the residual stair is far below the envelope's own movement.
+          if (tameActive) pre *= st.tameGain[(base + (j / L | 0) - TAME_UP_DELAY) & TAME_MASK]
           if (softenActive) pre = st.soften.process(pre, softenScaleValue, softenReference)
           sum[j] = applyTransfer(curveFn, pre, hardness, offset, shapedOffset)
         }
+        st.tameBase += n
       } else {
         for (let j = 0; j < n * L; j++) {
           sum[j] =

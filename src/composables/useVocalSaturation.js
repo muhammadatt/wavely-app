@@ -18,6 +18,7 @@ const vsAsymmetry = ref(VOCAL_SAT_DEFAULTS.asymmetry)
 const vsMode = ref(VOCAL_SAT_DEFAULTS.mode)
 const vsEmphasis = ref(VOCAL_SAT_DEFAULTS.emphasis)
 const vsSoften = ref(VOCAL_SAT_DEFAULTS.soften)
+const vsTame = ref(VOCAL_SAT_DEFAULTS.tame)
 const vsHardness = ref(VOCAL_SAT_DEFAULTS.hardness)
 const vsCurve = ref(VOCAL_SAT_DEFAULTS.curve)
 const vsLowCrossover = ref(VOCAL_SAT_DEFAULTS.lowCrossover)
@@ -40,6 +41,7 @@ function currentParams() {
     mode: vsMode.value,
     emphasis: vsEmphasis.value,
     soften: vsSoften.value,
+    tame: vsTame.value,
     hardness: vsHardness.value,
     curve: vsCurve.value,
     lowCrossover: vsLowCrossover.value,
@@ -128,6 +130,7 @@ export function useVocalSaturation() {
   const syncMode = v => syncParam('mode', vsMode, v)
   const syncEmphasis = v => syncParam('emphasis', vsEmphasis, v)
   const syncSoften = v => syncParam('soften', vsSoften, v)
+  const syncTame = v => syncParam('tame', vsTame, v)
   const syncHardness = v => syncParam('hardness', vsHardness, v)
   const syncCurve = v => syncParam('curve', vsCurve, v)
   const syncLowCrossover = v => syncParam('lowCrossover', vsLowCrossover, v)
@@ -190,6 +193,7 @@ export function useVocalSaturation() {
     vsMode,
     vsEmphasis,
     vsSoften,
+    vsTame,
     VOCAL_SAT_MODES,
     vsLowCrossover,
     vsMidCrossover,
@@ -210,6 +214,7 @@ export function useVocalSaturation() {
     syncMode,
     syncEmphasis,
     syncSoften,
+    syncTame,
     syncLowCrossover,
     syncMidCrossover,
     syncLowDriveMult,
