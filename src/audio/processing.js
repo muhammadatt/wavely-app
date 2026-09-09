@@ -1,6 +1,7 @@
 import { getSegmentDuration } from './operations.js'
 import { analysisWindow, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
+import { LA2A_PREROLL_S } from './la2aProcessor.js'
 import {
   LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
 } from './effects/la2aCompressor.js'
@@ -22,6 +23,7 @@ import {
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
+import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
   SCHEPS_DEFAULTS,
   SCHEPS_LATENCY_SAMPLES,
@@ -32,6 +34,7 @@ import { ensureInflatorWorklet } from './inflatorWorkletLoader.js'
 import {
   VOCAL_SAT_DEFAULTS,
   VOCAL_SAT_LATENCY_SAMPLES,
+  VOCAL_SAT_PREROLL_S,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
 import {
@@ -452,19 +455,61 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
  */
 async function applyWorkletRegion(
   segments, start, end, sampleRate, channels,
-  { ensureWorklet, processorName, kernelParams, latencySamples = 0 },
+  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0 },
 ) {
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
   const latency = Math.max(0, Math.round(latencySamples))
-  const renderSamples = numSamples + latency
+
+  // ── PRE-ROLL ─────────────────────────────────────────────────────────────
+  //
+  // ⚠ WITHOUT THIS, A STAGE WITH ENVELOPE STATE DOES NOT PRODUCE WHAT THE
+  // PREVIEW PRODUCED, and the gap is not small. The preview worklet has been
+  // running over everything the user played; this render starts COLD at the
+  // region's first sample. Measured on Tube Saturation, preview settled against
+  // a cold apply, energy over the first 0.5 s of the region: -0.36 dB at the
+  // shipped default and -2.06 dB with its slower trackers engaged. That second
+  // figure sits inside the range tapeCharacter records for the same defect the
+  // last time it shipped ("preview came out 1.5-2.3 dB more softened").
+  //
+  // Worse than a level offset: a stage that makes a DECISION from tracked
+  // state can decide differently. Tube Saturation's skew tracker settles to
+  // direction -0.62 on positive-leaning material but reads +1.00 before its 3 s
+  // evidence gate, so a selection shorter than that had its asymmetry leaning
+  // the wrong way — worth up to 7.9 dB of extra distortion by that module's own
+  // measurement.
+  //
+  // ⚠ CLAMPED TO WHAT THE TIMELINE ACTUALLY HAS, and that is not a detail.
+  // renderRegionToBuffer zero-fills before the start of the timeline, and
+  // priming an RmsFollower with four seconds of digital silence is WORSE than
+  // starting cold: its warmup would complete on the silence and the exponential
+  // average would then have to climb from zero, which is the exact failure the
+  // warmup exists to prevent. A region at t=0 therefore gets no pre-roll and
+  // behaves exactly as it did before.
+  //
+  // ⚠ OPT-IN, ONE STAGE AT A TIME. Every caller of this function has envelope
+  // state and the same bug; turning it on for all of them at once would change
+  // the output of five shipped plugins in one commit. Three ask for it, each
+  // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s) and
+  // Scheps (2 s) — see the note beside each call site for what its number
+  // buys. The rest keep today's behaviour until each is measured on its own.
+  //
+  // Two of those measurements say pre-roll is not the answer, and they are the
+  // reason this is not a flag to switch on everywhere. FET Punch's makeup
+  // tracker is a running MAXIMUM, so no length of pre-roll converges it — only
+  // a bounded reference would. ResoTame's error is the STFT grid phase,
+  // (regionStart - preRoll) % hop, which the apply path cannot know; a pre-roll
+  // that happens to land hop-aligned looks exact and is not.
+  const wantedPreRoll = Math.max(0, Math.round(preRollSamples))
+  const preRoll = Math.min(wantedPreRoll, Math.max(0, Math.floor(start * sampleRate)))
+  const renderSamples = preRoll + numSamples + latency
 
   // Pull `latency` extra samples of real audio from past the region where the
   // timeline has them, so the tail is reconstructed from context rather than
   // from silence. renderRegionToBuffer zero-fills beyond the end of the
   // timeline, which is exactly what we want there.
   const channelData = renderRegionToBuffer(
-    segments, start, end + latency / sampleRate, sampleRate, channels,
+    segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels,
   )
 
   const offlineCtx = new OfflineAudioContext(channels, renderSamples, sampleRate)
@@ -496,15 +541,18 @@ async function applyWorkletRegion(
   source.start(0)
 
   const rendered = await offlineCtx.startRendering()
-  if (latency === 0) return rendered
+  // The pre-roll is discarded along with the latency: both are context the
+  // kernel needed to see and neither belongs on the timeline.
+  const head = preRoll + latency
+  if (head === 0) return rendered
 
-  // Drop the leading `latency` samples so output sample 0 corresponds to input
-  // sample 0, and hand back a buffer of exactly the region's length — that is
-  // what replaceRegion expects to splice in.
+  // Drop the leading `head` samples so output sample 0 corresponds to the
+  // region's first input sample, and hand back a buffer of exactly the region's
+  // length — that is what replaceRegion expects to splice in.
   const trimmed = offlineCtx.createBuffer(channels, numSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
     trimmed.copyToChannel(
-      rendered.getChannelData(ch).subarray(latency, latency + numSamples),
+      rendered.getChannelData(ch).subarray(head, head + numSamples),
       ch,
     )
   }
@@ -527,6 +575,9 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
     processorName: 'la2a-processor',
     kernelParams: toKernelParams(merged),
     latencySamples: la2aPatchLatencySamples(merged, sampleRate),
+    // Bit-exact against a settled preview at this length — see LA2A_PREROLL_S
+    // for the measurements and for why nothing in this kernel latches.
+    preRollSamples: Math.round(LA2A_PREROLL_S * sampleRate),
   })
 }
 
@@ -574,6 +625,9 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     processorName: 'scheps-processor',
     kernelParams: toSchepsKernelParams({ ...SCHEPS_DEFAULTS, ...params }),
     latencySamples: SCHEPS_LATENCY_SAMPLES,
+    // Inherits the LA-2A kernel, so it inherits its convergence — see
+    // SCHEPS_PREROLL_S. Also bit-exact at this length.
+    preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
   })
 }
 
@@ -584,6 +638,12 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
     latencySamples: VOCAL_SAT_LATENCY_SAMPLES,
+    // ⚠ THE ONLY CALLER ASKING FOR THIS SO FAR. Tube Saturation carries the
+    // slowest trackers in the app — a 3 s skew evidence gate and a 1.5 s level
+    // follower — so a cold start showed up as a 2 dB error over the opening of
+    // a region. See VOCAL_SAT_PREROLL_S for the measurements and for why it
+    // narrows the gap rather than closing it.
+    preRollSamples: Math.round(VOCAL_SAT_PREROLL_S * sampleRate),
   })
 }
 
@@ -732,6 +792,9 @@ export function applyResonanceRegion(segments, start, end, params, sampleRate, c
     processorName: 'resonance-processor',
     kernelParams: toResonanceKernelParams({ ...RESONANCE_DEFAULTS, ...params }),
     latencySamples: RESONANCE_LATENCY_SAMPLES,
+    // ⚠ NO PRE-ROLL, DELIBERATELY — see the note on StftProcessor's use in
+    // resonanceProcessor.js. This stage's disagreement is a frame-PHASE error,
+    // not a convergence one, and a pre-roll cannot fix it.
   })
 }
 

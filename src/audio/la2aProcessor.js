@@ -189,6 +189,46 @@ export { MAKEUP_PERCENTILE, CEILING_KNEE_DB }
  * -5.12 / -5.97 / -5.89. Faster recovery means less of the cell is still lit,
  * so the margin narrows with the gap; the ORDERING is the claim, not the size.
  */
+/**
+ * Seconds of real audio the offline apply path runs through the kernel BEFORE
+ * the region and discards. See applyWorkletRegion in processing.js.
+ *
+ * WITHOUT IT, PREVIEW AND APPLY DISAGREE. The preview worklet has been running
+ * over the whole session; the apply render starts cold at the region's first
+ * sample, with the T4 cell at rest and the makeup tracker unwarmed. Measured,
+ * settled preview against a cold apply, energy over the region's first 0.5 s:
+ *
+ *   PR 25 (no compression)   0.000 dB      no gain reduction, no state
+ *   PR 50 (default)         -0.101
+ *   PR 75                   -0.160
+ *   PR 90                   -0.168
+ *   PR 75, limit mode       -0.388
+ *   PR 90, limit mode       -0.520
+ *
+ * ⚠ 2 SECONDS MAKES IT BIT-EXACT, which is a stronger result than Tube
+ * Saturation can get and the reason this constant is not simply copied from
+ * there. Adversarial probe — a loud passage running right up to the region
+ * boundary and then dropping quiet, so the cell is deeply compressed and
+ * releasing through the region:
+ *
+ *   pre-roll     0 s      0.5 s      1 s       2 s
+ *   max diff   3.2e-2    1.7e-7   3.6e-12   0.0e+0
+ *   RMS dB    -0.3040   -0.0000    0.0000   0.0000
+ *
+ * NOTHING HERE LATCHES. Every piece of state is driven by the input and its
+ * influence decays exponentially, so after a few time constants the state is a
+ * function of recent input alone. That is the whole difference: Tube
+ * Saturation cannot reach zero because its skew sign is a STICKY LATCH and its
+ * voiced gate holds a valley floor, neither of which forgets. FET Punch cannot
+ * either — its makeup tracker targets "the loudest input sample heard so far",
+ * a running maximum with unbounded memory.
+ *
+ * A useful incidental: 2 s is 88,200 samples, not a whole number of 128-sample
+ * blocks, so the two runs see different block boundaries and are STILL
+ * bit-identical. Nothing in this kernel is resolved per block.
+ */
+export const LA2A_PREROLL_S = 2
+
 export const ATTACK_DARK_S = 0.010
 export const ATTACK_LIT_S = 0.0045
 

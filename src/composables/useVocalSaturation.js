@@ -3,7 +3,9 @@ import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyVocalSatRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
-import { vocalSatEffect, VOCAL_SAT_DEFAULTS } from '../audio/effects/vocalSat.js'
+import {
+  vocalSatEffect, VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES, VOCAL_SAT_ASYM_MODES,
+} from '../audio/effects/vocalSat.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -12,8 +14,15 @@ export const VOCAL_SAT_WINDOW_ID = 'vocal-saturation'
 // Singleton reactive state shared between the sidebar trigger and the modal.
 const vsDrive = ref(VOCAL_SAT_DEFAULTS.drive)
 const vsWetDry = ref(VOCAL_SAT_DEFAULTS.wetDry)
-const vsBias = ref(VOCAL_SAT_DEFAULTS.bias)
-const vsSoftness = ref(VOCAL_SAT_DEFAULTS.softness)
+const vsAsymmetry = ref(VOCAL_SAT_DEFAULTS.asymmetry)
+const vsAsymMode = ref(VOCAL_SAT_DEFAULTS.asymMode)
+const vsMode = ref(VOCAL_SAT_DEFAULTS.mode)
+const vsEmphasis = ref(VOCAL_SAT_DEFAULTS.emphasis)
+const vsSoften = ref(VOCAL_SAT_DEFAULTS.soften)
+const vsTame = ref(VOCAL_SAT_DEFAULTS.tame)
+const vsAutoDrive = ref(VOCAL_SAT_DEFAULTS.autoDrive)
+const vsHardness = ref(VOCAL_SAT_DEFAULTS.hardness)
+const vsCurve = ref(VOCAL_SAT_DEFAULTS.curve)
 const vsLowCrossover = ref(VOCAL_SAT_DEFAULTS.lowCrossover)
 const vsMidCrossover = ref(VOCAL_SAT_DEFAULTS.midCrossover)
 const vsLowDriveMult = ref(VOCAL_SAT_DEFAULTS.lowDriveMult)
@@ -30,8 +39,15 @@ function currentParams() {
   return {
     drive: vsDrive.value,
     wetDry: vsWetDry.value,
-    bias: vsBias.value,
-    softness: vsSoftness.value,
+    asymmetry: vsAsymmetry.value,
+    asymMode: vsAsymMode.value,
+    mode: vsMode.value,
+    emphasis: vsEmphasis.value,
+    soften: vsSoften.value,
+    tame: vsTame.value,
+    autoDrive: vsAutoDrive.value,
+    hardness: vsHardness.value,
+    curve: vsCurve.value,
     lowCrossover: vsLowCrossover.value,
     midCrossover: vsMidCrossover.value,
     lowDriveMult: vsLowDriveMult.value,
@@ -114,8 +130,15 @@ export function useVocalSaturation() {
 
   const syncDrive = v => syncParam('drive', vsDrive, v)
   const syncWetDry = v => syncParam('wetDry', vsWetDry, v)
-  const syncBias = v => syncParam('bias', vsBias, v)
-  const syncSoftness = v => syncParam('softness', vsSoftness, v)
+  const syncAsymmetry = v => syncParam('asymmetry', vsAsymmetry, v)
+  const syncAsymMode = v => syncParam('asymMode', vsAsymMode, v)
+  const syncMode = v => syncParam('mode', vsMode, v)
+  const syncEmphasis = v => syncParam('emphasis', vsEmphasis, v)
+  const syncSoften = v => syncParam('soften', vsSoften, v)
+  const syncTame = v => syncParam('tame', vsTame, v)
+  const syncAutoDrive = v => syncParam('autoDrive', vsAutoDrive, v)
+  const syncHardness = v => syncParam('hardness', vsHardness, v)
+  const syncCurve = v => syncParam('curve', vsCurve, v)
   const syncLowCrossover = v => syncParam('lowCrossover', vsLowCrossover, v)
   const syncMidCrossover = v => syncParam('midCrossover', vsMidCrossover, v)
   const syncLowDriveMult = v => syncParam('lowDriveMult', vsLowDriveMult, v)
@@ -169,8 +192,18 @@ export function useVocalSaturation() {
   return {
     vsDrive,
     vsWetDry,
-    vsBias,
-    vsSoftness,
+    vsAsymmetry,
+    vsAsymMode,
+    VOCAL_SAT_ASYM_MODES,
+    vsHardness,
+    vsCurve,
+    VOCAL_SAT_CURVES,
+    vsMode,
+    vsEmphasis,
+    vsSoften,
+    vsTame,
+    vsAutoDrive,
+    VOCAL_SAT_MODES,
     vsLowCrossover,
     vsMidCrossover,
     vsLowDriveMult,
@@ -184,8 +217,15 @@ export function useVocalSaturation() {
     togglePreview,
     syncDrive,
     syncWetDry,
-    syncBias,
-    syncSoftness,
+    syncAsymmetry,
+    syncAsymMode,
+    syncHardness,
+    syncCurve,
+    syncMode,
+    syncEmphasis,
+    syncSoften,
+    syncTame,
+    syncAutoDrive,
     syncLowCrossover,
     syncMidCrossover,
     syncLowDriveMult,

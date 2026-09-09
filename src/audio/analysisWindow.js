@@ -53,30 +53,46 @@ export const AUTO_MAKEUP_MAX_ANALYSIS_S = 30
  * so a window taken from the start reproduces the cold start the applied audio
  * actually has, instead of manufacturing one mid-phrase.
  *
- * Measured on the reported file, makeup error against a whole-file measurement:
+ * ⚠ THAT LAST SENTENCE IS NO LONGER TRUE OF TWO STAGES, AND THE ANCHORING IS
+ * STILL RIGHT — the two facts belong together, because they arrived from
+ * different branches and the first looks like it should undo the second.
+ * `applyWorkletRegion` now takes an opt-in `preRollSamples`, and OptoSmooth and
+ * Scheps ask for 2 s of it, so THEIR applied audio reaches the region with a
+ * warm detector while this window still solves against a cold one. The warm
+ * number is the correct one; this window's is the one that is off.
  *
- *                        centred (was)      from the start (now)
- *   FET Punch drive 30     −0.02 dB              0.00 dB
- *   FET Punch drive 55     −2.15                 0.00     <- the report
- *   FET Punch drive 80     −4.67                 0.00
- *   OptoSmooth PR 60       −5.57                 0.00
- *   OptoSmooth PR 75       −7.85                 0.00
+ * Measured, warm-apply makeup minus cold-window makeup, by how far the material
+ * DROPS in level across the region boundary (loud passage, then a quieter
+ * selection — a warm detector enters that gain-reduced and a cold one does not):
  *
- * ⚠ THE ERROR GREW WITH DEPTH, WHICH IS THE SECOND HALF OF THE REPORT. The
- * cold-start transient escapes compression whatever the setting, so the harder
- * the compressor is driven the further the measured output peak sits above the
- * real one. Across FET Punch's Input knob the shipped measurement travelled
- * 13.81 → 2.40 dB where the truth travels 13.83 → 7.07 — so the makeup did
- * respond to the knob, in the wrong proportion and worst where the compressor
- * works hardest. That is what "makeup does not update in response to input
- * level" looks like from the outside.
+ *   drop across the edge    PR 40     PR 60     PR 75     PR 90
+ *     0 dB (flat)          +0.011    +0.009    +0.002    +0.000
+ *     6 dB                 +0.030    +0.010    +0.003    +0.000
+ *    18 dB                 +0.341    +0.041    +0.020    +0.013
+ *    25 dB                 +0.369    +0.584    +0.039    +0.024
+ *   quieter before        <0.001    <0.001    <0.001    <0.001
  *
- * ⚠ SCHEPS AND THE SOFT CLIPPER WERE NEVER AFFECTED, and why is worth keeping.
- * Scheps references the 95th percentile of 100 ms blocks, which one cold block
- * cannot move (measured error 0.03 dB); the soft clipper's peak control is
- * memoryless with a fixed ceiling, so it has no detector to start cold (0.00).
- * The exposure is exactly the peak-referenced measurements with a stateful
- * detector behind them.
+ * ⚠ THE AXIS IS THE LEVEL STEP, NOT THE COMPRESSION DEPTH, which is the
+ * opposite of the centring bug above and the reason one is a report and this is
+ * a footnote. That bug grew with depth and applied to every file; this needs a
+ * loud passage butted directly against a much quieter selection, and is 0.03 dB
+ * or less on anything gentler than a 6 dB step.
+ *
+ * ⚠ AND THE PERCENTILE REFERENCE DOES NOT RESCUE THIS ONE — worth stating
+ * because the paragraph above says it rescued Scheps from the centring bug, and
+ * the inference does not carry. Under a 25 dB step the percentile error (0.584
+ * dB) is LARGER than the peak error (0.262), because the two failures are not
+ * the same shape: a cold start mis-measures the first few milliseconds, which a
+ * percentile ignores and a peak does not, whereas a warm detector enters a
+ * quiet region compressed and holds the WHOLE opening down — a bulk shift, which
+ * is exactly what a percentile does see. Immunity to one is not immunity to the
+ * other.
+ *
+ * Left as it is rather than fixed: teaching this window about `preRollSamples`
+ * means rendering the lead-in on every knob-drag measurement, which is the
+ * latency this cap exists to bound, for a correction that is under 0.05 dB on
+ * anything but a pathological edge. Pinned in
+ * test/dsp/previewApplyConvergence.test.js so it cannot widen unnoticed.
  *
  * ⚠ WHAT IS STILL APPROXIMATE: a peak later in the region than the cap is not
  * seen, so on a selection longer than AUTO_MAKEUP_MAX_ANALYSIS_S the makeup can

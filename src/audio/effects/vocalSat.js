@@ -2,10 +2,22 @@
  * Vocal Saturation — real-time effect chain wrapper.
  *
  * The DSP lives in ../vocalSatProcessor.js (complementary three-band split,
- * blended tanh/arctan transfer with per-band drive, gain-neutral parallel
- * blend) and runs in an AudioWorklet. The offline apply path renders through
- * the same worklet in an OfflineAudioContext, so the preview is
- * sample-identical to what gets written to the timeline.
+ * knee-order transfer curve with per-band drive, measured-sign asymmetry, and a
+ * gain-neutral parallel blend) and runs in an AudioWorklet. The offline apply
+ * path renders through the same worklet in an OfflineAudioContext.
+ *
+ * ⚠ THAT DOES NOT MAKE THEM SAMPLE-IDENTICAL, AND THIS FILE CLAIMED IT DID.
+ * Same code and same parameters, but the preview kernel has been running over
+ * the whole session while the apply render starts COLD at the region's first
+ * sample, so every follower, gate and tracker inside begins somewhere else.
+ * Measured at up to 2 dB over the opening of a region before the apply path
+ * grew a pre-roll, and about 0.3 dB after. See VOCAL_SAT_PREROLL_S for the
+ * numbers and for why no finite pre-roll closes it completely.
+ *
+ * ⚠ EIGHT OTHER EFFECT WRAPPERS IN THIS DIRECTORY MAKE THE SAME CLAIM and all
+ * of them have envelope state too, so it is likely wrong for them as well —
+ * OptoSmooth and FET Punch carry the most. None has been measured, so none has
+ * been changed; do not read their silence as a clean bill of health.
  *
  * This replaces a server round-trip: the panel used to POST the rendered
  * selection to /api/spot/vocal_saturation and wait on a modal.
@@ -15,43 +27,25 @@
  */
 
 import { ensureVocalSatWorklet } from '../vocalSatWorkletLoader.js'
-import { VOCAL_SAT_LATENCY_SAMPLES } from '../vocalSatProcessor.js'
+import {
+  VOCAL_SAT_LATENCY_SAMPLES, VOCAL_SAT_PREROLL_S,
+} from '../vocalSatProcessor.js'
+import {
+  VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES, VOCAL_SAT_ASYM_MODES,
+  toKernelParams,
+  MODE_SERIES, MODE_PARALLEL, CURVE_SHAPE, CURVE_CUBIC,
+  ASYM_MODE_OFFSET, ASYM_MODE_SPLIT,
+} from '../vocalSatParams.js'
 import { createLevelTap } from './levelTap.js'
 
-export { VOCAL_SAT_LATENCY_SAMPLES }
-
-// Same names and defaults the panel already used, so the UI is unchanged.
-export const VOCAL_SAT_DEFAULTS = {
-  drive: 2.0,
-  wetDry: 1,
-  bias: 1,
-  softness: 0.5,
-  lowCrossover: 500,
-  midCrossover: 3500,
-  lowDriveMult: 8.0,
-  midDriveMult: 8,
-  highDriveMult: 8,
-  // The medium's own bandwidth, 0-100. Moved here from the soft clipper's
-  // Drive knob, where a linear shelf sat inside a stage whose identity is
-  // transparency. 0 is absent, not flat — see HF_LOSS_CORNER_HZ.
-  hfLoss: 0,
+export {
+  VOCAL_SAT_LATENCY_SAMPLES, VOCAL_SAT_PREROLL_S,
+  VOCAL_SAT_DEFAULTS, VOCAL_SAT_MODES, VOCAL_SAT_CURVES, VOCAL_SAT_ASYM_MODES,
+  toKernelParams,
+  MODE_SERIES, MODE_PARALLEL, CURVE_SHAPE, CURVE_CUBIC,
+  ASYM_MODE_OFFSET, ASYM_MODE_SPLIT,
 }
 
-/** Map UI param names to kernel param names — 1:1 for this effect. */
-export function toKernelParams(params) {
-  return {
-    drive: params.drive,
-    wetDry: params.wetDry,
-    bias: params.bias,
-    softness: params.softness,
-    lowCrossover: params.lowCrossover,
-    midCrossover: params.midCrossover,
-    lowDriveMult: params.lowDriveMult,
-    midDriveMult: params.midDriveMult,
-    highDriveMult: params.highDriveMult,
-    hfLoss: params.hfLoss,
-  }
-}
 
 export function createVocalSat(audioContext) {
   const input = audioContext.createGain()
