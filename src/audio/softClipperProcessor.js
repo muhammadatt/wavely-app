@@ -363,11 +363,16 @@ const SPEECH_INIT_WINDOW_MS = 500
  * far more slowly than any other stage (OptoSmooth and Scheps are bit-exact at
  * 2 s), because the tracker must traverse ~20 dB at a 3 s time constant.
  *
- * NO PRE-ROLL IS WIRED YET. Twelve seconds would be needed for parity with the
- * others, and seeding the tracker from a fast measurement of the render's
- * opening — rather than from this constant — would converge immediately and
- * cost nothing, at the price of changing a deliberate cold-start behaviour.
- * That is a design decision rather than a plumbing one.
+ * ⚠ NOTHING IS BEING DONE ABOUT THIS, AND THAT IS THE RIGHT ANSWER, because
+ * `adaptive` is deprecated and off the faceplate — see thresholdMode. This
+ * measurement is not a bug report against the shipping stage; it is the
+ * strongest evidence yet for why that mode should STAY deprecated, and it is
+ * recorded here so that anyone tempted to re-expose it finds the number first.
+ *
+ * The shipping `fixed` mode has no tracker to be cold and is exactly identical
+ * between preview and apply at every pre-roll, including none. Wiring a
+ * 12-second pre-roll to rescue a deprecated mode would slow every apply of the
+ * mode people actually use, to fix the one they cannot select.
  *
  * ⚠ A MEASUREMENT TRAP THAT NEARLY HID ALL OF THIS: a probe quieter than the
  * threshold shows PERFECT agreement, because a threshold stage below its
@@ -1163,6 +1168,15 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // parameterisations of one idea is the duplication this codebase keeps
   // learning not to ship.
   thresholdMode: 'adaptive',
+  //
+  // ⚠ A THIRD REASON TO LEAVE IT DEPRECATED, MEASURED AFTER THE FACT: it is the
+  // largest preview/apply disagreement in the app. The tracker starts at
+  // SPEECH_INIT_HOLD_DB and a preview has been running all session, so on a
+  // region louder than the passage before it the preview clips hard while a
+  // cold render barely clips at all — 11.4 dB apart on the stock patch, and
+  // still 0.4 dB after eight seconds of lead-in because the tracker has ~20 dB
+  // to travel at a 3 s time constant. In `fixed` mode the same probe is
+  // EXACTLY identical at every pre-roll. See SPEECH_INIT_HOLD_DB for the table.
   fixedThresholdDb: -10, // used only in 'fixed' mode
   // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT.
   //
