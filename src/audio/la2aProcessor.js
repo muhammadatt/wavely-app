@@ -1655,8 +1655,34 @@ export class LA2AKernel {
      * ⚠ THE RENDERED FILE IS UNAFFECTED. Apply uses `computeAutoMakeupPlan`,
      * which renders and re-measures and is correct to 0.01 dB — verified by
      * rendering at its answer and finding the output peak on the input peak.
-     * What this costs is that the AUTO Gain knob reads about a dB low during
-     * preview on a patch with the pair engaged, and apply then corrects it.
+     * What this costs is a small disagreement on the AUTO Gain knob during
+     * preview, which apply then corrects.
+     *
+     * ⚠ THE -1 dB FIGURE ABOVE IS THE WORST CASE, NOT THE TYPICAL ONE, AND IT
+     * IS NOT A BIAS THAT CAN BE TRIMMED OUT. It was first characterised as
+     * "the knob reads about a dB low", generalised from the single probe in
+     * `liveMakeup.test.js` — which peaks at -0.55 dBFS. Swept across material
+     * and level, live minus offline runs:
+     *
+     *   dark voice (-12 dBFS)          +0.31 .. +0.45
+     *   neutral voice                  +0.33 .. +0.38
+     *   bright voice                   +0.11 .. +0.17
+     *   sibilant speech                -0.09 .. +0.06
+     *   hard-onset bursts              -0.01 .. +0.16
+     *   the test probe at -0.55 dBFS            -1.03
+     *   the same probe at -4.85 dBFS            -0.12
+     *   the same probe at -9.67 dBFS            +0.09
+     *
+     * So the sign FLIPS with material, most real sources sit within about
+     * +/-0.4 dB, and the large negative figure belongs to a source peaking at
+     * full scale — where the solve targets an output peak close to the tube's
+     * saturation and the inverse is at its most sensitive.
+     *
+     * ⚠ WHICH IS WHY NO CORRECTION GAIN BELONGS HERE. A fixed offset sized to
+     * the worst case would push the common case — already reading slightly
+     * HIGH — a further half dB the wrong way, converting a bounded spread into
+     * a guaranteed error on ordinary material. The honest fix is a better
+     * model of the filter, not a constant.
      */
     this.trkEmph = []
     this.trkEmphScratch = new Float32Array(128)

@@ -100,11 +100,21 @@ test('OptoSmooth: converges on the offline solve with the loop closed', () => {
   }
 })
 
+/**
+ * ⚠ THIS PROBE IS THE WORST CASE, NOT A TYPICAL ONE, AND THE BOUND IS NOT
+ * SYMMETRIC BECAUSE OF IT. `material()` peaks at -0.55 dBFS, which puts the
+ * makeup solve's target right up against the tube's saturation where the
+ * inverse is most sensitive. Backed off to -4.85 dBFS the same probe measures
+ * -0.12 dB and at -9.67 it measures +0.09.
+ *
+ * ⚠ AND THE RESIDUE IS NOT ONE-SIDED, WHICH AN EARLIER VERSION OF THIS
+ * COMMENT CLAIMED. It was written from this probe alone; swept across
+ * material the sign flips, and ordinary speech reads HIGH by up to 0.45 dB.
+ * The claim under test is that the spread is BOUNDED, not that it has a
+ * direction — the next test pins the other end.
+ */
 test('with the emphasis pair the closed form stays within a documented 1.2 dB', () => {
-  // Not a relaxed version of the test above — a different claim. It pins that
-  // the residue is BOUNDED and one-sided (the tracker under-reads, so the knob
-  // never asks for more than apply will deliver), and it would fail loudly if
-  // the tracker-side de-emphasis were removed: that measures -11.4 dB.
+  // Would fail loudly if the tracker-side de-emphasis were removed: -11.4 dB.
   const x = material()
   for (const peakReduction of [55, 70, 85]) {
     const p = { peakReduction }
@@ -112,8 +122,48 @@ test('with the emphasis pair the closed form stays within a documented 1.2 dB', 
     const k = new LA2AKernel(SR); k.setParams(p)
     const { final } = runClosedLoop(k, x, 'gainDb')
     const err = final - offline
-    assert.ok(err > -1.2 && err <= 0.1,
+    assert.ok(err > -1.2 && err <= 0.5,
       `PR ${peakReduction}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`)
+  }
+})
+
+test('on ordinary material the closed form is well inside half a dB', () => {
+  /**
+   * The counterweight to the test above, and the reason no correction gain is
+   * applied to the preview path: the error is a SPREAD around zero whose sign
+   * depends on the material, not an offset that could be trimmed out. A fixed
+   * correction sized to the worst case would push these — already reading
+   * slightly high — a further half dB the wrong way.
+   */
+  const tilted = (tilt, f0) => {
+    const n = Math.round(SR * 4)
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      const t = i / SR
+      let s = 0
+      for (let k = 1; k <= 40; k++) {
+        const f = f0 * k
+        if (f > 16000) break
+        s += Math.pow(k, -tilt) * Math.sin(2 * Math.PI * f * t + k * 1.7)
+      }
+      x[i] = s * Math.pow(Math.max(0, Math.sin(2 * Math.PI * 4 * t)), 0.6)
+    }
+    let p = 0
+    for (const v of x) p = Math.max(p, Math.abs(v))
+    // -12 dBFS: a gain-staged source, not one slammed against full scale.
+    for (let i = 0; i < n; i++) x[i] = (x[i] / p) * Math.pow(10, -12 / 20)
+    return x
+  }
+  for (const [tilt, f0] of [[1.4, 110], [1.0, 118], [0.6, 125], [0.3, 130]]) {
+    const x = tilted(tilt, f0)
+    for (const peakReduction of [55, 85]) {
+      const p = { peakReduction }
+      const offline = computeAutoMakeupDb([x], SR, p)
+      const k = new LA2AKernel(SR); k.setParams(p)
+      const { final } = runClosedLoop(k, x, 'gainDb')
+      assert.ok(Math.abs(final - offline) < 0.5,
+        `tilt ${tilt} PR ${peakReduction}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`)
+    }
   }
 })
 
