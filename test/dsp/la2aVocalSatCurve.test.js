@@ -296,3 +296,68 @@ test('the pair absorbs on the imported cell shaper and is inert on tanh', () => 
   assert.ok(shaperDelta < -0.2, `shaper absorbs (${shaperDelta.toFixed(2)} dB)`)
   assert.ok(Math.abs(tanhDelta) < 0.1, `tanh valve inert (${tanhDelta.toFixed(2)} dB)`)
 })
+
+// ── Live re-enable, which the bench panel does to a running worklet ─────────
+
+/**
+ * ⚠ BOTH OF THESE WERE REAL AND BOTH CAME FROM A REVIEW, NOT FROM THIS SUITE.
+ * The tuning panel writes params onto a worklet that is already streaming, so
+ * "switch it off and back on mid-playback" is an ordinary user action. Neither
+ * stage cleaned up after itself on the way out.
+ */
+test('disabling the emphasis pair empties its filters', () => {
+  /**
+   * ⚠ ASSERTS THE STATE, NOT THE SIGNAL, AND THE FIRST VERSION OF THIS TEST
+   * WAS VACUOUS FOR EXACTLY THAT REASON. It compared a toggled kernel against
+   * a fresh one and required the block after re-enable to agree within 40 dBc
+   * — which it does with the fix REMOVED, because the two kernels differ
+   * legitimately in detector and cell history and that swamps the filter
+   * memory. A 1800 Hz biquad also forgets in well under a millisecond, so the
+   * signal-level evidence is small and easily masked. The claim worth pinning
+   * is the invariant: while the pair is off, it holds nothing.
+   */
+  const x = speech()
+  const k = new LA2AKernel(SR)
+  k.setParams({ peakReduction: 70, gainDb: 3, inputAlignDb: 12, emphasis: 100 })
+  const out = new Float32Array(128)
+  for (let off = 0; off + 128 <= 8192; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+  }
+  const live = [...k.preEmph, ...k.deEmph, ...k.trkEmph]
+  assert.ok(live.length > 0, 'the filters were built')
+  assert.ok(live.some(f => f.z1.some(v => v !== 0) || f.z2.some(v => v !== 0)),
+    'precondition: the filters hold state while the pair is running')
+
+  k.setParams({ emphasis: 0 })
+  for (const f of [...k.preEmph, ...k.deEmph, ...k.trkEmph]) {
+    assert.ok(f.z1.every(v => v === 0) && f.z2.every(v => v === 0),
+      'a bypassed emphasis filter is still holding pre-bypass audio')
+  }
+})
+
+test('toggling the cell shaper resets its ramp seams to the stage\'s identities', () => {
+  /**
+   * Same reasoning: the seams only advance while the shaper runs, so after a
+   * spell switched off they name gains and a drive from whenever it last ran.
+   * Re-enabling then ramps the first block FROM those, which is a step. The
+   * identities are unity gains and a zero drive — `transferAt` reads that as
+   * the stage being absent, so the first block ramps in from nothing exactly
+   * as a fresh kernel does.
+   */
+  const x = speech()
+  const k = new LA2AKernel(SR)
+  k.setParams({
+    peakReduction: 70, gainDb: 3, inputAlignDb: 12,
+    cellCurve: CELL_CURVE_VOCALSAT,
+  })
+  const out = new Float32Array(128)
+  for (let off = 0; off + 128 <= 8192; off += 128) {
+    k.process([x.subarray(off, off + 128)], [out], 128)
+  }
+  assert.ok(k.seamDrive > 0, 'precondition: the seams advanced while running')
+
+  k.setParams({ cellCurve: CELL_CURVE_GAINMOD })
+  assert.equal(k.seamPreG, 1)
+  assert.equal(k.seamMakeup, 1)
+  assert.equal(k.seamDrive, 0)
+})

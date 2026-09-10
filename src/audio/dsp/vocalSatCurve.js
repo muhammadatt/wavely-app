@@ -7,8 +7,13 @@
  * the copy Scheps deliberately does NOT make of the LA-2A kernel, for the
  * reason CLAUDE.md gives: a copy means the next tuning pass on Tube Saturation
  * silently stops reaching everything else that was voiced against it. So the
- * curve functions are imported from `vocalSatProcessor.js` — one definition,
- * and Tube Saturation remains their owner.
+ * curve functions are imported — one definition, still Tube Saturation's.
+ *
+ * ⚠ FROM `dsp/satCurves.js`, AND IT IMPORTED THEM FROM `vocalSatProcessor.js`
+ * FIRST. That module registers an AudioWorklet processor at module scope, so
+ * the import put a duplicate `vocal-sat-processor` registration into the LA-2A
+ * and Scheps worklet bundles and broke whichever plugin loaded second. Caught
+ * in review, not by the suite. See the note at the top of satCurves.js.
  *
  * ⚠ THIS IS THE CURVE, NOT THE PLUGIN, AND THE DIFFERENCE IS DELIBERATE.
  * Tube Saturation's panel patch is a whole chain: a 3-band split, a pre/de-
@@ -31,7 +36,7 @@
 
 import {
   shape, splitShape, splitKnees, cubicShape,
-} from '../vocalSatProcessor.js'
+} from './satCurves.js'
 import {
   VOCAL_SAT_DEFAULTS, CURVE_CUBIC, ASYM_MODE_SPLIT,
 } from '../vocalSatParams.js'

@@ -2006,7 +2006,26 @@ export class LA2AKernel {
      */
     this.emphasisDb = (Math.min(Math.max(p.emphasis ?? 0, 0), 100) / 100)
       * EMPHASIS_MAX_DB
+    const emphWas = this.emphasisActive
     this.emphasisActive = this.emphasisDb > EMPHASIS_EPSILON
+    /**
+     * ⚠ THE PAIR'S FILTERS ARE CLEARED WHEN IT SWITCHES OFF, AND THEY WERE NOT.
+     * Turning Emphasis to 0 stops feeding the three biquads but does not empty
+     * them, so turning it back up resumed from histories holding audio from
+     * before the bypass — a stale transient spat into the wet path AND into the
+     * makeup tracker, which shares one of these filters. The bench panel writes
+     * these live onto a running worklet, so the transition is a thing a user
+     * does mid-playback, not a theoretical state.
+     *
+     * Cleared on the way OUT rather than the way in: the filters must not hold
+     * anything while bypassed either, or a later `resetState()` would be the
+     * only thing that saved us.
+     */
+    if (emphWas && !this.emphasisActive) {
+      for (const f of this.preEmph) f?.reset()
+      for (const f of this.deEmph) f?.reset()
+      for (const f of this.trkEmph) f?.reset()
+    }
     if (this.emphasisActive) {
       this.preSections = [highShelf(
         this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, this.emphasisDb,
@@ -2031,8 +2050,29 @@ export class LA2AKernel {
      */
     this.cellModActive = this.cellCurveMode === CELL_CURVE_GAINMOD
       && this.cellMod > 0
+    const shaperWas = this.cellShaperActive
     this.cellShaperActive = this.cellCurveMode === CELL_CURVE_VOCALSAT
       && this.cellCurveDriveMax > 0
+    /**
+     * ⚠ THE SHAPER'S THREE SEAM VALUES ONLY ADVANCE WHILE IT IS RUNNING, so
+     * they go stale the moment it is switched off. Switching back on then
+     * started the first block's ramps from gains and a drive belonging to
+     * whenever the shaper last ran — a step discontinuity at the re-enable
+     * boundary, which is audible as a click.
+     *
+     * Reset to the identities the constructor seeds: unity gains and a zero
+     * drive, which `transferAt` treats as the stage being absent. The first
+     * block then ramps from "no shaper" to whatever the envelope asks for,
+     * which is the same thing a fresh kernel does.
+     */
+    if (shaperWas !== this.cellShaperActive) {
+      this.seamPreG = 1
+      this.seamMakeup = 1
+      this.seamDrive = 0
+      this.preGainDelay.reset()
+      this.makeupDelay.reset()
+      this.cellDriveDelay.reset()
+    }
     /**
      * A one-pole on the RECTIFIER, ahead of `rect / env`. 0 is off and is what
      * ships. It exists because it is the only thing measured that changes the

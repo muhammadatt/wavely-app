@@ -71,7 +71,7 @@ const CONTROLS = [
   },
   {
     key: 'cellModTauDb', label: 'Cell onset', min: 0.5, max: 20, step: 0.05, digits: 3, unit: ' dB',
-    hint: 'How quickly depth rises with gain reduction. Smaller = distortion arrives sooner.',
+    hint: 'How quickly the distortion rises with gain reduction. Smaller = arrives sooner. LIVE ON BOTH cell mechanisms — the Tube Sat shaper shares this law for its drive (1 - exp(-GR / onset)), so this is not one of the gain-mod-only controls.',
   },
   {
     key: 'rectLpMs', label: 'Rect pole', min: 0, max: 5, step: 0.02, digits: 2, unit: ' ms',
@@ -120,6 +120,28 @@ const CURVE_CHOICES = [
     ],
   },
 ]
+
+/**
+ * Arrow / Home / End over a curve rocker, as the radiogroup role promises.
+ * Focus follows selection, which is what DeviceChoiceRocker does and what a
+ * two-option group should do — there is no "browse without selecting" case
+ * worth the extra mode here.
+ */
+function onCurveKey(e, ch) {
+  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+  if (!keys.includes(e.key) || props.disabled) return
+  e.preventDefault()
+  const ids = ch.options.map(o => o.id)
+  const cur = Math.max(0, ids.indexOf(vals.value[ch.key]))
+  const next = e.key === 'Home' ? 0
+    : e.key === 'End' ? ids.length - 1
+      : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+        ? (cur - 1 + ids.length) % ids.length
+        : (cur + 1) % ids.length
+  write({ [ch.key]: ids[next] })
+  const btns = e.currentTarget.querySelectorAll('[role="radio"]')
+  btns[next]?.focus()
+}
 
 const fmt = (c, v) => v.toFixed(c.digits) + (c.unit || '')
 const isDefault = (c) => vals.value[c.key] === LA2A_TUNING_DEFAULTS[c.key]
@@ -225,14 +247,31 @@ async function copyConstants() {
         </p>
       </div>
 
+      <!--
+        ⚠ role=radiogroup / role=radio, MATCHING DeviceChoiceRocker. These
+        shipped as two plain buttons whose selected state was carried ONLY by
+        the amber class, so a screen reader announced two unrelated buttons and
+        never said which curve was active — and the choice between the fitted
+        model and the imported one is the most consequential control on this
+        panel. Roving tabindex and arrow keys follow the same pattern the
+        existing rockers use, so the two behave alike.
+      -->
       <div v-for="ch in CURVE_CHOICES" :key="ch.key" class="mt-3">
         <div class="flex items-center gap-2">
-          <span class="w-[70px] shrink-0 text-[10px] text-white/45">{{ ch.label }}</span>
-          <div class="flex gap-1">
+          <span :id="`la2a-curve-${ch.key}`" class="w-[70px] shrink-0 text-[10px] text-white/45">{{ ch.label }}</span>
+          <div
+            role="radiogroup"
+            :aria-labelledby="`la2a-curve-${ch.key}`"
+            class="flex gap-1"
+            @keydown="onCurveKey($event, ch)"
+          >
             <button
-              v-for="o in ch.options"
+              v-for="(o, i) in ch.options"
               :key="o.id"
               type="button"
+              role="radio"
+              :aria-checked="vals[ch.key] === o.id"
+              :tabindex="vals[ch.key] === o.id || (!ch.options.some(x => x.id === vals[ch.key]) && i === 0) ? 0 : -1"
               :title="o.title"
               :disabled="disabled"
               class="rounded border px-2 py-[3px] text-[9px] tracking-wide disabled:opacity-30"
@@ -249,7 +288,8 @@ async function copyConstants() {
         v-if="vals.cellCurve === 'vocalsat'"
         class="ml-[76px] mt-1 text-[9px] text-amber-400/80"
       >
-        Replaces the gain modulation — Cell depth / max / onset are inert.
+        Replaces the gain modulation — Cell depth and Cell max are inert.
+        <span class="text-white/45">Cell onset stays live: it sets how fast the Tube Sat drive arrives.</span>
       </p>
 
       <label
