@@ -86,6 +86,7 @@ import {
   softCeiling, float32AtOrBelow, percentileOfChannels,
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve } from './dsp/vocalSatCurve.js'
+import { highShelf, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 export { MAKEUP_PERCENTILE, CEILING_KNEE_DB }
@@ -1252,6 +1253,75 @@ export const CELL_CURVE_DRIVE_MAX = 12
  */
 export const CELL_CURVE_COMP_MAX_DB = 12
 
+/**
+ * PRE/DE-EMPHASIS AROUND THE NONLINEAR SECTION — Tube Saturation's pair,
+ * ported, and NOT tied to its curve.
+ *
+ * WHAT IT DOES. A high shelf boosts HF into the nonlinearity and its exact
+ * inverse takes the boost back out afterwards. The static tilt cancels; what
+ * does NOT cancel is what the nonlinearity did differently because of the
+ * boost. Tube Saturation's own note puts it best: a memoryless curve reduces
+ * the instantaneous peak but generates harmonics loudest exactly where the
+ * signal is loudest, dropping a burst of new high frequency onto every onset.
+ * The pair is what turns a waveshaper from something that excites a transient
+ * into something that absorbs it.
+ *
+ * ⚠ IT IS WIRED AS THOUGH THE MECHANISM WERE CURVE-AGNOSTIC — IT WRAPS THE
+ * WHOLE NONLINEAR SECTION — AND MEASURED, IT IS NOT. That was the reason for
+ * this placement and the measurement did not support it. Change in crest
+ * factor from emphasis 0 to 50, hard-onset burst probe at Peak Reduction 70
+ * (negative is absorption, which is what the pair is for):
+ *
+ *   Tube Sat cell + Tube Sat valve    -1.13 dB   monotone across the knob
+ *   Tube Sat cell, valve off          -0.78 dB   monotone
+ *   gain modulation, valve off        -0.15 dB   NOT monotone (rises at 100)
+ *   tanh valve alone                  +0.02 dB   inert
+ *   tanh valve alone, drive 8         +0.01 dB   inert
+ *
+ * ⚠ SO IT EARNS ITS KEEP ON THE IMPORTED CELL SHAPER AND NOWHERE ELSE, and the
+ * two negative results are worth separating because they fail for different
+ * reasons.
+ *
+ * `tanh` IS INERT AT EVERY DRIVE, including drive 8 where it is taking 3.6 dB
+ * of crest off on its own — so this is not "the valve stage is too quiet to
+ * matter", which is the explanation that fits every other null result in this
+ * file. Something about the curve resists the pair.
+ *
+ * ⚠ AND THE OBVIOUS EXPLANATION IS WRONG — KNEE ORDER DOES NOT DECIDE IT. The
+ * hypothesis was that a hard knee lets boosted HF cross it while the body stays
+ * under, where `tanh` curves gradually and compresses both alike. Tested on
+ * bare curves at matched drive, the pair RAISES crest for every curve tried —
+ * tanh +0.40, shape n=2 +0.24, n=8 +0.60, hard clip +0.59 dB — i.e. the
+ * opposite sign and no ordering by hardness. The absorption measured in the
+ * table above therefore comes from the pair interacting with the COMPRESSOR's
+ * gain path (a drive that tracks gain reduction, an operating point held
+ * against the attenuation), not from the curve in isolation.
+ *
+ * ⚠ THE MECHANISM IS THEREFORE NOT ESTABLISHED. Two experiments disagree in
+ * sign and neither has been reconciled with the other. What is settled is the
+ * table: where the pair helps, where it does nothing, and that "it is a
+ * property of memoryless curves in general" is not a claim this file can make.
+ *
+ * ⚠ THE GAIN MODULATION RESULT IS THE ONE THAT MATCHES THEORY. It is not a
+ * curve but a time-varying gain, and a shelf with its exact inverse around a
+ * MULTIPLY cancels whenever that gain is constant; only the part moving fast
+ * enough to be seen through the shelf survives. -0.15 dB and non-monotone is
+ * what "essentially nothing, plus noise" looks like.
+ *
+ * ⚠ THE SIDE-CHAIN DOES NOT SEE IT. The detector runs on the untouched input,
+ * so the pair cannot change the ballistics, the gain reduction, or what a Peak
+ * Reduction setting means — only what the nonlinearities do with the audio.
+ * The dry path of `mix` does not see it either: that is the bypass reference
+ * and has to stay the input.
+ */
+export const EMPHASIS_MAX_DB = 12
+
+/** Corner of the emphasis shelf, Hz. Inherited from Tube Saturation. */
+export const EMPHASIS_CORNER_HZ = 1800
+
+/** Below this the pair is skipped outright rather than run flat. */
+export const EMPHASIS_EPSILON = 1e-4
+
 const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
 
@@ -1316,6 +1386,13 @@ export const LA2A_KERNEL_DEFAULTS = {
    * between.
    */
   cellCurve: CELL_CURVE_GAINMOD,
+  /**
+   * Pre/de-emphasis depth around the nonlinear section, 0-100 -> 0-12 dB.
+   * ABSENT at 0, which is the default: the branch is skipped and the filter
+   * state never advances, so a patch that does not use it is bit-identical to
+   * one built before it existed.
+   */
+  emphasis: 0,
 }
 
 /**
@@ -1469,6 +1546,15 @@ export class LA2AKernel {
      * the default gain modulation never touches them, and the delay lines never
      * advance, so nothing about the default path depends on their state.
      */
+    /**
+     * Emphasis pair. Per channel because a biquad has state; grown on demand
+     * like every other per-channel resource here. The scratch buffer exists
+     * because the pre-emphasised signal cannot overwrite `input` — the dry path
+     * of `mix` reads the same array and must stay the untouched input.
+     */
+    this.preEmph = []
+    this.deEmph = []
+    this.emphScratch = new Float32Array(128)
     this.cellPreGScratch = new Float32Array(128)
     this.cellMakeupScratch = new Float32Array(128)
     this.cellDriveScratch = new Float32Array(128)
@@ -1597,6 +1683,8 @@ export class LA2AKernel {
     this.seamDrive = 0
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
+    for (const f of this.preEmph) f?.reset()
+    for (const f of this.deEmph) f?.reset()
     this.gainDelay.reset()
     this.preGainDelay.reset()
     this.makeupDelay.reset()
@@ -1714,6 +1802,27 @@ export class LA2AKernel {
     this.vsCurve = makeVocalSatCurve(curveOverrides)
     this.cellCurveDriveMax = Number.isFinite(p.cellCurveDriveMax)
       && p.cellCurveDriveMax >= 0 ? p.cellCurveDriveMax : CELL_CURVE_DRIVE_MAX
+    /**
+     * ⚠ SECTIONS ARE PUSHED TO EXISTING CHANNELS TOO, not only to ones grown
+     * later. A kernel that has already processed audio has its filters built;
+     * moving the knob has to reach those, and a version that only seeded new
+     * channels left a running preview on the old depth until the region was
+     * re-opened.
+     */
+    this.emphasisDb = (Math.min(Math.max(p.emphasis ?? 0, 0), 100) / 100)
+      * EMPHASIS_MAX_DB
+    this.emphasisActive = this.emphasisDb > EMPHASIS_EPSILON
+    if (this.emphasisActive) {
+      this.preSections = [highShelf(
+        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, this.emphasisDb,
+      )]
+      this.deSections = [highShelf(
+        this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, -this.emphasisDb,
+      )]
+      for (const f of this.preEmph) f?.setSections(this.preSections)
+      for (const f of this.deEmph) f?.setSections(this.deSections)
+    }
+
     this.cellCompMax = Math.exp(
       (Number.isFinite(p.cellCurveCompMaxDb) && p.cellCurveCompMaxDb >= 0
         ? p.cellCurveCompMaxDb : CELL_CURVE_COMP_MAX_DB) * LN10_OVER_20,
@@ -2081,6 +2190,18 @@ export class LA2AKernel {
         this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
       }
     }
+    // Emphasis filters, on the same build-only-when-used rule.
+    if (this.emphasisActive) {
+      if (this.emphScratch.length < n) this.emphScratch = new Float32Array(n)
+      while (this.preEmph.length < nOut) {
+        const pre = new BiquadCascade(1, 1)
+        const de = new BiquadCascade(1, 1)
+        pre.setSections(this.preSections)
+        de.setSections(this.deSections)
+        this.preEmph.push(pre)
+        this.deEmph.push(de)
+      }
+    }
 
     const L = OVERSAMPLE_FACTOR
     const invL = 1 / L
@@ -2104,12 +2225,32 @@ export class LA2AKernel {
       const input = audioChannels[ch < nIn ? ch : nIn - 1]
       const out = outputChannels[ch]
 
+      /**
+       * PRE-EMPHASIS, AT THE BASE RATE AND BEFORE THE UPSAMPLER.
+       *
+       * The shelf is linear and generates nothing, so running it high would
+       * cost three times the arithmetic for a bit-identical result — the same
+       * argument that keeps the DC blocker at the base rate.
+       *
+       * ⚠ INTO A SCRATCH BUFFER, NEVER OVER `input`. The dry path of `mix`
+       * reads that same array further down and has to stay the untouched
+       * input; writing the emphasised signal there would silently make bypass
+       * a shelved copy of itself.
+       */
+      let driven = input
+      if (this.emphasisActive) {
+        this.preEmph[ch].process(input, this.emphScratch, n, 0)
+        driven = this.emphScratch
+      }
+
       if (!this.oversampleOn) {
-        this._processChannelBaseRate(input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive)
+        this._processChannelBaseRate(
+          driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive,
+        )
         continue
       }
 
-      const hi = this.oversamplers[ch].up(input, n)
+      const hi = this.oversamplers[ch].up(driven, n)
 
       // The multiply is itself a nonlinearity — a fast-moving gain against
       // program material generates sum and difference content — so the gain is
@@ -2187,6 +2328,40 @@ export class LA2AKernel {
       let dcX = this.dcX[ch]
       let dcY = this.dcY[ch]
       const dryLine = this.dryLines[ch]
+      /**
+       * DE-EMPHASIS, BEFORE THE DRY SUM AND BEFORE THE CEILING.
+       *
+       * ⚠ THE ORDER OF THOSE TWO IS LOAD-BEARING. The ceiling is what enforces
+       * "never louder than the source" for the percentile-referenced makeup, and
+       * a shelf AFTER it can put back what it just took off — a de-emphasis
+       * boosts nothing but it does change the peak, so a limiter upstream of it
+       * no longer bounds the output. Emphasis first, then mix, then ceiling.
+       *
+       * Runs over the wet buffer in place: `wet` is kernel scratch, and the
+       * dry side is read from the delay line, not from here.
+       */
+      if (this.emphasisActive) {
+        for (let i = 0; i < n; i++) {
+          let w = wet[i]
+          if (this.applyTube) {
+            dcY = w - dcX + this.dcR * dcY
+            dcX = w
+            w = dcY
+          }
+          wet[i] = w
+        }
+        this.deEmph[ch].process(wet, wet, n, 0)
+        for (let i = 0; i < n; i++) {
+          const dry = dryLine.push(input[i])
+          const mixed = dry * this.dryMix + wet[i] * this.wetMix
+          out[i] = this.ceilingLin > 0
+            ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
+            : mixed
+        }
+        this.dcX[ch] = dcX
+        this.dcY[ch] = dcY
+        continue
+      }
       for (let i = 0; i < n; i++) {
         let w = wet[i]
         if (this.applyTube) {
@@ -2226,17 +2401,23 @@ export class LA2AKernel {
       : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
   }
 
-  _processChannelBaseRate(input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive) {
+  /**
+   * @param {Float32Array} driven  pre-emphasised audio, or `input` when off
+   * @param {Float32Array} input   the untouched input, for the dry side of mix
+   */
+  _processChannelBaseRate(driven, input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive) {
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
+    // The wet side is built first so the de-emphasis has a buffer to filter;
+    // `out` doubles as that buffer, then the dry is summed into it.
     for (let i = 0; i < n; i++) {
-      const dry = input[i]
       let w
       if (this.cellShaperActive) {
         // Same order as the oversampled path: attenuate, shape, then make up.
-        w = this.vsCurve.transferAt(dry * cellPreG[i], cellDrive[i]) * cellMakeup[i]
+        w = this.vsCurve.transferAt(driven[i] * cellPreG[i], cellDrive[i])
+          * cellMakeup[i]
       } else {
-        w = dry * gain[i]
+        w = driven[i] * gain[i]
       }
       if (this.applyTube) {
         const shaped = this.shapeTube(w)
@@ -2244,7 +2425,11 @@ export class LA2AKernel {
         dcX = shaped
         w = dcY
       }
-      const mixed = dry * this.dryMix + w * this.wetMix
+      out[i] = w
+    }
+    if (this.emphasisActive) this.deEmph[ch].process(out, out, n, 0)
+    for (let i = 0; i < n; i++) {
+      const mixed = input[i] * this.dryMix + out[i] * this.wetMix
       out[i] = this.ceilingLin > 0
         ? softCeiling(mixed, this.ceilingLin, this.ceilingKneeLin)
         : mixed

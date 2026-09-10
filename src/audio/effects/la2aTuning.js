@@ -90,6 +90,15 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
    * thing to try if the imported character sounds inverted against the plugin.
    */
   vocalSatLeanPositive: VOCAL_SAT_CURVE_LEAN_POSITIVE,
+  /**
+   * Pre/de-emphasis depth around the nonlinear section, 0-100.
+   *
+   * ⚠ IT IS NOT TIED TO THE IMPORTED CURVE — it wraps the whole nonlinear
+   * section, so it is live whichever mechanisms are selected. Measured, it
+   * only does anything on the Tube Sat cell shaper; on tanh and on the gain
+   * modulation it is inert. See EMPHASIS_MAX_DB for the table.
+   */
+  emphasis: 0,
 })
 
 /**

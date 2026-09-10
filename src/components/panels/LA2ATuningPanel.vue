@@ -90,6 +90,10 @@ const CONTROLS = [
     hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law and the attenuation compensation scale it. NOT Tube Sat’s Drive knob. Default 12 is level-matched to the gain modulation so an A/B compares character, not loudness.',
   },
   {
+    key: 'emphasis', label: 'Emphasis', min: 0, max: 100, step: 1, digits: 0,
+    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Measured: it works on the Tube Sat CELL (-1.1 dB crest at 50) and is inert on tanh and on the gain modulation.',
+  },
+  {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
     hint: 'VALVE stage only — barely audible, the valves are ~5% of the distortion. Same quantity as Cell sat drive, at the other stage. NOT Tube Sat’s Drive knob either: 2.38 is its EFFECTIVE drive, Drive (1) x band mult (3) x auto-drive gain (0.794).',
   },
@@ -145,6 +149,7 @@ async function copyConstants() {
     `cellCurveDriveMax  = ${v.cellCurveDriveMax}`,
     `vocalSatCurveDrive = ${v.vocalSatCurveDrive}`,
     `vocalSatLeanPositive = ${v.vocalSatLeanPositive}`,
+    `emphasis        = ${v.emphasis}`,
   ].join('\n')
   try {
     await navigator.clipboard.writeText(lines)

@@ -177,3 +177,76 @@ test('auto makeup still solves with the imported tube curve', () => {
   assert.ok(db !== null, 'the tracker reports a makeup')
   assert.ok(Number.isFinite(db) && db > -60 && db < 60, `makeup in range: ${db}`)
 })
+
+// ── The emphasis pair ──────────────────────────────────────────────────────
+
+test('emphasis 0 is bit-identical to a kernel built before the pair existed', () => {
+  const base = run({})
+  assert.deepEqual(Array.from(run({ emphasis: 0 })), Array.from(base))
+  // Absent, not flat: an undefined knob must behave as 0 rather than as NaN.
+  assert.deepEqual(Array.from(run({ emphasis: undefined })), Array.from(base))
+})
+
+test('the pair does not reach the side-chain', () => {
+  // If it did, the shelf would change the ballistics and what a Peak Reduction
+  // setting means — the pair is only allowed to change what the nonlinearities
+  // do with the audio.
+  const a = processLA2ABuffer([Float32Array.from(speech())], SR,
+    { peakReduction: 70, inputAlignDb: 12, emphasis: 0 })
+  const b = processLA2ABuffer([Float32Array.from(speech())], SR,
+    { peakReduction: 70, inputAlignDb: 12, emphasis: 100 })
+  assert.equal(a.metering.avgGainReductionDb, b.metering.avgGainReductionDb)
+  assert.equal(a.metering.maxGainReductionDb, b.metering.maxGainReductionDb)
+})
+
+test('the pair does not reach the dry path — bypass stays the input', () => {
+  // `mix: 0` is the bypass reference. Pre-emphasising in place over `input`
+  // instead of into scratch would make it a shelved copy of itself.
+  const dry0 = run({ mix: 0, emphasis: 0 })
+  const dry1 = run({ mix: 0, emphasis: 100 })
+  /**
+   * ⚠ `===` RATHER THAN `deepEqual`, FOR SIGNED ZERO. The emphasis branch sums
+   * the mix in a different order, and on one sample of this probe that yields
+   * -0 where the default path yields +0. `deepEqual` compares with SameValue
+   * and calls that a difference; every arithmetic consumer treats them as
+   * equal, and there is no bit pattern here that reaches audio. Asserted this
+   * way deliberately rather than by loosening to a tolerance, which would also
+   * have hidden a real one-sample error.
+   */
+  for (let i = 0; i < dry0.length; i++) {
+    assert.ok(dry1[i] === dry0[i], `dry path unchanged at sample ${i}`)
+  }
+})
+
+test('emphasis is applied before the ceiling, not after it', () => {
+  // A shelf downstream of the ceiling can put back what the ceiling took off,
+  // which would break the "never louder than the source" guarantee the
+  // percentile-referenced makeup depends on.
+  const ceilingDb = -12
+  const out = run({ emphasis: 100, ceilingDb })
+  let peak = 0
+  for (const v of out) peak = Math.max(peak, Math.abs(v))
+  const peakDb = 20 * Math.log10(peak)
+  assert.ok(peakDb <= ceilingDb + 0.01, `peak ${peakDb.toFixed(2)} under ceiling`)
+})
+
+test('the pair absorbs on the imported cell shaper and is inert on tanh', () => {
+  // Pins the table in the EMPHASIS_MAX_DB note: the direction of each result,
+  // not its exact value. If a future change makes the pair work on tanh, that
+  // is a finding and this test is where it surfaces.
+  const crest = (a) => {
+    let p = 0
+    let s = 0
+    for (let i = 4096; i < a.length; i++) {
+      p = Math.max(p, Math.abs(a[i]))
+      s += a[i] * a[i]
+    }
+    return 20 * Math.log10(p / Math.sqrt(s / (a.length - 4096)))
+  }
+  const shaperDelta = crest(run({ cellCurve: CELL_CURVE_VOCALSAT, emphasis: 50 }))
+    - crest(run({ cellCurve: CELL_CURVE_VOCALSAT, emphasis: 0 }))
+  const tanhDelta = crest(run({ cellMod: 0, emphasis: 50 }))
+    - crest(run({ cellMod: 0, emphasis: 0 }))
+  assert.ok(shaperDelta < -0.2, `shaper absorbs (${shaperDelta.toFixed(2)} dB)`)
+  assert.ok(Math.abs(tanhDelta) < 0.1, `tanh valve inert (${tanhDelta.toFixed(2)} dB)`)
+})
