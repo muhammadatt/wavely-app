@@ -71,6 +71,12 @@ const MEASUREMENTS = [
   ['schepsAutoTrim', {}, 'trimDb'],
   ['softClipperCeiling', { percentile: 0.001 }, 'ceilingDb'],
   ['voiceProfile', {}, 'profile'],
+  ['measureLoudness', {}, 'loudness'],
+  [
+    'loudnessNormalize',
+    { target: { targetDb: -16, unit: 'LUFS', ceilingDb: -1 }, peakMode: 'limit' },
+    'report',
+  ],
 ]
 
 for (const [type, params, key] of MEASUREMENTS) {
@@ -98,6 +104,22 @@ test('the two OptoSmooth references really do return different makeup', () => {
   assert.equal(byBody.type, 'done')
   assert.notEqual(byPeak.makeupDb, byBody.makeupDb,
     'the reference is being dropped somewhere between the message and the solve')
+})
+
+test('loudnessNormalize hands back audio as well as a report', () => {
+  // ⚠ IT REPLIES THROUGH A DIFFERENT HELPER FROM EVERY OTHER HANDLER HERE,
+  // because it transfers its buffers rather than copying them. That is a second
+  // place the reply is spelled out, and the contract is the same one: `done`,
+  // `__id` echoed. Spelling it differently would fail exactly as silently.
+  const reply = request('loudnessNormalize', {
+    channelData: tone(1),
+    params: { target: { targetDb: -16, unit: 'LUFS', ceilingDb: -1 }, peakMode: 'limit' },
+  })
+  assert.equal(reply.type, 'done')
+  assert.equal(reply.__id, 7, 'the transferring reply must echo the request id too')
+  assert.equal(reply.channelData.length, 1, 'the rendered audio must come back')
+  assert.ok(reply.channelData[0] instanceof Float32Array)
+  assert.ok(Number.isFinite(reply.report.achievedDb), 'and the measured report with it')
 })
 
 test('an unknown operation answers with an error, not silence', () => {
