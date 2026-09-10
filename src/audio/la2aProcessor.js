@@ -1425,6 +1425,52 @@ export const LA2A_KERNEL_DEFAULTS = {
    * What justifies this one is a listening decision, and the file says so
    * rather than dressing it up as a fit.
    *
+   * ── HOW FAR FROM THE HARDWARE, MEASURED ────────────────────────────────
+   *
+   * At the paper's own operating point — 6.0 dB of gain reduction SOLVED per
+   * frequency, +4 dBu in, the five tones it uses:
+   *
+   *   f Hz     legacy THD / H3-H2      shipping THD / H3-H2
+   *     63     2.101 % / +25.8          0.644 % /  +6.3
+   *    125     1.455 % / +24.3          0.417 % /  +1.1
+   *    250     1.522 % / +26.8          0.286 % /  -9.4
+   *    500     1.961 % / +29.9          0.253 % / -10.5
+   *   1000     2.130 % / +30.9          0.196 % /  -9.7
+   *   median   1.96 %  / +26.8          0.29 %  /  -9.4
+   *   hardware 0.94-4.22 % (med 2.19) / +16..+44 (med +25.7)
+   *
+   * TWO DEPARTURES, AND THE SECOND IS CATEGORICAL RATHER THAN A MATTER OF
+   * DEGREE. The patch is about 6.8x cleaner than the legacy model and sits
+   * BELOW THE QUIETEST OF THE SIX UNITS at every frequency. And it is
+   * EVEN-DOMINANT where the hardware is strongly ODD-dominant — H3-H2 runs
+   * -10.5 to +6.3 against a measured window of +16 to +44, so it is not merely
+   * outside the band, it is on the other side of zero.
+   *
+   * ⚠ THE TONE FIGURE IS NOT FLATTERING IT — SPEECH AGREES. The ledger's own
+   * warning is that tone THD understates a memoryless waveshaper on programme
+   * material by ~11 dB and a gain modulation by -6.7, so the comparison could
+   * have reversed on speech. Measured at matched AVERAGE gain reduction,
+   * distortion energy re. output:
+   *
+   *   avg GR    legacy    shipping    difference
+   *    3 dB     -23.3      -33.3       -10.1 dB
+   *    6 dB     -19.7      -32.0       -12.3
+   *   10 dB     -17.9      -30.8       -12.9
+   *   14 dB     -17.0      -29.8       -12.8
+   *
+   * The gap narrows from the tone's 16.6 dB to about 12.5, which is the IMD
+   * closing part of it exactly as the ledger predicts, and the direction
+   * holds.
+   *
+   * ⚠ AND IT LANDS NEAR THE PROFILE THE PLUGIN HAD BEFORE THE PAPER CORRECTED
+   * IT, which is worth knowing rather than rediscovering. The pre-Moore
+   * tanh-only build was "17x too clean" with H3 16.3 dB BELOW H2; this patch
+   * is 1.5x hotter than that and 6.6 dB less even-dominant. Chosen by ear,
+   * independently, it came back to the same SIDE of the hardware the
+   * measurement once moved the model away from. That is a fact about the
+   * patch, not an argument against it — the ear was asked a different question
+   * from the one the paper answers.
+   *
    * ⚠ AND `acx_audiobook` AND THE OTHER SERVER PRESETS DO NOT USE THIS. The
    * preset chain runs its own compression stages server-side; these are the
    * client-side plugin's defaults. Nothing in `presets.js` changes.
