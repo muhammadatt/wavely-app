@@ -1,0 +1,179 @@
+/**
+ * OptoSmooth's imported Tube Saturation curve — the two selectors, and the
+ * guarantee that neither of them exists as far as the default patch is
+ * concerned.
+ *
+ * ⚠ THE BIT-IDENTITY TEST IS THE POINT OF THIS FILE. Everything else here
+ * describes a stage chosen by ear, and taste is not what a test pins. What a
+ * test CAN pin is that a render made before this stage existed is the same
+ * render after it — every preset, every saved patch, every file already on
+ * disk. That is what makes the option safe to ship, and it is asserted on the
+ * oversampled path AND the base-rate measurement path, because the makeup
+ * solver runs on the second one and a divergence there would move the makeup
+ * without moving the audio.
+ */
+
+import test from 'node:test'
+import assert from 'node:assert/strict'
+
+import {
+  LA2AKernel, processLA2ABuffer,
+  TUBE_CURVE_TANH, TUBE_CURVE_VOCALSAT,
+  CELL_CURVE_GAINMOD, CELL_CURVE_VOCALSAT,
+} from '../../src/audio/la2aProcessor.js'
+import { makeVocalSatCurve } from '../../src/audio/dsp/vocalSatCurve.js'
+
+const SR = 44100
+
+/** Narration-ish: a harmonic stack under a syllabic envelope, with pauses. */
+function speech(seconds = 1.5, peak = 0.35) {
+  const n = Math.round(SR * seconds)
+  const x = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const t = i / SR
+    let s = 0
+    for (let k = 1; k <= 24; k++) {
+      s += (1 / k) * Math.sin(2 * Math.PI * 118 * k * t + k * 1.7)
+    }
+    const syl = Math.pow(Math.max(0, Math.sin(2 * Math.PI * 4 * t)), 0.6)
+    x[i] = s * syl * ((t % 0.55) > 0.42 ? 0.02 : 1)
+  }
+  let m = 0
+  for (const v of x) m = Math.max(m, Math.abs(v))
+  for (let i = 0; i < n; i++) x[i] = (x[i] / m) * peak
+  return x
+}
+
+const run = (params) => processLA2ABuffer(
+  [Float32Array.from(speech())], SR,
+  { peakReduction: 70, gainDb: 3, inputAlignDb: 12, ...params },
+).channelData[0]
+
+test('the default patch is bit-identical to one with no curve selectors at all', () => {
+  const base = run({})
+  const explicit = run({
+    tubeCurve: TUBE_CURVE_TANH, cellCurve: CELL_CURVE_GAINMOD,
+  })
+  assert.deepEqual(Array.from(explicit), Array.from(base))
+})
+
+test('bit-identical on the base-rate path the makeup solver uses', () => {
+  const base = run({ oversample: false })
+  const explicit = run({
+    oversample: false, tubeCurve: TUBE_CURVE_TANH, cellCurve: CELL_CURVE_GAINMOD,
+  })
+  assert.deepEqual(Array.from(explicit), Array.from(base))
+})
+
+test('an unknown curve name falls back to the shipping curve, it does not throw', () => {
+  const base = run({})
+  const bogus = run({ tubeCurve: 'nope', cellCurve: 'nope' })
+  assert.deepEqual(Array.from(bogus), Array.from(base))
+})
+
+test('each selector actually changes the output', () => {
+  const base = run({})
+  const tube = run({ tubeCurve: TUBE_CURVE_VOCALSAT })
+  const cell = run({ cellCurve: CELL_CURVE_VOCALSAT })
+  assert.notDeepEqual(Array.from(tube), Array.from(base))
+  assert.notDeepEqual(Array.from(cell), Array.from(base))
+})
+
+test('the cell shaper replaces the gain modulation rather than stacking with it', () => {
+  // With the shaper selected, `cellMod` is inert — the modulation is not
+  // running, so its depth control has nothing to scale.
+  const a = run({ cellCurve: CELL_CURVE_VOCALSAT })
+  const b = run({ cellCurve: CELL_CURVE_VOCALSAT, cellMod: 0 })
+  assert.deepEqual(Array.from(a), Array.from(b))
+})
+
+test('the cell shaper is absent at zero gain reduction, as the cell must be', () => {
+  // Against `cellMod: 0` — the comparison is "no cell distortion of either
+  // kind", not the default patch, because selecting the shaper switches the
+  // gain modulation off and differencing against the default would measure
+  // that removal instead. That mistake is why this test failed first time.
+  const quiet = { peakReduction: 0, gainDb: 0, inputAlignDb: 0 }
+  const base = run({ ...quiet, cellMod: 0 })
+  const shaped = run({ ...quiet, cellCurve: CELL_CURVE_VOCALSAT })
+  // The bound is the ramp-restructure floor pinned by the next test, not a
+  // tolerance on the curve: at zero reduction the drive is exactly zero and
+  // `transferAt` is the identity, so nothing of the curve is present at all.
+  let err = 0
+  let sig = 0
+  for (let i = 0; i < base.length; i++) {
+    err += (base[i] - shaped[i]) ** 2
+    sig += base[i] ** 2
+  }
+  const dbc = 10 * Math.log10(err / sig)
+  assert.ok(dbc < -90, `no cell distortion at 0 GR (${dbc.toFixed(1)} dBc)`)
+})
+
+/**
+ * ⚠ THE SHAPER PATH IS NOT BIT-IDENTICAL TO THE DEFAULT ONE EVEN WITH THE
+ * CURVE REMOVED, AND THIS PINS HOW FAR OFF IT IS.
+ *
+ * The default loop interpolates ONE gain across the oversampled sub-samples;
+ * the shaper loop has to interpolate the attenuation and the makeup separately,
+ * because the curve sits between them. A linear ramp of a product is not the
+ * product of two linear ramps, so the two differ by a second-order term.
+ *
+ * Measured at -100.7 dBc on programme material at Peak Reduction 70 — three
+ * orders below the -70 dB bar the curve modules hold themselves to, and far
+ * under the plugin's own alias floor. It is not zero, it is not audible, and
+ * nobody should discover it by differencing renders and wondering.
+ */
+test('splitting the gain ramp in two costs less than -90 dBc', () => {
+  const noCell = run({ cellMod: 0 })
+  // Shaper selected, drive floored: isolates the ramp restructure alone.
+  const ramped = run({ cellCurve: CELL_CURVE_VOCALSAT, cellCurveDriveMax: 1e-12 })
+  let err = 0
+  let sig = 0
+  for (let i = 0; i < noCell.length; i++) {
+    err += (noCell[i] - ramped[i]) ** 2
+    sig += noCell[i] ** 2
+  }
+  const dbc = 10 * Math.log10(err / sig)
+  assert.ok(dbc < -90, `ramp restructure residual ${dbc.toFixed(1)} dBc`)
+})
+
+test('latency does not move — neither curve resamples or looks ahead', () => {
+  const base = processLA2ABuffer([speech(0.2)], SR, {})
+  const both = processLA2ABuffer([speech(0.2)], SR, {
+    tubeCurve: TUBE_CURVE_VOCALSAT, cellCurve: CELL_CURVE_VOCALSAT,
+  })
+  assert.equal(both.latencySamples, base.latencySamples)
+})
+
+test('the imported curve is Tube Saturation\'s own, not a copy that can drift', () => {
+  // If `vocalSatParams.js` retunes, this follows. The assertion is that the
+  // kernel's curve and a freshly built one from the shared module agree.
+  const curve = makeVocalSatCurve()
+  const k = new LA2AKernel(SR)
+  k.setParams({ tubeCurve: TUBE_CURVE_VOCALSAT })
+  for (const x of [-0.9, -0.3, -0.01, 0, 0.01, 0.3, 0.9]) {
+    assert.equal(k.shapeTube(x), curve.transfer(x))
+  }
+})
+
+test('the curve inverse round-trips on BOTH branches, not just the positive one', () => {
+  // SPLIT asymmetry makes the curve non-odd; an inverse that folds through
+  // Math.abs answers the wrong half. Guards the bug that shipped in the first
+  // draft of this module.
+  const { transfer, inverse } = makeVocalSatCurve()
+  for (let x = -4; x <= 4; x += 0.037) {
+    assert.ok(Math.abs(inverse(transfer(x)) - x) < 1e-9, `round trip at ${x}`)
+  }
+})
+
+test('auto makeup still solves with the imported tube curve', () => {
+  const src = speech(2)
+  const k = new LA2AKernel(SR)
+  k.setParams({ peakReduction: 70, inputAlignDb: 12, tubeCurve: TUBE_CURVE_VOCALSAT })
+  const out = new Float32Array(128)
+  for (let off = 0; off + 128 <= src.length; off += 128) {
+    k.process([src.subarray(off, off + 128)], [out], 128)
+  }
+  const db = k.liveAutoMakeupDb()
+  assert.ok(db !== null, 'the tracker reports a makeup')
+  assert.ok(Number.isFinite(db) && db > -60 && db < 60, `makeup in range: ${db}`)
+})

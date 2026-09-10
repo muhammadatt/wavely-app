@@ -343,7 +343,7 @@ function clamp(v, lo, hi) {
  * transcendentals per band per sample. This is two, and the caller hoists the
  * operating-point term out of the sample loop entirely.
  */
-function shape(x, hardness) {
+export function shape(x, hardness) {
   const a = Math.abs(x)
   if (a < 1e-12) return x
   return x / Math.pow(1 + Math.pow(a, hardness), 1 / hardness)
@@ -439,7 +439,7 @@ function shape(x, hardness) {
 const CUBIC_LIMIT = 1.5
 const CUBIC_COEFF = 1 / 6.75
 
-function cubicShape(x) {
+export function cubicShape(x) {
   if (x >= CUBIC_LIMIT) return 1
   if (x <= -CUBIC_LIMIT) return -1
   return x - CUBIC_COEFF * x * x * x
@@ -636,7 +636,7 @@ export const ASYM_MODE_SPLIT = 'split'
  * absolute knee orders, not the ratio between them, that set the even content,
  * and a softer Hardness gives more warmth at the same knob position.
  */
-function splitKnees(hardness, u, leanPositive) {
+export function splitKnees(hardness, u, leanPositive) {
   const hi = leanPositive ? HARDNESS_MAX : HARDNESS_MIN
   const lo = leanPositive ? HARDNESS_MIN : HARDNESS_MAX
   const lh = Math.log(hardness)
@@ -651,7 +651,7 @@ function splitKnees(hardness, u, leanPositive) {
  * origin and an asymptote of 1 — see the note above for why that is the whole
  * point rather than an implementation detail.
  */
-function splitShape(x, nPos, nNeg) {
+export function splitShape(x, nPos, nNeg) {
   return x >= 0 ? shape(x, nPos) : shape(x, nNeg)
 }
 

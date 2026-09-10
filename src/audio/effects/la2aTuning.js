@@ -28,7 +28,11 @@
 
 import {
   TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
+  TUBE_CURVE_TANH, CELL_CURVE_GAINMOD, CELL_CURVE_DRIVE_MAX,
 } from '../la2aProcessor.js'
+import {
+  VOCAL_SAT_CURVE_DRIVE, VOCAL_SAT_CURVE_LEAN_POSITIVE,
+} from '../dsp/vocalSatCurve.js'
 
 /**
  * Every default here is the module constant the kernel would use anyway, so
@@ -60,7 +64,44 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
   tubeDriveLin: TUBE_DRIVE_LIN,
   /** Valve operating-point offset, which is what makes the stage even. */
   tubeBias: TUBE_BIAS,
+  /**
+   * ── Tube Saturation's curve, imported ──────────────────────────────────
+   *
+   * Both selectors default to the shipping mechanism, so a panel nobody has
+   * touched emits no overrides and the kernel is the kernel it always was.
+   *
+   * ⚠ THESE REACH SCHEPS TOO, FOR FREE AND WITHOUT A LINE OF WIRING — it
+   * spreads `la2aTuningOverrides()` into the kernel params it builds. That is
+   * usually the hazard CLAUDE.md warns about (Scheps silently inheriting a
+   * re-tune); here it is the point, because the character is meant to reach
+   * both. It does mean an audition of one is an audition of the other.
+   */
+  /** `'tanh'` (fitted) or `'vocalsat'` (Tube Saturation's curve). */
+  tubeCurve: TUBE_CURVE_TANH,
+  /** `'gainmod'` (detector ripple, fitted) or `'vocalsat'` (waveshaper). */
+  cellCurve: CELL_CURVE_GAINMOD,
+  /** Cell shaper drive at full compression. Not fitted — chosen by ear. */
+  cellCurveDriveMax: CELL_CURVE_DRIVE_MAX,
+  /** Where the imported curve sits on its transfer. See the module's note. */
+  vocalSatCurveDrive: VOCAL_SAT_CURVE_DRIVE,
+  /**
+   * Which polarity gets the hard knee. Tube Saturation MEASURES this from the
+   * material and a memoryless stage cannot, so it is a switch here — the first
+   * thing to try if the imported character sounds inverted against the plugin.
+   */
+  vocalSatLeanPositive: VOCAL_SAT_CURVE_LEAN_POSITIVE,
 })
+
+/**
+ * Keys that are not numbers.
+ *
+ * ⚠ THE COERCION USED TO BE `Number(v)` FOR EVERYTHING EXCEPT `tube`, which
+ * would have turned both curve names into NaN and dropped them silently — the
+ * store would have accepted the write, reported no change, and the panel would
+ * have looked broken with nothing to show for it.
+ */
+const STRING_KEYS = new Set(['tubeCurve', 'cellCurve'])
+const BOOL_KEYS = new Set(['tube', 'vocalSatLeanPositive'])
 
 const KEYS = Object.keys(LA2A_TUNING_DEFAULTS)
 
@@ -95,8 +136,13 @@ export function setLA2ATuning(patch) {
   for (const k of KEYS) {
     if (!(k in patch)) continue
     const v = patch[k]
-    const next = k === 'tube' ? v !== false : Number(v)
-    if (k !== 'tube' && !Number.isFinite(next)) continue
+    let next
+    if (BOOL_KEYS.has(k)) next = v !== false
+    else if (STRING_KEYS.has(k)) next = String(v)
+    else {
+      next = Number(v)
+      if (!Number.isFinite(next)) continue
+    }
     if (tuning[k] !== next) { tuning[k] = next; changed = true }
   }
   if (changed) for (const fn of listeners) fn()

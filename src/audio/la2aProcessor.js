@@ -85,6 +85,7 @@ import {
   MAKEUP_PERCENTILE, CEILING_KNEE_DB,
   softCeiling, float32AtOrBelow, percentileOfChannels,
 } from './dsp/makeupReference.js'
+import { makeVocalSatCurve } from './dsp/vocalSatCurve.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
 export { MAKEUP_PERCENTILE, CEILING_KNEE_DB }
@@ -1169,6 +1170,88 @@ export const TUBE_BIAS = 0.06 // operating-point offset, 4.2% of the linear rang
  * reduction lands on the body alone. See LOOKAHEAD_MAX_MS for what does move
  * that peak, and CELL_MOD_SHAPE for the mechanism fast enough to catch it.
  */
+/**
+ * TUBE SATURATION'S CURVE, IMPORTED RATHER THAN COPIED — see
+ * `dsp/vocalSatCurve.js` for what does and does not come across with it.
+ */
+export const TUBE_CURVE_TANH = 'tanh'
+export const TUBE_CURVE_VOCALSAT = 'vocalsat'
+export const CELL_CURVE_GAINMOD = 'gainmod'
+export const CELL_CURVE_VOCALSAT = 'vocalsat'
+
+/**
+ * The cell shaper's drive at full compression.
+ *
+ * ⚠ THIS IS A DEPTH LAW WITH NO MEASUREMENT UNDER IT, AND IT IS NOT THE ONE
+ * THE GAIN MODULATION HAS. `CELL_MOD_MAX` and `CELL_MOD_TAU_DB` are fitted to
+ * the Moore paper at 6 dB of gain reduction; this constant is not fitted to
+ * anything. It exists because the character it carries was arrived at BY EAR
+ * on programme material over two days of tuning Tube Saturation, which is a
+ * different kind of evidence from a bench measurement and is not a weaker one
+ * for this purpose — the paper constrains what an LA-2A DOES, and this stage
+ * is a deliberate departure from that, chosen for how it sounds.
+ *
+ * ⚠ SO DO NOT RE-DERIVE IT AGAINST THE PAPER. A fit to the six units' THD band
+ * is what `CELL_CURVE_GAINMOD` is for, it remains the default, and the two are
+ * peers with different purposes rather than a calibrated option and an
+ * uncalibrated one.
+ *
+ * ⚠ 12 IS A LEVEL MATCH, NOT A TASTE SETTING, AND IT IS THE STARTING POINT FOR
+ * AN AUDITION RATHER THAN THE ANSWER TO ONE. It is solved so the shaper puts
+ * out the same AMOUNT of distortion as the mechanism it replaces, measured on
+ * speech re. output level:
+ *
+ *   driveMax    PR 50   PR 60   PR 70   PR 85
+ *   2.38        -33.9   -32.7   -31.7   -31.0
+ *   12.00       -22.9   -19.4   -17.3   -17.9
+ *   gain mod    -23.3   -20.7   -19.2   -17.8
+ *
+ * The point of matching is that an A/B then compares CHARACTER instead of
+ * loudness — an option 13 dB quieter than the one it is being judged against
+ * wins or loses for the wrong reason, whichever way the listener goes. The
+ * first draft shipped at 2.38 and was exactly that unfair test.
+ *
+ * ⚠ AND 2.38 WAS NOT AN ARBITRARY WRONG NUMBER — it is `VOCAL_SAT_CURVE_DRIVE`,
+ * the reconstruction of Tube Saturation's own operating point, which is right
+ * for the VALVE stage (that stage sees a roughly nominal signal) and wrong here
+ * for a reason worth keeping: the cell shaper is inside the compressor's gain
+ * path and the valve stage is after it.
+ *
+ * The saturating shape is shared with the gain modulation (`CELL_MOD_TAU_DB`)
+ * for the reason that law was adopted there: a depth linear in gain reduction
+ * hits its operating point and then runs away. It is ABSENT at zero reduction,
+ * which is the one structural property the cell must have either way.
+ *
+ * ⚠ THE DRIVE IS COMPENSATED FOR THE ATTENUATION AHEAD OF IT, AND WITHOUT THAT
+ * THE STAGE LANDED 13 dB LIGHT. The cell shaper sits AFTER the gain cell, so it
+ * sees a signal the compressor has already pulled down — 7 dB at Peak Reduction
+ * 70, more above it. A fixed drive there puts the curve in a different place on
+ * its transfer at every depth, which is precisely what Tube Saturation's
+ * `autoDrive` follower exists to prevent: its curve sits at the same operating
+ * point whatever the programme level is doing.
+ *
+ * So the compensation IS that mechanism, ported to the one place it is free.
+ * `dsp/vocalSatCurve.js` explains why the follower itself cannot come across —
+ * a gated dual-RMS normaliser inside a compressor's gain path is an expander
+ * fighting a compressor. Here nothing has to be estimated: the attenuation is
+ * `preG`, known exactly, so dividing it back out holds the operating point with
+ * no follower, no state, and no gain riding of any kind. Measured on speech,
+ * uncompensated the imported cell ran -32 dBc against the gain modulation's
+ * -19; compensated the two sit in the same range and can be compared by ear,
+ * which is the whole purpose of the option.
+ */
+export const CELL_CURVE_DRIVE_MAX = 12
+
+/**
+ * Ceiling on that compensation, dB.
+ *
+ * ⚠ INHERITED FROM `AUTO_MAX_DB` IN `vocalSatProcessor.js` RATHER THAN CHOSEN,
+ * and it is there for the same reason: an unbounded normaliser runs away on
+ * quiet material. At 20 dB of gain reduction the raw reciprocal asks for 10x
+ * drive, which is well past anything Tube Saturation's own panel can reach.
+ */
+export const CELL_CURVE_COMP_MAX_DB = 12
+
 const COMPRESS_KNEE_DB = 5
 const LIMIT_KNEE_DB = 6
 
@@ -1214,6 +1297,25 @@ export const LA2A_KERNEL_DEFAULTS = {
    * nothing else. `dsp/inputAlign.js` computes it and documents why.
    */
   inputAlignDb: 0,
+  /**
+   * Which curve the output valve stage uses — `'tanh'` (the fitted biased
+   * hyperbolic tangent) or `'vocalsat'` (Tube Saturation's, at its panel
+   * defaults). `'tanh'` is the default and every render that predates this is
+   * bit-identical under it.
+   */
+  tubeCurve: TUBE_CURVE_TANH,
+  /**
+   * How the T4 cell makes its distortion — `'gainmod'` (the detector-ripple
+   * gain modulation fitted to the Moore paper) or `'vocalsat'` (Tube
+   * Saturation's curve as a waveshaper at the cell position, drive tracking
+   * gain reduction). `'gainmod'` is the default.
+   *
+   * ⚠ THEY ARE ALTERNATIVES, NOT A STACK. Selecting `'vocalsat'` disables the
+   * gain modulation rather than adding to it — two dominant distortion
+   * mechanisms in the same stage is neither of the two things being chosen
+   * between.
+   */
+  cellCurve: CELL_CURVE_GAINMOD,
 }
 
 /**
@@ -1349,6 +1451,9 @@ export class LA2AKernel {
     this.gainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     // Last gain of the previous block, for interpolating across the block seam.
     this.lastGain = 1
+    this.seamPreG = 1
+    this.seamMakeup = 1
+    this.seamDrive = 0
 
     // Metering
     this.grDb = 0
@@ -1358,6 +1463,18 @@ export class LA2AKernel {
 
     this.gainScratch = new Float32Array(128)
     this.preGainScratch = new Float32Array(128)
+    /**
+     * Cell-shaper scratch and delay lines. Allocated up front like the two
+     * above, but only WRITTEN when the shaper is selected — a kernel running
+     * the default gain modulation never touches them, and the delay lines never
+     * advance, so nothing about the default path depends on their state.
+     */
+    this.cellPreGScratch = new Float32Array(128)
+    this.cellMakeupScratch = new Float32Array(128)
+    this.cellDriveScratch = new Float32Array(128)
+    this.preGainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    this.makeupDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
+    this.cellDriveDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
 
     /**
      * LIVE AUTO-MAKEUP TRACKER — running extrema, O(1) per sample.
@@ -1447,12 +1564,14 @@ export class LA2AKernel {
 
     let g = Infinity
     if (this.applyTube) {
-      const inv = (y) => {
-        const a = y * this.tubeNorm + this.tanhBias
-        // The shaper saturates below the target: no makeup reaches it.
-        if (a >= 1 || a <= -1) return null
-        return (Math.atanh(a) - this.tubeBias) / this.tubeDriveLin
-      }
+      const inv = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
+        ? (y) => this.vsCurve.inverse(y)
+        : (y) => {
+          const a = y * this.tubeNorm + this.tanhBias
+          // The shaper saturates below the target: no makeup reaches it.
+          if (a >= 1 || a <= -1) return null
+          return (Math.atanh(a) - this.tubeBias) / this.tubeDriveLin
+        }
       const up = inv(P), dn = inv(-P)
       if (up !== null && vMax > 0) g = Math.min(g, up / vMax)
       if (dn !== null && vMin < 0) g = Math.min(g, dn / vMin)
@@ -1473,9 +1592,15 @@ export class LA2AKernel {
     this.gr = 0
     this.relPhase = 0
     this.lastGain = 1
+    this.seamPreG = 1
+    this.seamMakeup = 1
+    this.seamDrive = 0
     this.dcX = this.dcX.map(() => 0)
     this.dcY = this.dcY.map(() => 0)
     this.gainDelay.reset()
+    this.preGainDelay.reset()
+    this.makeupDelay.reset()
+    this.cellDriveDelay.reset()
     for (const line of this.dryLines) line?.reset()
     // ⚠ THE LOOKAHEAD LINES TOO. They hold `lookaheadSamples` of the PREVIOUS
     // region's audio, and a reset that left them would splice that tail onto
@@ -1564,6 +1689,45 @@ export class LA2AKernel {
     this.tanhBias = Math.tanh(this.tubeBias)
     // Normalize so the shaper has unity small-signal gain
     this.tubeNorm = this.tubeDriveLin * (1 - this.tanhBias * this.tanhBias)
+
+    /**
+     * CURVE SELECTION. Both curves are built once per param change and stored
+     * as closures; the inner loops call through them.
+     *
+     * ⚠ THE CLOSURE IS BUILT EVEN WHEN THE CURVE IS NOT SELECTED, and that is
+     * deliberate rather than wasteful — `liveAutoMakeupDb` and the offline
+     * solve both need the INVERSE, and a null closure there would mean the
+     * makeup path carrying its own branch for a stage that is already
+     * expressible as one. It costs one object per `setParams`.
+     */
+    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_VOCALSAT
+      ? TUBE_CURVE_VOCALSAT : TUBE_CURVE_TANH
+    this.cellCurveMode = p.cellCurve === CELL_CURVE_VOCALSAT
+      ? CELL_CURVE_VOCALSAT : CELL_CURVE_GAINMOD
+    const curveOverrides = {}
+    if (Number.isFinite(p.vocalSatCurveDrive) && p.vocalSatCurveDrive > 0) {
+      curveOverrides.curveDrive = p.vocalSatCurveDrive
+    }
+    if (typeof p.vocalSatLeanPositive === 'boolean') {
+      curveOverrides.leanPositive = p.vocalSatLeanPositive
+    }
+    this.vsCurve = makeVocalSatCurve(curveOverrides)
+    this.cellCurveDriveMax = Number.isFinite(p.cellCurveDriveMax)
+      && p.cellCurveDriveMax >= 0 ? p.cellCurveDriveMax : CELL_CURVE_DRIVE_MAX
+    this.cellCompMax = Math.exp(
+      (Number.isFinite(p.cellCurveCompMaxDb) && p.cellCurveCompMaxDb >= 0
+        ? p.cellCurveCompMaxDb : CELL_CURVE_COMP_MAX_DB) * LN10_OVER_20,
+    )
+    /**
+     * ⚠ THE GAIN MODULATION IS SWITCHED OFF WHEN THE SHAPER IS SELECTED — see
+     * the `cellCurve` note in the defaults. `cellMod` remains the measurement
+     * bypass it always was; this is the selector honouring "alternatives, not a
+     * stack" in one place rather than at every call site.
+     */
+    this.cellModActive = this.cellCurveMode === CELL_CURVE_GAINMOD
+      && this.cellMod > 0
+    this.cellShaperActive = this.cellCurveMode === CELL_CURVE_VOCALSAT
+      && this.cellCurveDriveMax > 0
     /**
      * A one-pole on the RECTIFIER, ahead of `rect / env`. 0 is off and is what
      * ships. It exists because it is the only thing measured that changes the
@@ -1641,9 +1805,17 @@ export class LA2AKernel {
 
     if (this.gainScratch.length < n) this.gainScratch = new Float32Array(n)
     if (this.preGainScratch.length < n) this.preGainScratch = new Float32Array(n)
+    if (this.cellPreGScratch.length < n) {
+      this.cellPreGScratch = new Float32Array(n)
+      this.cellMakeupScratch = new Float32Array(n)
+      this.cellDriveScratch = new Float32Array(n)
+    }
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
     const preGain = this.preGainScratch
+    const cellPreG = this.cellPreGScratch
+    const cellMakeup = this.cellMakeupScratch
+    const cellDrive = this.cellDriveScratch
     const chScale = 1 / nIn
 
     // The tracker's target: the loudest input sample heard so far.
@@ -1773,7 +1945,7 @@ export class LA2AKernel {
       // nothing to meet, so the delay would only misalign it.
       makeupLinSmoothed += this.makeupSmoothCoef * (this.makeupLin - makeupLinSmoothed)
       let preG = Math.exp(-grNow * LN10_OVER_20)
-      if (this.cellMod > 0 && env > 1e-6) {
+      if (this.cellModActive && env > 1e-6) {
         // Ripple as a fraction of the smoothed envelope, scaled by how hard
         // the cell is working. Sign is compressive: an instantaneously loud
         // sample means an instantaneously brighter lamp, so more attenuation.
@@ -1796,6 +1968,35 @@ export class LA2AKernel {
       const g = preG * makeupLinSmoothed
       gain[i] = this.oversampleOn ? this.gainDelay.push(g) : g
       preGain[i] = preG
+      /**
+       * THE CELL SHAPER NEEDS THE TWO GAINS SEPARATELY, because it sits
+       * BETWEEN them — after the attenuation, before the makeup amp, which is
+       * where the T4 is on the hardware and where the spike that preceded this
+       * put its waveshaper. `gain[]` is their product and cannot be taken
+       * apart afterwards.
+       *
+       * ⚠ DELAYED THROUGH THEIR OWN LINES, NOT DERIVED FROM `gain[]` BY
+       * DIVISION. Dividing the makeup back out is exactly the coupling that
+       * made the live tracker run away to -4635 dB, and the note on `trkInPeak`
+       * exists to stop it being reintroduced. Two lines of the same length give
+       * `delayed(a) * delayed(b) === delayed(a * b)` exactly — the same stored
+       * operands, the same multiply — so the default path is untouched.
+       */
+      if (this.cellShaperActive) {
+        // Attenuation-compensated, bounded — see CELL_CURVE_DRIVE_MAX.
+        const comp = preG > 0 ? Math.min(1 / preG, this.cellCompMax) : 1
+        const d = this.cellCurveDriveMax * comp
+          * (1 - Math.exp(-grNow / this.cellModTauDb))
+        if (this.oversampleOn) {
+          cellPreG[i] = this.preGainDelay.push(preG)
+          cellMakeup[i] = this.makeupDelay.push(makeupLinSmoothed)
+          cellDrive[i] = this.cellDriveDelay.push(d)
+        } else {
+          cellPreG[i] = preG
+          cellMakeup[i] = makeupLinSmoothed
+          cellDrive[i] = d
+        }
+      }
     }
     this.makeupLinSmoothed = makeupLinSmoothed
 
@@ -1886,6 +2087,17 @@ export class LA2AKernel {
     // Every channel interpolates from the same block-seam value, so it is read
     // before the loop and advanced once after it.
     const seamGain = this.lastGain
+    /**
+     * Seam values for the cell shaper's three ramps, matching what `seamGain`
+     * does for the combined one: the last value of the PREVIOUS block, so a
+     * ramp crossing the block boundary starts where the last one ended rather
+     * than stepping. `lastGain` is seeded to 1 and these to their own
+     * identities — unity gains and a zero drive, which `transferAt` treats as
+     * the stage being absent.
+     */
+    const seamPreG = this.seamPreG
+    const seamMakeup = this.seamMakeup
+    const seamDrive = this.seamDrive
     const wet = this.wetScratch
 
     for (let ch = 0; ch < nOut; ch++) {
@@ -1893,7 +2105,7 @@ export class LA2AKernel {
       const out = outputChannels[ch]
 
       if (!this.oversampleOn) {
-        this._processChannelBaseRate(input, out, gain, n, ch)
+        this._processChannelBaseRate(input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive)
         continue
       }
 
@@ -1912,18 +2124,59 @@ export class LA2AKernel {
       // should have received, so the first sample of a hard onset passed through nearly
       // unattenuated and read as a click.
       let gCur = seamGain
-      for (let i = 0; i < n; i++) {
-        const gNext = gain[i]
-        const step = (gNext - gCur) * invL
-        for (let j = 0; j < L; j++) {
-          const k = i * L + j
-          let w = hi[k] * (gCur + step * j)
-          if (this.applyTube) {
-            w = (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
+      if (this.cellShaperActive) {
+        /**
+         * ⚠ A SEPARATE LOOP RATHER THAN BRANCHES INSIDE THE SHIPPING ONE. The
+         * inner loop runs OVERSAMPLE_FACTOR times per sample per channel and is
+         * the hottest code in the plugin; two predictable branches per
+         * sub-sample measured worse than the duplication, and the default path
+         * stays literally the code it was.
+         *
+         * The cell shaper is applied to the ATTENUATED signal and the makeup
+         * follows it, which is the hardware's order and the one thing about
+         * this placement that is not a matter of taste.
+         */
+        let pCur = seamPreG
+        let mCur = seamMakeup
+        let dCur = seamDrive
+        for (let i = 0; i < n; i++) {
+          const pNext = cellPreG[i]
+          const mNext = cellMakeup[i]
+          const dNext = cellDrive[i]
+          const pStep = (pNext - pCur) * invL
+          const mStep = (mNext - mCur) * invL
+          const dStep = (dNext - dCur) * invL
+          for (let j = 0; j < L; j++) {
+            const k = i * L + j
+            let w = hi[k] * (pCur + pStep * j)
+            w = this.vsCurve.transferAt(w, dCur + dStep * j)
+            w *= mCur + mStep * j
+            if (this.applyTube) w = this.shapeTube(w)
+            hi[k] = w
           }
-          hi[k] = w
+          pCur = pNext
+          mCur = mNext
+          dCur = dNext
         }
-        gCur = gNext
+        this.seamPreG = pCur
+        this.seamMakeup = mCur
+        this.seamDrive = dCur
+      } else {
+        for (let i = 0; i < n; i++) {
+          const gNext = gain[i]
+          const step = (gNext - gCur) * invL
+          for (let j = 0; j < L; j++) {
+            const k = i * L + j
+            let w = hi[k] * (gCur + step * j)
+            if (this.applyTube) {
+              w = this.tubeCurveMode === TUBE_CURVE_VOCALSAT
+                ? this.vsCurve.transfer(w)
+                : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
+            }
+            hi[k] = w
+          }
+          gCur = gNext
+        }
       }
 
       this.oversamplers[ch].down(wet, n)
@@ -1959,14 +2212,34 @@ export class LA2AKernel {
    * resampling and therefore no latency. See the counterpart in
    * fet1176Processor.js for why this exists and why it is sound.
    */
-  _processChannelBaseRate(input, out, gain, n, ch) {
+  /**
+   * The output valve stage's transfer, whichever curve is selected.
+   *
+   * ⚠ NOT USED BY THE DEFAULT OVERSAMPLED LOOP, which still evaluates the tanh
+   * inline. That loop runs OVERSAMPLE_FACTOR times per sample per channel and a
+   * call through a property lookup there is not free; the shipping path keeps
+   * the arithmetic it had. Everywhere else the call is nowhere near hot.
+   */
+  shapeTube(w) {
+    return this.tubeCurveMode === TUBE_CURVE_VOCALSAT
+      ? this.vsCurve.transfer(w)
+      : (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
+  }
+
+  _processChannelBaseRate(input, out, gain, n, ch, cellPreG, cellMakeup, cellDrive) {
     let dcX = this.dcX[ch]
     let dcY = this.dcY[ch]
     for (let i = 0; i < n; i++) {
       const dry = input[i]
-      let w = dry * gain[i]
+      let w
+      if (this.cellShaperActive) {
+        // Same order as the oversampled path: attenuate, shape, then make up.
+        w = this.vsCurve.transferAt(dry * cellPreG[i], cellDrive[i]) * cellMakeup[i]
+      } else {
+        w = dry * gain[i]
+      }
       if (this.applyTube) {
-        const shaped = (Math.tanh(this.tubeDriveLin * w + this.tubeBias) - this.tanhBias) / this.tubeNorm
+        const shaped = this.shapeTube(w)
         dcY = shaped - dcX + this.dcR * dcY
         dcX = shaped
         w = dcY
