@@ -54,6 +54,13 @@ import {
  *
  *   VOCAL_SAT_CURVE_DRIVE = 2.38
  *
+ * ⚠ SO THIS IS NOT THE PANEL'S `drive` AND MUST NEVER BE LABELLED AS THOUGH IT
+ * WERE. Tube Saturation's Drive knob reads 1 at its defaults; this is the
+ * EFFECTIVE drive its curve sees once the band multiplier and the auto-drive
+ * normaliser have been folded in. Anyone matching this against the plugin knob
+ * by eye will set it to 1 and land 7.5 dB short of where the plugin's curve
+ * actually sits. The tuning panel calls it "Valve sat drive" and says so.
+ *
  * ⚠ IT IS ONLY RIGHT AT NOMINAL, AND THAT IS WHY `inputAlignDb` IS LOAD-
  * BEARING HERE RATHER THAN MERELY HELPFUL. Tube Saturation's follower tracks
  * the programme, so its curve sits at the same place on the transfer for a

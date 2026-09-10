@@ -55,6 +55,11 @@ const rectNulling = computed(() =>
   Math.abs(vals.value.rectLpMs - NULL_MS) < 0.06 && vals.value.rectLpMs > 0
 )
 
+/**
+ * ⚠ LABELS ARE CLIPPED PAST ~11 CHARACTERS by the 68px label column below.
+ * "Valve sat drive" was the accurate name and did not fit; the hint carries
+ * what the label cannot.
+ */
 const CONTROLS = [
   {
     key: 'cellMod', label: 'Cell depth', min: 0, max: 1, step: 0.01, digits: 2,
@@ -81,12 +86,12 @@ const CONTROLS = [
     hint: 'Operating-point offset — what makes the valve stage even-order at all.',
   },
   {
-    key: 'cellCurveDriveMax', label: 'Sat depth', min: 0, max: 24, step: 0.05, digits: 2,
-    hint: 'Cell shaper drive at full compression. Only live with the cell set to Tube Sat. The default is level-matched to the gain modulation so an A/B compares character, not loudness.',
+    key: 'cellCurveDriveMax', label: 'Cell sat', min: 0, max: 24, step: 0.05, digits: 2,
+    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law and the attenuation compensation scale it. NOT Tube Sat’s Drive knob. Default 12 is level-matched to the gain modulation so an A/B compares character, not loudness.',
   },
   {
-    key: 'vocalSatCurveDrive', label: 'Sat drive', min: 0.2, max: 8, step: 0.02, digits: 2,
-    hint: 'Where the imported curve sits on its transfer. 2.38 reconstructs Tube Sat’s own operating point at nominal level.',
+    key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
+    hint: 'VALVE stage only — barely audible, the valves are ~5% of the distortion. Same quantity as Cell sat drive, at the other stage. NOT Tube Sat’s Drive knob either: 2.38 is its EFFECTIVE drive, Drive (1) x band mult (3) x auto-drive gain (0.794).',
   },
 ]
 
