@@ -34,7 +34,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
+import { LA2AKernel, LA2A_LEGACY_PATCH } from '../../src/audio/la2aProcessor.js'
 
 const SR = 48000
 
@@ -56,7 +56,7 @@ const lin = dbfs => Math.pow(10, dbfs / 20)
 
 function run(x, params = {}) {
   const k = new LA2AKernel(SR)
-  k.setParams({ mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1, ...params })
+  k.setParams({ mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1, ...LA2A_LEGACY_PATCH, ...params })
   const n = x.length, o = new Float32Array(n)
   for (let f = 0; f < n; f += 128) {
     const l = Math.min(128, n - f)
@@ -108,7 +108,7 @@ function knobForGainReduction(targetDb, amp) {
   for (let i = 0; i < 40; i++) {
     const mid = (lo + hi) / 2
     const k = new LA2AKernel(SR)
-    k.setParams({ mode: 'compress', peakReduction: mid, gainDb: 0, r37: 100, mix: 1 })
+    k.setParams({ mode: 'compress', peakReduction: mid, gainDb: 0, r37: 100, mix: 1, ...LA2A_LEGACY_PATCH })
     const o = new Float32Array(x.length)
     for (let f = 0; f < x.length; f += 128) {
       const l = Math.min(128, x.length - f)
@@ -120,6 +120,17 @@ function knobForGainReduction(targetDb, amp) {
   return (lo + hi) / 2
 }
 
+/**
+ * ⚠ RUNS ON `LA2A_LEGACY_PATCH`, WHICH IS NO LONGER THE KERNEL DEFAULT. Every
+ * assertion below validates the fitted `tanh` valve and the Moore-derived T4
+ * gain modulation. OptoSmooth now ships Tube Saturation's curve at both stages,
+ * so these have to ask for the model they are about — they were written when it
+ * was simply what a bare kernel did.
+ *
+ * ⚠ THEY ARE NOT STALE. This is the only mechanism in the plugin with hardware
+ * measurements behind it, it is still selectable, and it is what every file
+ * rendered before the switch was made with.
+ */
 test('saturation follows input level', () => {
   // The valves have no drive of their own: the only thing that decides how hard
   // they work is how much signal arrives. Measured 0.007 / 0.045 / 0.090 /

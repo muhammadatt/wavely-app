@@ -17,7 +17,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { LA2AKernel, computeAutoMakeupDb } from '../../src/audio/la2aProcessor.js'
+import { LA2AKernel, computeAutoMakeupDb , LA2A_LEGACY_PATCH } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel, computeFET1176AutoMakeupDb } from '../../src/audio/fet1176Processor.js'
 
 const SR = 48000
@@ -65,17 +65,55 @@ function runClosedLoop(kernel, x, knob) {
   return { final: kernel.liveAutoMakeupDb(), trace }
 }
 
+/**
+ * ⚠ THE BOUND IS PER-PATCH, AND THE EMPHASIS PAIR IS WHY.
+ *
+ * The closed form solves from two extrema of the pre-makeup signal. That is
+ * exact against a memoryless curve and inexact against an LTI FILTER, because
+ * a shelf's effect on a peak depends on the waveform's shape and the tube
+ * stage changes that shape in between. Measured at Peak Reduction 55 the
+ * residue is about 1 dB with the pair engaged and 0.02 dB without it — so the
+ * tight bound is asserted where it is achievable rather than relaxed for
+ * everything. See the note on `trkEmph`.
+ *
+ * The rendered file is unaffected: apply uses the offline solve.
+ */
 test('OptoSmooth: converges on the offline solve with the loop closed', () => {
+  const x = material()
+  // Without the emphasis pair the closed form is exact and is held to it.
+  for (const peakReduction of [55, 70, 85]) {
+    for (const patch of [
+      { ...LA2A_LEGACY_PATCH },
+      { cellCurve: 'gainmod', emphasis: 0 },
+      { tubeCurve: 'tanh', emphasis: 0 },
+      { emphasis: 0 },
+    ]) {
+      const p = { peakReduction, ...patch }
+      const offline = computeAutoMakeupDb([x], SR, p)
+      const k = new LA2AKernel(SR); k.setParams(p)
+      const { final } = runClosedLoop(k, x, 'gainDb')
+      assert.ok(
+        Math.abs(final - offline) < 0.6,
+        `PR ${peakReduction} ${JSON.stringify(patch)}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`,
+      )
+    }
+  }
+})
+
+test('with the emphasis pair the closed form stays within a documented 1.2 dB', () => {
+  // Not a relaxed version of the test above — a different claim. It pins that
+  // the residue is BOUNDED and one-sided (the tracker under-reads, so the knob
+  // never asks for more than apply will deliver), and it would fail loudly if
+  // the tracker-side de-emphasis were removed: that measures -11.4 dB.
   const x = material()
   for (const peakReduction of [55, 70, 85]) {
     const p = { peakReduction }
     const offline = computeAutoMakeupDb([x], SR, p)
     const k = new LA2AKernel(SR); k.setParams(p)
     const { final } = runClosedLoop(k, x, 'gainDb')
-    assert.ok(
-      Math.abs(final - offline) < 0.6,
-      `PR ${peakReduction}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`,
-    )
+    const err = final - offline
+    assert.ok(err > -1.2 && err <= 0.1,
+      `PR ${peakReduction}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`)
   }
 })
 

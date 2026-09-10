@@ -85,7 +85,7 @@ import {
   MAKEUP_PERCENTILE, CEILING_KNEE_DB,
   softCeiling, float32AtOrBelow, percentileOfChannels,
 } from './dsp/makeupReference.js'
-import { makeVocalSatCurve } from './dsp/vocalSatCurve.js'
+import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
 import { highShelf, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
@@ -1197,51 +1197,43 @@ export const CELL_CURVE_VOCALSAT = 'vocalsat'
  * peers with different purposes rather than a calibrated option and an
  * uncalibrated one.
  *
- * ⚠ 12 IS A LEVEL MATCH, NOT A TASTE SETTING, AND IT IS THE STARTING POINT FOR
- * AN AUDITION RATHER THAN THE ANSWER TO ONE. It is solved so the shaper puts
- * out the same AMOUNT of distortion as the mechanism it replaces, measured on
- * speech re. output level:
+ * ⚠ 1.5 IS AN AUDITIONED VALUE AND IS THE SHIPPING DEFAULT. Arrived at by ear
+ * alongside a valve drive of 0.5 and Emphasis at 100, on narration, and it is
+ * deliberately far below the 12 this constant shipped at for one release.
  *
- *   driveMax    PR 50   PR 60   PR 70   PR 85
- *   2.38        -33.9   -32.7   -31.7   -31.0
- *   12.00       -22.9   -19.4   -17.3   -17.9
- *   gain mod    -23.3   -20.7   -19.2   -17.8
+ * ⚠ THAT 12 WAS DERIVED FROM A MEASUREMENT THAT WAS WRONG, and the error is
+ * recorded because it is easy to repeat. It was solved to make the shaper put
+ * out the same distortion ENERGY as the gain modulation it replaces, so that an
+ * A/B would compare character rather than loudness. The intent was right; the
+ * instrument was not. Both the level-match solve and the "effective drive"
+ * table that followed it were run with the makeup at 0 dB, and they multiplied
+ * this knob by the attenuation compensation as though the compensation ADDED
+ * drive.
  *
- * The point of matching is that an A/B then compares CHARACTER instead of
- * loudness — an option 13 dB quieter than the one it is being judged against
- * wins or loses for the wrong reason, whichever way the listener goes. The
- * first draft shipped at 2.38 and was exactly that unfair test.
+ * It does the opposite. The compensation exists to CANCEL `preG`, so
+ * `knob * comp * preG` is just `knob` — the curve sees a nominal-referred
+ * signal, not an amplified one. And the valve stage sits AFTER the makeup amp,
+ * so measuring it at makeup 0 starves it of exactly the gain that makes the two
+ * stages comparable. Instrumenting both curves for the RMS they actually
+ * receive, same knob value on both, with auto makeup as the app runs it:
  *
- * ⚠ AND 2.38 WAS NOT AN ARBITRARY WRONG NUMBER — it is `VOCAL_SAT_CURVE_DRIVE`,
- * the reconstruction of Tube Saturation's own operating point, which is right
- * for the VALVE stage (that stage sees a roughly nominal signal) and wrong here
- * for a reason worth keeping: the cell shaper is inside the compressor's gain
- * path and the valve stage is after it.
+ *   PR   auto makeup   avg GR    cell vs valve
+ *   40      1.21 dB    1.11 dB     -13.4 dB
+ *   55      4.62 dB    4.14 dB      -4.4 dB
+ *   70      8.86 dB    7.85 dB      -1.5 dB
+ *   85     13.29 dB   11.86 dB      -2.8 dB
  *
- * The saturating shape is shared with the gain modulation (`CELL_MOD_TAU_DB`)
- * for the reason that law was adopted there: a depth linear in gain reduction
- * hits its operating point and then runs away. It is ABSENT at zero reduction,
- * which is the one structural property the cell must have either way.
+ * So the two knobs were ALREADY in the same units to within a few dB at any
+ * working depth, and the 3.6x mismatch the bad table reported does not exist.
+ * The remaining spread at Peak Reduction 40 is the cell correctly vanishing
+ * when there is nothing to compress, which is the intended difference between
+ * the stages and must not be normalised away.
  *
- * ⚠ THE DRIVE IS COMPENSATED FOR THE ATTENUATION AHEAD OF IT, AND WITHOUT THAT
- * THE STAGE LANDED 13 dB LIGHT. The cell shaper sits AFTER the gain cell, so it
- * sees a signal the compressor has already pulled down — 7 dB at Peak Reduction
- * 70, more above it. A fixed drive there puts the curve in a different place on
- * its transfer at every depth, which is precisely what Tube Saturation's
- * `autoDrive` follower exists to prevent: its curve sits at the same operating
- * point whatever the programme level is doing.
- *
- * So the compensation IS that mechanism, ported to the one place it is free.
- * `dsp/vocalSatCurve.js` explains why the follower itself cannot come across —
- * a gated dual-RMS normaliser inside a compressor's gain path is an expander
- * fighting a compressor. Here nothing has to be estimated: the attenuation is
- * `preG`, known exactly, so dividing it back out holds the operating point with
- * no follower, no state, and no gain riding of any kind. Measured on speech,
- * uncompensated the imported cell ran -32 dBc against the gain modulation's
- * -19; compensated the two sit in the same range and can be compared by ear,
- * which is the whole purpose of the option.
+ * ⚠ THE LESSON IS THE MEASUREMENT CONDITION, NOT THE NUMBER. Anything comparing
+ * these two stages has to run with the makeup the patch will actually use.
+ * At makeup 0 the valve is starved and every comparison tilts toward the cell.
  */
-export const CELL_CURVE_DRIVE_MAX = 12
+export const CELL_CURVE_DRIVE_MAX = 1.5
 
 /**
  * Ceiling on that compensation, dB.
@@ -1252,6 +1244,54 @@ export const CELL_CURVE_DRIVE_MAX = 12
  * drive, which is well past anything Tube Saturation's own panel can reach.
  */
 export const CELL_CURVE_COMP_MAX_DB = 12
+
+/**
+ * The valve stage's drive into the imported curve — the shipping default.
+ *
+ * ⚠ NOT `VOCAL_SAT_CURVE_DRIVE`, AND THE TWO ANSWER DIFFERENT QUESTIONS.
+ * That constant (2.38) is a DERIVATION: the operating point Tube Saturation's
+ * own curve sits at, reconstructed from its band multiplier and its auto-drive
+ * normaliser. It stays where it is and remains the module's fallback. This is
+ * an AUDITION: what the valve stage wants inside a compressor, with a cell
+ * shaper already ahead of it and the makeup amp between them. Chosen by ear at
+ * 0.5, well under the reconstruction, because most of the colour now arrives
+ * from the cell and the valve is a small constant floor beneath it.
+ */
+export const VALVE_CURVE_DRIVE = 0.5
+
+/**
+ * Emphasis depth, 0-100, as the plugin ships.
+ *
+ * ⚠ 100 RATHER THAN THE 0 THIS SHIPPED AT, and that is only defensible because
+ * the cell curve is now the default too. Measured, the pair does nothing on
+ * `tanh` and nothing on the gain modulation — see EMPHASIS_MAX_DB — so at the
+ * old defaults this value would have been an inert knob at full travel, which
+ * is worse than an honest zero. On the imported cell shaper it is the control
+ * that turns the curve from something that brightens an onset into something
+ * that absorbs it, which is the reason the whole import was undertaken.
+ */
+export const EMPHASIS_DEFAULT = 100
+
+/**
+ * THE PRE-IMPORT KERNEL, AS A PATCH — the fitted `tanh` valve, the Moore-
+ * derived T4 gain modulation, and no emphasis pair.
+ *
+ * ⚠ IT EXISTS SO THERE IS ONE DEFINITION OF "THE OLD MODEL". Six test files
+ * validate that model — its H2 against the paper, its odd/even split, its
+ * depth law, the rectifier pole, the makeup inverse — and every one of them
+ * was written when it was simply the default. Spelling the three keys out in
+ * each of them is three chances per file to drift out of step with what
+ * `gainmod` and `tanh` actually mean.
+ *
+ * ⚠ IT IS NOT DEPRECATED AND MUST NOT BE DELETED. `gainmod` is still the only
+ * mechanism in this file with hardware behind it, and everything rendered
+ * before the switch was rendered with this.
+ */
+export const LA2A_LEGACY_PATCH = Object.freeze({
+  tubeCurve: TUBE_CURVE_TANH,
+  cellCurve: CELL_CURVE_GAINMOD,
+  emphasis: 0,
+})
 
 /**
  * PRE/DE-EMPHASIS AROUND THE NONLINEAR SECTION — Tube Saturation's pair,
@@ -1368,31 +1408,46 @@ export const LA2A_KERNEL_DEFAULTS = {
    */
   inputAlignDb: 0,
   /**
-   * Which curve the output valve stage uses — `'tanh'` (the fitted biased
-   * hyperbolic tangent) or `'vocalsat'` (Tube Saturation's, at its panel
-   * defaults). `'tanh'` is the default and every render that predates this is
-   * bit-identical under it.
-   */
-  tubeCurve: TUBE_CURVE_TANH,
-  /**
-   * How the T4 cell makes its distortion — `'gainmod'` (the detector-ripple
-   * gain modulation fitted to the Moore paper) or `'vocalsat'` (Tube
-   * Saturation's curve as a waveshaper at the cell position, drive tracking
-   * gain reduction). `'gainmod'` is the default.
+   * ── THE SATURATION PATCH, AND IT IS A DELIBERATE BREAK WITH THE HARDWARE ──
    *
-   * ⚠ THEY ARE ALTERNATIVES, NOT A STACK. Selecting `'vocalsat'` disables the
-   * gain modulation rather than adding to it — two dominant distortion
-   * mechanisms in the same stage is neither of the two things being chosen
-   * between.
+   * ⚠ EVERY RENDER MADE BEFORE THIS SOUNDS DIFFERENT NOW. These five keys ship
+   * OptoSmooth and Scheps on Tube Saturation's curve at BOTH stages, chosen by
+   * ear on narration. That is not a re-tune of the previous model, it is a
+   * different model: the fitted `tanh` valve and the Moore-derived T4 gain
+   * modulation are both OFF by default. Both remain selectable and both remain
+   * correct — `tubeCurve: 'tanh'` with `cellCurve: 'gainmod'` and
+   * `emphasis: 0` reproduces the previous kernel exactly, and a test pins it.
+   *
+   * ⚠ SO THE MOORE CALIBRATION NO LONGER DESCRIBES WHAT SHIPS. The paper's six
+   * units, the H3-over-H2 balance, the 0.94-4.22 % THD band — all of that
+   * still validates `gainmod`, which is still the honest LA-2A model and is
+   * still here. It does not validate this patch and must not be cited for it.
+   * What justifies this one is a listening decision, and the file says so
+   * rather than dressing it up as a fit.
+   *
+   * ⚠ AND `acx_audiobook` AND THE OTHER SERVER PRESETS DO NOT USE THIS. The
+   * preset chain runs its own compression stages server-side; these are the
+   * client-side plugin's defaults. Nothing in `presets.js` changes.
    */
-  cellCurve: CELL_CURVE_GAINMOD,
+  tubeCurve: TUBE_CURVE_VOCALSAT,
+  cellCurve: CELL_CURVE_VOCALSAT,
+  /** Cell shaper drive at full compression. Auditioned — see the constant. */
+  cellCurveDriveMax: CELL_CURVE_DRIVE_MAX,
+  /** Valve stage drive. Auditioned, and NOT the derived reconstruction. */
+  vocalSatCurveDrive: VALVE_CURVE_DRIVE,
+  /**
+   * Which polarity gets the hard knee under SPLIT asymmetry. Tube Saturation
+   * measures this from the material; a memoryless stage cannot, so it is a
+   * constant here and `true` is a choice rather than a measurement.
+   */
+  vocalSatLeanPositive: VOCAL_SAT_CURVE_LEAN_POSITIVE,
   /**
    * Pre/de-emphasis depth around the nonlinear section, 0-100 -> 0-12 dB.
-   * ABSENT at 0, which is the default: the branch is skipped and the filter
-   * state never advances, so a patch that does not use it is bit-identical to
-   * one built before it existed.
+   *
+   * ⚠ IT IS ONLY WORTH HAVING BECAUSE THE CELL CURVE IS THE DEFAULT. Measured
+   * inert on `tanh` and on the gain modulation; see EMPHASIS_DEFAULT.
    */
-  emphasis: 0,
+  emphasis: EMPHASIS_DEFAULT,
 }
 
 /**
@@ -1555,9 +1610,69 @@ export class LA2AKernel {
     this.preEmph = []
     this.deEmph = []
     this.emphScratch = new Float32Array(128)
+    /**
+     * A THIRD COPY OF THE DE-EMPHASIS, FOR THE MAKEUP TRACKER ONLY.
+     *
+     * ⚠ WITHOUT IT THE AUTO GAIN KNOB UNDER-READS BY ABOUT A dB ON THE SHIPPING
+     * PATCH. `liveAutoMakeupDb` solves from two extrema of the pre-makeup
+     * signal, which works because everything downstream of the makeup amp was
+     * a memoryless monotone curve it could invert. The emphasis pair put an
+     * LTI filter down there, and no pair of extrema can describe what a shelf
+     * does to a peak — it depends on the spectrum. Measured, live 1.91 dB
+     * against an offline 2.93 at Peak Reduction 55.
+     *
+     * The fix is to move the filter to the other side of the makeup, which is
+     * legitimate because a scalar COMMUTES with an LTI filter: de-emphasising
+     * the pre-makeup signal and then solving is identical to solving and then
+     * de-emphasising, exactly, for as long as the tube stage between them is
+     * linear — and approximate in proportion to how hard it is driven, which
+     * at the shipping valve drive of 0.5 is barely at all.
+     *
+     * ⚠ IT KEEPS THE TRACKER INDEPENDENT OF THE MAKEUP, which is the property
+     * the panel's write-back loop is stable because of. This filter never sees
+     * the makeup; the note on `trkInPeak` records what happened the one time
+     * something here did.
+     *
+     * ⚠ IT IS WORTH -11 dB AND IT DOES NOT CLOSE THE GAP. Against the offline
+     * solve at Peak Reduction 55, live minus offline:
+     *
+     *   legacy patch (no pair)          -0.02 dB
+     *   imported valve only             -0.02
+     *   imported cell only              -0.02
+     *   legacy + emphasis 100           -0.83
+     *   shipping patch                  -1.03
+     *   shipping patch, WITHOUT this   -11.37
+     *
+     * ⚠ THE REMAINING ~1 dB IS A LIMIT OF THE METHOD, NOT A BUG TO TUNE OUT,
+     * and no fudge factor belongs here. A closed form over two extrema can
+     * describe what a memoryless curve does to a peak; it cannot describe what
+     * a FILTER does, because a shelf's effect on a peak depends on the
+     * waveform's SHAPE, and the tube stage changes that shape between this tap
+     * and the real filter. Commuting the shelf across the makeup is exact
+     * (a scalar commutes with an LTI filter); commuting it across the tube is
+     * not, and that residue is what is left.
+     *
+     * ⚠ THE RENDERED FILE IS UNAFFECTED. Apply uses `computeAutoMakeupPlan`,
+     * which renders and re-measures and is correct to 0.01 dB — verified by
+     * rendering at its answer and finding the output peak on the input peak.
+     * What this costs is that the AUTO Gain knob reads about a dB low during
+     * preview on a patch with the pair engaged, and apply then corrects it.
+     */
+    this.trkEmph = []
+    this.trkEmphScratch = new Float32Array(128)
     this.cellPreGScratch = new Float32Array(128)
     this.cellMakeupScratch = new Float32Array(128)
     this.cellDriveScratch = new Float32Array(128)
+    /**
+     * The cell drive UNDELAYED, for the makeup tracker only.
+     *
+     * ⚠ `cellDriveScratch` IS DELAYED TO MEET THE OVERSAMPLER AND THE TRACKER
+     * IS NOT. The tracker deliberately pairs the undelayed input with the
+     * undelayed `preGain` — see the note on `wetScratch` — so it needs the
+     * drive on that same timebase. Reusing the delayed one pairs each sample
+     * with a drive from before its own attack.
+     */
+    this.cellDriveRawScratch = new Float32Array(128)
     this.preGainDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.makeupDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
     this.cellDriveDelay = new DelayLine(Math.max(0, UPSAMPLE_DELAY_SAMPLES - 1))
@@ -1685,6 +1800,7 @@ export class LA2AKernel {
     this.dcY = this.dcY.map(() => 0)
     for (const f of this.preEmph) f?.reset()
     for (const f of this.deEmph) f?.reset()
+    for (const f of this.trkEmph) f?.reset()
     this.gainDelay.reset()
     this.preGainDelay.reset()
     this.makeupDelay.reset()
@@ -1788,10 +1904,17 @@ export class LA2AKernel {
      * makeup path carrying its own branch for a stage that is already
      * expressible as one. It costs one object per `setParams`.
      */
-    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_VOCALSAT
-      ? TUBE_CURVE_VOCALSAT : TUBE_CURVE_TANH
-    this.cellCurveMode = p.cellCurve === CELL_CURVE_VOCALSAT
-      ? CELL_CURVE_VOCALSAT : CELL_CURVE_GAINMOD
+    /**
+     * ⚠ THE TEST IS AGAINST THE LEGACY NAME, NOT THE SHIPPING ONE, SO AN
+     * UNKNOWN VALUE FALLS BACK TO WHAT SHIPS. It read the other way around
+     * while `tanh`/`gainmod` were the defaults, and leaving it would have
+     * meant a typo or a stale param message silently selecting the OLD model —
+     * a fallback that lands anywhere but the shipping patch is not a fallback.
+     */
+    this.tubeCurveMode = p.tubeCurve === TUBE_CURVE_TANH
+      ? TUBE_CURVE_TANH : TUBE_CURVE_VOCALSAT
+    this.cellCurveMode = p.cellCurve === CELL_CURVE_GAINMOD
+      ? CELL_CURVE_GAINMOD : CELL_CURVE_VOCALSAT
     const curveOverrides = {}
     if (Number.isFinite(p.vocalSatCurveDrive) && p.vocalSatCurveDrive > 0) {
       curveOverrides.curveDrive = p.vocalSatCurveDrive
@@ -1821,6 +1944,7 @@ export class LA2AKernel {
       )]
       for (const f of this.preEmph) f?.setSections(this.preSections)
       for (const f of this.deEmph) f?.setSections(this.deSections)
+      for (const f of this.trkEmph) f?.setSections(this.deSections)
     }
 
     this.cellCompMax = Math.exp(
@@ -1918,6 +2042,7 @@ export class LA2AKernel {
       this.cellPreGScratch = new Float32Array(n)
       this.cellMakeupScratch = new Float32Array(n)
       this.cellDriveScratch = new Float32Array(n)
+      this.cellDriveRawScratch = new Float32Array(n)
     }
     if (this.wetScratch.length < n) this.wetScratch = new Float64Array(n)
     const gain = this.gainScratch
@@ -1925,6 +2050,7 @@ export class LA2AKernel {
     const cellPreG = this.cellPreGScratch
     const cellMakeup = this.cellMakeupScratch
     const cellDrive = this.cellDriveScratch
+    const cellDriveRaw = this.cellDriveRawScratch
     const chScale = 1 / nIn
 
     // The tracker's target: the loudest input sample heard so far.
@@ -2096,6 +2222,7 @@ export class LA2AKernel {
         const comp = preG > 0 ? Math.min(1 / preG, this.cellCompMax) : 1
         const d = this.cellCurveDriveMax * comp
           * (1 - Math.exp(-grNow / this.cellModTauDb))
+        cellDriveRaw[i] = d
         if (this.oversampleOn) {
           cellPreG[i] = this.preGainDelay.push(preG)
           cellMakeup[i] = this.makeupDelay.push(makeupLinSmoothed)
@@ -2167,12 +2294,46 @@ export class LA2AKernel {
       audioChannels = delayed
     }
 
-    for (let ch = 0; ch < nOut; ch++) {
-      const src = audioChannels[Math.min(ch, nIn - 1)]
-      for (let i = 0; i < n; i++) {
-        const v = src[i] * preGain[i]
-        if (v > this.trkVMax) this.trkVMax = v
-        else if (v < this.trkVMin) this.trkVMin = v
+    /**
+     * ⚠ THE EXTREMA ARE TAKEN AFTER THE CELL SHAPER, NOT BEFORE IT, AND THAT IS
+     * WHAT KEEPS THE LIVE SOLVE HONEST.
+     *
+     * `liveAutoMakeupDb` inverts everything DOWNSTREAM of the makeup amp, which
+     * is the tube stage alone. The signal the makeup actually multiplies is the
+     * cell shaper's output, so the extrema have to be of that. Recording them
+     * before the shaper was correct while the cell was a gain modulation —
+     * modulation folds into `preGain` and the pre-makeup signal really was
+     * `src * preGain` — and became wrong the moment a waveshaper appeared
+     * between the two.
+     *
+     * ⚠ IT SHIPPED WRONG FOR EXACTLY ONE COMMIT AND `liveMakeup.test.js`
+     * CAUGHT IT: live 2.17 dB against an offline 3.32 at Peak Reduction 55,
+     * i.e. the AUTO Gain knob would have under-read by over a dB on the
+     * shipping patch. The tracker is still independent of the makeup by
+     * construction, which is the property that keeps the panel's write-back
+     * loop stable.
+     */
+    /**
+     * ⚠ GROWN HERE, AHEAD OF THE TRACKER, NOT DOWN WITH THE OTHER PER-CHANNEL
+     * RESOURCES. The tracker is the FIRST consumer of these filters, and while
+     * this block sat with the oversamplers below it the very first call read
+     * `trkEmph[ch]` before anything had pushed one. A resource has to be grown
+     * above its earliest use, not above its most obvious one.
+     */
+    // Emphasis filters, on the same build-only-when-used rule.
+    if (this.emphasisActive) {
+      if (this.emphScratch.length < n) this.emphScratch = new Float32Array(n)
+      if (this.trkEmphScratch.length < n) this.trkEmphScratch = new Float32Array(n)
+      while (this.preEmph.length < nOut) {
+        const pre = new BiquadCascade(1, 1)
+        const de = new BiquadCascade(1, 1)
+        const trk = new BiquadCascade(1, 1)
+        pre.setSections(this.preSections)
+        de.setSections(this.deSections)
+        trk.setSections(this.deSections)
+        this.preEmph.push(pre)
+        this.deEmph.push(de)
+        this.trkEmph.push(trk)
       }
     }
 
@@ -2188,18 +2349,6 @@ export class LA2AKernel {
       while (this.oversamplers.length < nOut) {
         this.oversamplers.push(new Oversampler())
         this.dryLines.push(new DelayLine(OVERSAMPLE_LATENCY_SAMPLES))
-      }
-    }
-    // Emphasis filters, on the same build-only-when-used rule.
-    if (this.emphasisActive) {
-      if (this.emphScratch.length < n) this.emphScratch = new Float32Array(n)
-      while (this.preEmph.length < nOut) {
-        const pre = new BiquadCascade(1, 1)
-        const de = new BiquadCascade(1, 1)
-        pre.setSections(this.preSections)
-        de.setSections(this.deSections)
-        this.preEmph.push(pre)
-        this.deEmph.push(de)
       }
     }
 
@@ -2241,6 +2390,35 @@ export class LA2AKernel {
       if (this.emphasisActive) {
         this.preEmph[ch].process(input, this.emphScratch, n, 0)
         driven = this.emphScratch
+      }
+
+      /**
+       * MAKEUP TRACKER EXTREMA — inside this loop, on `driven`, not on the raw
+       * input in a loop of their own.
+       *
+       * ⚠ IT HAS TO SEE THE SAME PRE-EMPHASIS THE AUDIO DOES. Standing outside
+       * this loop the tracker could only reach the raw input, so applying the
+       * de-emphasis to it (see `trkEmph`) left the signal NET SHELVED — the
+       * pair no longer cancelled, the extrema came out small, and the makeup
+       * overshot by 1.5 dB in the opposite direction from the bug it was
+       * fixing. Both halves of the pair, or neither.
+       *
+       * What is recorded is the signal as it reaches the makeup amp — attenuated
+       * by the cell, shaped by the cell curve — with the downstream de-emphasis
+       * moved to this side of the makeup, which a scalar permits. Everything
+       * here remains independent of the makeup itself.
+       */
+      const trk = this.trkEmphScratch
+      for (let i = 0; i < n; i++) {
+        let v = driven[i] * preGain[i]
+        if (this.cellShaperActive) v = this.vsCurve.transferAt(v, cellDriveRaw[i])
+        trk[i] = v
+      }
+      if (this.emphasisActive) this.trkEmph[ch].process(trk, trk, n, 0)
+      for (let i = 0; i < n; i++) {
+        const v = trk[i]
+        if (v > this.trkVMax) this.trkVMax = v
+        else if (v < this.trkVMin) this.trkVMin = v
       }
 
       if (!this.oversampleOn) {

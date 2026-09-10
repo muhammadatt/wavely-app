@@ -21,7 +21,22 @@ import {
   TUBE_CURVE_TANH, TUBE_CURVE_VOCALSAT,
   CELL_CURVE_GAINMOD, CELL_CURVE_VOCALSAT,
 } from '../../src/audio/la2aProcessor.js'
+import { LA2A_KERNEL_DEFAULTS } from '../../src/audio/la2aProcessor.js'
 import { makeVocalSatCurve } from '../../src/audio/dsp/vocalSatCurve.js'
+
+/**
+ * The pre-import kernel, as a patch.
+ *
+ * ⚠ THIS IS NOT "THE DEFAULTS" ANY MORE. Tube Saturation's curve ships at both
+ * stages now, so the old model has to be asked for by name — and it must stay
+ * exactly reachable, because every render, preset and rendered file made before
+ * the switch was made with it.
+ */
+const LEGACY = {
+  tubeCurve: TUBE_CURVE_TANH,
+  cellCurve: CELL_CURVE_GAINMOD,
+  emphasis: 0,
+}
 
 const SR = 44100
 
@@ -49,34 +64,55 @@ const run = (params) => processLA2ABuffer(
   { peakReduction: 70, gainDb: 3, inputAlignDb: 12, ...params },
 ).channelData[0]
 
-test('the default patch is bit-identical to one with no curve selectors at all', () => {
-  const base = run({})
-  const explicit = run({
-    tubeCurve: TUBE_CURVE_TANH, cellCurve: CELL_CURVE_GAINMOD,
-  })
-  assert.deepEqual(Array.from(explicit), Array.from(base))
+test('the shipping patch is the audition patch, exactly', () => {
+  // Pins what OptoSmooth and Scheps sound like out of the box. Every one of
+  // these was chosen by ear; if a refactor moves one, that is a change to the
+  // product's sound and it should have to come through this test.
+  const d = LA2A_KERNEL_DEFAULTS
+  assert.equal(d.tubeCurve, TUBE_CURVE_VOCALSAT)
+  assert.equal(d.cellCurve, CELL_CURVE_VOCALSAT)
+  assert.equal(d.cellCurveDriveMax, 1.5)
+  assert.equal(d.vocalSatCurveDrive, 0.5)
+  assert.equal(d.vocalSatLeanPositive, true)
+  assert.equal(d.emphasis, 100)
+  assert.equal(d.tube, true)
 })
 
-test('bit-identical on the base-rate path the makeup solver uses', () => {
-  const base = run({ oversample: false })
+test('the pre-import kernel is still exactly reachable by name', () => {
+  // Everything rendered before the switch was made with this. It must not
+  // become approximately recoverable.
+  const legacy = run(LEGACY)
   const explicit = run({
-    oversample: false, tubeCurve: TUBE_CURVE_TANH, cellCurve: CELL_CURVE_GAINMOD,
+    ...LEGACY, cellMod: 1, cellCurveDriveMax: 1.5, vocalSatCurveDrive: 0.5,
   })
-  assert.deepEqual(Array.from(explicit), Array.from(base))
+  // The imported-curve knobs must not reach the legacy path at all.
+  assert.deepEqual(Array.from(explicit), Array.from(legacy))
 })
 
-test('an unknown curve name falls back to the shipping curve, it does not throw', () => {
+test('the legacy path holds on the base-rate path the makeup solver uses', () => {
+  const a = run({ ...LEGACY, oversample: false })
+  const b = run({
+    ...LEGACY, oversample: false, cellCurveDriveMax: 99, vocalSatCurveDrive: 8,
+  })
+  assert.deepEqual(Array.from(b), Array.from(a))
+})
+
+test('an unknown curve name falls back to what SHIPS, not to the old model', () => {
+  // It fell back to tanh/gainmod while those were the defaults. Left alone,
+  // a typo or a stale param message would silently select the previous model.
   const base = run({})
-  const bogus = run({ tubeCurve: 'nope', cellCurve: 'nope' })
-  assert.deepEqual(Array.from(bogus), Array.from(base))
+  assert.deepEqual(Array.from(run({ tubeCurve: 'nope', cellCurve: 'nope' })),
+    Array.from(base))
+  assert.deepEqual(Array.from(run({ tubeCurve: undefined, cellCurve: undefined })),
+    Array.from(base))
 })
 
 test('each selector actually changes the output', () => {
   const base = run({})
-  const tube = run({ tubeCurve: TUBE_CURVE_VOCALSAT })
-  const cell = run({ cellCurve: CELL_CURVE_VOCALSAT })
-  assert.notDeepEqual(Array.from(tube), Array.from(base))
-  assert.notDeepEqual(Array.from(cell), Array.from(base))
+  assert.notDeepEqual(Array.from(run({ tubeCurve: TUBE_CURVE_TANH })),
+    Array.from(base))
+  assert.notDeepEqual(Array.from(run({ cellCurve: CELL_CURVE_GAINMOD })),
+    Array.from(base))
 })
 
 test('the cell shaper replaces the gain modulation rather than stacking with it', () => {
@@ -93,7 +129,7 @@ test('the cell shaper is absent at zero gain reduction, as the cell must be', ()
   // gain modulation off and differencing against the default would measure
   // that removal instead. That mistake is why this test failed first time.
   const quiet = { peakReduction: 0, gainDb: 0, inputAlignDb: 0 }
-  const base = run({ ...quiet, cellMod: 0 })
+  const base = run({ ...quiet, cellCurve: CELL_CURVE_GAINMOD, cellMod: 0 })
   const shaped = run({ ...quiet, cellCurve: CELL_CURVE_VOCALSAT })
   // The bound is the ramp-restructure floor pinned by the next test, not a
   // tolerance on the curve: at zero reduction the drive is exactly zero and
@@ -123,7 +159,7 @@ test('the cell shaper is absent at zero gain reduction, as the cell must be', ()
  * nobody should discover it by differencing renders and wondering.
  */
 test('splitting the gain ramp in two costs less than -90 dBc', () => {
-  const noCell = run({ cellMod: 0 })
+  const noCell = run({ cellCurve: CELL_CURVE_GAINMOD, cellMod: 0 })
   // Shaper selected, drive floored: isolates the ramp restructure alone.
   const ramped = run({ cellCurve: CELL_CURVE_VOCALSAT, cellCurveDriveMax: 1e-12 })
   let err = 0
@@ -147,7 +183,13 @@ test('latency does not move — neither curve resamples or looks ahead', () => {
 test('the imported curve is Tube Saturation\'s own, not a copy that can drift', () => {
   // If `vocalSatParams.js` retunes, this follows. The assertion is that the
   // kernel's curve and a freshly built one from the shared module agree.
-  const curve = makeVocalSatCurve()
+  // Built at the KERNEL's configured drive, not the module's own fallback —
+  // the two diverged when the valve's shipping drive became an auditioned 0.5
+  // rather than the 2.38 reconstruction, and this test caught it.
+  const curve = makeVocalSatCurve({
+    curveDrive: LA2A_KERNEL_DEFAULTS.vocalSatCurveDrive,
+    leanPositive: LA2A_KERNEL_DEFAULTS.vocalSatLeanPositive,
+  })
   const k = new LA2AKernel(SR)
   k.setParams({ tubeCurve: TUBE_CURVE_VOCALSAT })
   for (const x of [-0.9, -0.3, -0.01, 0, 0.01, 0.3, 0.9]) {
@@ -180,11 +222,13 @@ test('auto makeup still solves with the imported tube curve', () => {
 
 // ── The emphasis pair ──────────────────────────────────────────────────────
 
-test('emphasis 0 is bit-identical to a kernel built before the pair existed', () => {
-  const base = run({})
-  assert.deepEqual(Array.from(run({ emphasis: 0 })), Array.from(base))
-  // Absent, not flat: an undefined knob must behave as 0 rather than as NaN.
-  assert.deepEqual(Array.from(run({ emphasis: undefined })), Array.from(base))
+test('emphasis 0 removes the pair entirely rather than running it flat', () => {
+  // The branch is skipped and the filter state never advances, so the legacy
+  // patch is the kernel that predates the pair — not a shelf set to 0 dB.
+  const off = run(LEGACY)
+  assert.deepEqual(Array.from(run({ ...LEGACY, emphasis: 0 })), Array.from(off))
+  assert.notDeepEqual(Array.from(run({ ...LEGACY, emphasis: 100 })),
+    Array.from(off))
 })
 
 test('the pair does not reach the side-chain', () => {
@@ -243,10 +287,12 @@ test('the pair absorbs on the imported cell shaper and is inert on tanh', () => 
     }
     return 20 * Math.log10(p / Math.sqrt(s / (a.length - 4096)))
   }
-  const shaperDelta = crest(run({ cellCurve: CELL_CURVE_VOCALSAT, emphasis: 50 }))
-    - crest(run({ cellCurve: CELL_CURVE_VOCALSAT, emphasis: 0 }))
-  const tanhDelta = crest(run({ cellMod: 0, emphasis: 50 }))
-    - crest(run({ cellMod: 0, emphasis: 0 }))
+  const shaper = { cellCurve: CELL_CURVE_VOCALSAT, cellCurveDriveMax: 12 }
+  const shaperDelta = crest(run({ ...shaper, emphasis: 50 }))
+    - crest(run({ ...shaper, emphasis: 0 }))
+  const valveOnly = { ...LEGACY, cellMod: 0 }
+  const tanhDelta = crest(run({ ...valveOnly, emphasis: 50 }))
+    - crest(run({ ...valveOnly, emphasis: 0 }))
   assert.ok(shaperDelta < -0.2, `shaper absorbs (${shaperDelta.toFixed(2)} dB)`)
   assert.ok(Math.abs(tanhDelta) < 0.1, `tanh valve inert (${tanhDelta.toFixed(2)} dB)`)
 })

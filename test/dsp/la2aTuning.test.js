@@ -16,7 +16,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
+import { LA2AKernel, LA2A_LEGACY_PATCH } from '../../src/audio/la2aProcessor.js'
 import {
   LA2A_TUNING_DEFAULTS, getLA2ATuning, setLA2ATuning, resetLA2ATuning,
   isLA2ATuningDefault, la2aTuningOverrides,
@@ -39,7 +39,7 @@ const CYCLE = SR / F
 
 function run(x, params = {}) {
   const k = new LA2AKernel(SR)
-  k.setParams({ mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1, ...params })
+  k.setParams({ mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1, ...LA2A_LEGACY_PATCH, ...params })
   const n = x.length, o = new Float32Array(n)
   for (let f = 0; f < n; f += 128) {
     const l = Math.min(128, n - f)
@@ -68,6 +68,17 @@ function harmonic(y, k) {
 
 const dBc = (y, k) => 20 * Math.log10(Math.max(harmonic(y, k), 1e-30) / harmonic(y, 1))
 
+/**
+ * ⚠ RUNS ON `LA2A_LEGACY_PATCH`, WHICH IS NO LONGER THE KERNEL DEFAULT. Every
+ * assertion below validates the fitted `tanh` valve and the Moore-derived T4
+ * gain modulation. OptoSmooth now ships Tube Saturation's curve at both stages,
+ * so these have to ask for the model they are about — they were written when it
+ * was simply what a bare kernel did.
+ *
+ * ⚠ THEY ARE NOT STALE. This is the only mechanism in the plugin with hardware
+ * measurements behind it, it is still selectable, and it is what every file
+ * rendered before the switch was made with.
+ */
 test('an untouched bench emits no kernel params at all', () => {
   resetLA2ATuning()
   assert.ok(isLA2ATuningDefault())
@@ -199,7 +210,12 @@ test('a rectifier pole at the detector time constant nulls the modulation', () =
 test('moving the valve constants moves the makeup inverse with them', () => {
   const mk = (p) => {
     const k = new LA2AKernel(SR)
-    k.setParams({ mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1, ...p })
+    // Legacy patch: `tubeDriveLin` is a constant OF THE TANH CURVE and does
+    // nothing while the imported curve is selected, which is now the default.
+    k.setParams({
+      mode: 'compress', peakReduction: 0, gainDb: 0, r37: 100, mix: 1,
+      ...LA2A_LEGACY_PATCH, ...p,
+    })
     const x = tone(1.2, 0.35), o = new Float32Array(x.length)
     for (let f = 0; f < x.length; f += 128) {
       const l = Math.min(128, x.length - f)

@@ -28,11 +28,9 @@
 
 import {
   TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
-  TUBE_CURVE_TANH, CELL_CURVE_GAINMOD, CELL_CURVE_DRIVE_MAX,
+  CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE, EMPHASIS_DEFAULT,
+  LA2A_KERNEL_DEFAULTS,
 } from '../la2aProcessor.js'
-import {
-  VOCAL_SAT_CURVE_DRIVE, VOCAL_SAT_CURVE_LEAN_POSITIVE,
-} from '../dsp/vocalSatCurve.js'
 
 /**
  * Every default here is the module constant the kernel would use anyway, so
@@ -76,20 +74,26 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
    * re-tune); here it is the point, because the character is meant to reach
    * both. It does mean an audition of one is an audition of the other.
    */
-  /** `'tanh'` (fitted) or `'vocalsat'` (Tube Saturation's curve). */
-  tubeCurve: TUBE_CURVE_TANH,
-  /** `'gainmod'` (detector ripple, fitted) or `'vocalsat'` (waveshaper). */
-  cellCurve: CELL_CURVE_GAINMOD,
+  /**
+   * ⚠ THESE TRACK THE KERNEL'S SHIPPING PATCH AND MUST KEEP DOING SO. The panel
+   * decides "MODIFIED" by comparing against this object; a default here that
+   * disagrees with `LA2A_KERNEL_DEFAULTS` makes an untouched panel report a
+   * modification and, worse, makes `la2aTuningOverrides()` emit a key on every
+   * render — which Scheps spreads straight into its kernel. Read from the
+   * kernel defaults rather than restated, so the two cannot drift.
+   */
+  tubeCurve: LA2A_KERNEL_DEFAULTS.tubeCurve,
+  cellCurve: LA2A_KERNEL_DEFAULTS.cellCurve,
   /** Cell shaper drive at full compression. Not fitted — chosen by ear. */
   cellCurveDriveMax: CELL_CURVE_DRIVE_MAX,
   /** Where the imported curve sits on its transfer. See the module's note. */
-  vocalSatCurveDrive: VOCAL_SAT_CURVE_DRIVE,
+  vocalSatCurveDrive: VALVE_CURVE_DRIVE,
   /**
    * Which polarity gets the hard knee. Tube Saturation MEASURES this from the
    * material and a memoryless stage cannot, so it is a switch here — the first
    * thing to try if the imported character sounds inverted against the plugin.
    */
-  vocalSatLeanPositive: VOCAL_SAT_CURVE_LEAN_POSITIVE,
+  vocalSatLeanPositive: LA2A_KERNEL_DEFAULTS.vocalSatLeanPositive,
   /**
    * Pre/de-emphasis depth around the nonlinear section, 0-100.
    *
@@ -98,7 +102,7 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
    * only does anything on the Tube Sat cell shaper; on tanh and on the gain
    * modulation it is inert. See EMPHASIS_MAX_DB for the table.
    */
-  emphasis: 0,
+  emphasis: EMPHASIS_DEFAULT,
 })
 
 /**

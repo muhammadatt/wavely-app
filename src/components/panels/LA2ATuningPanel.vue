@@ -63,7 +63,7 @@ const rectNulling = computed(() =>
 const CONTROLS = [
   {
     key: 'cellMod', label: 'Cell depth', min: 0, max: 1, step: 0.01, digits: 2,
-    hint: 'Master on the cell modulation. This is the audible distortion — 0 removes it.',
+    hint: 'Master on the cell GAIN MODULATION. Inert unless Cell mechanism is set to GAIN MOD — the shipping patch uses the Tube Sat curve instead, where Cell sat is the depth control.',
   },
   {
     key: 'cellModMax', label: 'Cell max', min: 0, max: 0.4, step: 0.0025, digits: 4,
@@ -87,7 +87,7 @@ const CONTROLS = [
   },
   {
     key: 'cellCurveDriveMax', label: 'Cell sat', min: 0, max: 24, step: 0.05, digits: 2,
-    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law and the attenuation compensation scale it. NOT Tube Sat’s Drive knob. Default 12 is level-matched to the gain modulation so an A/B compares character, not loudness.',
+    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. NOT Tube Sat’s Drive knob. Ships at 1.5, chosen by ear alongside Valve sat 0.5 and Emphasis 100.',
   },
   {
     key: 'emphasis', label: 'Emphasis', min: 0, max: 100, step: 1, digits: 0,
@@ -95,7 +95,7 @@ const CONTROLS = [
   },
   {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
-    hint: 'VALVE stage only — barely audible, the valves are ~5% of the distortion. Same quantity as Cell sat drive, at the other stage. NOT Tube Sat’s Drive knob either: 2.38 is its EFFECTIVE drive, Drive (1) x band mult (3) x auto-drive gain (0.794).',
+    hint: 'VALVE stage only — the valves are ~5% of the distortion, so this is a small constant floor under the cell. Same quantity as Cell sat, at the other stage, and the two read in comparable units once auto makeup is engaged. Ships at 0.5, chosen by ear.',
   },
 ]
 
