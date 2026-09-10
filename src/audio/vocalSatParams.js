@@ -14,10 +14,17 @@
  * unaffected.
  */
 
+/**
+ * ⚠ FROM `dsp/satCurves.js`, NOT FROM `vocalSatProcessor.js`. This file is
+ * imported by the LA-2A kernel (through `dsp/vocalSatCurve.js`), and the
+ * processor module registers an AudioWorklet processor at module scope — so
+ * importing these six ids from there put that registration into the LA-2A and
+ * Scheps worklet bundles. See the note at the top of satCurves.js.
+ */
 import {
   MODE_SERIES, MODE_PARALLEL, CURVE_SHAPE, CURVE_CUBIC,
   ASYM_MODE_OFFSET, ASYM_MODE_SPLIT,
-} from './vocalSatProcessor.js'
+} from './dsp/satCurves.js'
 
 export {
   MODE_SERIES, MODE_PARALLEL, CURVE_SHAPE, CURVE_CUBIC,

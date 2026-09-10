@@ -707,6 +707,14 @@ test('a moved bench reaches the kernel params', () => {
  * the LA-2A's dominant distortion term — if the bench reaches the embedded
  * kernel at all, this is audible in the samples.
  */
+/**
+ * ⚠ MOVES `cellCurveDriveMax`, NOT `cellMod`, AND THE SWAP IS THE POINT. The
+ * claim is that a moved bench reaches Scheps' EMBEDDED kernel — it needs a knob
+ * that is live on the shipping patch to demonstrate that. Since Tube
+ * Saturation's curve became the default cell mechanism, `cellMod` scales a
+ * modulation that is not running, so moving it correctly changes nothing and
+ * the test would be asserting the bench is broken when it is not.
+ */
 test('a moved bench actually reaches the embedded cell', () => {
   const input = voiceLike(2, { envRateHz: 0.5 })
   const patch = { ...SCHEPS_DEFAULTS, squash: 80, mix: 100 }
@@ -714,7 +722,7 @@ test('a moved bench actually reaches the embedded cell', () => {
 
   let benched
   try {
-    setLA2ATuning({ cellMod: 0 })
+    setLA2ATuning({ cellCurveDriveMax: 0 })
     benched = processSchepsBuffer([input], SR, toKernelParams(patch)).channelData[0]
   } finally {
     resetLA2ATuning()
@@ -760,7 +768,8 @@ test('the trim measurement honours the nested bench tuning', () => {
 
   const plain = computeSchepsAutoTrim([input], SR, patch)
   const benched = computeSchepsAutoTrim([input], SR, {
-    ...patch, la2aTuning: { cellMod: 0, cellModMax: 0.5 },
+    // Live on the shipping patch — see the note above.
+    ...patch, la2aTuning: { cellCurveDriveMax: 0, vocalSatCurveDrive: 4 },
   })
 
   assert.notEqual(plain.trimDb, benched.trimDb,

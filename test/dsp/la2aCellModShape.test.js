@@ -23,7 +23,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  processLA2ABuffer, CELL_MOD_SHAPE, CELL_MOD_MAX,
+  processLA2ABuffer, CELL_MOD_SHAPE, CELL_MOD_MAX, LA2A_LEGACY_PATCH,
 } from '../../src/audio/la2aProcessor.js'
 
 const SR = 44100
@@ -44,9 +44,17 @@ function stimulus(seconds = 2) {
 }
 
 const render = params => processLA2ABuffer([stimulus()], SR, {
-  peakReduction: 65, tube: false, lookaheadMs: 0, gainDb: 0, ...params,
+  peakReduction: 65, tube: false, lookaheadMs: 0, gainDb: 0,
+  ...LA2A_LEGACY_PATCH, ...params,
 }).channelData[0]
 
+/**
+ * ⚠ RUNS ON `LA2A_LEGACY_PATCH`, WHICH IS NO LONGER THE KERNEL DEFAULT. These
+ * assertions are about the Moore-derived T4 gain modulation; OptoSmooth now
+ * ships Tube Saturation's curve at the cell, so the mechanism under test has to
+ * be asked for by name. Still selectable, still the only cell mechanism with
+ * hardware behind it, and still what every earlier render used.
+ */
 test('CELL_MOD_SHAPE ships at the linear law', () => {
   assert.equal(CELL_MOD_SHAPE, 1.0)
 })

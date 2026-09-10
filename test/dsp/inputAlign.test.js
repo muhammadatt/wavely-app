@@ -21,7 +21,7 @@ import {
   ALIGN_TARGET_DBFS, ALIGN_MAX_DB, ALIGN_GATE_RANGE_DB, ALIGN_BLOCK_MS,
   INPUT_TRIM_MAX_DB,
 } from '../../src/audio/dsp/inputAlign.js'
-import { LA2AKernel } from '../../src/audio/la2aProcessor.js'
+import { LA2AKernel, LA2A_LEGACY_PATCH } from '../../src/audio/la2aProcessor.js'
 
 const SR = 44100
 const db = (v) => 20 * Math.log10(v)
@@ -57,7 +57,16 @@ function render(x, params) {
   const k = new LA2AKernel(SR)
   k.setParams({
     mode: 'compress', peakReduction: 50, gainDb: 0, r37: 100, mix: 1,
-    lookaheadMs: 0, tube: false, cellMod: 0, oversample: false, ...params,
+    lookaheadMs: 0, tube: false, cellMod: 0, oversample: false,
+    /**
+     * ⚠ `LA2A_LEGACY_PATCH` IS WHAT MAKES `cellMod: 0` MEAN "LINEAR" AGAIN.
+     * These tests need an audio path that is a pure time-varying gain, so the
+     * exact input-gain equivalence can be asserted sample by sample. That used
+     * to follow from `tube: false, cellMod: 0`; since Tube Saturation's curve
+     * became the default cell mechanism, `cellMod` is inert and a waveshaper
+     * sits in the path — which is not scale-invariant, so the claim fails.
+     */
+    ...LA2A_LEGACY_PATCH, ...params,
   })
   const out = new Float32Array(x.length)
   for (let i = 0; i < x.length; i += 128) {

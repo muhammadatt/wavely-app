@@ -310,10 +310,22 @@ test('the pre-roll moves the measured makeup only at a hard level step', () => {
   // Flat, and a 6 dB drop: what ordinary speech does at a selection edge.
   assert.ok(step(0.35, 0.35) < 0.05, `flat material drifted ${step(0.35, 0.35).toFixed(3)} dB`)
   assert.ok(step(0.80, 0.40) < 0.05, `a 6 dB step drifted ${step(0.80, 0.40).toFixed(3)} dB`)
-  // A quieter lead-in barely produces it — the warm detector arrives open. Not
-  // exactly zero (4.6e-4 dB): a lead-in 13 dB DOWN still leaves the envelope
-  // marginally off where a cold start puts it.
-  assert.ok(step(0.08, 0.35) < 0.005, `a quiet lead-in drifted ${step(0.08, 0.35).toFixed(4)} dB`)
+  /**
+   * A quieter lead-in barely produces it — the warm detector arrives open.
+   *
+   * ⚠ RE-DERIVED FOR THE IMPORTED-CURVE DEFAULTS: 4.6e-4 -> 7.4e-3 dB. The
+   * emphasis pair puts BIQUADS on the audio path, and a filter has state, so
+   * the pre-roll now warms something the old model did not have — a second
+   * source of path dependence on top of the detector's. Still four orders
+   * below anything audible, and the other three bounds barely moved on the
+   * same measurement (flat 0.020, a 6 dB step 0.040, the pathological edge
+   * 0.5856 against the 0.584 recorded below).
+   *
+   * The bound is 0.01 rather than 0.0074 for headroom, and it is deliberately
+   * NOT widened to the 0.05 the two above use: this case is an order tighter
+   * and should have to stay that way.
+   */
+  assert.ok(step(0.08, 0.35) < 0.01, `a quiet lead-in drifted ${step(0.08, 0.35).toFixed(4)} dB`)
 
   // ⚠ THE PATHOLOGICAL EDGE IS PINNED, NOT ASSERTED AWAY. A 25 dB drop right at
   // the boundary reaches 0.584 dB, and that is recorded as the known ceiling.

@@ -55,10 +55,15 @@ const rectNulling = computed(() =>
   Math.abs(vals.value.rectLpMs - NULL_MS) < 0.06 && vals.value.rectLpMs > 0
 )
 
+/**
+ * ⚠ LABELS ARE CLIPPED PAST ~11 CHARACTERS by the 68px label column below.
+ * "Valve sat drive" was the accurate name and did not fit; the hint carries
+ * what the label cannot.
+ */
 const CONTROLS = [
   {
     key: 'cellMod', label: 'Cell depth', min: 0, max: 1, step: 0.01, digits: 2,
-    hint: 'Master on the cell modulation. This is the audible distortion — 0 removes it.',
+    hint: 'Master on the cell GAIN MODULATION. Inert unless Cell mechanism is set to GAIN MOD — the shipping patch uses the Tube Sat curve instead, where Cell sat is the depth control.',
   },
   {
     key: 'cellModMax', label: 'Cell max', min: 0, max: 0.4, step: 0.0025, digits: 4,
@@ -66,7 +71,7 @@ const CONTROLS = [
   },
   {
     key: 'cellModTauDb', label: 'Cell onset', min: 0.5, max: 20, step: 0.05, digits: 3, unit: ' dB',
-    hint: 'How quickly depth rises with gain reduction. Smaller = distortion arrives sooner.',
+    hint: 'How quickly the distortion rises with gain reduction. Smaller = arrives sooner. LIVE ON BOTH cell mechanisms — the Tube Sat shaper shares this law for its drive (1 - exp(-GR / onset)), so this is not one of the gain-mod-only controls.',
   },
   {
     key: 'rectLpMs', label: 'Rect pole', min: 0, max: 5, step: 0.02, digits: 2, unit: ' ms',
@@ -80,7 +85,63 @@ const CONTROLS = [
     key: 'tubeBias', label: 'Valve bias', min: 0, max: 0.4, step: 0.002, digits: 3,
     hint: 'Operating-point offset — what makes the valve stage even-order at all.',
   },
+  {
+    key: 'cellCurveDriveMax', label: 'Cell sat', min: 0, max: 24, step: 0.05, digits: 2,
+    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. NOT Tube Sat’s Drive knob. Ships at 1.5, chosen by ear alongside Valve sat 0.5 and Emphasis 100.',
+  },
+  {
+    key: 'emphasis', label: 'Emphasis', min: 0, max: 100, step: 1, digits: 0,
+    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Measured: it works on the Tube Sat CELL (-1.1 dB crest at 50) and is inert on tanh and on the gain modulation.',
+  },
+  {
+    key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,
+    hint: 'VALVE stage only — the valves are ~5% of the distortion, so this is a small constant floor under the cell. Same quantity as Cell sat, at the other stage, and the two read in comparable units once auto makeup is engaged. Ships at 0.5, chosen by ear.',
+  },
 ]
+
+/**
+ * The two curve selectors. Peers rather than on/off, which is why they are
+ * rockers and not checkboxes: a fitted mechanism and an auditioned one are two
+ * different things, not more and less of one thing.
+ */
+const CURVE_CHOICES = [
+  {
+    key: 'tubeCurve', label: 'Valve curve',
+    options: [
+      { id: 'tanh', label: 'TANH', title: 'The fitted biased hyperbolic tangent — anchored to the paper’s H2 median' },
+      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve at its panel defaults' },
+    ],
+  },
+  {
+    key: 'cellCurve', label: 'Cell mechanism',
+    options: [
+      { id: 'gainmod', label: 'GAIN MOD', title: 'Detector ripple modulating the gain — fitted to the hardware paper' },
+      { id: 'vocalsat', label: 'TUBE SAT', title: 'Tube Saturation’s curve as a waveshaper at the cell. Replaces the modulation; this is where ~95% of the plugin’s distortion lives' },
+    ],
+  },
+]
+
+/**
+ * Arrow / Home / End over a curve rocker, as the radiogroup role promises.
+ * Focus follows selection, which is what DeviceChoiceRocker does and what a
+ * two-option group should do — there is no "browse without selecting" case
+ * worth the extra mode here.
+ */
+function onCurveKey(e, ch) {
+  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+  if (!keys.includes(e.key) || props.disabled) return
+  e.preventDefault()
+  const ids = ch.options.map(o => o.id)
+  const cur = Math.max(0, ids.indexOf(vals.value[ch.key]))
+  const next = e.key === 'Home' ? 0
+    : e.key === 'End' ? ids.length - 1
+      : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+        ? (cur - 1 + ids.length) % ids.length
+        : (cur + 1) % ids.length
+  write({ [ch.key]: ids[next] })
+  const btns = e.currentTarget.querySelectorAll('[role="radio"]')
+  btns[next]?.focus()
+}
 
 const fmt = (c, v) => v.toFixed(c.digits) + (c.unit || '')
 const isDefault = (c) => vals.value[c.key] === LA2A_TUNING_DEFAULTS[c.key]
@@ -105,6 +166,12 @@ async function copyConstants() {
     `rectLpMs        = ${v.rectLpMs}`,
     `cellMod         = ${v.cellMod}`,
     `tube            = ${v.tube}`,
+    `tubeCurve       = ${v.tubeCurve}`,
+    `cellCurve       = ${v.cellCurve}`,
+    `cellCurveDriveMax  = ${v.cellCurveDriveMax}`,
+    `vocalSatCurveDrive = ${v.vocalSatCurveDrive}`,
+    `vocalSatLeanPositive = ${v.vocalSatLeanPositive}`,
+    `emphasis        = ${v.emphasis}`,
   ].join('\n')
   try {
     await navigator.clipboard.writeText(lines)
@@ -179,6 +246,65 @@ async function copyConstants() {
           At the detector's own 0.5 ms the modulation nulls out — rect/env → 1.
         </p>
       </div>
+
+      <!--
+        ⚠ role=radiogroup / role=radio, MATCHING DeviceChoiceRocker. These
+        shipped as two plain buttons whose selected state was carried ONLY by
+        the amber class, so a screen reader announced two unrelated buttons and
+        never said which curve was active — and the choice between the fitted
+        model and the imported one is the most consequential control on this
+        panel. Roving tabindex and arrow keys follow the same pattern the
+        existing rockers use, so the two behave alike.
+      -->
+      <div v-for="ch in CURVE_CHOICES" :key="ch.key" class="mt-3">
+        <div class="flex items-center gap-2">
+          <span :id="`la2a-curve-${ch.key}`" class="w-[70px] shrink-0 text-[10px] text-white/45">{{ ch.label }}</span>
+          <div
+            role="radiogroup"
+            :aria-labelledby="`la2a-curve-${ch.key}`"
+            class="flex gap-1"
+            @keydown="onCurveKey($event, ch)"
+          >
+            <button
+              v-for="(o, i) in ch.options"
+              :key="o.id"
+              type="button"
+              role="radio"
+              :aria-checked="vals[ch.key] === o.id"
+              :tabindex="vals[ch.key] === o.id || (!ch.options.some(x => x.id === vals[ch.key]) && i === 0) ? 0 : -1"
+              :title="o.title"
+              :disabled="disabled"
+              class="rounded border px-2 py-[3px] text-[9px] tracking-wide disabled:opacity-30"
+              :class="vals[ch.key] === o.id
+                ? 'border-amber-400/60 bg-amber-400/10 text-amber-200'
+                : 'border-white/15 text-white/45 hover:border-white/35 hover:text-white/80'"
+              @click="write({ [ch.key]: o.id })"
+            >{{ o.label }}</button>
+          </div>
+        </div>
+      </div>
+
+      <p
+        v-if="vals.cellCurve === 'vocalsat'"
+        class="ml-[76px] mt-1 text-[9px] text-amber-400/80"
+      >
+        Replaces the gain modulation — Cell depth and Cell max are inert.
+        <span class="text-white/45">Cell onset stays live: it sets how fast the Tube Sat drive arrives.</span>
+      </p>
+
+      <label
+        v-if="vals.tubeCurve === 'vocalsat' || vals.cellCurve === 'vocalsat'"
+        class="mt-3 flex items-center gap-2 text-[10px] text-white/55"
+      >
+        <input
+          type="checkbox"
+          :checked="vals.vocalSatLeanPositive"
+          :disabled="disabled"
+          @change="write({ vocalSatLeanPositive: $event.target.checked })"
+        />
+        <span>Lean positive</span>
+        <span class="text-white/25">— which polarity gets the hard knee</span>
+      </label>
 
       <label class="mt-3 flex items-center gap-2 text-[10px] text-white/55">
         <input
