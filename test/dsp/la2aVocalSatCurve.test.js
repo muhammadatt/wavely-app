@@ -68,13 +68,18 @@ test('the shipping patch is the audition patch, exactly', () => {
   // Pins what OptoSmooth and Scheps sound like out of the box. Every one of
   // these was chosen by ear; if a refactor moves one, that is a change to the
   // product's sound and it should have to come through this test.
+  //
+  // `emphasis` came through it: 100 -> 50, deliberately, after the top half of
+  // the knob was measured to cost ~11 dB of worst-case distortion on bright
+  // sustained vowels for under 0.02 dB of the transient absorption it was kept
+  // for. See EMPHASIS_DEFAULT for the sweep.
   const d = LA2A_KERNEL_DEFAULTS
   assert.equal(d.tubeCurve, TUBE_CURVE_VOCALSAT)
   assert.equal(d.cellCurve, CELL_CURVE_VOCALSAT)
   assert.equal(d.cellCurveDriveMax, 1.5)
   assert.equal(d.vocalSatCurveDrive, 0.5)
   assert.equal(d.vocalSatLeanPositive, true)
-  assert.equal(d.emphasis, 100)
+  assert.equal(d.emphasis, 50)
   assert.equal(d.tube, true)
 })
 

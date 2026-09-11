@@ -1262,15 +1262,60 @@ export const VALVE_CURVE_DRIVE = 0.5
 /**
  * Emphasis depth, 0-100, as the plugin ships.
  *
- * ⚠ 100 RATHER THAN THE 0 THIS SHIPPED AT, and that is only defensible because
- * the cell curve is now the default too. Measured, the pair does nothing on
- * `tanh` and nothing on the gain modulation — see EMPHASIS_MAX_DB — so at the
- * old defaults this value would have been an inert knob at full travel, which
- * is worse than an honest zero. On the imported cell shaper it is the control
- * that turns the curve from something that brightens an onset into something
- * that absorbs it, which is the reason the whole import was undertaken.
+ * ⚠ 50, DOWN FROM 100, AND THE TOP HALF OF THIS KNOB WAS BUYING NOTHING. The
+ * reasoning for a non-zero default is unchanged and still holds: the pair does
+ * nothing on `tanh` and nothing on the gain modulation (see EMPHASIS_MAX_DB),
+ * so it is only worth a default at all because the imported cell shaper is the
+ * default too, and on that shaper it is what turns a curve that brightens an
+ * onset into one that absorbs it. What changed is the measured PRICE of the
+ * last 50 points of travel.
+ *
+ * MEASURED ON REAL NARRATION (43 s of dry male voice, auto makeup as the app
+ * runs it, shipping cell 1.5 / valve 0.5). `crest` and `onset` are the
+ * absorption this pair exists to buy — whole-file crest, and median gain
+ * overshoot in the first 20 ms of an onset out of silence, against the settled
+ * gain 150-400 ms later. `loud p98` and `worst` are the nonlinear residual
+ * against a saturation-off render of the same patch, over 50 ms frames above
+ * -22 dBFS; `worst` is the single worst frame in the one passage where a
+ * listener flagged the distortion (a bright, sustained "SO high").
+ *
+ *   PR 55 (2.69 dB avg GR)          PR 70 (5.92 dB avg GR)
+ *   emph  crest  onset  p98  worst  crest  onset  p98  worst
+ *      0  12.70   6.00 -29.0 -32.9  12.70   9.09 -27.3 -30.4
+ *     25  12.70   6.00 -29.0 -32.9  12.69   9.10 -27.3 -30.4
+ *     50  12.70   5.99 -28.8 -31.6  12.69   9.12 -27.2 -26.7
+ *     75  12.69   5.98 -27.9 -25.2  12.68   9.14 -25.8 -20.8
+ *    100  12.67   5.97 -26.1 -19.7  12.63   9.17 -21.8 -15.8
+ *
+ * The whole 0-100 sweep moves crest by 0.03-0.07 dB and onset overshoot by
+ * 0.03-0.08 dB — in the WRONG direction at PR 70, where the overshoot rises
+ * with the knob. Over the same sweep the worst frame in that passage goes from
+ * -32.9 to -19.7 dBc. 100 → 50 therefore costs 0.00-0.02 dB of absorption and
+ * buys 10.9-11.9 dB of worst-case distortion.
+ *
+ * ⚠ THE -1.13 dB OF ABSORPTION IN EMPHASIS_MAX_DB'S TABLE DOES NOT SURVIVE ON
+ * PROGRAMME MATERIAL, and that table is not wrong — it is a hard-onset BURST
+ * probe, the same synthetic-stimulus failure mode this file has recorded
+ * repeatedly (see the DC_BLOCK_HZ note, which overstated its effect by 24 dB
+ * the same way). A burst stopping dead into digital silence hands the pair a
+ * transient with no preceding programme, which is the condition it flatters.
+ * Speech does not do that, and on speech the effect is two orders of magnitude
+ * smaller than the probe reports. The table stays because its RANKING across
+ * curves is what it is cited for, and that ranking is unaffected.
+ *
+ * ⚠ WHY THE DAMAGE IS SPECTRAL, NOT LEVEL, and why no drive knob substitutes
+ * for this one. The flagged passage sits at only the 59th-66th percentile of
+ * level in the file, so it is not the loudest thing there — it is the
+ * brightest. A +12 dB shelf at EMPHASIS_CORNER_HZ drives that HF into the
+ * shaper, and de-emphasis takes the static tilt back out but cannot take back
+ * the intermodulation. Reaching for `cellCurveDriveMax` instead only moves the
+ * same passage 3-4 dB and pays for it broadband; this knob moves it 11 dB and
+ * is nearly free everywhere else.
+ *
+ * ⚠ 50 IS AUDITIONED, NOT SOLVED. The measurement says anything at or below 50
+ * is equally free; 50 is where it was listened to and kept.
  */
-export const EMPHASIS_DEFAULT = 100
+export const EMPHASIS_DEFAULT = 50
 
 /**
  * THE PRE-IMPORT KERNEL, AS A PATCH — the fitted `tanh` valve, the Moore-
@@ -1317,6 +1362,11 @@ export const LA2A_LEGACY_PATCH = Object.freeze({
  *   gain modulation, valve off        -0.15 dB   NOT monotone (rises at 100)
  *   tanh valve alone                  +0.02 dB   inert
  *   tanh valve alone, drive 8         +0.01 dB   inert
+ *
+ * ⚠ THOSE ARE BURST-PROBE NUMBERS AND THE MAGNITUDE DOES NOT TRANSFER — on
+ * real narration the whole 0-100 sweep moves crest by under 0.07 dB. See
+ * EMPHASIS_DEFAULT for that table and for why the probe flatters the pair.
+ * What this table is cited for is the RANKING across curves, which stands.
  *
  * ⚠ SO IT EARNS ITS KEEP ON THE IMPORTED CELL SHAPER AND NOWHERE ELSE, and the
  * two negative results are worth separating because they fail for different
