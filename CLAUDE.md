@@ -38,7 +38,7 @@ Trim, cut, delete, silence regions, add silence, split. Spot processing (normali
 **Phase 2 — Mastering (server)**
 The full preset chain. Produces a compliance-checked, level-matched, export-ready file. This is typically the final step and should be run on the complete, edited file.
 
-**The natural order is: Edit → Master.** Users should not normalize or compress specific passages *after* mastering — doing so can break compliance. However, edge cases exist: a narrator may finish a file, get it mastered, and then need to add a few seconds of room tone or silence a small passage. These post-master touch-ups are level-neutral or near-neutral and should be supported without forcing a full re-master. The export UI should always display current compliance status (pass/fail) so the state of the file is self-evident — no lecturing, just clear signal.
+**The natural order is: Edit → Master.** Users should not normalize or compress specific passages *after* mastering — doing so can break compliance. However, edge cases exist: a narrator may finish a file, get it mastered, and then need to add a few seconds of room tone or silence a small passage. These post-master touch-ups are level-neutral or near-neutral and should be supported without forcing a full re-master.
 
 ---
 
@@ -255,7 +255,8 @@ These apply only to the `acx_audiobook` preset:
 - Vue 3 (Composition API) production app — not a PoC
 - Non-destructive timeline editor: trim, cut, delete, silence, split, fade, volume, copy/paste
 - Undo/redo stack (50-item cap), each entry labeled with the operation that created it; dirtiness is tracked via a revision counter rather than undo-stack depth, driving the tab marker, Save button dot, close confirmation and `beforeunload` guard consistently
-- Save / Save As write the file back to disk via the File System Access API (the first Save is always a Save As); falls back to a download where the write API is unavailable (Firefox, Safari)
+- Save / Save As write the file back to disk via the File System Access API (the first Save is always a Save As); falls back to a download where the write API is unavailable (Firefox, Safari). Both take a document id, so the files panel offers them per row without switching the active file
+- Files panel (Ctrl+P): search, per-file Go to / Rename / Save / Save As / Close, bulk export and bulk close. **Every action is a labelled button** — the first version hid them behind gestures and shipped three bugs for it: a dismiss ✕ that closed the *file*, a double-click rename that lost to the row's own click handler, and an Escape out of a rename that took the panel with it. `npm run smoke` drives all three against a real document
 - Waveform visualization (Canvas 2D, peak caching, device pixel ratio support), with a minimum-drag threshold before a selection is created and draggable selection edges (`src/audio/selectionDrag.js`)
 - Playback with A/B before/after comparison; looping and region changes are scheduled on the audio clock (not animation frames) for sample-accurate seams
 - Preset panel (4 presets) + output profile panel (3 profiles) with dynamic UI rules

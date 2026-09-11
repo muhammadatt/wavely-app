@@ -57,6 +57,11 @@ const ROOT = join(HERE, '../..')
  * to catch — silently at build, on render for the user.
  */
 const FILES = [
+  // The two export surfaces. Both destructure `useExport`, and that seam — a
+  // composable that stops exporting a name while its template keeps using it —
+  // is the exact failure this file exists for.
+  'src/components/ExportDialog.vue',
+  'src/components/FilesPanel.vue',
   'src/components/panels/PresetMenu.vue',
   'src/components/meters/ResonanceSpectrum.vue',
   'src/components/panels/FocusNodePanel.vue',
