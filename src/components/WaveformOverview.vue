@@ -35,6 +35,20 @@ const windowLeftPct = computed(() => (totalDuration.value ? (scrollLeft.value / 
 const windowWidthPct = computed(() => (totalDuration.value ? Math.min(100, (visibleDuration.value / totalDuration.value) * 100) : 100))
 const playheadPct = computed(() => (totalDuration.value ? (state.playhead / totalDuration.value) * 100 : 0))
 
+// Marker ticks. The whole point of the overview is to show what is off-screen,
+// and once a file is marked up the boundaries are the main thing worth knowing
+// the position of — so they are drawn here as well as on the waveform itself.
+// Percentages rather than canvas: the playhead and the zoom window are already
+// positioned this way, so the ticks line up with them by construction.
+const markerPcts = computed(() => {
+  if (!totalDuration.value) return []
+  return state.markers.map(m => ({
+    id: m.id,
+    kind: m.kind,
+    pct: (m.time / totalDuration.value) * 100,
+  }))
+})
+
 function drawMini() {
   if (!canvas.value || !state.currentFile || !totalDuration.value || !stripWidth.value) return
   renderWaveform(canvas.value, {
@@ -190,6 +204,18 @@ onUnmounted(() => {
     <!-- Dimmed regions outside the visible window -->
     <div class="absolute top-0 bottom-0 left-0 pointer-events-none" style="background:rgba(5,7,9,.65)" :style="{ width: windowLeftPct + '%' }"></div>
     <div class="absolute top-0 bottom-0 right-0 pointer-events-none" style="background:rgba(5,7,9,.65)" :style="{ width: (100 - windowLeftPct - windowWidthPct) + '%' }"></div>
+
+    <!-- Marker ticks. Under the zoom window and the playhead in stack order,
+         so neither is ever hidden by a dense marker set. -->
+    <div
+      v-for="tick in markerPcts"
+      :key="tick.id"
+      class="absolute top-0 bottom-0 w-px pointer-events-none"
+      :style="{
+        left: tick.pct + '%',
+        background: tick.kind === 'gap' ? 'rgba(255,180,84,.45)' : 'rgba(255,180,84,.8)',
+      }"
+    ></div>
 
     <!-- Draggable zoom window. The body pans the view; the edges resize it,
          which is the zoom. Neither is guessable from a plain translucent bar,
