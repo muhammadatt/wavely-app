@@ -8,6 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { memoSignal } from '../helpers/memoSignal.js'
 import {
   SchepsKernel,
   processSchepsBuffer,
@@ -50,28 +51,30 @@ function db(x) {
  * broadband energy that the low shelves would then read as content.
  */
 function voiceLike(seconds, { f0 = 130, envRateHz = 3 } = {}) {
-  const n = Math.round(seconds * SR)
-  const out = new Float32Array(n)
-  let seed = 1
-  for (let i = 0; i < n; i++) {
-    const t = i / SR
-    let s = 0
-    for (let h = 1; h <= 40; h++) {
-      const f = f0 * h
-      if (f > SR / 2) break
-      let a = 1 / h
-      for (const F of [600, 1800, 2800]) {
-        a += 0.9 * Math.exp(-Math.pow((f - F) / 260, 2)) / Math.sqrt(h)
+  return memoSignal(`voiceLike|${seconds}|${f0}|${envRateHz}`, () => {
+    const n = Math.round(seconds * SR)
+    const out = new Float32Array(n)
+    let seed = 1
+    for (let i = 0; i < n; i++) {
+      const t = i / SR
+      let s = 0
+      for (let h = 1; h <= 40; h++) {
+        const f = f0 * h
+        if (f > SR / 2) break
+        let a = 1 / h
+        for (const F of [600, 1800, 2800]) {
+          a += 0.9 * Math.exp(-Math.pow((f - F) / 260, 2)) / Math.sqrt(h)
+        }
+        // Per-harmonic phase offset: summing them all in phase builds an
+        // impulse train with a crest factor no voice has.
+        s += a * Math.sin(2 * Math.PI * f * t + h)
       }
-      // Per-harmonic phase offset: summing them all in phase builds an
-      // impulse train with a crest factor no voice has.
-      s += a * Math.sin(2 * Math.PI * f * t + h)
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      const env = 0.25 + 0.75 * (0.5 - 0.5 * Math.cos(2 * Math.PI * envRateHz * t))
+      out[i] = 0.06 * (s + ((seed / 0x7fffffff) - 0.5) * 0.35) * env
     }
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff
-    const env = 0.25 + 0.75 * (0.5 - 0.5 * Math.cos(2 * Math.PI * envRateHz * t))
-    out[i] = 0.06 * (s + ((seed / 0x7fffffff) - 0.5) * 0.35) * env
-  }
-  return out
+    return out
+  })
 }
 
 /**
