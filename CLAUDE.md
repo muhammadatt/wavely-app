@@ -255,7 +255,8 @@ These apply only to the `acx_audiobook` preset:
 - Vue 3 (Composition API) production app — not a PoC
 - Non-destructive timeline editor: trim, cut, delete, silence, split, fade, volume, copy/paste
 - Undo/redo stack (50-item cap), each entry labeled with the operation that created it; dirtiness is tracked via a revision counter rather than undo-stack depth, driving the tab marker, Save button dot, close confirmation and `beforeunload` guard consistently
-- Save / Save As write the file back to disk via the File System Access API (the first Save is always a Save As); falls back to a download where the write API is unavailable (Firefox, Safari)
+- Save / Save As write the file back to disk via the File System Access API (the first Save is always a Save As); falls back to a download where the write API is unavailable (Firefox, Safari). Both take a document id, so the files panel offers them per row without switching the active file
+- Files panel (Ctrl+P): search, per-file Go to / Rename / Save / Save As / Close, bulk export and bulk close. **Every action is a labelled button** — the first version hid them behind gestures and shipped three bugs for it: a dismiss ✕ that closed the *file*, a double-click rename that lost to the row's own click handler, and an Escape out of a rename that took the panel with it. `npm run smoke` drives all three against a real document
 - Waveform visualization (Canvas 2D, peak caching, device pixel ratio support), with a minimum-drag threshold before a selection is created and draggable selection edges (`src/audio/selectionDrag.js`)
 - Playback with A/B before/after comparison; looping and region changes are scheduled on the audio clock (not animation frames) for sample-accurate seams
 - Preset panel (4 presets) + output profile panel (3 profiles) with dynamic UI rules

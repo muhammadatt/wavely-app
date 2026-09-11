@@ -1,5 +1,6 @@
 /**
- * Open every plugin panel in a real browser and fail on any console error.
+ * Open every plugin panel — and the files panel — in a real browser, and fail
+ * on any console error.
  *
  *   npm run smoke
  *
@@ -142,6 +143,96 @@ try {
     if (!ok) failures++
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(16)} ${opened ? '' : 'did not open (renamed in the registry?) '}${fresh.join(' | ')}`)
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+  }
+
+  /**
+   * The files panel, which is not a plugin window and so is not in PANELS.
+   *
+   * ⚠ THIS CHECKS WHAT EACH CONTROL DOES, NOT ONLY THAT THE PANEL RENDERS, and
+   * that is the whole reason it is here. Its three shipped bugs were all
+   * behavioural and all invisible to a render check: the dismiss ✕ closed the
+   * *file* instead of the panel, double-click-to-rename lost a fight with the
+   * row's own click handler and never opened an input, and Escape out of a
+   * rename dismissed the panel along with it.
+   *
+   * ⚠ NOTHING HERE KEYS OFF A SELECTOR THAT ONLY THE FIXED PANEL HAS. The first
+   * cut located the panel by the `role="dialog"` added in the same change, so
+   * against the broken panel it reported "did not open" and never reached a
+   * single behavioural assertion — it passed for the wrong reason and would have
+   * kept passing through a regression of all three bugs. Everything below is
+   * found by what both versions render (the search box, the file's own name) or
+   * counted before it is clicked, so each line fails on its own.
+   */
+  {
+    const before = errors.length
+    // Present in every version of this panel, so "open" means open.
+    const search = page.locator('input[placeholder="Search open files…"]')
+    const isOpen = () => search.isVisible().catch(() => false)
+    const renameInput = page.locator('input[aria-label="File name"]')
+    const visible = async loc => (await loc.count()) > 0 && await loc.first().isVisible().catch(() => false)
+
+    await page.keyboard.press('Control+p'); await page.waitForTimeout(500)
+    const opened = await isOpen()
+
+    // Double-click the name. The row's own click handler used to fire first and
+    // dismiss the panel, so the rename input never mounted.
+    let dblclickOk = false
+    if (opened) {
+      // Scoped by the waveform thumbnail: the tab strip behind the overlay
+      // renders a div carrying the same filename in its title, and an unscoped
+      // locator picks that one and then waits 30 s for the overlay to stop
+      // intercepting the click.
+      await page.locator('.group').filter({ has: page.locator('canvas') }).first()
+        .locator(`div[title*="${'wavely-panel-smoke'}"]`).first().dblclick().catch(() => {})
+      await page.waitForTimeout(350)
+      dblclickOk = await visible(renameInput) && await isOpen()
+      if (dblclickOk) { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
+    }
+
+    // Escape out of a rename must close the input and leave the panel standing.
+    let escapeOk = false
+    if (await isOpen()) {
+      const pencil = page.locator('[aria-label^="Rename "]')
+      if (await pencil.count()) {
+        await pencil.first().click(); await page.waitForTimeout(300)
+        const editing = await visible(renameInput)
+        await page.keyboard.press('Escape'); await page.waitForTimeout(300)
+        escapeOk = editing && !(await visible(renameInput)) && await isOpen()
+      }
+    }
+
+    // Save, Save As and the per-file Close are each a button with a name on it.
+    const actionsOk = await isOpen()
+      && await visible(page.getByRole('button', { name: 'Save', exact: true }))
+      && await visible(page.getByRole('button', { name: 'Save As…' }))
+      && await visible(page.locator('[aria-label^="Close "]:not([aria-label="Close files panel"])'))
+
+    // The dismiss ✕ closes the PANEL. The file it was listing stays open —
+    // reopening and finding it still counted is the assertion that matters.
+    let dismissOk = false
+    if (await isOpen()) {
+      const dismiss = page.locator('[aria-label="Close files panel"]')
+      if (await dismiss.count()) {
+        await dismiss.first().click(); await page.waitForTimeout(400)
+        const gone = !(await isOpen())
+        await page.keyboard.press('Control+p'); await page.waitForTimeout(500)
+        // "1/1" is the search row's match count, rendered by every version.
+        dismissOk = gone && await visible(page.getByText('1/1'))
+      }
+    }
+    if (await isOpen()) { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
+
+    const fresh = errors.slice(before)
+    const ok = opened && dblclickOk && escapeOk && actionsOk && dismissOk && fresh.length === 0
+    if (!ok) failures++
+    const why = [
+      opened ? '' : 'did not open; ',
+      dblclickOk ? '' : 'double-click on the name did not start a rename; ',
+      escapeOk ? '' : 'Escape out of a rename misbehaved; ',
+      actionsOk ? '' : 'per-file Save / Save As / Close missing; ',
+      dismissOk ? '' : 'dismiss ✕ did not close the panel and leave the file open; ',
+    ].join('')
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Files panel'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }
 } finally {
   await browser.close()

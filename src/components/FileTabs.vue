@@ -183,8 +183,8 @@ const statusOf = documentStatus
           v-model="renameDraft"
           class="flex-1 min-w-0 bg-transparent outline-none text-[11.5px] font-semibold text-[#eaf6f8] border-b border-[#35d3e6]"
           @click.stop
-          @keydown.enter.prevent="commitRename"
-          @keydown.esc.prevent="renamingId = null"
+          @keydown.enter.prevent.stop="commitRename"
+          @keydown.esc.prevent.stop="renamingId = null"
           @blur="commitRename"
         />
         <span

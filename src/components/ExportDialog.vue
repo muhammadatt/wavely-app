@@ -242,8 +242,8 @@ function complianceOf(doc) {
               class="w-full bg-transparent outline-none text-[12.5px] font-bold text-[#eaf6f8] border-b border-[#35d3e6]"
               aria-label="File name"
               @click.stop
-              @keydown.enter.prevent="commitRename"
-              @keydown.esc.prevent="renamingId = null"
+              @keydown.enter.prevent.stop="commitRename"
+              @keydown.esc.prevent.stop="renamingId = null"
               @blur="commitRename"
             />
             <div v-else class="flex items-center gap-[6px] min-w-0">
