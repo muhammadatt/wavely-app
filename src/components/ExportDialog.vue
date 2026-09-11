@@ -1,10 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
+import { useExport } from '../composables/useExport.js'
 import { getTimelineDuration } from '../audio/operations.js'
-import { renderTimelineToWav } from '../audio/export.js'
-import { toWavFileName, downloadBlob } from '../audio/download.js'
-import { createZip, ZIP_SIZE_LIMIT } from '../audio/zip.js'
 import { formatDuration } from '../utils/format.js'
 import { focusRenameInput } from '../utils/renameInput.js'
 import BaseButton from './ui/BaseButton.vue'
@@ -17,19 +15,22 @@ import BaseButton from './ui/BaseButton.vue'
  * persistent meaning of the word in the primary navigation confuses more than
  * it helps. Checking files at the moment you export also puts the decision
  * where it's actually being made.
+ *
+ * The export itself is `useExport`, shared with the files panel, which exports
+ * its ticked files where they stand rather than handing them here to be ticked
+ * a second time. This dialog is the surface for the other approach — open it
+ * with nothing chosen and decide, with sizes and compliance in front of you.
  */
 
-const { appState, documents, showToast, renameDocument } = useEditorState()
+const { appState, documents, renameDocument } = useEditorState()
+const {
+  isExporting, exportProgress, exportDocuments,
+  estimatedBytes, totalBytes, formatSize, overZipLimit,
+} = useExport()
 
-// Pre-check whatever the caller asked for, else just the active document.
-const initial = appState.exportPreselection?.length
-  ? appState.exportPreselection
-  : [appState.activeDocumentId].filter(Boolean)
-const checked = ref(new Set(initial))
-appState.exportPreselection = null
-
-const isExporting = ref(false)
-const exportProgress = ref({ done: 0, total: 0 })
+// Opens on the active document. Nothing pre-checks a wider set any more: the
+// only caller that did was the files panel, and it exports its own ticks now.
+const checked = ref(new Set([appState.activeDocumentId].filter(Boolean)))
 
 function toggle(docId) {
   const next = new Set(checked.value)
@@ -48,27 +49,8 @@ function toggleAll() {
 
 const selectedDocs = computed(() => documents.value.filter(d => checked.value.has(d.id)))
 
-/** 16-bit PCM: bytes = samples × channels × 2, plus a 44-byte header. */
-function estimatedBytes(doc) {
-  const dur = getTimelineDuration(doc.segments)
-  const f = doc.currentFile
-  if (!f || !dur) return 0
-  return Math.round(dur * f.sampleRate) * f.channels * 2 + 44
-}
-
-const totalBytes = computed(() =>
-  selectedDocs.value.reduce((sum, d) => sum + estimatedBytes(d), 0)
-)
-
-function formatSize(bytes) {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`
-  return `${Math.max(1, Math.round(bytes / 1e3))} KB`
-}
-
-const overZipLimit = computed(() =>
-  selectedDocs.value.length > 1 && totalBytes.value > ZIP_SIZE_LIMIT
-)
+const selectedBytes = computed(() => totalBytes(selectedDocs.value))
+const tooBig = computed(() => overZipLimit(selectedDocs.value))
 
 function close() {
   if (isExporting.value) return
@@ -81,7 +63,7 @@ function close() {
 // name matters is the moment it becomes a filename on disk, which is this
 // dialog, so the same inline rename lives here too. It edits the document's
 // real name (the tab strip and files panel follow), and the exported file
-// takes it via uniqueNames() below.
+// takes it via uniqueNames() in useExport.
 const renamingId = ref(null)
 const renameDraft = ref('')
 
@@ -96,85 +78,10 @@ function commitRename() {
   renamingId.value = null
 }
 
-/** Disambiguate names that collide once extensions are normalised to .wav. */
-function uniqueNames(docs) {
-  const seen = new Map()
-  return docs.map(doc => {
-    const base = toWavFileName(doc.name)
-    const count = seen.get(base) ?? 0
-    seen.set(base, count + 1)
-    if (count === 0) return base
-    return base.replace(/\.wav$/, ` (${count + 1}).wav`)
-  })
-}
-
 async function handleExport() {
-  const docs = selectedDocs.value
-  if (docs.length === 0 || isExporting.value) return
-
-  isExporting.value = true
-  exportProgress.value = { done: 0, total: docs.length }
-
-  try {
-    const names = uniqueNames(docs)
-    const rendered = []
-    const failed = []
-
-    for (const [i, doc] of docs.entries()) {
-      // Yield to the browser between files so the progress readout actually
-      // paints — rendering is synchronous and would otherwise freeze the UI
-      // solid until every file was done.
-      await new Promise(r => setTimeout(r, 0))
-      try {
-        const wav = renderTimelineToWav(
-          doc.segments, doc.currentFile.sampleRate, doc.currentFile.channels
-        )
-        if (wav) rendered.push({ name: names[i], data: wav })
-        else failed.push(doc.name)
-      } catch (err) {
-        console.error(`Failed to render ${doc.name}:`, err)
-        failed.push(doc.name)
-      }
-      exportProgress.value = { done: i + 1, total: docs.length }
-    }
-
-    if (rendered.length === 0) {
-      showToast('Nothing to export')
-      return
-    }
-
-    if (rendered.length === 1) {
-      downloadBlob(new Blob([rendered[0].data], { type: 'audio/wav' }), rendered[0].name)
-      showToast(`Exported ${rendered[0].name}`)
-    } else {
-      const stamp = new Date().toISOString().slice(0, 10)
-      downloadBlob(createZip(rendered), `wavely-export-${stamp}.zip`)
-      showToast(`Exported ${rendered.length} files as a zip`)
-    }
-
-    if (failed.length > 0) {
-      showToast(`Skipped ${failed.length} file${failed.length === 1 ? '' : 's'} that failed to render`)
-    }
-    appState.exportDialogOpen = false
-  } finally {
-    isExporting.value = false
-  }
+  if (await exportDocuments(selectedDocs.value)) appState.exportDialogOpen = false
 }
 
-// ── Per-row compliance signal ────────────────────────────────────────────────
-// CLAUDE.md is explicit that the export UI should always show current
-// compliance status, so the state of each file is self-evident at the moment
-// it matters. No lecturing — just the signal.
-function complianceOf(doc) {
-  const cert = doc.processingReport?.acx_certification
-  if (cert) {
-    return cert.certificate === 'pass'
-      ? { text: 'ACX pass', color: '#5fd39a' }
-      : { text: 'ACX fail', color: '#ff8a80' }
-  }
-  if (doc.processingReport) return { text: 'Mastered', color: '#7fe9f6' }
-  return { text: 'Not mastered', color: 'rgba(255,255,255,.35)' }
-}
 </script>
 
 <template>
@@ -290,18 +197,13 @@ function complianceOf(doc) {
             class="text-[10.5px] font-bold shrink-0"
             style="color:#7fe9f6"
           >Processing…</span>
-          <span
-            v-else
-            class="text-[10.5px] font-bold shrink-0"
-            :style="{ color: complianceOf(doc).color }"
-          >{{ complianceOf(doc).text }}</span>
         </div>
       </div>
 
       <!-- Footer -->
       <div class="px-5 py-[13px] border-t border-[rgba(255,255,255,.07)]">
-        <div v-if="overZipLimit" class="mb-[10px] text-[11px] font-bold leading-snug text-[#ff8a80]">
-          This selection is {{ formatSize(totalBytes) }} — over the 4 GB zip limit. Export in smaller batches.
+        <div v-if="tooBig" class="mb-[10px] text-[11px] font-bold leading-snug text-[#ff8a80]">
+          This selection is {{ formatSize(selectedBytes) }} — over the 4 GB zip limit. Export in smaller batches.
         </div>
 
         <div v-if="isExporting" class="mb-[10px]">
@@ -323,7 +225,7 @@ function complianceOf(doc) {
             <template v-if="selectedDocs.length === 0">Nothing selected</template>
             <template v-else>
               {{ selectedDocs.length }} file{{ selectedDocs.length === 1 ? '' : 's' }}
-              · {{ formatSize(totalBytes) }}
+              · {{ formatSize(selectedBytes) }}
               <span v-if="selectedDocs.length > 1" class="text-[rgba(255,255,255,.3)]"> · zip</span>
             </template>
           </span>
@@ -331,7 +233,7 @@ function complianceOf(doc) {
           <BaseButton size="sm" color="ghost" :pill="false" :disabled="isExporting" @click="close">Cancel</BaseButton>
           <BaseButton
             size="md" :pill="false"
-            :disabled="selectedDocs.length === 0 || isExporting || overZipLimit"
+            :disabled="selectedDocs.length === 0 || isExporting || tooBig"
             @click="handleExport"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>

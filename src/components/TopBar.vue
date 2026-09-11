@@ -5,8 +5,6 @@ import { useFileImport } from '../composables/useFileImport.js'
 import { useFileSave } from '../composables/useFileSave.js'
 import BaseButton from './ui/BaseButton.vue'
 import Icon from './ui/Icon.vue'
-import FileTabs from './FileTabs.vue'
-
 
 const {
   state, appState, hasFile, documentCount, undo, redo, canUndo, canRedo,
@@ -92,8 +90,6 @@ const fileMeta = computed(() => {
       <span class="font-['JetBrains_Mono'] text-[11px] font-semibold text-[rgba(255,255,255,.4)] whitespace-nowrap shrink-0">{{ fileMeta.sampleRate }}</span>
     </div>
     <div v-else class="flex-1"></div>
-
-        <FileTabs />
 
     <!-- Actions -->
     <div class="flex items-center gap-2">

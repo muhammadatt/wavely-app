@@ -138,7 +138,7 @@ const statusOf = documentStatus
 <template>
   <div
     v-if="documents.length > 0"
-    class="h-[36px] flex items-stretch shrink-0 px-2 gap-[3px] border-b border-[rgba(255,255,255,.06)]"
+    class="h-[36px] flex items-stretch shrink-0 px-2 gap-[3px]"
     style="background:linear-gradient(180deg,#12161b,#0f1318)"
   >
 
@@ -258,7 +258,7 @@ const statusOf = documentStatus
          threshold — or an unadvertised Ctrl+P. -->
     <div class="flex items-center gap-[8px] shrink-0 pr-3">
       <button
-        class="flex items-center gap-[5px] px-[9px] py-4 h-[22px] rounded-[7px] text-[12px] font-bold transition-colors hover:bg-[rgba(255,255,255,.09)]"
+        class="flex items-center gap-[5px] px-[9px] py-4 h-[25px] rounded-[7px] text-[12px] font-bold transition-colors hover:bg-[rgba(255,255,255,.09)]"
         style="color:rgba(255,255,255,.55);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)"
         title="All files — search, rename, bulk export (Ctrl+P)"
         @click="appState.filesPanelOpen = true"

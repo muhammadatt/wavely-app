@@ -169,6 +169,10 @@ try {
     const search = page.locator('input[placeholder="Search open files…"]')
     const isOpen = () => search.isVisible().catch(() => false)
     const renameInput = page.locator('input[aria-label="File name"]')
+    // The panel's first file row. Scoped by the waveform thumbnail, which only
+    // this panel's rows render — the tab strip and the top bar carry buttons
+    // with the same names, and an unscoped locator finds those instead.
+    const panelRow = () => page.locator('.group').filter({ has: page.locator('canvas') }).first()
     const visible = async loc => (await loc.count()) > 0 && await loc.first().isVisible().catch(() => false)
 
     await page.keyboard.press('Control+p'); await page.waitForTimeout(500)
@@ -179,11 +183,15 @@ try {
     let dblclickOk = false
     if (opened) {
       // Scoped by the waveform thumbnail: the tab strip behind the overlay
-      // renders a div carrying the same filename in its title, and an unscoped
-      // locator picks that one and then waits 30 s for the overlay to stop
-      // intercepting the click.
-      await page.locator('.group').filter({ has: page.locator('canvas') }).first()
-        .locator(`div[title*="${'wavely-panel-smoke'}"]`).first().dblclick().catch(() => {})
+      // renders an element carrying the same filename in its title, and an
+      // unscoped locator picks that one and then waits 30 s for the overlay to
+      // stop intercepting the click.
+      //
+      // ⚠ MATCHED ON THE TITLE, NOT THE TAG. This read `div[title*=…]` and went
+      // red when the name became a <span> — the rename it was checking still
+      // worked. The row's own element shape is not part of the contract.
+      await panelRow().locator(`[title*="${'wavely-panel-smoke'}"]`)
+        .first().dblclick().catch(() => {})
       await page.waitForTimeout(350)
       dblclickOk = await visible(renameInput) && await isOpen()
       if (dblclickOk) { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
@@ -192,7 +200,7 @@ try {
     // Escape out of a rename must close the input and leave the panel standing.
     let escapeOk = false
     if (await isOpen()) {
-      const pencil = page.locator('[aria-label^="Rename "]')
+      const pencil = panelRow().locator('[aria-label^="Rename "]')
       if (await pencil.count()) {
         await pencil.first().click(); await page.waitForTimeout(300)
         const editing = await visible(renameInput)
@@ -201,11 +209,46 @@ try {
       }
     }
 
-    // Save, Save As and the per-file Close are each a button with a name on it.
-    const actionsOk = await isOpen()
-      && await visible(page.getByRole('button', { name: 'Save', exact: true }))
-      && await visible(page.getByRole('button', { name: 'Save As…' }))
-      && await visible(page.locator('[aria-label^="Close "]:not([aria-label="Close files panel"])'))
+    // The row click ticks the file for export, the way the export dialog's rows
+    // do — and every per-file control has to survive sitting inside that click
+    // target. The pencil stands in for all of them: it is the one that can be
+    // driven here without opening a file picker, and they all carry the same
+    // @click.stop.
+    let tickOk = false
+    if (await isOpen()) {
+      const row = panelRow()
+      const box = row.locator('[aria-label^="Select "]').first()
+      const ticked = async () => (await box.getAttribute('aria-pressed')) === 'true'
+      await row.locator('canvas').first().click(); await page.waitForTimeout(250)
+      const onAfterRowClick = await ticked()
+      await row.locator('[aria-label^="Rename "]').first().click(); await page.waitForTimeout(250)
+      const stillOnAfterRename = await ticked() && await visible(renameInput)
+      await page.keyboard.press('Escape'); await page.waitForTimeout(250)
+      await row.locator('canvas').first().click(); await page.waitForTimeout(250)
+      tickOk = onAfterRowClick && stillOnAfterRename && !(await ticked())
+    }
+
+    // Go to, Save, Save As and the per-file Close are each a button of its own.
+    //
+    // ⚠ FOUND BY ACCESSIBLE NAME, NOT BY VISIBLE TEXT. These were text buttons
+    // and are now lucide icons; the labels moved into aria-label and title and
+    // the actions did not change, so the check follows the name rather than
+    // going red over an icon swap. An unnamed icon button IS a failure here —
+    // that is the thing worth holding.
+    //
+    // ⚠ SCOPED TO THE ROW, and that is not tidiness. Unscoped, every one of
+    // these matched something else on the page — the top bar's own Save
+    // (text "Save"), its Save As dropdown (aria-label "Save As"), the tab
+    // strip's per-tab ✕ (`Close <name>`) — so the check passed with the panel's
+    // buttons deleted. Mutation-tested: removing the Save button's aria-label
+    // reported ok until this was scoped.
+    const actionsOk = await isOpen() && await (async () => {
+      const row = panelRow()
+      return await visible(row.locator('[aria-label^="Switch to "]'))
+        && await visible(row.locator('[aria-label^="Save "]:not([aria-label$="as a new file"])'))
+        && await visible(row.locator('[aria-label$="as a new file"]'))
+        && await visible(row.locator('[aria-label^="Close "]'))
+    })()
 
     // The dismiss ✕ closes the PANEL. The file it was listing stays open —
     // reopening and finding it still counted is the assertion that matters.
@@ -220,17 +263,39 @@ try {
         dismissOk = gone && await visible(page.getByText('1/1'))
       }
     }
+    // Export runs HERE, not in the export dialog. The panel used to hand its
+    // ticked set over and open that dialog, so the assertion that matters is a
+    // file actually arriving from a click in this panel.
+    let exportOk = false
+    if (await isOpen()) {
+      const row = panelRow()
+      await row.locator('canvas').first().click(); await page.waitForTimeout(250)
+      const download = page.waitForEvent('download', { timeout: 15000 }).catch(() => null)
+      // Scoped to the panel: the top bar has an Export button too, and an
+      // unscoped locator is a strict-mode violation rather than a miss.
+      await page.getByRole('dialog', { name: 'Files' })
+        .getByRole('button', { name: 'Export' }).click()
+      const got = await download
+      await page.waitForTimeout(500)
+      // A single ticked file downloads as itself, not as a zip — and the panel
+      // dismisses once the bytes are handed over.
+      exportOk = !!got && got.suggestedFilename().endsWith('.wav') && !(await isOpen())
+    }
+
     if (await isOpen()) { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
 
     const fresh = errors.slice(before)
-    const ok = opened && dblclickOk && escapeOk && actionsOk && dismissOk && fresh.length === 0
+    const ok = opened && dblclickOk && escapeOk && tickOk && actionsOk && dismissOk
+      && exportOk && fresh.length === 0
     if (!ok) failures++
     const why = [
       opened ? '' : 'did not open; ',
       dblclickOk ? '' : 'double-click on the name did not start a rename; ',
       escapeOk ? '' : 'Escape out of a rename misbehaved; ',
-      actionsOk ? '' : 'per-file Save / Save As / Close missing; ',
+      tickOk ? '' : 'row click did not tick the file, or a per-file button ticked it; ',
+      actionsOk ? '' : 'per-file Go to / Save / Save As / Close missing or unnamed; ',
       dismissOk ? '' : 'dismiss ✕ did not close the panel and leave the file open; ',
+      exportOk ? '' : 'Export from the files panel did not deliver a file; ',
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Files panel'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }
