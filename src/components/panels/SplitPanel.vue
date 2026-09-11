@@ -24,14 +24,9 @@ function apply() {
 </script>
 
 <template>
+  <!-- No header: as a rail operation, ContextPanel draws the title block and
+       the back chevron from the registry entry. -->
   <div class="font-['Inter']">
-    <!-- Panel header -->
-    <div class="px-5 pt-5 pb-[14px] border-b border-[rgba(255,255,255,.06)]">
-      <div class="text-[15px] font-bold text-[#eaf6f8]">Split</div>
-      <div class="mt-[4px] text-[11.5px] leading-[1.4] text-[rgba(255,255,255,.42)]">Divide the audio into two separate clips</div>
-    </div>
-
-    <!-- Panel body -->
     <div class="p-4 flex flex-col gap-2.5">
       <button
         class="text-left px-[14px] py-[13px] rounded-[12px] border cursor-pointer transition-all"

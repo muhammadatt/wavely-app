@@ -34,10 +34,23 @@ import { join } from 'node:path'
 const PORT = Number(process.env.SMOKE_PORT ?? 5199)
 const URL_ = `http://localhost:${PORT}/`
 
-/** Command-palette search terms. These are the REGISTRY labels, not our names. */
+/**
+ * What to open, by its command-palette search term. These are the REGISTRY
+ * labels, not our names for the effects.
+ *
+ * `rail` names an operation that opens in the right-hand rail rather than as a
+ * floating window, and carries the registry id the rail tags itself with. Rail
+ * panels were outside this run until markers added a second one — they are
+ * exactly as able to throw at module scope as a window is, and nothing else in
+ * the suite renders a component at all.
+ */
 const PANELS = [
-  'Opto Comp', 'FET Punch', 'Soft Clipper', 'Scheps Parallel',
-  'Reso', 'EQ', 'Air Boost', 'De-Esser', 'Inflator', 'Tube Sat',
+  { name: 'Opto Comp' }, { name: 'FET Punch' }, { name: 'Soft Clipper' },
+  { name: 'Scheps Parallel' }, { name: 'Reso' }, { name: 'EQ' },
+  { name: 'Air Boost' }, { name: 'De-Esser' }, { name: 'Inflator' },
+  { name: 'Tube Sat' },
+  { name: 'Split', rail: 'split' },
+  { name: 'Markers', rail: 'markers' },
 ]
 
 function writeProbeWav(path) {
@@ -131,12 +144,14 @@ try {
   await page.getByText('Select All', { exact: false }).first().click()
   await page.waitForTimeout(600)
 
-  for (const name of PANELS) {
+  for (const { name, rail } of PANELS) {
     const before = errors.length
     await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
     await page.keyboard.type(name); await page.waitForTimeout(450)
-    await page.keyboard.press('Enter'); await page.waitForTimeout(3000)
-    const opened = await page.evaluate(() => !!document.querySelector('.win-frame'))
+    await page.keyboard.press('Enter'); await page.waitForTimeout(rail ? 1200 : 3000)
+    const opened = rail
+      ? await page.evaluate(id => !!document.querySelector(`[data-rail-panel="${id}"]`), rail)
+      : await page.evaluate(() => !!document.querySelector('.win-frame'))
     const fresh = errors.slice(before)
     const ok = opened && fresh.length === 0
     if (!ok) failures++
