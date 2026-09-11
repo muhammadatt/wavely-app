@@ -84,12 +84,17 @@ self.onmessage = function (e) {
  * Only `makeupDb` comes back. The ceiling the percentile reference needs is
  * measured over the WHOLE region by `computeLA2AAutoMakeup`, not here, because
  * this worker only ever sees the capped analysis window — see `regionPeakDb`.
+ *
+ * ⚠ THE REPLY CARRIES `ceilingKneeDb` AS WELL AS `makeupDb`, and dropping it
+ * is a SILENT regression: the kernel falls back to the widest fixed knee and
+ * every render just goes a little quieter at the peak. `processWorkerContract`
+ * pins both fields for that reason.
  */
 function la2aAutoMakeup(channelData, sampleRate, params) {
   const { reference = 'peak', ...kernelParams } = params ?? {}
   try {
     const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
-    postDone({ makeupDb: plan.makeupDb })
+    postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -110,8 +115,10 @@ function autoMakeup(measure, channelData, sampleRate, params) {
 // Scheps wet path (two EQ cascades and the opto compressor) over the region.
 function schepsAutoTrim(channelData, sampleRate, params) {
   try {
-    const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
-    postDone({ trimDb, correlation, densityDb })
+    const {
+      trimDb, correlation, densityDb, ceilingKneeDb,
+    } = computeSchepsAutoTrim(channelData, sampleRate, params)
+    postDone({ trimDb, correlation, densityDb, ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }

@@ -33,6 +33,7 @@ import { onLA2ATuningChange } from './la2aTuning.js'
 import {
   SCHEPS_LATENCY_SAMPLES, SCHEPS_DEFAULTS, toKernelParams,
 } from './schepsParams.js'
+import { withMeasuredClears } from './measuredKeys.js'
 
 export { SCHEPS_LATENCY_SAMPLES, SCHEPS_DEFAULTS, toKernelParams }
 
@@ -94,7 +95,9 @@ export function createScheps(audioContext) {
    * patch params is all it takes.
    */
   const unsubscribeTuning = onLA2ATuningChange(() => {
-    worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+    worklet?.port.postMessage({
+        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+      })
   })
 
   return {
@@ -104,7 +107,9 @@ export function createScheps(audioContext) {
     setParam(name, value) {
       if (name in params) {
         params[name] = value
-        worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+        worklet?.port.postMessage({
+        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+      })
       }
     },
 
@@ -134,7 +139,9 @@ export function createScheps(audioContext) {
      * and needs the live node to pick it up.
      */
     refreshKernelParams() {
-      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+      worklet?.port.postMessage({
+        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+      })
     },
 
     destroy() {

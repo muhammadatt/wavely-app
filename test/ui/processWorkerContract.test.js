@@ -86,6 +86,35 @@ for (const [type, params, key] of MEASUREMENTS) {
   })
 }
 
+/**
+ * The ceiling and its knee are solved together and the kernel falls back to the
+ * old fixed 3 dB width when the knee is absent — which means a worker reply that
+ * quietly stops carrying it degrades SILENTLY, with every render a little
+ * quieter at the peak and nothing failing. This seam is a known blind spot (see
+ * CLAUDE.md) and it is the reason this file exists, so it gets pinned here.
+ */
+test('the ceiling solvers carry the knee back with them, never the level alone', () => {
+  const audio = tone(1)
+  const percentile = request('la2aAutoMakeup', {
+    channelData: audio, params: { peakReduction: 70, reference: 'percentile' },
+  })
+  assert.equal(percentile.type, 'done')
+  assert.ok('ceilingKneeDb' in percentile, 'OptoSmooth must return a knee with its ceiling')
+  assert.ok(Number.isFinite(percentile.ceilingKneeDb))
+
+  // The peak reference needs no ceiling, so the key is present and null rather
+  // than missing — missing is what makes the kernel fall back to the old width.
+  const peak = request('la2aAutoMakeup', {
+    channelData: audio, params: { peakReduction: 70 },
+  })
+  assert.ok('ceilingKneeDb' in peak)
+  assert.equal(peak.ceilingKneeDb, null)
+
+  const scheps = request('schepsAutoTrim', { channelData: audio, params: {} })
+  assert.equal(scheps.type, 'done')
+  assert.ok('ceilingKneeDb' in scheps, 'Scheps must return a knee with its ceiling')
+})
+
 test('the two OptoSmooth references really do return different makeup', () => {
   const audio = tone(1)
   const byPeak = request('la2aAutoMakeup', {

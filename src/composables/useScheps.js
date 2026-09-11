@@ -38,6 +38,8 @@ const schepsDensityDb = ref(SCHEPS_DEFAULTS.densityDb)
  * same reason they do — so preview and apply cannot disagree about it.
  */
 const schepsCeilingDb = ref(SCHEPS_DEFAULTS.ceilingDb)
+/** The ceiling's knee width, dB, measured with it. See `ceilingKneeDbFor`. */
+const schepsCeilingKneeDb = ref(SCHEPS_DEFAULTS.ceilingKneeDb)
 
 /**
  * INPUT ALIGNMENT for the embedded compressor — see `dsp/inputAlign.js`.
@@ -96,6 +98,8 @@ function currentParams() {
      * attenuate a setting they made deliberately. Same rule `useLA2A` follows.
      */
     ceilingDb: schepsAutoTrim.value ? schepsCeilingDb.value : null,
+    // Leaves with the ceiling it belongs to, for the same reason.
+    ceilingKneeDb: schepsAutoTrim.value ? schepsCeilingKneeDb.value : null,
     /**
      * ⚠ INDEPENDENT OF AUTO TRIM, unlike the ceiling. The ceiling is half of the
      * trim solve and leaves with it; alignment decides how much the embedded
@@ -264,7 +268,9 @@ export function useScheps() {
     const seq = ++trimSeq
     schepsAutoTrimBusy.value = true
     try {
-      const { trimDb, correlation, densityDb, ceilingDb } = await computeSchepsTrim(
+      const {
+        trimDb, correlation, densityDb, ceilingDb, ceilingKneeDb,
+      } = await computeSchepsTrim(
         state.segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
@@ -278,6 +284,9 @@ export function useScheps() {
        */
       schepsCeilingDb.value = ceilingDb
       pushParam('ceilingDb', ceilingDb)
+      // With the ceiling, ahead of the trim: the knee is how hard it holds.
+      schepsCeilingKneeDb.value = ceilingKneeDb
+      pushParam('ceilingKneeDb', ceilingKneeDb)
       schepsWetTrimDb.value = trimDb
       schepsCorrelation.value = correlation
       schepsDensityDb.value = densityDb
@@ -372,6 +381,8 @@ export function useScheps() {
      */
     schepsCeilingDb.value = null
     pushParam('ceilingDb', null)
+    schepsCeilingKneeDb.value = null
+    pushParam('ceilingKneeDb', null)
   }
 
   async function apply() {
