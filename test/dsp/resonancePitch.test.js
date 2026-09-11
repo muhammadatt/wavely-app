@@ -39,6 +39,7 @@ import {
 } from '../../src/audio/resonanceParams.js'
 import { peaking, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
+import { memoSignal, hashNumbers } from '../helpers/memoSignal.js'
 
 const SR = 44100
 const LATENCY = 2048
@@ -61,24 +62,34 @@ const LATENCY = 2048
  */
 function pitched(contour, { seconds = 4, amp = 0.2, noiseDb = -70, tilt = 1.5 } = {}) {
   const n = Math.round(seconds * SR)
-  const out = new Float32Array(n)
-  const noiseAmp = Math.pow(10, noiseDb / 20)
-  // `tilt` is the exponent of the spectral roll-off above 300 Hz. It matters to
-  // any test that probes the top of the spectrum: a steeper source has less up
-  // there for a defect to sit on, so detection falls for a reason that is the
-  // material rather than the detector. Stated per test rather than fixed.
-  const envelope = f => (f <= 300 ? 1 : Math.pow(300 / f, tilt))
-  let phase = 0
-  let s = 991
-  for (let i = 0; i < n; i++) {
-    const f0 = contour(i / SR)
-    phase += (2 * Math.PI * f0) / SR
-    let v = 0
-    for (let k = 1; k * f0 < SR / 2; k++) v += envelope(k * f0) * Math.sin(k * phase + k * 0.9)
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    out[i] = amp * v * 0.25 + noiseAmp * (s / 0x3fffffff - 1)
-  }
-  return out
+  // Sampled first so it can key the memo. The contour is still evaluated once
+  // per sample, and a Float64Array holds the same double the inline call did,
+  // so the carrier below is bit-identical to the un-memoised version.
+  const f0s = new Float64Array(n)
+  for (let i = 0; i < n; i++) f0s[i] = contour(i / SR)
+  // The sampled contour plus these scalars fully determine the output: phase
+  // integrates f0, the envelope reads tilt, and the noise is a fixed seed.
+  const key = `pitched|${amp}|${noiseDb}|${tilt}|${hashNumbers(f0s)}`
+  return memoSignal(key, () => {
+    const out = new Float32Array(n)
+    const noiseAmp = Math.pow(10, noiseDb / 20)
+    // `tilt` is the exponent of the spectral roll-off above 300 Hz. It matters to
+    // any test that probes the top of the spectrum: a steeper source has less up
+    // there for a defect to sit on, so detection falls for a reason that is the
+    // material rather than the detector. Stated per test rather than fixed.
+    const envelope = f => (f <= 300 ? 1 : Math.pow(300 / f, tilt))
+    let phase = 0
+    let s = 991
+    for (let i = 0; i < n; i++) {
+      const f0 = f0s[i]
+      phase += (2 * Math.PI * f0) / SR
+      let v = 0
+      for (let k = 1; k * f0 < SR / 2; k++) v += envelope(k * f0) * Math.sin(k * phase + k * 0.9)
+      s = (s * 1103515245 + 12345) & 0x7fffffff
+      out[i] = amp * v * 0.25 + noiseAmp * (s / 0x3fffffff - 1)
+    }
+    return out
+  })
 }
 
 function resonate(sig, freqHz, q, gainDb) {
