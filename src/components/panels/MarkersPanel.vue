@@ -4,6 +4,12 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import ApplyAction from '../ui/ApplyAction.vue'
 import Icon from '../ui/Icon.vue'
 import { formatTimecode } from '../../utils/format.js'
+import {
+  formatAudacityLabels,
+  parseAudacityLabels,
+  toLabelFileName,
+} from '../../audio/labels.js'
+import { downloadBlob } from '../../audio/download.js'
 
 /**
  * The markers rail panel.
@@ -30,6 +36,7 @@ const {
   setPlayhead,
   performSplitAtMarkers,
   performDropGaps,
+  setMarkers,
   showToast,
 } = useEditorState()
 
@@ -77,6 +84,39 @@ function dropGaps() {
 function clearAll() {
   clearMarkers()
   showToast('Markers cleared')
+}
+
+// ── Label files ──────────────────────────────────────────────────────────────
+
+const fileInput = ref(null)
+
+function exportLabels() {
+  const text = formatAudacityLabels(markers.value, totalDuration.value)
+  downloadBlob(
+    new Blob([text], { type: 'text/plain' }),
+    toLabelFileName(state.currentFile?.name)
+  )
+  showToast('Labels exported')
+}
+
+async function importLabels(event) {
+  const file = event.target.files?.[0]
+  // Cleared immediately so picking the same file twice in a row still fires a
+  // change event — otherwise a re-import after an undo silently does nothing.
+  event.target.value = ''
+  if (!file) return
+
+  const { markers: imported, skipped } = parseAudacityLabels(await file.text())
+  if (!imported.length) {
+    showToast(skipped ? `No usable rows in that file (${skipped} skipped)` : 'That file has no labels')
+    return
+  }
+  setMarkers(imported)
+  showToast(
+    skipped
+      ? `Imported ${imported.length} markers, skipped ${skipped} bad rows`
+      : `Imported ${imported.length} markers`
+  )
 }
 </script>
 
@@ -204,6 +244,30 @@ function clearAll() {
         <Icon name="cut" :size="13" :stroke-width="2" />
         Delete {{ gapCount }} gap{{ gapCount === 1 ? '' : 's' }}
       </button>
+
+      <div class="flex gap-2 mt-1">
+        <button class="marker-action flex-1 justify-center" @click="fileInput.click()">
+          Import labels
+        </button>
+        <button
+          class="marker-action flex-1 justify-center"
+          :disabled="totalDuration <= 0"
+          @click="exportLabels"
+        >
+          Export labels
+        </button>
+      </div>
+      <p class="text-[10.5px] leading-[1.45] text-[rgba(255,255,255,.38)] px-[2px]">
+        Audacity label format — one tab-separated row per slice, readable by
+        Audacity and most transcription tools.
+      </p>
+      <input
+        ref="fileInput"
+        type="file"
+        accept=".txt,.tsv,text/plain"
+        class="hidden"
+        @change="importLabels"
+      />
     </div>
   </div>
 </template>
