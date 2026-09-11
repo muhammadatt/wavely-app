@@ -15,7 +15,7 @@ import DeviceChoiceRocker from '../../knobs/DeviceChoiceRocker.vue'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  state, getAudioContext, replaceRegion, setPeakCache,
+  appState, state, getAudioContext, replaceRegion, setPeakCache,
   startProcessing, endProcessing, showToast, totalDuration, hasSelection,
 } = useEditorState()
 
@@ -95,6 +95,10 @@ const plan = computed(() => {
 
 let measureSeq = 0
 let measureTimer = null
+/** Set while a pass is in the worker, so a second one cannot be started. */
+let measureInFlight = false
+/** Set when a request arrives mid-pass; the pass re-runs once, on completion. */
+let measureAgain = false
 
 /**
  * Measure the region.
@@ -104,14 +108,31 @@ let measureTimer = null
  * longer than the short one, and without the sequence check an older reply
  * would land last and leave the readout describing a region nobody has
  * selected.
+ *
+ * ⚠ AND ONLY ONE PASS IS EVER IN FLIGHT, which the sequence check alone does
+ * NOT give you: a superseded request still renders its whole region to a flat
+ * buffer, transfers it, and runs the full measurement before its reply is
+ * thrown away. Unlike the compressors' measurements this one is uncapped by
+ * design, so on an hour of stereo that is hundreds of megabytes of allocation
+ * and a serialised worker queue per discarded pass — and the worker is shared,
+ * so the queue is in front of every other plugin's measurements too. Anything
+ * asked for mid-pass collapses into a single re-run at the end instead, which
+ * bounds the work at twice the useful amount however hard the selection is
+ * dragged. The re-run reads the CURRENT region, so the last answer is still
+ * the right one.
  */
 async function remeasure() {
+  if (measureInFlight) {
+    measureAgain = true
+    return
+  }
   const { start, end } = region()
   if (!(end > start) || !state.currentFile) {
     measurement.value = null
     return
   }
   const seq = ++measureSeq
+  measureInFlight = true
   measuring.value = true
   try {
     const m = await measureRegionLoudness(
@@ -125,7 +146,15 @@ async function remeasure() {
     console.error('Loudness measurement failed:', err)
     measurement.value = null
   } finally {
-    if (seq === measureSeq) measuring.value = false
+    measureInFlight = false
+    if (measureAgain) {
+      measureAgain = false
+      // Straight back round: the region moved while this pass was running, so
+      // what it just measured is not what is selected now.
+      remeasure()
+    } else if (seq === measureSeq) {
+      measuring.value = false
+    }
   }
 }
 
@@ -202,51 +231,102 @@ const outcome = computed(() => {
   return `${db(p.gainDb)} dB, then peaks limited to ${plain(ceilingDb.value)} ${peakUnit.value}`
 })
 
-/** What the last Apply landed on, or null before one has run. */
+/**
+ * What the last Apply landed on, or null before one has run.
+ *
+ * ⚠ EVERY FIGURE HERE COMES FROM THE SNAPSHOT TAKEN AT APPLY TIME, including
+ * the units it is labelled with and the target it is judged against. The knobs
+ * are live and a render is not instant: reading `unit` or `targetDb` here would
+ * let a user who moved to ACX mid-render see the LUFS result they asked for
+ * labelled dBFS, and warn or not warn against a target that measurement was
+ * never aiming at.
+ */
 const achieved = computed(() => {
   const r = lastReport.value
   if (!r) return null
-  const miss = Math.abs(r.achievedDb - targetDb.value)
+  const miss = Math.abs(r.achievedDb - r.targetDb)
   return {
     text: `Applied: ${plain(r.achievedDb)} ${r.unitLabel} at ${plain(r.achievedPeakDb)} ${r.peakUnitLabel}`,
-    warn: !r.converged || miss > 0.5,
+    warn: !r.converged || miss > 0.5 || r.shortfallDb > 0.5,
   }
 })
 
 async function applyNormalize() {
   const { start, end } = region()
   if (start >= end) return
+  // A region with nothing measurable has no target to move to. The Apply button
+  // is disabled for it, and this is the second half of that: a keyboard or a
+  // race must not reach a no-op that then reports success.
+  if (!plan.value || plan.value.silent) return
 
-  startProcessing('Loudness normalizing…')
+  /**
+   * ⚠ THE DOCUMENT IS CAPTURED BEFORE THE AWAIT, NOT LOOKED UP AFTER IT.
+   * `replaceRegion`, `startProcessing` and `endProcessing` all default to
+   * whichever tab is active when they are CALLED, and this render is the
+   * longest-running client-side apply in the app — a whole-file measurement
+   * plus up to four limiter passes. Switch tabs while it runs and the default
+   * splices the result into the wrong document and leaves this one stuck
+   * showing "processing" forever. The state API already takes a docId for
+   * exactly this reason; it just has to be passed.
+   */
+  const docId = appState.activeDocumentId
+  // Likewise the settings: the knobs stay live during the render, and the
+  // report has to be labelled with what was actually rendered.
+  const applied = target.value
+  const appliedUnit = unit.value
+  const appliedPeakUnit = peakUnit.value
+  const mode = peakMode.value
+  const { sampleRate, channels } = state.currentFile
+
+  startProcessing('Loudness normalizing…', docId)
   try {
     const ctx = getAudioContext()
     const { buffer, report } = await loudnessNormalizeRegion(
-      state.segments, start, end, target.value, peakMode.value,
-      ctx, state.currentFile.sampleRate, state.currentFile.channels,
+      state.segments, start, end, applied, mode, ctx, sampleRate, channels,
     )
-    const bufferId = replaceRegion(start, end, buffer, 'loudness normalization')
+    const bufferId = replaceRegion(start, end, buffer, 'loudness normalization', docId)
     setPeakCache(bufferId, await computePeakCache(buffer, 256))
 
     lastReport.value = {
       ...report,
-      unitLabel: unit.value,
-      peakUnitLabel: peakUnit.value,
+      targetDb: applied.targetDb,
+      unitLabel: appliedUnit,
+      peakUnitLabel: appliedPeakUnit,
     }
     // The region now measures differently — say so with the new numbers rather
     // than leaving the readout describing the file that has just been replaced.
     measurement.value = null
     scheduleMeasure()
 
-    showToast(report.converged
-      ? 'Loudness normalized'
-      : `Reached ${plain(report.achievedDb)} ${unit.value} — the ceiling would not allow more`)
+    showToast(toastFor(report, appliedUnit))
   } catch (err) {
     console.error('Loudness normalize failed:', err)
     showToast('Loudness normalization failed')
   } finally {
-    endProcessing()
+    endProcessing(docId)
   }
 }
+
+/**
+ * What to say about a finished render.
+ *
+ * ⚠ `converged` IS NOT THE SAME QUESTION AS "DID IT REACH THE TARGET". SAFE
+ * converges by design when the ceiling stops it short — there was nothing to
+ * iterate — so reporting on `converged` alone announced "Loudness normalized"
+ * for a render the panel's own outcome line had just said would fall 8 dB
+ * short. Both ways of missing are reported, in the terms that caused them.
+ */
+function toastFor(report, appliedUnit) {
+  if (report.shortfallDb > 0.05) {
+    return `Normalized to ${plain(report.achievedDb)} ${appliedUnit} — `
+      + `${plain(report.shortfallDb)} dB short of target, held by the ceiling`
+  }
+  if (!report.converged) {
+    return `Reached ${plain(report.achievedDb)} ${appliedUnit} — the ceiling would not allow more`
+  }
+  return 'Loudness normalized'
+}
+
 </script>
 
 <template>
@@ -261,8 +341,11 @@ async function applyNormalize() {
     show-preview
     :previewable="false"
     show-apply
-    :apply-disabled="!measurement"
-    apply-disabled-hint="Nothing measurable in this region"
+    :requires-selection="false"
+    :apply-disabled="!measurement || !!plan?.silent"
+    :apply-disabled-hint="measuring
+      ? 'Measuring the region'
+      : 'Nothing measurable in this region'"
     @apply="applyNormalize()"
   >
     <div class="px-[24px] pt-[20px] pb-[22px] flex flex-col gap-[18px]">

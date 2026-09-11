@@ -96,6 +96,47 @@ test('SAFE never touches the ceiling and says how far short it stopped', () => {
     `reported ${report.shortfallDb} short, actually ${(podcast.targetDb - lufs).toFixed(3)}`)
 })
 
+test('the one-gain path measures its result rather than predicting it', () => {
+  // ⚠ REGRESSION. `achievedDb` was `measuredDb + gainDb` here, on the reasoning
+  // that one gain is exact arithmetic. It is — but LUFS is GATED against a
+  // FIXED -70 LKFS absolute threshold, so a large boost carries blocks up
+  // across it that were excluded before, and the average afterwards is over a
+  // different set of blocks. Measured on this fixture the shortcut was 1.9 LU
+  // out while reporting an exact hit.
+  //
+  // A very quiet recording is precisely the one that needs a large gain, so
+  // this is the file the tool exists for, not a corner of it.
+  const n = SR * 8
+  const faint = new Float32Array(n)
+  const loudAmp = 5.6e-4
+  const quietAmp = loudAmp * Math.pow(10, -6 / 20)
+  for (let i = 0; i < n; i++) {
+    const loud = Math.sin((2 * Math.PI * i) / (SR * 2)) > 0
+    faint[i] = (loud ? loudAmp : quietAmp) * Math.sin((2 * Math.PI * 200 * i) / SR)
+  }
+
+  const before = measureIntegratedLufs([faint], SR)
+  const { channelData, report } = renderLoudnessNormalize([faint], SR, podcast, 'safe')
+
+  // The fixture must actually straddle the gate, or it proves nothing.
+  assert.ok(
+    Math.abs((before + report.gainDb) - report.achievedDb) > 1,
+    'this fixture no longer exercises the gate crossing',
+  )
+  // What is reported is what is in the buffer.
+  assert.ok(Math.abs(measureIntegratedLufs(channelData, SR) - report.achievedDb) < 0.01,
+    `reported ${report.achievedDb}, rendered ${measureIntegratedLufs(channelData, SR)}`)
+})
+
+test('RMS really is exact under one gain, so nothing was lost by measuring', () => {
+  // The counterpart: ACX's measurement is ungated, so gain does move it
+  // linearly. Measuring instead of predicting has to agree here, otherwise the
+  // re-measure above would have introduced an error of its own.
+  const x = narration()
+  const { report } = renderLoudnessNormalize([x], SR, acx, 'safe')
+  assert.ok(Math.abs((measureRmsDb([x]) + report.gainDb) - report.achievedDb) < 1e-6)
+})
+
 test('SAFE and LIMIT agree exactly whenever the ceiling is not in the way', () => {
   // Otherwise the switch would be a character control, which it is not: it only
   // decides what gives when the two constraints disagree.

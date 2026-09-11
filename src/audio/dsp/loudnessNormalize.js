@@ -232,6 +232,24 @@ export function planNormalization(measurement, target, peakMode) {
 }
 
 /**
+ * Read a rendered region back on the meters the target is stated in.
+ *
+ * One helper rather than the same pair of ternaries at each return, because the
+ * two paths through the render must not be able to answer with different
+ * measurements of the same output.
+ */
+function measureAgainst(channelData, sampleRate, target) {
+  return {
+    achievedDb: target.unit === 'RMS'
+      ? measureRmsDb(channelData)
+      : measureIntegratedLufs(channelData, sampleRate),
+    achievedPeakDb: target.unit === 'RMS'
+      ? measureSamplePeakDb(channelData)
+      : measureTruePeakDb(channelData),
+  }
+}
+
+/**
  * Normalize a region to a target and return the rendered channels plus a
  * report measured on them.
  *
@@ -254,16 +272,28 @@ export function renderLoudnessNormalize(channelData, sampleRate, target, peakMod
     }
   }
 
-  // SAFE, or a target that fits under the ceiling on its own: one gain, and
-  // the arithmetic is exact. No limiter, no solve, nothing to converge.
+  // SAFE, or a target that fits under the ceiling on its own: one gain, no
+  // limiter, nothing to converge.
   if (peakMode === 'safe' || !plan.ceilingHit) {
     const out = applyGain(channelData, plan.gainDb)
+    // ⚠ THE RESULT IS MEASURED, NOT `measuredDb + gainDb`, AND THE SHORTCUT IS
+    // WRONG EVEN THOUGH THE GAIN IS EXACT. RMS really does move by the gain, so
+    // the two agree there — but LUFS is GATED, and both gates are evaluated
+    // against a fixed absolute threshold. Lifting a region by 8 dB can carry
+    // blocks of room tone up across -70 LKFS that were under it before, and
+    // once they are in the average the answer is no longer `before + gain`.
+    // A recording quiet enough to need a large boost is exactly the one whose
+    // floor sits near the gate, so the case this gets wrong is not a corner —
+    // it is the file the user reached for this tool to fix. Predicting it here
+    // would also make this the one path whose printed figure was not the
+    // rendered one, which is the promise the whole module is built on.
+    const { achievedDb, achievedPeakDb } = measureAgainst(out, sampleRate, target)
     return {
       channelData: out,
       report: {
         ...plan,
-        achievedDb: plan.measuredDb + plan.gainDb,
-        achievedPeakDb: plan.peakBeforeDb + plan.gainDb,
+        achievedDb,
+        achievedPeakDb,
         limitedDb: 0,
         passes: 1,
         converged: true,
@@ -290,12 +320,7 @@ export function renderLoudnessNormalize(channelData, sampleRate, target, peakMod
       sampleRate,
     )
 
-    achievedDb = target.unit === 'RMS'
-      ? measureRmsDb(out)
-      : measureIntegratedLufs(out, sampleRate)
-    achievedPeakDb = target.unit === 'RMS'
-      ? measureSamplePeakDb(out)
-      : measureTruePeakDb(out)
+    ;({ achievedDb, achievedPeakDb } = measureAgainst(out, sampleRate, target))
 
     const over = achievedPeakDb - target.ceilingDb
     const short = target.targetDb - achievedDb
