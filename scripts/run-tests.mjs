@@ -27,7 +27,35 @@ const child = spawn(
   ['--test', `--test-concurrency=${Math.max(1, availableParallelism())}`, ...targets],
   { stdio: 'inherit' },
 )
+const parentSignalHandlers = new Map()
+
+function cleanupParentSignalHandlers() {
+  for (const [signal, handler] of parentSignalHandlers) {
+    process.removeListener(signal, handler)
+  }
+}
+
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  const handler = () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill(signal)
+      return
+    }
+    cleanupParentSignalHandlers()
+    process.kill(process.pid, signal)
+  }
+  parentSignalHandlers.set(signal, handler)
+  process.on(signal, handler)
+}
+
+child.on('error', (error) => {
+  cleanupParentSignalHandlers()
+  console.error('Failed to start test runner:', error)
+  process.exit(1)
+})
+
 child.on('exit', (code, signal) => {
+  cleanupParentSignalHandlers()
   if (signal) process.kill(process.pid, signal)
   else process.exit(code ?? 1)
 })
