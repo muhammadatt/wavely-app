@@ -17,7 +17,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { LA2AKernel, computeAutoMakeupDb } from '../../src/audio/la2aProcessor.js'
+import { LA2AKernel, computeAutoMakeupDb , LA2A_LEGACY_PATCH } from '../../src/audio/la2aProcessor.js'
 import { FET1176Kernel, computeFET1176AutoMakeupDb } from '../../src/audio/fet1176Processor.js'
 
 const SR = 48000
@@ -65,17 +65,105 @@ function runClosedLoop(kernel, x, knob) {
   return { final: kernel.liveAutoMakeupDb(), trace }
 }
 
+/**
+ * ⚠ THE BOUND IS PER-PATCH, AND THE EMPHASIS PAIR IS WHY.
+ *
+ * The closed form solves from two extrema of the pre-makeup signal. That is
+ * exact against a memoryless curve and inexact against an LTI FILTER, because
+ * a shelf's effect on a peak depends on the waveform's shape and the tube
+ * stage changes that shape in between. Measured at Peak Reduction 55 the
+ * residue is about 1 dB with the pair engaged and 0.02 dB without it — so the
+ * tight bound is asserted where it is achievable rather than relaxed for
+ * everything. See the note on `trkEmph`.
+ *
+ * The rendered file is unaffected: apply uses the offline solve.
+ */
 test('OptoSmooth: converges on the offline solve with the loop closed', () => {
+  const x = material()
+  // Without the emphasis pair the closed form is exact and is held to it.
+  for (const peakReduction of [55, 70, 85]) {
+    for (const patch of [
+      { ...LA2A_LEGACY_PATCH },
+      { cellCurve: 'gainmod', emphasis: 0 },
+      { tubeCurve: 'tanh', emphasis: 0 },
+      { emphasis: 0 },
+    ]) {
+      const p = { peakReduction, ...patch }
+      const offline = computeAutoMakeupDb([x], SR, p)
+      const k = new LA2AKernel(SR); k.setParams(p)
+      const { final } = runClosedLoop(k, x, 'gainDb')
+      assert.ok(
+        Math.abs(final - offline) < 0.6,
+        `PR ${peakReduction} ${JSON.stringify(patch)}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`,
+      )
+    }
+  }
+})
+
+/**
+ * ⚠ THIS PROBE IS THE WORST CASE, NOT A TYPICAL ONE, AND THE BOUND IS NOT
+ * SYMMETRIC BECAUSE OF IT. `material()` peaks at -0.55 dBFS, which puts the
+ * makeup solve's target right up against the tube's saturation where the
+ * inverse is most sensitive. Backed off to -4.85 dBFS the same probe measures
+ * -0.12 dB and at -9.67 it measures +0.09.
+ *
+ * ⚠ AND THE RESIDUE IS NOT ONE-SIDED, WHICH AN EARLIER VERSION OF THIS
+ * COMMENT CLAIMED. It was written from this probe alone; swept across
+ * material the sign flips, and ordinary speech reads HIGH by up to 0.45 dB.
+ * The claim under test is that the spread is BOUNDED, not that it has a
+ * direction — the next test pins the other end.
+ */
+test('with the emphasis pair the closed form stays within a documented 1.2 dB', () => {
+  // Would fail loudly if the tracker-side de-emphasis were removed: -11.4 dB.
   const x = material()
   for (const peakReduction of [55, 70, 85]) {
     const p = { peakReduction }
     const offline = computeAutoMakeupDb([x], SR, p)
     const k = new LA2AKernel(SR); k.setParams(p)
     const { final } = runClosedLoop(k, x, 'gainDb')
-    assert.ok(
-      Math.abs(final - offline) < 0.6,
-      `PR ${peakReduction}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`,
-    )
+    const err = final - offline
+    assert.ok(err > -1.2 && err <= 0.5,
+      `PR ${peakReduction}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`)
+  }
+})
+
+test('on ordinary material the closed form is well inside half a dB', () => {
+  /**
+   * The counterweight to the test above, and the reason no correction gain is
+   * applied to the preview path: the error is a SPREAD around zero whose sign
+   * depends on the material, not an offset that could be trimmed out. A fixed
+   * correction sized to the worst case would push these — already reading
+   * slightly high — a further half dB the wrong way.
+   */
+  const tilted = (tilt, f0) => {
+    const n = Math.round(SR * 4)
+    const x = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      const t = i / SR
+      let s = 0
+      for (let k = 1; k <= 40; k++) {
+        const f = f0 * k
+        if (f > 16000) break
+        s += Math.pow(k, -tilt) * Math.sin(2 * Math.PI * f * t + k * 1.7)
+      }
+      x[i] = s * Math.pow(Math.max(0, Math.sin(2 * Math.PI * 4 * t)), 0.6)
+    }
+    let p = 0
+    for (const v of x) p = Math.max(p, Math.abs(v))
+    // -12 dBFS: a gain-staged source, not one slammed against full scale.
+    for (let i = 0; i < n; i++) x[i] = (x[i] / p) * Math.pow(10, -12 / 20)
+    return x
+  }
+  for (const [tilt, f0] of [[1.4, 110], [1.0, 118], [0.6, 125], [0.3, 130]]) {
+    const x = tilted(tilt, f0)
+    for (const peakReduction of [55, 85]) {
+      const p = { peakReduction }
+      const offline = computeAutoMakeupDb([x], SR, p)
+      const k = new LA2AKernel(SR); k.setParams(p)
+      const { final } = runClosedLoop(k, x, 'gainDb')
+      assert.ok(Math.abs(final - offline) < 0.5,
+        `tilt ${tilt} PR ${peakReduction}: live ${final.toFixed(2)} vs offline ${offline.toFixed(2)}`)
+    }
   }
 })
 

@@ -28,6 +28,8 @@
 
 import {
   TUBE_DRIVE_LIN, TUBE_BIAS, CELL_MOD_MAX, CELL_MOD_TAU_DB, CELL_MOD_SHAPE,
+  CELL_CURVE_DRIVE_MAX, VALVE_CURVE_DRIVE, EMPHASIS_DEFAULT,
+  LA2A_KERNEL_DEFAULTS,
 } from '../la2aProcessor.js'
 
 /**
@@ -60,7 +62,59 @@ export const LA2A_TUNING_DEFAULTS = Object.freeze({
   tubeDriveLin: TUBE_DRIVE_LIN,
   /** Valve operating-point offset, which is what makes the stage even. */
   tubeBias: TUBE_BIAS,
+  /**
+   * ── Tube Saturation's curve, imported ──────────────────────────────────
+   *
+   * Both selectors default to the shipping mechanism, so a panel nobody has
+   * touched emits no overrides and the kernel is the kernel it always was.
+   *
+   * ⚠ THESE REACH SCHEPS TOO, FOR FREE AND WITHOUT A LINE OF WIRING — it
+   * spreads `la2aTuningOverrides()` into the kernel params it builds. That is
+   * usually the hazard CLAUDE.md warns about (Scheps silently inheriting a
+   * re-tune); here it is the point, because the character is meant to reach
+   * both. It does mean an audition of one is an audition of the other.
+   */
+  /**
+   * ⚠ THESE TRACK THE KERNEL'S SHIPPING PATCH AND MUST KEEP DOING SO. The panel
+   * decides "MODIFIED" by comparing against this object; a default here that
+   * disagrees with `LA2A_KERNEL_DEFAULTS` makes an untouched panel report a
+   * modification and, worse, makes `la2aTuningOverrides()` emit a key on every
+   * render — which Scheps spreads straight into its kernel. Read from the
+   * kernel defaults rather than restated, so the two cannot drift.
+   */
+  tubeCurve: LA2A_KERNEL_DEFAULTS.tubeCurve,
+  cellCurve: LA2A_KERNEL_DEFAULTS.cellCurve,
+  /** Cell shaper drive at full compression. Not fitted — chosen by ear. */
+  cellCurveDriveMax: CELL_CURVE_DRIVE_MAX,
+  /** Where the imported curve sits on its transfer. See the module's note. */
+  vocalSatCurveDrive: VALVE_CURVE_DRIVE,
+  /**
+   * Which polarity gets the hard knee. Tube Saturation MEASURES this from the
+   * material and a memoryless stage cannot, so it is a switch here — the first
+   * thing to try if the imported character sounds inverted against the plugin.
+   */
+  vocalSatLeanPositive: LA2A_KERNEL_DEFAULTS.vocalSatLeanPositive,
+  /**
+   * Pre/de-emphasis depth around the nonlinear section, 0-100.
+   *
+   * ⚠ IT IS NOT TIED TO THE IMPORTED CURVE — it wraps the whole nonlinear
+   * section, so it is live whichever mechanisms are selected. Measured, it
+   * only does anything on the Tube Sat cell shaper; on tanh and on the gain
+   * modulation it is inert. See EMPHASIS_MAX_DB for the table.
+   */
+  emphasis: EMPHASIS_DEFAULT,
 })
+
+/**
+ * Keys that are not numbers.
+ *
+ * ⚠ THE COERCION USED TO BE `Number(v)` FOR EVERYTHING EXCEPT `tube`, which
+ * would have turned both curve names into NaN and dropped them silently — the
+ * store would have accepted the write, reported no change, and the panel would
+ * have looked broken with nothing to show for it.
+ */
+const STRING_KEYS = new Set(['tubeCurve', 'cellCurve'])
+const BOOL_KEYS = new Set(['tube', 'vocalSatLeanPositive'])
 
 const KEYS = Object.keys(LA2A_TUNING_DEFAULTS)
 
@@ -95,8 +149,13 @@ export function setLA2ATuning(patch) {
   for (const k of KEYS) {
     if (!(k in patch)) continue
     const v = patch[k]
-    const next = k === 'tube' ? v !== false : Number(v)
-    if (k !== 'tube' && !Number.isFinite(next)) continue
+    let next
+    if (BOOL_KEYS.has(k)) next = v !== false
+    else if (STRING_KEYS.has(k)) next = String(v)
+    else {
+      next = Number(v)
+      if (!Number.isFinite(next)) continue
+    }
     if (tuning[k] !== next) { tuning[k] = next; changed = true }
   }
   if (changed) for (const fn of listeners) fn()

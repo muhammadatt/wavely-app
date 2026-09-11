@@ -8,6 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { memoSignal } from '../helpers/memoSignal.js'
 import {
   SchepsKernel,
   processSchepsBuffer,
@@ -50,28 +51,30 @@ function db(x) {
  * broadband energy that the low shelves would then read as content.
  */
 function voiceLike(seconds, { f0 = 130, envRateHz = 3 } = {}) {
-  const n = Math.round(seconds * SR)
-  const out = new Float32Array(n)
-  let seed = 1
-  for (let i = 0; i < n; i++) {
-    const t = i / SR
-    let s = 0
-    for (let h = 1; h <= 40; h++) {
-      const f = f0 * h
-      if (f > SR / 2) break
-      let a = 1 / h
-      for (const F of [600, 1800, 2800]) {
-        a += 0.9 * Math.exp(-Math.pow((f - F) / 260, 2)) / Math.sqrt(h)
+  return memoSignal(`voiceLike|${seconds}|${f0}|${envRateHz}`, () => {
+    const n = Math.round(seconds * SR)
+    const out = new Float32Array(n)
+    let seed = 1
+    for (let i = 0; i < n; i++) {
+      const t = i / SR
+      let s = 0
+      for (let h = 1; h <= 40; h++) {
+        const f = f0 * h
+        if (f > SR / 2) break
+        let a = 1 / h
+        for (const F of [600, 1800, 2800]) {
+          a += 0.9 * Math.exp(-Math.pow((f - F) / 260, 2)) / Math.sqrt(h)
+        }
+        // Per-harmonic phase offset: summing them all in phase builds an
+        // impulse train with a crest factor no voice has.
+        s += a * Math.sin(2 * Math.PI * f * t + h)
       }
-      // Per-harmonic phase offset: summing them all in phase builds an
-      // impulse train with a crest factor no voice has.
-      s += a * Math.sin(2 * Math.PI * f * t + h)
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      const env = 0.25 + 0.75 * (0.5 - 0.5 * Math.cos(2 * Math.PI * envRateHz * t))
+      out[i] = 0.06 * (s + ((seed / 0x7fffffff) - 0.5) * 0.35) * env
     }
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff
-    const env = 0.25 + 0.75 * (0.5 - 0.5 * Math.cos(2 * Math.PI * envRateHz * t))
-    out[i] = 0.06 * (s + ((seed / 0x7fffffff) - 0.5) * 0.35) * env
-  }
-  return out
+    return out
+  })
 }
 
 /**
@@ -707,6 +710,14 @@ test('a moved bench reaches the kernel params', () => {
  * the LA-2A's dominant distortion term — if the bench reaches the embedded
  * kernel at all, this is audible in the samples.
  */
+/**
+ * ⚠ MOVES `cellCurveDriveMax`, NOT `cellMod`, AND THE SWAP IS THE POINT. The
+ * claim is that a moved bench reaches Scheps' EMBEDDED kernel — it needs a knob
+ * that is live on the shipping patch to demonstrate that. Since Tube
+ * Saturation's curve became the default cell mechanism, `cellMod` scales a
+ * modulation that is not running, so moving it correctly changes nothing and
+ * the test would be asserting the bench is broken when it is not.
+ */
 test('a moved bench actually reaches the embedded cell', () => {
   const input = voiceLike(2, { envRateHz: 0.5 })
   const patch = { ...SCHEPS_DEFAULTS, squash: 80, mix: 100 }
@@ -714,7 +725,7 @@ test('a moved bench actually reaches the embedded cell', () => {
 
   let benched
   try {
-    setLA2ATuning({ cellMod: 0 })
+    setLA2ATuning({ cellCurveDriveMax: 0 })
     benched = processSchepsBuffer([input], SR, toKernelParams(patch)).channelData[0]
   } finally {
     resetLA2ATuning()
@@ -760,7 +771,8 @@ test('the trim measurement honours the nested bench tuning', () => {
 
   const plain = computeSchepsAutoTrim([input], SR, patch)
   const benched = computeSchepsAutoTrim([input], SR, {
-    ...patch, la2aTuning: { cellMod: 0, cellModMax: 0.5 },
+    // Live on the shipping patch — see the note above.
+    ...patch, la2aTuning: { cellCurveDriveMax: 0, vocalSatCurveDrive: 4 },
   })
 
   assert.notEqual(plain.trimDb, benched.trimDb,
