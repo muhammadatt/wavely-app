@@ -1,5 +1,5 @@
 import { getSegmentDuration } from './operations.js'
-import { analysisWindow, regionPeakDb } from './analysisWindow.js'
+import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
 import {
@@ -330,7 +330,11 @@ function measureInWorker(workerType, segments, start, end, kernelParams, sampleR
 
 /**
  * Measure OptoSmooth's auto-makeup for a region. Resolves
- * `{ makeupDb, ceilingDb }`.
+ * `{ makeupDb, ceilingDb, ceilingKneeDb }`.
+ *
+ * The knee travels with the ceiling and must not be dropped: without it the
+ * kernel falls back to the widest fixed width, which costs peak headroom
+ * silently. See `ceilingKneeDbFor`.
  *
  * ⚠ THE TWO HALVES ARE MEASURED OVER DIFFERENT SPANS, DELIBERATELY. The makeup
  * comes from the worker's capped, start-anchored window, because solving it
@@ -357,14 +361,13 @@ export function computeLA2AAutoMakeup(
       makeupDb: d.makeupDb,
       ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
       /**
-       * ⚠ THE KNEE COMES FROM THE WORKER'S WINDOW WHILE THE CEILING COMES FROM
-       * THE WHOLE REGION, and that mismatch is deliberate and safe in this
-       * direction only. It is a WIDTH, not a level, so it survives the span
-       * difference; and a whole-region peak can only be higher than the
-       * window's, which can only make the true overshoot smaller than the one
-       * the knee was sized for. Too wide is soft; too narrow would be a corner.
+       * The measured width only when the solve saw everything the ceiling was
+       * measured over — see `analysedWholeRegion`. Null is the conservative
+       * fixed knee, which is what this did before the width was measured at all.
        */
-      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) ? d.ceilingKneeDb : null,
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
     }
   })
 }
@@ -391,7 +394,9 @@ export function computeSoftClipperAutoMakeup(segments, start, end, kernelParams,
 /**
  * Measure the Scheps wet-path makeup, the dry/wet correlation and the density
  * the compression yields, for a region. Resolves
- * `{ trimDb, correlation, densityDb }` — see computeSchepsAutoTrim.
+ * `{ trimDb, correlation, densityDb, ceilingDb, ceilingKneeDb }` — see
+ * computeSchepsAutoTrim. The last two travel together: the ceiling is the
+ * guarantee and the knee is how softly it is enforced.
  */
 export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker('schepsAutoTrim', segments, start, end, kernelParams, sampleRate, channels)
@@ -409,8 +414,10 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
         correlation: d.correlation,
         densityDb: d.densityDb,
         ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
-        // A width, so the same span mismatch is safe here — see above.
-        ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) ? d.ceilingKneeDb : null,
+        // Same span guard as the OptoSmooth solve, for the same reason.
+        ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+          ? d.ceilingKneeDb
+          : null,
       }
     })
 }

@@ -26,6 +26,9 @@ import {
   CEILING_KNEE_DB, CEILING_KNEE_MARGIN_DB, ceilingKneeDbFor,
 } from '../../src/audio/dsp/makeupReference.js'
 import { LA2A_DEFAULTS, toKernelParams } from '../../src/audio/effects/la2aParams.js'
+import {
+  withMeasuredClears, MEASURED_KEYS,
+} from '../../src/audio/effects/measuredKeys.js'
 
 const SR = 44100
 const db = x => 20 * Math.log10(Math.max(x, 1e-12))
@@ -457,4 +460,67 @@ test('the peak reference returns no knee, having no ceiling to soften', () => {
   const plan = computeAutoMakeupPlan([stimulus()], SR, { peakReduction: 60 })
   assert.equal(plan.ceilingDb, null)
   assert.equal(plan.ceilingKneeDb, null)
+})
+
+// ── Turning AUTO off must actually turn the ceiling off ──────────────────────
+
+test('a null pushed at the live node CLEARS the ceiling and its knee', () => {
+  /**
+   * ⚠ THIS SHIPPED BROKEN AND WAS PREVIEW-ONLY, WHICH IS WHAT MADE IT SILENT.
+   * `toKernelParams` omits a measured key when it is null, the kernel MERGES a
+   * partial, so an omission read as "unchanged" rather than "cleared" — and
+   * `disableAutoMakeup`'s `pushParam('ceilingDb', null)` left the previous
+   * ceiling armed against a manual gain the user now owned. The apply path
+   * always built a fresh kernel and was right, so the two disagreed.
+   *
+   * Modelled exactly as the effect wrapper does it: mutate the panel object,
+   * map it, hand the kernel the partial.
+   */
+  const panel = { ...LA2A_DEFAULTS, ceilingDb: null, ceilingKneeDb: null, inputAlignDb: null }
+  const kernel = new LA2AKernel(SR)
+
+  panel.ceilingDb = -6
+  panel.ceilingKneeDb = 1.2
+  kernel.setParams(withMeasuredClears(toKernelParams(panel)))
+  assert.ok(kernel.ceilingLin > 0, 'the solve must arm the ceiling')
+  assert.ok(kernel.ceilingKneeLin > 0)
+
+  panel.ceilingDb = null
+  panel.ceilingKneeDb = null
+  kernel.setParams(withMeasuredClears(toKernelParams(panel)))
+  assert.equal(kernel.ceilingLin, 0, 'AUTO off must leave no ceiling behind')
+  assert.equal(kernel.ceilingKneeLin, 0)
+})
+
+test('the clear is on the runtime path only — the mapping still omits', () => {
+  // Presets, patches and the apply path keep the shape a test already pins.
+  const mapped = toKernelParams({ ...LA2A_DEFAULTS, ceilingDb: null, ceilingKneeDb: null })
+  assert.equal('ceilingDb' in mapped, false)
+  assert.equal('ceilingKneeDb' in mapped, false)
+  // Only the live-node wrapper adds the explicit nulls a merge needs.
+  const runtime = withMeasuredClears(mapped)
+  assert.equal(runtime.ceilingDb, null)
+  assert.equal(runtime.ceilingKneeDb, null)
+  assert.equal(runtime.inputAlignDb, null)
+  // And it must not disturb anything that IS set.
+  const set = withMeasuredClears(toKernelParams({
+    ...LA2A_DEFAULTS, ceilingDb: -3, ceilingKneeDb: 0, inputAlignDb: 4,
+  }))
+  assert.equal(set.ceilingDb, -3)
+  assert.equal(set.ceilingKneeDb, 0)
+  assert.equal(set.inputAlignDb, 4)
+})
+
+test('every conditionally-spread measured key is covered by the clear list', () => {
+  /**
+   * The conditional spread is the half that hides a clear and MEASURED_KEYS is
+   * the half that delivers it; a key added to one and not the other reopens the
+   * bug above. Derived from the mapping rather than restated, so adding a key
+   * to `toKernelParams` fails here until it is listed.
+   */
+  const all = { ...LA2A_DEFAULTS, ceilingDb: -3, ceilingKneeDb: 1, inputAlignDb: 2 }
+  const none = { ...LA2A_DEFAULTS, ceilingDb: null, ceilingKneeDb: null, inputAlignDb: null }
+  const conditional = Object.keys(toKernelParams(all))
+    .filter(k => !(k in toKernelParams(none)))
+  assert.deepEqual(conditional.sort(), [...MEASURED_KEYS].sort())
 })

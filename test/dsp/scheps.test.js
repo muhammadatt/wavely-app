@@ -21,6 +21,7 @@ import {
   percentileOfChannels, MAKEUP_PERCENTILE, CEILING_KNEE_DB,
 } from '../../src/audio/dsp/makeupReference.js'
 import { SCHEPS_DEFAULTS, toKernelParams } from '../../src/audio/effects/schepsParams.js'
+import { withMeasuredClears } from '../../src/audio/effects/measuredKeys.js'
 import {
   setLA2ATuning, resetLA2ATuning, la2aTuningOverrides,
 } from '../../src/audio/effects/la2aTuning.js'
@@ -904,4 +905,58 @@ test('kernel params carry the knee only when it is real', () => {
   const mapped = toKernelParams({ ...SCHEPS_DEFAULTS, ceilingDb: -3, ceilingKneeDb: 0 })
   // Zero is a real width — a hard ceiling — not a missing one.
   assert.equal(mapped.ceilingKneeDb, 0)
+})
+
+test('a null pushed at the live node clears Scheps’ ceiling and knee too', () => {
+  // Same bug, same shape, same fix — see `measuredKeys.js`.
+  const panel = { ...SCHEPS_DEFAULTS }
+  const kernel = new SchepsKernel(SR)
+
+  panel.ceilingDb = -6
+  panel.ceilingKneeDb = 1.2
+  kernel.setParams(withMeasuredClears(toKernelParams(panel)))
+  assert.ok(kernel.ceilingLin > 0)
+  assert.ok(kernel.ceilingKneeLin > 0)
+
+  panel.ceilingDb = null
+  panel.ceilingKneeDb = null
+  kernel.setParams(withMeasuredClears(toKernelParams(panel)))
+  assert.equal(kernel.ceilingLin, 0, 'AUTO off must leave no ceiling behind')
+  assert.equal(kernel.ceilingKneeLin, 0)
+})
+
+test('the Output trim widens the knee, because it is applied before the ceiling', () => {
+  const input = voiceLike(3)
+  const t = computeSchepsAutoTrim([input], SR, SCHEPS_KERNEL_DEFAULTS)
+  const common = {
+    mix: 1,
+    wetTrimDb: t.trimDb,
+    correlation: t.correlation,
+    densityDb: t.densityDb,
+    ceilingDb: t.ceilingDb,
+    ceilingKneeDb: Math.min(t.ceilingKneeDb, 1),
+  }
+  /**
+   * Output is a manual knob AUTO does not own, and `outputLin` multiplies the
+   * summed blend BEFORE the ceiling — so a trim added after the solve pushes a
+   * peak the knee was never sized for. Without the widening that turns a soft
+   * knee into a hard clamp.
+   */
+  const kneeLinFor = (outputDb) => {
+    const k = new SchepsKernel(SR)
+    k.setParams({ ...common, outputDb })
+    return k.ceilingKneeLin
+  }
+  const base = kneeLinFor(0)
+  // A positive trim widens (knee START moves DOWN, so the linear value falls).
+  assert.ok(kneeLinFor(1) < base, 'a +1 dB trim must widen the knee')
+  assert.ok(kneeLinFor(6) < kneeLinFor(1), 'and more trim must widen it further')
+  // A negative trim does not: it only moves the signal further under the
+  // ceiling, where the narrow knee is already right and free.
+  assert.equal(kneeLinFor(-6), base)
+  // The guarantee holds at every trim regardless.
+  for (const outputDb of [-6, 0, 3, 6, 12]) {
+    const { channelData } = processSchepsBuffer([input], SR, { ...common, outputDb })
+    assert.ok(peakDb(channelData[0]) <= t.ceilingDb + 1e-9, `outputDb ${outputDb}: ceiling broken`)
+  }
 })

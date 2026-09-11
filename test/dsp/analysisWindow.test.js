@@ -19,7 +19,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { analysisWindow, AUTO_MAKEUP_MAX_ANALYSIS_S } from '../../src/audio/analysisWindow.js'
+import {
+  analysisWindow, analysedWholeRegion, AUTO_MAKEUP_MAX_ANALYSIS_S,
+} from '../../src/audio/analysisWindow.js'
 import {
   processFET1176Buffer, computeFET1176AutoMakeupDb,
 } from '../../src/audio/fet1176Processor.js'
@@ -129,4 +131,30 @@ test('the under-read is a cold-start transient at the head of the excerpt', () =
     20 * Math.log10(cold / warm) > 1,
     `the first 50 ms should carry an uncompressed overshoot, got ${(20 * Math.log10(cold / warm)).toFixed(2)} dB`,
   )
+})
+
+// ── The ceiling knee's span guard ────────────────────────────────────────────
+
+test('analysedWholeRegion is true only when the window covers the whole region', () => {
+  assert.equal(analysedWholeRegion(0, 1), true)
+  assert.equal(analysedWholeRegion(0, AUTO_MAKEUP_MAX_ANALYSIS_S), true)
+  assert.equal(analysedWholeRegion(0, AUTO_MAKEUP_MAX_ANALYSIS_S + 0.001), false)
+  assert.equal(analysedWholeRegion(0, AUTO_MAKEUP_MAX_ANALYSIS_S * 10), false)
+  // Offsets must not fool it: what matters is the span, not where it sits.
+  assert.equal(analysedWholeRegion(600, 600 + AUTO_MAKEUP_MAX_ANALYSIS_S), true)
+  assert.equal(analysedWholeRegion(600, 600 + AUTO_MAKEUP_MAX_ANALYSIS_S + 1), false)
+})
+
+test('it agrees with the window analysisWindow actually returns', () => {
+  /**
+   * The point of the guard is that a knee sized inside the window cannot be
+   * trusted outside it, so it must track the real window rather than restate
+   * the cap. Checked against the window itself at every span.
+   */
+  for (const [start, end] of [[0, 5], [0, 30], [0, 30.5], [0, 120], [7.5, 40], [100, 130]]) {
+    const w = analysisWindow(start, end)
+    const covers = w.start <= start && w.end >= end
+    assert.equal(analysedWholeRegion(start, end), covers,
+      `region ${start}..${end} window ${w.start}..${w.end}`)
+  }
 })

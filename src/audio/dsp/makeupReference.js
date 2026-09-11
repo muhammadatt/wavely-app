@@ -124,14 +124,25 @@ export const CEILING_KNEE_MARGIN_DB = 0.5
  * guarantee is unchanged either way, and it is the ARMING that matters, not the
  * shape of a curve nothing touches.
  *
- * ⚠ IT IS A WIDTH, SO IT TRAVELS WITH THE SOLVE AND NOT WITH THE CEILING.
- * `processing.js` deliberately re-measures `ceilingDb` over the WHOLE region
- * while the solve only ever sees a capped window, so the two spans disagree.
- * That disagreement is safe in one direction only, and this is the safe one: a
- * whole-region peak can only be HIGHER than the window's, which makes the true
- * overshoot SMALLER than the one measured here, which makes this knee wider
- * than it needs to be. Wider is soft and slightly quiet; narrower would be a
- * corner on material nobody measured.
+ * ⚠ IT IS A WIDTH, SO IT TRAVELS WITH THE SOLVE AND NOT WITH THE CEILING — BUT
+ * IT IS ONLY VALID OVER THE SPAN THE SOLVE SAW. `processing.js` deliberately
+ * re-measures `ceilingDb` over the WHOLE region while the solve only ever sees
+ * a capped window, and the first version of this claimed that mismatch was safe
+ * because a whole-region peak can only be HIGHER than the window's, making the
+ * true overshoot smaller and this knee merely too wide.
+ *
+ * ⚠ THAT ARGUMENT WAS WRONG AND A REVIEWER CAUGHT IT. It is an argument about
+ * the CEILING and the knee is sized from TWO measurements, not one: the
+ * window's output peak is windowed too, the compressor is stateful, and a
+ * transient outside the window can overshoot by more than anything inside it.
+ * The subtraction can then return a near-zero width and hard-clamp material
+ * nobody measured. It never breaks the guarantee — `softCeiling` still bounds
+ * the output — so the cost is a hard corner where a soft one was intended,
+ * which is the exact thing this knee exists to avoid.
+ *
+ * `analysedWholeRegion` is the guard: the measured width is used only when the
+ * window covered the whole region, and a long selection falls back to the
+ * conservative fixed knee it has always had.
  */
 export function ceilingKneeDbFor(overshootDb) {
   /**

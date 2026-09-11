@@ -21,6 +21,7 @@ import {
   LA2A_DEFAULTS, LA2A_LATENCY_SAMPLES, LOOKAHEAD_MAX_MS,
   toKernelParams, la2aPatchLatencySamples,
 } from './la2aParams.js'
+import { withMeasuredClears } from './measuredKeys.js'
 
 // Re-exported so callers that already reach for these through the effect keep
 // working; the definitions live in la2aParams.js, which Node can import.
@@ -99,7 +100,9 @@ export function createLA2ACompressor(audioContext) {
     setParam(name, value) {
       if (name in params) {
         params[name] = value
-        worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+        worklet?.port.postMessage({
+        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+      })
       }
     },
 
@@ -114,7 +117,9 @@ export function createLA2ACompressor(audioContext) {
      * asks the live node to pick it up.
      */
     refreshKernelParams() {
-      worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+      worklet?.port.postMessage({
+        type: 'params', params: withMeasuredClears(toKernelParams(params)),
+      })
     },
 
     // Negative dB, matching DynamicsCompressorNode.reduction conventions.

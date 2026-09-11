@@ -247,3 +247,29 @@ export function regionAlignDb(segments, start, end, sampleRate, channels) {
   for (let b = 0; b < nBlocks; b++) sum += blockRms[b] * blockRms[b]
   return alignDbForRms(Math.sqrt(sum / nBlocks))
 }
+
+/**
+ * Was the whole region analysed, or only the worker's capped window?
+ *
+ * ⚠ THE CEILING'S KNEE IS ONLY TRUSTWORTHY WHEN THE ANSWER IS YES, and the
+ * first version of this shipped without the check on a reasoning that was
+ * wrong. The argument was that the span mismatch is safe because a whole-region
+ * ceiling can only be HIGHER than the window's, making the true overshoot
+ * smaller and the knee merely too wide. That is true of the CEILING and says
+ * nothing about the other half: the knee is sized from the window's OUTPUT peak
+ * as well, the compressor is stateful, and a transient outside the window can
+ * overshoot by more than anything inside it. The subtraction can then return a
+ * zero or near-zero width and hard-clamp material nobody measured.
+ *
+ * It never breaks the guarantee — `softCeiling` still bounds the output — so
+ * the cost is a hard corner where a soft one was intended, which is precisely
+ * what the knee exists to avoid.
+ *
+ * So: full region measured, use the measured width; capped window, fall back to
+ * the conservative fixed one. Long selections keep exactly the behaviour they
+ * have always had, and the recovery applies where it can be justified.
+ */
+export function analysedWholeRegion(start, end) {
+  const { start: aStart, end: aEnd } = analysisWindow(start, end)
+  return aStart <= start && aEnd >= end
+}

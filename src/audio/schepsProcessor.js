@@ -361,8 +361,23 @@ export class SchepsKernel {
      * `CEILING_KNEE_DB` remains the cap and the fallback, so a ceiling handed
      * over without a width behaves exactly as it used to.
      */
-    const ceilingKneeDb = Number.isFinite(p.ceilingKneeDb)
+    /**
+     * ⚠ THE OUTPUT TRIM WIDENS IT, BECAUSE THE TRIM IS APPLIED BEFORE THE
+     * CEILING AND CAN MOVE AFTER THE SOLVE. `outputLin` multiplies the summed
+     * blend on the line above the ceiling, and Output is a manual knob that AUTO
+     * does not own — so a user can add up to 12 dB to a peak the knee was sized
+     * for at 0 dB and turn a soft knee into a hard clamp. The solve renders at
+     * `outputDb: 0` (see `renderWetPath`), so the trim above zero is exactly the
+     * unmeasured extra and adding it back is exactly the right widening. A
+     * NEGATIVE trim is ignored: it only moves the signal further under the
+     * ceiling, where a narrower knee is already correct and free.
+     */
+    const solvedKneeDb = Number.isFinite(p.ceilingKneeDb)
       ? clamp(p.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
+    const trimHeadroomDb = Math.max(0, finite(p.outputDb, 0, -24, 24))
+    const ceilingKneeDb = Number.isFinite(p.ceilingKneeDb)
+      ? clamp(solvedKneeDb + trimHeadroomDb, 0, CEILING_KNEE_DB)
+      : CEILING_KNEE_DB
     this.ceilingKneeLin = this.ceilingLin > 0
       ? this.ceilingLin * Math.exp(-ceilingKneeDb * LN10_OVER_20) : 0
     this._updateMix()
