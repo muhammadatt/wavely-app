@@ -141,8 +141,11 @@ export function markerSpans(markers, totalDuration) {
 
 // ── Edit-following ───────────────────────────────────────────────────────────
 // One transform per length-changing mutation in operations.js. The mutations
-// that preserve length — silenceRegion, and every split — need nothing, which
-// is why there is no transform for them.
+// that preserve length need nothing, and there are more of them than you would
+// guess: silenceRegion swaps in a SilenceSegment of exactly equal duration,
+// every split only inserts a boundary, and replaceRegionWithBuffer pins the new
+// segment to `sourceEnd = end - start` regardless of how long the buffer handed
+// to it actually is. So there is no transform for an effect render.
 
 /**
  * `deleteRegion(segments, start, end)`.
@@ -186,20 +189,6 @@ export function markersAfterInsert(markers, position, duration) {
   if (!(duration > 0)) return markers
   return normalizeMarkers(
     markers.map(m => (m.time >= position ? { ...m, time: m.time + duration } : m))
-  )
-}
-
-/**
- * A region swapped for a buffer of a different length.
- *
- * Effects render same-length, so `delta` is almost always 0 and this is a
- * no-op — but "almost always" is not a thing to build on, and the caller
- * measures the delta rather than assuming it.
- */
-export function markersAfterLengthChange(markers, at, delta) {
-  if (!delta) return markers
-  return normalizeMarkers(
-    markers.map(m => (m.time > at ? { ...m, time: Math.max(at, m.time + delta) } : m))
   )
 }
 

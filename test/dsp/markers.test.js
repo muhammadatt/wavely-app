@@ -19,7 +19,6 @@ import {
   markersAfterDelete,
   markersAfterTrimTo,
   markersAfterInsert,
-  markersAfterLengthChange,
   clampMarkers,
 } from '../../src/audio/markers.js'
 
@@ -186,16 +185,6 @@ test('an insert pushes everything at or after it later', () => {
 
 test('an insert of nothing changes nothing', () => {
   assert.deepEqual(times(markersAfterInsert([at(4)], 2, 0)), [4])
-})
-
-test('a region that renders longer or shorter moves what follows it', () => {
-  assert.deepEqual(times(markersAfterLengthChange([at(2), at(8)], 5, 1.5)), [2, 9.5])
-  assert.deepEqual(times(markersAfterLengthChange([at(2), at(8)], 5, -1.5)), [2, 6.5])
-  assert.deepEqual(times(markersAfterLengthChange([at(2), at(8)], 5, 0)), [2, 8])
-})
-
-test('a shrinking region cannot drag a later marker in front of it', () => {
-  assert.deepEqual(times(markersAfterLengthChange([at(6)], 5, -10)), [5])
 })
 
 test('clampMarkers drops what has fallen off the end', () => {
