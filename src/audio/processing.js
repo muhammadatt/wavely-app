@@ -349,11 +349,22 @@ export function computeLA2AAutoMakeup(
   return measureInWorker(
     'la2aAutoMakeup', segments, start, end, { ...kernelParams, reference }, sampleRate, channels,
   ).then((d) => {
-    if (reference !== 'percentile') return { makeupDb: d.makeupDb, ceilingDb: null }
+    if (reference !== 'percentile') {
+      return { makeupDb: d.makeupDb, ceilingDb: null, ceilingKneeDb: null }
+    }
     const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
     return {
       makeupDb: d.makeupDb,
       ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      /**
+       * ⚠ THE KNEE COMES FROM THE WORKER'S WINDOW WHILE THE CEILING COMES FROM
+       * THE WHOLE REGION, and that mismatch is deliberate and safe in this
+       * direction only. It is a WIDTH, not a level, so it survives the span
+       * difference; and a whole-region peak can only be higher than the
+       * window's, which can only make the true overshoot smaller than the one
+       * the knee was sized for. Too wide is soft; too narrow would be a corner.
+       */
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) ? d.ceilingKneeDb : null,
     }
   })
 }
@@ -398,6 +409,8 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
         correlation: d.correlation,
         densityDb: d.densityDb,
         ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+        // A width, so the same span mismatch is safe here — see above.
+        ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) ? d.ceilingKneeDb : null,
       }
     })
 }

@@ -52,7 +52,7 @@ export function createLA2ACompressor(audioContext) {
    * push of it would be dropped by the same gate — leaving preview running the
    * raw hardware behaviour while apply ran the aligned one.
    */
-  let params = { ...LA2A_DEFAULTS, ceilingDb: null, inputAlignDb: null }
+  let params = { ...LA2A_DEFAULTS, ceilingDb: null, ceilingKneeDb: null, inputAlignDb: null }
   let worklet = null
   let destroyed = false
   let grDb = 0

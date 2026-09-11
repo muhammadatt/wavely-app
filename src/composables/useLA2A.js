@@ -44,6 +44,8 @@ const MAKEUP_REFERENCE = 'percentile'
  * and the preset normaliser's key whitelist keeps it out of stored presets.
  */
 const la2aCeilingDb = ref(null)
+/** The ceiling's knee width, dB, measured with it. See `ceilingKneeDbFor`. */
+const la2aCeilingKneeDb = ref(null)
 
 /**
  * INPUT TRIM — the side-chain drive offset, measured by default and overridable.
@@ -157,6 +159,8 @@ function currentParams() {
      * complete escape from the pairing rather than half of one.
      */
     ceilingDb: la2aAutoMakeup.value ? la2aCeilingDb.value : null,
+    // Leaves with the ceiling it belongs to, for the same reason.
+    ceilingKneeDb: la2aAutoMakeup.value ? la2aCeilingKneeDb.value : null,
     /**
      * ⚠ INDEPENDENT OF AUTO MAKEUP, unlike the ceiling above. The ceiling is
      * half of the makeup solve and leaves with it; alignment is upstream of
@@ -432,7 +436,7 @@ export function useLA2A() {
     const seq = ++makeupSeq
     la2aAutoMakeupBusy.value = true
     try {
-      const { makeupDb, ceilingDb } = await computeLA2AAutoMakeup(
+      const { makeupDb, ceilingDb, ceilingKneeDb } = await computeLA2AAutoMakeup(
         state.segments, start, end,
         measurementParams(),
         state.currentFile.sampleRate, state.currentFile.channels,
@@ -449,6 +453,10 @@ export function useLA2A() {
        */
       la2aCeilingDb.value = ceilingDb
       pushParam('ceilingDb', ceilingDb)
+      // With the ceiling, ahead of the gain, and for the same reason: the knee
+      // is how hard that ceiling holds, so it must not lag the makeup either.
+      la2aCeilingKneeDb.value = ceilingKneeDb
+      pushParam('ceilingKneeDb', ceilingKneeDb)
       la2aGain.value = Math.max(GAIN_MIN_DB, Math.min(GAIN_MAX_DB, makeupDb))
       pushGain()
     } catch (err) {
@@ -546,6 +554,8 @@ export function useLA2A() {
      */
     la2aCeilingDb.value = null
     pushParam('ceilingDb', null)
+    la2aCeilingKneeDb.value = null
+    pushParam('ceilingKneeDb', null)
   }
 
   function toggleAutoMakeup() {

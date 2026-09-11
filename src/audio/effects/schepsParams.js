@@ -74,6 +74,8 @@ export const SCHEPS_DEFAULTS = {
    * values above here for the reason this needs to be here too.
    */
   ceilingDb: null,
+  /** The ceiling's knee width, dB, measured alongside it. See `ceilingKneeDbFor`. */
+  ceilingKneeDb: null,
   /**
    * Side-chain drive offset for the embedded compressor, dB — the file's own
    * level relative to nominal. Measured from the whole file, like the ceiling
@@ -102,6 +104,7 @@ export function toKernelParams(params) {
     // everywhere the ceiling is not in play — same reason as `toKernelParams`
     // in la2aParams.js.
     ...(Number.isFinite(params.ceilingDb) ? { ceilingDb: params.ceilingDb } : {}),
+    ...(Number.isFinite(params.ceilingKneeDb) ? { ceilingKneeDb: params.ceilingKneeDb } : {}),
     ...(Number.isFinite(params.inputAlignDb) ? { inputAlignDb: params.inputAlignDb } : {}),
     ...la2aTuningFor(),
   }

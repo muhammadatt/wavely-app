@@ -22,6 +22,9 @@ import {
   processLA2ABuffer, computeAutoMakeupDb, computeAutoMakeupPlan,
   MAKEUP_PERCENTILE, LA2AKernel,
 } from '../../src/audio/la2aProcessor.js'
+import {
+  CEILING_KNEE_DB, CEILING_KNEE_MARGIN_DB, ceilingKneeDbFor,
+} from '../../src/audio/dsp/makeupReference.js'
 import { LA2A_DEFAULTS, toKernelParams } from '../../src/audio/effects/la2aParams.js'
 
 const SR = 44100
@@ -309,4 +312,149 @@ test('and is therefore well below the percentile solve, which is why it is gated
   assert.ok(percentile - live > 1,
     'if these have converged the composable\'s live-tracker gate is no longer needed: '
     + `live ${live.toFixed(2)}, percentile ${percentile.toFixed(2)}`)
+})
+
+// ── The ceiling's knee is sized by the solve ─────────────────────────────────
+//
+// The knee used to be a fixed 3 dB, which costs peak headroom on any render
+// that had nothing for the ceiling to catch — see `ceilingKneeDbFor` for the
+// measurements. These pin the two halves that matter: it must cost nothing when
+// there is no overshoot, and it must not have moved where there is one.
+
+test('ceilingKneeDbFor is zero below the margin, and capped at CEILING_KNEE_DB', () => {
+  assert.equal(ceilingKneeDbFor(-3), 0)
+  assert.equal(ceilingKneeDbFor(-CEILING_KNEE_MARGIN_DB), 0)
+  assert.equal(ceilingKneeDbFor(0), CEILING_KNEE_MARGIN_DB)
+  assert.equal(ceilingKneeDbFor(0.5), 1)
+  assert.equal(ceilingKneeDbFor(CEILING_KNEE_DB), CEILING_KNEE_DB)
+  assert.equal(ceilingKneeDbFor(50), CEILING_KNEE_DB)
+  // A missing measurement falls back to the widest knee, never to a corner.
+  // A MISSING measurement falls back to the widest knee, never to a corner.
+  assert.equal(ceilingKneeDbFor(undefined), CEILING_KNEE_DB)
+  assert.equal(ceilingKneeDbFor(NaN), CEILING_KNEE_DB)
+  // -Infinity is an ANSWER, not a missing one: a silent render catches nothing.
+  assert.equal(ceilingKneeDbFor(-Infinity), 0)
+})
+
+test('a knee sized to the overshoot costs NOTHING while the ceiling is inert', () => {
+  const x = stimulus()
+  const bare = render(x, { peakReduction: 55, gainDb: 3, ceilingDb: null })
+  const barePeakDb = db(peak(bare))
+  /**
+   * The regime the fixed 3 dB knee broke: a render sitting just under its
+   * ceiling. At 0.5-2.9 dB of headroom the old knee reached down past the peak
+   * and attenuated material that was never going to exceed anything.
+   */
+  for (const headroomDb of [0.6, 1, 2, 2.9]) {
+    const ceilingDb = barePeakDb + headroomDb
+    const knee = ceilingKneeDbFor(barePeakDb - ceilingDb)
+    assert.ok(knee < headroomDb, `headroom ${headroomDb}: knee must stay clear of the peak`)
+    const armed = render(x, { peakReduction: 55, gainDb: 3, ceilingDb, ceilingKneeDb: knee })
+    assert.deepEqual(Array.from(armed), Array.from(bare),
+      `headroom ${headroomDb}: an inert ceiling must cost nothing`)
+    /**
+     * And the old fixed width DID cost peak here, so this is a real recovery
+     * rather than a no-op. Only asserted below 2 dB of headroom: the knee is C1
+     * at its start, so at 2.9 dB the peak sits 0.1 dB inside a 3 dB knee where
+     * the curve has barely left the unity line and the loss is under a
+     * hundredth of a dB. That is the knee behaving correctly, not a miss.
+     */
+    if (headroomDb <= 2) {
+      const legacy = render(x, { peakReduction: 55, gainDb: 3, ceilingDb })
+      assert.ok(db(peak(legacy)) < barePeakDb - 0.02,
+        `headroom ${headroomDb}: the fixed knee is meant to have cost peak here`)
+    }
+  }
+})
+
+test('the solved knee is consistent with the overshoot the solve measured', () => {
+  const x = stimulus()
+  for (const pr of [0, 10, 30, 55, 70, 100]) {
+    const params = { peakReduction: pr }
+    const plan = computeAutoMakeupPlan([x], SR, params, { reference: 'percentile' })
+    const common = { ...params, gainDb: plan.makeupDb }
+    const bareDb = db(peak(render(x, { ...common, ceilingDb: null })))
+    // The solve renders at base rate and one correction step behind, so this is
+    // close rather than exact; the margin exists to absorb precisely that.
+    assert.ok(Math.abs(plan.ceilingKneeDb - ceilingKneeDbFor(bareDb - plan.ceilingDb)) < 0.1,
+      `PR ${pr}: knee ${plan.ceilingKneeDb} disagrees with a ${(bareDb - plan.ceilingDb).toFixed(2)} dB overshoot`)
+    const armed = render(x, {
+      ...common, ceilingDb: plan.ceilingDb, ceilingKneeDb: plan.ceilingKneeDb,
+    })
+    assert.ok(db(peak(armed)) <= plan.ceilingDb + 1e-9, `PR ${pr}: ceiling broken`)
+  }
+})
+
+test('and it is unchanged wherever the solve asks for the old fixed width', () => {
+  const x = stimulus()
+  const ceilingDb = db(peak(x))
+  /**
+   * Driven past the cap with a manual gain on purpose. The solve only asks for
+   * the full 3 dB once the overshoot reaches CEILING_KNEE_DB minus the margin,
+   * and on THIS stimulus the percentile makeup never gets there — it overshoots
+   * by 0.04-0.24 dB across the whole knob, where the real narration it was
+   * measured on undershoots by 0.3-0.7 at low drive. Synthetic material does
+   * not reproduce either end of this, which is why the ledger's numbers are
+   * from a recording and these assertions are about invariants.
+   */
+  for (const gainDb of [18, 24]) {
+    const overshootDb = db(peak(render(x, {
+      peakReduction: 70, gainDb, ceilingDb: null,
+    }))) - ceilingDb
+    assert.ok(overshootDb > CEILING_KNEE_DB, `gain ${gainDb}: meant to saturate the cap`)
+    assert.equal(ceilingKneeDbFor(overshootDb), CEILING_KNEE_DB)
+    const base = { peakReduction: 70, gainDb, ceilingDb }
+    assert.deepEqual(
+      Array.from(render(x, { ...base, ceilingKneeDb: CEILING_KNEE_DB })),
+      Array.from(render(x, base)),
+      `gain ${gainDb}: a capped knee must be the render it always was`,
+    )
+  }
+})
+
+test('the guarantee survives every knee width, including zero', () => {
+  const x = stimulus()
+  const ceilingDb = db(peak(x))
+  for (const ceilingKneeDb of [0, 0.5, 1.08, CEILING_KNEE_DB]) {
+    // Absurd gain, so everything is driven hard into the ceiling.
+    const out = render(x, { peakReduction: 70, gainDb: 24, ceilingDb, ceilingKneeDb })
+    assert.ok(Number.isFinite(out[0]), `knee ${ceilingKneeDb}: no NaN from a zero span`)
+    for (let i = 0; i < out.length; i++) {
+      assert.ok(Number.isFinite(out[i]))
+      assert.ok(db(Math.abs(out[i])) <= ceilingDb + 1e-9,
+        `knee ${ceilingKneeDb}: sample ${i} broke the ceiling`)
+    }
+  }
+})
+
+test('an absent knee is the old fixed width, so nothing upstream of the solve moves', () => {
+  const x = stimulus()
+  const ceilingDb = db(peak(x)) - 6
+  const base = { peakReduction: 60, gainDb: 6, ceilingDb }
+  assert.deepEqual(
+    Array.from(render(x, base)),
+    Array.from(render(x, { ...base, ceilingKneeDb: CEILING_KNEE_DB })),
+  )
+  // Out-of-range widths clamp rather than throw or wrap.
+  assert.deepEqual(
+    Array.from(render(x, { ...base, ceilingKneeDb: 99 })),
+    Array.from(render(x, { ...base, ceilingKneeDb: CEILING_KNEE_DB })),
+  )
+  assert.deepEqual(
+    Array.from(render(x, { ...base, ceilingKneeDb: -5 })),
+    Array.from(render(x, { ...base, ceilingKneeDb: 0 })),
+  )
+})
+
+test('the knee reaches kernel params only when it is real', () => {
+  assert.equal('ceilingKneeDb' in toKernelParams({ ...LA2A_DEFAULTS }), false)
+  const withKnee = toKernelParams({ ...LA2A_DEFAULTS, ceilingDb: -3, ceilingKneeDb: 0 })
+  // Zero is a REAL width — a hard ceiling — not an absent one.
+  assert.equal(withKnee.ceilingKneeDb, 0)
+})
+
+test('the peak reference returns no knee, having no ceiling to soften', () => {
+  const plan = computeAutoMakeupPlan([stimulus()], SR, { peakReduction: 60 })
+  assert.equal(plan.ceilingDb, null)
+  assert.equal(plan.ceilingKneeDb, null)
 })

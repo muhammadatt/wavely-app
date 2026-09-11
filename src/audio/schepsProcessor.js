@@ -40,7 +40,8 @@
 
 import { LA2AKernel } from './la2aProcessor.js'
 import {
-  MAKEUP_PERCENTILE, CEILING_KNEE_DB, softCeiling, float32AtOrBelow, percentileOfChannels,
+  MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor,
+  softCeiling, float32AtOrBelow, percentileOfChannels,
 } from './dsp/makeupReference.js'
 import { DelayLine } from './dsp/oversample.js'
 import { BiquadCascade, highpass, lowpass } from './dsp/biquad.js'
@@ -351,8 +352,19 @@ export class SchepsKernel {
      */
     this.ceilingLin = Number.isFinite(p.ceilingDb)
       ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20)) : 0
+    /**
+     * ⚠ SIZED BY THE SOLVE, AND THIS PLUGIN IS WHY IT HAD TO BE. A fixed 3 dB
+     * knee cost 0.63 dB of peak at Mix 0, where this kernel is otherwise
+     * BIT-EXACT against the delayed input — the ceiling is the source peak and
+     * at low Mix the output is approximately the source, so the peak sample
+     * lands where the knee is deepest by construction. See `ceilingKneeDbFor`.
+     * `CEILING_KNEE_DB` remains the cap and the fallback, so a ceiling handed
+     * over without a width behaves exactly as it used to.
+     */
+    const ceilingKneeDb = Number.isFinite(p.ceilingKneeDb)
+      ? clamp(p.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
     this.ceilingKneeLin = this.ceilingLin > 0
-      ? this.ceilingLin * Math.exp(-CEILING_KNEE_DB * LN10_OVER_20) : 0
+      ? this.ceilingLin * Math.exp(-ceilingKneeDb * LN10_OVER_20) : 0
     this._updateMix()
 
     // The dry delay has to match the wet path's latency exactly; rebuild it if
@@ -482,6 +494,15 @@ function renderWetPath(channelData, sampleRate, params, wetTrimDb = 0) {
     correlation: 0,
     wetTrimDb,
     outputDb: 0,
+    /**
+     * ⚠ PINNED OFF, BECAUSE `params` CAN CARRY THE PREVIOUS SOLVE'S CEILING and
+     * this render is what the NEXT one is measured from. Leaving it in would
+     * clamp the peak this measures, and a ceiling sized from an already-ceilinged
+     * render converges downward on every re-solve. It is also the same reason
+     * computeAutoMakeupPlan measures without one: the solve belongs below the
+     * enforcement, never through it.
+     */
+    ceilingDb: null,
     // Base rate: the question is what the wet path's level and shape are, and
     // oversampling moves neither by anything measurable. It also makes the wet
     // output latency-free, so it lines up with the dry input sample for sample
@@ -595,12 +616,19 @@ function loudPartDb(x, sampleRate) {
  *
  * `densityDb` is what that buys: how much louder the wet copy's average is than
  * the dry one's, once its loud parts are level. It is the compression's actual
- * yield, and it is modest here — 0.6 to 0.8 dB on real speech — because an opto
+ * yield, and it is modest here — 1.6 dB on real narration, stable to
+ * 0.013 dB across 27 dB of input level — because an opto
  * cell with a multi-second release applies nearly constant gain reduction
  * rather than selectively ducking peaks. A fast peak compressor would hand back
  * far more. The mix law passes this through rather than flattening it, so
  * pushing Mix does gently increase loudness, which is the whole point of
  * blending a compressed copy in.
+ *
+ * ⚠ THIS SAID "0.6 to 0.8 dB" UNTIL IT WAS MEASURED AGAIN, and the ⚠ note
+ * below on the reference statistic predicted exactly that: moving to the shared
+ * sample percentile moves the trim, "and therefore `densityDb` and the mix law
+ * it feeds". The prediction was right and the number here was not updated with
+ * it. Re-measured on 43 s of real narration.
  *
  * ALL THREE ARE MEASURED IN THE SPEECH BAND, not broadband — see `speechWeight`
  * for the measurement that forced that. Broadband energy is free to rise faster
@@ -651,7 +679,9 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
 
   let dryEnergy = 0
   for (const d of dryBand) for (let i = 0; i < d.length; i++) dryEnergy += d[i] * d[i]
-  if (dryEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0, ceilingDb: null }
+  if (dryEnergy <= 0) {
+    return { trimDb: 0, correlation: 0, densityDb: 0, ceilingDb: null, ceilingKneeDb: null }
+  }
 
   // ITERATED, because the makeup is now the compressor's own Gain and that sits
   // BEFORE the tube stage, as on the hardware. Raising it drives the tube a
@@ -660,8 +690,30 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
   // computeAutoMakeupDb; two passes is normally enough.
   let trimDb = 0
   let wet = null
+  /**
+   * The un-ceilinged BROADBAND peak of the last wet render, for sizing the
+   * ceiling's knee, and the trim it was rendered at.
+   *
+   * ⚠ THE WET RENDER IS THE Mix 1 OUTPUT, WHICH IS WHY THIS IS FREE AND WHY IT
+   * IS THE RIGHT MIX TO MEASURE. `renderWetPath` runs at `mix: 1`,
+   * `correlation: 0`, `outputDb: 0`, and at Mix 1 the blend's compensation is
+   * 1, so its output IS what this plugin puts out at Mix 1. That matters
+   * because Mix moves AFTER the solve: measured across the knob, the
+   * un-ceilinged peak runs -2.80 / -3.11 / -3.05 / -2.92 / -2.62 / -2.22 dBFS
+   * at Mix 0 / .2 / .35 / .5 / .75 / 1, so Mix 1 is the worst case and Mix 0 is
+   * pinned at the input peak by the bit-exact dry path. Sizing the knee at the
+   * worst case means the knob cannot walk out from under it.
+   *
+   * ⚠ BROADBAND, NOT `speechWeight`, for the same reason `ceilingDb` below is:
+   * the speech band is the right domain for MATCHING two paths and the wrong
+   * one for a statement about the samples that actually leave.
+   */
+  let lastWetPeak = 0
+  let lastTrimDb = 0
   for (let pass = 0; pass < 4; pass++) {
     const rendered = renderWetPath(channelData, sampleRate, params, trimDb)
+    lastWetPeak = peakOfChannels(rendered)
+    lastTrimDb = trimDb
     wet = rendered.map(c => speechWeight(c, sampleRate))
     const wetLoudDb = loudestBandDb(wet)
     if (!Number.isFinite(wetLoudDb)) break
@@ -680,7 +732,9 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
       crossEnergy += d[i] * w[i]
     }
   }
-  if (wetEnergy <= 0) return { trimDb: 0, correlation: 0, densityDb: 0, ceilingDb: null }
+  if (wetEnergy <= 0) {
+    return { trimDb: 0, correlation: 0, densityDb: 0, ceilingDb: null, ceilingKneeDb: null }
+  }
 
   // The rendered wet path ALREADY carries the makeup, so the density is the
   // straight energy ratio — no trim term to add back, unlike when the makeup
@@ -699,11 +753,20 @@ export function computeSchepsAutoTrim(channelData, sampleRate, params = {}) {
    * a guarantee about the samples that actually leave.
    */
   const inputPeak = peakOfChannels(channelData)
+  if (!(inputPeak > 0)) {
+    return { trimDb, correlation, densityDb, ceilingDb: null, ceilingKneeDb: null }
+  }
+  const ceilingDb = 20 * Math.log10(inputPeak)
+  // One step stale, and carried forward rather than re-rendered — same
+  // reasoning as computeAutoMakeupPlan's.
+  const wetPeakDb = lastWetPeak > 0
+    ? 20 * Math.log10(lastWetPeak) + (trimDb - lastTrimDb) : -Infinity
   return {
     trimDb,
     correlation,
     densityDb,
-    ceilingDb: inputPeak > 0 ? 20 * Math.log10(inputPeak) : null,
+    ceilingDb,
+    ceilingKneeDb: ceilingKneeDbFor(wetPeakDb - ceilingDb),
   }
 }
 

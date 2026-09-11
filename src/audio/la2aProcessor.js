@@ -82,14 +82,14 @@ import {
  * two guarantees. Re-exported here so importers of the constants are unchanged.
  */
 import {
-  MAKEUP_PERCENTILE, CEILING_KNEE_DB,
+  MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor,
   softCeiling, float32AtOrBelow, percentileOfChannels,
 } from './dsp/makeupReference.js'
 import { makeVocalSatCurve, VOCAL_SAT_CURVE_LEAN_POSITIVE } from './dsp/vocalSatCurve.js'
 import { highShelf, BiquadCascade } from './dsp/biquad.js'
 
 export { OVERSAMPLE_FACTOR, OVERSAMPLE_LATENCY_SAMPLES }
-export { MAKEUP_PERCENTILE, CEILING_KNEE_DB }
+export { MAKEUP_PERCENTILE, CEILING_KNEE_DB, ceilingKneeDbFor }
 
 // ── T4 optical cell constants ───────────────────────────────────────────────
 
@@ -2007,8 +2007,18 @@ export class LA2AKernel {
      */
     this.ceilingLin = Number.isFinite(p.ceilingDb)
       ? float32AtOrBelow(Math.exp(p.ceilingDb * LN10_OVER_20)) : 0
+    /**
+     * ⚠ THE KNEE IS SIZED BY THE SOLVE NOW, NOT FIXED — see `ceilingKneeDbFor`
+     * for the measurements and for why a fixed 3 dB cost up to 0.6 dB of peak
+     * on renders with nothing to catch. `CEILING_KNEE_DB` is the CAP and the
+     * fallback, so a caller that hands over a ceiling without a width (an old
+     * patch, a test, anything upstream of the solve) gets exactly the previous
+     * behaviour.
+     */
+    const ceilingKneeDb = Number.isFinite(p.ceilingKneeDb)
+      ? clamp(p.ceilingKneeDb, 0, CEILING_KNEE_DB) : CEILING_KNEE_DB
     this.ceilingKneeLin = this.ceilingLin > 0
-      ? this.ceilingLin * Math.exp(-CEILING_KNEE_DB * LN10_OVER_20) : 0
+      ? this.ceilingLin * Math.exp(-ceilingKneeDb * LN10_OVER_20) : 0
     this.tubeDriveLin = Number.isFinite(p.tubeDriveLin) && p.tubeDriveLin > 0
       ? p.tubeDriveLin : TUBE_DRIVE_LIN
     this.tubeBias = Number.isFinite(p.tubeBias) ? p.tubeBias : TUBE_BIAS
@@ -3009,7 +3019,9 @@ export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, opti
 
   const inputPeak = peakOfChannels(channelData)
   const inputRef = measureRef(channelData)
-  if (!(inputPeak > 0) || !(inputRef > 0)) return { makeupDb: 0, ceilingDb: null }
+  if (!(inputPeak > 0) || !(inputRef > 0)) {
+    return { makeupDb: 0, ceilingDb: null, ceilingKneeDb: null }
+  }
 
   /**
    * ⚠ THE MEASURED SPAN MUST BE THE SPAN APPLY WRITES BACK, not the raw render.
@@ -3034,6 +3046,14 @@ export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, opti
     : channelData
 
   let makeupDb = 0
+  /**
+   * The un-ceilinged peak of the last render, and the makeup it was rendered
+   * at. The knee is sized from how far this sits over the ceiling, and these
+   * come free — the loop already renders without the ceiling, deliberately
+   * (see above), which is exactly the measurement the knee needs.
+   */
+  let lastOutPeak = 0
+  let lastMakeupDb = 0
   for (let i = 0; i < maxIterations; i++) {
     const { channelData: rendered } = processLA2ABuffer(padded, sampleRate, {
       ...measureParams,
@@ -3042,19 +3062,37 @@ export function computeAutoMakeupPlan(channelData, sampleRate, params = {}, opti
     const out = latency > 0
       ? rendered.map((ch) => ch.subarray(latency, latency + channelData[0].length))
       : rendered
+    lastOutPeak = peakOfChannels(out)
+    lastMakeupDb = makeupDb
     const outRef = measureRef(out)
     if (outRef <= 0) break
     const correctionDb = 20 * Math.log10(inputRef / outRef)
     makeupDb = clamp(makeupDb + correctionDb, -24, 24)
     if (Math.abs(correctionDb) < toleranceDb) break
   }
+  if (reference !== 'percentile') {
+    // The peak reference needs no ceiling, so it needs no knee either.
+    return { makeupDb, ceilingDb: null, ceilingKneeDb: null }
+  }
+  const ceilingDb = 20 * Math.log10(inputPeak)
+  /**
+   * The loop renders at `makeupDb` and only THEN corrects it, so the last
+   * render is one step stale. Carried forward rather than re-rendered: the gain
+   * is ahead of the peak by that step, and the step is under `toleranceDb` on a
+   * converged solve. Only an unconverged one makes it large, and there the
+   * correction is what keeps the knee honest.
+   */
+  const outPeakDb = lastOutPeak > 0
+    ? 20 * Math.log10(lastOutPeak) + (makeupDb - lastMakeupDb) : -Infinity
   return {
     makeupDb,
     // The guarantee, restated as a number the kernel can enforce: the source's
     // own peak. `softCeiling` never lets the output exceed it — at or under,
     // not strictly under; see the note there for why that distinction is the
     // honest one and not a weaker claim.
-    ceilingDb: reference === 'percentile' ? 20 * Math.log10(inputPeak) : null,
+    ceilingDb,
+    // How soft that enforcement has to be, from how much there is to enforce.
+    ceilingKneeDb: ceilingKneeDbFor(outPeakDb - ceilingDb),
   }
 }
 

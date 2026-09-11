@@ -89,7 +89,7 @@ function la2aAutoMakeup(channelData, sampleRate, params) {
   const { reference = 'peak', ...kernelParams } = params ?? {}
   try {
     const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
-    postDone({ makeupDb: plan.makeupDb })
+    postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -110,8 +110,10 @@ function autoMakeup(measure, channelData, sampleRate, params) {
 // Scheps wet path (two EQ cascades and the opto compressor) over the region.
 function schepsAutoTrim(channelData, sampleRate, params) {
   try {
-    const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
-    postDone({ trimDb, correlation, densityDb })
+    const {
+      trimDb, correlation, densityDb, ceilingKneeDb,
+    } = computeSchepsAutoTrim(channelData, sampleRate, params)
+    postDone({ trimDb, correlation, densityDb, ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }

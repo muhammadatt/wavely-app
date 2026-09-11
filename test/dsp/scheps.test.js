@@ -17,7 +17,9 @@ import {
 } from '../../src/audio/schepsProcessor.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../../src/audio/dsp/oversample.js'
 import { highpass, lowpass, BiquadCascade } from '../../src/audio/dsp/biquad.js'
-import { percentileOfChannels, MAKEUP_PERCENTILE } from '../../src/audio/dsp/makeupReference.js'
+import {
+  percentileOfChannels, MAKEUP_PERCENTILE, CEILING_KNEE_DB,
+} from '../../src/audio/dsp/makeupReference.js'
 import { SCHEPS_DEFAULTS, toKernelParams } from '../../src/audio/effects/schepsParams.js'
 import {
   setLA2ATuning, resetLA2ATuning, la2aTuningOverrides,
@@ -783,4 +785,123 @@ test('an absent bench leaves the trim exactly where it was', () => {
     computeSchepsAutoTrim([input], SR, patch),
     computeSchepsAutoTrim([input], SR, { ...patch, la2aTuning: {} }),
   )
+})
+
+// Spread into Math.max blows the stack on a buffer this long; loop instead.
+function peakDb(x) {
+  let p = 0
+  for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > p) p = a }
+  return db(p)
+}
+
+// ── The ceiling's knee is sized by the solve ─────────────────────────────────
+//
+// This plugin is why the knee stopped being a fixed 3 dB. Its ceiling is the
+// source peak and at low Mix its output IS approximately the source, so the peak
+// sample lands where the knee is deepest by construction — the fixed width cost
+// 0.63 dB of peak at Mix 0, where the kernel is otherwise bit-exact against the
+// delayed input. See `ceilingKneeDbFor`.
+
+test('the auto trim returns a knee alongside its ceiling, never one without', () => {
+  const input = voiceLike(3)
+  const t = computeSchepsAutoTrim([input], SR, SCHEPS_KERNEL_DEFAULTS)
+  assert.ok(Number.isFinite(t.ceilingDb))
+  assert.ok(Number.isFinite(t.ceilingKneeDb))
+  assert.ok(t.ceilingKneeDb >= 0 && t.ceilingKneeDb <= CEILING_KNEE_DB)
+  // Silence has a ceiling of nothing, and must not invent a knee for it.
+  const quiet = computeSchepsAutoTrim([new Float32Array(SR)], SR, SCHEPS_KERNEL_DEFAULTS)
+  assert.equal(quiet.ceilingDb, null)
+  assert.equal(quiet.ceilingKneeDb, null)
+})
+
+test('the solved knee is sized at Mix 1, the worst case, not at the current Mix', () => {
+  const input = voiceLike(3)
+  // Solved at the default Mix...
+  const t = computeSchepsAutoTrim([input], SR, SCHEPS_KERNEL_DEFAULTS)
+  const common = {
+    wetTrimDb: t.trimDb,
+    correlation: t.correlation,
+    densityDb: t.densityDb,
+    ceilingDb: t.ceilingDb,
+  }
+  // ...and the ceiling must still hold at every Mix the user can then dial,
+  // which is the whole reason the measurement is taken at Mix 1.
+  for (const mix of [0, 0.35, 0.7, 1]) {
+    const { channelData } = processSchepsBuffer([input], SR, {
+      ...common, mix, ceilingKneeDb: t.ceilingKneeDb,
+    })
+    assert.ok(peakDb(channelData[0]) <= t.ceilingDb + 1e-9,
+      `mix ${mix}: ceiling broken`)
+  }
+})
+
+test('the solved knee recovers peak the fixed 3 dB one was taking', () => {
+  const input = voiceLike(3)
+  const t = computeSchepsAutoTrim([input], SR, SCHEPS_KERNEL_DEFAULTS)
+  const common = {
+    wetTrimDb: t.trimDb,
+    correlation: t.correlation,
+    densityDb: t.densityDb,
+    ceilingDb: t.ceilingDb,
+  }
+  for (const mix of [0, 0.35, 1]) {
+    const solved = peakDb(processSchepsBuffer([input], SR, {
+      ...common, mix, ceilingKneeDb: t.ceilingKneeDb,
+    }).channelData[0])
+    // No ceilingKneeDb is the old fixed width, by design — see the kernel.
+    const fixed = peakDb(processSchepsBuffer([input], SR, { ...common, mix }).channelData[0])
+    assert.ok(solved > fixed, `mix ${mix}: expected to recover peak, got ${solved} vs ${fixed}`)
+  }
+})
+
+test('at Mix 0 the peak loss scales with the knee, so a narrower one recovers it', () => {
+  const input = voiceLike(3)
+  const t = computeSchepsAutoTrim([input], SR, SCHEPS_KERNEL_DEFAULTS)
+  const common = {
+    mix: 0,
+    wetTrimDb: t.trimDb,
+    correlation: t.correlation,
+    densityDb: t.densityDb,
+    ceilingDb: t.ceilingDb,
+  }
+  const dryDb = peakDb(input)
+  const lossFor = ceilingKneeDb => dryDb - peakDb(processSchepsBuffer([input], SR, {
+    ...common, ceilingKneeDb,
+  }).channelData[0])
+  /**
+   * Mix 0 is the dry signal and its peak IS the ceiling, so this is the worst
+   * position for a soft knee and the one the fixed 3 dB width cost most at.
+   * Asserted as a monotone relationship rather than at a number, because how
+   * wide the SOLVE goes is a property of the material: this synthetic stimulus
+   * overshoots by 2.04 dB at Mix 1 and asks for a 2.54 dB knee, where the real
+   * narration in `ceilingKneeDbFor` overshoots by 0.58 and asks for 1.08.
+   */
+  const losses = [0, 0.5, 1.08, 2, CEILING_KNEE_DB].map(lossFor)
+  for (let i = 1; i < losses.length; i++) {
+    assert.ok(losses[i] > losses[i - 1],
+      `a wider knee must cost more peak: ${losses.map(v => v.toFixed(3)).join(' ')}`)
+  }
+  // A zero knee is a hard ceiling the dry peak sits exactly on, so it is free.
+  assert.ok(losses[0] < 1e-6, `a zero knee must cost nothing, got ${losses[0]}`)
+  // And no knee at all is still the old fixed width, so nothing upstream moved.
+  assert.equal(
+    peakDb(processSchepsBuffer([input], SR, common).channelData[0]),
+    peakDb(processSchepsBuffer([input], SR, {
+      ...common, ceilingKneeDb: CEILING_KNEE_DB,
+    }).channelData[0]),
+  )
+  /**
+   * ⚠ THE SOLVED KNEE DOES NOT DRIVE THIS TO ZERO, AND THAT IS A KNOWN RESIDUAL.
+   * It is sized for the worst Mix because Mix moves after the solve, so at Mix 0
+   * the dry peak still sits inside it. Closing it needs a knee that follows Mix,
+   * which needs the dry and wet peaks handed over as separate params.
+   * Deliberately not built here.
+   */
+})
+
+test('kernel params carry the knee only when it is real', () => {
+  assert.equal('ceilingKneeDb' in toKernelParams({ ...SCHEPS_DEFAULTS }), false)
+  const mapped = toKernelParams({ ...SCHEPS_DEFAULTS, ceilingDb: -3, ceilingKneeDb: 0 })
+  // Zero is a real width — a hard ceiling — not a missing one.
+  assert.equal(mapped.ceilingKneeDb, 0)
 })
