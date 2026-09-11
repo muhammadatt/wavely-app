@@ -4,7 +4,7 @@ import { renderTimelineToWav } from '../audio/export.js'
 import { downloadBlob } from '../audio/download.js'
 import { createZip } from '../audio/zip.js'
 import {
-  estimatedBytes, totalBytes, formatSize, overZipLimit, uniqueNames,
+  estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames,
 } from '../audio/exportPlan.js'
 
 /**
@@ -44,7 +44,10 @@ export function useExport() {
    *   surface standing with the selection intact.
    */
   async function exportDocuments(docs) {
-    if (docs.length === 0 || isExporting.value || overZipLimit(docs)) return false
+    // The size refusal is repeated here rather than trusted to the caller: both
+    // surfaces disable their button on it, and a render that gets past a
+    // disabled button still produces a file the user cannot play.
+    if (docs.length === 0 || isExporting.value || exportSizeLimit(docs)) return false
 
     isExporting.value = true
     exportProgress.value = { done: 0, total: docs.length }
@@ -97,6 +100,6 @@ export function useExport() {
 
   return {
     isExporting, exportProgress, exportDocuments,
-    estimatedBytes, totalBytes, formatSize, overZipLimit, uniqueNames,
+    estimatedBytes, totalBytes, formatSize, exportSizeLimit, uniqueNames,
   }
 }

@@ -18,7 +18,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  estimatedBytes, totalBytes, formatSize, overZipLimit, uniqueNames,
+  estimatedBytes, totalBytes, formatSize, archiveBytes, exportSizeLimit, uniqueNames,
 } from '../../src/audio/exportPlan.js'
 import { ZIP_SIZE_LIMIT } from '../../src/audio/zip.js'
 
@@ -55,6 +55,26 @@ test('colliding names disambiguate rather than overwriting each other in the zip
   assert.deepEqual(names, ['chapter01.wav', 'chapter01 (2).wav', 'chapter01 (3).wav'])
 })
 
+test('a generated name cannot collide with one the user already chose', () => {
+  // The bug this pins: counting occurrences of the ORIGINAL name handed the
+  // second "chapter.wav" the suffix "(2)", and the file genuinely called
+  // "chapter (2).wav" kept its own name — two identical entries in the zip.
+  // The third keeps ITS OWN name as the base and suffixes that, rather than
+  // being renumbered into the generated sequence: "chapter (2).wav" is the name
+  // the user gave it, and quietly turning it into "chapter (3).wav" would claim
+  // it is the third copy of chapter. Ugly, unique, and it does not rewrite what
+  // the user chose.
+  assert.deepEqual(
+    uniqueNames([doc('chapter.wav'), doc('chapter.wav'), doc('chapter (2).wav')]),
+    ['chapter.wav', 'chapter (2).wav', 'chapter (2) (2).wav'],
+  )
+  // ...and it holds when the taken name comes first.
+  assert.deepEqual(
+    uniqueNames([doc('chapter (2).wav'), doc('chapter.wav'), doc('chapter.wav')]),
+    ['chapter (2).wav', 'chapter.wav', 'chapter (3).wav'],
+  )
+})
+
 test('names that do not collide are left exactly as the user set them', () => {
   assert.deepEqual(
     uniqueNames([doc('chapter01.wav'), doc('chapter02.wav')]),
@@ -62,15 +82,37 @@ test('names that do not collide are left exactly as the user set them', () => {
   )
 })
 
-test('the zip limit applies to archives only — one huge file still exports', () => {
-  // The writer is not zip64: over 4 GB the archive comes out corrupt rather
-  // than refused, so the check happens before anything is built. A lone file
-  // is downloaded as-is and never reaches the writer.
+test('an ordinary selection is not refused', () => {
+  assert.equal(exportSizeLimit([doc('a.wav', 60)]), null)
+  assert.equal(exportSizeLimit([doc('a.wav', 60), doc('b.wav', 60)]), null)
+  assert.equal(exportSizeLimit([]), null)
+})
+
+test('a single WAV over 4 GB is refused too — RIFF has 32-bit size fields', () => {
+  // Skipping the archive does not save it: `RIFF` at offset 4 and `data` at 40
+  // both wrap, and the file reads back as garbage in every player.
   const huge = doc('long.wav', 40000, { channels: 2 })
-  assert.ok(totalBytes([huge, huge]) > ZIP_SIZE_LIMIT)
-  assert.equal(overZipLimit([huge]), false)
-  assert.equal(overZipLimit([huge, huge]), true)
-  assert.equal(overZipLimit([doc('a.wav', 60), doc('b.wav', 60)]), false)
+  assert.ok(estimatedBytes(huge) > ZIP_SIZE_LIMIT)
+  const refusal = exportSizeLimit([huge])
+  assert.ok(refusal, 'a 7 GB WAV must be refused, not written')
+  assert.match(refusal.message, /WAV/)
+})
+
+test('the zip limit counts the archive, not just the audio in it', () => {
+  // Every entry costs a 30-byte local header, a 46-byte central record and two
+  // copies of its name; the archive then ends with a 22-byte record. A
+  // selection measured at just under the limit crosses it once written.
+  const docs = [doc('a.wav', 10), doc('b.wav', 20)]
+  const names = ['a.wav', 'b.wav']
+  const overhead = names.reduce((sum, n) => sum + 30 + 46 + 2 * n.length, 0) + 22
+  assert.equal(archiveBytes(docs), totalBytes(docs) + overhead)
+  assert.ok(archiveBytes(docs) > totalBytes(docs))
+})
+
+test('the refusal message says which ceiling was hit', () => {
+  const huge = doc('long.wav', 40000, { channels: 2 })
+  assert.match(exportSizeLimit([huge]).message, /Split it/)
+  assert.match(exportSizeLimit([huge, huge]).message, /smaller batches/)
 })
 
 test('sizes read in the unit the number deserves', () => {

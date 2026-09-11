@@ -4,6 +4,7 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useExport } from '../composables/useExport.js'
 import { getTimelineDuration } from '../audio/operations.js'
 import { formatDuration } from '../utils/format.js'
+import { documentStatus } from '../utils/documentStatus.js'
 import { focusRenameInput } from '../utils/renameInput.js'
 import BaseButton from './ui/BaseButton.vue'
 
@@ -25,7 +26,7 @@ import BaseButton from './ui/BaseButton.vue'
 const { appState, documents, renameDocument } = useEditorState()
 const {
   isExporting, exportProgress, exportDocuments,
-  estimatedBytes, totalBytes, formatSize, overZipLimit,
+  estimatedBytes, totalBytes, formatSize, exportSizeLimit,
 } = useExport()
 
 // Opens on the active document. Nothing pre-checks a wider set any more: the
@@ -50,7 +51,9 @@ function toggleAll() {
 const selectedDocs = computed(() => documents.value.filter(d => checked.value.has(d.id)))
 
 const selectedBytes = computed(() => totalBytes(selectedDocs.value))
-const tooBig = computed(() => overZipLimit(selectedDocs.value))
+// The refusal carries its own message: what goes over the 4 GB ceiling differs
+// between one file and many, and so does what the user should do about it.
+const sizeLimit = computed(() => exportSizeLimit(selectedDocs.value))
 
 function close() {
   if (isExporting.value) return
@@ -80,6 +83,22 @@ function commitRename() {
 
 async function handleExport() {
   if (await exportDocuments(selectedDocs.value)) appState.exportDialogOpen = false
+}
+
+// ── Per-row compliance signal ────────────────────────────────────────────────
+// CLAUDE.md is explicit that the export UI should always show current
+// compliance status, so the state of each file is self-evident at the moment it
+// matters. No lecturing — just the signal.
+//
+// ⚠ THIS WAS DELETED ONCE AND THE DIALOG SHIPPED WITHOUT IT, leaving duration
+// and size where the ACX verdict should be — on the one screen where a narrator
+// decides what to send to ACX. It is back as `documentStatus`, not as the
+// private copy it was before: that copy had its own colour table for the same
+// four states, which is exactly what documentStatus.js exists to stop. The only
+// thing it does not cover is a file nobody has mastered, which is worth saying
+// here and nowhere else.
+function statusOf(doc) {
+  return documentStatus(doc) ?? { label: 'Not mastered', color: 'rgba(255,255,255,.35)' }
 }
 
 </script>
@@ -193,17 +212,17 @@ async function handleExport() {
           </div>
 
           <span
-            v-if="doc.isProcessing"
             class="text-[10.5px] font-bold shrink-0"
-            style="color:#7fe9f6"
-          >Processing…</span>
+            :style="{ color: statusOf(doc).color }"
+            :title="statusOf(doc).title"
+          >{{ statusOf(doc).label }}</span>
         </div>
       </div>
 
       <!-- Footer -->
       <div class="px-5 py-[13px] border-t border-[rgba(255,255,255,.07)]">
-        <div v-if="tooBig" class="mb-[10px] text-[11px] font-bold leading-snug text-[#ff8a80]">
-          This selection is {{ formatSize(selectedBytes) }} — over the 4 GB zip limit. Export in smaller batches.
+        <div v-if="sizeLimit" class="mb-[10px] text-[11px] font-bold leading-snug text-[#ff8a80]">
+          {{ sizeLimit.message }}
         </div>
 
         <div v-if="isExporting" class="mb-[10px]">
@@ -233,7 +252,7 @@ async function handleExport() {
           <BaseButton size="sm" color="ghost" :pill="false" :disabled="isExporting" @click="close">Cancel</BaseButton>
           <BaseButton
             size="md" :pill="false"
-            :disabled="selectedDocs.length === 0 || isExporting || tooBig"
+            :disabled="selectedDocs.length === 0 || isExporting || !!sizeLimit"
             @click="handleExport"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>

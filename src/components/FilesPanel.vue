@@ -58,7 +58,7 @@ const {
 const { promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs, isSaving } = useFileSave()
 const {
-  isExporting, exportProgress, exportDocuments, totalBytes, formatSize, overZipLimit,
+  isExporting, exportProgress, exportDocuments, totalBytes, formatSize, exportSizeLimit,
 } = useExport()
 
 const query = ref('')
@@ -142,7 +142,7 @@ function closeMarked() {
 // renderer, same name disambiguation, same zip.
 const markedDocs = computed(() => documents.value.filter(d => marked.value.has(d.id)))
 const markedBytes = computed(() => totalBytes(markedDocs.value))
-const tooBig = computed(() => overZipLimit(markedDocs.value))
+const sizeLimit = computed(() => exportSizeLimit(markedDocs.value))
 
 async function exportMarked() {
   if (await exportDocuments(markedDocs.value)) {
@@ -359,7 +359,6 @@ watch(documents, docs => { if (docs.length === 0) close() })
               @click.stop="handleSaveAs(doc)"
             >
               <!-- lucide save-pen -->
-               <SavePen />
               <svg viewBox="0 0 24 24" class="w-[16px] h-[16px] fill-none stroke-current" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.33 13H8a1 1 0 0 0-1 1v7"/><path d="M14.363 17.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 1 0-3.004-3.004z"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10.2a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4v.3"/></svg>
             </button>
 
@@ -382,8 +381,8 @@ watch(documents, docs => { if (docs.length === 0) close() })
 
       <!-- Footer -->
       <div class="px-3 py-[11px] border-t border-[rgba(255,255,255,.07)]">
-        <div v-if="tooBig" class="mb-[9px] px-1 text-[11px] font-bold leading-snug text-[#ff8a80]">
-          This selection is {{ formatSize(markedBytes) }} — over the 4 GB zip limit. Export in smaller batches.
+        <div v-if="sizeLimit" class="mb-[9px] px-1 text-[11px] font-bold leading-snug text-[#ff8a80]">
+          {{ sizeLimit.message }}
         </div>
 
         <!-- The same progress readout the export dialog shows, for the same
@@ -417,7 +416,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
               · {{ formatSize(markedBytes) }}
               <span v-if="markedCount > 1" class="text-[rgba(255,255,255,.3)]"> · zip</span>
             </span>
-            <BaseButton size="sm" :pill="false" :disabled="isExporting || tooBig" @click="exportMarked">
+            <BaseButton size="sm" :pill="false" :disabled="isExporting || !!sizeLimit" @click="exportMarked">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>
               {{ isExporting ? 'Exporting…' : 'Export' }}
             </BaseButton>

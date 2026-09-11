@@ -89,7 +89,24 @@ const browser = await chromium.launch(executablePath ? { executablePath } : {})
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
 page.on('pageerror', e => errors.push(`PAGEERROR ${e.message}`))
-page.on('console', m => { if (m.type() === 'error') errors.push(`CONSOLE ${m.text().slice(0, 200)}`) })
+/**
+ * ⚠ SOME VUE WARNINGS ARE FAILURES, AND THIS RAN GREEN OVER ONE. A stray
+ * `<SavePen />` — a component tag nothing imports — sat inside a live button
+ * and shipped: Vue reports an unresolvable component with `console.warn`, not
+ * `error`, so nothing here saw it, and `test/ui/componentBindings.test.js` is
+ * blind to it too (it reads identifiers in template EXPRESSIONS, and a bare tag
+ * is not one). Copilot caught it on review, which is not a gate.
+ *
+ * Only the warnings that mean "this template is wrong" are promoted; Vue's
+ * chattier advice is left alone, because a gate that fires on everything gets
+ * switched off.
+ */
+const FATAL_WARNINGS = /Failed to resolve component|Invalid VNode type|is not a valid prop name|was accessed during render but is not defined/
+page.on('console', m => {
+  const text = m.text().slice(0, 200)
+  if (m.type() === 'error') errors.push(`CONSOLE ${text}`)
+  else if (m.type() === 'warning' && FATAL_WARNINGS.test(text)) errors.push(`WARNING ${text}`)
+})
 
 let failures = 0
 try {
