@@ -95,6 +95,7 @@ export function useExport() {
       return true
     } finally {
       isExporting.value = false
+      exportProgress.value = { done: 0, total: 0 }
     }
   }
 
