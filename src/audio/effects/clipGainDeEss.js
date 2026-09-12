@@ -29,6 +29,7 @@
 import { createLevelTap } from './levelTap.js'
 import { buildClipGainEnvelope } from '../dsp/clipGainEnvelope.js'
 import { decideClipGains } from '../dsp/clipGainDecision.js'
+import { scheduleEnvelope } from './envelopeSchedule.js'
 
 export const DEESSER_DEFAULTS = {
   stridentCeilingDb: 6.0,
@@ -174,16 +175,16 @@ export function createClipGainDeEsser(audioContext) {
     stopTransport(when)
     if (destroyed || !envelopeBuffer) return
 
-    const regionEndSec = regionStartSec + envelopeBuffer.duration
-    if (startSec >= regionEndSec) return // region already behind the playhead
-
-    let at = when
-    let offset = 0
-    if (startSec < regionStartSec) {
-      at = when + (regionStartSec - startSec)
-    } else {
-      offset = startSec - regionStartSec
-    }
+    // The arithmetic lives in envelopeSchedule.js — shared with Auto Level and
+    // tested there, because it cannot be reached from Node through this wrapper.
+    const plan = scheduleEnvelope({
+      regionStartSec,
+      durationSec: envelopeBuffer.duration,
+      when,
+      startSec,
+    })
+    if (plan === null) return // region already behind the playhead
+    const { at, offset } = plan
 
     modulator = audioContext.createBufferSource()
     modulator.buffer = envelopeBuffer
@@ -205,7 +206,7 @@ export function createClipGainDeEsser(audioContext) {
     modulator.start(at, offset)
 
     transportWhen = at
-    transportStartSec = startSec < regionStartSec ? regionStartSec : startSec
+    transportStartSec = plan.transportStartSec
     running = true
   }
 

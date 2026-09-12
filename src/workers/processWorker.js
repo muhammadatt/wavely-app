@@ -4,7 +4,7 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness
+ * voiceProfile, measureLoudness, autoLevelAnalyze
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
@@ -14,6 +14,7 @@ import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
+import { analyzeAutoLevel } from '../audio/dsp/autoLevel.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -89,9 +90,30 @@ self.onmessage = function (e) {
     case 'voiceProfile':
       voiceProfile(channelData, sampleRate)
       break
+    case 'autoLevelAnalyze':
+      autoLevelAnalyze(channelData, sampleRate, params)
+      break
     default:
       postReply({ type: 'error', message: `Unknown operation: ${type}` })
   }
+}
+
+/**
+ * Auto Level's clip plan for a WHOLE FILE.
+ *
+ * ⚠ IT RUNS HERE AND NOT ON THE MAIN THREAD BECAUSE IT WALKS EVERY SAMPLE
+ * SEVERAL TIMES — a K-weighting cascade per channel, a prefix sum over the
+ * result, and a frame-RMS pass — and it is run over the whole timeline rather
+ * than a capped window. On an hour-long chapter that is long enough to drop
+ * frames if it happened between animation frames.
+ *
+ * The reply is the plan, not audio: clip bounds, per-clip gains and the
+ * crossfade windows. Every field is a plain number or array, so it structured-
+ * clones without a transfer list, and the envelope itself is rendered on the
+ * main thread from `renderAutoLevelGainDb` for whatever span is wanted.
+ */
+function autoLevelAnalyze(channelData, sampleRate, params) {
+  postDone({ analysis: analyzeAutoLevel(channelData, sampleRate, params) })
 }
 
 /**

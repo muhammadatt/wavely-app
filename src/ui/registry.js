@@ -15,6 +15,7 @@ import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
+import AutoLevelWindow from '../components/panels/windows/AutoLevelWindow.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
@@ -230,6 +231,26 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: NormalizeWindow,
+  },
+  {
+    id: 'auto-level',
+    label: 'Auto Level',
+    desc: 'Even out phrase-to-phrase level across a recording',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'loudness',
+    keywords: [
+      'leveler', 'leveller', 'auto level', 'gain riding', 'ride', 'drift',
+      'consistency', 'volume', 'uneven', 'quiet passage', 'clip gain',
+    ],
+    /**
+     * ⚠ THE ANALYSIS IS WHOLE-FILE, BUT APPLY STILL WRITES BACK A SELECTION —
+     * so this gates on one like every other effect. The panel says which is
+     * which; the distinction is real and the two must not be conflated.
+     */
+    requires: 'selection',
+    surface: 'window',
+    component: AutoLevelWindow,
   },
   {
     id: 'loudness',

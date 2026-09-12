@@ -276,6 +276,57 @@ test('the linear envelope is the dB one, converted', () => {
   }
 })
 
+test('the chunked K-weighting matches a single-pass measurement', () => {
+  /**
+   * ⚠ THIS IS THE ONLY DIRECT CHECK ON THE STREAMING FILTER. The energy sum is
+   * built in chunks so the scratch buffer is not file-length — an hour at
+   * 44.1 kHz would otherwise want a 1.27 GB Float64Array and a 635 MB mono
+   * buffer, on exactly the file size this product exists for. A BiquadCascade
+   * is a stateful streaming filter, so the chunks are only equivalent while its
+   * state is CARRIED ACROSS them; resetting between chunks would put a filter
+   * transient at every boundary, ~40 s apart, and nothing else here would
+   * notice.
+   *
+   * 90 s crosses at least one chunk boundary (4096 blocks x 10 ms = 41 s).
+   */
+  const x = narration({ seconds: 90, driftDb: 12 })
+  const a = analyzeAutoLevel([x], SR, { targetMode: 'global' })
+  assert.ok(a.applied)
+  assert.ok(x.length > 41 * SR, 'the probe must be long enough to cross a chunk boundary')
+
+  const kw = kWeighted(x) // one uninterrupted cascade over the whole file
+  for (let k = 0; k < a.clips.length; k++) {
+    const c = a.clips[k]
+    const independent = lufsRange(kw, c.sampleStart, c.sampleEnd)
+    // Block quantisation of the range ends is the only expected difference.
+    assert.ok(Math.abs(a.clipLufs[k] - independent) < 0.05,
+      `clip ${k}: ${a.clipLufs[k].toFixed(3)} vs single-pass ${independent.toFixed(3)}`)
+  }
+})
+
+test('channels are summed, not measured separately and averaged', () => {
+  /**
+   * ⚠ THE TWO AGREE ON DUPLICATED CHANNELS, WHICH IS WHY THAT CANNOT BE THE
+   * TEST. `[x, x]` is precisely the case where a channel sum and a mean of
+   * channel powers give the same answer — the same trap `inputAlign.js` records
+   * a measurement falling into. Opposed channels separate them: summed, they
+   * cancel to the room tone and nothing is voiced.
+   */
+  const x = narration({ driftDb: 12 })
+  const inverted = new Float32Array(x.length)
+  for (let i = 0; i < x.length; i++) inverted[i] = -x[i]
+
+  const summed = voicedFramesByEnergy([x, inverted], SR, x.length)
+  const count = (m) => m.reduce((s, v) => s + v, 0)
+  assert.equal(count(summed.voiced), 0,
+    'a polarity-flipped pair sums to silence and must read as silence')
+
+  // And an ordinary duplicated pair reads the same as the mono original.
+  const mono = voicedFramesByEnergy([x], SR, x.length)
+  const dual = voicedFramesByEnergy([x, x], SR, x.length)
+  assert.equal(count(dual.voiced), count(mono.voiced))
+})
+
 test('short and empty input is skipped, not crashed on', () => {
   assert.equal(analyzeAutoLevel([], SR).skippedReason, 'empty')
   assert.equal(analyzeAutoLevel([new Float32Array(0)], SR).skippedReason, 'empty')

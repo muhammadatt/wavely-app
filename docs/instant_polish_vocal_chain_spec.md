@@ -151,8 +151,10 @@ useless to a self-contained client chain. This section is new DSP.
 ## Section 3 · LEVEL
 
 Ahead of the dynamics. The server's `autoLevel`, and the reason its compression
-passes sound effortless. ✓ **DSP landed** (`src/audio/dsp/autoLevel.js`); not yet
-wired to a node, an apply path or a panel.
+passes sound effortless. ✓ **Shipped as a standalone plugin** — DSP
+(`dsp/autoLevel.js`), preview node, apply path, panel and help. It becomes this
+section of the composite unchanged; the composite will drive the same analysis
+and envelope rather than carrying its own.
 
 **Macro: Level 0–100**, scaling max up/down travel.
 
@@ -195,6 +197,20 @@ On 60 s of narration with a 20 dB drift, `global` mode: clip loudness spread
 sd 5.75 → 1.60 dB, range 18.33 → 4.33 dB. A file already inside the deadband is
 skipped outright (`file_already_leveled`) rather than nudged, so a level file
 comes back bit-identical.
+
+⚠ **The energy sum is per-block (10 ms) and streamed, and that is a hard
+requirement rather than an optimisation.** A per-sample prefix sum is 1.27 GB for
+an hour-long chapter, beside a 635 MB mono buffer — and an hour-long chapter is
+what the beachhead audience uploads, so the first version would have failed on
+precisely the target file. Block resolution is 2.9 MB and, incidentally, 4.5×
+faster: 14.3 s → 3.2 s. Hop is *derived* from block so clip bounds stay exactly
+block-aligned.
+
+⚠ **Analysis is 3.2 s on an hour, so there is an explicit ANALYSE step** and
+every config control invalidates the plan. The gain solve is cheap and the
+detection is not; splitting them so the knobs can be live against a frozen
+detection — which is what the de-esser does with its decision and detection
+halves — is a known follow-up, not an oversight.
 
 ### Implementation: a precomputed envelope, not a live follower
 

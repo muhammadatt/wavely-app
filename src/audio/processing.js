@@ -811,6 +811,22 @@ export function applyHumNotchRegion(segments, start, end, params, sampleRate, ch
  * @returns {AudioBuffer}
  */
 export function applyDeEsserRegion(segments, start, end, deviation, sampleRate, channels) {
+  return applyGainEnvelopeRegion(segments, start, end, deviation, sampleRate, channels)
+}
+
+/**
+ * Multiply a deviation-from-unity envelope into a region.
+ *
+ * ⚠ THE SAME FUNCTION SERVES THE DE-ESSER AND AUTO LEVEL, and that is not
+ * incidental reuse — it is the same operation. Both compute their whole gain
+ * before playback, both drive a GainNode's AudioParam from a buffer of
+ * `envelope - 1` during preview, and both therefore apply by multiplying the
+ * identical numbers into the identical samples. A second copy would be a second
+ * place for the `1 + deviation` convention to be got wrong.
+ *
+ * @param {Float32Array} deviation region-aligned, deviation from unity
+ */
+export function applyGainEnvelopeRegion(segments, start, end, deviation, sampleRate, channels) {
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
   const numSamples = channelData[0].length
 
@@ -828,6 +844,29 @@ export function applyDeEsserRegion(segments, start, end, deviation, sampleRate, 
   }
 
   return out
+}
+
+/**
+ * Auto Level's clip plan for the WHOLE timeline.
+ *
+ * ⚠ THE WHOLE TIMELINE, ALWAYS, IGNORING THE SELECTION — and it takes no
+ * start/end for that reason. Clip targets are a running median over neighbouring
+ * clips, so analysing only the selection would give one answer for a phrase and
+ * a different one for the paragraph containing it; the same edit applied to each
+ * would not agree, and a leveller whose whole purpose is consistency across a
+ * recording would be inconsistent within one. The same rule `regionAlignDb`
+ * follows, for the same reason.
+ *
+ * ⚠ AND IT GOES THROUGH `measureWholeRegionInWorker`, NOT `measureInWorker`.
+ * The 30 s centred cap is right for a measured knob position and wrong for
+ * anything that is a statement about the whole recording — see that function.
+ *
+ * @returns {Promise<object>} the `analyzeAutoLevel` result — see dsp/autoLevel.js
+ */
+export function computeAutoLevelAnalysis(segments, totalDuration, sampleRate, channels, config = {}) {
+  return measureWholeRegionInWorker(
+    'autoLevelAnalyze', segments, 0, totalDuration, config, sampleRate, channels,
+  ).then(d => d.analysis)
 }
 
 /**

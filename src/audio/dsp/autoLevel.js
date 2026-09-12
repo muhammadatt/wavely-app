@@ -80,6 +80,30 @@ export const FRAME_MS = 25
 /** Hop for the short-term loudness curve that drives sub-phrase splitting, ms. */
 export const HOP_MS = 100
 
+/**
+ * Resolution of the K-weighted energy prefix sum, ms.
+ *
+ * ⚠ THE ENERGY SUM IS PER-BLOCK, NOT PER-SAMPLE, AND THAT IS A HARD REQUIREMENT
+ * RATHER THAN AN OPTIMISATION. A per-sample `Float64Array` prefix sum over an
+ * hour of 44.1 kHz audio is 1.27 GB, with a 635 MB mono buffer beside it — and
+ * an hour-long chapter is not an edge case here, it is what the beachhead
+ * audience uploads. At 10 ms the same file needs 2.9 MB.
+ *
+ * ⚠ NOTHING IN THIS STAGE WANTS SAMPLE RESOLUTION. Clip and hop boundaries are
+ * hop-aligned by construction; the only finer consumer is the crossfade
+ * placement search, whose window is 30 ms — so 10 ms moves a transition by at
+ * most one block, inside silence that was chosen for being the quietest place
+ * in the gap.
+ *
+ * ⚠ HOP IS DERIVED FROM BLOCK, NOT ROUNDED SEPARATELY. `round(0.1 * sr)` and
+ * `10 * round(0.01 * sr)` differ at some sample rates, and a hop that is not a
+ * whole number of blocks makes every clip boundary land mid-block — which turns
+ * an exact range sum into a silently approximate one.
+ */
+export const BLOCK_MS = 10
+/** Blocks per hop. HOP_MS / BLOCK_MS, stated so the derivation is visible. */
+const BLOCKS_PER_HOP = HOP_MS / BLOCK_MS
+
 export const VAD_MIN_VOICED_MS = 200
 export const VAD_MIN_UNVOICED_MS = 300
 
@@ -126,53 +150,95 @@ function frameBoundary(f, sampleRate) {
 // ── Mono sum and K-weighted power ───────────────────────────────────────────
 
 /**
- * Sum of channels, for the energy gate.
+ * Per-frame RMS of the channel SUM, without materialising the sum.
  *
  * ⚠ SUM, NOT MEAN-OF-POWERS — the same distinction `gatedRmsOfChannels` records
  * paying for. A stereo file with one dead channel and a polarity-flipped pair
  * are the two cases that separate them, and both are ordinary recordings.
+ *
+ * ⚠ AND NOT VIA A MONO BUFFER. Building one costs a `Float32Array` the length of
+ * the file — 635 MB for an hour — to be read once, in order, and thrown away.
+ * The frame loop needs only the samples of the frame it is on.
  */
-function monoSum(channels, length) {
-  const n = channels.length
-  const out = new Float32Array(length)
-  if (n === 0) return out
-  const scale = 1 / n
-  for (let ch = 0; ch < n; ch++) {
-    const c = channels[ch]
-    const m = Math.min(length, c.length)
-    for (let i = 0; i < m; i++) out[i] += c[i] * scale
+function frameRmsOfChannelSum(channels, sampleRate, totalSamples) {
+  const numFrames = Math.floor(totalSamples / ((FRAME_MS / 1000) * sampleRate))
+  const out = new Float64Array(Math.max(0, numFrames))
+  const nCh = channels.length
+  if (nCh === 0) return out
+  const scale = 1 / nCh
+
+  for (let f = 0; f < numFrames; f++) {
+    const start = frameBoundary(f, sampleRate)
+    const end = Math.min(totalSamples, frameBoundary(f + 1, sampleRate))
+    let sumSq = 0
+    for (let i = start; i < end; i++) {
+      let x = 0
+      for (let ch = 0; ch < nCh; ch++) x += channels[ch][i]
+      x *= scale
+      sumSq += x * x
+    }
+    out[f] = end > start ? Math.sqrt(sumSq / (end - start)) : 0
   }
   return out
 }
 
 /**
- * Prefix sum of K-weighted power, summed across channels per BS.1770.
+ * Prefix sum of K-weighted energy per BLOCK, summed across channels per BS.1770.
  *
- * A prefix array makes "loudness of an arbitrary sample range" O(1), which is
- * what the clip measurement and the short-term curve both need — the server
- * builds the same thing for the same reason.
+ * Entry `b` holds the total K-weighted energy of every sample before block `b`,
+ * so the energy of any block-aligned range is one subtraction. See `BLOCK_MS`
+ * for why this is per-block and not per-sample.
+ *
+ * ⚠ FILTERED IN CHUNKS, WITH THE CASCADE STATE CARRIED ACROSS THEM. The scratch
+ * buffer is what would otherwise be file-length; a `BiquadCascade` is a
+ * stateful streaming filter, so feeding it consecutive chunks gives bit-identical
+ * output to one long call. Resetting between chunks instead would put a filter
+ * transient at every chunk boundary.
  */
-function kWeightedPowerSum(channels, sampleRate, length) {
+function kWeightedBlockEnergy(channels, sampleRate, totalSamples, blockSamples) {
   const sections = kWeightingSections(sampleRate)
-  const ps = new Float64Array(length + 1)
-  const scratch = new Float32Array(length)
+  const numBlocks = Math.ceil(totalSamples / blockSamples)
+  const prefix = new Float64Array(numBlocks + 1)
+  const perBlock = new Float64Array(numBlocks)
+
+  // A whole number of blocks per chunk, so a chunk never splits one.
+  const CHUNK_BLOCKS = 4096
+  const chunkSamples = CHUNK_BLOCKS * blockSamples
+  const scratch = new Float32Array(chunkSamples)
 
   for (const channel of channels) {
     const cascade = new BiquadCascade(sections.length, 1)
     cascade.setSections(sections)
-    const src = channel.length >= length ? channel.subarray(0, length) : channel
-    scratch.fill(0)
-    cascade.process(src, scratch.subarray(0, src.length), src.length, 0)
-    for (let i = 0; i < length; i++) ps[i + 1] += scratch[i] * scratch[i]
+    for (let off = 0; off < totalSamples; off += chunkSamples) {
+      const n = Math.min(chunkSamples, totalSamples - off, channel.length - off)
+      if (n <= 0) break
+      cascade.process(channel.subarray(off, off + n), scratch.subarray(0, n), n, 0)
+      for (let i = 0; i < n; i++) {
+        const v = scratch[i]
+        perBlock[((off + i) / blockSamples) | 0] += v * v
+      }
+    }
   }
-  // Prefix-accumulate in place, now that every channel has contributed.
-  for (let i = 0; i < length; i++) ps[i + 1] += ps[i]
-  return ps
+
+  for (let b = 0; b < numBlocks; b++) prefix[b + 1] = prefix[b] + perBlock[b]
+  return prefix
 }
 
-function meanSquareRange(powerSum, start, end) {
+/**
+ * Mean K-weighted square over a SAMPLE range, read from the block prefix sum.
+ *
+ * ⚠ THE RANGE IS ROUNDED TO BLOCKS. Every caller that matters passes hop-aligned
+ * bounds (clips and hops are both whole numbers of blocks by construction), so
+ * the rounding is a no-op for them; only the crossfade search can land between
+ * blocks, and it is choosing a place to hide a transition rather than measuring
+ * anything reported.
+ */
+function meanSquareRange(blockPrefix, start, end, blockSamples) {
   if (end <= start) return 0
-  return (powerSum[end] - powerSum[start]) / (end - start)
+  const b0 = Math.max(0, Math.round(start / blockSamples))
+  const b1 = Math.min(blockPrefix.length - 1, Math.round(end / blockSamples))
+  if (b1 <= b0) return 0
+  return (blockPrefix[b1] - blockPrefix[b0]) / ((b1 - b0) * blockSamples)
 }
 
 function lufsOf(meanSq) {
@@ -185,19 +251,19 @@ function lufsOf(meanSq) {
  * Per-frame voiced flags from energy alone, plus the bootstrapped noise floor.
  * The server's energy backend, ported exactly.
  */
-export function voicedFramesByEnergy(mono, sampleRate) {
-  const numFrames = Math.floor(mono.length / ((FRAME_MS / 1000) * sampleRate))
+export function voicedFramesByEnergy(channels, sampleRate, totalSamples) {
+  /**
+   * ⚠ THE WRAP HAPPENS BEFORE THE LENGTH IS TAKEN, and a default parameter
+   * cannot do that. `channels[0]` on a bare Float32Array is the first SAMPLE, a
+   * number, so `.length` is undefined and the default resolved to zero — the
+   * function then reported no frames on perfectly good audio.
+   */
+  const list = Array.isArray(channels) ? channels : [channels]
+  const n = totalSamples ?? list[0]?.length ?? 0
+  const frameRms = frameRmsOfChannelSum(list, sampleRate, n)
+  const numFrames = frameRms.length
   if (numFrames === 0) {
     return { voiced: new Uint8Array(0), noiseFloorDbfs: DB_FLOOR, frameRms: new Float64Array(0) }
-  }
-
-  const frameRms = new Float64Array(numFrames)
-  for (let f = 0; f < numFrames; f++) {
-    const start = frameBoundary(f, sampleRate)
-    const end = Math.min(mono.length, frameBoundary(f + 1, sampleRate))
-    let sumSq = 0
-    for (let i = start; i < end; i++) sumSq += mono[i] * mono[i]
-    frameRms[f] = end > start ? Math.sqrt(sumSq / (end - start)) : 0
   }
 
   // Noise floor: RMS over the lowest-energy frames.
@@ -445,16 +511,24 @@ function mergeClipsForGainConflict(clipsIn, gainsIn, maxDeltaDb) {
   return { clips, gains, merges }
 }
 
-function findLowestEnergyWindow(powerSum, fromSample, toSample, windowSamples, totalSamples) {
+function findLowestEnergyWindow(
+  powerSum, fromSample, toSample, windowSamples, totalSamples, blockSamples,
+) {
   const lo = Math.max(0, fromSample)
   const hi = Math.min(totalSamples, toSample)
   const win = Math.max(1, Math.min(windowSamples, hi - lo))
   if (hi - lo <= win) return lo
-  const stride = Math.max(1, Math.floor(win / 4))
+  /**
+   * ⚠ STEPPED IN BLOCKS, because the energy sum has no finer resolution — a
+   * sample-stride search would read the same block repeatedly and report ties.
+   * The window is 30 ms against a 10 ms block, so the placement moves by at
+   * most a third of a crossfade, inside a gap chosen for being quiet.
+   */
+  const stride = Math.max(blockSamples, Math.floor(win / 4))
   let bestStart = lo
   let bestEnergy = Infinity
   for (let s = lo; s + win <= hi; s += stride) {
-    const e = meanSquareRange(powerSum, s, s + win)
+    const e = meanSquareRange(powerSum, s, s + win, blockSamples)
     if (e < bestEnergy) { bestEnergy = e; bestStart = s }
   }
   return bestStart
@@ -488,11 +562,11 @@ function findLowestEnergyWindow(powerSum, fromSample, toSample, windowSamples, t
  * Null when the first clip starts at sample 0: there is nothing before it to
  * step from, so the envelope simply begins at that clip's gain.
  */
-function buildHeadPlan(clips, gains, powerSum, crossfadeSamples, totalSamples) {
+function buildHeadPlan(clips, gains, powerSum, crossfadeSamples, totalSamples, blockSamples) {
   const first = clips[0]
   if (!first || first.sampleStart <= 0) return null
   const start = findLowestEnergyWindow(
-    powerSum, 0, first.sampleStart, crossfadeSamples, totalSamples,
+    powerSum, 0, first.sampleStart, crossfadeSamples, totalSamples, blockSamples,
   )
   return {
     startSample: start,
@@ -502,13 +576,17 @@ function buildHeadPlan(clips, gains, powerSum, crossfadeSamples, totalSamples) {
   }
 }
 
-function buildCrossfadePlans(clips, gains, powerSum, crossfadeSamples, totalSamples) {
+function buildCrossfadePlans(
+  clips, gains, powerSum, crossfadeSamples, totalSamples, blockSamples,
+) {
   const plans = []
   for (let k = 0; k < clips.length - 1; k++) {
     const a = clips[k]
     const b = clips[k + 1]
     const start = b.sampleStart > a.sampleEnd
-      ? findLowestEnergyWindow(powerSum, a.sampleEnd, b.sampleStart, crossfadeSamples, totalSamples)
+      ? findLowestEnergyWindow(
+        powerSum, a.sampleEnd, b.sampleStart, crossfadeSamples, totalSamples, blockSamples,
+      )
       : Math.max(0, a.sampleEnd - Math.floor(crossfadeSamples / 2))
     plans.push({
       startSample: start,
@@ -549,28 +627,36 @@ export function analyzeAutoLevel(channels, sampleRate, config = {}) {
   if (!channels || channels.length === 0 || totalSamples === 0) return skip('empty')
   if (totalSamples < MIN_FILE_DURATION_S * sampleRate) return skip('file_too_short')
 
-  const mono = monoSum(channels, totalSamples)
-  const { voiced: rawVoiced, noiseFloorDbfs } = voicedFramesByEnergy(mono, sampleRate)
+  const { voiced: rawVoiced, noiseFloorDbfs } = voicedFramesByEnergy(
+    channels, sampleRate, totalSamples,
+  )
   const voiced = applyVadHysteresis(rawVoiced)
 
   let voicedFrames = 0
   for (let i = 0; i < voiced.length; i++) voicedFrames += voiced[i]
   if (voicedFrames * (FRAME_MS / 1000) < MIN_VOICED_DURATION_S) return skip('not_enough_voiced')
 
-  const hopSamples = Math.max(1, Math.round((HOP_MS / 1000) * sampleRate))
+  /**
+   * ⚠ HOP DERIVED FROM BLOCK, so a clip boundary is always a whole number of
+   * blocks and `meanSquareRange`'s rounding is exact for it. See BLOCK_MS.
+   */
+  const blockSamples = Math.max(1, Math.round((BLOCK_MS / 1000) * sampleRate))
+  const hopSamples = blockSamples * BLOCKS_PER_HOP
   const numHops = Math.floor(totalSamples / hopSamples)
   if (numHops < 2) return skip('file_too_short')
   const framesPerHop = Math.max(1, Math.round(HOP_MS / FRAME_MS))
   const hopVoiced = frameVoicedToHopVoiced(voiced, framesPerHop, numHops)
 
-  const kwPowerSum = kWeightedPowerSum(channels, sampleRate, totalSamples)
+  const kwPowerSum = kWeightedBlockEnergy(channels, sampleRate, totalSamples, blockSamples)
 
   // Short-term loudness per hop, for sub-phrase splitting. One hop's own window
   // — the server uses the same span for this curve.
   const shortTerm = new Float64Array(numHops)
   for (let h = 0; h < numHops; h++) {
     const a = h * hopSamples
-    shortTerm[h] = lufsOf(meanSquareRange(kwPowerSum, a, Math.min(a + hopSamples, totalSamples)))
+    shortTerm[h] = lufsOf(meanSquareRange(
+      kwPowerSum, a, Math.min(a + hopSamples, totalSamples), blockSamples,
+    ))
   }
 
   const minHops = Math.max(1, Math.round(SUBPHRASE_SPLIT_MIN_DURATION_MS / HOP_MS))
@@ -586,7 +672,9 @@ export function analyzeAutoLevel(channels, sampleRate, config = {}) {
   }
   if (clips.length === 0) return skip('no_clips')
 
-  const clipLufs = clips.map(c => lufsOf(meanSquareRange(kwPowerSum, c.sampleStart, c.sampleEnd)))
+  const clipLufs = clips.map(
+    c => lufsOf(meanSquareRange(kwPowerSum, c.sampleStart, c.sampleEnd, blockSamples)),
+  )
   const durations = clips.map(c => c.sampleEnd - c.sampleStart)
   const sampleStarts = clips.map(c => c.sampleStart)
 
@@ -620,10 +708,10 @@ export function analyzeAutoLevel(channels, sampleRate, config = {}) {
   const merged = mergeClipsForGainConflict(clips, rawGains, MERGE_MAX_DELTA_DB)
   const crossfadeSamples = Math.max(1, Math.round((CROSSFADE_MS / 1000) * sampleRate))
   const crossfadePlans = buildCrossfadePlans(
-    merged.clips, merged.gains, kwPowerSum, crossfadeSamples, totalSamples,
+    merged.clips, merged.gains, kwPowerSum, crossfadeSamples, totalSamples, blockSamples,
   )
   const headPlan = buildHeadPlan(
-    merged.clips, merged.gains, kwPowerSum, crossfadeSamples, totalSamples,
+    merged.clips, merged.gains, kwPowerSum, crossfadeSamples, totalSamples, blockSamples,
   )
 
   return {
@@ -631,6 +719,15 @@ export function analyzeAutoLevel(channels, sampleRate, config = {}) {
     skippedReason: null,
     clips: merged.clips,
     gainsDb: merged.gains,
+    /**
+     * Each clip's measured K-weighted loudness, ungated. Reported rather than
+     * kept private so the panel can show what was measured instead of only what
+     * was decided — and so the chunked filtering above can be checked against an
+     * independent single-pass measurement, which is the only direct test of it.
+     */
+    clipLufs: merged.clips.map(
+      c => lufsOf(meanSquareRange(kwPowerSum, c.sampleStart, c.sampleEnd, blockSamples)),
+    ),
     crossfadePlans,
     headPlan,
     totalSamples,

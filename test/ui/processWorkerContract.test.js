@@ -71,6 +71,14 @@ const MEASUREMENTS = [
   ['schepsAutoTrim', {}, 'trimDb'],
   ['softClipperCeiling', { percentile: 0.001 }, 'ceilingDb'],
   ['voiceProfile', {}, 'profile'],
+  /**
+   * ⚠ ANSWERS `done` EVEN WHEN IT DECIDES TO DO NOTHING. The half-second of
+   * tone below is far under the stage's own minimum length, so this exercises
+   * the SKIP path — and a skip is a successful measurement carrying
+   * `applied: false`, not an error. A handler that treated "nothing to do" as
+   * a failure would leave the panel analysing forever.
+   */
+  ['autoLevelAnalyze', {}, 'analysis'],
   ['measureLoudness', {}, 'loudness'],
   [
     'loudnessNormalize',
