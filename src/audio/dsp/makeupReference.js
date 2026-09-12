@@ -41,18 +41,124 @@
 export const MAKEUP_PERCENTILE = 0.001
 
 /**
- * How far below the ceiling the soft knee starts, dB.
+ * The WIDEST the soft knee is allowed to be, dB. No longer the width itself —
+ * see `ceilingKneeDbFor`, which sizes each render's knee to the overshoot that
+ * render actually has.
  *
  * The knee is C1 at its start — the curve leaves the unity line with unity
- * slope — so nothing below `ceiling - CEILING_KNEE_DB` is touched at all and
- * the transition into the ceiling has no corner. 3 dB is wide enough that the
- * bend is inaudible on the handful of samples that reach it and narrow enough
- * that it never reaches the programme: measured on narration, the ceiling
- * attenuates the loudest 0.1 % of samples by 0.00 / 0.07 / 0.19 / 0.24 dB at
- * Peak Reduction 50 / 60 / 70 / 80, and the 1-10 % band by 0.00 dB at every
- * one of them.
+ * slope — so nothing below `ceiling - knee` is touched at all and the
+ * transition into the ceiling has no corner. 3 dB is wide enough that the bend
+ * is inaudible on the handful of samples that reach it and narrow enough that
+ * it never reaches the programme: measured on narration, the ceiling attenuates
+ * the loudest 0.1 % of samples by 0.00 / 0.07 / 0.19 / 0.24 dB at Peak
+ * Reduction 50 / 60 / 70 / 80, and the 1-10 % band by 0.00 dB at every one of
+ * them.
+ *
+ * ⚠ THAT TABLE IS A MEAN OVER A BAND AND IT HID WHAT HAPPENS AT THE PEAK. The
+ * band is dominated by samples well below the ceiling; the peak sample is the
+ * one the guarantee is about, and it pays far more. See `ceilingKneeDbFor`.
  */
 export const CEILING_KNEE_DB = 3
+
+/**
+ * Headroom added to the measured overshoot when sizing a knee, dB.
+ *
+ * NOT a measurement-error margin — there is almost nothing to cover there. The
+ * solve measures at base rate and the render is oversampled, and that moves the
+ * un-ceilinged peak by at most 0.001 dB across Peak Reduction 0-100 on
+ * narration. This exists for the parameters that move AFTER the solve: Scheps'
+ * Mix and Output trim, and OptoSmooth's Gain, all of which can push a little
+ * more into a ceiling than the solve saw.
+ */
+export const CEILING_KNEE_MARGIN_DB = 0.5
+
+/**
+ * The knee width for a render whose un-ceilinged peak sits `overshootDb` above
+ * the ceiling.
+ *
+ * ⚠ THE KNEE USED TO BE A FIXED 3 dB AND THAT IS A COST WHEN THERE IS NOTHING
+ * TO CATCH. `softCeiling` is a `tanh` knee, so it approaches the ceiling
+ * asymptotically and NEVER REACHES IT: at an input exactly at the ceiling,
+ * `tanh(1) = 0.7616` puts the output 0.627 dB BELOW it, and the bend starts a
+ * full 3 dB down. Measured on narration, peak with the ceiling armed against
+ * the same render with it off:
+ *
+ *   OptoSmooth                     Scheps
+ *    PR   w/     w/o    cost        mix   w/     w/o    cost
+ *    10  -3.57  -3.09  -0.48          0  -3.43  -2.80  -0.63
+ *    25  -3.62  -3.18  -0.44        0.2  -3.58  -3.11  -0.47
+ *    40  -3.81  -3.50  -0.30       0.35  -3.55  -3.05  -0.50
+ *    55  -2.83  +0.60  -3.43        0.5  -3.48  -2.92  -0.57
+ *    70  -2.80  +2.58  -5.38       0.75  -3.35  -2.62  -0.73
+ *    85  -2.80  +2.84  -5.64          1  -3.20  -2.22  -0.98
+ *
+ * Two regimes, and the fixed knee is only right in one. At Peak Reduction 55+
+ * the ceiling is LOAD-BEARING — un-ceilinged those renders deliver +0.60,
+ * +2.58, +2.84 dBFS — and it is catching 3.4-5.6 dB of percentile-makeup
+ * overshoot, exactly the job it was built for. At PR 10-40 the render is
+ * already under the ceiling (-3.09, -3.18, -3.50) and the knee still takes
+ * 0.30-0.48 dB for nothing.
+ *
+ * ⚠ SCHEPS IS STRUCTURALLY EXPOSED WHERE OPTOSMOOTH IS NOT, and that is what
+ * made this worth fixing rather than noting. Its ceiling is the source peak and
+ * at low Mix its output IS approximately the source, so the peak sample sits
+ * where the knee is deepest BY CONSTRUCTION. At Mix 0 — bit-exact against the
+ * delayed input with the ceiling off, verified — the ceiling alone cost
+ * 0.63 dB of peak. The one setting that should be a reference for an A/B was
+ * not one. At Mix 1 the real overshoot is 0.58 dB and the fixed knee charged
+ * 0.98: it cost more than it caught.
+ *
+ * ⚠ A KNEE CANNOT BE BOTH SOFT AND FREE, so this does not try. Any curve that
+ * is C1 and bounded by the ceiling must leave the unity line below it, so a
+ * soft knee ALWAYS lands the peak under the ceiling; only a hard corner at the
+ * ceiling costs nothing, and that is a clipper. The lever is therefore the
+ * WIDTH, which is now the overshoot the render actually has:
+ *
+ *   overshoot <= -margin   knee 0     ceiling armed, hard, and never reached
+ *   overshoot 0.58 dB      knee 1.08  the Scheps Mix 1 case
+ *   overshoot >= 2.5 dB    knee 3     capped: OptoSmooth at PR 55+, unchanged
+ *
+ * ⚠ A ZERO WIDTH IS SAFE AND IS NOT A CLIPPER IN DISGUISE. `softCeiling` at
+ * `kneeStart === ceiling` telescopes to a hard clamp at the ceiling, which is
+ * only reachable by material the solve measured as being below it; the
+ * guarantee is unchanged either way, and it is the ARMING that matters, not the
+ * shape of a curve nothing touches.
+ *
+ * ⚠ IT IS A WIDTH, SO IT TRAVELS WITH THE SOLVE AND NOT WITH THE CEILING — BUT
+ * IT IS ONLY VALID OVER THE SPAN THE SOLVE SAW. `processing.js` deliberately
+ * re-measures `ceilingDb` over the WHOLE region while the solve only ever sees
+ * a capped window, and the first version of this claimed that mismatch was safe
+ * because a whole-region peak can only be HIGHER than the window's, making the
+ * true overshoot smaller and this knee merely too wide.
+ *
+ * ⚠ THAT ARGUMENT WAS WRONG AND A REVIEWER CAUGHT IT. It is an argument about
+ * the CEILING and the knee is sized from TWO measurements, not one: the
+ * window's output peak is windowed too, the compressor is stateful, and a
+ * transient outside the window can overshoot by more than anything inside it.
+ * The subtraction can then return a near-zero width and hard-clamp material
+ * nobody measured. It never breaks the guarantee — `softCeiling` still bounds
+ * the output — so the cost is a hard corner where a soft one was intended,
+ * which is the exact thing this knee exists to avoid.
+ *
+ * `analysedWholeRegion` is the guard: the measured width is used only when the
+ * window covered the whole region, and a long selection falls back to the
+ * conservative fixed knee it has always had.
+ */
+export function ceilingKneeDbFor(overshootDb) {
+  /**
+   * ⚠ -Infinity IS AN ANSWER AND NaN IS A MISSING ONE, so they must not share a
+   * branch. A silent render peaks at -Infinity dB and genuinely has nothing to
+   * catch, which is knee 0; only an absent or corrupt measurement should fall
+   * back to the widest knee, because a fallback is a guess and the wide one is
+   * the guess that cannot clip.
+   */
+  if (Number.isNaN(overshootDb) || overshootDb === undefined || overshootDb === null) {
+    return CEILING_KNEE_DB
+  }
+  if (typeof overshootDb !== 'number') return CEILING_KNEE_DB
+  const knee = overshootDb + CEILING_KNEE_MARGIN_DB
+  return knee < 0 ? 0 : knee > CEILING_KNEE_DB ? CEILING_KNEE_DB : knee
+}
 
 /**
  * Memoryless soft ceiling. Asymptotic, so |output| never EXCEEDS `ceiling`, for

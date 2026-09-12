@@ -87,11 +87,11 @@ const CONTROLS = [
   },
   {
     key: 'cellCurveDriveMax', label: 'Cell sat', min: 0, max: 24, step: 0.05, digits: 2,
-    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. NOT Tube Sat’s Drive knob. Ships at 1.5, chosen by ear alongside Valve sat 0.5 and Emphasis 100.',
+    hint: 'CELL stage only — this is the one that matters, the cell is ~95% of the distortion. Drive into the imported curve at full compression, before the gain-reduction law scales it. NOT Tube Sat’s Drive knob. Ships at 1.5, chosen by ear alongside Valve sat 0.5 and Emphasis 50.',
   },
   {
     key: 'emphasis', label: 'Emphasis', min: 0, max: 100, step: 1, digits: 0,
-    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Measured: it works on the Tube Sat CELL (-1.1 dB crest at 50) and is inert on tanh and on the gain modulation.',
+    hint: 'Pre/de-emphasis pair around the nonlinear section — boosts HF into it and takes the boost back out after, so the curve absorbs an onset instead of brightening it. Ported from Tube Sat. Ships at 50. Measured on narration, the whole 0-100 sweep moves crest under 0.07 dB while the top half adds ~11 dB of distortion on bright sustained vowels — the -1.1 dB it shows on a synthetic burst probe does not transfer to speech. Inert on tanh and on the gain modulation.',
   },
   {
     key: 'vocalSatCurveDrive', label: 'Valve sat', min: 0.2, max: 8, step: 0.02, digits: 2,

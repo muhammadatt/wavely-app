@@ -1,5 +1,5 @@
 import { getSegmentDuration } from './operations.js'
-import { analysisWindow, regionPeakDb } from './analysisWindow.js'
+import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
 import {
@@ -329,8 +329,73 @@ function measureInWorker(workerType, segments, start, end, kernelParams, sampleR
 }
 
 /**
+ * The same round trip over the WHOLE region, with no analysis cap.
+ *
+ * ⚠ THE CAP IS NOT AN OPTIMISATION THAT CAN BE APPLIED EVERYWHERE. It is right
+ * for a measured knob position, which asks "what is this setting doing" and is
+ * answered as well by a representative half-minute. It is wrong for anything
+ * that is a statement about the region as a whole: integrated loudness and
+ * ACX's ungated RMS are both defined over all of it, and measuring thirty
+ * seconds of a chapter that opens loud reads hot and normalizes the rest of
+ * the recording down to match. Two functions rather than a flag, so the
+ * decision is visible at every call site.
+ */
+function measureWholeRegionInWorker(workerType, segments, start, end, params, sampleRate, channels) {
+  return new Promise((resolve, reject) => {
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    const id = ++measureSeq
+    measurePending.set(id, { resolve, reject })
+    getMeasureWorker().postMessage(
+      { __id: id, type: workerType, channelData, sampleRate, params },
+      channelData.map(c => c.buffer)
+    )
+  })
+}
+
+/**
+ * Every loudness reading for a region — integrated LUFS, ACX's ungated RMS,
+ * sample peak and true peak. Resolves the shape `measureLoudness` in
+ * dsp/loudness.js returns.
+ */
+export function measureRegionLoudness(segments, start, end, sampleRate, channels) {
+  return measureWholeRegionInWorker(
+    'measureLoudness', segments, start, end, {}, sampleRate, channels,
+  ).then(d => d.loudness)
+}
+
+/**
+ * Normalize a region to a loudness target and resolve `{ buffer, report }`.
+ *
+ * ⚠ THE REPORT IS MEASURED ON THE RENDERED OUTPUT, not predicted from the gain,
+ * and the panel prints it verbatim. Where the peak ceiling forced limiting, the
+ * loudness that came out is not the loudness the gain aimed at — see
+ * dsp/loudnessNormalize.js — and a panel that reported the aim would be telling
+ * a narrator they had hit a spec somebody else is about to measure.
+ *
+ * @param {{targetDb:number, unit:'LUFS'|'RMS', ceilingDb:number}} target
+ * @param {'limit'|'safe'} peakMode
+ */
+export function loudnessNormalizeRegion(
+  segments, start, end, target, peakMode, audioContext, sampleRate, channels,
+) {
+  return measureWholeRegionInWorker(
+    'loudnessNormalize', segments, start, end, { target, peakMode }, sampleRate, channels,
+  ).then((d) => {
+    const buffer = audioContext.createBuffer(
+      channels, Math.ceil((end - start) * sampleRate), sampleRate,
+    )
+    for (let ch = 0; ch < channels; ch++) buffer.copyToChannel(d.channelData[ch], ch)
+    return { buffer, report: d.report }
+  })
+}
+
+/**
  * Measure OptoSmooth's auto-makeup for a region. Resolves
- * `{ makeupDb, ceilingDb }`.
+ * `{ makeupDb, ceilingDb, ceilingKneeDb }`.
+ *
+ * The knee travels with the ceiling and must not be dropped: without it the
+ * kernel falls back to the widest fixed width, which costs peak headroom
+ * silently. See `ceilingKneeDbFor`.
  *
  * ⚠ THE TWO HALVES ARE MEASURED OVER DIFFERENT SPANS, DELIBERATELY. The makeup
  * comes from the worker's capped, start-anchored window, because solving it
@@ -349,11 +414,21 @@ export function computeLA2AAutoMakeup(
   return measureInWorker(
     'la2aAutoMakeup', segments, start, end, { ...kernelParams, reference }, sampleRate, channels,
   ).then((d) => {
-    if (reference !== 'percentile') return { makeupDb: d.makeupDb, ceilingDb: null }
+    if (reference !== 'percentile') {
+      return { makeupDb: d.makeupDb, ceilingDb: null, ceilingKneeDb: null }
+    }
     const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
     return {
       makeupDb: d.makeupDb,
       ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      /**
+       * The measured width only when the solve saw everything the ceiling was
+       * measured over — see `analysedWholeRegion`. Null is the conservative
+       * fixed knee, which is what this did before the width was measured at all.
+       */
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
     }
   })
 }
@@ -380,7 +455,9 @@ export function computeSoftClipperAutoMakeup(segments, start, end, kernelParams,
 /**
  * Measure the Scheps wet-path makeup, the dry/wet correlation and the density
  * the compression yields, for a region. Resolves
- * `{ trimDb, correlation, densityDb }` — see computeSchepsAutoTrim.
+ * `{ trimDb, correlation, densityDb, ceilingDb, ceilingKneeDb }` — see
+ * computeSchepsAutoTrim. The last two travel together: the ceiling is the
+ * guarantee and the knee is how softly it is enforced.
  */
 export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker('schepsAutoTrim', segments, start, end, kernelParams, sampleRate, channels)
@@ -398,6 +475,10 @@ export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate
         correlation: d.correlation,
         densityDb: d.densityDb,
         ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+        // Same span guard as the OptoSmooth solve, for the same reason.
+        ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+          ? d.ceilingKneeDb
+          : null,
       }
     })
 }

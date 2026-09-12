@@ -17,6 +17,7 @@ import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
+import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
 import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
@@ -248,15 +249,36 @@ export const OPERATIONS = [
   // ---- Effects (windows) ----
   {
     id: 'normalize',
-    label: 'Normalize',
-    desc: 'Peak normalize',
+    // "Normalize" on its own stopped being a name the moment there were two of
+    // them, and the pair are not interchangeable: one puts the loudest SAMPLE
+    // somewhere, the other puts the perceived LOUDNESS somewhere. Both say
+    // which in the label, so the rail never offers a choice between a word and
+    // the same word.
+    label: 'Peak Normalize',
+    desc: 'Put the loudest peak at a chosen level',
     category: 'effects',
     group: 'Dynamics',
     icon: 'normalize',
-    keywords: ['peak', 'level', 'loudness', 'maximize', 'gain'],
+    keywords: ['peak', 'level', 'maximize', 'gain', 'amplify'],
     requires: 'selection',
     surface: 'window',
     component: NormalizeWindow,
+  },
+  {
+    id: 'loudness',
+    label: 'Loudness Normalize',
+    desc: 'Hit a delivery target like ACX, Spotify or -16 LUFS',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'loudness',
+    keywords: [
+      'lufs', 'loudness', 'level', 'acx', 'spotify', 'apple', 'youtube',
+      'amazon', 'tidal', 'podcast', 'broadcast', 'r128', 'ebu', 'rms',
+      'true peak', 'dbtp', 'target', 'compliance',
+    ],
+    requires: 'selection',
+    surface: 'window',
+    component: LoudnessWindow,
   },
   {
     id: 'opto-smooth',

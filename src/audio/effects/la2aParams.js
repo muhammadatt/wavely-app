@@ -81,6 +81,11 @@ export function toKernelParams(params) {
      */
     ...(Number.isFinite(params.ceilingDb) ? { ceilingDb: params.ceilingDb } : {}),
     /**
+     * The ceiling's knee width, dB — measured with the ceiling and travelling
+     * with it, for exactly the reasons above. See `ceilingKneeDbFor`.
+     */
+    ...(Number.isFinite(params.ceilingKneeDb) ? { ceilingKneeDb: params.ceilingKneeDb } : {}),
+    /**
      * ⚠ MEASURED FROM THE WHOLE FILE, NOT DIALLED, AND NOT A PRESET KEY — same
      * reasoning as `ceilingDb` above. It is the file's own level relative to
      * nominal, so it belongs to the audio; a preset carrying one would apply

@@ -3,6 +3,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { memoSignal } from '../helpers/memoSignal.js'
 import {
   ResonanceKernel,
   RESONANCE_KERNEL_DEFAULTS,
@@ -36,24 +37,26 @@ const LATENCY = 2048
 function voice({
   seconds = 3, f0 = 150, jitterHz = 3, amp = 0.2, noiseDb = -45,
 } = {}) {
-  const n = Math.round(seconds * SR)
-  const out = new Float32Array(n)
-  const noiseAmp = Math.pow(10, noiseDb / 20)
-  let phase = 0
-  let s = 4242
-  for (let i = 0; i < n; i++) {
-    const t = i / SR
-    const pitch = f0 + jitterHz * Math.sin(2 * Math.PI * 2.7 * t)
-    phase += (2 * Math.PI * pitch) / SR
-    let v = 0
-    for (let k = 1; k <= 30; k++) {
-      if (pitch * k >= SR / 2) break
-      v += (amp / k) * Math.sin(k * phase + k * 0.9)
+  return memoSignal(`voice|${seconds}|${f0}|${jitterHz}|${amp}|${noiseDb}`, () => {
+    const n = Math.round(seconds * SR)
+    const out = new Float32Array(n)
+    const noiseAmp = Math.pow(10, noiseDb / 20)
+    let phase = 0
+    let s = 4242
+    for (let i = 0; i < n; i++) {
+      const t = i / SR
+      const pitch = f0 + jitterHz * Math.sin(2 * Math.PI * 2.7 * t)
+      phase += (2 * Math.PI * pitch) / SR
+      let v = 0
+      for (let k = 1; k <= 30; k++) {
+        if (pitch * k >= SR / 2) break
+        v += (amp / k) * Math.sin(k * phase + k * 0.9)
+      }
+      s = (s * 1103515245 + 12345) & 0x7fffffff
+      out[i] = v + noiseAmp * (s / 0x3fffffff - 1)
     }
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    out[i] = v + noiseAmp * (s / 0x3fffffff - 1)
-  }
-  return out
+    return out
+  })
 }
 
 /** Apply a resonant peaking boost — what a room mode or mic resonance does. */
@@ -67,15 +70,17 @@ function resonate(sig, freqHz, q, gainDb) {
 
 /** Unpitched broadband signal — the tracker reads 0 of 255 frames as pitched. */
 function noise({ seconds = 3, db = -20 } = {}) {
-  const n = Math.round(seconds * SR)
-  const out = new Float32Array(n)
-  const amp = Math.pow(10, db / 20)
-  let s = 4242
-  for (let i = 0; i < n; i++) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    out[i] = amp * (s / 0x3fffffff - 1)
-  }
-  return out
+  return memoSignal(`noise|${seconds}|${db}`, () => {
+    const n = Math.round(seconds * SR)
+    const out = new Float32Array(n)
+    const amp = Math.pow(10, db / 20)
+    let s = 4242
+    for (let i = 0; i < n; i++) {
+      s = (s * 1103515245 + 12345) & 0x7fffffff
+      out[i] = amp * (s / 0x3fffffff - 1)
+    }
+    return out
+  })
 }
 
 /**

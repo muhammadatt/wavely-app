@@ -2,8 +2,9 @@
  * Audio Processing Web Worker
  *
  * Handles CPU-intensive audio processing tasks off the main thread.
- * Supports: normalize, adjustVolume, la2aAutoMakeup, fet1176AutoMakeup,
- * softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling, voiceProfile
+ * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
+ * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
+ * voiceProfile, measureLoudness
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
@@ -11,6 +12,8 @@ import { computeSchepsAutoTrim } from '../audio/schepsProcessor.js'
 import { computeSoftClipperAutoMakeupDb } from '../audio/softClipperProcessor.js'
 import { measurePeakCeilingDb } from '../audio/ceilingPresets.js'
 import { measureVoiceProfile } from '../audio/voiceProfile.js'
+import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
+import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -39,6 +42,18 @@ function postDone(payload) {
   postReply({ type: 'done', ...payload })
 }
 
+/**
+ * Reply with a SUCCESS that hands buffers back rather than copying them.
+ *
+ * Same contract as `postDone` — `type: 'done'`, `__id` echoed — and split out
+ * only because a reply carrying rendered audio must transfer it: a stereo
+ * hour is several hundred megabytes, and a structured clone of that is a
+ * copy the main thread pays for twice.
+ */
+function postDoneTransfer(payload, transfer) {
+  self.postMessage({ type: 'done', ...payload, __id: currentId }, transfer)
+}
+
 self.onmessage = function (e) {
   const { type, channelData, sampleRate, params } = e.data
   currentId = e.data.__id
@@ -46,6 +61,12 @@ self.onmessage = function (e) {
   switch (type) {
     case 'normalize':
       normalizeAudio(channelData, params)
+      break
+    case 'measureLoudness':
+      measureLoudness(channelData, sampleRate)
+      break
+    case 'loudnessNormalize':
+      loudnessNormalize(channelData, sampleRate, params)
       break
     case 'adjustVolume':
       adjustVolume(channelData, params)
@@ -84,12 +105,17 @@ self.onmessage = function (e) {
  * Only `makeupDb` comes back. The ceiling the percentile reference needs is
  * measured over the WHOLE region by `computeLA2AAutoMakeup`, not here, because
  * this worker only ever sees the capped analysis window — see `regionPeakDb`.
+ *
+ * ⚠ THE REPLY CARRIES `ceilingKneeDb` AS WELL AS `makeupDb`, and dropping it
+ * is a SILENT regression: the kernel falls back to the widest fixed knee and
+ * every render just goes a little quieter at the peak. `processWorkerContract`
+ * pins both fields for that reason.
  */
 function la2aAutoMakeup(channelData, sampleRate, params) {
   const { reference = 'peak', ...kernelParams } = params ?? {}
   try {
     const plan = computeAutoMakeupPlan(channelData, sampleRate, kernelParams, { reference })
-    postDone({ makeupDb: plan.makeupDb })
+    postDone({ makeupDb: plan.makeupDb, ceilingKneeDb: plan.ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -110,8 +136,10 @@ function autoMakeup(measure, channelData, sampleRate, params) {
 // Scheps wet path (two EQ cascades and the opto compressor) over the region.
 function schepsAutoTrim(channelData, sampleRate, params) {
   try {
-    const { trimDb, correlation, densityDb } = computeSchepsAutoTrim(channelData, sampleRate, params)
-    postDone({ trimDb, correlation, densityDb })
+    const {
+      trimDb, correlation, densityDb, ceilingKneeDb,
+    } = computeSchepsAutoTrim(channelData, sampleRate, params)
+    postDone({ trimDb, correlation, densityDb, ceilingKneeDb })
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
@@ -152,6 +180,43 @@ function softClipperCeiling(channelData, sampleRate, params) {
 function voiceProfile(channelData, sampleRate) {
   try {
     postDone({ profile: measureVoiceProfile(channelData, sampleRate) })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * Every loudness reading for a region — LUFS, ACX's RMS, sample and true peak.
+ *
+ * ⚠ THIS ONE IS NOT WINDOW-CAPPED AND MUST NOT BECOME SO. Every other
+ * measurement in this worker answers "what is this knob doing", and a
+ * representative thirty seconds answers that. Integrated loudness is a
+ * statement about the whole region by definition — cap it and a file whose
+ * first half-minute is a loud cold open reads hot, and the normalizer then
+ * takes the entire recording down to match. `measureRegionLoudness` in
+ * processing.js is the main-thread half and passes the full region.
+ */
+function measureLoudness(channelData, sampleRate) {
+  try {
+    postDone({ loudness: measureLoudnessOf(channelData, sampleRate) })
+  } catch (err) {
+    postReply({ type: 'error', message: err.message })
+  }
+}
+
+/**
+ * Render a region normalized to a loudness target.
+ *
+ * The report comes back MEASURED ON THE OUTPUT rather than predicted from the
+ * gain — see dsp/loudnessNormalize.js for why that distinction is the point of
+ * the whole module.
+ */
+function loudnessNormalize(channelData, sampleRate, params) {
+  try {
+    const { target, peakMode } = params ?? {}
+    const { channelData: out, report } =
+      renderLoudnessNormalize(channelData, sampleRate, target, peakMode)
+    postDoneTransfer({ channelData: out, report }, out.map(c => c.buffer))
   } catch (err) {
     postReply({ type: 'error', message: err.message })
   }
