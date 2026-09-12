@@ -336,6 +336,49 @@ const SPEECH_INIT_WINDOW_MS = 500
  * the safe direction (too high merely does less), and the 3 s tracker then
  * settles down onto the typical peak from above rather than climbing to it
  * from below.
+ *
+ * ⚠ IT IS ALSO THE LARGEST PREVIEW/APPLY DISAGREEMENT IN THE APP, and the two
+ * facts are the same fact. Preview runs the kernel over the whole session; an
+ * offline apply starts here, at 0 dBFS, and has to travel down at 3 s per
+ * e-fold. Where the preview entered a region with a LOW tracker — because the
+ * passage before it was quiet — it clips hard while the cold render, threshold
+ * still up near 0 dBFS, barely clips at all. Measured on a region 18 dB louder
+ * than what preceded it, energy over the region, preview against apply:
+ *
+ *   pre-roll    0 s      2 s      4 s      8 s     12 s     16 s
+ *   stock    -11.44   -2.813   -1.603   -0.400   -0.108    0.000
+ *   lim 0     -4.000   -1.172   -0.632   -0.150   -0.040    0.000
+ *
+ * ⚠ THE DIRECTION IS ASYMMETRIC AND ONLY ONE HALF IS BROKEN. Loud-to-loud and
+ * loud-to-quieter regions are EXACTLY identical at any pre-roll including
+ * none, because there the cold tracker and the settled one land in the same
+ * place. It is quiet-to-loud that fails, which is precisely the case this
+ * constant's "safe direction" reasoning creates.
+ *
+ * ⚠ AND IT IS THE ADAPTIVE TRACKER ALONE. In `fixed` threshold mode the same
+ * probe is exactly identical at every pre-roll — there is no tracker to be cold.
+ *
+ * Nothing here LATCHES, so unlike FET Punch this is fixable: at a pre-roll
+ * equal to all the preceding audio the difference is 0.000 dB. But it converges
+ * far more slowly than any other stage (OptoSmooth and Scheps are bit-exact at
+ * 2 s), because the tracker must traverse ~20 dB at a 3 s time constant.
+ *
+ * ⚠ NOTHING IS BEING DONE ABOUT THIS, AND THAT IS THE RIGHT ANSWER, because
+ * `adaptive` is deprecated and off the faceplate — see thresholdMode. This
+ * measurement is not a bug report against the shipping stage; it is the
+ * strongest evidence yet for why that mode should STAY deprecated, and it is
+ * recorded here so that anyone tempted to re-expose it finds the number first.
+ *
+ * The shipping `fixed` mode has no tracker to be cold and is exactly identical
+ * between preview and apply at every pre-roll, including none. Wiring a
+ * 12-second pre-roll to rescue a deprecated mode would slow every apply of the
+ * mode people actually use, to fix the one they cannot select.
+ *
+ * ⚠ A MEASUREMENT TRAP THAT NEARLY HID ALL OF THIS: a probe quieter than the
+ * threshold shows PERFECT agreement, because a threshold stage below its
+ * threshold is transparent and both runs pass the audio through untouched. The
+ * first sweep run against this stage used a -20 dBFS region and reported 0.0e+0
+ * everywhere. Check the stage is doing something before believing it agrees.
  */
 const SPEECH_INIT_HOLD_DB = 0
 
@@ -1125,6 +1168,15 @@ export const SOFT_CLIPPER_KERNEL_DEFAULTS = {
   // parameterisations of one idea is the duplication this codebase keeps
   // learning not to ship.
   thresholdMode: 'adaptive',
+  //
+  // ⚠ A THIRD REASON TO LEAVE IT DEPRECATED, MEASURED AFTER THE FACT: it is the
+  // largest preview/apply disagreement in the app. The tracker starts at
+  // SPEECH_INIT_HOLD_DB and a preview has been running all session, so on a
+  // region louder than the passage before it the preview clips hard while a
+  // cold render barely clips at all — 11.4 dB apart on the stock patch, and
+  // still 0.4 dB after eight seconds of lead-in because the tracker has ~20 dB
+  // to travel at a 3 s time constant. In `fixed` mode the same probe is
+  // EXACTLY identical at every pre-roll. See SPEECH_INIT_HOLD_DB for the table.
   fixedThresholdDb: -10, // used only in 'fixed' mode
   // 'tanh2' | 'tanh3' | 'tanh4' — knee contact order, see SHAPE_EXPONENT.
   //

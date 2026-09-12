@@ -39,12 +39,13 @@
  * The split falls exactly where the server's own data flow does; it is only
  * that the server never had a reason to name the halves.
  *
- * Dependency-free apart from ./biquad.js. No Web Audio, no DOM — the caller
- * hands in a mono Float32Array, which keeps this unit-testable without an
- * AudioContext.
+ * Dependency-free apart from ./biquad.js and ./loudness.js. No Web Audio, no
+ * DOM — the caller hands in a mono Float32Array, which keeps this unit-testable
+ * without an AudioContext.
  */
 
 import { BiquadCascade } from './biquad.js'
+import { kWeightingSections } from './loudness.js'
 
 // ── Constants (must track server/pipeline/autoLeveler.js) ────────────────────
 
@@ -99,46 +100,28 @@ export const AUTOLEVEL_DEFAULTS = {
 // ── K-weighting filter (EBU R128 / ITU-R BS.1770-4) ──────────────────────────
 
 /**
- * The two BS.1770 stages as normalised biquad sections.
+ * K-weight a buffer, using the loudness module's sections rather than the
+ * server's.
  *
- * Coefficients are the server's, which are the standard's: a high-shelf
- * pre-filter approximating the head's acoustic effect, then a 38 Hz high-pass.
- * They are written out rather than designed through biquad.js's `highShelf`
- * because the standard specifies these exact numbers, and a design function
- * that agrees to five decimals is not the same thing as the reference.
+ * ⚠ THESE ARE NOT THE SERVER'S COEFFICIENTS, AND PARITY STILL HOLDS EXACTLY.
+ * That looks like it cannot both be true, so: the two differ only in the
+ * numerator scaling of stage 2. `loudness.js` reproduces the BS.1770-4 table
+ * (b = [1, -2, 1]); the server divides that numerator by a0, which is the same
+ * filter a constant 0.047 dB quieter at 44.1 kHz. Nothing here reads an
+ * absolute LUFS value. Every number that leaves this module is a DIFFERENCE of
+ * two LUFS measurements taken through the same filter — a clip against its
+ * target, a hop against its clip's median, the weighted standard deviation of
+ * a set of clips — and a constant offset cancels out of all of them. The gains
+ * come out bit-identical, which autoLevelParity.test.js checks against the real
+ * pipeline stage rather than taking on faith.
+ *
+ * Sharing it is worth the paragraph. Two `kWeightingSections` in one directory,
+ * agreeing to four decimal places and disagreeing in the fifth, is a trap for
+ * whoever next needs K-weighting and picks whichever import their editor
+ * offers first.
+ *
+ * @returns {Float64Array} K-weighted copy of `samples`.
  */
-export function kWeightingSections(sampleRate) {
-  // Stage 1: high-shelf pre-filter
-  const K1  = Math.tan(Math.PI * 1681.974450955533 / sampleRate)
-  const Vh  = Math.pow(10.0, 3.999843853973347 / 20.0)
-  const Vb  = Math.pow(Vh, 0.4996667741545416)
-  const Q1  = 0.7071752369554196
-  const a0s = 1.0 + K1 / Q1 + K1 * K1
-
-  // Stage 2: high-pass filter at 38.135 Hz
-  const K2  = Math.tan(Math.PI * 38.13547087602444 / sampleRate)
-  const Q2  = 0.5003270373238773
-  const a0h = 1.0 + K2 / Q2 + K2 * K2
-
-  return [
-    {
-      b0: (Vh + Vb * K1 / Q1 + K1 * K1) / a0s,
-      b1: 2.0 * (K1 * K1 - Vh) / a0s,
-      b2: (Vh - Vb * K1 / Q1 + K1 * K1) / a0s,
-      a1: 2.0 * (K1 * K1 - 1.0) / a0s,
-      a2: (1.0 - K1 / Q1 + K1 * K1) / a0s,
-    },
-    {
-      b0: 1.0 / a0h,
-      b1: -2.0 / a0h,
-      b2: 1.0 / a0h,
-      a1: 2.0 * (K2 * K2 - 1.0) / a0h,
-      a2: (1.0 - K2 / Q2 + K2 * K2) / a0h,
-    },
-  ]
-}
-
-/** @returns {Float64Array} K-weighted copy of `samples`. */
 export function applyKWeighting(samples, sampleRate) {
   const cascade = new BiquadCascade(2, 1)
   cascade.setSections(kWeightingSections(sampleRate))

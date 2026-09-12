@@ -38,9 +38,13 @@ export const ICONS = {
 
   // Effects
   normalize: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  // Bars under a target line — the loudness normalizer aims a measurement at a
+  // number, which the peak normalizer's waveform glyph does not say.
+  loudness: '<line x1="3" y1="8" x2="21" y2="8"/><line x1="6" y1="15" x2="6" y2="20"/><line x1="10" y1="12" x2="10" y2="20"/><line x1="14" y1="16" x2="14" y2="20"/><line x1="18" y1="13" x2="18" y2="20"/>',
   // Phrases at uneven levels being brought onto one line — the leveler's whole
   // job in one glyph, and deliberately unlike `normalize`, which moves the file
-  // as a single block rather than phrase by phrase.
+  // as a single block rather than phrase by phrase, or `loudness`, which aims
+  // the whole selection at a number.
   autolevel: '<path d="M2 7h4M8 15h4M14 10h3M19 17h3"/><path d="M2 12h20" stroke-dasharray="2.5 2.5" opacity=".5"/><path d="M4 7v3M10 15v-3M15.5 10v2M20.5 17v-5" opacity=".55"/>',
   opto: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   fet: '<polyline points="13 2 4 14 11 14 10 22 20 10 13 10 13 2"/>',

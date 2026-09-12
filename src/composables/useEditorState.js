@@ -89,9 +89,6 @@ const appState = reactive({
   // above the rail and the floating windows.
   contextMenu: null,
   exportDialogOpen: false,
-  // Document ids the export dialog should open with pre-checked. Set when
-  // export is invoked from a bulk selection; null means "just the active one".
-  exportPreselection: null,
   filesPanelOpen: false,
   toasts: [],
 })

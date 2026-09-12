@@ -1,9 +1,16 @@
 /**
  * Vocal Saturation — worklet kernel.
  *
- * A realtime port of server/scripts/vocal_saturation.py: a complementary
- * three-band split, a blended tanh/arctan transfer with per-band drive, and a
- * gain-neutral parallel blend back against the dry signal.
+ * Began as a realtime port of server/scripts/vocal_saturation.py: a
+ * complementary three-band split, a blended tanh/arctan transfer with per-band
+ * drive, and a gain-neutral parallel blend back against the dry signal. It has
+ * since diverged from that Python in three ways that matter — the transfer is a
+ * knee-order curve rather than a tanh/arctan blend (see `shape`), the asymmetry
+ * offset takes its sign from the material rather than always leaning positive
+ * (see ASYM_REFERENCE), and the stage can now run in SERIES as one broadband
+ * curve rather than only as a parallel sum of three (see MODE_SERIES). The
+ * server's `vocalSaturation` pipeline stage is still the Python and is
+ * unaffected by any of it.
  *
  * This file is BOTH a normal ES module (exports VocalSatKernel and
  * processVocalSatBuffer) AND an AudioWorklet module (registers
@@ -12,6 +19,12 @@
  *
  * Two deliberate deviations from the Python, both consequences of the fact
  * that a streaming effect cannot see the whole file:
+ *
+ * ⚠ 3. PREVIEW AND APPLY ARE NOT SAMPLE-IDENTICAL. This file used to be
+ *    described as producing exactly what the preview produced; it does not, and
+ *    it never quite did. The apply path starts cold while the preview has run
+ *    over the whole session, so every follower in here begins somewhere else.
+ *    VOCAL_SAT_PREROLL_S is what narrows the gap and records how far.
  *
  * 1. LEVEL MATCHING. The Python normalises twice against whole-file RMS —
  *    `wet *= dry_rms/wet_rms` then `output *= dry_rms/out_rms`. Here each of
@@ -67,18 +80,125 @@
  * Only the three transfer curves run high.
  */
 
-import { lowpass, highpass, butterworthQs, BiquadCascade } from './dsp/biquad.js'
+import { lowpass, highpass, highShelf, butterworthQs, BiquadCascade } from './dsp/biquad.js'
 import { Oversampler, DelayLine, VOCAL_SAT_OVERSAMPLE } from './dsp/oversample.js'
-import { RmsFollower } from './dsp/envelope.js'
-import { HfLossShelf } from './dsp/tapeCharacter.js'
+import { LookaheadLimiter } from './dsp/lookaheadLimiter.js'
+import { RmsFollower, riseCoeff, dbToLin } from './dsp/envelope.js'
+import {
+  HfLossShelf, SkewTracker, asymmetryOffset, makeDcBlocker, ASYM_EPSILON,
+  SoftenLimiter, softenScale, SOFTEN_EPSILON,
+} from './dsp/tapeCharacter.js'
+/**
+ * ⚠ THE CURVES LIVE IN `dsp/satCurves.js` NOW, AND THIS MODULE MUST NOT BECOME
+ * THEIR OWNER AGAIN. This file registers a processor at module scope, so
+ * anything importing the curves FROM here drags that registration into another
+ * worklet bundle and breaks whichever plugin loads second. Re-exported below so
+ * every existing importer is unaffected and there is still one definition.
+ */
+import {
+  shape, cubicShape, splitKnees, splitShape, CUBIC_LIMIT,
+  CURVE_SHAPE, CURVE_CUBIC, ASYM_MODE_OFFSET, ASYM_MODE_SPLIT,
+  MODE_SERIES, MODE_PARALLEL, HARDNESS_MIN, HARDNESS_MAX,
+} from './dsp/satCurves.js'
+export {
+  shape, cubicShape, splitKnees, splitShape, CUBIC_LIMIT,
+  CURVE_SHAPE, CURVE_CUBIC, ASYM_MODE_OFFSET, ASYM_MODE_SPLIT,
+  MODE_SERIES, MODE_PARALLEL, HARDNESS_MIN, HARDNESS_MAX,
+}
 
 export const VOCAL_SAT_LATENCY_SAMPLES = VOCAL_SAT_OVERSAMPLE.latencySamples
+
+/**
+ * Seconds of real audio the offline apply path should run through the kernel
+ * BEFORE the region, and discard. See applyWorkletRegion in processing.js.
+ *
+ * ⚠ THIS STAGE IS NOT SAMPLE-IDENTICAL BETWEEN PREVIEW AND APPLY AND CANNOT BE
+ * MADE SO. The preview worklet has been running over everything the user
+ * played; the apply render starts cold at the region's first sample. Every
+ * follower, gate and tracker in here therefore begins in a different state.
+ * Measured, preview settled against a cold apply, energy over the first 0.5 s:
+ *
+ *   patch                                  first 0.5 s
+ *   kernel default (parallel, offset)        -0.363 dB
+ *   series + cubic + tame                    -1.275
+ *     + autoDrive 100                        -1.678
+ *     + asymmetry 100                        -2.055
+ *
+ * Read the BOTTOM of that table, not the top. The first row is
+ * VOCAL_SAT_KERNEL_DEFAULTS; the patch the panel now opens with is series,
+ * autoDrive 100 and asymmetry 100, so the figure that applies to what a user
+ * actually hears is the last one. It is also why VOCAL_SAT_PREROLL_S is 4 s
+ * rather than the 2 s that suffices for OptoSmooth and Scheps.
+ *
+ * That last figure is inside the range tapeCharacter records for the same
+ * defect the last time it shipped. Most of it is NOT new: the three 300 ms RMS
+ * followers alone account for -1.035 dB, and series mode amplifies them because
+ * at wetDry 1 the output is entirely wet.
+ *
+ * AND ONE FAILURE IS WORSE THAN A LEVEL OFFSET. The skew tracker settles to
+ * direction -0.62 on positive-leaning material but reads +1.00 before its 3 s
+ * evidence gate, so a selection shorter than that had its asymmetry leaning the
+ * WRONG WAY — worth up to 7.9 dB of other distortion by that module's own
+ * measurement. A decision, not a settling difference.
+ *
+ * ── WHY 4 AND NOT MORE ─────────────────────────────────────────────────────
+ *
+ * Convergence of a cold apply toward the settled preview, full patch:
+ *
+ *   pre-roll    0 s     1 s     2 s     3 s     4 s     8 s    all
+ *   first .5s  -1.083  -0.645  -0.316  -0.295  -0.297  -0.031  0.000
+ *
+ * It knees at 2-3 s — the skew tracker's SKEW_EVIDENCE_S is 3 — and then
+ * plateaus near -0.3 dB before improving again much later. 4 s covers the
+ * evidence gate plus the flip ramp with margin and costs a 2 s region a 6 s
+ * render, which is nothing offline.
+ *
+ * ⚠ IT DOES NOT REACH IDENTITY AND NOTHING SHORT OF THE WHOLE FILE WOULD. At a
+ * pre-roll equal to ALL the preceding audio the difference is 0.0000 dB, which
+ * is the proof that state history is the only cause — but the voiced gate's
+ * valley floor and the skew sign's stickiness depend on history arbitrarily far
+ * back, so any finite pre-roll leaves a residue. 4 s takes the opening error
+ * from about 1.1 dB to about 0.3.
+ */
+export const VOCAL_SAT_PREROLL_S = 4
 
 export const VOCAL_SAT_KERNEL_DEFAULTS = {
   drive: 2.0,
   wetDry: 0.3,
-  bias: 0.5,
-  softness: 0.3,
+  // ── Asymmetry (was `bias`) ───────────────────────────────────────────────
+  // 0-100, and the SAME QUANTITY the old `bias` number was: the offset is
+  // `asymmetry/100 * ASYM_MAX_FRACTION * reference`, ASYM_MAX_FRACTION is 1 and
+  // the reference is 1 (see ASYM_REFERENCE), so `asymmetry: 50` puts the same
+  // 0.5 in front of the curve that `bias: 0.5` did. The magnitude of the
+  // shipped patch is unchanged by the rename; only the SIGN is now measured
+  // from the material rather than always positive.
+  asymmetry: 50,
+  // How the asymmetry is produced — see ASYM_MODE_SPLIT. 'offset' is what
+  // ships; 'split' is the variant that does not fight peak absorption.
+  asymMode: 'offset',
+  // ── Topology ─────────────────────────────────────────────────────────────
+  // 'parallel' (the shipped behaviour) or 'series'. See MODE_SERIES for what
+  // the difference actually buys and why the default does not move.
+  mode: 'parallel',
+  // Pre/de-emphasis depth around the curve, 0-100 -> 0-EMPHASIS_MAX_DB. ABSENT
+  // at 0, so the patch that shipped before it existed is bit-identical.
+  emphasis: 0,
+  // Slew limit ahead of the curve, 0-100. SERIES ONLY and absent at 0 — see
+  // SOFTEN_REFERENCE_NOTE for why it cannot be offered in parallel.
+  soften: 0,
+  // Peak control ahead of the curve, 0-100. SERIES ONLY, absent at 0, and
+  // costs NO added latency — see TAME_LOOKAHEAD_L.
+  tame: 0,
+  // Programme-level normalisation ahead of the drive, 0-100. Works in BOTH
+  // topologies, unlike Tame and Soften. Absent at 0. See AutoDrive.
+  autoDrive: 0,
+  // Knee order of the transfer curve — see `shape`. Replaces `softness`, which
+  // crossfaded tanh against arctan; measured at matched THD those two are the
+  // same curve to within 3 dB at the 5th harmonic and the blend was not a
+  // character control. This one is.
+  hardness: 2.5,
+  // Curve family — see cubicShape. 'shape' is what ships.
+  curve: 'shape',
   lowCrossover: 500,
   midCrossover: 3500,
   lowDriveMult: 5.0,
@@ -169,24 +289,464 @@ const RMS_TAU_MS = 300
 // divisions below finite through silence.
 const RMS_FLOOR = 1e-8
 
-const TWO_OVER_PI = 2 / Math.PI
-
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v
 }
 
 /**
- * Blended tanh/arctan transfer with the bias operating point removed.
- * Direct port of `_apply_transfer`.
+ * The curve, run off-centre by `offset` with its operating point removed.
+ *
+ * ⚠ `shapedOffset` MUST be `shape(offset, hardness)` — the caller passes it in
+ * because it is constant for a whole block and evaluating it per sample was a
+ * third of this function's cost. See tapeCharacter's note (1): asymmetry is not
+ * a stage, it is `curve(x + off) - curve(off)`, and where the curve is
+ * transparent that expression is exactly `x`. Every harmonic the offset appears
+ * to create belongs to THIS curve, generated off-centre.
  */
-function applyTransfer(pre, softness, bias) {
-  if (softness <= 0) return Math.tanh(pre) - Math.tanh(bias)
-  if (softness >= 1) return TWO_OVER_PI * (Math.atan(pre) - Math.atan(bias))
-  const yTanh = Math.tanh(pre)
-  const yAtan = TWO_OVER_PI * Math.atan(pre)
-  const biasRef =
-    (1 - softness) * Math.tanh(bias) + softness * TWO_OVER_PI * Math.atan(bias)
-  return (1 - softness) * yTanh + softness * yAtan - biasRef
+function applyTransfer(curveFn, pre, hardness, offset, shapedOffset) {
+  return curveFn(pre + offset, hardness) - shapedOffset
+}
+
+/**
+ * The level the asymmetry offset is referenced to.
+ *
+ * ⚠ IT IS 1 BECAUSE THE OFFSET IS ADDED AFTER DRIVE, in the curve's own input
+ * units, where the knee sits at |x| ~ 1 by construction for every n. That is
+ * what makes it the level the nonlinearity acts at, which is what
+ * `asymmetryOffset` documents its reference argument to be. Referenced to the
+ * band's own level instead, the offset would track programme material and stop
+ * being a character control — the failure tapeCharacter records under "ONLY THE
+ * SIGN COMES FROM THE SKEW".
+ *
+ * It also makes the rename arithmetic-free: ASYM_MAX_FRACTION is 1, so the
+ * offset is exactly `asymmetry/100`, and the `bias: 0.5` this replaced is
+ * `asymmetry: 50` to the last bit.
+ */
+const ASYM_REFERENCE = 1
+
+/**
+ * Emphasis depth at the top of the knob, dB.
+ *
+ * THE PAIR IS WHAT MAKES A WAVESHAPER ABSORB RATHER THAN EXCITE, and it is the
+ * other half of the answer above. A memoryless curve reduces the INSTANTANEOUS
+ * peak, but it generates harmonics loudest exactly where the signal is loudest
+ * — so it drops a burst of new high frequency onto the onset. Squashed but
+ * BRIGHTER, which the ear reads as edge, not softness. To absorb a transient
+ * the nonlinearity has to bite high frequencies harder than low ones.
+ *
+ * A shelf boosted into the curve and cut after it does exactly that: HF reaches
+ * the knee first, is compressed most, and the de-emphasis restores the level
+ * with the edge already rounded. Measured on the same bursts, level-matched,
+ * energy above 4 kHz against the dry:
+ *
+ * Measured IN THIS PLUGIN, series, one broadband curve, asymmetry 0, level
+ * matched, energy above 4 kHz against the dry:
+ *
+ *   emphasis      0      25      50      75     100
+ *   onset HF   -2.89   -3.29   -3.66   -4.49   -5.19  dB
+ *   body HF   +12.70  +12.06  +11.59  +11.23  +10.90  dB
+ *   d crest    -4.80   -3.90   -2.60   -1.35   -0.27  dB
+ *
+ * The onset's top end comes down while the body keeps essentially all of its
+ * added harmonics — thick and soft rather than thick and sharp, which is the
+ * whole point. It reaches -6.37 dB at drive 8.
+ *
+ * ⚠ IT TRADES CREST ABSORPTION FOR HF ABSORPTION AND THE TRADE IS INTRINSIC,
+ * not a tuning miss: -4.80 dB of crest at emphasis 0 becomes -0.27 at 100. The
+ * two goals are opposites. Saturation SQUARES the waveform, and a square wave
+ * has a crest factor of 0 dB; the de-emphasis then low-passes that flat top
+ * back toward a rounded shape, and a sine's crest is 3 dB. Rounding the edges
+ * off is exactly what raises peak-to-RMS again. You cannot both square a wave
+ * and round it.
+ *
+ * So these are two different characters rather than one axis: emphasis up for
+ * SOFT (edges rounded, harshness gone), emphasis at 0 for SQUASHED (peaks
+ * absorbed, sound harder). "Softer and mushier" is the first one.
+ *
+ * ⚠ AT DEPTH IT READS AS CHORUSING, AND THAT IS THIS MECHANISM WORKING RATHER
+ * THAN A TIMING FAULT. Pre-emphasis boosts HF into the curve, the curve
+ * compresses HF harder when the signal is loud, and the de-emphasis restores
+ * the STATIC tilt but not the dynamic part — so the net shelf around
+ * EMPHASIS_CORNER_HZ has a depth that moves with level, syllable to syllable. A
+ * shelf whose depth breathes is what the ear reads as phasing.
+ *
+ * Coherence against the input (1.000 = linear and time-INVARIANT; any fixed EQ,
+ * however wild, still scores 1.000, so this measures only the moving part):
+ *
+ *   emphasis        0       25       50      100
+ *   mean       0.9997   0.9985   0.9902   0.9643
+ *   min        0.9979   0.9877   0.9218   0.5336
+ *
+ * ⚠ IT IS NOT A SERIES/PARALLEL PROPERTY, though it is heard in series first.
+ * Parallel scores 0.9949 and 0.9995 with emphasis at 50 and 0, so the artefact
+ * is present there too — series simply carries more of it, because parallel
+ * ADDS the wet under a unity dry (at wetDry 0.65 the dry is 60% of the sum)
+ * while series CROSSFADES (the wet is 65%). It tracks the wet share in both:
+ * parallel 0.9977 / 0.9949 / 0.9919 / 0.9861 at wetDry 0.35 / 0.65 / 1 / 2.
+ *
+ * ⚠ AND IT IS NOT A DELAY MISMATCH, which was checked before concluding any of
+ * the above. In a linearised patch the wet path and the dry path each peak-
+ * cross-correlate at lag 62, exactly the reported latency, in both modes; and
+ * the residual against a plain scaled copy is captured by a STATIC 65-tap
+ * filter (-21.6 dBc to -65.0), i.e. it is ordinary frequency response and not a
+ * moving comb. Back Emphasis off to trade the modulation for onset softening:
+ * 25 keeps most of the absorption (-3.29 dB against 50's -3.66) at a quarter of
+ * the coherence cost.
+ *
+ * ⚠ AND IT IS WEAKER HERE THAN AROUND A BARE SINGLE CURVE, which is worth
+ * knowing before anyone re-tunes EMPHASIS_MAX_DB chasing the difference. A
+ * standalone curve with the same pair reaches -9.34 dB at the onset. In the
+ * plugin the HF does not saturate on its own — it rides on the low-frequency
+ * content into one shared curve — and the RMS match takes some back.
+ *
+ * ⚠ IT IS MUCH WEAKER IN PARALLEL AND THAT IS STRUCTURAL, not a bug to chase.
+ * The pair can only shape what the curve sees, and in parallel the dry path
+ * still delivers the transient at unity underneath whatever the wet path does.
+ * Available in both modes because it is a wet-path pair either way and the
+ * spectrum of the added harmonics is worth controlling on its own; just do not
+ * expect it to round an onset that the dry path is holding up.
+ *
+ * 12 dB because that is what the measurement above used. Deeper keeps working
+ * in the same direction but the de-emphasis starts to audibly dull the body,
+ * which is the thing the pair is supposed to leave alone.
+ */
+export const EMPHASIS_MAX_DB = 12
+
+/**
+ * Corner of the emphasis shelf, Hz.
+ *
+ * Low enough to cover the consonant and attack region a voice puts its edge in,
+ * high enough to leave the fundamental and the first formant out of it — the
+ * pair must not turn into a bass control, because whatever it boosts into the
+ * curve is what the curve distorts most.
+ */
+export const EMPHASIS_CORNER_HZ = 1800
+
+/** Below this the pair is skipped outright rather than run flat. */
+export const EMPHASIS_EPSILON = 1e-4
+
+/**
+ * SOFTEN — the slew limiter, and the reference it had to be given.
+ *
+ * ⚠ SERIES ONLY, AND THAT IS NOT A UI PREFERENCE. tapeCharacter's finding (2)
+ * is that this needs four things at once: a CLEAN, BROADBAND signal, at the
+ * OVERSAMPLED rate, just ahead of ONE nonlinearity, with its allowance
+ * referenced near the level that nonlinearity acts at. In parallel this plugin
+ * supplies NONE of them — there is no broadband oversampled point until after
+ * the three curves — and that placement was measured there at +0.66 and
+ * +1.38 dB of tilt, HF RISING, on a control that provably cannot boost. Slew
+ * limiting an already-saturated, LF-dominated sum makes it triangular, and a
+ * triangle is harmonics. THE KERNEL IGNORES THE KNOB IN PARALLEL rather than
+ * trusting the panel to hide it; a stale param message must not be able to
+ * reach the one placement the module says is actively harmful.
+ *
+ * The single broadband curve in series is the first place in this codebase that
+ * supplies all four, which is what made wiring this possible at all.
+ *
+ * ── THE REFERENCE, WHICH IS THE WHOLE OF THE DIFFICULTY ────────────────────
+ *
+ * SOFTEN_REFERENCE is 1: the curve's knee, in post-drive units, the same
+ * quantity ASYM_REFERENCE names. "The level the nonlinearity acts at" is the
+ * knee, and the knee is at |x| ~ 1 for every hardness by construction.
+ *
+ * ⚠ THE OBVIOUS CHOICE WAS TRIED FIRST AND MADE THREE QUARTERS OF THE KNOB
+ * INERT. Referencing to the largest amplitude a full-scale input can present,
+ * `drive * max(mult)`, is the choice that preserves Bernstein's guarantee — a
+ * signal bandlimited to the base Nyquist and bounded by A cannot move more than
+ * (pi/L)*A per oversampled sample, so at scale 1 the limit provably cannot
+ * bind. It measured:
+ *
+ *   soften     0      10      25      50      75      90     100
+ *   d tilt  -2.588  -2.588  -2.588  -2.588  -2.600  -3.480  -4.963  dB
+ *
+ * Nothing at all until 75. The reference was about twelve times the level the
+ * curve actually works at, so the allowance was twelve times too generous and
+ * the entire useful range fell off the bottom of the knob. Against the knee:
+ *
+ *   soften     0      10      25      50      75      90     100
+ *   d tilt  -2.588  -2.600  -3.474  -8.037 -14.764 -18.188 -20.138  dB
+ *
+ * Monotonic across the whole travel, negative at every setting — softening, not
+ * the distortion generation the module warns the wrong placement produces.
+ *
+ * ⚠ THIS FORFEITS "CANNOT BIND AT SCALE 1", and that is deliberate and
+ * pre-authorised: the module already records that "to do anything at all it
+ * must bind below the threshold". Bit-identity at soften 0 does NOT rest on
+ * Bernstein here — it rests on `softenActive` skipping the branch outright, so
+ * the limiter's state never even advances on a patch that does not use it.
+ *
+ * ⚠ IT IS MOTIONLESS, WHICH IS THE OTHER HALF OF THE REQUIREMENT. tapeCharacter
+ * records that anything whose depth scales with a TRACKED level cannot be
+ * compared between a live preview and an offline region render, because the
+ * tracker starts cold offline — that defect shipped once, with preview coming
+ * out 1.5-2.3 dB more softened than the applied audio. A constant 1 cannot do
+ * that. It does mean the knob's effect grows with Drive, which is correct
+ * rather than incidental: more drive is faster edges.
+ *
+ * ⚠ SOFTEN_MIN_SCALE IS REUSED UNCHANGED, and the module's warning that a
+ * reuser "must re-derive this or the knob will mean something else" is
+ * satisfied by the table above rather than ignored. Against the knee the
+ * shipped constant lands where its own doc says it should — "half the knob is
+ * already down at 0.14 of the reference" — so re-deriving it would have moved a
+ * shared constant to arrive back where it started.
+ *
+ * ⚠ ONE OF THE MODULE'S CLAIMS DOES NOT SURVIVE THE MOVE. "Output peak does not
+ * move at any setting" was measured in the soft clipper; here the peak drifts
+ * 0.6 dB across the knob (-11.13 to -10.51 dBFS), because this plugin
+ * renormalises against moving RMS followers downstream of the limiter and the
+ * soft clipper did not. Small, but it is not zero and should not be repeated as
+ * though it were.
+ */
+export const SOFTEN_REFERENCE = 1
+
+// ── Tame: lookahead peak control paid for out of latency we already spend ──
+
+/**
+ * TAME — the piece that makes the cubic worth having, at zero added latency.
+ *
+ * THE PROBLEM IT SOLVES. `cubicShape` generates exactly the third harmonic and
+ * essentially no aliasing, but only while the signal stays inside |x| <= 1.5.
+ * Past that it is a hard clipper and measures GRITTIER than the rational curve
+ * it was meant to improve on. Nothing else in this plugin keeps it in domain.
+ *
+ * ⚠ AND IT CANNOT BE DONE WITH A PLAIN ENVELOPE FOLLOWER, WHICH IS CAUSALITY
+ * RATHER THAN AN IMPLEMENTATION LIMIT. A causal follower cannot reduce the gain
+ * before the peak arrives. Measured on bursts, cubic at drive 8, share of
+ * samples the clamp caught:
+ *
+ *   no gain control                 0.26%
+ *   zero-latency env, attack 5 ms   0.26%   the envelope never catches up
+ *   zero-latency env, attack 1 ms   0.26%   still nothing
+ *   zero-latency env, attack 0.3 ms 0.10%
+ *   zero-latency env, attack 0.1 ms 0.07%   but high-order content ROSE
+ *
+ * The usable window is about 0.3-1 ms wide and barely moves the number, and
+ * below it the gain changes appreciably WITHIN a cycle — which is waveshaping,
+ * so you trade one distortion for another. At 0.1 ms the high-order content
+ * came out worse than with no limiter at all.
+ *
+ * ── WHERE THE LOOKAHEAD COMES FROM, WHICH IS THE WHOLE TRICK ───────────────
+ *
+ * The 2x oversampler's upsampling FIR is linear phase and already delays the
+ * signal by `upsampleDelaySamples` = 31 base samples before it reaches the
+ * curve. A detector reading the signal BEFORE the upsampler therefore sees the
+ * curve-side audio 31 samples early. That is lookahead we have already paid
+ * for and were not spending.
+ *
+ * `LookaheadLimiter` needs 2L of delay to align its envelope, so the free
+ * budget supports L = 15: a +/-15 sample (0.34 ms) window, with 2L = 30 against
+ * the 31 available. THE GAIN IS THEREFORE APPLIED ONE SAMPLE EARLY, which is
+ * the safe direction for a limiter — early is conservative, late is an
+ * overshoot.
+ *
+ *   lookahead                     added latency   out of domain
+ *   0.34 ms (this, free)              0 samples       0.00%
+ *   1 ms                             88 samples       0.00%
+ *   2 ms                            176 samples       0.00%
+ *
+ * ⚠ FREE LOOKAHEAD BUYS THE GUARANTEE, NOT THE SMOOTHNESS. A short window means
+ * a fast gain envelope, and fast gain movement has its own modulation cost. On
+ * a proxy for high-order content: 6.08% with no limiter, 5.78% here, 4.35% at
+ * 1 ms, 3.36% at 2 ms. (That proxy is contaminated by programme content, so it
+ * understates the spread; the out-of-domain column is the solid one.) If the
+ * gain movement is ever audible, TAME_LOOKAHEAD_L is the one constant to raise
+ * — and raising it stops being free.
+ *
+ * ⚠ SERIES ONLY, for the same reason Soften is: parallel has no single
+ * broadband driven signal to detect on or apply a gain to. The kernel enforces
+ * it rather than trusting the panel.
+ *
+ * ⚠ THE DETECTOR IS EXACT HERE, unlike Soften's reference. Soften had to bound
+ * `drive * max(mult)` because it acts on the oversampled sum; this detector
+ * runs on `low*lowDrive + mid*midDrive + high*highDrive` at the BASE rate,
+ * which is the pre-curve signal itself rather than a bound on it.
+ */
+export const TAME_LOOKAHEAD_L = Math.floor(VOCAL_SAT_OVERSAMPLE.upsampleDelaySamples / 2)
+
+/** Alignment: gains are stored for base time `i - TAME_ALIGN`. */
+const TAME_ALIGN = 2 * TAME_LOOKAHEAD_L
+
+/** Delay, in base samples, between the detector tap and the curve. */
+const TAME_UP_DELAY = VOCAL_SAT_OVERSAMPLE.upsampleDelaySamples
+
+/**
+ * Ring of base-rate gains. Must exceed TAME_UP_DELAY + TAME_ALIGN so a block
+ * can still read gains written during the previous one. Power of two so the
+ * index can be masked — and JS bitwise AND wraps negatives correctly, which is
+ * what lets the first blocks read "before the beginning" and find the 1s the
+ * ring is primed with.
+ */
+const TAME_RING = 128
+const TAME_MASK = TAME_RING - 1
+
+/** Below this the whole thing is skipped and the ring is never touched. */
+export const TAME_EPSILON = 1e-4
+
+/**
+ * Knob to threshold, as a multiple of the curve's own edge.
+ *
+ *   threshold = edge * 4^(1 - 2a)     4x edge at 0, exactly edge at 50, edge/4 at 100
+ *
+ * ⚠ THE FIRST MAPPING PUT THE WHOLE USEFUL RANGE IN THE TOP QUARTER, which is
+ * the same failure Soften's first reference had and is worth recording twice
+ * because it is easy to reach for. Running 8x edge down to 1x edge measured:
+ *
+ *   tame      0      25      50      75     100
+ *   grit    6.59%  6.59%   6.59%   6.72%   6.70%
+ *
+ * — nothing at all below 75, because at any ordinary Drive the signal's peak
+ * sits under a threshold of 2.8x the edge and the limiter never engages.
+ *
+ * Anchoring 50 AT the edge fixes it: the bottom half brings the threshold down
+ * to where the curve's domain ends, and the top half goes below it, which is
+ * what buys headroom against the intersample peaks the base-rate detector
+ * cannot see. Geometric so the ratio, not the difference, is what the knob
+ * moves — the quantity that matters is how far into the curve the signal gets.
+ */
+function tameThreshold(amount, edge) {
+  const a = clamp(amount, 0, 100) / 100
+  return edge * Math.pow(4, 1 - 2 * a)
+}
+
+// ── The voiced gate the skew tracker requires ──────────────────────────────
+
+/** Short-term level, fast enough to open inside a syllable. */
+const VOICED_TAU_MS = 20
+
+/** Creep-up rate of the noise-floor valley follower. */
+const NOISE_FOLLOW_TAU_MS = 2000
+
+/** How far over the floor a sample must sit to count as voice. */
+const VOICED_MARGIN_DB = 12
+
+/**
+ * Decides which samples the skew tracker is allowed to see.
+ *
+ * ⚠ THE TRACKER CANNOT OWN THIS AND tapeCharacter SAYS SO: "FEED IT ONLY VOICED
+ * SAMPLES. The caller owns the gate." A pause contributes room tone to the
+ * second moment and almost nothing to the third, so ungated the skew estimate
+ * is dragged toward zero by silence — which lands inside the deadband and
+ * quietly disables the whole control on any file with pauses in it.
+ *
+ * A valley follower that snaps DOWN and creeps UP, exactly as the soft
+ * clipper's noise estimate does. Deliberately not a port of that detector: this
+ * needs a boolean, not a threshold in dB, and carrying a copy of a 200-line
+ * tracker to get one is the trade tapeCharacter warns against under Soften.
+ */
+class VoicedGate {
+  constructor(sampleRate) {
+    this.fast = new RmsFollower(sampleRate, VOICED_TAU_MS, 1e-9)
+    this.creep = riseCoeff(NOISE_FOLLOW_TAU_MS, sampleRate)
+    this.margin = dbToLin(VOICED_MARGIN_DB)
+    this.floor = 0
+    this.primed = false
+  }
+
+  /** @returns {boolean} whether this sample is voice rather than room. */
+  update(x) {
+    const level = this.fast.process(x)
+    if (!this.primed) {
+      this.floor = level
+      this.primed = true
+    } else if (level < this.floor) {
+      this.floor = level
+    } else {
+      this.floor += this.creep * (level - this.floor)
+    }
+    return level > this.floor * this.margin
+  }
+}
+
+/**
+ * AUTO-DRIVE — makes Drive mean the same thing on a quiet file as a loud one.
+ *
+ * Saturation is not level-invariant: a selection 10 dB quieter is driven 10 dB
+ * less at the same Drive setting, which is already in this plugin's help as a
+ * caveat users have to work around by hand. This normalises the tracked
+ * programme level toward a fixed reference before the drive is applied, so the
+ * knob's meaning stops depending on how hot the recording is.
+ *
+ * It also completes what Tame started from the other end. Tame pins the
+ * operating point for PEAKS, so loud material cannot leave the curve's domain;
+ * it does nothing for quiet material, which simply gets less saturation. This
+ * raises quiet passages INTO the curve. The two together hold the whole file at
+ * a consistent operating point.
+ *
+ * ── TWO RECORDED FAILURES THIS IS BUILT AROUND ─────────────────────────────
+ *
+ * (1) BREATHING. tapeCharacter's HF Loss note: "Following the envelope gives
+ *     full depth on a loud syllable and none through the pause after it — a
+ *     room that BREATHES, which a listener hears as pumping long before they
+ *     hear the colour." An ungated normaliser is worse than that shelf ever
+ *     was, because a pause is where the tracked level is LOWEST and so the gain
+ *     is HIGHEST — it would drive room tone hardest of all.
+ *
+ *     THE TRACKER IS THEREFORE GATED ON VOICE and holds its last value through
+ *     a pause, reusing the VoicedGate the skew tracker already needs. A pause
+ *     changes nothing at all.
+ *
+ * (2) PREVIEW AND OFFLINE DISAGREEING. Same module: "anything whose depth
+ *     scales with a TRACKED level cannot be compared between a live preview and
+ *     an offline region render: the tracker starts cold offline. That defect
+ *     shipped once — preview came out 1.5-2.3 dB more softened than the applied
+ *     audio. Reference colour to something MOTIONLESS, or accept that the two
+ *     will never agree."
+ *
+ *     THE TARGET HERE IS MOTIONLESS — a fixed reference level, not a second
+ *     tracker — so only the MEASUREMENT moves, and it converges to the same
+ *     value from either start. What remains is the opening of a region, which
+ *     is exactly what RmsFollower's warmup priming exists for and what the
+ *     plugin's three existing level-matching followers already rely on. This is
+ *     the fourth tracked gain in this kernel, not the first.
+ *
+ * ⚠ IT IS STILL A TRACKED GAIN, AND THAT IS A REAL COST. A region short
+ * relative to AUTO_TAU_MS is normalised against a level the follower never
+ * fully settled on. The priming bounds it; it does not remove it.
+ */
+const AUTO_TAU_MS = 1500
+
+/**
+ * The level the tracker is normalised toward, linear RMS.
+ *
+ * 0.1 is -20 dBFS, which is both a typical narration working level and ACX's
+ * own RMS target, so a compliant file arrives already at the reference and is
+ * left alone. MOTIONLESS BY CONSTRUCTION — see failure (2) above.
+ */
+const AUTO_REFERENCE_RMS = 0.1
+
+/** Hard bound on the correction, dB. A near-silent passage must not run away. */
+const AUTO_MAX_DB = 12
+
+/** Below this the whole thing is skipped. */
+export const AUTO_EPSILON = 1e-4
+
+/**
+ * Tracks programme level and reports the drive correction.
+ *
+ * The knob is an exponent rather than a blend: `pow(ref/level, amount/100)`
+ * gives 1 at 0, full normalisation at 100, and a partial correction in between
+ * that is still exact in dB terms — half the knob is half the correction.
+ */
+class AutoDrive {
+  constructor(sampleRate) {
+    this.level = new RmsFollower(sampleRate, AUTO_TAU_MS, 1e-6)
+    this.gate = new VoicedGate(sampleRate)
+    this.tracked = AUTO_REFERENCE_RMS
+  }
+
+  /** One base-rate sample of the signal the drive will act on. */
+  update(x) {
+    // GATED: a pause holds the last voiced level rather than dragging the
+    // tracker down and the gain up. See failure (1).
+    if (this.gate.update(x)) this.tracked = this.level.process(x)
+  }
+
+  /** Correction to multiply the per-band drives by. */
+  gain(amount) {
+    const raw = Math.pow(AUTO_REFERENCE_RMS / this.tracked, clamp(amount, 0, 100) / 100)
+    const max = dbToLin(AUTO_MAX_DB)
+    return clamp(raw, 1 / max, max)
+  }
 }
 
 /** Per-channel filter, follower, and resampler state. */
@@ -206,6 +766,28 @@ class ChannelState {
     this.upMid = new Oversampler(VOCAL_SAT_OVERSAMPLE)
     this.upHigh = new Oversampler(VOCAL_SAT_OVERSAMPLE)
     this.downWet = new Oversampler(VOCAL_SAT_OVERSAMPLE)
+
+    // Asymmetry state. Per channel because the skew is a property of what that
+    // channel recorded — a stereo pair miked differently can lean two ways.
+    // The emphasis pair. One section each; the de-emphasis is the exact
+    // inverse shelf, so with a LINEAR path between them the two cancel and the
+    // wet path is unchanged. Everything the pair does, it does by changing what
+    // the curve sees — which is the whole mechanism.
+    this.preEmph = new BiquadCascade(1, 1)
+    this.deEmph = new BiquadCascade(1, 1)
+    this.soften = new SoftenLimiter(VOCAL_SAT_OVERSAMPLE.factor)
+
+    // Tame. The limiter is used as a GAIN GENERATOR only — its own delayed
+    // output is discarded, because the delay this design runs on is the
+    // oversampler's, not the limiter's. See TAME_LOOKAHEAD_L.
+    this.tame = new LookaheadLimiter(TAME_LOOKAHEAD_L)
+    this.tameGain = new Float32Array(TAME_RING).fill(1)
+    this.tameBase = 0
+
+    this.autoDrive = new AutoDrive(sampleRate)
+    this.skew = new SkewTracker(sampleRate)
+    this.gate = new VoicedGate(sampleRate)
+    this.dcBlock = makeDcBlocker(sampleRate)
 
     // The blend `x + wetDry * wet` is a sample-accurate sum, so the dry side
     // has to wait for the wet side to come back down.
@@ -251,12 +833,62 @@ export class VocalSatKernel {
     this.hfLossMaxDb = HfLossShelf.depthFor(p.hfLoss ?? 0)
     this.hfLossActive = HfLossShelf.isActive(this.hfLossMaxDb)
 
-    this.softness = clamp(p.softness, 0, 1)
-    this.bias = p.bias
+    this.hardness = clamp(p.hardness, HARDNESS_MIN, HARDNESS_MAX)
+    this.curveFn = p.curve === CURVE_CUBIC ? cubicShape : shape
+    // Read as 0-100 and ABSENT below the epsilon, so a patch at 0 runs no DC
+    // blocker and takes no branch — the same rule HF Loss follows, and the
+    // thing that keeps `asymmetry: 0` bit-identical to a build without any of
+    // this. `asymmetryOffset` applies the same epsilon to the offset itself.
+    this.asymmetry = clamp(p.asymmetry, 0, 100)
+    this.asymActive = this.asymmetry / 100 > ASYM_EPSILON
+    // ⚠ SPLIT FALLS BACK TO OFFSET ON THE CUBIC, which has no knee order to
+    // split — see ASYM_MODE_SPLIT. Resolved here rather than in the loop so the
+    // panel and the kernel cannot disagree about what is running.
+    this.splitActive = this.asymActive
+      && p.asymMode === ASYM_MODE_SPLIT
+      && this.curveFn !== cubicShape
+    this.splitAmount = this.asymmetry / 100
+    this.series = p.mode === MODE_SERIES
+    // Read as 0-100 and ABSENT below the epsilon — the same rule HF Loss and
+    // asymmetry follow, and what keeps the shipped patch bit-identical.
+    this.emphasis = clamp(p.emphasis ?? 0, 0, 100)
+    this.emphasisDb = (this.emphasis / 100) * EMPHASIS_MAX_DB
+    this.emphasisActive = this.emphasisDb > EMPHASIS_EPSILON
+    if (this.emphasisActive) {
+      this.preSections = [highShelf(this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, this.emphasisDb)]
+      this.deSections = [highShelf(this.sampleRate, EMPHASIS_CORNER_HZ, Math.SQRT1_2, -this.emphasisDb)]
+      for (const c of this.channels) {
+        c.preEmph.setSections(this.preSections)
+        c.deEmph.setSections(this.deSections)
+      }
+    }
+
     this.wetDry = Math.max(0, p.wetDry)
     this.lowDrive = p.drive * p.lowDriveMult
     this.midDrive = p.drive * p.midDriveMult
     this.highDrive = p.drive * p.highDriveMult
+
+    // SOFTEN — series only, absent at 0, and referenced to a motionless bound.
+    // See SOFTEN_REFERENCE_NOTE. `softenScale` returns exactly 1 below its own
+    // epsilon, but the branch is skipped outright as well so the limiter's
+    // state never advances on a patch that does not use it.
+    // TAME — series only, absent at 0. The threshold is the CURVE'S OWN edge:
+    // 1.5 for the cubic, where its domain actually ends, and 1 for the rational
+    // curve, which has no hard domain but whose knee is the level it acts at.
+    // Same quantity ASYM_REFERENCE and SOFTEN_REFERENCE name.
+    this.autoAmount = clamp(p.autoDrive ?? 0, 0, 100)
+    this.autoActive = this.autoAmount / 100 > AUTO_EPSILON
+
+    this.tameAmount = clamp(p.tame ?? 0, 0, 100)
+    this.tameActive = this.series && this.tameAmount / 100 > TAME_EPSILON
+    this.tameThresholdValue = tameThreshold(
+      this.tameAmount, this.curveFn === cubicShape ? CUBIC_LIMIT : 1,
+    )
+
+    this.softenAmount = clamp(p.soften ?? 0, 0, 100)
+    this.softenActive = this.series && this.softenAmount / 100 > SOFTEN_EPSILON
+    this.softenScaleValue = softenScale(this.softenAmount)
+    this.softenReference = SOFTEN_REFERENCE
   }
 
   _ensureChannels(n) {
@@ -264,6 +896,10 @@ export class VocalSatKernel {
       const c = new ChannelState(this.sampleRate)
       c.lp.setSections(this.lpSections)
       c.hp.setSections(this.hpSections)
+      if (this.emphasisActive) {
+        c.preEmph.setSections(this.preSections)
+        c.deEmph.setSections(this.deSections)
+      }
       this.channels.push(c)
     }
   }
@@ -285,10 +921,16 @@ export class VocalSatKernel {
 
     this._ensureChannels(nOut)
 
-    const { softness, bias, wetDry, lowDrive, midDrive, highDrive } = this
+    const {
+      hardness, asymActive, wetDry, lowDrive, midDrive, highDrive,
+      series, emphasisActive, softenActive, tameActive, autoActive, curveFn,
+      splitActive,
+    } = this
     const L = VOCAL_SAT_OVERSAMPLE.factor
 
-    const { low: lowBuf, high: highBuf, mid: midBuf, wet: wetBuf } = this._scratch(n)
+    const {
+      low: lowBuf, high: highBuf, mid: midBuf, wet: wetBuf, emph: emphBuf,
+    } = this._scratch(n)
 
     // ONCE PER BLOCK, BEFORE THE CHANNEL LOOP — see HfLossShelf. The depth is a
     // parameter ramp shared by every channel; advancing it per channel makes it
@@ -304,9 +946,78 @@ export class VocalSatKernel {
       //   low  = sosfilt(sos_lp, audio)
       //   high = sosfilt(sos_hp, audio)
       //   mid  = audio - low - high      (complementary — sums back exactly)
-      st.lp.process(input, lowBuf, n, 0)
-      st.hp.process(input, highBuf, n, 0)
-      for (let i = 0; i < n; i++) midBuf[i] = input[i] - lowBuf[i] - highBuf[i]
+      // PRE-EMPHASIS GOES HERE, ahead of the split, so it wraps all three
+      // curves rather than one. The dry path is NOT emphasised — it is the raw
+      // input via dryLine — so the pair lives entirely on the wet side and its
+      // only effect is on what the curves see.
+      let wetIn = input
+      if (emphasisActive) {
+        st.preEmph.process(input, emphBuf, n, 0)
+        wetIn = emphBuf
+      }
+
+      st.lp.process(wetIn, lowBuf, n, 0)
+      st.hp.process(wetIn, highBuf, n, 0)
+      for (let i = 0; i < n; i++) midBuf[i] = wetIn[i] - lowBuf[i] - highBuf[i]
+
+      // ── Which way the offset should lean ─────────────────────────────────
+      // Fed the BROADBAND input, which is exactly what the three curves see
+      // between them: the split is complementary, so the bands sum back to this
+      // signal. Feeding one band instead would measure that filter's skew, and
+      // tapeCharacter is explicit that a shelf changes a waveform's lean.
+      //
+      // Updated BEFORE the offset is read, so a block uses its own direction
+      // rather than the previous one. The ramp is 200 ms; either would do.
+      // ⚠ FED `wetIn`, NOT `input`, and tapeCharacter is explicit about why:
+      // "FEED IT THE SIGNAL THE CURVE ACTUALLY SEES, post any emphasis or
+      // shelving, because a shelf changes a waveform's skew." Emphasis is a
+      // shelf on exactly that path, so reading the raw input here would choose
+      // the offset's sign from a waveform the curve never sees.
+      if (asymActive) {
+        for (let i = 0; i < n; i++) {
+          if (st.gate.update(wetIn[i])) st.skew.update(wetIn[i])
+        }
+      }
+      // ⚠ THE TWO MECHANISMS ARE EXCLUSIVE. Split produces its asymmetry in the
+      // curve's shape, so it takes NO offset — running both would put the
+      // offset's bound imbalance straight back, which is the thing split exists
+      // to avoid.
+      const offset = asymActive && !splitActive
+        ? asymmetryOffset(this.asymmetry, st.skew.direction, ASYM_REFERENCE)
+        : 0
+      // Constant for the block — see applyTransfer on why this is hoisted.
+      const shapedOffset = curveFn(offset, hardness)
+
+      // WHICH POLARITY GETS THE HARDER KNEE is the same question the offset's
+      // sign answers, so it comes from the same tracker. The direction is
+      // already smoothed over 200 ms and passes through 0, where the exponent
+      // is 0 and the pair collapses to symmetric — so a sign change is a glide
+      // through "no asymmetry" rather than a swap, and cannot click.
+      let nPos = hardness
+      let nNeg = hardness
+      if (splitActive) {
+        const t = this.splitAmount * st.skew.direction
+        const knees = splitKnees(hardness, Math.abs(t), t >= 0)
+        nPos = knees.nPos
+        nNeg = knees.nNeg
+      }
+
+      // ── AUTO-DRIVE ───────────────────────────────────────────────────────
+      // Fed the RAW input, NOT `wetIn`. Emphasis is a shelf and would change
+      // the measured RMS, which would couple two unrelated knobs: raising
+      // Emphasis would quietly pull the drive down. This control is about how
+      // loud the RECORDING is, which is a property of the file rather than of
+      // the patch, so it reads the file.
+      //
+      // Resolved once per block. The time constant is 1.5 s; per-block
+      // granularity is three orders of magnitude finer than that.
+      if (autoActive) {
+        for (let i = 0; i < n; i++) st.autoDrive.update(input[i])
+      }
+      const autoGain = autoActive ? st.autoDrive.gain(this.autoAmount) : 1
+      const lowD = lowDrive * autoGain
+      const midD = midDrive * autoGain
+      const highD = highDrive * autoGain
 
       // Up to the high rate one band at a time. Upsampling is linear, so the
       // three still sum back to the input there — the complementary split is
@@ -316,15 +1027,95 @@ export class VocalSatKernel {
       const midUp = st.upMid.up(midBuf, n)
       const highUp = st.upHigh.up(highBuf, n)
 
+      // ── ONE CURVE IN SERIES, THREE IN PARALLEL ───────────────────────────
+      //
+      // ⚠ CLIPPING THREE BANDS SEPARATELY IS NOT CLIPPING THEIR SUM, and that
+      // is why series needs its own topology here rather than just a different
+      // blend. A transient is BROADBAND: split three ways, each band sees only
+      // part of it, saturates mildly, and the sum puts the peak back together.
+      // Measured in series, crest against dry: three bands +0.25 dB against one
+      // band -3.55 dB. The split was cancelling most of what the crossfade had
+      // just bought.
+      //
+      // THE PER-BAND DRIVE KNOBS STILL DO SOMETHING, which is the reason this
+      // sums the DRIVEN bands rather than ignoring the split. `low*lowDrive +
+      // mid*midDrive + high*highDrive` is a tilt applied before a single
+      // nonlinearity, so Low/Mid/High Drive go on shaping what the curve sees
+      // instead of going dead the moment the mode changes. The split is still
+      // complementary, so at equal mults this is exactly `mult * wetIn`.
+      //
+      // ⚠ THE OFFSET IS APPLIED ONCE HERE AND THREE TIMES IN PARALLEL, so the
+      // same Asymmetry setting is a WEAKER effect in series. That is the honest
+      // arrangement rather than a scaling bug to correct: one stage has one
+      // operating point. Do not "fix" it by tripling the offset — that would be
+      // a different, harder-clipped curve, not the same one applied evenly.
       const sum = st.downWet.scratch(n)
-      for (let j = 0; j < n * L; j++) {
-        sum[j] =
-          applyTransfer(lowUp[j] * lowDrive + bias, softness, bias) +
-          applyTransfer(midUp[j] * midDrive + bias, softness, bias) +
-          applyTransfer(highUp[j] * highDrive + bias, softness, bias)
+      if (series) {
+        // TAME's DETECTOR PASS, at the BASE rate and BEFORE the upsampler —
+        // which is the entire point. This signal is the pre-curve sum exactly,
+        // and reading it here means the gain has seen TAME_UP_DELAY samples of
+        // the future by the time the audio it modulates reaches the curve.
+        // The limiter's returned sample is discarded; only its gain is wanted.
+        if (tameActive) {
+          const threshold = this.tameThresholdValue
+          for (let i = 0; i < n; i++) {
+            const d = lowBuf[i] * lowD + midBuf[i] * midD + highBuf[i] * highD
+            st.tame.processSample(d, threshold)
+            // Valid for base time (base + i - TAME_ALIGN); negative indices
+            // wrap correctly under the mask and find the primed 1s.
+            st.tameGain[(st.tameBase + i - TAME_ALIGN) & TAME_MASK] = st.tame.gain
+          }
+        }
+
+        // SOFTEN sits HERE and nowhere else: on the summed, driven, broadband
+        // signal, at the oversampled rate, with exactly one nonlinearity in
+        // front of it. Those are tapeCharacter's four conditions, and this is
+        // the only point in this plugin that satisfies them.
+        const softenScaleValue = this.softenScaleValue
+        const softenReference = this.softenReference
+        const base = st.tameBase
+        for (let j = 0; j < n * L; j++) {
+          let pre = lowUp[j] * lowD + midUp[j] * midD + highUp[j] * highD
+          // Zero-order hold across the two oversampled samples of a base
+          // period. The gain is already triangular-smoothed at base rate, so
+          // the residual stair is far below the envelope's own movement.
+          if (tameActive) pre *= st.tameGain[(base + (j / L | 0) - TAME_UP_DELAY) & TAME_MASK]
+          if (softenActive) pre = st.soften.process(pre, softenScaleValue, softenReference)
+          sum[j] = splitActive
+            ? splitShape(pre, nPos, nNeg)
+            : applyTransfer(curveFn, pre, hardness, offset, shapedOffset)
+        }
+        st.tameBase += n
+      } else {
+        for (let j = 0; j < n * L; j++) {
+          sum[j] = splitActive
+            ? splitShape(lowUp[j] * lowD, nPos, nNeg)
+              + splitShape(midUp[j] * midD, nPos, nNeg)
+              + splitShape(highUp[j] * highD, nPos, nNeg)
+            : applyTransfer(curveFn, lowUp[j] * lowD, hardness, offset, shapedOffset)
+              + applyTransfer(curveFn, midUp[j] * midD, hardness, offset, shapedOffset)
+              + applyTransfer(curveFn, highUp[j] * highD, hardness, offset, shapedOffset)
+        }
       }
 
       st.downWet.down(wetBuf, n)
+
+      // DE-EMPHASIS, and it must sit HERE: after the curve, and BEFORE the DC
+      // blocker. tapeCharacter's blocker note is explicit — "Place it AFTER the
+      // curve (and after any de-emphasis), so it blocks the DC that reaches the
+      // output rather than one a later filter would reshape."
+      if (emphasisActive) st.deEmph.process(wetBuf, wetBuf, n, 0)
+
+      // ⚠ LOAD-BEARING, AND ONLY WHILE THE OFFSET IS ENGAGED — see DC_BLOCK_HZ.
+      // `curve(x + off) - curve(off)` removes the operating point for a SILENT
+      // input; under signal the mean of the off-centre curve is not curve(off),
+      // and what is left is level-dependent DC. It lands on the wet path, ahead
+      // of both RMS matches, so untreated it is read as level and handed back
+      // as gain. tapeCharacter measured -45.2 dBFS of it on a driven 120 Hz
+      // tone, and a file that already carried DC came out 5.1 dB below its own
+      // peak — which corrupts exactly the peak measurement ACX compliance is
+      // built on. This is the plugin that shipped `bias` with no blocker at all.
+      if (asymActive) st.dcBlock.process(wetBuf, wetBuf, n, 0)
 
       // Level matching and the blend stay at the base rate, where the Python
       // does them. The dry side is delayed to meet the wet side.
@@ -337,8 +1128,16 @@ export class VocalSatKernel {
 
         // wet *= dry_rms / wet_rms
         const wetMatched = wet * (dryRms / wetRms)
-        // output = audio + wet_dry * wet
-        const blended = x + wetDry * wetMatched
+        // PARALLEL: `output = audio + wet_dry * wet`, the Python's add, where
+        // the dry sits at unity and the transient is never touched.
+        // SERIES: a real crossfade, which is what lets the curve's 11.7 dB of
+        // crest reduction actually reach the output. See MODE_SERIES.
+        //
+        // dryGain is clamped rather than written `1 - wetDry` because wetDry is
+        // only clamped below: a patch above 1 would otherwise invert the dry
+        // path's polarity and subtract it from the wet.
+        const dryGain = series ? (wetDry >= 1 ? 0 : 1 - wetDry) : 1
+        const blended = dryGain * x + wetDry * wetMatched
         // output *= dry_rms / out_rms
         const outRms = st.outRms.process(blended)
         const y = blended * (dryRms / outRms)
@@ -398,9 +1197,11 @@ export class VocalSatKernel {
       this._highBuf = new Float64Array(n)
       this._midBuf = new Float64Array(n)
       this._wetBuf = new Float64Array(n)
+      this._emphBuf = new Float64Array(n)
     }
     return {
-      low: this._lowBuf, high: this._highBuf, mid: this._midBuf, wet: this._wetBuf,
+      low: this._lowBuf, high: this._highBuf, mid: this._midBuf,
+      wet: this._wetBuf, emph: this._emphBuf,
     }
   }
 }

@@ -1574,6 +1574,32 @@ export class ResonanceKernel {
   _ensureChannels(n, detectFrom = n) {
     while (this.stfts.length < n) {
       this.stfts.push(new StftProcessor({ fftSize: this.frameSize, hopSize: this.hopSize }))
+      // ⚠ NO PRE-ROLL IS WIRED FOR THIS STAGE, AND ONE WOULD NOT HELP. Every
+      // other latent plugin's preview/apply disagreement is a CONVERGENCE
+      // problem — cold state that settles given enough lead-in — and
+      // applyWorkletRegion's preRollSamples fixes those (OptoSmooth and Scheps
+      // reach bit-exact at 2 s). This one is a frame-PHASE problem instead.
+      //
+      // An STFT reconstructs on a grid anchored at sample 0 of whatever it is
+      // handed. What decides whether an offline render agrees with the preview
+      // is therefore `(regionStart - preRoll) % hopSize === 0` — the ABSOLUTE
+      // grid phase — and not the length of the pre-roll at all:
+      //
+      //   region start   pre-roll   (start-pre)%hop    max diff
+      //        440832      88576                  0     0.00e+0
+      //        440832      88583                505     6.57e-6
+      //        441000      88576                168     6.87e-5
+      //        441000     441000                  0     0.00e+0
+      //
+      // ⚠ AND THE PHASE IS UNKNOWABLE FROM THE APPLY PATH. The preview
+      // worklet's grid is anchored wherever it happened to start processing,
+      // which has no fixed relationship to the timeline. So there is no length
+      // the apply path could choose that reliably lands on it.
+      //
+      // The residue is ~1e-5 with an RMS difference of 0.00 dB — a phase
+      // artefact, not a level error — so this is recorded rather than chased.
+      // A sweep of 0/0.5/1/2/4 s once looked like this stage had a hard floor
+      // at 4e-4; it does not, those lengths all simply missed the grid.
     }
     // Only worth a second transform when there is genuinely more than one
     // input to combine; a mono source fanned out to several outputs is still

@@ -7,9 +7,21 @@ import {
   VocalSatKernel,
   VOCAL_SAT_KERNEL_DEFAULTS,
   VOCAL_SAT_LATENCY_SAMPLES,
+  HARDNESS_MIN,
+  HARDNESS_MAX,
+  MODE_SERIES,
+  MODE_PARALLEL,
+  SOFTEN_REFERENCE,
+  CURVE_SHAPE,
+  CURVE_CUBIC,
+  TAME_LOOKAHEAD_L,
+  ASYM_MODE_OFFSET,
+  ASYM_MODE_SPLIT,
+  VOCAL_SAT_PREROLL_S,
   processVocalSatBuffer,
 } from '../../src/audio/vocalSatProcessor.js'
 import { getFFT, rfftBinCount } from '../../src/audio/dsp/fft.js'
+import { highpass, BiquadCascade } from '../../src/audio/dsp/biquad.js'
 
 const SR = 44100
 
@@ -33,7 +45,7 @@ test('is transparent at zero drive and zero bias', () => {
   const n = 8192
   const sig = tone(n, 220)
   const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
-    drive: 0, bias: 0, wetDry: 0.5,
+    drive: 0, asymmetry: 0, wetDry: 0.5,
   })
   assert.equal(latencySamples, VOCAL_SAT_LATENCY_SAMPLES)
   let maxErr = 0
@@ -112,16 +124,17 @@ test('actually adds harmonics', () => {
   assert.ok(third / fundamental > 1e-3, `no 3rd harmonic (${third / fundamental})`)
 })
 
-test('bias asymmetry produces even harmonics', () => {
-  // A symmetric transfer generates odd harmonics only; the bias term is what
-  // gives the "tube" second harmonic.
+test('asymmetry produces even harmonics', () => {
+  // A symmetric transfer generates odd harmonics only; running the curve off
+  // centre is the ONLY source of even ones. Was `bias`, and the number is the
+  // same offset scaled by 100 — see ASYM_REFERENCE.
   const n = 32768
   const f0 = 220
   const sig = tone(n, f0, 0.4)
 
-  const measureSecond = biasValue => {
+  const measureSecond = asymmetry => {
     const { channelData } = processVocalSatBuffer([sig], SR, {
-      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 3, wetDry: 0.8, bias: biasValue,
+      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 3, wetDry: 0.8, asymmetry,
     })
     const fft = getFFT(n)
     const bins = rfftBinCount(n)
@@ -136,9 +149,990 @@ test('bias asymmetry produces even harmonics', () => {
   }
 
   assert.ok(
-    measureSecond(0.5) > measureSecond(0) * 5,
-    'bias should raise the second harmonic substantially',
+    measureSecond(50) > measureSecond(0) * 5,
+    'asymmetry should raise the second harmonic substantially',
   )
+  // Additive, not a rebalancing — tapeCharacter's claim, re-pinned here because
+  // it is what makes this a character control rather than a second drive knob.
+  assert.ok(measureSecond(100) > measureSecond(50), 'more asymmetry, more H2')
+})
+
+test('asymmetry at 0 is absent, not merely a zero offset', () => {
+  // The DC blocker must not run for a user who never touches the control, and
+  // `asymActive` is what buys that. Bit-identical, not close.
+  const n = 16384
+  const sig = tone(n, 220)
+  const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { asymmetry: 0 }).channelData[0]
+  const c = processVocalSatBuffer([sig], SR, { asymmetry: 0.001 }).channelData[0]
+  let differs = false
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) differs = true
+  assert.ok(differs, 'the default is not asymmetry 0, so these should differ')
+  // Below ASYM_EPSILON the offset is exactly 0 and the branch is not taken.
+  for (let i = 0; i < n; i++) {
+    assert.equal(b[i], c[i], `asymmetry below the epsilon should be absent (i=${i})`)
+  }
+})
+
+test('the asymmetry offset opposes the material lean', () => {
+  // tapeCharacter measured up to 7.9 dB of OTHER distortion riding on this
+  // choice. The sign is the whole reason the skew tracker is wired in: a fixed
+  // positive offset is right on two of three real narrators and costs the third
+  // 4.9 dB for nothing. Probed with a deliberately skewed wave, gated as voice.
+  const n = SR * 6 // past SKEW_EVIDENCE_S, which is 3 s
+  const skewed = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const t = (2 * Math.PI * 220 * i) / SR
+    // Asymmetric by construction: tall narrow positive lobe, long shallow
+    // negative one. Third moment is strongly positive.
+    skewed[i] = 0.4 * (Math.sin(t) + 0.5 * Math.sin(2 * t))
+  }
+  const flipped = Float32Array.from(skewed, v => -v)
+
+  const distortion = sig => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 3, wetDry: 1, asymmetry: 60,
+    })
+    let s = 0
+    const tail = channelData[0].subarray(n - SR)
+    for (let i = 0; i < tail.length; i++) s += tail[i] * tail[i]
+    return Math.sqrt(s / tail.length)
+  }
+
+  // A polarity flip flips the measured skew and therefore the chosen offset, so
+  // the two must come out at the same level. That symmetry is the property the
+  // tracker exists to give, and it fails outright for a fixed-sign offset.
+  const a = distortion(skewed)
+  const b = distortion(flipped)
+  const diffDb = Math.abs(20 * Math.log10(a / b))
+  assert.ok(diffDb < 0.5, `polarity flip changed the result by ${diffDb.toFixed(2)} dB`)
+})
+
+test('hardness tilts the harmonic series, and only below saturation', () => {
+  // THE CLAIM THAT MAKES THIS A CHARACTER CONTROL, and the limit on it.
+  //
+  // Measured as TILT — the top of the series against the bottom — because an
+  // absolute harmonic level moves with the AMOUNT of distortion as well as its
+  // kind, and hardness changes both (THD 20.0% at n=2 to 23.1% at n=8 at a
+  // fixed drive). A ratio between two harmonics cancels the amount and leaves
+  // the decay rate, which is the thing the knob is actually for.
+  //
+  // ⚠ IT ONLY WORKS BELOW SATURATION, AND THE SHIPPED PATCH IS ABOVE IT. Every
+  // member of this family tends to sign(x) for large |x|, so once the drive has
+  // squared the wave off there is no knee left to shape and the knob converges
+  // to inert. Measured tilt swing from n=2 to n=8:
+  //
+  //   drive 1 (effective 5)    12.8 dB    <- the knob works
+  //   drive 3 (effective 15)    1.4 dB    <- near-inert
+  //
+  // The `softness` control this replaced was inert for the SAME reason, at
+  // every setting, which is the likely explanation for why nobody ever reported
+  // that it did nothing. Lowering the default drive would put the knob inside
+  // its own window; that is a change to the shipped sound and has not been made
+  // here.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const tilt = hardness => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...VOCAL_SAT_KERNEL_DEFAULTS, drive: 1, wetDry: 1, asymmetry: 0, hardness,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => {
+      const k = Math.round((f * n) / SR)
+      return Math.hypot(re[k], im[k])
+    }
+    return 20 * Math.log10(at(f0 * 11) / at(f0 * 5))
+  }
+  const swing = tilt(HARDNESS_MAX) - tilt(HARDNESS_MIN)
+  assert.ok(
+    swing > 8,
+    `hardness should tilt the series; swung ${swing.toFixed(1)} dB (expected ~12.8)`,
+  )
+})
+
+/**
+ * Bursts with instant onsets and a decaying body — the material the
+ * transient-behaviour claims are about. A steady tone cannot probe any of this.
+ */
+function bursts(hits = 8) {
+  const n = SR * 4
+  const sig = new Float32Array(n)
+  for (let k = 0; k < hits; k++) {
+    const h = Math.round(SR * (0.25 + 0.45 * k))
+    for (let i = 0; i < SR * 0.35 && h + i < n; i++) {
+      const t = i / SR
+      const env = Math.exp(-t / 0.045)
+      const body = Math.sin(2 * Math.PI * 180 * t) + 0.5 * Math.sin(2 * Math.PI * 360 * t)
+      const click = Math.exp(-t / 0.004)
+        * (Math.sin(2 * Math.PI * 3200 * t) + Math.sin(2 * Math.PI * 6100 * t))
+      sig[h + i] += 0.30 * env * (body * 0.55 + click * 0.5)
+    }
+  }
+  return sig
+}
+
+function crestDb(buf, latency = 0) {
+  let peak = 0
+  let sum = 0
+  let count = 0
+  for (let i = 0; i < buf.length - latency; i++) {
+    const v = buf[i + latency]
+    peak = Math.max(peak, Math.abs(v))
+    sum += v * v
+    count++
+  }
+  return 20 * Math.log10(peak) - 20 * Math.log10(Math.sqrt(sum / count))
+}
+
+// asymmetry 0 deliberately: it has its own strong effect on crest (see the
+// interaction test below), and the topology claims must not ride on it.
+const HOT = {
+  drive: 2.0, wetDry: 1, asymmetry: 0, hardness: 2.5,
+  lowCrossover: 500, midCrossover: 3500,
+  lowDriveMult: 8, midDriveMult: 8, highDriveMult: 8, hfLoss: 0,
+}
+
+test('the default patch is bit-identical to the build before the switch', () => {
+  // ⚠ THE WHOLE LICENCE FOR ADDING A TOPOLOGY SWITCH TO A SHIPPED STAGE. Series
+  // is a different-sounding stage, not a better one, and every saved patch
+  // assumes the old wiring — so the default must be exactly what it was, and
+  // "exactly" has to mean sample equality rather than "sounds the same".
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, {
+    mode: MODE_PARALLEL, emphasis: 0,
+  }).channelData[0]
+  for (let i = 0; i < a.length; i++) {
+    assert.equal(a[i], b[i], `default is not parallel/emphasis-0 (i=${i})`)
+  }
+})
+
+test('emphasis at 0 is absent, not merely a flat shelf', () => {
+  // Same rule HF Loss and asymmetry follow: below the epsilon the pair is
+  // skipped outright, so a user who never touches it runs no extra biquads and
+  // pays nothing for the feature existing.
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, { emphasis: 0 }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { emphasis: 0.00001 }).channelData[0]
+  for (let i = 0; i < a.length; i++) {
+    assert.equal(a[i], b[i], `emphasis below the epsilon should be absent (i=${i})`)
+  }
+})
+
+test('parallel cannot absorb a transient at ANY Wet/Dry, and series can', () => {
+  // THE MEASUREMENT THE SWITCH EXISTS FOR. Parallel is an add, so the dry
+  // transient is at unity however the knob is set: crest is flat across the
+  // whole range, including past what the panel offers.
+  const sig = bursts()
+  const dry = crestDb(sig)
+  for (const wetDry of [0, 0.3, 0.5, 1, 2, 4]) {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_PARALLEL, wetDry,
+    })
+    const delta = crestDb(channelData[0], latencySamples) - dry
+    assert.ok(
+      Math.abs(delta) < 1,
+      `parallel at wetDry ${wetDry} changed crest by ${delta.toFixed(2)} dB — `
+      + 'if this now absorbs, the blend stopped being an add',
+    )
+  }
+  // Series runs ONE broadband curve, which is where the crossfade's peak
+  // absorption actually reaches the output.
+  const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES,
+  })
+  const delta = crestDb(channelData[0], latencySamples) - dry
+  assert.ok(delta < -2, `series should absorb; crest moved ${delta.toFixed(2)} dB`)
+})
+
+test('series is ONE curve, so at equal band drives the crossovers stop mattering', () => {
+  // THE STRUCTURAL PROOF THAT THE SPLIT IS GONE FROM THIS PATH. The split is
+  // complementary — low + mid + high is the input exactly — so summing the
+  // DRIVEN bands at equal mults is `mult * input` whatever the corners are set
+  // to. If someone reintroduces a per-band nonlinearity in series, the three
+  // curves start seeing different content and this goes red.
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, lowCrossover: 500, midCrossover: 3500,
+  }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, lowCrossover: 1200, midCrossover: 7000,
+  }).channelData[0]
+  let worst = 0
+  for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]))
+  assert.ok(worst < 1e-6, `series should not depend on the crossovers; max diff ${worst}`)
+
+  // And in PARALLEL the same move changes the output, because there the three
+  // curves genuinely see three different signals.
+  const c = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, lowCrossover: 500, midCrossover: 3500,
+  }).channelData[0]
+  const d = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, lowCrossover: 1200, midCrossover: 7000,
+  }).channelData[0]
+  let parallelDiff = 0
+  for (let i = 0; i < c.length; i++) parallelDiff = Math.max(parallelDiff, Math.abs(c[i] - d[i]))
+  assert.ok(parallelDiff > 1e-4, 'parallel should still depend on the crossovers')
+})
+
+test('the RMS match is the last thing resisting absorption, and this bounds it', () => {
+  // WHERE THE REMAINING GAP GOES, so nobody re-derives it. The curve alone at
+  // this drive takes 11.69 dB off the crest. Series recovers most of the
+  // topology losses but lands near -4.8, and the difference is the double RMS
+  // match: two 300 ms followers renormalising the wet to the dry's MOVING level
+  // is by construction an expander. Measured on the curve alone:
+  //
+  //   constant whole-file scalar    -11.69 dB   (crest is scale-invariant)
+  //   the shipped 300 ms followers   -4.92 dB   (6.8 dB handed back)
+  //
+  // -11.69 + 6.8 = -4.9, which is what the whole plugin measures. That match is
+  // the Python's own level matching and the level-neutrality guarantee rests on
+  // it, so it stays. This test is the tripwire if it ever moves.
+  const sig = bursts()
+  const dry = crestDb(sig)
+  const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES,
+  })
+  const delta = crestDb(channelData[0], latencySamples) - dry
+  assert.ok(
+    delta < -3,
+    `series should absorb around 4.8 dB of crest; measured ${delta.toFixed(2)} dB`,
+  )
+  assert.ok(
+    delta > -9,
+    `series absorbed ${delta.toFixed(2)} dB — more than the RMS match should allow. `
+    + 'If the match changed, the numbers in this comment need re-measuring',
+  )
+})
+
+test('soften is absent at 0 and IGNORED ENTIRELY in parallel', () => {
+  // ⚠ THE KERNEL MUST ENFORCE THIS, NOT THE PANEL. tapeCharacter measured this
+  // limiter ahead of a band split at +0.66 and +1.38 dB of tilt — HF RISING, on
+  // a control that provably cannot boost — because slew-limiting an
+  // already-saturated LF-dominated sum makes it triangular and a triangle is
+  // harmonics. A stale param message from a panel that thinks it is in series
+  // must not be able to reach that placement.
+  const sig = bursts(2)
+  const parallel = v => processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, soften: v,
+  }).channelData[0]
+  const base = parallel(0)
+  for (const v of [1, 50, 100]) {
+    const other = parallel(v)
+    for (let i = 0; i < base.length; i++) {
+      assert.equal(other[i], base[i], `soften ${v} changed the parallel path (i=${i})`)
+    }
+  }
+  // And in series, 0 is absent rather than a limiter running at scale 1: the
+  // branch is skipped, so its state never advances.
+  const a = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES, soften: 0 }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES }).channelData[0]
+  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `soften 0 is not the default (i=${i})`)
+})
+
+test('soften SOFTENS across its whole travel, monotonically', () => {
+  // TWO FAILURE MODES AT ONCE, both of which tapeCharacter records catching in
+  // the wild.
+  //
+  // (1) SIGN. Measured as TILT — the band against the broadband — because the
+  //     module's second measurement trap is that a limiter inside a path that
+  //     is level-matched afterwards reads POSITIVE on an absolute band
+  //     measurement: the match hands the removed energy back as broadband gain.
+  //     Tilt must be NEGATIVE at every setting. Positive means it has become a
+  //     distortion generator, which is what the wrong placement produces.
+  //
+  // (2) MONOTONICITY. "A MUTATION THAT SURVIVED FOUR ASSERTIONS: inverting the
+  //     knob's mapping. Every HF test still passed." Only monotonicity across
+  //     the travel catches that, so the sweep is the test.
+  //
+  //   soften     0      10      25      50      75      90     100
+  //   d tilt  -2.588  -2.600  -3.474  -8.037 -14.764 -18.188 -20.138  dB
+  const sig = bursts()
+  const hp = buf => {
+    const c = new BiquadCascade(2, 1)
+    c.setSections([highpass(SR, 4000), highpass(SR, 4000)])
+    const out = new Float64Array(buf.length)
+    c.process(buf, out, buf.length, 0)
+    return out
+  }
+  const rmsOf = buf => {
+    let s = 0
+    for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]
+    return Math.sqrt(s / buf.length)
+  }
+  const db = v => 20 * Math.log10(Math.max(v, 1e-12))
+  const dryTilt = db(rmsOf(hp(sig))) - db(rmsOf(sig))
+  const tiltAt = soften => {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, soften,
+    })
+    const aligned = new Float64Array(sig.length)
+    for (let i = 0; i < sig.length - latencySamples; i++) {
+      aligned[i] = channelData[0][i + latencySamples]
+    }
+    return (db(rmsOf(hp(aligned))) - db(rmsOf(aligned))) - dryTilt
+  }
+  const sweep = [0, 25, 50, 75, 100].map(tiltAt)
+  for (let i = 0; i < sweep.length; i++) {
+    assert.ok(
+      sweep[i] < 0,
+      `soften should soften, not excite; tilt ${sweep[i].toFixed(2)} dB at step ${i}`,
+    )
+  }
+  for (let i = 1; i < sweep.length; i++) {
+    assert.ok(
+      sweep[i] < sweep[i - 1],
+      `soften must deepen monotonically; ${sweep[i - 1].toFixed(2)} -> ${sweep[i].toFixed(2)} dB. `
+      + 'An inverted knob mapping passes every other assertion here',
+    )
+  }
+  assert.ok(sweep[4] < -12, `full knob should be deep; measured ${sweep[4].toFixed(2)} dB`)
+})
+
+test('asymmetry works AGAINST peak absorption, and by how much', () => {
+  // ⚠ AN INTERACTION NOBODY WOULD PREDICT FROM THE TWO CONTROLS' NAMES, and the
+  // reason the topology tests above pin asymmetry at 0.
+  //
+  // An off-centre curve clips one polarity earlier than the other, so the
+  // output is lopsided: the peak is set by the side that clipped LATE while the
+  // RMS falls with the side that clipped early. Crest therefore RISES. Series,
+  // one band, drive 16:
+  //
+  //   asymmetry     0      25      50     100
+  //   d crest    -4.80   -3.14   +0.56   +5.38  dB
+  //
+  // So the warmth control and the transient-absorption character pull in
+  // opposite directions, and a patch that wants the soft, absorbing sound wants
+  // asymmetry LOW.
+  //
+  // ⚠ THE PANEL SHIPS ASYMMETRY AT 100, so switching that patch to SERIES makes
+  // transients MORE prominent, not less — the one result a user reaching for
+  // series is not expecting. The help text says so; this records why.
+  const sig = bursts()
+  const dry = crestDb(sig)
+  const at = asymmetry => {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, asymmetry,
+    })
+    return crestDb(channelData[0], latencySamples) - dry
+  }
+  assert.ok(at(100) > at(0) + 4, `asymmetry should raise crest: ${at(0).toFixed(2)} -> ${at(100).toFixed(2)}`)
+})
+
+test('the emphasis pair absorbs the onset edge while the body keeps its harmonics', () => {
+  // THE OTHER HALF OF THE ANSWER. A bare curve adds harmonics loudest where the
+  // signal is loudest, so it drops new HF onto the onset — squashed but
+  // brighter, which reads as edge. Emphasis makes the curve bite HF hardest, so
+  // the onset's top end comes DOWN while the body stays thick. Series, one broadband
+  // curve, asymmetry 0:
+  //
+  //   emphasis      0      25      50      75     100
+  //   onset HF   -2.89   -3.29   -3.66   -4.49   -5.19  dB
+  //   body HF   +12.70  +12.06  +11.59  +11.23  +10.90  dB
+  //
+  // 2.3 dB rather than the 5+ the same pair gets around a bare single curve:
+  // here the HF rides on the low-frequency content into ONE shared curve rather
+  // than saturating in a band of its own. See EMPHASIS_MAX_DB, which also
+  // records that this trades crest absorption for HF absorption.
+  const sig = bursts()
+  const hp = buf => {
+    const c = new BiquadCascade(2, 1)
+    c.setSections([highpass(SR, 4000), highpass(SR, 4000)])
+    const out = new Float64Array(buf.length)
+    c.process(buf, out, buf.length, 0)
+    return out
+  }
+  const energy = (buf, fromS, toS) => {
+    let sum = 0
+    let count = 0
+    for (let k = 0; k < 8; k++) {
+      const h = Math.round(SR * (0.25 + 0.45 * k))
+      for (let i = h + Math.round(SR * fromS); i < h + Math.round(SR * toS); i++) {
+        sum += buf[i] * buf[i]
+        count++
+      }
+    }
+    return Math.sqrt(sum / count)
+  }
+  const wholeRms = buf => {
+    let s = 0
+    for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]
+    return Math.sqrt(s / buf.length)
+  }
+  const dryHf = hp(sig)
+  const measure = emphasis => {
+    const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, emphasis,
+    })
+    const aligned = new Float64Array(sig.length)
+    for (let i = 0; i < sig.length - latencySamples; i++) {
+      aligned[i] = channelData[0][i + latencySamples]
+    }
+    // Level-match to the dry, or this measures the output trim, not the tone.
+    const g = wholeRms(sig) / wholeRms(aligned)
+    for (let i = 0; i < aligned.length; i++) aligned[i] *= g
+    const hf = hp(aligned)
+    return {
+      onset: 20 * Math.log10(energy(hf, 0, 0.005) / energy(dryHf, 0, 0.005)),
+      body: 20 * Math.log10(energy(hf, 0.05, 0.20) / energy(dryHf, 0.05, 0.20)),
+    }
+  }
+  const off = measure(0)
+  const on = measure(100)
+  assert.ok(
+    on.onset < off.onset - 2,
+    `emphasis should absorb the onset's top end: ${off.onset.toFixed(2)} -> ${on.onset.toFixed(2)} dB`,
+  )
+  assert.ok(
+    on.body > 8,
+    `the body should keep its added harmonics; measured ${on.body.toFixed(2)} dB`,
+  )
+})
+
+test('the soften reference is motionless, not tracked', () => {
+  // tapeCharacter's third measurement trap: anything whose depth scales with a
+  // TRACKED level cannot be compared between a live preview and an offline
+  // region render, because the tracker starts cold offline. That defect has
+  // shipped in this codebase once already. A plain constant cannot do it, and
+  // this asserts it stays one rather than quietly becoming an envelope.
+  assert.equal(typeof SOFTEN_REFERENCE, 'number')
+  assert.ok(SOFTEN_REFERENCE > 0)
+})
+
+test('the cubic makes ONLY the third harmonic while it stays in domain', () => {
+  // THE ONE PROPERTY THAT MOTIVATES THIS CURVE, and the algebra is why it is a
+  // guarantee rather than a measurement: sin^3 expands to (3sin - sin3)/4, so a
+  // cubic in a sine is a fundamental and a third, full stop. No 5th exists to
+  // be small. Probed at a Drive that keeps the signal inside |x| <= 1.5.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const harmonics = curve => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, drive: 0.3, curve,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    const fund = at(f0)
+    return { h3: at(f0 * 3) / fund, h5: at(f0 * 5) / fund }
+  }
+  const shaped = harmonics(CURVE_SHAPE)
+  const cubic = harmonics(CURVE_CUBIC)
+  const drop = 20 * Math.log10(shaped.h5 / cubic.h5)
+  assert.ok(cubic.h3 > 1e-3, 'the cubic should still make a third harmonic')
+  assert.ok(
+    drop > 12,
+    `the cubic should have far less 5th; only ${drop.toFixed(1)} dB below shape. `
+    + 'If this fell, check the signal is still inside the polynomial domain',
+  )
+})
+
+test('⚠ THE CUBIC IS GRITTIER THAN SHAPE ONCE DRIVE CLAMPS IT', () => {
+  // THE TRAP, PINNED SO IT CANNOT BE FORGOTTEN. A polynomial diverges and must
+  // be clamped; the clamp is a hard clipper with UNBOUNDED harmonic order. In
+  // this plugin the band mults are 8, so Drive 1 already presents a peak of 3.2
+  // to a curve whose domain ends at 1.5 — the clamp is the NORMAL case here,
+  // not the edge case. Share of distortion energy above the 5th harmonic:
+  //
+  //   drive    0.3      1       2       4
+  //   shape    0.0%    2.6%   10.6%   19.3%
+  //   cubic    0.0%    1.6%   12.7%   22.3%
+  //
+  // The promise holds at 0.3 and inverts by 2. Anyone who reads only the
+  // "third harmonic only" claim will ship this at the default Drive and make
+  // the plugin worse.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const grit = (curve, drive) => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, drive, curve,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    const fund = at(f0)
+    let total = 0
+    let high = 0
+    for (let k = 2; k <= 20; k++) {
+      const v = (at(f0 * k) / fund) ** 2
+      total += v
+      if (k > 5) high += v
+    }
+    return (100 * high) / total
+  }
+  assert.ok(grit(CURVE_CUBIC, 0.3) < 1, 'in domain the cubic should have no high-order content')
+  assert.ok(
+    grit(CURVE_CUBIC, 4) > grit(CURVE_SHAPE, 4),
+    'past its domain the cubic hard-clips and should measure GRITTIER than shape. '
+    + 'If that stopped being true, the clamp or the domain changed',
+  )
+})
+
+test('the curve families agree at low level, so the switch is a fair A/B', () => {
+  // The textbook cubic is 1.5x - 0.5x^3, whose slope at the origin is 1.5 —
+  // 3.5 dB of gain. Switching to THAT would change level as well as character
+  // and the comparison would be measuring the wrong thing. This one is solved
+  // for unity slope at 0, an asymptote of 1 and a C1 join; see cubicShape.
+  const n = 16384
+  const sig = tone(n, 220, 0.4)
+  const at = curve => processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, drive: 0.02, curve,
+  }).channelData[0]
+  const a = at(CURVE_SHAPE)
+  const b = at(CURVE_CUBIC)
+  let worst = 0
+  for (let i = 2000; i < n; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]))
+  assert.ok(worst < 1e-3, `curves should agree at low level; max diff ${worst.toExponential(2)}`)
+})
+
+test('the default curve is shape, and the default patch is still bit-identical', () => {
+  const sig = bursts(2)
+  const a = processVocalSatBuffer([sig], SR, {}).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { curve: CURVE_SHAPE }).channelData[0]
+  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `default curve moved (i=${i})`)
+})
+
+test('TAME ADDS NO LATENCY — the whole design rests on this', () => {
+  // The lookahead is paid for out of the oversampler's existing 31-sample
+  // upsampling group delay: a detector reading the signal BEFORE the upsampler
+  // sees the curve-side audio that many samples early. If this number ever
+  // moves, the delay stopped being free and the design's premise is gone.
+  assert.equal(TAME_LOOKAHEAD_L, 15)
+  const sig = bursts(2)
+  for (const tame of [0, 50, 100]) {
+    const { latencySamples } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, tame,
+    })
+    assert.equal(
+      latencySamples, VOCAL_SAT_LATENCY_SAMPLES,
+      `tame ${tame} changed the plugin's latency`,
+    )
+  }
+})
+
+test('tame is absent at 0 and ignored in parallel', () => {
+  const sig = bursts(2)
+  const par = v => processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_PARALLEL, curve: CURVE_CUBIC, tame: v,
+  }).channelData[0]
+  const base = par(0)
+  for (const v of [1, 50, 100]) {
+    const other = par(v)
+    for (let i = 0; i < base.length; i++) {
+      assert.equal(other[i], base[i], `tame ${v} reached the parallel path (i=${i})`)
+    }
+  }
+  const a = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES, tame: 0 }).channelData[0]
+  const b = processVocalSatBuffer([sig], SR, { ...HOT, mode: MODE_SERIES }).channelData[0]
+  for (let i = 0; i < a.length; i++) assert.equal(a[i], b[i], `tame 0 is not absent (i=${i})`)
+})
+
+test('tame keeps the cubic in domain, which is the entire point of it', () => {
+  // THE MEASUREMENT THE FEATURE EXISTS FOR. Series, cubic, drive 2, share of
+  // distortion energy above the 5th harmonic:
+  //
+  //   tame      0      25      50      60      75     100
+  //   THD    38.9%   35.9%   20.0%   14.8%   11.6%   10.1%
+  //   grit   12.7%    7.9%    2.2%    2.4%    2.6%    2.8%
+  //
+  // Every step of the knob does something — an earlier mapping ran 8x edge down
+  // to 1x and was inert below 75; see tameThreshold for why anchoring 50 at the
+  // edge fixes it.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const grit = tame => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 2, tame,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    const fund = at(f0)
+    let total = 0
+    let high = 0
+    for (let k = 2; k <= 20; k++) {
+      const v = (at(f0 * k) / fund) ** 2
+      total += v
+      if (k > 5) high += v
+    }
+    return (100 * high) / total
+  }
+  assert.ok(grit(0) > 8, `unlimited cubic at drive 2 should be gritty; got ${grit(0).toFixed(1)}%`)
+  assert.ok(grit(50) < 4, `tame 50 should hold it in domain; got ${grit(50).toFixed(1)}%`)
+  assert.ok(grit(25) < grit(0), 'the knob should work below 50 as well')
+
+  // ⚠ THE FLOOR IS NOT ZERO, AND THE REASON IS STRUCTURAL. The detector runs at
+  // the BASE rate, so it cannot see intersample peaks — the oversampled signal
+  // between two base samples can exceed a bound the base samples respect. That
+  // residue is the ~2% that survives. Oversampling the detector would remove
+  // it and would cost the free lookahead, since the delay budget is counted in
+  // base samples.
+  assert.ok(grit(50) > 0.5, 'a base-rate detector cannot reach zero; if it did, re-measure')
+})
+
+test('above tame 50 the saturation stops depending on Drive', () => {
+  // A side effect worth pinning because it changes how the plugin is used: the
+  // limiter pins the operating point, so Drive above the threshold no longer
+  // changes the sound. Measured identical at drive 1, 2, 4 and 8.
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const thd = drive => {
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive, tame: 60,
+    })
+    const fft = getFFT(n)
+    const bins = rfftBinCount(n)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(channelData[0], re, im)
+    const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+    let total = 0
+    for (let k = 2; k <= 20; k++) total += (at(f0 * k) / at(f0)) ** 2
+    return Math.sqrt(total) * 100
+  }
+  const ref = thd(1)
+  for (const d of [2, 4, 8]) {
+    assert.ok(
+      Math.abs(thd(d) - ref) < 1,
+      `drive ${d} gave ${thd(d).toFixed(1)}% against ${ref.toFixed(1)}% at drive 1`,
+    )
+  }
+})
+
+test('auto-drive makes the saturation independent of source level', () => {
+  // THE POINT OF THE CONTROL. "Saturation is not level-invariant: a quieter
+  // selection is driven less at the same Drive setting" has been in this
+  // plugin's help as a caveat users work around by hand. Measured THD on the
+  // same patch at three input levels 30 dB apart:
+  //
+  //   input     -28 dBFS   -18 dBFS   -8 dBFS
+  //   auto 0        0.3%       1.3%      9.1%
+  //   auto 100      1.7%       1.7%      1.7%
+  const n = SR * 5
+  const f0 = 180
+  const cycles = Math.round((f0 * n) / SR)
+  const thdOf = (amp, autoDrive) => {
+    const sig = new Float32Array(n)
+    for (let i = 0; i < n; i++) sig[i] = amp * Math.sin((2 * Math.PI * cycles * i) / n)
+    const { channelData } = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 1, autoDrive,
+    })
+    const W = 1 << 15
+    const seg = new Float64Array(W)
+    for (let i = 0; i < W; i++) seg[i] = channelData[0][n - W + i]
+    const fft = getFFT(W)
+    const bins = rfftBinCount(W)
+    const re = new Float64Array(bins)
+    const im = new Float64Array(bins)
+    fft.rfft(seg, re, im)
+    const k0 = Math.round((f0 * W) / SR)
+    const at = h => Math.hypot(re[h * k0], im[h * k0])
+    let sum = 0
+    for (let h = 2; h <= 20; h++) sum += (at(h) / at(1)) ** 2
+    return Math.sqrt(sum) * 100
+  }
+  const levels = [0.04, 0.126, 0.4]
+  const off = levels.map(a => thdOf(a, 0))
+  const on = levels.map(a => thdOf(a, 100))
+  assert.ok(
+    off[2] > off[0] * 5,
+    `without auto-drive THD should track level hard; got ${off.map(v => v.toFixed(1)).join(' / ')}%`,
+  )
+  const spread = Math.max(...on) / Math.min(...on)
+  assert.ok(
+    spread < 1.3,
+    `auto-drive should flatten it; got ${on.map(v => v.toFixed(1)).join(' / ')}% (spread ${spread.toFixed(2)}x)`,
+  )
+})
+
+test('⚠ AUTO-DRIVE MUST NOT BREATHE — it is gated on voice for this reason', () => {
+  // tapeCharacter's HF Loss note records the failure this is built around:
+  // "Following the envelope gives full depth on a loud syllable and none
+  // through the pause after it — a room that BREATHES, which a listener hears
+  // as pumping long before they hear the colour."
+  //
+  // An UNGATED normaliser is worse than that shelf ever was, because a pause is
+  // where the tracked level is LOWEST and therefore the gain HIGHEST: it would
+  // drive room tone harder than speech. The tracker holds its last voiced value
+  // instead, so raising the knob must not lift the pauses.
+  const n = SR * 8
+  const sig = new Float32Array(n)
+  for (let i = 0; i < n; i++) sig[i] = (Math.random() * 2 - 1) * 1e-4
+  for (let k = 0; k < 5; k++) {
+    const h = Math.round(SR * (0.3 + 1.6 * k))
+    for (let i = 0; i < SR * 0.6 && h + i < n; i++) {
+      const t = i / SR
+      sig[h + i] += 0.25 * (0.6 + 0.4 * Math.sin(2 * Math.PI * 3 * t))
+        * Math.sin(2 * Math.PI * 180 * t)
+    }
+  }
+  const pauseDb = buf => {
+    let sum = 0
+    let count = 0
+    for (let k = 0; k < 4; k++) {
+      const a = Math.round(SR * (1.1 + 1.6 * k))
+      const z = Math.round(SR * (1.7 + 1.6 * k))
+      for (let i = a; i < z; i++) {
+        sum += buf[i] * buf[i]
+        count++
+      }
+    }
+    return 20 * Math.log10(Math.sqrt(sum / count))
+  }
+  const at = autoDrive => pauseDb(processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 1, autoDrive,
+  }).channelData[0])
+  const off = at(0)
+  assert.ok(
+    at(100) <= off + 0.5,
+    `auto-drive lifted the pauses by ${(at(100) - off).toFixed(2)} dB — the voiced `
+    + 'gate is not holding, and this will pump audibly',
+  )
+})
+
+test('auto-drive is absent at 0 and works in BOTH topologies', () => {
+  // Unlike Tame and Soften it needs no broadband oversampled point, so it is
+  // not restricted to series — it is a gain on the drive, nothing more.
+  const sig = bursts(2)
+  for (const mode of [MODE_PARALLEL, MODE_SERIES]) {
+    const a = processVocalSatBuffer([sig], SR, { ...HOT, mode, autoDrive: 0 }).channelData[0]
+    const b = processVocalSatBuffer([sig], SR, { ...HOT, mode }).channelData[0]
+    for (let i = 0; i < a.length; i++) {
+      assert.equal(a[i], b[i], `auto-drive 0 is not absent in ${mode} (i=${i})`)
+    }
+    const c = processVocalSatBuffer([sig], SR, { ...HOT, mode, autoDrive: 100 }).channelData[0]
+    let differs = false
+    for (let i = 0; i < a.length; i++) if (a[i] !== c[i]) differs = true
+    assert.ok(differs, `auto-drive should do something in ${mode}`)
+  }
+})
+
+function evenOddAndCrest(params) {
+  const n = 32768
+  const f0 = 220
+  const sig = tone(n, f0, 0.4)
+  const { channelData } = processVocalSatBuffer([sig], SR, params)
+  const fft = getFFT(n)
+  const bins = rfftBinCount(n)
+  const re = new Float64Array(bins)
+  const im = new Float64Array(bins)
+  fft.rfft(channelData[0], re, im)
+  const at = f => Math.hypot(re[Math.round((f * n) / SR)], im[Math.round((f * n) / SR)])
+  const fund = at(f0)
+  return { h2: 20 * Math.log10(at(f0 * 2) / fund) }
+}
+
+/** Crest change against the dry bursts, for a given patch. */
+function crestDelta(params) {
+  const sig = bursts()
+  const dry = crestDb(sig)
+  const { channelData, latencySamples } = processVocalSatBuffer([sig], SR, params)
+  return crestDb(channelData[0], latencySamples) - dry
+}
+
+test('SPLIT gives warmth without the onset cost OFFSET charges for it', () => {
+  // THE MEASUREMENT THE MODE EXISTS FOR. An offset makes the curve's two bounds
+  // unequal — 17.2 dB apart at Asymmetry 100 on shape n=2.5 — and THAT, not the
+  // even harmonics, is what raises crest and pushes onsets forward. A split
+  // knee keeps both bounds at +-1 because every `shape` order asymptotes to 1.
+  //
+  // series, shape, hardness 4, drive 2:
+  //
+  //   asym  mode        H2     d crest
+  //     0   (either)  -52.4     -5.01
+  //    50   offset    -22.5     +1.10
+  //    50   split     -41.5     -5.06
+  //   100   offset    -16.5     +6.87
+  //   100   split     -34.3     -5.06
+  const base = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_SHAPE, hardness: 4, drive: 2,
+  }
+  const sym = crestDelta({ ...base, asymmetry: 0 })
+  const offset = crestDelta({ ...base, asymmetry: 100, asymMode: ASYM_MODE_OFFSET })
+  const split = crestDelta({ ...base, asymmetry: 100, asymMode: ASYM_MODE_SPLIT })
+  assert.ok(
+    offset > sym + 5,
+    `offset asymmetry should cost crest: ${sym.toFixed(2)} -> ${offset.toFixed(2)} dB`,
+  )
+  assert.ok(
+    Math.abs(split - sym) < 1,
+    `split should cost essentially nothing: ${sym.toFixed(2)} -> ${split.toFixed(2)} dB`,
+  )
+  // It must still actually produce even harmonics, or it is costing nothing by
+  // doing nothing.
+  const h2Sym = evenOddAndCrest({ ...base, asymmetry: 0 }).h2
+  const h2Split = evenOddAndCrest({ ...base, asymmetry: 100, asymMode: ASYM_MODE_SPLIT }).h2
+  assert.ok(h2Split > h2Sym + 10, `split should make H2: ${h2Sym.toFixed(1)} -> ${h2Split.toFixed(1)} dB`)
+  // ...and honestly less of it than offset does. This is the subtle option.
+  const h2Offset = evenOddAndCrest({ ...base, asymmetry: 100, asymMode: ASYM_MODE_OFFSET }).h2
+  assert.ok(h2Offset > h2Split, 'offset should still be the louder of the two')
+})
+
+test('the split knob is not inert over half its travel', () => {
+  // ⚠ THE THIRD CONTROL IN THIS FILE TO FAIL THIS WAY. A fixed ratio clamped to
+  // [HARDNESS_MIN, HARDNESS_MAX] reached 8/2 at Asymmetry 50 and could not move
+  // after: H2 -34.3 at BOTH 50 and 100, identical. Interpolating toward the
+  // bounds instead uses the whole travel. Soften's first reference and Tame's
+  // first threshold mapping had the same defect; a sweep is the only thing that
+  // catches it.
+  const base = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_SHAPE, hardness: 4, drive: 2,
+    asymMode: ASYM_MODE_SPLIT,
+  }
+  const h2 = a => evenOddAndCrest({ ...base, asymmetry: a }).h2
+  const sweep = [25, 50, 75, 100].map(h2)
+  for (let i = 1; i < sweep.length; i++) {
+    assert.ok(
+      sweep[i] > sweep[i - 1] + 0.5,
+      `split must keep deepening across the knob: ${sweep.map(v => v.toFixed(1)).join(' -> ')} dB`,
+    )
+  }
+})
+
+test('full split travel reaches the same pair at every hardness', () => {
+  // The endpoints ARE the bounds, so Hardness cannot run the knob out of room —
+  // which the clamped form could not promise. Measured H2 -34.3 dB at every
+  // Hardness from 2 to 8 at Asymmetry 100.
+  const base = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_SHAPE, drive: 2,
+    asymmetry: 100, asymMode: ASYM_MODE_SPLIT,
+  }
+  const values = [2, 4, 8].map(hardness => evenOddAndCrest({ ...base, hardness }).h2)
+  const spread = Math.max(...values) - Math.min(...values)
+  assert.ok(spread < 0.5, `should be hardness-independent at full travel; got ${values.map(v => v.toFixed(1)).join(' / ')}`)
+})
+
+test('split falls back to offset on the cubic, and is absent at asymmetry 0', () => {
+  // A cubic's normalisation determines it uniquely — unity slope, asymptote 1,
+  // C1 join — so there is no second cubic to put on the other polarity. The
+  // kernel resolves that rather than silently doing nothing.
+  const sig = bursts(2)
+  const cubicSplit = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, asymmetry: 100, asymMode: ASYM_MODE_SPLIT,
+  }).channelData[0]
+  const cubicOffset = processVocalSatBuffer([sig], SR, {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, asymmetry: 100, asymMode: ASYM_MODE_OFFSET,
+  }).channelData[0]
+  for (let i = 0; i < cubicSplit.length; i++) {
+    assert.equal(cubicSplit[i], cubicOffset[i], `cubic should ignore split mode (i=${i})`)
+  }
+  for (const curve of [CURVE_SHAPE, CURVE_CUBIC]) {
+    const a = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve, asymmetry: 0, asymMode: ASYM_MODE_SPLIT,
+    }).channelData[0]
+    const b = processVocalSatBuffer([sig], SR, {
+      ...HOT, mode: MODE_SERIES, curve, asymmetry: 0, asymMode: ASYM_MODE_OFFSET,
+    }).channelData[0]
+    for (let i = 0; i < a.length; i++) {
+      assert.equal(a[i], b[i], `asymmetry 0 should be mode-independent on ${curve} (i=${i})`)
+    }
+  }
+})
+
+test('⚠ PREVIEW AND APPLY DIVERGE, AND A PRE-ROLL IS WHAT NARROWS IT', () => {
+  // THE PREMISE BEHIND VOCAL_SAT_PREROLL_S, pinned at DSP level because the
+  // apply path itself needs an OfflineAudioContext that node has not got.
+  //
+  // Preview runs the kernel over everything the user played; apply starts COLD
+  // at the region's first sample. Same code, same params, different state. This
+  // asserts three things in order of importance:
+  //
+  //   1. a cold start really does differ (if this stops being true, the
+  //      pre-roll is dead weight and should come out)
+  //   2. the pre-roll narrows it
+  //   3. a pre-roll equal to ALL preceding audio closes it, which is the proof
+  //      that state history is the ONLY cause
+  //
+  // Measured convergence over the first 0.5 s of the region, full patch:
+  //   pre-roll  0 s  -1.083 dB   2 s  -0.316   4 s  -0.297   all  0.000
+  const SETTLE = SR * 10
+  const REGION = SR * 2
+  const total = SETTLE + REGION
+  const full = new Float32Array(total)
+  for (let i = 0; i < total; i++) {
+    const t = i / SR
+    const syllable = Math.max(0, Math.sin(2 * Math.PI * 2.6 * t)) ** 2
+    // Deliberately skewed, so the skew tracker has an opinion to converge to.
+    const ph = 2 * Math.PI * 160 * t
+    full[i] = 0.24 * syllable * (Math.exp(3 * Math.sin(ph)) - 1) / (Math.exp(3) - 1)
+  }
+  const patch = {
+    ...HOT, mode: MODE_SERIES, curve: CURVE_CUBIC, drive: 2,
+    asymmetry: 100, asymMode: ASYM_MODE_OFFSET,
+    emphasis: 50, tame: 60, autoDrive: 100,
+  }
+  const settled = processVocalSatBuffer([full], SR, patch).channelData[0]
+  const lat = VOCAL_SAT_LATENCY_SAMPLES
+
+  // Energy over the first half-second of the region, apply against preview.
+  const openingErrorDb = preRollSeconds => {
+    const pre = Math.round(SR * preRollSeconds)
+    const fed = full.slice(SETTLE - pre, SETTLE + REGION)
+    const applied = processVocalSatBuffer([fed], SR, patch).channelData[0]
+    let a = 0
+    let b = 0
+    let n = 0
+    for (let i = 0; i < SR * 0.5; i++) {
+      a += settled[SETTLE + i + lat] ** 2
+      b += applied[pre + i + lat] ** 2
+      n++
+    }
+    return 20 * Math.log10(Math.sqrt(a / n)) - 20 * Math.log10(Math.sqrt(b / n))
+  }
+
+  const cold = Math.abs(openingErrorDb(0))
+  assert.ok(cold > 0.5, `a cold apply should differ audibly; measured ${cold.toFixed(3)} dB`)
+
+  const withPreRoll = Math.abs(openingErrorDb(VOCAL_SAT_PREROLL_S))
+  assert.ok(
+    withPreRoll < cold / 2,
+    `the pre-roll should at least halve the opening error: ${cold.toFixed(3)} -> ${withPreRoll.toFixed(3)} dB`,
+  )
+
+  // ⚠ AND IT DOES NOT REACH ZERO. Stated as an assertion so nobody "fixes" the
+  // residue by lengthening the constant: the voiced gate's valley floor and the
+  // skew sign's stickiness depend on history arbitrarily far back.
+  assert.ok(
+    withPreRoll > 0.02,
+    `if a ${VOCAL_SAT_PREROLL_S}s pre-roll now closes this completely, the kernel's `
+    + 'slow state changed and VOCAL_SAT_PREROLL_S should be re-derived',
+  )
+
+  // The whole preceding file DOES close it — the proof that nothing but state
+  // history is in play.
+  const everything = Math.abs(openingErrorDb(SETTLE / SR))
+  assert.ok(
+    everything < 0.001,
+    `full history should be exact; measured ${everything.toFixed(5)} dB`,
+  )
+})
+
+test('hardness is clamped to the measured range', () => {
+  // HARDNESS_MIN is an aliasing measurement, not a preference. A param message
+  // from a stale panel must not reach the curve with n below it.
+  const k = new VocalSatKernel(SR)
+  k.setParams({ hardness: 0.5 })
+  assert.equal(k.hardness, HARDNESS_MIN)
+  k.setParams({ hardness: 99 })
+  assert.equal(k.hardness, HARDNESS_MAX)
 })
 
 /** FFT length used by the aliasing measurements. */
@@ -251,11 +1245,38 @@ test('the worst folded product on a high tone stays far down', () => {
 
 test('a near-linear band produces essentially no aliasing', () => {
   // Sanity check on the measurement itself: drop the low band's drive below
-  // the point where the transfer curves and the number should fall away.
+  // the point where the transfer curves bite and the number should fall away.
+  //
+  // ⚠ ASYMMETRY MUST BE 0 FOR THIS PROBE TO MEAN WHAT IT SAYS, and that is a
+  // statement about the effect rather than about the test. An odd curve has no
+  // second-order term AT THE ORIGIN, so a small signal centred there is very
+  // nearly linear however curved the transfer is further out. Run the same
+  // curve OFF CENTRE and that cancellation is gone: the small signal now rides
+  // on a part of the curve that bends, and "drop the drive and the
+  // nonlinearity falls away" stops being true at any drive. The offset is not
+  // a bias on the measurement — it is a second nonlinearity the drive knob
+  // does not reach. See the companion test below for what it costs.
   const db = aliasToSignalDb(
-    { ...VOCAL_SAT_KERNEL_DEFAULTS, lowDriveMult: 0.1 }, 235, 0.4,
+    { ...VOCAL_SAT_KERNEL_DEFAULTS, lowDriveMult: 0.1, asymmetry: 0 }, 235, 0.4,
   )
   assert.ok(db < -120, `expected near-nothing, measured ${db.toFixed(1)} dB`)
+})
+
+test('running the curve off centre costs alias margin, and this is how much', () => {
+  // THE PRICE OF THE CURVE CHANGE, pinned rather than described. Same probe as
+  // above with the offset engaged. The tanh build this replaced measured
+  // -139.4 dB here; this curve measures about -109, because a slower-decaying
+  // harmonic series is exactly what folds. That is the trade the curve was
+  // changed to make, and 109 dB down is 39 dB below this file's own -70 dB
+  // audibility bar — but it is a real 30 dB and it should go red if it moves.
+  const off = { ...VOCAL_SAT_KERNEL_DEFAULTS, lowDriveMult: 0.1, asymmetry: 50 }
+  const db = aliasToSignalDb(off, 235, 0.4)
+  assert.ok(db < -100, `off-centre aliasing regressed: ${db.toFixed(1)} dB`)
+  assert.ok(
+    db > -130,
+    `off-centre aliasing improved to ${db.toFixed(1)} dB — if this is real, the `
+    + 'comment above and HARDNESS_MIN both need re-measuring',
+  )
 })
 
 test('block size does not change the result', () => {

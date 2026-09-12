@@ -1,9 +1,10 @@
 import { getSegmentDuration } from './operations.js'
 import { applyGainSegments } from './dsp/autoLevel.js'
-import { analysisWindow } from './analysisWindow.js'
+import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
+import { LA2A_PREROLL_S } from './la2aProcessor.js'
 import {
-  LA2A_DEFAULTS, LA2A_LATENCY_SAMPLES, toKernelParams,
+  LA2A_DEFAULTS, la2aPatchLatencySamples, toKernelParams,
 } from './effects/la2aCompressor.js'
 import { ensureFET1176Worklet } from './fet1176WorkletLoader.js'
 import {
@@ -23,6 +24,7 @@ import {
   toKernelParams as toAirBandKernelParams,
 } from './effects/airBand.js'
 import { ensureSchepsWorklet } from './schepsWorkletLoader.js'
+import { SCHEPS_PREROLL_S } from './schepsProcessor.js'
 import {
   SCHEPS_DEFAULTS,
   SCHEPS_LATENCY_SAMPLES,
@@ -33,6 +35,7 @@ import { ensureInflatorWorklet } from './inflatorWorkletLoader.js'
 import {
   VOCAL_SAT_DEFAULTS,
   VOCAL_SAT_LATENCY_SAMPLES,
+  VOCAL_SAT_PREROLL_S,
   toKernelParams as toVocalSatKernelParams,
 } from './effects/vocalSat.js'
 import {
@@ -326,9 +329,109 @@ function measureInWorker(workerType, segments, start, end, kernelParams, sampleR
   })
 }
 
-export function computeLA2AAutoMakeup(segments, start, end, kernelParams, sampleRate, channels) {
-  return measureInWorker('la2aAutoMakeup', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => d.makeupDb)
+/**
+ * The same round trip over the WHOLE region, with no analysis cap.
+ *
+ * ⚠ THE CAP IS NOT AN OPTIMISATION THAT CAN BE APPLIED EVERYWHERE. It is right
+ * for a measured knob position, which asks "what is this setting doing" and is
+ * answered as well by a representative half-minute. It is wrong for anything
+ * that is a statement about the region as a whole: integrated loudness and
+ * ACX's ungated RMS are both defined over all of it, and measuring thirty
+ * seconds of a chapter that opens loud reads hot and normalizes the rest of
+ * the recording down to match. Two functions rather than a flag, so the
+ * decision is visible at every call site.
+ */
+function measureWholeRegionInWorker(workerType, segments, start, end, params, sampleRate, channels) {
+  return new Promise((resolve, reject) => {
+    const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+    const id = ++measureSeq
+    measurePending.set(id, { resolve, reject })
+    getMeasureWorker().postMessage(
+      { __id: id, type: workerType, channelData, sampleRate, params },
+      channelData.map(c => c.buffer)
+    )
+  })
+}
+
+/**
+ * Every loudness reading for a region — integrated LUFS, ACX's ungated RMS,
+ * sample peak and true peak. Resolves the shape `measureLoudness` in
+ * dsp/loudness.js returns.
+ */
+export function measureRegionLoudness(segments, start, end, sampleRate, channels) {
+  return measureWholeRegionInWorker(
+    'measureLoudness', segments, start, end, {}, sampleRate, channels,
+  ).then(d => d.loudness)
+}
+
+/**
+ * Normalize a region to a loudness target and resolve `{ buffer, report }`.
+ *
+ * ⚠ THE REPORT IS MEASURED ON THE RENDERED OUTPUT, not predicted from the gain,
+ * and the panel prints it verbatim. Where the peak ceiling forced limiting, the
+ * loudness that came out is not the loudness the gain aimed at — see
+ * dsp/loudnessNormalize.js — and a panel that reported the aim would be telling
+ * a narrator they had hit a spec somebody else is about to measure.
+ *
+ * @param {{targetDb:number, unit:'LUFS'|'RMS', ceilingDb:number}} target
+ * @param {'limit'|'safe'} peakMode
+ */
+export function loudnessNormalizeRegion(
+  segments, start, end, target, peakMode, audioContext, sampleRate, channels,
+) {
+  return measureWholeRegionInWorker(
+    'loudnessNormalize', segments, start, end, { target, peakMode }, sampleRate, channels,
+  ).then((d) => {
+    const buffer = audioContext.createBuffer(
+      channels, Math.ceil((end - start) * sampleRate), sampleRate,
+    )
+    for (let ch = 0; ch < channels; ch++) buffer.copyToChannel(d.channelData[ch], ch)
+    return { buffer, report: d.report }
+  })
+}
+
+/**
+ * Measure OptoSmooth's auto-makeup for a region. Resolves
+ * `{ makeupDb, ceilingDb, ceilingKneeDb }`.
+ *
+ * The knee travels with the ceiling and must not be dropped: without it the
+ * kernel falls back to the widest fixed width, which costs peak headroom
+ * silently. See `ceilingKneeDbFor`.
+ *
+ * ⚠ THE TWO HALVES ARE MEASURED OVER DIFFERENT SPANS, DELIBERATELY. The makeup
+ * comes from the worker's capped, start-anchored window, because solving it
+ * means running the kernel and that has to stay fast enough to sit behind a
+ * knob drag. The ceiling comes from `regionPeakDb` over the WHOLE region,
+ * because it is the guarantee — "never louder than the source" is a claim about
+ * the source, not about the first thirty seconds of it. See both functions for
+ * why each span is right for its job.
+ *
+ * `ceilingDb` is null under the peak reference, which needs no ceiling: its
+ * guarantee is arithmetic. See `peakOfChannels` in la2aProcessor.js.
+ */
+export function computeLA2AAutoMakeup(
+  segments, start, end, kernelParams, sampleRate, channels, reference = 'peak',
+) {
+  return measureInWorker(
+    'la2aAutoMakeup', segments, start, end, { ...kernelParams, reference }, sampleRate, channels,
+  ).then((d) => {
+    if (reference !== 'percentile') {
+      return { makeupDb: d.makeupDb, ceilingDb: null, ceilingKneeDb: null }
+    }
+    const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+    return {
+      makeupDb: d.makeupDb,
+      ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+      /**
+       * The measured width only when the solve saw everything the ceiling was
+       * measured over — see `analysedWholeRegion`. Null is the conservative
+       * fixed knee, which is what this did before the width was measured at all.
+       */
+      ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+        ? d.ceilingKneeDb
+        : null,
+    }
+  })
 }
 
 /** Measure the FET Punch auto-makeup (Output) for a region — see above. */
@@ -353,11 +456,32 @@ export function computeSoftClipperAutoMakeup(segments, start, end, kernelParams,
 /**
  * Measure the Scheps wet-path makeup, the dry/wet correlation and the density
  * the compression yields, for a region. Resolves
- * `{ trimDb, correlation, densityDb }` — see computeSchepsAutoTrim.
+ * `{ trimDb, correlation, densityDb, ceilingDb, ceilingKneeDb }` — see
+ * computeSchepsAutoTrim. The last two travel together: the ceiling is the
+ * guarantee and the knee is how softly it is enforced.
  */
 export function computeSchepsTrim(segments, start, end, kernelParams, sampleRate, channels) {
   return measureInWorker('schepsAutoTrim', segments, start, end, kernelParams, sampleRate, channels)
-    .then(d => ({ trimDb: d.trimDb, correlation: d.correlation, densityDb: d.densityDb }))
+    .then((d) => {
+      /**
+       * ⚠ THE CEILING IS RE-MEASURED OVER THE WHOLE REGION, exactly as
+       * `computeLA2AAutoMakeup` does and for the same reason: the worker only
+       * ever sees the capped, start-anchored analysis window, and a ceiling from
+       * an excerpt would clamp everything after it. The trim keeps the capped
+       * pass because solving it renders the wet path and has to stay fast.
+       */
+      const ceilingDb = regionPeakDb(segments, start, end, sampleRate, channels)
+      return {
+        trimDb: d.trimDb,
+        correlation: d.correlation,
+        densityDb: d.densityDb,
+        ceilingDb: Number.isFinite(ceilingDb) ? ceilingDb : null,
+        // Same span guard as the OptoSmooth solve, for the same reason.
+        ceilingKneeDb: Number.isFinite(d.ceilingKneeDb) && analysedWholeRegion(start, end)
+          ? d.ceilingKneeDb
+          : null,
+      }
+    })
 }
 
 /**
@@ -413,19 +537,61 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
  */
 async function applyWorkletRegion(
   segments, start, end, sampleRate, channels,
-  { ensureWorklet, processorName, kernelParams, latencySamples = 0 },
+  { ensureWorklet, processorName, kernelParams, latencySamples = 0, preRollSamples = 0 },
 ) {
   const duration = end - start
   const numSamples = Math.ceil(duration * sampleRate)
   const latency = Math.max(0, Math.round(latencySamples))
-  const renderSamples = numSamples + latency
+
+  // ── PRE-ROLL ─────────────────────────────────────────────────────────────
+  //
+  // ⚠ WITHOUT THIS, A STAGE WITH ENVELOPE STATE DOES NOT PRODUCE WHAT THE
+  // PREVIEW PRODUCED, and the gap is not small. The preview worklet has been
+  // running over everything the user played; this render starts COLD at the
+  // region's first sample. Measured on Tube Saturation, preview settled against
+  // a cold apply, energy over the first 0.5 s of the region: -0.36 dB at the
+  // shipped default and -2.06 dB with its slower trackers engaged. That second
+  // figure sits inside the range tapeCharacter records for the same defect the
+  // last time it shipped ("preview came out 1.5-2.3 dB more softened").
+  //
+  // Worse than a level offset: a stage that makes a DECISION from tracked
+  // state can decide differently. Tube Saturation's skew tracker settles to
+  // direction -0.62 on positive-leaning material but reads +1.00 before its 3 s
+  // evidence gate, so a selection shorter than that had its asymmetry leaning
+  // the wrong way — worth up to 7.9 dB of extra distortion by that module's own
+  // measurement.
+  //
+  // ⚠ CLAMPED TO WHAT THE TIMELINE ACTUALLY HAS, and that is not a detail.
+  // renderRegionToBuffer zero-fills before the start of the timeline, and
+  // priming an RmsFollower with four seconds of digital silence is WORSE than
+  // starting cold: its warmup would complete on the silence and the exponential
+  // average would then have to climb from zero, which is the exact failure the
+  // warmup exists to prevent. A region at t=0 therefore gets no pre-roll and
+  // behaves exactly as it did before.
+  //
+  // ⚠ OPT-IN, ONE STAGE AT A TIME. Every caller of this function has envelope
+  // state and the same bug; turning it on for all of them at once would change
+  // the output of five shipped plugins in one commit. Three ask for it, each
+  // after its own measurement: Tube Saturation (4 s), OptoSmooth (2 s) and
+  // Scheps (2 s) — see the note beside each call site for what its number
+  // buys. The rest keep today's behaviour until each is measured on its own.
+  //
+  // Two of those measurements say pre-roll is not the answer, and they are the
+  // reason this is not a flag to switch on everywhere. FET Punch's makeup
+  // tracker is a running MAXIMUM, so no length of pre-roll converges it — only
+  // a bounded reference would. ResoTame's error is the STFT grid phase,
+  // (regionStart - preRoll) % hop, which the apply path cannot know; a pre-roll
+  // that happens to land hop-aligned looks exact and is not.
+  const wantedPreRoll = Math.max(0, Math.round(preRollSamples))
+  const preRoll = Math.min(wantedPreRoll, Math.max(0, Math.floor(start * sampleRate)))
+  const renderSamples = preRoll + numSamples + latency
 
   // Pull `latency` extra samples of real audio from past the region where the
   // timeline has them, so the tail is reconstructed from context rather than
   // from silence. renderRegionToBuffer zero-fills beyond the end of the
   // timeline, which is exactly what we want there.
   const channelData = renderRegionToBuffer(
-    segments, start, end + latency / sampleRate, sampleRate, channels,
+    segments, start - preRoll / sampleRate, end + latency / sampleRate, sampleRate, channels,
   )
 
   const offlineCtx = new OfflineAudioContext(channels, renderSamples, sampleRate)
@@ -457,28 +623,43 @@ async function applyWorkletRegion(
   source.start(0)
 
   const rendered = await offlineCtx.startRendering()
-  if (latency === 0) return rendered
+  // The pre-roll is discarded along with the latency: both are context the
+  // kernel needed to see and neither belongs on the timeline.
+  const head = preRoll + latency
+  if (head === 0) return rendered
 
-  // Drop the leading `latency` samples so output sample 0 corresponds to input
-  // sample 0, and hand back a buffer of exactly the region's length — that is
-  // what replaceRegion expects to splice in.
+  // Drop the leading `head` samples so output sample 0 corresponds to the
+  // region's first input sample, and hand back a buffer of exactly the region's
+  // length — that is what replaceRegion expects to splice in.
   const trimmed = offlineCtx.createBuffer(channels, numSamples, sampleRate)
   for (let ch = 0; ch < channels; ch++) {
     trimmed.copyToChannel(
-      rendered.getChannelData(ch).subarray(latency, latency + numSamples),
+      rendered.getChannelData(ch).subarray(head, head + numSamples),
       ch,
     )
   }
   return trimmed
 }
 
-/** Apply OptoSmooth (LA-2A) compression to a region. */
+/**
+ * Apply OptoSmooth (LA-2A) compression to a region.
+ *
+ * ⚠ THE LATENCY IS PER-PATCH, NOT A CONSTANT — lookahead adds its own delay on
+ * top of the oversampler's 50 samples, and at the 20 ms ceiling that is 882
+ * more. Trimming the constant instead would splice the region in that far late
+ * and drop that much of its tail, at both boundaries. Same shape as the soft
+ * clipper's limiter; see the note on `applySoftClipperRegion`.
+ */
 export function applyLA2ARegion(segments, start, end, params, sampleRate, channels) {
+  const merged = { ...LA2A_DEFAULTS, ...params }
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureLA2AWorklet,
     processorName: 'la2a-processor',
-    kernelParams: toKernelParams({ ...LA2A_DEFAULTS, ...params }),
-    latencySamples: LA2A_LATENCY_SAMPLES,
+    kernelParams: toKernelParams(merged),
+    latencySamples: la2aPatchLatencySamples(merged, sampleRate),
+    // Bit-exact against a settled preview at this length — see LA2A_PREROLL_S
+    // for the measurements and for why nothing in this kernel latches.
+    preRollSamples: Math.round(LA2A_PREROLL_S * sampleRate),
   })
 }
 
@@ -526,6 +707,9 @@ export function applySchepsRegion(segments, start, end, params, sampleRate, chan
     processorName: 'scheps-processor',
     kernelParams: toSchepsKernelParams({ ...SCHEPS_DEFAULTS, ...params }),
     latencySamples: SCHEPS_LATENCY_SAMPLES,
+    // Inherits the LA-2A kernel, so it inherits its convergence — see
+    // SCHEPS_PREROLL_S. Also bit-exact at this length.
+    preRollSamples: Math.round(SCHEPS_PREROLL_S * sampleRate),
   })
 }
 
@@ -536,6 +720,12 @@ export function applyVocalSatRegion(segments, start, end, params, sampleRate, ch
     processorName: 'vocal-sat-processor',
     kernelParams: toVocalSatKernelParams({ ...VOCAL_SAT_DEFAULTS, ...params }),
     latencySamples: VOCAL_SAT_LATENCY_SAMPLES,
+    // ⚠ THE ONLY CALLER ASKING FOR THIS SO FAR. Tube Saturation carries the
+    // slowest trackers in the app — a 3 s skew evidence gate and a 1.5 s level
+    // follower — so a cold start showed up as a 2 dB error over the opening of
+    // a region. See VOCAL_SAT_PREROLL_S for the measurements and for why it
+    // narrows the gap rather than closing it.
+    preRollSamples: Math.round(VOCAL_SAT_PREROLL_S * sampleRate),
   })
 }
 
@@ -711,6 +901,9 @@ export function applyResonanceRegion(segments, start, end, params, sampleRate, c
     processorName: 'resonance-processor',
     kernelParams: toResonanceKernelParams({ ...RESONANCE_DEFAULTS, ...params }),
     latencySamples: RESONANCE_LATENCY_SAMPLES,
+    // ⚠ NO PRE-ROLL, DELIBERATELY — see the note on StftProcessor's use in
+    // resonanceProcessor.js. This stage's disagreement is a frame-PHASE error,
+    // not a convergence one, and a pre-roll cannot fix it.
   })
 }
 
