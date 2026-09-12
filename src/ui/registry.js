@@ -3,6 +3,7 @@ import SilencePanel from '../components/panels/SilencePanel.vue'
 import FadePanel from '../components/panels/FadePanel.vue'
 import VolumePanel from '../components/panels/VolumePanel.vue'
 import SplitPanel from '../components/panels/SplitPanel.vue'
+import MarkersPanel from '../components/panels/MarkersPanel.vue'
 import PresetsPanel from '../components/panels/PresetsPanel.vue'
 
 import LA2AModal from '../components/panels/LA2AModal.vue'
@@ -53,7 +54,13 @@ export const CATEGORIES = [
     label: 'Split',
     icon: 'split',
     desc: 'Cut the file into separate pieces',
-    panel: SplitPanel,
+    // Was a bespoke panel holding the split modes directly. It became an
+    // ordinary list the moment there was a second thing under Split: a
+    // category with a `panel` skips the list level entirely, so nothing else
+    // could ever appear beside it — and the modes it held are a better fit for
+    // a rail operation anyway, which is what every other category already
+    // uses. Markers and Split are now both in the command palette for free.
+    panel: null,
   },
   {
     id: 'edit',
@@ -99,6 +106,32 @@ export const CATEGORIES = [
  * differently — that inconsistency is what this replaces.
  */
 export const OPERATIONS = [
+
+  // ---- Split (rail) ----
+  {
+    id: 'split',
+    label: 'Split',
+    desc: 'Divide the audio into two separate clips',
+    category: 'split',
+    group: 'Cut points',
+    icon: 'split',
+    keywords: ['divide', 'cut', 'separate', 'clip', 'playhead'],
+    requires: null,
+    surface: 'rail',
+    component: SplitPanel,
+  },
+  {
+    id: 'markers',
+    label: 'Markers',
+    desc: 'Mark the boundaries in a file, then cut them all at once',
+    category: 'split',
+    group: 'Cut points',
+    icon: 'markers',
+    keywords: ['marker', 'region', 'label', 'chapter', 'slice', 'gap', 'boundary'],
+    requires: 'file',
+    surface: 'rail',
+    component: MarkersPanel,
+  },
 
   // ---- Edit: clipboard verbs (immediate) ----
   // These duplicate SelectionBar's buttons on purpose. The bar is a shortcut

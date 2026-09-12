@@ -51,7 +51,13 @@ const operation = computed(() => (state.railOperation ? getOperation(state.railO
           :back-label="category.label"
           @back="setRailOperation(null)"
         />
-        <component :is="operation.component" />
+        <!-- data-rail-panel is a test hook: scripts/panel-smoke.mjs asserts
+             that the panel it asked for is the one that rendered. Without it
+             the smoke run can only see floating windows, and rail panels are
+             just as able to throw at module scope. -->
+        <div :data-rail-panel="operation.id">
+          <component :is="operation.component" />
+        </div>
       </template>
 
       <!-- List level -->

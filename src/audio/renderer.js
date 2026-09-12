@@ -22,6 +22,17 @@ const LANE_DIVIDER_COLOR = 'rgba(255, 255, 255, 0.14)'
 // together rather than drifting apart in separate files.
 export const RULER_GUTTER_HEIGHT = 18
 const LANE_LABEL_COLOR = 'rgba(255, 255, 255, 0.38)'
+// Markers are amber so they read as neither the selection (cyan) nor the
+// playhead (red) — a boundary the user placed is a third kind of thing from
+// "what is selected" and "where playback is".
+const MARKER_COLOR = '#ffb454'
+const MARKER_GAP_COLOR = 'rgba(255, 180, 84, 0.55)'
+const MARKER_HAIRLINE_COLOR = 'rgba(255, 180, 84, 0.38)'
+// The name sits beside the flag on the transparent overlay, over whatever the
+// waveform is doing underneath — so it is light, not the dark ink it would be
+// if it were printed on the flag itself.
+const MARKER_LABEL_COLOR = 'rgba(255, 214, 160, 0.95)'
+const GAP_VEIL_COLOR = 'rgba(255, 180, 84, 0.10)'
 // Stereo is the case worth labelling; anything wider falls back to numbers.
 const LANE_LABELS = ['L', 'R']
 
@@ -296,6 +307,10 @@ export function renderOverlay(canvas, options) {
     pixelsPerSecond = 100,
     selection = null,
     playhead = 0,
+    markers = [],
+    gapSpans = [],
+    activeMarkerId = null,
+    hoverMarkerId = null,
   } = options
 
   const dpr = window.devicePixelRatio || 1
@@ -341,6 +356,20 @@ export function renderOverlay(canvas, options) {
     }
   }
 
+  // Markers sit between the selection and the playhead in draw order: over the
+  // selection veil so a marked boundary stays visible inside a selection, and
+  // under the playhead so the transport is never hidden by one.
+  drawGapSpans(ctx, gapSpans, scrollLeft, pixelsPerSecond, logicalWidth, logicalHeight)
+  drawMarkers(ctx, {
+    markers,
+    scrollLeft,
+    pixelsPerSecond,
+    logicalWidth,
+    logicalHeight,
+    activeMarkerId,
+    hoverMarkerId,
+  })
+
   // Draw playhead
   const playheadPx = (playhead - scrollLeft) * pixelsPerSecond
   if (playheadPx >= 0 && playheadPx <= logicalWidth) {
@@ -360,6 +389,100 @@ export function renderOverlay(canvas, options) {
     ctx.closePath()
     ctx.fill()
   }
+}
+
+
+/** Flag width in the gutter, either side of the marker's own line. */
+const MARKER_FLAG_HALF_W = 5
+/** Below this much clear space to the next marker, a name is not drawn. */
+const MARKER_LABEL_MIN_PX = 34
+
+/**
+ * The dead-air spans, veiled so they read as material that is going to go.
+ *
+ * Drawn before the markers so the flags that define a gap sit on top of it.
+ */
+function drawGapSpans(ctx, gapSpans, scrollLeft, pixelsPerSecond, width, height) {
+  if (!gapSpans?.length) return
+  ctx.save()
+  ctx.fillStyle = GAP_VEIL_COLOR
+  for (const span of gapSpans) {
+    const x0 = (span.start - scrollLeft) * pixelsPerSecond
+    const x1 = (span.end - scrollLeft) * pixelsPerSecond
+    if (x1 <= 0 || x0 >= width) continue
+    const left = Math.max(0, x0)
+    ctx.fillRect(left, 0, Math.min(x1, width) - left, height)
+  }
+  ctx.restore()
+}
+
+/**
+ * Marker hairlines, flags and names.
+ *
+ * ── THE NAME IS DROPPED BEFORE IT COLLIDES, NOT CLIPPED ────────────────────
+ * Zoomed out on a file with thirty chapter markers, every name overlaps its
+ * neighbour and the result is an unreadable smear — the same failure the
+ * ruler's tick ladder exists to avoid. So a name is drawn only when there is
+ * room for it before the next marker. Nothing is ever half-drawn: the panel's
+ * list is where names are always legible, and the canvas shows what fits.
+ */
+function drawMarkers(ctx, {
+  markers,
+  scrollLeft,
+  pixelsPerSecond,
+  logicalWidth,
+  logicalHeight,
+  activeMarkerId,
+  hoverMarkerId,
+}) {
+  if (!markers?.length) return
+
+  ctx.save()
+  ctx.font = '10px Inter, system-ui, sans-serif'
+  ctx.textBaseline = 'middle'
+
+  for (let i = 0; i < markers.length; i++) {
+    const m = markers[i]
+    const x = (m.time - scrollLeft) * pixelsPerSecond
+    // The flag overhangs the line, so cull on the flag's own extent rather
+    // than the line's or a marker just off-screen loses half its flag.
+    if (x < -MARKER_FLAG_HALF_W || x > logicalWidth + MARKER_FLAG_HALF_W) continue
+
+    const emphasised = m.id === activeMarkerId || m.id === hoverMarkerId
+    const colour = m.kind === 'gap' ? MARKER_GAP_COLOR : MARKER_COLOR
+
+    ctx.strokeStyle = emphasised ? colour : MARKER_HAIRLINE_COLOR
+    ctx.lineWidth = emphasised ? 1.5 : 1
+    ctx.beginPath()
+    ctx.moveTo(x, RULER_GUTTER_HEIGHT)
+    ctx.lineTo(x, logicalHeight)
+    ctx.stroke()
+
+    // A pennant rather than a triangle: it points into the span it opens, which
+    // is the whole of what a marker's kind and name refer to.
+    ctx.fillStyle = colour
+    ctx.beginPath()
+    ctx.moveTo(x, 1)
+    ctx.lineTo(x + MARKER_FLAG_HALF_W * 2, 1)
+    ctx.lineTo(x + MARKER_FLAG_HALF_W * 2, RULER_GUTTER_HEIGHT - 7)
+    ctx.lineTo(x, RULER_GUTTER_HEIGHT - 3)
+    ctx.closePath()
+    ctx.fill()
+
+    if (!m.name) continue
+    const nextX = i + 1 < markers.length
+      ? (markers[i + 1].time - scrollLeft) * pixelsPerSecond
+      : logicalWidth
+    const room = Math.min(nextX, logicalWidth) - (x + MARKER_FLAG_HALF_W * 2 + 4)
+    if (room < MARKER_LABEL_MIN_PX) continue
+
+    if (ctx.measureText(m.name).width > room) continue
+
+    ctx.fillStyle = MARKER_LABEL_COLOR
+    ctx.fillText(m.name, x + MARKER_FLAG_HALF_W * 2 + 4, RULER_GUTTER_HEIGHT / 2)
+  }
+
+  ctx.restore()
 }
 
 /**

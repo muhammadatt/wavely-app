@@ -390,7 +390,7 @@ watch(documents, docs => { if (docs.length === 0) close() })
              multi-file export is an unexplained pause. -->
         <div v-if="isExporting" class="mb-[9px] px-1">
           <div class="flex justify-between text-[11px] font-bold text-[rgba(255,255,255,.5)] mb-[6px]">
-            <span>Rendering {{ exportProgress.done + 1 }} of {{ exportProgress.total }}…</span>
+            <span>Rendering {{ Math.min(exportProgress.done + 1, exportProgress.total) }} of {{ exportProgress.total }}…</span>
             <span class="font-['JetBrains_Mono']">{{ Math.round((exportProgress.done / exportProgress.total) * 100) }}%</span>
           </div>
           <div class="w-full h-[6px] rounded-md overflow-hidden" style="background:rgba(255,255,255,.06)">

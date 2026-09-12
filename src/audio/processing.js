@@ -381,10 +381,23 @@ export function loudnessNormalizeRegion(
   return measureWholeRegionInWorker(
     'loudnessNormalize', segments, start, end, { target, peakMode }, sampleRate, channels,
   ).then((d) => {
+    const renderedChannels = Array.isArray(d.channelData) ? d.channelData : []
+    const channelCount = renderedChannels.length || channels
+    const frameLength = renderedChannels.reduce(
+      (max, ch) => Math.max(max, ch?.length ?? 0),
+      0,
+    ) || Math.ceil((end - start) * sampleRate)
     const buffer = audioContext.createBuffer(
-      channels, Math.ceil((end - start) * sampleRate), sampleRate,
+      channelCount, frameLength, sampleRate,
     )
-    for (let ch = 0; ch < channels; ch++) buffer.copyToChannel(d.channelData[ch], ch)
+    for (let ch = 0; ch < channelCount; ch++) {
+      const samples = renderedChannels[ch]
+      if (!samples) continue
+      buffer.copyToChannel(
+        samples.length > frameLength ? samples.subarray(0, frameLength) : samples,
+        ch,
+      )
+    }
     return { buffer, report: d.report }
   })
 }

@@ -316,8 +316,7 @@ export const TRUE_PEAK_PHASES = TP_PHASES
  */
 export function measureTruePeakDb(channelData) {
   const chans = channelData ?? []
-  const n = chans[0]?.length ?? 0
-  if (!n) return -Infinity
+  if (!(chans[0]?.length > 0)) return -Infinity
 
   let samplePk = 0
   for (const ch of chans) {
@@ -339,7 +338,9 @@ export function measureTruePeakDb(channelData) {
   // discontinuity is really there in what gets written back — and erring high
   // is the safe direction for something a peak ceiling is set from.
   for (const ch of chans) {
-    for (let i = 0; i < n; i++) {
+    const chN = ch?.length ?? 0
+    if (!chN) continue
+    for (let i = 0; i < chN; i++) {
       const a = ch[i] < 0 ? -ch[i] : ch[i]
       if (a < screen) continue
       // The peaks between this sample and its neighbours on both sides.
@@ -350,7 +351,7 @@ export function measureTruePeakDb(channelData) {
           let acc = 0
           for (let k = 0; k < TP_TAPS_PER_PHASE; k++) {
             const idx = j - half + 1 + k
-            if (idx >= 0 && idx < n) acc += taps[k] * ch[idx]
+            if (idx >= 0 && idx < chN) acc += taps[k] * ch[idx]
           }
           const b = acc < 0 ? -acc : acc
           if (b > peak) peak = b

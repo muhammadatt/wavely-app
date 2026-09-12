@@ -13,6 +13,10 @@ export const ICONS = {
   // Split: a dashed cut line with the halves moving apart. The old glyph was a
   // line with chevrons above and below, which read as "expand vertically".
   split: '<path d="M12 3v3M12 10.5v3M12 18v3"/><path d="M7.5 8.5L4 12l3.5 3.5"/><path d="M16.5 8.5L20 12l-3.5 3.5"/>',
+  // Markers: two pennants on a baseline. A pennant rather than a pin because
+  // that is the shape the waveform draws — it points into the span it opens,
+  // and the rail row should be recognisably the same object.
+  markers: '<path d="M6 21V4h9l-2 3 2 3H6"/><path d="M18 21V9h3"/>',
   // Edit: pencil. Kept, but `trim` no longer duplicates it (see below).
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>',
   // Effects: channel faders. The old concentric arcs read as wifi/broadcast;
