@@ -46,6 +46,9 @@ import {
 import { DelayLine } from './dsp/oversample.js'
 import { BiquadCascade, highpass, lowpass } from './dsp/biquad.js'
 import { pultecSections, PULTEC_STAGES } from './dsp/pultec.js'
+import { clamp, finite, mixGains } from './dsp/parallelMix.js'
+
+export { mixGains }
 
 const LN10_OVER_20 = Math.LN10 / 20
 
@@ -189,72 +192,16 @@ export const SCHEPS_KERNEL_DEFAULTS = {
   outputDb: 0, // manual trim on the summed output
 }
 
-function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v
-}
-
 /**
- * Clamp, but reject anything that is not a finite number.
+ * ⚠ THE BLEND LAW AND ITS GUARDS NOW LIVE IN `dsp/parallelMix.js`, shared with
+ * the vocal chain's dynamics section, which blends the same way. Re-exported
+ * here so importers and `scheps.test.js` are unchanged.
  *
- * Params reach this kernel over a message port from UI state, so one undefined
- * or NaN is always one bug away — and since the makeup is now the compressor's
- * own Gain, a NaN no longer stays local. It enters the T4 cell's envelope and
- * memory, which are persistent, and the kernel then outputs NaN forever: the
- * effect goes silent and stays silent until the page is reloaded. Measured
- * exactly that way — one bad push, then twenty blocks of good params, still all
- * non-finite.
- *
- * `clamp` alone cannot catch it: `undefined < lo` and `undefined > hi` are both
- * false, so it returns undefined unchanged.
+ * ⚠ IMPORTED AND RE-EXPORTED, NOT JUST RE-EXPORTED, AND THE DIFFERENCE IS A
+ * RUNTIME CRASH — this file already records paying for that once. `export { X }
+ * from '...'` forwards the binding without introducing it into this module's
+ * scope, and `clamp`, `finite` and `mixGains` are all used locally below.
  */
-function finite(v, fallback, lo, hi) {
-  return Number.isFinite(v) ? clamp(v, lo, hi) : fallback
-}
-
-/**
- * Dry and wet gains for a mix position, plus the compensation that keeps the
- * sum's level constant across the whole sweep.
- *
- * Equal power (cos/sin) is the right law here and a linear blend is not: at the
- * halfway point a linear blend is 6 dB down on each path and audibly dips. But
- * equal power assumes the two paths are uncorrelated, and these two are the same
- * voice — below a kilohertz they are nearly the same waveform. Summing them at
- * cos/sin therefore lands up to 3 dB HOT in the middle of the sweep, which is
- * the same loudness bias the auto trim exists to remove, arriving by a different
- * door.
- *
- * With the wet path level-matched to the dry one, the sum's power is
- * `1 + rho*sin(2*theta)` — exactly 1 when the two are uncorrelated, and up to
- * `1 + rho` when they track each other. Dividing by its square root makes the
- * blend loudness-flat end to end for a measured rho, and degenerates to plain
- * equal power when rho is 0.
- *
- * Exported for the tests and the panel readout.
- */
-export function mixGains(mix, correlation = 0, densityDb = 0) {
-  const theta = finite(mix, 0, 0, 1) * (Math.PI / 2)
-  const dry = Math.cos(theta)
-  const wet = Math.sin(theta)
-  const rho = finite(correlation, 0, -0.98, 0.98)
-  const r = Math.exp(finite(densityDb, 0, -12, 12) * LN10_OVER_20)
-
-  // What the sum WOULD be if the two paths were independent. This is the target
-  // rather than unity, and the difference is the point: the wet copy is louder
-  // on average than the dry one by `densityDb`, because its loud parts were
-  // pulled down and handed back. That gain is the compression's yield and has
-  // to survive the blend — flattening it is what left the plugin unable to make
-  // anything louder.
-  const target = dry * dry + r * r * wet * wet
-  // What it actually is, with the interference term the correlation creates.
-  const actual = target + 2 * rho * r * dry * wet
-  const compensation = Math.sqrt(target / Math.max(actual, 1e-6))
-  // `r` shapes the compensation only. It is not applied as a gain: the wet path
-  // is ALREADY that much louder on average, because the trim put its loud parts
-  // level and compression raised everything underneath them. Multiplying by it
-  // here would count the same density twice.
-  return { dry, wet, compensation }
-}
-
 export class SchepsKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate

@@ -258,6 +258,11 @@ rests on.
                            └─ wet ─ Pultec pre ─ Opto ─ Pultec post ┘
 ```
 
+✓ **Kernel landed** (`src/audio/dynamicsProcessor.js`). Latency is 150 samples
+and constant across every patch; Mix 0 is bit-exact against clip → FET alone,
+which is also the only direct check on the dry delay. The worklet wrapper, the
+crest solve, the apply path and the panel are the next increments.
+
 **Macros: Density 0–100** (drives the crest ladder) and **Mix 0–1** (the opto
 block's parallel blend).
 
@@ -343,6 +348,35 @@ Four consequences, all improvements:
   output is approximately the source. Everything stays float internally. The only
   caveat is that TONE's saturation is level-dependent, so the block needs a sane
   output trim rather than an unbounded one.
+
+### ⚠ Every stage must be aligned at its own input
+
+**This is a consequence of chaining the spec did not anticipate, and it
+constrains the solve.** Both compressors drive a fixed internal threshold, so
+each needs its input brought to nominal or its knob means nothing. In a serial
+chain the two do not share an input: the FET's Input attenuator drops the audio
+path by ~1 dB at drive 50 and its own gain reduction takes more.
+
+Measured on narration at −6 dBFS peak, clip at −9:
+
+| point | gated alignment offset |
+|---|---|
+| section input | −1.69 dB |
+| post-clip | −1.12 dB |
+| post-FET — the opto's input | **+4.42 dB** |
+
+The opto's peak reduction at `squash: 40` is **0.25 dB** aligned from the raw
+file against **2.98 dB** aligned from its own input — twelve times, from the
+same knob position.
+
+So the solve cannot measure once at the front and hand the same offset to both
+stages. It has to render the head stage by stage and measure where each stage
+actually sits. That also means the alignment measurement and the crest solve are
+one pass, not two independent ones.
+
+⚠ And 2.98 dB is itself evidence for what this spec already predicted: **`squash:
+40` does not transfer.** Scheps lands 7.64 dB at that value; here the cell sees a
+signal already clipped and already FET-compressed, so there is less left to grab.
 
 ### The crest ladder
 
