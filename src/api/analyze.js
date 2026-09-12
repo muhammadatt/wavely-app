@@ -11,7 +11,9 @@
  * knobs the user actually turns are recomputed locally from what comes back.
  */
 
-import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
+import {
+  renderRegionToBuffer, floatChannelsToWavBlob, renderVadWavBlob,
+} from '../audio/processing.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -100,7 +102,10 @@ export async function analyzeSibilance({
  */
 export async function analyzeVoiceActivity({ segments, start, end, sampleRate, channels }) {
   const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
-  const wavBlob = floatChannelsToWavBlob(channelData, sampleRate, channels)
+  // Mono 16 kHz 16-bit, not the full-rate float the sibilance route uploads:
+  // this plugin's selections are chapters, and the detector reads nothing else.
+  // See renderVadWavBlob for what that costs and what it does not.
+  const wavBlob = await renderVadWavBlob(channelData, sampleRate)
 
   const formData = new FormData()
   formData.append('file', wavBlob, 'selection.wav')

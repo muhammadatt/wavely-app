@@ -31,8 +31,10 @@
  *
  * ── THE TWO-PHASE SHAPE ──────────────────────────────────────────────────────
  *
- *   prepareAutoLevel()  audio + mask -> clips, per-clip LUFS, prefix sums.
- *                       O(n) with two biquad passes. Runs once per analysis.
+ *   prepareAutoLevel()  audio + mask -> clips, per-clip LUFS, a block power
+ *                       index. O(n), two biquad passes, once per analysis.
+ *                       Transiently allocates one Float32 copy of the audio and
+ *                       RETAINS under a megabyte of it — see BlockPowerSum.
  *   solveAutoLevel()    prepared + config -> gains, merges, crossfades.
  *                       O(clips). Runs on every knob move.
  *
@@ -120,28 +122,112 @@ export const AUTOLEVEL_DEFAULTS = {
  * whoever next needs K-weighting and picks whichever import their editor
  * offers first.
  *
- * @returns {Float64Array} K-weighted copy of `samples`.
+ * @returns {Float32Array} K-weighted copy of `samples`.
  */
 export function applyKWeighting(samples, sampleRate) {
   const cascade = new BiquadCascade(2, 1)
   cascade.setSections(kWeightingSections(sampleRate))
-  const out = new Float64Array(samples.length)
+  // FLOAT32 OUT, FLOAT64 INSIDE. The cascade's z1/z2 state is Float64 either
+  // way, so the filter is unchanged; only the stored result is narrowed. That
+  // halves the largest array this module holds, and every value in it is read
+  // back into a Float64 accumulator, so the precision that actually matters —
+  // the sums — is not the precision being narrowed.
+  const out = new Float32Array(samples.length)
   cascade.process(samples, out, samples.length, 0)
   return out
 }
 
-// ── Power-sum prefix array (for O(1) energy-in-range queries) ────────────────
+// ── Energy-in-range queries ──────────────────────────────────────────────────
 
+/**
+ * Block size for the power index. 4096 samples is ~93 ms at 44.1 kHz.
+ *
+ * Only the partial blocks at each end of a query are summed directly, so this
+ * bounds a range query at ~8192 multiply-adds however long the range is. The
+ * queries are per clip and per hop — hundreds, not millions — so that is free,
+ * and a bigger block would only shrink an index that is already negligible.
+ */
+const POWER_BLOCK = 4096
+
+/**
+ * Energy over arbitrary sample ranges, without a per-sample prefix array.
+ *
+ * ⚠ THE OBVIOUS STRUCTURE IS A FULL PREFIX SUM, AND IT DOES NOT FIT. One
+ * Float64 per sample is 635 MB per thirty minutes of mono at 44.1 kHz, and the
+ * first version of this module built two of them — over the K-weighted signal
+ * and over the raw audio — beside a Float64 copy of the filtered samples. That
+ * is ~1.9 GB before the render and the upload buffer, on exactly the
+ * chapter-length selections this plugin exists for. Scheduling the gain curve
+ * instead of rendering it (see effects/autoLevel.js) had already been done for
+ * this reason; the analysis pass simply had not been looked at with the same
+ * eye.
+ *
+ * A block index holds one Float64 per 4096 samples — 155 KB for that same half
+ * hour — and the samples it indexes are BORROWED, not copied. The raw-audio
+ * index therefore costs nothing beyond the index itself, because the caller
+ * already owns the audio.
+ *
+ * ⚠ IT IS ALSO MORE ACCURATE, WHICH IS NOT THE POINT BUT IS WORTH KNOWING. A
+ * prefix sum over 79 M squared samples answers a short range by subtracting two
+ * large nearly-equal numbers, and a 30 ms crossfade window late in a chapter is
+ * exactly that subtraction. Summing whole blocks and the two partial ends never
+ * forms the large intermediate at all.
+ */
+export class BlockPowerSum {
+  /** @param {Float32Array|Float64Array} samples borrowed, never copied */
+  constructor(samples) {
+    this.samples = samples
+    const n = samples.length
+    const blocks = Math.ceil(n / POWER_BLOCK)
+    this.blockPrefix = new Float64Array(blocks + 1)
+    for (let b = 0; b < blocks; b++) {
+      const from = b * POWER_BLOCK
+      const to = Math.min(n, from + POWER_BLOCK)
+      let sum = 0
+      for (let i = from; i < to; i++) sum += samples[i] * samples[i]
+      this.blockPrefix[b + 1] = this.blockPrefix[b] + sum
+    }
+  }
+
+  /** Sum of squares over [start, end). */
+  sum(start, end) {
+    const a = Math.max(0, start)
+    const b = Math.min(this.samples.length, end)
+    if (b <= a) return 0
+
+    const firstWhole = Math.ceil(a / POWER_BLOCK)
+    const lastWhole = Math.floor(b / POWER_BLOCK)
+    const { samples } = this
+
+    // Too short to contain a whole block: sum it directly.
+    if (firstWhole >= lastWhole) {
+      let sum = 0
+      for (let i = a; i < b; i++) sum += samples[i] * samples[i]
+      return sum
+    }
+
+    let sum = this.blockPrefix[lastWhole] - this.blockPrefix[firstWhole]
+    for (let i = a; i < firstWhole * POWER_BLOCK; i++) sum += samples[i] * samples[i]
+    for (let i = lastWhole * POWER_BLOCK; i < b; i++) sum += samples[i] * samples[i]
+    return sum
+  }
+
+  /** Mean square over [start, end), or 0 for an empty range. */
+  meanSquare(start, end) {
+    const a = Math.max(0, start)
+    const b = Math.min(this.samples.length, end)
+    if (b <= a) return 0
+    return this.sum(a, b) / (b - a)
+  }
+}
+
+/** @returns {BlockPowerSum} */
 export function buildPowerSum(samples) {
-  const n = samples.length
-  const ps = new Float64Array(n + 1)
-  for (let i = 0; i < n; i++) ps[i + 1] = ps[i] + samples[i] * samples[i]
-  return ps
+  return new BlockPowerSum(samples)
 }
 
 function meanSquareRange(powerSum, start, end) {
-  if (end <= start) return 0
-  return (powerSum[end] - powerSum[start]) / (end - start)
+  return powerSum.meanSquare(start, end)
 }
 
 function meanSquareToLufs(meanSq) {
@@ -795,7 +881,7 @@ export function gainDbAtSample(segments, sample) {
  * @property {number} sampleRate
  * @property {number} totalSamples
  * @property {number} noiseFloorDbfs
- * @property {Float64Array} audioPowerSum
+ * @property {BlockPowerSum} audioPowerSum
  */
 
 /**
@@ -834,9 +920,11 @@ export function prepareAutoLevel({ audio, sampleRate, frameVoiced, frameDuration
   }
 
   // K-weight once; reuse for L_st (sub-phrase splitting) and per-clip LUFS.
+  // The K-weighted copy is the only full-length array this pass allocates; the
+  // raw-audio index borrows the caller's samples and adds only its block table.
   const kwSamples     = applyKWeighting(audio, sampleRate)
-  const kwPowerSum    = buildPowerSum(kwSamples)
-  const audioPowerSum = buildPowerSum(audio)
+  const kwPowerSum    = new BlockPowerSum(kwSamples)
+  const audioPowerSum = new BlockPowerSum(audio)
 
   const windowSt = Math.round(ST_WINDOW_MS * 0.001 * sampleRate)
   const L_st     = computeLufsCurve(kwPowerSum, hopVoiced, windowSt, hopSamples, n)

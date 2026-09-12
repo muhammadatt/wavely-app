@@ -97,21 +97,41 @@ export function createAutoLeveler(audioContext) {
   let transportWhen = 0
   let transportStartSec = 0
   let running = false
+  /** Anchor for a pass booked into the lookahead window but not yet sounding. */
+  let pending = null
 
-  function cancelAutomation() {
+  /**
+   * Stop the scheduled curve. `when` is a context time to stop AT, and that is
+   * what makes a gapless loop possible.
+   *
+   * ⚠ PLAYBACK BOOKS THE NEXT LOOP PASS BEFORE THE CURRENT ONE ENDS. It calls
+   * `startTransport(passEndsAt, loopFrom)` a TRANSPORT_LOOKAHEAD_SEC (60 ms)
+   * ahead of the seam, with `when` in the future. Cancelling at `currentTime`
+   * there does not tidy up the outgoing pass — it kills automation that is
+   * still sounding, and the leveler drops to unity for the last 60 ms of every
+   * repeat. Cancelling at `when` leaves everything scheduled before the seam
+   * intact and clears only what the next pass is about to replace.
+   *
+   * Omitted — a transport stop, a new curve, teardown — it cancels immediately
+   * and returns the param to unity, which is the pass-through the de-esser gets
+   * for free by storing deviation instead of absolute gain.
+   */
+  function stopTransport(when) {
+    if (destroyed) return
+
     const now = audioContext.currentTime
+    const future = when !== undefined && when > now
+    if (!future) {
+      running = false
+      pending = null
+    }
+
     try {
-      gainNode.gain.cancelScheduledValues(now)
+      gainNode.gain.cancelScheduledValues(future ? when : now)
     } catch {
       // Nothing scheduled.
     }
-    gainNode.gain.value = 1
-  }
-
-  function stopTransport() {
-    running = false
-    if (destroyed) return
-    cancelAutomation()
+    if (!future) gainNode.gain.value = 1
   }
 
   /**
@@ -123,7 +143,9 @@ export function createAutoLeveler(audioContext) {
    * phrase's gain rather than ramping into it from unity.
    */
   function startTransport(when, startSec) {
-    stopTransport()
+    // Hand the outgoing pass the time it is allowed to run to. When `when` is
+    // now, this is the immediate stop it always was.
+    stopTransport(when)
     if (destroyed || !segments?.length) return
 
     const param = gainNode.gain
@@ -171,9 +193,20 @@ export function createAutoLeveler(audioContext) {
       )
     }
 
-    transportWhen = when
-    transportStartSec = Math.max(startSec, regionStartSec)
-    running = true
+    // The outgoing pass is still sounding until `when`, so the meter must keep
+    // reading against its anchor until then. Promoting immediately would make
+    // getGainDb see a negative elapsed time and report 0 dB — a visible drop to
+    // unity on the meter at every loop seam, for the same 60 ms the audio bug
+    // above used to last.
+    const anchor = { when, startSec: Math.max(startSec, regionStartSec) }
+    if (running && when > audioContext.currentTime) {
+      pending = anchor
+    } else {
+      transportWhen = anchor.when
+      transportStartSec = anchor.startSec
+      pending = null
+      running = true
+    }
   }
 
   function lastSample() {
@@ -225,6 +258,13 @@ export function createAutoLeveler(audioContext) {
      */
     getGainDb() {
       if (!running || !segments) return 0
+
+      // Promote the queued pass once its start time has actually arrived.
+      if (pending && audioContext.currentTime >= pending.when) {
+        transportWhen = pending.when
+        transportStartSec = pending.startSec
+        pending = null
+      }
 
       // currentTime is the scheduler's clock: audio scheduled for it has not
       // been heard yet. Backing off by the device latency reports the curve at

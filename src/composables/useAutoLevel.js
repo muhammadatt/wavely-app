@@ -75,10 +75,25 @@ export function useAutoLevel() {
   } = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
+  /**
+   * Identifies the timeline the analysis was measured from.
+   *
+   * ⚠ THE BUFFER IDS ARE NOT ENOUGH, which is what the de-esser's copy of this
+   * uses and what this started as. `trimToSelection` and `splitSegmentsAtTime`
+   * keep the same `sourceBufferId` while moving `sourceStart`, `sourceEnd` and
+   * every downstream `outputStart` — so a trim leaves an id-based key
+   * unchanged, `isStale` stays false, and phrase gains measured against the old
+   * geometry go on being applied to audio that has shifted under them.
+   *
+   * `revision` is the editor's own answer to this: monotonic across every
+   * document, bumped by every mutation, and carried through undo/redo so
+   * returning to a previous state restores its revision rather than minting a
+   * new one. A revision number identifies a timeline; a set of buffer ids
+   * identifies only which recordings it draws on.
+   */
   function sourceKey() {
     if (!state.currentFile) return null
-    const ids = state.segments.map(s => s.sourceBufferId ?? 'silence').join(',')
-    return `${state.currentFile.name}:${ids}`
+    return `${state.currentFile.name}:${state.revision}`
   }
 
   const isStale = computed(() => {
@@ -234,11 +249,27 @@ export function useAutoLevel() {
     const { start, end } = state.selection
     const { sampleRate, channels } = state.currentFile
 
+    // ⚠ CAPTURED BEFORE THE REQUEST, CHECKED AFTER IT. The upload is a render of
+    // the timeline as it stands now, but the round trip is seconds long and the
+    // editor stays live throughout — an edit or a tab switch lands while the
+    // mask is in flight. Reading `sourceKey()` afterwards would stamp the
+    // result with the NEW timeline's identity, which is worse than not checking
+    // at all: the mask describes audio that no longer exists and `isStale`
+    // cheerfully certifies it as fresh.
+    const requestKey = sourceKey()
     analyzing.value = true
     try {
       const result = await analyzeVoiceActivity({
         segments: state.segments, start, end, sampleRate, channels,
       })
+
+      if (sourceKey() !== requestKey) {
+        // The timeline moved under the request. Say so rather than failing
+        // silently — the user pressed a button and is owed an outcome.
+        showToast('Audio changed during analysis — analyse again')
+        return
+      }
+
       vad.value = result
 
       // Mono for analysis: clip loudness and the mask are both single-channel
@@ -254,7 +285,7 @@ export function useAutoLevel() {
         frameDurationS: result.frameDurationS,
         noiseFloorDbfs: result.noiseFloorDbfs,
       })
-      analyzedRegion.value = { start, end, sourceKey: sourceKey() }
+      analyzedRegion.value = { start, end, sourceKey: requestKey }
       pushCurve()
 
       if (!prepared.value.applicable) {

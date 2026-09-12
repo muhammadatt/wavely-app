@@ -33,7 +33,13 @@ const router = Router()
 
 const upload = multer({
   dest: path.resolve(import.meta.dirname, '..', 'uploads'),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB — analysis clips are short
+  // 512 MB. The sibilance route works on short clips and never came near the
+  // old 100 MB, but the VAD route is called on whole chapters: the client sends
+  // mono 16 kHz 16-bit (110 MB/hour — see renderVadWavBlob), and this leaves
+  // room for a long one plus anything a future kind needs to send at full rate.
+  // Multer streams to disk rather than buffering, so the ceiling costs nothing
+  // until it is used.
+  limits: { fileSize: 512 * 1024 * 1024 },
 })
 
 /** Analysis rate — must track INTERNAL_SAMPLE_RATE in lib/ffmpeg.js. */
