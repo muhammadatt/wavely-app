@@ -432,16 +432,38 @@ precomputed.
 
 Three pieces of work that must land before the composite can be trusted.
 
-**1 · FET Punch must be input-aligned.** `CLAUDE.md` states plainly that it is
-not. It has the same fixed-threshold topology as the opto, so `dsp/inputAlign.js`
-applies almost directly. In a serial chain an unaligned second compressor is a
-level-dependent surprise sitting behind a macro knob — the exact defect
-`inputAlign` was written to remove, reintroduced one level up.
+**1 · FET Punch must be input-aligned.** ✓ **Landed.** In a serial chain an
+unaligned second compressor is a level-dependent surprise sitting behind a macro
+knob — the exact defect `inputAlign` was written to remove, reintroduced one
+level up.
+
+⚠ **It did NOT apply directly, and the reason matters for the composite.** The
+opto can add its offset to `scDriveDb` because Peak Reduction is side-chain gain
+and nothing else. This unit's Input knob is an attenuator on the audio path as
+well, exactly as the hardware wires it, so the same move would have made the
+alignment an input gain — raising the output by the same amount, requiring
+Output to cancel it, and driving the FET saturator harder on a quiet file. The
+offset rides a separate detector-only coefficient instead, and the panel calls it
+ALIGN because INPUT is already a different control. Any future stage folded into
+this chain needs the same question asked of it before `inputAlign.js` is pointed
+at it.
 
 ⚠ The reference statistic is **gated RMS, not the makeup percentile.** Reusing
-`MAKEUP_PERCENTILE` looks like the obvious standardisation and scores 4.99 dB of
-spread against 1.26: a near-peak statistic answers "how loud is the loudest
-thing", and this asks "how much energy drives the detector".
+`MAKEUP_PERCENTILE` scores 4.99 dB of spread against 1.26 on the opto's corpus:
+a near-peak statistic answers "how loud is the loudest thing", and this asks
+"how much energy drives the detector".
+
+⚠ **That argument was made for the opto and has NOT been re-made for this unit.**
+It rests on gain reduction being an integral over the envelope distribution,
+which in turn rests on the T4's ~10 ms attack smoothing the detector into
+something envelope-like. FET Punch's detector is a rectified peak follower with
+deliberately no smoothing. It ships on gated RMS anyway — one statistic across
+both compressors is what stops the chain's two devices drifting apart on material
+that separates them — and `npm run fet:align` scores the alternatives against
+this unit specifically. There is no corpus in the repo to settle it with, and a
+synthetic stimulus cannot: variants built here score plain RMS at 0.40 dB against
+gated RMS's 3.21 on the OPTO, where the real corpus says the opposite, so the
+bench fails its own control.
 
 **2 · FET's makeup tracker needs a bounded reference.** It is a running *maximum*,
 and `applyWorkletRegion`'s own note records that no length of pre-roll converges

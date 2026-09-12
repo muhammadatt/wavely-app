@@ -6,6 +6,7 @@
  *   npm run la2a:align                  # the corpus, plus derived variants
  *   npm run la2a:align -- --dir path/   # every .wav in a directory, as sources
  *   npm run la2a:align -- --no-variants # real files only, no perturbations
+ *   npm run fet:align                   # score the same statistics for FET Punch
  *
  * ⚠ THIS EXISTS BECAUSE ALIGN_GATE_RANGE_DB IS FITTED ON ONE PROGRAMME. There
  * is exactly one dry source in `data/corpus/` — `hardware.unknown.dry.wav` and
@@ -34,6 +35,7 @@ import { fileURLToPath } from 'node:url'
 
 import { readWav } from '../test/voicerx/wav.js'
 import { LA2AKernel } from '../src/audio/la2aProcessor.js'
+import { FET1176Kernel } from '../src/audio/fet1176Processor.js'
 import { percentileOfChannels, MAKEUP_PERCENTILE } from '../src/audio/dsp/makeupReference.js'
 import {
   gatedRmsFromBlocks, ALIGN_GATE_RANGE_DB, ALIGN_BLOCK_MS, ALIGN_TARGET_DBFS,
@@ -49,6 +51,24 @@ const argOf = (name) => {
 }
 const DIR = argOf('--dir') ?? DEFAULT_DIR
 const WITH_VARIANTS = !args.includes('--no-variants')
+/**
+ * `--fet` scores the same statistics against FET Punch instead of OptoSmooth.
+ *
+ * ⚠ THE TWO UNITS ARE NOT GUARANTEED TO WANT THE SAME STATISTIC, and that is
+ * the question this flag exists to answer. Gated RMS was chosen because gain
+ * reduction is an integral over the envelope distribution, so an ENERGY
+ * statistic summarises it — an argument that rests on the T4's ~10 ms attack
+ * smoothing the detector into something envelope-like. FET Punch's detector is
+ * a full-wave rectified PEAK follower with deliberately no smoothing (see
+ * `fet1176Processor.js`), so at the fast dials the cell tracks the waveform and
+ * the same argument does not obviously carry.
+ *
+ * It ships on gated RMS anyway, for two reasons: one statistic across both
+ * compressors means a serial chain cannot have its two devices drift apart on
+ * material that separates them, and nothing available here can settle the
+ * question — see the note by `--fet`'s render function.
+ */
+const FET = args.includes('--fet')
 const PR = Number(argOf('--pr') ?? 50)
 const TARGET_GR = Number(argOf('--gr') ?? 4)
 
@@ -112,6 +132,51 @@ function avgGr(x, sr, pr) {
     k.process([x.subarray(i, i + n)], [out.subarray(i, i + n)], n)
   }
   return k.grActive ? k.grSum / k.grActive : 0
+}
+
+/**
+ * FET Punch's average gain reduction, aligned by the SHIPPING MECHANISM.
+ *
+ * ⚠ IT TAKES AN OFFSET AND NOT A PRE-SCALED BUFFER, AND THAT ASYMMETRY WITH THE
+ * OPTO PATH ABOVE IS LOAD-BEARING. On the LA-2A, scaling the input and adding
+ * side-chain drive are the same thing to the detector and to everything else
+ * (`inputAlign.test.js` pins it bit-identical), so the opto rows may align by
+ * scaling. On this unit they are NOT the same thing: the Input attenuator feeds
+ * the audio path as well as the detector, so a scaled buffer would drive the FET
+ * saturator harder as well — which is exactly the input-gain behaviour
+ * `inputAlignDb` exists to avoid. Scoring a statistic against a mechanism the
+ * plugin does not use would measure the wrong plugin.
+ *
+ * The opto path is deliberately left scaling rather than converted to match:
+ * its published spreads are quoted in CLAUDE.md and there is no corpus in this
+ * checkout to re-run them against.
+ */
+function avgGrFet(x, sr, drive, alignDb) {
+  const k = new FET1176Kernel(sr)
+  k.setParams({
+    inputDrive: drive, outputGainDb: 0, attack: 4, release: 4, ratio: '4',
+    fetDrive: 0, scHpfHz: 0, mix: 1, oversample: false,
+    inputAlignDb: Math.max(-48, Math.min(48, alignDb)),
+  })
+  const out = new Float32Array(x.length)
+  for (let i = 0; i < x.length; i += 128) {
+    const n = Math.min(128, x.length - i)
+    k.process([x.subarray(i, i + n)], [out.subarray(i, i + n)], n)
+  }
+  return k.grActive ? k.grSum / k.grActive : 0
+}
+
+/**
+ * One row's reduction for a case, given the statistic target in dBFS. Hides
+ * which unit is under test from the scoring loop.
+ */
+function grAtTarget(c, fn, targetDb) {
+  const stat = fn(c.x, c.sr)
+  if (!(stat > 0)) return FET ? avgGrFet(c.x, c.sr, PR, 0) : avgGr(c.x, c.sr, PR)
+  const offsetDb = targetDb - 20 * Math.log10(stat)
+  return FET
+    ? avgGrFet(c.x, c.sr, PR, offsetDb)
+    : avgGr(scaled(c.x, Math.pow(10, offsetDb / 20)), c.sr, PR)
 }
 const scaled = (x, g) => {
   const y = new Float32Array(x.length)
@@ -229,7 +294,8 @@ for (const s of sources) {
 }
 
 console.log(`\n${sources.length} distinct source(s) from ${path.relative(ROOT, DIR) || DIR}`
-  + `, ${cases.length} cases, PR ${PR}, calibrated to ${TARGET_GR.toFixed(2)} dB GR\n`)
+  + `, ${cases.length} cases, ${FET ? 'FET Punch, Input' : 'OptoSmooth, PR'} ${PR}`
+  + `, calibrated to ${TARGET_GR.toFixed(2)} dB GR\n`)
 if (sources.length < 2) {
   console.log('⚠ ONE SOURCE ONLY — every case below is a perturbation of the same')
   console.log('  recording, so this cannot tell you how the gate behaves across voices,')
@@ -252,15 +318,11 @@ for (const [name, fn] of Object.entries(STATS)) {
   // where the bench's runtime goes.
   for (let i = 0; i < 24; i++) {
     const m = (lo + hi) / 2
-    const g = Math.pow(10, m / 20) / fn(anchor.x, anchor.sr)
-    if (avgGr(scaled(anchor.x, g), anchor.sr, PR) < TARGET_GR) lo = m
+    if (grAtTarget(anchor, fn, m) < TARGET_GR) lo = m
     else hi = m
   }
   const target = (lo + hi) / 2
-  const got = cases.map(c => ({
-    label: c.label,
-    gr: avgGr(scaled(c.x, Math.pow(10, target / 20) / fn(c.x, c.sr)), c.sr, PR),
-  }))
+  const got = cases.map(c => ({ label: c.label, gr: grAtTarget(c, fn, target) }))
   const grs = got.map(g => g.gr)
   const spread = Math.max(...grs) - Math.min(...grs)
   const worst = got.reduce((a, b) => Math.abs(b.gr - TARGET_GR) > Math.abs(a.gr - TARGET_GR) ? b : a)
@@ -275,8 +337,8 @@ for (const [label, fn, tgt] of [
   ['as captured', null, null],
 ]) {
   const grs = cases.map(c => fn
-    ? avgGr(scaled(c.x, Math.pow(10, tgt / 20) / fn(c.x, c.sr)), c.sr, PR)
-    : avgGr(c.x, c.sr, PR))
+    ? grAtTarget(c, fn, tgt)
+    : (FET ? avgGrFet(c.x, c.sr, PR, 0) : avgGr(c.x, c.sr, PR)))
   const mean = grs.reduce((a, b) => a + b, 0) / grs.length
   const spread = Math.max(...grs) - Math.min(...grs)
   console.log(label.padEnd(14) + '     n/a' + '  ' + spread.toFixed(2).padStart(7)

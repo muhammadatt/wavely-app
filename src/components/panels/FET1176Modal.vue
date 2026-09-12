@@ -4,6 +4,7 @@ import { useFET1176 } from '../../composables/useFET1176.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { attackSecondsForDial, releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import Knob from '../knobs/Knob.vue'
+import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
 import DeviceDetentRotary from '../knobs/DeviceDetentRotary.vue'
 import DeviceTravelSlide from '../knobs/DeviceTravelSlide.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -18,15 +19,23 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetScHpf, fetMix,
   fetAutoMakeup, fetPreview, fetReduction, fetInputLevels, fetOutputLevels,
+  fetAlignDb, fetAlignAuto, syncAlign, resetAlignAuto,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncScHpf, syncMix, toggleAutoMakeup, refreshAutoMakeup, resetLiveMakeup,
   apply, teardown, closeModal,
 } = useFET1176()
 
+const formatAlign = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
+
 /**
  * Presets. Same two functions and the same ordering constraint as OptoSmooth:
  * Output goes last and through the AUTO decision, because `syncOutput` is a
  * take-over that drops AUTO and accepts the value.
+ *
+ * ⚠ ALIGN IS DELIBERATELY ABSENT FROM BOTH. It is measured from the file, not
+ * dialled, so a preset carrying one would apply another recording's gain
+ * staging to this file — the portability failure alignment exists to remove,
+ * arriving one level up. Same rule as OptoSmooth's Input trim.
  */
 const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, {
   read: () => ({
@@ -179,7 +188,7 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
       <div class="flex items-center justify-between gap-[14px] mt-[24px]">
         <LevelMeter :levels="fetInputLevels" label="IN" :height="132" />
 
-        <div class="flex-1 flex justify-center gap-[40px]">
+        <div class="flex-1 flex justify-center gap-[26px]">
           <div class="w-[118px]">
             <!-- Input is the only threshold control there is: it drives the
                  audio path and the detector together, exactly as the
@@ -191,6 +200,59 @@ const releaseTime = computed(() => formatMs(releaseSecondsForDial(fetRelease.val
               label="Input" :accent="ACCENT" :format-value="formatInteger"
               :disabled="!fetPreview"
             />
+          </div>
+
+          <!-- ALIGN offsets the SIDE-CHAIN DRIVE ONLY, and that is the whole
+               reason it is not folded into the Input knob beside it. Input is
+               an attenuator on the audio path as well as the detector, exactly
+               as the hardware wires it — so an alignment applied there would be
+               an input GAIN: it would raise the output by the same amount, need
+               Output to cancel it, and drive the FET saturator harder on a
+               quiet file. This one changes what the cell hears and nothing else.
+
+               It exists because neither this plugin nor the hardware has a
+               threshold control, so without it the file's own level decides
+               what Input does. Measured on speech at Input 50: 7.35 dB of
+               reduction on a file peaking at -1 dBFS, 1.74 at -12, and 0.00 at
+               -18 and below — a narrator who gain-staged with headroom gets a
+               compressor that does nothing at its own default.
+
+               ⚠ OptoSmooth's equivalent is labelled INPUT because the LA-2A has
+               no input attenuator to collide with. Same measurement, same AUTO
+               contract, different name for a real reason.
+
+               AUTO measures the whole file's gated RMS and drives this knob;
+               touching it takes over, exactly as Output behaves. -->
+          <div class="w-[78px] flex flex-col items-center">
+            <div class="relative w-full" :style="{ opacity: fetAlignAuto ? 0.78 : 1 }">
+              <Knob
+                :model-value="fetAlignDb"
+                @update:model-value="syncAlign"
+                :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
+                :value-font-px="13"
+                label="Align" :accent="ACCENT" :format-value="formatAlign"
+                :disabled="!fetPreview"
+              />
+              <span
+                v-if="fetAlignAuto"
+                class="absolute top-[2px] right-[2px] px-1 py-[1px] rounded-full pointer-events-none"
+                :style="{
+                  background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
+                  border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
+                  font: `700 6px/1 'JetBrains Mono',monospace`,
+                  letterSpacing: '.08em',
+                  color: `color-mix(in srgb, ${ACCENT} 65%, #ffffff)`,
+                }"
+              >AUTO</span>
+            </div>
+            <button
+              v-if="!fetAlignAuto"
+              class="mt-[5px] px-2 py-[2px] rounded-full cursor-pointer transition-all"
+              style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.4);font:700 7.5px 'JetBrains Mono',monospace;letter-spacing:.1em"
+              :disabled="!fetPreview"
+              title="Hand the side-chain alignment back to the automatic measurement."
+              @click="resetAlignAuto"
+            >AUTO</button>
           </div>
           <div class="w-[118px] flex flex-col items-center">
             <div class="relative w-full" :style="{ opacity: fetAutoMakeup ? 0.78 : 1 }">

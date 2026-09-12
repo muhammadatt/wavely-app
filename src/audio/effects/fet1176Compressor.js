@@ -15,6 +15,7 @@
 import { ensureFET1176Worklet } from '../fet1176WorkletLoader.js'
 import { OVERSAMPLE_LATENCY_SAMPLES } from '../dsp/oversample.js'
 import { createLevelTap } from './levelTap.js'
+import { withMeasuredClears } from './measuredKeys.js'
 
 /**
  * The gain cell and FET stage run oversampled, and the halfband filters that
@@ -45,6 +46,18 @@ export function toKernelParams(params) {
     fetDrive: params.fetDrive,
     scHpfHz: params.scHpf,
     mix: params.mix,
+    /**
+     * ⚠ MEASURED FROM THE WHOLE FILE, NOT DIALLED, AND NOT A PRESET KEY — the
+     * same rule `la2aParams.js` states for its copy of this key, for the same
+     * reason. It is the file's own level relative to nominal, so it belongs to
+     * the audio; a preset carrying one would apply another recording's gain
+     * staging to this one, which is the portability problem alignment exists to
+     * fix, inverted.
+     *
+     * Spread in only when it is real, so the params object stays key-for-key
+     * what it has always been wherever no measurement is in play.
+     */
+    ...(Number.isFinite(params.inputAlignDb) ? { inputAlignDb: params.inputAlignDb } : {}),
   }
 }
 
@@ -57,7 +70,14 @@ export function createFET1176Compressor(audioContext) {
   const preOutput = audioContext.createGain()
   const output = audioContext.createGain()
 
-  let params = { ...FET1176_DEFAULTS }
+  /**
+   * ⚠ `inputAlignDb` IS SEEDED HERE THOUGH IT IS ABSENT FROM `FET1176_DEFAULTS`,
+   * and without the seed the panel could never clear it. `setParam` only accepts
+   * names already present on this object (`if (name in params)`), so a key that
+   * never appears cannot be written — and a measured key has to be writable in
+   * both directions. Same reasoning, same shape, as `la2aCompressor.js`.
+   */
+  let params = { ...FET1176_DEFAULTS, inputAlignDb: null }
   let worklet = null
   let destroyed = false
   let grDb = 0
@@ -104,7 +124,17 @@ export function createFET1176Compressor(audioContext) {
     setParam(name, value) {
       if (name in params) {
         params[name] = value
-        worklet?.port.postMessage({ type: 'params', params: toKernelParams(params) })
+        /**
+         * ⚠ `withMeasuredClears` ON THE LIVE PATH ONLY. The kernel MERGES a
+         * partial, so an omitted key means "unchanged", not "null" — and
+         * `toKernelParams` omits `inputAlignDb` whenever it is not finite.
+         * Without this, pushing a clear would leave the previous alignment armed
+         * on the running node while the panel showed none. See measuredKeys.js
+         * for the measured-and-silent version of this bug that shipped once.
+         */
+        worklet?.port.postMessage({
+          type: 'params', params: withMeasuredClears(toKernelParams(params)),
+        })
       }
     },
 

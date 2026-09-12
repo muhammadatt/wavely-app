@@ -6,6 +6,8 @@ import { applyFET1176Region, computeFET1176AutoMakeup, computePeakCache } from '
 import { getEffectChain } from '../audio/effectChain.js'
 import { fet1176Effect, FET1176_DEFAULTS } from '../audio/effects/fet1176Compressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { regionAlignDb } from '../audio/analysisWindow.js'
+import { INPUT_TRIM_MAX_DB } from '../audio/dsp/inputAlign.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const FET1176_WINDOW_ID = 'fet-punch'
@@ -19,6 +21,50 @@ const fetRatio = ref(FET1176_DEFAULTS.ratio)
 const fetDrive = ref(FET1176_DEFAULTS.fetDrive)
 const fetScHpf = ref(FET1176_DEFAULTS.scHpf)
 const fetMix = ref(FET1176_DEFAULTS.mix)
+
+/**
+ * SIDE-CHAIN ALIGNMENT — the offset that makes a knob position mean the same
+ * thing on every file. `dsp/inputAlign.js` has the argument and the numbers.
+ *
+ * ⚠ IT IS A SEPARATE CONTROL FROM `fetInput`, AND ON THIS UNIT THAT SEPARATION
+ * IS NOT COSMETIC. The hardware's Input knob is an attenuator feeding the audio
+ * path AND the detector, so folding the alignment into `fetInput` would make it
+ * an input gain — it would raise the output by the same amount, need the Output
+ * knob to cancel it, and drive the FET saturator harder on a quiet file. The
+ * kernel keeps the offset on the detector's coefficient alone; see
+ * `inputAlignDb` in `fet1176Processor.js`. OptoSmooth can put its offset on the
+ * INPUT knob precisely because the LA-2A has no input attenuator to collide
+ * with, and the panel here is labelled ALIGN for the same reason.
+ *
+ * ⚠ MEASURED-THEN-OVERRIDABLE, the same contract the Output knob has under AUTO
+ * and the same one OptoSmooth's INPUT knob has: while `fetAlignAuto` is set the
+ * measurement owns `fetAlignDb`, so the knob always shows the offset actually in
+ * force rather than a delta against a number kept somewhere else.
+ *
+ * ⚠ NOT A PRESET KEY. It describes the audio, not the patch, so it stays out of
+ * `FET1176_DEFAULTS` and out of saved presets — a preset carrying one would
+ * apply another recording's gain staging to this file, which is the failure the
+ * mechanism removes.
+ *
+ * ⚠ THE STATISTIC IS INHERITED AND NOT INDEPENDENTLY SETTLED FOR THIS UNIT.
+ * Gated RMS was chosen for the opto on the argument that gain reduction is an
+ * integral over the envelope distribution; this unit's detector is a rectified
+ * PEAK follower with no smoothing, so that argument does not obviously carry.
+ * It ships on gated RMS regardless, because one statistic across both
+ * compressors is what stops a serial chain's two devices drifting apart on
+ * material that separates them. `npm run fet:align -- --dir <narration>` scores
+ * the alternatives against this unit specifically; there is no corpus in the
+ * repo to settle it with.
+ */
+const fetAlignAuto = ref(true)
+const fetAlignDb = ref(0)
+/**
+ * Which timeline `fetAlignDb` was measured from — `docId:revision`, or null.
+ * The state here is a module singleton and the document under it can change;
+ * see the identical note in `useLA2A.js` for the bug that keying on identity
+ * (rather than null-checking) exists to prevent.
+ */
+let alignedFor = null
 
 // Auto makeup: on by default, and load-bearing here in a way it isn't on the
 // OptoSmooth — Input drives the audio path as well as the detector, so a
@@ -63,6 +109,13 @@ function currentParams() {
     fetDrive: fetDrive.value,
     scHpf: fetScHpf.value,
     mix: fetMix.value,
+    /**
+     * ⚠ INDEPENDENT OF AUTO MAKEUP, unlike a ceiling would be. The makeup is
+     * solved downstream of the compression; alignment decides how much
+     * compression there is at all. Turning the makeup off is not a reason to
+     * hand the user back a compressor whose knob does nothing.
+     */
+    inputAlignDb: fetAlignDb.value,
   }
 }
 
@@ -77,11 +130,18 @@ function measurementParams() {
     fetDrive: fetDrive.value,
     scHpfHz: fetScHpf.value,
     mix: fetMix.value,
+    /**
+     * ⚠ THE ALIGNMENT BELONGS IN THE MEASUREMENT. Without it the solve models
+     * the raw hardware behaviour and the render applies the aligned one, so the
+     * makeup is solved for a compressor nobody is listening to. On a file 15 dB
+     * below nominal the two differ by the whole of the gain reduction.
+     */
+    ...(Number.isFinite(fetAlignDb.value) ? { inputAlignDb: fetAlignDb.value } : {}),
   }
 }
 
 export function useFET1176() {
-  const { state, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
+  const { state, appState, getAudioContext, hasSelection, replaceRegion, setPeakCache, startProcessing, endProcessing, showToast, totalDuration} = useEditorState()
   const { openWindow, closeWindow } = useWindows()
 
   function initChain() {
@@ -159,6 +219,9 @@ export function useFET1176() {
     chain.setEnabled(fet1176Effect.id, fetPreview.value)
 
     if (fetPreview.value) {
+      // Before pushAllParams, not after: it pushes `currentParams()`, so a
+      // stale or unmeasured offset would be what preview starts with.
+      refreshInputAlign()
       pushAllParams(chain)
       startMeters(chain)
       refreshAutoMakeup()
@@ -183,7 +246,89 @@ export function useFET1176() {
    * number so a fast knob drag can't have an older measurement land after
    * a newer one.
    */
+  /** Identity of the timeline currently loaded, for the freshness check above. */
+  function timelineKey() {
+    return state.currentFile ? `${appState.activeDocumentId}:${state.revision}` : null
+  }
+
+  /**
+   * Measure the file's alignment offset and push it.
+   *
+   * ⚠ THE WHOLE FILE, ALWAYS, IGNORING THE SELECTION — see `regionAlignDb`. A
+   * per-selection offset would make this a different compressor on every
+   * selection, so the same edit applied to a phrase and to the paragraph
+   * containing it would not agree.
+   */
+  function refreshInputAlign() {
+    if (!state.currentFile) return
+    const key = timelineKey()
+
+    /**
+     * ⚠ A MANUAL TRIM BELONGS TO THE FILE IT WAS DIALLED ON, so a different
+     * document takes the knob back to AUTO rather than inheriting it — the same
+     * principle that keeps this value out of presets. Within one document the
+     * user's value stands: a new selection or an edit must never walk it back.
+     */
+    const sameDoc = alignedFor !== null
+      && alignedFor.split(':')[0] === String(appState.activeDocumentId)
+    if (!fetAlignAuto.value) {
+      if (sameDoc) return
+      fetAlignAuto.value = true
+    } else if (alignedFor === key) {
+      return // already measured for this exact timeline
+    }
+
+    const end = totalDuration.value
+    if (!(end > 0)) return
+    const db = regionAlignDb(
+      state.segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels,
+    )
+    alignedFor = key
+    fetAlignDb.value = db
+    pushParam('inputAlignDb', db)
+  }
+
+  /**
+   * The user moved ALIGN: take the knob over from the measurement.
+   *
+   * ⚠ IT RE-SOLVES THE MAKEUP, because this is a compression change — the
+   * offset decides how much reduction the cell applies, so the makeup that
+   * matches it moves too. It also clears the live tracker, for the reason
+   * `syncCompressionParam` gives: the tracked signal is post-gain-reduction and
+   * this is one of the knobs that sets it.
+   */
+  function syncAlign(v) {
+    const clamped = Math.max(-INPUT_TRIM_MAX_DB, Math.min(INPUT_TRIM_MAX_DB, v))
+    fetAlignAuto.value = false
+    alignedFor = timelineKey()
+    fetAlignDb.value = clamped
+    pushParam('inputAlignDb', clamped)
+    resetLiveMakeup()
+    scheduleAutoMakeup()
+  }
+
+  /**
+   * Hand ALIGN back to the measurement. Re-measures immediately so the knob
+   * lands on the file's own value rather than sitting on the user's until
+   * something else happens to trigger a pass.
+   */
+  function resetAlignAuto() {
+    fetAlignAuto.value = true
+    alignedFor = null
+    refreshInputAlign()
+    resetLiveMakeup()
+    scheduleAutoMakeup()
+  }
+
   async function refreshAutoMakeup() {
+    /**
+     * ⚠ BEFORE THE AUTO GUARD, NOT AFTER IT. Alignment is not part of the
+     * makeup solve — it decides how much the compressor does at all — so with
+     * AUTO makeup off, the selection watcher that drives this function would
+     * never refresh it and preview would run on whatever offset was left over.
+     * The same staleness hole `useLA2A.js` records closing.
+     */
+    refreshInputAlign()
     if (!fetAutoMakeup.value || !state.currentFile) return
 
     /**
@@ -366,6 +511,8 @@ export function useFET1176() {
 
   return {
     fetInput,
+    fetAlignDb,
+    fetAlignAuto,
     fetOutput,
     fetAttack,
     fetRelease,
@@ -382,6 +529,8 @@ export function useFET1176() {
     hasSelection,
     togglePreview,
     syncInput,
+    syncAlign,
+    resetAlignAuto,
     syncOutput,
     syncAttack,
     syncRelease,

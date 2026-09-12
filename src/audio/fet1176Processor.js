@@ -153,6 +153,31 @@ export const FET1176_KERNEL_DEFAULTS = {
   scHpfHz: 0, // 0 = off (stock), or sidechain high-pass corner in Hz
   mix: 1, // wet/dry blend — parallel compression
   /**
+   * Side-chain drive offset that brings this file to nominal, dB. Measured from
+   * the whole file, never dialled as a patch value. `dsp/inputAlign.js` computes
+   * it and documents why it has to exist at all.
+   *
+   * ⚠ DETECTOR ONLY, AND THAT IS NOT HOW `inputDrive` BEHAVES. On this unit the
+   * Input knob is an attenuator feeding the audio path AND the detector, exactly
+   * as the hardware wires it — `inputLin` is multiplied into both the side-chain
+   * tap and the per-sample gain coefficient in `process`. Folding the alignment
+   * into `inputDrive` would therefore make it an INPUT GAIN, which is precisely
+   * what `inputAlign.js` argues it must not be: it would raise the output level
+   * along with the drive, need an output trim to cancel, and push the FET
+   * saturator harder on a quiet file for no reason the user asked for.
+   *
+   * So it rides `scDriveLin` — the detector's own coefficient — and leaves
+   * `inputLin` alone. Level and drive add in dB inside the gain computer, so the
+   * cell sees exactly what it would see at a higher input, and nothing else in
+   * the unit can tell the difference.
+   *
+   * ⚠ THE OPTO'S EQUIVALENT NEEDS NO SUCH CARE because the LA-2A has no input
+   * attenuator in the audio path at all — Peak Reduction is side-chain gain and
+   * nothing else, so `la2aProcessor.js` can simply add the offset to
+   * `scDriveDb`. The two plugins reach the same place by different routes.
+   */
+  inputAlignDb: 0,
+  /**
    * Run the gain cell and FET stage oversampled. Always true for anything
    * anyone listens to; see `computeFET1176AutoMakeupDb` for the one caller
    * that turns it off and why that is sound.
@@ -332,6 +357,18 @@ export class FET1176Kernel {
     this.inputLin = Math.exp(this.inputDriveDb * LN10_OVER_20)
     this.outputLin = Math.exp(p.outputGainDb * LN10_OVER_20)
 
+    /**
+     * The DETECTOR's input coefficient: the attenuator plus the file's alignment
+     * offset. See `inputAlignDb` for why the offset stops here and never reaches
+     * `inputLin`.
+     *
+     * Non-finite is treated as zero rather than clamped, so a `null` clear from
+     * `withMeasuredClears` turns the correction off instead of poisoning the
+     * detector — the same guard `la2aProcessor.js` applies to the same key.
+     */
+    const alignDb = Number.isFinite(p.inputAlignDb) ? p.inputAlignDb : 0
+    this.scDriveLin = this.inputLin * Math.exp(alignDb * LN10_OVER_20)
+
     // Optional sidechain high-pass (0 = off, the stock broadband detector).
     // Two cascaded one-poles: a single pole leaves too much of a 60-80 Hz
     // plosive in the detector to be worth switching on.
@@ -471,7 +508,8 @@ export class FET1176Kernel {
       // Mono sidechain tap, taken after the input attenuator
       let x = inputChannels[0][i]
       for (let ch = 1; ch < nIn; ch++) x += inputChannels[ch][i]
-      x *= chScale * this.inputLin
+      // `scDriveLin`, not `inputLin` — the alignment offset is detector-only.
+      x *= chScale * this.scDriveLin
 
       let sc = x
       if (this.scHpfOn) {
