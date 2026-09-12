@@ -421,10 +421,13 @@ generalised to `source → gain(modulated) → worklet` inside the same
 `OfflineAudioContext`. Modest work — `effects/clipGainDeEss.js` already builds
 that graph shape for its own apply path.
 
-**Pre-roll:** the slowest envelope in the composite. `LA2A_PREROLL_S` is 2 s and
-bit-exact; that is the starting figure, to be re-measured once the FET's makeup
-tracker question below is settled. The LEVEL envelope needs none — it is
-precomputed.
+**Pre-roll:** the slowest envelope in the composite — which is the FET's release
+tail, not the opto's ballistics. `fet1176PreRollSeconds` computes it per patch
+(2 s floor, up to 26.4 s at the slowest dial in all-buttons mode), so the
+composite should ask its embedded kernel rather than carry a constant of its own.
+⚠ That also caps what the composite can claim: OptoSmooth and Scheps are
+bit-exact at their pre-rolls and the FET is not, so the composite converges to
+~1e-4 rather than to zero. The LEVEL envelope needs none — it is precomputed.
 
 ---
 
@@ -465,10 +468,39 @@ synthetic stimulus cannot: variants built here score plain RMS at 0.40 dB agains
 gated RMS's 3.21 on the OPTO, where the real corpus says the opposite, so the
 bench fails its own control.
 
-**2 · FET's makeup tracker needs a bounded reference.** It is a running *maximum*,
-and `applyWorkletRegion`'s own note records that no length of pre-roll converges
-it. Inside a composite that is a preview/apply divergence with no workaround.
-Give it a percentile reference as the opto has.
+**2 · FET Punch needs a pre-roll on its apply path.** ✓ **Landed, and it was not
+the job this prerequisite described.**
+
+⚠ **The premise was wrong.** This said the makeup tracker's unbounded running
+maximum was a preview/apply divergence with no workaround, quoting
+`applyWorkletRegion`'s own note. The tracker is unbounded — but it is read only
+by `liveAutoMakeupDb()`, which leaves the kernel as a port message for the
+panel's knob. It cannot reach a sample: the audio path's output gain comes from
+the `outputGainDb` param. So it was never in the render's error budget, and
+`useFET1176.apply()` already re-measures offline before committing, which closes
+the knob's history-dependence at the app level. Nothing in the composite will use
+the live tracker at all.
+
+**The real defect was next door: `applyFET1176Region` had no pre-roll whatever.**
+Measured against a settled preview on an adversarial region, the stock patch
+rendered 5.03 dB hot over its first half-second. What the old note's table was
+actually showing is the release tail — which *does* decay — probed at well under
+one of its own time constants.
+
+The pre-roll is per-patch, because the tail is: `release × TAIL_MULT` spans
+0.20 s at dial 7 to 6.60 s at dial 1 in all-buttons mode, a 33:1 range no single
+constant serves. Four tail time constants, floored at 2 s for the rate-
+independent state (oversampler history, DC blocker, the 8 ms output smoother),
+lands every dial and both ratio modes inside 1e-4 worst-case sample error against
+1e-2…1e-1 cold.
+
+⚠ **It converges asymptotically, not exactly, and the composite inherits that.**
+OptoSmooth and Scheps are bit-exact at their pre-rolls; this stage is not. The
+fast dials do reach exactly zero given ~40 taus, but 40 taus at dial 1 is 176 s
+of pre-roll for a 2 s region. The composite's pre-roll is therefore bounded below
+by whatever its embedded FET asks for, and its convergence claim has to be
+"~1e-4", not "bit-exact" — which is a claim to make in the composite's own test
+rather than inherit by assumption.
 
 **3 · `applyWorkletRegion` gains a pre-worklet gain node.** See *Apply path*.
 

@@ -15,23 +15,38 @@
  *     OptoSmooth   ballistics driven by the input
  *     Scheps       holds the LA-2A kernel, so it inherits that
  *
+ *   decays SLOWLY -> a practical pre-roll converges, but not to zero
+ *     FET Punch    the release tail runs to 4.4 s (6.6 in all-buttons), so
+ *                  bit-exactness would want ~40 taus — 176 s for a 2 s region.
+ *                  Four taus, floored at 2 s, buys ~1e-4. See its test below.
+ *
  *   latches      -> no pre-roll can ever be exact
- *     FET Punch    `trkInPeak` is a running maximum, never decays
  *     Tube Sat     sticky skew sign, and a valley floor that only creeps up
  *
  *   neither      -> not a convergence problem at all
  *     ResoTame     an STFT frame-PHASE error; see its own test below
  *
- * This file pins the first group. The second group is asserted NOT to converge,
- * so that if someone gives one of them a bounded reference the test goes red
- * and the pre-roll can be wired for it too.
+ * ⚠ FET PUNCH WAS IN THE `latches` GROUP AND THE DIAGNOSIS WAS WRONG. The claim
+ * was that `trkInPeak`, a running maximum, made it unconvergeable. That field is
+ * genuinely unbounded — but it is read ONLY by `liveAutoMakeupDb()`, whose value
+ * leaves the kernel as a port message for the panel's knob. It cannot reach a
+ * sample: the audio path's output gain comes from the `outputGainDb` param. So
+ * the tracker was never in the render's error budget, and what the old numbers
+ * were actually showing was the release tail being probed at well under one of
+ * its own time constants. Both halves are now asserted separately below.
+ *
+ * This file pins the first two groups. The `latches` group is asserted NOT to
+ * converge, so that if someone gives one of them a bounded reference the test
+ * goes red and the pre-roll can be wired for it too.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { processLA2ABuffer } from '../../src/audio/la2aProcessor.js'
 import { processSchepsBuffer } from '../../src/audio/schepsProcessor.js'
 import { processResonanceBuffer } from '../../src/audio/resonanceProcessor.js'
-import { processFET1176Buffer } from '../../src/audio/fet1176Processor.js'
+import {
+  processFET1176Buffer, fet1176PreRollSeconds, FET1176Kernel,
+} from '../../src/audio/fet1176Processor.js'
 import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.js'
 import { LA2A_PREROLL_S } from '../../src/audio/la2aProcessor.js'
 import { SCHEPS_PREROLL_S } from '../../src/audio/schepsProcessor.js'
@@ -196,8 +211,7 @@ test('the wired pre-roll exceeds the kernels\' actual memory', () => {
   // NOTHING FOR THESE TWO. A seed only sets where the state begins, and by the
   // end of a lead-in longer than the memory, where it began has been forgotten.
   // Seeding is a way to shrink a cold-start TRANSIENT, not a way to make two
-  // different starting points agree — FET Punch already seeds on its first
-  // block and is the one stage that cannot converge at all.
+  // different starting points agree.
   assert.equal(
     historyStillShowsThrough(processLA2ABuffer, { peakReduction: 75, mode: 'limit' }, SR * LA2A_PREROLL_S),
     0,
@@ -229,21 +243,122 @@ test('⚠ the soft clipper\'s adaptive mode is why it stays deprecated', () => {
   assert.equal(fixed, 0, 'the shipping fixed mode should be history-independent')
 })
 
-test('⚠ FET Punch CANNOT be made exact, and this records why', () => {
-  // `trkInPeak` is a running maximum — "the loudest input sample heard so far"
-  // — so it carries the whole preview session and an offline render cannot
-  // match it. A pre-roll helps a lot (stock: -0.668 dB cold, -0.022 at 2 s) and
-  // never closes. No pre-roll is wired for it.
-  //
-  // If someone gives that tracker a bounded reference — a decaying peak, or a
-  // percentile over a window — this goes red, and FET Punch can then be wired
-  // like the other three.
-  const diff = worstDiff(processFET1176Buffer, { inputDrive: 70, attack: 1, release: 1 }, SR * 2)
-  assert.ok(
-    diff > 1e-4,
-    `FET Punch converged to ${diff.toExponential(2)} — if its makeup tracker `
-    + 'stopped latching, wire preRollSamples for it and delete this test',
+test('FET Punch converges at its per-patch pre-roll', () => {
+  /**
+   * ⚠ THE PRE-ROLL IS PER-PATCH AND HAS TO BE, WHICH IS WHY THIS TEST ASKS THE
+   * KERNEL FOR IT RATHER THAN USING A CONSTANT. The release network's slow half
+   * decays at `release x TAIL_MULT`, spanning 0.20 s at dial 7 to 4.40 s at
+   * dial 1 and 6.60 s in all-buttons mode — so the same number of seconds is
+   * ten time constants at one end of the dial and a fifth of one at the other.
+   *
+   * ⚠ AND A 2 s PROBE IS WHY THIS USED TO LOOK UNCONVERGEABLE. The old version
+   * of this test ran dial 1 — a 4.4 s tail — at a 2 s pre-roll, i.e. under half
+   * a time constant, and read the (real) residue as proof of a latch.
+   */
+  const SETTLE_LONG = SR * 40 // must exceed the longest pre-roll asked for below
+  for (const params of [
+    { inputDrive: 70, attack: 1, release: 1 },
+    { inputDrive: 70, attack: 4, release: 4 },
+    { inputDrive: 70, attack: 7, release: 7 },
+    { inputDrive: 50, attack: 4, release: 4, ratio: 'all' },
+    { inputDrive: 90, attack: 4, release: 2, mix: 0.4 },
+  ]) {
+    const preRoll = Math.round(fet1176PreRollSeconds(params) * SR)
+    assert.ok(preRoll < SETTLE_LONG, 'the probe must hold more settle than pre-roll')
+
+    const cold = worstDiffAt(processFET1176Buffer, params, 0, SETTLE_LONG)
+    const warm = worstDiffAt(processFET1176Buffer, params, preRoll, SETTLE_LONG)
+
+    // Measured worst case across these patches: 1.15e-2 to 1.28e-1 cold,
+    // 8.94e-8 to 9.87e-5 at the wired pre-roll.
+    assert.ok(cold > 1e-3,
+      `${JSON.stringify(params)}: a cold apply should differ; got ${cold.toExponential(2)}`)
+    assert.ok(warm < 5e-4,
+      `${JSON.stringify(params)}: not converged at ${(preRoll / SR).toFixed(2)} s; `
+      + `got ${warm.toExponential(2)}`)
+    assert.ok(warm < cold / 50,
+      `${JSON.stringify(params)}: pre-roll bought only ${(cold / warm).toFixed(0)}x`)
+  }
+})
+
+test('⚠ FET Punch is NOT bit-exact, unlike OptoSmooth, and that is the tail', () => {
+  /**
+   * An exponential never actually arrives. The fast dials DO reach exactly zero
+   * given enough taus — dial 7 is bit-exact at 8 s, which is 40 of its 0.20 s
+   * tails — but 40 taus at dial 1 is 176 s of pre-roll for a 2 s region, which
+   * is not a thing to render. So this stage is asymptotic where OptoSmooth is
+   * exact, and the wired pre-roll buys ~1e-4 rather than 0.
+   *
+   * Pinned so that "FET Punch converges" is never read as "FET Punch is exact".
+   */
+  const params = { inputDrive: 70, attack: 1, release: 1 }
+  const preRoll = Math.round(fet1176PreRollSeconds(params) * SR)
+  const warm = worstDiffAt(processFET1176Buffer, params, preRoll, SR * 40)
+  assert.ok(warm > 0, 'if this reached zero, the pre-roll model has changed — re-read the tail note')
+})
+
+test('⚠ the makeup tracker still latches, and still cannot reach the audio', () => {
+  /**
+   * BOTH HALVES MATTER. The tracker is a running maximum with unbounded memory,
+   * so it does not converge and a pre-roll cannot make it. That is fine ONLY
+   * because its value never reaches a sample — it leaves the kernel as a port
+   * message and the panel writes it to the Output knob during preview, while
+   * `useFET1176.apply()` re-measures offline before committing.
+   *
+   * If someone ever routes `liveAutoMakeupDb()` into the render, this test is
+   * where the consequence is written down.
+   */
+  const feed = (kernel, x) => {
+    const out = new Float32Array(x.length)
+    for (let i = 0; i < x.length; i += 128) {
+      const n = Math.min(128, x.length - i)
+      kernel.process([x.subarray(i, i + n)], [out.subarray(i, i + n)], n)
+    }
+    return out
+  }
+  const params = { inputDrive: 70, outputGainDb: 0, attack: 4, release: 4, ratio: '4', mix: 1 }
+  const quiet = adversarial(SR * 2, 0) // uniformly quiet — amp 0.10 throughout
+  const loud = adversarial(SR * 2, SR * 2) // uniformly loud — amp 0.80 throughout
+
+  // Same region, two histories. The tracker keeps the louder one forever.
+  const withLoudPast = new FET1176Kernel(SR)
+  withLoudPast.setParams(params)
+  feed(withLoudPast, loud)
+  const audioA = feed(withLoudPast, quiet)
+
+  const coldStart = new FET1176Kernel(SR)
+  coldStart.setParams(params)
+  const audioB = feed(coldStart, quiet)
+
+  assert.notEqual(
+    withLoudPast.liveAutoMakeupDb(), coldStart.liveAutoMakeupDb(),
+    'the tracker should still be history-dependent — that is what makes it unconvergeable',
   )
+
+  /**
+   * ⚠ AND YET THE RENDERS AGREE TO THE BALLISTICS ALONE. `audioA` still differs
+   * from `audioB` because the RELEASE state differs, which is the convergeable
+   * part — but the tracker's much larger disagreement contributes nothing. The
+   * check that isolates it: re-render with the tracker forced apart and the
+   * ballistics forced together.
+   */
+  const sameBallistics = new FET1176Kernel(SR)
+  sameBallistics.setParams(params)
+  feed(sameBallistics, quiet) // identical history to `coldStart` after its run
+  sameBallistics.trkInPeak = 1.0 // a tracker state `coldStart` can never reach
+  sameBallistics.trkAAbs = 0
+  sameBallistics.trkBAbs = 0.5
+
+  const afterA = feed(sameBallistics, quiet)
+  const cold2 = new FET1176Kernel(SR)
+  cold2.setParams(params)
+  feed(cold2, quiet)
+  const afterB = feed(cold2, quiet)
+
+  for (let i = 0; i < afterA.length; i++) {
+    assert.equal(afterA[i], afterB[i],
+      `the tracker reached the audio at sample ${i} — it must not`)
+  }
 })
 
 /**

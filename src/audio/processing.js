@@ -11,6 +11,7 @@ import {
   FET1176_LATENCY_SAMPLES,
   toKernelParams as toFET1176KernelParams,
 } from './effects/fet1176Compressor.js'
+import { fet1176PreRollSeconds } from './fet1176Processor.js'
 import { ensureSoftClipperWorklet } from './softClipperWorkletLoader.js'
 import {
   SOFT_CLIPPER_DEFAULTS,
@@ -575,12 +576,28 @@ async function applyWorkletRegion(
   // Scheps (2 s) — see the note beside each call site for what its number
   // buys. The rest keep today's behaviour until each is measured on its own.
   //
-  // Two of those measurements say pre-roll is not the answer, and they are the
-  // reason this is not a flag to switch on everywhere. FET Punch's makeup
-  // tracker is a running MAXIMUM, so no length of pre-roll converges it — only
-  // a bounded reference would. ResoTame's error is the STFT grid phase,
+  // ⚠ ONE OF THOSE MEASUREMENTS SAYS PRE-ROLL IS NOT THE ANSWER, AND THIS NOTE
+  // USED TO SAY TWO. ResoTame's error is the STFT grid phase,
   // (regionStart - preRoll) % hop, which the apply path cannot know; a pre-roll
-  // that happens to land hop-aligned looks exact and is not.
+  // that happens to land hop-aligned looks exact and is not. That one stands.
+  //
+  // ⚠ FET PUNCH WAS THE OTHER, AND THE DIAGNOSIS WAS WRONG. The claim was that
+  // its makeup tracker is a running MAXIMUM so no length of pre-roll converges
+  // it. The tracker is indeed unbounded — but it is read ONLY by
+  // `liveAutoMakeupDb()`, which leaves the kernel as a port message for the
+  // panel's knob. It cannot reach a sample: the audio path's output gain comes
+  // from `outputGainDb`, a param. So the tracker cannot put any error into a
+  // render, and an offline render has no knob to write back to in the first
+  // place — `useFET1176.apply()` re-measures offline before committing, which
+  // is what actually closes the knob's history-dependence.
+  //
+  // What the old table was really showing is the release tail, which DOES
+  // decay and DOES converge — just over a per-patch time up to 26.4 s, where
+  // the 4 s it was probed at is under one time constant at the slow dials.
+  // Measured against a settled preview at the stock patch: 5.03 dB cold,
+  // 0.033 at 2 s, 0.0024 at 4 s, 0.0000 at 8 s. FET Punch now asks for
+  // `fet1176PreRollSeconds`, four tail time constants, and lands inside
+  // 0.0043 dB at every dial and both ratio modes.
   const wantedPreRoll = Math.max(0, Math.round(preRollSamples))
   const preRoll = Math.min(wantedPreRoll, Math.max(0, Math.floor(start * sampleRate)))
   const renderSamples = preRoll + numSamples + latency
@@ -662,13 +679,24 @@ export function applyLA2ARegion(segments, start, end, params, sampleRate, channe
   })
 }
 
-/** Apply FET Punch (1176) compression to a region. */
+/**
+ * Apply FET Punch (1176) compression to a region.
+ *
+ * ⚠ THE PRE-ROLL IS PER-PATCH, NOT A CONSTANT — see `fet1176PreRollSeconds` for
+ * the measurements. The release network's slow half decays at
+ * `release x TAIL_MULT`, a 22:1 span across the dial, so one number cannot serve
+ * both ends. With no pre-roll at all, which is what this shipped with, the
+ * adversarial probe renders 5.03 dB hot over the region's first half-second at
+ * the stock patch.
+ */
 export function applyFET1176Region(segments, start, end, params, sampleRate, channels) {
+  const kernelParams = toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params })
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {
     ensureWorklet: ensureFET1176Worklet,
     processorName: 'fet1176-processor',
-    kernelParams: toFET1176KernelParams({ ...FET1176_DEFAULTS, ...params }),
+    kernelParams,
     latencySamples: FET1176_LATENCY_SAMPLES,
+    preRollSamples: Math.round(fet1176PreRollSeconds(kernelParams) * sampleRate),
   })
 }
 

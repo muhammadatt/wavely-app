@@ -221,6 +221,97 @@ export function releaseSecondsForDial(dial) {
 }
 
 /**
+ * How many release-tail time constants of pre-roll the offline apply path needs
+ * before its render matches a settled preview.
+ *
+ * ⚠ THE PRE-ROLL IS PER-PATCH, NOT A CONSTANT, BECAUSE THE THING IT HAS TO
+ * OUTRUN IS PER-PATCH. The slow half of the release network decays at
+ * `release x TAIL_MULT`, which spans 0.20 s at dial 7 to 4.40 s at dial 1 — a
+ * 22:1 range — and in all-buttons mode the multiplier is larger again. A single
+ * number is therefore either wasteful at the fast end or useless at the slow
+ * end. Measured on an adversarial probe (loud at -3 dBFS right up to the region
+ * boundary, then a -20 dBFS region), energy over the region's first 0.5 s
+ * against a settled preview:
+ *
+ *   ratio 4      tail tau   k=1      k=2      k=3      k=4      fixed 4 s
+ *   dial 1         4.40 s   0.1509   0.0306   0.0069   0.0014     0.1680
+ *   dial 2         2.63 s   0.2184   0.0475   0.0108   0.0023     0.0949
+ *   dial 4         0.94 s   0.2443   0.0690   0.0157   0.0043     0.0027
+ *   dial 6         0.33 s   0.1201   0.0391   0.0051   0.0021     0.0000
+ *   dial 7         0.20 s   0.1523   0.0114   0.0114   0.0022     0.0000
+ *
+ *   all buttons  tail tau   k=1      k=2      k=3      k=4      fixed 4 s
+ *   dial 1         6.60 s   0.1008   0.0052   0.0003   0.0000     0.2961
+ *   dial 4         1.41 s   0.4260   0.0446   0.0066   0.0005     0.0066
+ *   dial 7         0.30 s   0.1139   0.0303   0.0010   0.0003     0.0000
+ *
+ * The error collapses with k and not with wall-clock seconds, which is what
+ * says the tail is the mechanism. Four taus holds every dial and both modes
+ * inside 0.0043 dB; a fixed 4 s leaves dial 1 at 0.17 (0.30 in all-buttons),
+ * which is the same order as defects this project has treated as shipping bugs.
+ *
+ * ⚠ NOT BIT-EXACT, UNLIKE OptoSmooth AT ITS 2 s. An exponential never actually
+ * arrives, and this unit's tail is up to twice the opto's whole pre-roll. 0.0043
+ * dB is ~0.05 %, far below the 0.24 dB the ledger records as the smallest
+ * difference anyone has argued about here, so the remaining gap is stated rather
+ * than chased.
+ *
+ * ⚠ AND THE ATTACK DIAL IS NOT IN THIS AT ALL. It runs 800 us to 20 us; nothing
+ * at that scale survives a block boundary, let alone a pre-roll.
+ */
+export const FET1176_PREROLL_TAIL_TAUS = 4
+
+/**
+ * Floor under the tau-scaled pre-roll, seconds — the state that does NOT scale
+ * with the release dial.
+ *
+ * ⚠ WITHOUT IT THE FAST DIALS ARE THE WORST ROWS IN THE TABLE, WHICH LOOKS
+ * BACKWARDS UNTIL YOU SEE WHY. Four taus at dial 7 is 0.80 s, and that is not
+ * long enough for the state whose memory is fixed rather than dial-dependent:
+ * the oversampler's halfband history, the DC blocker's ~5 Hz pole, and the 8 ms
+ * output-gain smoother. Worst sample difference against a settled preview at
+ * dial 7:
+ *
+ *   pre-roll   0.80 s    1 s       2 s       4 s       8 s
+ *   dial 7     1.29e-4   6.58e-5   8.94e-8   7.45e-9   0.00e+0
+ *   dial 6     1.52e-3   9.09e-4   1.61e-5   1.49e-8   0.00e+0
+ *
+ * 2 s buys three to five orders of magnitude at the fast end and costs nothing
+ * anywhere else — the slow dials already ask for far more than this. It is the
+ * same number as `LA2A_PREROLL_S`, and for the same reason: that is how long
+ * this project's fixed-duration filter state takes to be forgotten.
+ *
+ * ⚠ BIT-EXACTNESS IS REACHABLE AT THE FAST DIALS AND NOT AT THE SLOW ONES, and
+ * no floor fixes that. Dial 7 reaches exactly zero at 8 s, which is 40 taus of
+ * its 0.20 s tail; 40 taus at dial 1 would be 176 s of pre-roll for a 2 s
+ * region. The tail is an exponential and never truly arrives, so this stage
+ * converges asymptotically where OptoSmooth converges exactly, and the wired
+ * pre-roll buys ~1e-4 rather than zero. See the test.
+ */
+export const FET1176_PREROLL_FLOOR_S = 2
+
+/**
+ * Pre-roll for the offline apply path, seconds, for a given patch.
+ *
+ * ⚠ IT CAN ASK FOR UP TO 26.4 s (dial 1, all buttons in) AND IS DELIBERATELY
+ * NOT CAPPED. A cap bites exactly the patches that need the pre-roll most, and
+ * it would do so silently — the fast dials it never touches are already inside
+ * a tenth of a second. In practice `applyWorkletRegion` clamps the request to
+ * the audio the timeline actually holds before the region, so a region near the
+ * head of a file costs whatever is there and a region at t=0 costs nothing.
+ *
+ * Takes KERNEL params (the shape `toKernelParams` produces), since the apply
+ * path has those in hand.
+ */
+export function fet1176PreRollSeconds(params = {}) {
+  const dial = Number.isFinite(params.release)
+    ? params.release : FET1176_KERNEL_DEFAULTS.release
+  const tailMult = String(params.ratio) === 'all' ? ALL_TAIL_MULT : TAIL_MULT
+  const tail = FET1176_PREROLL_TAIL_TAUS * releaseSecondsForDial(dial) * tailMult
+  return Math.max(FET1176_PREROLL_FLOOR_S, tail)
+}
+
+/**
  * Stateful block processor. Feed it consecutive blocks of any length and it
  * behaves identically to processing the concatenation in one pass (block size
  * affects nothing — every coefficient is fixed at setParams time).
