@@ -33,8 +33,16 @@ const BLOCK_STEP_S = 0.1
 export const ABSOLUTE_GATE_LUFS = -70
 /** The relative gate, in LU below the ungated-but-absolutely-gated mean. */
 export const RELATIVE_GATE_LU = 10
-/** BS.1770's calibration offset, the -0.691 in l_j. */
-const LOUDNESS_OFFSET_DB = -0.691
+/**
+ * BS.1770's calibration offset, the -0.691 in l_j.
+ *
+ * Exported because `dsp/autoLevel.js` converts K-weighted mean square to LUFS
+ * for its own per-clip measurement rather than going through
+ * `measureIntegratedLufs` — it needs an UNGATED loudness over an arbitrary
+ * sample range, which the gated integrator cannot express. Two copies of this
+ * number would be two things to keep in step.
+ */
+export const LOUDNESS_OFFSET_DB = -0.691
 
 /**
  * K-weighting, as two biquads at the working sample rate.

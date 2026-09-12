@@ -150,10 +150,51 @@ useless to a self-contained client chain. This section is new DSP.
 
 ## Section 3 · LEVEL
 
-Slow gain riding ahead of the dynamics. The server's `autoLevel`, and the reason
-its compression passes sound effortless.
+Ahead of the dynamics. The server's `autoLevel`, and the reason its compression
+passes sound effortless. ✓ **DSP landed** (`src/audio/dsp/autoLevel.js`); not yet
+wired to a node, an apply path or a panel.
 
 **Macro: Level 0–100**, scaling max up/down travel.
+
+⚠ **It is NOT "slow gain riding", which is what this spec first called it.** The
+server's leveller is **clip-based**: segment into voiced clips, give each clip
+ONE flat gain, crossfade between them at the quietest point in the gap. Nothing
+is smoothed continuously. That matters here — a continuously-ridden gain is a
+slow compressor wearing a different name, and it flattens exactly the
+syllable-scale movement the DYNAMICS section is supposed to act on. Piecewise-
+constant preserves the dynamics *inside* a clip exactly.
+
+### Two things the port had to decide
+
+⚠ **The voiced mask is energy, not Silero — and not `F0Tracker` either.** There
+is no Silero in the browser. `frameAnalysis.js` ships an **energy backend** as a
+first-class path (`VAD_BACKEND=energy`), used whenever Silero is unavailable, and
+that is what is ported: frame RMS against `noiseFloor + 6 dB`. This is a
+different substitution from VoiceRx's, and the two are not interchangeable —
+VoiceRx wants *pitched* frames because its computation is about harmonic
+structure; a leveller wants "is anyone talking", where a pitch tracker would drop
+every fricative outright.
+
+The cost is real and lands in one place: an energy gate labels quiet fricatives
+and breaths as silence, which could **fragment** a clip at its own "s". The
+hysteresis absorbs it — an unvoiced run under 300 ms is bridged, and speech
+fricatives are always shorter than that. Measured: a sub-300 ms gap inside speech
+is bridged, a real pause is not.
+
+⚠ **The head step is a server behaviour this port deliberately does not copy.**
+`buildSampleGainArray` fills everything before the first clip with 0 dB and the
+clip with its own gain, so the envelope jumps by the whole of that gain on one
+sample — landing exactly where the first word begins. Measured at 6.00 dB. Every
+ACX file meets it, because `roomTonePad` exists to put 0.75 s of room tone at the
+head. The port adds a head ramp using the rule the other boundaries already
+follow (quietest window in the preceding silence): 6.00 dB → 7.12e-3 dB.
+
+### Measured
+
+On 60 s of narration with a 20 dB drift, `global` mode: clip loudness spread
+sd 5.75 → 1.60 dB, range 18.33 → 4.33 dB. A file already inside the deadband is
+skipped outright (`file_already_leveled`) rather than nudged, so a level file
+comes back bit-identical.
 
 ### Implementation: a precomputed envelope, not a live follower
 
@@ -182,6 +223,14 @@ the measurement must span the drift.
 envelope is scheduled with the same `when`/`offset` arithmetic as the audio,
 which is what makes alignment a property of construction rather than something to
 maintain on every seek. Follow that exactly.
+
+⚠ **Analysis is whole-file; the envelope is evaluated per span.** That split is
+what the apply path's pre-roll needs — `renderAutoLevelGainDb(analysis,
+startSample, numSamples)` is a function of absolute position, so the pre-roll
+carries the same gain the preview gave it and the composite's compressors do not
+meet a step at the region boundary. A test pins that the envelope is identical
+whichever span it is evaluated from; it is the property everything else here
+rests on.
 
 ---
 
@@ -502,7 +551,22 @@ by whatever its embedded FET asks for, and its convergence claim has to be
 "~1e-4", not "bit-exact" — which is a claim to make in the composite's own test
 rather than inherit by assumption.
 
-**3 · `applyWorkletRegion` gains a pre-worklet gain node.** See *Apply path*.
+**3 · `applyWorkletRegion` gains a pre-worklet gain stage.** Not yet done, and
+the shape has changed since this was written.
+
+⚠ **The precedent cited here was wrong.** This said `effects/clipGainDeEss.js`
+"already builds that graph shape for its own apply path". It does not — it builds
+the modulated-`GainNode` graph for *preview*, and its APPLY path multiplies the
+envelope into the rendered arrays directly, because that was measured
+bit-identical and needs no graph or promise. So the generalisation wanted is a
+**pre-multiply hook**, not a node: `applyWorkletRegion` already renders the
+extended span into `channelData` before copying it into the worklet's input
+buffer, and the envelope can be multiplied in there.
+
+⚠ **It must cover the pre-roll, not just the region** — otherwise the pre-roll
+enters the composite ungained and the compressors meet at the boundary exactly
+the step the pre-roll exists to remove. `renderAutoLevelGainDb` takes an absolute
+`startSample` for this reason.
 
 ---
 
