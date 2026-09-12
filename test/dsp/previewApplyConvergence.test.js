@@ -21,6 +21,10 @@
  *
  *   neither      -> not a convergence problem at all
  *     ResoTame     an STFT frame-PHASE error; see its own test below
+ *     Auto Leveler no kernel and no state: preview schedules the solved gain
+ *                  curve onto an AudioParam and apply expands the same segment
+ *                  list, so the two are equal by construction rather than by
+ *                  convergence. Pinned in autoLevelSegments.test.js
  *
  * This file pins the first group. The second group is asserted NOT to converge,
  * so that if someone gives one of them a bounded reference the test goes red

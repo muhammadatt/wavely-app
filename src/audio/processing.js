@@ -1,4 +1,5 @@
 import { getSegmentDuration } from './operations.js'
+import { applyGainSegments } from './dsp/autoLevel.js'
 import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
@@ -112,6 +113,102 @@ export function renderRegionToBuffer(segments, start, end, sampleRate, channels)
   }
 
   return channelData
+}
+
+/**
+ * Render a region down to the mono 16 kHz 16-bit WAV that voice-activity
+ * detection actually consumes.
+ *
+ * ⚠ THE FULL-RATE FLOAT UPLOAD DOES NOT FIT DOWN THE PIPE. `floatChannelsToWavBlob`
+ * writes 32-bit float, so half an hour of mono at 44.1 kHz is 318 MB and an hour
+ * is 635 MB — against an upload limit, a proxy timeout and a user's uplink. The
+ * Auto Leveler is FOR chapter-length selections, so that is the ordinary case
+ * rather than an edge one.
+ *
+ * Nothing is lost that the detector would have used: Silero v5 runs at 16 kHz
+ * mono, and the server resamples to exactly this before calling it
+ * (`decodeToFloat32Mono16k`). Sending it pre-resampled removes a conversion
+ * rather than adding one, and takes an hour-long chapter to 110 MB (measured, not estimated).
+ *
+ * ⚠ ONE MEASUREMENT DOES RIDE ALONG AND IS AFFECTED. The same route returns the
+ * noise floor, measured on what it receives — so it is measured without the
+ * content above 8 kHz. Room tone is broadband, so a floor read this way lands a
+ * fraction of a dB LOW, which makes the leveler's headroom cap marginally more
+ * permissive rather than more conservative. It is a safety rail whose target the
+ * user sets and can see, not a precision reading, so a sub-dB shift in it is
+ * accepted here deliberately; if that ever stops being true, measure the floor
+ * client-side off the full-rate render instead of narrowing this upload.
+ *
+ * @param {Float32Array[]} channelData
+ * @param {number} sampleRate  the project's rate
+ * @returns {Promise<Blob>}
+ */
+export async function renderVadWavBlob(channelData, sampleRate) {
+  const numSamples = channelData[0].length
+  const channels = channelData.length
+
+  // Mono first: VAD is a single-channel decision, and mixing before the
+  // resample is one pass over the data instead of one per channel.
+  const mono = new Float32Array(numSamples)
+  if (channels === 1) {
+    mono.set(channelData[0])
+  } else {
+    for (let i = 0; i < numSamples; i++) {
+      let sum = 0
+      for (let c = 0; c < channels; c++) sum += channelData[c][i]
+      mono[i] = sum / channels
+    }
+  }
+
+  const outLength = Math.max(1, Math.round((numSamples * VAD_SAMPLE_RATE) / sampleRate))
+  const ctx = new OfflineAudioContext(1, outLength, VAD_SAMPLE_RATE)
+  const buffer = ctx.createBuffer(1, numSamples, sampleRate)
+  buffer.copyToChannel(mono, 0)
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+  source.connect(ctx.destination)
+  source.start()
+  const rendered = await ctx.startRendering()
+
+  return pcm16WavBlob(rendered.getChannelData(0), VAD_SAMPLE_RATE)
+}
+
+/** Silero v5's native rate. Resampling past this would throw information away. */
+const VAD_SAMPLE_RATE = 16000
+
+/**
+ * Mono 16-bit PCM WAV.
+ *
+ * 16-bit rather than float because this is only ever read by a detector whose
+ * decisions live far above the -96 dBFS quantisation floor, and it halves the
+ * upload again.
+ */
+function pcm16WavBlob(samples, sampleRate) {
+  const n = samples.length
+  const dataSize = n * 2
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+
+  writeString(view, 0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeString(view, 8, 'WAVE')
+  writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)            // PCM
+  view.setUint16(22, 1, true)            // mono
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)            // block align
+  view.setUint16(34, 16, true)           // bits per sample
+  writeString(view, 36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  for (let i = 0; i < n; i++) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(44 + i * 2, Math.round(clamped * 32767), true)
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' })
 }
 
 /**
@@ -763,6 +860,33 @@ export function applyHumNotchRegion(segments, start, end, params, sampleRate, ch
     processorName: 'hum-notch-processor',
     kernelParams: toHumNotchKernelParams({ ...HUM_NOTCH_DEFAULTS, ...params }),
   })
+}
+
+/**
+ * Apply a solved auto-leveler curve to a region and return the new buffer.
+ *
+ * The curve is expressed over the ANALYSED region, which is usually larger than
+ * what is being written: analysing a chapter and applying one chapter is the
+ * common case, but narrowing to a paragraph afterwards is allowed and every
+ * clip inside it was already measured. `offsetSamples` is where this region
+ * starts within that one, so the gains stay attached to the audio they were
+ * computed from rather than sliding to the head of the selection.
+ */
+export function applyAutoLevelRegion(
+  segments, start, end, gainSegments, analysisStartSec, sampleRate, channels,
+) {
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  const numSamples = channelData[0].length
+  const offsetSamples = Math.round((start - analysisStartSec) * sampleRate)
+
+  const levelled = applyGainSegments(channelData, gainSegments, numSamples, offsetSamples)
+
+  const ctx = new OfflineAudioContext(channels, numSamples, sampleRate)
+  const out = ctx.createBuffer(channels, numSamples, sampleRate)
+  for (let ch = 0; ch < channels; ch++) {
+    out.getChannelData(ch).set(levelled[ch])
+  }
+  return out
 }
 
 /**

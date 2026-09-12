@@ -11,7 +11,9 @@
  * knobs the user actually turns are recomputed locally from what comes back.
  */
 
-import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
+import {
+  renderRegionToBuffer, floatChannelsToWavBlob, renderVadWavBlob,
+} from '../audio/processing.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -74,4 +76,50 @@ export async function analyzeSibilance({
     sampleRate,
     measuredEvents: rescaleEvents(result.measuredEvents ?? [], result.sampleRate, sampleRate),
   }
+}
+
+/**
+ * Run voice-activity detection over a region of the timeline.
+ *
+ * The auto-leveler's one server dependency. Everything else it does — clip
+ * segmentation, per-clip loudness, the gain solve, the crossfades — runs in the
+ * browser against the mask this returns, so this is called once per analysis
+ * and never again while the controls move.
+ *
+ * NO SAMPLE-RATE RESCALING, unlike analyzeSibilance above. The route answers in
+ * frame indices and tells us the frame duration, so a 48 kHz project multiplies
+ * by its own rate and lands on its own grid. That removes the whole class of
+ * bug the rescaleEvents helper exists to patch rather than patching it again.
+ *
+ * @param {object} options
+ * @param {Array}  options.segments   - Timeline segments
+ * @param {number} options.start      - Region start (seconds)
+ * @param {number} options.end        - Region end (seconds)
+ * @param {number} options.sampleRate - Project sample rate
+ * @param {number} options.channels   - Channel count
+ * @returns {Promise<{ voicedRuns: Array<[number,number]>, numFrames: number,
+ *                     frameDurationS: number, noiseFloorDbfs: number|null }>}
+ */
+export async function analyzeVoiceActivity({ segments, start, end, sampleRate, channels }) {
+  const channelData = renderRegionToBuffer(segments, start, end, sampleRate, channels)
+  // Mono 16 kHz 16-bit, not the full-rate float the sibilance route uploads:
+  // this plugin's selections are chapters, and the detector reads nothing else.
+  // See renderVadWavBlob for what that costs and what it does not.
+  const wavBlob = await renderVadWavBlob(channelData, sampleRate)
+
+  const formData = new FormData()
+  formData.append('file', wavBlob, 'selection.wav')
+  formData.append('params', JSON.stringify({}))
+
+  const res = await fetch(`${API_BASE}/api/analyze/vad`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `Analysis failed: ${res.status}` }))
+    throw new Error(body.error || `Analysis failed: ${res.status}`)
+  }
+
+  return res.json()
 }
