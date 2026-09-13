@@ -38,7 +38,9 @@
     "smoke": "node scripts/panel-smoke.mjs",
     "la2a:align": "node scripts/la2a-input-align.mjs",
     "fet:stimulus": "node scripts/fet-ballistics.mjs --stimulus",
-    "fet:selftest": "node scripts/fet-ballistics.mjs --selftest"
+    "fet:selftest": "node scripts/fet-ballistics.mjs --selftest",
+    "fet:null": "node scripts/fet-null.mjs",
+    "fet:null:selftest": "node scripts/fet-null.mjs --selftest"
   },
   "dependencies": {
     "uuid": "^13.0.0",

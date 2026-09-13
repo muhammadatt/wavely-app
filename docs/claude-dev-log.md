@@ -1518,7 +1518,91 @@ closing it, against Analog Obsession FETish and Waves CLA-76.
   law after all. Either answer reshapes the matrix, for one bounce. Totals are
   now **45 bounces for CLA-76 and 39 for FETish**.
 
-- **Not yet built:** the capture fitters. The recovery is proved against a
+### FET Punch — the null-test reader (first fitter)
+
+`npm run fet:null` reads the Step 1 bounces and reports the verdicts;
+`npm run fet:null:selftest` proves it against synthetic captures whose answers
+are known. Shared capture-side library alongside it: `lib/probeCapture.js`
+(rate check, bypass check, mute detection, alignment, preflight) and
+`lib/harmonics.js` (exact-bin DFT, dBc, the stimulus-floor comparison).
+
+⚠ **THE VERDICTS ARE THE PRODUCT, NOT THE ARITHMETIC**, and the self-test found
+three wrong ones before any reference was captured. Each would have been acted
+on by spending or not spending thirty-five bounces.
+
+- **⚗ GAIN REDUCTION WAS COMPUTED ACROSS TWO CAPTURES INSTEAD OF WITHIN ONE, so
+  it carried the insertion gain.** The headline of the most important comparison
+  in the protocol — THD against dB of GR — reported **−22.63 dB of reduction on
+  a reference whose real reduction was 11.0 dB**. Fixed by measuring down from
+  each capture's OWN open gain (its quietest tone, below threshold at any Input
+  position the null test uses), so the Input position and any insertion trim
+  drop out.
+
+- **⚗⚗ A COMPRESSOR WITH NO SATURATOR WAS REPORTED AS A SATURATOR.** Our kernel
+  at `fetDrive: 0` — no waveshaper in the path by construction — still reads
+  **0.020 % THD at 10.9 dB of reduction**, and the reader called it "distortion
+  rises with compression, the nonlinearity lives with the gain cell". It is the
+  unsmoothed full-wave detector modulating the gain at 2f: a tone times a 2f
+  modulation puts sidebands at f and 3f, so **odd orders only**, H3 at −74.2 dBc
+  with H2 84 dB below it. ⚠ **The same signature LAEA showed with Peak Reduction
+  engaged** and the log already recorded. Fitting `fetDrive` to it would put a
+  saturator where a ripple is. `harmonicBalance` now separates them.
+
+- **⚠ AND THE EVEN/ODD TEST HAD TO BE DOMINANCE, NOT PRESENCE.** First cut asked
+  whether any even harmonic sat above the stimulus's own floor — but the
+  stimulus's H2 is near **−311 dBc**, so a capture's H2 at −158 qualifies while
+  carrying no energy worth the name, and the ripple case was still called a
+  saturator. The test is now a 10 dB margin between the strongest odd and the
+  strongest even: the ripple measures **84 dB**, a real asymmetric shaper
+  measures **3.7 dB the other way**.
+
+- **A TRANSPARENT CAPTURE WAS REPORTED AS A BYPASSED PLUGIN.** Bit-identity is
+  the right bypass test in general, but a reference with no output stage, at a
+  setting with no reduction and no makeup, genuinely returns its input — ours
+  does. Two synthetic captures were flagged bypassed while **null4 from the same
+  "plugin" showed 11.23 dB of reduction in the same run**. null4 is the
+  disambiguator, which is what it is in the matrix for, so it is now read first
+  and its verdict gates the others.
+
+- **⚗ ALIGNMENT WAS BIASED BY ITS OWN SMOOTHER, BY 332 SAMPLES.** The capture is
+  rectified and smoothed to get an envelope; the reference needs no smoothing
+  because `buildProbe` hands back the exact amplitude. Comparing smoothed to
+  unsmoothed asked the search to absorb the one-pole's group delay as capture
+  latency: on a capture with **no offset at all** it reported **332 samples,
+  3.5 ms at 96 kHz**, and injected offsets of 0 / 137 / 4096 came back as
+  332 / 469 / 4428 — right spacing, wrong origin. Harmless for a THD window
+  0.8 s inside a 3 s tone; **fatal for a ballistics fit, where 3.5 ms is longer
+  than every attack time this unit has.** Smoothing both sides drops it to ~12
+  samples. ⚠ **Still not enough for ballistics**: at a 4 kHz probe and 96 kHz
+  there are 24 samples per period, so ±12 sits exactly at period ambiguity. The
+  fix when it is needed is to refine against a **step edge** — broadband, placed
+  on a zero crossing — rather than the periodic tone. Not built; building it
+  against a real capture beats guessing.
+
+- **AND IT WAS 29× TOO SLOW, WHICH ONLY SHOWED UP AS A TEST TIMEOUT.** The lag
+  search ran every 8th lag across the whole range at a 128-sample stride —
+  240 M operations, **6 s per capture**, ~60 s for a null-test run and past the
+  suite's timeout. Multi-resolution (256/32/4/1 with matching strides) costs
+  about 3.6 M for the same answer: **6 s → 0.21 s**. The coarse step is safe
+  only because the envelope smoother is 5 ms; sharpen that and the step comes
+  down with it.
+
+- **THE TWO DISTORTION QUESTIONS ARE SEPARATE AND THE REPORT NOW ASKS BOTH.**
+  THD rising with **level at zero GR** is a static/output-stage saturator; THD
+  rising with **reduction** is a gain-cell one. Our own kernel shows the first
+  plainly — gain flat to 0.002 dB across all five tones while THD climbs
+  0.006 → 0.089 % over 24 dB — and a report saying only "linear" would have
+  hidden it completely.
+
+- **⚠ `lib/probeCapture.js` DOES NOT REPLACE THE COPIES IN
+  `la2a-ballistics.mjs`, deliberately.** Those are written against a
+  module-level 44.1 kHz constant; these take the rate as an argument. Merging
+  them would be an unverifiable refactor — `data/corpus/la2a-ballistics/captures/`
+  is gitignored and empty in a fresh clone, so there is no way to prove the
+  LA-2A fitting path still behaves. The stimulus side WAS merged, because its
+  output is checkable byte-for-byte and all 23 files were.
+
+- **Still not built:** the static-curve and ballistics fitters. The recovery is proved against a
   kernel whose constants are known before it is pointed at one whose constants
   are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`
   has no FET counterpart, so a retune would change every existing FET Punch

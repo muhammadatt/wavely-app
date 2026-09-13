@@ -257,7 +257,28 @@ against.
 The matrix is 39–45 bounces per reference. Spend five first: they can disqualify
 a reference, or show a control is not what it says.
 
-Session set up as in Step 2. Use **`thd.wav`** throughout.
+Session set up as in Step 2. Use **`thd.wav`** throughout except where noted.
+
+**Name the files exactly this**, in `data/corpus/fet1176/captures/` — the reader
+finds them by name. `<ref>` is free-form and only groups the report
+(`fetish`, `cla76`, `cla76_bluey`, …):
+
+```
+null1_<ref>.wav   null2_<ref>.wav   null3_<ref>.wav
+null4_<ref>.wav   null5_<ref>.wav        (null5 is FETish only)
+```
+
+Then:
+
+```
+npm run fet:null
+```
+
+It reports each bounce and then the verdicts. ⚠ **It measures the gain
+reduction itself rather than trusting the plugin's meter** — keep logging the
+meter anyway, because the two disagreeing is itself informative.
+
+Partial runs are fine: anything missing is named and skipped.
 
 | # | Settings | What it answers |
 |---|---|---|
@@ -295,6 +316,17 @@ the bottom of the I1–I4 sweep.
   for ballistics and the static curve. **Log it and stop asking that reference
   about `fetDrive`.** This is the LAEA outcome; it is not a failure of the
   protocol.
+- **"ODD-ORDER DOMINATED"** → ⚠ **not a saturator, and this one is easy to
+  misread as one.** An unsmoothed full-wave detector modulates the gain at 2f on
+  a steady tone, and a tone times a 2f modulation puts sidebands at f and 3f —
+  odd orders only, with no waveshaper involved. LAEA showed exactly this with
+  Peak Reduction engaged, and our own kernel reads 0.020 % THD at 11 dB of
+  reduction with `fetDrive` set to **zero**. Fitting `fetDrive` to it would put
+  a saturator where a ripple is.
+- **A capture reads BIT-IDENTICAL but null4 shows compression** → the reference
+  is simply transparent at that setting. That is a finding, not a bad bounce,
+  and the reader says which it is — which is why null4 is worth bouncing even
+  though it feels redundant.
 
 ---
 
