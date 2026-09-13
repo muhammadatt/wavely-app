@@ -47,8 +47,8 @@ Quoted text is the vendor's; the ranges are what the plugin displays.
 
 | Our param | CLA-76 control | Notes |
 |---|---|---|
-| `inputDrive` | **Input** | Displays −inf…0, default 30 — ⚠ see the open item below |
-| `outputGainDb` | **Output** | Displays −inf…0, default 18 — same open item |
+| `inputDrive` | **Input** | **Attenuator, −inf…0 dB, default −30.** ⚠ Faceplate hides the minus sign |
+| `outputGainDb` | **Output** | **Attenuator, −inf…0 dB, default −18.** Same hidden sign |
 | `attack` | **Attack 1–7** | Direct match to our dial |
 | `release` | **Release 1–7** | Direct match to our dial |
 | `ratio` | **4 / 8 / 12 / 20** | Direct match |
@@ -57,18 +57,15 @@ Quoted text is the vendor's; the ranges are what the plugin displays.
 | `scHpfHz` | *(none)* | Broadband detector, as the hardware is |
 | — | **Auto makeup** | ⚠ **MUST BE OFF** |
 | — | **Analog 50 Hz / 60 Hz / Off** | ⚠ **MUST BE OFF** |
-| — | **Rev: Bluey / Blacky** | ⚠ **Two different units** — see below |
+| — | **Rev: Bluey / Blacky** | **Blacky** is primary — ⚠ see below |
 | — | **Mix 0–100** | Set **100** |
 | — | **Trim ±18 dB** | Set **0** |
 
 ⚠ **"The models have different gain stages, time constants, and harmonic
-distortion."** That is the vendor's own wording, and *time constants* is the
-word that matters: Bluey and Blacky are not two voicings of one unit, they are
-two ballistics. **Pick one, record it, never change it mid-matrix.** Our model's
-four ratio buttons plus a British-mode all-buttons is classic 1176LN behaviour,
-so **Blacky** is the better primary if it is the blackface model — confirm that
-against the Waves documentation before starting, because a matrix run on the
-wrong one is not recoverable by relabelling.
+distortion."** That is the vendor's own wording, and *time constants* is the word
+that matters: Bluey and Blacky are not two voicings of one unit, **they are two
+ballistics.** A matrix run across both is two units and is not recoverable by
+relabelling. Fix the Rev, record it, never change it mid-matrix.
 
 ⚠ **Auto makeup is the single most damaging control in this list.** With it on,
 Output moves with Input, so a `stairs.wav` capture measures compression *and*
@@ -80,12 +77,44 @@ whole point. It lands in the recovered gain trace as gain that is not gain, and
 it is worst exactly where the trace is most sensitive: near the probe's zero
 crossings, where division is already ill-conditioned.
 
-**⚠ OPEN ITEM — the Input and Output readouts are self-inconsistent.** "−inf to
-0" with a default of **30** cannot both be true; 30 is outside that range. Before
-bouncing, turn each knob fully counter-clockwise and fully clockwise and write
-down what it actually reads at both ends. This is not pedantry — see the FETish
-readout mismatch below, and the LA-2A precedent where a knob taken for an
-emphasis trimmer turned out to be a mix control and a whole fit was built on it.
+**⚠ INPUT AND OUTPUT ARE BOTH ATTENUATORS, AND THE FACEPLATE HIDES THE MINUS
+SIGN.** Resolved: the range is −inf…0 dB with defaults of **−30** and **−18**;
+the panel prints "30" and "18". **Zero is maximum on both knobs, and fully
+counter-clockwise is silence.**
+
+Two bounces in the first draft of this protocol were impossible because of it,
+and both are now corrected below:
+
+- "Input at minimum" would have muted the track, not disengaged compression.
+- "Output +10 dB" is unreachable — unity *is* the top of the travel. The Output
+  test now raises the knob 10 dB *from its starting position* (−18 → −8).
+
+This is the same class of error as the LA-2A's R37: a control read as one thing
+and used as another. It cost nothing this time only because the panel was read
+before the bounces.
+
+### ⚠ Blacky is primary, and that choice cuts against the distortion fit
+
+Confirmed from the documentation: **Bluey** is Blue Stripe / Rev A-B — "brighter,
+dirtier, more aggressive with added harmonic distortion and grit", pushing the
+midrange forward. **Blacky** is Blackface / Rev D-E — "smoother, cleaner, more
+neutral", flatter response, "compression without heavily coloring the original
+tone".
+
+**Blacky is the right primary.** Our four ratio buttons plus a British-mode
+all-buttons is classic 1176LN, and the ballistics and static curve want the
+neutral model.
+
+⚠ **But note what that means for `fetDrive`: we are choosing the deliberately
+cleaner of the two models as our distortion reference.** Waves' own wording is
+that the Revs differ in "gain stages, time constants, **and harmonic
+distortion**" — so the one axis where the choice most plausibly changes the
+answer is the one `thd.wav` measures.
+
+**So capture `thd.wav` on BOTH Revs.** Three extra bounces, and it is the only
+place in the matrix where the Rev difference is both documented and cheap to
+measure. Ballistics on both Revs would double the matrix and is not worth it —
+note it as an open question instead.
 
 ### Analog Obsession FETish
 
@@ -103,6 +132,7 @@ emphasis trimmer turned out to be a mix control and a whole fit was built on it.
 | — | **Sidechain INT/EXT** | **INT** |
 | — | **MID F / MID GAIN ±6 dB** | **MID GAIN 0** |
 | — | **HF −12…0 (flat)** | **flat** |
+| — | **Oversampling** | ⚠ **Hidden behind the logo, default OFF. Turn it ON** — see below |
 | — | **Mix 0–100 %** | **100** |
 
 ---
@@ -133,6 +163,34 @@ Consequences, all of which have to be in the log before the bounces start:
   capture.** Someone will otherwise read it as one.
 - Our `stairs.wav` collapse test still works on FETish, and measures the
   **detector drive per knob unit** rather than the combined law.
+
+### ⚠ FINDING 1b — FETish's oversampling is a hidden toggle that defaults OFF
+
+Clicking the plugin's logo toggles it. There is no other indication of its state.
+
+**Turn it ON for the entire matrix.** Our kernel runs the gain cell and the FET
+stage at 4× (`dsp/oversample.js`) and the reason is measured: at 44.1 kHz the
+un-oversampled path put **−47 dBc of folded product on a 9 kHz tone** at the
+default `fetDrive`, and **−80 dBc with the FET stage switched off entirely** —
+the residue of the gain multiply alone, because the detector is unsmoothed and at
+a fast attack the cell tracks the waveform, so the gain signal is itself
+broadband. Capturing an aliasing reference against a non-aliasing model would put
+folded products into the THD columns at frequencies that are not harmonics of
+anything, and into the gain trace as noise.
+
+⚠ **A HIDDEN TOGGLE WITH NO PANEL STATE IS A PROVENANCE HAZARD OF THE FIRST
+ORDER.** If half the matrix is captured with it on and half off, the ballistics
+fit is polluted and **nothing in the numbers will say so** — it will read as
+scatter. Verify it at the start of every session, and log it per capture, not
+once per reference.
+
+⚠ **It may also change the plugin's latency.** That is removable by alignment,
+but only if it is constant across the matrix — another reason not to let it vary.
+
+**Worth one extra bounce:** `thd.wav` at I3 captured **both ways**. That
+measures what FETish's oversampling actually does, which is the closest thing
+available to an independent check on whether our own 4× is enough. Not fit data
+for any current constant.
 
 ### ⚠ FINDING 2 — FETish has no all-buttons-in mode
 
@@ -196,16 +254,16 @@ against.
 
 ## Step 1 — The null test. Five bounces, not thirty-eight.
 
-The matrix is 33–38 bounces per reference. Spend five first: they can disqualify
+The matrix is 39–45 bounces per reference. Spend five first: they can disqualify
 a reference, or show a control is not what it says.
 
 Session set up as in Step 2. Use **`thd.wav`** throughout.
 
 | # | Settings | What it answers |
 |---|---|---|
-| 1 | Input at **minimum**, ratio 4, Output unity | Insertion gain, and whether anything is nonlinear with **no** gain reduction. GR meter must read 0. |
-| 2 | As 1, but **Output +10 dB** | Is Output a clean multiply, or does it drive a stage? |
-| 3 | Input up for **~10 dB of GR**, Output unity | Does distortion rise with **gain reduction**? That is the axis that matters. |
+| 1 | Input **low enough that the GR meter reads 0 throughout**, ratio 4, Output at its default (CLA-76 −18, FETish 0) | Insertion gain, and whether anything is nonlinear with **no** gain reduction. |
+| 2 | As 1, but **Output raised 10 dB from that position** (CLA-76 −18 → −8, FETish 0 → +10) | Is Output a clean multiply, or does it drive a stage? |
+| 3 | Input up for **~10 dB of GR**, Output back at its default | Does distortion rise with **gain reduction**? That is the axis that matters. |
 | 4 | `stairs.wav`, ratio 4, mid Input | Sanity: is the plugin actually in circuit? |
 | 5 | **FETish only.** `thd.wav` at two Input positions, ratio 4, level low enough for **zero GR** at both | ⚠ **Does the internal compensation exist?** |
 
@@ -215,6 +273,12 @@ holds — FETish tells us nothing about our Input's audio path. If the level
 *rises* with the knob, the manual is wrong, the compensation is not there, and
 FETish becomes a full reference for the Input law after all. Either answer
 reshapes the rest of the matrix, and it costs one bounce.
+
+⚠ **"INPUT AT MINIMUM" IS NOT WHAT BOUNCE 1 WANTS ON EITHER PLUGIN, AND ON
+CLA-76 IT IS SILENCE.** Both Input controls bottom out at −inf. What the test
+needs is the lowest position that still passes full signal with the GR meter at
+zero — find it by ear and by the meter, and **write it down**, because it is also
+the bottom of the I1–I4 sweep.
 
 **Reading the rest:**
 
@@ -253,9 +317,11 @@ committing or backing up.
 - **The plugin alone on the track.** Fader at unity, clip gain 0 dB, no other
   processing anywhere in the path including the master bus.
 - **Every control from the Step 0 tables at its stated neutral setting.** CLA-76:
-  Auto makeup **off**, Analog **off**, Mix **100**, Trim **0**, Rev fixed.
+  Auto makeup **off**, Analog **off**, Mix **100**, Trim **0**, Rev **Blacky**.
   FETish: SLAM **off**, sidechain **INT**, HPF **20**, MID GAIN **0**, HF
-  **flat**, Mix **100**.
+  **flat**, Mix **100**, and ⚠ **oversampling ON** — it is behind the logo, it
+  defaults off, and nothing on the panel shows its state. **Check it at the start
+  of every session.**
 - **Disable plugin delay compensation, or write down that it is on.** A constant
   latency is removable by alignment. What is not removable is a host quietly
   compensating by a number it will not tell you, while the trace is being read as
@@ -405,14 +471,21 @@ this is less likely to bite — which is itself a check on the compensation.
 
 ### Totals
 
-| | CLA-76 | FETish |
+| | CLA-76 (Blacky) | FETish |
 |---|---|---|
 | null test | 4 | **5** |
 | stairs | 20 | 16 |
 | bursts | 14 | 13 |
 | frequency | 1 | 1 |
 | thd | 3 | 3 |
-| **total** | **42** | **38** |
+| thd, Bluey Rev | **3** | — |
+| thd, oversampling off | — | **1** |
+| **total** | **45** | **39** |
+
+The last two rows are the cheap ones that answer a question nothing else in the
+matrix can: whether the Rev choice moves the distortion we fit `fetDrive`
+against, and what FETish's oversampling actually does. Neither is fit data for a
+current constant.
 
 ---
 
@@ -437,10 +510,15 @@ not bookkeeping — see "Choosing the Input positions"); **the GR meter reading*
 the Output or Trim used, if any; session rate; and whether delay compensation was
 on.
 
-⚠ **Log the neutral controls too, per reference, at least once** — Auto makeup,
-Analog, Mix, Trim, SLAM, sidechain. "It was off" recorded nowhere is
-indistinguishable later from "nobody checked". Provenance is part of the
-measurement, and this repo has lost eight captures to it once already.
+⚠ **Log the neutral controls too** — Auto makeup, Analog, Rev, Mix, Trim, SLAM,
+sidechain. "It was off" recorded nowhere is indistinguishable later from "nobody
+checked". Provenance is part of the measurement, and this repo has lost eight
+captures to it once already.
+
+⚠ **FETish's oversampling goes in EVERY row, not once per reference.** It is
+behind the logo, it defaults off, and the panel shows nothing. A matrix captured
+half one way and half the other reads as scatter, and no number in it will say
+which rows were which.
 
 ---
 

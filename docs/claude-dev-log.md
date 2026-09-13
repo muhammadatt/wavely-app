@@ -1472,12 +1472,51 @@ closing it, against Analog Obsession FETish and Waves CLA-76.
   floor, costing ~0.17 dB at the 100 Hz probe, which is below what the detector
   hold-out looks for but is noted rather than discovered later.
 
+- **⚗ STEP 0, ROUND TWO — THE CLA-76 READOUT IS RESOLVED AND IT BROKE TWO
+  BOUNCES.** Input and Output are both **attenuators, −inf…0 dB, defaults −30 and
+  −18**; the faceplate prints "30" and "18" and **hides the minus sign**. So zero
+  is maximum on both knobs and fully counter-clockwise is silence — which makes
+  "Input at minimum" (null-test bounce 1) a muted track rather than a disengaged
+  compressor, and "Output +10 dB" (bounce 2) unreachable, since unity IS the top
+  of the travel. Both restated: Input goes to the lowest position that still
+  passes signal with the GR meter at zero (**and that position is logged — it is
+  the bottom of the I1–I4 sweep**), and Output is raised 10 dB *from its default*
+  (−18 → −8). Same class as the LA-2A's R37 — a control read as one thing and
+  used as another — and it cost nothing only because the panel was read before
+  the bounces.
+
+- **BLACKY IS PRIMARY, AND THAT CHOICE CUTS AGAINST THE DISTORTION FIT.** Bluey
+  is Blue Stripe / Rev A-B, "brighter, dirtier, more aggressive with added
+  harmonic distortion and grit"; Blacky is Blackface / Rev D-E, "smoother,
+  cleaner, more neutral". Blacky is right for the ballistics and the static curve
+  — our four buttons plus British mode is classic 1176LN. ⚠ **But it means the
+  deliberately cleaner of the two models is our `fetDrive` reference**, and
+  Waves' own wording is that the Revs differ in "gain stages, time constants, and
+  harmonic distortion" — so the axis where the choice most plausibly changes the
+  answer is exactly the one `thd.wav` measures. **`thd.wav` is therefore captured
+  on BOTH Revs** (3 extra bounces). Ballistics on both would double the matrix
+  and is left as an open question.
+
+- **⚠ FETISH'S OVERSAMPLING IS A HIDDEN TOGGLE BEHIND THE LOGO AND DEFAULTS
+  OFF.** Nothing on the panel shows its state. It must be **ON** for the matrix:
+  our kernel runs the gain cell and FET stage at 4× because the un-oversampled
+  path measured **−47 dBc of folded product on a 9 kHz tone** at the default
+  `fetDrive` and **−80 dBc with the FET stage off entirely** — the residue of the
+  gain multiply alone, since the detector is unsmoothed and the cell tracks the
+  waveform. Capturing an aliasing reference against a non-aliasing model puts
+  folded products into the THD columns at frequencies that are not harmonics of
+  anything. ⚠ **A hidden toggle with no panel state is a provenance hazard of the
+  first order**: a matrix captured half each way reads as scatter and **no number
+  in it says which rows were which**, so it is logged per capture rather than per
+  reference. One extra bounce captures `thd.wav` both ways — the closest thing
+  available to an independent check on whether our own 4× is enough.
+
 - **THE NULL TEST GAINED A FIFTH BOUNCE AND IT IS THE MOST VALUABLE ONE.**
   `thd.wav` at two Input positions with zero GR at both, FETish only: if the
   output level is the same, the compensation is real and Finding 1 holds; if it
   rises, the manual is wrong and FETish becomes a full reference for the Input
   law after all. Either answer reshapes the matrix, for one bounce. Totals are
-  now **42 bounces for CLA-76 and 38 for FETish**.
+  now **45 bounces for CLA-76 and 39 for FETish**.
 
 - **Not yet built:** the capture fitters. The recovery is proved against a
   kernel whose constants are known before it is pointed at one whose constants
