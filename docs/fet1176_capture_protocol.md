@@ -38,71 +38,199 @@ reference, hold the other out, and **do not average them.**
 
 ---
 
-## Step 0 — Control parity, before any bounce
+## Step 0 — Control parity: DONE, and it moved four things
 
-You cannot fit a knob until you know what it is. Fill this in for each plugin
-and keep it with the captures. A row you cannot confirm is a row that does not
-get fitted.
+Both plugins were read off their own panels and manuals (September 2026).
+Quoted text is the vendor's; the ranges are what the plugin displays.
 
-| Our param | Expected control | FETish | CLA-76 |
-|---|---|---|---|
-| `inputDrive` | Input — attenuator into a fixed threshold, feeding **both** the audio path and the detector | | |
-| `outputGainDb` | Output — makeup, **after** the FET stage | | |
-| `attack` | Attack dial 1–7, **7 = fastest** | | |
-| `release` | Release dial 1–7, **7 = fastest** | | |
-| `ratio` | Buttons 4 / 8 / 12 / 20 | | |
-| `ratio: 'all'` | All buttons in ("British mode") | | |
-| `fetDrive` | *(no control — driven by level alone)* | | |
-| `scHpfHz` | *(not on the hardware; a modern extension)* | | |
-| — | Anything else the plugin has | | |
+### Waves CLA-76
 
-⚠ **THE DIALS ARE REVERSED ON THE HARDWARE AND EVERY EMULATION KEEPS THAT.**
-7 is the *fastest* position on both Attack and Release, not the slowest. Confirm
-it on the panel before you start — a capture matrix run backwards fits the
-ballistics inside out and every number in it looks plausible.
+| Our param | CLA-76 control | Notes |
+|---|---|---|
+| `inputDrive` | **Input** | Displays −inf…0, default 30 — ⚠ see the open item below |
+| `outputGainDb` | **Output** | Displays −inf…0, default 18 — same open item |
+| `attack` | **Attack 1–7** | Direct match to our dial |
+| `release` | **Release 1–7** | Direct match to our dial |
+| `ratio` | **4 / 8 / 12 / 20** | Direct match |
+| `ratio: 'all'` | **ALL** | Direct match — **the only source we have for this** |
+| `fetDrive` | *(no control)* | Level-driven, as ours is |
+| `scHpfHz` | *(none)* | Broadband detector, as the hardware is |
+| — | **Auto makeup** | ⚠ **MUST BE OFF** |
+| — | **Analog 50 Hz / 60 Hz / Off** | ⚠ **MUST BE OFF** |
+| — | **Rev: Bluey / Blacky** | ⚠ **Two different units** — see below |
+| — | **Mix 0–100** | Set **100** |
+| — | **Trim ±18 dB** | Set **0** |
 
-⚠ **TURN OFF ANYTHING THAT IS NOT THE COMPRESSOR.** CLA-76 has an analog-noise
-control; any hiss it adds lands in the recovered gain trace as gain that is not
-gain, and it is worst exactly where the trace is most sensitive — near the
-probe's zero crossings. Same for any mix/blend control (set fully wet), any
-sidechain filter (off), and any auto-gain or output-normalisation feature. This
-protocol wants the plugin's transfer function, not its opinion about level.
+⚠ **"The models have different gain stages, time constants, and harmonic
+distortion."** That is the vendor's own wording, and *time constants* is the
+word that matters: Bluey and Blacky are not two voicings of one unit, they are
+two ballistics. **Pick one, record it, never change it mid-matrix.** Our model's
+four ratio buttons plus a British-mode all-buttons is classic 1176LN behaviour,
+so **Blacky** is the better primary if it is the blackface model — confirm that
+against the Waves documentation before starting, because a matrix run on the
+wrong one is not recoverable by relabelling.
 
-⚠ **CLA-76 HAS MORE THAN ONE MODEL** (component buttons). Pick one, write down
-which, and never change it mid-matrix. They are different units.
+⚠ **Auto makeup is the single most damaging control in this list.** With it on,
+Output moves with Input, so a `stairs.wav` capture measures compression *and*
+makeup summed into one curve and the static fit reads a threshold that does not
+exist.
+
+⚠ **Analog adds hum and noise floor by design** — 50 Hz or 60 Hz, the vendor's
+whole point. It lands in the recovered gain trace as gain that is not gain, and
+it is worst exactly where the trace is most sensitive: near the probe's zero
+crossings, where division is already ill-conditioned.
+
+**⚠ OPEN ITEM — the Input and Output readouts are self-inconsistent.** "−inf to
+0" with a default of **30** cannot both be true; 30 is outside that range. Before
+bouncing, turn each knob fully counter-clockwise and fully clockwise and write
+down what it actually reads at both ends. This is not pedantry — see the FETish
+readout mismatch below, and the LA-2A precedent where a knob taken for an
+emphasis trimmer turned out to be a mix control and a whole fit was built on it.
+
+### Analog Obsession FETish
+
+| Our param | FETish control | Notes |
+|---|---|---|
+| `inputDrive` | **Input**, displays −96…0 dB | ⚠ **Internally compensated — see below** |
+| `outputGainDb` | **Output**, displays 0…+36 dB | Manual says −30…+30. Readout ≠ manual |
+| `attack` | **Attack, continuous 20–800 µs** | ⚠ **Better than a dial — see below** |
+| `release` | **Release, continuous 50–1100 ms** | Same |
+| `ratio` | **Continuous 4:1–20:1** | Manual says selectable 4/8/12/20 |
+| `ratio: 'all'` | **absent** | ⚠ **SLAM is not all-buttons — see below** |
+| `fetDrive` | *(no control)* | |
+| `scHpfHz` | **Sidechain HPF 20–500 Hz** | A real counterpart to ours. Set to **20** |
+| — | **SLAM** | **OFF** for the whole matrix |
+| — | **Sidechain INT/EXT** | **INT** |
+| — | **MID F / MID GAIN ±6 dB** | **MID GAIN 0** |
+| — | **HF −12…0 (flat)** | **flat** |
+| — | **Mix 0–100 %** | **100** |
 
 ---
 
-## Step 1 — The null test. Four bounces, not thirty-eight.
+### ⚠ FINDING 1 — FETish's Input is a DRIVE OFFSET, not an input gain
 
-The full matrix is 38 bounces per reference. Spend four first, because they can
-disqualify a reference or tell you a control is not what it says.
+> "Internally compensated input knob to drive circuit and get compression. With
+> original gear, input will boost signal without compensation. With FETish, you
+> don't have to reduce volume while you boost input."
 
-Use **`thd.wav`** for all four. Session set up as in Step 2 below.
+**This is the whole gain-staging feel of the unit, and FETish deliberately does
+not have it.** Our model — and the hardware — put Input ahead of a fixed
+threshold feeding *both* the detector and the audio path, so turning it up
+raises level and compression together and Output brings it back. FETish
+compensates that internally: the knob drives the detector and the audio comes
+out at the same level.
+
+That is precisely the distinction this codebase already drew for OptoSmooth: a
+**drive offset**, not an input gain (`dsp/inputAlign.js`, and the ledger entry
+insisting the two are different things even when they render identically).
+
+Consequences, all of which have to be in the log before the bounces start:
+
+- **FETish cannot speak to our Input knob's audio-path behaviour at all.** It is
+  a reference for the *detector* side — threshold and taper — and nothing else.
+- **The two references will disagree on `stairs.wav` by construction**, in the
+  output level at a given Input position. ⚠ **That is expected and is not a bad
+  capture.** Someone will otherwise read it as one.
+- Our `stairs.wav` collapse test still works on FETish, and measures the
+  **detector drive per knob unit** rather than the combined law.
+
+### ⚠ FINDING 2 — FETish has no all-buttons-in mode
+
+> "SLAM: With this function, you will get ultra-fast and aggressive limiting
+> option. You can use this function for every ratio."
+
+Usable *with* every ratio means SLAM is not the ratio buttons ganged together.
+Our `ratio: 'all'` models British mode as its own thing — threshold dropped
+6 dB, effective ratio climbing with overshoot, attack lagged 2.5×, release tail
+lengthened, FET driven 1.6× harder. **Seven constants, and CLA-76 is now the
+only reference that can touch any of them.**
+
+⚠ **That makes all-buttons a single-reference fit with no hold-out**, which is
+the weakest position in this whole exercise and must be recorded as such in
+whatever ships. Do not quietly present it alongside the two-reference results.
+
+SLAM is worth one exploratory bounce for curiosity. It is **not** fit data for
+anything we currently model.
+
+### ⚠ FINDING 3 — FETish says the threshold MOVES with ratio. Ours does not.
+
+> "Each has it's own curve and range to start compress. While you use lowest
+> ratio, you should get compression quickly when you boost input. With higher
+> ratios, compression will start at higher input gains."
+
+Our model holds `THRESHOLD_DBFS` fixed at −18 across all four ratios and varies
+only the knee (`RATIO_KNEE_DB` 10 / 8 / 6 / 3). FETish claims the threshold
+itself shifts. On real hardware that is plausible — the ratio buttons change the
+feedback network — so this may well be a genuine gap in our model rather than a
+plugin quirk.
+
+**It is directly measurable**: the ratio sweep in `stairs.wav` reads the
+threshold at each ratio. That sweep was in the matrix to fit the knee; it is now
+load-bearing for the threshold too, and it is the first place to look if the two
+references disagree about the knee.
+
+### ⚠ FINDING 4 — FETish's ballistics are continuous, which is better than a dial
+
+Set the knob to the exact time our own dial produces and compare directly, with
+**no interpolation assumption on either side**:
+
+| dial | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| attack | 800 µs | 433 | 234 | 126 | 68 | 37 | 20 |
+| release | 1100 ms | 657 | 393 | 235 | 140 | 84 | 50 |
+
+⚠ **BUT THE ENDPOINTS ARE NOT INDEPENDENT EVIDENCE.** FETish's advertised
+20–800 µs and 50–1100 ms are *identical* to our `ATTACK_FASTEST_S` /
+`ATTACK_SLOWEST_S` and `RELEASE_FASTEST_S` / `RELEASE_SLOWEST_S`, because both
+are quoting the same 1176 datasheet. Agreement at the ends confirms nothing. What
+these captures can settle is **the taper between them** — our `dialToSeconds`
+interpolates geometrically, and that has never been checked against anything.
+
+⚠ **AND A PRINTED NUMBER IS NOT A MEASUREMENT.** FETish's Input reads −96…0
+where its manual says 0…60, and its Output reads 0…+36 where the manual says
+−30…+30. Two controls, two mismatches, one plugin. Treat every printed µs and ms
+as a knob position to be *verified by the capture*, not as a value to fit
+against.
+
+---
+
+## Step 1 — The null test. Five bounces, not thirty-eight.
+
+The matrix is 33–38 bounces per reference. Spend five first: they can disqualify
+a reference, or show a control is not what it says.
+
+Session set up as in Step 2. Use **`thd.wav`** throughout.
 
 | # | Settings | What it answers |
 |---|---|---|
-| 1 | Input at **minimum**, ratio 4, Output unity | Insertion gain, and whether there is any nonlinearity with **no** gain reduction. GR meter must read 0. |
-| 2 | Same as 1, but **Output +10 dB** | Is Output a clean multiply, or does it drive something? On the hardware it sits after the FET and feeds a class-A amp. |
-| 3 | Input high enough for **~10 dB of GR**, Output unity | Does distortion rise with **gain reduction**? This is the axis that matters. |
-| 4 | `stairs.wav`, Input 50, ratio 4 | Sanity: is the plugin actually in circuit? |
+| 1 | Input at **minimum**, ratio 4, Output unity | Insertion gain, and whether anything is nonlinear with **no** gain reduction. GR meter must read 0. |
+| 2 | As 1, but **Output +10 dB** | Is Output a clean multiply, or does it drive a stage? |
+| 3 | Input up for **~10 dB of GR**, Output unity | Does distortion rise with **gain reduction**? That is the axis that matters. |
+| 4 | `stairs.wav`, ratio 4, mid Input | Sanity: is the plugin actually in circuit? |
+| 5 | **FETish only.** `thd.wav` at two Input positions, ratio 4, level low enough for **zero GR** at both | ⚠ **Does the internal compensation exist?** |
 
-**How to read them:**
+**Bounce 5 is the most valuable single bounce in this protocol.** If the output
+level is the *same* at both Input positions, Input is drive-only and Finding 1
+holds — FETish tells us nothing about our Input's audio path. If the level
+*rises* with the knob, the manual is wrong, the compensation is not there, and
+FETish becomes a full reference for the Input law after all. Either answer
+reshapes the rest of the matrix, and it costs one bounce.
 
-- **Bounce 4 comes back bit-identical to the stimulus** → the plugin is
-  bypassed, or the bounce exported the source track. Every reading downstream
-  will say "no compression", which looks exactly like "the Input knob is too
-  low". Fix this before anything else.
-- **1 and 2 are both perfectly linear, and 3 distorts** → the nonlinearity lives
-  with the gain cell, not the output amp. That is what `fetDrive` should be
-  fitted against, and it is the same answer the Moore paper reached for the
-  LA-2A after two years of a model that put it in the valves.
-- **2 distorts and 3 does not** → the reference's Output drives a stage; our
-  model has no such thing, and `fetDrive` cannot be fitted from it.
-- **Nothing distorts anywhere** → this reference has no output stage modelled.
-  It is still perfectly good for ballistics and the static curve. **Say so in
-  the capture log and stop asking it about `fetDrive`.** This is the LAEA
-  outcome and it is not a failure of the protocol.
+**Reading the rest:**
+
+- **4 comes back bit-identical to the stimulus** → the plugin is bypassed, or the
+  bounce exported the source. Everything downstream will say "no compression",
+  which looks exactly like "the Input knob is too low". Fix this first.
+- **1 and 2 linear, 3 distorts** → the nonlinearity lives with the gain cell, not
+  the output amp. That is what `fetDrive` fits against, and it is the same answer
+  the Moore paper reached for the LA-2A after two years of a model that put it in
+  the valves.
+- **2 distorts and 3 does not** → Output drives a stage. We model no such thing,
+  and `fetDrive` cannot be fitted from that reference.
+- **Nothing distorts anywhere** → no output stage modelled. Still perfectly good
+  for ballistics and the static curve. **Log it and stop asking that reference
+  about `fetDrive`.** This is the LAEA outcome; it is not a failure of the
+  protocol.
 
 ---
 
@@ -124,10 +252,14 @@ committing or backing up.
 - **Bounce at 32-bit float, no dither.**
 - **The plugin alone on the track.** Fader at unity, clip gain 0 dB, no other
   processing anywhere in the path including the master bus.
+- **Every control from the Step 0 tables at its stated neutral setting.** CLA-76:
+  Auto makeup **off**, Analog **off**, Mix **100**, Trim **0**, Rev fixed.
+  FETish: SLAM **off**, sidechain **INT**, HPF **20**, MID GAIN **0**, HF
+  **flat**, Mix **100**.
 - **Disable plugin delay compensation, or write down that it is on.** A constant
   latency is removable by alignment. What is not removable is a host quietly
-  compensating by a number it will not tell you, while the trace is being read
-  as an attack time.
+  compensating by a number it will not tell you, while the trace is being read as
+  an attack time.
 
 ### ⚠ Start every bounce at the file's first sample
 
@@ -138,23 +270,42 @@ bounce with pre-roll slides every event into the mutes it was placed to avoid,
 and the only symptom is events going missing.
 
 The scheduling runs for both references. FETish does not mute, and scheduling
-around a mute that is not there costs only a slightly longer rest — which is
-the point: **one stimulus serves both, and two references measured on two
-different stimuli cannot be compared.**
+around a mute that is not there costs only a slightly longer rest — which is the
+point: **one stimulus serves both, and two references measured on two different
+stimuli cannot be compared.**
 
 ---
 
 ## Step 3 — The capture matrix
 
-38 bounces per reference. **The stimulus files do not change across it. Only the
-plugin's knobs do.**
+**The stimulus files do not change across it. Only the plugin's knobs do.**
 
-### `stairs.wav` — static curve (20 bounces)
+### Choosing the Input positions
+
+⚠ **NOT by knob percentage.** The two plugins have different scales (and
+CLA-76's readout is currently self-contradictory), so a position stated as a
+number is not portable between them and may not be reproducible on either.
+
+Instead, pick four Input positions by the **gain reduction they produce on the
+−12 dBFS step of `stairs.wav`**, read off the plugin's own GR meter:
+
+| position | target GR |
+|---|---|
+| I1 | ~2 dB |
+| I2 | ~6 dB |
+| I3 | ~12 dB |
+| I4 | ~18 dB |
+
+**Write down the knob readout for each.** Those four numbers are data: the shift
+that collapses the four static curves onto one *is* the taper, and the readouts
+are what it gets expressed in.
+
+### `stairs.wav` — static curve
 
 44.6 s. Fifteen 1 s steps from −45 to −3 dBFS in 3 dB.
 
-**Ballistics: attack 1 (slowest), release 7 (fastest), for both files, always.**
-Both halves matter and neither is arbitrary:
+**Ballistics: attack slowest, release fastest, always** — CLA-76 attack 1 /
+release 7; FETish attack 800 µs / release 50 ms. Both halves matter:
 
 - The detector is a bare full-wave rectifier with no smoothing, so at a **fast**
   attack the gain tracks |sin| *within* the cycle — the trace swings between no
@@ -162,32 +313,52 @@ Both halves matter and neither is arbitrary:
   settled value to read. The slowest attack (800 µs against a 250 µs probe
   period) smooths that into a steady, peak-referenced number, which is the
   quantity the static curve is defined on.
-- The **fastest** release then settles each step in ~200 ms, so the steps can sit
+- The **fastest** release settles each step in ~200 ms, so the steps can sit
   1.5 s apart instead of needing ten.
 
-| | |
-|---|---|
-| ratio | 4 / 8 / 12 / 20 / all |
-| Input | 20 / 40 / 60 / 80 |
+| reference | ratio | Input | bounces |
+|---|---|---|---|
+| CLA-76 | 4 / 8 / 12 / 20 / **ALL** | I1–I4 | **20** |
+| FETish | 4 / 8 / 12 / 20 | I1–I4 | **16** |
 
-⚠ **SWEEPING INPUT LOOKS REDUNDANT AND THAT IS EXACTLY WHY IT IS IN THE
-MATRIX.** Our model says drive and level add in dB, so a level staircase at
-fixed Input and an Input sweep at fixed level are the same experiment. If the
-curves **collapse onto one another** when shifted by the knob's dB, the additive
-model holds and **the shift that collapses them is the taper, measured
-directly**. If they do not collapse, the Input knob is doing something our model
-does not have, and that is a finding worth the twenty bounces on its own.
+⚠ **THE RATIO SWEEP NOW CARRIES TWO QUESTIONS, NOT ONE.** It was in the matrix
+to fit `RATIO_KNEE_DB`. Per Finding 3 it also measures **whether the threshold
+moves with ratio**, which our model says it does not and FETish's manual says it
+does. Read the threshold per ratio before reading the knee — a moving threshold
+misfits as a knee if you assume it is fixed.
 
-### `bursts.wav` — ballistics (14 bounces)
+⚠ **AND THE INPUT SWEEP IS NOT REDUNDANT, DESPITE LOOKING IT.** Our model says
+drive and level add in dB, so a level staircase at fixed Input and an Input sweep
+at fixed level should be the same experiment. If the curves **collapse onto one
+another** when shifted, the additive model holds and the shift is the taper. If
+they do not, the Input knob does something we do not model. On FETish, per
+Finding 1, what collapses is the **detector** drive only — the output level will
+*not* shift with Input, and that is the compensation, not a fault.
+
+### `bursts.wav` — ballistics
 
 83.1 s. Four holds at −12 dBFS: 50 ms at t=2.0, 200 ms at 22.1, 1 s at 42.1,
-3 s at 62.1. Ratio 4, Input 50 throughout.
+3 s at 62.1. Ratio 4, Input at **I3** (~12 dB GR) throughout.
+
+**CLA-76 — 14 bounces**
 
 | | |
 |---|---|
-| attack sweep | attack **1…7** at release 4 — 7 bounces |
-| release sweep | release **1…7** at attack 7 — 7 bounces |
-| all-buttons | ratio **all**, attack 4, release 4 — 1 bounce |
+| attack **1…7** at release 4 | 7 |
+| release **1…7** at attack 7 | 7 (one shared corner) |
+| ratio **ALL**, attack 4, release 4 | 1 |
+
+**FETish — 13 bounces.** Same shape, but set the continuous knobs to the exact
+times in the Finding 4 table rather than to dial numbers, and **there is no
+all-buttons bounce**:
+
+| | |
+|---|---|
+| attack **800 / 433 / 234 / 126 / 68 / 37 / 20 µs** at release 235 ms | 7 |
+| release **1100 / 657 / 393 / 235 / 140 / 84 / 50 ms** at attack 20 µs | 7 (one shared corner) |
+
+Optional, not fit data: one **SLAM** bounce at ratio 4, attack 126 µs, release
+235 ms. We model nothing like it; capture it only if you are curious what it is.
 
 Sweeping the **hold length** is what separates the release tail from the main
 release: a single time constant recovers identically after every hold, and a
@@ -195,10 +366,10 @@ two-stage network does not. ⚠ It is also the check that caught a mislabelled
 LA-2A capture — a release trace *bit-identical* after 50 ms and 10 s cannot be a
 photocell, and that signature is how an 1176 got into the LA-2A corpus.
 
-### `frequency.wav` — hold-out (1 bounce)
+### `frequency.wav` — hold-out, 1 bounce each
 
 57.0 s. The same −12 dBFS step at 100 / 400 / 1000 / 4000 / 10000 Hz. Ratio 4,
-Input 50, attack 1, release 7.
+Input I3, attack slowest, release fastest.
 
 ⚠ **HOLD-OUT, NOT FIT DATA, AND IT MUST STAY THAT WAY.** The hardware's detector
 is broadband and ours models it that way, so the settled reduction has to be
@@ -206,24 +377,42 @@ is broadband and ours models it that way, so the settled reduction has to be
 assumption baked into the model. If a reference ducks 100 Hz harder than 4 kHz,
 no retuning of the taper or the knee can reproduce it — it would mean the
 detector needs a filter, not that a constant is wrong. Keeping it out of the fit
-is the only thing that lets it answer that. (The LA-2A's side-chain turned out
-to be HF-tilted by 2.5 dB, and ours tilted the other way. Nobody guessed it.)
+is the only thing that lets it answer that. (The LA-2A's side-chain turned out to
+be HF-tilted by 2.5 dB, and ours tilted the other way. Nobody guessed it.)
 
-### `thd.wav` — distortion (3 bounces)
+⚠ **FETish's sidechain HPF has no bypass** — 20 Hz is the floor, so its detector
+is not perfectly broadband even at the neutral setting. A one-pole at 20 Hz costs
+about **0.17 dB at the 100 Hz probe**, which is below anything this test is
+looking for, but note it rather than discovering it later. (Its HPF is also a
+direct counterpart to our `scHpfHz`, so it is worth its own small sweep once the
+main matrix is in.)
 
-26.6 s. Five 3 s tones at 1 kHz: −30, −24, −18, −12, −6 dBFS. Ratio 4, attack 1,
-release 7. Input **20 / 50 / 80**.
+### `thd.wav` — distortion, 3 bounces each
 
-⚠ **THE AXIS IS GAIN REDUCTION, NOT INPUT LEVEL.** THD against input level
-cannot tell a gain-cell nonlinearity from an output-amp one. THD against dB of
-GR can. Record the plugin's GR meter reading for each tone at each Input
-position — **that is the x-axis**, and without it these three bounces measure
-the wrong thing.
+26.6 s. Five 3 s tones at 1 kHz: −30, −24, −18, −12, −6 dBFS. Ratio 4, attack
+slowest, release fastest. Input at **I1 / I3 / I4**.
 
-⚠ **WATCH FOR THE REFERENCE CLIPPING AT INPUT 80.** A −6 dBFS tone with the
-Input knob up drives the audio path hot; if the output exceeds 0 dBFS, bring it
-back with **Output**, which sits after the FET and therefore does not change
-harmonic content measured in dBc. Note the trim you used.
+⚠ **THE AXIS IS GAIN REDUCTION, NOT INPUT LEVEL.** THD against input level cannot
+tell a gain-cell nonlinearity from an output-amp one. THD against dB of GR can.
+**Record the plugin's GR meter for each tone at each Input position — that is the
+x-axis**, and without it these bounces measure the wrong thing.
+
+⚠ **WATCH FOR CLIPPING AT I4.** A −6 dBFS tone with the Input up drives the audio
+path hot. If the output exceeds 0 dBFS, bring it back with **Output** (CLA-76:
+or **Trim**), which sits after the FET and therefore does not change harmonic
+content measured in dBc. **Note the trim you used.** On FETish, per Finding 1,
+this is less likely to bite — which is itself a check on the compensation.
+
+### Totals
+
+| | CLA-76 | FETish |
+|---|---|---|
+| null test | 4 | **5** |
+| stairs | 20 | 16 |
+| bursts | 14 | 13 |
+| frequency | 1 | 1 |
+| thd | 3 | 3 |
+| **total** | **42** | **38** |
 
 ---
 
@@ -235,15 +424,23 @@ repo-wide, so no licensed audio reaches the repo.
 Name each file for its cell and keep a log beside them:
 
 ```
-<reference>_<stimulus>_<ratio>_in<input>_a<attack>_r<release>.wav
+<reference>_<stimulus>_<ratio>_<inputPos>_a<attack>_r<release>.wav
 
-fetish_stairs_r8_in60_a1_r7.wav
-cla76_bursts_r4_in50_a3_r4.wav
+fetish_stairs_r8_I3_a800us_r50ms.wav
+cla76_bursts_rALL_I3_a4_r4.wav
+cla76_stairs_r4_I1_a1_r7.wav
 ```
 
-Per capture, log: reference and version, model/component variant, every knob
-position, **the GR meter reading**, the Output trim if any, session rate, and
-whether delay compensation was on. Provenance is part of the measurement.
+Per capture, log: reference and version; **Rev / component variant**; every knob
+position **as the plugin displays it** (the Input readouts for I1–I4 are data,
+not bookkeeping — see "Choosing the Input positions"); **the GR meter reading**;
+the Output or Trim used, if any; session rate; and whether delay compensation was
+on.
+
+⚠ **Log the neutral controls too, per reference, at least once** — Auto makeup,
+Analog, Mix, Trim, SLAM, sidechain. "It was off" recorded nowhere is
+indistinguishable later from "nobody checked". Provenance is part of the
+measurement, and this repo has lost eight captures to it once already.
 
 ---
 
@@ -299,10 +496,20 @@ Not yet built, deliberately — the recovery is proved against a kernel with kno
 constants before it is pointed at one whose constants are not.
 
 1. Fitters for each plan, matched-measurement as above.
-2. A real-program hold-out: a narration dry/wet pair through both references,
+2. ⚠ **All-buttons-in is a single-reference fit and must be labelled one.**
+   FETish has no such mode (SLAM is a different thing), so all seven `ALL_*`
+   constants can only come from CLA-76, with no hold-out and no second opinion.
+   That is the weakest result this exercise will produce; it does not get
+   presented alongside the two-reference numbers as though it were one of them.
+3. ⚠ **Check the fixed threshold before fitting the knees.** FETish's manual says
+   compression starts at a higher input as the ratio climbs; our model holds
+   `THRESHOLD_DBFS` fixed across all four and varies only the knee. If the
+   captures agree with the manual, that is a missing term in the model, and a
+   moving threshold misfits as a knee if you assume it is fixed.
+4. A real-program hold-out: a narration dry/wet pair through both references,
    scored on crest factor (scale-invariant, so immune to whatever makeup was
    dialled by hand), delivered ratio, and gain-envelope error. Never in the fit.
-3. Then, before anything ships: a `FET_LEGACY_PATCH` and a test pinning it —
+5. Then, before anything ships: a `FET_LEGACY_PATCH` and a test pinning it —
    a retune changes **every existing FET Punch render** and there is currently no
    way back. And the five factory presets in `src/audio/pluginPresets/fetPunch.js`
    are calibrated against today's kernel; the Scheps inheritance bug, which

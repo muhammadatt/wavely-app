@@ -1418,6 +1418,67 @@ closing it, against Analog Obsession FETish and Waves CLA-76.
   Fit one reference, hold the other out, **do not average them**, and label every
   capture with its reference and settings.
 
+- **⚗ STEP 0 (CONTROL PARITY) IS DONE, AND IT MOVED FOUR THINGS.** Both
+  references read off their own panels and manuals. **(1) FETish's Input is
+  INTERNALLY COMPENSATED** — "you don't have to reduce volume while you boost
+  input" — so it is a **drive offset, not an input gain**, which is exactly the
+  distinction `dsp/inputAlign.js` already draws for OptoSmooth. Our Input (and
+  the hardware's) drives the detector *and* the audio path, and that interaction
+  is the unit's whole gain-staging feel. **FETish therefore cannot speak to our
+  Input's audio path at all**, only to the detector side, and ⚠ **the two
+  references will disagree on `stairs.wav` by construction** — expected, not a
+  bad capture. **(2) FETish HAS NO ALL-BUTTONS-IN.** Its "SLAM" is usable *with*
+  every ratio, so it is not the buttons ganged; all seven `ALL_*` constants can
+  only come from CLA-76, ⚠ **a single-reference fit with no hold-out**, which is
+  the weakest result this exercise will produce and must be labelled one.
+  **(3) FETish SAYS THE THRESHOLD MOVES WITH RATIO** — "with higher ratios,
+  compression will start at higher input gains" — where we hold `THRESHOLD_DBFS`
+  fixed at −18 and vary only `RATIO_KNEE_DB`. Plausible on real hardware (the
+  ratio buttons change the feedback network), directly measurable by the ratio
+  sweep, and ⚠ **a moving threshold misfits as a knee if you assume it is
+  fixed**. **(4) FETish'S BALLISTICS ARE CONTINUOUS WITH µs/ms READOUTS**, so the
+  knob goes straight to the time our dial produces and no interpolation is
+  assumed on either side — but ⚠ **its advertised 20–800 µs / 50–1100 ms are
+  IDENTICAL to our own endpoints because both quote the same datasheet.**
+  Agreement at the ends confirms nothing; what these captures can settle is the
+  taper between them, which `dialToSeconds` has never had checked.
+
+- **⚠ AND NEITHER PLUGIN'S PRINTED NUMBERS SURVIVED CONTACT.** FETish's Input
+  reads −96…0 dB where its manual says 0…60, and its Output reads 0…+36 where the
+  manual says −30…+30. CLA-76's Input and Output are documented "−inf…0" with
+  defaults of **30** and **18**, which are outside that range. Two plugins, three
+  mismatches. **Every printed dB, µs and ms is a knob position to be verified by
+  the capture, not a value to fit against** — the R37 precedent, where a knob
+  taken for an emphasis trimmer was a mix control, one level up.
+
+- **THE INPUT SWEEP IS NOW CHOSEN BY GAIN REDUCTION, NOT BY KNOB PERCENTAGE.**
+  The first matrix said "Input 20 / 40 / 60 / 80", which silently assumed our own
+  0–100 knob; neither reference has one, and CLA-76's readout is
+  self-contradictory. Positions are now picked to give ~2 / 6 / 12 / 18 dB of GR
+  on the −12 dBFS step, **with the readout logged** — which is also what the
+  collapse test needs, since the shift that collapses the four static curves is
+  the taper and the readouts are what it gets expressed in.
+
+- **CONTROLS THAT MUST BE NEUTRALISED, now concrete rather than generic.**
+  CLA-76: **Auto makeup OFF** (with it on, Output moves with Input and
+  `stairs.wav` measures compression and makeup summed into one curve, reading a
+  threshold that does not exist), **Analog OFF** (it adds hum and noise floor by
+  design, and lands in the recovered trace as gain that is not gain, worst at the
+  zero crossings where division is already ill-conditioned), Mix 100, Trim 0, and
+  ⚠ **Rev fixed** — Waves' own wording is that Bluey and Blacky differ in "gain
+  stages, **time constants**, and harmonic distortion", so they are two
+  ballistics, not two voicings. FETish: SLAM off, sidechain INT, HPF 20, MID GAIN
+  0, HF flat, Mix 100. ⚠ **FETish's sidechain HPF has no bypass** — 20 Hz is the
+  floor, costing ~0.17 dB at the 100 Hz probe, which is below what the detector
+  hold-out looks for but is noted rather than discovered later.
+
+- **THE NULL TEST GAINED A FIFTH BOUNCE AND IT IS THE MOST VALUABLE ONE.**
+  `thd.wav` at two Input positions with zero GR at both, FETish only: if the
+  output level is the same, the compensation is real and Finding 1 holds; if it
+  rises, the manual is wrong and FETish becomes a full reference for the Input
+  law after all. Either answer reshapes the matrix, for one bounce. Totals are
+  now **42 bounces for CLA-76 and 38 for FETish**.
+
 - **Not yet built:** the capture fitters. The recovery is proved against a
   kernel whose constants are known before it is pointed at one whose constants
   are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`

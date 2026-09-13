@@ -34,6 +34,17 @@
  * where it mattered. Label every capture with its reference and its settings.
  * Do not average the two references; fit one, hold the other out.
  *
+ * ⚠ AND THEY ARE NOT INTERCHANGEABLE — control parity found four structural
+ * differences before a single bounce. FETish's Input is INTERNALLY COMPENSATED
+ * (a drive offset, not an input gain), so it cannot speak to our Input's audio
+ * path; it has NO all-buttons-in mode, so all seven ALL_* constants can only
+ * come from CLA-76 and are a single-reference fit with no hold-out; its manual
+ * says the threshold MOVES with ratio where we hold it fixed; and its
+ * ballistics are continuous, which is better, except that its advertised
+ * endpoints are identical to ours because both quote the same datasheet.
+ * `docs/fet1176_capture_protocol.md` has all four and what each does to the
+ * matrix.
+ *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT EACH PLAN MEASURES, AND WHY IT IS SEPARABLE FROM THE OTHERS
  *
