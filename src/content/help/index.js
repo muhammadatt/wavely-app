@@ -58,6 +58,7 @@
 import airBand from './air-band.js'
 import clipGainDeesser from './clip-gain-deesser.js'
 import fetPunch from './fet-punch.js'
+import fetPunchModula from './fet-punch-modula.js'
 import humRemover from './hum-remover.js'
 import loudness from './loudness.js'
 import manualEq from './manual-eq.js'
@@ -71,12 +72,14 @@ import softClipper from './soft-clipper.js'
 import spectrumAnalyzer from './spectrum-analyzer.js'
 import inflator from './inflator.js'
 import vocalSaturation from './vocal-saturation.js'
+import vocalSaturationModula from './vocal-saturation-modula.js'
 import voicerx from './voicerx.js'
 
 export const HELP = {
   'air-band': airBand,
   'clip-gain-deesser': clipGainDeesser,
   'fet-punch': fetPunch,
+  'fet-punch-modula': fetPunchModula,
   'hum-remover': humRemover,
   loudness,
   'manual-eq': manualEq,
@@ -90,6 +93,7 @@ export const HELP = {
   'spectrum-analyzer': spectrumAnalyzer,
   'inflator': inflator,
   'vocal-saturation': vocalSaturation,
+  'vocal-saturation-modula': vocalSaturationModula,
   voicerx,
 }
 

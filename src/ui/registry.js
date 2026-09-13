@@ -7,6 +7,7 @@ import PresetsPanel from '../components/panels/PresetsPanel.vue'
 
 import LA2AModal from '../components/panels/LA2AModal.vue'
 import FET1176Modal from '../components/panels/FET1176Modal.vue'
+import FET1176ModulaModal from '../components/panels/FET1176ModulaModal.vue'
 import SoftClipperModal from '../components/panels/SoftClipperModal.vue'
 import SchepsModal from '../components/panels/SchepsModal.vue'
 import AirBandModal from '../components/panels/AirBandModal.vue'
@@ -18,6 +19,7 @@ import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
+import VocalSaturationModulaWindow from '../components/panels/windows/VocalSaturationModulaWindow.vue'
 import InflatorWindow from '../components/panels/windows/InflatorWindow.vue'
 import NoiseReductionWindow from '../components/panels/windows/NoiseReductionWindow.vue'
 import RemoveSilenceWindow from '../components/panels/windows/RemoveSilenceWindow.vue'
@@ -272,6 +274,23 @@ export const OPERATIONS = [
     component: FET1176Modal,
   },
   {
+    // UI EVALUATION DUPLICATE. The same plugin — same composable, same
+    // singleton state, same kernel — behind the "Modula" faceplate from the
+    // Plugin UI Kit design project, so the two faces can be compared on the
+    // same audio before any faceplate is replaced. Remove this entry (and the
+    // component) once that decision is made.
+    id: 'fet-punch-modula',
+    label: 'FET Punch · Modula',
+    desc: 'FET Punch in the Modula faceplate (UI evaluation)',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'fet',
+    keywords: ['1176', 'compressor', 'fet', 'punch', 'modula', 'ui', 'design'],
+    requires: 'selection',
+    surface: 'window',
+    component: FET1176ModulaModal,
+  },
+  {
     // Filed under Dynamics, ahead of the compressors in the panel: the whole
     // point is to run before them, taming plosive peaks so they don't slip
     // past a compressor's attack and get amplified by makeup gain.
@@ -315,6 +334,20 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: VocalSaturationWindow,
+  },
+  {
+    // UI EVALUATION DUPLICATE — see the note on 'fet-punch-modula'. Same
+    // plugin, same singleton state, in the Modula faceplate.
+    id: 'vocal-saturation-modula',
+    label: 'Tube Saturation · Modula',
+    desc: 'Tube Saturation in the Modula faceplate (UI evaluation)',
+    category: 'effects',
+    group: 'Tone',
+    icon: 'saturation',
+    keywords: ['tube', 'saturation', 'modula', 'ui', 'design'],
+    requires: 'selection',
+    surface: 'window',
+    component: VocalSaturationModulaWindow,
   },
   {
     id: 'inflator',
