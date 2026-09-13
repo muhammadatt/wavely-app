@@ -220,13 +220,19 @@ test('⚠ each stage must be aligned at ITS OWN input, not at the section\'s', (
    *
    * So the solve cannot measure once at the front. It has to render the head
    * stage by stage and measure where each stage actually sits.
+   *
+   * ⚠ SQUASH IS PINNED AT 40 HERE, which was the kernel default when these
+   * figures were measured; the shipping default has since been recalibrated to
+   * 33 on real narration. The finding is about where the alignment is taken,
+   * not how deep the layer is, so the depth is held fixed rather than tracking
+   * a default that can move.
    */
   const x = speech(6, -6)
   const fromSectionInput = processDynamicsBuffer([x], SR, {
-    mix: 1, clipThresholdDb: CLIP_DB, fetAlignDb: -1.69, optoAlignDb: -1.69,
+    mix: 1, clipThresholdDb: CLIP_DB, squash: 40, fetAlignDb: -1.69, optoAlignDb: -1.69,
   })
   const fromOwnInput = processDynamicsBuffer([x], SR, {
-    mix: 1, clipThresholdDb: CLIP_DB, fetAlignDb: -1.12, optoAlignDb: 4.42,
+    mix: 1, clipThresholdDb: CLIP_DB, squash: 40, fetAlignDb: -1.12, optoAlignDb: 4.42,
   })
 
   assert.ok(fromSectionInput.metering.opto.peak < 0.6,

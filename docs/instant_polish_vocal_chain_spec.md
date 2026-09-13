@@ -398,6 +398,7 @@ one pass, not two independent ones.
 ⚠ And 2.98 dB is itself evidence for what this spec already predicted: **`squash:
 40` does not transfer.** Scheps lands 7.64 dB at that value; here the cell sees a
 signal already clipped and already FET-compressed, so there is less left to grab.
+The recalibration below puts a number on it: **33**.
 
 ### ⚠ The crest ladder was wrong. Three devices, three statistics.
 
@@ -419,12 +420,39 @@ explain any of this), and measured:
 onsets through. At squash 100 it pulls the body down 19.7 dB while the peak
 falls 8.2. A compressor that reduced crest would be a different compressor.
 
-⚠ **And its knob is not monotonic in level variance either — it has a minimum.**
-Block-level spread after the FET: squash 30 → 2.605, 40 → 2.326, **50 → 2.082**,
-60 → 2.093, 70 → 2.148, 80 → 2.225. Past ~50 it gets *worse*, because the
-transients it lets through start dominating the blocks it is evening out. So the
-opto is a bounded **search**, not a bisection, and "more squash" is not "more
-levelling".
+⚠ **AND THE "SPREAD MINIMUM" THAT ONCE DROVE THIS KNOB WAS AN ARTIFACT OF THE
+SYNTHETIC BENCH.** On the generator, block spread after the FET ran 2.605 / 2.326
+/ **2.082** / 2.093 / 2.148 / 2.225 at squash 30–80 — a real interior minimum, and
+the solve searched for it. On 35 s of real narration there is no minimum and no
+improvement to find: spread after the FET is 3.663, and the opto only raises it —
+**4.774 at squash 0** (the Pultec pair alone, before the cell does anything), 4.771
+at 15, with the bare opto running 3.666 → 5.179 at 40 → 6.275 at 60. The bench's
+minimum came from its slow sinusoidal amplitude envelope, which a ~10 ms attack
+genuinely can flatten; a talker's level moves between syllables, not across
+seconds. **Levelling is not this device's job here — that is what LEVEL is for.**
+
+**So squash is a calibrated constant scaled by Density, not a search.** The anchor
+is the only calibrated one in the codebase for how deep a parallel opto layer sits:
+Scheps' own tuned layer, peak gain reduction 7.64 dB / average 1.23. Measured on
+the same narration at the opto's own-input alignment:
+
+| squash | 30 | 32 | **33** | 34 | 36 | 40 |
+|---|---|---|---|---|---|---|
+| GR peak (dB) | 6.51 | 7.18 | **7.52** | 7.86 | 8.53 | 9.87 |
+| GR avg (dB) | 0.94 | 1.12 | **1.23** | 1.34 | 1.61 | 2.27 |
+
+⚠ **Scheps reaches that same operating point at 40, this chain at 33** — its cell
+sees the raw file, this one sees a signal already clipped and already
+FET-compressed, so there is less left to grab. The spec predicted the knob value
+would transfer; it does not, and the gap is now quantified. Podcast (40) and
+Natural (26) are that anchor moved deliberately, by ear, not measured.
+
+⚠ **CALIBRATED AT 48 kHz ON A PRODUCT THAT RESAMPLES TO 44.1.** Re-declaring the
+same samples at 44.1 kHz moves squash 33 to GR peak 6.96 / avg 1.02 — about half a
+dB. That probe time-stretches the content, so it *bounds* the sensitivity rather
+than measuring it; a real 44.1 kHz resample should re-check before this is treated
+as settled. `npm run dynamics:calibrate` reproduces the whole table against any
+file.
 
 **What the solve does instead** — each device on the statistic it controls:
 
@@ -432,7 +460,7 @@ levelling".
 |---|---|---|---|
 | Soft Clip | crest (true peak − body) | bisect threshold | ⚠ ≤ 3 dB depth, hard |
 | FET Punch | impact (p99.9 − body) | bisect drive | — |
-| Opto | block-level spread | bounded search for the minimum | voicing's `squashMax` |
+| Opto | — (calibrated depth) | voicing's `squash` × Density, aligned at its own input | — |
 
 The clipper's cap is enforced on what it *actually did*, and the solve returns
 the last feasible threshold rather than the bracket midpoint — the midpoint

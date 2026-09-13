@@ -37,7 +37,8 @@
     "la2a:taper:selftest": "node scripts/la2a-ballistics.mjs --taper --selftest",
     "smoke": "node scripts/panel-smoke.mjs",
     "la2a:align": "node scripts/la2a-input-align.mjs",
-    "fet:align": "node scripts/la2a-input-align.mjs --fet"
+    "fet:align": "node scripts/la2a-input-align.mjs --fet",
+    "dynamics:calibrate": "node scripts/dynamics-calibrate.mjs"
   },
   "dependencies": {
     "uuid": "^13.0.0",

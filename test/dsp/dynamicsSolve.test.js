@@ -91,24 +91,36 @@ test('⚠ the three devices control three different statistics', () => {
     `peak-to-body should fall: ${before.impactDb.toFixed(2)} -> ${after.impactDb.toFixed(2)}`)
 })
 
-test('⚠ the opto is a bounded search because its curve has a minimum', () => {
+test('⚠ the opto is a calibrated depth, NOT a search — the minimum was synthetic', () => {
   /**
-   * Measured block spread against squash, after the FET:
-   *   30: 2.605  40: 2.326  50: 2.082  60: 2.093  70: 2.148  80: 2.225
+   * An earlier version scanned squash for the block-spread minimum, on a
+   * synthetic bench that showed one (2.605 / 2.326 / 2.082 / 2.093 / 2.148 /
+   * 2.225 at squash 30-80). ⚠ THAT MINIMUM DOES NOT EXIST ON SPEECH. On 35 s of
+   * real narration, spread after the FET is 3.663, and the opto only ever makes
+   * it worse: 4.774 at squash 0 (the Pultec pair alone), 4.771 at 15, and the
+   * bare opto runs 3.666 -> 5.179 at 40 -> 6.275 at 60. The synthetic minimum was
+   * an artifact of the generator's slow sinusoidal amplitude envelope, which the
+   * opto's ~10 ms attack could actually flatten; a real talker's level moves
+   * between syllables, not across seconds.
    *
-   * Past ~50 it gets WORSE, because the transients the opto lets through start
-   * dominating the blocks it is trying to even out. A bisection assumes a slope
-   * and would run to whichever end it was pointed at.
+   * So squash is a calibrated constant scaled by Density, anchored on the gain
+   * reduction Scheps' own layer was tuned to (peak 7.64 / avg 1.23). What the
+   * solve still owes is that the knob MEANS the same thing on every file, which
+   * is `optoAlignDb`, not a scan.
    */
   const x = [narration(16, -6)]
-  const { report } = solveDynamics(x, SR, { density: 100, voicing: 'podcast' })
-  // The search must land strictly inside its allowed range, not on an endpoint —
-  // an endpoint is what a monotonic assumption would produce.
-  assert.ok(report.opto.bestSquash > 0, 'the search found nothing to do')
-  assert.ok(report.opto.bestSquash < VOICINGS.podcast.squashMax,
-    `the search hit its ceiling (${report.opto.bestSquash}), which a minimum should not`)
-  assert.ok(report.opto.bestSpreadDb < report.afterFet.spreadDb,
-    'the chosen squash should be an improvement on doing nothing')
+  const { params, report } = solveDynamics(x, SR, { density: 100, voicing: 'podcast' })
+
+  assert.equal(report.opto.calibratedSquash, VOICINGS.podcast.squash)
+  assert.equal(report.opto.squash, VOICINGS.podcast.squash)
+  assert.equal(params.squash, VOICINGS.podcast.squash)
+  // Density scales the depth; it is not re-derived from the audio.
+  const half = solveDynamics(x, SR, { density: 50, voicing: 'podcast' })
+  assert.ok(Math.abs(half.params.squash - VOICINGS.podcast.squash * 0.5) < 1e-9,
+    `Density should scale the calibrated depth: ${half.params.squash}`)
+  // The layer must actually be doing something at the calibrated depth.
+  assert.ok(report.opto.peakDb > 1,
+    `the calibrated depth should produce real gain reduction: ${report.opto.peakDb}`)
 })
 
 test('⚠ each stage is aligned at its own input, not at the section\'s', () => {
@@ -222,5 +234,7 @@ test('silence and near-silence are solved without crashing', () => {
   assert.ok(Number.isFinite(params.fetDrive))
   assert.ok(Number.isFinite(params.squash))
   assert.equal(params.correlation, 0)
-  assert.equal(report.opto.bestSquash, 0)
+  // Nothing to grab, so the calibrated depth is still dialled but idle.
+  assert.equal(report.opto.squash, VOICINGS.audiobook.squash)
+  assert.ok(report.opto.peakDb < 0.5, `silence should not be compressed: ${report.opto.peakDb}`)
 })

@@ -199,15 +199,18 @@ export const DYNAMICS_KERNEL_DEFAULTS = {
   /**
    * The opto's Peak Reduction, 0-100.
    *
-   * ⚠ 40 IS SCHEPS' CALIBRATED DEFAULT AND IT DOES NOT TRANSFER. There the cell
-   * sees the raw signal through the Pultec pre-emphasis; here it sees a signal
-   * already clipped and already FET-compressed, and the pre stage now shapes
-   * only its side-chain because the clip and the FET sit AHEAD of the sandwich
-   * rather than inside it. That constant has been recalibrated twice for
-   * exactly this kind of inheritance. This is a placeholder carried over so the
-   * kernel runs; it is the first thing to measure on real narration.
+   * ⚠ 33, NOT SCHEPS' 40, AND THE NUMBER IS ANCHORED ON A MEASURED OPERATING
+   * POINT RATHER THAN COPIED. Scheps' calibrated layer depth is peak gain
+   * reduction 7.64 dB / average 1.23; measured on real narration through this
+   * chain's head, at the opto's own-input alignment, squash 33 gives 7.52 /
+   * 1.23 and 40 gives 9.87 / 2.27. Scheps needs more knob because its cell sees
+   * the raw signal; here it sees one already clipped and already FET-compressed,
+   * so there is less left to grab.
+   *
+   * ⚠ THIS IS THE FALLBACK ONLY. In normal use the solve sets it from the
+   * voicing, scaled by Density — see `VOICINGS` in dynamicsSolve.js.
    */
-  squash: 40,
+  squash: 33,
   optoAlignDb: 0, // measured
 
   // ── Blend and output ─────────────────────────────────────────────────────

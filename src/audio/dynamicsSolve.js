@@ -24,15 +24,32 @@
  * the peak falls 8.2. A compressor that reduced crest would be a different
  * compressor; this one reduces LEVEL VARIANCE, which is what it is for.
  *
- * ⚠ AND ITS KNOB IS NOT MONOTONIC IN THAT EITHER — IT HAS A MINIMUM. Measured
- * on material with phrase-to-phrase level variation, block-level spread:
+ * ⚠ AND IT IS NOT A LEVELLER IN THIS CHAIN AT ALL — MEASURED ON REAL NARRATION,
+ * WHICH OVERTURNED HOW THIS SOLVE FIRST WORKED.
  *
- *   input 3.653 -> after FET 2.647 -> squash 30: 2.605, 40: 2.326,
- *   50: 2.082, 60: 2.093, 70: 2.148, 80: 2.225
+ * The opto was originally SEARCHED for the squash that minimised block-level
+ * spread, on synthetic material where that curve had a clean minimum at ~50.
+ * On 35 s of real narration there is no minimum and no improvement anywhere:
  *
- * Past ~50 it gets WORSE, because the transients it lets through start
- * dominating the block levels it is trying to even out. So the opto is a
- * bounded SEARCH, not a bisection, and "more squash" is not "more levelling".
+ *   post-FET spread          3.663 dB
+ *   opto at squash 0         4.774      <- worse before it does anything
+ *   opto at squash 15        4.771      <- the "best" the search could find
+ *   opto at squash 50        5.660
+ *
+ * Two causes, both real. The Pultec POST stage's low boost dominates the
+ * statistic — pre-only reads 2.609 against 5.449 for pre+post, with no opto in
+ * either — and the opto itself raises spread monotonically from ~20 upward
+ * because it rides the body and lets onsets through. The synthetic minimum was
+ * an artifact of a stimulus carrying a slow sinusoidal amplitude envelope,
+ * which is exactly the long-term variation an opto CAN track and is not what
+ * narration's variance looks like.
+ *
+ * ⚠ SO SQUASH IS A CALIBRATED CONSTANT, NOT A SEARCH. Evening out phrase-to-
+ * phrase level is the LEVEL section's job and it does it far better (spread sd
+ * 5.75 -> 1.60 where this cannot improve it at all). What the opto contributes
+ * here is a parallel glue layer, whose depth is a character decision — and the
+ * quantity that expresses it is the wet path's gain reduction, which
+ * `optoAlignDb` now makes mean the same thing on every file.
  *
  * ── WHAT THIS SOLVE DOES INSTEAD ────────────────────────────────────────────
  *
@@ -40,7 +57,7 @@
  *
  *   Soft Clip   crest            bisect threshold, hard-capped depth
  *   FET Punch   p99.9 - body     bisect drive
- *   Opto        block spread     bounded search for the minimum
+ *   Opto        (not solved)     a calibrated depth per voicing, scaled by Density
  *
  * ⚠ AND THE HEAD IS RENDERED STAGE BY STAGE, WHICH IS NOT AN IMPLEMENTATION
  * DETAIL. Both compressors drive a fixed internal threshold, so each needs its
@@ -265,16 +282,44 @@ function bisect({ lo, hi, target, measure, decreasing, passes = BISECT_PASSES })
  *
  *   clipShaveDb  how much crest the clipper may take (its hard cap is separate)
  *   impactDb     the peak-to-body the FET is asked to reach
- *   squashMax    how far the opto's search is allowed to run
+ *   squash       the opto block's calibrated layer depth
  *   mix          the opto block's blend
  *
  * Density scales the first three from "do nothing" toward these.
  */
 export const VOICINGS = Object.freeze({
-  audiobook: { clipShaveDb: 2.0, impactDb: 8.5, squashMax: 55, mix: 0.30 },
-  podcast: { clipShaveDb: 3.0, impactDb: 7.5, squashMax: 65, mix: 0.40 },
-  natural: { clipShaveDb: 1.0, impactDb: 9.5, squashMax: 45, mix: 0.20 },
+  audiobook: { clipShaveDb: 2.0, impactDb: 8.5, squash: 33, mix: 0.30 },
+  podcast: { clipShaveDb: 3.0, impactDb: 7.5, squash: 40, mix: 0.40 },
+  natural: { clipShaveDb: 1.0, impactDb: 9.5, squash: 26, mix: 0.20 },
 })
+
+/**
+ * ⚠ THE SQUASH VALUES ARE ANCHORED ON A MEASURED OPERATING POINT, NOT COPIED
+ * FROM SCHEPS' KNOB. Scheps' calibrated layer depth is peak gain reduction 7.64
+ * dB / average 1.23 on its own wet path — a number arrived at by listening, and
+ * the only calibrated reference in this codebase for how deep a parallel opto
+ * layer should sit. Measured on 35 s of real narration through this chain's
+ * head, at the opto's own-input alignment:
+ *
+ *   squash   30     32     33     34     36     40
+ *   GR peak  6.51   7.18   7.52   7.86   8.53   9.87
+ *   GR avg   0.94   1.12   1.23   1.34   1.61   2.27
+ *
+ * so 33 reproduces that operating point here. Scheps reaches it at 40 because
+ * its cell sees the raw signal; here it sees one already clipped and already
+ * FET-compressed, so there is less left to grab — the transfer this spec
+ * predicted would not hold, quantified.
+ *
+ * Podcast and Natural are that anchor moved deliberately, not measured: 40 for
+ * a denser layer, 26 for a lighter one.
+ *
+ * ⚠ CALIBRATED AT 48 kHz ON A PRODUCT THAT RESAMPLES TO 44.1. Re-declaring the
+ * same samples at 44.1 kHz moves the same squash to GR peak 6.96 / avg 1.02 —
+ * about half a dB. That probe time-stretches the content, so it bounds the
+ * sensitivity rather than measuring it; a real 44.1 kHz resample should re-check
+ * this before the number is treated as settled. `npm run dynamics:calibrate`
+ * reproduces the whole table against any file.
+ */
 
 /**
  * ⚠ THE CLIPPER'S HARD CAP, AND THE ONE RULE THAT OVERRIDES THE MACRO.
@@ -369,32 +414,16 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
   const dry = fetRun.out
   const afterFet = measureDynamics(dry, sampleRate)
 
-  // ── 3. Opto: aligned at ITS OWN input, then SEARCHED for least spread ────
+  // ── 3. Opto: aligned at ITS OWN input, then set to its calibrated depth ──
   const optoAlignDb = inputAlignDbFor(dry, sampleRate)
   /**
-   * ⚠ A SCAN, NOT A BISECTION, because the spread curve has a minimum rather
-   * than a slope — see the header. Coarse then fine: the curve is smooth, and a
-   * render per probe is the cost here.
+   * ⚠ NO SEARCH. This used to scan squash for the minimum block-level spread,
+   * which measured well on synthetic material and does nothing on real
+   * narration — see the header. Density scales the voicing's calibrated depth,
+   * so Density 0 really is "leave it alone" and the knob still means something
+   * in between.
    */
-  const squashCeiling = voicing.squashMax
-  const probe = (sq) => levelSpreadDb(
-    renderWet(dry, sampleRate, { ...patch, squash: sq, optoAlignDb }).out, sampleRate,
-  )
-  let bestSquash = 0
-  let bestSpread = probe(0)
-  for (let sq = 10; sq <= squashCeiling; sq += 10) {
-    const v = probe(sq)
-    if (v < bestSpread) { bestSpread = v; bestSquash = sq }
-  }
-  for (let sq = Math.max(0, bestSquash - 8); sq <= Math.min(squashCeiling, bestSquash + 8); sq += 4) {
-    const v = probe(sq)
-    if (v < bestSpread) { bestSpread = v; bestSquash = sq }
-  }
-  /**
-   * Density scales toward the minimum rather than jumping to it, so the macro
-   * still means something and Density 0 really is "leave it alone".
-   */
-  const squash = bestSquash * density
+  const squash = voicing.squash * density
   const wetRun = renderWet(dry, sampleRate, { ...patch, squash, optoAlignDb })
   const wet = wetRun.out
 
@@ -423,7 +452,14 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
       afterWet: measureDynamics(wet, sampleRate),
       clip: { thresholdDb: clipThresholdDb, depthDb: clipDepthDb, capped: clipCapped },
       fet: { drive: fetDrive, alignDb: fetAlignDb, peakDb: fetRun.metering.maxGainReductionDb, targetImpactDb: targetImpact },
-      opto: { squash, alignDb: optoAlignDb, bestSquash, bestSpreadDb: bestSpread, peakDb: wetRun.metering.maxGainReductionDb },
+      opto: {
+        squash,
+        alignDb: optoAlignDb,
+        peakDb: wetRun.metering.maxGainReductionDb,
+        avgDb: wetRun.metering.avgGainReductionDb,
+        /** The depth this voicing is calibrated to, before Density scales it. */
+        calibratedSquash: voicing.squash,
+      },
       blend,
       /**
        * ⚠ SURFACED, NOT HIDDEN. The opto raises peak-to-body by design — it
