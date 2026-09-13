@@ -47,6 +47,13 @@ import { DelayLine } from './dsp/oversample.js'
 import { BiquadCascade, highpass, lowpass } from './dsp/biquad.js'
 import { pultecSections, PULTEC_STAGES } from './dsp/pultec.js'
 import { clamp, finite, mixGains } from './dsp/parallelMix.js'
+/**
+ * ⚠ THE MATCHING BAND MOVED TO `dsp/speechBand.js`, shared with the vocal
+ * chain's dynamics section, which matches two paths the same way and for the
+ * same reason — a Pultec stage either side of the compressor. Imported, not
+ * forwarded, because `speechWeight` is used locally below.
+ */
+import { speechWeight, SPEECH_BAND_HZ } from './dsp/speechBand.js'
 
 export { mixGains }
 
@@ -486,10 +493,6 @@ function renderWetPath(channelData, sampleRate, params, wetTrimDb = 0) {
   return out
 }
 
-/**
- * Speech band, in Hz, for the trim measurement — see `speechWeight`.
- */
-const SPEECH_BAND_HZ = [300, 4000]
 
 /**
  * Band-limit a copy of a signal to the speech range, for measurement only.
@@ -511,17 +514,6 @@ const SPEECH_BAND_HZ = [300, 4000]
  * where the ear decides loudness for a voice, and it is explicable in one line —
  * which a weighting curve fitted to this one recording would not be.
  */
-function speechWeight(x, sampleRate) {
-  const cascade = new BiquadCascade(2, 1)
-  cascade.setSections([
-    highpass(sampleRate, SPEECH_BAND_HZ[0], Math.SQRT1_2),
-    lowpass(sampleRate, Math.min(SPEECH_BAND_HZ[1], sampleRate * 0.45), Math.SQRT1_2),
-  ])
-  const y = new Float32Array(x.length)
-  cascade.process(x, y, x.length, 0)
-  return y
-}
-
 /**
  * Level of the LOUD PARTS: the 95th percentile of 100 ms block levels, in dB.
  *

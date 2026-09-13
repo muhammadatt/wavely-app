@@ -222,6 +222,71 @@ export const DYNAMICS_KERNEL_DEFAULTS = {
   outputDb: 0, // manual trim on the summed output
 }
 
+/**
+ * ── THE STAGE PARAM BUILDERS ────────────────────────────────────────────────
+ *
+ * ⚠ EXPORTED, AND THE SOLVE USES THEM RATHER THAN REBUILDING THE MAPPING. The
+ * solve has to render the head STAGE BY STAGE — see the note at the top of this
+ * file on staged alignment — which means it constructs the same embedded
+ * kernels this composite does. If it spelled their params out again, the pinned
+ * decisions above (`limiter: 0`, `thresholdMode: 'fixed'`, `r37: 0`,
+ * `lookaheadMs: 0`, no ceiling) would exist in two places, and the solve would
+ * quietly be measuring a different compressor from the one that renders.
+ */
+
+/** True when a clip threshold has been measured; absent bypasses the stage. */
+export function clipEnabled(p) {
+  return Number.isFinite(p.clipThresholdDb)
+}
+
+export function clipParamsFor(p) {
+  return {
+    ...CLIP_FIXED,
+    shape: p.clipShape ?? DYNAMICS_KERNEL_DEFAULTS.clipShape,
+    fixedThresholdDb: finite(p.clipThresholdDb, -10, -60, 0),
+  }
+}
+
+export function fetParamsFor(p) {
+  return {
+    ...FET_FIXED,
+    inputDrive: finite(p.fetDrive, DYNAMICS_KERNEL_DEFAULTS.fetDrive, 0, 100),
+    outputGainDb: 0,
+    attack: finite(p.fetAttack, DYNAMICS_KERNEL_DEFAULTS.fetAttack, 1, 7),
+    release: finite(p.fetRelease, DYNAMICS_KERNEL_DEFAULTS.fetRelease, 1, 7),
+    ratio: p.fetRatio ?? DYNAMICS_KERNEL_DEFAULTS.fetRatio,
+    fetDrive: finite(p.fetSat, DYNAMICS_KERNEL_DEFAULTS.fetSat, 0, 1),
+    scHpfHz: finite(p.fetScHpfHz, DYNAMICS_KERNEL_DEFAULTS.fetScHpfHz, 0, 400),
+    /**
+     * ⚠ DETECTOR-ONLY ON THIS UNIT — its Input knob is an attenuator on the
+     * audio path as well, so the alignment rides a separate coefficient. See
+     * `inputAlignDb` in fet1176Processor.js.
+     */
+    inputAlignDb: finite(p.fetAlignDb, 0, -60, 60),
+  }
+}
+
+export function optoParamsFor(p) {
+  return {
+    ...OPTO_FIXED,
+    peakReduction: finite(p.squash, DYNAMICS_KERNEL_DEFAULTS.squash, 0, 100),
+    // No makeup inside the block: the section's trim sits after the blend.
+    gainDb: 0,
+    oversample: p.oversample !== false,
+    inputAlignDb: finite(p.optoAlignDb, 0, -60, 60),
+  }
+}
+
+/** The Pultec pair the opto sits between, for a given character. */
+export function pultecPairFor(p, sampleRate) {
+  const character = PULTEC_STAGES[p.character]
+    ? p.character : DYNAMICS_KERNEL_DEFAULTS.character
+  return {
+    pre: pultecSections(sampleRate, character, 'pre'),
+    post: pultecSections(sampleRate, character, 'post'),
+  }
+}
+
 export class DynamicsKernel {
   constructor(sampleRate) {
     this.sampleRate = sampleRate
@@ -245,38 +310,12 @@ export class DynamicsKernel {
     const p = { ...this.params, ...partial }
     this.params = p
 
-    // ── Soft clip ──────────────────────────────────────────────────────────
     // Absent threshold means the stage is bypassed; see `clipThresholdDb`.
-    this.clipOn = Number.isFinite(p.clipThresholdDb)
-    this.clipper.setParams({
-      ...CLIP_FIXED,
-      shape: p.clipShape,
-      fixedThresholdDb: finite(p.clipThresholdDb, -10, -60, 0),
-    })
+    this.clipOn = clipEnabled(p)
+    this.clipper.setParams(clipParamsFor(p))
+    this.fet.setParams(fetParamsFor(p))
 
-    // ── FET ────────────────────────────────────────────────────────────────
-    this.fet.setParams({
-      ...FET_FIXED,
-      inputDrive: finite(p.fetDrive, 50, 0, 100),
-      outputGainDb: 0,
-      attack: finite(p.fetAttack, 4, 1, 7),
-      release: finite(p.fetRelease, 4, 1, 7),
-      ratio: p.fetRatio,
-      fetDrive: finite(p.fetSat, 0.35, 0, 1),
-      scHpfHz: finite(p.fetScHpfHz, 0, 0, 400),
-      /**
-       * ⚠ DETECTOR-ONLY ON THIS UNIT — its Input knob is an attenuator on the
-       * audio path as well, so the alignment rides a separate coefficient. See
-       * `inputAlignDb` in fet1176Processor.js.
-       */
-      inputAlignDb: finite(p.fetAlignDb, 0, -60, 60),
-    })
-
-    // ── Pultec pair around the opto ────────────────────────────────────────
-    const character = PULTEC_STAGES[p.character]
-      ? p.character : DYNAMICS_KERNEL_DEFAULTS.character
-    const pre = pultecSections(this.sampleRate, character, 'pre')
-    const post = pultecSections(this.sampleRate, character, 'post')
+    const { pre, post } = pultecPairFor(p, this.sampleRate)
     // Rebuilt rather than resized when the character changes: the two curves can
     // differ in section count, and a cascade's state is meaningless across a
     // topology change anyway.
@@ -289,15 +328,7 @@ export class DynamicsKernel {
     this.preEq.setSections(pre)
     this.postEq.setSections(post)
 
-    // ── Opto ───────────────────────────────────────────────────────────────
-    this.la2a.setParams({
-      ...OPTO_FIXED,
-      peakReduction: finite(p.squash, DYNAMICS_KERNEL_DEFAULTS.squash, 0, 100),
-      // No makeup inside the block: the section's trim sits after the blend.
-      gainDb: 0,
-      oversample: p.oversample !== false,
-      inputAlignDb: finite(p.optoAlignDb, 0, -60, 60),
-    })
+    this.la2a.setParams(optoParamsFor(p))
 
     this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)
     this._updateMix()

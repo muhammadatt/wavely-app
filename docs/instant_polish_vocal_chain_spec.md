@@ -378,20 +378,80 @@ one pass, not two independent ones.
 40` does not transfer.** Scheps lands 7.64 dB at that value; here the cell sees a
 signal already clipped and already FET-compressed, so there is less left to grab.
 
-### The crest ladder
+### ⚠ The crest ladder was wrong. Three devices, three statistics.
 
-Density sets a target crest via the voicing's trajectory. Allocation, in order:
+✓ **Solve landed** (`src/audio/dynamicsSolve.js`), and building it disproved the
+design above.
 
-| Device | Takes | Bound |
-|---|---|---|
-| LEVEL (upstream) | slow variance across voiced blocks | target ≈ 1 dB std dev |
-| Soft Clip | fixed shave of the spikes | ⚠ ≤ ~3 dB, hard |
-| FET Punch | the fast component | full strength |
-| Opto | the syllabic residue | scaled by the mix law |
+The ladder assumed one crest budget allocated across three devices. That only
+works if they all move the same number in the same direction. **They do not** —
+crest is `peak − gated body`, it is invariant under gain (so makeup cannot
+explain any of this), and measured:
 
-Each device reports what it actually did, and the panel prints all four. A solve
-that cannot reach the target reports the shortfall rather than pushing the
-clipper.
+| device, swept full range | peak | gated body | crest / impact |
+|---|---|---|---|
+| FET, drive 0→100 | −29.9 → −6.2 | −40.2 → −16.5 | impact 9.29 → **7.70** ↓ |
+| Opto, squash 0→100 | −10.5 → −18.5 | −21.4 → **−41.1** | crest 8.45 → **15.87** ↑ |
+
+⚠ **The opto increases peak-to-body, and that is the T4 working correctly.** Its
+~10 ms attack means it never catches transients — it rides the body and lets
+onsets through. At squash 100 it pulls the body down 19.7 dB while the peak
+falls 8.2. A compressor that reduced crest would be a different compressor.
+
+⚠ **And its knob is not monotonic in level variance either — it has a minimum.**
+Block-level spread after the FET: squash 30 → 2.605, 40 → 2.326, **50 → 2.082**,
+60 → 2.093, 70 → 2.148, 80 → 2.225. Past ~50 it gets *worse*, because the
+transients it lets through start dominating the blocks it is evening out. So the
+opto is a bounded **search**, not a bisection, and "more squash" is not "more
+levelling".
+
+**What the solve does instead** — each device on the statistic it controls:
+
+| Device | Statistic | Method | Bound |
+|---|---|---|---|
+| Soft Clip | crest (true peak − body) | bisect threshold | ⚠ ≤ 3 dB depth, hard |
+| FET Punch | impact (p99.9 − body) | bisect drive | — |
+| Opto | block-level spread | bounded search for the minimum | voicing's `squashMax` |
+
+The clipper's cap is enforced on what it *actually did*, and the solve returns
+the last feasible threshold rather than the bracket midpoint — the midpoint
+overshot to 3.06 dB against a 3.00 cap, and on a hard bound "close enough" is a
+bound that does not hold. When the cap binds, Density backs off and the report
+says so.
+
+**Measured, Density 0 → 100 on narration with phrase-level variation:** block
+spread 3.73 → 2.58 dB, impact 10.16 → 8.06 dB. ⚠ And crest *rises* 2.13 dB at
+full Density — the predicted trade, evenness bought with headroom, surfaced in
+the report as `crestRoseBy` because the delivery limiter downstream is where it
+is paid for.
+
+⚠ **Density 0 does not put the FET at drive 0**, and that is not a bug: its Input
+knob is an attenuator, so drive 0 is 24 dB down rather than a bypass. There is no
+off position; the honest answer is the drive at which it happens to do nothing
+(~28, about 1.3 dB of reduction).
+
+### ⚠ The blend must be measured on aligned paths
+
+A bug worth recording because it was invisible in everything anyone would check.
+The wet path carries the opto's oversampling latency and the kernel delays the
+dry side to match — but the solve correlated them **unaligned**. Measured
+`rho` 0.481 unaligned against 0.956 aligned, and `rho` shapes the blend's
+loudness compensation directly, so the wrong number makes Mix drift in level
+across its sweep — the exact failure the compensation exists to prevent.
+
+It surfaced only by accident: switching oversampling off for speed takes the
+opto's latency to zero, so the paths line up by coincidence. **Every solved knob
+was identical between the two runs** — only `rho` moved.
+
+### Solve cost
+
+Each bisect pass is a full render of the analysis window, so the caller must
+pass a **capped window**, not a whole chapter. Two measured savings: seven
+halvings rather than ten (finer than the panel's own step), and the solve renders
+with `oversample: false` — every solved value identical to three decimals, the
+FET render 261 ms → 81.5 ms. ⚠ That flag is a render overlay and never reaches
+the returned params; the audible path always oversamples. 18.4 s → 7.3 s on
+sixteen seconds of audio.
 
 ### ⚠ Constants that must be re-measured, not inherited
 
