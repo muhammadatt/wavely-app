@@ -2686,5 +2686,24 @@ if (typeof registerProcessor === 'function') {
     }
   }
 
-  registerProcessor('soft-clipper-processor', SoftClipperWorkletProcessor)
+  /**
+   * Guarded, because this module reaches a worklet scope by more than one
+   * route: its own loader, and as a dependency of the vocal chain's dynamics
+   * worklet, which composes SoftClipperKernel. Load both into one AudioContext and the
+   * second bundle's registration hits a name that is already taken and throws
+   * NotSupportedError — which would abort that whole module, taking the
+   * composite's processor with it over a duplicate nobody needed.
+   * Already-registered is the desired state, so swallow exactly that and
+   * nothing else.
+   *
+   * ⚠ THE GUARD IS NOT A LICENCE TO IMPORT ENTRY POINTS FREELY — see
+   * `test/dsp/workletEntryPoints.test.js`. It is half of what an allowlisted
+   * composition needs; the other half is a real structural reason to hold this
+   * kernel rather than copy it.
+   */
+  try {
+    registerProcessor('soft-clipper-processor', SoftClipperWorkletProcessor)
+  } catch (err) {
+    if (err?.name !== 'NotSupportedError') throw err
+  }
 }

@@ -4,7 +4,7 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness, autoLevelAnalyze
+ * voiceProfile, measureLoudness, autoLevelAnalyze, dynamicsSolve
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
@@ -15,6 +15,7 @@ import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 import { analyzeAutoLevel } from '../audio/dsp/autoLevel.js'
+import { solveDynamics } from '../audio/dynamicsSolve.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -93,9 +94,27 @@ self.onmessage = function (e) {
     case 'autoLevelAnalyze':
       autoLevelAnalyze(channelData, sampleRate, params)
       break
+    case 'dynamicsSolve':
+      dynamicsSolveOp(channelData, sampleRate, params)
+      break
     default:
       postReply({ type: 'error', message: `Unknown operation: ${type}` })
   }
+}
+
+/**
+ * The vocal chain dynamics section's solved knob positions for a region.
+ *
+ * ⚠ IT MUST RUN HERE. Every bisect pass renders the analysis window through a
+ * compressor kernel — roughly twenty-five renders per solve, measured at 7.3 s
+ * for sixteen seconds of audio. On the main thread that is seconds of dropped
+ * frames; the panel shows a busy state and waits.
+ *
+ * The reply is knob positions and a report of what each stage did. Every field
+ * is a plain number, so it structured-clones without a transfer list.
+ */
+function dynamicsSolveOp(channelData, sampleRate, params) {
+  postDone({ solution: solveDynamics(channelData, sampleRate, params) })
 }
 
 /**

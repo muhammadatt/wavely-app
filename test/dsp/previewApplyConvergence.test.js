@@ -19,6 +19,9 @@
  *     FET Punch    the release tail runs to 4.4 s (6.6 in all-buttons), so
  *                  bit-exactness would want ~40 taus — 176 s for a 2 s region.
  *                  Four taus, floored at 2 s, buys ~1e-4. See its test below.
+ *     Vocal chain  holds that FET, so it inherits the bound exactly. Its
+ *     dynamics     pre-roll is the FET's, NOT the opto's 2 s — the stage this
+ *                  section is "about" is not the slow one.
  *
  *   latches      -> no pre-roll can ever be exact
  *     Tube Sat     sticky skew sign, and a valley floor that only creeps up
@@ -51,6 +54,9 @@ import { processSoftClipperBuffer } from '../../src/audio/softClipperProcessor.j
 import { LA2A_PREROLL_S } from '../../src/audio/la2aProcessor.js'
 import { SCHEPS_PREROLL_S } from '../../src/audio/schepsProcessor.js'
 import { computeAutoMakeupPlan } from '../../src/audio/la2aProcessor.js'
+import {
+  processDynamicsBuffer, dynamicsPreRollSeconds,
+} from '../../src/audio/dynamicsProcessor.js'
 import { MAKEUP_PERCENTILE } from '../../src/audio/dsp/makeupReference.js'
 
 const SR = 44100
@@ -295,6 +301,38 @@ test('⚠ FET Punch is NOT bit-exact, unlike OptoSmooth, and that is the tail', 
   const preRoll = Math.round(fet1176PreRollSeconds(params) * SR)
   const warm = worstDiffAt(processFET1176Buffer, params, preRoll, SR * 40)
   assert.ok(warm > 0, 'if this reached zero, the pre-roll model has changed — re-read the tail note')
+})
+
+test('the vocal chain dynamics section converges at its own pre-roll', () => {
+  /**
+   * ⚠ IT INHERITS THE FET'S BOUND, NOT THE OPTO'S EXACTNESS, and the pre-roll
+   * has to follow the slowest embedded envelope rather than the stage the
+   * section is named for. Measured against a settled preview on the adversarial
+   * probe, worst sample difference:
+   *
+   *   patch                                    pre-roll   wired      cold
+   *   stock                                      3.75 s   6.04e-5   7.06e-2
+   *   fetRelease 1                              17.60 s   3.41e-5   1.18e-1
+   *   fetRelease 7, no clip, squash 70, mix 1    2.00 s   5.96e-8   2.90e-2
+   *   all-buttons, fetRelease 2                 15.77 s   2.38e-7   9.95e-2
+   */
+  const SETTLE_LONG = SR * 40
+  for (const params of [
+    { clipThresholdDb: -9, squash: 40, mix: 0.35 },
+    { clipThresholdDb: -9, squash: 40, mix: 0.35, fetRelease: 1 },
+    { clipThresholdDb: null, squash: 70, mix: 1, fetRelease: 7 },
+    { clipThresholdDb: -12, squash: 50, mix: 0.5, fetRatio: 'all', fetRelease: 2 },
+  ]) {
+    const preRoll = Math.round(dynamicsPreRollSeconds(params) * SR)
+    assert.ok(preRoll < SETTLE_LONG, 'the probe must hold more settle than pre-roll')
+
+    const cold = worstDiffAt(processDynamicsBuffer, params, 0, SETTLE_LONG)
+    const warm = worstDiffAt(processDynamicsBuffer, params, preRoll, SETTLE_LONG)
+    assert.ok(cold > 1e-2, `${JSON.stringify(params)}: cold should differ; got ${cold.toExponential(2)}`)
+    assert.ok(warm < 5e-4,
+      `${JSON.stringify(params)}: not converged at ${(preRoll / SR).toFixed(2)} s; got ${warm.toExponential(2)}`)
+    assert.ok(warm < cold / 100, 'the pre-roll should buy two orders of magnitude')
+  }
 })
 
 test('⚠ the makeup tracker still latches, and still cannot reach the audio', () => {

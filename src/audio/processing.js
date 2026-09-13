@@ -12,6 +12,13 @@ import {
   toKernelParams as toFET1176KernelParams,
 } from './effects/fet1176Compressor.js'
 import { fet1176PreRollSeconds } from './fet1176Processor.js'
+import { ensureDynamicsWorklet } from './dynamicsWorkletLoader.js'
+import {
+  DYNAMICS_DEFAULTS,
+  DYNAMICS_LATENCY_SAMPLES,
+  dynamicsPreRollSeconds,
+  toKernelParams as toDynamicsKernelParams,
+} from './effects/dynamicsParams.js'
 import { ensureSoftClipperWorklet } from './softClipperWorkletLoader.js'
 import {
   SOFT_CLIPPER_DEFAULTS,
@@ -716,6 +723,55 @@ export function applySoftClipperRegion(segments, start, end, params, sampleRate,
     kernelParams,
     latencySamples: softClipperLatencySamples(kernelParams, sampleRate),
   })
+}
+
+/**
+ * Apply the vocal chain's dynamics section to a region.
+ *
+ * ⚠ THE PRE-ROLL IS THE SLOWEST EMBEDDED ENVELOPE, WHICH IS THE FET'S RELEASE
+ * TAIL AND NOT THE OPTO'S BALLISTICS — see `dynamicsPreRollSeconds`. Taking the
+ * opto's 2 s because this section is "about" the opto would under-roll the
+ * stage that actually needs it, by up to an order of magnitude.
+ *
+ * ⚠ AND THIS SECTION IS NOT BIT-EXACT AT ITS PRE-ROLL, WHERE OptoSmooth AND
+ * SCHEPS ARE. The FET converges asymptotically — ~1e-4 at its wired pre-roll,
+ * never zero — so the composite inherits that bound. Stated rather than
+ * discovered later.
+ *
+ * @param {object} panel   DYNAMICS_DEFAULTS shape
+ * @param {object} solved  `solveDynamics().params` — the measured half
+ */
+export function applyDynamicsRegion(
+  segments, start, end, panel, solved, sampleRate, channels,
+) {
+  const kernelParams = toDynamicsKernelParams({ ...DYNAMICS_DEFAULTS, ...panel }, solved)
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureDynamicsWorklet,
+    processorName: 'dynamics-processor',
+    kernelParams,
+    latencySamples: DYNAMICS_LATENCY_SAMPLES,
+    preRollSamples: Math.round(dynamicsPreRollSeconds(kernelParams) * sampleRate),
+  })
+}
+
+/**
+ * Solve the dynamics section for a region, in a Worker.
+ *
+ * ⚠ IT GOES THROUGH THE CAPPED WINDOW, NOT THE WHOLE REGION, AND THAT IS THE
+ * RIGHT HALF OF THAT CHOICE HERE. Every bisect pass is a full render of what it
+ * is handed — measured at 7.3 s for sixteen seconds of audio — so a whole
+ * chapter is not available. What the solve produces is a set of KNOB POSITIONS,
+ * which is exactly the quantity `analysisWindow`'s note says a representative
+ * half-minute answers as well as ten minutes would.
+ *
+ * Contrast `computeAutoLevelAnalysis`, which is uncapped: that one is a
+ * statement about the whole recording's phrase-to-phrase consistency, and a
+ * capped window would give one answer for a phrase and another for the
+ * paragraph containing it.
+ */
+export function computeDynamicsSolve(segments, start, end, options, sampleRate, channels) {
+  return measureInWorker('dynamicsSolve', segments, start, end, options, sampleRate, channels)
+    .then(d => d.solution)
 }
 
 /** Apply Air Band to a region. */

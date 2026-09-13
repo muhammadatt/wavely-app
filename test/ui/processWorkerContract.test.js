@@ -79,6 +79,14 @@ const MEASUREMENTS = [
    * a failure would leave the panel analysing forever.
    */
   ['autoLevelAnalyze', {}, 'analysis'],
+  /**
+   * ⚠ THE TONE BELOW IS HALF A SECOND, SO THIS EXERCISES THE DEGENERATE PATH —
+   * far too short for the statistics the solve reads, and the point is that it
+   * still answers `done` with a usable set of knob positions rather than
+   * throwing. A solve that failed on short input would leave the panel busy
+   * forever, since every caller of a measurement catches and logs.
+   */
+  ['dynamicsSolve', { density: 50 }, 'solution'],
   ['measureLoudness', {}, 'loudness'],
   [
     'loudnessNormalize',

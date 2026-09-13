@@ -258,10 +258,27 @@ rests on.
                            └─ wet ─ Pultec pre ─ Opto ─ Pultec post ┘
 ```
 
-✓ **Kernel landed** (`src/audio/dynamicsProcessor.js`). Latency is 150 samples
-and constant across every patch; Mix 0 is bit-exact against clip → FET alone,
-which is also the only direct check on the dry delay. The worklet wrapper, the
-crest solve, the apply path and the panel are the next increments.
+✓ **Kernel, solve, worklet and apply path landed.** Latency is 150 samples and
+constant across every patch; Mix 0 is bit-exact against clip → FET alone, which
+is also the only direct check on the dry delay. The panel is the remaining
+increment.
+
+⚠ **Composing three shipping kernels required guarding two of them.** The repo
+holds an invariant — no worklet entry point may import another — with one
+allowlisted exception (Scheps composing the LA-2A), because a second bundle
+re-running a registration throws `NotSupportedError`, aborts that module, and
+silently kills one plugin by load order. The composite carries three such
+modules, and only the LA-2A was guarded. `fet1176Processor.js` and
+`softClipperProcessor.js` now guard too, and the allowlist gained a test
+asserting that **every** allowlisted import is guarded — allowlisting without
+guarding would have made the duplicate real rather than handled, and nothing
+would have noticed until two plugins were open at once.
+
+⚠ **The section converges asymptotically, not bit-exactly**, because it holds
+the FET. Measured against a settled preview at its wired pre-roll: 6.04e-5
+(stock), 3.41e-5 (slow release), 5.96e-8 and 2.38e-7 — against 2.9e-2…1.2e-1
+cold. Its pre-roll is the FET's, up to 26.4 s, **not the opto's 2 s**: the stage
+this section is named for is not the slow one.
 
 **Macros: Density 0–100** (drives the crest ladder) and **Mix 0–1** (the opto
 block's parallel blend).

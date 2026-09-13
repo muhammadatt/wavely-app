@@ -485,3 +485,57 @@ export function processDynamicsBuffer(channelData, sampleRate, params = {}) {
 }
 
 export { clamp }
+
+// ── AudioWorklet registration (worklet scope only) ──────────────────────────
+
+/**
+ * ⚠ GUARDED, AND SO ARE THE THREE KERNELS THIS CHUNK CONTAINS. `?worker&url`
+ * bundles this file together with everything it imports — the clipper, the FET,
+ * the LA-2A — so their own `registerProcessor` calls travel with it, and more
+ * than one such chunk can end up in a single AudioContext. Each guard is what
+ * stops the second load throwing on an already-registered name.
+ */
+if (typeof registerProcessor === 'function') {
+  class DynamicsWorkletProcessor extends AudioWorkletProcessor {
+    constructor(options) {
+      super()
+      this.kernel = new DynamicsKernel(sampleRate)
+      if (options?.processorOptions?.params) {
+        this.kernel.setParams(options.processorOptions.params)
+      }
+      this.port.onmessage = (e) => {
+        if (e.data?.type === 'params') this.kernel.setParams(e.data.params)
+      }
+      this.frame = 0
+    }
+
+    process(inputs, outputs) {
+      const input = inputs[0]
+      const output = outputs[0]
+      if (!output || output.length === 0) return true
+
+      const n = output[0].length
+      if (!input || input.length === 0) {
+        for (const ch of output) ch.fill(0)
+        return true
+      }
+
+      this.kernel.process(input, output, n)
+
+      /**
+       * ⚠ ALL THREE STAGES, NOT A SUM. The section's macro sets a target and a
+       * solve distributes it across the ladder; one summed meter would hide
+       * whether the clipper is being asked for more than its cap, which is the
+       * one failure the design says must never happen silently.
+       */
+      this.frame += n
+      if (this.frame >= 735) {
+        this.frame = 0
+        this.port.postMessage({ type: 'gr', metering: this.kernel.getMetering() })
+      }
+      return true
+    }
+  }
+
+  registerProcessor('dynamics-processor', DynamicsWorkletProcessor)
+}

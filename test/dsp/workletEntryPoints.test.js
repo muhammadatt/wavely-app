@@ -75,18 +75,41 @@ const ENTRY_POINTS = FILES.filter(isEntryPoint)
 const rel = f => f.slice(AUDIO.length + 1)
 
 /**
- * The one legitimate entry-point-to-entry-point import, allowlisted by name.
+ * The legitimate entry-point-to-entry-point imports, allowlisted by name.
  *
- * ⚠ IT IS AN EXCEPTION, NOT A PRECEDENT, AND IT IS ONLY SAFE BECAUSE THE
+ * ⚠ THESE ARE EXCEPTIONS, NOT A PRECEDENT, AND EACH IS ONLY SAFE BECAUSE THE
  * COLLISION WAS DESIGNED FOR. Scheps Parallel COMPOSES `LA2AKernel` — holding
  * the kernel rather than copying it is the whole architecture — so its bundle
  * necessarily carries the LA-2A module, and `la2aProcessor.js` wraps its own
  * `registerProcessor` in a try/catch that swallows exactly NotSupportedError
- * for this reason. Anything added here needs the same two things: a real
- * structural need, and a guarded registration on the imported side.
+ * for this reason.
+ *
+ * Anything added here needs the same two things: a real structural need, and a
+ * guarded registration on the imported side. The second half is not a matter of
+ * good intentions — `every allowlisted import guards its own registration`
+ * below checks it, because an entry added without the guard makes the duplicate
+ * real rather than handled, and nothing would notice until two plugins were
+ * open at once.
  */
 const ALLOWED = new Map([
   ['schepsProcessor.js', new Set(['la2aProcessor.js'])],
+  /**
+   * ⚠ THE VOCAL CHAIN'S DYNAMICS SECTION COMPOSES ALL THREE, and that IS its
+   * architecture rather than a convenience: holding the shipping kernels means
+   * every module constant — the clipper's shape table, the FET's ballistics,
+   * the opto's taper and cell and tube laws — reaches the composite with no
+   * conforming change. A copy would be three more places for a retune to stop
+   * arriving.
+   *
+   * ⚠ ALL THREE IMPORTED SIDES ARE GUARDED, which is the other half of what
+   * this allowlist requires. `fet1176Processor.js` and `softClipperProcessor.js`
+   * were NOT before this entry was added — only the LA-2A was, for Scheps — so
+   * adding the composite meant adding their guards too. Allowlisting without
+   * that would have made the duplicate registration real rather than handled.
+   */
+  ['dynamicsProcessor.js', new Set([
+    'la2aProcessor.js', 'fet1176Processor.js', 'softClipperProcessor.js',
+  ])],
 ])
 const allowed = (from, to) => ALLOWED.get(rel(from))?.has(rel(to)) ?? false
 
@@ -116,6 +139,32 @@ test('no worklet entry point reaches another one through its imports', () => {
       for (const d of importsOf(cur)) {
         if (!seen.has(d)) { stack.push(d); via.set(d, [...path, rel(d)]) }
       }
+    }
+  }
+})
+
+test('every allowlisted import guards its own registration', () => {
+  /**
+   * ⚠ THE ALLOWLIST IS ONLY SAFE WHILE THIS HOLDS. An entry allows a composite
+   * to carry another processor's module into a shared AudioContext; the guard
+   * on the imported side is what makes the resulting duplicate a no-op rather
+   * than an aborted module. Allowlisting without guarding would turn this
+   * file's whole argument inside out, and nothing else would notice until two
+   * plugins were open at once.
+   */
+  for (const [from, tos] of ALLOWED) {
+    for (const to of tos) {
+      const src = source.get(join(AUDIO, to))
+      assert.ok(src, `${to} is allowlisted for ${from} but does not exist`)
+      assert.match(
+        src, /try\s*\{\s*registerProcessor\(/,
+        `${to} is allowlisted as a dependency of ${from} but registers `
+        + 'unguarded — a second load into one AudioContext would abort it',
+      )
+      assert.match(
+        src, /NotSupportedError/,
+        `${to} must swallow exactly NotSupportedError and nothing else`,
+      )
     }
   }
 })
