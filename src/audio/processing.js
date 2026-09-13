@@ -774,6 +774,19 @@ export function computeDynamicsSolve(segments, start, end, options, sampleRate, 
     .then(d => d.solution)
 }
 
+/**
+ * Sample every curve the dynamics section's knobs sit on, for a region.
+ *
+ * Same capped window and the same reasoning as `computeDynamicsSolve` — what
+ * comes back is a set of KNOB CURVES, which a representative excerpt answers as
+ * well as ten minutes would. The difference is that this is paid ONCE: Density
+ * and Voicing then move with no renders at all (`solveFromSweep`).
+ */
+export function computeDynamicsSweep(segments, start, end, options, sampleRate, channels) {
+  return measureInWorker('dynamicsSweep', segments, start, end, options, sampleRate, channels)
+    .then(d => d.sweep)
+}
+
 /** Apply Air Band to a region. */
 export function applyAirBandRegion(segments, start, end, params, sampleRate, channels) {
   return applyWorkletRegion(segments, start, end, sampleRate, channels, {

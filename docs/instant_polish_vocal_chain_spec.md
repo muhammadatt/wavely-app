@@ -468,51 +468,72 @@ overshot to 3.06 dB against a 3.00 cap, and on a hard bound "close enough" is a
 bound that does not hold. When the cap binds, Density backs off and the report
 says so.
 
-### Density is not a live knob, and a sampled sweep would make it one
+### Density IS a live knob — the sweep replaced the per-move bisect
 
-Measured on 30 s of real narration: **7.3–7.9 s per Density move** (the macro
-invalidates the solve, so every move re-runs both bisects — ~8 kernel renders
-each). That is the panel's headline control, and it is not interactive.
+The bisect cost **7.3–11.3 s per Density move** on a 30 s window, and Density is
+the panel's headline control. Both knobs are monotonic in the statistic they
+control near the solution, so the curves are now **sampled once** and every
+later Density or Voicing move is an interpolation with no renders at all.
 
-`npm run dynamics:sweep` tests the alternative — sample each curve ONCE, then
-make Density a lookup:
+Scored by rendering both param sets through the real stages
+(`npm run dynamics:sweep`):
 
 | Density | 10 | 30 | 50 | 70 | 90 | 100 |
 |---|---|---|---|---|---|---|
-| threshold err (dB) | +0.27 | +0.18 | +0.01 | −0.16 | −0.73 | −0.54 |
+| threshold err (dB) | +0.27 | +0.18 | +0.01 | −0.16 | −0.15 | −0.23 |
 | drive err | +0.7 | +0.4 | −0.3 | +0.4 | +0.4 | +0.4 |
-| **achieved impact err (dB)** | **−0.06** | **−0.03** | **+0.01** | **0.00** | **−0.00** | **−0.00** |
+| **delivered impact err (dB)** | **−0.064** | **−0.034** | **+0.008** | **+0.005** | **+0.005** | **+0.004** |
 
-**Max error in what the section actually delivers: 0.064 dB**, against 12 + 12
-renders costing 10.9 s once and **zero** per Density move thereafter. The knob
-positions differ by more than the result does, which is the expected shape: both
-curves are shallow near the solution, so the bisect's last digits are not
-load-bearing.
+**Max error in what the section delivers: 0.064 dB**, for ~29 s of sampling paid
+once. ⚠ **SCORE THE RESULT, NEVER THE KNOBS** — both curves are shallow near the
+solution, so the two paths disagree on knob positions by an order of magnitude
+more than they disagree on the output. The bench's first version compared the
+sweep's *interpolated* opto reduction against the bisect's *measured* one and
+flagged a 0.80 dB audio problem that does not exist (rendered, the two agree to
+**0.009 dB**) while hiding a reporting one that did.
 
-⚠ **The clipper half is exact, not approximate** — it measures on the RAW input,
-so its curve does not depend on Density at all; Density only picks the target.
-The approximation is entirely in the FET, whose curve is measured on the
-CLIPPED signal and is therefore a function of two variables. Measured directly,
-across the whole clip range the macro uses (−3.54 to −7.16 dB):
+**What is exact and what is approximate:**
 
-| FET drive | 0 | 20 | 40 | 60 | 100 |
-|---|---|---|---|---|---|
-| impact spread across clip settings (dB) | 0.03 | 0.08 | 0.03 | 0.03 | 0.02 |
+- **Clipper — exact.** Its curve is measured on the raw input, so it does not
+  depend on Density at all; Density only picks a target on it.
+- **FET — one sample serves the macro.** Its curve is measured on the clipped
+  signal, so it is a function of two variables. Measured across the whole clip
+  range the macro uses: **0.08 dB** of movement.
+- **Opto — indexed by Density, not squash.** ⚠ Indexing by squash scored 0.80 dB
+  of reported reduction at Density 100, because the FET's drive rises with
+  Density too and the opto ends up looking at a far more compressed signal.
+  ⚠ **Alignment does not rescue this**, and the reasoning that said it would is
+  worth keeping as a correction: alignment matches gated RMS, and gain reduction
+  is an integral over the envelope *distribution*. Same energy, different crest,
+  different reduction. The trajectory is now walked directly; residual **0.30 dB**
+  on the reported figure, entirely in the middle of the macro where the FET
+  saturates (drive 33 → 100 between Density 40 and 60) and the curve is genuinely
+  convex. More sample points do not fix it — 8 scored 0.292 against 6's 0.303.
+- **Blend — measured once.** Across the whole Density range `correlation` moves
+  0.0122 and `densityDb` 0.300 dB, which is **0.034 dB** of level through the mix
+  law at its worst Mix position.
 
-**0.09 dB worst case.** The FET's curve is effectively invariant to what the
-clipper did under it, which is why one sample of it serves the whole macro.
+⚠ **TWO ASSUMPTIONS FAILED, AND BOTH FAILED QUIETLY.**
 
-⚠ **AND THE FIRST ATTEMPT FAILED ITS OWN TEST, for a reason worth keeping.** The
-inversion initially solved only the crest target and ignored the clipper's hard
-depth cap, so above Density 80 it ran off the end of the sampled range and cost
-1.32 dB of impact. The bisect it replaces satisfies both constraints in one
-search; an interpolation has to invert *both* curves and take the shallower
-threshold. A lookup table is not exempt from the rules the search was obeying.
+1. The first inversion solved only the crest target and dropped the clipper's
+   hard depth cap, so above Density 80 it ran off the sampled range and cost 1.32
+   dB. The bisect satisfies both constraints in one search; a lookup table is not
+   exempt from the rules the search was obeying.
+2. ⚠ **The clipper's crest curve is NOT MONOTONIC**, which is a fact about the
+   device rather than the sampling. Over 24 dB of threshold on tight-crest
+   material (12.45 dB): 12.71, 12.64, 11.92, 10.64, 9.62, **9.27**, 9.49, 10.17,
+   10.94, 11.57, 12.02, 12.31 — crest falls to a minimum and then *rises*, because
+   past that point deep clipping pulls the BODY down faster than the peak. Crest
+   is a difference of two things the clipper moves. The crossing's endpoint
+   shortcut ("below the last sample means unreachable") fired on the wrong end
+   and returned the deepest threshold sampled. ⚠ **THE REFERENCE NARRATION NEVER
+   SHOWED IT** — its crest is 19.79 dB and its curve does not turn inside the
+   range, so the corpus bench scored 0.064 dB while a second stimulus was 0.65 dB
+   out. One file is not a bench. Fixing it also improved the corpus, taking
+   threshold error at Density 90–100 from 0.73/0.54 to 0.15/0.23.
 
-⚠ **ONE FILE, ONE VOICE.** Every number here is from a single narrator. The
-0.09 dB invariance in particular is a claim about how much the clipper disturbs
-the FET's operating point, and a more percussive or more clipped source could
-move it. Re-run the bench before treating this as settled.
+⚠ **ONE VOICE, STILL.** Every tolerance above is one narrator plus one synthetic
+probe. Re-run the bench against another voice before treating them as settled.
 
 **Measured, Density 0 → 100 on narration with phrase-level variation:** block
 spread 3.73 → 2.58 dB, impact 10.16 → 8.06 dB. ⚠ And crest *rises* 2.13 dB at

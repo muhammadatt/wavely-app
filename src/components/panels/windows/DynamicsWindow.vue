@@ -79,9 +79,9 @@ const stages = computed(() => [
 ])
 
 const statusText = computed(() => {
-  if (solving.value) return 'Measuring and solving — this renders the section several times'
-  if (!hasSolution.value) return 'Solve to measure this material and set the three devices'
-  if (isStale.value) return 'The file or the selection moved — solve again'
+  if (solving.value) return 'Measuring — sampling this material once, so the knobs stay live after'
+  if (!hasSolution.value) return 'Measure this material to set the three devices'
+  if (isStale.value) return 'The file or the selection moved — measure again'
   const s = summary.value
   return `clip ${s.clipDepthDb.toFixed(1)} · FET ${s.fetPeakDb.toFixed(1)} · opto `
     + `${s.optoPeakDb.toFixed(1)} dB · evenness ${s.spreadFrom.toFixed(1)} → ${s.spreadTo.toFixed(1)} dB`
@@ -114,8 +114,8 @@ const tradeNote = computed(() => {
 
 const applyHint = computed(() => {
   if (!preview.value) return 'Turn the section on to apply it'
-  if (!hasSolution.value) return 'Solve first'
-  if (isStale.value) return 'The file or selection moved — solve again'
+  if (!hasSolution.value) return 'Measure first'
+  if (isStale.value) return 'The file or selection moved — measure again'
   if (!hasSelection.value) return 'Select the part of the file to write back'
   return ''
 })
@@ -179,10 +179,11 @@ function close() {
         style="border-top:1px solid rgba(255,255,255,.06)"
       >
         <div class="w-[122px]">
-          <!-- One macro. The solve turns it into a clip threshold, a drive and
-               a squash by measuring the material — each device on the statistic
-               it actually controls, which is not the same statistic for all
-               three. -->
+          <!-- One macro. It turns into a clip threshold, a drive and a squash
+               by reading the sampled curves — each device on the statistic it
+               actually controls, which is not the same statistic for all three.
+               ⚠ LIVE: this used to throw the measurement away on every move and
+               make the user re-run a 7.3-7.9 s bisect. -->
           <Knob
             :model-value="panel.density"
             @update:model-value="v => syncMacro('density', v)"
@@ -266,7 +267,7 @@ function close() {
           :disabled="solving"
           title="Measure this material and set the three devices from it"
           @click="solve"
-        >{{ solving ? 'SOLVING…' : (hasSolution ? 'RE-SOLVE' : 'SOLVE') }}</button>
+        >{{ solving ? 'MEASURING…' : (hasSolution ? 'RE-MEASURE' : 'MEASURE') }}</button>
 
         <p class="text-[10.5px] leading-[1.45] text-[rgba(255,255,255,.45)]">{{ statusText }}</p>
       </div>

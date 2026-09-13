@@ -2,11 +2,11 @@ import { ref, computed } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import {
-  computeDynamicsSolve, applyDynamicsRegion, computePeakCache,
+  computeDynamicsSweep, applyDynamicsRegion, computePeakCache,
 } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { dynamicsEffect, DYNAMICS_DEFAULTS } from '../audio/effects/dynamics.js'
-import { VOICINGS, CLIP_MAX_DEPTH_DB } from '../audio/dynamicsSolve.js'
+import { VOICINGS, CLIP_MAX_DEPTH_DB, solveFromSweep } from '../audio/dynamicsSolve.js'
 import { regionCovers } from '../audio/dsp/clipGainDecision.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
@@ -31,6 +31,8 @@ export { VOICINGS, CLIP_MAX_DEPTH_DB }
  */
 const panel = ref({ ...DYNAMICS_DEFAULTS })
 
+/** The sampled curves. Everything else on this panel is a lookup on them. */
+const sweep = ref(null)
 const solution = ref(null)
 /** `docId:revision` the solution was measured on. */
 const solvedFor = ref(null)
@@ -81,11 +83,11 @@ export function useDynamics() {
    * nothing was measured at all. Narrowing INSIDE that window is neither.
    */
   const isStale = computed(() => {
-    if (solution.value === null) return false
+    if (sweep.value === null) return false
     if (solvedFor.value !== timelineKey()) return true
     return !regionCovers(solvedSelection.value, state.selection)
   })
-  const hasSolution = computed(() => solution.value !== null)
+  const hasSolution = computed(() => sweep.value !== null && solution.value !== null)
   const solutionValid = computed(() => hasSolution.value && !isStale.value)
 
   const voicing = computed(() => VOICINGS[panel.value.voicing] ?? VOICINGS.audiobook)
@@ -176,13 +178,23 @@ export function useDynamics() {
     }
   }
 
-  /** Density and Voicing invalidate the solve; Mix and Output do not. */
+  /**
+   * Density and Voicing — LIVE, because they are lookups on the sampled curves.
+   *
+   * ⚠ THEY USED TO THROW THE MEASUREMENT AWAY. Each move cleared the solution
+   * and made the user re-run a 7.3-7.9 s bisect, which is not a knob. The sweep
+   * samples both curves once, so re-deriving the knob positions for a new
+   * Density costs no renders — see `solveFromSweep`.
+   */
   function syncMacro(name, value) {
     panel.value = { ...panel.value, [name]: value }
-    solution.value = null
-    solvedFor.value = null
-    solvedSelection.value = null
+    if (sweep.value) solution.value = solveFromSweep(sweep.value, macroOptions())
     push()
+  }
+
+  /** The sweep lookup's inputs. Mix is left out: it is applied after the law. */
+  function macroOptions() {
+    return { density: panel.value.density, voicing: panel.value.voicing }
   }
 
   function syncBlend(name, value) {
@@ -197,15 +209,20 @@ export function useDynamics() {
   }
 
   /**
-   * Measure the region and solve the section's device settings.
+   * Sample the region's curves. Every knob on this panel is a lookup after it.
    *
    * ⚠ THE WINDOW IS CAPPED AND WHAT IS REMEMBERED IS THE SELECTION, NOT THE
-   * WINDOW. `computeDynamicsSolve` renders through `analysisWindow`, so it sees
-   * a bounded slice anchored at the region's start — but what it returns is a
-   * set of knob positions for the whole selection, so that selection is what
-   * the staleness check has to compare against. Recording the window instead
-   * made every solve on a selection over 30 s instantly stale; see
+   * WINDOW. `computeDynamicsSweep` renders through `analysisWindow`, so it sees
+   * a bounded slice anchored at the region's start — but what it produces is a
+   * set of knob curves for the whole selection, so that selection is what the
+   * staleness check has to compare against. Recording the window instead made
+   * every solve on a selection over 30 s instantly stale; see
    * `solvedSelection`.
+   *
+   * ⚠ THE MACRO IS READ AT LOOKUP TIME, NOT AT SAMPLE TIME. The curves do not
+   * depend on Density or Voicing — those only pick targets on them — so moving
+   * either while this is in flight is not a race, and the result is valid for
+   * whatever the knobs say when it lands.
    */
   async function solve() {
     if (!state.currentFile) return
@@ -215,12 +232,12 @@ export function useDynamics() {
 
     solving.value = true
     try {
-      const result = await computeDynamicsSolve(
-        state.segments, start, end,
-        { density: panel.value.density, voicing: panel.value.voicing },
+      const curves = await computeDynamicsSweep(
+        state.segments, start, end, {},
         state.currentFile.sampleRate, state.currentFile.channels,
       )
-      solution.value = result
+      sweep.value = curves
+      solution.value = solveFromSweep(curves, macroOptions())
       solvedFor.value = timelineKey()
       solvedSelection.value = { start, end }
       push()
@@ -233,6 +250,7 @@ export function useDynamics() {
   }
 
   function clearSolution() {
+    sweep.value = null
     solution.value = null
     solvedFor.value = null
     solvedSelection.value = null

@@ -322,6 +322,37 @@ export const VOICINGS = Object.freeze({
  */
 
 /**
+ * ── THE TARGETS ─────────────────────────────────────────────────────────────
+ *
+ * ⚠ SHARED BY THE BISECT SOLVE AND THE SWEEP, AND THAT IS THE POINT. The two
+ * paths differ only in HOW they find the knob that reaches a target — one
+ * searches, one interpolates a sampled curve. If each spelled the target
+ * arithmetic out for itself they would drift, and the drift would look like an
+ * interpolation error rather than a second copy of a formula. The sweep bench
+ * scores one against the other, so a divergence here would be scored as noise.
+ */
+
+/** How much crest the clipper may take at this Density, before its hard cap. */
+export function clipShaveFor(voicing, density) {
+  return Math.min(voicing.clipShaveDb * density, CLIP_MAX_DEPTH_DB)
+}
+
+/**
+ * The peak-to-body the FET is asked to reach.
+ *
+ * Interpolated from what the audio ALREADY IS toward the voicing's target, so
+ * Density 0 really is "leave it alone" rather than "hit 8.5 dB regardless".
+ */
+export function fetTargetImpactFor(voicing, density, afterClipImpactDb) {
+  return afterClipImpactDb - (afterClipImpactDb - voicing.impactDb) * density
+}
+
+/** The opto's depth: a calibrated constant scaled by Density. See VOICINGS. */
+export function squashFor(voicing, density) {
+  return voicing.squash * density
+}
+
+/**
  * ⚠ THE CLIPPER'S HARD CAP, AND THE ONE RULE THAT OVERRIDES THE MACRO.
  *
  * Measured stock depth on two narrators is 2.77-3.21 dB; past that, speech
@@ -352,7 +383,7 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
   const input = measureDynamics(channelData, sampleRate)
 
   // ── 1. Clipper: bisect the threshold for a bounded crest shave ───────────
-  const wantShave = Math.min(voicing.clipShaveDb * density, CLIP_MAX_DEPTH_DB)
+  const wantShave = clipShaveFor(voicing, density)
   let clipThresholdDb = null
   let clipDepthDb = 0
   let clipped = channelData
@@ -402,8 +433,7 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
 
   // ── 2. FET: aligned at ITS OWN input, then bisected on peak-to-body ──────
   const fetAlignDb = inputAlignDbFor(clipped, sampleRate)
-  const targetImpact = afterClip.impactDb
-    - (afterClip.impactDb - voicing.impactDb) * density
+  const targetImpact = fetTargetImpactFor(voicing, density, afterClip.impactDb)
   const fetDrive = bisect({
     lo: 0, hi: 100, target: targetImpact, decreasing: true,
     measure: (d) => measureDynamics(
@@ -423,7 +453,7 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
    * so Density 0 really is "leave it alone" and the knob still means something
    * in between.
    */
-  const squash = voicing.squash * density
+  const squash = squashFor(voicing, density)
   const wetRun = renderWet(dry, sampleRate, { ...patch, squash, optoAlignDb })
   const wet = wetRun.out
 
@@ -543,5 +573,415 @@ export function measureBlend(dry, wet, sampleRate, wetLatencySamples = 0) {
      * delivery solve are better placed to give back than a number baked in now.
      */
     trimDb: 0,
+  }
+}
+
+// ── The Density sweep ───────────────────────────────────────────────────────
+
+/**
+ * ── WHY A SWEEP EXISTS AT ALL ───────────────────────────────────────────────
+ *
+ * `solveDynamics` bisects two knobs, which is ~16 kernel renders and measures
+ * 7.3–7.9 s on a 30 s window. Density and Voicing invalidate it, so the panel's
+ * headline control was not a live knob — every move meant a progress spinner.
+ *
+ * ⚠ THE FIX IS NOT A FASTER SEARCH, IT IS NOT SEARCHING PER MOVE. Both knobs
+ * are monotonic in the statistic they control, so the curves can be SAMPLED
+ * once and every later Density or Voicing move is an interpolation with no
+ * renders at all. Measured against the bisect it replaces (`npm run
+ * dynamics:sweep`): **0.064 dB of achieved impact**, worst case over the whole
+ * macro, for 12 + 12 renders costing ~11 s once.
+ *
+ * ⚠ THE KNOB POSITIONS DISAGREE BY MORE THAN THE RESULT DOES — up to 0.73 dB of
+ * threshold and 0.7 of drive — and that is the expected shape rather than a
+ * worry: both curves are shallow near the solution, so the bisect's last digits
+ * were never load-bearing. Scoring the sweep on knob positions would reject a
+ * result that is audibly identical.
+ *
+ * ⚠ AND THE FIRST ATTEMPT FAILED ITS OWN BENCH, which is the reusable lesson.
+ * The inversion solved only the crest target and dropped the clipper's hard
+ * depth cap, so above Density 80 it ran off the end of the sampled range and
+ * cost 1.32 dB. The bisect it replaces satisfies BOTH constraints in one search
+ * (see the note there); an interpolation has to invert both curves and take the
+ * shallower threshold. A lookup table is not exempt from the rules the search
+ * was obeying.
+ *
+ * ── WHAT IS EXACT AND WHAT IS APPROXIMATE ───────────────────────────────────
+ *
+ * The clipper's curve is measured on the RAW input, so it does not depend on
+ * Density at all — Density only picks a target on it. That half is exact up to
+ * interpolation.
+ *
+ * The FET's curve is measured on the CLIPPED signal, so it is a function of two
+ * variables and is sampled at ONE clip setting. Measured directly across the
+ * whole clip range the macro uses (−3.54 to −7.16 dB on the reference file),
+ * the curve moves **0.09 dB** worst case. That invariance is what lets one
+ * sample serve the macro.
+ *
+ * The opto's curve is sampled at one FET setting for the same reason, and its
+ * invariance is STRUCTURAL rather than lucky: `optoAlignDb` normalises the
+ * cell's input level, which is the entire purpose of `dsp/inputAlign.js`. A
+ * curve sampled behind an alignment is a curve in knob position, not in level.
+ *
+ * The blend (`correlation`, `densityDb`) is measured ONCE. Across the whole
+ * Density range it moves 0.0122 of correlation and 0.300 dB of density, which
+ * costs **0.034 dB** of level through the mix law at the worst Mix position.
+ *
+ * ⚠ EVERY NUMBER ABOVE IS ONE NARRATOR. Re-run `npm run dynamics:sweep` against
+ * another voice before treating them as settled — a more percussive source
+ * disturbs the FET's operating point more than this one does.
+ */
+
+/** Samples per curve. 12 is what the bench scored; fewer was not tested. */
+export const SWEEP_POINTS = 12
+
+/** How far below the region's peak the clipper's curve is sampled, in dB. */
+export const CLIP_SWEEP_RANGE_DB = 24
+
+/**
+ * Points on the opto's DENSITY trajectory. Fewer than the knob curves because
+ * each one is a full head render (clip -> FET -> wet), and because what it
+ * feeds is the report rather than the audio.
+ */
+export const OPTO_SWEEP_POINTS = 6
+
+/**
+ * ⚠ THE TRAJECTORY IS WALKED FOR ONE VOICING, AND THE OTHERS READ OFF IT. Each
+ * voicing bends the path differently — its own clip shave, impact target and
+ * squash — so a per-voicing trajectory would triple the build. The audio is
+ * unaffected either way (`squash` and `optoAlignDb` are computed per voicing);
+ * what rides on this is the reported opto reduction. `npm run dynamics:sweep`
+ * scores the other two against their own bisect.
+ */
+const TRAJECTORY_VOICING = VOICINGS.audiobook
+
+/**
+ * Interpolate `ys` at `xq`, given `xs` ASCENDING. Clamps at both ends.
+ */
+function lerpAt(xs, ys, xq) {
+  const n = xs.length
+  if (xq <= xs[0]) return ys[0]
+  if (xq >= xs[n - 1]) return ys[n - 1]
+  for (let i = 1; i < n; i++) {
+    if (xq <= xs[i]) {
+      const span = xs[i] - xs[i - 1]
+      const t = span === 0 ? 0 : (xq - xs[i - 1]) / span
+      return ys[i - 1] + t * (ys[i] - ys[i - 1])
+    }
+  }
+  return ys[n - 1]
+}
+
+/**
+ * The `x` at which a sampled `ys` FIRST falls through `target`, walking from
+ * `xs[0]`.
+ *
+ * ⚠ IT TAKES THE FIRST CROSSING RATHER THAN ASSUMING THE CURVE IS MONOTONIC,
+ * AND THE FIRST VERSION DID ASSUME IT. It short-circuited on the endpoints —
+ * "target below the last sample means the knob cannot reach it" — which is only
+ * sound if `ys` descends all the way.
+ *
+ * ⚠ THE CLIPPER'S CREST CURVE DOES NOT, and that is a fact about the device
+ * rather than about the sampling. Measured over 24 dB of threshold on material
+ * with a tight crest (12.45 dB): 12.71, 12.64, 11.92, 10.64, 9.62, **9.27**,
+ * 9.49, 10.17, 10.94, 11.57, 12.02, 12.31. Crest falls to a minimum and then
+ * RISES again, because past that point deep clipping pulls the BODY down faster
+ * than it pulls the peak down. Crest is a difference of two things the clipper
+ * moves, and the far end of the range is not a place any solve should go.
+ *
+ * The endpoint shortcut therefore fired on the wrong end and returned the
+ * deepest threshold sampled — 24 dB below peak — where the first crossing was
+ * 0.2 dB from where the bisect landed. It cost 0.65 dB of delivered impact on
+ * that stimulus and nothing at all on the reference narration, whose crest is
+ * 19.79 dB and whose curve does not turn inside the range. ⚠ A BENCH ON ONE
+ * FILE WOULD NEVER HAVE FOUND IT.
+ *
+ * Walking from the shallow end and stopping at the first bracket gives the same
+ * answer as the bisect on a monotonic curve, and the right one on this.
+ */
+function crossingOf(xs, ys, target) {
+  const n = xs.length
+  // Already at or below the target with the knob doing nothing.
+  if (ys[0] <= target) return xs[0]
+  for (let i = 1; i < n; i++) {
+    if (target >= ys[i]) {
+      const span = ys[i - 1] - ys[i]
+      const t = span === 0 ? 0 : (ys[i - 1] - target) / span
+      return xs[i - 1] + t * (xs[i] - xs[i - 1])
+    }
+  }
+  // Never reached, anywhere in the sampled range — the same answer the bisect
+  // gives by running to its own endpoint.
+  return xs[n - 1]
+}
+
+/**
+ * Sample every curve the section's knobs sit on, once.
+ *
+ * The result is a plain object — no buffers, no kernels — so it crosses the
+ * worker boundary as a structured clone and can be held in panel state.
+ *
+ * @param {Float32Array[]} channelData
+ * @param {number} sampleRate
+ * @param {object} [options]
+ * @param {object} [options.patch] fixed params (ballistics, character) to honour
+ */
+export function sweepDynamics(channelData, sampleRate, options = {}) {
+  const patch = { ...DYNAMICS_KERNEL_DEFAULTS, ...(options.patch ?? {}) }
+  const input = measureDynamics(channelData, sampleRate)
+
+  // ── 1. Clipper: threshold -> crest, depth, impact. On the RAW input, so
+  //       this curve is Density-independent and the half it answers is exact.
+  const thresholds = []
+  const crest = []
+  const depth = []
+  const impact = []
+  for (let i = 0; i < SWEEP_POINTS; i++) {
+    const th = input.peakDb - CLIP_SWEEP_RANGE_DB
+      + (CLIP_SWEEP_RANGE_DB * i) / (SWEEP_POINTS - 1)
+    const r = renderClip(channelData, sampleRate, { ...patch, clipThresholdDb: th })
+    const m = measureDynamics(r.out, sampleRate)
+    thresholds.push(th)
+    crest.push(m.crestDb)
+    depth.push(r.metering.maxReductionDb)
+    // ⚠ SAMPLED TOO, or a Density move still costs a clip render (~600 ms) just
+    // to read the impact its FET target is derived from. That is not a live
+    // knob either.
+    impact.push(m.impactDb)
+  }
+  // Both curves rise with the threshold, and `crossingOf` wants them falling.
+  const thrDesc = [...thresholds].reverse()
+  const crestDesc = [...crest].reverse()
+  const depthDesc = [...depth].reverse()
+
+  // ── 2. FET, sampled at the MIDDLE of the macro's clip range ──────────────
+  const midShave = clipShaveFor(VOICINGS.audiobook, 0.5)
+  const midThreshold = Math.max(
+    crossingOf(thrDesc, crestDesc, input.crestDb - midShave),
+    crossingOf(thrDesc, depthDesc.map(v => -v), -CLIP_MAX_DEPTH_DB),
+  )
+  const midClip = renderClip(
+    channelData, sampleRate, { ...patch, clipThresholdDb: midThreshold },
+  ).out
+  const fetAlignDb = inputAlignDbFor(midClip, sampleRate)
+
+  const drives = []
+  const fetImpact = []
+  const fetPeakDb = []
+  const fetOutAlignDb = []
+  for (let i = 0; i < SWEEP_POINTS; i++) {
+    const drive = (100 * i) / (SWEEP_POINTS - 1)
+    const r = renderFet(midClip, sampleRate, { ...patch, fetDrive: drive, fetAlignDb })
+    drives.push(drive)
+    fetImpact.push(measureDynamics(r.out, sampleRate).impactDb)
+    fetPeakDb.push(r.metering.maxGainReductionDb)
+    // ⚠ THE OPTO'S ALIGNMENT IS A CURVE IN THE FET'S DRIVE, because the opto's
+    // input IS the FET's output and the FET moves it by many dB across its
+    // range. Reading it from the section's input instead is the error the
+    // staged-alignment note describes.
+    fetOutAlignDb.push(inputAlignDbFor(r.out, sampleRate))
+  }
+
+  // ── 3. Opto, sampled along the DENSITY TRAJECTORY ───────────────────────
+  /**
+   * ⚠ INDEXED BY DENSITY, NOT BY SQUASH, AND THE FIRST VERSION GOT THIS WRONG.
+   *
+   * Sampling the opto's curve at one FET setting and looking it up by squash
+   * scored 0.80 dB of error on reported gain reduction at Density 100 — the
+   * bisect measured 8.35 dB where the sweep reported 7.56. The reason is that
+   * squash is not the only thing moving: the FET's drive rises with Density
+   * too, so by Density 100 the opto is looking at a far more compressed signal
+   * than the mid setting the curve was sampled at, and it grabs more of it.
+   *
+   * ⚠ AND ALIGNMENT DOES NOT RESCUE IT, WHICH IS THE CORRECTION WORTH KEEPING.
+   * The reasoning for sampling at one point was that `optoAlignDb` normalises
+   * the cell's input, so a curve behind an alignment is a curve in knob
+   * position rather than in level. That is true of LEVEL and false of SHAPE:
+   * alignment matches gated RMS, and gain reduction is an integral over the
+   * envelope DISTRIBUTION, which the FET has been flattening all the way up the
+   * macro. Same energy, different crest, different reduction.
+   *
+   * ⚠ THE AUDIO WAS NEVER WRONG — only the number the panel printed. Rendered
+   * through the real kernel, the two paths' opto reduction agrees to 0.009 dB,
+   * because `squash` is `voicing.squash × density` in both and the interpolated
+   * `optoAlignDb` lands within 0.26 dB. That is why this had to be scored by
+   * rendering both param sets rather than by comparing a measured figure to an
+   * interpolated one: the bench's first version flagged an audio problem that
+   * did not exist and hid a reporting one that did.
+   *
+   * So the trajectory is walked directly: each point solves the head from the
+   * curves above, renders it, and measures where the opto actually sits.
+   */
+  const optoDensities = []
+  const optoSquash = []
+  const optoAlign = []
+  const optoPeakDb = []
+  const optoAvgDb = []
+  const wetCrestDb = []
+  const wetSpreadDb = []
+  let blend = { correlation: 0, densityDb: 0, trimDb: 0 }
+  const midPoint = Math.floor(OPTO_SWEEP_POINTS / 2)
+  for (let i = 0; i < OPTO_SWEEP_POINTS; i++) {
+    const density = i / (OPTO_SWEEP_POINTS - 1)
+    const shave = clipShaveFor(TRAJECTORY_VOICING, density)
+    let head = channelData
+    if (shave > 0.05) {
+      const th = Math.max(
+        crossingOf(thrDesc, crestDesc, input.crestDb - shave),
+        crossingOf(thrDesc, depthDesc.map(v => -v), -CLIP_MAX_DEPTH_DB),
+      )
+      head = renderClip(channelData, sampleRate, { ...patch, clipThresholdDb: th }).out
+    }
+    const headAlign = inputAlignDbFor(head, sampleRate)
+    const target = fetTargetImpactFor(
+      TRAJECTORY_VOICING, density,
+      measureDynamics(head, sampleRate).impactDb,
+    )
+    const drive = crossingOf(drives, fetImpact, target)
+    const dry = renderFet(
+      head, sampleRate, { ...patch, fetDrive: drive, fetAlignDb: headAlign },
+    ).out
+    const align = inputAlignDbFor(dry, sampleRate)
+    const squash = squashFor(TRAJECTORY_VOICING, density)
+    const r = renderWet(dry, sampleRate, { ...patch, squash, optoAlignDb: align })
+    const m = measureDynamics(r.out, sampleRate)
+
+    optoDensities.push(density)
+    optoSquash.push(squash)
+    optoAlign.push(align)
+    optoPeakDb.push(r.metering.maxGainReductionDb)
+    optoAvgDb.push(r.metering.avgGainReductionDb)
+    wetCrestDb.push(m.crestDb)
+    wetSpreadDb.push(m.spreadDb)
+    /**
+     * ⚠ MEASURED ONCE, MID-TRAJECTORY. Across the whole Density range the blend
+     * moves 0.0122 of correlation and 0.300 dB of density, which is 0.034 dB of
+     * level through the mix law at its worst Mix position — below the 0.06 dB
+     * the sweep already concedes on impact, so sampling it per point would buy
+     * nothing.
+     */
+    if (i === midPoint) blend = measureBlend(dry, r.out, sampleRate, r.latencySamples)
+  }
+
+  return {
+    sampleRate,
+    patch,
+    input,
+    clip: { thresholds, crest, depth, impact },
+    fet: { alignDb: fetAlignDb, drives, impact: fetImpact, peakDb: fetPeakDb, outAlignDb: fetOutAlignDb },
+    opto: {
+      densities: optoDensities,
+      squash: optoSquash,
+      alignDb: optoAlign,
+      peakDb: optoPeakDb,
+      avgDb: optoAvgDb,
+      crestDb: wetCrestDb,
+      spreadDb: wetSpreadDb,
+    },
+    blend,
+  }
+}
+
+/**
+ * Knob positions and the report for one Density and Voicing, from a sweep.
+ *
+ * ⚠ NO RENDERS, WHICH IS THE ENTIRE POINT — this is what Density and Voicing
+ * call on every move. It returns the same `{ params, report }` shape
+ * `solveDynamics` does, so the panel and the apply path cannot tell which
+ * produced them.
+ */
+export function solveFromSweep(sweep, options = {}) {
+  const density = clamp(options.density ?? 50, 0, 100) / 100
+  const voicing = VOICINGS[options.voicing] ?? VOICINGS.audiobook
+  const { input, patch } = sweep
+
+  const thrDesc = [...sweep.clip.thresholds].reverse()
+  const crestDesc = [...sweep.clip.crest].reverse()
+  const depthDesc = [...sweep.clip.depth].reverse()
+
+  // ── 1. Clipper: ONE inversion against TWO constraints, as the bisect has it
+  const wantShave = clipShaveFor(voicing, density)
+  let clipThresholdDb = null
+  let clipDepthDb = 0
+  let clipCapped = false
+  let afterClipImpactDb = input.impactDb
+  if (wantShave > 0.05) {
+    const targetCrest = input.crestDb - wantShave
+    clipThresholdDb = Math.max(
+      crossingOf(thrDesc, crestDesc, targetCrest),
+      // Negated so the cap reads as a descending curve too.
+      crossingOf(thrDesc, depthDesc.map(v => -v), -CLIP_MAX_DEPTH_DB),
+    )
+    clipDepthDb = lerpAt(sweep.clip.thresholds, sweep.clip.depth, clipThresholdDb)
+    clipCapped = lerpAt(sweep.clip.thresholds, sweep.clip.crest, clipThresholdDb)
+      > targetCrest + 0.05
+    afterClipImpactDb = lerpAt(sweep.clip.thresholds, sweep.clip.impact, clipThresholdDb)
+  }
+
+  // ── 2. FET ──────────────────────────────────────────────────────────────
+  const targetImpact = fetTargetImpactFor(voicing, density, afterClipImpactDb)
+  const fetDrive = crossingOf(sweep.fet.drives, sweep.fet.impact, targetImpact)
+  const afterFetImpactDb = lerpAt(sweep.fet.drives, sweep.fet.impact, fetDrive)
+
+  // ── 3. Opto, at its own input's alignment ───────────────────────────────
+  /**
+   * ⚠ `squash` IS EXACT AND `optoAlignDb` IS THE INTERPOLATION. The depth is a
+   * calibrated constant scaled by Density, so it needs no curve at all; what
+   * has to be looked up is where the opto's input SITS, which the FET moves by
+   * many dB across its range. Read from the FET's drive, not from the section's
+   * input — that is the staged-alignment rule, and taking it from the raw file
+   * gives 0.25 dB of reduction where the opto's own input gives 2.98.
+   */
+  const squash = squashFor(voicing, density)
+  const optoAlignDb = lerpAt(sweep.fet.drives, sweep.fet.outAlignDb, fetDrive)
+
+  const params = {
+    ...patch,
+    clipThresholdDb,
+    fetDrive,
+    fetAlignDb: sweep.fet.alignDb,
+    squash,
+    optoAlignDb,
+    mix: options.mix ?? voicing.mix,
+    correlation: sweep.blend.correlation,
+    densityDb: sweep.blend.densityDb,
+    outputDb: sweep.blend.trimDb,
+  }
+
+  /**
+   * ⚠ THE REPORT'S OPTO FIGURES READ OFF THE DENSITY TRAJECTORY, NOT OFF SQUASH.
+   * Both the depth AND the opto's input move with Density, so a curve indexed
+   * by squash alone mis-reported reduction by 0.80 dB at the top of the macro.
+   * See the trajectory note in `sweepDynamics`. These are report values only —
+   * every param above is computed, not interpolated from here.
+   */
+  const at = (ys) => lerpAt(sweep.opto.densities, ys, density)
+  const wetCrestDb = at(sweep.opto.crestDb)
+  return {
+    params,
+    report: {
+      input,
+      afterClip: { impactDb: afterClipImpactDb },
+      afterFet: { impactDb: afterFetImpactDb },
+      afterWet: { spreadDb: at(sweep.opto.spreadDb) },
+      clip: { thresholdDb: clipThresholdDb, depthDb: clipDepthDb, capped: clipCapped },
+      fet: {
+        drive: fetDrive,
+        alignDb: sweep.fet.alignDb,
+        peakDb: lerpAt(sweep.fet.drives, sweep.fet.peakDb, fetDrive),
+        targetImpactDb: targetImpact,
+      },
+      opto: {
+        squash,
+        alignDb: optoAlignDb,
+        peakDb: at(sweep.opto.peakDb),
+        avgDb: at(sweep.opto.avgDb),
+        calibratedSquash: voicing.squash,
+      },
+      blend: sweep.blend,
+      crestRoseBy: wetCrestDb - input.crestDb,
+      /** ⚠ So a reader of the report knows which path produced it. */
+      fromSweep: true,
+    },
   }
 }

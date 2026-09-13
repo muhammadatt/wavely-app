@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 
 import {
   solveDynamics, measureDynamics, levelSpreadDb, measureBlend,
+  sweepDynamics, solveFromSweep,
   VOICINGS, CLIP_MAX_DEPTH_DB,
 } from '../../src/audio/dynamicsSolve.js'
 import { processDynamicsBuffer } from '../../src/audio/dynamicsProcessor.js'

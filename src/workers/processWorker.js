@@ -4,7 +4,7 @@
  * Handles CPU-intensive audio processing tasks off the main thread.
  * Supports: normalize, loudnessNormalize, adjustVolume, la2aAutoMakeup,
  * fet1176AutoMakeup, softClipperAutoMakeup, schepsAutoTrim, softClipperCeiling,
- * voiceProfile, measureLoudness, autoLevelAnalyze, dynamicsSolve
+ * voiceProfile, measureLoudness, autoLevelAnalyze, dynamicsSolve, dynamicsSweep
  */
 import { computeAutoMakeupPlan } from '../audio/la2aProcessor.js'
 import { computeFET1176AutoMakeupDb } from '../audio/fet1176Processor.js'
@@ -15,7 +15,7 @@ import { measureVoiceProfile } from '../audio/voiceProfile.js'
 import { measureLoudness as measureLoudnessOf } from '../audio/dsp/loudness.js'
 import { renderLoudnessNormalize } from '../audio/dsp/loudnessNormalize.js'
 import { analyzeAutoLevel } from '../audio/dsp/autoLevel.js'
-import { solveDynamics } from '../audio/dynamicsSolve.js'
+import { solveDynamics, sweepDynamics } from '../audio/dynamicsSolve.js'
 
 /**
  * ⚠ EVERY REPLY MUST CARRY `__id` BACK. The worker is shared and long-lived
@@ -97,6 +97,9 @@ self.onmessage = function (e) {
     case 'dynamicsSolve':
       dynamicsSolveOp(channelData, sampleRate, params)
       break
+    case 'dynamicsSweep':
+      dynamicsSweepOp(channelData, sampleRate, params)
+      break
     default:
       postReply({ type: 'error', message: `Unknown operation: ${type}` })
   }
@@ -115,6 +118,23 @@ self.onmessage = function (e) {
  */
 function dynamicsSolveOp(channelData, sampleRate, params) {
   postDone({ solution: solveDynamics(channelData, sampleRate, params) })
+}
+
+/**
+ * Every curve the section's knobs sit on, sampled once for the whole region.
+ *
+ * ⚠ THIS IS WHAT THE PANEL ACTUALLY CALLS, and `dynamicsSolve` is kept as the
+ * reference the sweep is scored against (`npm run dynamics:sweep`) rather than
+ * as a second production path. Sampling costs more than one bisect — measured
+ * ~29 s against ~11 s on a 30 s window — and buys every LATER Density and
+ * Voicing move for no renders at all, which is what makes the macro a live
+ * knob instead of a modal wait per move.
+ *
+ * The reply is arrays of plain numbers, so it structured-clones without a
+ * transfer list and can be held in panel state across moves.
+ */
+function dynamicsSweepOp(channelData, sampleRate, params) {
+  postDone({ sweep: sweepDynamics(channelData, sampleRate, params) })
 }
 
 /**
