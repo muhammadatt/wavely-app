@@ -8,7 +8,6 @@ import { getEffectChain } from '../audio/effectChain.js'
 import { dynamicsEffect, DYNAMICS_DEFAULTS } from '../audio/effects/dynamics.js'
 import { VOICINGS, CLIP_MAX_DEPTH_DB } from '../audio/dynamicsSolve.js'
 import { regionCovers } from '../audio/dsp/clipGainDecision.js'
-import { analysisWindow } from '../audio/analysisWindow.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -33,9 +32,29 @@ export { VOICINGS, CLIP_MAX_DEPTH_DB }
 const panel = ref({ ...DYNAMICS_DEFAULTS })
 
 const solution = ref(null)
-/** `docId:revision` the solution was measured on, plus the region it saw. */
+/** `docId:revision` the solution was measured on. */
 const solvedFor = ref(null)
-const solvedRegion = ref(null)
+/**
+ * The SELECTION the solve was asked about — not the capped window it measured.
+ *
+ * ⚠ THE DIFFERENCE BETWEEN THOSE TWO SHIPPED AS A BUG THAT DISABLED APPLY ON
+ * EVERY REAL SELECTION. This held `analysisWindow(start, end)`, which truncates
+ * to AUTO_MAKEUP_MAX_ANALYSIS_S (30 s) from the region's start, and `isStale`
+ * asked whether that window covered the selection. For any selection longer than
+ * 30 s it cannot — by construction, because the window IS a 30 s slice of it — so
+ * the solve reported itself stale the instant it finished, `solutionValid` never
+ * became true, and the Apply button stayed disabled no matter how many times it
+ * was re-run. A narrator's selection is a chapter; almost nothing real is under
+ * 30 s.
+ *
+ * The window is deliberately a slice: what the solve produces is a set of KNOB
+ * POSITIONS, and `analysisWindow`'s own note is that a representative excerpt
+ * answers that as well as ten minutes would. So "does this solve still apply?"
+ * is a question about the selection it was run on, never about the excerpt it
+ * happened to render. `useDeEsser` compares against its analysed region and is
+ * correct because that region IS the whole selection — its analysis is uncapped.
+ */
+const solvedSelection = ref(null)
 const solving = ref(false)
 
 const preview = ref(false)
@@ -64,7 +83,7 @@ export function useDynamics() {
   const isStale = computed(() => {
     if (solution.value === null) return false
     if (solvedFor.value !== timelineKey()) return true
-    return !regionCovers(solvedRegion.value, state.selection)
+    return !regionCovers(solvedSelection.value, state.selection)
   })
   const hasSolution = computed(() => solution.value !== null)
   const solutionValid = computed(() => hasSolution.value && !isStale.value)
@@ -162,7 +181,7 @@ export function useDynamics() {
     panel.value = { ...panel.value, [name]: value }
     solution.value = null
     solvedFor.value = null
-    solvedRegion.value = null
+    solvedSelection.value = null
     push()
   }
 
@@ -180,11 +199,13 @@ export function useDynamics() {
   /**
    * Measure the region and solve the section's device settings.
    *
-   * ⚠ THE WINDOW IS CAPPED AND THE PANEL REMEMBERS WHICH ONE. `computeDynamicsSolve`
-   * goes through the capped analysis window, so the solve saw a bounded, centred
-   * slice of the selection — and the staleness check above compares against THAT,
-   * not against the selection, or moving the playhead outside the measured slice
-   * would silently keep applying numbers measured somewhere else.
+   * ⚠ THE WINDOW IS CAPPED AND WHAT IS REMEMBERED IS THE SELECTION, NOT THE
+   * WINDOW. `computeDynamicsSolve` renders through `analysisWindow`, so it sees
+   * a bounded slice anchored at the region's start — but what it returns is a
+   * set of knob positions for the whole selection, so that selection is what
+   * the staleness check has to compare against. Recording the window instead
+   * made every solve on a selection over 30 s instantly stale; see
+   * `solvedSelection`.
    */
   async function solve() {
     if (!state.currentFile) return
@@ -201,7 +222,7 @@ export function useDynamics() {
       )
       solution.value = result
       solvedFor.value = timelineKey()
-      solvedRegion.value = analysisWindow(start, end)
+      solvedSelection.value = { start, end }
       push()
     } catch (err) {
       console.error('Dynamics solve failed:', err)
@@ -214,7 +235,7 @@ export function useDynamics() {
   function clearSolution() {
     solution.value = null
     solvedFor.value = null
-    solvedRegion.value = null
+    solvedSelection.value = null
     push()
   }
 

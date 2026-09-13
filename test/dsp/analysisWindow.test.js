@@ -22,6 +22,7 @@ import assert from 'node:assert/strict'
 import {
   analysisWindow, analysedWholeRegion, AUTO_MAKEUP_MAX_ANALYSIS_S,
 } from '../../src/audio/analysisWindow.js'
+import { regionCovers } from '../../src/audio/dsp/clipGainDecision.js'
 import {
   processFET1176Buffer, computeFET1176AutoMakeupDb,
 } from '../../src/audio/fet1176Processor.js'
@@ -157,4 +158,32 @@ test('it agrees with the window analysisWindow actually returns', () => {
     assert.equal(analysedWholeRegion(start, end), covers,
       `region ${start}..${end} window ${w.start}..${w.end}`)
   }
+})
+
+test('⚠ the window can NEVER cover the region it came from, past the cap', () => {
+  /**
+   * The bug this pins shipped in the Vocal Dynamics panel and disabled Apply on
+   * every real selection. Its staleness check recorded `analysisWindow(start,
+   * end)` as "what the solve covers" and asked whether that still covered the
+   * selection. For anything longer than the cap it cannot — the window IS a
+   * truncated slice of the region — so the solve reported itself stale the
+   * instant it finished and the Apply button never enabled.
+   *
+   * A capped window is a sampling strategy, not a statement of scope: what the
+   * solve returns is a set of knob positions for the WHOLE selection. So a
+   * "does this still apply?" check must compare against the selection the solve
+   * was run on, never against the excerpt it rendered.
+   */
+  const start = 0
+  const end = AUTO_MAKEUP_MAX_ANALYSIS_S * 4
+  const w = analysisWindow(start, end)
+  assert.ok(w.end < end, 'the window is a strict slice of a long region')
+  assert.ok(!regionCovers(w, { start, end }),
+    'a capped window cannot cover its own region — so it cannot be the staleness span')
+  assert.ok(regionCovers({ start, end }, { start, end }),
+    'the region solved for always covers itself')
+  // Narrowing inside the solved selection is still not stale.
+  assert.ok(regionCovers({ start, end }, { start: 10, end: end - 10 }))
+  // Leaving it is.
+  assert.ok(!regionCovers({ start, end }, { start: 10, end: end + 1 }))
 })
