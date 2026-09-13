@@ -478,13 +478,14 @@ later Density or Voicing move is an interpolation with no renders at all.
 Scored by rendering both param sets through the real stages
 (`npm run dynamics:sweep`):
 
-| Density | 10 | 30 | 50 | 70 | 90 | 100 |
-|---|---|---|---|---|---|---|
-| threshold err (dB) | +0.27 | +0.18 | +0.01 | −0.16 | −0.15 | −0.23 |
-| drive err | +0.7 | +0.4 | −0.3 | +0.4 | +0.4 | +0.4 |
-| **delivered impact err (dB)** | **−0.064** | **−0.034** | **+0.008** | **+0.005** | **+0.005** | **+0.004** |
+Delivered impact error, two narrators:
 
-**Max error in what the section delivers: 0.064 dB**, for ~29 s of sampling paid
+| Density | 10 | 20 | 30 | 40 | 50 | 60+ |
+|---|---|---|---|---|---|---|
+| narrator 1 (48 k, crest 19.79) | −0.104 | −0.080 | −0.078 | −0.084 | −0.047 | ≤0.007 |
+| narrator 2 (44.1 k, crest 16.36) | −0.055 | **−0.136** | −0.129 | −0.011 | +0.015 | ≤0.007 |
+
+**Max error in what the section delivers: 0.136 dB**, for ~28 s of sampling paid
 once. ⚠ **SCORE THE RESULT, NEVER THE KNOBS** — both curves are shallow near the
 solution, so the two paths disagree on knob positions by an order of magnitude
 more than they disagree on the output. The bench's first version compared the
@@ -496,9 +497,23 @@ flagged a 0.80 dB audio problem that does not exist (rendered, the two agree to
 
 - **Clipper — exact.** Its curve is measured on the raw input, so it does not
   depend on Density at all; Density only picks a target on it.
-- **FET — one sample serves the macro.** Its curve is measured on the clipped
-  signal, so it is a function of two variables. Measured across the whole clip
-  range the macro uses: **0.08 dB** of movement.
+- **FET — sampled once, and stored as a DROP rather than an absolute impact.**
+  ⚠ **THE SECOND NARRATOR IS WHAT FORCED THIS.** The curve is sampled at one clip
+  setting, so its drive-0 value is *that* setting's post-clip impact — but the
+  target is computed from the post-clip impact of the threshold actually chosen.
+  Inverting the absolute curve therefore charges the FET for a clipper difference
+  the sweep has already measured separately. On narrator 1 the curves spread only
+  0.08 dB across the clip range and the double-count was invisible; on narrator 2
+  they spread **0.62 dB**, and it cost 0.25 dB of delivered impact at Density 10.
+  Measured as a drop from each curve's own drive-0, the same three curves spread
+  0.44 dB — and at low drive, where the bottom of the macro lives, 0.62 against
+  **0.12**.
+
+  ⚠ **IT IS A TRADE, NOT A FREE WIN, AND THE WORST CASE IS WHAT DECIDES IT.**
+  The drop form takes narrator 2 from 0.252 to 0.136 dB and narrator 1 from 0.064
+  to 0.104 — the absolute form's accidental cancellation on narrator 1 was
+  cancelling an error it had itself introduced. Worst case across both files:
+  0.136 against 0.252.
 - **Opto — indexed by Density, not squash.** ⚠ Indexing by squash scored 0.80 dB
   of reported reduction at Density 100, because the FET's drive rises with
   Density too and the opto ends up looking at a far more compressed signal.
@@ -532,8 +547,11 @@ flagged a 0.80 dB audio problem that does not exist (rendered, the two agree to
    out. One file is not a bench. Fixing it also improved the corpus, taking
    threshold error at Density 90–100 from 0.73/0.54 to 0.15/0.23.
 
-⚠ **ONE VOICE, STILL.** Every tolerance above is one narrator plus one synthetic
-probe. Re-run the bench against another voice before treating them as settled.
+⚠ **TWO VOICES AND ONE SYNTHETIC PROBE, AND ALL THREE FOUND SOMETHING DIFFERENT.**
+The synthetic probe found the non-monotonic crest curve; the second narrator
+found the FET double-count; neither was visible on the first. The tolerances
+above are the worst case over that set, not a bound — a third voice is still the
+cheapest way to find the next one. `npm run dynamics:sweep <file>` is the bench.
 
 **Measured, Density 0 → 100 on narration with phrase-level variation:** block
 spread 3.73 → 2.58 dB, impact 10.16 → 8.06 dB. ⚠ And crest *rises* 2.13 dB at

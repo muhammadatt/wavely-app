@@ -775,6 +775,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     drives.push(drive)
     fetImpact.push(measureDynamics(r.out, sampleRate).impactDb)
     fetPeakDb.push(r.metering.maxGainReductionDb)
+    // ⚠ See `fet.impactDrop` below for why the absolute curve is not what the
+    // lookup uses.
     // ⚠ THE OPTO'S ALIGNMENT IS A CURVE IN THE FET'S DRIVE, because the opto's
     // input IS the FET's output and the FET moves it by many dB across its
     // range. Reading it from the section's input instead is the error the
@@ -868,7 +870,32 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     patch,
     input,
     clip: { thresholds, crest, depth, impact },
-    fet: { alignDb: fetAlignDb, drives, impact: fetImpact, peakDb: fetPeakDb, outAlignDb: fetOutAlignDb },
+    fet: {
+      alignDb: fetAlignDb,
+      drives,
+      impact: fetImpact,
+      peakDb: fetPeakDb,
+      outAlignDb: fetOutAlignDb,
+      /**
+       * ⚠ HOW MUCH IMPACT EACH DRIVE REMOVES, AND THIS IS WHAT THE LOOKUP USES.
+       * The absolute curve above is kept for the bench and for reading; asking
+       * it "which drive reaches impact X" DOUBLE-COUNTS the clipper.
+       *
+       * The curve is sampled at ONE clip setting, so its drive-0 value is that
+       * setting's post-clip impact. The target, though, is computed from the
+       * post-clip impact of the threshold actually chosen — a different number.
+       * Inverting an absolute curve therefore charges the FET for a clipper
+       * difference the sweep has already accounted for.
+       *
+       * ⚠ A SECOND NARRATOR IS WHAT EXPOSED IT. On the first, absolute spread
+       * across the clip range was 0.08 dB and the error was invisible. On the
+       * second: absolute 0.62 dB, but measured as a DROP from each curve's own
+       * drive-0 the same three curves spread only 0.44 — and at low drive,
+       * where the macro's bottom end lives, 0.62 against 0.12. The mismatch
+       * cost 0.25 dB of delivered impact at Density 10.
+       */
+      impactDrop: fetImpact.map(v => fetImpact[0] - v),
+    },
     opto: {
       densities: optoDensities,
       squash: optoSquash,
@@ -918,10 +945,21 @@ export function solveFromSweep(sweep, options = {}) {
     afterClipImpactDb = lerpAt(sweep.clip.thresholds, sweep.clip.impact, clipThresholdDb)
   }
 
-  // ── 2. FET ──────────────────────────────────────────────────────────────
+  // ── 2. FET, on how much impact the drive REMOVES ────────────────────────
+  /**
+   * ⚠ THE DRIVE IS FOUND ON THE DROP CURVE, NOT THE ABSOLUTE ONE. Both describe
+   * the same renders; the difference is what the clipper is charged for. See
+   * `fet.impactDrop` — inverting the absolute curve makes the FET absorb a
+   * clipper difference the lookup above has already measured.
+   */
   const targetImpact = fetTargetImpactFor(voicing, density, afterClipImpactDb)
-  const fetDrive = crossingOf(sweep.fet.drives, sweep.fet.impact, targetImpact)
-  const afterFetImpactDb = lerpAt(sweep.fet.drives, sweep.fet.impact, fetDrive)
+  const wantDrop = afterClipImpactDb - targetImpact
+  // The drop RISES with drive, and `crossingOf` walks a falling curve.
+  const fetDrive = crossingOf(
+    sweep.fet.drives, sweep.fet.impactDrop.map(v => -v), -wantDrop,
+  )
+  const afterFetImpactDb = afterClipImpactDb
+    - lerpAt(sweep.fet.drives, sweep.fet.impactDrop, fetDrive)
 
   // ── 3. Opto, at its own input's alignment ───────────────────────────────
   /**
