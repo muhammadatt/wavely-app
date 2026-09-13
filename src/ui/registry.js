@@ -16,6 +16,7 @@ import DeEsserModal from '../components/panels/DeEsserModal.vue'
 import EqModal from '../components/panels/EqModal.vue'
 import VoiceRxModal from '../components/panels/VoiceRxModal.vue'
 import AutoLevelWindow from '../components/panels/windows/AutoLevelWindow.vue'
+import DynamicsWindow from '../components/panels/windows/DynamicsWindow.vue'
 import NormalizeWindow from '../components/panels/windows/NormalizeWindow.vue'
 import LoudnessWindow from '../components/panels/windows/LoudnessWindow.vue'
 import VocalSaturationWindow from '../components/panels/windows/VocalSaturationWindow.vue'
@@ -231,6 +232,21 @@ export const OPERATIONS = [
     requires: 'selection',
     surface: 'window',
     component: NormalizeWindow,
+  },
+  {
+    id: 'vocal-chain-dynamics',
+    label: 'Vocal Dynamics',
+    desc: 'Clip, compress and glue in one measured move',
+    category: 'effects',
+    group: 'Dynamics',
+    icon: 'opto',
+    keywords: [
+      'vocal chain', 'dynamics', 'density', 'punch', 'glue', 'chain',
+      'compressor', 'clipper', 'macro', 'one click', 'master',
+    ],
+    requires: 'selection',
+    surface: 'window',
+    component: DynamicsWindow,
   },
   {
     id: 'auto-level',

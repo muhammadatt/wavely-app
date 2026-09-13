@@ -55,6 +55,7 @@
  * sentences in one bullet is a sign it should be two bullets. No emoji.
  */
 
+import vocalChainDynamics from './vocal-chain-dynamics.js'
 import autoLevel from './auto-level.js'
 import airBand from './air-band.js'
 import clipGainDeesser from './clip-gain-deesser.js'
@@ -75,6 +76,7 @@ import vocalSaturation from './vocal-saturation.js'
 import voicerx from './voicerx.js'
 
 export const HELP = {
+  'vocal-chain-dynamics': vocalChainDynamics,
   'auto-level': autoLevel,
   'air-band': airBand,
   'clip-gain-deesser': clipGainDeesser,

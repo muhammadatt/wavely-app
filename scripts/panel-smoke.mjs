@@ -41,6 +41,7 @@ const PANELS = [
   'Reso', 'EQ', 'Air Boost', 'De-Esser', 'Inflator', 'Tube Sat',
   'Loudness Normalize',
   'Auto Level',
+  'Vocal Dynamics',
 ]
 
 function writeProbeWav(path) {

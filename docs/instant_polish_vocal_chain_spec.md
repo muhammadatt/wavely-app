@@ -258,10 +258,14 @@ rests on.
                            └─ wet ─ Pultec pre ─ Opto ─ Pultec post ┘
 ```
 
-✓ **Kernel, solve, worklet and apply path landed.** Latency is 150 samples and
+✓ **Section complete** — kernel, solve, worklet, apply path and panel. Latency is 150 samples and
 constant across every patch; Mix 0 is bit-exact against clip → FET alone, which
-is also the only direct check on the dry delay. The panel is the remaining
-increment.
+is also the only direct check on the dry delay.
+
+⚠ **The panel shows three meters and never a sum.** A single bar would hide
+which device is working, and in particular would hide the clipper sitting on its
+cap — the one failure the design says must never be silent. The cap and the
+opto's peak-to-body trade both surface as captions when they bind.
 
 ⚠ **Composing three shipping kernels required guarding two of them.** The repo
 holds an invariant — no worklet entry point may import another — with one

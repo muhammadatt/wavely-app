@@ -15,7 +15,19 @@ const {
   analyze, syncConfig, togglePreview, apply, teardown, closeModal,
 } = useAutoLevel()
 
-const { state, togglePlayback } = useEditorState()
+const { state } = useEditorState()
+
+/**
+ * The transport, the way every other faceplate reaches it: a window event, not
+ * a composable call. `useEditorState` deliberately does not expose playback —
+ * the harness owns it — and destructuring a `togglePlayback` from it silently
+ * produced `undefined`, which the preview button would have called on click.
+ * `test/ui/composableDestructure.test.js` is what caught that.
+ */
+function togglePlayback() {
+  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
+}
+
 
 const ACCENT = '#6ee7b7'
 
