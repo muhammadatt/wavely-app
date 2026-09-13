@@ -6,6 +6,12 @@
  *   npm run fet:stimulus    write the test signals
  *   npm run fet:selftest    prove the recovery on our own kernel
  *
+ * See `docs/fet1176_capture_protocol.md` for the full protocol — the
+ * control-parity check, the four-bounce null test that can disqualify a
+ * reference before the other thirty-eight, and what to log per capture. This
+ * script builds the stimulus and proves the recovery; the doc is how to run the
+ * bounces.
+ *
  * ⚠ EACH MODE HAS ITS OWN NPM SCRIPT WITH THE FLAG BAKED IN, AND THAT IS NOT
  * COSMETIC. `npm run fet:ballistics -- --stimulus` can reach this file with an
  * EMPTY argv on Windows — PowerShell and some npm/shell combinations swallow the
@@ -128,7 +134,7 @@
  */
 
 import { mkdirSync, existsSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import { writeFloatWav } from './lib/wav.js'
@@ -519,13 +525,29 @@ CAPTURE MATRIX — the stimulus files above do not change across it, only knobs 
 
 Captures go in ${CAP_DIR} (gitignored — *.wav is ignored repo-wide, so no
 licensed audio reaches the repo).
+
+⚠ RUN THE FOUR-BOUNCE NULL TEST FIRST. It can disqualify a reference, or show a
+  knob is not what it says, before you spend the other 38. Full protocol,
+  including what to log per capture:  docs/fet1176_capture_protocol.md
 `)
 }
 
-const args = process.argv.slice(2)
-const sr = rateFromArgs(args)
+/**
+ * ⚠ THE CLI RUNS ONLY WHEN THIS FILE IS THE ENTRY POINT, and that guard is
+ * load-bearing rather than tidy. The plan builders above are exported BECAUSE a
+ * fitter is meant to import them rather than read a manifest — and without this
+ * check, `import { PLANS }` executed the argv dispatch and printed the usage
+ * text into the importer's output. Caught by importing it.
+ */
+const isEntryPoint = process.argv[1]
+  && import.meta.url === pathToFileURL(process.argv[1]).href
 
-if (args.includes('--selftest')) {
+const args = isEntryPoint ? process.argv.slice(2) : []
+const sr = isEntryPoint ? rateFromArgs(args) : DEFAULT_SR
+
+if (!isEntryPoint) {
+  // imported as a library — the plans and `runKernel` are the API
+} else if (args.includes('--selftest')) {
   selftest(sr)
 } else if (args.includes('--stimulus')) {
   writeStimulus(sr)
