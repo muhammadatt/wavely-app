@@ -28,9 +28,34 @@ test('nothing measured can reach a preset', () => {
     assert.ok(!(key in DYNAMICS_DEFAULTS),
       `${key} is measured from the file and must not be a panel param`)
   }
-  // And the panel holds only the four things a patch should describe.
+  /**
+   * And the panel holds ONLY things that describe an intention: how much
+   * (density), in what character (voicing), which compressor does it
+   * (balance), how much wet (mix) and the trim. Every one of them is portable —
+   * a patch saved on one file means the same thing on another.
+   *
+   * ⚠ THIS LIST IS PINNED EXACTLY, and that is deliberate rather than fussy.
+   * The failure it guards is a measured value being added to the panel for
+   * convenience — a threshold, a drive, an alignment — which would silently
+   * bake one recording's gain staging into every preset saved from it. An
+   * `assert.ok(key in ...)` per key would not catch an ADDITION.
+   */
   assert.deepEqual(Object.keys(DYNAMICS_DEFAULTS).sort(),
-    ['density', 'mix', 'outputDb', 'voicing'])
+    ['balance', 'density', 'mix', 'outputDb', 'voicing'])
+})
+
+test('⚠ Balance is a SOLVE input and never reaches the kernel', () => {
+  /**
+   * It shifts the voicing's impact target and squash before the lookup. The
+   * kernel has no opinion about it and must never receive it — `toKernelParams`
+   * names every key it passes on, so a key added to the panel does not leak
+   * through by default, and this pins that.
+   */
+  assert.ok('balance' in DYNAMICS_DEFAULTS)
+  const mapped = toKernelParams({ ...DYNAMICS_DEFAULTS, balance: 75 })
+  assert.ok(!('balance' in mapped), 'balance leaked into the kernel params')
+  // And it changes nothing the kernel reads, on its own.
+  assert.deepEqual(mapped, toKernelParams({ ...DYNAMICS_DEFAULTS, balance: -75 }))
 })
 
 test('an un-solved panel maps to the kernel\'s own defaults', () => {

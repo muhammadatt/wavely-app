@@ -21,7 +21,10 @@
 import { readWav } from '../test/voicerx/wav.js'
 import { SoftClipperKernel } from '../src/audio/softClipperProcessor.js'
 import { FET1176Kernel } from '../src/audio/fet1176Processor.js'
-import { clipParamsFor, fetParamsFor, clipEnabled, DYNAMICS_KERNEL_DEFAULTS } from '../src/audio/dynamicsProcessor.js'
+import {
+  clipParamsFor, fetParamsFor, clipEnabled, processDynamicsBuffer,
+  DYNAMICS_KERNEL_DEFAULTS,
+} from '../src/audio/dynamicsProcessor.js'
 import { inputAlignDbFor } from '../src/audio/dsp/inputAlign.js'
 import {
   measureDynamics, solveDynamics, sweepDynamics, solveFromSweep, VOICINGS,
@@ -132,3 +135,32 @@ const spread = DRIVES.map((_, i) => {
 })
 console.log('   spread |' + spread.map(v => fmt(v, 9)).join(''))
 console.log(`\nmax spread across the whole clip range: ${Math.max(...spread).toFixed(3)} dB`)
+
+// ── Balance: does the report follow it? ────────────────────────────────────
+/**
+ * ⚠ THE OPTO'S REPORTED REDUCTION IS THE FRAGILE FIGURE HERE, and Balance is
+ * what broke it twice. It depends on the FET's drive AND the opto's depth, and
+ * Balance moves those in OPPOSITE directions at a fixed Density — so a curve in
+ * either one alone reads the wrong cell. The audio is not at risk (`squash` is
+ * computed, `optoAlignDb` comes off the FET curve); the panel's number is.
+ */
+console.log('\nBalance — reported opto GR against what the opto really does')
+console.log('  D  bal | FET GR  opto GR | reported   err')
+let worstOpto = 0
+let worstImpact = 0
+for (const d of [30, 50, 60]) {
+  for (const bal of [-1, -0.5, 0, 0.5, 1]) {
+    const truth = solveDynamics(x, sampleRate, { density: d, balance: bal })
+    const swept = solveFromSweep(sweep, { density: d, balance: bal })
+    const r = processDynamicsBuffer(x, sampleRate, { ...swept.params, oversample: false })
+    const real = r.metering.opto.peak
+    const optoErr = swept.report.opto.peakDb - real
+    const impErr = deliver(swept.params).impactDb - deliver(truth.params).impactDb
+    worstOpto = Math.max(worstOpto, Math.abs(optoErr))
+    worstImpact = Math.max(worstImpact, Math.abs(impErr))
+    console.log(`${String(d).padStart(4)}${fmt(bal, 5, 1)} |${fmt(r.metering.fet.peak, 7)}`
+      + `${fmt(real, 9)} |${fmt(swept.report.opto.peakDb, 9)}${fmt(optoErr, 7)}`)
+  }
+}
+console.log(`\nunder Balance: delivered impact ${worstImpact.toFixed(3)} dB, `
+  + `REPORTED opto GR ${worstOpto.toFixed(2)} dB`)

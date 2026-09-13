@@ -33,14 +33,24 @@ export const DYNAMICS_LATENCY_SAMPLES = 150
  * `solveDynamics` and arrives with the solve, not from here.
  *
  * ⚠ THE SEPARATION IS THE POINT, AND IT IS WHAT MAKES A PRESET PORTABLE. A
- * saved patch is a macro position, a voicing and a blend — three things that
- * describe an intention. The threshold, the drives, the two alignment offsets
+ * saved patch is a macro position, a voicing, a balance and a blend — four
+ * things that describe an intention. The threshold, the drives, the two alignment offsets
  * and the blend's correlation all describe THE FILE, and a preset carrying any
  * of them would apply one recording's gain staging to another.
  */
 export const DYNAMICS_DEFAULTS = {
   density: 50, // the macro, 0-100
   voicing: 'audiobook',
+  /**
+   * WHICH compressor does the work, −100 (FET) … 0 (as voiced) … +100 (opto).
+   *
+   * ⚠ A SOLVE INPUT, NOT A KERNEL PARAM. It shifts the voicing's `impactDb` and
+   * `squash` before the lookup and never appears in what the kernel reads —
+   * `toKernelParams` below names every key it passes on, and this is not one of
+   * them. It belongs on the panel because it is an intention, the same as
+   * Density and Voicing, and a preset carrying it is portable.
+   */
+  balance: 0,
   /**
    * Null means "take the voicing's own blend". A number is the user overriding
    * it, which survives a re-solve — the same contract AUTO knobs have

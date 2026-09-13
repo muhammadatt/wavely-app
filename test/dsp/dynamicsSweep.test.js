@@ -20,7 +20,8 @@ import assert from 'node:assert/strict'
 import {
   sweepDynamics, solveFromSweep, solveDynamics, measureDynamics,
   clipShaveFor, fetTargetImpactFor, squashFor,
-  VOICINGS, SWEEP_POINTS, OPTO_SWEEP_POINTS, CLIP_MAX_DEPTH_DB,
+  effectiveVoicing, BALANCE_IMPACT_DB, BALANCE_SQUASH_SCALE, MAX_SQUASH,
+  VOICINGS, SWEEP_POINTS, OPTO_GRID_DRIVES, OPTO_GRID_SQUASH, CLIP_MAX_DEPTH_DB,
 } from '../../src/audio/dynamicsSolve.js'
 import {
   processDynamicsBuffer, clipParamsFor, DYNAMICS_KERNEL_DEFAULTS,
@@ -57,7 +58,10 @@ test('a sweep is plain numbers, so it crosses the worker boundary', () => {
   const round = structuredClone(sweep)
   assert.equal(round.clip.thresholds.length, SWEEP_POINTS)
   assert.equal(round.fet.drives.length, SWEEP_POINTS)
-  assert.equal(round.opto.densities.length, OPTO_SWEEP_POINTS)
+  assert.equal(round.opto.drives.length, OPTO_GRID_DRIVES)
+  assert.equal(round.opto.squash.length, OPTO_GRID_SQUASH)
+  assert.equal(round.opto.peakDb.length, OPTO_GRID_DRIVES)
+  assert.equal(round.opto.peakDb[0].length, OPTO_GRID_SQUASH)
   assert.equal(JSON.stringify(round.blend), JSON.stringify(sweep.blend))
 })
 
@@ -226,4 +230,62 @@ test('silence is swept and looked up without crashing', () => {
   assert.ok(Number.isFinite(params.optoAlignDb))
   assert.equal(params.correlation, 0)
   assert.ok(report.opto.peakDb < 0.5, `silence should not be compressed: ${report.opto.peakDb}`)
+})
+
+test('⚠ Balance moves the two voicing numbers in OPPOSITE senses', () => {
+  /**
+   * ⚠ THE SIGNS ARE THE EASY THING TO GET BACKWARDS. A HIGHER `impactDb` is a
+   * SLACKER target — it asks the FET to leave more peak-to-body alone — so
+   * leaning toward the opto RAISES it. `squash` is a depth, so leaning toward
+   * the opto raises that too. Both go up together; only one of them means
+   * "do less". An inverted sign here would make Balance a second Density.
+   */
+  const v = VOICINGS.audiobook
+  const opto = effectiveVoicing(v, 1)
+  const fet = effectiveVoicing(v, -1)
+
+  assert.equal(opto.impactDb, v.impactDb + BALANCE_IMPACT_DB)
+  assert.equal(fet.impactDb, v.impactDb - BALANCE_IMPACT_DB)
+  assert.ok(opto.squash > v.squash && fet.squash < v.squash)
+  // The clipper and the blend are NOT part of the trade.
+  assert.equal(opto.clipShaveDb, v.clipShaveDb)
+  assert.equal(opto.mix, v.mix)
+  // Centre is the voicing itself, untouched — not a rebuilt copy of it.
+  assert.equal(effectiveVoicing(v, 0), v)
+  // A stray percent pins rather than running away.
+  assert.deepEqual(effectiveVoicing(v, 75), effectiveVoicing(v, 1))
+  assert.deepEqual(effectiveVoicing(v, NaN), v)
+})
+
+test('⚠ the opto grid reaches the deepest squash ANY voicing can ask for', () => {
+  /**
+   * The grid is what the reported opto reduction is read from. If its squash
+   * axis stopped at the widest voicing, every leaned patch would land on the
+   * clamp — reporting the same number for Balance +50 and +100. `MAX_SQUASH` is
+   * derived from VOICINGS and the Balance range for exactly that reason.
+   */
+  for (const v of Object.values(VOICINGS)) {
+    assert.ok(effectiveVoicing(v, 1).squash <= MAX_SQUASH + 1e-9,
+      `${v.squash} leaned to ${effectiveVoicing(v, 1).squash} exceeds the grid`)
+  }
+  assert.equal(MAX_SQUASH,
+    Math.max(...Object.values(VOICINGS).map(v => v.squash)) * (1 + BALANCE_SQUASH_SCALE))
+})
+
+test('Balance actually shifts the work between the two compressors', () => {
+  const x = [narration(12, -6)]
+  const sweep = sweepDynamics(x, SR)
+  const at = (balance) => {
+    const { params } = solveFromSweep(sweep, { density: 50, balance })
+    const r = processDynamicsBuffer(x, SR, params)
+    return { fet: r.metering.fet.peak, opto: r.metering.opto.peak }
+  }
+  const fetLean = at(-1)
+  const even = at(0)
+  const optoLean = at(1)
+
+  assert.ok(optoLean.opto > even.opto && even.opto > fetLean.opto,
+    `opto should deepen toward +1: ${fetLean.opto} / ${even.opto} / ${optoLean.opto}`)
+  assert.ok(optoLean.fet < even.fet,
+    `the FET should back off toward +1: ${even.fet} -> ${optoLean.fet}`)
 })

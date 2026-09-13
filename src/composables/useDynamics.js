@@ -192,9 +192,19 @@ export function useDynamics() {
     push()
   }
 
-  /** The sweep lookup's inputs. Mix is left out: it is applied after the law. */
+  /**
+   * The sweep lookup's inputs. Mix is left out: it is applied after the law.
+   *
+   * ⚠ BALANCE IS A PANEL PERCENT AND THE SOLVE TAKES A FRACTION. The knob reads
+   * −100…+100 so it can say "OPTO 60" rather than "0.6"; `effectiveVoicing`
+   * clamps to ±1, so a stray percent would silently pin instead of throwing.
+   */
   function macroOptions() {
-    return { density: panel.value.density, voicing: panel.value.voicing }
+    return {
+      density: panel.value.density,
+      voicing: panel.value.voicing,
+      balance: (panel.value.balance ?? 0) / 100,
+    }
   }
 
   function syncBlend(name, value) {

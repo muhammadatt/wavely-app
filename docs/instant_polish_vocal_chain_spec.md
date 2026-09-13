@@ -553,6 +553,72 @@ found the FET double-count; neither was visible on the first. The tolerances
 above are the worst case over that set, not a bound — a third voice is still the
 cheapest way to find the next one. `npm run dynamics:sweep <file>` is the bench.
 
+### Balance — which compressor does the work
+
+Density says *how much* the section does; Balance says *which device* does it.
+−100 leans on the FET, +100 on the opto, 0 is the voicing as calibrated.
+
+It moves exactly two voicing numbers and nothing else:
+
+| | at Balance +1 (opto) | at Balance −1 (FET) |
+|---|---|---|
+| `impactDb` (FET's target) | +2.0 dB | −2.0 dB |
+| `squash` (opto's depth) | ×1.45 | ×0.55 |
+
+⚠ **The signs are the easy thing to get backwards.** A *higher* `impactDb` is a
+*slacker* target — it asks the FET to leave more peak-to-body alone — so leaning
+toward the opto raises it. `squash` is a depth, so leaning toward the opto raises
+that too. Both go up together; only one of them means "do less".
+
+⚠ **The clipper and the blend are deliberately untouched.** The clipper is not
+one of the two compressors being traded between, and it already has a hard cap
+that Density backs off from — folding it in would give Balance a second way to
+hit that cap for reasons its label does not suggest. Mix is a blend position the
+user owns, not a distribution of work.
+
+Measured, Density 60, audiobook (FET peak GR / opto peak GR):
+
+| Balance | −100 | −50 | 0 | +50 | +100 |
+|---|---|---|---|---|---|
+| FET GR (dB) | 26.6 | 26.6 | 26.6 | 16.6 | **9.4** |
+| opto GR (dB) | 1.0 | 2.4 | 3.9 | 4.9 | **5.8** |
+
+⚠ **IT ONLY BITES BELOW ROUGHLY DENSITY 60 ON THE FET SIDE.** Above that the
+FET's drive pins at 100 and `impactDb` stops reaching, so the top of the macro is
+"FET flat out, opto scaling" and Balance moves the opto half alone. That is a
+property of the macro, not of this control.
+
+**It costs no renders.** Both numbers are read by lookups on the sampled curves,
+so Balance is live and never invalidates a sweep — exactly like Density and
+Voicing. Panel state goes to five keys, all of them intentions; nothing measured
+joins them.
+
+#### ⚠ Balance broke the opto's reported reduction, twice over
+
+The audio was never at risk — `squash` is computed and `optoAlignDb` comes off
+the FET curve, so delivered impact stays at **0.086 / 0.210 dB** across the whole
+Balance range on the two narrators. What broke was the number the panel prints.
+
+The opto's reduction depends on its **depth** *and* on **what the FET handed it**,
+and Balance moves those in opposite directions at a fixed Density. So:
+
+| the opto's report indexed by… | worst error | why it failed |
+|---|---|---|
+| squash alone | 0.80 dB | drive rises with Density too |
+| Density alone | **2.86 dB** | Balance moves drive and squash oppositely |
+| **(drive × squash) grid, 4×6** | **0.70 dB** | — |
+
+The panel was reading 3.90 dB where the opto was really doing 1.04. A 4×4 grid
+got it to 1.45 dB; the residual was the squash axis being too coarse where the
+curve bends, so 4×6 — one extra FET render's worth of wet renders, and the build
+went 28 → 29.7 s. The remaining 0.70 dB sits where the opto is barely working
+(0.19 dB real against 0.70 reported at Density 30), so it is an absolute error in
+a region where the number is near zero anyway.
+
+⚠ **THE LESSON IS THE SHAPE, NOT THE GRID.** A reported figure that depends on
+two independently-moving controls cannot be a curve in either one, and it read
+correctly right up until the second control existed.
+
 **Measured, Density 0 → 100 on narration with phrase-level variation:** block
 spread 3.73 → 2.58 dB, impact 10.16 → 8.06 dB. ⚠ And crest *rises* 2.13 dB at
 full Density — the predicted trade, evenness bought with headroom, surfaced in

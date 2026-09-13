@@ -322,6 +322,65 @@ export const VOICINGS = Object.freeze({
  */
 
 /**
+ * ── BALANCE: WHICH COMPRESSOR DOES THE WORK ─────────────────────────────────
+ *
+ * Density says HOW MUCH the section does. Balance says WHICH DEVICE does it —
+ * −1 leans on the FET, +1 leans on the opto, 0 is the voicing as calibrated.
+ *
+ * ⚠ IT MOVES TWO VOICING NUMBERS AND NOTHING ELSE, which is what keeps it free
+ * at runtime. `impactDb` is the FET's target and `squash` is the opto's depth;
+ * both are read by lookups on the sampled curves, so Balance costs no renders
+ * and never invalidates a sweep — exactly like Density and Voicing.
+ *
+ * ⚠ THE TWO MOVE IN OPPOSITE SENSES AND THE SIGNS ARE EASY TO GET BACKWARDS.
+ * A HIGHER `impactDb` is a SLACKER target — it asks the FET to leave more
+ * peak-to-body alone — so leaning toward the opto RAISES it. `squash` is a
+ * depth, so leaning toward the opto raises that too. Both go up together; only
+ * one of them means "do less".
+ *
+ * ⚠ THE CLIPPER AND THE BLEND ARE DELIBERATELY UNTOUCHED. The clipper is not
+ * one of the two compressors this trades between, and it already has a hard cap
+ * that Density backs off from; folding it in would give Balance a second way to
+ * hit that cap for reasons the label does not suggest. Mix is a blend position
+ * the user owns, not a distribution of work.
+ *
+ * Measured on narration, Density 60, audiobook — the range this was sized
+ * against (FET peak GR / opto peak GR):
+ *
+ *   balance   0 (ships)      26.58 / 3.90
+ *   balance +1 (opto)         9.43 / 5.80
+ *
+ * ⚠ AND IT ONLY BITES BELOW ROUGHLY DENSITY 60 ON THAT MATERIAL, because the
+ * FET's drive pins at 100 above it and `impactDb` stops reaching. That is a
+ * property of the macro, not of this knob: past the pin the top of the macro is
+ * "FET flat out, opto scaling", and Balance can still move the opto half.
+ */
+
+/** dB added to the FET's impact target at full opto lean. */
+export const BALANCE_IMPACT_DB = 2.0
+
+/** Fraction the opto's depth is scaled by at full lean, either way. */
+export const BALANCE_SQUASH_SCALE = 0.45
+
+/**
+ * The voicing as Balance leaves it. Everything downstream reads THIS, never
+ * `VOICINGS[key]` directly, so the two solve paths cannot disagree about what
+ * the knob did.
+ *
+ * @param {object} voicing a VOICINGS entry
+ * @param {number} balance −1 (lean FET) … 0 (as calibrated) … +1 (lean opto)
+ */
+export function effectiveVoicing(voicing, balance = 0) {
+  const b = clamp(Number.isFinite(balance) ? balance : 0, -1, 1)
+  if (b === 0) return voicing
+  return {
+    ...voicing,
+    impactDb: voicing.impactDb + BALANCE_IMPACT_DB * b,
+    squash: voicing.squash * (1 + BALANCE_SQUASH_SCALE * b),
+  }
+}
+
+/**
  * ── THE TARGETS ─────────────────────────────────────────────────────────────
  *
  * ⚠ SHARED BY THE BISECT SOLVE AND THE SWEEP, AND THAT IS THE POINT. The two
@@ -377,7 +436,8 @@ export const CLIP_MAX_DEPTH_DB = 3
  */
 export function solveDynamics(channelData, sampleRate, options = {}) {
   const density = clamp(options.density ?? 50, 0, 100) / 100
-  const voicing = VOICINGS[options.voicing] ?? VOICINGS.audiobook
+  const calibrated = VOICINGS[options.voicing] ?? VOICINGS.audiobook
+  const voicing = effectiveVoicing(calibrated, options.balance)
   const patch = { ...DYNAMICS_KERNEL_DEFAULTS, ...(options.patch ?? {}) }
 
   const input = measureDynamics(channelData, sampleRate)
@@ -488,7 +548,15 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
         peakDb: wetRun.metering.maxGainReductionDb,
         avgDb: wetRun.metering.avgGainReductionDb,
         /** The depth this voicing is calibrated to, before Density scales it. */
-        calibratedSquash: voicing.squash,
+        /**
+         * ⚠ THE VOICING'S OWN DEPTH, NOT THE ONE BALANCE ASKED FOR. This field
+         * exists so a reader can see how far Density has scaled the calibrated
+         * anchor; quoting the balanced value would make the anchor look like it
+         * moves, which is the one thing it must not appear to do.
+         */
+        calibratedSquash: calibrated.squash,
+        /** What Balance did to it, so the pair is readable together. */
+        balancedSquash: voicing.squash,
       },
       blend,
       /**
@@ -639,21 +707,25 @@ export const SWEEP_POINTS = 12
 export const CLIP_SWEEP_RANGE_DB = 24
 
 /**
- * Points on the opto's DENSITY trajectory. Fewer than the knob curves because
- * each one is a full head render (clip -> FET -> wet), and because what it
- * feeds is the report rather than the audio.
+ * Grid resolution for the opto's reported reduction: drives x squash.
+ *
+ * Coarser than the knob curves because each cell is a wet render and what it
+ * feeds is the REPORT, never the audio — `squash` is computed and `optoAlignDb`
+ * comes off the FET curve. Both axes are smooth, so bilinear on 4x4 is enough;
+ * the drive axis reuses one FET render per row.
  */
-export const OPTO_SWEEP_POINTS = 6
+export const OPTO_GRID_DRIVES = 4
+export const OPTO_GRID_SQUASH = 6
 
 /**
- * ⚠ THE TRAJECTORY IS WALKED FOR ONE VOICING, AND THE OTHERS READ OFF IT. Each
- * voicing bends the path differently — its own clip shave, impact target and
- * squash — so a per-voicing trajectory would triple the build. The audio is
- * unaffected either way (`squash` and `optoAlignDb` are computed per voicing);
- * what rides on this is the reported opto reduction. `npm run dynamics:sweep`
- * scores the other two against their own bisect.
+ * The widest depth any voicing can ask for, Balance included — the squash axis
+ * has to reach it or the grid clamps exactly where a leaned patch lives.
+ *
+ * ⚠ DERIVED, NOT TYPED. A new voicing or a wider Balance range must not
+ * silently fall off the end of the grid.
  */
-const TRAJECTORY_VOICING = VOICINGS.audiobook
+export const MAX_SQUASH = Math.max(...Object.values(VOICINGS).map(v => v.squash))
+  * (1 + BALANCE_SQUASH_SCALE)
 
 /**
  * Interpolate `ys` at `xq`, given `xs` ASCENDING. Clamps at both ends.
@@ -670,6 +742,33 @@ function lerpAt(xs, ys, xq) {
     }
   }
   return ys[n - 1]
+}
+
+/**
+ * Bilinear lookup on `grid[i][j]`, sampled at `xs[i]` by `ys[j]`.
+ *
+ * Clamps at every edge: off the grid means the nearest cell, which for the
+ * opto's report is "as deep as we sampled" rather than an extrapolation into a
+ * region nothing was measured in.
+ */
+function bilinearAt(xs, ys, grid, xq, yq) {
+  const span = (arr, q) => {
+    const n = arr.length
+    if (q <= arr[0]) return [0, 0, 0]
+    if (q >= arr[n - 1]) return [n - 1, n - 1, 0]
+    for (let i = 1; i < n; i++) {
+      if (q <= arr[i]) {
+        const d = arr[i] - arr[i - 1]
+        return [i - 1, i, d === 0 ? 0 : (q - arr[i - 1]) / d]
+      }
+    }
+    return [n - 1, n - 1, 0]
+  }
+  const [x0, x1, tx] = span(xs, xq)
+  const [y0, y1, ty] = span(ys, yq)
+  const a = grid[x0][y0] + ty * (grid[x0][y1] - grid[x0][y0])
+  const b = grid[x1][y0] + ty * (grid[x1][y1] - grid[x1][y0])
+  return a + tx * (b - a)
 }
 
 /**
@@ -784,85 +883,94 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     fetOutAlignDb.push(inputAlignDbFor(r.out, sampleRate))
   }
 
-  // ── 3. Opto, sampled along the DENSITY TRAJECTORY ───────────────────────
+  // ── 3. Opto, sampled on a (DRIVE x SQUASH) GRID ─────────────────────────
   /**
-   * ⚠ INDEXED BY DENSITY, NOT BY SQUASH, AND THE FIRST VERSION GOT THIS WRONG.
+   * ⚠ A GRID, BECAUSE THE TWO THINGS THAT SET THE OPTO'S REDUCTION NOW MOVE
+   * INDEPENDENTLY. This has been wrong twice, in opposite directions, and the
+   * history is the argument for the shape.
    *
-   * Sampling the opto's curve at one FET setting and looking it up by squash
-   * scored 0.80 dB of error on reported gain reduction at Density 100 — the
-   * bisect measured 8.35 dB where the sweep reported 7.56. The reason is that
-   * squash is not the only thing moving: the FET's drive rises with Density
-   * too, so by Density 100 the opto is looking at a far more compressed signal
-   * than the mid setting the curve was sampled at, and it grabs more of it.
+   * FIRST: a curve in SQUASH, sampled at one FET setting. It scored 0.80 dB of
+   * error at Density 100 — the FET's drive rises with Density too, so the opto
+   * ends up looking at a far more compressed signal than the sample point.
    *
-   * ⚠ AND ALIGNMENT DOES NOT RESCUE IT, WHICH IS THE CORRECTION WORTH KEEPING.
-   * The reasoning for sampling at one point was that `optoAlignDb` normalises
-   * the cell's input, so a curve behind an alignment is a curve in knob
-   * position rather than in level. That is true of LEVEL and false of SHAPE:
-   * alignment matches gated RMS, and gain reduction is an integral over the
-   * envelope DISTRIBUTION, which the FET has been flattening all the way up the
-   * macro. Same energy, different crest, different reduction.
+   * ⚠ ALIGNMENT DOES NOT RESCUE THAT, and the reasoning that said it would is
+   * worth keeping: `optoAlignDb` normalises the cell's input, so a curve behind
+   * an alignment is a curve in knob position rather than in level. True of
+   * LEVEL, false of SHAPE — alignment matches gated RMS, and gain reduction is
+   * an integral over the envelope DISTRIBUTION, which the FET has been
+   * flattening all the way up the macro. Same energy, different crest,
+   * different reduction.
    *
-   * ⚠ THE AUDIO WAS NEVER WRONG — only the number the panel printed. Rendered
-   * through the real kernel, the two paths' opto reduction agrees to 0.009 dB,
-   * because `squash` is `voicing.squash × density` in both and the interpolated
-   * `optoAlignDb` lands within 0.26 dB. That is why this had to be scored by
-   * rendering both param sets rather than by comparing a measured figure to an
-   * interpolated one: the bench's first version flagged an audio problem that
-   * did not exist and hid a reporting one that did.
+   * SECOND: a curve in DENSITY, walked along the shipping voicing's trajectory.
+   * That was right while Density was the only axis — and Balance broke it the
+   * day it arrived, because it moves drive and squash in OPPOSITE directions at
+   * a fixed Density. Measured, the reported reduction was out by up to 2.86 dB:
+   * the panel read 3.90 dB where the opto was really doing 1.04.
    *
-   * So the trajectory is walked directly: each point solves the head from the
-   * curves above, renders it, and measures where the opto actually sits.
+   * ⚠ THE AUDIO WAS CORRECT IN BOTH CASES — only the number the panel printed
+   * was wrong. `squash` is computed, never interpolated, and the interpolated
+   * `optoAlignDb` lands within 0.26 dB, so rendered reduction agrees to 0.009
+   * dB. That is why this is scored by rendering both param sets and comparing
+   * the RESULT: the bench's first version flagged an audio problem that did not
+   * exist and hid a reporting one that did.
+   *
+   * So: sample the two axes that actually determine it. The grid is bilinear in
+   * (drive, squash) and covers every voicing and every Balance position,
+   * because the squash axis runs to the widest any of them can ask for.
    */
-  const optoDensities = []
-  const optoSquash = []
-  const optoAlign = []
-  const optoPeakDb = []
-  const optoAvgDb = []
-  const wetCrestDb = []
-  const wetSpreadDb = []
+  const gridDrives = []
+  const gridSquash = []
+  for (let i = 0; i < OPTO_GRID_DRIVES; i++) {
+    gridDrives.push((100 * i) / (OPTO_GRID_DRIVES - 1))
+  }
+  for (let j = 0; j < OPTO_GRID_SQUASH; j++) {
+    gridSquash.push((MAX_SQUASH * j) / (OPTO_GRID_SQUASH - 1))
+  }
+
+  // [driveIndex][squashIndex]
+  const gridPeakDb = []
+  const gridAvgDb = []
+  const gridCrestDb = []
+  const gridSpreadDb = []
+  const gridAlignDb = []
   let blend = { correlation: 0, densityDb: 0, trimDb: 0 }
-  const midPoint = Math.floor(OPTO_SWEEP_POINTS / 2)
-  for (let i = 0; i < OPTO_SWEEP_POINTS; i++) {
-    const density = i / (OPTO_SWEEP_POINTS - 1)
-    const shave = clipShaveFor(TRAJECTORY_VOICING, density)
-    let head = channelData
-    if (shave > 0.05) {
-      const th = Math.max(
-        crossingOf(thrDesc, crestDesc, input.crestDb - shave),
-        crossingOf(thrDesc, depthDesc.map(v => -v), -CLIP_MAX_DEPTH_DB),
-      )
-      head = renderClip(channelData, sampleRate, { ...patch, clipThresholdDb: th }).out
-    }
-    const headAlign = inputAlignDbFor(head, sampleRate)
-    const target = fetTargetImpactFor(
-      TRAJECTORY_VOICING, density,
-      measureDynamics(head, sampleRate).impactDb,
-    )
-    const drive = crossingOf(drives, fetImpact, target)
+  const midDrive = Math.floor(OPTO_GRID_DRIVES / 2)
+  const midSquash = Math.floor(OPTO_GRID_SQUASH / 2)
+
+  for (let i = 0; i < OPTO_GRID_DRIVES; i++) {
     const dry = renderFet(
-      head, sampleRate, { ...patch, fetDrive: drive, fetAlignDb: headAlign },
+      midClip, sampleRate, { ...patch, fetDrive: gridDrives[i], fetAlignDb },
     ).out
     const align = inputAlignDbFor(dry, sampleRate)
-    const squash = squashFor(TRAJECTORY_VOICING, density)
-    const r = renderWet(dry, sampleRate, { ...patch, squash, optoAlignDb: align })
-    const m = measureDynamics(r.out, sampleRate)
-
-    optoDensities.push(density)
-    optoSquash.push(squash)
-    optoAlign.push(align)
-    optoPeakDb.push(r.metering.maxGainReductionDb)
-    optoAvgDb.push(r.metering.avgGainReductionDb)
-    wetCrestDb.push(m.crestDb)
-    wetSpreadDb.push(m.spreadDb)
-    /**
-     * ⚠ MEASURED ONCE, MID-TRAJECTORY. Across the whole Density range the blend
-     * moves 0.0122 of correlation and 0.300 dB of density, which is 0.034 dB of
-     * level through the mix law at its worst Mix position — below the 0.06 dB
-     * the sweep already concedes on impact, so sampling it per point would buy
-     * nothing.
-     */
-    if (i === midPoint) blend = measureBlend(dry, r.out, sampleRate, r.latencySamples)
+    gridAlignDb.push(align)
+    const peak = []
+    const avg = []
+    const crest = []
+    const spread = []
+    for (let j = 0; j < OPTO_GRID_SQUASH; j++) {
+      const r = renderWet(
+        dry, sampleRate, { ...patch, squash: gridSquash[j], optoAlignDb: align },
+      )
+      const m = measureDynamics(r.out, sampleRate)
+      peak.push(r.metering.maxGainReductionDb)
+      avg.push(r.metering.avgGainReductionDb)
+      crest.push(m.crestDb)
+      spread.push(m.spreadDb)
+      /**
+       * ⚠ MEASURED ONCE, MID-GRID. Across the whole Density range the blend
+       * moves 0.0122 of correlation and 0.300 dB of density, which is 0.034 dB
+       * of level through the mix law at its worst Mix position — below what the
+       * sweep already concedes on impact, so sampling it per grid point would
+       * buy nothing for a wet render each.
+       */
+      if (i === midDrive && j === midSquash) {
+        blend = measureBlend(dry, r.out, sampleRate, r.latencySamples)
+      }
+    }
+    gridPeakDb.push(peak)
+    gridAvgDb.push(avg)
+    gridCrestDb.push(crest)
+    gridSpreadDb.push(spread)
   }
 
   return {
@@ -897,13 +1005,13 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
       impactDrop: fetImpact.map(v => fetImpact[0] - v),
     },
     opto: {
-      densities: optoDensities,
-      squash: optoSquash,
-      alignDb: optoAlign,
-      peakDb: optoPeakDb,
-      avgDb: optoAvgDb,
-      crestDb: wetCrestDb,
-      spreadDb: wetSpreadDb,
+      drives: gridDrives,
+      squash: gridSquash,
+      alignDb: gridAlignDb,
+      peakDb: gridPeakDb,
+      avgDb: gridAvgDb,
+      crestDb: gridCrestDb,
+      spreadDb: gridSpreadDb,
     },
     blend,
   }
@@ -919,7 +1027,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
  */
 export function solveFromSweep(sweep, options = {}) {
   const density = clamp(options.density ?? 50, 0, 100) / 100
-  const voicing = VOICINGS[options.voicing] ?? VOICINGS.audiobook
+  const calibrated = VOICINGS[options.voicing] ?? VOICINGS.audiobook
+  const voicing = effectiveVoicing(calibrated, options.balance)
   const { input, patch } = sweep
 
   const thrDesc = [...sweep.clip.thresholds].reverse()
@@ -987,13 +1096,16 @@ export function solveFromSweep(sweep, options = {}) {
   }
 
   /**
-   * ⚠ THE REPORT'S OPTO FIGURES READ OFF THE DENSITY TRAJECTORY, NOT OFF SQUASH.
-   * Both the depth AND the opto's input move with Density, so a curve indexed
-   * by squash alone mis-reported reduction by 0.80 dB at the top of the macro.
-   * See the trajectory note in `sweepDynamics`. These are report values only —
-   * every param above is computed, not interpolated from here.
+   * ⚠ THE REPORT'S OPTO FIGURES ARE BILINEAR IN (DRIVE, SQUASH), which are the
+   * two things that actually set them — and which Balance moves in OPPOSITE
+   * directions at a fixed Density. Indexing by squash alone was out by 0.80 dB
+   * at the top of the macro; indexing by Density was out by 2.86 dB the moment
+   * Balance existed. See the grid note in `sweepDynamics`.
+   *
+   * These are report values ONLY. Every param above is computed or read off the
+   * knob curves; nothing here reaches the audio.
    */
-  const at = (ys) => lerpAt(sweep.opto.densities, ys, density)
+  const at = (grid) => bilinearAt(sweep.opto.drives, sweep.opto.squash, grid, fetDrive, squash)
   const wetCrestDb = at(sweep.opto.crestDb)
   return {
     params,
@@ -1014,7 +1126,8 @@ export function solveFromSweep(sweep, options = {}) {
         alignDb: optoAlignDb,
         peakDb: at(sweep.opto.peakDb),
         avgDb: at(sweep.opto.avgDb),
-        calibratedSquash: voicing.squash,
+        calibratedSquash: calibrated.squash,
+        balancedSquash: voicing.squash,
       },
       blend: sweep.blend,
       crestRoseBy: wetCrestDb - input.crestDb,

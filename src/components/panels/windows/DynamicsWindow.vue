@@ -62,6 +62,15 @@ const ACCENT = '#f59e6b'
 
 const formatInt = (v) => String(Math.round(v))
 const formatMix = (v) => `${Math.round(v * 100)}%`
+/**
+ * ⚠ NAMED ENDS, NOT A SIGNED NUMBER. "−60" says nothing about which compressor
+ * is being leaned on, and the whole point of the control is which.
+ */
+const formatBalance = (v) => {
+  const n = Math.round(v)
+  if (n === 0) return 'EVEN'
+  return n < 0 ? `FET ${-n}` : `OPTO ${n}`
+}
 const formatDb = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
 
 /**
@@ -190,6 +199,23 @@ function close() {
             :min="0" :max="100" :step="1"
             label="Density" :accent="ACCENT" :format-value="formatInt"
             :value-font-px="22"
+          />
+        </div>
+
+        <div class="w-[96px] flex flex-col items-center">
+          <!-- ⚠ WHICH compressor does the work, not how much. Density sets the
+               amount; this shifts the voicing's impact target and squash in
+               OPPOSITE senses, so the two compressors trade. Live for the same
+               reason Density is: both are lookups on the sampled curves.
+               ⚠ It only bites below roughly Density 60 on typical narration —
+               above that the FET's drive pins at 100 and its target stops
+               reaching, so the lean shows up on the opto half alone. -->
+          <Knob
+            :model-value="panel.balance"
+            @update:model-value="v => syncMacro('balance', v)"
+            :min="-100" :max="100" :step="1"
+            label="Balance" :accent="ACCENT" :format-value="formatBalance"
+            :value-font-px="15"
           />
         </div>
 
