@@ -237,9 +237,46 @@ export const DYNAMICS_KERNEL_DEFAULTS = {
  * quietly be measuring a different compressor from the one that renders.
  */
 
-/** True when a clip threshold has been measured; absent bypasses the stage. */
+/**
+ * ⚠ A STAGE WHOSE MEASURED KEY IS ABSENT IS BYPASSED, AND ALL THREE FOLLOW THE
+ * SAME RULE. Only the clipper did, and the asymmetry was load-bearing in the
+ * wrong direction: an un-solved live node clears every measured key (see
+ * DYNAMICS_MEASURED_KEYS), so the FET fell back to `fetDrive: 50` and the opto
+ * to `squash: 33` with BOTH alignments at 0 — an unmeasured compressor doing
+ * real, audible work while the panel said "Solve first". On a −1 dBFS file that
+ * is ~7 dB of gain reduction nobody asked for. Now an un-solved section is a
+ * true pass-through, which is what lets the panel open ENGAGED.
+ *
+ * ⚠ AND EACH BYPASS KEEPS THE STAGE'S OWN LATENCY, which is a bug fix rather
+ * than bookkeeping. Every stage reports 50 samples and `latencySamples` sums
+ * all three unconditionally, but the clipper's bypass used to SKIP its
+ * processing — so with no threshold the composite delayed by 100 samples while
+ * still declaring 150, and `applyWorkletRegion` trimmed the difference off the
+ * front of the region. Measured with an impulse: peak at 1100 bypassed against
+ * 1150 engaged. It bit at Density under ~2.5, where the wanted shave rounds to
+ * nothing and the threshold stays null.
+ *
+ * ⚠ THE EXISTING TEST DID NOT CATCH IT because it pins `latencySamples` — the
+ * DECLARED number — across every patch, and the declared number was never
+ * wrong. What moved was the delay actually applied. The new test measures an
+ * impulse instead.
+ */
 export function clipEnabled(p) {
   return Number.isFinite(p.clipThresholdDb)
+}
+
+/** True when the FET's drive has been measured; absent bypasses the stage. */
+export function fetEnabled(p) {
+  return Number.isFinite(p.fetDrive)
+}
+
+/**
+ * True when the opto's depth has been measured; absent bypasses the whole opto
+ * BLOCK — Pultec pre, cell and Pultec post — and with it the parallel blend,
+ * since there is nothing to blend against the dry path.
+ */
+export function optoEnabled(p) {
+  return Number.isFinite(p.squash)
 }
 
 export function clipParamsFor(p) {
@@ -301,6 +338,19 @@ export class DynamicsKernel {
     this.postEq = null
     this.dryLines = [] // one per channel, grown on demand
     this.dryLatency = -1
+    /**
+     * One per channel per stage, used ONLY while that stage is bypassed, so the
+     * composite's delay stays 150 samples whatever is switched off. Allocated
+     * with the rest rather than on demand: a stage can be bypassed by a param
+     * push from the message port, which is not a place to be allocating.
+     */
+    this.bypassLines = { clip: [], fet: [], opto: [] }
+    /** Each stage's own latency, read from the kernels rather than hardcoded. */
+    this.stageLatency = {
+      clip: this.clipper.latencySamples,
+      fet: this.fet.latencySamples,
+      opto: this.la2a.latencySamples,
+    }
     this.wetScratch = []
     this.stageScratch = []
 
@@ -313,8 +363,10 @@ export class DynamicsKernel {
     const p = { ...this.params, ...partial }
     this.params = p
 
-    // Absent threshold means the stage is bypassed; see `clipThresholdDb`.
+    // Absent measured key means the stage is bypassed; see `clipEnabled`.
     this.clipOn = clipEnabled(p)
+    this.fetOn = fetEnabled(p)
+    this.optoOn = optoEnabled(p)
     this.clipper.setParams(clipParamsFor(p))
     this.fet.setParams(fetParamsFor(p))
 
@@ -379,13 +431,21 @@ export class DynamicsKernel {
    * questions: a meter needs the instant, a report needs the worst case.
    */
   getMetering() {
-    const fet = this.fet.getMetering()
-    const opto = this.la2a.getMetering()
+    const fet = this.fetOn ? this.fet.getMetering() : null
+    const opto = this.optoOn ? this.la2a.getMetering() : null
     const clip = this.clipOn ? this.clipper.getMetering() : null
     return {
       clip: { now: clip?.reductionDb ?? 0, peak: clip?.maxReductionDb ?? 0 },
-      fet: { now: fet.grDb, peak: fet.maxGainReductionDb, avg: fet.avgGainReductionDb },
-      opto: { now: opto.grDb, peak: opto.maxGainReductionDb ?? 0, avg: opto.avgGainReductionDb ?? 0 },
+      fet: {
+        now: fet?.grDb ?? 0,
+        peak: fet?.maxGainReductionDb ?? 0,
+        avg: fet?.avgGainReductionDb ?? 0,
+      },
+      opto: {
+        now: opto?.grDb ?? 0,
+        peak: opto?.maxGainReductionDb ?? 0,
+        avg: opto?.avgGainReductionDb ?? 0,
+      },
     }
   }
 
@@ -393,6 +453,10 @@ export class DynamicsKernel {
     this.preEq.ensureChannels(count)
     this.postEq.ensureChannels(count)
     while (this.dryLines.length < count) this.dryLines.push(new DelayLine(this.dryLatency))
+    for (const [stage, lines] of Object.entries(this.bypassLines)) {
+      const len = this.stageLatency[stage]
+      while (lines.length < count) lines.push(new DelayLine(len))
+    }
     while (this.wetScratch.length < count) this.wetScratch.push(new Float32Array(128))
     while (this.stageScratch.length < count) this.stageScratch.push(new Float32Array(128))
   }
@@ -431,7 +495,29 @@ export class DynamicsKernel {
     // between channels by design, so a stereo file's two sides move together;
     // calling them per channel would let the sides drift apart.
     if (this.clipOn) this.clipper.process(stage, stage, n)
-    this.fet.process(stage, stage, n)
+    else this._delay(this.bypassLines.clip, stage, n, nOut)
+    if (this.fetOn) this.fet.process(stage, stage, n)
+    else this._delay(this.bypassLines.fet, stage, n, nOut)
+
+    const { dryGain, wetGain, outputLin } = this
+
+    /**
+     * ⚠ THE WHOLE OPTO BLOCK GOES, NOT JUST THE CELL, AND SO DOES THE BLEND.
+     * With no measured depth there is no wet path to blend, so a mix law over
+     * two copies of the dry signal would apply its correlation compensation to
+     * a sum of the signal with itself — a level change out of a stage that is
+     * supposed to be doing nothing.
+     */
+    if (!this.optoOn) {
+      const lines = this.bypassLines.opto
+      for (let ch = 0; ch < nOut; ch++) {
+        const s = stage[ch]
+        const out = outputChannels[ch]
+        const line = lines[ch]
+        for (let i = 0; i < n; i++) out[i] = line.push(s[i]) * outputLin
+      }
+      return
+    }
 
     // The dry tap is HERE — post-FET, pre-Pultec. See the header.
     const wet = []
@@ -442,7 +528,6 @@ export class DynamicsKernel {
     }
     this.la2a.process(wet, wet, n)
 
-    const { dryGain, wetGain, outputLin } = this
     for (let ch = 0; ch < nOut; ch++) {
       const w = wet[ch]
       const out = outputChannels[ch]
@@ -456,6 +541,15 @@ export class DynamicsKernel {
         const dry = line.push(s[i])
         out[i] = (dry * dryGain + w[i] * wetGain) * outputLin
       }
+    }
+  }
+
+  /** Run a bypassed stage's delay so the composite's latency does not move. */
+  _delay(lines, chans, n, nOut) {
+    for (let ch = 0; ch < nOut; ch++) {
+      const c = chans[ch]
+      const line = lines[ch]
+      for (let i = 0; i < n; i++) c[i] = line.push(c[i])
     }
   }
 }

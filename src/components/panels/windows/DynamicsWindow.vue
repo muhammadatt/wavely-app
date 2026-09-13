@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useDynamics } from '../../../composables/useDynamics.js'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import FloatingWindow from '../FloatingWindow.vue'
@@ -22,6 +22,29 @@ const {
 } = useDynamics()
 
 const { state } = useEditorState()
+
+/**
+ * ⚠ THE SECTION ENGAGES WHEN THE PANEL OPENS, RATHER THAN OPENING BYPASSED.
+ *
+ * Engaging cannot be a default on `preview` — the flag has to travel with the
+ * side effects `togglePreview` performs (put the effect in the chain, enable
+ * it, start the meters), or the panel would read ENGAGED over a chain that has
+ * nothing in it. It also cannot happen before a user gesture, because
+ * `getAudioContext` constructs the AudioContext; mounting this window is the
+ * result of a click, so this is inside one.
+ *
+ * ⚠ AND IT IS SAFE ONLY BECAUSE AN UN-SOLVED SECTION IS A BIT-EXACT
+ * PASS-THROUGH, WHICH IT WAS NOT UNTIL THIS CHANGE. `toLiveKernelParams` clears
+ * every measured key, and only the clipper read that as "bypass" — the FET fell
+ * back to `fetDrive: 50` and the opto to `squash: 33`, both unaligned, so
+ * opening the panel would have started compressing with a patch nobody
+ * measured. All three stages now bypass on an absent measured key; pinned in
+ * dynamicsComposite.test.js. So what the user hears on open is the file, and
+ * the first thing they hear change is their own solve.
+ */
+onMounted(() => {
+  if (!preview.value) togglePreview()
+})
 
 /**
  * The transport, the way every other faceplate reaches it: a window event, not

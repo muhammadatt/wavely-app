@@ -256,3 +256,73 @@ test('the defaults name every param the kernel reads', () => {
   // would be a real setting rather than "unmeasured".
   assert.equal(DYNAMICS_KERNEL_DEFAULTS.clipThresholdDb, null)
 })
+
+test('⚠ an UN-SOLVED section is bit-exact pass-through, not a default patch', () => {
+  /**
+   * This is what lets the panel open ENGAGED rather than bypassed.
+   *
+   * A live node with no solve in force clears every measured key to null (see
+   * DYNAMICS_MEASURED_KEYS). Only the clipper treated that as "bypass"; the FET
+   * and the opto fell back to their kernel defaults — `fetDrive: 50`,
+   * `squash: 33` — with both alignments at 0, so an engaged-but-un-solved
+   * section was an UNMEASURED compressor doing real work while the panel said
+   * "Solve first". On a −1 dBFS file that is roughly 7 dB of gain reduction
+   * nobody asked for, and it is exactly the failure `effects/measuredKeys.js`
+   * documents one level up.
+   */
+  const n = 20000
+  const x = new Float32Array(n)
+  let s = 7
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff * 2 - 1
+  for (let i = 0; i < n; i++) x[i] = Math.fround(rnd() * 0.4)
+
+  const r = processDynamicsBuffer([x], SR, {
+    clipThresholdDb: null, fetDrive: null, squash: null,
+  })
+  const out = r.channelData[0]
+  assert.equal(r.latencySamples, 150)
+  for (let i = 0; i < n - r.latencySamples; i++) {
+    assert.equal(out[i + r.latencySamples], x[i],
+      `un-solved must be bit-exact pass-through; diverged at ${i}`)
+  }
+  // Mix and the blend law must not reach a bypassed opto block either.
+  const wet = processDynamicsBuffer([x], SR, {
+    clipThresholdDb: null, fetDrive: null, squash: null, mix: 1, correlation: 0.9,
+  })
+  assert.deepEqual(wet.channelData[0], out, 'Mix moved a section that is bypassed')
+})
+
+test('⚠ latency is constant in FACT, not just in what the getter DECLARES', () => {
+  /**
+   * ⚠ THE TEST ABOVE ("CONSTANT ACROSS EVERY PATCH") DID NOT CATCH THIS, and
+   * that is the reusable part. It asserts `latencySamples` — the DECLARED
+   * number — which was never wrong. What moved was the delay actually applied:
+   * the clipper's bypass skipped its processing, so with no threshold the
+   * composite delayed by 100 samples while still declaring 150, and
+   * `applyWorkletRegion` trimmed 50 samples too many off the front of the
+   * region. It bit below Density ~2.5, where the wanted shave rounds to nothing
+   * and the threshold stays null.
+   *
+   * Measuring an impulse is the only way to see it, so this does that.
+   */
+  const n = 4096
+  const impulseAt = 1000
+  const peakIndex = (params) => {
+    const x = new Float32Array(n)
+    x[impulseAt] = 0.5
+    const out = processDynamicsBuffer([x], SR, params).channelData[0]
+    let best = 0
+    let at = -1
+    for (let i = 0; i < n; i++) {
+      const a = Math.abs(out[i])
+      if (a > best) { best = a; at = i }
+    }
+    return at
+  }
+  const expected = impulseAt + 150
+  assert.equal(peakIndex({ clipThresholdDb: -6, mix: 0 }), expected, 'all stages engaged')
+  assert.equal(peakIndex({ clipThresholdDb: null, mix: 0 }), expected, 'clipper bypassed')
+  assert.equal(peakIndex({ clipThresholdDb: null, fetDrive: null }), expected, 'FET bypassed')
+  assert.equal(peakIndex({ clipThresholdDb: null, fetDrive: null, squash: null }), expected,
+    'nothing solved')
+})

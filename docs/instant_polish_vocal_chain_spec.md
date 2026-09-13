@@ -468,6 +468,52 @@ overshot to 3.06 dB against a 3.00 cap, and on a hard bound "close enough" is a
 bound that does not hold. When the cap binds, Density backs off and the report
 says so.
 
+### Density is not a live knob, and a sampled sweep would make it one
+
+Measured on 30 s of real narration: **7.3–7.9 s per Density move** (the macro
+invalidates the solve, so every move re-runs both bisects — ~8 kernel renders
+each). That is the panel's headline control, and it is not interactive.
+
+`npm run dynamics:sweep` tests the alternative — sample each curve ONCE, then
+make Density a lookup:
+
+| Density | 10 | 30 | 50 | 70 | 90 | 100 |
+|---|---|---|---|---|---|---|
+| threshold err (dB) | +0.27 | +0.18 | +0.01 | −0.16 | −0.73 | −0.54 |
+| drive err | +0.7 | +0.4 | −0.3 | +0.4 | +0.4 | +0.4 |
+| **achieved impact err (dB)** | **−0.06** | **−0.03** | **+0.01** | **0.00** | **−0.00** | **−0.00** |
+
+**Max error in what the section actually delivers: 0.064 dB**, against 12 + 12
+renders costing 10.9 s once and **zero** per Density move thereafter. The knob
+positions differ by more than the result does, which is the expected shape: both
+curves are shallow near the solution, so the bisect's last digits are not
+load-bearing.
+
+⚠ **The clipper half is exact, not approximate** — it measures on the RAW input,
+so its curve does not depend on Density at all; Density only picks the target.
+The approximation is entirely in the FET, whose curve is measured on the
+CLIPPED signal and is therefore a function of two variables. Measured directly,
+across the whole clip range the macro uses (−3.54 to −7.16 dB):
+
+| FET drive | 0 | 20 | 40 | 60 | 100 |
+|---|---|---|---|---|---|
+| impact spread across clip settings (dB) | 0.03 | 0.08 | 0.03 | 0.03 | 0.02 |
+
+**0.09 dB worst case.** The FET's curve is effectively invariant to what the
+clipper did under it, which is why one sample of it serves the whole macro.
+
+⚠ **AND THE FIRST ATTEMPT FAILED ITS OWN TEST, for a reason worth keeping.** The
+inversion initially solved only the crest target and ignored the clipper's hard
+depth cap, so above Density 80 it ran off the end of the sampled range and cost
+1.32 dB of impact. The bisect it replaces satisfies both constraints in one
+search; an interpolation has to invert *both* curves and take the shallower
+threshold. A lookup table is not exempt from the rules the search was obeying.
+
+⚠ **ONE FILE, ONE VOICE.** Every number here is from a single narrator. The
+0.09 dB invariance in particular is a claim about how much the clipper disturbs
+the FET's operating point, and a more percussive or more clipped source could
+move it. Re-run the bench before treating this as settled.
+
 **Measured, Density 0 → 100 on narration with phrase-level variation:** block
 spread 3.73 → 2.58 dB, impact 10.16 → 8.06 dB. ⚠ And crest *rises* 2.13 dB at
 full Density — the predicted trade, evenness bought with headroom, surfaced in
