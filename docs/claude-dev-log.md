@@ -1326,6 +1326,107 @@ SC_DRIVE_MAX_DB carried, where the single reference turned out to be the wrong
 unit entirely. `npm run la2a:align -- --dir <path>` re-scores it. **FET Punch
 has the same fixed-threshold topology and is not yet aligned.**
 
+### FET Punch — reference measurement tooling (stimulus stage)
+
+FET Punch has never been compared to anything. Every constant in
+`src/audio/fet1176Processor.js` — the input taper and its `-18 dBFS` threshold
+reference, the four ratio knees, both ballistics ranges, `TAIL_FRACTION` /
+`TAIL_MULT`, all seven all-buttons-in constants and `fetDrive` — reproduces a
+*described* behaviour. The module says so; this is the tooling that starts
+closing it, against Analog Obsession FETish and Waves CLA-76.
+
+- **THE LA-2A TOOLING WAS SPLIT RATHER THAN COPIED.** `scripts/lib/wav.js`
+  (the 32-bit float writer, which existed as two byte-identical copies and was
+  about to become three), `scripts/lib/demoMute.js` (the 20 s Waves demo-mute
+  grid and the scheduler that places events in the clean windows) and
+  `scripts/lib/probeStimulus.js` (zero-crossing steps, continuous-phase build).
+  `la2a-ballistics.mjs` and `la2a-tube-capture-tones.mjs` now import them, and
+  **all 23 existing stimulus files regenerate byte-identical** — the refactor is
+  verified against the artefacts, not against a reading of the diff.
+
+- **⚠ COHERENT DETECTION CANNOT MEASURE THIS UNIT AND THE LA-2A SUITE IS BUILT
+  ON IT.** The LA-2A recovers an envelope by demodulating at the probe and
+  low-passing at `min(500, f/2.5)`: two poles at 500 Hz rise in ~0.8 ms, fine
+  against a 1–10 ms attack. `ATTACK_FASTEST_S` here is **20 µs**, which would
+  need a ~19 kHz cutoff and therefore a probe above 47 kHz. There is no
+  audio-band probe that makes it work. Run anyway it would report every dial
+  from about 5 upward as the detector's own rise time, **and that number would
+  look like a measurement.**
+
+- **SO THE GAIN IS RECOVERED BY DIVISION INSTEAD** (`scripts/lib/gainTrace.js`).
+  We wrote the stimulus, so the dry signal is known exactly at every sample and
+  the applied gain is `wet[i]/dry[i]` — no filter in the path, so no rise time
+  of its own, and resolution is the capture's sample period. Verified against
+  our own kernel at **2.8e-17** max reconstruction error. The cost is the zero
+  crossings, where division is ill-conditioned: the blind window is
+  `asin(floor)/(pi·f)`, **31.9 µs at 1 kHz and 8.0 µs at 4 kHz** against a 20 µs
+  attack. **That is why the FET probe is 4 kHz where the LA-2A's is 1 kHz** — a
+  1 kHz probe cannot see this unit's fast end at all.
+
+- **⚗ THE SELF-TEST FOUND A 2.9× BIAS BEFORE ANY REFERENCE WAS TOUCHED, AND IT
+  WOULD HAVE BEEN INVISIBLE IN THE RESULT.** Measured t63 against the kernel's
+  own `attackSecondsForDial()`: declared 800 / 433 / 234 / 126 µs, measured
+  **2313 / 1188 / 688 / 438 µs**, ratio **2.89 / 2.75 / 2.94 / 3.46**. The cause
+  is structural and the references will have it too — the detector is a bare
+  full-wave rectifier, so its target is over threshold only near the waveform
+  peaks and under it at every crossing; the gain attacks in bursts and releases
+  between them, and the peak-to-peak envelope climbs slower than the
+  coefficient. **The factor is not a constant to divide out**: it moves with
+  Input, level and knee. ⚠ **So the fit is by MATCHED MEASUREMENT — run our
+  kernel at each dial, measure its t63 the identical way, match the reference's
+  number to ours — never by converting a t63 into a constant.** Fitting
+  `ATTACK_FASTEST_S` to a reference's raw t63 would have landed it ~3× too slow
+  and the number would have looked entirely reasonable.
+
+- **AND THE OVERSHOOT COLUMN IS THE BETTER STATISTIC ANYWAY.** How far the first
+  post-step peak sits above the settled reduction runs **3.55 / 3.42 / 3.20 /
+  2.83 / 2.27 / 1.52 / 0.78 dB** across dials 1–7 — monotone over the *whole*
+  range, including the three dials no audio-band probe can resolve as a time
+  constant, and it is the thing a listener is buying from this unit. Fit against
+  it; keep t63 as the cross-check.
+
+- **THE RELEASE TAIL IS VISIBLE AND SEPARABLE.** Measured/declared t63 sits at
+  **1.70** for dials 4–7 — the two-stage signature of `TAIL_FRACTION` 0.22 on a
+  network `TAIL_MULT` 4× slower. A ratio near 1.0 would mean the tail is
+  missing, which is what that column is really watching on a reference.
+  ⚠ **The first version of this test took its "open" reference from the end of
+  the recovery and was wrong at the slow dials**: at release 1 the tail runs
+  4.4 s, so 7 s after the step it still holds 20 % of its share, which put the
+  t63 target 4 % low and read as ratio 1.36 where the other six dials read 1.70.
+  The open reading now comes from the head of the file, before any event, which
+  is the only place the cell has no history at all.
+
+- **THE SATURATOR RIDES ON THE TRACE, AND THAT IS A MEASUREMENT, NOT AN ERROR.**
+  The capture is `fet(dry·inputLin·g)·outGain`, so the recovered trace carries
+  the output stage's instantaneous compression of the waveform as a ripple at
+  **2f** — **0.32 dB at `fetDrive` 0.35**, zero for a pure time-varying gain.
+  That is the static nonlinearity observed separately from the compression, the
+  same quantity `la2a-pair-compare.mjs` isolates as "peak rounding" and gets at
+  a harder way. What it means procedurally is that a ballistics fit must read
+  the peak series and never the raw trace.
+
+- **⚠ THE THD SWEEP'S AXIS IS GAIN REDUCTION, NOT INPUT LEVEL**, which is the
+  correction the LA-2A work arrived at expensively. THD against input level
+  cannot tell a gain-cell nonlinearity from an output-amp one; THD against dB of
+  GR can, and on the LA-2A the answer turned out to be the cell after two years
+  of a model that put it in the valves.
+
+- **⚠ BOTH REFERENCES ARE PLUGINS AND NEITHER IS EVIDENCE ABOUT HARDWARE.** The
+  precedent is in `docs/la2a_tube_capture_protocol.md`: LAEA was asked for an
+  output stage it does not model, and two captures that looked like one dataset
+  were a plugin and an analog unit that disagreed exactly where it mattered.
+  Fit one reference, hold the other out, **do not average them**, and label every
+  capture with its reference and settings.
+
+- **Not yet built:** the capture fitters. The recovery is proved against a
+  kernel whose constants are known before it is pointed at one whose constants
+  are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`
+  has no FET counterpart, so a retune would change every existing FET Punch
+  render with no way back, and the five factory presets in
+  `src/audio/pluginPresets/fetPunch.js` are calibrated against today's kernel —
+  the Scheps inheritance bug (which shipped 4× the intended gain reduction) is
+  the precedent for what happens when that is not handled deliberately.
+
 ### Available but Not Active in Current Presets
 
 - **Room tone padding** (`roomTonePad`) — Stage implemented; not currently in any preset's stages array

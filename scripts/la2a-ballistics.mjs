@@ -82,7 +82,9 @@
 import { writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import { readWav } from '../test/voicerx/wav.js'
+import { readWav, writeFloatWav } from './lib/wav.js'
+import { MUTE_PERIOD_S, scheduleClear, assertPlanClear } from './lib/demoMute.js'
+import { snapToZeroCrossing, buildProbe } from './lib/probeStimulus.js'
 import { getFFT } from '../src/audio/dsp/fft.js'
 import {
   LA2AKernel, scDriveDbFor, SC_DRIVE_MAX_DB, SC_DRIVE_SPAN_DB, SC_TAPER,
@@ -133,96 +135,10 @@ const lin = d => Math.pow(10, d / 20)
 // ── Stimulus ────────────────────────────────────────────────────────────────
 
 /**
- * Every event carries its own probe frequency and levels. Steps land on a ZERO
- * CROSSING of that probe, which is what lets the edge be instantaneous: the
- * waveform value is continuous across it (only its derivative jumps), so there
- * is nothing to click and no fade to blur the attack.
+ * ⚠ THE STIMULUS IS SCHEDULED AROUND A DEMO PLUGIN'S PERIODIC MUTE — the grid,
+ * what it cost before it existed, and the guard that fails a build rather than
+ * losing an event all live in `lib/demoMute.js`, shared with the FET suite.
  */
-function snapToZeroCrossing(tSec, freqHz) {
-  const halfPeriod = 1 / (2 * freqHz)
-  return Math.round(tSec / halfPeriod) * halfPeriod
-}
-
-/**
- * THE WAVES DEMO MUTE, AND WHY IT NO LONGER COSTS US EVENTS.
- *
- * The demo silences one second in every twenty. That cost the CLA-2A captures
- * real measurements — the frequency plan lost BOTH its 400 Hz and 3 kHz probes,
- * which is exactly the pair that would settle whether the side-chain carries a
- * real HF emphasis, and the retrigger plan lost two of its five gaps.
- *
- * ⚠ IT IS NOT RANDOM DAMAGE, IT IS A TIMER, AND THAT MAKES IT SCHEDULABLE.
- * Measured across NINE captures from three sessions at five knob settings, with
- * file lengths from 98 s to 162 s, the pattern is identical every time: first
- * mute at 20.01 s, then every 20.00 s, lasting 0.99 s. The edges are sharp —
- * last clean sample 19.99 s, dead by 20.01, dead until 20.99, clean again at
- * 21.01 — so a 0.1 s guard on each side is generous.
- *
- * So every event is placed in a clean window instead of wherever the arithmetic
- * happened to put it. ⚠ THE SHIFT IS TAKEN OUT OF THE REST BETWEEN EVENTS AND
- * NEVER FROM INSIDE ONE. The rest exists to let the cell go dark and only ever
- * gets longer, so no measured quantity moves: the conditioning-to-test gap that
- * IS the retrigger measurement is inside a protected span and travels with it.
- *
- * ⚠ IT ONLY WORKS BECAUSE EVERY SPAN FITS. The clean window is 18.80 s after
- * guards, and the longest protected span is the 10 s burst at 18.00 s — 0.8 s
- * of slack. Lengthening BURSTS, POST_S or PRE_S can overflow it, so
- * `assertPlanClear` fails the build rather than shipping a stimulus that
- * silently loses an event again.
- */
-const MUTE_PERIOD_S = 20.0
-const MUTE_LEN_S = 1.0
-const MUTE_GUARD_S = 0.1
-
-/** The longest protected span that can fit between two mutes. */
-const CLEAN_WINDOW_S = MUTE_PERIOD_S - MUTE_LEN_S - 2 * MUTE_GUARD_S
-
-/**
- * Earliest start >= `t` at which a protected span of `span` seconds is clear.
- *
- * ⚠ THE INFEASIBLE CASE THROWS RATHER THAN SEARCHING, AND IT HAS TO. Pushing
- * past a mute is only progress if the span then fits before the NEXT one; for a
- * span longer than the window every push lands on another mute, and the search
- * chases `t` forever. Caught by testing it — a 12 s burst hung the stimulus
- * build instead of failing it.
- */
-function scheduleClear(t, span, tag = 'event') {
-  if (span > CLEAN_WINDOW_S) {
-    throw new Error(
-      `${tag}: protected span ${span.toFixed(2)}s exceeds the ${CLEAN_WINDOW_S.toFixed(2)}s ` +
-      'clean window between demo mutes, so no placement can avoid one. Shorten the ' +
-      'event, PRE_S or POST_S — or drop the mute scheduling and accept losing it.')
-  }
-  for (let k = 1; k * MUTE_PERIOD_S < t + span + MUTE_PERIOD_S; k++) {
-    const from = k * MUTE_PERIOD_S - MUTE_GUARD_S
-    const to = k * MUTE_PERIOD_S + MUTE_LEN_S + MUTE_GUARD_S
-    if (from >= t + span) break
-    if (to > t) t = to
-  }
-  return t
-}
-
-/**
- * ⚠ A STIMULUS THAT LOSES AN EVENT MUST NOT BUILD. This is the guard on the
- * 0.8 s of slack above: it re-derives each protected span from the events
- * themselves, so it catches an overflow introduced by editing the constants
- * rather than trusting the scheduler that just ran.
- */
-function assertPlanClear(name, plan, spans) {
-  for (const [tag, from, to] of spans) {
-    for (let k = 1; k * MUTE_PERIOD_S < to + MUTE_PERIOD_S; k++) {
-      const mFrom = k * MUTE_PERIOD_S - MUTE_GUARD_S
-      const mTo = k * MUTE_PERIOD_S + MUTE_LEN_S + MUTE_GUARD_S
-      if (mFrom < to && mTo > from) {
-        throw new Error(
-          `${name}: "${tag}" spans ${from.toFixed(2)}-${to.toFixed(2)}s and hits the ` +
-          `demo mute at ${(k * MUTE_PERIOD_S).toFixed(2)}s. The protected span is ` +
-          `${(to - from).toFixed(2)}s against an 18.80s clean window — shorten it, ` +
-          'or the capture loses this event.')
-      }
-    }
-  }
-}
 
 function burstPlan() {
   const events = []
@@ -236,7 +152,7 @@ function burstPlan() {
     spans.push([`burst ${T}s`, t, t + PRE_S + T + POST_S])
     t += PRE_S + T + POST_S + REST_S
   }
-  assertPlanClear('bursts', null, spans)
+  assertPlanClear('bursts', spans)
   return { events, seconds: t + 1.0 }
 }
 
@@ -252,7 +168,7 @@ function stairPlan() {
     spans.push([`${L} dBFS`, t, t + STAIR_REST_S + STAIR_S])
     t += STAIR_REST_S + STAIR_S
   }
-  assertPlanClear('staircase', null, spans)
+  assertPlanClear('staircase', spans)
   return { events, seconds: t + 1.0 }
 }
 
@@ -282,7 +198,7 @@ function retriggerPlan() {
       up: tUp, down: snapToZeroCrossing(tUp + TEST_S, PROBE_HZ), role: 'test' })
     t = tUp + TEST_S + POST_S + REST_S
   }
-  assertPlanClear('retrigger', null, spans)
+  assertPlanClear('retrigger', spans)
   return { events, seconds: t + 1.0 }
 }
 
@@ -302,7 +218,7 @@ function freqPlan() {
     spans.push([`${f} Hz`, t, t + PRE_S + 1.0 + POST_S])
     t += PRE_S + 1.0 + POST_S + REST_S
   }
-  assertPlanClear('frequency', null, spans)
+  assertPlanClear('frequency', spans)
   return { events, seconds: t + 1.0 }
 }
 
@@ -350,71 +266,12 @@ function rampPlan() {
 }
 
 /**
- * Build the waveform. Between events the probe sits at LOW_DBFS at that
- * event's frequency; frequency changes happen during a rest, at a zero
- * crossing, so they too are click-free.
+ * Render a plan. `lib/probeStimulus.js` takes the rest level from the plan, so
+ * it is supplied here rather than read from a module constant — every plan in
+ * this file rests at LOW_DBFS.
  */
 function build(plan) {
-  const n = Math.round(plan.seconds * SR)
-  const x = new Float32Array(n)
-  if (plan.isRamp) {
-    const env = new Float64Array(n)
-    let phase = 0
-    for (let i = 0; i < n; i++) {
-      env[i] = plan.envAt(i / SR)
-      x[i] = env[i] * Math.sin(phase)
-      phase += 2 * Math.PI * PROBE_HZ / SR
-      if (phase > 2 * Math.PI) phase -= 2 * Math.PI
-    }
-    return { x, env }
-  }
-  const env = new Float64Array(n).fill(lin(LOW_DBFS))
-  const freq = new Float64Array(n).fill(plan.events[0]?.freqHz ?? PROBE_HZ)
-
-  // Each event owns the span from halfway back to the previous event.
-  for (let e = 0; e < plan.events.length; e++) {
-    const ev = plan.events[e]
-    const prev = plan.events[e - 1]
-    const from = prev ? Math.round(((prev.down + ev.up) / 2) * SR) : 0
-    const to = e + 1 < plan.events.length
-      ? Math.round(((ev.down + plan.events[e + 1].up) / 2) * SR) : n
-    for (let i = Math.max(0, from); i < Math.min(n, to); i++) freq[i] = ev.freqHz
-    const a = Math.round(ev.up * SR), b = Math.round(ev.down * SR)
-    for (let i = Math.max(0, a); i < Math.min(n, b); i++) env[i] = lin(ev.hiDb)
-  }
-  // Continuous phase, so a frequency change mid-rest cannot step the waveform.
-  let phase = 0
-  for (let i = 0; i < n; i++) {
-    x[i] = env[i] * Math.sin(phase)
-    phase += 2 * Math.PI * freq[i] / SR
-    if (phase > 2 * Math.PI) phase -= 2 * Math.PI
-  }
-  return { x, env, freq }
-}
-
-function writeFloatWav(file, samples) {
-  const n = samples.length, fmtSize = 18, factSize = 4, dataSize = n * 4
-  const buf = Buffer.alloc(12 + (8 + fmtSize) + (8 + factSize) + (8 + dataSize))
-  let o = 0
-  buf.write('RIFF', o); o += 4
-  buf.writeUInt32LE(buf.length - 8, o); o += 4
-  buf.write('WAVE', o); o += 4
-  buf.write('fmt ', o); o += 4
-  buf.writeUInt32LE(fmtSize, o); o += 4
-  buf.writeUInt16LE(3, o); o += 2
-  buf.writeUInt16LE(1, o); o += 2
-  buf.writeUInt32LE(SR, o); o += 4
-  buf.writeUInt32LE(SR * 4, o); o += 4
-  buf.writeUInt16LE(4, o); o += 2
-  buf.writeUInt16LE(32, o); o += 2
-  buf.writeUInt16LE(0, o); o += 2
-  buf.write('fact', o); o += 4
-  buf.writeUInt32LE(factSize, o); o += 4
-  buf.writeUInt32LE(n, o); o += 4
-  buf.write('data', o); o += 4
-  buf.writeUInt32LE(dataSize, o); o += 4
-  for (let i = 0; i < n; i++) { buf.writeFloatLE(samples[i], o); o += 4 }
-  writeFileSync(file, buf)
+  return buildProbe({ ...plan, lowDb: LOW_DBFS }, SR)
 }
 
 // ── Envelope recovery ───────────────────────────────────────────────────────
@@ -1297,7 +1154,7 @@ if (args.includes('--stimulus')) {
   for (const [name, { plan }] of Object.entries(PLANS)) {
     const p = plan()
     const file = path.join(STIM_DIR, `${name}.wav`)
-    writeFloatWav(file, build(p).x)
+    writeFloatWav(file, build(p).x, SR)
     const md5 = createHash('md5').update(readFileSync(file)).digest('hex').slice(0, 8)
     console.log(`  ${(name + '.wav').padEnd(16)} ${p.seconds.toFixed(1).padStart(6)} s   ${md5}`)
   }

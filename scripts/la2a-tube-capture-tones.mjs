@@ -53,7 +53,7 @@
 
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { readWav } from '../test/voicerx/wav.js'
+import { readWav, writeFloatWav } from './lib/wav.js'
 import { dirname, join, resolve } from 'node:path'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -191,40 +191,6 @@ export function concatPlan() {
   return { slots, seconds: t + 0.5 }
 }
 
-
-// ── WAV writer — 32-bit float, mono, no quantization of the stimulus ────────
-
-function writeFloatWav(path, samples, sampleRate) {
-  const n = samples.length
-  const fmtSize = 18
-  const factSize = 4
-  const dataSize = n * 4
-  const buf = Buffer.alloc(12 + (8 + fmtSize) + (8 + factSize) + (8 + dataSize))
-  let o = 0
-  buf.write('RIFF', o); o += 4
-  buf.writeUInt32LE(buf.length - 8, o); o += 4
-  buf.write('WAVE', o); o += 4
-
-  buf.write('fmt ', o); o += 4
-  buf.writeUInt32LE(fmtSize, o); o += 4
-  buf.writeUInt16LE(3, o); o += 2 // WAVE_FORMAT_IEEE_FLOAT
-  buf.writeUInt16LE(1, o); o += 2 // mono
-  buf.writeUInt32LE(sampleRate, o); o += 4
-  buf.writeUInt32LE(sampleRate * 4, o); o += 4 // byte rate
-  buf.writeUInt16LE(4, o); o += 2 // block align
-  buf.writeUInt16LE(32, o); o += 2 // bits per sample
-  buf.writeUInt16LE(0, o); o += 2 // cbSize
-
-  buf.write('fact', o); o += 4
-  buf.writeUInt32LE(factSize, o); o += 4
-  buf.writeUInt32LE(n, o); o += 4
-
-  buf.write('data', o); o += 4
-  buf.writeUInt32LE(dataSize, o); o += 4
-  for (let i = 0; i < n; i++) { buf.writeFloatLE(samples[i], o); o += 4 }
-
-  writeFileSync(path, buf)
-}
 
 /**
  * A raised-cosine fade in/out around an otherwise steady tone. The fade
