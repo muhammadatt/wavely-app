@@ -40,7 +40,9 @@
     "fet:stimulus": "node scripts/fet-ballistics.mjs --stimulus",
     "fet:selftest": "node scripts/fet-ballistics.mjs --selftest",
     "fet:null": "node scripts/fet-null.mjs",
-    "fet:null:selftest": "node scripts/fet-null.mjs --selftest"
+    "fet:null:selftest": "node scripts/fet-null.mjs --selftest",
+    "fet:curve": "node scripts/fet-static-curve.mjs",
+    "fet:curve:selftest": "node scripts/fet-static-curve.mjs --selftest"
   },
   "dependencies": {
     "uuid": "^13.0.0",

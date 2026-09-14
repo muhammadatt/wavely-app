@@ -1749,7 +1749,92 @@ splits the primary reference by constant rather than by plugin, which is
 defensible because they are measuring different things — but it must be recorded
 as a split, not presented as two references agreeing.
 
-- **Still not built:** the static-curve and ballistics fitters. The recovery is proved against a
+### ⚗⚗ FETISH'S STATIC CURVE, FITTED — AND IT IS A DEGREE-5 POLYNOMIAL
+
+`npm run fet:curve` fits a reference's memoryless transfer curve from its null1
+capture (the bounce with no gain reduction anywhere in it, so the capture is the
+curve applied to a known tone and nothing else). `npm run fet:curve:selftest`
+proves it against curves we chose ourselves.
+
+**THE RESULT:**
+
+```
+f(x) = x − 0.0100·x⁴ + 0.0100·x⁵          (c1 = 0.99998)
+     = x − 0.01·x⁴·(1 − x)
+```
+
+Fitted jointly over all five tone levels. Verified by rendering the fitted curve
+through the same tones: **H2 matches to 0.1 dB at every level** (−136.0 / −118.0
+/ −100.0 / −82.0 / −64.0 measured and fitted alike), H4 within 0.5 dB, worst
+error over 17 usable readings **1.39 dB**. ⚠ **AND IT EXTRAPOLATES**: fitted
+without the −6 dBFS tone and asked to predict it, worst error **1.41 dB**. A
+level-dependent mechanism fits every level individually and fails that.
+
+- **THE ORDERS ARE READ FROM THE DATA, NOT ASSUMED.** A term of order n makes
+  harmonics rising (n−1) dB per dB of level, of its own parity, at or below n.
+  FETish measures H2 3.00, H3 4.04, H4 3.02, H5 4.09 — orders 4 and 5 — and
+  **H6 through H9 sit at the float noise floor**, which is what a degree-5
+  polynomial and nothing else looks like. The corroboration is exact:
+  H4/H2 measures **−12.04 dB** against a pure x⁴ term's **−12.04**.
+
+- **⚠ THE COEFFICIENTS ARE −0.01 AND +0.01 TO FOUR FIGURES.** Almost certainly
+  the plugin's own design constants rather than a fit artefact.
+
+**THREE TRAPS, EACH OF WHICH PRODUCED A PLAUSIBLE WRONG ANSWER:**
+
+- **⚗ FITTING AGAINST THE RAW STIMULUS.** A memoryless polynomial cannot express
+  a delay, and the capture has one (3 samples of measured lag, plus whatever
+  fractional shift the plugin's filtering adds). Residual **−14.1 dB** and a
+  linear term of **0.980** on a plugin that is unity to five decimals. Rebuilding
+  the input as a sine at the OUTPUT's fundamental phase absorbs any pure delay
+  and takes the residual to −70 dB.
+
+- **⚗⚗ NOT MEAN-CENTRING, WHICH HALVED THE FOURTH-ORDER TERM.** An x⁴ term
+  carries DC — 3A⁴/8 on a sine — and the capture does not. Uncentred least
+  squares trades real fourth-order amplitude away to avoid adding DC that is not
+  there: **c₄ came out 2.06× too small**. The tell was that fitted H2 and H4 were
+  low by **exactly 6.3 dB at every level** — the right shape at the wrong
+  amplitude, which is what a scale error looks like and a shape error does not.
+
+- **AN ILL-CONDITIONED MONOMIAL BASIS.** Fitting orders 1-7 gave c₄ = −0.070 and
+  c₆ = +0.136; orders 1-5 gave c₄ = −0.022. Unstable, because the high terms were
+  fitting noise. Choosing the basis from the harmonic slopes, and fitting every
+  level at once, removes it.
+
+### ⚠⚠ AND A CORRECTION: CLA-76'S CURVE IS NOT MEMORYLESS
+
+The earlier entry said CLA-76 was the reference for `fetDrive` — "right
+topology, right curve shape, clean square-law to fit". **The topology half
+stands; the curve half does not.**
+
+CLA-76's harmonics ALL rise together at ~1.0 dB per dB: H2 0.99, H3 0.99,
+H5 1.00, H7 0.99, H9 1.00. H2 at 1.0 is a clean quadratic term. **H3 at 1.0 is
+impossible** — a cubic term gives 2.0. Every harmonic rising together means the
+distortion residual has a fixed SHAPE whose amplitude grows as the square of
+level: a drive following an envelope, or hysteresis. **Not a curve.**
+
+⚠ **Our own shaper is memoryless too, so this is not a `fetDrive` value we are
+missing — it is a mechanism we do not have.** No static shaper of any shape
+reproduces CLA-76's distortion.
+
+- **⚠ THE FIRST VERSION OF THE FITTER HAD NO SUCH CHECK AND PRODUCED A
+  CONFIDENT-LOOKING NUMBER.** It silently dropped the four harmonics its basis
+  could not generate, fitted `x + c₂x²`, and reported a worst error of
+  **257 dB** — against harmonics the basis cannot produce at all. It now refuses
+  to fit when the slopes are inconsistent with any polynomial, and says why.
+
+**SO THE PREFERENCE FOR FETISH IS BETTER SUPPORTED THAN WHEN IT WAS MADE.**
+FETish's static curve is exactly fittable by a memoryless shaper — which is what
+we have — and CLA-76's is not.
+
+**⚠ ONE SHIPPING CAVEAT: THE POLYNOMIAL IS UNBOUNDED.** Deviation from linear is
+0.00 at x = 1 and 0.02 at x = −1, but it reaches +0.16 at x = 2 and **+7.70 at
+x = 4**. `inputDrive` can push the shaper's input well over unity, so landing
+this in the kernel needs a clamp or a blend back to linear above about |x| = 1.5.
+Our `tanh` is bounded by construction and this is the one property it has that
+the fitted curve does not.
+
+- **Still not built:** the ballistics fitter, and the kernel change itself. The recovery is proved against a
   kernel whose constants are known before it is pointed at one whose constants
   are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`
   has no FET counterpart, so a retune would change every existing FET Punch
