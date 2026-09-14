@@ -232,6 +232,52 @@ function grWithinCapture(r) {
   return t.map(x => ({ tag: x.ev.tag, grDb: open - x.gainDb, thdPct: x.h.thdPct }))
 }
 
+/**
+ * The static distortion law: log10(THD%) against OUTPUT level in dBFS, fitted
+ * from a capture with no gain reduction anywhere in it.
+ *
+ * ⚠ THIS EXISTS BECAUSE THE FIRST VERSION OF THE null3 VERDICT WAS WRONG, AND
+ * WRONG IN THE EXACT WAY THIS WHOLE PROTOCOL IS BUILT TO AVOID.
+ *
+ * On `thd.wav` the loudest tones are also the most compressed, so within one
+ * capture LEVEL AND GAIN REDUCTION RISE TOGETHER AND CANNOT BE SEPARATED. The
+ * reader compared THD at 0 dB of GR against THD at 8 dB and announced
+ * "distortion rises with compression — the nonlinearity lives with the gain
+ * cell". On the first real capture (Waves CLA-76, Blacky) that was false: the
+ * law fitted from null1, where NOTHING is compressing, predicts every null3
+ * tone to within 0.9 % — including the ones with 8.2 dB of reduction. The
+ * distortion is a function of output level alone and the gain cell contributes
+ * nothing measurable.
+ *
+ * So null3 is read as a RESIDUAL against null1's law, at matched output level.
+ * That is the control the comparison needed, and without it a level effect gets
+ * attributed to compression — which would have fitted `fetDrive` to a
+ * mechanism that is not there.
+ */
+function staticThdLaw(r) {
+  const t = r.tones.filter(x => x.h && x.h.thdPct > 0)
+  if (t.length < 3) return null
+  /**
+   * ⚠ A REFERENCE WITH NO STATIC DISTORTION HAS NO LAW, and fitting one anyway
+   * divides by nothing. Our own kernel at `fetDrive: 0` reads THD of 0.0000 %
+   * at every level in null1; the regression through five zeros then predicted
+   * ~0, and null3's 0.02 % came back as a residual of **2,895,331 %**, which
+   * is a divide-by-zero wearing a percentage sign. When null1 is at the floor
+   * the honest statement is that there is nothing to control against.
+   */
+  if (Math.max(...t.map(x => x.h.thdPct)) < 0.005) return { degenerate: true }
+  const X = t.map(x => x.h.fundamentalDbfs), Y = t.map(x => Math.log10(x.h.thdPct))
+  const n = X.length
+  const sx = X.reduce((a, b) => a + b, 0), sy = Y.reduce((a, b) => a + b, 0)
+  const sxx = X.reduce((a, b) => a + b * b, 0)
+  const sxy = X.reduce((a, b, i) => a + b * Y[i], 0)
+  const m = (n * sxy - sx * sy) / (n * sxx - sx * sx)
+  const c = (sy - m * sx) / n
+  // How well the line describes its own data — a curved law would show here.
+  const worst = Math.max(...X.map((x, i) => Math.abs(Math.pow(10, m * x + c) / t[i].h.thdPct - 1)))
+  return { m, c, worst, loDb: Math.min(...X), hiDb: Math.max(...X), predict: outDb => Math.pow(10, m * outDb + c) }
+}
+
 function main() {
   const files = discover()
   if (!files.length) {
@@ -370,51 +416,114 @@ function main() {
           console.log('    without separating the two nonlinearities first.')
         } else {
           console.log('  → Output is a clean multiply, as we model it.')
+          /**
+           * ⚠ AND THIS SAYS MORE THAN "CLEAN", WHICH THE FIRST VERSION MISSED.
+           * If raising Output by 10 dB leaves the harmonics UNCHANGED IN dBc,
+           * the distortion cannot be happening at or after Output — a shaper
+           * fed 10 dB hotter would produce more. So it is generated upstream
+           * and Output merely scales the result. That is our topology exactly:
+           * waveshaper first, output gain after it.
+           */
+          const same = Math.abs(t2 - t1) < Math.max(0.002, 0.03 * t1)
+          if (same) {
+            console.log('  → ⚠ AND THE HARMONICS ARE UNCHANGED IN dBc, which places the')
+            console.log('    distortion UPSTREAM OF OUTPUT. A shaper fed 10 dB hotter would make')
+            console.log('    more; this one makes exactly as much and Output just scales it. Same')
+            console.log('    topology as ours — waveshaper first, output gain after.')
+            console.log('    ⚠ It also means the static law below is a law about the level at the')
+            console.log('    SHAPER, not at the output. null1 and null3 share an Output setting per')
+            console.log('    the protocol, so output level is a valid axis between those two — but')
+            console.log('    it is not one across captures with different Output positions.')
+          }
         }
       }
     }
 
     if (results.null3) {
       const curve = grWithinCapture(results.null3)
-      console.log('\n  ⚠ THE AXIS THAT MATTERS — THD against GAIN REDUCTION.')
+      console.log('\n  ⚠ THE AXIS THAT MATTERS — DISTORTION AGAINST GAIN REDUCTION,')
+      console.log('    CONTROLLED FOR OUTPUT LEVEL.')
       console.log('    Reduction is measured DOWN FROM THIS CAPTURE\'S OWN open gain, so the')
-      console.log('    Input position and any insertion trim drop out of it.\n')
-      console.log('      tone        GR      THD%')
-      for (const c of curve) {
-        console.log(`      ${c.tag.padEnd(10)}${c.grDb.toFixed(2).padStart(6)}  ${c.thdPct.toFixed(3).padStart(8)}`)
+      console.log('    Input position and any insertion trim drop out of it. ⚠ And THD is')
+      console.log('    compared against what null1\'s no-compression law predicts AT THE SAME')
+      console.log('    OUTPUT LEVEL — on this stimulus the loudest tones are also the most')
+      console.log('    compressed, so an uncontrolled comparison credits the gain cell with a')
+      console.log('    level effect.\n')
+
+      let law = results.null1 ? staticThdLaw(results.null1) : null
+      if (law && law.degenerate) {
+        console.log('    ⚠ null1 shows NO static distortion at any level — there is no law to')
+        console.log('      control against, so nothing below can separate a gain-cell term from a')
+        console.log('      level effect. Whatever null3 shows is generated by the compression.')
+        law = null
       }
-      const deep = curve[curve.length - 1]
-      const open = curve[0]
-      const toneRows = results.null3.tones.filter(t => t.h)
-      const deepTone = toneRows[toneRows.length - 1]
-      if (allClean(results.null3)) {
-        console.log('\n  → NO DISTORTION AT ANY REDUCTION. This reference models no output stage.')
-        console.log('    ⚠ STILL PERFECTLY GOOD for ballistics and the static curve — log it and')
-        console.log('    stop asking this reference about `fetDrive`. That is the LAEA outcome and')
-        console.log('    it is not a failure of the protocol.')
-      } else if (deepTone && harmonicBalance(deepTone.h, deepTone.usable).oddDominant) {
-        const bal = harmonicBalance(deepTone.h, deepTone.usable)
-        console.log(`\n  → ⚠ ODD-ORDER DOMINATED (H3 at ${bal.oddDbc.toFixed(1)} dBc` +
-          `${bal.marginDb !== null ? `, ${bal.marginDb.toFixed(0)} dB over the strongest even` : ', nothing even above the floor'}).`)
-        console.log('    THAT IS NOT A SATURATOR. An unsmoothed full-wave detector')
-        console.log('    modulates the gain at 2f on a steady tone, and a tone times a 2f modulation')
-        console.log('    puts sidebands at f and 3f — odd orders only, with the waveshaper not')
-        console.log('    involved at all. LAEA showed the same signature with Peak Reduction')
-        console.log('    engaged, and our own kernel reads it at `fetDrive: 0`.')
-        console.log('    ⚠ FITTING `fetDrive` TO THIS WOULD PUT A SATURATOR WHERE A RIPPLE IS.')
-        console.log('    It says nothing either way about whether this reference has an output')
-        console.log('    stage — only that this measurement has not found one.')
-      } else if (deep.thdPct > open.thdPct * 2 && deep.grDb > 3) {
-        console.log(`\n  → DISTORTION RISES WITH COMPRESSION: ${open.thdPct.toFixed(3)} % at ${open.grDb.toFixed(1)} dB of GR`)
-        console.log(`    to ${deep.thdPct.toFixed(3)} % at ${deep.grDb.toFixed(1)} dB. The nonlinearity lives with the GAIN`)
-        console.log('    CELL — which is what `fetDrive` fits against, and the same answer the Moore')
-        console.log('    paper reached for the LA-2A after two years of a model that put it in the')
-        console.log('    valves. ⚠ Read it against the null1 row above: if THD also rose with LEVEL')
-        console.log('    at zero GR, both mechanisms are present and they need separating.')
+      const rows3 = results.null3.tones.filter(t => t.h)
+
+      if (!law) {
+        console.log('      tone        GR      THD%')
+        for (const c of curve) console.log(`      ${c.tag.padEnd(10)}${c.grDb.toFixed(2).padStart(6)}  ${c.thdPct.toFixed(3).padStart(8)}`)
+        console.log('\n  ⚠ No null1 in this set, so there is no static law to control against and')
+        console.log('    nothing here can separate a gain-cell term from a level effect.')
       } else {
-        console.log('\n  → Distortion does not track reduction here. If null1 showed THD rising with')
-        console.log('    level, what is in circuit is a static saturator and not a gain-cell')
-        console.log('    nonlinearity.')
+        console.log(`    static law from null1: THD% rises ${(20 * law.m).toFixed(2)} dB per 20 dB of output level`)
+        console.log(`    (fits its own five points to ${(law.worst * 100).toFixed(1)} %)\n`)
+        console.log('      tone       out      GR   THD meas   predicted   residual')
+        let extrapolated = 0
+        for (let i = 0; i < rows3.length; i++) {
+          const t = rows3[i], c = curve[i]
+          const pred = law.predict(t.h.fundamentalDbfs)
+          const res = (t.h.thdPct / pred - 1) * 100
+          const beyond = t.h.fundamentalDbfs > law.hiDb + 0.5 || t.h.fundamentalDbfs < law.loDb - 0.5
+          if (beyond) extrapolated++
+          console.log(`      ${c.tag.padEnd(9)}${t.h.fundamentalDbfs.toFixed(1).padStart(7)}` +
+            `${c.grDb.toFixed(2).padStart(8)}  ${t.h.thdPct.toFixed(4).padStart(9)}  ` +
+            `${pred.toFixed(4).padStart(10)}  ${(res >= 0 ? '+' : '') + res.toFixed(1).padStart(6)}%` +
+            `${beyond ? '  (extrapolated)' : ''}`)
+        }
+        if (extrapolated) {
+          console.log(`\n    ⚠ ${extrapolated} tone(s) sit outside null1's measured level range ` +
+            `(${law.loDb.toFixed(1)} to ${law.hiDb.toFixed(1)} dBFS).`)
+          console.log('      The law is extrapolated there. Read those rows with that in mind.')
+        }
+
+        // Residual at the most-compressed tone is the gain cell's contribution.
+        const compressed = rows3.map((t, i) => ({ t, c: curve[i] })).filter(x => x.c.grDb > 2)
+        if (!compressed.length) {
+          console.log('\n  ⚠ NOTHING IN null3 COMPRESSED BY MORE THAN 2 dB. Raise the Input and')
+          console.log('    re-bounce — this capture cannot answer the question it was taken for.')
+        } else {
+          // ⚠ ABSOLUTE residual. A signed max reported "within −0.8 %" when every
+          // row undershot, which reads as a bound and is not one.
+          const worstRes = Math.max(...compressed.map(x =>
+            Math.abs(x.t.h.thdPct / law.predict(x.t.h.fundamentalDbfs) - 1) * 100))
+          const deepest = compressed[compressed.length - 1]
+          if (worstRes < 15) {
+            console.log(`\n  → NO GAIN-CELL DISTORTION. Output level alone explains every tone to`)
+            console.log(`    within ${worstRes.toFixed(1)} %, up to ${deepest.c.grDb.toFixed(1)} dB of reduction.`)
+            console.log('    The nonlinearity is STATIC and sits where level reaches it — which is')
+            console.log('    where our own `fetDrive` shaper sits, after the gain cell. ⚠ That is a')
+            console.log('    validation of the TOPOLOGY; only the drive constant is left to fit.')
+            console.log('    ⚠ It is also the OPPOSITE of the LA-2A result, where the distortion')
+            console.log('    lives with the cell and rises with reduction. Do not carry that')
+            console.log('    finding across to this unit.')
+          } else {
+            console.log(`\n  → ⚠ A GAIN-CELL TERM IS PRESENT: ${worstRes.toFixed(0)} % more distortion than output`)
+            console.log(`    level alone accounts for, at ${deepest.c.grDb.toFixed(1)} dB of reduction. That is on TOP of`)
+            console.log('    the static law, and the two have to be separated before either is fitted.')
+          }
+        }
+      }
+
+      const deepTone = rows3[rows3.length - 1]
+      if (deepTone && harmonicBalance(deepTone.h, deepTone.usable).oddDominant) {
+        const bal = harmonicBalance(deepTone.h, deepTone.usable)
+        console.log(`\n  ⚠ ODD-ORDER DOMINATED (H3 at ${bal.oddDbc.toFixed(1)} dBc` +
+          `${bal.marginDb !== null ? `, ${bal.marginDb.toFixed(0)} dB over the strongest even` : ', nothing even above the floor'}).`)
+        console.log('    An unsmoothed full-wave detector modulates the gain at 2f on a steady')
+        console.log('    tone, and a tone times a 2f modulation puts sidebands at f and 3f — odd')
+        console.log('    orders only, with no waveshaper involved. LAEA showed the same signature')
+        console.log('    with Peak Reduction engaged, and our own kernel reads it at `fetDrive: 0`.')
+        console.log('    ⚠ FITTING `fetDrive` TO THIS WOULD PUT A SATURATOR WHERE A RIPPLE IS.')
       }
     }
 

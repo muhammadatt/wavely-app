@@ -72,8 +72,13 @@ test('null reader: a compensated, saturator-free reference', { skip: !haveStimul
   // ⚠ THE ONE THAT WAS WRONG. fetDrive is 0 here: there is no saturator.
   assert.match(s, /ODD-ORDER DOMINATED/,
     'a detector ripple must not be reported as a saturator')
-  assert.doesNotMatch(s, /DISTORTION RISES WITH COMPRESSION/,
-    'fetDrive 0 has no gain-cell saturation to find')
+
+  // ⚠ AND WITH NO STATIC DISTORTION THERE IS NO LAW TO CONTROL AGAINST.
+  // Fitting one through five zeros made null3's 0.02 % come back as a residual
+  // of 2,895,331 % — a divide-by-zero wearing a percentage sign.
+  assert.match(s, /no law to\n\s+control against/,
+    'a reference with no static distortion must not be given a fitted law')
+  assert.doesNotMatch(s, /\d{5,} ?%/, 'a runaway residual escaped the degenerate guard')
 
   assert.match(s, /INPUT IS COMPENSATED/)
   assert.match(s, /output level moved \+?-?0\.00 dB/)
@@ -86,18 +91,29 @@ test('null reader: a true-input-gain reference with a saturator', { skip: !haveS
   assert.match(s, /A STATIC SATURATOR IS IN CIRCUIT/,
     'fetDrive is level-driven and distorts with no reduction at all')
   assert.match(s, /Even order present/, 'our shaper is asymmetric')
-  assert.match(s, /DISTORTION RISES WITH COMPRESSION/)
+  assert.match(s, /A GAIN-CELL TERM IS PRESENT/,
+    'our kernel carries the detector ripple on top of the static curve')
   assert.match(s, /INPUT IS A REAL GAIN/)
 })
 
 test('gain reduction is measured within one capture, not across two', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
   const s = section(runSelftest(), 'synthdirty')
   // ⚠ The regression: comparing null3's mean gain to null1's carried the
-  // insertion gain and reported −22.63 dB where the truth is ~11.
-  const m = s.match(/to \d+\.\d+ % at (\d+\.\d) dB/)
-  assert.ok(m, 'no GR figure in the distortion verdict')
-  const grDb = Number(m[1])
-  assert.ok(grDb > 8 && grDb < 14, `reduction read as ${grDb} dB, expected ~11`)
+  // insertion gain and reported −22.63 dB where the truth is ~11. The GR column
+  // of the residual table is where that number lives now.
+  const rows = [...s.matchAll(/^ {6}-\d+ dBFS\s+-?\d+\.\d\s+(-?\d+\.\d\d)/gm)]
+  assert.ok(rows.length >= 5, `found ${rows.length} residual rows, expected 5`)
+  const deepest = Math.max(...rows.map(m => Number(m[1])))
+  assert.ok(deepest > 8 && deepest < 14, `deepest reduction read as ${deepest} dB, expected ~11`)
+})
+
+test('a static law extrapolated past its data says so', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {
+  // ⚠ null1 and null3 sit at different Input positions, so their output level
+  // ranges need not overlap — and when they do not, the law is extrapolated and
+  // the residual is partly fit error. Silence there would read as measurement.
+  const s = section(runSelftest(), 'synthdirty')
+  assert.match(s, /\(extrapolated\)/)
+  assert.match(s, /sit outside null1's measured level range/)
 })
 
 test('a bypassed capture is caught, and a transparent one is not mistaken for it', { skip: !haveStimulus && 'run npm run fet:stimulus first' }, () => {

@@ -1602,6 +1602,72 @@ on by spending or not spending thirty-five bounces.
   LA-2A fitting path still behaves. The stimulus side WAS merged, because its
   output is checkable byte-for-byte and all 23 files were.
 
+### ⚗ FIRST REAL CAPTURES — Waves CLA-76 (Blacky), null test bounces 1-4
+
+Capture hygiene is exact: 96 kHz / 32-bit float / mono, durations matching the
+stimulus to the sample (26.60 s and 44.60 s), demo mutes landing at **20.02 and
+40.02 s** — dead on the scheduled grid, so the bounces started at sample 0.
+**Analog confirmed OFF**: 50 and 60 Hz sit at −388 dBFS (numerical zero) and the
+demo mute is true digital silence. Nothing to re-bounce.
+
+- **Insertion gain −9.65 dB, flat to 0.024 dB across 24 dB of level.** The
+  no-compression gain path is linear.
+
+- **OUTPUT IS A CLEAN MULTIPLY, AND IT SAYS MORE THAN THAT.** +10.34 dB for the
+  10 dB dialled, and **every harmonic unchanged in dBc to 0.1 dB**. A shaper fed
+  10 dB hotter would produce more; this one produces exactly as much. So the
+  distortion is generated **upstream of Output**, which is our topology —
+  waveshaper first, output gain after — confirmed rather than assumed.
+
+- **A STATIC, EVEN-ORDER-DOMINANT SATURATOR IS IN CIRCUIT.** THD 0.012 % at
+  −39.7 dBFS out rising to 0.186 % at −15.6, i.e. **0.99 dB of THD per dB of
+  level** — the square-law signature. H2 leads H3 by a constant 9.2 dB.
+
+- **⚗⚗ AND THERE IS NO GAIN-CELL DISTORTION AT ALL. THIS IS THE OPPOSITE OF THE
+  LA-2A AND MUST NOT BE CONFUSED WITH IT.** The static law fitted from null1,
+  where nothing is compressing, predicts **every** null3 tone to within
+  **0.9 %** — including the tones carrying 3.1 and 8.2 dB of gain reduction.
+  Distortion is a function of level at the shaper and nothing else. For
+  OptoSmooth the finding was the reverse (the cell, rising with reduction) and
+  it took two years and a published paper to correct; **that finding does not
+  transfer to this unit.**
+
+  Our own `fetDrive` shaper already sits after the gain cell and is driven by
+  level, so **the topology is validated and only the drive constant is left to
+  fit.**
+
+- **⚠⚠ THE READER'S FIRST VERDICT ON THIS WAS WRONG, IN EXACTLY THE WAY THE
+  PROTOCOL EXISTS TO PREVENT.** It reported "distortion rises with compression —
+  the nonlinearity lives with the gain cell". On `thd.wav` **the loudest tones
+  are also the most compressed**, so within one capture level and reduction are
+  confounded and cannot be separated. The comparison is now a RESIDUAL against
+  null1's static law **at matched output level**, which is the control it needed;
+  uncontrolled, it would have fitted `fetDrive` to a mechanism that is not there.
+  ⚠ The self-test had passed on this: our own kernel has *both* mechanisms, so a
+  confounded verdict looked right on synthetic data and only a real reference
+  with one mechanism exposed it.
+
+- **⚠ AND FITTING A LAW THROUGH FIVE ZEROS PRODUCED A RESIDUAL OF 2,895,331 %.**
+  Our kernel at `fetDrive: 0` has no static distortion to fit; the regression
+  divided by nothing. Guarded — below 0.005 % there is no law and the reader
+  says so.
+
+- **⚠ OPEN QUESTION: H3 SCALES LIKE H2, WHICH A MEMORYLESS POLYNOMIAL DOES NOT
+  DO.** In dBc, H2 rises 1.0 dB per dB of level (correct for a quadratic term)
+  and **H3 also rises 1.0** where a cubic term would give 2.0. H5 likewise. The
+  residual has a fixed harmonic shape whose amplitude grows as the square of
+  level. Recorded rather than explained — it is the static-curve fit's problem,
+  and it may mean our memoryless asymmetric `tanh` is the wrong shape rather
+  than the wrong constant.
+
+- **⚠ TWO LIMITATIONS IN THIS BATCH, BOTH CHEAP TO FIX NEXT TIME.** null3 reached
+  only **8.17 dB** of reduction and only **two of five tones** compressed by more
+  than 2 dB, so the GR axis is thin. And **three of five null3 rows sit above
+  null1's measured level range**, so the law is extrapolated by up to 5 dB there
+  — defensible on a law that fits its own five points to 0.3 % over 24 dB, but
+  it is extrapolation. The protocol now asks for null1 at the **highest** Input
+  that still reads zero GR, so the two captures' level ranges overlap.
+
 - **Still not built:** the static-curve and ballistics fitters. The recovery is proved against a
   kernel whose constants are known before it is pointed at one whose constants
   are not, and that ordering is the point. Also still open: `LA2A_LEGACY_PATCH`

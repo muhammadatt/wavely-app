@@ -282,7 +282,7 @@ Partial runs are fine: anything missing is named and skipped.
 
 | # | Settings | What it answers |
 |---|---|---|
-| 1 | Input **low enough that the GR meter reads 0 throughout**, ratio 4, Output at its default (CLA-76 −18, FETish 0) | Insertion gain, and whether anything is nonlinear with **no** gain reduction. |
+| 1 | Input at the **HIGHEST** position that still reads 0 GR throughout, ratio 4, Output at its default (CLA-76 −18, FETish 0) | Insertion gain, and whether anything is nonlinear with **no** gain reduction. |
 | 2 | As 1, but **Output raised 10 dB from that position** (CLA-76 −18 → −8, FETish 0 → +10) | Is Output a clean multiply, or does it drive a stage? |
 | 3 | Input up for **~10 dB of GR**, Output back at its default | Does distortion rise with **gain reduction**? That is the axis that matters. |
 | 4 | `stairs.wav`, ratio 4, mid Input | Sanity: is the plugin actually in circuit? |
@@ -295,8 +295,17 @@ holds — FETish tells us nothing about our Input's audio path. If the level
 FETish becomes a full reference for the Input law after all. Either answer
 reshapes the rest of the matrix, and it costs one bounce.
 
-⚠ **"INPUT AT MINIMUM" IS NOT WHAT BOUNCE 1 WANTS ON EITHER PLUGIN, AND ON
-CLA-76 IT IS SILENCE.** Both Input controls bottom out at −inf. What the test
+⚠ **BOUNCE 1 WANTS THE HIGHEST ZERO-GR INPUT, NOT THE LOWEST, and the reason is
+what bounce 3 is compared against.** null1 measures the static distortion as a
+function of level; null3's distortion is then checked against that law at
+MATCHED OUTPUT LEVEL, because on this stimulus the loudest tones are also the
+most compressed and an uncontrolled comparison credits the gain cell with a
+level effect. That control only works where the two captures' output levels
+overlap — so null1 should reach as high as it can without compressing. The
+reader flags every null3 row that falls outside null1's measured range as
+`(extrapolated)`.
+
+⚠ **AND "INPUT AT MINIMUM" IS NOT IT EITHER — ON CLA-76 THAT IS SILENCE.** Both Input controls bottom out at −inf. What the test
 needs is the lowest position that still passes full signal with the GR meter at
 zero — find it by ear and by the meter, and **write it down**, because it is also
 the bottom of the I1–I4 sweep.
@@ -323,6 +332,15 @@ the bottom of the I1–I4 sweep.
   Peak Reduction engaged, and our own kernel reads 0.020 % THD at 11 dB of
   reduction with `fetDrive` set to **zero**. Fitting `fetDrive` to it would put
   a saturator where a ripple is.
+- **"NO GAIN-CELL DISTORTION"** → the static law from null1 explains null3 at
+  matched output level, so the nonlinearity sits where level reaches it rather
+  than tracking compression. ⚠ **That is the opposite of the LA-2A result** —
+  there the distortion lives with the cell and rises with reduction — so do not
+  carry that finding across to this unit.
+- **"THE HARMONICS ARE UNCHANGED IN dBc" on null2** → the distortion is
+  generated UPSTREAM of Output: a shaper fed 10 dB hotter would make more, and
+  this one makes exactly as much. That is our topology — waveshaper first,
+  output gain after — confirmed rather than assumed.
 - **A capture reads BIT-IDENTICAL but null4 shows compression** → the reference
   is simply transparent at that setting. That is a finding, not a bad bounce,
   and the reader says which it is — which is why null4 is worth bouncing even
