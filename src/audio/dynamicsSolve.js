@@ -398,16 +398,36 @@ export const VOICINGS = Object.freeze({
 /**
  * dB added to the FET's impact target at full opto lean.
  *
- * ⚠ IT CAME DOWN FROM 2.0, WHICH SOUNDS BACKWARDS AND IS NOT. A ±2.0 shift is a
- * 4.0 dB span across a usable band measured at 2.18-3.30 dB — wider than the
- * whole range the section can move, so both ends sat on the rail. At ±1.0 all
- * five sampled Balance positions produce distinct drives at Density 60; at ±2.0
- * the lean-opto end ran the target past the point where the FET bypasses.
+ * ⚠ THIS WAS BRIEFLY NARROWED TO 1.0 ON REASONING THAT DID NOT SURVIVE ITS OWN
+ * BENCH, and the episode is worth more than the constant.
  *
- * The dead zone this knob had was never the range. It was the target sitting
- * below the floor — see VOICINGS.
+ * The argument was that ±2.0 is a 4.0 dB span across a usable impact band
+ * measured at 2.18-3.30 dB, so both ends must sit on the rail. That is wrong
+ * about how the span is spent: Density already places the target INSIDE the
+ * band, and Balance shifts from wherever that is. The shift only rails when it
+ * pushes past an end.
+ *
+ * Measured at the shipping calibration, rails per five sampled positions
+ * (bypassed or pinned), across Density 30/50/70/90:
+ *
+ *   span    narrator 1              narrator 2
+ *   ±1.0    none, at any density    1-2 of 5 at every density
+ *   ±2.0    1 of 5, at D90 only     2 of 5 (3 at D90)
+ *   ±3.0    1-3 of 5 everywhere     2-3 of 5 everywhere
+ *
+ * and at Density 70 on narrator 1, ±2.0 spans FET reduction 17.3 -> 1.3 dB
+ * against ±1.0's 9.0 -> 3.4. So ±2.0 buys roughly double the usable range for
+ * one railed cell at the top of the macro, and ±3.0 is where it actually breaks.
+ *
+ * ⚠ NARRATOR 2 RAILS AT EVERY SPAN INCLUDING THE NARROWEST, which is the tell:
+ * its input impact (13.21) sits ~1 dB from the target, so the lean-opto side
+ * bypasses immediately whatever the span is. That is the absolute target's
+ * material-dependence, not this constant's fault, and narrowing cannot fix it.
+ *
+ * The dead zone this knob originally had was the target sitting below the
+ * floor — see VOICINGS. Fixing that did not imply anything about the range.
  */
-export const BALANCE_IMPACT_DB = 1.0
+export const BALANCE_IMPACT_DB = 2.0
 
 /** Fraction the opto's depth is scaled by at full lean, either way. */
 export const BALANCE_SQUASH_SCALE = 0.45

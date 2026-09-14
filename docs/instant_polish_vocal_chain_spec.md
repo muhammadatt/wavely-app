@@ -592,10 +592,28 @@ distinct value out of nine**. A control cannot trade against a pinned device.
 Narrator 1 now reaches FET 5.99 dB / opto 2.05 dB at Density 70 — the canonical
 1176-into-LA-2A operating point — with drive at 24 rather than 100.
 
-⚠ **`BALANCE_IMPACT_DB` came DOWN, 2.0 → 1.0, which sounds backwards.** A ±2.0
-shift is a 4.0 dB span across a usable band of 2.18–3.30 dB — wider than the
-range the section can move, so both ends sat on the rail. The dead zone was never
-the range; it was the target sitting below the floor.
+⚠ **`BALANCE_IMPACT_DB` STAYS AT ±2.0, after being briefly narrowed to ±1.0 on
+reasoning that did not survive its own bench.** The argument was that ±2.0 is a
+4.0 dB span across a usable band of 2.18–3.30 dB, so both ends must rail. That
+mis-describes how the span is spent: Density already places the target *inside*
+the band, and Balance shifts from there — it only rails when the shift passes an
+end. Measured rails per five positions across Density 30/50/70/90:
+
+| span | narrator 1 | narrator 2 |
+|---|---|---|
+| ±1.0 | none, at any density | 1–2 of 5 everywhere |
+| **±2.0** | 1 of 5, at D90 only | 2 of 5 (3 at D90) |
+| ±3.0 | 1–3 of 5 everywhere | 2–3 of 5 everywhere |
+
+At Density 70 on narrator 1, ±2.0 spans FET reduction 17.3 → 1.3 dB against
+±1.0's 9.0 → 3.4 — roughly double the usable range for one railed cell, and ±3.0
+is where it genuinely breaks. ⚠ Narrator 2 rails at *every* span including the
+narrowest, which is the tell: its input impact sits ~1 dB from the target, so the
+lean-opto side bypasses regardless. That is the absolute target's
+material-dependence, not the span's, and narrowing cannot fix it.
+
+The dead zone this knob originally had was the target sitting below the floor.
+Fixing that implied nothing about the range.
 
 #### Two hazards this exposed
 
