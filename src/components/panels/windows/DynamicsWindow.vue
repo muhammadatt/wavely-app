@@ -58,6 +58,20 @@ function togglePlayback() {
 }
 
 
+/**
+ * ⚠ 600 WAS SIZED FOR FOUR CONTROLS AND BALANCE MADE FIVE.
+ *
+ * The knob row is flex with fixed child widths and no wrap, so the overflow did
+ * not push anything off the faceplate — every child simply shrank, because flex
+ * children shrink by default. 122 + 96 + 108 + 96 + 96 plus four 22px gaps is
+ * 606px against the 548 a 600px window leaves after its 26px padding, so all
+ * five knobs were squeezed about 12px each.
+ *
+ * ⚠ `npm run smoke` CANNOT SEE THIS. It checks that every panel opens without
+ * throwing, and this one did. Layout that is merely wrong is invisible to it.
+ */
+const WINDOW_WIDTH = 680
+
 const ACCENT = '#f59e6b'
 
 const formatInt = (v) => String(Math.round(v))
@@ -158,7 +172,7 @@ function close() {
   <FloatingWindow
     window-id="vocal-chain-dynamics"
     :z="z"
-    :width="600"
+    :width="WINDOW_WIDTH"
     :accent="ACCENT"
     brand-lead="VOCAL"
     brand-tail="DYNAMICS"
