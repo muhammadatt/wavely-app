@@ -54,15 +54,28 @@ test('recovers the attack dial by matched measurement', opts, () => {
   // ⚠ NOT by converting t63 to a constant: measured t63 runs ~2.9x the constant
   // behind it, and the factor moves with Input, level and knee. Both sides go
   // through the same analysis so the bias cancels.
-  assert.match(section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav'), /closest is dial 2/)
-  assert.match(section(selftest(), 'synth_bursts_r4_I3_a5_r6.wav'), /closest is dial 5/)
+  assert.match(section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav'), /our dial 2\.0\d/)
+  assert.match(section(selftest(), 'synth_bursts_r4_I3_a5_r6.wav'), /our dial 5\.0\d/)
 })
 
 test('recovers the release dial too', opts, () => {
   const a = section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav')
   const b = section(selftest(), 'synth_bursts_r4_I3_a5_r6.wav')
-  assert.match(a.slice(a.indexOf('release t63 (release)')), /closest is dial 4/)
-  assert.match(b.slice(b.indexOf('release t63 (release)')), /closest is dial 6/)
+  assert.match(a.slice(a.indexOf('release t63 (release)')), /our dial 4\.0\d/)
+  assert.match(b.slice(b.indexOf('release t63 (release)')), /our dial (5\.9\d|6\.0\d)/)
+})
+
+test('the dial is reported continuously, with the time it corresponds to', opts, () => {
+  /**
+   * ⚠ THE FRACTIONAL DIAL IS THE ANSWER A CONTINUOUS CONTROL NEEDS, and it costs
+   * nothing to produce: `dialToSeconds` already takes a float and interpolates
+   * geometrically, so 3.4 is a real setting. A knob reading in microseconds is
+   * the same law with the same endpoints, without detents — which is why making
+   * the control continuous does not change the fitting METHOD at all.
+   */
+  const s = section(selftest(), 'synth_bursts_r4_I3_a2_r4.wav')
+  assert.match(s, /our dial \d\.\d\d  \(between \d and \d\) = \d+ us/)
+  assert.match(s, /our dial \d\.\d\d  \(between \d and \d\) = \d+ ms/)
 })
 
 test('finds the release tail on a kernel that has one', opts, () => {

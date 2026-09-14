@@ -1892,6 +1892,45 @@ figure.
   chosen over speed because a preview that disagrees with apply is the failure
   this whole tracker exists to avoid.
 
+### ⚠ THE DIAL SEARCH COULD NOT FAIL, AND A CONTINUOUS KNOB IS WHAT EXPOSED IT
+
+Asked whether a continuous attack/release control (like FETish's) would need a
+different fitter. It does not — but the question surfaced a real defect in the
+one that exists.
+
+**The METHOD is unchanged and still necessary.** Matched measurement exists to
+cancel the ~2.9x bias between a measured t63 and the constant behind it, and
+that bias is a property of the MEASUREMENT — a bare rectifier whose target is
+over threshold only near the waveform peaks — not of whether the control has
+detents. Both sides go through the same analysis either way.
+
+**What changes is the SEARCH, and it gets simpler rather than harder.**
+
+- **⚠⚠ AN ARGMIN OVER SEVEN DIALS CANNOT FAIL.** `bestDial` returned the nearest
+  and printed it with no residual and no range check, so a reference SLOWER than
+  our slowest came back as a confident "dial 1" and one faster than our fastest
+  as "dial 7" — either of which reads as a successful fit. ⚠ That outcome is
+  live: `ATTACK_SLOWEST_S` / `ATTACK_FASTEST_S` have no provenance but a
+  datasheet, and Waves' own wording is that Bluey and Blacky differ in **time
+  constants**, so a reference off the end of our range is one of the more useful
+  things these captures could say. It now names the endpoint constant and calls
+  it a finding rather than a dial.
+
+- **AND THE FRACTIONAL DIAL IS THE CONTINUOUS ANSWER, FOR FREE.**
+  `dialToSeconds` already takes a float and interpolates geometrically, so 3.4
+  is a real setting; a knob reading in microseconds is the same law with the
+  same endpoints, minus the detents. The fitter interpolates on the MEASURED
+  statistic (what both sides share, not on time) and prints the dial to two
+  decimals with its equivalent µs/ms. Verified against the synthetic captures:
+  2.00, 4.00, 5.01, 6.00 for known dials 2, 4, 5, 6.
+
+**⚠ AND IF THE KNOB EVER GOES CONTINUOUS, THE FIT BECOMES A RESIDUAL RATHER THAN
+A SEARCH — which is strictly stronger.** With both sides declaring a time in
+microseconds there is no mapping left to calibrate: set ours to the reference's
+234 µs and measure the difference. That tests the ballistics MODEL — one-pole
+attack, two-stage release, `TAIL_FRACTION` / `TAIL_MULT` — instead of
+calibrating a knob law, and unlike a search it can come back wrong.
+
 ### The ballistics fitter, ready for the captures
 
 `npm run fet:ballistics` reads `*bursts*.wav` captures and reports attack t63,

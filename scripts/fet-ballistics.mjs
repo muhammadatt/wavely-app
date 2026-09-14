@@ -580,16 +580,56 @@ function ourDialTable(plan, stim, sampleRate, params, sweep) {
   return rows
 }
 
-/** The dial whose measurement is closest, on the statistic given. */
-function bestDial(table, target, pick) {
-  let best = null
-  for (const row of table) {
-    const v = pick(row.bursts)
-    if (!Number.isFinite(v)) continue
-    const err = Math.abs(v - target)
-    if (!best || err < best.err) best = { dial: row.dial, value: v, err }
+/**
+ * Where the reference sits on our dial — as a CONTINUOUS position, and with an
+ * explicit answer when it sits off the end.
+ *
+ * ⚠ AN ARGMIN OVER SEVEN DIALS CANNOT FAIL, AND THAT IS A DEFECT NOT A FEATURE.
+ * The first version of this returned the nearest dial and printed it with no
+ * residual and no range check — so a reference slower than our slowest came
+ * back as a confident "dial 1" and a reference faster than our fastest as
+ * "dial 7", either of which reads as a successful fit. The endpoints are
+ * `ATTACK_SLOWEST_S` / `ATTACK_FASTEST_S` and their whole provenance is a
+ * datasheet, so "the reference is outside our range" is a live outcome and one
+ * of the more useful things this capture could say.
+ *
+ * ⚠ AND THE FRACTIONAL DIAL IS NOT A ROUNDING ARTEFACT — IT IS THE ANSWER A
+ * CONTINUOUS CONTROL NEEDS. `dialToSeconds` already takes a float and
+ * interpolates geometrically, so 3.4 is a real setting; a knob that reads in
+ * microseconds is the same law with the same endpoints, exposed without
+ * detents. The interpolation is on the MEASURED statistic rather than on time,
+ * because the statistic is what both sides share.
+ */
+function matchDial(table, target, pick) {
+  const pts = table
+    .map(r => ({ dial: r.dial, value: pick(r.bursts) }))
+    .filter(p => Number.isFinite(p.value))
+  if (pts.length < 2) return null
+
+  const first = pts[0].value, last = pts[pts.length - 1].value
+  const rising = last > first
+  const beyondSlow = rising ? target < first : target > first
+  const beyondFast = rising ? target > last : target < last
+  if (beyondSlow || beyondFast) {
+    const edge = beyondSlow ? pts[0] : pts[pts.length - 1]
+    return { dial: edge.dial, value: edge.value, residual: target - edge.value, outside: beyondSlow ? 'slow' : 'fast' }
   }
-  return best
+
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i]
+    const lo = Math.min(a.value, b.value), hi = Math.max(a.value, b.value)
+    if (target < lo || target > hi) continue
+    const span = b.value - a.value
+    const f = span === 0 ? 0 : (target - a.value) / span
+    return { dial: a.dial + f * (b.dial - a.dial), value: target, residual: 0, outside: null, between: [a.dial, b.dial] }
+  }
+  // Non-monotonic table: fall back to nearest, and say the interpolation failed.
+  let best = null
+  for (const p of pts) {
+    const err = Math.abs(p.value - target)
+    if (!best || err < best.err) best = { dial: p.dial, value: p.value, err }
+  }
+  return { ...best, residual: target - best.value, outside: null, nonMonotonic: true }
 }
 
 /**
@@ -722,15 +762,32 @@ function fitCaptures(sampleRate, dir = CAP_DIR) {
       const target = pick(bursts)
       if (!Number.isFinite(target)) continue
       const table = ourDialTable(plan, stim, sampleRate, params, sweep)
-      const best = bestDial(table, target, pick)
+      const m = matchDial(table, target, pick)
       console.log(`\n   MATCHED MEASUREMENT on ${label} (${sweep}):`)
       console.log('     our dial   ' + table.map(r => String(r.dial).padStart(9)).join(''))
       console.log('     measured   ' + table.map(r => {
         const v = pick(r.bursts)
         return (Number.isFinite(v) ? (sweep === 'attack' ? v.toFixed(1) : (v * 1e3).toFixed(0)) : '--').padStart(9)
       }).join(''))
-      console.log(`     reference reads ${fmt(target)}  →  closest is dial ${best ? best.dial : '?'}` +
-        (best ? ` (${fmt(best.value)})` : ''))
+      console.log(`     reference reads ${fmt(target)}`)
+      if (!m) {
+        console.log('     ⚠ too few usable dials to place it.')
+      } else if (m.outside) {
+        const endpoint = sweep === 'attack'
+          ? (m.outside === 'slow' ? 'ATTACK_SLOWEST_S' : 'ATTACK_FASTEST_S')
+          : (m.outside === 'slow' ? 'RELEASE_SLOWEST_S' : 'RELEASE_FASTEST_S')
+        console.log(`     ⚠⚠ OUTSIDE OUR RANGE — ${m.outside === 'slow' ? 'slower' : 'faster'} than dial ${m.dial},`)
+        console.log(`        which reads ${fmt(m.value)}. This is NOT a dial: it is a finding about`)
+        console.log(`        ${endpoint}, whose only provenance is a datasheet both plugins quote.`)
+      } else if (m.nonMonotonic) {
+        console.log(`     ⚠ our table is not monotonic on this statistic, so it cannot be interpolated.`)
+        console.log(`       Nearest is dial ${m.dial} (${fmt(m.value)}), residual ${fmt(Math.abs(m.residual))}.`)
+      } else {
+        const t = sweep === 'attack'
+          ? (attackSecondsForDial(m.dial) * 1e6).toFixed(0) + ' us'
+          : (releaseSecondsForDial(m.dial) * 1e3).toFixed(0) + ' ms'
+        console.log(`     →  our dial ${m.dial.toFixed(2)}  (between ${m.between[0]} and ${m.between[1]}) = ${t}`)
+      }
     }
     console.log(`\n   ⚠ Read the dial, not the microseconds. Measured t63 runs ~2.9x the constant`)
     console.log('     behind it, on both sides, which is why the comparison is dial-to-dial.\n')
