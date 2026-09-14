@@ -35,13 +35,30 @@ function narration(seconds, peakDbfs, seed = 4242) {
   const x = new Float32Array(n)
   let s = seed
   const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff * 2 - 1
+  /**
+   * ⚠ THE ACCENTS ARE LOAD-BEARING AND WERE ADDED AFTER A CALIBRATION SHIPPED
+   * WRONG BECAUSE THEY WERE MISSING. Without them this generator reads impact
+   * 10.8-11.3 dB against real narration's 13.2-14.8 — a flat train of identical
+   * syllables has no plosives and no stressed onsets, so p99.9 sits much closer
+   * to the body than speech ever does.
+   *
+   * That single number is why `impactDb` was calibrated at 8.5: reachable here,
+   * 3 dB below the floor on every real voice, and the FET pinned at full drive
+   * on narration for months without anything looking wrong. Every impact-based
+   * assertion in this file is only meaningful if the stimulus is as punchy as
+   * the material — so one syllable in seven is accented, which puts it at
+   * impact ~14.7 / crest ~17.7.
+   */
+  const ACCENT_EVERY = 7
+  const ACCENT_GAIN = 2.6
   for (let i = 0; i < n; i++) {
     const t = i / SR
     const syl = t % 0.32
     const burst = syl < 0.2 ? Math.min(1, syl / 0.005) * Math.exp(-syl * 3.2) : 0
     // Phrase-level variation, so the macro has something to act on.
     const phrase = 0.45 + 0.55 * (Math.floor(t / 1.7) % 3) / 2
-    x[i] = burst * phrase * (0.6 * Math.sin(2 * Math.PI * 165 * t)
+    const accent = Math.floor(t / 0.32) % ACCENT_EVERY === 0 ? ACCENT_GAIN : 1
+    x[i] = burst * phrase * accent * (0.6 * Math.sin(2 * Math.PI * 165 * t)
       + 0.25 * Math.sin(2 * Math.PI * 880 * t) + 0.15 * rnd())
   }
   let pk = 0
@@ -225,7 +242,8 @@ test('silence is swept and looked up without crashing', () => {
   const quiet = [new Float32Array(SR * 8)]
   const sweep = sweepDynamics(quiet, SR)
   const { params, report } = solveFromSweep(sweep, { density: 100 })
-  assert.ok(Number.isFinite(params.fetDrive))
+  // Nothing to reduce, so the FET bypasses rather than attenuating by 24 dB.
+  assert.ok(params.fetDrive === null || Number.isFinite(params.fetDrive))
   assert.ok(Number.isFinite(params.squash))
   assert.ok(Number.isFinite(params.optoAlignDb))
   assert.equal(params.correlation, 0)
@@ -288,4 +306,66 @@ test('Balance actually shifts the work between the two compressors', () => {
     `opto should deepen toward +1: ${fetLean.opto} / ${even.opto} / ${optoLean.opto}`)
   assert.ok(optoLean.fet < even.fet,
     `the FET should back off toward +1: ${even.fet} -> ${optoLean.fet}`)
+})
+
+test('⚠ the FET BYPASSES when the target is met — drive 0 is a 24 dB attenuator', () => {
+  /**
+   * ⚠ THIS IS THE HAZARD THE RECALIBRATION EXPOSED, and it was latent for as
+   * long as the targets were unreachable.
+   *
+   * `crossingOf` returns the FIRST sampled drive when the target is already
+   * met, which is 0. Correct as a curve lookup, catastrophic as a setting: the
+   * FET's Input knob attenuates the AUDIO PATH as well as the detector, exactly
+   * as the hardware wires it, so drive 0 delivers 0.07 dB of gain reduction and
+   * takes the signal down 24.00 dB. Measured.
+   *
+   * It never came up while every target sat below the floor. The moment the
+   * targets became reachable, the gentlest voicing on the least punchy file
+   * selected it.
+   */
+  const x = [narration(10, -6)]
+  const sweep = sweepDynamics(x, SR)
+  // A target far slacker than the material can possibly need.
+  const saved = { ...VOICINGS.natural }
+  Object.assign(VOICINGS.natural, { ...saved, impactDb: 99 })
+  const { params, report } = solveFromSweep(sweep, { density: 100, voicing: 'natural' })
+  Object.assign(VOICINGS.natural, saved)
+
+  assert.equal(params.fetDrive, null, 'an unneeded FET must bypass, never sit at drive 0')
+  assert.equal(report.fet.peakDb, 0)
+
+  // And a bypassed FET is a pass-through, not a 24 dB drop.
+  const r = processDynamicsBuffer(x, SR, { ...params, squash: null, clipThresholdDb: null })
+  const out = r.channelData[0]
+  for (let i = 0; i < x[0].length - r.latencySamples; i++) {
+    assert.equal(out[i + r.latencySamples], x[0][i], `not bit-exact at ${i}`)
+  }
+})
+
+test('⚠ an unreachable impact target is REPORTED, not silently pinned', () => {
+  /**
+   * Impact has only ~3 dB of travel through this device — measured alone it
+   * moves 3.3 dB across the whole drive range and plateaus at 60, because
+   * compressing the loud parts pulls the body down with them. So a target below
+   * the floor pins the drive at 100 and, without this flag, looks exactly like
+   * a target that was met. That silence is how 26 dB of gain reduction shipped.
+   *
+   * The clipper has reported its cap since it was written. Now both do.
+   */
+  const x = [narration(10, -6)]
+  const sweep = sweepDynamics(x, SR)
+  const saved = { ...VOICINGS.podcast }
+  Object.assign(VOICINGS.podcast, { ...saved, impactDb: 2 }) // far below any floor
+  const { params, report } = solveFromSweep(sweep, { density: 100, voicing: 'podcast' })
+  Object.assign(VOICINGS.podcast, saved)
+
+  assert.equal(params.fetDrive, 100, 'the drive should run out at the top')
+  assert.ok(report.fet.capped, 'an unreachable target must be flagged')
+  assert.ok(report.fet.shortfallDb > 1,
+    `the shortfall should be reported: ${report.fet.shortfallDb}`)
+
+  // And a reachable target reports no shortfall.
+  const ok = solveFromSweep(sweep, { density: 100, voicing: 'podcast' })
+  assert.equal(ok.report.fet.capped, false)
+  assert.equal(ok.report.fet.shortfallDb, 0)
 })

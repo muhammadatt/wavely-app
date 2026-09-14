@@ -553,6 +553,77 @@ found the FET double-count; neither was visible on the first. The tolerances
 above are the worst case over that set, not a bound — a third voice is still the
 cheapest way to find the next one. `npm run dynamics:sweep <file>` is the bench.
 
+### ⚠ The impact targets were below the floor, and everything downstream broke
+
+`impactDb` was 8.5 / 7.5 / 9.5. **None of them was reachable.**
+
+Measured floor — clipper at its hard cap, FET at full drive:
+
+| file | input impact | floor | usable band |
+|---|---|---|---|
+| narrator 1 | 14.81 | **11.50** | 3.30 dB |
+| narrator 2 | 13.21 | **11.03** | 2.18 dB |
+| synthetic generator | 11.32 | — | — |
+
+The generator's impact is 11.32, so 8.5 asks it for 2.82 dB — comfortable. Real
+narration reads 13.2–14.8, so the *same absolute number* asks for 4.7–6.3 dB.
+
+⚠ **And the FET cannot deliver that at any setting.** Measured alone, impact
+moves **3.3 dB across its entire drive range** and plateaus at drive 60, because
+compressing the loud parts pulls the body down with them:
+
+| drive | GR | p99.9 | body | impact |
+|---|---|---|---|---|
+| — | 0.00 | −5.98 | −20.79 | 14.81 |
+| 20 | 5.42 | −21.44 | −34.72 | 13.29 |
+| 60 | 17.06 | −15.72 | −27.31 | 11.59 |
+| 100 | 27.13 | −12.34 | −23.91 | **11.57** |
+
+So the drive pinned at 100 and 26 dB of gain reduction came out — which nobody
+asked for. The solve just ran out of road looking for a number that doesn't
+exist, and it **failed silently**: `crossingOf` clamps to the last sampled drive
+when a target is never crossed, which is indistinguishable from reaching it.
+
+It took the top half of Density and the whole FET side of Balance with it. At
+Density 80 every Balance position from −100 to +100 produced drive 100 — **one
+distinct value out of nine**. A control cannot trade against a pinned device.
+
+**Recalibrated to reachable targets** (12.2 / 11.8 / 13.0, squash 26 / 32 / 20).
+Narrator 1 now reaches FET 5.99 dB / opto 2.05 dB at Density 70 — the canonical
+1176-into-LA-2A operating point — with drive at 24 rather than 100.
+
+⚠ **`BALANCE_IMPACT_DB` came DOWN, 2.0 → 1.0, which sounds backwards.** A ±2.0
+shift is a 4.0 dB span across a usable band of 2.18–3.30 dB — wider than the
+range the section can move, so both ends sat on the rail. The dead zone was never
+the range; it was the target sitting below the floor.
+
+#### Two hazards this exposed
+
+⚠ **Drive 0 is a 24 dB attenuator, and the solve started selecting it.** The
+FET's Input knob attenuates the audio path as well as the detector, exactly as
+the hardware wires it: drive 0 delivers 0.07 dB of gain reduction and takes the
+signal down **24.00 dB**. `crossingOf` returns the first sampled drive when the
+target is already met — correct as a curve lookup, catastrophic as a setting. It
+never came up while the targets were unreachable. The FET now **bypasses** when
+there is nothing to do, which is bit-exact with the latency preserved. An older
+test had documented the attenuator and concluded "there is no bypass position",
+which was true when written and stopped being true when every stage learned to
+bypass on an absent measured key.
+
+⚠ **An unreachable target is now reported.** `report.fet.capped` and
+`shortfallDb`, the same contract the clipper's depth cap has had since it was
+written, surfaced on the panel. Silence there is what let 26 dB ship.
+
+#### ⚠ And the test stimulus was the root cause all along
+
+Both synthetic generators read impact 10.8–11.3 against real narration's
+13.2–14.8. A flat train of identical syllables has no plosives and no stressed
+onsets, so p99.9 sits far closer to the body than speech ever does — which is
+precisely the statistic every one of these targets is expressed in. **That one
+number is why 8.5 looked reasonable.** Both generators now accent one syllable in
+seven (impact ~13.9 / ~14.7), and four assertions had to move to match, every one
+of them in the direction of the real files.
+
 ### Balance — which compressor does the work
 
 Density says *how much* the section does; Balance says *which device* does it.

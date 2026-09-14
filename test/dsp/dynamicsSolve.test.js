@@ -26,6 +26,22 @@ const SR = 44100
 
 /** Narration with both syllable detail and phrase-to-phrase level variation. */
 function narration(seconds, peakDbfs, seed = 12345) {
+  /**
+   * ⚠ THE ACCENTS ARE LOAD-BEARING AND WERE ADDED AFTER A CALIBRATION SHIPPED
+   * WRONG BECAUSE THEY WERE MISSING. Without them this generator reads impact
+   * 10.8-11.3 dB against real narration's 13.2-14.8 — a flat train of identical
+   * syllables has no plosives and no stressed onsets, so p99.9 sits far closer
+   * to the body than speech ever does.
+   *
+   * That one number is why `impactDb` was calibrated at 8.5: comfortably
+   * reachable here, 3 dB BELOW the floor on every real voice. The FET pinned at
+   * full drive on narration and nothing in this file looked wrong. Every
+   * impact-based assertion is only meaningful if the stimulus is as punchy as
+   * the material, so one syllable in seven is accented — impact ~14.7, crest
+   * ~17.7, which is where the real files sit.
+   */
+  const ACCENT_EVERY = 7
+  const ACCENT_GAIN = 2.6
   const n = Math.round(SR * seconds)
   const x = new Float32Array(n)
   let s = seed
@@ -37,7 +53,8 @@ function narration(seconds, peakDbfs, seed = 12345) {
     // is no spread to reduce and its half of this solve is untested.
     const loud = 0.35 + 0.65 * Math.abs(Math.sin(2 * Math.PI * t / 3.7))
     const burst = ph < 0.35 ? Math.min(1, ph / 0.004) * Math.exp(-ph * 2.5) : 0
-    x[i] = loud * burst * (0.6 * Math.sin(2 * Math.PI * 180 * t)
+    const accent = Math.floor(t / 0.6) % ACCENT_EVERY === 0 ? ACCENT_GAIN : 1
+    x[i] = loud * burst * accent * (0.6 * Math.sin(2 * Math.PI * 180 * t)
       + 0.25 * Math.sin(2 * Math.PI * 900 * t) + 0.15 * rnd())
   }
   let pk = 0
@@ -86,8 +103,16 @@ test('⚠ the three devices control three different statistics', () => {
   const r = processDynamicsBuffer(x, SR, params)
   const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
 
-  assert.ok(after.spreadDb < before.spreadDb * 0.85,
-    `spread should fall materially: ${before.spreadDb.toFixed(2)} -> ${after.spreadDb.toFixed(2)}`)
+  /**
+   * ⚠ DIRECTIONAL, NOT A MAGNITUDE, AND IT USED TO DEMAND 15 %. Two findings
+   * retired that threshold. The opto does not reduce spread on speech at all —
+   * levelling is Auto Level's job — so what moves this is the clipper and the
+   * FET. And the voicings were recalibrated to reachable targets, which made
+   * every one of them gentler by design. A percentage here just pins how hard
+   * the current voicing happens to push.
+   */
+  assert.ok(after.spreadDb < before.spreadDb,
+    `spread should fall: ${before.spreadDb.toFixed(2)} -> ${after.spreadDb.toFixed(2)}`)
   assert.ok(after.impactDb < before.impactDb - 1,
     `peak-to-body should fall: ${before.impactDb.toFixed(2)} -> ${after.impactDb.toFixed(2)}`)
 })
@@ -154,12 +179,20 @@ test('density 0 asks for no clipping and no opto', () => {
   assert.equal(report.clip.depthDb, 0)
   assert.equal(params.squash, 0)
   /**
-   * ⚠ THE FET IS NOT AT ZERO, AND THAT IS NOT A BUG. Its Input knob is an
-   * ATTENUATOR — drive 0 is 24 dB down, not "off" — so there is no bypass
-   * position, and the honest answer at Density 0 is the drive at which it
-   * happens to do nothing. Measured ~28 with about 1.3 dB of reduction.
+   * ⚠ THE FET IS BYPASSED, AND THE REASONING HERE USED TO SAY IT COULD NOT BE.
+   * Its Input knob is an ATTENUATOR — drive 0 is 24.00 dB down with 0.07 dB of
+   * reduction, measured — so the old note concluded "there is no bypass
+   * position" and asserted a nonzero drive instead. That was true when written
+   * and stopped being true when every stage learned to bypass on an absent
+   * measured key (see fetEnabled). A null drive is a bit-exact pass-through
+   * with the latency preserved, which is the honest answer at Density 0.
+   *
+   * ⚠ AND THE OLD WORKAROUND WAS A LIVE HAZARD, not just untidy: once the
+   * impact targets became reachable the solve started SELECTING drive 0 on
+   * material that already met the target, which would have dropped the whole
+   * region 24 dB.
    */
-  assert.ok(params.fetDrive > 0, 'drive 0 would be 24 dB of attenuation, not a bypass')
+  assert.equal(params.fetDrive, null, 'drive 0 is 24 dB of attenuation, not a bypass')
 })
 
 test('the macro is monotonic in what it is supposed to move', () => {
@@ -232,7 +265,8 @@ test('solved params render through the real kernel cleanly', () => {
 test('silence and near-silence are solved without crashing', () => {
   const quiet = [new Float32Array(SR * 12)]
   const { params, report } = solveDynamics(quiet, SR, { density: 100 })
-  assert.ok(Number.isFinite(params.fetDrive))
+  // Nothing to reduce, so the FET bypasses rather than attenuating by 24 dB.
+  assert.ok(params.fetDrive === null || Number.isFinite(params.fetDrive))
   assert.ok(Number.isFinite(params.squash))
   assert.equal(params.correlation, 0)
   // Nothing to grab, so the calibrated depth is still dialled but idle.

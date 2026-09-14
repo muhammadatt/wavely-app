@@ -109,6 +109,20 @@ const cappedNote = computed(() => {
 })
 
 /**
+ * ⚠ THE FET RAN OUT OF ROAD, AND STAYING QUIET ABOUT IT IS WHAT LET 26 dB OF
+ * GAIN REDUCTION SHIP. Impact has only ~3 dB of travel through this device, so
+ * a target below the floor pins the drive at 100 and looks identical to a
+ * target that was met. The clipper has said so since it was written.
+ */
+const fetShortNote = computed(() => {
+  const s = summary.value
+  if (!solutionValid.value || !s?.fetCapped) return null
+  return `The FET is at full drive and still ${s.fetShortfallDb.toFixed(1)} dB short of `
+    + `the dynamic range this Voicing asks for — there is not enough peak-to-body `
+    + `left in the material to take. Lower Density, or lean Balance toward the opto`
+})
+
+/**
  * The opto's trade, stated rather than buried. It rides the body and lets
  * onsets through, so past a point it hands the delivery stage more peak than it
  * received. Half a dB is noise; two is worth knowing about.
@@ -303,6 +317,11 @@ function close() {
         class="mt-[10px] text-[10px] leading-[1.45]"
         :style="{ color: `color-mix(in srgb, ${ACCENT} 55%, #ffffff)` }"
       >{{ cappedNote }}</p>
+
+      <p
+        v-if="fetShortNote"
+        class="mt-[8px] text-[10px] leading-[1.5] text-[rgba(255,255,255,.4)]"
+      >{{ fetShortNote }}</p>
 
       <p
         v-if="tradeNote"

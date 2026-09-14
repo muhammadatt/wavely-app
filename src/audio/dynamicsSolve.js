@@ -288,10 +288,49 @@ function bisect({ lo, hi, target, measure, decreasing, passes = BISECT_PASSES })
  * Density scales the first three from "do nothing" toward these.
  */
 export const VOICINGS = Object.freeze({
-  audiobook: { clipShaveDb: 2.0, impactDb: 8.5, squash: 33, mix: 0.30 },
-  podcast: { clipShaveDb: 3.0, impactDb: 7.5, squash: 40, mix: 0.40 },
-  natural: { clipShaveDb: 1.0, impactDb: 9.5, squash: 26, mix: 0.20 },
+  audiobook: { clipShaveDb: 2.0, impactDb: 12.2, squash: 26, mix: 0.30 },
+  podcast: { clipShaveDb: 3.0, impactDb: 11.8, squash: 32, mix: 0.40 },
+  natural: { clipShaveDb: 1.0, impactDb: 13.0, squash: 20, mix: 0.20 },
 })
+
+/**
+ * ⚠ THE IMPACT TARGETS WERE 8.5 / 7.5 / 9.5 AND EVERY ONE OF THEM WAS BELOW
+ * WHAT THE SECTION CAN REACH. This is the third constant on this plugin fitted
+ * to the synthetic generator and falsified by real narration, and it is the one
+ * that did the most damage.
+ *
+ * The generator's impact is 11.32 dB, so a target of 8.5 asks it for 2.82 dB —
+ * comfortable. Real narration reads 13.2-14.8, so the SAME absolute number asks
+ * for 4.7-6.3 dB. And the FET cannot deliver that at any setting: measured
+ * alone, impact moves only 3.3 dB across its ENTIRE drive range and plateaus at
+ * drive 60, because compressing the loud parts pulls the body down with them
+ * (p99.9 falls 6.4 dB while the body falls 3.1; impact is the difference).
+ *
+ * Measured floor — clipper at its cap, FET at full drive:
+ *
+ *   narrator 1   input 14.81   floor 11.50   usable band 3.30 dB
+ *   narrator 2   input 13.21   floor 11.03   usable band 2.18 dB
+ *
+ * ⚠ SO THE DRIVE PINNED AT 100 AND 26 dB OF GAIN REDUCTION CAME OUT, WHICH
+ * NOBODY ASKED FOR — the solve just ran out of road looking for a number that
+ * does not exist. It failed silently, because `crossingOf` clamps to the last
+ * sampled drive when a target is never crossed, and that is indistinguishable
+ * from reaching it at 100. The clipper has said "capped" since it was written;
+ * the FET now does too, below.
+ *
+ * ⚠ AND IT TOOK THE TOP HALF OF DENSITY AND THE WHOLE FET SIDE OF BALANCE WITH
+ * IT. At Density 80 every Balance position from -100 to +100 produced drive 100:
+ * one distinct value out of nine. A control cannot trade against a device that
+ * is already pinned.
+ *
+ * These targets are reachable on both files and leave the drive mid-range.
+ * Squash comes down with them (33/40/26 -> 26/32/20) so the opto lands nearer
+ * the 2-3 dB of reduction a narration chain actually runs.
+ *
+ * ⚠ STILL NOT A LISTENING DECISION. They are reachable operating points on two
+ * voices, which is what the old ones failed to be. `npm run dynamics:sweep`
+ * against a third voice is the cheapest way to find the next problem.
+ */
 
 /**
  * ⚠ THE SQUASH VALUES ARE ANCHORED ON A MEASURED OPERATING POINT, NOT COPIED
@@ -356,8 +395,19 @@ export const VOICINGS = Object.freeze({
  * "FET flat out, opto scaling", and Balance can still move the opto half.
  */
 
-/** dB added to the FET's impact target at full opto lean. */
-export const BALANCE_IMPACT_DB = 2.0
+/**
+ * dB added to the FET's impact target at full opto lean.
+ *
+ * ⚠ IT CAME DOWN FROM 2.0, WHICH SOUNDS BACKWARDS AND IS NOT. A ±2.0 shift is a
+ * 4.0 dB span across a usable band measured at 2.18-3.30 dB — wider than the
+ * whole range the section can move, so both ends sat on the rail. At ±1.0 all
+ * five sampled Balance positions produce distinct drives at Density 60; at ±2.0
+ * the lean-opto end ran the target past the point where the FET bypasses.
+ *
+ * The dead zone this knob had was never the range. It was the target sitting
+ * below the floor — see VOICINGS.
+ */
+export const BALANCE_IMPACT_DB = 1.0
 
 /** Fraction the opto's depth is scaled by at full lean, either way. */
 export const BALANCE_SQUASH_SCALE = 0.45
@@ -494,15 +544,26 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
   // ── 2. FET: aligned at ITS OWN input, then bisected on peak-to-body ──────
   const fetAlignDb = inputAlignDbFor(clipped, sampleRate)
   const targetImpact = fetTargetImpactFor(voicing, density, afterClip.impactDb)
-  const fetDrive = bisect({
-    lo: 0, hi: 100, target: targetImpact, decreasing: true,
-    measure: (d) => measureDynamics(
-      renderFet(clipped, sampleRate, { ...patch, fetDrive: d, fetAlignDb }).out, sampleRate,
-    ).impactDb,
-  })
+  /**
+   * ⚠ BYPASS WHEN THERE IS NOTHING TO DO — DRIVE 0 IS A 24 dB ATTENUATOR, not
+   * an idle compressor. See the note in `solveFromSweep`; the bisect has the
+   * same exposure, because `lo: 0` is exactly where it lands when the material
+   * already meets the target.
+   */
+  let fetDrive = null
+  if (afterClip.impactDb - targetImpact > 0.05) {
+    fetDrive = bisect({
+      lo: 0, hi: 100, target: targetImpact, decreasing: true,
+      measure: (d) => measureDynamics(
+        renderFet(clipped, sampleRate, { ...patch, fetDrive: d, fetAlignDb }).out, sampleRate,
+      ).impactDb,
+    })
+  }
   const fetRun = renderFet(clipped, sampleRate, { ...patch, fetDrive, fetAlignDb })
   const dry = fetRun.out
   const afterFet = measureDynamics(dry, sampleRate)
+  /** Same reporting contract as the clipper's cap — see `solveFromSweep`. */
+  const fetShortfallDb = Math.max(0, afterFet.impactDb - targetImpact)
 
   // ── 3. Opto: aligned at ITS OWN input, then set to its calibrated depth ──
   const optoAlignDb = inputAlignDbFor(dry, sampleRate)
@@ -541,7 +602,14 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
       afterFet,
       afterWet: measureDynamics(wet, sampleRate),
       clip: { thresholdDb: clipThresholdDb, depthDb: clipDepthDb, capped: clipCapped },
-      fet: { drive: fetDrive, alignDb: fetAlignDb, peakDb: fetRun.metering.maxGainReductionDb, targetImpactDb: targetImpact },
+      fet: {
+        drive: fetDrive,
+        alignDb: fetAlignDb,
+        peakDb: fetRun.metering.maxGainReductionDb,
+        targetImpactDb: targetImpact,
+        shortfallDb: fetShortfallDb,
+        capped: fetShortfallDb > 0.05,
+      },
       opto: {
         squash,
         alignDb: optoAlignDb,
@@ -1063,12 +1131,40 @@ export function solveFromSweep(sweep, options = {}) {
    */
   const targetImpact = fetTargetImpactFor(voicing, density, afterClipImpactDb)
   const wantDrop = afterClipImpactDb - targetImpact
-  // The drop RISES with drive, and `crossingOf` walks a falling curve.
-  const fetDrive = crossingOf(
-    sweep.fet.drives, sweep.fet.impactDrop.map(v => -v), -wantDrop,
-  )
-  const afterFetImpactDb = afterClipImpactDb
-    - lerpAt(sweep.fet.drives, sweep.fet.impactDrop, fetDrive)
+  /**
+   * ⚠ NOTHING TO DO MEANS BYPASS, NOT DRIVE 0 — AND DRIVE 0 IS A 24 dB
+   * ATTENUATOR. The FET's Input knob attenuates the audio path as well as the
+   * detector, exactly as the hardware wires it, so drive 0 delivers 0.07 dB of
+   * gain reduction and takes the whole signal down 24.00 dB. Measured.
+   *
+   * `crossingOf` returns the first sampled drive when the target is already
+   * met, which is 0 — correct as a curve lookup and catastrophic as a setting.
+   * It never came up while the targets were unreachable; the recalibration
+   * above made them reachable and exposed it immediately, on the voicing with
+   * the gentlest target against the file that needed least.
+   *
+   * A null drive bypasses the stage (bit-exact, latency preserved), which is
+   * the same contract the clipper's absent threshold has.
+   */
+  let fetDrive = null
+  let afterFetImpactDb = afterClipImpactDb
+  let fetShortfallDb = 0
+  if (wantDrop > 0.05) {
+    // The drop RISES with drive, and `crossingOf` walks a falling curve.
+    fetDrive = crossingOf(
+      sweep.fet.drives, sweep.fet.impactDrop.map(v => -v), -wantDrop,
+    )
+    const gotDrop = lerpAt(sweep.fet.drives, sweep.fet.impactDrop, fetDrive)
+    afterFetImpactDb = afterClipImpactDb - gotDrop
+    /**
+     * ⚠ REPORTED WHEN THE TARGET IS OUT OF REACH, for the same reason the
+     * clipper reports its cap: impact has only ~3 dB of travel through this
+     * device, so a target below the floor pins the drive at 100 and looks
+     * exactly like a target that was met. Silence here is what let 26 dB of
+     * gain reduction ship.
+     */
+    fetShortfallDb = Math.max(0, wantDrop - gotDrop)
+  }
 
   // ── 3. Opto, at its own input's alignment ───────────────────────────────
   /**
@@ -1118,8 +1214,13 @@ export function solveFromSweep(sweep, options = {}) {
       fet: {
         drive: fetDrive,
         alignDb: sweep.fet.alignDb,
-        peakDb: lerpAt(sweep.fet.drives, sweep.fet.peakDb, fetDrive),
+        peakDb: fetDrive === null
+          ? 0
+          : lerpAt(sweep.fet.drives, sweep.fet.peakDb, fetDrive),
         targetImpactDb: targetImpact,
+        /** How far short of the target the drive ran out, dB. 0 when met. */
+        shortfallDb: fetShortfallDb,
+        capped: fetShortfallDb > 0.05,
       },
       opto: {
         squash,

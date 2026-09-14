@@ -103,6 +103,9 @@ export function useDynamics() {
       clipDepthDb: r.clip.depthDb,
       clipCapped: r.clip.capped,
       fetPeakDb: r.fet.peakDb,
+      /** The FET ran out of drive before reaching its target — see the report. */
+      fetCapped: r.fet.capped,
+      fetShortfallDb: r.fet.shortfallDb,
       optoPeakDb: r.opto.peakDb,
       squash: r.opto.squash,
       spreadFrom: r.input.spreadDb,
