@@ -84,7 +84,7 @@ import {
 import { gatedRmsOfChannels, inputAlignDbFor } from './dsp/inputAlign.js'
 import { percentileOfChannels, MAKEUP_PERCENTILE } from './dsp/makeupReference.js'
 import { speechWeight } from './dsp/speechBand.js'
-import { clamp } from './dsp/parallelMix.js'
+import { clamp, mixGains } from './dsp/parallelMix.js'
 
 const DB_FLOOR = -120
 
@@ -443,6 +443,86 @@ export function fetTargetImpactFor(impactDb, density, afterClipImpactDb) {
   return afterClipImpactDb - (afterClipImpactDb - impactDb) * density
 }
 
+/**
+ * ── THE SECTION'S AUTO MAKEUP ───────────────────────────────────────────────
+ *
+ * ⚠ IT SHIPPED WITHOUT ONE AND CAME OUT 16 dB QUIET. The FET's Input knob is an
+ * attenuator on the AUDIO PATH as well as the detector, exactly as the hardware
+ * wires it, so every drive the solve picks costs level. Measured on narration at
+ * Density 70: output peak 15.86 dB below the input, body 11.93 below, with the
+ * trim sitting at 0.
+ *
+ * ⚠ THE ZERO WAS DELIBERATE AND THE REASONING EXPIRED. The note said the level
+ * the attenuator took was for "the chain's tone section and delivery solve" to
+ * give back — but this section ships standalone and those do not exist, so the
+ * deferral left the plugin unusable. Every other dynamics plugin here carries
+ * auto makeup (`computeAutoMakeupPlan`, Scheps' auto trim, the clipper's).
+ *
+ * ⚠ REFERENCED TO THE 99.9th PERCENTILE, NOT THE PEAK, for the reason the house
+ * already recorded: a peak reference lets one uncompressed onset pin the whole
+ * file, and above ~Peak Reduction 50 the knob runs BACKWARDS. The percentile is
+ * what OptoSmooth and Scheps use.
+ *
+ * ⚠ AND CAPPED SO THE OUTPUT CAN NEVER EXCEED THE INPUT PEAK — by ARITHMETIC,
+ * not by a soft ceiling. The house rule is that a percentile makeup ships with a
+ * ceiling because it can overshoot; that rule exists because OptoSmooth's makeup
+ * is applied inside a running kernel where the overshoot is not knowable in
+ * advance. Here the trim is a single solved gain on the output, so the safe
+ * maximum is just `inputPeak − outputPeak` and the guarantee costs nothing. It
+ * also keeps this section's "nothing inside holds a ceiling" property intact,
+ * and avoids the knee cost Scheps pays at low Mix.
+ *
+ * ⚠ THE PEAK PREDICTION IS A LOOKUP AND IT UNDER-READS, SO THE CAP CARRIES A
+ * MEASURED MARGIN. Level interpolates well — p99.9 tracks a Mix lerp to 0.04 dB
+ * — but the PEAK does not, for two compounding reasons:
+ *
+ *   1. Output level against FET drive is strongly convex near zero (the Input
+ *      knob is an attenuator: −26.03 / −20.97 / −18.50 dB at drives 0 / 9.1 /
+ *      18.2). Monotone cubic interpolation takes that from 1.20 dB of error to
+ *      0.96, and cannot remove it.
+ *   2. The peak of a SUM is not the blend of two peaks. The triangle-inequality
+ *      bound on the real blend gains is sound in principle but reads off two
+ *      interpolated peaks, so it inherits (1) on both sides.
+ *
+ * Measured across 240 combinations of Density, Mix and Balance on two narrators,
+ * the prediction under-reads the true output peak by at most **3.43 dB**, so
+ * that is the margin. With it, zero of those 240 combinations exceed the input
+ * peak; without it, 68 of them did, by up to 1.97 dB.
+ *
+ * ⚠ IT IS NOT FREE, AND AN EARLIER DRAFT OF THIS NOTE CLAIMED IT WAS. The cap
+ * binds at ordinary settings, not just in the corner that motivated it: on the
+ * reference narration at Density 70 the delivered body goes +2.63 dB without the
+ * margin and +0.87 with it, so roughly 1.8 dB of makeup is given up to buy the
+ * guarantee. The output is body-neutral-to-slightly-up with the peak ~3 dB down,
+ * which is a reasonable compressor output — but it is quieter than the
+ * percentile target alone would give, and that is the price.
+ *
+ * ⚠ THE MARGIN IS SIZED ON THE WORST CASE AND THE WORST CASE IS NOT TYPICAL —
+ * the 3.43 dB comes from Density 5-10 at Mix 1, where the error is largest; at
+ * Density 70 it is about 1.7. A margin that followed the error's own structure
+ * would recover most of that, and is the obvious next improvement.
+ *
+ * ⚠ AN EXACT CAP WOULD NEED A RENDER, and a render is what this whole path
+ * exists to avoid — Density, Balance and Mix are lookups precisely so the knobs
+ * stay live. A measured margin buys the guarantee at the price of some makeup in
+ * a corner; a render would buy it at the price of the live knobs.
+ *
+ * ⚠ AND THE GUARANTEE IS ON THE MEASURED WINDOW, not the whole region — a peak
+ * later in a long selection than `analysisWindow` reaches is not seen, the same
+ * approximation that note already documents for every measured parameter.
+ */
+
+/**
+ * Worst measured under-read of the output-peak lookup, dB. See `makeupDbFor`.
+ */
+export const MAKEUP_PEAK_MARGIN_DB = 3.43
+
+export function makeupDbFor(inputP999Db, inputPeakDb, outP999Db, outPeakDb) {
+  const wanted = inputP999Db - outP999Db
+  const headroom = inputPeakDb - outPeakDb - MAKEUP_PEAK_MARGIN_DB
+  return Math.max(0, Math.min(wanted, headroom))
+}
+
 /** The opto's depth: a calibrated constant scaled by Density. */
 export function squashFor(squash, density) {
   return squash * density
@@ -569,6 +649,17 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
   // ── 4. The blend's measured inputs, against THIS section's dry path ──────
   const blend = measureBlend(dry, wet, sampleRate, wetRun.latencySamples)
 
+  /** Same rule as the sweep's, measured from this path's own renders. */
+  const mix = clamp(options.mix ?? DEFAULT_MIX, 0, 1)
+  const atMix = (d, w) => d + (w - d) * mix
+  const wetOut = [wet[0].subarray(wetRun.latencySamples)]
+  const outP999Db = atMix(
+    toDb(percentileOfChannels(dry, MAKEUP_PERCENTILE)),
+    toDb(percentileOfChannels(wetOut, MAKEUP_PERCENTILE)),
+  )
+  const outPeakDb = atMix(afterFet.peakDb, measureDynamics(wetOut, sampleRate).peakDb)
+  const makeupDb = makeupDbFor(input.p999Db, input.peakDb, outP999Db, outPeakDb)
+
   const params = {
     ...patch,
     clipThresholdDb,
@@ -576,7 +667,8 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
     fetAlignDb,
     squash,
     optoAlignDb,
-    mix: options.mix ?? DEFAULT_MIX,
+    makeupDb,
+    mix,
     correlation: blend.correlation,
     densityDb: blend.densityDb,
     outputDb: blend.trimDb,
@@ -615,6 +707,12 @@ export function solveDynamics(channelData, sampleRate, options = {}) {
         balancedSquash: target.squash,
       },
       blend,
+      makeup: {
+        db: makeupDb,
+        outP999Db,
+        outPeakDb,
+        peakCapped: input.p999Db - outP999Db > input.peakDb - outPeakDb + 0.01,
+      },
       /**
        * ⚠ SURFACED, NOT HIDDEN. The opto raises peak-to-body by design — it
        * rides the body and lets onsets through — so at high Density the section
@@ -800,6 +898,56 @@ function lerpAt(xs, ys, xq) {
 }
 
 /**
+ * Monotone cubic (Fritsch–Carlson) lookup, for curves that are smooth and
+ * strongly CURVED rather than nearly straight.
+ *
+ * ⚠ THE LEVEL CURVES NEED THIS AND THE KNOB CURVES DO NOT. Output level against
+ * FET drive is convex at the low end because the Input knob is an attenuator:
+ * measured −26.03 / −20.97 / −18.50 dB at drives 0 / 9.1 / 18.2, so the first
+ * gap alone falls 5 dB and the next 2.5. A straight line across it under-read
+ * the output peak by 1.20 dB at drive 5.2, which the auto makeup then handed
+ * straight to the output as overshoot.
+ *
+ * ⚠ IT IS NOT USED FOR THE CROSSINGS THAT PICK KNOB POSITIONS. Those are scored
+ * against the bisect at 0.136 dB of delivered impact and a change of basis would
+ * move every number in that bench for no measured reason. This is a repair to a
+ * REPORTED and APPLIED level, where the error was measured and is real.
+ */
+function pchipAt(xs, ys, xq) {
+  const n = xs.length
+  if (n < 3) return lerpAt(xs, ys, xq)
+  if (xq <= xs[0]) return ys[0]
+  if (xq >= xs[n - 1]) return ys[n - 1]
+  let i = 1
+  while (i < n - 1 && xq > xs[i]) i++
+  const h = xs[i] - xs[i - 1]
+  if (h === 0) return ys[i]
+  // Secants either side, and the Fritsch–Carlson harmonic-mean slopes that
+  // keep the interpolant monotone between samples.
+  const d = (a, b) => (ys[b] - ys[a]) / (xs[b] - xs[a])
+  const dk = d(i - 1, i)
+  const slope = (k) => {
+    if (k === 0) return d(0, 1)
+    if (k === n - 1) return d(n - 2, n - 1)
+    const a = d(k - 1, k)
+    const b = d(k, k + 1)
+    if (a * b <= 0) return 0
+    const wa = 2 * (xs[k + 1] - xs[k]) + (xs[k] - xs[k - 1])
+    const wb = (xs[k + 1] - xs[k]) + 2 * (xs[k] - xs[k - 1])
+    return (wa + wb) / (wa / a + wb / b)
+  }
+  const m0 = slope(i - 1)
+  const m1 = slope(i)
+  const t = (xq - xs[i - 1]) / h
+  const t2 = t * t
+  const t3 = t2 * t
+  return (2 * t3 - 3 * t2 + 1) * ys[i - 1]
+    + (t3 - 2 * t2 + t) * h * m0
+    + (-2 * t3 + 3 * t2) * ys[i]
+    + (t3 - t2) * h * m1
+}
+
+/**
  * Bilinear lookup on `grid[i][j]`, sampled at `xs[i]` by `ys[j]`.
  *
  * Clamps at every edge: off the grid means the nearest cell, which for the
@@ -890,6 +1038,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const crest = []
   const depth = []
   const impact = []
+  const clipOutP999Db = []
+  const clipOutPeakDb = []
   for (let i = 0; i < SWEEP_POINTS; i++) {
     const th = input.peakDb - CLIP_SWEEP_RANGE_DB
       + (CLIP_SWEEP_RANGE_DB * i) / (SWEEP_POINTS - 1)
@@ -898,6 +1048,15 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     thresholds.push(th)
     crest.push(m.crestDb)
     depth.push(r.metering.maxReductionDb)
+    /**
+     * ⚠ THE DRY PATH WHEN THE FET BYPASSES, which is not the same as the FET
+     * curve at drive 0 — drive 0 is a 24 dB ATTENUATOR. Reading the FET curve
+     * with a `?? 0` fallback made the makeup add back 24 dB of attenuation that
+     * never happened: measured +24.16 dB over the input peak. Third time that
+     * fallback has bitten; see `fetEnabled`.
+     */
+    clipOutP999Db.push(toDb(percentileOfChannels(r.out, MAKEUP_PERCENTILE)))
+    clipOutPeakDb.push(m.peakDb)
     // ⚠ SAMPLED TOO, or a Density move still costs a clip render (~600 ms) just
     // to read the impact its FET target is derived from. That is not a live
     // knob either.
@@ -923,12 +1082,21 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const fetImpact = []
   const fetPeakDb = []
   const fetOutAlignDb = []
+  const fetOutP999Db = []
+  const fetOutPeakDb = []
   for (let i = 0; i < SWEEP_POINTS; i++) {
     const drive = (100 * i) / (SWEEP_POINTS - 1)
     const r = renderFet(midClip, sampleRate, { ...patch, fetDrive: drive, fetAlignDb })
     drives.push(drive)
     fetImpact.push(measureDynamics(r.out, sampleRate).impactDb)
     fetPeakDb.push(r.metering.maxGainReductionDb)
+    /**
+     * ⚠ THE SECTION'S OUTPUT LEVEL AT MIX 0, WHICH IS EXACTLY THIS SIGNAL. The
+     * blend's dry side is the post-FET path, so at Mix 0 the output IS the
+     * delayed dry — measured, the two agree to 0.00 dB. See `makeupDb`.
+     */
+    fetOutP999Db.push(toDb(percentileOfChannels(r.out, MAKEUP_PERCENTILE)))
+    fetOutPeakDb.push(measureDynamics(r.out, sampleRate).peakDb)
     // ⚠ See `fet.impactDrop` below for why the absolute curve is not what the
     // lookup uses.
     // ⚠ THE OPTO'S ALIGNMENT IS A CURVE IN THE FET'S DRIVE, because the opto's
@@ -987,6 +1155,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
   const gridAvgDb = []
   const gridCrestDb = []
   const gridSpreadDb = []
+  const gridOutP999Db = []
+  const gridOutPeakDb = []
   const gridAlignDb = []
   let blend = { correlation: 0, densityDb: 0, trimDb: 0 }
   const midDrive = Math.floor(OPTO_GRID_DRIVES / 2)
@@ -1002,6 +1172,13 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     const avg = []
     const crest = []
     const spread = []
+    /**
+     * ⚠ THE SECTION'S OUTPUT LEVEL AT MIX 1, WHICH IS EXACTLY THIS RENDER. At
+     * Mix 1 the blend law's dry gain is cos(π/2) = 0 and its compensation is
+     * exactly 1, so the output is the wet path and nothing else.
+     */
+    const outP999 = []
+    const outPeak = []
     for (let j = 0; j < OPTO_GRID_SQUASH; j++) {
       const r = renderWet(
         dry, sampleRate, { ...patch, squash: gridSquash[j], optoAlignDb: align },
@@ -1011,6 +1188,8 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
       avg.push(r.metering.avgGainReductionDb)
       crest.push(m.crestDb)
       spread.push(m.spreadDb)
+      outP999.push(toDb(percentileOfChannels(r.out, MAKEUP_PERCENTILE)))
+      outPeak.push(m.peakDb)
       /**
        * ⚠ MEASURED ONCE, MID-GRID. Across the whole Density range the blend
        * moves 0.0122 of correlation and 0.300 dB of density, which is 0.034 dB
@@ -1026,19 +1205,24 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
     gridAvgDb.push(avg)
     gridCrestDb.push(crest)
     gridSpreadDb.push(spread)
+    gridOutP999Db.push(outP999)
+    gridOutPeakDb.push(outPeak)
   }
 
   return {
     sampleRate,
     patch,
     input,
-    clip: { thresholds, crest, depth, impact },
+    clip: { thresholds, crest, depth, impact, outP999Db: clipOutP999Db, outPeakDb: clipOutPeakDb },
     fet: {
       alignDb: fetAlignDb,
       drives,
       impact: fetImpact,
       peakDb: fetPeakDb,
       outAlignDb: fetOutAlignDb,
+      /** Output level at Mix 0, per drive — see `makeupDb`. */
+      outP999Db: fetOutP999Db,
+      outPeakDb: fetOutPeakDb,
       /**
        * ⚠ HOW MUCH IMPACT EACH DRIVE REMOVES, AND THIS IS WHAT THE LOOKUP USES.
        * The absolute curve above is kept for the bench and for reading; asking
@@ -1067,6 +1251,9 @@ export function sweepDynamics(channelData, sampleRate, options = {}) {
       avgDb: gridAvgDb,
       crestDb: gridCrestDb,
       spreadDb: gridSpreadDb,
+      /** Output level at Mix 1, per (drive, squash) — see `makeupDb`. */
+      outP999Db: gridOutP999Db,
+      outPeakDb: gridOutPeakDb,
     },
     blend,
   }
@@ -1165,6 +1352,59 @@ export function solveFromSweep(sweep, options = {}) {
   const squash = squashFor(target.squash, density)
   const optoAlignDb = lerpAt(sweep.fet.drives, sweep.fet.outAlignDb, fetDrive)
 
+  /**
+   * ⚠ THE OUTPUT LEVEL IS LINEAR IN MIX, so two sampled ends are enough. The
+   * blend's dry side is the post-FET path (Mix 0 output exactly) and its wet
+   * side is the opto grid's render (Mix 1 output exactly). Measured across
+   * Density 20-100, the true output tracks that interpolation to 0.04 dB;
+   * reading the Mix-0 end alone — which the blend law's level compensation
+   * makes tempting — is out by 1.88 dB at Mix 1, because the law holds POWER
+   * constant and the wet path has a different crest.
+   */
+  const mix = clamp(options.mix ?? DEFAULT_MIX, 0, 1)
+  const atMix = (dry, wet) => dry + (wet - dry) * mix
+  /**
+   * ⚠ A BYPASSED FET IS NOT THE FET CURVE AT DRIVE 0. Drive 0 is a 24 dB
+   * attenuator (see `fetEnabled`), so a `?? 0` fallback here told the makeup
+   * the output was 24 dB down when the stage had simply been skipped — measured
+   * +24.16 dB over the input peak. When the FET is out, the dry path is the
+   * post-CLIP signal, which the clipper's own curve carries.
+   */
+  const clipAt = clipThresholdDb ?? sweep.clip.thresholds.at(-1)
+  const dryP999 = fetDrive === null
+    ? pchipAt(sweep.clip.thresholds, sweep.clip.outP999Db, clipAt)
+    : pchipAt(sweep.fet.drives, sweep.fet.outP999Db, fetDrive)
+  const dryPeak = fetDrive === null
+    ? pchipAt(sweep.clip.thresholds, sweep.clip.outPeakDb, clipAt)
+    : pchipAt(sweep.fet.drives, sweep.fet.outPeakDb, fetDrive)
+  // The wet grid is indexed by drive; with the FET out its input is the clipped
+  // signal, which the grid's top row (drive 100) does not describe either — so
+  // a bypassed FET reads the grid at the drive the solve would otherwise use.
+  const gridDrive = fetDrive ?? 0
+  const outP999Db = atMix(dryP999,
+    fetDrive === null ? dryP999
+      : bilinearAt(sweep.opto.drives, sweep.opto.squash, sweep.opto.outP999Db, gridDrive, squash))
+  /**
+   * ⚠ PEAK DOES NOT INTERPOLATE, AND INTERPOLATING IT COST 1.97 dB OF OVERSHOOT.
+   * Level does — the p99.9 above tracks a Mix lerp to 0.04 dB — but the peak of
+   * a SUM is not the lerp of the two peaks: the blend adds two signals and their
+   * loudest samples do not have to land in the same place or scale together.
+   *
+   * So the peak is BOUNDED rather than predicted, by the triangle inequality on
+   * the actual blend gains: |dry·g_d + wet·g_w| ≤ (peak_d·g_d + peak_w·g_w)·comp.
+   * That is a true upper bound at every Mix, so the cap below cannot be
+   * undershot. It is nearly tight here because the two paths are the same voice
+   * (measured rho 0.956), which is exactly why the blend law needs its
+   * correlation term in the first place.
+   */
+  const wetPeak = fetDrive === null ? dryPeak
+    : bilinearAt(sweep.opto.drives, sweep.opto.squash, sweep.opto.outPeakDb, gridDrive, squash)
+  const g = mixGains(mix, sweep.blend.correlation, sweep.blend.densityDb)
+  const lin = (db) => Math.pow(10, db / 20)
+  const outPeakDb = 20 * Math.log10(Math.max(1e-9,
+    (lin(dryPeak) * g.dry + lin(wetPeak) * g.wet) * g.compensation))
+  const makeupDb = makeupDbFor(sweep.input.p999Db, input.peakDb, outP999Db, outPeakDb)
+
   const params = {
     ...patch,
     clipThresholdDb,
@@ -1172,7 +1412,8 @@ export function solveFromSweep(sweep, options = {}) {
     fetAlignDb: sweep.fet.alignDb,
     squash,
     optoAlignDb,
-    mix: options.mix ?? DEFAULT_MIX,
+    makeupDb,
+    mix,
     correlation: sweep.blend.correlation,
     densityDb: sweep.blend.densityDb,
     outputDb: sweep.blend.trimDb,
@@ -1218,6 +1459,14 @@ export function solveFromSweep(sweep, options = {}) {
         balancedSquash: target.squash,
       },
       blend: sweep.blend,
+      makeup: {
+        db: makeupDb,
+        /** What the section would have delivered without it. */
+        outP999Db,
+        outPeakDb,
+        /** True when the peak cap bound rather than the percentile target. */
+        peakCapped: input.p999Db - outP999Db > input.peakDb - outPeakDb + 0.01,
+      },
       crestRoseBy: wetCrestDb - input.crestDb,
       /** ⚠ So a reader of the report knows which path produced it. */
       fromSweep: true,

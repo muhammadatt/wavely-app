@@ -84,7 +84,17 @@ test('a live push CLEARS the measured keys when no solve is in force', () => {
     assert.equal(live[key], null, `${key} was not cleared`)
   }
   // With a solve in force nothing is cleared — the values ARE the solve.
-  const solved = { clipThresholdDb: -12, fetDrive: 40, fetAlignDb: 1.1, squash: 37, optoAlignDb: 8.4, correlation: 0.95, densityDb: -0.2 }
+  const solved = {
+    clipThresholdDb: -12, fetDrive: 40, fetAlignDb: 1.1, squash: 37,
+    optoAlignDb: 8.4, correlation: 0.95, densityDb: -0.2,
+    /**
+     * ⚠ THE AUTO MAKEUP IS A MEASURED KEY AND MUST CLEAR WITH THE REST. It
+     * describes how much level THIS FILE lost to the FET's input attenuator, so
+     * a bypassed section still applying it would be 14 dB louder than the
+     * pass-through it claims to be.
+     */
+    makeupDb: 6.2,
+  }
   const withSolve = toLiveKernelParams(DYNAMICS_DEFAULTS, solved)
   for (const key of DYNAMICS_MEASURED_KEYS) {
     assert.equal(withSolve[key], solved[key], `${key} did not survive`)
@@ -96,7 +106,7 @@ test('⚠ Mix is the panel\'s and overrides the solve\'s', () => {
    * The solve measures the blend at Mix 1, the worst case, precisely so the mix
    * law stays valid wherever the knob lands afterwards — the same reasoning
    * Scheps uses for sizing its ceiling knee at Mix 1. So a user's Mix must win
-   * over the voicing's, and null must mean "take the voicing's".
+   * over the solve's.
    */
   const solved = { mix: 0.4 }
   assert.equal(toKernelParams({ ...DYNAMICS_DEFAULTS, mix: null }, solved).mix, 0.4)

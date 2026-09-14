@@ -223,6 +223,18 @@ export const DYNAMICS_KERNEL_DEFAULTS = {
   correlation: 0,
   densityDb: 0,
   outputDb: 0, // manual trim on the summed output
+  /**
+   * ⚠ MEASURED, AND A SEPARATE PARAM FROM `outputDb` ON PURPOSE. It is the
+   * solve's auto makeup — see `makeupDbFor` — and keeping it out of the manual
+   * trim is what lets the Output knob read what the USER dialled rather than
+   * the sum. The two are added in dB and applied as one gain, so it costs
+   * nothing at render time.
+   *
+   * ⚠ AND IT IS A MEASURED KEY, so a live node with no solve clears it to null
+   * and falls back to 0. A bypassed section applying 14 dB of makeup would not
+   * be a pass-through.
+   */
+  makeupDb: 0,
 }
 
 /**
@@ -385,7 +397,9 @@ export class DynamicsKernel {
 
     this.la2a.setParams(optoParamsFor(p))
 
-    this.outputLin = Math.exp(finite(p.outputDb, 0, -24, 24) * LN10_OVER_20)
+    this.outputLin = Math.exp(
+      (finite(p.outputDb, 0, -24, 24) + finite(p.makeupDb, 0, -24, 36)) * LN10_OVER_20,
+    )
     this._updateMix()
 
     /**

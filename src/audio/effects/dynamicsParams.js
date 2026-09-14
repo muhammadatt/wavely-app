@@ -85,6 +85,14 @@ export const DYNAMICS_DEFAULTS = {
 export const DYNAMICS_MEASURED_KEYS = Object.freeze([
   'clipThresholdDb', 'fetDrive', 'fetAlignDb', 'squash', 'optoAlignDb',
   'correlation', 'densityDb',
+  /**
+   * ⚠ THE AUTO MAKEUP BELONGS HERE, NOT ON THE PANEL. It describes how much
+   * level THIS FILE lost to the FET's input attenuator at the solved drive, so
+   * a preset carrying it would apply one recording's gain staging to another —
+   * and a live node with no solve must clear it, or a bypassed section would be
+   * applying 14 dB of makeup while claiming to be a pass-through.
+   */
+  'makeupDb',
 ])
 
 /**

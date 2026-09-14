@@ -676,6 +676,53 @@ and every one is now portable in the strong sense: it means the same thing on
 every file *and* independently of every other control. Use-case starting points
 belong in **presets**, which save all five at once and say so.
 
+### ⚠ It shipped with no auto makeup and came out 16 dB quiet
+
+The FET's Input knob attenuates the **audio path** as well as the detector,
+exactly as the hardware wires it, so every drive the solve picks costs level.
+Measured on narration at Density 70: output peak **15.86 dB** below the input,
+body **11.93** below, with the trim at 0.
+
+The zero was deliberate — the note said the level belonged to "the chain's tone
+section and delivery solve" to give back. ⚠ **Those do not exist and this section
+ships standalone**, so the deferral left the plugin unusable. Every other
+dynamics plugin here carries auto makeup.
+
+`makeupDb` is now a measured key: referenced to the **99.9th percentile**, which
+is the house reference (a peak reference lets one uncompressed onset pin the
+whole file, and above ~PR 50 the knob runs backwards), and capped so the output
+can never exceed the input peak.
+
+**Four things this turned up:**
+
+1. ⚠ **`fetDrive ?? 0` bit for the fourth time.** Drive 0 is a 24 dB attenuator,
+   so reading the FET's level curve there told the makeup the output was 24 dB
+   down when the stage had simply been skipped — **+24.16 dB over the input
+   peak**. With the FET out, the dry path is the post-clip signal.
+2. ⚠ **Level interpolates; peak does not.** p99.9 tracks a Mix lerp to 0.04 dB,
+   because the blend law holds power constant. The peak of a *sum* is not the
+   blend of two peaks, so a cap built on an interpolated peak is unsound.
+3. ⚠ **Output level against FET drive is strongly convex near zero** — −26.03 /
+   −20.97 / −18.50 dB at drives 0 / 9.1 / 18.2. Linear interpolation under-read
+   by 1.20 dB at drive 5.2; monotone cubic takes it to 0.96 and cannot remove it.
+   The knob-solving crossings deliberately stay linear: they are scored at 0.136
+   dB and a change of basis would move that bench for no measured reason.
+4. **So the cap carries a measured margin** of **3.43 dB**, the worst under-read
+   across 240 combinations of Density, Mix and Balance on two narrators. With it,
+   0 of 240 exceed the input peak; without it, 68 did, by up to 1.97 dB.
+
+⚠ **The margin is not free, and an earlier draft of this claimed it was.** It
+binds at ordinary settings, not just the corner that motivated it: at Density 70
+the delivered body is +2.63 dB without it and +0.87 with it, so ~1.8 dB of makeup
+is given up to buy the guarantee. ⚠ And it is sized on a worst case that is not
+typical — the 3.43 comes from Density 5–10 at Mix 1; at Density 70 the error is
+about 1.7. **A margin following the error's own structure would recover most of
+that, and is the obvious next improvement.**
+
+⚠ **An exact cap would need a render**, which is what this path exists to avoid —
+Density, Balance and Mix are lookups precisely so the knobs stay live. The margin
+buys the guarantee with some makeup; a render would buy it with the live knobs.
+
 ### ⚠ The controls are disabled without a measurement
 
 With no valid solve the kernel is a bit-exact pass-through: all three stages

@@ -383,3 +383,79 @@ test('⚠ an unreachable impact target is REPORTED, not silently pinned', () => 
   assert.equal(ok.report.fet.capped, false)
   assert.equal(ok.report.fet.shortfallDb, 0)
 })
+
+test('⚠ the section makes up the level the FET attenuator took', () => {
+  /**
+   * ⚠ IT SHIPPED WITHOUT MAKEUP AND CAME OUT 16 dB QUIET. The FET's Input knob
+   * attenuates the AUDIO PATH as well as the detector, so every drive the solve
+   * picks costs level — measured on narration at Density 70, the output peak sat
+   * 15.86 dB below the input and the body 11.93 below, with the trim at 0.
+   *
+   * The zero was deliberate: the note said the level belonged to "the chain's
+   * tone section and delivery solve" to give back. Those do not exist and this
+   * section ships standalone, so the deferral left the plugin unusable.
+   */
+  const x = [narration(12, -6)]
+  const before = measureDynamics(x, SR)
+  const sweep = sweepDynamics(x, SR)
+
+  for (const density of [40, 70, 100]) {
+    const { params } = solveFromSweep(sweep, { density })
+    assert.ok(params.makeupDb > 3,
+      `density ${density}: the makeup should be substantial, got ${params.makeupDb}`)
+    const r = processDynamicsBuffer(x, SR, params)
+    const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
+    assert.ok(after.gatedDb > before.gatedDb - 3,
+      `density ${density}: body fell ${(before.gatedDb - after.gatedDb).toFixed(2)} dB — `
+      + 'the section should not come out quiet')
+  }
+})
+
+test('⚠ the makeup can never push the output past the input peak', () => {
+  /**
+   * The percentile reference is the house one — a peak reference lets a single
+   * uncompressed onset pin the file — and the house rule is that it ships with a
+   * ceiling because it can overshoot. This section deliberately holds no
+   * ceiling, so the guarantee is arithmetic instead: the trim is capped by the
+   * headroom, less a margin sized to the measured under-read of the peak lookup.
+   *
+   * ⚠ WITHOUT THE MARGIN 68 OF 240 MEASURED COMBINATIONS OVERSHOT, by up to 1.97
+   * dB, because the PEAK does not interpolate the way level does.
+   */
+  const x = [narration(12, -6)]
+  const before = measureDynamics(x, SR)
+  const sweep = sweepDynamics(x, SR)
+  for (const density of [5, 20, 60, 100]) {
+    for (const mix of [0, 0.5, 1]) {
+      const { params } = solveFromSweep(sweep, { density, mix })
+      const r = processDynamicsBuffer(x, SR, params)
+      const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
+      assert.ok(after.peakDb <= before.peakDb + 0.01,
+        `D${density} mix ${mix}: output peaked ${after.peakDb.toFixed(2)} against an input `
+        + `peak of ${before.peakDb.toFixed(2)}`)
+    }
+  }
+})
+
+test('⚠ a bypassed FET is not the drive-0 attenuator — the makeup must know', () => {
+  /**
+   * ⚠ THE FOURTH TIME `fetDrive ?? 0` HAS BITTEN. Drive 0 is a 24 dB attenuator,
+   * so reading the FET's level curve there told the makeup the output was 24 dB
+   * down when the stage had simply been skipped. Measured: +24.16 dB over the
+   * input peak. With the FET out, the dry path is the post-CLIP signal, which the
+   * clipper's own curve carries.
+   */
+  const x = [narration(10, -6)]
+  const before = measureDynamics(x, SR)
+  const sweep = sweepDynamics(x, SR)
+  // Density near zero leaves nothing for the FET to do, so it bypasses.
+  const { params } = solveFromSweep(sweep, { density: 0.0001, clipShaveDb: 0 })
+  assert.equal(params.fetDrive, null, 'this case is only interesting with the FET out')
+  assert.ok(params.makeupDb < 1,
+    `a bypassed FET took no level, so there is nothing to make up: ${params.makeupDb}`)
+
+  const r = processDynamicsBuffer(x, SR, params)
+  const after = measureDynamics([r.channelData[0].subarray(r.latencySamples)], SR)
+  assert.ok(after.peakDb <= before.peakDb + 0.01,
+    `output peaked ${after.peakDb.toFixed(2)} against ${before.peakDb.toFixed(2)}`)
+})
